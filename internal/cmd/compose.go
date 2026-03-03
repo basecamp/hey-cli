@@ -21,7 +21,10 @@ func newComposeCommand() *composeCommand {
 	composeCommand.cmd = &cobra.Command{
 		Use:   "compose",
 		Short: "Compose a new message",
-		RunE:  composeCommand.run,
+		Example: `  hey compose --to alice@hey.com --subject "Hello" -m "Hi there"
+  hey compose --subject "Update" --topic-id 12345 -m "Thread reply"
+  echo "Long message" | hey compose --to bob@hey.com --subject "Report"`,
+		RunE: composeCommand.run,
 	}
 
 	composeCommand.cmd.Flags().StringVar(&composeCommand.to, "to", "", "Recipient email address(es)")
@@ -43,13 +46,24 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 
 	message := c.message
 	if message == "" {
-		var err error
-		message, err = editor.Open("")
-		if err != nil {
-			return fmt.Errorf("could not open editor: %w", err)
-		}
-		if message == "" {
-			return fmt.Errorf("empty message, aborting")
+		if !stdinIsTerminal() {
+			var err error
+			message, err = readStdin()
+			if err != nil {
+				return err
+			}
+			if message == "" {
+				return fmt.Errorf("no message provided (use -m or --message to provide inline, or pipe to stdin)")
+			}
+		} else {
+			var err error
+			message, err = editor.Open("")
+			if err != nil {
+				return fmt.Errorf("could not open editor: %w", err)
+			}
+			if message == "" {
+				return fmt.Errorf("empty message, aborting")
+			}
 		}
 	}
 
@@ -75,6 +89,6 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		return printRawJSON(data)
 	}
 
-	fmt.Println("Message sent.")
+	fmt.Printf("Message sent.%s\n", extractMutationInfo(data))
 	return nil
 }

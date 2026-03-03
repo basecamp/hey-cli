@@ -1,6 +1,7 @@
 # hey-cli
 
-A CLI and TUI for [HEY](https://hey.com). Read and send emails, manage boxes, calendars, todos, habits, time tracking, and journal entries — all from your terminal.
+A CLI and TUI for [HEY](https://hey.com). 
+*Read and send emails, manage boxes, calendars, todos, habits, time tracking, and journal entries — all from your terminal.*
 
 ## Install
 

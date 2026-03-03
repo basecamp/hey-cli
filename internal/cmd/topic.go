@@ -18,7 +18,9 @@ func newTopicCommand() *topicCommand {
 	topicCommand.cmd = &cobra.Command{
 		Use:   "topic <id>",
 		Short: "Read an email thread",
-		RunE:  topicCommand.run,
+		Example: `  hey topic 12345
+  hey topic 12345 --json`,
+		RunE: topicCommand.run,
 		Args:  cobra.ExactArgs(1),
 	}
 

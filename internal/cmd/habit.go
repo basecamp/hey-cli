@@ -36,8 +36,10 @@ func newHabitCompleteCommand() *habitCompleteCommand {
 	habitCompleteCommand.cmd = &cobra.Command{
 		Use:   "complete <id>",
 		Short: "Mark a habit as complete for a date",
-		RunE:  habitCompleteCommand.run,
-		Args:  cobra.ExactArgs(1),
+		Example: `  hey habit complete 789
+  hey habit complete 789 --date 2024-01-15`,
+		RunE: habitCompleteCommand.run,
+		Args: cobra.ExactArgs(1),
 	}
 
 	habitCompleteCommand.cmd.Flags().StringVar(&habitCompleteCommand.date, "date", "", "Date (YYYY-MM-DD, default: today)")
@@ -65,7 +67,7 @@ func (c *habitCompleteCommand) run(cmd *cobra.Command, args []string) error {
 		return printRawJSON(data)
 	}
 
-	fmt.Printf("Habit %s completed for %s.\n", args[0], date)
+	fmt.Printf("Habit %s completed for %s.%s\n", args[0], date, extractMutationInfo(data))
 	return nil
 }
 
@@ -81,8 +83,10 @@ func newHabitUncompleteCommand() *habitUncompleteCommand {
 	habitUncompleteCommand.cmd = &cobra.Command{
 		Use:   "uncomplete <id>",
 		Short: "Remove a habit completion for a date",
-		RunE:  habitUncompleteCommand.run,
-		Args:  cobra.ExactArgs(1),
+		Example: `  hey habit uncomplete 789
+  hey habit uncomplete 789 --date 2024-01-15`,
+		RunE: habitUncompleteCommand.run,
+		Args: cobra.ExactArgs(1),
 	}
 
 	habitUncompleteCommand.cmd.Flags().StringVar(&habitUncompleteCommand.date, "date", "", "Date (YYYY-MM-DD, default: today)")
@@ -110,6 +114,6 @@ func (c *habitUncompleteCommand) run(cmd *cobra.Command, args []string) error {
 		return printRawJSON(data)
 	}
 
-	fmt.Printf("Habit %s uncompleted for %s.\n", args[0], date)
+	fmt.Printf("Habit %s uncompleted for %s.%s\n", args[0], date, extractMutationInfo(data))
 	return nil
 }

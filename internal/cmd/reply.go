@@ -18,8 +18,10 @@ func newReplyCommand() *replyCommand {
 	replyCommand.cmd = &cobra.Command{
 		Use:   "reply <entry-id>",
 		Short: "Reply to an email entry",
-		RunE:  replyCommand.run,
-		Args:  cobra.ExactArgs(1),
+		Example: `  hey reply 12345 -m "Thanks!"
+  echo "Detailed reply" | hey reply 12345`,
+		RunE: replyCommand.run,
+		Args: cobra.ExactArgs(1),
 	}
 
 	replyCommand.cmd.Flags().StringVarP(&replyCommand.message, "message", "m", "", "Reply message (or opens $EDITOR)")
@@ -34,13 +36,24 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 
 	message := c.message
 	if message == "" {
-		var err error
-		message, err = editor.Open("")
-		if err != nil {
-			return fmt.Errorf("could not open editor: %w", err)
-		}
-		if message == "" {
-			return fmt.Errorf("empty message, aborting")
+		if !stdinIsTerminal() {
+			var err error
+			message, err = readStdin()
+			if err != nil {
+				return err
+			}
+			if message == "" {
+				return fmt.Errorf("no message provided (use -m or --message to provide inline, or pipe to stdin)")
+			}
+		} else {
+			var err error
+			message, err = editor.Open("")
+			if err != nil {
+				return fmt.Errorf("could not open editor: %w", err)
+			}
+			if message == "" {
+				return fmt.Errorf("empty message, aborting")
+			}
 		}
 	}
 
@@ -56,6 +69,6 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 		return printRawJSON(data)
 	}
 
-	fmt.Println("Reply sent.")
+	fmt.Printf("Reply sent.%s\n", extractMutationInfo(data))
 	return nil
 }

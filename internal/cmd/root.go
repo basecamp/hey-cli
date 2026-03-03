@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -18,9 +21,10 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:          "hey",
-	Short:        "CLI for the Haystack (HEY) email service",
-	SilenceUsage: true,
+	Use:           "hey",
+	Short:         "CLI for the Haystack (HEY) email service",
+	SilenceUsage:  true,
+	SilenceErrors: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		var err error
 		cfg, err = config.Load()
@@ -66,6 +70,17 @@ func Execute() {
 
 	err := rootCmd.Execute()
 	if err != nil {
+		if jsonOutput {
+			obj := map[string]interface{}{"error": err.Error()}
+			var apiErr *client.APIError
+			if errors.As(err, &apiErr) {
+				obj["error"] = apiErr.Message
+				obj["status"] = apiErr.StatusCode
+			}
+			json.NewEncoder(os.Stdout).Encode(obj)
+		} else {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		}
 		os.Exit(1)
 	}
 }

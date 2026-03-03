@@ -31,7 +31,8 @@ func newTodoCommand() *todoCommand {
 // list
 
 type todoListCommand struct {
-	cmd *cobra.Command
+	cmd   *cobra.Command
+	limit int
 }
 
 func newTodoListCommand() *todoListCommand {
@@ -39,8 +40,13 @@ func newTodoListCommand() *todoListCommand {
 	todoListCommand.cmd = &cobra.Command{
 		Use:   "list",
 		Short: "List todos",
-		RunE:  todoListCommand.run,
+		Example: `  hey todo list
+  hey todo list --limit 10
+  hey todo list --json`,
+		RunE: todoListCommand.run,
 	}
+
+	todoListCommand.cmd.Flags().IntVar(&todoListCommand.limit, "limit", 0, "Maximum number of todos to show")
 
 	return todoListCommand
 }
@@ -55,7 +61,7 @@ func (c *todoListCommand) run(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		return printRawJSON(data)
+		return printRawJSON(limitJSONArray(data, c.limit))
 	}
 
 	var todos []models.Todo
@@ -66,6 +72,10 @@ func (c *todoListCommand) run(cmd *cobra.Command, args []string) error {
 	if len(todos) == 0 {
 		fmt.Println("No todos.")
 		return nil
+	}
+
+	if c.limit > 0 && len(todos) > c.limit {
+		todos = todos[:c.limit]
 	}
 
 	table := newTable()
@@ -98,7 +108,10 @@ func newTodoAddCommand() *todoAddCommand {
 	todoAddCommand.cmd = &cobra.Command{
 		Use:   "add",
 		Short: "Create a new todo",
-		RunE:  todoAddCommand.run,
+		Example: `  hey todo add --title "Buy groceries"
+  hey todo add --title "Meeting prep" --date 2024-01-20
+  hey todo add --title "Review PR" --json`,
+		RunE: todoAddCommand.run,
 	}
 
 	todoAddCommand.cmd.Flags().StringVar(&todoAddCommand.title, "title", "", "Todo title (required)")
@@ -130,7 +143,7 @@ func (c *todoAddCommand) run(cmd *cobra.Command, args []string) error {
 		return printRawJSON(data)
 	}
 
-	fmt.Println("Todo created.")
+	fmt.Printf("Todo created.%s\n", extractMutationInfo(data))
 	return nil
 }
 
@@ -143,10 +156,11 @@ type todoCompleteCommand struct {
 func newTodoCompleteCommand() *todoCompleteCommand {
 	todoCompleteCommand := &todoCompleteCommand{}
 	todoCompleteCommand.cmd = &cobra.Command{
-		Use:   "complete <id>",
-		Short: "Mark a todo as complete",
-		RunE:  todoCompleteCommand.run,
-		Args:  cobra.ExactArgs(1),
+		Use:     "complete <id>",
+		Short:   "Mark a todo as complete",
+		Example: `  hey todo complete 456`,
+		RunE:    todoCompleteCommand.run,
+		Args:    cobra.ExactArgs(1),
 	}
 
 	return todoCompleteCommand
@@ -167,7 +181,7 @@ func (c *todoCompleteCommand) run(cmd *cobra.Command, args []string) error {
 		return printRawJSON(data)
 	}
 
-	fmt.Println("Todo completed.")
+	fmt.Printf("Todo completed.%s\n", extractMutationInfo(data))
 	return nil
 }
 
@@ -180,10 +194,11 @@ type todoUncompleteCommand struct {
 func newTodoUncompleteCommand() *todoUncompleteCommand {
 	todoUncompleteCommand := &todoUncompleteCommand{}
 	todoUncompleteCommand.cmd = &cobra.Command{
-		Use:   "uncomplete <id>",
-		Short: "Mark a todo as incomplete",
-		RunE:  todoUncompleteCommand.run,
-		Args:  cobra.ExactArgs(1),
+		Use:     "uncomplete <id>",
+		Short:   "Mark a todo as incomplete",
+		Example: `  hey todo uncomplete 456`,
+		RunE:    todoUncompleteCommand.run,
+		Args:    cobra.ExactArgs(1),
 	}
 
 	return todoUncompleteCommand
@@ -204,7 +219,7 @@ func (c *todoUncompleteCommand) run(cmd *cobra.Command, args []string) error {
 		return printRawJSON(data)
 	}
 
-	fmt.Println("Todo marked incomplete.")
+	fmt.Printf("Todo marked incomplete.%s\n", extractMutationInfo(data))
 	return nil
 }
 
@@ -217,10 +232,11 @@ type todoDeleteCommand struct {
 func newTodoDeleteCommand() *todoDeleteCommand {
 	todoDeleteCommand := &todoDeleteCommand{}
 	todoDeleteCommand.cmd = &cobra.Command{
-		Use:   "delete <id>",
-		Short: "Delete a todo",
-		RunE:  todoDeleteCommand.run,
-		Args:  cobra.ExactArgs(1),
+		Use:     "delete <id>",
+		Short:   "Delete a todo",
+		Example: `  hey todo delete 456`,
+		RunE:    todoDeleteCommand.run,
+		Args:    cobra.ExactArgs(1),
 	}
 
 	return todoDeleteCommand
@@ -241,6 +257,6 @@ func (c *todoDeleteCommand) run(cmd *cobra.Command, args []string) error {
 		return printRawJSON(data)
 	}
 
-	fmt.Println("Todo deleted.")
+	fmt.Printf("Todo deleted.%s\n", extractMutationInfo(data))
 	return nil
 }

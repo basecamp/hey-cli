@@ -12,7 +12,8 @@ import (
 )
 
 type boxCommand struct {
-	cmd *cobra.Command
+	cmd   *cobra.Command
+	limit int
 }
 
 func newBoxCommand() *boxCommand {
@@ -21,9 +22,14 @@ func newBoxCommand() *boxCommand {
 		Use:   "box <name|id>",
 		Short: "List postings in a mailbox",
 		Long:  "List postings in a mailbox. Accepts a box name (imbox, feedbox, etc.) or numeric ID.",
-		RunE:  boxCommand.run,
-		Args:  cobra.ExactArgs(1),
+		Example: `  hey box imbox
+  hey box imbox --limit 10
+  hey box 123 --json`,
+		RunE: boxCommand.run,
+		Args: cobra.ExactArgs(1),
 	}
+
+	boxCommand.cmd.Flags().IntVar(&boxCommand.limit, "limit", 0, "Maximum number of postings to show")
 
 	return boxCommand
 }
@@ -45,6 +51,17 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
+		if c.limit > 0 {
+			var obj map[string]json.RawMessage
+			if err := json.Unmarshal(data, &obj); err == nil {
+				if postings, ok := obj["postings"]; ok {
+					obj["postings"] = json.RawMessage(limitJSONArray([]byte(postings), c.limit))
+					if limited, err := json.Marshal(obj); err == nil {
+						data = limited
+					}
+				}
+			}
+		}
 		return printRawJSON(data)
 	}
 
@@ -55,9 +72,14 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Box: %s (%s)\n\n", resp.Box.Name, resp.Box.Kind)
 
+	postings := resp.Postings
+	if c.limit > 0 && len(postings) > c.limit {
+		postings = postings[:c.limit]
+	}
+
 	table := newTable()
 	table.addRow([]string{"ID", "From", "Summary", "Date"})
-	for _, raw := range resp.Postings {
+	for _, raw := range postings {
 		var p models.Posting
 		if err := json.Unmarshal(raw, &p); err != nil {
 			continue

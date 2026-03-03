@@ -17,7 +17,9 @@ func newCalendarsCommand() *calendarsCommand {
 	calendarsCommand.cmd = &cobra.Command{
 		Use:   "calendars",
 		Short: "List calendars",
-		RunE:  calendarsCommand.run,
+		Example: `  hey calendars
+  hey calendars --json`,
+		RunE: calendarsCommand.run,
 	}
 
 	return calendarsCommand

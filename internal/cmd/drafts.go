@@ -9,7 +9,8 @@ import (
 )
 
 type draftsCommand struct {
-	cmd *cobra.Command
+	cmd   *cobra.Command
+	limit int
 }
 
 func newDraftsCommand() *draftsCommand {
@@ -17,8 +18,13 @@ func newDraftsCommand() *draftsCommand {
 	draftsCommand.cmd = &cobra.Command{
 		Use:   "drafts",
 		Short: "List draft entries",
-		RunE:  draftsCommand.run,
+		Example: `  hey drafts
+  hey drafts --limit 10
+  hey drafts --json`,
+		RunE: draftsCommand.run,
 	}
+
+	draftsCommand.cmd.Flags().IntVar(&draftsCommand.limit, "limit", 0, "Maximum number of drafts to show")
 
 	return draftsCommand
 }
@@ -33,7 +39,7 @@ func (c *draftsCommand) run(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		return printRawJSON(data)
+		return printRawJSON(limitJSONArray(data, c.limit))
 	}
 
 	var drafts []models.Draft
@@ -44,6 +50,10 @@ func (c *draftsCommand) run(cmd *cobra.Command, args []string) error {
 	if len(drafts) == 0 {
 		fmt.Println("No drafts.")
 		return nil
+	}
+
+	if c.limit > 0 && len(drafts) > c.limit {
+		drafts = drafts[:c.limit]
 	}
 
 	table := newTable()

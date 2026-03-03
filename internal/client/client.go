@@ -13,6 +13,26 @@ import (
 	"hey-cli/internal/config"
 )
 
+type APIError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *APIError) Error() string {
+	return e.Message
+}
+
+func responseError(resp *http.Response, data []byte) *APIError {
+	switch resp.StatusCode {
+	case 401:
+		return &APIError{StatusCode: 401, Message: "unauthorized — run `hey login` to authenticate"}
+	case 404:
+		return &APIError{StatusCode: 404, Message: "not found (404)"}
+	default:
+		return &APIError{StatusCode: resp.StatusCode, Message: fmt.Sprintf("API error %d: %s", resp.StatusCode, string(data))}
+	}
+}
+
 type Client struct {
 	Config     *config.Config
 	HTTPClient *http.Client
@@ -103,28 +123,24 @@ func (c *Client) refreshToken() error {
 	return c.Config.Save()
 }
 
+func (c *Client) readBody(resp *http.Response) ([]byte, error) {
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("could not read response: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		return nil, responseError(resp, data)
+	}
+	return data, nil
+}
+
 func (c *Client) Get(path string) ([]byte, error) {
 	resp, err := c.doRequest("GET", path, nil, "")
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("could not read response: %w", err)
-	}
-
-	if resp.StatusCode == 401 {
-		return nil, fmt.Errorf("unauthorized — run `hey login` to authenticate")
-	}
-	if resp.StatusCode == 404 {
-		return nil, fmt.Errorf("not found (404)")
-	}
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(data))
-	}
-	return data, nil
+	return c.readBody(resp)
 }
 
 func (c *Client) GetJSON(path string, v interface{}) error {
@@ -148,19 +164,7 @@ func (c *Client) PostJSON(path string, body interface{}) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("could not read response: %w", err)
-	}
-
-	if resp.StatusCode == 401 {
-		return nil, fmt.Errorf("unauthorized — run `hey login` to authenticate")
-	}
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(data))
-	}
-	return data, nil
+	return c.readBody(resp)
 }
 
 func (c *Client) PostForm(path string, values url.Values) ([]byte, error) {
@@ -169,16 +173,7 @@ func (c *Client) PostForm(path string, values url.Values) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("could not read response: %w", err)
-	}
-
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(data))
-	}
-	return data, nil
+	return c.readBody(resp)
 }
 
 func (c *Client) PatchJSON(path string, body interface{}) ([]byte, error) {
@@ -194,19 +189,7 @@ func (c *Client) PatchJSON(path string, body interface{}) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("could not read response: %w", err)
-	}
-
-	if resp.StatusCode == 401 {
-		return nil, fmt.Errorf("unauthorized — run `hey login` to authenticate")
-	}
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(data))
-	}
-	return data, nil
+	return c.readBody(resp)
 }
 
 func (c *Client) PutJSON(path string, body interface{}) ([]byte, error) {
@@ -222,19 +205,7 @@ func (c *Client) PutJSON(path string, body interface{}) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("could not read response: %w", err)
-	}
-
-	if resp.StatusCode == 401 {
-		return nil, fmt.Errorf("unauthorized — run `hey login` to authenticate")
-	}
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(data))
-	}
-	return data, nil
+	return c.readBody(resp)
 }
 
 func (c *Client) Delete(path string) ([]byte, error) {
@@ -243,17 +214,5 @@ func (c *Client) Delete(path string) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("could not read response: %w", err)
-	}
-
-	if resp.StatusCode == 401 {
-		return nil, fmt.Errorf("unauthorized — run `hey login` to authenticate")
-	}
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(data))
-	}
-	return data, nil
+	return c.readBody(resp)
 }

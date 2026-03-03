@@ -9,7 +9,8 @@ import (
 )
 
 type boxesCommand struct {
-	cmd *cobra.Command
+	cmd   *cobra.Command
+	limit int
 }
 
 func newBoxesCommand() *boxesCommand {
@@ -17,8 +18,13 @@ func newBoxesCommand() *boxesCommand {
 	boxesCommand.cmd = &cobra.Command{
 		Use:   "boxes",
 		Short: "List mailboxes",
-		RunE:  boxesCommand.run,
+		Example: `  hey boxes
+  hey boxes --limit 5
+  hey boxes --json`,
+		RunE: boxesCommand.run,
 	}
+
+	boxesCommand.cmd.Flags().IntVar(&boxesCommand.limit, "limit", 0, "Maximum number of boxes to show")
 
 	return boxesCommand
 }
@@ -33,12 +39,16 @@ func (c *boxesCommand) run(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		return printRawJSON(data)
+		return printRawJSON(limitJSONArray(data, c.limit))
 	}
 
 	var boxes []models.Box
 	if err := apiClient.GetJSON("/boxes.json", &boxes); err != nil {
 		return err
+	}
+
+	if c.limit > 0 && len(boxes) > c.limit {
+		boxes = boxes[:c.limit]
 	}
 
 	table := newTable()

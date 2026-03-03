@@ -39,7 +39,9 @@ func newTimetrackStartCommand() *timetrackStartCommand {
 	timetrackStartCommand.cmd = &cobra.Command{
 		Use:   "start",
 		Short: "Start time tracking",
-		RunE:  timetrackStartCommand.run,
+		Example: `  hey timetrack start
+  hey timetrack start --json`,
+		RunE: timetrackStartCommand.run,
 	}
 
 	return timetrackStartCommand
@@ -59,7 +61,7 @@ func (c *timetrackStartCommand) run(cmd *cobra.Command, args []string) error {
 		return printRawJSON(data)
 	}
 
-	fmt.Println("Time tracking started.")
+	fmt.Printf("Time tracking started.%s\n", extractMutationInfo(data))
 	return nil
 }
 
@@ -74,7 +76,9 @@ func newTimetrackStopCommand() *timetrackStopCommand {
 	timetrackStopCommand.cmd = &cobra.Command{
 		Use:   "stop",
 		Short: "Stop time tracking",
-		RunE:  timetrackStopCommand.run,
+		Example: `  hey timetrack stop
+  hey timetrack stop --json`,
+		RunE: timetrackStopCommand.run,
 	}
 
 	return timetrackStopCommand
@@ -109,7 +113,7 @@ func (c *timetrackStopCommand) run(cmd *cobra.Command, args []string) error {
 		return printRawJSON(result)
 	}
 
-	fmt.Println("Time tracking stopped.")
+	fmt.Printf("Time tracking stopped.%s\n", extractMutationInfo(result))
 	return nil
 }
 
@@ -124,7 +128,9 @@ func newTimetrackCurrentCommand() *timetrackCurrentCommand {
 	timetrackCurrentCommand.cmd = &cobra.Command{
 		Use:   "current",
 		Short: "Show current time tracking status",
-		RunE:  timetrackCurrentCommand.run,
+		Example: `  hey timetrack current
+  hey timetrack current --json`,
+		RunE: timetrackCurrentCommand.run,
 	}
 
 	return timetrackCurrentCommand
@@ -177,7 +183,9 @@ func newTimetrackListCommand() *timetrackListCommand {
 	timetrackListCommand.cmd = &cobra.Command{
 		Use:   "list",
 		Short: "List time tracks",
-		RunE:  timetrackListCommand.run,
+		Example: `  hey timetrack list
+  hey timetrack list --json`,
+		RunE: timetrackListCommand.run,
 	}
 
 	return timetrackListCommand

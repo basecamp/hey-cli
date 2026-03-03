@@ -31,7 +31,8 @@ func newJournalCommand() *journalCommand {
 // list
 
 type journalListCommand struct {
-	cmd *cobra.Command
+	cmd   *cobra.Command
+	limit int
 }
 
 func newJournalListCommand() *journalListCommand {
@@ -39,8 +40,13 @@ func newJournalListCommand() *journalListCommand {
 	journalListCommand.cmd = &cobra.Command{
 		Use:   "list",
 		Short: "List journal entries",
-		RunE:  journalListCommand.run,
+		Example: `  hey journal list
+  hey journal list --limit 10
+  hey journal list --json`,
+		RunE: journalListCommand.run,
 	}
+
+	journalListCommand.cmd.Flags().IntVar(&journalListCommand.limit, "limit", 0, "Maximum number of entries to show")
 
 	return journalListCommand
 }
@@ -55,7 +61,7 @@ func (c *journalListCommand) run(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		return printRawJSON(data)
+		return printRawJSON(limitJSONArray(data, c.limit))
 	}
 
 	var entries []models.JournalEntry
@@ -66,6 +72,10 @@ func (c *journalListCommand) run(cmd *cobra.Command, args []string) error {
 	if len(entries) == 0 {
 		fmt.Println("No journal entries.")
 		return nil
+	}
+
+	if c.limit > 0 && len(entries) > c.limit {
+		entries = entries[:c.limit]
 	}
 
 	table := newTable()
@@ -88,8 +98,11 @@ func newJournalReadCommand() *journalReadCommand {
 	journalReadCommand.cmd = &cobra.Command{
 		Use:   "read [date]",
 		Short: "Read a journal entry (default: today)",
-		RunE:  journalReadCommand.run,
-		Args:  cobra.MaximumNArgs(1),
+		Example: `  hey journal read
+  hey journal read 2024-01-15
+  hey journal read --json`,
+		RunE: journalReadCommand.run,
+		Args: cobra.MaximumNArgs(1),
 	}
 
 	return journalReadCommand
@@ -141,8 +154,11 @@ func newJournalWriteCommand() *journalWriteCommand {
 	journalWriteCommand.cmd = &cobra.Command{
 		Use:   "write [date]",
 		Short: "Write or edit a journal entry (default: today)",
-		RunE:  journalWriteCommand.run,
-		Args:  cobra.MaximumNArgs(1),
+		Example: `  hey journal write --content "Today was great"
+  hey journal write 2024-01-15 --content "Retrospective"
+  echo "Journal content" | hey journal write`,
+		RunE: journalWriteCommand.run,
+		Args: cobra.MaximumNArgs(1),
 	}
 
 	journalWriteCommand.cmd.Flags().StringVar(&journalWriteCommand.content, "content", "", "Journal content (or opens $EDITOR)")
@@ -162,17 +178,28 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 
 	content := c.content
 	if content == "" {
-		existing := ""
-		path := fmt.Sprintf("/calendar/days/%s/journal_entry.json", date)
-		var entry models.JournalEntry
-		if err := apiClient.GetJSON(path, &entry); err == nil {
-			existing = entry.Body
-		}
+		if !stdinIsTerminal() {
+			var err error
+			content, err = readStdin()
+			if err != nil {
+				return err
+			}
+			if content == "" {
+				return fmt.Errorf("no content provided (use --content to provide inline, or pipe to stdin)")
+			}
+		} else {
+			existing := ""
+			path := fmt.Sprintf("/calendar/days/%s/journal_entry.json", date)
+			var entry models.JournalEntry
+			if err := apiClient.GetJSON(path, &entry); err == nil {
+				existing = entry.Body
+			}
 
-		var err error
-		content, err = editor.Open(existing)
-		if err != nil {
-			return fmt.Errorf("could not open editor: %w", err)
+			var err error
+			content, err = editor.Open(existing)
+			if err != nil {
+				return fmt.Errorf("could not open editor: %w", err)
+			}
 		}
 	}
 
@@ -188,6 +215,6 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 		return printRawJSON(data)
 	}
 
-	fmt.Printf("Journal entry for %s saved.\n", date)
+	fmt.Printf("Journal entry for %s saved.%s\n", date, extractMutationInfo(data))
 	return nil
 }

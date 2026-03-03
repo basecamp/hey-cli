@@ -17,7 +17,9 @@ func newEntryCommand() *entryCommand {
 	entryCommand.cmd = &cobra.Command{
 		Use:   "entry <id>",
 		Short: "Read a single email entry",
-		RunE:  entryCommand.run,
+		Example: `  hey entry 67890
+  hey entry 67890 --json`,
+		RunE: entryCommand.run,
 		Args:  cobra.ExactArgs(1),
 	}
 

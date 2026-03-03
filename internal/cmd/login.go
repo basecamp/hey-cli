@@ -31,6 +31,9 @@ func newLoginCommand() *loginCommand {
 Use --cookie to paste the session_token cookie value from your browser.
 Use --token to paste a pre-generated Bearer token.
 Without either, performs interactive OAuth password grant (requires --client-id and --client-secret).`,
+		Example: `  hey login --token YOUR_BEARER_TOKEN
+  hey login --cookie SESSION_COOKIE_VALUE
+  hey login --client-id ID --client-secret SECRET`,
 		RunE: loginCommand.run,
 	}
 
