@@ -27,7 +27,7 @@ var (
 var rootCmd = &cobra.Command{
 	Use:   "hey",
 	Short: "CLI for HEY",
-	Long: `A CLI for HEY
+	Long: `
 ⠀⠀⠀⠀⠀⠀⣰⠲⣄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ⠀⠀⠀⡟⢳⡀⣏⠀⠘⣆⠀⠀⠀⠀⠀⣤⣤⡄⠀⠀⢠⣤⣤⣤⣤⣤⣤⣤⣤⠀⠀⢀⣤⣤⡄⠀
 ⠀⣴⢄⢳⠀⠹⣿⠀⠀⠸⣆⠴⠒⢢⡀⢻⣿⡇⠀⠀⢸⣿⣿⡟⠛⠛⠛⢿⣿⣇⠀⣼⣿⡟⠀⠀
