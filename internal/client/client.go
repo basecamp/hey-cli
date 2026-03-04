@@ -109,9 +109,9 @@ func (c *Client) doWithRetry(method, path string, body []byte, contentType, acce
 			backoff(attempt)
 			continue
 		}
-		defer resp.Body.Close()
 
 		data, err := c.readBody(resp)
+		resp.Body.Close()
 		if err != nil {
 			oerr := apierr.AsError(err)
 			if oerr.Code == "rate_limit" && attempt < maxRetries-1 {

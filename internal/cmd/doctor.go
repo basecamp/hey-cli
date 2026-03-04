@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-cli/internal/config"
 	"github.com/basecamp/hey-cli/internal/output"
 	"github.com/basecamp/hey-cli/internal/version"
 )
@@ -62,12 +64,7 @@ func runDoctorChecks() []map[string]string {
 	})
 
 	// Config File
-	configDir := os.ExpandEnv("${XDG_CONFIG_HOME}")
-	if configDir == "" {
-		home, _ := os.UserHomeDir()
-		configDir = home + "/.config"
-	}
-	configFile := configDir + "/hey-cli/config.json"
+	configFile := filepath.Join(config.ConfigDir(), "config.json")
 	if _, err := os.Stat(configFile); err == nil {
 		checks = append(checks, map[string]string{
 			"name":    "Config File",

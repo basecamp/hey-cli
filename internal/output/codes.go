@@ -1,5 +1,7 @@
 package output
 
+import "errors"
+
 const (
 	ExitOK        = 0
 	ExitUsage     = 1
@@ -13,8 +15,8 @@ const (
 )
 
 func ExitCodeFor(err error) int {
-	e, ok := err.(*Error)
-	if !ok {
+	var e *Error
+	if !errors.As(err, &e) {
 		return 1
 	}
 	switch e.Code {

@@ -1,6 +1,7 @@
 package output
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -48,7 +49,7 @@ func (w *Writer) EffectiveFormat() Format {
 	if w.opts.Format != FormatAuto {
 		return w.opts.Format
 	}
-	if isTTY() {
+	if isTTY(w.opts.Stdout) {
 		return FormatStyled
 	}
 	return FormatJSON
@@ -206,8 +207,11 @@ func (w *Writer) writeMarkdown(data any) error {
 	return nil
 }
 
-func isTTY() bool {
-	return term.IsTerminal(int(os.Stdout.Fd()))
+func isTTY(w io.Writer) bool {
+	if f, ok := w.(*os.File); ok {
+		return term.IsTerminal(int(f.Fd()))
+	}
+	return false
 }
 
 func toSlice(data any) ([]any, bool) {
@@ -312,7 +316,7 @@ func FormatFromFlags(jsonFlag, quiet, idsOnly, count, markdown, styled, agent bo
 }
 
 func NormalizeJSONNumbers(data []byte) (any, error) {
-	dec := json.NewDecoder(strings.NewReader(string(data)))
+	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
 	var v any
 	if err := dec.Decode(&v); err != nil {

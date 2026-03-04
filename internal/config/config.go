@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 )
@@ -220,7 +219,7 @@ func LoadOld() (*OldConfig, error) {
 func (c *Config) Save() error {
 	path := globalConfigPath()
 
-	if err = os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return fmt.Errorf("could not create config directory: %w", err)
 	}
 
@@ -241,7 +240,7 @@ func validateBaseURL(base string) error {
 		return apierr.ErrUsage(fmt.Sprintf("invalid base URL %q: %v", base, err))
 	}
 	// Enforce HTTPS for non-localhost
-	host := strings.Split(u.Hostname(), ":")[0]
+	host := u.Hostname()
 	if u.Scheme != "https" && host != "localhost" && host != "127.0.0.1" && host != "::1" {
 		return apierr.ErrUsage(fmt.Sprintf("base URL must use HTTPS (got %q)", base))
 	}
