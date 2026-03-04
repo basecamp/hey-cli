@@ -96,7 +96,9 @@ func Execute() {
 				obj["error"] = apiErr.Message
 				obj["status"] = apiErr.StatusCode
 			}
-			json.NewEncoder(os.Stdout).Encode(obj)
+			if encodeErr := json.NewEncoder(os.Stdout).Encode(obj); encodeErr != nil {
+				fmt.Fprintf(os.Stderr, "Error: %s (failed to encode JSON: %v)\n", err, encodeErr)
+			}
 		} else {
 			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 		}
