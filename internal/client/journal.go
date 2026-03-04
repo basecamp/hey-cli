@@ -11,10 +11,28 @@ import (
 )
 
 func (c *Client) ListJournalEntries() ([]models.JournalEntry, error) {
-	var entries []models.JournalEntry
-	if err := c.GetJSON("/calendar/journal_entries.json", &entries); err != nil {
+	recordingsByType, err := c.listPersonalCalendarRecordings()
+	if err != nil {
 		return nil, err
 	}
+
+	recordings := recordingsByType["Calendar::JournalEntry"]
+	entries := make([]models.JournalEntry, 0, len(recordings))
+	for _, recording := range recordings {
+		entryDate := recording.StartsAt
+		if len(entryDate) >= 10 {
+			entryDate = entryDate[:10]
+		}
+
+		entries = append(entries, models.JournalEntry{
+			ID:        recording.ID,
+			Date:      entryDate,
+			Body:      recording.Content,
+			CreatedAt: recording.CreatedAt,
+			UpdatedAt: recording.UpdatedAt,
+		})
+	}
+
 	return entries, nil
 }
 
