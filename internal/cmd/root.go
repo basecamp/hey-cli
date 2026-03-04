@@ -145,6 +145,7 @@ func agentHelpFunc(cmd *cobra.Command, _ []string) {
 			flags = append(flags, flagInfo{Name: f.Name, Type: f.Value.Type()})
 		})
 	}
+	addFlags(cmd.PersistentFlags())
 	addFlags(cmd.LocalFlags())
 	addFlags(cmd.InheritedFlags())
 	sort.Slice(flags, func(i, j int) bool { return flags[i].Name < flags[j].Name })

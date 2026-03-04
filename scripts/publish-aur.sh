@@ -2,7 +2,10 @@
 set -euo pipefail
 
 # Publish hey-cli to AUR
-# Requires: GITHUB_TOKEN, AUR_KEY environment variables
+# Requires: GITHUB_REF_NAME (from GitHub Actions), AUR_KEY environment variables
+
+: "${GITHUB_REF_NAME:?GITHUB_REF_NAME is required (set by GitHub Actions)}"
+: "${AUR_KEY:?AUR_KEY is required for AUR publishing}"
 
 VERSION="${GITHUB_REF_NAME#v}"
 REPO="basecamp/hey-cli"

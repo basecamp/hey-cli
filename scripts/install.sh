@@ -72,7 +72,7 @@ if command -v cosign >/dev/null 2>&1 && [ -z "${HEY_INSECURE_SKIP_COSIGN:-}" ]; 
     echo "Verifying cosign signature..."
     if cosign verify-blob \
       --bundle checksums.txt.bundle \
-      --certificate-identity-regexp="https://github.com/$REPO" \
+      --certificate-identity-regexp="https://github.com/$REPO/.github/workflows/release.yml@refs/tags/v" \
       --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
       checksums.txt 2>/dev/null; then
       echo "Signature verified."
