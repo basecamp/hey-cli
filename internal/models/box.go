@@ -35,10 +35,10 @@ type Posting struct {
 	EntryKind           string  `json:"entry_kind"`
 	IncludesAttachments bool    `json:"includes_attachments"`
 	BubbledUp           bool    `json:"bubbled_up"`
+	AppURL              string  `json:"app_url"`
 	Creator             Contact `json:"creator"`
 	TopicID             int     `json:"topic_id"`
 	Topic               *Topic  `json:"topic,omitempty"`
-	AppURL              string  `json:"app_url"`
 }
 
 // ResolveTopicID returns the topic ID for this posting, preferring
