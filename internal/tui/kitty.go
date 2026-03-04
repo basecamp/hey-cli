@@ -30,13 +30,6 @@ var diacritics = []rune{
 
 const placeholder = '\U0010EEEE'
 
-type kittyImage struct {
-	id   int
-	data []byte
-	cols int
-	rows int
-}
-
 // kittyUploadAndPlace returns escape sequences to upload image data and create
 // a virtual Unicode placement. The result should be sent via tea.Raw().
 func kittyUploadAndPlace(data []byte, id, cols, rows int) string {

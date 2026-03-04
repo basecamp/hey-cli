@@ -141,21 +141,3 @@ func extractMutationInfo(data []byte) string {
 	}
 	return " (" + strings.Join(parts, ", ") + ")"
 }
-
-func limitJSONArray(data []byte, limit int) []byte {
-	if limit <= 0 {
-		return data
-	}
-	var arr []json.RawMessage
-	if err := json.Unmarshal(data, &arr); err != nil {
-		return data
-	}
-	if len(arr) <= limit {
-		return data
-	}
-	result, err := json.Marshal(arr[:limit])
-	if err != nil {
-		return data
-	}
-	return result
-}
