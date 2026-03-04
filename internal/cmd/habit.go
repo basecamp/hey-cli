@@ -39,7 +39,7 @@ func newHabitCompleteCommand() *habitCompleteCommand {
 		Example: `  hey habit complete 789
   hey habit complete 789 --date 2024-01-15`,
 		RunE: habitCompleteCommand.run,
-		Args: cobra.ExactArgs(1),
+		Args: usageExactArgs(1),
 	}
 
 	habitCompleteCommand.cmd.Flags().StringVar(&habitCompleteCommand.date, "date", "", "Date (YYYY-MM-DD, default: today)")
@@ -85,7 +85,7 @@ func newHabitUncompleteCommand() *habitUncompleteCommand {
 		Example: `  hey habit uncomplete 789
   hey habit uncomplete 789 --date 2024-01-15`,
 		RunE: habitUncompleteCommand.run,
-		Args: cobra.ExactArgs(1),
+		Args: usageExactArgs(1),
 	}
 
 	habitUncompleteCommand.cmd.Flags().StringVar(&habitUncompleteCommand.date, "date", "", "Date (YYYY-MM-DD, default: today)")

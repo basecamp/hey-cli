@@ -22,7 +22,7 @@ func newReplyCommand() *replyCommand {
 		Example: `  hey reply 12345 -m "Thanks!"
   echo "Detailed reply" | hey reply 12345`,
 		RunE: replyCommand.run,
-		Args: cobra.ExactArgs(1),
+		Args: usageExactArgs(1),
 	}
 
 	replyCommand.cmd.Flags().StringVarP(&replyCommand.message, "message", "m", "", "Reply message (or opens $EDITOR)")

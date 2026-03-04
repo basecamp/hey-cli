@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -99,6 +100,8 @@ func Execute() {
 			if encodeErr := json.NewEncoder(os.Stdout).Encode(obj); encodeErr != nil {
 				fmt.Fprintf(os.Stderr, "Error: %s (failed to encode JSON: %v)\n", err, encodeErr)
 			}
+		} else if strings.HasPrefix(err.Error(), "Usage:") {
+			fmt.Fprintln(os.Stderr, err.Error())
 		} else {
 			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 		}

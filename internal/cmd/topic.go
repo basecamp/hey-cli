@@ -20,7 +20,7 @@ func newTopicCommand() *topicCommand {
 		Example: `  hey topic 12345
   hey topic 12345 --json`,
 		RunE: topicCommand.run,
-		Args:  cobra.ExactArgs(1),
+		Args: usageExactArgs(1),
 	}
 
 	return topicCommand

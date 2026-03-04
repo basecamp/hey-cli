@@ -39,7 +39,7 @@ func validateBoxArgs(cmd *cobra.Command, args []string) error {
 	case 1:
 		return nil
 	case 0:
-		return fmt.Errorf("missing mailbox argument; usage: %s <name|id> (example: hey box imbox)", cmd.CommandPath())
+		return fmt.Errorf("Usage: %s <name|id> (example: hey box imbox)", cmd.CommandPath())
 	default:
 		return fmt.Errorf("expected 1 mailbox argument, got %d", len(args))
 	}

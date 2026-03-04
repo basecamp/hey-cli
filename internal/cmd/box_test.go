@@ -21,7 +21,7 @@ func TestValidateBoxArgs(t *testing.T) {
 			name:        "missing arg",
 			args:        nil,
 			wantErr:     true,
-			errContains: "missing mailbox argument",
+			errContains: "Usage:",
 		},
 		{
 			name:    "one arg",

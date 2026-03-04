@@ -24,7 +24,7 @@ func newRecordingsCommand() *recordingsCommand {
   hey recordings 123 --starts-on 2024-01-01 --ends-on 2024-01-31
   hey recordings 123 --limit 5 --json`,
 		RunE: recordingsCommand.run,
-		Args: cobra.ExactArgs(1),
+		Args: usageExactArgs(1),
 	}
 
 	recordingsCommand.cmd.Flags().StringVar(&recordingsCommand.startsOn, "starts-on", "", "Start date (YYYY-MM-DD, defaults to today)")
