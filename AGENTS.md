@@ -53,6 +53,16 @@ Remember to update the examples in the README when you change, add or remove CLI
 
 Some HEY API endpoints return 204 or incomplete data via JSON, but the full HTML content is available by scraping the edit page (e.g., `/calendar/days/{date}/journal_entry/edit` contains the Trix editor hidden input with full HTML). When an API endpoint returns incomplete data, check the corresponding web page for the full content. The `internal/htmlutil` package provides `ToText` (HTML→plain text) and `ExtractImageURLs` shared by both CLI and TUI. HEY uses Trix editor with `<figure data-trix-attachment="{...}">` for attachments — image URLs in those attributes are relative paths requiring authentication via `client.Get`.
 
+### Inline images in the TUI
+
+The TUI renders inline images using the Kitty graphics protocol's Unicode Placeholder extension (`internal/tui/kitty.go`). This works because Bubble Tea's cell-based renderer corrupts raw APC escape sequences, but Unicode placeholders are regular text that survives rendering. The approach has three steps:
+
+1. **Upload** — image data is sent to the terminal via `tea.Raw()` with `a=t` (transmit only) and `q=2` (suppress response), then a virtual placement is created with `U=1`.
+2. **Display** — U+10EEEE placeholder characters with combining diacritics (encoding row/column) are placed in the viewport content. The image ID is encoded in the foreground color.
+3. **Sizing** — `image.DecodeConfig` reads dimensions without full decoding; terminal cell count accounts for ~2:1 height:width cell ratio.
+
+This works in Kitty and Ghostty. Other terminals show the text content normally (placeholders are invisible).
+
 ### Server implementation
 
 You can read through the server implementation to understand how the API works.

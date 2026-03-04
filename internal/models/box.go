@@ -32,6 +32,7 @@ type Posting struct {
 	IncludesAttachments bool    `json:"includes_attachments"`
 	BubbledUp           bool    `json:"bubbled_up"`
 	Creator             Contact `json:"creator"`
+	TopicID             int     `json:"topic_id"`
 	Topic               *Topic  `json:"topic,omitempty"`
 }
 

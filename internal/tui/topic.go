@@ -13,6 +13,7 @@ import (
 type topicModel struct {
 	viewport viewport.Model
 	title    string
+	content  string
 	styles   styles
 }
 
@@ -23,8 +24,14 @@ func newTopicModel(s styles) topicModel {
 
 func (m *topicModel) setEntries(title string, entries []models.Entry) {
 	m.title = title
-	m.viewport.SetContent(m.renderEntries(entries))
+	m.content = m.renderEntries(entries)
+	m.viewport.SetContent(m.content)
 	m.viewport.GotoTop()
+}
+
+func (m *topicModel) appendContent(extra string) {
+	m.content += extra
+	m.viewport.SetContent(m.content)
 }
 
 func (m *topicModel) setSize(w, h int) {
@@ -70,7 +77,7 @@ func (m topicModel) renderEntries(entries []models.Entry) string {
 			fmt.Fprintf(&b, "%s\n", e.Summary)
 		}
 		if e.Body != "" {
-			fmt.Fprintf(&b, "\n%s\n", m.styles.entryBody.Render(e.Body))
+			fmt.Fprintf(&b, "\n%s\n", m.styles.entryBody.Render(htmlToText(e.Body)))
 		}
 		b.WriteString("\n")
 	}

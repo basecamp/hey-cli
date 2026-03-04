@@ -39,6 +39,7 @@ type boxLoadedMsg struct {
 type topicLoadedMsg struct {
 	title   string
 	entries []models.Entry
+	images  [][]byte
 }
 
 type calendarsLoadedMsg []models.Calendar
@@ -165,6 +166,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.topic.setEntries(msg.title, msg.entries)
 		m.state = viewTopic
+		var uploadCmds []tea.Cmd
+		for i, imgData := range msg.images {
+			imageID := i + 1
+			cols, rows := imageDimensions(imgData, m.width-4)
+			m.topic.appendContent("\n\n" + renderImagePlaceholder(imageID, cols, rows))
+			seq := kittyUploadAndPlace(imgData, imageID, cols, rows)
+			uploadCmds = append(uploadCmds, tea.Raw(seq))
+		}
+		if len(uploadCmds) > 0 {
+			return m, tea.Batch(uploadCmds...)
+		}
 		return m, nil
 
 	case calendarsLoadedMsg:
@@ -264,9 +276,16 @@ func (m *model) updateBox(msg tea.Msg) tea.Cmd {
 		case tea.KeyEnter:
 			if m.box.list.FilterState() != list.Filtering {
 				posting := m.box.selectedPosting()
-				if posting != nil && posting.Topic != nil {
+				if posting != nil {
+					topicID := posting.ID
+					if posting.TopicID != 0 {
+						topicID = posting.TopicID
+					}
+					if posting.Topic != nil {
+						topicID = posting.Topic.ID
+					}
 					m.loading = true
-					return m.fetchTopic(posting.Topic.ID, posting.Summary)
+					return m.fetchTopic(topicID, posting.Summary)
 				}
 			}
 		}
@@ -464,7 +483,24 @@ func (m model) fetchTopic(topicID int, title string) tea.Cmd {
 		if err != nil {
 			return errMsg{err}
 		}
-		return topicLoadedMsg{title: title, entries: entries}
+
+		// Download image data from all entry bodies
+		var images [][]byte
+		for _, e := range entries {
+			for _, imgURL := range extractImageURLs(e.Body) {
+				var data []byte
+				if strings.HasPrefix(imgURL, "http://") || strings.HasPrefix(imgURL, "https://") {
+					data = fetchImageData(imgURL)
+				} else {
+					data, _ = m.client.Get(imgURL)
+				}
+				if len(data) > 0 {
+					images = append(images, data)
+				}
+			}
+		}
+
+		return topicLoadedMsg{title: title, entries: entries, images: images}
 	}
 }
 
@@ -604,8 +640,10 @@ func (m model) showRecordingDetail(rec models.Recording) tea.Cmd {
 	}
 }
 
+var imageHTTPClient = &http.Client{Timeout: 10 * time.Second}
+
 func fetchImageData(url string) []byte {
-	resp, err := http.Get(url)
+	resp, err := imageHTTPClient.Get(url)
 	if err != nil {
 		return nil
 	}
