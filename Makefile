@@ -103,14 +103,15 @@ lint:
 
 # Verify go.mod/go.sum tidiness (non-mutating)
 tidy-check:
-	@cp go.mod go.mod.bak && cp go.sum go.sum.bak
-	@go mod tidy
-	@if ! diff -q go.mod go.mod.bak >/dev/null 2>&1 || ! diff -q go.sum go.sum.bak >/dev/null 2>&1; then \
-		mv go.mod.bak go.mod; mv go.sum.bak go.sum; \
+	@set -eu; \
+	trap 'mv -f go.mod.bak go.mod; mv -f go.sum.bak go.sum' EXIT; \
+	cp go.mod go.mod.bak; \
+	cp go.sum go.sum.bak; \
+	go mod tidy; \
+	if ! diff -q go.mod go.mod.bak >/dev/null 2>&1 || ! diff -q go.sum go.sum.bak >/dev/null 2>&1; then \
 		echo "go.mod or go.sum is not tidy — run 'go mod tidy'"; \
 		exit 1; \
 	fi
-	@mv go.mod.bak go.mod && mv go.sum.bak go.sum
 
 # Run unit tests with race detector
 race-test: check-toolchain
@@ -154,13 +155,14 @@ check-surface-compat: build
 		WORKTREE_DIR=/tmp/baseline-tree-$$$$; \
 		trap 'git worktree remove "$$WORKTREE_DIR" --force 2>/dev/null || true' EXIT; \
 		git worktree add "$$WORKTREE_DIR" "$$PREV_TAG"; \
-		cd "$$WORKTREE_DIR" && make build; \
-		if "$$SCRIPT_DIR/check-cli-surface.sh" ./bin/hey /tmp/baseline-surface.txt 2>/dev/null; then \
-			cd - && git worktree remove "$$WORKTREE_DIR" --force; \
+		if ! (cd "$$WORKTREE_DIR" && make build); then \
+			echo "ERROR: baseline ($$PREV_TAG) failed to build"; \
+			exit 1; \
+		fi; \
+		if "$$SCRIPT_DIR/check-cli-surface.sh" "$$WORKTREE_DIR/bin/hey" /tmp/baseline-surface.txt 2>/dev/null; then \
 			scripts/check-cli-surface-diff.sh /tmp/baseline-surface.txt /tmp/current-surface.txt; \
 		else \
 			echo "Baseline ($$PREV_TAG) does not support --help --agent — skipping surface diff"; \
-			cd - && git worktree remove "$$WORKTREE_DIR" --force; \
 		fi; \
 	fi
 

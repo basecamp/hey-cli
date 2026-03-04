@@ -135,12 +135,18 @@ func agentHelpFunc(cmd *cobra.Command, _ []string) {
 	}
 
 	var flags []flagInfo
-	cmd.Flags().VisitAll(func(f *pflag.Flag) {
-		if f.Hidden {
-			return
-		}
-		flags = append(flags, flagInfo{Name: f.Name, Type: f.Value.Type()})
-	})
+	seen := make(map[string]bool)
+	addFlags := func(fs *pflag.FlagSet) {
+		fs.VisitAll(func(f *pflag.Flag) {
+			if f.Hidden || seen[f.Name] {
+				return
+			}
+			seen[f.Name] = true
+			flags = append(flags, flagInfo{Name: f.Name, Type: f.Value.Type()})
+		})
+	}
+	addFlags(cmd.LocalFlags())
+	addFlags(cmd.InheritedFlags())
 	sort.Slice(flags, func(i, j int) bool { return flags[i].Name < flags[j].Name })
 
 	var subs []subInfo

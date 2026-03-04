@@ -51,7 +51,8 @@ echo "Verifying checksum..."
 cd "$TMPDIR"
 EXPECTED=$(awk -v f="$ARCHIVE" '$2 == f {print $1}' checksums.txt)
 if [ -z "$EXPECTED" ]; then
-  echo "WARNING: Archive not found in checksums file"
+  echo "ERROR: Archive not found in checksums file"
+  exit 1
 else
   ACTUAL=$(sha256sum "$ARCHIVE" 2>/dev/null || shasum -a 256 "$ARCHIVE" | awk '{print $1}')
   ACTUAL=$(echo "$ACTUAL" | awk '{print $1}')
@@ -65,7 +66,7 @@ else
 fi
 
 # Verify cosign signature (if cosign available)
-if command -v cosign >/dev/null 2>&1; then
+if command -v cosign >/dev/null 2>&1 && [ -z "${HEY_INSECURE_SKIP_COSIGN:-}" ]; then
   SIG_URL="https://github.com/$REPO/releases/download/${VERSION}/checksums.txt.bundle"
   if curl -fsSL "$SIG_URL" -o checksums.txt.bundle 2>/dev/null; then
     echo "Verifying cosign signature..."
@@ -76,7 +77,9 @@ if command -v cosign >/dev/null 2>&1; then
       checksums.txt 2>/dev/null; then
       echo "Signature verified."
     else
-      echo "WARNING: Signature verification failed (continuing anyway)"
+      echo "ERROR: Signature verification failed"
+      echo "Set HEY_INSECURE_SKIP_COSIGN=1 to bypass"
+      exit 1
     fi
   fi
 fi
