@@ -79,7 +79,6 @@ func Execute() {
 	rootCmd.AddCommand(newBoxesCommand().cmd)
 	rootCmd.AddCommand(newBoxCommand().cmd)
 	rootCmd.AddCommand(newTopicCommand().cmd)
-	rootCmd.AddCommand(newEntryCommand().cmd)
 	rootCmd.AddCommand(newReplyCommand().cmd)
 	rootCmd.AddCommand(newComposeCommand().cmd)
 	rootCmd.AddCommand(newDraftsCommand().cmd)

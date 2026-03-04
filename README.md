@@ -70,8 +70,7 @@ All commands support `--json` for raw JSON output and `--base-url` to override t
 hey boxes                          # list mailboxes
 hey box imbox                      # list postings in a box (by name or ID)
 hey topic 123                      # read a full email thread
-hey entry 456                      # read a single entry
-hey reply 456 -m "Thanks!"        # reply to an entry (or omit -m to open $EDITOR)
+hey reply 123 -m "Thanks!"        # reply to a topic (or omit -m to open $EDITOR)
 hey compose --to user@example.com --subject "Hello"  # compose a new message
 hey drafts                         # list drafts
 ```

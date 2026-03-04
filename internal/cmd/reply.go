@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/spf13/cobra"
 
@@ -16,8 +17,8 @@ type replyCommand struct {
 func newReplyCommand() *replyCommand {
 	replyCommand := &replyCommand{}
 	replyCommand.cmd = &cobra.Command{
-		Use:   "reply <entry-id>",
-		Short: "Reply to an email entry",
+		Use:   "reply <topic-id>",
+		Short: "Reply to an email topic",
 		Example: `  hey reply 12345 -m "Thanks!"
   echo "Detailed reply" | hey reply 12345`,
 		RunE: replyCommand.run,
@@ -34,10 +35,24 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	topicID, err := strconv.Atoi(args[0])
+	if err != nil {
+		return fmt.Errorf("invalid topic ID: %s", args[0])
+	}
+
+	entries, err := apiClient.GetTopicEntries(topicID)
+	if err != nil {
+		return err
+	}
+	if len(entries) == 0 {
+		return fmt.Errorf("no entries found for topic %d", topicID)
+	}
+
+	latestEntryID := entries[len(entries)-1].ID
+
 	message := c.message
 	if message == "" {
 		if !stdinIsTerminal() {
-			var err error
 			message, err = readStdin()
 			if err != nil {
 				return err
@@ -46,7 +61,6 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("no message provided (use -m or --message to provide inline, or pipe to stdin)")
 			}
 		} else {
-			var err error
 			message, err = editor.Open("")
 			if err != nil {
 				return fmt.Errorf("could not open editor: %w", err)
@@ -59,7 +73,7 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 
 	body := map[string]interface{}{"body": message}
 
-	data, err := apiClient.ReplyToEntry(args[0], body)
+	data, err := apiClient.ReplyToEntry(fmt.Sprintf("%d", latestEntryID), body)
 	if err != nil {
 		return err
 	}

@@ -15,7 +15,7 @@ func newDraftsCommand() *draftsCommand {
 	draftsCommand := &draftsCommand{}
 	draftsCommand.cmd = &cobra.Command{
 		Use:   "drafts",
-		Short: "List draft entries",
+		Short: "List drafts",
 		Example: `  hey drafts
   hey drafts --limit 10
   hey drafts --json`,
