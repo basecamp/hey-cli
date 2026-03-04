@@ -77,29 +77,11 @@ func (s style) format(value string) string {
 	return "\033[" + string(s) + "m" + value + "\033[0m"
 }
 
-func printJSON(v any) error {
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(v)
-}
-
-func printRawJSON(data []byte) error {
-	var v any
-	if err := json.Unmarshal(data, &v); err != nil {
-		_, _ = os.Stdout.Write(data)
-		fmt.Println()
-		return nil //nolint:nilerr // fallback to raw output when JSON is invalid
-	}
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(v)
-}
-
-func truncate(s string, maxWidth int) string {
-	if runewidth.StringWidth(s) <= maxWidth {
+func truncate(s string, max int) string {
+	if runewidth.StringWidth(s) <= max {
 		return s
 	}
-	return runewidth.Truncate(s, maxWidth, "...")
+	return runewidth.Truncate(s, max, "...")
 }
 
 func stdinIsTerminal() bool {

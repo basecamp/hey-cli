@@ -1,6 +1,6 @@
 package output
 
-import "hey-cli/internal/apierr"
+import "github.com/basecamp/hey-cli/internal/apierr"
 
 // Error is a typed error with a code, message, and optional fields.
 // Alias for apierr.Error so that cmd-layer code can use output.Error

@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/basecamp/hey-cli/internal/auth"
-	"hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/version"
 )
 

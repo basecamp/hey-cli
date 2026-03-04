@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/basecamp/hey-cli/internal/output"
 )
 
 type habitCommand struct {
@@ -62,12 +64,16 @@ func (c *habitCompleteCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if jsonOutput {
-		return printRawJSON(data)
+	if writer.IsStyled() {
+		fmt.Printf("Habit %s completed for %s.%s\n", args[0], date, extractMutationInfo(data))
+		return nil
 	}
 
-	fmt.Printf("Habit %s completed for %s.%s\n", args[0], date, extractMutationInfo(data))
-	return nil
+	normalized, nerr := output.NormalizeJSONNumbers(data)
+	if nerr != nil {
+		return writer.OK(nil, output.WithSummary(fmt.Sprintf("Habit %s completed for %s", args[0], date)))
+	}
+	return writer.OK(normalized, output.WithSummary(fmt.Sprintf("Habit %s completed for %s", args[0], date)))
 }
 
 // uncomplete
@@ -108,10 +114,14 @@ func (c *habitUncompleteCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if jsonOutput {
-		return printRawJSON(data)
+	if writer.IsStyled() {
+		fmt.Printf("Habit %s uncompleted for %s.%s\n", args[0], date, extractMutationInfo(data))
+		return nil
 	}
 
-	fmt.Printf("Habit %s uncompleted for %s.%s\n", args[0], date, extractMutationInfo(data))
-	return nil
+	normalized, nerr := output.NormalizeJSONNumbers(data)
+	if nerr != nil {
+		return writer.OK(nil, output.WithSummary(fmt.Sprintf("Habit %s uncompleted for %s", args[0], date)))
+	}
+	return writer.OK(normalized, output.WithSummary(fmt.Sprintf("Habit %s uncompleted for %s", args[0], date)))
 }

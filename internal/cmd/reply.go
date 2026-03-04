@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/hey-cli/internal/editor"
+	"github.com/basecamp/hey-cli/internal/output"
 )
 
 type replyCommand struct {
@@ -37,7 +38,7 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 
 	topicID, err := strconv.Atoi(args[0])
 	if err != nil {
-		return fmt.Errorf("invalid topic ID: %s", args[0])
+		return output.ErrUsage(fmt.Sprintf("invalid topic ID: %s", args[0]))
 	}
 
 	entries, err := apiClient.GetTopicEntries(topicID)
@@ -45,7 +46,7 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if len(entries) == 0 {
-		return fmt.Errorf("no entries found for topic %d", topicID)
+		return output.ErrNotFound("entries for topic", args[0])
 	}
 
 	latestEntryID := entries[len(entries)-1].ID
@@ -58,15 +59,15 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 				return err
 			}
 			if message == "" {
-				return fmt.Errorf("no message provided (use -m or --message to provide inline, or pipe to stdin)")
+				return output.ErrUsage("no message provided (use -m or --message to provide inline, or pipe to stdin)")
 			}
 		} else {
 			message, err = editor.Open("")
 			if err != nil {
-				return fmt.Errorf("could not open editor: %w", err)
+				return output.ErrAPI(0, fmt.Sprintf("could not open editor: %v", err))
 			}
 			if message == "" {
-				return fmt.Errorf("empty message, aborting")
+				return output.ErrUsage("empty message, aborting")
 			}
 		}
 	}
@@ -78,10 +79,21 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if jsonOutput {
-		return printRawJSON(data)
+	if writer.IsStyled() {
+		fmt.Printf("Reply sent.%s\n", extractMutationInfo(data))
+		return nil
 	}
 
-	fmt.Printf("Reply sent.%s\n", extractMutationInfo(data))
-	return nil
+	normalized, err := output.NormalizeJSONNumbers(data)
+	if err != nil {
+		return writer.OK(nil, output.WithSummary("Reply sent"))
+	}
+	return writer.OK(normalized,
+		output.WithSummary("Reply sent"),
+		output.WithBreadcrumbs(output.Breadcrumb{
+			Action:      "view",
+			Command:     fmt.Sprintf("hey topic %d", topicID),
+			Description: "View the full thread",
+		}),
+	)
 }

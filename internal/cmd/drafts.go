@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+
+	"github.com/basecamp/hey-cli/internal/output"
 )
 
 type draftsCommand struct {
@@ -41,24 +43,26 @@ func (c *draftsCommand) run(cmd *cobra.Command, args []string) error {
 		drafts = drafts[:c.limit]
 	}
 
-	if jsonOutput {
-		return printJSON(drafts)
-	}
+	if writer.IsStyled() {
+		if len(drafts) == 0 {
+			fmt.Println("No drafts.")
+			return nil
+		}
 
-	if len(drafts) == 0 {
-		fmt.Println("No drafts.")
+		table := newTable()
+		table.addRow([]string{"ID", "Summary", "Kind", "Date"})
+		for _, d := range drafts {
+			date := ""
+			if len(d.UpdatedAt) >= 10 {
+				date = d.UpdatedAt[:10]
+			}
+			table.addRow([]string{fmt.Sprintf("%d", d.ID), truncate(d.Summary, 60), d.Kind, date})
+		}
+		table.print()
 		return nil
 	}
 
-	table := newTable()
-	table.addRow([]string{"ID", "Summary", "Kind", "Date"})
-	for _, d := range drafts {
-		date := ""
-		if len(d.UpdatedAt) >= 10 {
-			date = d.UpdatedAt[:10]
-		}
-		table.addRow([]string{fmt.Sprintf("%d", d.ID), truncate(d.Summary, 60), d.Kind, date})
-	}
-	table.print()
-	return nil
+	return writer.OK(drafts,
+		output.WithSummary(fmt.Sprintf("%d drafts", len(drafts))),
+	)
 }

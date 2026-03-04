@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/basecamp/hey-cli/internal/output"
 )
 
 type recordingsCommand struct {
@@ -41,7 +43,7 @@ func (c *recordingsCommand) run(cmd *cobra.Command, args []string) error {
 
 	calendarID, err := strconv.Atoi(args[0])
 	if err != nil {
-		return fmt.Errorf("invalid calendar ID: %s", args[0])
+		return output.ErrUsage(fmt.Sprintf("invalid calendar ID: %s", args[0]))
 	}
 
 	startsOn := c.startsOn
@@ -53,7 +55,7 @@ func (c *recordingsCommand) run(cmd *cobra.Command, args []string) error {
 		var start time.Time
 		start, err = time.Parse("2006-01-02", startsOn)
 		if err != nil {
-			return fmt.Errorf("invalid starts-on date: %s", startsOn)
+			return output.ErrUsage(fmt.Sprintf("invalid starts-on date: %s", startsOn))
 		}
 		endsOn = start.AddDate(0, 0, 30).Format("2006-01-02")
 	}
@@ -71,30 +73,31 @@ func (c *recordingsCommand) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if jsonOutput {
-		return printJSON(resp)
+	if writer.IsStyled() {
+		for recType, recordings := range resp {
+			if len(recordings) == 0 {
+				continue
+			}
+			fmt.Printf("\n%s:\n", recType)
+			table := newTable()
+			table.addRow([]string{"ID", "Title", "Starts", "Ends"})
+			for _, r := range recordings {
+				starts := ""
+				if len(r.StartsAt) >= 16 {
+					starts = r.StartsAt[:16]
+				}
+				ends := ""
+				if len(r.EndsAt) >= 16 {
+					ends = r.EndsAt[:16]
+				}
+				table.addRow([]string{fmt.Sprintf("%d", r.ID), r.Title, starts, ends})
+			}
+			table.print()
+		}
+		return nil
 	}
 
-	for recType, recordings := range resp {
-		if len(recordings) == 0 {
-			continue
-		}
-		fmt.Printf("\n%s:\n", recType)
-		table := newTable()
-		table.addRow([]string{"ID", "Title", "Starts", "Ends"})
-		for _, r := range recordings {
-			starts := ""
-			if len(r.StartsAt) >= 16 {
-				starts = r.StartsAt[:16]
-			}
-			ends := ""
-			if len(r.EndsAt) >= 16 {
-				ends = r.EndsAt[:16]
-			}
-			table.addRow([]string{fmt.Sprintf("%d", r.ID), r.Title, starts, ends})
-		}
-		table.print()
-	}
-
-	return nil
+	return writer.OK(resp,
+		output.WithSummary(fmt.Sprintf("Recordings for calendar %d (%s to %s)", calendarID, startsOn, endsOn)),
+	)
 }

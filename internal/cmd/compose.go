@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/hey-cli/internal/editor"
+	"github.com/basecamp/hey-cli/internal/output"
 )
 
 type composeCommand struct {
@@ -42,7 +43,7 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if c.subject == "" {
-		return fmt.Errorf("--subject is required")
+		return output.ErrUsageHint("--subject is required", "hey compose --to <email> --subject <subject> -m <message>")
 	}
 
 	message := c.message
@@ -54,16 +55,16 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 				return err
 			}
 			if message == "" {
-				return fmt.Errorf("no message provided (use -m or --message to provide inline, or pipe to stdin)")
+				return output.ErrUsage("no message provided (use -m or --message to provide inline, or pipe to stdin)")
 			}
 		} else {
 			var err error
 			message, err = editor.Open("")
 			if err != nil {
-				return fmt.Errorf("could not open editor: %w", err)
+				return output.ErrAPI(0, fmt.Sprintf("could not open editor: %v", err))
 			}
 			if message == "" {
-				return fmt.Errorf("empty message, aborting")
+				return output.ErrUsage("empty message, aborting")
 			}
 		}
 	}
@@ -80,7 +81,7 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 	if c.topicID != "" {
 		id, err := strconv.Atoi(c.topicID)
 		if err != nil {
-			return fmt.Errorf("invalid topic ID: %s", c.topicID)
+			return output.ErrUsage(fmt.Sprintf("invalid topic ID: %s", c.topicID))
 		}
 		topicID = &id
 	}
@@ -90,10 +91,14 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if jsonOutput {
-		return printRawJSON(data)
+	if writer.IsStyled() {
+		fmt.Printf("Message sent.%s\n", extractMutationInfo(data))
+		return nil
 	}
 
-	fmt.Printf("Message sent.%s\n", extractMutationInfo(data))
-	return nil
+	normalized, err := output.NormalizeJSONNumbers(data)
+	if err != nil {
+		return writer.OK(nil, output.WithSummary("Message sent"))
+	}
+	return writer.OK(normalized, output.WithSummary("Message sent"))
 }

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
 const (

@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+
+	"github.com/basecamp/hey-cli/internal/output"
 )
 
 type todoCommand struct {
@@ -63,30 +65,44 @@ func (c *todoListCommand) run(cmd *cobra.Command, args []string) error {
 		todos = todos[:c.limit]
 	}
 
-	if jsonOutput {
-		return printJSON(todos)
-	}
+	if writer.IsStyled() {
+		if len(todos) == 0 {
+			fmt.Println("No todos.")
+			return nil
+		}
 
-	if len(todos) == 0 {
-		fmt.Println("No todos.")
+		table := newTable()
+		table.addRow([]string{"ID", "Title", "Date", "Done"})
+		for _, t := range todos {
+			date := ""
+			if len(t.StartsAt) >= 10 {
+				date = t.StartsAt[:10]
+			}
+			done := ""
+			if t.CompletedAt != "" {
+				done = "yes"
+			}
+			table.addRow([]string{fmt.Sprintf("%d", t.ID), t.Title, date, done})
+		}
+		table.print()
 		return nil
 	}
 
-	table := newTable()
-	table.addRow([]string{"ID", "Title", "Date", "Done"})
-	for _, t := range todos {
-		date := ""
-		if len(t.StartsAt) >= 10 {
-			date = t.StartsAt[:10]
-		}
-		done := ""
-		if t.CompletedAt != "" {
-			done = "yes"
-		}
-		table.addRow([]string{fmt.Sprintf("%d", t.ID), t.Title, date, done})
-	}
-	table.print()
-	return nil
+	return writer.OK(todos,
+		output.WithSummary(fmt.Sprintf("%d todos", len(todos))),
+		output.WithBreadcrumbs(
+			output.Breadcrumb{
+				Action:      "add",
+				Command:     "hey todo add --title '...'",
+				Description: "Add a new todo",
+			},
+			output.Breadcrumb{
+				Action:      "complete",
+				Command:     "hey todo complete <id>",
+				Description: "Mark a todo as complete",
+			},
+		),
+	)
 }
 
 // add
@@ -120,7 +136,7 @@ func (c *todoAddCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if c.title == "" {
-		return fmt.Errorf("--title is required")
+		return output.ErrUsageHint("--title is required", "hey todo add --title 'Buy groceries'")
 	}
 
 	body := map[string]any{"title": c.title}
@@ -133,12 +149,16 @@ func (c *todoAddCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if jsonOutput {
-		return printRawJSON(data)
+	if writer.IsStyled() {
+		fmt.Printf("Todo created.%s\n", extractMutationInfo(data))
+		return nil
 	}
 
-	fmt.Printf("Todo created.%s\n", extractMutationInfo(data))
-	return nil
+	normalized, err := output.NormalizeJSONNumbers(data)
+	if err != nil {
+		return writer.OK(nil, output.WithSummary("Todo created"))
+	}
+	return writer.OK(normalized, output.WithSummary("Todo created"))
 }
 
 // complete
@@ -170,12 +190,16 @@ func (c *todoCompleteCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if jsonOutput {
-		return printRawJSON(data)
+	if writer.IsStyled() {
+		fmt.Printf("Todo completed.%s\n", extractMutationInfo(data))
+		return nil
 	}
 
-	fmt.Printf("Todo completed.%s\n", extractMutationInfo(data))
-	return nil
+	normalized, err := output.NormalizeJSONNumbers(data)
+	if err != nil {
+		return writer.OK(nil, output.WithSummary("Todo completed"))
+	}
+	return writer.OK(normalized, output.WithSummary("Todo completed"))
 }
 
 // uncomplete
@@ -207,12 +231,16 @@ func (c *todoUncompleteCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if jsonOutput {
-		return printRawJSON(data)
+	if writer.IsStyled() {
+		fmt.Printf("Todo marked incomplete.%s\n", extractMutationInfo(data))
+		return nil
 	}
 
-	fmt.Printf("Todo marked incomplete.%s\n", extractMutationInfo(data))
-	return nil
+	normalized, err := output.NormalizeJSONNumbers(data)
+	if err != nil {
+		return writer.OK(nil, output.WithSummary("Todo marked incomplete"))
+	}
+	return writer.OK(normalized, output.WithSummary("Todo marked incomplete"))
 }
 
 // delete
@@ -244,10 +272,14 @@ func (c *todoDeleteCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if jsonOutput {
-		return printRawJSON(data)
+	if writer.IsStyled() {
+		fmt.Printf("Todo deleted.%s\n", extractMutationInfo(data))
+		return nil
 	}
 
-	fmt.Printf("Todo deleted.%s\n", extractMutationInfo(data))
-	return nil
+	normalized, err := output.NormalizeJSONNumbers(data)
+	if err != nil {
+		return writer.OK(nil, output.WithSummary("Todo deleted"))
+	}
+	return writer.OK(normalized, output.WithSummary("Todo deleted"))
 }

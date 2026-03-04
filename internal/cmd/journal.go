@@ -8,6 +8,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/editor"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
+	"github.com/basecamp/hey-cli/internal/output"
 )
 
 type journalCommand struct {
@@ -65,22 +66,36 @@ func (c *journalListCommand) run(cmd *cobra.Command, args []string) error {
 		entries = entries[:c.limit]
 	}
 
-	if jsonOutput {
-		return printJSON(entries)
-	}
+	if writer.IsStyled() {
+		if len(entries) == 0 {
+			fmt.Println("No journal entries.")
+			return nil
+		}
 
-	if len(entries) == 0 {
-		fmt.Println("No journal entries.")
+		table := newTable()
+		table.addRow([]string{"ID", "Date", "Preview"})
+		for _, e := range entries {
+			table.addRow([]string{fmt.Sprintf("%d", e.ID), e.Date, truncate(e.Body, 60)})
+		}
+		table.print()
 		return nil
 	}
 
-	table := newTable()
-	table.addRow([]string{"ID", "Date", "Preview"})
-	for _, e := range entries {
-		table.addRow([]string{fmt.Sprintf("%d", e.ID), e.Date, truncate(e.Body, 60)})
-	}
-	table.print()
-	return nil
+	return writer.OK(entries,
+		output.WithSummary(fmt.Sprintf("%d journal entries", len(entries))),
+		output.WithBreadcrumbs(
+			output.Breadcrumb{
+				Action:      "read",
+				Command:     "hey journal read [date]",
+				Description: "Read a journal entry",
+			},
+			output.Breadcrumb{
+				Action:      "write",
+				Command:     "hey journal write --content '...'",
+				Description: "Write a journal entry",
+			},
+		),
+	)
 }
 
 // read
@@ -120,22 +135,29 @@ func (c *journalReadCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if jsonOutput {
-		return printJSON(entry)
-	}
+	if writer.IsStyled() {
+		if htmlOutput {
+			fmt.Println(entry.Body)
+			return nil
+		}
 
-	if htmlOutput {
-		fmt.Println(entry.Body)
+		fmt.Printf("Journal — %s\n\n", date)
+		if entry.Body != "" {
+			fmt.Println(htmlutil.ToText(entry.Body))
+		} else {
+			fmt.Println("(empty)")
+		}
 		return nil
 	}
 
-	fmt.Printf("Journal — %s\n\n", date)
-	if entry.Body != "" {
-		fmt.Println(htmlutil.ToText(entry.Body))
-	} else {
-		fmt.Println("(empty)")
-	}
-	return nil
+	return writer.OK(entry,
+		output.WithSummary(fmt.Sprintf("Journal entry for %s", date)),
+		output.WithBreadcrumbs(output.Breadcrumb{
+			Action:      "write",
+			Command:     fmt.Sprintf("hey journal write %s --content '...'", date),
+			Description: "Edit this journal entry",
+		}),
+	)
 }
 
 // write
@@ -181,7 +203,7 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 				return err
 			}
 			if content == "" {
-				return fmt.Errorf("no content provided (use --content to provide inline, or pipe to stdin)")
+				return output.ErrUsage("no content provided (use --content to provide inline, or pipe to stdin)")
 			}
 		} else {
 			existing := ""
@@ -192,7 +214,7 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 
 			content, err = editor.Open(existing)
 			if err != nil {
-				return fmt.Errorf("could not open editor: %w", err)
+				return output.ErrAPI(0, fmt.Sprintf("could not open editor: %v", err))
 			}
 		}
 	}
@@ -204,10 +226,21 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if jsonOutput {
-		return printRawJSON(data)
+	if writer.IsStyled() {
+		fmt.Printf("Journal entry for %s saved.%s\n", date, extractMutationInfo(data))
+		return nil
 	}
 
-	fmt.Printf("Journal entry for %s saved.%s\n", date, extractMutationInfo(data))
-	return nil
+	normalized, nerr := output.NormalizeJSONNumbers(data)
+	if nerr != nil {
+		return writer.OK(nil, output.WithSummary(fmt.Sprintf("Journal entry for %s saved", date)))
+	}
+	return writer.OK(normalized,
+		output.WithSummary(fmt.Sprintf("Journal entry for %s saved", date)),
+		output.WithBreadcrumbs(output.Breadcrumb{
+			Action:      "read",
+			Command:     fmt.Sprintf("hey journal read %s", date),
+			Description: "Read the journal entry",
+		}),
+	)
 }
