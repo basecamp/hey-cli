@@ -26,12 +26,23 @@ func newBoxCommand() *boxCommand {
   hey box imbox --limit 10
   hey box 123 --json`,
 		RunE: boxCommand.run,
-		Args: cobra.ExactArgs(1),
+		Args: validateBoxArgs,
 	}
 
 	boxCommand.cmd.Flags().IntVar(&boxCommand.limit, "limit", 0, "Maximum number of postings to show")
 
 	return boxCommand
+}
+
+func validateBoxArgs(cmd *cobra.Command, args []string) error {
+	switch len(args) {
+	case 1:
+		return nil
+	case 0:
+		return fmt.Errorf("missing mailbox argument; usage: %s <name|id> (example: hey box imbox)", cmd.CommandPath())
+	default:
+		return fmt.Errorf("expected 1 mailbox argument, got %d", len(args))
+	}
 }
 
 func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
