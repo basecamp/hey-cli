@@ -28,9 +28,9 @@ A CLI and TUI for [HEY](https://hey.com).
 Requires Go 1.26+. Use [mise](https://mise.jdx.dev) to install the correct version:
 
 ```bash
-mise install       # install Go 1.26
-make build         # build to ./bin/hey
-sudo make install  # install to /usr/local/bin (macOS) or /usr/bin (Linux)
+mise install  # install Go 1.26
+make build    # build to ./bin/hey
+make install  # install to /usr/local/bin (macOS) or /usr/bin (Linux)
 ```
 
 ## Authentication
