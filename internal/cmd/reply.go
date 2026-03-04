@@ -57,10 +57,9 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	path := fmt.Sprintf("/entries/%s/replies", args[0])
 	body := map[string]interface{}{"body": message}
 
-	data, err := apiClient.PostJSON(path, body)
+	data, err := apiClient.ReplyToEntry(args[0], body)
 	if err != nil {
 		return err
 	}

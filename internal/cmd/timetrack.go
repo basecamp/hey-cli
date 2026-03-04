@@ -1,12 +1,9 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/spf13/cobra"
-
-	"hey-cli/internal/models"
 )
 
 type timetrackCommand struct {
@@ -52,7 +49,7 @@ func (c *timetrackStartCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	data, err := apiClient.PostJSON("/calendar/ongoing_time_track.json", nil)
+	data, err := apiClient.StartTimeTrack(nil)
 	if err != nil {
 		return err
 	}
@@ -89,22 +86,16 @@ func (c *timetrackStopCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	data, err := apiClient.Get("/calendar/ongoing_time_track.json")
+	track, err := apiClient.GetOngoingTimeTrack()
 	if err != nil {
 		return fmt.Errorf("could not get current time track: %w", err)
-	}
-
-	var track models.TimeTrack
-	if err := json.Unmarshal(data, &track); err != nil {
-		return fmt.Errorf("could not parse time track: %w", err)
 	}
 
 	if track.ID == 0 {
 		return fmt.Errorf("no active time track")
 	}
 
-	path := fmt.Sprintf("/calendar/time_tracks/%d.json", track.ID)
-	result, err := apiClient.PutJSON(path, map[string]interface{}{"stopped": true})
+	result, err := apiClient.StopTimeTrack(track.ID)
 	if err != nil {
 		return err
 	}
@@ -141,18 +132,13 @@ func (c *timetrackCurrentCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	data, err := apiClient.Get("/calendar/ongoing_time_track.json")
+	track, err := apiClient.GetOngoingTimeTrack()
 	if err != nil {
 		return err
 	}
 
 	if jsonOutput {
-		return printRawJSON(data)
-	}
-
-	var track models.TimeTrack
-	if err := json.Unmarshal(data, &track); err != nil {
-		return fmt.Errorf("could not parse time track: %w", err)
+		return printJSON(track)
 	}
 
 	if track.ID == 0 {
@@ -196,17 +182,13 @@ func (c *timetrackListCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if jsonOutput {
-		data, err := apiClient.Get("/calendar/time_tracks.json")
-		if err != nil {
-			return err
-		}
-		return printRawJSON(data)
+	tracks, err := apiClient.ListTimeTracks()
+	if err != nil {
+		return err
 	}
 
-	var tracks []models.TimeTrack
-	if err := apiClient.GetJSON("/calendar/time_tracks.json", &tracks); err != nil {
-		return err
+	if jsonOutput {
+		return printJSON(tracks)
 	}
 
 	if len(tracks) == 0 {

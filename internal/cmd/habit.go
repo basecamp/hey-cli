@@ -57,8 +57,7 @@ func (c *habitCompleteCommand) run(cmd *cobra.Command, args []string) error {
 		date = time.Now().Format("2006-01-02")
 	}
 
-	path := fmt.Sprintf("/calendar/days/%s/habits/%s/completions.json", date, args[0])
-	data, err := apiClient.PostJSON(path, nil)
+	data, err := apiClient.CompleteHabit(date, args[0])
 	if err != nil {
 		return err
 	}
@@ -104,8 +103,7 @@ func (c *habitUncompleteCommand) run(cmd *cobra.Command, args []string) error {
 		date = time.Now().Format("2006-01-02")
 	}
 
-	path := fmt.Sprintf("/calendar/days/%s/habits/%s/completions.json", date, args[0])
-	data, err := apiClient.Delete(path)
+	data, err := apiClient.UncompleteHabit(date, args[0])
 	if err != nil {
 		return err
 	}

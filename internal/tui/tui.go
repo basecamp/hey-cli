@@ -17,6 +17,8 @@ const (
 	viewBoxes viewState = iota
 	viewBox
 	viewTopic
+	viewCalendars
+	viewCalendar
 )
 
 // Async messages
@@ -30,6 +32,13 @@ type boxLoadedMsg struct {
 type topicLoadedMsg struct {
 	title   string
 	entries []models.Entry
+}
+
+type calendarsLoadedMsg []models.Calendar
+
+type calendarLoadedMsg struct {
+	calendar   models.Calendar
+	recordings models.RecordingsResponse
 }
 
 type errMsg struct{ err error }
@@ -47,6 +56,10 @@ type model struct {
 	box   boxModel
 	topic topicModel
 
+	calendars      calendarsModel
+	calendar       calendarModel
+	calendarsLoaded bool
+
 	loading  bool
 	err      error
 	lastKey  string // debug: last key event received
@@ -55,12 +68,14 @@ type model struct {
 func newModel(c *client.Client) model {
 	s := newStyles()
 	return model{
-		state:  viewBoxes,
-		client: c,
-		styles: s,
-		boxes:  newBoxesModel(),
-		box:    newBoxModel(),
-		topic:  newTopicModel(s),
+		state:     viewBoxes,
+		client:    c,
+		styles:    s,
+		boxes:     newBoxesModel(),
+		box:       newBoxModel(),
+		topic:     newTopicModel(s),
+		calendars: newCalendarsModel(),
+		calendar:  newCalendarModel(),
 	}
 }
 
@@ -76,12 +91,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.boxes.setSize(msg.Width, msg.Height)
 		m.box.setSize(msg.Width, msg.Height)
 		m.topic.setSize(msg.Width, msg.Height)
+		m.calendars.setSize(msg.Width, msg.Height)
+		m.calendar.setSize(msg.Width, msg.Height)
 		return m, nil
 
 	case tea.KeyPressMsg:
 		m.lastKey = fmt.Sprintf("key=%q code=0x%x mod=%d", msg.String(), msg.Key().Code, msg.Key().Mod)
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
+		}
+		if msg.Key().Code == tea.KeyTab {
+			switch m.state {
+			case viewBoxes:
+				m.state = viewCalendars
+				if !m.calendarsLoaded {
+					m.loading = true
+					return m, m.fetchCalendars()
+				}
+				return m, nil
+			case viewCalendars:
+				m.state = viewBoxes
+				return m, nil
+			}
 		}
 
 	case boxesLoadedMsg:
@@ -101,6 +132,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = viewTopic
 		return m, nil
 
+	case calendarsLoadedMsg:
+		m.loading = false
+		m.calendarsLoaded = true
+		cmd := m.calendars.setItems([]models.Calendar(msg))
+		return m, cmd
+
+	case calendarLoadedMsg:
+		m.loading = false
+		cmd := m.calendar.setItems(msg.calendar, msg.recordings)
+		m.state = viewCalendar
+		return m, cmd
+
 	case errMsg:
 		m.loading = false
 		m.err = msg.err
@@ -115,6 +158,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = m.updateBox(msg)
 	case viewTopic:
 		cmd = m.updateTopic(msg)
+	case viewCalendars:
+		cmd = m.updateCalendars(msg)
+	case viewCalendar:
+		cmd = m.updateCalendar(msg)
 	}
 	return m, cmd
 }
@@ -178,6 +225,38 @@ func (m *model) updateTopic(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
+func (m *model) updateCalendars(msg tea.Msg) tea.Cmd {
+	if msg, ok := msg.(tea.KeyPressMsg); ok {
+		if msg.Key().Code == tea.KeyEnter && m.calendars.list.FilterState() != list.Filtering {
+			cal := m.calendars.selectedCalendar()
+			if cal != nil {
+				m.loading = true
+				return m.fetchCalendar(*cal)
+			}
+		}
+	}
+
+	var cmd tea.Cmd
+	m.calendars, cmd = m.calendars.update(msg)
+	return cmd
+}
+
+func (m *model) updateCalendar(msg tea.Msg) tea.Cmd {
+	if msg, ok := msg.(tea.KeyPressMsg); ok {
+		switch msg.Key().Code {
+		case tea.KeyEscape, tea.KeyBackspace:
+			if m.calendar.list.FilterState() == list.Unfiltered {
+				m.state = viewCalendars
+				return nil
+			}
+		}
+	}
+
+	var cmd tea.Cmd
+	m.calendar, cmd = m.calendar.update(msg)
+	return cmd
+}
+
 func (m model) View() tea.View {
 	var content string
 
@@ -193,6 +272,10 @@ func (m model) View() tea.View {
 			content = m.box.view()
 		case viewTopic:
 			content = m.topic.view()
+		case viewCalendars:
+			content = m.calendars.view()
+		case viewCalendar:
+			content = m.calendar.view()
 		}
 	}
 
@@ -209,8 +292,8 @@ func (m model) View() tea.View {
 
 func (m model) fetchBoxes() tea.Cmd {
 	return func() tea.Msg {
-		var boxes []models.Box
-		if err := m.client.GetJSON("/boxes.json", &boxes); err != nil {
+		boxes, err := m.client.ListBoxes()
+		if err != nil {
 			return errMsg{err}
 		}
 		return boxesLoadedMsg(boxes)
@@ -219,9 +302,8 @@ func (m model) fetchBoxes() tea.Cmd {
 
 func (m model) fetchBox(boxID int) tea.Cmd {
 	return func() tea.Msg {
-		var resp models.BoxShowResponse
-		path := fmt.Sprintf("/boxes/%d.json", boxID)
-		if err := m.client.GetJSON(path, &resp); err != nil {
+		resp, err := m.client.GetBox(boxID)
+		if err != nil {
 			return errMsg{err}
 		}
 
@@ -240,12 +322,31 @@ func (m model) fetchBox(boxID int) tea.Cmd {
 
 func (m model) fetchTopic(topicID int, title string) tea.Cmd {
 	return func() tea.Msg {
-		var entries []models.Entry
-		path := fmt.Sprintf("/topics/%d/entries.json", topicID)
-		if err := m.client.GetJSON(path, &entries); err != nil {
+		entries, err := m.client.GetTopicEntries(topicID)
+		if err != nil {
 			return errMsg{err}
 		}
 		return topicLoadedMsg{title: title, entries: entries}
+	}
+}
+
+func (m model) fetchCalendars() tea.Cmd {
+	return func() tea.Msg {
+		calendars, err := m.client.ListCalendars()
+		if err != nil {
+			return errMsg{err}
+		}
+		return calendarsLoadedMsg(calendars)
+	}
+}
+
+func (m model) fetchCalendar(cal models.Calendar) tea.Cmd {
+	return func() tea.Msg {
+		recordings, err := m.client.GetCalendarRecordings(cal.ID, "", "")
+		if err != nil {
+			return errMsg{err}
+		}
+		return calendarLoadedMsg{calendar: cal, recordings: recordings}
 	}
 }
 

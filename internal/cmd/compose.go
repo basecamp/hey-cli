@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/spf13/cobra"
 
@@ -75,12 +76,16 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		body["to"] = c.to
 	}
 
-	path := "/topics/messages"
+	var topicID *int
 	if c.topicID != "" {
-		path = fmt.Sprintf("/topics/%s/messages", c.topicID)
+		id, err := strconv.Atoi(c.topicID)
+		if err != nil {
+			return fmt.Errorf("invalid topic ID: %s", c.topicID)
+		}
+		topicID = &id
 	}
 
-	data, err := apiClient.PostJSON(path, body)
+	data, err := apiClient.CreateMessage(topicID, body)
 	if err != nil {
 		return err
 	}

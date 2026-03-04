@@ -2,11 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
-
-	"hey-cli/internal/models"
 )
 
 type topicCommand struct {
@@ -32,19 +31,18 @@ func (c *topicCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	path := fmt.Sprintf("/topics/%s/entries.json", args[0])
-
-	if jsonOutput {
-		data, err := apiClient.Get(path)
-		if err != nil {
-			return err
-		}
-		return printRawJSON(data)
+	topicID, err := strconv.Atoi(args[0])
+	if err != nil {
+		return fmt.Errorf("invalid topic ID: %s", args[0])
 	}
 
-	var entries []models.Entry
-	if err := apiClient.GetJSON(path, &entries); err != nil {
+	entries, err := apiClient.GetTopicEntries(topicID)
+	if err != nil {
 		return err
+	}
+
+	if jsonOutput {
+		return printJSON(entries)
 	}
 
 	for i, e := range entries {

@@ -7,7 +7,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"hey-cli/internal/editor"
-	"hey-cli/internal/models"
 )
 
 type journalCommand struct {
@@ -56,26 +55,22 @@ func (c *journalListCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if jsonOutput {
-		data, err := apiClient.Get("/calendar/journal_entries.json")
-		if err != nil {
-			return err
-		}
-		return printRawJSON(limitJSONArray(data, c.limit))
+	entries, err := apiClient.ListJournalEntries()
+	if err != nil {
+		return err
 	}
 
-	var entries []models.JournalEntry
-	if err := apiClient.GetJSON("/calendar/journal_entries.json", &entries); err != nil {
-		return err
+	if c.limit > 0 && len(entries) > c.limit {
+		entries = entries[:c.limit]
+	}
+
+	if jsonOutput {
+		return printJSON(entries)
 	}
 
 	if len(entries) == 0 {
 		fmt.Println("No journal entries.")
 		return nil
-	}
-
-	if c.limit > 0 && len(entries) > c.limit {
-		entries = entries[:c.limit]
 	}
 
 	table := newTable()
@@ -118,19 +113,13 @@ func (c *journalReadCommand) run(cmd *cobra.Command, args []string) error {
 		date = args[0]
 	}
 
-	path := fmt.Sprintf("/calendar/days/%s/journal_entry.json", date)
-
-	if jsonOutput {
-		data, err := apiClient.Get(path)
-		if err != nil {
-			return err
-		}
-		return printRawJSON(data)
+	entry, err := apiClient.GetJournalEntry(date)
+	if err != nil {
+		return err
 	}
 
-	var entry models.JournalEntry
-	if err := apiClient.GetJSON(path, &entry); err != nil {
-		return err
+	if jsonOutput {
+		return printJSON(entry)
 	}
 
 	fmt.Printf("Journal — %s\n\n", date)
@@ -189,13 +178,11 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 			}
 		} else {
 			existing := ""
-			path := fmt.Sprintf("/calendar/days/%s/journal_entry.json", date)
-			var entry models.JournalEntry
-			if err := apiClient.GetJSON(path, &entry); err == nil {
+			entry, err := apiClient.GetJournalEntry(date)
+			if err == nil {
 				existing = entry.Body
 			}
 
-			var err error
 			content, err = editor.Open(existing)
 			if err != nil {
 				return fmt.Errorf("could not open editor: %w", err)
@@ -203,10 +190,9 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	path := fmt.Sprintf("/calendar/days/%s/journal_entry.json", date)
 	body := map[string]interface{}{"body": content}
 
-	data, err := apiClient.PatchJSON(path, body)
+	data, err := apiClient.UpdateJournalEntry(date, body)
 	if err != nil {
 		return err
 	}

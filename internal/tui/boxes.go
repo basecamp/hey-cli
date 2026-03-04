@@ -21,7 +21,7 @@ type boxesModel struct {
 
 func newBoxesModel() boxesModel {
 	l := list.New(nil, list.NewDefaultDelegate(), 0, 0)
-	l.Title = "Mailboxes"
+	l.Title = "Mailboxes  (Tab → Calendars)"
 	l.SetShowStatusBar(false)
 	return boxesModel{list: l}
 }

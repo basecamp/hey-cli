@@ -4,8 +4,6 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-
-	"hey-cli/internal/models"
 )
 
 type draftsCommand struct {
@@ -34,26 +32,22 @@ func (c *draftsCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if jsonOutput {
-		data, err := apiClient.Get("/entries/drafts.json")
-		if err != nil {
-			return err
-		}
-		return printRawJSON(limitJSONArray(data, c.limit))
+	drafts, err := apiClient.ListDrafts()
+	if err != nil {
+		return err
 	}
 
-	var drafts []models.Draft
-	if err := apiClient.GetJSON("/entries/drafts.json", &drafts); err != nil {
-		return err
+	if c.limit > 0 && len(drafts) > c.limit {
+		drafts = drafts[:c.limit]
+	}
+
+	if jsonOutput {
+		return printJSON(drafts)
 	}
 
 	if len(drafts) == 0 {
 		fmt.Println("No drafts.")
 		return nil
-	}
-
-	if c.limit > 0 && len(drafts) > c.limit {
-		drafts = drafts[:c.limit]
 	}
 
 	table := newTable()

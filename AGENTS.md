@@ -13,7 +13,7 @@ The TUI is primarily intended for human use, while the CLI is primarily intended
 This project uses make.
 
 ```bash
-make build   # Builds the project into a binary located at ./bin/hey-cli
+make build   # Builds the project into a binary located at ./bin/hey
 make test    # Runs the tests
 make lint    # Lints the code
 make clean   # Cleans the build artifacts
@@ -25,6 +25,8 @@ make install # Installs the binary to /usr/local/bin/hey-cli or /usr/bin/hey-cli
 This is a Go project that uses:
 - [spf13/cobra](github.com/spf13/cobra) for the CLI interface
 - [charm.land/bubbletea/v2] for the TUI interface along with bubbles/v2 and lipgloss/v2 (these are new versions that recently came out and differ from the v1 versions!)
+
+All API interactions go through typed methods on `internal/client.Client` (e.g., `ListBoxes`, `GetEntry`, `ListCalendars`), organized into domain-specific files (`boxes.go`, `entries.go`, `calendars.go`, `todos.go`, `journal.go`, `habits.go`, `time_tracks.go`). Both CLI commands (`internal/cmd/`) and the TUI (`internal/tui/`) call these methods instead of using raw HTTP methods with hardcoded paths. Authentication and token refresh are handled via `internal/auth/`.
 
 ### Authentication
 
@@ -42,6 +44,10 @@ All data-access commands call `requireAuth()` before making API calls. Auth subc
 ### State storage
 
 Configuration (base URL only) is stored in `~/.config/hey-cli/config.json`. Credentials are stored in the system keyring (service name: `hey`) with automatic fallback to `~/.config/hey-cli/credentials.json` when the keyring is unavailable. Set `HEY_NO_KEYRING=1` to force file storage.
+
+### CLI
+
+Remember to update the examples in the README when you change, add or remove CLI commands.
 
 ## Code style
 

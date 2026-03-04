@@ -4,8 +4,6 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-
-	"hey-cli/internal/models"
 )
 
 type entryCommand struct {
@@ -31,19 +29,13 @@ func (c *entryCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	path := fmt.Sprintf("/entries/%s.json", args[0])
-
-	if jsonOutput {
-		data, err := apiClient.Get(path)
-		if err != nil {
-			return err
-		}
-		return printRawJSON(data)
+	e, err := apiClient.GetEntry(args[0])
+	if err != nil {
+		return err
 	}
 
-	var e models.Entry
-	if err := apiClient.GetJSON(path, &e); err != nil {
-		return err
+	if jsonOutput {
+		return printJSON(e)
 	}
 
 	from := e.Creator.Name

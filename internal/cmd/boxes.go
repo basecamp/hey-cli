@@ -4,8 +4,6 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-
-	"hey-cli/internal/models"
 )
 
 type boxesCommand struct {
@@ -34,21 +32,17 @@ func (c *boxesCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if jsonOutput {
-		data, err := apiClient.Get("/boxes.json")
-		if err != nil {
-			return err
-		}
-		return printRawJSON(limitJSONArray(data, c.limit))
-	}
-
-	var boxes []models.Box
-	if err := apiClient.GetJSON("/boxes.json", &boxes); err != nil {
+	boxes, err := apiClient.ListBoxes()
+	if err != nil {
 		return err
 	}
 
 	if c.limit > 0 && len(boxes) > c.limit {
 		boxes = boxes[:c.limit]
+	}
+
+	if jsonOutput {
+		return printJSON(boxes)
 	}
 
 	table := newTable()

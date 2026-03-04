@@ -4,8 +4,6 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-
-	"hey-cli/internal/models"
 )
 
 type calendarsCommand struct {
@@ -30,22 +28,18 @@ func (c *calendarsCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if jsonOutput {
-		data, err := apiClient.Get("/calendar/calendars.json")
-		if err != nil {
-			return err
-		}
-		return printRawJSON(data)
+	calendars, err := apiClient.ListCalendars()
+	if err != nil {
+		return err
 	}
 
-	var resp models.CalendarsResponse
-	if err := apiClient.GetJSON("/calendar/calendars.json", &resp); err != nil {
-		return err
+	if jsonOutput {
+		return printJSON(calendars)
 	}
 
 	table := newTable()
 	table.addRow([]string{"ID", "Name", "Kind", "Owned"})
-	for _, cal := range resp.Calendars {
+	for _, cal := range calendars {
 		owned := "no"
 		if cal.Owned {
 			owned = "yes"

@@ -82,6 +82,8 @@ func keyPress(k string) tea.KeyPressMsg {
 		return tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape})
 	case "backspace":
 		return tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace})
+	case "tab":
+		return tea.KeyPressMsg(tea.Key{Code: tea.KeyTab})
 	case "ctrl+c":
 		return tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModCtrl})
 	default:
@@ -509,8 +511,8 @@ func TestRenderEntriesEmpty(t *testing.T) {
 
 func TestNewBoxesModelTitle(t *testing.T) {
 	bm := newBoxesModel()
-	if bm.list.Title != "Mailboxes" {
-		t.Errorf("boxes list title = %q, want %q", bm.list.Title, "Mailboxes")
+	if bm.list.Title != "Mailboxes  (Tab → Calendars)" {
+		t.Errorf("boxes list title = %q, want %q", bm.list.Title, "Mailboxes  (Tab → Calendars)")
 	}
 }
 
@@ -534,5 +536,342 @@ func TestErrMsgError(t *testing.T) {
 	e := errMsg{err: errors.New("test error")}
 	if e.Error() != "test error" {
 		t.Errorf("Error() = %q, want %q", e.Error(), "test error")
+	}
+}
+
+// --- Calendar test helpers ---
+
+func testCalendars() []models.Calendar {
+	return []models.Calendar{
+		{ID: 1, Name: "My Calendar", Kind: "personal"},
+		{ID: 2, Name: "Team Calendar", Kind: "shared"},
+	}
+}
+
+func testRecordings() models.RecordingsResponse {
+	return models.RecordingsResponse{
+		"events": {
+			{
+				ID:       100,
+				Title:    "Standup",
+				AllDay:   false,
+				StartsAt: "2025-03-01T09:00:00Z",
+				Recurring: true,
+			},
+			{
+				ID:       101,
+				Title:    "Company Holiday",
+				AllDay:   true,
+				StartsAt: "2025-03-15T00:00:00Z",
+			},
+		},
+		"deadlines": {
+			{
+				ID:       102,
+				Title:    "Ship v2",
+				AllDay:   false,
+				StartsAt: "2025-03-20T17:00:00Z",
+			},
+		},
+	}
+}
+
+func modelWithCalendars() model {
+	m := sizedModel()
+	updated, _ := m.Update(calendarsLoadedMsg(testCalendars()))
+	return updated.(model)
+}
+
+// --- calendarItem tests ---
+
+func TestCalendarItemTitle(t *testing.T) {
+	item := calendarItem{calendar: models.Calendar{Name: "My Calendar"}}
+	if got := item.Title(); got != "My Calendar" {
+		t.Errorf("Title() = %q, want %q", got, "My Calendar")
+	}
+}
+
+func TestCalendarItemDescription(t *testing.T) {
+	item := calendarItem{calendar: models.Calendar{Kind: "personal"}}
+	if got := item.Description(); got != "personal" {
+		t.Errorf("Description() = %q, want %q", got, "personal")
+	}
+}
+
+func TestCalendarItemFilterValue(t *testing.T) {
+	item := calendarItem{calendar: models.Calendar{Name: "Team Calendar"}}
+	if got := item.FilterValue(); got != "Team Calendar" {
+		t.Errorf("FilterValue() = %q, want %q", got, "Team Calendar")
+	}
+}
+
+// --- recordingItem tests ---
+
+func TestRecordingItemTitleWithTime(t *testing.T) {
+	item := recordingItem{
+		recording: models.Recording{Title: "Standup", AllDay: false, StartsAt: "2025-03-01T09:00:00Z"},
+		recType:   "events",
+	}
+	got := item.Title()
+	want := "[09:00] Standup"
+	if got != want {
+		t.Errorf("Title() = %q, want %q", got, want)
+	}
+}
+
+func TestRecordingItemTitleAllDay(t *testing.T) {
+	item := recordingItem{
+		recording: models.Recording{Title: "Holiday", AllDay: true, StartsAt: "2025-03-15T00:00:00Z"},
+		recType:   "events",
+	}
+	got := item.Title()
+	want := "[All day] Holiday"
+	if got != want {
+		t.Errorf("Title() = %q, want %q", got, want)
+	}
+}
+
+func TestRecordingItemTitleShortStartsAt(t *testing.T) {
+	item := recordingItem{
+		recording: models.Recording{Title: "Short", AllDay: false, StartsAt: "short"},
+		recType:   "events",
+	}
+	got := item.Title()
+	want := "[All day] Short"
+	if got != want {
+		t.Errorf("Title() = %q, want %q (short StartsAt should fall back to All day)", got, want)
+	}
+}
+
+func TestRecordingItemDescription(t *testing.T) {
+	item := recordingItem{
+		recording: models.Recording{StartsAt: "2025-03-01T09:00:00Z", Recurring: true},
+		recType:   "events",
+	}
+	got := item.Description()
+	want := "events · 2025-03-01 · recurring"
+	if got != want {
+		t.Errorf("Description() = %q, want %q", got, want)
+	}
+}
+
+func TestRecordingItemDescriptionNonRecurring(t *testing.T) {
+	item := recordingItem{
+		recording: models.Recording{StartsAt: "2025-03-20T17:00:00Z", Recurring: false},
+		recType:   "deadlines",
+	}
+	got := item.Description()
+	want := "deadlines · 2025-03-20"
+	if got != want {
+		t.Errorf("Description() = %q, want %q", got, want)
+	}
+}
+
+func TestRecordingItemFilterValue(t *testing.T) {
+	item := recordingItem{recording: models.Recording{Title: "Standup"}}
+	if got := item.FilterValue(); got != "Standup" {
+		t.Errorf("FilterValue() = %q, want %q", got, "Standup")
+	}
+}
+
+// --- Tab switching ---
+
+func TestTabFromBoxesToCalendars(t *testing.T) {
+	m := modelWithBoxes()
+	updated, cmd := m.Update(keyPress("tab"))
+	result := updated.(model)
+
+	if result.state != viewCalendars {
+		t.Errorf("state = %d, want viewCalendars (%d)", result.state, viewCalendars)
+	}
+	if !result.loading {
+		t.Error("should be loading calendars on first Tab")
+	}
+	if cmd == nil {
+		t.Error("first Tab should return a fetch command")
+	}
+}
+
+func TestTabFromBoxesToCalendarsAlreadyLoaded(t *testing.T) {
+	m := modelWithCalendars()
+	m.state = viewBoxes // go back to boxes
+	updated, cmd := m.Update(keyPress("tab"))
+	result := updated.(model)
+
+	if result.state != viewCalendars {
+		t.Errorf("state = %d, want viewCalendars (%d)", result.state, viewCalendars)
+	}
+	if result.loading {
+		t.Error("should not be loading when calendars already loaded")
+	}
+	if cmd != nil {
+		t.Error("should not fetch when calendars already loaded")
+	}
+}
+
+func TestTabFromCalendarsToBoxes(t *testing.T) {
+	m := modelWithCalendars()
+	m.state = viewCalendars
+	updated, _ := m.Update(keyPress("tab"))
+	result := updated.(model)
+
+	if result.state != viewBoxes {
+		t.Errorf("state = %d, want viewBoxes (%d)", result.state, viewBoxes)
+	}
+}
+
+func TestTabDoesNothingInBox(t *testing.T) {
+	m := modelWithBoxes()
+	m.state = viewBox
+	updated, _ := m.Update(keyPress("tab"))
+	result := updated.(model)
+
+	if result.state != viewBox {
+		t.Errorf("state = %d, want viewBox (%d)", result.state, viewBox)
+	}
+}
+
+func TestTabDoesNothingInTopic(t *testing.T) {
+	m := modelWithBoxes()
+	m.state = viewTopic
+	updated, _ := m.Update(keyPress("tab"))
+	result := updated.(model)
+
+	if result.state != viewTopic {
+		t.Errorf("state = %d, want viewTopic (%d)", result.state, viewTopic)
+	}
+}
+
+func TestTabDoesNothingInCalendar(t *testing.T) {
+	m := modelWithCalendars()
+	m.state = viewCalendar
+	updated, _ := m.Update(keyPress("tab"))
+	result := updated.(model)
+
+	if result.state != viewCalendar {
+		t.Errorf("state = %d, want viewCalendar (%d)", result.state, viewCalendar)
+	}
+}
+
+// --- Calendar data loading ---
+
+func TestCalendarsLoadedMsg(t *testing.T) {
+	m := sizedModel()
+	m.loading = true
+
+	updated, _ := m.Update(calendarsLoadedMsg(testCalendars()))
+	result := updated.(model)
+
+	if result.loading {
+		t.Error("loading should be false after calendarsLoadedMsg")
+	}
+	if !result.calendarsLoaded {
+		t.Error("calendarsLoaded should be true")
+	}
+	selected := result.calendars.selectedCalendar()
+	if selected == nil {
+		t.Fatal("selectedCalendar() returned nil after setting items")
+	}
+	if selected.Name != "My Calendar" {
+		t.Errorf("first selected calendar = %q, want %q", selected.Name, "My Calendar")
+	}
+}
+
+func TestCalendarLoadedMsg(t *testing.T) {
+	m := sizedModel()
+	m.loading = true
+	m.state = viewCalendars
+
+	cal := models.Calendar{ID: 1, Name: "My Calendar", Kind: "personal"}
+	updated, _ := m.Update(calendarLoadedMsg{calendar: cal, recordings: testRecordings()})
+	result := updated.(model)
+
+	if result.loading {
+		t.Error("loading should be false after calendarLoadedMsg")
+	}
+	if result.state != viewCalendar {
+		t.Errorf("state = %d, want viewCalendar (%d)", result.state, viewCalendar)
+	}
+	if result.calendar.list.Title != "My Calendar" {
+		t.Errorf("calendar list title = %q, want %q", result.calendar.list.Title, "My Calendar")
+	}
+}
+
+// --- Calendar navigation ---
+
+func TestEscFromCalendarGoesBackToCalendars(t *testing.T) {
+	m := modelWithCalendars()
+	m.state = viewCalendar
+
+	updated, _ := m.Update(keyPress("esc"))
+	result := updated.(model)
+
+	if result.state != viewCalendars {
+		t.Errorf("state after esc = %d, want viewCalendars (%d)", result.state, viewCalendars)
+	}
+}
+
+func TestBackspaceFromCalendarGoesBackToCalendars(t *testing.T) {
+	m := modelWithCalendars()
+	m.state = viewCalendar
+
+	updated, _ := m.Update(keyPress("backspace"))
+	result := updated.(model)
+
+	if result.state != viewCalendars {
+		t.Errorf("state after backspace = %d, want viewCalendars (%d)", result.state, viewCalendars)
+	}
+}
+
+func TestCtrlCQuitsFromCalendars(t *testing.T) {
+	m := modelWithCalendars()
+	m.state = viewCalendars
+	_, cmd := m.Update(keyPress("ctrl+c"))
+	if cmd == nil {
+		t.Fatal("ctrl+c should return a quit cmd")
+	}
+	msg := cmd()
+	if _, ok := msg.(tea.QuitMsg); !ok {
+		t.Errorf("ctrl+c cmd produced %T, want tea.QuitMsg", msg)
+	}
+}
+
+func TestCtrlCQuitsFromCalendar(t *testing.T) {
+	m := modelWithCalendars()
+	m.state = viewCalendar
+	_, cmd := m.Update(keyPress("ctrl+c"))
+	if cmd == nil {
+		t.Fatal("ctrl+c should return a quit cmd")
+	}
+	msg := cmd()
+	if _, ok := msg.(tea.QuitMsg); !ok {
+		t.Errorf("ctrl+c cmd produced %T, want tea.QuitMsg", msg)
+	}
+}
+
+// --- Calendar sub-model construction ---
+
+func TestNewCalendarsModelTitle(t *testing.T) {
+	cm := newCalendarsModel()
+	if cm.list.Title != "Calendars  (Tab → Mail)" {
+		t.Errorf("calendars list title = %q, want %q", cm.list.Title, "Calendars  (Tab → Mail)")
+	}
+}
+
+func TestCalendarsSelectedCalendarNilWhenEmpty(t *testing.T) {
+	cm := newCalendarsModel()
+	if cm.selectedCalendar() != nil {
+		t.Error("selectedCalendar() should return nil when list is empty")
+	}
+}
+
+// --- Calendar view rendering ---
+
+func TestViewShowsCalendars(t *testing.T) {
+	m := modelWithCalendars()
+	m.state = viewCalendars
+	v := m.View()
+	if !strings.Contains(v.Content, "Calendars") {
+		t.Error("View should show calendars content when in viewCalendars state")
 	}
 }

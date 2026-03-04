@@ -1,12 +1,10 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/spf13/cobra"
-
-	"hey-cli/internal/models"
 )
 
 type recordingsCommand struct {
@@ -40,46 +38,31 @@ func (c *recordingsCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	path := fmt.Sprintf("/calendar/calendars/%s/recordings.json", args[0])
-	sep := "?"
-	if c.from != "" {
-		path += sep + "from=" + c.from
-		sep = "&"
+	calendarID, err := strconv.Atoi(args[0])
+	if err != nil {
+		return fmt.Errorf("invalid calendar ID: %s", args[0])
 	}
-	if c.to != "" {
-		path += sep + "to=" + c.to
+
+	resp, err := apiClient.GetCalendarRecordings(calendarID, c.from, c.to)
+	if err != nil {
+		return err
+	}
+
+	if c.limit > 0 {
+		for key, recordings := range resp {
+			if len(recordings) > c.limit {
+				resp[key] = recordings[:c.limit]
+			}
+		}
 	}
 
 	if jsonOutput {
-		data, err := apiClient.Get(path)
-		if err != nil {
-			return err
-		}
-		if c.limit > 0 {
-			var obj map[string]json.RawMessage
-			if err := json.Unmarshal(data, &obj); err == nil {
-				for key, val := range obj {
-					obj[key] = json.RawMessage(limitJSONArray([]byte(val), c.limit))
-				}
-				if limited, err := json.Marshal(obj); err == nil {
-					data = limited
-				}
-			}
-		}
-		return printRawJSON(data)
-	}
-
-	var resp models.RecordingsResponse
-	if err := apiClient.GetJSON(path, &resp); err != nil {
-		return err
+		return printJSON(resp)
 	}
 
 	for recType, recordings := range resp {
 		if len(recordings) == 0 {
 			continue
-		}
-		if c.limit > 0 && len(recordings) > c.limit {
-			recordings = recordings[:c.limit]
 		}
 		fmt.Printf("\n%s:\n", recType)
 		table := newTable()

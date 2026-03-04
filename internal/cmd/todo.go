@@ -4,8 +4,6 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-
-	"hey-cli/internal/models"
 )
 
 type todoCommand struct {
@@ -56,26 +54,22 @@ func (c *todoListCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if jsonOutput {
-		data, err := apiClient.Get("/calendar/todos.json")
-		if err != nil {
-			return err
-		}
-		return printRawJSON(limitJSONArray(data, c.limit))
+	todos, err := apiClient.ListTodos()
+	if err != nil {
+		return err
 	}
 
-	var todos []models.Todo
-	if err := apiClient.GetJSON("/calendar/todos.json", &todos); err != nil {
-		return err
+	if c.limit > 0 && len(todos) > c.limit {
+		todos = todos[:c.limit]
+	}
+
+	if jsonOutput {
+		return printJSON(todos)
 	}
 
 	if len(todos) == 0 {
 		fmt.Println("No todos.")
 		return nil
-	}
-
-	if c.limit > 0 && len(todos) > c.limit {
-		todos = todos[:c.limit]
 	}
 
 	table := newTable()
@@ -134,7 +128,7 @@ func (c *todoAddCommand) run(cmd *cobra.Command, args []string) error {
 		body["starts_at"] = c.date
 	}
 
-	data, err := apiClient.PostJSON("/calendar/todos.json", body)
+	data, err := apiClient.CreateTodo(body)
 	if err != nil {
 		return err
 	}
@@ -171,8 +165,7 @@ func (c *todoCompleteCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	path := fmt.Sprintf("/calendar/todos/%s/completions.json", args[0])
-	data, err := apiClient.PostJSON(path, nil)
+	data, err := apiClient.CompleteTodo(args[0])
 	if err != nil {
 		return err
 	}
@@ -209,8 +202,7 @@ func (c *todoUncompleteCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	path := fmt.Sprintf("/calendar/todos/%s/completions.json", args[0])
-	data, err := apiClient.Delete(path)
+	data, err := apiClient.UncompleteTodo(args[0])
 	if err != nil {
 		return err
 	}
@@ -247,8 +239,7 @@ func (c *todoDeleteCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	path := fmt.Sprintf("/calendar/todos/%s.json", args[0])
-	data, err := apiClient.Delete(path)
+	data, err := apiClient.DeleteTodo(args[0])
 	if err != nil {
 		return err
 	}
