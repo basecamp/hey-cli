@@ -123,17 +123,28 @@ func extractMutationInfo(data []byte) string {
 		return ""
 	}
 
+	type field struct {
+		apiKey      string
+		displayName string
+	}
+
+	fields := []field{
+		{apiKey: "id", displayName: "id"},
+		{apiKey: "topic_id", displayName: "thread_id"},
+		{apiKey: "entry_id", displayName: "entry_id"},
+	}
+
 	var parts []string
-	for _, key := range []string{"id", "topic_id", "entry_id"} {
-		v, ok := obj[key]
+	for _, f := range fields {
+		v, ok := obj[f.apiKey]
 		if !ok || v == nil {
 			continue
 		}
 		switch v := v.(type) {
 		case float64:
-			parts = append(parts, fmt.Sprintf("%s: %d", key, int64(v)))
+			parts = append(parts, fmt.Sprintf("%s: %d", f.displayName, int64(v)))
 		default:
-			parts = append(parts, fmt.Sprintf("%s: %v", key, v))
+			parts = append(parts, fmt.Sprintf("%s: %v", f.displayName, v))
 		}
 	}
 	if len(parts) == 0 {

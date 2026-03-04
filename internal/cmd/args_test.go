@@ -9,7 +9,7 @@ import (
 
 func TestUsageExactArgs(t *testing.T) {
 	root := &cobra.Command{Use: "hey"}
-	cmd := &cobra.Command{Use: "topic <id>"}
+	cmd := &cobra.Command{Use: "threads <id>"}
 	root.AddCommand(cmd)
 
 	validator := usageExactArgs(1)
@@ -22,7 +22,7 @@ func TestUsageExactArgs(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing args, got nil")
 	}
-	if !strings.Contains(err.Error(), "Usage: hey topic <id>") {
+	if !strings.Contains(err.Error(), "Usage: hey threads <id>") {
 		t.Fatalf("unexpected missing-args error: %q", err.Error())
 	}
 

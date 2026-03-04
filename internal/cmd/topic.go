@@ -12,18 +12,31 @@ type topicCommand struct {
 	cmd *cobra.Command
 }
 
-func newTopicCommand() *topicCommand {
-	topicCommand := &topicCommand{}
-	topicCommand.cmd = &cobra.Command{
-		Use:   "topic <id>",
+func newThreadsCommand() *topicCommand {
+	threadsCommand := &topicCommand{}
+	threadsCommand.cmd = &cobra.Command{
+		Use:   "threads <id>",
 		Short: "Read an email thread",
-		Example: `  hey topic 12345
-  hey topic 12345 --json`,
-		RunE: topicCommand.run,
+		Example: `  hey threads 12345
+  hey threads 12345 --json`,
+		RunE: threadsCommand.run,
 		Args: usageExactArgs(1),
 	}
 
-	return topicCommand
+	return threadsCommand
+}
+
+func newTopicAliasCommand() *topicCommand {
+	aliasCommand := &topicCommand{}
+	aliasCommand.cmd = &cobra.Command{
+		Use:    "topic <id>",
+		Short:  "Hidden alias for threads",
+		Hidden: true,
+		RunE:   aliasCommand.run,
+		Args:   usageExactArgs(1),
+	}
+
+	return aliasCommand
 }
 
 func (c *topicCommand) run(cmd *cobra.Command, args []string) error {
@@ -31,12 +44,12 @@ func (c *topicCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	topicID, err := strconv.Atoi(args[0])
+	threadID, err := strconv.Atoi(args[0])
 	if err != nil {
-		return fmt.Errorf("invalid topic ID: %s", args[0])
+		return fmt.Errorf("invalid thread ID: %s", args[0])
 	}
 
-	entries, err := apiClient.GetTopicEntries(topicID)
+	entries, err := apiClient.GetTopicEntries(threadID)
 	if err != nil {
 		return err
 	}

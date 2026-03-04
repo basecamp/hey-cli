@@ -17,8 +17,8 @@ type replyCommand struct {
 func newReplyCommand() *replyCommand {
 	replyCommand := &replyCommand{}
 	replyCommand.cmd = &cobra.Command{
-		Use:   "reply <topic-id>",
-		Short: "Reply to an email topic",
+		Use:   "reply <thread-id>",
+		Short: "Reply to a thread",
 		Example: `  hey reply 12345 -m "Thanks!"
   echo "Detailed reply" | hey reply 12345`,
 		RunE: replyCommand.run,
@@ -35,17 +35,17 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	topicID, err := strconv.Atoi(args[0])
+	threadID, err := strconv.Atoi(args[0])
 	if err != nil {
-		return fmt.Errorf("invalid topic ID: %s", args[0])
+		return fmt.Errorf("invalid thread ID: %s", args[0])
 	}
 
-	entries, err := apiClient.GetTopicEntries(topicID)
+	entries, err := apiClient.GetTopicEntries(threadID)
 	if err != nil {
 		return err
 	}
 	if len(entries) == 0 {
-		return fmt.Errorf("no entries found for topic %d", topicID)
+		return fmt.Errorf("no entries found for thread %d", threadID)
 	}
 
 	latestEntryID := entries[len(entries)-1].ID

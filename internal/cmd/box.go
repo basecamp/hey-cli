@@ -73,7 +73,7 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Box: %s (%s)\n\n", resp.Box.Name, resp.Box.Kind)
 
 	table := newTable()
-	table.addRow([]string{"Topic", "From", "Summary", "Date"})
+	table.addRow([]string{"Thread", "From", "Summary", "Date"})
 	for _, raw := range postings {
 		var p models.Posting
 		if err := json.Unmarshal(raw, &p); err != nil {
