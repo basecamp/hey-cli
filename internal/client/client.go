@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"hey-cli/internal/config"
+	"hey-cli/internal/auth"
 )
 
 type APIError struct {
@@ -25,7 +26,7 @@ func (e *APIError) Error() string {
 func responseError(resp *http.Response, data []byte) *APIError {
 	switch resp.StatusCode {
 	case 401:
-		return &APIError{StatusCode: 401, Message: "unauthorized — run `hey login` to authenticate"}
+		return &APIError{StatusCode: 401, Message: "unauthorized — run `hey auth login` to authenticate"}
 	case 404:
 		return &APIError{StatusCode: 404, Message: "not found (404)"}
 	default:
@@ -34,13 +35,15 @@ func responseError(resp *http.Response, data []byte) *APIError {
 }
 
 type Client struct {
-	Config     *config.Config
+	BaseURL    string
+	AuthMgr    *auth.Manager
 	HTTPClient *http.Client
 }
 
-func New(cfg *config.Config) *Client {
+func New(baseURL string, authMgr *auth.Manager) *Client {
 	return &Client{
-		Config: cfg,
+		BaseURL: baseURL,
+		AuthMgr: authMgr,
 		HTTPClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -48,7 +51,7 @@ func New(cfg *config.Config) *Client {
 }
 
 func (c *Client) doRequest(method, path string, body io.Reader, contentType string) (*http.Response, error) {
-	base := strings.TrimRight(c.Config.BaseURL, "/")
+	base := strings.TrimRight(c.BaseURL, "/")
 	reqURL := base + path
 
 	req, err := http.NewRequest(method, reqURL, body)
@@ -56,11 +59,11 @@ func (c *Client) doRequest(method, path string, body io.Reader, contentType stri
 		return nil, fmt.Errorf("could not create request: %w", err)
 	}
 
-	if c.Config.AccessToken != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Config.AccessToken)
-	} else if c.Config.SessionCookie != "" {
-		req.Header.Set("Cookie", "session_token="+c.Config.SessionCookie)
+	ctx := context.Background()
+	if err := c.AuthMgr.AuthenticateRequest(ctx, req); err != nil {
+		return nil, fmt.Errorf("authentication failed: %w", err)
 	}
+
 	req.Header.Set("Accept", "application/json")
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
@@ -71,56 +74,7 @@ func (c *Client) doRequest(method, path string, body io.Reader, contentType stri
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 
-	if resp.StatusCode == 401 && c.Config.RefreshToken != "" && c.Config.AccessToken != "" {
-		resp.Body.Close()
-		if err := c.refreshToken(); err == nil {
-			req, _ = http.NewRequest(method, reqURL, body)
-			req.Header.Set("Authorization", "Bearer "+c.Config.AccessToken)
-			req.Header.Set("Accept", "application/json")
-			if contentType != "" {
-				req.Header.Set("Content-Type", contentType)
-			}
-			return c.HTTPClient.Do(req)
-		}
-	}
-
 	return resp, nil
-}
-
-func (c *Client) refreshToken() error {
-	base := strings.TrimRight(c.Config.BaseURL, "/")
-	data := url.Values{
-		"grant_type":    {"refresh_token"},
-		"client_id":     {c.Config.ClientID},
-		"refresh_token": {c.Config.RefreshToken},
-		"install_id":    {c.Config.InstallID},
-	}
-
-	resp, err := c.HTTPClient.PostForm(base+"/oauth/tokens", data)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("refresh failed with status %d", resp.StatusCode)
-	}
-
-	var result struct {
-		AccessToken  string `json:"access_token"`
-		RefreshToken string `json:"refresh_token"`
-		ExpiresIn    int64  `json:"expires_in"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return err
-	}
-
-	c.Config.AccessToken = result.AccessToken
-	if result.RefreshToken != "" {
-		c.Config.RefreshToken = result.RefreshToken
-	}
-	c.Config.TokenExpiry = time.Now().Unix() + result.ExpiresIn
-	return c.Config.Save()
 }
 
 func (c *Client) readBody(resp *http.Response) ([]byte, error) {

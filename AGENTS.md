@@ -28,19 +28,20 @@ This is a Go project that uses:
 
 ### Authentication
 
-Authentication supports three methods, all managed through `internal/auth/` and `internal/config/`:
+Authentication supports three methods, all managed through `internal/auth/`:
 
-1. **OAuth password grant** (primary) — `hey login --client-id ID --client-secret SECRET` prompts for email/password, signs credentials with HMAC-SHA256 (matching Rails MessageVerifier), and exchanges them at `/oauth/tokens` for an access token and refresh token.
-2. **Pre-generated bearer token** — `hey login --token TOKEN` stores a token directly.
-3. **Browser session cookie** — `hey login --cookie COOKIE` uses an existing HEY.com session.
+1. **Browser-based OAuth with PKCE** (primary) — `hey auth login` opens a browser for OAuth authentication against HEY's own OAuth server (`/oauth/authorizations/new`), using PKCE (S256) for security. A local callback server on `127.0.0.1:8976` receives the authorization code, which is exchanged for access and refresh tokens at `/oauth/tokens`.
+2. **Pre-generated bearer token** — `hey auth login --token TOKEN` stores a token directly.
+3. **Browser session cookie** — `hey auth login --cookie COOKIE` uses an existing HEY.com session.
+4. **Environment variable** — Set `HEY_TOKEN` to use a token without storing it.
 
-The API client (`internal/client/`) attaches auth automatically: `Authorization: Bearer <token>` or `Cookie: session_token=<cookie>` (bearer token takes precedence). On a 401 response, it transparently refreshes the access token using the refresh token and retries the request.
+The auth Manager (`internal/auth/auth.go`) proactively refreshes tokens with a 5-minute expiry buffer. The API client (`internal/client/`) uses the Manager to authenticate requests: `Authorization: Bearer <token>` or `Cookie: session_token=<cookie>` (bearer token takes precedence).
 
-All data-access commands call `requireAuth()` before making API calls. `login`, `logout`, and `status` work without authentication.
+All data-access commands call `requireAuth()` before making API calls. Auth subcommands (`hey auth login`, `hey auth logout`, `hey auth status`) work without authentication.
 
 ### State storage
 
-Credentials and config are stored in `~/.config/hey-cli/config.json` with file permissions `0600`. The config includes base URL, access token, refresh token, token expiry (Unix timestamp), OAuth client ID/secret, and install ID. `hey logout` deletes the config file entirely via `config.Clear()`.
+Configuration (base URL only) is stored in `~/.config/hey-cli/config.json`. Credentials are stored in the system keyring (service name: `hey`) with automatic fallback to `~/.config/hey-cli/credentials.json` when the keyring is unavailable. Set `HEY_NO_KEYRING=1` to force file storage.
 
 ## Code style
 

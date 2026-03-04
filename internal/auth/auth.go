@@ -1,77 +1,332 @@
+// Package auth provides OAuth authentication for HEY.
 package auth
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/json"
+	"context"
 	"fmt"
+	"net"
+	"net/http"
 	"net/url"
+	"os"
+	"strings"
+	"sync"
 	"time"
-
-	"hey-cli/internal/client"
-	"hey-cli/internal/config"
 )
 
-// SignCredentials signs email+password using HMAC-SHA256 with the client secret,
-// matching Rails MessageVerifier behavior for the password grant.
-func SignCredentials(email, password, secret string) string {
-	creds := map[string]string{
-		"email_address": email,
-		"password":      password,
-	}
-	data, _ := json.Marshal(creds)
-	encoded := base64.StdEncoding.EncodeToString(data)
+// Built-in OAuth client credentials for the CLI app.
+const (
+	oauthClientID = "khMWSVDVSq78oyKA3KtxmYRv"
+	installID     = "hey-cli"
+)
 
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(encoded))
-	sig := base64.StdEncoding.EncodeToString(mac.Sum(nil))
-
-	return encoded + "--" + sig
+// Manager handles OAuth authentication.
+type Manager struct {
+	baseURL    string
+	store      *Store
+	httpClient *http.Client
+	mu         sync.Mutex
 }
 
-type TokenResponse struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	ExpiresIn    int64  `json:"expires_in"`
-	TokenType    string `json:"token_type"`
-	Error        string `json:"error"`
-	ErrorDesc    string `json:"error_description"`
+// NewManager creates a new auth manager.
+func NewManager(baseURL string, httpClient *http.Client, configDir string) *Manager {
+	return &Manager{
+		baseURL:    normalizeBaseURL(baseURL),
+		store:      NewStore(configDir),
+		httpClient: httpClient,
+	}
 }
 
-// PasswordGrant performs an OAuth password grant to obtain tokens.
-func PasswordGrant(cfg *config.Config, email, password string) (*TokenResponse, error) {
-	sig := SignCredentials(email, password, cfg.ClientSecret)
+// normalizeBaseURL strips trailing slashes for consistent credential keys.
+func normalizeBaseURL(u string) string {
+	return strings.TrimRight(u, "/")
+}
 
-	c := client.New(cfg)
-	values := url.Values{
-		"grant_type": {"password"},
-		"client_id":  {cfg.ClientID},
-		"sig":        {sig},
-		"install_id": {cfg.InstallID},
+// AccessToken returns a valid access token, refreshing if needed.
+// If HEY_TOKEN env var is set, it's used directly.
+func (m *Manager) AccessToken(ctx context.Context) (string, error) {
+	if token := os.Getenv("HEY_TOKEN"); token != "" {
+		return token, nil
 	}
 
-	data, err := c.PostForm("/oauth/tokens", values)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	creds, err := m.store.Load(m.baseURL)
 	if err != nil {
-		return nil, err
+		return "", fmt.Errorf("not authenticated: %v", err)
 	}
 
-	var resp TokenResponse
-	if err := json.Unmarshal(data, &resp); err != nil {
-		return nil, fmt.Errorf("could not parse token response: %w", err)
+	// Check if token is expired (with 5-minute buffer)
+	if creds.ExpiresAt > 0 && time.Now().Unix() >= creds.ExpiresAt-300 {
+		if err := m.refreshLocked(ctx, creds); err != nil {
+			return "", err
+		}
+		creds, err = m.store.Load(m.baseURL)
+		if err != nil {
+			return "", fmt.Errorf("failed to load refreshed credentials: %v", err)
+		}
 	}
 
-	if resp.Error != "" {
-		return &resp, fmt.Errorf("%s: %s", resp.Error, resp.ErrorDesc)
+	if creds.AccessToken == "" {
+		return "", fmt.Errorf("stored credentials have empty access token")
 	}
 
-	cfg.AccessToken = resp.AccessToken
-	cfg.RefreshToken = resp.RefreshToken
-	cfg.TokenExpiry = time.Now().Unix() + resp.ExpiresIn
+	return creds.AccessToken, nil
+}
 
-	if err := cfg.Save(); err != nil {
-		return &resp, fmt.Errorf("tokens obtained but could not save config: %w", err)
+// AuthenticateRequest sets the appropriate auth header on an HTTP request.
+// Uses Bearer token if available, otherwise falls back to session cookie.
+func (m *Manager) AuthenticateRequest(ctx context.Context, req *http.Request) error {
+	if token := os.Getenv("HEY_TOKEN"); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+		return nil
 	}
 
-	return &resp, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	creds, err := m.store.Load(m.baseURL)
+	if err != nil {
+		return fmt.Errorf("not authenticated: %v", err)
+	}
+
+	if creds.AccessToken != "" {
+		// Auto-refresh if needed
+		if creds.ExpiresAt > 0 && time.Now().Unix() >= creds.ExpiresAt-300 {
+			if err := m.refreshLocked(ctx, creds); err != nil {
+				return err
+			}
+			creds, err = m.store.Load(m.baseURL)
+			if err != nil {
+				return fmt.Errorf("failed to load refreshed credentials: %v", err)
+			}
+		}
+		req.Header.Set("Authorization", "Bearer "+creds.AccessToken)
+		return nil
+	}
+
+	if creds.SessionCookie != "" {
+		req.Header.Set("Cookie", "session_token="+creds.SessionCookie)
+		return nil
+	}
+
+	return fmt.Errorf("no access token or session cookie available")
+}
+
+// IsAuthenticated checks if there are valid credentials.
+func (m *Manager) IsAuthenticated() bool {
+	if os.Getenv("HEY_TOKEN") != "" {
+		return true
+	}
+
+	creds, err := m.store.Load(m.baseURL)
+	if err != nil {
+		return false
+	}
+	return creds.AccessToken != "" || creds.SessionCookie != ""
+}
+
+// LoginOptions configures the login flow.
+type LoginOptions struct {
+	NoBrowser bool
+}
+
+// Login initiates the browser-based OAuth login flow with PKCE.
+func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
+	authEndpoint := m.baseURL + "/oauth/authorizations/new"
+	tokenEndpoint := m.baseURL + "/oauth/tokens"
+	callbackAddr := "127.0.0.1:8976"
+	redirectURI := "http://" + callbackAddr + "/callback"
+
+	state := generateState()
+	codeVerifier := generateCodeVerifier()
+	codeChallenge := generateCodeChallenge(codeVerifier)
+
+	// Build authorization URL
+	u, err := url.Parse(authEndpoint)
+	if err != nil {
+		return fmt.Errorf("invalid auth endpoint: %w", err)
+	}
+	q := u.Query()
+	q.Set("client_id", oauthClientID)
+	q.Set("grant_type", "authorization_code")
+	q.Set("redirect_uri", redirectURI)
+	q.Set("state", state)
+	q.Set("code_challenge", codeChallenge)
+	q.Set("code_challenge_method", "S256")
+	q.Set("install_id", installID)
+	u.RawQuery = q.Encode()
+	authURL := u.String()
+
+	// Start local callback server
+	code, err := m.waitForCallback(ctx, state, authURL, callbackAddr, opts)
+	if err != nil {
+		return err
+	}
+
+	// Exchange code for tokens
+	token, err := exchangeCode(ctx, m.httpClient, tokenEndpoint, code, redirectURI, oauthClientID, codeVerifier, installID)
+	if err != nil {
+		return fmt.Errorf("token exchange failed: %w", err)
+	}
+
+	creds := &Credentials{
+		AccessToken:   token.AccessToken,
+		RefreshToken:  token.RefreshToken,
+		OAuthType:     "oauth",
+		TokenEndpoint: tokenEndpoint,
+	}
+	if !token.ExpiresAt.IsZero() {
+		creds.ExpiresAt = token.ExpiresAt.Unix()
+	}
+
+	return m.store.Save(m.baseURL, creds)
+}
+
+// LoginWithToken stores a pre-provided bearer token.
+func (m *Manager) LoginWithToken(token string) error {
+	creds := &Credentials{
+		AccessToken: token,
+		OAuthType:   "token",
+	}
+	return m.store.Save(m.baseURL, creds)
+}
+
+// LoginWithCookie stores a session cookie.
+func (m *Manager) LoginWithCookie(cookie string) error {
+	creds := &Credentials{
+		SessionCookie: cookie,
+		OAuthType:     "cookie",
+	}
+	return m.store.Save(m.baseURL, creds)
+}
+
+// Logout removes stored credentials.
+func (m *Manager) Logout() error {
+	return m.store.Delete(m.baseURL)
+}
+
+// Refresh forces a token refresh.
+func (m *Manager) Refresh(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	creds, err := m.store.Load(m.baseURL)
+	if err != nil {
+		return fmt.Errorf("not authenticated: %v", err)
+	}
+
+	return m.refreshLocked(ctx, creds)
+}
+
+func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
+	if creds.RefreshToken == "" {
+		return fmt.Errorf("no refresh token available")
+	}
+
+	tokenEndpoint := creds.TokenEndpoint
+	if tokenEndpoint == "" {
+		tokenEndpoint = m.baseURL + "/oauth/tokens"
+	}
+
+	token, err := refreshOAuthToken(ctx, m.httpClient, tokenEndpoint, creds.RefreshToken, oauthClientID, installID)
+	if err != nil {
+		return fmt.Errorf("token refresh failed: %v", err)
+	}
+
+	creds.AccessToken = token.AccessToken
+	if token.RefreshToken != "" {
+		creds.RefreshToken = token.RefreshToken
+	}
+	if !token.ExpiresAt.IsZero() {
+		creds.ExpiresAt = token.ExpiresAt.Unix()
+	}
+
+	return m.store.Save(m.baseURL, creds)
+}
+
+// GetStore returns the credential store.
+func (m *Manager) GetStore() *Store {
+	return m.store
+}
+
+// CredentialKey returns the base URL used as the credential storage key.
+func (m *Manager) CredentialKey() string {
+	return m.baseURL
+}
+
+func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL, callbackAddr string, opts LoginOptions) (string, error) {
+	lc := net.ListenConfig{}
+	listener, err := lc.Listen(ctx, "tcp", callbackAddr)
+	if err != nil {
+		return "", fmt.Errorf("failed to start callback server: %w", err)
+	}
+	defer func() { _ = listener.Close() }()
+
+	codeCh := make(chan string, 1)
+	errCh := make(chan error, 1)
+	var shutdownOnce sync.Once
+
+	server := &http.Server{
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       30 * time.Second,
+	}
+
+	server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		state := r.URL.Query().Get("state")
+		code := r.URL.Query().Get("code")
+		errParam := r.URL.Query().Get("error")
+
+		if errParam != "" {
+			errCh <- fmt.Errorf("OAuth error: %s", errParam)
+			fmt.Fprint(w, "<html><body><h1>Authentication failed</h1><p>You can close this window.</p></body></html>")
+			shutdownOnce.Do(func() {
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				go func() { defer cancel(); server.Shutdown(shutdownCtx) }()
+			})
+			return
+		}
+
+		if state != expectedState {
+			errCh <- fmt.Errorf("state mismatch: CSRF protection failed")
+			fmt.Fprint(w, "<html><body><h1>Authentication failed</h1><p>State mismatch.</p></body></html>")
+			shutdownOnce.Do(func() {
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				go func() { defer cancel(); server.Shutdown(shutdownCtx) }()
+			})
+			return
+		}
+
+		codeCh <- code
+		fmt.Fprint(w, "<html><body><h1>Authentication successful!</h1><p>You can close this window.</p></body></html>")
+		shutdownOnce.Do(func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			go func() { defer cancel(); server.Shutdown(shutdownCtx) }()
+		})
+	})
+
+	go server.Serve(listener) //nolint:errcheck
+
+	if !opts.NoBrowser {
+		if err := openBrowser(authURL); err != nil {
+			fmt.Fprintf(os.Stderr, "\nCouldn't open browser automatically.\nOpen this URL in your browser:\n%s\n\nWaiting for authentication...\n", authURL)
+		} else {
+			fmt.Fprintf(os.Stderr, "\nOpening browser for authentication...\nIf the browser doesn't open, visit: %s\n\nWaiting for authentication...\n", authURL)
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "\nOpen this URL in your browser:\n%s\n\nWaiting for authentication...\n", authURL)
+	}
+
+	select {
+	case code := <-codeCh:
+		return code, nil
+	case err := <-errCh:
+		return "", err
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-time.After(5 * time.Minute):
+		return "", fmt.Errorf("authentication timeout")
+	}
 }

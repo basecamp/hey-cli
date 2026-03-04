@@ -16,21 +16,23 @@ sudo make install  # install to /usr/local/bin (macOS) or /usr/bin (Linux)
 ## Authentication
 
 ```bash
-# OAuth password grant (primary method)
-hey login --client-id CLIENT_ID --client-secret SECRET
+# Browser-based OAuth via Launchpad (primary method)
+hey auth login
 
 # Or use a pre-generated token
-hey login --token TOKEN
+hey auth login --token TOKEN
 
 # Or use a browser session cookie
-hey login --cookie COOKIE
+hey auth login --cookie COOKIE
 ```
 
-Tokens refresh automatically on expiry. Credentials are stored in `~/.config/hey-cli/config.json`.
+Tokens refresh automatically on expiry. Credentials are stored in the system keyring (with file fallback at `~/.config/hey-cli/credentials.json`).
 
 ```bash
-hey status  # check auth status
-hey logout  # clear credentials
+hey auth status   # check auth status
+hey auth token    # print access token for scripting
+hey auth refresh  # force token refresh
+hey auth logout   # clear credentials
 ```
 
 ## TUI

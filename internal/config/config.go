@@ -7,10 +7,16 @@ import (
 	"path/filepath"
 )
 
-const configDir = ".config/hey-cli"
+const configDirName = ".config/hey-cli"
 const configFile = "config.json"
 
 type Config struct {
+	BaseURL string `json:"base_url"`
+}
+
+// OldConfig represents the legacy config format with embedded credentials.
+// Used only for migration.
+type OldConfig struct {
 	BaseURL       string `json:"base_url"`
 	AccessToken   string `json:"access_token,omitempty"`
 	RefreshToken  string `json:"refresh_token,omitempty"`
@@ -21,12 +27,21 @@ type Config struct {
 	SessionCookie string `json:"session_cookie,omitempty"`
 }
 
+// ConfigDir returns the config directory path (~/.config/hey-cli).
+func ConfigDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, configDirName)
+}
+
 func configPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("could not determine home directory: %w", err)
 	}
-	return filepath.Join(home, configDir, configFile), nil
+	return filepath.Join(home, configDirName, configFile), nil
 }
 
 func Load() (*Config, error) {
@@ -55,6 +70,26 @@ func Load() (*Config, error) {
 	return &cfg, nil
 }
 
+// LoadOld reads the config file as the old format (with embedded credentials).
+// Used only during migration.
+func LoadOld() (*OldConfig, error) {
+	path, err := configPath()
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	var cfg OldConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
 func (c *Config) Save() error {
 	path, err := configPath()
 	if err != nil {
@@ -74,19 +109,4 @@ func (c *Config) Save() error {
 		return fmt.Errorf("could not write config: %w", err)
 	}
 	return nil
-}
-
-func (c *Config) Clear() error {
-	path, err := configPath()
-	if err != nil {
-		return err
-	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("could not remove config: %w", err)
-	}
-	return nil
-}
-
-func (c *Config) IsLoggedIn() bool {
-	return c.AccessToken != "" || c.SessionCookie != ""
 }
