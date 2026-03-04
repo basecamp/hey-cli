@@ -26,19 +26,6 @@ func newThreadsCommand() *topicCommand {
 	return threadsCommand
 }
 
-func newTopicAliasCommand() *topicCommand {
-	aliasCommand := &topicCommand{}
-	aliasCommand.cmd = &cobra.Command{
-		Use:    "topic <id>",
-		Short:  "Hidden alias for threads",
-		Hidden: true,
-		RunE:   aliasCommand.run,
-		Args:   usageExactArgs(1),
-	}
-
-	return aliasCommand
-}
-
 func (c *topicCommand) run(cmd *cobra.Command, args []string) error {
 	if err := requireAuth(); err != nil {
 		return err
