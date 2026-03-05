@@ -68,7 +68,7 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	body := map[string]interface{}{
+	body := map[string]any{
 		"subject": c.subject,
 		"body":    message,
 	}

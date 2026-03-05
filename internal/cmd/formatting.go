@@ -46,10 +46,7 @@ func (t *table) print() {
 				cellStyle = bold
 			}
 
-			pad := t.columnWidths[i] - runewidth.StringWidth(cell)
-			if pad < 0 {
-				pad = 0
-			}
+			pad := max(t.columnWidths[i]-runewidth.StringWidth(cell), 0)
 			fmt.Printf("%s%s  ", cellStyle.format(cell), strings.Repeat(" ", pad))
 		}
 		fmt.Println()
@@ -87,7 +84,7 @@ func printJSON(v any) error {
 }
 
 func printRawJSON(data []byte) error {
-	var v interface{}
+	var v any
 	if err := json.Unmarshal(data, &v); err != nil {
 		_, _ = os.Stdout.Write(data)
 		fmt.Println()
@@ -118,7 +115,7 @@ func readStdin() (string, error) {
 }
 
 func extractMutationInfo(data []byte) string {
-	var obj map[string]interface{}
+	var obj map[string]any
 	if err := json.Unmarshal(data, &obj); err != nil {
 		return ""
 	}

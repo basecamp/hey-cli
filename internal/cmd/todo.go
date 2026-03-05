@@ -123,7 +123,7 @@ func (c *todoAddCommand) run(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--title is required")
 	}
 
-	body := map[string]interface{}{"title": c.title}
+	body := map[string]any{"title": c.title}
 	if c.date != "" {
 		body["starts_at"] = c.date
 	}
