@@ -55,7 +55,14 @@ func runSkillInstall(cmd *cobra.Command, args []string) error {
 		return output.ErrAPI(0, fmt.Sprintf("creating symlink: %v", err))
 	}
 
-	fmt.Fprintln(cmd.OutOrStdout(), "Installed hey skill to ~/.agents/skills/hey/SKILL.md")
-	fmt.Fprintln(cmd.OutOrStdout(), "Symlinked ~/.claude/skills/hey → ../../.agents/skills/hey")
-	return nil
+	if writer.IsStyled() {
+		fmt.Fprintln(cmd.OutOrStdout(), "Installed hey skill to ~/.agents/skills/hey/SKILL.md")
+		fmt.Fprintln(cmd.OutOrStdout(), "Symlinked ~/.claude/skills/hey → ../../.agents/skills/hey")
+		return nil
+	}
+
+	return writer.OK(map[string]string{
+		"skill_path":   skillFile,
+		"symlink_path": symlinkPath,
+	}, output.WithSummary("hey skill installed"))
 }
