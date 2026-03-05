@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"os"
-
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/hey-cli/internal/output"
@@ -46,13 +44,13 @@ PowerShell:
 			root := cmd.Root()
 			switch args[0] {
 			case "bash":
-				return root.GenBashCompletion(os.Stdout)
+				return root.GenBashCompletion(cmd.OutOrStdout())
 			case "zsh":
-				return root.GenZshCompletion(os.Stdout)
+				return root.GenZshCompletion(cmd.OutOrStdout())
 			case "fish":
-				return root.GenFishCompletion(os.Stdout, true)
+				return root.GenFishCompletion(cmd.OutOrStdout(), true)
 			case "powershell":
-				return root.GenPowerShellCompletionWithDesc(os.Stdout)
+				return root.GenPowerShellCompletionWithDesc(cmd.OutOrStdout())
 			default:
 				return output.ErrUsage("unsupported shell: " + args[0])
 			}

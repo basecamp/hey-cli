@@ -56,7 +56,11 @@ func newRootCmd() *cobra.Command {
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			format := output.FormatFromFlags(jsonFlag, quietFlag, idsOnly, countFlag, markdownF, styledFlag, agentFlag)
-			writer = output.New(output.Options{Format: format})
+			writer = output.New(output.Options{
+				Format: format,
+				Stdout: cmd.OutOrStdout(),
+				Stderr: cmd.ErrOrStderr(),
+			})
 
 			var err error
 			cfg, err = config.Load()
@@ -107,6 +111,7 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().BoolVar(&markdownF, "markdown", false, "Output as Markdown")
 	root.PersistentFlags().BoolVar(&styledFlag, "styled", false, "Force styled output even when piped")
 	root.PersistentFlags().BoolVar(&agentFlag, "agent", false, "Agent mode (JSON envelope, no TTY formatting)")
+	root.PersistentFlags().MarkHidden("agent") //nolint:errcheck,gosec // flag exists
 	root.PersistentFlags().StringVar(&baseURL, "base-url", "", "Override server URL")
 	root.PersistentFlags().CountVarP(&verboseFlag, "verbose", "v", "Increase verbosity (request logging)")
 	root.PersistentFlags().BoolVar(&statsFlag, "stats", false, "Include request stats in response meta")
@@ -155,7 +160,9 @@ func Execute() {
 	if err != nil {
 		err = normalizeCobraError(err)
 		if writer == nil {
-			writer = output.New(output.Options{Format: output.FormatAuto})
+			writer = output.New(output.Options{
+				Format: output.FormatFromFlags(jsonFlag, quietFlag, idsOnly, countFlag, markdownF, styledFlag, agentFlag),
+			})
 		}
 		writer.Err(err)
 		os.Exit(output.ExitCodeFor(err))
@@ -271,14 +278,16 @@ func printAgentHelp(cmd *cobra.Command) {
 	}
 
 	var flags []map[string]string
-	cmd.Flags().VisitAll(func(f *pflag.Flag) {
+	addFlag := func(f *pflag.Flag) {
 		flags = append(flags, map[string]string{
 			"name":      f.Name,
 			"shorthand": f.Shorthand,
 			"usage":     f.Usage,
 			"default":   f.DefValue,
 		})
-	})
+	}
+	cmd.LocalFlags().VisitAll(addFlag)
+	cmd.InheritedFlags().VisitAll(addFlag)
 	if len(flags) > 0 {
 		info["flags"] = flags
 	}

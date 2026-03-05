@@ -48,7 +48,11 @@ curl -fsSL "$URL" -o "$TMPDIR/$ARCHIVE"
 # Verify checksum
 echo "Verifying checksum..."
 curl -fsSL "$CHECKSUM_URL" -o "$TMPDIR/checksums.txt"
-EXPECTED=$(grep "$ARCHIVE" "$TMPDIR/checksums.txt" | awk '{print $1}')
+EXPECTED=$(grep -F -- "$ARCHIVE" "$TMPDIR/checksums.txt" | awk '{print $1}')
+if [ -z "$EXPECTED" ]; then
+  echo "Checksum for $ARCHIVE not found in checksums.txt" >&2
+  exit 1
+fi
 if [ -n "$EXPECTED" ]; then
   if command -v sha256sum >/dev/null 2>&1; then
     ACTUAL=$(sha256sum "$TMPDIR/$ARCHIVE" | awk '{print $1}')

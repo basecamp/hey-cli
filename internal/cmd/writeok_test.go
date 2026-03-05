@@ -33,11 +33,13 @@ func TestBareHeyShowsHelpWithoutTTY(t *testing.T) {
 }
 
 func TestWriteOKIncludesStats(t *testing.T) {
+	oldWriter, oldClient, oldStats := writer, apiClient, statsFlag
+	defer func() { writer, apiClient, statsFlag = oldWriter, oldClient, oldStats }()
+
 	var buf bytes.Buffer
 	writer = output.New(output.Options{Format: output.FormatJSON, Stdout: &buf})
 	apiClient = client.New("https://example.com", nil)
 	statsFlag = true
-	defer func() { statsFlag = false }()
 
 	if err := writeOK(map[string]string{"hello": "world"}, output.WithSummary("test")); err != nil {
 		t.Fatalf("writeOK: %v", err)
@@ -63,6 +65,9 @@ func TestWriteOKIncludesStats(t *testing.T) {
 }
 
 func TestWriteOKOmitsStatsWhenFlagOff(t *testing.T) {
+	oldWriter, oldClient, oldStats := writer, apiClient, statsFlag
+	defer func() { writer, apiClient, statsFlag = oldWriter, oldClient, oldStats }()
+
 	var buf bytes.Buffer
 	writer = output.New(output.Options{Format: output.FormatJSON, Stdout: &buf})
 	apiClient = client.New("https://example.com", nil)
