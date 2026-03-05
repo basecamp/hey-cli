@@ -2,7 +2,8 @@ package tui
 
 import (
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/list"
@@ -52,11 +53,7 @@ func (m *calendarModel) setItems(cal models.Calendar, resp models.RecordingsResp
 	m.list.Title = cal.Name
 
 	// Sort type keys for stable ordering
-	keys := make([]string, 0, len(resp))
-	for k := range resp {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(resp))
 
 	var items []list.Item
 	for _, k := range keys {
