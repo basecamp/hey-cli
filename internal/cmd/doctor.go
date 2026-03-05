@@ -26,10 +26,8 @@ func newDoctorCommand() *cobra.Command {
 				allOK := true
 				for _, c := range checks {
 					icon := "ok"
-					if c["status"] == "warning" {
-						icon = "!!"
-						allOK = false
-					} else if c["status"] == "error" {
+					switch c["status"] {
+					case "warning", "error":
 						icon = "!!"
 						allOK = false
 					}

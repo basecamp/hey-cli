@@ -97,7 +97,7 @@ func (w *Writer) Err(err error) {
 	}
 	enc := json.NewEncoder(w.opts.Stderr)
 	enc.SetIndent("", "  ")
-	enc.Encode(resp)
+	_ = enc.Encode(resp)
 }
 
 func (w *Writer) writeJSON(data any, opts ...ResponseOption) error {
@@ -209,7 +209,7 @@ func (w *Writer) writeMarkdown(data any) error {
 
 func isTTY(w io.Writer) bool {
 	if f, ok := w.(*os.File); ok {
-		return term.IsTerminal(int(f.Fd()))
+		return term.IsTerminal(int(f.Fd())) //nolint:gosec // G115: fd fits in int on all supported platforms
 	}
 	return false
 }

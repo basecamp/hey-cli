@@ -80,11 +80,11 @@ func (s style) format(value string) string {
 	return "\033[" + string(s) + "m" + value + "\033[0m"
 }
 
-func truncate(s string, max int) string {
-	if runewidth.StringWidth(s) <= max {
+func truncate(s string, maxWidth int) string {
+	if runewidth.StringWidth(s) <= maxWidth {
 		return s
 	}
-	return runewidth.Truncate(s, max, "...")
+	return runewidth.Truncate(s, maxWidth, "...")
 }
 
 func stdinIsTerminal() bool {

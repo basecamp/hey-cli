@@ -164,7 +164,7 @@ func requireAuth() error {
 
 // migrateOldCredentials migrates credentials from the old config.json format
 // to the new credential store (keyring or credentials.json).
-func migrateOldCredentials(configDir string) {
+func migrateOldCredentials(_ string) {
 	old, err := config.LoadOld()
 	if err != nil {
 		return
@@ -286,5 +286,5 @@ func printAgentHelp(cmd *cobra.Command) {
 
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	enc.Encode(info) //nolint:errcheck
+	_ = enc.Encode(info)
 }

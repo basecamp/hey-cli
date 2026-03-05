@@ -18,7 +18,9 @@ func newCommandsCommand() *cobra.Command {
 				table := newTable(cmd.OutOrStdout())
 				table.addRow([]string{"Command", "Description"})
 				for _, entry := range catalog {
-					table.addRow([]string{entry["path"].(string), entry["short"].(string)})
+					path, _ := entry["path"].(string)
+					short, _ := entry["short"].(string)
+					table.addRow([]string{path, short})
 				}
 				table.print()
 				return nil

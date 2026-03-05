@@ -100,7 +100,8 @@ func (c *Client) readBody(resp *http.Response) ([]byte, error) {
 
 // doOnce performs a single HTTP request without retry. Used for non-idempotent
 // mutations (POST, PATCH, PUT, DELETE) where retrying could duplicate side effects.
-func (c *Client) doOnce(method, path string, body []byte, contentType, accept string) ([]byte, error) {
+func (c *Client) doOnce(method, path string, body []byte, contentType, accept string) ([]byte, error) { //nolint:unparam // accept varies by caller intent
+
 	var bodyReader io.Reader
 	if body != nil {
 		bodyReader = bytes.NewReader(body)
@@ -135,13 +136,13 @@ func (c *Client) doWithRetry(method, path string, body []byte, contentType, acce
 		}
 
 		data, err := c.readBody(resp)
-		resp.Body.Close()
+		resp.Body.Close() //nolint:gosec // G104: error from Close is non-actionable in retry loop
 		if err != nil {
 			oerr := apierr.AsError(err)
 			if oerr.Code == "rate_limit" && attempt < maxRetries-1 {
 				retryAfter := 0
 				if v := resp.Header.Get("Retry-After"); v != "" {
-					fmt.Sscanf(v, "%d", &retryAfter)
+					_, _ = fmt.Sscanf(v, "%d", &retryAfter)
 				}
 				if retryAfter > 0 {
 					c.SleepFunc(time.Duration(retryAfter) * time.Second)
@@ -164,8 +165,8 @@ func (c *Client) doWithRetry(method, path string, body []byte, contentType, acce
 }
 
 func (c *Client) backoff(attempt int) {
-	base := time.Duration(1<<uint(attempt)) * time.Second
-	jitter := time.Duration(rand.Int64N(int64(base / 2)))
+	base := time.Duration(1<<uint(min(attempt, 30))) * time.Second //nolint:gosec // G115: attempt is bounded by maxRetries
+	jitter := time.Duration(rand.Int64N(int64(base / 2)))          //nolint:gosec // G404: jitter does not need crypto-grade randomness
 	wait := base + jitter
 	if c.Logger != nil {
 		fmt.Fprintf(c.Logger, "> retry #%d after %dms\n", attempt+1, wait.Milliseconds())
@@ -184,7 +185,7 @@ func responseError(resp *http.Response, data []byte) *apierr.Error {
 	case 429:
 		retryAfter := 0
 		if v := resp.Header.Get("Retry-After"); v != "" {
-			fmt.Sscanf(v, "%d", &retryAfter)
+			_, _ = fmt.Sscanf(v, "%d", &retryAfter)
 		}
 		return apierr.ErrRateLimit(retryAfter)
 	default:
