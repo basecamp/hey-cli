@@ -10,10 +10,11 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
-	"github.com/basecamp/hey-cli/internal/auth"
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/auth"
 	"github.com/basecamp/hey-cli/internal/version"
 )
 
@@ -23,6 +24,11 @@ type Client struct {
 	BaseURL    string
 	AuthMgr    *auth.Manager
 	HTTPClient *http.Client
+	Logger     io.Writer
+	SleepFunc  func(time.Duration)
+
+	requestCount atomic.Int64
+	totalLatency atomic.Int64 // nanoseconds
 }
 
 func New(baseURL string, authMgr *auth.Manager) *Client {
@@ -32,8 +38,12 @@ func New(baseURL string, authMgr *auth.Manager) *Client {
 		HTTPClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		SleepFunc: time.Sleep,
 	}
 }
+
+func (c *Client) RequestCount() int           { return int(c.requestCount.Load()) }
+func (c *Client) TotalLatency() time.Duration { return time.Duration(c.totalLatency.Load()) }
 
 func (c *Client) doRequestAccept(method, path string, body io.Reader, contentType, accept string) (*http.Response, error) {
 	base := strings.TrimRight(c.BaseURL, "/")
@@ -55,9 +65,23 @@ func (c *Client) doRequestAccept(method, path string, body io.Reader, contentTyp
 		req.Header.Set("Content-Type", contentType)
 	}
 
+	if c.Logger != nil {
+		fmt.Fprintf(c.Logger, "> %s %s\n", method, reqURL)
+	}
+
+	start := time.Now()
 	resp, err := c.HTTPClient.Do(req)
+	elapsed := time.Since(start)
+
+	c.requestCount.Add(1)
+	c.totalLatency.Add(int64(elapsed))
+
 	if err != nil {
 		return nil, apierr.ErrNetwork(err)
+	}
+
+	if c.Logger != nil {
+		fmt.Fprintf(c.Logger, "< %d %s (%dms)\n", resp.StatusCode, http.StatusText(resp.StatusCode), elapsed.Milliseconds())
 	}
 
 	return resp, nil
@@ -106,7 +130,7 @@ func (c *Client) doWithRetry(method, path string, body []byte, contentType, acce
 				return nil, err
 			}
 			lastErr = err
-			backoff(attempt)
+			c.backoff(attempt)
 			continue
 		}
 
@@ -120,9 +144,9 @@ func (c *Client) doWithRetry(method, path string, body []byte, contentType, acce
 					fmt.Sscanf(v, "%d", &retryAfter)
 				}
 				if retryAfter > 0 {
-					time.Sleep(time.Duration(retryAfter) * time.Second)
+					c.SleepFunc(time.Duration(retryAfter) * time.Second)
 				} else {
-					backoff(attempt)
+					c.backoff(attempt)
 				}
 				lastErr = err
 				continue
@@ -131,7 +155,7 @@ func (c *Client) doWithRetry(method, path string, body []byte, contentType, acce
 				return nil, err
 			}
 			lastErr = err
-			backoff(attempt)
+			c.backoff(attempt)
 			continue
 		}
 		return data, nil
@@ -139,10 +163,14 @@ func (c *Client) doWithRetry(method, path string, body []byte, contentType, acce
 	return nil, lastErr
 }
 
-func backoff(attempt int) {
+func (c *Client) backoff(attempt int) {
 	base := time.Duration(1<<uint(attempt)) * time.Second
 	jitter := time.Duration(rand.Int64N(int64(base / 2)))
-	time.Sleep(base + jitter)
+	wait := base + jitter
+	if c.Logger != nil {
+		fmt.Fprintf(c.Logger, "> retry #%d after %dms\n", attempt+1, wait.Milliseconds())
+	}
+	c.SleepFunc(wait)
 }
 
 func responseError(resp *http.Response, data []byte) *apierr.Error {

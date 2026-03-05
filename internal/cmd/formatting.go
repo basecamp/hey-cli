@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/basecamp/hey-cli/internal/output"
 	"github.com/mattn/go-runewidth"
 	"golang.org/x/term"
 )
@@ -19,12 +20,14 @@ func init() {
 }
 
 type table struct {
+	w            io.Writer
 	columnWidths map[int]int
 	rows         [][]string
 }
 
-func newTable() *table {
+func newTable(w io.Writer) *table {
 	return &table{
+		w:            w,
 		columnWidths: map[int]int{},
 		rows:         [][]string{},
 	}
@@ -47,9 +50,9 @@ func (t *table) print() {
 			}
 
 			pad := max(t.columnWidths[i]-runewidth.StringWidth(cell), 0)
-			fmt.Printf("%s%s  ", cellStyle.format(cell), strings.Repeat(" ", pad))
+			fmt.Fprintf(t.w, "%s%s  ", cellStyle.format(cell), strings.Repeat(" ", pad))
 		}
-		fmt.Println()
+		fmt.Fprintln(t.w)
 	}
 }
 
@@ -91,7 +94,7 @@ func stdinIsTerminal() bool {
 func readStdin() (string, error) {
 	data, err := io.ReadAll(os.Stdin)
 	if err != nil {
-		return "", fmt.Errorf("could not read from stdin: %w", err)
+		return "", output.ErrUsage(fmt.Sprintf("could not read from stdin: %v", err))
 	}
 	return strings.TrimSpace(string(data)), nil
 }

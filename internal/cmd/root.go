@@ -20,19 +20,21 @@ import (
 )
 
 var (
-	jsonFlag   bool
-	htmlOutput bool
-	quietFlag  bool
-	idsOnly    bool
-	countFlag  bool
-	markdownF  bool
-	styledFlag bool
-	agentFlag  bool
-	baseURL    string
-	cfg        *config.Config
-	authMgr    *auth.Manager
-	apiClient  *client.Client
-	writer     *output.Writer
+	jsonFlag    bool
+	htmlOutput  bool
+	quietFlag   bool
+	idsOnly     bool
+	countFlag   bool
+	markdownF   bool
+	styledFlag  bool
+	agentFlag   bool
+	statsFlag   bool
+	verboseFlag int
+	baseURL     string
+	cfg         *config.Config
+	authMgr     *auth.Manager
+	apiClient   *client.Client
+	writer      *output.Writer
 )
 
 func newRootCmd() *cobra.Command {
@@ -66,10 +68,18 @@ func newRootCmd() *cobra.Command {
 				}
 			}
 
+			if os.Getenv("HEY_DEBUG") != "" && verboseFlag == 0 {
+				verboseFlag = 1
+			}
+
 			configDir := config.ConfigDir()
 			httpClient := &http.Client{Timeout: 30 * time.Second}
 			authMgr = auth.NewManager(cfg.BaseURL, httpClient, configDir)
 			apiClient = client.New(cfg.BaseURL, authMgr)
+
+			if verboseFlag > 0 {
+				apiClient.Logger = os.Stderr
+			}
 
 			migrateOldCredentials(configDir)
 
@@ -91,6 +101,8 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().BoolVar(&styledFlag, "styled", false, "Force styled output even when piped")
 	root.PersistentFlags().BoolVar(&agentFlag, "agent", false, "Agent mode (JSON envelope, no TTY formatting)")
 	root.PersistentFlags().StringVar(&baseURL, "base-url", "", "Override server URL")
+	root.PersistentFlags().CountVarP(&verboseFlag, "verbose", "v", "Increase verbosity (request logging)")
+	root.PersistentFlags().BoolVar(&statsFlag, "stats", false, "Include request stats in response meta")
 
 	root.Version = version.Version
 	root.SetVersionTemplate("hey version {{.Version}}\n")
@@ -118,6 +130,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newHabitCommand().cmd)
 	root.AddCommand(newTimetrackCommand().cmd)
 	root.AddCommand(newJournalCommand().cmd)
+	root.AddCommand(newSetupCommand())
 	root.AddCommand(newTuiCommand().cmd)
 	root.AddCommand(newSkillCommand().cmd)
 	root.AddCommand(newCommandsCommand())
@@ -221,6 +234,16 @@ func isCobraParseError(err error) bool {
 	return false
 }
 
+func statsOption() output.ResponseOption {
+	if !statsFlag {
+		return func(*output.Response) {}
+	}
+	return output.WithMeta("stats", map[string]any{
+		"requests":   apiClient.RequestCount(),
+		"latency_ms": apiClient.TotalLatency().Milliseconds(),
+	})
+}
+
 func printAgentHelp(cmd *cobra.Command) {
 	info := map[string]any{
 		"name":  cmd.Name(),
@@ -229,6 +252,9 @@ func printAgentHelp(cmd *cobra.Command) {
 	}
 	if cmd.Long != "" {
 		info["long"] = cmd.Long
+	}
+	if notes, ok := cmd.Annotations["agent_notes"]; ok {
+		info["agent_notes"] = notes
 	}
 
 	var flags []map[string]string
