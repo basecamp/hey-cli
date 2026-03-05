@@ -239,6 +239,9 @@ func validateBaseURL(base string) error {
 	if err != nil {
 		return apierr.ErrUsage(fmt.Sprintf("invalid base URL %q: %v", base, err))
 	}
+	if u.Scheme == "" || u.Host == "" {
+		return apierr.ErrUsage(fmt.Sprintf("base URL must be an absolute URL with scheme and host (got %q)", base))
+	}
 	// Enforce HTTPS for non-localhost
 	host := u.Hostname()
 	if u.Scheme != "https" && host != "localhost" && host != "127.0.0.1" && host != "::1" {

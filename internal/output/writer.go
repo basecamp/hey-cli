@@ -219,13 +219,15 @@ func toSlice(data any) ([]any, bool) {
 	case []any:
 		return v, true
 	default:
-		// Use JSON round-trip for typed slices
+		// Use JSON round-trip for typed slices; UseNumber preserves integer precision
 		b, err := json.Marshal(data)
 		if err != nil {
 			return nil, false
 		}
+		dec := json.NewDecoder(bytes.NewReader(b))
+		dec.UseNumber()
 		var arr []any
-		if err := json.Unmarshal(b, &arr); err != nil {
+		if err := dec.Decode(&arr); err != nil {
 			return nil, false
 		}
 		return arr, true
@@ -240,8 +242,10 @@ func toMap(item any) map[string]any {
 	if err != nil {
 		return nil
 	}
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
 	var m map[string]any
-	if err := json.Unmarshal(b, &m); err != nil {
+	if err := dec.Decode(&m); err != nil {
 		return nil
 	}
 	return m
@@ -263,7 +267,9 @@ func extractID(item any) string {
 		if err != nil {
 			return ""
 		}
-		if err := json.Unmarshal(b, &m); err != nil {
+		dec := json.NewDecoder(bytes.NewReader(b))
+		dec.UseNumber()
+		if err := dec.Decode(&m); err != nil {
 			return ""
 		}
 	}
