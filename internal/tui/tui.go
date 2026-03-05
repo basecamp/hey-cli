@@ -200,7 +200,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case journalDetailMsg:
 		m.loading = false
+		if len(msg.images) == 0 {
+			m.detail.setContent(msg.title, msg.body)
+			m.state = viewJournalDetail
+			return m, nil
+		}
 		var body strings.Builder
+		body.Grow(len(msg.body) + len(msg.images)*128)
 		body.WriteString(msg.body)
 		var uploadCmds []tea.Cmd
 		for i, imgData := range msg.images {
@@ -212,10 +218,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.detail.setContent(msg.title, body.String())
 		m.state = viewJournalDetail
-		if len(uploadCmds) > 0 {
-			return m, tea.Batch(uploadCmds...)
-		}
-		return m, nil
+		return m, tea.Batch(uploadCmds...)
 
 	case recordingDetailMsg:
 		m.loading = false
