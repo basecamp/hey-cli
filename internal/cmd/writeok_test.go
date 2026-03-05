@@ -3,11 +3,31 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/basecamp/hey-cli/internal/client"
 	"github.com/basecamp/hey-cli/internal/output"
 )
+
+func TestBareHeyShowsHelpWithoutTTY(t *testing.T) {
+	root := newRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetArgs([]string{})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("bare hey: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "Usage:") {
+		t.Errorf("expected help output with Usage:, got:\n%s", out)
+	}
+	if !strings.Contains(out, "hey [command]") {
+		t.Errorf("expected help to mention 'hey [command]', got:\n%s", out)
+	}
+}
 
 func TestWriteOKIncludesStats(t *testing.T) {
 	var buf bytes.Buffer

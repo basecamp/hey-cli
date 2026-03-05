@@ -16,6 +16,7 @@ import (
 	"github.com/basecamp/hey-cli/internal/client"
 	"github.com/basecamp/hey-cli/internal/config"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/tui"
 	"github.com/basecamp/hey-cli/internal/version"
 )
 
@@ -86,7 +87,13 @@ func newRootCmd() *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return cmd.Help()
+			if !stdinIsTerminal() {
+				return cmd.Help()
+			}
+			if err := requireAuth(); err != nil {
+				return err
+			}
+			return tui.Run(apiClient)
 		},
 	}
 
