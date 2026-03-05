@@ -102,7 +102,7 @@ func (c *journalListCommand) run(cmd *cobra.Command, args []string) error {
 			},
 			output.Breadcrumb{
 				Action:      "write",
-				Command:     "hey journal write --content '...'",
+				Command:     "hey journal write '...'",
 				Description: "Write a journal entry",
 			},
 		),
@@ -166,7 +166,7 @@ func (c *journalReadCommand) run(cmd *cobra.Command, args []string) error {
 		output.WithSummary(fmt.Sprintf("Journal entry for %s", date)),
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "write",
-			Command:     fmt.Sprintf("hey journal write %s --content '...'", date),
+			Command:     fmt.Sprintf("hey journal write %s '...'", date),
 			Description: "Edit this journal entry",
 		}),
 	)
@@ -182,16 +182,17 @@ type journalWriteCommand struct {
 func newJournalWriteCommand() *journalWriteCommand {
 	journalWriteCommand := &journalWriteCommand{}
 	journalWriteCommand.cmd = &cobra.Command{
-		Use:   "write [date]",
+		Use:   "write [date] [content]",
 		Short: "Write or edit a journal entry (default: today)",
-		Example: `  hey journal write --content "Today was great"
-  hey journal write 2024-01-15 --content "Retrospective"
+		Example: `  hey journal write "Today was great"
+  hey journal write 2024-01-15 "Retrospective"
+  hey journal write -c "Today was great"
   echo "Journal content" | hey journal write`,
 		RunE: journalWriteCommand.run,
-		Args: cobra.MaximumNArgs(1),
+		Args: cobra.MaximumNArgs(2),
 	}
 
-	journalWriteCommand.cmd.Flags().StringVar(&journalWriteCommand.content, "content", "", "Journal content (or opens $EDITOR)")
+	journalWriteCommand.cmd.Flags().StringVarP(&journalWriteCommand.content, "content", "c", "", "Journal content (or opens $EDITOR)")
 
 	return journalWriteCommand
 }
@@ -202,11 +203,30 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	date := time.Now().Format("2006-01-02")
-	if len(args) > 0 {
-		date = args[0]
-	}
-
 	content := c.content
+
+	switch len(args) {
+	case 2:
+		if content != "" {
+			return output.ErrUsage("--content and positional content are mutually exclusive")
+		}
+		if !isDateArg(args[0]) {
+			return output.ErrUsageHint(
+				"first argument must be a date (YYYY-MM-DD) when two positional arguments are given",
+				"hey journal write 2024-01-15 \"Content\"  or  hey journal write \"Content\"")
+		}
+		date = args[0]
+		content = args[1]
+	case 1:
+		if isDateArg(args[0]) {
+			date = args[0]
+		} else {
+			if content != "" {
+				return output.ErrUsage("--content and positional content are mutually exclusive")
+			}
+			content = args[0]
+		}
+	}
 	if content == "" {
 		if !stdinIsTerminal() {
 			var err error

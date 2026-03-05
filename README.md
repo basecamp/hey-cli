@@ -86,7 +86,7 @@ hey recordings 1 --starts-on 2026-01-01 --ends-on 2026-01-31  # list events in a
 
 ```bash
 hey todo list                      # list todos
-hey todo add --title "Buy milk"    # create a todo
+hey todo add "Buy milk"            # create a todo
 hey todo complete 1                # mark done
 hey todo uncomplete 1              # mark undone
 hey todo delete 1                  # delete
@@ -113,7 +113,7 @@ hey timetrack list                 # list all tracks
 ```bash
 hey journal list                   # list entries
 hey journal read                   # read today's entry (or pass YYYY-MM-DD)
-hey journal write --content "..."  # write today's entry (or omit --content for $EDITOR)
+hey journal write "..."            # write today's entry (or omit content for $EDITOR)
 ```
 
 ## Agent Skill

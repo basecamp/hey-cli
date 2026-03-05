@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/basecamp/hey-cli/internal/output"
 	"github.com/mattn/go-runewidth"
@@ -101,6 +102,11 @@ func readStdin() (string, error) {
 		return "", output.ErrUsage(fmt.Sprintf("could not read from stdin: %v", err))
 	}
 	return strings.TrimSpace(string(data)), nil
+}
+
+func isDateArg(s string) bool {
+	_, err := time.Parse("2006-01-02", s)
+	return err == nil
 }
 
 func extractMutationInfo(data []byte) string {
