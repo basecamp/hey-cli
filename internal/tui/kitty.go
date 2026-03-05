@@ -44,10 +44,7 @@ func kittyUploadAndPlace(data []byte, id, cols, rows int) string {
 
 	// Upload image data: a=t (transmit only, no display), q=2 (suppress response)
 	for i := 0; i < len(encoded); i += chunkSize {
-		end := i + chunkSize
-		if end > len(encoded) {
-			end = len(encoded)
-		}
+		end := min(i+chunkSize, len(encoded))
 		chunk := encoded[i:end]
 		more := 1
 		if end == len(encoded) {
@@ -75,12 +72,8 @@ func renderImagePlaceholder(id, cols, rows int) string {
 	}
 
 	// Cap to diacritics table size
-	if cols > len(diacritics) {
-		cols = len(diacritics)
-	}
-	if rows > len(diacritics) {
-		rows = len(diacritics)
-	}
+	cols = min(cols, len(diacritics))
+	rows = min(rows, len(diacritics))
 
 	var b strings.Builder
 
@@ -118,17 +111,9 @@ func imageDimensions(data []byte, maxCols int) (cols, rows int) {
 		return maxCols, 10
 	}
 
-	cols = maxCols
-	if cols > 60 {
-		cols = 60
-	}
+	cols = min(maxCols, 60)
 	// Divide by 2 because terminal cells are ~2x taller than wide
-	rows = int(math.Round(float64(cols) * float64(cfg.Height) / float64(cfg.Width) / 2.0))
-	if rows < 1 {
-		rows = 1
-	}
-	if rows > 40 {
-		rows = 40
-	}
+	rows = max(int(math.Round(float64(cols)*float64(cfg.Height)/float64(cfg.Width)/2.0)), 1)
+	rows = min(rows, 40)
 	return cols, rows
 }

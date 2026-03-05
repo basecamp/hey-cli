@@ -106,7 +106,7 @@ func Execute() {
 	err := rootCmd.Execute()
 	if err != nil {
 		if jsonOutput {
-			obj := map[string]interface{}{"error": err.Error()}
+			obj := map[string]any{"error": err.Error()}
 			var apiErr *client.APIError
 			if errors.As(err, &apiErr) {
 				obj["error"] = apiErr.Message

@@ -71,7 +71,7 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	body := map[string]interface{}{"body": message}
+	body := map[string]any{"body": message}
 
 	data, err := apiClient.ReplyToEntry(fmt.Sprintf("%d", latestEntryID), body)
 	if err != nil {

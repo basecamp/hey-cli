@@ -197,7 +197,7 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	body := map[string]interface{}{"body": content}
+	body := map[string]any{"body": content}
 
 	data, err := apiClient.UpdateJournalEntry(date, body)
 	if err != nil {

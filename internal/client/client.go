@@ -112,7 +112,7 @@ func (c *Client) GetHTML(path string) ([]byte, error) {
 	return c.readBody(resp)
 }
 
-func (c *Client) GetJSON(path string, v interface{}) error {
+func (c *Client) GetJSON(path string, v any) error {
 	data, err := c.Get(path)
 	if err != nil {
 		return err
@@ -120,7 +120,7 @@ func (c *Client) GetJSON(path string, v interface{}) error {
 	return json.Unmarshal(data, v)
 }
 
-func (c *Client) PostJSON(path string, body interface{}) ([]byte, error) {
+func (c *Client) PostJSON(path string, body any) ([]byte, error) {
 	var buf bytes.Buffer
 	if body != nil {
 		if err := json.NewEncoder(&buf).Encode(body); err != nil {
@@ -145,7 +145,7 @@ func (c *Client) PostForm(path string, values url.Values) ([]byte, error) {
 	return c.readBody(resp)
 }
 
-func (c *Client) PatchJSON(path string, body interface{}) ([]byte, error) {
+func (c *Client) PatchJSON(path string, body any) ([]byte, error) {
 	var buf bytes.Buffer
 	if body != nil {
 		if err := json.NewEncoder(&buf).Encode(body); err != nil {
@@ -161,7 +161,7 @@ func (c *Client) PatchJSON(path string, body interface{}) ([]byte, error) {
 	return c.readBody(resp)
 }
 
-func (c *Client) PutJSON(path string, body interface{}) ([]byte, error) {
+func (c *Client) PutJSON(path string, body any) ([]byte, error) {
 	var buf bytes.Buffer
 	if body != nil {
 		if err := json.NewEncoder(&buf).Encode(body); err != nil {

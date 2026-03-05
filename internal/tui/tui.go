@@ -200,16 +200,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case journalDetailMsg:
 		m.loading = false
-		body := msg.body
+		var body strings.Builder
+		body.WriteString(msg.body)
 		var uploadCmds []tea.Cmd
 		for i, imgData := range msg.images {
 			imageID := i + 1
 			cols, rows := imageDimensions(imgData, m.width-4)
-			body += "\n\n" + renderImagePlaceholder(imageID, cols, rows)
+			body.WriteString("\n\n" + renderImagePlaceholder(imageID, cols, rows))
 			seq := kittyUploadAndPlace(imgData, imageID, cols, rows)
 			uploadCmds = append(uploadCmds, tea.Raw(seq))
 		}
-		m.detail.setContent(msg.title, body)
+		m.detail.setContent(msg.title, body.String())
 		m.state = viewJournalDetail
 		if len(uploadCmds) > 0 {
 			return m, tea.Batch(uploadCmds...)
