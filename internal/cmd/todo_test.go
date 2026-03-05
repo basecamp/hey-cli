@@ -38,6 +38,10 @@ func runTodoAdd(t *testing.T, server *httptest.Server, args ...string) (output.R
 	t.Setenv("HEY_TOKEN", "test-token")
 	t.Setenv("HEY_NO_KEYRING", "1")
 	t.Setenv("HEY_BASE_URL", "")
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	t.Setenv("XDG_STATE_HOME", tmpDir)
+	t.Setenv("XDG_CACHE_HOME", tmpDir)
 
 	root := newRootCmd()
 	var buf bytes.Buffer

@@ -42,6 +42,10 @@ func runJournalWrite(t *testing.T, server *httptest.Server, args ...string) (out
 	t.Setenv("HEY_TOKEN", "test-token")
 	t.Setenv("HEY_NO_KEYRING", "1")
 	t.Setenv("HEY_BASE_URL", "")
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	t.Setenv("XDG_STATE_HOME", tmpDir)
+	t.Setenv("XDG_CACHE_HOME", tmpDir)
 
 	root := newRootCmd()
 	var buf bytes.Buffer
@@ -124,6 +128,19 @@ func TestJournalWriteConflictFlagAndPositional(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "mutually exclusive") {
 		t.Errorf("error = %q, want to contain %q", err.Error(), "mutually exclusive")
+	}
+}
+
+func TestJournalWriteTwoPositionalsInvalidDate(t *testing.T) {
+	server := journalServer(t)
+	defer server.Close()
+
+	_, err := runJournalWrite(t, server, "not-a-date", "Content")
+	if err == nil {
+		t.Fatal("expected error for invalid date in 2-arg form")
+	}
+	if !strings.Contains(err.Error(), "YYYY-MM-DD") {
+		t.Errorf("error = %q, want to mention YYYY-MM-DD", err.Error())
 	}
 }
 

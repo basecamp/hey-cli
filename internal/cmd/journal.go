@@ -210,6 +210,11 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 		if content != "" {
 			return output.ErrUsage("--content and positional content are mutually exclusive")
 		}
+		if !isDateArg(args[0]) {
+			return output.ErrUsageHint(
+				"first argument must be a date (YYYY-MM-DD) when two positional arguments are given",
+				"hey journal write 2024-01-15 \"Content\"  or  hey journal write \"Content\"")
+		}
 		date = args[0]
 		content = args[1]
 	case 1:
