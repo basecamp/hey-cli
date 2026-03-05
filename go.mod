@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	charm.land/bubbles/v2 v2.0.0
-	charm.land/bubbletea/v2 v2.0.0
+	charm.land/bubbletea/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.0
 	github.com/mattn/go-runewidth v0.0.20
 	github.com/spf13/cobra v1.10.2
