@@ -33,7 +33,7 @@ hey compose
 hey compose --message
 hey compose --subject
 hey compose --to
-hey compose --topic-id
+hey compose --thread-id
 hey config
 hey config show
 hey doctor
@@ -79,5 +79,5 @@ hey todo list
 hey todo list --all
 hey todo list --limit
 hey todo uncomplete
-hey topic
+hey threads
 hey tui

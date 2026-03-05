@@ -7,10 +7,24 @@ import (
 )
 
 func (c *Client) ListTodos() ([]models.Todo, error) {
-	var todos []models.Todo
-	if err := c.GetJSON("/calendar/todos.json", &todos); err != nil {
+	recordingsByType, err := c.listPersonalCalendarRecordings()
+	if err != nil {
 		return nil, err
 	}
+
+	recordings := recordingsByType["Calendar::Todo"]
+	todos := make([]models.Todo, 0, len(recordings))
+	for _, recording := range recordings {
+		todos = append(todos, models.Todo{
+			ID:          recording.ID,
+			Title:       recording.Title,
+			StartsAt:    recording.StartsAt,
+			CompletedAt: recording.CompletedAt,
+			CreatedAt:   recording.CreatedAt,
+			UpdatedAt:   recording.UpdatedAt,
+		})
+	}
+
 	return todos, nil
 }
 

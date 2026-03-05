@@ -132,7 +132,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newAuthCommand().cmd)
 	root.AddCommand(newBoxesCommand().cmd)
 	root.AddCommand(newBoxCommand().cmd)
-	root.AddCommand(newTopicCommand().cmd)
+	root.AddCommand(newThreadsCommand().cmd)
 	root.AddCommand(newReplyCommand().cmd)
 	root.AddCommand(newComposeCommand().cmd)
 	root.AddCommand(newDraftsCommand().cmd)
@@ -163,6 +163,10 @@ func Execute() {
 			writer = output.New(output.Options{
 				Format: output.FormatFromFlags(jsonFlag, quietFlag, idsOnly, countFlag, markdownF, styledFlag, agentFlag),
 			})
+		}
+		if writer.IsStyled() && strings.HasPrefix(err.Error(), "Usage:") {
+			fmt.Fprintln(os.Stderr, err.Error())
+			os.Exit(output.ExitCodeFor(err))
 		}
 		writer.Err(err)
 		os.Exit(output.ExitCodeFor(err))

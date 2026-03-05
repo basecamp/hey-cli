@@ -202,7 +202,7 @@ func newTodoCompleteCommand() *todoCompleteCommand {
 		Short:   "Mark a todo as complete",
 		Example: `  hey todo complete 456`,
 		RunE:    todoCompleteCommand.run,
-		Args:    cobra.ExactArgs(1),
+		Args:    usageExactOneArg(),
 	}
 
 	return todoCompleteCommand
@@ -243,7 +243,7 @@ func newTodoUncompleteCommand() *todoUncompleteCommand {
 		Short:   "Mark a todo as incomplete",
 		Example: `  hey todo uncomplete 456`,
 		RunE:    todoUncompleteCommand.run,
-		Args:    cobra.ExactArgs(1),
+		Args:    usageExactOneArg(),
 	}
 
 	return todoUncompleteCommand
@@ -284,7 +284,7 @@ func newTodoDeleteCommand() *todoDeleteCommand {
 		Short:   "Delete a todo",
 		Example: `  hey todo delete 456`,
 		RunE:    todoDeleteCommand.run,
-		Args:    cobra.ExactArgs(1),
+		Args:    usageExactOneArg(),
 	}
 
 	return todoDeleteCommand

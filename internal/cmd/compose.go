@@ -11,11 +11,11 @@ import (
 )
 
 type composeCommand struct {
-	cmd     *cobra.Command
-	to      string
-	subject string
-	message string
-	topicID string
+	cmd      *cobra.Command
+	to       string
+	subject  string
+	message  string
+	threadID string
 }
 
 func newComposeCommand() *composeCommand {
@@ -24,10 +24,10 @@ func newComposeCommand() *composeCommand {
 		Use:   "compose",
 		Short: "Compose a new message",
 		Annotations: map[string]string{
-			"agent_notes": "Creates a new email. Requires --subject. Use --to for new threads or --topic-id for existing ones.",
+			"agent_notes": "Creates a new email. Requires --subject. Use --to for new threads or --thread-id for existing ones.",
 		},
 		Example: `  hey compose --to alice@hey.com --subject "Hello" -m "Hi there"
-  hey compose --subject "Update" --topic-id 12345 -m "Thread reply"
+  hey compose --subject "Update" --thread-id 12345 -m "Thread reply"
   echo "Long message" | hey compose --to bob@hey.com --subject "Report"`,
 		RunE: composeCommand.run,
 	}
@@ -35,7 +35,7 @@ func newComposeCommand() *composeCommand {
 	composeCommand.cmd.Flags().StringVar(&composeCommand.to, "to", "", "Recipient email address(es)")
 	composeCommand.cmd.Flags().StringVar(&composeCommand.subject, "subject", "", "Message subject (required)")
 	composeCommand.cmd.Flags().StringVarP(&composeCommand.message, "message", "m", "", "Message body (or opens $EDITOR)")
-	composeCommand.cmd.Flags().StringVar(&composeCommand.topicID, "topic-id", "", "Topic ID to post message to")
+	composeCommand.cmd.Flags().StringVar(&composeCommand.threadID, "thread-id", "", "Thread ID to post message to")
 
 	return composeCommand
 }
@@ -80,16 +80,16 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		body["to"] = c.to
 	}
 
-	var topicID *int
-	if c.topicID != "" {
-		id, err := strconv.Atoi(c.topicID)
+	var threadID *int
+	if c.threadID != "" {
+		id, err := strconv.Atoi(c.threadID)
 		if err != nil {
-			return output.ErrUsage(fmt.Sprintf("invalid topic ID: %s", c.topicID))
+			return output.ErrUsage(fmt.Sprintf("invalid thread ID: %s", c.threadID))
 		}
-		topicID = &id
+		threadID = &id
 	}
 
-	data, err := apiClient.CreateMessage(topicID, body)
+	data, err := apiClient.CreateMessage(threadID, body)
 	if err != nil {
 		return err
 	}

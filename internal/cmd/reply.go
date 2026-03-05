@@ -18,15 +18,15 @@ type replyCommand struct {
 func newReplyCommand() *replyCommand {
 	replyCommand := &replyCommand{}
 	replyCommand.cmd = &cobra.Command{
-		Use:   "reply <topic-id>",
-		Short: "Reply to an email topic",
+		Use:   "reply <thread-id>",
+		Short: "Reply to a thread",
 		Annotations: map[string]string{
-			"agent_notes": "Replies to the latest entry in a topic. Accepts message via -m, stdin, or $EDITOR.",
+			"agent_notes": "Replies to the latest entry in a thread. Accepts message via -m, stdin, or $EDITOR.",
 		},
 		Example: `  hey reply 12345 -m "Thanks!"
   echo "Detailed reply" | hey reply 12345`,
 		RunE: replyCommand.run,
-		Args: cobra.ExactArgs(1),
+		Args: usageExactOneArg(),
 	}
 
 	replyCommand.cmd.Flags().StringVarP(&replyCommand.message, "message", "m", "", "Reply message (or opens $EDITOR)")
@@ -39,17 +39,17 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	topicID, err := strconv.Atoi(args[0])
+	threadID, err := strconv.Atoi(args[0])
 	if err != nil {
-		return output.ErrUsage(fmt.Sprintf("invalid topic ID: %s", args[0]))
+		return output.ErrUsage(fmt.Sprintf("invalid thread ID: %s", args[0]))
 	}
 
-	entries, err := apiClient.GetTopicEntries(topicID)
+	entries, err := apiClient.GetTopicEntries(threadID)
 	if err != nil {
 		return err
 	}
 	if len(entries) == 0 {
-		return output.ErrNotFound("entries for topic", args[0])
+		return output.ErrNotFound("entries for thread", args[0])
 	}
 
 	latestEntryID := entries[len(entries)-1].ID
@@ -95,7 +95,7 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 		output.WithSummary("Reply sent"),
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "view",
-			Command:     fmt.Sprintf("hey topic %d", topicID),
+			Command:     fmt.Sprintf("hey threads %d", threadID),
 			Description: "View the full thread",
 		}),
 	)

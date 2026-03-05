@@ -14,21 +14,21 @@ type topicCommand struct {
 	cmd *cobra.Command
 }
 
-func newTopicCommand() *topicCommand {
-	topicCommand := &topicCommand{}
-	topicCommand.cmd = &cobra.Command{
-		Use:   "topic <id>",
+func newThreadsCommand() *topicCommand {
+	threadsCommand := &topicCommand{}
+	threadsCommand.cmd = &cobra.Command{
+		Use:   "threads <id>",
 		Short: "Read an email thread",
 		Annotations: map[string]string{
-			"agent_notes": "Returns thread with all entries. Use entry IDs with hey reply.",
+			"agent_notes": "Returns a thread with all entries. Use entry IDs with hey reply.",
 		},
-		Example: `  hey topic 12345
-  hey topic 12345 --json`,
-		RunE: topicCommand.run,
-		Args: cobra.ExactArgs(1),
+		Example: `  hey threads 12345
+  hey threads 12345 --json`,
+		RunE: threadsCommand.run,
+		Args: usageExactOneArg(),
 	}
 
-	return topicCommand
+	return threadsCommand
 }
 
 func (c *topicCommand) run(cmd *cobra.Command, args []string) error {
@@ -36,12 +36,12 @@ func (c *topicCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	topicID, err := strconv.Atoi(args[0])
+	threadID, err := strconv.Atoi(args[0])
 	if err != nil {
-		return output.ErrUsage(fmt.Sprintf("invalid topic ID: %s", args[0]))
+		return output.ErrUsage(fmt.Sprintf("invalid thread ID: %s", args[0]))
 	}
 
-	entries, err := apiClient.GetTopicEntries(topicID)
+	entries, err := apiClient.GetTopicEntries(threadID)
 	if err != nil {
 		return err
 	}
@@ -80,11 +80,11 @@ func (c *topicCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	return writeOK(entries,
-		output.WithSummary(fmt.Sprintf("%d entries in topic %d", len(entries), topicID)),
+		output.WithSummary(fmt.Sprintf("%d entries in thread %d", len(entries), threadID)),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "reply",
-				Command:     fmt.Sprintf("hey reply %d", topicID),
+				Command:     fmt.Sprintf("hey reply %d", threadID),
 				Description: "Reply to this thread",
 			},
 		),

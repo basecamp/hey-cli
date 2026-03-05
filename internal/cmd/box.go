@@ -25,19 +25,30 @@ func newBoxCommand() *boxCommand {
 		Short: "List postings in a mailbox",
 		Long:  "List postings in a mailbox. Accepts a box name (imbox, feedbox, etc.) or numeric ID.",
 		Annotations: map[string]string{
-			"agent_notes": "Accepts box name or numeric ID. Returns postings (threads). Use topic IDs with hey topic.",
+			"agent_notes": "Accepts box name or numeric ID. Returns postings (threads). Use thread IDs with hey threads.",
 		},
 		Example: `  hey box imbox
   hey box imbox --limit 10
   hey box 123 --json`,
 		RunE: boxCommand.run,
-		Args: cobra.ExactArgs(1),
+		Args: validateBoxArgs,
 	}
 
 	boxCommand.cmd.Flags().IntVar(&boxCommand.limit, "limit", 0, "Maximum number of postings to show")
 	boxCommand.cmd.Flags().BoolVar(&boxCommand.all, "all", false, "Fetch all results (override --limit)")
 
 	return boxCommand
+}
+
+func validateBoxArgs(cmd *cobra.Command, args []string) error {
+	switch len(args) {
+	case 1:
+		return nil
+	case 0:
+		return usageErrorf("%s <name|id> (example: hey box imbox)", cmd.CommandPath())
+	default:
+		return fmt.Errorf("expected 1 mailbox argument, got %d", len(args))
+	}
 }
 
 func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
@@ -66,7 +77,7 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(cmd.OutOrStdout(), "Box: %s (%s)\n\n", resp.Box.Name, resp.Box.Kind)
 
 		table := newTable(cmd.OutOrStdout())
-		table.addRow([]string{"Topic", "From", "Summary", "Date"})
+		table.addRow([]string{"Thread", "From", "Summary", "Date"})
 		for _, raw := range postings {
 			var p models.Posting
 			if err := json.Unmarshal(raw, &p); err != nil {
@@ -96,7 +107,7 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "read",
-				Command:     "hey topic <id>",
+				Command:     "hey threads <id>",
 				Description: "Read an email thread",
 			},
 			output.Breadcrumb{

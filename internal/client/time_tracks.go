@@ -1,22 +1,42 @@
 package client
 
 import (
+	"errors"
 	"fmt"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/models"
 )
 
 func (c *Client) ListTimeTracks() ([]models.TimeTrack, error) {
-	var tracks []models.TimeTrack
-	if err := c.GetJSON("/calendar/time_tracks.json", &tracks); err != nil {
+	recordingsByType, err := c.listPersonalCalendarRecordings()
+	if err != nil {
 		return nil, err
 	}
+
+	recordings := recordingsByType["Calendar::TimeTrack"]
+	tracks := make([]models.TimeTrack, 0, len(recordings))
+	for _, recording := range recordings {
+		tracks = append(tracks, models.TimeTrack{
+			ID:        recording.ID,
+			Title:     recording.Title,
+			StartsAt:  recording.StartsAt,
+			EndsAt:    recording.EndsAt,
+			CreatedAt: recording.CreatedAt,
+			UpdatedAt: recording.UpdatedAt,
+		})
+	}
+
 	return tracks, nil
 }
 
 func (c *Client) GetOngoingTimeTrack() (models.TimeTrack, error) {
 	var track models.TimeTrack
-	if err := c.GetJSON("/calendar/ongoing_time_track.json", &track); err != nil {
+	if err := c.GetJSON("/calendar/ongoing_time_track", &track); err != nil {
+		var apiErr *apierr.Error
+		if errors.As(err, &apiErr) && apiErr.Code == "not_found" {
+			return models.TimeTrack{}, nil
+		}
 		return track, err
 	}
 	return track, nil
