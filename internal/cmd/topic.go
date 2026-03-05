@@ -78,7 +78,7 @@ func (c *topicCommand) run(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return writer.OK(entries, statsOption(),
+	return writeOK(entries,
 		output.WithSummary(fmt.Sprintf("%d entries in topic %d", len(entries), topicID)),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{

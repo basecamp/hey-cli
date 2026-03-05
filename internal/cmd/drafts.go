@@ -72,7 +72,7 @@ func (c *draftsCommand) run(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return writer.OK(drafts, statsOption(),
+	return writeOK(drafts,
 		output.WithSummary(fmt.Sprintf("%d drafts", len(drafts))),
 		output.WithNotice(notice),
 	)

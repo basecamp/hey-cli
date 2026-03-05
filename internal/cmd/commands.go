@@ -26,7 +26,7 @@ func newCommandsCommand() *cobra.Command {
 				return nil
 			}
 
-			return writer.OK(catalog, statsOption(),
+			return writeOK(catalog,
 				output.WithSummary("Available commands"),
 			)
 		},

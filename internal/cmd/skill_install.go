@@ -61,7 +61,7 @@ func runSkillInstall(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return writer.OK(map[string]string{
+	return writeOK(map[string]string{
 		"skill_path":   skillFile,
 		"symlink_path": symlinkPath,
 	}, output.WithSummary("hey skill installed"))

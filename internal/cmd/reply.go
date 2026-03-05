@@ -89,9 +89,9 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 
 	normalized, err := output.NormalizeJSONNumbers(data)
 	if err != nil {
-		return writer.OK(nil, output.WithSummary("Reply sent"))
+		return writeOK(nil, output.WithSummary("Reply sent"))
 	}
-	return writer.OK(normalized,
+	return writeOK(normalized,
 		output.WithSummary("Reply sent"),
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "view",

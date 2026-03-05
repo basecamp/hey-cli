@@ -39,7 +39,7 @@ func newDoctorCommand() *cobra.Command {
 				return nil
 			}
 
-			return writer.OK(checks, output.WithSummary("Doctor checks complete"))
+			return writeOK(checks, output.WithSummary("Doctor checks complete"))
 		},
 	}
 }

@@ -52,7 +52,7 @@ func (c *calendarsCommand) run(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return writer.OK(calendars, statsOption(),
+	return writeOK(calendars,
 		output.WithSummary(fmt.Sprintf("%d calendars", len(calendars))),
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "view",

@@ -70,6 +70,10 @@ func (c *recordingsCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	var total, shown int
+	for _, recordings := range resp {
+		total += len(recordings)
+	}
 	if c.limit > 0 && !c.all {
 		for key, recordings := range resp {
 			if len(recordings) > c.limit {
@@ -77,13 +81,17 @@ func (c *recordingsCommand) run(cmd *cobra.Command, args []string) error {
 			}
 		}
 	}
+	for _, recordings := range resp {
+		shown += len(recordings)
+	}
+	notice := output.TruncationNotice(shown, total)
 
 	if writer.IsStyled() {
 		for recType, recordings := range resp {
 			if len(recordings) == 0 {
 				continue
 			}
-			fmt.Printf("\n%s:\n", recType)
+			fmt.Fprintf(cmd.OutOrStdout(), "\n%s:\n", recType)
 			table := newTable(cmd.OutOrStdout())
 			table.addRow([]string{"ID", "Title", "Starts", "Ends"})
 			for _, r := range recordings {
@@ -99,10 +107,14 @@ func (c *recordingsCommand) run(cmd *cobra.Command, args []string) error {
 			}
 			table.print()
 		}
+		if notice != "" {
+			fmt.Fprintln(cmd.OutOrStdout(), notice)
+		}
 		return nil
 	}
 
-	return writer.OK(resp, statsOption(),
+	return writeOK(resp,
 		output.WithSummary(fmt.Sprintf("Recordings for calendar %d (%s to %s)", calendarID, startsOn, endsOn)),
+		output.WithNotice(notice),
 	)
 }

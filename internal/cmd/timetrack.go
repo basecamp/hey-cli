@@ -66,9 +66,9 @@ func (c *timetrackStartCommand) run(cmd *cobra.Command, args []string) error {
 
 	normalized, nerr := output.NormalizeJSONNumbers(data)
 	if nerr != nil {
-		return writer.OK(nil, output.WithSummary("Time tracking started"))
+		return writeOK(nil, output.WithSummary("Time tracking started"))
 	}
-	return writer.OK(normalized,
+	return writeOK(normalized,
 		output.WithSummary("Time tracking started"),
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "stop",
@@ -123,9 +123,9 @@ func (c *timetrackStopCommand) run(cmd *cobra.Command, args []string) error {
 
 	normalized, nerr := output.NormalizeJSONNumbers(result)
 	if nerr != nil {
-		return writer.OK(nil, output.WithSummary("Time tracking stopped"))
+		return writeOK(nil, output.WithSummary("Time tracking stopped"))
 	}
-	return writer.OK(normalized, output.WithSummary("Time tracking stopped"))
+	return writeOK(normalized, output.WithSummary("Time tracking stopped"))
 }
 
 // current
@@ -175,7 +175,7 @@ func (c *timetrackCurrentCommand) run(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return writer.OK(track,
+	return writeOK(track,
 		output.WithSummary(func() string {
 			if track.ID == 0 {
 				return "No active time track"
@@ -252,7 +252,7 @@ func (c *timetrackListCommand) run(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return writer.OK(tracks, statsOption(),
+	return writeOK(tracks,
 		output.WithSummary(fmt.Sprintf("%d time tracks", len(tracks))),
 		output.WithNotice(notice),
 		output.WithBreadcrumbs(output.Breadcrumb{

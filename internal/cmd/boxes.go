@@ -63,7 +63,7 @@ func (c *boxesCommand) run(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return writer.OK(boxes, statsOption(),
+	return writeOK(boxes,
 		output.WithSummary(fmt.Sprintf("%d mailboxes", len(boxes))),
 		output.WithNotice(notice),
 		output.WithBreadcrumbs(output.Breadcrumb{

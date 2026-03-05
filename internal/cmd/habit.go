@@ -74,9 +74,9 @@ func (c *habitCompleteCommand) run(cmd *cobra.Command, args []string) error {
 
 	normalized, nerr := output.NormalizeJSONNumbers(data)
 	if nerr != nil {
-		return writer.OK(nil, output.WithSummary(fmt.Sprintf("Habit %s completed for %s", args[0], date)))
+		return writeOK(nil, output.WithSummary(fmt.Sprintf("Habit %s completed for %s", args[0], date)))
 	}
-	return writer.OK(normalized, output.WithSummary(fmt.Sprintf("Habit %s completed for %s", args[0], date)))
+	return writeOK(normalized, output.WithSummary(fmt.Sprintf("Habit %s completed for %s", args[0], date)))
 }
 
 // uncomplete
@@ -124,7 +124,7 @@ func (c *habitUncompleteCommand) run(cmd *cobra.Command, args []string) error {
 
 	normalized, nerr := output.NormalizeJSONNumbers(data)
 	if nerr != nil {
-		return writer.OK(nil, output.WithSummary(fmt.Sprintf("Habit %s uncompleted for %s", args[0], date)))
+		return writeOK(nil, output.WithSummary(fmt.Sprintf("Habit %s uncompleted for %s", args[0], date)))
 	}
-	return writer.OK(normalized, output.WithSummary(fmt.Sprintf("Habit %s uncompleted for %s", args[0], date)))
+	return writeOK(normalized, output.WithSummary(fmt.Sprintf("Habit %s uncompleted for %s", args[0], date)))
 }

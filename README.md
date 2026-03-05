@@ -79,7 +79,7 @@ hey drafts                         # list drafts
 
 ```bash
 hey calendars                      # list calendars
-hey recordings 1 --from 2026-01-01 --to 2026-01-31  # list events in a calendar
+hey recordings 1 --starts-on 2026-01-01 --ends-on 2026-01-31  # list events in a calendar
 ```
 
 ### Todos

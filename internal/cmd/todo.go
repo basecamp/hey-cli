@@ -98,7 +98,7 @@ func (c *todoListCommand) run(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return writer.OK(todos, statsOption(),
+	return writeOK(todos,
 		output.WithSummary(fmt.Sprintf("%d todos", len(todos))),
 		output.WithNotice(notice),
 		output.WithBreadcrumbs(
@@ -167,9 +167,9 @@ func (c *todoAddCommand) run(cmd *cobra.Command, args []string) error {
 
 	normalized, err := output.NormalizeJSONNumbers(data)
 	if err != nil {
-		return writer.OK(nil, output.WithSummary("Todo created"))
+		return writeOK(nil, output.WithSummary("Todo created"))
 	}
-	return writer.OK(normalized, output.WithSummary("Todo created"))
+	return writeOK(normalized, output.WithSummary("Todo created"))
 }
 
 // complete
@@ -208,9 +208,9 @@ func (c *todoCompleteCommand) run(cmd *cobra.Command, args []string) error {
 
 	normalized, err := output.NormalizeJSONNumbers(data)
 	if err != nil {
-		return writer.OK(nil, output.WithSummary("Todo completed"))
+		return writeOK(nil, output.WithSummary("Todo completed"))
 	}
-	return writer.OK(normalized, output.WithSummary("Todo completed"))
+	return writeOK(normalized, output.WithSummary("Todo completed"))
 }
 
 // uncomplete
@@ -249,9 +249,9 @@ func (c *todoUncompleteCommand) run(cmd *cobra.Command, args []string) error {
 
 	normalized, err := output.NormalizeJSONNumbers(data)
 	if err != nil {
-		return writer.OK(nil, output.WithSummary("Todo marked incomplete"))
+		return writeOK(nil, output.WithSummary("Todo marked incomplete"))
 	}
-	return writer.OK(normalized, output.WithSummary("Todo marked incomplete"))
+	return writeOK(normalized, output.WithSummary("Todo marked incomplete"))
 }
 
 // delete
@@ -290,7 +290,7 @@ func (c *todoDeleteCommand) run(cmd *cobra.Command, args []string) error {
 
 	normalized, err := output.NormalizeJSONNumbers(data)
 	if err != nil {
-		return writer.OK(nil, output.WithSummary("Todo deleted"))
+		return writeOK(nil, output.WithSummary("Todo deleted"))
 	}
-	return writer.OK(normalized, output.WithSummary("Todo deleted"))
+	return writeOK(normalized, output.WithSummary("Todo deleted"))
 }

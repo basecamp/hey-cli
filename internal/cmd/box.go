@@ -90,7 +90,7 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	resp.Postings = postings
-	return writer.OK(resp, statsOption(),
+	return writeOK(resp,
 		output.WithSummary(fmt.Sprintf("%d postings in %s", len(postings), resp.Box.Name)),
 		output.WithNotice(notice),
 		output.WithBreadcrumbs(

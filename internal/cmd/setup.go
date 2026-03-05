@@ -25,7 +25,7 @@ func newSetupCommand() *cobra.Command {
 					fmt.Println("Already authenticated. Run `hey auth status` for details.")
 					return nil
 				}
-				return writer.OK(map[string]string{"status": "already_authenticated"},
+				return writeOK(map[string]string{"status": "already_authenticated"},
 					output.WithSummary("Already authenticated"),
 				)
 			}
@@ -51,7 +51,7 @@ func newSetupCommand() *cobra.Command {
 				return nil
 			}
 
-			return writer.OK(map[string]string{"status": "setup_complete"},
+			return writeOK(map[string]string{"status": "setup_complete"},
 				output.WithSummary("Setup complete"),
 				output.WithBreadcrumbs(output.Breadcrumb{
 					Action:      "start",

@@ -47,7 +47,7 @@ func newConfigShowCommand() *cobra.Command {
 				return nil
 			}
 
-			return writer.OK(entries,
+			return writeOK(entries,
 				output.WithSummary(fmt.Sprintf("%d configuration values", len(entries))),
 			)
 		},

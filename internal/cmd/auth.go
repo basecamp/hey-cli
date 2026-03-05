@@ -64,7 +64,7 @@ Opens a browser for OAuth authentication. Use --token or --cookie for non-intera
 					fmt.Println("Logged in with token.")
 					return nil
 				}
-				return writer.OK(map[string]string{"method": "token"}, output.WithSummary("Logged in with token"))
+				return writeOK(map[string]string{"method": "token"}, output.WithSummary("Logged in with token"))
 			}
 
 			if cookie != "" {
@@ -75,7 +75,7 @@ Opens a browser for OAuth authentication. Use --token or --cookie for non-intera
 					fmt.Println("Logged in with session cookie.")
 					return nil
 				}
-				return writer.OK(map[string]string{"method": "cookie"}, output.WithSummary("Logged in with session cookie"))
+				return writeOK(map[string]string{"method": "cookie"}, output.WithSummary("Logged in with session cookie"))
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
@@ -89,7 +89,7 @@ Opens a browser for OAuth authentication. Use --token or --cookie for non-intera
 				fmt.Println("Logged in successfully.")
 				return nil
 			}
-			return writer.OK(map[string]string{"method": "oauth"}, output.WithSummary("Logged in successfully"))
+			return writeOK(map[string]string{"method": "oauth"}, output.WithSummary("Logged in successfully"))
 		},
 	}
 
@@ -114,7 +114,7 @@ func newAuthLogoutCommand() *cobra.Command {
 				fmt.Println("Logged out.")
 				return nil
 			}
-			return writer.OK(nil, output.WithSummary("Logged out"))
+			return writeOK(nil, output.WithSummary("Logged out"))
 		},
 	}
 }
@@ -140,7 +140,7 @@ func newAuthStatusCommand() *cobra.Command {
 					fmt.Println("Status:    Logged in (via HEY_TOKEN env var)")
 					return nil
 				}
-				return writer.OK(status, output.WithSummary("Logged in via HEY_TOKEN"))
+				return writeOK(status, output.WithSummary("Logged in via HEY_TOKEN"))
 			}
 
 			store := authMgr.GetStore()
@@ -151,7 +151,7 @@ func newAuthStatusCommand() *cobra.Command {
 					fmt.Println("Status:    Not logged in")
 					return nil
 				}
-				return writer.OK(status, output.WithSummary("Not logged in"),
+				return writeOK(status, output.WithSummary("Not logged in"),
 					output.WithBreadcrumbs(output.Breadcrumb{
 						Action:      "login",
 						Command:     "hey auth login",
@@ -217,7 +217,7 @@ func newAuthStatusCommand() *cobra.Command {
 				return nil
 			}
 
-			return writer.OK(status, output.WithSummary("Logged in"))
+			return writeOK(status, output.WithSummary("Logged in"))
 		},
 	}
 }
@@ -237,7 +237,7 @@ func newAuthRefreshCommand() *cobra.Command {
 				fmt.Println("Token refreshed.")
 				return nil
 			}
-			return writer.OK(nil, output.WithSummary("Token refreshed"))
+			return writeOK(nil, output.WithSummary("Token refreshed"))
 		},
 	}
 }

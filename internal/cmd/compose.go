@@ -101,7 +101,7 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 
 	normalized, err := output.NormalizeJSONNumbers(data)
 	if err != nil {
-		return writer.OK(nil, output.WithSummary("Message sent"))
+		return writeOK(nil, output.WithSummary("Message sent"))
 	}
-	return writer.OK(normalized, output.WithSummary("Message sent"))
+	return writeOK(normalized, output.WithSummary("Message sent"))
 }

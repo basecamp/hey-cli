@@ -244,6 +244,12 @@ func statsOption() output.ResponseOption {
 	})
 }
 
+// writeOK wraps writer.OK and always injects statsOption() so every command
+// response includes request stats when --stats is set.
+func writeOK(data any, opts ...output.ResponseOption) error {
+	return writer.OK(data, append(opts, statsOption())...)
+}
+
 func printAgentHelp(cmd *cobra.Command) {
 	info := map[string]any{
 		"name":  cmd.Name(),

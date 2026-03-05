@@ -91,7 +91,7 @@ func (c *journalListCommand) run(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return writer.OK(entries, statsOption(),
+	return writeOK(entries,
 		output.WithSummary(fmt.Sprintf("%d journal entries", len(entries))),
 		output.WithNotice(notice),
 		output.WithBreadcrumbs(
@@ -161,7 +161,7 @@ func (c *journalReadCommand) run(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return writer.OK(entry,
+	return writeOK(entry,
 		output.WithSummary(fmt.Sprintf("Journal entry for %s", date)),
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "write",
@@ -244,9 +244,9 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 
 	normalized, nerr := output.NormalizeJSONNumbers(data)
 	if nerr != nil {
-		return writer.OK(nil, output.WithSummary(fmt.Sprintf("Journal entry for %s saved", date)))
+		return writeOK(nil, output.WithSummary(fmt.Sprintf("Journal entry for %s saved", date)))
 	}
-	return writer.OK(normalized,
+	return writeOK(normalized,
 		output.WithSummary(fmt.Sprintf("Journal entry for %s saved", date)),
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "read",
