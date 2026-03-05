@@ -38,7 +38,7 @@ func newConfigShowCommand() *cobra.Command {
 			}
 
 			if writer.IsStyled() {
-				table := newTable()
+				table := newTable(cmd.OutOrStdout())
 				table.addRow([]string{"Key", "Value", "Source"})
 				for _, e := range entries {
 					table.addRow([]string{e["key"], e["value"], e["source"]})

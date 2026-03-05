@@ -17,6 +17,9 @@ func newCalendarsCommand() *calendarsCommand {
 	calendarsCommand.cmd = &cobra.Command{
 		Use:   "calendars",
 		Short: "List calendars",
+		Annotations: map[string]string{
+			"agent_notes": "Returns all calendars with IDs. Pipe IDs to hey recordings <id>.",
+		},
 		Example: `  hey calendars
   hey calendars --json`,
 		RunE: calendarsCommand.run,
@@ -36,7 +39,7 @@ func (c *calendarsCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if writer.IsStyled() {
-		table := newTable()
+		table := newTable(cmd.OutOrStdout())
 		table.addRow([]string{"ID", "Name", "Kind", "Owned"})
 		for _, cal := range calendars {
 			owned := "no"
@@ -49,7 +52,7 @@ func (c *calendarsCommand) run(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return writer.OK(calendars,
+	return writer.OK(calendars, statsOption(),
 		output.WithSummary(fmt.Sprintf("%d calendars", len(calendars))),
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "view",

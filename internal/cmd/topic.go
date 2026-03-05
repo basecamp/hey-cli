@@ -19,6 +19,9 @@ func newTopicCommand() *topicCommand {
 	topicCommand.cmd = &cobra.Command{
 		Use:   "topic <id>",
 		Short: "Read an email thread",
+		Annotations: map[string]string{
+			"agent_notes": "Returns thread with all entries. Use entry IDs with hey reply.",
+		},
 		Example: `  hey topic 12345
   hey topic 12345 --json`,
 		RunE: topicCommand.run,
@@ -75,7 +78,7 @@ func (c *topicCommand) run(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return writer.OK(entries,
+	return writer.OK(entries, statsOption(),
 		output.WithSummary(fmt.Sprintf("%d entries in topic %d", len(entries), topicID)),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{

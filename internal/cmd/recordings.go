@@ -15,6 +15,7 @@ type recordingsCommand struct {
 	startsOn string
 	endsOn   string
 	limit    int
+	all      bool
 }
 
 func newRecordingsCommand() *recordingsCommand {
@@ -22,6 +23,9 @@ func newRecordingsCommand() *recordingsCommand {
 	recordingsCommand.cmd = &cobra.Command{
 		Use:   "recordings <calendar-id>",
 		Short: "List recordings (events, todos, etc.) for a calendar",
+		Annotations: map[string]string{
+			"agent_notes": "Returns recordings grouped by type for a calendar. Defaults to today + 30 days.",
+		},
 		Example: `  hey recordings 123
   hey recordings 123 --starts-on 2024-01-01 --ends-on 2024-01-31
   hey recordings 123 --limit 5 --json`,
@@ -32,6 +36,7 @@ func newRecordingsCommand() *recordingsCommand {
 	recordingsCommand.cmd.Flags().StringVar(&recordingsCommand.startsOn, "starts-on", "", "Start date (YYYY-MM-DD, defaults to today)")
 	recordingsCommand.cmd.Flags().StringVar(&recordingsCommand.endsOn, "ends-on", "", "End date (YYYY-MM-DD, defaults to 30 days from starts-on)")
 	recordingsCommand.cmd.Flags().IntVar(&recordingsCommand.limit, "limit", 0, "Maximum number of recordings per type to show")
+	recordingsCommand.cmd.Flags().BoolVar(&recordingsCommand.all, "all", false, "Fetch all results (override --limit)")
 
 	return recordingsCommand
 }
@@ -65,7 +70,7 @@ func (c *recordingsCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if c.limit > 0 {
+	if c.limit > 0 && !c.all {
 		for key, recordings := range resp {
 			if len(recordings) > c.limit {
 				resp[key] = recordings[:c.limit]
@@ -79,7 +84,7 @@ func (c *recordingsCommand) run(cmd *cobra.Command, args []string) error {
 				continue
 			}
 			fmt.Printf("\n%s:\n", recType)
-			table := newTable()
+			table := newTable(cmd.OutOrStdout())
 			table.addRow([]string{"ID", "Title", "Starts", "Ends"})
 			for _, r := range recordings {
 				starts := ""
@@ -97,7 +102,7 @@ func (c *recordingsCommand) run(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return writer.OK(resp,
+	return writer.OK(resp, statsOption(),
 		output.WithSummary(fmt.Sprintf("Recordings for calendar %d (%s to %s)", calendarID, startsOn, endsOn)),
 	)
 }

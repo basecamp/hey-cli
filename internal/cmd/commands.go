@@ -15,7 +15,7 @@ func newCommandsCommand() *cobra.Command {
 			catalog := walkCommands(cmd.Root(), "")
 
 			if writer.IsStyled() {
-				table := newTable()
+				table := newTable(cmd.OutOrStdout())
 				table.addRow([]string{"Command", "Description"})
 				for _, entry := range catalog {
 					table.addRow([]string{entry["path"].(string), entry["short"].(string)})
@@ -24,7 +24,7 @@ func newCommandsCommand() *cobra.Command {
 				return nil
 			}
 
-			return writer.OK(catalog,
+			return writer.OK(catalog, statsOption(),
 				output.WithSummary("Available commands"),
 			)
 		},

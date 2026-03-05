@@ -22,6 +22,9 @@ func newAuthCommand() *authCommand {
 		Use:   "auth",
 		Short: "Manage authentication",
 		Long:  "Manage authentication with the HEY server via Launchpad OAuth.",
+		Annotations: map[string]string{
+			"agent_notes": "Use status to check auth before other commands. Returns token expiry info in JSON. Use login --token for non-interactive auth.",
+		},
 	}
 
 	ac.cmd.AddCommand(newAuthLoginCommand())

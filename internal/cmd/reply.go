@@ -20,6 +20,9 @@ func newReplyCommand() *replyCommand {
 	replyCommand.cmd = &cobra.Command{
 		Use:   "reply <topic-id>",
 		Short: "Reply to an email topic",
+		Annotations: map[string]string{
+			"agent_notes": "Replies to the latest entry in a topic. Accepts message via -m, stdin, or $EDITOR.",
+		},
 		Example: `  hey reply 12345 -m "Thanks!"
   echo "Detailed reply" | hey reply 12345`,
 		RunE: replyCommand.run,

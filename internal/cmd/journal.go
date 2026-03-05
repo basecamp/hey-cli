@@ -20,6 +20,9 @@ func newJournalCommand() *journalCommand {
 	journalCommand.cmd = &cobra.Command{
 		Use:   "journal",
 		Short: "Manage journal entries",
+		Annotations: map[string]string{
+			"agent_notes": "Subcommands: list, read, write. Read defaults to today. Write accepts --content, stdin, or opens $EDITOR.",
+		},
 	}
 
 	journalCommand.cmd.AddCommand(newJournalListCommand().cmd)
@@ -34,6 +37,7 @@ func newJournalCommand() *journalCommand {
 type journalListCommand struct {
 	cmd   *cobra.Command
 	limit int
+	all   bool
 }
 
 func newJournalListCommand() *journalListCommand {
@@ -48,6 +52,7 @@ func newJournalListCommand() *journalListCommand {
 	}
 
 	journalListCommand.cmd.Flags().IntVar(&journalListCommand.limit, "limit", 0, "Maximum number of entries to show")
+	journalListCommand.cmd.Flags().BoolVar(&journalListCommand.all, "all", false, "Fetch all results (override --limit)")
 
 	return journalListCommand
 }
@@ -62,9 +67,11 @@ func (c *journalListCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if c.limit > 0 && len(entries) > c.limit {
+	total := len(entries)
+	if c.limit > 0 && !c.all && len(entries) > c.limit {
 		entries = entries[:c.limit]
 	}
+	notice := output.TruncationNotice(len(entries), total)
 
 	if writer.IsStyled() {
 		if len(entries) == 0 {
@@ -72,17 +79,21 @@ func (c *journalListCommand) run(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 
-		table := newTable()
+		table := newTable(cmd.OutOrStdout())
 		table.addRow([]string{"ID", "Date", "Preview"})
 		for _, e := range entries {
 			table.addRow([]string{fmt.Sprintf("%d", e.ID), e.Date, truncate(e.Body, 60)})
 		}
 		table.print()
+		if notice != "" {
+			fmt.Fprintln(cmd.OutOrStdout(), notice)
+		}
 		return nil
 	}
 
-	return writer.OK(entries,
+	return writer.OK(entries, statsOption(),
 		output.WithSummary(fmt.Sprintf("%d journal entries", len(entries))),
+		output.WithNotice(notice),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "read",

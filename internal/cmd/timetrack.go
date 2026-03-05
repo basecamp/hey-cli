@@ -17,6 +17,9 @@ func newTimetrackCommand() *timetrackCommand {
 	timetrackCommand.cmd = &cobra.Command{
 		Use:   "timetrack",
 		Short: "Manage time tracking",
+		Annotations: map[string]string{
+			"agent_notes": "Subcommands: start, stop, current, list. Use current to check if tracking is active before start/stop.",
+		},
 	}
 
 	timetrackCommand.cmd.AddCommand(newTimetrackStartCommand().cmd)
@@ -185,7 +188,9 @@ func (c *timetrackCurrentCommand) run(cmd *cobra.Command, args []string) error {
 // list
 
 type timetrackListCommand struct {
-	cmd *cobra.Command
+	cmd   *cobra.Command
+	limit int
+	all   bool
 }
 
 func newTimetrackListCommand() *timetrackListCommand {
@@ -194,9 +199,13 @@ func newTimetrackListCommand() *timetrackListCommand {
 		Use:   "list",
 		Short: "List time tracks",
 		Example: `  hey timetrack list
+  hey timetrack list --limit 10
   hey timetrack list --json`,
 		RunE: timetrackListCommand.run,
 	}
+
+	timetrackListCommand.cmd.Flags().IntVar(&timetrackListCommand.limit, "limit", 0, "Maximum number of time tracks to show")
+	timetrackListCommand.cmd.Flags().BoolVar(&timetrackListCommand.all, "all", false, "Fetch all results (override --limit)")
 
 	return timetrackListCommand
 }
@@ -211,13 +220,19 @@ func (c *timetrackListCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	total := len(tracks)
+	if c.limit > 0 && !c.all && len(tracks) > c.limit {
+		tracks = tracks[:c.limit]
+	}
+	notice := output.TruncationNotice(len(tracks), total)
+
 	if writer.IsStyled() {
 		if len(tracks) == 0 {
 			fmt.Println("No time tracks.")
 			return nil
 		}
 
-		table := newTable()
+		table := newTable(cmd.OutOrStdout())
 		table.addRow([]string{"ID", "Title", "Start", "End"})
 		for _, t := range tracks {
 			starts := ""
@@ -231,11 +246,15 @@ func (c *timetrackListCommand) run(cmd *cobra.Command, args []string) error {
 			table.addRow([]string{fmt.Sprintf("%d", t.ID), t.Title, starts, ends})
 		}
 		table.print()
+		if notice != "" {
+			fmt.Fprintln(cmd.OutOrStdout(), notice)
+		}
 		return nil
 	}
 
-	return writer.OK(tracks,
+	return writer.OK(tracks, statsOption(),
 		output.WithSummary(fmt.Sprintf("%d time tracks", len(tracks))),
+		output.WithNotice(notice),
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "start",
 			Command:     "hey timetrack start",

@@ -23,6 +23,9 @@ func newComposeCommand() *composeCommand {
 	composeCommand.cmd = &cobra.Command{
 		Use:   "compose",
 		Short: "Compose a new message",
+		Annotations: map[string]string{
+			"agent_notes": "Creates a new email. Requires --subject. Use --to for new threads or --topic-id for existing ones.",
+		},
 		Example: `  hey compose --to alice@hey.com --subject "Hello" -m "Hi there"
   hey compose --subject "Update" --topic-id 12345 -m "Thread reply"
   echo "Long message" | hey compose --to bob@hey.com --subject "Report"`,

@@ -15,6 +15,7 @@ import (
 type boxCommand struct {
 	cmd   *cobra.Command
 	limit int
+	all   bool
 }
 
 func newBoxCommand() *boxCommand {
@@ -23,6 +24,9 @@ func newBoxCommand() *boxCommand {
 		Use:   "box <name|id>",
 		Short: "List postings in a mailbox",
 		Long:  "List postings in a mailbox. Accepts a box name (imbox, feedbox, etc.) or numeric ID.",
+		Annotations: map[string]string{
+			"agent_notes": "Accepts box name or numeric ID. Returns postings (threads). Use topic IDs with hey topic.",
+		},
 		Example: `  hey box imbox
   hey box imbox --limit 10
   hey box 123 --json`,
@@ -31,6 +35,7 @@ func newBoxCommand() *boxCommand {
 	}
 
 	boxCommand.cmd.Flags().IntVar(&boxCommand.limit, "limit", 0, "Maximum number of postings to show")
+	boxCommand.cmd.Flags().BoolVar(&boxCommand.all, "all", false, "Fetch all results (override --limit)")
 
 	return boxCommand
 }
@@ -51,14 +56,16 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	postings := resp.Postings
-	if c.limit > 0 && len(postings) > c.limit {
+	total := len(postings)
+	if c.limit > 0 && !c.all && len(postings) > c.limit {
 		postings = postings[:c.limit]
 	}
+	notice := output.TruncationNotice(len(postings), total)
 
 	if writer.IsStyled() {
 		fmt.Printf("Box: %s (%s)\n\n", resp.Box.Name, resp.Box.Kind)
 
-		table := newTable()
+		table := newTable(cmd.OutOrStdout())
 		table.addRow([]string{"Topic", "From", "Summary", "Date"})
 		for _, raw := range postings {
 			var p models.Posting
@@ -76,12 +83,16 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 			table.addRow([]string{fmt.Sprintf("%d", displayID), p.Creator.Name, truncate(p.Summary, 60), date})
 		}
 		table.print()
+		if notice != "" {
+			fmt.Fprintln(cmd.OutOrStdout(), notice)
+		}
 		return nil
 	}
 
 	resp.Postings = postings
-	return writer.OK(resp,
+	return writer.OK(resp, statsOption(),
 		output.WithSummary(fmt.Sprintf("%d postings in %s", len(postings), resp.Box.Name)),
+		output.WithNotice(notice),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "read",

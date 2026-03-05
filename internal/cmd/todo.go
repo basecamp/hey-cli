@@ -17,6 +17,9 @@ func newTodoCommand() *todoCommand {
 	todoCommand.cmd = &cobra.Command{
 		Use:   "todo",
 		Short: "Manage todos",
+		Annotations: map[string]string{
+			"agent_notes": "Subcommands: list, add, complete, uncomplete, delete. Use list --ids-only to pipe IDs to complete/delete.",
+		},
 	}
 
 	todoCommand.cmd.AddCommand(newTodoListCommand().cmd)
@@ -33,6 +36,7 @@ func newTodoCommand() *todoCommand {
 type todoListCommand struct {
 	cmd   *cobra.Command
 	limit int
+	all   bool
 }
 
 func newTodoListCommand() *todoListCommand {
@@ -47,6 +51,7 @@ func newTodoListCommand() *todoListCommand {
 	}
 
 	todoListCommand.cmd.Flags().IntVar(&todoListCommand.limit, "limit", 0, "Maximum number of todos to show")
+	todoListCommand.cmd.Flags().BoolVar(&todoListCommand.all, "all", false, "Fetch all results (override --limit)")
 
 	return todoListCommand
 }
@@ -61,9 +66,11 @@ func (c *todoListCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if c.limit > 0 && len(todos) > c.limit {
+	total := len(todos)
+	if c.limit > 0 && !c.all && len(todos) > c.limit {
 		todos = todos[:c.limit]
 	}
+	notice := output.TruncationNotice(len(todos), total)
 
 	if writer.IsStyled() {
 		if len(todos) == 0 {
@@ -71,7 +78,7 @@ func (c *todoListCommand) run(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 
-		table := newTable()
+		table := newTable(cmd.OutOrStdout())
 		table.addRow([]string{"ID", "Title", "Date", "Done"})
 		for _, t := range todos {
 			date := ""
@@ -85,11 +92,15 @@ func (c *todoListCommand) run(cmd *cobra.Command, args []string) error {
 			table.addRow([]string{fmt.Sprintf("%d", t.ID), t.Title, date, done})
 		}
 		table.print()
+		if notice != "" {
+			fmt.Fprintln(cmd.OutOrStdout(), notice)
+		}
 		return nil
 	}
 
-	return writer.OK(todos,
+	return writer.OK(todos, statsOption(),
 		output.WithSummary(fmt.Sprintf("%d todos", len(todos))),
+		output.WithNotice(notice),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "add",
