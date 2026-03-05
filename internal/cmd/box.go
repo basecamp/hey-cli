@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"hey-cli/internal/models"
+	"github.com/basecamp/hey-cli/internal/models"
 )
 
 type boxCommand struct {

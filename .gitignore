@@ -1,2 +1,9 @@
 /bin/*
 !/bin/.keep
+dist/
+completions/
+profiles/
+default.pgo
+benchmarks-*.txt
+*.pprof
+*.test

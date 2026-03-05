@@ -4,7 +4,7 @@ import (
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 
-	"hey-cli/internal/models"
+	"github.com/basecamp/hey-cli/internal/models"
 )
 
 type calendarItem struct {
@@ -53,6 +53,9 @@ func (m calendarsModel) selectedCalendar() *models.Calendar {
 	if item == nil {
 		return nil
 	}
-	ci := item.(calendarItem)
+	ci, ok := item.(calendarItem)
+	if !ok {
+		return nil
+	}
 	return &ci.calendar
 }

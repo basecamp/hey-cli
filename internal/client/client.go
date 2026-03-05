@@ -11,7 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"hey-cli/internal/auth"
+	"github.com/basecamp/hey-cli/internal/auth"
+	"github.com/basecamp/hey-cli/internal/version"
 )
 
 type APIError struct {
@@ -58,17 +59,18 @@ func (c *Client) doRequestAccept(method, path string, body io.Reader, contentTyp
 	base := strings.TrimRight(c.BaseURL, "/")
 	reqURL := base + path
 
-	req, err := http.NewRequest(method, reqURL, body)
+	ctx := context.Background()
+	req, err := http.NewRequestWithContext(ctx, method, reqURL, body)
 	if err != nil {
 		return nil, fmt.Errorf("could not create request: %w", err)
 	}
 
-	ctx := context.Background()
-	if err := c.AuthMgr.AuthenticateRequest(ctx, req); err != nil {
+	if err = c.AuthMgr.AuthenticateRequest(ctx, req); err != nil {
 		return nil, fmt.Errorf("authentication failed: %w", err)
 	}
 
 	req.Header.Set("Accept", accept)
+	req.Header.Set("User-Agent", version.UserAgent())
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}

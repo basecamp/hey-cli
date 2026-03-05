@@ -53,17 +53,17 @@ func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 
 	creds, err := m.store.Load(m.baseURL)
 	if err != nil {
-		return "", fmt.Errorf("not authenticated: %v", err)
+		return "", fmt.Errorf("not authenticated: %w", err)
 	}
 
 	// Check if token is expired (with 5-minute buffer)
 	if creds.ExpiresAt > 0 && time.Now().Unix() >= creds.ExpiresAt-300 {
-		if err := m.refreshLocked(ctx, creds); err != nil {
+		if err = m.refreshLocked(ctx, creds); err != nil {
 			return "", err
 		}
 		creds, err = m.store.Load(m.baseURL)
 		if err != nil {
-			return "", fmt.Errorf("failed to load refreshed credentials: %v", err)
+			return "", fmt.Errorf("failed to load refreshed credentials: %w", err)
 		}
 	}
 
@@ -87,18 +87,18 @@ func (m *Manager) AuthenticateRequest(ctx context.Context, req *http.Request) er
 
 	creds, err := m.store.Load(m.baseURL)
 	if err != nil {
-		return fmt.Errorf("not authenticated: %v", err)
+		return fmt.Errorf("not authenticated: %w", err)
 	}
 
 	if creds.AccessToken != "" {
 		// Auto-refresh if needed
 		if creds.ExpiresAt > 0 && time.Now().Unix() >= creds.ExpiresAt-300 {
-			if err := m.refreshLocked(ctx, creds); err != nil {
+			if err = m.refreshLocked(ctx, creds); err != nil {
 				return err
 			}
 			creds, err = m.store.Load(m.baseURL)
 			if err != nil {
-				return fmt.Errorf("failed to load refreshed credentials: %v", err)
+				return fmt.Errorf("failed to load refreshed credentials: %w", err)
 			}
 		}
 		req.Header.Set("Authorization", "Bearer "+creds.AccessToken)
@@ -213,7 +213,7 @@ func (m *Manager) Refresh(ctx context.Context) error {
 
 	creds, err := m.store.Load(m.baseURL)
 	if err != nil {
-		return fmt.Errorf("not authenticated: %v", err)
+		return fmt.Errorf("not authenticated: %w", err)
 	}
 
 	return m.refreshLocked(ctx, creds)
@@ -231,7 +231,7 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 
 	token, err := refreshOAuthToken(ctx, m.httpClient, tokenEndpoint, creds.RefreshToken, oauthClientID, installID)
 	if err != nil {
-		return fmt.Errorf("token refresh failed: %v", err)
+		return fmt.Errorf("token refresh failed: %w", err)
 	}
 
 	creds.AccessToken = token.AccessToken
@@ -284,7 +284,7 @@ func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL, c
 			fmt.Fprint(w, "<html><body><h1>Authentication failed</h1><p>You can close this window.</p></body></html>")
 			shutdownOnce.Do(func() {
 				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				go func() { defer cancel(); server.Shutdown(shutdownCtx) }()
+				go func() { defer cancel(); _ = server.Shutdown(shutdownCtx) }()
 			})
 			return
 		}
@@ -294,7 +294,7 @@ func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL, c
 			fmt.Fprint(w, "<html><body><h1>Authentication failed</h1><p>State mismatch.</p></body></html>")
 			shutdownOnce.Do(func() {
 				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				go func() { defer cancel(); server.Shutdown(shutdownCtx) }()
+				go func() { defer cancel(); _ = server.Shutdown(shutdownCtx) }()
 			})
 			return
 		}
@@ -303,7 +303,7 @@ func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL, c
 		fmt.Fprint(w, "<html><body><h1>Authentication successful!</h1><p>You can close this window.</p></body></html>")
 		shutdownOnce.Do(func() {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			go func() { defer cancel(); server.Shutdown(shutdownCtx) }()
+			go func() { defer cancel(); _ = server.Shutdown(shutdownCtx) }()
 		})
 	})
 

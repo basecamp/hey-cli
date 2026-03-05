@@ -3,7 +3,7 @@ package client
 import (
 	"fmt"
 
-	"hey-cli/internal/models"
+	"github.com/basecamp/hey-cli/internal/models"
 )
 
 func (c *Client) ListTodos() ([]models.Todo, error) {

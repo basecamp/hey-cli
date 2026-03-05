@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"hey-cli/skills"
+	"github.com/basecamp/hey-cli/skills"
 )
 
 type skillCommand struct {

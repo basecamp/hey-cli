@@ -7,7 +7,7 @@ import (
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 
-	"hey-cli/internal/models"
+	"github.com/basecamp/hey-cli/internal/models"
 )
 
 type journalItem struct {
@@ -80,6 +80,9 @@ func (m journalModel) selectedRecording() *models.Recording {
 	if item == nil {
 		return nil
 	}
-	ji := item.(journalItem)
+	ji, ok := item.(journalItem)
+	if !ok {
+		return nil
+	}
 	return &ji.recording
 }

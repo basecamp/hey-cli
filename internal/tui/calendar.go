@@ -8,7 +8,7 @@ import (
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 
-	"hey-cli/internal/models"
+	"github.com/basecamp/hey-cli/internal/models"
 )
 
 type recordingItem struct {
@@ -86,6 +86,9 @@ func (m calendarModel) selectedRecording() *models.Recording {
 	if item == nil {
 		return nil
 	}
-	ri := item.(recordingItem)
+	ri, ok := item.(recordingItem)
+	if !ok {
+		return nil
+	}
 	return &ri.recording
 }

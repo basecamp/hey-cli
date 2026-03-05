@@ -50,7 +50,8 @@ func (c *recordingsCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	endsOn := c.endsOn
 	if endsOn == "" {
-		start, err := time.Parse("2006-01-02", startsOn)
+		var start time.Time
+		start, err = time.Parse("2006-01-02", startsOn)
 		if err != nil {
 			return fmt.Errorf("invalid starts-on date: %s", startsOn)
 		}

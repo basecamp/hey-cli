@@ -6,22 +6,26 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
-	"hey-cli/internal/auth"
-	"hey-cli/internal/client"
-	"hey-cli/internal/config"
+	"github.com/basecamp/hey-cli/internal/auth"
+	"github.com/basecamp/hey-cli/internal/client"
+	"github.com/basecamp/hey-cli/internal/config"
+	"github.com/basecamp/hey-cli/internal/version"
 )
 
 var (
-	jsonOutput bool
-	htmlOutput bool
-	baseURL    string
-	cfg        *config.Config
-	authMgr    *auth.Manager
-	apiClient  *client.Client
+	jsonOutput  bool
+	htmlOutput  bool
+	agentOutput bool
+	baseURL     string
+	cfg         *config.Config
+	authMgr     *auth.Manager
+	apiClient   *client.Client
 )
 
 var rootCmd = &cobra.Command{
@@ -55,7 +59,7 @@ var rootCmd = &cobra.Command{
 		apiClient = client.New(cfg.BaseURL, authMgr)
 
 		// Migrate old config credentials to new store
-		migrateOldCredentials(configDir)
+		migrateOldCredentials()
 
 		return nil
 	},
@@ -65,10 +69,13 @@ var rootCmd = &cobra.Command{
 }
 
 func Execute() {
-	rootCmd.CompletionOptions.HiddenDefaultCmd = true
+	rootCmd.Version = version.Full()
+	rootCmd.SetVersionTemplate("{{.Version}}\n")
 
 	rootCmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "Output raw JSON")
 	rootCmd.PersistentFlags().BoolVar(&htmlOutput, "html", false, "Output raw HTML (for commands that return HTML content)")
+	rootCmd.PersistentFlags().BoolVar(&agentOutput, "agent", false, "")
+	_ = rootCmd.PersistentFlags().MarkHidden("agent")
 	rootCmd.PersistentFlags().StringVar(&baseURL, "base-url", "", "Override server URL")
 
 	rootCmd.AddCommand(newAuthCommand().cmd)
@@ -87,6 +94,15 @@ func Execute() {
 	rootCmd.AddCommand(newTuiCommand().cmd)
 	rootCmd.AddCommand(newSkillCommand().cmd)
 
+	defaultHelp := rootCmd.HelpFunc()
+	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		if agentOutput {
+			agentHelpFunc(cmd, args)
+		} else {
+			defaultHelp(cmd, args)
+		}
+	})
+
 	err := rootCmd.Execute()
 	if err != nil {
 		if jsonOutput {
@@ -96,12 +112,58 @@ func Execute() {
 				obj["error"] = apiErr.Message
 				obj["status"] = apiErr.StatusCode
 			}
-			json.NewEncoder(os.Stdout).Encode(obj)
+			_ = json.NewEncoder(os.Stdout).Encode(obj)
 		} else {
 			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 		}
 		os.Exit(1)
 	}
+}
+
+func agentHelpFunc(cmd *cobra.Command, _ []string) {
+	type flagInfo struct {
+		Name string `json:"name"`
+		Type string `json:"type"`
+	}
+	type subInfo struct {
+		Name string `json:"name"`
+	}
+	type surface struct {
+		Name        string     `json:"name"`
+		Flags       []flagInfo `json:"flags,omitempty"`
+		Subcommands []subInfo  `json:"subcommands,omitempty"`
+	}
+
+	var flags []flagInfo
+	seen := make(map[string]bool)
+	addFlags := func(fs *pflag.FlagSet) {
+		fs.VisitAll(func(f *pflag.Flag) {
+			if f.Hidden || seen[f.Name] {
+				return
+			}
+			seen[f.Name] = true
+			flags = append(flags, flagInfo{Name: f.Name, Type: f.Value.Type()})
+		})
+	}
+	addFlags(cmd.PersistentFlags())
+	addFlags(cmd.LocalFlags())
+	addFlags(cmd.InheritedFlags())
+	sort.Slice(flags, func(i, j int) bool { return flags[i].Name < flags[j].Name })
+
+	var subs []subInfo
+	for _, c := range cmd.Commands() {
+		if c.IsAvailableCommand() {
+			subs = append(subs, subInfo{Name: c.Name()})
+		}
+	}
+	sort.Slice(subs, func(i, j int) bool { return subs[i].Name < subs[j].Name })
+
+	s := surface{
+		Name:        cmd.Name(),
+		Flags:       flags,
+		Subcommands: subs,
+	}
+	_ = json.NewEncoder(os.Stdout).Encode(s)
 }
 
 func requireAuth() error {
@@ -113,7 +175,7 @@ func requireAuth() error {
 
 // migrateOldCredentials migrates credentials from the old config.json format
 // to the new credential store (keyring or credentials.json).
-func migrateOldCredentials(configDir string) {
+func migrateOldCredentials() {
 	old, err := config.LoadOld()
 	if err != nil {
 		return

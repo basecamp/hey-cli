@@ -5,9 +5,9 @@ import (
 	"encoding/base64"
 	"fmt"
 	"image"
-	_ "image/gif"
-	_ "image/jpeg"
-	_ "image/png"
+	_ "image/gif"  // register GIF decoder for image.DecodeConfig
+	_ "image/jpeg" // register JPEG decoder
+	_ "image/png"  // register PNG decoder
 	"math"
 	"strings"
 )
@@ -29,13 +29,6 @@ var diacritics = []rune{
 }
 
 const placeholder = '\U0010EEEE'
-
-type kittyImage struct {
-	id   int
-	data []byte
-	cols int
-	rows int
-}
 
 // kittyUploadAndPlace returns escape sequences to upload image data and create
 // a virtual Unicode placement. The result should be sent via tea.Raw().

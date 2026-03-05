@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"hey-cli/skills"
+	"github.com/basecamp/hey-cli/skills"
 )
 
 func newSkillInstallCommand() *cobra.Command {

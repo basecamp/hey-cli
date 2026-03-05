@@ -6,8 +6,8 @@ type CalendarsResponse struct {
 }
 
 type CalendarWrapper struct {
-	Calendar           Calendar `json:"calendar"`
-	RecordingChangesURL string  `json:"recording_changes_url"`
+	Calendar            Calendar `json:"calendar"`
+	RecordingChangesURL string   `json:"recording_changes_url"`
 }
 
 type Calendar struct {
@@ -25,23 +25,23 @@ type Calendar struct {
 }
 
 type Recording struct {
-	ID                 int       `json:"id"`
-	ParentID           *int      `json:"parent_id"`
-	Title              string    `json:"title"`
-	AllDay             bool      `json:"all_day"`
-	Recurring          bool      `json:"recurring"`
-	StartsAt           string    `json:"starts_at"`
-	EndsAt             string    `json:"ends_at"`
-	StartsAtTimeZone   string    `json:"starts_at_time_zone"`
-	EndsAtTimeZone     string    `json:"ends_at_time_zone"`
-	CreatedAt          string    `json:"created_at"`
-	UpdatedAt          string    `json:"updated_at"`
-	Type               string    `json:"type"`
-	CompletedAt        string    `json:"completed_at,omitempty"`
-	Calendar           *Calendar `json:"calendar,omitempty"`
-	RemindersLabel     string    `json:"reminders_label,omitempty"`
-	OccurrencesURL     string    `json:"occurrences_url,omitempty"`
-	Content            string    `json:"content,omitempty"`
+	ID               int       `json:"id"`
+	ParentID         *int      `json:"parent_id"`
+	Title            string    `json:"title"`
+	AllDay           bool      `json:"all_day"`
+	Recurring        bool      `json:"recurring"`
+	StartsAt         string    `json:"starts_at"`
+	EndsAt           string    `json:"ends_at"`
+	StartsAtTimeZone string    `json:"starts_at_time_zone"`
+	EndsAtTimeZone   string    `json:"ends_at_time_zone"`
+	CreatedAt        string    `json:"created_at"`
+	UpdatedAt        string    `json:"updated_at"`
+	Type             string    `json:"type"`
+	CompletedAt      string    `json:"completed_at,omitempty"`
+	Calendar         *Calendar `json:"calendar,omitempty"`
+	RemindersLabel   string    `json:"reminders_label,omitempty"`
+	OccurrencesURL   string    `json:"occurrences_url,omitempty"`
+	Content          string    `json:"content,omitempty"`
 }
 
 type RecordingsResponse map[string][]Recording
