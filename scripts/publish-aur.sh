@@ -97,8 +97,8 @@ SSHEOF
 git clone ssh://aur@aur.archlinux.org/hey-cli.git aur-repo
 cp PKGBUILD .SRCINFO aur-repo/
 cd aur-repo
-git config user.name "hey-release-bot"
-git config user.email "hey-release-bot@users.noreply.github.com"
+git config user.name "cli-release-bot"
+git config user.email "cli-release-bot@users.noreply.github.com"
 git add PKGBUILD .SRCINFO
 if git diff --cached --quiet; then
   echo "AUR package already up to date for $VERSION"
