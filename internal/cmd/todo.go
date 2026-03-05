@@ -104,7 +104,7 @@ func (c *todoListCommand) run(cmd *cobra.Command, args []string) error {
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "add",
-				Command:     "hey todo add --title '...'",
+				Command:     "hey todo add '...'",
 				Description: "Add a new todo",
 			},
 			output.Breadcrumb{
@@ -127,15 +127,17 @@ type todoAddCommand struct {
 func newTodoAddCommand() *todoAddCommand {
 	todoAddCommand := &todoAddCommand{}
 	todoAddCommand.cmd = &cobra.Command{
-		Use:   "add",
+		Use:   "add [title]",
 		Short: "Create a new todo",
-		Example: `  hey todo add --title "Buy groceries"
-  hey todo add --title "Meeting prep" --date 2024-01-20
-  hey todo add --title "Review PR" --json`,
+		Example: `  hey todo add "Buy groceries"
+  hey todo add -t "Meeting prep" --date 2024-01-20
+  hey todo add --title "Review PR" --json
+  echo "Buy milk" | hey todo add`,
 		RunE: todoAddCommand.run,
+		Args: cobra.MaximumNArgs(1),
 	}
 
-	todoAddCommand.cmd.Flags().StringVar(&todoAddCommand.title, "title", "", "Todo title (required)")
+	todoAddCommand.cmd.Flags().StringVarP(&todoAddCommand.title, "title", "t", "", "Todo title")
 	todoAddCommand.cmd.Flags().StringVar(&todoAddCommand.date, "date", "", "Due date (YYYY-MM-DD)")
 
 	return todoAddCommand
@@ -146,11 +148,26 @@ func (c *todoAddCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if c.title == "" {
-		return output.ErrUsageHint("--title is required", "hey todo add --title 'Buy groceries'")
+	title := c.title
+	if title != "" && len(args) > 0 {
+		return output.ErrUsage("--title and positional argument are mutually exclusive")
+	}
+	if title == "" && len(args) > 0 {
+		title = args[0]
+	}
+	if title == "" && !stdinIsTerminal() {
+		var err error
+		title, err = readStdin()
+		if err != nil {
+			return err
+		}
+	}
+	if title == "" {
+		return output.ErrUsageHint("title is required",
+			"hey todo add \"Buy milk\"  or  hey todo add --title \"Buy milk\"")
 	}
 
-	body := map[string]any{"title": c.title}
+	body := map[string]any{"title": title}
 	if c.date != "" {
 		body["starts_at"] = c.date
 	}
