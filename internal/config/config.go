@@ -84,7 +84,11 @@ func CacheDir() string {
 }
 
 func globalConfigPath() string {
-	return filepath.Join(ConfigDir(), configFile)
+	dir := ConfigDir()
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, configFile)
 }
 
 func localConfigPath() string {

@@ -75,7 +75,7 @@ func (c *journalListCommand) run(cmd *cobra.Command, args []string) error {
 
 	if writer.IsStyled() {
 		if len(entries) == 0 {
-			fmt.Println("No journal entries.")
+			fmt.Fprintln(cmd.OutOrStdout(), "No journal entries.")
 			return nil
 		}
 
@@ -147,16 +147,17 @@ func (c *journalReadCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if writer.IsStyled() {
+		w := cmd.OutOrStdout()
 		if htmlOutput {
-			fmt.Println(entry.Body)
+			fmt.Fprintln(w, entry.Body)
 			return nil
 		}
 
-		fmt.Printf("Journal — %s\n\n", date)
+		fmt.Fprintf(w, "Journal — %s\n\n", date)
 		if entry.Body != "" {
-			fmt.Println(htmlutil.ToText(entry.Body))
+			fmt.Fprintln(w, htmlutil.ToText(entry.Body))
 		} else {
-			fmt.Println("(empty)")
+			fmt.Fprintln(w, "(empty)")
 		}
 		return nil
 	}
@@ -238,7 +239,7 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if writer.IsStyled() {
-		fmt.Printf("Journal entry for %s saved.%s\n", date, extractMutationInfo(data))
+		fmt.Fprintf(cmd.OutOrStdout(), "Journal entry for %s saved.%s\n", date, extractMutationInfo(data))
 		return nil
 	}
 

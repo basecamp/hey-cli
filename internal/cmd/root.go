@@ -87,7 +87,7 @@ func newRootCmd() *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !stdinIsTerminal() {
+			if !stdinIsTerminal() || !stdoutIsTerminal() {
 				return cmd.Help()
 			}
 			if err := requireAuth(); err != nil {
@@ -155,7 +155,7 @@ func Execute() {
 	if err != nil {
 		err = normalizeCobraError(err)
 		if writer == nil {
-			writer = output.New(output.Options{Format: output.FormatJSON})
+			writer = output.New(output.Options{Format: output.FormatAuto})
 		}
 		writer.Err(err)
 		os.Exit(output.ExitCodeFor(err))
@@ -297,7 +297,7 @@ func printAgentHelp(cmd *cobra.Command) {
 		info["subcommands"] = subs
 	}
 
-	enc := json.NewEncoder(os.Stdout)
+	enc := json.NewEncoder(cmd.OutOrStdout())
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(info)
 }

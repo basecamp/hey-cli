@@ -52,7 +52,7 @@ func (c *draftsCommand) run(cmd *cobra.Command, args []string) error {
 
 	if writer.IsStyled() {
 		if len(drafts) == 0 {
-			fmt.Println("No drafts.")
+			fmt.Fprintln(cmd.OutOrStdout(), "No drafts.")
 			return nil
 		}
 

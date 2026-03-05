@@ -91,6 +91,10 @@ func stdinIsTerminal() bool {
 	return term.IsTerminal(int(os.Stdin.Fd())) //nolint:gosec // G115: fd fits in int
 }
 
+func stdoutIsTerminal() bool {
+	return term.IsTerminal(int(os.Stdout.Fd())) //nolint:gosec // G115: fd fits in int
+}
+
 func readStdin() (string, error) {
 	data, err := io.ReadAll(os.Stdin)
 	if err != nil {

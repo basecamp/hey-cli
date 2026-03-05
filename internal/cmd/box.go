@@ -63,7 +63,7 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 	notice := output.TruncationNotice(len(postings), total)
 
 	if writer.IsStyled() {
-		fmt.Printf("Box: %s (%s)\n\n", resp.Box.Name, resp.Box.Kind)
+		fmt.Fprintf(cmd.OutOrStdout(), "Box: %s (%s)\n\n", resp.Box.Name, resp.Box.Kind)
 
 		table := newTable(cmd.OutOrStdout())
 		table.addRow([]string{"Topic", "From", "Summary", "Date"})

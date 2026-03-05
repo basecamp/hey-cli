@@ -95,7 +95,7 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if writer.IsStyled() {
-		fmt.Printf("Message sent.%s\n", extractMutationInfo(data))
+		fmt.Fprintf(cmd.OutOrStdout(), "Message sent.%s\n", extractMutationInfo(data))
 		return nil
 	}
 

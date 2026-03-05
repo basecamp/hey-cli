@@ -47,9 +47,10 @@ func (c *topicCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if writer.IsStyled() {
+		w := cmd.OutOrStdout()
 		for i, e := range entries {
 			if i > 0 {
-				fmt.Println(strings.Repeat("─", 60))
+				fmt.Fprintln(w, strings.Repeat("─", 60))
 			}
 			from := e.Creator.Name
 			if from == "" {
@@ -62,18 +63,18 @@ func (c *topicCommand) run(cmd *cobra.Command, args []string) error {
 			if len(e.CreatedAt) >= 16 {
 				date = e.CreatedAt[:16]
 			}
-			fmt.Printf("From: %s  [%s]  #%d\n", from, date, e.ID)
+			fmt.Fprintf(w, "From: %s  [%s]  #%d\n", from, date, e.ID)
 			if e.Summary != "" {
-				fmt.Println(e.Summary)
+				fmt.Fprintln(w, e.Summary)
 			}
 			if htmlOutput && e.BodyHTML != "" {
-				fmt.Println()
-				fmt.Println(e.BodyHTML)
+				fmt.Fprintln(w)
+				fmt.Fprintln(w, e.BodyHTML)
 			} else if e.Body != "" {
-				fmt.Println()
-				fmt.Println(e.Body)
+				fmt.Fprintln(w)
+				fmt.Fprintln(w, e.Body)
 			}
-			fmt.Println()
+			fmt.Fprintln(w)
 		}
 		return nil
 	}

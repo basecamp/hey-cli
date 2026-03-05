@@ -23,6 +23,7 @@ func newDoctorCommand() *cobra.Command {
 			checks := runDoctorChecks()
 
 			if writer.IsStyled() {
+				w := cmd.OutOrStdout()
 				allOK := true
 				for _, c := range checks {
 					icon := "ok"
@@ -31,10 +32,10 @@ func newDoctorCommand() *cobra.Command {
 						icon = "!!"
 						allOK = false
 					}
-					fmt.Printf("[%s] %s: %s\n", icon, c["name"], c["message"])
+					fmt.Fprintf(w, "[%s] %s: %s\n", icon, c["name"], c["message"])
 				}
 				if allOK {
-					fmt.Println("\nAll checks passed.")
+					fmt.Fprintln(w, "\nAll checks passed.")
 				}
 				return nil
 			}

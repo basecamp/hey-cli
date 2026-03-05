@@ -60,7 +60,7 @@ func (c *timetrackStartCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if writer.IsStyled() {
-		fmt.Printf("Time tracking started.%s\n", extractMutationInfo(data))
+		fmt.Fprintf(cmd.OutOrStdout(), "Time tracking started.%s\n", extractMutationInfo(data))
 		return nil
 	}
 
@@ -117,7 +117,7 @@ func (c *timetrackStopCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if writer.IsStyled() {
-		fmt.Printf("Time tracking stopped.%s\n", extractMutationInfo(result))
+		fmt.Fprintf(cmd.OutOrStdout(), "Time tracking stopped.%s\n", extractMutationInfo(result))
 		return nil
 	}
 
@@ -158,8 +158,9 @@ func (c *timetrackCurrentCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if writer.IsStyled() {
+		w := cmd.OutOrStdout()
 		if track.ID == 0 {
-			fmt.Println("No active time track.")
+			fmt.Fprintln(w, "No active time track.")
 			return nil
 		}
 
@@ -167,10 +168,10 @@ func (c *timetrackCurrentCommand) run(cmd *cobra.Command, args []string) error {
 		if len(track.StartsAt) >= 16 {
 			starts = track.StartsAt[:16]
 		}
-		fmt.Printf("Active time track #%d\n", track.ID)
-		fmt.Printf("Started: %s\n", starts)
+		fmt.Fprintf(w, "Active time track #%d\n", track.ID)
+		fmt.Fprintf(w, "Started: %s\n", starts)
 		if track.Title != "" {
-			fmt.Printf("Title:   %s\n", track.Title)
+			fmt.Fprintf(w, "Title:   %s\n", track.Title)
 		}
 		return nil
 	}
@@ -228,7 +229,7 @@ func (c *timetrackListCommand) run(cmd *cobra.Command, args []string) error {
 
 	if writer.IsStyled() {
 		if len(tracks) == 0 {
-			fmt.Println("No time tracks.")
+			fmt.Fprintln(cmd.OutOrStdout(), "No time tracks.")
 			return nil
 		}
 

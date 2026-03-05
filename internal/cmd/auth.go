@@ -61,7 +61,7 @@ Opens a browser for OAuth authentication. Use --token or --cookie for non-intera
 					return output.ErrAuth(fmt.Sprintf("could not save token: %v", err))
 				}
 				if writer.IsStyled() {
-					fmt.Println("Logged in with token.")
+					fmt.Fprintln(cmd.OutOrStdout(), "Logged in with token.")
 					return nil
 				}
 				return writeOK(map[string]string{"method": "token"}, output.WithSummary("Logged in with token"))
@@ -72,7 +72,7 @@ Opens a browser for OAuth authentication. Use --token or --cookie for non-intera
 					return output.ErrAuth(fmt.Sprintf("could not save cookie: %v", err))
 				}
 				if writer.IsStyled() {
-					fmt.Println("Logged in with session cookie.")
+					fmt.Fprintln(cmd.OutOrStdout(), "Logged in with session cookie.")
 					return nil
 				}
 				return writeOK(map[string]string{"method": "cookie"}, output.WithSummary("Logged in with session cookie"))
@@ -86,7 +86,7 @@ Opens a browser for OAuth authentication. Use --token or --cookie for non-intera
 			}
 
 			if writer.IsStyled() {
-				fmt.Println("Logged in successfully.")
+				fmt.Fprintln(cmd.OutOrStdout(), "Logged in successfully.")
 				return nil
 			}
 			return writeOK(map[string]string{"method": "oauth"}, output.WithSummary("Logged in successfully"))
@@ -111,7 +111,7 @@ func newAuthLogoutCommand() *cobra.Command {
 				return output.ErrAuth(fmt.Sprintf("could not clear credentials: %v", err))
 			}
 			if writer.IsStyled() {
-				fmt.Println("Logged out.")
+				fmt.Fprintln(cmd.OutOrStdout(), "Logged out.")
 				return nil
 			}
 			return writeOK(nil, output.WithSummary("Logged out"))
@@ -136,8 +136,9 @@ func newAuthStatusCommand() *cobra.Command {
 				status["method"] = "env_var"
 
 				if writer.IsStyled() {
-					fmt.Printf("Base URL:  %s\n", cfg.BaseURL)
-					fmt.Println("Status:    Logged in (via HEY_TOKEN env var)")
+					w := cmd.OutOrStdout()
+					fmt.Fprintf(w, "Base URL:  %s\n", cfg.BaseURL)
+					fmt.Fprintln(w, "Status:    Logged in (via HEY_TOKEN env var)")
 					return nil
 				}
 				return writeOK(status, output.WithSummary("Logged in via HEY_TOKEN"))
@@ -147,8 +148,9 @@ func newAuthStatusCommand() *cobra.Command {
 			creds, err := store.Load(authMgr.CredentialKey())
 			if err != nil || (creds.AccessToken == "" && creds.SessionCookie == "") {
 				if writer.IsStyled() {
-					fmt.Printf("Base URL:  %s\n", cfg.BaseURL)
-					fmt.Println("Status:    Not logged in")
+					w := cmd.OutOrStdout()
+					fmt.Fprintf(w, "Base URL:  %s\n", cfg.BaseURL)
+					fmt.Fprintln(w, "Status:    Not logged in")
 					return nil
 				}
 				return writeOK(status, output.WithSummary("Not logged in"),
@@ -179,40 +181,41 @@ func newAuthStatusCommand() *cobra.Command {
 			}
 
 			if writer.IsStyled() {
-				fmt.Printf("Base URL:  %s\n", cfg.BaseURL)
-				fmt.Println("Status:    Logged in")
+				w := cmd.OutOrStdout()
+				fmt.Fprintf(w, "Base URL:  %s\n", cfg.BaseURL)
+				fmt.Fprintln(w, "Status:    Logged in")
 
 				if creds.OAuthType != "" {
-					fmt.Printf("Auth:      %s\n", creds.OAuthType)
+					fmt.Fprintf(w, "Auth:      %s\n", creds.OAuthType)
 				}
 
 				token := creds.AccessToken
 				if len(token) > 12 {
-					fmt.Printf("Token:     %s...%s\n", token[:8], token[len(token)-4:])
+					fmt.Fprintf(w, "Token:     %s...%s\n", token[:8], token[len(token)-4:])
 				} else if creds.SessionCookie != "" {
 					cookie := creds.SessionCookie
 					if len(cookie) > 12 {
-						fmt.Printf("Cookie:    %s...%s\n", cookie[:8], cookie[len(cookie)-4:])
+						fmt.Fprintf(w, "Cookie:    %s...%s\n", cookie[:8], cookie[len(cookie)-4:])
 					}
 				}
 
 				if creds.ExpiresAt > 0 {
 					expiry := time.Unix(creds.ExpiresAt, 0)
 					if time.Now().After(expiry) {
-						fmt.Printf("Expiry:    Expired (%s)\n", expiry.Format(time.RFC3339))
+						fmt.Fprintf(w, "Expiry:    Expired (%s)\n", expiry.Format(time.RFC3339))
 					} else {
-						fmt.Printf("Expiry:    %s\n", expiry.Format(time.RFC3339))
+						fmt.Fprintf(w, "Expiry:    %s\n", expiry.Format(time.RFC3339))
 					}
 				}
 
 				if creds.RefreshToken != "" {
-					fmt.Println("Refresh:   Available")
+					fmt.Fprintln(w, "Refresh:   Available")
 				}
 
 				if store.UsingKeyring() {
-					fmt.Println("Storage:   system keyring")
+					fmt.Fprintln(w, "Storage:   system keyring")
 				} else {
-					fmt.Println("Storage:   file")
+					fmt.Fprintln(w, "Storage:   file")
 				}
 				return nil
 			}
@@ -234,7 +237,7 @@ func newAuthRefreshCommand() *cobra.Command {
 				return output.ErrAuth(fmt.Sprintf("refresh failed: %v", err))
 			}
 			if writer.IsStyled() {
-				fmt.Println("Token refreshed.")
+				fmt.Fprintln(cmd.OutOrStdout(), "Token refreshed.")
 				return nil
 			}
 			return writeOK(nil, output.WithSummary("Token refreshed"))
@@ -253,7 +256,7 @@ func newAuthTokenCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !stored {
 				if envToken := os.Getenv("HEY_TOKEN"); envToken != "" {
-					fmt.Print(envToken)
+					fmt.Fprint(cmd.OutOrStdout(), envToken)
 					return nil
 				}
 			}
@@ -263,7 +266,7 @@ func newAuthTokenCommand() *cobra.Command {
 			if err != nil {
 				return output.ErrAuth(fmt.Sprintf("could not get token: %v", err))
 			}
-			fmt.Print(token)
+			fmt.Fprint(cmd.OutOrStdout(), token)
 			return nil
 		},
 	}

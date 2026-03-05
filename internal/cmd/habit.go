@@ -68,7 +68,7 @@ func (c *habitCompleteCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if writer.IsStyled() {
-		fmt.Printf("Habit %s completed for %s.%s\n", args[0], date, extractMutationInfo(data))
+		fmt.Fprintf(cmd.OutOrStdout(), "Habit %s completed for %s.%s\n", args[0], date, extractMutationInfo(data))
 		return nil
 	}
 
@@ -118,7 +118,7 @@ func (c *habitUncompleteCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if writer.IsStyled() {
-		fmt.Printf("Habit %s uncompleted for %s.%s\n", args[0], date, extractMutationInfo(data))
+		fmt.Fprintf(cmd.OutOrStdout(), "Habit %s uncompleted for %s.%s\n", args[0], date, extractMutationInfo(data))
 		return nil
 	}
 

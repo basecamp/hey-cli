@@ -74,7 +74,7 @@ func (c *todoListCommand) run(cmd *cobra.Command, args []string) error {
 
 	if writer.IsStyled() {
 		if len(todos) == 0 {
-			fmt.Println("No todos.")
+			fmt.Fprintln(cmd.OutOrStdout(), "No todos.")
 			return nil
 		}
 
@@ -161,7 +161,7 @@ func (c *todoAddCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if writer.IsStyled() {
-		fmt.Printf("Todo created.%s\n", extractMutationInfo(data))
+		fmt.Fprintf(cmd.OutOrStdout(), "Todo created.%s\n", extractMutationInfo(data))
 		return nil
 	}
 
@@ -202,7 +202,7 @@ func (c *todoCompleteCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if writer.IsStyled() {
-		fmt.Printf("Todo completed.%s\n", extractMutationInfo(data))
+		fmt.Fprintf(cmd.OutOrStdout(), "Todo completed.%s\n", extractMutationInfo(data))
 		return nil
 	}
 
@@ -243,7 +243,7 @@ func (c *todoUncompleteCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if writer.IsStyled() {
-		fmt.Printf("Todo marked incomplete.%s\n", extractMutationInfo(data))
+		fmt.Fprintf(cmd.OutOrStdout(), "Todo marked incomplete.%s\n", extractMutationInfo(data))
 		return nil
 	}
 
@@ -284,7 +284,7 @@ func (c *todoDeleteCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if writer.IsStyled() {
-		fmt.Printf("Todo deleted.%s\n", extractMutationInfo(data))
+		fmt.Fprintf(cmd.OutOrStdout(), "Todo deleted.%s\n", extractMutationInfo(data))
 		return nil
 	}
 

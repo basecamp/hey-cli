@@ -10,6 +10,9 @@ import (
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
+// TestBareHeyShowsHelpWithoutTTY verifies that bare `hey` falls back to help
+// when either stdin or stdout is not a terminal (e.g. `hey | head`, cron,
+// CI pipelines). In test context neither fd is a TTY, covering both gates.
 func TestBareHeyShowsHelpWithoutTTY(t *testing.T) {
 	root := newRootCmd()
 	var buf bytes.Buffer

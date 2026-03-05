@@ -83,7 +83,7 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if writer.IsStyled() {
-		fmt.Printf("Reply sent.%s\n", extractMutationInfo(data))
+		fmt.Fprintf(cmd.OutOrStdout(), "Reply sent.%s\n", extractMutationInfo(data))
 		return nil
 	}
 

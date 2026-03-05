@@ -22,7 +22,7 @@ func newSetupCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if authMgr.IsAuthenticated() {
 				if writer.IsStyled() {
-					fmt.Println("Already authenticated. Run `hey auth status` for details.")
+					fmt.Fprintln(cmd.OutOrStdout(), "Already authenticated. Run `hey auth status` for details.")
 					return nil
 				}
 				return writeOK(map[string]string{"status": "already_authenticated"},
@@ -31,10 +31,11 @@ func newSetupCommand() *cobra.Command {
 			}
 
 			if writer.IsStyled() {
-				fmt.Println("Welcome to hey CLI!")
-				fmt.Println()
-				fmt.Println("Let's get you logged in...")
-				fmt.Println()
+				w := cmd.OutOrStdout()
+				fmt.Fprintln(w, "Welcome to hey CLI!")
+				fmt.Fprintln(w)
+				fmt.Fprintln(w, "Let's get you logged in...")
+				fmt.Fprintln(w)
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
@@ -45,9 +46,10 @@ func newSetupCommand() *cobra.Command {
 			}
 
 			if writer.IsStyled() {
-				fmt.Println("Setup complete! You're ready to use hey.")
-				fmt.Println()
-				fmt.Println("Try: hey boxes")
+				w := cmd.OutOrStdout()
+				fmt.Fprintln(w, "Setup complete! You're ready to use hey.")
+				fmt.Fprintln(w)
+				fmt.Fprintln(w, "Try: hey boxes")
 				return nil
 			}
 
