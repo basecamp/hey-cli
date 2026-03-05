@@ -96,7 +96,7 @@ CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos,
 | List time entries | `hey timetrack list --json` |
 | List journal entries | `hey journal list --json` |
 | Read journal entry | `hey journal read 2024-03-15 --json` |
-| Write journal entry | `hey journal write -m "Today was great"` |
+| Write journal entry | `hey journal write "Today was great"` |
 | Check auth status | `hey auth status` |
 | Print access token | `hey auth token` |
 | Launch TUI | `hey` |
@@ -184,7 +184,7 @@ hey recordings 123 --json                     # List events in calendar
 
 ```bash
 hey todo list --json                          # List all todos
-hey todo add "Task description"               # Add a todo
+hey todo add "Task description"                        # Add a todo
 hey todo complete 123                         # Mark complete
 hey todo uncomplete 123                       # Mark incomplete
 hey todo delete 123                           # Delete a todo
@@ -211,7 +211,7 @@ hey timetrack list --json                     # List time entries
 ```bash
 hey journal list --json                       # List journal entries
 hey journal read 2024-03-15 --json            # Read entry by date
-hey journal write -m "Today's entry"          # Write entry inline
+hey journal write "Today's entry"                     # Write entry inline
 hey journal write                             # Write entry via $EDITOR
 ```
 

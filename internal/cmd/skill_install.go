@@ -7,7 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"hey-cli/skills"
+	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/skills"
 )
 
 func newSkillInstallCommand() *cobra.Command {
@@ -22,7 +23,7 @@ func newSkillInstallCommand() *cobra.Command {
 func runSkillInstall(cmd *cobra.Command, args []string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("getting home directory: %w", err)
+		return output.ErrAPI(0, fmt.Sprintf("getting home directory: %v", err))
 	}
 
 	skillDir := filepath.Join(home, ".agents", "skills", "hey")
@@ -33,28 +34,35 @@ func runSkillInstall(cmd *cobra.Command, args []string) error {
 	// Read embedded SKILL.md
 	data, err := skills.FS.ReadFile("hey/SKILL.md")
 	if err != nil {
-		return fmt.Errorf("reading embedded skill: %w", err)
+		return output.ErrAPI(0, fmt.Sprintf("reading embedded skill: %v", err))
 	}
 
 	// Create skill directory and write file
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
-		return fmt.Errorf("creating skill directory: %w", err)
+		return output.ErrAPI(0, fmt.Sprintf("creating skill directory: %v", err))
 	}
 	if err := os.WriteFile(skillFile, data, 0o644); err != nil {
-		return fmt.Errorf("writing skill file: %w", err)
+		return output.ErrAPI(0, fmt.Sprintf("writing skill file: %v", err))
 	}
 
 	// Create symlink directory and symlink
 	if err := os.MkdirAll(symlinkDir, 0o755); err != nil {
-		return fmt.Errorf("creating symlink directory: %w", err)
+		return output.ErrAPI(0, fmt.Sprintf("creating symlink directory: %v", err))
 	}
 	// Remove existing symlink/file if present
 	os.Remove(symlinkPath)
 	if err := os.Symlink(filepath.Join("..", "..", ".agents", "skills", "hey"), symlinkPath); err != nil {
-		return fmt.Errorf("creating symlink: %w", err)
+		return output.ErrAPI(0, fmt.Sprintf("creating symlink: %v", err))
 	}
 
-	fmt.Fprintln(cmd.OutOrStdout(), "Installed hey skill to ~/.agents/skills/hey/SKILL.md")
-	fmt.Fprintln(cmd.OutOrStdout(), "Symlinked ~/.claude/skills/hey → ../../.agents/skills/hey")
-	return nil
+	if writer.IsStyled() {
+		fmt.Fprintln(cmd.OutOrStdout(), "Installed hey skill to ~/.agents/skills/hey/SKILL.md")
+		fmt.Fprintln(cmd.OutOrStdout(), "Symlinked ~/.claude/skills/hey → ../../.agents/skills/hey")
+		return nil
+	}
+
+	return writeOK(map[string]string{
+		"skill_path":   skillFile,
+		"symlink_path": symlinkPath,
+	}, output.WithSummary("hey skill installed"))
 }

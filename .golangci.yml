@@ -1,0 +1,86 @@
+version: "2"
+
+run:
+  build-tags:
+    - integration
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - gosec
+    - errorlint
+    - misspell
+    - prealloc
+    - unconvert
+    - unparam
+    - revive
+    - nilerr
+    - noctx
+    - bodyclose
+    - durationcheck
+    - errname
+    - exhaustive
+    - predeclared
+    - wastedassign
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    exhaustive:
+      default-signifies-exhaustive: true
+    gosec:
+      excludes:
+        - G304
+        - G704
+        - G705
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: exported
+          disabled: true
+        - name: increment-decrement
+        - name: var-naming
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+        - name: empty-block
+        - name: superfluous-else
+        - name: unreachable-code
+
+  exclusions:
+    presets:
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - errorlint
+          - govet
+      - path: internal/config/
+        linters:
+          - gosec
+      - path: internal/cmd/skill
+        linters:
+          - gosec
+      - path: internal/version/
+        linters:
+          - revive
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

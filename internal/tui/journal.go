@@ -1,13 +1,13 @@
 package tui
 
 import (
-	"sort"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 
-	"hey-cli/internal/models"
+	"github.com/basecamp/hey-cli/internal/models"
 )
 
 type journalItem struct {
@@ -50,8 +50,8 @@ func (m *journalModel) setItems(recordings []models.Recording) tea.Cmd {
 		}
 	}
 
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].StartsAt > entries[j].StartsAt
+	slices.SortFunc(entries, func(a, b models.Recording) int {
+		return strings.Compare(b.StartsAt, a.StartsAt)
 	})
 
 	items := make([]list.Item, len(entries))
@@ -80,6 +80,9 @@ func (m journalModel) selectedRecording() *models.Recording {
 	if item == nil {
 		return nil
 	}
-	ji := item.(journalItem)
+	ji, ok := item.(journalItem)
+	if !ok {
+		return nil
+	}
 	return &ji.recording
 }

@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/basecamp/hey-cli/internal/output"
 )
 
 type recordingsCommand struct {
@@ -13,6 +15,7 @@ type recordingsCommand struct {
 	startsOn string
 	endsOn   string
 	limit    int
+	all      bool
 }
 
 func newRecordingsCommand() *recordingsCommand {
@@ -20,16 +23,20 @@ func newRecordingsCommand() *recordingsCommand {
 	recordingsCommand.cmd = &cobra.Command{
 		Use:   "recordings <calendar-id>",
 		Short: "List recordings (events, todos, etc.) for a calendar",
+		Annotations: map[string]string{
+			"agent_notes": "Returns recordings grouped by type for a calendar. Defaults to today + 30 days.",
+		},
 		Example: `  hey recordings 123
   hey recordings 123 --starts-on 2024-01-01 --ends-on 2024-01-31
   hey recordings 123 --limit 5 --json`,
 		RunE: recordingsCommand.run,
-		Args: usageExactArgs(1),
+		Args: usageExactOneArg(),
 	}
 
 	recordingsCommand.cmd.Flags().StringVar(&recordingsCommand.startsOn, "starts-on", "", "Start date (YYYY-MM-DD, defaults to today)")
 	recordingsCommand.cmd.Flags().StringVar(&recordingsCommand.endsOn, "ends-on", "", "End date (YYYY-MM-DD, defaults to 30 days from starts-on)")
 	recordingsCommand.cmd.Flags().IntVar(&recordingsCommand.limit, "limit", 0, "Maximum number of recordings per type to show")
+	recordingsCommand.cmd.Flags().BoolVar(&recordingsCommand.all, "all", false, "Fetch all results (override --limit)")
 
 	return recordingsCommand
 }
@@ -41,7 +48,7 @@ func (c *recordingsCommand) run(cmd *cobra.Command, args []string) error {
 
 	calendarID, err := strconv.Atoi(args[0])
 	if err != nil {
-		return fmt.Errorf("invalid calendar ID: %s", args[0])
+		return output.ErrUsage(fmt.Sprintf("invalid calendar ID: %s", args[0]))
 	}
 
 	startsOn := c.startsOn
@@ -50,9 +57,10 @@ func (c *recordingsCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	endsOn := c.endsOn
 	if endsOn == "" {
-		start, err := time.Parse("2006-01-02", startsOn)
+		var start time.Time
+		start, err = time.Parse("2006-01-02", startsOn)
 		if err != nil {
-			return fmt.Errorf("invalid starts-on date: %s", startsOn)
+			return output.ErrUsage(fmt.Sprintf("invalid starts-on date: %s", startsOn))
 		}
 		endsOn = start.AddDate(0, 0, 30).Format("2006-01-02")
 	}
@@ -62,38 +70,51 @@ func (c *recordingsCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if c.limit > 0 {
+	var total, shown int
+	for _, recordings := range resp {
+		total += len(recordings)
+	}
+	if c.limit > 0 && !c.all {
 		for key, recordings := range resp {
 			if len(recordings) > c.limit {
 				resp[key] = recordings[:c.limit]
 			}
 		}
 	}
+	for _, recordings := range resp {
+		shown += len(recordings)
+	}
+	notice := output.TruncationNotice(shown, total)
 
-	if jsonOutput {
-		return printJSON(resp)
+	if writer.IsStyled() {
+		for recType, recordings := range resp {
+			if len(recordings) == 0 {
+				continue
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "\n%s:\n", recType)
+			table := newTable(cmd.OutOrStdout())
+			table.addRow([]string{"ID", "Title", "Starts", "Ends"})
+			for _, r := range recordings {
+				starts := ""
+				if len(r.StartsAt) >= 16 {
+					starts = r.StartsAt[:16]
+				}
+				ends := ""
+				if len(r.EndsAt) >= 16 {
+					ends = r.EndsAt[:16]
+				}
+				table.addRow([]string{fmt.Sprintf("%d", r.ID), r.Title, starts, ends})
+			}
+			table.print()
+		}
+		if notice != "" {
+			fmt.Fprintln(cmd.OutOrStdout(), notice)
+		}
+		return nil
 	}
 
-	for recType, recordings := range resp {
-		if len(recordings) == 0 {
-			continue
-		}
-		fmt.Printf("\n%s:\n", recType)
-		table := newTable()
-		table.addRow([]string{"ID", "Title", "Starts", "Ends"})
-		for _, r := range recordings {
-			starts := ""
-			if len(r.StartsAt) >= 16 {
-				starts = r.StartsAt[:16]
-			}
-			ends := ""
-			if len(r.EndsAt) >= 16 {
-				ends = r.EndsAt[:16]
-			}
-			table.addRow([]string{fmt.Sprintf("%d", r.ID), r.Title, starts, ends})
-		}
-		table.print()
-	}
-
-	return nil
+	return writeOK(resp,
+		output.WithSummary(fmt.Sprintf("Recordings for calendar %d (%s to %s)", calendarID, startsOn, endsOn)),
+		output.WithNotice(notice),
+	)
 }

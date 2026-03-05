@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 
 	"github.com/zalando/go-keyring"
 )
@@ -14,8 +15,8 @@ const serviceName = "hey"
 
 // Credentials holds OAuth tokens and metadata.
 type Credentials struct {
-	AccessToken   string `json:"access_token"`
-	RefreshToken  string `json:"refresh_token"`
+	AccessToken   string `json:"access_token"`  //nolint:gosec // G117: legitimate credential field
+	RefreshToken  string `json:"refresh_token"` //nolint:gosec // G117: legitimate credential field
 	ExpiresAt     int64  `json:"expires_at"`
 	OAuthType     string `json:"oauth_type"`
 	TokenEndpoint string `json:"token_endpoint"`
@@ -24,26 +25,36 @@ type Credentials struct {
 
 // Store handles credential storage, preferring system keychain.
 type Store struct {
+	initOnce    sync.Once
 	useKeyring  bool
+	noKeyring   bool
 	fallbackDir string
 }
 
-// NewStore creates a credential store.
+// NewStore creates a credential store. Keyring availability is probed lazily
+// on first credential operation, not at construction time.
 func NewStore(fallbackDir string) *Store {
-	if os.Getenv("HEY_NO_KEYRING") != "" {
-		return &Store{useKeyring: false, fallbackDir: fallbackDir}
+	return &Store{
+		fallbackDir: fallbackDir,
+		noKeyring:   os.Getenv("HEY_NO_KEYRING") != "",
 	}
+}
 
-	// Test if keyring is available
-	testKey := "hey::test"
-	err := keyring.Set(serviceName, testKey, "test")
-	if err == nil {
-		_ = keyring.Delete(serviceName, testKey)
-		return &Store{useKeyring: true, fallbackDir: fallbackDir}
-	}
-	fmt.Fprintf(os.Stderr, "warning: system keyring unavailable, credentials stored in plaintext at %s\n",
-		filepath.Join(fallbackDir, "credentials.json"))
-	return &Store{useKeyring: false, fallbackDir: fallbackDir}
+func (s *Store) ensureInit() {
+	s.initOnce.Do(func() {
+		if s.noKeyring {
+			return
+		}
+		testKey := "hey::test"
+		err := keyring.Set(serviceName, testKey, "test")
+		if err == nil {
+			_ = keyring.Delete(serviceName, testKey)
+			s.useKeyring = true
+			return
+		}
+		fmt.Fprintf(os.Stderr, "warning: system keyring unavailable, credentials stored in plaintext at %s\n",
+			filepath.Join(s.fallbackDir, "credentials.json"))
+	})
 }
 
 func key(origin string) string {
@@ -52,6 +63,7 @@ func key(origin string) string {
 
 // Load retrieves credentials for the given origin.
 func (s *Store) Load(origin string) (*Credentials, error) {
+	s.ensureInit()
 	if s.useKeyring {
 		return s.loadFromKeyring(origin)
 	}
@@ -60,6 +72,7 @@ func (s *Store) Load(origin string) (*Credentials, error) {
 
 // Save stores credentials for the given origin.
 func (s *Store) Save(origin string, creds *Credentials) error {
+	s.ensureInit()
 	if s.useKeyring {
 		return s.saveToKeyring(origin, creds)
 	}
@@ -68,6 +81,7 @@ func (s *Store) Save(origin string, creds *Credentials) error {
 
 // Delete removes credentials for the given origin.
 func (s *Store) Delete(origin string) error {
+	s.ensureInit()
 	if s.useKeyring {
 		return keyring.Delete(serviceName, key(origin))
 	}
@@ -132,27 +146,27 @@ func (s *Store) saveAllToFile(all map[string]*Credentials) error {
 	tmpPath := tmpFile.Name()
 
 	if _, err := tmpFile.Write(data); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpPath)
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath) //nolint:gosec // G703: path from os.CreateTemp
 		return err
 	}
 	if err := tmpFile.Chmod(0600); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpPath)
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath) //nolint:gosec // G703: path from os.CreateTemp
 		return err
 	}
 	if err := tmpFile.Close(); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath) //nolint:gosec // G703: path from os.CreateTemp
 		return err
 	}
 
 	destPath := s.credentialsPath()
-	if err := os.Rename(tmpPath, destPath); err != nil {
+	if err := os.Rename(tmpPath, destPath); err != nil { //nolint:gosec // G703: paths constructed internally
 		if runtime.GOOS == "windows" {
 			_ = os.Remove(destPath)
-			return os.Rename(tmpPath, destPath)
+			return os.Rename(tmpPath, destPath) //nolint:gosec // G703: same
 		}
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath) //nolint:gosec // G703: path from os.CreateTemp
 		return err
 	}
 	return nil
@@ -193,6 +207,7 @@ func (s *Store) deleteFile(origin string) error {
 
 // MigrateToKeyring migrates credentials from file to keyring.
 func (s *Store) MigrateToKeyring() error {
+	s.ensureInit()
 	if !s.useKeyring {
 		return nil
 	}
@@ -214,5 +229,6 @@ func (s *Store) MigrateToKeyring() error {
 
 // UsingKeyring returns true if the store is using the system keyring.
 func (s *Store) UsingKeyring() bool {
+	s.ensureInit()
 	return s.useKeyring
 }

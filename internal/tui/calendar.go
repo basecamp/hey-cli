@@ -2,13 +2,14 @@ package tui
 
 import (
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 
-	"hey-cli/internal/models"
+	"github.com/basecamp/hey-cli/internal/models"
 )
 
 type recordingItem struct {
@@ -52,11 +53,7 @@ func (m *calendarModel) setItems(cal models.Calendar, resp models.RecordingsResp
 	m.list.Title = cal.Name
 
 	// Sort type keys for stable ordering
-	keys := make([]string, 0, len(resp))
-	for k := range resp {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(resp))
 
 	var items []list.Item
 	for _, k := range keys {
@@ -86,6 +83,9 @@ func (m calendarModel) selectedRecording() *models.Recording {
 	if item == nil {
 		return nil
 	}
-	ri := item.(recordingItem)
+	ri, ok := item.(recordingItem)
+	if !ok {
+		return nil
+	}
 	return &ri.recording
 }

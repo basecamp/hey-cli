@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+
+	"github.com/basecamp/hey-cli/internal/output"
 )
 
 type timetrackCommand struct {
@@ -15,6 +17,9 @@ func newTimetrackCommand() *timetrackCommand {
 	timetrackCommand.cmd = &cobra.Command{
 		Use:   "timetrack",
 		Short: "Manage time tracking",
+		Annotations: map[string]string{
+			"agent_notes": "Subcommands: start, stop, current, list. Use current to check if tracking is active before start/stop.",
+		},
 	}
 
 	timetrackCommand.cmd.AddCommand(newTimetrackStartCommand().cmd)
@@ -54,12 +59,23 @@ func (c *timetrackStartCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if jsonOutput {
-		return printRawJSON(data)
+	if writer.IsStyled() {
+		fmt.Fprintf(cmd.OutOrStdout(), "Time tracking started.%s\n", extractMutationInfo(data))
+		return nil
 	}
 
-	fmt.Printf("Time tracking started.%s\n", extractMutationInfo(data))
-	return nil
+	normalized, nerr := output.NormalizeJSONNumbers(data)
+	if nerr != nil {
+		return writeOK(nil, output.WithSummary("Time tracking started"))
+	}
+	return writeOK(normalized,
+		output.WithSummary("Time tracking started"),
+		output.WithBreadcrumbs(output.Breadcrumb{
+			Action:      "stop",
+			Command:     "hey timetrack stop",
+			Description: "Stop time tracking",
+		}),
+	)
 }
 
 // stop
@@ -88,11 +104,11 @@ func (c *timetrackStopCommand) run(cmd *cobra.Command, args []string) error {
 
 	track, err := apiClient.GetOngoingTimeTrack()
 	if err != nil {
-		return fmt.Errorf("could not get current time track: %w", err)
+		return err
 	}
 
 	if track.ID == 0 {
-		return fmt.Errorf("no active time track")
+		return output.ErrNotFound("time track", "active")
 	}
 
 	result, err := apiClient.StopTimeTrack(track.ID)
@@ -100,12 +116,16 @@ func (c *timetrackStopCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if jsonOutput {
-		return printRawJSON(result)
+	if writer.IsStyled() {
+		fmt.Fprintf(cmd.OutOrStdout(), "Time tracking stopped.%s\n", extractMutationInfo(result))
+		return nil
 	}
 
-	fmt.Printf("Time tracking stopped.%s\n", extractMutationInfo(result))
-	return nil
+	normalized, nerr := output.NormalizeJSONNumbers(result)
+	if nerr != nil {
+		return writeOK(nil, output.WithSummary("Time tracking stopped"))
+	}
+	return writeOK(normalized, output.WithSummary("Time tracking stopped"))
 }
 
 // current
@@ -137,31 +157,41 @@ func (c *timetrackCurrentCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if jsonOutput {
-		return printJSON(track)
-	}
+	if writer.IsStyled() {
+		w := cmd.OutOrStdout()
+		if track.ID == 0 {
+			fmt.Fprintln(w, "No active time track.")
+			return nil
+		}
 
-	if track.ID == 0 {
-		fmt.Println("No active time track.")
+		starts := ""
+		if len(track.StartsAt) >= 16 {
+			starts = track.StartsAt[:16]
+		}
+		fmt.Fprintf(w, "Active time track #%d\n", track.ID)
+		fmt.Fprintf(w, "Started: %s\n", starts)
+		if track.Title != "" {
+			fmt.Fprintf(w, "Title:   %s\n", track.Title)
+		}
 		return nil
 	}
 
-	starts := ""
-	if len(track.StartsAt) >= 16 {
-		starts = track.StartsAt[:16]
-	}
-	fmt.Printf("Active time track #%d\n", track.ID)
-	fmt.Printf("Started: %s\n", starts)
-	if track.Title != "" {
-		fmt.Printf("Title:   %s\n", track.Title)
-	}
-	return nil
+	return writeOK(track,
+		output.WithSummary(func() string {
+			if track.ID == 0 {
+				return "No active time track"
+			}
+			return fmt.Sprintf("Active time track #%d", track.ID)
+		}()),
+	)
 }
 
 // list
 
 type timetrackListCommand struct {
-	cmd *cobra.Command
+	cmd   *cobra.Command
+	limit int
+	all   bool
 }
 
 func newTimetrackListCommand() *timetrackListCommand {
@@ -170,9 +200,13 @@ func newTimetrackListCommand() *timetrackListCommand {
 		Use:   "list",
 		Short: "List time tracks",
 		Example: `  hey timetrack list
+  hey timetrack list --limit 10
   hey timetrack list --json`,
 		RunE: timetrackListCommand.run,
 	}
+
+	timetrackListCommand.cmd.Flags().IntVar(&timetrackListCommand.limit, "limit", 0, "Maximum number of time tracks to show")
+	timetrackListCommand.cmd.Flags().BoolVar(&timetrackListCommand.all, "all", false, "Fetch all results (override --limit)")
 
 	return timetrackListCommand
 }
@@ -187,28 +221,45 @@ func (c *timetrackListCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if jsonOutput {
-		return printJSON(tracks)
+	total := len(tracks)
+	if c.limit > 0 && !c.all && len(tracks) > c.limit {
+		tracks = tracks[:c.limit]
 	}
+	notice := output.TruncationNotice(len(tracks), total)
 
-	if len(tracks) == 0 {
-		fmt.Println("No time tracks.")
+	if writer.IsStyled() {
+		if len(tracks) == 0 {
+			fmt.Fprintln(cmd.OutOrStdout(), "No time tracks.")
+			return nil
+		}
+
+		table := newTable(cmd.OutOrStdout())
+		table.addRow([]string{"ID", "Title", "Start", "End"})
+		for _, t := range tracks {
+			starts := ""
+			if len(t.StartsAt) >= 16 {
+				starts = t.StartsAt[:16]
+			}
+			ends := ""
+			if len(t.EndsAt) >= 16 {
+				ends = t.EndsAt[:16]
+			}
+			table.addRow([]string{fmt.Sprintf("%d", t.ID), t.Title, starts, ends})
+		}
+		table.print()
+		if notice != "" {
+			fmt.Fprintln(cmd.OutOrStdout(), notice)
+		}
 		return nil
 	}
 
-	table := newTable()
-	table.addRow([]string{"ID", "Title", "Start", "End"})
-	for _, t := range tracks {
-		starts := ""
-		if len(t.StartsAt) >= 16 {
-			starts = t.StartsAt[:16]
-		}
-		ends := ""
-		if len(t.EndsAt) >= 16 {
-			ends = t.EndsAt[:16]
-		}
-		table.addRow([]string{fmt.Sprintf("%d", t.ID), t.Title, starts, ends})
-	}
-	table.print()
-	return nil
+	return writeOK(tracks,
+		output.WithSummary(fmt.Sprintf("%d time tracks", len(tracks))),
+		output.WithNotice(notice),
+		output.WithBreadcrumbs(output.Breadcrumb{
+			Action:      "start",
+			Command:     "hey timetrack start",
+			Description: "Start time tracking",
+		}),
+	)
 }

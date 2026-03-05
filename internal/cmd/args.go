@@ -7,21 +7,29 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func usageExactArgs(expected int) cobra.PositionalArgs {
+type usageError struct {
+	usage string
+}
+
+func (e usageError) Error() string {
+	return "Usage: " + e.usage
+}
+
+func usageErrorf(format string, args ...any) error {
+	return usageError{usage: fmt.Sprintf(format, args...)}
+}
+
+func usageExactOneArg() cobra.PositionalArgs {
 	return func(cmd *cobra.Command, args []string) error {
-		if len(args) == expected {
+		if len(args) == 1 {
 			return nil
 		}
 
-		if len(args) < expected {
-			return fmt.Errorf("Usage: %s", cleanUseLine(cmd.UseLine()))
+		if len(args) == 0 {
+			return usageErrorf("%s", cleanUseLine(cmd.UseLine()))
 		}
 
-		argumentLabel := "arguments"
-		if expected == 1 {
-			argumentLabel = "argument"
-		}
-		return fmt.Errorf("expected %d %s, got %d", expected, argumentLabel, len(args))
+		return fmt.Errorf("expected 1 argument, got %d", len(args))
 	}
 }
 

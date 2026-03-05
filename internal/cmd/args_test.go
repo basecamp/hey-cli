@@ -12,7 +12,7 @@ func TestUsageExactArgs(t *testing.T) {
 	cmd := &cobra.Command{Use: "threads <id>"}
 	root.AddCommand(cmd)
 
-	validator := usageExactArgs(1)
+	validator := usageExactOneArg()
 
 	if err := validator(cmd, []string{"123"}); err != nil {
 		t.Fatalf("expected nil error for valid args, got %v", err)

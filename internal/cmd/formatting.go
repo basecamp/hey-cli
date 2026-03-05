@@ -6,7 +6,9 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/basecamp/hey-cli/internal/output"
 	"github.com/mattn/go-runewidth"
 	"golang.org/x/term"
 )
@@ -15,16 +17,18 @@ var colorDisabled bool
 
 func init() {
 	_, noColor := os.LookupEnv("NO_COLOR")
-	colorDisabled = noColor || !term.IsTerminal(int(os.Stdout.Fd()))
+	colorDisabled = noColor || !term.IsTerminal(int(os.Stdout.Fd())) //nolint:gosec // G115: fd fits in int on all supported platforms
 }
 
 type table struct {
+	w            io.Writer
 	columnWidths map[int]int
 	rows         [][]string
 }
 
-func newTable() *table {
+func newTable(w io.Writer) *table {
 	return &table{
+		w:            w,
 		columnWidths: map[int]int{},
 		rows:         [][]string{},
 	}
@@ -46,13 +50,10 @@ func (t *table) print() {
 				cellStyle = bold
 			}
 
-			pad := t.columnWidths[i] - runewidth.StringWidth(cell)
-			if pad < 0 {
-				pad = 0
-			}
-			fmt.Printf("%s%s  ", cellStyle.format(cell), strings.Repeat(" ", pad))
+			pad := max(t.columnWidths[i]-runewidth.StringWidth(cell), 0)
+			fmt.Fprintf(t.w, "%s%s  ", cellStyle.format(cell), strings.Repeat(" ", pad))
 		}
-		fmt.Println()
+		fmt.Fprintln(t.w)
 	}
 }
 
@@ -80,45 +81,36 @@ func (s style) format(value string) string {
 	return "\033[" + string(s) + "m" + value + "\033[0m"
 }
 
-func printJSON(v any) error {
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(v)
-}
-
-func printRawJSON(data []byte) error {
-	var v interface{}
-	if err := json.Unmarshal(data, &v); err != nil {
-		os.Stdout.Write(data)
-		fmt.Println()
-		return nil
-	}
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(v)
-}
-
-func truncate(s string, max int) string {
-	if runewidth.StringWidth(s) <= max {
+func truncate(s string, maxWidth int) string {
+	if runewidth.StringWidth(s) <= maxWidth {
 		return s
 	}
-	return runewidth.Truncate(s, max, "...")
+	return runewidth.Truncate(s, maxWidth, "...")
 }
 
 func stdinIsTerminal() bool {
-	return term.IsTerminal(int(os.Stdin.Fd()))
+	return term.IsTerminal(int(os.Stdin.Fd())) //nolint:gosec // G115: fd fits in int
+}
+
+func stdoutIsTerminal() bool {
+	return term.IsTerminal(int(os.Stdout.Fd())) //nolint:gosec // G115: fd fits in int
 }
 
 func readStdin() (string, error) {
 	data, err := io.ReadAll(os.Stdin)
 	if err != nil {
-		return "", fmt.Errorf("could not read from stdin: %w", err)
+		return "", output.ErrUsage(fmt.Sprintf("could not read from stdin: %v", err))
 	}
 	return strings.TrimSpace(string(data)), nil
 }
 
+func isDateArg(s string) bool {
+	_, err := time.Parse("2006-01-02", s)
+	return err == nil
+}
+
 func extractMutationInfo(data []byte) string {
-	var obj map[string]interface{}
+	var obj map[string]any
 	if err := json.Unmarshal(data, &obj); err != nil {
 		return ""
 	}

@@ -1,0 +1,29 @@
+{
+  "name": "hey",
+  "display_name": "HEY CLI",
+  "version": "0.1.0",
+  "description": "CLI and agent integration for HEY email",
+  "binary": "hey",
+  "hooks": {
+    "session_start": "hooks/session-start.sh"
+  },
+  "agents": [
+    {
+      "name": "navigator",
+      "description": "Cross-resource search and navigation for HEY",
+      "file": "agents/navigator.md"
+    },
+    {
+      "name": "context-linker",
+      "description": "Link code changes to HEY items",
+      "file": "agents/context-linker.md"
+    }
+  ],
+  "capabilities": {
+    "output_formats": ["json", "styled", "quiet", "ids-only", "count", "markdown"],
+    "agent_discovery": true,
+    "structured_help": true,
+    "breadcrumbs": true,
+    "typed_exit_codes": true
+  }
+}

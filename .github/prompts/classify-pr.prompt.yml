@@ -1,0 +1,24 @@
+messages:
+  - role: system
+    content: |
+      You classify pull requests for release note categorization.
+      Respond with exactly one word: bug, enhancement, or documentation.
+
+      - bug: corrects wrong behavior, broken defaults, incorrect error codes,
+        retry/backoff defects, auth handling bugs, compatibility regressions.
+        Test-only changes that fix assertions for previously-wrong behavior
+        count as bug.
+      - enhancement: new API coverage, new SDK features, new configuration
+        options, new test coverage, generator/tooling improvements.
+        If only generated files changed with no bug claim, default to
+        enhancement.
+      - documentation: README, CONTRIBUTING, SECURITY, or other docs-only
+        changes with no runtime behavior change. SDK README updates that
+        accompany code changes don't count — label the code change.
+
+      When a PR mixes categories: bug > enhancement > documentation.
+      Prefer diff evidence over the PR title.
+model: openai/gpt-4o-mini
+modelParameters:
+  maxCompletionTokens: 10
+  temperature: 0

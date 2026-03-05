@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,24 +19,24 @@ func Open(initialContent string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("could not create temp file: %w", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer os.Remove(tmpFile.Name()) //nolint:gosec // G703: path from os.CreateTemp
 
-	if _, err := tmpFile.WriteString(initialContent); err != nil {
-		tmpFile.Close()
+	if _, err = tmpFile.WriteString(initialContent); err != nil {
+		_ = tmpFile.Close()
 		return "", fmt.Errorf("could not write temp file: %w", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
-	cmd := exec.Command(editor, tmpFile.Name())
+	cmd := exec.CommandContext(context.Background(), editor, tmpFile.Name()) //nolint:gosec // G204: intentional — launches user's $EDITOR
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	if err := cmd.Run(); err != nil {
+	if err = cmd.Run(); err != nil {
 		return "", fmt.Errorf("editor exited with error: %w", err)
 	}
 
-	data, err := os.ReadFile(tmpFile.Name())
+	data, err := os.ReadFile(tmpFile.Name()) //nolint:gosec // G703: path from os.CreateTemp
 	if err != nil {
 		return "", fmt.Errorf("could not read edited file: %w", err)
 	}

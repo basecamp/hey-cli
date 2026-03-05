@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"hey-cli/internal/htmlutil"
-	"hey-cli/internal/models"
+	"github.com/basecamp/hey-cli/internal/htmlutil"
+	"github.com/basecamp/hey-cli/internal/models"
 )
 
 func (c *Client) GetEntry(id string) (models.Entry, error) {
@@ -84,8 +84,9 @@ func parseTopicEntriesHTML(html string) []models.Entry {
 
 	// Extract bodies from srcdoc iframes - they appear in entry order
 	type body struct{ html, text string }
-	var bodies []body
-	for _, m := range srcdocRe.FindAllStringSubmatch(html, -1) {
+	bodyMatches := srcdocRe.FindAllStringSubmatch(html, -1)
+	bodies := make([]body, 0, len(bodyMatches))
+	for _, m := range bodyMatches {
 		raw := m[1]
 		raw = strings.ReplaceAll(raw, "&lt;", "<")
 		raw = strings.ReplaceAll(raw, "&gt;", ">")
@@ -95,7 +96,7 @@ func parseTopicEntriesHTML(html string) []models.Entry {
 		bodies = append(bodies, body{html: raw, text: htmlutil.ToText(raw)})
 	}
 
-	var entries []models.Entry
+	entries := make([]models.Entry, 0, len(entryIDs))
 	for i, eid := range entryIDs {
 		id, _ := strconv.Atoi(eid)
 		e := models.Entry{

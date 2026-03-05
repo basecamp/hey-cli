@@ -1,0 +1,83 @@
+hey
+hey --agent
+hey --base-url
+hey --count
+hey --html
+hey --ids-only
+hey --json
+hey --markdown
+hey --quiet
+hey --stats
+hey --styled
+hey --verbose
+hey auth
+hey auth login
+hey auth login --cookie
+hey auth login --no-browser
+hey auth login --token
+hey auth logout
+hey auth refresh
+hey auth status
+hey auth token
+hey auth token --stored
+hey box
+hey box --all
+hey box --limit
+hey boxes
+hey boxes --all
+hey boxes --limit
+hey calendars
+hey commands
+hey completion
+hey compose
+hey compose --message
+hey compose --subject
+hey compose --to
+hey compose --thread-id
+hey config
+hey config show
+hey doctor
+hey drafts
+hey drafts --all
+hey drafts --limit
+hey habit
+hey habit complete
+hey habit complete --date
+hey habit uncomplete
+hey habit uncomplete --date
+hey journal
+hey journal list
+hey journal list --all
+hey journal list --limit
+hey journal read
+hey journal write
+hey journal write --content
+hey recordings
+hey recordings --all
+hey recordings --ends-on
+hey recordings --limit
+hey recordings --starts-on
+hey reply
+hey reply --message
+hey setup
+hey skill
+hey skill install
+hey timetrack
+hey timetrack current
+hey timetrack list
+hey timetrack list --all
+hey timetrack list --limit
+hey timetrack start
+hey timetrack stop
+hey todo
+hey todo add
+hey todo add --date
+hey todo add --title
+hey todo complete
+hey todo delete
+hey todo list
+hey todo list --all
+hey todo list --limit
+hey todo uncomplete
+hey threads
+hey tui

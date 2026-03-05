@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"hey-cli/internal/models"
+	"github.com/basecamp/hey-cli/internal/models"
 )
 
 const (

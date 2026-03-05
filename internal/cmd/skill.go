@@ -5,7 +5,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"hey-cli/skills"
+	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/skills"
 )
 
 type skillCommand struct {
@@ -21,10 +22,12 @@ func newSkillCommand() *skillCommand {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			data, err := skills.FS.ReadFile("hey/SKILL.md")
 			if err != nil {
-				return fmt.Errorf("reading embedded skill: %w", err)
+				return output.ErrAPI(0, fmt.Sprintf("reading embedded skill: %v", err))
 			}
-			_, err = fmt.Fprint(cmd.OutOrStdout(), string(data))
-			return err
+			if _, err = fmt.Fprint(cmd.OutOrStdout(), string(data)); err != nil {
+				return output.ErrAPI(0, fmt.Sprintf("writing skill output: %v", err))
+			}
+			return nil
 		},
 	}
 	sc.cmd.AddCommand(newSkillInstallCommand())

@@ -1,0 +1,284 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  id-token: write
+  security-events: write
+  pull-requests: read
+  models: read
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  security:
+    uses: ./.github/workflows/security.yml
+
+  release:
+    name: Release
+    needs: [test, security]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: release
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Verify tag is on main
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+      - name: Collect PGO profile
+        run: |
+          echo "Collecting PGO profile from benchmarks..."
+          mkdir -p profiles
+          failed=0
+          for pkg in $(go list ./internal/...); do
+            pkg_name=$(basename "$pkg")
+            echo "  Profiling $pkg_name..."
+            if ! go test -cpuprofile="profiles/${pkg_name}.pprof" -bench=. -benchtime=3s "$pkg" 2>&1; then
+              echo "  WARNING: $pkg_name benchmarks failed"
+              failed=$((failed + 1))
+            fi
+          done
+          rm -f *.test
+          if [ "$failed" -gt 0 ]; then
+            echo "WARNING: $failed package(s) failed benchmarking — PGO profile may be incomplete"
+          fi
+          if ls profiles/*.pprof >/dev/null 2>&1; then
+            go tool pprof -proto profiles/*.pprof > default.pgo
+            echo "PGO profile generated: $(du -h default.pgo | cut -f1)"
+          else
+            echo "No PGO profiles generated — build will use standard optimization"
+          fi
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: Generate shell completions
+        run: |
+          go build -o hey-tmp ./cmd/hey
+          mkdir -p completions
+          ./hey-tmp completion bash > completions/hey.bash
+          ./hey-tmp completion zsh > completions/hey.zsh
+          ./hey-tmp completion fish > completions/hey.fish
+          rm hey-tmp
+
+      - name: Build changelog context
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          DIFF_FILE=/tmp/diff.txt
+          if [ -z "$PREV_TAG" ]; then
+            COMMITS=$(git log --oneline --no-decorate)
+            git diff --stat 4b825dc642cb6eb9a060e54bf899d69f82a3ef17 HEAD > "$DIFF_FILE"
+          else
+            COMMITS=$(git log --oneline --no-decorate "${PREV_TAG}..HEAD")
+            git diff "${PREV_TAG}..HEAD" -- '*.go' 'go.mod' > "$DIFF_FILE"
+          fi
+          {
+            echo "Commits:"
+            echo "$COMMITS"
+            echo ""
+            echo "Diff summary:"
+            head -c 80000 "$DIFF_FILE"
+          } > /tmp/user-message.txt
+          python3 -c "
+          with open('.github/prompts/summarize-changelog.prompt.yml') as f:
+              lines = f.readlines()
+          with open('/tmp/user-message.txt') as f:
+              user_msg = f.read()
+          insert_at = len(lines)
+          for i, line in enumerate(lines):
+              if i == 0: continue
+              if line.strip() and not line[0].isspace():
+                  insert_at = i
+                  break
+          entry = ['  - role: user\n', '    content: |\n']
+          for ln in user_msg.splitlines():
+              entry.append('      ' + ln + '\n')
+          lines[insert_at:insert_at] = entry
+          with open('/tmp/prompt.yml', 'w') as f:
+              f.writelines(lines)
+          try:
+              import yaml
+              doc = yaml.safe_load(open('/tmp/prompt.yml'))
+              assert doc['messages'][-1]['role'] == 'user', 'prompt splice failed'
+          except ImportError:
+              pass
+          "
+        continue-on-error: true
+
+      - name: Generate AI changelog
+        id: ai-changelog
+        uses: actions/ai-inference@v2
+        continue-on-error: true
+        with:
+          prompt-file: /tmp/prompt.yml
+
+      - name: Set changelog env
+        run: |
+          RESPONSE_FILE="${{ steps.ai-changelog.outputs.response-file }}"
+          if [ -n "$RESPONSE_FILE" ] && [ -f "$RESPONSE_FILE" ]; then
+            sed -i '/^```\(markdown\)\?$/d' "$RESPONSE_FILE"
+            DELIM="CHANGELOG_DELIM_$(openssl rand -hex 8)"
+            {
+              echo "RELEASE_CHANGELOG<<${DELIM}"
+              cat "$RESPONSE_FILE"
+              echo ""
+              echo "${DELIM}"
+            } >> $GITHUB_ENV
+          else
+            echo "RELEASE_CHANGELOG=" >> $GITHUB_ENV
+          fi
+
+      - name: Verify macOS signing secrets
+        run: |
+          missing=()
+          for var in MACOS_SIGN_P12 MACOS_SIGN_PASSWORD MACOS_NOTARY_KEY MACOS_NOTARY_KEY_ID MACOS_NOTARY_ISSUER_ID; do
+            if [ -z "${!var}" ]; then
+              missing+=("$var")
+            fi
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "ERROR: Missing required macOS signing secrets: ${missing[*]}"
+            echo "Notarization is mandatory. Configure all MACOS_* secrets before releasing."
+            exit 1
+          fi
+        env:
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          repositories: homebrew-tap
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ steps.app-token.outputs.token }}
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+
+      - name: Check CLI surface compatibility
+        run: |
+          make build
+          scripts/check-cli-surface.sh ./bin/hey /tmp/current-surface.txt
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            SCRIPT_DIR="$(pwd)/scripts"
+            WORKTREE_DIR=/tmp/baseline-tree
+            trap 'git worktree remove "$WORKTREE_DIR" --force 2>/dev/null || true' EXIT
+            git worktree add "$WORKTREE_DIR" "$PREV_TAG"
+            cd "$WORKTREE_DIR"
+            make build
+            if "$SCRIPT_DIR/check-cli-surface.sh" ./bin/hey /tmp/baseline-surface.txt 2>/dev/null; then
+              cd -
+              git worktree remove "$WORKTREE_DIR" --force
+              trap - EXIT
+              scripts/check-cli-surface-diff.sh /tmp/baseline-surface.txt /tmp/current-surface.txt
+            else
+              echo "Baseline ($PREV_TAG) does not support --help --agent — skipping surface diff"
+              cd -
+              git worktree remove "$WORKTREE_DIR" --force
+              trap - EXIT
+            fi
+          else
+            echo "First release — no baseline to compare against"
+          fi
+
+  aur-publish:
+    runs-on: ubuntu-latest
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check AUR secret
+        id: check
+        env:
+          AUR_KEY: ${{ secrets.AUR_KEY }}
+        run: |
+          if [ -n "$AUR_KEY" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to AUR
+        if: steps.check.outputs.available == 'true'
+        run: scripts/publish-aur.sh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AUR_KEY: ${{ secrets.AUR_KEY }}
+
+  sync-skills:
+    name: Sync skills
+    needs: [release]
+    if: startsWith(github.ref, 'refs/tags/v')
+    continue-on-error: true
+    concurrency:
+      group: sync-skills
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Generate token for skills repo
+        id: skills-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: basecamp
+          repositories: skills
+
+      - name: Sync skills to distribution repo
+        id: sync
+        env:
+          SKILLS_TOKEN: ${{ steps.skills-token.outputs.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: scripts/sync-skills.sh
+
+      - name: Notify on sync failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ steps.skills-token.outputs.token }}
+        run: |
+          TITLE="Skills sync failure"
+          BODY="The automatic skills sync from [hey-cli ${{ github.ref_name }}](https://github.com/basecamp/hey-cli/actions/runs/${{ github.run_id }}) failed. Check the workflow run for details."
+          existing=$(gh issue list --repo basecamp/skills --state open --search "in:title $TITLE" --json number,title --jq '[.[] | select(.title == "'"$TITLE"'")][0].number // empty' 2>/dev/null || true)
+          if [ -n "$existing" ]; then
+            gh issue comment --repo basecamp/skills "$existing" --body "$BODY" || true
+          else
+            gh issue create --repo basecamp/skills --title "$TITLE" --body "$BODY" || true
+          fi
+          echo "::error::Skills sync to basecamp/skills failed for ${{ github.ref_name }}. See https://github.com/basecamp/hey-cli/actions/runs/${{ github.run_id }}"

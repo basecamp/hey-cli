@@ -3,15 +3,39 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
-const configDirName = ".config/hey-cli"
-const configFile = "config.json"
+const (
+	configDirName = "hey-cli"
+	configFile    = "config.json"
+	defaultBase   = "https://app.hey.com"
+)
+
+type Source string
+
+const (
+	SourceDefault Source = "default"
+	SourceGlobal  Source = "global"
+	SourceLocal   Source = "local"
+	SourceEnv     Source = "env"
+	SourceFlag    Source = "flag"
+)
+
+type Value struct {
+	Value  string `json:"value"`
+	Source Source `json:"source"`
+}
 
 type Config struct {
 	BaseURL string `json:"base_url"`
+
+	sources map[string]Source
 }
 
 // OldConfig represents the legacy config format with embedded credentials.
@@ -27,56 +51,163 @@ type OldConfig struct {
 	SessionCookie string `json:"session_cookie,omitempty"`
 }
 
-// ConfigDir returns the config directory path (~/.config/hey-cli).
 func ConfigDir() string {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, configDirName)
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, configDirName)
+	return filepath.Join(home, ".config", configDirName)
 }
 
-func configPath() (string, error) {
+func StateDir() string {
+	if xdg := os.Getenv("XDG_STATE_HOME"); xdg != "" {
+		return filepath.Join(xdg, configDirName)
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("could not determine home directory: %w", err)
+		return ""
 	}
-	return filepath.Join(home, configDirName, configFile), nil
+	return filepath.Join(home, ".local", "state", configDirName)
+}
+
+func CacheDir() string {
+	if xdg := os.Getenv("XDG_CACHE_HOME"); xdg != "" {
+		return filepath.Join(xdg, configDirName)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".cache", configDirName)
+}
+
+func globalConfigPath() string {
+	dir := ConfigDir()
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, configFile)
+}
+
+func localConfigPath() string {
+	// Walk up from cwd looking for .hey/config.json
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	for {
+		candidate := filepath.Join(dir, ".hey", configFile)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
 }
 
 func Load() (*Config, error) {
-	path, err := configPath()
-	if err != nil {
+	cfg := &Config{
+		BaseURL: defaultBase,
+		sources: map[string]Source{"base_url": SourceDefault},
+	}
+
+	// Layer 1: global config
+	if err := cfg.loadFile(globalConfigPath(), SourceGlobal); err != nil {
 		return nil, err
+	}
+
+	// Layer 2: local config (.hey/config.json walking up)
+	if local := localConfigPath(); local != "" {
+		if err := cfg.loadFile(local, SourceLocal); err != nil {
+			return nil, err
+		}
+	}
+
+	// Layer 3: environment variables
+	if env := os.Getenv("HEY_BASE_URL"); env != "" {
+		cfg.BaseURL = env
+		cfg.sources["base_url"] = SourceEnv
+	}
+
+	// Validate base URL
+	if err := validateBaseURL(cfg.BaseURL); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
+}
+
+func (c *Config) loadFile(path string, source Source) error {
+	if path == "" {
+		return nil
 	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &Config{
-				BaseURL: "https://app.hey.com",
-			}, nil
+			return nil
 		}
-		return nil, fmt.Errorf("could not read config: %w", err)
+		return fmt.Errorf("could not read config %s: %w", path, err)
 	}
 
-	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("could not parse config: %w", err)
+	var file struct {
+		BaseURL string `json:"base_url"`
 	}
-	if cfg.BaseURL == "" {
-		cfg.BaseURL = "https://app.hey.com"
+	if err := json.Unmarshal(data, &file); err != nil {
+		return fmt.Errorf("could not parse config %s: %w", path, err)
 	}
-	return &cfg, nil
+
+	if file.BaseURL != "" {
+		c.BaseURL = file.BaseURL
+		c.sources["base_url"] = source
+	}
+
+	return nil
+}
+
+func (c *Config) SourceOf(key string) Source {
+	if c.sources == nil {
+		return SourceDefault
+	}
+	s, ok := c.sources[key]
+	if !ok {
+		return SourceDefault
+	}
+	return s
+}
+
+func (c *Config) SetFromFlag(key, value string) error {
+	switch key {
+	case "base_url":
+		if err := validateBaseURL(value); err != nil {
+			return err
+		}
+		c.BaseURL = value
+		if c.sources == nil {
+			c.sources = map[string]Source{}
+		}
+		c.sources["base_url"] = SourceFlag
+	}
+	return nil
+}
+
+func (c *Config) Values() []Value {
+	return []Value{
+		{Value: c.BaseURL, Source: c.SourceOf("base_url")},
+	}
 }
 
 // LoadOld reads the config file as the old format (with embedded credentials).
 // Used only during migration.
 func LoadOld() (*OldConfig, error) {
-	path, err := configPath()
-	if err != nil {
-		return nil, err
-	}
+	path := globalConfigPath()
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -91,10 +222,7 @@ func LoadOld() (*OldConfig, error) {
 }
 
 func (c *Config) Save() error {
-	path, err := configPath()
-	if err != nil {
-		return err
-	}
+	path := globalConfigPath()
 
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return fmt.Errorf("could not create config directory: %w", err)
@@ -107,6 +235,22 @@ func (c *Config) Save() error {
 
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("could not write config: %w", err)
+	}
+	return nil
+}
+
+func validateBaseURL(base string) error {
+	u, err := url.Parse(base)
+	if err != nil {
+		return apierr.ErrUsage(fmt.Sprintf("invalid base URL %q: %v", base, err))
+	}
+	if u.Scheme == "" || u.Host == "" {
+		return apierr.ErrUsage(fmt.Sprintf("base URL must be an absolute URL with scheme and host (got %q)", base))
+	}
+	// Enforce HTTPS for non-localhost
+	host := u.Hostname()
+	if u.Scheme != "https" && host != "localhost" && host != "127.0.0.1" && host != "::1" && !strings.HasSuffix(host, ".localhost") {
+		return apierr.ErrUsage(fmt.Sprintf("base URL must use HTTPS (got %q)", base))
 	}
 	return nil
 }

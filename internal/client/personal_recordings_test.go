@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"hey-cli/internal/auth"
+	"github.com/basecamp/hey-cli/internal/auth"
 )
 
 func newAuthenticatedTestClient(t *testing.T, handler http.HandlerFunc) *Client {

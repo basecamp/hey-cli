@@ -6,7 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"hey-cli/internal/editor"
+	"github.com/basecamp/hey-cli/internal/editor"
+	"github.com/basecamp/hey-cli/internal/output"
 )
 
 type composeCommand struct {
@@ -22,6 +23,9 @@ func newComposeCommand() *composeCommand {
 	composeCommand.cmd = &cobra.Command{
 		Use:   "compose",
 		Short: "Compose a new message",
+		Annotations: map[string]string{
+			"agent_notes": "Creates a new email. Requires --subject. Use --to for new threads or --thread-id for existing ones.",
+		},
 		Example: `  hey compose --to alice@hey.com --subject "Hello" -m "Hi there"
   hey compose --subject "Update" --thread-id 12345 -m "Thread reply"
   echo "Long message" | hey compose --to bob@hey.com --subject "Report"`,
@@ -42,7 +46,7 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if c.subject == "" {
-		return fmt.Errorf("--subject is required")
+		return output.ErrUsageHint("--subject is required", "hey compose --to <email> --subject <subject> -m <message>")
 	}
 
 	message := c.message
@@ -54,21 +58,21 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 				return err
 			}
 			if message == "" {
-				return fmt.Errorf("no message provided (use -m or --message to provide inline, or pipe to stdin)")
+				return output.ErrUsage("no message provided (use -m or --message to provide inline, or pipe to stdin)")
 			}
 		} else {
 			var err error
 			message, err = editor.Open("")
 			if err != nil {
-				return fmt.Errorf("could not open editor: %w", err)
+				return output.ErrAPI(0, fmt.Sprintf("could not open editor: %v", err))
 			}
 			if message == "" {
-				return fmt.Errorf("empty message, aborting")
+				return output.ErrUsage("empty message, aborting")
 			}
 		}
 	}
 
-	body := map[string]interface{}{
+	body := map[string]any{
 		"subject": c.subject,
 		"body":    message,
 	}
@@ -80,7 +84,7 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 	if c.threadID != "" {
 		id, err := strconv.Atoi(c.threadID)
 		if err != nil {
-			return fmt.Errorf("invalid thread ID: %s", c.threadID)
+			return output.ErrUsage(fmt.Sprintf("invalid thread ID: %s", c.threadID))
 		}
 		threadID = &id
 	}
@@ -90,10 +94,14 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if jsonOutput {
-		return printRawJSON(data)
+	if writer.IsStyled() {
+		fmt.Fprintf(cmd.OutOrStdout(), "Message sent.%s\n", extractMutationInfo(data))
+		return nil
 	}
 
-	fmt.Printf("Message sent.%s\n", extractMutationInfo(data))
-	return nil
+	normalized, err := output.NormalizeJSONNumbers(data)
+	if err != nil {
+		return writeOK(nil, output.WithSummary("Message sent"))
+	}
+	return writeOK(normalized, output.WithSummary("Message sent"))
 }

@@ -4,7 +4,8 @@ import (
 	"errors"
 	"fmt"
 
-	"hey-cli/internal/models"
+	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/models"
 )
 
 func (c *Client) ListTimeTracks() ([]models.TimeTrack, error) {
@@ -32,8 +33,8 @@ func (c *Client) ListTimeTracks() ([]models.TimeTrack, error) {
 func (c *Client) GetOngoingTimeTrack() (models.TimeTrack, error) {
 	var track models.TimeTrack
 	if err := c.GetJSON("/calendar/ongoing_time_track", &track); err != nil {
-		var apiErr *APIError
-		if errors.As(err, &apiErr) && apiErr.StatusCode == 404 {
+		var apiErr *apierr.Error
+		if errors.As(err, &apiErr) && apiErr.Code == "not_found" {
 			return models.TimeTrack{}, nil
 		}
 		return track, err

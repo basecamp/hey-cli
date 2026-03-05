@@ -1,0 +1,153 @@
+version: 2
+
+project_name: hey
+
+before:
+  hooks:
+    - go mod tidy
+    - sh -c 'mkdir -p completions && go run ./cmd/hey completion bash > completions/hey.bash && go run ./cmd/hey completion zsh > completions/hey.zsh && go run ./cmd/hey completion fish > completions/hey.fish'
+
+builds:
+  - id: hey
+    main: ./cmd/hey
+    binary: hey
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+      - freebsd
+      - openbsd
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -pgo=auto
+    ldflags:
+      - -s -w
+      - -X github.com/basecamp/hey-cli/internal/version.Version={{.Version}}
+      - -X github.com/basecamp/hey-cli/internal/version.Commit={{.Commit}}
+      - -X github.com/basecamp/hey-cli/internal/version.Date={{.Date}}
+
+archives:
+  - id: default
+    ids: [hey]
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE*
+      - README*
+      - completions/*
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+sboms:
+  - artifacts: archive
+
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    output: true
+    args:
+      - sign-blob
+      - --yes
+      - --output-certificate=${certificate}
+      - --output-signature=${signature}
+      - ${artifact}
+
+notarize:
+  macos:
+    - enabled: '{{ and (ne (index .Env "MACOS_SIGN_P12") "") (ne (index .Env "MACOS_SIGN_PASSWORD") "") (ne (index .Env "MACOS_NOTARY_KEY") "") (ne (index .Env "MACOS_NOTARY_KEY_ID") "") (ne (index .Env "MACOS_NOTARY_ISSUER_ID") "") }}'
+      ids: [hey]
+      sign:
+        certificate: '{{ index .Env "MACOS_SIGN_P12" }}'
+        password: '{{ index .Env "MACOS_SIGN_PASSWORD" }}'
+      notarize:
+        issuer_id: '{{ index .Env "MACOS_NOTARY_ISSUER_ID" }}'
+        key_id: '{{ index .Env "MACOS_NOTARY_KEY_ID" }}'
+        key: '{{ index .Env "MACOS_NOTARY_KEY" }}'
+        wait: true
+        timeout: 20m
+
+changelog:
+  use: github-native
+
+release:
+  github:
+    owner: basecamp
+    name: hey-cli
+  draft: false
+  prerelease: auto
+  name_template: "{{.ProjectName}} v{{.Version}}"
+  header: |
+    {{ if index .Env "RELEASE_CHANGELOG" }}{{ index .Env "RELEASE_CHANGELOG" }}
+
+    ---
+    {{ end }}
+    ### Install
+
+    **macOS:**
+    ```sh
+    brew install --cask basecamp/tap/hey
+    hey auth login
+    ```
+
+    **Arch Linux / Omarchy:**
+    ```sh
+    yay -S hey-cli
+    hey auth login
+    ```
+
+    **Other platforms:** download the matching archive from the assets below.
+
+homebrew_casks:
+  - name: hey
+    ids: [default]
+    repository:
+      owner: basecamp
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Casks
+    homepage: "https://github.com/basecamp/hey-cli"
+    description: "Command-line interface for HEY email"
+    completions:
+      bash: "completions/hey.bash"
+      zsh: "completions/hey.zsh"
+      fish: "completions/hey.fish"
+
+scoops:
+  - name: hey
+    ids: [default]
+    repository:
+      owner: basecamp
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: "https://github.com/basecamp/hey-cli"
+    description: "Command-line interface for HEY email"
+    license: MIT
+
+nfpms:
+  - id: packages
+    package_name: hey-cli
+    ids: [hey]
+    vendor: 37signals
+    homepage: "https://github.com/basecamp/hey-cli"
+    maintainer: "37signals <support@37signals.com>"
+    description: "Command-line interface for HEY email"
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    contents:
+      - src: completions/hey.bash
+        dst: /usr/share/bash-completion/completions/hey
+      - src: completions/hey.zsh
+        dst: /usr/share/zsh/vendor-completions/_hey
+      - src: completions/hey.fish
+        dst: /usr/share/fish/vendor_completions.d/hey.fish
