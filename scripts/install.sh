@@ -99,7 +99,12 @@ BINARY="hey"
 if [ "$OS" = "windows" ]; then
   BINARY="hey.exe"
 fi
-cp "extract/${BINARY}" "$INSTALL_DIR/${BINARY}"
+FOUND=$(find extract -name "${BINARY}" -type f | head -1)
+if [ -z "$FOUND" ]; then
+  echo "ERROR: Could not find ${BINARY} in archive"
+  exit 1
+fi
+cp "$FOUND" "$INSTALL_DIR/${BINARY}"
 chmod +x "$INSTALL_DIR/${BINARY}"
 
 echo ""
