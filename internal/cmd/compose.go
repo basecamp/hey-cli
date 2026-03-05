@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"hey-cli/internal/editor"
+	"github.com/basecamp/hey-cli/internal/editor"
 )
 
 type composeCommand struct {

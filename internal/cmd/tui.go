@@ -3,7 +3,7 @@ package cmd
 import (
 	"github.com/spf13/cobra"
 
-	"hey-cli/internal/tui"
+	"github.com/basecamp/hey-cli/internal/tui"
 )
 
 type tuiCommand struct {

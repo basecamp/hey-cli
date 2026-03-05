@@ -15,7 +15,7 @@ var colorDisabled bool
 
 func init() {
 	_, noColor := os.LookupEnv("NO_COLOR")
-	colorDisabled = noColor || !term.IsTerminal(int(os.Stdout.Fd()))
+	colorDisabled = noColor || !term.IsTerminal(int(os.Stdout.Fd())) //nolint:gosec // G115: fd fits in int on all supported platforms
 }
 
 type table struct {
@@ -89,24 +89,24 @@ func printJSON(v any) error {
 func printRawJSON(data []byte) error {
 	var v interface{}
 	if err := json.Unmarshal(data, &v); err != nil {
-		os.Stdout.Write(data)
+		_, _ = os.Stdout.Write(data)
 		fmt.Println()
-		return nil
+		return nil //nolint:nilerr // fallback to raw output when JSON is invalid
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(v)
 }
 
-func truncate(s string, max int) string {
-	if runewidth.StringWidth(s) <= max {
+func truncate(s string, maxWidth int) string {
+	if runewidth.StringWidth(s) <= maxWidth {
 		return s
 	}
-	return runewidth.Truncate(s, max, "...")
+	return runewidth.Truncate(s, maxWidth, "...")
 }
 
 func stdinIsTerminal() bool {
-	return term.IsTerminal(int(os.Stdin.Fd()))
+	return term.IsTerminal(int(os.Stdin.Fd())) //nolint:gosec // G115: fd fits in int
 }
 
 func readStdin() (string, error) {
@@ -140,22 +140,4 @@ func extractMutationInfo(data []byte) string {
 		return ""
 	}
 	return " (" + strings.Join(parts, ", ") + ")"
-}
-
-func limitJSONArray(data []byte, limit int) []byte {
-	if limit <= 0 {
-		return data
-	}
-	var arr []json.RawMessage
-	if err := json.Unmarshal(data, &arr); err != nil {
-		return data
-	}
-	if len(arr) <= limit {
-		return data
-	}
-	result, err := json.Marshal(arr[:limit])
-	if err != nil {
-		return data
-	}
-	return result
 }

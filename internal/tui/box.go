@@ -6,7 +6,7 @@ import (
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 
-	"hey-cli/internal/models"
+	"github.com/basecamp/hey-cli/internal/models"
 )
 
 type postingItem struct {
@@ -81,6 +81,9 @@ func (m boxModel) selectedPosting() *models.Posting {
 	if item == nil {
 		return nil
 	}
-	pi := item.(postingItem)
+	pi, ok := item.(postingItem)
+	if !ok {
+		return nil
+	}
 	return &pi.posting
 }

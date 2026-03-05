@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,8 +12,8 @@ import (
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 
-	"hey-cli/internal/client"
-	"hey-cli/internal/models"
+	"github.com/basecamp/hey-cli/internal/client"
+	"github.com/basecamp/hey-cli/internal/models"
 )
 
 type viewState int
@@ -61,7 +62,7 @@ type recordingDetailMsg struct {
 	body  string
 }
 
-type errMsg struct{ err error }
+type errMsg struct{ err error } //nolint:errname // bubbletea convention: Msg types end in Msg, not Error
 
 func (e errMsg) Error() string { return e.err.Error() }
 
@@ -85,9 +86,9 @@ type model struct {
 
 	detail detailModel
 
-	loading  bool
-	err      error
-	lastKey  string // debug: last key event received
+	loading bool
+	err     error
+	lastKey string // debug: last key event received
 }
 
 func newModel(c *client.Client) model {
@@ -130,7 +131,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		if msg.Key().Code == tea.KeyTab {
-			switch m.state {
+			switch m.state { //nolint:exhaustive // only tab-navigable views need handling
 			case viewBoxes:
 				m.state = viewCalendars
 				if !m.calendarsLoaded {
@@ -639,8 +640,12 @@ func (m model) showRecordingDetail(rec models.Recording) tea.Cmd {
 
 var imageHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
-func fetchImageData(url string) []byte {
-	resp, err := imageHTTPClient.Get(url)
+func fetchImageData(imgURL string) []byte {
+	req, err := http.NewRequestWithContext(context.Background(), "GET", imgURL, nil)
+	if err != nil {
+		return nil
+	}
+	resp, err := imageHTTPClient.Do(req)
 	if err != nil {
 		return nil
 	}

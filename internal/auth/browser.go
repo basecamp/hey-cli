@@ -26,5 +26,5 @@ func openBrowser(url string) error {
 		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
 	}
 
-	return exec.CommandContext(context.Background(), cmd, args...).Start()
+	return exec.CommandContext(context.Background(), cmd, args...).Start() //nolint:gosec // intentional: opens user's browser
 }

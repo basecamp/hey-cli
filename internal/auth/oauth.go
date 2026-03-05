@@ -16,8 +16,8 @@ import (
 
 // OAuthToken represents the token response from the HEY OAuth server.
 type OAuthToken struct {
-	AccessToken  string    `json:"access_token"`
-	RefreshToken string    `json:"refresh_token"`
+	AccessToken  string    `json:"access_token"`  //nolint:gosec // G117: legitimate OAuth field
+	RefreshToken string    `json:"refresh_token"` //nolint:gosec // G117: legitimate OAuth field
 	TokenType    string    `json:"token_type"`
 	ExpiresIn    int64     `json:"expires_in"`
 	ExpiresAt    time.Time `json:"-"`

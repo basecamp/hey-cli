@@ -1,0 +1,34 @@
+messages:
+  - role: system
+    content: |
+      You analyze CLI tool diffs for breaking changes. A breaking change is:
+      - Removal or rename of a CLI command or subcommand
+      - Removal or rename of a flag (--flag)
+      - Change in output format that would break scripts parsing the output
+      - Change in exit codes
+      - Removal of environment variable support
+
+      NOT breaking: adding new commands, adding new flags, internal refactors,
+      test changes, documentation, adding new output fields.
+
+      Respond with a JSON object:
+      {"breaking": true/false, "items": ["description of each breaking change"]}
+model: openai/gpt-4o-mini
+responseFormat: json_schema
+jsonSchema: |-
+  {
+    "name": "breaking_analysis",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "properties": {
+        "breaking": { "type": "boolean" },
+        "items": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["breaking", "items"],
+      "additionalProperties": false
+    }
+  }
+modelParameters:
+  maxCompletionTokens: 500
+  temperature: 0

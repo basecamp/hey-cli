@@ -7,7 +7,7 @@ import (
 
 	"golang.org/x/net/html"
 
-	"hey-cli/internal/models"
+	"github.com/basecamp/hey-cli/internal/models"
 )
 
 func (c *Client) ListJournalEntries() ([]models.JournalEntry, error) {

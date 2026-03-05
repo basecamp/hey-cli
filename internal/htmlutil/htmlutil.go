@@ -37,7 +37,7 @@ func ExtractImageURLs(s string) []string {
 }
 
 func walkNode(b *strings.Builder, n *html.Node) {
-	switch n.Type {
+	switch n.Type { //nolint:exhaustive // only text and element nodes need handling
 	case html.TextNode:
 		b.WriteString(n.Data)
 	case html.ElementNode:
@@ -125,13 +125,14 @@ func walkChildren(b *strings.Builder, n *html.Node) {
 
 func findImages(n *html.Node, urls *[]string) {
 	if n.Type == html.ElementNode {
-		if n.Data == "img" {
+		switch n.Data {
+		case "img":
 			for _, a := range n.Attr {
 				if a.Key == "src" && a.Val != "" {
 					*urls = append(*urls, a.Val)
 				}
 			}
-		} else if n.Data == "figure" {
+		case "figure":
 			if att := parseTrixAttachment(n); att != nil && att.URL != "" {
 				*urls = append(*urls, att.URL)
 			}

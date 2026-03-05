@@ -6,8 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"hey-cli/internal/editor"
-	"hey-cli/internal/htmlutil"
+	"github.com/basecamp/hey-cli/internal/editor"
+	"github.com/basecamp/hey-cli/internal/htmlutil"
 )
 
 type journalCommand struct {

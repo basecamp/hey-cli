@@ -7,7 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"hey-cli/internal/models"
+	"github.com/basecamp/hey-cli/internal/models"
 )
 
 // Test helpers
@@ -552,10 +552,10 @@ func testRecordings() models.RecordingsResponse {
 	return models.RecordingsResponse{
 		"events": {
 			{
-				ID:       100,
-				Title:    "Standup",
-				AllDay:   false,
-				StartsAt: "2025-03-01T09:00:00Z",
+				ID:        100,
+				Title:     "Standup",
+				AllDay:    false,
+				StartsAt:  "2025-03-01T09:00:00Z",
 				Recurring: true,
 			},
 			{
