@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"flag"
 	"os"
 	"sort"
 	"strings"
@@ -9,6 +10,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
+
+var updateSurface = flag.Bool("update-surface", false, "Update the .surface baseline file")
 
 func TestSurfaceSnapshot(t *testing.T) {
 	root := newRootCmd()
@@ -20,12 +23,14 @@ func TestSurfaceSnapshot(t *testing.T) {
 	baselineFile := "../../.surface"
 	baseline, err := os.ReadFile(baselineFile)
 	if os.IsNotExist(err) {
-		// First run — write the baseline
-		if err := os.WriteFile(baselineFile, []byte(snapshot), 0644); err != nil {
-			t.Fatalf("writing baseline: %v", err)
+		if *updateSurface {
+			if err := os.WriteFile(baselineFile, []byte(snapshot), 0644); err != nil {
+				t.Fatalf("writing baseline: %v", err)
+			}
+			t.Log("Surface baseline created at .surface")
+			return
 		}
-		t.Log("Surface baseline created at .surface")
-		return
+		t.Fatal("No .surface baseline found. Run with -update-surface to create it.")
 	}
 	if err != nil {
 		t.Fatalf("reading baseline: %v", err)
@@ -34,10 +39,13 @@ func TestSurfaceSnapshot(t *testing.T) {
 	baselineLines := strings.Split(strings.TrimSpace(string(baseline)), "\n")
 	sort.Strings(baselineLines)
 
-	// Check for removals (commands in baseline but not in current)
 	currentSet := map[string]bool{}
 	for _, line := range current {
 		currentSet[line] = true
+	}
+	baselineSet := map[string]bool{}
+	for _, line := range baselineLines {
+		baselineSet[line] = true
 	}
 
 	var removed []string
@@ -47,15 +55,27 @@ func TestSurfaceSnapshot(t *testing.T) {
 		}
 	}
 
+	var added []string
+	for _, line := range current {
+		if !baselineSet[line] {
+			added = append(added, line)
+		}
+	}
+
 	if len(removed) > 0 {
-		t.Errorf("Surface compatibility break — removed commands/flags:\n%s\n\nUpdate .surface if this removal is intentional.",
+		t.Errorf("Surface compatibility break — removed commands/flags:\n%s",
 			strings.Join(removed, "\n"))
 	}
 
-	// Update baseline with any additions
-	if snapshot != string(baseline) {
-		if err := os.WriteFile(baselineFile, []byte(snapshot), 0644); err != nil {
-			t.Logf("warning: could not update baseline: %v", err)
+	if len(added) > 0 {
+		if *updateSurface {
+			if err := os.WriteFile(baselineFile, []byte(snapshot), 0644); err != nil {
+				t.Fatalf("writing updated baseline: %v", err)
+			}
+			t.Logf("Surface baseline updated with additions:\n%s", strings.Join(added, "\n"))
+		} else {
+			t.Errorf("Surface has new commands/flags:\n%s\n\nRun with -update-surface to accept.",
+				strings.Join(added, "\n"))
 		}
 	}
 }
