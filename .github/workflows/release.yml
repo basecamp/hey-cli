@@ -5,9 +5,13 @@ on:
     tags:
       - 'v*'
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
-  id-token: write
+  attestations: write
   security-events: write
   pull-requests: read
   models: read
@@ -28,6 +32,7 @@ jobs:
     permissions:
       contents: write
       id-token: write
+      attestations: write
       models: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -171,11 +176,12 @@ jobs:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           repositories: homebrew-tap
+          permission-contents: write
 
       - name: Install GoReleaser
         uses: goreleaser/goreleaser-action@ec59f474b9834571250b370d4735c50f8e2d1e29 # v7
         with:
-          version: '~> v2'
+          version: 'v2.14.1'
           install-only: true
 
       - name: Run GoReleaser
@@ -195,6 +201,11 @@ jobs:
           fi
           export RELEASE_CHANGELOG
           goreleaser release --clean
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-checksums-file: ./dist/checksums.txt
 
       - name: Check CLI surface compatibility
         run: |
@@ -273,6 +284,9 @@ jobs:
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           owner: basecamp
           repositories: skills
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
 
       - name: Sync skills to distribution repo
         id: sync
