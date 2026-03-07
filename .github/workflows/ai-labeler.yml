@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   classify:
-    uses: basecamp/.github/.github/workflows/ai-classify-pr.yml@fc560544cd2bb4e242530bde9b0d9deb7863ea45
+    uses: basecamp/.github/.github/workflows/ai-classify-pr.yml@0f236fea0ac36da812ff7178af3af1b4ee686c3c
     with:
       prompt-file: .github/prompts/classify-pr.prompt.yml
       labels: "bug,enhancement,documentation"
@@ -27,7 +27,7 @@ jobs:
       pull-requests: write
 
   breaking:
-    uses: basecamp/.github/.github/workflows/ai-breaking-change.yml@fc560544cd2bb4e242530bde9b0d9deb7863ea45
+    uses: basecamp/.github/.github/workflows/ai-breaking-change.yml@0f236fea0ac36da812ff7178af3af1b4ee686c3c
     with:
       prompt-file: .github/prompts/detect-breaking.prompt.yml
       file-patterns: |
