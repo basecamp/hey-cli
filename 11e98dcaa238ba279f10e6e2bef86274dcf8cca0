@@ -1,0 +1,25 @@
+internal/auth/auth.go
+  3824aa9be041f285 280
+internal/auth/store.go
+  3824aa9be041f285 105,137
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "11e98dcaa238ba279f10e6e2bef86274dcf8cca0",
+  "prompts": {
+    "3824aa9be041f285": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6843dcd4-059f-4305-9a03-29d5863d585d",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 7,
+      "total_deletions": 5,
+      "accepted_lines": 6,
+      "overriden_lines": 0
+    }
+  }
+}
