@@ -1,0 +1,25 @@
+.github/workflows/ai-labeler.yml
+  2e0f542df67c3699 21,26,73,80-81,83,101,107,174,182-183
+.github/prompts/classify-pr.prompt.yml
+  2e0f542df67c3699 5,22-38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "5c84fe317f780c9a12fdbf1a2dc17df2ce0e6eda",
+  "prompts": {
+    "2e0f542df67c3699": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1721de05-e680-48dc-8692-3cc3e70bfe8b",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 100,
+      "total_deletions": 77,
+      "accepted_lines": 99,
+      "overriden_lines": 0
+    }
+  }
+}
