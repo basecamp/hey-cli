@@ -18,13 +18,13 @@ jobs:
   classify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Build prompt
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
         run: |
-          PR=${{ github.event.pull_request.number }}
           gh pr diff "$PR" > /tmp/pr.diff
           gh pr view "$PR" --json title --jq .title > /tmp/pr-title.txt
           gh pr view "$PR" --json body --jq '.body // ""' > /tmp/pr-body.txt
@@ -70,20 +70,21 @@ jobs:
 
       - name: Classify
         id: classify
-        uses: actions/ai-inference@v2
+        uses: actions/ai-inference@e09e65981758de8b2fdab13c2bfb7c7d5493b0b6 # v2
         with:
           prompt-file: /tmp/prompt.yml
 
       - name: Apply label
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RESPONSE_FILE: ${{ steps.classify.outputs.response-file }}
+          PR: ${{ github.event.pull_request.number }}
         run: |
-          LABEL=$(echo "${{ steps.classify.outputs.response }}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+          LABEL=$(jq -r '.label // empty' "$RESPONSE_FILE" 2>/dev/null || tr -d '[:space:]' < "$RESPONSE_FILE" | tr '[:upper:]' '[:lower:]')
           case "$LABEL" in
             bug|enhancement|documentation) ;;
             *) echo "Unexpected: $LABEL — skipping"; exit 0 ;;
           esac
-          PR=${{ github.event.pull_request.number }}
           CURRENT=$(gh pr view "$PR" --json labels --jq '.labels[].name')
           for L in bug enhancement documentation; do
             if [ "$L" != "$LABEL" ] && echo "$CURRENT" | grep -qx "$L"; then
@@ -97,15 +98,14 @@ jobs:
   breaking:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Build prompt
         id: cmd-diff
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
         run: |
-          PR=${{ github.event.pull_request.number }}
-
           PATTERNS=(
             "internal/cmd/*.go"
           )
@@ -171,7 +171,7 @@ jobs:
       - name: Detect breaking changes
         if: steps.cmd-diff.outputs.skip != 'true'
         id: detect
-        uses: actions/ai-inference@v2
+        uses: actions/ai-inference@e09e65981758de8b2fdab13c2bfb7c7d5493b0b6 # v2
         with:
           prompt-file: /tmp/prompt.yml
 
@@ -179,8 +179,9 @@ jobs:
         if: steps.cmd-diff.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RESPONSE_FILE: ${{ steps.detect.outputs.response-file }}
+          PR: ${{ github.event.pull_request.number }}
         run: |
-          RESPONSE_FILE="${{ steps.detect.outputs.response-file }}"
           if [ -z "$RESPONSE_FILE" ] || [ ! -f "$RESPONSE_FILE" ]; then
             echo "::warning::Model response file is missing; skipping breaking label."
             exit 0
@@ -197,7 +198,6 @@ jobs:
             exit 0
           fi
           BREAKING=$(jq -r '.breaking' "$RESPONSE_FILE")
-          PR=${{ github.event.pull_request.number }}
 
           if [ "$BREAKING" = "true" ]; then
             ITEMS=$(jq -r '.items[]' "$RESPONSE_FILE" | sed 's/^/- /')

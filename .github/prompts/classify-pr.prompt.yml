@@ -2,7 +2,7 @@ messages:
   - role: system
     content: |
       You classify pull requests for release note categorization.
-      Respond with exactly one word: bug, enhancement, or documentation.
+      Respond with JSON: {"label": "bug"}, {"label": "enhancement"}, or {"label": "documentation"}.
 
       - bug: corrects wrong behavior, broken defaults, incorrect error codes,
         retry/backoff defects, auth handling bugs, compatibility regressions.
@@ -19,6 +19,23 @@ messages:
       When a PR mixes categories: bug > enhancement > documentation.
       Prefer diff evidence over the PR title.
 model: openai/gpt-4o-mini
+responseFormat:
+  type: json_schema
+  json_schema:
+    name: classification
+    strict: true
+    schema:
+      type: object
+      properties:
+        label:
+          type: string
+          enum:
+            - bug
+            - enhancement
+            - documentation
+      required:
+        - label
+      additionalProperties: false
 modelParameters:
   maxCompletionTokens: 10
   temperature: 0
