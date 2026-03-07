@@ -16,209 +16,24 @@ permissions:
 
 jobs:
   classify:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - name: Build prompt
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR: ${{ github.event.pull_request.number }}
-        run: |
-          gh pr diff "$PR" > /tmp/pr.diff
-          gh pr view "$PR" --json title --jq .title > /tmp/pr-title.txt
-          gh pr view "$PR" --json body --jq '.body // ""' > /tmp/pr-body.txt
-
-          {
-            printf 'PR #%s: %s\n' "$PR" "$(cat /tmp/pr-title.txt)"
-            echo ""
-            cat /tmp/pr-body.txt
-            echo ""
-            echo "Diff (truncated):"
-            head -c 100000 /tmp/pr.diff
-          } > /tmp/user-message.txt
-
-          python3 -c "
-          with open('.github/prompts/classify-pr.prompt.yml') as f:
-              lines = f.readlines()
-          with open('/tmp/user-message.txt') as f:
-              user_msg = f.read()
-
-          insert_at = len(lines)
-          for i, line in enumerate(lines):
-              if i == 0:
-                  continue
-              if line.strip() and not line[0].isspace():
-                  insert_at = i
-                  break
-
-          entry = ['  - role: user\n', '    content: |\n']
-          for ln in user_msg.splitlines():
-              entry.append('      ' + ln + '\n')
-
-          lines[insert_at:insert_at] = entry
-          with open('/tmp/prompt.yml', 'w') as f:
-              f.writelines(lines)
-
-          try:
-              import yaml
-              doc = yaml.safe_load(open('/tmp/prompt.yml'))
-              assert doc['messages'][-1]['role'] == 'user', 'prompt splice failed'
-          except ImportError:
-              pass
-          "
-
-      - name: Classify
-        id: classify
-        uses: actions/ai-inference@e09e65981758de8b2fdab13c2bfb7c7d5493b0b6 # v2
-        with:
-          prompt-file: /tmp/prompt.yml
-
-      - name: Apply label
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RESPONSE_FILE: ${{ steps.classify.outputs.response-file }}
-          PR: ${{ github.event.pull_request.number }}
-        run: |
-          LABEL=$(jq -r '.label // empty' "$RESPONSE_FILE" 2>/dev/null || cat "$RESPONSE_FILE")
-          LABEL=$(printf '%s' "$LABEL" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
-          case "$LABEL" in
-            bug|enhancement|documentation) ;;
-            *) echo "Unexpected: $LABEL — skipping"; exit 0 ;;
-          esac
-          CURRENT=$(gh pr view "$PR" --json labels --jq '.labels[].name')
-          for L in bug enhancement documentation; do
-            if [ "$L" != "$LABEL" ] && echo "$CURRENT" | grep -qx "$L"; then
-              gh pr edit "$PR" --remove-label "$L" 2>/dev/null || true
-            fi
-          done
-          if ! echo "$CURRENT" | grep -qx "$LABEL"; then
-            gh pr edit "$PR" --add-label "$LABEL" 2>/dev/null || true
-          fi
+    uses: basecamp/.github/.github/workflows/ai-classify-pr.yml@fc560544cd2bb4e242530bde9b0d9deb7863ea45
+    with:
+      prompt-file: .github/prompts/classify-pr.prompt.yml
+      labels: "bug,enhancement,documentation"
+    permissions:
+      contents: read
+      issues: write
+      models: read
+      pull-requests: write
 
   breaking:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - name: Build prompt
-        id: cmd-diff
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR: ${{ github.event.pull_request.number }}
-        run: |
-          PATTERNS=(
-            "internal/cmd/*.go"
-          )
-          gh pr diff "$PR" > /tmp/full.diff
-
-          python3 -c "
-          import sys, re, fnmatch
-          diff = open('/tmp/full.diff').read()
-          patterns = sys.argv[1:]
-          sections = re.split(r'(?=^diff --git)', diff, flags=re.MULTILINE)
-          for s in sections:
-              m = re.match(r'diff --git a/(\S+)', s)
-              if m:
-                  path = m.group(1)
-                  if any(fnmatch.fnmatch(path, p) for p in patterns):
-                      sys.stdout.write(s)
-          " "${PATTERNS[@]}" > /tmp/cmd.diff
-
-          if [ ! -s /tmp/cmd.diff ]; then
-            echo "skip=true" >> $GITHUB_OUTPUT
-          else
-            TITLE=$(gh pr view "$PR" --json title --jq .title)
-
-            {
-              printf 'PR #%s: %s\n' "$PR" "$TITLE"
-              echo ""
-              echo "Diff of CLI command surface files:"
-              head -c 100000 /tmp/cmd.diff
-            } > /tmp/user-message.txt
-
-            python3 -c "
-          with open('.github/prompts/detect-breaking.prompt.yml') as f:
-              lines = f.readlines()
-          with open('/tmp/user-message.txt') as f:
-              user_msg = f.read()
-
-          insert_at = len(lines)
-          for i, line in enumerate(lines):
-              if i == 0:
-                  continue
-              if line.strip() and not line[0].isspace():
-                  insert_at = i
-                  break
-
-          entry = ['  - role: user\n', '    content: |\n']
-          for ln in user_msg.splitlines():
-              entry.append('      ' + ln + '\n')
-
-          lines[insert_at:insert_at] = entry
-          with open('/tmp/prompt.yml', 'w') as f:
-              f.writelines(lines)
-
-          try:
-              import yaml
-              doc = yaml.safe_load(open('/tmp/prompt.yml'))
-              assert doc['messages'][-1]['role'] == 'user', 'prompt splice failed'
-          except ImportError:
-              pass
-            "
-            echo "skip=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Detect breaking changes
-        if: steps.cmd-diff.outputs.skip != 'true'
-        id: detect
-        uses: actions/ai-inference@e09e65981758de8b2fdab13c2bfb7c7d5493b0b6 # v2
-        with:
-          prompt-file: /tmp/prompt.yml
-
-      - name: Apply breaking label
-        if: steps.cmd-diff.outputs.skip != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RESPONSE_FILE: ${{ steps.detect.outputs.response-file }}
-          PR: ${{ github.event.pull_request.number }}
-        run: |
-          if [ -z "$RESPONSE_FILE" ] || [ ! -f "$RESPONSE_FILE" ]; then
-            echo "::warning::Model response file is missing; skipping breaking label."
-            exit 0
-          fi
-          if ! jq empty "$RESPONSE_FILE" 2>/dev/null; then
-            echo "::warning::Model response is not valid JSON; skipping breaking label."
-            echo "## Breaking change detection failed" >> "$GITHUB_STEP_SUMMARY"
-            echo "Model returned invalid JSON. Breaking label was **not** applied." >> "$GITHUB_STEP_SUMMARY"
-            if [ -s "$RESPONSE_FILE" ]; then
-              echo '```' >> "$GITHUB_STEP_SUMMARY"
-              cat "$RESPONSE_FILE" >> "$GITHUB_STEP_SUMMARY"
-              echo '```' >> "$GITHUB_STEP_SUMMARY"
-            fi
-            exit 0
-          fi
-          BREAKING=$(jq -r '.breaking' "$RESPONSE_FILE")
-
-          if [ "$BREAKING" = "true" ]; then
-            ITEMS=$(jq -r '.items[]' "$RESPONSE_FILE" | sed 's/^/- /')
-            gh label create breaking --color "B60205" 2>/dev/null || true
-            gh pr edit "$PR" --add-label "breaking"
-
-            {
-              echo "⚠️ **Potential breaking changes detected:**"
-              echo ""
-              echo "$ITEMS"
-              echo ""
-              echo "_Review carefully before merging. Consider a major version bump._"
-            } > /tmp/breaking-comment.md
-
-            EXISTING=$(gh pr view "$PR" --json comments --jq '.comments[] | select(.body | startswith("⚠️ **Potential breaking")) | .id' | head -1)
-            if [ -n "$EXISTING" ]; then
-              gh api graphql -f query="mutation { updateIssueComment(input: {id: \"$EXISTING\", body: $(jq -Rs . /tmp/breaking-comment.md)}) { issueComment { id } } }"
-            else
-              gh pr comment "$PR" --body-file /tmp/breaking-comment.md
-            fi
-          else
-            gh pr edit "$PR" --remove-label "breaking" 2>/dev/null || true
-          fi
+    uses: basecamp/.github/.github/workflows/ai-breaking-change.yml@fc560544cd2bb4e242530bde9b0d9deb7863ea45
+    with:
+      prompt-file: .github/prompts/detect-breaking.prompt.yml
+      file-patterns: |
+        internal/cmd/*.go
+    permissions:
+      contents: read
+      issues: write
+      models: read
+      pull-requests: write
