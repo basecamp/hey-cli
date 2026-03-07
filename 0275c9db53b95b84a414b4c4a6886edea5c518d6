@@ -1,0 +1,29 @@
+.github/workflows/test.yml
+  2e0f542df67c3699 17,42,56,63,78
+.github/workflows/ci.yml
+  2e0f542df67c3699 15-16,24-25,33-34,42-43,51-52,60-61,64,71-72
+.github/workflows/dependabot-auto-merge.yml
+  2e0f542df67c3699 16
+.github/workflows/security.yml
+  2e0f542df67c3699 21,36,42,52,56,66-67,75,78,83,92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "0275c9db53b95b84a414b4c4a6886edea5c518d6",
+  "prompts": {
+    "2e0f542df67c3699": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1721de05-e680-48dc-8692-3cc3e70bfe8b",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 32,
+      "overriden_lines": 0
+    }
+  }
+}
