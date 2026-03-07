@@ -277,7 +277,7 @@ func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL, c
 
 	shutdownServer := func() {
 		shutdownOnce.Do(func() {
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second) //nolint:gosec // G118: cancel deferred in goroutine; async shutdown required to avoid handler self-deadlock
 			go func() {
 				defer cancel()
 				if shutdownErr := server.Shutdown(shutdownCtx); shutdownErr != nil && !errors.Is(shutdownErr, http.ErrServerClosed) {

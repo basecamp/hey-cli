@@ -102,7 +102,7 @@ func (s *Store) loadFromKeyring(origin string) (*Credentials, error) {
 }
 
 func (s *Store) saveToKeyring(origin string, creds *Credentials) error {
-	data, err := json.Marshal(creds)
+	data, err := json.Marshal(creds) //nolint:gosec // G117: intentional credential marshaling for storage
 	if err != nil {
 		return err
 	}
@@ -134,7 +134,7 @@ func (s *Store) saveAllToFile(all map[string]*Credentials) error {
 		return err
 	}
 
-	data, err := json.MarshalIndent(all, "", "  ")
+	data, err := json.MarshalIndent(all, "", "  ") //nolint:gosec // G117: intentional credential marshaling for storage
 	if err != nil {
 		return err
 	}
