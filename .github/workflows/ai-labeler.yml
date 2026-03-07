@@ -80,7 +80,8 @@ jobs:
           RESPONSE_FILE: ${{ steps.classify.outputs.response-file }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          LABEL=$(jq -r '.label // empty' "$RESPONSE_FILE" 2>/dev/null || tr -d '[:space:]' < "$RESPONSE_FILE" | tr '[:upper:]' '[:lower:]')
+          LABEL=$(jq -r '.label // empty' "$RESPONSE_FILE" 2>/dev/null || cat "$RESPONSE_FILE")
+          LABEL=$(printf '%s' "$LABEL" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
           case "$LABEL" in
             bug|enhancement|documentation) ;;
             *) echo "Unexpected: $LABEL — skipping"; exit 0 ;;

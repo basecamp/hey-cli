@@ -5,6 +5,13 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+  id-token: write
+  security-events: write
+  pull-requests: read
+  models: read
+
 jobs:
   test:
     uses: ./.github/workflows/test.yml
@@ -182,10 +189,11 @@ jobs:
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
         run: |
+          RELEASE_CHANGELOG=""
           if [ -n "$CHANGELOG_FILE" ] && [ -f "$CHANGELOG_FILE" ]; then
             RELEASE_CHANGELOG=$(cat "$CHANGELOG_FILE")
-            export RELEASE_CHANGELOG
           fi
+          export RELEASE_CHANGELOG
           goreleaser release --clean
 
       - name: Check CLI surface compatibility

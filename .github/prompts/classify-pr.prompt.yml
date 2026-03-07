@@ -19,23 +19,23 @@ messages:
       When a PR mixes categories: bug > enhancement > documentation.
       Prefer diff evidence over the PR title.
 model: openai/gpt-4o-mini
-responseFormat:
-  type: json_schema
-  json_schema:
-    name: classification
-    strict: true
-    schema:
-      type: object
-      properties:
-        label:
-          type: string
-          enum:
-            - bug
-            - enhancement
-            - documentation
-      required:
-        - label
-      additionalProperties: false
+responseFormat: json_schema
+jsonSchema: |-
+  {
+    "name": "classification",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "type": "string",
+          "enum": ["bug", "enhancement", "documentation"]
+        }
+      },
+      "required": ["label"],
+      "additionalProperties": false
+    }
+  }
 modelParameters:
-  maxCompletionTokens: 10
+  maxCompletionTokens: 25
   temperature: 0
