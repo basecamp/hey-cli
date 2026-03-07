@@ -1,0 +1,25 @@
+go.mod
+  3824aa9be041f285 3
+.mise.toml
+  3824aa9be041f285 2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "c2281ef0f4b5ae99de6a6d96a8d2059a8be1083c",
+  "prompts": {
+    "3824aa9be041f285": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6843dcd4-059f-4305-9a03-29d5863d585d",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 8,
+      "total_deletions": 10,
+      "accepted_lines": 5,
+      "overriden_lines": 0
+    }
+  }
+}
