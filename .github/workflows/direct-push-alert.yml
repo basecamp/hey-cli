@@ -1,0 +1,16 @@
+name: Direct Push Alert
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  alert:
+    uses: basecamp/.github/.github/workflows/direct-push-alert.yml@a667bfaac8b33b9c8a6c61019664463a98055995
+    permissions:
+      contents: read
+      issues: write
