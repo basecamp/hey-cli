@@ -205,7 +205,7 @@ jobs:
       - name: Attest build provenance
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
-          subject-checksums-file: ./dist/checksums.txt
+          subject-checksums: ./dist/checksums.txt
 
       - name: Check CLI surface compatibility
         run: |
