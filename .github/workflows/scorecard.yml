@@ -34,5 +34,6 @@ jobs:
           retention-days: 5
 
       - uses: github/codeql-action/upload-sarif@89a39a4e59826350b863aa6b6252a07ad50cf83e # v4
+        continue-on-error: true
         with:
           sarif_file: results.sarif
