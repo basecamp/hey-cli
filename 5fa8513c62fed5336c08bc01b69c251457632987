@@ -1,0 +1,23 @@
+internal/cmd/journal_test.go
+  aa2db4daca2a5c22 17-25,29-47,53-56,103-104,121-122,139-140,182-244
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "5fa8513c62fed5336c08bc01b69c251457632987",
+  "prompts": {
+    "aa2db4daca2a5c22": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "85893d12-ca54-495e-82c0-259f6a7a2a2c",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 101,
+      "overriden_lines": 0
+    }
+  }
+}
