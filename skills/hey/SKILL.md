@@ -118,7 +118,7 @@ CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos,
 Want to read email?
 ├── Which mailbox? → hey boxes --json
 ├── List emails in box? → hey box <name|id> --json
-├── Read full thread? → hey threads <id> --json
+├── Read full thread? → hey threads <topic_id> --json
 ├── Mark as seen? → hey seen <posting-id>
 ├── Mark as unseen? → hey unseen <posting-id>
 └── Launch interactive UI? → hey (no args, launches TUI)
@@ -163,8 +163,8 @@ Box names: `imbox`, `feedbox`, `trailbox`, `asidebox`, `laterbox`, `bubblebox`
 ### Email - Threads
 
 ```bash
-hey threads 123 --json                        # Read full email thread
-hey threads 123 --html                        # Read with raw HTML content
+hey threads <topic_id> --json                 # Read full email thread
+hey threads <topic_id> --html                 # Read with raw HTML content
 ```
 
 **ID note:** `hey box` returns postings with an `id` (posting ID) and a `topic_id` (topic ID). `hey threads` and `hey reply` expect the **topic ID** — use `topic_id` directly. The `app_url` field also contains the topic ID as a fallback (e.g. `https://app.hey.com/topics/123` → `123`).
@@ -172,8 +172,8 @@ hey threads 123 --html                        # Read with raw HTML content
 ### Email - Reply & Compose
 
 ```bash
-hey reply 123 -m "Thanks!"                   # Reply with inline message
-hey reply 123                                 # Reply via $EDITOR
+hey reply <topic_id> -m "Thanks!"             # Reply with inline message
+hey reply <topic_id>                          # Reply via $EDITOR
 hey compose --to user@example.com --subject "Hello"         # Compose new (opens $EDITOR)
 hey compose --to user@example.com --subject "Hi" -m "Body"  # With inline body
 hey compose --subject "Update" --thread-id 12345 -m "msg"   # Post to existing thread
