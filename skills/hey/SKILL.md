@@ -20,6 +20,13 @@ triggers:
   - hey recordings
   # Todos
   - hey todo
+  # Seen/unseen
+  - hey seen
+  - hey unseen
+  - mark as read
+  - mark as seen
+  - mark as unseen
+  - mark as unread
   # Habits
   - hey habit
   # Time tracking
@@ -88,6 +95,8 @@ CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos,
 | Complete todo | `hey todo complete 123` |
 | Uncomplete todo | `hey todo uncomplete 123` |
 | Delete todo | `hey todo delete 123` |
+| Mark as seen | `hey seen 12345` |
+| Mark as unseen | `hey unseen 12345` |
 | Complete habit | `hey habit complete` |
 | Uncomplete habit | `hey habit uncomplete` |
 | Start time tracking | `hey timetrack start` |
@@ -110,6 +119,8 @@ Want to read email?
 ├── Which mailbox? → hey boxes --json
 ├── List emails in box? → hey box <name|id> --json
 ├── Read full thread? → hey topic <id> --json
+├── Mark as seen? → hey seen <posting-id>
+├── Mark as unseen? → hey unseen <posting-id>
 └── Launch interactive UI? → hey (no args, launches TUI)
 ```
 
@@ -164,6 +175,17 @@ hey reply 123                                 # Reply via $EDITOR
 hey compose --to user@example.com --subject "Hello"         # Compose new
 hey compose --to user@example.com --subject "Hi" -m "Body"  # With body
 ```
+
+### Email - Seen/Unseen
+
+```bash
+hey seen 12345                                # Mark posting as seen
+hey seen 12345 67890                          # Mark multiple postings as seen
+hey unseen 12345                              # Mark posting as unseen
+hey unseen 12345 67890                        # Mark multiple postings as unseen
+```
+
+Takes posting IDs (the `id` field from `hey box` output).
 
 ### Drafts
 
