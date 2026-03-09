@@ -77,8 +77,8 @@ CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos,
 |------|---------|
 | List mailboxes | `hey boxes --json` |
 | List emails in a box | `hey box imbox --json` |
-| Read email thread | `hey threads 123 --json` |
-| Reply to email | `hey reply 123 -m "Thanks!"` |
+| Read email thread | `hey threads <topic_id> --json` |
+| Reply to email | `hey reply <topic_id> -m "Thanks!"` |
 | Compose email | `hey compose --to user@example.com --subject "Hello"` |
 | List drafts | `hey drafts --json` |
 | List calendars | `hey calendars --json` |
@@ -147,7 +147,7 @@ hey box 123 --json                            # List emails in box (by ID)
 
 Box names: `imbox`, `feedbox`, `trailbox`, `asidebox`, `laterbox`, `bubblebox`
 
-**Response format:** `hey box` returns `{"box": {...}, "postings": [...]}`. Each posting has: `id` (posting ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url` (contains topic ID). Use the posting `id` with `hey seen`/`hey unseen`. Extract the topic ID from `app_url` for `hey threads` and `hey reply`.
+**Response format:** `hey box` returns `{"box": {...}, "postings": [...]}`. Each posting has: `id` (posting ID), `topic_id` (topic ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`. Use `topic_id` for `hey threads` and `hey reply`.
 
 ### Email - Threads
 
@@ -156,7 +156,7 @@ hey threads 123 --json                        # Read full email thread
 hey threads 123 --html                        # Read with raw HTML content
 ```
 
-**ID note:** `hey box` returns postings with an `id` (posting ID) and an `app_url` containing the topic ID. `hey threads` expects the **topic ID** (the numeric ID from `app_url`, e.g. `https://app.hey.com/topics/123` → use `123`). `hey reply` also uses the topic ID.
+**ID note:** `hey box` returns postings with an `id` (posting ID) and a `topic_id` (topic ID). `hey threads` and `hey reply` expect the **topic ID** — use `topic_id` directly. The `app_url` field also contains the topic ID as a fallback (e.g. `https://app.hey.com/topics/123` → `123`).
 
 ### Email - Reply & Compose
 
