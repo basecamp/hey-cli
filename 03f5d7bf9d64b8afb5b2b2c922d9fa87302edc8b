@@ -1,0 +1,45 @@
+internal/cmd/compose.go
+  aa2db4daca2a5c22 9-10,77-78,81,85-95,97-101,103-105,109,113
+internal/cmd/calendars.go
+  aa2db4daca2a5c22 36-37,39,42-43,52
+internal/cmd/recordings.go
+  aa2db4daca2a5c22 10-11,51,70-74,76,80,84,86,90,96,104
+internal/cmd/timetrack.go
+  aa2db4daca2a5c22 8-9,59-60,62,66,70,108-109,111,114,118,120,124,128,159-160,162,167,172-173,180-183,185,219-220,225,242
+internal/cmd/tui.go
+  aa2db4daca2a5c22 22
+internal/cmd/habit.go
+  aa2db4daca2a5c22 5,61-65,71-72,74,78,82,117-121,127-128,130,134,138
+internal/cmd/todo.go
+  aa2db4daca2a5c22 5,9-11,68-69,74-75,92,95,173-174,177-181,184-185,187,191,195-196,226,228-234,238,242-243,273,275-281,285,289-290,320,322-328,332,336
+internal/cmd/box.go
+  aa2db4daca2a5c22 57,63,65,76,80-82,93,110-111,115-116,118,122,124
+internal/cmd/boxes.go
+  aa2db4daca2a5c22 42-43,45,48,59
+internal/cmd/drafts.go
+  aa2db4daca2a5c22 42-43,45,48,62,64
+internal/cmd/reply.go
+  aa2db4daca2a5c22 9-10,44,49-50,52,54,58-59,82-84,86,90,94-95
+internal/cmd/journal.go
+  aa2db4daca2a5c22 9-10,67-68,73,90,149-150,152-173,179,184,188-199,275,277-279,281-285,295-298,300,304,308
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "03f5d7bf9d64b8afb5b2b2c922d9fa87302edc8b",
+  "prompts": {
+    "aa2db4daca2a5c22": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "85893d12-ca54-495e-82c0-259f6a7a2a2c",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 498,
+      "overriden_lines": 0
+    }
+  }
+}
