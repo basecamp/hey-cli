@@ -32,8 +32,8 @@ hey completion
 hey compose
 hey compose --message
 hey compose --subject
-hey compose --to
 hey compose --thread-id
+hey compose --to
 hey config
 hey config show
 hey doctor
@@ -59,9 +59,11 @@ hey recordings --limit
 hey recordings --starts-on
 hey reply
 hey reply --message
+hey seen
 hey setup
 hey skill
 hey skill install
+hey threads
 hey timetrack
 hey timetrack current
 hey timetrack list
@@ -79,5 +81,5 @@ hey todo list
 hey todo list --all
 hey todo list --limit
 hey todo uncomplete
-hey threads
 hey tui
+hey unseen
