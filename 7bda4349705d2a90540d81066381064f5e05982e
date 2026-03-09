@@ -1,0 +1,35 @@
+internal/tui/tui.go
+  aa2db4daca2a5c22 16,514-515,518
+internal/cmd/journal.go
+  aa2db4daca2a5c22 297
+internal/cmd/sdk.go
+  aa2db4daca2a5c22 18,106-108,111,114-116,119
+internal/cmd/sdk_test.go
+  aa2db4daca2a5c22 3,5,7-8,11,14-15,18,23-24,27,32-33,35,40-42,45,50-51,53
+internal/cmd/todo.go
+  aa2db4daca2a5c22 92,181
+internal/cmd/journal_test.go
+  aa2db4daca2a5c22 39,42,52,57,63,66
+go.mod
+  aa2db4daca2a5c22 9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "7bda4349705d2a90540d81066381064f5e05982e",
+  "prompts": {
+    "aa2db4daca2a5c22": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "85893d12-ca54-495e-82c0-259f6a7a2a2c",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 50,
+      "total_deletions": 46,
+      "accepted_lines": 45,
+      "overriden_lines": 0
+    }
+  }
+}
