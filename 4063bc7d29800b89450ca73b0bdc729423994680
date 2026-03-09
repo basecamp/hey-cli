@@ -1,0 +1,29 @@
+internal/cmd/root.go
+  aa2db4daca2a5c22 84,101,260-266,268-269
+internal/cmd/sdk_test.go
+  aa2db4daca2a5c22 1-46
+internal/cmd/sdk.go
+  aa2db4daca2a5c22 1-249
+go.mod
+  aa2db4daca2a5c22 9,18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "4063bc7d29800b89450ca73b0bdc729423994680",
+  "prompts": {
+    "aa2db4daca2a5c22": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "85893d12-ca54-495e-82c0-259f6a7a2a2c",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 858,
+      "total_deletions": 274,
+      "accepted_lines": 816,
+      "overriden_lines": 0
+    }
+  }
+}
