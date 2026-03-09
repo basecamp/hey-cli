@@ -1,0 +1,23 @@
+go.mod
+  aa2db4daca2a5c22 9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "6d1768a41d66cb42cb2a8575a75dc525f86e2872",
+  "prompts": {
+    "aa2db4daca2a5c22": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "85893d12-ca54-495e-82c0-259f6a7a2a2c",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 39,
+      "total_deletions": 13,
+      "accepted_lines": 35,
+      "overriden_lines": 0
+    }
+  }
+}
