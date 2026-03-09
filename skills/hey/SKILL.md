@@ -11,7 +11,7 @@ triggers:
   # Email actions
   - hey boxes
   - hey box
-  - hey topic
+  - hey threads
   - hey reply
   - hey compose
   - hey drafts
@@ -77,8 +77,8 @@ CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos,
 |------|---------|
 | List mailboxes | `hey boxes --json` |
 | List emails in a box | `hey box imbox --json` |
-| Read email thread | `hey topic 123 --json` |
-| Reply to email | `hey reply 123 -m "Thanks!"` |
+| Read email thread | `hey threads <topic_id> --json` |
+| Reply to email | `hey reply <topic_id> -m "Thanks!"` |
 | Compose email | `hey compose --to user@example.com --subject "Hello"` |
 | List drafts | `hey drafts --json` |
 | List calendars | `hey calendars --json` |
@@ -88,8 +88,8 @@ CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos,
 | Complete todo | `hey todo complete 123` |
 | Uncomplete todo | `hey todo uncomplete 123` |
 | Delete todo | `hey todo delete 123` |
-| Complete habit | `hey habit complete` |
-| Uncomplete habit | `hey habit uncomplete` |
+| Complete habit | `hey habit complete 123` |
+| Uncomplete habit | `hey habit uncomplete 123` |
 | Start time tracking | `hey timetrack start` |
 | Stop time tracking | `hey timetrack stop` |
 | Current timer | `hey timetrack current --json` |
@@ -109,7 +109,7 @@ CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos,
 Want to read email?
 ├── Which mailbox? → hey boxes --json
 ├── List emails in box? → hey box <name|id> --json
-├── Read full thread? → hey topic <id> --json
+├── Read full thread? → hey threads <topic_id> --json
 └── Launch interactive UI? → hey (no args, launches TUI)
 ```
 
@@ -145,24 +145,27 @@ hey box imbox --json                          # List emails in Imbox (by name)
 hey box 123 --json                            # List emails in box (by ID)
 ```
 
-Box names: `imbox`, `the_feed`, `paper_trail`, `set_aside`, `reply_later`, `screened_out`
+Box names: `imbox`, `feedbox`, `trailbox`, `asidebox`, `laterbox`, `bubblebox`
 
-**Response format:** `hey box` returns `{"box": {...}, "postings": [...]}`. Each posting has: `id`, `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`.
+**Response format:** `hey box` returns `{"box": {...}, "postings": [...]}`. Each posting has: `id` (posting ID), `topic_id` (topic ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`. Use `topic_id` for `hey threads` and `hey reply`.
 
-### Email - Topics
+### Email - Threads
 
 ```bash
-hey topic 123 --json                          # Read full email thread
-hey topic 123 --html                          # Read with raw HTML content
+hey threads <topic_id> --json                 # Read full email thread
+hey threads <topic_id> --html                 # Read with raw HTML content
 ```
+
+**ID note:** `hey box` returns postings with an `id` (posting ID) and a `topic_id` (topic ID). `hey threads` and `hey reply` expect the **topic ID** — use `topic_id` directly. The `app_url` field also contains the topic ID as a fallback (e.g. `https://app.hey.com/topics/123` → `123`).
 
 ### Email - Reply & Compose
 
 ```bash
-hey reply 123 -m "Thanks!"                   # Reply with inline message
-hey reply 123                                 # Reply via $EDITOR
-hey compose --to user@example.com --subject "Hello"         # Compose new
-hey compose --to user@example.com --subject "Hi" -m "Body"  # With body
+hey reply <topic_id> -m "Thanks!"             # Reply with inline message
+hey reply <topic_id>                          # Reply via $EDITOR
+hey compose --to user@example.com --subject "Hello"         # Compose new (opens $EDITOR)
+hey compose --to user@example.com --subject "Hi" -m "Body"  # With inline body
+hey compose --subject "Update" --thread-id 12345 -m "msg"   # Post to existing thread
 ```
 
 ### Drafts
@@ -178,7 +181,7 @@ hey calendars --json                          # List calendars (returns array of
 hey recordings 123 --json                     # List events in calendar
 ```
 
-**Response format:** `hey recordings` returns `{"Calendar::Event": [...]}`. Each event has: `id`, `title`, `starts_at`, `ends_at`, `all_day`, `recurring`, `starts_at_time_zone`. Access events via `.["Calendar::Event"]` in jq.
+**Response format:** `hey recordings` returns recordings grouped by type (e.g. `{"Calendar::Event": [...], "Calendar::Habit": [...], "Calendar::Todo": [...]}`). Each recording has: `id`, `title`, `starts_at`, `ends_at`, `all_day`, `recurring`, `starts_at_time_zone`. Access by type key in jq, e.g. `.["Calendar::Event"]`.
 
 ### Todos
 
@@ -193,9 +196,12 @@ hey todo delete 123                           # Delete a todo
 ### Habits
 
 ```bash
-hey habit complete                            # Mark habit complete for today
-hey habit uncomplete                          # Unmark habit for today
+hey habit complete 123                        # Mark habit complete for today
+hey habit complete 123 --date 2024-01-15      # Mark complete for specific date
+hey habit uncomplete 123                      # Unmark habit for today
 ```
+
+Habit IDs can be found via `hey recordings <calendar-id> --json`.
 
 ### Time Tracking
 
