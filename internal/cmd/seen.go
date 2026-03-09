@@ -24,7 +24,7 @@ func newSeenCommand() *seenCommand {
 			"agent_notes": "Accepts one or more posting IDs. Marks each as seen/read.",
 		},
 		RunE: seenCommand.run,
-		Args: cobra.MinimumNArgs(1),
+		Args: usageMinOneArg(),
 	}
 
 	return seenCommand
@@ -71,7 +71,7 @@ func newUnseenCommand() *unseenCommand {
 			"agent_notes": "Accepts one or more posting IDs. Marks each as unseen/unread.",
 		},
 		RunE: unseenCommand.run,
-		Args: cobra.MinimumNArgs(1),
+		Args: usageMinOneArg(),
 	}
 
 	return unseenCommand

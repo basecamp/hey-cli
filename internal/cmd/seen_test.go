@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/basecamp/hey-cli/internal/output"
@@ -121,6 +122,9 @@ func TestSeenNoArgs(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing args")
 	}
+	if got := err.Error(); !strings.Contains(got, "Usage:") {
+		t.Errorf("error = %q, want it to contain %q", got, "Usage:")
+	}
 }
 
 func TestSeenInvalidID(t *testing.T) {
@@ -166,6 +170,9 @@ func TestUnseenNoArgs(t *testing.T) {
 	_, err := runUnseen(t, server)
 	if err == nil {
 		t.Fatal("expected error for missing args")
+	}
+	if got := err.Error(); !strings.Contains(got, "Usage:") {
+		t.Errorf("error = %q, want it to contain %q", got, "Usage:")
 	}
 }
 
