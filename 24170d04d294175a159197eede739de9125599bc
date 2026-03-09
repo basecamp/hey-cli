@@ -1,0 +1,35 @@
+internal/cmd/boxes.go
+  aa2db4daca2a5c22 8-9,50-53
+internal/cmd/drafts.go
+  aa2db4daca2a5c22 8-9,50-53
+internal/cmd/sdk.go
+  aa2db4daca2a5c22 131-136,191-193
+internal/cmd/compose.go
+  aa2db4daca2a5c22 93
+internal/tui/tui.go
+  aa2db4daca2a5c22 7,518-519,532-537,628-630,674-676
+internal/cmd/box.go
+  aa2db4daca2a5c22 122-124
+internal/cmd/recordings.go
+  aa2db4daca2a5c22 79-81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "24170d04d294175a159197eede739de9125599bc",
+  "prompts": {
+    "aa2db4daca2a5c22": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "85893d12-ca54-495e-82c0-259f6a7a2a2c",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 43,
+      "total_deletions": 9,
+      "accepted_lines": 43,
+      "overriden_lines": 0
+    }
+  }
+}
