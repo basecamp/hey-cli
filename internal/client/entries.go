@@ -10,28 +10,6 @@ import (
 	"github.com/basecamp/hey-cli/internal/models"
 )
 
-func (c *Client) GetEntry(id string) (models.Entry, error) {
-	path := fmt.Sprintf("/entries/%s", id)
-	data, err := c.GetHTML(path)
-	if err != nil {
-		return models.Entry{}, err
-	}
-
-	entries := parseTopicEntriesHTML(string(data))
-	if len(entries) == 0 {
-		return models.Entry{}, fmt.Errorf("entry %s not found", id)
-	}
-	return entries[0], nil
-}
-
-func (c *Client) ListDrafts() ([]models.Draft, error) {
-	var drafts []models.Draft
-	if err := c.GetJSON("/entries/drafts.json", &drafts); err != nil {
-		return nil, err
-	}
-	return drafts, nil
-}
-
 var (
 	entryBlockRe = regexp.MustCompile(`(?s)data-entry-id="(\d+)"`)
 	senderRe     = regexp.MustCompile(`id="sender_entry_(\d+)"[^>]*>\s*([^<]+?)\s*<`)
@@ -114,17 +92,4 @@ func parseTopicEntriesHTML(html string) []models.Entry {
 	}
 
 	return entries
-}
-
-func (c *Client) CreateMessage(topicID *int, body any) ([]byte, error) {
-	path := "/topics/messages"
-	if topicID != nil {
-		path = fmt.Sprintf("/topics/%d/messages", *topicID)
-	}
-	return c.PostJSON(path, body)
-}
-
-func (c *Client) ReplyToEntry(id string, body any) ([]byte, error) {
-	path := fmt.Sprintf("/entries/%s/replies", id)
-	return c.PostJSON(path, body)
 }

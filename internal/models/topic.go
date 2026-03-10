@@ -25,18 +25,3 @@ type Entry struct {
 	BodyHTML              string    `json:"-"`
 	Recipients            []Contact `json:"recipients,omitempty"`
 }
-
-type EntriesResponse struct {
-	Entries     []Entry `json:"entries"`
-	NextPageURL string  `json:"next_page_url,omitempty"`
-}
-
-type Draft struct {
-	ID        int     `json:"id"`
-	CreatedAt string  `json:"created_at"`
-	UpdatedAt string  `json:"updated_at"`
-	Summary   string  `json:"summary"`
-	Kind      string  `json:"kind"`
-	Creator   Contact `json:"creator"`
-	Topic     *Topic  `json:"topic,omitempty"`
-}

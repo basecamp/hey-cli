@@ -10,32 +10,6 @@ import (
 	"github.com/basecamp/hey-cli/internal/models"
 )
 
-func (c *Client) ListJournalEntries() ([]models.JournalEntry, error) {
-	recordingsByType, err := c.listPersonalCalendarRecordings()
-	if err != nil {
-		return nil, err
-	}
-
-	recordings := recordingsByType["Calendar::JournalEntry"]
-	entries := make([]models.JournalEntry, 0, len(recordings))
-	for _, recording := range recordings {
-		entryDate := recording.StartsAt
-		if len(entryDate) >= 10 {
-			entryDate = entryDate[:10]
-		}
-
-		entries = append(entries, models.JournalEntry{
-			ID:        recording.ID,
-			Date:      entryDate,
-			Body:      recording.Content,
-			CreatedAt: recording.CreatedAt,
-			UpdatedAt: recording.UpdatedAt,
-		})
-	}
-
-	return entries, nil
-}
-
 // GetJournalEntry fetches a journal entry by date.
 // The JSON API (/calendar/days/{date}/journal_entry.json) returns 204 for
 // journal entries, so we scrape the edit page to get the full HTML body.
@@ -87,9 +61,4 @@ func findTrixInput(n *html.Node) string {
 		}
 	}
 	return ""
-}
-
-func (c *Client) UpdateJournalEntry(date string, body any) ([]byte, error) {
-	path := fmt.Sprintf("/calendar/days/%s/journal_entry.json", date)
-	return c.PatchJSON(path, body)
 }

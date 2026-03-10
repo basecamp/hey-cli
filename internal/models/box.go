@@ -1,7 +1,6 @@
 package models
 
 import (
-	"encoding/json"
 	"strconv"
 	"strings"
 )
@@ -13,51 +12,6 @@ type Box struct {
 	AppURL            string `json:"app_url"`
 	URL               string `json:"url"`
 	PostingChangesURL string `json:"posting_changes_url"`
-}
-
-type BoxShowResponse struct {
-	Box                    Box               `json:"box"`
-	Postings               []json.RawMessage `json:"postings"`
-	NextHistoryURL         string            `json:"next_history_url"`
-	NextIncrementalSyncURL string            `json:"next_incremental_sync_url"`
-}
-
-func (r *BoxShowResponse) UnmarshalJSON(data []byte) error {
-	type alias BoxShowResponse
-	var aux struct {
-		alias
-		Box               *Box   `json:"box"`
-		ID                int    `json:"id"`
-		Kind              string `json:"kind"`
-		Name              string `json:"name"`
-		AppURL            string `json:"app_url"`
-		URL               string `json:"url"`
-		PostingChangesURL string `json:"posting_changes_url"`
-	}
-
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-
-	*r = BoxShowResponse(aux.alias)
-
-	if aux.Box != nil {
-		r.Box = *aux.Box
-		return nil
-	}
-
-	if aux.ID != 0 || aux.Kind != "" || aux.Name != "" || aux.AppURL != "" || aux.URL != "" || aux.PostingChangesURL != "" {
-		r.Box = Box{
-			ID:                aux.ID,
-			Kind:              aux.Kind,
-			Name:              aux.Name,
-			AppURL:            aux.AppURL,
-			URL:               aux.URL,
-			PostingChangesURL: aux.PostingChangesURL,
-		}
-	}
-
-	return nil
 }
 
 type Posting struct {

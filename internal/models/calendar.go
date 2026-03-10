@@ -1,15 +1,5 @@
 package models
 
-type CalendarsResponse struct {
-	Calendars          []CalendarWrapper `json:"calendars"`
-	CalendarChangesURL string            `json:"calendar_changes_url"`
-}
-
-type CalendarWrapper struct {
-	Calendar            Calendar `json:"calendar"`
-	RecordingChangesURL string   `json:"recording_changes_url"`
-}
-
 type Calendar struct {
 	ID             int    `json:"id"`
 	Name           string `json:"name"`
@@ -45,21 +35,3 @@ type Recording struct {
 }
 
 type RecordingsResponse map[string][]Recording
-
-type Todo struct {
-	ID          int    `json:"id"`
-	Title       string `json:"title"`
-	StartsAt    string `json:"starts_at"`
-	CompletedAt string `json:"completed_at,omitempty"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
-}
-
-type TimeTrack struct {
-	ID        int    `json:"id"`
-	Title     string `json:"title"`
-	StartsAt  string `json:"starts_at"`
-	EndsAt    string `json:"ends_at,omitempty"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
-}

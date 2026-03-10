@@ -8,7 +8,6 @@ import (
 	"io"
 	"math/rand/v2"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -87,19 +86,6 @@ func (c *Client) doRequestAccept(method, path string, body io.Reader, contentTyp
 	return resp, nil
 }
 
-func (c *Client) readBody(resp *http.Response) ([]byte, error) {
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, apierr.ErrNetwork(err)
-	}
-	if resp.StatusCode >= 400 {
-		return nil, responseError(resp, data)
-	}
-	return data, nil
-}
-
-// doOnce performs a single HTTP request without retry. Used for non-idempotent
-// mutations (POST, PATCH, PUT, DELETE) where retrying could duplicate side effects.
 func (c *Client) doOnce(method, path string, body []byte, contentType, accept string) ([]byte, error) { //nolint:unparam // accept varies by caller intent
 
 	var bodyReader io.Reader
@@ -112,6 +98,17 @@ func (c *Client) doOnce(method, path string, body []byte, contentType, accept st
 	}
 	defer resp.Body.Close()
 	return c.readBody(resp)
+}
+
+func (c *Client) readBody(resp *http.Response) ([]byte, error) {
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, apierr.ErrNetwork(err)
+	}
+	if resp.StatusCode >= 400 {
+		return nil, responseError(resp, data)
+	}
+	return data, nil
 }
 
 // doWithRetry performs an HTTP request with exponential backoff retry.
@@ -204,14 +201,6 @@ func (c *Client) GetHTML(path string) ([]byte, error) {
 	return c.doWithRetry("GET", path, nil, "", "text/html")
 }
 
-func (c *Client) GetJSON(path string, v any) error {
-	data, err := c.Get(path)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(data, v)
-}
-
 func (c *Client) PostJSON(path string, body any) ([]byte, error) {
 	var encoded []byte
 	if body != nil {
@@ -222,36 +211,4 @@ func (c *Client) PostJSON(path string, body any) ([]byte, error) {
 		}
 	}
 	return c.doOnce("POST", path, encoded, "application/json", "application/json")
-}
-
-func (c *Client) PostForm(path string, values url.Values) ([]byte, error) {
-	return c.doOnce("POST", path, []byte(values.Encode()), "application/x-www-form-urlencoded", "application/json")
-}
-
-func (c *Client) PatchJSON(path string, body any) ([]byte, error) {
-	var encoded []byte
-	if body != nil {
-		var err error
-		encoded, err = json.Marshal(body)
-		if err != nil {
-			return nil, apierr.ErrAPI(0, fmt.Sprintf("could not encode body: %v", err))
-		}
-	}
-	return c.doOnce("PATCH", path, encoded, "application/json", "application/json")
-}
-
-func (c *Client) PutJSON(path string, body any) ([]byte, error) {
-	var encoded []byte
-	if body != nil {
-		var err error
-		encoded, err = json.Marshal(body)
-		if err != nil {
-			return nil, apierr.ErrAPI(0, fmt.Sprintf("could not encode body: %v", err))
-		}
-	}
-	return c.doOnce("PUT", path, encoded, "application/json", "application/json")
-}
-
-func (c *Client) Delete(path string) ([]byte, error) {
-	return c.doOnce("DELETE", path, nil, "", "application/json")
 }

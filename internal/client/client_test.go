@@ -65,40 +65,6 @@ func TestResponseError(t *testing.T) {
 	}
 }
 
-func TestDoOnceNoRetry(t *testing.T) {
-	for _, method := range []string{"POST", "PATCH", "PUT", "DELETE"} {
-		t.Run(method, func(t *testing.T) {
-			var calls atomic.Int32
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				calls.Add(1)
-				w.WriteHeader(500)
-				fmt.Fprint(w, "server error")
-			}))
-			defer server.Close()
-
-			c := testClient(t, server)
-			var err error
-			switch method {
-			case "POST":
-				_, err = c.PostJSON("/test", nil)
-			case "PATCH":
-				_, err = c.PatchJSON("/test", nil)
-			case "PUT":
-				_, err = c.PutJSON("/test", nil)
-			case "DELETE":
-				_, err = c.Delete("/test")
-			}
-
-			if err == nil {
-				t.Fatal("expected error")
-			}
-			if got := calls.Load(); got != 1 {
-				t.Errorf("expected 1 call, got %d", got)
-			}
-		})
-	}
-}
-
 func TestDoWithRetrySuccess(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
