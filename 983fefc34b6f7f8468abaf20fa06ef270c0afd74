@@ -1,0 +1,15 @@
+internal/cmd/sdk_test.go
+  aa2db4daca2a5c22 1-3,5-53
+go.mod
+  aa2db4daca2a5c22 9
+internal/cmd/root.go
+  aa2db4daca2a5c22 84,101,260-266,268-269
+internal/cmd/sdk.go
+  aa2db4daca2a5c22 1-18,21-252
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "983fefc34b6f7f8468abaf20fa06ef270c0afd74",
+  "prompts": {}
+}
