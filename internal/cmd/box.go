@@ -7,6 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
+
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -54,15 +56,9 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx := cmdContext()
-	boxID, err := c.resolveBoxID(args[0])
+	resp, err := resolveBox(args[0])
 	if err != nil {
 		return err
-	}
-
-	resp, err := sdk.Boxes().Get(ctx, boxID, nil)
-	if err != nil {
-		return convertSDKError(err)
 	}
 
 	postings := resp.Postings
@@ -107,26 +103,78 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 	)
 }
 
-func (c *boxCommand) resolveBoxID(nameOrID string) (int64, error) {
+// resolveBox fetches a box by name or ID, using named SDK getters for
+// well-known box names to avoid an extra List API call.
+func resolveBox(nameOrID string) (*generated.BoxShowResponse, error) {
+	ctx := cmdContext()
+
+	// Numeric ID: fetch directly
 	if id, err := strconv.ParseInt(nameOrID, 10, 64); err == nil {
-		return id, nil
+		resp, err := sdk.Boxes().Get(ctx, id, nil)
+		if err != nil {
+			return nil, convertSDKError(err)
+		}
+		return resp, nil
 	}
 
-	ctx := cmdContext()
+	// Named getter for well-known boxes (saves a List call)
+	switch strings.ToLower(nameOrID) {
+	case "imbox":
+		resp, err := sdk.Boxes().GetImbox(ctx, nil)
+		if err != nil {
+			return nil, convertSDKError(err)
+		}
+		return resp, nil
+	case "feedbox", "the feed":
+		resp, err := sdk.Boxes().GetFeedbox(ctx, nil)
+		if err != nil {
+			return nil, convertSDKError(err)
+		}
+		return resp, nil
+	case "trailbox", "paper trail":
+		resp, err := sdk.Boxes().GetTrailbox(ctx, nil)
+		if err != nil {
+			return nil, convertSDKError(err)
+		}
+		return resp, nil
+	case "asidebox", "set aside":
+		resp, err := sdk.Boxes().GetAsidebox(ctx, nil)
+		if err != nil {
+			return nil, convertSDKError(err)
+		}
+		return resp, nil
+	case "laterbox", "reply later":
+		resp, err := sdk.Boxes().GetLaterbox(ctx, nil)
+		if err != nil {
+			return nil, convertSDKError(err)
+		}
+		return resp, nil
+	case "bubblebox", "bubbled up":
+		resp, err := sdk.Boxes().GetBubblebox(ctx, nil)
+		if err != nil {
+			return nil, convertSDKError(err)
+		}
+		return resp, nil
+	}
+
+	// Unknown name: list-then-filter fallback
 	result, err := sdk.Boxes().List(ctx)
 	if err != nil {
-		return 0, convertSDKError(err)
+		return nil, convertSDKError(err)
 	}
 
-	nameOrID = strings.ToLower(nameOrID)
-	if result == nil {
-		return 0, output.ErrNotFound("box", nameOrID)
-	}
-	for _, b := range *result {
-		if strings.ToLower(b.Kind) == nameOrID || strings.ToLower(b.Name) == nameOrID {
-			return b.Id, nil
+	lower := strings.ToLower(nameOrID)
+	if result != nil {
+		for _, b := range *result {
+			if strings.ToLower(b.Kind) == lower || strings.ToLower(b.Name) == lower {
+				resp, err := sdk.Boxes().Get(ctx, b.Id, nil)
+				if err != nil {
+					return nil, convertSDKError(err)
+				}
+				return resp, nil
+			}
 		}
 	}
 
-	return 0, output.ErrNotFound("box", nameOrID)
+	return nil, output.ErrNotFound("box", nameOrID)
 }
