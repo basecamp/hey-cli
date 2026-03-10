@@ -1,0 +1,25 @@
+internal/tui/tui.go
+  aa2db4daca2a5c22 600-602,651-653,699-705
+internal/cmd/sdk.go
+  aa2db4daca2a5c22 92,96-98
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "c66bf9bb9c8df99cd01bf928a538cb2fdfff7b7a",
+  "prompts": {
+    "aa2db4daca2a5c22": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "85893d12-ca54-495e-82c0-259f6a7a2a2c",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 17,
+      "total_deletions": 2,
+      "accepted_lines": 17,
+      "overriden_lines": 0
+    }
+  }
+}
