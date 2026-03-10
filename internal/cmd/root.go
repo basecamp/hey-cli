@@ -81,6 +81,7 @@ func newRootCmd() *cobra.Command {
 			httpClient := &http.Client{Timeout: 30 * time.Second}
 			authMgr = auth.NewManager(cfg.BaseURL, httpClient, configDir)
 			apiClient = client.New(cfg.BaseURL, authMgr)
+			initSDK(authMgr, cfg.BaseURL)
 
 			if verboseFlag > 0 {
 				apiClient.Logger = os.Stderr
@@ -97,7 +98,7 @@ func newRootCmd() *cobra.Command {
 			if err := requireAuth(); err != nil {
 				return err
 			}
-			return tui.Run(apiClient)
+			return tui.Run(sdk, apiClient)
 		},
 	}
 
@@ -258,9 +259,16 @@ func statsOption() output.ResponseOption {
 	if !statsFlag {
 		return func(*output.Response) {}
 	}
+	// Combine stats from both legacy client and SDK
+	requests := apiClient.RequestCount()
+	latency := apiClient.TotalLatency()
+	if sdkStats != nil {
+		requests += sdkStats.RequestCount()
+		latency += sdkStats.TotalLatency()
+	}
 	return output.WithMeta("stats", map[string]any{
-		"requests":   apiClient.RequestCount(),
-		"latency_ms": apiClient.TotalLatency().Milliseconds(),
+		"requests":   requests,
+		"latency_ms": latency.Milliseconds(),
 	})
 }
 
