@@ -1,0 +1,23 @@
+internal/cmd/box.go
+  47c9f259ea5545e0 10-11,59,106-109,111,113-117,120-160,163,166-167,169-175,179
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "ca21873ef89dab237d72eea52b9079e4f20fd467",
+  "prompts": {
+    "47c9f259ea5545e0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3575dede-8669-4f17-8448-3818e8785b4f",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 97,
+      "overriden_lines": 0
+    }
+  }
+}
