@@ -1,0 +1,45 @@
+internal/cmd/drafts.go
+  47c9f259ea5545e0 44
+internal/cmd/journal.go
+  47c9f259ea5545e0 67,149,275,295
+internal/cmd/calendars.go
+  47c9f259ea5545e0 36
+internal/cmd/box.go
+  47c9f259ea5545e0 4,60-61,110
+internal/cmd/boxes.go
+  47c9f259ea5545e0 44
+internal/cmd/habit.go
+  47c9f259ea5545e0 71,127
+internal/cmd/recordings.go
+  47c9f259ea5545e0 70
+internal/cmd/compose.go
+  47c9f259ea5545e0 78
+internal/cmd/timetrack.go
+  47c9f259ea5545e0 59,108,159,219
+internal/cmd/reply.go
+  47c9f259ea5545e0 49
+internal/cmd/todo.go
+  47c9f259ea5545e0 68,184,231,278,325
+internal/tui/tui.go
+  47c9f259ea5545e0 77-78,101,106-107,140,530,549,600,619,651,701
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "176d16b6e2173acda874e6bd58e04a27cf0c7dd7",
+  "prompts": {
+    "47c9f259ea5545e0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3575dede-8669-4f17-8448-3818e8785b4f",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 38,
+      "total_deletions": 46,
+      "accepted_lines": 37,
+      "overriden_lines": 0
+    }
+  }
+}
