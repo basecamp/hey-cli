@@ -22,7 +22,7 @@ func newDraftsCommand() *draftsCommand {
 		Use:   "drafts",
 		Short: "List drafts",
 		Annotations: map[string]string{
-			"agent_notes": "Returns saved draft messages with IDs, summaries, and kind.",
+			"agent_notes": "Returns saved draft messages with IDs, summaries, and subjects.",
 		},
 		Example: `  hey drafts
   hey drafts --limit 10

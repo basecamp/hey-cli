@@ -73,7 +73,7 @@ type model struct {
 	width  int
 	height int
 	sdk    *hey.Client
-	legacy *client.Client // kept for gap operations (topic entry bodies)
+	legacy *client.Client // kept for gap operations (topic entries, journal fallback, relative URL fetches)
 	ctx    context.Context
 	cancel context.CancelFunc
 	styles styles
@@ -570,6 +570,9 @@ func (m model) fetchBox(boxID int) tea.Cmd {
 // fetchTopic uses the legacy client — SDK entries lack body content (Gap 1).
 func (m model) fetchTopic(topicID int, title string) tea.Cmd {
 	return func() tea.Msg {
+		if m.legacy == nil {
+			return errMsg{fmt.Errorf("topic view requires legacy client (SDK entries lack body content)")}
+		}
 		entries, err := m.legacy.GetTopicEntries(topicID)
 		if err != nil {
 			return errMsg{err}

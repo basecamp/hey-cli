@@ -3,6 +3,8 @@ package cmd
 import (
 	"testing"
 	"time"
+
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
 )
 
 func TestFormatTimestampUTC(t *testing.T) {
@@ -49,5 +51,85 @@ func TestFormatDateZero(t *testing.T) {
 	got := formatDate(ts)
 	if got != "" {
 		t.Errorf("formatDate(zero) = %q, want empty", got)
+	}
+}
+
+func TestFindPersonalCalendarIDByFlag(t *testing.T) {
+	calendars := []generated.Calendar{
+		{Id: 1, Name: "Work", Personal: false},
+		{Id: 110, Name: "", Personal: true},
+	}
+	id, err := findPersonalCalendarID(calendars)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id != 110 {
+		t.Errorf("findPersonalCalendarID = %d, want 110", id)
+	}
+}
+
+func TestFindPersonalCalendarIDByName(t *testing.T) {
+	calendars := []generated.Calendar{
+		{Id: 1, Name: "Work", Personal: false},
+		{Id: 42, Name: "Personal", Personal: false},
+	}
+	id, err := findPersonalCalendarID(calendars)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id != 42 {
+		t.Errorf("findPersonalCalendarID = %d, want 42", id)
+	}
+}
+
+func TestFindPersonalCalendarIDNotFound(t *testing.T) {
+	calendars := []generated.Calendar{
+		{Id: 1, Name: "Work", Personal: false},
+	}
+	_, err := findPersonalCalendarID(calendars)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestUnwrapCalendarsNil(t *testing.T) {
+	result := unwrapCalendars(nil)
+	if result != nil {
+		t.Errorf("unwrapCalendars(nil) = %v, want nil", result)
+	}
+}
+
+func TestUnwrapCalendars(t *testing.T) {
+	payload := &generated.CalendarListPayload{
+		Calendars: []generated.CalendarWithRecordingChangesUrl{
+			{Calendar: generated.Calendar{Id: 1, Name: "Work"}},
+			{Calendar: generated.Calendar{Id: 2, Name: "Personal"}},
+		},
+	}
+	result := unwrapCalendars(payload)
+	if len(result) != 2 {
+		t.Fatalf("len = %d, want 2", len(result))
+	}
+	if result[0].Id != 1 || result[1].Id != 2 {
+		t.Errorf("IDs = [%d, %d], want [1, 2]", result[0].Id, result[1].Id)
+	}
+}
+
+func TestFilterRecordingsByType(t *testing.T) {
+	resp := &generated.CalendarRecordingsResponse{
+		"Calendar::Todo":         {{Id: 1, Title: "Todo"}},
+		"Calendar::JournalEntry": {{Id: 2, Title: "Journal"}},
+	}
+	todos := filterRecordingsByType(resp, "Calendar::Todo")
+	if len(todos) != 1 || todos[0].Id != 1 {
+		t.Errorf("unexpected todos: %v", todos)
+	}
+	missing := filterRecordingsByType(resp, "Calendar::TimeTrack")
+	if missing != nil {
+		t.Errorf("expected nil for missing type, got %v", missing)
+	}
+	nilResult := filterRecordingsByType(nil, "Calendar::Todo")
+	if nilResult != nil {
+		t.Errorf("expected nil for nil resp, got %v", nilResult)
 	}
 }
