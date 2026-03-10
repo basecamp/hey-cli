@@ -33,10 +33,13 @@ func (c *calendarsCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	calendars, err := apiClient.ListCalendars()
+	ctx := cmdContext()
+	payload, err := sdk.Calendars().List(ctx)
 	if err != nil {
-		return err
+		return convertSDKError(err)
 	}
+
+	calendars := unwrapCalendars(payload)
 
 	if writer.IsStyled() {
 		table := newTable(cmd.OutOrStdout())
@@ -46,7 +49,7 @@ func (c *calendarsCommand) run(cmd *cobra.Command, args []string) error {
 			if cal.Owned {
 				owned = "yes"
 			}
-			table.addRow([]string{fmt.Sprintf("%d", cal.ID), cal.Name, cal.Kind, owned})
+			table.addRow([]string{fmt.Sprintf("%d", cal.Id), cal.Name, cal.Kind, owned})
 		}
 		table.print()
 		return nil

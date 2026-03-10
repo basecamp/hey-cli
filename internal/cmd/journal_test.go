@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,23 +15,58 @@ import (
 
 func journalServer(t *testing.T) *httptest.Server {
 	t.Helper()
+	return journalServerWithReadBehavior(t, "200")
+}
+
+// journalServerWithReadBehavior creates a journal test server.
+// readBehavior controls GET /calendar/days/{date}/journal_entry:
+//
+//	"200"               — returns a Recording with content
+//	"204"               — returns 204 No Content (SDK returns nil), no legacy fallback
+//	"204-with-fallback" — returns 204 on SDK path, serves HTML on legacy /edit path
+func journalServerWithReadBehavior(t *testing.T, readBehavior string) *httptest.Server {
+	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == "PATCH" && strings.Contains(r.URL.Path, "/journal_entry.json"):
+		case r.Method == "GET" && strings.Contains(r.URL.Path, "/calendar/days/") && strings.HasSuffix(r.URL.Path, "/journal_entry/edit"):
+			// Legacy HTML-scrape path
+			w.Header().Set("Content-Type", "text/html")
+			if readBehavior == "204-with-fallback" {
+				fmt.Fprint(w, `<html><body><input id="journal_trix_input" value="&lt;div&gt;Fallback content&lt;/div&gt;"></body></html>`)
+			} else {
+				fmt.Fprint(w, `<html><body></body></html>`)
+			}
+		case r.Method == "GET" && strings.Contains(r.URL.Path, "/calendar/days/") && (strings.HasSuffix(r.URL.Path, "/journal_entry") || strings.HasSuffix(r.URL.Path, "/journal_entry.json")):
+			path := r.URL.Path
+			path = strings.TrimPrefix(path, "/calendar/days/")
+			date := strings.TrimSuffix(strings.TrimSuffix(path, ".json"), "/journal_entry")
+			switch readBehavior {
+			case "204", "204-with-fallback":
+				w.WriteHeader(204)
+			default:
+				resp := map[string]any{
+					"id":        1,
+					"content":   "<div>Entry for " + date + "</div>",
+					"type":      "Calendar::JournalEntry",
+					"title":     "Journal Entry",
+					"starts_at": "2024-01-15T00:00:00Z",
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(resp)
+			}
+		case r.Method == "PATCH" && strings.Contains(r.URL.Path, "/calendar/days/") && (strings.HasSuffix(r.URL.Path, "/journal_entry") || strings.HasSuffix(r.URL.Path, "/journal_entry.json")):
 			body, _ := io.ReadAll(r.Body)
 			var req map[string]any
 			_ = json.Unmarshal(body, &req)
 			resp := map[string]any{
-				"id":   1,
-				"body": req["body"],
-				"date": strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/calendar/days/"), "/journal_entry.json"),
+				"id":        1,
+				"content":   req["body"],
+				"type":      "Calendar::JournalEntry",
+				"title":     "Journal Entry",
+				"starts_at": "2024-01-15T00:00:00Z",
 			}
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(resp)
-		case r.Method == "GET" && strings.Contains(r.URL.Path, "/journal_entry/edit"):
-			// Return a minimal HTML page with an empty trix input
-			w.Header().Set("Content-Type", "text/html")
-			w.Write([]byte(`<html><body><input id="journal_trix_input" value=""></body></html>`))
 		default:
 			w.WriteHeader(200)
 		}
@@ -74,8 +110,8 @@ func TestJournalWritePositionalContent(t *testing.T) {
 	if !ok {
 		t.Fatalf("data type = %T, want map[string]any", resp.Data)
 	}
-	if got := data["body"]; got != "Today was great" {
-		t.Errorf("body = %q, want %q", got, "Today was great")
+	if got := data["content"]; got != "Today was great" {
+		t.Errorf("content = %q, want %q", got, "Today was great")
 	}
 }
 
@@ -92,11 +128,8 @@ func TestJournalWritePositionalDateAndContent(t *testing.T) {
 	if !ok {
 		t.Fatalf("data type = %T, want map[string]any", resp.Data)
 	}
-	if got := data["body"]; got != "Retrospective" {
-		t.Errorf("body = %q, want %q", got, "Retrospective")
-	}
-	if got := data["date"]; got != "2024-01-15" {
-		t.Errorf("date = %q, want %q", got, "2024-01-15")
+	if got := data["content"]; got != "Retrospective" {
+		t.Errorf("content = %q, want %q", got, "Retrospective")
 	}
 }
 
@@ -113,8 +146,8 @@ func TestJournalWriteShortFlag(t *testing.T) {
 	if !ok {
 		t.Fatalf("data type = %T, want map[string]any", resp.Data)
 	}
-	if got := data["body"]; got != "Content via short flag" {
-		t.Errorf("body = %q, want %q", got, "Content via short flag")
+	if got := data["content"]; got != "Content via short flag" {
+		t.Errorf("content = %q, want %q", got, "Content via short flag")
 	}
 }
 
@@ -154,5 +187,85 @@ func TestJournalWriteConflictFlagAndTwoPositionals(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "mutually exclusive") {
 		t.Errorf("error = %q, want to contain %q", err.Error(), "mutually exclusive")
+	}
+}
+
+// --- Journal read tests ---
+
+func runJournalRead(t *testing.T, server *httptest.Server, args ...string) (output.Response, error) {
+	t.Helper()
+	t.Setenv("HEY_TOKEN", "test-token")
+	t.Setenv("HEY_NO_KEYRING", "1")
+	t.Setenv("HEY_BASE_URL", "")
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	t.Setenv("XDG_STATE_HOME", tmpDir)
+	t.Setenv("XDG_CACHE_HOME", tmpDir)
+
+	root := newRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs(append([]string{"journal", "read", "--json", "--base-url", server.URL}, args...))
+
+	err := root.Execute()
+	var resp output.Response
+	if buf.Len() > 0 {
+		_ = json.Unmarshal(buf.Bytes(), &resp)
+	}
+	return resp, err
+}
+
+func TestJournalReadReturns200WithContent(t *testing.T) {
+	server := journalServerWithReadBehavior(t, "200")
+	defer server.Close()
+
+	resp, err := runJournalRead(t, server, "2024-01-15")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	data, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("data type = %T, want map[string]any", resp.Data)
+	}
+	content, _ := data["content"].(string)
+	if !strings.Contains(content, "Entry for 2024-01-15") {
+		t.Errorf("content = %q, want to contain %q", content, "Entry for 2024-01-15")
+	}
+}
+
+func TestJournalReadReturns204FallsBackToLegacyHTML(t *testing.T) {
+	server := journalServerWithReadBehavior(t, "204-with-fallback")
+	defer server.Close()
+
+	resp, err := runJournalRead(t, server, "2024-01-15")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	// SDK returns nil (204), but the legacy HTML scrape at /edit should provide content.
+	data, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("data type = %T, want map[string]any (fallback should have returned content)", resp.Data)
+	}
+	content, _ := data["content"].(string)
+	if !strings.Contains(content, "Fallback content") {
+		t.Errorf("content = %q, want to contain %q", content, "Fallback content")
+	}
+}
+
+func TestJournalReadReturns204NoFallbackContent(t *testing.T) {
+	server := journalServerWithReadBehavior(t, "204")
+	defer server.Close()
+
+	resp, err := runJournalRead(t, server, "2024-01-15")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	// 204 from SDK and legacy /edit returns empty page — no content available.
+	if !strings.Contains(resp.Summary, "No journal entry") {
+		t.Errorf("summary = %q, want to contain %q", resp.Summary, "No journal entry")
 	}
 }

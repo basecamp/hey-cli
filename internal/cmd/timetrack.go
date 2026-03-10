@@ -5,6 +5,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
+
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -54,17 +56,18 @@ func (c *timetrackStartCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	data, err := apiClient.StartTimeTrack(nil)
+	ctx := cmdContext()
+	result, err := sdk.TimeTracks().Start(ctx, generated.StartTimeTrackJSONRequestBody{})
 	if err != nil {
-		return err
+		return convertSDKError(err)
 	}
 
 	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Time tracking started.%s\n", extractMutationInfo(data))
+		fmt.Fprintf(cmd.OutOrStdout(), "Time tracking started.%s\n", extractMutationInfoFromResult(result))
 		return nil
 	}
 
-	normalized, nerr := output.NormalizeJSONNumbers(data)
+	normalized, nerr := normalizeAny(result)
 	if nerr != nil {
 		return writeOK(nil, output.WithSummary("Time tracking started"))
 	}
@@ -102,26 +105,27 @@ func (c *timetrackStopCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	track, err := apiClient.GetOngoingTimeTrack()
+	ctx := cmdContext()
+	track, err := sdk.TimeTracks().GetOngoing(ctx)
 	if err != nil {
-		return err
+		return convertSDKError(err)
 	}
 
-	if track.ID == 0 {
+	if track == nil {
 		return output.ErrNotFound("time track", "active")
 	}
 
-	result, err := apiClient.StopTimeTrack(track.ID)
+	result, err := sdk.TimeTracks().Stop(ctx, track.Id)
 	if err != nil {
-		return err
+		return convertSDKError(err)
 	}
 
 	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Time tracking stopped.%s\n", extractMutationInfo(result))
+		fmt.Fprintf(cmd.OutOrStdout(), "Time tracking stopped.%s\n", extractMutationInfoFromResult(result))
 		return nil
 	}
 
-	normalized, nerr := output.NormalizeJSONNumbers(result)
+	normalized, nerr := normalizeAny(result)
 	if nerr != nil {
 		return writeOK(nil, output.WithSummary("Time tracking stopped"))
 	}
@@ -152,37 +156,33 @@ func (c *timetrackCurrentCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	track, err := apiClient.GetOngoingTimeTrack()
+	ctx := cmdContext()
+	track, err := sdk.TimeTracks().GetOngoing(ctx)
 	if err != nil {
-		return err
+		return convertSDKError(err)
 	}
 
 	if writer.IsStyled() {
 		w := cmd.OutOrStdout()
-		if track.ID == 0 {
+		if track == nil {
 			fmt.Fprintln(w, "No active time track.")
 			return nil
 		}
 
-		starts := ""
-		if len(track.StartsAt) >= 16 {
-			starts = track.StartsAt[:16]
-		}
-		fmt.Fprintf(w, "Active time track #%d\n", track.ID)
-		fmt.Fprintf(w, "Started: %s\n", starts)
+		fmt.Fprintf(w, "Active time track #%d\n", track.Id)
+		fmt.Fprintf(w, "Started: %s\n", formatTimestamp(track.StartsAt))
 		if track.Title != "" {
 			fmt.Fprintf(w, "Title:   %s\n", track.Title)
 		}
 		return nil
 	}
 
+	if track == nil {
+		return writeOK(nil, output.WithSummary("No active time track"))
+	}
+
 	return writeOK(track,
-		output.WithSummary(func() string {
-			if track.ID == 0 {
-				return "No active time track"
-			}
-			return fmt.Sprintf("Active time track #%d", track.ID)
-		}()),
+		output.WithSummary(fmt.Sprintf("Active time track #%d", track.Id)),
 	)
 }
 
@@ -216,10 +216,13 @@ func (c *timetrackListCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	tracks, err := apiClient.ListTimeTracks()
+	ctx := cmdContext()
+	resp, err := listPersonalRecordings(ctx)
 	if err != nil {
 		return err
 	}
+
+	tracks := filterRecordingsByType(resp, "Calendar::TimeTrack")
 
 	total := len(tracks)
 	if c.limit > 0 && !c.all && len(tracks) > c.limit {
@@ -236,15 +239,7 @@ func (c *timetrackListCommand) run(cmd *cobra.Command, args []string) error {
 		table := newTable(cmd.OutOrStdout())
 		table.addRow([]string{"ID", "Title", "Start", "End"})
 		for _, t := range tracks {
-			starts := ""
-			if len(t.StartsAt) >= 16 {
-				starts = t.StartsAt[:16]
-			}
-			ends := ""
-			if len(t.EndsAt) >= 16 {
-				ends = t.EndsAt[:16]
-			}
-			table.addRow([]string{fmt.Sprintf("%d", t.ID), t.Title, starts, ends})
+			table.addRow([]string{fmt.Sprintf("%d", t.Id), t.Title, formatTimestamp(t.StartsAt), formatTimestamp(t.EndsAt)})
 		}
 		table.print()
 		if notice != "" {

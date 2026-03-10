@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -57,22 +58,28 @@ func (c *habitCompleteCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	id, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return output.ErrUsage(fmt.Sprintf("invalid habit ID: %s", args[0]))
+	}
+
 	date := c.date
 	if date == "" {
 		date = time.Now().Format("2006-01-02")
 	}
 
-	data, err := apiClient.CompleteHabit(date, args[0])
+	ctx := cmdContext()
+	result, err := sdk.Habits().Complete(ctx, date, id)
 	if err != nil {
-		return err
+		return convertSDKError(err)
 	}
 
 	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Habit %s completed for %s.%s\n", args[0], date, extractMutationInfo(data))
+		fmt.Fprintf(cmd.OutOrStdout(), "Habit %s completed for %s.%s\n", args[0], date, extractMutationInfoFromResult(result))
 		return nil
 	}
 
-	normalized, nerr := output.NormalizeJSONNumbers(data)
+	normalized, nerr := normalizeAny(result)
 	if nerr != nil {
 		return writeOK(nil, output.WithSummary(fmt.Sprintf("Habit %s completed for %s", args[0], date)))
 	}
@@ -107,22 +114,28 @@ func (c *habitUncompleteCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	id, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return output.ErrUsage(fmt.Sprintf("invalid habit ID: %s", args[0]))
+	}
+
 	date := c.date
 	if date == "" {
 		date = time.Now().Format("2006-01-02")
 	}
 
-	data, err := apiClient.UncompleteHabit(date, args[0])
+	ctx := cmdContext()
+	result, err := sdk.Habits().Uncomplete(ctx, date, id)
 	if err != nil {
-		return err
+		return convertSDKError(err)
 	}
 
 	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Habit %s uncompleted for %s.%s\n", args[0], date, extractMutationInfo(data))
+		fmt.Fprintf(cmd.OutOrStdout(), "Habit %s uncompleted for %s.%s\n", args[0], date, extractMutationInfoFromResult(result))
 		return nil
 	}
 
-	normalized, nerr := output.NormalizeJSONNumbers(data)
+	normalized, nerr := normalizeAny(result)
 	if nerr != nil {
 		return writeOK(nil, output.WithSummary(fmt.Sprintf("Habit %s uncompleted for %s", args[0], date)))
 	}

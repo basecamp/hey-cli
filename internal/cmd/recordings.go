@@ -7,6 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
+
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -46,7 +48,7 @@ func (c *recordingsCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	calendarID, err := strconv.Atoi(args[0])
+	calendarID, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil {
 		return output.ErrUsage(fmt.Sprintf("invalid calendar ID: %s", args[0]))
 	}
@@ -65,29 +67,36 @@ func (c *recordingsCommand) run(cmd *cobra.Command, args []string) error {
 		endsOn = start.AddDate(0, 0, 30).Format("2006-01-02")
 	}
 
-	resp, err := apiClient.GetCalendarRecordings(calendarID, startsOn, endsOn)
+	ctx := cmdContext()
+	resp, err := sdk.Calendars().GetRecordings(ctx, calendarID, &generated.GetCalendarRecordingsParams{
+		StartsOn: startsOn,
+		EndsOn:   endsOn,
+	})
 	if err != nil {
-		return err
+		return convertSDKError(err)
 	}
 
+	if resp == nil {
+		resp = &generated.CalendarRecordingsResponse{}
+	}
 	var total, shown int
-	for _, recordings := range resp {
+	for _, recordings := range *resp {
 		total += len(recordings)
 	}
 	if c.limit > 0 && !c.all {
-		for key, recordings := range resp {
+		for key, recordings := range *resp {
 			if len(recordings) > c.limit {
-				resp[key] = recordings[:c.limit]
+				(*resp)[key] = recordings[:c.limit]
 			}
 		}
 	}
-	for _, recordings := range resp {
+	for _, recordings := range *resp {
 		shown += len(recordings)
 	}
 	notice := output.TruncationNotice(shown, total)
 
 	if writer.IsStyled() {
-		for recType, recordings := range resp {
+		for recType, recordings := range *resp {
 			if len(recordings) == 0 {
 				continue
 			}
@@ -95,15 +104,7 @@ func (c *recordingsCommand) run(cmd *cobra.Command, args []string) error {
 			table := newTable(cmd.OutOrStdout())
 			table.addRow([]string{"ID", "Title", "Starts", "Ends"})
 			for _, r := range recordings {
-				starts := ""
-				if len(r.StartsAt) >= 16 {
-					starts = r.StartsAt[:16]
-				}
-				ends := ""
-				if len(r.EndsAt) >= 16 {
-					ends = r.EndsAt[:16]
-				}
-				table.addRow([]string{fmt.Sprintf("%d", r.ID), r.Title, starts, ends})
+				table.addRow([]string{fmt.Sprintf("%d", r.Id), r.Title, formatTimestamp(r.StartsAt), formatTimestamp(r.EndsAt)})
 			}
 			table.print()
 		}

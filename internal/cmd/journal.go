@@ -6,6 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
+
 	"github.com/basecamp/hey-cli/internal/editor"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/output"
@@ -62,10 +64,13 @@ func (c *journalListCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	entries, err := apiClient.ListJournalEntries()
+	ctx := cmdContext()
+	resp, err := listPersonalRecordings(ctx)
 	if err != nil {
 		return err
 	}
+
+	entries := filterRecordingsByType(resp, "Calendar::JournalEntry")
 
 	total := len(entries)
 	if c.limit > 0 && !c.all && len(entries) > c.limit {
@@ -82,7 +87,7 @@ func (c *journalListCommand) run(cmd *cobra.Command, args []string) error {
 		table := newTable(cmd.OutOrStdout())
 		table.addRow([]string{"ID", "Date", "Preview"})
 		for _, e := range entries {
-			table.addRow([]string{fmt.Sprintf("%d", e.ID), e.Date, truncate(e.Body, 60)})
+			table.addRow([]string{fmt.Sprintf("%d", e.Id), formatDate(e.StartsAt), truncate(e.Content, 60)})
 		}
 		table.print()
 		if notice != "" {
@@ -141,28 +146,57 @@ func (c *journalReadCommand) run(cmd *cobra.Command, args []string) error {
 		date = args[0]
 	}
 
-	entry, err := apiClient.GetJournalEntry(date)
+	ctx := cmdContext()
+	entry, err := sdk.Journal().Get(ctx, date)
 	if err != nil {
-		return err
+		return convertSDKError(err)
+	}
+
+	// SDK returns nil when the server responds 204 (no JSON body).
+	// Fall back to the legacy HTML-scrape path which parses the edit page.
+	content := ""
+	if entry != nil {
+		content = entry.Content
+	}
+	if content == "" && apiClient != nil {
+		legacy, legacyErr := apiClient.GetJournalEntry(date)
+		if legacyErr == nil && legacy.Body != "" {
+			content = legacy.Body
+		}
+	}
+
+	if content == "" {
+		if writer.IsStyled() {
+			fmt.Fprintf(cmd.OutOrStdout(), "Journal — %s\n\n(empty)\n", date)
+			return nil
+		}
+		return writeOK(nil, output.WithSummary(fmt.Sprintf("No journal entry for %s", date)))
 	}
 
 	if writer.IsStyled() {
 		w := cmd.OutOrStdout()
 		if htmlOutput {
-			fmt.Fprintln(w, entry.Body)
+			fmt.Fprintln(w, content)
 			return nil
 		}
 
 		fmt.Fprintf(w, "Journal — %s\n\n", date)
-		if entry.Body != "" {
-			fmt.Fprintln(w, htmlutil.ToText(entry.Body))
-		} else {
-			fmt.Fprintln(w, "(empty)")
-		}
+		fmt.Fprintln(w, htmlutil.ToText(content))
 		return nil
 	}
 
-	return writeOK(entry,
+	// If SDK returned a full entry, use it; otherwise wrap the scraped content.
+	if entry != nil {
+		return writeOK(entry,
+			output.WithSummary(fmt.Sprintf("Journal entry for %s", date)),
+			output.WithBreadcrumbs(output.Breadcrumb{
+				Action:      "write",
+				Command:     fmt.Sprintf("hey journal write %s '...'", date),
+				Description: "Edit this journal entry",
+			}),
+		)
+	}
+	return writeOK(map[string]string{"date": date, "content": content},
 		output.WithSummary(fmt.Sprintf("Journal entry for %s", date)),
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "write",
@@ -238,10 +272,17 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 				return output.ErrUsage("no content provided (use --content to provide inline, or pipe to stdin)")
 			}
 		} else {
+			ctx := cmdContext()
 			existing := ""
-			entry, err := apiClient.GetJournalEntry(date)
-			if err == nil {
-				existing = entry.Body
+			entry, err := sdk.Journal().Get(ctx, date)
+			if err == nil && entry != nil {
+				existing = entry.Content
+			}
+			if existing == "" && apiClient != nil {
+				legacy, legacyErr := apiClient.GetJournalEntry(date)
+				if legacyErr == nil {
+					existing = legacy.Body
+				}
 			}
 
 			content, err = editor.Open(existing)
@@ -251,19 +292,20 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	body := map[string]any{"body": content}
-
-	data, err := apiClient.UpdateJournalEntry(date, body)
+	ctx := cmdContext()
+	result, err := sdk.Journal().Update(ctx, date, generated.UpdateJournalEntryJSONRequestBody{
+		Body: content,
+	})
 	if err != nil {
-		return err
+		return convertSDKError(err)
 	}
 
 	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Journal entry for %s saved.%s\n", date, extractMutationInfo(data))
+		fmt.Fprintf(cmd.OutOrStdout(), "Journal entry for %s saved.%s\n", date, extractMutationInfoFromResult(result))
 		return nil
 	}
 
-	normalized, nerr := output.NormalizeJSONNumbers(data)
+	normalized, nerr := normalizeAny(result)
 	if nerr != nil {
 		return writeOK(nil, output.WithSummary(fmt.Sprintf("Journal entry for %s saved", date)))
 	}

@@ -2,8 +2,12 @@ package cmd
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/spf13/cobra"
+
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
+	"github.com/basecamp/hey-sdk/go/pkg/types"
 
 	"github.com/basecamp/hey-cli/internal/output"
 )
@@ -61,10 +65,13 @@ func (c *todoListCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	todos, err := apiClient.ListTodos()
+	ctx := cmdContext()
+	resp, err := listPersonalRecordings(ctx)
 	if err != nil {
 		return err
 	}
+
+	todos := filterRecordingsByType(resp, "Calendar::Todo")
 
 	total := len(todos)
 	if c.limit > 0 && !c.all && len(todos) > c.limit {
@@ -81,15 +88,11 @@ func (c *todoListCommand) run(cmd *cobra.Command, args []string) error {
 		table := newTable(cmd.OutOrStdout())
 		table.addRow([]string{"ID", "Title", "Date", "Done"})
 		for _, t := range todos {
-			date := ""
-			if len(t.StartsAt) >= 10 {
-				date = t.StartsAt[:10]
-			}
 			done := ""
-			if t.CompletedAt != "" {
+			if !t.CompletedAt.IsZero() {
 				done = "yes"
 			}
-			table.addRow([]string{fmt.Sprintf("%d", t.ID), t.Title, date, done})
+			table.addRow([]string{fmt.Sprintf("%d", t.Id), t.Title, formatDate(t.StartsAt), done})
 		}
 		table.print()
 		if notice != "" {
@@ -167,23 +170,30 @@ func (c *todoAddCommand) run(cmd *cobra.Command, args []string) error {
 			"hey todo add \"Buy milk\"  or  hey todo add --title \"Buy milk\"")
 	}
 
-	body := map[string]any{"title": title}
+	body := generated.CreateCalendarTodoJSONRequestBody{
+		Title: title,
+	}
 	if c.date != "" {
-		body["starts_at"] = c.date
+		d, err := types.ParseDate(c.date)
+		if err != nil {
+			return output.ErrUsage(fmt.Sprintf("invalid date: %s", c.date))
+		}
+		body.StartsOn = d
 	}
 
-	data, err := apiClient.CreateTodo(body)
+	ctx := cmdContext()
+	result, err := sdk.CalendarTodos().Create(ctx, body)
 	if err != nil {
-		return err
+		return convertSDKError(err)
 	}
 
 	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Todo created.%s\n", extractMutationInfo(data))
+		fmt.Fprintf(cmd.OutOrStdout(), "Todo created.%s\n", extractMutationInfoFromResult(result))
 		return nil
 	}
 
-	normalized, err := output.NormalizeJSONNumbers(data)
-	if err != nil {
+	normalized, nerr := normalizeAny(result)
+	if nerr != nil {
 		return writeOK(nil, output.WithSummary("Todo created"))
 	}
 	return writeOK(normalized, output.WithSummary("Todo created"))
@@ -213,18 +223,24 @@ func (c *todoCompleteCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	data, err := apiClient.CompleteTodo(args[0])
+	id, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil {
-		return err
+		return output.ErrUsage(fmt.Sprintf("invalid todo ID: %s", args[0]))
+	}
+
+	ctx := cmdContext()
+	result, err := sdk.CalendarTodos().Complete(ctx, id)
+	if err != nil {
+		return convertSDKError(err)
 	}
 
 	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Todo completed.%s\n", extractMutationInfo(data))
+		fmt.Fprintf(cmd.OutOrStdout(), "Todo completed.%s\n", extractMutationInfoFromResult(result))
 		return nil
 	}
 
-	normalized, err := output.NormalizeJSONNumbers(data)
-	if err != nil {
+	normalized, nerr := normalizeAny(result)
+	if nerr != nil {
 		return writeOK(nil, output.WithSummary("Todo completed"))
 	}
 	return writeOK(normalized, output.WithSummary("Todo completed"))
@@ -254,18 +270,24 @@ func (c *todoUncompleteCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	data, err := apiClient.UncompleteTodo(args[0])
+	id, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil {
-		return err
+		return output.ErrUsage(fmt.Sprintf("invalid todo ID: %s", args[0]))
+	}
+
+	ctx := cmdContext()
+	result, err := sdk.CalendarTodos().Uncomplete(ctx, id)
+	if err != nil {
+		return convertSDKError(err)
 	}
 
 	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Todo marked incomplete.%s\n", extractMutationInfo(data))
+		fmt.Fprintf(cmd.OutOrStdout(), "Todo marked incomplete.%s\n", extractMutationInfoFromResult(result))
 		return nil
 	}
 
-	normalized, err := output.NormalizeJSONNumbers(data)
-	if err != nil {
+	normalized, nerr := normalizeAny(result)
+	if nerr != nil {
 		return writeOK(nil, output.WithSummary("Todo marked incomplete"))
 	}
 	return writeOK(normalized, output.WithSummary("Todo marked incomplete"))
@@ -295,19 +317,21 @@ func (c *todoDeleteCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	data, err := apiClient.DeleteTodo(args[0])
+	id, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil {
-		return err
+		return output.ErrUsage(fmt.Sprintf("invalid todo ID: %s", args[0]))
+	}
+
+	ctx := cmdContext()
+	err = sdk.CalendarTodos().Delete(ctx, id)
+	if err != nil {
+		return convertSDKError(err)
 	}
 
 	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Todo deleted.%s\n", extractMutationInfo(data))
+		fmt.Fprintln(cmd.OutOrStdout(), "Todo deleted.")
 		return nil
 	}
 
-	normalized, err := output.NormalizeJSONNumbers(data)
-	if err != nil {
-		return writeOK(nil, output.WithSummary("Todo deleted"))
-	}
-	return writeOK(normalized, output.WithSummary("Todo deleted"))
+	return writeOK(nil, output.WithSummary("Todo deleted"))
 }

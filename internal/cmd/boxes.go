@@ -5,6 +5,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
+
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -39,11 +41,16 @@ func (c *boxesCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	boxes, err := apiClient.ListBoxes()
+	ctx := cmdContext()
+	result, err := sdk.Boxes().List(ctx)
 	if err != nil {
-		return err
+		return convertSDKError(err)
 	}
 
+	var boxes []generated.Box
+	if result != nil {
+		boxes = *result
+	}
 	total := len(boxes)
 	if c.limit > 0 && !c.all && len(boxes) > c.limit {
 		boxes = boxes[:c.limit]
@@ -54,7 +61,7 @@ func (c *boxesCommand) run(cmd *cobra.Command, args []string) error {
 		table := newTable(cmd.OutOrStdout())
 		table.addRow([]string{"ID", "Kind", "Name"})
 		for _, b := range boxes {
-			table.addRow([]string{fmt.Sprintf("%d", b.ID), b.Kind, b.Name})
+			table.addRow([]string{fmt.Sprintf("%d", b.Id), b.Kind, b.Name})
 		}
 		table.print()
 		if notice != "" {

@@ -5,6 +5,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
+
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -39,11 +41,16 @@ func (c *draftsCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	drafts, err := apiClient.ListDrafts()
+	ctx := cmdContext()
+	result, err := sdk.Entries().ListDrafts(ctx, nil)
 	if err != nil {
-		return err
+		return convertSDKError(err)
 	}
 
+	var drafts []generated.DraftMessage
+	if result != nil {
+		drafts = *result
+	}
 	total := len(drafts)
 	if c.limit > 0 && !c.all && len(drafts) > c.limit {
 		drafts = drafts[:c.limit]
@@ -57,13 +64,9 @@ func (c *draftsCommand) run(cmd *cobra.Command, args []string) error {
 		}
 
 		table := newTable(cmd.OutOrStdout())
-		table.addRow([]string{"ID", "Summary", "Kind", "Date"})
+		table.addRow([]string{"ID", "Summary", "Subject", "Date"})
 		for _, d := range drafts {
-			date := ""
-			if len(d.UpdatedAt) >= 10 {
-				date = d.UpdatedAt[:10]
-			}
-			table.addRow([]string{fmt.Sprintf("%d", d.ID), truncate(d.Summary, 60), d.Kind, date})
+			table.addRow([]string{fmt.Sprintf("%d", d.Id), truncate(d.Summary, 60), d.Subject, formatDate(d.UpdatedAt)})
 		}
 		table.print()
 		if notice != "" {

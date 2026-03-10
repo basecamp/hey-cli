@@ -91,7 +91,12 @@ func (p *Posting) ResolveTopicID() int {
 	}
 	// Parse from app_url like "https://app.hey.com/topics/1943585351"
 	if i := strings.LastIndex(p.AppURL, "/topics/"); i >= 0 {
-		if id, err := strconv.Atoi(p.AppURL[i+len("/topics/"):]); err == nil {
+		segment := p.AppURL[i+len("/topics/"):]
+		// Strip trailing path components or query strings
+		if j := strings.IndexAny(segment, "/?#"); j >= 0 {
+			segment = segment[:j]
+		}
+		if id, err := strconv.Atoi(segment); err == nil {
 			return id
 		}
 	}

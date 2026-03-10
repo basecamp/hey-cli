@@ -19,7 +19,7 @@ func newTuiCommand() *tuiCommand {
 			if err := requireAuth(); err != nil {
 				return err
 			}
-			return tui.Run(apiClient)
+			return tui.Run(sdk, apiClient)
 		},
 	}
 	return c

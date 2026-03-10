@@ -3,8 +3,11 @@ package cmd
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
 	"github.com/basecamp/hey-cli/internal/editor"
 	"github.com/basecamp/hey-cli/internal/output"
@@ -72,34 +75,48 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	body := map[string]any{
-		"subject": c.subject,
-		"body":    message,
-	}
-	if c.to != "" {
-		body["to"] = c.to
-	}
+	ctx := cmdContext()
+	var result any
 
-	var threadID *int
 	if c.threadID != "" {
-		id, err := strconv.Atoi(c.threadID)
+		topicID, err := strconv.ParseInt(c.threadID, 10, 64)
 		if err != nil {
 			return output.ErrUsage(fmt.Sprintf("invalid thread ID: %s", c.threadID))
 		}
-		threadID = &id
-	}
-
-	data, err := apiClient.CreateMessage(threadID, body)
-	if err != nil {
-		return err
+		resp, err := sdk.Messages().CreateTopicMessage(ctx, topicID, generated.CreateTopicMessageJSONRequestBody{
+			Content: message,
+		})
+		if err != nil {
+			return convertSDKError(err)
+		}
+		result = resp
+	} else {
+		to := []string{}
+		if c.to != "" {
+			for _, addr := range strings.Split(c.to, ",") {
+				addr = strings.TrimSpace(addr)
+				if addr != "" {
+					to = append(to, addr)
+				}
+			}
+		}
+		resp, err := sdk.Messages().Create(ctx, generated.CreateMessageJSONRequestBody{
+			Subject: c.subject,
+			Content: message,
+			To:      to,
+		})
+		if err != nil {
+			return convertSDKError(err)
+		}
+		result = resp
 	}
 
 	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Message sent.%s\n", extractMutationInfo(data))
+		fmt.Fprintf(cmd.OutOrStdout(), "Message sent.%s\n", extractMutationInfoFromResult(result))
 		return nil
 	}
 
-	normalized, err := output.NormalizeJSONNumbers(data)
+	normalized, err := normalizeAny(result)
 	if err != nil {
 		return writeOK(nil, output.WithSummary("Message sent"))
 	}
