@@ -74,6 +74,8 @@ type model struct {
 	height int
 	sdk    *hey.Client
 	legacy *client.Client // kept for gap operations (topic entry bodies)
+	ctx    context.Context
+	cancel context.CancelFunc
 	styles styles
 
 	boxes boxesModel
@@ -96,10 +98,13 @@ type model struct {
 
 func newModel(sdk *hey.Client, legacy *client.Client) model {
 	s := newStyles()
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118: cancel is stored in model and called on ctrl+c
 	return model{
 		state:     viewBoxes,
 		sdk:       sdk,
 		legacy:    legacy,
+		ctx:       ctx,
+		cancel:    cancel,
 		styles:    s,
 		boxes:     newBoxesModel(),
 		box:       newBoxModel(),
@@ -132,6 +137,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		m.lastKey = fmt.Sprintf("key=%q code=0x%x mod=%d", msg.String(), msg.Key().Code, msg.Key().Mod)
 		if msg.String() == "ctrl+c" {
+			m.cancel()
 			return m, tea.Quit
 		}
 		if msg.Key().Code == tea.KeyTab {
@@ -521,7 +527,7 @@ func formatTimestamp(ts time.Time) string {
 
 func (m model) fetchBoxes() tea.Cmd {
 	return func() tea.Msg {
-		ctx := context.Background()
+		ctx := m.ctx
 		result, err := m.sdk.Boxes().List(ctx)
 		if err != nil {
 			return errMsg{err}
@@ -540,7 +546,7 @@ func (m model) fetchBoxes() tea.Cmd {
 
 func (m model) fetchBox(boxID int) tea.Cmd {
 	return func() tea.Msg {
-		ctx := context.Background()
+		ctx := m.ctx
 		resp, err := m.sdk.Boxes().Get(ctx, int64(boxID), nil)
 		if err != nil {
 			return errMsg{err}
@@ -591,7 +597,7 @@ func (m model) fetchTopic(topicID int, title string) tea.Cmd {
 
 func (m model) fetchCalendars() tea.Cmd {
 	return func() tea.Msg {
-		ctx := context.Background()
+		ctx := m.ctx
 		payload, err := m.sdk.Calendars().List(ctx)
 		if err != nil {
 			return errMsg{err}
@@ -610,7 +616,7 @@ func (m model) fetchCalendars() tea.Cmd {
 
 func (m model) fetchCalendar(cal models.Calendar) tea.Cmd {
 	return func() tea.Msg {
-		ctx := context.Background()
+		ctx := m.ctx
 		now := time.Now()
 		startsOn := now.Format("2006-01-02")
 		endsOn := now.AddDate(0, 0, 30).Format("2006-01-02")
@@ -642,7 +648,7 @@ func (m model) fetchCalendar(cal models.Calendar) tea.Cmd {
 
 func (m model) fetchJournal() tea.Cmd {
 	return func() tea.Msg {
-		ctx := context.Background()
+		ctx := m.ctx
 		payload, err := m.sdk.Calendars().List(ctx)
 		if err != nil {
 			return errMsg{err}
@@ -692,7 +698,7 @@ func (m model) fetchJournalEntry(rec models.Recording) tea.Cmd {
 	return func() tea.Msg {
 		date := rec.StartsAt[:10]
 
-		ctx := context.Background()
+		ctx := m.ctx
 		entry, err := m.sdk.Journal().Get(ctx, date)
 		if err != nil || entry == nil || entry.Content == "" {
 			// Fall back to legacy HTML scrape, matching CLI journal read behavior

@@ -41,7 +41,7 @@ func (c *boxesCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx := cmdContext()
+	ctx := cmd.Context()
 	result, err := sdk.Boxes().List(ctx)
 	if err != nil {
 		return convertSDKError(err)

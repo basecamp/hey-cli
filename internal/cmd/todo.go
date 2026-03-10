@@ -65,7 +65,7 @@ func (c *todoListCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx := cmdContext()
+	ctx := cmd.Context()
 	resp, err := listPersonalRecordings(ctx)
 	if err != nil {
 		return err
@@ -181,7 +181,7 @@ func (c *todoAddCommand) run(cmd *cobra.Command, args []string) error {
 		body.StartsOn = d
 	}
 
-	ctx := cmdContext()
+	ctx := cmd.Context()
 	result, err := sdk.CalendarTodos().Create(ctx, body)
 	if err != nil {
 		return convertSDKError(err)
@@ -228,7 +228,7 @@ func (c *todoCompleteCommand) run(cmd *cobra.Command, args []string) error {
 		return output.ErrUsage(fmt.Sprintf("invalid todo ID: %s", args[0]))
 	}
 
-	ctx := cmdContext()
+	ctx := cmd.Context()
 	result, err := sdk.CalendarTodos().Complete(ctx, id)
 	if err != nil {
 		return convertSDKError(err)
@@ -275,7 +275,7 @@ func (c *todoUncompleteCommand) run(cmd *cobra.Command, args []string) error {
 		return output.ErrUsage(fmt.Sprintf("invalid todo ID: %s", args[0]))
 	}
 
-	ctx := cmdContext()
+	ctx := cmd.Context()
 	result, err := sdk.CalendarTodos().Uncomplete(ctx, id)
 	if err != nil {
 		return convertSDKError(err)
@@ -322,7 +322,7 @@ func (c *todoDeleteCommand) run(cmd *cobra.Command, args []string) error {
 		return output.ErrUsage(fmt.Sprintf("invalid todo ID: %s", args[0]))
 	}
 
-	ctx := cmdContext()
+	ctx := cmd.Context()
 	err = sdk.CalendarTodos().Delete(ctx, id)
 	if err != nil {
 		return convertSDKError(err)

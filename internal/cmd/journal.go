@@ -64,7 +64,7 @@ func (c *journalListCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx := cmdContext()
+	ctx := cmd.Context()
 	resp, err := listPersonalRecordings(ctx)
 	if err != nil {
 		return err
@@ -146,7 +146,7 @@ func (c *journalReadCommand) run(cmd *cobra.Command, args []string) error {
 		date = args[0]
 	}
 
-	ctx := cmdContext()
+	ctx := cmd.Context()
 	entry, err := sdk.Journal().Get(ctx, date)
 	if err != nil {
 		return convertSDKError(err)
@@ -272,7 +272,7 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 				return output.ErrUsage("no content provided (use --content to provide inline, or pipe to stdin)")
 			}
 		} else {
-			ctx := cmdContext()
+			ctx := cmd.Context()
 			existing := ""
 			entry, err := sdk.Journal().Get(ctx, date)
 			if err == nil && entry != nil {
@@ -292,7 +292,7 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	ctx := cmdContext()
+	ctx := cmd.Context()
 	result, err := sdk.Journal().Update(ctx, date, generated.UpdateJournalEntryJSONRequestBody{
 		Body: content,
 	})

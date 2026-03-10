@@ -56,7 +56,7 @@ func (c *timetrackStartCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx := cmdContext()
+	ctx := cmd.Context()
 	result, err := sdk.TimeTracks().Start(ctx, generated.StartTimeTrackJSONRequestBody{})
 	if err != nil {
 		return convertSDKError(err)
@@ -105,7 +105,7 @@ func (c *timetrackStopCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx := cmdContext()
+	ctx := cmd.Context()
 	track, err := sdk.TimeTracks().GetOngoing(ctx)
 	if err != nil {
 		return convertSDKError(err)
@@ -156,7 +156,7 @@ func (c *timetrackCurrentCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx := cmdContext()
+	ctx := cmd.Context()
 	track, err := sdk.TimeTracks().GetOngoing(ctx)
 	if err != nil {
 		return convertSDKError(err)
@@ -216,7 +216,7 @@ func (c *timetrackListCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx := cmdContext()
+	ctx := cmd.Context()
 	resp, err := listPersonalRecordings(ctx)
 	if err != nil {
 		return err

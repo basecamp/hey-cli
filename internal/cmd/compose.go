@@ -75,7 +75,7 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	ctx := cmdContext()
+	ctx := cmd.Context()
 	var result any
 
 	if c.threadID != "" {

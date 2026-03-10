@@ -41,7 +41,7 @@ func (c *draftsCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx := cmdContext()
+	ctx := cmd.Context()
 	result, err := sdk.Entries().ListDrafts(ctx, nil)
 	if err != nil {
 		return convertSDKError(err)

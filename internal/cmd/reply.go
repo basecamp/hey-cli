@@ -46,7 +46,7 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 		return output.ErrUsage(fmt.Sprintf("invalid thread ID: %s", args[0]))
 	}
 
-	ctx := cmdContext()
+	ctx := cmd.Context()
 	entriesResp, err := sdk.Topics().GetEntries(ctx, threadID, nil)
 	if err != nil {
 		return convertSDKError(err)

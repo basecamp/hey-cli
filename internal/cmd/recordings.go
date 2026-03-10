@@ -67,7 +67,7 @@ func (c *recordingsCommand) run(cmd *cobra.Command, args []string) error {
 		endsOn = start.AddDate(0, 0, 30).Format("2006-01-02")
 	}
 
-	ctx := cmdContext()
+	ctx := cmd.Context()
 	resp, err := sdk.Calendars().GetRecordings(ctx, calendarID, &generated.GetCalendarRecordingsParams{
 		StartsOn: startsOn,
 		EndsOn:   endsOn,

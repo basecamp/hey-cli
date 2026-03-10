@@ -68,7 +68,7 @@ func (c *habitCompleteCommand) run(cmd *cobra.Command, args []string) error {
 		date = time.Now().Format("2006-01-02")
 	}
 
-	ctx := cmdContext()
+	ctx := cmd.Context()
 	result, err := sdk.Habits().Complete(ctx, date, id)
 	if err != nil {
 		return convertSDKError(err)
@@ -124,7 +124,7 @@ func (c *habitUncompleteCommand) run(cmd *cobra.Command, args []string) error {
 		date = time.Now().Format("2006-01-02")
 	}
 
-	ctx := cmdContext()
+	ctx := cmd.Context()
 	result, err := sdk.Habits().Uncomplete(ctx, date, id)
 	if err != nil {
 		return convertSDKError(err)

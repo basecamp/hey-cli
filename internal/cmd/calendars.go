@@ -33,7 +33,7 @@ func (c *calendarsCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx := cmdContext()
+	ctx := cmd.Context()
 	payload, err := sdk.Calendars().List(ctx)
 	if err != nil {
 		return convertSDKError(err)

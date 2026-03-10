@@ -9,7 +9,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -234,19 +233,4 @@ func normalizeAny(v any) (any, error) {
 		return nil, err
 	}
 	return output.NormalizeJSONNumbers(data)
-}
-
-// --- Lazy context helper ---
-
-var (
-	bgCtx     context.Context
-	bgCtxOnce sync.Once
-)
-
-// cmdContext returns a background context for SDK calls.
-func cmdContext() context.Context {
-	bgCtxOnce.Do(func() {
-		bgCtx = context.Background()
-	})
-	return bgCtx
 }

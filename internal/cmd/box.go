@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -56,7 +57,8 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	resp, err := resolveBox(args[0])
+	ctx := cmd.Context()
+	resp, err := resolveBox(ctx, args[0])
 	if err != nil {
 		return err
 	}
@@ -105,8 +107,7 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 
 // resolveBox fetches a box by name or ID, using named SDK getters for
 // well-known box names to avoid an extra List API call.
-func resolveBox(nameOrID string) (*generated.BoxShowResponse, error) {
-	ctx := cmdContext()
+func resolveBox(ctx context.Context, nameOrID string) (*generated.BoxShowResponse, error) {
 
 	// Numeric ID: fetch directly
 	if id, err := strconv.ParseInt(nameOrID, 10, 64); err == nil {
