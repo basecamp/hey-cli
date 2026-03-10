@@ -14,6 +14,16 @@ func (c *Client) ListBoxes() ([]models.Box, error) {
 	return boxes, nil
 }
 
+func (c *Client) MarkSeen(postingIDs []int) ([]byte, error) {
+	body := map[string]any{"posting_ids": postingIDs}
+	return c.PostJSON("/postings/seen", body)
+}
+
+func (c *Client) MarkUnseen(postingIDs []int) ([]byte, error) {
+	body := map[string]any{"posting_ids": postingIDs}
+	return c.PostJSON("/postings/unseen", body)
+}
+
 func (c *Client) GetBox(id int) (models.BoxShowResponse, error) {
 	var resp models.BoxShowResponse
 	path := fmt.Sprintf("/boxes/%d.json", id)
