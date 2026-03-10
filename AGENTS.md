@@ -26,7 +26,7 @@ This is a Go project that uses:
 - [spf13/cobra](github.com/spf13/cobra) for the CLI interface
 - [charm.land/bubbletea/v2] for the TUI interface along with bubbles/v2 and lipgloss/v2 (these are new versions that recently came out and differ from the v1 versions!)
 
-All API interactions go through typed methods on `internal/client.Client` (e.g., `ListBoxes`, `GetEntry`, `ListCalendars`), organized into domain-specific files (`boxes.go`, `entries.go`, `calendars.go`, `todos.go`, `journal.go`, `habits.go`, `time_tracks.go`). Both CLI commands (`internal/cmd/`) and the TUI (`internal/tui/`) call these methods instead of using raw HTTP methods with hardcoded paths. Authentication and token refresh are handled via `internal/auth/`.
+Most API interactions go through the HEY SDK (`hey-sdk/go`), with typed service methods accessed via `internal/cmd/sdk.go` (e.g., `sdk.Boxes().List`, `sdk.Messages().Create`, `sdk.Calendars().GetRecordings`). A legacy `internal/client.Client` remains for two gap operations where the SDK lacks body content: `GetTopicEntries` (HTML-scraped topic entries for `hey threads` and TUI) and `GetJournalEntry` (HTML-scraped journal fallback when the JSON API returns 204). Authentication and token refresh are handled via `internal/auth/`.
 
 ### Authentication
 
