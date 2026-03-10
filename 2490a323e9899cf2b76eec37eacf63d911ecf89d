@@ -1,0 +1,25 @@
+API-COVERAGE.md
+  47c9f259ea5545e0 3-4,6-34
+AGENTS.md
+  47c9f259ea5545e0 29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "2490a323e9899cf2b76eec37eacf63d911ecf89d",
+  "prompts": {
+    "47c9f259ea5545e0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3575dede-8669-4f17-8448-3818e8785b4f",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 32,
+      "overriden_lines": 0
+    }
+  }
+}
