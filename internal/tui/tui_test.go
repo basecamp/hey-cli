@@ -13,7 +13,7 @@ import (
 // Test helpers
 
 func testModel() model {
-	return newModel(nil)
+	return newModel(nil, nil)
 }
 
 func sizedModel() model {

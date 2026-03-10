@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +10,9 @@ import (
 
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
+	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/client"
 	"github.com/basecamp/hey-cli/internal/models"
@@ -70,7 +72,8 @@ type model struct {
 	state  viewState
 	width  int
 	height int
-	client *client.Client
+	sdk    *hey.Client
+	legacy *client.Client // kept for gap operations (topic entry bodies)
 	styles styles
 
 	boxes boxesModel
@@ -91,11 +94,12 @@ type model struct {
 	lastKey string // debug: last key event received
 }
 
-func newModel(c *client.Client) model {
+func newModel(sdk *hey.Client, legacy *client.Client) model {
 	s := newStyles()
 	return model{
 		state:     viewBoxes,
-		client:    c,
+		sdk:       sdk,
+		legacy:    legacy,
 		styles:    s,
 		boxes:     newBoxesModel(),
 		box:       newBoxModel(),
@@ -447,13 +451,88 @@ func (m model) View() tea.View {
 	return v
 }
 
-// Async data fetching commands
+// --- SDK type to models type converters ---
+
+func sdkBoxToModel(b generated.Box) models.Box {
+	return models.Box{
+		ID:   int(b.Id),
+		Kind: b.Kind,
+		Name: b.Name,
+	}
+}
+
+func sdkPostingToModel(p generated.Posting) models.Posting {
+	return models.Posting{
+		ID:        int(p.Id),
+		CreatedAt: formatTimestamp(p.CreatedAt),
+		UpdatedAt: formatTimestamp(p.UpdatedAt),
+		Kind:      p.Kind,
+		Seen:      p.Seen,
+		Bundled:   p.Bundled,
+		Muted:     p.Muted,
+		Summary:   p.Summary,
+		EntryKind: p.EntryKind,
+		AppURL:    p.AppUrl,
+		Creator: models.Contact{
+			ID:           int(p.Creator.Id),
+			Name:         p.Creator.Name,
+			EmailAddress: p.Creator.EmailAddress,
+		},
+	}
+}
+
+func sdkCalendarToModel(c generated.Calendar) models.Calendar {
+	return models.Calendar{
+		ID:       int(c.Id),
+		Name:     c.Name,
+		Kind:     c.Kind,
+		Owned:    c.Owned,
+		Personal: c.Personal,
+		External: c.External,
+	}
+}
+
+func sdkRecordingToModel(r generated.Recording) models.Recording {
+	return models.Recording{
+		ID:               int(r.Id),
+		Title:            r.Title,
+		AllDay:           r.AllDay,
+		Recurring:        r.Recurring,
+		StartsAt:         formatTimestamp(r.StartsAt),
+		EndsAt:           formatTimestamp(r.EndsAt),
+		StartsAtTimeZone: r.StartsAtTimeZone,
+		EndsAtTimeZone:   r.EndsAtTimeZone,
+		CreatedAt:        formatTimestamp(r.CreatedAt),
+		UpdatedAt:        formatTimestamp(r.UpdatedAt),
+		Type:             r.Type,
+		Content:          r.Content,
+		RemindersLabel:   r.RemindersLabel,
+	}
+}
+
+func formatTimestamp(ts time.Time) string {
+	if ts.IsZero() {
+		return ""
+	}
+	return ts.UTC().Format("2006-01-02T15:04:05Z")
+}
+
+// --- Async data fetching commands (using SDK) ---
 
 func (m model) fetchBoxes() tea.Cmd {
 	return func() tea.Msg {
-		boxes, err := m.client.ListBoxes()
+		ctx := context.Background()
+		result, err := m.sdk.Boxes().List(ctx)
 		if err != nil {
 			return errMsg{err}
+		}
+		var sdkBoxes []generated.Box
+		if result != nil {
+			sdkBoxes = *result
+		}
+		boxes := make([]models.Box, len(sdkBoxes))
+		for i, b := range sdkBoxes {
+			boxes[i] = sdkBoxToModel(b)
 		}
 		return boxesLoadedMsg(boxes)
 	}
@@ -461,27 +540,31 @@ func (m model) fetchBoxes() tea.Cmd {
 
 func (m model) fetchBox(boxID int) tea.Cmd {
 	return func() tea.Msg {
-		resp, err := m.client.GetBox(boxID)
+		ctx := context.Background()
+		resp, err := m.sdk.Boxes().Get(ctx, int64(boxID), nil)
 		if err != nil {
 			return errMsg{err}
 		}
 
-		var postings []models.Posting
-		for _, raw := range resp.Postings {
-			var p models.Posting
-			if err := json.Unmarshal(raw, &p); err != nil {
-				continue
-			}
-			postings = append(postings, p)
+		box := models.Box{
+			ID:   int(resp.Id),
+			Kind: resp.Kind,
+			Name: resp.Name,
 		}
 
-		return boxLoadedMsg{box: resp.Box, postings: postings}
+		postings := make([]models.Posting, 0, len(resp.Postings))
+		for _, p := range resp.Postings {
+			postings = append(postings, sdkPostingToModel(p))
+		}
+
+		return boxLoadedMsg{box: box, postings: postings}
 	}
 }
 
+// fetchTopic uses the legacy client — SDK entries lack body content (Gap 1).
 func (m model) fetchTopic(topicID int, title string) tea.Cmd {
 	return func() tea.Msg {
-		entries, err := m.client.GetTopicEntries(topicID)
+		entries, err := m.legacy.GetTopicEntries(topicID)
 		if err != nil {
 			return errMsg{err}
 		}
@@ -494,7 +577,7 @@ func (m model) fetchTopic(topicID int, title string) tea.Cmd {
 				if strings.HasPrefix(imgURL, "http://") || strings.HasPrefix(imgURL, "https://") {
 					data = fetchImageData(imgURL)
 				} else {
-					data, _ = m.client.Get(imgURL)
+					data, _ = m.legacy.Get(imgURL)
 				}
 				if len(data) > 0 {
 					images = append(images, data)
@@ -508,9 +591,18 @@ func (m model) fetchTopic(topicID int, title string) tea.Cmd {
 
 func (m model) fetchCalendars() tea.Cmd {
 	return func() tea.Msg {
-		calendars, err := m.client.ListCalendars()
+		ctx := context.Background()
+		payload, err := m.sdk.Calendars().List(ctx)
 		if err != nil {
 			return errMsg{err}
+		}
+		if payload == nil {
+			return calendarsLoadedMsg(nil)
+		}
+
+		calendars := make([]models.Calendar, 0, len(payload.Calendars))
+		for _, cw := range payload.Calendars {
+			calendars = append(calendars, sdkCalendarToModel(cw.Calendar))
 		}
 		return calendarsLoadedMsg(calendars)
 	}
@@ -518,28 +610,51 @@ func (m model) fetchCalendars() tea.Cmd {
 
 func (m model) fetchCalendar(cal models.Calendar) tea.Cmd {
 	return func() tea.Msg {
+		ctx := context.Background()
 		now := time.Now()
 		startsOn := now.Format("2006-01-02")
 		endsOn := now.AddDate(0, 0, 30).Format("2006-01-02")
-		recordings, err := m.client.GetCalendarRecordings(cal.ID, startsOn, endsOn)
+
+		resp, err := m.sdk.Calendars().GetRecordings(ctx, int64(cal.ID), &generated.GetCalendarRecordingsParams{
+			StartsOn: startsOn,
+			EndsOn:   endsOn,
+		})
 		if err != nil {
 			return errMsg{err}
 		}
+
+		// Convert SDK CalendarRecordingsResponse to models.RecordingsResponse
+		recordings := make(models.RecordingsResponse)
+		if resp == nil {
+			resp = &generated.CalendarRecordingsResponse{}
+		}
+		for recType, recs := range *resp {
+			modelRecs := make([]models.Recording, len(recs))
+			for i, r := range recs {
+				modelRecs[i] = sdkRecordingToModel(r)
+			}
+			recordings[recType] = modelRecs
+		}
+
 		return calendarLoadedMsg{calendar: cal, recordings: recordings}
 	}
 }
 
 func (m model) fetchJournal() tea.Cmd {
 	return func() tea.Msg {
-		calendars, err := m.client.ListCalendars()
+		ctx := context.Background()
+		payload, err := m.sdk.Calendars().List(ctx)
 		if err != nil {
 			return errMsg{err}
 		}
+		if payload == nil {
+			return errMsg{fmt.Errorf("no calendars returned")}
+		}
 
-		var personalID int
-		for _, c := range calendars {
-			if c.Personal {
-				personalID = c.ID
+		var personalID int64
+		for _, cw := range payload.Calendars {
+			if cw.Calendar.Personal {
+				personalID = cw.Calendar.Id
 				break
 			}
 		}
@@ -550,16 +665,22 @@ func (m model) fetchJournal() tea.Cmd {
 		now := time.Now()
 		startsOn := now.AddDate(-1, 0, 0).Format("2006-01-02")
 		endsOn := now.Format("2006-01-02")
-		recordings, err := m.client.GetCalendarRecordings(personalID, startsOn, endsOn)
+		resp, err := m.sdk.Calendars().GetRecordings(ctx, personalID, &generated.GetCalendarRecordingsParams{
+			StartsOn: startsOn,
+			EndsOn:   endsOn,
+		})
 		if err != nil {
 			return errMsg{err}
 		}
 
 		var entries []models.Recording
-		for _, recs := range recordings {
+		if resp == nil {
+			resp = &generated.CalendarRecordingsResponse{}
+		}
+		for _, recs := range *resp {
 			for _, r := range recs {
 				if r.Type == "Calendar::JournalEntry" {
-					entries = append(entries, r)
+					entries = append(entries, sdkRecordingToModel(r))
 				}
 			}
 		}
@@ -571,8 +692,16 @@ func (m model) fetchJournalEntry(rec models.Recording) tea.Cmd {
 	return func() tea.Msg {
 		date := rec.StartsAt[:10]
 
-		entry, err := m.client.GetJournalEntry(date)
-		if err != nil || entry.Body == "" {
+		ctx := context.Background()
+		entry, err := m.sdk.Journal().Get(ctx, date)
+		if err != nil || entry == nil || entry.Content == "" {
+			// Fall back to legacy HTML scrape, matching CLI journal read behavior
+			if m.legacy != nil {
+				legacyEntry, legacyErr := m.legacy.GetJournalEntry(date)
+				if legacyErr == nil && legacyEntry.Body != "" {
+					return journalDetailMsg{title: date, body: htmlToText(legacyEntry.Body)}
+				}
+			}
 			body := strings.TrimSpace(rec.Content)
 			if body == "" {
 				body = "(empty)"
@@ -580,16 +709,20 @@ func (m model) fetchJournalEntry(rec models.Recording) tea.Cmd {
 			return journalDetailMsg{title: date, body: body}
 		}
 
-		body := htmlToText(entry.Body)
+		body := htmlToText(entry.Content)
 
 		// Download image data for Kitty unicode placeholder rendering
 		var images [][]byte
-		for _, imgURL := range extractImageURLs(entry.Body) {
+		for _, imgURL := range extractImageURLs(entry.Content) {
 			var data []byte
 			if strings.HasPrefix(imgURL, "http://") || strings.HasPrefix(imgURL, "https://") {
 				data = fetchImageData(imgURL)
 			} else {
-				data, _ = m.client.Get(imgURL)
+				// Use SDK's Get for relative URLs
+				sdkResp, getErr := m.sdk.Get(ctx, imgURL)
+				if getErr == nil && sdkResp != nil {
+					data = sdkResp.Data
+				}
 			}
 			if len(data) > 0 {
 				images = append(images, data)
@@ -665,8 +798,8 @@ func fetchImageData(imgURL string) []byte {
 }
 
 // Run starts the TUI program.
-func Run(c *client.Client) error {
-	p := tea.NewProgram(newModel(c))
+func Run(sdk *hey.Client, legacy *client.Client) error {
+	p := tea.NewProgram(newModel(sdk, legacy))
 	_, err := p.Run()
 	return err
 }
