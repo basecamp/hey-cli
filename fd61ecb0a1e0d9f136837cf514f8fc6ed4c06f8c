@@ -1,0 +1,29 @@
+internal/cmd/sdk_test.go
+  47c9f259ea5545e0 6-7,56-135
+API-COVERAGE.md
+  47c9f259ea5545e0 17
+internal/cmd/drafts.go
+  47c9f259ea5545e0 25
+internal/tui/tui.go
+  47c9f259ea5545e0 76,573-575
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.9",
+  "base_commit_sha": "fd61ecb0a1e0d9f136837cf514f8fc6ed4c06f8c",
+  "prompts": {
+    "47c9f259ea5545e0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3575dede-8669-4f17-8448-3818e8785b4f",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>",
+      "messages": [],
+      "total_additions": 89,
+      "total_deletions": 4,
+      "accepted_lines": 88,
+      "overriden_lines": 0
+    }
+  }
+}
