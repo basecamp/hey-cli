@@ -100,6 +100,34 @@ func convertSDKError(err error) error {
 	}
 }
 
+// --- Identity helpers ---
+
+// getDefaultSenderID fetches the current user's identity and returns the
+// default sender's contact ID. This is required for compose (Acting.sender).
+func getDefaultSenderID(ctx context.Context) (int64, error) {
+	identity, err := sdk.Identity().GetIdentity(ctx)
+	if err != nil {
+		return 0, convertSDKError(err)
+	}
+	if identity == nil {
+		return 0, output.ErrAPI(0, "could not fetch identity")
+	}
+	for _, s := range identity.Senders {
+		if s.Default {
+			return s.Id, nil
+		}
+	}
+	// Fall back to first sender if none marked default.
+	if len(identity.Senders) > 0 {
+		return identity.Senders[0].Id, nil
+	}
+	// Fall back to primary contact.
+	if identity.PrimaryContact.Id > 0 {
+		return identity.PrimaryContact.Id, nil
+	}
+	return 0, output.ErrAPI(0, "no sender found in identity")
+}
+
 // --- Timestamp formatting helpers ---
 
 // formatTimestamp formats a time.Time to "YYYY-MM-DDTHH:MM" display format.
@@ -170,7 +198,7 @@ const (
 	personalRecordingsLookaheadYears = 1
 )
 
-// listPersonalRecordings fetches all recordings from the user's personal calendar
+// listPersonalRecordings fetches recordings from the user's personal calendar
 // with a lookback/lookahead window matching the old CLI behavior.
 func listPersonalRecordings(ctx context.Context) (*generated.CalendarRecordingsResponse, error) {
 	payload, err := sdk.Calendars().List(ctx)

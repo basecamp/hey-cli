@@ -3,11 +3,9 @@ package cmd
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/spf13/cobra"
-
-	"github.com/basecamp/hey-sdk/go/pkg/generated"
-	"github.com/basecamp/hey-sdk/go/pkg/types"
 
 	"github.com/basecamp/hey-cli/internal/output"
 )
@@ -170,33 +168,33 @@ func (c *todoAddCommand) run(cmd *cobra.Command, args []string) error {
 			"hey todo add \"Buy milk\"  or  hey todo add --title \"Buy milk\"")
 	}
 
-	body := generated.CreateCalendarTodoJSONRequestBody{
-		Title: title,
+	startsAt := c.date
+	if startsAt == "" {
+		startsAt = time.Now().Format("2006-01-02")
 	}
-	if c.date != "" {
-		d, err := types.ParseDate(c.date)
-		if err != nil {
-			return output.ErrUsage(fmt.Sprintf("invalid date: %s", c.date))
-		}
-		body.StartsOn = d
+	todoParams := map[string]any{
+		"title":     title,
+		"starts_at": startsAt,
+	}
+	body := map[string]any{
+		"calendar_todo": todoParams,
 	}
 
-	ctx := cmd.Context()
-	result, err := sdk.CalendarTodos().Create(ctx, body)
+	respData, err := apiClient.PostJSON("/calendar/todos.json", body)
 	if err != nil {
-		return convertSDKError(err)
+		return err
 	}
 
 	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Todo created.%s\n", extractMutationInfoFromResult(result))
+		fmt.Fprintln(cmd.OutOrStdout(), "Todo created.")
 		return nil
 	}
 
-	normalized, nerr := normalizeAny(result)
-	if nerr != nil {
+	result, _ := output.NormalizeJSONNumbers(respData)
+	if result == nil {
 		return writeOK(nil, output.WithSummary("Todo created"))
 	}
-	return writeOK(normalized, output.WithSummary("Todo created"))
+	return writeOK(result, output.WithSummary("Todo created"))
 }
 
 // complete

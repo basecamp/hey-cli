@@ -1,4 +1,4 @@
-.PHONY: build build-pgo test test-unit fmt fmt-check vet lint tidy tidy-check \
+.PHONY: build build-pgo test test-unit test-smoke fmt fmt-check vet lint tidy tidy-check \
 	race-test vuln secrets replace-check check-toolchain check security \
 	release-check release bench bench-cpu bench-mem bench-save bench-compare \
 	collect-profile clean-pgo check-surface check-surface-compat tools clean \
@@ -19,6 +19,7 @@ help:
 	@echo "  make build-pgo       Build with PGO profile"
 	@echo "  make test-unit       Run unit tests"
 	@echo "  make test            Alias for test-unit"
+	@echo "  make test-smoke      Run smoke tests against a live server"
 	@echo "  make clean           Remove build artifacts"
 	@echo "  make tidy            Tidy dependencies"
 	@echo ""
@@ -84,6 +85,12 @@ test-unit: check-toolchain
 
 # Alias for test-unit
 test: test-unit
+
+# Run smoke tests against a live HEY server.
+# Requires: a running server (default http://app.hey.localhost:3003) and Chrome.
+# Override defaults: make test-smoke HEY_SMOKE_BASE_URL=... HEY_SMOKE_EMAIL=... HEY_SMOKE_PASSWORD=...
+test-smoke: build
+	cd tests/smoke && go test -v -count=1 -timeout 5m ./...
 
 # Format Go source
 fmt:

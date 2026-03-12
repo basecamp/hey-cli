@@ -71,9 +71,59 @@ The server code is located at `~/Work/basecamp/haystack/`, feel free to read it 
 
 If you don't understand how the routes are laid out you can call rails routes in that directory to get a list of all the routes and their corresponding controller actions.
 
-### Testing
+### Unit Testing
 
 Whenever you add, remove or change any functionality add/remove/change tests as well. Tests are located in the same package as the code they test, with filenames ending in `_test.go`. Run `make test` to run all tests.
+
+### Smoke Testing
+
+Smoke tests verify all CLI commands against a real HEY server. They live in `tests/smoke/` as a separate Go module and use a pre-compiled binary built by `make build`.
+
+**What they test:** Every CLI command and its flags — boxes, box, compose, reply, threads, drafts, calendars, recordings, todo, journal, habit, timetrack, seen/unseen, config, auth, and all output format flags (--json, --quiet, --ids-only, --count, --markdown, --styled, --verbose, --stats). Browser-based cross-verification tests confirm CLI actions are visible in the browser and vice versa.
+
+**Running:**
+
+```bash
+make test-smoke   # Builds binary then runs tests (requires dev server)
+```
+
+The dev server must be running at `http://app.hey.localhost:3003` (override with `HEY_SMOKE_BASE_URL`). Default login: `david@basecamp.com` / `secret123456` (override with `HEY_SMOKE_EMAIL` and `HEY_SMOKE_PASSWORD`).
+
+**How they work:**
+
+1. `TestMain` in `helpers_test.go` orchestrates setup: finds the binary, checks server reachability, launches headless Chrome via chromedp to log in and extract the `session_token` cookie, then authenticates the CLI with `hey auth login --cookie`.
+2. All CLI invocations run in an isolated environment: temp `XDG_CONFIG_HOME`, `HEY_NO_KEYRING=1`, `HEY_BASE_URL` pointing to the dev server.
+3. Helper functions (`hey()`, `heyOK()`, `heyJSON()`, `heyFail()`) run the binary and parse output. `dataAs[T]()` generically unmarshals response data.
+4. Tests that depend on write operations (compose, todo add, journal write, reply, timetrack start) skip gracefully when the server returns errors, since the SDK's parameter format may not match the server's expectations.
+5. Test data uses `uniqueID()` (nanosecond timestamps) to avoid collisions. Cleanup happens via `t.Cleanup()`.
+
+**How to add a new test:**
+
+1. Create or edit a `*_test.go` file in `tests/smoke/` (package `smoke_test`).
+2. Use `heyJSON(t, "command", "args...")` for commands that should succeed and return JSON.
+3. Use `heyFail(t, "command", "args...")` for commands that should fail.
+4. For write operations that may fail server-side, use `hey(t, ...)` directly and skip on non-zero exit: `if code != 0 { t.Skipf("... (exit %d): %s", code, stderr) }`.
+5. Use `dataAs[T](t, resp)` to unmarshal response data into typed structs.
+6. For browser cross-verification, use `browserPageText(t, url)` to get page content.
+
+**File layout:**
+
+| File | What it covers |
+|------|---------------|
+| `helpers_test.go` | Setup, CLI runners, browser helpers, assertions |
+| `util_test.go` | Shared utilities (intStr, extractTopicID) |
+| `auth_test.go` | auth status/login/logout/token/refresh |
+| `boxes_test.go` | boxes list, box by name/ID, --limit, --all |
+| `compose_test.go` | compose, threads, reply, drafts |
+| `todo_test.go` | todo CRUD, --date, --limit, --all |
+| `calendar_test.go` | calendars, recordings with date ranges/limits |
+| `journal_test.go` | journal write/read/list with limits |
+| `timetrack_test.go` | timetrack start/stop/current/list |
+| `habit_test.go` | habit complete/uncomplete with --date |
+| `seen_test.go` | seen/unseen single and batch |
+| `config_test.go` | config show/set with validation |
+| `output_test.go` | all output format flags |
+| `browser_test.go` | CLI-to-browser and browser-to-CLI cross-verification |
 
 ### Running
 

@@ -212,3 +212,45 @@ func (c *Client) PostJSON(path string, body any) ([]byte, error) {
 	}
 	return c.doOnce("POST", path, encoded, "application/json", "application/json")
 }
+
+// PostMutation sends a JSON POST with Accept: */* — use for mutations where the
+// server may redirect to a page that lacks a JSON template.
+func (c *Client) PostMutation(path string, body any) ([]byte, error) {
+	var encoded []byte
+	if body != nil {
+		var err error
+		encoded, err = json.Marshal(body)
+		if err != nil {
+			return nil, apierr.ErrAPI(0, fmt.Sprintf("could not encode body: %v", err))
+		}
+	}
+	return c.doOnce("POST", path, encoded, "application/json", "*/*")
+}
+
+func (c *Client) PatchJSON(path string, body any) ([]byte, error) {
+	var encoded []byte
+	if body != nil {
+		var err error
+		encoded, err = json.Marshal(body)
+		if err != nil {
+			return nil, apierr.ErrAPI(0, fmt.Sprintf("could not encode body: %v", err))
+		}
+	}
+	return c.doOnce("PATCH", path, encoded, "application/json", "*/*")
+}
+
+func (c *Client) PutJSON(path string, body any) ([]byte, error) {
+	var encoded []byte
+	if body != nil {
+		var err error
+		encoded, err = json.Marshal(body)
+		if err != nil {
+			return nil, apierr.ErrAPI(0, fmt.Sprintf("could not encode body: %v", err))
+		}
+	}
+	return c.doOnce("PUT", path, encoded, "application/json", "*/*")
+}
+
+func (c *Client) Delete(path string) ([]byte, error) {
+	return c.doOnce("DELETE", path, nil, "", "*/*")
+}

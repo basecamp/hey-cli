@@ -6,8 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/basecamp/hey-sdk/go/pkg/generated"
-
 	"github.com/basecamp/hey-cli/internal/editor"
 	"github.com/basecamp/hey-cli/internal/output"
 )
@@ -47,16 +45,15 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := cmd.Context()
-	entriesResp, err := sdk.Topics().GetEntries(ctx, threadID, nil)
+	entries, err := apiClient.GetTopicEntries(int(threadID))
 	if err != nil {
-		return convertSDKError(err)
+		return err
 	}
-	if entriesResp == nil || len(*entriesResp) == 0 {
+	if len(entries) == 0 {
 		return output.ErrNotFound("entries for thread", args[0])
 	}
 
-	entries := *entriesResp
-	latestEntryID := entries[len(entries)-1].Id
+	latestEntryID := int64(entries[len(entries)-1].ID)
 
 	message := c.message
 	if message == "" {
@@ -79,23 +76,28 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	result, err := sdk.Entries().CreateReply(ctx, latestEntryID, generated.CreateReplyJSONRequestBody{
-		Content: message,
-	})
+	senderID, err := getDefaultSenderID(ctx)
 	if err != nil {
-		return convertSDKError(err)
+		return err
+	}
+
+	body := map[string]any{
+		"acting_sender_id": senderID,
+		"message": map[string]any{
+			"content": message,
+		},
+	}
+	path := fmt.Sprintf("/entries/%d/replies.json", latestEntryID)
+	if _, err = apiClient.PostMutation(path, body); err != nil {
+		return err
 	}
 
 	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Reply sent.%s\n", extractMutationInfoFromResult(result))
+		fmt.Fprintln(cmd.OutOrStdout(), "Reply sent.")
 		return nil
 	}
 
-	normalized, nerr := normalizeAny(result)
-	if nerr != nil {
-		return writeOK(nil, output.WithSummary("Reply sent"))
-	}
-	return writeOK(normalized,
+	return writeOK(nil,
 		output.WithSummary("Reply sent"),
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "view",

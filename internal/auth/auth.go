@@ -68,11 +68,16 @@ func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 		}
 	}
 
-	if creds.AccessToken == "" {
-		return "", fmt.Errorf("stored credentials have empty access token")
+	if creds.AccessToken != "" {
+		return creds.AccessToken, nil
 	}
 
-	return creds.AccessToken, nil
+	// Fall back to session cookie for cookie-based auth.
+	if creds.SessionCookie != "" {
+		return creds.SessionCookie, nil
+	}
+
+	return "", fmt.Errorf("no access token or session cookie available")
 }
 
 // AuthenticateRequest sets the appropriate auth header on an HTTP request.
@@ -215,6 +220,11 @@ func (m *Manager) Refresh(ctx context.Context) error {
 	creds, err := m.store.Load(m.baseURL)
 	if err != nil {
 		return fmt.Errorf("not authenticated: %w", err)
+	}
+
+	// Cookie-based auth doesn't support refresh; treat as no-op.
+	if creds.RefreshToken == "" && creds.SessionCookie != "" {
+		return nil
 	}
 
 	return m.refreshLocked(ctx, creds)
