@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"strconv"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -168,21 +167,10 @@ func (c *todoAddCommand) run(cmd *cobra.Command, args []string) error {
 			"hey todo add \"Buy milk\"  or  hey todo add --title \"Buy milk\"")
 	}
 
-	startsAt := c.date
-	if startsAt == "" {
-		startsAt = time.Now().Format("2006-01-02")
-	}
-	todoParams := map[string]any{
-		"title":     title,
-		"starts_at": startsAt,
-	}
-	body := map[string]any{
-		"calendar_todo": todoParams,
-	}
-
-	respData, err := apiClient.PostJSON("/calendar/todos.json", body)
+	ctx := cmd.Context()
+	result, err := sdk.CalendarTodos().Create(ctx, title, c.date)
 	if err != nil {
-		return err
+		return convertSDKError(err)
 	}
 
 	if writer.IsStyled() {
@@ -190,11 +178,11 @@ func (c *todoAddCommand) run(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	result, _ := output.NormalizeJSONNumbers(respData)
-	if result == nil {
+	normalized, nerr := normalizeAny(result)
+	if nerr != nil {
 		return writeOK(nil, output.WithSummary("Todo created"))
 	}
-	return writeOK(result, output.WithSummary("Todo created"))
+	return writeOK(normalized, output.WithSummary("Todo created"))
 }
 
 // complete

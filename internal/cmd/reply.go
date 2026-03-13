@@ -76,20 +76,8 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	senderID, err := getDefaultSenderID(ctx)
-	if err != nil {
-		return err
-	}
-
-	body := map[string]any{
-		"acting_sender_id": senderID,
-		"message": map[string]any{
-			"content": message,
-		},
-	}
-	path := fmt.Sprintf("/entries/%d/replies.json", latestEntryID)
-	if _, err = apiClient.PostMutation(path, body); err != nil {
-		return err
+	if err = sdk.Entries().CreateReply(ctx, latestEntryID, message); err != nil {
+		return convertSDKError(err)
 	}
 
 	if writer.IsStyled() {

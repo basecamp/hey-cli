@@ -75,26 +75,13 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 
 	ctx := cmd.Context()
 
-	// Fetch sender ID for acting context.
-	senderID, err := getDefaultSenderID(ctx)
-	if err != nil {
-		return err
-	}
-
 	if c.threadID != "" {
 		topicID, err := strconv.ParseInt(c.threadID, 10, 64)
 		if err != nil {
 			return output.ErrUsage(fmt.Sprintf("invalid thread ID: %s", c.threadID))
 		}
-		body := map[string]any{
-			"acting_sender_id": senderID,
-			"message": map[string]any{
-				"content": message,
-			},
-		}
-		path := fmt.Sprintf("/topics/%d/entries.json", topicID)
-		if _, err := apiClient.PostJSON(path, body); err != nil {
-			return err
+		if err := sdk.Messages().CreateTopicMessage(ctx, topicID, message); err != nil {
+			return convertSDKError(err)
 		}
 	} else {
 		to := []string{}
@@ -106,22 +93,8 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 				}
 			}
 		}
-		addressed := map[string]any{}
-		if len(to) > 0 {
-			addressed["directly"] = strings.Join(to, ",")
-		}
-		body := map[string]any{
-			"acting_sender_id": senderID,
-			"message": map[string]any{
-				"subject": c.subject,
-				"content": message,
-			},
-			"entry": map[string]any{
-				"addressed": addressed,
-			},
-		}
-		if _, err := apiClient.PostJSON("/messages.json", body); err != nil {
-			return err
+		if err := sdk.Messages().Create(ctx, c.subject, message, to); err != nil {
+			return convertSDKError(err)
 		}
 	}
 

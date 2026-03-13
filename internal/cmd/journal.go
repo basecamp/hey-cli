@@ -259,6 +259,7 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 			content = args[0]
 		}
 	}
+	ctx := cmd.Context()
 	if content == "" {
 		if !stdinIsTerminal() {
 			var err error
@@ -270,7 +271,6 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 				return output.ErrUsage("no content provided (use --content to provide inline, or pipe to stdin)")
 			}
 		} else {
-			ctx := cmd.Context()
 			existing := ""
 			entry, err := sdk.Journal().Get(ctx, date)
 			if err == nil && entry != nil {
@@ -290,14 +290,8 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	body := map[string]any{
-		"calendar_journal_entry": map[string]any{
-			"content": content,
-		},
-	}
-	path := fmt.Sprintf("/calendar/days/%s/journal_entry", date)
-	if _, err := apiClient.PatchJSON(path, body); err != nil {
-		return err
+	if err := sdk.Journal().Update(ctx, date, content); err != nil {
+		return convertSDKError(err)
 	}
 
 	if writer.IsStyled() {

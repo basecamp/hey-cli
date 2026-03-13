@@ -2,6 +2,8 @@ module github.com/basecamp/hey-cli
 
 go 1.26.1
 
+replace github.com/basecamp/hey-sdk/go => ../hey-sdk/go
+
 require (
 	charm.land/bubbles/v2 v2.0.0
 	charm.land/bubbletea/v2 v2.0.2

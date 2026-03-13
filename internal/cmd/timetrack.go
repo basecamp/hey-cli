@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -64,7 +63,7 @@ func (c *timetrackStartCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Time tracking started.%s\n", extractMutationInfoFromResult(result))
+		fmt.Fprintln(cmd.OutOrStdout(), "Time tracking started.")
 		return nil
 	}
 
@@ -116,14 +115,8 @@ func (c *timetrackStopCommand) run(cmd *cobra.Command, args []string) error {
 		return output.ErrNotFound("time track", "active")
 	}
 
-	body := map[string]any{
-		"calendar_time_track": map[string]any{
-			"ends_at": time.Now().UTC().Format(time.RFC3339),
-		},
-	}
-	path := fmt.Sprintf("/calendar/time_tracks/%d.json", track.Id)
-	if _, err = apiClient.PutJSON(path, body); err != nil {
-		return err
+	if err = sdk.TimeTracks().Stop(ctx, track.Id); err != nil {
+		return convertSDKError(err)
 	}
 
 	if writer.IsStyled() {
