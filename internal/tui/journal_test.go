@@ -23,7 +23,7 @@ func TestJournalSetItemsFiltersAndSorts(t *testing.T) {
 	}
 
 	// Should be reverse-chronological
-	wantIDs := []int{3, 2, 4}
+	wantIDs := []int64{3, 2, 4}
 	for i, wantID := range wantIDs {
 		got := items[i].(journalItem).recording.ID
 		if got != wantID {

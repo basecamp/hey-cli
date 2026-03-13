@@ -117,4 +117,3 @@ func TestCLIJournalVisibleInBrowser(t *testing.T) {
 	// The content should appear somewhere on the page.
 	assertContains(t, text, uid)
 }
-

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -55,18 +54,7 @@ func journalServerWithReadBehavior(t *testing.T, readBehavior string) *httptest.
 				json.NewEncoder(w).Encode(resp)
 			}
 		case r.Method == "PATCH" && strings.Contains(r.URL.Path, "/calendar/days/") && (strings.HasSuffix(r.URL.Path, "/journal_entry") || strings.HasSuffix(r.URL.Path, "/journal_entry.json")):
-			body, _ := io.ReadAll(r.Body)
-			var req map[string]any
-			_ = json.Unmarshal(body, &req)
-			resp := map[string]any{
-				"id":        1,
-				"content":   req["body"],
-				"type":      "Calendar::JournalEntry",
-				"title":     "Journal Entry",
-				"starts_at": "2024-01-15T00:00:00Z",
-			}
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp)
+			w.WriteHeader(204)
 		default:
 			w.WriteHeader(200)
 		}
@@ -106,12 +94,8 @@ func TestJournalWritePositionalContent(t *testing.T) {
 		t.Fatalf("execute: %v", err)
 	}
 
-	data, ok := resp.Data.(map[string]any)
-	if !ok {
-		t.Fatalf("data type = %T, want map[string]any", resp.Data)
-	}
-	if got := data["content"]; got != "Today was great" {
-		t.Errorf("content = %q, want %q", got, "Today was great")
+	if !strings.Contains(resp.Summary, "Journal entry") {
+		t.Errorf("summary = %q, want to contain %q", resp.Summary, "Journal entry")
 	}
 }
 
@@ -124,12 +108,8 @@ func TestJournalWritePositionalDateAndContent(t *testing.T) {
 		t.Fatalf("execute: %v", err)
 	}
 
-	data, ok := resp.Data.(map[string]any)
-	if !ok {
-		t.Fatalf("data type = %T, want map[string]any", resp.Data)
-	}
-	if got := data["content"]; got != "Retrospective" {
-		t.Errorf("content = %q, want %q", got, "Retrospective")
+	if !strings.Contains(resp.Summary, "2024-01-15") {
+		t.Errorf("summary = %q, want to contain date", resp.Summary)
 	}
 }
 
@@ -142,12 +122,8 @@ func TestJournalWriteShortFlag(t *testing.T) {
 		t.Fatalf("execute: %v", err)
 	}
 
-	data, ok := resp.Data.(map[string]any)
-	if !ok {
-		t.Fatalf("data type = %T, want map[string]any", resp.Data)
-	}
-	if got := data["content"]; got != "Content via short flag" {
-		t.Errorf("content = %q, want %q", got, "Content via short flag")
+	if !strings.Contains(resp.Summary, "Journal entry") {
+		t.Errorf("summary = %q, want to contain %q", resp.Summary, "Journal entry")
 	}
 }
 

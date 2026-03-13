@@ -112,7 +112,6 @@ func deleteTestHabit(t *testing.T, habitID int) {
 	resp.Body.Close()
 }
 
-
 func TestHabitComplete(t *testing.T) {
 	uid := uniqueID()
 	name := fmt.Sprintf("Test habit %s", uid)

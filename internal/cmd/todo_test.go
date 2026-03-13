@@ -21,9 +21,14 @@ func todoServer(t *testing.T) *httptest.Server {
 			body, _ := io.ReadAll(r.Body)
 			var req map[string]any
 			_ = json.Unmarshal(body, &req)
+			todo, _ := req["calendar_todo"].(map[string]any)
+			title := ""
+			if todo != nil {
+				title, _ = todo["title"].(string)
+			}
 			resp := map[string]any{
 				"id":    1,
-				"title": req["title"],
+				"title": title,
 			}
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(resp)

@@ -19,11 +19,10 @@ import (
 
 // Shared test state set up once in TestMain.
 var (
-	binaryPath string
-	baseURL    string
-	configDir  string
+	binaryPath    string
+	baseURL       string
+	configDir     string
 	sessionCookie string
-
 )
 
 // Response mirrors the CLI's JSON envelope.
