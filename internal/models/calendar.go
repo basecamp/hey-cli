@@ -1,7 +1,7 @@
 package models
 
 type Calendar struct {
-	ID             int    `json:"id"`
+	ID             int64  `json:"id"`
 	Name           string `json:"name"`
 	Kind           string `json:"kind"`
 	Owned          bool   `json:"owned"`
@@ -15,8 +15,8 @@ type Calendar struct {
 }
 
 type Recording struct {
-	ID               int       `json:"id"`
-	ParentID         *int      `json:"parent_id"`
+	ID               int64     `json:"id"`
+	ParentID         *int64    `json:"parent_id"`
 	Title            string    `json:"title"`
 	AllDay           bool      `json:"all_day"`
 	Recurring        bool      `json:"recurring"`

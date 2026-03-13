@@ -461,7 +461,7 @@ func (m model) View() tea.View {
 
 func sdkBoxToModel(b generated.Box) models.Box {
 	return models.Box{
-		ID:   int(b.Id),
+		ID:   int64(b.Id),
 		Kind: b.Kind,
 		Name: b.Name,
 	}
@@ -469,7 +469,7 @@ func sdkBoxToModel(b generated.Box) models.Box {
 
 func sdkPostingToModel(p generated.Posting) models.Posting {
 	return models.Posting{
-		ID:        int(p.Id),
+		ID:        int64(p.Id),
 		CreatedAt: formatTimestamp(p.CreatedAt),
 		UpdatedAt: formatTimestamp(p.UpdatedAt),
 		Kind:      p.Kind,
@@ -480,7 +480,7 @@ func sdkPostingToModel(p generated.Posting) models.Posting {
 		EntryKind: p.EntryKind,
 		AppURL:    p.AppUrl,
 		Creator: models.Contact{
-			ID:           int(p.Creator.Id),
+			ID:           int64(p.Creator.Id),
 			Name:         p.Creator.Name,
 			EmailAddress: p.Creator.EmailAddress,
 		},
@@ -489,7 +489,7 @@ func sdkPostingToModel(p generated.Posting) models.Posting {
 
 func sdkCalendarToModel(c generated.Calendar) models.Calendar {
 	return models.Calendar{
-		ID:       int(c.Id),
+		ID:       int64(c.Id),
 		Name:     c.Name,
 		Kind:     c.Kind,
 		Owned:    c.Owned,
@@ -500,7 +500,7 @@ func sdkCalendarToModel(c generated.Calendar) models.Calendar {
 
 func sdkRecordingToModel(r generated.Recording) models.Recording {
 	return models.Recording{
-		ID:               int(r.Id),
+		ID:               int64(r.Id),
 		Title:            r.Title,
 		AllDay:           r.AllDay,
 		Recurring:        r.Recurring,
@@ -544,16 +544,16 @@ func (m model) fetchBoxes() tea.Cmd {
 	}
 }
 
-func (m model) fetchBox(boxID int) tea.Cmd {
+func (m model) fetchBox(boxID int64) tea.Cmd {
 	return func() tea.Msg {
 		ctx := m.ctx
-		resp, err := m.sdk.Boxes().Get(ctx, int64(boxID), nil)
+		resp, err := m.sdk.Boxes().Get(ctx, boxID, nil)
 		if err != nil {
 			return errMsg{err}
 		}
 
 		box := models.Box{
-			ID:   int(resp.Id),
+			ID:   int64(resp.Id),
 			Kind: resp.Kind,
 			Name: resp.Name,
 		}
@@ -568,7 +568,7 @@ func (m model) fetchBox(boxID int) tea.Cmd {
 }
 
 // fetchTopic uses the legacy client — SDK entries lack body content (Gap 1).
-func (m model) fetchTopic(topicID int, title string) tea.Cmd {
+func (m model) fetchTopic(topicID int64, title string) tea.Cmd {
 	return func() tea.Msg {
 		if m.legacy == nil {
 			return errMsg{fmt.Errorf("topic view requires legacy client (SDK entries lack body content)")}
@@ -624,7 +624,7 @@ func (m model) fetchCalendar(cal models.Calendar) tea.Cmd {
 		startsOn := now.Format("2006-01-02")
 		endsOn := now.AddDate(0, 0, 30).Format("2006-01-02")
 
-		resp, err := m.sdk.Calendars().GetRecordings(ctx, int64(cal.ID), &generated.GetCalendarRecordingsParams{
+		resp, err := m.sdk.Calendars().GetRecordings(ctx, cal.ID, &generated.GetCalendarRecordingsParams{
 			StartsOn: startsOn,
 			EndsOn:   endsOn,
 		})

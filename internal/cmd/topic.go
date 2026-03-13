@@ -36,7 +36,7 @@ func (c *topicCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	threadID, err := strconv.Atoi(args[0])
+	threadID, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil {
 		return output.ErrUsage(fmt.Sprintf("invalid thread ID: %s", args[0]))
 	}

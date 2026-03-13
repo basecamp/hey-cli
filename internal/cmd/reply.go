@@ -45,7 +45,7 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := cmd.Context()
-	entries, err := apiClient.GetTopicEntries(int(threadID))
+	entries, err := apiClient.GetTopicEntries(threadID)
 	if err != nil {
 		return err
 	}
@@ -53,7 +53,7 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 		return output.ErrNotFound("entries for thread", args[0])
 	}
 
-	latestEntryID := int64(entries[len(entries)-1].ID)
+	latestEntryID := entries[len(entries)-1].ID
 
 	message := c.message
 	if message == "" {

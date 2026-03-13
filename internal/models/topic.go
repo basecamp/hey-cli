@@ -1,11 +1,11 @@
 package models
 
 type Topic struct {
-	ID          int       `json:"id"`
+	ID          int64     `json:"id"`
 	Name        string    `json:"name"`
 	CreatedAt   string    `json:"created_at"`
 	UpdatedAt   string    `json:"updated_at"`
-	AccountID   int       `json:"account_id"`
+	AccountID   int64     `json:"account_id"`
 	AppURL      string    `json:"app_url"`
 	Creator     Contact   `json:"creator"`
 	Contacts    []Contact `json:"contacts"`
@@ -13,7 +13,7 @@ type Topic struct {
 }
 
 type Entry struct {
-	ID                    int       `json:"id"`
+	ID                    int64     `json:"id"`
 	CreatedAt             string    `json:"created_at"`
 	UpdatedAt             string    `json:"updated_at"`
 	Creator               Contact   `json:"creator"`

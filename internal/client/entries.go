@@ -17,7 +17,7 @@ var (
 	srcdocRe     = regexp.MustCompile(`(?s)srcdoc="([^"]*trix-content[^"]*)"`)
 )
 
-func (c *Client) GetTopicEntries(id int) ([]models.Entry, error) {
+func (c *Client) GetTopicEntries(id int64) ([]models.Entry, error) {
 	path := fmt.Sprintf("/topics/%d/entries", id)
 	data, err := c.GetHTML(path)
 	if err != nil {
@@ -76,7 +76,7 @@ func parseTopicEntriesHTML(html string) []models.Entry {
 
 	entries := make([]models.Entry, 0, len(entryIDs))
 	for i, eid := range entryIDs {
-		id, _ := strconv.Atoi(eid)
+		id, _ := strconv.ParseInt(eid, 10, 64)
 		e := models.Entry{
 			ID:        id,
 			CreatedAt: entryTimes[eid],

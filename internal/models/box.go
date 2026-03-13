@@ -6,7 +6,7 @@ import (
 )
 
 type Box struct {
-	ID                int    `json:"id"`
+	ID                int64  `json:"id"`
 	Kind              string `json:"kind"`
 	Name              string `json:"name"`
 	AppURL            string `json:"app_url"`
@@ -15,7 +15,7 @@ type Box struct {
 }
 
 type Posting struct {
-	ID                  int     `json:"id"`
+	ID                  int64   `json:"id"`
 	CreatedAt           string  `json:"created_at"`
 	UpdatedAt           string  `json:"updated_at"`
 	ObservedAt          string  `json:"observed_at"`
@@ -29,14 +29,14 @@ type Posting struct {
 	BubbledUp           bool    `json:"bubbled_up"`
 	AppURL              string  `json:"app_url"`
 	Creator             Contact `json:"creator"`
-	TopicID             int     `json:"topic_id"`
+	TopicID             int64   `json:"topic_id"`
 	Topic               *Topic  `json:"topic,omitempty"`
 }
 
 // ResolveTopicID returns the topic ID for this posting, preferring
 // the embedded topic_id/topic fields, then parsing from app_url.
 // Returns 0 if no topic ID can be determined (e.g. bundles).
-func (p *Posting) ResolveTopicID() int {
+func (p *Posting) ResolveTopicID() int64 {
 	if p.Topic != nil && p.Topic.ID != 0 {
 		return p.Topic.ID
 	}
@@ -50,7 +50,7 @@ func (p *Posting) ResolveTopicID() int {
 		if j := strings.IndexAny(segment, "/?#"); j >= 0 {
 			segment = segment[:j]
 		}
-		if id, err := strconv.Atoi(segment); err == nil {
+		if id, err := strconv.ParseInt(segment, 10, 64); err == nil {
 			return id
 		}
 	}
@@ -58,7 +58,7 @@ func (p *Posting) ResolveTopicID() int {
 }
 
 type Contact struct {
-	ID           int    `json:"id"`
+	ID           int64  `json:"id"`
 	Name         string `json:"name"`
 	EmailAddress string `json:"email_address"`
 	Avatar       string `json:"avatar,omitempty"`
