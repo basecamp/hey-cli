@@ -371,7 +371,10 @@ func browserPageText(t *testing.T, pageURL string) string {
 
 	// Set session cookie directly instead of doing a full login flow.
 	// This avoids loading the heavy post-login homepage which can crash Chrome.
-	parsed, _ := url.Parse(baseURL)
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		t.Fatalf("failed to parse baseURL %q: %v", baseURL, err)
+	}
 	cookieDomain := parsed.Hostname()
 	if err := chromedp.Run(tCtx,
 		network.SetCookie("session_token", sessionCookie).
