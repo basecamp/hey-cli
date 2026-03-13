@@ -461,7 +461,7 @@ func (m model) View() tea.View {
 
 func sdkBoxToModel(b generated.Box) models.Box {
 	return models.Box{
-		ID:   int64(b.Id),
+		ID:   b.Id,
 		Kind: b.Kind,
 		Name: b.Name,
 	}
@@ -469,7 +469,7 @@ func sdkBoxToModel(b generated.Box) models.Box {
 
 func sdkPostingToModel(p generated.Posting) models.Posting {
 	return models.Posting{
-		ID:        int64(p.Id),
+		ID:        p.Id,
 		CreatedAt: formatTimestamp(p.CreatedAt),
 		UpdatedAt: formatTimestamp(p.UpdatedAt),
 		Kind:      p.Kind,
@@ -480,7 +480,7 @@ func sdkPostingToModel(p generated.Posting) models.Posting {
 		EntryKind: p.EntryKind,
 		AppURL:    p.AppUrl,
 		Creator: models.Contact{
-			ID:           int64(p.Creator.Id),
+			ID:           p.Creator.Id,
 			Name:         p.Creator.Name,
 			EmailAddress: p.Creator.EmailAddress,
 		},
@@ -489,7 +489,7 @@ func sdkPostingToModel(p generated.Posting) models.Posting {
 
 func sdkCalendarToModel(c generated.Calendar) models.Calendar {
 	return models.Calendar{
-		ID:       int64(c.Id),
+		ID:       c.Id,
 		Name:     c.Name,
 		Kind:     c.Kind,
 		Owned:    c.Owned,
@@ -500,7 +500,7 @@ func sdkCalendarToModel(c generated.Calendar) models.Calendar {
 
 func sdkRecordingToModel(r generated.Recording) models.Recording {
 	return models.Recording{
-		ID:               int64(r.Id),
+		ID:               r.Id,
 		Title:            r.Title,
 		AllDay:           r.AllDay,
 		Recurring:        r.Recurring,
@@ -553,7 +553,7 @@ func (m model) fetchBox(boxID int64) tea.Cmd {
 		}
 
 		box := models.Box{
-			ID:   int64(resp.Id),
+			ID:   resp.Id,
 			Kind: resp.Kind,
 			Name: resp.Name,
 		}
