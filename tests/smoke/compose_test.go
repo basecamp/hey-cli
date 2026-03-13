@@ -107,14 +107,22 @@ func TestReply(t *testing.T) {
 	data := dataAs[BoxResp](t, resp)
 
 	var topicID string
-	for _, p := range data.Postings {
-		if composeCode == 0 && p.Summary == subject {
-			topicID = extractTopicID(p.AppURL)
-			break
+	// First pass: find the thread we just composed.
+	if composeCode == 0 {
+		for _, p := range data.Postings {
+			if p.Summary == subject {
+				topicID = extractTopicID(p.AppURL)
+				break
+			}
 		}
-		if p.AppURL != "" {
-			topicID = extractTopicID(p.AppURL)
-			break
+	}
+	// Fallback: use any thread with a valid app_url.
+	if topicID == "" {
+		for _, p := range data.Postings {
+			if p.AppURL != "" {
+				topicID = extractTopicID(p.AppURL)
+				break
+			}
 		}
 	}
 	if topicID == "" {

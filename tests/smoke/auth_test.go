@@ -51,13 +51,7 @@ func TestAuthLogoutAndRelogin(t *testing.T) {
 	// Logout
 	heyOK(t, "auth", "logout")
 
-	// Verify we're logged out — commands should fail.
-	_, _, code := hey(t, "auth", "status", "--json")
-	// Status should still succeed (exit 0) but show not authenticated.
-	if code != 0 {
-		// Auth status doesn't fail on logout, it just reports status.
-		// Let's check the data instead.
-	}
+	// Verify we're logged out.
 	stdout := heyOK(t, "auth", "status", "--json")
 	var resp Response
 	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
@@ -69,7 +63,7 @@ func TestAuthLogoutAndRelogin(t *testing.T) {
 	}
 
 	// Commands requiring auth should fail.
-	_, _, code = hey(t, "boxes", "--json")
+	_, _, code := hey(t, "boxes", "--json")
 	if code == 0 {
 		t.Errorf("expected 'hey boxes' to fail when not authenticated")
 	}

@@ -1,7 +1,6 @@
 package smoke_test
 
 import (
-	"encoding/json"
 	"testing"
 )
 
@@ -99,11 +98,4 @@ func TestJournalWriteAndReadWithContent(t *testing.T) {
 	html := fetchHTML(t, baseURL+"/calendar/days/"+date+"/journal_entry/edit")
 	assertContains(t, html, "Overwrite test")
 	assertNotContains(t, html, "original content")
-}
-
-// dataAsJSON is a helper to unmarshal Response.Data into json.RawMessage for
-// type-flexible access.
-func dataAsJSON(t *testing.T, resp Response) json.RawMessage {
-	t.Helper()
-	return resp.Data
 }

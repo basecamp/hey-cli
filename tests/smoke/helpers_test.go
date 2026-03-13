@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -74,8 +75,6 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "Failed to create temp config dir: %v\n", err)
 		os.Exit(1)
 	}
-	defer os.RemoveAll(configDir)
-
 	// Launch headless Chrome browser and log in to obtain a session cookie.
 	sessionCookie, err = browserLogin(baseURL, email, password)
 	if err != nil {
@@ -90,6 +89,7 @@ func TestMain(m *testing.M) {
 	}
 
 	code := m.Run()
+	os.RemoveAll(configDir)
 	os.Exit(code)
 }
 
@@ -359,7 +359,7 @@ func browserLoginCtx(ctx context.Context, base, email, password string) error {
 
 // browserPageText navigates to the given URL and returns the page's innerText.
 // It creates a fresh browser context and sets the session cookie directly.
-func browserPageText(t *testing.T, url string) string {
+func browserPageText(t *testing.T, pageURL string) string {
 	t.Helper()
 
 	ctx, ctxCancel, allocCancel := newBrowserContext()
@@ -371,9 +371,11 @@ func browserPageText(t *testing.T, url string) string {
 
 	// Set session cookie directly instead of doing a full login flow.
 	// This avoids loading the heavy post-login homepage which can crash Chrome.
+	parsed, _ := url.Parse(baseURL)
+	cookieDomain := parsed.Hostname()
 	if err := chromedp.Run(tCtx,
 		network.SetCookie("session_token", sessionCookie).
-			WithDomain("app.hey.localhost").
+			WithDomain(cookieDomain).
 			WithPath("/").
 			WithHTTPOnly(true),
 	); err != nil {
@@ -382,12 +384,12 @@ func browserPageText(t *testing.T, url string) string {
 
 	var text string
 	if err := chromedp.Run(tCtx,
-		chromedp.Navigate(url),
+		chromedp.Navigate(pageURL),
 		chromedp.WaitReady(`body`, chromedp.ByQuery),
 		chromedp.Sleep(1*time.Second),
 		chromedp.Text(`body`, &text, chromedp.ByQuery),
 	); err != nil {
-		t.Fatalf("browser navigate to %s failed: %v", url, err)
+		t.Fatalf("browser navigate to %s failed: %v", pageURL, err)
 	}
 	return text
 }

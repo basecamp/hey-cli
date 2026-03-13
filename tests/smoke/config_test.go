@@ -73,6 +73,8 @@ func TestConfigSet(t *testing.T) {
 		if err != nil {
 			if ee, ok := err.(*exec.ExitError); ok {
 				code = ee.ExitCode()
+			} else {
+				t.Fatalf("failed to run hey: %v", err)
 			}
 		}
 		return outBuf.String(), code
