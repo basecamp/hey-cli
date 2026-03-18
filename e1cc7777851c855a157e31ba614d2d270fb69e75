@@ -1,0 +1,25 @@
+internal/tui/debug_test.go
+  68adfe78068efa89 58
+internal/tui/tui_test.go
+  68adfe78068efa89 244,787
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.15",
+  "base_commit_sha": "e1cc7777851c855a157e31ba614d2d270fb69e75",
+  "prompts": {
+    "68adfe78068efa89": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7ba324fb-4b1d-4cce-8e86-3917ffbd4f48",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jeremy Daer <jeremydaer@gmail.com>",
+      "messages": [],
+      "total_additions": 3,
+      "total_deletions": 0,
+      "accepted_lines": 3,
+      "overriden_lines": 0
+    }
+  }
+}
