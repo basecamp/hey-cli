@@ -241,6 +241,7 @@ func TestBoxesLoadedMsg(t *testing.T) {
 	selected := result.boxes.selectedBox()
 	if selected == nil {
 		t.Fatal("selectedBox() returned nil after setting items")
+		return
 	}
 	if selected.Name != "Imbox" {
 		t.Errorf("first selected box = %q, want %q", selected.Name, "Imbox")
@@ -783,6 +784,7 @@ func TestCalendarsLoadedMsg(t *testing.T) {
 	selected := result.calendars.selectedCalendar()
 	if selected == nil {
 		t.Fatal("selectedCalendar() returned nil after setting items")
+		return
 	}
 	if selected.Name != "My Calendar" {
 		t.Errorf("first selected calendar = %q, want %q", selected.Name, "My Calendar")
