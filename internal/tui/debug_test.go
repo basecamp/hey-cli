@@ -55,6 +55,7 @@ func TestEnterOnBoxPostingTriggersFetch(t *testing.T) {
 	posting := m.box.selectedPosting()
 	if posting == nil {
 		t.Fatal("selectedPosting() is nil")
+		return
 	}
 	t.Logf("selected posting: %+v", posting)
 	t.Logf("posting.Topic: %+v", posting.Topic)
