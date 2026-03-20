@@ -8,11 +8,7 @@ concurrency:
   group: classify-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-  issues: write
-  models: read
-  pull-requests: write
+permissions: {}
 
 jobs:
   classify:
