@@ -24,7 +24,10 @@ jobs:
           persist-credentials: false
       - name: Install gitleaks
         run: |
-          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz | tar -xz
+          curl -sSfLo gitleaks_8.21.2_linux_x64.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz
+          curl -sSfLo checksums.txt https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_checksums.txt
+          grep 'gitleaks_8.21.2_linux_x64.tar.gz' checksums.txt | sha256sum -c -
+          tar -xzf gitleaks_8.21.2_linux_x64.tar.gz
           sudo mv gitleaks /usr/local/bin/
       - name: Run gitleaks
         run: gitleaks detect --source . --verbose
