@@ -10,13 +10,12 @@ require (
 	github.com/mattn/go-runewidth v0.0.21
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
-	github.com/zalando/go-keyring v0.2.6
+	github.com/zalando/go-keyring v0.2.7
 	golang.org/x/net v0.52.0
 	golang.org/x/term v0.41.0
 )
 
 require (
-	al.essio.dev/pkg/shellescape v1.6.0 // indirect
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/charmbracelet/colorprofile v0.4.2 // indirect
