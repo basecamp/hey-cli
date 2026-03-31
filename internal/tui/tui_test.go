@@ -1,16 +1,16 @@
 package tui
 
 import (
-	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/basecamp/hey-cli/internal/models"
 )
 
-// Test helpers
+// --- Test helpers ---
 
 func testModel() model {
 	return newModel(nil, nil)
@@ -18,1036 +18,277 @@ func testModel() model {
 
 func sizedModel() model {
 	m := testModel()
-	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 40})
 	return updated.(model)
 }
 
 func modelWithBoxes() model {
 	m := sizedModel()
 	updated, _ := m.Update(boxesLoadedMsg(testBoxes()))
+	m = updated.(model)
+	// Simulate postings loaded for first box
+	updated, _ = m.Update(postingsLoadedMsg{postings: testPostings()})
 	return updated.(model)
 }
 
 func testBoxes() []models.Box {
 	return []models.Box{
-		{ID: 1, Name: "Imbox", Kind: "imbox"},
-		{ID: 2, Name: "Feed", Kind: "feedbox"},
-		{ID: 3, Name: "Paper Trail", Kind: "papertrailbox"},
+		{ID: 1, Name: "Imbox", Kind: "inbox"},
+		{ID: 2, Name: "The Feed", Kind: "feed"},
+		{ID: 3, Name: "Paper Trail", Kind: "paper_trail"},
 	}
 }
 
 func testPostings() []models.Posting {
 	return []models.Posting{
 		{
-			ID:        10,
+			ID:        100,
 			Summary:   "Hello world",
-			CreatedAt: "2025-01-15T10:30:00Z",
-			Creator:   models.Contact{ID: 1, Name: "Alice"},
-			Topic:     &models.Topic{ID: 100, Name: "Hello world"},
+			CreatedAt: "2025-03-01T10:00:00Z",
+			Seen:      false,
+			Creator:   models.Contact{Name: "Alice"},
 		},
 		{
-			ID:        11,
+			ID:        101,
 			Summary:   "Meeting notes",
-			CreatedAt: "2025-01-16T14:00:00Z",
-			Creator:   models.Contact{ID: 2, Name: "Bob"},
-			Topic:     &models.Topic{ID: 101, Name: "Meeting notes"},
+			CreatedAt: "2025-03-01T09:00:00Z",
+			Seen:      true,
+			Creator:   models.Contact{Name: "Bob"},
 		},
 	}
 }
 
-func testEntries() []models.Entry {
-	return []models.Entry{
-		{
-			ID:        200,
-			CreatedAt: "2025-01-15T10:30:00Z",
-			Creator:   models.Contact{Name: "Alice", EmailAddress: "alice@hey.com"},
-			Summary:   "Hello world",
-			Body:      "This is the message body.",
-		},
-		{
-			ID:        201,
-			CreatedAt: "2025-01-15T11:00:00Z",
-			Creator:   models.Contact{Name: "Bob", EmailAddress: "bob@hey.com"},
-			Summary:   "Re: Hello world",
-			Body:      "Thanks for reaching out!",
-		},
-	}
-}
-
-func keyPress(k string) tea.KeyPressMsg {
-	switch k {
-	case "enter":
-		return tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
-	case "esc":
-		return tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape})
-	case "backspace":
-		return tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace})
-	case "tab":
-		return tea.KeyPressMsg(tea.Key{Code: tea.KeyTab})
+func keyPress(key string) tea.KeyPressMsg {
+	k := tea.Key{Text: key}
+	switch key {
 	case "ctrl+c":
-		return tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModCtrl})
-	default:
-		r := rune(k[0])
-		return tea.KeyPressMsg(tea.Key{Code: r, Text: k})
+		k = tea.Key{Code: 'c', Mod: tea.ModCtrl}
+	case "esc":
+		k = tea.Key{Code: tea.KeyEscape}
+	case "enter":
+		k = tea.Key{Code: tea.KeyEnter}
+	case "tab":
+		k = tea.Key{Code: tea.KeyTab}
+	case "shift+tab":
+		k = tea.Key{Code: tea.KeyTab, Mod: tea.ModShift}
+	case "left":
+		k = tea.Key{Code: tea.KeyLeft}
+	case "right":
+		k = tea.Key{Code: tea.KeyRight}
+	case "up":
+		k = tea.Key{Code: tea.KeyUp}
+	case "down":
+		k = tea.Key{Code: tea.KeyDown}
 	}
-}
-
-// --- boxItem tests ---
-
-func TestBoxItemTitle(t *testing.T) {
-	item := boxItem{box: models.Box{Name: "Imbox"}}
-	if got := item.Title(); got != "Imbox" {
-		t.Errorf("Title() = %q, want %q", got, "Imbox")
-	}
-}
-
-func TestBoxItemDescription(t *testing.T) {
-	item := boxItem{box: models.Box{Kind: "imbox"}}
-	if got := item.Description(); got != "imbox" {
-		t.Errorf("Description() = %q, want %q", got, "imbox")
-	}
-}
-
-func TestBoxItemFilterValue(t *testing.T) {
-	item := boxItem{box: models.Box{Name: "Feed"}}
-	if got := item.FilterValue(); got != "Feed" {
-		t.Errorf("FilterValue() = %q, want %q", got, "Feed")
-	}
-}
-
-// --- postingItem tests ---
-
-func TestPostingItemTitle(t *testing.T) {
-	item := postingItem{posting: models.Posting{Summary: "Hello world", Seen: true}}
-	if got := item.Title(); got != "  Hello world" {
-		t.Errorf("Title() = %q, want %q", got, "  Hello world")
-	}
-}
-
-func TestPostingItemTitleUnread(t *testing.T) {
-	item := postingItem{posting: models.Posting{Summary: "New mail", Seen: false}}
-	if got := item.Title(); got != "● New mail" {
-		t.Errorf("Title() = %q, want %q", got, "● New mail")
-	}
-}
-
-func TestPostingItemTitleFallbackToTopic(t *testing.T) {
-	item := postingItem{posting: models.Posting{
-		Seen:  true,
-		Topic: &models.Topic{Name: "Topic Name"},
-	}}
-	if got := item.Title(); got != "  Topic Name" {
-		t.Errorf("Title() = %q, want %q", got, "  Topic Name")
-	}
-}
-
-func TestPostingItemTitleFallbackToCreator(t *testing.T) {
-	item := postingItem{posting: models.Posting{
-		Seen:    true,
-		Creator: models.Contact{Name: "Alice"},
-	}}
-	if got := item.Title(); got != "  Alice" {
-		t.Errorf("Title() = %q, want %q", got, "  Alice")
-	}
-}
-
-func TestPostingItemDescription(t *testing.T) {
-	item := postingItem{posting: models.Posting{
-		CreatedAt: "2025-01-15T10:30:00Z",
-		Creator:   models.Contact{Name: "Alice"},
-	}}
-	got := item.Description()
-	if got != "  Alice · 2025-01-15" {
-		t.Errorf("Description() = %q, want %q", got, "  Alice · 2025-01-15")
-	}
-}
-
-func TestPostingItemDescriptionShortDate(t *testing.T) {
-	item := postingItem{posting: models.Posting{
-		CreatedAt: "short",
-		Creator:   models.Contact{Name: "Bob"},
-	}}
-	got := item.Description()
-	if got != "  Bob · " {
-		t.Errorf("Description() = %q, want %q", got, "  Bob · ")
-	}
-}
-
-func TestPostingItemFilterValue(t *testing.T) {
-	item := postingItem{posting: models.Posting{Summary: "Meeting notes"}}
-	if got := item.FilterValue(); got != "Meeting notes" {
-		t.Errorf("FilterValue() = %q, want %q", got, "Meeting notes")
-	}
+	return tea.KeyPressMsg(k)
 }
 
 // --- Model initialization ---
 
 func TestNewModelInitialState(t *testing.T) {
 	m := testModel()
-	if m.state != viewBoxes {
-		t.Errorf("initial state = %d, want viewBoxes (%d)", m.state, viewBoxes)
+	if m.section != sectionMail {
+		t.Errorf("initial section = %d, want sectionMail", m.section)
 	}
-	if m.loading {
-		t.Error("loading should be false initially")
+	if m.focus != rowContent {
+		t.Errorf("initial focus = %d, want rowContent", m.focus)
 	}
-	if m.err != nil {
-		t.Error("err should be nil initially")
+	if !m.loading {
+		t.Error("loading should be true initially")
 	}
 }
 
 func TestInitReturnsCmd(t *testing.T) {
 	m := testModel()
 	cmd := m.Init()
-	// Init should return a command (fetchBoxes), not nil
-	// We can't execute it without a real client, but it shouldn't be nil
 	if cmd == nil {
-		t.Error("Init() should return a non-nil command")
+		t.Fatal("Init should return a command")
 	}
 }
 
-// --- WindowSizeMsg ---
+// --- Box ordering ---
 
-func TestWindowSizeMsg(t *testing.T) {
-	m := testModel()
-	updated, cmd := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	result := updated.(model)
-
-	if result.width != 120 {
-		t.Errorf("width = %d, want 120", result.width)
+func TestOrderBoxes(t *testing.T) {
+	boxes := []models.Box{
+		{ID: 1, Name: "The Feed"},
+		{ID: 2, Name: "Imbox"},
+		{ID: 3, Name: "Custom Box"},
+		{ID: 4, Name: "Paper Trail"},
 	}
-	if result.height != 40 {
-		t.Errorf("height = %d, want 40", result.height)
+	ordered := orderBoxes(boxes)
+	if ordered[0].Name != "Imbox" {
+		t.Errorf("first box = %q, want Imbox", ordered[0].Name)
 	}
-	if cmd != nil {
-		t.Error("WindowSizeMsg should return nil cmd")
+	if ordered[1].Name != "Paper Trail" {
+		t.Errorf("second box = %q, want Paper Trail", ordered[1].Name)
 	}
-}
-
-// --- Data loading messages ---
-
-func TestBoxesLoadedMsg(t *testing.T) {
-	m := sizedModel()
-	m.loading = true
-
-	updated, _ := m.Update(boxesLoadedMsg(testBoxes()))
-	result := updated.(model)
-
-	if result.loading {
-		t.Error("loading should be false after boxesLoadedMsg")
+	if ordered[2].Name != "The Feed" {
+		t.Errorf("third box = %q, want The Feed", ordered[2].Name)
 	}
-	if result.state != viewBoxes {
-		t.Errorf("state = %d, want viewBoxes", result.state)
-	}
-	selected := result.boxes.selectedBox()
-	if selected == nil {
-		t.Fatal("selectedBox() returned nil after setting items")
-		return
-	}
-	if selected.Name != "Imbox" {
-		t.Errorf("first selected box = %q, want %q", selected.Name, "Imbox")
+	if ordered[3].Name != "Custom Box" {
+		t.Errorf("last box = %q, want Custom Box", ordered[3].Name)
 	}
 }
 
-func TestBoxLoadedMsg(t *testing.T) {
-	m := sizedModel()
-	m.loading = true
+// --- Navigation: Tab cycles focus rows ---
 
-	box := models.Box{ID: 1, Name: "Imbox", Kind: "imbox"}
-	postings := testPostings()
-
-	updated, _ := m.Update(boxLoadedMsg{box: box, postings: postings})
-	result := updated.(model)
-
-	if result.loading {
-		t.Error("loading should be false after boxLoadedMsg")
-	}
-	if result.state != viewBox {
-		t.Errorf("state = %d, want viewBox (%d)", result.state, viewBox)
-	}
-	if result.box.list.Title != "Imbox" {
-		t.Errorf("box list title = %q, want %q", result.box.list.Title, "Imbox")
-	}
-}
-
-func TestTopicLoadedMsg(t *testing.T) {
-	m := sizedModel()
-	m.loading = true
-
-	updated, _ := m.Update(topicLoadedMsg{title: "Hello world", entries: testEntries()})
-	result := updated.(model)
-
-	if result.loading {
-		t.Error("loading should be false after topicLoadedMsg")
-	}
-	if result.state != viewTopic {
-		t.Errorf("state = %d, want viewTopic (%d)", result.state, viewTopic)
-	}
-	if result.topic.title != "Hello world" {
-		t.Errorf("topic title = %q, want %q", result.topic.title, "Hello world")
-	}
-}
-
-func TestErrMsg(t *testing.T) {
-	m := sizedModel()
-	m.loading = true
-
-	updated, _ := m.Update(errMsg{err: errors.New("network error")})
-	result := updated.(model)
-
-	if result.loading {
-		t.Error("loading should be false after errMsg")
-	}
-	if result.err == nil {
-		t.Fatal("err should be set after errMsg")
-	}
-	if result.err.Error() != "network error" {
-		t.Errorf("err = %q, want %q", result.err.Error(), "network error")
-	}
-}
-
-// --- Navigation: ctrl+c quits from any view ---
-
-func TestCtrlCQuitsFromBoxes(t *testing.T) {
+func TestTabCyclesFocus(t *testing.T) {
 	m := modelWithBoxes()
+	m.focus = rowSection
+
+	updated, _ := m.Update(keyPress("tab"))
+	m = updated.(model)
+	if m.focus != rowSubnav {
+		t.Errorf("after tab from rowSection: focus = %d, want rowSubnav", m.focus)
+	}
+
+	updated, _ = m.Update(keyPress("tab"))
+	m = updated.(model)
+	if m.focus != rowContent {
+		t.Errorf("after tab from rowSubnav: focus = %d, want rowContent", m.focus)
+	}
+
+	updated, _ = m.Update(keyPress("tab"))
+	m = updated.(model)
+	if m.focus != rowSection {
+		t.Errorf("after tab from rowContent: focus = %d, want rowSection", m.focus)
+	}
+}
+
+func TestShiftTabReversesFocus(t *testing.T) {
+	m := modelWithBoxes()
+	m.focus = rowContent
+
+	updated, _ := m.Update(keyPress("shift+tab"))
+	m = updated.(model)
+	if m.focus != rowSubnav {
+		t.Errorf("after shift+tab from rowContent: focus = %d, want rowSubnav", m.focus)
+	}
+}
+
+// --- Navigation: Double Ctrl+C to quit ---
+
+func TestDoubleCtrlCQuits(t *testing.T) {
+	m := modelWithBoxes()
+	updated, _ := m.Update(keyPress("ctrl+c"))
+	m = updated.(model)
+	if !m.ctrlCOnce {
+		t.Fatal("first ctrl+c should arm quit")
+	}
+
 	_, cmd := m.Update(keyPress("ctrl+c"))
 	if cmd == nil {
-		t.Fatal("ctrl+c should return a quit cmd")
-	}
-	// Execute the cmd and check it returns a QuitMsg
-	msg := cmd()
-	if _, ok := msg.(tea.QuitMsg); !ok {
-		t.Errorf("ctrl+c cmd produced %T, want tea.QuitMsg", msg)
-	}
-}
-
-func TestCtrlCQuitsFromBox(t *testing.T) {
-	m := modelWithBoxes()
-	m.state = viewBox
-	_, cmd := m.Update(keyPress("ctrl+c"))
-	if cmd == nil {
-		t.Fatal("ctrl+c should return a quit cmd")
+		t.Fatal("double ctrl+c should return a quit cmd")
 	}
 	msg := cmd()
 	if _, ok := msg.(tea.QuitMsg); !ok {
-		t.Errorf("ctrl+c cmd produced %T, want tea.QuitMsg", msg)
+		t.Errorf("double ctrl+c produced %T, want tea.QuitMsg", msg)
 	}
 }
 
-func TestCtrlCQuitsFromTopic(t *testing.T) {
+func TestSingleCtrlCDoesNotQuit(t *testing.T) {
 	m := modelWithBoxes()
-	m.state = viewTopic
 	_, cmd := m.Update(keyPress("ctrl+c"))
 	if cmd == nil {
-		t.Fatal("ctrl+c should return a quit cmd")
+		t.Fatal("first ctrl+c should return a timer cmd")
 	}
 	msg := cmd()
-	if _, ok := msg.(tea.QuitMsg); !ok {
-		t.Errorf("ctrl+c cmd produced %T, want tea.QuitMsg", msg)
+	if _, ok := msg.(tea.QuitMsg); ok {
+		t.Error("single ctrl+c should NOT quit")
 	}
 }
 
-// --- Navigation: esc goes back ---
+// --- Navigation: Esc/q in thread goes back ---
 
-func TestEscFromBoxGoesBackToBoxes(t *testing.T) {
+func TestEscExitsThread(t *testing.T) {
 	m := modelWithBoxes()
-	// Transition to box view
-	m.state = viewBox
+	m.inThread = true
 
 	updated, _ := m.Update(keyPress("esc"))
 	result := updated.(model)
-
-	if result.state != viewBoxes {
-		t.Errorf("state after esc = %d, want viewBoxes (%d)", result.state, viewBoxes)
+	if result.inThread {
+		t.Error("esc should exit thread")
 	}
 }
 
-func TestBackspaceFromBoxGoesBackToBoxes(t *testing.T) {
+func TestQExitsThread(t *testing.T) {
 	m := modelWithBoxes()
-	m.state = viewBox
-
-	updated, _ := m.Update(keyPress("backspace"))
-	result := updated.(model)
-
-	if result.state != viewBoxes {
-		t.Errorf("state after backspace = %d, want viewBoxes (%d)", result.state, viewBoxes)
-	}
-}
-
-func TestEscFromTopicGoesBackToBox(t *testing.T) {
-	m := modelWithBoxes()
-	m.state = viewTopic
-
-	updated, _ := m.Update(keyPress("esc"))
-	result := updated.(model)
-
-	if result.state != viewBox {
-		t.Errorf("state after esc = %d, want viewBox (%d)", result.state, viewBox)
-	}
-}
-
-func TestBackspaceFromTopicGoesBackToBox(t *testing.T) {
-	m := modelWithBoxes()
-	m.state = viewTopic
-
-	updated, _ := m.Update(keyPress("backspace"))
-	result := updated.(model)
-
-	if result.state != viewBox {
-		t.Errorf("state after backspace = %d, want viewBox (%d)", result.state, viewBox)
-	}
-}
-
-func TestQFromTopicGoesBackToBox(t *testing.T) {
-	m := modelWithBoxes()
-	m.state = viewTopic
+	m.inThread = true
 
 	updated, _ := m.Update(keyPress("q"))
 	result := updated.(model)
+	if result.inThread {
+		t.Error("q should exit thread")
+	}
+}
 
-	if result.state != viewBox {
-		t.Errorf("state after q in topic = %d, want viewBox (%d)", result.state, viewBox)
+// --- Content list ---
+
+func TestContentListNavigation(t *testing.T) {
+	cl := &contentList{}
+	cl.setPostings(testPostings())
+	cl.setSize(80, 20)
+
+	if cl.cursor != 0 {
+		t.Errorf("initial cursor = %d, want 0", cl.cursor)
+	}
+
+	cl.moveDown()
+	if cl.cursor != 1 {
+		t.Errorf("after moveDown cursor = %d, want 1", cl.cursor)
+	}
+
+	cl.moveDown() // already at end
+	if cl.cursor != 1 {
+		t.Errorf("moveDown at end: cursor = %d, want 1", cl.cursor)
+	}
+
+	cl.moveUp()
+	if cl.cursor != 0 {
+		t.Errorf("after moveUp cursor = %d, want 0", cl.cursor)
+	}
+}
+
+func TestContentListSelectedPosting(t *testing.T) {
+	cl := &contentList{}
+	cl.setPostings(testPostings())
+
+	p := cl.selectedPosting()
+	if p == nil || p.Summary != "Hello world" {
+		t.Error("selectedPosting should return first posting")
 	}
 }
 
 // --- View rendering ---
 
-func TestViewShowsLoadingState(t *testing.T) {
-	m := sizedModel()
-	m.loading = true
-	v := m.View()
-	if !strings.Contains(v.Content, "Loading...") {
-		t.Error("View should show 'Loading...' when loading")
-	}
-	if !v.AltScreen {
-		t.Error("View should have AltScreen enabled")
-	}
-}
-
-func TestViewShowsError(t *testing.T) {
-	m := sizedModel()
-	m.err = errors.New("connection failed")
-	v := m.View()
-	if !strings.Contains(v.Content, "connection failed") {
-		t.Error("View should display the error message")
-	}
-}
-
-func TestViewAltScreenAlwaysEnabled(t *testing.T) {
-	m := sizedModel()
-	v := m.View()
-	if !v.AltScreen {
-		t.Error("View should always have AltScreen = true")
-	}
-}
-
-// --- Topic rendering ---
-
-func TestRenderEntries(t *testing.T) {
-	s := newStyles()
-	tm := newTopicModel(s)
-	content := tm.renderEntries(testEntries())
-
-	if !strings.Contains(content, "Alice") {
-		t.Error("rendered entries should contain creator name 'Alice'")
-	}
-	if !strings.Contains(content, "Bob") {
-		t.Error("rendered entries should contain creator name 'Bob'")
-	}
-	if !strings.Contains(content, "This is the message body.") {
-		t.Error("rendered entries should contain body text")
-	}
-	if !strings.Contains(content, "Thanks for reaching out!") {
-		t.Error("rendered entries should contain second entry body")
-	}
-	if !strings.Contains(content, "─") {
-		t.Error("rendered entries should contain separator between entries")
-	}
-}
-
-func TestRenderEntriesAlternativeSender(t *testing.T) {
-	s := newStyles()
-	tm := newTopicModel(s)
-	entries := []models.Entry{
-		{
-			Creator:               models.Contact{Name: "System", EmailAddress: "system@hey.com"},
-			AlternativeSenderName: "Custom Sender",
-			CreatedAt:             "2025-01-15T10:30:00Z",
-			Body:                  "test body",
-		},
-	}
-	content := tm.renderEntries(entries)
-
-	if !strings.Contains(content, "Custom Sender") {
-		t.Error("should use AlternativeSenderName when set")
-	}
-}
-
-func TestRenderEntriesFallsBackToEmail(t *testing.T) {
-	s := newStyles()
-	tm := newTopicModel(s)
-	entries := []models.Entry{
-		{
-			Creator:   models.Contact{EmailAddress: "nobody@hey.com"},
-			CreatedAt: "2025-01-15T10:30:00Z",
-			Body:      "test",
-		},
-	}
-	content := tm.renderEntries(entries)
-
-	if !strings.Contains(content, "nobody@hey.com") {
-		t.Error("should fall back to email when name is empty")
-	}
-}
-
-func TestRenderEntriesEmpty(t *testing.T) {
-	s := newStyles()
-	tm := newTopicModel(s)
-	content := tm.renderEntries(nil)
-	if content != "" {
-		t.Errorf("renderEntries(nil) = %q, want empty string", content)
-	}
-}
-
-// --- Sub-model construction ---
-
-func TestNewBoxesModelTitle(t *testing.T) {
-	bm := newBoxesModel()
-	if bm.list.Title != "Mailboxes  (Tab → Calendars)" {
-		t.Errorf("boxes list title = %q, want %q", bm.list.Title, "Mailboxes  (Tab → Calendars)")
-	}
-}
-
-func TestBoxesSelectedBoxNilWhenEmpty(t *testing.T) {
-	bm := newBoxesModel()
-	if bm.selectedBox() != nil {
-		t.Error("selectedBox() should return nil when list is empty")
-	}
-}
-
-func TestBoxSelectedPostingNilWhenEmpty(t *testing.T) {
-	bm := newBoxModel()
-	if bm.selectedPosting() != nil {
-		t.Error("selectedPosting() should return nil when list is empty")
-	}
-}
-
-// --- errMsg ---
-
-func TestErrMsgError(t *testing.T) {
-	e := errMsg{err: errors.New("test error")}
-	if e.Error() != "test error" {
-		t.Errorf("Error() = %q, want %q", e.Error(), "test error")
-	}
-}
-
-// --- Calendar test helpers ---
-
-func testCalendars() []models.Calendar {
-	return []models.Calendar{
-		{ID: 1, Name: "My Calendar", Kind: "personal"},
-		{ID: 2, Name: "Team Calendar", Kind: "shared"},
-	}
-}
-
-func testRecordings() models.RecordingsResponse {
-	return models.RecordingsResponse{
-		"events": {
-			{
-				ID:        100,
-				Title:     "Standup",
-				AllDay:    false,
-				StartsAt:  "2025-03-01T09:00:00Z",
-				Recurring: true,
-			},
-			{
-				ID:       101,
-				Title:    "Company Holiday",
-				AllDay:   true,
-				StartsAt: "2025-03-15T00:00:00Z",
-			},
-		},
-		"deadlines": {
-			{
-				ID:       102,
-				Title:    "Ship v2",
-				AllDay:   false,
-				StartsAt: "2025-03-20T17:00:00Z",
-			},
-		},
-	}
-}
-
-func modelWithCalendars() model {
-	m := sizedModel()
-	updated, _ := m.Update(calendarsLoadedMsg(testCalendars()))
-	return updated.(model)
-}
-
-// --- calendarItem tests ---
-
-func TestCalendarItemTitle(t *testing.T) {
-	item := calendarItem{calendar: models.Calendar{Name: "My Calendar"}}
-	if got := item.Title(); got != "My Calendar" {
-		t.Errorf("Title() = %q, want %q", got, "My Calendar")
-	}
-}
-
-func TestCalendarItemDescription(t *testing.T) {
-	item := calendarItem{calendar: models.Calendar{Kind: "personal"}}
-	if got := item.Description(); got != "personal" {
-		t.Errorf("Description() = %q, want %q", got, "personal")
-	}
-}
-
-func TestCalendarItemFilterValue(t *testing.T) {
-	item := calendarItem{calendar: models.Calendar{Name: "Team Calendar"}}
-	if got := item.FilterValue(); got != "Team Calendar" {
-		t.Errorf("FilterValue() = %q, want %q", got, "Team Calendar")
-	}
-}
-
-// --- recordingItem tests ---
-
-func TestRecordingItemTitleWithTime(t *testing.T) {
-	item := recordingItem{
-		recording: models.Recording{Title: "Standup", AllDay: false, StartsAt: "2025-03-01T09:00:00Z"},
-		recType:   "events",
-	}
-	got := item.Title()
-	want := "[09:00] Standup"
-	if got != want {
-		t.Errorf("Title() = %q, want %q", got, want)
-	}
-}
-
-func TestRecordingItemTitleAllDay(t *testing.T) {
-	item := recordingItem{
-		recording: models.Recording{Title: "Holiday", AllDay: true, StartsAt: "2025-03-15T00:00:00Z"},
-		recType:   "events",
-	}
-	got := item.Title()
-	want := "[All day] Holiday"
-	if got != want {
-		t.Errorf("Title() = %q, want %q", got, want)
-	}
-}
-
-func TestRecordingItemTitleShortStartsAt(t *testing.T) {
-	item := recordingItem{
-		recording: models.Recording{Title: "Short", AllDay: false, StartsAt: "short"},
-		recType:   "events",
-	}
-	got := item.Title()
-	want := "[All day] Short"
-	if got != want {
-		t.Errorf("Title() = %q, want %q (short StartsAt should fall back to All day)", got, want)
-	}
-}
-
-func TestRecordingItemDescription(t *testing.T) {
-	item := recordingItem{
-		recording: models.Recording{StartsAt: "2025-03-01T09:00:00Z", Recurring: true},
-		recType:   "events",
-	}
-	got := item.Description()
-	want := "events · 2025-03-01 · recurring"
-	if got != want {
-		t.Errorf("Description() = %q, want %q", got, want)
-	}
-}
-
-func TestRecordingItemDescriptionNonRecurring(t *testing.T) {
-	item := recordingItem{
-		recording: models.Recording{StartsAt: "2025-03-20T17:00:00Z", Recurring: false},
-		recType:   "deadlines",
-	}
-	got := item.Description()
-	want := "deadlines · 2025-03-20"
-	if got != want {
-		t.Errorf("Description() = %q, want %q", got, want)
-	}
-}
-
-func TestRecordingItemFilterValue(t *testing.T) {
-	item := recordingItem{recording: models.Recording{Title: "Standup"}}
-	if got := item.FilterValue(); got != "Standup" {
-		t.Errorf("FilterValue() = %q, want %q", got, "Standup")
-	}
-}
-
-// --- Tab switching ---
-
-func TestTabFromBoxesToCalendars(t *testing.T) {
+func TestViewShowsHeader(t *testing.T) {
 	m := modelWithBoxes()
-	updated, cmd := m.Update(keyPress("tab"))
-	result := updated.(model)
-
-	if result.state != viewCalendars {
-		t.Errorf("state = %d, want viewCalendars (%d)", result.state, viewCalendars)
+	v := m.View()
+	if !strings.Contains(v.Content, "HEY") {
+		t.Error("View should contain HEY header")
 	}
-	if !result.loading {
-		t.Error("should be loading calendars on first Tab")
-	}
-	if cmd == nil {
-		t.Error("first Tab should return a fetch command")
+	if !strings.Contains(v.Content, "Mail") {
+		t.Error("View should contain Mail section")
 	}
 }
 
-func TestTabFromBoxesToCalendarsAlreadyLoaded(t *testing.T) {
-	m := modelWithCalendars()
-	m.state = viewBoxes // go back to boxes
-	updated, cmd := m.Update(keyPress("tab"))
-	result := updated.(model)
-
-	if result.state != viewCalendars {
-		t.Errorf("state = %d, want viewCalendars (%d)", result.state, viewCalendars)
-	}
-	if result.loading {
-		t.Error("should not be loading when calendars already loaded")
-	}
-	if cmd != nil {
-		t.Error("should not fetch when calendars already loaded")
-	}
-}
-
-func TestTabFromCalendarsToJournal(t *testing.T) {
-	m := modelWithCalendars()
-	m.state = viewCalendars
-	updated, _ := m.Update(keyPress("tab"))
-	result := updated.(model)
-
-	if result.state != viewJournal {
-		t.Errorf("state = %d, want viewJournal (%d)", result.state, viewJournal)
-	}
-}
-
-func TestTabFromJournalToBoxes(t *testing.T) {
-	m := modelWithCalendars()
-	m.state = viewJournal
-	m.journalLoaded = true
-	updated, _ := m.Update(keyPress("tab"))
-	result := updated.(model)
-
-	if result.state != viewBoxes {
-		t.Errorf("state = %d, want viewBoxes (%d)", result.state, viewBoxes)
-	}
-}
-
-func TestTabDoesNothingInBox(t *testing.T) {
+func TestViewShowsBoxNames(t *testing.T) {
 	m := modelWithBoxes()
-	m.state = viewBox
-	updated, _ := m.Update(keyPress("tab"))
-	result := updated.(model)
-
-	if result.state != viewBox {
-		t.Errorf("state = %d, want viewBox (%d)", result.state, viewBox)
-	}
-}
-
-func TestTabDoesNothingInTopic(t *testing.T) {
-	m := modelWithBoxes()
-	m.state = viewTopic
-	updated, _ := m.Update(keyPress("tab"))
-	result := updated.(model)
-
-	if result.state != viewTopic {
-		t.Errorf("state = %d, want viewTopic (%d)", result.state, viewTopic)
-	}
-}
-
-func TestTabDoesNothingInCalendar(t *testing.T) {
-	m := modelWithCalendars()
-	m.state = viewCalendar
-	updated, _ := m.Update(keyPress("tab"))
-	result := updated.(model)
-
-	if result.state != viewCalendar {
-		t.Errorf("state = %d, want viewCalendar (%d)", result.state, viewCalendar)
-	}
-}
-
-// --- Calendar data loading ---
-
-func TestCalendarsLoadedMsg(t *testing.T) {
-	m := sizedModel()
-	m.loading = true
-
-	updated, _ := m.Update(calendarsLoadedMsg(testCalendars()))
-	result := updated.(model)
-
-	if result.loading {
-		t.Error("loading should be false after calendarsLoadedMsg")
-	}
-	if !result.calendarsLoaded {
-		t.Error("calendarsLoaded should be true")
-	}
-	selected := result.calendars.selectedCalendar()
-	if selected == nil {
-		t.Fatal("selectedCalendar() returned nil after setting items")
-		return
-	}
-	if selected.Name != "My Calendar" {
-		t.Errorf("first selected calendar = %q, want %q", selected.Name, "My Calendar")
-	}
-}
-
-func TestCalendarLoadedMsg(t *testing.T) {
-	m := sizedModel()
-	m.loading = true
-	m.state = viewCalendars
-
-	cal := models.Calendar{ID: 1, Name: "My Calendar", Kind: "personal"}
-	updated, _ := m.Update(calendarLoadedMsg{calendar: cal, recordings: testRecordings()})
-	result := updated.(model)
-
-	if result.loading {
-		t.Error("loading should be false after calendarLoadedMsg")
-	}
-	if result.state != viewCalendar {
-		t.Errorf("state = %d, want viewCalendar (%d)", result.state, viewCalendar)
-	}
-	if result.calendar.list.Title != "My Calendar" {
-		t.Errorf("calendar list title = %q, want %q", result.calendar.list.Title, "My Calendar")
-	}
-}
-
-// --- Calendar navigation ---
-
-func TestEscFromCalendarGoesBackToCalendars(t *testing.T) {
-	m := modelWithCalendars()
-	m.state = viewCalendar
-
-	updated, _ := m.Update(keyPress("esc"))
-	result := updated.(model)
-
-	if result.state != viewCalendars {
-		t.Errorf("state after esc = %d, want viewCalendars (%d)", result.state, viewCalendars)
-	}
-}
-
-func TestBackspaceFromCalendarGoesBackToCalendars(t *testing.T) {
-	m := modelWithCalendars()
-	m.state = viewCalendar
-
-	updated, _ := m.Update(keyPress("backspace"))
-	result := updated.(model)
-
-	if result.state != viewCalendars {
-		t.Errorf("state after backspace = %d, want viewCalendars (%d)", result.state, viewCalendars)
-	}
-}
-
-func TestCtrlCQuitsFromCalendars(t *testing.T) {
-	m := modelWithCalendars()
-	m.state = viewCalendars
-	_, cmd := m.Update(keyPress("ctrl+c"))
-	if cmd == nil {
-		t.Fatal("ctrl+c should return a quit cmd")
-	}
-	msg := cmd()
-	if _, ok := msg.(tea.QuitMsg); !ok {
-		t.Errorf("ctrl+c cmd produced %T, want tea.QuitMsg", msg)
-	}
-}
-
-func TestCtrlCQuitsFromCalendar(t *testing.T) {
-	m := modelWithCalendars()
-	m.state = viewCalendar
-	_, cmd := m.Update(keyPress("ctrl+c"))
-	if cmd == nil {
-		t.Fatal("ctrl+c should return a quit cmd")
-	}
-	msg := cmd()
-	if _, ok := msg.(tea.QuitMsg); !ok {
-		t.Errorf("ctrl+c cmd produced %T, want tea.QuitMsg", msg)
-	}
-}
-
-// --- Calendar sub-model construction ---
-
-func TestNewCalendarsModelTitle(t *testing.T) {
-	cm := newCalendarsModel()
-	if cm.list.Title != "Calendars  (Tab → Journal)" {
-		t.Errorf("calendars list title = %q, want %q", cm.list.Title, "Calendars  (Tab → Journal)")
-	}
-}
-
-func TestCalendarsSelectedCalendarNilWhenEmpty(t *testing.T) {
-	cm := newCalendarsModel()
-	if cm.selectedCalendar() != nil {
-		t.Error("selectedCalendar() should return nil when list is empty")
-	}
-}
-
-// --- Calendar view rendering ---
-
-func TestViewShowsCalendars(t *testing.T) {
-	m := modelWithCalendars()
-	m.state = viewCalendars
 	v := m.View()
-	if !strings.Contains(v.Content, "Calendars") {
-		t.Error("View should show calendars content when in viewCalendars state")
+	if !strings.Contains(v.Content, "Imbox") {
+		t.Error("View should contain Imbox")
 	}
 }
 
-// --- Journal detail navigation ---
+// --- Journal dates ---
 
-func TestJournalDetailMsg(t *testing.T) {
-	m := sizedModel()
-	m.loading = true
-	m.state = viewJournal
-
-	updated, _ := m.Update(journalDetailMsg{title: "2025-03-01", body: "Hello world"})
-	result := updated.(model)
-
-	if result.loading {
-		t.Error("loading should be false after journalDetailMsg")
+func TestGenerateJournalDates(t *testing.T) {
+	dates := generateJournalDates(7)
+	if len(dates) != 7 {
+		t.Fatalf("expected 7 dates, got %d", len(dates))
 	}
-	if result.state != viewJournalDetail {
-		t.Errorf("state = %d, want viewJournalDetail (%d)", result.state, viewJournalDetail)
-	}
-	if result.detail.title != "2025-03-01" {
-		t.Errorf("detail title = %q, want %q", result.detail.title, "2025-03-01")
-	}
-}
-
-func TestEscFromJournalDetailGoesBackToJournal(t *testing.T) {
-	m := sizedModel()
-	m.state = viewJournalDetail
-
-	updated, _ := m.Update(keyPress("esc"))
-	result := updated.(model)
-
-	if result.state != viewJournal {
-		t.Errorf("state after esc = %d, want viewJournal (%d)", result.state, viewJournal)
-	}
-}
-
-func TestBackspaceFromJournalDetailGoesBackToJournal(t *testing.T) {
-	m := sizedModel()
-	m.state = viewJournalDetail
-
-	updated, _ := m.Update(keyPress("backspace"))
-	result := updated.(model)
-
-	if result.state != viewJournal {
-		t.Errorf("state after backspace = %d, want viewJournal (%d)", result.state, viewJournal)
-	}
-}
-
-func TestQFromJournalDetailGoesBackToJournal(t *testing.T) {
-	m := sizedModel()
-	m.state = viewJournalDetail
-
-	updated, _ := m.Update(keyPress("q"))
-	result := updated.(model)
-
-	if result.state != viewJournal {
-		t.Errorf("state after q = %d, want viewJournal (%d)", result.state, viewJournal)
-	}
-}
-
-// --- Recording detail navigation ---
-
-func TestRecordingDetailMsg(t *testing.T) {
-	m := sizedModel()
-	m.loading = true
-	m.state = viewCalendar
-
-	updated, _ := m.Update(recordingDetailMsg{title: "Standup", body: "Starts: 2025-03-01T09:00"})
-	result := updated.(model)
-
-	if result.loading {
-		t.Error("loading should be false after recordingDetailMsg")
-	}
-	if result.state != viewRecordingDetail {
-		t.Errorf("state = %d, want viewRecordingDetail (%d)", result.state, viewRecordingDetail)
-	}
-	if result.detail.title != "Standup" {
-		t.Errorf("detail title = %q, want %q", result.detail.title, "Standup")
-	}
-}
-
-func TestEscFromRecordingDetailGoesBackToCalendar(t *testing.T) {
-	m := sizedModel()
-	m.state = viewRecordingDetail
-
-	updated, _ := m.Update(keyPress("esc"))
-	result := updated.(model)
-
-	if result.state != viewCalendar {
-		t.Errorf("state after esc = %d, want viewCalendar (%d)", result.state, viewCalendar)
-	}
-}
-
-func TestBackspaceFromRecordingDetailGoesBackToCalendar(t *testing.T) {
-	m := sizedModel()
-	m.state = viewRecordingDetail
-
-	updated, _ := m.Update(keyPress("backspace"))
-	result := updated.(model)
-
-	if result.state != viewCalendar {
-		t.Errorf("state after backspace = %d, want viewCalendar (%d)", result.state, viewCalendar)
-	}
-}
-
-func TestQFromRecordingDetailGoesBackToCalendar(t *testing.T) {
-	m := sizedModel()
-	m.state = viewRecordingDetail
-
-	updated, _ := m.Update(keyPress("q"))
-	result := updated.(model)
-
-	if result.state != viewCalendar {
-		t.Errorf("state after q = %d, want viewCalendar (%d)", result.state, viewCalendar)
-	}
-}
-
-func TestCtrlCQuitsFromJournalDetail(t *testing.T) {
-	m := sizedModel()
-	m.state = viewJournalDetail
-	_, cmd := m.Update(keyPress("ctrl+c"))
-	if cmd == nil {
-		t.Fatal("ctrl+c should return a quit cmd")
-	}
-	msg := cmd()
-	if _, ok := msg.(tea.QuitMsg); !ok {
-		t.Errorf("ctrl+c cmd produced %T, want tea.QuitMsg", msg)
-	}
-}
-
-func TestCtrlCQuitsFromRecordingDetail(t *testing.T) {
-	m := sizedModel()
-	m.state = viewRecordingDetail
-	_, cmd := m.Update(keyPress("ctrl+c"))
-	if cmd == nil {
-		t.Fatal("ctrl+c should return a quit cmd")
-	}
-	msg := cmd()
-	if _, ok := msg.(tea.QuitMsg); !ok {
-		t.Errorf("ctrl+c cmd produced %T, want tea.QuitMsg", msg)
-	}
-}
-
-// --- Detail view rendering ---
-
-func TestViewShowsJournalDetail(t *testing.T) {
-	m := sizedModel()
-	m.detail.setContent("2025-03-01", "My journal entry text")
-	m.state = viewJournalDetail
-	v := m.View()
-	if !strings.Contains(v.Content, "2025-03-01") {
-		t.Error("View should show journal detail title")
-	}
-}
-
-func TestViewShowsRecordingDetail(t *testing.T) {
-	m := sizedModel()
-	m.detail.setContent("Standup", "Starts: 2025-03-01T09:00")
-	m.state = viewRecordingDetail
-	v := m.View()
-	if !strings.Contains(v.Content, "Standup") {
-		t.Error("View should show recording detail title")
+	today := time.Now().Format("2006-01-02")
+	if dates[6] != today {
+		t.Errorf("last date = %q, want today %q", dates[6], today)
 	}
 }

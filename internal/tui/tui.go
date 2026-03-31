@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
@@ -18,24 +18,11 @@ import (
 	"github.com/basecamp/hey-cli/internal/models"
 )
 
-type viewState int
+// --- Async messages ---
 
-const (
-	viewBoxes viewState = iota
-	viewBox
-	viewTopic
-	viewCalendars
-	viewCalendar
-	viewRecordingDetail
-	viewJournal
-	viewJournalDetail
-)
-
-// Async messages
 type boxesLoadedMsg []models.Box
 
-type boxLoadedMsg struct {
-	box      models.Box
+type postingsLoadedMsg struct {
 	postings []models.Posting
 }
 
@@ -46,17 +33,15 @@ type topicLoadedMsg struct {
 }
 
 type calendarsLoadedMsg []models.Calendar
-type journalLoadedMsg []models.Recording
 
-type calendarLoadedMsg struct {
-	calendar   models.Calendar
-	recordings models.RecordingsResponse
+type recordingsLoadedMsg struct {
+	recordings []models.Recording
 }
 
 type journalDetailMsg struct {
 	title  string
 	body   string
-	images [][]byte // raw image data
+	images [][]byte
 }
 
 type recordingDetailMsg struct {
@@ -64,124 +49,126 @@ type recordingDetailMsg struct {
 	body  string
 }
 
-type errMsg struct{ err error } //nolint:errname // bubbletea convention: Msg types end in Msg, not Error
+type errMsg struct{ err error } //nolint:errname // bubbletea convention
 
 func (e errMsg) Error() string { return e.err.Error() }
 
+type ctrlCResetMsg struct{}
+type spinnerTickMsg struct{}
+
+// --- Model ---
+
 type model struct {
-	state  viewState
 	width  int
 	height int
 	sdk    *hey.Client
-	legacy *client.Client // kept for gap operations (topic entries, journal fallback, relative URL fetches)
+	legacy *client.Client
 	ctx    context.Context
 	cancel context.CancelFunc
 	styles styles
+	help   helpBar
 
-	boxes boxesModel
-	box   boxModel
-	topic topicModel
+	// Navigation state
+	section  section
+	focus    focusRow
+	inThread bool
 
-	calendars       calendarsModel
-	calendar        calendarModel
-	calendarsLoaded bool
+	// Row 2 data
+	boxes        []models.Box
+	boxIndex     int
+	calendars    []models.Calendar
+	calIndex     int
+	journalDates []string
+	dateIndex    int
 
-	journal       journalModel
-	journalLoaded bool
+	// Content
+	postingList   contentList
+	recordingL    recordingList
+	topicViewport viewport.Model
+	topicContent  string
 
-	detail detailModel
-
-	loading bool
-	err     error
-	lastKey string // debug: last key event received
+	// Loading & error
+	loading      bool
+	spinnerPhase float64
+	err          error
+	ctrlCOnce    bool
 }
 
 func newModel(sdk *hey.Client, legacy *client.Client) model {
 	s := newStyles()
-	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118: cancel is stored in model and called on ctrl+c
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118: cancel stored, called on ctrl+c
 	return model{
-		state:     viewBoxes,
-		sdk:       sdk,
-		legacy:    legacy,
-		ctx:       ctx,
-		cancel:    cancel,
-		styles:    s,
-		boxes:     newBoxesModel(),
-		box:       newBoxModel(),
-		topic:     newTopicModel(s),
-		calendars: newCalendarsModel(),
-		calendar:  newCalendarModel(),
-		journal:   newJournalModel(),
-		detail:    newDetailModel(s),
+		sdk:           sdk,
+		legacy:        legacy,
+		ctx:           ctx,
+		cancel:        cancel,
+		styles:        s,
+		help:          newHelpBar(s),
+		section:       sectionMail,
+		focus:         rowContent,
+		loading:       true,
+		topicViewport: viewport.New(viewport.WithWidth(0), viewport.WithHeight(0)),
 	}
 }
 
 func (m model) Init() tea.Cmd {
-	return m.fetchBoxes()
+	return tea.Batch(m.fetchBoxes(), spinnerTick())
 }
+
+// --- Update ---
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.boxes.setSize(msg.Width, msg.Height)
-		m.box.setSize(msg.Width, msg.Height)
-		m.topic.setSize(msg.Width, msg.Height)
-		m.calendars.setSize(msg.Width, msg.Height)
-		m.calendar.setSize(msg.Width, msg.Height)
-		m.journal.setSize(msg.Width, msg.Height)
-		m.detail.setSize(msg.Width, msg.Height)
+		m.help.setWidth(msg.Width)
+		m.updateHelpBindings()
+		m.resizeContent()
 		return m, nil
 
-	case tea.KeyPressMsg:
-		m.lastKey = fmt.Sprintf("key=%q code=0x%x mod=%d", msg.String(), msg.Key().Code, msg.Key().Mod)
-		if msg.String() == "ctrl+c" {
-			m.cancel()
-			return m, tea.Quit
+	case spinnerTickMsg:
+		if m.loading {
+			m.spinnerPhase += 0.15
+			return m, spinnerTick()
 		}
-		if msg.Key().Code == tea.KeyTab {
-			switch m.state { //nolint:exhaustive // only tab-navigable views need handling
-			case viewBoxes:
-				m.state = viewCalendars
-				if !m.calendarsLoaded {
-					m.loading = true
-					return m, m.fetchCalendars()
-				}
-				return m, nil
-			case viewCalendars:
-				m.state = viewJournal
-				if !m.journalLoaded {
-					m.loading = true
-					return m, m.fetchJournal()
-				}
-				return m, nil
-			case viewJournal:
-				m.state = viewBoxes
-				return m, nil
-			}
-		}
+		return m, nil
 
+	case ctrlCResetMsg:
+		m.ctrlCOnce = false
+		m.updateHelpBindings()
+		return m, nil
+
+	// --- Data loaded messages ---
 	case boxesLoadedMsg:
+		m.boxes = orderBoxes([]models.Box(msg))
 		m.loading = false
-		cmd := m.boxes.setItems([]models.Box(msg))
-		return m, cmd
+		if len(m.boxes) > 0 {
+			m.boxIndex = 0
+			m.loading = true
+			return m, tea.Batch(m.fetchPostings(m.boxes[0].ID), spinnerTick())
+		}
+		return m, nil
 
-	case boxLoadedMsg:
+	case postingsLoadedMsg:
 		m.loading = false
-		cmd := m.box.setItems(msg.box, msg.postings)
-		m.state = viewBox
-		return m, cmd
+		m.postingList.setPostings(msg.postings)
+		return m, nil
 
 	case topicLoadedMsg:
 		m.loading = false
-		m.topic.setEntries(msg.title, msg.entries)
-		m.state = viewTopic
+		m.inThread = true
+		m.topicContent = m.renderEntries(msg.entries)
+		m.topicViewport.SetContent(m.topicContent)
+		m.topicViewport.GotoTop()
+		m.updateHelpBindings()
+		m.resizeContent()
 		var uploadCmds []tea.Cmd
 		for i, imgData := range msg.images {
 			imageID := i + 1
 			cols, rows := imageDimensions(imgData, m.width-4)
-			m.topic.appendContent("\n\n" + renderImagePlaceholder(imageID, cols, rows))
+			m.topicContent += "\n\n" + renderImagePlaceholder(imageID, cols, rows)
+			m.topicViewport.SetContent(m.topicContent)
 			seq := kittyUploadAndPlace(imgData, imageID, cols, rows)
 			uploadCmds = append(uploadCmds, tea.Raw(seq))
 		}
@@ -192,272 +179,467 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case calendarsLoadedMsg:
 		m.loading = false
-		m.calendarsLoaded = true
-		cmd := m.calendars.setItems([]models.Calendar(msg))
-		return m, cmd
+		m.calendars = []models.Calendar(msg)
+		if len(m.calendars) > 0 {
+			m.calIndex = 0
+			m.loading = true
+			return m, tea.Batch(m.fetchRecordings(m.calendars[0].ID), spinnerTick())
+		}
+		return m, nil
 
-	case journalLoadedMsg:
+	case recordingsLoadedMsg:
 		m.loading = false
-		m.journalLoaded = true
-		cmd := m.journal.setItems([]models.Recording(msg))
-		return m, cmd
-
-	case calendarLoadedMsg:
-		m.loading = false
-		cmd := m.calendar.setItems(msg.calendar, msg.recordings)
-		m.state = viewCalendar
-		return m, cmd
+		m.recordingL.setRecordings(msg.recordings)
+		return m, nil
 
 	case journalDetailMsg:
 		m.loading = false
-		if len(msg.images) == 0 {
-			m.detail.setContent(msg.title, msg.body)
-			m.state = viewJournalDetail
-			return m, nil
-		}
-		var body strings.Builder
-		body.Grow(len(msg.body) + len(msg.images)*128)
-		body.WriteString(msg.body)
+		m.inThread = true
+		body := msg.body
+		m.topicContent = body
+		m.topicViewport.SetContent(m.topicContent)
+		m.topicViewport.GotoTop()
+		m.updateHelpBindings()
+		m.resizeContent()
 		var uploadCmds []tea.Cmd
 		for i, imgData := range msg.images {
 			imageID := i + 1
 			cols, rows := imageDimensions(imgData, m.width-4)
-			body.WriteString("\n\n" + renderImagePlaceholder(imageID, cols, rows))
+			m.topicContent += "\n\n" + renderImagePlaceholder(imageID, cols, rows)
+			m.topicViewport.SetContent(m.topicContent)
 			seq := kittyUploadAndPlace(imgData, imageID, cols, rows)
 			uploadCmds = append(uploadCmds, tea.Raw(seq))
 		}
-		m.detail.setContent(msg.title, body.String())
-		m.state = viewJournalDetail
-		return m, tea.Batch(uploadCmds...)
+		if len(uploadCmds) > 0 {
+			return m, tea.Batch(uploadCmds...)
+		}
+		return m, nil
 
 	case recordingDetailMsg:
 		m.loading = false
-		m.detail.setContent(msg.title, msg.body)
-		m.state = viewRecordingDetail
+		m.inThread = true
+		m.topicContent = msg.body
+		m.topicViewport.SetContent(m.topicContent)
+		m.topicViewport.GotoTop()
+		m.updateHelpBindings()
+		m.resizeContent()
 		return m, nil
 
 	case errMsg:
 		m.loading = false
 		m.err = msg.err
 		return m, nil
+
+	case tea.KeyPressMsg:
+		return m.handleKey(msg)
 	}
 
-	var cmd tea.Cmd
-	switch m.state {
-	case viewBoxes:
-		cmd = m.updateBoxes(msg)
-	case viewBox:
-		cmd = m.updateBox(msg)
-	case viewTopic:
-		cmd = m.updateTopic(msg)
-	case viewCalendars:
-		cmd = m.updateCalendars(msg)
-	case viewCalendar:
-		cmd = m.updateCalendar(msg)
-	case viewRecordingDetail:
-		cmd = m.updateRecordingDetail(msg)
-	case viewJournal:
-		cmd = m.updateJournal(msg)
-	case viewJournalDetail:
-		cmd = m.updateJournalDetail(msg)
+	// Pass through to viewport if in thread
+	if m.inThread {
+		var cmd tea.Cmd
+		m.topicViewport, cmd = m.topicViewport.Update(msg)
+		return m, cmd
 	}
-	return m, cmd
+
+	return m, nil
 }
 
-func (m *model) updateBoxes(msg tea.Msg) tea.Cmd {
-	if msg, ok := msg.(tea.KeyPressMsg); ok {
-		if msg.Key().Code == tea.KeyEnter && m.boxes.list.FilterState() != list.Filtering {
-			box := m.boxes.selectedBox()
-			if box != nil {
-				m.loading = true
-				return m.fetchBox(box.ID)
-			}
+// --- Key handling ---
+
+func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	// Double Ctrl+C to quit
+	if key == "ctrl+c" {
+		if m.ctrlCOnce {
+			m.cancel()
+			return m, tea.Quit
+		}
+		m.ctrlCOnce = true
+		m.updateHelpBindings()
+		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg { return ctrlCResetMsg{} })
+	}
+	if m.ctrlCOnce {
+		m.ctrlCOnce = false
+		m.updateHelpBindings()
+	}
+
+	// Esc/q: back out of thread, or no-op at top level
+	if msg.Key().Code == tea.KeyEscape || key == "q" {
+		if m.inThread {
+			m.inThread = false
+			m.updateHelpBindings()
+			m.resizeContent()
+			return m, nil
+		}
+		return m, nil
+	}
+
+	// Tab / Shift+Tab: cycle focus rows
+	if msg.Key().Code == tea.KeyTab {
+		if msg.Key().Mod == tea.ModShift {
+			m.focus = (m.focus + 2) % 3 // reverse
+		} else {
+			m.focus = (m.focus + 1) % 3
+		}
+		m.updateHelpBindings()
+		return m, nil
+	}
+
+	// Global shortcuts: Shift+letter for sections
+	if sec := sectionForShortcut(key); sec >= 0 {
+		return m.switchSection(sec)
+	}
+
+	// Box shortcuts (only when in Mail section)
+	if m.section == sectionMail {
+		if idx := boxForShortcut(key, m.boxes); idx >= 0 && idx != m.boxIndex {
+			m.boxIndex = idx
+			m.loading = true
+			return m, tea.Batch(m.fetchPostings(m.boxes[idx].ID), spinnerTick())
 		}
 	}
 
-	var cmd tea.Cmd
-	m.boxes, cmd = m.boxes.update(msg)
-	return cmd
-}
-
-func (m *model) updateBox(msg tea.Msg) tea.Cmd {
-	if msg, ok := msg.(tea.KeyPressMsg); ok {
-		switch msg.Key().Code {
-		case tea.KeyEscape, tea.KeyBackspace:
-			if m.box.list.FilterState() == list.Unfiltered {
-				m.state = viewBoxes
-				return nil
-			}
-		case tea.KeyEnter:
-			if m.box.list.FilterState() != list.Filtering {
-				posting := m.box.selectedPosting()
-				if posting != nil {
-					topicID := posting.ResolveTopicID()
-					if topicID == 0 {
-						topicID = posting.ID
-					}
-					m.loading = true
-					return m.fetchTopic(topicID, posting.Summary)
-				}
-			}
-		}
+	// Route by focus row
+	switch m.focus {
+	case rowSection:
+		return m.handleSectionKeys(msg)
+	case rowSubnav:
+		return m.handleSubnavKeys(msg)
+	case rowContent:
+		return m.handleContentKeys(msg)
 	}
 
-	var cmd tea.Cmd
-	m.box, cmd = m.box.update(msg)
-	return cmd
+	return m, nil
 }
 
-func (m *model) updateTopic(msg tea.Msg) tea.Cmd {
-	if msg, ok := msg.(tea.KeyPressMsg); ok {
-		switch msg.Key().Code {
-		case tea.KeyEscape, tea.KeyBackspace:
-			m.state = viewBox
-			return nil
-		default:
-			if msg.String() == "q" {
-				m.state = viewBox
-				return nil
-			}
+func (m model) switchSection(sec section) (tea.Model, tea.Cmd) {
+	if sec == m.section {
+		return m, nil
+	}
+	m.section = sec
+	m.inThread = false
+	m.updateHelpBindings()
+
+	switch sec {
+	case sectionMail:
+		if len(m.boxes) == 0 {
+			m.loading = true
+			return m, tea.Batch(m.fetchBoxes(), spinnerTick())
+		}
+		// Re-fetch current box
+		if m.boxIndex < len(m.boxes) {
+			m.loading = true
+			return m, tea.Batch(m.fetchPostings(m.boxes[m.boxIndex].ID), spinnerTick())
+		}
+	case sectionCalendar:
+		if len(m.calendars) == 0 {
+			m.loading = true
+			return m, tea.Batch(m.fetchCalendars(), spinnerTick())
+		}
+		if m.calIndex < len(m.calendars) {
+			m.loading = true
+			return m, tea.Batch(m.fetchRecordings(m.calendars[m.calIndex].ID), spinnerTick())
+		}
+	case sectionJournal:
+		m.journalDates = generateJournalDates(30)
+		m.dateIndex = len(m.journalDates) - 1 // select today
+		m.loading = true
+		return m, tea.Batch(m.fetchJournalEntry(m.journalDates[m.dateIndex]), spinnerTick())
+	}
+	return m, nil
+}
+
+func (m model) handleSectionKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.Key().Code {
+	case tea.KeyLeft:
+		if m.section > 0 {
+			return m.switchSection(m.section - 1)
+		}
+	case tea.KeyRight:
+		if m.section < sectionJournal {
+			return m.switchSection(m.section + 1)
 		}
 	}
-
-	var cmd tea.Cmd
-	m.topic, cmd = m.topic.update(msg)
-	return cmd
+	return m, nil
 }
 
-func (m *model) updateCalendars(msg tea.Msg) tea.Cmd {
-	if msg, ok := msg.(tea.KeyPressMsg); ok {
-		if msg.Key().Code == tea.KeyEnter && m.calendars.list.FilterState() != list.Filtering {
-			cal := m.calendars.selectedCalendar()
-			if cal != nil {
-				m.loading = true
-				return m.fetchCalendar(*cal)
-			}
+func (m model) handleSubnavKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.Key().Code {
+	case tea.KeyLeft:
+		return m.subnavLeft()
+	case tea.KeyRight:
+		return m.subnavRight()
+	}
+	return m, nil
+}
+
+func (m model) subnavLeft() (tea.Model, tea.Cmd) {
+	switch m.section {
+	case sectionMail:
+		if m.boxIndex > 0 {
+			m.boxIndex--
+			m.loading = true
+			return m, tea.Batch(m.fetchPostings(m.boxes[m.boxIndex].ID), spinnerTick())
+		}
+	case sectionCalendar:
+		if m.calIndex > 0 {
+			m.calIndex--
+			m.loading = true
+			return m, tea.Batch(m.fetchRecordings(m.calendars[m.calIndex].ID), spinnerTick())
+		}
+	case sectionJournal:
+		if m.dateIndex > 0 {
+			m.dateIndex--
+			m.loading = true
+			return m, tea.Batch(m.fetchJournalEntry(m.journalDates[m.dateIndex]), spinnerTick())
 		}
 	}
-
-	var cmd tea.Cmd
-	m.calendars, cmd = m.calendars.update(msg)
-	return cmd
+	return m, nil
 }
 
-func (m *model) updateCalendar(msg tea.Msg) tea.Cmd {
-	if msg, ok := msg.(tea.KeyPressMsg); ok {
-		switch msg.Key().Code {
-		case tea.KeyEscape, tea.KeyBackspace:
-			if m.calendar.list.FilterState() == list.Unfiltered {
-				m.state = viewCalendars
-				return nil
-			}
-		case tea.KeyEnter:
-			if m.calendar.list.FilterState() != list.Filtering {
-				rec := m.calendar.selectedRecording()
-				if rec != nil {
-					return m.showRecordingDetail(*rec)
-				}
-			}
+func (m model) subnavRight() (tea.Model, tea.Cmd) {
+	switch m.section {
+	case sectionMail:
+		if m.boxIndex < len(m.boxes)-1 {
+			m.boxIndex++
+			m.loading = true
+			return m, tea.Batch(m.fetchPostings(m.boxes[m.boxIndex].ID), spinnerTick())
+		}
+	case sectionCalendar:
+		if m.calIndex < len(m.calendars)-1 {
+			m.calIndex++
+			m.loading = true
+			return m, tea.Batch(m.fetchRecordings(m.calendars[m.calIndex].ID), spinnerTick())
+		}
+	case sectionJournal:
+		if m.dateIndex < len(m.journalDates)-1 {
+			m.dateIndex++
+			m.loading = true
+			return m, tea.Batch(m.fetchJournalEntry(m.journalDates[m.dateIndex]), spinnerTick())
 		}
 	}
-
-	var cmd tea.Cmd
-	m.calendar, cmd = m.calendar.update(msg)
-	return cmd
+	return m, nil
 }
 
-func (m *model) updateRecordingDetail(msg tea.Msg) tea.Cmd {
-	if msg, ok := msg.(tea.KeyPressMsg); ok {
-		switch msg.Key().Code {
-		case tea.KeyEscape, tea.KeyBackspace:
-			m.state = viewCalendar
-			return nil
-		default:
-			if msg.String() == "q" {
-				m.state = viewCalendar
-				return nil
-			}
-		}
+func (m model) handleContentKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.inThread {
+		var cmd tea.Cmd
+		m.topicViewport, cmd = m.topicViewport.Update(msg)
+		return m, cmd
 	}
 
-	var cmd tea.Cmd
-	m.detail, cmd = m.detail.update(msg)
-	return cmd
-}
-
-func (m *model) updateJournal(msg tea.Msg) tea.Cmd {
-	if msg, ok := msg.(tea.KeyPressMsg); ok {
-		if msg.Key().Code == tea.KeyEnter && m.journal.list.FilterState() != list.Filtering {
-			rec := m.journal.selectedRecording()
-			if rec != nil && len(rec.StartsAt) >= 10 {
-				m.loading = true
-				return m.fetchJournalEntry(*rec)
-			}
+	switch msg.Key().Code {
+	case tea.KeyUp:
+		switch m.section {
+		case sectionMail:
+			m.postingList.moveUp()
+		case sectionCalendar:
+			m.recordingL.moveUp()
+		case sectionJournal:
+			var cmd tea.Cmd
+			m.topicViewport, cmd = m.topicViewport.Update(msg)
+			return m, cmd
 		}
-	}
-
-	var cmd tea.Cmd
-	m.journal, cmd = m.journal.update(msg)
-	return cmd
-}
-
-func (m *model) updateJournalDetail(msg tea.Msg) tea.Cmd {
-	if msg, ok := msg.(tea.KeyPressMsg); ok {
-		switch msg.Key().Code {
-		case tea.KeyEscape, tea.KeyBackspace:
-			m.state = viewJournal
-			return nil
-		default:
-			if msg.String() == "q" {
-				m.state = viewJournal
-				return nil
-			}
+	case tea.KeyDown:
+		switch m.section {
+		case sectionMail:
+			m.postingList.moveDown()
+		case sectionCalendar:
+			m.recordingL.moveDown()
+		case sectionJournal:
+			var cmd tea.Cmd
+			m.topicViewport, cmd = m.topicViewport.Update(msg)
+			return m, cmd
 		}
+	case tea.KeyEnter:
+		return m.openSelected()
 	}
-
-	var cmd tea.Cmd
-	m.detail, cmd = m.detail.update(msg)
-	return cmd
+	return m, nil
 }
+
+func (m model) openSelected() (tea.Model, tea.Cmd) {
+	switch m.section {
+	case sectionMail:
+		p := m.postingList.selectedPosting()
+		if p != nil {
+			topicID := p.ResolveTopicID()
+			if topicID == 0 {
+				topicID = p.ID
+			}
+			m.loading = true
+			return m, tea.Batch(m.fetchTopic(topicID, p.Summary), spinnerTick())
+		}
+	case sectionCalendar:
+		r := m.recordingL.selectedRecording()
+		if r != nil {
+			return m, m.showRecordingDetail(*r)
+		}
+	case sectionJournal:
+		// Journal content shows directly, no nested enter
+	}
+	return m, nil
+}
+
+// --- View ---
+
+const headerHeight = 6 // rule + row1 + rule + row2 + rule + (gap absorbed)
 
 func (m model) View() tea.View {
-	var content string
+	var b strings.Builder
 
+	// Header
+	b.WriteString(renderHeader(&m))
+	b.WriteString("\n")
+
+	// Content
 	if m.err != nil {
-		content = fmt.Sprintf("Error: %v\n\nPress q to quit.", m.err)
+		b.WriteString(errorView(m.err.Error(), m.width))
 	} else if m.loading {
-		content = "Loading..."
+		b.WriteString(loadingView(m.width, m.spinnerPhase))
+	} else if m.inThread {
+		b.WriteString(m.topicViewport.View())
 	} else {
-		switch m.state {
-		case viewBoxes:
-			content = m.boxes.view()
-		case viewBox:
-			content = m.box.view()
-		case viewTopic:
-			content = m.topic.view()
-		case viewCalendars:
-			content = m.calendars.view()
-		case viewCalendar:
-			content = m.calendar.view()
-		case viewRecordingDetail:
-			content = m.detail.view()
-		case viewJournal:
-			content = m.journal.view()
-		case viewJournalDetail:
-			content = m.detail.view()
+		switch m.section {
+		case sectionMail:
+			b.WriteString(m.postingList.view())
+		case sectionCalendar:
+			b.WriteString(m.recordingL.view())
+		case sectionJournal:
+			b.WriteString(m.topicViewport.View())
 		}
 	}
 
-	if m.lastKey != "" {
-		content = content + "\n\n[DEBUG] last key: " + m.lastKey
+	// Pad content to push separator + help to the bottom
+	contentLines := strings.Count(b.String(), "\n")
+	helpView := m.help.view()
+	helpH := 0
+	if helpView != "" {
+		helpH = strings.Count(helpView, "\n") + 1
+	}
+	footerH := 1 + helpH // 1 for separator rule
+	padLines := m.height - contentLines - footerH - 1
+	for range max(padLines, 0) {
+		b.WriteString("\n")
 	}
 
-	v := tea.NewView(content)
+	// Bottom separator + help (always at screen bottom)
+	b.WriteString(renderRule(m.width, ""))
+	if helpView != "" {
+		b.WriteString("\n" + helpView)
+	}
+
+	v := tea.NewView(b.String())
 	v.AltScreen = true
 	return v
 }
 
-// --- SDK type to models type converters ---
+func (m *model) resizeContent() {
+	helpH := m.help.height()
+	contentH := m.height - headerHeight - helpH - 3 // 3 for bottom separator + gaps
+	if contentH < 1 {
+		contentH = 1
+	}
+	m.postingList.setSize(m.width, contentH)
+	m.recordingL.setSize(m.width, contentH)
+	m.topicViewport.SetWidth(m.width)
+	m.topicViewport.SetHeight(contentH)
+}
+
+func (m *model) updateHelpBindings() {
+	quitHint := helpBinding{"ctrl+c ctrl+c", "quit"}
+	if m.ctrlCOnce {
+		quitHint = helpBinding{"ctrl+c", "press again to quit"}
+	}
+
+	var bindings []helpBinding
+
+	if m.inThread {
+		bindings = []helpBinding{
+			{"↑↓", "scroll"},
+			{"esc/q", "back"},
+			quitHint,
+		}
+	} else {
+		switch m.focus {
+		case rowSection:
+			bindings = []helpBinding{
+				{"←→", "section"},
+				{"tab", "next row"},
+				{"shift+M/C/J", "jump"},
+				quitHint,
+			}
+		case rowSubnav:
+			bindings = []helpBinding{
+				{"←→", "switch"},
+				{"tab", "next row"},
+				{"shift+tab", "prev row"},
+				quitHint,
+			}
+		case rowContent:
+			bindings = []helpBinding{
+				{"↑↓", "navigate"},
+				{"enter", "open"},
+				{"tab", "next row"},
+				{"shift+tab", "prev row"},
+				quitHint,
+			}
+		}
+	}
+	m.help.setBindings(bindings)
+}
+
+// --- Entry rendering (for topic/thread view) ---
+
+func (m model) renderEntries(entries []models.Entry) string {
+	var b strings.Builder
+	sepWidth := max(m.width-4, 40)
+	sep := m.styles.separator.Render(strings.Repeat("─", sepWidth))
+
+	for i, e := range entries {
+		if i > 0 {
+			fmt.Fprintf(&b, "%s\n", sep)
+		}
+
+		from := e.Creator.Name
+		if from == "" {
+			from = e.Creator.EmailAddress
+		}
+		if e.AlternativeSenderName != "" {
+			from = e.AlternativeSenderName
+		}
+
+		date := ""
+		if len(e.CreatedAt) >= 16 {
+			date = e.CreatedAt[:16]
+		}
+
+		fmt.Fprintf(&b, "%s  %s\n", m.styles.entryFrom.Render(from), m.styles.entryDate.Render(date))
+		if e.Summary != "" {
+			fmt.Fprintf(&b, "%s\n", e.Summary)
+		}
+		if e.Body != "" {
+			fmt.Fprintf(&b, "\n%s\n", m.styles.entryBody.Render(htmlToText(e.Body)))
+		}
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
+// --- Journal date generation ---
+
+func generateJournalDates(n int) []string {
+	dates := make([]string, n)
+	today := time.Now()
+	for i := range n {
+		d := today.AddDate(0, 0, -(n - 1 - i))
+		dates[i] = d.Format("2006-01-02")
+	}
+	return dates
+}
+
+// --- SDK type converters ---
 
 func sdkBoxToModel(b generated.Box) models.Box {
 	return models.Box{
@@ -469,22 +651,37 @@ func sdkBoxToModel(b generated.Box) models.Box {
 
 func sdkPostingToModel(p generated.Posting) models.Posting {
 	return models.Posting{
-		ID:        p.Id,
-		CreatedAt: formatTimestamp(p.CreatedAt),
-		UpdatedAt: formatTimestamp(p.UpdatedAt),
-		Kind:      p.Kind,
-		Seen:      p.Seen,
-		Bundled:   p.Bundled,
-		Muted:     p.Muted,
-		Summary:   p.Summary,
-		EntryKind: p.EntryKind,
-		AppURL:    p.AppUrl,
+		ID:                    p.Id,
+		CreatedAt:             formatTimestamp(p.CreatedAt),
+		UpdatedAt:             formatTimestamp(p.UpdatedAt),
+		Kind:                  p.Kind,
+		Name:                  p.Name,
+		Seen:                  p.Seen,
+		Bundled:               p.Bundled,
+		Muted:                 p.Muted,
+		Summary:               p.Summary,
+		EntryKind:             p.EntryKind,
+		AppURL:                p.AppUrl,
+		AlternativeSenderName: p.AlternativeSenderName,
+		VisibleEntryCount:     p.VisibleEntryCount,
+		Extenzions:            sdkExtenzionsToModel(p.Extenzions),
 		Creator: models.Contact{
 			ID:           p.Creator.Id,
 			Name:         p.Creator.Name,
 			EmailAddress: p.Creator.EmailAddress,
 		},
 	}
+}
+
+func sdkExtenzionsToModel(exts []generated.Extenzion) []models.Extenzion {
+	if len(exts) == 0 {
+		return nil
+	}
+	result := make([]models.Extenzion, len(exts))
+	for i, e := range exts {
+		result[i] = models.Extenzion{ID: e.Id, Name: e.Name}
+	}
+	return result
 }
 
 func sdkCalendarToModel(c generated.Calendar) models.Calendar {
@@ -523,12 +720,11 @@ func formatTimestamp(ts time.Time) string {
 	return ts.UTC().Format("2006-01-02T15:04:05Z")
 }
 
-// --- Async data fetching commands (using SDK) ---
+// --- Async fetch commands ---
 
 func (m model) fetchBoxes() tea.Cmd {
 	return func() tea.Msg {
-		ctx := m.ctx
-		result, err := m.sdk.Boxes().List(ctx)
+		result, err := m.sdk.Boxes().List(m.ctx)
 		if err != nil {
 			return errMsg{err}
 		}
@@ -544,41 +740,30 @@ func (m model) fetchBoxes() tea.Cmd {
 	}
 }
 
-func (m model) fetchBox(boxID int64) tea.Cmd {
+func (m model) fetchPostings(boxID int64) tea.Cmd {
 	return func() tea.Msg {
-		ctx := m.ctx
-		resp, err := m.sdk.Boxes().Get(ctx, boxID, nil)
+		resp, err := m.sdk.Boxes().Get(m.ctx, boxID, nil)
 		if err != nil {
 			return errMsg{err}
 		}
-
-		box := models.Box{
-			ID:   resp.Id,
-			Kind: resp.Kind,
-			Name: resp.Name,
-		}
-
 		postings := make([]models.Posting, 0, len(resp.Postings))
 		for _, p := range resp.Postings {
 			postings = append(postings, sdkPostingToModel(p))
 		}
-
-		return boxLoadedMsg{box: box, postings: postings}
+		return postingsLoadedMsg{postings: postings}
 	}
 }
 
-// fetchTopic uses the legacy client — SDK entries lack body content (Gap 1).
 func (m model) fetchTopic(topicID int64, title string) tea.Cmd {
 	return func() tea.Msg {
 		if m.legacy == nil {
-			return errMsg{fmt.Errorf("topic view requires legacy client (SDK entries lack body content)")}
+			return errMsg{fmt.Errorf("topic view requires legacy client")}
 		}
 		entries, err := m.legacy.GetTopicEntries(topicID)
 		if err != nil {
 			return errMsg{err}
 		}
 
-		// Download image data from all entry bodies
 		var images [][]byte
 		for _, e := range entries {
 			for _, imgURL := range extractImageURLs(e.Body) {
@@ -600,15 +785,13 @@ func (m model) fetchTopic(topicID int64, title string) tea.Cmd {
 
 func (m model) fetchCalendars() tea.Cmd {
 	return func() tea.Msg {
-		ctx := m.ctx
-		payload, err := m.sdk.Calendars().List(ctx)
+		payload, err := m.sdk.Calendars().List(m.ctx)
 		if err != nil {
 			return errMsg{err}
 		}
 		if payload == nil {
 			return calendarsLoadedMsg(nil)
 		}
-
 		calendars := make([]models.Calendar, 0, len(payload.Calendars))
 		for _, cw := range payload.Calendars {
 			calendars = append(calendars, sdkCalendarToModel(cw.Calendar))
@@ -617,118 +800,51 @@ func (m model) fetchCalendars() tea.Cmd {
 	}
 }
 
-func (m model) fetchCalendar(cal models.Calendar) tea.Cmd {
+func (m model) fetchRecordings(calID int64) tea.Cmd {
 	return func() tea.Msg {
-		ctx := m.ctx
 		now := time.Now()
-		startsOn := now.Format("2006-01-02")
-		endsOn := now.AddDate(0, 0, 30).Format("2006-01-02")
-
-		resp, err := m.sdk.Calendars().GetRecordings(ctx, cal.ID, &generated.GetCalendarRecordingsParams{
-			StartsOn: startsOn,
-			EndsOn:   endsOn,
+		resp, err := m.sdk.Calendars().GetRecordings(m.ctx, calID, &generated.GetCalendarRecordingsParams{
+			StartsOn: now.Format("2006-01-02"),
+			EndsOn:   now.AddDate(0, 0, 30).Format("2006-01-02"),
 		})
 		if err != nil {
 			return errMsg{err}
 		}
 
-		// Convert SDK CalendarRecordingsResponse to models.RecordingsResponse
-		recordings := make(models.RecordingsResponse)
-		if resp == nil {
-			resp = &generated.CalendarRecordingsResponse{}
-		}
-		for recType, recs := range *resp {
-			modelRecs := make([]models.Recording, len(recs))
-			for i, r := range recs {
-				modelRecs[i] = sdkRecordingToModel(r)
-			}
-			recordings[recType] = modelRecs
-		}
-
-		return calendarLoadedMsg{calendar: cal, recordings: recordings}
-	}
-}
-
-func (m model) fetchJournal() tea.Cmd {
-	return func() tea.Msg {
-		ctx := m.ctx
-		payload, err := m.sdk.Calendars().List(ctx)
-		if err != nil {
-			return errMsg{err}
-		}
-		if payload == nil {
-			return errMsg{fmt.Errorf("no calendars returned")}
-		}
-
-		var personalID int64
-		for _, cw := range payload.Calendars {
-			if cw.Calendar.Personal {
-				personalID = cw.Calendar.Id
-				break
-			}
-		}
-		if personalID == 0 {
-			return errMsg{fmt.Errorf("no personal calendar found")}
-		}
-
-		now := time.Now()
-		startsOn := now.AddDate(-1, 0, 0).Format("2006-01-02")
-		endsOn := now.Format("2006-01-02")
-		resp, err := m.sdk.Calendars().GetRecordings(ctx, personalID, &generated.GetCalendarRecordingsParams{
-			StartsOn: startsOn,
-			EndsOn:   endsOn,
-		})
-		if err != nil {
-			return errMsg{err}
-		}
-
-		var entries []models.Recording
-		if resp == nil {
-			resp = &generated.CalendarRecordingsResponse{}
-		}
-		for _, recs := range *resp {
-			for _, r := range recs {
-				if r.Type == "Calendar::JournalEntry" {
-					entries = append(entries, sdkRecordingToModel(r))
+		var all []models.Recording
+		if resp != nil {
+			for _, recs := range *resp {
+				for _, r := range recs {
+					all = append(all, sdkRecordingToModel(r))
 				}
 			}
 		}
-		return journalLoadedMsg(entries)
+		return recordingsLoadedMsg{recordings: all}
 	}
 }
 
-func (m model) fetchJournalEntry(rec models.Recording) tea.Cmd {
+func (m model) fetchJournalEntry(date string) tea.Cmd {
 	return func() tea.Msg {
-		date := rec.StartsAt[:10]
-
-		ctx := m.ctx
-		entry, err := m.sdk.Journal().Get(ctx, date)
+		entry, err := m.sdk.Journal().Get(m.ctx, date)
 		if err != nil || entry == nil || entry.Content == "" {
-			// Fall back to legacy HTML scrape, matching CLI journal read behavior
 			if m.legacy != nil {
 				legacyEntry, legacyErr := m.legacy.GetJournalEntry(date)
 				if legacyErr == nil && legacyEntry.Body != "" {
 					return journalDetailMsg{title: date, body: htmlToText(legacyEntry.Body)}
 				}
 			}
-			body := strings.TrimSpace(rec.Content)
-			if body == "" {
-				body = "(empty)"
-			}
-			return journalDetailMsg{title: date, body: body}
+			return journalDetailMsg{title: date, body: "(empty)"}
 		}
 
 		body := htmlToText(entry.Content)
 
-		// Download image data for Kitty unicode placeholder rendering
 		var images [][]byte
 		for _, imgURL := range extractImageURLs(entry.Content) {
 			var data []byte
 			if strings.HasPrefix(imgURL, "http://") || strings.HasPrefix(imgURL, "https://") {
 				data = fetchImageData(imgURL)
 			} else {
-				// Use SDK's Get for relative URLs
-				sdkResp, getErr := m.sdk.Get(ctx, imgURL)
+				sdkResp, getErr := m.sdk.Get(m.ctx, imgURL)
 				if getErr == nil && sdkResp != nil {
 					data = sdkResp.Data
 				}
