@@ -225,6 +225,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resizeContent()
 		return m, nil
 
+	case postingActionDoneMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		if msg.removes {
+			// Remove the posting from the list (move/trash/ignore actions)
+			if m.section == sectionMail && m.postingList.cursor < len(m.postingList.postings) {
+				idx := m.postingList.cursor
+				m.postingList.postings = append(m.postingList.postings[:idx], m.postingList.postings[idx+1:]...)
+				if m.postingList.cursor >= len(m.postingList.postings) && m.postingList.cursor > 0 {
+					m.postingList.cursor--
+				}
+			}
+		} else if msg.action == "marked as seen" {
+			// Update the posting in-place
+			if m.section == sectionMail && m.postingList.cursor < len(m.postingList.postings) {
+				m.postingList.postings[m.postingList.cursor].Seen = true
+			}
+		}
+		return m, nil
+
 	case errMsg:
 		m.loading = false
 		m.err = msg.err
@@ -454,6 +476,11 @@ func (m model) handleContentKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case tea.KeyEnter:
 		return m.openSelected()
+	default:
+		// Posting action shortcuts (Mail section only)
+		if m.section == sectionMail {
+			return m.handlePostingAction(msg.String())
+		}
 	}
 	return m, nil
 }
@@ -479,6 +506,75 @@ func (m model) openSelected() (tea.Model, tea.Cmd) {
 		// Journal content shows directly, no nested enter
 	}
 	return m, nil
+}
+
+// --- Posting actions (Imbox shortcuts) ---
+
+type postingActionDoneMsg struct {
+	action  string
+	removes bool // true if the posting should be removed from the list
+	err     error
+}
+
+func (m model) handlePostingAction(key string) (tea.Model, tea.Cmd) {
+	p := m.postingList.selectedPosting()
+	if p == nil {
+		return m, nil
+	}
+
+	switch key {
+	case "l": // Reply Later — stays in list
+		return m, m.doPostingAction("moved to Reply Later", false, func() error {
+			return m.sdk.Postings().MoveToReplyLater(m.ctx, p.ID)
+		})
+	case "a": // Set Aside — removes from Imbox
+		return m, m.doPostingAction("moved to Set Aside", true, func() error {
+			return m.sdk.Postings().MoveToSetAside(m.ctx, p.ID)
+		})
+	case "e": // Mark seen — stays in list
+		return m, m.doPostingAction("marked as seen", false, func() error {
+			return m.sdk.Postings().MarkSeen(m.ctx, []int64{p.ID})
+		})
+	case "d": // Move to Feed — removes from current box
+		return m, m.doPostingAction("moved to The Feed", true, func() error {
+			return m.sdk.Postings().MoveToFeed(m.ctx, p.ID)
+		})
+	case "p": // Paper Trail — removes from current box
+		return m, m.doPostingAction("moved to Paper Trail", true, func() error {
+			return m.sdk.Postings().MoveToPaperTrail(m.ctx, p.ID)
+		})
+	case "t": // Trash — removes from current box
+		return m, m.doPostingAction("moved to Trash", true, func() error {
+			return m.sdk.Postings().MoveToTrash(m.ctx, p.ID)
+		})
+	case "-": // Ignore — removes from current box
+		return m, m.doPostingAction("ignored", true, func() error {
+			return m.sdk.Postings().Ignore(m.ctx, p.ID)
+		})
+	case "r": // Reply (open thread)
+		topicID := p.ResolveTopicID()
+		if topicID == 0 {
+			topicID = p.ID
+		}
+		m.loading = true
+		return m, tea.Batch(m.fetchTopic(topicID, p.Summary), spinnerTick())
+	case "f": // Forward (open thread — full forward TBD)
+		topicID := p.ResolveTopicID()
+		if topicID == 0 {
+			topicID = p.ID
+		}
+		m.loading = true
+		return m, tea.Batch(m.fetchTopic(topicID, p.Summary), spinnerTick())
+	}
+	// b (label), n (collection), v (workflow) — not yet wired to API
+	return m, nil
+}
+
+func (m model) doPostingAction(label string, removes bool, fn func() error) tea.Cmd {
+	return func() tea.Msg {
+		err := fn()
+		return postingActionDoneMsg{action: label, removes: removes, err: err}
+	}
 }
 
 // --- View ---
@@ -583,6 +679,19 @@ func (m *model) updateHelpBindings() {
 				{"tab", "next row"},
 				{"shift+tab", "prev row"},
 				quitHint,
+			}
+			if m.section == sectionMail {
+				bindings = append(bindings,
+					helpBinding{"r", "reply"},
+					helpBinding{"f", "forward"},
+					helpBinding{"e", "seen"},
+					helpBinding{"l", "reply later"},
+					helpBinding{"a", "set aside"},
+					helpBinding{"d", "feed"},
+					helpBinding{"p", "paper trail"},
+					helpBinding{"t", "trash"},
+					helpBinding{"-", "ignore"},
+				)
 			}
 		}
 	}
