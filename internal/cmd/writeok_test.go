@@ -24,11 +24,11 @@ func TestBareHeyShowsHelpWithoutTTY(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "Usage:") {
-		t.Errorf("expected help output with Usage:, got:\n%s", out)
+	if !strings.Contains(out, "USAGE") {
+		t.Errorf("expected help output with USAGE, got:\n%s", out)
 	}
-	if !strings.Contains(out, "hey [command]") {
-		t.Errorf("expected help to mention 'hey [command]', got:\n%s", out)
+	if !strings.Contains(out, "hey <command>") {
+		t.Errorf("expected help to mention 'hey <command>', got:\n%s", out)
 	}
 }
 

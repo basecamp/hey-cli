@@ -120,15 +120,8 @@ func newRootCmd() *cobra.Command {
 	root.Version = version.Version
 	root.SetVersionTemplate("hey version {{.Version}}\n")
 
-	// Override help to support --help --agent for structured JSON
-	defaultHelp := root.HelpFunc()
-	root.SetHelpFunc(func(cmd *cobra.Command, args []string) {
-		if agentFlag {
-			printAgentHelp(cmd)
-			return
-		}
-		defaultHelp(cmd, args)
-	})
+	// Override help with styled categories and curated flags
+	root.SetHelpFunc(customHelpFunc(root.HelpFunc()))
 
 	root.AddCommand(newAuthCommand().cmd)
 	root.AddCommand(newBoxesCommand().cmd)
