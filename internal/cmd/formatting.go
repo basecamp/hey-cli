@@ -8,9 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/basecamp/hey-cli/internal/output"
 	"github.com/mattn/go-runewidth"
 	"golang.org/x/term"
+
+	"github.com/basecamp/hey-cli/internal/output"
 )
 
 var colorDisabled bool

@@ -4,6 +4,15 @@ run:
   build-tags:
     - smoke
 
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/basecamp/hey-cli
+
 linters:
   enable:
     - errcheck
@@ -20,6 +29,7 @@ linters:
     - nilerr
     - noctx
     - bodyclose
+    - contextcheck
     - durationcheck
     - errname
     - exhaustive
@@ -44,13 +54,16 @@ linters:
       rules:
         - name: blank-imports
         - name: context-as-argument
+        - name: context-keys-type
         - name: dot-imports
         - name: error-return
         - name: error-strings
+        - name: error-naming
         - name: exported
           disabled: true
         - name: increment-decrement
         - name: var-naming
+        - name: var-declaration
         - name: range
         - name: receiver-naming
         - name: time-naming
@@ -80,6 +93,15 @@ linters:
       - path: internal/version/
         linters:
           - revive
+      - path: internal/auth/
+        linters:
+          - contextcheck
+      # Newer gosec rules (G117/G703/G704) that appear with updated analyzers.
+      # These are false positives for a CLI tool: field names match secret
+      # patterns, paths derive from XDG/HOME, and HTTP targets are known APIs.
+      - text: "G117:|G703:|G704:"
+        linters:
+          - gosec
 
 issues:
   max-issues-per-linter: 0

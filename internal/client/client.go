@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/auth"
 	"github.com/basecamp/hey-cli/internal/version"
@@ -59,7 +61,7 @@ func (c *Client) doRequestAccept(method, path string, body io.Reader, contentTyp
 	}
 
 	req.Header.Set("Accept", accept)
-	req.Header.Set("User-Agent", version.UserAgent())
+	req.Header.Set("User-Agent", version.UserAgent()+" "+hey.DefaultUserAgent)
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}

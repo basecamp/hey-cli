@@ -12,11 +12,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
+	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
 	"github.com/basecamp/hey-cli/internal/auth"
 	"github.com/basecamp/hey-cli/internal/output"
 	"github.com/basecamp/hey-cli/internal/version"
-	"github.com/basecamp/hey-sdk/go/pkg/generated"
-	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 )
 
 var sdk *hey.Client
@@ -64,7 +65,7 @@ func initSDK(authMgr *auth.Manager, baseURL string) {
 
 	var opts []hey.ClientOption
 	opts = append(opts, hey.WithAuthStrategy(&cliAuthStrategy{mgr: authMgr}))
-	opts = append(opts, hey.WithUserAgent(version.UserAgent()))
+	opts = append(opts, hey.WithUserAgent(version.UserAgent()+" "+hey.DefaultUserAgent))
 
 	if verboseFlag > 0 {
 		opts = append(opts, hey.WithLogger(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))))
