@@ -72,7 +72,7 @@ func makePostings(n, offset int) []generated.Posting {
 // Each call returns the next page; after all pages are exhausted it returns an error.
 func mockFetcher(pages []generated.BoxShowResponse) pageFetcher {
 	idx := 0
-	return func(_ context.Context, url string) (*generated.BoxShowResponse, error) {
+	return func(_ context.Context, _ string) (*generated.BoxShowResponse, error) {
 		if idx >= len(pages) {
 			return nil, fmt.Errorf("unexpected fetch beyond %d pages", len(pages))
 		}
@@ -87,15 +87,15 @@ func TestPaginateBoxPostings_NoFlagsSinglePage(t *testing.T) {
 		Postings:       makePostings(30, 0),
 		NextHistoryUrl: "https://app.hey.com/page2",
 	}
-	postings, hasMore, err := paginateBoxPostings(context.Background(), first, 0, false, nil)
+	postings, nextURL, err := paginateBoxPostings(context.Background(), first, 0, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(postings) != 30 {
 		t.Errorf("expected 30 postings, got %d", len(postings))
 	}
-	if !hasMore {
-		t.Error("expected hasMore=true when next_history_url is present")
+	if nextURL == "" {
+		t.Error("expected non-empty nextURL when next_history_url is present")
 	}
 }
 
@@ -109,15 +109,15 @@ func TestPaginateBoxPostings_AllFlag(t *testing.T) {
 		{Postings: makePostings(15, 60)},
 	}
 
-	postings, hasMore, err := paginateBoxPostings(context.Background(), first, 0, true, mockFetcher(pages))
+	postings, nextURL, err := paginateBoxPostings(context.Background(), first, 0, true, mockFetcher(pages))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(postings) != 75 {
 		t.Errorf("expected 75 postings, got %d", len(postings))
 	}
-	if hasMore {
-		t.Error("expected hasMore=false when last page has no next URL")
+	if nextURL != "" {
+		t.Errorf("expected empty nextURL when last page has no next URL, got %q", nextURL)
 	}
 }
 
@@ -130,15 +130,15 @@ func TestPaginateBoxPostings_LimitExceedsFirstPage(t *testing.T) {
 		{Postings: makePostings(30, 30), NextHistoryUrl: "https://app.hey.com/page3"},
 	}
 
-	postings, hasMore, err := paginateBoxPostings(context.Background(), first, 50, false, mockFetcher(pages))
+	postings, nextURL, err := paginateBoxPostings(context.Background(), first, 50, false, mockFetcher(pages))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(postings) != 60 {
 		t.Errorf("expected 60 postings, got %d", len(postings))
 	}
-	if !hasMore {
-		t.Error("expected hasMore=true when stopped by limit with more pages available")
+	if nextURL == "" {
+		t.Error("expected non-empty nextURL when stopped by limit with more pages available")
 	}
 }
 
@@ -148,15 +148,15 @@ func TestPaginateBoxPostings_LimitSatisfiedByFirstPage(t *testing.T) {
 		NextHistoryUrl: "https://app.hey.com/page2",
 	}
 
-	postings, hasMore, err := paginateBoxPostings(context.Background(), first, 10, false, nil)
+	postings, nextURL, err := paginateBoxPostings(context.Background(), first, 10, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(postings) != 30 {
 		t.Errorf("expected 30 postings (full first page), got %d", len(postings))
 	}
-	if !hasMore {
-		t.Error("expected hasMore=true")
+	if nextURL == "" {
+		t.Error("expected non-empty nextURL")
 	}
 }
 
@@ -165,15 +165,15 @@ func TestPaginateBoxPostings_NoNextURL(t *testing.T) {
 		Postings: makePostings(10, 0),
 	}
 
-	postings, hasMore, err := paginateBoxPostings(context.Background(), first, 0, true, nil)
+	postings, nextURL, err := paginateBoxPostings(context.Background(), first, 0, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(postings) != 10 {
 		t.Errorf("expected 10 postings, got %d", len(postings))
 	}
-	if hasMore {
-		t.Error("expected hasMore=false when no next URL")
+	if nextURL != "" {
+		t.Errorf("expected empty nextURL when no next URL, got %q", nextURL)
 	}
 }
 
@@ -186,15 +186,15 @@ func TestPaginateBoxPostings_EmptyPageStopsPagination(t *testing.T) {
 		{Postings: nil},
 	}
 
-	postings, hasMore, err := paginateBoxPostings(context.Background(), first, 0, true, mockFetcher(pages))
+	postings, nextURL, err := paginateBoxPostings(context.Background(), first, 0, true, mockFetcher(pages))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(postings) != 30 {
 		t.Errorf("expected 30 postings, got %d", len(postings))
 	}
-	if hasMore {
-		t.Error("expected hasMore=false after empty page")
+	if nextURL != "" {
+		t.Errorf("expected empty nextURL after empty page, got %q", nextURL)
 	}
 }
 
@@ -204,18 +204,20 @@ func TestBoxTruncationNotice(t *testing.T) {
 		shown   int
 		fetched int
 		hasMore bool
+		all     bool
 		want    string
 	}{
-		{"client truncated", 10, 30, false, "Showing 10 of 30 results. Use --all to see everything."},
-		{"more pages available", 30, 30, true, "Showing 30 results. More available; use --all to fetch all."},
-		{"all shown no more", 30, 30, false, ""},
-		{"truncated with more", 10, 30, true, "Showing 10 of 30 results. Use --all to see everything."},
+		{"client truncated", 10, 30, false, false, "Showing 10 of 30 results. Use --all to see everything."},
+		{"more pages available", 30, 30, true, false, "Showing 30 results. More available; use --all to fetch all."},
+		{"all shown no more", 30, 30, false, false, ""},
+		{"truncated with more", 10, 30, true, false, "Showing 10 of 30 results. Use --all to see everything."},
+		{"all flag pagination capped", 30, 30, true, true, "Showing 30 results. Pagination limit reached; not all results could be fetched."},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := boxTruncationNotice(tt.shown, tt.fetched, tt.hasMore)
+			got := boxTruncationNotice(tt.shown, tt.fetched, tt.hasMore, tt.all)
 			if got != tt.want {
-				t.Errorf("boxTruncationNotice(%d, %d, %v) = %q, want %q", tt.shown, tt.fetched, tt.hasMore, got, tt.want)
+				t.Errorf("boxTruncationNotice(%d, %d, %v, %v) = %q, want %q", tt.shown, tt.fetched, tt.hasMore, tt.all, got, tt.want)
 			}
 		})
 	}
