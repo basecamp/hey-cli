@@ -13,6 +13,8 @@ import (
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
+const maxPaginationPages = 100
+
 type boxCommand struct {
 	cmd   *cobra.Command
 	limit int
@@ -63,12 +65,16 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	postings := resp.Postings
+	postings, hasMore, err := paginateBoxPostings(ctx, resp, c.limit, c.all, fetchNextBoxPage)
+	if err != nil {
+		return err
+	}
+
 	total := len(postings)
 	if c.limit > 0 && !c.all && len(postings) > c.limit {
 		postings = postings[:c.limit]
 	}
-	notice := output.TruncationNotice(len(postings), total)
+	notice := boxTruncationNotice(len(postings), total, hasMore)
 
 	if writer.IsStyled() {
 		fmt.Fprintf(cmd.OutOrStdout(), "Box: %s (%s)\n\n", resp.Name, resp.Kind)
@@ -178,4 +184,62 @@ func resolveBox(ctx context.Context, nameOrID string) (*generated.BoxShowRespons
 	}
 
 	return nil, output.ErrNotFound("box", nameOrID)
+}
+
+// pageFetcher fetches the next page of box postings given a URL.
+type pageFetcher func(ctx context.Context, url string) (*generated.BoxShowResponse, error)
+
+// fetchNextBoxPage fetches a pagination URL and decodes it as a BoxShowResponse.
+func fetchNextBoxPage(ctx context.Context, nextURL string) (*generated.BoxShowResponse, error) {
+	resp, err := sdk.Get(ctx, nextURL)
+	if err != nil {
+		return nil, convertSDKError(err)
+	}
+	var page generated.BoxShowResponse
+	if err := resp.UnmarshalData(&page); err != nil {
+		return nil, fmt.Errorf("failed to parse pagination response: %w", err)
+	}
+	return &page, nil
+}
+
+// paginateBoxPostings follows next_history_url links to collect additional postings
+// beyond the first page. When neither all nor a limit exceeding the first page is
+// requested, it returns the first page only (preserving default behavior).
+func paginateBoxPostings(ctx context.Context, firstPage *generated.BoxShowResponse, limit int, all bool, fetch pageFetcher) ([]generated.Posting, bool, error) {
+	postings := firstPage.Postings
+	nextURL := firstPage.NextHistoryUrl
+
+	needMore := all || (limit > 0 && len(postings) < limit)
+	if !needMore || nextURL == "" {
+		return postings, nextURL != "", nil
+	}
+
+	for page := 1; page <= maxPaginationPages && nextURL != ""; page++ {
+		resp, err := fetch(ctx, nextURL)
+		if err != nil {
+			return nil, false, err
+		}
+		nextURL = resp.NextHistoryUrl
+		if len(resp.Postings) == 0 {
+			break
+		}
+		postings = append(postings, resp.Postings...)
+
+		if !all && limit > 0 && len(postings) >= limit {
+			break
+		}
+	}
+
+	return postings, nextURL != "", nil
+}
+
+// boxTruncationNotice returns a user-facing notice about truncated or paginated results.
+func boxTruncationNotice(shown, fetched int, hasMore bool) string {
+	if shown < fetched {
+		return fmt.Sprintf("Showing %d of %d results. Use --all to see everything.", shown, fetched)
+	}
+	if hasMore {
+		return fmt.Sprintf("Showing %d results. More available; use --all to fetch all.", shown)
+	}
+	return ""
 }
