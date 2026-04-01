@@ -69,12 +69,16 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	resp.NextHistoryUrl = finalNextURL
 	hasMore := finalNextURL != ""
 
 	total := len(postings)
 	if c.limit > 0 && !c.all && len(postings) > c.limit {
 		postings = postings[:c.limit]
+		// Clear next_history_url when client-side truncation drops postings,
+		// so JSON consumers don't skip the truncated items.
+		resp.NextHistoryUrl = ""
+	} else {
+		resp.NextHistoryUrl = finalNextURL
 	}
 	notice := boxTruncationNotice(len(postings), total, hasMore, c.all)
 
