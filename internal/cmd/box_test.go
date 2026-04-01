@@ -198,6 +198,40 @@ func TestPaginateBoxPostings_EmptyPageStopsPagination(t *testing.T) {
 	}
 }
 
+func TestPaginateBoxPostings_NilFetchReturnsError(t *testing.T) {
+	first := &generated.BoxShowResponse{
+		Postings:       makePostings(30, 0),
+		NextHistoryUrl: "https://app.hey.com/page2",
+	}
+	_, _, err := paginateBoxPostings(context.Background(), first, 0, true, nil)
+	if err == nil {
+		t.Fatal("expected error when fetch is nil and pagination is required")
+	}
+}
+
+func TestValidateSameOrigin(t *testing.T) {
+	tests := []struct {
+		name    string
+		base    string
+		target  string
+		wantErr bool
+	}{
+		{"same origin", "https://app.hey.com", "https://app.hey.com/page2", false},
+		{"different host", "https://app.hey.com", "https://evil.com/page2", true},
+		{"different scheme", "https://app.hey.com", "http://app.hey.com/page2", true},
+		{"with port match", "https://app.hey.com:443", "https://app.hey.com:443/page2", false},
+		{"port mismatch", "https://app.hey.com:443", "https://app.hey.com:8080/page2", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateSameOrigin(tt.base, tt.target)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateSameOrigin(%q, %q) error = %v, wantErr %v", tt.base, tt.target, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestBoxTruncationNotice(t *testing.T) {
 	tests := []struct {
 		name    string

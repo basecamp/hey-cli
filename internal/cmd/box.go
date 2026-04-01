@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -13,7 +14,7 @@ import (
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
-const maxPaginationPages = 100
+const maxAdditionalPages = 100
 
 type boxCommand struct {
 	cmd   *cobra.Command
@@ -196,7 +197,12 @@ func resolveBox(ctx context.Context, nameOrID string) (*generated.BoxShowRespons
 type pageFetcher func(ctx context.Context, url string) (*generated.BoxShowResponse, error)
 
 // fetchNextBoxPage fetches a pagination URL and decodes it as a BoxShowResponse.
+// It validates that the URL shares the same origin as the SDK base URL to prevent
+// leaking auth credentials to a different host.
 func fetchNextBoxPage(ctx context.Context, nextURL string) (*generated.BoxShowResponse, error) {
+	if err := validateSameOrigin(sdk.Config().BaseURL, nextURL); err != nil {
+		return nil, err
+	}
 	resp, err := sdk.Get(ctx, nextURL)
 	if err != nil {
 		return nil, convertSDKError(err)
@@ -206,6 +212,23 @@ func fetchNextBoxPage(ctx context.Context, nextURL string) (*generated.BoxShowRe
 		return nil, fmt.Errorf("failed to parse pagination response: %w", err)
 	}
 	return &page, nil
+}
+
+// validateSameOrigin checks that targetURL has the same scheme and host as baseURL.
+func validateSameOrigin(baseURL, targetURL string) error {
+	base, err := url.Parse(baseURL)
+	if err != nil {
+		return fmt.Errorf("invalid base URL: %w", err)
+	}
+	target, err := url.Parse(targetURL)
+	if err != nil {
+		return fmt.Errorf("invalid pagination URL: %w", err)
+	}
+	if base.Scheme != target.Scheme || base.Host != target.Host {
+		return fmt.Errorf("pagination URL origin %s://%s does not match base %s://%s",
+			target.Scheme, target.Host, base.Scheme, base.Host)
+	}
+	return nil
 }
 
 // paginateBoxPostings follows next_history_url links to collect additional postings
@@ -219,8 +242,11 @@ func paginateBoxPostings(ctx context.Context, firstPage *generated.BoxShowRespon
 	if !needMore || nextURL == "" {
 		return postings, nextURL, nil
 	}
+	if fetch == nil {
+		return nil, "", fmt.Errorf("paginateBoxPostings: fetch function is nil while pagination is required")
+	}
 
-	for page := 1; page <= maxPaginationPages && nextURL != ""; page++ {
+	for page := 1; page <= maxAdditionalPages && nextURL != ""; page++ {
 		resp, err := fetch(ctx, nextURL)
 		if err != nil {
 			return nil, "", err
