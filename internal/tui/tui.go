@@ -933,22 +933,15 @@ func (m model) fetchRecordings(calID int64) tea.Cmd {
 
 func (m model) fetchJournalEntry(date string) tea.Cmd {
 	return func() tea.Msg {
-		entry, err := m.sdk.Journal().Get(m.ctx, date)
-		if err != nil || entry == nil || entry.Content == "" {
-			htmlResp, htmlErr := m.sdk.GetHTML(m.ctx, fmt.Sprintf("/calendar/days/%s/journal_entry/edit", date))
-			if htmlErr == nil {
-				body, _ := htmlutil.ExtractTrixContent(htmlResp.Data)
-				if body != "" {
-					return journalDetailMsg{title: date, body: htmlToText(body)}
-				}
-			}
+		content, err := m.sdk.Journal().GetContent(m.ctx, date)
+		if err != nil || content == "" {
 			return journalDetailMsg{title: date, body: "(empty)"}
 		}
 
-		body := htmlToText(entry.Content)
+		body := htmlToText(content)
 
 		var images [][]byte
-		for _, imgURL := range extractImageURLs(entry.Content) {
+		for _, imgURL := range extractImageURLs(content) {
 			var data []byte
 			if strings.HasPrefix(imgURL, "http://") || strings.HasPrefix(imgURL, "https://") {
 				data = fetchImageData(imgURL)
