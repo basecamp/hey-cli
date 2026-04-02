@@ -5,7 +5,7 @@ This file provides guidance to AI coding agents working with this repository.
 ## What is hey-cli?
 
 hey-cli is a CLI and TUI interface for [HEY](https://hey.com). 
-It allows users to read and send emails, mange their boxes, manage their calendars and journal entries.
+It allows users to read and send emails, manage their boxes, manage their calendars and journal entries.
 The TUI is primarily intended for human use, while the CLI is primarily intended for use by AI agents and for scripting.
 
 ## Development commands
@@ -26,18 +26,18 @@ This is a Go project that uses:
 - [spf13/cobra](github.com/spf13/cobra) for the CLI interface
 - [charm.land/bubbletea/v2] for the TUI interface along with bubbles/v2 and lipgloss/v2 (these are new versions that recently came out and differ from the v1 versions!)
 
-Most API interactions go through the HEY SDK (`hey-sdk/go`), with typed service methods accessed via `internal/cmd/sdk.go` (e.g., `sdk.Boxes().List`, `sdk.Messages().Create`, `sdk.Calendars().GetRecordings`). A legacy `internal/client.Client` remains for two gap operations where the SDK lacks body content: `GetTopicEntries` (HTML-scraped topic entries for `hey threads` and TUI) and `GetJournalEntry` (HTML-scraped journal fallback when the JSON API returns 204). Authentication and token refresh are handled via `internal/auth/`.
+All API interactions go through the HEY SDK (`hey-sdk/go`), with typed service methods accessed via `internal/cmd/sdk.go` (e.g., `sdk.Boxes().List`, `sdk.Messages().Create`, `sdk.Calendars().GetRecordings`). Authentication and token refresh are handled via `internal/auth/`.
 
 ### Authentication
 
-Authentication supports three methods, all managed through `internal/auth/`:
+Authentication supports four methods, all managed through `internal/auth/`:
 
 1. **Browser-based OAuth with PKCE** (primary) — `hey auth login` opens a browser for OAuth authentication against HEY's own OAuth server (`/oauth/authorizations/new`), using PKCE (S256) for security. A local callback server on `127.0.0.1:8976` receives the authorization code, which is exchanged for access and refresh tokens at `/oauth/tokens`.
 2. **Pre-generated bearer token** — `hey auth login --token TOKEN` stores a token directly.
 3. **Browser session cookie** — `hey auth login --cookie COOKIE` uses an existing HEY.com session.
 4. **Environment variable** — Set `HEY_TOKEN` to use a token without storing it.
 
-The auth Manager (`internal/auth/auth.go`) proactively refreshes tokens with a 5-minute expiry buffer. The API client (`internal/client/`) uses the Manager to authenticate requests: `Authorization: Bearer <token>` or `Cookie: session_token=<cookie>` (bearer token takes precedence).
+The auth Manager (`internal/auth/auth.go`) proactively refreshes tokens with a 5-minute expiry buffer. The SDK uses the Manager to authenticate requests via a bridge in `internal/cmd/sdk.go`.
 
 All data-access commands call `requireAuth()` before making API calls. Auth subcommands (`hey auth login`, `hey auth logout`, `hey auth status`) work without authentication.
 
@@ -51,7 +51,7 @@ Remember to update the examples in the README when you change, add or remove CLI
 
 ### HTML content
 
-Some HEY API endpoints return 204 or incomplete data via JSON, but the full HTML content is available by scraping the edit page (e.g., `/calendar/days/{date}/journal_entry/edit` contains the Trix editor hidden input with full HTML). When an API endpoint returns incomplete data, check the corresponding web page for the full content. The `internal/htmlutil` package provides `ToText` (HTML→plain text) and `ExtractImageURLs` shared by both CLI and TUI. HEY uses Trix editor with `<figure data-trix-attachment="{...}">` for attachments — image URLs in those attributes are relative paths requiring authentication via `client.Get`.
+Some HEY API endpoints return 204 or incomplete data via JSON, but the full HTML content is available by scraping the edit page (e.g., `/calendar/days/{date}/journal_entry/edit` contains the Trix editor hidden input with full HTML). When an API endpoint returns incomplete data, check the corresponding web page for the full content. The `internal/htmlutil` package provides `ToText` (HTML→plain text), `ExtractImageURLs`, and `ParseTopicEntriesHTML` shared by both CLI and TUI. HEY uses Trix editor with `<figure data-trix-attachment="{...}">` for attachments — image URLs in those attributes are relative paths requiring authentication via `sdk.Get`.
 
 ### Inline images in the TUI
 
@@ -71,18 +71,17 @@ The server code is located at `~/Work/basecamp/haystack/`, feel free to read it 
 
 If you don't understand how the routes are laid out you can call rails routes in that directory to get a list of all the routes and their corresponding controller actions.
 
-
 ### SDK
 
-All API interactions should go through the HEY SDK (`hey-sdk/go`), which provides typed service methods. 
+All API interactions must go through the HEY SDK (`hey-sdk/go`). There is no legacy client — the SDK is the only HTTP client.
 
-If you need to call an endpoint that the SDK doesn't support yet, add it to the SDK. Avoid using the legacy `internal/client.Client` for new API interactions, except for the two gap operations (topic entries and journal entry) where the SDK lacks body content.
+If you need to call an endpoint that the SDK doesn't support yet, **add it to the SDK**. The SDK is located at `~/Work/basecamp/hey-sdk`. To use your local changes:
 
-The SDK is located in `~/Work/basecamp/hey-sdk`.
+1. Add a `replace` directive in `go.mod` pointing to the local SDK: `go mod edit -replace github.com/basecamp/hey-sdk/go=~/Work/basecamp/hey-sdk/go`
+2. Implement and test your changes
+3. **Call out that you made changes to the SDK** when you're done — your operator will review those changes and publish a new SDK release, then you can remove the `replace` directive and pin to the released version
 
-After adding something to the SDK you'll have to switch to using that directory as the dependency. Call out that you made changes to the SDK and your operator will go through the process of releasing a new version.
-
-The SDK is developed with Smithy so you shouldn't update the code directly, but rather update Smithy and then run the necessary make tasks to generate the code and definitions (you can check what the release task does).
+The hand-written service wrappers in `pkg/hey/` (e.g., `messages.go`, `journal.go`, `postings.go`) are safe to edit directly. The Smithy-generated code lives in `pkg/generated/` and should not be edited by hand — update the Smithy model and run `make smithy-build` followed by `make go-generate` instead.
 
 ### Examples
 
@@ -91,7 +90,7 @@ When you add any kind of example make it realistic.
 For emails, always use @example.com or @example.org domains to avoid accidentally sending emails to real people.
 For names, use common names or fictional characters. For calendar events, use plausible titles and times. 
 The goal is to make the examples feel authentic without risking privacy or confusion.
-Never use abbrivations or placeholders like "Test Event", "User1", "a@ex.com". Instead, use full names and descriptive titles that reflect real-world usage.
+Never use abbreviations or placeholders like "Test Event", "User1", "a@ex.com". Instead, use full names and descriptive titles that reflect real-world usage.
 
 ### Unit Testing
 
@@ -149,7 +148,7 @@ The dev server must be running at `http://app.hey.localhost:3003` (override with
 
 ### Running
 
-To run the cli use `make build` and then `./bin/hey`. This ensures that you and I are running the same version of the program.
+To run the CLI use `make build` and then `./bin/hey`. This ensures that you and I are running the same version of the program.
 
 ## Code style
 
