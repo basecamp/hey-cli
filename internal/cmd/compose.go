@@ -29,10 +29,10 @@ func newComposeCommand() *composeCommand {
 		Annotations: map[string]string{
 			"agent_notes": "Creates a new email. Requires --subject. Use --to (optionally with --cc/--bcc) for new threads or --thread-id for existing ones.",
 		},
-		Example: `  hey compose --to alice@hey.com --subject "Hello" -m "Hi there"
-  hey compose --to alice@hey.com --cc bob@hey.com --bcc carol@hey.com --subject "Hello" -m "Hi"
+		Example: `  hey compose --to alice@example.com --subject "Hello" -m "Hi there"
+  hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Hello" -m "Hi"
   hey compose --subject "Update" --thread-id 12345 -m "Thread reply"
-  echo "Long message" | hey compose --to bob@hey.com --subject "Report"`,
+  echo "Long message" | hey compose --to bob@example.com --subject "Report"`,
 		RunE: composeCommand.run,
 	}
 
@@ -89,9 +89,9 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 			return convertSDKError(err)
 		}
 	} else {
-		to := splitAddresses(c.to)
-		cc := splitAddresses(c.cc)
-		bcc := splitAddresses(c.bcc)
+		to := parseAddresses(c.to)
+		cc := parseAddresses(c.cc)
+		bcc := parseAddresses(c.bcc)
 		if err := sdk.Messages().Create(ctx, c.subject, message, to, cc, bcc); err != nil {
 			return convertSDKError(err)
 		}
@@ -105,7 +105,7 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 	return writeOK(nil, output.WithSummary("Message sent"))
 }
 
-func splitAddresses(s string) []string {
+func parseAddresses(s string) []string {
 	if s == "" {
 		return nil
 	}

@@ -13,7 +13,6 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/basecamp/hey-cli/internal/auth"
-	"github.com/basecamp/hey-cli/internal/client"
 	"github.com/basecamp/hey-cli/internal/config"
 	"github.com/basecamp/hey-cli/internal/output"
 	"github.com/basecamp/hey-cli/internal/tui"
@@ -34,7 +33,6 @@ var (
 	baseURL     string
 	cfg         *config.Config
 	authMgr     *auth.Manager
-	apiClient   *client.Client
 	writer      *output.Writer
 )
 
@@ -80,12 +78,7 @@ func newRootCmd() *cobra.Command {
 			configDir := config.ConfigDir()
 			httpClient := &http.Client{Timeout: 30 * time.Second}
 			authMgr = auth.NewManager(cfg.BaseURL, httpClient, configDir)
-			apiClient = client.New(cfg.BaseURL, authMgr)
 			initSDK(authMgr, cfg.BaseURL)
-
-			if verboseFlag > 0 {
-				apiClient.Logger = os.Stderr
-			}
 
 			migrateOldCredentials(configDir)
 
@@ -98,7 +91,7 @@ func newRootCmd() *cobra.Command {
 			if err := requireAuth(); err != nil {
 				return err
 			}
-			return tui.Run(sdk, apiClient)
+			return tui.Run(sdk)
 		},
 	}
 
@@ -252,12 +245,11 @@ func statsOption() output.ResponseOption {
 	if !statsFlag {
 		return func(*output.Response) {}
 	}
-	// Combine stats from both legacy client and SDK
-	requests := apiClient.RequestCount()
-	latency := apiClient.TotalLatency()
+	var requests int
+	var latency time.Duration
 	if sdkStats != nil {
-		requests += sdkStats.RequestCount()
-		latency += sdkStats.TotalLatency()
+		requests = sdkStats.RequestCount()
+		latency = sdkStats.TotalLatency()
 	}
 	return output.WithMeta("stats", map[string]any{
 		"requests":   requests,

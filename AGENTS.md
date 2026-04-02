@@ -71,6 +71,28 @@ The server code is located at `~/Work/basecamp/haystack/`, feel free to read it 
 
 If you don't understand how the routes are laid out you can call rails routes in that directory to get a list of all the routes and their corresponding controller actions.
 
+
+### SDK
+
+All API interactions should go through the HEY SDK (`hey-sdk/go`), which provides typed service methods. 
+
+If you need to call an endpoint that the SDK doesn't support yet, add it to the SDK. Avoid using the legacy `internal/client.Client` for new API interactions, except for the two gap operations (topic entries and journal entry) where the SDK lacks body content.
+
+The SDK is located in `~/Work/basecamp/hey-sdk`.
+
+After adding something to the SDK you'll have to switch to using that directory as the dependency. Call out that you made changes to the SDK and your operator will go through the process of releasing a new version.
+
+The SDK is developed with Smithy so you shouldn't update the code directly, but rather update Smithy and then run the necessary make tasks to generate the code and definitions (you can check what the release task does).
+
+### Examples
+
+When you add any kind of example make it realistic.
+
+For emails, always use @example.com or @example.org domains to avoid accidentally sending emails to real people.
+For names, use common names or fictional characters. For calendar events, use plausible titles and times. 
+The goal is to make the examples feel authentic without risking privacy or confusion.
+Never use abbrivations or placeholders like "Test Event", "User1", "a@ex.com". Instead, use full names and descriptive titles that reflect real-world usage.
+
 ### Unit Testing
 
 Whenever you add, remove or change any functionality add/remove/change tests as well. Tests are located in the same package as the code they test, with filenames ending in `_test.go`. Run `make test` to run all tests.

@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/basecamp/hey-cli/internal/client"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -33,12 +32,12 @@ func TestBareHeyShowsHelpWithoutTTY(t *testing.T) {
 }
 
 func TestWriteOKIncludesStats(t *testing.T) {
-	oldWriter, oldClient, oldStats := writer, apiClient, statsFlag
-	defer func() { writer, apiClient, statsFlag = oldWriter, oldClient, oldStats }()
+	oldWriter, oldStats, oldSDKStats := writer, statsFlag, sdkStats
+	defer func() { writer, statsFlag, sdkStats = oldWriter, oldStats, oldSDKStats }()
 
 	var buf bytes.Buffer
 	writer = output.New(output.Options{Format: output.FormatJSON, Stdout: &buf})
-	apiClient = client.New("https://example.com", nil)
+	sdkStats = &statsHooks{}
 	statsFlag = true
 
 	if err := writeOK(map[string]string{"hello": "world"}, output.WithSummary("test")); err != nil {
@@ -65,12 +64,12 @@ func TestWriteOKIncludesStats(t *testing.T) {
 }
 
 func TestWriteOKOmitsStatsWhenFlagOff(t *testing.T) {
-	oldWriter, oldClient, oldStats := writer, apiClient, statsFlag
-	defer func() { writer, apiClient, statsFlag = oldWriter, oldClient, oldStats }()
+	oldWriter, oldStats, oldSDKStats := writer, statsFlag, sdkStats
+	defer func() { writer, statsFlag, sdkStats = oldWriter, oldStats, oldSDKStats }()
 
 	var buf bytes.Buffer
 	writer = output.New(output.Options{Format: output.FormatJSON, Stdout: &buf})
-	apiClient = client.New("https://example.com", nil)
+	sdkStats = &statsHooks{}
 	statsFlag = false
 
 	if err := writeOK(map[string]string{"hello": "world"}); err != nil {

@@ -1,4 +1,4 @@
-package client
+package htmlutil
 
 import (
 	"fmt"
@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/models"
 )
 
@@ -17,17 +16,10 @@ var (
 	srcdocRe     = regexp.MustCompile(`(?s)srcdoc="([^"]*trix-content[^"]*)"`)
 )
 
-func (c *Client) GetTopicEntries(id int64) ([]models.Entry, error) {
-	path := fmt.Sprintf("/topics/%d/entries", id)
-	data, err := c.GetHTML(path)
-	if err != nil {
-		return nil, err
-	}
-
-	return parseTopicEntriesHTML(string(data)), nil
-}
-
-func parseTopicEntriesHTML(html string) []models.Entry {
+// ParseTopicEntriesHTML extracts structured entry data from the HTML page
+// served by /topics/{id}/entries. The JSON API does not return full entry
+// bodies, so this HTML-based extraction is required.
+func ParseTopicEntriesHTML(html string) []models.Entry {
 	// Find unique entry IDs in order
 	idMatches := entryBlockRe.FindAllStringSubmatch(html, -1)
 	seen := map[string]bool{}
@@ -71,7 +63,7 @@ func parseTopicEntriesHTML(html string) []models.Entry {
 		raw = strings.ReplaceAll(raw, "&quot;", "\"")
 		raw = strings.ReplaceAll(raw, "&amp;", "&")
 		raw = strings.ReplaceAll(raw, "&#39;", "'")
-		bodies = append(bodies, body{html: raw, text: htmlutil.ToText(raw)})
+		bodies = append(bodies, body{html: raw, text: ToText(raw)})
 	}
 
 	entries := make([]models.Entry, 0, len(entryIDs))

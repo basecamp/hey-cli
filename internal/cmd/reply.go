@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/hey-cli/internal/editor"
+	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -45,10 +46,11 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := cmd.Context()
-	entries, err := apiClient.GetTopicEntries(threadID)
+	resp, err := sdk.GetHTML(ctx, fmt.Sprintf("/topics/%d/entries", threadID))
 	if err != nil {
-		return err
+		return convertSDKError(err)
 	}
+	entries := htmlutil.ParseTopicEntriesHTML(string(resp.Data))
 	if len(entries) == 0 {
 		return output.ErrNotFound("entries for thread", args[0])
 	}

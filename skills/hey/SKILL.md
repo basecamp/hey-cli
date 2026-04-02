@@ -87,6 +87,7 @@ CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos,
 | Read email thread | `hey threads <topic_id> --json` |
 | Reply to email | `hey reply <topic_id> -m "Thanks!"` |
 | Compose email | `hey compose --to user@example.com --subject "Hello"` |
+| Compose with CC/BCC | `hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Hello"` |
 | List drafts | `hey drafts --json` |
 | List calendars | `hey calendars --json` |
 | List calendar events | `hey recordings 123 --json` |
@@ -131,7 +132,9 @@ Want to send email?
 ├── Reply to thread? → hey reply <topic_id> -m "message"
 │   └── Open editor? → hey reply <topic_id> (omit -m to open $EDITOR)
 ├── Compose new? → hey compose --to <email> --subject "Subject"
-│   └── With body? → hey compose --to <email> --subject "Subject" -m "Body"
+│   ├── With body? → hey compose --to <email> --subject "Subject" -m "Body"
+│   ├── With CC? → add --cc <email>
+│   └── With BCC? → add --bcc <email>
 └── Check drafts? → hey drafts --json
 ```
 
@@ -176,6 +179,7 @@ hey reply <topic_id> -m "Thanks!"             # Reply with inline message
 hey reply <topic_id>                          # Reply via $EDITOR
 hey compose --to user@example.com --subject "Hello"         # Compose new (opens $EDITOR)
 hey compose --to user@example.com --subject "Hi" -m "Body"  # With inline body
+hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Project update" -m "Body"  # With CC/BCC
 hey compose --subject "Update" --thread-id 12345 -m "msg"   # Post to existing thread
 ```
 

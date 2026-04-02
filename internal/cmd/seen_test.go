@@ -16,7 +16,7 @@ func seenServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == "POST" && r.URL.Path == "/postings/seen":
+		case r.Method == "POST" && (r.URL.Path == "/postings/seen" || r.URL.Path == "/postings/seen.json"):
 			body, _ := io.ReadAll(r.Body)
 			var req map[string]any
 			_ = json.Unmarshal(body, &req)
@@ -25,7 +25,7 @@ func seenServer(t *testing.T) *httptest.Server {
 				return
 			}
 			w.WriteHeader(201)
-		case r.Method == "POST" && r.URL.Path == "/postings/unseen":
+		case r.Method == "POST" && (r.URL.Path == "/postings/unseen" || r.URL.Path == "/postings/unseen.json"):
 			body, _ := io.ReadAll(r.Body)
 			var req map[string]any
 			_ = json.Unmarshal(body, &req)
@@ -34,6 +34,10 @@ func seenServer(t *testing.T) *httptest.Server {
 				return
 			}
 			w.WriteHeader(201)
+		case r.Method == "GET" && r.URL.Path == "/me.json":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(200)
+			_, _ = w.Write([]byte(`{"id": 1}`))
 		default:
 			w.WriteHeader(404)
 		}

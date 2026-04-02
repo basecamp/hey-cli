@@ -40,8 +40,8 @@ func (c *seenCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if _, err := apiClient.MarkSeen(ids); err != nil {
-		return err
+	if err := sdk.Postings().MarkSeen(cmd.Context(), ids); err != nil {
+		return convertSDKError(err)
 	}
 
 	summary := fmt.Sprintf("%d posting(s) marked as seen", len(ids))
@@ -87,8 +87,8 @@ func (c *unseenCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if _, err := apiClient.MarkUnseen(ids); err != nil {
-		return err
+	if err := sdk.Postings().MarkUnseen(cmd.Context(), ids); err != nil {
+		return convertSDKError(err)
 	}
 
 	summary := fmt.Sprintf("%d posting(s) marked as unseen", len(ids))
@@ -101,10 +101,10 @@ func (c *unseenCommand) run(cmd *cobra.Command, args []string) error {
 	return writeOK(nil, output.WithSummary(summary))
 }
 
-func parseIntArgs(args []string) ([]int, error) {
-	ids := make([]int, 0, len(args))
+func parseIntArgs(args []string) ([]int64, error) {
+	ids := make([]int64, 0, len(args))
 	for _, arg := range args {
-		id, err := strconv.Atoi(arg)
+		id, err := strconv.ParseInt(arg, 10, 64)
 		if err != nil {
 			return nil, output.ErrUsage(fmt.Sprintf("invalid posting ID: %s", arg))
 		}

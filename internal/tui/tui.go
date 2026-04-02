@@ -14,7 +14,7 @@ import (
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
-	"github.com/basecamp/hey-cli/internal/client"
+	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/models"
 )
 
@@ -62,7 +62,6 @@ type model struct {
 	width  int
 	height int
 	sdk    *hey.Client
-	legacy *client.Client
 	ctx    context.Context
 	cancel context.CancelFunc
 	styles styles
@@ -94,12 +93,11 @@ type model struct {
 	ctrlCOnce    bool
 }
 
-func newModel(sdk *hey.Client, legacy *client.Client) model {
+func newModel(sdk *hey.Client) model {
 	s := newStyles()
 	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118: cancel stored, called on ctrl+c
 	return model{
 		sdk:           sdk,
-		legacy:        legacy,
 		ctx:           ctx,
 		cancel:        cancel,
 		styles:        s,
@@ -865,13 +863,11 @@ func (m model) fetchPostings(boxID int64) tea.Cmd {
 
 func (m model) fetchTopic(topicID int64, title string) tea.Cmd {
 	return func() tea.Msg {
-		if m.legacy == nil {
-			return errMsg{fmt.Errorf("topic view requires legacy client")}
-		}
-		entries, err := m.legacy.GetTopicEntries(topicID)
+		resp, err := m.sdk.GetHTML(m.ctx, fmt.Sprintf("/topics/%d/entries", topicID))
 		if err != nil {
 			return errMsg{err}
 		}
+		entries := htmlutil.ParseTopicEntriesHTML(string(resp.Data))
 
 		var images [][]byte
 		for _, e := range entries {
@@ -880,7 +876,10 @@ func (m model) fetchTopic(topicID int64, title string) tea.Cmd {
 				if strings.HasPrefix(imgURL, "http://") || strings.HasPrefix(imgURL, "https://") {
 					data = fetchImageData(imgURL)
 				} else {
-					data, _ = m.legacy.Get(imgURL)
+					sdkResp, getErr := m.sdk.Get(m.ctx, imgURL)
+					if getErr == nil && sdkResp != nil {
+						data = sdkResp.Data
+					}
 				}
 				if len(data) > 0 {
 					images = append(images, data)
@@ -936,10 +935,11 @@ func (m model) fetchJournalEntry(date string) tea.Cmd {
 	return func() tea.Msg {
 		entry, err := m.sdk.Journal().Get(m.ctx, date)
 		if err != nil || entry == nil || entry.Content == "" {
-			if m.legacy != nil {
-				legacyEntry, legacyErr := m.legacy.GetJournalEntry(date)
-				if legacyErr == nil && legacyEntry.Body != "" {
-					return journalDetailMsg{title: date, body: htmlToText(legacyEntry.Body)}
+			htmlResp, htmlErr := m.sdk.GetHTML(m.ctx, fmt.Sprintf("/calendar/days/%s/journal_entry/edit", date))
+			if htmlErr == nil {
+				body, _ := htmlutil.ExtractTrixContent(htmlResp.Data)
+				if body != "" {
+					return journalDetailMsg{title: date, body: htmlToText(body)}
 				}
 			}
 			return journalDetailMsg{title: date, body: "(empty)"}
@@ -1032,8 +1032,8 @@ func fetchImageData(imgURL string) []byte {
 }
 
 // Run starts the TUI program.
-func Run(sdk *hey.Client, legacy *client.Client) error {
-	p := tea.NewProgram(newModel(sdk, legacy))
+func Run(sdk *hey.Client) error {
+	p := tea.NewProgram(newModel(sdk))
 	_, err := p.Run()
 	return err
 }

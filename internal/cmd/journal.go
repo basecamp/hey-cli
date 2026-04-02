@@ -156,10 +156,13 @@ func (c *journalReadCommand) run(cmd *cobra.Command, args []string) error {
 	if entry != nil {
 		content = entry.Content
 	}
-	if content == "" && apiClient != nil {
-		legacy, legacyErr := apiClient.GetJournalEntry(date)
-		if legacyErr == nil && legacy.Body != "" {
-			content = legacy.Body
+	if content == "" {
+		htmlResp, htmlErr := sdk.GetHTML(ctx, fmt.Sprintf("/calendar/days/%s/journal_entry/edit", date))
+		if htmlErr == nil {
+			body, _ := htmlutil.ExtractTrixContent(htmlResp.Data)
+			if body != "" {
+				content = body
+			}
 		}
 	}
 
@@ -276,10 +279,13 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 			if err == nil && entry != nil {
 				existing = entry.Content
 			}
-			if existing == "" && apiClient != nil {
-				legacy, legacyErr := apiClient.GetJournalEntry(date)
-				if legacyErr == nil {
-					existing = legacy.Body
+			if existing == "" {
+				htmlResp, htmlErr := sdk.GetHTML(ctx, fmt.Sprintf("/calendar/days/%s/journal_entry/edit", date))
+				if htmlErr == nil {
+					body, _ := htmlutil.ExtractTrixContent(htmlResp.Data)
+					if body != "" {
+						existing = body
+					}
 				}
 			}
 
