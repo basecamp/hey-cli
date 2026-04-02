@@ -145,25 +145,9 @@ func (c *journalReadCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := cmd.Context()
-	entry, err := sdk.Journal().Get(ctx, date)
+	content, err := sdk.Journal().GetContent(ctx, date)
 	if err != nil {
 		return convertSDKError(err)
-	}
-
-	// SDK returns nil when the server responds 204 (no JSON body).
-	// Fall back to the legacy HTML-scrape path which parses the edit page.
-	content := ""
-	if entry != nil {
-		content = entry.Content
-	}
-	if content == "" {
-		htmlResp, htmlErr := sdk.GetHTML(ctx, fmt.Sprintf("/calendar/days/%s/journal_entry/edit", date))
-		if htmlErr == nil {
-			body, _ := htmlutil.ExtractTrixContent(htmlResp.Data)
-			if body != "" {
-				content = body
-			}
-		}
 	}
 
 	if content == "" {
@@ -186,17 +170,6 @@ func (c *journalReadCommand) run(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// If SDK returned a full entry, use it; otherwise wrap the scraped content.
-	if entry != nil {
-		return writeOK(entry,
-			output.WithSummary(fmt.Sprintf("Journal entry for %s", date)),
-			output.WithBreadcrumbs(output.Breadcrumb{
-				Action:      "write",
-				Command:     fmt.Sprintf("hey journal write %s '...'", date),
-				Description: "Edit this journal entry",
-			}),
-		)
-	}
 	return writeOK(map[string]string{"date": date, "content": content},
 		output.WithSummary(fmt.Sprintf("Journal entry for %s", date)),
 		output.WithBreadcrumbs(output.Breadcrumb{
@@ -274,21 +247,9 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 				return output.ErrUsage("no content provided (use --content to provide inline, or pipe to stdin)")
 			}
 		} else {
-			existing := ""
-			entry, err := sdk.Journal().Get(ctx, date)
-			if err == nil && entry != nil {
-				existing = entry.Content
-			}
-			if existing == "" {
-				htmlResp, htmlErr := sdk.GetHTML(ctx, fmt.Sprintf("/calendar/days/%s/journal_entry/edit", date))
-				if htmlErr == nil {
-					body, _ := htmlutil.ExtractTrixContent(htmlResp.Data)
-					if body != "" {
-						existing = body
-					}
-				}
-			}
+			existing, _ := sdk.Journal().GetContent(ctx, date)
 
+			var err error
 			content, err = editor.Open(existing)
 			if err != nil {
 				return output.ErrAPI(0, fmt.Sprintf("could not open editor: %v", err))
