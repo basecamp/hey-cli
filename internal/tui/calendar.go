@@ -109,7 +109,7 @@ func (v *calendarView) SubnavItems() ([]navItem, int, string, bool) {
 	if v.calIndex >= 0 && v.calIndex < len(v.calendars) {
 		label = v.calendars[v.calIndex].Name
 	}
-	return calendarNavItems(v.calendars), v.calIndex, label, false
+	return calendarNavItems(v.calendars), v.calIndex, label, true
 }
 
 func (v *calendarView) SubnavLeft() tea.Cmd {
@@ -151,9 +151,9 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
-func (v *calendarView) InThread() bool  { return v.inThread }
-func (v *calendarView) ExitThread()     { v.inThread = false }
-func (v *calendarView) Loading() bool   { return v.loading }
+func (v *calendarView) InThread() bool { return v.inThread }
+func (v *calendarView) ExitThread()    { v.inThread = false }
+func (v *calendarView) Loading() bool  { return v.loading }
 
 func (v *calendarView) Resize(width, height int) {
 	v.recordingL.setSize(width, height)

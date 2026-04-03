@@ -145,8 +145,8 @@ func TestCalendarViewSubnavItems(t *testing.T) {
 	if label != "Work" {
 		t.Errorf("label = %q, want Work", label)
 	}
-	if centered {
-		t.Error("calendar subnav should not be centered")
+	if !centered {
+		t.Error("calendar subnav should be centered")
 	}
 }
 

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -130,11 +131,18 @@ func TestMailViewPostingActionMarksSeen(t *testing.T) {
 
 func TestMailViewPostingActionError(t *testing.T) {
 	v := mailWithPostings()
-	cmd, consumed := v.Update(postingActionDoneMsg{err: errMsg{err: nil}.err})
+	cmd, consumed := v.Update(postingActionDoneMsg{err: fmt.Errorf("network error")})
 
-	// With a nil error the err field is nil, let's use a real error
-	_ = cmd
-	_ = consumed
+	if !consumed {
+		t.Error("postingActionDoneMsg with error should be consumed")
+	}
+	if cmd == nil {
+		t.Fatal("should return a command that produces errMsg")
+	}
+	msg := cmd()
+	if _, ok := msg.(errMsg); !ok {
+		t.Errorf("command produced %T, want errMsg", msg)
+	}
 }
 
 // --- Content key handling ---
