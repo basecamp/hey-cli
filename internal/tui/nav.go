@@ -163,25 +163,125 @@ func renderRule(width int, label string) string {
 
 // renderNavRow draws a row of nav items with the selected one bolded.
 // If centered is true, the row is horizontally centered within width.
+// When items overflow the available width, the row scrolls horizontally
+// to keep the selected item visible and shows ‹/› indicators.
 func renderNavRow(items []navItem, selected int, focused bool, width int, centered bool) string {
-	var parts []string
+	const sep = "  "
+	sepW := lipgloss.Width(sep)
+
+	// Pre-render each item and measure its display width.
+	type rendered struct {
+		str string
+		w   int
+	}
+	all := make([]rendered, len(items))
+	totalW := 0
 	for i, item := range items {
 		text := item.label
 		if item.icon != "" {
 			text = item.icon + " " + text
 		}
 
+		var s string
 		if i == selected {
 			style := lipgloss.NewStyle().Bold(true)
 			if focused {
 				style = style.Foreground(colorPrimary)
 			}
-			parts = append(parts, style.Render(text))
+			s = style.Render(text)
 		} else {
-			parts = append(parts, lipgloss.NewStyle().Foreground(colorMuted).Render(text))
+			s = lipgloss.NewStyle().Foreground(colorMuted).Render(text)
+		}
+		w := lipgloss.Width(s)
+		all[i] = rendered{s, w}
+		totalW += w
+	}
+	totalW += sepW * max(len(items)-1, 0) // separators
+
+	// If everything fits, no scrolling needed.
+	if totalW <= width {
+		parts := make([]string, len(all))
+		for i, r := range all {
+			parts[i] = r.str
+		}
+		row := strings.Join(parts, sep)
+		if centered {
+			rowWidth := lipgloss.Width(row)
+			pad := max((width-rowWidth)/2, 0)
+			return strings.Repeat(" ", pad) + row
+		}
+		return row
+	}
+
+	// Scrolling: find the largest window of items around `selected` that fits.
+	leftArrow := lipgloss.NewStyle().Foreground(colorMuted).Render("‹ ")
+	rightArrow := lipgloss.NewStyle().Foreground(colorMuted).Render(" ›")
+	arrowW := lipgloss.Width(leftArrow) // both arrows have the same width
+
+	// Start with the selected item and expand outward.
+	lo, hi := selected, selected
+	usedW := all[selected].w
+
+	for {
+		expandedLeft, expandedRight := false, false
+
+		// Try expanding left.
+		if lo > 0 {
+			need := sepW + all[lo-1].w
+			reserveR := 0
+			if hi < len(items)-1 {
+				reserveR = arrowW
+			}
+			reserveL := 0
+			if lo-1 > 0 {
+				reserveL = arrowW
+			}
+			if usedW+need+reserveL+reserveR <= width {
+				lo--
+				usedW += need
+				expandedLeft = true
+			}
+		}
+
+		// Try expanding right.
+		if hi < len(items)-1 {
+			need := sepW + all[hi+1].w
+			reserveL := 0
+			if lo > 0 {
+				reserveL = arrowW
+			}
+			reserveR := 0
+			if hi+1 < len(items)-1 {
+				reserveR = arrowW
+			}
+			if usedW+need+reserveL+reserveR <= width {
+				hi++
+				usedW += need
+				expandedRight = true
+			}
+		}
+
+		if !expandedLeft && !expandedRight {
+			break
 		}
 	}
-	row := strings.Join(parts, "  ")
+
+	// Build the visible row.
+	var b strings.Builder
+	if lo > 0 {
+		b.WriteString(leftArrow)
+	}
+	for i := lo; i <= hi; i++ {
+		if i > lo {
+			b.WriteString(sep)
+		}
+		b.WriteString(all[i].str)
+	}
+	if hi < len(items)-1 {
+		b.WriteString(rightArrow)
+	}
+
+	row := b.String()
 	if centered {
 		rowWidth := lipgloss.Width(row)
 		pad := max((width-rowWidth)/2, 0)
