@@ -48,6 +48,10 @@ func (v *journalView) Init() tea.Cmd {
 func (v *journalView) Update(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case journalDetailMsg:
+		// Guard against stale async responses from a previously selected date.
+		if v.dateIndex >= 0 && v.dateIndex < len(v.dates) && msg.title != v.dates[v.dateIndex] {
+			return nil, true
+		}
 		v.loading = false
 		v.inThread = true
 		body := msg.body
@@ -79,10 +83,7 @@ func (v *journalView) Update(msg tea.Msg) (tea.Cmd, bool) {
 }
 
 func (v *journalView) View() string {
-	if v.inThread {
-		return v.topicViewport.View()
-	}
-	return ""
+	return v.topicViewport.View()
 }
 
 func (v *journalView) HelpBindings() []helpBinding { return nil }
@@ -92,7 +93,7 @@ func (v *journalView) SubnavItems() ([]navItem, int, string, bool) {
 	if v.dateIndex >= 0 && v.dateIndex < len(v.dates) {
 		label = v.dates[v.dateIndex]
 	}
-	return journalNavItems(v.dates), v.dateIndex, label, true
+	return journalNavItems(v.dates), v.dateIndex, label, false
 }
 
 func (v *journalView) SubnavLeft() tea.Cmd {
@@ -120,9 +121,9 @@ func (v *journalView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	return cmd
 }
 
-func (v *journalView) InThread() bool  { return v.inThread }
-func (v *journalView) ExitThread()     { v.inThread = false }
-func (v *journalView) Loading() bool   { return v.loading }
+func (v *journalView) InThread() bool { return v.inThread }
+func (v *journalView) ExitThread()    {} // no-op: journal always shows content
+func (v *journalView) Loading() bool  { return v.loading }
 
 func (v *journalView) Resize(width, height int) {
 	v.topicViewport.SetWidth(width)

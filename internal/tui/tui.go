@@ -212,14 +212,16 @@ func (m *model) updateHelpBindings() {
 				quitHint,
 			}
 		case rowContent:
-			bindings = []helpBinding{
-				{"↑↓", "navigate"},
-				{"enter", "open"},
-				{"tab", "next row"},
-				{"shift+tab", "prev row"},
+			extra := m.activeView.HelpBindings()
+			bindings = make([]helpBinding, 0, 5+len(extra))
+			bindings = append(bindings,
+				helpBinding{"↑↓", "navigate"},
+				helpBinding{"enter", "open"},
+				helpBinding{"tab", "next row"},
+				helpBinding{"shift+tab", "prev row"},
 				quitHint,
-			}
-			bindings = append(bindings, m.activeView.HelpBindings()...)
+			)
+			bindings = append(bindings, extra...)
 		}
 	}
 	m.help.setBindings(bindings)
@@ -304,6 +306,7 @@ func (m model) switchSection(sec section) (tea.Model, tea.Cmd) {
 	case sectionJournal:
 		m.activeView = m.journalView
 	}
+	m.activeView.Resize(m.vc.width, m.vc.height)
 	cmd := m.activeView.Init()
 	cmd = m.syncLoading(cmd)
 	m.updateHelpBindings()

@@ -204,9 +204,9 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
-func (v *mailView) InThread() bool  { return v.inThread }
-func (v *mailView) ExitThread()     { v.inThread = false }
-func (v *mailView) Loading() bool   { return v.loading }
+func (v *mailView) InThread() bool { return v.inThread }
+func (v *mailView) ExitThread()    { v.inThread = false }
+func (v *mailView) Loading() bool  { return v.loading }
 
 func (v *mailView) Resize(width, height int) {
 	v.postingList.setSize(width, height)

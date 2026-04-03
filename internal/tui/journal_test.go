@@ -7,7 +7,9 @@ import (
 
 func journalWithEntry() *journalView {
 	v := newJournalView(testVC())
-	v.Update(journalDetailMsg{title: "2025-03-01", body: "Today was great"})
+	v.Init()
+	today := v.dates[v.dateIndex]
+	v.Update(journalDetailMsg{title: today, body: "Today was great"})
 	return v
 }
 
@@ -40,9 +42,11 @@ func TestJournalViewInitSelectsToday(t *testing.T) {
 
 func TestJournalViewHandlesDetailLoaded(t *testing.T) {
 	v := newJournalView(testVC())
+	v.Init() // sets dateIndex to today
 	v.loading = true
 
-	_, consumed := v.Update(journalDetailMsg{title: "2025-03-01", body: "Entry body"})
+	today := v.dates[v.dateIndex]
+	_, consumed := v.Update(journalDetailMsg{title: today, body: "Entry body"})
 	if !consumed {
 		t.Error("journalDetailMsg should be consumed")
 	}
@@ -51,6 +55,25 @@ func TestJournalViewHandlesDetailLoaded(t *testing.T) {
 	}
 	if !v.inThread {
 		t.Error("should be in thread after detail loaded")
+	}
+}
+
+func TestJournalViewIgnoresStaleResponse(t *testing.T) {
+	v := newJournalView(testVC())
+	v.Init()
+	v.loading = true
+
+	// Simulate a response for a different date than currently selected
+	staleDate := "1999-01-01"
+	_, consumed := v.Update(journalDetailMsg{title: staleDate, body: "old content"})
+	if !consumed {
+		t.Error("stale journalDetailMsg should still be consumed")
+	}
+	if !v.loading {
+		t.Error("loading should remain true after stale response")
+	}
+	if v.topicContent == "old content" {
+		t.Error("stale response should not overwrite content")
 	}
 }
 
@@ -90,8 +113,8 @@ func TestJournalViewSubnavItems(t *testing.T) {
 	if label != today {
 		t.Errorf("label = %q, want %q", label, today)
 	}
-	if !centered {
-		t.Error("journal subnav should be centered")
+	if centered {
+		t.Error("journal subnav should not be centered")
 	}
 }
 
@@ -133,9 +156,10 @@ func TestJournalViewInThread(t *testing.T) {
 	if !v.InThread() {
 		t.Error("InThread should return true")
 	}
+	// ExitThread is a no-op for journal — content always stays visible
 	v.ExitThread()
-	if v.InThread() {
-		t.Error("ExitThread should clear thread state")
+	if !v.InThread() {
+		t.Error("ExitThread should be a no-op for journal")
 	}
 }
 
