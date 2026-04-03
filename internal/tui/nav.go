@@ -201,42 +201,12 @@ func renderHeader(m *model) string {
 	b.WriteString(renderNavRow(sectionItems, int(m.section), m.focus == rowSection, m.width, true))
 	b.WriteString("\n")
 
-	// Row 2: sub-nav rule + items
-	var row2Label string
-	var row2Items []navItem
-	var row2Selected int
-
-	switch m.section {
-	case sectionMail:
-		if m.boxIndex >= 0 && m.boxIndex < len(m.boxes) {
-			row2Label = m.boxes[m.boxIndex].Name
-		} else {
-			row2Label = "Mail"
-		}
-		row2Items = boxNavItems(m.boxes)
-		row2Selected = m.boxIndex
-	case sectionCalendar:
-		if m.calIndex >= 0 && m.calIndex < len(m.calendars) {
-			row2Label = m.calendars[m.calIndex].Name
-		} else {
-			row2Label = "Calendar"
-		}
-		row2Items = calendarNavItems(m.calendars)
-		row2Selected = m.calIndex
-	case sectionJournal:
-		if m.dateIndex >= 0 && m.dateIndex < len(m.journalDates) {
-			row2Label = m.journalDates[m.dateIndex]
-		} else {
-			row2Label = "Journal"
-		}
-		row2Items = journalNavItems(m.journalDates)
-		row2Selected = m.dateIndex
-	}
+	// Row 2: sub-nav rule + items (delegated to active section view)
+	row2Items, row2Selected, row2Label, centered := m.activeView.SubnavItems()
 
 	b.WriteString(renderRule(m.width, row2Label))
 	b.WriteString("\n")
 	if len(row2Items) > 0 {
-		centered := m.section != sectionJournal
 		b.WriteString(renderNavRow(row2Items, row2Selected, m.focus == rowSubnav, m.width, centered))
 		b.WriteString("\n")
 	}

@@ -202,22 +202,22 @@ func TestSingleCtrlCDoesNotQuit(t *testing.T) {
 
 func TestEscExitsThread(t *testing.T) {
 	m := modelWithBoxes()
-	m.inThread = true
+	m.mailView.inThread = true
 
 	updated, _ := m.Update(keyPress("esc"))
 	result := updated.(model)
-	if result.inThread {
+	if result.activeView.InThread() {
 		t.Error("esc should exit thread")
 	}
 }
 
 func TestQExitsThread(t *testing.T) {
 	m := modelWithBoxes()
-	m.inThread = true
+	m.mailView.inThread = true
 
 	updated, _ := m.Update(keyPress("q"))
 	result := updated.(model)
-	if result.inThread {
+	if result.activeView.InThread() {
 		t.Error("q should exit thread")
 	}
 }
