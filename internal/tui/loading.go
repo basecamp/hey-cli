@@ -25,7 +25,7 @@ const (
 // Frames 0-6: sand drains from top to bottom over ~3 seconds.
 // Frames 7-10: hourglass rotates 180° — tilts to horizontal, continues
 // to inverted, then the next drain cycle starts upright again.
-var hourglassFrames = [][]string{
+var hourglassFrames = [hourglassTotalFrames][]string{
 	{ // 0: full top, empty bottom
 		"   ╭───╮   ",
 		"   │⣿⣿⣿│   ",
@@ -139,6 +139,10 @@ func hourglassFrameIndex(phase float64) int {
 
 // loadingView renders an animated hourglass centered in the content area.
 func loadingView(width, contentHeight int, phase float64) string {
+	if width < hourglassVisualWidth || contentHeight < 2 {
+		return "Loading..."
+	}
+
 	frame := hourglassFrames[hourglassFrameIndex(phase)]
 
 	glass := lipgloss.NewStyle().Foreground(colorPrimary)

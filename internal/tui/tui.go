@@ -835,7 +835,6 @@ func formatTimestamp(ts time.Time) string {
 
 func (m model) fetchBoxes() tea.Cmd {
 	return func() tea.Msg {
-		time.Sleep(12 * time.Second) // intentional delay for testing loading animation
 		result, err := m.sdk.Boxes().List(m.ctx)
 		if err != nil {
 			return errMsg{err}
