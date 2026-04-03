@@ -1,11 +1,8 @@
 package tui
 
 import (
-	"math"
 	"strings"
-	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
 
@@ -41,71 +38,6 @@ func newStyles() styles {
 		helpDesc:  lipgloss.NewStyle().Foreground(colorMuted),
 		helpSep:   lipgloss.NewStyle().Foreground(colorMuted),
 	}
-}
-
-// --- Loading wave ---
-
-// spinnerTick returns a command that ticks every 50ms for the loading animation.
-func spinnerTick() tea.Cmd {
-	return tea.Tick(50*time.Millisecond, func(time.Time) tea.Msg {
-		return spinnerTickMsg{}
-	})
-}
-
-// loadingView renders an animated braille ripple inside a bordered box.
-func loadingView(width int, phase float64) string {
-	border := lipgloss.NewStyle().Foreground(colorMuted)
-	wave := lipgloss.NewStyle().Foreground(colorPrimary)
-
-	barWidth := min(width-4, 30)
-	if barWidth <= 0 {
-		return "Loading..."
-	}
-
-	bar := string(generateWave(barWidth, phase))
-	inner := " " + bar + " "
-	innerWidth := lipgloss.Width(inner)
-
-	top := border.Render("╭" + strings.Repeat("─", innerWidth) + "╮")
-	mid := border.Render("│") + wave.Render(inner) + border.Render("│")
-	bot := border.Render("╰" + strings.Repeat("─", innerWidth) + "╯")
-
-	label := lipgloss.NewStyle().Foreground(colorMuted).Render("  Loading...")
-
-	return top + "\n" + mid + "\n" + bot + "\n" + label
-}
-
-// generateWave creates a ripple pattern in braille — concentric rings
-// expanding outward from the center, like a droplet hitting water.
-func generateWave(width int, phase float64) []rune {
-	cx := float64(width)
-	cy := 1.5
-
-	pattern := make([]rune, width)
-	for i := range pattern {
-		var bits byte
-		for row := range 4 {
-			for col := range 2 {
-				x := float64(2*i+col) - cx
-				y := (float64(row) - cy) * 2.5
-				dist := math.Sqrt(x*x + y*y)
-				v := math.Sin(dist*0.7 - phase)
-				if v > 0.1 {
-					bits |= dotBit[row][col]
-				}
-			}
-		}
-		pattern[i] = rune(0x2800 + int(bits)) //nolint:gosec // G115: bits is a byte (0-255), always valid braille range
-	}
-	return pattern
-}
-
-// dotBit maps (row, col) to the braille bit for that dot position.
-var dotBit = [4][2]byte{
-	{1 << 0, 1 << 3}, // row 0
-	{1 << 1, 1 << 4}, // row 1
-	{1 << 2, 1 << 5}, // row 2
-	{1 << 6, 1 << 7}, // row 3
 }
 
 // --- Error display ---

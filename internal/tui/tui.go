@@ -590,7 +590,11 @@ func (m model) View() tea.View {
 	if m.err != nil {
 		b.WriteString(errorView(m.err.Error(), m.width))
 	} else if m.loading {
-		b.WriteString(loadingView(m.width, m.spinnerPhase))
+		contentH := m.height - headerHeight - m.help.height() - 3
+		if contentH < 1 {
+			contentH = 1
+		}
+		b.WriteString(loadingView(m.width, contentH, m.spinnerPhase))
 	} else if m.inThread {
 		b.WriteString(m.topicViewport.View())
 	} else {
@@ -831,6 +835,7 @@ func formatTimestamp(ts time.Time) string {
 
 func (m model) fetchBoxes() tea.Cmd {
 	return func() tea.Msg {
+		time.Sleep(12 * time.Second) // intentional delay for testing loading animation
 		result, err := m.sdk.Boxes().List(m.ctx)
 		if err != nil {
 			return errMsg{err}
