@@ -804,19 +804,28 @@ func truncateStr(s string, maxLen int) string {
 	if maxLen <= 0 {
 		return ""
 	}
-	if len(s) <= maxLen {
+	if lipgloss.Width(s) <= maxLen {
 		return s
 	}
 	if maxLen <= 1 {
 		return "…"
 	}
-	return s[:maxLen-1] + "…"
+	runes := []rune(s)
+	for len(runes) > 0 && lipgloss.Width(string(runes))+lipgloss.Width("…") > maxLen {
+		runes = runes[:len(runes)-1]
+	}
+	return string(runes) + "…"
 }
 
 func centerPad(s string, width int) string {
-	pad := width - len(s)
+	sw := lipgloss.Width(s)
+	pad := width - sw
 	if pad <= 0 {
-		return s[:width]
+		runes := []rune(s)
+		for len(runes) > 0 && lipgloss.Width(string(runes)) > width {
+			runes = runes[:len(runes)-1]
+		}
+		return string(runes)
 	}
 	left := pad / 2
 	right := pad - left

@@ -91,7 +91,7 @@ var hourglassFrames = [hourglassTotalFrames][]string{
 		"     │⣿⣿⣿│ ",
 		"      ╰───╯",
 	},
-	{ // 8: 90° horizontal — sand on right
+	{ // 8: ~67° tilt
 		"╭─         ",
 		"│ ──╮      ",
 		"╰─   ⣠╭──  ",
@@ -99,7 +99,7 @@ var hourglassFrames = [hourglassTotalFrames][]string{
 		"      ╰──⣿│",
 		"         ─╯",
 	},
-	{ // 8: 90° horizontal — sand on right
+	{ // 9: 90° horizontal — sand on right
 		"           ",
 		"╭───╮ ╭───╮",
 		"│    ⣠⣾⣿⣿⣿│",
@@ -107,7 +107,7 @@ var hourglassFrames = [hourglassTotalFrames][]string{
 		"           ",
 		"           ",
 	},
-	{ // 8: 90° horizontal — sand on right
+	{ // 10: ~113° tilt
 		"         ─╮",
 		"      ╭──⣿│",
 		"  ──╮ ⣾⣿⣿─╯",
@@ -115,7 +115,7 @@ var hourglassFrames = [hourglassTotalFrames][]string{
 		"│ ──╯      ",
 		"╰─         ",
 	},
-	{ // 9: ~135° tilt — sand now top-right, empty bottom-left
+	{ // 11: ~135° tilt — sand now top-right, empty bottom-left
 		"      ╭───╮",
 		"     │⣿⣿⣿│ ",
 		"    ╰╮ ╭╯  ",
@@ -123,7 +123,7 @@ var hourglassFrames = [hourglassTotalFrames][]string{
 		" │   │     ",
 		"╰───╯      ",
 	},
-	{ // 10: 180° inverted — sand at top, glass upside-down
+	{ // 12: 180° inverted — sand at top, glass upside-down
 		"   ╭───╮   ",
 		"   │⣿⣿⣿│   ",
 		"   ╰╮⣿╭╯   ",

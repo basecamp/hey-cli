@@ -260,7 +260,11 @@ func (v *calendarView) fetchIdentity() tea.Cmd {
 		if err != nil || identity == nil {
 			return identityLoadedMsg{firstWeekDay: time.Monday}
 		}
-		return identityLoadedMsg{firstWeekDay: time.Weekday(identity.FirstWeekDay)}
+		wd := identity.FirstWeekDay
+		if wd < 0 || wd > 6 {
+			wd = 1 // default to Monday
+		}
+		return identityLoadedMsg{firstWeekDay: time.Weekday(wd)}
 	}
 }
 
