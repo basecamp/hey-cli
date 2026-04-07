@@ -14,10 +14,10 @@ import (
 const (
 	hourglassVisualWidth = 11  // visual cell width of each frame line
 	hourglassDrainFrames = 7   // frames where sand falls
-	hourglassFlipFrames  = 4   // frames for the rotation
-	hourglassTotalFrames = 11  // drain + flip
+	hourglassFlipFrames  = 6   // frames for the rotation
+	hourglassTotalFrames = 13  // drain + flip
 	hourglassDrainPhase  = 9.0 // ~3 sec of drain (60 ticks × 0.15)
-	hourglassFlipPhase   = 2.4 // ~0.8 sec of flip (16 ticks × 0.15)
+	hourglassFlipPhase   = 3.6 // ~1.2 sec of flip (24 ticks × 0.15)
 	hourglassCyclePhase  = hourglassDrainPhase + hourglassFlipPhase
 )
 
@@ -92,12 +92,28 @@ var hourglassFrames = [hourglassTotalFrames][]string{
 		"      ╰───╯",
 	},
 	{ // 8: 90° horizontal — sand on right
+		"╭─         ",
+		"│ ──╮      ",
+		"╰─   ⣠╭──  ",
+		"  ──╯ ⣾⣿⣿─╮",
+		"      ╰──⣿│",
+		"         ─╯",
+	},
+	{ // 8: 90° horizontal — sand on right
 		"           ",
 		"╭───╮ ╭───╮",
 		"│    ⣠⣾⣿⣿⣿│",
 		"╰───╯ ╰───╯",
 		"           ",
 		"           ",
+	},
+	{ // 8: 90° horizontal — sand on right
+		"         ─╮",
+		"      ╭──⣿│",
+		"  ──╮ ⣾⣿⣿─╯",
+		"╭─    ╰──  ",
+		"│ ──╯      ",
+		"╰─         ",
 	},
 	{ // 9: ~135° tilt — sand now top-right, empty bottom-left
 		"      ╭───╮",

@@ -28,6 +28,7 @@ type Recording struct {
 	UpdatedAt        string    `json:"updated_at"`
 	Type             string    `json:"type"`
 	CompletedAt      string    `json:"completed_at,omitempty"`
+	Label            string    `json:"label,omitempty"`
 	Calendar         *Calendar `json:"calendar,omitempty"`
 	RemindersLabel   string    `json:"reminders_label,omitempty"`
 	OccurrencesURL   string    `json:"occurrences_url,omitempty"`

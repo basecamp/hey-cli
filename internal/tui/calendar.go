@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"fmt"
-	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/viewport"
@@ -26,6 +24,10 @@ type recordingDetailMsg struct {
 	body  string
 }
 
+type identityLoadedMsg struct {
+	firstWeekDay time.Weekday
+}
+
 // --- Calendar section view ---
 
 type calendarView struct {
@@ -34,7 +36,19 @@ type calendarView struct {
 	calendars []models.Calendar
 	calIndex  int
 
-	recordingL    recordingList
+	viewMode     calendarViewMode
+	firstWeekDay time.Weekday
+	anchorDate   time.Time
+
+	// Recordings split by type
+	events []models.Recording
+	todos  []models.Recording
+	habits []models.Recording
+
+	// Scrollable content viewport for the calendar views
+	contentVP viewport.Model
+
+	// Detail view
 	topicViewport viewport.Model
 	topicContent  string
 	inThread      bool
@@ -44,24 +58,32 @@ type calendarView struct {
 func newCalendarView(vc *viewContext) *calendarView {
 	return &calendarView{
 		vc:            vc,
+		anchorDate:    time.Now(),
+		firstWeekDay:  time.Monday,
 		topicViewport: viewport.New(viewport.WithWidth(0), viewport.WithHeight(0)),
+		contentVP:     viewport.New(viewport.WithWidth(0), viewport.WithHeight(0)),
 	}
 }
 
 func (v *calendarView) Init() tea.Cmd {
+	cmds := []tea.Cmd{v.fetchIdentity()}
 	if len(v.calendars) == 0 {
 		v.loading = true
-		return v.fetchCalendars()
-	}
-	if v.calIndex < len(v.calendars) {
+		cmds = append(cmds, v.fetchCalendars())
+	} else if v.calIndex < len(v.calendars) {
 		v.loading = true
-		return v.fetchRecordings(v.calendars[v.calIndex].ID)
+		cmds = append(cmds, v.fetchRecordings(v.calendars[v.calIndex].ID))
 	}
-	return nil
+	return tea.Batch(cmds...)
 }
 
 func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
+	case identityLoadedMsg:
+		v.firstWeekDay = msg.firstWeekDay
+		v.rebuildView()
+		return nil, true
+
 	case calendarsLoadedMsg:
 		v.loading = false
 		v.calendars = []models.Calendar(msg)
@@ -74,7 +96,8 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 
 	case recordingsLoadedMsg:
 		v.loading = false
-		v.recordingL.setRecordings(msg.recordings)
+		v.events, v.todos, v.habits = splitRecordings(msg.recordings)
+		v.rebuildView()
 		return nil, true
 
 	case recordingDetailMsg:
@@ -99,16 +122,21 @@ func (v *calendarView) View() string {
 	if v.inThread {
 		return v.topicViewport.View()
 	}
-	return v.recordingL.view()
+	return v.contentVP.View()
 }
 
-func (v *calendarView) HelpBindings() []helpBinding { return nil }
+func (v *calendarView) HelpBindings() []helpBinding {
+	return []helpBinding{
+		{"v", v.viewMode.next().String() + " view"},
+	}
+}
 
 func (v *calendarView) SubnavItems() ([]navItem, int, string, bool) {
 	label := "Calendar"
 	if v.calIndex >= 0 && v.calIndex < len(v.calendars) {
 		label = v.calendars[v.calIndex].Name
 	}
+	label += " · " + v.viewMode.String()
 	return calendarNavItems(v.calendars), v.calIndex, label, true
 }
 
@@ -137,18 +165,21 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		return cmd
 	}
 
-	switch msg.Key().Code {
-	case tea.KeyUp:
-		v.recordingL.moveUp()
-	case tea.KeyDown:
-		v.recordingL.moveDown()
-	case tea.KeyEnter:
-		r := v.recordingL.selectedRecording()
-		if r != nil {
-			return v.showRecordingDetail(*r)
+	switch msg.String() {
+	case "v":
+		v.viewMode = v.viewMode.next()
+		if v.calIndex >= 0 && v.calIndex < len(v.calendars) {
+			v.loading = true
+			return v.fetchRecordings(v.calendars[v.calIndex].ID)
 		}
+		v.rebuildView()
+		return nil
 	}
-	return nil
+
+	// Delegate scrolling to the content viewport
+	var cmd tea.Cmd
+	v.contentVP, cmd = v.contentVP.Update(msg)
+	return cmd
 }
 
 func (v *calendarView) InThread() bool { return v.inThread }
@@ -156,9 +187,46 @@ func (v *calendarView) ExitThread()    { v.inThread = false }
 func (v *calendarView) Loading() bool  { return v.loading }
 
 func (v *calendarView) Resize(width, height int) {
-	v.recordingL.setSize(width, height)
+	v.contentVP.SetWidth(width)
+	v.contentVP.SetHeight(height)
 	v.topicViewport.SetWidth(width)
 	v.topicViewport.SetHeight(height)
+	v.rebuildView()
+}
+
+// rebuildView re-renders the current view mode content into the viewport.
+func (v *calendarView) rebuildView() {
+	w := v.vc.width
+	h := v.vc.height
+	if w == 0 || h == 0 {
+		return
+	}
+
+	dayLabels := dayLabelsFromEvents(v.events)
+
+	var content string
+	switch v.viewMode {
+	case viewDay:
+		content = renderDayView(v.events, v.todos, v.habits, v.anchorDate, w, h)
+	case viewWeek:
+		content = renderWeekView(v.events, v.todos, v.habits, v.anchorDate, v.firstWeekDay, w, h, dayLabels)
+	case viewYear:
+		content = renderYearView(v.events, v.anchorDate, v.firstWeekDay, w, h, dayLabels)
+	}
+
+	v.contentVP.SetContent(content)
+
+	// For year view, scroll to the current week
+	if v.viewMode == viewYear {
+		today := time.Now()
+		gridStart := weekStartDate(time.Date(v.anchorDate.Year(), 1, 1, 0, 0, 0, 0, v.anchorDate.Location()), v.firstWeekDay)
+		weeksToToday := int(today.Sub(gridStart).Hours()/24) / 7
+		// Center today's week in the viewport (+2 for header rows)
+		offset := max(weeksToToday-h/2+2, 0)
+		v.contentVP.SetYOffset(offset)
+	} else {
+		v.contentVP.GotoTop()
+	}
 }
 
 // --- SDK type converters ---
@@ -177,10 +245,24 @@ func sdkRecordingToModel(r generated.Recording) models.Recording {
 		StartsAtTimeZone: r.StartsAtTimeZone, EndsAtTimeZone: r.EndsAtTimeZone,
 		CreatedAt: formatTimestamp(r.CreatedAt), UpdatedAt: formatTimestamp(r.UpdatedAt),
 		Type: r.Type, Content: r.Content, RemindersLabel: r.RemindersLabel,
+		CompletedAt: formatTimestamp(r.CompletedAt), Label: r.Label,
 	}
 }
 
 // --- Fetch commands ---
+
+func (v *calendarView) fetchIdentity() tea.Cmd {
+	return func() tea.Msg {
+		if v.vc.sdk == nil || v.vc.ctx == nil {
+			return identityLoadedMsg{firstWeekDay: time.Monday}
+		}
+		identity, err := v.vc.sdk.Identity().GetIdentity(v.vc.ctx)
+		if err != nil || identity == nil {
+			return identityLoadedMsg{firstWeekDay: time.Monday}
+		}
+		return identityLoadedMsg{firstWeekDay: time.Weekday(identity.FirstWeekDay)}
+	}
+}
 
 func (v *calendarView) fetchCalendars() tea.Cmd {
 	return func() tea.Msg {
@@ -200,11 +282,11 @@ func (v *calendarView) fetchCalendars() tea.Cmd {
 }
 
 func (v *calendarView) fetchRecordings(calID int64) tea.Cmd {
+	start, end := dateRangeForMode(v.viewMode, v.anchorDate, v.firstWeekDay)
 	return func() tea.Msg {
-		now := time.Now()
 		resp, err := v.vc.sdk.Calendars().GetRecordings(v.vc.ctx, calID, &generated.GetCalendarRecordingsParams{
-			StartsOn: now.Format("2006-01-02"),
-			EndsOn:   now.AddDate(0, 0, 30).Format("2006-01-02"),
+			StartsOn: start.Format("2006-01-02"),
+			EndsOn:   end.Format("2006-01-02"),
 		})
 		if err != nil {
 			return errMsg{err}
@@ -218,43 +300,5 @@ func (v *calendarView) fetchRecordings(calID int64) tea.Cmd {
 			}
 		}
 		return recordingsLoadedMsg{recordings: all}
-	}
-}
-
-func (v *calendarView) showRecordingDetail(rec models.Recording) tea.Cmd {
-	return func() tea.Msg {
-		var b strings.Builder
-
-		if rec.Title != "" {
-			fmt.Fprintf(&b, "%s\n\n", rec.Title)
-		}
-		if rec.AllDay {
-			fmt.Fprintf(&b, "All day\n")
-		} else {
-			if len(rec.StartsAt) >= 16 {
-				fmt.Fprintf(&b, "Starts: %s\n", rec.StartsAt[:16])
-			}
-			if len(rec.EndsAt) >= 16 {
-				fmt.Fprintf(&b, "Ends:   %s\n", rec.EndsAt[:16])
-			}
-		}
-		if rec.StartsAtTimeZone != "" {
-			fmt.Fprintf(&b, "Timezone: %s\n", rec.StartsAtTimeZone)
-		}
-		if rec.Recurring {
-			fmt.Fprintf(&b, "Recurring: yes\n")
-		}
-		if rec.RemindersLabel != "" {
-			fmt.Fprintf(&b, "Reminders: %s\n", rec.RemindersLabel)
-		}
-		if rec.Content != "" {
-			fmt.Fprintf(&b, "\n%s\n", rec.Content)
-		}
-
-		title := rec.Title
-		if title == "" && len(rec.StartsAt) >= 10 {
-			title = rec.StartsAt[:10]
-		}
-		return recordingDetailMsg{title: title, body: b.String()}
 	}
 }

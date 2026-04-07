@@ -2,6 +2,7 @@ package tui
 
 import (
 	"testing"
+	"time"
 
 	"github.com/basecamp/hey-cli/internal/models"
 )
@@ -15,13 +16,16 @@ func testCalendars() []models.Calendar {
 
 func testRecordings() []models.Recording {
 	return []models.Recording{
-		{ID: 200, Title: "Standup", StartsAt: "2025-03-01T09:00:00Z", Type: "event"},
-		{ID: 201, Title: "Lunch", StartsAt: "2025-03-01T12:00:00Z", AllDay: false, Type: "event"},
+		{ID: 200, Title: "Standup", StartsAt: "2025-03-01T09:00:00Z", EndsAt: "2025-03-01T09:30:00Z", Type: "CalendarEvent"},
+		{ID: 201, Title: "Lunch", StartsAt: "2025-03-01T12:00:00Z", EndsAt: "2025-03-01T13:00:00Z", AllDay: false, Type: "CalendarEvent"},
+		{ID: 202, Title: "Read a book", StartsAt: "2025-03-01T06:00:00Z", Type: "Habit"},
+		{ID: 203, Title: "Buy milk", StartsAt: "2025-03-01T00:00:00Z", Type: "CalendarTodo"},
 	}
 }
 
 func calendarWithRecordings() *calendarView {
 	v := newCalendarView(testVC())
+	v.Resize(80, 30)
 	v.Update(calendarsLoadedMsg(testCalendars()))
 	v.Update(recordingsLoadedMsg{recordings: testRecordings()})
 	return v
@@ -65,6 +69,7 @@ func TestCalendarViewHandlesCalendarsLoaded(t *testing.T) {
 
 func TestCalendarViewHandlesRecordingsLoaded(t *testing.T) {
 	v := newCalendarView(testVC())
+	v.Resize(80, 30)
 	v.calendars = testCalendars()
 	v.loading = true
 
@@ -75,8 +80,14 @@ func TestCalendarViewHandlesRecordingsLoaded(t *testing.T) {
 	if v.loading {
 		t.Error("loading should be false after recordings loaded")
 	}
-	if len(v.recordingL.recordings) != 2 {
-		t.Errorf("expected 2 recordings, got %d", len(v.recordingL.recordings))
+	if len(v.events) != 2 {
+		t.Errorf("expected 2 events, got %d", len(v.events))
+	}
+	if len(v.habits) != 1 {
+		t.Errorf("expected 1 habit, got %d", len(v.habits))
+	}
+	if len(v.todos) != 1 {
+		t.Errorf("expected 1 todo, got %d", len(v.todos))
 	}
 }
 
@@ -92,6 +103,19 @@ func TestCalendarViewHandlesRecordingDetail(t *testing.T) {
 	}
 }
 
+func TestCalendarViewHandlesIdentityLoaded(t *testing.T) {
+	v := newCalendarView(testVC())
+	v.Resize(80, 30)
+
+	_, consumed := v.Update(identityLoadedMsg{firstWeekDay: time.Sunday})
+	if !consumed {
+		t.Error("identityLoadedMsg should be consumed")
+	}
+	if v.firstWeekDay != time.Sunday {
+		t.Errorf("firstWeekDay = %v, want Sunday", v.firstWeekDay)
+	}
+}
+
 func TestCalendarViewIgnoresUnrelatedMessages(t *testing.T) {
 	v := newCalendarView(testVC())
 	_, consumed := v.Update(boxesLoadedMsg{})
@@ -100,33 +124,28 @@ func TestCalendarViewIgnoresUnrelatedMessages(t *testing.T) {
 	}
 }
 
-// --- Content key handling ---
+// --- View mode cycling ---
 
-func TestCalendarViewContentKeyUpDown(t *testing.T) {
+func TestCalendarViewModeCycle(t *testing.T) {
 	v := calendarWithRecordings()
 
-	if v.recordingL.cursor != 0 {
-		t.Fatalf("initial cursor = %d, want 0", v.recordingL.cursor)
+	if v.viewMode != viewDay {
+		t.Fatalf("initial mode = %v, want Day", v.viewMode)
 	}
 
-	v.HandleContentKey(keyPress("down"))
-	if v.recordingL.cursor != 1 {
-		t.Errorf("after down: cursor = %d, want 1", v.recordingL.cursor)
+	v.HandleContentKey(keyPress("v"))
+	if v.viewMode != viewWeek {
+		t.Errorf("after first v: mode = %v, want Week", v.viewMode)
 	}
 
-	v.HandleContentKey(keyPress("up"))
-	if v.recordingL.cursor != 0 {
-		t.Errorf("after up: cursor = %d, want 0", v.recordingL.cursor)
+	v.HandleContentKey(keyPress("v"))
+	if v.viewMode != viewYear {
+		t.Errorf("after second v: mode = %v, want Year", v.viewMode)
 	}
-}
 
-func TestCalendarViewContentKeyEnter(t *testing.T) {
-	v := calendarWithRecordings()
-	v.Resize(80, 30)
-
-	cmd := v.HandleContentKey(keyPress("enter"))
-	if cmd == nil {
-		t.Fatal("enter on a recording should return a command")
+	v.HandleContentKey(keyPress("v"))
+	if v.viewMode != viewDay {
+		t.Errorf("after third v: mode = %v, want Day (wrap around)", v.viewMode)
 	}
 }
 
@@ -142,8 +161,8 @@ func TestCalendarViewSubnavItems(t *testing.T) {
 	if selected != 0 {
 		t.Errorf("selected = %d, want 0", selected)
 	}
-	if label != "Work" {
-		t.Errorf("label = %q, want Work", label)
+	if label != "Work · Day" {
+		t.Errorf("label = %q, want \"Work · Day\"", label)
 	}
 	if !centered {
 		t.Error("calendar subnav should be centered")
@@ -192,10 +211,13 @@ func TestCalendarViewInThread(t *testing.T) {
 
 // --- Help bindings ---
 
-func TestCalendarViewHelpBindingsEmpty(t *testing.T) {
+func TestCalendarViewHelpBindingsShowsViewToggle(t *testing.T) {
 	v := calendarWithRecordings()
 	bindings := v.HelpBindings()
-	if len(bindings) != 0 {
-		t.Errorf("calendar should have no extra bindings, got %d", len(bindings))
+	if len(bindings) != 1 {
+		t.Fatalf("expected 1 binding, got %d", len(bindings))
+	}
+	if bindings[0].key != "v" {
+		t.Errorf("binding key = %q, want \"v\"", bindings[0].key)
 	}
 }
