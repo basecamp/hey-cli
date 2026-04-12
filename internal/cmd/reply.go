@@ -14,6 +14,7 @@ import (
 type replyCommand struct {
 	cmd     *cobra.Command
 	message string
+	from    string
 }
 
 func newReplyCommand() *replyCommand {
@@ -31,6 +32,7 @@ func newReplyCommand() *replyCommand {
 	}
 
 	replyCommand.cmd.Flags().StringVarP(&replyCommand.message, "message", "m", "", "Reply message (or opens $EDITOR)")
+	replyCommand.cmd.Flags().StringVar(&replyCommand.from, "from", "", "Sender email address (overrides default)")
 
 	return replyCommand
 }
@@ -90,8 +92,40 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if err = sdk.Entries().CreateReply(ctx, latestEntryID, message, addressed.To, addressed.CC, addressed.BCC); err != nil {
-		return convertSDKError(err)
+	hasSenderOverride := c.from != "" || cfg.DefaultSender != ""
+	if hasSenderOverride {
+		senderID, err := effectiveSenderID(ctx, c.from)
+		if err != nil {
+			return err
+		}
+		body := map[string]any{
+			"acting_sender_id": senderID,
+			"message": map[string]any{
+				"content": message,
+			},
+		}
+		addrMap := map[string]any{}
+		if len(addressed.To) > 0 {
+			addrMap["directly"] = addressed.To
+		}
+		if len(addressed.CC) > 0 {
+			addrMap["copied"] = addressed.CC
+		}
+		if len(addressed.BCC) > 0 {
+			addrMap["blindcopied"] = addressed.BCC
+		}
+		if len(addrMap) > 0 {
+			body["entry"] = map[string]any{
+				"addressed": addrMap,
+			}
+		}
+		if _, err := sdk.PostMutation(ctx, fmt.Sprintf("/entries/%d/replies.json", latestEntryID), body); err != nil {
+			return convertSDKError(err)
+		}
+	} else {
+		if err = sdk.Entries().CreateReply(ctx, latestEntryID, message, addressed.To, addressed.CC, addressed.BCC); err != nil {
+			return convertSDKError(err)
+		}
 	}
 
 	if writer.IsStyled() {
