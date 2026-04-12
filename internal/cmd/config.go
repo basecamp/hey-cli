@@ -41,7 +41,7 @@ func newConfigSetCommand() *cobra.Command {
 		Short: "Set a configuration value in the global config",
 		Example: `  hey config set base_url http://app.hey.localhost:3003
   hey config set base_url https://app.hey.com
-  hey config set default_sender erik@parrotapp.com`,
+  hey config set default_sender you@hey.com`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			key, value := normalizeConfigKey(args[0]), args[1]
