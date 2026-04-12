@@ -213,11 +213,17 @@ func fetchScreenerItems(ctx context.Context) ([]screenerItem, string, string, er
 	emailRe := regexp.MustCompile(`[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}`)
 	allEmails := emailRe.FindAllString(body, -1)
 
-	// Filter out the user's own emails (they appear in nav/header)
+	// Filter out the authenticated user's own emails (they appear in nav/header).
+	// Look up dynamically via the identity endpoint.
+	ownEmails := map[string]bool{}
+	if identity, err := sdk.Identity().GetIdentity(ctx); err == nil && identity != nil {
+		for _, s := range identity.Senders {
+			ownEmails[strings.ToLower(s.EmailAddress)] = true
+		}
+	}
 	senderEmails := []string{}
 	for _, e := range allEmails {
-		lower := strings.ToLower(e)
-		if lower != "erik.dahl@hey.com" && lower != "erik@parrotapp.com" {
+		if !ownEmails[strings.ToLower(e)] {
 			senderEmails = append(senderEmails, e)
 		}
 	}

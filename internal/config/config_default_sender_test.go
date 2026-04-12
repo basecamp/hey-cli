@@ -35,7 +35,7 @@ func TestDefaultSenderFromGlobalConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	data, _ := json.Marshal(map[string]string{"default_sender": "erik@parrotapp.com"})
+	data, _ := json.Marshal(map[string]string{"default_sender": "alice@hey.com"})
 	if err := os.WriteFile(filepath.Join(dir, configFile), data, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -45,8 +45,8 @@ func TestDefaultSenderFromGlobalConfig(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if cfg.DefaultSender != "erik@parrotapp.com" {
-		t.Errorf("DefaultSender = %q, want %q", cfg.DefaultSender, "erik@parrotapp.com")
+	if cfg.DefaultSender != "alice@hey.com" {
+		t.Errorf("DefaultSender = %q, want %q", cfg.DefaultSender, "alice@hey.com")
 	}
 	if src := cfg.SourceOf("default_sender"); src != SourceGlobal {
 		t.Errorf("source = %q, want %q", src, SourceGlobal)
