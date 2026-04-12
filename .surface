@@ -66,6 +66,12 @@ hey recordings --starts-on
 hey reply
 hey reply --from
 hey reply --message
+hey screener
+hey screener approve
+hey screener deny
+hey screener feed
+hey screener spam
+hey screener trail
 hey seen
 hey setup
 hey skill

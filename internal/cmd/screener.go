@@ -233,28 +233,29 @@ func fetchScreenerItems(ctx context.Context) ([]screenerItem, string, string, er
 		}
 	}
 
-	// Extract feed/trail box IDs from hidden form inputs
-	feedRe := regexp.MustCompile(`data-clearances-target="feedboxButton"[^<]*<input[^>]*name="designation_box_id"[^>]*value="(\d+)"`)
+	// Extract feed/trail box IDs from hidden form inputs.
+	// The HTML has forms where designation_box_id appears before the feedbox/trailbox button,
+	// so we use (?s) to match across newlines.
+	feedRe := regexp.MustCompile(`(?s)designation_box_id[^>]*value="(\d+)"[^<]*</input>?[^<]*<button[^>]*feedboxButton`)
 	if m := feedRe.FindStringSubmatch(body); m != nil {
 		feedBoxID = m[1]
 	}
-	// Alternative: find feedbox button form
+	// Alternative pattern: button target appears after the input in the same form
 	if feedBoxID == "" {
-		// Look for the pattern: feedboxButton form has designation_box_id
-		feedForms := regexp.MustCompile(`feedboxButton.*?designation_box_id.*?value="(\d+)"`).FindStringSubmatch(body)
-		if feedForms != nil {
-			feedBoxID = feedForms[1]
+		altFeedRe := regexp.MustCompile(`(?s)designation_box_id"[^>]*value="(\d+)".*?feedboxButton`)
+		if m := altFeedRe.FindStringSubmatch(body); m != nil {
+			feedBoxID = m[1]
 		}
 	}
 
-	trailRe := regexp.MustCompile(`data-clearances-target="trailboxButton"[^<]*<input[^>]*name="designation_box_id"[^>]*value="(\d+)"`)
+	trailRe := regexp.MustCompile(`(?s)designation_box_id[^>]*value="(\d+)"[^<]*</input>?[^<]*<button[^>]*trailboxButton`)
 	if m := trailRe.FindStringSubmatch(body); m != nil {
 		trailBoxID = m[1]
 	}
 	if trailBoxID == "" {
-		trailForms := regexp.MustCompile(`trailboxButton.*?designation_box_id.*?value="(\d+)"`).FindStringSubmatch(body)
-		if trailForms != nil {
-			trailBoxID = trailForms[1]
+		altTrailRe := regexp.MustCompile(`(?s)designation_box_id"[^>]*value="(\d+)".*?trailboxButton`)
+		if m := altTrailRe.FindStringSubmatch(body); m != nil {
+			trailBoxID = m[1]
 		}
 	}
 
