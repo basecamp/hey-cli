@@ -44,6 +44,15 @@ hey drafts
 hey drafts --all
 hey drafts --limit
 hey event
+hey event create
+hey event create --all-day
+hey event create --calendar
+hey event create --date
+hey event create --end
+hey event create --reminder
+hey event create --start
+hey event create --timezone
+hey event create --title
 hey event list
 hey event list --all
 hey event list --calendar

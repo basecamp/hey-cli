@@ -2,10 +2,14 @@ package cmd
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
+	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/output"
 )
@@ -20,11 +24,12 @@ func newEventCommand() *eventCommand {
 		Use:   "event",
 		Short: "Manage calendar events",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list. Lists events from the personal calendar by default, or from --calendar ID.",
+			"agent_notes": "Subcommands: list, create. Lists events from the personal calendar by default, or from --calendar ID.",
 		},
 	}
 
 	eventCommand.cmd.AddCommand(newEventListCommand().cmd)
+	eventCommand.cmd.AddCommand(newEventCreateCommand().cmd)
 
 	return eventCommand
 }
@@ -107,4 +112,176 @@ func (c *eventListCommand) run(cmd *cobra.Command, args []string) error {
 		output.WithSummary(fmt.Sprintf("%d events", len(events))),
 		output.WithNotice(notice),
 	)
+}
+
+// create
+
+type eventCreateCommand struct {
+	cmd        *cobra.Command
+	title      string
+	date       string
+	allDay     bool
+	start      string
+	end        string
+	calendarID int64
+	timezone   string
+	reminders  []string
+}
+
+func newEventCreateCommand() *eventCreateCommand {
+	c := &eventCreateCommand{}
+	c.cmd = &cobra.Command{
+		Use:   "create",
+		Short: "Create a calendar event",
+		Example: `  hey event create --title "Team sync" --date 2024-06-15 --start 09:00 --end 10:00
+  hey event create --title "Holiday" --date 2024-06-15 --all-day
+  hey event create --title "Review" --date 2024-06-15 --start 14:00 --end 15:00 --reminder 30m --reminder 1h`,
+		RunE: c.run,
+	}
+
+	c.cmd.Flags().StringVar(&c.title, "title", "", "Event title (required)")
+	c.cmd.Flags().StringVar(&c.date, "date", "", "Event date YYYY-MM-DD (required)")
+	c.cmd.Flags().BoolVar(&c.allDay, "all-day", false, "Create as all-day event")
+	c.cmd.Flags().StringVar(&c.start, "start", "", "Start time HH:MM (required unless --all-day)")
+	c.cmd.Flags().StringVar(&c.end, "end", "", "End time HH:MM (required unless --all-day)")
+	c.cmd.Flags().Int64Var(&c.calendarID, "calendar", 0, "Calendar ID (defaults to personal calendar)")
+	c.cmd.Flags().StringVar(&c.timezone, "timezone", "", "IANA timezone name (defaults to local)")
+	c.cmd.Flags().StringArrayVar(&c.reminders, "reminder", nil, "Reminder duration (e.g. 30m, 1h, 2d, 1w); repeatable")
+
+	return c
+}
+
+func (c *eventCreateCommand) run(cmd *cobra.Command, args []string) error {
+	if strings.TrimSpace(c.title) == "" {
+		return output.ErrUsage("--title is required")
+	}
+	if strings.TrimSpace(c.date) == "" {
+		return output.ErrUsage("--date is required (YYYY-MM-DD)")
+	}
+	if _, err := time.Parse("2006-01-02", c.date); err != nil {
+		return output.ErrUsage("--date must be in YYYY-MM-DD format")
+	}
+	if !c.allDay {
+		if c.start == "" || c.end == "" {
+			return output.ErrUsageHint(
+				"must supply either --all-day or both --start and --end",
+				"Use --all-day for all-day events, or --start HH:MM --end HH:MM for timed events",
+			)
+		}
+		if _, err := time.Parse("15:04", c.start); err != nil {
+			return output.ErrUsage("--start must be in HH:MM format")
+		}
+		if _, err := time.Parse("15:04", c.end); err != nil {
+			return output.ErrUsage("--end must be in HH:MM format")
+		}
+	}
+
+	reminders, err := parseReminders(c.reminders)
+	if err != nil {
+		return err
+	}
+
+	if err := requireAuth(); err != nil {
+		return err
+	}
+
+	ctx := cmd.Context()
+
+	calID := c.calendarID
+	if calID == 0 {
+		payload, err := sdk.Calendars().List(ctx)
+		if err != nil {
+			return convertSDKError(err)
+		}
+		id, err := findPersonalCalendarID(unwrapCalendars(payload))
+		if err != nil {
+			return output.ErrNotFound("calendar", "personal")
+		}
+		calID = id
+	}
+
+	tz := c.timezone
+	if tz == "" && !c.allDay {
+		tz = localTimezoneName()
+	}
+
+	params := hey.CreateCalendarEventParams{
+		CalendarID: calID,
+		Title:      c.title,
+		StartsAt:   c.date,
+		EndsAt:     c.date,
+		AllDay:     c.allDay,
+		Reminders:  reminders,
+	}
+	if !c.allDay {
+		params.StartTime = c.start
+		params.EndTime = c.end
+		params.TimeZone = tz
+	}
+
+	id, err := sdk.CalendarEvents().Create(ctx, params)
+	if err != nil {
+		return convertSDKError(err)
+	}
+
+	if writer.IsStyled() {
+		fmt.Fprintf(cmd.OutOrStdout(), "Event created (id=%d).\n", id)
+		return nil
+	}
+
+	return writeOK(map[string]any{"id": id}, output.WithSummary("Event created"))
+}
+
+// parseReminderDuration parses reminder durations like "30m", "1h", "2d", "1w"
+// into time.Duration. Supports minutes, hours, days, and weeks.
+func parseReminderDuration(s string) (time.Duration, error) {
+	s = strings.TrimSpace(s)
+	if len(s) < 2 {
+		return 0, fmt.Errorf("invalid reminder %q: expected a number followed by m, h, d, or w", s)
+	}
+	unit := s[len(s)-1]
+	numStr := s[:len(s)-1]
+	n, err := strconv.Atoi(numStr)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("invalid reminder %q: expected a non-negative number followed by m, h, d, or w", s)
+	}
+	switch unit {
+	case 'm':
+		return time.Duration(n) * time.Minute, nil
+	case 'h':
+		return time.Duration(n) * time.Hour, nil
+	case 'd':
+		return time.Duration(n) * 24 * time.Hour, nil
+	case 'w':
+		return time.Duration(n) * 7 * 24 * time.Hour, nil
+	default:
+		return 0, fmt.Errorf("invalid reminder %q: unit must be m, h, d, or w", s)
+	}
+}
+
+// parseReminders converts a list of reminder strings to durations, returning
+// a usage error on the first failure.
+func parseReminders(in []string) ([]time.Duration, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	out := make([]time.Duration, 0, len(in))
+	for _, s := range in {
+		d, err := parseReminderDuration(s)
+		if err != nil {
+			return nil, output.ErrUsage(err.Error())
+		}
+		out = append(out, d)
+	}
+	return out, nil
+}
+
+// localTimezoneName returns the local IANA timezone name, falling back to
+// "UTC" if the runtime didn't resolve one.
+func localTimezoneName() string {
+	name := time.Local.String()
+	if name == "" || name == "Local" {
+		return "UTC"
+	}
+	return name
 }
