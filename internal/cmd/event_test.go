@@ -191,6 +191,32 @@ func TestEventCreateRejectsStartEndWithAllDay(t *testing.T) {
 	}
 }
 
+func TestEventCreateRejectsLocalTimezone(t *testing.T) {
+	captured := &capturedHTTP{}
+	server := eventCreateCustomServer(t, captured, defaultCalendarsPayload())
+	defer server.Close()
+
+	_, err := runEvent(t, server, "create",
+		"--title", "T",
+		"--date", "2024-06-15",
+		"--start", "09:00",
+		"--end", "10:00",
+		"--timezone", "Local",
+	)
+	if err == nil {
+		t.Fatalf("expected error for --timezone Local")
+	}
+	ae := apierr.AsError(err)
+	combined := ae.Message + " " + ae.Hint
+	if !strings.Contains(combined, "IANA") {
+		t.Errorf("expected error to mention IANA, got msg=%q hint=%q", ae.Message, ae.Hint)
+	}
+	method, _ := captured.getMethodPath()
+	if method != "" {
+		t.Errorf("should not have made HTTP request; got %s", method)
+	}
+}
+
 func TestEventCreateRejectsInvalidTimezone(t *testing.T) {
 	captured := &capturedHTTP{}
 	server := eventCreateCustomServer(t, captured, defaultCalendarsPayload())

@@ -504,6 +504,12 @@ func validateTimezone(tz string) error {
 	if tz == "" {
 		return output.ErrUsage("--timezone cannot be empty")
 	}
+	if tz == "Local" {
+		return output.ErrUsageHint(
+			`--timezone "Local" is not a valid IANA name`,
+			"pass an IANA timezone name (e.g. America/New_York)",
+		)
+	}
 	if _, err := time.LoadLocation(tz); err != nil {
 		return output.ErrUsageHint(
 			fmt.Sprintf("invalid --timezone %q", tz),
