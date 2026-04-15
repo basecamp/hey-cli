@@ -164,6 +164,25 @@ func TestEventCreateRequiresTitle(t *testing.T) {
 	}
 }
 
+func TestEventCreateRejectsTimezoneWithAllDay(t *testing.T) {
+	captured := &capturedHTTP{}
+	server := eventCreateCustomServer(t, captured, defaultCalendarsPayload())
+	defer server.Close()
+
+	_, err := runEvent(t, server, "create",
+		"--title", "Holiday",
+		"--date", "2024-06-15",
+		"--all-day",
+		"--timezone", "America/New_York",
+	)
+	if err == nil {
+		t.Fatalf("expected error when --timezone combined with --all-day")
+	}
+	if !strings.Contains(err.Error(), "--timezone") || !strings.Contains(err.Error(), "--all-day") {
+		t.Errorf("expected error to name both flags, got: %v", err)
+	}
+}
+
 func TestEventCreateTimed(t *testing.T) {
 	captured := &capturedHTTP{}
 	server := eventCreateCustomServer(t, captured, defaultCalendarsPayload())
@@ -281,6 +300,20 @@ func TestEventEditOnlyChangedFields(t *testing.T) {
 		if strings.Contains(body, f) {
 			t.Errorf("body should not contain %q when not changed; body=%s", f, body)
 		}
+	}
+}
+
+func TestEventEditRejectsTimezoneWithAllDay(t *testing.T) {
+	captured := &capturedHTTP{}
+	server := eventEditServer(t, captured)
+	defer server.Close()
+
+	_, err := runEvent(t, server, "edit", "101", "--all-day", "--timezone", "America/New_York")
+	if err == nil {
+		t.Fatalf("expected error when --timezone combined with --all-day")
+	}
+	if !strings.Contains(err.Error(), "--timezone") || !strings.Contains(err.Error(), "--all-day") {
+		t.Errorf("expected error to name both flags, got: %v", err)
 	}
 }
 
