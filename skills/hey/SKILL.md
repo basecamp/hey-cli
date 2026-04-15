@@ -229,7 +229,7 @@ hey todo delete 123                           # Delete a todo
 
 ```bash
 hey event list --json                         # List events (personal calendar by default)
-hey event list --calendar 123 --limit 10 --json  # List events in a specific calendar
+hey event list --calendar <id-or-name> --limit 10 --json  # List events in a specific calendar (names match owned calendars case-insensitively)
 hey event create --title "Team sync" --date 2024-06-15 --start 09:00 --end 10:00
 hey event create --title "Holiday" --date 2024-06-15 --all-day
 hey event create --title "Review" --date 2024-06-15 --start 14:00 --end 15:00 --reminder 30m --reminder 1h

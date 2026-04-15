@@ -87,7 +87,7 @@ hey recordings 1 --starts-on 2026-01-01 --ends-on 2026-01-31  # list events in a
 
 ```bash
 hey event list                     # list events (personal calendar by default)
-hey event list --calendar 123 --limit 10
+hey event list --calendar <id-or-name> --limit 10  # name matches owned calendars case-insensitively
 hey event create --title "Team sync" --date 2026-06-15 --start 09:00 --end 10:00
 hey event create --title "Holiday" --date 2026-06-15 --all-day
 hey event create --title "Review" --date 2026-06-15 --start 14:00 --end 15:00 --reminder 30m --reminder 1h

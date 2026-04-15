@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -24,7 +26,7 @@ func newEventCommand() *eventCommand {
 		Use:   "event",
 		Short: "Manage calendar events",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, create, edit, delete. Lists events from the personal calendar by default, or from --calendar ID.",
+			"agent_notes": "Subcommands: list, create, edit, delete. Lists events from the personal calendar by default, or from --calendar (accepts ID or owned calendar name, case-insensitive).",
 		},
 	}
 
@@ -39,10 +41,10 @@ func newEventCommand() *eventCommand {
 // list
 
 type eventListCommand struct {
-	cmd        *cobra.Command
-	limit      int
-	all        bool
-	calendarID int64
+	cmd      *cobra.Command
+	limit    int
+	all      bool
+	calendar string
 }
 
 func newEventListCommand() *eventListCommand {
@@ -52,6 +54,7 @@ func newEventListCommand() *eventListCommand {
 		Short: "List calendar events",
 		Example: `  hey event list
   hey event list --limit 10
+  hey event list --calendar Work
   hey event list --calendar 123
   hey event list --ids-only`,
 		RunE: eventListCommand.run,
@@ -59,7 +62,7 @@ func newEventListCommand() *eventListCommand {
 
 	eventListCommand.cmd.Flags().IntVar(&eventListCommand.limit, "limit", 0, "Maximum number of events to show")
 	eventListCommand.cmd.Flags().BoolVar(&eventListCommand.all, "all", false, "Fetch all results (override --limit)")
-	eventListCommand.cmd.Flags().Int64Var(&eventListCommand.calendarID, "calendar", 0, "Calendar ID (defaults to personal calendar)")
+	eventListCommand.cmd.Flags().StringVar(&eventListCommand.calendar, "calendar", "", "Calendar ID or name (defaults to personal calendar; names matched case-insensitively against owned calendars)")
 
 	return eventListCommand
 }
@@ -72,9 +75,13 @@ func (c *eventListCommand) run(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
 	var events []generated.Recording
-	if c.calendarID != 0 {
+	if c.calendar != "" {
+		calID, err := resolveCalendarID(ctx, c.calendar)
+		if err != nil {
+			return err
+		}
 		now := time.Now()
-		resp, err := sdk.Calendars().GetRecordings(ctx, c.calendarID, &generated.GetCalendarRecordingsParams{
+		resp, err := sdk.Calendars().GetRecordings(ctx, calID, &generated.GetCalendarRecordingsParams{
 			StartsOn: now.AddDate(-personalRecordingsLookbackYears, 0, 0).Format("2006-01-02"),
 			EndsOn:   now.AddDate(personalRecordingsLookaheadYears, 0, 0).Format("2006-01-02"),
 		})
@@ -123,15 +130,15 @@ func (c *eventListCommand) run(cmd *cobra.Command, args []string) error {
 // create
 
 type eventCreateCommand struct {
-	cmd        *cobra.Command
-	title      string
-	date       string
-	allDay     bool
-	start      string
-	end        string
-	calendarID int64
-	timezone   string
-	reminders  []string
+	cmd       *cobra.Command
+	title     string
+	date      string
+	allDay    bool
+	start     string
+	end       string
+	calendar  string
+	timezone  string
+	reminders []string
 }
 
 func newEventCreateCommand() *eventCreateCommand {
@@ -150,7 +157,7 @@ func newEventCreateCommand() *eventCreateCommand {
 	c.cmd.Flags().BoolVar(&c.allDay, "all-day", false, "Create as all-day event")
 	c.cmd.Flags().StringVar(&c.start, "start", "", "Start time HH:MM (required unless --all-day)")
 	c.cmd.Flags().StringVar(&c.end, "end", "", "End time HH:MM (required unless --all-day)")
-	c.cmd.Flags().Int64Var(&c.calendarID, "calendar", 0, "Calendar ID (defaults to personal calendar)")
+	c.cmd.Flags().StringVar(&c.calendar, "calendar", "", "Calendar ID or name (defaults to personal calendar; names matched case-insensitively against owned calendars)")
 	c.cmd.Flags().StringVar(&c.timezone, "timezone", "", "IANA timezone name (defaults to local)")
 	c.cmd.Flags().StringArrayVar(&c.reminders, "reminder", nil, "Reminder duration (e.g. 30m, 1h, 2d, 1w); repeatable")
 
@@ -193,15 +200,27 @@ func (c *eventCreateCommand) run(cmd *cobra.Command, args []string) error {
 
 	ctx := cmd.Context()
 
-	calID := c.calendarID
-	if calID == 0 {
+	var calID int64
+	if c.calendar != "" {
+		id, err := resolveCalendarID(ctx, c.calendar)
+		if err != nil {
+			return err
+		}
+		calID = id
+	} else {
 		payload, err := sdk.Calendars().List(ctx)
 		if err != nil {
 			return convertSDKError(err)
 		}
-		id, err := findPersonalCalendarID(unwrapCalendars(payload))
+		calendars := unwrapCalendars(payload)
+		id, err := findPersonalCalendarID(calendars)
 		if err != nil {
-			return output.ErrNotFound("calendar", "personal")
+			msg := "Couldn't determine default calendar. Pass --calendar <id-or-name>."
+			list := formatOwnedCalendarList(calendars)
+			if list != "" {
+				msg += " Available:\n" + list
+			}
+			return output.ErrUsage(msg)
 		}
 		calID = id
 	}
@@ -440,6 +459,71 @@ func parseReminders(in []string) ([]time.Duration, error) {
 		out = append(out, d)
 	}
 	return out, nil
+}
+
+// resolveCalendarID maps user input (numeric ID or calendar name) to a
+// calendar ID. Numeric input is returned as-is with no SDK call. Otherwise the
+// calendar list is fetched and filtered to Owned == true, matching Name
+// case-insensitively. Zero matches or multiple matches yield a usage error.
+func resolveCalendarID(ctx context.Context, input string) (int64, error) {
+	trimmed := strings.TrimSpace(input)
+	if id, err := strconv.ParseInt(trimmed, 10, 64); err == nil && id > 0 {
+		return id, nil
+	}
+
+	payload, err := sdk.Calendars().List(ctx)
+	if err != nil {
+		return 0, convertSDKError(err)
+	}
+	calendars := unwrapCalendars(payload)
+
+	var matches []generated.Calendar
+	for _, cal := range calendars {
+		if !cal.Owned {
+			continue
+		}
+		if strings.EqualFold(cal.Name, trimmed) {
+			matches = append(matches, cal)
+		}
+	}
+
+	switch len(matches) {
+	case 1:
+		return matches[0].Id, nil
+	case 0:
+		return 0, output.ErrUsageHint(
+			fmt.Sprintf("no owned calendar named %q", trimmed),
+			"run 'hey calendars' to list your calendars, then use --calendar <id-or-name>",
+		)
+	default:
+		var b strings.Builder
+		fmt.Fprintf(&b, "multiple owned calendars named %q; pick one by ID:\n", trimmed)
+		sort.Slice(matches, func(i, j int) bool { return matches[i].Id < matches[j].Id })
+		for _, cal := range matches {
+			fmt.Fprintf(&b, "  %d\t%s\n", cal.Id, cal.Name)
+		}
+		return 0, output.ErrUsage(strings.TrimRight(b.String(), "\n"))
+	}
+}
+
+// formatOwnedCalendarList renders owned calendars as "  ID\tName" lines sorted
+// by ID. Returns an empty string when there are no owned calendars.
+func formatOwnedCalendarList(calendars []generated.Calendar) string {
+	owned := make([]generated.Calendar, 0, len(calendars))
+	for _, cal := range calendars {
+		if cal.Owned {
+			owned = append(owned, cal)
+		}
+	}
+	if len(owned) == 0 {
+		return ""
+	}
+	sort.Slice(owned, func(i, j int) bool { return owned[i].Id < owned[j].Id })
+	var b strings.Builder
+	for _, cal := range owned {
+		fmt.Fprintf(&b, "  %d\t%s\n", cal.Id, cal.Name)
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // localTimezoneName returns the local IANA timezone name, falling back to

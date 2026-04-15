@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
 func eventServer(t *testing.T) *httptest.Server {
@@ -401,6 +403,187 @@ func TestEventDelete(t *testing.T) {
 	}
 	if path != "/calendar/events/101" {
 		t.Errorf("expected path /calendar/events/101, got %q", path)
+	}
+}
+
+// eventCreateMultiCalendarServer returns a calendar list with multiple owned
+// calendars. The caller specifies the JSON payload via calendarsPayload so
+// tests can model name-match scenarios (unique, ambiguous, missing, no
+// personal).
+func eventCreateCustomServer(t *testing.T, captured *capturedRequest, calendarsPayload []map[string]any) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/calendars.json":
+			resp := map[string]any{"calendars": calendarsPayload}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+		case r.Method == "POST" && r.URL.Path == "/calendar/events":
+			body, _ := io.ReadAll(r.Body)
+			captured.set(string(body))
+			w.Header().Set("Location", "/calendar/events/999")
+			w.WriteHeader(http.StatusFound)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+}
+
+func TestEventCreate_CalendarByName(t *testing.T) {
+	captured := &capturedRequest{}
+	server := eventCreateCustomServer(t, captured, []map[string]any{
+		{"calendar": map[string]any{"id": 42, "name": "Personal", "personal": true, "owned": true}},
+		{"calendar": map[string]any{"id": 791879, "name": "Work", "owned": true}},
+	})
+	defer server.Close()
+
+	_, err := runEventCreate(t, server,
+		"--calendar", "Work",
+		"--title", "T",
+		"--date", "2024-06-15",
+		"--all-day",
+	)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	body := captured.get()
+	if !strings.Contains(body, "calendar_event%5Bcalendar_id%5D=791879") {
+		t.Errorf("body missing calendar_id=791879; body=%s", body)
+	}
+}
+
+func TestEventCreate_CalendarByNameAmbiguous(t *testing.T) {
+	captured := &capturedRequest{}
+	server := eventCreateCustomServer(t, captured, []map[string]any{
+		{"calendar": map[string]any{"id": 100, "name": "Personal", "owned": true}},
+		{"calendar": map[string]any{"id": 200, "name": "Personal", "owned": true}},
+	})
+	defer server.Close()
+
+	_, err := runEventCreate(t, server,
+		"--calendar", "Personal",
+		"--title", "T",
+		"--date", "2024-06-15",
+		"--all-day",
+	)
+	if err == nil {
+		t.Fatalf("expected error for ambiguous calendar name")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "100") || !strings.Contains(msg, "200") {
+		t.Errorf("error should mention both IDs, got: %v", msg)
+	}
+	if !strings.Contains(strings.ToLower(msg), "id") {
+		t.Errorf("error should say to pick by ID, got: %v", msg)
+	}
+}
+
+func TestEventCreate_CalendarNotFound(t *testing.T) {
+	captured := &capturedRequest{}
+	server := eventCreateCustomServer(t, captured, []map[string]any{
+		{"calendar": map[string]any{"id": 42, "name": "Personal", "personal": true, "owned": true}},
+		{"calendar": map[string]any{"id": 99, "name": "Work", "owned": true}},
+	})
+	defer server.Close()
+
+	_, err := runEventCreate(t, server,
+		"--calendar", "Nope",
+		"--title", "T",
+		"--date", "2024-06-15",
+		"--all-day",
+	)
+	if err == nil {
+		t.Fatalf("expected error for missing calendar name")
+	}
+	ae := apierr.AsError(err)
+	combined := ae.Message + " " + ae.Hint
+	if !strings.Contains(combined, "hey calendars") {
+		t.Errorf("error should hint at 'hey calendars', got msg=%q hint=%q", ae.Message, ae.Hint)
+	}
+}
+
+func eventListCustomServer(t *testing.T, calendarsPayload []map[string]any, recordingsByID map[int64]map[string]any) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/calendars.json":
+			resp := map[string]any{"calendars": calendarsPayload}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+		case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/calendars/") && strings.HasSuffix(r.URL.Path, "/recordings"):
+			// extract id
+			seg := strings.TrimPrefix(r.URL.Path, "/calendars/")
+			seg = strings.TrimSuffix(seg, "/recordings")
+			var id int64
+			for _, c := range seg {
+				if c < '0' || c > '9' {
+					id = 0
+					break
+				}
+				id = id*10 + int64(c-'0')
+			}
+			resp, ok := recordingsByID[id]
+			if !ok {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+}
+
+func TestEventList_CalendarByName(t *testing.T) {
+	server := eventListCustomServer(t,
+		[]map[string]any{
+			{"calendar": map[string]any{"id": 791879, "name": "Work", "owned": true}},
+		},
+		map[int64]map[string]any{
+			791879: {
+				"Calendar::Event": []map[string]any{
+					{"id": 555, "title": "Work meeting", "starts_at": "2024-05-01T09:00:00Z", "ends_at": "2024-05-01T09:30:00Z"},
+				},
+			},
+		},
+	)
+	defer server.Close()
+
+	out, err := runEventList(t, server, "--styled", "--calendar", "Work")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !strings.Contains(out, "Work meeting") {
+		t.Errorf("expected output to contain event from calendar 791879; out=%q", out)
+	}
+}
+
+func TestEventCreate_DefaultCalendarFailsShowsList(t *testing.T) {
+	captured := &capturedRequest{}
+	server := eventCreateCustomServer(t, captured, []map[string]any{
+		{"calendar": map[string]any{"id": 6037, "name": "Maybe", "owned": true}},
+		{"calendar": map[string]any{"id": 791879, "name": "Work", "owned": true}},
+	})
+	defer server.Close()
+
+	_, err := runEventCreate(t, server,
+		"--title", "T",
+		"--date", "2024-06-15",
+		"--all-day",
+	)
+	if err == nil {
+		t.Fatalf("expected error when no default calendar")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "--calendar") {
+		t.Errorf("error should mention --calendar, got: %v", msg)
+	}
+	if !strings.Contains(msg, "6037") || !strings.Contains(msg, "791879") {
+		t.Errorf("error should list available calendar IDs, got: %v", msg)
+	}
+	if !strings.Contains(msg, "Maybe") || !strings.Contains(msg, "Work") {
+		t.Errorf("error should list available calendar names, got: %v", msg)
 	}
 }
 
