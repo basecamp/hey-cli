@@ -48,8 +48,8 @@ type eventListCommand struct {
 }
 
 func newEventListCommand() *eventListCommand {
-	eventListCommand := &eventListCommand{}
-	eventListCommand.cmd = &cobra.Command{
+	c := &eventListCommand{}
+	c.cmd = &cobra.Command{
 		Use:   "list",
 		Short: "List calendar events",
 		Example: `  hey event list
@@ -57,14 +57,14 @@ func newEventListCommand() *eventListCommand {
   hey event list --calendar Work
   hey event list --calendar 123
   hey event list --ids-only`,
-		RunE: eventListCommand.run,
+		RunE: c.run,
 	}
 
-	eventListCommand.cmd.Flags().IntVar(&eventListCommand.limit, "limit", 0, "Maximum number of events to show")
-	eventListCommand.cmd.Flags().BoolVar(&eventListCommand.all, "all", false, "Fetch all results (override --limit)")
-	eventListCommand.cmd.Flags().StringVar(&eventListCommand.calendar, "calendar", "", "Calendar ID or name (defaults to personal calendar; names matched case-insensitively against owned calendars)")
+	c.cmd.Flags().IntVar(&c.limit, "limit", 0, "Maximum number of events to show")
+	c.cmd.Flags().BoolVar(&c.all, "all", false, "Fetch all results (override --limit)")
+	c.cmd.Flags().StringVar(&c.calendar, "calendar", "", "Calendar ID or name (defaults to personal calendar; names matched case-insensitively against owned calendars)")
 
-	return eventListCommand
+	return c
 }
 
 func (c *eventListCommand) run(cmd *cobra.Command, args []string) error {
@@ -74,28 +74,28 @@ func (c *eventListCommand) run(cmd *cobra.Command, args []string) error {
 
 	ctx := cmd.Context()
 
-	var events []generated.Recording
+	var resp *generated.CalendarRecordingsResponse
 	if c.calendar != "" {
 		calID, err := resolveCalendarID(ctx, c.calendar)
 		if err != nil {
 			return err
 		}
 		now := time.Now()
-		resp, err := sdk.Calendars().GetRecordings(ctx, calID, &generated.GetCalendarRecordingsParams{
+		resp, err = sdk.Calendars().GetRecordings(ctx, calID, &generated.GetCalendarRecordingsParams{
 			StartsOn: now.AddDate(-personalRecordingsLookbackYears, 0, 0).Format("2006-01-02"),
 			EndsOn:   now.AddDate(personalRecordingsLookaheadYears, 0, 0).Format("2006-01-02"),
 		})
 		if err != nil {
 			return convertSDKError(err)
 		}
-		events = filterRecordingsByType(resp, "Calendar::Event")
 	} else {
-		resp, err := listPersonalRecordings(ctx)
+		var err error
+		resp, err = listPersonalRecordings(ctx)
 		if err != nil {
 			return err
 		}
-		events = filterRecordingsByType(resp, "Calendar::Event")
 	}
+	events := filterRecordingsByType(resp, "Calendar::Event")
 
 	total := len(events)
 	if c.limit > 0 && !c.all && len(events) > c.limit {
@@ -200,6 +200,8 @@ func (c *eventCreateCommand) run(cmd *cobra.Command, args []string) error {
 
 	ctx := cmd.Context()
 
+	var defaultCalendars []generated.Calendar // populated only when taking the default branch
+
 	var calID int64
 	if c.calendar != "" {
 		id, err := resolveCalendarID(ctx, c.calendar)
@@ -212,12 +214,11 @@ func (c *eventCreateCommand) run(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return convertSDKError(err)
 		}
-		calendars := unwrapCalendars(payload)
-		id, err := findPersonalCalendarID(calendars)
+		defaultCalendars = unwrapCalendars(payload)
+		id, err := findPersonalCalendarID(defaultCalendars)
 		if err != nil {
 			msg := "Couldn't determine default calendar. Pass --calendar <id-or-name>."
-			list := formatOwnedCalendarList(calendars)
-			if list != "" {
+			if list := formatOwnedCalendarList(defaultCalendars); list != "" {
 				msg += " Available:\n" + list
 			}
 			return output.ErrUsage(msg)
@@ -247,14 +248,11 @@ func (c *eventCreateCommand) run(cmd *cobra.Command, args []string) error {
 	id, err := sdk.CalendarEvents().Create(ctx, params)
 	if err != nil {
 		if c.calendar == "" && hey.AsError(err).HTTPStatus == 404 {
-			payload, lerr := sdk.Calendars().List(ctx)
-			if lerr == nil {
-				msg := fmt.Sprintf("Couldn't create event in default calendar (id=%d). Pass --calendar <id-or-name>.", calID)
-				if list := formatOwnedCalendarList(unwrapCalendars(payload)); list != "" {
-					msg += " Available:\n" + list
-				}
-				return output.ErrUsage(msg)
+			msg := fmt.Sprintf("Couldn't create event in default calendar (id=%d). Pass --calendar <id-or-name>.", calID)
+			if list := formatOwnedCalendarList(defaultCalendars); list != "" {
+				msg += " Available:\n" + list
 			}
+			return output.ErrUsage(msg)
 		}
 		return convertSDKError(err)
 	}
@@ -333,9 +331,6 @@ func (c *eventEditCommand) run(cmd *cobra.Command, args []string) error {
 		reminders, err = parseReminders(c.reminders)
 		if err != nil {
 			return err
-		}
-		if reminders == nil {
-			reminders = []time.Duration{}
 		}
 	}
 

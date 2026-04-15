@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -13,50 +14,67 @@ import (
 	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
-func eventServer(t *testing.T) *httptest.Server {
-	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == "GET" && r.URL.Path == "/calendars.json":
-			resp := map[string]any{
-				"calendars": []map[string]any{
-					{
-						"calendar": map[string]any{
-							"id":       42,
-							"name":     "Personal",
-							"personal": true,
-						},
-					},
-				},
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(resp)
-		case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/calendars/") && strings.HasSuffix(r.URL.Path, "/recordings"):
-			resp := map[string]any{
-				"Calendar::Event": []map[string]any{
-					{
-						"id":        101,
-						"title":     "Team standup",
-						"starts_at": "2024-05-01T09:00:00Z",
-						"ends_at":   "2024-05-01T09:30:00Z",
-					},
-					{
-						"id":        102,
-						"title":     "Lunch meeting",
-						"starts_at": "2024-05-02T12:00:00Z",
-						"ends_at":   "2024-05-02T13:00:00Z",
-					},
-				},
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(resp)
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
+// capturedHTTP records the method, path, and body of a captured request so
+// tests can assert on whichever fields they care about.
+type capturedHTTP struct {
+	mu     sync.Mutex
+	method string
+	path   string
+	body   string
 }
 
-func runEventList(t *testing.T, server *httptest.Server, args ...string) (string, error) {
+func (c *capturedHTTP) set(method, path, body string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.method = method
+	c.path = path
+	c.body = body
+}
+
+func (c *capturedHTTP) getBody() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.body
+}
+
+func (c *capturedHTTP) getMethodPath() (string, string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.method, c.path
+}
+
+func defaultCalendarsPayload() []map[string]any {
+	return []map[string]any{
+		{
+			"calendar": map[string]any{
+				"id":       42,
+				"name":     "Personal",
+				"personal": true,
+			},
+		},
+	}
+}
+
+func defaultEventRecordings() map[string]any {
+	return map[string]any{
+		"Calendar::Event": []map[string]any{
+			{
+				"id":        101,
+				"title":     "Team standup",
+				"starts_at": "2024-05-01T09:00:00Z",
+				"ends_at":   "2024-05-01T09:30:00Z",
+			},
+			{
+				"id":        102,
+				"title":     "Lunch meeting",
+				"starts_at": "2024-05-02T12:00:00Z",
+				"ends_at":   "2024-05-02T13:00:00Z",
+			},
+		},
+	}
+}
+
+func runEvent(t *testing.T, server *httptest.Server, sub string, args ...string) (string, error) {
 	t.Helper()
 	t.Setenv("HEY_TOKEN", "test-token")
 	t.Setenv("HEY_NO_KEYRING", "1")
@@ -70,7 +88,7 @@ func runEventList(t *testing.T, server *httptest.Server, args ...string) (string
 	var buf bytes.Buffer
 	root.SetOut(&buf)
 	root.SetErr(&buf)
-	fullArgs := append([]string{"event", "list", "--base-url", server.URL}, args...)
+	fullArgs := append([]string{"event", sub, "--base-url", server.URL}, args...)
 	root.SetArgs(fullArgs)
 
 	err := root.Execute()
@@ -78,10 +96,12 @@ func runEventList(t *testing.T, server *httptest.Server, args ...string) (string
 }
 
 func TestEventListDefault(t *testing.T) {
-	server := eventServer(t)
+	server := eventListCustomServer(t, defaultCalendarsPayload(), map[int64]map[string]any{
+		42: defaultEventRecordings(),
+	})
 	defer server.Close()
 
-	out, err := runEventList(t, server, "--styled")
+	out, err := runEvent(t, server, "list", "--styled")
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -94,10 +114,12 @@ func TestEventListDefault(t *testing.T) {
 }
 
 func TestEventListLimit(t *testing.T) {
-	server := eventServer(t)
+	server := eventListCustomServer(t, defaultCalendarsPayload(), map[int64]map[string]any{
+		42: defaultEventRecordings(),
+	})
 	defer server.Close()
 
-	out, err := runEventList(t, server, "--styled", "--limit", "1")
+	out, err := runEvent(t, server, "list", "--styled", "--limit", "1")
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -109,46 +131,17 @@ func TestEventListLimit(t *testing.T) {
 	}
 }
 
-// eventCreateServer captures the POST body so assertions can verify the
-// form-encoded payload sent to the server.
-type capturedRequest struct {
-	mu   sync.Mutex
-	body string
-}
-
-func (c *capturedRequest) set(s string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.body = s
-}
-
-func (c *capturedRequest) get() string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.body
-}
-
-func eventCreateServer(t *testing.T, captured *capturedRequest) *httptest.Server {
+func eventCreateCustomServer(t *testing.T, captured *capturedHTTP, calendarsPayload []map[string]any) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/calendars.json":
-			resp := map[string]any{
-				"calendars": []map[string]any{
-					{
-						"calendar": map[string]any{
-							"id":       42,
-							"name":     "Personal",
-							"personal": true,
-						},
-					},
-				},
-			}
+			resp := map[string]any{"calendars": calendarsPayload}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(resp)
 		case r.Method == "POST" && r.URL.Path == "/calendar/events":
 			body, _ := io.ReadAll(r.Body)
-			captured.set(string(body))
+			captured.set(r.Method, r.URL.Path, string(body))
 			w.Header().Set("Location", "/calendar/events/999")
 			w.WriteHeader(http.StatusFound)
 		default:
@@ -157,33 +150,12 @@ func eventCreateServer(t *testing.T, captured *capturedRequest) *httptest.Server
 	}))
 }
 
-func runEventCreate(t *testing.T, server *httptest.Server, args ...string) (string, error) {
-	t.Helper()
-	t.Setenv("HEY_TOKEN", "test-token")
-	t.Setenv("HEY_NO_KEYRING", "1")
-	t.Setenv("HEY_BASE_URL", "")
-	tmpDir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmpDir)
-	t.Setenv("XDG_STATE_HOME", tmpDir)
-	t.Setenv("XDG_CACHE_HOME", tmpDir)
-
-	root := newRootCmd()
-	var buf bytes.Buffer
-	root.SetOut(&buf)
-	root.SetErr(&buf)
-	fullArgs := append([]string{"event", "create", "--base-url", server.URL}, args...)
-	root.SetArgs(fullArgs)
-
-	err := root.Execute()
-	return buf.String(), err
-}
-
 func TestEventCreateRequiresTitle(t *testing.T) {
-	captured := &capturedRequest{}
-	server := eventCreateServer(t, captured)
+	captured := &capturedHTTP{}
+	server := eventCreateCustomServer(t, captured, defaultCalendarsPayload())
 	defer server.Close()
 
-	_, err := runEventCreate(t, server, "--date", "2024-06-15", "--all-day")
+	_, err := runEvent(t, server, "create", "--date", "2024-06-15", "--all-day")
 	if err == nil {
 		t.Fatalf("expected error when --title missing")
 	}
@@ -193,11 +165,11 @@ func TestEventCreateRequiresTitle(t *testing.T) {
 }
 
 func TestEventCreateTimed(t *testing.T) {
-	captured := &capturedRequest{}
-	server := eventCreateServer(t, captured)
+	captured := &capturedHTTP{}
+	server := eventCreateCustomServer(t, captured, defaultCalendarsPayload())
 	defer server.Close()
 
-	_, err := runEventCreate(t, server,
+	_, err := runEvent(t, server, "create",
 		"--title", "Team sync",
 		"--date", "2024-06-15",
 		"--start", "09:00",
@@ -208,7 +180,7 @@ func TestEventCreateTimed(t *testing.T) {
 		t.Fatalf("execute: %v", err)
 	}
 
-	body := captured.get()
+	body := captured.getBody()
 	wantFragments := []string{
 		"calendar_event%5Bsummary%5D=Team+sync",
 		"calendar_event%5Bstarts_at%5D=2024-06-15",
@@ -225,11 +197,11 @@ func TestEventCreateTimed(t *testing.T) {
 }
 
 func TestEventCreateAllDay(t *testing.T) {
-	captured := &capturedRequest{}
-	server := eventCreateServer(t, captured)
+	captured := &capturedHTTP{}
+	server := eventCreateCustomServer(t, captured, defaultCalendarsPayload())
 	defer server.Close()
 
-	_, err := runEventCreate(t, server,
+	_, err := runEvent(t, server, "create",
 		"--title", "Holiday",
 		"--date", "2024-06-15",
 		"--all-day",
@@ -239,7 +211,7 @@ func TestEventCreateAllDay(t *testing.T) {
 		t.Fatalf("execute: %v", err)
 	}
 
-	body := captured.get()
+	body := captured.getBody()
 	if !strings.Contains(body, "calendar_event%5Ball_day%5D=1") {
 		t.Errorf("body missing all_day=1; body=%s", body)
 	}
@@ -248,13 +220,13 @@ func TestEventCreateAllDay(t *testing.T) {
 	}
 }
 
-func eventEditServer(t *testing.T, captured *capturedRequest) *httptest.Server {
+func eventEditServer(t *testing.T, captured *capturedHTTP) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "PATCH" && r.URL.Path == "/calendar/events/101":
 			body, _ := io.ReadAll(r.Body)
-			captured.set(string(body))
+			captured.set(r.Method, r.URL.Path, string(body))
 			w.Header().Set("Location", "/calendar/events/101")
 			w.WriteHeader(http.StatusFound)
 		default:
@@ -263,49 +235,28 @@ func eventEditServer(t *testing.T, captured *capturedRequest) *httptest.Server {
 	}))
 }
 
-func runEventEdit(t *testing.T, server *httptest.Server, args ...string) (string, error) {
-	t.Helper()
-	t.Setenv("HEY_TOKEN", "test-token")
-	t.Setenv("HEY_NO_KEYRING", "1")
-	t.Setenv("HEY_BASE_URL", "")
-	tmpDir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmpDir)
-	t.Setenv("XDG_STATE_HOME", tmpDir)
-	t.Setenv("XDG_CACHE_HOME", tmpDir)
-
-	root := newRootCmd()
-	var buf bytes.Buffer
-	root.SetOut(&buf)
-	root.SetErr(&buf)
-	fullArgs := append([]string{"event", "edit", "--base-url", server.URL}, args...)
-	root.SetArgs(fullArgs)
-
-	err := root.Execute()
-	return buf.String(), err
-}
-
 func TestEventEdit(t *testing.T) {
-	captured := &capturedRequest{}
+	captured := &capturedHTTP{}
 	server := eventEditServer(t, captured)
 	defer server.Close()
 
-	_, err := runEventEdit(t, server, "101", "--title", "Updated standup")
+	_, err := runEvent(t, server, "edit", "101", "--title", "Updated standup")
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 
-	body := captured.get()
+	body := captured.getBody()
 	if !strings.Contains(body, "calendar_event%5Bsummary%5D=Updated+standup") {
 		t.Errorf("body missing summary fragment; body=%s", body)
 	}
 }
 
 func TestEventEditInvalidID(t *testing.T) {
-	captured := &capturedRequest{}
+	captured := &capturedHTTP{}
 	server := eventEditServer(t, captured)
 	defer server.Close()
 
-	_, err := runEventEdit(t, server, "notanumber", "--title", "x")
+	_, err := runEvent(t, server, "edit", "notanumber", "--title", "x")
 	if err == nil {
 		t.Fatalf("expected error for invalid event ID")
 	}
@@ -315,16 +266,16 @@ func TestEventEditInvalidID(t *testing.T) {
 }
 
 func TestEventEditOnlyChangedFields(t *testing.T) {
-	captured := &capturedRequest{}
+	captured := &capturedHTTP{}
 	server := eventEditServer(t, captured)
 	defer server.Close()
 
-	_, err := runEventEdit(t, server, "101", "--title", "X")
+	_, err := runEvent(t, server, "edit", "101", "--title", "X")
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 
-	body := captured.get()
+	body := captured.getBody()
 	forbidden := []string{"starts_at", "ends_at", "all_day", "starts_at_time", "ends_at_time"}
 	for _, f := range forbidden {
 		if strings.Contains(body, f) {
@@ -333,31 +284,12 @@ func TestEventEditOnlyChangedFields(t *testing.T) {
 	}
 }
 
-type capturedMethodPath struct {
-	mu     sync.Mutex
-	method string
-	path   string
-}
-
-func (c *capturedMethodPath) set(method, path string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.method = method
-	c.path = path
-}
-
-func (c *capturedMethodPath) get() (string, string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.method, c.path
-}
-
-func eventDeleteServer(t *testing.T, captured *capturedMethodPath) *httptest.Server {
+func eventDeleteServer(t *testing.T, captured *capturedHTTP) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "DELETE" && r.URL.Path == "/calendar/events/101":
-			captured.set(r.Method, r.URL.Path)
+			captured.set(r.Method, r.URL.Path, "")
 			w.Header().Set("Location", "/calendar")
 			w.WriteHeader(http.StatusFound)
 		default:
@@ -366,38 +298,17 @@ func eventDeleteServer(t *testing.T, captured *capturedMethodPath) *httptest.Ser
 	}))
 }
 
-func runEventDelete(t *testing.T, server *httptest.Server, args ...string) (string, error) {
-	t.Helper()
-	t.Setenv("HEY_TOKEN", "test-token")
-	t.Setenv("HEY_NO_KEYRING", "1")
-	t.Setenv("HEY_BASE_URL", "")
-	tmpDir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmpDir)
-	t.Setenv("XDG_STATE_HOME", tmpDir)
-	t.Setenv("XDG_CACHE_HOME", tmpDir)
-
-	root := newRootCmd()
-	var buf bytes.Buffer
-	root.SetOut(&buf)
-	root.SetErr(&buf)
-	fullArgs := append([]string{"event", "delete", "--base-url", server.URL}, args...)
-	root.SetArgs(fullArgs)
-
-	err := root.Execute()
-	return buf.String(), err
-}
-
 func TestEventDelete(t *testing.T) {
-	captured := &capturedMethodPath{}
+	captured := &capturedHTTP{}
 	server := eventDeleteServer(t, captured)
 	defer server.Close()
 
-	_, err := runEventDelete(t, server, "101")
+	_, err := runEvent(t, server, "delete", "101")
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 
-	method, path := captured.get()
+	method, path := captured.getMethodPath()
 	if method != "DELETE" {
 		t.Errorf("expected DELETE method, got %q", method)
 	}
@@ -406,38 +317,15 @@ func TestEventDelete(t *testing.T) {
 	}
 }
 
-// eventCreateMultiCalendarServer returns a calendar list with multiple owned
-// calendars. The caller specifies the JSON payload via calendarsPayload so
-// tests can model name-match scenarios (unique, ambiguous, missing, no
-// personal).
-func eventCreateCustomServer(t *testing.T, captured *capturedRequest, calendarsPayload []map[string]any) *httptest.Server {
-	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == "GET" && r.URL.Path == "/calendars.json":
-			resp := map[string]any{"calendars": calendarsPayload}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(resp)
-		case r.Method == "POST" && r.URL.Path == "/calendar/events":
-			body, _ := io.ReadAll(r.Body)
-			captured.set(string(body))
-			w.Header().Set("Location", "/calendar/events/999")
-			w.WriteHeader(http.StatusFound)
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-}
-
 func TestEventCreate_CalendarByName(t *testing.T) {
-	captured := &capturedRequest{}
+	captured := &capturedHTTP{}
 	server := eventCreateCustomServer(t, captured, []map[string]any{
 		{"calendar": map[string]any{"id": 42, "name": "Personal", "personal": true, "owned": true}},
 		{"calendar": map[string]any{"id": 791879, "name": "Work", "owned": true}},
 	})
 	defer server.Close()
 
-	_, err := runEventCreate(t, server,
+	_, err := runEvent(t, server, "create",
 		"--calendar", "Work",
 		"--title", "T",
 		"--date", "2024-06-15",
@@ -446,21 +334,21 @@ func TestEventCreate_CalendarByName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	body := captured.get()
+	body := captured.getBody()
 	if !strings.Contains(body, "calendar_event%5Bcalendar_id%5D=791879") {
 		t.Errorf("body missing calendar_id=791879; body=%s", body)
 	}
 }
 
 func TestEventCreate_CalendarByNameAmbiguous(t *testing.T) {
-	captured := &capturedRequest{}
+	captured := &capturedHTTP{}
 	server := eventCreateCustomServer(t, captured, []map[string]any{
 		{"calendar": map[string]any{"id": 100, "name": "Personal", "owned": true}},
 		{"calendar": map[string]any{"id": 200, "name": "Personal", "owned": true}},
 	})
 	defer server.Close()
 
-	_, err := runEventCreate(t, server,
+	_, err := runEvent(t, server, "create",
 		"--calendar", "Personal",
 		"--title", "T",
 		"--date", "2024-06-15",
@@ -479,14 +367,14 @@ func TestEventCreate_CalendarByNameAmbiguous(t *testing.T) {
 }
 
 func TestEventCreate_CalendarNotFound(t *testing.T) {
-	captured := &capturedRequest{}
+	captured := &capturedHTTP{}
 	server := eventCreateCustomServer(t, captured, []map[string]any{
 		{"calendar": map[string]any{"id": 42, "name": "Personal", "personal": true, "owned": true}},
 		{"calendar": map[string]any{"id": 99, "name": "Work", "owned": true}},
 	})
 	defer server.Close()
 
-	_, err := runEventCreate(t, server,
+	_, err := runEvent(t, server, "create",
 		"--calendar", "Nope",
 		"--title", "T",
 		"--date", "2024-06-15",
@@ -511,16 +399,12 @@ func eventListCustomServer(t *testing.T, calendarsPayload []map[string]any, reco
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(resp)
 		case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/calendars/") && strings.HasSuffix(r.URL.Path, "/recordings"):
-			// extract id
 			seg := strings.TrimPrefix(r.URL.Path, "/calendars/")
 			seg = strings.TrimSuffix(seg, "/recordings")
-			var id int64
-			for _, c := range seg {
-				if c < '0' || c > '9' {
-					id = 0
-					break
-				}
-				id = id*10 + int64(c-'0')
+			id, err := strconv.ParseInt(seg, 10, 64)
+			if err != nil {
+				w.WriteHeader(http.StatusNotFound)
+				return
 			}
 			resp, ok := recordingsByID[id]
 			if !ok {
@@ -550,7 +434,7 @@ func TestEventList_CalendarByName(t *testing.T) {
 	)
 	defer server.Close()
 
-	out, err := runEventList(t, server, "--styled", "--calendar", "Work")
+	out, err := runEvent(t, server, "list", "--styled", "--calendar", "Work")
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -560,14 +444,14 @@ func TestEventList_CalendarByName(t *testing.T) {
 }
 
 func TestEventCreate_DefaultCalendarFailsShowsList(t *testing.T) {
-	captured := &capturedRequest{}
+	captured := &capturedHTTP{}
 	server := eventCreateCustomServer(t, captured, []map[string]any{
 		{"calendar": map[string]any{"id": 6037, "name": "Maybe", "owned": true}},
 		{"calendar": map[string]any{"id": 791879, "name": "Work", "owned": true}},
 	})
 	defer server.Close()
 
-	_, err := runEventCreate(t, server,
+	_, err := runEvent(t, server, "create",
 		"--title", "T",
 		"--date", "2024-06-15",
 		"--all-day",
@@ -588,10 +472,12 @@ func TestEventCreate_DefaultCalendarFailsShowsList(t *testing.T) {
 }
 
 func TestEventListIdsOnly(t *testing.T) {
-	server := eventServer(t)
+	server := eventListCustomServer(t, defaultCalendarsPayload(), map[int64]map[string]any{
+		42: defaultEventRecordings(),
+	})
 	defer server.Close()
 
-	out, err := runEventList(t, server, "--ids-only")
+	out, err := runEvent(t, server, "list", "--ids-only")
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
