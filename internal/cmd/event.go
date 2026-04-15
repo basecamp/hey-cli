@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -462,7 +463,8 @@ func (c *eventDeleteCommand) run(cmd *cobra.Command, args []string) error {
 }
 
 // parseReminderDuration parses reminder durations like "30m", "1h", "2d", "1w"
-// into time.Duration. Supports minutes, hours, days, and weeks.
+// into time.Duration. Supports minutes, hours, days, and weeks. Rejects
+// magnitudes that would overflow time.Duration.
 func parseReminderDuration(s string) (time.Duration, error) {
 	s = strings.TrimSpace(s)
 	if len(s) < 2 {
@@ -470,22 +472,27 @@ func parseReminderDuration(s string) (time.Duration, error) {
 	}
 	unit := s[len(s)-1]
 	numStr := s[:len(s)-1]
-	n, err := strconv.Atoi(numStr)
+	n, err := strconv.ParseInt(numStr, 10, 64)
 	if err != nil || n < 0 {
 		return 0, fmt.Errorf("invalid reminder %q: expected a non-negative number followed by m, h, d, or w", s)
 	}
+	var perUnit time.Duration
 	switch unit {
 	case 'm':
-		return time.Duration(n) * time.Minute, nil
+		perUnit = time.Minute
 	case 'h':
-		return time.Duration(n) * time.Hour, nil
+		perUnit = time.Hour
 	case 'd':
-		return time.Duration(n) * 24 * time.Hour, nil
+		perUnit = 24 * time.Hour
 	case 'w':
-		return time.Duration(n) * 7 * 24 * time.Hour, nil
+		perUnit = 7 * 24 * time.Hour
 	default:
 		return 0, fmt.Errorf("invalid reminder %q: unit must be m, h, d, or w", s)
 	}
+	if n > int64(time.Duration(math.MaxInt64)/perUnit) {
+		return 0, fmt.Errorf("invalid reminder %q: value is too large", s)
+	}
+	return time.Duration(n) * perUnit, nil
 }
 
 // parseReminders converts a list of reminder strings to durations, returning
@@ -586,7 +593,11 @@ func localTimezoneName() string {
 		return name
 	}
 	if tz := os.Getenv("TZ"); tz != "" {
-		return tz
+		if loc, err := time.LoadLocation(tz); err == nil {
+			if name := loc.String(); name != "" && name != "Local" {
+				return name
+			}
+		}
 	}
 	return readSystemTimezoneFrom(systemTimezonePath)
 }

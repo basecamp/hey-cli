@@ -210,7 +210,78 @@ func TestEventCreateRejectsTimezoneWithAllDay(t *testing.T) {
 	}
 }
 
-func TestReadSystemTimezoneFrom(t *testing.T) {
+func TestParseReminderDurationOverflow(t *testing.T) {
+	_, err := parseReminderDuration("99999999999w")
+	if err == nil {
+		t.Fatalf("expected overflow error for huge week value")
+	}
+	if !strings.Contains(err.Error(), "too large") {
+		t.Errorf("expected 'too large' in error, got: %v", err)
+	}
+}
+
+func TestParseReminderDurationBoundaries(t *testing.T) {
+	cases := map[string]time.Duration{
+		"0m":   0,
+		"1m":   time.Minute,
+		"60m":  60 * time.Minute,
+		"24h":  24 * time.Hour,
+		"7d":   7 * 24 * time.Hour,
+		"52w":  52 * 7 * 24 * time.Hour,
+	}
+	for in, want := range cases {
+		got, err := parseReminderDuration(in)
+		if err != nil {
+			t.Errorf("%s: unexpected err: %v", in, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("%s: got %v, want %v", in, got, want)
+		}
+	}
+}
+
+func TestReadSystemTimezoneFrom_MissingPath(t *testing.T) {
+	if got := readSystemTimezoneFrom(filepath.Join(t.TempDir(), "nope")); got != "" {
+		t.Errorf("missing path should yield \"\", got %q", got)
+	}
+}
+
+func TestReadSystemTimezoneFrom_PathOutsideZoneinfo(t *testing.T) {
+	plain := filepath.Join(t.TempDir(), "plain")
+	if err := os.WriteFile(plain, nil, 0o644); err != nil {
+		t.Fatalf("write plain: %v", err)
+	}
+	if got := readSystemTimezoneFrom(plain); got != "" {
+		t.Errorf("path outside zoneinfo should yield \"\", got %q", got)
+	}
+}
+
+func TestLocalTimezoneName_IgnoresInvalidTZ(t *testing.T) {
+	prev := time.Local
+	time.Local = time.FixedZone("Local", 0)
+	defer func() { time.Local = prev }()
+	t.Setenv("TZ", "BOGUS_NOT_A_REAL_ZONE")
+	prevPath := systemTimezonePath
+	systemTimezonePath = filepath.Join(t.TempDir(), "nope")
+	defer func() { systemTimezonePath = prevPath }()
+
+	if got := localTimezoneName(); got != "" {
+		t.Errorf("invalid $TZ should be rejected, got %q", got)
+	}
+}
+
+func TestLocalTimezoneName_UsesValidTZ(t *testing.T) {
+	prev := time.Local
+	time.Local = time.FixedZone("Local", 0)
+	defer func() { time.Local = prev }()
+	t.Setenv("TZ", "America/New_York")
+	if got := localTimezoneName(); got != "America/New_York" {
+		t.Errorf("got %q, want America/New_York", got)
+	}
+}
+
+func TestReadSystemTimezoneFrom_SymlinkToZoneinfo(t *testing.T) {
 	dir := t.TempDir()
 	zoneinfoDir := filepath.Join(dir, "usr", "share", "zoneinfo", "America")
 	if err := os.MkdirAll(zoneinfoDir, 0o755); err != nil {
@@ -224,22 +295,8 @@ func TestReadSystemTimezoneFrom(t *testing.T) {
 	if err := os.Symlink(zoneFile, link); err != nil {
 		t.Skipf("symlinks not supported on this filesystem: %v", err)
 	}
-
-	got := readSystemTimezoneFrom(link)
-	if got != "America/Sao_Paulo" {
+	if got := readSystemTimezoneFrom(link); got != "America/Sao_Paulo" {
 		t.Errorf("got %q, want America/Sao_Paulo", got)
-	}
-
-	if got := readSystemTimezoneFrom(filepath.Join(dir, "nope")); got != "" {
-		t.Errorf("missing path should yield \"\", got %q", got)
-	}
-
-	plain := filepath.Join(dir, "plain")
-	if err := os.WriteFile(plain, nil, 0o644); err != nil {
-		t.Fatalf("write plain: %v", err)
-	}
-	if got := readSystemTimezoneFrom(plain); got != "" {
-		t.Errorf("path outside zoneinfo should yield \"\", got %q", got)
 	}
 }
 
