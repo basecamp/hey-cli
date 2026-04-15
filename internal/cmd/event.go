@@ -168,10 +168,16 @@ func newEventCreateCommand() *eventCreateCommand {
 }
 
 func (c *eventCreateCommand) run(cmd *cobra.Command, args []string) error {
-	if strings.TrimSpace(c.title) == "" {
+	c.title = strings.TrimSpace(c.title)
+	c.date = strings.TrimSpace(c.date)
+	c.start = strings.TrimSpace(c.start)
+	c.end = strings.TrimSpace(c.end)
+	c.timezone = strings.TrimSpace(c.timezone)
+
+	if c.title == "" {
 		return output.ErrUsage("--title is required")
 	}
-	if strings.TrimSpace(c.date) == "" {
+	if c.date == "" {
 		return output.ErrUsage("--date is required (YYYY-MM-DD)")
 	}
 	if _, err := time.Parse("2006-01-02", c.date); err != nil {
@@ -196,6 +202,12 @@ func (c *eventCreateCommand) run(cmd *cobra.Command, args []string) error {
 		}
 		if _, err := time.Parse("15:04", c.end); err != nil {
 			return output.ErrUsage("--end must be in HH:MM format")
+		}
+	}
+
+	if cmd.Flags().Changed("timezone") {
+		if err := validateTimezone(c.timezone); err != nil {
+			return err
 		}
 	}
 
@@ -326,6 +338,12 @@ func (c *eventEditCommand) run(cmd *cobra.Command, args []string) error {
 
 	flags := cmd.Flags()
 
+	c.title = strings.TrimSpace(c.title)
+	c.date = strings.TrimSpace(c.date)
+	c.start = strings.TrimSpace(c.start)
+	c.end = strings.TrimSpace(c.end)
+	c.timezone = strings.TrimSpace(c.timezone)
+
 	editable := []string{"title", "date", "start", "end", "all-day", "timezone", "reminder"}
 	anyChanged := false
 	for _, name := range editable {
@@ -363,6 +381,11 @@ func (c *eventEditCommand) run(cmd *cobra.Command, args []string) error {
 	if flags.Changed("end") {
 		if _, err := time.Parse("15:04", c.end); err != nil {
 			return output.ErrUsage("--end must be in HH:MM format")
+		}
+	}
+	if flags.Changed("timezone") {
+		if err := validateTimezone(c.timezone); err != nil {
+			return err
 		}
 	}
 
@@ -460,6 +483,22 @@ func (c *eventDeleteCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	return writeOK(nil, output.WithSummary("Event deleted"))
+}
+
+// validateTimezone returns a usage error when tz isn't a resolvable IANA
+// timezone name. Empty input is also rejected so callers don't need a
+// separate check.
+func validateTimezone(tz string) error {
+	if tz == "" {
+		return output.ErrUsage("--timezone cannot be empty")
+	}
+	if _, err := time.LoadLocation(tz); err != nil {
+		return output.ErrUsageHint(
+			fmt.Sprintf("invalid --timezone %q", tz),
+			"use an IANA timezone name (e.g. America/New_York)",
+		)
+	}
+	return nil
 }
 
 // parseReminderDuration parses reminder durations like "30m", "1h", "2d", "1w"

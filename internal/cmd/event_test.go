@@ -191,6 +191,75 @@ func TestEventCreateRejectsStartEndWithAllDay(t *testing.T) {
 	}
 }
 
+func TestEventCreateRejectsInvalidTimezone(t *testing.T) {
+	captured := &capturedHTTP{}
+	server := eventCreateCustomServer(t, captured, defaultCalendarsPayload())
+	defer server.Close()
+
+	_, err := runEvent(t, server, "create",
+		"--title", "T",
+		"--date", "2024-06-15",
+		"--start", "09:00",
+		"--end", "10:00",
+		"--timezone", "NOT_A_REAL_ZONE",
+	)
+	if err == nil {
+		t.Fatalf("expected error for invalid timezone")
+	}
+	if !strings.Contains(err.Error(), "invalid --timezone") {
+		t.Errorf("expected 'invalid --timezone' in error, got: %v", err)
+	}
+	method, _ := captured.getMethodPath()
+	if method != "" {
+		t.Errorf("should not have made HTTP request; got %s", method)
+	}
+}
+
+func TestEventCreateTrimsTimeInputs(t *testing.T) {
+	captured := &capturedHTTP{}
+	server := eventCreateCustomServer(t, captured, defaultCalendarsPayload())
+	defer server.Close()
+
+	_, err := runEvent(t, server, "create",
+		"--title", "  Padded  ",
+		"--date", "  2024-06-15 ",
+		"--start", " 09:00 ",
+		"--end", "10:00 ",
+		"--timezone", " America/New_York ",
+	)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	body := captured.getBody()
+	if !strings.Contains(body, "calendar_event%5Bsummary%5D=Padded") {
+		t.Errorf("title should be trimmed in body; body=%s", body)
+	}
+	if !strings.Contains(body, "calendar_event%5Bstarts_at_time%5D=09%3A00%3A00") {
+		t.Errorf("start should be trimmed; body=%s", body)
+	}
+	if !strings.Contains(body, "calendar_event%5Bstarts_at_time_zone_name%5D=America%2FNew_York") {
+		t.Errorf("timezone should be trimmed; body=%s", body)
+	}
+}
+
+func TestEventEditRejectsInvalidTimezone(t *testing.T) {
+	captured := &capturedHTTP{}
+	server := eventEditServer(t, captured)
+	defer server.Close()
+
+	_, err := runEvent(t, server, "edit", "101", "--timezone", "NOT_A_REAL_ZONE")
+	if err == nil {
+		t.Fatalf("expected error for invalid timezone")
+	}
+	if !strings.Contains(err.Error(), "invalid --timezone") {
+		t.Errorf("expected 'invalid --timezone' in error, got: %v", err)
+	}
+	method, _ := captured.getMethodPath()
+	if method != "" {
+		t.Errorf("should not have made HTTP request; got %s", method)
+	}
+}
+
 func TestEventCreateRejectsTimezoneWithAllDay(t *testing.T) {
 	captured := &capturedHTTP{}
 	server := eventCreateCustomServer(t, captured, defaultCalendarsPayload())
