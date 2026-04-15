@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 )
@@ -180,6 +181,34 @@ func TestEventCreateRejectsTimezoneWithAllDay(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--timezone") || !strings.Contains(err.Error(), "--all-day") {
 		t.Errorf("expected error to name both flags, got: %v", err)
+	}
+}
+
+func TestEventCreateRequiresTimezoneWhenLocalUnavailable(t *testing.T) {
+	captured := &capturedHTTP{}
+	server := eventCreateCustomServer(t, captured, defaultCalendarsPayload())
+	defer server.Close()
+
+	// time.Local.String() returns "UTC" when TZ is explicitly empty/unset
+	// on most systems, which is fine. We force a "Local" sentinel by
+	// pointing TZ at a path that won't resolve; Go falls back to UTC so
+	// we need a different injection. Simpler: directly swap time.Local.
+	prev := time.Local
+	time.Local = time.FixedZone("Local", 0) // .String() will be "Local"
+	defer func() { time.Local = prev }()
+
+	_, err := runEvent(t, server, "create",
+		"--title", "T",
+		"--date", "2024-06-15",
+		"--start", "09:00",
+		"--end", "10:00",
+	)
+	if err == nil {
+		t.Fatalf("expected error when local timezone is indeterminate and --timezone is missing")
+	}
+	ae := apierr.AsError(err)
+	if !strings.Contains(ae.Message+" "+ae.Hint, "--timezone") {
+		t.Errorf("expected hint to mention --timezone, got msg=%q hint=%q", ae.Message, ae.Hint)
 	}
 }
 

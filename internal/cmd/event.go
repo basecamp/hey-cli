@@ -231,6 +231,12 @@ func (c *eventCreateCommand) run(cmd *cobra.Command, args []string) error {
 	tz := c.timezone
 	if tz == "" && !c.allDay {
 		tz = localTimezoneName()
+		if tz == "" {
+			return output.ErrUsageHint(
+				"could not determine local timezone",
+				"pass --timezone explicitly (e.g. --timezone America/New_York)",
+			)
+		}
 	}
 
 	params := hey.CreateCalendarEventParams{
@@ -552,12 +558,14 @@ func formatOwnedCalendarList(calendars []generated.Calendar) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// localTimezoneName returns the local IANA timezone name, falling back to
-// "UTC" if the runtime didn't resolve one.
+// localTimezoneName returns the local IANA timezone name, or "" when the
+// runtime can't produce one (e.g. time.Local.String() returns "Local").
+// Silently defaulting to UTC would shift event times, so callers should
+// treat "" as "ask the user".
 func localTimezoneName() string {
 	name := time.Local.String()
 	if name == "" || name == "Local" {
-		return "UTC"
+		return ""
 	}
 	return name
 }
