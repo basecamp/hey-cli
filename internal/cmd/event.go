@@ -73,7 +73,11 @@ func (c *eventListCommand) run(cmd *cobra.Command, args []string) error {
 
 	var events []generated.Recording
 	if c.calendarID != 0 {
-		resp, err := sdk.Calendars().GetRecordings(ctx, c.calendarID, nil)
+		now := time.Now()
+		resp, err := sdk.Calendars().GetRecordings(ctx, c.calendarID, &generated.GetCalendarRecordingsParams{
+			StartsOn: now.AddDate(-personalRecordingsLookbackYears, 0, 0).Format("2006-01-02"),
+			EndsOn:   now.AddDate(personalRecordingsLookaheadYears, 0, 0).Format("2006-01-02"),
+		})
 		if err != nil {
 			return convertSDKError(err)
 		}
