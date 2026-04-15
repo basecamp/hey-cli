@@ -291,12 +291,12 @@ func TestParseReminderDurationOverflow(t *testing.T) {
 
 func TestParseReminderDurationBoundaries(t *testing.T) {
 	cases := map[string]time.Duration{
-		"0m":   0,
-		"1m":   time.Minute,
-		"60m":  60 * time.Minute,
-		"24h":  24 * time.Hour,
-		"7d":   7 * 24 * time.Hour,
-		"52w":  52 * 7 * 24 * time.Hour,
+		"0m":  0,
+		"1m":  time.Minute,
+		"60m": 60 * time.Minute,
+		"24h": 24 * time.Hour,
+		"7d":  7 * 24 * time.Hour,
+		"52w": 52 * 7 * 24 * time.Hour,
 	}
 	for in, want := range cases {
 		got, err := parseReminderDuration(in)
