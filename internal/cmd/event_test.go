@@ -303,6 +303,23 @@ func TestEventEditOnlyChangedFields(t *testing.T) {
 	}
 }
 
+func TestEventEditRequiresAtLeastOneFlag(t *testing.T) {
+	captured := &capturedHTTP{}
+	server := eventEditServer(t, captured)
+	defer server.Close()
+
+	_, err := runEvent(t, server, "edit", "101")
+	if err == nil {
+		t.Fatalf("expected error when no editable flags passed")
+	}
+	if !strings.Contains(err.Error(), "no fields to update") {
+		t.Errorf("expected 'no fields to update' error, got: %v", err)
+	}
+	if captured.getBody() != "" {
+		t.Errorf("should not have made HTTP request; got body=%s", captured.getBody())
+	}
+}
+
 func TestEventEditRejectsTimezoneWithAllDay(t *testing.T) {
 	captured := &capturedHTTP{}
 	server := eventEditServer(t, captured)

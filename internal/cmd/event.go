@@ -312,6 +312,21 @@ func (c *eventEditCommand) run(cmd *cobra.Command, args []string) error {
 
 	flags := cmd.Flags()
 
+	editable := []string{"title", "date", "start", "end", "all-day", "timezone", "reminder"}
+	anyChanged := false
+	for _, name := range editable {
+		if flags.Changed(name) {
+			anyChanged = true
+			break
+		}
+	}
+	if !anyChanged {
+		return output.ErrUsageHint(
+			"no fields to update",
+			"pass at least one of --title, --date, --start, --end, --all-day, --timezone, --reminder",
+		)
+	}
+
 	if flags.Changed("all-day") && c.allDay && flags.Changed("timezone") {
 		return output.ErrUsage("--timezone cannot be combined with --all-day")
 	}
