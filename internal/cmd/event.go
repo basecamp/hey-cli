@@ -638,7 +638,12 @@ func localTimezoneName() string {
 			}
 		}
 	}
-	return readSystemTimezoneFrom(systemTimezonePath)
+	if name := readSystemTimezoneFrom(systemTimezonePath); name != "" {
+		if _, err := time.LoadLocation(name); err == nil {
+			return name
+		}
+	}
+	return ""
 }
 
 // readSystemTimezoneFrom resolves a symlink like /etc/localtime →
