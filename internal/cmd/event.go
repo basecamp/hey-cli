@@ -100,7 +100,7 @@ func (c *eventListCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	events := filterRecordingsByType(resp, "Calendar::Event")
 	if events == nil {
-		events = []generated.CalendarEvent{}
+		events = []generated.Recording{}
 	}
 
 	total := len(events)
