@@ -95,7 +95,7 @@ hey event edit 123 --title "Updated standup"
 hey event delete 123
 ```
 
-Reminder durations accept `30m`, `1h`, `2d`, `1w`.
+Reminder durations accept a non-negative number followed by `m`, `h`, `d`, or `w` (for example `30m`, `1h`, `2d`, `1w`).
 
 ### Todos
 

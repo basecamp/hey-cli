@@ -445,6 +445,47 @@ func TestEventCreate_CalendarByNameAmbiguous(t *testing.T) {
 	}
 }
 
+func TestEventCreate_DefaultCalendarReturns404ShowsList(t *testing.T) {
+	// findPersonalCalendarID succeeds (returns the personal calendar),
+	// but the server rejects the POST with 404 — reproduces the orphaned
+	// personal:true calendar that some accounts have.
+	calendars := []map[string]any{
+		{"calendar": map[string]any{"id": 42, "name": "Personal", "personal": true, "owned": true}},
+		{"calendar": map[string]any{"id": 100, "name": "Work", "owned": true}},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/calendars.json":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"calendars": calendars})
+		case r.Method == "POST" && r.URL.Path == "/calendar/events":
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	_, err := runEvent(t, server, "create",
+		"--title", "T",
+		"--date", "2024-06-15",
+		"--all-day",
+	)
+	if err == nil {
+		t.Fatalf("expected usage error after 404 fallback")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "--calendar") {
+		t.Errorf("error should mention --calendar, got: %v", msg)
+	}
+	if !strings.Contains(msg, "id=42") {
+		t.Errorf("error should mention the default calendar ID, got: %v", msg)
+	}
+	if !strings.Contains(msg, "Work") || !strings.Contains(msg, "100") {
+		t.Errorf("error should list available owned calendars, got: %v", msg)
+	}
+}
+
 func TestEventCreate_CalendarNotFound(t *testing.T) {
 	captured := &capturedHTTP{}
 	server := eventCreateCustomServer(t, captured, []map[string]any{

@@ -237,7 +237,7 @@ hey event edit 123 --title "Updated standup"  # Edit any subset of fields
 hey event delete 123                          # Delete an event
 ```
 
-Reminder durations: `30m`, `1h`, `2d`, `1w` (repeat `--reminder` for multiple). Timezone defaults to local; override with `--timezone` (IANA name).
+Reminder durations: any non-negative number followed by `m`, `h`, `d`, or `w` (e.g. `30m`, `1h`, `2d`, `1w`; repeat `--reminder` for multiple). Timezone defaults to local; override with `--timezone` (IANA name). `--timezone` cannot be combined with `--all-day`.
 
 ### Habits
 
