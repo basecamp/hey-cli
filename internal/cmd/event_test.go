@@ -370,13 +370,10 @@ func TestReadSystemTimezoneFrom_SymlinkToZoneinfo(t *testing.T) {
 }
 
 func TestEventCreateRequiresTimezoneWhenLocalUnavailable(t *testing.T) {
-	captured := &capturedHTTP{}
-	server := eventCreateCustomServer(t, captured, defaultCalendarsPayload())
-	defer server.Close()
-
-	// Force time.Local.String() to return "Local" (no IANA name) and
-	// clear both the $TZ fallback and the /etc/localtime path to
-	// exercise the final error path.
+	// Mutating time.Local must happen before the httptest server starts
+	// so that the deferred restoration runs *after* server.Close(); the
+	// server's goroutines call time.Now (which reads time.Local) and
+	// would race with a concurrent restoration otherwise.
 	prev := time.Local
 	time.Local = time.FixedZone("Local", 0)
 	defer func() { time.Local = prev }()
@@ -384,6 +381,10 @@ func TestEventCreateRequiresTimezoneWhenLocalUnavailable(t *testing.T) {
 	prevPath := systemTimezonePath
 	systemTimezonePath = filepath.Join(t.TempDir(), "nope-localtime")
 	defer func() { systemTimezonePath = prevPath }()
+
+	captured := &capturedHTTP{}
+	server := eventCreateCustomServer(t, captured, defaultCalendarsPayload())
+	defer server.Close()
 
 	_, err := runEvent(t, server, "create",
 		"--title", "T",
