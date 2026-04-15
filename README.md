@@ -83,6 +83,20 @@ hey calendars                      # list calendars
 hey recordings 1 --starts-on 2026-01-01 --ends-on 2026-01-31  # list events in a calendar
 ```
 
+### Events
+
+```bash
+hey event list                     # list events (personal calendar by default)
+hey event list --calendar 123 --limit 10
+hey event create --title "Team sync" --date 2026-06-15 --start 09:00 --end 10:00
+hey event create --title "Holiday" --date 2026-06-15 --all-day
+hey event create --title "Review" --date 2026-06-15 --start 14:00 --end 15:00 --reminder 30m --reminder 1h
+hey event edit 123 --title "Updated standup"
+hey event delete 123
+```
+
+Reminder durations accept `30m`, `1h`, `2d`, `1w`.
+
 ### Todos
 
 ```bash

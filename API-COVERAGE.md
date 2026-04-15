@@ -32,3 +32,6 @@ The legacy `internal/client/` is used only for HTML-scraping gap operations mark
 | `/calendar/todos/{id}/completions.json` | POST | SDK `CalendarTodos().Complete` | `hey todo complete <id>` | covered |
 | `/calendar/todos/{id}/completions.json` | DELETE | SDK `CalendarTodos().Uncomplete` | `hey todo uncomplete <id>` | covered |
 | `/calendar/todos/{id}.json` | DELETE | SDK `CalendarTodos().Delete` | `hey todo delete <id>` | covered |
+| `/calendar/events` | POST | SDK `CalendarEvents().Create` | `hey event create` | covered |
+| `/calendar/events/{id}` | PATCH | SDK `CalendarEvents().Update` | `hey event edit <id>` | covered |
+| `/calendar/events/{id}` | DELETE | SDK `CalendarEvents().Delete` | `hey event delete <id>` | covered |
