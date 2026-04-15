@@ -246,6 +246,16 @@ func (c *eventCreateCommand) run(cmd *cobra.Command, args []string) error {
 
 	id, err := sdk.CalendarEvents().Create(ctx, params)
 	if err != nil {
+		if c.calendar == "" && hey.AsError(err).HTTPStatus == 404 {
+			payload, lerr := sdk.Calendars().List(ctx)
+			if lerr == nil {
+				msg := fmt.Sprintf("Couldn't create event in default calendar (id=%d). Pass --calendar <id-or-name>.", calID)
+				if list := formatOwnedCalendarList(unwrapCalendars(payload)); list != "" {
+					msg += " Available:\n" + list
+				}
+				return output.ErrUsage(msg)
+			}
+		}
 		return convertSDKError(err)
 	}
 
