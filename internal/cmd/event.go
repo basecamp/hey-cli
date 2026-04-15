@@ -24,13 +24,14 @@ func newEventCommand() *eventCommand {
 		Use:   "event",
 		Short: "Manage calendar events",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, create, edit. Lists events from the personal calendar by default, or from --calendar ID.",
+			"agent_notes": "Subcommands: list, create, edit, delete. Lists events from the personal calendar by default, or from --calendar ID.",
 		},
 	}
 
 	eventCommand.cmd.AddCommand(newEventListCommand().cmd)
 	eventCommand.cmd.AddCommand(newEventCreateCommand().cmd)
 	eventCommand.cmd.AddCommand(newEventEditCommand().cmd)
+	eventCommand.cmd.AddCommand(newEventDeleteCommand().cmd)
 
 	return eventCommand
 }
@@ -350,6 +351,47 @@ func (c *eventEditCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	return writeOK(nil, output.WithSummary("Event updated"))
+}
+
+// delete
+
+type eventDeleteCommand struct {
+	cmd *cobra.Command
+}
+
+func newEventDeleteCommand() *eventDeleteCommand {
+	c := &eventDeleteCommand{}
+	c.cmd = &cobra.Command{
+		Use:     "delete <id>",
+		Short:   "Delete a calendar event",
+		Example: `  hey event delete 123`,
+		Args:    usageExactOneArg(),
+		RunE:    c.run,
+	}
+	return c
+}
+
+func (c *eventDeleteCommand) run(cmd *cobra.Command, args []string) error {
+	id, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return output.ErrUsage(fmt.Sprintf("invalid event ID: %s", args[0]))
+	}
+
+	if err := requireAuth(); err != nil {
+		return err
+	}
+
+	ctx := cmd.Context()
+	if err := sdk.CalendarEvents().Delete(ctx, id); err != nil {
+		return convertSDKError(err)
+	}
+
+	if writer.IsStyled() {
+		fmt.Fprintln(cmd.OutOrStdout(), "Event deleted.")
+		return nil
+	}
+
+	return writeOK(nil, output.WithSummary("Event deleted"))
 }
 
 // parseReminderDuration parses reminder durations like "30m", "1h", "2d", "1w"

@@ -331,6 +331,79 @@ func TestEventEditOnlyChangedFields(t *testing.T) {
 	}
 }
 
+type capturedMethodPath struct {
+	mu     sync.Mutex
+	method string
+	path   string
+}
+
+func (c *capturedMethodPath) set(method, path string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.method = method
+	c.path = path
+}
+
+func (c *capturedMethodPath) get() (string, string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.method, c.path
+}
+
+func eventDeleteServer(t *testing.T, captured *capturedMethodPath) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "DELETE" && r.URL.Path == "/calendar/events/101":
+			captured.set(r.Method, r.URL.Path)
+			w.Header().Set("Location", "/calendar")
+			w.WriteHeader(http.StatusFound)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+}
+
+func runEventDelete(t *testing.T, server *httptest.Server, args ...string) (string, error) {
+	t.Helper()
+	t.Setenv("HEY_TOKEN", "test-token")
+	t.Setenv("HEY_NO_KEYRING", "1")
+	t.Setenv("HEY_BASE_URL", "")
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	t.Setenv("XDG_STATE_HOME", tmpDir)
+	t.Setenv("XDG_CACHE_HOME", tmpDir)
+
+	root := newRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	fullArgs := append([]string{"event", "delete", "--base-url", server.URL}, args...)
+	root.SetArgs(fullArgs)
+
+	err := root.Execute()
+	return buf.String(), err
+}
+
+func TestEventDelete(t *testing.T) {
+	captured := &capturedMethodPath{}
+	server := eventDeleteServer(t, captured)
+	defer server.Close()
+
+	_, err := runEventDelete(t, server, "101")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	method, path := captured.get()
+	if method != "DELETE" {
+		t.Errorf("expected DELETE method, got %q", method)
+	}
+	if path != "/calendar/events/101" {
+		t.Errorf("expected path /calendar/events/101, got %q", path)
+	}
+}
+
 func TestEventListIdsOnly(t *testing.T) {
 	server := eventServer(t)
 	defer server.Close()

@@ -53,6 +53,7 @@ hey event create --reminder
 hey event create --start
 hey event create --timezone
 hey event create --title
+hey event delete
 hey event edit
 hey event edit --all-day
 hey event edit --date
