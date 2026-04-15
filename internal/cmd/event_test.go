@@ -165,6 +165,30 @@ func TestEventCreateRequiresTitle(t *testing.T) {
 	}
 }
 
+func TestEventCreateRejectsStartEndWithAllDay(t *testing.T) {
+	captured := &capturedHTTP{}
+	server := eventCreateCustomServer(t, captured, defaultCalendarsPayload())
+	defer server.Close()
+
+	_, err := runEvent(t, server, "create",
+		"--title", "Holiday",
+		"--date", "2024-06-15",
+		"--all-day",
+		"--start", "09:00",
+		"--end", "10:00",
+	)
+	if err == nil {
+		t.Fatalf("expected error when --start/--end combined with --all-day")
+	}
+	if !strings.Contains(err.Error(), "--all-day") {
+		t.Errorf("expected error to mention --all-day, got: %v", err)
+	}
+	method, _ := captured.getMethodPath()
+	if method != "" {
+		t.Errorf("should not have made HTTP request; got %s", method)
+	}
+}
+
 func TestEventCreateRejectsTimezoneWithAllDay(t *testing.T) {
 	captured := &capturedHTTP{}
 	server := eventCreateCustomServer(t, captured, defaultCalendarsPayload())
@@ -346,6 +370,24 @@ func TestEventEditRequiresAtLeastOneFlag(t *testing.T) {
 	}
 	if captured.getBody() != "" {
 		t.Errorf("should not have made HTTP request; got body=%s", captured.getBody())
+	}
+}
+
+func TestEventEditRejectsStartEndWithAllDay(t *testing.T) {
+	captured := &capturedHTTP{}
+	server := eventEditServer(t, captured)
+	defer server.Close()
+
+	_, err := runEvent(t, server, "edit", "101", "--all-day", "--start", "09:00")
+	if err == nil {
+		t.Fatalf("expected error when --start combined with --all-day on edit")
+	}
+	if !strings.Contains(err.Error(), "--all-day") {
+		t.Errorf("expected error to mention --all-day, got: %v", err)
+	}
+	method, _ := captured.getMethodPath()
+	if method != "" {
+		t.Errorf("should not have made HTTP request; got %s", method)
 	}
 }
 

@@ -174,7 +174,14 @@ func (c *eventCreateCommand) run(cmd *cobra.Command, args []string) error {
 	if _, err := time.Parse("2006-01-02", c.date); err != nil {
 		return output.ErrUsage("--date must be in YYYY-MM-DD format")
 	}
-	if !c.allDay {
+	if c.allDay {
+		if c.start != "" || c.end != "" {
+			return output.ErrUsage("--start/--end cannot be combined with --all-day")
+		}
+		if cmd.Flags().Changed("timezone") {
+			return output.ErrUsage("--timezone cannot be combined with --all-day")
+		}
+	} else {
 		if c.start == "" || c.end == "" {
 			return output.ErrUsageHint(
 				"must supply either --all-day or both --start and --end",
@@ -187,8 +194,6 @@ func (c *eventCreateCommand) run(cmd *cobra.Command, args []string) error {
 		if _, err := time.Parse("15:04", c.end); err != nil {
 			return output.ErrUsage("--end must be in HH:MM format")
 		}
-	} else if cmd.Flags().Changed("timezone") {
-		return output.ErrUsage("--timezone cannot be combined with --all-day")
 	}
 
 	reminders, err := parseReminders(c.reminders)
@@ -333,8 +338,13 @@ func (c *eventEditCommand) run(cmd *cobra.Command, args []string) error {
 		)
 	}
 
-	if flags.Changed("all-day") && c.allDay && flags.Changed("timezone") {
-		return output.ErrUsage("--timezone cannot be combined with --all-day")
+	if flags.Changed("all-day") && c.allDay {
+		if flags.Changed("start") || flags.Changed("end") {
+			return output.ErrUsage("--start/--end cannot be combined with --all-day")
+		}
+		if flags.Changed("timezone") {
+			return output.ErrUsage("--timezone cannot be combined with --all-day")
+		}
 	}
 
 	if flags.Changed("date") {
