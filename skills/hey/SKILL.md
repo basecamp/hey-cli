@@ -20,6 +20,8 @@ triggers:
   - hey recordings
   # Todos
   - hey todo
+  # Events
+  - hey event
   # Seen/unseen
   - hey seen
   - hey unseen
@@ -96,6 +98,10 @@ CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos,
 | Complete todo | `hey todo complete 123` |
 | Uncomplete todo | `hey todo uncomplete 123` |
 | Delete todo | `hey todo delete 123` |
+| List events | `hey event list --json` |
+| Create event | `hey event create --title "Sync" --date 2024-06-15 --start 09:00 --end 10:00` |
+| Edit event | `hey event edit 123 --title "Updated"` |
+| Delete event | `hey event delete 123` |
 | Mark as seen | `hey seen 12345` |
 | Mark as unseen | `hey unseen 12345` |
 | Complete habit | `hey habit complete 123` |
@@ -218,6 +224,20 @@ hey todo complete 123                         # Mark complete
 hey todo uncomplete 123                       # Mark incomplete
 hey todo delete 123                           # Delete a todo
 ```
+
+### Events
+
+```bash
+hey event list --json                         # List events (personal calendar by default)
+hey event list --calendar <id-or-name> --limit 10 --json  # List events in a specific calendar (names match owned calendars case-insensitively)
+hey event create --title "Team sync" --date 2024-06-15 --start 09:00 --end 10:00
+hey event create --title "Holiday" --date 2024-06-15 --all-day
+hey event create --title "Review" --date 2024-06-15 --start 14:00 --end 15:00 --reminder 30m --reminder 1h
+hey event edit 123 --title "Updated standup"  # Edit any subset of fields
+hey event delete 123                          # Delete an event
+```
+
+Reminder durations: any non-negative number followed by `m`, `h`, `d`, or `w` (e.g. `30m`, `1h`, `2d`, `1w`; repeat `--reminder` for multiple). Timezone defaults to local; override with `--timezone` (IANA name). `--timezone` cannot be combined with `--all-day`.
 
 ### Habits
 

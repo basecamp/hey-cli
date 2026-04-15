@@ -43,6 +43,29 @@ hey doctor
 hey drafts
 hey drafts --all
 hey drafts --limit
+hey event
+hey event create
+hey event create --all-day
+hey event create --calendar
+hey event create --date
+hey event create --end
+hey event create --reminder
+hey event create --start
+hey event create --timezone
+hey event create --title
+hey event delete
+hey event edit
+hey event edit --all-day
+hey event edit --date
+hey event edit --end
+hey event edit --reminder
+hey event edit --start
+hey event edit --timezone
+hey event edit --title
+hey event list
+hey event list --all
+hey event list --calendar
+hey event list --limit
 hey habit
 hey habit complete
 hey habit complete --date
