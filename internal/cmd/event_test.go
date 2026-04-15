@@ -694,6 +694,34 @@ func TestEventCreate_DefaultCalendarReturns404ShowsList(t *testing.T) {
 	}
 }
 
+func TestEventCreate_RejectsNonPositiveCalendarID(t *testing.T) {
+	captured := &capturedHTTP{}
+	server := eventCreateCustomServer(t, captured, defaultCalendarsPayload())
+	defer server.Close()
+
+	for _, in := range []string{"0", "-1"} {
+		t.Run(in, func(t *testing.T) {
+			captured.set("", "", "")
+			_, err := runEvent(t, server, "create",
+				"--calendar", in,
+				"--title", "T",
+				"--date", "2024-06-15",
+				"--all-day",
+			)
+			if err == nil {
+				t.Fatalf("expected error for calendar=%q", in)
+			}
+			if !strings.Contains(err.Error(), "calendar ID must be positive") {
+				t.Errorf("expected 'calendar ID must be positive', got: %v", err)
+			}
+			method, _ := captured.getMethodPath()
+			if method != "" {
+				t.Errorf("should not have made HTTP request; got %s", method)
+			}
+		})
+	}
+}
+
 func TestEventCreate_CalendarNotFound(t *testing.T) {
 	captured := &capturedHTTP{}
 	server := eventCreateCustomServer(t, captured, []map[string]any{

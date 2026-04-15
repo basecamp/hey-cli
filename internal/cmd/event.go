@@ -555,12 +555,16 @@ func parseReminders(in []string) ([]time.Duration, error) {
 }
 
 // resolveCalendarID maps user input (numeric ID or calendar name) to a
-// calendar ID. Numeric input is returned as-is with no SDK call. Otherwise the
-// calendar list is fetched and filtered to Owned == true, matching Name
+// calendar ID. Positive numeric input is returned as-is with no SDK call;
+// non-positive numeric input is rejected locally. Otherwise the calendar
+// list is fetched and filtered to Owned == true, matching Name
 // case-insensitively. Zero matches or multiple matches yield a usage error.
 func resolveCalendarID(ctx context.Context, input string) (int64, error) {
 	trimmed := strings.TrimSpace(input)
-	if id, err := strconv.ParseInt(trimmed, 10, 64); err == nil && id > 0 {
+	if id, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
+		if id <= 0 {
+			return 0, output.ErrUsage(fmt.Sprintf("calendar ID must be positive, got %d", id))
+		}
 		return id, nil
 	}
 
