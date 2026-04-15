@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -208,18 +210,54 @@ func TestEventCreateRejectsTimezoneWithAllDay(t *testing.T) {
 	}
 }
 
+func TestReadSystemTimezoneFrom(t *testing.T) {
+	dir := t.TempDir()
+	zoneinfoDir := filepath.Join(dir, "usr", "share", "zoneinfo", "America")
+	if err := os.MkdirAll(zoneinfoDir, 0o755); err != nil {
+		t.Fatalf("mkdir zoneinfo: %v", err)
+	}
+	zoneFile := filepath.Join(zoneinfoDir, "Sao_Paulo")
+	if err := os.WriteFile(zoneFile, []byte("tzif-stub"), 0o644); err != nil {
+		t.Fatalf("write zone: %v", err)
+	}
+	link := filepath.Join(dir, "localtime")
+	if err := os.Symlink(zoneFile, link); err != nil {
+		t.Skipf("symlinks not supported on this filesystem: %v", err)
+	}
+
+	got := readSystemTimezoneFrom(link)
+	if got != "America/Sao_Paulo" {
+		t.Errorf("got %q, want America/Sao_Paulo", got)
+	}
+
+	if got := readSystemTimezoneFrom(filepath.Join(dir, "nope")); got != "" {
+		t.Errorf("missing path should yield \"\", got %q", got)
+	}
+
+	plain := filepath.Join(dir, "plain")
+	if err := os.WriteFile(plain, nil, 0o644); err != nil {
+		t.Fatalf("write plain: %v", err)
+	}
+	if got := readSystemTimezoneFrom(plain); got != "" {
+		t.Errorf("path outside zoneinfo should yield \"\", got %q", got)
+	}
+}
+
 func TestEventCreateRequiresTimezoneWhenLocalUnavailable(t *testing.T) {
 	captured := &capturedHTTP{}
 	server := eventCreateCustomServer(t, captured, defaultCalendarsPayload())
 	defer server.Close()
 
-	// time.Local.String() returns "UTC" when TZ is explicitly empty/unset
-	// on most systems, which is fine. We force a "Local" sentinel by
-	// pointing TZ at a path that won't resolve; Go falls back to UTC so
-	// we need a different injection. Simpler: directly swap time.Local.
+	// Force time.Local.String() to return "Local" (no IANA name) and
+	// clear both the $TZ fallback and the /etc/localtime path to
+	// exercise the final error path.
 	prev := time.Local
-	time.Local = time.FixedZone("Local", 0) // .String() will be "Local"
+	time.Local = time.FixedZone("Local", 0)
 	defer func() { time.Local = prev }()
+	t.Setenv("TZ", "")
+	prevPath := systemTimezonePath
+	systemTimezonePath = filepath.Join(t.TempDir(), "nope-localtime")
+	defer func() { systemTimezonePath = prevPath }()
 
 	_, err := runEvent(t, server, "create",
 		"--title", "T",

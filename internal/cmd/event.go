@@ -3,6 +3,8 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -568,14 +570,39 @@ func formatOwnedCalendarList(calendars []generated.Calendar) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// localTimezoneName returns the local IANA timezone name, or "" when the
-// runtime can't produce one (e.g. time.Local.String() returns "Local").
-// Silently defaulting to UTC would shift event times, so callers should
-// treat "" as "ask the user".
+// systemTimezonePath is the path consulted by localTimezoneName after
+// time.Local and $TZ fail. Overridable for tests.
+var systemTimezonePath = "/etc/localtime"
+
+// localTimezoneName returns the local IANA timezone name, or "" when no
+// reasonable candidate can be determined. Silently defaulting to UTC would
+// shift event times, so callers should treat "" as "ask the user".
+//
+// On Linux/macOS, time.Local.String() typically returns "Local" when the
+// zone was loaded from /etc/localtime; we fall back to $TZ and to the
+// /etc/localtime symlink target to recover an IANA name.
 func localTimezoneName() string {
-	name := time.Local.String()
-	if name == "" || name == "Local" {
+	if name := time.Local.String(); name != "" && name != "Local" {
+		return name
+	}
+	if tz := os.Getenv("TZ"); tz != "" {
+		return tz
+	}
+	return readSystemTimezoneFrom(systemTimezonePath)
+}
+
+// readSystemTimezoneFrom resolves a symlink like /etc/localtime →
+// /usr/share/zoneinfo/America/Sao_Paulo and returns the IANA suffix
+// ("America/Sao_Paulo"). Returns "" on any failure.
+func readSystemTimezoneFrom(path string) string {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
 		return ""
 	}
-	return name
+	const marker = "zoneinfo/"
+	idx := strings.Index(resolved, marker)
+	if idx < 0 {
+		return ""
+	}
+	return resolved[idx+len(marker):]
 }
