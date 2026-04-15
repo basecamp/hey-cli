@@ -406,8 +406,9 @@ func TestEventEditRequiresAtLeastOneFlag(t *testing.T) {
 	if !strings.Contains(err.Error(), "no fields to update") {
 		t.Errorf("expected 'no fields to update' error, got: %v", err)
 	}
-	if captured.getBody() != "" {
-		t.Errorf("should not have made HTTP request; got body=%s", captured.getBody())
+	method, path := captured.getMethodPath()
+	if method != "" || path != "" {
+		t.Errorf("should not have made HTTP request; got %s %s", method, path)
 	}
 }
 
