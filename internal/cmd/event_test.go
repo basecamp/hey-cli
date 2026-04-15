@@ -694,6 +694,93 @@ func TestEventCreate_DefaultCalendarReturns404ShowsList(t *testing.T) {
 	}
 }
 
+func TestEventCreate_RejectsWhitespaceCalendar(t *testing.T) {
+	captured := &capturedHTTP{}
+	server := eventCreateCustomServer(t, captured, defaultCalendarsPayload())
+	defer server.Close()
+
+	_, err := runEvent(t, server, "create",
+		"--calendar", "   ",
+		"--title", "T",
+		"--date", "2024-06-15",
+		"--all-day",
+	)
+	if err == nil {
+		t.Fatalf("expected error for whitespace --calendar")
+	}
+	if !strings.Contains(err.Error(), "--calendar cannot be empty") {
+		t.Errorf("expected '--calendar cannot be empty', got: %v", err)
+	}
+	method, _ := captured.getMethodPath()
+	if method != "" {
+		t.Errorf("should not have made HTTP request; got %s", method)
+	}
+}
+
+func TestEventEdit_RejectsEmptyTitle(t *testing.T) {
+	captured := &capturedHTTP{}
+	server := eventEditServer(t, captured)
+	defer server.Close()
+
+	_, err := runEvent(t, server, "edit", "101", "--title", "")
+	if err == nil {
+		t.Fatalf("expected error for --title \"\"")
+	}
+	if !strings.Contains(err.Error(), "--title cannot be empty") {
+		t.Errorf("expected '--title cannot be empty', got: %v", err)
+	}
+	method, _ := captured.getMethodPath()
+	if method != "" {
+		t.Errorf("should not have made HTTP request; got %s", method)
+	}
+}
+
+func TestEventEdit_RejectsNonPositiveID(t *testing.T) {
+	captured := &capturedHTTP{}
+	server := eventEditServer(t, captured)
+	defer server.Close()
+
+	for _, in := range []string{"0", "-5"} {
+		t.Run(in, func(t *testing.T) {
+			captured.set("", "", "")
+			_, err := runEvent(t, server, "edit", "--title", "x", "--", in)
+			if err == nil {
+				t.Fatalf("expected error for id=%q", in)
+			}
+			if !strings.Contains(err.Error(), "event ID must be positive") {
+				t.Errorf("expected 'event ID must be positive', got: %v", err)
+			}
+			method, _ := captured.getMethodPath()
+			if method != "" {
+				t.Errorf("should not have made HTTP request; got %s", method)
+			}
+		})
+	}
+}
+
+func TestEventDelete_RejectsNonPositiveID(t *testing.T) {
+	captured := &capturedHTTP{}
+	server := eventDeleteServer(t, captured)
+	defer server.Close()
+
+	for _, in := range []string{"0", "-7"} {
+		t.Run(in, func(t *testing.T) {
+			captured.set("", "", "")
+			_, err := runEvent(t, server, "delete", "--", in)
+			if err == nil {
+				t.Fatalf("expected error for id=%q", in)
+			}
+			if !strings.Contains(err.Error(), "event ID must be positive") {
+				t.Errorf("expected 'event ID must be positive', got: %v", err)
+			}
+			method, _ := captured.getMethodPath()
+			if method != "" {
+				t.Errorf("should not have made HTTP request; got %s", method)
+			}
+		})
+	}
+}
+
 func TestEventCreate_RejectsNonPositiveCalendarID(t *testing.T) {
 	captured := &capturedHTTP{}
 	server := eventCreateCustomServer(t, captured, defaultCalendarsPayload())

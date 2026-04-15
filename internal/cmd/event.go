@@ -338,6 +338,9 @@ func (c *eventEditCommand) run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return output.ErrUsage(fmt.Sprintf("invalid event ID: %s", args[0]))
 	}
+	if id <= 0 {
+		return output.ErrUsage(fmt.Sprintf("event ID must be positive, got %d", id))
+	}
 
 	flags := cmd.Flags()
 
@@ -371,6 +374,9 @@ func (c *eventEditCommand) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	if flags.Changed("title") && c.title == "" {
+		return output.ErrUsage("--title cannot be empty")
+	}
 	if flags.Changed("date") {
 		if _, err := time.Parse("2006-01-02", c.date); err != nil {
 			return output.ErrUsage("--date must be in YYYY-MM-DD format")
@@ -470,6 +476,9 @@ func (c *eventDeleteCommand) run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return output.ErrUsage(fmt.Sprintf("invalid event ID: %s", args[0]))
 	}
+	if id <= 0 {
+		return output.ErrUsage(fmt.Sprintf("event ID must be positive, got %d", id))
+	}
 
 	if err := requireAuth(); err != nil {
 		return err
@@ -561,6 +570,9 @@ func parseReminders(in []string) ([]time.Duration, error) {
 // case-insensitively. Zero matches or multiple matches yield a usage error.
 func resolveCalendarID(ctx context.Context, input string) (int64, error) {
 	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return 0, output.ErrUsage("--calendar cannot be empty")
+	}
 	if id, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
 		if id <= 0 {
 			return 0, output.ErrUsage(fmt.Sprintf("calendar ID must be positive, got %d", id))
