@@ -26,7 +26,7 @@ func newEventCommand() *eventCommand {
 		Use:   "event",
 		Short: "Manage calendar events",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, create, edit, delete. Lists events from the personal calendar by default, or from --calendar (accepts ID or owned calendar name, case-insensitive).",
+			"agent_notes": "Subcommands: list, create, edit, delete. Defaults to the personal calendar; pass --calendar (ID or owned calendar name, case-insensitive) to target another. Use list --ids-only to pipe IDs to edit/delete.",
 		},
 	}
 
