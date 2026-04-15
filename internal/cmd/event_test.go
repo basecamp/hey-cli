@@ -246,6 +246,91 @@ func TestEventCreateAllDay(t *testing.T) {
 	}
 }
 
+func eventEditServer(t *testing.T, captured *capturedRequest) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "PATCH" && r.URL.Path == "/calendar/events/101":
+			body, _ := io.ReadAll(r.Body)
+			captured.set(string(body))
+			w.Header().Set("Location", "/calendar/events/101")
+			w.WriteHeader(http.StatusFound)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+}
+
+func runEventEdit(t *testing.T, server *httptest.Server, args ...string) (string, error) {
+	t.Helper()
+	t.Setenv("HEY_TOKEN", "test-token")
+	t.Setenv("HEY_NO_KEYRING", "1")
+	t.Setenv("HEY_BASE_URL", "")
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	t.Setenv("XDG_STATE_HOME", tmpDir)
+	t.Setenv("XDG_CACHE_HOME", tmpDir)
+
+	root := newRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	fullArgs := append([]string{"event", "edit", "--base-url", server.URL}, args...)
+	root.SetArgs(fullArgs)
+
+	err := root.Execute()
+	return buf.String(), err
+}
+
+func TestEventEdit(t *testing.T) {
+	captured := &capturedRequest{}
+	server := eventEditServer(t, captured)
+	defer server.Close()
+
+	_, err := runEventEdit(t, server, "101", "--title", "Updated standup")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	body := captured.get()
+	if !strings.Contains(body, "calendar_event%5Bsummary%5D=Updated+standup") {
+		t.Errorf("body missing summary fragment; body=%s", body)
+	}
+}
+
+func TestEventEditInvalidID(t *testing.T) {
+	captured := &capturedRequest{}
+	server := eventEditServer(t, captured)
+	defer server.Close()
+
+	_, err := runEventEdit(t, server, "notanumber", "--title", "x")
+	if err == nil {
+		t.Fatalf("expected error for invalid event ID")
+	}
+	if !strings.Contains(err.Error(), "invalid event ID") {
+		t.Errorf("expected 'invalid event ID' in error, got: %v", err)
+	}
+}
+
+func TestEventEditOnlyChangedFields(t *testing.T) {
+	captured := &capturedRequest{}
+	server := eventEditServer(t, captured)
+	defer server.Close()
+
+	_, err := runEventEdit(t, server, "101", "--title", "X")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	body := captured.get()
+	forbidden := []string{"starts_at", "ends_at", "all_day", "starts_at_time", "ends_at_time"}
+	for _, f := range forbidden {
+		if strings.Contains(body, f) {
+			t.Errorf("body should not contain %q when not changed; body=%s", f, body)
+		}
+	}
+}
+
 func TestEventListIdsOnly(t *testing.T) {
 	server := eventServer(t)
 	defer server.Close()

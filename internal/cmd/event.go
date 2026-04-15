@@ -24,12 +24,13 @@ func newEventCommand() *eventCommand {
 		Use:   "event",
 		Short: "Manage calendar events",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, create. Lists events from the personal calendar by default, or from --calendar ID.",
+			"agent_notes": "Subcommands: list, create, edit. Lists events from the personal calendar by default, or from --calendar ID.",
 		},
 	}
 
 	eventCommand.cmd.AddCommand(newEventListCommand().cmd)
 	eventCommand.cmd.AddCommand(newEventCreateCommand().cmd)
+	eventCommand.cmd.AddCommand(newEventEditCommand().cmd)
 
 	return eventCommand
 }
@@ -230,6 +231,125 @@ func (c *eventCreateCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	return writeOK(map[string]any{"id": id}, output.WithSummary("Event created"))
+}
+
+// edit
+
+type eventEditCommand struct {
+	cmd       *cobra.Command
+	title     string
+	date      string
+	start     string
+	end       string
+	allDay    bool
+	timezone  string
+	reminders []string
+}
+
+func newEventEditCommand() *eventEditCommand {
+	c := &eventEditCommand{}
+	c.cmd = &cobra.Command{
+		Use:   "edit <id>",
+		Short: "Edit a calendar event",
+		Example: `  hey event edit 123 --title "Updated standup"
+  hey event edit 123 --date 2024-06-16 --start 10:00 --end 11:00
+  hey event edit 123 --all-day
+  hey event edit 123 --reminder 30m --reminder 1h`,
+		Args: usageExactOneArg(),
+		RunE: c.run,
+	}
+
+	c.cmd.Flags().StringVar(&c.title, "title", "", "New event title")
+	c.cmd.Flags().StringVar(&c.date, "date", "", "New event date YYYY-MM-DD (applies to both start and end)")
+	c.cmd.Flags().StringVar(&c.start, "start", "", "New start time HH:MM")
+	c.cmd.Flags().StringVar(&c.end, "end", "", "New end time HH:MM")
+	c.cmd.Flags().BoolVar(&c.allDay, "all-day", false, "Set as all-day event")
+	c.cmd.Flags().StringVar(&c.timezone, "timezone", "", "IANA timezone name")
+	c.cmd.Flags().StringArrayVar(&c.reminders, "reminder", nil, "Reminder duration (e.g. 30m, 1h, 2d, 1w); repeatable")
+
+	return c
+}
+
+func (c *eventEditCommand) run(cmd *cobra.Command, args []string) error {
+	id, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return output.ErrUsage(fmt.Sprintf("invalid event ID: %s", args[0]))
+	}
+
+	flags := cmd.Flags()
+
+	if flags.Changed("date") {
+		if _, err := time.Parse("2006-01-02", c.date); err != nil {
+			return output.ErrUsage("--date must be in YYYY-MM-DD format")
+		}
+	}
+	if flags.Changed("start") {
+		if _, err := time.Parse("15:04", c.start); err != nil {
+			return output.ErrUsage("--start must be in HH:MM format")
+		}
+	}
+	if flags.Changed("end") {
+		if _, err := time.Parse("15:04", c.end); err != nil {
+			return output.ErrUsage("--end must be in HH:MM format")
+		}
+	}
+
+	var reminders []time.Duration
+	if flags.Changed("reminder") {
+		reminders, err = parseReminders(c.reminders)
+		if err != nil {
+			return err
+		}
+		if reminders == nil {
+			reminders = []time.Duration{}
+		}
+	}
+
+	if err := requireAuth(); err != nil {
+		return err
+	}
+
+	params := hey.UpdateCalendarEventParams{}
+	if flags.Changed("title") {
+		v := c.title
+		params.Title = &v
+	}
+	if flags.Changed("date") {
+		v := c.date
+		params.StartsAt = &v
+		params.EndsAt = &v
+	}
+	if flags.Changed("start") {
+		v := c.start
+		params.StartTime = &v
+	}
+	if flags.Changed("end") {
+		v := c.end
+		params.EndTime = &v
+	}
+	if flags.Changed("all-day") {
+		v := c.allDay
+		params.AllDay = &v
+	}
+	if flags.Changed("timezone") {
+		v := c.timezone
+		params.TimeZone = &v
+	}
+	if flags.Changed("reminder") {
+		params.Reminders = reminders
+	}
+
+	ctx := cmd.Context()
+	if err := sdk.CalendarEvents().Update(ctx, id, params); err != nil {
+		return convertSDKError(err)
+	}
+
+	if writer.IsStyled() {
+		fmt.Fprintln(cmd.OutOrStdout(), "Event updated.")
+		return nil
+	}
+
+	return writeOK(nil, output.WithSummary("Event updated"))
 }
 
 // parseReminderDuration parses reminder durations like "30m", "1h", "2d", "1w"
