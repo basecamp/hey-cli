@@ -3,9 +3,11 @@ package cmd
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
+	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 )
 
 func TestPaginateDraftsAllFollowsNextLinks(t *testing.T) {
@@ -100,6 +102,63 @@ func TestParseNextLinkHeader(t *testing.T) {
 
 	if got != "https://app.hey.com/entries/drafts.json?page=next" {
 		t.Fatalf("next link = %q", got)
+	}
+}
+
+func TestFetchDraftsPageRejectsCrossOriginURL(t *testing.T) {
+	originalSDK := sdk
+	sdk = hey.NewClient(&hey.Config{BaseURL: "https://app.hey.com"}, nil)
+	t.Cleanup(func() { sdk = originalSDK })
+
+	_, _, _, err := fetchDraftsPage(context.Background(), "https://evil.example/entries/drafts.json")
+
+	if err == nil {
+		t.Fatal("expected cross-origin pagination URL to fail")
+	}
+	if !strings.Contains(err.Error(), "does not match base") {
+		t.Fatalf("error = %q, want origin mismatch", err.Error())
+	}
+}
+
+func TestDraftsTruncationNotice(t *testing.T) {
+	tests := []struct {
+		name    string
+		shown   int
+		total   int
+		hasMore bool
+		all     bool
+		want    string
+	}{
+		{
+			name:    "default page has more",
+			shown:   15,
+			total:   146,
+			hasMore: true,
+			want:    "Showing 15 of 146 drafts. Use --all to fetch all.",
+		},
+		{
+			name:    "all capped",
+			shown:   1500,
+			total:   1600,
+			hasMore: true,
+			all:     true,
+			want:    "Showing 1500 of at least 1600 drafts. Pagination limit reached; not all drafts could be fetched.",
+		},
+		{
+			name:  "complete result",
+			shown: 3,
+			total: 3,
+			want:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := draftsTruncationNotice(tt.shown, tt.total, tt.hasMore, tt.all)
+			if got != tt.want {
+				t.Fatalf("notice = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
