@@ -87,7 +87,9 @@ CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos,
 | List emails in a box | `hey box imbox --json` |
 | Read email thread | `hey threads <topic_id> --json` |
 | Reply to email | `hey reply <topic_id> -m "Thanks!"` |
+| Save reply draft | `hey reply <topic_id> --draft -m "Thanks!"` |
 | Compose email | `hey compose --to user@example.com --subject "Hello"` |
+| Save compose draft | `hey compose --draft --to user@example.com --subject "Hello" -m "Draft body"` |
 | Compose with CC/BCC | `hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Hello"` |
 | Create draft | `hey draft create --to user@example.com --subject "Hello" -m "Draft body"` |
 | Create reply draft | `hey draft create --thread-id 12345 -m "Thanks!"` |
@@ -136,9 +138,11 @@ Want to read email?
 Want to send email?
 ├── Reply to thread? → hey reply <topic_id> -m "message"
 │   └── Open editor? → hey reply <topic_id> (omit -m to open $EDITOR)
+├── Save reply draft? → hey reply <topic_id> --draft -m "message"
 ├── Compose new? → hey compose --to <email> --subject "Subject"
 │   ├── With body? → hey compose --to <email> --subject "Subject" -m "Body"
 │   ├── With CC? → add --cc <email>
+│   ├── Save as draft? → add --draft
 │   └── With BCC? → add --bcc <email>
 ├── Save a draft instead? → hey draft create --to <email> --subject "Subject" -m "Body"
 ├── Save a reply draft? → hey draft create --thread-id <topic_id> -m "Body"
@@ -183,9 +187,11 @@ hey threads <topic_id> --html                 # Read with raw HTML content
 
 ```bash
 hey reply <topic_id> -m "Thanks!"             # Reply with inline message
+hey reply <topic_id> --draft -m "Thanks!"     # Save reply draft without sending
 hey reply <topic_id>                          # Reply via $EDITOR
 hey compose --to user@example.com --subject "Hello"         # Compose new (opens $EDITOR)
 hey compose --to user@example.com --subject "Hi" -m "Body"  # With inline body
+hey compose --draft --to user@example.com --subject "Hi" -m "Body"  # Save draft without sending
 hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Project update" -m "Body"  # With CC/BCC
 hey compose --subject "Update" --thread-id 12345 -m "msg"   # Post to existing thread
 ```
@@ -212,7 +218,7 @@ hey draft delete 67890                        # Delete draft
 ```
 
 Use `hey draft ...` when an agent must prepare mail without sending. `hey compose`
-and `hey reply` send immediately.
+and `hey reply` send immediately unless `--draft` is set.
 
 ### Calendars
 

@@ -116,3 +116,15 @@ func TestParseSelectedAddressesFieldRejectsSelectedOptionWithoutValue(t *testing
 		t.Fatalf("expected parser to reject selected option without value, got %#v", addresses)
 	}
 }
+
+func TestDraftUpdateHasChanges(t *testing.T) {
+	if draftUpdateHasChanges(false, false, false, false, false) {
+		t.Fatal("expected no changes when no flags are changed")
+	}
+	if !draftUpdateHasChanges(true, false, false, false, false) {
+		t.Fatal("expected subject flag change to count")
+	}
+	if !draftUpdateHasChanges(false, false, false, false, true) {
+		t.Fatal("expected message flag change to count")
+	}
+}

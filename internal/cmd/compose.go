@@ -19,6 +19,7 @@ type composeCommand struct {
 	subject  string
 	message  string
 	threadID string
+	draft    bool
 }
 
 func newComposeCommand() *composeCommand {
@@ -27,9 +28,10 @@ func newComposeCommand() *composeCommand {
 		Use:   "compose",
 		Short: "Compose a new message",
 		Annotations: map[string]string{
-			"agent_notes": "Creates a new email. Requires --subject. Use --to (optionally with --cc/--bcc) for new threads or --thread-id for existing ones.",
+			"agent_notes": "Creates and sends a new email unless --draft is set. Requires --subject. Use --to (optionally with --cc/--bcc) for new threads or --thread-id for existing ones.",
 		},
 		Example: `  hey compose --to alice@example.com --subject "Hello" -m "Hi there"
+  hey compose --draft --to alice@example.com --subject "Hello" -m "Draft body"
   hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Hello" -m "Hi"
   hey compose --subject "Update" --thread-id 12345 -m "Thread reply"
   echo "Long message" | hey compose --to bob@example.com --subject "Report"`,
@@ -42,6 +44,7 @@ func newComposeCommand() *composeCommand {
 	composeCommand.cmd.Flags().StringVar(&composeCommand.subject, "subject", "", "Message subject (required)")
 	composeCommand.cmd.Flags().StringVarP(&composeCommand.message, "message", "m", "", "Message body (or opens $EDITOR)")
 	composeCommand.cmd.Flags().StringVar(&composeCommand.threadID, "thread-id", "", "Thread ID to post message to")
+	composeCommand.cmd.Flags().BoolVar(&composeCommand.draft, "draft", false, "Save as draft instead of sending")
 
 	return composeCommand
 }
@@ -85,6 +88,12 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return output.ErrUsage(fmt.Sprintf("invalid thread ID: %s", c.threadID))
 		}
+		if c.draft {
+			return createReplyDraft(ctx, cmd.OutOrStdout(), topicID, draftFormRequest{
+				Subject: c.subject,
+				Content: message,
+			})
+		}
 		if err := sdk.Messages().CreateTopicMessage(ctx, topicID, message); err != nil {
 			return convertSDKError(err)
 		}
@@ -92,6 +101,15 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		to := parseAddresses(c.to)
 		cc := parseAddresses(c.cc)
 		bcc := parseAddresses(c.bcc)
+		if c.draft {
+			return createMessageDraft(ctx, cmd.OutOrStdout(), draftFormRequest{
+				Subject: c.subject,
+				Content: message,
+				To:      to,
+				CC:      cc,
+				BCC:     bcc,
+			})
+		}
 		if err := sdk.Messages().Create(ctx, c.subject, message, to, cc, bcc); err != nil {
 			return convertSDKError(err)
 		}

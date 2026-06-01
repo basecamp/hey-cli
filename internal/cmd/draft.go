@@ -139,21 +139,25 @@ func newDraftUpdateCommand() *cobra.Command {
 }
 
 func (c *draftUpdateCommand) run(cmd *cobra.Command, args []string) error {
-	if err := requireAuth(); err != nil {
-		return err
-	}
-
 	draftID, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil {
 		return output.ErrUsage(fmt.Sprintf("invalid draft ID: %s", args[0]))
 	}
+	flags := cmd.Flags()
+	if !draftUpdateHasChanges(flags.Changed("subject"), flags.Changed("to"), flags.Changed("cc"), flags.Changed("bcc"), flags.Changed("message")) {
+		return output.ErrUsageHint("No update fields specified", "hey draft update <draft-id> --subject <subject> -m <message>")
+	}
+
+	if err := requireAuth(); err != nil {
+		return err
+	}
+
 	existing, err := loadMessageDraft(cmd.Context(), draftID)
 	if err != nil {
 		return err
 	}
 	draft := existing.Request
 
-	flags := cmd.Flags()
 	if flags.Changed("subject") {
 		draft.Subject = c.subject
 	}
@@ -167,7 +171,7 @@ func (c *draftUpdateCommand) run(cmd *cobra.Command, args []string) error {
 		draft.BCC = parseAddresses(c.bcc)
 	}
 
-	if flags.Changed("message") || !stdinIsTerminal() {
+	if flags.Changed("message") {
 		message, err := draftMessageWithInitial(c.message, draft.Content, flags.Changed("message"))
 		if err != nil {
 			return err
@@ -176,6 +180,10 @@ func (c *draftUpdateCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	return updateDraft(cmd.Context(), cmd.OutOrStdout(), draftID, draft, existing.CSRFToken)
+}
+
+func draftUpdateHasChanges(subjectChanged, toChanged, ccChanged, bccChanged, messageChanged bool) bool {
+	return subjectChanged || toChanged || ccChanged || bccChanged || messageChanged
 }
 
 type draftDeleteCommand struct{}
