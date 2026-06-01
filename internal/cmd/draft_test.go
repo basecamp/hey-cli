@@ -1,8 +1,12 @@
 package cmd
 
 import (
+	"bytes"
+	"errors"
 	"reflect"
 	"testing"
+
+	"github.com/basecamp/hey-cli/internal/output"
 )
 
 func TestDraftValues(t *testing.T) {
@@ -117,14 +121,23 @@ func TestParseSelectedAddressesFieldRejectsSelectedOptionWithoutValue(t *testing
 	}
 }
 
-func TestDraftUpdateHasChanges(t *testing.T) {
-	if draftUpdateHasChanges(false, false, false, false, false) {
-		t.Fatal("expected no changes when no flags are changed")
+func TestDraftUpdateWithoutFieldsFailsBeforeAuth(t *testing.T) {
+	cmd := newDraftUpdateCommand()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"123"})
+
+	err := cmd.Execute()
+
+	var usageErr *output.Error
+	if !errors.As(err, &usageErr) {
+		t.Fatalf("error = %T, want output.Error", err)
 	}
-	if !draftUpdateHasChanges(true, false, false, false, false) {
-		t.Fatal("expected subject flag change to count")
+	if usageErr.Code != "usage" {
+		t.Fatalf("code = %q, want usage", usageErr.Code)
 	}
-	if !draftUpdateHasChanges(false, false, false, false, true) {
-		t.Fatal("expected message flag change to count")
+	if usageErr.Message != "No update fields specified" {
+		t.Fatalf("message = %q", usageErr.Message)
 	}
 }

@@ -94,7 +94,7 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if c.draft {
-		return createReplyDraft(ctx, cmd.OutOrStdout(), threadID, draftFormRequest{
+		return createReplyDraftForEntry(ctx, cmd.OutOrStdout(), latestEntryID, draftFormRequest{
 			Content: message,
 			To:      addressed.To,
 			CC:      addressed.CC,

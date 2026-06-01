@@ -144,7 +144,7 @@ func (c *draftUpdateCommand) run(cmd *cobra.Command, args []string) error {
 		return output.ErrUsage(fmt.Sprintf("invalid draft ID: %s", args[0]))
 	}
 	flags := cmd.Flags()
-	if !draftUpdateHasChanges(flags.Changed("subject"), flags.Changed("to"), flags.Changed("cc"), flags.Changed("bcc"), flags.Changed("message")) {
+	if !flags.Changed("subject") && !flags.Changed("to") && !flags.Changed("cc") && !flags.Changed("bcc") && !flags.Changed("message") {
 		return output.ErrUsageHint("No update fields specified", "hey draft update <draft-id> --subject <subject> -m <message>")
 	}
 
@@ -180,10 +180,6 @@ func (c *draftUpdateCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	return updateDraft(cmd.Context(), cmd.OutOrStdout(), draftID, draft, existing.CSRFToken)
-}
-
-func draftUpdateHasChanges(subjectChanged, toChanged, ccChanged, bccChanged, messageChanged bool) bool {
-	return subjectChanged || toChanged || ccChanged || bccChanged || messageChanged
 }
 
 type draftDeleteCommand struct{}
@@ -257,11 +253,6 @@ func createMessageDraft(ctx context.Context, w io.Writer, draft draftFormRequest
 }
 
 func createReplyDraft(ctx context.Context, w io.Writer, threadID int64, draft draftFormRequest) error {
-	senderID, err := sdk.DefaultSenderID(ctx)
-	if err != nil {
-		return convertSDKError(err)
-	}
-
 	topicResp, err := sdk.GetHTML(ctx, fmt.Sprintf("/topics/%d", threadID))
 	if err != nil {
 		return convertSDKError(err)
@@ -278,17 +269,27 @@ func createReplyDraft(ctx context.Context, w io.Writer, threadID int64, draft dr
 	}
 
 	latestEntryID := entries[len(entries)-1].ID
+	if len(draft.To) == 0 && len(draft.CC) == 0 && len(draft.BCC) == 0 {
+		draft.To = addressed.To
+		draft.CC = addressed.CC
+		draft.BCC = addressed.BCC
+	}
+
+	return createReplyDraftForEntry(ctx, w, latestEntryID, draft)
+}
+
+func createReplyDraftForEntry(ctx context.Context, w io.Writer, latestEntryID int64, draft draftFormRequest) error {
+	senderID, err := sdk.DefaultSenderID(ctx)
+	if err != nil {
+		return convertSDKError(err)
+	}
+
 	replyForm, err := loadReplyDraftForm(ctx, latestEntryID)
 	if err != nil {
 		return err
 	}
 	if draft.Subject == "" {
 		draft.Subject = replyForm.Request.Subject
-	}
-	if len(draft.To) == 0 && len(draft.CC) == 0 && len(draft.BCC) == 0 {
-		draft.To = addressed.To
-		draft.CC = addressed.CC
-		draft.BCC = addressed.BCC
 	}
 
 	values := draftValues(senderID, draft)
