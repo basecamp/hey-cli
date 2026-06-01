@@ -1,6 +1,9 @@
 package cmd
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestDraftValues(t *testing.T) {
 	values := draftValues(123, draftFormRequest{
@@ -46,5 +49,43 @@ func TestParseMessageSubject(t *testing.T) {
 
 	if got := parseMessageSubject(html); got != "Re: Research & Planning" {
 		t.Fatalf("subject = %q", got)
+	}
+}
+
+func TestParseDraftForm(t *testing.T) {
+	html := `
+<meta name="csrf-token" content="csrf-123" />
+<select name="entry[addressed][directly][]" hidden multiple>
+  <option value="alice@example.com" selected>Alice</option>
+  <option value="bob@example.com">Bob</option>
+</select>
+<select name="entry[addressed][copied][]" hidden multiple>
+  <option value="carol@example.com" selected>Carol</option>
+</select>
+<select name="entry[addressed][blindcopied][]" hidden multiple>
+  <option value="dave@example.com" selected>Dave</option>
+</select>
+<input value="Hello &amp; welcome" name="message[subject]" />
+<input type="hidden" name="message[content]" value="Body &amp; more" />`
+
+	state := parseDraftForm(html)
+
+	if state.CSRFToken != "csrf-123" {
+		t.Fatalf("csrf = %q", state.CSRFToken)
+	}
+	if state.Request.Subject != "Hello & welcome" {
+		t.Fatalf("subject = %q", state.Request.Subject)
+	}
+	if state.Request.Content != "Body & more" {
+		t.Fatalf("content = %q", state.Request.Content)
+	}
+	if !reflect.DeepEqual(state.Request.To, []string{"alice@example.com"}) {
+		t.Fatalf("to = %#v", state.Request.To)
+	}
+	if !reflect.DeepEqual(state.Request.CC, []string{"carol@example.com"}) {
+		t.Fatalf("cc = %#v", state.Request.CC)
+	}
+	if !reflect.DeepEqual(state.Request.BCC, []string{"dave@example.com"}) {
+		t.Fatalf("bcc = %#v", state.Request.BCC)
 	}
 }

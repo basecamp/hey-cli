@@ -33,6 +33,7 @@ var (
 	baseURL     string
 	cfg         *config.Config
 	authMgr     *auth.Manager
+	httpClient  *http.Client
 	writer      *output.Writer
 )
 
@@ -76,7 +77,7 @@ func newRootCmd() *cobra.Command {
 			}
 
 			configDir := config.ConfigDir()
-			httpClient := &http.Client{Timeout: 30 * time.Second}
+			httpClient = &http.Client{Timeout: 30 * time.Second}
 			authMgr = auth.NewManager(cfg.BaseURL, httpClient, configDir)
 			initSDK(authMgr, cfg.BaseURL)
 
