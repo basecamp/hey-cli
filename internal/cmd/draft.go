@@ -322,18 +322,6 @@ func loadMessageDraft(ctx context.Context, draftID int64) (draftFormState, error
 	return state, nil
 }
 
-func loadMessageDraftCSRFToken(ctx context.Context, draftID int64) (string, error) {
-	resp, err := sdk.GetHTML(ctx, fmt.Sprintf("/messages/%d/edit", draftID))
-	if err != nil {
-		return "", convertSDKError(err)
-	}
-	token := parseCSRFToken(string(resp.Data))
-	if token == "" {
-		return "", output.ErrAPI(0, "could not determine draft authenticity token")
-	}
-	return token, nil
-}
-
 func loadCSRFToken(ctx context.Context, path string) (string, error) {
 	resp, err := sdk.GetHTML(ctx, path)
 	if err != nil {
@@ -369,7 +357,7 @@ func updateDraft(ctx context.Context, w io.Writer, draftID int64, draft draftFor
 }
 
 func deleteDraft(ctx context.Context, w io.Writer, draftID int64) error {
-	csrfToken, err := loadMessageDraftCSRFToken(ctx, draftID)
+	csrfToken, err := loadCSRFToken(ctx, fmt.Sprintf("/messages/%d/edit", draftID))
 	if err != nil {
 		return err
 	}
