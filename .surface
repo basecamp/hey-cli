@@ -40,6 +40,21 @@ hey config
 hey config set
 hey config show
 hey doctor
+hey draft
+hey draft create
+hey draft create --bcc
+hey draft create --cc
+hey draft create --message
+hey draft create --subject
+hey draft create --thread-id
+hey draft create --to
+hey draft delete
+hey draft update
+hey draft update --bcc
+hey draft update --cc
+hey draft update --message
+hey draft update --subject
+hey draft update --to
 hey drafts
 hey drafts --all
 hey drafts --limit

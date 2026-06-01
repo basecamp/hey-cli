@@ -14,6 +14,7 @@ triggers:
   - hey threads
   - hey reply
   - hey compose
+  - hey draft
   - hey drafts
   # Calendar actions
   - hey calendars
@@ -88,6 +89,10 @@ CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos,
 | Reply to email | `hey reply <topic_id> -m "Thanks!"` |
 | Compose email | `hey compose --to user@example.com --subject "Hello"` |
 | Compose with CC/BCC | `hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Hello"` |
+| Create draft | `hey draft create --to user@example.com --subject "Hello" -m "Draft body"` |
+| Create reply draft | `hey draft create --thread-id 12345 -m "Thanks!"` |
+| Update draft | `hey draft update 12345 --to user@example.com --subject "Hello" -m "Updated body"` |
+| Delete draft | `hey draft delete 12345` |
 | List drafts | `hey drafts --json` |
 | List calendars | `hey calendars --json` |
 | List calendar events | `hey recordings 123 --json` |
@@ -135,6 +140,8 @@ Want to send email?
 │   ├── With body? → hey compose --to <email> --subject "Subject" -m "Body"
 │   ├── With CC? → add --cc <email>
 │   └── With BCC? → add --bcc <email>
+├── Save a draft instead? → hey draft create --to <email> --subject "Subject" -m "Body"
+├── Save a reply draft? → hey draft create --thread-id <topic_id> -m "Body"
 └── Check drafts? → hey drafts --json
 ```
 
@@ -198,7 +205,14 @@ Takes posting IDs (the `id` field from `hey box` output).
 
 ```bash
 hey drafts --json                             # List drafts
+hey draft create --to user@example.com --subject "Hello" -m "Body"  # Save new draft
+hey draft create --thread-id 12345 -m "Thanks!"       # Save reply draft
+hey draft update 67890 --to user@example.com --subject "Hello" -m "Updated body"
+hey draft delete 67890                        # Delete draft
 ```
+
+Use `hey draft ...` when an agent must prepare mail without sending. `hey compose`
+and `hey reply` send immediately.
 
 ### Calendars
 
