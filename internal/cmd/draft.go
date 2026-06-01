@@ -167,11 +167,13 @@ func (c *draftUpdateCommand) run(cmd *cobra.Command, args []string) error {
 		draft.BCC = parseAddresses(c.bcc)
 	}
 
-	message, err := draftMessageWithInitial(c.message, draft.Content, flags.Changed("message"))
-	if err != nil {
-		return err
+	if flags.Changed("message") || !stdinIsTerminal() {
+		message, err := draftMessageWithInitial(c.message, draft.Content, flags.Changed("message"))
+		if err != nil {
+			return err
+		}
+		draft.Content = message
 	}
-	draft.Content = message
 
 	return updateDraft(cmd.Context(), cmd.OutOrStdout(), draftID, draft, existing.CSRFToken)
 }
@@ -218,8 +220,13 @@ type draftResponse struct {
 }
 
 type draftFormState struct {
-	Request   draftFormRequest
-	CSRFToken string
+	Request    draftFormRequest
+	CSRFToken  string
+	HasSubject bool
+	HasContent bool
+	HasTo      bool
+	HasCC      bool
+	HasBCC     bool
 }
 
 func createMessageDraft(ctx context.Context, w io.Writer, draft draftFormRequest) error {
@@ -291,8 +298,11 @@ func loadReplyDraftForm(ctx context.Context, entryID int64) (draftFormState, err
 		return draftFormState{}, convertSDKError(err)
 	}
 	state := parseDraftForm(string(resp.Data))
-	if state.Request.Subject == "" {
+	if !state.HasSubject || state.Request.Subject == "" {
 		return draftFormState{}, output.ErrAPI(0, "could not determine reply draft subject")
+	}
+	if state.CSRFToken == "" {
+		return draftFormState{}, output.ErrAPI(0, "could not determine reply draft authenticity token")
 	}
 	return state, nil
 }
@@ -302,7 +312,14 @@ func loadMessageDraft(ctx context.Context, draftID int64) (draftFormState, error
 	if err != nil {
 		return draftFormState{}, convertSDKError(err)
 	}
-	return parseDraftForm(string(resp.Data)), nil
+	state := parseDraftForm(string(resp.Data))
+	if !state.HasSubject || !state.HasContent || !state.HasTo || !state.HasCC || !state.HasBCC {
+		return draftFormState{}, output.ErrAPI(0, "could not parse draft edit form")
+	}
+	if state.CSRFToken == "" {
+		return draftFormState{}, output.ErrAPI(0, "could not determine draft authenticity token")
+	}
+	return state, nil
 }
 
 func loadCSRFToken(ctx context.Context, path string) (string, error) {
@@ -310,7 +327,11 @@ func loadCSRFToken(ctx context.Context, path string) (string, error) {
 	if err != nil {
 		return "", convertSDKError(err)
 	}
-	return parseCSRFToken(string(resp.Data)), nil
+	token := parseCSRFToken(string(resp.Data))
+	if token == "" {
+		return "", output.ErrAPI(0, "could not determine draft authenticity token")
+	}
+	return token, nil
 }
 
 func updateDraft(ctx context.Context, w io.Writer, draftID int64, draft draftFormRequest, csrfToken string) error {
@@ -441,47 +462,72 @@ func draftResponseFromLocation(location string) draftResponse {
 }
 
 func parseMessageSubject(pageHTML string) string {
+	subject, _ := parseMessageSubjectField(pageHTML)
+	return subject
+}
+
+func parseMessageSubjectField(pageHTML string) (string, bool) {
 	input := messageSubjectInputRe.FindString(pageHTML)
 	if input == "" {
-		return ""
+		return "", false
 	}
 	match := valueAttrRe.FindStringSubmatch(input)
 	if match == nil {
-		return ""
+		return "", false
 	}
-	return html.UnescapeString(match[1])
+	return html.UnescapeString(match[1]), true
 }
 
 func parseDraftForm(pageHTML string) draftFormState {
+	subject, hasSubject := parseMessageSubjectField(pageHTML)
+	content, hasContent := parseMessageContentField(pageHTML)
+	to, hasTo := parseSelectedAddressesField(pageHTML, "entry[addressed][directly][]")
+	cc, hasCC := parseSelectedAddressesField(pageHTML, "entry[addressed][copied][]")
+	bcc, hasBCC := parseSelectedAddressesField(pageHTML, "entry[addressed][blindcopied][]")
 	return draftFormState{
 		Request: draftFormRequest{
-			Subject: parseMessageSubject(pageHTML),
-			Content: parseMessageContent(pageHTML),
-			To:      parseSelectedAddresses(pageHTML, "entry[addressed][directly][]"),
-			CC:      parseSelectedAddresses(pageHTML, "entry[addressed][copied][]"),
-			BCC:     parseSelectedAddresses(pageHTML, "entry[addressed][blindcopied][]"),
+			Subject: subject,
+			Content: content,
+			To:      to,
+			CC:      cc,
+			BCC:     bcc,
 		},
-		CSRFToken: parseCSRFToken(pageHTML),
+		CSRFToken:  parseCSRFToken(pageHTML),
+		HasSubject: hasSubject,
+		HasContent: hasContent,
+		HasTo:      hasTo,
+		HasCC:      hasCC,
+		HasBCC:     hasBCC,
 	}
 }
 
 func parseMessageContent(pageHTML string) string {
+	content, _ := parseMessageContentField(pageHTML)
+	return content
+}
+
+func parseMessageContentField(pageHTML string) (string, bool) {
 	input := messageContentInputRe.FindString(pageHTML)
 	if input == "" {
-		return ""
+		return "", false
 	}
 	match := valueAttrRe.FindStringSubmatch(input)
 	if match == nil {
-		return ""
+		return "", false
 	}
-	return html.UnescapeString(match[1])
+	return html.UnescapeString(match[1]), true
 }
 
 func parseSelectedAddresses(pageHTML, fieldName string) []string {
+	addresses, _ := parseSelectedAddressesField(pageHTML, fieldName)
+	return addresses
+}
+
+func parseSelectedAddressesField(pageHTML, fieldName string) ([]string, bool) {
 	selectRe := regexp.MustCompile(`(?s)<select[^>]+name="` + regexp.QuoteMeta(fieldName) + `"[^>]*>(.*?)</select>`)
 	match := selectRe.FindStringSubmatch(pageHTML)
 	if match == nil {
-		return nil
+		return nil, false
 	}
 
 	var addresses []string
@@ -491,7 +537,7 @@ func parseSelectedAddresses(pageHTML, fieldName string) []string {
 			addresses = append(addresses, html.UnescapeString(valueMatch[1]))
 		}
 	}
-	return addresses
+	return addresses, true
 }
 
 func parseCSRFToken(pageHTML string) string {

@@ -73,6 +73,9 @@ func TestParseDraftForm(t *testing.T) {
 	if state.CSRFToken != "csrf-123" {
 		t.Fatalf("csrf = %q", state.CSRFToken)
 	}
+	if !state.HasSubject || !state.HasContent || !state.HasTo || !state.HasCC || !state.HasBCC {
+		t.Fatalf("field presence = subject:%t content:%t to:%t cc:%t bcc:%t", state.HasSubject, state.HasContent, state.HasTo, state.HasCC, state.HasBCC)
+	}
 	if state.Request.Subject != "Hello & welcome" {
 		t.Fatalf("subject = %q", state.Request.Subject)
 	}
@@ -87,5 +90,16 @@ func TestParseDraftForm(t *testing.T) {
 	}
 	if !reflect.DeepEqual(state.Request.BCC, []string{"dave@example.com"}) {
 		t.Fatalf("bcc = %#v", state.Request.BCC)
+	}
+}
+
+func TestParseDraftFormMissingFields(t *testing.T) {
+	state := parseDraftForm(`<meta name="csrf-token" content="csrf-123" />`)
+
+	if state.CSRFToken != "csrf-123" {
+		t.Fatalf("csrf = %q", state.CSRFToken)
+	}
+	if state.HasSubject || state.HasContent || state.HasTo || state.HasCC || state.HasBCC {
+		t.Fatalf("unexpected field presence = subject:%t content:%t to:%t cc:%t bcc:%t", state.HasSubject, state.HasContent, state.HasTo, state.HasCC, state.HasBCC)
 	}
 }
