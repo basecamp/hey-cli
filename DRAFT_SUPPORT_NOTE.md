@@ -2,7 +2,7 @@
 
 ## Authorship
 
-Authored by Mike Gyi with Codex, based on GPT-5.
+Authored by Mike Gyi with Codex 5.5.
 
 ## Intent
 
