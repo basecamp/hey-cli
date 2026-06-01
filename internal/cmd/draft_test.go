@@ -103,3 +103,16 @@ func TestParseDraftFormMissingFields(t *testing.T) {
 		t.Fatalf("unexpected field presence = subject:%t content:%t to:%t cc:%t bcc:%t", state.HasSubject, state.HasContent, state.HasTo, state.HasCC, state.HasBCC)
 	}
 }
+
+func TestParseSelectedAddressesFieldRejectsSelectedOptionWithoutValue(t *testing.T) {
+	html := `
+<select name="entry[addressed][directly][]" hidden multiple>
+  <option selected>Alice</option>
+</select>`
+
+	addresses, ok := parseSelectedAddressesField(html, "entry[addressed][directly][]")
+
+	if ok {
+		t.Fatalf("expected parser to reject selected option without value, got %#v", addresses)
+	}
+}

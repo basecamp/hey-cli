@@ -322,6 +322,18 @@ func loadMessageDraft(ctx context.Context, draftID int64) (draftFormState, error
 	return state, nil
 }
 
+func loadMessageDraftCSRFToken(ctx context.Context, draftID int64) (string, error) {
+	resp, err := sdk.GetHTML(ctx, fmt.Sprintf("/messages/%d/edit", draftID))
+	if err != nil {
+		return "", convertSDKError(err)
+	}
+	token := parseCSRFToken(string(resp.Data))
+	if token == "" {
+		return "", output.ErrAPI(0, "could not determine draft authenticity token")
+	}
+	return token, nil
+}
+
 func loadCSRFToken(ctx context.Context, path string) (string, error) {
 	resp, err := sdk.GetHTML(ctx, path)
 	if err != nil {
@@ -357,7 +369,7 @@ func updateDraft(ctx context.Context, w io.Writer, draftID int64, draft draftFor
 }
 
 func deleteDraft(ctx context.Context, w io.Writer, draftID int64) error {
-	existing, err := loadMessageDraft(ctx, draftID)
+	csrfToken, err := loadMessageDraftCSRFToken(ctx, draftID)
 	if err != nil {
 		return err
 	}
@@ -365,7 +377,7 @@ func deleteDraft(ctx context.Context, w io.Writer, draftID int64) error {
 	values.Set("_method", "delete")
 	values.Set("status", "drafted")
 
-	if _, err := submitDraftForm(ctx, "POST", fmt.Sprintf("/messages/%d", draftID), values, existing.CSRFToken); err != nil {
+	if _, err := submitDraftForm(ctx, "POST", fmt.Sprintf("/messages/%d", draftID), values, csrfToken); err != nil {
 		return err
 	}
 
@@ -533,9 +545,10 @@ func parseSelectedAddressesField(pageHTML, fieldName string) ([]string, bool) {
 	var addresses []string
 	for _, option := range optionRe.FindAllString(match[1], -1) {
 		valueMatch := valueAttrRe.FindStringSubmatch(option)
-		if valueMatch != nil {
-			addresses = append(addresses, html.UnescapeString(valueMatch[1]))
+		if valueMatch == nil {
+			return nil, false
 		}
+		addresses = append(addresses, html.UnescapeString(valueMatch[1]))
 	}
 	return addresses, true
 }
