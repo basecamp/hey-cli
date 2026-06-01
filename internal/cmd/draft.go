@@ -414,9 +414,13 @@ func draftContentHTML(content string) string {
 	content = strings.ReplaceAll(content, "\r", "\n")
 	lines := strings.Split(content, "\n")
 	for i, line := range lines {
-		lines[i] = html.EscapeString(line)
+		if line == "" {
+			lines[i] = "<div><br></div>"
+			continue
+		}
+		lines[i] = "<div>" + html.EscapeString(line) + "</div>"
 	}
-	return "<div>" + strings.Join(lines, "<br>") + "</div>"
+	return strings.Join(lines, "")
 }
 
 func looksLikeDraftHTML(content string) bool {

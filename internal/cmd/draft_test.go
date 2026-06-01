@@ -44,7 +44,7 @@ func TestDraftValuesFormatsPlainTextContent(t *testing.T) {
 		To:      []string{"chrissie@example.com"},
 	})
 
-	want := "<div>Hi Chrissie,<br><br>Thanks &amp; all the best.<br><br>Mike</div>"
+	want := "<div>Hi Chrissie,</div><div><br></div><div>Thanks &amp; all the best.</div><div><br></div><div>Mike</div>"
 	if got := values.Get("message[content]"); got != want {
 		t.Fatalf("content = %q, want %q", got, want)
 	}
