@@ -37,6 +37,56 @@ func TestDraftValues(t *testing.T) {
 	}
 }
 
+func TestDraftValuesFormatsPlainTextContent(t *testing.T) {
+	values := draftValues(123, draftFormRequest{
+		Subject: "Hello",
+		Content: "Hi Chrissie,\n\nThanks & all the best.\n\nMike",
+		To:      []string{"chrissie@example.com"},
+	})
+
+	want := "<div>Hi Chrissie,<br><br>Thanks &amp; all the best.<br><br>Mike</div>"
+	if got := values.Get("message[content]"); got != want {
+		t.Fatalf("content = %q, want %q", got, want)
+	}
+}
+
+func TestWithReplyFormRecipientsUsesReplyFormDefaults(t *testing.T) {
+	got := withReplyFormRecipients(draftFormRequest{
+		Content: "Thanks",
+	}, draftFormRequest{
+		To:  []string{"chrissie@example.com"},
+		CC:  []string{"friend@example.com"},
+		BCC: nil,
+	})
+
+	want := draftFormRequest{
+		Content: "Thanks",
+		To:      []string{"chrissie@example.com"},
+		CC:      []string{"friend@example.com"},
+		BCC:     nil,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("draft = %#v, want %#v", got, want)
+	}
+}
+
+func TestWithReplyFormRecipientsKeepsExplicitRecipients(t *testing.T) {
+	got := withReplyFormRecipients(draftFormRequest{
+		Content: "Thanks",
+		To:      []string{"selected@example.com"},
+	}, draftFormRequest{
+		To:  []string{"form@example.com"},
+		BCC: []string{"hidden@example.com"},
+	})
+
+	if !reflect.DeepEqual(got.To, []string{"selected@example.com"}) {
+		t.Fatalf("to = %#v", got.To)
+	}
+	if len(got.BCC) != 0 {
+		t.Fatalf("bcc = %#v, want empty explicit recipient state to be preserved", got.BCC)
+	}
+}
+
 func TestDraftResponseFromLocation(t *testing.T) {
 	resp := draftResponseFromLocation("https://app.hey.com/messages/2159062391")
 

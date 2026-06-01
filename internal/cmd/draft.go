@@ -253,12 +253,6 @@ func createMessageDraft(ctx context.Context, w io.Writer, draft draftFormRequest
 }
 
 func createReplyDraft(ctx context.Context, w io.Writer, threadID int64, draft draftFormRequest) error {
-	topicResp, err := sdk.GetHTML(ctx, fmt.Sprintf("/topics/%d", threadID))
-	if err != nil {
-		return convertSDKError(err)
-	}
-	addressed := htmlutil.ParseTopicAddressed(string(topicResp.Data))
-
 	entriesResp, err := sdk.GetHTML(ctx, fmt.Sprintf("/topics/%d/entries", threadID))
 	if err != nil {
 		return convertSDKError(err)
@@ -268,14 +262,7 @@ func createReplyDraft(ctx context.Context, w io.Writer, threadID int64, draft dr
 		return output.ErrNotFound("entries for thread", fmt.Sprintf("%d", threadID))
 	}
 
-	latestEntryID := entries[len(entries)-1].ID
-	if len(draft.To) == 0 && len(draft.CC) == 0 && len(draft.BCC) == 0 {
-		draft.To = addressed.To
-		draft.CC = addressed.CC
-		draft.BCC = addressed.BCC
-	}
-
-	return createReplyDraftForEntry(ctx, w, latestEntryID, draft)
+	return createReplyDraftForEntry(ctx, w, entries[len(entries)-1].ID, draft)
 }
 
 func createReplyDraftForEntry(ctx context.Context, w io.Writer, latestEntryID int64, draft draftFormRequest) error {
@@ -290,6 +277,10 @@ func createReplyDraftForEntry(ctx context.Context, w io.Writer, latestEntryID in
 	}
 	if draft.Subject == "" {
 		draft.Subject = replyForm.Request.Subject
+	}
+	draft = withReplyFormRecipients(draft, replyForm.Request)
+	if len(draft.To) == 0 && len(draft.CC) == 0 && len(draft.BCC) == 0 {
+		return output.ErrUsage("could not determine thread recipients")
 	}
 
 	values := draftValues(senderID, draft)
@@ -391,7 +382,7 @@ func draftValues(senderID int64, draft draftFormRequest) url.Values {
 	values.Set("acting_sender_id", fmt.Sprintf("%d", senderID))
 	values.Set("entry[status]", "drafted")
 	values.Set("message[subject]", draft.Subject)
-	values.Set("message[content]", draft.Content)
+	values.Set("message[content]", draftContentHTML(draft.Content))
 	for _, to := range draft.To {
 		values.Add("entry[addressed][directly][]", to)
 	}
@@ -402,6 +393,40 @@ func draftValues(senderID int64, draft draftFormRequest) url.Values {
 		values.Add("entry[addressed][blindcopied][]", bcc)
 	}
 	return values
+}
+
+func withReplyFormRecipients(draft, replyForm draftFormRequest) draftFormRequest {
+	if len(draft.To) > 0 || len(draft.CC) > 0 || len(draft.BCC) > 0 {
+		return draft
+	}
+	draft.To = replyForm.To
+	draft.CC = replyForm.CC
+	draft.BCC = replyForm.BCC
+	return draft
+}
+
+func draftContentHTML(content string) string {
+	if looksLikeDraftHTML(content) {
+		return content
+	}
+
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	content = strings.ReplaceAll(content, "\r", "\n")
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		lines[i] = html.EscapeString(line)
+	}
+	return "<div>" + strings.Join(lines, "<br>") + "</div>"
+}
+
+func looksLikeDraftHTML(content string) bool {
+	trimmed := strings.TrimSpace(strings.ToLower(content))
+	return strings.HasPrefix(trimmed, "<div") ||
+		strings.HasPrefix(trimmed, "<p") ||
+		strings.HasPrefix(trimmed, "<ul") ||
+		strings.HasPrefix(trimmed, "<ol") ||
+		strings.HasPrefix(trimmed, "<blockquote") ||
+		strings.Contains(trimmed, "<br")
 }
 
 func submitDraftForm(ctx context.Context, method, path string, values url.Values, csrfToken string) (draftResponse, error) {
