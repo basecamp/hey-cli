@@ -33,7 +33,8 @@ type Value struct {
 }
 
 type Config struct {
-	BaseURL string `json:"base_url"`
+	BaseURL       string `json:"base_url"`
+	DefaultSender string `json:"default_sender,omitempty"`
 
 	sources map[string]Source
 }
@@ -115,7 +116,10 @@ func localConfigPath() string {
 func Load() (*Config, error) {
 	cfg := &Config{
 		BaseURL: defaultBase,
-		sources: map[string]Source{"base_url": SourceDefault},
+		sources: map[string]Source{
+			"base_url":       SourceDefault,
+			"default_sender": SourceDefault,
+		},
 	}
 
 	// Layer 1: global config
@@ -158,7 +162,8 @@ func (c *Config) loadFile(path string, source Source) error {
 	}
 
 	var file struct {
-		BaseURL string `json:"base_url"`
+		BaseURL       string `json:"base_url"`
+		DefaultSender string `json:"default_sender"`
 	}
 	if err := json.Unmarshal(data, &file); err != nil {
 		return fmt.Errorf("could not parse config %s: %w", path, err)
@@ -167,6 +172,10 @@ func (c *Config) loadFile(path string, source Source) error {
 	if file.BaseURL != "" {
 		c.BaseURL = file.BaseURL
 		c.sources["base_url"] = source
+	}
+	if file.DefaultSender != "" {
+		c.DefaultSender = file.DefaultSender
+		c.sources["default_sender"] = source
 	}
 
 	return nil
@@ -194,13 +203,31 @@ func (c *Config) SetFromFlag(key, value string) error {
 			c.sources = map[string]Source{}
 		}
 		c.sources["base_url"] = SourceFlag
+	case "default_sender":
+		c.DefaultSender = value
+		if c.sources == nil {
+			c.sources = map[string]Source{}
+		}
+		c.sources["default_sender"] = SourceFlag
 	}
 	return nil
+}
+
+// UnsetField clears a configuration field so it reverts to default.
+func (c *Config) UnsetField(key string) {
+	switch key {
+	case "default_sender":
+		c.DefaultSender = ""
+		if c.sources != nil {
+			c.sources["default_sender"] = SourceDefault
+		}
+	}
 }
 
 func (c *Config) Values() []Value {
 	return []Value{
 		{Value: c.BaseURL, Source: c.SourceOf("base_url")},
+		{Value: c.DefaultSender, Source: c.SourceOf("default_sender")},
 	}
 }
 

@@ -19,6 +19,7 @@ type composeCommand struct {
 	subject  string
 	message  string
 	threadID string
+	from     string
 }
 
 func newComposeCommand() *composeCommand {
@@ -42,6 +43,7 @@ func newComposeCommand() *composeCommand {
 	composeCommand.cmd.Flags().StringVar(&composeCommand.subject, "subject", "", "Message subject (required)")
 	composeCommand.cmd.Flags().StringVarP(&composeCommand.message, "message", "m", "", "Message body (or opens $EDITOR)")
 	composeCommand.cmd.Flags().StringVar(&composeCommand.threadID, "thread-id", "", "Thread ID to post message to")
+	composeCommand.cmd.Flags().StringVar(&composeCommand.from, "from", "", "Sender email address (overrides default)")
 
 	return composeCommand
 }
@@ -80,20 +82,70 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 
 	ctx := cmd.Context()
 
+	// When --from or default_sender is set, we bypass the SDK's service methods
+	// and call PostMutation directly so we can control the acting_sender_id.
+	hasSenderOverride := c.from != "" || cfg.DefaultSender != ""
+
 	if c.threadID != "" {
 		topicID, err := strconv.ParseInt(c.threadID, 10, 64)
 		if err != nil {
 			return output.ErrUsage(fmt.Sprintf("invalid thread ID: %s", c.threadID))
 		}
-		if err := sdk.Messages().CreateTopicMessage(ctx, topicID, message); err != nil {
-			return convertSDKError(err)
+		if hasSenderOverride {
+			senderID, err := effectiveSenderID(ctx, c.from)
+			if err != nil {
+				return err
+			}
+			body := map[string]any{
+				"acting_sender_id": senderID,
+				"message": map[string]any{
+					"content": message,
+				},
+			}
+			if _, err := sdk.PostMutation(ctx, fmt.Sprintf("/topics/%d/entries.json", topicID), body); err != nil {
+				return convertSDKError(err)
+			}
+		} else {
+			if err := sdk.Messages().CreateTopicMessage(ctx, topicID, message); err != nil {
+				return convertSDKError(err)
+			}
 		}
 	} else {
 		to := parseAddresses(c.to)
 		cc := parseAddresses(c.cc)
 		bcc := parseAddresses(c.bcc)
-		if err := sdk.Messages().Create(ctx, c.subject, message, to, cc, bcc); err != nil {
-			return convertSDKError(err)
+		if hasSenderOverride {
+			senderID, err := effectiveSenderID(ctx, c.from)
+			if err != nil {
+				return err
+			}
+			addressed := map[string]any{}
+			if len(to) > 0 {
+				addressed["directly"] = to
+			}
+			if len(cc) > 0 {
+				addressed["copied"] = cc
+			}
+			if len(bcc) > 0 {
+				addressed["blindcopied"] = bcc
+			}
+			body := map[string]any{
+				"acting_sender_id": senderID,
+				"message": map[string]any{
+					"subject": c.subject,
+					"content": message,
+				},
+				"entry": map[string]any{
+					"addressed": addressed,
+				},
+			}
+			if _, err := sdk.PostMutation(ctx, "/messages.json", body); err != nil {
+				return convertSDKError(err)
+			}
+		} else {
+			if err := sdk.Messages().Create(ctx, c.subject, message, to, cc, bcc); err != nil {
+				return convertSDKError(err)
+			}
 		}
 	}
 

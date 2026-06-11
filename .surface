@@ -32,13 +32,16 @@ hey completion
 hey compose
 hey compose --bcc
 hey compose --cc
+hey compose --from
 hey compose --message
 hey compose --subject
 hey compose --thread-id
 hey compose --to
 hey config
+hey config get
 hey config set
 hey config show
+hey config unset
 hey doctor
 hey drafts
 hey drafts --all
@@ -61,7 +64,14 @@ hey recordings --ends-on
 hey recordings --limit
 hey recordings --starts-on
 hey reply
+hey reply --from
 hey reply --message
+hey screener
+hey screener approve
+hey screener deny
+hey screener feed
+hey screener spam
+hey screener trail
 hey seen
 hey setup
 hey skill
