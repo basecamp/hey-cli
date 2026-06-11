@@ -33,6 +33,7 @@ var (
 	baseURL     string
 	cfg         *config.Config
 	authMgr     *auth.Manager
+	httpClient  *http.Client
 	writer      *output.Writer
 )
 
@@ -76,7 +77,7 @@ func newRootCmd() *cobra.Command {
 			}
 
 			configDir := config.ConfigDir()
-			httpClient := &http.Client{Timeout: 30 * time.Second}
+			httpClient = &http.Client{Timeout: 30 * time.Second}
 			authMgr = auth.NewManager(cfg.BaseURL, httpClient, configDir)
 			initSDK(authMgr, cfg.BaseURL)
 
@@ -122,6 +123,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newThreadsCommand().cmd)
 	root.AddCommand(newReplyCommand().cmd)
 	root.AddCommand(newComposeCommand().cmd)
+	root.AddCommand(newDraftCommand().cmd)
 	root.AddCommand(newDraftsCommand().cmd)
 	root.AddCommand(newCalendarsCommand().cmd)
 	root.AddCommand(newRecordingsCommand().cmd)

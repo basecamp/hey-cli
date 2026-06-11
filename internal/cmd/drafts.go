@@ -1,7 +1,10 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -42,20 +45,11 @@ func (c *draftsCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := cmd.Context()
-	result, err := sdk.Entries().ListDrafts(ctx, nil)
+	drafts, total, hasMore, err := paginateDrafts(ctx, c.limit, c.all, fetchDraftsPage)
 	if err != nil {
-		return convertSDKError(err)
+		return err
 	}
-
-	var drafts []generated.DraftMessage
-	if result != nil {
-		drafts = *result
-	}
-	total := len(drafts)
-	if c.limit > 0 && !c.all && len(drafts) > c.limit {
-		drafts = drafts[:c.limit]
-	}
-	notice := output.TruncationNotice(len(drafts), total)
+	notice := draftsTruncationNotice(len(drafts), total, hasMore, c.all)
 
 	if writer.IsStyled() {
 		if len(drafts) == 0 {
@@ -79,4 +73,104 @@ func (c *draftsCommand) run(cmd *cobra.Command, args []string) error {
 		output.WithSummary(fmt.Sprintf("%d drafts", len(drafts))),
 		output.WithNotice(notice),
 	)
+}
+
+type draftPageFetcher func(ctx context.Context, pageURL string) ([]generated.DraftMessage, string, int, error)
+
+func fetchDraftsPage(ctx context.Context, pageURL string) ([]generated.DraftMessage, string, int, error) {
+	if strings.HasPrefix(pageURL, "http://") || strings.HasPrefix(pageURL, "https://") {
+		if err := validateSameOrigin(sdk.Config().BaseURL, pageURL); err != nil {
+			return nil, "", 0, err
+		}
+	}
+
+	resp, err := sdk.Get(ctx, pageURL)
+	if err != nil {
+		return nil, "", 0, convertSDKError(err)
+	}
+
+	var drafts []generated.DraftMessage
+	if err := resp.UnmarshalData(&drafts); err != nil {
+		return nil, "", 0, fmt.Errorf("failed to parse drafts response: %w", err)
+	}
+
+	total := len(drafts)
+	if totalHeader := resp.Headers.Get("X-Total-Count"); totalHeader != "" {
+		if parsed, err := strconv.Atoi(totalHeader); err == nil {
+			total = parsed
+		}
+	}
+
+	return drafts, parseNextLinkHeader(resp.Headers.Get("Link")), total, nil
+}
+
+func paginateDrafts(ctx context.Context, limit int, all bool, fetch draftPageFetcher) ([]generated.DraftMessage, int, bool, error) {
+	if fetch == nil {
+		return nil, 0, false, fmt.Errorf("paginateDrafts: fetch function is nil")
+	}
+
+	pageDrafts, nextURL, total, err := fetch(ctx, "/entries/drafts.json")
+	if err != nil {
+		return nil, 0, false, err
+	}
+
+	drafts := append([]generated.DraftMessage(nil), pageDrafts...)
+	if total == 0 {
+		total = len(drafts)
+	}
+
+	needMore := all || (limit > 0 && len(drafts) < limit)
+	for page := 1; needMore && nextURL != "" && page <= maxAdditionalPages; page++ {
+		var pageTotal int
+		pageDrafts, nextURL, pageTotal, err = fetch(ctx, nextURL)
+		if err != nil {
+			return nil, 0, false, err
+		}
+		if pageTotal > total {
+			total = pageTotal
+		}
+		if len(pageDrafts) == 0 {
+			nextURL = ""
+			break
+		}
+
+		drafts = append(drafts, pageDrafts...)
+		needMore = all || (limit > 0 && len(drafts) < limit)
+	}
+
+	hasMore := nextURL != ""
+	if limit > 0 && !all && len(drafts) > limit {
+		drafts = drafts[:limit]
+		hasMore = true
+	}
+	if total < len(drafts) {
+		total = len(drafts)
+	}
+
+	return drafts, total, hasMore, nil
+}
+
+func draftsTruncationNotice(shown, total int, hasMore, all bool) string {
+	if hasMore && all {
+		return fmt.Sprintf("Showing %d of at least %d drafts. Pagination limit reached; not all drafts could be fetched.", shown, total)
+	}
+	if hasMore {
+		return fmt.Sprintf("Showing %d of %d drafts. Use --all to fetch all.", shown, total)
+	}
+	return output.TruncationNotice(shown, total)
+}
+
+func parseNextLinkHeader(linkHeader string) string {
+	for _, part := range strings.Split(linkHeader, ",") {
+		part = strings.TrimSpace(part)
+		if !strings.Contains(part, `rel="next"`) {
+			continue
+		}
+		start := strings.Index(part, "<")
+		end := strings.Index(part, ">")
+		if start >= 0 && end > start {
+			return part[start+1 : end]
+		}
+	}
+	return ""
 }
