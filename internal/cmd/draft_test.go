@@ -169,8 +169,8 @@ func TestResponseBodyErrorMessageCapsAndCollapsesWhitespace(t *testing.T) {
 
 	got := responseBodyErrorMessage(body)
 
-	if len(got) != 503 {
-		t.Fatalf("length = %d, want capped message plus ellipsis", len(got))
+	if len([]rune(strings.TrimSuffix(got, "..."))) > 500 {
+		t.Fatalf("message prefix length = %d, want at most 500 runes", len([]rune(strings.TrimSuffix(got, "..."))))
 	}
 	if strings.Contains(got, "\n") || strings.Contains(got, "  ") {
 		t.Fatalf("message was not normalized: %q", got)

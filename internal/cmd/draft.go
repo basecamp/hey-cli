@@ -484,16 +484,17 @@ func submitDraftForm(ctx context.Context, method, path string, values url.Values
 }
 
 func responseBodyErrorMessage(body []byte) string {
-	const maxErrorBodyBytes = 500
+	const maxErrorBodyRunes = 500
 	bodyText := strings.TrimSpace(string(body))
 	if bodyText == "" {
 		return ""
 	}
 	bodyText = strings.Join(strings.Fields(bodyText), " ")
-	if len(bodyText) <= maxErrorBodyBytes {
+	runes := []rune(bodyText)
+	if len(runes) <= maxErrorBodyRunes {
 		return bodyText
 	}
-	return bodyText[:maxErrorBodyBytes] + "..."
+	return string(runes[:maxErrorBodyRunes]) + "..."
 }
 
 func trackDraftRequest(duration time.Duration) {

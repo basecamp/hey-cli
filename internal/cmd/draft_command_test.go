@@ -29,6 +29,15 @@ func TestComposeDraftNewMessageUsesDraftEndpoint(t *testing.T) {
 	recorder.assertHit(t, "POST /messages.json", 0)
 }
 
+func TestComposeDraftAllowsExplicitEmptyMessage(t *testing.T) {
+	recorder := newDraftEndpointRecorder(t)
+	cmd := newComposeCommand().cmd
+	runCommandWithServer(t, cmd, recorder.handler, "--draft", "--to", "alice@example.com", "--subject", "Hello", "--message", "")
+
+	recorder.assertHit(t, "POST /messages", 1)
+	recorder.assertFormValue(t, "POST /messages", "message[content]", "<div><br></div>")
+}
+
 func TestDraftCreateAllowsExplicitEmptyMessage(t *testing.T) {
 	recorder := newDraftEndpointRecorder(t)
 	cmd := newDraftCreateCommand()
@@ -36,6 +45,15 @@ func TestDraftCreateAllowsExplicitEmptyMessage(t *testing.T) {
 
 	recorder.assertHit(t, "POST /messages", 1)
 	recorder.assertFormValue(t, "POST /messages", "message[content]", "<div><br></div>")
+}
+
+func TestDraftUpdateAllowsExplicitEmptyMessage(t *testing.T) {
+	recorder := newDraftEndpointRecorder(t)
+	cmd := newDraftUpdateCommand()
+	runCommandWithServer(t, cmd, recorder.handler, "123", "--message", "")
+
+	recorder.assertHit(t, "POST /messages/123", 1)
+	recorder.assertFormValue(t, "POST /messages/123", "message[content]", "<div><br></div>")
 }
 
 func TestComposeSendsNewMessageWithoutDraft(t *testing.T) {
@@ -63,6 +81,15 @@ func TestReplyDraftUsesReplyDraftEndpoint(t *testing.T) {
 
 	recorder.assertHit(t, "POST /entries/456/replies", 1)
 	recorder.assertHit(t, "POST /entries/456/replies.json", 0)
+}
+
+func TestReplyDraftAllowsExplicitEmptyMessage(t *testing.T) {
+	recorder := newDraftEndpointRecorder(t)
+	cmd := newReplyCommand().cmd
+	runCommandWithServer(t, cmd, recorder.handler, "123", "--draft", "--message", "")
+
+	recorder.assertHit(t, "POST /entries/456/replies", 1)
+	recorder.assertFormValue(t, "POST /entries/456/replies", "message[content]", "<div><br></div>")
 }
 
 func TestReplySendsWithoutDraft(t *testing.T) {
@@ -102,7 +129,7 @@ func (r *draftEndpointRecorder) handler(w http.ResponseWriter, req *http.Request
 	case "GET /identity.json":
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(testIdentityJSON))
-	case "GET /messages/new", "GET /entries/456/replies/new":
+	case "GET /messages/new", "GET /messages/123/edit", "GET /entries/456/replies/new":
 		w.Header().Set("Content-Type", "text/html")
 		_, _ = w.Write([]byte(testDraftFormHTML()))
 	case "GET /topics/123/entries":
@@ -114,6 +141,9 @@ func (r *draftEndpointRecorder) handler(w http.ResponseWriter, req *http.Request
 	case "POST /entries/456/replies":
 		w.Header().Set("Location", "https://app.hey.test/messages/9002")
 		w.WriteHeader(http.StatusCreated)
+	case "POST /messages/123":
+		w.Header().Set("Location", "https://app.hey.test/messages/123")
+		w.WriteHeader(http.StatusOK)
 	case "POST /messages.json", "POST /topics/123/entries.json", "POST /entries/456/replies.json":
 		w.WriteHeader(http.StatusNoContent)
 	default:

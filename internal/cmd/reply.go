@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/basecamp/hey-cli/internal/editor"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/output"
 )
@@ -62,25 +61,9 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 
 	latestEntryID := entries[len(entries)-1].ID
 
-	message := c.message
-	if message == "" {
-		if !stdinIsTerminal() {
-			message, err = readStdin()
-			if err != nil {
-				return err
-			}
-			if message == "" {
-				return output.ErrUsage("no message provided (use -m or --message to provide inline, or pipe to stdin)")
-			}
-		} else {
-			message, err = editor.Open("")
-			if err != nil {
-				return output.ErrAPI(0, fmt.Sprintf("could not open editor: %v", err))
-			}
-			if message == "" {
-				return output.ErrUsage("empty message, aborting")
-			}
-		}
+	message, err := draftMessageWithInitial(c.message, "", c.draft && cmd.Flags().Changed("message"))
+	if err != nil {
+		return err
 	}
 
 	if c.draft {

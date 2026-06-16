@@ -7,7 +7,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/basecamp/hey-cli/internal/editor"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -58,27 +57,9 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		return output.ErrUsageHint("--subject is required", "hey compose --to <email> --subject <subject> -m <message>")
 	}
 
-	message := c.message
-	if message == "" {
-		if !stdinIsTerminal() {
-			var err error
-			message, err = readStdin()
-			if err != nil {
-				return err
-			}
-			if message == "" {
-				return output.ErrUsage("no message provided (use -m or --message to provide inline, or pipe to stdin)")
-			}
-		} else {
-			var err error
-			message, err = editor.Open("")
-			if err != nil {
-				return output.ErrAPI(0, fmt.Sprintf("could not open editor: %v", err))
-			}
-			if message == "" {
-				return output.ErrUsage("empty message, aborting")
-			}
-		}
+	message, err := draftMessageWithInitial(c.message, "", c.draft && cmd.Flags().Changed("message"))
+	if err != nil {
+		return err
 	}
 
 	ctx := cmd.Context()
