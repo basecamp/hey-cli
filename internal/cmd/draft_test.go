@@ -180,6 +180,18 @@ func TestResponseBodyErrorMessageCapsAndCollapsesWhitespace(t *testing.T) {
 	}
 }
 
+func TestResponseBodyErrorMessageCapsMultibyteText(t *testing.T) {
+	got := responseBodyErrorMessage([]byte(strings.Repeat("é", 600)))
+	prefix := strings.TrimSuffix(got, "...")
+
+	if len([]rune(prefix)) != 500 {
+		t.Fatalf("message prefix length = %d, want 500 runes", len([]rune(prefix)))
+	}
+	if !strings.HasSuffix(got, "...") {
+		t.Fatalf("message = %q, want ellipsis", got)
+	}
+}
+
 func TestParseMessageSubject(t *testing.T) {
 	html := `<input class="input" value="Re: Research &amp; Planning" name="message[subject]" id="message_subject" />`
 

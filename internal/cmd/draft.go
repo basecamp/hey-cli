@@ -633,15 +633,11 @@ func writeDraftSaved(w io.Writer, resp draftResponse, summary string) error {
 	return writeOK(resp, output.WithSummary(summary))
 }
 
-func draftMessage(inline string) (string, error) {
-	return draftMessageWithInitial(inline, "", inline != "")
-}
-
-func draftMessageWithInitial(inline, initial string, inlineChanged bool) (string, error) {
+func draftMessageWithInitial(inline, initial string, messageFlagChanged bool) (string, error) {
 	if inline != "" {
 		return inline, nil
 	}
-	if inlineChanged {
+	if messageFlagChanged {
 		return "", nil
 	}
 	if !stdinIsTerminal() {
