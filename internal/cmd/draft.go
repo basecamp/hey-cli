@@ -464,14 +464,19 @@ func submitDraftForm(ctx context.Context, method, path string, values url.Values
 		return draftResponse{}, output.ErrNetwork(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	body, _ := io.ReadAll(resp.Body)
+	body, readErr := io.ReadAll(resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
-		msg := strings.TrimSpace(string(body))
-		if msg == "" {
-			msg = resp.Status
+		msg := resp.Status
+		if readErr == nil {
+			if bodyText := strings.TrimSpace(string(body)); bodyText != "" {
+				msg = bodyText
+			}
 		}
 		return draftResponse{}, output.ErrAPI(resp.StatusCode, msg)
+	}
+	if readErr != nil {
+		return draftResponse{}, output.ErrNetwork(readErr)
 	}
 
 	location := resp.Header.Get("Location")
@@ -490,12 +495,23 @@ func draftResponseFromLocation(location string) draftResponse {
 	if location == "" {
 		return draftResponse{}
 	}
-	location = strings.TrimRight(location, "/")
-	id, _ := strconv.ParseInt(location[strings.LastIndex(location, "/")+1:], 10, 64)
+	locationURL := strings.TrimRight(location, "/")
+	if parsed, err := url.Parse(location); err == nil {
+		parsed.RawQuery = ""
+		parsed.Fragment = ""
+		parsed.Path = strings.TrimRight(parsed.Path, "/")
+		locationURL = parsed.String()
+	}
+
+	path := locationURL
+	if parsed, err := url.Parse(locationURL); err == nil && parsed.Path != "" {
+		path = parsed.Path
+	}
+	id, _ := strconv.ParseInt(path[strings.LastIndex(path, "/")+1:], 10, 64)
 	return draftResponse{
 		ID:      id,
-		URL:     location,
-		EditURL: location + "/edit",
+		URL:     locationURL,
+		EditURL: locationURL + "/edit",
 	}
 }
 

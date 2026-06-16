@@ -2,10 +2,17 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"io"
+	"net/http"
+	"net/url"
 	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/basecamp/hey-cli/internal/auth"
+	"github.com/basecamp/hey-cli/internal/config"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -98,12 +105,87 @@ func TestDraftResponseFromLocation(t *testing.T) {
 	}
 }
 
+func TestDraftResponseFromLocationWithQueryAndFragment(t *testing.T) {
+	resp := draftResponseFromLocation("https://app.hey.com/messages/2159062391?draft=1#top")
+
+	if resp.ID != 2159062391 {
+		t.Fatalf("ID = %d, want 2159062391", resp.ID)
+	}
+	if resp.URL != "https://app.hey.com/messages/2159062391" {
+		t.Fatalf("URL = %q", resp.URL)
+	}
+	if resp.EditURL != "https://app.hey.com/messages/2159062391/edit" {
+		t.Fatalf("EditURL = %q", resp.EditURL)
+	}
+}
+
+func TestDraftResponseFromRelativeLocation(t *testing.T) {
+	resp := draftResponseFromLocation("/messages/2159062391?draft=1")
+
+	if resp.ID != 2159062391 {
+		t.Fatalf("ID = %d, want 2159062391", resp.ID)
+	}
+	if resp.URL != "/messages/2159062391" {
+		t.Fatalf("URL = %q", resp.URL)
+	}
+	if resp.EditURL != "/messages/2159062391/edit" {
+		t.Fatalf("EditURL = %q", resp.EditURL)
+	}
+}
+
+func TestSubmitDraftFormFallsBackToStatusWhenErrorBodyReadFails(t *testing.T) {
+	oldCfg, oldAuthMgr, oldHTTPClient := cfg, authMgr, httpClient
+	t.Cleanup(func() {
+		cfg, authMgr, httpClient = oldCfg, oldAuthMgr, oldHTTPClient
+	})
+	t.Setenv("HEY_TOKEN", "test-token")
+	cfg = &config.Config{BaseURL: "https://app.hey.com"}
+	authMgr = auth.NewManager(cfg.BaseURL, nil, t.TempDir())
+	httpClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusBadGateway,
+			Status:     "502 Bad Gateway",
+			Body:       errorReadCloser{},
+			Header:     make(http.Header),
+		}, nil
+	})}
+
+	_, err := submitDraftForm(context.Background(), "POST", "/messages", url.Values{}, "csrf")
+
+	var apiErr *output.Error
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("error = %T, want output.Error", err)
+	}
+	if apiErr.HTTPStatus != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", apiErr.HTTPStatus, http.StatusBadGateway)
+	}
+	if !strings.Contains(apiErr.Message, "502 Bad Gateway") {
+		t.Fatalf("message = %q, want status fallback", apiErr.Message)
+	}
+}
+
 func TestParseMessageSubject(t *testing.T) {
 	html := `<input class="input" value="Re: Research &amp; Planning" name="message[subject]" id="message_subject" />`
 
 	if got := parseMessageSubject(html); got != "Re: Research & Planning" {
 		t.Fatalf("subject = %q", got)
 	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+type errorReadCloser struct{}
+
+func (errorReadCloser) Read([]byte) (int, error) {
+	return 0, io.ErrUnexpectedEOF
+}
+
+func (errorReadCloser) Close() error {
+	return nil
 }
 
 func TestParseDraftForm(t *testing.T) {

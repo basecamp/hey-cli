@@ -120,6 +120,59 @@ func TestFetchDraftsPageRejectsCrossOriginURL(t *testing.T) {
 	}
 }
 
+func TestNormalizeDraftsPageURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		base    string
+		pageURL string
+		want    string
+		wantErr bool
+	}{
+		{
+			name:    "relative path is unchanged",
+			base:    "https://app.hey.com",
+			pageURL: "/entries/drafts.json?page=2",
+			want:    "/entries/drafts.json?page=2",
+		},
+		{
+			name:    "same origin absolute URL becomes relative",
+			base:    "https://app.hey.com",
+			pageURL: "https://app.hey.com/entries/drafts.json?page=2",
+			want:    "/entries/drafts.json?page=2",
+		},
+		{
+			name:    "scheme-relative same host becomes relative",
+			base:    "https://app.hey.com",
+			pageURL: "//app.hey.com/entries/drafts.json?page=2",
+			want:    "/entries/drafts.json?page=2",
+		},
+		{
+			name:    "mixed-case same origin becomes relative",
+			base:    "https://app.hey.com",
+			pageURL: "HTTPS://app.hey.com/entries/drafts.json?page=2",
+			want:    "/entries/drafts.json?page=2",
+		},
+		{
+			name:    "cross origin is rejected",
+			base:    "https://app.hey.com",
+			pageURL: "//evil.example/entries/drafts.json?page=2",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := normalizeDraftsPageURL(tt.base, tt.pageURL)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("normalizeDraftsPageURL error = %v, wantErr %t", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Fatalf("normalized URL = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDraftsTruncationNotice(t *testing.T) {
 	tests := []struct {
 		name    string

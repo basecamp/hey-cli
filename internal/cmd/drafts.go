@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -78,13 +79,12 @@ func (c *draftsCommand) run(cmd *cobra.Command, args []string) error {
 type draftPageFetcher func(ctx context.Context, pageURL string) ([]generated.DraftMessage, string, int, error)
 
 func fetchDraftsPage(ctx context.Context, pageURL string) ([]generated.DraftMessage, string, int, error) {
-	if strings.HasPrefix(pageURL, "http://") || strings.HasPrefix(pageURL, "https://") {
-		if err := validateSameOrigin(sdk.Config().BaseURL, pageURL); err != nil {
-			return nil, "", 0, err
-		}
+	requestPath, err := normalizeDraftsPageURL(sdk.Config().BaseURL, pageURL)
+	if err != nil {
+		return nil, "", 0, err
 	}
 
-	resp, err := sdk.Get(ctx, pageURL)
+	resp, err := sdk.Get(ctx, requestPath)
 	if err != nil {
 		return nil, "", 0, convertSDKError(err)
 	}
@@ -102,6 +102,36 @@ func fetchDraftsPage(ctx context.Context, pageURL string) ([]generated.DraftMess
 	}
 
 	return drafts, parseNextLinkHeader(resp.Headers.Get("Link")), total, nil
+}
+
+func normalizeDraftsPageURL(baseURL, pageURL string) (string, error) {
+	parsed, err := url.Parse(pageURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid pagination URL: %w", err)
+	}
+	if parsed.Host == "" {
+		return pageURL, nil
+	}
+
+	base, err := url.Parse(baseURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid base URL: %w", err)
+	}
+	if parsed.Scheme == "" {
+		parsed.Scheme = base.Scheme
+	}
+	if err := validateSameOrigin(baseURL, parsed.String()); err != nil {
+		return "", err
+	}
+
+	path := parsed.EscapedPath()
+	if path == "" {
+		path = "/"
+	}
+	if parsed.RawQuery != "" {
+		path += "?" + parsed.RawQuery
+	}
+	return path, nil
 }
 
 func paginateDrafts(ctx context.Context, limit int, all bool, fetch draftPageFetcher) ([]generated.DraftMessage, int, bool, error) {

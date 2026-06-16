@@ -224,7 +224,10 @@ func validateSameOrigin(baseURL, targetURL string) error {
 	if err != nil {
 		return fmt.Errorf("invalid pagination URL: %w", err)
 	}
-	if base.Scheme != target.Scheme || base.Host != target.Host {
+	if target.Scheme == "" && target.Host != "" {
+		target.Scheme = base.Scheme
+	}
+	if !strings.EqualFold(base.Scheme, target.Scheme) || base.Host != target.Host {
 		return fmt.Errorf("pagination URL origin %s://%s does not match base %s://%s",
 			target.Scheme, target.Host, base.Scheme, base.Host)
 	}
