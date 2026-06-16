@@ -221,6 +221,7 @@ func TestValidateSameOrigin(t *testing.T) {
 		{"different scheme", "https://app.hey.com", "http://app.hey.com/page2", true},
 		{"scheme relative same host", "https://app.hey.com", "//app.hey.com/page2", false},
 		{"mixed case scheme", "https://app.hey.com", "HTTPS://app.hey.com/page2", false},
+		{"mixed case host", "https://app.hey.com", "https://APP.HEY.COM/page2", false},
 		{"with port match", "https://app.hey.com:443", "https://app.hey.com:443/page2", false},
 		{"port mismatch", "https://app.hey.com:443", "https://app.hey.com:8080/page2", true},
 	}

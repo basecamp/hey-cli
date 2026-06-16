@@ -164,6 +164,22 @@ func TestSubmitDraftFormFallsBackToStatusWhenErrorBodyReadFails(t *testing.T) {
 	}
 }
 
+func TestResponseBodyErrorMessageCapsAndCollapsesWhitespace(t *testing.T) {
+	body := []byte("<html>\n" + strings.Repeat("long error body ", 80) + "</html>")
+
+	got := responseBodyErrorMessage(body)
+
+	if len(got) != 503 {
+		t.Fatalf("length = %d, want capped message plus ellipsis", len(got))
+	}
+	if strings.Contains(got, "\n") || strings.Contains(got, "  ") {
+		t.Fatalf("message was not normalized: %q", got)
+	}
+	if !strings.HasSuffix(got, "...") {
+		t.Fatalf("message = %q, want ellipsis", got)
+	}
+}
+
 func TestParseMessageSubject(t *testing.T) {
 	html := `<input class="input" value="Re: Research &amp; Planning" name="message[subject]" id="message_subject" />`
 

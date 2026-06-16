@@ -83,7 +83,7 @@ func (c *draftCreateCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	message, err := draftMessage(c.message)
+	message, err := draftMessageWithInitial(c.message, "", cmd.Flags().Changed("message"))
 	if err != nil {
 		return err
 	}
@@ -469,7 +469,7 @@ func submitDraftForm(ctx context.Context, method, path string, values url.Values
 	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
 		msg := resp.Status
 		if readErr == nil {
-			if bodyText := strings.TrimSpace(string(body)); bodyText != "" {
+			if bodyText := responseBodyErrorMessage(body); bodyText != "" {
 				msg = bodyText
 			}
 		}
@@ -481,6 +481,19 @@ func submitDraftForm(ctx context.Context, method, path string, values url.Values
 
 	location := resp.Header.Get("Location")
 	return draftResponseFromLocation(location), nil
+}
+
+func responseBodyErrorMessage(body []byte) string {
+	const maxErrorBodyBytes = 500
+	bodyText := strings.TrimSpace(string(body))
+	if bodyText == "" {
+		return ""
+	}
+	bodyText = strings.Join(strings.Fields(bodyText), " ")
+	if len(bodyText) <= maxErrorBodyBytes {
+		return bodyText
+	}
+	return bodyText[:maxErrorBodyBytes] + "..."
 }
 
 func trackDraftRequest(duration time.Duration) {

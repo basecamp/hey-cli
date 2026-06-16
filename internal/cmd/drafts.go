@@ -110,6 +110,9 @@ func normalizeDraftsPageURL(baseURL, pageURL string) (string, error) {
 		return "", fmt.Errorf("invalid pagination URL: %w", err)
 	}
 	if parsed.Host == "" {
+		if parsed.Scheme != "" {
+			return "", fmt.Errorf("invalid pagination URL: absolute URL missing host")
+		}
 		return pageURL, nil
 	}
 

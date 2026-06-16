@@ -158,6 +158,12 @@ func TestNormalizeDraftsPageURL(t *testing.T) {
 			pageURL: "//evil.example/entries/drafts.json?page=2",
 			wantErr: true,
 		},
+		{
+			name:    "scheme without host is rejected",
+			base:    "https://app.hey.com",
+			pageURL: "mailto:alice@example.com",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {

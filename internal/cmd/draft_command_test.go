@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync"
 	"testing"
 
@@ -26,6 +27,15 @@ func TestComposeDraftNewMessageUsesDraftEndpoint(t *testing.T) {
 
 	recorder.assertHit(t, "POST /messages", 1)
 	recorder.assertHit(t, "POST /messages.json", 0)
+}
+
+func TestDraftCreateAllowsExplicitEmptyMessage(t *testing.T) {
+	recorder := newDraftEndpointRecorder(t)
+	cmd := newDraftCreateCommand()
+	runCommandWithServer(t, cmd, recorder.handler, "--to", "alice@example.com", "--subject", "Hello", "--message", "")
+
+	recorder.assertHit(t, "POST /messages", 1)
+	recorder.assertFormValue(t, "POST /messages", "message[content]", "<div><br></div>")
 }
 
 func TestComposeSendsNewMessageWithoutDraft(t *testing.T) {
@@ -67,17 +77,25 @@ func TestReplySendsWithoutDraft(t *testing.T) {
 type draftEndpointRecorder struct {
 	mu   sync.Mutex
 	hits map[string]int
+	form map[string]url.Values
 }
 
 func newDraftEndpointRecorder(t *testing.T) *draftEndpointRecorder {
 	t.Helper()
-	return &draftEndpointRecorder{hits: map[string]int{}}
+	return &draftEndpointRecorder{
+		hits: map[string]int{},
+		form: map[string]url.Values{},
+	}
 }
 
 func (r *draftEndpointRecorder) handler(w http.ResponseWriter, req *http.Request) {
 	key := req.Method + " " + req.URL.Path
+	_ = req.ParseForm()
 	r.mu.Lock()
 	r.hits[key]++
+	if len(req.PostForm) > 0 {
+		r.form[key] = req.PostForm
+	}
 	r.mu.Unlock()
 
 	switch key {
@@ -110,6 +128,16 @@ func (r *draftEndpointRecorder) assertHit(t *testing.T, key string, want int) {
 	r.mu.Unlock()
 	if got != want {
 		t.Fatalf("%s hit %d times, want %d", key, got, want)
+	}
+}
+
+func (r *draftEndpointRecorder) assertFormValue(t *testing.T, key, name, want string) {
+	t.Helper()
+	r.mu.Lock()
+	got := r.form[key].Get(name)
+	r.mu.Unlock()
+	if got != want {
+		t.Fatalf("%s form %s = %q, want %q", key, name, got, want)
 	}
 }
 
