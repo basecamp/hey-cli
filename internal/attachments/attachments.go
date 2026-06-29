@@ -13,7 +13,6 @@
 package attachments
 
 import (
-	"bytes"
 	"context"
 	"crypto/md5" //nolint:gosec // Active Storage requires an MD5 checksum, not for security
 	"encoding/base64"
@@ -127,24 +126,21 @@ func (u *Uploader) Upload(ctx context.Context, path string) (*Attachment, error)
 		return nil, err
 	}
 
-	data, err := os.ReadFile(path) //nolint:gosec // path is user-provided by design
+	blob, file, err := blobForFile(path)
 	if err != nil {
-		return nil, apierr.ErrUsage(fmt.Sprintf("cannot read attachment %s: %v", path, err))
+		return nil, err
 	}
-
-	blob := Blob{
-		Filename:    filepath.Base(path),
-		ContentType: detectContentType(path, data),
-		ByteSize:    int64(len(data)),
-		Checksum:    checksum(data),
-	}
+	defer func() { _ = file.Close() }()
 
 	upload, err := u.creator.CreateDirectUpload(ctx, blob)
 	if err != nil {
 		return nil, err
 	}
+	if upload.AttachableSGID == "" {
+		return nil, apierr.ErrAPI(0, "direct upload response missing attachable SGID")
+	}
 
-	if err := u.put(ctx, upload, data); err != nil {
+	if err := u.put(ctx, upload, file); err != nil {
 		return nil, err
 	}
 
@@ -153,12 +149,12 @@ func (u *Uploader) Upload(ctx context.Context, path string) (*Attachment, error)
 		ContentType: blob.ContentType,
 		ByteSize:    blob.ByteSize,
 		SignedID:    upload.SignedID,
-		SGID:        attachableSGID(upload),
+		SGID:        upload.AttachableSGID,
 	}, nil
 }
 
-func (u *Uploader) put(ctx context.Context, upload *DirectUpload, data []byte) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, upload.URL, bytes.NewReader(data))
+func (u *Uploader) put(ctx context.Context, upload *DirectUpload, body io.Reader) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, upload.URL, body)
 	if err != nil {
 		return apierr.ErrAPI(0, fmt.Sprintf("could not build upload request: %v", err))
 	}
@@ -191,26 +187,53 @@ func (a *Attachment) Markup() string {
 	)
 }
 
-// attachableSGID prefers the attachable signed global ID, falling back to the
-// blob's signed ID when the server omits it.
-func attachableSGID(upload *DirectUpload) string {
-	if upload.AttachableSGID != "" {
-		return upload.AttachableSGID
+func blobForFile(path string) (Blob, *os.File, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return Blob{}, nil, apierr.ErrUsage(fmt.Sprintf("cannot read attachment %s: %v", path, err))
 	}
-	return upload.SignedID
+
+	file, err := os.Open(path) //nolint:gosec // path is user-provided by design
+	if err != nil {
+		return Blob{}, nil, apierr.ErrUsage(fmt.Sprintf("cannot read attachment %s: %v", path, err))
+	}
+
+	sample := make([]byte, 512)
+	n, err := file.Read(sample)
+	if err != nil && err != io.EOF {
+		_ = file.Close()
+		return Blob{}, nil, apierr.ErrUsage(fmt.Sprintf("cannot read attachment %s: %v", path, err))
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		_ = file.Close()
+		return Blob{}, nil, apierr.ErrUsage(fmt.Sprintf("cannot read attachment %s: %v", path, err))
+	}
+
+	h := md5.New() //nolint:gosec // Active Storage requires an MD5 checksum, not for security
+	if _, err := io.Copy(h, file); err != nil {
+		_ = file.Close()
+		return Blob{}, nil, apierr.ErrUsage(fmt.Sprintf("cannot read attachment %s: %v", path, err))
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		_ = file.Close()
+		return Blob{}, nil, apierr.ErrUsage(fmt.Sprintf("cannot read attachment %s: %v", path, err))
+	}
+
+	blob := Blob{
+		Filename:    filepath.Base(path),
+		ContentType: detectContentType(path, sample[:n]),
+		ByteSize:    info.Size(),
+		Checksum:    base64.StdEncoding.EncodeToString(h.Sum(nil)),
+	}
+	return blob, file, nil
 }
 
-func detectContentType(path string, data []byte) string {
+func detectContentType(path string, sample []byte) string {
 	if ct := mime.TypeByExtension(filepath.Ext(path)); ct != "" {
 		return ct
 	}
-	if ct := http.DetectContentType(data); ct != "application/octet-stream" {
+	if ct := http.DetectContentType(sample); ct != "application/octet-stream" {
 		return ct
 	}
 	return "application/octet-stream"
-}
-
-func checksum(data []byte) string {
-	sum := md5.Sum(data) //nolint:gosec // Active Storage requires an MD5 checksum, not for security
-	return base64.StdEncoding.EncodeToString(sum[:])
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
@@ -19,7 +20,7 @@ const directUploadsPath = "/rails/active_storage/direct_uploads.json"
 // are PUT to a self-authenticating Active Storage URL, so the transfer uses a
 // plain HTTP client with no HEY credentials.
 func newAttachmentUploader() *attachments.Uploader {
-	return attachments.NewUploader(&sdkDirectUploadCreator{client: sdk}, http.DefaultClient)
+	return attachments.NewUploader(&sdkDirectUploadCreator{client: sdk}, &http.Client{Timeout: 30 * time.Second})
 }
 
 // sdkDirectUploadCreator creates Active Storage direct uploads through the HEY
@@ -55,6 +56,12 @@ func parseDirectUpload(data []byte) (*attachments.DirectUpload, error) {
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return nil, output.ErrAPI(0, fmt.Sprintf("could not parse direct upload response: %v", err))
+	}
+	if payload.SignedID == "" {
+		return nil, output.ErrAPI(0, "direct upload response missing signed ID")
+	}
+	if payload.AttachableSGID == "" {
+		return nil, output.ErrAPI(0, "direct upload response missing attachable SGID")
 	}
 	if payload.DirectUpload.URL == "" {
 		return nil, output.ErrAPI(0, "direct upload response missing upload URL")

@@ -85,16 +85,21 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 
 	ctx := cmd.Context()
 
+	var topicID int64
+	if c.threadID != "" {
+		var err error
+		topicID, err = strconv.ParseInt(c.threadID, 10, 64)
+		if err != nil {
+			return output.ErrUsage(fmt.Sprintf("invalid thread ID: %s", c.threadID))
+		}
+	}
+
 	message, err := c.attachFiles(ctx, message)
 	if err != nil {
 		return err
 	}
 
 	if c.threadID != "" {
-		topicID, err := strconv.ParseInt(c.threadID, 10, 64)
-		if err != nil {
-			return output.ErrUsage(fmt.Sprintf("invalid thread ID: %s", c.threadID))
-		}
 		if err := sdk.Messages().CreateTopicMessage(ctx, topicID, message); err != nil {
 			return convertSDKError(err)
 		}

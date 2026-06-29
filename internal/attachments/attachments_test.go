@@ -118,12 +118,43 @@ func TestUploadPutFailure(t *testing.T) {
 	defer srv.Close()
 
 	creator := creatorFunc(func(ctx context.Context, blob Blob) (*DirectUpload, error) {
-		return &DirectUpload{URL: srv.URL, Headers: map[string]string{"Content-Type": "image/png"}}, nil
+		return &DirectUpload{
+			SignedID:       "signed-abc",
+			AttachableSGID: "sgid-xyz",
+			URL:            srv.URL,
+			Headers:        map[string]string{"Content-Type": "image/png"},
+		}, nil
 	})
 
 	up := NewUploader(creator, srv.Client())
 	if _, err := up.Upload(context.Background(), path); err == nil {
 		t.Fatal("expected error on non-2xx PUT")
+	}
+}
+
+func TestUploadMissingAttachableSGIDFailsBeforePut(t *testing.T) {
+	path := writeTempFile(t, "diagram.png", []byte("x"))
+	putCalled := false
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		putCalled = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	creator := creatorFunc(func(ctx context.Context, blob Blob) (*DirectUpload, error) {
+		return &DirectUpload{
+			SignedID: "signed-abc",
+			URL:      srv.URL,
+		}, nil
+	})
+
+	up := NewUploader(creator, srv.Client())
+	if _, err := up.Upload(context.Background(), path); err == nil {
+		t.Fatal("expected error when attachable SGID is missing")
+	}
+	if putCalled {
+		t.Fatal("blob PUT should not be attempted without an attachable SGID")
 	}
 }
 
