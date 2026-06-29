@@ -73,6 +73,8 @@ hey threads 123                    # read a full email thread
 hey reply 123 -m "Thanks!"        # reply to a thread (or omit -m to open $EDITOR)
 hey compose --to user@example.com --subject "Hello"  # compose a new message
 hey compose --to user@example.com --cc bob@example.com --bcc carol@example.org --subject "Hello"  # with CC/BCC
+hey compose --to user@example.com --subject "Q3 deck" -m "See attached" -a ~/reports/q3.pdf -a ~/charts/revenue.png  # with attachments
+hey compose --subject "Update" --thread-id 123 -m "Updated figures attached" -a ~/reports/q3-final.pdf  # reply with an attachment
 hey drafts                         # list drafts
 ```
 

@@ -30,6 +30,7 @@ hey calendars
 hey commands
 hey completion
 hey compose
+hey compose --attachment
 hey compose --bcc
 hey compose --cc
 hey compose --message

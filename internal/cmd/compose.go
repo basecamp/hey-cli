@@ -1,24 +1,27 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-cli/internal/attachments"
 	"github.com/basecamp/hey-cli/internal/editor"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
 type composeCommand struct {
-	cmd      *cobra.Command
-	to       string
-	cc       string
-	bcc      string
-	subject  string
-	message  string
-	threadID string
+	cmd         *cobra.Command
+	to          string
+	cc          string
+	bcc         string
+	subject     string
+	message     string
+	threadID    string
+	attachments []string
 }
 
 func newComposeCommand() *composeCommand {
@@ -27,10 +30,11 @@ func newComposeCommand() *composeCommand {
 		Use:   "compose",
 		Short: "Compose a new message",
 		Annotations: map[string]string{
-			"agent_notes": "Creates a new email. Requires --subject. Use --to (optionally with --cc/--bcc) for new threads or --thread-id for existing ones.",
+			"agent_notes": "Creates a new email. Requires --subject. Use --to (optionally with --cc/--bcc) for new threads or --thread-id for existing ones. Attach files with repeatable -a/--attachment; works for both new messages and --thread-id replies.",
 		},
 		Example: `  hey compose --to alice@example.com --subject "Hello" -m "Hi there"
   hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Hello" -m "Hi"
+  hey compose --to alice@example.com --subject "Q3 deck" -m "See attached" -a ~/reports/q3.pdf -a ~/charts/revenue.png
   hey compose --subject "Update" --thread-id 12345 -m "Thread reply"
   echo "Long message" | hey compose --to bob@example.com --subject "Report"`,
 		RunE: composeCommand.run,
@@ -42,6 +46,7 @@ func newComposeCommand() *composeCommand {
 	composeCommand.cmd.Flags().StringVar(&composeCommand.subject, "subject", "", "Message subject (required)")
 	composeCommand.cmd.Flags().StringVarP(&composeCommand.message, "message", "m", "", "Message body (or opens $EDITOR)")
 	composeCommand.cmd.Flags().StringVar(&composeCommand.threadID, "thread-id", "", "Thread ID to post message to")
+	composeCommand.cmd.Flags().StringArrayVarP(&composeCommand.attachments, "attachment", "a", nil, "Path to a file to attach (repeatable)")
 
 	return composeCommand
 }
@@ -80,6 +85,11 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 
 	ctx := cmd.Context()
 
+	message, err := c.attachFiles(ctx, message)
+	if err != nil {
+		return err
+	}
+
 	if c.threadID != "" {
 		topicID, err := strconv.ParseInt(c.threadID, 10, 64)
 		if err != nil {
@@ -103,6 +113,36 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	return writeOK(nil, output.WithSummary("Message sent"))
+}
+
+// attachFiles validates every attachment path, uploads each file through the
+// Active Storage direct-upload flow, and appends the resulting markup to the
+// message content. With no attachments it returns the content unchanged so
+// existing behavior is preserved.
+func (c *composeCommand) attachFiles(ctx context.Context, message string) (string, error) {
+	if len(c.attachments) == 0 {
+		return message, nil
+	}
+
+	// Validate everything up front so a bad path never results in a partial
+	// upload or a sent message.
+	for _, path := range c.attachments {
+		if err := attachments.Validate(path); err != nil {
+			return "", err
+		}
+	}
+
+	uploader := newAttachmentUploader()
+	uploaded := make([]*attachments.Attachment, 0, len(c.attachments))
+	for _, path := range c.attachments {
+		att, err := uploader.Upload(ctx, path)
+		if err != nil {
+			return "", err
+		}
+		uploaded = append(uploaded, att)
+	}
+
+	return attachments.AppendMarkup(message, uploaded), nil
 }
 
 func parseAddresses(s string) []string {
