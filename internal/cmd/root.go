@@ -119,6 +119,8 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newAuthCommand().cmd)
 	root.AddCommand(newBoxesCommand().cmd)
 	root.AddCommand(newBoxCommand().cmd)
+	root.AddCommand(newCollectionsCommand().cmd)
+	root.AddCommand(newCollectionCommand().cmd)
 	root.AddCommand(newThreadsCommand().cmd)
 	root.AddCommand(newReplyCommand().cmd)
 	root.AddCommand(newComposeCommand().cmd)
