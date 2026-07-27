@@ -1,0 +1,19 @@
+go.mod
+  s_7cd130483cb0ba::t_1f7bbf6869a978 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "81087037c5cc088181539f3c597faa2359ad2085",
+  "prompts": {},
+  "sessions": {
+    "s_7cd130483cb0ba": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e70042f8-3788-4966-bca1-06b7839d136b",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremydaer@gmail.com>"
+    }
+  }
+}
