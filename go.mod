@@ -11,7 +11,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/zalando/go-keyring v0.2.8
-	golang.org/x/net v0.55.0
+	golang.org/x/net v0.57.0
 	golang.org/x/term v0.45.0
 )
 
