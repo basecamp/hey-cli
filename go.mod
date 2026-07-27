@@ -5,7 +5,7 @@ go 1.26.5
 require (
 	charm.land/bubbles/v2 v2.1.1
 	charm.land/bubbletea/v2 v2.0.8
-	charm.land/lipgloss/v2 v2.0.4
+	charm.land/lipgloss/v2 v2.0.5
 	github.com/basecamp/hey-sdk/go v0.3.0
 	github.com/mattn/go-runewidth v0.0.24
 	github.com/spf13/cobra v1.10.2
