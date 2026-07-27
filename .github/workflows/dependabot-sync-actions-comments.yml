@@ -33,7 +33,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       startsWith(github.event.workflow_run.head_branch, 'dependabot/github_actions/')
-    uses: basecamp/.github/.github/workflows/dependabot-sync-actions-comments.yml@95a9f7a2bd69c73cd2839eb4a27616e1651497e2
+    uses: basecamp/.github/.github/workflows/dependabot-sync-actions-comments.yml@9ca40e3b2d6be769b370b7cee86e8448267c95d8
     with:
       ci-workflow-name: Test
       branch: ${{ inputs.branch || '' }}
