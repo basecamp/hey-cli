@@ -1,0 +1,46 @@
+name: Sync Dependabot action pin comments
+
+# Thin caller: all logic lives in basecamp/.github's reusable workflow —
+# trusted default-branch code that fetches the Dependabot head branch as data
+# only, rewrites stale `# vX.Y.Z` pin comments, and pushes back behind a
+# compare-and-swap lease using the write deploy key scoped to this repo's
+# dependabot-sync environment.
+
+on:
+  workflow_run: # zizmor: ignore[dangerous-triggers] -- only the SHA-pinned reusable workflow (reviewed default-branch code) executes; the Dependabot head branch is fetched as data, never executed
+    workflows: [CI]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Dependabot branch to sync (dependabot/github_actions/...)
+        required: true
+        type: string
+      e2e:
+        description: "E2E proof mode: expect a draft PR authored by the dispatcher on a dependabot/github_actions/e2e-proof-* branch"
+        required: false
+        default: false
+        type: boolean
+
+permissions: {}
+
+jobs:
+  sync:
+    # Cheap prefilter to avoid a skipped-run entry on every CI completion;
+    # the reusable workflow re-checks this and everything else.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.workflow_run.head_branch, 'dependabot/github_actions/')
+    uses: basecamp/.github/.github/workflows/dependabot-sync-actions-comments.yml@95a9f7a2bd69c73cd2839eb4a27616e1651497e2
+    with:
+      ci-workflow-name: CI
+      branch: ${{ inputs.branch || '' }}
+      e2e: ${{ inputs.e2e || false }}
+    permissions:
+      contents: read
+      actions: write
+      pull-requests: read
+    # The deploy key is scoped to this repo's dependabot-sync environment
+    # (deployment branches: default branch only); environment secrets cannot
+    # be forwarded explicitly to a reusable workflow, so inherit is required.
+    secrets: inherit # zizmor: ignore[secrets-inherit] -- see above; the called workflow is SHA-pinned and reads only SYNC_ACTIONS_DEPLOY_KEY, gated by the dependabot-sync environment
