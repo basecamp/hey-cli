@@ -1,47 +1,31 @@
 name: Sync Dependabot action pin comments
 
-# Thin caller: all logic lives in basecamp/.github's reusable workflow —
-# trusted default-branch code that fetches the Dependabot head branch as data
-# only, rewrites stale `# vX.Y.Z` pin comments, and pushes back behind a
-# compare-and-swap lease using the write deploy key scoped to this repo's
-# dependabot-sync environment.
+# Post-merge backstop. Dependabot maintains the bare `# vX.Y.Z` comments on
+# its own PRs natively (pins restructured to one-line-pin + standalone zizmor
+# ignore). After workflow-file pushes land on main, the SHA-pinned reusable
+# workflow recomputes the comments and, when drifted, opens a comment-only
+# repair PR that auto-merges once checks pass. Only reviewed default-branch
+# code executes; nothing is ever pushed to a Dependabot branch, so the
+# Dependabot sandbox on its PRs is never disturbed.
 
 on:
-  workflow_run: # zizmor: ignore[dangerous-triggers] -- only the SHA-pinned reusable workflow (reviewed default-branch code) executes; the Dependabot head branch is fetched as data, never executed
-    workflows: [Test]
-    types: [completed]
-    branches: ["dependabot/github_actions/**"]
-  workflow_dispatch:
-    inputs:
-      branch:
-        description: Dependabot branch to sync (dependabot/github_actions/...)
-        required: true
-        type: string
-      e2e:
-        description: "E2E proof mode: expect a draft PR authored by the dispatcher on a dependabot/github_actions/e2e-proof-* branch"
-        required: false
-        default: false
-        type: boolean
+  push:
+    branches: [main]
+    # GitHub path filters don't do {yml,yaml} brace expansion — list both.
+    paths:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+  workflow_dispatch: {}
 
 permissions: {}
 
 jobs:
   sync:
-    # Defense-in-depth behind the trigger-level branches filter (which stops
-    # runs from being created for other branches at all); the reusable
-    # workflow re-checks this and everything else.
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      startsWith(github.event.workflow_run.head_branch, 'dependabot/github_actions/')
-    uses: basecamp/.github/.github/workflows/dependabot-sync-actions-comments.yml@9ca40e3b2d6be769b370b7cee86e8448267c95d8
-    with:
-      ci-workflow-name: Test
-      branch: ${{ inputs.branch || '' }}
-      e2e: ${{ inputs.e2e || false }}
+    uses: basecamp/.github/.github/workflows/dependabot-sync-actions-comments.yml@45d3fc9588f15d50fbccde7476418007dd19e16e
     permissions:
       contents: read
       actions: write
-      pull-requests: read
+      pull-requests: write
     # The deploy key is scoped to this repo's dependabot-sync environment
     # (deployment branches: default branch only); environment secrets cannot
     # be forwarded explicitly to a reusable workflow, so inherit is required.
