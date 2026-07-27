@@ -8,8 +8,9 @@ name: Sync Dependabot action pin comments
 
 on:
   workflow_run: # zizmor: ignore[dangerous-triggers] -- only the SHA-pinned reusable workflow (reviewed default-branch code) executes; the Dependabot head branch is fetched as data, never executed
-    workflows: [CI]
+    workflows: [Test]
     types: [completed]
+    branches: ["dependabot/github_actions/**"]
   workflow_dispatch:
     inputs:
       branch:
@@ -26,14 +27,15 @@ permissions: {}
 
 jobs:
   sync:
-    # Cheap prefilter to avoid a skipped-run entry on every CI completion;
-    # the reusable workflow re-checks this and everything else.
+    # Defense-in-depth behind the trigger-level branches filter (which stops
+    # runs from being created for other branches at all); the reusable
+    # workflow re-checks this and everything else.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       startsWith(github.event.workflow_run.head_branch, 'dependabot/github_actions/')
     uses: basecamp/.github/.github/workflows/dependabot-sync-actions-comments.yml@95a9f7a2bd69c73cd2839eb4a27616e1651497e2
     with:
-      ci-workflow-name: CI
+      ci-workflow-name: Test
       branch: ${{ inputs.branch || '' }}
       e2e: ${{ inputs.e2e || false }}
     permissions:
