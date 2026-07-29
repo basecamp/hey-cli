@@ -10,14 +10,13 @@ The TUI is primarily intended for human use, while the CLI is primarily intended
 
 ## Development commands
 
-This project uses make.
+This project uses make. `make help` lists every target; these are the ones you'll
+reach for:
 
 ```bash
-make build   # Builds the project into a binary located at ./bin/hey
+make build   # Builds ./bin/hey
 make test    # Runs the tests
 make lint    # Lints the code
-make clean   # Cleans the build artifacts
-make install # Installs the binary to /usr/local/bin/hey
 ```
 
 ## Architecture Overview
@@ -57,20 +56,8 @@ Some HEY API endpoints return 204 or incomplete data via JSON, but the full HTML
 
 The TUI uses the `sectionView` interface pattern. Each top-level section (Mail, Calendar, Journal) implements `sectionView` and owns its data, fetch commands, key handling, rendering, and help bindings. The main model delegates to the active view.
 
-| File | What it contains |
-|------|-----------------|
-| `section_view.go` | `sectionView` interface + `viewContext` shared dependencies |
-| `tui.go` | Core model, `Update` router, `View`, key routing, shared utilities |
-| `mail.go` | `mailView` — boxes, postings, topic threads, posting actions, entry rendering |
-| `calendar.go` | `calendarView` — calendars, recordings, recording detail |
-| `journal.go` | `journalView` — date navigation, journal entries |
-| `nav.go` | Header rendering, section/box/calendar/journal nav items, shortcuts |
-| `content.go` | `contentList` (posting list) and `recordingList` (recording list) |
-| `loading.go` | Hourglass loading animation |
-| `styles.go` | Colors, lipgloss styles, error display |
-| `help.go` | Help bar at screen bottom |
-| `kitty.go` | Kitty graphics protocol for inline images |
-| `html.go` | Thin wrappers around `htmlutil` |
+Each file in `internal/tui/` is named for the section it implements; read the directory
+rather than a table here.
 
 To add a new section: implement the `sectionView` interface in a new file, add a field and constructor call in `newModel`, and add a case in `switchSection`.
 
@@ -88,7 +75,8 @@ This works in Kitty and Ghostty. Other terminals show the text content normally 
 
 If you are unsure what the API endpoints are, what they expect or what they respond to you can read through the server implementation to understand how the API works.
 
-The server code is located at `~/Work/basecamp/haystack/`, feel free to read it whenever you need information about the API.
+The server is the `basecamp/haystack` repo. If you have it checked out (conventionally
+`~/Work/basecamp/haystack/`), read it whenever you need to know how the API behaves.
 
 If you don't understand how the routes are laid out you can call rails routes in that directory to get a list of all the routes and their corresponding controller actions.
 
@@ -96,13 +84,26 @@ If you don't understand how the routes are laid out you can call rails routes in
 
 All API interactions must go through the HEY SDK (`hey-sdk/go`). There is no legacy client — the SDK is the only HTTP client.
 
-If you need to call an endpoint that the SDK doesn't support yet, **add it to the SDK**. The SDK is located at `~/Work/basecamp/hey-sdk`. To use your local changes:
+If you need to call an endpoint that the SDK doesn't support yet, **add it to the SDK**.
+The SDK is the `basecamp/hey-sdk` repo, conventionally checked out at
+`~/Work/basecamp/hey-sdk`. To use your local changes:
 
-1. Add a `replace` directive in `go.mod` pointing to the local SDK: `go mod edit -replace github.com/basecamp/hey-sdk/go=~/Work/basecamp/hey-sdk/go`
+1. Add a `replace` directive in `go.mod` pointing at your checkout. Give it a real path.
+   The shell does **not** expand `~` in the middle of an argument, so
+   `...hey-sdk/go=~/Work/...` reaches Go as a literal tilde and the command fails with
+   `unversioned new path must be local directory`:
+
+   ```bash
+   go mod edit -replace github.com/basecamp/hey-sdk/go="$HOME/Work/basecamp/hey-sdk/go"
+   ```
 2. Implement and test your changes
 3. **Call out that you made changes to the SDK** when you're done — your operator will review those changes and publish a new SDK release, then you can remove the `replace` directive and pin to the released version
 
-The hand-written service wrappers in `pkg/hey/` (e.g., `messages.go`, `journal.go`, `postings.go`) are safe to edit directly. The Smithy-generated code lives in `pkg/generated/` and should not be edited by hand — update the Smithy model and run `make smithy-build` followed by `make go-generate` instead.
+Those paths are in the SDK repo, not this one. There, the hand-written service wrappers
+in `go/pkg/hey/` (e.g. `messages.go`, `journal.go`, `postings.go`) are safe to edit
+directly. The Smithy-generated code in `go/pkg/generated/` is not — update the Smithy
+model and run `make smithy-build` then `make go-generate` from the SDK root. hey-cli has
+neither target.
 
 ### Examples
 
@@ -148,24 +149,6 @@ The dev server must be running at `http://app.hey.localhost:3003` (override with
 5. Use `dataAs[T](t, resp)` to unmarshal response data into typed structs.
 6. For browser cross-verification, use `browserPageText(t, url)` to get page content.
 
-**File layout:**
-
-| File | What it covers |
-|------|---------------|
-| `helpers_test.go` | Setup, CLI runners, browser helpers, assertions |
-| `util_test.go` | Shared utilities (intStr, extractTopicID) |
-| `auth_test.go` | auth status/login/logout/token/refresh |
-| `boxes_test.go` | boxes list, box by name/ID, --limit, --all |
-| `compose_test.go` | compose, threads, reply, drafts |
-| `todo_test.go` | todo CRUD, --date, --limit, --all |
-| `calendar_test.go` | calendars, recordings with date ranges/limits |
-| `journal_test.go` | journal write/read/list with limits |
-| `timetrack_test.go` | timetrack start/stop/current/list |
-| `habit_test.go` | habit complete/uncomplete with --date |
-| `seen_test.go` | seen/unseen single and batch |
-| `config_test.go` | config show/set with validation |
-| `output_test.go` | all output format flags |
-| `browser_test.go` | CLI-to-browser and browser-to-CLI cross-verification |
 
 ### Running
 
@@ -173,4 +156,6 @@ To run the CLI use `make build` and then `./bin/hey`. This ensures that you and 
 
 ## Code style
 
-@STYLE.md
+See `STYLE.md` for the Go conventions used here. Read it when writing or reviewing Go in
+this repo -- it is not imported, so it does not sit in context for sessions that never
+touch Go.
