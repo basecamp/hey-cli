@@ -10,13 +10,14 @@ The TUI is primarily intended for human use, while the CLI is primarily intended
 
 ## Development commands
 
-This project uses make. `make help` lists every target; these are the ones you'll
-reach for:
+This project uses make. `make help` covers most targets -- though not all of them:
+`install`, `check-toolchain` and `help` itself are defined but unlisted.
 
 ```bash
 make build   # Builds ./bin/hey
 make test    # Runs the tests
 make lint    # Lints the code
+make install # Installs the binary to /usr/local/bin/hey (not shown by make help)
 ```
 
 ## Architecture Overview
@@ -148,7 +149,6 @@ The dev server must be running at `http://app.hey.localhost:3003` (override with
 4. For write operations that may fail server-side, use `hey(t, ...)` directly and skip on non-zero exit: `if code != 0 { t.Skipf("... (exit %d): %s", code, stderr) }`.
 5. Use `dataAs[T](t, resp)` to unmarshal response data into typed structs.
 6. For browser cross-verification, use `browserPageText(t, url)` to get page content.
-
 
 ### Running
 
