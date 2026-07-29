@@ -57,8 +57,11 @@ Some HEY API endpoints return 204 or incomplete data via JSON, but the full HTML
 
 The TUI uses the `sectionView` interface pattern. Each top-level section (Mail, Calendar, Journal) implements `sectionView` and owns its data, fetch commands, key handling, rendering, and help bindings. The main model delegates to the active view.
 
-Each file in `internal/tui/` is named for the section it implements; read the directory
-rather than a table here.
+Three files implement `sectionView` -- `mail.go`, `calendar.go` and `journal.go`, one per
+section. The rest of `internal/tui/` is shared infrastructure: `tui.go` (model and
+router), `section_view.go` (the interface), plus `nav.go`, `content.go`, `help.go`,
+`styles.go`, `loading.go`, `kitty.go`, `html.go` and `calendar_views.go`. Read the directory rather than a
+table here.
 
 To add a new section: implement the `sectionView` interface in a new file, add a field and constructor call in `newModel`, and add a case in `switchSection`.
 
