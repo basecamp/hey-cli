@@ -94,6 +94,9 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	message = formatMessageContent(message, c.rawHTML)
+	if message == "" {
+		return output.ErrUsage("empty message, aborting")
+	}
 	if err = sdk.Entries().CreateReply(ctx, latestEntryID, message, addressed.To, addressed.CC, addressed.BCC); err != nil {
 		return convertSDKError(err)
 	}

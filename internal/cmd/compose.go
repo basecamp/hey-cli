@@ -83,6 +83,9 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 
 	ctx := cmd.Context()
 	message = formatMessageContent(message, c.rawHTML)
+	if message == "" {
+		return output.ErrUsage("empty message, aborting")
+	}
 
 	if c.threadID != "" {
 		topicID, err := strconv.ParseInt(c.threadID, 10, 64)

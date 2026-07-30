@@ -31,9 +31,20 @@ func TestFormatMessageContent(t *testing.T) {
 			want:    "<p>Hello</p><ul><li>One</li></ul>",
 		},
 		{
+			name:    "rejects whitespace-only HTML",
+			message: " \n\t ",
+			rawHTML: true,
+			want:    "",
+		},
+		{
 			name:    "trims surrounding whitespace",
 			message: "\n\n Hello \n\n",
 			want:    "<p>Hello</p>",
+		},
+		{
+			name:    "rejects whitespace-only text",
+			message: " \n\t ",
+			want:    "",
 		},
 	}
 

@@ -10,6 +10,9 @@ import (
 // an entire plain-text message as a single paragraph.
 func formatMessageContent(message string, rawHTML bool) string {
 	if rawHTML {
+		if strings.TrimSpace(message) == "" {
+			return ""
+		}
 		return message
 	}
 
