@@ -33,6 +33,7 @@ hey compose
 hey compose --bcc
 hey compose --cc
 hey compose --message
+hey compose --raw-html
 hey compose --subject
 hey compose --thread-id
 hey compose --to
@@ -62,6 +63,7 @@ hey recordings --limit
 hey recordings --starts-on
 hey reply
 hey reply --message
+hey reply --raw-html
 hey seen
 hey setup
 hey skill

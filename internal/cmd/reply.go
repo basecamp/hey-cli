@@ -14,6 +14,7 @@ import (
 type replyCommand struct {
 	cmd     *cobra.Command
 	message string
+	rawHTML bool
 }
 
 func newReplyCommand() *replyCommand {
@@ -22,15 +23,17 @@ func newReplyCommand() *replyCommand {
 		Use:   "reply <thread-id>",
 		Short: "Reply to a thread",
 		Annotations: map[string]string{
-			"agent_notes": "Replies to the latest entry in a thread. Accepts message via -m, stdin, or $EDITOR.",
+			"agent_notes": "Replies to the latest entry in a thread. Accepts message via -m, stdin, or $EDITOR. Plain-text paragraphs and line breaks are preserved automatically; use --raw-html only when supplying HEY-compatible HTML.",
 		},
 		Example: `  hey reply 12345 -m "Thanks!"
-  echo "Detailed reply" | hey reply 12345`,
+  echo "Detailed reply" | hey reply 12345
+  hey reply 12345 --raw-html -m "<p>Thanks!</p>"`,
 		RunE: replyCommand.run,
 		Args: usageExactOneArg(),
 	}
 
 	replyCommand.cmd.Flags().StringVarP(&replyCommand.message, "message", "m", "", "Reply message (or opens $EDITOR)")
+	replyCommand.cmd.Flags().BoolVar(&replyCommand.rawHTML, "raw-html", false, "Send message body as HEY-compatible HTML without plain-text formatting")
 
 	return replyCommand
 }
@@ -90,6 +93,7 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	message = formatMessageContent(message, c.rawHTML)
 	if err = sdk.Entries().CreateReply(ctx, latestEntryID, message, addressed.To, addressed.CC, addressed.BCC); err != nil {
 		return convertSDKError(err)
 	}
