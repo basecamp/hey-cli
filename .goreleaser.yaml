@@ -86,10 +86,6 @@ release:
   prerelease: auto
   name_template: "{{.ProjectName}} v{{.Version}}"
   header: |
-    {{ if index .Env "RELEASE_CHANGELOG" }}{{ index .Env "RELEASE_CHANGELOG" }}
-
-    ---
-    {{ end }}
     ### Install
 
     **macOS:**

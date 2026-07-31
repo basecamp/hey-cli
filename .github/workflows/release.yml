@@ -33,7 +33,6 @@ jobs:
       contents: write
       id-token: write
       attestations: write
-      models: read
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -90,67 +89,6 @@ jobs:
           ./hey-tmp completion fish > completions/hey.fish
           rm hey-tmp
 
-      - name: Build changelog context
-        run: |
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-          DIFF_FILE=/tmp/diff.txt
-          if [ -z "$PREV_TAG" ]; then
-            COMMITS=$(git log --oneline --no-decorate)
-            git diff --stat 4b825dc642cb6eb9a060e54bf899d69f82a3ef17 HEAD > "$DIFF_FILE"
-          else
-            COMMITS=$(git log --oneline --no-decorate "${PREV_TAG}..HEAD")
-            git diff "${PREV_TAG}..HEAD" -- '*.go' 'go.mod' > "$DIFF_FILE"
-          fi
-          {
-            echo "Commits:"
-            echo "$COMMITS"
-            echo ""
-            echo "Diff summary:"
-            head -c 80000 "$DIFF_FILE"
-          } > /tmp/user-message.txt
-          python3 -c "
-          with open('.github/prompts/summarize-changelog.prompt.yml') as f:
-              lines = f.readlines()
-          with open('/tmp/user-message.txt') as f:
-              user_msg = f.read()
-          insert_at = len(lines)
-          for i, line in enumerate(lines):
-              if i == 0: continue
-              if line.strip() and not line[0].isspace():
-                  insert_at = i
-                  break
-          entry = ['  - role: user\n', '    content: |\n']
-          for ln in user_msg.splitlines():
-              entry.append('      ' + ln + '\n')
-          lines[insert_at:insert_at] = entry
-          with open('/tmp/prompt.yml', 'w') as f:
-              f.writelines(lines)
-          try:
-              import yaml
-              doc = yaml.safe_load(open('/tmp/prompt.yml'))
-              assert doc['messages'][-1]['role'] == 'user', 'prompt splice failed'
-          except ImportError:
-              pass
-          "
-        continue-on-error: true
-
-      - name: Generate AI changelog
-        id: ai-changelog
-        uses: actions/ai-inference@a7805884c80886efc241e94a5351df715968a0ad # v2.1.1
-        continue-on-error: true
-        with:
-          prompt-file: /tmp/prompt.yml
-
-      - name: Set changelog path
-        id: changelog
-        env:
-          RESPONSE_FILE: ${{ steps.ai-changelog.outputs.response-file }}
-        run: |
-          if [ -n "$RESPONSE_FILE" ] && [ -f "$RESPONSE_FILE" ]; then
-            sed -i '/^```\(markdown\)\?$/d' "$RESPONSE_FILE"
-            echo "file=$RESPONSE_FILE" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Verify macOS signing secrets
         run: |
           missing=()
@@ -188,7 +126,6 @@ jobs:
 
       - name: Run GoReleaser
         env:
-          CHANGELOG_FILE: ${{ steps.changelog.outputs.file }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ steps.app-token.outputs.token }}
           MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
@@ -196,13 +133,7 @@ jobs:
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
-        run: |
-          RELEASE_CHANGELOG=""
-          if [ -n "$CHANGELOG_FILE" ] && [ -f "$CHANGELOG_FILE" ]; then
-            RELEASE_CHANGELOG=$(cat "$CHANGELOG_FILE")
-          fi
-          export RELEASE_CHANGELOG
-          goreleaser release --clean
+        run: goreleaser release --clean
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
