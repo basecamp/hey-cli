@@ -15,6 +15,12 @@ triggers:
   - hey reply
   - hey compose
   - hey drafts
+  - hey trash
+  - hey paper-trail
+  - hey feed
+  - hey set-aside
+  - hey reply-later
+  - hey ignore
   # Calendar actions
   - hey calendars
   - hey recordings
@@ -77,6 +83,8 @@ CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos,
 1. **Always use `--json`** for structured, predictable output
 2. **Authentication required** for all data commands — run `hey auth login` first
 3. **HTML output** is available via `--html` for commands that return HTML content
+4. **Confirm state-changing actions first** — obtain explicit user approval before
+   running `trash`, `ignore`, or changing posting routing
 
 ## Quick Reference
 
@@ -98,6 +106,12 @@ CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos,
 | Delete todo | `hey todo delete 123` |
 | Mark as seen | `hey seen 12345` |
 | Mark as unseen | `hey unseen 12345` |
+| Move to Trash | `hey trash 12345` |
+| Move to Paper Trail | `hey paper-trail 12345` |
+| Move to Feed | `hey feed 12345` |
+| Set aside | `hey set-aside 12345` |
+| Move to Reply Later | `hey reply-later 12345` |
+| Ignore posting | `hey ignore 12345` |
 | Complete habit | `hey habit complete 123` |
 | Uncomplete habit | `hey habit uncomplete 123` |
 | Start time tracking | `hey timetrack start` |
@@ -122,6 +136,7 @@ Want to read email?
 ├── Read full thread? → hey threads <topic_id> --json
 ├── Mark as seen? → hey seen <posting-id>
 ├── Mark as unseen? → hey unseen <posting-id>
+├── Move or ignore? → confirm first, then use hey <paper-trail|feed|set-aside|reply-later|trash|ignore> <posting-id>
 └── Launch interactive UI? → hey (no args, launches TUI)
 ```
 
@@ -193,6 +208,23 @@ hey unseen 12345 67890                        # Mark multiple postings as unseen
 ```
 
 Takes posting IDs (the `id` field from `hey box` output).
+
+### Email - Posting Actions
+
+These commands change mailbox state. Confirm the exact posting IDs and obtain
+explicit user approval before running them.
+
+```bash
+hey paper-trail 12345                        # Move to Paper Trail
+hey feed 12345                               # Move to The Feed
+hey set-aside 12345                          # Move to Set Aside
+hey reply-later 12345                        # Move to Reply Later
+hey trash 12345                              # Move to Trash
+hey ignore 12345                             # Stop notifications
+```
+
+Each command accepts exactly one posting ID. Use the `id` field from
+`hey box --json`, not `topic_id`.
 
 ### Drafts
 

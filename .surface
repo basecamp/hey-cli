@@ -43,11 +43,13 @@ hey doctor
 hey drafts
 hey drafts --all
 hey drafts --limit
+hey feed
 hey habit
 hey habit complete
 hey habit complete --date
 hey habit uncomplete
 hey habit uncomplete --date
+hey ignore
 hey journal
 hey journal list
 hey journal list --all
@@ -55,6 +57,7 @@ hey journal list --limit
 hey journal read
 hey journal write
 hey journal write --content
+hey paper-trail
 hey recordings
 hey recordings --all
 hey recordings --ends-on
@@ -62,7 +65,9 @@ hey recordings --limit
 hey recordings --starts-on
 hey reply
 hey reply --message
+hey reply-later
 hey seen
+hey set-aside
 hey setup
 hey skill
 hey skill install
@@ -84,5 +89,6 @@ hey todo list
 hey todo list --all
 hey todo list --limit
 hey todo uncomplete
+hey trash
 hey tui
 hey unseen

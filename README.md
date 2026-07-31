@@ -74,6 +74,12 @@ hey reply 123 -m "Thanks!"        # reply to a thread (or omit -m to open $EDITO
 hey compose --to user@example.com --subject "Hello"  # compose a new message
 hey compose --to user@example.com --cc bob@example.com --bcc carol@example.org --subject "Hello"  # with CC/BCC
 hey drafts                         # list drafts
+hey paper-trail 12345              # move a posting to Paper Trail
+hey feed 12345                     # move a posting to The Feed
+hey set-aside 12345                # move a posting to Set Aside
+hey reply-later 12345              # move a posting to Reply Later
+hey trash 12345                    # move a posting to Trash
+hey ignore 12345                   # ignore a posting
 ```
 
 ### Calendars
