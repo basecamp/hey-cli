@@ -125,6 +125,19 @@ hey-cli ships with an embedded agent skill so your agent can interact with HEY o
 hey skill install   # install the skill globally for your agent
 ```
 
+## Upgrading
+
+To update hey-cli to the latest version:
+
+```bash
+cd /path/to/hey-cli
+git pull                # fetch latest changes
+make install            # rebuild binary with updated embedded skill
+hey skill install       # update agent skill to match new binary
+```
+
+The agent skill is embedded in the binary at build time, so all three steps are required to keep everything in sync.
+
 ## Development
 
 ```bash
