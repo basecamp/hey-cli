@@ -41,3 +41,43 @@ func TestCleanUseLineStripsFlagsSuffix(t *testing.T) {
 		t.Fatalf("cleanUseLine() = %q", line)
 	}
 }
+
+func TestParseIntArgsRejectsNonPositive(t *testing.T) {
+	for _, arg := range []string{"0", "-1", "-99999"} {
+		if _, err := parseIntArgs([]string{arg}); err == nil {
+			t.Errorf("parseIntArgs(%q): expected an error, got nil", arg)
+		}
+	}
+}
+
+func TestParseIntArgsRejectsNonNumeric(t *testing.T) {
+	if _, err := parseIntArgs([]string{"abc"}); err == nil {
+		t.Error("parseIntArgs(\"abc\"): expected an error, got nil")
+	}
+}
+
+func TestParseIntArgsDeduplicatesPreservingOrder(t *testing.T) {
+	got, err := parseIntArgs([]string{"3", "1", "3", "2", "1"})
+	if err != nil {
+		t.Fatalf("parseIntArgs: %v", err)
+	}
+	want := []int64{3, 1, 2}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v (first occurrence order preserved)", got, want)
+		}
+	}
+}
+
+func TestParseIntArgsAcceptsValidIDs(t *testing.T) {
+	got, err := parseIntArgs([]string{"12345", "67890"})
+	if err != nil {
+		t.Fatalf("parseIntArgs: %v", err)
+	}
+	if len(got) != 2 || got[0] != 12345 || got[1] != 67890 {
+		t.Errorf("got %v, want [12345 67890]", got)
+	}
+}

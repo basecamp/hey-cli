@@ -101,14 +101,30 @@ func (c *unseenCommand) run(cmd *cobra.Command, args []string) error {
 	return writeOK(nil, output.WithSummary(summary))
 }
 
+// parseIntArgs parses posting IDs, rejecting non-positive values and dropping
+// duplicates. Zero and negatives are not valid posting IDs, and passing one
+// through produces a request against a nonsense path (/postings/0/...) that the
+// server can only reject. Duplicates cost a round trip and, for commands where
+// the operation is not idempotent, can turn a request the caller got right into
+// a reported failure.
 func parseIntArgs(args []string) ([]int64, error) {
 	ids := make([]int64, 0, len(args))
+	seen := make(map[int64]bool, len(args))
+
 	for _, arg := range args {
 		id, err := strconv.ParseInt(arg, 10, 64)
 		if err != nil {
 			return nil, output.ErrUsage(fmt.Sprintf("invalid posting ID: %s", arg))
 		}
+		if id <= 0 {
+			return nil, output.ErrUsage(fmt.Sprintf("invalid posting ID: %d (must be positive)", id))
+		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
 		ids = append(ids, id)
 	}
+
 	return ids, nil
 }
