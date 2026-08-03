@@ -43,9 +43,20 @@ func TestCleanUseLineStripsFlagsSuffix(t *testing.T) {
 }
 
 func TestParseIntArgsRejectsNonPositive(t *testing.T) {
-	for _, arg := range []string{"0", "-1", "-99999"} {
-		if _, err := parseIntArgs([]string{arg}); err == nil {
-			t.Errorf("parseIntArgs(%q): expected an error, got nil", arg)
+	for _, tc := range []struct{ arg, want string }{
+		{"0", "invalid posting ID: 0 (must be positive)"},
+		{"-1", "invalid posting ID: -1 (must be positive)"},
+		{"-99999", "invalid posting ID: -99999 (must be positive)"},
+	} {
+		_, err := parseIntArgs([]string{tc.arg})
+		if err == nil {
+			t.Errorf("parseIntArgs(%q): expected an error, got nil", tc.arg)
+			continue
+		}
+		// The clearer message is the point of the change, so assert it rather
+		// than just the presence of an error.
+		if err.Error() != tc.want {
+			t.Errorf("parseIntArgs(%q) = %q, want %q", tc.arg, err.Error(), tc.want)
 		}
 	}
 }
