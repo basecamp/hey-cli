@@ -62,8 +62,19 @@ func TestParseIntArgsRejectsNonPositive(t *testing.T) {
 }
 
 func TestParseIntArgsRejectsNonNumeric(t *testing.T) {
-	if _, err := parseIntArgs([]string{"abc"}); err == nil {
-		t.Error("parseIntArgs(\"abc\"): expected an error, got nil")
+	for _, tc := range []struct{ arg, want string }{
+		{"abc", "invalid posting ID: abc"},
+		{"", "invalid posting ID: "},
+		{"1.5", "invalid posting ID: 1.5"},
+	} {
+		_, err := parseIntArgs([]string{tc.arg})
+		if err == nil {
+			t.Errorf("parseIntArgs(%q): expected an error, got nil", tc.arg)
+			continue
+		}
+		if err.Error() != tc.want {
+			t.Errorf("parseIntArgs(%q) = %q, want %q", tc.arg, err.Error(), tc.want)
+		}
 	}
 }
 
