@@ -41,3 +41,65 @@ func TestCleanUseLineStripsFlagsSuffix(t *testing.T) {
 		t.Fatalf("cleanUseLine() = %q", line)
 	}
 }
+
+func TestParseIntArgsRejectsNonPositive(t *testing.T) {
+	for _, tc := range []struct{ arg, want string }{
+		{"0", "invalid posting ID: 0 (must be positive)"},
+		{"-1", "invalid posting ID: -1 (must be positive)"},
+		{"-99999", "invalid posting ID: -99999 (must be positive)"},
+	} {
+		_, err := parseIntArgs([]string{tc.arg})
+		if err == nil {
+			t.Errorf("parseIntArgs(%q): expected an error, got nil", tc.arg)
+			continue
+		}
+		// The clearer message is the point of the change, so assert it rather
+		// than just the presence of an error.
+		if err.Error() != tc.want {
+			t.Errorf("parseIntArgs(%q) = %q, want %q", tc.arg, err.Error(), tc.want)
+		}
+	}
+}
+
+func TestParseIntArgsRejectsNonNumeric(t *testing.T) {
+	for _, tc := range []struct{ arg, want string }{
+		{"abc", "invalid posting ID: abc"},
+		{"", "invalid posting ID: "},
+		{"1.5", "invalid posting ID: 1.5"},
+	} {
+		_, err := parseIntArgs([]string{tc.arg})
+		if err == nil {
+			t.Errorf("parseIntArgs(%q): expected an error, got nil", tc.arg)
+			continue
+		}
+		if err.Error() != tc.want {
+			t.Errorf("parseIntArgs(%q) = %q, want %q", tc.arg, err.Error(), tc.want)
+		}
+	}
+}
+
+func TestParseIntArgsDeduplicatesPreservingOrder(t *testing.T) {
+	got, err := parseIntArgs([]string{"3", "1", "3", "2", "1"})
+	if err != nil {
+		t.Fatalf("parseIntArgs: %v", err)
+	}
+	want := []int64{3, 1, 2}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v (first occurrence order preserved)", got, want)
+		}
+	}
+}
+
+func TestParseIntArgsAcceptsValidIDs(t *testing.T) {
+	got, err := parseIntArgs([]string{"12345", "67890"})
+	if err != nil {
+		t.Fatalf("parseIntArgs: %v", err)
+	}
+	if len(got) != 2 || got[0] != 12345 || got[1] != 67890 {
+		t.Errorf("got %v, want [12345 67890]", got)
+	}
+}
