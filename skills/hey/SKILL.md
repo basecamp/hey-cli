@@ -161,7 +161,12 @@ hey box 123 --json                            # List emails in box (by ID)
 
 Box names: `imbox`, `feedbox`, `trailbox`, `asidebox`, `laterbox`, `bubblebox`
 
-**Response format:** `hey box` returns `{"box": {...}, "postings": [...]}`. Each posting has an `id` (posting ID), plus fields such as `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, and `app_url`. It does not currently guarantee a `topic_id`.
+**Response format:** `hey box --json` returns `{"ok": true, "data": {...box fields..., "postings": [...]}}`. Each posting has an `id` (posting ID), plus fields such as `kind`, `name` (subject), `created_at`, `contacts`, `summary`, `app_url`, and — on bundles — `app_bundle_url`. No posting carries a `topic_id`; see the ID note under Threads for resolving one.
+
+Postings come in two kinds:
+
+- `kind: "topic"` — a single message. `app_url` is `/topics/<id>`.
+- `kind: "bundle"` — HEY's per-contact digest, wrapping one or more messages from one sender. `app_url` is `/contacts/<id>`, and `name` is a `•`-joined concatenation of the bundled subjects rather than one email's subject.
 
 ### Email - Threads
 
@@ -170,7 +175,12 @@ hey threads <topic_id> --json                 # Read full email thread
 hey threads <topic_id> --html                 # Read with raw HTML content
 ```
 
-**ID note:** `hey threads` and `hey reply` expect a **topic ID**, not a posting ID. When a posting's `app_url` contains `/topics/<id>`, use that ID. If it does not, do not substitute the posting ID: the current CLI has no supported lookup from posting ID to topic ID, so ask the user to open the thread in HEY instead. See issue #156.
+**ID note:** `hey threads` and `hey reply` expect a **topic ID**, not a posting ID. Resolve one from the first `/topics/<id>` URL the posting offers:
+
+1. `app_url` — present on every `kind: "topic"` posting.
+2. `app_bundle_url` — a `kind: "bundle"` posting has a contact-shaped `app_url`, but a bundle wrapping a single message still points at that one topic here.
+
+If neither is topic-shaped, the posting is a bundle of several messages: it names a contact, not a thread, so no topic ID exists for it. Do not substitute the posting ID — `hey threads <posting-id>` requests `/topics/<posting-id>/entries` and returns not-found. The CLI has no command to list the topics inside a bundle, so ask the user to open it in HEY instead. See issue #156.
 
 ### Email - Reply & Compose
 
