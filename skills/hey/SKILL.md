@@ -161,7 +161,7 @@ hey box 123 --json                            # List emails in box (by ID)
 
 Box names: `imbox`, `feedbox`, `trailbox`, `asidebox`, `laterbox`, `bubblebox`
 
-**Response format:** `hey box` returns `{"box": {...}, "postings": [...]}`. Each posting has: `id` (posting ID), `topic_id` (topic ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`. Use `topic_id` for `hey threads` and `hey reply`.
+**Response format:** `hey box` returns `{"box": {...}, "postings": [...]}`. Each posting has an `id` (posting ID), plus fields such as `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, and `app_url`. It does not currently guarantee a `topic_id`.
 
 ### Email - Threads
 
@@ -170,7 +170,7 @@ hey threads <topic_id> --json                 # Read full email thread
 hey threads <topic_id> --html                 # Read with raw HTML content
 ```
 
-**ID note:** `hey box` returns postings with an `id` (posting ID) and a `topic_id` (topic ID). `hey threads` and `hey reply` expect the **topic ID** — use `topic_id` directly. The `app_url` field also contains the topic ID as a fallback (e.g. `https://app.hey.com/topics/123` → `123`).
+**ID note:** `hey threads` and `hey reply` expect a **topic ID**, not a posting ID. When a posting's `app_url` contains `/topics/<id>`, use that ID. If it does not, do not substitute the posting ID: the current CLI has no supported lookup from posting ID to topic ID, so ask the user to open the thread in HEY instead. See issue #156.
 
 ### Email - Reply & Compose
 
