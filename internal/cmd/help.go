@@ -17,7 +17,7 @@ var curatedCategories = []struct {
 }{
 	{
 		heading: "EMAIL",
-		names:   []string{"boxes", "box", "threads", "compose", "reply", "drafts", "seen", "unseen"},
+		names:   []string{"boxes", "box", "threads", "compose", "reply", "draft", "drafts", "seen", "unseen"},
 	},
 	{
 		heading: "CALENDAR & TASKS",
