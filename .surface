@@ -27,6 +27,10 @@ hey boxes
 hey boxes --all
 hey boxes --limit
 hey calendars
+hey collection
+hey collections
+hey collections --all
+hey collections --limit
 hey commands
 hey completion
 hey compose
