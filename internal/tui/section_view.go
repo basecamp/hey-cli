@@ -56,8 +56,9 @@ type sectionView interface {
 }
 
 // inputCapturer is implemented by section views that can open a text form.
-// While CapturingInput is true the app routes every key press to
-// HandleContentKey instead of treating any of them as global shortcuts.
+// While CapturingInput is true the app routes every key press (except the
+// ctrl+c quit chord, which is handled first) to sectionView.HandleContentKey
+// instead of treating any of them as global shortcuts.
 type inputCapturer interface {
 	CapturingInput() bool
 }

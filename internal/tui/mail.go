@@ -151,10 +151,10 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 	}
 
-	// Cursor blinks and other component messages go to the open form
+	// Cursor blinks and other component messages go to the open form. The
+	// form owns the message while it is open, whether or not it yields a cmd.
 	if v.compose != nil {
-		cmd := v.compose.update(msg)
-		return cmd, cmd != nil
+		return v.compose.update(msg), true
 	}
 
 	// Pass through to viewport if in thread
