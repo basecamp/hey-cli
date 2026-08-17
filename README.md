@@ -209,6 +209,8 @@ hey boxes --quiet --jq '.[].id'
 ```bash
 hey boxes                          # list mailboxes
 hey box imbox                      # list email threads in a box (by name or ID)
+hey bubble-up-now 123 --topic-id 456  # keep one exact posting at the top of the Imbox
+hey pop 123 --topic-id 456         # remove that exact posting from Bubble Up
 hey labels                          # list labels and their IDs
 hey label 789 --all                 # list all email threads with a label
 hey label add 12345 --to 789        # add a label to a thread
@@ -267,7 +269,9 @@ The Screener is where first-time senders wait. `hey screener list` returns clear
 
 `--attach` is repeatable on `hey compose`, `hey reply`, and `hey bulk-reply send`, and attachment-only messages are supported. The CLI validates and uploads every file before sending the email. `hey attachments <topic_id>` returns stable message-and-position IDs such as `456:1`; pass an ID to `hey attachments save`. Saving uses the original filename by default, accepts `--output` for a file or directory, and preserves existing files unless `--force` is set.
 
-Organization actions take the `id` values returned by `hey box --json`, `hey label --json`, or `hey search --json`. Label IDs come from `hey labels`; `hey label` returns `next_page` and `total_count`, accepts `--page <next_page>` for continuation, and supports `--all` for complete traversal. HEY creates a label while adding it to at least one thread, so `hey label create` requires thread item IDs. Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Bubble Up requires a scheduled date and is not available through `hey move`. Trashing a shared thread removes your access instead of deleting it for everyone. Ignored threads remain in their box and can be restored with `hey stop-ignoring`.
+`hey bubble-up-now <posting-id> --topic-id <topic-id>` and `hey pop <posting-id> --topic-id <topic-id>` require both IDs from the same posting returned by `hey box imbox --all` (the topic ID is in `app_url`). Each command reads the complete Imbox and Bubble Up listings before acting, calls the generated posting operation through the HEY SDK, and verifies the exact result with fresh reads. Safe repeats return structured `changed: false`, `no_op: true` results. If a listing is transiently incomplete, the command fails without mutating and asks the caller to retry only after the exact pair is visible.
+
+Organization actions take the `id` values returned by `hey box --json`, `hey label --json`, or `hey search --json`. Label IDs come from `hey labels`; `hey label` returns `next_page` and `total_count`, accepts `--page <next_page>` for continuation, and supports `--all` for complete traversal. HEY creates a label while adding it to at least one thread, so `hey label create` requires thread item IDs. Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail; Bubble Up is handled separately by the exact-target commands above. Trashing a shared thread removes your access instead of deleting it for everyone. Ignored threads remain in their box and can be restored with `hey stop-ignoring`.
 
 ### Watching for changes
 

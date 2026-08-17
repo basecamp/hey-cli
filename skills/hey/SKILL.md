@@ -21,6 +21,8 @@ triggers:
   - hey forward
   - hey compose
   - hey drafts
+  - hey bubble-up-now
+  - hey pop
   # Calendar actions
   - hey calendars
   - hey recordings
@@ -105,6 +107,7 @@ CLI for HEY: mailboxes, labels, email threads, contacts, replies, compose, calen
 3. **HTML output** is available via `--html` for commands that return HTML content
 4. **Linked mail accounts share one login** — use `hey accounts list --json`, then `--account <id|all>` when a task must target one account
 5. **Local HEY configuration requires human trust** — never run `hey config trust-local` without the user's explicit approval
+6. **Require the exact posting/topic pair for Bubble Up mutations** — read `hey box imbox --all --json`, pair `id` with the topic ID in that posting's `app_url`, and never infer one from another result
 
 ## Output Filtering
 
@@ -151,6 +154,8 @@ hey boxes --quiet --jq '.[].name'
 | Compose email | `hey compose --to user@example.com --subject "Hello"` |
 | Compose with CC/BCC | `hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Hello"` |
 | List drafts | `hey drafts --json` |
+| Bubble Up now | `hey bubble-up-now <posting_id> --topic-id <topic_id> --json` |
+| Pop from Bubble Up | `hey pop <posting_id> --topic-id <topic_id> --json` |
 | List calendars | `hey calendars --json` |
 | List calendar events | `hey recordings 123 --json` |
 | List todos | `hey todo list --json` |
@@ -196,6 +201,8 @@ Want to read email?
 ├── Read full thread? → hey threads <topic_id> --json
 ├── Mark as seen? → hey seen <id>
 ├── Mark as unseen? → hey unseen <id>
+├── Keep exact email at top? → hey bubble-up-now <posting-id> --topic-id <topic-id> --json
+├── Remove exact email from Bubble Up? → hey pop <posting-id> --topic-id <topic-id> --json
 ├── Move to another box? → hey move <id> --to <box>
 ├── Move to Trash? → hey trash <id>
 ├── Mark as spam? → hey spam <id>
@@ -399,6 +406,22 @@ To drive a command per change, choose one of two behaviours — passing both is 
 two can overlap; `--run-sync` waits for each and runs them in order. Both get the JSON on
 stdin and the fields as `HEY_CHANGE`, `HEY_AT`, `HEY_BOX_ID`, `HEY_BOX_KIND`,
 `HEY_BOX_NAME`, `HEY_POSTING_ID` and `HEY_THREAD_ID`, and both take over stdout.
+
+### Email - Bubble Up
+
+```bash
+hey box imbox --all --json
+hey bubble-up-now <posting_id> --topic-id <topic_id> --json
+hey pop <posting_id> --topic-id <topic_id> --json
+```
+
+Use the posting ID and topic ID from the same posting (`app_url` contains
+`/topics/<topic_id>`). These commands fully read Imbox and Bubble Up before
+the write, invoke the generated posting operation through the HEY SDK, and
+verify with fresh reads. A successful JSON result reports `changed`, `no_op`,
+`verified`, `before`, and `after`. If HEY temporarily omits the exact
+posting from a valid box response, the command returns a retryable not-found
+error and does not mutate; wait until the exact pair is visible before retrying.
 
 ### Drafts
 
