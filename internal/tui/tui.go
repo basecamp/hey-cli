@@ -189,7 +189,9 @@ func (m *model) updateHelpBindings() {
 
 	var bindings []helpBinding
 
-	if m.activeView.InThread() {
+	if ic, ok := m.activeView.(inputCapturer); ok && ic.CapturingInput() {
+		bindings = append(m.activeView.HelpBindings(), quitHint)
+	} else if m.activeView.InThread() {
 		bindings = []helpBinding{
 			{"↑↓", "scroll"},
 			{"esc/q", "back"},
@@ -244,6 +246,14 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.ctrlCOnce {
 		m.ctrlCOnce = false
 		m.updateHelpBindings()
+	}
+
+	// A view with an open text form gets every key (esc, tab, letters, ...).
+	if ic, ok := m.activeView.(inputCapturer); ok && ic.CapturingInput() {
+		cmd := m.activeView.HandleContentKey(msg)
+		cmd = m.syncLoading(cmd)
+		m.updateHelpBindings()
+		return m, cmd
 	}
 
 	if msg.Key().Code == tea.KeyEscape || key == "q" {

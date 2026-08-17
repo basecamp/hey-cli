@@ -287,8 +287,8 @@ func TestMailViewHelpBindingsInThread(t *testing.T) {
 	v := mailWithPostings()
 	v.inThread = true
 	bindings := v.HelpBindings()
-	if len(bindings) != 0 {
-		t.Error("mail should have no extra bindings in thread mode")
+	if len(bindings) != 1 || bindings[0].key != "r" {
+		t.Errorf("thread mode should offer only reply, got %v", bindings)
 	}
 }
 

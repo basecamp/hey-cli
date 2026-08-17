@@ -44,8 +44,13 @@ type mailView struct {
 	postingList   contentList
 	topicViewport viewport.Model
 	topicContent  string
+	topicID       int64
+	topicName     string
 	inThread      bool
 	loading       bool
+
+	compose *composeForm // non-nil while a new message or reply is being written
+	notice  string       // one-shot confirmation shown above the list after a send
 }
 
 func newMailView(vc *viewContext) *mailView {
@@ -104,6 +109,28 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		return nil, true
 
+	case replyContextLoadedMsg:
+		v.loading = false
+		if msg.err != nil {
+			return func() tea.Msg { return errMsg{msg.err} }, true
+		}
+		v.compose = newReplyForm(msg, v.vc.styles)
+		v.compose.resize(v.vc.width, v.vc.height)
+		return v.compose.init(), true
+
+	case composeSentMsg:
+		if v.compose == nil {
+			return nil, true
+		}
+		if msg.err != nil {
+			v.compose.sending = false
+			v.compose.setStatus("Send failed: "+msg.err.Error(), true)
+			return nil, true
+		}
+		v.compose = nil
+		v.notice = msg.label
+		return nil, true
+
 	case postingActionDoneMsg:
 		if msg.err != nil {
 			return func() tea.Msg { return errMsg{msg.err} }, true
@@ -124,6 +151,12 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 	}
 
+	// Cursor blinks and other component messages go to the open form
+	if v.compose != nil {
+		cmd := v.compose.update(msg)
+		return cmd, cmd != nil
+	}
+
 	// Pass through to viewport if in thread
 	if v.inThread {
 		var cmd tea.Cmd
@@ -135,17 +168,30 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 }
 
 func (v *mailView) View() string {
+	if v.compose != nil {
+		return v.compose.view()
+	}
 	if v.inThread {
 		return v.topicViewport.View()
+	}
+	if v.notice != "" {
+		return v.vc.styles.title.Render(v.notice) + "\n" + v.postingList.view()
 	}
 	return v.postingList.view()
 }
 
+// CapturingInput reports whether a form is open and wants every key.
+func (v *mailView) CapturingInput() bool { return v.compose != nil }
+
 func (v *mailView) HelpBindings() []helpBinding {
+	if v.compose != nil {
+		return v.compose.helpBindings()
+	}
 	if v.inThread {
-		return nil
+		return []helpBinding{{"r", "reply"}}
 	}
 	return []helpBinding{
+		{"c", "compose"},
 		{"r", "reply"},
 		{"f", "forward"},
 		{"e", "seen"},
@@ -185,7 +231,25 @@ func (v *mailView) SubnavRight() tea.Cmd {
 }
 
 func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
+	v.notice = ""
+
+	if v.compose != nil {
+		if msg.Key().Code == tea.KeyEscape && !v.compose.sending {
+			v.compose = nil
+			return nil
+		}
+		cmd, submit := v.compose.handleKey(msg)
+		if submit {
+			return v.send()
+		}
+		return cmd
+	}
+
 	if v.inThread {
+		if msg.String() == "r" && v.topicID != 0 {
+			v.loading = true
+			return v.loadReplyContext(v.topicID, v.topicName)
+		}
 		var cmd tea.Cmd
 		v.topicViewport, cmd = v.topicViewport.Update(msg)
 		return cmd
@@ -199,16 +263,22 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	case tea.KeyEnter:
 		return v.openSelected()
 	default:
+		if msg.String() == "c" {
+			return v.startCompose()
+		}
 		return v.handlePostingAction(msg.String())
 	}
 	return nil
 }
 
 func (v *mailView) InThread() bool { return v.inThread }
-func (v *mailView) ExitThread()    { v.inThread = false }
+func (v *mailView) ExitThread()    { v.inThread = false; v.compose = nil }
 func (v *mailView) Loading() bool  { return v.loading }
 
 func (v *mailView) Resize(width, height int) {
+	if v.compose != nil {
+		v.compose.resize(width, height)
+	}
 	v.postingList.setSize(width, height)
 	v.topicViewport.SetWidth(width)
 	v.topicViewport.SetHeight(height)
@@ -233,6 +303,8 @@ func (v *mailView) openSelected() tea.Cmd {
 	if topicID == 0 {
 		topicID = p.ID
 	}
+	v.topicID = topicID
+	v.topicName = p.Summary
 	v.loading = true
 	return v.fetchTopic(topicID, p.Summary)
 }
@@ -274,11 +346,22 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 		return v.doPostingAction("ignored", true, func() error {
 			return v.vc.sdk.Postings().Ignore(v.vc.ctx, p.ID)
 		})
-	case "r", "f":
+	case "r":
 		topicID := p.ResolveTopicID()
 		if topicID == 0 {
 			topicID = p.ID
 		}
+		v.topicID = topicID
+		v.topicName = p.Summary
+		v.loading = true
+		return v.loadReplyContext(topicID, p.Summary)
+	case "f":
+		topicID := p.ResolveTopicID()
+		if topicID == 0 {
+			topicID = p.ID
+		}
+		v.topicID = topicID
+		v.topicName = p.Summary
 		v.loading = true
 		return v.fetchTopic(topicID, p.Summary)
 	}
