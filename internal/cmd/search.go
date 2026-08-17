@@ -19,9 +19,9 @@ type searchCommand struct {
 }
 
 func newSearchCommand() *searchCommand {
-	searchCommand := &searchCommand{}
-	searchCommand.cmd = &cobra.Command{
-		Use:   "search <query>",
+	command := &searchCommand{}
+	command.cmd = &cobra.Command{
+		Use:   "search <query...>",
 		Short: "Search email",
 		Long:  "Search email topics by keyword or phrase using HEY's advanced search.",
 		Annotations: map[string]string{
@@ -30,13 +30,13 @@ func newSearchCommand() *searchCommand {
 		Example: `  hey search "quarterly planning"
   hey search invoice --page 2
   hey search "project update" --json`,
-		RunE: searchCommand.run,
+		RunE: command.run,
 		Args: usageMinOneArg(),
 	}
 
-	searchCommand.cmd.Flags().IntVar(&searchCommand.page, "page", 1, "Result page (starting at 1)")
+	command.cmd.Flags().IntVar(&command.page, "page", 1, "Result page (starting at 1)")
 
-	return searchCommand
+	return command
 }
 
 func (c *searchCommand) run(cmd *cobra.Command, args []string) error {
