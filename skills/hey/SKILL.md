@@ -11,6 +11,7 @@ triggers:
   # Email actions
   - hey boxes
   - hey box
+  - hey search
   - hey threads
   - hey reply
   - hey compose
@@ -84,6 +85,7 @@ CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos,
 |------|---------|
 | List mailboxes | `hey boxes --json` |
 | List emails in a box | `hey box imbox --json` |
+| Search email | `hey search "quarterly planning" --json` |
 | Read email thread | `hey threads <topic_id> --json` |
 | Reply to email | `hey reply <topic_id> -m "Thanks!"` |
 | Compose email | `hey compose --to user@example.com --subject "Hello"` |
@@ -119,6 +121,7 @@ CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos,
 Want to read email?
 ├── Which mailbox? → hey boxes --json
 ├── List emails in box? → hey box <name|id> --json
+├── Search email? → hey search "<query>" --json
 ├── Read full thread? → hey threads <topic_id> --json
 ├── Mark as seen? → hey seen <posting-id>
 ├── Mark as unseen? → hey unseen <posting-id>
@@ -162,6 +165,15 @@ hey box 123 --json                            # List emails in box (by ID)
 Box names: `imbox`, `feedbox`, `trailbox`, `asidebox`, `laterbox`, `bubblebox`
 
 **Response format:** `hey box` returns `{"box": {...}, "postings": [...]}`. Each posting has: `id` (posting ID), `topic_id` (topic ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`. Use `topic_id` for `hey threads` and `hey reply`.
+
+### Email - Search
+
+```bash
+hey search "quarterly planning" --json         # Search email topics
+hey search invoice --page 2 --json             # Read another result page
+```
+
+Search returns topics. Use a result's `id` with `hey threads`.
 
 ### Email - Threads
 

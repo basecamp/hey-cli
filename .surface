@@ -62,6 +62,8 @@ hey recordings --limit
 hey recordings --starts-on
 hey reply
 hey reply --message
+hey search
+hey search --page
 hey seen
 hey setup
 hey skill

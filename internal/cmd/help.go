@@ -17,7 +17,7 @@ var curatedCategories = []struct {
 }{
 	{
 		heading: "EMAIL",
-		names:   []string{"boxes", "box", "threads", "compose", "reply", "drafts", "seen", "unseen"},
+		names:   []string{"boxes", "box", "search", "threads", "compose", "reply", "drafts", "seen", "unseen"},
 	},
 	{
 		heading: "CALENDAR & TASKS",
@@ -123,6 +123,7 @@ func renderRootHelp(w io.Writer, cmd *cobra.Command) {
 	examples := []string{
 		"$ hey boxes",
 		"$ hey box imbox",
+		`$ hey search "quarterly planning"`,
 		"$ hey threads 123",
 		`$ hey compose --to "someone@hey.com" -m "Hello!"`,
 	}
