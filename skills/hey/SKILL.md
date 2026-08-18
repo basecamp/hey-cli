@@ -180,7 +180,7 @@ hey reply <topic_id>                          # Reply via $EDITOR
 hey compose --to user@example.com --subject "Hello"         # Compose new (opens $EDITOR)
 hey compose --to user@example.com --subject "Hi" -m "Body"  # With inline body
 hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Project update" -m "Body"  # With CC/BCC
-hey compose --subject "Update" --thread-id 12345 -m "msg"   # Post to existing thread
+hey compose --thread-id 12345 -m "msg"                       # Reply to an existing thread (no subject: it carries the thread's)
 ```
 
 ### Email - Seen/Unseen
