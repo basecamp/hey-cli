@@ -140,6 +140,49 @@ func TestPaginateBoxPostings_AllFlag(t *testing.T) {
 	}
 }
 
+func TestPaginateBoxPostings_AllFlagContinuesPastPreviousPageLimit(t *testing.T) {
+	first := &generated.BoxShowResponse{
+		Postings:       makePostings(30, 0),
+		NextHistoryUrl: "https://app.hey.com/page2",
+	}
+	pages := make([]generated.BoxShowResponse, 101)
+	for i := range pages {
+		pages[i].Postings = makePostings(10, 30+i*10)
+		if i < len(pages)-1 {
+			pages[i].NextHistoryUrl = fmt.Sprintf("https://app.hey.com/page%d", i+3)
+		}
+	}
+
+	postings, nextURL, err := paginateBoxPostings(context.Background(), first, 0, true, mockFetcher(pages))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(postings) != 1040 {
+		t.Errorf("expected 1040 postings, got %d", len(postings))
+	}
+	if nextURL != "" {
+		t.Errorf("expected empty nextURL when last page has no next URL, got %q", nextURL)
+	}
+}
+
+func TestPaginateBoxPostings_RejectsPaginationLoop(t *testing.T) {
+	first := &generated.BoxShowResponse{
+		Postings:       makePostings(30, 0),
+		NextHistoryUrl: "https://app.hey.com/page2",
+	}
+	pages := []generated.BoxShowResponse{
+		{Postings: makePostings(10, 30), NextHistoryUrl: "https://app.hey.com/page2"},
+	}
+
+	_, _, err := paginateBoxPostings(context.Background(), first, 0, true, mockFetcher(pages))
+	if err == nil {
+		t.Fatal("expected pagination loop error")
+	}
+	if !strings.Contains(err.Error(), "pagination loop") {
+		t.Errorf("error = %q, want pagination loop error", err)
+	}
+}
+
 func TestPaginateBoxPostings_LimitExceedsFirstPage(t *testing.T) {
 	first := &generated.BoxShowResponse{
 		Postings:       makePostings(30, 0),
@@ -196,7 +239,7 @@ func TestPaginateBoxPostings_NoNextURL(t *testing.T) {
 	}
 }
 
-func TestPaginateBoxPostings_EmptyPageStopsPagination(t *testing.T) {
+func TestPaginateBoxPostings_EmptyFinalPageStopsPagination(t *testing.T) {
 	first := &generated.BoxShowResponse{
 		Postings:       makePostings(30, 0),
 		NextHistoryUrl: "https://app.hey.com/page2",
@@ -214,6 +257,28 @@ func TestPaginateBoxPostings_EmptyPageStopsPagination(t *testing.T) {
 	}
 	if nextURL != "" {
 		t.Errorf("expected empty nextURL after empty page, got %q", nextURL)
+	}
+}
+
+func TestPaginateBoxPostings_EmptyPageWithNextURLContinuesPagination(t *testing.T) {
+	first := &generated.BoxShowResponse{
+		Postings:       makePostings(30, 0),
+		NextHistoryUrl: "https://app.hey.com/page2",
+	}
+	pages := []generated.BoxShowResponse{
+		{NextHistoryUrl: "https://app.hey.com/page3"},
+		{Postings: makePostings(10, 30)},
+	}
+
+	postings, nextURL, err := paginateBoxPostings(context.Background(), first, 0, true, mockFetcher(pages))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(postings) != 40 {
+		t.Errorf("expected 40 postings, got %d", len(postings))
+	}
+	if nextURL != "" {
+		t.Errorf("expected empty nextURL when last page has no next URL, got %q", nextURL)
 	}
 }
 
@@ -257,20 +322,18 @@ func TestBoxTruncationNotice(t *testing.T) {
 		shown   int
 		fetched int
 		hasMore bool
-		all     bool
 		want    string
 	}{
-		{"client truncated", 10, 30, false, false, "Showing 10 of 30 results. Use --all to see everything."},
-		{"more pages available", 30, 30, true, false, "Showing 30 results. More available; use --all to fetch all."},
-		{"all shown no more", 30, 30, false, false, ""},
-		{"truncated with more", 10, 30, true, false, "Showing 10 of 30 results. Use --all to see everything."},
-		{"all flag pagination capped", 30, 30, true, true, "Showing 30 results. Pagination limit reached; not all results could be fetched."},
+		{"client truncated", 10, 30, false, "Showing 10 of 30 results. Use --all to see everything."},
+		{"more pages available", 30, 30, true, "Showing 30 results. More available; use --all to fetch all."},
+		{"all shown no more", 30, 30, false, ""},
+		{"truncated with more", 10, 30, true, "Showing 10 of 30 results. Use --all to see everything."},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := boxTruncationNotice(tt.shown, tt.fetched, tt.hasMore, tt.all)
+			got := boxTruncationNotice(tt.shown, tt.fetched, tt.hasMore)
 			if got != tt.want {
-				t.Errorf("boxTruncationNotice(%d, %d, %v, %v) = %q, want %q", tt.shown, tt.fetched, tt.hasMore, tt.all, got, tt.want)
+				t.Errorf("boxTruncationNotice(%d, %d, %v) = %q, want %q", tt.shown, tt.fetched, tt.hasMore, got, tt.want)
 			}
 		})
 	}

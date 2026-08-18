@@ -14,8 +14,6 @@ import (
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
-const maxAdditionalPages = 100
-
 type boxCommand struct {
 	cmd   *cobra.Command
 	limit int
@@ -81,7 +79,7 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 	} else {
 		resp.NextHistoryUrl = finalNextURL
 	}
-	notice := boxTruncationNotice(len(postings), total, hasMore, c.all)
+	notice := boxTruncationNotice(len(postings), total, hasMore)
 
 	if writer.IsStyled() {
 		fmt.Fprintf(cmd.OutOrStdout(), "Box: %s (%s)\n\n", resp.Name, resp.Kind)
@@ -255,15 +253,18 @@ func paginateBoxPostings(ctx context.Context, firstPage *generated.BoxShowRespon
 		return nil, "", fmt.Errorf("paginateBoxPostings: fetch function is nil while pagination is required")
 	}
 
-	for page := 1; page <= maxAdditionalPages && nextURL != ""; page++ {
+	seenPageURLs := make(map[string]struct{})
+	for nextURL != "" {
+		if _, seen := seenPageURLs[nextURL]; seen {
+			return nil, "", fmt.Errorf("box pagination loop detected")
+		}
+		seenPageURLs[nextURL] = struct{}{}
+
 		resp, err := fetch(ctx, nextURL)
 		if err != nil {
 			return nil, "", err
 		}
 		nextURL = resp.NextHistoryUrl
-		if len(resp.Postings) == 0 {
-			break
-		}
 		postings = append(postings, resp.Postings...)
 
 		if !all && limit > 0 && len(postings) >= limit {
@@ -275,12 +276,9 @@ func paginateBoxPostings(ctx context.Context, firstPage *generated.BoxShowRespon
 }
 
 // boxTruncationNotice returns a user-facing notice about truncated or paginated results.
-func boxTruncationNotice(shown, fetched int, hasMore, all bool) string {
+func boxTruncationNotice(shown, fetched int, hasMore bool) string {
 	if shown < fetched {
 		return fmt.Sprintf("Showing %d of %d results. Use --all to see everything.", shown, fetched)
-	}
-	if hasMore && all {
-		return fmt.Sprintf("Showing %d results. Pagination limit reached; not all results could be fetched.", shown)
 	}
 	if hasMore {
 		return fmt.Sprintf("Showing %d results. More available; use --all to fetch all.", shown)
