@@ -51,7 +51,26 @@ Remember to update the examples in the README when you change, add or remove CLI
 
 ### HTML content
 
-Some HEY API endpoints return 204 or incomplete data via JSON, but the full HTML content is available by scraping the edit page (e.g., `/calendar/days/{date}/journal_entry/edit` contains the Trix editor hidden input with full HTML). When an API endpoint returns incomplete data, check the corresponding web page for the full content. The `internal/htmlutil` package provides `ToText` (HTML→plain text), `ExtractImageURLs`, and `ParseTopicEntriesHTML` shared by both CLI and TUI. HEY uses Trix editor with `<figure data-trix-attachment="{...}">` for attachments — image URLs in those attributes are relative paths requiring authentication via `sdk.Get`.
+**Scraping is being removed, not extended.** HEY grew JSON for the endpoints the CLI reads,
+the SDK dropped its scrapers in v0.4.0, and what is left here is on its way out. Do not
+answer "the JSON looks incomplete" by parsing a web page — check whether the SDK already
+has a typed operation, and if HEY does not serve JSON for what you need, add it there
+rather than working around it here.
+
+The journal used to be the example of this: a day with an entry answered 204, so the
+content was scraped from the Trix input on `/calendar/days/{date}/journal_entry/edit`.
+HEY answers the entry itself now, a 204 means the day is empty, and the scrape is gone.
+
+What still reads HTML, and only until the typed reads replace it: `hey reply`, `hey topic`
+and two TUI paths use `internal/htmlutil`'s `ParseTopicEntriesHTML` and
+`ParseTopicAddressed` to find a thread's entries and recipients. `Topics.Get` carries the
+topic's entries as of SDK v0.4.0, so this can go; `resolveThreadReply` in
+`internal/cmd/thread_reply.go` is the one place to change.
+
+`internal/htmlutil` also provides `ToText` (HTML→plain text) and `ExtractImageURLs`, which
+are presentation helpers rather than scrapers and are staying. HEY uses the Trix editor
+with `<figure data-trix-attachment="{...}">` for attachments — image URLs in those
+attributes are relative paths requiring authentication via `sdk.Get`.
 
 ### TUI structure
 
