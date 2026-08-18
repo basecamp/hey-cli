@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/basecamp/hey-cli/internal/output"
@@ -58,12 +59,12 @@ func journalServerWithReadBehavior(t *testing.T, readBehavior string) *httptest.
 
 // journalServerRecordingEditFetches answers 204 for the journal entry and notes whether
 // anything asked for the legacy edit page.
-func journalServerRecordingEditFetches(t *testing.T, editFetched *bool) *httptest.Server {
+func journalServerRecordingEditFetches(t *testing.T, editFetched *atomic.Bool) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/journal_entry/edit"):
-			*editFetched = true
+			editFetched.Store(true)
 			w.Header().Set("Content-Type", "text/html")
 			fmt.Fprint(w, `<html><body><input id="journal_trix_input" value="&lt;div&gt;Fallback content&lt;/div&gt;"></body></html>`)
 		case strings.Contains(r.URL.Path, "/journal_entry"):
@@ -229,7 +230,7 @@ func TestJournalReadReturns200WithContent(t *testing.T) {
 // now, so a 204 means what it says -- there is no entry that day -- and the edit page is
 // never fetched.
 func TestJournalReadReturns204MeansNoEntry(t *testing.T) {
-	var editFetched bool
+	var editFetched atomic.Bool
 	server := journalServerRecordingEditFetches(t, &editFetched)
 	defer server.Close()
 
@@ -244,7 +245,7 @@ func TestJournalReadReturns204MeansNoEntry(t *testing.T) {
 	if !strings.Contains(resp.Summary, "No journal entry") {
 		t.Errorf("summary = %q, want it to say there is no entry", resp.Summary)
 	}
-	if editFetched {
+	if editFetched.Load() {
 		t.Error("the edit page should not be fetched any more")
 	}
 }
