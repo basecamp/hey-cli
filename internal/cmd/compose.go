@@ -27,11 +27,11 @@ func newComposeCommand() *composeCommand {
 		Use:   "compose",
 		Short: "Compose a new message",
 		Annotations: map[string]string{
-			"agent_notes": "Creates a new email. Requires --subject. Use --to (optionally with --cc/--bcc) for new threads or --thread-id for existing ones.",
+			"agent_notes": "Starts a new thread with --to (optionally --cc/--bcc), which requires --subject, or replies to an existing one with --thread-id, which does not: a reply carries the thread's subject and goes to that thread's recipients.",
 		},
 		Example: `  hey compose --to alice@example.com --subject "Hello" -m "Hi there"
   hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Hello" -m "Hi"
-  hey compose --subject "Update" --thread-id 12345 -m "Thread reply"
+  hey compose --thread-id 12345 -m "Thread reply"
   echo "Long message" | hey compose --to bob@example.com --subject "Report"`,
 		RunE: composeCommand.run,
 	}
