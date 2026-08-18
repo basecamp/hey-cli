@@ -39,9 +39,9 @@ func newComposeCommand() *composeCommand {
 	composeCommand.cmd.Flags().StringVar(&composeCommand.to, "to", "", "Recipient email address(es)")
 	composeCommand.cmd.Flags().StringVar(&composeCommand.cc, "cc", "", "CC recipient email address(es)")
 	composeCommand.cmd.Flags().StringVar(&composeCommand.bcc, "bcc", "", "BCC recipient email address(es)")
-	composeCommand.cmd.Flags().StringVar(&composeCommand.subject, "subject", "", "Message subject (required)")
+	composeCommand.cmd.Flags().StringVar(&composeCommand.subject, "subject", "", "Message subject (required for a new message)")
 	composeCommand.cmd.Flags().StringVarP(&composeCommand.message, "message", "m", "", "Message body (or opens $EDITOR)")
-	composeCommand.cmd.Flags().StringVar(&composeCommand.threadID, "thread-id", "", "Thread ID to post message to")
+	composeCommand.cmd.Flags().StringVar(&composeCommand.threadID, "thread-id", "", "Reply to this thread instead of starting a new one")
 
 	return composeCommand
 }
@@ -51,7 +51,8 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if c.subject == "" {
+	// A reply carries the thread's subject, so only a new message needs one.
+	if c.subject == "" && c.threadID == "" {
 		return output.ErrUsageHint("--subject is required", "hey compose --to <email> --subject <subject> -m <message>")
 	}
 

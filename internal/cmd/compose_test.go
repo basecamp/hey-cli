@@ -1,7 +1,12 @@
 package cmd
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"testing"
+
+	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
 func TestParseAddresses(t *testing.T) {
@@ -56,5 +61,32 @@ func TestParseAddresses(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A reply carries the thread's subject with it, so --subject is only wanted when
+// starting a new thread. Requiring it either way made people pass one that HEY ignores.
+func TestComposeSubjectRequiredOnlyForANewMessage(t *testing.T) {
+	server := threadReplyServer(t, topicWithRecipients, topicEntries)
+	withSDKPointedAt(t, server)
+
+	newMessage := newComposeCommand()
+	newMessage.cmd.SetContext(context.Background())
+	newMessage.message = "body"
+	err := newMessage.run(newMessage.cmd, nil)
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != "usage" {
+		t.Fatalf("a new message with no subject should be a usage error, got %v", err)
+	}
+
+	// The reply goes no further here — the stub server does not stand in for the whole
+	// send — but it has to get past the subject check, which is what changed.
+	reply := newComposeCommand()
+	reply.cmd.SetContext(context.Background())
+	reply.message = "body"
+	reply.threadID = "7"
+	err = reply.run(reply.cmd, nil)
+	if errors.As(err, &cliErr) && strings.Contains(cliErr.Message, "--subject") {
+		t.Errorf("a reply should not be asked for a subject, got %v", err)
 	}
 }
