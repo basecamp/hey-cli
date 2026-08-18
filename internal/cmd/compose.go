@@ -85,7 +85,12 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return output.ErrUsage(fmt.Sprintf("invalid thread ID: %s", c.threadID))
 		}
-		if err := sdk.Messages().CreateTopicMessage(ctx, topicID, message); err != nil {
+		target, err := resolveThreadReply(ctx, topicID)
+		if err != nil {
+			return err
+		}
+		if err := sdk.Entries().CreateReply(ctx, target.EntryID, message,
+			target.Addressed.To, target.Addressed.CC, target.Addressed.BCC); err != nil {
 			return convertSDKError(err)
 		}
 	} else {

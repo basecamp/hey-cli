@@ -190,8 +190,8 @@ func listPersonalRecordings(ctx context.Context) (*generated.CalendarRecordingsR
 	endsOn := now.AddDate(personalRecordingsLookaheadYears, 0, 0).Format("2006-01-02")
 
 	resp, err := sdk.Calendars().GetRecordings(ctx, calID, &generated.GetCalendarRecordingsParams{
-		StartsOn: startsOn,
-		EndsOn:   endsOn,
+		StartsOn: &startsOn,
+		EndsOn:   &endsOn,
 	})
 	if err != nil {
 		return nil, convertSDKError(err)

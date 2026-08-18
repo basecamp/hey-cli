@@ -22,7 +22,6 @@ func journalServer(t *testing.T) *httptest.Server {
 //
 //	"200"               — returns a Recording with content
 //	"204"               — returns 204 No Content (SDK returns nil), no legacy fallback
-//	"204-with-fallback" — returns 204 on SDK path, serves HTML on legacy /edit path
 func journalServerWithReadBehavior(t *testing.T, readBehavior string) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -30,17 +29,13 @@ func journalServerWithReadBehavior(t *testing.T, readBehavior string) *httptest.
 		case r.Method == "GET" && strings.Contains(r.URL.Path, "/calendar/days/") && strings.HasSuffix(r.URL.Path, "/journal_entry/edit"):
 			// Legacy HTML-scrape path
 			w.Header().Set("Content-Type", "text/html")
-			if readBehavior == "204-with-fallback" {
-				fmt.Fprint(w, `<html><body><input id="journal_trix_input" value="&lt;div&gt;Fallback content&lt;/div&gt;"></body></html>`)
-			} else {
-				fmt.Fprint(w, `<html><body></body></html>`)
-			}
+			fmt.Fprint(w, `<html><body></body></html>`)
 		case r.Method == "GET" && strings.Contains(r.URL.Path, "/calendar/days/") && (strings.HasSuffix(r.URL.Path, "/journal_entry") || strings.HasSuffix(r.URL.Path, "/journal_entry.json")):
 			path := r.URL.Path
 			path = strings.TrimPrefix(path, "/calendar/days/")
 			date := strings.TrimSuffix(strings.TrimSuffix(path, ".json"), "/journal_entry")
 			switch readBehavior {
-			case "204", "204-with-fallback":
+			case "204":
 				w.WriteHeader(204)
 			default:
 				resp := map[string]any{
@@ -54,6 +49,24 @@ func journalServerWithReadBehavior(t *testing.T, readBehavior string) *httptest.
 				json.NewEncoder(w).Encode(resp)
 			}
 		case r.Method == "PATCH" && strings.Contains(r.URL.Path, "/calendar/days/") && (strings.HasSuffix(r.URL.Path, "/journal_entry") || strings.HasSuffix(r.URL.Path, "/journal_entry.json")):
+			w.WriteHeader(204)
+		default:
+			w.WriteHeader(200)
+		}
+	}))
+}
+
+// journalServerRecordingEditFetches answers 204 for the journal entry and notes whether
+// anything asked for the legacy edit page.
+func journalServerRecordingEditFetches(t *testing.T, editFetched *bool) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/journal_entry/edit"):
+			*editFetched = true
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprint(w, `<html><body><input id="journal_trix_input" value="&lt;div&gt;Fallback content&lt;/div&gt;"></body></html>`)
+		case strings.Contains(r.URL.Path, "/journal_entry"):
 			w.WriteHeader(204)
 		default:
 			w.WriteHeader(200)
@@ -211,8 +224,13 @@ func TestJournalReadReturns200WithContent(t *testing.T) {
 	}
 }
 
-func TestJournalReadReturns204FallsBackToLegacyHTML(t *testing.T) {
-	server := journalServerWithReadBehavior(t, "204-with-fallback")
+// A 204 used to mean "ask the edit page instead": HEY answered 204 for a day that had an
+// entry, so the SDK scraped the Trix input for its content. HEY answers the entry itself
+// now, so a 204 means what it says -- there is no entry that day -- and the edit page is
+// never fetched.
+func TestJournalReadReturns204MeansNoEntry(t *testing.T) {
+	var editFetched bool
+	server := journalServerRecordingEditFetches(t, &editFetched)
 	defer server.Close()
 
 	resp, err := runJournalRead(t, server, "2024-01-15")
@@ -220,14 +238,14 @@ func TestJournalReadReturns204FallsBackToLegacyHTML(t *testing.T) {
 		t.Fatalf("execute: %v", err)
 	}
 
-	// SDK returns nil (204), but the legacy HTML scrape at /edit should provide content.
-	data, ok := resp.Data.(map[string]any)
-	if !ok {
-		t.Fatalf("data type = %T, want map[string]any (fallback should have returned content)", resp.Data)
+	if resp.Data != nil {
+		t.Errorf("data = %v, want nil for a day with no entry", resp.Data)
 	}
-	content, _ := data["content"].(string)
-	if !strings.Contains(content, "Fallback content") {
-		t.Errorf("content = %q, want to contain %q", content, "Fallback content")
+	if !strings.Contains(resp.Summary, "No journal entry") {
+		t.Errorf("summary = %q, want it to say there is no entry", resp.Summary)
+	}
+	if editFetched {
+		t.Error("the edit page should not be fetched any more")
 	}
 }
 

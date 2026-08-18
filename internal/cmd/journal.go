@@ -257,7 +257,7 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if err := sdk.Journal().Update(ctx, date, content); err != nil {
+	if _, err := sdk.Journal().Update(ctx, date, content); err != nil {
 		return convertSDKError(err)
 	}
 

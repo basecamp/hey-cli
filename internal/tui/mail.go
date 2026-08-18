@@ -200,7 +200,7 @@ func (v *mailView) HelpBindings() []helpBinding {
 		{"d", "feed"},
 		{"p", "paper trail"},
 		{"t", "trash"},
-		{"-", "ignore"},
+		{"-", "mute"},
 	}
 }
 
@@ -343,8 +343,8 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 			return v.vc.sdk.Postings().MoveToTrash(v.vc.ctx, p.ID)
 		})
 	case "-":
-		return v.doPostingAction("ignored", true, func() error {
-			return v.vc.sdk.Postings().Ignore(v.vc.ctx, p.ID)
+		return v.doPostingAction("muted", true, func() error {
+			return v.vc.sdk.Postings().Mute(v.vc.ctx, p.ID)
 		})
 	case "r":
 		topicID := p.ResolveTopicID()

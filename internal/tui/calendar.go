@@ -288,9 +288,10 @@ func (v *calendarView) fetchCalendars() tea.Cmd {
 func (v *calendarView) fetchRecordings(calID int64) tea.Cmd {
 	start, end := dateRangeForMode(v.viewMode, v.anchorDate, v.firstWeekDay)
 	return func() tea.Msg {
+		startsOn, endsOn := start.Format("2006-01-02"), end.Format("2006-01-02")
 		resp, err := v.vc.sdk.Calendars().GetRecordings(v.vc.ctx, calID, &generated.GetCalendarRecordingsParams{
-			StartsOn: start.Format("2006-01-02"),
-			EndsOn:   end.Format("2006-01-02"),
+			StartsOn: &startsOn,
+			EndsOn:   &endsOn,
 		})
 		if err != nil {
 			return errMsg{err}

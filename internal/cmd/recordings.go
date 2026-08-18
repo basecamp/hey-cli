@@ -69,8 +69,8 @@ func (c *recordingsCommand) run(cmd *cobra.Command, args []string) error {
 
 	ctx := cmd.Context()
 	resp, err := sdk.Calendars().GetRecordings(ctx, calendarID, &generated.GetCalendarRecordingsParams{
-		StartsOn: startsOn,
-		EndsOn:   endsOn,
+		StartsOn: &startsOn,
+		EndsOn:   &endsOn,
 	})
 	if err != nil {
 		return convertSDKError(err)

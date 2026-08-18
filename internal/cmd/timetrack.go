@@ -5,8 +5,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/basecamp/hey-sdk/go/pkg/generated"
-
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -57,7 +55,7 @@ func (c *timetrackStartCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := cmd.Context()
-	result, err := sdk.TimeTracks().Start(ctx, generated.StartTimeTrackJSONRequestBody{})
+	result, err := sdk.TimeTracks().Start(ctx)
 	if err != nil {
 		return convertSDKError(err)
 	}

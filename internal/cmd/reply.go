@@ -7,7 +7,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/hey-cli/internal/editor"
-	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -47,27 +46,10 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 
 	ctx := cmd.Context()
 
-	// Fetch topic page to extract recipients (To/CC/BCC).
-	topicResp, err := sdk.GetHTML(ctx, fmt.Sprintf("/topics/%d", threadID))
+	target, err := resolveThreadReply(ctx, threadID)
 	if err != nil {
-		return convertSDKError(err)
+		return err
 	}
-	addressed := htmlutil.ParseTopicAddressed(string(topicResp.Data))
-	if len(addressed.To) == 0 && len(addressed.CC) == 0 && len(addressed.BCC) == 0 {
-		return output.ErrUsage("could not determine thread recipients")
-	}
-
-	// Fetch entries to find the latest entry ID for the reply.
-	entriesResp, err := sdk.GetHTML(ctx, fmt.Sprintf("/topics/%d/entries", threadID))
-	if err != nil {
-		return convertSDKError(err)
-	}
-	entries := htmlutil.ParseTopicEntriesHTML(string(entriesResp.Data))
-	if len(entries) == 0 {
-		return output.ErrNotFound("entries for thread", args[0])
-	}
-
-	latestEntryID := entries[len(entries)-1].ID
 
 	message := c.message
 	if message == "" {
@@ -90,7 +72,7 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if err = sdk.Entries().CreateReply(ctx, latestEntryID, message, addressed.To, addressed.CC, addressed.BCC); err != nil {
+	if err = sdk.Entries().CreateReply(ctx, target.EntryID, message, target.Addressed.To, target.Addressed.CC, target.Addressed.BCC); err != nil {
 		return convertSDKError(err)
 	}
 
