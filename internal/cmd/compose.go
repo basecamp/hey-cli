@@ -19,6 +19,7 @@ type composeCommand struct {
 	subject  string
 	message  string
 	threadID string
+	rawHTML  bool
 }
 
 func newComposeCommand() *composeCommand {
@@ -27,12 +28,13 @@ func newComposeCommand() *composeCommand {
 		Use:   "compose",
 		Short: "Compose a new message",
 		Annotations: map[string]string{
-			"agent_notes": "Creates a new email. Requires --subject. Use --to (optionally with --cc/--bcc) for new threads or --thread-id for existing ones.",
+			"agent_notes": "Creates a new email. Requires --subject. Use --to (optionally with --cc/--bcc) for new threads or --thread-id for existing ones. Plain-text paragraphs and line breaks are preserved automatically; use --raw-html only when supplying HEY-compatible HTML.",
 		},
 		Example: `  hey compose --to alice@example.com --subject "Hello" -m "Hi there"
   hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Hello" -m "Hi"
   hey compose --subject "Update" --thread-id 12345 -m "Thread reply"
-  echo "Long message" | hey compose --to bob@example.com --subject "Report"`,
+  echo "Long message" | hey compose --to bob@example.com --subject "Report"
+  hey compose --to bob@example.com --subject "Formatted" --raw-html -m "<p>Hello</p>"`,
 		RunE: composeCommand.run,
 	}
 
@@ -42,6 +44,7 @@ func newComposeCommand() *composeCommand {
 	composeCommand.cmd.Flags().StringVar(&composeCommand.subject, "subject", "", "Message subject (required)")
 	composeCommand.cmd.Flags().StringVarP(&composeCommand.message, "message", "m", "", "Message body (or opens $EDITOR)")
 	composeCommand.cmd.Flags().StringVar(&composeCommand.threadID, "thread-id", "", "Thread ID to post message to")
+	composeCommand.cmd.Flags().BoolVar(&composeCommand.rawHTML, "raw-html", false, "Send message body as HEY-compatible HTML without plain-text formatting")
 
 	return composeCommand
 }
@@ -79,6 +82,10 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := cmd.Context()
+	message = formatMessageContent(message, c.rawHTML)
+	if message == "" {
+		return output.ErrUsage("empty message, aborting")
+	}
 
 	if c.threadID != "" {
 		topicID, err := strconv.ParseInt(c.threadID, 10, 64)
