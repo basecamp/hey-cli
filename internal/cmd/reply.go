@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/basecamp/hey-cli/internal/editor"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/output"
 )
@@ -14,6 +13,7 @@ import (
 type replyCommand struct {
 	cmd     *cobra.Command
 	message string
+	draft   bool
 }
 
 func newReplyCommand() *replyCommand {
@@ -22,15 +22,17 @@ func newReplyCommand() *replyCommand {
 		Use:   "reply <thread-id>",
 		Short: "Reply to a thread",
 		Annotations: map[string]string{
-			"agent_notes": "Replies to the latest entry in a thread. Accepts message via -m, stdin, or $EDITOR.",
+			"agent_notes": "Replies to the latest entry in a thread. Accepts message via -m, stdin, or $EDITOR. Use --draft to save without sending.",
 		},
 		Example: `  hey reply 12345 -m "Thanks!"
+  hey reply 12345 --draft -m "Draft reply"
   echo "Detailed reply" | hey reply 12345`,
 		RunE: replyCommand.run,
 		Args: usageExactOneArg(),
 	}
 
 	replyCommand.cmd.Flags().StringVarP(&replyCommand.message, "message", "m", "", "Reply message (or opens $EDITOR)")
+	replyCommand.cmd.Flags().BoolVar(&replyCommand.draft, "draft", false, "Save as draft instead of sending")
 
 	return replyCommand
 }
@@ -47,16 +49,6 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 
 	ctx := cmd.Context()
 
-	// Fetch topic page to extract recipients (To/CC/BCC).
-	topicResp, err := sdk.GetHTML(ctx, fmt.Sprintf("/topics/%d", threadID))
-	if err != nil {
-		return convertSDKError(err)
-	}
-	addressed := htmlutil.ParseTopicAddressed(string(topicResp.Data))
-	if len(addressed.To) == 0 && len(addressed.CC) == 0 && len(addressed.BCC) == 0 {
-		return output.ErrUsage("could not determine thread recipients")
-	}
-
 	// Fetch entries to find the latest entry ID for the reply.
 	entriesResp, err := sdk.GetHTML(ctx, fmt.Sprintf("/topics/%d/entries", threadID))
 	if err != nil {
@@ -69,25 +61,24 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 
 	latestEntryID := entries[len(entries)-1].ID
 
-	message := c.message
-	if message == "" {
-		if !stdinIsTerminal() {
-			message, err = readStdin()
-			if err != nil {
-				return err
-			}
-			if message == "" {
-				return output.ErrUsage("no message provided (use -m or --message to provide inline, or pipe to stdin)")
-			}
-		} else {
-			message, err = editor.Open("")
-			if err != nil {
-				return output.ErrAPI(0, fmt.Sprintf("could not open editor: %v", err))
-			}
-			if message == "" {
-				return output.ErrUsage("empty message, aborting")
-			}
-		}
+	message, err := draftMessageWithInitial(c.message, "", c.draft && cmd.Flags().Changed("message"))
+	if err != nil {
+		return err
+	}
+
+	if c.draft {
+		return createReplyDraftForEntry(ctx, cmd.OutOrStdout(), latestEntryID, draftFormRequest{
+			Content: message,
+		})
+	}
+
+	replyForm, err := loadReplyDraftForm(ctx, latestEntryID)
+	if err != nil {
+		return err
+	}
+	addressed := replyForm.Request
+	if len(addressed.To) == 0 && len(addressed.CC) == 0 && len(addressed.BCC) == 0 {
+		return output.ErrUsage("could not determine thread recipients")
 	}
 
 	if err = sdk.Entries().CreateReply(ctx, latestEntryID, message, addressed.To, addressed.CC, addressed.BCC); err != nil {
