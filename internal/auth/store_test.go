@@ -1,10 +1,35 @@
 package auth
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+
+	keyringlib "github.com/zalando/go-keyring"
 )
+
+type recordingKeyring struct {
+	getCalls    int
+	setCalls    int
+	deleteCalls int
+	getErr      error
+}
+
+func (k *recordingKeyring) Get(_, _ string) (string, error) {
+	k.getCalls++
+	return "", k.getErr
+}
+
+func (k *recordingKeyring) Set(_, _, _ string) error {
+	k.setCalls++
+	return nil
+}
+
+func (k *recordingKeyring) Delete(_, _ string) error {
+	k.deleteCalls++
+	return nil
+}
 
 func testStore(t *testing.T) *Store {
 	t.Helper()
@@ -50,6 +75,34 @@ func TestLoadNotFound(t *testing.T) {
 	_, err := s.Load("https://app.hey.com")
 	if err == nil {
 		t.Fatal("expected error for missing credentials")
+	}
+}
+
+func TestKeyringAvailabilityCheckIsReadOnly(t *testing.T) {
+	t.Setenv("HEY_NO_KEYRING", "")
+	keyring := &recordingKeyring{getErr: keyringlib.ErrNotFound}
+	store := NewStore(t.TempDir())
+	store.keyring = keyring
+
+	if !store.UsingKeyring() {
+		t.Fatal("expected missing availability key to confirm keyring access")
+	}
+	if keyring.getCalls != 1 {
+		t.Errorf("Get calls = %d, want 1", keyring.getCalls)
+	}
+	if keyring.setCalls != 0 || keyring.deleteCalls != 0 {
+		t.Errorf("availability check mutated keyring: Set = %d, Delete = %d", keyring.setCalls, keyring.deleteCalls)
+	}
+}
+
+func TestKeyringAvailabilityErrorUsesFileStore(t *testing.T) {
+	t.Setenv("HEY_NO_KEYRING", "")
+	keyring := &recordingKeyring{getErr: errors.New("keyring unavailable")}
+	store := NewStore(t.TempDir())
+	store.keyring = keyring
+
+	if store.UsingKeyring() {
+		t.Fatal("expected unavailable keyring to use file store")
 	}
 }
 
