@@ -2,6 +2,7 @@ package auth
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,7 +12,10 @@ import (
 	"github.com/zalando/go-keyring"
 )
 
-const serviceName = "hey"
+const (
+	serviceName         = "hey"
+	keyringAvailability = "hey::availability"
+)
 
 type credentialKeyring struct {
 	set    func(service, user, password string) error
@@ -58,10 +62,8 @@ func (s *Store) ensureInit() {
 		if s.noKeyring {
 			return
 		}
-		testKey := "hey::test"
-		err := s.keyring.set(serviceName, testKey, "test")
-		if err == nil {
-			_ = s.keyring.delete(serviceName, testKey)
+		_, err := s.keyring.get(serviceName, keyringAvailability)
+		if err == nil || errors.Is(err, keyring.ErrNotFound) {
 			s.useKeyring = true
 			return
 		}

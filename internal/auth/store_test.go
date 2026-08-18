@@ -6,7 +6,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
+
+	keyringlib "github.com/zalando/go-keyring"
 )
 
 func testStore(t *testing.T) *Store {
@@ -16,12 +19,10 @@ func testStore(t *testing.T) *Store {
 }
 
 type fakeKeyring struct {
-	values         map[string]string
-	setErr         error
-	getErr         error
-	deleteErr      error
-	failAfterProbe bool
-	probeComplete  bool
+	values    map[string]string
+	setErr    error
+	getErr    error
+	deleteErr error
 }
 
 func newFakeKeyring() *fakeKeyring {
@@ -29,13 +30,10 @@ func newFakeKeyring() *fakeKeyring {
 }
 
 func (f *fakeKeyring) Set(service, user, password string) error {
-	if f.setErr != nil && (!f.failAfterProbe || f.probeComplete) {
+	if f.setErr != nil {
 		return f.setErr
 	}
 	f.values[service+"/"+user] = password
-	if user == "hey::test" {
-		f.probeComplete = true
-	}
 	return nil
 }
 
@@ -45,7 +43,7 @@ func (f *fakeKeyring) Get(service, user string) (string, error) {
 	}
 	value, ok := f.values[service+"/"+user]
 	if !ok {
-		return "", errors.New("not found")
+		return "", keyringlib.ErrNotFound
 	}
 	return value, nil
 }
@@ -98,15 +96,15 @@ func TestKeyringSaveLoadDelete(t *testing.T) {
 }
 
 func TestKeyringFailures(t *testing.T) {
-	t.Run("probe falls back to file", func(t *testing.T) {
+	t.Run("availability error falls back to file", func(t *testing.T) {
 		fake := newFakeKeyring()
-		fake.setErr = errors.New("keyring unavailable")
+		fake.getErr = errors.New("keyring unavailable")
 		store := keyringStore(t, fake)
 		if err := store.Save("https://app.hey.com", &Credentials{AccessToken: "file-token"}); err != nil {
 			t.Fatalf("Save fallback: %v", err)
 		}
 		if store.UsingKeyring() {
-			t.Fatal("UsingKeyring = true after failed probe")
+			t.Fatal("UsingKeyring = true after failed availability check")
 		}
 		if _, err := os.Stat(store.credentialsPath()); err != nil {
 			t.Fatalf("fallback credentials file: %v", err)
@@ -183,7 +181,6 @@ func TestMigrateToKeyring(t *testing.T) {
 func TestMigrationFailurePreservesFallbackFile(t *testing.T) {
 	fake := newFakeKeyring()
 	fake.setErr = errors.New("keyring write failed")
-	fake.failAfterProbe = true
 	store := keyringStore(t, fake)
 	if err := store.saveAllToFile(map[string]*Credentials{
 		"https://app.hey.com": {AccessToken: "production"},
@@ -245,6 +242,86 @@ func TestLoadNotFound(t *testing.T) {
 	_, err := s.Load("https://app.hey.com")
 	if err == nil {
 		t.Fatal("expected error for missing credentials")
+	}
+}
+
+func TestConcurrentKeyringAvailabilityChecksAreReadOnly(t *testing.T) {
+	t.Setenv("HEY_NO_KEYRING", "")
+
+	const storeCount = 16
+	var mu sync.Mutex
+	var getCalls, setCalls, deleteCalls, wrongLookups int
+	keyring := credentialKeyring{
+		get: func(service, user string) (string, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			getCalls++
+			if service != serviceName || user != keyringAvailability {
+				wrongLookups++
+			}
+			return "", keyringlib.ErrNotFound
+		},
+		set: func(_, _, _ string) error {
+			mu.Lock()
+			defer mu.Unlock()
+			setCalls++
+			return nil
+		},
+		delete: func(_, _ string) error {
+			mu.Lock()
+			defer mu.Unlock()
+			deleteCalls++
+			return nil
+		},
+	}
+
+	stores := make([]*Store, storeCount)
+	for i := range stores {
+		stores[i] = NewStore(t.TempDir())
+		stores[i].keyring = keyring
+	}
+
+	available := make(chan bool, storeCount)
+	var wg sync.WaitGroup
+	for _, store := range stores {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			available <- store.UsingKeyring()
+		}()
+	}
+	wg.Wait()
+	close(available)
+
+	for usingKeyring := range available {
+		if !usingKeyring {
+			t.Error("missing availability entry reported the keyring unavailable")
+		}
+	}
+	if getCalls != storeCount {
+		t.Errorf("availability Get calls = %d, want %d", getCalls, storeCount)
+	}
+	if wrongLookups != 0 {
+		t.Errorf("availability lookups with the wrong service or user = %d", wrongLookups)
+	}
+	if setCalls != 0 || deleteCalls != 0 {
+		t.Errorf("availability checks mutated the keyring: Set = %d, Delete = %d", setCalls, deleteCalls)
+	}
+}
+
+func TestKeyringAvailabilityErrorUsesFileStore(t *testing.T) {
+	t.Setenv("HEY_NO_KEYRING", "")
+	store := NewStore(t.TempDir())
+	store.keyring = credentialKeyring{
+		get: func(_, _ string) (string, error) {
+			return "", errors.New("keyring unavailable")
+		},
+		set:    func(_, _, _ string) error { return nil },
+		delete: func(_, _ string) error { return nil },
+	}
+
+	if store.UsingKeyring() {
+		t.Fatal("unavailable keyring reported as available")
 	}
 }
 
