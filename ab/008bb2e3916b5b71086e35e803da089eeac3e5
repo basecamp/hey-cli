@@ -1,0 +1,28 @@
+.github/workflows/aur-publish.yml
+  s_1c71cb51305a7b::t_b2021b0a7c9d5b 52-59,62-64
+  s_fa187cd0a92a52::t_ee0f7624fde614 65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "ab008bb2e3916b5b71086e35e803da089eeac3e5",
+  "prompts": {},
+  "sessions": {
+    "s_1c71cb51305a7b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "163e832f-e84f-413e-90f9-1abcb69cf5e3",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_fa187cd0a92a52": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9d62f32d-2f1d-4c34-a1fd-393352922881",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
