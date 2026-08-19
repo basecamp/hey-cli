@@ -26,7 +26,7 @@ func TestBulkReplyPreview(t *testing.T) {
 	}
 	stdout, stderr, code := hey(t, append(args, "--json")...)
 	if code != 0 {
-		t.Skipf("no replyable Imbox postings available (exit %d): %s", code, stderr)
+		t.Fatalf("bulk reply preview failed (exit %d): %s", code, stderr)
 	}
 	var response Response
 	if err := json.Unmarshal([]byte(stdout), &response); err != nil {

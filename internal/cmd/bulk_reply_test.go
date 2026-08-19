@@ -161,6 +161,38 @@ func TestBulkReplyPreviewShowsExactRecipientsInEveryFormat(t *testing.T) {
 	}
 }
 
+func TestBulkReplyStyledPreviewNeverTruncatesSafetyDetails(t *testing.T) {
+	server, state := bulkReplyServer(t)
+	const subject = "Quarterly planning across every regional office and product team"
+	const finalRecipient = "final.recipient.with.a.long.address@example.com"
+	state.draft = `{
+		"content":"",
+		"entries":[{
+			"id":11,
+			"topic_id":21,
+			"topic_name":"` + subject + `",
+			"addressed":{"directly":[
+				{"id":31,"name":"Jane Doe","email_address":"jane@example.com"},
+				{"id":32,"name":"Bob Smith","email_address":"bob@example.org"},
+				{"id":33,"name":"Final Recipient","email_address":"` + finalRecipient + `"}
+			]}
+		}]
+	}`
+
+	preview, err := runBulkReply(t, server, []string{"--styled"}, []string{"preview", "101"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{subject, "Jane Doe <jane@example.com>", "Bob Smith <bob@example.org>", finalRecipient} {
+		if !strings.Contains(preview, expected) {
+			t.Errorf("styled preview omitted %q:\n%s", expected, preview)
+		}
+	}
+	if strings.Contains(preview, "...") {
+		t.Errorf("styled safety preview contains truncation: %s", preview)
+	}
+}
+
 func TestBulkReplySendPreservesDraftAndReportsDelayedDelivery(t *testing.T) {
 	server, state := bulkReplyServer(t)
 	output, err := runBulkReply(t, server, []string{"--json"}, []string{"send", "101", "202", "303", "-m", "Thanks everyone"})
@@ -302,6 +334,7 @@ func TestBulkReplyValidatesPositiveUniqueIDsBeforeRequest(t *testing.T) {
 		{"preview", "not-an-id"},
 		{"send", "101", "101", "-m", "No"},
 		{"send", "101", "-m", ""},
+		{"send", "101", "-m", "   \n\t"},
 		{"send", "101", "-m", "No", "--attach", filepath.Join(t.TempDir(), "missing.pdf")},
 		{"undo", "0"},
 	}
@@ -322,11 +355,11 @@ func TestReadBulkReplyMessageSupportsInlineStdinEditorAndAttachmentsOnly(t *test
 	unused := func() (string, error) { return "", errors.New("should not read stdin") }
 	unusedEditor := func(string) (string, error) { return "", errors.New("should not open editor") }
 
-	message, err := readBulkReplyMessage("Inline", 0, true, unused, unusedEditor)
+	message, err := readBulkReplyMessage("  Inline \n", 0, true, unused, unusedEditor)
 	if err != nil || message != "Inline" {
 		t.Errorf("inline = %q, %v", message, err)
 	}
-	message, err = readBulkReplyMessage("", 0, false, func() (string, error) { return "From stdin", nil }, unusedEditor)
+	message, err = readBulkReplyMessage("", 0, false, func() (string, error) { return "  From stdin\n", nil }, unusedEditor)
 	if err != nil || message != "From stdin" {
 		t.Errorf("stdin = %q, %v", message, err)
 	}
@@ -339,9 +372,12 @@ func TestReadBulkReplyMessageSupportsInlineStdinEditorAndAttachmentsOnly(t *test
 	if err != nil || message != "From editor" {
 		t.Errorf("editor = %q, %v", message, err)
 	}
-	message, err = readBulkReplyMessage("", 1, true, unused, unusedEditor)
+	message, err = readBulkReplyMessage(" \n\t", 1, true, unused, unusedEditor)
 	if err != nil || message != "" {
 		t.Errorf("attachment-only = %q, %v", message, err)
+	}
+	if message, err = readBulkReplyMessage(" \n\t", 0, true, unused, unusedEditor); err == nil || message != "" {
+		t.Errorf("whitespace-only inline message = %q, %v", message, err)
 	}
 }
 

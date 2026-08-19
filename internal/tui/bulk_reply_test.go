@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -151,12 +152,58 @@ func TestTUIBulkReplySelectionAndPreviewShowExactRecipients(t *testing.T) {
 			t.Errorf("preview does not contain %q: %q", expected, preview)
 		}
 	}
-	if help := view.HelpBindings(); len(help) == 0 || help[0].key != "enter" {
+	if help := view.HelpBindings(); len(help) < 2 || help[0].key != "↑↓" || help[1].key != "enter" {
 		t.Errorf("preview help = %v", help)
 	}
 	requests := state.snapshot()
 	if len(requests) != 1 || requests[0].query != "posting_ids=100%2C101" {
 		t.Errorf("draft request = %+v", requests)
+	}
+}
+
+func TestTUIBulkReplyPreviewScrollsThroughEveryRecipient(t *testing.T) {
+	entries := make([]generated.BulkReplyEntry, 12)
+	for i := range entries {
+		entries[i] = generated.BulkReplyEntry{
+			Id:        int64(500 + i),
+			TopicId:   int64(700 + i),
+			TopicName: fmt.Sprintf("Thread %02d", i+1),
+			Addressed: generated.Addressed{Directly: []generated.Contact{{
+				Id:           int64(900 + i),
+				EmailAddress: fmt.Sprintf("recipient-%02d@example.com", i+1),
+			}}},
+		}
+	}
+	form := newBulkReplyForm([]int64{100, 101}, &generated.BulkReplyDraft{Entries: entries}, newStyles())
+	form.resize(40, 8)
+
+	if strings.Contains(form.view(), "recipient-12@example.com") {
+		t.Fatal("last recipient should begin below the viewport")
+	}
+	for range 100 {
+		_, _ = form.handleKey(keyPress("down"))
+	}
+	if form.preview.YOffset() == 0 {
+		t.Fatal("down should scroll the recipient preview")
+	}
+	if !strings.Contains(form.view(), "recipient-12@example.com") {
+		t.Errorf("last recipient is not reviewable after scrolling: %q", form.view())
+	}
+}
+
+func TestTUIBulkReplyPreviewWrapsLongRecipientsWithoutDroppingText(t *testing.T) {
+	const email = "recipient-with-an-extraordinarily-long-address@example.com"
+	form := newBulkReplyForm([]int64{100}, &generated.BulkReplyDraft{Entries: []generated.BulkReplyEntry{{
+		Id:        501,
+		TopicId:   701,
+		TopicName: "A complete safety preview",
+		Addressed: generated.Addressed{Directly: []generated.Contact{{Id: 901, EmailAddress: email}}},
+	}}}, newStyles())
+
+	content := form.previewContent(24)
+	compacted := strings.NewReplacer("\n", "", " ", "").Replace(content)
+	if !strings.Contains(compacted, email) {
+		t.Errorf("wrapped preview dropped recipient text: %q", content)
 	}
 }
 

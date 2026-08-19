@@ -238,25 +238,29 @@ func (c *bulkReplySendCommand) readMessage() (string, error) {
 }
 
 func readBulkReplyMessage(message string, attachmentCount int, stdinTerminal bool, readInput func() (string, error), openEditor func(string) (string, error)) (string, error) {
+	inputSource := "inline"
 	if message == "" && !stdinTerminal {
+		inputSource = "stdin"
 		var err error
 		message, err = readInput()
 		if err != nil {
 			return "", err
 		}
-		if message == "" && attachmentCount == 0 {
-			return "", output.ErrUsage("no message provided (use -m or --message to provide inline, or pipe to stdin)")
-		}
 	} else if message == "" && attachmentCount == 0 {
+		inputSource = "editor"
 		var err error
 		message, err = openEditor("")
 		if err != nil {
 			return "", output.ErrAPI(0, fmt.Sprintf("could not open editor: %v", err))
 		}
-		message = strings.TrimSpace(message)
-		if message == "" {
-			return "", output.ErrUsage("empty message, aborting")
+	}
+
+	message = strings.TrimSpace(message)
+	if message == "" && attachmentCount == 0 {
+		if inputSource == "stdin" {
+			return "", output.ErrUsage("no message provided (use -m or --message to provide inline, or pipe to stdin)")
 		}
+		return "", output.ErrUsage("empty message, aborting")
 	}
 	return message, nil
 }
@@ -376,19 +380,17 @@ func printBulkReplyPreview(cmd *cobra.Command, entries []bulkReplyEntry, content
 	if len(entries) == 0 {
 		fmt.Fprintln(cmd.OutOrStdout(), "No replyable threads found.")
 	} else {
-		table := newTable(cmd.OutOrStdout())
-		table.addRow([]string{"Entry", "Thread", "Subject", "To", "CC", "BCC"})
-		for _, entry := range entries {
-			table.addRow([]string{
-				fmt.Sprintf("%d", entry.ID),
-				fmt.Sprintf("%d", entry.TopicID),
-				truncate(terminalSafeText(entry.TopicName), 36),
-				truncate(formatBulkReplyRecipients(entry.To), 48),
-				truncate(formatBulkReplyRecipients(entry.CC), 48),
-				truncate(formatBulkReplyRecipients(entry.BCC), 48),
-			})
+		for i, entry := range entries {
+			if i > 0 {
+				fmt.Fprintln(cmd.OutOrStdout())
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Entry: %d\n", entry.ID)
+			fmt.Fprintf(cmd.OutOrStdout(), "Thread: %d\n", entry.TopicID)
+			fmt.Fprintf(cmd.OutOrStdout(), "Subject: %s\n", terminalSafeText(entry.TopicName))
+			fmt.Fprintf(cmd.OutOrStdout(), "To: %s\n", formatBulkReplyRecipients(entry.To))
+			fmt.Fprintf(cmd.OutOrStdout(), "CC: %s\n", formatBulkReplyRecipients(entry.CC))
+			fmt.Fprintf(cmd.OutOrStdout(), "BCC: %s\n", formatBulkReplyRecipients(entry.BCC))
 		}
-		table.print()
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "\n%s.\n", bulkReplyPreviewSummary(len(entries), skipped))
 	if text := htmlutil.ToText(content); text != "" {

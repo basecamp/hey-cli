@@ -5,8 +5,10 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/mattn/go-runewidth"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
@@ -37,6 +39,7 @@ type bulkReplyForm struct {
 	postingIDs []int64
 	draft      generated.BulkReplyDraft
 	composing  bool
+	preview    viewport.Model
 	body       textarea.Model
 	status     string
 	isError    bool
@@ -54,6 +57,8 @@ func newBulkReplyForm(postingIDs []int64, draft *generated.BulkReplyDraft, s sty
 	if draft != nil {
 		form.draft = *draft
 	}
+	form.preview = viewport.New(viewport.WithWidth(80), viewport.WithHeight(24))
+	form.preview.SetContent(form.previewContent(80))
 	form.body = textarea.New()
 	form.body.Prompt = ""
 	form.body.ShowLineNumbers = false
@@ -71,6 +76,11 @@ func (f *bulkReplyForm) init() tea.Cmd {
 func (f *bulkReplyForm) resize(width, height int) {
 	f.width = width
 	f.height = height
+	previewOffset := f.preview.YOffset()
+	f.preview.SetWidth(max(width, 1))
+	f.preview.SetHeight(max(height, 1))
+	f.preview.SetContent(f.previewContent(width))
+	f.preview.SetYOffset(previewOffset)
 	f.body.SetWidth(max(width-4, 10))
 	f.body.SetHeight(max(height-8, 3))
 }
@@ -84,7 +94,9 @@ func (f *bulkReplyForm) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			f.composing = true
 			return f.body.Focus(), false
 		}
-		return nil, false
+		var cmd tea.Cmd
+		f.preview, cmd = f.preview.Update(msg)
+		return cmd, false
 	}
 	if msg.String() == "ctrl+s" {
 		if strings.TrimSpace(f.body.Value()) == "" {
@@ -103,29 +115,30 @@ func (f *bulkReplyForm) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 }
 
 func (f *bulkReplyForm) update(msg tea.Msg) tea.Cmd {
-	if !f.composing {
-		return nil
-	}
 	var cmd tea.Cmd
+	if !f.composing {
+		f.preview, cmd = f.preview.Update(msg)
+		return cmd
+	}
 	f.body, cmd = f.body.Update(msg)
 	return cmd
 }
 
 func (f *bulkReplyForm) helpBindings() []helpBinding {
 	if !f.composing {
-		return []helpBinding{{"enter", "write reply"}, {"esc", "cancel"}}
+		return []helpBinding{{"↑↓", "review recipients"}, {"enter", "write reply"}, {"esc", "cancel"}}
 	}
 	return []helpBinding{{"ctrl+s", "send to all"}, {"esc", "cancel"}}
 }
 
 func (f *bulkReplyForm) view() string {
 	if !f.composing {
-		return f.previewView()
+		return f.preview.View()
 	}
 	return f.composeView()
 }
 
-func (f *bulkReplyForm) previewView() string {
+func (f *bulkReplyForm) previewContent(width int) string {
 	var b strings.Builder
 	b.WriteString(f.styles.title.Render("Bulk reply preview"))
 	b.WriteString("\n")
@@ -137,20 +150,19 @@ func (f *bulkReplyForm) previewView() string {
 
 	labelStyle := lipgloss.NewStyle().Foreground(colorMuted)
 	for i, entry := range f.draft.Entries {
-		fmt.Fprintf(&b, "%d. %s\n", i+1, terminalSafeAttachmentText(entry.TopicName))
-		fmt.Fprintf(&b, "%s %s\n", labelStyle.Render("   To:"), formatBulkReplyContacts(entry.Addressed.Directly))
-		if len(entry.Addressed.Copied) > 0 {
-			fmt.Fprintf(&b, "%s %s\n", labelStyle.Render("   CC:"), formatBulkReplyContacts(entry.Addressed.Copied))
-		}
-		if len(entry.Addressed.Blindcopied) > 0 {
-			fmt.Fprintf(&b, "%s %s\n", labelStyle.Render("  BCC:"), formatBulkReplyContacts(entry.Addressed.Blindcopied))
-		}
+		writeBulkReplyWrappedLine(&b, fmt.Sprintf("%d. ", i+1), terminalSafeAttachmentText(entry.TopicName), width)
+		writeBulkReplyContacts(&b, "To", entry.Addressed.Directly, width, labelStyle)
+		writeBulkReplyContacts(&b, "CC", entry.Addressed.Copied, width, labelStyle)
+		writeBulkReplyContacts(&b, "BCC", entry.Addressed.Blindcopied, width, labelStyle)
 		b.WriteString("\n")
 	}
 	if nameTag := htmlutil.ToText(f.draft.Content); nameTag != "" {
-		b.WriteString(labelStyle.Render("HEY will preserve your name tag: "))
-		b.WriteString(terminalSafeAttachmentText(nameTag))
-		b.WriteString("\n\n")
+		b.WriteString(labelStyle.Render("HEY will preserve your name tag:"))
+		b.WriteString("\n")
+		for _, line := range wrapBulkReplyText(terminalSafeAttachmentText(nameTag), max(width-4, 10)) {
+			fmt.Fprintf(&b, "  %s\n", line)
+		}
+		b.WriteString("\n")
 	}
 	b.WriteString(labelStyle.Render("Review every recipient, then press enter to write the reply."))
 	return b.String()
@@ -173,21 +185,64 @@ func (f *bulkReplyForm) composeView() string {
 	return b.String()
 }
 
-func formatBulkReplyContacts(contacts []generated.Contact) string {
-	formatted := make([]string, 0, len(contacts))
+func writeBulkReplyContacts(b *strings.Builder, label string, contacts []generated.Contact, width int, labelStyle lipgloss.Style) {
+	fmt.Fprintf(b, "%s\n", labelStyle.Render(label+":"))
+	if len(contacts) == 0 {
+		fmt.Fprintln(b, "  (none)")
+		return
+	}
 	for _, contact := range contacts {
-		name := terminalSafeAttachmentText(contact.Name)
-		email := terminalSafeAttachmentText(contact.EmailAddress)
-		switch {
-		case name != "" && email != "":
-			formatted = append(formatted, fmt.Sprintf("%s <%s>", name, email))
-		case email != "":
-			formatted = append(formatted, email)
-		case name != "":
-			formatted = append(formatted, name)
+		writeBulkReplyWrappedLine(b, "  - ", formatBulkReplyContact(contact), width)
+	}
+}
+
+func formatBulkReplyContact(contact generated.Contact) string {
+	name := terminalSafeAttachmentText(contact.Name)
+	email := terminalSafeAttachmentText(contact.EmailAddress)
+	switch {
+	case name != "" && email != "":
+		return fmt.Sprintf("%s <%s>", name, email)
+	case email != "":
+		return email
+	default:
+		return name
+	}
+}
+
+func writeBulkReplyWrappedLine(b *strings.Builder, prefix, text string, width int) {
+	prefixWidth := runewidth.StringWidth(prefix)
+	lines := wrapBulkReplyText(text, max(width-prefixWidth, 1))
+	for i, line := range lines {
+		if i == 0 {
+			fmt.Fprintf(b, "%s%s\n", prefix, line)
+		} else {
+			fmt.Fprintf(b, "%s%s\n", strings.Repeat(" ", prefixWidth), line)
 		}
 	}
-	return strings.Join(formatted, ", ")
+}
+
+func wrapBulkReplyText(text string, width int) []string {
+	width = max(width, 1)
+	if text == "" {
+		return []string{""}
+	}
+	var lines []string
+	var line strings.Builder
+	lineWidth := 0
+	for _, r := range text {
+		runeWidth := runewidth.RuneWidth(r)
+		if line.Len() > 0 && lineWidth+runeWidth > width {
+			lines = append(lines, line.String())
+			line.Reset()
+			lineWidth = 0
+		}
+		line.WriteRune(r)
+		lineWidth += runeWidth
+	}
+	if line.Len() > 0 {
+		lines = append(lines, line.String())
+	}
+	return lines
 }
 
 func tuiThreadNoun(count int) string {

@@ -40,6 +40,7 @@ The remaining HTML-reading gaps use the SDK's authenticated HTML helper and are 
 | `/bulk_replies/new.json` | GET | SDK `BulkReplies().Draft` | `hey bulk-reply preview`, `hey bulk-reply send`, TUI `b` | covered |
 | `/bulk_replies.json` | POST | SDK `BulkReplies().Send` | `hey bulk-reply send`, TUI bulk reply | covered |
 | `/bulk_replies/{id}/undo_send` | POST | SDK `BulkReplies().Undo` | `hey bulk-reply undo`, TUI `u` | covered |
+| `/bulk_replies/{id}` | GET (redirect target) | SDK `BulkReplies().Undo` redirect handling | `hey bulk-reply undo`, TUI `u` | covered |
 | `/postings/moves.json` | POST | SDK `Postings().Move` | `hey move <id> --to <box>`, TUI `m` | covered |
 | `/postings/trash.json` | POST | SDK `Postings().MoveToTrash` | `hey trash <id>`, TUI `t` | covered |
 | `/postings/spam.json` | POST | SDK `Postings().MarkSpam` | `hey spam <id>`, TUI `s` | covered |
