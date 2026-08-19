@@ -343,6 +343,7 @@ func (v *mailView) switchBox(index int) tea.Cmd {
 	}
 	v.ExitThread()
 	v.notice = ""
+	v.postingList.setPostings(nil)
 	v.boxIndex = index
 	return v.requestPostings(v.boxes[index].ID)
 }

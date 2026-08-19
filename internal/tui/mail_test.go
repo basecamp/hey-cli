@@ -44,7 +44,7 @@ type recordedMailRequest struct {
 	requests []string
 	body     struct {
 		PostingIDs []int64 `json:"posting_ids"`
-		BoxID      int64   `json:"box_id"`
+		BoxID      *int64  `json:"box_id"`
 	}
 }
 
@@ -274,8 +274,14 @@ func TestMailViewPostingKeysCallExpectedEndpoints(t *testing.T) {
 			if len(recorded.body.PostingIDs) != 1 || recorded.body.PostingIDs[0] != 100 {
 				t.Errorf("posting_ids = %v, want [100]", recorded.body.PostingIDs)
 			}
-			if tt.boxID != 0 && recorded.body.BoxID != tt.boxID {
-				t.Errorf("box_id = %d, want %d", recorded.body.BoxID, tt.boxID)
+			if tt.boxID == 0 {
+				if recorded.body.BoxID != nil {
+					t.Errorf("box_id = %d, want field omitted", *recorded.body.BoxID)
+				}
+			} else if recorded.body.BoxID == nil {
+				t.Errorf("box_id is omitted, want %d", tt.boxID)
+			} else if *recorded.body.BoxID != tt.boxID {
+				t.Errorf("box_id = %d, want %d", *recorded.body.BoxID, tt.boxID)
 			}
 
 			wantPostings := 2
@@ -849,6 +855,23 @@ func TestMailViewSubnavLeftRight(t *testing.T) {
 	v.SubnavRight()
 	if v.boxIndex != 2 {
 		t.Errorf("SubnavRight at end: boxIndex = %d, want 2", v.boxIndex)
+	}
+}
+
+func TestMailViewBoxSwitchClearsPostingsDuringLoad(t *testing.T) {
+	v := mailWithPostings()
+
+	if cmd := v.SubnavRight(); cmd == nil {
+		t.Fatal("box switch should start loading the new box")
+	}
+	if len(v.postingList.postings) != 0 {
+		t.Fatalf("postings during box load = %v, want none", v.postingList.postings)
+	}
+
+	for _, key := range []string{"enter", "r", "t"} {
+		if cmd := v.HandleContentKey(keyPress(key)); cmd != nil {
+			t.Errorf("key %q acted on a posting from the previous box", key)
+		}
 	}
 }
 
