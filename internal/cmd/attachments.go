@@ -28,7 +28,7 @@ type threadAttachment struct {
 	MessageID   int64  `json:"message_id"`
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type,omitempty"`
-	ByteSize    int64  `json:"byte_size,omitempty"`
+	ByteSize    *int64 `json:"byte_size,omitempty"`
 	URL         string `json:"-"`
 }
 
@@ -82,7 +82,7 @@ func (c *attachmentsCommand) run(cmd *cobra.Command, args []string) error {
 					attachment.ID,
 					terminalSafeText(attachment.Filename),
 					terminalSafeText(attachment.ContentType),
-					formatByteSize(attachment.ByteSize),
+					formatOptionalByteSize(attachment.ByteSize),
 				})
 			}
 			table.print()
@@ -180,9 +180,16 @@ func attachmentID(messageID int64, position int) string {
 	return fmt.Sprintf("%d:%d", messageID, position)
 }
 
+func formatOptionalByteSize(size *int64) string {
+	if size == nil {
+		return "—"
+	}
+	return formatByteSize(*size)
+}
+
 func formatByteSize(size int64) string {
 	switch {
-	case size <= 0:
+	case size < 0:
 		return "—"
 	case size < 1024:
 		return fmt.Sprintf("%d B", size)

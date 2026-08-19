@@ -54,7 +54,7 @@ type Attachment struct {
 	URL         string
 	Filename    string
 	ContentType string
-	ByteSize    int64
+	ByteSize    *int64
 	SGID        string
 }
 
@@ -124,7 +124,7 @@ type trixAttachment struct {
 	URL         string `json:"url"`
 	Filename    string `json:"filename"`
 	ContentType string `json:"contentType"`
-	Filesize    int64  `json:"filesize"`
+	Filesize    *int64 `json:"filesize"`
 	SGID        string `json:"sgid"`
 }
 
@@ -162,7 +162,7 @@ func findAttachments(n *html.Node, attachments *[]Attachment) {
 	if n.Type == html.ElementNode {
 		switch n.Data {
 		case "action-text-attachment":
-			byteSize, _ := strconv.ParseInt(getAttr(n, "filesize"), 10, 64)
+			byteSize := parseAttachmentByteSize(getAttr(n, "filesize"))
 			attachment := Attachment{
 				URL:         getAttr(n, "url"),
 				Filename:    getAttr(n, "filename"),
@@ -179,7 +179,7 @@ func findAttachments(n *html.Node, attachments *[]Attachment) {
 					URL:         trix.URL,
 					Filename:    trix.Filename,
 					ContentType: trix.ContentType,
-					ByteSize:    trix.Filesize,
+					ByteSize:    nonnegativeAttachmentByteSize(trix.Filesize),
 					SGID:        trix.SGID,
 				})
 			}
@@ -188,6 +188,24 @@ func findAttachments(n *html.Node, attachments *[]Attachment) {
 	for child := n.FirstChild; child != nil; child = child.NextSibling {
 		findAttachments(child, attachments)
 	}
+}
+
+func parseAttachmentByteSize(value string) *int64 {
+	if value == "" {
+		return nil
+	}
+	size, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || size < 0 {
+		return nil
+	}
+	return &size
+}
+
+func nonnegativeAttachmentByteSize(size *int64) *int64 {
+	if size == nil || *size < 0 {
+		return nil
+	}
+	return size
 }
 
 func findImages(n *html.Node, urls *[]string) {

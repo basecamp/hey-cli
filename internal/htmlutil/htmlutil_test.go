@@ -119,11 +119,26 @@ func TestExtractAttachments(t *testing.T) {
 	if len(attachments) != 2 {
 		t.Fatalf("ExtractAttachments got %d attachments, want 2", len(attachments))
 	}
-	if attachments[0].Filename != "quarterly-report.pdf" || attachments[0].ContentType != "application/pdf" || attachments[0].ByteSize != 128 || attachments[0].SGID != "sgid-1" {
+	if attachments[0].Filename != "quarterly-report.pdf" || attachments[0].ContentType != "application/pdf" || attachments[0].ByteSize == nil || *attachments[0].ByteSize != 128 || attachments[0].SGID != "sgid-1" {
 		t.Errorf("canonical attachment = %+v", attachments[0])
 	}
-	if attachments[1].Filename != "photo.png" || attachments[1].URL != "/rails/blobs/photo.png" || attachments[1].ByteSize != 256 || attachments[1].SGID != "sgid-2" {
+	if attachments[1].Filename != "photo.png" || attachments[1].URL != "/rails/blobs/photo.png" || attachments[1].ByteSize == nil || *attachments[1].ByteSize != 256 || attachments[1].SGID != "sgid-2" {
 		t.Errorf("Trix attachment = %+v", attachments[1])
+	}
+}
+
+func TestExtractAttachmentsDistinguishesEmptyFromUnknownSize(t *testing.T) {
+	h := `<action-text-attachment url="/rails/blobs/empty.txt" filename="empty.txt" filesize="0"></action-text-attachment>
+<figure data-trix-attachment='{"url":"/rails/blobs/unknown.txt","filename":"unknown.txt"}'></figure>`
+	attachments := ExtractAttachments(h)
+	if len(attachments) != 2 {
+		t.Fatalf("ExtractAttachments got %d attachments, want 2", len(attachments))
+	}
+	if attachments[0].ByteSize == nil || *attachments[0].ByteSize != 0 {
+		t.Errorf("empty attachment size = %v", attachments[0].ByteSize)
+	}
+	if attachments[1].ByteSize != nil {
+		t.Errorf("unknown attachment size = %v", *attachments[1].ByteSize)
 	}
 }
 

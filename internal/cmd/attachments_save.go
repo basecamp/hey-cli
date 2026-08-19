@@ -207,7 +207,7 @@ func downloadAttachmentFile(ctx context.Context, destination, sourceURL string, 
 		}
 		return written, nil
 	}
-	if err := os.Link(temporaryPath, destination); os.IsExist(err) {
+	if err := commitFileNoReplace(temporaryPath, destination); os.IsExist(err) {
 		return written, output.ErrUsage(fmt.Sprintf("destination already exists: %s (use --force to replace it)", destination))
 	} else if err != nil {
 		return written, output.ErrAPI(0, fmt.Sprintf("could not save attachment file: %v", err))

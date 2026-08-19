@@ -178,7 +178,7 @@ func TestAttachmentsListsFilesFromKnownThread(t *testing.T) {
 		t.Fatalf("response = %+v", response)
 	}
 	attachment := response.Data[0]
-	if attachment.ID != "101:1" || attachment.MessageID != 101 || attachment.Filename != "quarterly-report.pdf" || attachment.ByteSize != 23 {
+	if attachment.ID != "101:1" || attachment.MessageID != 101 || attachment.Filename != "quarterly-report.pdf" || attachment.ByteSize == nil || *attachment.ByteSize != 23 {
 		t.Errorf("attachment = %+v", attachment)
 	}
 }
@@ -433,6 +433,21 @@ func TestAttachmentDestinationUsesSafeFilename(t *testing.T) {
 	explicit := filepath.Join(t.TempDir(), "chosen-name.pdf")
 	if destination, err := attachmentDestination(explicit, ".."); err != nil || destination != explicit {
 		t.Errorf("explicit destination = %q, %v", destination, err)
+	}
+}
+
+func TestAttachmentByteSizeDistinguishesEmptyFromUnknown(t *testing.T) {
+	zero := int64(0)
+	attachment := threadAttachment{ID: "101:1", ByteSize: &zero}
+	encoded, err := json.Marshal(attachment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"byte_size":0`) || formatOptionalByteSize(attachment.ByteSize) != "0 B" {
+		t.Errorf("empty attachment = %s, %q", encoded, formatOptionalByteSize(attachment.ByteSize))
+	}
+	if formatOptionalByteSize(nil) != "—" {
+		t.Errorf("unknown attachment size = %q", formatOptionalByteSize(nil))
 	}
 }
 
