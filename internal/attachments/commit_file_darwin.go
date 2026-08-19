@@ -1,6 +1,6 @@
-//go:build linux
+//go:build darwin
 
-package cmd
+package attachments
 
 import (
 	"errors"
@@ -10,7 +10,7 @@ import (
 )
 
 func commitFileNoReplace(source, destination string) error {
-	err := unix.Renameat2(unix.AT_FDCWD, source, unix.AT_FDCWD, destination, unix.RENAME_NOREPLACE)
+	err := unix.RenamexNp(source, destination, unix.RENAME_EXCL)
 	if err == nil || (!errors.Is(err, unix.ENOSYS) && !errors.Is(err, unix.EINVAL) && !errors.Is(err, unix.EOPNOTSUPP)) {
 		return err
 	}

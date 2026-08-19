@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -104,6 +105,35 @@ func TestInitReturnsCmd(t *testing.T) {
 	cmd := m.Init()
 	if cmd == nil {
 		t.Fatal("Init should return a command")
+	}
+}
+
+func TestModelResizesContentWhenThreadHelpChangesHeight(t *testing.T) {
+	for _, width := range []int{32, 40, 48, 64, 80, 100} {
+		t.Run(strconv.Itoa(width), func(t *testing.T) {
+			m := modelWithBoxes()
+			updated, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 30})
+			m = updated.(model)
+			m.mailView.activeRequestID = 7
+			m.mailView.activeRequestKind = mailRequestTopic
+			updated, _ = m.Update(topicLoadedMsg{
+				requestID:   7,
+				boxID:       1,
+				topicID:     100,
+				title:       "Quarterly planning",
+				entries:     []models.Entry{{ID: 501, Creator: models.Contact{Name: "Alice"}}},
+				attachments: []messageAttachment{{ID: "501:1", MessageID: 501, Filename: "agenda.pdf"}},
+			})
+			m = updated.(model)
+
+			wantHeight := m.height - headerHeight - m.help.height() - 3
+			if wantHeight < 1 {
+				wantHeight = 1
+			}
+			if m.vc.height != wantHeight || m.mailView.topicViewport.Height() != wantHeight {
+				t.Errorf("thread content height = context:%d viewport:%d, want %d for help height %d", m.vc.height, m.mailView.topicViewport.Height(), wantHeight, m.help.height())
+			}
+		})
 	}
 }
 

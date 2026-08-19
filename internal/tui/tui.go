@@ -4,12 +4,15 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
+	attachmentfiles "github.com/basecamp/hey-cli/internal/attachments"
 )
 
 // --- Shared messages ---
@@ -52,7 +55,19 @@ type model struct {
 func newModel(sdk *hey.Client) model {
 	s := newStyles()
 	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118: cancel stored, called on ctrl+c
-	vc := &viewContext{sdk: sdk, ctx: ctx, styles: s, imageRenderer: environmentImageRenderer()}
+	vc := &viewContext{
+		sdk:           sdk,
+		ctx:           ctx,
+		styles:        s,
+		imageRenderer: environmentImageRenderer(),
+		saveAttachment: func(ctx context.Context, destination, sourceURL string, force bool) (int64, error) {
+			return attachmentfiles.Save(ctx, sdk, destination, sourceURL, force)
+		},
+		openAttachment: openExternalFile,
+		newAttachmentTempDir: func() (string, error) {
+			return os.MkdirTemp("", "hey-cli-attachment-*")
+		},
+	}
 
 	mv := newMailView(vc)
 	ov := newContactsView(vc)
@@ -233,6 +248,14 @@ func (m *model) updateHelpBindings() {
 		}
 	}
 	m.help.setBindings(bindings)
+	contentHeight := m.height - headerHeight - m.help.height() - 3
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+	if contentHeight != m.vc.height {
+		m.vc.height = contentHeight
+		m.activeView.Resize(m.vc.width, contentHeight)
+	}
 }
 
 // --- Key handling ---

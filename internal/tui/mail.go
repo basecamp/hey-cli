@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"charm.land/bubbles/v2/viewport"
@@ -12,6 +13,8 @@ import (
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
+	attachmentfiles "github.com/basecamp/hey-cli/internal/attachments"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/models"
 )
@@ -59,6 +62,20 @@ type searchResultsLoadedMsg struct {
 	err       error
 }
 
+type attachmentSavedMsg struct {
+	topicID      int64
+	attachmentID string
+	path         string
+	err          error
+}
+
+type attachmentOpenedMsg struct {
+	topicID      int64
+	attachmentID string
+	filename     string
+	err          error
+}
+
 type postingActionEffect int
 
 const (
@@ -90,8 +107,10 @@ type mailView struct {
 	topicContent     string
 	topicID          int64
 	topicName        string
+	entries          []models.Entry
 	attachments      []messageAttachment
 	attachmentCursor int
+	imageContent     string
 	inThread         bool
 	loading          bool
 
@@ -178,23 +197,25 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.inThread = true
 		v.topicID = msg.topicID
 		v.topicName = msg.title
+		v.entries = msg.entries
 		v.attachments = msg.attachments
 		v.attachmentCursor = 0
-		v.topicContent = v.renderEntries(msg.entries)
-		v.topicViewport.SetContent(v.topicContent)
-		v.topicViewport.GotoTop()
+		var imageContent strings.Builder
 		var uploadCmds []tea.Cmd
 		for i, imgData := range msg.images {
 			imageID := i + 1
 			rendered := v.vc.imageRenderer.render(imgData, imageID, v.vc.width-4)
 			if rendered.content != "" {
-				v.topicContent += "\n\n" + rendered.content
-				v.topicViewport.SetContent(v.topicContent)
+				imageContent.WriteString("\n\n")
+				imageContent.WriteString(rendered.content)
 			}
 			if rendered.raw != "" {
 				uploadCmds = append(uploadCmds, tea.Raw(rendered.raw))
 			}
 		}
+		v.imageContent = imageContent.String()
+		v.rebuildTopicContent()
+		v.topicViewport.GotoTop()
 		if len(uploadCmds) > 0 {
 			return tea.Batch(uploadCmds...), true
 		}
@@ -235,6 +256,33 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.compose = nil
 		v.notice = msg.label
+		return nil, true
+
+	case attachmentSavedMsg:
+		if !v.currentAttachmentAction(msg.topicID, msg.attachmentID) {
+			return nil, true
+		}
+		if msg.err != nil {
+			saveErr := apierr.AsError(msg.err)
+			if saveErr.Code == "usage" && strings.HasPrefix(saveErr.Message, "destination already exists:") {
+				v.notice = "Attachment already exists: " + terminalSafeAttachmentText(msg.path)
+			} else {
+				v.notice = "Could not save attachment: " + msg.err.Error()
+			}
+			return nil, true
+		}
+		v.notice = "Saved attachment to " + terminalSafeAttachmentText(msg.path)
+		return nil, true
+
+	case attachmentOpenedMsg:
+		if !v.currentAttachmentAction(msg.topicID, msg.attachmentID) {
+			return nil, true
+		}
+		if msg.err != nil {
+			v.notice = "Could not open attachment: " + msg.err.Error()
+			return nil, true
+		}
+		v.notice = "Opened attachment " + terminalSafeAttachmentText(msg.filename)
 		return nil, true
 
 	case postingActionDoneMsg:
@@ -335,7 +383,16 @@ func (v *mailView) HelpBindings() []helpBinding {
 		return v.movePicker.helpBindings()
 	}
 	if v.inThread {
-		return []helpBinding{{"r", "reply"}, {"f", "forward"}}
+		bindings := []helpBinding{{"r", "reply"}, {"f", "forward"}}
+		if len(v.attachments) > 0 {
+			bindings = append(bindings,
+				helpBinding{"[", "previous attachment"},
+				helpBinding{"]", "next attachment"},
+				helpBinding{"s", "save attachment"},
+				helpBinding{"o", "open attachment"},
+			)
+		}
+		return bindings
 	}
 	if v.searchActive {
 		return []helpBinding{{"enter", "open"}, {"/", "new search"}, {"n", "next page"}, {"p", "previous page"}}
@@ -437,11 +494,25 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 
 	if v.inThread {
-		if msg.String() == "r" && v.topicID != 0 {
-			return v.loadReplyContext(v.topicID, v.topicName)
-		}
-		if msg.String() == "f" && v.topicID != 0 {
-			return v.loadForwardContext(v.topicID, v.topicName)
+		switch msg.String() {
+		case "r":
+			if v.topicID != 0 {
+				return v.loadReplyContext(v.topicID, v.topicName)
+			}
+		case "f":
+			if v.topicID != 0 {
+				return v.loadForwardContext(v.topicID, v.topicName)
+			}
+		case "[":
+			v.moveAttachmentCursor(-1)
+			return nil
+		case "]":
+			v.moveAttachmentCursor(1)
+			return nil
+		case "s":
+			return v.saveSelectedAttachment()
+		case "o":
+			return v.openSelectedAttachment()
 		}
 		var cmd tea.Cmd
 		v.topicViewport, cmd = v.topicViewport.Update(msg)
@@ -644,6 +715,81 @@ func (v *mailView) postingIndex(postingID int64) int {
 		}
 	}
 	return -1
+}
+
+func (v *mailView) moveAttachmentCursor(delta int) {
+	if len(v.attachments) == 0 {
+		return
+	}
+	v.attachmentCursor = max(0, min(v.attachmentCursor+delta, len(v.attachments)-1))
+	v.rebuildTopicContent()
+	if marker := strings.Index(v.topicContent, "│ › "); marker >= 0 {
+		v.topicViewport.EnsureVisible(strings.Count(v.topicContent[:marker], "\n"), 0, 0)
+	}
+}
+
+func (v *mailView) saveSelectedAttachment() tea.Cmd {
+	attachment := v.selectedAttachment()
+	if attachment == nil || v.vc.saveAttachment == nil {
+		return nil
+	}
+	topicID := v.topicID
+	return func() tea.Msg {
+		destination, err := attachmentfiles.Destination("", attachment.Filename)
+		if err == nil {
+			_, err = v.vc.saveAttachment(v.vc.ctx, destination, attachment.URL, false)
+		}
+		return attachmentSavedMsg{topicID: topicID, attachmentID: attachment.ID, path: destination, err: err}
+	}
+}
+
+func (v *mailView) openSelectedAttachment() tea.Cmd {
+	attachment := v.selectedAttachment()
+	if attachment == nil || v.vc.saveAttachment == nil || v.vc.openAttachment == nil || v.vc.newAttachmentTempDir == nil {
+		return nil
+	}
+	topicID := v.topicID
+	return func() tea.Msg {
+		directory, err := v.vc.newAttachmentTempDir()
+		if err != nil {
+			return attachmentOpenedMsg{topicID: topicID, attachmentID: attachment.ID, filename: attachment.Filename, err: err}
+		}
+		destination, err := attachmentfiles.Destination(directory, attachment.Filename)
+		if err == nil {
+			_, err = v.vc.saveAttachment(v.vc.ctx, destination, attachment.URL, false)
+		}
+		if err == nil {
+			err = v.vc.openAttachment(destination)
+		}
+		if err != nil {
+			_ = os.RemoveAll(directory)
+		}
+		return attachmentOpenedMsg{topicID: topicID, attachmentID: attachment.ID, filename: attachment.Filename, err: err}
+	}
+}
+
+func (v *mailView) selectedAttachment() *messageAttachment {
+	if v.attachmentCursor < 0 || v.attachmentCursor >= len(v.attachments) {
+		return nil
+	}
+	return &v.attachments[v.attachmentCursor]
+}
+
+func (v *mailView) currentAttachmentAction(topicID int64, attachmentID string) bool {
+	if !v.inThread || topicID != v.topicID {
+		return false
+	}
+	for _, attachment := range v.attachments {
+		if attachment.ID == attachmentID {
+			return true
+		}
+	}
+	return false
+}
+
+func (v *mailView) rebuildTopicContent() {
+	v.topicContent = v.renderEntries(v.entries) + v.imageContent
+	v.topicViewport.SetContent(v.topicContent)
 }
 
 func (v *mailView) openSelected() tea.Cmd {
@@ -997,19 +1143,21 @@ func (v *mailView) fetchTopic(ctx context.Context, requestID uint64, boxID, topi
 		}
 
 		var images [][]byte
-		for _, entry := range entries {
-			for _, imgURL := range extractImageURLs(entry.Body) {
-				var data []byte
-				if strings.HasPrefix(imgURL, "http://") || strings.HasPrefix(imgURL, "https://") {
-					data = fetchImageData(ctx, imgURL)
-				} else {
-					sdkResp, getErr := v.vc.sdk.Get(ctx, imgURL)
-					if getErr == nil && sdkResp != nil {
-						data = sdkResp.Data
+		if v.vc.imageRenderer.protocol() == imageProtocolKitty {
+			for _, entry := range entries {
+				for _, imgURL := range extractImageURLs(entry.Body) {
+					var data []byte
+					if strings.HasPrefix(imgURL, "http://") || strings.HasPrefix(imgURL, "https://") {
+						data = fetchImageData(ctx, imgURL)
+					} else {
+						sdkResp, getErr := v.vc.sdk.Get(ctx, imgURL)
+						if getErr == nil && sdkResp != nil {
+							data = sdkResp.Data
+						}
 					}
-				}
-				if len(data) > 0 {
-					images = append(images, data)
+					if len(data) > 0 {
+						images = append(images, data)
+					}
 				}
 			}
 		}

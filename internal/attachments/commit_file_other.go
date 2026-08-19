@@ -1,6 +1,6 @@
 //go:build !darwin && !linux && !windows
 
-package cmd
+package attachments
 
 import "os"
 

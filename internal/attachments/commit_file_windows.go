@@ -1,6 +1,6 @@
 //go:build windows
 
-package cmd
+package attachments
 
 import "golang.org/x/sys/windows"
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -16,6 +17,7 @@ import (
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/models"
 )
 
@@ -708,6 +710,49 @@ func TestMailViewEnterOpensSelectedThread(t *testing.T) {
 	}
 }
 
+func TestMailViewDownloadsImageDataOnlyForKittyRenderer(t *testing.T) {
+	var imageRequests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/topics/100.json":
+			_, _ = w.Write([]byte(`{"id":100,"name":"Latest image","entries":[{"id":501,"kind":"message"}]}`))
+		case "/messages/501.json":
+			_, _ = w.Write([]byte(`{"id":501,"content":"<action-text-attachment url=\"/rails/blobs/chart.png\" filename=\"chart.png\" content-type=\"image/png\"></action-text-attachment>"}`))
+		case "/rails/blobs/chart.png":
+			imageRequests.Add(1)
+			_, _ = w.Write([]byte("image data"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := hey.NewClient(
+		&hey.Config{BaseURL: server.URL},
+		&hey.StaticTokenProvider{Token: "test-token"},
+		hey.WithMaxRetries(0),
+	)
+	vc := testVC()
+	vc.sdk = client
+	v := newMailView(vc)
+	loaded := v.fetchTopic(context.Background(), 1, 1, 100, "Latest image")().(topicLoadedMsg)
+
+	if loaded.err != nil || len(loaded.attachments) != 1 {
+		t.Fatalf("text fallback topic = attachments:%d error:%v", len(loaded.attachments), loaded.err)
+	}
+	if len(loaded.images) != 0 || imageRequests.Load() != 0 {
+		t.Errorf("text fallback downloaded %d discarded images and returned %d", imageRequests.Load(), len(loaded.images))
+	}
+
+	vc.imageRenderer = kittyImageRenderer{}
+	v = newMailView(vc)
+	loaded = v.fetchTopic(context.Background(), 2, 1, 100, "Latest image")().(topicLoadedMsg)
+	if loaded.err != nil || len(loaded.images) != 1 || imageRequests.Load() != 1 {
+		t.Errorf("Kitty topic = images:%d requests:%d error:%v", len(loaded.images), imageRequests.Load(), loaded.err)
+	}
+}
+
 func TestMailViewFetchesThreadMessagesConcurrentlyInOrder(t *testing.T) {
 	const entryCount = 12
 
@@ -1128,6 +1173,186 @@ func TestMailViewRendersPostings(t *testing.T) {
 	view := v.View()
 	if !strings.Contains(view, "Hello world") {
 		t.Error("view should contain posting summary")
+	}
+}
+
+func TestMailViewAttachmentNavigationUpdatesSelectionAndHelp(t *testing.T) {
+	v := mailWithPostings()
+	v.Resize(80, 30)
+	v.Update(topicLoadedMsg{
+		boxID:   1,
+		topicID: 100,
+		title:   "Quarterly planning",
+		entries: []models.Entry{{ID: 501, Creator: models.Contact{Name: "Alice"}}, {ID: 502, Creator: models.Contact{Name: "Bob"}}},
+		attachments: []messageAttachment{
+			{ID: "501:1", MessageID: 501, Filename: "agenda.pdf"},
+			{ID: "502:1", MessageID: 502, Filename: "chart.png"},
+		},
+	})
+
+	if !strings.Contains(v.View(), "› 1. agenda.pdf") {
+		t.Fatalf("first attachment is not selected: %q", v.View())
+	}
+	if cmd := v.HandleContentKey(keyPress("]")); cmd != nil {
+		t.Fatal("attachment navigation should not start a command")
+	}
+	if v.attachmentCursor != 1 || !strings.Contains(v.View(), "› 1. chart.png") || strings.Contains(v.View(), "› 1. agenda.pdf") {
+		t.Errorf("next attachment state = cursor:%d view:%q", v.attachmentCursor, v.View())
+	}
+	v.HandleContentKey(keyPress("["))
+	if v.attachmentCursor != 0 || !strings.Contains(v.View(), "› 1. agenda.pdf") {
+		t.Errorf("previous attachment state = cursor:%d view:%q", v.attachmentCursor, v.View())
+	}
+
+	bindings := fmt.Sprint(v.HelpBindings())
+	for _, want := range []string{"previous attachment", "next attachment", "save attachment", "open attachment"} {
+		if !strings.Contains(bindings, want) {
+			t.Errorf("thread help does not contain %q: %s", want, bindings)
+		}
+	}
+}
+
+func TestMailViewSavesSelectedAttachmentOnlyAfterExplicitAction(t *testing.T) {
+	v := mailWithPostings()
+	var savedDestination, savedURL string
+	var savedForce bool
+	var saveCalls int
+	v.vc.saveAttachment = func(_ context.Context, destination, sourceURL string, force bool) (int64, error) {
+		saveCalls++
+		savedDestination = destination
+		savedURL = sourceURL
+		savedForce = force
+		return 128, nil
+	}
+	v.Update(topicLoadedMsg{
+		boxID:   1,
+		topicID: 100,
+		title:   "Quarterly planning",
+		entries: []models.Entry{{ID: 501, Creator: models.Contact{Name: "Alice"}}},
+		attachments: []messageAttachment{
+			{ID: "501:1", MessageID: 501, Filename: "agenda.pdf", URL: "/rails/blobs/agenda.pdf"},
+			{ID: "501:2", MessageID: 501, Filename: "chart.png", URL: "/rails/blobs/chart.png"},
+		},
+	})
+	if saveCalls != 0 {
+		t.Fatal("loading a thread must not save its attachment")
+	}
+	v.HandleContentKey(keyPress("]"))
+
+	save := v.HandleContentKey(keyPress("s"))
+	if save == nil {
+		t.Fatal("s should save the selected attachment")
+	}
+	if saveCalls != 0 {
+		t.Fatal("handling the key must defer file access to the command")
+	}
+	if _, consumed := v.Update(save()); !consumed {
+		t.Fatal("attachment save result was not consumed")
+	}
+	if saveCalls != 1 || savedDestination != "chart.png" || savedURL != "/rails/blobs/chart.png" || savedForce {
+		t.Errorf("save call = count:%d destination:%q URL:%q force:%v", saveCalls, savedDestination, savedURL, savedForce)
+	}
+	if v.notice != "Saved attachment to chart.png" {
+		t.Errorf("save notice = %q", v.notice)
+	}
+}
+
+func TestMailViewExplainsThatSaveWillNotReplaceExistingAttachment(t *testing.T) {
+	v := mailWithPostings()
+	v.vc.saveAttachment = func(context.Context, string, string, bool) (int64, error) {
+		return 0, apierr.ErrUsage("destination already exists: agenda.pdf (use --force to replace it)")
+	}
+	v.Update(topicLoadedMsg{
+		boxID:       1,
+		topicID:     100,
+		title:       "Quarterly planning",
+		entries:     []models.Entry{{ID: 501, Creator: models.Contact{Name: "Alice"}}},
+		attachments: []messageAttachment{{ID: "501:1", MessageID: 501, Filename: "agenda.pdf", URL: "/rails/blobs/agenda.pdf"}},
+	})
+
+	save := v.HandleContentKey(keyPress("s"))
+	v.Update(save())
+	if v.notice != "Attachment already exists: agenda.pdf" {
+		t.Errorf("existing attachment notice = %q", v.notice)
+	}
+}
+
+func TestMailViewDownloadsBeforeExplicitExternalOpen(t *testing.T) {
+	v := mailWithPostings()
+	temporaryDirectory := t.TempDir()
+	var events []string
+	var openedPath string
+	v.vc.newAttachmentTempDir = func() (string, error) { return temporaryDirectory, nil }
+	v.vc.saveAttachment = func(_ context.Context, destination, sourceURL string, force bool) (int64, error) {
+		events = append(events, "save")
+		if sourceURL != "/rails/blobs/chart.png" || force {
+			t.Errorf("save arguments = URL:%q force:%v", sourceURL, force)
+		}
+		return 256, nil
+	}
+	v.vc.openAttachment = func(path string) error {
+		events = append(events, "open")
+		openedPath = path
+		return nil
+	}
+	v.Update(topicLoadedMsg{
+		boxID:       1,
+		topicID:     100,
+		title:       "Quarterly planning",
+		entries:     []models.Entry{{ID: 501, Creator: models.Contact{Name: "Alice"}}},
+		attachments: []messageAttachment{{ID: "501:1", MessageID: 501, Filename: "chart.png", URL: "/rails/blobs/chart.png"}},
+	})
+	if len(events) != 0 {
+		t.Fatalf("loading a thread opened an attachment: %v", events)
+	}
+
+	open := v.HandleContentKey(keyPress("o"))
+	if open == nil {
+		t.Fatal("o should open the selected attachment")
+	}
+	if len(events) != 0 {
+		t.Fatalf("handling the key opened an attachment before the command ran: %v", events)
+	}
+	if _, consumed := v.Update(open()); !consumed {
+		t.Fatal("attachment open result was not consumed")
+	}
+	if fmt.Sprint(events) != "[save open]" {
+		t.Errorf("open events = %v", events)
+	}
+	if openedPath != filepath.Join(temporaryDirectory, "chart.png") {
+		t.Errorf("opened path = %q", openedPath)
+	}
+	if v.notice != "Opened attachment chart.png" {
+		t.Errorf("open notice = %q", v.notice)
+	}
+}
+
+func TestMailViewDoesNotOpenAttachmentWhenDownloadFails(t *testing.T) {
+	v := mailWithPostings()
+	v.vc.newAttachmentTempDir = func() (string, error) { return t.TempDir(), nil }
+	v.vc.saveAttachment = func(context.Context, string, string, bool) (int64, error) {
+		return 0, fmt.Errorf("download failed")
+	}
+	openCalls := 0
+	v.vc.openAttachment = func(string) error {
+		openCalls++
+		return nil
+	}
+	v.Update(topicLoadedMsg{
+		boxID:       1,
+		topicID:     100,
+		title:       "Quarterly planning",
+		entries:     []models.Entry{{ID: 501, Creator: models.Contact{Name: "Alice"}}},
+		attachments: []messageAttachment{{ID: "501:1", MessageID: 501, Filename: "chart.png", URL: "/rails/blobs/chart.png"}},
+	})
+
+	open := v.HandleContentKey(keyPress("o"))
+	v.Update(open())
+	if openCalls != 0 {
+		t.Errorf("opener was called %d times after download failure", openCalls)
+	}
+	if !strings.Contains(v.notice, "Could not open attachment: download failed") {
+		t.Errorf("open failure notice = %q", v.notice)
 	}
 }
 

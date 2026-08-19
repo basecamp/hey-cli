@@ -60,6 +60,8 @@ Run `hey` to launch the interactive terminal UI.
 
 Navigate between Mail, Contacts, Calendar, and Journal. In Mail, use `/` to search, Enter to open a thread, `r` to reply, `f` to forward, `m` to move, `t` to trash, `s` to mark as spam, `-` to ignore, and `+` to stop ignoring. Search results retain the matching-message summary; use `n` and `p` to move between result pages.
 
+Thread attachments always appear with their filename, media type, and size. Use `[` and `]` to select an attachment, `s` to save it without replacing an existing file, and `o` to download and open it in an external application. Attachments never open automatically. Kitty and Ghostty can show inline images. Foot and other terminals use visible text markers.
+
 Press Shift+O to open Contacts. Use Enter to view a contact, `a` to add, `e` to edit, `n` to edit the private note, `x` twice to delete a note, `h` to hide, and `u` to show the most recently hidden contact again. Escape or `q` goes back.
 
 ## CLI Commands

@@ -9,13 +9,19 @@ import (
 )
 
 // viewContext holds shared dependencies injected into every sectionView.
+type attachmentSaveFunc func(context.Context, string, string, bool) (int64, error)
+type attachmentOpenFunc func(string) error
+
 type viewContext struct {
-	sdk           *hey.Client
-	ctx           context.Context
-	styles        styles
-	imageRenderer imageRenderer
-	width         int
-	height        int // content area height
+	sdk                  *hey.Client
+	ctx                  context.Context
+	styles               styles
+	imageRenderer        imageRenderer
+	saveAttachment       attachmentSaveFunc
+	openAttachment       attachmentOpenFunc
+	newAttachmentTempDir func() (string, error)
+	width                int
+	height               int // content area height
 }
 
 // sectionView is the interface every top-level section must implement.
