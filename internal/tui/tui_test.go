@@ -216,6 +216,20 @@ func TestThreadHelpIncludesMailActions(t *testing.T) {
 	}
 }
 
+func TestCalendarDetailHelpOmitsListActions(t *testing.T) {
+	m := sizedModel()
+	m.section = sectionCalendar
+	m.activeView = m.calendarView
+	m.calendarView.inThread = true
+	m.updateHelpBindings()
+
+	for _, binding := range m.help.bindings {
+		if binding.key == "v" {
+			t.Errorf("calendar detail help advertises inactive view toggle: %v", m.help.bindings)
+		}
+	}
+}
+
 func TestEscExitsThread(t *testing.T) {
 	m := modelWithBoxes()
 	m.mailView.inThread = true

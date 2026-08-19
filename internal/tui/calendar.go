@@ -126,6 +126,9 @@ func (v *calendarView) View() string {
 }
 
 func (v *calendarView) HelpBindings() []helpBinding {
+	if v.inThread {
+		return nil
+	}
 	return []helpBinding{
 		{"v", v.viewMode.next().String() + " view"},
 	}
