@@ -73,6 +73,10 @@ All commands support `--json` for raw JSON output and `--base-url` to override t
 ```bash
 hey boxes                          # list mailboxes
 hey box imbox                      # list email threads in a box (by name or ID)
+hey sent                           # list sent emails
+hey spammed                        # list emails in Spam without changing them
+hey trashed                        # list emails in Trash without changing them
+hey everything                     # list all email in HEY's Everything view
 hey search "quarterly planning"    # search threads and matching messages
 hey search --from jane@example.com --date last_30_days  # refine a search
 hey search filters                 # list available refinement values
@@ -101,6 +105,8 @@ hey spam 12345                     # mark a thread as spam
 hey ignore 12345                   # ignore future activity on a thread
 hey stop-ignoring 12345            # resume attention for a thread
 ```
+
+The system-view commands are read-only. `hey spammed` lists Spam while `hey spam <id>` marks an email as spam. `hey trashed` lists Trash while `hey trash <id>` moves an email to Trash. Each result returns a thread ID for `hey threads`.
 
 Search accepts free text plus `--required`, `--any`, `--none`, `--exact`, `--from`, `--to`, `--subject`, `--date`, `--in`, `--label`, and `--attachment`. Use `--page` for one page or `--all` to fetch up to 100 pages; capped searches report the next page for continuation. Search results include `topic_id` for reading the thread and the matching message summaries. Results with an active box item also include `id` for organization actions.
 

@@ -69,6 +69,8 @@ hey doctor
 hey drafts
 hey drafts --all
 hey drafts --limit
+hey everything
+hey everything --page
 hey forward
 hey forward --bcc
 hey forward --cc
@@ -113,10 +115,14 @@ hey search --subject
 hey search --to
 hey search filters
 hey seen
+hey sent
+hey sent --page
 hey setup
 hey skill
 hey skill install
 hey spam
+hey spammed
+hey spammed --page
 hey stop-ignoring
 hey threads
 hey timetrack
@@ -137,5 +143,7 @@ hey todo list --all
 hey todo list --limit
 hey todo uncomplete
 hey trash
+hey trashed
+hey trashed --page
 hey tui
 hey unseen

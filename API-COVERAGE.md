@@ -13,6 +13,10 @@ The remaining HTML-reading gaps use the SDK's authenticated HTML helper and are 
 | `/asidebox.json` | GET | SDK `Boxes().GetAsidebox` | `hey box asidebox` | covered |
 | `/laterbox.json` | GET | SDK `Boxes().GetLaterbox` | `hey box laterbox` | covered |
 | `/bubblebox.json` | GET | SDK `Boxes().GetBubblebox` | `hey box bubblebox` | covered |
+| `/topics/sent.json` | GET | SDK `Topics().GetSent` | `hey sent` | covered |
+| `/topics/spam.json` | GET | SDK `Topics().GetSpam` | `hey spammed` | covered |
+| `/topics/trash.json` | GET | SDK `Topics().GetTrash` | `hey trashed` | covered |
+| `/topics/everything.json` | GET | SDK `Topics().GetEverything` | `hey everything` | covered |
 | `/advanced_search.json` | GET | SDK `Search().Search` | `hey search`, TUI `/` | covered |
 | `/advanced_search_filters.json` | GET | SDK `Search().Filters` | `hey search filters` | covered |
 | `/contacts.json` | GET | SDK `Contacts().List` | `hey contacts list`, Contacts TUI | covered |

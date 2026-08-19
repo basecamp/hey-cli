@@ -11,6 +11,10 @@ triggers:
   # Email actions
   - hey boxes
   - hey box
+  - hey sent
+  - hey spammed
+  - hey trashed
+  - hey everything
   - hey search
   - hey contacts
   - hey threads
@@ -105,6 +109,10 @@ CLI for HEY: mailboxes, email threads, contacts, replies, compose, calendars, to
 |------|---------|
 | List mailboxes | `hey boxes --json` |
 | List emails in a box | `hey box imbox --json` |
+| List sent emails | `hey sent --json` |
+| List emails in Spam | `hey spammed --json` |
+| List emails in Trash | `hey trashed --json` |
+| List all email | `hey everything --json` |
 | Search email | `hey search "quarterly planning" --json` |
 | List search filters | `hey search filters --json` |
 | List contacts | `hey contacts list --json` |
@@ -157,6 +165,10 @@ CLI for HEY: mailboxes, email threads, contacts, replies, compose, calendars, to
 Want to read email?
 ├── Which mailbox? → hey boxes --json
 ├── List emails in box? → hey box <name|id> --json
+├── List sent emails? → hey sent --json
+├── List emails in Spam? → hey spammed --json
+├── List emails in Trash? → hey trashed --json
+├── List all email? → hey everything --json
 ├── Search threads and messages? → hey search <query> --json
 ├── Need available refinements? → hey search filters --json
 ├── List or view contacts? → hey contacts list --json / hey contacts show <id> --json
@@ -214,6 +226,18 @@ hey box 123 --json                            # List emails in box (by ID)
 Box names: `imbox`, `feedbox`, `trailbox`, `asidebox`, `laterbox`, `bubblebox`
 
 **Response format:** `hey box` returns `{"box": {...}, "postings": [...]}`. The `postings` array is the API representation of the email threads in that box. Each item has: `id` (box item ID), `topic_id` (thread ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`. Use `id` for `hey seen`, `hey unseen`, `hey move`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring`. Use `topic_id` for `hey threads`, `hey reply`, and `hey forward`.
+
+### Email - System Views
+
+```bash
+hey sent --json                              # List sent emails
+hey spammed --json                           # List emails in Spam
+hey trashed --json                           # List emails in Trash
+hey everything --json                        # List all email
+hey sent --page 2 --json                     # Read another result page
+```
+
+These read-only commands return email topics. Use each result's `id` with `hey threads`. `hey spammed` and `hey trashed` are named differently from the state-changing `hey spam <id>` and `hey trash <id>` commands.
 
 ### Email - Search
 

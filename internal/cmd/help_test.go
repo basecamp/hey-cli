@@ -94,6 +94,10 @@ USAGE
 EMAIL
   boxes          List your HEY boxes
   box            List email threads in a box
+  sent           List sent emails
+  spammed        List emails in Spam
+  trashed        List emails in Trash
+  everything     List all email
   search         Search email threads and messages
   contacts       Manage contacts
   threads        Read a thread
