@@ -101,7 +101,7 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 
 	resp.Postings = postings
 	return writeOK(resp,
-		output.WithSummary(fmt.Sprintf("%d %s in %s", len(postings), threadNoun(len(postings)), resp.Name)),
+		output.WithSummary(boxSummary(len(postings), resp.Name)),
 		output.WithNotice(notice),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -121,6 +121,10 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 			},
 		),
 	)
+}
+
+func boxSummary(count int, name string) string {
+	return fmt.Sprintf("%d %s in %s", count, threadNoun(count), name)
 }
 
 // resolveBox fetches a box by name or ID, using named SDK getters for

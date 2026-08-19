@@ -82,6 +82,25 @@ func mockFetcher(pages []generated.BoxShowResponse) pageFetcher {
 	}
 }
 
+func TestBoxSummaryUsesThreadTerminology(t *testing.T) {
+	tests := []struct {
+		name  string
+		count int
+		want  string
+	}{
+		{"one thread", 1, "1 thread in Imbox"},
+		{"multiple threads", 2, "2 threads in Imbox"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := boxSummary(tt.count, "Imbox"); got != tt.want {
+				t.Errorf("boxSummary(%d) = %q, want %q", tt.count, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestPaginateBoxPostings_NoFlagsSinglePage(t *testing.T) {
 	first := &generated.BoxShowResponse{
 		Postings:       makePostings(30, 0),
