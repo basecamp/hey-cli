@@ -63,7 +63,7 @@ func composeTestServer(t *testing.T) (*mailView, *struct {
 	vc.ctx = context.Background()
 	v := newMailView(vc)
 	v.boxes = orderBoxes(testBoxes())
-	v.Update(postingsLoadedMsg{postings: testPostings()})
+	v.Update(currentPostingsLoaded(v, testPostings()))
 	return v, rec
 }
 

@@ -22,8 +22,16 @@ func mailWithPostings() *mailView {
 	v := newMailView(testVC())
 	v.boxes = orderBoxes(testBoxes())
 	v.boxIndex = 0
-	v.Update(postingsLoadedMsg{postings: testPostings()})
+	v.Update(currentPostingsLoaded(v, testPostings()))
 	return v
+}
+
+func currentPostingsLoaded(v *mailView, postings []models.Posting) postingsLoadedMsg {
+	return postingsLoadedMsg{
+		requestID: v.activeRequestID,
+		boxID:     v.currentBoxID(),
+		postings:  postings,
+	}
 }
 
 type recordedMailRequest struct {
@@ -80,7 +88,7 @@ func mailWithTestServer(t *testing.T, status int) (*mailView, *recordedMailReque
 	v := newMailView(vc)
 	v.Resize(vc.width, vc.height)
 	v.boxes = orderBoxes(testBoxes())
-	v.Update(postingsLoadedMsg{postings: testPostings()})
+	v.Update(currentPostingsLoaded(v, testPostings()))
 	return v, recorded
 }
 
@@ -128,7 +136,7 @@ func TestMailViewHandlesPostingsLoaded(t *testing.T) {
 	v.boxes = testBoxes()
 	v.loading = true
 
-	_, consumed := v.Update(postingsLoadedMsg{postings: testPostings()})
+	_, consumed := v.Update(currentPostingsLoaded(v, testPostings()))
 	if !consumed {
 		t.Error("postingsLoadedMsg should be consumed")
 	}
@@ -140,20 +148,73 @@ func TestMailViewHandlesPostingsLoaded(t *testing.T) {
 	}
 }
 
+func TestMailViewIgnoresPostingLoadFromEarlierBoxVisit(t *testing.T) {
+	v := mailWithPostings()
+
+	v.SubnavRight()
+	stale := currentPostingsLoaded(v, []models.Posting{{ID: 200, Summary: "The Feed message"}})
+	v.SubnavLeft()
+	current := currentPostingsLoaded(v, []models.Posting{{ID: 300, Summary: "Current Imbox message"}})
+	v.Update(current)
+	v.Update(stale)
+
+	if len(v.postingList.postings) != 1 || v.postingList.postings[0].ID != 300 {
+		t.Errorf("an earlier box visit overwrote the current postings: %v", v.postingList.postings)
+	}
+}
+
+func TestMailViewReportsCurrentPostingLoadFailure(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusBadRequest)
+
+	failed, ok := runCmd(v.SubnavRight()).(postingsLoadedMsg)
+	if !ok || failed.err == nil {
+		t.Fatalf("posting load returned %#v, want an error", failed)
+	}
+	cmd, consumed := v.Update(failed)
+
+	if !consumed || cmd == nil {
+		t.Fatal("current posting load error should be reported")
+	}
+	if _, ok := runCmd(cmd).(errMsg); !ok {
+		t.Error("current posting load error should produce errMsg")
+	}
+	if v.loading {
+		t.Error("failed current posting load should stop loading")
+	}
+}
+
+func TestMailViewIgnoresPostingErrorFromEarlierBoxVisit(t *testing.T) {
+	v := mailWithPostings()
+
+	v.SubnavRight()
+	stale := currentPostingsLoaded(v, nil)
+	stale.err = fmt.Errorf("old box failed")
+	v.SubnavLeft()
+	cmd, consumed := v.Update(stale)
+
+	if !consumed || cmd != nil {
+		t.Error("an earlier box error should be ignored")
+	}
+	if !v.loading {
+		t.Error("an earlier box error should not stop the current box load")
+	}
+}
+
 func TestMailViewHandlesTopicLoaded(t *testing.T) {
 	v := mailWithPostings()
 	v.loading = true
 
 	_, consumed := v.Update(topicLoadedMsg{
 		boxID:   1,
+		topicID: 100,
 		title:   "Test topic",
 		entries: []models.Entry{{Creator: models.Contact{Name: "Alice"}, Body: "hello"}},
 	})
 	if !consumed {
 		t.Error("topicLoadedMsg should be consumed")
 	}
-	if !v.inThread {
-		t.Error("should be in thread after topic loaded")
+	if !v.inThread || v.topicID != 100 || v.topicName != "Test topic" {
+		t.Errorf("thread state = open:%v id:%d name:%q", v.inThread, v.topicID, v.topicName)
 	}
 	if v.loading {
 		t.Error("loading should be false")
@@ -287,7 +348,7 @@ func TestMailViewIgnoresPostingCompletionAfterBoxSwitch(t *testing.T) {
 		t.Fatalf("posting command returned %T, want postingActionDoneMsg", msg)
 	}
 	v.SubnavRight()
-	v.Update(postingsLoadedMsg{postings: []models.Posting{{ID: 200, Summary: "Other box"}}})
+	v.Update(currentPostingsLoaded(v, []models.Posting{{ID: 200, Summary: "Other box"}}))
 	v.Update(done)
 
 	if len(v.postingList.postings) != 1 || v.postingList.postings[0].ID != 200 {
@@ -307,7 +368,7 @@ func TestMailViewReportsPostingFailureAfterBoxSwitch(t *testing.T) {
 		t.Fatalf("posting command returned %#v, want an action error", msg)
 	}
 	v.SubnavRight()
-	v.Update(postingsLoadedMsg{postings: []models.Posting{{ID: 200, Summary: "Other box"}}})
+	v.Update(currentPostingsLoaded(v, []models.Posting{{ID: 200, Summary: "Other box"}}))
 	errCmd, consumed := v.Update(done)
 
 	if !consumed || errCmd == nil {
@@ -397,20 +458,86 @@ func TestMailViewIgnoresThreadLoadAfterBoxSwitch(t *testing.T) {
 	}
 }
 
+func TestMailViewIgnoresThreadLoadAfterReturningToOriginBox(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusOK)
+
+	loaded := runCmd(v.HandleContentKey(keyPress("enter")))
+	v.SubnavRight()
+	v.SubnavLeft()
+	v.Update(loaded)
+
+	if v.inThread {
+		t.Error("a stale thread load should not reopen after returning to its source box")
+	}
+	if !v.loading {
+		t.Error("a stale thread load should not stop the current box load")
+	}
+}
+
+func TestMailViewIgnoresEarlierThreadLoadInSameBox(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusOK)
+
+	earlier := runCmd(v.HandleContentKey(keyPress("enter")))
+	v.postingList.moveDown()
+	_ = v.openSelected()
+	v.Update(earlier)
+
+	if v.inThread {
+		t.Error("an earlier thread load should not replace a newer open request")
+	}
+	if !v.loading {
+		t.Error("an earlier thread load should not stop the newer open request")
+	}
+}
+
 func TestMailViewIgnoresReplyLoadAfterBoxSwitch(t *testing.T) {
 	v := mailWithPostings()
+	v.inThread = true
+	_ = v.loadReplyContext(100, "Hello world")
+	loaded := replyContextLoadedMsg{
+		requestID: v.activeRequestID,
+		boxID:     1,
+		topicID:   100,
+		topicName: "Hello world",
+		entryID:   501,
+		to:        []string{"jane@example.com"},
+	}
 
 	v.SubnavRight()
-	cmd, consumed := v.Update(replyContextLoadedMsg{
-		boxID: 1, topicID: 100, topicName: "Hello world", entryID: 501,
-		to: []string{"jane@example.com"},
-	})
+	cmd, consumed := v.Update(loaded)
 
 	if !consumed {
 		t.Error("stale reply context should be consumed")
 	}
 	if cmd != nil || v.compose != nil {
 		t.Error("stale reply context should not open the reply form")
+	}
+}
+
+func TestMailViewIgnoresReplyLoadAfterThreadExit(t *testing.T) {
+	v := mailWithPostings()
+	v.inThread = true
+	_ = v.loadReplyContext(100, "Hello world")
+	loaded := replyContextLoadedMsg{
+		requestID: v.activeRequestID,
+		boxID:     1,
+		topicID:   100,
+		topicName: "Hello world",
+		entryID:   501,
+		to:        []string{"jane@example.com"},
+	}
+
+	v.ExitThread()
+	cmd, consumed := v.Update(loaded)
+
+	if !consumed || cmd != nil {
+		t.Error("a canceled reply load should be ignored")
+	}
+	if v.compose != nil {
+		t.Error("a canceled reply load should not open the reply form")
+	}
+	if v.loading {
+		t.Error("a canceled reply load should not keep loading")
 	}
 }
 

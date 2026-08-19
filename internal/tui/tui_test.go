@@ -27,7 +27,7 @@ func modelWithBoxes() model {
 	updated, _ := m.Update(boxesLoadedMsg(testBoxes()))
 	m = updated.(model)
 	// Simulate postings loaded for first box
-	updated, _ = m.Update(postingsLoadedMsg{postings: testPostings()})
+	updated, _ = m.Update(currentPostingsLoaded(m.mailView, testPostings()))
 	return updated.(model)
 }
 
@@ -219,6 +219,25 @@ func TestQExitsThread(t *testing.T) {
 	result := updated.(model)
 	if result.activeView.InThread() {
 		t.Error("q should exit thread")
+	}
+}
+
+func TestQExitsPendingReplyLoad(t *testing.T) {
+	m := modelWithBoxes()
+	m.mailView.inThread = true
+	m.mailView.topicID = 100
+	m.mailView.topicName = "Hello world"
+
+	updated, _ := m.Update(keyPress("r"))
+	m = updated.(model)
+	if !m.mailView.loading || !m.loading {
+		t.Fatal("reply should start loading")
+	}
+
+	updated, _ = m.Update(keyPress("q"))
+	result := updated.(model)
+	if result.mailView.loading || result.loading {
+		t.Error("q should stop a canceled reply load")
 	}
 }
 

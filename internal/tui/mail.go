@@ -17,15 +17,20 @@ import (
 type boxesLoadedMsg []models.Box
 
 type postingsLoadedMsg struct {
-	postings []models.Posting
+	requestID uint64
+	boxID     int64
+	postings  []models.Posting
+	err       error
 }
 
 type topicLoadedMsg struct {
-	boxID   int64
-	title   string
-	entries []models.Entry
-	images  [][]byte
-	err     error
+	requestID uint64
+	boxID     int64
+	topicID   int64
+	title     string
+	entries   []models.Entry
+	images    [][]byte
+	err       error
 }
 
 type postingActionDoneMsg struct {
@@ -52,8 +57,9 @@ type mailView struct {
 	inThread      bool
 	loading       bool
 
-	compose *composeForm // non-nil while a new message or reply is being written
-	notice  string       // one-shot confirmation shown above the posting list
+	compose         *composeForm // non-nil while a new message or reply is being written
+	notice          string       // one-shot confirmation shown above the posting list
+	activeRequestID uint64       // identifies the only mail read allowed to update the view
 }
 
 func newMailView(vc *viewContext) *mailView {
@@ -69,8 +75,7 @@ func (v *mailView) Init() tea.Cmd {
 		return v.fetchBoxes()
 	}
 	if v.boxIndex < len(v.boxes) {
-		v.loading = true
-		return v.fetchPostings(v.boxes[v.boxIndex].ID)
+		return v.requestPostings(v.boxes[v.boxIndex].ID)
 	}
 	return nil
 }
@@ -82,18 +87,23 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.loading = false
 		if len(v.boxes) > 0 {
 			v.boxIndex = 0
-			v.loading = true
-			return v.fetchPostings(v.boxes[0].ID), true
+			return v.requestPostings(v.boxes[0].ID), true
 		}
 		return nil, true
 
 	case postingsLoadedMsg:
+		if msg.requestID != v.activeRequestID || msg.boxID != v.currentBoxID() {
+			return nil, true
+		}
 		v.loading = false
+		if msg.err != nil {
+			return func() tea.Msg { return errMsg{msg.err} }, true
+		}
 		v.postingList.setPostings(msg.postings)
 		return nil, true
 
 	case topicLoadedMsg:
-		if msg.boxID != v.currentBoxID() {
+		if msg.requestID != v.activeRequestID || msg.boxID != v.currentBoxID() {
 			return nil, true
 		}
 		v.loading = false
@@ -101,6 +111,8 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return func() tea.Msg { return errMsg{msg.err} }, true
 		}
 		v.inThread = true
+		v.topicID = msg.topicID
+		v.topicName = msg.title
 		v.topicContent = v.renderEntries(msg.entries)
 		v.topicViewport.SetContent(v.topicContent)
 		v.topicViewport.GotoTop()
@@ -119,7 +131,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 
 	case replyContextLoadedMsg:
-		if msg.boxID != v.currentBoxID() {
+		if msg.requestID != v.activeRequestID || msg.boxID != v.currentBoxID() {
 			return nil, true
 		}
 		v.loading = false
@@ -253,7 +265,6 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 
 	if v.inThread {
 		if msg.String() == "r" && v.topicID != 0 {
-			v.loading = true
 			return v.loadReplyContext(v.topicID, v.topicName)
 		}
 		var cmd tea.Cmd
@@ -278,8 +289,12 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 func (v *mailView) InThread() bool { return v.inThread }
-func (v *mailView) ExitThread()    { v.inThread = false; v.compose = nil }
-func (v *mailView) Loading() bool  { return v.loading }
+func (v *mailView) ExitThread() {
+	v.inThread = false
+	v.compose = nil
+	v.cancelRequest()
+}
+func (v *mailView) Loading() bool { return v.loading }
 
 func (v *mailView) Resize(width, height int) {
 	if v.compose != nil {
@@ -302,8 +317,7 @@ func (v *mailView) switchBox(index int) tea.Cmd {
 	v.ExitThread()
 	v.notice = ""
 	v.boxIndex = index
-	v.loading = true
-	return v.fetchPostings(v.boxes[index].ID)
+	return v.requestPostings(v.boxes[index].ID)
 }
 
 func (v *mailView) currentBoxID() int64 {
@@ -311,6 +325,21 @@ func (v *mailView) currentBoxID() int64 {
 		return 0
 	}
 	return v.boxes[v.boxIndex].ID
+}
+
+func (v *mailView) beginRequest() uint64 {
+	v.activeRequestID++
+	v.loading = true
+	return v.activeRequestID
+}
+
+func (v *mailView) cancelRequest() {
+	v.activeRequestID++
+	v.loading = false
+}
+
+func (v *mailView) requestPostings(boxID int64) tea.Cmd {
+	return v.fetchPostings(v.beginRequest(), boxID)
 }
 
 func (v *mailView) postingIndex(postingID int64) int {
@@ -331,10 +360,7 @@ func (v *mailView) openSelected() tea.Cmd {
 	if topicID == 0 {
 		topicID = p.ID
 	}
-	v.topicID = topicID
-	v.topicName = p.Summary
-	v.loading = true
-	return v.fetchTopic(topicID, p.Summary)
+	return v.fetchTopic(v.beginRequest(), v.currentBoxID(), topicID, p.Summary)
 }
 
 // --- Posting actions ---
@@ -380,19 +406,13 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 		if topicID == 0 {
 			topicID = p.ID
 		}
-		v.topicID = topicID
-		v.topicName = p.Summary
-		v.loading = true
 		return v.loadReplyContext(topicID, p.Summary)
 	case "f":
 		topicID := p.ResolveTopicID()
 		if topicID == 0 {
 			topicID = p.ID
 		}
-		v.topicID = topicID
-		v.topicName = p.Summary
-		v.loading = true
-		return v.fetchTopic(topicID, p.Summary)
+		return v.fetchTopic(v.beginRequest(), v.currentBoxID(), topicID, p.Summary)
 	}
 	return nil
 }
@@ -511,39 +531,38 @@ func (v *mailView) fetchBoxes() tea.Cmd {
 	}
 }
 
-func (v *mailView) fetchPostings(boxID int64) tea.Cmd {
+func (v *mailView) fetchPostings(requestID uint64, boxID int64) tea.Cmd {
 	return func() tea.Msg {
 		resp, err := v.vc.sdk.Boxes().Get(v.vc.ctx, boxID, nil)
 		if err != nil {
-			return errMsg{err}
+			return postingsLoadedMsg{requestID: requestID, boxID: boxID, err: err}
 		}
 		postings := make([]models.Posting, 0, len(resp.Postings))
 		for _, p := range resp.Postings {
 			postings = append(postings, sdkPostingToModel(p))
 		}
-		return postingsLoadedMsg{postings: postings}
+		return postingsLoadedMsg{requestID: requestID, boxID: boxID, postings: postings}
 	}
 }
 
-func (v *mailView) fetchTopic(topicID int64, title string) tea.Cmd {
-	boxID := v.currentBoxID()
+func (v *mailView) fetchTopic(requestID uint64, boxID, topicID int64, title string) tea.Cmd {
 	return func() tea.Msg {
 		topic, err := v.vc.sdk.Topics().Get(v.vc.ctx, topicID)
 		if err != nil {
-			return topicLoadedMsg{boxID: boxID, err: err}
+			return topicLoadedMsg{requestID: requestID, boxID: boxID, topicID: topicID, title: title, err: err}
 		}
 		if topic == nil {
-			return topicLoadedMsg{boxID: boxID, err: fmt.Errorf("topic %d returned no data", topicID)}
+			return topicLoadedMsg{requestID: requestID, boxID: boxID, topicID: topicID, title: title, err: fmt.Errorf("topic %d returned no data", topicID)}
 		}
 
 		entries := make([]models.Entry, 0, len(topic.Entries))
 		for _, entry := range topic.Entries {
 			message, getErr := v.vc.sdk.Messages().Get(v.vc.ctx, entry.Id)
 			if getErr != nil {
-				return topicLoadedMsg{boxID: boxID, err: getErr}
+				return topicLoadedMsg{requestID: requestID, boxID: boxID, topicID: topicID, title: title, err: getErr}
 			}
 			if message == nil {
-				return topicLoadedMsg{boxID: boxID, err: fmt.Errorf("message %d returned no data", entry.Id)}
+				return topicLoadedMsg{requestID: requestID, boxID: boxID, topicID: topicID, title: title, err: fmt.Errorf("message %d returned no data", entry.Id)}
 			}
 			entries = append(entries, sdkMessageToEntry(entry, *message))
 		}
@@ -566,7 +585,14 @@ func (v *mailView) fetchTopic(topicID int64, title string) tea.Cmd {
 			}
 		}
 
-		return topicLoadedMsg{boxID: boxID, title: title, entries: entries, images: images}
+		return topicLoadedMsg{
+			requestID: requestID,
+			boxID:     boxID,
+			topicID:   topicID,
+			title:     title,
+			entries:   entries,
+			images:    images,
+		}
 	}
 }
 

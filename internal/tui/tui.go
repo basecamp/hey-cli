@@ -261,7 +261,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.activeView.ExitThread()
 			m.updateHelpBindings()
 			m.activeView.Resize(m.vc.width, m.vc.height)
-			return m, nil
+			return m, m.syncLoading(nil)
 		}
 		return m, nil
 	}
