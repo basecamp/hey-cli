@@ -20,7 +20,13 @@ import (
 )
 
 func testVC() *viewContext {
-	return &viewContext{ctx: context.Background(), styles: newStyles(), width: 80, height: 30}
+	return &viewContext{
+		ctx:           context.Background(),
+		styles:        newStyles(),
+		imageRenderer: textImageRenderer{},
+		width:         80,
+		height:        30,
+	}
 }
 
 func mailWithPostings() *mailView {
@@ -1122,6 +1128,40 @@ func TestMailViewRendersPostings(t *testing.T) {
 	view := v.View()
 	if !strings.Contains(view, "Hello world") {
 		t.Error("view should contain posting summary")
+	}
+}
+
+func TestMailViewAlwaysRendersAttachmentPanelAndTextMarker(t *testing.T) {
+	size := int64(1536)
+	v := mailWithPostings()
+	v.Resize(80, 30)
+	v.Update(topicLoadedMsg{
+		boxID:   1,
+		topicID: 100,
+		title:   "Quarterly planning",
+		entries: []models.Entry{{
+			ID:      501,
+			Creator: models.Contact{Name: "Alice"},
+			Body:    `<p>Review this image:</p><action-text-attachment url="/rails/blobs/chart.png" filename="chart.png" content-type="image/png" filesize="1536"></action-text-attachment><p>Thank you.</p>`,
+		}},
+		attachments: []messageAttachment{{
+			ID:          "501:1",
+			MessageID:   501,
+			Filename:    "chart.png",
+			ContentType: "image/png",
+			ByteSize:    &size,
+			URL:         "/rails/blobs/chart.png",
+		}},
+	})
+
+	view := v.View()
+	for _, want := range []string{"[chart.png]", "Attachments", "chart.png", "image/png", "1.5 KB"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("thread view does not contain %q: %q", want, view)
+		}
+	}
+	if strings.ContainsRune(view, placeholder) {
+		t.Errorf("text fallback contains an invisible Kitty placeholder: %q", view)
 	}
 }
 

@@ -52,7 +52,7 @@ type model struct {
 func newModel(sdk *hey.Client) model {
 	s := newStyles()
 	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118: cancel stored, called on ctrl+c
-	vc := &viewContext{sdk: sdk, ctx: ctx, styles: s}
+	vc := &viewContext{sdk: sdk, ctx: ctx, styles: s, imageRenderer: environmentImageRenderer()}
 
 	mv := newMailView(vc)
 	ov := newContactsView(vc)

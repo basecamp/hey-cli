@@ -12,6 +12,7 @@ import (
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
+	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/models"
 )
 
@@ -40,13 +41,14 @@ type postingsLoadedMsg struct {
 }
 
 type topicLoadedMsg struct {
-	requestID uint64
-	boxID     int64
-	topicID   int64
-	title     string
-	entries   []models.Entry
-	images    [][]byte
-	err       error
+	requestID   uint64
+	boxID       int64
+	topicID     int64
+	title       string
+	entries     []models.Entry
+	attachments []messageAttachment
+	images      [][]byte
+	err         error
 }
 
 type searchResultsLoadedMsg struct {
@@ -83,13 +85,15 @@ type mailView struct {
 	boxes    []models.Box
 	boxIndex int
 
-	postingList   contentList
-	topicViewport viewport.Model
-	topicContent  string
-	topicID       int64
-	topicName     string
-	inThread      bool
-	loading       bool
+	postingList      contentList
+	topicViewport    viewport.Model
+	topicContent     string
+	topicID          int64
+	topicName        string
+	attachments      []messageAttachment
+	attachmentCursor int
+	inThread         bool
+	loading          bool
 
 	compose           *composeForm    // non-nil while a message, reply or forward is being written
 	movePicker        *movePicker     // non-nil while a destination box is being selected
@@ -174,17 +178,22 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.inThread = true
 		v.topicID = msg.topicID
 		v.topicName = msg.title
+		v.attachments = msg.attachments
+		v.attachmentCursor = 0
 		v.topicContent = v.renderEntries(msg.entries)
 		v.topicViewport.SetContent(v.topicContent)
 		v.topicViewport.GotoTop()
 		var uploadCmds []tea.Cmd
 		for i, imgData := range msg.images {
 			imageID := i + 1
-			cols, rows := imageDimensions(imgData, v.vc.width-4)
-			v.topicContent += "\n\n" + renderImagePlaceholder(imageID, cols, rows)
-			v.topicViewport.SetContent(v.topicContent)
-			seq := kittyUploadAndPlace(imgData, imageID, cols, rows)
-			uploadCmds = append(uploadCmds, tea.Raw(seq))
+			rendered := v.vc.imageRenderer.render(imgData, imageID, v.vc.width-4)
+			if rendered.content != "" {
+				v.topicContent += "\n\n" + rendered.content
+				v.topicViewport.SetContent(v.topicContent)
+			}
+			if rendered.raw != "" {
+				uploadCmds = append(uploadCmds, tea.Raw(rendered.raw))
+			}
 		}
 		if len(uploadCmds) > 0 {
 			return tea.Batch(uploadCmds...), true
@@ -972,8 +981,19 @@ func (v *mailView) fetchTopic(ctx context.Context, requestID uint64, boxID, topi
 		}
 
 		entries := make([]models.Entry, len(topic.Entries))
+		var attachments []messageAttachment
 		for i, entry := range topic.Entries {
 			entries[i] = sdkMessageToEntry(entry, messages[i])
+			for position, attachment := range htmlutil.ExtractAttachments(messages[i].Content) {
+				attachments = append(attachments, messageAttachment{
+					ID:          fmt.Sprintf("%d:%d", entry.Id, position+1),
+					MessageID:   entry.Id,
+					Filename:    attachment.Filename,
+					ContentType: attachment.ContentType,
+					ByteSize:    attachment.ByteSize,
+					URL:         attachment.URL,
+				})
+			}
 		}
 
 		var images [][]byte
@@ -995,12 +1015,13 @@ func (v *mailView) fetchTopic(ctx context.Context, requestID uint64, boxID, topi
 		}
 
 		return topicLoadedMsg{
-			requestID: requestID,
-			boxID:     boxID,
-			topicID:   topicID,
-			title:     title,
-			entries:   entries,
-			images:    images,
+			requestID:   requestID,
+			boxID:       boxID,
+			topicID:     topicID,
+			title:       title,
+			entries:     entries,
+			attachments: attachments,
+			images:      images,
 		}
 	}
 }
@@ -1036,6 +1057,10 @@ func (v *mailView) renderEntries(entries []models.Entry) string {
 		}
 		if e.Body != "" {
 			fmt.Fprintf(&b, "\n%s\n", v.vc.styles.entryBody.Render(htmlToText(e.Body)))
+		}
+		entryAttachments := attachmentsForMessage(v.attachments, e.ID)
+		if panel := renderAttachmentPanel(entryAttachments, selectedAttachmentForMessage(v.attachments, v.attachmentCursor, e.ID)); panel != "" {
+			fmt.Fprintf(&b, "\n%s\n", panel)
 		}
 		b.WriteString("\n")
 	}
