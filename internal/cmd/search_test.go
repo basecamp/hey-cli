@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
@@ -227,6 +229,30 @@ func TestSearchAllFetchesUntilEmptyPage(t *testing.T) {
 		if got := recorded.queries[i].Get("page"); got != want {
 			t.Errorf("request %d page = %q, want %q", i+1, got, want)
 		}
+	}
+}
+
+func TestSearchAllReportsContinuationAtPageLimit(t *testing.T) {
+	calls := 0
+	lastPage := 0
+	firstPage := 7
+	matches, pages, truncated, err := collectSearchMatches(t.Context(), hey.SearchParams{Query: "planning", Page: firstPage}, true,
+		func(_ context.Context, params hey.SearchParams) (*generated.AdvancedSearchResult, error) {
+			calls++
+			lastPage = params.Page
+			return &generated.AdvancedSearchResult{Matches: []generated.SearchMatch{{
+				Topic: generated.Topic{Id: 1},
+			}}}, nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != maxSearchPages || pages != maxSearchPages || len(matches) != maxSearchPages || !truncated || lastPage != 106 {
+		t.Errorf("calls=%d pages=%d matches=%d truncated=%v lastPage=%d", calls, pages, len(matches), truncated, lastPage)
+	}
+	want := "Search stopped after 100 pages. Continue with --page 107."
+	if got := searchTruncationNotice(firstPage, pages, truncated); got != want {
+		t.Errorf("notice = %q, want %q", got, want)
 	}
 }
 

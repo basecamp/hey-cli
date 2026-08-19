@@ -51,8 +51,10 @@ func TestSearchFreeTextAndRefinements(t *testing.T) {
 		t.Skip("no Imbox thread available for read-only search validation")
 	}
 
-	query := strings.Fields(subject)[0]
-	freeText := dataAs[[]smokeSearchResult](t, heyJSON(t, "search", query))
+	freeText := dataAs[[]smokeSearchResult](t, heyJSON(t, "search", subject))
+	if len(freeText) == 0 {
+		t.Fatal("free-text search did not find the known Imbox thread")
+	}
 	for _, result := range freeText {
 		if result.TopicID == 0 {
 			t.Error("free-text search result has no topic_id")

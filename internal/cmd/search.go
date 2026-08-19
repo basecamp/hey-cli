@@ -108,17 +108,13 @@ func (c *searchCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	results := makeSearchResults(matches)
 
+	notice := searchTruncationNotice(params.Page, pages, truncated)
 	if writer.IsStyled() {
 		printSearchResults(cmd, results)
-		if truncated {
-			fmt.Fprintf(cmd.OutOrStdout(), "\nSearch stopped after %d pages. Continue with --page %d.\n", pages, params.Page+pages)
+		if notice != "" {
+			fmt.Fprintf(cmd.OutOrStdout(), "\n%s\n", notice)
 		}
 		return nil
-	}
-
-	notice := ""
-	if truncated {
-		notice = fmt.Sprintf("Search stopped after %d pages. Continue with --page %d.", pages, params.Page+pages)
 	}
 	return writeOK(results,
 		output.WithSummary(searchSummary(len(results))),
@@ -272,4 +268,11 @@ func printSearchResults(cmd *cobra.Command, results []searchResult) {
 
 func searchSummary(count int) string {
 	return fmt.Sprintf("%d matching %s", count, threadNoun(count))
+}
+
+func searchTruncationNotice(startPage, pages int, truncated bool) string {
+	if !truncated {
+		return ""
+	}
+	return fmt.Sprintf("Search stopped after %d pages. Continue with --page %d.", pages, startPage+pages)
 }
