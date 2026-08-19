@@ -516,6 +516,7 @@ func (v *mailView) ExitThread() {
 func (v *mailView) clearSearch() {
 	v.searchActive = false
 	v.searchQuery = ""
+	v.notice = ""
 	v.searchPage = 0
 	v.searchList.setPostings(nil)
 	v.searchForm = nil

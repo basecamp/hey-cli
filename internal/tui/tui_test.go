@@ -281,11 +281,15 @@ func TestQExitsSearchResults(t *testing.T) {
 	m := modelWithBoxes()
 	m.mailView.searchActive = true
 	m.mailView.searchQuery = "quarterly planning"
+	m.mailView.notice = "No more search results"
 
 	updated, _ := m.Update(keyPress("q"))
 	result := updated.(model)
 	if result.mailView.searchActive || result.activeView.InThread() {
 		t.Error("q should exit search results")
+	}
+	if result.mailView.notice != "" {
+		t.Errorf("q left a stale search notice: %q", result.mailView.notice)
 	}
 }
 
