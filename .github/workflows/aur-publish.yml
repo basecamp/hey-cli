@@ -1,0 +1,186 @@
+# Manual AUR publish, for when the release-time publish could not run.
+#
+# The AUR goes down for maintenance often enough that a release must not depend
+# on it being reachable — release.yml's aur-publish job is continue-on-error for
+# exactly that reason. This workflow is the recovery path: it republishes any
+# already-released version once the AUR is back, with no need to cut a new tag.
+#
+# scripts/publish-aur.sh derives the PKGBUILD entirely from the published GitHub
+# release assets and no-ops when the AUR copy is already current, so running this
+# against an already-published version is safe and idempotent.
+name: Publish to AUR
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Released version to publish, without the v prefix (e.g. 0.8.0)'
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: aur-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish to AUR
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Validate version input
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid version '${VERSION}' — expected semver with no v prefix (e.g. 0.8.0)"
+            exit 1
+          fi
+          # Only publish versions that actually exist as a stable release, so a
+          # typo cannot push a PKGBUILD pointing at assets that were never built.
+          if ! gh release view "v${VERSION}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "::error::No published release found for v${VERSION}"
+            exit 1
+          fi
+          echo "Publishing v${VERSION} to the AUR"
+
+      - name: Refuse to downgrade the AUR package
+        id: aur-state
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          # publish-aur.sh rewrites pkgver unconditionally, so dispatching an
+          # older-but-valid release would push every Arch user backwards. Being
+          # a published release is not enough — compare against what is actually
+          # in the AUR right now.
+          if ! body=$(curl -fsS --max-time 30 --retry 2 \
+                        'https://aur.archlinux.org/rpc/v5/info/hey-cli'); then
+            # Fail closed: proceeding blind here risks a silent downgrade, and a
+            # dispatch is cheap to repeat once the AUR is reachable again.
+            # Flag it so the notify step can tell an outage from a bad input.
+            echo "unreachable=true" >> "$GITHUB_OUTPUT"
+            echo "::error::Could not reach the AUR to check the published version. Retry when it is reachable."
+            exit 1
+          fi
+
+          # AUR reports version as pkgver-pkgrel (e.g. 0.7.2-1).
+          full=$(printf '%s' "$body" | jq -r '.results[0].Version // empty')
+          if [ -z "$full" ]; then
+            echo "hey-cli is not in the AUR yet — nothing to downgrade"
+            exit 0
+          fi
+          if [[ "$full" == *-* ]]; then
+            current="${full%-*}"
+            currel="${full##*-}"
+          else
+            current="$full"
+            currel=1
+          fi
+
+          if [ "$current" = "$VERSION" ]; then
+            # publish-aur.sh hardcodes pkgrel=1, so republishing over a higher
+            # revision would silently discard an AUR-side packaging fix.
+            #
+            # Compare with sort -V, not an arithmetic test: PKGBUILD(5) allows a
+            # dotted subrelease (1.1), which `[ -gt ]` rejects as a non-integer
+            # with status 2 — and a suppressed stderr would turn that error into
+            # a silent "not greater", letting the clobber through.
+            highest=$(printf '%s\n%s\n' "$currel" "1" | sort -V | tail -1)
+            if [ "$highest" != "1" ]; then
+              echo "::error::AUR has ${full}; publish-aur.sh would replace it with ${VERSION}-1 and discard that packaging revision"
+              exit 1
+            fi
+            echo "AUR already at ${full} — republish is a no-op unless the PKGBUILD drifted"
+            exit 0
+          fi
+
+          oldest=$(printf '%s\n%s\n' "$current" "$VERSION" | sort -V | head -1)
+          if [ "$oldest" = "$VERSION" ]; then
+            echo "::error::Refusing to downgrade the AUR from ${current} to ${VERSION}"
+            exit 1
+          fi
+          echo "AUR is at ${current}; publishing ${VERSION}"
+
+      - name: Verify AUR key is configured
+        env:
+          AUR_KEY: ${{ secrets.AUR_KEY }}
+        run: |
+          if [ -z "$AUR_KEY" ]; then
+            echo "::error::AUR_KEY is not configured for the release environment"
+            exit 1
+          fi
+
+      - name: Publish to AUR
+        id: publish
+        env:
+          AUR_KEY: ${{ secrets.AUR_KEY }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$AUR_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          echo -e "Host aur.archlinux.org\n  IdentityFile ~/.ssh/aur\n  User aur\n  StrictHostKeyChecking accept-new" >> ~/.ssh/config
+          git config --global user.name "37signals"
+          git config --global user.email "dev@37signals.com"
+          for attempt in 1 2 3; do
+            if scripts/publish-aur.sh "$VERSION"; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "AUR publish attempt ${attempt} failed; retrying in $((attempt * 60))s"
+              sleep $((attempt * 60))
+            fi
+          done
+          echo "::error::AUR publish failed after 3 attempts"
+          exit 1
+
+      # The recovery path needs this more than the release job does: a recovery
+      # run is dispatched by hand and then forgotten, and its whole reason for
+      # existing is that the AUR was unreachable — which is exactly the outage
+      # likely to still be going when the retries run out.
+      #
+      # Scoped to the two failures that actually mean "the AUR is unreachable":
+      # retries exhausted, or the RPC reachability check. A bare failure() would
+      # also catch a mistyped version, a version with no release, a refused
+      # downgrade and a missing AUR_KEY — none of which the issue's "retry once
+      # the AUR accepts pushes again" advice fits. Those are operator mistakes,
+      # visible in the run they just dispatched by hand, and because the issue
+      # dedupes on label they would otherwise land as misleading comments on the
+      # genuine outage issue.
+      - name: Notify on AUR publish failure
+        if: failure() && (steps.publish.outcome == 'failure' || steps.aur-state.outputs.unreachable == 'true')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_SLUG: ${{ github.repository }}
+          VERSION: ${{ inputs.version }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          RUN_URL="https://github.com/${REPO_SLUG}/actions/runs/${RUN_ID}"
+          BODY="Recovery publish of \`${VERSION}\` to the AUR [failed](${RUN_URL}). The GitHub release is unaffected — only the Arch package is stale. Re-run the \`Publish to AUR\` workflow with version \`${VERSION}\` once the AUR accepts pushes again."
+
+          # Dedup lives in notify-issue.sh, shared with release.yml, and keys on
+          # the aur-publish label rather than the title. A title lookup misses
+          # the moment someone retitles the issue while triaging it — which is
+          # the normal fate of an issue that stays open across an outage.
+          notify_status=0
+          scripts/notify-issue.sh \
+            --repo "$REPO_SLUG" \
+            --label aur-publish \
+            --title "AUR publish failure" \
+            --body "$BODY" || notify_status=$?
+
+          # The notifier fails closed, so on a lookup failure the annotation is
+          # the only record that this dispatch went nowhere.
+          echo "::error::AUR publish failed for ${VERSION}. See ${RUN_URL}"
+          exit "$notify_status"

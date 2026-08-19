@@ -22,7 +22,7 @@ Pushing the tag triggers the GitHub Actions release workflow, which:
 9. Publishes Homebrew cask to `basecamp/homebrew-tap`
 10. Publishes Scoop manifest to `basecamp/homebrew-tap`
 11. Builds .deb and .rpm packages
-12. Publishes to AUR (if `AUR_KEY` configured)
+12. Publishes the binary package to AUR (if `AUR_KEY` configured; isolated and non-blocking — an AUR outage cannot fail the release)
 13. Checks CLI surface compatibility against previous release
 14. Syncs skills to `basecamp/skills`
 
@@ -76,6 +76,15 @@ goreleaser release --snapshot --clean
 1. Generate ed25519 SSH keypair: `ssh-keygen -t ed25519 -f aur_key`
 2. Add public key to your AUR account profile
 3. Add private key as `AUR_KEY` secret on the hey-cli repo
+
+The AUR package installs the prebuilt release binaries (with shell completions),
+not a source build — `publish-aur.sh` derives the PKGBUILD from the published
+release assets.
+
+If the release-time publish fails (the AUR is down for maintenance regularly),
+a labeled `aur-publish` issue is filed and the release itself is unaffected.
+Recover by dispatching the `Publish to AUR` workflow with the released version —
+it is idempotent and refuses downgrades.
 
 ## PGO (Profile-Guided Optimization)
 
