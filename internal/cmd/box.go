@@ -26,7 +26,7 @@ func newBoxCommand() *boxCommand {
 	boxCommand := &boxCommand{}
 	boxCommand.cmd = &cobra.Command{
 		Use:   "box <name|id>",
-		Short: "List email threads in a box",
+		Short: "List email and HEY World items in a box",
 		Long:  "List email threads and HEY World posts in a box. Each kind is counted separately. Accepts a box name (imbox, feedbox, etc.) or numeric ID.",
 		Annotations: map[string]string{
 			"agent_notes": "Accepts a box name or numeric ID. Preserve each item's kind. Use topic_id with hey threads, reply, and forward. Use id plus --kind with email organization actions. HEY World posts are published content, not email.",
@@ -38,7 +38,7 @@ func newBoxCommand() *boxCommand {
 		Args: validateBoxArgs,
 	}
 
-	boxCommand.cmd.Flags().IntVar(&boxCommand.limit, "limit", 0, "Maximum number of threads to show")
+	boxCommand.cmd.Flags().IntVar(&boxCommand.limit, "limit", 0, "Maximum number of items to show")
 	boxCommand.cmd.Flags().BoolVar(&boxCommand.all, "all", false, "Fetch all results (override --limit)")
 
 	return boxCommand

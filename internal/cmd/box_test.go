@@ -67,6 +67,16 @@ func TestValidateBoxArgs(t *testing.T) {
 	}
 }
 
+func TestBoxHelpUsesMixedItemTerminology(t *testing.T) {
+	command := newBoxCommand().cmd
+	if command.Short != "List email and HEY World items in a box" {
+		t.Errorf("short help = %q", command.Short)
+	}
+	if usage := command.Flags().Lookup("limit").Usage; usage != "Maximum number of items to show" {
+		t.Errorf("--limit help = %q", usage)
+	}
+}
+
 // makePostings creates n test postings with sequential IDs starting at offset+1.
 func makePostings(n, offset int) []generated.Posting {
 	postings := make([]generated.Posting, n)

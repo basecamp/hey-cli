@@ -93,7 +93,7 @@ USAGE
 
 EMAIL
   boxes          List your HEY boxes
-  box            List email threads in a box
+  box            List email and HEY World items in a box
   labels         List your email labels
   label          View and manage an email label
   search         Search email threads and messages
@@ -113,7 +113,9 @@ EMAIL
   ignore         Ignore email threads
   stop-ignoring  Stop ignoring email threads
   watch          Follow email threads as they change
-  world          Manage HEY World posts
+
+HEY WORLD
+  world  Manage HEY World posts
 
 CALENDAR & TASKS
   calendars   List calendars
