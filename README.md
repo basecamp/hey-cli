@@ -58,7 +58,7 @@ hey auth logout   # clear credentials
 
 Run `hey` to launch the interactive terminal UI.
 
-Navigate between mailboxes and email threads. Use Enter to open a thread, `r` to reply, `f` to forward, `m` to move a thread, and Escape or `q` to go back.
+Navigate between mailboxes and email threads. Use Enter to open a thread, `r` to reply, `f` to forward, `m` to move, `t` to trash, `s` to mark as spam, and Escape or `q` to go back.
 
 ## CLI Commands
 
@@ -77,9 +77,11 @@ hey compose --to user@example.com --cc bob@example.com --bcc carol@example.org -
 hey drafts                         # list drafts
 hey move 12345 --to feed           # move a thread to another box
 hey move 12345 67890 --to "paper trail"  # move multiple threads
+hey trash 12345                    # move a thread to Trash
+hey spam 12345                     # mark a thread as spam
 ```
 
-`hey move` takes the `id` values returned by `hey box --json`. Destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Bubble Up requires a scheduled date and is not available through `hey move`.
+`hey move`, `hey trash`, and `hey spam` take the `id` values returned by `hey box --json`. Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Bubble Up requires a scheduled date and is not available through `hey move`. Trashing a shared thread removes your access instead of deleting it for everyone.
 
 ### Calendars
 

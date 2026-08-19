@@ -27,7 +27,7 @@ func TestCuratedCommandHelpUsesUserFacingLanguage(t *testing.T) {
 
 func TestEmailCommandHelpKeepsPostingAsAnInternalTerm(t *testing.T) {
 	root := newRootCmd()
-	for _, name := range []string{"boxes", "box", "seen", "unseen", "move"} {
+	for _, name := range []string{"boxes", "box", "seen", "unseen", "move", "trash", "spam"} {
 		t.Run(name, func(t *testing.T) {
 			command, _, err := root.Find([]string{name})
 			if err != nil {
@@ -73,6 +73,8 @@ EMAIL
   seen     Mark email threads as seen
   unseen   Mark email threads as unseen
   move     Move email threads to another box
+  trash    Move email threads to Trash
+  spam     Mark email threads as spam
 
 CALENDAR & TASKS
   calendars   List calendars

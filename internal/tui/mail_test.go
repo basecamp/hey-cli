@@ -251,6 +251,7 @@ func TestMailViewPostingKeysCallExpectedEndpoints(t *testing.T) {
 		{"feed", "d", "/postings/moves.json", 2, true, "Thread moved to The Feed", false},
 		{"paper trail", "p", "/postings/moves.json", 5, true, "Thread moved to Paper Trail", false},
 		{"trash", "t", "/postings/trash.json", 0, true, "Thread moved to Trash", false},
+		{"spam", "s", "/postings/spam.json", 0, true, "Thread marked as spam", false},
 		{"mute", "-", "/postings/mutings.json", 0, true, "Thread muted", false},
 	}
 
@@ -1072,7 +1073,7 @@ func TestMailViewHelpBindings(t *testing.T) {
 	for _, b := range bindings {
 		keys[b.key] = true
 	}
-	for _, expected := range []string{"r", "f", "m", "e", "l", "a", "t"} {
+	for _, expected := range []string{"r", "f", "m", "e", "l", "a", "t", "s"} {
 		if !keys[expected] {
 			t.Errorf("missing help binding for key %q", expected)
 		}

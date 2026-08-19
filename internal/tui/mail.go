@@ -271,6 +271,7 @@ func (v *mailView) HelpBindings() []helpBinding {
 		{"d", "feed"},
 		{"p", "paper trail"},
 		{"t", "trash"},
+		{"s", "spam"},
 		{"-", "mute"},
 	}
 }
@@ -525,6 +526,10 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 	case "t":
 		return v.doPostingAction("Thread moved to Trash", true, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MoveToTrash(v.vc.ctx, p.ID)
+		})
+	case "s":
+		return v.doPostingAction("Thread marked as spam", true, boxID, p.ID, func() error {
+			return v.vc.sdk.Postings().MarkSpam(v.vc.ctx, p.ID)
 		})
 	case "-":
 		return v.doPostingAction("Thread muted", true, boxID, p.ID, func() error {

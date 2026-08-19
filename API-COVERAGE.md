@@ -22,6 +22,8 @@ The legacy `internal/client/` is used only for HTML-scraping gap operations mark
 | `/topics/{id}.json` | GET | SDK `Topics().Get` | `hey forward <topic-id>` | covered |
 | `/entries/{id}/forwards/new.json` | GET | SDK `Entries().NewForward` | `hey forward <topic-id>` | covered |
 | `/postings/moves.json` | POST | SDK `Postings().Move` | `hey move <id> --to <box>`, TUI `m` | covered |
+| `/postings/trash.json` | POST | SDK `Postings().MoveToTrash` | `hey trash <id>`, TUI `t` | covered |
+| `/postings/spam.json` | POST | SDK `Postings().MarkSpam` | `hey spam <id>`, TUI `s` | covered |
 | `/calendar/days/{date}/habits/{id}/completions.json` | POST | SDK `Habits().Complete` | `hey habit complete <id>` | covered |
 | `/calendar/days/{date}/habits/{id}/completions.json` | DELETE | SDK `Habits().Uncomplete` | `hey habit uncomplete <id>` | covered |
 | `/calendar/days/{date}/journal_entry.json` | GET | SDK `Journal().Get` | `hey journal read [date]` | partial: falls back to legacy |

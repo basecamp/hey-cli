@@ -73,6 +73,7 @@ hey seen
 hey setup
 hey skill
 hey skill install
+hey spam
 hey threads
 hey timetrack
 hey timetrack current
@@ -91,5 +92,6 @@ hey todo list
 hey todo list --all
 hey todo list --limit
 hey todo uncomplete
+hey trash
 hey tui
 hey unseen
