@@ -73,6 +73,7 @@ type mailView struct {
 	loading       bool
 
 	compose           *composeForm // non-nil while a message, reply or forward is being written
+	movePicker        *movePicker  // non-nil while a destination box is being selected
 	notice            string       // one-shot confirmation shown above the posting list
 	activeRequestID   uint64       // identifies the only mail read allowed to update the view
 	activeRequestKind mailRequestKind
@@ -231,6 +232,9 @@ func (v *mailView) View() string {
 	if v.compose != nil {
 		return v.compose.view()
 	}
+	if v.movePicker != nil {
+		return v.movePicker.view(v.vc.styles, v.vc.width)
+	}
 	if v.inThread {
 		if v.notice != "" {
 			return v.vc.styles.title.Render(v.notice) + "\n" + v.topicViewport.View()
@@ -243,12 +247,15 @@ func (v *mailView) View() string {
 	return v.postingList.view()
 }
 
-// CapturingInput reports whether a form is open and wants every key.
-func (v *mailView) CapturingInput() bool { return v.compose != nil }
+// CapturingInput reports whether a form or picker is open and wants every key.
+func (v *mailView) CapturingInput() bool { return v.compose != nil || v.movePicker != nil }
 
 func (v *mailView) HelpBindings() []helpBinding {
 	if v.compose != nil {
 		return v.compose.helpBindings()
+	}
+	if v.movePicker != nil {
+		return v.movePicker.helpBindings()
 	}
 	if v.inThread {
 		return []helpBinding{{"r", "reply"}, {"f", "forward"}}
@@ -257,6 +264,7 @@ func (v *mailView) HelpBindings() []helpBinding {
 		{"c", "compose"},
 		{"r", "reply"},
 		{"f", "forward"},
+		{"m", "move"},
 		{"e", "seen"},
 		{"l", "reply later"},
 		{"a", "set aside"},
@@ -298,6 +306,24 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		return cmd
 	}
 
+	if v.movePicker != nil {
+		if msg.Key().Code == tea.KeyEscape {
+			v.movePicker = nil
+			return nil
+		}
+		if msg.Key().Code == tea.KeyEnter {
+			picker := v.movePicker
+			destination := picker.selected()
+			v.movePicker = nil
+			if destination == nil {
+				return nil
+			}
+			return v.movePostingToBox(picker.postingID, *destination)
+		}
+		v.movePicker.update(msg)
+		return nil
+	}
+
 	if v.inThread {
 		if msg.String() == "r" && v.topicID != 0 {
 			return v.loadReplyContext(v.topicID, v.topicName)
@@ -318,10 +344,15 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	case tea.KeyEnter:
 		return v.openSelected()
 	default:
-		if msg.String() == "c" {
+		switch msg.String() {
+		case "c":
 			return v.startCompose()
+		case "m":
+			v.startMove()
+			return nil
+		default:
+			return v.handlePostingAction(msg.String())
 		}
-		return v.handlePostingAction(msg.String())
 	}
 	return nil
 }
@@ -330,6 +361,7 @@ func (v *mailView) InThread() bool { return v.inThread }
 func (v *mailView) ExitThread() {
 	v.inThread = false
 	v.compose = nil
+	v.movePicker = nil
 	v.cancelRequest()
 }
 
@@ -442,6 +474,25 @@ func (v *mailView) openSelected() tea.Cmd {
 
 // --- Posting actions ---
 
+func (v *mailView) startMove() {
+	selected := v.postingList.selectedPosting()
+	if selected == nil {
+		return
+	}
+	picker := newMovePicker(*selected, v.boxes, v.currentBoxID())
+	if len(picker.destinations) == 0 {
+		v.notice = "No other boxes available"
+		return
+	}
+	v.movePicker = picker
+}
+
+func (v *mailView) movePostingToBox(postingID int64, destination models.Box) tea.Cmd {
+	return v.doPostingAction("moved to "+destination.Name, true, v.currentBoxID(), postingID, func() error {
+		return v.vc.sdk.Postings().Move(v.vc.ctx, destination.ID, postingID)
+	})
+}
+
 func (v *mailView) handlePostingAction(key string) tea.Cmd {
 	selected := v.postingList.selectedPosting()
 	if selected == nil {
@@ -452,11 +503,11 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 
 	switch key {
 	case "l":
-		return v.doPostingAction("moved to Reply Later", v.movesOutOfCurrentBox(hey.BoxKindLater), boxID, p.ID, func() error {
+		return v.moveSelectedToKnownBox("Reply Later", hey.BoxKindLater, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MoveToReplyLater(v.vc.ctx, p.ID)
 		})
 	case "a":
-		return v.doPostingAction("moved to Set Aside", v.movesOutOfCurrentBox(hey.BoxKindSetAside), boxID, p.ID, func() error {
+		return v.moveSelectedToKnownBox("Set Aside", hey.BoxKindSetAside, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MoveToSetAside(v.vc.ctx, p.ID)
 		})
 	case "e":
@@ -464,11 +515,11 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 			return v.vc.sdk.Postings().MarkSeen(v.vc.ctx, []int64{p.ID})
 		})
 	case "d":
-		return v.doPostingAction("moved to The Feed", v.movesOutOfCurrentBox(hey.BoxKindFeed), boxID, p.ID, func() error {
+		return v.moveSelectedToKnownBox("The Feed", hey.BoxKindFeed, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MoveToFeed(v.vc.ctx, p.ID)
 		})
 	case "p":
-		return v.doPostingAction("moved to Paper Trail", v.movesOutOfCurrentBox(hey.BoxKindTrail), boxID, p.ID, func() error {
+		return v.moveSelectedToKnownBox("Paper Trail", hey.BoxKindTrail, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MoveToPaperTrail(v.vc.ctx, p.ID)
 		})
 	case "t":
@@ -493,6 +544,14 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 		return v.loadForwardContext(topicID, p.Summary)
 	}
 	return nil
+}
+
+func (v *mailView) moveSelectedToKnownBox(name, kind string, boxID, postingID int64, fn func() error) tea.Cmd {
+	if !v.movesOutOfCurrentBox(kind) {
+		v.notice = "Already in " + name
+		return nil
+	}
+	return v.doPostingAction("moved to "+name, true, boxID, postingID, fn)
 }
 
 func (v *mailView) movesOutOfCurrentBox(destinationKind string) bool {

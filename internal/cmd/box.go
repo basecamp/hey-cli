@@ -110,6 +110,11 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 				Description: "Read an email thread",
 			},
 			output.Breadcrumb{
+				Action:      "move",
+				Command:     "hey move <posting-id> --to <box>",
+				Description: "Move a message to another box",
+			},
+			output.Breadcrumb{
 				Action:      "compose",
 				Command:     "hey compose --to <email> --subject <subject>",
 				Description: "Compose a new message",

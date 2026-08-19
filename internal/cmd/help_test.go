@@ -49,6 +49,7 @@ EMAIL
   drafts   List draft emails
   seen     Mark messages as seen
   unseen   Mark messages as unseen
+  move     Move messages to another box
 
 CALENDAR & TASKS
   calendars   List calendars

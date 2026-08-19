@@ -132,6 +132,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newJournalCommand().cmd)
 	root.AddCommand(newSeenCommand().cmd)
 	root.AddCommand(newUnseenCommand().cmd)
+	root.AddCommand(newMoveCommand().cmd)
 	root.AddCommand(newSetupCommand())
 	root.AddCommand(newTuiCommand().cmd)
 	root.AddCommand(newSkillCommand().cmd)

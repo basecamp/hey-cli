@@ -58,7 +58,7 @@ hey auth logout   # clear credentials
 
 Run `hey` to launch the interactive terminal UI.
 
-Navigate between mailboxes, postings, and full email threads. Use Enter to open a thread, `r` to reply, `f` to forward, and Escape or `q` to go back.
+Navigate between mailboxes, postings, and full email threads. Use Enter to open a thread, `r` to reply, `f` to forward, `m` to move a posting, and Escape or `q` to go back.
 
 ## CLI Commands
 
@@ -75,7 +75,11 @@ hey forward 123 --to alice@example.com -m "For your review"  # forward the lates
 hey compose --to user@example.com --subject "Hello"  # compose a new message
 hey compose --to user@example.com --cc bob@example.com --bcc carol@example.org --subject "Hello"  # with CC/BCC
 hey drafts                         # list drafts
+hey move 12345 --to feed           # move a posting to another box
+hey move 12345 67890 --to "paper trail"  # move multiple postings
 ```
+
+`hey move` takes posting IDs from `hey box --json`. Destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Bubble Up requires a scheduled date and is not available through `hey move`.
 
 ### Calendars
 

@@ -301,17 +301,104 @@ func TestMailViewPostingKeysCallExpectedEndpoints(t *testing.T) {
 	}
 }
 
-func TestMailViewMoveWithinCurrentBoxKeepsPosting(t *testing.T) {
+func TestMailViewMovePickerMovesToSelectedBox(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v.boxes = []models.Box{
+		{ID: 1, Kind: hey.BoxKindImbox, Name: "Imbox"},
+		{ID: 2, Kind: hey.BoxKindFeed, Name: "The Feed"},
+		{ID: 3, Kind: hey.BoxKindSetAside, Name: "Set Aside"},
+		{ID: 4, Kind: hey.BoxKindLater, Name: "Reply Later"},
+		{ID: 5, Kind: hey.BoxKindTrail, Name: "Paper Trail"},
+		{ID: 6, Kind: hey.BoxKindBubbleUp, Name: "Bubble Up"},
+	}
+
+	if cmd := v.HandleContentKey(keyPress("m")); cmd != nil {
+		t.Fatal("opening the move picker should not start a request")
+	}
+	if !v.CapturingInput() || v.movePicker == nil {
+		t.Fatal("move picker should capture input")
+	}
+	if len(v.movePicker.destinations) != 4 {
+		t.Fatalf("destinations = %v, want four boxes", v.movePicker.destinations)
+	}
+	if view := v.View(); strings.Contains(view, "Bubble Up") || strings.Contains(view, "\n  Imbox") {
+		t.Errorf("move picker offered an ineligible destination: %q", view)
+	}
+
+	msg := runCmd(v.HandleContentKey(keyPress("enter")))
+	done, ok := msg.(postingActionDoneMsg)
+	if !ok || done.err != nil {
+		t.Fatalf("move command returned %#v", msg)
+	}
+	if v.movePicker != nil || v.CapturingInput() {
+		t.Error("move picker should close after choosing a destination")
+	}
+	if recorded.body.BoxID == nil || *recorded.body.BoxID != 2 {
+		t.Errorf("box_id = %v, want 2", recorded.body.BoxID)
+	}
+	if len(recorded.body.PostingIDs) != 1 || recorded.body.PostingIDs[0] != 100 {
+		t.Errorf("posting_ids = %v, want [100]", recorded.body.PostingIDs)
+	}
+
+	v.Update(done)
+	if v.postingIndex(100) >= 0 {
+		t.Error("moved posting should leave the current box")
+	}
+	if v.notice != "moved to The Feed" {
+		t.Errorf("notice = %q", v.notice)
+	}
+}
+
+func TestMailViewMovePickerSelectsWithArrowKeys(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v.boxes = []models.Box{
+		{ID: 1, Kind: hey.BoxKindImbox, Name: "Imbox"},
+		{ID: 2, Kind: hey.BoxKindFeed, Name: "The Feed"},
+		{ID: 3, Kind: hey.BoxKindSetAside, Name: "Set Aside"},
+	}
+
+	v.HandleContentKey(keyPress("m"))
+	v.HandleContentKey(keyPress("down"))
+	msg := runCmd(v.HandleContentKey(keyPress("enter")))
+	if done, ok := msg.(postingActionDoneMsg); !ok || done.err != nil {
+		t.Fatalf("move command returned %#v", msg)
+	}
+	if recorded.body.BoxID == nil || *recorded.body.BoxID != 3 {
+		t.Errorf("box_id = %v, want 3", recorded.body.BoxID)
+	}
+}
+
+func TestMailViewMovePickerCancelsWithoutRequest(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v.boxes = []models.Box{
+		{ID: 1, Kind: hey.BoxKindImbox, Name: "Imbox"},
+		{ID: 2, Kind: hey.BoxKindFeed, Name: "The Feed"},
+	}
+
+	v.HandleContentKey(keyPress("m"))
+	if cmd := v.HandleContentKey(keyPress("esc")); cmd != nil {
+		t.Fatal("canceling the move picker should not return a command")
+	}
+	if v.movePicker != nil || v.CapturingInput() {
+		t.Error("escape should close the move picker")
+	}
+	if len(recorded.requests) != 0 {
+		t.Errorf("canceling made requests: %v", recorded.requests)
+	}
+}
+
+func TestMailViewMoveWithinCurrentBoxSkipsRequest(t *testing.T) {
 	tests := []struct {
-		name  string
-		key   string
-		kind  string
-		boxID int64
+		name    string
+		key     string
+		kind    string
+		boxID   int64
+		display string
 	}{
-		{"reply later", "l", hey.BoxKindLater, 4},
-		{"set aside", "a", hey.BoxKindSetAside, 3},
-		{"feed", "d", hey.BoxKindFeed, 2},
-		{"paper trail", "p", hey.BoxKindTrail, 5},
+		{"reply later", "l", hey.BoxKindLater, 4, "Reply Later"},
+		{"set aside", "a", hey.BoxKindSetAside, 3, "Set Aside"},
+		{"feed", "d", hey.BoxKindFeed, 2, "The Feed"},
+		{"paper trail", "p", hey.BoxKindTrail, 5, "Paper Trail"},
 	}
 
 	for _, tt := range tests {
@@ -320,23 +407,17 @@ func TestMailViewMoveWithinCurrentBoxKeepsPosting(t *testing.T) {
 			v.boxes = []models.Box{{ID: tt.boxID, Kind: tt.kind, Name: tt.name}}
 			v.boxIndex = 0
 
-			msg := runCmd(v.HandleContentKey(keyPress(tt.key)))
-			done, ok := msg.(postingActionDoneMsg)
-			if !ok || done.err != nil {
-				t.Fatalf("posting command returned %#v", msg)
+			if cmd := v.HandleContentKey(keyPress(tt.key)); cmd != nil {
+				t.Fatal("move within the current box should not start a request")
 			}
-			if done.removes {
-				t.Fatal("move within the current box should keep the posting visible")
-			}
-			v.Update(done)
-
 			if len(v.postingList.postings) != len(testPostings()) || v.postingList.postings[0].ID != 100 {
 				t.Errorf("move within current box changed postings: %v", v.postingList.postings)
 			}
-			if recorded.body.BoxID == nil {
-				t.Errorf("box_id is omitted, want %d", tt.boxID)
-			} else if *recorded.body.BoxID != tt.boxID {
-				t.Errorf("box_id = %d, want %d", *recorded.body.BoxID, tt.boxID)
+			if len(recorded.requests) != 0 {
+				t.Errorf("move within current box made requests: %v", recorded.requests)
+			}
+			if v.notice != "Already in "+tt.display {
+				t.Errorf("notice = %q, want %q", v.notice, "Already in "+tt.display)
 			}
 		})
 	}
@@ -989,10 +1070,20 @@ func TestMailViewHelpBindings(t *testing.T) {
 	for _, b := range bindings {
 		keys[b.key] = true
 	}
-	for _, expected := range []string{"r", "f", "e", "l", "a", "t"} {
+	for _, expected := range []string{"r", "f", "m", "e", "l", "a", "t"} {
 		if !keys[expected] {
 			t.Errorf("missing help binding for key %q", expected)
 		}
+	}
+}
+
+func TestMailViewHelpBindingsInMovePicker(t *testing.T) {
+	v := mailWithPostings()
+	v.HandleContentKey(keyPress("m"))
+
+	bindings := v.HelpBindings()
+	if len(bindings) != 3 || bindings[0].key != "↑↓" || bindings[1].key != "enter" || bindings[2].key != "esc" {
+		t.Errorf("move picker help = %v", bindings)
 	}
 }
 

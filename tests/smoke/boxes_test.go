@@ -171,6 +171,66 @@ func TestBoxesAll(t *testing.T) {
 	}
 }
 
+func TestMovePosting(t *testing.T) {
+	resp := heyJSON(t, "box", "imbox", "--limit", "10")
+	type Posting struct {
+		ID   int  `json:"id"`
+		Seen bool `json:"seen"`
+	}
+	type BoxResponse struct {
+		Postings []Posting `json:"postings"`
+	}
+	imbox := dataAs[BoxResponse](t, resp)
+	postingID := 0
+	for _, posting := range imbox.Postings {
+		if posting.Seen {
+			postingID = posting.ID
+			break
+		}
+	}
+	if postingID == 0 {
+		t.Skip("no seen postings in Imbox to move without changing unread state")
+	}
+
+	stdout, stderr, code := hey(t, "move", intStr(postingID), "--to", "feedbox", "--json")
+	if code != 0 {
+		t.Skipf("moving postings is unavailable on this server (exit %d): %s", code, stderr)
+	}
+	t.Cleanup(func() {
+		_, cleanupStderr, cleanupCode := hey(t, "move", intStr(postingID), "--to", "imbox", "--json")
+		if cleanupCode != 0 {
+			t.Logf("could not restore posting %d to Imbox: %s", postingID, cleanupStderr)
+		}
+	})
+
+	var moveResp Response
+	if err := json.Unmarshal([]byte(stdout), &moveResp); err != nil {
+		t.Fatalf("failed to parse move response: %v", err)
+	}
+	assertContains(t, moveResp.Summary, "moved to The Feed")
+
+	feedResp := heyJSON(t, "box", "feedbox", "--all")
+	feed := dataAs[BoxResponse](t, feedResp)
+	for _, posting := range feed.Postings {
+		if posting.ID == postingID {
+			return
+		}
+	}
+	t.Errorf("posting %d did not appear in The Feed", postingID)
+}
+
+func TestMoveNoPostingID(t *testing.T) {
+	heyFail(t, "move", "--to", "feed", "--json")
+}
+
+func TestMoveNoDestination(t *testing.T) {
+	heyFail(t, "move", "12345", "--json")
+}
+
+func TestMoveRejectsBubbleUp(t *testing.T) {
+	heyFail(t, "move", "12345", "--to", "bubblebox", "--json")
+}
+
 func TestBoxNoArgument(t *testing.T) {
 	heyFail(t, "box", "--json")
 }

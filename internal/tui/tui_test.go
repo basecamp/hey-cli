@@ -230,6 +230,29 @@ func TestCalendarDetailHelpOmitsListActions(t *testing.T) {
 	}
 }
 
+func TestMovePickerOwnsNavigationKeys(t *testing.T) {
+	m := modelWithBoxes()
+	m.focus = rowContent
+
+	updated, _ := m.Update(keyPress("m"))
+	m = updated.(model)
+	if m.mailView.movePicker == nil || !m.mailView.CapturingInput() {
+		t.Fatal("m should open the move picker")
+	}
+
+	updated, _ = m.Update(keyPress("tab"))
+	m = updated.(model)
+	if m.focus != rowContent || m.mailView.movePicker == nil {
+		t.Error("tab should remain inside the move picker")
+	}
+
+	updated, _ = m.Update(keyPress("esc"))
+	m = updated.(model)
+	if m.mailView.movePicker != nil || m.mailView.CapturingInput() {
+		t.Error("escape should close the move picker")
+	}
+}
+
 func TestEscExitsThread(t *testing.T) {
 	m := modelWithBoxes()
 	m.mailView.inThread = true

@@ -24,6 +24,8 @@ triggers:
   # Seen/unseen
   - hey seen
   - hey unseen
+  - hey move
+  - move email
   - mark as read
   - mark as seen
   - mark as unseen
@@ -101,6 +103,7 @@ CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos,
 | Delete todo | `hey todo delete 123` |
 | Mark as seen | `hey seen 12345` |
 | Mark as unseen | `hey unseen 12345` |
+| Move postings | `hey move 12345 --to feed` |
 | Complete habit | `hey habit complete 123` |
 | Uncomplete habit | `hey habit uncomplete 123` |
 | Start time tracking | `hey timetrack start` |
@@ -125,6 +128,7 @@ Want to read email?
 ├── Read full thread? → hey threads <topic_id> --json
 ├── Mark as seen? → hey seen <posting-id>
 ├── Mark as unseen? → hey unseen <posting-id>
+├── Move to another box? → hey move <posting-id> --to <box>
 └── Launch interactive UI? → hey (no args, launches TUI)
 ```
 
@@ -200,6 +204,15 @@ hey unseen 12345 67890                        # Mark multiple postings as unseen
 ```
 
 Takes posting IDs (the `id` field from `hey box` output).
+
+### Email - Moving Postings
+
+```bash
+hey move 12345 --to imbox                     # Move one posting
+hey move 12345 67890 --to "paper trail"       # Move multiple postings
+```
+
+Takes posting IDs (the `id` field from `hey box --json`). `--to` accepts a box name, kind, or ID. Supported destinations are Imbox, The Feed, Set Aside, Reply Later, and Paper Trail. Bubble Up requires a scheduled date and is not supported by this command.
 
 ### Drafts
 
