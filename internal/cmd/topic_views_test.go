@@ -130,6 +130,31 @@ func TestTopicViewStyledOutput(t *testing.T) {
 	}
 }
 
+func TestTopicViewStyledOutputSanitizesUntrustedFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+  "title": "Sent",
+  "topics": [{
+    "id": 42,
+    "name": "Quarterly planning\u001b[31m\rnotes",
+    "creator": {"id": 7, "name": "Amanda\u001b[2J\nJones"}
+  }]
+}`))
+	}))
+	defer server.Close()
+
+	stdout, err := runTopicView(t, server, "sent", "--styled")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	for _, unsafe := range []string{"\x1b[31m", "\x1b[2J", "\r", "\nJones"} {
+		if strings.Contains(stdout, unsafe) {
+			t.Errorf("styled output contains unsafe text %q:\n%s", unsafe, stdout)
+		}
+	}
+}
+
 func TestTopicViewsRejectInvalidPageBeforeRequest(t *testing.T) {
 	for _, name := range []string{"sent", "spammed", "trashed", "everything"} {
 		t.Run(name, func(t *testing.T) {

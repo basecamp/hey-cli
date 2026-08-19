@@ -132,8 +132,8 @@ func (c *topicViewCommand) run(cmd *cobra.Command, _ []string) error {
 		for _, topic := range topics {
 			table.addRow([]string{
 				fmt.Sprintf("%d", topic.Id),
-				truncate(topic.Name, 48),
-				topicViewSender(topic),
+				truncate(terminalSafeText(topic.Name), 48),
+				terminalSafeText(topicViewSender(topic)),
 				formatDate(topicViewDate(topic)),
 			})
 		}
