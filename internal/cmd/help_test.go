@@ -27,7 +27,7 @@ func TestCuratedCommandHelpUsesUserFacingLanguage(t *testing.T) {
 
 func TestEmailCommandHelpKeepsPostingAsAnInternalTerm(t *testing.T) {
 	root := newRootCmd()
-	for _, name := range []string{"boxes", "box", "seen", "unseen", "move", "trash", "spam"} {
+	for _, name := range []string{"boxes", "box", "seen", "unseen", "move", "trash", "spam", "ignore", "stop-ignoring"} {
 		t.Run(name, func(t *testing.T) {
 			command, _, err := root.Find([]string{name})
 			if err != nil {
@@ -63,18 +63,20 @@ USAGE
   hey                     Open the interactive app
 
 EMAIL
-  boxes    List your HEY boxes
-  box      List email threads in a box
-  threads  Read a thread
-  compose  Write and send a new email
-  reply    Reply to a thread
-  forward  Forward the latest message in a thread
-  drafts   List draft emails
-  seen     Mark email threads as seen
-  unseen   Mark email threads as unseen
-  move     Move email threads to another box
-  trash    Move email threads to Trash
-  spam     Mark email threads as spam
+  boxes          List your HEY boxes
+  box            List email threads in a box
+  threads        Read a thread
+  compose        Write and send a new email
+  reply          Reply to a thread
+  forward        Forward the latest message in a thread
+  drafts         List draft emails
+  seen           Mark email threads as seen
+  unseen         Mark email threads as unseen
+  move           Move email threads to another box
+  trash          Move email threads to Trash
+  spam           Mark email threads as spam
+  ignore         Ignore email threads
+  stop-ignoring  Stop ignoring email threads
 
 CALENDAR & TASKS
   calendars   List calendars

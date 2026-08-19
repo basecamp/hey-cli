@@ -27,9 +27,13 @@ triggers:
   - hey move
   - hey trash
   - hey spam
+  - hey ignore
+  - hey stop-ignoring
   - move email
   - trash email
   - mark as spam
+  - ignore email thread
+  - stop ignoring email thread
   - mark as read
   - mark as seen
   - mark as unseen
@@ -110,6 +114,8 @@ CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos,
 | Move email threads | `hey move 12345 --to feed` |
 | Move email threads to Trash | `hey trash 12345` |
 | Mark email threads as spam | `hey spam 12345` |
+| Ignore email threads | `hey ignore 12345` |
+| Stop ignoring email threads | `hey stop-ignoring 12345` |
 | Complete habit | `hey habit complete 123` |
 | Uncomplete habit | `hey habit uncomplete 123` |
 | Start time tracking | `hey timetrack start` |
@@ -137,6 +143,8 @@ Want to read email?
 ├── Move to another box? → hey move <id> --to <box>
 ├── Move to Trash? → hey trash <id>
 ├── Mark as spam? → hey spam <id>
+├── Ignore future activity? → hey ignore <id>
+├── Stop ignoring? → hey stop-ignoring <id>
 └── Launch interactive UI? → hey (no args, launches TUI)
 ```
 
@@ -178,7 +186,7 @@ hey box 123 --json                            # List emails in box (by ID)
 
 Box names: `imbox`, `feedbox`, `trailbox`, `asidebox`, `laterbox`, `bubblebox`
 
-**Response format:** `hey box` returns `{"box": {...}, "postings": [...]}`. The `postings` array is the API representation of the email threads in that box. Each item has: `id` (box item ID), `topic_id` (thread ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`. Use `id` for `hey seen`, `hey unseen`, `hey move`, `hey trash`, and `hey spam`. Use `topic_id` for `hey threads`, `hey reply`, and `hey forward`.
+**Response format:** `hey box` returns `{"box": {...}, "postings": [...]}`. The `postings` array is the API representation of the email threads in that box. Each item has: `id` (box item ID), `topic_id` (thread ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`. Use `id` for `hey seen`, `hey unseen`, `hey move`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring`. Use `topic_id` for `hey threads`, `hey reply`, and `hey forward`.
 
 ### Email - Threads
 
@@ -187,7 +195,7 @@ hey threads <topic_id> --json                 # Read full email thread
 hey threads <topic_id> --html                 # Read with raw HTML content
 ```
 
-**ID note:** Every email thread returned by `hey box` has an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, `hey move`, `hey trash`, and `hey spam` expect `id`. `hey threads`, `hey reply`, and `hey forward` expect `topic_id`. The `app_url` field also contains the thread ID as a fallback (e.g. `https://app.hey.com/topics/123` → `123`).
+**ID note:** Every email thread returned by `hey box` has an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, `hey move`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring` expect `id`. `hey threads`, `hey reply`, and `hey forward` expect `topic_id`. The `app_url` field also contains the thread ID as a fallback (e.g. `https://app.hey.com/topics/123` → `123`).
 
 ### Email - Reply, Forward & Compose
 
@@ -232,6 +240,17 @@ hey spam 12345 67890                          # Mark multiple threads as spam
 ```
 
 Takes box item IDs (the `id` field from `hey box --json`). Trashing a shared thread removes your access instead of deleting it for everyone. Marking a thread as spam moves it to Spam and trains HEY's filters.
+
+### Email - Ignoring Threads
+
+```bash
+hey ignore 12345                              # Ignore one thread
+hey ignore 12345 67890                        # Ignore multiple threads
+hey stop-ignoring 12345                       # Stop ignoring one thread
+hey stop-ignoring 12345 67890                 # Stop ignoring multiple threads
+```
+
+Takes box item IDs (the `id` field from `hey box --json`). Ignored threads remain in their box; new replies do not bring them back to your attention. `hey stop-ignoring` reverses the action.
 
 ### Drafts
 

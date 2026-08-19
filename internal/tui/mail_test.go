@@ -75,7 +75,15 @@ func mailWithTestServer(t *testing.T, status int) (*mailView, *recordedMailReque
 		case "/messages/501.json":
 			_, _ = w.Write([]byte(`{"id":501,"subject":"Hello world","content":"<p>Message body</p>","created_at":"2026-08-19T09:00:00Z","creator":{"id":10,"name":"Alice"}}`))
 		default:
-			_ = json.NewDecoder(r.Body).Decode(&recorded.body)
+			if r.Method == http.MethodDelete {
+				for _, value := range strings.Split(r.URL.Query().Get("posting_ids"), ",") {
+					if id, err := strconv.ParseInt(value, 10, 64); err == nil {
+						recorded.body.PostingIDs = append(recorded.body.PostingIDs, id)
+					}
+				}
+			} else {
+				_ = json.NewDecoder(r.Body).Decode(&recorded.body)
+			}
 			w.WriteHeader(status)
 		}
 	}))
@@ -237,22 +245,21 @@ func TestMailViewIgnoresUnrelatedMessages(t *testing.T) {
 
 func TestMailViewPostingKeysCallExpectedEndpoints(t *testing.T) {
 	tests := []struct {
-		name    string
-		key     string
-		path    string
-		boxID   int64
-		removes bool
-		notice  string
-		seen    bool
+		name   string
+		key    string
+		path   string
+		boxID  int64
+		effect postingActionEffect
+		notice string
 	}{
-		{"reply later", "l", "/postings/moves.json", 4, true, "Thread moved to Reply Later", false},
-		{"set aside", "a", "/postings/moves.json", 3, true, "Thread moved to Set Aside", false},
-		{"seen", "e", "/postings/seen.json", 0, false, "Thread marked as seen", true},
-		{"feed", "d", "/postings/moves.json", 2, true, "Thread moved to The Feed", false},
-		{"paper trail", "p", "/postings/moves.json", 5, true, "Thread moved to Paper Trail", false},
-		{"trash", "t", "/postings/trash.json", 0, true, "Thread moved to Trash", false},
-		{"spam", "s", "/postings/spam.json", 0, true, "Thread marked as spam", false},
-		{"mute", "-", "/postings/mutings.json", 0, true, "Thread muted", false},
+		{"reply later", "l", "/postings/moves.json", 4, postingActionRemove, "Thread moved to Reply Later"},
+		{"set aside", "a", "/postings/moves.json", 3, postingActionRemove, "Thread moved to Set Aside"},
+		{"seen", "e", "/postings/seen.json", 0, postingActionSeen, "Thread marked as seen"},
+		{"feed", "d", "/postings/moves.json", 2, postingActionRemove, "Thread moved to The Feed"},
+		{"paper trail", "p", "/postings/moves.json", 5, postingActionRemove, "Thread moved to Paper Trail"},
+		{"trash", "t", "/postings/trash.json", 0, postingActionRemove, "Thread moved to Trash"},
+		{"spam", "s", "/postings/spam.json", 0, postingActionRemove, "Thread marked as spam"},
+		{"ignore", "-", "/postings/mutings.json", 0, postingActionIgnore, "Thread ignored"},
 	}
 
 	for _, tt := range tests {
@@ -266,6 +273,9 @@ func TestMailViewPostingKeysCallExpectedEndpoints(t *testing.T) {
 			}
 			if done.boxID != 1 || done.postingID != 100 {
 				t.Errorf("action origin = box %d posting %d, want box 1 posting 100", done.boxID, done.postingID)
+			}
+			if done.effect != tt.effect {
+				t.Errorf("action effect = %v, want %v", done.effect, tt.effect)
 			}
 			v.Update(done)
 
@@ -286,17 +296,76 @@ func TestMailViewPostingKeysCallExpectedEndpoints(t *testing.T) {
 			}
 
 			wantPostings := 2
-			if tt.removes {
+			if tt.effect == postingActionRemove {
 				wantPostings = 1
 			}
 			if len(v.postingList.postings) != wantPostings {
 				t.Errorf("posting count = %d, want %d", len(v.postingList.postings), wantPostings)
 			}
-			if tt.seen && !v.postingList.postings[0].Seen {
+			if tt.effect == postingActionSeen && !v.postingList.postings[0].Seen {
 				t.Error("selected posting should be marked seen")
+			}
+			if tt.effect == postingActionIgnore && !v.postingList.postings[0].Muted {
+				t.Error("selected posting should be ignored")
 			}
 			if v.notice != tt.notice || !strings.Contains(v.View(), tt.notice) {
 				t.Errorf("notice = %q, want visible %q", v.notice, tt.notice)
+			}
+		})
+	}
+}
+
+func TestMailViewStopIgnoringCallsDeleteAndKeepsThreadVisible(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v.postingList.postings[0].Muted = true
+
+	msg := runCmd(v.HandleContentKey(keyPress("+")))
+	done, ok := msg.(postingActionDoneMsg)
+	if !ok || done.err != nil {
+		t.Fatalf("stop-ignoring command returned %#v", msg)
+	}
+	if recorded.method != http.MethodDelete || recorded.path != "/postings/mutings.json" {
+		t.Errorf("request = %s %s, want DELETE /postings/mutings.json", recorded.method, recorded.path)
+	}
+	if len(recorded.body.PostingIDs) != 1 || recorded.body.PostingIDs[0] != 100 {
+		t.Errorf("posting_ids = %v, want [100]", recorded.body.PostingIDs)
+	}
+
+	v.Update(done)
+	if len(v.postingList.postings) != 2 {
+		t.Errorf("posting count = %d, want ignored thread to remain visible", len(v.postingList.postings))
+	}
+	if v.postingList.postings[0].Muted {
+		t.Error("selected posting should no longer be ignored")
+	}
+	if v.notice != "Stopped ignoring thread" {
+		t.Errorf("notice = %q, want %q", v.notice, "Stopped ignoring thread")
+	}
+}
+
+func TestMailViewIgnoreActionsSkipThreadsAlreadyInRequestedState(t *testing.T) {
+	tests := []struct {
+		name   string
+		key    string
+		muted  bool
+		notice string
+	}{
+		{"already ignored", "-", true, "Already ignoring thread"},
+		{"not ignored", "+", false, "Thread is not ignored"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v, recorded := mailWithTestServer(t, http.StatusNoContent)
+			v.postingList.postings[0].Muted = tt.muted
+			if cmd := v.HandleContentKey(keyPress(tt.key)); cmd != nil {
+				t.Fatal("redundant action should not start a request")
+			}
+			if len(recorded.requests) != 0 {
+				t.Errorf("redundant action made requests: %v", recorded.requests)
+			}
+			if v.notice != tt.notice {
+				t.Errorf("notice = %q, want %q", v.notice, tt.notice)
 			}
 		})
 	}
@@ -456,7 +525,7 @@ func TestMailViewPostingActionCopiesSelectedPostingBeforeAsyncRequest(t *testing
 
 	cmd := v.HandleContentKey(keyPress("t"))
 	v.Update(postingActionDoneMsg{
-		action: "Thread moved to Trash", boxID: 1, postingID: 100, removes: true,
+		action: "Thread moved to Trash", boxID: 1, postingID: 100, effect: postingActionRemove,
 	})
 	done, ok := runCmd(cmd).(postingActionDoneMsg)
 	if !ok {
@@ -480,7 +549,7 @@ func TestMailViewPostingCompletionInvalidatesConcurrentReload(t *testing.T) {
 	stale := currentPostingsLoaded(v, testPostings())
 
 	refresh, consumed := v.Update(postingActionDoneMsg{
-		action: "Thread moved to Trash", boxID: 1, postingID: 100, removes: true,
+		action: "Thread moved to Trash", boxID: 1, postingID: 100, effect: postingActionRemove,
 	})
 	if !consumed || refresh == nil {
 		t.Fatal("action completion should replace a concurrent reload with a fresh reload")
@@ -570,7 +639,7 @@ func TestMailViewPostingActionRemoves(t *testing.T) {
 		t.Fatalf("expected 2 postings, got %d", len(v.postingList.postings))
 	}
 
-	v.Update(postingActionDoneMsg{action: "Thread moved to Trash", boxID: 1, postingID: 100, removes: true})
+	v.Update(postingActionDoneMsg{action: "Thread moved to Trash", boxID: 1, postingID: 100, effect: postingActionRemove})
 	if len(v.postingList.postings) != 1 {
 		t.Errorf("expected 1 posting after remove, got %d", len(v.postingList.postings))
 	}
@@ -582,7 +651,7 @@ func TestMailViewPostingActionMarksSeen(t *testing.T) {
 		t.Fatal("first posting should be unseen")
 	}
 
-	v.Update(postingActionDoneMsg{action: "Thread marked as seen", boxID: 1, postingID: 100})
+	v.Update(postingActionDoneMsg{action: "Thread marked as seen", boxID: 1, postingID: 100, effect: postingActionSeen})
 	if !v.postingList.postings[0].Seen {
 		t.Error("first posting should be seen after action")
 	}
@@ -1051,6 +1120,15 @@ func TestMailViewRendersPostings(t *testing.T) {
 	}
 }
 
+func TestMailViewRendersIgnoredThread(t *testing.T) {
+	v := mailWithPostings()
+	v.Resize(80, 30)
+	v.postingList.postings[0].Muted = true
+	if view := v.View(); !strings.Contains(view, "[Ignored] Hello world") {
+		t.Errorf("ignored thread state is not visible: %q", view)
+	}
+}
+
 func TestMailViewRendersEmptyList(t *testing.T) {
 	v := newMailView(testVC())
 	v.Resize(80, 30)
@@ -1073,11 +1151,24 @@ func TestMailViewHelpBindings(t *testing.T) {
 	for _, b := range bindings {
 		keys[b.key] = true
 	}
-	for _, expected := range []string{"r", "f", "m", "e", "l", "a", "t", "s"} {
+	for _, expected := range []string{"r", "f", "m", "e", "l", "a", "t", "s", "-"} {
 		if !keys[expected] {
 			t.Errorf("missing help binding for key %q", expected)
 		}
 	}
+}
+
+func TestMailViewHelpBindingsStopIgnoringForIgnoredThread(t *testing.T) {
+	v := mailWithPostings()
+	v.postingList.postings[0].Muted = true
+
+	bindings := v.HelpBindings()
+	for _, binding := range bindings {
+		if binding.key == "+" && binding.desc == "stop ignoring" {
+			return
+		}
+	}
+	t.Errorf("ignored thread help does not offer stop ignoring: %v", bindings)
 }
 
 func TestMailViewHelpBindingsInMovePicker(t *testing.T) {

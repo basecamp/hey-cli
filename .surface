@@ -53,6 +53,7 @@ hey habit complete
 hey habit complete --date
 hey habit uncomplete
 hey habit uncomplete --date
+hey ignore
 hey journal
 hey journal list
 hey journal list --all
@@ -74,6 +75,7 @@ hey setup
 hey skill
 hey skill install
 hey spam
+hey stop-ignoring
 hey threads
 hey timetrack
 hey timetrack current

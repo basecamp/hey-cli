@@ -48,11 +48,21 @@ type topicLoadedMsg struct {
 	err       error
 }
 
+type postingActionEffect int
+
+const (
+	postingActionNone postingActionEffect = iota
+	postingActionRemove
+	postingActionSeen
+	postingActionIgnore
+	postingActionStopIgnoring
+)
+
 type postingActionDoneMsg struct {
 	action    string
 	boxID     int64
 	postingID int64
-	removes   bool
+	effect    postingActionEffect
 	err       error
 }
 
@@ -194,17 +204,25 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.notice = msg.action
 		idx := v.postingIndex(msg.postingID)
-		if msg.removes && idx >= 0 {
-			v.postingList.postings = append(v.postingList.postings[:idx], v.postingList.postings[idx+1:]...)
-			if v.postingList.cursor > idx {
-				v.postingList.cursor--
+		if idx >= 0 {
+			switch msg.effect {
+			case postingActionNone:
+			case postingActionRemove:
+				v.postingList.postings = append(v.postingList.postings[:idx], v.postingList.postings[idx+1:]...)
+				if v.postingList.cursor > idx {
+					v.postingList.cursor--
+				}
+				if v.postingList.cursor >= len(v.postingList.postings) && v.postingList.cursor > 0 {
+					v.postingList.cursor--
+				}
+				v.postingList.ensureVisible()
+			case postingActionSeen:
+				v.postingList.postings[idx].Seen = true
+			case postingActionIgnore:
+				v.postingList.postings[idx].Muted = true
+			case postingActionStopIgnoring:
+				v.postingList.postings[idx].Muted = false
 			}
-			if v.postingList.cursor >= len(v.postingList.postings) && v.postingList.cursor > 0 {
-				v.postingList.cursor--
-			}
-			v.postingList.ensureVisible()
-		} else if msg.action == "Thread marked as seen" && idx >= 0 {
-			v.postingList.postings[idx].Seen = true
 		}
 		if v.activeRequestKind == mailRequestPostings {
 			return v.requestPostings(v.currentBoxID()), true
@@ -260,6 +278,10 @@ func (v *mailView) HelpBindings() []helpBinding {
 	if v.inThread {
 		return []helpBinding{{"r", "reply"}, {"f", "forward"}}
 	}
+	ignoreBinding := helpBinding{"-", "ignore"}
+	if selected := v.postingList.selectedPosting(); selected != nil && selected.Muted {
+		ignoreBinding = helpBinding{"+", "stop ignoring"}
+	}
 	return []helpBinding{
 		{"c", "compose"},
 		{"r", "reply"},
@@ -272,7 +294,7 @@ func (v *mailView) HelpBindings() []helpBinding {
 		{"p", "paper trail"},
 		{"t", "trash"},
 		{"s", "spam"},
-		{"-", "mute"},
+		ignoreBinding,
 	}
 }
 
@@ -489,7 +511,7 @@ func (v *mailView) startMove() {
 }
 
 func (v *mailView) movePostingToBox(postingID int64, destination models.Box) tea.Cmd {
-	return v.doPostingAction("Thread moved to "+destination.Name, true, v.currentBoxID(), postingID, func() error {
+	return v.doPostingAction("Thread moved to "+destination.Name, postingActionRemove, v.currentBoxID(), postingID, func() error {
 		return v.vc.sdk.Postings().Move(v.vc.ctx, destination.ID, postingID)
 	})
 }
@@ -512,7 +534,7 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 			return v.vc.sdk.Postings().MoveToSetAside(v.vc.ctx, p.ID)
 		})
 	case "e":
-		return v.doPostingAction("Thread marked as seen", false, boxID, p.ID, func() error {
+		return v.doPostingAction("Thread marked as seen", postingActionSeen, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MarkSeen(v.vc.ctx, []int64{p.ID})
 		})
 	case "d":
@@ -524,16 +546,28 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 			return v.vc.sdk.Postings().MoveToPaperTrail(v.vc.ctx, p.ID)
 		})
 	case "t":
-		return v.doPostingAction("Thread moved to Trash", true, boxID, p.ID, func() error {
+		return v.doPostingAction("Thread moved to Trash", postingActionRemove, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MoveToTrash(v.vc.ctx, p.ID)
 		})
 	case "s":
-		return v.doPostingAction("Thread marked as spam", true, boxID, p.ID, func() error {
+		return v.doPostingAction("Thread marked as spam", postingActionRemove, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MarkSpam(v.vc.ctx, p.ID)
 		})
 	case "-":
-		return v.doPostingAction("Thread muted", true, boxID, p.ID, func() error {
+		if p.Muted {
+			v.notice = "Already ignoring thread"
+			return nil
+		}
+		return v.doPostingAction("Thread ignored", postingActionIgnore, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().Mute(v.vc.ctx, p.ID)
+		})
+	case "+":
+		if !p.Muted {
+			v.notice = "Thread is not ignored"
+			return nil
+		}
+		return v.doPostingAction("Stopped ignoring thread", postingActionStopIgnoring, boxID, p.ID, func() error {
+			return v.vc.sdk.Postings().Unmute(v.vc.ctx, p.ID)
 		})
 	case "r":
 		topicID := p.ResolveTopicID()
@@ -556,7 +590,7 @@ func (v *mailView) moveSelectedToKnownBox(name, kind string, boxID, postingID in
 		v.notice = "Already in " + name
 		return nil
 	}
-	return v.doPostingAction("Thread moved to "+name, true, boxID, postingID, fn)
+	return v.doPostingAction("Thread moved to "+name, postingActionRemove, boxID, postingID, fn)
 }
 
 func (v *mailView) movesOutOfCurrentBox(destinationKind string) bool {
@@ -566,14 +600,14 @@ func (v *mailView) movesOutOfCurrentBox(destinationKind string) bool {
 	return !strings.EqualFold(v.boxes[v.boxIndex].Kind, destinationKind)
 }
 
-func (v *mailView) doPostingAction(label string, removes bool, boxID, postingID int64, fn func() error) tea.Cmd {
+func (v *mailView) doPostingAction(label string, effect postingActionEffect, boxID, postingID int64, fn func() error) tea.Cmd {
 	return func() tea.Msg {
 		err := fn()
 		return postingActionDoneMsg{
 			action:    label,
 			boxID:     boxID,
 			postingID: postingID,
-			removes:   removes,
+			effect:    effect,
 			err:       err,
 		}
 	}

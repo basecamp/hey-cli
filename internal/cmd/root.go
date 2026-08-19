@@ -135,6 +135,8 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newMoveCommand().cmd)
 	root.AddCommand(newTrashCommand().cmd)
 	root.AddCommand(newSpamCommand().cmd)
+	root.AddCommand(newIgnoreCommand().cmd)
+	root.AddCommand(newStopIgnoringCommand().cmd)
 	root.AddCommand(newSetupCommand())
 	root.AddCommand(newTuiCommand().cmd)
 	root.AddCommand(newSkillCommand().cmd)

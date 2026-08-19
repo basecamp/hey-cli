@@ -126,6 +126,9 @@ func (c *contentList) view() string {
 		if subject == "" {
 			subject = p.Creator.Name
 		}
+		if p.Muted {
+			subject = "[Ignored] " + subject
+		}
 		if p.VisibleEntryCount > 1 {
 			subject += fmt.Sprintf(" (%d)", p.VisibleEntryCount)
 		}
