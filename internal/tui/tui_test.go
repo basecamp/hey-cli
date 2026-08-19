@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/hey-cli/internal/models"
 )
@@ -460,6 +461,15 @@ func TestContentListSelectedPosting(t *testing.T) {
 }
 
 // --- View rendering ---
+
+func TestRenderRuleBoundsLongLabels(t *testing.T) {
+	for _, width := range []int{1, 10, 24} {
+		rule := renderRule(width, "Search: a query that is much wider than the terminal (page 1)")
+		if got := lipgloss.Width(rule); got != width {
+			t.Errorf("renderRule(%d) width = %d, want %d: %q", width, got, width, rule)
+		}
+	}
+}
 
 func TestViewShowsHeader(t *testing.T) {
 	m := modelWithBoxes()

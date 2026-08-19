@@ -149,9 +149,13 @@ func journalNavItems(dates []string) []navItem {
 //
 //	——————————————————— label ———————————————————
 func renderRule(width int, label string) string {
-	if label == "" {
+	if width <= 0 {
+		return ""
+	}
+	if label == "" || width < 3 {
 		return lipgloss.NewStyle().Foreground(colorMuted).Render(strings.Repeat("─", width))
 	}
+	label = truncateStr(label, width-2)
 	padded := " " + label + " "
 	padLen := lipgloss.Width(padded)
 	ruleLen := max(width-padLen, 0)
