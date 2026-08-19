@@ -12,6 +12,7 @@ import (
 var (
 	entryBlockRe     = regexp.MustCompile(`(?s)data-entry-id="(\d+)"`)
 	senderRe         = regexp.MustCompile(`id="sender_entry_(\d+)"[^>]*>\s*([^<]+?)\s*<`)
+	senderEmailRe    = regexp.MustCompile(`(?s)sender_entry_(\d+).*?entry__sender-email[^>]*><span[^>]*>[^<]*</span>([^<]+)<`)
 	timeRe           = regexp.MustCompile(`<time[^>]*datetime="([^"]+)"`)
 	srcdocRe         = regexp.MustCompile(`(?s)srcdoc="([^"]*trix-content[^"]*)"`)
 	fullRecipientsRe = regexp.MustCompile(`(?s)entry__full-recipients[^>]*>(.*?)</span>`)
@@ -86,6 +87,12 @@ func ParseTopicEntriesHTML(html string) []models.Entry {
 			senders[m[1]] = m[2]
 		}
 	}
+	senderEmails := map[string]string{}
+	for _, m := range senderEmailRe.FindAllStringSubmatch(html, -1) {
+		if _, exists := senderEmails[m[1]]; !exists {
+			senderEmails[m[1]] = strings.TrimSpace(m[2])
+		}
+	}
 
 	// Associate times with entries by finding the first <time> after each entry anchor
 	entryTimes := map[string]string{}
@@ -97,6 +104,35 @@ func ParseTopicEntriesHTML(html string) []models.Entry {
 		}
 		if m := timeRe.FindStringSubmatch(html[idx:]); m != nil {
 			entryTimes[eid] = m[1]
+		}
+	}
+
+	// Associate recipients with entries by slicing between entry anchors.
+	entryRecipients := map[string][]models.Contact{}
+	for i, eid := range entryIDs {
+		anchor := fmt.Sprintf(`id="entry_%s"`, eid)
+		start := strings.Index(html, anchor)
+		if start < 0 {
+			continue
+		}
+		end := len(html)
+		if i+1 < len(entryIDs) {
+			nextAnchor := fmt.Sprintf(`id="entry_%s"`, entryIDs[i+1])
+			if n := strings.Index(html[start:], nextAnchor); n > 0 {
+				end = start + n
+			}
+		}
+		m := fullRecipientsRe.FindStringSubmatch(html[start:end])
+		if m == nil {
+			continue
+		}
+		seen := map[string]bool{}
+		for _, addr := range extractEmails(m[1]) {
+			if seen[addr] {
+				continue
+			}
+			seen[addr] = true
+			entryRecipients[eid] = append(entryRecipients[eid], models.Contact{EmailAddress: addr})
 		}
 	}
 
@@ -122,7 +158,10 @@ func ParseTopicEntriesHTML(html string) []models.Entry {
 			CreatedAt: entryTimes[eid],
 		}
 		if name, ok := senders[eid]; ok {
-			e.Creator = models.Contact{Name: name}
+			e.Creator = models.Contact{Name: name, EmailAddress: senderEmails[eid]}
+		}
+		if recips, ok := entryRecipients[eid]; ok {
+			e.Recipients = recips
 		}
 		if i < len(bodies) {
 			e.Body = bodies[i].text
