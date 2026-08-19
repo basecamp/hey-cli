@@ -71,8 +71,28 @@ func (c *contactsUpdateCommand) run(cmd *cobra.Command, args []string) error {
 	if aliasesChanged {
 		params.AliasEmailAddresses = cleanContactAliases(c.aliases)
 	}
-	if params.EmailAddress != "" {
-		if validationErr := validateDistinctContactEmails(params.EmailAddress, params.AliasEmailAddresses); validationErr != nil {
+	if emailChanged || aliasesChanged {
+		validationEmail := params.EmailAddress
+		validationAliases := params.AliasEmailAddresses
+		if validationEmail == "" || validationAliases == nil {
+			current, getErr := sdk.Contacts().Get(cmd.Context(), contactID)
+			if getErr != nil {
+				return convertSDKError(getErr)
+			}
+			if current == nil {
+				return output.ErrNotFound("contact", args[0])
+			}
+			if validationEmail == "" {
+				validationEmail = current.EmailAddress
+			}
+			if validationAliases == nil {
+				validationAliases = make([]string, 0, len(current.Aliases))
+				for _, alias := range current.Aliases {
+					validationAliases = append(validationAliases, alias.EmailAddress)
+				}
+			}
+		}
+		if validationErr := validateDistinctContactEmails(validationEmail, validationAliases); validationErr != nil {
 			return validationErr
 		}
 	}

@@ -237,8 +237,17 @@ func TestContactsUpdateClearsAliases(t *testing.T) {
 		t.Fatal(err)
 	}
 	requests := recorded.snapshot()
+	var patch recordedContactRequest
+	for _, request := range requests {
+		if request.Method == http.MethodPatch {
+			patch = request
+		}
+	}
+	if patch.Method == "" {
+		t.Fatalf("requests contain no PATCH: %+v", requests)
+	}
 	var body generated.ContactRequestContent
-	if err := json.Unmarshal(requests[1].Body, &body); err != nil {
+	if err := json.Unmarshal(patch.Body, &body); err != nil {
 		t.Fatal(err)
 	}
 	if body.Contact.AliasEmailAddresses != nil {
@@ -246,6 +255,28 @@ func TestContactsUpdateClearsAliases(t *testing.T) {
 	}
 	if body.Contact.Name != "Jane Doe" || body.Contact.EmailAddress != "jane@example.com" {
 		t.Errorf("clear-alias update did not preserve contact fields: %+v", body.Contact)
+	}
+}
+
+func TestContactsUpdateValidatesAliasesAgainstExistingPrimary(t *testing.T) {
+	tests := [][]string{
+		{"update", "7", "--alias", "jane@example.com"},
+		{"update", "7", "--alias", "duplicate@example.org", "--alias", "duplicate@example.org"},
+	}
+	for _, args := range tests {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			server, recorded := contactsServer(t)
+			_, err := runContacts(t, server, args...)
+			var cliErr *apierr.Error
+			if !errors.As(err, &cliErr) || cliErr.Code != "usage" {
+				t.Fatalf("error = %v, want usage", err)
+			}
+			for _, request := range recorded.snapshot() {
+				if request.Method == http.MethodPatch {
+					t.Errorf("invalid aliases reached PATCH: %+v", recorded.snapshot())
+				}
+			}
+		})
 	}
 }
 
