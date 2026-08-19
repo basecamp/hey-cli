@@ -87,6 +87,7 @@ hey journal list --limit
 hey journal read
 hey journal write
 hey journal write --content
+hey mark-spam
 hey move
 hey move --to
 hey recordings
@@ -97,6 +98,7 @@ hey recordings --starts-on
 hey reply
 hey reply --attach
 hey reply --message
+hey restore
 hey search
 hey search --all
 hey search --any

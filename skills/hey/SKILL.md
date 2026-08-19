@@ -18,6 +18,8 @@ triggers:
   - hey forward
   - hey compose
   - hey drafts
+  - hey restore
+  - hey mark-spam
   # Calendar actions
   - hey calendars
   - hey recordings
@@ -98,6 +100,7 @@ CLI for HEY: mailboxes, email threads, contacts, replies, compose, calendars, to
 1. **Always use `--json`** for structured, predictable output
 2. **Authentication required** for all data commands — run `hey auth login` first
 3. **HTML output** is available via `--html` for commands that return HTML content
+4. **Confirm the exact ID before topic controls** because restore and mark-spam change mailbox state
 
 ## Quick Reference
 
@@ -122,6 +125,8 @@ CLI for HEY: mailboxes, email threads, contacts, replies, compose, calendars, to
 | Compose email | `hey compose --to user@example.com --subject "Hello"` |
 | Compose with CC/BCC | `hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Hello"` |
 | List drafts | `hey drafts --json` |
+| Restore from Trash | Confirm first, then `hey restore <topic_id> --json` |
+| Mark one entry as spam | Confirm first, then `hey mark-spam <entry_id> --json` |
 | List calendars | `hey calendars --json` |
 | List calendar events | `hey recordings 123 --json` |
 | List todos | `hey todo list --json` |
@@ -161,6 +166,8 @@ Want to read email?
 ├── Need available refinements? → hey search filters --json
 ├── List or view contacts? → hey contacts list --json / hey contacts show <id> --json
 ├── Read full thread? → hey threads <topic_id> --json
+├── Restore a trashed topic? → confirm first, then hey restore <topic_id> --json
+├── Mark one entry as spam? → confirm first, then hey mark-spam <entry_id> --json
 ├── Mark as seen? → hey seen <id>
 ├── Mark as unseen? → hey unseen <id>
 ├── Move to another box? → hey move <id> --to <box>
