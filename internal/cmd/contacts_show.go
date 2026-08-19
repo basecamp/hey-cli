@@ -109,6 +109,8 @@ func printContactDetails(cmd *cobra.Command, result contactShowResult) {
 	fmt.Fprintln(w, "\nPrivate note:")
 	if result.Note == "" {
 		fmt.Fprintln(w, "(empty)")
+	} else if htmlOutput && result.NoteHTML != "" {
+		fmt.Fprintln(w, result.NoteHTML)
 	} else {
 		fmt.Fprintln(w, result.Note)
 	}

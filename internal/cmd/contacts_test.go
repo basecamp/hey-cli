@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
+	"github.com/spf13/cobra"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
@@ -164,6 +165,24 @@ func TestContactsShowIncludesAliasesAndPrivateNote(t *testing.T) {
 	requests := recorded.snapshot()
 	if len(requests) != 2 {
 		t.Fatalf("requests = %d, want contact and note", len(requests))
+	}
+}
+
+func TestContactsShowHonorsHTMLOutput(t *testing.T) {
+	original := htmlOutput
+	htmlOutput = true
+	t.Cleanup(func() { htmlOutput = original })
+
+	var output bytes.Buffer
+	command := &cobra.Command{}
+	command.SetOut(&output)
+	printContactDetails(command, contactShowResult{
+		ContactDetail: generated.ContactDetail{Id: 7, Name: "Jane Doe", EmailAddress: "jane@example.com"},
+		Note:          "Plain note",
+		NoteHTML:      "<p>Rich note</p>",
+	})
+	if !strings.Contains(output.String(), "<p>Rich note</p>") || strings.Contains(output.String(), "Plain note") {
+		t.Errorf("HTML contact detail output = %q", output.String())
 	}
 }
 
