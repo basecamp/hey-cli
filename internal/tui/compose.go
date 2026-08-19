@@ -17,6 +17,7 @@ import (
 // replyContextLoadedMsg carries what a reply needs from the thread: the entry to
 // reply to and who the thread is addressed to.
 type replyContextLoadedMsg struct {
+	boxID     int64
 	topicID   int64
 	topicName string
 	entryID   int64
@@ -281,22 +282,24 @@ func (v *mailView) startCompose() tea.Cmd {
 func (v *mailView) loadReplyContext(topicID int64, topicName string) tea.Cmd {
 	ctx := v.vc.ctx
 	sdk := v.vc.sdk
+	boxID := v.currentBoxID()
 	return func() tea.Msg {
 		topicResp, err := sdk.GetHTML(ctx, fmt.Sprintf("/topics/%d", topicID))
 		if err != nil {
-			return replyContextLoadedMsg{err: err}
+			return replyContextLoadedMsg{boxID: boxID, err: err}
 		}
 		addressed := htmlutil.ParseTopicAddressed(string(topicResp.Data))
 
 		entriesResp, err := sdk.GetHTML(ctx, fmt.Sprintf("/topics/%d/entries", topicID))
 		if err != nil {
-			return replyContextLoadedMsg{err: err}
+			return replyContextLoadedMsg{boxID: boxID, err: err}
 		}
 		entries := htmlutil.ParseTopicEntriesHTML(string(entriesResp.Data))
 		if len(entries) == 0 {
-			return replyContextLoadedMsg{err: fmt.Errorf("no entries found in thread %d", topicID)}
+			return replyContextLoadedMsg{boxID: boxID, err: fmt.Errorf("no entries found in thread %d", topicID)}
 		}
 		return replyContextLoadedMsg{
+			boxID:     boxID,
 			topicID:   topicID,
 			topicName: topicName,
 			entryID:   entries[len(entries)-1].ID,

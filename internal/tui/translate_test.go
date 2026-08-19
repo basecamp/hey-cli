@@ -66,6 +66,35 @@ func TestSDKBoxToModel(t *testing.T) {
 	}
 }
 
+func TestSDKMessageToEntry(t *testing.T) {
+	created := time.Date(2026, 8, 18, 9, 30, 0, 0, time.UTC)
+	updated := time.Date(2026, 8, 18, 11, 0, 0, 0, time.UTC)
+
+	got := sdkMessageToEntry(generated.Entry{
+		Id: 501, Kind: "message", Summary: "Thread summary", CreatedAt: created,
+		AlternativeSenderName: "Support", AppUrl: "https://app.hey.com/messages/501",
+		Creator: generated.Contact{Id: 42, Name: "Jane Dawson", EmailAddress: "jane@example.com"},
+	}, generated.Message{
+		Id: 501, Subject: "Thread subject", Content: "<p>Message body</p>", UpdatedAt: updated,
+	})
+
+	if got.ID != 501 || got.Kind != "message" || got.Summary != "Thread summary" {
+		t.Errorf("identity fields wrong: %+v", got)
+	}
+	if got.CreatedAt != "2026-08-18T09:30:00Z" || got.UpdatedAt != "2026-08-18T11:00:00Z" {
+		t.Errorf("timestamps = %q / %q", got.CreatedAt, got.UpdatedAt)
+	}
+	if got.Body != "<p>Message body</p>" || got.BodyHTML != got.Body {
+		t.Errorf("body = %q / %q", got.Body, got.BodyHTML)
+	}
+	if got.Creator.ID != 42 || got.Creator.EmailAddress != "jane@example.com" {
+		t.Errorf("creator = %+v", got.Creator)
+	}
+	if got.AlternativeSenderName != "Support" || got.AppURL != "https://app.hey.com/messages/501" {
+		t.Errorf("sender or URL wrong: %+v", got)
+	}
+}
+
 func TestSDKCalendarToModel(t *testing.T) {
 	got := sdkCalendarToModel(generated.Calendar{
 		Id: 4732, Name: "Rob Zolkos", Kind: "personal",

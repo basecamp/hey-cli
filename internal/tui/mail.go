@@ -9,7 +9,6 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
-	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/models"
 )
 
@@ -22,9 +21,11 @@ type postingsLoadedMsg struct {
 }
 
 type topicLoadedMsg struct {
+	boxID   int64
 	title   string
 	entries []models.Entry
 	images  [][]byte
+	err     error
 }
 
 type postingActionDoneMsg struct {
@@ -92,7 +93,13 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 
 	case topicLoadedMsg:
+		if msg.boxID != v.currentBoxID() {
+			return nil, true
+		}
 		v.loading = false
+		if msg.err != nil {
+			return func() tea.Msg { return errMsg{msg.err} }, true
+		}
 		v.inThread = true
 		v.topicContent = v.renderEntries(msg.entries)
 		v.topicViewport.SetContent(v.topicContent)
@@ -112,6 +119,9 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 
 	case replyContextLoadedMsg:
+		if msg.boxID != v.currentBoxID() {
+			return nil, true
+		}
 		v.loading = false
 		if msg.err != nil {
 			return func() tea.Msg { return errMsg{msg.err} }, true
@@ -134,11 +144,11 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 
 	case postingActionDoneMsg:
-		if msg.boxID != v.currentBoxID() {
-			return nil, true
-		}
 		if msg.err != nil {
 			return func() tea.Msg { return errMsg{msg.err} }, true
+		}
+		if msg.boxID != v.currentBoxID() {
+			return nil, true
 		}
 		v.notice = msg.action
 		idx := v.postingIndex(msg.postingID)
@@ -150,6 +160,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			if v.postingList.cursor >= len(v.postingList.postings) && v.postingList.cursor > 0 {
 				v.postingList.cursor--
 			}
+			v.postingList.ensureVisible()
 		} else if msg.action == "marked as seen" && idx >= 0 {
 			v.postingList.postings[idx].Seen = true
 		}
@@ -337,7 +348,7 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 
 	switch key {
 	case "l":
-		return v.doPostingAction("moved to Reply Later", false, boxID, p.ID, func() error {
+		return v.doPostingAction("moved to Reply Later", true, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MoveToReplyLater(v.vc.ctx, p.ID)
 		})
 	case "a":
@@ -440,6 +451,46 @@ func sdkExtenzionsToModel(exts []generated.Extenzion) []models.Extenzion {
 	return result
 }
 
+func sdkMessageToEntry(entry generated.Entry, message generated.Message) models.Entry {
+	creator := entry.Creator
+	if creator.Id == 0 {
+		creator = message.Creator
+	}
+	createdAt := entry.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = message.CreatedAt
+	}
+	updatedAt := entry.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = message.UpdatedAt
+	}
+	summary := entry.Summary
+	if summary == "" {
+		summary = message.Subject
+	}
+	appURL := entry.AppUrl
+	if appURL == "" {
+		appURL = message.Url
+	}
+
+	return models.Entry{
+		ID:                    entry.Id,
+		CreatedAt:             formatTimestamp(createdAt),
+		UpdatedAt:             formatTimestamp(updatedAt),
+		AlternativeSenderName: entry.AlternativeSenderName,
+		Summary:               summary,
+		Kind:                  entry.Kind,
+		AppURL:                appURL,
+		Body:                  message.Content,
+		BodyHTML:              message.Content,
+		Creator: models.Contact{
+			ID:           creator.Id,
+			Name:         creator.Name,
+			EmailAddress: creator.EmailAddress,
+		},
+	}
+}
+
 // --- Fetch commands ---
 
 func (v *mailView) fetchBoxes() tea.Cmd {
@@ -475,16 +526,31 @@ func (v *mailView) fetchPostings(boxID int64) tea.Cmd {
 }
 
 func (v *mailView) fetchTopic(topicID int64, title string) tea.Cmd {
+	boxID := v.currentBoxID()
 	return func() tea.Msg {
-		resp, err := v.vc.sdk.GetHTML(v.vc.ctx, fmt.Sprintf("/topics/%d/entries", topicID))
+		topic, err := v.vc.sdk.Topics().Get(v.vc.ctx, topicID)
 		if err != nil {
-			return errMsg{err}
+			return topicLoadedMsg{boxID: boxID, err: err}
 		}
-		entries := htmlutil.ParseTopicEntriesHTML(string(resp.Data))
+		if topic == nil {
+			return topicLoadedMsg{boxID: boxID, err: fmt.Errorf("topic %d returned no data", topicID)}
+		}
+
+		entries := make([]models.Entry, 0, len(topic.Entries))
+		for _, entry := range topic.Entries {
+			message, getErr := v.vc.sdk.Messages().Get(v.vc.ctx, entry.Id)
+			if getErr != nil {
+				return topicLoadedMsg{boxID: boxID, err: getErr}
+			}
+			if message == nil {
+				return topicLoadedMsg{boxID: boxID, err: fmt.Errorf("message %d returned no data", entry.Id)}
+			}
+			entries = append(entries, sdkMessageToEntry(entry, *message))
+		}
 
 		var images [][]byte
-		for _, e := range entries {
-			for _, imgURL := range extractImageURLs(e.Body) {
+		for _, entry := range entries {
+			for _, imgURL := range extractImageURLs(entry.Body) {
 				var data []byte
 				if strings.HasPrefix(imgURL, "http://") || strings.HasPrefix(imgURL, "https://") {
 					data = fetchImageData(imgURL)
@@ -500,7 +566,7 @@ func (v *mailView) fetchTopic(topicID int64, title string) tea.Cmd {
 			}
 		}
 
-		return topicLoadedMsg{title: title, entries: entries, images: images}
+		return topicLoadedMsg{boxID: boxID, title: title, entries: entries, images: images}
 	}
 }
 

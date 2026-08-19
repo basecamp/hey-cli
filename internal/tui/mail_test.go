@@ -27,9 +27,10 @@ func mailWithPostings() *mailView {
 }
 
 type recordedMailRequest struct {
-	method string
-	path   string
-	body   struct {
+	method   string
+	path     string
+	requests []string
+	body     struct {
 		PostingIDs []int64 `json:"posting_ids"`
 		BoxID      int64   `json:"box_id"`
 	}
@@ -54,19 +55,17 @@ func mailWithTestServer(t *testing.T, status int) (*mailView, *recordedMailReque
 
 		recorded.method = r.Method
 		recorded.path = r.URL.Path
-		if r.URL.Path == "/topics/100/entries" {
-			w.Header().Set("Content-Type", "text/html")
+		recorded.requests = append(recorded.requests, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/topics/100.json":
+			_, _ = w.Write([]byte(`{"id":100,"name":"Hello world","entries":[{"id":501,"kind":"message","summary":"Hello world","created_at":"2026-08-19T09:00:00Z","creator":{"id":10,"name":"Alice"}}]}`))
+		case "/messages/501.json":
+			_, _ = w.Write([]byte(`{"id":501,"subject":"Hello world","content":"<p>Message body</p>","created_at":"2026-08-19T09:00:00Z","creator":{"id":10,"name":"Alice"}}`))
+		default:
+			_ = json.NewDecoder(r.Body).Decode(&recorded.body)
 			w.WriteHeader(status)
-			_, _ = w.Write([]byte(`<article id="entry_501" data-entry-id="501">
-				<span id="sender_entry_501">Alice</span>
-				<time datetime="2026-08-19T09:00:00Z"></time>
-				<iframe srcdoc="&lt;div class=&quot;trix-content&quot;&gt;Message body&lt;/div&gt;"></iframe>
-			</article>`))
-			return
 		}
-
-		_ = json.NewDecoder(r.Body).Decode(&recorded.body)
-		w.WriteHeader(status)
 	}))
 	t.Cleanup(server.Close)
 
@@ -146,6 +145,7 @@ func TestMailViewHandlesTopicLoaded(t *testing.T) {
 	v.loading = true
 
 	_, consumed := v.Update(topicLoadedMsg{
+		boxID:   1,
 		title:   "Test topic",
 		entries: []models.Entry{{Creator: models.Contact{Name: "Alice"}, Body: "hello"}},
 	})
@@ -180,7 +180,7 @@ func TestMailViewPostingKeysCallExpectedEndpoints(t *testing.T) {
 		notice  string
 		seen    bool
 	}{
-		{"reply later", "l", "/postings/moves.json", 4, false, "moved to Reply Later", false},
+		{"reply later", "l", "/postings/moves.json", 4, true, "moved to Reply Later", false},
 		{"set aside", "a", "/postings/moves.json", 3, true, "moved to Set Aside", false},
 		{"seen", "e", "/postings/seen.json", 0, false, "marked as seen", true},
 		{"feed", "d", "/postings/moves.json", 2, true, "moved to The Feed", false},
@@ -257,6 +257,7 @@ func TestMailViewPostingKeyFailureKeepsPosting(t *testing.T) {
 
 func TestMailViewPostingCompletionUpdatesOriginatingPosting(t *testing.T) {
 	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	v.Resize(80, 2)
 
 	msg := runCmd(v.HandleContentKey(keyPress("t")))
 	done, ok := msg.(postingActionDoneMsg)
@@ -264,10 +265,16 @@ func TestMailViewPostingCompletionUpdatesOriginatingPosting(t *testing.T) {
 		t.Fatalf("posting command returned %T, want postingActionDoneMsg", msg)
 	}
 	v.postingList.moveDown()
+	if v.postingList.scrollOff != 1 {
+		t.Fatalf("scroll offset before completion = %d, want 1", v.postingList.scrollOff)
+	}
 	v.Update(done)
 
 	if len(v.postingList.postings) != 1 || v.postingList.postings[0].ID != 101 {
 		t.Errorf("postings after completion = %v, want only posting 101", v.postingList.postings)
+	}
+	if v.postingList.scrollOff != 0 || !strings.Contains(v.View(), "│") {
+		t.Errorf("selected posting is not visible: cursor=%d scroll=%d view=%q", v.postingList.cursor, v.postingList.scrollOff, v.View())
 	}
 }
 
@@ -288,6 +295,29 @@ func TestMailViewIgnoresPostingCompletionAfterBoxSwitch(t *testing.T) {
 	}
 	if v.notice != "" {
 		t.Errorf("stale completion notice = %q, want empty", v.notice)
+	}
+}
+
+func TestMailViewReportsPostingFailureAfterBoxSwitch(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusInternalServerError)
+
+	msg := runCmd(v.HandleContentKey(keyPress("t")))
+	done, ok := msg.(postingActionDoneMsg)
+	if !ok || done.err == nil {
+		t.Fatalf("posting command returned %#v, want an action error", msg)
+	}
+	v.SubnavRight()
+	v.Update(postingsLoadedMsg{postings: []models.Posting{{ID: 200, Summary: "Other box"}}})
+	errCmd, consumed := v.Update(done)
+
+	if !consumed || errCmd == nil {
+		t.Fatal("failed action should still return an error after a box switch")
+	}
+	if _, ok := runCmd(errCmd).(errMsg); !ok {
+		t.Error("failed action should produce errMsg")
+	}
+	if len(v.postingList.postings) != 1 || v.postingList.postings[0].ID != 200 {
+		t.Errorf("failed action changed the new box: %v", v.postingList.postings)
 	}
 }
 
@@ -343,14 +373,44 @@ func TestMailViewEnterOpensSelectedThread(t *testing.T) {
 	}
 	v.Update(loaded)
 
-	if recorded.method != http.MethodGet || recorded.path != "/topics/100/entries" {
-		t.Errorf("request = %s %s, want GET /topics/100/entries", recorded.method, recorded.path)
+	wantRequests := "GET /topics/100.json,GET /messages/501.json"
+	if got := strings.Join(recorded.requests, ","); got != wantRequests {
+		t.Errorf("requests = %q, want %q", got, wantRequests)
 	}
 	if !v.inThread || v.topicID != 100 || v.topicName != "Hello world" {
 		t.Errorf("thread state = open:%v id:%d name:%q", v.inThread, v.topicID, v.topicName)
 	}
 	if !strings.Contains(v.View(), "Alice") || !strings.Contains(v.View(), "Message body") {
 		t.Errorf("thread view does not contain the fetched entry: %q", v.View())
+	}
+}
+
+func TestMailViewIgnoresThreadLoadAfterBoxSwitch(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusOK)
+
+	loaded := runCmd(v.HandleContentKey(keyPress("enter")))
+	v.SubnavRight()
+	v.Update(loaded)
+
+	if v.inThread {
+		t.Error("stale thread load should not reopen a thread after switching boxes")
+	}
+}
+
+func TestMailViewIgnoresReplyLoadAfterBoxSwitch(t *testing.T) {
+	v := mailWithPostings()
+
+	v.SubnavRight()
+	cmd, consumed := v.Update(replyContextLoadedMsg{
+		boxID: 1, topicID: 100, topicName: "Hello world", entryID: 501,
+		to: []string{"jane@example.com"},
+	})
+
+	if !consumed {
+		t.Error("stale reply context should be consumed")
+	}
+	if cmd != nil || v.compose != nil {
+		t.Error("stale reply context should not open the reply form")
 	}
 }
 

@@ -203,7 +203,7 @@ func TestReplyFormPrefillsAndSends(t *testing.T) {
 	v, rec := composeTestServer(t)
 	v.Resize(80, 30)
 	v.Update(replyContextLoadedMsg{
-		topicID: 7, topicName: "Kitchen", entryID: 99,
+		boxID: 1, topicID: 7, topicName: "Kitchen", entryID: 99,
 		to: []string{"jane@x.com"}, cc: []string{"bob@x.com"},
 	})
 	f := v.compose
