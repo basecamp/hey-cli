@@ -35,6 +35,8 @@ The remaining HTML-reading gaps use the SDK's authenticated HTML helper and are 
 | signed Active Storage blob URL | GET | SDK `DownloadBlob` | `hey attachments save <id>` | covered |
 | `/messages.json` | POST | SDK `Messages().Create` | `hey compose`, `hey forward <topic-id>` | covered |
 | `/entries/{id}/replies` | POST | SDK `Entries().CreateReply` | `hey reply <topic-id>` | covered |
+| `/topics/{id}/status/active` | PUT | SDK `Topics().Restore` | `hey restore <topic-id>` | covered |
+| `/entries/{id}/status/spam` | PUT | SDK `Entries().MarkSpam` | `hey mark-spam <entry-id>` | covered |
 | `/topics/{id}.json` | GET | SDK `Topics().Get` | `hey forward <topic-id>` | covered |
 | `/entries/{id}/forwards/new.json` | GET | SDK `Entries().NewForward` | `hey forward <topic-id>` | covered |
 | `/postings/moves.json` | POST | SDK `Postings().Move` | `hey move <id> --to <box>`, TUI `m` | covered |

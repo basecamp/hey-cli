@@ -94,6 +94,8 @@ hey compose --to user@example.com --subject "Hello"  # compose a new message
 hey compose --to user@example.com --subject "Report" -m "Attached." --attach ./report.pdf
 hey compose --to user@example.com --cc bob@example.com --bcc carol@example.org --subject "Hello"  # with CC/BCC
 hey drafts                         # list drafts
+hey restore 123                    # restore a topic from Trash
+hey mark-spam 456                  # mark one email entry as spam
 hey move 12345 --to feed           # move a thread to another box
 hey move 12345 67890 --to "paper trail"  # move multiple threads
 hey trash 12345                    # move a thread to Trash
@@ -109,6 +111,8 @@ Contact updates preserve omitted name, email, and alias fields. Supplying `--ali
 `--attach` is repeatable on `hey compose` and `hey reply`, and attachment-only messages are supported. The CLI validates and uploads every file before sending the email. `hey attachments <topic_id>` returns stable message-and-position IDs such as `456:1`; pass an ID to `hey attachments save`. Saving uses the original filename by default, accepts `--output` for a file or directory, and preserves existing files unless `--force` is set.
 
 Organization actions take the `id` values returned by `hey box --json` or `hey search --json`. Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Bubble Up requires a scheduled date and is not available through `hey move`. Trashing a shared thread removes your access instead of deleting it for everyone. Ignored threads remain in their box and can be restored with `hey stop-ignoring`.
+
+`hey restore` takes a topic ID and returns a topic from Trash to active mail. `hey mark-spam` takes an entry ID and marks that one email entry as spam. Both commands change mailbox state, so confirm the exact ID before running them.
 
 ### Calendars
 

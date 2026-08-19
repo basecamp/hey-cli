@@ -102,6 +102,8 @@ EMAIL
   reply          Reply to a thread
   forward        Forward the latest message in a thread
   drafts         List draft emails
+  restore        Restore a topic to active mail
+  mark-spam      Mark an email entry as spam
   seen           Mark email threads as seen
   unseen         Mark email threads as unseen
   move           Move email threads to another box
