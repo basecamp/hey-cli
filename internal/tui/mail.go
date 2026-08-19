@@ -50,7 +50,7 @@ type mailView struct {
 	loading       bool
 
 	compose *composeForm // non-nil while a new message or reply is being written
-	notice  string       // one-shot confirmation shown above the list after a send
+	notice  string       // one-shot confirmation shown above the posting list
 }
 
 func newMailView(vc *viewContext) *mailView {
@@ -135,6 +135,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if msg.err != nil {
 			return func() tea.Msg { return errMsg{msg.err} }, true
 		}
+		v.notice = msg.action
 		if msg.removes {
 			if v.postingList.cursor < len(v.postingList.postings) {
 				idx := v.postingList.cursor
@@ -287,6 +288,7 @@ func (v *mailView) Resize(width, height int) {
 // handleBoxShortcut handles number-key shortcuts for switching boxes.
 func (v *mailView) handleBoxShortcut(key string) tea.Cmd {
 	if idx := boxForShortcut(key, v.boxes); idx >= 0 && idx != v.boxIndex {
+		v.notice = ""
 		v.boxIndex = idx
 		v.loading = true
 		return v.fetchPostings(v.boxes[idx].ID)
