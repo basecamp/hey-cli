@@ -66,7 +66,7 @@ func TestParseAddresses(t *testing.T) {
 // A reply carries the thread's subject with it, so --subject is only wanted when
 // starting a new thread. Requiring it either way made people pass one that HEY ignores.
 func TestComposeSubjectRequiredOnlyForANewMessage(t *testing.T) {
-	server, sent := threadReplyServer(t, topicWithRecipients, topicEntries)
+	server, sent := threadReplyServer(t, replyForm)
 
 	err := runCLI(t, server, "compose", "-m", "body")
 	var cliErr *apierr.Error

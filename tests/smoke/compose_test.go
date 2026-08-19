@@ -129,9 +129,20 @@ func TestReply(t *testing.T) {
 		t.Fatal("could not find a thread to reply to")
 	}
 
-	// Reply to it.
+	message := fmt.Sprintf("Reply from smoke test %s", uid)
+	preview := heyJSON(t, "reply", topicID, "-m", message, "--preview")
+	type replyPreview struct {
+		EntryID int64 `json:"entry_id"`
+	}
+	previewData := dataAs[replyPreview](t, preview)
+	if previewData.EntryID <= 0 {
+		t.Fatal("reply preview did not return an entry_id")
+	}
+
+	// Reply to exactly the entry that was previewed.
 	stdout, stderr, code := hey(t, "reply", topicID,
-		"-m", fmt.Sprintf("Reply from smoke test %s", uid),
+		"-m", message,
+		"--expect-entry", fmt.Sprint(previewData.EntryID),
 		"--json",
 	)
 	if code != 0 {

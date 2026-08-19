@@ -17,13 +17,15 @@ import (
 )
 
 type attachmentServerState struct {
-	mu             sync.Mutex
-	directUploads  int
-	storageUploads int
-	sentContents   []string
-	events         []string
-	blobStatus     int
-	nilMessage     bool
+	mu              sync.Mutex
+	directUploads   int
+	storageUploads  int
+	sentContents    []string
+	events          []string
+	blobStatus      int
+	nilMessage      bool
+	advanceOnUpload bool
+	threadAdvanced  bool
 }
 
 func attachmentServer(t *testing.T) (*httptest.Server, *attachmentServerState) {
@@ -77,16 +79,47 @@ func attachmentServer(t *testing.T) (*httptest.Server, *attachmentServerState) {
 			state.mu.Lock()
 			state.storageUploads++
 			state.events = append(state.events, "upload")
+			if state.advanceOnUpload {
+				state.threadAdvanced = true
+			}
 			state.mu.Unlock()
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodGet && r.URL.Path == "/identity.json":
 			_, _ = w.Write([]byte(`{"id":1,"senders":[{"id":42,"default":true}]}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/topics/7":
+		case r.Method == http.MethodGet && (r.URL.Path == "/topics/7" || r.URL.Path == "/topics/7.json"):
+			state.mu.Lock()
+			sentOrAdvanced := len(state.sentContents) > 0 || state.threadAdvanced
+			state.mu.Unlock()
+			latestEntryID := 12
+			if sentOrAdvanced {
+				latestEntryID = 13
+			}
+			_, _ = fmt.Fprintf(w, `{"id":7,"name":"Project update","latest_entry":{"id":%d}}`, latestEntryID)
+		case r.Method == http.MethodGet && r.URL.Path == "/topics/7/entries.json":
+			state.mu.Lock()
+			sent := len(state.sentContents) > 0
+			state.mu.Unlock()
+			if sent && r.URL.Query().Get("page") == "1" {
+				_, _ = w.Write([]byte(`[{"id":13,"kind":"message","creator":{"id":42}}]`))
+			} else {
+				_, _ = w.Write([]byte(`[]`))
+			}
+		case r.Method == http.MethodGet && r.URL.Path == "/messages/13.json":
+			state.mu.Lock()
+			content := ""
+			if len(state.sentContents) > 0 {
+				content = state.sentContents[len(state.sentContents)-1]
+			}
+			state.mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":      13,
+				"content": content,
+				"creator": map[string]any{"id": 42},
+				"sender":  map[string]any{"id": 42},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/entries/12/replies/new":
 			w.Header().Set("Content-Type", "text/html")
-			_, _ = w.Write([]byte(topicWithRecipients))
-		case r.Method == http.MethodGet && r.URL.Path == "/topics/7/entries":
-			w.Header().Set("Content-Type", "text/html")
-			_, _ = w.Write([]byte(topicEntries))
+			_, _ = w.Write([]byte(replyForm))
 		case r.Method == http.MethodPost && r.URL.Path == "/entries/12/replies.json":
 			var body struct {
 				Message struct {
@@ -320,7 +353,7 @@ func TestReplyUploadsAttachmentsBeforeSending(t *testing.T) {
 	if err := os.WriteFile(path, []byte("report contents"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runAttachmentCommand(t, server, "reply", "7", "-m", "Attached.", "--attach", path); err != nil {
+	if _, err := runAttachmentCommand(t, server, "reply", "7", "-m", "Attached.", "--attach", path, "--expect-entry", "12"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -331,13 +364,35 @@ func TestReplyUploadsAttachmentsBeforeSending(t *testing.T) {
 	}
 }
 
+func TestReplyRechecksPreviewedEntryAfterAttachmentUpload(t *testing.T) {
+	server, state := attachmentServer(t)
+	state.mu.Lock()
+	state.advanceOnUpload = true
+	state.mu.Unlock()
+	path := filepath.Join(t.TempDir(), "quarterly-report.pdf")
+	if err := os.WriteFile(path, []byte("report contents"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := runAttachmentCommand(t, server, "reply", "7", "-m", "Attached.", "--attach", path, "--expect-entry", "12")
+	if err == nil || !strings.Contains(err.Error(), "thread changed after preview") {
+		t.Fatalf("error = %v, want stale preview rejection", err)
+	}
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if len(state.sentContents) != 0 || strings.Contains(strings.Join(state.events, ","), "send") {
+		t.Errorf("stale reply was sent: %+v", state)
+	}
+}
+
 func TestReplySupportsAttachmentOnlyMessages(t *testing.T) {
 	server, state := attachmentServer(t)
 	path := filepath.Join(t.TempDir(), "quarterly-report.pdf")
 	if err := os.WriteFile(path, []byte("report contents"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runAttachmentCommand(t, server, "reply", "7", "--attach", path); err != nil {
+	if _, err := runAttachmentCommand(t, server, "reply", "7", "--attach", path, "--expect-entry", "12"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -355,7 +410,7 @@ func TestReplyReadsPipedBodyWithAttachments(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := runAttachmentCommandWithStdin(t, server, "Piped reply body\n",
-		"reply", "7", "--attach", path,
+		"reply", "7", "--attach", path, "--expect-entry", "12",
 	); err != nil {
 		t.Fatal(err)
 	}

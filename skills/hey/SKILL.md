@@ -98,6 +98,7 @@ CLI for HEY: mailboxes, email threads, contacts, replies, compose, calendars, to
 1. **Always use `--json`** for structured, predictable output
 2. **Authentication required** for all data commands — run `hey auth login` first
 3. **HTML output** is available via `--html` for commands that return HTML content
+4. **Preview every reply.** Run `hey reply ... --preview --json`, show From, To, CC, BCC, Subject, the complete body, and attachments, then obtain explicit confirmation immediately before sending with `--expect-entry`.
 
 ## Quick Reference
 
@@ -117,7 +118,8 @@ CLI for HEY: mailboxes, email threads, contacts, replies, compose, calendars, to
 | Set private contact note | `hey contacts note set <id> "Prefers email"` |
 | Delete private contact note | `hey contacts note delete <id>` |
 | Read email thread | `hey threads <topic_id> --json` |
-| Reply to email | `hey reply <topic_id> -m "Thanks!"` |
+| Preview a reply | `hey reply <topic_id> -m "Thanks!" --preview --json` |
+| Send a reply | `hey reply <topic_id> -m "Thanks!" --expect-entry <entry_id>` |
 | Forward email | `hey forward <topic_id> --to alice@example.com -m "For your review"` |
 | Compose email | `hey compose --to user@example.com --subject "Hello"` |
 | Compose with CC/BCC | `hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Hello"` |
@@ -175,8 +177,9 @@ Want to read email?
 
 ```
 Want to send email?
-├── Reply to thread? → hey reply <topic_id> -m "message"
-│   ├── Open editor? → hey reply <topic_id> (omit -m to open $EDITOR)
+├── Reply to thread? → hey reply <topic_id> -m "message" --preview --json
+│   ├── Send after confirmation? → pass the preview's entry_id to --expect-entry
+│   ├── Open editor? → hey reply <topic_id> --expect-entry <entry_id> (omit -m to open $EDITOR)
 │   └── Attach files? → add --attach ./report.pdf (repeatable)
 ├── Forward latest message? → hey forward <topic_id> --to <email>
 │   └── Add a note? → add -m "note"
@@ -273,9 +276,10 @@ An attachment ID combines its message ID and position, so `67890:1` identifies t
 ### Email - Reply, Forward & Compose
 
 ```bash
-hey reply <topic_id> -m "Thanks!"             # Reply with inline message
-hey reply <topic_id>                          # Reply via $EDITOR
-hey reply <topic_id> -m "Attached." --attach ./diagram.png
+hey reply <topic_id> -m "Thanks!" --preview --json # Preview complete reply
+hey reply <topic_id> -m "Thanks!" --expect-entry 67890 --json # Send the previewed reply
+hey reply <topic_id> --expect-entry 67890                       # Reply via $EDITOR
+hey reply <topic_id> -m "Attached." --attach ./diagram.png --preview
 hey forward <topic_id> --to alice@example.com                 # Forward the latest message
 hey forward <topic_id> --to alice@example.com -m "Please review"  # Forward with a note
 hey compose --to user@example.com --subject "Hello"         # Compose new (opens $EDITOR)

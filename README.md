@@ -87,8 +87,9 @@ hey contacts note delete 12345
 hey threads 123                    # read a full email thread
 hey attachments 123                # list files attached to the thread
 hey attachments save 456:1         # save a file using its attachment ID
-hey reply 123 -m "Thanks!"        # reply to a thread (or omit -m to open $EDITOR)
-hey reply 123 -m "Attached." --attach ./diagram.png
+hey reply 123 -m "Thanks!" --preview  # preview recipients, subject, body, and files
+hey reply 123 -m "Thanks!" --expect-entry 456  # send only to the previewed entry
+hey reply 123 -m "Attached." --attach ./diagram.png --preview
 hey forward 123 --to alice@example.com -m "For your review"  # forward the latest message
 hey compose --to user@example.com --subject "Hello"  # compose a new message
 hey compose --to user@example.com --subject "Report" -m "Attached." --attach ./report.pdf
@@ -106,7 +107,7 @@ Search accepts free text plus `--required`, `--any`, `--none`, `--exact`, `--fro
 
 Contact updates preserve omitted name, email, and alias fields. Supplying `--alias` replaces the complete alias list; `--alias=` clears it. Contact notes accept positional content, `--note`, stdin, or `$EDITOR`. HEY hides contacts rather than permanently deleting them; hidden contacts leave lists, autocomplete, and search, and can be shown again by ID.
 
-`--attach` is repeatable on `hey compose` and `hey reply`, and attachment-only messages are supported. The CLI validates and uploads every file before sending the email. `hey attachments <topic_id>` returns stable message-and-position IDs such as `456:1`; pass an ID to `hey attachments save`. Saving uses the original filename by default, accepts `--output` for a file or directory, and preserves existing files unless `--force` is set.
+`--attach` is repeatable on `hey compose` and `hey reply`, and attachment-only messages are supported. `hey reply --preview` inspects attachment files locally but does not upload or send anything. The preview returns an `entry_id`; pass it to `--expect-entry` when sending. If a newer entry arrived after the preview, the send stops and asks you to preview again. Sending validates and uploads every file before delivering the email. `hey attachments <topic_id>` returns stable message-and-position IDs such as `456:1`; pass an ID to `hey attachments save`. Saving uses the original filename by default, accepts `--output` for a file or directory, and preserves existing files unless `--force` is set.
 
 Organization actions take the `id` values returned by `hey box --json` or `hey search --json`. Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Bubble Up requires a scheduled date and is not available through `hey move`. Trashing a shared thread removes your access instead of deleting it for everyone. Ignored threads remain in their box and can be restored with `hey stop-ignoring`.
 
