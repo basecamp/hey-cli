@@ -58,7 +58,9 @@ hey auth logout   # clear credentials
 
 Run `hey` to launch the interactive terminal UI.
 
-Navigate between mailboxes and email threads. Use `/` to search, Enter to open a thread, `r` to reply, `f` to forward, `m` to move, `t` to trash, `s` to mark as spam, `-` to ignore, `+` to stop ignoring, and Escape or `q` to go back. Search results retain the matching-message summary; use `n` and `p` to move between result pages.
+Navigate between Mail, Contacts, Calendar, and Journal. In Mail, use `/` to search, Enter to open a thread, `r` to reply, `f` to forward, `m` to move, `t` to trash, `s` to mark as spam, `-` to ignore, and `+` to stop ignoring. Search results retain the matching-message summary; use `n` and `p` to move between result pages.
+
+Press Shift+O to open Contacts. Use Enter to view a contact, `a` to add, `e` to edit, `n` to edit the private note, `x` twice to delete a note, `h` to hide, and `u` to show the most recently hidden contact again. Escape or `q` goes back.
 
 ## CLI Commands
 
@@ -72,6 +74,14 @@ hey box imbox                      # list email threads in a box (by name or ID)
 hey search "quarterly planning"    # search threads and matching messages
 hey search --from jane@example.com --date last_30_days  # refine a search
 hey search filters                 # list available refinement values
+hey contacts list                  # list contacts
+hey contacts show 12345            # view a contact and private note
+hey contacts add --name "Jane Doe" --email jane@example.com
+hey contacts update 12345 --name "Jane Dawson"
+hey contacts hide 12345            # hide without permanently deleting
+hey contacts show-again 12345      # show a hidden contact again
+hey contacts note set 12345 "Prefers email"
+hey contacts note delete 12345
 hey threads 123                    # read a full email thread
 hey reply 123 -m "Thanks!"        # reply to a thread (or omit -m to open $EDITOR)
 hey forward 123 --to alice@example.com -m "For your review"  # forward the latest message
@@ -87,6 +97,8 @@ hey stop-ignoring 12345            # resume attention for a thread
 ```
 
 Search accepts free text plus `--required`, `--any`, `--none`, `--exact`, `--from`, `--to`, `--subject`, `--date`, `--in`, `--label`, and `--attachment`. Use `--page` for one page or `--all` to fetch up to 100 pages; capped searches report the next page for continuation. Search results include `topic_id` for reading the thread and the matching message summaries. Results with an active box item also include `id` for organization actions.
+
+Contact updates preserve omitted name, email, and alias fields. Supplying `--alias` replaces the complete alias list; `--alias=` clears it. Contact notes accept positional content, `--note`, stdin, or `$EDITOR`. HEY hides contacts rather than permanently deleting them; hidden contacts leave lists, autocomplete, and search, and can be shown again by ID.
 
 Organization actions take the `id` values returned by `hey box --json` or `hey search --json`. Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Bubble Up requires a scheduled date and is not available through `hey move`. Trashing a shared thread removes your access instead of deleting it for everyone. Ignored threads remain in their box and can be restored with `hey stop-ignoring`.
 

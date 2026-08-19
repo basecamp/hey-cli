@@ -1,8 +1,11 @@
 package cmd
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 func TestCuratedCommandHelpUsesUserFacingLanguage(t *testing.T) {
@@ -48,6 +51,32 @@ func TestEmailCommandHelpKeepsPostingAsAnInternalTerm(t *testing.T) {
 	}
 }
 
+func TestContactCommandHelpUsesHEYTerminology(t *testing.T) {
+	root := newRootCmd()
+	contacts, _, err := root.Find([]string{"contacts"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var text strings.Builder
+	var walk func(*cobra.Command)
+	walk = func(command *cobra.Command) {
+		fmt.Fprintln(&text, command.Use, command.Short, command.Long, command.Example, command.Annotations["agent_notes"])
+		for _, child := range command.Commands() {
+			walk(child)
+		}
+	}
+	walk(contacts)
+	lower := strings.ToLower(text.String())
+	if strings.Contains(lower, "reveal") || strings.Contains(lower, "delete a contact") {
+		t.Errorf("contact help exposes internal or destructive terminology:\n%s", text.String())
+	}
+	for _, want := range []string{"hide a contact", "show a hidden contact again", "delete a private contact note"} {
+		if !strings.Contains(lower, want) {
+			t.Errorf("contact help missing %q:\n%s", want, text.String())
+		}
+	}
+}
+
 func TestRenderRootHelpUsesUserFacingLanguage(t *testing.T) {
 	originalColorDisabled := colorDisabled
 	colorDisabled = true
@@ -56,7 +85,7 @@ func TestRenderRootHelpUsesUserFacingLanguage(t *testing.T) {
 	var output strings.Builder
 	renderRootHelp(&output, newRootCmd())
 
-	const expected = `Read, send, and organize HEY email and calendars from your terminal.
+	const expected = `Read, send, and organize HEY email, contacts, and calendars from your terminal.
 
 USAGE
   hey <command> [flags]
@@ -66,6 +95,7 @@ EMAIL
   boxes          List your HEY boxes
   box            List email threads in a box
   search         Search email threads and messages
+  contacts       Manage contacts
   threads        Read a thread
   compose        Write and send a new email
   reply          Reply to a thread

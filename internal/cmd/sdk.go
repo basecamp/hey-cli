@@ -96,6 +96,10 @@ func convertSDKError(err error) error {
 		return output.ErrRateLimit(retryAfter)
 	case hey.CodeNetwork:
 		return output.ErrNetwork(err)
+	case hey.CodeValidation:
+		return &output.Error{Code: "validation", Message: sdkErr.Message, Hint: sdkErr.Hint, HTTPStatus: sdkErr.HTTPStatus, Cause: err}
+	case hey.CodeConflict:
+		return &output.Error{Code: "conflict", Message: sdkErr.Message, Hint: sdkErr.Hint, HTTPStatus: sdkErr.HTTPStatus, Cause: err}
 	default:
 		return output.ErrAPI(sdkErr.HTTPStatus, sdkErr.Message)
 	}

@@ -116,7 +116,7 @@ func (c *searchCommand) run(cmd *cobra.Command, args []string) error {
 		}
 		return nil
 	}
-	if stderrNotice := searchNoticeForStderr(writer.EffectiveFormat(), notice); stderrNotice != "" {
+	if stderrNotice := paginationNoticeForStderr(writer.EffectiveFormat(), notice); stderrNotice != "" {
 		fmt.Fprintln(cmd.ErrOrStderr(), stderrNotice)
 	}
 	return writeOK(results,
@@ -280,7 +280,7 @@ func searchTruncationNotice(startPage, pages int, truncated bool) string {
 	return fmt.Sprintf("Search stopped after %d pages. Continue with --page %d.", pages, startPage+pages)
 }
 
-func searchNoticeForStderr(format output.Format, notice string) string {
+func paginationNoticeForStderr(format output.Format, notice string) string {
 	if notice == "" || format == output.FormatJSON || format == output.FormatStyled {
 		return ""
 	}

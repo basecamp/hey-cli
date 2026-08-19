@@ -39,7 +39,7 @@ var (
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "hey",
-		Short: "Read, send, and organize HEY email and calendars from your terminal.",
+		Short: "Read, send, and organize HEY email, contacts, and calendars from your terminal.",
 		Long: `A CLI for HEY
 ⠀⠀⠀⠀⠀⠀⣰⠲⣄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ⠀⠀⠀⡟⢳⡀⣏⠀⠘⣆⠀⠀⠀⠀⠀⣤⣤⡄⠀⠀⢠⣤⣤⣤⣤⣤⣤⣤⣤⠀⠀⢀⣤⣤⡄⠀
@@ -120,6 +120,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newBoxesCommand().cmd)
 	root.AddCommand(newBoxCommand().cmd)
 	root.AddCommand(newSearchCommand().cmd)
+	root.AddCommand(newContactsCommand().cmd)
 	root.AddCommand(newThreadsCommand().cmd)
 	root.AddCommand(newReplyCommand().cmd)
 	root.AddCommand(newForwardCommand().cmd)

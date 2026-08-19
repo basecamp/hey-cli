@@ -1,8 +1,8 @@
 ---
 name: hey
 description: |
-  Interact with HEY email via the HEY CLI. Read and send emails, manage boxes,
-  calendars, todos, habits, time tracking, and journal entries. Use for ANY
+  Interact with HEY via the HEY CLI. Read and send emails, manage contacts,
+  boxes, calendars, todos, habits, time tracking, and journal entries. Use for ANY
   HEY-related question or action.
 triggers:
   # Direct invocations
@@ -12,6 +12,7 @@ triggers:
   - hey boxes
   - hey box
   - hey search
+  - hey contacts
   - hey threads
   - hey reply
   - hey forward
@@ -57,6 +58,11 @@ triggers:
   - list mailboxes
   - search email
   - find email
+  - list contacts
+  - add contact
+  - edit contact
+  - hide contact
+  - contact note
   - check calendar
   - add todo
   - complete todo
@@ -83,7 +89,7 @@ argument-hint: "[command] [args...]"
 
 # /hey - HEY Email Workflow Command
 
-CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos, habits, time tracking, and journal entries.
+CLI for HEY: mailboxes, email threads, contacts, replies, compose, calendars, todos, habits, time tracking, and journal entries.
 
 ## Agent Invariants
 
@@ -101,6 +107,15 @@ CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos,
 | List emails in a box | `hey box imbox --json` |
 | Search email | `hey search "quarterly planning" --json` |
 | List search filters | `hey search filters --json` |
+| List contacts | `hey contacts list --json` |
+| View contact | `hey contacts show <id> --json` |
+| Add contact | `hey contacts add --name "Jane Doe" --email jane@example.com` |
+| Edit contact | `hey contacts update <id> --name "Jane Dawson"` |
+| Hide contact | `hey contacts hide <id>` |
+| Show contact again | `hey contacts show-again <id>` |
+| Read private contact note | `hey contacts note show <id> --json` |
+| Set private contact note | `hey contacts note set <id> "Prefers email"` |
+| Delete private contact note | `hey contacts note delete <id>` |
 | Read email thread | `hey threads <topic_id> --json` |
 | Reply to email | `hey reply <topic_id> -m "Thanks!"` |
 | Forward email | `hey forward <topic_id> --to alice@example.com -m "For your review"` |
@@ -144,6 +159,7 @@ Want to read email?
 ├── List emails in box? → hey box <name|id> --json
 ├── Search threads and messages? → hey search <query> --json
 ├── Need available refinements? → hey search filters --json
+├── List or view contacts? → hey contacts list --json / hey contacts show <id> --json
 ├── Read full thread? → hey threads <topic_id> --json
 ├── Mark as seen? → hey seen <id>
 ├── Mark as unseen? → hey unseen <id>
@@ -207,6 +223,28 @@ hey search filters --json                      # Available box, date, label, and
 Search refinements are `--required`, `--any`, `--none`, `--exact`, `--from`, `--to`, `--subject`, `--date`, `--in`, `--label`, and `--attachment`. `--page` selects one result page; `--all` fetches up to 100 pages from that point onward. When the cap is reached, the response notice provides the next `--page` value for continuation.
 
 **Response format:** `data` contains one item per matching thread. Each result has `id` (box item ID for organization actions), `topic_id` (thread ID for `hey threads`, `hey reply`, and `hey forward`), `subject`, `updated_at`, and `messages` containing the matching message IDs, senders, dates, and summaries. A result can omit `id` when the thread has no active box item.
+
+### Contacts
+
+```bash
+hey contacts list --json                       # List contacts
+hey contacts list --page 2 --json              # List another page
+hey contacts show 12345 --json                 # View details, aliases, and private note
+hey contacts add --name "Jane Doe" --email jane@example.com
+hey contacts add --name "Jane Doe" --email jane@example.com --alias jane.doe@example.org
+hey contacts update 12345 --name "Jane Dawson"
+hey contacts update 12345 --alias=              # Clear aliases
+hey contacts hide 12345                         # Hide from lists and autocomplete
+hey contacts show-again 12345                   # Reverse hiding
+hey contacts note show 12345 --json
+hey contacts note set 12345 "Prefers email"
+echo "Multiline private note" | hey contacts note set 12345
+hey contacts note delete 12345
+```
+
+`hey contacts list` returns contact IDs, names, email addresses, and update timestamps. `hey contacts show` adds aliases, screening status, and the private note. Contact updates preserve omitted fields. Supplying `--alias` replaces the complete alias list, and `--alias=` clears it.
+
+HEY hides contacts instead of permanently deleting them. A hidden contact leaves contact lists, autocomplete, and search results while remaining available by ID; `show-again` reverses the action. Contact notes are private and support positional content, `--note`, stdin, or `$EDITOR`. Deleting a note leaves the contact unchanged.
 
 ### Email - Threads
 

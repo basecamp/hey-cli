@@ -13,6 +13,7 @@ type section int
 
 const (
 	sectionMail section = iota
+	sectionContacts
 	sectionCalendar
 	sectionJournal
 )
@@ -21,7 +22,7 @@ const (
 type focusRow int
 
 const (
-	rowSection focusRow = iota // row 1: Mail / Calendar / Journal
+	rowSection focusRow = iota // row 1: Mail / Contacts / Calendar / Journal
 	rowSubnav                  // row 2: boxes / calendars / dates
 	rowContent                 // content area
 )
@@ -36,6 +37,7 @@ type navItem struct {
 
 var sectionItems = []navItem{
 	{"🄼", "Mail"},
+	{"🄾", "Contacts"},
 	{"🄲", "Calendar"},
 	{"🄹", "Journal"},
 }
@@ -45,6 +47,8 @@ func sectionForShortcut(key string) section {
 	switch key {
 	case "M":
 		return sectionMail
+	case "O":
+		return sectionContacts
 	case "C":
 		return sectionCalendar
 	case "J":

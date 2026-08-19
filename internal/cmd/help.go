@@ -17,7 +17,7 @@ var curatedCategories = []struct {
 }{
 	{
 		heading: "EMAIL",
-		names:   []string{"boxes", "box", "search", "threads", "compose", "reply", "forward", "drafts", "seen", "unseen", "move", "trash", "spam", "ignore", "stop-ignoring"},
+		names:   []string{"boxes", "box", "search", "contacts", "threads", "compose", "reply", "forward", "drafts", "seen", "unseen", "move", "trash", "spam", "ignore", "stop-ignoring"},
 	},
 	{
 		heading: "CALENDAR & TASKS",
@@ -54,7 +54,7 @@ func customHelpFunc(defaultHelp func(*cobra.Command, []string)) func(*cobra.Comm
 func renderRootHelp(w io.Writer, cmd *cobra.Command) {
 	var b strings.Builder
 
-	b.WriteString("Read, send, and organize HEY email and calendars from your terminal.\n")
+	b.WriteString("Read, send, and organize HEY email, contacts, and calendars from your terminal.\n")
 
 	// USAGE
 	b.WriteString("\n")

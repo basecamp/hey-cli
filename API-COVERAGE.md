@@ -15,6 +15,15 @@ The legacy `internal/client/` is used only for HTML-scraping gap operations mark
 | `/bubblebox.json` | GET | SDK `Boxes().GetBubblebox` | `hey box bubblebox` | covered |
 | `/advanced_search.json` | GET | SDK `Search().Search` | `hey search`, TUI `/` | covered |
 | `/advanced_search_filters.json` | GET | SDK `Search().Filters` | `hey search filters` | covered |
+| `/contacts.json` | GET | SDK `Contacts().List` | `hey contacts list`, Contacts TUI | covered |
+| `/contacts/{id}.json` | GET | SDK `Contacts().Get` | `hey contacts show`, Contacts TUI | covered |
+| `/contacts.json` | POST | SDK `Contacts().Create` | `hey contacts add`, Contacts TUI | covered |
+| `/contacts/{id}.json` | PATCH | SDK `Contacts().Update` | `hey contacts update`, Contacts TUI | covered |
+| `/contacts/{id}.json` | DELETE | SDK `Contacts().Hide` | `hey contacts hide`, Contacts TUI | covered |
+| `/contacts/{id}/reveal.json` | POST | SDK `Contacts().Reveal` | `hey contacts show-again`, Contacts TUI | covered |
+| `/contacts/{id}/note.json` | GET | SDK `Contacts().Note` | `hey contacts note show`, Contacts TUI | covered |
+| `/contacts/{id}/note.json` | PATCH | SDK `Contacts().SetNote` | `hey contacts note set`, Contacts TUI | covered |
+| `/contacts/{id}/note.json` | DELETE | SDK `Contacts().DeleteNote` | `hey contacts note delete`, Contacts TUI | covered |
 | `/calendars.json` | GET | SDK `Calendars().List` | `hey calendars` | covered |
 | `/calendars/{id}/recordings.json` | GET | SDK `Calendars().GetRecordings` | `hey recordings <calendar-id>`, `hey todo list`, `hey timetrack list`, `hey journal list` | covered |
 | `/topics/{id}/entries` | GET (HTML) | Legacy `GetTopicEntries` | `hey threads <id>` | gap: SDK Entry lacks body |
