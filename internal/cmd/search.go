@@ -54,7 +54,7 @@ func newSearchCommand() *searchCommand {
 		Short: "Search email threads and messages",
 		Long:  "Search email threads and matching messages. Combine an optional free-text query with advanced refinements.",
 		Annotations: map[string]string{
-			"agent_notes": "Returns one result per thread. id is the box item ID for organization actions, topic_id opens the thread, and messages contains the matching message summaries. Use `hey search filters` to discover box, date, label, and attachment values.",
+			"agent_notes": "Returns one result per thread. id is the box item ID for organization actions when the thread has an active box item, topic_id opens the thread, and messages contains the matching message summaries. Use `hey search filters` to discover box, date, label, and attachment values.",
 		},
 		Example: `  hey search "quarterly planning"
   hey search --from jane@example.com --date last_30_days

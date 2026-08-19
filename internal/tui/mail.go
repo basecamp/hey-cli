@@ -487,6 +487,16 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 func (v *mailView) InThread() bool { return v.inThread || v.searchActive }
+
+func (v *mailView) ExitDetail(key string) {
+	if key == "q" && v.searchActive && !v.inThread && (v.activeRequestKind == mailRequestTopic || v.activeRequestKind == mailRequestSearch) {
+		v.cancelRequest()
+		v.clearSearch()
+		return
+	}
+	v.ExitThread()
+}
+
 func (v *mailView) ExitThread() {
 	if v.searchActive && !v.inThread && (v.activeRequestKind == mailRequestTopic || v.activeRequestKind == mailRequestSearch) {
 		v.cancelRequest()
@@ -499,12 +509,16 @@ func (v *mailView) ExitThread() {
 		v.cancelRequest()
 		return
 	}
+	v.clearSearch()
+	v.cancelRequest()
+}
+
+func (v *mailView) clearSearch() {
 	v.searchActive = false
 	v.searchQuery = ""
 	v.searchPage = 0
 	v.searchList.setPostings(nil)
 	v.searchForm = nil
-	v.cancelRequest()
 }
 
 func (v *mailView) CancelPendingDetail() bool {
@@ -540,11 +554,7 @@ func (v *mailView) switchBox(index int) tea.Cmd {
 		return nil
 	}
 	v.inThread = false
-	v.searchActive = false
-	v.searchForm = nil
-	v.searchQuery = ""
-	v.searchPage = 0
-	v.searchList.setPostings(nil)
+	v.clearSearch()
 	v.cancelRequest()
 	v.notice = ""
 	v.postingList.setPostings(nil)

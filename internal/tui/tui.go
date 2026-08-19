@@ -261,7 +261,11 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	if msg.Key().Code == tea.KeyEscape || key == "q" {
 		if m.activeView.InThread() {
-			m.activeView.ExitThread()
+			if exiter, ok := m.activeView.(detailExiter); ok {
+				exiter.ExitDetail(key)
+			} else {
+				m.activeView.ExitThread()
+			}
 			m.updateHelpBindings()
 			m.activeView.Resize(m.vc.width, m.vc.height)
 			return m, m.syncLoading(nil)

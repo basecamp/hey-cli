@@ -68,3 +68,9 @@ type inputCapturer interface {
 type pendingDetailCanceler interface {
 	CancelPendingDetail() bool
 }
+
+// detailExiter lets a section preserve the distinct back and exit behavior of
+// Escape and q while a nested view or request is active.
+type detailExiter interface {
+	ExitDetail(key string)
+}
