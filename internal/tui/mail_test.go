@@ -6,9 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	tea "charm.land/bubbletea/v2"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/models"
@@ -316,6 +320,26 @@ func TestMailViewPostingKeyFailureKeepsPosting(t *testing.T) {
 	}
 }
 
+func TestMailViewPostingActionCopiesSelectedPostingBeforeAsyncRequest(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+
+	cmd := v.HandleContentKey(keyPress("t"))
+	v.Update(postingActionDoneMsg{
+		action: "moved to Trash", boxID: 1, postingID: 100, removes: true,
+	})
+	done, ok := runCmd(cmd).(postingActionDoneMsg)
+	if !ok {
+		t.Fatalf("posting command returned %T, want postingActionDoneMsg", done)
+	}
+
+	if len(recorded.body.PostingIDs) != 1 || recorded.body.PostingIDs[0] != 100 {
+		t.Errorf("request posting_ids = %v, want the originally selected posting [100]", recorded.body.PostingIDs)
+	}
+	if done.postingID != 100 {
+		t.Errorf("completion posting ID = %d, want 100", done.postingID)
+	}
+}
+
 func TestMailViewPostingCompletionUpdatesOriginatingPosting(t *testing.T) {
 	v, _ := mailWithTestServer(t, http.StatusNoContent)
 	v.Resize(80, 2)
@@ -443,6 +467,116 @@ func TestMailViewEnterOpensSelectedThread(t *testing.T) {
 	}
 	if !strings.Contains(v.View(), "Alice") || !strings.Contains(v.View(), "Message body") {
 		t.Errorf("thread view does not contain the fetched entry: %q", v.View())
+	}
+}
+
+func TestMailViewFetchesThreadMessagesConcurrentlyInOrder(t *testing.T) {
+	const entryCount = 12
+
+	var active atomic.Int64
+	var maximum atomic.Int64
+	started := make(chan struct{}, entryCount)
+	release := make(chan struct{})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/topics/100.json" {
+			entries := make([]map[string]any, entryCount)
+			for i := range entries {
+				entries[i] = map[string]any{"id": 501 + i, "kind": "message"}
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 100, "name": "Thread", "entries": entries})
+			return
+		}
+
+		idText := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/messages/"), ".json")
+		id, err := strconv.ParseInt(idText, 10, 64)
+		if err != nil {
+			http.Error(w, "bad message ID", http.StatusBadRequest)
+			return
+		}
+
+		current := active.Add(1)
+		for {
+			previous := maximum.Load()
+			if current <= previous || maximum.CompareAndSwap(previous, current) {
+				break
+			}
+		}
+		started <- struct{}{}
+		<-release
+		active.Add(-1)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": id, "subject": fmt.Sprintf("Message %d", id), "content": fmt.Sprintf("body %d", id),
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	client := hey.NewClient(
+		&hey.Config{BaseURL: server.URL},
+		&hey.StaticTokenProvider{Token: "test-token"},
+		hey.WithMaxRetries(0),
+	)
+	vc := testVC()
+	vc.sdk = client
+	vc.ctx = context.Background()
+	v := newMailView(vc)
+	v.boxes = orderBoxes(testBoxes())
+	v.Update(currentPostingsLoaded(v, testPostings()))
+
+	result := make(chan tea.Msg, 1)
+	cmd := v.HandleContentKey(keyPress("enter"))
+	go func() { result <- cmd() }()
+
+	startedCount := 0
+	deadline := time.NewTimer(2 * time.Second)
+waitForLimit:
+	for startedCount < maxConcurrentMessageFetches {
+		select {
+		case <-started:
+			startedCount++
+		case <-deadline.C:
+			break waitForLimit
+		}
+	}
+	if !deadline.Stop() {
+		select {
+		case <-deadline.C:
+		default:
+		}
+	}
+
+	if startedCount == maxConcurrentMessageFetches {
+		select {
+		case <-started:
+			startedCount++
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	observedConcurrency := maximum.Load()
+	close(release)
+	loaded, ok := (<-result).(topicLoadedMsg)
+	if !ok {
+		t.Fatalf("thread command did not return topicLoadedMsg")
+	}
+
+	if startedCount < maxConcurrentMessageFetches {
+		t.Errorf("started %d concurrent message requests, want %d", startedCount, maxConcurrentMessageFetches)
+	}
+	if observedConcurrency <= 1 {
+		t.Errorf("message requests were sequential, maximum concurrency = %d", observedConcurrency)
+	}
+	if observedConcurrency > maxConcurrentMessageFetches {
+		t.Errorf("message request concurrency = %d, limit = %d", observedConcurrency, maxConcurrentMessageFetches)
+	}
+	if len(loaded.entries) != entryCount {
+		t.Fatalf("loaded %d entries, want %d", len(loaded.entries), entryCount)
+	}
+	for i, entry := range loaded.entries {
+		wantID := int64(501 + i)
+		if entry.ID != wantID {
+			t.Errorf("entry %d ID = %d, want %d", i, entry.ID, wantID)
+		}
 	}
 }
 

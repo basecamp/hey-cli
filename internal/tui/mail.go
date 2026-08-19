@@ -6,6 +6,7 @@ import (
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
@@ -13,6 +14,8 @@ import (
 )
 
 // --- Mail messages ---
+
+const maxConcurrentMessageFetches = 6
 
 type boxesLoadedMsg []models.Box
 
@@ -366,10 +369,11 @@ func (v *mailView) openSelected() tea.Cmd {
 // --- Posting actions ---
 
 func (v *mailView) handlePostingAction(key string) tea.Cmd {
-	p := v.postingList.selectedPosting()
-	if p == nil {
+	selected := v.postingList.selectedPosting()
+	if selected == nil {
 		return nil
 	}
+	p := *selected
 	boxID := v.currentBoxID()
 
 	switch key {
@@ -555,16 +559,35 @@ func (v *mailView) fetchTopic(requestID uint64, boxID, topicID int64, title stri
 			return topicLoadedMsg{requestID: requestID, boxID: boxID, topicID: topicID, title: title, err: fmt.Errorf("topic %d returned no data", topicID)}
 		}
 
-		entries := make([]models.Entry, 0, len(topic.Entries))
-		for _, entry := range topic.Entries {
-			message, getErr := v.vc.sdk.Messages().Get(v.vc.ctx, entry.Id)
-			if getErr != nil {
-				return topicLoadedMsg{requestID: requestID, boxID: boxID, topicID: topicID, title: title, err: getErr}
+		messages := make([]generated.Message, len(topic.Entries))
+		group, ctx := errgroup.WithContext(v.vc.ctx)
+		group.SetLimit(maxConcurrentMessageFetches)
+		for i, entry := range topic.Entries {
+			group.Go(func() error {
+				message, getErr := v.vc.sdk.Messages().Get(ctx, entry.Id)
+				if getErr != nil {
+					return fmt.Errorf("get message %d: %w", entry.Id, getErr)
+				}
+				if message == nil {
+					return fmt.Errorf("message %d returned no data", entry.Id)
+				}
+				messages[i] = *message
+				return nil
+			})
+		}
+		if getErr := group.Wait(); getErr != nil {
+			return topicLoadedMsg{
+				requestID: requestID,
+				boxID:     boxID,
+				topicID:   topicID,
+				title:     title,
+				err:       getErr,
 			}
-			if message == nil {
-				return topicLoadedMsg{requestID: requestID, boxID: boxID, topicID: topicID, title: title, err: fmt.Errorf("message %d returned no data", entry.Id)}
-			}
-			entries = append(entries, sdkMessageToEntry(entry, *message))
+		}
+
+		entries := make([]models.Entry, len(topic.Entries))
+		for i, entry := range topic.Entries {
+			entries[i] = sdkMessageToEntry(entry, messages[i])
 		}
 
 		var images [][]byte
