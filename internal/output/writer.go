@@ -164,12 +164,17 @@ func (w *Writer) writeMarkdown(data any) error {
 		return nil
 	}
 
-	first := toMap(items[0])
-	if first == nil {
+	if toMap(items[0]) == nil {
 		return w.writeQuiet(data)
 	}
 
-	headers := sortedKeys(first)
+	headerSet := make(map[string]any)
+	for _, item := range items {
+		for key := range toMap(item) {
+			headerSet[key] = nil
+		}
+	}
+	headers := sortedKeys(headerSet)
 
 	// Header row
 	var sb strings.Builder

@@ -87,6 +87,27 @@ func TestWriterOK_IDsOnly(t *testing.T) {
 	}
 }
 
+func TestWriterOK_MarkdownIncludesOptionalFieldsFromLaterRows(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatMarkdown, Stdout: &buf})
+
+	data := []map[string]any{
+		{"name": "Archived thread"},
+		{"id": 20, "name": "Active thread"},
+	}
+	if err := w.OK(data); err != nil {
+		t.Fatal(err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "| id | name |") {
+		t.Errorf("markdown header omitted optional id: %q", output)
+	}
+	if !strings.Contains(output, "| 20 | Active thread |") {
+		t.Errorf("markdown rows omitted later id: %q", output)
+	}
+}
+
 func TestWriterErr_JSON(t *testing.T) {
 	var buf bytes.Buffer
 	w := New(Options{Format: FormatJSON, Stderr: &buf})
