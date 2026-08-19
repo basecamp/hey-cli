@@ -222,6 +222,17 @@ func TestQExitsThread(t *testing.T) {
 	}
 }
 
+func TestBoxShortcutExitsThread(t *testing.T) {
+	m := modelWithBoxes()
+	m.mailView.inThread = true
+
+	updated, _ := m.Update(keyPress("F"))
+	result := updated.(model)
+	if result.activeView.InThread() {
+		t.Error("switching boxes should exit thread")
+	}
+}
+
 // --- Content list ---
 
 func TestContentListNavigation(t *testing.T) {

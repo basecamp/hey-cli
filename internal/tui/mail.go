@@ -28,9 +28,11 @@ type topicLoadedMsg struct {
 }
 
 type postingActionDoneMsg struct {
-	action  string
-	removes bool
-	err     error
+	action    string
+	boxID     int64
+	postingID int64
+	removes   bool
+	err       error
 }
 
 // --- Mail section view ---
@@ -132,22 +134,24 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 
 	case postingActionDoneMsg:
+		if msg.boxID != v.currentBoxID() {
+			return nil, true
+		}
 		if msg.err != nil {
 			return func() tea.Msg { return errMsg{msg.err} }, true
 		}
 		v.notice = msg.action
-		if msg.removes {
-			if v.postingList.cursor < len(v.postingList.postings) {
-				idx := v.postingList.cursor
-				v.postingList.postings = append(v.postingList.postings[:idx], v.postingList.postings[idx+1:]...)
-				if v.postingList.cursor >= len(v.postingList.postings) && v.postingList.cursor > 0 {
-					v.postingList.cursor--
-				}
+		idx := v.postingIndex(msg.postingID)
+		if msg.removes && idx >= 0 {
+			v.postingList.postings = append(v.postingList.postings[:idx], v.postingList.postings[idx+1:]...)
+			if v.postingList.cursor > idx {
+				v.postingList.cursor--
 			}
-		} else if msg.action == "marked as seen" {
-			if v.postingList.cursor < len(v.postingList.postings) {
-				v.postingList.postings[v.postingList.cursor].Seen = true
+			if v.postingList.cursor >= len(v.postingList.postings) && v.postingList.cursor > 0 {
+				v.postingList.cursor--
 			}
+		} else if msg.action == "marked as seen" && idx >= 0 {
+			v.postingList.postings[idx].Seen = true
 		}
 		return nil, true
 	}
@@ -214,21 +218,11 @@ func (v *mailView) SubnavItems() ([]navItem, int, string, bool) {
 }
 
 func (v *mailView) SubnavLeft() tea.Cmd {
-	if v.boxIndex > 0 {
-		v.boxIndex--
-		v.loading = true
-		return v.fetchPostings(v.boxes[v.boxIndex].ID)
-	}
-	return nil
+	return v.switchBox(v.boxIndex - 1)
 }
 
 func (v *mailView) SubnavRight() tea.Cmd {
-	if v.boxIndex < len(v.boxes)-1 {
-		v.boxIndex++
-		v.loading = true
-		return v.fetchPostings(v.boxes[v.boxIndex].ID)
-	}
-	return nil
+	return v.switchBox(v.boxIndex + 1)
 }
 
 func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
@@ -287,13 +281,34 @@ func (v *mailView) Resize(width, height int) {
 
 // handleBoxShortcut handles number-key shortcuts for switching boxes.
 func (v *mailView) handleBoxShortcut(key string) tea.Cmd {
-	if idx := boxForShortcut(key, v.boxes); idx >= 0 && idx != v.boxIndex {
-		v.notice = ""
-		v.boxIndex = idx
-		v.loading = true
-		return v.fetchPostings(v.boxes[idx].ID)
+	return v.switchBox(boxForShortcut(key, v.boxes))
+}
+
+func (v *mailView) switchBox(index int) tea.Cmd {
+	if index < 0 || index >= len(v.boxes) || index == v.boxIndex {
+		return nil
 	}
-	return nil
+	v.ExitThread()
+	v.notice = ""
+	v.boxIndex = index
+	v.loading = true
+	return v.fetchPostings(v.boxes[index].ID)
+}
+
+func (v *mailView) currentBoxID() int64 {
+	if v.boxIndex < 0 || v.boxIndex >= len(v.boxes) {
+		return 0
+	}
+	return v.boxes[v.boxIndex].ID
+}
+
+func (v *mailView) postingIndex(postingID int64) int {
+	for i := range v.postingList.postings {
+		if v.postingList.postings[i].ID == postingID {
+			return i
+		}
+	}
+	return -1
 }
 
 func (v *mailView) openSelected() tea.Cmd {
@@ -318,34 +333,35 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 	if p == nil {
 		return nil
 	}
+	boxID := v.currentBoxID()
 
 	switch key {
 	case "l":
-		return v.doPostingAction("moved to Reply Later", false, func() error {
+		return v.doPostingAction("moved to Reply Later", false, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MoveToReplyLater(v.vc.ctx, p.ID)
 		})
 	case "a":
-		return v.doPostingAction("moved to Set Aside", true, func() error {
+		return v.doPostingAction("moved to Set Aside", true, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MoveToSetAside(v.vc.ctx, p.ID)
 		})
 	case "e":
-		return v.doPostingAction("marked as seen", false, func() error {
+		return v.doPostingAction("marked as seen", false, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MarkSeen(v.vc.ctx, []int64{p.ID})
 		})
 	case "d":
-		return v.doPostingAction("moved to The Feed", true, func() error {
+		return v.doPostingAction("moved to The Feed", true, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MoveToFeed(v.vc.ctx, p.ID)
 		})
 	case "p":
-		return v.doPostingAction("moved to Paper Trail", true, func() error {
+		return v.doPostingAction("moved to Paper Trail", true, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MoveToPaperTrail(v.vc.ctx, p.ID)
 		})
 	case "t":
-		return v.doPostingAction("moved to Trash", true, func() error {
+		return v.doPostingAction("moved to Trash", true, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MoveToTrash(v.vc.ctx, p.ID)
 		})
 	case "-":
-		return v.doPostingAction("muted", true, func() error {
+		return v.doPostingAction("muted", true, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().Mute(v.vc.ctx, p.ID)
 		})
 	case "r":
@@ -370,10 +386,16 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 	return nil
 }
 
-func (v *mailView) doPostingAction(label string, removes bool, fn func() error) tea.Cmd {
+func (v *mailView) doPostingAction(label string, removes bool, boxID, postingID int64, fn func() error) tea.Cmd {
 	return func() tea.Msg {
 		err := fn()
-		return postingActionDoneMsg{action: label, removes: removes, err: err}
+		return postingActionDoneMsg{
+			action:    label,
+			boxID:     boxID,
+			postingID: postingID,
+			removes:   removes,
+			err:       err,
+		}
 	}
 }
 

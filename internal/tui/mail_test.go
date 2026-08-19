@@ -198,6 +198,9 @@ func TestMailViewPostingKeysCallExpectedEndpoints(t *testing.T) {
 			if !ok || done.err != nil {
 				t.Fatalf("posting command returned %#v", msg)
 			}
+			if done.boxID != 1 || done.postingID != 100 {
+				t.Errorf("action origin = box %d posting %d, want box 1 posting 100", done.boxID, done.postingID)
+			}
 			v.Update(done)
 
 			if recorded.method != http.MethodPost || recorded.path != tt.path {
@@ -252,13 +255,49 @@ func TestMailViewPostingKeyFailureKeepsPosting(t *testing.T) {
 	}
 }
 
+func TestMailViewPostingCompletionUpdatesOriginatingPosting(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+
+	msg := runCmd(v.HandleContentKey(keyPress("t")))
+	done, ok := msg.(postingActionDoneMsg)
+	if !ok {
+		t.Fatalf("posting command returned %T, want postingActionDoneMsg", msg)
+	}
+	v.postingList.moveDown()
+	v.Update(done)
+
+	if len(v.postingList.postings) != 1 || v.postingList.postings[0].ID != 101 {
+		t.Errorf("postings after completion = %v, want only posting 101", v.postingList.postings)
+	}
+}
+
+func TestMailViewIgnoresPostingCompletionAfterBoxSwitch(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+
+	msg := runCmd(v.HandleContentKey(keyPress("t")))
+	done, ok := msg.(postingActionDoneMsg)
+	if !ok {
+		t.Fatalf("posting command returned %T, want postingActionDoneMsg", msg)
+	}
+	v.SubnavRight()
+	v.Update(postingsLoadedMsg{postings: []models.Posting{{ID: 200, Summary: "Other box"}}})
+	v.Update(done)
+
+	if len(v.postingList.postings) != 1 || v.postingList.postings[0].ID != 200 {
+		t.Errorf("stale completion changed the new box: %v", v.postingList.postings)
+	}
+	if v.notice != "" {
+		t.Errorf("stale completion notice = %q, want empty", v.notice)
+	}
+}
+
 func TestMailViewPostingActionRemoves(t *testing.T) {
 	v := mailWithPostings()
 	if len(v.postingList.postings) != 2 {
 		t.Fatalf("expected 2 postings, got %d", len(v.postingList.postings))
 	}
 
-	v.Update(postingActionDoneMsg{action: "moved to Trash", removes: true})
+	v.Update(postingActionDoneMsg{action: "moved to Trash", boxID: 1, postingID: 100, removes: true})
 	if len(v.postingList.postings) != 1 {
 		t.Errorf("expected 1 posting after remove, got %d", len(v.postingList.postings))
 	}
@@ -270,7 +309,7 @@ func TestMailViewPostingActionMarksSeen(t *testing.T) {
 		t.Fatal("first posting should be unseen")
 	}
 
-	v.Update(postingActionDoneMsg{action: "marked as seen"})
+	v.Update(postingActionDoneMsg{action: "marked as seen", boxID: 1, postingID: 100})
 	if !v.postingList.postings[0].Seen {
 		t.Error("first posting should be seen after action")
 	}
@@ -278,7 +317,7 @@ func TestMailViewPostingActionMarksSeen(t *testing.T) {
 
 func TestMailViewPostingActionError(t *testing.T) {
 	v := mailWithPostings()
-	cmd, consumed := v.Update(postingActionDoneMsg{err: fmt.Errorf("network error")})
+	cmd, consumed := v.Update(postingActionDoneMsg{boxID: 1, postingID: 100, err: fmt.Errorf("network error")})
 
 	if !consumed {
 		t.Error("postingActionDoneMsg with error should be consumed")
@@ -372,12 +411,20 @@ func TestMailViewSubnavLeftRight(t *testing.T) {
 	}
 
 	// Go right
+	v.inThread = true
+	v.notice = "previous action"
 	v.SubnavRight()
 	if v.boxIndex != 1 {
 		t.Errorf("after SubnavRight: boxIndex = %d, want 1", v.boxIndex)
 	}
 	if !v.loading {
 		t.Error("SubnavRight should set loading")
+	}
+	if v.inThread {
+		t.Error("SubnavRight should close the open thread")
+	}
+	if v.notice != "" {
+		t.Errorf("SubnavRight should clear the previous notice, got %q", v.notice)
 	}
 
 	v.loading = false
@@ -464,6 +511,7 @@ func TestMailViewHelpBindingsInThread(t *testing.T) {
 
 func TestMailViewBoxShortcut(t *testing.T) {
 	v := mailWithPostings()
+	v.inThread = true
 	v.notice = "previous action"
 	cmd := v.handleBoxShortcut("F") // The Feed
 	if cmd == nil {
@@ -477,6 +525,9 @@ func TestMailViewBoxShortcut(t *testing.T) {
 	}
 	if v.notice != "" {
 		t.Errorf("box switch should clear the previous notice, got %q", v.notice)
+	}
+	if v.inThread {
+		t.Error("box switch should close the open thread")
 	}
 }
 
