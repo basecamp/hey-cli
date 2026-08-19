@@ -78,7 +78,12 @@ func (c *attachmentsCommand) run(cmd *cobra.Command, args []string) error {
 			table := newTable(cmd.OutOrStdout())
 			table.addRow([]string{"ID", "Filename", "Type", "Size"})
 			for _, attachment := range attachments {
-				table.addRow([]string{attachment.ID, attachment.Filename, attachment.ContentType, formatByteSize(attachment.ByteSize)})
+				table.addRow([]string{
+					attachment.ID,
+					terminalSafeText(attachment.Filename),
+					terminalSafeText(attachment.ContentType),
+					formatByteSize(attachment.ByteSize),
+				})
 			}
 			table.print()
 		}

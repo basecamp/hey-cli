@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/mattn/go-runewidth"
 	"golang.org/x/term"
@@ -80,6 +81,15 @@ func (s style) format(value string) string {
 		return value
 	}
 	return "\033[" + string(s) + "m" + value + "\033[0m"
+}
+
+func terminalSafeText(value string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return '�'
+		}
+		return r
+	}, value)
 }
 
 func truncate(s string, maxWidth int) string {

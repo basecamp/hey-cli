@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/spf13/cobra"
 
@@ -105,9 +107,9 @@ func parseAttachmentID(id string) (int64, int, error) {
 }
 
 func attachmentDestination(outputPath, filename string) (string, error) {
-	filename = filepath.Base(strings.TrimSpace(filename))
-	if filename == "" || filename == "." || filename == ".." || filename == string(filepath.Separator) {
-		return "", output.ErrUsage("attachment has no safe filename")
+	filename, err := portableAttachmentFilename(filename)
+	if err != nil {
+		return "", err
 	}
 	if outputPath == "" {
 		return filename, nil
@@ -120,6 +122,43 @@ func attachmentDestination(outputPath, filename string) (string, error) {
 		return "", output.ErrAPI(0, fmt.Sprintf("could not inspect output path: %v", err))
 	}
 	return filepath.Clean(outputPath), nil
+}
+
+func portableAttachmentFilename(filename string) (string, error) {
+	filename = strings.TrimSpace(filename)
+	filename = path.Base(strings.ReplaceAll(filename, `\`, "/"))
+	if filename == "" || filename == "." || filename == ".." || filename == "/" {
+		return "", output.ErrUsage("attachment has no safe filename")
+	}
+	filename = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || strings.ContainsRune(`<>:"/\|?*`, r) {
+			return '_'
+		}
+		return r
+	}, filename)
+	filename = strings.TrimRight(filename, ". ")
+	if filename == "" {
+		filename = "attachment"
+	}
+	if windowsReservedFilename(filename) {
+		filename = "_" + filename
+	}
+	return filename, nil
+}
+
+func windowsReservedFilename(filename string) bool {
+	stem := filename
+	if dot := strings.IndexByte(stem, '.'); dot >= 0 {
+		stem = stem[:dot]
+	}
+	stem = strings.ToUpper(stem)
+	if stem == "CON" || stem == "PRN" || stem == "AUX" || stem == "NUL" {
+		return true
+	}
+	if len(stem) == 4 && (strings.HasPrefix(stem, "COM") || strings.HasPrefix(stem, "LPT")) {
+		return stem[3] >= '1' && stem[3] <= '9'
+	}
+	return false
 }
 
 func downloadAttachmentFile(ctx context.Context, destination, sourceURL string, force bool) (int64, error) {

@@ -312,6 +312,23 @@ func TestReplyUploadsAttachmentsBeforeSending(t *testing.T) {
 	}
 }
 
+func TestReplySupportsAttachmentOnlyMessages(t *testing.T) {
+	server, state := attachmentServer(t)
+	path := filepath.Join(t.TempDir(), "quarterly-report.pdf")
+	if err := os.WriteFile(path, []byte("report contents"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runAttachmentCommand(t, server, "reply", "7", "--attach", path); err != nil {
+		t.Fatal(err)
+	}
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if len(state.sentContents) != 1 || !strings.HasPrefix(state.sentContents[0], `<action-text-attachment`) {
+		t.Errorf("attachment-only reply content = %q", state.sentContents)
+	}
+}
+
 func TestReplyReadsPipedBodyWithAttachments(t *testing.T) {
 	server, state := attachmentServer(t)
 	path := filepath.Join(t.TempDir(), "quarterly-report.pdf")
@@ -370,17 +387,34 @@ func TestAttachmentContentTypeUsesBrowserCompatibleMediaType(t *testing.T) {
 
 func TestAttachmentDestinationUsesSafeFilename(t *testing.T) {
 	directory := t.TempDir()
-	destination, err := attachmentDestination(directory, "../../quarterly-report.pdf")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if destination != filepath.Join(directory, "quarterly-report.pdf") {
-		t.Errorf("destination = %q", destination)
+	for filename, want := range map[string]string{
+		"../../quarterly-report.pdf": `quarterly-report.pdf`,
+		`..\..\project-notes.txt`:    `project-notes.txt`,
+		`CON.pdf`:                    `_CON.pdf`,
+		`notes?.txt`:                 `notes_.txt`,
+		"line\nbreak.txt":            `line_break.txt`,
+		`quarterly-report. `:         `quarterly-report`,
+	} {
+		destination, err := attachmentDestination(directory, filename)
+		if err != nil {
+			t.Errorf("attachmentDestination(%q): %v", filename, err)
+			continue
+		}
+		if destination != filepath.Join(directory, want) {
+			t.Errorf("attachmentDestination(%q) = %q, want %q", filename, destination, filepath.Join(directory, want))
+		}
 	}
 	for _, filename := range []string{"", ".", ".."} {
 		if _, err := attachmentDestination("", filename); err == nil {
 			t.Errorf("unsafe filename %q was accepted", filename)
 		}
+	}
+}
+
+func TestTerminalSafeTextReplacesControls(t *testing.T) {
+	safe := terminalSafeText("report\x1b[31m\r\n.pdf")
+	if strings.ContainsAny(safe, "\x1b\r\n") {
+		t.Errorf("terminal-safe text still contains controls: %q", safe)
 	}
 }
 
