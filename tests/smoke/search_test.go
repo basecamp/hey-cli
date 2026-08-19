@@ -36,14 +36,22 @@ func TestSearchFreeTextAndRefinements(t *testing.T) {
 	boxResp := heyJSON(t, "box", "imbox")
 	box := dataAs[struct {
 		Postings []struct {
+			Kind string `json:"kind"`
 			Name string `json:"name"`
 		} `json:"postings"`
 	}](t, boxResp)
-	if len(box.Postings) == 0 || strings.TrimSpace(box.Postings[0].Name) == "" {
+	var subject string
+	for _, posting := range box.Postings {
+		if posting.Kind != "bundle" && strings.TrimSpace(posting.Name) != "" {
+			subject = posting.Name
+			break
+		}
+	}
+	if subject == "" {
 		t.Skip("no Imbox thread available for read-only search validation")
 	}
 
-	query := strings.Fields(box.Postings[0].Name)[0]
+	query := strings.Fields(subject)[0]
 	freeText := dataAs[[]smokeSearchResult](t, heyJSON(t, "search", query))
 	for _, result := range freeText {
 		if result.TopicID == 0 {
@@ -51,7 +59,10 @@ func TestSearchFreeTextAndRefinements(t *testing.T) {
 		}
 	}
 
-	refined := dataAs[[]smokeSearchResult](t, heyJSON(t, "search", "--subject", box.Postings[0].Name, "--in", "imbox", "--page", "1"))
+	refined := dataAs[[]smokeSearchResult](t, heyJSON(t, "search", "--subject", subject, "--in", "imbox", "--page", "1"))
+	if len(refined) == 0 {
+		t.Fatal("subject and box refinements did not find the known Imbox thread")
+	}
 	for _, result := range refined {
 		if result.TopicID == 0 {
 			t.Error("refined search result has no topic_id")

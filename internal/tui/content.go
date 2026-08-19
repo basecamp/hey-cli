@@ -28,11 +28,12 @@ func formatDisplayDate(ts string) string {
 
 // contentList renders a scrollable list of postings with a cursor.
 type contentList struct {
-	postings  []models.Posting
-	cursor    int
-	scrollOff int
-	width     int
-	height    int // visible rows (each posting takes 2 lines)
+	postings      []models.Posting
+	cursor        int
+	scrollOff     int
+	width         int
+	height        int // visible rows (each posting takes 2 lines)
+	hideSeenState bool
 }
 
 func (c *contentList) setPostings(postings []models.Posting) {
@@ -109,7 +110,7 @@ func (c *contentList) view() string {
 		} else {
 			line1.WriteString("  ")
 		}
-		if !p.Seen {
+		if !p.Seen && !c.hideSeenState {
 			line1.WriteString(unseenDot.Render("●") + " ")
 		} else {
 			line1.WriteString("  ")

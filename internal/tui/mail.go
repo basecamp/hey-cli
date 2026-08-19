@@ -108,6 +108,7 @@ func newMailView(vc *viewContext) *mailView {
 	return &mailView{
 		vc:            vc,
 		topicViewport: viewport.New(viewport.WithWidth(0), viewport.WithHeight(0)),
+		searchList:    contentList{hideSeenState: true},
 	}
 }
 

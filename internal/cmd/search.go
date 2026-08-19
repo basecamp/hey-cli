@@ -77,7 +77,7 @@ func newSearchCommand() *searchCommand {
 	flags.StringVar(&searchCommand.label, "label", "", "Label name")
 	flags.StringVar(&searchCommand.attachment, "attachment", "", "Attachment kind, or any")
 	flags.IntVar(&searchCommand.page, "page", 1, "Results page")
-	flags.BoolVar(&searchCommand.all, "all", false, "Fetch every results page from --page onward")
+	flags.BoolVar(&searchCommand.all, "all", false, "Fetch up to 100 results pages from --page onward")
 
 	searchCommand.cmd.AddCommand(newSearchFiltersCommand().cmd)
 	return searchCommand

@@ -200,11 +200,11 @@ Box names: `imbox`, `feedbox`, `trailbox`, `asidebox`, `laterbox`, `bubblebox`
 ```bash
 hey search "quarterly planning" --json         # Free-text search
 hey search --from jane@example.com --date last_30_days --json  # Refined search
-hey search --subject invoice --attachment pdf --all --json     # Search every page
+hey search --subject invoice --attachment pdf --all --json     # Search up to 100 pages
 hey search filters --json                      # Available box, date, label, and attachment values
 ```
 
-Search refinements are `--required`, `--any`, `--none`, `--exact`, `--from`, `--to`, `--subject`, `--date`, `--in`, `--label`, and `--attachment`. `--page` selects one result page; `--all` fetches every page from that point onward.
+Search refinements are `--required`, `--any`, `--none`, `--exact`, `--from`, `--to`, `--subject`, `--date`, `--in`, `--label`, and `--attachment`. `--page` selects one result page; `--all` fetches up to 100 pages from that point onward. When the cap is reached, the response notice provides the next `--page` value for continuation.
 
 **Response format:** `data` contains one item per matching thread. Each result has `id` (box item ID for organization actions), `topic_id` (thread ID for `hey threads`, `hey reply`, and `hey forward`), `subject`, `updated_at`, and `messages` containing the matching message IDs, senders, dates, and summaries. A result can omit `id` when the thread has no active box item.
 

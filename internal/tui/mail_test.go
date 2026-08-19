@@ -1179,6 +1179,9 @@ func TestMailViewSearchFormSubmitsQueryAndRendersResults(t *testing.T) {
 	if !strings.Contains(view, "Hello world") || !strings.Contains(view, "Matching message summary") {
 		t.Errorf("search result does not show thread and matching-message context: %q", view)
 	}
+	if strings.Contains(view, "●") {
+		t.Errorf("search result shows an unread marker without a read state: %q", view)
+	}
 	_, _, label, _ := v.SubnavItems()
 	if !strings.Contains(label, "quarterly planning") || !strings.Contains(label, "page 1") {
 		t.Errorf("search label = %q", label)
