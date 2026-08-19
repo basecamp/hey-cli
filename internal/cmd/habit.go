@@ -18,7 +18,7 @@ func newHabitCommand() *habitCommand {
 	habitCommand := &habitCommand{}
 	habitCommand.cmd = &cobra.Command{
 		Use:   "habit",
-		Short: "Manage habit completions",
+		Short: "Track completed habits",
 		Annotations: map[string]string{
 			"agent_notes": "Subcommands: complete, uncomplete. Requires habit ID from calendar recordings.",
 		},

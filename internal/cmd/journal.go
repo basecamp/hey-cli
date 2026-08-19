@@ -19,7 +19,7 @@ func newJournalCommand() *journalCommand {
 	journalCommand := &journalCommand{}
 	journalCommand.cmd = &cobra.Command{
 		Use:   "journal",
-		Short: "Manage journal entries",
+		Short: "Read and write journal entries",
 		Annotations: map[string]string{
 			"agent_notes": "Subcommands: list, read, write. Read defaults to today. Write accepts --content, stdin, or opens $EDITOR.",
 		},

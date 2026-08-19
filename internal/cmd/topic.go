@@ -19,7 +19,7 @@ func newThreadsCommand() *topicCommand {
 	threadsCommand := &topicCommand{}
 	threadsCommand.cmd = &cobra.Command{
 		Use:   "threads <id>",
-		Short: "Read an email thread",
+		Short: "Read a thread",
 		Annotations: map[string]string{
 			"agent_notes": "Returns a thread with all entries. Use entry IDs with hey reply.",
 		},

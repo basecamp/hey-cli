@@ -20,8 +20,8 @@ func newAuthCommand() *authCommand {
 	ac := &authCommand{}
 	ac.cmd = &cobra.Command{
 		Use:   "auth",
-		Short: "Manage authentication",
-		Long:  "Manage authentication with the HEY server via Launchpad OAuth.",
+		Short: "Sign in, sign out, and check login status",
+		Long:  "Sign in to HEY, sign out, or check your login status.",
 		Annotations: map[string]string{
 			"agent_notes": "Use status to check auth before other commands. Returns token expiry info in JSON. Use login --token for non-interactive auth.",
 		},

@@ -17,7 +17,7 @@ func newTodoCommand() *todoCommand {
 	todoCommand := &todoCommand{}
 	todoCommand.cmd = &cobra.Command{
 		Use:   "todo",
-		Short: "Manage todos",
+		Short: "Create and manage to-dos",
 		Annotations: map[string]string{
 			"agent_notes": "Subcommands: list, add, complete, uncomplete, delete. Use list --ids-only to pipe IDs to complete/delete.",
 		},

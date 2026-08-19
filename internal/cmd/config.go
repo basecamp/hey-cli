@@ -16,7 +16,7 @@ func newConfigCommand() *configCommand {
 	configCommand := &configCommand{}
 	configCommand.cmd = &cobra.Command{
 		Use:   "config",
-		Short: "Manage configuration",
+		Short: "View and change settings",
 	}
 
 	configCommand.cmd.AddCommand(newConfigShowCommand())

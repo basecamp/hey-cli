@@ -39,7 +39,7 @@ var (
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "hey",
-		Short: "CLI for HEY",
+		Short: "Read, send, and organize HEY email and calendars from your terminal.",
 		Long: `A CLI for HEY
 ⠀⠀⠀⠀⠀⠀⣰⠲⣄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ⠀⠀⠀⡟⢳⡀⣏⠀⠘⣆⠀⠀⠀⠀⠀⣤⣤⡄⠀⠀⢠⣤⣤⣤⣤⣤⣤⣤⣤⠀⠀⢀⣤⣤⡄⠀
@@ -97,9 +97,9 @@ func newRootCmd() *cobra.Command {
 
 	root.CompletionOptions.HiddenDefaultCmd = true
 
-	root.PersistentFlags().BoolVar(&jsonFlag, "json", false, "Output as JSON envelope")
+	root.PersistentFlags().BoolVar(&jsonFlag, "json", false, "Output JSON with metadata")
 	root.PersistentFlags().BoolVar(&htmlOutput, "html", false, "Output raw HTML (for commands that return HTML content)")
-	root.PersistentFlags().BoolVar(&quietFlag, "quiet", false, "Output raw data without envelope")
+	root.PersistentFlags().BoolVar(&quietFlag, "quiet", false, "Output result data only")
 	root.PersistentFlags().BoolVar(&idsOnly, "ids-only", false, "Output only IDs, one per line")
 	root.PersistentFlags().BoolVar(&countFlag, "count", false, "Output only the count of results")
 	root.PersistentFlags().BoolVar(&markdownF, "markdown", false, "Output as Markdown")
@@ -107,7 +107,7 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().BoolVar(&agentFlag, "agent", false, "Agent mode (JSON envelope, no TTY formatting)")
 	root.PersistentFlags().MarkHidden("agent") //nolint:errcheck,gosec // flag exists
 	root.PersistentFlags().StringVar(&baseURL, "base-url", "", "Override server URL")
-	root.PersistentFlags().CountVarP(&verboseFlag, "verbose", "v", "Increase verbosity (request logging)")
+	root.PersistentFlags().CountVarP(&verboseFlag, "verbose", "v", "Show request details")
 	root.PersistentFlags().BoolVar(&statsFlag, "stats", false, "Include request stats in response meta")
 
 	root.Version = version.Version

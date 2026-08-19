@@ -26,8 +26,8 @@ func newBoxCommand() *boxCommand {
 	boxCommand := &boxCommand{}
 	boxCommand.cmd = &cobra.Command{
 		Use:   "box <name|id>",
-		Short: "List postings in a mailbox",
-		Long:  "List postings in a mailbox. Accepts a box name (imbox, feedbox, etc.) or numeric ID.",
+		Short: "List messages in a box",
+		Long:  "List messages in a HEY box. Accepts a box name (imbox, feedbox, etc.) or numeric ID.",
 		Annotations: map[string]string{
 			"agent_notes": "Accepts box name or numeric ID. Returns postings (threads). Use thread IDs with hey threads.",
 		},
@@ -38,7 +38,7 @@ func newBoxCommand() *boxCommand {
 		Args: validateBoxArgs,
 	}
 
-	boxCommand.cmd.Flags().IntVar(&boxCommand.limit, "limit", 0, "Maximum number of postings to show")
+	boxCommand.cmd.Flags().IntVar(&boxCommand.limit, "limit", 0, "Maximum number of messages to show")
 	boxCommand.cmd.Flags().BoolVar(&boxCommand.all, "all", false, "Fetch all results (override --limit)")
 
 	return boxCommand

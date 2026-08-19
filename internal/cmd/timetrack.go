@@ -16,7 +16,7 @@ func newTimetrackCommand() *timetrackCommand {
 	timetrackCommand := &timetrackCommand{}
 	timetrackCommand.cmd = &cobra.Command{
 		Use:   "timetrack",
-		Short: "Manage time tracking",
+		Short: "Track time",
 		Annotations: map[string]string{
 			"agent_notes": "Subcommands: start, stop, current, list. Use current to check if tracking is active before start/stop.",
 		},

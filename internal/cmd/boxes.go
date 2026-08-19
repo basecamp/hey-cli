@@ -20,7 +20,7 @@ func newBoxesCommand() *boxesCommand {
 	boxesCommand := &boxesCommand{}
 	boxesCommand.cmd = &cobra.Command{
 		Use:   "boxes",
-		Short: "List mailboxes",
+		Short: "List your HEY boxes",
 		Annotations: map[string]string{
 			"agent_notes": "Returns all mailbox types. Use --ids-only to pipe IDs to hey box.",
 		},

@@ -14,8 +14,8 @@ import (
 func newSetupCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "setup",
-		Short: "First-run setup wizard",
-		Long:  "Walks through initial authentication setup for hey CLI.",
+		Short: "Set up HEY for first use",
+		Long:  "Sign in and prepare HEY for first use.",
 		Annotations: map[string]string{
 			"agent_notes": "Run this on first use. Performs OAuth login. Equivalent to hey auth login.",
 		},

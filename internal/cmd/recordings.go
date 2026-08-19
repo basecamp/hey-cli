@@ -24,7 +24,7 @@ func newRecordingsCommand() *recordingsCommand {
 	recordingsCommand := &recordingsCommand{}
 	recordingsCommand.cmd = &cobra.Command{
 		Use:   "recordings <calendar-id>",
-		Short: "List recordings (events, todos, etc.) for a calendar",
+		Short: "List events, to-dos, and other calendar entries",
 		Annotations: map[string]string{
 			"agent_notes": "Returns recordings grouped by type for a calendar. Defaults to today + 30 days.",
 		},
@@ -37,7 +37,7 @@ func newRecordingsCommand() *recordingsCommand {
 
 	recordingsCommand.cmd.Flags().StringVar(&recordingsCommand.startsOn, "starts-on", "", "Start date (YYYY-MM-DD, defaults to today)")
 	recordingsCommand.cmd.Flags().StringVar(&recordingsCommand.endsOn, "ends-on", "", "End date (YYYY-MM-DD, defaults to 30 days from starts-on)")
-	recordingsCommand.cmd.Flags().IntVar(&recordingsCommand.limit, "limit", 0, "Maximum number of recordings per type to show")
+	recordingsCommand.cmd.Flags().IntVar(&recordingsCommand.limit, "limit", 0, "Maximum number of calendar entries per type to show")
 	recordingsCommand.cmd.Flags().BoolVar(&recordingsCommand.all, "all", false, "Fetch all results (override --limit)")
 
 	return recordingsCommand

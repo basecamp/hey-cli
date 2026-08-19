@@ -17,7 +17,7 @@ func newSeenCommand() *seenCommand {
 	seenCommand := &seenCommand{}
 	seenCommand.cmd = &cobra.Command{
 		Use:   "seen <posting-id>...",
-		Short: "Mark postings as seen",
+		Short: "Mark messages as seen",
 		Example: `  hey seen 12345
   hey seen 12345 67890`,
 		Annotations: map[string]string{
@@ -64,7 +64,7 @@ func newUnseenCommand() *unseenCommand {
 	unseenCommand := &unseenCommand{}
 	unseenCommand.cmd = &cobra.Command{
 		Use:   "unseen <posting-id>...",
-		Short: "Mark postings as unseen",
+		Short: "Mark messages as unseen",
 		Example: `  hey unseen 12345
   hey unseen 12345 67890`,
 		Annotations: map[string]string{

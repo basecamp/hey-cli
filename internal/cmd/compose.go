@@ -25,7 +25,7 @@ func newComposeCommand() *composeCommand {
 	composeCommand := &composeCommand{}
 	composeCommand.cmd = &cobra.Command{
 		Use:   "compose",
-		Short: "Compose a new message",
+		Short: "Write and send a new email",
 		Annotations: map[string]string{
 			"agent_notes": "Starts a new thread with --to (optionally --cc/--bcc), which requires --subject, or replies to an existing one with --thread-id, which does not: a reply carries the thread's subject and goes to that thread's recipients.",
 		},

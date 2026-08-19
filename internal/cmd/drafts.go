@@ -20,7 +20,7 @@ func newDraftsCommand() *draftsCommand {
 	draftsCommand := &draftsCommand{}
 	draftsCommand.cmd = &cobra.Command{
 		Use:   "drafts",
-		Short: "List drafts",
+		Short: "List draft emails",
 		Annotations: map[string]string{
 			"agent_notes": "Returns saved draft messages with IDs, summaries, and subjects.",
 		},

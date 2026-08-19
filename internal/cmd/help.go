@@ -54,13 +54,13 @@ func customHelpFunc(defaultHelp func(*cobra.Command, []string)) func(*cobra.Comm
 func renderRootHelp(w io.Writer, cmd *cobra.Command) {
 	var b strings.Builder
 
-	b.WriteString("CLI for HEY\n")
+	b.WriteString("Read, send, and organize HEY email and calendars from your terminal.\n")
 
 	// USAGE
 	b.WriteString("\n")
 	b.WriteString(bold.format("USAGE") + "\n")
 	b.WriteString("  hey <command> [flags]\n")
-	b.WriteString("  hey                     Launch the interactive TUI\n")
+	b.WriteString("  hey                     Open the interactive app\n")
 
 	// Build lookup from command name → registered cobra.Command
 	registered := make(map[string]*cobra.Command, len(cmd.Commands()))
@@ -102,11 +102,11 @@ func renderRootHelp(w io.Writer, cmd *cobra.Command) {
 		desc  string
 	}
 	flags := []flagEntry{
-		{"", "--json", "Output as JSON envelope"},
+		{"", "--json", "Output JSON with metadata"},
 		{"", "--markdown", "Output as Markdown"},
-		{"", "--quiet", "Output raw data without envelope"},
-		{"-v", "--verbose", "Increase verbosity"},
-		{"", "--help", "Show help for command"},
+		{"", "--quiet", "Output result data only"},
+		{"-v", "--verbose", "Show request details"},
+		{"", "--help", "Show help"},
 		{"", "--version", "Show version"},
 	}
 	for _, f := range flags {
@@ -124,7 +124,7 @@ func renderRootHelp(w io.Writer, cmd *cobra.Command) {
 		"$ hey boxes",
 		"$ hey box imbox",
 		"$ hey threads 123",
-		`$ hey compose --to "someone@hey.com" -m "Hello!"`,
+		`$ hey compose --to alice@example.com --subject "Lunch plans" -m "Are you free Friday?"`,
 	}
 	for _, ex := range examples {
 		b.WriteString(italic.format("  "+ex) + "\n")
