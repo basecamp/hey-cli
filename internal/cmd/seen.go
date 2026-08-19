@@ -16,12 +16,12 @@ type seenCommand struct {
 func newSeenCommand() *seenCommand {
 	seenCommand := &seenCommand{}
 	seenCommand.cmd = &cobra.Command{
-		Use:   "seen <posting-id>...",
-		Short: "Mark messages as seen",
+		Use:   "seen <id>...",
+		Short: "Mark email threads as seen",
 		Example: `  hey seen 12345
   hey seen 12345 67890`,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts one or more posting IDs. Marks each as seen/read.",
+			"agent_notes": "Accepts one or more box item IDs from hey box output. Marks each email thread as seen/read.",
 		},
 		RunE: seenCommand.run,
 		Args: usageMinOneArg(),
@@ -44,7 +44,7 @@ func (c *seenCommand) run(cmd *cobra.Command, args []string) error {
 		return convertSDKError(err)
 	}
 
-	summary := fmt.Sprintf("%d posting(s) marked as seen", len(ids))
+	summary := fmt.Sprintf("%d %s marked as seen", len(ids), threadNoun(len(ids)))
 
 	if writer.IsStyled() {
 		fmt.Fprintln(cmd.OutOrStdout(), summary+".")
@@ -63,12 +63,12 @@ type unseenCommand struct {
 func newUnseenCommand() *unseenCommand {
 	unseenCommand := &unseenCommand{}
 	unseenCommand.cmd = &cobra.Command{
-		Use:   "unseen <posting-id>...",
-		Short: "Mark messages as unseen",
+		Use:   "unseen <id>...",
+		Short: "Mark email threads as unseen",
 		Example: `  hey unseen 12345
   hey unseen 12345 67890`,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts one or more posting IDs. Marks each as unseen/unread.",
+			"agent_notes": "Accepts one or more box item IDs from hey box output. Marks each email thread as unseen/unread.",
 		},
 		RunE: unseenCommand.run,
 		Args: usageMinOneArg(),
@@ -91,7 +91,7 @@ func (c *unseenCommand) run(cmd *cobra.Command, args []string) error {
 		return convertSDKError(err)
 	}
 
-	summary := fmt.Sprintf("%d posting(s) marked as unseen", len(ids))
+	summary := fmt.Sprintf("%d %s marked as unseen", len(ids), threadNoun(len(ids)))
 
 	if writer.IsStyled() {
 		fmt.Fprintln(cmd.OutOrStdout(), summary+".")
@@ -106,7 +106,7 @@ func parseIntArgs(args []string) ([]int64, error) {
 	for _, arg := range args {
 		id, err := strconv.ParseInt(arg, 10, 64)
 		if err != nil {
-			return nil, output.ErrUsage(fmt.Sprintf("invalid posting ID: %s", arg))
+			return nil, output.ErrUsage(fmt.Sprintf("invalid ID: %s", arg))
 		}
 		ids = append(ids, id)
 	}

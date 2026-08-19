@@ -100,8 +100,8 @@ func TestSeenSingle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if resp.Summary != "1 posting(s) marked as seen" {
-		t.Errorf("summary = %q, want %q", resp.Summary, "1 posting(s) marked as seen")
+	if resp.Summary != "1 thread marked as seen" {
+		t.Errorf("summary = %q, want %q", resp.Summary, "1 thread marked as seen")
 	}
 }
 
@@ -113,8 +113,8 @@ func TestSeenMultiple(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if resp.Summary != "2 posting(s) marked as seen" {
-		t.Errorf("summary = %q, want %q", resp.Summary, "2 posting(s) marked as seen")
+	if resp.Summary != "2 threads marked as seen" {
+		t.Errorf("summary = %q, want %q", resp.Summary, "2 threads marked as seen")
 	}
 }
 
@@ -139,6 +139,9 @@ func TestSeenInvalidID(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for non-numeric ID")
 	}
+	if err.Error() != "invalid ID: abc" {
+		t.Errorf("error = %q, want %q", err, "invalid ID: abc")
+	}
 }
 
 func TestUnseenSingle(t *testing.T) {
@@ -149,8 +152,8 @@ func TestUnseenSingle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if resp.Summary != "1 posting(s) marked as unseen" {
-		t.Errorf("summary = %q, want %q", resp.Summary, "1 posting(s) marked as unseen")
+	if resp.Summary != "1 thread marked as unseen" {
+		t.Errorf("summary = %q, want %q", resp.Summary, "1 thread marked as unseen")
 	}
 }
 
@@ -162,8 +165,8 @@ func TestUnseenMultiple(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if resp.Summary != "2 posting(s) marked as unseen" {
-		t.Errorf("summary = %q, want %q", resp.Summary, "2 posting(s) marked as unseen")
+	if resp.Summary != "2 threads marked as unseen" {
+		t.Errorf("summary = %q, want %q", resp.Summary, "2 threads marked as unseen")
 	}
 }
 

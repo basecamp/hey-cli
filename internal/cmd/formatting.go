@@ -89,6 +89,13 @@ func truncate(s string, maxWidth int) string {
 	return runewidth.Truncate(s, maxWidth, "...")
 }
 
+func threadNoun(count int) string {
+	if count == 1 {
+		return "thread"
+	}
+	return "threads"
+}
+
 func stdinIsTerminal() bool {
 	return term.IsTerminal(int(os.Stdin.Fd())) //nolint:gosec // G115: fd fits in int
 }

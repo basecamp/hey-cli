@@ -58,7 +58,7 @@ hey auth logout   # clear credentials
 
 Run `hey` to launch the interactive terminal UI.
 
-Navigate between mailboxes, postings, and full email threads. Use Enter to open a thread, `r` to reply, `f` to forward, `m` to move a posting, and Escape or `q` to go back.
+Navigate between mailboxes and email threads. Use Enter to open a thread, `r` to reply, `f` to forward, `m` to move a thread, and Escape or `q` to go back.
 
 ## CLI Commands
 
@@ -68,18 +68,18 @@ All commands support `--json` for raw JSON output and `--base-url` to override t
 
 ```bash
 hey boxes                          # list mailboxes
-hey box imbox                      # list postings in a box (by name or ID)
+hey box imbox                      # list email threads in a box (by name or ID)
 hey threads 123                    # read a full email thread
 hey reply 123 -m "Thanks!"        # reply to a thread (or omit -m to open $EDITOR)
 hey forward 123 --to alice@example.com -m "For your review"  # forward the latest message
 hey compose --to user@example.com --subject "Hello"  # compose a new message
 hey compose --to user@example.com --cc bob@example.com --bcc carol@example.org --subject "Hello"  # with CC/BCC
 hey drafts                         # list drafts
-hey move 12345 --to feed           # move a posting to another box
-hey move 12345 67890 --to "paper trail"  # move multiple postings
+hey move 12345 --to feed           # move a thread to another box
+hey move 12345 67890 --to "paper trail"  # move multiple threads
 ```
 
-`hey move` takes posting IDs from `hey box --json`. Destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Bubble Up requires a scheduled date and is not available through `hey move`.
+`hey move` takes the `id` values returned by `hey box --json`. Destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Bubble Up requires a scheduled date and is not available through `hey move`.
 
 ### Calendars
 

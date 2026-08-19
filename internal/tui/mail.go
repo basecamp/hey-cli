@@ -203,7 +203,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 				v.postingList.cursor--
 			}
 			v.postingList.ensureVisible()
-		} else if msg.action == "marked as seen" && idx >= 0 {
+		} else if msg.action == "Thread marked as seen" && idx >= 0 {
 			v.postingList.postings[idx].Seen = true
 		}
 		if v.activeRequestKind == mailRequestPostings {
@@ -488,7 +488,7 @@ func (v *mailView) startMove() {
 }
 
 func (v *mailView) movePostingToBox(postingID int64, destination models.Box) tea.Cmd {
-	return v.doPostingAction("moved to "+destination.Name, true, v.currentBoxID(), postingID, func() error {
+	return v.doPostingAction("Thread moved to "+destination.Name, true, v.currentBoxID(), postingID, func() error {
 		return v.vc.sdk.Postings().Move(v.vc.ctx, destination.ID, postingID)
 	})
 }
@@ -511,7 +511,7 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 			return v.vc.sdk.Postings().MoveToSetAside(v.vc.ctx, p.ID)
 		})
 	case "e":
-		return v.doPostingAction("marked as seen", false, boxID, p.ID, func() error {
+		return v.doPostingAction("Thread marked as seen", false, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MarkSeen(v.vc.ctx, []int64{p.ID})
 		})
 	case "d":
@@ -523,11 +523,11 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 			return v.vc.sdk.Postings().MoveToPaperTrail(v.vc.ctx, p.ID)
 		})
 	case "t":
-		return v.doPostingAction("moved to Trash", true, boxID, p.ID, func() error {
+		return v.doPostingAction("Thread moved to Trash", true, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MoveToTrash(v.vc.ctx, p.ID)
 		})
 	case "-":
-		return v.doPostingAction("muted", true, boxID, p.ID, func() error {
+		return v.doPostingAction("Thread muted", true, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().Mute(v.vc.ctx, p.ID)
 		})
 	case "r":
@@ -551,7 +551,7 @@ func (v *mailView) moveSelectedToKnownBox(name, kind string, boxID, postingID in
 		v.notice = "Already in " + name
 		return nil
 	}
-	return v.doPostingAction("moved to "+name, true, boxID, postingID, fn)
+	return v.doPostingAction("Thread moved to "+name, true, boxID, postingID, fn)
 }
 
 func (v *mailView) movesOutOfCurrentBox(destinationKind string) bool {

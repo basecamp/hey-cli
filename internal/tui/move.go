@@ -56,7 +56,7 @@ func (p *movePicker) update(msg tea.KeyPressMsg) {
 func (p *movePicker) view(styles styles, width int) string {
 	contentWidth := max(width-4, 1)
 	var b strings.Builder
-	b.WriteString(styles.title.Render("Move message"))
+	b.WriteString(styles.title.Render("Move thread"))
 	if p.summary != "" {
 		fmt.Fprintf(&b, "\n%s", truncateStr(p.summary, contentWidth))
 	}
@@ -71,7 +71,7 @@ func (p *movePicker) view(styles styles, width int) string {
 		fmt.Fprintf(&b, "%s%s\n", prefix, name)
 	}
 	b.WriteString("\n")
-	b.WriteString(strings.Join(wrapText("Moving to a box other than Imbox marks the message as seen.", contentWidth), "\n"))
+	b.WriteString(strings.Join(wrapText("Moving to a box other than Imbox marks the thread as seen.", contentWidth), "\n"))
 	return b.String()
 }
 

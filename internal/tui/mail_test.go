@@ -245,13 +245,13 @@ func TestMailViewPostingKeysCallExpectedEndpoints(t *testing.T) {
 		notice  string
 		seen    bool
 	}{
-		{"reply later", "l", "/postings/moves.json", 4, true, "moved to Reply Later", false},
-		{"set aside", "a", "/postings/moves.json", 3, true, "moved to Set Aside", false},
-		{"seen", "e", "/postings/seen.json", 0, false, "marked as seen", true},
-		{"feed", "d", "/postings/moves.json", 2, true, "moved to The Feed", false},
-		{"paper trail", "p", "/postings/moves.json", 5, true, "moved to Paper Trail", false},
-		{"trash", "t", "/postings/trash.json", 0, true, "moved to Trash", false},
-		{"mute", "-", "/postings/mutings.json", 0, true, "muted", false},
+		{"reply later", "l", "/postings/moves.json", 4, true, "Thread moved to Reply Later", false},
+		{"set aside", "a", "/postings/moves.json", 3, true, "Thread moved to Set Aside", false},
+		{"seen", "e", "/postings/seen.json", 0, false, "Thread marked as seen", true},
+		{"feed", "d", "/postings/moves.json", 2, true, "Thread moved to The Feed", false},
+		{"paper trail", "p", "/postings/moves.json", 5, true, "Thread moved to Paper Trail", false},
+		{"trash", "t", "/postings/trash.json", 0, true, "Thread moved to Trash", false},
+		{"mute", "-", "/postings/mutings.json", 0, true, "Thread muted", false},
 	}
 
 	for _, tt := range tests {
@@ -321,7 +321,9 @@ func TestMailViewMovePickerMovesToSelectedBox(t *testing.T) {
 	if len(v.movePicker.destinations) != 4 {
 		t.Fatalf("destinations = %v, want four boxes", v.movePicker.destinations)
 	}
-	if view := v.View(); strings.Contains(view, "Bubble Up") || strings.Contains(view, "\n  Imbox") {
+	if view := v.View(); !strings.Contains(view, "Move thread") || !strings.Contains(view, "marks the thread as seen") {
+		t.Errorf("move picker does not use thread terminology: %q", view)
+	} else if strings.Contains(view, "Bubble Up") || strings.Contains(view, "\n  Imbox") {
 		t.Errorf("move picker offered an ineligible destination: %q", view)
 	}
 
@@ -344,7 +346,7 @@ func TestMailViewMovePickerMovesToSelectedBox(t *testing.T) {
 	if v.postingIndex(100) >= 0 {
 		t.Error("moved posting should leave the current box")
 	}
-	if v.notice != "moved to The Feed" {
+	if v.notice != "Thread moved to The Feed" {
 		t.Errorf("notice = %q", v.notice)
 	}
 }
@@ -453,7 +455,7 @@ func TestMailViewPostingActionCopiesSelectedPostingBeforeAsyncRequest(t *testing
 
 	cmd := v.HandleContentKey(keyPress("t"))
 	v.Update(postingActionDoneMsg{
-		action: "moved to Trash", boxID: 1, postingID: 100, removes: true,
+		action: "Thread moved to Trash", boxID: 1, postingID: 100, removes: true,
 	})
 	done, ok := runCmd(cmd).(postingActionDoneMsg)
 	if !ok {
@@ -477,7 +479,7 @@ func TestMailViewPostingCompletionInvalidatesConcurrentReload(t *testing.T) {
 	stale := currentPostingsLoaded(v, testPostings())
 
 	refresh, consumed := v.Update(postingActionDoneMsg{
-		action: "moved to Trash", boxID: 1, postingID: 100, removes: true,
+		action: "Thread moved to Trash", boxID: 1, postingID: 100, removes: true,
 	})
 	if !consumed || refresh == nil {
 		t.Fatal("action completion should replace a concurrent reload with a fresh reload")
@@ -567,7 +569,7 @@ func TestMailViewPostingActionRemoves(t *testing.T) {
 		t.Fatalf("expected 2 postings, got %d", len(v.postingList.postings))
 	}
 
-	v.Update(postingActionDoneMsg{action: "moved to Trash", boxID: 1, postingID: 100, removes: true})
+	v.Update(postingActionDoneMsg{action: "Thread moved to Trash", boxID: 1, postingID: 100, removes: true})
 	if len(v.postingList.postings) != 1 {
 		t.Errorf("expected 1 posting after remove, got %d", len(v.postingList.postings))
 	}
@@ -579,7 +581,7 @@ func TestMailViewPostingActionMarksSeen(t *testing.T) {
 		t.Fatal("first posting should be unseen")
 	}
 
-	v.Update(postingActionDoneMsg{action: "marked as seen", boxID: 1, postingID: 100})
+	v.Update(postingActionDoneMsg{action: "Thread marked as seen", boxID: 1, postingID: 100})
 	if !v.postingList.postings[0].Seen {
 		t.Error("first posting should be seen after action")
 	}

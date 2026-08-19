@@ -25,6 +25,29 @@ func TestCuratedCommandHelpUsesUserFacingLanguage(t *testing.T) {
 	}
 }
 
+func TestEmailCommandHelpKeepsPostingAsAnInternalTerm(t *testing.T) {
+	root := newRootCmd()
+	for _, name := range []string{"boxes", "box", "seen", "unseen", "move"} {
+		t.Run(name, func(t *testing.T) {
+			command, _, err := root.Find([]string{name})
+			if err != nil {
+				t.Fatal(err)
+			}
+			text := strings.Join([]string{
+				command.Use,
+				command.Short,
+				command.Long,
+				command.Example,
+				command.Annotations["agent_notes"],
+				command.NonInheritedFlags().FlagUsages(),
+			}, "\n")
+			if strings.Contains(strings.ToLower(text), "posting") {
+				t.Errorf("%s exposes internal posting terminology:\n%s", name, text)
+			}
+		})
+	}
+}
+
 func TestRenderRootHelpUsesUserFacingLanguage(t *testing.T) {
 	originalColorDisabled := colorDisabled
 	colorDisabled = true
@@ -41,15 +64,15 @@ USAGE
 
 EMAIL
   boxes    List your HEY boxes
-  box      List messages in a box
+  box      List email threads in a box
   threads  Read a thread
   compose  Write and send a new email
   reply    Reply to a thread
   forward  Forward the latest message in a thread
   drafts   List draft emails
-  seen     Mark messages as seen
-  unseen   Mark messages as unseen
-  move     Move messages to another box
+  seen     Mark email threads as seen
+  unseen   Mark email threads as unseen
+  move     Move email threads to another box
 
 CALENDAR & TASKS
   calendars   List calendars

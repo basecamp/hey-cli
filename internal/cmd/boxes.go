@@ -76,7 +76,7 @@ func (c *boxesCommand) run(cmd *cobra.Command, args []string) error {
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "view",
 			Command:     "hey box <name>",
-			Description: "View postings in a box",
+			Description: "View email threads in a box",
 		}),
 	)
 }

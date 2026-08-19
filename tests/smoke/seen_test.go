@@ -71,7 +71,7 @@ func TestSeenMultiple(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &resp2); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
-	assertContains(t, resp2.Summary, "2 posting(s) marked as seen")
+	assertContains(t, resp2.Summary, "2 threads marked as seen")
 }
 
 func TestSeenInvalidID(t *testing.T) {

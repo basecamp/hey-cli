@@ -93,7 +93,7 @@ func TestMovePostingsToNamedBox(t *testing.T) {
 	if len(recorded.postingIDs) != 2 || recorded.postingIDs[0] != 12345 || recorded.postingIDs[1] != 67890 {
 		t.Errorf("posting_ids = %v", recorded.postingIDs)
 	}
-	if resp.Summary != "2 posting(s) moved to Paper Trail" {
+	if resp.Summary != "2 threads moved to Paper Trail" {
 		t.Errorf("summary = %q", resp.Summary)
 	}
 }

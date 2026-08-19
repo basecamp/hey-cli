@@ -103,7 +103,7 @@ CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos,
 | Delete todo | `hey todo delete 123` |
 | Mark as seen | `hey seen 12345` |
 | Mark as unseen | `hey unseen 12345` |
-| Move postings | `hey move 12345 --to feed` |
+| Move email threads | `hey move 12345 --to feed` |
 | Complete habit | `hey habit complete 123` |
 | Uncomplete habit | `hey habit uncomplete 123` |
 | Start time tracking | `hey timetrack start` |
@@ -126,9 +126,9 @@ Want to read email?
 ├── Which mailbox? → hey boxes --json
 ├── List emails in box? → hey box <name|id> --json
 ├── Read full thread? → hey threads <topic_id> --json
-├── Mark as seen? → hey seen <posting-id>
-├── Mark as unseen? → hey unseen <posting-id>
-├── Move to another box? → hey move <posting-id> --to <box>
+├── Mark as seen? → hey seen <id>
+├── Mark as unseen? → hey unseen <id>
+├── Move to another box? → hey move <id> --to <box>
 └── Launch interactive UI? → hey (no args, launches TUI)
 ```
 
@@ -170,7 +170,7 @@ hey box 123 --json                            # List emails in box (by ID)
 
 Box names: `imbox`, `feedbox`, `trailbox`, `asidebox`, `laterbox`, `bubblebox`
 
-**Response format:** `hey box` returns `{"box": {...}, "postings": [...]}`. Each posting has: `id` (posting ID), `topic_id` (topic ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`. Use `topic_id` for `hey threads`, `hey reply`, and `hey forward`.
+**Response format:** `hey box` returns `{"box": {...}, "postings": [...]}`. The `postings` array is the API representation of the email threads in that box. Each item has: `id` (box item ID), `topic_id` (thread ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`. Use `id` for `hey seen`, `hey unseen`, and `hey move`. Use `topic_id` for `hey threads`, `hey reply`, and `hey forward`.
 
 ### Email - Threads
 
@@ -179,7 +179,7 @@ hey threads <topic_id> --json                 # Read full email thread
 hey threads <topic_id> --html                 # Read with raw HTML content
 ```
 
-**ID note:** `hey box` returns postings with an `id` (posting ID) and a `topic_id` (topic ID). `hey threads`, `hey reply`, and `hey forward` expect the **topic ID** — use `topic_id` directly. The `app_url` field also contains the topic ID as a fallback (e.g. `https://app.hey.com/topics/123` → `123`).
+**ID note:** Every email thread returned by `hey box` has an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, and `hey move` expect `id`. `hey threads`, `hey reply`, and `hey forward` expect `topic_id`. The `app_url` field also contains the thread ID as a fallback (e.g. `https://app.hey.com/topics/123` → `123`).
 
 ### Email - Reply, Forward & Compose
 
@@ -197,22 +197,22 @@ hey compose --thread-id 12345 -m "msg"                       # Reply to an exist
 ### Email - Seen/Unseen
 
 ```bash
-hey seen 12345                                # Mark posting as seen
-hey seen 12345 67890                          # Mark multiple postings as seen
-hey unseen 12345                              # Mark posting as unseen
-hey unseen 12345 67890                        # Mark multiple postings as unseen
+hey seen 12345                                # Mark a thread as seen
+hey seen 12345 67890                          # Mark multiple threads as seen
+hey unseen 12345                              # Mark a thread as unseen
+hey unseen 12345 67890                        # Mark multiple threads as unseen
 ```
 
-Takes posting IDs (the `id` field from `hey box` output).
+Takes box item IDs (the `id` field from `hey box` output).
 
-### Email - Moving Postings
+### Email - Moving Threads
 
 ```bash
-hey move 12345 --to imbox                     # Move one posting
-hey move 12345 67890 --to "paper trail"       # Move multiple postings
+hey move 12345 --to imbox                     # Move one thread
+hey move 12345 67890 --to "paper trail"       # Move multiple threads
 ```
 
-Takes posting IDs (the `id` field from `hey box --json`). `--to` accepts a box name, kind, or ID. Supported destinations are Imbox, The Feed, Set Aside, Reply Later, and Paper Trail. Bubble Up requires a scheduled date and is not supported by this command.
+Takes box item IDs (the `id` field from `hey box --json`). `--to` accepts a box name, kind, or ID. Supported destinations are Imbox, The Feed, Set Aside, Reply Later, and Paper Trail. Bubble Up requires a scheduled date and is not supported by this command.
 
 ### Drafts
 

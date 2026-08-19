@@ -26,10 +26,10 @@ func newBoxCommand() *boxCommand {
 	boxCommand := &boxCommand{}
 	boxCommand.cmd = &cobra.Command{
 		Use:   "box <name|id>",
-		Short: "List messages in a box",
-		Long:  "List messages in a HEY box. Accepts a box name (imbox, feedbox, etc.) or numeric ID.",
+		Short: "List email threads in a box",
+		Long:  "List email threads in a HEY box. Accepts a box name (imbox, feedbox, etc.) or numeric ID.",
 		Annotations: map[string]string{
-			"agent_notes": "Accepts box name or numeric ID. Returns postings (threads). Use thread IDs with hey threads.",
+			"agent_notes": "Accepts a box name or numeric ID. Returns email threads. Use topic_id with hey threads, reply, and forward; use id with seen, unseen, and move.",
 		},
 		Example: `  hey box imbox
   hey box imbox --limit 10
@@ -38,7 +38,7 @@ func newBoxCommand() *boxCommand {
 		Args: validateBoxArgs,
 	}
 
-	boxCommand.cmd.Flags().IntVar(&boxCommand.limit, "limit", 0, "Maximum number of messages to show")
+	boxCommand.cmd.Flags().IntVar(&boxCommand.limit, "limit", 0, "Maximum number of threads to show")
 	boxCommand.cmd.Flags().BoolVar(&boxCommand.all, "all", false, "Fetch all results (override --limit)")
 
 	return boxCommand
@@ -101,7 +101,7 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 
 	resp.Postings = postings
 	return writeOK(resp,
-		output.WithSummary(fmt.Sprintf("%d postings in %s", len(postings), resp.Name)),
+		output.WithSummary(fmt.Sprintf("%d %s in %s", len(postings), threadNoun(len(postings)), resp.Name)),
 		output.WithNotice(notice),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -111,8 +111,8 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 			},
 			output.Breadcrumb{
 				Action:      "move",
-				Command:     "hey move <posting-id> --to <box>",
-				Description: "Move a message to another box",
+				Command:     "hey move <id> --to <box>",
+				Description: "Move an email thread to another box",
 			},
 			output.Breadcrumb{
 				Action:      "compose",

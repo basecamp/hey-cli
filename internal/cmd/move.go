@@ -22,14 +22,14 @@ type moveCommand struct {
 func newMoveCommand() *moveCommand {
 	moveCommand := &moveCommand{}
 	moveCommand.cmd = &cobra.Command{
-		Use:   "move <posting-id>...",
-		Short: "Move messages to another box",
-		Long:  "Move one or more HEY postings to Imbox, The Feed, Set Aside, Reply Later, or Paper Trail.",
+		Use:   "move <id>...",
+		Short: "Move email threads to another box",
+		Long:  "Move one or more email threads to Imbox, The Feed, Set Aside, Reply Later, or Paper Trail.",
 		Example: `  hey move 12345 --to feed
   hey move 12345 67890 --to "paper trail"
   hey move 12345 --to 987`,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts posting IDs from hey box output. --to accepts a box name, kind, or ID. Use HEY's scheduled Bubble Up flow for Bubble Up.",
+			"agent_notes": "Accepts box item IDs from hey box output. --to accepts a box name, kind, or ID. Use HEY's scheduled Bubble Up flow for Bubble Up.",
 		},
 		RunE: moveCommand.run,
 		Args: usageMinOneArg(),
@@ -62,7 +62,7 @@ func (c *moveCommand) run(cmd *cobra.Command, args []string) error {
 		return convertSDKError(err)
 	}
 
-	summary := fmt.Sprintf("%d posting(s) moved to %s", len(ids), destination.Name)
+	summary := fmt.Sprintf("%d %s moved to %s", len(ids), threadNoun(len(ids)), destination.Name)
 	if writer.IsStyled() {
 		fmt.Fprintln(cmd.OutOrStdout(), summary+".")
 		return nil
