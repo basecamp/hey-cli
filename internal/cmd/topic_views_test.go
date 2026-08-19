@@ -134,7 +134,7 @@ func TestTopicViewStyledOutputSanitizesUntrustedFields(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
-  "title": "Sent",
+  "title": "Sent\u001b[8m\rHidden",
   "topics": [{
     "id": 42,
     "name": "Quarterly planning\u001b[31m\rnotes",
@@ -148,7 +148,7 @@ func TestTopicViewStyledOutputSanitizesUntrustedFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	for _, unsafe := range []string{"\x1b[31m", "\x1b[2J", "\r", "\nJones"} {
+	for _, unsafe := range []string{"\x1b[8m", "\rHidden", "\x1b[31m", "\x1b[2J", "\r", "\nJones"} {
 		if strings.Contains(stdout, unsafe) {
 			t.Errorf("styled output contains unsafe text %q:\n%s", unsafe, stdout)
 		}

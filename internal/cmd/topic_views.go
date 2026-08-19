@@ -126,7 +126,7 @@ func (c *topicViewCommand) run(cmd *cobra.Command, _ []string) error {
 			return nil
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "%s\n\n", title)
+		fmt.Fprintf(cmd.OutOrStdout(), "%s\n\n", terminalSafeText(title))
 		table := newTable(cmd.OutOrStdout())
 		table.addRow([]string{"Thread", "Subject", "From", "Date"})
 		for _, topic := range topics {
