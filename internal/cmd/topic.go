@@ -86,8 +86,8 @@ func (c *topicCommand) run(cmd *cobra.Command, args []string) error {
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "reply",
-				Command:     fmt.Sprintf("hey reply %d", threadID),
-				Description: "Reply to this thread",
+				Command:     fmt.Sprintf("hey reply %d --preview", threadID),
+				Description: "Preview a reply to this thread",
 			},
 			output.Breadcrumb{
 				Action:      "forward",

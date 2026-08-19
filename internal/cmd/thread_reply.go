@@ -13,33 +13,45 @@ import (
 // the recipients are not optional.
 type threadReplyTarget struct {
 	EntryID   int64
-	Addressed *htmlutil.TopicAddressed
+	Subject   string
+	Addressed *htmlutil.ReplyForm
 }
 
 // resolveThreadReply works out what replying to a thread means: the last entry on it, and
-// who that entry went to.
-//
-// It still reads the topic's HTML pages. The SDK gained typed reads for both in v0.4.0 —
-// Topics.Get carries the topic's entries — and this is the one place to change when the
-// CLI moves onto them.
+// the live envelope HEY prepared for that reply.
 func resolveThreadReply(ctx context.Context, threadID int64) (*threadReplyTarget, error) {
-	topicResp, err := sdk.GetHTML(ctx, fmt.Sprintf("/topics/%d", threadID))
-	if err != nil {
-		return nil, convertSDKError(err)
-	}
-	addressed := htmlutil.ParseTopicAddressed(string(topicResp.Data))
-	if len(addressed.To) == 0 && len(addressed.CC) == 0 && len(addressed.BCC) == 0 {
-		return nil, output.ErrUsage("could not determine thread recipients")
-	}
+	return resolveThreadReplyAtEntry(ctx, threadID, 0)
+}
 
-	entriesResp, err := sdk.GetHTML(ctx, fmt.Sprintf("/topics/%d/entries", threadID))
+// resolveThreadReplyAtEntry refuses to load a reply envelope when the latest entry no
+// longer matches the one the user previewed.
+func resolveThreadReplyAtEntry(ctx context.Context, threadID, expectedEntryID int64) (*threadReplyTarget, error) {
+	topic, err := sdk.Topics().Get(ctx, threadID)
 	if err != nil {
 		return nil, convertSDKError(err)
 	}
-	entries := htmlutil.ParseTopicEntriesHTML(string(entriesResp.Data))
-	if len(entries) == 0 {
+	if topic == nil || topic.LatestEntry.Id <= 0 {
 		return nil, output.ErrNotFound("entries for thread", fmt.Sprintf("%d", threadID))
 	}
+	if expectedEntryID > 0 && topic.LatestEntry.Id != expectedEntryID {
+		return nil, output.ErrUsageHint(
+			fmt.Sprintf("thread changed after preview: expected entry %d, latest entry is %d", expectedEntryID, topic.LatestEntry.Id),
+			fmt.Sprintf("Run: hey reply %d -m <message> --preview --json", threadID),
+		)
+	}
 
-	return &threadReplyTarget{EntryID: entries[len(entries)-1].ID, Addressed: addressed}, nil
+	replyResp, err := sdk.GetHTML(ctx, fmt.Sprintf("/entries/%d/replies/new", topic.LatestEntry.Id))
+	if err != nil {
+		return nil, convertSDKError(err)
+	}
+	addressed, err := htmlutil.ParseReplyFormHTML(string(replyResp.Data))
+	if err != nil {
+		return nil, output.ErrUsage("could not determine thread recipients from HEY's reply form")
+	}
+
+	return &threadReplyTarget{
+		EntryID:   topic.LatestEntry.Id,
+		Subject:   topic.Name,
+		Addressed: &addressed,
+	}, nil
 }

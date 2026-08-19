@@ -96,7 +96,9 @@ hey recordings --limit
 hey recordings --starts-on
 hey reply
 hey reply --attach
+hey reply --expect-entry
 hey reply --message
+hey reply --preview
 hey search
 hey search --all
 hey search --any

@@ -34,8 +34,9 @@ The remaining HTML-reading gaps use the SDK's authenticated HTML helper and are 
 | signed Active Storage upload URL | PUT | SDK `Attachments().Upload` | `hey compose --attach`, `hey reply --attach` | covered |
 | signed Active Storage blob URL | GET | SDK `DownloadBlob` | `hey attachments save <id>` | covered |
 | `/messages.json` | POST | SDK `Messages().Create` | `hey compose`, `hey forward <topic-id>` | covered |
-| `/entries/{id}/replies` | POST | SDK `Entries().CreateReply` | `hey reply <topic-id>` | covered |
-| `/topics/{id}.json` | GET | SDK `Topics().Get` | `hey forward <topic-id>` | covered |
+| `/entries/{id}/replies/new` | GET (HTML) | SDK `GetHTML` | `hey reply <topic-id>`, `hey compose --thread-id` | gap: resolves the live reply envelope |
+| `/entries/{id}/replies.json` | POST | SDK `Entries().CreateReply` | `hey reply <topic-id>` | covered |
+| `/topics/{id}.json` | GET | SDK `Topics().Get` | `hey forward <topic-id>`, `hey reply <topic-id>` | covered |
 | `/entries/{id}/forwards/new.json` | GET | SDK `Entries().NewForward` | `hey forward <topic-id>` | covered |
 | `/postings/moves.json` | POST | SDK `Postings().Move` | `hey move <id> --to <box>`, TUI `m` | covered |
 | `/postings/trash.json` | POST | SDK `Postings().MoveToTrash` | `hey trash <id>`, TUI `t` | covered |
