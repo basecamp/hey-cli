@@ -220,6 +220,9 @@ func TestContactsViewCreateConflictLoadsWrittenContact(t *testing.T) {
 	if !view.inDetail || view.detail.ID != 9 {
 		t.Errorf("written conflict contact was not loaded: %+v", view.detail)
 	}
+	if len(view.list.contacts) != 2 || view.list.contacts[0].ID != 9 {
+		t.Errorf("written conflict contact was not added to the list: %+v", view.list.contacts)
+	}
 }
 
 func TestContactsViewEditsContact(t *testing.T) {

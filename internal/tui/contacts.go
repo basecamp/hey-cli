@@ -69,19 +69,21 @@ type contactNoteSavedMsg struct {
 type contactsView struct {
 	vc *viewContext
 
-	list              contactList
-	loaded            bool
-	page              int
-	detail            models.Contact
-	note              string
-	inDetail          bool
-	detailView        viewport.Model
-	contactForm       *contactForm
-	noteForm          *contactNoteForm
-	lastHiddenID      int64
-	confirmNoteDelete bool
-	notice            string
-	loading           bool
+	list                contactList
+	loaded              bool
+	page                int
+	detail              models.Contact
+	note                string
+	inDetail            bool
+	detailView          viewport.Model
+	contactForm         *contactForm
+	noteForm            *contactNoteForm
+	lastHiddenID        int64
+	pendingSavedContact bool
+	pendingOriginalID   int64
+	confirmNoteDelete   bool
+	notice              string
+	loading             bool
 
 	activeRequestID   uint64
 	activeRequestKind contactRequestKind
@@ -128,7 +130,17 @@ func (v *contactsView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.finishRequest(msg.requestID)
 		if msg.err != nil {
+			v.pendingSavedContact = false
+			v.pendingOriginalID = 0
 			return func() tea.Msg { return errMsg{msg.err} }, true
+		}
+		if v.pendingSavedContact {
+			if v.pendingOriginalID != 0 && v.pendingOriginalID != msg.contact.ID {
+				v.list.remove(v.pendingOriginalID)
+			}
+			v.updateContactInList(msg.contact)
+			v.pendingSavedContact = false
+			v.pendingOriginalID = 0
 		}
 		v.detail = msg.contact
 		v.note = msg.note
@@ -146,6 +158,8 @@ func (v *contactsView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			if errors.As(msg.err, &conflict) && conflict.ContactID != 0 {
 				v.contactForm = nil
 				v.notice = contactSaveFailure(msg.err)
+				v.pendingSavedContact = true
+				v.pendingOriginalID = msg.originalID
 				return v.requestContactDetail(conflict.ContactID), true
 			}
 			if v.contactForm != nil {
@@ -381,6 +395,8 @@ func (v *contactsView) ExitDetail(_ string) {
 
 func (v *contactsView) ExitThread() {
 	v.inDetail = false
+	v.pendingSavedContact = false
+	v.pendingOriginalID = 0
 	v.contactForm = nil
 	v.noteForm = nil
 	v.detail = models.Contact{}
@@ -393,6 +409,8 @@ func (v *contactsView) CancelPendingDetail() bool {
 	if v.activeRequestKind != contactRequestDetail {
 		return false
 	}
+	v.pendingSavedContact = false
+	v.pendingOriginalID = 0
 	v.cancelRequest()
 	return true
 }
