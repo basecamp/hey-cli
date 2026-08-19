@@ -1,0 +1,28 @@
+.github/workflows/release.yml
+  s_1c71cb51305a7b::t_5257a5ad3af9d6 170-173,175-178,180-186,190,196-197,202-204,208,211-255
+.github/workflows/aur-publish.yml
+  s_1c71cb51305a7b::t_53b6739ce829cc 1-186
+scripts/notify-issue.sh
+  s_1c71cb51305a7b::t_c3e6752ac7faec 1-83
+scripts/publish-aur.sh
+  s_1c71cb51305a7b::t_94970ffef1143f 2-14,17-19,21-24,26-29,32,34-35,39,43-51,54-58,60-61,64-65,67,69,76-90,92-93,95-96,100-101,104-106
+RELEASING.md
+  s_1c71cb51305a7b::t_ec5f5c245b5d19 25
+  s_1c71cb51305a7b::t_359fe0c7e17ed1 80-88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "a779315c66da75a4e9641b3c9d459765b93e60d7",
+  "prompts": {},
+  "sessions": {
+    "s_1c71cb51305a7b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "163e832f-e84f-413e-90f9-1abcb69cf5e3",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
