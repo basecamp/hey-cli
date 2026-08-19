@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
@@ -111,7 +112,21 @@ func (c *attachmentsCommand) run(cmd *cobra.Command, args []string) error {
 			Description: "Save an attachment",
 		}))
 	}
+	if writer.EffectiveFormat() == output.FormatMarkdown {
+		attachments = attachmentsForMarkdown(attachments)
+	}
 	return writeOK(attachments, options...)
+}
+
+func attachmentsForMarkdown(attachments []threadAttachment) []threadAttachment {
+	safe := make([]threadAttachment, len(attachments))
+	copy(safe, attachments)
+	replacer := strings.NewReplacer(`\`, `\\`, `|`, `\|`)
+	for index := range safe {
+		safe[index].Filename = replacer.Replace(terminalSafeText(safe[index].Filename))
+		safe[index].ContentType = replacer.Replace(terminalSafeText(safe[index].ContentType))
+	}
+	return safe
 }
 
 func attachmentsInThread(ctx context.Context, threadID int64) ([]threadAttachment, bool, error) {

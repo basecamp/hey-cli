@@ -439,6 +439,17 @@ func TestTerminalSafeTextReplacesControls(t *testing.T) {
 	}
 }
 
+func TestAttachmentsForMarkdownEscapesUntrustedFields(t *testing.T) {
+	attachments := []threadAttachment{{Filename: "report|draft\n.pdf", ContentType: "text/plain|preview"}}
+	safe := attachmentsForMarkdown(attachments)
+	if strings.ContainsAny(safe[0].Filename, "\r\n\x1b") || !strings.Contains(safe[0].Filename, `\|`) || !strings.Contains(safe[0].ContentType, `\|`) {
+		t.Errorf("Markdown attachment = %+v", safe[0])
+	}
+	if attachments[0].Filename != "report|draft\n.pdf" {
+		t.Errorf("JSON attachment data was changed to %q", attachments[0].Filename)
+	}
+}
+
 func TestAppendUploadedAttachmentsSupportsAttachmentOnlyMessages(t *testing.T) {
 	content := appendUploadedAttachments("", []uploadedAttachment{{
 		Filename:    `report & "notes".pdf`,

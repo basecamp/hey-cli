@@ -97,6 +97,7 @@ EMAIL
   search         Search email threads and messages
   contacts       Manage contacts
   threads        Read a thread
+  attachments    List and save files from a thread
   compose        Write and send a new email
   reply          Reply to a thread
   forward        Forward the latest message in a thread
