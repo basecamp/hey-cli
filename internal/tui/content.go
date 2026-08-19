@@ -34,12 +34,14 @@ type contentList struct {
 	width         int
 	height        int // visible rows (each posting takes 2 lines)
 	hideSeenState bool
+	selected      map[int64]struct{}
 }
 
 func (c *contentList) setPostings(postings []models.Posting) {
 	c.postings = postings
 	c.cursor = 0
 	c.scrollOff = 0
+	c.clearSelected()
 }
 
 func (c *contentList) setSize(w, h int) {
@@ -81,6 +83,36 @@ func (c *contentList) selectedPosting() *models.Posting {
 	return &c.postings[c.cursor]
 }
 
+func (c *contentList) toggleSelected() bool {
+	posting := c.selectedPosting()
+	if posting == nil {
+		return false
+	}
+	if c.selected == nil {
+		c.selected = make(map[int64]struct{})
+	}
+	if _, exists := c.selected[posting.ID]; exists {
+		delete(c.selected, posting.ID)
+		return false
+	}
+	c.selected[posting.ID] = struct{}{}
+	return true
+}
+
+func (c *contentList) selectedIDs() []int64 {
+	ids := make([]int64, 0, len(c.selected))
+	for _, posting := range c.postings {
+		if _, exists := c.selected[posting.ID]; exists {
+			ids = append(ids, posting.ID)
+		}
+	}
+	return ids
+}
+
+func (c *contentList) clearSelected() {
+	c.selected = nil
+}
+
 func (c *contentList) view() string {
 	if len(c.postings) == 0 {
 		return lipgloss.NewStyle().Foreground(colorMuted).Render("  (empty)")
@@ -98,6 +130,7 @@ func (c *contentList) view() string {
 	normal := lipgloss.NewStyle().Foreground(colorBright)
 	muted := lipgloss.NewStyle().Foreground(colorMuted)
 	unseenDot := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
+	selectedMark := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
 
 	for i := c.scrollOff; i < end; i++ {
 		p := c.postings[i]
@@ -110,7 +143,9 @@ func (c *contentList) view() string {
 		} else {
 			line1.WriteString("  ")
 		}
-		if !p.Seen && !c.hideSeenState {
+		if _, isSelected := c.selected[p.ID]; isSelected {
+			line1.WriteString(selectedMark.Render("✓") + " ")
+		} else if !p.Seen && !c.hideSeenState {
 			line1.WriteString(unseenDot.Render("●") + " ")
 		} else {
 			line1.WriteString("  ")

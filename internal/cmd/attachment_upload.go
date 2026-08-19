@@ -40,7 +40,10 @@ func attachFiles(ctx context.Context, content string, paths []string) (string, e
 		return "", err
 	}
 	defer closePreparedAttachments(attachments)
+	return attachPreparedFiles(ctx, content, attachments)
+}
 
+func attachPreparedFiles(ctx context.Context, content string, attachments []preparedAttachment) (string, error) {
 	uploads := make([]uploadedAttachment, 0, len(attachments))
 	for _, attachment := range attachments {
 		upload, err := uploadAttachment(ctx, attachment)

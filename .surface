@@ -30,6 +30,12 @@ hey box --limit
 hey boxes
 hey boxes --all
 hey boxes --limit
+hey bulk-reply
+hey bulk-reply preview
+hey bulk-reply send
+hey bulk-reply send --attach
+hey bulk-reply send --message
+hey bulk-reply undo
 hey calendars
 hey commands
 hey completion

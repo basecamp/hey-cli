@@ -124,6 +124,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newThreadsCommand().cmd)
 	root.AddCommand(newAttachmentsCommand().cmd)
 	root.AddCommand(newReplyCommand().cmd)
+	root.AddCommand(newBulkReplyCommand().cmd)
 	root.AddCommand(newForwardCommand().cmd)
 	root.AddCommand(newComposeCommand().cmd)
 	root.AddCommand(newDraftsCommand().cmd)

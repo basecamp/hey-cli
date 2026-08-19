@@ -32,6 +32,7 @@ const (
 	mailRequestReply
 	mailRequestForward
 	mailRequestSearch
+	mailRequestBulkReply
 )
 
 type boxesLoadedMsg []models.Box
@@ -115,12 +116,14 @@ type mailView struct {
 	loading          bool
 
 	compose           *composeForm    // non-nil while a message, reply or forward is being written
+	bulkReply         *bulkReplyForm  // non-nil while a bulk reply is being previewed or written
 	movePicker        *movePicker     // non-nil while a destination box is being selected
 	searchForm        *mailSearchForm // non-nil while a search query is being entered
 	searchList        contentList
 	searchActive      bool
 	searchQuery       string
 	searchPage        int
+	lastBulkReplyID   int64  // delayed delivery currently available for undo
 	notice            string // one-shot confirmation shown above the posting list
 	activeRequestID   uint64 // identifies the only mail read allowed to update the view
 	activeRequestKind mailRequestKind
@@ -245,6 +248,68 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.compose.resize(v.vc.width, v.vc.height)
 		return v.compose.init(), true
 
+	case bulkReplyDraftLoadedMsg:
+		if msg.requestID != v.activeRequestID || msg.boxID != v.currentBoxID() {
+			return nil, true
+		}
+		v.finishRequest(msg.requestID)
+		if msg.err != nil {
+			v.notice = "Could not preview bulk reply: " + msg.err.Error()
+			return nil, true
+		}
+		if msg.draft == nil || len(msg.draft.Entries) == 0 {
+			v.notice = "No replyable threads found; nothing was sent"
+			return nil, true
+		}
+		v.bulkReply = newBulkReplyForm(msg.postingIDs, msg.draft, v.vc.styles)
+		v.bulkReply.resize(v.vc.width, v.vc.height)
+		return v.bulkReply.init(), true
+
+	case bulkReplySentMsg:
+		if v.bulkReply == nil {
+			return nil, true
+		}
+		if msg.err != nil {
+			v.bulkReply.sending = false
+			v.bulkReply.status = "Send failed: " + msg.err.Error()
+			v.bulkReply.isError = true
+			return nil, true
+		}
+		if msg.delivery == nil {
+			v.bulkReply.sending = false
+			v.bulkReply.status = "Send failed: HEY returned no delivery"
+			v.bulkReply.isError = true
+			return nil, true
+		}
+		v.bulkReply = nil
+		v.postingList.clearSelected()
+		count := int(msg.delivery.EntriesCount)
+		v.notice = fmt.Sprintf("%d bulk %s sent", count, replyNoun(count))
+		v.lastBulkReplyID = 0
+		if msg.delivery.Delayed {
+			v.notice = fmt.Sprintf("%d bulk %s queued with undo available", count, replyNoun(count))
+			if msg.delivery.Id > 0 {
+				v.lastBulkReplyID = msg.delivery.Id
+				v.notice += " — press u to undo"
+			}
+		}
+		if msg.skipped > 0 {
+			v.notice += fmt.Sprintf("; %d skipped", msg.skipped)
+		}
+		return nil, true
+
+	case bulkReplyUndoneMsg:
+		if msg.id != v.lastBulkReplyID {
+			return nil, true
+		}
+		if msg.err != nil {
+			v.notice = "Could not undo bulk reply: " + msg.err.Error()
+			return nil, true
+		}
+		v.lastBulkReplyID = 0
+		v.notice = "Bulk reply recalled"
+		return nil, true
+
 	case composeSentMsg:
 		if v.compose == nil {
 			return nil, true
@@ -325,6 +390,9 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 	if v.compose != nil {
 		return v.compose.update(msg), true
 	}
+	if v.bulkReply != nil {
+		return v.bulkReply.update(msg), true
+	}
 	if v.searchForm != nil {
 		return v.searchForm.update(msg), true
 	}
@@ -342,6 +410,9 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 func (v *mailView) View() string {
 	if v.compose != nil {
 		return v.compose.view()
+	}
+	if v.bulkReply != nil {
+		return v.bulkReply.view()
 	}
 	if v.searchForm != nil {
 		return v.searchForm.view()
@@ -369,12 +440,15 @@ func (v *mailView) View() string {
 
 // CapturingInput reports whether a form or picker is open and wants every key.
 func (v *mailView) CapturingInput() bool {
-	return v.compose != nil || v.movePicker != nil || v.searchForm != nil
+	return v.compose != nil || v.bulkReply != nil || v.movePicker != nil || v.searchForm != nil
 }
 
 func (v *mailView) HelpBindings() []helpBinding {
 	if v.compose != nil {
 		return v.compose.helpBindings()
+	}
+	if v.bulkReply != nil {
+		return v.bulkReply.helpBindings()
 	}
 	if v.searchForm != nil {
 		return v.searchForm.helpBindings()
@@ -401,9 +475,11 @@ func (v *mailView) HelpBindings() []helpBinding {
 	if selected := v.postingList.selectedPosting(); selected != nil && selected.Muted {
 		ignoreBinding = helpBinding{"+", "stop ignoring"}
 	}
-	return []helpBinding{
+	bindings := []helpBinding{
 		{"/", "search"},
 		{"c", "compose"},
+		{"space", "select"},
+		{"b", "bulk reply"},
 		{"r", "reply"},
 		{"f", "forward"},
 		{"m", "move"},
@@ -416,6 +492,10 @@ func (v *mailView) HelpBindings() []helpBinding {
 		{"s", "spam"},
 		ignoreBinding,
 	}
+	if v.lastBulkReplyID != 0 {
+		bindings = append(bindings, helpBinding{"u", "undo bulk reply"})
+	}
+	return bindings
 }
 
 func (v *mailView) SubnavItems() ([]navItem, int, string, bool) {
@@ -458,6 +538,18 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		cmd, submit := v.compose.handleKey(msg)
 		if submit {
 			return v.send()
+		}
+		return cmd
+	}
+
+	if v.bulkReply != nil {
+		if msg.Key().Code == tea.KeyEscape && !v.bulkReply.sending {
+			v.bulkReply = nil
+			return nil
+		}
+		cmd, submit := v.bulkReply.handleKey(msg)
+		if submit {
+			return v.sendBulkReply()
 		}
 		return cmd
 	}
@@ -556,6 +648,13 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 			return v.startSearch()
 		case "c":
 			return v.startCompose()
+		case " ", "space":
+			v.postingList.toggleSelected()
+			return nil
+		case "b":
+			return v.startBulkReply()
+		case "u":
+			return v.undoBulkReply()
 		case "m":
 			v.startMove()
 			return nil
@@ -603,7 +702,7 @@ func (v *mailView) clearSearch() {
 }
 
 func (v *mailView) CancelPendingDetail() bool {
-	if v.activeRequestKind != mailRequestTopic && v.activeRequestKind != mailRequestReply && v.activeRequestKind != mailRequestForward && v.activeRequestKind != mailRequestSearch {
+	if v.activeRequestKind != mailRequestTopic && v.activeRequestKind != mailRequestReply && v.activeRequestKind != mailRequestForward && v.activeRequestKind != mailRequestSearch && v.activeRequestKind != mailRequestBulkReply {
 		return false
 	}
 	v.cancelRequest()
@@ -615,6 +714,9 @@ func (v *mailView) Loading() bool { return v.loading }
 func (v *mailView) Resize(width, height int) {
 	if v.compose != nil {
 		v.compose.resize(width, height)
+	}
+	if v.bulkReply != nil {
+		v.bulkReply.resize(width, height)
 	}
 	if v.searchForm != nil {
 		v.searchForm.resize(width, height)

@@ -30,13 +30,16 @@ The remaining HTML-reading gaps use the SDK's authenticated HTML helper and are 
 | `/topics/{id}/entries.json` | GET | SDK `Topics().GetEntries` | `hey attachments <topic-id>` | covered |
 | `/messages/{id}.json` | GET | SDK `Messages().Get` | `hey attachments <topic-id>`, `hey attachments save <id>` | covered |
 | `/entries/drafts.json` | GET | SDK `Entries().ListDrafts` | `hey drafts` | covered |
-| `/rails/active_storage/direct_uploads.json` | POST | SDK `Attachments().Upload` | `hey compose --attach`, `hey reply --attach` | covered |
-| signed Active Storage upload URL | PUT | SDK `Attachments().Upload` | `hey compose --attach`, `hey reply --attach` | covered |
+| `/rails/active_storage/direct_uploads.json` | POST | SDK `Attachments().Upload` | `hey compose --attach`, `hey reply --attach`, `hey bulk-reply send --attach` | covered |
+| signed Active Storage upload URL | PUT | SDK `Attachments().Upload` | `hey compose --attach`, `hey reply --attach`, `hey bulk-reply send --attach` | covered |
 | signed Active Storage blob URL | GET | SDK `DownloadBlob` | `hey attachments save <id>` | covered |
 | `/messages.json` | POST | SDK `Messages().Create` | `hey compose`, `hey forward <topic-id>` | covered |
 | `/entries/{id}/replies` | POST | SDK `Entries().CreateReply` | `hey reply <topic-id>` | covered |
 | `/topics/{id}.json` | GET | SDK `Topics().Get` | `hey forward <topic-id>` | covered |
 | `/entries/{id}/forwards/new.json` | GET | SDK `Entries().NewForward` | `hey forward <topic-id>` | covered |
+| `/bulk_replies/new.json` | GET | SDK `BulkReplies().Draft` | `hey bulk-reply preview`, `hey bulk-reply send`, TUI `b` | covered |
+| `/bulk_replies.json` | POST | SDK `BulkReplies().Send` | `hey bulk-reply send`, TUI bulk reply | covered |
+| `/bulk_replies/{id}/undo_send` | POST | SDK `BulkReplies().Undo` | `hey bulk-reply undo`, TUI `u` | covered |
 | `/postings/moves.json` | POST | SDK `Postings().Move` | `hey move <id> --to <box>`, TUI `m` | covered |
 | `/postings/trash.json` | POST | SDK `Postings().MoveToTrash` | `hey trash <id>`, TUI `t` | covered |
 | `/postings/spam.json` | POST | SDK `Postings().MarkSpam` | `hey spam <id>`, TUI `s` | covered |

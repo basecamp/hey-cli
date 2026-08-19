@@ -100,6 +100,7 @@ EMAIL
   attachments    List and save files from a thread
   compose        Write and send a new email
   reply          Reply to a thread
+  bulk-reply     Reply to multiple email threads
   forward        Forward the latest message in a thread
   drafts         List draft emails
   seen           Mark email threads as seen

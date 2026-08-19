@@ -58,7 +58,7 @@ hey auth logout   # clear credentials
 
 Run `hey` to launch the interactive terminal UI.
 
-Navigate between Mail, Contacts, Calendar, and Journal. In Mail, use `/` to search, Enter to open a thread, `r` to reply, `f` to forward, `m` to move, `t` to trash, `s` to mark as spam, `-` to ignore, and `+` to stop ignoring. Search results retain the matching-message summary; use `n` and `p` to move between result pages.
+Navigate between Mail, Contacts, Calendar, and Journal. In Mail, use `/` to search, Enter to open a thread, `r` to reply, `f` to forward, `m` to move, `t` to trash, `s` to mark as spam, `-` to ignore, and `+` to stop ignoring. Select threads with Space and press `b` to preview every bulk-reply recipient before writing and sending one reply to all selected threads. A delayed bulk reply can be recalled with `u` while HEY's undo window remains open. Search results retain the matching-message summary; use `n` and `p` to move between result pages.
 
 Thread attachments always appear with their filename, media type, and size. Use `[` and `]` to select an attachment, `s` to save it without replacing an existing file, and `o` to download and open it in an external application. Attachments never open automatically. Kitty and Ghostty can show inline images. Foot and other terminals use visible text markers.
 
@@ -89,6 +89,9 @@ hey attachments 123                # list files attached to the thread
 hey attachments save 456:1         # save a file using its attachment ID
 hey reply 123 -m "Thanks!"        # reply to a thread (or omit -m to open $EDITOR)
 hey reply 123 -m "Attached." --attach ./diagram.png
+hey bulk-reply preview 12345 67890  # inspect threads and exact To/CC/BCC recipients
+hey bulk-reply send 12345 67890 -m "Thanks for the update."
+hey bulk-reply undo 98765            # recall a delayed bulk reply
 hey forward 123 --to alice@example.com -m "For your review"  # forward the latest message
 hey compose --to user@example.com --subject "Hello"  # compose a new message
 hey compose --to user@example.com --subject "Report" -m "Attached." --attach ./report.pdf
@@ -106,7 +109,9 @@ Search accepts free text plus `--required`, `--any`, `--none`, `--exact`, `--fro
 
 Contact updates preserve omitted name, email, and alias fields. Supplying `--alias` replaces the complete alias list; `--alias=` clears it. Contact notes accept positional content, `--note`, stdin, or `$EDITOR`. HEY hides contacts rather than permanently deleting them; hidden contacts leave lists, autocomplete, and search, and can be shown again by ID.
 
-`--attach` is repeatable on `hey compose` and `hey reply`, and attachment-only messages are supported. The CLI validates and uploads every file before sending the email. `hey attachments <topic_id>` returns stable message-and-position IDs such as `456:1`; pass an ID to `hey attachments save`. Saving uses the original filename by default, accepts `--output` for a file or directory, and preserves existing files unless `--force` is set.
+`hey bulk-reply preview` is read-only and resolves each posting to its latest replyable entry. `hey bulk-reply send` resolves the selection again, skips threads without a replyable entry, keeps HEY's server-provided name tag, and returns the exact reply count, delivery ID, delayed state, undo URL, and undo command. Posting IDs must be positive and unique. The message can come from `-m`, stdin, or `$EDITOR`; `--attach` is repeatable.
+
+`--attach` is repeatable on `hey compose`, `hey reply`, and `hey bulk-reply send`, and attachment-only messages are supported. The CLI validates and uploads every file before sending the email. `hey attachments <topic_id>` returns stable message-and-position IDs such as `456:1`; pass an ID to `hey attachments save`. Saving uses the original filename by default, accepts `--output` for a file or directory, and preserves existing files unless `--force` is set.
 
 Organization actions take the `id` values returned by `hey box --json` or `hey search --json`. Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Bubble Up requires a scheduled date and is not available through `hey move`. Trashing a shared thread removes your access instead of deleting it for everyone. Ignored threads remain in their box and can be restored with `hey stop-ignoring`.
 
