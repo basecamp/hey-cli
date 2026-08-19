@@ -58,7 +58,7 @@ hey auth logout   # clear credentials
 
 Run `hey` to launch the interactive terminal UI.
 
-Navigate between mailboxes, postings, and full email threads. Use Enter to drill in, Escape/Backspace to go back, and `/` to filter lists.
+Navigate between mailboxes, postings, and full email threads. Use Enter to open a thread, `r` to reply, `f` to forward, and Escape or `q` to go back.
 
 ## CLI Commands
 
@@ -71,6 +71,7 @@ hey boxes                          # list mailboxes
 hey box imbox                      # list postings in a box (by name or ID)
 hey threads 123                    # read a full email thread
 hey reply 123 -m "Thanks!"        # reply to a thread (or omit -m to open $EDITOR)
+hey forward 123 --to alice@example.com -m "For your review"  # forward the latest message
 hey compose --to user@example.com --subject "Hello"  # compose a new message
 hey compose --to user@example.com --cc bob@example.com --bcc carol@example.org --subject "Hello"  # with CC/BCC
 hey drafts                         # list drafts

@@ -97,6 +97,21 @@ func TestToTextTrixFigure(t *testing.T) {
 	}
 }
 
+func TestPrependText(t *testing.T) {
+	got := PrependText(`<div>Forwarded message</div>`, "For your review\nThanks & take care")
+	want := `<div>For your review<br>Thanks &amp; take care</div><br><div>Forwarded message</div>`
+	if got != want {
+		t.Errorf("PrependText() = %q, want %q", got, want)
+	}
+}
+
+func TestPrependTextWithoutNote(t *testing.T) {
+	content := `<div>Forwarded message</div>`
+	if got := PrependText(content, "  "); got != content {
+		t.Errorf("PrependText() = %q, want unchanged content", got)
+	}
+}
+
 func TestExtractImageURLs(t *testing.T) {
 	h := `<p>Hello</p><img src="https://example.com/a.png"><img src="https://example.com/b.jpg">`
 	urls := ExtractImageURLs(h)

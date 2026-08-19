@@ -27,6 +27,18 @@ type replyContextLoadedMsg struct {
 	err       error
 }
 
+// forwardContextLoadedMsg carries HEY's prefilled subject and quoted message
+// for forwarding the latest entry in a thread.
+type forwardContextLoadedMsg struct {
+	requestID uint64
+	boxID     int64
+	topicID   int64
+	topicName string
+	subject   string
+	content   string
+	err       error
+}
+
 // composeSentMsg reports the outcome of a send.
 type composeSentMsg struct {
 	label string
@@ -40,6 +52,7 @@ type composeMode int
 const (
 	composeNew composeMode = iota
 	composeReply
+	composeForward
 )
 
 // composeField indexes the inputs in a form. Body is always the last field.
@@ -53,15 +66,16 @@ const (
 	fieldBody
 )
 
-// composeForm is the in-TUI editor for a new message or a reply. It owns its
-// inputs, validation and status; sending is done by mailView so the form stays
-// free of SDK calls.
+// composeForm is the in-TUI editor for a new message, reply or forward. It owns
+// its inputs, validation and status; sending is done by mailView so the form
+// stays free of SDK calls.
 type composeForm struct {
-	mode      composeMode
-	topicName string
-	entryID   int64 // reply target (composeReply only)
+	mode             composeMode
+	topicName        string
+	entryID          int64 // reply target (composeReply only)
+	forwardedContent string
 
-	inputs []textinput.Model // to, cc, bcc, subject (subject only for composeNew)
+	inputs []textinput.Model // to, cc, bcc, subject (subject omitted for replies)
 	body   textarea.Model
 	focus  int // index into inputs, or len(inputs) for body
 
@@ -77,7 +91,7 @@ type composeForm struct {
 func newComposeForm(mode composeMode, s styles) *composeForm {
 	f := &composeForm{mode: mode, styles: s}
 	labels := []string{"To", "Cc", "Bcc"}
-	if mode == composeNew {
+	if mode != composeReply {
 		labels = append(labels, "Subject")
 	}
 	for _, l := range labels {
@@ -116,6 +130,15 @@ func newReplyForm(ctxMsg replyContextLoadedMsg, s styles) *composeForm {
 	return f
 }
 
+func newForwardForm(ctxMsg forwardContextLoadedMsg, s styles) *composeForm {
+	f := newComposeForm(composeForward, s)
+	f.topicName = ctxMsg.topicName
+	f.forwardedContent = ctxMsg.content
+	f.inputs[fieldSubject].SetValue(ctxMsg.subject)
+	f.body.Placeholder = "Add a note…"
+	return f
+}
+
 func (f *composeForm) bodyIndex() int { return len(f.inputs) }
 
 func (f *composeForm) init() tea.Cmd {
@@ -150,20 +173,23 @@ func (f *composeForm) values() (to, cc, bcc []string, subject, body string) {
 	to = parseAddressList(f.inputs[fieldTo].Value())
 	cc = parseAddressList(f.inputs[fieldCc].Value())
 	bcc = parseAddressList(f.inputs[fieldBcc].Value())
-	if f.mode == composeNew {
+	if f.mode != composeReply {
 		subject = strings.TrimSpace(f.inputs[fieldSubject].Value())
 	}
 	body = strings.TrimSpace(f.body.Value())
+	if f.mode == composeForward {
+		body = htmlutil.PrependText(f.forwardedContent, body)
+	}
 	return
 }
 
 // validate returns a user-facing problem, or "" when the form can be sent.
 func (f *composeForm) validate() string {
 	to, cc, bcc, subject, body := f.values()
-	if f.mode == composeNew && len(to)+len(cc)+len(bcc) == 0 {
+	if f.mode != composeReply && len(to)+len(cc)+len(bcc) == 0 {
 		return "Add at least one recipient"
 	}
-	if f.mode == composeNew && subject == "" {
+	if f.mode != composeReply && subject == "" {
 		return "Subject is required"
 	}
 	if body == "" {
@@ -228,11 +254,15 @@ func (f *composeForm) helpBindings() []helpBinding {
 func (f *composeForm) view() string {
 	var b strings.Builder
 	title := "New message"
-	if f.mode == composeReply {
+	switch f.mode {
+	case composeNew:
+	case composeReply:
 		title = "Reply"
-		if f.topicName != "" {
-			title += ": " + f.topicName
-		}
+	case composeForward:
+		title = "Forward"
+	}
+	if f.mode != composeNew && f.topicName != "" {
+		title += ": " + f.topicName
 	}
 	b.WriteString(f.styles.title.Render(title))
 	b.WriteString("\n")
@@ -247,6 +277,10 @@ func (f *composeForm) view() string {
 	b.WriteString("\n")
 	b.WriteString(f.body.View())
 	b.WriteString("\n")
+	if f.mode == composeForward {
+		b.WriteString(labelStyle.Render("The original message will be included."))
+		b.WriteString("\n")
+	}
 
 	if f.status != "" {
 		st := lipgloss.NewStyle().Foreground(colorMuted)
@@ -316,6 +350,47 @@ func (v *mailView) loadReplyContext(topicID int64, topicName string) tea.Cmd {
 	}
 }
 
+// loadForwardContext fetches HEY's prefilled forward for the latest entry in
+// the thread, then opens the forward form on forwardContextLoadedMsg.
+func (v *mailView) loadForwardContext(topicID int64, topicName string) tea.Cmd {
+	sdk := v.vc.sdk
+	boxID := v.currentBoxID()
+	requestID, ctx := v.beginRequest(mailRequestForward)
+	return func() tea.Msg {
+		topic, err := sdk.Topics().Get(ctx, topicID)
+		if err != nil {
+			return forwardContextLoadedMsg{requestID: requestID, boxID: boxID, err: err}
+		}
+		if topic == nil || len(topic.Entries) == 0 {
+			return forwardContextLoadedMsg{
+				requestID: requestID,
+				boxID:     boxID,
+				err:       fmt.Errorf("no entries found in thread %d", topicID),
+			}
+		}
+		entryID := topic.Entries[len(topic.Entries)-1].Id
+		draft, err := sdk.Entries().NewForward(ctx, entryID)
+		if err != nil {
+			return forwardContextLoadedMsg{requestID: requestID, boxID: boxID, err: err}
+		}
+		if draft == nil {
+			return forwardContextLoadedMsg{
+				requestID: requestID,
+				boxID:     boxID,
+				err:       fmt.Errorf("thread %d returned no forward draft", topicID),
+			}
+		}
+		return forwardContextLoadedMsg{
+			requestID: requestID,
+			boxID:     boxID,
+			topicID:   topicID,
+			topicName: topicName,
+			subject:   draft.Subject,
+			content:   draft.Content,
+		}
+	}
+}
+
 // send submits the open form through the SDK.
 func (v *mailView) send() tea.Cmd {
 	f := v.compose
@@ -328,6 +403,11 @@ func (v *mailView) send() tea.Cmd {
 		return func() tea.Msg {
 			err := sdk.Entries().CreateReply(ctx, entryID, body, to, cc, bcc)
 			return composeSentMsg{label: "Reply sent", err: err}
+		}
+	case composeForward:
+		return func() tea.Msg {
+			err := sdk.Messages().Create(ctx, subject, body, to, cc, bcc)
+			return composeSentMsg{label: "Message forwarded", err: err}
 		}
 	default:
 		return func() tea.Msg {

@@ -21,7 +21,7 @@ func newThreadsCommand() *topicCommand {
 		Use:   "threads <id>",
 		Short: "Read a thread",
 		Annotations: map[string]string{
-			"agent_notes": "Returns a thread with all entries. Use entry IDs with hey reply.",
+			"agent_notes": "Returns a thread with all entries. Use the topic ID with hey reply or hey forward.",
 		},
 		Example: `  hey threads 12345
   hey threads 12345 --json`,
@@ -88,6 +88,11 @@ func (c *topicCommand) run(cmd *cobra.Command, args []string) error {
 				Action:      "reply",
 				Command:     fmt.Sprintf("hey reply %d", threadID),
 				Description: "Reply to this thread",
+			},
+			output.Breadcrumb{
+				Action:      "forward",
+				Command:     fmt.Sprintf("hey forward %d --to <email>", threadID),
+				Description: "Forward the latest message",
 			},
 		),
 	)

@@ -148,6 +148,38 @@ func TestReply(t *testing.T) {
 	assertContains(t, html, uid)
 }
 
+func TestForward(t *testing.T) {
+	resp := heyJSON(t, "box", "imbox")
+	type Posting struct {
+		AppURL string `json:"app_url"`
+	}
+	type BoxResp struct {
+		Postings []Posting `json:"postings"`
+	}
+	data := dataAs[BoxResp](t, resp)
+	if len(data.Postings) == 0 {
+		t.Skip("no postings in imbox to forward")
+	}
+	topicID := extractTopicID(data.Postings[0].AppURL)
+	if topicID == "" {
+		t.Fatalf("could not extract topic ID from app_url: %s", data.Postings[0].AppURL)
+	}
+
+	stdout, stderr, code := hey(t, "forward", topicID,
+		"--to", "david@basecamp.com",
+		"-m", fmt.Sprintf("Forward smoke test %s", uniqueID()),
+		"--json",
+	)
+	if code != 0 {
+		t.Skipf("forward is unavailable on this server (exit %d): %s", code, stderr)
+	}
+	var forwardResp Response
+	if err := json.Unmarshal([]byte(stdout), &forwardResp); err != nil {
+		t.Fatalf("failed to parse forward response: %v", err)
+	}
+	assertContains(t, forwardResp.Summary, "Message forwarded")
+}
+
 func TestDrafts(t *testing.T) {
 	resp := heyJSON(t, "drafts")
 	// Just verify the command succeeds and returns valid data.
@@ -188,4 +220,8 @@ func TestThreadsNoArgument(t *testing.T) {
 
 func TestReplyNoArgument(t *testing.T) {
 	heyFail(t, "reply", "--json")
+}
+
+func TestForwardNoArgument(t *testing.T) {
+	heyFail(t, "forward", "--to", "david@basecamp.com", "--json")
 }

@@ -192,11 +192,14 @@ func (m *model) updateHelpBindings() {
 	if ic, ok := m.activeView.(inputCapturer); ok && ic.CapturingInput() {
 		bindings = append(m.activeView.HelpBindings(), quitHint)
 	} else if m.activeView.InThread() {
-		bindings = []helpBinding{
-			{"↑↓", "scroll"},
-			{"esc/q", "back"},
-			quitHint,
-		}
+		extra := m.activeView.HelpBindings()
+		bindings = make([]helpBinding, 0, 3+len(extra))
+		bindings = append(bindings,
+			helpBinding{"↑↓", "scroll"},
+			helpBinding{"esc/q", "back"},
+		)
+		bindings = append(bindings, extra...)
+		bindings = append(bindings, quitHint)
 	} else {
 		switch m.focus {
 		case rowSection:

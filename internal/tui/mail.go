@@ -26,6 +26,7 @@ const (
 	mailRequestPostings
 	mailRequestTopic
 	mailRequestReply
+	mailRequestForward
 )
 
 type boxesLoadedMsg []models.Box
@@ -71,7 +72,7 @@ type mailView struct {
 	inThread      bool
 	loading       bool
 
-	compose           *composeForm // non-nil while a new message or reply is being written
+	compose           *composeForm // non-nil while a message, reply or forward is being written
 	notice            string       // one-shot confirmation shown above the posting list
 	activeRequestID   uint64       // identifies the only mail read allowed to update the view
 	activeRequestKind mailRequestKind
@@ -158,6 +159,18 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.compose.resize(v.vc.width, v.vc.height)
 		return v.compose.init(), true
 
+	case forwardContextLoadedMsg:
+		if msg.requestID != v.activeRequestID || msg.boxID != v.currentBoxID() {
+			return nil, true
+		}
+		v.finishRequest(msg.requestID)
+		if msg.err != nil {
+			return func() tea.Msg { return errMsg{msg.err} }, true
+		}
+		v.compose = newForwardForm(msg, v.vc.styles)
+		v.compose.resize(v.vc.width, v.vc.height)
+		return v.compose.init(), true
+
 	case composeSentMsg:
 		if v.compose == nil {
 			return nil, true
@@ -235,7 +248,7 @@ func (v *mailView) HelpBindings() []helpBinding {
 		return v.compose.helpBindings()
 	}
 	if v.inThread {
-		return []helpBinding{{"r", "reply"}}
+		return []helpBinding{{"r", "reply"}, {"f", "forward"}}
 	}
 	return []helpBinding{
 		{"c", "compose"},
@@ -286,6 +299,9 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		if msg.String() == "r" && v.topicID != 0 {
 			return v.loadReplyContext(v.topicID, v.topicName)
 		}
+		if msg.String() == "f" && v.topicID != 0 {
+			return v.loadForwardContext(v.topicID, v.topicName)
+		}
 		var cmd tea.Cmd
 		v.topicViewport, cmd = v.topicViewport.Update(msg)
 		return cmd
@@ -315,7 +331,7 @@ func (v *mailView) ExitThread() {
 }
 
 func (v *mailView) CancelPendingDetail() bool {
-	if v.activeRequestKind != mailRequestTopic && v.activeRequestKind != mailRequestReply {
+	if v.activeRequestKind != mailRequestTopic && v.activeRequestKind != mailRequestReply && v.activeRequestKind != mailRequestForward {
 		return false
 	}
 	v.cancelRequest()
@@ -471,7 +487,7 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 		if topicID == 0 {
 			topicID = p.ID
 		}
-		return v.requestTopic(v.currentBoxID(), topicID, p.Summary)
+		return v.loadForwardContext(topicID, p.Summary)
 	}
 	return nil
 }

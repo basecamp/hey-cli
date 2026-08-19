@@ -785,6 +785,29 @@ func TestMailViewIgnoresReplyLoadAfterBoxSwitch(t *testing.T) {
 	}
 }
 
+func TestMailViewIgnoresForwardLoadAfterBoxSwitch(t *testing.T) {
+	v := mailWithPostings()
+	_ = v.loadForwardContext(100, "Hello world")
+	loaded := forwardContextLoadedMsg{
+		requestID: v.activeRequestID,
+		boxID:     1,
+		topicID:   100,
+		topicName: "Hello world",
+		subject:   "Fwd: Hello world",
+		content:   "<div>Hello world</div>",
+	}
+
+	v.SubnavRight()
+	cmd, consumed := v.Update(loaded)
+
+	if !consumed || cmd != nil {
+		t.Error("stale forward context should be ignored")
+	}
+	if v.compose != nil {
+		t.Error("stale forward context should not open the forward form")
+	}
+}
+
 func TestMailViewIgnoresReplyLoadAfterThreadExit(t *testing.T) {
 	v := mailWithPostings()
 	v.inThread = true
@@ -977,8 +1000,8 @@ func TestMailViewHelpBindingsInThread(t *testing.T) {
 	v := mailWithPostings()
 	v.inThread = true
 	bindings := v.HelpBindings()
-	if len(bindings) != 1 || bindings[0].key != "r" {
-		t.Errorf("thread mode should offer only reply, got %v", bindings)
+	if len(bindings) != 2 || bindings[0].key != "r" || bindings[1].key != "f" {
+		t.Errorf("thread mode should offer reply and forward, got %v", bindings)
 	}
 }
 

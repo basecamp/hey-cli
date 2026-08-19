@@ -13,6 +13,7 @@ triggers:
   - hey box
   - hey threads
   - hey reply
+  - hey forward
   - hey compose
   - hey drafts
   # Calendar actions
@@ -40,6 +41,7 @@ triggers:
   - read email
   - send email
   - reply to email
+  - forward email
   - compose email
   - list mailboxes
   - check calendar
@@ -86,6 +88,7 @@ CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos,
 | List emails in a box | `hey box imbox --json` |
 | Read email thread | `hey threads <topic_id> --json` |
 | Reply to email | `hey reply <topic_id> -m "Thanks!"` |
+| Forward email | `hey forward <topic_id> --to alice@example.com -m "For your review"` |
 | Compose email | `hey compose --to user@example.com --subject "Hello"` |
 | Compose with CC/BCC | `hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Hello"` |
 | List drafts | `hey drafts --json` |
@@ -131,6 +134,8 @@ Want to read email?
 Want to send email?
 ├── Reply to thread? → hey reply <topic_id> -m "message"
 │   └── Open editor? → hey reply <topic_id> (omit -m to open $EDITOR)
+├── Forward latest message? → hey forward <topic_id> --to <email>
+│   └── Add a note? → add -m "note"
 ├── Compose new? → hey compose --to <email> --subject "Subject"
 │   ├── With body? → hey compose --to <email> --subject "Subject" -m "Body"
 │   ├── With CC? → add --cc <email>
@@ -161,7 +166,7 @@ hey box 123 --json                            # List emails in box (by ID)
 
 Box names: `imbox`, `feedbox`, `trailbox`, `asidebox`, `laterbox`, `bubblebox`
 
-**Response format:** `hey box` returns `{"box": {...}, "postings": [...]}`. Each posting has: `id` (posting ID), `topic_id` (topic ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`. Use `topic_id` for `hey threads` and `hey reply`.
+**Response format:** `hey box` returns `{"box": {...}, "postings": [...]}`. Each posting has: `id` (posting ID), `topic_id` (topic ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`. Use `topic_id` for `hey threads`, `hey reply`, and `hey forward`.
 
 ### Email - Threads
 
@@ -170,13 +175,15 @@ hey threads <topic_id> --json                 # Read full email thread
 hey threads <topic_id> --html                 # Read with raw HTML content
 ```
 
-**ID note:** `hey box` returns postings with an `id` (posting ID) and a `topic_id` (topic ID). `hey threads` and `hey reply` expect the **topic ID** — use `topic_id` directly. The `app_url` field also contains the topic ID as a fallback (e.g. `https://app.hey.com/topics/123` → `123`).
+**ID note:** `hey box` returns postings with an `id` (posting ID) and a `topic_id` (topic ID). `hey threads`, `hey reply`, and `hey forward` expect the **topic ID** — use `topic_id` directly. The `app_url` field also contains the topic ID as a fallback (e.g. `https://app.hey.com/topics/123` → `123`).
 
-### Email - Reply & Compose
+### Email - Reply, Forward & Compose
 
 ```bash
 hey reply <topic_id> -m "Thanks!"             # Reply with inline message
 hey reply <topic_id>                          # Reply via $EDITOR
+hey forward <topic_id> --to alice@example.com                 # Forward the latest message
+hey forward <topic_id> --to alice@example.com -m "Please review"  # Forward with a note
 hey compose --to user@example.com --subject "Hello"         # Compose new (opens $EDITOR)
 hey compose --to user@example.com --subject "Hi" -m "Body"  # With inline body
 hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Project update" -m "Body"  # With CC/BCC

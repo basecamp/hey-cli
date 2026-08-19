@@ -3,6 +3,7 @@ package htmlutil
 import (
 	"encoding/json"
 	"fmt"
+	stdhtml "html"
 	"strings"
 
 	"golang.org/x/net/html"
@@ -22,6 +23,17 @@ func ToText(s string) string {
 		result = strings.ReplaceAll(result, "\n\n\n", "\n\n")
 	}
 	return strings.TrimSpace(result)
+}
+
+// PrependText adds a plain-text note before existing HTML content.
+func PrependText(content, note string) string {
+	note = strings.TrimSpace(strings.ReplaceAll(note, "\r\n", "\n"))
+	if note == "" {
+		return content
+	}
+	escaped := stdhtml.EscapeString(note)
+	escaped = strings.ReplaceAll(escaped, "\n", "<br>")
+	return "<div>" + escaped + "</div><br>" + content
 }
 
 // ExtractImageURLs finds image URLs from <img src> tags and

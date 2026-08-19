@@ -200,6 +200,22 @@ func TestSingleCtrlCDoesNotQuit(t *testing.T) {
 
 // --- Navigation: Esc/q in thread goes back ---
 
+func TestThreadHelpIncludesMailActions(t *testing.T) {
+	m := modelWithBoxes()
+	m.mailView.inThread = true
+	m.updateHelpBindings()
+
+	keys := make(map[string]bool)
+	for _, binding := range m.help.bindings {
+		keys[binding.key] = true
+	}
+	for _, want := range []string{"↑↓", "esc/q", "r", "f"} {
+		if !keys[want] {
+			t.Errorf("thread help is missing %q: %v", want, m.help.bindings)
+		}
+	}
+}
+
 func TestEscExitsThread(t *testing.T) {
 	m := modelWithBoxes()
 	m.mailView.inThread = true
@@ -271,6 +287,36 @@ func TestQExitsPendingReplyLoadFromPostingList(t *testing.T) {
 	m = updated.(model)
 	if m.mailView.compose != nil {
 		t.Error("a canceled reply load should not open the reply form")
+	}
+}
+
+func TestQExitsPendingForwardLoadFromPostingList(t *testing.T) {
+	m := modelWithBoxes()
+
+	updated, cmd := m.Update(keyPress("f"))
+	m = updated.(model)
+	if cmd == nil || !m.mailView.loading || m.mailView.activeRequestKind != mailRequestForward {
+		t.Fatal("forward from the posting list should start loading")
+	}
+	requestID := m.mailView.activeRequestID
+
+	updated, _ = m.Update(keyPress("q"))
+	m = updated.(model)
+	if m.mailView.loading || m.loading {
+		t.Error("q should stop a forward started from the posting list")
+	}
+
+	updated, _ = m.Update(forwardContextLoadedMsg{
+		requestID: requestID,
+		boxID:     1,
+		topicID:   100,
+		topicName: "Hello world",
+		subject:   "Fwd: Hello world",
+		content:   "<div>Hello world</div>",
+	})
+	m = updated.(model)
+	if m.mailView.compose != nil {
+		t.Error("a canceled forward load should not open the forward form")
 	}
 }
 

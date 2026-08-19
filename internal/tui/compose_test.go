@@ -44,17 +44,22 @@ func composeTestServer(t *testing.T) (*mailView, *struct {
 		body         map[string]any
 	}{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/identity.json" {
-			w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/identity.json":
 			_, _ = w.Write([]byte(`{"id":1,"email_address":"me@hey.com","senders":[{"id":42,"default":true}]}`))
-			return
+		case "/topics/100.json":
+			_, _ = w.Write([]byte(`{"id":100,"name":"Quarterly planning","entries":[{"id":500},{"id":501}]}`))
+		case "/entries/501/forwards/new.json":
+			_, _ = w.Write([]byte(`{"subject":"Fwd: Quarterly planning","content":"<div>Quoted message</div>"}`))
+		default:
+			rec.method, rec.path = r.Method, r.URL.Path
+			if b, _ := io.ReadAll(r.Body); len(b) > 0 {
+				_ = json.Unmarshal(b, &rec.body)
+			}
+			w.WriteHeader(200)
+			_, _ = w.Write([]byte(`{}`))
 		}
-		rec.method, rec.path = r.Method, r.URL.Path
-		if b, _ := io.ReadAll(r.Body); len(b) > 0 {
-			_ = json.Unmarshal(b, &rec.body)
-		}
-		w.WriteHeader(200)
-		_, _ = w.Write([]byte(`{}`))
 	}))
 	t.Cleanup(srv.Close)
 	sdk := hey.NewClient(&hey.Config{BaseURL: srv.URL}, &hey.StaticTokenProvider{Token: "t"}, hey.WithMaxRetries(0))
@@ -234,6 +239,74 @@ func TestReplyFormPrefillsAndSends(t *testing.T) {
 	addressed := rec.body["entry"].(map[string]any)["addressed"].(map[string]any)
 	if got := addressed["directly"].([]any); len(got) != 1 || got[0] != "jane@x.com" {
 		t.Errorf("directly = %v", got)
+	}
+}
+
+func TestForwardFormLoadsLatestEntryAndSends(t *testing.T) {
+	v, rec := composeTestServer(t)
+	v.Resize(80, 30)
+
+	loaded := runCmd(v.HandleContentKey(keyPress("f")))
+	ctxMsg, ok := loaded.(forwardContextLoadedMsg)
+	if !ok || ctxMsg.err != nil {
+		t.Fatalf("forward command returned %#v", loaded)
+	}
+	if ctxMsg.subject != "Fwd: Quarterly planning" || ctxMsg.content != "<div>Quoted message</div>" {
+		t.Errorf("forward draft = subject %q content %q", ctxMsg.subject, ctxMsg.content)
+	}
+	v.Update(ctxMsg)
+
+	f := v.compose
+	if f == nil || f.mode != composeForward {
+		t.Fatal("forward context should open a forward form")
+	}
+	if f.inputs[fieldSubject].Value() != "Fwd: Quarterly planning" {
+		t.Errorf("subject = %q", f.inputs[fieldSubject].Value())
+	}
+	if !strings.Contains(v.View(), "Forward: Hello world") || !strings.Contains(v.View(), "original message will be included") {
+		t.Errorf("forward form view = %q", v.View())
+	}
+
+	typeText(v, "alice@example.com")
+	for range 4 {
+		v.HandleContentKey(keyPress("tab"))
+	}
+	typeText(v, "For your review")
+
+	msg := runCmd(v.HandleContentKey(ctrlS()))
+	sent, ok := msg.(composeSentMsg)
+	if !ok || sent.err != nil || sent.label != "Message forwarded" {
+		t.Fatalf("expected Message forwarded, got %#v", msg)
+	}
+	if rec.method != http.MethodPost || rec.path != "/messages.json" {
+		t.Errorf("sent %s %s, want POST /messages.json", rec.method, rec.path)
+	}
+	message := rec.body["message"].(map[string]any)
+	if message["subject"] != "Fwd: Quarterly planning" {
+		t.Errorf("message subject = %v", message["subject"])
+	}
+	wantContent := `<div>For your review</div><br><div>Quoted message</div>`
+	if message["content"] != wantContent {
+		t.Errorf("message content = %q, want %q", message["content"], wantContent)
+	}
+	addressed := rec.body["entry"].(map[string]any)["addressed"].(map[string]any)
+	if got := addressed["directly"].([]any); len(got) != 1 || got[0] != "alice@example.com" {
+		t.Errorf("directly = %v", got)
+	}
+
+	v.Update(sent)
+	if v.compose != nil || v.notice != "Message forwarded" {
+		t.Errorf("forward completion = compose %v notice %q", v.compose, v.notice)
+	}
+}
+
+func TestForwardKeyInThreadLoadsContext(t *testing.T) {
+	v := mailWithPostings()
+	v.inThread = true
+	v.topicID = 123
+	cmd := v.HandleContentKey(keyPress("f"))
+	if cmd == nil || !v.loading || v.activeRequestKind != mailRequestForward {
+		t.Fatal("'f' in a thread should start loading the forward context")
 	}
 }
 

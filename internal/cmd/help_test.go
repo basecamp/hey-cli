@@ -45,6 +45,7 @@ EMAIL
   threads  Read a thread
   compose  Write and send a new email
   reply    Reply to a thread
+  forward  Forward the latest message in a thread
   drafts   List draft emails
   seen     Mark messages as seen
   unseen   Mark messages as unseen
