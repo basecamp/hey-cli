@@ -610,6 +610,9 @@ func (v *mailView) requestPostings(boxID int64) tea.Cmd {
 }
 
 func (v *mailView) startSearch() tea.Cmd {
+	if v.loading || len(v.boxes) == 0 {
+		return nil
+	}
 	v.searchForm = newMailSearchForm(v.searchQuery, v.vc.styles)
 	v.searchForm.resize(v.vc.width, v.vc.height)
 	return v.searchForm.init()

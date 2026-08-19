@@ -1145,6 +1145,24 @@ func TestMailViewRendersEmptyList(t *testing.T) {
 
 // --- Search ---
 
+func TestMailViewSearchWaitsForMailboxLoad(t *testing.T) {
+	v := newMailView(testVC())
+	v.loading = true
+	if cmd := v.HandleContentKey(keyPress("/")); cmd != nil || v.searchForm != nil {
+		t.Error("search should not start before boxes load")
+	}
+
+	v.Update(boxesLoadedMsg(testBoxes()))
+	if cmd := v.HandleContentKey(keyPress("/")); cmd != nil || v.searchForm != nil {
+		t.Error("search should not start while the first box loads")
+	}
+
+	v.Update(currentPostingsLoaded(v, testPostings()))
+	if cmd := v.HandleContentKey(keyPress("/")); cmd == nil || v.searchForm == nil {
+		t.Error("search should start after the mailbox finishes loading")
+	}
+}
+
 func TestMailViewSearchFormSubmitsQueryAndRendersResults(t *testing.T) {
 	v, recorded := mailWithTestServer(t, http.StatusNoContent)
 	if cmd := v.HandleContentKey(keyPress("/")); cmd == nil {
