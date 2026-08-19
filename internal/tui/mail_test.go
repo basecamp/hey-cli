@@ -19,7 +19,7 @@ import (
 )
 
 func testVC() *viewContext {
-	return &viewContext{styles: newStyles(), width: 80, height: 30}
+	return &viewContext{ctx: context.Background(), styles: newStyles(), width: 80, height: 30}
 }
 
 func mailWithPostings() *mailView {
@@ -340,6 +340,33 @@ func TestMailViewPostingActionCopiesSelectedPostingBeforeAsyncRequest(t *testing
 	}
 }
 
+func TestMailViewPostingCompletionInvalidatesConcurrentReload(t *testing.T) {
+	v := mailWithPostings()
+
+	v.SubnavRight()
+	v.SubnavLeft()
+	staleRequestID := v.activeRequestID
+	stale := currentPostingsLoaded(v, testPostings())
+
+	refresh, consumed := v.Update(postingActionDoneMsg{
+		action: "moved to Trash", boxID: 1, postingID: 100, removes: true,
+	})
+	if !consumed || refresh == nil {
+		t.Fatal("action completion should replace a concurrent reload with a fresh reload")
+	}
+	if v.activeRequestID == staleRequestID {
+		t.Fatal("action completion should invalidate the concurrent reload")
+	}
+
+	v.Update(stale)
+	if v.postingIndex(100) >= 0 {
+		t.Error("stale reload restored the posting removed by the completed action")
+	}
+	if !v.loading {
+		t.Error("stale reload should not stop the post-action refresh")
+	}
+}
+
 func TestMailViewPostingCompletionUpdatesOriginatingPosting(t *testing.T) {
 	v, _ := mailWithTestServer(t, http.StatusNoContent)
 	v.Resize(80, 2)
@@ -577,6 +604,69 @@ waitForLimit:
 		if entry.ID != wantID {
 			t.Errorf("entry %d ID = %d, want %d", i, entry.ID, wantID)
 		}
+	}
+}
+
+func TestMailViewCancelPendingDetailStopsMessageRequests(t *testing.T) {
+	messageStarted := make(chan struct{})
+	messageCanceled := make(chan struct{})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/topics/100.json":
+			_, _ = w.Write([]byte(`{"id":100,"name":"Hello world","entries":[{"id":501,"kind":"message"}]}`))
+		case "/messages/501.json":
+			close(messageStarted)
+			<-r.Context().Done()
+			close(messageCanceled)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := hey.NewClient(
+		&hey.Config{BaseURL: server.URL},
+		&hey.StaticTokenProvider{Token: "test-token"},
+		hey.WithMaxRetries(0),
+	)
+	vc := testVC()
+	vc.sdk = client
+	v := newMailView(vc)
+	v.boxes = orderBoxes(testBoxes())
+	v.Update(currentPostingsLoaded(v, testPostings()))
+
+	result := make(chan tea.Msg, 1)
+	cmd := v.HandleContentKey(keyPress("enter"))
+	go func() { result <- cmd() }()
+
+	select {
+	case <-messageStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("message request did not start")
+	}
+
+	if !v.CancelPendingDetail() {
+		t.Fatal("pending thread load should be cancellable")
+	}
+	select {
+	case <-messageCanceled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("canceling the detail load did not cancel its HTTP request")
+	}
+
+	select {
+	case msg := <-result:
+		loaded, ok := msg.(topicLoadedMsg)
+		if !ok || loaded.err == nil {
+			t.Fatalf("canceled command returned %#v, want topicLoadedMsg with an error", msg)
+		}
+		if cmd, consumed := v.Update(loaded); !consumed || cmd != nil {
+			t.Error("canceled detail result should be ignored without reporting an error")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("canceled detail command did not return")
 	}
 }
 

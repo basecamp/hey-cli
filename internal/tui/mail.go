@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -16,6 +17,15 @@ import (
 // --- Mail messages ---
 
 const maxConcurrentMessageFetches = 6
+
+type mailRequestKind int
+
+const (
+	mailRequestNone mailRequestKind = iota
+	mailRequestPostings
+	mailRequestTopic
+	mailRequestReply
+)
 
 type boxesLoadedMsg []models.Box
 
@@ -60,9 +70,11 @@ type mailView struct {
 	inThread      bool
 	loading       bool
 
-	compose         *composeForm // non-nil while a new message or reply is being written
-	notice          string       // one-shot confirmation shown above the posting list
-	activeRequestID uint64       // identifies the only mail read allowed to update the view
+	compose           *composeForm // non-nil while a new message or reply is being written
+	notice            string       // one-shot confirmation shown above the posting list
+	activeRequestID   uint64       // identifies the only mail read allowed to update the view
+	activeRequestKind mailRequestKind
+	requestCancel     context.CancelFunc
 }
 
 func newMailView(vc *viewContext) *mailView {
@@ -98,7 +110,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if msg.requestID != v.activeRequestID || msg.boxID != v.currentBoxID() {
 			return nil, true
 		}
-		v.loading = false
+		v.finishRequest(msg.requestID)
 		if msg.err != nil {
 			return func() tea.Msg { return errMsg{msg.err} }, true
 		}
@@ -109,7 +121,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if msg.requestID != v.activeRequestID || msg.boxID != v.currentBoxID() {
 			return nil, true
 		}
-		v.loading = false
+		v.finishRequest(msg.requestID)
 		if msg.err != nil {
 			return func() tea.Msg { return errMsg{msg.err} }, true
 		}
@@ -137,7 +149,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if msg.requestID != v.activeRequestID || msg.boxID != v.currentBoxID() {
 			return nil, true
 		}
-		v.loading = false
+		v.finishRequest(msg.requestID)
 		if msg.err != nil {
 			return func() tea.Msg { return errMsg{msg.err} }, true
 		}
@@ -178,6 +190,9 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			v.postingList.ensureVisible()
 		} else if msg.action == "marked as seen" && idx >= 0 {
 			v.postingList.postings[idx].Seen = true
+		}
+		if v.activeRequestKind == mailRequestPostings {
+			return v.requestPostings(v.currentBoxID()), true
 		}
 		return nil, true
 	}
@@ -297,6 +312,15 @@ func (v *mailView) ExitThread() {
 	v.compose = nil
 	v.cancelRequest()
 }
+
+func (v *mailView) CancelPendingDetail() bool {
+	if v.activeRequestKind != mailRequestTopic && v.activeRequestKind != mailRequestReply {
+		return false
+	}
+	v.cancelRequest()
+	return true
+}
+
 func (v *mailView) Loading() bool { return v.loading }
 
 func (v *mailView) Resize(width, height int) {
@@ -330,19 +354,48 @@ func (v *mailView) currentBoxID() int64 {
 	return v.boxes[v.boxIndex].ID
 }
 
-func (v *mailView) beginRequest() uint64 {
+func (v *mailView) beginRequest(kind mailRequestKind) (uint64, context.Context) {
+	if v.requestCancel != nil {
+		v.requestCancel()
+	}
 	v.activeRequestID++
+	ctx, cancel := context.WithCancel(v.vc.ctx)
+	v.activeRequestKind = kind
+	v.requestCancel = cancel
 	v.loading = true
-	return v.activeRequestID
+	return v.activeRequestID, ctx
+}
+
+func (v *mailView) finishRequest(requestID uint64) {
+	if requestID != v.activeRequestID {
+		return
+	}
+	if v.requestCancel != nil {
+		v.requestCancel()
+	}
+	v.activeRequestKind = mailRequestNone
+	v.requestCancel = nil
+	v.loading = false
 }
 
 func (v *mailView) cancelRequest() {
+	if v.requestCancel != nil {
+		v.requestCancel()
+	}
 	v.activeRequestID++
+	v.activeRequestKind = mailRequestNone
+	v.requestCancel = nil
 	v.loading = false
 }
 
 func (v *mailView) requestPostings(boxID int64) tea.Cmd {
-	return v.fetchPostings(v.beginRequest(), boxID)
+	requestID, ctx := v.beginRequest(mailRequestPostings)
+	return v.fetchPostings(ctx, requestID, boxID)
+}
+
+func (v *mailView) requestTopic(boxID, topicID int64, title string) tea.Cmd {
+	requestID, ctx := v.beginRequest(mailRequestTopic)
+	return v.fetchTopic(ctx, requestID, boxID, topicID, title)
 }
 
 func (v *mailView) postingIndex(postingID int64) int {
@@ -363,7 +416,7 @@ func (v *mailView) openSelected() tea.Cmd {
 	if topicID == 0 {
 		topicID = p.ID
 	}
-	return v.fetchTopic(v.beginRequest(), v.currentBoxID(), topicID, p.Summary)
+	return v.requestTopic(v.currentBoxID(), topicID, p.Summary)
 }
 
 // --- Posting actions ---
@@ -416,7 +469,7 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 		if topicID == 0 {
 			topicID = p.ID
 		}
-		return v.fetchTopic(v.beginRequest(), v.currentBoxID(), topicID, p.Summary)
+		return v.requestTopic(v.currentBoxID(), topicID, p.Summary)
 	}
 	return nil
 }
@@ -535,9 +588,9 @@ func (v *mailView) fetchBoxes() tea.Cmd {
 	}
 }
 
-func (v *mailView) fetchPostings(requestID uint64, boxID int64) tea.Cmd {
+func (v *mailView) fetchPostings(ctx context.Context, requestID uint64, boxID int64) tea.Cmd {
 	return func() tea.Msg {
-		resp, err := v.vc.sdk.Boxes().Get(v.vc.ctx, boxID, nil)
+		resp, err := v.vc.sdk.Boxes().Get(ctx, boxID, nil)
 		if err != nil {
 			return postingsLoadedMsg{requestID: requestID, boxID: boxID, err: err}
 		}
@@ -549,9 +602,9 @@ func (v *mailView) fetchPostings(requestID uint64, boxID int64) tea.Cmd {
 	}
 }
 
-func (v *mailView) fetchTopic(requestID uint64, boxID, topicID int64, title string) tea.Cmd {
+func (v *mailView) fetchTopic(ctx context.Context, requestID uint64, boxID, topicID int64, title string) tea.Cmd {
 	return func() tea.Msg {
-		topic, err := v.vc.sdk.Topics().Get(v.vc.ctx, topicID)
+		topic, err := v.vc.sdk.Topics().Get(ctx, topicID)
 		if err != nil {
 			return topicLoadedMsg{requestID: requestID, boxID: boxID, topicID: topicID, title: title, err: err}
 		}
@@ -560,11 +613,11 @@ func (v *mailView) fetchTopic(requestID uint64, boxID, topicID int64, title stri
 		}
 
 		messages := make([]generated.Message, len(topic.Entries))
-		group, ctx := errgroup.WithContext(v.vc.ctx)
+		group, groupCtx := errgroup.WithContext(ctx)
 		group.SetLimit(maxConcurrentMessageFetches)
 		for i, entry := range topic.Entries {
 			group.Go(func() error {
-				message, getErr := v.vc.sdk.Messages().Get(ctx, entry.Id)
+				message, getErr := v.vc.sdk.Messages().Get(groupCtx, entry.Id)
 				if getErr != nil {
 					return fmt.Errorf("get message %d: %w", entry.Id, getErr)
 				}
@@ -595,9 +648,9 @@ func (v *mailView) fetchTopic(requestID uint64, boxID, topicID int64, title stri
 			for _, imgURL := range extractImageURLs(entry.Body) {
 				var data []byte
 				if strings.HasPrefix(imgURL, "http://") || strings.HasPrefix(imgURL, "https://") {
-					data = fetchImageData(imgURL)
+					data = fetchImageData(ctx, imgURL)
 				} else {
-					sdkResp, getErr := v.vc.sdk.Get(v.vc.ctx, imgURL)
+					sdkResp, getErr := v.vc.sdk.Get(ctx, imgURL)
 					if getErr == nil && sdkResp != nil {
 						data = sdkResp.Data
 					}

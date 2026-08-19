@@ -62,3 +62,9 @@ type sectionView interface {
 type inputCapturer interface {
 	CapturingInput() bool
 }
+
+// pendingDetailCanceler is implemented by section views whose detail reads can
+// be canceled before the detail view opens.
+type pendingDetailCanceler interface {
+	CancelPendingDetail() bool
+}

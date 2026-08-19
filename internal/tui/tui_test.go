@@ -241,6 +241,39 @@ func TestQExitsPendingReplyLoad(t *testing.T) {
 	}
 }
 
+func TestQExitsPendingReplyLoadFromPostingList(t *testing.T) {
+	m := modelWithBoxes()
+
+	updated, cmd := m.Update(keyPress("r"))
+	m = updated.(model)
+	if cmd == nil || !m.mailView.loading || !m.loading {
+		t.Fatal("reply from the posting list should start loading")
+	}
+	requestID := m.mailView.activeRequestID
+
+	updated, _ = m.Update(keyPress("q"))
+	m = updated.(model)
+	if m.mailView.loading || m.loading {
+		t.Error("q should stop a reply started from the posting list")
+	}
+	if m.mailView.activeRequestKind != mailRequestNone || m.mailView.requestCancel != nil {
+		t.Error("q should clear the pending reply request")
+	}
+
+	updated, _ = m.Update(replyContextLoadedMsg{
+		requestID: requestID,
+		boxID:     1,
+		topicID:   100,
+		topicName: "Hello world",
+		entryID:   501,
+		to:        []string{"jane@example.com"},
+	})
+	m = updated.(model)
+	if m.mailView.compose != nil {
+		t.Error("a canceled reply load should not open the reply form")
+	}
+}
+
 func TestBoxShortcutExitsThread(t *testing.T) {
 	m := modelWithBoxes()
 	m.mailView.inThread = true

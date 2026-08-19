@@ -145,7 +145,7 @@ func (v *journalView) fetchJournalEntry(date string) tea.Cmd {
 		for _, imgURL := range extractImageURLs(content) {
 			var data []byte
 			if strings.HasPrefix(imgURL, "http://") || strings.HasPrefix(imgURL, "https://") {
-				data = fetchImageData(imgURL)
+				data = fetchImageData(v.vc.ctx, imgURL)
 			} else {
 				sdkResp, getErr := v.vc.sdk.Get(v.vc.ctx, imgURL)
 				if getErr == nil && sdkResp != nil {

@@ -281,10 +281,9 @@ func (v *mailView) startCompose() tea.Cmd {
 // loadReplyContext fetches the thread's recipients and latest entry, the same
 // way `hey reply` does, then opens the reply form on replyContextLoadedMsg.
 func (v *mailView) loadReplyContext(topicID int64, topicName string) tea.Cmd {
-	ctx := v.vc.ctx
 	sdk := v.vc.sdk
 	boxID := v.currentBoxID()
-	requestID := v.beginRequest()
+	requestID, ctx := v.beginRequest(mailRequestReply)
 	return func() tea.Msg {
 		topicResp, err := sdk.GetHTML(ctx, fmt.Sprintf("/topics/%d", topicID))
 		if err != nil {
