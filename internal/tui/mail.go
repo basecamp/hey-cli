@@ -27,6 +27,7 @@ const (
 	mailRequestTopic
 	mailRequestReply
 	mailRequestForward
+	mailRequestSearch
 )
 
 type boxesLoadedMsg []models.Box
@@ -45,6 +46,14 @@ type topicLoadedMsg struct {
 	title     string
 	entries   []models.Entry
 	images    [][]byte
+	err       error
+}
+
+type searchResultsLoadedMsg struct {
+	requestID uint64
+	query     string
+	page      int
+	postings  []models.Posting
 	err       error
 }
 
@@ -82,10 +91,15 @@ type mailView struct {
 	inThread      bool
 	loading       bool
 
-	compose           *composeForm // non-nil while a message, reply or forward is being written
-	movePicker        *movePicker  // non-nil while a destination box is being selected
-	notice            string       // one-shot confirmation shown above the posting list
-	activeRequestID   uint64       // identifies the only mail read allowed to update the view
+	compose           *composeForm    // non-nil while a message, reply or forward is being written
+	movePicker        *movePicker     // non-nil while a destination box is being selected
+	searchForm        *mailSearchForm // non-nil while a search query is being entered
+	searchList        contentList
+	searchActive      bool
+	searchQuery       string
+	searchPage        int
+	notice            string // one-shot confirmation shown above the posting list
+	activeRequestID   uint64 // identifies the only mail read allowed to update the view
 	activeRequestKind mailRequestKind
 	requestCancel     context.CancelFunc
 }
@@ -128,6 +142,24 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return func() tea.Msg { return errMsg{msg.err} }, true
 		}
 		v.postingList.setPostings(msg.postings)
+		return nil, true
+
+	case searchResultsLoadedMsg:
+		if msg.requestID != v.activeRequestID {
+			return nil, true
+		}
+		v.finishRequest(msg.requestID)
+		if msg.err != nil {
+			return func() tea.Msg { return errMsg{msg.err} }, true
+		}
+		if len(msg.postings) == 0 && v.searchActive && msg.page > v.searchPage {
+			v.notice = "No more search results"
+			return nil, true
+		}
+		v.searchActive = true
+		v.searchQuery = msg.query
+		v.searchPage = msg.page
+		v.searchList.setPostings(msg.postings)
 		return nil, true
 
 	case topicLoadedMsg:
@@ -250,6 +282,9 @@ func (v *mailView) View() string {
 	if v.compose != nil {
 		return v.compose.view()
 	}
+	if v.searchForm != nil {
+		return v.searchForm.view()
+	}
 	if v.movePicker != nil {
 		return v.movePicker.view(v.vc.styles, v.vc.width)
 	}
@@ -259,6 +294,12 @@ func (v *mailView) View() string {
 		}
 		return v.topicViewport.View()
 	}
+	if v.searchActive {
+		if v.notice != "" {
+			return v.vc.styles.title.Render(v.notice) + "\n" + v.searchList.view()
+		}
+		return v.searchList.view()
+	}
 	if v.notice != "" {
 		return v.vc.styles.title.Render(v.notice) + "\n" + v.postingList.view()
 	}
@@ -266,11 +307,16 @@ func (v *mailView) View() string {
 }
 
 // CapturingInput reports whether a form or picker is open and wants every key.
-func (v *mailView) CapturingInput() bool { return v.compose != nil || v.movePicker != nil }
+func (v *mailView) CapturingInput() bool {
+	return v.compose != nil || v.movePicker != nil || v.searchForm != nil
+}
 
 func (v *mailView) HelpBindings() []helpBinding {
 	if v.compose != nil {
 		return v.compose.helpBindings()
+	}
+	if v.searchForm != nil {
+		return v.searchForm.helpBindings()
 	}
 	if v.movePicker != nil {
 		return v.movePicker.helpBindings()
@@ -278,11 +324,15 @@ func (v *mailView) HelpBindings() []helpBinding {
 	if v.inThread {
 		return []helpBinding{{"r", "reply"}, {"f", "forward"}}
 	}
+	if v.searchActive {
+		return []helpBinding{{"enter", "open"}, {"/", "new search"}, {"n", "next page"}, {"p", "previous page"}}
+	}
 	ignoreBinding := helpBinding{"-", "ignore"}
 	if selected := v.postingList.selectedPosting(); selected != nil && selected.Muted {
 		ignoreBinding = helpBinding{"+", "stop ignoring"}
 	}
 	return []helpBinding{
+		{"/", "search"},
 		{"c", "compose"},
 		{"r", "reply"},
 		{"f", "forward"},
@@ -299,6 +349,13 @@ func (v *mailView) HelpBindings() []helpBinding {
 }
 
 func (v *mailView) SubnavItems() ([]navItem, int, string, bool) {
+	if v.searchActive || v.searchForm != nil {
+		label := "Search"
+		if v.searchQuery != "" {
+			label = fmt.Sprintf("Search: %s (page %d)", v.searchQuery, max(v.searchPage, 1))
+		}
+		return nil, 0, label, true
+	}
 	label := "Mail"
 	if v.boxIndex >= 0 && v.boxIndex < len(v.boxes) {
 		label = v.boxes[v.boxIndex].Name
@@ -307,10 +364,16 @@ func (v *mailView) SubnavItems() ([]navItem, int, string, bool) {
 }
 
 func (v *mailView) SubnavLeft() tea.Cmd {
+	if v.searchActive || v.searchForm != nil {
+		return nil
+	}
 	return v.switchBox(v.boxIndex - 1)
 }
 
 func (v *mailView) SubnavRight() tea.Cmd {
+	if v.searchActive || v.searchForm != nil {
+		return nil
+	}
 	return v.switchBox(v.boxIndex + 1)
 }
 
@@ -325,6 +388,19 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		cmd, submit := v.compose.handleKey(msg)
 		if submit {
 			return v.send()
+		}
+		return cmd
+	}
+
+	if v.searchForm != nil {
+		if msg.Key().Code == tea.KeyEscape {
+			v.searchForm = nil
+			return nil
+		}
+		cmd, query, submit := v.searchForm.handleKey(msg)
+		if submit {
+			v.searchForm = nil
+			return v.requestSearch(query, 1)
 		}
 		return cmd
 	}
@@ -359,6 +435,30 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		return cmd
 	}
 
+	if v.searchActive {
+		switch msg.Key().Code {
+		case tea.KeyUp:
+			v.searchList.moveUp()
+		case tea.KeyDown:
+			v.searchList.moveDown()
+		case tea.KeyEnter:
+			return v.openSelected()
+		default:
+			switch msg.String() {
+			case "/":
+				return v.startSearch()
+			case "n":
+				return v.requestSearch(v.searchQuery, v.searchPage+1)
+			case "p":
+				if v.searchPage > 1 {
+					return v.requestSearch(v.searchQuery, v.searchPage-1)
+				}
+				v.notice = "Already on the first search page"
+			}
+		}
+		return nil
+	}
+
 	switch msg.Key().Code {
 	case tea.KeyUp:
 		v.postingList.moveUp()
@@ -368,6 +468,8 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		return v.openSelected()
 	default:
 		switch msg.String() {
+		case "/":
+			return v.startSearch()
 		case "c":
 			return v.startCompose()
 		case "m":
@@ -380,16 +482,25 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
-func (v *mailView) InThread() bool { return v.inThread }
+func (v *mailView) InThread() bool { return v.inThread || v.searchActive }
 func (v *mailView) ExitThread() {
-	v.inThread = false
-	v.compose = nil
-	v.movePicker = nil
+	if v.inThread {
+		v.inThread = false
+		v.compose = nil
+		v.movePicker = nil
+		v.cancelRequest()
+		return
+	}
+	v.searchActive = false
+	v.searchQuery = ""
+	v.searchPage = 0
+	v.searchList.setPostings(nil)
+	v.searchForm = nil
 	v.cancelRequest()
 }
 
 func (v *mailView) CancelPendingDetail() bool {
-	if v.activeRequestKind != mailRequestTopic && v.activeRequestKind != mailRequestReply && v.activeRequestKind != mailRequestForward {
+	if v.activeRequestKind != mailRequestTopic && v.activeRequestKind != mailRequestReply && v.activeRequestKind != mailRequestForward && v.activeRequestKind != mailRequestSearch {
 		return false
 	}
 	v.cancelRequest()
@@ -402,7 +513,11 @@ func (v *mailView) Resize(width, height int) {
 	if v.compose != nil {
 		v.compose.resize(width, height)
 	}
+	if v.searchForm != nil {
+		v.searchForm.resize(width, height)
+	}
 	v.postingList.setSize(width, height)
+	v.searchList.setSize(width, height)
 	v.topicViewport.SetWidth(width)
 	v.topicViewport.SetHeight(height)
 }
@@ -416,7 +531,13 @@ func (v *mailView) switchBox(index int) tea.Cmd {
 	if index < 0 || index >= len(v.boxes) || index == v.boxIndex {
 		return nil
 	}
-	v.ExitThread()
+	v.inThread = false
+	v.searchActive = false
+	v.searchForm = nil
+	v.searchQuery = ""
+	v.searchPage = 0
+	v.searchList.setPostings(nil)
+	v.cancelRequest()
 	v.notice = ""
 	v.postingList.setPostings(nil)
 	v.boxIndex = index
@@ -469,6 +590,17 @@ func (v *mailView) requestPostings(boxID int64) tea.Cmd {
 	return v.fetchPostings(ctx, requestID, boxID)
 }
 
+func (v *mailView) startSearch() tea.Cmd {
+	v.searchForm = newMailSearchForm(v.searchQuery, v.vc.styles)
+	v.searchForm.resize(v.vc.width, v.vc.height)
+	return v.searchForm.init()
+}
+
+func (v *mailView) requestSearch(query string, page int) tea.Cmd {
+	requestID, ctx := v.beginRequest(mailRequestSearch)
+	return v.fetchSearchResults(ctx, requestID, query, max(page, 1))
+}
+
 func (v *mailView) requestTopic(boxID, topicID int64, title string) tea.Cmd {
 	requestID, ctx := v.beginRequest(mailRequestTopic)
 	return v.fetchTopic(ctx, requestID, boxID, topicID, title)
@@ -484,15 +616,22 @@ func (v *mailView) postingIndex(postingID int64) int {
 }
 
 func (v *mailView) openSelected() tea.Cmd {
-	p := v.postingList.selectedPosting()
-	if p == nil {
+	selected := v.postingList.selectedPosting()
+	if v.searchActive {
+		selected = v.searchList.selectedPosting()
+	}
+	if selected == nil {
 		return nil
 	}
-	topicID := p.ResolveTopicID()
+	topicID := selected.ResolveTopicID()
 	if topicID == 0 {
-		topicID = p.ID
+		topicID = selected.ID
 	}
-	return v.requestTopic(v.currentBoxID(), topicID, p.Summary)
+	title := selected.Summary
+	if v.searchActive {
+		title = selected.Name
+	}
+	return v.requestTopic(v.currentBoxID(), topicID, title)
 }
 
 // --- Posting actions ---
@@ -643,6 +782,34 @@ func sdkPostingToModel(p generated.Posting) models.Posting {
 	}
 }
 
+func sdkSearchMatchToModel(match generated.SearchMatch) models.Posting {
+	posting := models.Posting{
+		ID:        match.PostingId,
+		TopicID:   match.Topic.Id,
+		Name:      match.Topic.Name,
+		AppURL:    match.Topic.AppUrl,
+		CreatedAt: formatTimestamp(match.Topic.UpdatedAt),
+		UpdatedAt: formatTimestamp(match.Topic.UpdatedAt),
+		Creator: models.Contact{
+			ID:           match.Topic.Creator.Id,
+			Name:         match.Topic.Creator.Name,
+			EmailAddress: match.Topic.Creator.EmailAddress,
+		},
+	}
+	if len(match.Entries) > 0 {
+		entry := match.Entries[0]
+		posting.CreatedAt = formatTimestamp(entry.CreatedAt)
+		posting.Summary = entry.Summary
+		posting.AlternativeSenderName = entry.AlternativeSenderName
+		posting.Creator = models.Contact{
+			ID:           entry.Creator.Id,
+			Name:         entry.Creator.Name,
+			EmailAddress: entry.Creator.EmailAddress,
+		}
+	}
+	return posting
+}
+
 func sdkExtenzionsToModel(exts []generated.Extenzion) []models.Extenzion {
 	if len(exts) == 0 {
 		return nil
@@ -725,6 +892,24 @@ func (v *mailView) fetchPostings(ctx context.Context, requestID uint64, boxID in
 			postings = append(postings, sdkPostingToModel(p))
 		}
 		return postingsLoadedMsg{requestID: requestID, boxID: boxID, postings: postings}
+	}
+}
+
+func (v *mailView) fetchSearchResults(ctx context.Context, requestID uint64, query string, page int) tea.Cmd {
+	return func() tea.Msg {
+		result, err := v.vc.sdk.Search().Search(ctx, hey.SearchParams{Query: query, Page: page})
+		if err != nil {
+			return searchResultsLoadedMsg{requestID: requestID, query: query, page: page, err: err}
+		}
+		var matches []generated.SearchMatch
+		if result != nil {
+			matches = result.Matches
+		}
+		postings := make([]models.Posting, 0, len(matches))
+		for _, match := range matches {
+			postings = append(postings, sdkSearchMatchToModel(match))
+		}
+		return searchResultsLoadedMsg{requestID: requestID, query: query, page: page, postings: postings}
 	}
 }
 

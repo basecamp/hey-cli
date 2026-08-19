@@ -11,6 +11,7 @@ triggers:
   # Email actions
   - hey boxes
   - hey box
+  - hey search
   - hey threads
   - hey reply
   - hey forward
@@ -54,6 +55,8 @@ triggers:
   - forward email
   - compose email
   - list mailboxes
+  - search email
+  - find email
   - check calendar
   - add todo
   - complete todo
@@ -96,6 +99,8 @@ CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos,
 |------|---------|
 | List mailboxes | `hey boxes --json` |
 | List emails in a box | `hey box imbox --json` |
+| Search email | `hey search "quarterly planning" --json` |
+| List search filters | `hey search filters --json` |
 | Read email thread | `hey threads <topic_id> --json` |
 | Reply to email | `hey reply <topic_id> -m "Thanks!"` |
 | Forward email | `hey forward <topic_id> --to alice@example.com -m "For your review"` |
@@ -137,6 +142,8 @@ CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos,
 Want to read email?
 ├── Which mailbox? → hey boxes --json
 ├── List emails in box? → hey box <name|id> --json
+├── Search threads and messages? → hey search <query> --json
+├── Need available refinements? → hey search filters --json
 ├── Read full thread? → hey threads <topic_id> --json
 ├── Mark as seen? → hey seen <id>
 ├── Mark as unseen? → hey unseen <id>
@@ -187,6 +194,19 @@ hey box 123 --json                            # List emails in box (by ID)
 Box names: `imbox`, `feedbox`, `trailbox`, `asidebox`, `laterbox`, `bubblebox`
 
 **Response format:** `hey box` returns `{"box": {...}, "postings": [...]}`. The `postings` array is the API representation of the email threads in that box. Each item has: `id` (box item ID), `topic_id` (thread ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`. Use `id` for `hey seen`, `hey unseen`, `hey move`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring`. Use `topic_id` for `hey threads`, `hey reply`, and `hey forward`.
+
+### Email - Search
+
+```bash
+hey search "quarterly planning" --json         # Free-text search
+hey search --from jane@example.com --date last_30_days --json  # Refined search
+hey search --subject invoice --attachment pdf --all --json     # Search every page
+hey search filters --json                      # Available box, date, label, and attachment values
+```
+
+Search refinements are `--required`, `--any`, `--none`, `--exact`, `--from`, `--to`, `--subject`, `--date`, `--in`, `--label`, and `--attachment`. `--page` selects one result page; `--all` fetches every page from that point onward.
+
+**Response format:** `data` contains one item per matching thread. Each result has `id` (box item ID for organization actions), `topic_id` (thread ID for `hey threads`, `hey reply`, and `hey forward`), `subject`, `updated_at`, and `messages` containing the matching message IDs, senders, dates, and summaries. A result can omit `id` when the thread has no active box item.
 
 ### Email - Threads
 

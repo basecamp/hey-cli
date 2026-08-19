@@ -58,7 +58,7 @@ hey auth logout   # clear credentials
 
 Run `hey` to launch the interactive terminal UI.
 
-Navigate between mailboxes and email threads. Use Enter to open a thread, `r` to reply, `f` to forward, `m` to move, `t` to trash, `s` to mark as spam, `-` to ignore, `+` to stop ignoring, and Escape or `q` to go back.
+Navigate between mailboxes and email threads. Use `/` to search, Enter to open a thread, `r` to reply, `f` to forward, `m` to move, `t` to trash, `s` to mark as spam, `-` to ignore, `+` to stop ignoring, and Escape or `q` to go back. Search results retain the matching-message summary; use `n` and `p` to move between result pages.
 
 ## CLI Commands
 
@@ -69,6 +69,9 @@ All commands support `--json` for raw JSON output and `--base-url` to override t
 ```bash
 hey boxes                          # list mailboxes
 hey box imbox                      # list email threads in a box (by name or ID)
+hey search "quarterly planning"    # search threads and matching messages
+hey search --from jane@example.com --date last_30_days  # refine a search
+hey search filters                 # list available refinement values
 hey threads 123                    # read a full email thread
 hey reply 123 -m "Thanks!"        # reply to a thread (or omit -m to open $EDITOR)
 hey forward 123 --to alice@example.com -m "For your review"  # forward the latest message
@@ -83,7 +86,9 @@ hey ignore 12345                   # ignore future activity on a thread
 hey stop-ignoring 12345            # resume attention for a thread
 ```
 
-These actions take the `id` values returned by `hey box --json`. Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Bubble Up requires a scheduled date and is not available through `hey move`. Trashing a shared thread removes your access instead of deleting it for everyone. Ignored threads remain in their box and can be restored with `hey stop-ignoring`.
+Search accepts free text plus `--required`, `--any`, `--none`, `--exact`, `--from`, `--to`, `--subject`, `--date`, `--in`, `--label`, and `--attachment`. Use `--page` for one page or `--all` to fetch every page. Search results include `id` for organization actions, `topic_id` for reading the thread, and the matching message summaries.
+
+Organization actions take the `id` values returned by `hey box --json` or `hey search --json`. Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Bubble Up requires a scheduled date and is not available through `hey move`. Trashing a shared thread removes your access instead of deleting it for everyone. Ignored threads remain in their box and can be restored with `hey stop-ignoring`.
 
 ### Calendars
 

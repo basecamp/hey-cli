@@ -13,6 +13,8 @@ The legacy `internal/client/` is used only for HTML-scraping gap operations mark
 | `/asidebox.json` | GET | SDK `Boxes().GetAsidebox` | `hey box asidebox` | covered |
 | `/laterbox.json` | GET | SDK `Boxes().GetLaterbox` | `hey box laterbox` | covered |
 | `/bubblebox.json` | GET | SDK `Boxes().GetBubblebox` | `hey box bubblebox` | covered |
+| `/advanced_search.json` | GET | SDK `Search().Search` | `hey search`, TUI `/` | covered |
+| `/advanced_search_filters.json` | GET | SDK `Search().Filters` | `hey search filters` | covered |
 | `/calendars.json` | GET | SDK `Calendars().List` | `hey calendars` | covered |
 | `/calendars/{id}/recordings.json` | GET | SDK `Calendars().GetRecordings` | `hey recordings <calendar-id>`, `hey todo list`, `hey timetrack list`, `hey journal list` | covered |
 | `/topics/{id}/entries` | GET (HTML) | Legacy `GetTopicEntries` | `hey threads <id>` | gap: SDK Entry lacks body |

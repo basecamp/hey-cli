@@ -70,6 +70,21 @@ hey recordings --limit
 hey recordings --starts-on
 hey reply
 hey reply --message
+hey search
+hey search --all
+hey search --any
+hey search --attachment
+hey search --date
+hey search --exact
+hey search --from
+hey search --in
+hey search --label
+hey search --none
+hey search --page
+hey search --required
+hey search --subject
+hey search --to
+hey search filters
 hey seen
 hey setup
 hey skill

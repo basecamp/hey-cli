@@ -13,6 +13,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/models"
@@ -39,10 +40,11 @@ func currentPostingsLoaded(v *mailView, postings []models.Posting) postingsLoade
 }
 
 type recordedMailRequest struct {
-	method   string
-	path     string
-	requests []string
-	body     struct {
+	method     string
+	path       string
+	requests   []string
+	rawQueries []string
+	body       struct {
 		PostingIDs []int64 `json:"posting_ids"`
 		BoxID      *int64  `json:"box_id"`
 	}
@@ -68,8 +70,11 @@ func mailWithTestServer(t *testing.T, status int) (*mailView, *recordedMailReque
 		recorded.method = r.Method
 		recorded.path = r.URL.Path
 		recorded.requests = append(recorded.requests, r.Method+" "+r.URL.Path)
+		recorded.rawQueries = append(recorded.rawQueries, r.URL.RawQuery)
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
+		case "/advanced_search.json":
+			_, _ = w.Write([]byte(`{"matches":[{"topic":{"id":100,"name":"Hello world","app_url":"https://app.hey.com/topics/100","updated_at":"2026-08-19T09:00:00Z"},"posting_id":10,"entries":[{"id":501,"kind":"message","summary":"Matching message summary","created_at":"2026-08-19T09:00:00Z","creator":{"id":10,"name":"Alice"}}]}]}`))
 		case "/topics/100.json":
 			_, _ = w.Write([]byte(`{"id":100,"name":"Hello world","entries":[{"id":501,"kind":"message","summary":"Hello world","created_at":"2026-08-19T09:00:00Z","creator":{"id":10,"name":"Alice"}}]}`))
 		case "/messages/501.json":
@@ -1138,6 +1143,174 @@ func TestMailViewRendersEmptyList(t *testing.T) {
 	}
 }
 
+// --- Search ---
+
+func TestMailViewSearchFormSubmitsQueryAndRendersResults(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	if cmd := v.HandleContentKey(keyPress("/")); cmd == nil {
+		t.Fatal("opening search should focus the input")
+	}
+	if v.searchForm == nil || !v.CapturingInput() {
+		t.Fatal("search form should capture input")
+	}
+	v.searchForm.input.SetValue("quarterly planning")
+
+	cmd := v.HandleContentKey(keyPress("enter"))
+	if cmd == nil || !v.loading {
+		t.Fatal("submitting search should start a request")
+	}
+	msg := cmd()
+	loaded, ok := msg.(searchResultsLoadedMsg)
+	if !ok {
+		t.Fatalf("search command returned %T", msg)
+	}
+	v.Update(loaded)
+
+	if recorded.path != "/advanced_search.json" || len(recorded.rawQueries) == 0 || !strings.Contains(recorded.rawQueries[len(recorded.rawQueries)-1], "q=quarterly+planning") {
+		t.Errorf("search request = %s?%v", recorded.path, recorded.rawQueries)
+	}
+	if !v.searchActive || v.searchQuery != "quarterly planning" || v.searchPage != 1 {
+		t.Errorf("search state = active:%v query:%q page:%d", v.searchActive, v.searchQuery, v.searchPage)
+	}
+	if len(v.searchList.postings) != 1 || v.searchList.postings[0].ResolveTopicID() != 100 {
+		t.Errorf("search postings = %+v", v.searchList.postings)
+	}
+	view := v.View()
+	if !strings.Contains(view, "Hello world") || !strings.Contains(view, "Matching message summary") {
+		t.Errorf("search result does not show thread and matching-message context: %q", view)
+	}
+	_, _, label, _ := v.SubnavItems()
+	if !strings.Contains(label, "quarterly planning") || !strings.Contains(label, "page 1") {
+		t.Errorf("search label = %q", label)
+	}
+}
+
+func TestMailViewSearchRequiresWords(t *testing.T) {
+	v := mailWithPostings()
+	v.HandleContentKey(keyPress("/"))
+	cmd := v.HandleContentKey(keyPress("enter"))
+	if cmd != nil {
+		t.Fatal("empty search should not submit")
+	}
+	if v.searchForm == nil || !strings.Contains(v.searchForm.view(), "Enter words to search for") {
+		t.Error("empty search should keep the form open with guidance")
+	}
+}
+
+func TestMailViewSearchEscapeClosesForm(t *testing.T) {
+	v := mailWithPostings()
+	v.HandleContentKey(keyPress("/"))
+	v.HandleContentKey(keyPress("esc"))
+	if v.searchForm != nil || v.CapturingInput() {
+		t.Error("escape should close the search form")
+	}
+}
+
+func TestMailViewIgnoresStaleSearchResults(t *testing.T) {
+	v := mailWithPostings()
+	v.activeRequestID = 2
+	v.Update(searchResultsLoadedMsg{
+		requestID: 1,
+		query:     "stale",
+		page:      1,
+		postings:  []models.Posting{{ID: 99}},
+	})
+	if v.searchActive || len(v.searchList.postings) != 0 {
+		t.Error("stale search results changed the view")
+	}
+}
+
+func TestMailViewSearchPagination(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v.searchActive = true
+	v.searchQuery = "quarterly planning"
+	v.searchPage = 1
+	v.searchList.setPostings([]models.Posting{{ID: 10, TopicID: 100, Name: "Hello world"}})
+
+	next := v.HandleContentKey(keyPress("n"))
+	if next == nil {
+		t.Fatal("next page should start a request")
+	}
+	nextMsg := next().(searchResultsLoadedMsg)
+	v.Update(nextMsg)
+	if v.searchPage != 2 || !strings.Contains(recorded.rawQueries[len(recorded.rawQueries)-1], "page=2") {
+		t.Errorf("next page state = %d, queries = %v", v.searchPage, recorded.rawQueries)
+	}
+
+	previous := v.HandleContentKey(keyPress("p"))
+	if previous == nil {
+		t.Fatal("previous page should start a request")
+	}
+	previousMsg := previous().(searchResultsLoadedMsg)
+	v.Update(previousMsg)
+	if v.searchPage != 1 {
+		t.Errorf("previous page = %d, want 1", v.searchPage)
+	}
+}
+
+func TestMailViewEmptyNextSearchPagePreservesResults(t *testing.T) {
+	v := mailWithPostings()
+	v.searchActive = true
+	v.searchQuery = "quarterly planning"
+	v.searchPage = 1
+	v.searchList.setPostings([]models.Posting{{ID: 10, TopicID: 100}})
+	v.activeRequestID = 3
+
+	v.Update(searchResultsLoadedMsg{requestID: 3, query: v.searchQuery, page: 2})
+	if v.searchPage != 1 || len(v.searchList.postings) != 1 {
+		t.Errorf("empty next page replaced results: page=%d postings=%v", v.searchPage, v.searchList.postings)
+	}
+	if v.notice != "No more search results" {
+		t.Errorf("notice = %q", v.notice)
+	}
+}
+
+func TestMailViewSearchResultOpensThreadAndReturnsToResults(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	v.searchActive = true
+	v.searchQuery = "quarterly planning"
+	v.searchPage = 1
+	v.searchList.setPostings([]models.Posting{{ID: 10, TopicID: 100, Name: "Hello world"}})
+
+	open := v.HandleContentKey(keyPress("enter"))
+	if open == nil {
+		t.Fatal("enter should open the selected search result")
+	}
+	v.Update(open())
+	if !v.inThread || !v.searchActive || v.topicID != 100 {
+		t.Errorf("thread state = open:%v search:%v id:%d", v.inThread, v.searchActive, v.topicID)
+	}
+
+	v.ExitThread()
+	if v.inThread || !v.searchActive || len(v.searchList.postings) != 1 {
+		t.Error("closing a searched thread should return to search results")
+	}
+	v.ExitThread()
+	if v.searchActive {
+		t.Error("closing search results should return to the box")
+	}
+}
+
+func TestSDKSearchMatchToModelPreservesActionAndThreadIDs(t *testing.T) {
+	match := generated.SearchMatch{
+		PostingId: 10,
+		Topic: generated.Topic{
+			Id:     100,
+			Name:   "Hello world",
+			AppUrl: "https://app.hey.com/topics/100",
+		},
+		Entries: []generated.Entry{{
+			Id:      501,
+			Summary: "Matching message summary",
+			Creator: generated.Contact{Name: "Alice"},
+		}},
+	}
+	posting := sdkSearchMatchToModel(match)
+	if posting.ID != 10 || posting.ResolveTopicID() != 100 || posting.Name != "Hello world" || posting.Summary != "Matching message summary" || posting.Creator.Name != "Alice" {
+		t.Errorf("posting = %+v", posting)
+	}
+}
+
 // --- Help bindings ---
 
 func TestMailViewHelpBindings(t *testing.T) {
@@ -1151,7 +1324,7 @@ func TestMailViewHelpBindings(t *testing.T) {
 	for _, b := range bindings {
 		keys[b.key] = true
 	}
-	for _, expected := range []string{"r", "f", "m", "e", "l", "a", "t", "s", "-"} {
+	for _, expected := range []string{"/", "r", "f", "m", "e", "l", "a", "t", "s", "-"} {
 		if !keys[expected] {
 			t.Errorf("missing help binding for key %q", expected)
 		}
@@ -1187,6 +1360,21 @@ func TestMailViewHelpBindingsInThread(t *testing.T) {
 	bindings := v.HelpBindings()
 	if len(bindings) != 2 || bindings[0].key != "r" || bindings[1].key != "f" {
 		t.Errorf("thread mode should offer reply and forward, got %v", bindings)
+	}
+}
+
+func TestMailViewHelpBindingsInSearchResults(t *testing.T) {
+	v := mailWithPostings()
+	v.searchActive = true
+	bindings := v.HelpBindings()
+	keys := make(map[string]bool)
+	for _, binding := range bindings {
+		keys[binding.key] = true
+	}
+	for _, expected := range []string{"enter", "/", "n", "p"} {
+		if !keys[expected] {
+			t.Errorf("search results missing help binding %q: %v", expected, bindings)
+		}
 	}
 }
 

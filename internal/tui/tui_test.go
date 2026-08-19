@@ -253,6 +253,41 @@ func TestMovePickerOwnsNavigationKeys(t *testing.T) {
 	}
 }
 
+func TestSearchFormOwnsNavigationKeys(t *testing.T) {
+	m := modelWithBoxes()
+	m.focus = rowContent
+
+	updated, _ := m.Update(keyPress("/"))
+	m = updated.(model)
+	if m.mailView.searchForm == nil || !m.mailView.CapturingInput() {
+		t.Fatal("/ should open the search form")
+	}
+
+	updated, _ = m.Update(keyPress("tab"))
+	m = updated.(model)
+	if m.focus != rowContent || m.mailView.searchForm == nil {
+		t.Error("tab should remain inside the search form")
+	}
+
+	updated, _ = m.Update(keyPress("esc"))
+	m = updated.(model)
+	if m.mailView.searchForm != nil || m.mailView.CapturingInput() {
+		t.Error("escape should close the search form")
+	}
+}
+
+func TestQExitsSearchResults(t *testing.T) {
+	m := modelWithBoxes()
+	m.mailView.searchActive = true
+	m.mailView.searchQuery = "quarterly planning"
+
+	updated, _ := m.Update(keyPress("q"))
+	result := updated.(model)
+	if result.mailView.searchActive || result.activeView.InThread() {
+		t.Error("q should exit search results")
+	}
+}
+
 func TestEscExitsThread(t *testing.T) {
 	m := modelWithBoxes()
 	m.mailView.inThread = true
