@@ -133,6 +133,39 @@ func TestReplyRequiresPreviewedEntry(t *testing.T) {
 	}
 }
 
+func TestReplyRechecksLatestEntryAfterLoadingEnvelope(t *testing.T) {
+	latestEntryID := int64(12)
+	posts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && (r.URL.Path == "/topics/7" || r.URL.Path == "/topics/7.json"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"id":7,"name":"Project update","latest_entry":{"id":%d}}`, latestEntryID)
+		case r.Method == http.MethodGet && r.URL.Path == "/entries/12/replies/new":
+			latestEntryID = 13
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = fmt.Fprint(w, replyForm)
+		case r.Method == http.MethodGet && r.URL.Path == "/identity.json":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"id":1,"senders":[{"id":42,"default":true,"email_address":"user@hey.com"}],"primary_contact":{"id":42,"email_address":"user@hey.com"}}`)
+		case r.Method == http.MethodPost:
+			posts++
+			w.WriteHeader(http.StatusCreated)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	_, err := runReply(t, server, "7", "-m", "Stale during envelope load", "--expect-entry", "12")
+	if err == nil || !strings.Contains(err.Error(), "thread changed after preview") {
+		t.Fatalf("error = %v, want stale-entry rejection", err)
+	}
+	if posts != 0 {
+		t.Fatalf("reply posts = %d, want 0", posts)
+	}
+}
+
 func TestVerifyReplyCreatedRejectsUnchangedTopic(t *testing.T) {
 	server := replyVerificationServer(t, []verificationCandidate{})
 	withSDKPointedAt(t, server)

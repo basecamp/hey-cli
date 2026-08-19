@@ -119,6 +119,9 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	}
+	if err = ensureExpectedEntryStillLatest(ctx, threadID, c.expectedEntryID); err != nil {
+		return err
+	}
 	if err = sdk.Entries().CreateReply(ctx, target.EntryID, message, target.Addressed.To, target.Addressed.CC, target.Addressed.BCC); err != nil {
 		return convertSDKError(err)
 	}
@@ -148,6 +151,23 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 
 func resolveExpectedThreadReply(ctx context.Context, threadID, expectedEntryID int64) (*threadReplyTarget, error) {
 	return resolveThreadReplyAtEntry(ctx, threadID, expectedEntryID)
+}
+
+func ensureExpectedEntryStillLatest(ctx context.Context, threadID, expectedEntryID int64) error {
+	topic, err := sdk.Topics().Get(ctx, threadID)
+	if err != nil {
+		return convertSDKError(err)
+	}
+	if topic == nil || topic.LatestEntry.Id <= 0 {
+		return output.ErrNotFound("entries for thread", fmt.Sprintf("%d", threadID))
+	}
+	if topic.LatestEntry.Id != expectedEntryID {
+		return output.ErrUsageHint(
+			fmt.Sprintf("thread changed after preview: expected entry %d, latest entry is %d", expectedEntryID, topic.LatestEntry.Id),
+			fmt.Sprintf("Run: hey reply %d -m <message> --preview --json", threadID),
+		)
+	}
+	return nil
 }
 
 type replyPreviewAttachment struct {
