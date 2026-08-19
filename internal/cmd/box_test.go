@@ -237,13 +237,22 @@ func TestBoxPostingCountsAndSummary(t *testing.T) {
 
 func TestBoxTableLabelsMixedItemsByKind(t *testing.T) {
 	headers := boxTableHeaders()
-	if len(headers) < 2 || headers[0] != "Item" || headers[1] != "Kind" {
-		t.Fatalf("headers = %v, want Item and Kind columns", headers)
+	if len(headers) < 3 || headers[0] != "Item" || headers[1] != "Kind" || headers[2] != "Topic" {
+		t.Fatalf("headers = %v, want Item, Kind, and Topic columns", headers)
 	}
 
-	row := boxTableRow(generated.Posting{Id: 102, Kind: "world/post", Summary: "Published note"})
-	if len(row) < 2 || row[0] != "102" || row[1] != "world/post" {
-		t.Fatalf("row = %v, want World item ID and kind", row)
+	worldRow := boxTableRow(generated.Posting{Id: 102, Kind: "world/post", Summary: "Published note"})
+	if len(worldRow) < 3 || worldRow[0] != "102" || worldRow[1] != "world/post" || worldRow[2] != "" {
+		t.Fatalf("row = %v, want World item ID, kind, and no topic ID", worldRow)
+	}
+
+	emailRow := boxTableRow(generated.Posting{
+		Id:     103,
+		Kind:   "topic",
+		AppUrl: "https://app.hey.com/topics/2103970613",
+	})
+	if len(emailRow) < 3 || emailRow[0] != "103" || emailRow[1] != "topic" || emailRow[2] != "2103970613" {
+		t.Fatalf("row = %v, want separate email item and topic IDs", emailRow)
 	}
 }
 

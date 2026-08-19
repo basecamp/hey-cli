@@ -129,17 +129,25 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 }
 
 func boxTableHeaders() []string {
-	return []string{"Item", "Kind", "From", "Summary", "Date"}
+	return []string{"Item", "Kind", "Topic", "From", "Summary", "Date"}
 }
 
 func boxTableRow(posting generated.Posting) []string {
 	return []string{
-		fmt.Sprintf("%d", resolvePostingTopicID(posting)),
+		fmt.Sprintf("%d", posting.Id),
 		posting.Kind,
+		boxPostingTopicID(posting),
 		posting.Creator.Name,
 		truncate(posting.Summary, 60),
 		formatDate(posting.CreatedAt),
 	}
+}
+
+func boxPostingTopicID(posting generated.Posting) string {
+	if strings.EqualFold(strings.TrimSpace(posting.Kind), "world/post") {
+		return ""
+	}
+	return fmt.Sprintf("%d", resolvePostingTopicID(posting))
 }
 
 type boxPostingCounts struct {
