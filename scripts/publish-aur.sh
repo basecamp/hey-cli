@@ -92,6 +92,34 @@ trap 'rm -rf "$workdir"' EXIT
 git clone "$AUR_REPO" "$workdir/aur"
 cd "$workdir/aur"
 
+# Never move the AUR backwards. The release workflow's concurrency group
+# serializes publishes but does not order them by version, so a re-run of an
+# older release's job can land after a newer version shipped. The just-cloned
+# PKGBUILD is the authoritative current state — read it rather than the AUR
+# RPC, which can lag. Exiting 0 keeps an out-of-order automatic run from
+# failing loudly over a package that is already correct; the recovery workflow
+# still rejects a downgrade dispatch with a hard error before reaching here.
+if [ -f PKGBUILD ]; then
+  current=$(sed -n 's/^pkgver=//p' PKGBUILD)
+  currel=$(sed -n 's/^pkgrel=//p' PKGBUILD)
+  if [ -n "$current" ]; then
+    if [ "$current" = "$VERSION" ]; then
+      # pkgrel=1 is hardcoded below, so republishing over a higher revision
+      # would silently discard an AUR-side packaging fix.
+      if [ "${currel:-1}" != "1" ]; then
+        echo "AUR already has ${current}-${currel}; refusing to clobber the packaging revision"
+        exit 0
+      fi
+    else
+      newest=$(printf '%s\n%s\n' "$current" "$VERSION" | sort -V | tail -1)
+      if [ "$newest" != "$VERSION" ]; then
+        echo "AUR already at ${current}, newer than ${VERSION}; nothing to do"
+        exit 0
+      fi
+    fi
+  fi
+fi
+
 echo "$pkgbuild" > PKGBUILD
 echo "$srcinfo" > .SRCINFO
 

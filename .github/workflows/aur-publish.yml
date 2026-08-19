@@ -60,10 +60,11 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
         run: |
-          # publish-aur.sh rewrites pkgver unconditionally, so dispatching an
-          # older-but-valid release would push every Arch user backwards. Being
-          # a published release is not enough — compare against what is actually
-          # in the AUR right now.
+          # publish-aur.sh refuses downgrades itself, but silently — it exits 0
+          # so an out-of-order automatic run doesn't fail over a package that is
+          # already correct. A hand-dispatched run deserves the opposite: an
+          # operator asking for an older-but-valid version should get a hard
+          # error, not a quiet no-op they will mistake for a publish.
           if ! body=$(curl -fsS --max-time 30 --retry 2 \
                         'https://aur.archlinux.org/rpc/v5/info/hey-cli'); then
             # Fail closed: proceeding blind here risks a silent downgrade, and a
@@ -89,8 +90,9 @@ jobs:
           fi
 
           if [ "$current" = "$VERSION" ]; then
-            # publish-aur.sh hardcodes pkgrel=1, so republishing over a higher
-            # revision would silently discard an AUR-side packaging fix.
+            # publish-aur.sh hardcodes pkgrel=1 and would refuse this with a
+            # quiet no-op; fail the dispatch loudly instead so the operator
+            # learns the AUR carries a packaging revision to preserve.
             #
             # Compare with sort -V, not an arithmetic test: PKGBUILD(5) allows a
             # dotted subrelease (1.1), which `[ -gt ]` rejects as a non-integer
