@@ -23,6 +23,7 @@ type attachmentServerState struct {
 	sentContents   []string
 	events         []string
 	blobStatus     int
+	nilMessage     bool
 }
 
 func attachmentServer(t *testing.T) (*httptest.Server, *attachmentServerState) {
@@ -44,6 +45,13 @@ func attachmentServer(t *testing.T) (*httptest.Server, *attachmentServerState) {
 				"content":"<figure data-trix-attachment='{\"sgid\":\"sgid-pdf\",\"url\":\"/rails/active_storage/blobs/report.pdf\",\"filename\":\"quarterly-report.pdf\",\"contentType\":\"application/pdf\",\"filesize\":23}'></figure>"
 			}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/messages/102.json":
+			state.mu.Lock()
+			nilMessage := state.nilMessage
+			state.mu.Unlock()
+			if nilMessage {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
 			_, _ = w.Write([]byte(`{"id":102,"content":"<p>No files here</p>"}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/rails/active_storage/blobs/report.pdf":
 			state.mu.Lock()
@@ -172,6 +180,17 @@ func TestAttachmentsListsFilesFromKnownThread(t *testing.T) {
 	attachment := response.Data[0]
 	if attachment.ID != "101:1" || attachment.MessageID != 101 || attachment.Filename != "quarterly-report.pdf" || attachment.ByteSize != 23 {
 		t.Errorf("attachment = %+v", attachment)
+	}
+}
+
+func TestAttachmentsRejectsAnEmptyMessageResponse(t *testing.T) {
+	server, state := attachmentServer(t)
+	state.mu.Lock()
+	state.nilMessage = true
+	state.mu.Unlock()
+
+	if _, err := runAttachmentCommand(t, server, "attachments", "42"); err == nil {
+		t.Fatal("empty message response should fail attachment discovery")
 	}
 }
 
@@ -391,6 +410,8 @@ func TestAttachmentDestinationUsesSafeFilename(t *testing.T) {
 		"../../quarterly-report.pdf": `quarterly-report.pdf`,
 		`..\..\project-notes.txt`:    `project-notes.txt`,
 		`CON.pdf`:                    `_CON.pdf`,
+		`CONIN$`:                     `_CONIN$`,
+		`LPT².log`:                   `_LPT².log`,
 		`notes?.txt`:                 `notes_.txt`,
 		"line\nbreak.txt":            `line_break.txt`,
 		`quarterly-report. `:         `quarterly-report`,

@@ -135,6 +135,9 @@ func attachmentsInThread(ctx context.Context, threadID int64) ([]threadAttachmen
 				if getErr != nil {
 					return getErr
 				}
+				if message == nil {
+					return fmt.Errorf("message %d returned no data", entry.Id)
+				}
 				messages[index] = message
 				return nil
 			})
@@ -145,9 +148,6 @@ func attachmentsInThread(ctx context.Context, threadID int64) ([]threadAttachmen
 
 		for entryIndex, entry := range *entries {
 			message := messages[entryIndex]
-			if message == nil {
-				continue
-			}
 			for attachmentIndex, attachment := range htmlutil.ExtractAttachments(message.Content) {
 				attachments = append(attachments, threadAttachment{
 					ID:          attachmentID(entry.Id, attachmentIndex+1),

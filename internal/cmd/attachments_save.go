@@ -152,13 +152,17 @@ func windowsReservedFilename(filename string) bool {
 		stem = stem[:dot]
 	}
 	stem = strings.ToUpper(stem)
-	if stem == "CON" || stem == "PRN" || stem == "AUX" || stem == "NUL" {
+	if stem == "CON" || stem == "PRN" || stem == "AUX" || stem == "NUL" || stem == "CONIN$" || stem == "CONOUT$" {
 		return true
 	}
-	if len(stem) == 4 && (strings.HasPrefix(stem, "COM") || strings.HasPrefix(stem, "LPT")) {
-		return stem[3] >= '1' && stem[3] <= '9'
+	runes := []rune(stem)
+	if len(runes) != 4 || (string(runes[:3]) != "COM" && string(runes[:3]) != "LPT") {
+		return false
 	}
-	return false
+	if runes[3] == '¹' || runes[3] == '²' || runes[3] == '³' {
+		return true
+	}
+	return runes[3] >= '1' && runes[3] <= '9'
 }
 
 func downloadAttachmentFile(ctx context.Context, destination, sourceURL string, force bool) (int64, error) {
