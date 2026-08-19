@@ -444,13 +444,30 @@ func TestTerminalSafeTextReplacesControls(t *testing.T) {
 }
 
 func TestAttachmentsForMarkdownEscapesUntrustedFields(t *testing.T) {
-	attachments := []threadAttachment{{Filename: "report|draft\n.pdf", ContentType: "text/plain|preview"}}
+	attachments := []threadAttachment{{
+		Filename:    "[report](https://example.invalid)|draft\n<img>.pdf",
+		ContentType: "text/plain|preview",
+	}}
 	safe := attachmentsForMarkdown(attachments)
-	if strings.ContainsAny(safe[0].Filename, "\r\n\x1b") || !strings.Contains(safe[0].Filename, `\|`) || !strings.Contains(safe[0].ContentType, `\|`) {
+	if strings.ContainsAny(safe[0].Filename, "\r\n\x1b") ||
+		!strings.Contains(safe[0].Filename, `\[report\]\(`) ||
+		!strings.Contains(safe[0].Filename, `\<img\>`) ||
+		!strings.Contains(safe[0].ContentType, `\|`) {
 		t.Errorf("Markdown attachment = %+v", safe[0])
 	}
-	if attachments[0].Filename != "report|draft\n.pdf" {
+	if attachments[0].Filename != "[report](https://example.invalid)|draft\n<img>.pdf" {
 		t.Errorf("JSON attachment data was changed to %q", attachments[0].Filename)
+	}
+}
+
+func TestSavedAttachmentForMarkdownEscapesFilenameAndPath(t *testing.T) {
+	attachment := savedAttachment{Filename: "[report](https://example.invalid)", Path: "<download>/report.pdf"}
+	safe := savedAttachmentForMarkdown(attachment)
+	if !strings.Contains(safe.Filename, `\[report\]\(`) || !strings.Contains(safe.Path, `\<download\>`) {
+		t.Errorf("Markdown saved attachment = %+v", safe)
+	}
+	if attachment.Filename != "[report](https://example.invalid)" {
+		t.Errorf("JSON saved attachment data was changed to %q", attachment.Filename)
 	}
 }
 

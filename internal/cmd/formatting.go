@@ -92,6 +92,18 @@ func terminalSafeText(value string) string {
 	}, value)
 }
 
+func markdownSafeText(value string) string {
+	const punctuation = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
+	var safe strings.Builder
+	for _, r := range terminalSafeText(value) {
+		if strings.ContainsRune(punctuation, r) {
+			safe.WriteByte('\\')
+		}
+		safe.WriteRune(r)
+	}
+	return safe.String()
+}
+
 func truncate(s string, maxWidth int) string {
 	if runewidth.StringWidth(s) <= maxWidth {
 		return s

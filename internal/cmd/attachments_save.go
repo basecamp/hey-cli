@@ -90,7 +90,17 @@ func (c *attachmentsSaveCommand) run(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(cmd.OutOrStdout(), "Saved %s (%s)\n", destination, formatByteSize(result.ByteSize))
 		return nil
 	}
-	return writeOK(result, output.WithSummary(fmt.Sprintf("Attachment saved to %s", destination)))
+	outputResult := result
+	if writer.EffectiveFormat() == output.FormatMarkdown {
+		outputResult = savedAttachmentForMarkdown(outputResult)
+	}
+	return writeOK(outputResult, output.WithSummary(fmt.Sprintf("Attachment saved to %s", destination)))
+}
+
+func savedAttachmentForMarkdown(attachment savedAttachment) savedAttachment {
+	attachment.Filename = markdownSafeText(attachment.Filename)
+	attachment.Path = markdownSafeText(attachment.Path)
+	return attachment
 }
 
 func parseAttachmentID(id string) (int64, int, error) {
