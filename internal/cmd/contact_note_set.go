@@ -45,14 +45,11 @@ func (c *contactNoteSetCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	content := c.note
-	if len(args) == 2 {
-		if cmd.Flags().Changed("note") {
-			return output.ErrUsage("--note and positional note are mutually exclusive")
-		}
-		content = args[1]
+	content, inputProvided, err := contactNoteInput(cmd.Flags().Changed("note"), c.note, args)
+	if err != nil {
+		return err
 	}
-	if content == "" {
+	if !inputProvided {
 		if !stdinIsTerminal() {
 			content, err = readStdin()
 			if err != nil {
@@ -89,6 +86,19 @@ func (c *contactNoteSetCommand) run(cmd *cobra.Command, args []string) error {
 		output.WithSummary("Private contact note saved"),
 		output.WithBreadcrumbs(output.Breadcrumb{Action: "read", Command: fmt.Sprintf("hey contacts note show %d", contactID), Description: "Read the private note"}),
 	)
+}
+
+func contactNoteInput(flagChanged bool, flagValue string, args []string) (string, bool, error) {
+	if len(args) == 2 {
+		if flagChanged {
+			return "", false, output.ErrUsage("--note and positional note are mutually exclusive")
+		}
+		return args[1], true, nil
+	}
+	if flagChanged {
+		return flagValue, true, nil
+	}
+	return "", false, nil
 }
 
 type contactNoteFetcher func(context.Context, int64) (*generated.ContactNote, error)

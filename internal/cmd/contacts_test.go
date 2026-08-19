@@ -295,6 +295,33 @@ func TestContactNoteSetPreservesMultilineContent(t *testing.T) {
 	}
 }
 
+func TestContactNoteInputDistinguishesExplicitEmptyContent(t *testing.T) {
+	tests := []struct {
+		name        string
+		flagChanged bool
+		flagValue   string
+		args        []string
+		want        string
+		provided    bool
+		wantErr     bool
+	}{
+		{name: "no inline input", args: []string{"7"}},
+		{name: "empty flag", flagChanged: true, args: []string{"7"}, provided: true},
+		{name: "empty positional", args: []string{"7", ""}, provided: true},
+		{name: "flag value", flagChanged: true, flagValue: "Private", args: []string{"7"}, want: "Private", provided: true},
+		{name: "positional value", args: []string{"7", "Private"}, want: "Private", provided: true},
+		{name: "conflicting inputs", flagChanged: true, flagValue: "One", args: []string{"7", "Two"}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, provided, err := contactNoteInput(tt.flagChanged, tt.flagValue, tt.args)
+			if (err != nil) != tt.wantErr || got != tt.want || provided != tt.provided {
+				t.Errorf("contactNoteInput = %q, %v, %v", got, provided, err)
+			}
+		})
+	}
+}
+
 func TestContactNoteForEditorReturnsReadErrors(t *testing.T) {
 	want := errors.New("note read failed")
 	if _, err := contactNoteForEditor(t.Context(), 7, func(context.Context, int64) (*generated.ContactNote, error) {
