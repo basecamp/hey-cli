@@ -348,7 +348,7 @@ func replyMessageMatches(entry generated.Entry, message *generated.Message, send
 	}
 	expected := normalizedReplyContent(sentContent)
 	actual := normalizedReplyContent(message.Content)
-	return expected != "" && (actual == expected || strings.HasPrefix(actual, expected+" "))
+	return expected != "" && actual == expected
 }
 
 func normalizedReplyContent(content string) string {

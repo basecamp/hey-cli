@@ -98,7 +98,7 @@ CLI for HEY: mailboxes, email threads, contacts, replies, compose, calendars, to
 1. **Always use `--json`** for structured, predictable output
 2. **Authentication required** for all data commands — run `hey auth login` first
 3. **HTML output** is available via `--html` for commands that return HTML content
-4. **Preview every outbound email.** Show From, To, CC, BCC, Subject, the complete body, and attachments, then obtain explicit confirmation immediately before sending.
+4. **Preview every reply.** Run `hey reply ... --preview --json`, show From, To, CC, BCC, Subject, the complete body, and attachments, then obtain explicit confirmation immediately before sending with `--expect-entry`.
 
 ## Quick Reference
 

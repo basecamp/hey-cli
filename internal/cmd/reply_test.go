@@ -201,6 +201,18 @@ func TestVerifyReplyCreatedRejectsDifferentContentFromCurrentUser(t *testing.T) 
 	}
 }
 
+func TestVerifyReplyCreatedRejectsLongerContentWithMatchingPrefix(t *testing.T) {
+	server := replyVerificationServer(t,
+		[]verificationCandidate{{ID: 13, SenderID: 42, Content: "Reply body with an unrelated ending"}},
+	)
+	withSDKPointedAt(t, server)
+
+	_, err := verifyReplyCreated(context.Background(), 7, 12, 42, "Reply body", []time.Duration{0})
+	if err == nil || !strings.Contains(err.Error(), "no matching sent entry appeared") {
+		t.Fatalf("error = %v, want prefix-only content rejection", err)
+	}
+}
+
 func TestReplyVerificationWindowCoversSlowPropagation(t *testing.T) {
 	var window time.Duration
 	for _, delay := range defaultReplyVerificationDelays() {
