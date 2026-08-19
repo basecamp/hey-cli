@@ -49,8 +49,19 @@ jobs:
           fi
           # Only publish versions that actually exist as a stable release, so a
           # typo cannot push a PKGBUILD pointing at assets that were never built.
-          if ! gh release view "v${VERSION}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+          # gh release view also answers for drafts and prereleases, so check
+          # the flags explicitly — the semver regex above already rejects
+          # prerelease tags, but a plain-versioned release can still carry the
+          # prerelease flag, and a draft's assets are not downloadable anyway.
+          state=$(gh release view "v${VERSION}" --repo "${GITHUB_REPOSITORY}" \
+                    --json isDraft,isPrerelease \
+                    --jq 'if .isDraft then "draft" elif .isPrerelease then "prerelease" else "stable" end' \
+                    2>/dev/null) || {
             echo "::error::No published release found for v${VERSION}"
+            exit 1
+          }
+          if [ "$state" != "stable" ]; then
+            echo "::error::v${VERSION} is a ${state} release — only stable releases publish to the AUR"
             exit 1
           fi
           echo "Publishing v${VERSION} to the AUR"
