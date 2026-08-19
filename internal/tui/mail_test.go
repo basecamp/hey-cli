@@ -1209,6 +1209,14 @@ func TestMailViewSearchEscapeClosesForm(t *testing.T) {
 	}
 }
 
+func TestMailViewSearchFormConsumesComponentMessages(t *testing.T) {
+	v := mailWithPostings()
+	v.HandleContentKey(keyPress("/"))
+	if _, consumed := v.Update(struct{}{}); !consumed {
+		t.Error("open search form should consume component messages")
+	}
+}
+
 func TestMailViewIgnoresStaleSearchResults(t *testing.T) {
 	v := mailWithPostings()
 	v.activeRequestID = 2
@@ -1265,6 +1273,28 @@ func TestMailViewEmptyNextSearchPagePreservesResults(t *testing.T) {
 	}
 	if v.notice != "No more search results" {
 		t.Errorf("notice = %q", v.notice)
+	}
+}
+
+func TestMailViewCancelPendingSearchResultPreservesResults(t *testing.T) {
+	v := mailWithPostings()
+	v.searchActive = true
+	v.searchQuery = "quarterly planning"
+	v.searchPage = 1
+	v.searchList.setPostings([]models.Posting{{ID: 10, TopicID: 100, Name: "Hello world"}})
+
+	if cmd := v.HandleContentKey(keyPress("enter")); cmd == nil {
+		t.Fatal("enter should start loading the selected thread")
+	}
+	if v.activeRequestKind != mailRequestTopic || !v.loading {
+		t.Fatalf("request state = kind:%d loading:%v", v.activeRequestKind, v.loading)
+	}
+	v.ExitThread()
+	if !v.searchActive || v.searchQuery != "quarterly planning" || v.searchPage != 1 || len(v.searchList.postings) != 1 {
+		t.Error("canceling a pending searched thread should preserve search results")
+	}
+	if v.loading || v.activeRequestKind != mailRequestNone {
+		t.Errorf("pending request was not canceled: kind=%d loading=%v", v.activeRequestKind, v.loading)
 	}
 }
 

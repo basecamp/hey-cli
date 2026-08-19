@@ -268,6 +268,9 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 	if v.compose != nil {
 		return v.compose.update(msg), true
 	}
+	if v.searchForm != nil {
+		return v.searchForm.update(msg), true
+	}
 
 	// Pass through to viewport if in thread
 	if v.inThread {
@@ -485,6 +488,10 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 
 func (v *mailView) InThread() bool { return v.inThread || v.searchActive }
 func (v *mailView) ExitThread() {
+	if v.searchActive && !v.inThread && (v.activeRequestKind == mailRequestTopic || v.activeRequestKind == mailRequestSearch) {
+		v.cancelRequest()
+		return
+	}
 	if v.inThread {
 		v.inThread = false
 		v.compose = nil

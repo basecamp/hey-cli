@@ -288,6 +288,25 @@ func TestQExitsSearchResults(t *testing.T) {
 	}
 }
 
+func TestEscCancelsPendingSearchResultAndPreservesResults(t *testing.T) {
+	m := modelWithBoxes()
+	m.mailView.searchActive = true
+	m.mailView.searchQuery = "quarterly planning"
+	m.mailView.searchPage = 1
+	m.mailView.searchList.setPostings([]models.Posting{{ID: 10, TopicID: 100, Name: "Hello world"}})
+	m.mailView.requestTopic(m.mailView.currentBoxID(), 100, "Hello world")
+	m.loading = true
+
+	updated, _ := m.Update(keyPress("esc"))
+	result := updated.(model)
+	if !result.mailView.searchActive || result.mailView.searchQuery != "quarterly planning" || len(result.mailView.searchList.postings) != 1 {
+		t.Error("escape during thread load should preserve search results")
+	}
+	if result.mailView.loading || result.loading {
+		t.Error("escape should cancel the pending thread load")
+	}
+}
+
 func TestEscExitsThread(t *testing.T) {
 	m := modelWithBoxes()
 	m.mailView.inThread = true
