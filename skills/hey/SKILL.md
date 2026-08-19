@@ -176,13 +176,17 @@ Want to read email?
 ```
 Want to send email?
 ├── Reply to thread? → hey reply <topic_id> -m "message"
-│   └── Open editor? → hey reply <topic_id> (omit -m to open $EDITOR)
+│   ├── Open editor? → hey reply <topic_id> (omit -m to open $EDITOR)
+│   └── Attach files? → add --attach ./report.pdf (repeatable)
 ├── Forward latest message? → hey forward <topic_id> --to <email>
 │   └── Add a note? → add -m "note"
 ├── Compose new? → hey compose --to <email> --subject "Subject"
 │   ├── With body? → hey compose --to <email> --subject "Subject" -m "Body"
+│   ├── With files? → add --attach ./report.pdf (repeatable; body is optional)
 │   ├── With CC? → add --cc <email>
 │   └── With BCC? → add --bcc <email>
+├── List files in a thread? → hey attachments <topic_id> --json
+│   └── Save one? → hey attachments save <attachment_id> [--output <path>]
 └── Check drafts? → hey drafts --json
 ```
 
@@ -253,17 +257,31 @@ hey threads <topic_id> --json                 # Read full email thread
 hey threads <topic_id> --html                 # Read with raw HTML content
 ```
 
-**ID note:** Every email thread returned by `hey box` has an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, `hey move`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring` expect `id`. `hey threads`, `hey reply`, and `hey forward` expect `topic_id`. The `app_url` field also contains the thread ID as a fallback (e.g. `https://app.hey.com/topics/123` → `123`).
+**ID note:** Every email thread returned by `hey box` has an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, `hey move`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring` expect `id`. `hey threads`, `hey attachments`, `hey reply`, and `hey forward` expect `topic_id`. The `app_url` field also contains the thread ID as a fallback (e.g. `https://app.hey.com/topics/123` → `123`).
+
+### Email - Attachments
+
+```bash
+hey attachments <topic_id> --json               # List files in every message
+hey attachments save 67890:1                    # Save using a returned ID
+hey attachments save 67890:1 --output ./reports # Save into a directory
+hey attachments save 67890:1 --output ./report.pdf --force
+```
+
+An attachment ID combines its message ID and position, so `67890:1` identifies the first attachment in message `67890`. Saving uses the original filename unless `--output` names a destination. Existing files are preserved unless `--force` is set.
 
 ### Email - Reply, Forward & Compose
 
 ```bash
 hey reply <topic_id> -m "Thanks!"             # Reply with inline message
 hey reply <topic_id>                          # Reply via $EDITOR
+hey reply <topic_id> -m "Attached." --attach ./diagram.png
 hey forward <topic_id> --to alice@example.com                 # Forward the latest message
 hey forward <topic_id> --to alice@example.com -m "Please review"  # Forward with a note
 hey compose --to user@example.com --subject "Hello"         # Compose new (opens $EDITOR)
 hey compose --to user@example.com --subject "Hi" -m "Body"  # With inline body
+hey compose --to user@example.com --subject "Report" --attach ./report.pdf  # Attachment-only message
+hey compose --to user@example.com --subject "Report" -m "Attached." --attach ./report.pdf --attach ./chart.png
 hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Project update" -m "Body"  # With CC/BCC
 hey compose --thread-id 12345 -m "msg"                       # Reply to an existing thread (no subject: it carries the thread's)
 ```

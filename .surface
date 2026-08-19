@@ -10,6 +10,10 @@ hey --quiet
 hey --stats
 hey --styled
 hey --verbose
+hey attachments
+hey attachments save
+hey attachments save --force
+hey attachments save --output
 hey auth
 hey auth login
 hey auth login --cookie
@@ -30,6 +34,7 @@ hey calendars
 hey commands
 hey completion
 hey compose
+hey compose --attach
 hey compose --bcc
 hey compose --cc
 hey compose --message
@@ -90,6 +95,7 @@ hey recordings --ends-on
 hey recordings --limit
 hey recordings --starts-on
 hey reply
+hey reply --attach
 hey reply --message
 hey search
 hey search --all

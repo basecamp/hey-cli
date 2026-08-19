@@ -1,7 +1,7 @@
 # API Coverage
 
-Mapping of HEY API endpoints used by the CLI. Most endpoints use the HEY SDK (`hey-sdk/go`).
-The legacy `internal/client/` is used only for HTML-scraping gap operations marked below.
+Mapping of HEY API endpoints used by the CLI. API interactions use the HEY SDK (`hey-sdk/go`).
+The remaining HTML-reading gaps use the SDK's authenticated HTML helper and are marked below.
 
 | Endpoint | Method | Client | CLI Command | Status |
 |----------|--------|--------|-------------|--------|
@@ -26,8 +26,13 @@ The legacy `internal/client/` is used only for HTML-scraping gap operations mark
 | `/contacts/{id}/note.json` | DELETE | SDK `Contacts().DeleteNote` | `hey contacts note delete`, Contacts TUI | covered |
 | `/calendars.json` | GET | SDK `Calendars().List` | `hey calendars` | covered |
 | `/calendars/{id}/recordings.json` | GET | SDK `Calendars().GetRecordings` | `hey recordings <calendar-id>`, `hey todo list`, `hey timetrack list`, `hey journal list` | covered |
-| `/topics/{id}/entries` | GET (HTML) | Legacy `GetTopicEntries` | `hey threads <id>` | gap: SDK Entry lacks body |
+| `/topics/{id}/entries` | GET (HTML) | SDK `GetHTML` | `hey threads <id>` | gap: SDK Entry lacks body |
+| `/topics/{id}/entries.json` | GET | SDK `Topics().GetEntries` | `hey attachments <topic-id>` | covered |
+| `/messages/{id}.json` | GET | SDK `Messages().Get` | `hey attachments <topic-id>`, `hey attachments save <id>` | covered |
 | `/entries/drafts.json` | GET | SDK `Entries().ListDrafts` | `hey drafts` | covered |
+| `/rails/active_storage/direct_uploads.json` | POST | SDK `Attachments().Upload` | `hey compose --attach`, `hey reply --attach` | covered |
+| signed Active Storage upload URL | PUT | SDK `Attachments().Upload` | `hey compose --attach`, `hey reply --attach` | covered |
+| signed Active Storage blob URL | GET | SDK `DownloadBlob` | `hey attachments save <id>` | covered |
 | `/messages.json` | POST | SDK `Messages().Create` | `hey compose`, `hey forward <topic-id>` | covered |
 | `/entries/{id}/replies` | POST | SDK `Entries().CreateReply` | `hey reply <topic-id>` | covered |
 | `/topics/{id}.json` | GET | SDK `Topics().Get` | `hey forward <topic-id>` | covered |

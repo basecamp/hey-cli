@@ -11,8 +11,9 @@ import (
 )
 
 type replyCommand struct {
-	cmd     *cobra.Command
-	message string
+	cmd         *cobra.Command
+	message     string
+	attachments []string
 }
 
 func newReplyCommand() *replyCommand {
@@ -21,15 +22,17 @@ func newReplyCommand() *replyCommand {
 		Use:   "reply <thread-id>",
 		Short: "Reply to a thread",
 		Annotations: map[string]string{
-			"agent_notes": "Replies to the latest entry in a thread. Accepts message via -m, stdin, or $EDITOR.",
+			"agent_notes": "Replies to the latest entry in a thread. Accepts message via -m, stdin, or $EDITOR, plus repeatable --attach files; an attachment can be sent without body text.",
 		},
 		Example: `  hey reply 12345 -m "Thanks!"
+  hey reply 12345 -m "Attached is the report." --attach ./report.pdf
   echo "Detailed reply" | hey reply 12345`,
 		RunE: replyCommand.run,
 		Args: usageExactOneArg(),
 	}
 
 	replyCommand.cmd.Flags().StringVarP(&replyCommand.message, "message", "m", "", "Reply message (or opens $EDITOR)")
+	replyCommand.cmd.Flags().StringArrayVar(&replyCommand.attachments, "attach", nil, "File to attach (repeatable)")
 
 	return replyCommand
 }
@@ -52,7 +55,7 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	message := c.message
-	if message == "" {
+	if message == "" && len(c.attachments) == 0 {
 		if !stdinIsTerminal() {
 			message, err = readStdin()
 			if err != nil {
@@ -72,17 +75,22 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	message, err = attachFiles(ctx, message, c.attachments)
+	if err != nil {
+		return err
+	}
 	if err = sdk.Entries().CreateReply(ctx, target.EntryID, message, target.Addressed.To, target.Addressed.CC, target.Addressed.BCC); err != nil {
 		return convertSDKError(err)
 	}
 
+	summary := sentWithAttachmentsSummary("Reply sent", len(c.attachments))
 	if writer.IsStyled() {
-		fmt.Fprintln(cmd.OutOrStdout(), "Reply sent.")
+		fmt.Fprintln(cmd.OutOrStdout(), summary+".")
 		return nil
 	}
 
 	return writeOK(nil,
-		output.WithSummary("Reply sent"),
+		output.WithSummary(summary),
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "view",
 			Command:     fmt.Sprintf("hey threads %d", threadID),

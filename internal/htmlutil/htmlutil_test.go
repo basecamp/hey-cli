@@ -112,6 +112,29 @@ func TestPrependTextWithoutNote(t *testing.T) {
 	}
 }
 
+func TestExtractAttachments(t *testing.T) {
+	h := `<action-text-attachment sgid="sgid-1" url="/rails/blobs/report.pdf" filename="quarterly-report.pdf" content-type="application/pdf" filesize="128"></action-text-attachment>
+<figure data-trix-attachment='{"sgid":"sgid-2","url":"/rails/blobs/photo.png","filename":"photo.png","contentType":"image/png","filesize":256}'></figure>`
+	attachments := ExtractAttachments(h)
+	if len(attachments) != 2 {
+		t.Fatalf("ExtractAttachments got %d attachments, want 2", len(attachments))
+	}
+	if attachments[0].Filename != "quarterly-report.pdf" || attachments[0].ContentType != "application/pdf" || attachments[0].ByteSize != 128 || attachments[0].SGID != "sgid-1" {
+		t.Errorf("canonical attachment = %+v", attachments[0])
+	}
+	if attachments[1].Filename != "photo.png" || attachments[1].URL != "/rails/blobs/photo.png" || attachments[1].ByteSize != 256 || attachments[1].SGID != "sgid-2" {
+		t.Errorf("Trix attachment = %+v", attachments[1])
+	}
+}
+
+func TestExtractAttachmentsSkipsIncompleteElements(t *testing.T) {
+	h := `<action-text-attachment sgid="sgid-1" filename="missing-url.pdf"></action-text-attachment>
+<figure data-trix-attachment='{"url":"/rails/blobs/missing-name"}'></figure>`
+	if attachments := ExtractAttachments(h); len(attachments) != 0 {
+		t.Errorf("ExtractAttachments = %+v, want none", attachments)
+	}
+}
+
 func TestExtractImageURLs(t *testing.T) {
 	h := `<p>Hello</p><img src="https://example.com/a.png"><img src="https://example.com/b.jpg">`
 	urls := ExtractImageURLs(h)

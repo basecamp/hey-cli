@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	stdhtml "html"
+	"strconv"
 	"strings"
 
 	"golang.org/x/net/html"
@@ -46,6 +47,26 @@ func ExtractImageURLs(s string) []string {
 	var urls []string
 	findImages(doc, &urls)
 	return urls
+}
+
+// Attachment describes a downloadable file embedded in rich-text content.
+type Attachment struct {
+	URL         string
+	Filename    string
+	ContentType string
+	ByteSize    int64
+	SGID        string
+}
+
+// ExtractAttachments returns downloadable files in their document order.
+func ExtractAttachments(s string) []Attachment {
+	doc, err := html.Parse(strings.NewReader(s))
+	if err != nil {
+		return nil
+	}
+	var attachments []Attachment
+	findAttachments(doc, &attachments)
+	return attachments
 }
 
 func walkNode(b *strings.Builder, n *html.Node) {
@@ -103,6 +124,8 @@ type trixAttachment struct {
 	URL         string `json:"url"`
 	Filename    string `json:"filename"`
 	ContentType string `json:"contentType"`
+	Filesize    int64  `json:"filesize"`
+	SGID        string `json:"sgid"`
 }
 
 func parseTrixAttachment(n *html.Node) *trixAttachment {
@@ -132,6 +155,38 @@ func getAttr(n *html.Node, key string) string {
 func walkChildren(b *strings.Builder, n *html.Node) {
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		walkNode(b, c)
+	}
+}
+
+func findAttachments(n *html.Node, attachments *[]Attachment) {
+	if n.Type == html.ElementNode {
+		switch n.Data {
+		case "action-text-attachment":
+			byteSize, _ := strconv.ParseInt(getAttr(n, "filesize"), 10, 64)
+			attachment := Attachment{
+				URL:         getAttr(n, "url"),
+				Filename:    getAttr(n, "filename"),
+				ContentType: getAttr(n, "content-type"),
+				ByteSize:    byteSize,
+				SGID:        getAttr(n, "sgid"),
+			}
+			if attachment.URL != "" && attachment.Filename != "" {
+				*attachments = append(*attachments, attachment)
+			}
+		case "figure":
+			if trix := parseTrixAttachment(n); trix != nil && trix.URL != "" {
+				*attachments = append(*attachments, Attachment{
+					URL:         trix.URL,
+					Filename:    trix.Filename,
+					ContentType: trix.ContentType,
+					ByteSize:    trix.Filesize,
+					SGID:        trix.SGID,
+				})
+			}
+		}
+	}
+	for child := n.FirstChild; child != nil; child = child.NextSibling {
+		findAttachments(child, attachments)
 	}
 }
 

@@ -12,13 +12,14 @@ import (
 )
 
 type composeCommand struct {
-	cmd      *cobra.Command
-	to       string
-	cc       string
-	bcc      string
-	subject  string
-	message  string
-	threadID string
+	cmd         *cobra.Command
+	to          string
+	cc          string
+	bcc         string
+	subject     string
+	message     string
+	threadID    string
+	attachments []string
 }
 
 func newComposeCommand() *composeCommand {
@@ -27,11 +28,12 @@ func newComposeCommand() *composeCommand {
 		Use:   "compose",
 		Short: "Write and send a new email",
 		Annotations: map[string]string{
-			"agent_notes": "Starts a new thread with --to (optionally --cc/--bcc), which requires --subject, or replies to an existing one with --thread-id, which does not: a reply carries the thread's subject and goes to that thread's recipients.",
+			"agent_notes": "Starts a new thread with --to (optionally --cc/--bcc), which requires --subject, or replies to an existing one with --thread-id, which does not. Repeatable --attach files are uploaded before sending and can be sent without body text.",
 		},
 		Example: `  hey compose --to alice@example.com --subject "Hello" -m "Hi there"
   hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Hello" -m "Hi"
-  hey compose --thread-id 12345 -m "Thread reply"
+  hey compose --to alice@example.com --subject "Report" -m "Attached." --attach ./report.pdf
+  hey compose --thread-id 12345 -m "Thread reply" --attach ./diagram.png
   echo "Long message" | hey compose --to bob@example.com --subject "Report"`,
 		RunE: composeCommand.run,
 	}
@@ -42,6 +44,7 @@ func newComposeCommand() *composeCommand {
 	composeCommand.cmd.Flags().StringVar(&composeCommand.subject, "subject", "", "Message subject (required for a new message)")
 	composeCommand.cmd.Flags().StringVarP(&composeCommand.message, "message", "m", "", "Message body (or opens $EDITOR)")
 	composeCommand.cmd.Flags().StringVar(&composeCommand.threadID, "thread-id", "", "Reply to this thread instead of starting a new one")
+	composeCommand.cmd.Flags().StringArrayVar(&composeCommand.attachments, "attach", nil, "File to attach (repeatable)")
 
 	return composeCommand
 }
@@ -57,7 +60,7 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	message := c.message
-	if message == "" {
+	if message == "" && len(c.attachments) == 0 {
 		if !stdinIsTerminal() {
 			var err error
 			message, err = readStdin()
@@ -82,15 +85,19 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
 	if c.threadID != "" {
-		topicID, err := strconv.ParseInt(c.threadID, 10, 64)
-		if err != nil {
+		topicID, parseErr := strconv.ParseInt(c.threadID, 10, 64)
+		if parseErr != nil {
 			return output.ErrUsage(fmt.Sprintf("invalid thread ID: %s", c.threadID))
 		}
-		target, err := resolveThreadReply(ctx, topicID)
-		if err != nil {
-			return err
+		target, resolveErr := resolveThreadReply(ctx, topicID)
+		if resolveErr != nil {
+			return resolveErr
 		}
-		if err := sdk.Entries().CreateReply(ctx, target.EntryID, message,
+		messageWithAttachments, attachErr := attachFiles(ctx, message, c.attachments)
+		if attachErr != nil {
+			return attachErr
+		}
+		if err := sdk.Entries().CreateReply(ctx, target.EntryID, messageWithAttachments,
 			target.Addressed.To, target.Addressed.CC, target.Addressed.BCC); err != nil {
 			return convertSDKError(err)
 		}
@@ -98,17 +105,25 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		to := parseAddresses(c.to)
 		cc := parseAddresses(c.cc)
 		bcc := parseAddresses(c.bcc)
-		if err := sdk.Messages().Create(ctx, c.subject, message, to, cc, bcc); err != nil {
+		if len(to)+len(cc)+len(bcc) == 0 {
+			return output.ErrUsage("a message needs at least one recipient (to, cc or bcc)")
+		}
+		messageWithAttachments, attachErr := attachFiles(ctx, message, c.attachments)
+		if attachErr != nil {
+			return attachErr
+		}
+		if err := sdk.Messages().Create(ctx, c.subject, messageWithAttachments, to, cc, bcc); err != nil {
 			return convertSDKError(err)
 		}
 	}
 
+	summary := sentWithAttachmentsSummary("Message sent", len(c.attachments))
 	if writer.IsStyled() {
-		fmt.Fprintln(cmd.OutOrStdout(), "Message sent.")
+		fmt.Fprintln(cmd.OutOrStdout(), summary+".")
 		return nil
 	}
 
-	return writeOK(nil, output.WithSummary("Message sent"))
+	return writeOK(nil, output.WithSummary(summary))
 }
 
 func parseAddresses(s string) []string {
