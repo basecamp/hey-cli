@@ -256,6 +256,23 @@ func TestSearchAllReportsContinuationAtPageLimit(t *testing.T) {
 	}
 }
 
+func TestSearchTruncationNoticeUsesStderrForDataOnlyFormats(t *testing.T) {
+	notice := "Search stopped after 100 pages. Continue with --page 107."
+	for _, format := range []output.Format{output.FormatQuiet, output.FormatIDs, output.FormatCount, output.FormatMarkdown} {
+		if got := searchNoticeForStderr(format, notice); got != "notice: "+notice {
+			t.Errorf("format %d notice = %q", format, got)
+		}
+	}
+	for _, format := range []output.Format{output.FormatJSON, output.FormatStyled} {
+		if got := searchNoticeForStderr(format, notice); got != "" {
+			t.Errorf("format %d notice = %q, want empty", format, got)
+		}
+	}
+	if got := searchNoticeForStderr(output.FormatQuiet, ""); got != "" {
+		t.Errorf("empty notice = %q", got)
+	}
+}
+
 func TestSearchStopsAfterFirstPageByDefault(t *testing.T) {
 	server, recorded := searchServer(t)
 	if _, err := runSearch(t, server, "planning"); err != nil {
