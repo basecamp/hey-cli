@@ -46,12 +46,14 @@ triggers:
   - hey move
   - hey bubble
   - hey trash
+  - hey restore
   - hey spam
   - hey ignore
   - hey stop-ignoring
   - move email
   - bubble a thread up
   - trash email
+  - restore email from trash
   - mark as spam
   - ignore email thread
   - stop ignoring email thread
@@ -235,6 +237,7 @@ notice on stderr. Both need list data, so they work on `hey box list`, `hey box 
 | List bubbled-up and scheduled threads | `hey bubble list --json` |
 | Cancel a bubble-up | `hey bubble pop 12345` |
 | Move email threads to Trash | `hey trash 12345` |
+| Restore email threads from Trash | `hey restore <topic_id>...` |
 | Mark email threads as spam | `hey spam 12345` |
 | Ignore email threads | `hey ignore 12345` |
 | Stop ignoring email threads | `hey stop-ignoring 12345` |
@@ -284,6 +287,7 @@ Want to read email?
 ├── Move to another box? → hey move <id> --to <box>
 ├── Remove or unmark Reply Later? → hey move <id> --to imbox
 ├── Move to Trash? → hey trash <id>
+├── Restore from Trash? → hey restore <topic_id>...
 ├── Mark as spam? → hey spam <id>
 ├── Ignore future activity? → hey ignore <id>
 ├── Stop ignoring? → hey stop-ignoring <id>
@@ -342,7 +346,7 @@ hey box view imbox --page next-cursor --json # Continue from an earlier listing
 
 Box names: `imbox`, `feedbox`, `trailbox`, `asidebox`, `laterbox`, `bubblebox`
 
-**Response format:** `hey box view --json` returns the box itself — `id`, `kind`, `name`, `app_url`, `next_history_url`, `next_page` — with a `postings` array of the email threads in it. Each posting has: `id` (box item ID), `topic_id` (thread ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`, `visible_entry_count`. Use `id` for `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring`, and `topic_id` for `hey thread read`, `hey reply`, `hey forward`, `hey share` and `hey attachment list`. A box item `id` passed to `hey thread read` answers `not_found`, and so does a `topic_id` passed to `hey move`.
+**Response format:** `hey box view --json` returns the box itself — `id`, `kind`, `name`, `app_url`, `next_history_url`, `next_page` — with a `postings` array of the email threads in it. Each posting has: `id` (box item ID), `topic_id` (thread ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`, `visible_entry_count`. Use `id` for `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring`, and `topic_id` for `hey thread read`, `hey reply`, `hey forward`, `hey share` and `hey attachment list`. A box item `id` passed to `hey thread read` answers `not_found`, and so does a `topic_id` passed to `hey move`. Restore is different because a trashed thread has no box item ID; use its `topic_id` from `hey search --in trash` today, or from `hey thread list --in trash` once that listing is available.
 
 A posting that bundles a contact's mail into one row can **omit `topic_id`**: a bundle names its sender rather than a thread, and its `name` joins the bundled subjects with `•`. A bundle that does carry a `topic_id` opens as that thread — its one unseen thread — and `hey threads` reads it as usual. For a bundle without one, never substitute the box item `id` (`hey threads <id>` answers `not_found`); there is no command that lists the threads inside a bundle, so run `hey contacts unbundle <contact_id>` — the contact is in the posting's `contacts` — to list that sender's mail as separate rows, or direct the user to open the bundle in HEY.
 
@@ -403,7 +407,7 @@ Search refinements are `--required`, `--any`, `--none`, `--exact`, `--from`, `--
 
 `--in`, `--date`, `--label` and `--attachment` accept only the values `hey search filters` lists: boxes are `imbox`, `feed`, `papertrail`, `trash`; dates are `last_7_days`, `last_30_days`, `last_90_days` or a four-digit year; attachment kinds are `any`, `images`, `pdfs`, `calendar_invites`, `documents`, `spreadsheets`, `presentations`, `media`, `zip_files`. The kinds are plural — `--attachment pdfs`, not `pdf`. An unrecognized `--in`, `--date` or `--attachment` is refused as a usage error naming the values it accepts, before anything is sent; `--label` is not checked, so read `hey search filters` when unsure of a label.
 
-**Response format:** `data` contains one item per matching thread. Each result has `id` (box item ID for organization actions), `topic_id` (thread ID for `hey thread read`, `hey reply`, and `hey forward`), `subject`, `updated_at`, and `messages` containing the matching message IDs, senders, dates, and summaries. A result can omit `id` when the thread has no active box item.
+**Response format:** `data` contains one item per matching thread. Each result has `id` (box item ID for organization actions), `topic_id` (thread ID for `hey thread read`, `hey reply`, `hey forward`, and `hey restore`), `subject`, `updated_at`, and `messages` containing the matching message IDs, senders, dates, and summaries. A result can omit `id` when the thread has no active box item; that is why `hey restore` takes `topic_id` from `hey search --in trash`.
 
 ### Contacts
 
@@ -446,7 +450,7 @@ on an entry; use `hey reply`, which works the addressing out itself.
 
 `hey share` returns a URL that shows the entire thread and future emails or replies sent to it. Anyone with the link can open it. `hey unshare` turns off the sharing link.
 
-**ID note:** Every email thread has two IDs: an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring` expect `id`. `hey thread read`, `hey share`, `hey unshare`, `hey attachment list`, `hey reply`, `hey forward`, `hey collection add`, and `hey collection remove` expect `topic_id`. Passing the wrong one answers `not_found`, not a redirect.
+**ID note:** Every email thread has two IDs: an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring` expect `id`. `hey thread read`, `hey share`, `hey unshare`, `hey attachment list`, `hey reply`, `hey forward`, `hey collection add`, `hey collection remove`, and `hey restore` expect `topic_id`. Passing the wrong one answers `not_found`, not a redirect.
 
 `hey box view --json`, `hey label view --json`, `hey collection view --json` and `hey search --json` all carry both — except a bundle posting, which can omit `topic_id` (see the Boxes section).
 
@@ -569,16 +573,20 @@ Takes box item IDs (the `id` field from `hey box view --json`). `hey bubble up` 
 
 `hey bubble list --json` answers two buckets: `bubbled_up`, the threads back in the Imbox after bubbling up, and `scheduled`, the threads waiting in Bubble Up — each scheduled row carries `bubble_up_schedule.bubble_up_at`, and `surprise_me` when HEY picked the time. Use `id` with `hey bubble pop`, `topic_id` with `hey thread read`.
 
-### Email - Trash and Spam
+### Email - Trash, Restore, and Spam
 
 ```bash
 hey trash 12345                               # Move one thread to Trash
 hey trash 12345 67890                         # Move multiple threads to Trash
+hey restore 98765                             # Restore one thread from Trash
+hey restore 98765 43210                       # Restore multiple threads from Trash
 hey spam 12345                                # Mark one thread as spam
 hey spam 12345 67890                          # Mark multiple threads as spam
 ```
 
-Takes box item IDs (the `id` field from `hey box view --json`). Trashing a shared thread removes your access instead of deleting it for everyone. Marking a thread as spam moves it to Spam and trains HEY's filters.
+`hey trash` and `hey spam` take box item IDs (the `id` field from `hey box view --json`). Trashing a shared thread removes your access instead of deleting it for everyone. Marking a thread as spam moves it to Spam and trains HEY's filters.
+
+`hey restore` is Trash-only and takes thread IDs, not box item IDs, because a trashed thread no longer has a box item. Use the `topic_id` column from `hey search --in trash --json` today; once `hey thread list --in trash` is available, its Trash listing will provide the same IDs. Pass one or more values in the same invocation.
 
 ### Email - Ignoring Threads
 

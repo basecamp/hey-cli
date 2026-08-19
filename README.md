@@ -68,6 +68,7 @@ hey thread read 12345                   # a whole thread, as Markdown
 hey reply 12345 -m "Friday works for me."
 hey compose --to alice@example.com --subject "Lunch?" -m "Thursday at noon?"
 hey search --from jane@example.com --date last_30_days
+hey restore 12345 67890              # restore topic_id values found with hey search --in trash
 hey screener list                       # first-time senders waiting on you
 hey event add "Design review" --starts-on 2026-09-02 --start-time 14:00
 hey watch --box imbox --events new      # a line of JSON for every new email, as it lands
