@@ -217,6 +217,11 @@ func findImages(n *html.Node, urls *[]string) {
 					*urls = append(*urls, a.Val)
 				}
 			}
+		case "action-text-attachment":
+			contentType := strings.ToLower(strings.TrimSpace(getAttr(n, "content-type")))
+			if imageURL := getAttr(n, "url"); strings.HasPrefix(contentType, "image/") && imageURL != "" {
+				*urls = append(*urls, imageURL)
+			}
 		case "figure":
 			if att := parseTrixAttachment(n); att != nil && att.URL != "" {
 				*urls = append(*urls, att.URL)
