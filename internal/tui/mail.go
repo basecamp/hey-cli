@@ -10,6 +10,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
+	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/models"
 )
@@ -432,11 +433,11 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 
 	switch key {
 	case "l":
-		return v.doPostingAction("moved to Reply Later", true, boxID, p.ID, func() error {
+		return v.doPostingAction("moved to Reply Later", v.movesOutOfCurrentBox(hey.BoxKindLater), boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MoveToReplyLater(v.vc.ctx, p.ID)
 		})
 	case "a":
-		return v.doPostingAction("moved to Set Aside", true, boxID, p.ID, func() error {
+		return v.doPostingAction("moved to Set Aside", v.movesOutOfCurrentBox(hey.BoxKindSetAside), boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MoveToSetAside(v.vc.ctx, p.ID)
 		})
 	case "e":
@@ -444,11 +445,11 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 			return v.vc.sdk.Postings().MarkSeen(v.vc.ctx, []int64{p.ID})
 		})
 	case "d":
-		return v.doPostingAction("moved to The Feed", true, boxID, p.ID, func() error {
+		return v.doPostingAction("moved to The Feed", v.movesOutOfCurrentBox(hey.BoxKindFeed), boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MoveToFeed(v.vc.ctx, p.ID)
 		})
 	case "p":
-		return v.doPostingAction("moved to Paper Trail", true, boxID, p.ID, func() error {
+		return v.doPostingAction("moved to Paper Trail", v.movesOutOfCurrentBox(hey.BoxKindTrail), boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MoveToPaperTrail(v.vc.ctx, p.ID)
 		})
 	case "t":
@@ -473,6 +474,13 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 		return v.requestTopic(v.currentBoxID(), topicID, p.Summary)
 	}
 	return nil
+}
+
+func (v *mailView) movesOutOfCurrentBox(destinationKind string) bool {
+	if v.boxIndex < 0 || v.boxIndex >= len(v.boxes) {
+		return true
+	}
+	return !strings.EqualFold(v.boxes[v.boxIndex].Kind, destinationKind)
 }
 
 func (v *mailView) doPostingAction(label string, removes bool, boxID, postingID int64, fn func() error) tea.Cmd {

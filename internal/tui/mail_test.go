@@ -301,6 +301,47 @@ func TestMailViewPostingKeysCallExpectedEndpoints(t *testing.T) {
 	}
 }
 
+func TestMailViewMoveWithinCurrentBoxKeepsPosting(t *testing.T) {
+	tests := []struct {
+		name  string
+		key   string
+		kind  string
+		boxID int64
+	}{
+		{"reply later", "l", hey.BoxKindLater, 4},
+		{"set aside", "a", hey.BoxKindSetAside, 3},
+		{"feed", "d", hey.BoxKindFeed, 2},
+		{"paper trail", "p", hey.BoxKindTrail, 5},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v, recorded := mailWithTestServer(t, http.StatusNoContent)
+			v.boxes = []models.Box{{ID: tt.boxID, Kind: tt.kind, Name: tt.name}}
+			v.boxIndex = 0
+
+			msg := runCmd(v.HandleContentKey(keyPress(tt.key)))
+			done, ok := msg.(postingActionDoneMsg)
+			if !ok || done.err != nil {
+				t.Fatalf("posting command returned %#v", msg)
+			}
+			if done.removes {
+				t.Fatal("move within the current box should keep the posting visible")
+			}
+			v.Update(done)
+
+			if len(v.postingList.postings) != len(testPostings()) || v.postingList.postings[0].ID != 100 {
+				t.Errorf("move within current box changed postings: %v", v.postingList.postings)
+			}
+			if recorded.body.BoxID == nil {
+				t.Errorf("box_id is omitted, want %d", tt.boxID)
+			} else if *recorded.body.BoxID != tt.boxID {
+				t.Errorf("box_id = %d, want %d", *recorded.body.BoxID, tt.boxID)
+			}
+		})
+	}
+}
+
 func TestMailViewPostingKeyFailureKeepsPosting(t *testing.T) {
 	v, _ := mailWithTestServer(t, http.StatusInternalServerError)
 
