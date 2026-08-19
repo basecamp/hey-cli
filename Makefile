@@ -247,7 +247,7 @@ clean-pgo:
 
 # Install dev tools
 tools:
-	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 	go install golang.org/x/vuln/cmd/govulncheck@latest
 	@echo "For gitleaks, install via: brew install gitleaks (or see https://github.com/gitleaks/gitleaks)"
 	@echo "For benchstat: go install golang.org/x/perf/cmd/benchstat@latest"
