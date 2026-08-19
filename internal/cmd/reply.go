@@ -55,23 +55,21 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	message := c.message
-	if message == "" && len(c.attachments) == 0 {
-		if !stdinIsTerminal() {
-			message, err = readStdin()
-			if err != nil {
-				return err
-			}
-			if message == "" {
-				return output.ErrUsage("no message provided (use -m or --message to provide inline, or pipe to stdin)")
-			}
-		} else {
-			message, err = editor.Open("")
-			if err != nil {
-				return output.ErrAPI(0, fmt.Sprintf("could not open editor: %v", err))
-			}
-			if message == "" {
-				return output.ErrUsage("empty message, aborting")
-			}
+	if message == "" && !stdinIsTerminal() {
+		message, err = readStdin()
+		if err != nil {
+			return err
+		}
+		if message == "" && len(c.attachments) == 0 {
+			return output.ErrUsage("no message provided (use -m or --message to provide inline, or pipe to stdin)")
+		}
+	} else if message == "" && len(c.attachments) == 0 {
+		message, err = editor.Open("")
+		if err != nil {
+			return output.ErrAPI(0, fmt.Sprintf("could not open editor: %v", err))
+		}
+		if message == "" {
+			return output.ErrUsage("empty message, aborting")
 		}
 	}
 

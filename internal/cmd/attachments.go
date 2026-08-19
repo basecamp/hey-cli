@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
@@ -13,7 +14,10 @@ import (
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
-const maxAttachmentThreadPages = 100
+const (
+	maxAttachmentThreadPages              = 100
+	maxConcurrentAttachmentMessageFetches = 8
+)
 
 type attachmentsCommand struct {
 	cmd *cobra.Command
@@ -117,17 +121,31 @@ func attachmentsInThread(ctx context.Context, threadID int64) ([]threadAttachmen
 			return attachments, false, nil
 		}
 
-		for _, entry := range *entries {
-			message, err := sdk.Messages().Get(ctx, entry.Id)
-			if err != nil {
-				return nil, false, convertSDKError(err)
-			}
+		messages := make([]*generated.Message, len(*entries))
+		group, groupCtx := errgroup.WithContext(ctx)
+		group.SetLimit(maxConcurrentAttachmentMessageFetches)
+		for index, entry := range *entries {
+			group.Go(func() error {
+				message, getErr := sdk.Messages().Get(groupCtx, entry.Id)
+				if getErr != nil {
+					return getErr
+				}
+				messages[index] = message
+				return nil
+			})
+		}
+		if err := group.Wait(); err != nil {
+			return nil, false, convertSDKError(err)
+		}
+
+		for entryIndex, entry := range *entries {
+			message := messages[entryIndex]
 			if message == nil {
 				continue
 			}
-			for index, attachment := range htmlutil.ExtractAttachments(message.Content) {
+			for attachmentIndex, attachment := range htmlutil.ExtractAttachments(message.Content) {
 				attachments = append(attachments, threadAttachment{
-					ID:          attachmentID(entry.Id, index+1),
+					ID:          attachmentID(entry.Id, attachmentIndex+1),
 					MessageID:   entry.Id,
 					Filename:    attachment.Filename,
 					ContentType: attachment.ContentType,

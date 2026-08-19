@@ -149,7 +149,7 @@ func downloadAttachmentFile(ctx context.Context, destination, sourceURL string, 
 	}
 
 	if force {
-		if err := os.Rename(temporaryPath, destination); err != nil {
+		if err := replaceFile(temporaryPath, destination); err != nil {
 			return written, output.ErrAPI(0, fmt.Sprintf("could not replace attachment file: %v", err))
 		}
 		return written, nil

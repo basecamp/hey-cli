@@ -22,18 +22,28 @@ type uploadedAttachment struct {
 	SGID        string
 }
 
+type preparedAttachment struct {
+	path        string
+	filename    string
+	contentType string
+	byteSize    int64
+	file        *os.File
+}
+
 func attachFiles(ctx context.Context, content string, paths []string) (string, error) {
 	if len(paths) == 0 {
 		return content, nil
 	}
 
-	if err := validateAttachmentPaths(paths); err != nil {
+	attachments, err := prepareAttachments(paths)
+	if err != nil {
 		return "", err
 	}
+	defer closePreparedAttachments(attachments)
 
-	uploads := make([]uploadedAttachment, 0, len(paths))
-	for _, path := range paths {
-		upload, err := uploadAttachment(ctx, path)
+	uploads := make([]uploadedAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		upload, err := uploadAttachment(ctx, attachment)
 		if err != nil {
 			return "", err
 		}
@@ -42,49 +52,60 @@ func attachFiles(ctx context.Context, content string, paths []string) (string, e
 	return appendUploadedAttachments(content, uploads), nil
 }
 
-func validateAttachmentPaths(paths []string) error {
+func prepareAttachments(paths []string) ([]preparedAttachment, error) {
+	attachments := make([]preparedAttachment, 0, len(paths))
 	for _, path := range paths {
-		info, err := os.Stat(path)
+		file, err := os.Open(path)
 		if err != nil {
-			return output.ErrUsage(fmt.Sprintf("could not read attachment %q: %v", path, err))
+			closePreparedAttachments(attachments)
+			return nil, output.ErrUsage(fmt.Sprintf("could not open attachment %q: %v", path, err))
+		}
+		info, err := file.Stat()
+		if err != nil {
+			_ = file.Close()
+			closePreparedAttachments(attachments)
+			return nil, output.ErrUsage(fmt.Sprintf("could not inspect attachment %q: %v", path, err))
 		}
 		if !info.Mode().IsRegular() {
-			return output.ErrUsage(fmt.Sprintf("attachment %q is not a regular file", path))
+			_ = file.Close()
+			closePreparedAttachments(attachments)
+			return nil, output.ErrUsage(fmt.Sprintf("attachment %q is not a regular file", path))
 		}
+		contentType, err := attachmentContentType(file, path)
+		if err != nil {
+			_ = file.Close()
+			closePreparedAttachments(attachments)
+			return nil, err
+		}
+		attachments = append(attachments, preparedAttachment{
+			path:        path,
+			filename:    filepath.Base(path),
+			contentType: contentType,
+			byteSize:    info.Size(),
+			file:        file,
+		})
 	}
-	return nil
+	return attachments, nil
 }
 
-func uploadAttachment(ctx context.Context, path string) (uploadedAttachment, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return uploadedAttachment{}, output.ErrUsage(fmt.Sprintf("could not open attachment %q: %v", path, err))
+func closePreparedAttachments(attachments []preparedAttachment) {
+	for _, attachment := range attachments {
+		_ = attachment.file.Close()
 	}
-	defer func() { _ = file.Close() }()
+}
 
-	info, err := file.Stat()
-	if err != nil {
-		return uploadedAttachment{}, output.ErrUsage(fmt.Sprintf("could not inspect attachment %q: %v", path, err))
-	}
-	if !info.Mode().IsRegular() {
-		return uploadedAttachment{}, output.ErrUsage(fmt.Sprintf("attachment %q is not a regular file", path))
-	}
-
-	contentType, err := attachmentContentType(file, path)
-	if err != nil {
-		return uploadedAttachment{}, err
-	}
-	upload, err := sdk.Attachments().Upload(ctx, filepath.Base(path), contentType, file)
+func uploadAttachment(ctx context.Context, attachment preparedAttachment) (uploadedAttachment, error) {
+	upload, err := sdk.Attachments().Upload(ctx, attachment.filename, attachment.contentType, attachment.file)
 	if err != nil {
 		return uploadedAttachment{}, convertSDKError(err)
 	}
 	if upload == nil || upload.AttachableSgid == "" {
-		return uploadedAttachment{}, fmt.Errorf("HEY returned an empty attachment reference for %q", path)
+		return uploadedAttachment{}, fmt.Errorf("HEY returned an empty attachment reference for %q", attachment.path)
 	}
 	return uploadedAttachment{
-		Filename:    filepath.Base(path),
-		ContentType: contentType,
-		ByteSize:    info.Size(),
+		Filename:    attachment.filename,
+		ContentType: attachment.contentType,
+		ByteSize:    attachment.byteSize,
 		SGID:        upload.AttachableSgid,
 	}, nil
 }

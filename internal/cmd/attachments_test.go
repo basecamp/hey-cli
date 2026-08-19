@@ -132,6 +132,27 @@ func runAttachmentCommand(t *testing.T, server *httptest.Server, args ...string)
 	return output.String(), err
 }
 
+func runAttachmentCommandWithStdin(t *testing.T, server *httptest.Server, input string, args ...string) (string, error) {
+	t.Helper()
+	stdin, err := os.CreateTemp(t.TempDir(), "stdin-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stdin.WriteString(input); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stdin.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	oldStdin := os.Stdin
+	os.Stdin = stdin
+	t.Cleanup(func() {
+		os.Stdin = oldStdin
+		_ = stdin.Close()
+	})
+	return runAttachmentCommand(t, server, args...)
+}
+
 func TestAttachmentsListsFilesFromKnownThread(t *testing.T) {
 	server, _ := attachmentServer(t)
 	stdout, err := runAttachmentCommand(t, server, "attachments", "42")
@@ -236,6 +257,25 @@ func TestComposeUploadsAttachmentsBeforeSending(t *testing.T) {
 	}
 }
 
+func TestComposeReadsPipedBodyWithAttachments(t *testing.T) {
+	server, state := attachmentServer(t)
+	path := filepath.Join(t.TempDir(), "quarterly-report.pdf")
+	if err := os.WriteFile(path, []byte("report contents"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runAttachmentCommandWithStdin(t, server, "Piped compose body\n",
+		"compose", "--to", "alice@example.com", "--subject", "Quarterly report", "--attach", path,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if len(state.sentContents) != 1 || !strings.HasPrefix(state.sentContents[0], "Piped compose body<br>") {
+		t.Errorf("sent content = %q", state.sentContents)
+	}
+}
+
 func TestComposeSupportsAttachmentOnlyMessages(t *testing.T) {
 	server, state := attachmentServer(t)
 	path := filepath.Join(t.TempDir(), "quarterly-report.pdf")
@@ -269,6 +309,25 @@ func TestReplyUploadsAttachmentsBeforeSending(t *testing.T) {
 	defer state.mu.Unlock()
 	if strings.Join(state.events, ",") != "reserve,upload,send" || len(state.sentContents) != 1 || !strings.Contains(state.sentContents[0], `sgid="sgid-upload"`) {
 		t.Errorf("reply attachment state = %+v", state)
+	}
+}
+
+func TestReplyReadsPipedBodyWithAttachments(t *testing.T) {
+	server, state := attachmentServer(t)
+	path := filepath.Join(t.TempDir(), "quarterly-report.pdf")
+	if err := os.WriteFile(path, []byte("report contents"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runAttachmentCommandWithStdin(t, server, "Piped reply body\n",
+		"reply", "7", "--attach", path,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if len(state.sentContents) != 1 || !strings.HasPrefix(state.sentContents[0], "Piped reply body<br>") {
+		t.Errorf("sent content = %q", state.sentContents)
 	}
 }
 

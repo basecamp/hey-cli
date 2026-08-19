@@ -60,13 +60,13 @@ func TestAttachmentSendListAndSave(t *testing.T) {
 	}
 
 	attachments := dataAs[[]struct {
-		Ref      string `json:"ref"`
+		ID       string `json:"id"`
 		Filename string `json:"filename"`
 	}](t, heyJSON(t, "attachments", fmt.Sprint(result.TopicID)))
 	var ref string
 	for _, attachment := range attachments {
 		if attachment.Filename == filename {
-			ref = attachment.Ref
+			ref = attachment.ID
 			break
 		}
 	}
