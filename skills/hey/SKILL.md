@@ -52,6 +52,7 @@ triggers:
   - hey move
   - hey bubble
   - hey trash
+  - hey restore
   - hey spam
   - hey ignore
   - hey stop-ignoring
@@ -176,7 +177,7 @@ hey box list --quiet --jq '.[].name'
 Every email thread has two IDs: `id`, its **box item ID** (one posting in one box), and `topic_id`, its **thread ID**. Each posting in a thread listing has `id`, `topic_id`, `kind` (`bundle` for a bundle row), `name` (subject), `created_at` and `app_url`; a thread row also has `contacts`, `summary` and `visible_entry_count`.
 
 - **Box item ID** (`id`): `hey seen`, `unseen`, `move`, `label add|remove|create`, `trash`, `spam`, `ignore`, `stop-ignoring`, `bubble up|pop`, `set-aside group`, `bulk-reply` and `bundle view`.
-- **Thread ID** (`topic_id`): `hey thread read|update|comment`, `share`, `unshare`, `attachment list`, `reply`, `forward`, `compose --thread-id`, `collection add|remove` and `workflow add|move|remove`.
+- **Thread ID** (`topic_id`): `hey thread read|update|comment`, `share`, `unshare`, `attachment list`, `reply`, `forward`, `compose --thread-id`, `collection add|remove`, `workflow add|move|remove` and `restore`.
 - **Entry ID**: an entry's `id` from `hey thread read`; `hey clip create` takes it, and the passage must appear in that message's text.
 - **Contact ID** from `hey contact list` or contact data, **clearance ID** from `hey screener list` (which also gives the `topic_id` of the thread to read before deciding; `hey screener approve|deny` also take the sender's email address), **box ID** from `hey box list`, **label ID** from `hey label list`. Never substitute one kind for another, or an email address for a contact ID.
 

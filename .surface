@@ -312,6 +312,7 @@ hey reply --message
 hey reply --message-html
 hey reply --replace-recipients
 hey reply --to
+hey restore
 hey screener
 hey screener approve
 hey screener approve --box
