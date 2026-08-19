@@ -979,6 +979,26 @@ func TestMailViewPostingKeyFailureKeepsPosting(t *testing.T) {
 	}
 }
 
+func TestMailViewRejectsWorldPostEmailActionsWithoutRequests(t *testing.T) {
+	for _, key := range []string{"t", "s", "m", "enter"} {
+		t.Run(key, func(t *testing.T) {
+			v, recorded := mailWithTestServer(t, http.StatusNoContent)
+			v.postingList.postings = []models.Posting{{ID: 900, Kind: "world/post", Summary: "Published note"}}
+			v.postingList.cursor = 0
+
+			if cmd := v.HandleContentKey(keyPress(key)); cmd != nil {
+				t.Fatalf("world post action %q returned a command", key)
+			}
+			if len(recorded.requests) != 0 {
+				t.Fatalf("world post action %q made requests: %v", key, recorded.requests)
+			}
+			if !strings.Contains(v.notice, "HEY World") {
+				t.Fatalf("world post action %q notice = %q", key, v.notice)
+			}
+		})
+	}
+}
+
 func TestMailViewPostingActionCopiesSelectedPostingBeforeAsyncRequest(t *testing.T) {
 	v, recorded := mailWithTestServer(t, http.StatusNoContent)
 

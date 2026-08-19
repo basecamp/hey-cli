@@ -27,9 +27,9 @@ func newBoxCommand() *boxCommand {
 	boxCommand.cmd = &cobra.Command{
 		Use:   "box <name|id>",
 		Short: "List email threads in a box",
-		Long:  "List email threads in a HEY box. Accepts a box name (imbox, feedbox, etc.) or numeric ID.",
+		Long:  "List email threads and HEY World posts in a box. Each kind is counted separately. Accepts a box name (imbox, feedbox, etc.) or numeric ID.",
 		Annotations: map[string]string{
-			"agent_notes": "Accepts a box name or numeric ID. Returns email threads. Use topic_id with hey threads, reply, and forward; use id with seen, unseen, and move.",
+			"agent_notes": "Accepts a box name or numeric ID. Preserve each item's kind. Use topic_id with hey threads, reply, and forward. Use id plus --kind with email organization actions. HEY World posts are published content, not email.",
 		},
 		Example: `  hey box imbox
   hey box imbox --limit 10
@@ -82,20 +82,19 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 		resp.NextHistoryUrl = finalNextURL
 	}
 	notice := boxTruncationNotice(len(postings), total, hasMore, c.all)
+	counts := countBoxPostings(postings)
+	summary := counts.summary(resp.Name)
 
 	if writer.IsStyled() {
 		fmt.Fprintf(cmd.OutOrStdout(), "Box: %s (%s)\n\n", resp.Name, resp.Kind)
 
 		table := newTable(cmd.OutOrStdout())
-		table.addRow([]string{"Thread", "From", "Summary", "Date"})
+		table.addRow(boxTableHeaders())
 		for _, p := range postings {
-			displayID := resolvePostingTopicID(p)
-			if displayID == 0 {
-				displayID = p.Id
-			}
-			table.addRow([]string{fmt.Sprintf("%d", displayID), p.Creator.Name, truncate(p.Summary, 60), formatDate(p.CreatedAt)})
+			table.addRow(boxTableRow(p))
 		}
 		table.print()
+		fmt.Fprintln(cmd.OutOrStdout(), summary+".")
 		if notice != "" {
 			fmt.Fprintln(cmd.OutOrStdout(), notice)
 		}
@@ -104,8 +103,11 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 
 	resp.Postings = postings
 	return writeOK(resp,
-		output.WithSummary(boxSummary(len(postings), resp.Name)),
+		output.WithSummary(summary),
 		output.WithNotice(notice),
+		output.WithMeta("posting_count", counts.postings),
+		output.WithMeta("email_count", counts.emails),
+		output.WithMeta("world_post_count", counts.worldPosts),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "read",
@@ -114,7 +116,7 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 			},
 			output.Breadcrumb{
 				Action:      "move",
-				Command:     "hey move <id> --to <box>",
+				Command:     "hey move <id> --to <box> --kind <kind>",
 				Description: "Move an email thread to another box",
 			},
 			output.Breadcrumb{
@@ -126,8 +128,65 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 	)
 }
 
-func boxSummary(count int, name string) string {
-	return fmt.Sprintf("%d %s in %s", count, threadNoun(count), name)
+func boxTableHeaders() []string {
+	return []string{"Item", "Kind", "From", "Summary", "Date"}
+}
+
+func boxTableRow(posting generated.Posting) []string {
+	return []string{
+		fmt.Sprintf("%d", resolvePostingTopicID(posting)),
+		posting.Kind,
+		posting.Creator.Name,
+		truncate(posting.Summary, 60),
+		formatDate(posting.CreatedAt),
+	}
+}
+
+type boxPostingCounts struct {
+	postings   int
+	emails     int
+	worldPosts int
+}
+
+func countBoxPostings(postings []generated.Posting) boxPostingCounts {
+	counts := boxPostingCounts{postings: len(postings)}
+	for _, posting := range postings {
+		if strings.EqualFold(strings.TrimSpace(posting.Kind), "world/post") {
+			counts.worldPosts++
+			continue
+		}
+		counts.emails++
+	}
+	return counts
+}
+
+func (c boxPostingCounts) summary(boxName string) string {
+	emails := countPhrase(c.emails, "email", "emails")
+	if c.worldPosts == 0 {
+		return fmt.Sprintf("%s in %s", emails, boxName)
+	}
+
+	worldPosts := countPhrase(c.worldPosts, "HEY World post", "HEY World posts")
+	if c.emails == 0 {
+		return fmt.Sprintf("%s in %s", worldPosts, boxName)
+	}
+	return fmt.Sprintf("%s and %s in %s", emails, worldPosts, boxName)
+}
+
+func countPhrase(count int, singular, plural string) string {
+	noun := plural
+	if count == 1 {
+		noun = singular
+	}
+	return fmt.Sprintf("%s %s", formatCount(count), noun)
+}
+
+func formatCount(count int) string {
+	digits := strconv.Itoa(count)
+	for i := len(digits) - 3; i > 0; i -= 3 {
+		digits = digits[:i] + "," + digits[i:]
+	}
+	return digits
 }
 
 // resolveBox fetches a box by name or ID, using named SDK getters for

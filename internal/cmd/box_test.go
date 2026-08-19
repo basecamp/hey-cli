@@ -1,16 +1,21 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	"github.com/spf13/cobra"
+
+	"github.com/basecamp/hey-cli/internal/output"
 )
 
 func TestValidateBoxArgs(t *testing.T) {
@@ -66,7 +71,7 @@ func TestValidateBoxArgs(t *testing.T) {
 func makePostings(n, offset int) []generated.Posting {
 	postings := make([]generated.Posting, n)
 	for i := range postings {
-		postings[i] = generated.Posting{Id: int64(offset + i + 1)}
+		postings[i] = generated.Posting{Id: int64(offset + i + 1), Kind: "topic"}
 	}
 	return postings
 }
@@ -117,7 +122,7 @@ func TestBoxCommandNamedRoutes(t *testing.T) {
 			if requests.Load() != 1 {
 				t.Errorf("requests = %d, want one named lookup", requests.Load())
 			}
-			if response.Summary != "0 threads in "+tt.name {
+			if response.Summary != "0 emails in "+tt.name {
 				t.Errorf("summary = %q", response.Summary)
 			}
 		})
@@ -137,7 +142,7 @@ func TestBoxCommandNumericIDAndLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute box: %v", err)
 	}
-	if response.Summary != "1 thread in Receipts" {
+	if response.Summary != "1 email in Receipts" {
 		t.Errorf("summary = %q", response.Summary)
 	}
 	if response.Notice != "Showing 1 of 2 results. Use --all to see everything." {
@@ -175,7 +180,7 @@ func TestBoxCommandUnknownNameFallsBackToList(t *testing.T) {
 	if got, want := fmt.Sprint(requests), "[GET /boxes.json GET /boxes/17.json]"; got != want {
 		t.Errorf("requests = %s, want %s", got, want)
 	}
-	if response.Summary != "0 threads in Receipts" {
+	if response.Summary != "0 emails in Receipts" {
 		t.Errorf("summary = %q", response.Summary)
 	}
 }
@@ -205,22 +210,107 @@ func TestBoxCommandUnknownNameReturnsNotFound(t *testing.T) {
 	}
 }
 
-func TestBoxSummaryUsesThreadTerminology(t *testing.T) {
-	tests := []struct {
-		name  string
-		count int
-		want  string
-	}{
-		{"one thread", 1, "1 thread in Imbox"},
-		{"multiple threads", 2, "2 threads in Imbox"},
+func TestBoxPostingCountsAndSummary(t *testing.T) {
+	postings := makePostings(2944, 0)
+	for i := 0; i < 21; i++ {
+		postings = append(postings, generated.Posting{Id: int64(3000 + i), Kind: "world/post"})
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := boxSummary(tt.count, "Imbox"); got != tt.want {
-				t.Errorf("boxSummary(%d) = %q, want %q", tt.count, got, tt.want)
-			}
-		})
+	counts := countBoxPostings(postings)
+	if counts.postings != 2965 || counts.emails != 2944 || counts.worldPosts != 21 {
+		t.Fatalf("counts = %+v", counts)
+	}
+	if got := counts.summary("Imbox"); got != "2,944 emails and 21 HEY World posts in Imbox" {
+		t.Errorf("summary = %q", got)
+	}
+}
+
+func TestBoxTableLabelsMixedItemsByKind(t *testing.T) {
+	headers := boxTableHeaders()
+	if len(headers) < 2 || headers[0] != "Item" || headers[1] != "Kind" {
+		t.Fatalf("headers = %v, want Item and Kind columns", headers)
+	}
+
+	row := boxTableRow(generated.Posting{Id: 102, Kind: "world/post", Summary: "Published note"})
+	if len(row) < 2 || row[0] != "102" || row[1] != "world/post" {
+		t.Fatalf("row = %v, want World item ID and kind", row)
+	}
+}
+
+func runBox(t *testing.T, server *httptest.Server, args ...string) (output.Response, error) {
+	t.Helper()
+	t.Setenv("HEY_TOKEN", "test-token")
+	t.Setenv("HEY_NO_KEYRING", "1")
+	t.Setenv("HEY_BASE_URL", "")
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	t.Setenv("XDG_STATE_HOME", tmpDir)
+	t.Setenv("XDG_CACHE_HOME", tmpDir)
+
+	root := newRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs(append([]string{"box", "--json", "--base-url", server.URL}, args...))
+
+	err := root.Execute()
+	var resp output.Response
+	if buf.Len() > 0 {
+		if decodeErr := json.Unmarshal(buf.Bytes(), &resp); decodeErr != nil {
+			t.Fatalf("decode response: %v\n%s", decodeErr, buf.String())
+		}
+	}
+	return resp, err
+}
+
+func TestBoxMixedPostingKindsJSONContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/imbox.json" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id": 1,
+			"kind": "imbox",
+			"name": "Imbox",
+			"postings": [
+				{"id": 101, "kind": "topic", "summary": "Project update"},
+				{"id": 102, "kind": "world/post", "summary": "Published note"}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	resp, err := runBox(t, server, "imbox")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if resp.Summary != "1 email and 1 HEY World post in Imbox" {
+		t.Errorf("summary = %q", resp.Summary)
+	}
+	if got := resp.Meta["posting_count"]; got != float64(2) {
+		t.Errorf("posting_count = %v, want 2", got)
+	}
+	if got := resp.Meta["email_count"]; got != float64(1) {
+		t.Errorf("email_count = %v, want 1", got)
+	}
+	if got := resp.Meta["world_post_count"]; got != float64(1) {
+		t.Errorf("world_post_count = %v, want 1", got)
+	}
+
+	data, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("data type = %T, want map[string]any", resp.Data)
+	}
+	postings, ok := data["postings"].([]any)
+	if !ok || len(postings) != 2 {
+		t.Fatalf("postings = %#v, want 2 entries", data["postings"])
+	}
+	first, _ := postings[0].(map[string]any)
+	second, _ := postings[1].(map[string]any)
+	if first["kind"] != "topic" || second["kind"] != "world/post" {
+		t.Errorf("posting kinds = %q, %q", first["kind"], second["kind"])
 	}
 }
 

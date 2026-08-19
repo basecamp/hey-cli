@@ -9,7 +9,8 @@ import (
 )
 
 type stopIgnoringCommand struct {
-	cmd *cobra.Command
+	cmd  *cobra.Command
+	kind string
 }
 
 func newStopIgnoringCommand() *stopIgnoringCommand {
@@ -21,16 +22,20 @@ func newStopIgnoringCommand() *stopIgnoringCommand {
 		Example: `  hey stop-ignoring 12345
   hey stop-ignoring 12345 67890`,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts one or more box item IDs from hey box output. Reverses hey ignore for each thread.",
+			"agent_notes": "Accepts one or more box item IDs from hey box output. Pass --kind exactly as returned by hey box --json. HEY World posts are rejected before any email action is requested. Reverses hey ignore for each thread.",
 		},
 		RunE: stopIgnoringCommand.run,
 		Args: usageMinOneArg(),
 	}
+	stopIgnoringCommand.cmd.Flags().StringVar(&stopIgnoringCommand.kind, "kind", "", "Item kind from hey box --json")
 
 	return stopIgnoringCommand
 }
 
 func (c *stopIgnoringCommand) run(cmd *cobra.Command, args []string) error {
+	if err := validateEmailPostingKind(c.cmd.Name(), c.kind); err != nil {
+		return err
+	}
 	if err := requireAuth(); err != nil {
 		return err
 	}

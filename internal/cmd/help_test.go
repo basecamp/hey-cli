@@ -113,6 +113,7 @@ EMAIL
   ignore         Ignore email threads
   stop-ignoring  Stop ignoring email threads
   watch          Follow email threads as they change
+  world          Manage HEY World posts
 
 CALENDAR & TASKS
   calendars   List calendars
