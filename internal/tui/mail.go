@@ -232,6 +232,9 @@ func (v *mailView) View() string {
 		return v.compose.view()
 	}
 	if v.inThread {
+		if v.notice != "" {
+			return v.vc.styles.title.Render(v.notice) + "\n" + v.topicViewport.View()
+		}
 		return v.topicViewport.View()
 	}
 	if v.notice != "" {

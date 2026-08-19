@@ -300,6 +300,27 @@ func TestForwardFormLoadsLatestEntryAndSends(t *testing.T) {
 	}
 }
 
+func TestForwardCompletionNoticeIsVisibleInThread(t *testing.T) {
+	v := mailWithPostings()
+	v.Resize(80, 30)
+	v.inThread = true
+	v.topicViewport.SetContent("Original thread")
+	v.compose = newForwardForm(forwardContextLoadedMsg{
+		topicName: "Quarterly planning",
+		subject:   "Fwd: Quarterly planning",
+		content:   "<div>Quoted message</div>",
+	}, v.vc.styles)
+
+	v.Update(composeSentMsg{label: "Message forwarded"})
+
+	if v.compose != nil {
+		t.Error("forward form should close after sending")
+	}
+	if view := v.View(); !strings.Contains(view, "Message forwarded") || !strings.Contains(view, "Original thread") {
+		t.Errorf("thread view should show the forwarding notice, got %q", view)
+	}
+}
+
 func TestForwardKeyInThreadLoadsContext(t *testing.T) {
 	v := mailWithPostings()
 	v.inThread = true
