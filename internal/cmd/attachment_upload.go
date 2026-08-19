@@ -55,6 +55,15 @@ func attachFiles(ctx context.Context, content string, paths []string) (string, e
 func prepareAttachments(paths []string) ([]preparedAttachment, error) {
 	attachments := make([]preparedAttachment, 0, len(paths))
 	for _, path := range paths {
+		pathInfo, err := os.Stat(path)
+		if err != nil {
+			closePreparedAttachments(attachments)
+			return nil, output.ErrUsage(fmt.Sprintf("could not inspect attachment %q: %v", path, err))
+		}
+		if !pathInfo.Mode().IsRegular() {
+			closePreparedAttachments(attachments)
+			return nil, output.ErrUsage(fmt.Sprintf("attachment %q is not a regular file", path))
+		}
 		file, err := os.Open(path)
 		if err != nil {
 			closePreparedAttachments(attachments)

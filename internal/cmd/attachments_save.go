@@ -107,16 +107,16 @@ func parseAttachmentID(id string) (int64, int, error) {
 }
 
 func attachmentDestination(outputPath, filename string) (string, error) {
-	filename, err := portableAttachmentFilename(filename)
-	if err != nil {
-		return "", err
-	}
 	if outputPath == "" {
-		return filename, nil
+		return portableAttachmentFilename(filename)
 	}
 	info, err := os.Stat(outputPath)
 	if err == nil && info.IsDir() {
-		return filepath.Join(outputPath, filename), nil
+		safeFilename, filenameErr := portableAttachmentFilename(filename)
+		if filenameErr != nil {
+			return "", filenameErr
+		}
+		return filepath.Join(outputPath, safeFilename), nil
 	}
 	if err != nil && !os.IsNotExist(err) {
 		return "", output.ErrAPI(0, fmt.Sprintf("could not inspect output path: %v", err))

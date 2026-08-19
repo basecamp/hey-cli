@@ -430,6 +430,10 @@ func TestAttachmentDestinationUsesSafeFilename(t *testing.T) {
 			t.Errorf("unsafe filename %q was accepted", filename)
 		}
 	}
+	explicit := filepath.Join(t.TempDir(), "chosen-name.pdf")
+	if destination, err := attachmentDestination(explicit, ".."); err != nil || destination != explicit {
+		t.Errorf("explicit destination = %q, %v", destination, err)
+	}
 }
 
 func TestTerminalSafeTextReplacesControls(t *testing.T) {
