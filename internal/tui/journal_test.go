@@ -1,8 +1,16 @@
 package tui
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 )
 
 func journalWithEntry() *journalView {
@@ -39,6 +47,47 @@ func TestJournalViewInitSelectsToday(t *testing.T) {
 }
 
 // --- Update: message routing ---
+
+func TestJournalTextFallbackDoesNotFetchImages(t *testing.T) {
+	var imageRequests atomic.Int64
+	imageData := testPNG(t)
+	untrusted := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		imageRequests.Add(1)
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(imageData)
+	}))
+	t.Cleanup(untrusted.Close)
+
+	heyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":      1,
+			"content": fmt.Sprintf(`<img src=%q>`, untrusted.URL+"/tracking.png"),
+			"type":    "Calendar::JournalEntry",
+		})
+	}))
+	t.Cleanup(heyServer.Close)
+
+	client := hey.NewClient(
+		&hey.Config{BaseURL: heyServer.URL},
+		&hey.StaticTokenProvider{Token: "test-token"},
+		hey.WithMaxRetries(0),
+	)
+	vc := testVC()
+	vc.ctx = context.Background()
+	vc.sdk = client
+	vc.imageFetcher = newTrustedImageFetcher(client)
+	v := newJournalView(vc)
+
+	loaded := v.fetchJournalEntry("2026-08-19")().(journalDetailMsg)
+
+	if got := imageRequests.Load(); got != 0 {
+		t.Fatalf("text journal fetched an image %d time(s)", got)
+	}
+	if len(loaded.images) != 0 {
+		t.Fatalf("text journal returned %d images", len(loaded.images))
+	}
+}
 
 func TestJournalViewHandlesDetailLoaded(t *testing.T) {
 	v := newJournalView(testVC())

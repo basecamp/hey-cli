@@ -190,6 +190,11 @@ func findAttachments(n *html.Node, attachments *[]Attachment) {
 	}
 }
 
+func isImageContentType(contentType string) bool {
+	contentType = strings.ToLower(strings.TrimSpace(contentType))
+	return contentType == "image" || strings.HasPrefix(contentType, "image/")
+}
+
 func parseAttachmentByteSize(value string) *int64 {
 	if value == "" {
 		return nil
@@ -218,12 +223,11 @@ func findImages(n *html.Node, urls *[]string) {
 				}
 			}
 		case "action-text-attachment":
-			contentType := strings.ToLower(strings.TrimSpace(getAttr(n, "content-type")))
-			if imageURL := getAttr(n, "url"); strings.HasPrefix(contentType, "image/") && imageURL != "" {
+			if imageURL := getAttr(n, "url"); isImageContentType(getAttr(n, "content-type")) && imageURL != "" {
 				*urls = append(*urls, imageURL)
 			}
 		case "figure":
-			if att := parseTrixAttachment(n); att != nil && att.URL != "" {
+			if att := parseTrixAttachment(n); att != nil && att.URL != "" && isImageContentType(att.ContentType) {
 				*urls = append(*urls, att.URL)
 			}
 		}

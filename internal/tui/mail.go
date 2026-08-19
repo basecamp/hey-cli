@@ -1143,19 +1143,11 @@ func (v *mailView) fetchTopic(ctx context.Context, requestID uint64, boxID, topi
 		}
 
 		var images [][]byte
-		if v.vc.imageRenderer.protocol() == imageProtocolKitty {
+		if v.vc.imageRenderer.protocol() == imageProtocolKitty && v.vc.imageFetcher != nil {
 			for _, entry := range entries {
-				for _, imgURL := range extractImageURLs(entry.Body) {
-					var data []byte
-					if strings.HasPrefix(imgURL, "http://") || strings.HasPrefix(imgURL, "https://") {
-						data = fetchImageData(ctx, imgURL)
-					} else {
-						sdkResp, getErr := v.vc.sdk.Get(ctx, imgURL)
-						if getErr == nil && sdkResp != nil {
-							data = sdkResp.Data
-						}
-					}
-					if len(data) > 0 {
+				for _, imageURL := range extractImageURLs(entry.Body) {
+					data, fetchErr := v.vc.imageFetcher.Fetch(ctx, imageURL)
+					if fetchErr == nil && len(data) > 0 {
 						images = append(images, data)
 					}
 				}

@@ -1,9 +1,13 @@
 package tui
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -20,6 +24,17 @@ import (
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/models"
 )
+
+func testPNG(t *testing.T) []byte {
+	t.Helper()
+	var encoded bytes.Buffer
+	pixels := image.NewNRGBA(image.Rect(0, 0, 1, 1))
+	pixels.Set(0, 0, color.NRGBA{R: 0x22, G: 0x66, B: 0xAA, A: 0xFF})
+	if err := png.Encode(&encoded, pixels); err != nil {
+		t.Fatal(err)
+	}
+	return encoded.Bytes()
+}
 
 func testVC() *viewContext {
 	return &viewContext{
@@ -712,16 +727,19 @@ func TestMailViewEnterOpensSelectedThread(t *testing.T) {
 
 func TestMailViewDownloadsImageDataOnlyForKittyRenderer(t *testing.T) {
 	var imageRequests atomic.Int64
+	imageData := testPNG(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/topics/100.json":
+			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"id":100,"name":"Latest image","entries":[{"id":501,"kind":"message"}]}`))
 		case "/messages/501.json":
+			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"id":501,"content":"<action-text-attachment url=\"/rails/blobs/chart.png\" filename=\"chart.png\" content-type=\"image/png\"></action-text-attachment>"}`))
 		case "/rails/blobs/chart.png":
 			imageRequests.Add(1)
-			_, _ = w.Write([]byte("image data"))
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write(imageData)
 		default:
 			http.NotFound(w, r)
 		}
@@ -735,6 +753,7 @@ func TestMailViewDownloadsImageDataOnlyForKittyRenderer(t *testing.T) {
 	)
 	vc := testVC()
 	vc.sdk = client
+	vc.imageFetcher = newTrustedImageFetcher(client)
 	v := newMailView(vc)
 	loaded := v.fetchTopic(context.Background(), 1, 1, 100, "Latest image")().(topicLoadedMsg)
 
@@ -750,6 +769,55 @@ func TestMailViewDownloadsImageDataOnlyForKittyRenderer(t *testing.T) {
 	loaded = v.fetchTopic(context.Background(), 2, 1, 100, "Latest image")().(topicLoadedMsg)
 	if loaded.err != nil || len(loaded.images) != 1 || imageRequests.Load() != 1 {
 		t.Errorf("Kitty topic = images:%d requests:%d error:%v", len(loaded.images), imageRequests.Load(), loaded.err)
+	}
+}
+
+func TestMailViewDoesNotFetchImagesOutsideHEYOrGopher(t *testing.T) {
+	var untrustedRequests atomic.Int64
+	untrusted := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		untrustedRequests.Add(1)
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte("untrusted image"))
+	}))
+	t.Cleanup(untrusted.Close)
+
+	heyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/topics/100.json":
+			_, _ = w.Write([]byte(`{"id":100,"name":"Untrusted image","entries":[{"id":501,"kind":"message"}]}`))
+		case "/messages/501.json":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":      501,
+				"content": fmt.Sprintf(`<img src=%q>`, untrusted.URL+"/tracking.png"),
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(heyServer.Close)
+
+	client := hey.NewClient(
+		&hey.Config{BaseURL: heyServer.URL},
+		&hey.StaticTokenProvider{Token: "test-token"},
+		hey.WithMaxRetries(0),
+	)
+	vc := testVC()
+	vc.sdk = client
+	vc.imageRenderer = kittyImageRenderer{}
+	vc.imageFetcher = newTrustedImageFetcher(client)
+	v := newMailView(vc)
+
+	loaded := v.fetchTopic(context.Background(), 1, 1, 100, "Untrusted image")().(topicLoadedMsg)
+
+	if loaded.err != nil {
+		t.Fatalf("fetch topic: %v", loaded.err)
+	}
+	if got := untrustedRequests.Load(); got != 0 {
+		t.Fatalf("opening a message fetched an untrusted image %d time(s)", got)
+	}
+	if len(loaded.images) != 0 {
+		t.Fatalf("topic returned %d untrusted images", len(loaded.images))
 	}
 }
 

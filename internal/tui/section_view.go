@@ -17,6 +17,7 @@ type viewContext struct {
 	ctx                  context.Context
 	styles               styles
 	imageRenderer        imageRenderer
+	imageFetcher         imageFetcher
 	saveAttachment       attachmentSaveFunc
 	openAttachment       attachmentOpenFunc
 	newAttachmentTempDir func() (string, error)

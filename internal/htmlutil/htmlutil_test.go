@@ -180,18 +180,23 @@ func TestExtractImageURLsEmptySrc(t *testing.T) {
 
 func TestExtractImageURLsActionTextImage(t *testing.T) {
 	h := `<action-text-attachment url="/rails/blobs/photo.png" filename="photo.png" content-type="image/png"></action-text-attachment>
+<action-text-attachment url="https://gopher.hey.com/signed/photo.jpg" content-type="image"></action-text-attachment>
 <action-text-attachment url="/rails/blobs/report.pdf" filename="report.pdf" content-type="application/pdf"></action-text-attachment>`
 	urls := ExtractImageURLs(h)
-	if len(urls) != 1 {
-		t.Fatalf("ExtractImageURLs Action Text got %d urls, want 1", len(urls))
+	if len(urls) != 2 {
+		t.Fatalf("ExtractImageURLs Action Text got %d urls, want 2", len(urls))
 	}
 	if urls[0] != "/rails/blobs/photo.png" {
 		t.Errorf("url[0] = %q, want %q", urls[0], "/rails/blobs/photo.png")
 	}
+	if urls[1] != "https://gopher.hey.com/signed/photo.jpg" {
+		t.Errorf("url[1] = %q, want Gopher image", urls[1])
+	}
 }
 
 func TestExtractImageURLsTrixFigure(t *testing.T) {
-	h := `<figure data-trix-attachment='{"url":"/rails/blobs/abc/image.png","filename":"image.png","contentType":"image/png"}'></figure>`
+	h := `<figure data-trix-attachment='{"url":"/rails/blobs/abc/image.png","filename":"image.png","contentType":"image/png"}'></figure>
+<figure data-trix-attachment='{"url":"/rails/blobs/abc/report.pdf","filename":"report.pdf","contentType":"application/pdf"}'></figure>`
 	urls := ExtractImageURLs(h)
 	if len(urls) != 1 {
 		t.Fatalf("ExtractImageURLs trix got %d urls, want 1", len(urls))

@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/viewport"
@@ -142,18 +141,12 @@ func (v *journalView) fetchJournalEntry(date string) tea.Cmd {
 		body := htmlToText(content)
 
 		var images [][]byte
-		for _, imgURL := range extractImageURLs(content) {
-			var data []byte
-			if strings.HasPrefix(imgURL, "http://") || strings.HasPrefix(imgURL, "https://") {
-				data = fetchImageData(v.vc.ctx, imgURL)
-			} else {
-				sdkResp, getErr := v.vc.sdk.Get(v.vc.ctx, imgURL)
-				if getErr == nil && sdkResp != nil {
-					data = sdkResp.Data
+		if v.vc.imageRenderer.protocol() == imageProtocolKitty && v.vc.imageFetcher != nil {
+			for _, imageURL := range extractImageURLs(content) {
+				data, fetchErr := v.vc.imageFetcher.Fetch(v.vc.ctx, imageURL)
+				if fetchErr == nil && len(data) > 0 {
+					images = append(images, data)
 				}
-			}
-			if len(data) > 0 {
-				images = append(images, data)
 			}
 		}
 

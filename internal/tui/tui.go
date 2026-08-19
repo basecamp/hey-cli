@@ -2,8 +2,6 @@ package tui
 
 import (
 	"context"
-	"io"
-	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -60,6 +58,7 @@ func newModel(sdk *hey.Client) model {
 		ctx:           ctx,
 		styles:        s,
 		imageRenderer: environmentImageRenderer(),
+		imageFetcher:  newTrustedImageFetcher(sdk),
 		saveAttachment: func(ctx context.Context, destination, sourceURL string, force bool) (int64, error) {
 			return attachmentfiles.Save(ctx, sdk, destination, sourceURL, force)
 		},
@@ -397,28 +396,6 @@ func formatTimestamp(ts time.Time) string {
 		return ""
 	}
 	return ts.UTC().Format("2006-01-02T15:04:05Z")
-}
-
-var imageHTTPClient = &http.Client{Timeout: 10 * time.Second}
-
-func fetchImageData(ctx context.Context, imgURL string) []byte {
-	req, err := http.NewRequestWithContext(ctx, "GET", imgURL, nil)
-	if err != nil {
-		return nil
-	}
-	resp, err := imageHTTPClient.Do(req)
-	if err != nil {
-		return nil
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return nil
-	}
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil
-	}
-	return data
 }
 
 // Run starts the TUI program.
