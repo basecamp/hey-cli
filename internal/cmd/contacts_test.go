@@ -295,6 +295,21 @@ func TestContactNoteSetPreservesMultilineContent(t *testing.T) {
 	}
 }
 
+func TestContactNoteForEditorReturnsReadErrors(t *testing.T) {
+	want := errors.New("note read failed")
+	if _, err := contactNoteForEditor(t.Context(), 7, func(context.Context, int64) (*generated.ContactNote, error) {
+		return nil, want
+	}); !errors.Is(err, want) {
+		t.Fatalf("error = %v, want %v", err, want)
+	}
+	content, err := contactNoteForEditor(t.Context(), 7, func(context.Context, int64) (*generated.ContactNote, error) {
+		return &generated.ContactNote{ContactId: 7, Note: "Existing note"}, nil
+	})
+	if err != nil || content != "Existing note" {
+		t.Errorf("content = %q, error = %v", content, err)
+	}
+}
+
 func TestContactCommandsValidateBeforeRequests(t *testing.T) {
 	tests := [][]string{
 		{"add", "--name", "Jane"},

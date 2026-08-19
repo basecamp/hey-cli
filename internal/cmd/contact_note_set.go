@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
 	"github.com/basecamp/hey-cli/internal/editor"
 	"github.com/basecamp/hey-cli/internal/output"
@@ -56,9 +59,9 @@ func (c *contactNoteSetCommand) run(cmd *cobra.Command, args []string) error {
 				return err
 			}
 		} else {
-			existing := ""
-			if note, getErr := sdk.Contacts().Note(cmd.Context(), contactID); getErr == nil && note != nil {
-				existing = note.Note
+			existing, getErr := contactNoteForEditor(cmd.Context(), contactID, sdk.Contacts().Note)
+			if getErr != nil {
+				return convertSDKError(getErr)
 			}
 			content, err = editor.Open(existing)
 			if err != nil {
@@ -86,4 +89,17 @@ func (c *contactNoteSetCommand) run(cmd *cobra.Command, args []string) error {
 		output.WithSummary("Private contact note saved"),
 		output.WithBreadcrumbs(output.Breadcrumb{Action: "read", Command: fmt.Sprintf("hey contacts note show %d", contactID), Description: "Read the private note"}),
 	)
+}
+
+type contactNoteFetcher func(context.Context, int64) (*generated.ContactNote, error)
+
+func contactNoteForEditor(ctx context.Context, contactID int64, fetch contactNoteFetcher) (string, error) {
+	note, err := fetch(ctx, contactID)
+	if err != nil {
+		return "", err
+	}
+	if note == nil {
+		return "", nil
+	}
+	return note.Note, nil
 }

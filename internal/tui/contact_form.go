@@ -75,6 +75,7 @@ func (f *contactForm) resize(width, _ int) {
 func (f *contactForm) values() (name, email string, aliases []string) {
 	name = strings.TrimSpace(f.inputs[contactFieldName].Value())
 	email = strings.TrimSpace(f.inputs[contactFieldEmail].Value())
+	aliases = make([]string, 0)
 	for _, value := range strings.Split(f.inputs[contactFieldAliases].Value(), ",") {
 		if alias := strings.TrimSpace(value); alias != "" {
 			aliases = append(aliases, alias)

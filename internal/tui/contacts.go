@@ -142,6 +142,12 @@ func (v *contactsView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.finishRequest(msg.requestID)
 		if msg.err != nil {
+			var conflict *hey.ContactConflictError
+			if errors.As(msg.err, &conflict) && conflict.ContactID != 0 {
+				v.contactForm = nil
+				v.notice = contactSaveFailure(msg.err)
+				return v.requestContactDetail(conflict.ContactID), true
+			}
 			if v.contactForm != nil {
 				v.contactForm.saving = false
 				v.contactForm.status = contactSaveFailure(msg.err)
@@ -365,6 +371,13 @@ func (v *contactsView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 func (v *contactsView) InThread() bool { return v.inDetail }
+
+func (v *contactsView) ExitDetail(_ string) {
+	if v.loading && v.activeRequestKind == contactRequestMutation {
+		return
+	}
+	v.ExitThread()
+}
 
 func (v *contactsView) ExitThread() {
 	v.inDetail = false

@@ -18,6 +18,7 @@ type recordedTUIContacts struct {
 	mu       sync.Mutex
 	requests []string
 	bodies   [][]byte
+	conflict bool
 }
 
 func (r *recordedTUIContacts) snapshot() ([]string, [][]byte) {
@@ -37,6 +38,7 @@ func contactsWithTestServer(t *testing.T) (*contactsView, *recordedTUIContacts) 
 		recorded.mu.Lock()
 		recorded.requests = append(recorded.requests, req.Method+" "+req.URL.RequestURI())
 		recorded.bodies = append(recorded.bodies, append([]byte(nil), raw...))
+		conflict := recorded.conflict
 		recorded.mu.Unlock()
 
 		w.Header().Set("Content-Type", "application/json")
@@ -48,12 +50,19 @@ func contactsWithTestServer(t *testing.T) (*contactsView, *recordedTUIContacts) 
 			}
 			_, _ = w.Write([]byte(`[{"id":7,"name":"Jane Doe","email_address":"jane@example.com"}]`))
 		case req.Method == http.MethodPost && req.URL.Path == "/contacts.json":
+			if conflict {
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"errors":["Some email addresses are already in use for other contacts"],"contact_id":9,"conflicting_contact_ids":[4,5]}`))
+				return
+			}
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"id":8,"name":"Sam Rivera","email_address":"sam@example.org"}`))
 		case req.Method == http.MethodGet && req.URL.Path == "/contacts/7.json":
 			_, _ = w.Write([]byte(`{"id":7,"name":"Jane Doe","email_address":"jane@example.com","aliases":[{"id":17,"name":"Jane Doe","email_address":"jane.doe@example.org"}]}`))
 		case req.Method == http.MethodGet && req.URL.Path == "/contacts/8.json":
 			_, _ = w.Write([]byte(`{"id":8,"name":"Sam Rivera","email_address":"sam@example.org","aliases":[]}`))
+		case req.Method == http.MethodGet && req.URL.Path == "/contacts/9.json":
+			_, _ = w.Write([]byte(`{"id":9,"name":"Sam Rivera","email_address":"sam@example.org","aliases":[]}`))
 		case req.Method == http.MethodPatch && req.URL.Path == "/contacts/7.json":
 			_, _ = w.Write([]byte(`{"id":7,"name":"Jane Dawson","email_address":"jane@example.com"}`))
 		case req.Method == http.MethodDelete && req.URL.Path == "/contacts/7.json":
@@ -64,6 +73,8 @@ func contactsWithTestServer(t *testing.T) (*contactsView, *recordedTUIContacts) 
 			_, _ = w.Write([]byte(`{"contact_id":7,"note":"Prefers email","note_html":"<p>Prefers email</p>"}`))
 		case req.Method == http.MethodGet && req.URL.Path == "/contacts/8/note.json":
 			_, _ = w.Write([]byte(`{"contact_id":8,"note":"","note_html":""}`))
+		case req.Method == http.MethodGet && req.URL.Path == "/contacts/9/note.json":
+			_, _ = w.Write([]byte(`{"contact_id":9,"note":"","note_html":""}`))
 		case req.Method == http.MethodPatch && req.URL.Path == "/contacts/7/note.json":
 			_, _ = w.Write([]byte(`{"contact_id":7,"note":"Prefers a call","note_html":"<p>Prefers a call</p>"}`))
 		case req.Method == http.MethodDelete && req.URL.Path == "/contacts/7/note.json":
@@ -190,6 +201,27 @@ func TestContactsViewAddsContact(t *testing.T) {
 	}
 }
 
+func TestContactsViewCreateConflictLoadsWrittenContact(t *testing.T) {
+	view, recorded := contactsWithTestServer(t)
+	loadTUIContacts(t, view)
+	view.HandleContentKey(keyPress("a"))
+	view.contactForm.inputs[contactFieldName].SetValue("Sam Rivera")
+	view.contactForm.inputs[contactFieldEmail].SetValue("sam@example.org")
+	recorded.mu.Lock()
+	recorded.conflict = true
+	recorded.mu.Unlock()
+
+	save := view.HandleContentKey(keyPress("ctrl+s"))
+	detail, _ := view.Update(save())
+	if detail == nil || view.contactForm != nil || !strings.Contains(view.notice, "Contact 9 was saved") {
+		t.Fatalf("conflict state = detail:%v form:%v notice:%q", detail != nil, view.contactForm, view.notice)
+	}
+	view.Update(detail())
+	if !view.inDetail || view.detail.ID != 9 {
+		t.Errorf("written conflict contact was not loaded: %+v", view.detail)
+	}
+}
+
 func TestContactsViewEditsContact(t *testing.T) {
 	view, recorded := contactsWithTestServer(t)
 	loadTUIContacts(t, view)
@@ -237,6 +269,20 @@ func TestContactsViewReplacesPromotedAliasContactID(t *testing.T) {
 	}
 	if len(view.list.contacts) != 1 || view.list.contacts[0].ID != 17 {
 		t.Errorf("promoted alias left stale contact in list: %+v", view.list.contacts)
+	}
+}
+
+func TestContactFormBlankAliasesCreatesExplicitEmptyReplacement(t *testing.T) {
+	form := newContactForm(contactFormEdit, models.Contact{
+		ID:           7,
+		Name:         "Jane Doe",
+		EmailAddress: "jane@example.com",
+		Aliases:      []models.Contact{{EmailAddress: "jane.doe@example.org"}},
+	}, newStyles())
+	form.inputs[contactFieldAliases].SetValue("")
+	_, _, aliases := form.values()
+	if aliases == nil || len(aliases) != 0 {
+		t.Errorf("aliases = %#v, want non-nil empty replacement", aliases)
 	}
 }
 
@@ -310,6 +356,17 @@ func TestContactsViewEditsAndDeletesNote(t *testing.T) {
 	joined := strings.Join(requests, "\n")
 	if !strings.Contains(joined, "PATCH /contacts/7/note.json") || !strings.Contains(joined, "DELETE /contacts/7/note.json") {
 		t.Errorf("requests = %v", requests)
+	}
+}
+
+func TestContactsViewCannotExitDuringMutation(t *testing.T) {
+	view, _ := contactsWithTestServer(t)
+	view.inDetail = true
+	view.loading = true
+	view.activeRequestKind = contactRequestMutation
+	view.ExitDetail("q")
+	if !view.inDetail || !view.loading || view.activeRequestKind != contactRequestMutation {
+		t.Error("detail exited while a contact mutation was pending")
 	}
 }
 

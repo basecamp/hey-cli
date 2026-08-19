@@ -118,23 +118,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 	}
 
-	// Delegate to the active section first. Responses owned by an inactive
-	// section still update that section so switching views cannot drop a request.
+	// Delegate to the active section view.
 	cmd, consumed := m.activeView.Update(msg)
 	if consumed {
 		cmd = m.syncLoading(cmd)
 		m.updateHelpBindings()
-		return m, cmd
 	}
-	for _, view := range []sectionView{m.mailView, m.contactsView, m.calendarView, m.journalView} {
-		if view == m.activeView {
-			continue
-		}
-		if cmd, consumed = view.Update(msg); consumed {
-			return m, cmd
-		}
-	}
-	return m, nil
+	return m, cmd
 }
 
 // syncLoading synchronizes the main loading state with the active section view.
@@ -287,6 +277,10 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.updateHelpBindings()
 			return m, m.syncLoading(nil)
 		}
+		return m, nil
+	}
+
+	if m.loading {
 		return m, nil
 	}
 

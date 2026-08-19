@@ -199,22 +199,18 @@ func TestSingleCtrlCDoesNotQuit(t *testing.T) {
 	}
 }
 
-func TestInactiveSectionReceivesItsResponse(t *testing.T) {
+func TestLoadingViewKeepsItsSectionUntilResponse(t *testing.T) {
 	m := modelWithBoxes()
-	m.contactsView.loading = true
-	m.contactsView.activeRequestID = 4
+	m.loading = true
+	m.mailView.loading = true
 
-	updated, _ := m.Update(contactsLoadedMsg{
-		requestID: 4,
-		page:      1,
-		contacts:  []models.Contact{{ID: 7, Name: "Jane Doe"}},
-	})
+	updated, cmd := m.Update(keyPress("O"))
 	result := updated.(model)
 	if result.activeView != result.mailView || result.section != sectionMail {
-		t.Error("inactive response changed the active section")
+		t.Error("section changed while the active view was loading")
 	}
-	if result.contactsView.loading || !result.contactsView.loaded || len(result.contactsView.list.contacts) != 1 {
-		t.Errorf("inactive Contacts response was dropped: %+v", result.contactsView.list.contacts)
+	if cmd != nil {
+		t.Error("section shortcut should not start another request while loading")
 	}
 }
 
