@@ -32,9 +32,12 @@ func TestLabelsCommand(t *testing.T) {
 	if !ok || len(folders) != 1 {
 		t.Fatalf("data = %#v, want one folder", response.Data)
 	}
-	folder, ok := folders[0].(map[string]any)
-	if !ok || folder["id"] != float64(12) || folder["name"] != "Receipts" {
-		t.Errorf("folder = %#v", folders[0])
+	label, ok := folders[0].(map[string]any)
+	if !ok || label["id"] != float64(12) || label["name"] != "Receipts" || label["app_url"] != "/folders/12" {
+		t.Errorf("label = %#v", folders[0])
+	}
+	if len(label) != 3 || label["created_at"] != nil || label["updated_at"] != nil {
+		t.Errorf("navigation label exposed fields HEY did not return: %#v", label)
 	}
 }
 
@@ -88,6 +91,31 @@ func TestLabelCommand(t *testing.T) {
 	posting, ok := postings[0].(map[string]any)
 	if !ok || posting["id"] != float64(101) || posting["topic_id"] != float64(501) {
 		t.Errorf("posting IDs = %#v, want id 101 and topic_id 501", postings[0])
+	}
+}
+
+func TestLabelCommandEmptyPreservesCollectionAndCount(t *testing.T) {
+	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Total-Count", "0")
+		_, _ = io.WriteString(w, `{"id":12,"name":"Receipts","postings":[]}`)
+	}), "label", "12")
+	if err != nil {
+		t.Fatalf("execute empty label: %v", err)
+	}
+	label, ok := response.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("data = %#v", response.Data)
+	}
+	postings, ok := label["postings"].([]any)
+	if !ok || len(postings) != 0 || label["total_count"] != float64(0) {
+		t.Errorf("empty label contract = %#v", label)
+	}
+	if _, ok := label["created_at"]; ok {
+		t.Errorf("empty label fabricated created_at: %#v", label)
+	}
+	if _, ok := label["updated_at"]; ok {
+		t.Errorf("empty label fabricated updated_at: %#v", label)
 	}
 }
 
@@ -164,6 +192,31 @@ func TestLabelCommandStyledTable(t *testing.T) {
 	for _, want := range []string{"Label: Receipts", "ID", "Thread", "From", "Summary", "Date", "101", "501", "Jane Doe", "Hotel receipt", "2026-08-20"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("output %q does not contain %q", stdout, want)
+		}
+	}
+}
+
+func TestLabelStyledOutputSanitizesPostingText(t *testing.T) {
+	const unsafeCreator = "Jane\x1b]2;owned\a\nDoe"
+	const unsafeSummary = "Receipt\x1b]2;owned\a\nArchive"
+	stdout, err := runStyledCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": 12, "name": "Receipts",
+			"postings": []any{map[string]any{
+				"id": 101, "kind": "topic", "creator": map[string]any{"name": unsafeCreator}, "summary": unsafeSummary,
+			}},
+		})
+	}), "label", "12")
+	if err != nil {
+		t.Fatalf("execute styled label: %v", err)
+	}
+	if strings.Contains(stdout, "\x1b]2;owned") || strings.Contains(stdout, "\nDoe") || strings.Contains(stdout, "\nArchive") {
+		t.Errorf("unsafe posting text reached terminal output: %q", stdout)
+	}
+	for _, want := range []string{"Jane�]2;owned��Doe", "Receipt�]2;owned��Archive"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("sanitized output %q does not contain %q", stdout, want)
 		}
 	}
 }

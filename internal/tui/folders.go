@@ -190,6 +190,7 @@ func (p *folderPicker) view(styles styles, width int) string {
 		case folderPickerRemoveAll:
 			label = "− Remove all labels"
 		}
+		label = truncateStr(label, max(contentWidth-lipgloss.Width(prefix), 1))
 		if i == p.cursor {
 			label = styles.title.Render(label)
 		}

@@ -18,10 +18,11 @@ type movePicker struct {
 	cursor       int
 }
 
-func newMovePicker(posting models.Posting, boxes []models.Box, currentBoxID int64) *movePicker {
+func newMovePicker(posting models.Posting, boxes []models.Box, currentSource models.Box) *movePicker {
 	destinations := make([]models.Box, 0, len(boxes))
 	for _, box := range boxes {
-		if box.Kind == mailSourceKindFolder || box.ID == currentBoxID || strings.EqualFold(box.Kind, hey.BoxKindBubbleUp) || strings.EqualFold(box.Name, "Bubble Up") {
+		isCurrentSource := box.ID == currentSource.ID && box.Kind == currentSource.Kind
+		if box.Kind == mailSourceKindFolder || isCurrentSource || strings.EqualFold(box.Kind, hey.BoxKindBubbleUp) || strings.EqualFold(box.Name, "Bubble Up") {
 			continue
 		}
 		destinations = append(destinations, box)

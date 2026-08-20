@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -60,8 +61,8 @@ func (c *labelsCommand) run(cmd *cobra.Command, args []string) error {
 	if writer.IsStyled() {
 		table := newTable(cmd.OutOrStdout())
 		table.addRow([]string{"ID", "Name"})
-		for _, folder := range folders {
-			table.addRow([]string{fmt.Sprintf("%d", folder.Id), terminalSafeText(folder.Name)})
+		for _, label := range folders {
+			table.addRow([]string{fmt.Sprintf("%d", label.ID), terminalSafeText(label.Name)})
 		}
 		table.print()
 		if notice != "" {
@@ -89,10 +90,14 @@ type labelCommand struct {
 }
 
 type folderOutput struct {
-	generated.Folder
-	Postings   []folderPostingOutput `json:"postings,omitempty"`
+	ID         int64                 `json:"id"`
+	Name       string                `json:"name,omitempty"`
+	AppURL     string                `json:"app_url,omitempty"`
+	CreatedAt  *time.Time            `json:"created_at,omitempty"`
+	UpdatedAt  *time.Time            `json:"updated_at,omitempty"`
+	Postings   []folderPostingOutput `json:"postings"`
 	NextPage   string                `json:"next_page,omitempty"`
-	TotalCount int                   `json:"total_count,omitempty"`
+	TotalCount int                   `json:"total_count"`
 }
 
 type folderPostingOutput struct {
@@ -159,7 +164,9 @@ func (c *labelCommand) run(cmd *cobra.Command, args []string) error {
 		table.addRow([]string{"ID", "Thread", "From", "Summary", "Date"})
 		for _, posting := range folder.Postings {
 			topicID := resolvePostingTopicID(posting)
-			table.addRow([]string{fmt.Sprintf("%d", posting.Id), fmt.Sprintf("%d", topicID), posting.Creator.Name, truncate(posting.Summary, 60), formatDate(posting.CreatedAt)})
+			creator := terminalSafeText(posting.Creator.Name)
+			summary := truncate(terminalSafeText(posting.Summary), 60)
+			table.addRow([]string{fmt.Sprintf("%d", posting.Id), fmt.Sprintf("%d", topicID), creator, summary, formatDate(posting.CreatedAt)})
 		}
 		table.print()
 		if notice != "" {
@@ -373,17 +380,22 @@ func makeFolderOutput(folder *generated.FolderWithPostings, nextPage string, tot
 		postings[i] = folderPostingOutput{Posting: posting, TopicID: resolvePostingTopicID(posting)}
 	}
 	return folderOutput{
-		Folder: generated.Folder{
-			Id:        folder.Id,
-			Name:      folder.Name,
-			AppUrl:    folder.AppUrl,
-			CreatedAt: folder.CreatedAt,
-			UpdatedAt: folder.UpdatedAt,
-		},
+		ID:         folder.Id,
+		Name:       folder.Name,
+		AppURL:     folder.AppUrl,
+		CreatedAt:  nonZeroTime(folder.CreatedAt),
+		UpdatedAt:  nonZeroTime(folder.UpdatedAt),
 		Postings:   postings,
 		NextPage:   nextPage,
 		TotalCount: total,
 	}
+}
+
+func nonZeroTime(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	return &value
 }
 
 func writeLabelMutation(cmd *cobra.Command, summary string) error {

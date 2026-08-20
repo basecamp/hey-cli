@@ -31,10 +31,10 @@ func TestList(t *testing.T) {
 	if len(folders) != 2 {
 		t.Fatalf("folders = %+v, want two", folders)
 	}
-	if folders[0].Id != 12 || folders[0].Name != "Receipts" || folders[0].AppUrl != "https://app.hey.com/folders/12" {
+	if folders[0].ID != 12 || folders[0].Name != "Receipts" || folders[0].AppURL != "https://app.hey.com/folders/12" {
 		t.Errorf("first folder = %+v", folders[0])
 	}
-	if folders[1].Id != 34 || folders[1].Name != "Travel" {
+	if folders[1].ID != 34 || folders[1].Name != "Travel" {
 		t.Errorf("second folder = %+v", folders[1])
 	}
 }

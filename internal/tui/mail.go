@@ -194,6 +194,9 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			v.notice = "Could not load labels — press g to retry"
 		} else {
 			v.folderDiscoveryErr = ""
+			if v.notice == "Retrying labels…" {
+				v.notice = ""
+			}
 		}
 		return v.applySources(sources), true
 
@@ -577,11 +580,15 @@ func (v *mailView) HelpBindings() []helpBinding {
 		{"l", "reply later"},
 		{"a", "set aside"},
 		{"d", "feed"},
-		{"p", "paper trail"},
-		{"t", "trash"},
-		{"s", "spam"},
-		ignoreBinding,
 	}
+	if v.currentSourceKind() != mailSourceKindFolder {
+		bindings = append(bindings, helpBinding{"p", "paper trail"})
+	}
+	bindings = append(bindings,
+		helpBinding{"t", "trash"},
+		helpBinding{"s", "spam"},
+		ignoreBinding,
+	)
 	if v.currentSourceKind() == mailSourceKindFolder {
 		if v.folderNextPage != "" {
 			bindings = append(bindings, helpBinding{"n", "next page"})
@@ -1166,10 +1173,11 @@ func (v *mailView) openSelected() tea.Cmd {
 
 func (v *mailView) startMove() {
 	selected := v.postingList.selectedPosting()
-	if selected == nil {
+	currentSource := v.currentSource()
+	if selected == nil || currentSource == nil {
 		return
 	}
-	picker := newMovePicker(*selected, v.boxes, v.currentBoxID())
+	picker := newMovePicker(*selected, v.boxes, *currentSource)
 	if len(picker.destinations) == 0 {
 		v.notice = "No other boxes available"
 		return
@@ -1479,8 +1487,8 @@ func (v *mailView) fetchSources(requestID uint64) tea.Cmd {
 
 		folders, folderErr := internalfolders.List(v.vc.ctx, v.vc.sdk)
 		if folderErr == nil {
-			for _, folder := range folders {
-				boxes = append(boxes, models.Box{ID: folder.Id, Kind: mailSourceKindFolder, Name: folder.Name, AppURL: folder.AppUrl})
+			for _, label := range folders {
+				boxes = append(boxes, models.Box{ID: label.ID, Kind: mailSourceKindFolder, Name: label.Name, AppURL: label.AppURL})
 			}
 		}
 		return mailSourcesLoadedMsg{requestID: requestID, sources: boxes, folderErr: folderErr}

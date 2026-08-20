@@ -9,8 +9,15 @@ import (
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 )
 
-// List returns the folders carried by HEY's typed navigation payload.
-func List(ctx context.Context, client *hey.Client) ([]generated.Folder, error) {
+// Label identifies a user-visible HEY label discovered through navigation.
+type Label struct {
+	ID     int64  `json:"id"`
+	Name   string `json:"name"`
+	AppURL string `json:"app_url,omitempty"`
+}
+
+// List returns the labels carried by HEY's typed navigation payload.
+func List(ctx context.Context, client *hey.Client) ([]Label, error) {
 	navigation, err := client.Identity().GetNavigation(ctx)
 	if err != nil {
 		return nil, err
@@ -18,13 +25,13 @@ func List(ctx context.Context, client *hey.Client) ([]generated.Folder, error) {
 	return FromNavigation(navigation), nil
 }
 
-// FromNavigation returns each concrete folder entry from HEY's Labels navigation group.
-func FromNavigation(navigation *generated.NavigationResponse) []generated.Folder {
+// FromNavigation returns each concrete label entry from HEY's Labels navigation group.
+func FromNavigation(navigation *generated.NavigationResponse) []Label {
 	if navigation == nil {
 		return nil
 	}
 
-	var result []generated.Folder
+	var result []Label
 	for _, item := range navigation.Items {
 		if item.Icon.Name != navigationIcon && item.Title != navigationTitle {
 			continue
@@ -38,7 +45,7 @@ func FromNavigation(navigation *generated.NavigationResponse) []generated.Folder
 			if err != nil {
 				continue
 			}
-			result = append(result, generated.Folder{Id: id, Name: entry.Title, AppUrl: entry.AppUrl})
+			result = append(result, Label{ID: id, Name: entry.Title, AppURL: entry.AppUrl})
 		}
 	}
 	return result

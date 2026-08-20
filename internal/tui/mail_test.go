@@ -18,6 +18,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
@@ -469,6 +470,24 @@ func TestMailViewMovePickerMovesToSelectedBox(t *testing.T) {
 	}
 }
 
+func TestMailViewMovePickerKeepsBoxWithCollidingLabelID(t *testing.T) {
+	v := mailWithPostings()
+	v.boxes = []models.Box{
+		{ID: 12, Kind: hey.BoxKindImbox, Name: "Imbox"},
+		{ID: 12, Kind: mailSourceKindFolder, Name: "Receipts"},
+	}
+	v.boxIndex = 1
+
+	v.HandleContentKey(keyPress("m"))
+	if v.movePicker == nil || len(v.movePicker.destinations) != 1 {
+		t.Fatalf("move destinations = %+v", v.movePicker)
+	}
+	destination := v.movePicker.destinations[0]
+	if destination.ID != 12 || destination.Kind != hey.BoxKindImbox {
+		t.Errorf("destination = %+v, want colliding Imbox", destination)
+	}
+}
+
 func TestMailViewMovePickerSelectsWithArrowKeys(t *testing.T) {
 	v, recorded := mailWithTestServer(t, http.StatusNoContent)
 	v.boxes = []models.Box{
@@ -663,6 +682,9 @@ func TestMailViewFolderDiscoveryFailurePreservesMailAndRetries(t *testing.T) {
 	if v.folderDiscoveryErr != "" || len(v.boxes) != 2 || v.boxes[1].Name != "Receipts" {
 		t.Errorf("recovered sources = %+v error=%q", v.boxes, v.folderDiscoveryErr)
 	}
+	if v.notice != "" {
+		t.Errorf("successful retry left notice %q", v.notice)
+	}
 }
 
 func TestMailViewFolderDiscoveryFailurePreservesKnownFolders(t *testing.T) {
@@ -812,6 +834,25 @@ func TestMailViewFolderPickerScrollsAndSanitizesNames(t *testing.T) {
 	_, _, label, _ := v.SubnavItems()
 	if strings.Contains(label, "\x1b]2;owned") || !strings.Contains(label, "Archive�]2;owned��2026") {
 		t.Errorf("folder navigation label = %q", label)
+	}
+}
+
+func TestMailViewFolderPickerTruncatesLongNamesToOneRow(t *testing.T) {
+	posting := models.Posting{ID: 100, Summary: "Receipt"}
+	picker := newFolderPicker(posting, []models.Box{{
+		ID: 12, Kind: mailSourceKindFolder,
+		Name: "A label name that is much wider than the picker",
+	}})
+	picker.resize(24, 8)
+
+	view := picker.view(testVC().styles, 24)
+	if !strings.Contains(view, "…") || strings.Contains(view, "much wider than the picker") {
+		t.Errorf("long label was not truncated: %q", view)
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if width := lipgloss.Width(line); width > 20 {
+			t.Errorf("picker line width = %d, want at most 20: %q", width, line)
+		}
 	}
 }
 
@@ -2102,6 +2143,32 @@ func TestMailViewHelpBindings(t *testing.T) {
 		if !keys[expected] {
 			t.Errorf("missing help binding for key %q", expected)
 		}
+	}
+}
+
+func TestMailViewLabelHelpUsesPOnlyForPreviousPage(t *testing.T) {
+	v := mailWithPostings()
+	v.boxes = append(v.boxes, models.Box{ID: 12, Kind: mailSourceKindFolder, Name: "Receipts"})
+	v.boxIndex = len(v.boxes) - 1
+
+	for _, binding := range v.HelpBindings() {
+		if binding.key == "p" {
+			t.Errorf("first label page advertised p binding: %+v", binding)
+		}
+	}
+
+	v.folderPageHistory = []string{""}
+	var previous, paperTrail int
+	for _, binding := range v.HelpBindings() {
+		if binding.key == "p" && binding.desc == "previous page" {
+			previous++
+		}
+		if binding.key == "p" && binding.desc == "paper trail" {
+			paperTrail++
+		}
+	}
+	if previous != 1 || paperTrail != 0 {
+		t.Errorf("label p bindings = previous:%d paper-trail:%d; all=%v", previous, paperTrail, v.HelpBindings())
 	}
 }
 
