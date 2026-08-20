@@ -145,7 +145,20 @@ NIX_BUILD_EXIT=1"
   cat > "$STUB_DIR/docker" <<'STUB'
 #!/usr/bin/env bash
 STATE="${NIX_STUB_STATE:?}"
+# The staged source is mounted at SRC:/src:ro — find it.
+SRC=""
+for a in "$@"; do
+  case "$a" in *:/src:ro) SRC="${a%%:*}";; esac
+done
 if [ -f "$STATE" ]; then
+  # The verification rebuild must see the corrected hash: the source is
+  # restaged per call, so a stale first-call stage would silently verify the
+  # old hash instead.
+  if ! grep -q 'sha256-NEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWB=' "$SRC/nix/package.nix"; then
+    echo "error: rebuild staged the stale vendorHash"
+    echo "NIX_BUILD_EXIT=1"
+    exit 0
+  fi
   echo "NIX_BUILD_EXIT=0"
 else
   touch "$STATE"
@@ -221,4 +234,35 @@ NIX_BUILD_EXIT=1"
   run scripts/update-nix-flake.sh 0.1.1
   [ "$status" -eq 1 ]
   [[ "$output" != *"verified (build succeeded)"* ]]
+}
+
+@test "stages only tracked files into the build source" {
+  # An untracked scratch .go file must not reach the temporary flake source:
+  # an import it adds could shift the computed vendorHash away from what a
+  # clean checkout produces, and CI would then reject the "verified" update.
+  echo 'package scratch' > scratch.go
+
+  cat > "$STUB_DIR/docker" <<'STUB'
+#!/usr/bin/env bash
+SRC=""
+for a in "$@"; do
+  case "$a" in *:/src:ro) SRC="${a%%:*}";; esac
+done
+[ -n "$SRC" ] || { echo "error: no /src mount"; echo "NIX_BUILD_EXIT=1"; exit 0; }
+# Tracked files arrive at their working-tree content...
+grep -q 'version = "0.1.1";' "$SRC/nix/package.nix" || {
+  echo "error: tracked file missing from stage"; echo "NIX_BUILD_EXIT=1"; exit 0; }
+# ...and untracked files do not arrive at all.
+if [ -e "$SRC/scratch.go" ]; then
+  echo "error: untracked file staged into build source"
+  echo "NIX_BUILD_EXIT=1"
+  exit 0
+fi
+echo "NIX_BUILD_EXIT=0"
+STUB
+  chmod +x "$STUB_DIR/docker"
+
+  run scripts/update-nix-flake.sh 0.1.1
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"verified (build succeeded)"* ]]
 }

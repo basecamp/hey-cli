@@ -82,10 +82,19 @@ NIX_IMAGE="${NIX_IMAGE:-nixos/nix@sha256:b9c9611c8530fa8049a1215b20638536e1e71dc
 # v0.8.0 ship a flake that could not build at all — nix logs
 # `building '...hey-0.8.0-go-modules.drv'` when it *starts* the build it
 # then fails, so the heuristic reported success on a hard failure.
+# The build source is staged from tracked files only (at their working-tree
+# content, so the version edit above is included). Mounting the checkout
+# directly would sweep untracked files into the temporary flake source, where
+# a scratch .go file adding an import could shift the computed vendorHash away
+# from what a clean checkout produces — and CI would then reject the
+# supposedly verified update. Staged fresh per call so the verification
+# rebuild sees the vendorHash written between calls.
 run_nix_build() {
-  docker run --rm -v "$(pwd):/src:ro" "$NIX_IMAGE" bash -c '
+  local stage rc=0 out
+  stage=$(mktemp -d)
+  git ls-files -z | tar -cf - --null -T - | tar -xf - -C "$stage"
+  out=$(docker run --rm -v "$stage:/src:ro" "$NIX_IMAGE" bash -c '
     cp -a /src /build && cd /build
-    rm -rf .git
     git config --global --add safe.directory /build
     git init -q && git add -A && \
       GIT_COMMITTER_NAME=ci GIT_COMMITTER_EMAIL=ci@ci \
@@ -93,7 +102,10 @@ run_nix_build() {
       git commit -q -m init
     nix --extra-experimental-features "nix-command flakes" build --no-link 2>&1
     echo "NIX_BUILD_EXIT=$?"
-  ' 2>&1
+  ' 2>&1) || rc=$?
+  rm -rf "$stage"
+  printf '%s\n' "$out"
+  return "$rc"
 }
 
 # The sentinel must be the LAST line: a `NIX_BUILD_EXIT=0` echoed anywhere
