@@ -102,3 +102,18 @@ write_budget() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"Size budget: stripped <="* ]]
 }
+
+@test "discovers goreleaser dist/ binaries when run with no arguments" {
+  mkdir -p "$WORK/dist/hey_linux_amd64_v1" "$WORK/dist/hey_windows_amd64_v1" "$WORK/dist/hey_linux_amd64_v1/nested"
+  cp "$WORK/big" "$WORK/dist/hey_linux_amd64_v1/hey"
+  cp "$WORK/big" "$WORK/dist/hey_windows_amd64_v1/hey.exe"
+  cp "$WORK/big" "$WORK/dist/hey_linux_amd64_v1/nested/hey"
+  cp "$WORK/big" "$WORK/dist/hey"
+  mkdir -p "$WORK/scripts" && cp "$CHECK" "$WORK/scripts/check-size-budget.sh"
+  write_budget 3 3 true
+  run "$WORK/scripts/check-size-budget.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"| linux_amd64 |"* ]]
+  [[ "$output" == *"| windows_amd64 |"* ]]
+  [ "$(printf '%s\n' "$output" | grep -c '^| ')" -eq 3 ]
+}

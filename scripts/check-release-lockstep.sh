@@ -95,7 +95,11 @@ shopt -u nullglob
 # sensitive-change gate is excluded from both: it lists path *patterns* to
 # watch, which may name a script before it lands.
 collect_files() {
-  { find . -maxdepth 1 -type f \( -name '*.md' -o -name Makefile -o -name '.goreleaser.y*ml' \);
+  # Root files come from globs rather than `find -maxdepth 1`: the root scan
+  # must behave the same under BSD find (macOS `make release-check`), and a
+  # glob has nothing to disagree about.
+  local f
+  { for f in ./*.md ./Makefile ./.goreleaser.yml ./.goreleaser.yaml; do [ -f "$f" ] && echo "$f"; done
     find "$@" -type f \( -name '*.yml' -o -name '*.yaml' -o -name '*.sh' -o -name '*.bats' -o -name '*.md' \) \
       ! -name 'sensitive-change-gate.yml'; } 2>/dev/null | LC_ALL=C sort -u
 }

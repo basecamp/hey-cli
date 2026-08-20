@@ -36,7 +36,12 @@ done
 bins=("$@")
 if [ "${#bins[@]}" -eq 0 ]; then
   if [ -d "$ROOT/dist" ]; then
-    while IFS= read -r f; do bins+=("$f"); done < <(find "$ROOT/dist" -mindepth 2 -maxdepth 2 -type f \( -name hey -o -name hey.exe \) | LC_ALL=C sort)
+    # Globs, not `find -mindepth/-maxdepth`, so dist/ discovery behaves the
+    # same under BSD find on a macOS operator's machine.
+    shopt -s nullglob
+    candidates=("$ROOT"/dist/*/hey "$ROOT"/dist/*/hey.exe)
+    shopt -u nullglob
+    while IFS= read -r f; do [ -f "$f" ] && bins+=("$f"); done < <(printf '%s\n' "${candidates[@]}" | sed '/^$/d' | LC_ALL=C sort)
   elif [ -f "$ROOT/bin/hey" ]; then
     bins=("$ROOT/bin/hey")
   fi

@@ -107,3 +107,23 @@ teardown() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"make update-surface"* ]]
 }
+
+@test "fails on a stale .surface-breaking entry that is not a removal" {
+  # The surface did not drop `hey box --limit`, so the allowlist line is left
+  # over from an earlier release (or pre-authorises a future break).
+  printf 'hey\nhey --json\nhey box\nhey box --limit\nhey todo\n' > .surface
+  printf 'hey box --limit\n' > .surface-breaking
+  run scripts/check-surface-compat.sh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"stale"* ]]
+  [[ "$output" == *"hey box --limit"* ]]
+}
+
+@test "a stale allowlist entry fails even alongside a live acknowledged removal" {
+  printf 'hey\nhey --json\nhey box\nhey box --limit\n' > .surface
+  printf 'hey todo\nhey box --unread\n' > .surface-breaking
+  run scripts/check-surface-compat.sh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"acknowledged"*"hey todo"* ]]
+  [[ "$output" == *"stale"*"hey box --unread"* ]]
+}
