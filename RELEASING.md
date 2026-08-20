@@ -125,7 +125,11 @@ basecamp-cli are further consumers of the same certificate.
 - Certificate: OV code signing, `CN=37signals LLC`, expires **2027-04-30**. The
   DigiCert ONE certificate ID (not the 1Password item's keypair alias) is pinned
   once, as `SIGN_ALIAS` in `release.yml` — keep it in sync with bc3-desktop and
-  basecamp-cli when the certificate is renewed.
+  basecamp-cli when the certificate is renewed. The certificate ID is a valid
+  jsign `--alias`: for `DIGICERTONE`, jsign accepts the certificate's ID or its
+  alias (hex-and-dash values are looked up as `certificates?id=`) and derives
+  the signing keypair from the certificate record — basecamp-cli releases sign
+  with this exact value.
 - jsign version and jar sha256 are pinned in the "Prepare Windows signing" step.
   jsign ≥ 7.5 is required; 7.1–7.3 are broken against DigiCert ONE's current API.
 - Quota: KeyLocker signatures draw from a budget shared with bc3-desktop and

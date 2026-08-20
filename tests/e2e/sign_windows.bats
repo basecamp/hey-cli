@@ -45,11 +45,14 @@ run_sign() {
     "$SIGN_SH" "$1" "$TARGET_FILE"
 }
 
+# SIGN_ALIAS carries the certificate-ID shape pinned in release.yml: jsign
+# routes hex-and-dash aliases to a certificates?id= lookup, so the fixture
+# must exercise that shape, not a mnemonic alias.
 full_env() {
   echo "SM_API_KEY=api-key" \
     "SM_CLIENT_CERT_FILE=$CERT_FILE" \
     "SM_CLIENT_CERT_PASSWORD=cert-pass" \
-    "SIGN_ALIAS=alias-guid" \
+    "SIGN_ALIAS=0f6d8c1a-4b2e-4d59-9a31-7c8e5b2f4a10" \
     "JSIGN_JAR=$JAR_FILE"
 }
 
@@ -100,7 +103,7 @@ full_env() {
 
 @test "nonexistent client cert path fails" {
   run_sign SM_API_KEY=api-key "SM_CLIENT_CERT_FILE=$STUB_DIR/missing.p12" \
-    SM_CLIENT_CERT_PASSWORD=cert-pass SIGN_ALIAS=alias-guid "JSIGN_JAR=$JAR_FILE" \
+    SM_CLIENT_CERT_PASSWORD=cert-pass SIGN_ALIAS=0f6d8c1a-4b2e-4d59-9a31-7c8e5b2f4a10 "JSIGN_JAR=$JAR_FILE" \
     windows_amd64
   [[ "$status" -eq 1 ]]
   [[ "$output" == *"client cert not found"* ]]
@@ -108,7 +111,7 @@ full_env() {
 
 @test "nonexistent jsign jar path fails" {
   run_sign SM_API_KEY=api-key "SM_CLIENT_CERT_FILE=$CERT_FILE" \
-    SM_CLIENT_CERT_PASSWORD=cert-pass SIGN_ALIAS=alias-guid \
+    SM_CLIENT_CERT_PASSWORD=cert-pass SIGN_ALIAS=0f6d8c1a-4b2e-4d59-9a31-7c8e5b2f4a10 \
     "JSIGN_JAR=$STUB_DIR/missing.jar" windows_amd64
   [[ "$status" -eq 1 ]]
   [[ "$output" == *"jsign jar not found"* ]]
@@ -125,7 +128,7 @@ $JAR_FILE
 --storetype
 DIGICERTONE
 --alias
-alias-guid
+0f6d8c1a-4b2e-4d59-9a31-7c8e5b2f4a10
 --storepass
 api-key|$CERT_FILE|cert-pass
 --tsaurl

@@ -242,7 +242,9 @@ jobs:
           SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
           # DigiCert ONE certificate ID (not the keypair alias) for the OV cert
           # CN=37signals LLC, expires 2027-04-30. Shared with basecamp-cli and
-          # bc3-desktop.
+          # bc3-desktop. The ID is a valid jsign --alias: DigiCertOneSigningService
+          # accepts the certificate's id or alias (hex-and-dash values query
+          # certificates?id=) and derives the keypair from the certificate record.
           SIGN_ALIAS: 1346fa41-d9f0-4580-b7b9-a95cf5674354
         run: goreleaser release --clean
 
