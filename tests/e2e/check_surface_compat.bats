@@ -85,6 +85,13 @@ teardown() {
   [[ "$output" == *"No previous stable tag"* ]]
 }
 
+@test "fails when an explicit baseline tag does not exist" {
+  run scripts/check-surface-compat.sh v0.2.O
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"v0.2.O"* ]]
+  [[ "$output" == *"does not resolve"* ]]
+}
+
 @test "skips when the baseline tag has no .surface" {
   git rm -q --cached .surface && git commit -qm "no surface" --allow-empty >/dev/null
   git tag -f v0.1.0 HEAD >/dev/null

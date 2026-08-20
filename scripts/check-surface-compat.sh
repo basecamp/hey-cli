@@ -11,7 +11,8 @@
 #
 # Exit codes:
 #   0 — no unacknowledged removals, or no baseline to compare against
-#   1 — removals found, or the current .surface is missing
+#   1 — removals found, the current .surface is missing, or an explicit
+#       PREV_TAG does not resolve
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -33,13 +34,20 @@ if [ -z "$PREV_TAG" ]; then
   exit 0
 fi
 
-BASELINE="$(mktemp)"
-trap 'rm -f "$BASELINE"' EXIT
+# A tag that does not resolve is a caller error (misspelled PREV_TAG, or an
+# unfetched shallow clone), not a baseline that predates .surface — skipping
+# here would silently disable the whole gate.
+git rev-parse --quiet --verify "${PREV_TAG}^{commit}" >/dev/null \
+  || { echo "FAIL: baseline tag ${PREV_TAG} does not resolve" >&2; exit 1; }
 
-if ! git show "${PREV_TAG}:${CURRENT}" > "$BASELINE" 2>/dev/null; then
+if ! git cat-file -e "${PREV_TAG}:${CURRENT}" 2>/dev/null; then
   echo "Baseline ${PREV_TAG} has no ${CURRENT} — skipping surface compatibility check"
   exit 0
 fi
+
+BASELINE="$(mktemp)"
+trap 'rm -f "$BASELINE"' EXIT
+git show "${PREV_TAG}:${CURRENT}" > "$BASELINE"
 
 echo "Comparing ${CURRENT} against ${PREV_TAG}"
 scripts/check-cli-surface-diff.sh "$BASELINE" "$CURRENT" "$ALLOWLIST"
