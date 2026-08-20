@@ -1,0 +1,102 @@
+# Manual skills sync, for when the release-time sync could not run.
+#
+# The sync-skills job in release.yml is `needs: [release]`, so anything that
+# fails the release job after publication skips the sync entirely and leaves
+# basecamp/skills stale against a shipped release. A skipped or failed sync
+# needs a way back without cutting a new tag. This is it.
+#
+# scripts/sync-skills.sh mirrors the skills/ tree at the given ref into
+# basecamp/skills and no-ops when the content already matches, so re-running it
+# for an already-synced release is safe.
+name: Sync skills
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to sync from, with the v prefix (e.g. v0.2.0)'
+        required: true
+        type: string
+      dry_run:
+        description: 'Preview the sync without pushing'
+        required: false
+        default: false
+        type: boolean
+
+permissions: {}
+
+# Shared with release.yml's sync-skills job so a manual run cannot interleave
+# with an automatic one.
+concurrency:
+  group: sync-skills
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync skills
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - name: Validate tag input
+        env:
+          TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # No prerelease suffix: the automatic sync in release.yml excludes
+          # prereleases deliberately, and this path must not smuggle prerelease
+          # content into the distribution repo's main branch.
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid tag '${TAG}' — expected a stable v-prefixed semver tag (e.g. v0.2.0)"
+            exit 1
+          fi
+
+          # sync-skills.sh mirrors the tree wholesale, so syncing an older tag
+          # would roll basecamp/skills back. The only reason to run this by
+          # hand is that the newest release failed to sync — so require exactly
+          # that release.
+          latest=$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName --jq .tagName)
+          if [ "$TAG" != "$latest" ]; then
+            echo "::error::Refusing to sync ${TAG}: the latest stable release is ${latest}. Syncing an older tag would roll basecamp/skills back."
+            exit 1
+          fi
+
+      # Check out the tag itself, not main: the sync must mirror the skills tree
+      # as it was released, even if main has moved on since.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+
+      # Needed for dry runs too: the honest preview clones the target, so it
+      # cannot run tokenless. Dry runs get a read-only token, which is also what
+      # stops DRY_RUN=remote from pushing even if the script were wrong.
+      - name: Generate token for skills repo
+        id: skills-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: basecamp
+          repositories: skills
+          permission-contents: ${{ inputs.dry_run && 'read' || 'write' }}
+          permission-pull-requests: ${{ inputs.dry_run && 'read' || 'write' }}
+
+      # github.sha is the dispatching ref's SHA (main), not the tag's, so resolve
+      # the commit actually checked out — otherwise the sync records the wrong
+      # provenance for the release it claims to mirror.
+      - name: Resolve the tagged commit
+        id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # DRY_RUN=remote clones the actual target and stops before the push, so
+      # the preview shows the real diff including deletions.
+      - name: Sync skills to distribution repo
+        env:
+          SKILLS_TOKEN: ${{ steps.skills-token.outputs.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          DRY_RUN: ${{ inputs.dry_run && 'remote' || '' }}
+        run: scripts/sync-skills.sh

@@ -5,6 +5,10 @@ project_name: hey
 before:
   hooks:
     - sh -c 'mkdir -p completions && go run ./cmd/hey completion bash > completions/hey.bash && go run ./cmd/hey completion zsh > completions/_hey && go run ./cmd/hey completion fish > completions/hey.fish'
+    # release.sh already committed the stamp for stable tags; this re-stamp
+    # makes the build self-consistent when a tag is pushed by hand. Prereleases
+    # keep plugin metadata on the latest stable version.
+    - sh -c '{{ if .Prerelease }}echo "Skipping plugin version stamp for prerelease {{ .Version }}"{{ else }}scripts/stamp-plugin-version.sh {{ .Version }}{{ end }}'
 
 builds:
   - id: hey

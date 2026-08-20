@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Usage: scripts/release.sh VERSION [--dry-run]
-#   VERSION: semver with v prefix (e.g. v1.0.0)
+#   VERSION: semver, with or without the v prefix (0.2.0, v0.2.0, 0.2.0-rc.1)
 #
-# Validates, tags, and pushes to trigger the release workflow.
+# Validates, updates stable release metadata, tags, and pushes to trigger the
+# release workflow. Set DRY_RUN=1 (or pass --dry-run) to run the checks only.
 
 set -euo pipefail
 
@@ -24,110 +25,154 @@ DRY_RUN="${DRY_RUN:-0}"
 if [[ "$*" == *"--dry-run"* ]]; then
   DRY_RUN=1
 fi
+case "$DRY_RUN" in
+  1|true) DRY_RUN=1 ;;
+  *) DRY_RUN=0 ;;
+esac
 
-if [ -z "$VERSION" ]; then
+if [[ -z "$VERSION" || "$VERSION" == "dev" ]]; then
   echo "Usage: scripts/release.sh VERSION [--dry-run]"
-  echo "       VERSION=v1.0.0 make release"
+  echo "       make release VERSION=0.2.0 [DRY_RUN=1]"
   exit 1
 fi
 
-# Validate semver
-if ! echo "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
-  die "Invalid version '$VERSION' (expected vX.Y.Z or vX.Y.Z-suffix)"
+# --- Normalise and validate the version ---
+VERSION="${VERSION#v}"
+if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+  die "Invalid version '${VERSION}' (expected X.Y.Z or X.Y.Z-suffix, optionally v-prefixed)"
 fi
 
-if [[ "$DRY_RUN" == "1" || "$DRY_RUN" == "true" ]]; then
-  info "Dry run — no tags will be created or pushed"
+TAG="v${VERSION}"
+PRERELEASE=0
+if [[ "$VERSION" == *-* ]]; then
+  PRERELEASE=1
+fi
+
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  info "Dry run — no commits, tags or pushes"
   echo ""
 fi
 
-# nix/package.nix carries its own version literal: it is what `nix profile
-# install github:basecamp/hey-cli` builds and what that binary's --version
-# reports. Tagging without it means the flake keeps advertising the previous
-# release, and nix-verify cannot tell — it only proves the flake builds. The
-# update is deliberate rather than automatic because it rebuilds the flake
-# via Docker and produces a commit to review; this gate makes skipping it
-# impossible. Prereleases are exempt: the flake tracks stable releases only.
-if [[ "$VERSION" != *-* ]]; then
-  NIX_VERSION=$(sed -n 's/.*version = "\([^"]*\)".*/\1/p' nix/package.nix | head -1)
-  if [[ "$NIX_VERSION" != "${VERSION#v}" ]]; then
-    die "nix/package.nix is at ${NIX_VERSION}, not ${VERSION#v}. Run \`make update-nix-hash VERSION=${VERSION}\`, then commit and push before releasing."
-  fi
-fi
-
-# Detect default branch
+# --- Verify branch ---
 DEFAULT_BRANCH=$(git remote show origin 2>/dev/null | sed -n 's/.*HEAD branch: //p')
 DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
-
-# Verify on default branch
-CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-if [ "$CURRENT_BRANCH" != "$DEFAULT_BRANCH" ]; then
-  die "Not on $DEFAULT_BRANCH (currently on $CURRENT_BRANCH)"
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [[ "$BRANCH" != "$DEFAULT_BRANCH" ]]; then
+  die "Not on $DEFAULT_BRANCH (currently on $BRANCH)"
 fi
 
-# Clean working tree
-if [ -n "$(git status --porcelain)" ]; then
-  die "Working tree is not clean"
+# --- Verify clean tree ---
+if [[ -n "$(git status --porcelain)" ]]; then
+  die "Working tree is not clean. Commit or stash changes first."
 fi
 
-# Synced with remote
+# --- Verify synced with remote ---
 git fetch origin "$DEFAULT_BRANCH" --quiet
 LOCAL=$(git rev-parse HEAD)
 REMOTE=$(git rev-parse "origin/$DEFAULT_BRANCH")
-if [ "$LOCAL" != "$REMOTE" ]; then
+if [[ "$LOCAL" != "$REMOTE" ]]; then
   die "Local $DEFAULT_BRANCH (${LOCAL:0:7}) is not synced with origin (${REMOTE:0:7}). Pull or push first."
 fi
 
-# No replace directives
-if grep -q '^replace' go.mod; then
+# --- Verify no replace directives ---
+if grep -q '^[[:space:]]*replace[[:space:]]' go.mod; then
   die "go.mod contains replace directives. Remove them before releasing."
 fi
 
-# Verify required tools
+# --- Verify required tools ---
 if ! command -v jq >/dev/null 2>&1; then
   die "jq is required but not found. Install with your package manager."
 fi
 
 # --- Run pre-flight checks ---
 info "Running release checks"
-info "  Branch: $CURRENT_BRANCH"
+info "  Branch: $BRANCH"
 info "  Commit: ${LOCAL:0:7}"
+info "  Tag:    $TAG"
+echo ""
+make release-check
 
-if [[ "$DRY_RUN" == "1" || "$DRY_RUN" == "true" ]]; then
-  echo ""
-  info "Running release-check..."
-  make release-check
+# --- Update stable release metadata ---
+# Prereleases leave the Nix flake and plugin metadata on the latest stable
+# version: those channels only ever point at stable.
+if [[ "$PRERELEASE" -eq 1 ]]; then
+  info "Skipping stable release metadata for prerelease"
+  echo "  nix flake: unchanged"
+  echo "  Claude plugin metadata: unchanged"
+else
+  info "Updating Nix flake"
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "  (skipped — dry run)"
+  else
+    NIX_RC=0
+    scripts/update-nix-flake.sh "$VERSION" || NIX_RC=$?
+    if [[ "$NIX_RC" -eq 0 ]]; then
+      : # nix flake updated
+    elif [[ "$NIX_RC" -eq 2 ]]; then
+      echo "  nix flake: no changes needed"
+    else
+      die "scripts/update-nix-flake.sh failed (exit $NIX_RC)"
+    fi
+  fi
+
+  info "Stamping plugin version"
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "  (skipped — dry run)"
+  else
+    scripts/stamp-plugin-version.sh "$VERSION"
+  fi
+fi
+
+# --- Commit release prep ---
+if [[ "$PRERELEASE" -eq 0 && "$DRY_RUN" -eq 0 ]]; then
+  git add nix/package.nix .claude-plugin/plugin.json
+  if ! git diff --cached --quiet; then
+    STAGED=$(git diff --cached --name-only)
+    HAS_NIX=0
+    HAS_PLUGIN=0
+    grep -q '^nix/package\.nix$' <<<"$STAGED" && HAS_NIX=1
+    grep -q '^\.claude-plugin/plugin\.json$' <<<"$STAGED" && HAS_PLUGIN=1
+    if [[ "$HAS_NIX" -eq 1 && "$HAS_PLUGIN" -eq 1 ]]; then
+      COMMIT_MSG="Update nix flake and plugin version for ${TAG}"
+    elif [[ "$HAS_NIX" -eq 1 ]]; then
+      COMMIT_MSG="Update nix flake for ${TAG}"
+    else
+      COMMIT_MSG="Update plugin version for ${TAG}"
+    fi
+    git commit -m "$COMMIT_MSG"
+    git push origin "$DEFAULT_BRANCH" --quiet
+    LOCAL=$(git rev-parse HEAD)
+    info "Pushed release prep (${LOCAL:0:7})"
+  fi
+fi
+
+if [[ "$DRY_RUN" -eq 1 ]]; then
   echo ""
   info "Dry run complete. No tag created."
   exit 0
 fi
 
-echo ""
-info "Running release-check..."
-make release-check
-
 # --- Fetch tags to ensure we see remote state ---
 git fetch origin --tags --quiet
 
 # --- Handle tag ---
-if git rev-parse "$VERSION" >/dev/null 2>&1; then
-  EXISTING_SHA=$(git rev-parse "${VERSION}^{commit}")
+if git rev-parse "$TAG" >/dev/null 2>&1; then
+  EXISTING_SHA=$(git rev-parse "${TAG}^{commit}")
   if [[ "$EXISTING_SHA" == "$LOCAL" ]]; then
-    info "Tag $VERSION already exists at HEAD"
+    info "Tag $TAG already exists at HEAD"
   else
-    die "Tag $VERSION already exists at ${EXISTING_SHA:0:7} (not HEAD). Delete it first or choose a different version."
+    die "Tag $TAG already exists at ${EXISTING_SHA:0:7} (not HEAD). Delete it first or choose a different version."
   fi
 else
-  echo ""
-  info "Creating tag $VERSION..."
-  git tag -a "$VERSION" -m "Release $VERSION"
+  info "Creating tag $TAG"
+  git tag -a "$TAG" -m "Release $TAG"
 fi
 
-info "Pushing $VERSION to origin..."
-git push origin "$VERSION"
+info "Pushing $TAG to origin"
+git push origin "$TAG"
 
 echo ""
-info "Released $VERSION"
+info "Release $TAG triggered"
 echo ""
 echo "  Actions: https://github.com/basecamp/hey-cli/actions"
-echo "  Release: https://github.com/basecamp/hey-cli/releases/tag/$VERSION"
+echo "  Release: https://github.com/basecamp/hey-cli/releases/tag/$TAG"

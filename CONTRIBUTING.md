@@ -76,3 +76,7 @@ Compares the current CLI surface against the previous tagged release to detect b
 2. Make your changes.
 3. Run `make check` and ensure everything passes.
 4. Open a pull request against `main`.
+
+## Releasing
+
+See [RELEASING.md](RELEASING.md).
