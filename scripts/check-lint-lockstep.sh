@@ -27,8 +27,17 @@ MIN_VERSION="v2.11.1"
 # Compare with sort -V, never lexically or arithmetically. As strings v2.9.0
 # sorts *above* v2.11.1 — 9 > 1 — so a lexical test would wave through the exact
 # version that failed the release tag. `[ -gt ]` cannot parse either one.
+# (sort -V is in both GNU coreutils and macOS's BSD sort.)
+#
+# Only the numeric core is compared: sort -V orders v2.11.1-rc.1 *after*
+# v2.11.1, so feeding it a prerelease suffix would be wrong in the direction
+# that matters. Pinning a prerelease is a deliberate act; the floor asks only
+# that its numeric part is not stale.
 version_gte() {
-  printf '%s\n%s\n' "$2" "$1" | sort -V | head -1 | grep -qx -- "$2"
+  local a b
+  a=$(printf '%s' "$1" | sed 's/[-+].*//')
+  b=$(printf '%s' "$2" | sed 's/[-+].*//')
+  printf '%s\n%s\n' "$b" "$a" | sort -V | head -1 | grep -qx -- "$b"
 }
 
 # Both spellings: every workflow here is .yml today, but GitHub honours .yaml
@@ -45,8 +54,17 @@ if [[ "${#workflows[@]}" -eq 0 ]]; then
 fi
 
 # One line per golangci-lint-action step: "<file>:<version>", or
-# "<file>:UNPINNED" when the step declares no version.
-mapfile -t pins < <(
+# "<file>:UNPINNED" when the step declares no version. The full version scalar
+# is kept, prerelease or build suffix included, so a v2.11.1 pin and a
+# v2.11.1-rc.1 pin count as disagreeing — the action installs different
+# binaries for them.
+#
+# A read loop rather than mapfile: macOS ships Bash 3.2 as /bin/bash, and this
+# runs locally under `make check`, not only in CI.
+pins=()
+while IFS= read -r line; do
+  pins+=("$line")
+done < <(
   for f in "${workflows[@]}"; do
     awk -v file="$f" '
       function close_step() {
@@ -56,7 +74,7 @@ mapfile -t pins < <(
       /^[[:space:]]*-[[:space:]]/ { close_step() }
       /uses:.*golangci-lint-action/ { in_step = 1; next }
       in_step && /^[[:space:]]*version:[[:space:]]*v[0-9]/ {
-        match($0, /v[0-9]+\.[0-9]+\.[0-9]+/)
+        match($0, /v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]*)?/)
         print file ":" substr($0, RSTART, RLENGTH)
         in_step = 0
         next

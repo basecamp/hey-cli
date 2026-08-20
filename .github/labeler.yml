@@ -30,7 +30,7 @@ tests:
 
 docs:
   - changed-files:
-      - any-glob-to-any-file: "*.md"
+      - any-glob-to-any-file: "**/*.md"
 
 deps:
   - changed-files:

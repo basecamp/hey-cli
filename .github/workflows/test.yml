@@ -41,6 +41,7 @@ jobs:
 
       - name: Smoke test
         run: |
+          set -o pipefail
           ./bin/hey --version
           ./bin/hey --help | head -5
 
@@ -153,7 +154,8 @@ jobs:
           go-version-file: go.mod
 
       # .surface is the committed snapshot of the CLI's commands and flags. A
-      # change that is not reflected there fails here; `make update-surface`
-      # regenerates it so the diff is reviewed, not discovered at release time.
+      # change that is not reflected there fails here. Regenerate it with
+      #   go test ./internal/cmd/ -run TestSurfaceSnapshot -update-surface
+      # so the diff is reviewed, not discovered at release time.
       - name: Compare CLI surface snapshot
         run: go test ./internal/cmd/ -run TestSurfaceSnapshot -v
