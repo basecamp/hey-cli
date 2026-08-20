@@ -9,6 +9,13 @@
 #                  (default: ~/bin if on PATH, else ~/.local/bin if on PATH;
 #                   otherwise ~/bin on Windows, ~/.local/bin elsewhere)
 #   HEY_VERSION    Specific version to install (default: latest)
+#   HEY_SKIP_SETUP Set to 1 to skip the interactive setup wizard after install
+#                  (still runs `hey setup agents` to install the agent skill
+#                  and connect coding agents without prompting)
+#   HEY_SETUP_AGENT
+#                  Which coding agent(s) `setup agents` connects:
+#                  claude | codex | all | none (default: auto-detect a single
+#                  agent; several detected connects none and lists them)
 #
 # Verification: the SHA-256 checksum is always verified against the release's
 # checksums.txt. When cosign is installed, checksums.txt is additionally
@@ -438,15 +445,111 @@ main() {
   # shellcheck disable=SC2064
   trap "rm -rf '${tmp_dir}'" EXIT
 
+  local binary_name="hey"
+  if [[ "$platform" == windows_* ]]; then
+    binary_name="hey.exe"
+  fi
+
   download_binary "$version" "$platform" "$tmp_dir"
   setup_path
   verify_install "$platform"
 
   echo ""
+
+  # Hand off to the setup wizard only when stdin and stdout are a terminal and
+  # it was not explicitly skipped. Non-interactive environments (CI, piped
+  # input, coding agents like Claude Code or Codex) get the agent skill
+  # installed and a best-effort agent connection via `setup agents`, plus
+  # next-step instructions — the wizard prompts, and a prompt without a
+  # terminal would hang.
+  if [[ "${HEY_SKIP_SETUP:-}" == "1" ]]; then
+    step "Skipping setup wizard (HEY_SKIP_SETUP=1)"
+    post_install_setup "$binary_name"
+    print_next_steps
+  elif [[ -t 0 ]] && [[ -t 1 ]]; then
+    "$BIN_DIR/$binary_name" setup
+  else
+    info "Skipping interactive setup (no terminal detected)."
+    post_install_setup "$binary_name"
+    print_next_steps
+  fi
+}
+
+print_next_steps() {
+  echo ""
   echo "  Next steps:"
   echo "    $(bold "hey auth login")    Authenticate with HEY"
+  echo "    $(bold "hey setup")         Run the setup wizard"
   echo "    $(bold "hey --help")        See what you can do"
   echo ""
+}
+
+# binary_supports_setup_agents reports whether the installed binary exposes the
+# `setup agents` subcommand. The hosted install.sh from main can outrun the
+# latest release, so we probe rather than assume.
+binary_supports_setup_agents() {
+  "$1" setup --help 2>/dev/null | grep -qE '^[[:space:]]+agents[[:space:]]'
+}
+
+# binary_supports_setup_agent reports whether the binary exposes a per-agent
+# `setup <id>` subcommand for the given agent id (claude or codex).
+binary_supports_setup_agent() {
+  "$1" setup --help 2>/dev/null | grep -qE "^[[:space:]]+$2[[:space:]]"
+}
+
+# post_install_setup installs the agent skill and connects coding agents
+# without prompting. It honors HEY_SETUP_AGENT (claude|codex|all|none; unset =
+# auto-detect). Never runs the interactive wizard.
+#
+# Cross-version: newer binaries get the intent-neutral `setup agents`. Older
+# release binaries (no `setup agents`) fall back without guessing an agent —
+# only an *explicitly* selected agent is connected. `all` runs every per-agent
+# setup the binary supports; an unset, auto, or ambiguous selector installs the
+# shared skill only (`skill install`).
+#
+# Every real invocation carries HEY_NO_KEYRING=1, per-command rather than
+# exported: these calls never touch credentials, but a locked headless keychain
+# (CI, ssh) can block the keyring probe forever. The `setup --help` capability
+# probes stay bare — help short-circuits before any probe.
+post_install_setup() {
+  local binary_name="$1"
+  local bin="$BIN_DIR/$binary_name"
+
+  if binary_supports_setup_agents "$bin"; then
+    HEY_NO_KEYRING=1 "$bin" setup agents || true
+    return 0
+  fi
+
+  case "${HEY_SETUP_AGENT:-}" in
+    claude|codex)
+      # Capability-check first: an old `setup` parent could accept an
+      # unadvertised agent id as a stray positional arg and launch the
+      # INTERACTIVE wizard, violating the non-interactive contract. Degrade to
+      # the shared skill.
+      if binary_supports_setup_agent "$bin" "${HEY_SETUP_AGENT}"; then
+        HEY_NO_KEYRING=1 "$bin" setup "${HEY_SETUP_AGENT}" || true
+      else
+        HEY_NO_KEYRING=1 "$bin" skill install || true
+      fi
+      ;;
+    all)
+      # Explicit "every agent": dispatch each per-agent setup the binary knows,
+      # falling back to the shared skill if it supports none of them.
+      local ran_agent=0 agent
+      for agent in claude codex; do
+        if binary_supports_setup_agent "$bin" "$agent"; then
+          HEY_NO_KEYRING=1 "$bin" setup "$agent" || true
+          ran_agent=1
+        fi
+      done
+      [[ "$ran_agent" -eq 1 ]] || HEY_NO_KEYRING=1 "$bin" skill install || true
+      ;;
+    *)
+      # Intent-neutral on old binaries: install the shared skill, never pick an
+      # agent. The user connects one via the printed "Next steps".
+      HEY_NO_KEYRING=1 "$bin" skill install || true
+      ;;
+  esac
 }
 
 # Guard so sourcing the script (e.g. from tests) doesn't run the installer.

@@ -14,8 +14,13 @@ try {
 }
 
 # Environment options:
-#   HEY_VERSION   Specific version to install (default: latest)
-#   HEY_BIN_DIR   Where to install the binary
+#   HEY_VERSION      Specific version to install (default: latest)
+#   HEY_BIN_DIR      Where to install the binary
+#   HEY_SKIP_SETUP   Set to 1 to skip the interactive setup wizard (still runs
+#                    `hey setup agents` to install the agent skill and connect
+#                    coding agents without prompting)
+#   HEY_SETUP_AGENT  Which coding agent(s) `setup agents` connects:
+#                    claude | codex | all | none (default: auto-detect)
 #
 # This file must stay pure ASCII: the release pipeline stages and
 # Authenticode-signs a CRLF copy of it, and Windows PowerShell 5.1 decodes a
@@ -24,6 +29,7 @@ try {
 $Repo = 'basecamp/hey-cli'
 $Version = $env:HEY_VERSION
 $BinDir = $env:HEY_BIN_DIR
+$SkipSetup = $env:HEY_SKIP_SETUP
 
 function Step([string]$Message) {
   Write-Host "  -> $Message"
@@ -288,6 +294,71 @@ function Ensure-UserPath([string]$Dir) {
   Info "Added $Dir to your user PATH"
 }
 
+function Test-InteractiveSession {
+  if ($Host.Name -ne 'ConsoleHost' -and $Host.Name -ne 'Visual Studio Code Host') {
+    return $false
+  }
+
+  try {
+    return -not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected
+  } catch {
+    return $false
+  }
+}
+
+# Invoke-PostInstallSetup installs the agent skill and connects coding agents
+# without prompting. It honors HEY_SETUP_AGENT (claude|codex|all|none; unset =
+# auto-detect). Never runs the interactive wizard. Newer binaries get the
+# intent-neutral `setup agents`; older ones (no `setup agents`) only connect an
+# explicitly selected agent, capability-checked, and otherwise install the
+# shared skill. Every call is best-effort: a failure here must not fail the
+# install.
+function Invoke-PostInstallSetup([string]$Binary) {
+  # None of these calls touch credentials, but a locked headless keychain can
+  # block the keyring probe forever. Set the escape hatch for the duration of
+  # setup only, restoring the caller's value (or absence) on the way out.
+  $savedNoKeyring = $env:HEY_NO_KEYRING
+  $env:HEY_NO_KEYRING = '1'
+  try {
+    try { $help = & $Binary setup --help 2>$null } catch { $help = '' }
+
+    if ($help -match '(?m)^\s+agents\s') {
+      try { & $Binary setup agents } catch { }
+      return
+    }
+
+    $selector = $env:HEY_SETUP_AGENT
+    if ($selector -in @('claude', 'codex')) {
+      # Capability-check first: an old `setup` parent could accept an
+      # unadvertised agent id as a stray arg and launch the INTERACTIVE wizard.
+      # Degrade to the skill.
+      if ($help -match "(?m)^\s+$selector\s") {
+        try { & $Binary setup $selector } catch { }
+      } else {
+        try { & $Binary skill install } catch { }
+      }
+    } elseif ($selector -eq 'all') {
+      $ranAgent = $false
+      foreach ($agent in @('claude', 'codex')) {
+        if ($help -match "(?m)^\s+$agent\s") {
+          # Mark attempted (not succeeded) -- matches install.sh's `ran_agent=1`.
+          $ranAgent = $true
+          try { & $Binary setup $agent } catch { }
+        }
+      }
+      if (-not $ranAgent) { try { & $Binary skill install } catch { } }
+    } else {
+      try { & $Binary skill install } catch { }
+    }
+  } finally {
+    if ($null -eq $savedNoKeyring) {
+      Remove-Item Env:HEY_NO_KEYRING -ErrorAction SilentlyContinue
+    } else {
+      $env:HEY_NO_KEYRING = $savedNoKeyring
+    }
+  }
+}
+
 function Main {
   $arch = Get-PlatformArch
   if (-not $BinDir) {
@@ -355,11 +426,32 @@ function Main {
     }
     Info "$installedVersion installed"
 
+    $isInteractive = Test-InteractiveSession
+
     Write-Host ''
-    Write-Host '  Next steps:'
-    Write-Host '    hey auth login    Authenticate with HEY'
-    Write-Host '    hey --help        See what you can do'
-    Write-Host ''
+    if ($SkipSetup -eq '1') {
+      Step 'Skipping setup wizard (HEY_SKIP_SETUP=1)'
+      # Still install the agent skill and connect coding agents (best-effort).
+      Invoke-PostInstallSetup $installedBinary
+      Write-Host ''
+      Write-Host '  Next steps:'
+      Write-Host '    hey auth login    Authenticate with HEY'
+      Write-Host '    hey setup         Run the setup wizard'
+      Write-Host '    hey --help        See what you can do'
+      Write-Host ''
+    } elseif ($isInteractive) {
+      & $installedBinary setup
+    } else {
+      Info 'Skipping interactive setup because PowerShell is running non-interactively.'
+      # Install the agent skill and connect coding agents (best-effort).
+      Invoke-PostInstallSetup $installedBinary
+      Write-Host ''
+      Write-Host '  Next steps:'
+      Write-Host '    hey auth login    Authenticate with HEY'
+      Write-Host '    hey setup         Run the setup wizard'
+      Write-Host '    hey --help        See what you can do'
+      Write-Host ''
+    }
     Write-Host '  Installed executable:'
     Write-Host "    $installedBinary"
     Write-Host ''

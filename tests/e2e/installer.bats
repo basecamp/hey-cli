@@ -9,11 +9,15 @@
 # first run diagnosed rather than swallowed.
 
 setup() {
+  # The installer's setup hand-off keys off these; a leaked value would skew results.
+  unset HEY_SKIP_SETUP HEY_SETUP_AGENT
+
   INSTALL_SH="${BATS_TEST_DIRNAME}/../../scripts/install.sh"
   INSTALL_PS1="${BATS_TEST_DIRNAME}/../../scripts/install.ps1"
 
   STUB_DIR="$(mktemp -d)"
   LOG="$STUB_DIR/calls.log"
+  write_stub new  # default: a binary that supports `setup agents`
 }
 
 teardown() {
@@ -37,12 +41,243 @@ teardown() {
   [[ "$output" != *"BASH_SOURCE[0]: unbound variable"* ]]
 }
 
-# No interactive setup wizard exists: the installer must end with printed next
-# steps, never by exec'ing the freshly installed binary into a prompt.
-@test "install.sh ends with next steps, not an interactive setup" {
-  run grep -nE '"\$BIN_DIR/\$binary_name" setup|HEY_SKIP_SETUP|post_install_setup' "$INSTALL_SH"
+# write_stub emits a `hey` stub that logs its argv. mode=new advertises the
+# `setup agents` subcommand in `setup --help`; mode=old omits it and fails an
+# actual `setup agents` invocation, mimicking a release binary that predates
+# the setup subcommands.
+write_stub() {
+  local mode="$1"
+  {
+    echo '#!/usr/bin/env bash'
+    echo "echo \"\$@\" >> \"$LOG\""
+    echo 'if [[ "$1 $2" == "setup --help" ]]; then'
+    echo '  echo "  claude  Connect Claude Code to HEY"'
+    if [[ "$mode" == "new" ]]; then
+      echo '  echo "  agents  Install the HEY skill and connect detected coding agents"'
+    fi
+    echo '  exit 0'
+    echo 'fi'
+    if [[ "$mode" == "old" ]]; then
+      # An old binary advertises only `setup claude`. Reject every OTHER
+      # `setup <sub>`: a real old parent would swallow it as a stray arg and
+      # launch the interactive wizard -- the exact bug the installer must avoid.
+      echo 'if [[ "$1" == "setup" && "$2" != "claude" && "$2" != "--help" ]]; then echo "unknown command \"$2\"" >&2; exit 1; fi'
+    fi
+    echo 'exit 0'
+  } > "$STUB_DIR/hey"
+  chmod +x "$STUB_DIR/hey"
+}
+
+# write_nk_stub emits a stub that logs HEY_NO_KEYRING alongside argv, for
+# asserting the escape-hatch belt. Separate from write_stub so the argv-shape
+# assertions stay byte-exact. mode mirrors write_stub's new/old.
+write_nk_stub() {
+  local mode="$1"
+  {
+    echo '#!/usr/bin/env bash'
+    echo "echo \"nk=\${HEY_NO_KEYRING:-unset} \$@\" >> \"$LOG\""
+    echo 'if [[ "$1 $2" == "setup --help" ]]; then'
+    if [[ "$mode" == "new" ]]; then
+      echo '  echo "  agents  Install the HEY skill and connect detected coding agents"'
+    fi
+    echo '  exit 0'
+    echo 'fi'
+    echo 'exit 0'
+  } > "$STUB_DIR/hey"
+  chmod +x "$STUB_DIR/hey"
+}
+
+run_post_install_setup() {
+  run bash -c "
+    set -euo pipefail
+    ${1:-}
+    source '$INSTALL_SH'
+    BIN_DIR='$STUB_DIR'
+    post_install_setup hey
+    cat '$LOG'
+  "
+}
+
+# The installer hands off to the setup wizard on a terminal and to the
+# non-interactive `setup agents` otherwise. The non-TTY and skip branches must
+# run `setup agents` (skill + best-effort agent connection), never a hardcoded
+# `setup claude`; old binaries (no `setup agents`) must fall back without
+# guessing an agent.
+
+@test "new binary: post_install_setup dispatches to 'setup agents', never 'setup claude'" {
+  run_post_install_setup
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"setup agents"* ]]
+  [[ "$output" != *"setup claude"* ]]
+}
+
+@test "new binary: HEY_SKIP_SETUP path still runs 'setup agents'" {
+  run_post_install_setup "export HEY_SKIP_SETUP=1"
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"setup agents"* ]]
+  [[ "$output" != *"setup claude"* ]]
+}
+
+@test "old binary + unset selector falls back to 'skill install', never 'setup claude'" {
+  write_stub old
+  run_post_install_setup
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"skill install"* ]]
+  [[ "$output" != *"setup claude"* ]]
+  [[ "$output" != *"setup agents"$'\n'* ]]  # the unknown command is never left as the outcome
+}
+
+@test "old binary + HEY_SETUP_AGENT=claude connects claude explicitly" {
+  write_stub old
+  run_post_install_setup "export HEY_SETUP_AGENT=claude"
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"setup claude"* ]]
+  [[ "$output" != *"skill install"* ]]
+}
+
+# Explicit `all` intent must dispatch every per-agent setup the old binary
+# supports (here the stub advertises only `claude`), never collapse to skill-only.
+@test "old binary + HEY_SETUP_AGENT=all runs the supported per-agent setups" {
+  write_stub old
+  run_post_install_setup "export HEY_SETUP_AGENT=all"
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"setup claude"* ]]
+  [[ "$output" != *"setup codex"* ]]  # codex unadvertised -> never invoked
+}
+
+# Explicit `codex` on an old binary that lacks `setup codex` must NOT run the
+# unknown subcommand (which would launch the interactive wizard) -- it degrades
+# to the shared skill.
+@test "old binary + HEY_SETUP_AGENT=codex degrades to 'skill install', never 'setup codex'" {
+  write_stub old
+  run_post_install_setup "export HEY_SETUP_AGENT=codex"
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"skill install"* ]]
+  [[ "$output" != *"setup codex"* ]]
+}
+
+@test "install.sh has no residual 'setup claude' dispatch" {
+  run grep -n 'setup claude' "$INSTALL_SH"
   [[ "$status" -ne 0 ]]
+}
+
+@test "install.sh hands off to the wizard on a TTY and to post_install_setup otherwise" {
+  # The TTY branch execs the freshly installed binary into `setup`.
+  grep -qF '"$BIN_DIR/$binary_name" setup' "$INSTALL_SH"
+  grep -qE '\[\[ -t 0 \]\] && \[\[ -t 1 \]\]' "$INSTALL_SH"
+  # The skip and non-TTY branches both dispatch via post_install_setup.
+  run grep -c 'post_install_setup "\$binary_name"' "$INSTALL_SH"
+  [[ "$status" -eq 0 ]]
+  [[ "$output" -ge 2 ]]
+  # Next steps keep the literal login hint plus the wizard.
   grep -q 'hey auth login' "$INSTALL_SH"
+  grep -q 'hey setup' "$INSTALL_SH"
+}
+
+@test "install.ps1 routes both non-wizard branches through the guarded best-effort helper" {
+  run grep -c 'Invoke-PostInstallSetup \$installedBinary' "$INSTALL_PS1"
+  [[ "$status" -eq 0 ]]
+  [[ "$output" -eq 2 ]]
+  grep -qF '& $installedBinary setup' "$INSTALL_PS1"
+}
+
+@test "install.ps1 helper is guarded and cross-version aware" {
+  grep -q 'function Invoke-PostInstallSetup' "$INSTALL_PS1"
+  grep -q 'setup agents' "$INSTALL_PS1"
+  grep -q 'skill install' "$INSTALL_PS1"
+  grep -q 'catch {' "$INSTALL_PS1"
+  # Explicit claude|codex selectors must be capability-checked before dispatch,
+  # so an old binary never gets an unadvertised subcommand as a stray arg.
+  grep -qF 'match "(?m)^\s+$selector\s"' "$INSTALL_PS1"
+  grep -q 'HEY_NO_KEYRING' "$INSTALL_PS1"
+}
+
+# The installer's best-effort children never touch credentials, but a locked
+# headless keychain can block the keyring probe forever, so they must carry
+# HEY_NO_KEYRING=1 -- per-command, not blanket: the `setup --help` capability
+# probe stays bare (help short-circuits before the probe).
+@test "new binary: real setup calls carry HEY_NO_KEYRING=1, capability probe does not" {
+  write_nk_stub new
+  run bash -c "
+    set -euo pipefail
+    unset HEY_NO_KEYRING
+    source '$INSTALL_SH'
+    BIN_DIR='$STUB_DIR'
+    post_install_setup hey
+    cat '$LOG'
+  "
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"nk=unset setup --help"* ]]
+  [[ "$output" == *"nk=1 setup agents"* ]]
+}
+
+@test "old binary: skill install fallback carries HEY_NO_KEYRING=1" {
+  write_nk_stub old
+  run bash -c "
+    set -euo pipefail
+    unset HEY_NO_KEYRING
+    source '$INSTALL_SH'
+    BIN_DIR='$STUB_DIR'
+    post_install_setup hey
+    cat '$LOG'
+  "
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"nk=unset setup --help"* ]]
+  [[ "$output" == *"nk=1 skill install"* ]]
+}
+
+# The function under test is extracted from install.ps1's AST and evaluated
+# alone: Main never runs, and the installer needs no test hooks.
+@test "install.ps1 Invoke-PostInstallSetup sets and restores HEY_NO_KEYRING" {
+  if ! command -v pwsh >/dev/null 2>&1; then
+    if [[ -n "${CI:-}" ]]; then
+      echo "pwsh is required in CI for install.ps1 belt coverage" >&2
+      return 1
+    fi
+    skip "pwsh not installed"
+  fi
+
+  PS_LOG="$STUB_DIR/ps-calls.log"
+
+  cat > "$STUB_DIR/hey-stub.ps1" <<'EOF'
+$rest = $args -join ' '
+$nk = if ($null -eq $env:HEY_NO_KEYRING) { 'unset' } else { $env:HEY_NO_KEYRING }
+Add-Content -LiteralPath $env:PS_LOG "nk=$nk $rest"
+if ($rest -eq 'setup --help') {
+  '  agents  Install the HEY skill and connect detected coding agents'
+}
+EOF
+
+  cat > "$STUB_DIR/driver.ps1" <<'EOF'
+$ErrorActionPreference = 'Stop'
+$tokens = $null; $parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:INSTALL_PS1_PATH, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count -gt 0) { throw "install.ps1 parse errors: $($parseErrors -join '; ')" }
+$fn = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-PostInstallSetup' }, $true)
+if (-not $fn) { throw 'Invoke-PostInstallSetup not found in install.ps1' }
+# Evaluate only the function definition -- the installer's Main never runs.
+. ([scriptblock]::Create($fn.Extent.Text))
+Invoke-PostInstallSetup $env:PS_STUB
+if ($null -ne $env:HEY_NO_KEYRING) { throw "HEY_NO_KEYRING not restored: '$env:HEY_NO_KEYRING'" }
+'restored-ok'
+# Second pass: a caller-set value must survive, not just absence.
+$env:HEY_NO_KEYRING = '0'
+Invoke-PostInstallSetup $env:PS_STUB
+if ($env:HEY_NO_KEYRING -ne '0') { throw "existing HEY_NO_KEYRING value not restored: '$env:HEY_NO_KEYRING'" }
+'restored-value-ok'
+EOF
+
+  run bash -c "
+    set -euo pipefail
+    unset HEY_NO_KEYRING
+    export PS_LOG='$PS_LOG' PS_STUB='$STUB_DIR/hey-stub.ps1' INSTALL_PS1_PATH='$INSTALL_PS1'
+    pwsh -NoProfile -File '$STUB_DIR/driver.ps1'
+    cat '$PS_LOG'
+  "
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"restored-ok"* ]]
+  [[ "$output" == *"restored-value-ok"* ]]
+  [[ "$output" == *"nk=1 setup agents"* ]]
 }
 
 # The release builds darwin_amd64 and darwin_arm64, never a universal
