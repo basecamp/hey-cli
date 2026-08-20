@@ -41,6 +41,20 @@ if [[ "$DRY_RUN" == "1" || "$DRY_RUN" == "true" ]]; then
   echo ""
 fi
 
+# nix/package.nix carries its own version literal: it is what `nix profile
+# install github:basecamp/hey-cli` builds and what that binary's --version
+# reports. Tagging without it means the flake keeps advertising the previous
+# release, and nix-verify cannot tell — it only proves the flake builds. The
+# update is deliberate rather than automatic because it rebuilds the flake
+# via Docker and produces a commit to review; this gate makes skipping it
+# impossible. Prereleases are exempt: the flake tracks stable releases only.
+if [[ "$VERSION" != *-* ]]; then
+  NIX_VERSION=$(sed -n 's/.*version = "\([^"]*\)".*/\1/p' nix/package.nix | head -1)
+  if [[ "$NIX_VERSION" != "${VERSION#v}" ]]; then
+    die "nix/package.nix is at ${NIX_VERSION}, not ${VERSION#v}. Run \`make update-nix-hash VERSION=${VERSION}\`, then commit and push before releasing."
+  fi
+fi
+
 # Detect default branch
 DEFAULT_BRANCH=$(git remote show origin 2>/dev/null | sed -n 's/.*HEAD branch: //p')
 DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"

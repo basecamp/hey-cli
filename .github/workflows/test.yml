@@ -314,6 +314,11 @@ jobs:
   # exists so it lands red with the correct hash and `make update-nix-hash`
   # attached, instead of a raw nix dump.
   #
+  # Go sources are in the filter too: vendorHash covers the vendored *files*,
+  # not go.sum, so a new import from a module already in go.mod changes the
+  # hash while leaving go.mod and go.sum alone. The filter exists to skip
+  # docs-only and workflow-only PRs, not Go changes.
+  #
   # The filter includes this file: a PR that changes only the job would
   # otherwise skip the job it changed.
   nix-build:
@@ -334,6 +339,7 @@ jobs:
         with:
           filters: |
             nix:
+              - '**/*.go'
               - 'go.mod'
               - 'go.sum'
               - 'flake.nix'

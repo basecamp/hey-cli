@@ -37,7 +37,7 @@ if [[ "$STATUS" -ne 0 ]]; then
   # other failure — a stale flake.lock whose Go is older than go.mod's
   # directive, say — falls through with nix's own output and no false remedy.
   if HASH="$("$SCRIPT_DIR/extract-nix-vendor-hash.sh" "$LOG")"; then
-    echo "::error::Stale Nix vendorHash. Expected ${HASH}. A go.mod or go.sum change invalidates it and dependabot does not update it — run 'make update-nix-hash' and commit nix/package.nix."
+    echo "::error::Stale Nix vendorHash. Expected ${HASH}. A dependency change (go.mod, go.sum, or a new import from an existing module) invalidates it and dependabot does not update it — run 'make update-nix-hash' and commit nix/package.nix."
   fi
   exit "$STATUS"
 fi

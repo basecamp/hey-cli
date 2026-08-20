@@ -52,7 +52,7 @@ help:
 	@echo ""
 	@echo "  make check-surface        Generate CLI surface snapshot"
 	@echo "  make check-surface-compat Compare surface against previous tag"
-	@echo "  make update-nix-hash      Recompute the Nix vendorHash via Docker"
+	@echo "  make update-nix-hash Recompute the Nix vendorHash via Docker ([VERSION=v1.2.3] bumps the version)"
 	@echo "  make tools                Install dev tools"
 
 # Toolchain guard — fails fast when PATH go and GOROOT go disagree
@@ -187,13 +187,16 @@ check-surface-compat: build
 		fi; \
 	fi
 
-# Recompute Nix vendorHash via Docker and update nix/package.nix.
-# 0 = updated, 2 = nothing to do. Anything else is a real failure and must
-# propagate: a blanket `|| true` here would silently undo the script's own
-# fail-closed check.
+# Recompute Nix vendorHash via Docker and update nix/package.nix. Pass
+# VERSION=vX.Y.Z to also bump the package version (scripts/release.sh refuses
+# to tag a stable release until it matches); without it the stored version is
+# kept. 0 = updated, 2 = nothing to do. Anything else is a real failure and
+# must propagate: a blanket `|| true` here would silently undo the script's
+# own fail-closed check.
 update-nix-hash:
-	@VERSION=$$(sed -n 's/.*version = "\([^"]*\)".*/\1/p' nix/package.nix | head -1); \
-	scripts/update-nix-flake.sh "$$VERSION"; RC=$$?; \
+	@V="$(VERSION)"; \
+	if [ "$$V" = dev ]; then V=$$(sed -n 's/.*version = "\([^"]*\)".*/\1/p' nix/package.nix | head -1); fi; \
+	scripts/update-nix-flake.sh "$${V#v}"; RC=$$?; \
 	if [ $$RC -ne 0 ] && [ $$RC -ne 2 ]; then exit $$RC; fi
 
 # Security suite

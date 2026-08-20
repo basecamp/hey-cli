@@ -25,21 +25,23 @@
       );
 
       devShells = forAllSystems (system:
-        let pkgs = nixpkgsFor.${system};
+        let
+          pkgs = nixpkgsFor.${system};
+          # The same toolchain the package builds with — see nix/go.nix.
+          go = pkgs.callPackage ./nix/go.nix { };
         in {
           default = pkgs.mkShell {
-            packages = with pkgs; [
+            packages = [ go ] ++ (with pkgs; [
               actionlint
               bats
               git
-              go_1_26
               golangci-lint
               goreleaser
               gnumake
               jq
               ripgrep
               zizmor
-            ];
+            ]);
           };
         }
       );

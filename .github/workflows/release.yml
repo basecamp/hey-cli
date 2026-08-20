@@ -387,10 +387,20 @@ jobs:
       - name: Install Nix
         uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31.11.0
 
+      # The version check closes the loop on scripts/release.sh's gate: a flake
+      # that builds but still advertises the previous release is a broken
+      # artifact for `nix profile install`, and only the tag knows the truth.
       - name: Build and verify
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
           STORE_PATH=$(nix build --no-link --print-out-paths)
-          "$STORE_PATH/bin/hey" --version
+          out=$("$STORE_PATH/bin/hey" --version)
+          echo "$out"
+          [ "$out" = "hey version ${TAG#v}" ] || {
+            echo "::error::Nix flake built ${out#hey version }, expected ${TAG#v}. nix/package.nix was not bumped before tagging."
+            exit 1
+          }
 
   sync-skills:
     name: Sync skills

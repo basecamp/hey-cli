@@ -1,28 +1,17 @@
-{ lib, buildGoModule, fetchurl, go_1_26, installShellFiles, stdenv }:
+{ lib, buildGoModule, callPackage, installShellFiles, stdenv }:
 
 let
-  # go.mod's `go` directive is the floor; nixpkgs-unstable lagged it at 1.26.5
-  # when this flake was written, so the toolchain is rebuilt from the upstream
-  # source tarball until nixpkgs catches up. The override is conditional and
-  # drops itself once go_1_26 reaches 1.26.6 — delete this block after a
-  # `nix flake update` that makes `lib.versionOlder` false. Keep MIN_GO in
-  # step with go.mod: a toolchain bump that outpaces flake.lock breaks the
-  # build without touching go.mod or go.sum, which is why the nix-build CI job
-  # runs on every go.mod change and on tags.
-  minGo = "1.26.6";
-  go = if lib.versionOlder go_1_26.version minGo
-    then go_1_26.overrideAttrs (_: {
-      version = minGo;
-      src = fetchurl {
-        url = "https://go.dev/dl/go${minGo}.src.tar.gz";
-        hash = "sha256-oHIcVMaIkBRI13rZs+x+p8R0cwdV/4kTgukuy5P/LLE=";
-      };
-    })
-    else go_1_26;
+  # The toolchain lives in nix/go.nix, shared with the flake's dev shell so
+  # both build with the same Go. Bound here rather than taken as a function
+  # argument: callPackage fills any argument whose name exists in pkgs, and
+  # `pkgs.go` does, so a `go ? ...` default would be silently overridden by
+  # the stock toolchain.
+  go = callPackage ./go.nix { };
 in
 buildGoModule.override { inherit go; } (finalAttrs: {
   pname = "hey";
-  # Updated automatically by scripts/update-nix-flake.sh on each release.
+  # Bumped by `make update-nix-hash VERSION=vX.Y.Z` before each stable
+  # release; scripts/release.sh refuses to tag until it matches.
   version = "0.1.1";
 
   src = lib.cleanSource ./..;

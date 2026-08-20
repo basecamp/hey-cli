@@ -77,6 +77,51 @@ NIX_BUILD_EXIT=0"
   [[ "$output" == *"verified (build succeeded)"* ]]
 }
 
+@test "rewrites the version literal when a new version is requested" {
+  # The script's other responsibility. Without this case a regression in the
+  # version rewrite passes CI, because every other test asks for the version
+  # already stored in package.nix.
+  stub_docker "NIX_BUILD_EXIT=0"
+
+  run scripts/update-nix-flake.sh 0.2.0
+  [ "$status" -eq 0 ]   # 0 = changes written
+  [[ "$output" == *"nix version: 0.1.1 → 0.2.0"* ]]
+  [[ "$output" == *"verified (build succeeded)"* ]]
+  grep -q 'version = "0.2.0";' nix/package.nix
+  ! grep -q 'version = "0.1.1";' nix/package.nix
+  # The hash line is untouched by a version-only change.
+  grep -q 'sha256-OLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDA=' nix/package.nix
+}
+
+@test "does not write a version when the build fails" {
+  # A version bump and a broken flake must not be half-committed: the literal
+  # is rewritten before the build, so the non-zero exit is what keeps the
+  # caller from committing it.
+  stub_docker "error: builder failed with exit code 1
+NIX_BUILD_EXIT=1"
+
+  run scripts/update-nix-flake.sh 0.2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not because of the vendorHash"* ]]
+}
+
+@test "does not write the Go source tarball's hash into vendorHash" {
+  # nix/go.nix fetches the Go source with its own fixed-output hash. When that
+  # one is stale, the remedy is in go.nix; the classifier must not hand its
+  # `got:` to this script, which would corrupt package.nix and then fail the
+  # verification rebuild.
+  stub_docker "error: hash mismatch in fixed-output derivation '/nix/store/abc-go1.26.6.src.tar.gz.drv':
+         specified: sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+            got:    sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=
+NIX_BUILD_EXIT=1"
+
+  run scripts/update-nix-flake.sh 0.1.1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not because of the vendorHash"* ]]
+  grep -q 'sha256-OLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDA=' nix/package.nix
+  ! grep -q 'sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=' nix/package.nix
+}
+
 @test "fails closed when the build fails without a hash mismatch" {
   # The exact v0.1.1 shape: nix logs that it is *building* hey, then dies
   # on the Go toolchain. The old heuristic matched that line and reported
@@ -101,7 +146,7 @@ if [ -f "$STATE" ]; then
   echo "NIX_BUILD_EXIT=0"
 else
   touch "$STATE"
-  echo "error: hash mismatch in fixed-output derivation"
+  echo "error: hash mismatch in fixed-output derivation '/nix/store/abc-hey-0.1.1-go-modules.drv':"
   echo "         specified: sha256-OLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDA="
   echo "            got:    sha256-NEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWB="
   echo "NIX_BUILD_EXIT=1"
@@ -119,7 +164,7 @@ STUB
 @test "fails when the corrected hash still does not build" {
   # Every call reports a mismatch — the rebuild never converges, so the script
   # must not claim success just because it wrote a new hash.
-  stub_docker "error: hash mismatch in fixed-output derivation
+  stub_docker "error: hash mismatch in fixed-output derivation '/nix/store/abc-hey-0.1.1-go-modules.drv':
          specified: sha256-OLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDA=
             got:    sha256-NEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWB=
 NIX_BUILD_EXIT=1"

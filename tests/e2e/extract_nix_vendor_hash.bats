@@ -88,6 +88,49 @@ LOG
   [ -z "$output" ]
 }
 
+@test "rejects a mismatch in a fixed-output derivation that is not go-modules" {
+  # This flake carries a second fixed-output derivation: the Go source tarball
+  # nix/go.nix fetches while nixpkgs lags go.mod. A stale hash there is a
+  # nix/go.nix problem; writing it into vendorHash corrupts the tracked file and
+  # then fails the verification rebuild anyway.
+  run "$EXTRACT" <<'LOG'
+error: hash mismatch in fixed-output derivation '/nix/store/abc-go1.26.6.src.tar.gz.drv':
+         specified: sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+            got:    sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=
+error: 1 dependencies of derivation '/nix/store/xyz-go-1.26.6.drv' failed to build
+LOG
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
+@test "takes the go-modules hash even when another mismatch precedes it" {
+  # The `got:` must come from the go-modules block itself, not from whichever
+  # mismatch nix happened to print first.
+  run "$EXTRACT" <<'LOG'
+error: hash mismatch in fixed-output derivation '/nix/store/abc-go1.26.6.src.tar.gz.drv':
+         specified: sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+            got:    sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=
+error: hash mismatch in fixed-output derivation '/nix/store/def-hey-0.1.2-go-modules.drv':
+         specified: sha256-OLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDA=
+            got:    sha256-NEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWB=
+LOG
+  [ "$status" -eq 0 ]
+  [ "$output" = "sha256-NEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWB=" ]
+}
+
+@test "does not borrow a later derivation's got: for a go-modules mismatch" {
+  # A go-modules diagnostic whose own value is unusable must not fall through
+  # to the next block's hash.
+  run "$EXTRACT" <<'LOG'
+error: hash mismatch in fixed-output derivation '/nix/store/def-hey-0.1.2-go-modules.drv':
+            got:    not-a-hash
+error: hash mismatch in fixed-output derivation '/nix/store/abc-go1.26.6.src.tar.gz.drv':
+            got:    sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=
+LOG
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
 @test "rejects an empty log" {
   run "$EXTRACT" </dev/null
   [ "$status" -ne 0 ]
