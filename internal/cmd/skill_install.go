@@ -143,7 +143,7 @@ func linkSkillToClaude() (string, error) {
 		return "", err
 	}
 
-	if err := makeSkillSymlink(filepath.Join("..", "..", ".agents", "skills", "hey"), symlinkPath); err != nil {
+	if err := makeSkillSymlink(claudeSkillLinkTarget, symlinkPath); err != nil {
 		// Fallback (e.g. Windows without symlink privilege): copy the files.
 		notice := fmt.Sprintf("symlink failed (%v), copied files instead", err)
 		if copyErr := copySkillFiles(skillDir, symlinkPath); copyErr != nil {
@@ -153,6 +153,11 @@ func linkSkillToClaude() (string, error) {
 	}
 	return "", nil
 }
+
+// claudeSkillLinkTarget is the relative target every hey-cli-written
+// ~/.claude/skills/hey symlink points at. It doubles as provenance: a link
+// with any other target was not written by hey-cli.
+var claudeSkillLinkTarget = filepath.Join("..", "..", ".agents", "skills", "hey")
 
 // makeSkillSymlink is a seam so tests can exercise the symlink-less fallback.
 var makeSkillSymlink = os.Symlink

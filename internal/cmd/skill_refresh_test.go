@@ -108,9 +108,12 @@ func TestRefreshSkillsWithoutInstallNeverInstalls(t *testing.T) {
 	}
 }
 
-func TestRefreshSkillsRepairsBrokenClaudeLink(t *testing.T) {
+// A dangling ~/.claude/skills/hey that hey-cli did not write — a user's link
+// to a volume that is merely unmounted right now — must survive the refresh
+// untouched, even when a marked baseline exists next to it.
+func TestRefreshSkillsPreservesForeignBrokenClaudeLink(t *testing.T) {
 	home := refreshFixture(t)
-	stubVersion(t, "1.2.3")
+	stubVersion(t, "9.9.9")
 	installStaleSkill(t, home)
 
 	claudeSkills := filepath.Join(home, ".claude", "skills")
@@ -118,15 +121,82 @@ func TestRefreshSkillsRepairsBrokenClaudeLink(t *testing.T) {
 		t.Fatal(err)
 	}
 	linkPath := filepath.Join(claudeSkills, "hey")
-	if err := os.Symlink("does-not-exist", linkPath); err != nil {
+	foreign := "../../../Volumes/offline/custom-hey-skill"
+	if err := os.Symlink(foreign, linkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	if !refreshSkillsIfVersionChanged() {
+		t.Fatal("the marked baseline should still refresh")
+	}
+	target, err := os.Readlink(linkPath)
+	if err != nil || target != foreign {
+		t.Errorf("foreign broken link was replaced: target = %q, %v", target, err)
+	}
+}
+
+// The provenance gate itself: only the canonical target over a marked
+// baseline counts as ours.
+func TestClaudeSkillLinkIsOurs(t *testing.T) {
+	home := refreshFixture(t)
+	claudeSkills := filepath.Join(home, ".claude", "skills")
+	if err := os.MkdirAll(claudeSkills, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linkPath := filepath.Join(claudeSkills, "hey")
+	relink := func(target string) {
+		t.Helper()
+		_ = os.Remove(linkPath)
+		if err := os.Symlink(target, linkPath); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	relink(claudeSkillLinkTarget)
+	if claudeSkillLinkIsOurs(linkPath) {
+		t.Error("canonical target over an unmarked baseline is not ours")
+	}
+
+	installStaleSkill(t, home) // marks the baseline
+	if !claudeSkillLinkIsOurs(linkPath) {
+		t.Error("canonical target over a marked baseline is ours")
+	}
+
+	relink("../../../Volumes/offline/custom-hey-skill")
+	if claudeSkillLinkIsOurs(linkPath) {
+		t.Error("a foreign target is never ours, marker or not")
+	}
+
+	relink(filepath.Join(home, ".agents", "skills", "hey")) // same place, absolute spelling
+	if claudeSkillLinkIsOurs(linkPath) {
+		t.Error("only the exact canonical relative target is ours")
+	}
+}
+
+// Our own canonical link over a marked baseline passes through the refresh
+// intact and still resolves afterwards.
+func TestRefreshSkillsKeepsCanonicalClaudeLink(t *testing.T) {
+	home := refreshFixture(t)
+	stubVersion(t, "9.9.9")
+	installStaleSkill(t, home)
+
+	claudeSkills := filepath.Join(home, ".claude", "skills")
+	if err := os.MkdirAll(claudeSkills, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linkPath := filepath.Join(claudeSkills, "hey")
+	if err := os.Symlink(claudeSkillLinkTarget, linkPath); err != nil {
 		t.Fatal(err)
 	}
 
 	if !refreshSkillsIfVersionChanged() {
 		t.Fatal("refresh should run")
 	}
+	if target, err := os.Readlink(linkPath); err != nil || target != claudeSkillLinkTarget {
+		t.Errorf("canonical link disturbed: %q, %v", target, err)
+	}
 	if _, err := os.Stat(filepath.Join(linkPath, "SKILL.md")); err != nil {
-		t.Errorf("broken Claude link was not repaired: %v", err)
+		t.Errorf("canonical link no longer resolves: %v", err)
 	}
 }
 
