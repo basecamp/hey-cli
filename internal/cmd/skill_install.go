@@ -118,11 +118,11 @@ func linkSkillToClaude() (string, error) {
 	if err := os.MkdirAll(symlinkDir, 0o755); err != nil { // #nosec G301 -- standard user-level skills directory
 		return "", fmt.Errorf("creating symlink directory: %w", err)
 	}
-	if err := os.Remove(symlinkPath); err != nil && !os.IsNotExist(err) {
-		return "", fmt.Errorf("removing existing skill link: %w", err)
+	if err := removeExistingSkillLink(symlinkPath); err != nil {
+		return "", err
 	}
 
-	if err := os.Symlink(filepath.Join("..", "..", ".agents", "skills", "hey"), symlinkPath); err != nil {
+	if err := makeSkillSymlink(filepath.Join("..", "..", ".agents", "skills", "hey"), symlinkPath); err != nil {
 		// Fallback (e.g. Windows without symlink privilege): copy the files.
 		notice := fmt.Sprintf("symlink failed (%v), copied files instead", err)
 		if copyErr := copySkillFiles(skillDir, symlinkPath); copyErr != nil {
@@ -131,6 +131,55 @@ func linkSkillToClaude() (string, error) {
 		return notice, nil
 	}
 	return "", nil
+}
+
+// makeSkillSymlink is a seam so tests can exercise the symlink-less fallback.
+var makeSkillSymlink = os.Symlink
+
+// removeExistingSkillLink clears the way for a fresh Claude skill link. The
+// interesting case is a real directory: a prior run's copy fallback leaves
+// one holding only our own files, and it must be replaceable on the next run
+// (os.Remove fails on a non-empty directory). Recognize exactly that shape
+// and remove it; any other populated directory is user content and an error.
+func removeExistingSkillLink(path string) error {
+	err := os.Remove(path)
+	if err == nil || os.IsNotExist(err) {
+		return nil
+	}
+	if !isManagedSkillCopy(path) {
+		return fmt.Errorf("removing existing skill link: %w", err)
+	}
+	if err := os.RemoveAll(path); err != nil {
+		return fmt.Errorf("removing existing skill copy: %w", err)
+	}
+	return nil
+}
+
+// isManagedSkillCopy reports whether path is a plain directory containing
+// only the files our copy fallback writes (SKILL.md and its version stamp).
+func isManagedSkillCopy(path string) bool {
+	info, err := os.Lstat(path)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return false
+	}
+	sawSkill := false
+	for _, entry := range entries {
+		if entry.IsDir() {
+			return false
+		}
+		switch entry.Name() {
+		case skillFilename:
+			sawSkill = true
+		case installedVersionFile:
+		default:
+			return false
+		}
+	}
+	return sawSkill
 }
 
 // installSkillToCodex copies the embedded SKILL.md into Codex's skills
