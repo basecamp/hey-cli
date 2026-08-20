@@ -29,14 +29,14 @@ const (
 // Package-manager seams, swappable for tests. The self-update seams live in
 // upgrade_selfupdate.go and the release lookup in release.go.
 var (
-	executablePathResolver  = resolvedExecutablePath
-	brewPrefixResolver      = resolveBrewPrefix
-	scoopPrefixResolver     = resolveScoopPrefix
-	homebrewChecker         = isHomebrew
-	homebrewUpgrader        = upgradeHomebrew
-	scoopChecker            = isScoop
-	scoopGlobalScopeChecker = isGlobalScoopInstall
-	scoopUpgrader           = upgradeScoop
+	executablePathResolver    = resolvedExecutablePath
+	rawExecutablePathResolver = rawExecutablePath
+	scoopPrefixResolver       = resolveScoopPrefix
+	homebrewChecker           = isHomebrew
+	homebrewUpgrader          = upgradeHomebrew
+	scoopChecker              = isScoop
+	scoopGlobalScopeChecker   = isGlobalScoopInstall
+	scoopUpgrader             = upgradeScoop
 )
 
 type upgradeCommand struct {
@@ -153,15 +153,22 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 			return errPinnedManagedInstall(current, latest, "Homebrew",
 				fmt.Sprintf("brew upgrade --cask %s", homebrewCask))
 		}
+		prefix, ok := homebrewPrefixFromExecutable()
+		if !ok {
+			return errUpgradeFailedHint(
+				"the running executable could not be resolved to the Homebrew prefix that owns it",
+				fmt.Sprintf("Run manually: brew upgrade --cask %s", homebrewCask),
+			)
+		}
 		fmt.Fprintln(w, "Upgrading via Homebrew…")
-		if brewErr := homebrewUpgrader(ctx, w, procErr); brewErr != nil {
+		if brewErr := homebrewUpgrader(ctx, filepath.Join(prefix, "bin", "brew"), w, procErr); brewErr != nil {
 			return &output.Error{
 				Code:    "upgrade_failed",
 				Message: fmt.Sprintf("brew upgrade failed for cask %s: %v", homebrewCask, brewErr),
 				Hint:    fmt.Sprintf("Run manually for detail: brew upgrade --cask %s", homebrewCask),
 			}
 		}
-		return confirmManagedUpgrade(ctx, w, "homebrew", homebrewBinaryPath(ctx), current, latest,
+		return confirmManagedUpgrade(ctx, w, "homebrew", filepath.Join(prefix, "bin", "hey"), current, latest,
 			fmt.Sprintf("brew reinstall --cask %s", homebrewCask))
 	}
 
@@ -302,15 +309,29 @@ func writeUpgradeOK(data map[string]string, summary string) error {
 	return writeOK(data, output.WithSummary(summary))
 }
 
-// homebrewBinaryPath derives the brew-managed entrypoint from `brew --prefix`.
-// os.Executable is deliberately not used here: Go documents it may return the
-// symlink or the resolved target — possibly stale after the cask swap.
-func homebrewBinaryPath(ctx context.Context) string {
-	prefix, err := brewPrefixResolver(ctx)
-	if err != nil || prefix == "" {
-		return ""
+// homebrewPrefixFromExecutable derives the Homebrew prefix that owns the
+// running cask payload, <prefix>/Caskroom/hey/<version>/hey. The upgrade and
+// its confirmation probe both bind to this prefix rather than to `brew` from
+// PATH: on a machine with two Homebrew installations (Intel and Apple
+// Silicon), the PATH lookup can win for the other prefix, and upgrading
+// through it would leave the running installation untouched while the probe
+// happily confirms the other one. The walk preserves the path's real case —
+// the lowercased executablePathResolver is for substring matching only.
+func homebrewPrefixFromExecutable() (string, bool) {
+	exe, ok := rawExecutablePathResolver()
+	if !ok {
+		return "", false
 	}
-	return filepath.Join(prefix, "bin", "hey")
+
+	appDir := filepath.Dir(filepath.Dir(exe)) // <prefix>/Caskroom/hey
+	caskroomDir := filepath.Dir(appDir)       // <prefix>/Caskroom
+	if !strings.EqualFold(filepath.Base(exe), "hey") ||
+		!strings.EqualFold(filepath.Base(appDir), "hey") ||
+		!strings.EqualFold(filepath.Base(caskroomDir), "caskroom") {
+		return "", false
+	}
+
+	return filepath.Dir(caskroomDir), true
 }
 
 // scoopBinaryPath derives the scoop-managed entrypoint from `scoop prefix`
@@ -323,16 +344,8 @@ func scoopBinaryPath(ctx context.Context) string {
 	return filepath.Join(filepath.FromSlash(prefix), "hey.exe")
 }
 
-func resolveBrewPrefix(ctx context.Context) (string, error) {
-	out, err := exec.CommandContext(ctx, "brew", "--prefix").Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-func upgradeHomebrew(ctx context.Context, stdout io.Writer, stderr io.Writer) error {
-	upgrade := exec.CommandContext(ctx, "brew", "upgrade", "--cask", homebrewCask)
+func upgradeHomebrew(ctx context.Context, brew string, stdout io.Writer, stderr io.Writer) error {
+	upgrade := exec.CommandContext(ctx, brew, "upgrade", "--cask", homebrewCask) //nolint:gosec // G204: brew is derived from the running executable's own Homebrew prefix
 	upgrade.Stdout = stdout
 	upgrade.Stderr = stderr
 	return upgrade.Run()
@@ -455,6 +468,17 @@ func scoopGlobalFlag(global bool) string {
 // resolvedExecutablePath returns the running executable, symlinks resolved,
 // lowercased and slash-normalized for substring matching only.
 func resolvedExecutablePath() (string, bool) {
+	exe, ok := rawExecutablePathResolver()
+	if !ok {
+		return "", false
+	}
+
+	return strings.ToLower(filepath.ToSlash(exe)), true
+}
+
+// rawExecutablePath returns the running executable with symlinks resolved and
+// its real case preserved, for callers that build filesystem paths from it.
+func rawExecutablePath() (string, bool) {
 	exe, err := os.Executable()
 	if err != nil {
 		return "", false
@@ -464,5 +488,5 @@ func resolvedExecutablePath() (string, bool) {
 		exe = resolved
 	}
 
-	return strings.ToLower(filepath.ToSlash(exe)), true
+	return exe, true
 }

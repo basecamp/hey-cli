@@ -76,11 +76,11 @@ func stubScoopPrefixResolver(t *testing.T, resolve func(context.Context, string)
 	t.Cleanup(func() { scoopPrefixResolver = orig })
 }
 
-func stubBrewPrefixResolver(t *testing.T, resolve func(context.Context) (string, error)) {
+func stubRawExecutablePathResolver(t *testing.T, path string, ok bool) {
 	t.Helper()
-	orig := brewPrefixResolver
-	brewPrefixResolver = resolve
-	t.Cleanup(func() { brewPrefixResolver = orig })
+	orig := rawExecutablePathResolver
+	rawExecutablePathResolver = func() (string, bool) { return path, ok }
+	t.Cleanup(func() { rawExecutablePathResolver = orig })
 }
 
 func stubReleaseFetcher(t *testing.T, fetch func(context.Context) (releaseInfo, error)) {
@@ -103,7 +103,7 @@ type upgradeCheckersStub struct {
 	isBrew          bool
 	isScoop         bool
 	isGlobalScoop   bool
-	homebrewUpgrade func(context.Context, io.Writer, io.Writer) error
+	homebrewUpgrade func(context.Context, string, io.Writer, io.Writer) error
 	scoopUpgrade    func(context.Context, bool, io.Writer, io.Writer) error
 }
 
@@ -126,9 +126,16 @@ func stubUpgradeCheckers(t *testing.T, stub upgradeCheckersStub) {
 	origHU := homebrewUpgrader
 	homebrewUpgrader = stub.homebrewUpgrade
 	if homebrewUpgrader == nil {
-		homebrewUpgrader = func(context.Context, io.Writer, io.Writer) error { return nil }
+		homebrewUpgrader = func(context.Context, string, io.Writer, io.Writer) error { return nil }
 	}
 	t.Cleanup(func() { homebrewUpgrader = origHU })
+
+	// The upgrade binds to the installation that owns the running binary, so
+	// give a stubbed brew install a plausible cask payload path. Tests that
+	// exercise the binding itself stub their own path afterwards.
+	if stub.isBrew {
+		stubRawExecutablePathResolver(t, "/opt/homebrew/Caskroom/hey/1.2.3/hey", true)
+	}
 
 	origSC := scoopChecker
 	scoopChecker = func(context.Context) bool { return stub.isScoop }
@@ -300,7 +307,7 @@ func TestUpgradePinnedManagedInstallRefused(t *testing.T) {
 	t.Run("homebrew", func(t *testing.T) {
 		stubUpgradeCheckers(t, upgradeCheckersStub{
 			isBrew: true,
-			homebrewUpgrade: func(context.Context, io.Writer, io.Writer) error {
+			homebrewUpgrade: func(context.Context, string, io.Writer, io.Writer) error {
 				t.Error("a refused pin must not run brew")
 				return nil
 			},
@@ -417,7 +424,6 @@ func TestUpgradeNarrationFollowsOutputMode(t *testing.T) {
 func TestUpgradeStyledSuccessEmitsNoEnvelope(t *testing.T) {
 	stubVersion(t, "1.2.3")
 	stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "1.3.0", isBrew: true})
-	stubBrewPrefixResolver(t, func(context.Context) (string, error) { return "/opt/homebrew", nil })
 	stubBinaryVersionProber(t, func(context.Context, string) (string, error) { return "1.3.0", nil })
 
 	run := executeStyledUpgradeCommand(t)
@@ -515,10 +521,9 @@ func TestUpgradeAndVersionSkipAccountScope(t *testing.T) {
 func TestUpgradeHomebrewConfirmedSuccess(t *testing.T) {
 	stubVersion(t, "1.2.3")
 	stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "1.3.0", isBrew: true})
-	stubBrewPrefixResolver(t, func(context.Context) (string, error) { return "/opt/homebrew", nil })
 	stubBinaryVersionProber(t, func(_ context.Context, path string) (string, error) {
 		if path != "/opt/homebrew/bin/hey" {
-			t.Errorf("probed %q, want the brew-managed entrypoint", path)
+			t.Errorf("probed %q, want the entrypoint of the prefix owning the running binary", path)
 		}
 		return "1.3.0", nil
 	})
@@ -534,7 +539,6 @@ func TestUpgradeHomebrewConfirmedSuccess(t *testing.T) {
 func TestUpgradeHomebrewStaleProbeIsIncomplete(t *testing.T) {
 	stubVersion(t, "1.2.3")
 	stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "1.3.0", isBrew: true})
-	stubBrewPrefixResolver(t, func(context.Context) (string, error) { return "/opt/homebrew", nil })
 	stubBinaryVersionProber(t, func(context.Context, string) (string, error) { return "1.2.3", nil })
 
 	run := executeUpgradeCommand(t)
@@ -544,20 +548,67 @@ func TestUpgradeHomebrewStaleProbeIsIncomplete(t *testing.T) {
 	assertContains(t, apiErr.Hint, "brew reinstall --cask basecamp/tap/hey")
 }
 
-func TestUpgradeHomebrewPrefixFailureIsUnverified(t *testing.T) {
+// The owning prefix comes from the running executable; if that can't be
+// resolved there is nothing to bind the upgrade to, and failing before the
+// mutation beats upgrading whichever installation `brew` on PATH happens to
+// manage.
+func TestUpgradeHomebrewUnresolvableExecutableFailsBeforeMutation(t *testing.T) {
 	stubVersion(t, "1.2.3")
-	stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "1.3.0", isBrew: true})
-	stubBrewPrefixResolver(t, func(context.Context) (string, error) { return "", errors.New("brew not on PATH") })
+	mutated := false
+	stubUpgradeCheckers(t, upgradeCheckersStub{
+		latestVersion: "1.3.0",
+		isBrew:        true,
+		homebrewUpgrade: func(context.Context, string, io.Writer, io.Writer) error {
+			mutated = true
+			return nil
+		},
+	})
+	stubRawExecutablePathResolver(t, "", false)
 
 	run := executeUpgradeCommand(t)
-	apiErr := requireUpgradeError(t, run.err, "upgrade_unverified")
-	assertContains(t, apiErr.Hint, "hey version")
+	apiErr := requireUpgradeError(t, run.err, "upgrade_failed")
+	assertContains(t, apiErr.Hint, "brew upgrade --cask basecamp/tap/hey")
+	if mutated {
+		t.Error("brew must not run when the owning prefix is unknown")
+	}
+}
+
+// On a machine with two Homebrew installations (Intel and Apple Silicon),
+// `brew` from PATH can belong to the other prefix — upgrading through it
+// would leave the running installation untouched while the probe confirms
+// the other one's success. Both the brew invocation and the probe must bind
+// to the prefix owning the running executable.
+func TestUpgradeHomebrewBindsToOwningPrefix(t *testing.T) {
+	stubVersion(t, "1.2.3")
+	var brewUsed string
+	stubUpgradeCheckers(t, upgradeCheckersStub{
+		latestVersion: "1.3.0",
+		isBrew:        true,
+		homebrewUpgrade: func(_ context.Context, brew string, _ io.Writer, _ io.Writer) error {
+			brewUsed = brew
+			return nil
+		},
+	})
+	stubRawExecutablePathResolver(t, "/usr/local/Caskroom/hey/1.2.3/hey", true)
+	var probed string
+	stubBinaryVersionProber(t, func(_ context.Context, path string) (string, error) {
+		probed = path
+		return "1.3.0", nil
+	})
+
+	run := executeUpgradeCommand(t)
+	mustNoError(t, run.err)
+	if brewUsed != "/usr/local/bin/brew" {
+		t.Errorf("ran %q, want the owning prefix's /usr/local/bin/brew", brewUsed)
+	}
+	if probed != "/usr/local/bin/hey" {
+		t.Errorf("probed %q, want the owning prefix's /usr/local/bin/hey", probed)
+	}
 }
 
 func TestUpgradeHomebrewProbeFailureIsUnverified(t *testing.T) {
 	stubVersion(t, "1.2.3")
 	stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "1.3.0", isBrew: true})
-	stubBrewPrefixResolver(t, func(context.Context) (string, error) { return "/opt/homebrew", nil })
 	stubBinaryVersionProber(t, func(context.Context, string) (string, error) {
 		return "", errors.New("exec failed")
 	})
@@ -573,7 +624,7 @@ func TestUpgradeHomebrewExecFailureIsStructured(t *testing.T) {
 	stubUpgradeCheckers(t, upgradeCheckersStub{
 		latestVersion: "1.3.0",
 		isBrew:        true,
-		homebrewUpgrade: func(context.Context, io.Writer, io.Writer) error {
+		homebrewUpgrade: func(context.Context, string, io.Writer, io.Writer) error {
 			return errors.New("exit status 1")
 		},
 	})
@@ -589,7 +640,6 @@ func TestUpgradeHomebrewExecFailureIsStructured(t *testing.T) {
 func TestUpgradeHomebrewNewerReportedVersionIsSuccess(t *testing.T) {
 	stubVersion(t, "1.2.3")
 	stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "1.3.0", isBrew: true})
-	stubBrewPrefixResolver(t, func(context.Context) (string, error) { return "/opt/homebrew", nil })
 	stubBinaryVersionProber(t, func(context.Context, string) (string, error) { return "1.3.1", nil })
 
 	run := executeUpgradeCommand(t)
@@ -604,7 +654,6 @@ func TestUpgradeHomebrewNewerReportedVersionIsSuccess(t *testing.T) {
 func TestUpgradeHomebrewGarbageReportedVersionIsUnverified(t *testing.T) {
 	stubVersion(t, "1.2.3")
 	stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "1.3.0", isBrew: true})
-	stubBrewPrefixResolver(t, func(context.Context) (string, error) { return "/opt/homebrew", nil })
 	stubBinaryVersionProber(t, func(context.Context, string) (string, error) { return "source)", nil })
 
 	run := executeUpgradeCommand(t)
