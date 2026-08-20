@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -340,6 +341,28 @@ func TestSectionNavigationIncludesContacts(t *testing.T) {
 	result := updated.(model)
 	if result.section != sectionContacts {
 		t.Errorf("right from Mail selected section %d, want Contacts", result.section)
+	}
+}
+
+func TestSubnavNavigationUpdatesHelpWhenItOpensCollections(t *testing.T) {
+	m := modelWithBoxes()
+	m.mailView.boxes = orderBoxes(append(m.mailView.boxes,
+		models.Box{ID: 12, Kind: mailSourceKindFolder, Name: "Receipts"},
+	))
+	m.mailView.boxIndex = len(m.mailView.tabBoxIndexes()) - 1
+	m.focus = rowSubnav
+	m.updateHelpBindings()
+
+	updated, _ := m.Update(keyPress("right"))
+	m = updated.(model)
+
+	if m.mailView.collections == nil {
+		t.Fatal("right from the last mail tab should open Collections")
+	}
+	for _, want := range []helpBinding{{"↑/↓", "choose"}, {"enter", "open"}, {"esc", "cancel"}} {
+		if !slices.Contains(m.help.bindings, want) {
+			t.Errorf("Collections help is missing %+v: %v", want, m.help.bindings)
+		}
 	}
 }
 

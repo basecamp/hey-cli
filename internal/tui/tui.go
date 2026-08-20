@@ -554,6 +554,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleSectionKeys(msg)
 	case rowSubnav:
 		cmd := m.handleSubnavKey(msg)
+		m.updateHelpBindings()
 		return m, m.syncLoading(cmd)
 	case rowContent:
 		cmd := m.activeView.HandleContentKey(msg)
