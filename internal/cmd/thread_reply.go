@@ -4,24 +4,27 @@ import (
 	"context"
 	"fmt"
 
+	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
-// threadReplyTarget is what a reply to a thread needs: the entry it answers, and the
-// recipients that entry was addressed to. HEY saves an unaddressed reply as a draft, so
-// the recipients are not optional.
+// threadReplyTarget carries the entry a reply answers, its recipients, and an immutable
+// client bound to the thread's mail account. HEY saves an unaddressed reply as a draft,
+// so the recipients are not optional.
 type threadReplyTarget struct {
 	EntryID   int64
 	AccountID int64
 	Addressed *htmlutil.TopicAddressed
+	client    *hey.Client
 }
 
 // resolveThreadReply returns the thread's latest entry, linked account, and addressed
 // recipients. The typed topic carries entry and account data; the rendered topic header
 // carries the recipient groups HEY expects on a reply.
 func resolveThreadReply(ctx context.Context, threadID int64) (*threadReplyTarget, error) {
-	topic, err := sdk.Topics().Get(ctx, threadID)
+	topic, err := rootSDK.Topics().Get(ctx, threadID)
 	if err != nil {
 		return nil, convertSDKError(err)
 	}
@@ -29,7 +32,11 @@ func resolveThreadReply(ctx context.Context, threadID int64) (*threadReplyTarget
 		return nil, output.ErrNotFound("entries for thread", fmt.Sprintf("%d", threadID))
 	}
 
-	topicResp, err := sdk.GetHTML(ctx, fmt.Sprintf("/topics/%d", threadID))
+	threadSDK, err := clientForResourceAccount(ctx, topic.AccountId)
+	if err != nil {
+		return nil, err
+	}
+	topicResp, err := threadSDK.GetHTML(ctx, fmt.Sprintf("/topics/%d", threadID))
 	if err != nil {
 		return nil, convertSDKError(err)
 	}
@@ -42,5 +49,6 @@ func resolveThreadReply(ctx context.Context, threadID int64) (*threadReplyTarget
 		EntryID:   topic.Entries[len(topic.Entries)-1].Id,
 		AccountID: topic.AccountId,
 		Addressed: addressed,
+		client:    threadSDK,
 	}, nil
 }

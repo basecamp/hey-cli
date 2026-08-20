@@ -76,7 +76,7 @@ func TestComposeSubjectRequiredOnlyForANewMessage(t *testing.T) {
 
 	// And the reply goes all the way out: --thread-id used to post a message to the
 	// topic, and now answers the thread's last entry with that entry's recipients.
-	if err := runCLI(t, server, "compose", "--thread-id", "7", "-m", "the reply body"); err != nil {
+	if err := runCLI(t, server, "--account", "8", "compose", "--thread-id", "7", "-m", "the reply body"); err != nil {
 		t.Fatalf("a reply should not need a subject, got %v", err)
 	}
 	if !strings.Contains(sent.Path, "/entries/12/replies") {
@@ -84,6 +84,12 @@ func TestComposeSubjectRequiredOnlyForANewMessage(t *testing.T) {
 	}
 	if !strings.Contains(sent.Content, "the reply body") {
 		t.Errorf("content = %q", sent.Content)
+	}
+	if sent.TopicAccountFilter != "" {
+		t.Errorf("topic account filter = %q, want unscoped discovery", sent.TopicAccountFilter)
+	}
+	if sent.HTMLAccountFilter != "9" {
+		t.Errorf("topic HTML account filter = %q, want thread account 9", sent.HTMLAccountFilter)
 	}
 	if sent.ActingSenderID != 42 {
 		t.Errorf("acting sender = %d, want thread account sender 42", sent.ActingSenderID)

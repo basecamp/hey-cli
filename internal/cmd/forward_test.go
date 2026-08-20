@@ -30,6 +30,9 @@ func forwardServer(t *testing.T, entriesJSON string) (*httptest.Server, *sentFor
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/topics/7.json":
+			if got := r.URL.Query().Get("filtered_account_id"); got != "" {
+				t.Errorf("topic account = %q, want unscoped discovery", got)
+			}
 			fmt.Fprintf(w, `{"id":7,"account_id":9,"name":"Quarterly planning","entries":%s}`, entriesJSON)
 		case "/entries/12/forwards/new.json":
 			if got := r.URL.Query().Get("filtered_account_id"); got != "9" {
@@ -40,7 +43,7 @@ func forwardServer(t *testing.T, entriesJSON string) (*httptest.Server, *sentFor
 			if got := r.URL.Query().Get("filtered_account_id"); got != "" {
 				t.Errorf("identity account = %q, want unscoped", got)
 			}
-			fmt.Fprint(w, `{"id":1,"accounts":[{"id":9,"status":"active"}],"senders":[{"id":42,"account_id":9,"default":true}]}`)
+			fmt.Fprint(w, `{"id":1,"accounts":[{"id":8,"status":"active"},{"id":9,"status":"active"}],"senders":[{"id":42,"account_id":9,"default":true}]}`)
 		case "/messages.json":
 			if got := r.URL.Query().Get("filtered_account_id"); got != "9" {
 				t.Errorf("forward message account = %q, want 9", got)
@@ -79,7 +82,7 @@ func forwardServer(t *testing.T, entriesJSON string) (*httptest.Server, *sentFor
 func TestForwardSendsLatestEntryDraft(t *testing.T) {
 	server, sent := forwardServer(t, `[{"id":11},{"id":12}]`)
 
-	err := runCLI(t, server, "forward", "7",
+	err := runCLI(t, server, "--account", "8", "forward", "7",
 		"--to", "alice@example.com",
 		"--cc", "bob@example.org",
 		"--bcc", "carol@example.com",
@@ -90,6 +93,7 @@ func TestForwardSendsLatestEntryDraft(t *testing.T) {
 	}
 
 	wantRequests := []string{
+		"GET /identity.json",
 		"GET /topics/7.json",
 		"GET /identity.json",
 		"GET /entries/12/forwards/new.json",

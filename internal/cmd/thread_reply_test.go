@@ -24,12 +24,14 @@ const (
 
 // sentReply is what the server saw a reply arrive as.
 type sentReply struct {
-	Path           string
-	Content        string
-	ActingSenderID int64
-	To             []string
-	CC             []string
-	BCC            []string
+	Path               string
+	Content            string
+	TopicAccountFilter string
+	HTMLAccountFilter  string
+	ActingSenderID     int64
+	To                 []string
+	CC                 []string
+	BCC                []string
 }
 
 // threadReplyServer answers the typed topic, its rendered recipient header, the identity
@@ -70,8 +72,9 @@ func threadReplyServer(t *testing.T, topicHTML, entriesHTML string) (*httptest.S
 				t.Errorf("identity account = %q, want unscoped", got)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"id":1,"accounts":[{"id":9,"status":"active"}],"senders":[{"id":42,"account_id":9,"default":true}]}`)
+			fmt.Fprint(w, `{"id":1,"accounts":[{"id":8,"status":"active"},{"id":9,"status":"active"}],"senders":[{"id":42,"account_id":9,"default":true}]}`)
 		case r.URL.Path == "/topics/7.json":
+			sent.TopicAccountFilter = r.URL.Query().Get("filtered_account_id")
 			w.Header().Set("Content-Type", "application/json")
 			if strings.Contains(entriesHTML, "12") {
 				fmt.Fprint(w, `{"id":7,"account_id":9,"entries":[{"id":11},{"id":12}]}`)
@@ -79,6 +82,7 @@ func threadReplyServer(t *testing.T, topicHTML, entriesHTML string) (*httptest.S
 				fmt.Fprint(w, `{"id":7,"account_id":9,"entries":[]}`)
 			}
 		default:
+			sent.HTMLAccountFilter = r.URL.Query().Get("filtered_account_id")
 			w.Header().Set("Content-Type", "text/html")
 			fmt.Fprint(w, topicHTML)
 		}
@@ -104,7 +108,7 @@ func withSDKPointedAt(t *testing.T, server *httptest.Server) {
 }
 
 func TestResolveThreadReply(t *testing.T) {
-	server, _ := threadReplyServer(t, topicWithRecipients, topicEntries)
+	server, sent := threadReplyServer(t, topicWithRecipients, topicEntries)
 	withSDKPointedAt(t, server)
 
 	target, err := resolveThreadReply(context.Background(), 7)
@@ -124,6 +128,15 @@ func TestResolveThreadReply(t *testing.T) {
 	}
 	if len(target.Addressed.CC) != 1 || target.Addressed.CC[0] != "cc@example.com" {
 		t.Errorf("cc = %v", target.Addressed.CC)
+	}
+	if target.client == nil {
+		t.Fatal("reply target has no thread-account client")
+	}
+	if sent.TopicAccountFilter != "" {
+		t.Errorf("topic account filter = %q, want unscoped discovery", sent.TopicAccountFilter)
+	}
+	if sent.HTMLAccountFilter != "9" {
+		t.Errorf("topic HTML account filter = %q, want thread account 9", sent.HTMLAccountFilter)
 	}
 }
 

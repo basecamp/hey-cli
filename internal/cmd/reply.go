@@ -53,10 +53,7 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	replySDK, err := clientForResourceAccount(ctx, target.AccountID)
-	if err != nil {
-		return err
-	}
+	replySDK := target.client
 
 	message := c.message
 	if message == "" && !stdinIsTerminal() {

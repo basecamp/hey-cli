@@ -111,7 +111,7 @@ func clientForResourceAccount(ctx context.Context, accountID int64) (*hey.Client
 	if accountID <= 0 {
 		return nil, output.ErrAPI(0, "thread did not identify its mail account")
 	}
-	scoped, err := sdk.ForAccount(ctx, accountID)
+	scoped, err := rootSDK.ForAccount(ctx, accountID)
 	if err != nil {
 		return nil, convertSDKError(err)
 	}

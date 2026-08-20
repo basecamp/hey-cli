@@ -58,7 +58,7 @@ func (c *forwardCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := cmd.Context()
-	topic, err := sdk.Topics().Get(ctx, threadID)
+	topic, err := rootSDK.Topics().Get(ctx, threadID)
 	if err != nil {
 		return convertSDKError(err)
 	}

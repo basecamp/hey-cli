@@ -91,10 +91,7 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		if resolveErr != nil {
 			return resolveErr
 		}
-		replySDK, resolveErr := clientForResourceAccount(ctx, target.AccountID)
-		if resolveErr != nil {
-			return resolveErr
-		}
+		replySDK := target.client
 		messageWithAttachments, attachErr := attachFilesWithClient(ctx, replySDK, message, c.attachments)
 		if attachErr != nil {
 			return attachErr
