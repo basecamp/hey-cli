@@ -86,7 +86,7 @@ cached the tag, so it could not be reused. The first working release is `v0.1.1`
 ## Secrets and variables
 
 Everything lives on the **`release` environment** (Settings → Environments), not
-at repository scope. basecamp-cli's `scripts/manage-release-env.sh` audits and
+at repository scope. `manage-release-env.sh` in basecamp-cli's scripts directory audits and
 converges the environment across the CLI repos and copies secrets in from
 1Password; add new rows there rather than pasting by hand.
 
@@ -137,16 +137,34 @@ that brings nixpkgs level, delete that block.
 
 ## CLI surface compatibility
 
-`.surface` is the committed snapshot of commands and flags. `TestSurfaceSnapshot`
-fails a PR that changes the CLI without regenerating it, and the release `test`
-job diffs the current surface against the previous tag's so a removed command or
-flag cannot ship unnoticed.
+`.surface` is the committed snapshot of commands and flags. `make check-surface`
+(`TestSurfaceSnapshot`) fails a PR that changes the CLI without regenerating it
+(`make update-surface`); `make check-surface-compat` diffs `.surface` against the
+previous stable tag's copy (`git show <tag>:.surface`, no second build) and fails
+on removals. A deliberate removal is acknowledged by listing the `.surface` line
+in `.surface-breaking` in the same PR; prune entries after the release ships.
 
 ## Release size budget
 
-Not yet enforced. A budget (`.size-budget`) and `make check-size` land once the
-first release with in-process Sigstore verification (`hey upgrade`) has been
-measured; the numbers will be recorded here.
+`.size-budget` holds per-platform ceilings (`stripped_max_mib`, `gzip_max_mib`);
+`scripts/check-size-budget.sh` checks every goreleaser output in `dist/` at
+release time (after the build, before attestation) and `./bin/hey` on PRs
+(`make check-size`), printing a per-platform table into the job summary.
+
+Baseline: pre-Sigstore `v0.1.x` measured 15.1 MiB stripped / 5.4 MiB gzipped
+(linux_amd64). The file is **report-only** (`enforce = false`) until the first
+release carrying in-process Sigstore verification for `hey upgrade` has been
+measured; the ceilings are then set to ceil(max observed × 1.15) and enforcement
+switched on. An increase beyond a ceiling after that needs a review of what grew,
+not a budget bump.
+
+## Pin and reference lockstep
+
+`make check-release-lockstep` (in `make check`, the PR lint job and the release
+gate) verifies that the golangci-lint pins agree across workflows and meet the
+floor, that `.mise.toml` and `release.yml` pin the same goreleaser, that the
+pre-commit golangci-lint rev matches CI, and that every `scripts/*.sh` named in
+docs, workflows, the Makefile or goreleaser config exists (and vice versa).
 
 ## Things that look safe to rename but are not
 

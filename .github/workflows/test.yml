@@ -37,6 +37,9 @@ jobs:
       - name: Build binary
         run: make build
 
+      - name: Check size budget
+        run: make check-size
+
       - name: Smoke test
         run: |
           set -o pipefail
@@ -66,8 +69,10 @@ jobs:
 
       # Runs before the linter: if the pins have drifted, say so plainly rather
       # than letting the odd job out fail later on a version-specific finding.
-      - name: Check golangci-lint pins are in lockstep
-        run: make check-lint-lockstep
+      # Also checks the goreleaser pin, the pre-commit rev, and that every
+      # scripts/*.sh named in docs and workflows exists.
+      - name: Check release pins and script references are in lockstep
+        run: make check-release-lockstep
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
@@ -375,8 +380,7 @@ jobs:
           go-version-file: go.mod
 
       # .surface is the committed snapshot of the CLI's commands and flags. A
-      # change that is not reflected there fails here. Regenerate it with
-      #   go test ./internal/cmd/ -run TestSurfaceSnapshot -update-surface
-      # so the diff is reviewed, not discovered at release time.
+      # change that is not reflected there fails here; `make update-surface`
+      # regenerates it so the diff is reviewed, not discovered at release time.
       - name: Compare CLI surface snapshot
-        run: go test ./internal/cmd/ -run TestSurfaceSnapshot -v
+        run: make check-surface

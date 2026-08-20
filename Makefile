@@ -1,7 +1,8 @@
 .PHONY: build test test-unit test-e2e test-smoke preview-callback coverage fmt fmt-check vet lint tidy tidy-check \
 	race-test vuln secrets replace-check check-toolchain check security \
 	release-check release test-release bench bench-save bench-compare \
-	check-surface check-surface-compat check-lint-lockstep update-nix-hash tools clean install help
+	check-surface update-surface check-surface-compat check-size check-lint-lockstep \
+	check-release-lockstep update-nix-hash tools clean install help
 
 BINARY := $(CURDIR)/bin/hey
 COVERAGE_FLOOR ?= 70.8
@@ -50,9 +51,12 @@ help:
 	@echo "  make bench-save      Save benchmark results"
 	@echo "  make bench-compare   Compare saved benchmarks"
 	@echo ""
-	@echo "  make check-surface        Generate CLI surface snapshot"
-	@echo "  make check-surface-compat Compare surface against previous tag"
-	@echo "  make update-nix-hash Recompute the Nix vendorHash via Docker ([VERSION=v1.2.3] bumps the version)"
+	@echo "  make check-surface        Verify .surface matches the command tree"
+	@echo "  make update-surface       Regenerate .surface"
+	@echo "  make check-surface-compat Compare .surface against the previous release tag"
+	@echo "  make check-size           Check the built binary against .size-budget"
+	@echo "  make check-release-lockstep  Verify release tool pins and script references agree"
+	@echo "  make update-nix-hash      Recompute the Nix vendorHash via Docker ([VERSION=v1.2.3] bumps the version)"
 	@echo "  make tools                Install dev tools"
 
 # Toolchain guard — fails fast when PATH go and GOROOT go disagree
@@ -155,37 +159,39 @@ replace-check:
 	fi
 
 # Local CI gate
-check: fmt-check vet lint test-unit tidy-check check-lint-lockstep
+check: fmt-check vet lint test-unit tidy-check check-surface check-release-lockstep
 
 # Verify every workflow lints with the same golangci-lint version
 check-lint-lockstep:
 	@scripts/check-lint-lockstep.sh
 
-# Generate CLI surface snapshot
-check-surface: build
-	@scripts/check-cli-surface.sh $(BINARY)
+# Verify the committed CLI surface snapshot (.surface) matches the command tree.
+# TestSurfaceSnapshot is the authority: it diffs .surface against the cobra tree
+# and fails on any drift, pointing here for regeneration.
+check-surface: check-toolchain
+	@HEY_NO_KEYRING=1 go test ./internal/cmd/ -run TestSurfaceSnapshot -count=1 || { \
+		echo; echo "TestSurfaceSnapshot failed — if the committed .surface is stale, run: make update-surface"; \
+		exit 1; \
+	}
 
-# Compare surface against previous tag
-check-surface-compat: build
-	@PREV_TAG=$$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo ""); \
-	if [ -z "$$PREV_TAG" ]; then \
-		echo "No previous tag — skipping surface compatibility check"; \
-	else \
-		scripts/check-cli-surface.sh $(BINARY) /tmp/current-surface.txt; \
-		SCRIPT_DIR=$$(pwd)/scripts; \
-		WORKTREE_DIR=/tmp/baseline-tree-$$$$; \
-		trap 'git worktree remove "$$WORKTREE_DIR" --force 2>/dev/null || true' EXIT; \
-		git worktree add "$$WORKTREE_DIR" "$$PREV_TAG"; \
-		if ! (cd "$$WORKTREE_DIR" && make build); then \
-			echo "ERROR: baseline ($$PREV_TAG) failed to build"; \
-			exit 1; \
-		fi; \
-		if "$$SCRIPT_DIR/check-cli-surface.sh" "$$WORKTREE_DIR/bin/hey" /tmp/baseline-surface.txt 2>/dev/null; then \
-			scripts/check-cli-surface-diff.sh /tmp/baseline-surface.txt /tmp/current-surface.txt; \
-		else \
-			echo "Baseline ($$PREV_TAG) does not support --help --agent — skipping surface diff"; \
-		fi; \
-	fi
+# Regenerate .surface from the current command tree
+update-surface: check-toolchain
+	@HEY_NO_KEYRING=1 go test ./internal/cmd/ -run TestSurfaceSnapshot -count=1 -update-surface >/dev/null || true
+	@HEY_NO_KEYRING=1 go test ./internal/cmd/ -run TestSurfaceSnapshot -count=1
+	@echo ".surface updated"
+
+# Compare .surface against the previous release tag (removals fail unless
+# acknowledged in .surface-breaking)
+check-surface-compat:
+	@scripts/check-surface-compat.sh
+
+# Check the built binary against .size-budget
+check-size: build
+	@scripts/check-size-budget.sh
+
+# Verify release tool pins and script references agree (wraps check-lint-lockstep)
+check-release-lockstep:
+	@scripts/check-release-lockstep.sh
 
 # Recompute Nix vendorHash via Docker and update nix/package.nix. Pass
 # VERSION=vX.Y.Z to also bump the package version (scripts/release.sh refuses
@@ -203,7 +209,7 @@ update-nix-hash:
 security: lint vuln secrets
 
 # Release preflight
-release-check: check replace-check vuln race-test
+release-check: check replace-check vuln race-test check-surface-compat check-size
 
 # Release (delegates to script)
 release:

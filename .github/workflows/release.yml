@@ -66,8 +66,7 @@ jobs:
 
       - name: Run release quality gate
         run: |
-          make check-lint-lockstep fmt-check vet lint test test-e2e tidy-check
-          go test ./internal/cmd/ -run TestSurfaceSnapshot -count=1
+          make check-release-lockstep fmt-check vet lint test test-e2e tidy-check check-surface
           go test -race -count=1 ./...
 
       - name: Run govulncheck
@@ -75,32 +74,11 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
 
+      # .surface is committed, so the baseline is `git show <prev tag>:.surface`
+      # — no second checkout or build. Removals fail unless acknowledged in
+      # .surface-breaking.
       - name: Check CLI surface compatibility
-        run: |
-          make build
-          scripts/check-cli-surface.sh ./bin/hey /tmp/current-surface.txt
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-          if [ -n "$PREV_TAG" ]; then
-            SCRIPT_DIR="$(pwd)/scripts"
-            WORKTREE_DIR=/tmp/baseline-tree
-            trap 'git worktree remove "$WORKTREE_DIR" --force 2>/dev/null || true' EXIT
-            git worktree add "$WORKTREE_DIR" "$PREV_TAG"
-            cd "$WORKTREE_DIR"
-            make build
-            if "$SCRIPT_DIR/check-cli-surface.sh" ./bin/hey /tmp/baseline-surface.txt 2>/dev/null; then
-              cd -
-              git worktree remove "$WORKTREE_DIR" --force
-              trap - EXIT
-              scripts/check-cli-surface-diff.sh /tmp/baseline-surface.txt /tmp/current-surface.txt
-            else
-              echo "Baseline ($PREV_TAG) does not support --help --agent — skipping surface diff"
-              cd -
-              git worktree remove "$WORKTREE_DIR" --force
-              trap - EXIT
-            fi
-          else
-            echo "First release — no baseline to compare against"
-          fi
+        run: scripts/check-surface-compat.sh
 
   release:
     name: Release
@@ -208,6 +186,12 @@ jobs:
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
         run: goreleaser release --clean
+
+      # After the build, before attestation: a binary over budget should not
+      # get a provenance statement as if it were fine. Report-only while
+      # .size-budget has enforce = false.
+      - name: Check release size budget
+        run: scripts/check-size-budget.sh
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2

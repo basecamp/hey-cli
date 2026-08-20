@@ -60,13 +60,15 @@ make fmt-check
 make check
 ```
 
-This runs `fmt-check`, `vet`, `lint`, `test`, and `tidy-check`.
+This runs `fmt-check`, `vet`, `lint`, `test`, `tidy-check`, `check-surface`
+and `check-release-lockstep`.
 
-## CLI surface compatibility
+## CLI surface
 
-```sh
-make check-surface-compat
-```
+`.surface` is the committed list of commands and flags. Adding or removing one
+fails `make check-surface`; regenerate with `make update-surface` and commit the
+diff. Removals also fail the release-time `make check-surface-compat` unless
+listed in `.surface-breaking`.
 
 Compares the current CLI surface against the previous tagged release to detect breaking changes.
 
