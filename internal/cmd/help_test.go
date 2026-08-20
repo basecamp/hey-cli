@@ -98,6 +98,7 @@ EMAIL
   label          View and manage an email label
   search         Search email threads and messages
   contacts       Manage contacts
+  screener       Decide who gets to email you
   threads        Read a thread
   attachments    List and save files from a thread
   compose        Write and send a new email
