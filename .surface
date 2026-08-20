@@ -143,6 +143,11 @@ hey label remove --from
 hey labels
 hey labels --all
 hey labels --limit
+hey login
+hey login --cookie
+hey login --no-browser
+hey login --token
+hey logout
 hey move
 hey move --to
 hey recordings
@@ -184,6 +189,9 @@ hey search --to
 hey search filters
 hey seen
 hey setup
+hey setup agents
+hey setup claude
+hey setup codex
 hey setup omarchy
 hey setup omarchy --no-notify
 hey setup omarchy --notify

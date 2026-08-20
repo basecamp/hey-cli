@@ -12,7 +12,7 @@ func TestCuratedCommandHelpUsesUserFacingLanguage(t *testing.T) {
 	root := newRootCmd()
 	tests := map[string]string{
 		"auth":  "Sign in to HEY, sign out, or check your login status.",
-		"setup": "Sign in and prepare HEY for first use.",
+		"setup": "Sign in and connect your coding agents.",
 	}
 
 	for name, expected := range tests {

@@ -129,6 +129,12 @@ func newRootCmd() *cobra.Command {
 				fmt.Fprintf(cmd.OutOrStdout(), "hey version %s\n", version.Version)
 				return nil
 			}
+			// First run: an interactive, logged-out bare `hey` gets the
+			// onboarding wizard (lite once onboarded — sign-in only). Every
+			// other bare `hey` prints help; the app lives at `hey tui`.
+			if interactiveStdio() && !machineReadableOutput(cmd) && !authMgr.IsAuthenticated() {
+				return runSetupWizard(cmd, wizardOptions{full: !cfg.Onboarded})
+			}
 			return cmd.Help()
 		},
 	}
@@ -155,6 +161,8 @@ func newRootCmd() *cobra.Command {
 	root.SetHelpFunc(customHelpFunc(root.HelpFunc()))
 
 	root.AddCommand(newAuthCommand().cmd)
+	root.AddCommand(newLoginCommand())
+	root.AddCommand(newLogoutCommand())
 	root.AddCommand(newAccountsCommand().cmd)
 	root.AddCommand(newBoxesCommand().cmd)
 	root.AddCommand(newBoxCommand().cmd)
@@ -188,7 +196,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newSpamCommand().cmd)
 	root.AddCommand(newIgnoreCommand().cmd)
 	root.AddCommand(newStopIgnoringCommand().cmd)
-	root.AddCommand(newSetupCommand())
+	root.AddCommand(newSetupCommand().cmd)
 	root.AddCommand(newOmarchyCommand().cmd)
 	root.AddCommand(newTuiCommand().cmd)
 	root.AddCommand(newHeyCommand().cmd)
@@ -211,7 +219,7 @@ func commandUsesAccountScope(cmd *cobra.Command) bool {
 	switch parts[1] {
 	// omarchy is exempt because its bar-status must never fail: it selects the
 	// configured account itself and treats a failed selection as a dark indicator.
-	case "accounts", "auth", "commands", "completion", "config", "doctor", "omarchy", "setup", "skill", "upgrade", "version":
+	case "accounts", "auth", "commands", "completion", "config", "doctor", "login", "logout", "omarchy", "setup", "skill", "upgrade", "version":
 		return false
 	default:
 		return true
@@ -261,6 +269,8 @@ func validateJQFlags(cmd *cobra.Command, filter string, requested, ids, count bo
 		return output.ErrJQNotSupported("the auth token command")
 	case "hey completion":
 		return output.ErrJQNotSupported("the completion command")
+	case "hey setup":
+		return output.ErrJQNotSupported("the setup wizard")
 	case "hey skill":
 		return output.ErrJQNotSupported("the skill display command")
 	case "hey tui", "hey hey":
@@ -270,11 +280,26 @@ func validateJQFlags(cmd *cobra.Command, filter string, requested, ids, count bo
 	}
 }
 
+// askToSignIn is the prompt requireAuth shows a logged-out user at a
+// terminal. A seam so tests can answer it.
+var askToSignIn = func() (bool, error) {
+	return tui.Confirm("Not logged in. Sign in now?", true)
+}
+
+// requireAuth gates data commands on a login. At an interactive terminal it
+// offers to sign in on the spot (prompt and OAuth progress on stderr, so
+// stdout stays data); declined, piped or machine-output runs get the auth
+// error and exit code 3 instead.
 func requireAuth() error {
-	if !authMgr.IsAuthenticated() {
-		return output.ErrAuth("not logged in — run `hey auth login` first")
+	if authMgr.IsAuthenticated() {
+		return nil
 	}
-	return nil
+	if writer.IsStyled() && interactiveStdio() {
+		if yes, err := askToSignIn(); err == nil && yes {
+			return loginInteractively(os.Stderr)
+		}
+	}
+	return output.ErrAuth("Not logged in")
 }
 
 // migrateOldCredentials migrates credentials from the old config.json format

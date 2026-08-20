@@ -3,12 +3,16 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/hey-cli/internal/auth"
+	"github.com/basecamp/hey-cli/internal/harness"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -39,6 +43,12 @@ func newAuthCommand() *authCommand {
 // login subcommand
 
 func newAuthLoginCommand() *cobra.Command {
+	return buildLoginCommand("hey auth login")
+}
+
+// buildLoginCommand constructs a login command whose examples read as the
+// given path. Shared by `hey auth login` and the top-level `hey login`.
+func buildLoginCommand(path string) *cobra.Command {
 	var (
 		token     string
 		cookie    string
@@ -51,10 +61,12 @@ func newAuthLoginCommand() *cobra.Command {
 		Long: `Authenticate with the HEY server via Launchpad OAuth.
 
 Opens a browser for OAuth authentication. Use --token or --cookie for non-interactive login.`,
-		Example: `  hey auth login
-  hey auth login --token YOUR_BEARER_TOKEN
-  hey auth login --cookie SESSION_COOKIE_VALUE
-  hey auth login --no-browser`,
+		Example: strings.Join([]string{
+			"  " + path,
+			"  " + path + " --token YOUR_BEARER_TOKEN",
+			"  " + path + " --cookie SESSION_COOKIE_VALUE",
+			"  " + path + " --no-browser",
+		}, "\n"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if token != "" {
 				if err := authMgr.LoginWithToken(token); err != nil {
@@ -86,7 +98,12 @@ Opens a browser for OAuth authentication. Use --token or --cookie for non-intera
 			}
 
 			if writer.IsStyled() {
-				fmt.Fprintln(cmd.OutOrStdout(), "Logged in successfully.")
+				w := cmd.OutOrStdout()
+				fmt.Fprintln(w, "Logged in successfully.")
+				if identity, err := rootSDK.Identity().GetIdentity(cmd.Context()); err == nil && identity != nil {
+					fmt.Fprintln(w, identityGreeting(identity))
+				}
+				printAgentNudge(w)
 				return nil
 			}
 			return writeOK(map[string]string{"method": "oauth"}, output.WithSummary("Logged in successfully"))
@@ -103,9 +120,16 @@ Opens a browser for OAuth authentication. Use --token or --cookie for non-intera
 // logout subcommand
 
 func newAuthLogoutCommand() *cobra.Command {
+	return buildLogoutCommand("hey auth logout")
+}
+
+// buildLogoutCommand constructs a logout command whose example reads as the
+// given path. Shared by `hey auth logout` and the top-level `hey logout`.
+func buildLogoutCommand(path string) *cobra.Command {
 	return &cobra.Command{
-		Use:   "logout",
-		Short: "Clear stored credentials",
+		Use:     "logout",
+		Short:   "Clear stored credentials",
+		Example: "  " + path,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := authMgr.Logout(); err != nil {
 				return output.ErrAuth(fmt.Sprintf("could not clear credentials: %v", err))
@@ -279,4 +303,42 @@ func newAuthTokenCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&stored, "stored", false, "Only print stored OAuth token (ignore HEY_TOKEN env var)")
 
 	return cmd
+}
+
+// printAgentNudge prints a hint about coding agent setup after login.
+//
+// Detection proves presence, not intent: with a single detected-unhealthy
+// agent it points at that agent; with several, it never guesses — it prints
+// every `hey setup <id>` choice so the user picks. It never suggests
+// `hey setup agents`, which is the installer's non-interactive path.
+func printAgentNudge(w io.Writer) {
+	type nudgeAgent struct{ id, name string }
+	var unhealthy []nudgeAgent
+	for _, agent := range harness.DetectedAgents() {
+		if agent.Checks == nil {
+			continue
+		}
+		for _, c := range agent.Checks() {
+			if c.Status != "pass" {
+				unhealthy = append(unhealthy, nudgeAgent{id: agent.ID, name: agent.Name})
+				break
+			}
+		}
+	}
+	sort.Slice(unhealthy, func(i, j int) bool { return unhealthy[i].id < unhealthy[j].id })
+
+	switch len(unhealthy) {
+	case 0:
+		return
+	case 1:
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, muted.format(fmt.Sprintf("  %s detected. Connect it to HEY:", unhealthy[0].name)))
+		fmt.Fprintln(w, bold.format("  hey setup "+unhealthy[0].id))
+	default:
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, muted.format("  Multiple coding agents detected. Choose one:"))
+		for _, a := range unhealthy {
+			fmt.Fprintln(w, bold.format("  hey setup "+a.id))
+		}
+	}
 }

@@ -253,3 +253,87 @@ func TestDoctorCommandReportsMissingAuthentication(t *testing.T) {
 	}
 	t.Fatal("Authentication check missing")
 }
+
+func TestLoginLogoutShortcutsMirrorAuthCommands(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+	configHome := t.TempDir()
+
+	_, login, err := runAuthCommand(t, configHome, server.URL, "", true, "login", "--cookie", "session-cookie")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if login.Summary != "Logged in with session cookie" {
+		t.Errorf("login summary = %q", login.Summary)
+	}
+
+	_, status, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "status")
+	if err != nil {
+		t.Fatalf("auth status: %v", err)
+	}
+	if data, _ := status.Data.(map[string]any); data["authenticated"] != true {
+		t.Errorf("status after hey login = %#v", status.Data)
+	}
+
+	_, logout, err := runAuthCommand(t, configHome, server.URL, "", true, "logout")
+	if err != nil {
+		t.Fatalf("logout: %v", err)
+	}
+	if logout.Summary != "Logged out" {
+		t.Errorf("logout summary = %q", logout.Summary)
+	}
+
+	_, status, err = runAuthCommand(t, configHome, server.URL, "", true, "auth", "status")
+	if err != nil {
+		t.Fatalf("auth status: %v", err)
+	}
+	if data, _ := status.Data.(map[string]any); data["authenticated"] != false {
+		t.Errorf("status after hey logout = %#v", status.Data)
+	}
+
+	root := newRootCmd()
+	login2, _, err := root.Find([]string{"login"})
+	if err != nil || !strings.Contains(login2.Example, "hey login --token") || strings.Contains(login2.Example, "hey auth login") {
+		t.Errorf("hey login example = %q", login2.Example)
+	}
+}
+
+func TestPrintAgentNudge(t *testing.T) {
+	isolateAgents(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	origColor := colorDisabled
+	colorDisabled = true
+	t.Cleanup(func() { colorDisabled = origColor })
+
+	var out bytes.Buffer
+	printAgentNudge(&out)
+	if out.Len() != 0 {
+		t.Errorf("no agents: nudge should be silent, got %q", out.String())
+	}
+
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	printAgentNudge(&out)
+	if !strings.Contains(out.String(), "Claude Code detected. Connect it to HEY:") || !strings.Contains(out.String(), "hey setup claude") {
+		t.Errorf("single agent nudge = %q", out.String())
+	}
+	if strings.Contains(out.String(), "setup agents") {
+		t.Errorf("nudge must never suggest setup agents: %q", out.String())
+	}
+
+	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	printAgentNudge(&out)
+	text := out.String()
+	if !strings.Contains(text, "Multiple coding agents detected. Choose one:") || !strings.Contains(text, "hey setup claude") || !strings.Contains(text, "hey setup codex") {
+		t.Errorf("multiple agent nudge = %q", text)
+	}
+}

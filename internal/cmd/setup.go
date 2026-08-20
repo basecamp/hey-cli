@@ -3,66 +3,487 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
+
 	"github.com/basecamp/hey-cli/internal/auth"
+	"github.com/basecamp/hey-cli/internal/config"
+	"github.com/basecamp/hey-cli/internal/harness"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/tui"
+	"github.com/basecamp/hey-cli/internal/version"
 )
 
-func newSetupCommand() *cobra.Command {
-	setup := &cobra.Command{
+type setupCommand struct {
+	cmd *cobra.Command
+}
+
+func newSetupCommand() *setupCommand {
+	setupCommand := &setupCommand{}
+	setupCommand.cmd = &cobra.Command{
 		Use:   "setup",
 		Short: "Set up HEY for first use",
-		Long:  "Sign in and prepare HEY for first use.",
+		Long:  "Sign in and connect your coding agents.",
+		Args:  cobra.NoArgs,
 		Annotations: map[string]string{
-			"agent_notes": "Run this on first use. Performs OAuth login. Equivalent to hey auth login.",
+			"agent_notes": "Runs the first-run wizard: OAuth sign-in, a look at the linked accounts, and coding-agent setup. With --json it never prompts; when not signed in and stdin is not a terminal it reports status incomplete with a `hey auth login` breadcrumb. Use `hey setup agents` to connect agents without signing in.",
 		},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if authMgr.IsAuthenticated() {
-				if writer.IsStyled() {
-					fmt.Fprintln(cmd.OutOrStdout(), "Already authenticated. Run `hey auth status` for details.")
-					return nil
-				}
-				return writeOK(map[string]string{"status": "already_authenticated"},
-					output.WithSummary("Already authenticated"),
-				)
-			}
-
-			if writer.IsStyled() {
-				w := cmd.OutOrStdout()
-				fmt.Fprintln(w, "Welcome to hey CLI!")
-				fmt.Fprintln(w)
-				fmt.Fprintln(w, "Let's get you logged in...")
-				fmt.Fprintln(w)
-			}
-
-			ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
-			defer cancel()
-
-			if err := authMgr.Login(ctx, auth.LoginOptions{}); err != nil {
-				return output.ErrAuth(fmt.Sprintf("login failed: %v", err))
-			}
-
-			if writer.IsStyled() {
-				w := cmd.OutOrStdout()
-				fmt.Fprintln(w, "Setup complete! You're ready to use hey.")
-				fmt.Fprintln(w)
-				fmt.Fprintln(w, "Try: hey boxes")
-				return nil
-			}
-
-			return writeOK(map[string]string{"status": "setup_complete"},
-				output.WithSummary("Setup complete"),
-				output.WithBreadcrumbs(output.Breadcrumb{
-					Action:      "start",
-					Command:     "hey boxes",
-					Description: "List your mailboxes",
-				}),
-			)
-		},
+		RunE: setupCommand.run,
 	}
-	setup.AddCommand(newSetupOmarchyCommand().cmd)
-	return setup
+
+	for _, sub := range newSetupAgentCommands() {
+		setupCommand.cmd.AddCommand(sub)
+	}
+	setupCommand.cmd.AddCommand(newSetupAgentsCommand())
+	setupCommand.cmd.AddCommand(newSetupOmarchyCommand().cmd)
+
+	return setupCommand
+}
+
+func (c *setupCommand) run(cmd *cobra.Command, _ []string) error {
+	return runSetupWizard(cmd, wizardOptions{full: true})
+}
+
+// wizardOptions tunes the first-run wizard. full runs every step; a lite run
+// (a later logged-out bare `hey` once onboarded) only signs in.
+type wizardOptions struct {
+	full bool
+}
+
+// wizardIdentity is the signed-in HEY identity reported in the envelope.
+type wizardIdentity struct {
+	Name  string `json:"name,omitempty"`
+	Email string `json:"email,omitempty"`
+}
+
+// wizardResult is the wizard's outcome, rendered as prose in a terminal and
+// as the envelope otherwise.
+type wizardResult struct {
+	Version        string            `json:"version"`
+	Status         string            `json:"status"` // "complete" or "incomplete"
+	Identity       *wizardIdentity   `json:"identity,omitempty"`
+	Accounts       []accountListItem `json:"accounts,omitempty"`
+	SkillInstalled bool              `json:"skill_installed"`
+	Agents         []agentCheck      `json:"agents"`
+	Issues         []agentIssue      `json:"issues"`
+}
+
+// setupWizard carries one wizard run: the command it prints through and what
+// it has learned so far.
+type setupWizard struct {
+	cmd     *cobra.Command
+	opts    wizardOptions
+	styled  bool
+	result  wizardResult
+	outcome agentSetupOutcome
+}
+
+// runSetupWizard is the entry point shared by `hey setup` and bare `hey`.
+func runSetupWizard(cmd *cobra.Command, opts wizardOptions) error {
+	wizard := &setupWizard{
+		cmd:    cmd,
+		opts:   opts,
+		styled: writer.IsStyled(),
+		result: wizardResult{Version: version.Version, Status: "complete"},
+	}
+	return wizard.run()
+}
+
+func (s *setupWizard) run() error {
+	if s.styled {
+		s.welcome(s.cmd.OutOrStdout())
+	}
+
+	signedIn, err := s.signIn()
+	if err != nil {
+		return err
+	}
+	if signedIn {
+		s.greet()
+	} else {
+		s.result.Status = "incomplete"
+		s.result.Issues = append(s.result.Issues, agentIssue{Check: "Not logged in", Hint: "Run: hey auth login"})
+	}
+
+	if s.opts.full {
+		s.outcome = s.setupAgents()
+	}
+	s.result.SkillInstalled = baselineSkillInstalled()
+	s.result.Agents = s.outcome.Checks
+	s.result.Issues = append(s.result.Issues, s.outcome.Issues...)
+	if statusFromOutcome(s.outcome) == "incomplete" {
+		s.result.Status = "incomplete"
+	}
+
+	s.persistOnboarded()
+	return s.summary()
+}
+
+// welcome prints the wordmark and a short intro (styled runs only).
+func (s *setupWizard) welcome(w io.Writer) {
+	fmt.Fprintln(w, tui.RenderWordmark(!colorDisabled))
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, bold.format("Welcome to HEY"))
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "The command-line interface for HEY (v%s).\n", version.Version)
+	fmt.Fprintln(w, "Let's get you set up. This will only take a moment.")
+	fmt.Fprintln(w)
+}
+
+// signIn makes sure we are authenticated. Reports whether we are: a styled
+// run always signs in (or fails); a machine run signs in only when stdin is a
+// terminal to type into, and otherwise reports "not logged in" so a piped
+// `hey setup --json` never hangs waiting for a browser.
+func (s *setupWizard) signIn() (bool, error) {
+	if authMgr.IsAuthenticated() {
+		return true, nil
+	}
+
+	if s.styled {
+		w := s.cmd.OutOrStdout()
+		fmt.Fprintln(w, bold.format("  Step 1: Sign in"))
+		fmt.Fprintln(w)
+		if err := loginInteractively(w); err != nil {
+			return false, err
+		}
+		fmt.Fprintln(w)
+		return true, nil
+	}
+
+	if !stdinIsTerminal() {
+		return false, nil
+	}
+	if err := loginInteractively(s.cmd.ErrOrStderr()); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// loginInteractively runs the OAuth flow with progress on out, then selects
+// the configured mail account (PersistentPreRunE skipped that while we were
+// logged out). Shared with requireAuth's sign-in prompt.
+func loginInteractively(out io.Writer) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+	defer cancel()
+
+	logger := func(msg string) {
+		for _, line := range strings.Split(strings.Trim(msg, "\n"), "\n") {
+			if line == "" {
+				fmt.Fprintln(out)
+			} else {
+				fmt.Fprintln(out, "  "+line)
+			}
+		}
+	}
+	if err := authMgr.Login(ctx, auth.LoginOptions{Logger: logger}); err != nil {
+		return output.ErrAuth(fmt.Sprintf("login failed: %v", err))
+	}
+	return selectConfiguredAccount(context.Background())
+}
+
+// greet looks up who signed in and shows the linked accounts. Read-only:
+// HEY is natively multi-account and "all" is the default, so nothing is
+// chosen or persisted here.
+func (s *setupWizard) greet() {
+	w := s.cmd.OutOrStdout()
+
+	identity, err := rootSDK.Identity().GetIdentity(s.cmd.Context())
+	if err != nil || identity == nil {
+		if s.styled {
+			fmt.Fprintln(w, success.format("  Signed in."))
+			fmt.Fprintln(w)
+		}
+		return
+	}
+
+	s.result.Identity = &wizardIdentity{Name: identity.Name, Email: identity.PrimaryContact.EmailAddress}
+	s.result.Accounts = linkedAccountList(identity, cfg.AccountID)
+
+	if !s.styled {
+		return
+	}
+	fmt.Fprintln(w, success.format("  "+identityGreeting(identity)))
+	// accounts[0] is the "All Accounts" filter; a single linked account
+	// needs no list.
+	if len(s.result.Accounts) > 2 {
+		for _, account := range s.result.Accounts[1:] {
+			label := terminalSafeText(account.Name)
+			if account.Email != "" {
+				label += " (" + terminalSafeText(account.Email) + ")"
+			}
+			fmt.Fprintln(w, muted.format("    • "+label))
+		}
+		if cfg.AccountID == config.AllAccounts {
+			fmt.Fprintln(w, muted.format("    Using All Accounts — hey accounts use <id> to default to one"))
+		} else {
+			fmt.Fprintln(w, muted.format("    Default mail account: "+cfg.AccountID))
+		}
+	}
+	fmt.Fprintln(w)
+}
+
+func identityGreeting(identity *generated.Identity) string {
+	name := terminalSafeText(identity.Name)
+	email := terminalSafeText(identity.PrimaryContact.EmailAddress)
+	switch {
+	case name != "" && email != "":
+		return fmt.Sprintf("Signed in as %s (%s)", name, email)
+	case email != "":
+		return "Signed in as " + email
+	case name != "":
+		return "Signed in as " + name
+	default:
+		return "Signed in."
+	}
+}
+
+// setupAgents offers to connect detected coding agents. In a styled run the
+// user confirms first; a machine run just does it — there is nobody to ask.
+func (s *setupWizard) setupAgents() agentSetupOutcome {
+	agents := harness.DetectedAgents()
+	if len(agents) == 0 {
+		return agentSetupOutcome{}
+	}
+
+	w := s.cmd.OutOrStdout()
+
+	// One pre-setup snapshot drives both the all-good gate and the checklist
+	// rendered in the summary for the paths that do not run setup.
+	preChecks := snapshotAgentChecks(agents)
+	if baselineSkillInstalled() && len(issuesFromChecks(preChecks)) == 0 {
+		if s.styled {
+			for _, a := range agents {
+				fmt.Fprintln(w, statusLine(true, a.Name+" connected"))
+			}
+			fmt.Fprintln(w)
+		}
+		return agentSetupOutcome{Checks: preChecks}
+	}
+
+	if s.styled {
+		fmt.Fprintln(w, bold.format("  Step 2: Coding agents"))
+		fmt.Fprintln(w)
+
+		var names []string
+		for _, a := range agents {
+			names = append(names, a.Name)
+		}
+		fmt.Fprintf(w, "  Detected: %s\n", joinNames(names))
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "  This will:")
+		step := 1
+		fmt.Fprintln(w, muted.format(fmt.Sprintf("    %d. Install the HEY agent skill to ~/.agents/skills/hey/", step)))
+		step++
+		for _, a := range agents {
+			handler, ok := agentSetupHandlers[a.ID]
+			if !ok {
+				continue
+			}
+			for _, label := range handler.Labels {
+				fmt.Fprintln(w, muted.format(fmt.Sprintf("    %d. %s", step, label)))
+				step++
+			}
+		}
+		fmt.Fprintln(w)
+
+		install, confirmErr := tui.Confirm("  Set up HEY for your coding agents?", true)
+		if confirmErr != nil || !install {
+			fmt.Fprintln(w, muted.format("  You can set up agents later:"))
+			for _, a := range agents {
+				if _, ok := agentSetupHandlers[a.ID]; ok {
+					fmt.Fprintln(w, bold.format("    hey setup "+a.ID))
+				}
+			}
+			fmt.Fprintln(w)
+			// Skipped carries the snapshot for the checklist but records no
+			// issues, so a deliberate skip stays "complete".
+			return agentSetupOutcome{Skipped: true, Checks: preChecks}
+		}
+		fmt.Fprintln(w)
+	}
+
+	var issues []agentIssue
+	if _, err := installSkillFiles(); err != nil {
+		if s.styled {
+			fmt.Fprintln(w, warning.format(fmt.Sprintf("  Skill install failed: %s", err)))
+		}
+		issues = append(issues, agentIssue{Check: "Agent skill", Hint: "Run: hey skill install"})
+	} else if s.styled {
+		fmt.Fprintln(w, statusLine(true, "Agent skill installed"))
+	}
+
+	for _, a := range agents {
+		handler, ok := agentSetupHandlers[a.ID]
+		if !ok {
+			continue
+		}
+		if s.styled {
+			if handler.Run != nil {
+				_ = handler.Run(s.cmd) // interactive handlers warn and continue
+			}
+		} else if handler.RunNonInteractive != nil {
+			_ = handler.RunNonInteractive(s.cmd) // the snapshot below reports failures
+		}
+	}
+
+	// Re-snapshot after setup ran so failed installs surface as issues rather
+	// than a silent "complete". The same snapshot renders the checklist, so
+	// status and checklist can never disagree.
+	postChecks := snapshotAgentChecks(agents)
+	issues = append(issues, issuesFromChecks(postChecks)...)
+
+	if s.styled {
+		fmt.Fprintln(w)
+	}
+	return agentSetupOutcome{Checks: postChecks, Issues: issues}
+}
+
+// persistOnboarded records that the wizard ran, so a later logged-out bare
+// `hey` runs the lite wizard. Best-effort: a read-only config dir only costs
+// a repeat of the agent step next time.
+func (s *setupWizard) persistOnboarded() {
+	if cfg.Onboarded {
+		return
+	}
+	if err := cfg.SaveOnboarded(true); err != nil {
+		fmt.Fprintf(s.cmd.ErrOrStderr(), "warning: could not save onboarding state: %v\n", err)
+	}
+}
+
+// summary closes the wizard: a checklist and next steps in a terminal, the
+// envelope otherwise.
+func (s *setupWizard) summary() error {
+	if s.styled {
+		showWizardSuccess(s.cmd.OutOrStdout(), s.result, s.outcome)
+		return nil
+	}
+	if s.result.Agents == nil {
+		s.result.Agents = []agentCheck{}
+	}
+	if s.result.Issues == nil {
+		s.result.Issues = []agentIssue{}
+	}
+	return writeOK(s.result,
+		output.WithSummary(wizardSummaryLine(s.result)),
+		output.WithBreadcrumbs(wizardBreadcrumbs(s.result)...),
+	)
+}
+
+// successHeadline returns the completion banner. When a step left unresolved
+// issues the banner is honest about it rather than claiming "Setup complete!".
+func successHeadline(status string, issueCount int) string {
+	if status != "incomplete" {
+		return "Setup complete!"
+	}
+	if issueCount == 1 {
+		return "Setup finished — 1 step needs attention"
+	}
+	return fmt.Sprintf("Setup finished — %d steps need attention", issueCount)
+}
+
+// showWizardSuccess renders the completion checklist, remediation for
+// anything that did not complete, and example commands.
+func showWizardSuccess(w io.Writer, result wizardResult, outcome agentSetupOutcome) {
+	divider := muted.format("─────────────────────────────────")
+
+	headline := success
+	if result.Status == "incomplete" {
+		headline = warning
+	}
+
+	fmt.Fprintln(w, divider)
+	fmt.Fprintln(w, headline.format("  "+successHeadline(result.Status, len(result.Issues))))
+	fmt.Fprintln(w, divider)
+	fmt.Fprintln(w)
+
+	signedIn := result.Identity != nil || !hasIssue(result.Issues, "Not logged in")
+	fmt.Fprintln(w, statusLine(signedIn, "Signed in"))
+	if outcome.Skipped {
+		fmt.Fprintln(w, muted.format("  Coding agent setup skipped — run: hey setup"))
+	} else {
+		for _, check := range outcome.Checks {
+			fmt.Fprintln(w, statusLine(check.Status == "pass", check.Name))
+		}
+	}
+	fmt.Fprintln(w)
+
+	if len(result.Issues) > 0 {
+		fmt.Fprintln(w, "  Some steps need attention:")
+		for _, issue := range result.Issues {
+			// Check names usually already carry the agent (e.g. "Claude Code
+			// Plugin"); only prefix when they don't.
+			label := issue.Check
+			if issue.Agent != "" && !strings.HasPrefix(issue.Check, issue.Agent) {
+				label = issue.Agent + " — " + issue.Check
+			}
+			line := "    " + label
+			if issue.Hint != "" {
+				line += ": " + issue.Hint
+			}
+			fmt.Fprintln(w, warning.format(line))
+		}
+		fmt.Fprintln(w, muted.format("    Then verify with: hey doctor"))
+		fmt.Fprintln(w)
+	}
+
+	fmt.Fprintln(w, "  Try these commands:")
+	fmt.Fprintln(w)
+	examples := []struct{ cmd, desc string }{
+		{"hey tui", "Open the app"},
+		{"hey boxes", "List your boxes"},
+		{"hey box imbox", "Read your Imbox"},
+		{`hey search "quarterly planning"`, "Search your mail"},
+	}
+	width := 0
+	for _, ex := range examples {
+		width = max(width, len(ex.cmd))
+	}
+	for _, ex := range examples {
+		fmt.Fprintf(w, "    %s%s  %s\n", bold.format(ex.cmd), strings.Repeat(" ", width-len(ex.cmd)), muted.format(ex.desc))
+	}
+	fmt.Fprintln(w)
+}
+
+func hasIssue(issues []agentIssue, check string) bool {
+	for _, issue := range issues {
+		if issue.Check == check {
+			return true
+		}
+	}
+	return false
+}
+
+// wizardSummaryLine builds a concise summary for the output envelope.
+func wizardSummaryLine(result wizardResult) string {
+	headline := "Setup complete"
+	if result.Status == "incomplete" {
+		headline = "Setup finished with issues"
+	}
+	if result.Identity != nil && result.Identity.Email != "" {
+		return fmt.Sprintf("%s - %s", headline, result.Identity.Email)
+	}
+	return headline
+}
+
+// wizardBreadcrumbs returns next-step breadcrumbs based on wizard outcome.
+func wizardBreadcrumbs(result wizardResult) []output.Breadcrumb {
+	if hasIssue(result.Issues, "Not logged in") {
+		return []output.Breadcrumb{
+			{Action: "login", Command: "hey auth login", Description: "Authenticate with HEY"},
+			{Action: "doctor", Command: "hey doctor", Description: "Check CLI health"},
+		}
+	}
+	crumbs := []output.Breadcrumb{
+		{Action: "open", Command: "hey tui", Description: "Open the app"},
+		{Action: "boxes", Command: "hey boxes", Description: "List your boxes"},
+	}
+	if result.Status == "incomplete" {
+		crumbs = append(crumbs, output.Breadcrumb{Action: "doctor", Command: "hey doctor", Description: "Check CLI health"})
+	}
+	return crumbs
 }
