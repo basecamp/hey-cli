@@ -164,13 +164,25 @@ func (r upgradeRun) data(t *testing.T) map[string]string {
 
 func executeUpgradeCommand(t *testing.T) upgradeRun {
 	t.Helper()
+	return executeUpgradeCommandAs(t, "--json")
+}
+
+// executeStyledUpgradeCommand runs `hey upgrade --styled`: narration goes to
+// stdout and success must end there, with no JSON envelope.
+func executeStyledUpgradeCommand(t *testing.T) upgradeRun {
+	t.Helper()
+	return executeUpgradeCommandAs(t, "--styled")
+}
+
+func executeUpgradeCommandAs(t *testing.T, formatFlag string) upgradeRun {
+	t.Helper()
 	isolateCommandEnv(t)
 
 	root := newRootCmd()
 	var stdout, stderr bytes.Buffer
 	root.SetOut(&stdout)
 	root.SetErr(&stderr)
-	root.SetArgs([]string{"upgrade", "--json"})
+	root.SetArgs([]string{"upgrade", formatFlag})
 
 	err := root.Execute()
 	return upgradeRun{stdout: stdout.String(), stderr: stderr.String(), err: err}
@@ -259,23 +271,37 @@ func TestUpgradeNarrationFollowsOutputMode(t *testing.T) {
 	stubVersion(t, "1.0.0")
 	stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "1.0.0"})
 
-	isolateCommandEnv(t)
-	root := newRootCmd()
-	var stdout, stderr bytes.Buffer
-	root.SetOut(&stdout)
-	root.SetErr(&stderr)
-	root.SetArgs([]string{"upgrade", "--styled"})
-	mustNoError(t, root.Execute())
-	assertContains(t, stdout.String(), "Current version: 1.0.0")
-	assertContains(t, stdout.String(), "already up to date")
-	if stderr.Len() != 0 {
-		t.Errorf("styled mode wrote to stderr: %q", stderr.String())
+	styled := executeStyledUpgradeCommand(t)
+	mustNoError(t, styled.err)
+	assertContains(t, styled.stdout, "Current version: 1.0.0")
+	assertContains(t, styled.stdout, "already up to date")
+	assertNotContains(t, styled.stdout, `"ok"`)
+	if styled.stderr != "" {
+		t.Errorf("styled mode wrote to stderr: %q", styled.stderr)
 	}
 
 	run := executeUpgradeCommand(t)
 	mustNoError(t, run.err)
 	assertContains(t, run.stderr, "Current version: 1.0.0")
 	assertNotContains(t, run.stdout, "Current version")
+}
+
+// A styled success ends with its narration: output.Writer.OK has no styled
+// case, so an unconditional writeOK would append a JSON envelope after the
+// human-readable progress.
+func TestUpgradeStyledSuccessEmitsNoEnvelope(t *testing.T) {
+	stubVersion(t, "1.2.3")
+	stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "1.3.0", isBrew: true})
+	stubBrewPrefixResolver(t, func(context.Context) (string, error) { return "/opt/homebrew", nil })
+	stubBinaryVersionProber(t, func(context.Context, string) (string, error) { return "1.3.0", nil })
+
+	run := executeStyledUpgradeCommand(t)
+	mustNoError(t, run.err)
+	assertContains(t, run.stdout, "Upgraded 1.2.3 → 1.3.0")
+	assertNotContains(t, run.stdout, `"ok"`)
+	if run.stderr != "" {
+		t.Errorf("styled mode wrote to stderr: %q", run.stderr)
+	}
 }
 
 // A failed update check must honor the structured upgrade contract — a plain

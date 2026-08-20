@@ -205,7 +205,8 @@ func probeDirWritable(dir string) error {
 }
 
 // runNativeSelfUpdate performs the download → verify → swap → confirm flow.
-// Returns writeOK on confirmed success; every other outcome is a *output.Error.
+// Returns writeUpgradeOK on confirmed success; every other outcome is a
+// *output.Error.
 func runNativeSelfUpdate(ctx context.Context, w io.Writer, target, current string, release releaseInfo) error {
 	latest := release.Version
 
@@ -325,9 +326,9 @@ func runNativeSelfUpdate(ctx context.Context, w io.Writer, target, current strin
 
 	fmt.Fprintln(w, "done")
 	fmt.Fprintf(w, "Upgraded %s → %s\n", current, latest)
-	return writeOK(
+	return writeUpgradeOK(
 		map[string]string{"status": "upgraded", "from": current, "to": latest, "method": "native"},
-		output.WithSummary(fmt.Sprintf("Upgraded %s → %s", current, latest)),
+		fmt.Sprintf("Upgraded %s → %s", current, latest),
 	)
 }
 

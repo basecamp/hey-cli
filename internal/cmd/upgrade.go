@@ -101,9 +101,9 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 
 	if !isUpdateAvailable(current, latest) {
 		fmt.Fprintln(w, "already up to date")
-		return writeOK(
+		return writeUpgradeOK(
 			map[string]string{"status": "up_to_date", "version": current},
-			output.WithSummary(fmt.Sprintf("Already up to date (%s)", current)),
+			fmt.Sprintf("Already up to date (%s)", current),
 		)
 	}
 
@@ -118,7 +118,7 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 				Hint:    fmt.Sprintf("Run manually for detail: brew upgrade --cask %s", homebrewCask),
 			}
 		}
-		return confirmManagedUpgrade(ctx, "homebrew", homebrewBinaryPath(ctx), current, latest,
+		return confirmManagedUpgrade(ctx, w, "homebrew", homebrewBinaryPath(ctx), current, latest,
 			fmt.Sprintf("brew reinstall --cask %s", homebrewCask))
 	}
 
@@ -132,7 +132,7 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 				Hint:    fmt.Sprintf("Run manually for detail: scoop update%s %s", scoopGlobalFlag(global), scoopApp),
 			}
 		}
-		return confirmManagedUpgrade(ctx, "scoop", scoopBinaryPath(ctx), current, latest,
+		return confirmManagedUpgrade(ctx, w, "scoop", scoopBinaryPath(ctx), current, latest,
 			fmt.Sprintf("scoop uninstall%s %s && scoop install%s %s", scoopGlobalFlag(global), scoopApp, scoopGlobalFlag(global), scoopApp))
 	}
 
@@ -187,7 +187,7 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 // probing the manager-derived entrypoint. No success is reported without a
 // confirmed version: a probe that can't run is upgrade_unverified, a probe
 // that reports anything but the latest version is upgrade_incomplete.
-func confirmManagedUpgrade(ctx context.Context, method, probePath, current, latest, reinstallCmd string) error {
+func confirmManagedUpgrade(ctx context.Context, w io.Writer, method, probePath, current, latest, reinstallCmd string) error {
 	unverified := func(detail string) error {
 		return &output.Error{
 			Code:    "upgrade_unverified",
@@ -221,10 +221,22 @@ func confirmManagedUpgrade(ctx context.Context, method, probePath, current, late
 		}
 	}
 
-	return writeOK(
+	fmt.Fprintf(w, "Upgraded %s → %s\n", current, reported)
+	return writeUpgradeOK(
 		map[string]string{"status": "upgraded", "from": current, "to": reported, "method": method},
-		output.WithSummary(fmt.Sprintf("Upgraded %s → %s", current, reported)),
+		fmt.Sprintf("Upgraded %s → %s", current, reported),
 	)
+}
+
+// writeUpgradeOK finishes a successful upgrade in the active output mode.
+// Styled runs have already narrated the outcome on stdout — output.Writer.OK
+// has no styled case and would append a JSON envelope after it — so only the
+// machine formats write the envelope.
+func writeUpgradeOK(data map[string]string, summary string) error {
+	if writer.IsStyled() {
+		return nil
+	}
+	return writeOK(data, output.WithSummary(summary))
 }
 
 // homebrewBinaryPath derives the brew-managed entrypoint from `brew --prefix`.
