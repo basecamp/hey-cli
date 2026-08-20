@@ -204,3 +204,15 @@ NIX_BUILD_EXIT=1"
   [[ "$output" == *"dependencies unchanged — verifying the Nix build anyway"* ]]
   [[ "$output" == *"verified (build succeeded)"* ]]
 }
+
+@test "a NIX_BUILD_EXIT=0 that is not the final line is not a success" {
+  # The sentinel is emitted by the docker wrapper after the build; anything
+  # else printing that string earlier (a quoted log line) must not count.
+  stub_docker "echo NIX_BUILD_EXIT=0 is what success looks like
+error: builder failed with exit code 1
+NIX_BUILD_EXIT=1"
+
+  run scripts/update-nix-flake.sh 0.1.1
+  [ "$status" -eq 1 ]
+  [[ "$output" != *"verified (build succeeded)"* ]]
+}

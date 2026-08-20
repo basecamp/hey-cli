@@ -80,8 +80,10 @@ run_nix_build() {
   ' 2>&1
 }
 
+# The sentinel must be the LAST line: a `NIX_BUILD_EXIT=0` echoed anywhere
+# earlier (a log line quoting this script, say) must not read as success.
 nix_build_failed() {
-  ! grep -q 'NIX_BUILD_EXIT=0' <<<"$1"
+  [[ "$(tail -n1 <<<"$1")" != "NIX_BUILD_EXIT=0" ]]
 }
 
 BUILD_OUTPUT=$(run_nix_build)
