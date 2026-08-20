@@ -46,8 +46,11 @@ find_sha256_cmd() {
     echo "sha256sum"
   elif command -v shasum &>/dev/null; then
     echo "shasum -a 256"
+  elif command -v sha256 &>/dev/null; then
+    # FreeBSD/OpenBSD base system; -q prints the bare digest.
+    echo "sha256 -q"
   else
-    error "No SHA256 tool found (need sha256sum or shasum)"
+    error "No SHA256 tool found (need sha256sum, shasum or sha256)"
   fi
 }
 
@@ -334,17 +337,21 @@ setup_path() {
   step "Adding $BIN_DIR to PATH"
 
   local shell_rc=""
+  local path_line="export PATH=\"$BIN_DIR:\$PATH\""
   case "${SHELL:-}" in
     */zsh)  shell_rc="$HOME/.zshrc" ;;
     */bash) shell_rc="$HOME/.bashrc" ;;
+    # fish sources neither ~/.profile nor Bourne syntax; fish_add_path
+    # (fish >= 3.2) persists the entry and is idempotent across runs.
+    */fish) shell_rc="${XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish"
+            path_line="fish_add_path \"$BIN_DIR\"" ;;
     *)      shell_rc="$HOME/.profile" ;;
   esac
-
-  local path_line="export PATH=\"$BIN_DIR:\$PATH\""
 
   if [[ -f "$shell_rc" ]] && grep -qF "$BIN_DIR" "$shell_rc" 2>/dev/null; then
     info "PATH already configured in $shell_rc"
   else
+    mkdir -p "$(dirname "$shell_rc")"
     {
       echo ""
       echo "# Added by hey installer"

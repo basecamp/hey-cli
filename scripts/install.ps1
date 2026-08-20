@@ -187,7 +187,9 @@ function Get-FirstRunFailureMessage([string]$Binary, [string]$Reason) {
     $sigStatus = (Get-AuthenticodeSignature -FilePath $Binary -ErrorAction Stop).Status
   } catch { }
 
-  # Smart App Control state: 0 = off, 1 = on, 2 = evaluation mode.
+  # Smart App Control state: 0 = off, 1 = on, 2 = evaluation mode. Only 1
+  # enforces; evaluation mode observes without blocking, so it must not
+  # claim the failure.
   $sacState = $null
   try {
     $policy = Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy' -ErrorAction Stop
@@ -196,7 +198,7 @@ function Get-FirstRunFailureMessage([string]$Binary, [string]$Reason) {
 
   $lead = "Installed hey.exe to $Binary, but running it failed: $Reason"
 
-  if ("$sigStatus" -eq 'NotSigned' -and ($sacState -eq 1 -or $sacState -eq 2)) {
+  if ("$sigStatus" -eq 'NotSigned' -and $sacState -eq 1) {
     return @"
 $lead
 
@@ -334,11 +336,15 @@ function Main {
 
     # Smart App Control kills CreateProcess for unsigned executables, so the
     # first run is where a block surfaces. Generic catch per the Copy-Item
-    # precedent above.
+    # precedent above. A launch that succeeds but exits nonzero does not
+    # throw in Windows PowerShell 5.1, so check $LASTEXITCODE as well.
     try {
       $installedVersion = & $installedBinary --version
     } catch {
       Fail (Get-FirstRunFailureMessage -Binary $installedBinary -Reason $_.Exception.Message)
+    }
+    if ($LASTEXITCODE -ne 0) {
+      Fail (Get-FirstRunFailureMessage -Binary $installedBinary -Reason "hey --version exited with code $LASTEXITCODE")
     }
     Info "$installedVersion installed"
 

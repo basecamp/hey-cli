@@ -2,7 +2,7 @@
 # installer_signing.bats - Tests for the shape the PowerShell installer must
 # have before Authenticode signing.
 #
-# v0.8.0-rc.2 shipped a hey_installer.ps1 that PowerShell rejected as
+# basecamp-cli v0.8.0-rc.2 shipped a hey_installer.ps1 that PowerShell rejected as
 # HashMismatch, so the installer would not run under AllSigned/RemoteSigned.
 # Cause: jsign digests the script as UTF-16LE of the content with NO
 # line-ending normalization, while PowerShell's script SIP normalizes to CRLF

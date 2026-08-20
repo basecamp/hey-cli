@@ -3,9 +3,22 @@
 # against the REAL published bundle format of the latest release — real
 # download, real Sigstore verification. A native `hey upgrade` matrix joins
 # once the command exists.
+#
+# Branch pushes necessarily verify the previous release, so the workflow also
+# runs on every published release (pinned to that release's tag) -- the first
+# bundle a changed .goreleaser.yaml actually produces gets exercised. Manual
+# runs can pin a version too.
 name: Upgrade Smoke
 
 on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release to install (e.g. 1.2.3); empty means latest"
+        required: false
+        default: ""
   push:
     branches: [main]
     paths:
@@ -25,6 +38,11 @@ permissions: {}
 concurrency:
   group: upgrade-smoke-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  # "v1.2.3" on release events, the input on workflow_dispatch, empty (latest)
+  # otherwise. The installers take the bare version; the "v" is stripped below.
+  RELEASE_TAG: ${{ github.event.release.tag_name || inputs.version }}
 
 jobs:
   installer-sh:
@@ -60,12 +78,27 @@ jobs:
           sudo mv /tmp/cosign /usr/local/bin/cosign
           cosign version
 
-      - name: Run install.sh against the latest release
+      # goreleaser publishes the release before its assets finish uploading,
+      # so a release-triggered run waits for the bundle to appear.
+      - name: Wait for release assets
+        if: env.RELEASE_TAG != ''
+        run: |
+          tag="v${RELEASE_TAG#v}"
+          url="https://github.com/basecamp/hey-cli/releases/download/${tag}/checksums.txt.bundle"
+          for _ in $(seq 1 30); do
+            if curl -fsSIL "$url" >/dev/null; then exit 0; fi
+            sleep 20
+          done
+          echo "::error::${url} never appeared" >&2
+          exit 1
+
+      - name: Run install.sh against the release
         env:
           HEY_BIN_DIR: /home/runner/.local/bin
           HEY_NO_KEYRING: "1"
         run: |
           set -o pipefail
+          export HEY_VERSION="${RELEASE_TAG#v}"
           bash scripts/install.sh | tee install.log
 
       - name: Assert the signature verification path
@@ -121,11 +154,25 @@ jobs:
           if ($actual -ne '${{ matrix.sha256 }}') { throw "cosign digest mismatch: $actual" }
           Add-Content $env:GITHUB_PATH $binDir
 
-      - name: Run install.ps1 against the latest release
+      - name: Wait for release assets
+        if: env.RELEASE_TAG != ''
+        run: |
+          $tag = 'v' + ($env:RELEASE_TAG -replace '^v', '')
+          $url = "https://github.com/basecamp/hey-cli/releases/download/$tag/checksums.txt.bundle"
+          foreach ($i in 1..30) {
+            try {
+              Invoke-WebRequest -UseBasicParsing -Method Head -Uri $url | Out-Null
+              exit 0
+            } catch { Start-Sleep -Seconds 20 }
+          }
+          throw "$url never appeared"
+
+      - name: Run install.ps1 against the release
         env:
           HEY_NO_KEYRING: "1"
         run: |
           cosign version
+          $env:HEY_VERSION = $env:RELEASE_TAG -replace '^v', ''
           & .\scripts\install.ps1 *>&1 | Tee-Object -FilePath install.log
 
       - name: Assert the signature verification path

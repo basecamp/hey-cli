@@ -9,7 +9,8 @@
 # (SignableScript.computeDigest). PowerShell's script SIP normalizes to CRLF
 # before hashing. Sign an LF file and the two digests differ, so
 # Get-AuthenticodeSignature reports HashMismatch and the installer is refused
-# under AllSigned/RemoteSigned. That is what shipped in v0.8.0-rc.2.
+# under AllSigned/RemoteSigned. That is what basecamp-cli
+# shipped in v0.8.0-rc.2, and hey-cli inherits the same pipeline.
 #
 # Two invariants make the digests agree:
 #

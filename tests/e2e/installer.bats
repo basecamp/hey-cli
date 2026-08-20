@@ -131,8 +131,11 @@ EOF
   grep -q 'function Get-FirstRunFailureMessage' "$INSTALL_PS1"
   grep -q 'Smart App Control' "$INSTALL_PS1"
   grep -q 'Protection history' "$INSTALL_PS1"
-  # The first-run failure path routes through the diagnosis helper.
+  # The first-run failure path routes through the diagnosis helper, for a
+  # launch that throws and for one that exits nonzero (PowerShell 5.1 does
+  # not throw on a native nonzero exit).
   grep -qF 'Fail (Get-FirstRunFailureMessage' "$INSTALL_PS1"
+  grep -qF -- '-Reason "hey --version exited with code $LASTEXITCODE"' "$INSTALL_PS1"
 }
 
 # All three diagnosis branches, driven by shadowing the probes. Only the
@@ -172,6 +175,15 @@ if ($msg -notlike '*no per-app exceptions*') { throw 'branch1 missing no-excepti
 if ($msg -notlike '*leave it off while using this unsigned build*') { throw 'branch1 missing stay-off caveat' }
 'branch1-ok'
 
+# Branch 1b: SAC in evaluation mode (2) observes without blocking, so it must
+# not be blamed -- falls through to the quarantine advice.
+$script:SacState = 2
+$msg = Get-FirstRunFailureMessage -Binary 'C:\bin\hey.exe' -Reason 'boom-eval'
+if ($msg -notlike '*boom-eval*') { throw 'branch1b missing original failure' }
+if ($msg -like '*wsl --install*') { throw 'branch1b must not blame SAC evaluation mode' }
+if ($msg -notlike '*Protection history*') { throw 'branch1b missing quarantine advice' }
+'branch1b-ok'
+
 # Branch 2: unsigned binary, SAC off -- quarantine advice, no WSL pitch.
 $script:SacState = 0
 $msg = Get-FirstRunFailureMessage -Binary 'C:\bin\hey.exe' -Reason 'boom-quarantine'
@@ -196,8 +208,62 @@ EOF
   "
   [[ "$status" -eq 0 ]]
   [[ "$output" == *"branch1-ok"* ]]
+  [[ "$output" == *"branch1b-ok"* ]]
   [[ "$output" == *"branch2-ok"* ]]
   [[ "$output" == *"branch3-ok"* ]]
+}
+
+# FreeBSD/OpenBSD base systems ship sha256(1), not sha256sum or shasum, and
+# detect_platform accepts both -- so the checksum step must too.
+@test "find_sha256_cmd falls back to the BSD sha256 -q" {
+  printf '#!/bin/sh\necho deadbeef\n' > "$STUB_DIR/sha256"
+  chmod +x "$STUB_DIR/sha256"
+  run bash -c "PATH='$STUB_DIR'; source '$INSTALL_SH'; find_sha256_cmd"
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == "sha256 -q" ]]
+
+  # Invoked the way verify_checksums does: the command word splits into
+  # sha256 plus its -q flag, and the digest lands in field 1.
+  run bash -c "PATH='$STUB_DIR'; source '$INSTALL_SH'; \$(find_sha256_cmd) somefile"
+  [[ "$status" -eq 0 ]]
+  [[ "${output%% *}" == "deadbeef" ]]
+}
+
+@test "find_sha256_cmd errors when no SHA256 tool exists" {
+  run bash -c "PATH='$STUB_DIR'; source '$INSTALL_SH'; find_sha256_cmd"
+  [[ "$status" -ne 0 ]]
+  [[ "$output" == *"No SHA256 tool found"* ]]
+}
+
+# fish sources neither ~/.profile nor Bourne `export`, so the PATH line for
+# a fish login shell has to land in config.fish in fish syntax.
+@test "setup_path writes fish_add_path to config.fish for fish shells" {
+  local home="$STUB_DIR/home"
+  mkdir -p "$home"
+  run bash -c "
+    export HOME='$home' SHELL=/usr/local/bin/fish PATH=/usr/bin:/bin
+    unset XDG_CONFIG_HOME
+    source '$INSTALL_SH'
+    BIN_DIR='$home/.local/bin'
+    setup_path
+  "
+  [[ "$status" -eq 0 ]]
+  [[ -f "$home/.config/fish/config.fish" ]]
+  grep -qF "fish_add_path \"$home/.local/bin\"" "$home/.config/fish/config.fish"
+  [[ ! -f "$home/.profile" ]]
+}
+
+@test "setup_path appends export PATH to .profile for other shells" {
+  local home="$STUB_DIR/home"
+  mkdir -p "$home"
+  run bash -c "
+    export HOME='$home' SHELL=/bin/ksh PATH=/usr/bin:/bin
+    source '$INSTALL_SH'
+    BIN_DIR='$home/.local/bin'
+    setup_path
+  "
+  [[ "$status" -eq 0 ]]
+  grep -qF "export PATH=\"$home/.local/bin:\$PATH\"" "$home/.profile"
 }
 
 # Releases publish the new (protobuf) Sigstore bundle format. cosign v3 parses

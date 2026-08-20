@@ -86,6 +86,7 @@ cosign verify-blob --bundle checksums.txt.bundle \
   --certificate-identity "https://github.com/basecamp/hey-cli/.github/workflows/release.yml@refs/tags/v<VERSION>" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt
 ```
+That command is for cosign v3. With cosign v2.6–v2.x add `--new-bundle-format=true`; older versions cannot verify the bundle.
 
 </details>
 
