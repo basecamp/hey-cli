@@ -74,6 +74,13 @@ func commandUsesRuntimeConfig(cmd *cobra.Command) bool {
 	switch parts[1] {
 	case "commands", "completion", "config", "skill", "upgrade", "version":
 		return false
+	case "setup":
+		// `hey setup` itself signs in against the effective server, but its
+		// subcommands (agents, claude, codex) only touch local agent files.
+		// The installer's non-TTY handoff runs `setup agents` from whatever
+		// directory the user piped curl in — possibly a repository with an
+		// untrusted .hey/config.json — and must not be blocked by it.
+		return len(parts) == 2
 	default:
 		return true
 	}

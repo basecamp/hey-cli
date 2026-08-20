@@ -222,3 +222,44 @@ func TestVersionRunsWithUntrustedLocalConfig(t *testing.T) {
 		t.Fatalf("version with an untrusted local config: %v", err)
 	}
 }
+
+// The agent-facing setup subcommands never touch the HEY server or account,
+// and the installer's non-TTY handoff runs `setup agents` from an arbitrary
+// directory — an untrusted .hey/config.json there must not block it. The
+// wizard itself signs in against the effective server, so it stays gated.
+func TestSetupSubcommandsSkipLocalConfigTrust(t *testing.T) {
+	root := newRootCmd()
+	for _, test := range []struct {
+		args []string
+		want bool
+	}{
+		{args: []string{"setup"}, want: true},
+		{args: []string{"setup", "agents"}, want: false},
+		{args: []string{"setup", "claude"}, want: false},
+		{args: []string{"setup", "codex"}, want: false},
+	} {
+		command, _, err := root.Find(test.args)
+		if err != nil {
+			t.Fatalf("Find(%v): %v", test.args, err)
+		}
+		if got := commandUsesRuntimeConfig(command); got != test.want {
+			t.Errorf("commandUsesRuntimeConfig(%v) = %v, want %v", test.args, got, test.want)
+		}
+	}
+}
+
+func TestSetupAgentsRunsWithUntrustedLocalConfig(t *testing.T) {
+	isolateAgents(t)
+	t.Setenv(agentSetupEnv, "none")
+	setupLocalTrustTest(t, "https://mail.example.com", "all")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	if err := runLocalTrustCLI(t, "--json", "setup", "agents"); err != nil {
+		t.Fatalf("setup agents must not be blocked by an untrusted local config: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".agents", "skills", "hey", "SKILL.md")); err != nil {
+		t.Errorf("skill was not installed: %v", err)
+	}
+}
