@@ -94,6 +94,20 @@ The TUI renders inline images using the Kitty graphics protocol's Unicode Placeh
 
 This works in Kitty and Ghostty. Other terminals show the text content normally (placeholders are invisible).
 
+### Watching for changes over Action Cable
+
+`hey watch` is told when a box changed instead of polling for it.
+`internal/cable` dials HEY's cable server with [actioncable-go](github.com/basecamp/actioncable-go),
+authorizing the upgrade request with the same credentials the SDK sends on an API request
+(`HEY_CABLE_URL` overrides the endpoint). `internal/cmd/watch.go` subscribes to
+haystack's `Postings::ChangesChannel`, which broadcasts only `{change, account_id, box_id,
+box_kind, posting_ids, at}` — a doorbell, not the change itself.
+
+The change is then read through `Postings().AllChanges`, the same incremental sync feed the
+mail clients use, starting from the cursor in the box's `posting_changes_url`. That is what
+makes a reconnect safe: the cursor, not the notification, is the source of truth, so a
+missed broadcast costs nothing, and a 409 means catch up in full instead.
+
 ### API documentation
 
 If you are unsure what the API endpoints are, what they expect or what they respond to you can read through the server implementation to understand how the API works.

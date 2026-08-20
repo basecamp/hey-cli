@@ -158,6 +158,8 @@ hey boxes --quiet --jq '.[].name'
 | Complete todo | `hey todo complete 123` |
 | Uncomplete todo | `hey todo uncomplete 123` |
 | Delete todo | `hey todo delete 123` |
+| Wait for new mail | `hey watch --box imbox --exit-on-first` |
+| Follow every change | `hey watch` |
 | Mark as seen | `hey seen 12345` |
 | Mark as unseen | `hey unseen 12345` |
 | Move email threads | `hey move 12345 --to feed` |
@@ -373,6 +375,30 @@ hey stop-ignoring 12345 67890                 # Stop ignoring multiple threads
 ```
 
 Takes box item IDs (the `id` field from `hey box --json`). Ignored threads remain in their box; new replies do not bring them back to your attention. `hey stop-ignoring` reverses the action.
+
+### Email - Watching for changes
+
+```bash
+hey watch                         # Follow every box until interrupted
+hey watch --box imbox             # Follow one box (repeatable, by name or ID)
+hey watch --events added,deleted  # Only these changes (added, updated, deleted)
+hey watch --exit-on-first         # Wait for one change, print it, exit
+hey watch --timeout 30m           # Give up waiting after a while
+hey watch --since 2026-03-15      # Report changes since then first, then follow
+hey watch --run-sync ./triage.sh  # Run a command per change instead of printing
+```
+
+Long-running, and driven by a websocket rather than polling — never poll `hey box` in a
+loop when this will do. Writes one JSON object per changed posting to stdout, one per
+line, instead of the usual envelope: `{"change": "added", "at": ..., "box": {"id", "kind",
+"name"}, "posting_id": ..., "thread_id": ..., "posting": {...}}`. Use `thread_id` with
+`hey threads`. A deleted posting carries no `posting` or `thread_id`.
+
+To drive a command per change, choose one of two behaviours — passing both is an error.
+`--run-async` spawns the command and moves on, so a slow one never holds up the watch and
+two can overlap; `--run-sync` waits for each and runs them in order. Both get the JSON on
+stdin and the fields as `HEY_CHANGE`, `HEY_AT`, `HEY_BOX_ID`, `HEY_BOX_KIND`,
+`HEY_BOX_NAME`, `HEY_POSTING_ID` and `HEY_THREAD_ID`, and both take over stdout.
 
 ### Drafts
 

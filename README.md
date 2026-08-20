@@ -258,6 +258,33 @@ Contact updates preserve omitted name, email, and alias fields. Supplying `--ali
 
 Organization actions take the `id` values returned by `hey box --json`, `hey label --json`, or `hey search --json`. Label IDs come from `hey labels`; `hey label` returns `next_page` and `total_count`, accepts `--page <next_page>` for continuation, and supports `--all` for complete traversal. HEY creates a label while adding it to at least one thread, so `hey label create` requires thread item IDs. Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Bubble Up requires a scheduled date and is not available through `hey move`. Trashing a shared thread removes your access instead of deleting it for everyone. Ignored threads remain in their box and can be restored with `hey stop-ignoring`.
 
+### Watching for changes
+
+```bash
+hey watch                               # follow every box, a line of JSON per change
+hey watch --box imbox --events added    # only new postings in the Imbox
+hey watch --box imbox --exit-on-first   # block until something lands, then exit
+hey watch --since 2026-08-18T09:00:00Z  # catch up from a time first, then follow
+hey watch --run-async 'notify-send "New mail in $HEY_BOX_KIND"'
+hey watch --run-sync ./triage.sh        # one at a time, waiting for each
+```
+
+Runs until interrupted, printing changes as they happen, one line each:
+
+```json
+{"change":"added","at":"2026-08-18T09:14:22.031Z","box":{"id":24088,"kind":"imbox","name":"Imbox"},"posting_id":98765,"thread_id":54321,"posting":{}}
+```
+
+A change can drive a command instead of being printed, and there's a choice to make
+between two behaviours — pass one or the other, not both. `--run-async` spawns the
+command per change and moves on, so a slow one never holds up the watch and two can
+overlap. `--run-sync` waits for each and runs them in order, so they never overlap and a
+slow one delays the next.
+
+Both hand the JSON to the command on its stdin, and the same fields as `HEY_CHANGE`,
+`HEY_AT`, `HEY_BOX_ID`, `HEY_BOX_KIND`, `HEY_BOX_NAME`, `HEY_POSTING_ID` and
+`HEY_THREAD_ID`. Both also take over stdout, so the JSON isn't printed as well.
+
 ### Calendars
 
 ```bash

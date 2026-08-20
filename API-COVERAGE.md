@@ -65,3 +65,5 @@ The remaining HTML-reading gaps use the SDK's authenticated HTML helper and are 
 | `/calendar/todos/{id}/completions.json` | POST | SDK `CalendarTodos().Complete` | `hey todo complete <id>` | covered |
 | `/calendar/todos/{id}/completions.json` | DELETE | SDK `CalendarTodos().Uncomplete` | `hey todo uncomplete <id>` | covered |
 | `/calendar/todos/{id}.json` | DELETE | SDK `CalendarTodos().Delete` | `hey todo delete <id>` | covered |
+| `/boxes/{id}/postings/changes.json` | GET | SDK `Postings().AllChanges` | `hey watch` | covered |
+| `/cable` (`Postings::ChangesChannel`) | WS | `internal/cable` + actioncable-go | `hey watch` | covered |
