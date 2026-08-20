@@ -36,7 +36,10 @@ func TestContactLifecycleAndPrivateNote(t *testing.T) {
 		t.Fatalf("created contact is incomplete: id=%d email_matches=%v", created.ID, created.EmailAddress == email)
 	}
 	id := intStr(created.ID)
-	t.Cleanup(func() { _, _, _ = hey(t, "contacts", "hide", id) })
+	t.Cleanup(func() {
+		_, _, _ = hey(t, "contacts", "unbundle", id)
+		_, _, _ = hey(t, "contacts", "hide", id)
+	})
 
 	updated := dataAs[smokeContact](t, contactWriteJSON(t, "contacts", "update", id, "--name", "Samuel Rivera", "--alias", alias))
 	if updated.ID == 0 || updated.Name != "Samuel Rivera" {
@@ -45,6 +48,21 @@ func TestContactLifecycleAndPrivateNote(t *testing.T) {
 	detail := dataAs[smokeContact](t, heyJSON(t, "contacts", "show", id))
 	if len(detail.Aliases) != 1 || detail.Aliases[0].EmailAddress != alias {
 		t.Errorf("contact aliases were not updated")
+	}
+
+	bundled := dataAs[struct {
+		ID     int    `json:"id"`
+		Action string `json:"action"`
+	}](t, contactWriteJSON(t, "contacts", "bundle", id))
+	if bundled.ID != created.ID || bundled.Action != "bundle" {
+		t.Error("accepted contact bundle action was not returned")
+	}
+	unbundled := dataAs[struct {
+		ID     int    `json:"id"`
+		Action string `json:"action"`
+	}](t, contactWriteJSON(t, "contacts", "unbundle", id))
+	if unbundled.ID != created.ID || unbundled.Action != "unbundle" {
+		t.Error("accepted contact unbundle action was not returned")
 	}
 
 	noteText := "Prefers email follow-ups for project planning."
@@ -97,4 +115,6 @@ func TestContactCommandsValidateInput(t *testing.T) {
 	heyFail(t, "contacts", "add", "--name", "Sam Rivera")
 	heyFail(t, "contacts", "update", "12345")
 	heyFail(t, "contacts", "show", "not-an-id")
+	heyFail(t, "contacts", "bundle", "not-an-id")
+	heyFail(t, "contacts", "unbundle", "0")
 }

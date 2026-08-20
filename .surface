@@ -63,6 +63,7 @@ hey contacts add --account-user-id
 hey contacts add --alias
 hey contacts add --email
 hey contacts add --name
+hey contacts bundle
 hey contacts hide
 hey contacts list
 hey contacts list --all
@@ -74,6 +75,7 @@ hey contacts note set --note
 hey contacts note show
 hey contacts show
 hey contacts show-again
+hey contacts unbundle
 hey contacts update
 hey contacts update --alias
 hey contacts update --email

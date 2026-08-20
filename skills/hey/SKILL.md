@@ -63,6 +63,8 @@ triggers:
   - add contact
   - edit contact
   - hide contact
+  - bundle contact mail
+  - unbundle contact mail
   - contact note
   - check calendar
   - add todo
@@ -121,6 +123,8 @@ CLI for HEY: mailboxes, email threads, contacts, replies, compose, calendars, to
 | Edit contact | `hey contacts update <id> --name "Jane Dawson"` |
 | Hide contact | `hey contacts hide <id>` |
 | Show contact again | `hey contacts show-again <id>` |
+| Bundle a contact's mail | `hey contacts bundle <id>` |
+| List a contact's mail separately | `hey contacts unbundle <id>` |
 | Read private contact note | `hey contacts note show <id> --json` |
 | Set private contact note | `hey contacts note set <id> "Prefers email"` |
 | Delete private contact note | `hey contacts note delete <id>` |
@@ -248,6 +252,8 @@ hey contacts update 12345 --name "Jane Dawson"
 hey contacts update 12345 --alias=              # Clear aliases
 hey contacts hide 12345                         # Hide from lists and autocomplete
 hey contacts show-again 12345                   # Reverse hiding
+hey contacts bundle 12345                       # Group this contact's mail into one row
+hey contacts unbundle 12345                     # List this contact's mail separately
 hey contacts note show 12345 --json
 hey contacts note set 12345 "Prefers email"
 echo "Multiline private note" | hey contacts note set 12345
@@ -256,7 +262,7 @@ hey contacts note delete 12345
 
 `hey contacts list` returns contact IDs, names, email addresses, and update timestamps. `hey contacts show` adds aliases, screening status, and the private note. Contact updates preserve omitted fields. Supplying `--alias` replaces the complete alias list, and `--alias=` clears it.
 
-HEY hides contacts instead of permanently deleting them. A hidden contact leaves contact lists, autocomplete, and search results while remaining available by ID; `show-again` reverses the action. Contact notes are private and support positional content, `--note`, stdin, or `$EDITOR`. Deleting a note leaves the contact unchanged.
+HEY hides contacts instead of permanently deleting them. A hidden contact leaves contact lists, autocomplete, and search results while remaining available by ID; `show-again` reverses the action. Bundling groups a contact's mail into one row without merging or deleting the underlying threads; `unbundle` lists those threads separately again. HEY applies bundling when the contact's current delivery setting supports bundles. Contact notes are private and support positional content, `--note`, stdin, or `$EDITOR`. Deleting a note leaves the contact unchanged.
 
 ### Email - Threads
 

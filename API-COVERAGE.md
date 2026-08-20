@@ -21,6 +21,8 @@ The remaining HTML-reading gaps use the SDK's authenticated HTML helper and are 
 | `/contacts/{id}.json` | PATCH | SDK `Contacts().Update` | `hey contacts update`, Contacts TUI | covered |
 | `/contacts/{id}.json` | DELETE | SDK `Contacts().Hide` | `hey contacts hide`, Contacts TUI | covered |
 | `/contacts/{id}/reveal.json` | POST | SDK `Contacts().Reveal` | `hey contacts show-again`, Contacts TUI | covered |
+| `/contacts/{id}/bundle.json` | POST | SDK `Contacts().Bundle` | `hey contacts bundle` | covered |
+| `/contacts/{id}/bundle.json` | DELETE | SDK `Contacts().Unbundle` | `hey contacts unbundle` | covered |
 | `/contacts/{id}/note.json` | GET | SDK `Contacts().Note` | `hey contacts note show`, Contacts TUI | covered |
 | `/contacts/{id}/note.json` | PATCH | SDK `Contacts().SetNote` | `hey contacts note set`, Contacts TUI | covered |
 | `/contacts/{id}/note.json` | DELETE | SDK `Contacts().DeleteNote` | `hey contacts note delete`, Contacts TUI | covered |

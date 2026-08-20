@@ -70,7 +70,7 @@ func TestContactCommandHelpUsesHEYTerminology(t *testing.T) {
 	if strings.Contains(lower, "reveal") || strings.Contains(lower, "delete a contact") {
 		t.Errorf("contact help exposes internal or destructive terminology:\n%s", text.String())
 	}
-	for _, want := range []string{"hide a contact", "show a hidden contact again", "delete a private contact note"} {
+	for _, want := range []string{"hide a contact", "show a hidden contact again", "bundle a contact's mail", "list a contact's mail separately", "delete a private contact note"} {
 		if !strings.Contains(lower, want) {
 			t.Errorf("contact help missing %q:\n%s", want, text.String())
 		}

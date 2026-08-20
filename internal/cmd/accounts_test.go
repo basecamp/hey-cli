@@ -147,7 +147,7 @@ func TestPersistedAccountScopesMailRequests(t *testing.T) {
 }
 
 func TestSelectedAccountUsesMatchingSenderAndUser(t *testing.T) {
-	var messageAccount, contactAccount string
+	var messageAccount, contactAccount, bundleAccount string
 	var actingSenderID, actingUserID int64
 	server := linkedAccountServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -168,6 +168,9 @@ func TestSelectedAccountUsesMatchingSenderAndUser(t *testing.T) {
 			actingUserID = body.ActingUserID
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"id":77,"name":"Jane Doe","email_address":"jane@example.org"}`))
+		case "/contacts/77/bundle.json":
+			bundleAccount = r.URL.Query().Get("filtered_account_id")
+			w.WriteHeader(http.StatusCreated)
 		default:
 			http.NotFound(w, r)
 		}
@@ -185,11 +188,19 @@ func TestSelectedAccountUsesMatchingSenderAndUser(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := runAccountsCLI(t, server,
+		"--account", "2", "contacts", "bundle", "77",
+	); err != nil {
+		t.Fatal(err)
+	}
 	if messageAccount != "2" || actingSenderID != 222 {
 		t.Fatalf("message account/sender = %q/%d, want 2/222", messageAccount, actingSenderID)
 	}
 	if contactAccount != "2" || actingUserID != 22 {
 		t.Fatalf("contact account/user = %q/%d, want 2/22", contactAccount, actingUserID)
+	}
+	if bundleAccount != "2" {
+		t.Fatalf("bundle account = %q, want 2", bundleAccount)
 	}
 }
 

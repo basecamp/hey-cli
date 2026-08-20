@@ -22,9 +22,9 @@ func newContactsCommand() *contactsCommand {
 	contactsCommand.cmd = &cobra.Command{
 		Use:   "contacts",
 		Short: "Manage contacts",
-		Long:  "List, view, add, edit, hide, and annotate HEY contacts.",
+		Long:  "List, view, add, edit, hide, bundle, and annotate HEY contacts.",
 		Annotations: map[string]string{
-			"agent_notes": "Contact IDs come from `hey contacts list`. Hiding is reversible with `hey contacts show-again <id>`. Private notes are managed under `hey contacts note`.",
+			"agent_notes": "Contact IDs come from `hey contacts list`. Hiding and bundling are reversible. Private notes are managed under `hey contacts note`.",
 		},
 	}
 
@@ -34,6 +34,8 @@ func newContactsCommand() *contactsCommand {
 	contactsCommand.cmd.AddCommand(newContactsUpdateCommand().cmd)
 	contactsCommand.cmd.AddCommand(newContactsHideCommand().cmd)
 	contactsCommand.cmd.AddCommand(newContactsShowAgainCommand().cmd)
+	contactsCommand.cmd.AddCommand(newContactsBundleCommand().cmd)
+	contactsCommand.cmd.AddCommand(newContactsUnbundleCommand().cmd)
 	contactsCommand.cmd.AddCommand(newContactNoteCommand().cmd)
 	return contactsCommand
 }

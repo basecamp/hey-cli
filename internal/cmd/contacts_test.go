@@ -52,8 +52,11 @@ func contactsServer(t *testing.T) (*httptest.Server, *recordedContacts) {
 		if status != 0 {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(status)
-			if status == http.StatusConflict {
+			switch status {
+			case http.StatusConflict:
 				_, _ = w.Write([]byte(`{"errors":["Some email addresses are already in use for other contacts"],"contact_id":9,"conflicting_contact_ids":[4,5]}`))
+			case http.StatusForbidden:
+				_, _ = w.Write([]byte(`{"message":"Forbidden"}`))
 			}
 			return
 		}
@@ -83,6 +86,10 @@ func contactsServer(t *testing.T) (*httptest.Server, *recordedContacts) {
 			w.WriteHeader(http.StatusNoContent)
 		case req.Method == http.MethodPost && req.URL.Path == "/contacts/7/reveal.json":
 			_, _ = w.Write([]byte(`{"id":7,"account_id":1,"name":"Jane Doe","email_address":"jane@example.com"}`))
+		case req.Method == http.MethodPost && req.URL.Path == "/contacts/7/bundle.json":
+			w.WriteHeader(http.StatusCreated)
+		case req.Method == http.MethodDelete && req.URL.Path == "/contacts/7/bundle.json":
+			w.WriteHeader(http.StatusNoContent)
 		case req.Method == http.MethodGet && req.URL.Path == "/contacts/7/note.json":
 			_, _ = w.Write([]byte(`{"contact_id":7,"note":"Prefers email","note_html":"<p>Prefers email</p>"}`))
 		case req.Method == http.MethodPatch && req.URL.Path == "/contacts/7/note.json":
@@ -294,6 +301,38 @@ func TestContactsHideAndReveal(t *testing.T) {
 	}
 }
 
+func TestContactsBundleAndUnbundle(t *testing.T) {
+	server, recorded := contactsServer(t)
+	bundled, err := runContacts(t, server, "bundle", "7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundleResult := decodeContactData[contactBundleResult](t, bundled.Data)
+	if bundleResult.ID != 7 || bundleResult.Action != "bundle" || bundled.Summary != "Bundle request accepted" {
+		t.Errorf("bundle: result=%+v summary=%q", bundleResult, bundled.Summary)
+	}
+	if len(bundled.Breadcrumbs) != 1 || bundled.Breadcrumbs[0].Command != "hey contacts unbundle 7" {
+		t.Errorf("bundle breadcrumbs = %+v", bundled.Breadcrumbs)
+	}
+
+	unbundled, err := runContacts(t, server, "unbundle", "7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unbundleResult := decodeContactData[contactBundleResult](t, unbundled.Data)
+	if unbundleResult.ID != 7 || unbundleResult.Action != "unbundle" || unbundled.Summary != "Unbundle request accepted" {
+		t.Errorf("unbundle: result=%+v summary=%q", unbundleResult, unbundled.Summary)
+	}
+	if len(unbundled.Breadcrumbs) != 1 || unbundled.Breadcrumbs[0].Command != "hey contacts bundle 7" {
+		t.Errorf("unbundle breadcrumbs = %+v", unbundled.Breadcrumbs)
+	}
+
+	requests := recorded.snapshot()
+	if len(requests) != 2 || requests[0].Method != http.MethodPost || requests[0].Path != "/contacts/7/bundle.json" || requests[1].Method != http.MethodDelete || requests[1].Path != "/contacts/7/bundle.json" {
+		t.Errorf("requests = %+v", requests)
+	}
+}
+
 func TestContactNotesShowSetAndDelete(t *testing.T) {
 	server, recorded := contactsServer(t)
 	show, err := runContacts(t, server, "note", "show", "7")
@@ -394,6 +433,8 @@ func TestContactCommandsValidateBeforeRequests(t *testing.T) {
 		{"add", "--name", "Jane", "--email", "jane@example.com", "--alias", "jane@example.com"},
 		{"update", "7"},
 		{"show", "not-an-id"},
+		{"bundle", "not-an-id"},
+		{"unbundle", "0"},
 		{"note", "set", "7", ""},
 	}
 	for _, args := range tests {
@@ -406,6 +447,29 @@ func TestContactCommandsValidateBeforeRequests(t *testing.T) {
 			}
 			if len(recorded.snapshot()) != 0 {
 				t.Errorf("validation made requests: %+v", recorded.snapshot())
+			}
+		})
+	}
+}
+
+func TestContactBundleErrorsAreReturned(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		method string
+		args   []string
+	}{
+		{name: "bundle", method: http.MethodPost, args: []string{"bundle", "7"}},
+		{name: "unbundle", method: http.MethodDelete, args: []string{"unbundle", "7"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			server, recorded := contactsServer(t)
+			recorded.mu.Lock()
+			recorded.statuses[tt.method+" /contacts/7/bundle.json"] = http.StatusForbidden
+			recorded.mu.Unlock()
+			_, err := runContacts(t, server, tt.args...)
+			var cliErr *apierr.Error
+			if !errors.As(err, &cliErr) || cliErr.Code != "forbidden" {
+				t.Fatalf("error = %#v, want forbidden", err)
 			}
 		})
 	}
