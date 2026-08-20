@@ -28,13 +28,13 @@ A CLI and TUI for [HEY](https://hey.com).
 **macOS / Linux / WSL2**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/basecamp/hey-cli/main/scripts/install.sh | bash
+curl -fsSL https://hey.com/install-cli | bash
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-irm https://raw.githubusercontent.com/basecamp/hey-cli/main/scripts/install.ps1 | iex
+irm https://hey.com/install-cli.ps1 | iex
 ```
 
 On Windows 11 with Smart App Control, see [Troubleshooting](#windows-smart-app-control-and-smartscreen) if the install is blocked.
@@ -358,7 +358,7 @@ blocks an unsigned `hey.exe`, two options:
 1. **Use WSL2 (preferred).** Install the Linux build inside WSL2 — Smart App
    Control doesn't apply there and your Windows security setup is untouched:
    `wsl --install`, then inside the WSL terminal:
-   `curl -fsSL https://raw.githubusercontent.com/basecamp/hey-cli/main/scripts/install.sh | bash`
+   `curl -fsSL https://hey.com/install-cli | bash`
 2. **Turn Smart App Control off** (Windows Security → App & browser control →
    Smart App Control settings) **and leave it off while using the unsigned
    build.** Because there are no per-app exceptions, turning it back on

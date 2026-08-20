@@ -5,11 +5,11 @@ name: Installer Smoke
 # pre-merge, and this catches a broken published installer after. Runs the
 # documented Quick Start shape (curl pipe to bash), not a checkout.
 #
-# TODO(hey.com/install-cli): switch the curl URLs to
-# https://hey.com/install-cli?sha=... once the haystack redirect is live. The
-# raw URL is the documented shape until then; ?sha= still cache-busts
-# raw.githubusercontent.com (max-age=300), so a push-triggered run cannot
-# fetch the pre-push installer and falsely pass.
+# Fetches through the hey.com/install-cli redirect (a 302 to the raw file on
+# main) so the documented URL is what gets exercised. nginx carries the query
+# string across the hop, and ?sha= cache-busts raw.githubusercontent.com
+# (max-age=300), so a push-triggered run cannot fetch the pre-push installer
+# and falsely pass.
 
 on:
   schedule:
@@ -43,7 +43,7 @@ jobs:
           export HOME="$smoke_root/home"
           export HEY_BIN_DIR="$smoke_root/bin"
 
-          curl -fsSL "https://raw.githubusercontent.com/basecamp/hey-cli/main/scripts/install.sh?sha=${GITHUB_SHA}" | bash
+          curl -fsSL "https://hey.com/install-cli?sha=${GITHUB_SHA}" | bash
 
           # Assert the deterministic installed path, not ambient PATH.
           "$HEY_BIN_DIR/hey" --version
@@ -66,7 +66,7 @@ jobs:
           export HOME="$smoke_root/home"
           export HEY_BIN_DIR="$smoke_root/bin"
 
-          curl -fsSL "https://raw.githubusercontent.com/basecamp/hey-cli/main/scripts/install.sh?sha=${GITHUB_SHA}" | /bin/bash
+          curl -fsSL "https://hey.com/install-cli?sha=${GITHUB_SHA}" | /bin/bash
 
           "$HEY_BIN_DIR/hey" --version
 
@@ -103,7 +103,7 @@ jobs:
 
           # Documented Quick Start shape, cache-busted. Single-quoted so the
           # inner interpreter expands $env:GITHUB_SHA itself.
-          & $env:SMOKE_SHELL -NoProfile -Command 'irm "https://raw.githubusercontent.com/basecamp/hey-cli/main/scripts/install.ps1?sha=$env:GITHUB_SHA" | iex'
+          & $env:SMOKE_SHELL -NoProfile -Command 'irm "https://hey.com/install-cli.ps1?sha=$env:GITHUB_SHA" | iex'
           if ($LASTEXITCODE -ne 0) { throw "installer exited $LASTEXITCODE under $env:SMOKE_SHELL" }
 
           & "$env:HEY_BIN_DIR\hey.exe" --version

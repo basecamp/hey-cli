@@ -113,9 +113,9 @@ func releaseTagURL(ver string) string {
 // installerHint is the one-line reinstall command for this platform.
 func installerHint() string {
 	if runtime.GOOS == "windows" {
-		return "irm https://raw.githubusercontent.com/basecamp/hey-cli/main/scripts/install.ps1 | iex"
+		return "irm https://hey.com/install-cli.ps1 | iex"
 	}
-	return "curl -fsSL https://raw.githubusercontent.com/basecamp/hey-cli/main/scripts/install.sh | bash"
+	return "curl -fsSL https://hey.com/install-cli | bash"
 }
 
 // resolveSelfUpdateTarget returns the canonical, case-preserving path of the

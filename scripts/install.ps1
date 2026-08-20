@@ -214,7 +214,7 @@ This build of hey.exe is not code-signed, and Smart App Control is enabled. Smar
   1. (Preferred) Install the Linux build inside WSL2 - Smart App Control does not apply there and your Windows security setup is untouched:
        wsl --install
      then, inside the WSL terminal:
-       curl -fsSL https://raw.githubusercontent.com/basecamp/hey-cli/main/scripts/install.sh | bash
+       curl -fsSL https://hey.com/install-cli | bash
 
   2. Turn Smart App Control off (Windows Security > App & browser control > Smart App Control settings) and leave it off while using this unsigned build. Because there are no per-app exceptions, turning it back on re-blocks hey.exe on its next run - only re-enable after upgrading to a signed release. Windows 11 with the March/April 2026 updates can re-enable Smart App Control from Windows Security without a reset; on older builds re-enabling requires resetting Windows, so prefer the WSL2 option there.
 "@

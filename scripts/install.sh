@@ -2,7 +2,7 @@
 # install.sh - Install the hey CLI
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/basecamp/hey-cli/main/scripts/install.sh | bash
+#   curl -fsSL https://hey.com/install-cli | bash
 #
 # Options (via environment):
 #   HEY_BIN_DIR    Where to install the binary
@@ -393,11 +393,9 @@ verify_install() {
     detail="$detail: $run_error"
   fi
   if [[ "$platform" == windows_* ]]; then
-    # TODO(hey.com/install-cli): point the WSL2 hint at the short URL once the
-    # haystack redirect is live.
     detail="$detail
   Windows may have blocked the executable: Smart App Control only runs code-signed binaries.
-  Either install inside WSL2 (curl -fsSL https://raw.githubusercontent.com/basecamp/hey-cli/main/scripts/install.sh | bash) or see
+  Either install inside WSL2 (curl -fsSL https://hey.com/install-cli | bash) or see
   https://github.com/basecamp/hey-cli#windows-smart-app-control-and-smartscreen"
   fi
   error "$detail"
