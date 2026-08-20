@@ -307,29 +307,45 @@ func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL, c
 		})
 	}
 
-	server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+
 		state := r.URL.Query().Get("state")
 		code := r.URL.Query().Get("code")
 		errParam := r.URL.Query().Get("error")
 
-		if errParam != "" {
-			errCh <- fmt.Errorf("OAuth error: %s", errParam)
-			fmt.Fprint(w, "<html><body><h1>Authentication failed</h1><p>You can close this window.</p></body></html>")
+		// Sends are non-blocking: only the first request's result matters,
+		// and waitForCallback stops reading once it returns.
+		fail := func(err error, page string) {
+			select {
+			case errCh <- err:
+			default:
+			}
+			fmt.Fprint(w, page)
 			shutdownServer()
-			return
 		}
 
-		if state != expectedState {
-			errCh <- fmt.Errorf("state mismatch: CSRF protection failed")
-			fmt.Fprint(w, "<html><body><h1>Authentication failed</h1><p>State mismatch.</p></body></html>")
+		switch {
+		case state != expectedState:
+			fail(fmt.Errorf("state mismatch: CSRF protection failed"), callbackInvalid)
+		case errParam == "access_denied":
+			fail(fmt.Errorf("OAuth error: %s", errParam), callbackDenied)
+		case errParam != "":
+			fail(fmt.Errorf("OAuth error: %s", errParam), callbackError)
+		case code == "":
+			fail(fmt.Errorf("OAuth callback missing authorization code"), callbackError)
+		default:
+			select {
+			case codeCh <- code:
+			default:
+			}
+			fmt.Fprint(w, callbackSuccess)
 			shutdownServer()
-			return
 		}
-
-		codeCh <- code
-		fmt.Fprint(w, "<html><body><h1>Authentication successful!</h1><p>You can close this window.</p></body></html>")
-		shutdownServer()
 	})
+	server.Handler = mux
 
 	go server.Serve(listener) //nolint:errcheck
 

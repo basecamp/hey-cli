@@ -215,10 +215,13 @@ func TestWaitForCallback(t *testing.T) {
 		query     string
 		wantCode  string
 		wantError string
+		wantBody  string
 	}{
-		{name: "success", query: "?state=expected&code=authorization-code", wantCode: "authorization-code"},
-		{name: "OAuth error", query: "?error=access_denied", wantError: "OAuth error: access_denied"},
-		{name: "state mismatch", query: "?state=wrong&code=authorization-code", wantError: "state mismatch"},
+		{name: "success", query: "?state=expected&code=authorization-code", wantCode: "authorization-code", wantBody: "Authorization successful"},
+		{name: "access denied", query: "?state=expected&error=access_denied", wantError: "OAuth error: access_denied", wantBody: "You denied access"},
+		{name: "OAuth error", query: "?state=expected&error=server_error", wantError: "OAuth error: server_error", wantBody: "Authorization failed"},
+		{name: "missing code", query: "?state=expected", wantError: "missing authorization code", wantBody: "Authorization failed"},
+		{name: "state mismatch", query: "?state=wrong&code=authorization-code", wantError: "state mismatch", wantBody: "authorization link is invalid"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -249,7 +252,14 @@ func TestWaitForCallback(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GET callback: %v", err)
 			}
+			body, err := io.ReadAll(response.Body)
 			_ = response.Body.Close()
+			if err != nil {
+				t.Fatalf("reading callback response: %v", err)
+			}
+			if !strings.Contains(string(body), tt.wantBody) {
+				t.Errorf("response body does not contain %q", tt.wantBody)
+			}
 			var got result
 			select {
 			case got = <-resultCh:

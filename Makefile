@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-smoke coverage fmt fmt-check vet lint tidy tidy-check \
+.PHONY: build test test-unit test-smoke preview-callback coverage fmt fmt-check vet lint tidy tidy-check \
 	race-test vuln secrets replace-check check-toolchain check security \
 	release-check release bench bench-save bench-compare \
 	check-surface check-surface-compat tools clean install help
@@ -23,6 +23,7 @@ help:
 	@echo "  make test-unit       Run unit tests"
 	@echo "  make test            Alias for test-unit"
 	@echo "  make test-smoke      Run smoke tests against a live server"
+	@echo "  make preview-callback Preview the OAuth callback screens in a browser"
 	@echo "  make coverage        Run cross-package coverage and enforce the 70.8% floor"
 	@echo "  make clean           Remove build artifacts"
 	@echo "  make tidy            Tidy dependencies"
@@ -80,6 +81,12 @@ coverage: check-toolchain
 	HEY_NO_KEYRING=1 GOWORK=off go test ./... -coverpkg=./... -covermode=atomic -coverprofile=$(COVERAGE_PROFILE)
 	@./scripts/coverage-summary.sh $(COVERAGE_PROFILE) $(COVERAGE_FUNCTIONS) $(COVERAGE_PACKAGES)
 	@./scripts/check-coverage.sh $(COVERAGE_PROFILE) $(COVERAGE_FLOOR)
+
+# Serve the OAuth callback screens for visual review at http://127.0.0.1:9999.
+# Pages re-render from disk on every request: edit internal/auth/callback*.html
+# and refresh the browser. Ctrl-C to stop.
+preview-callback: check-toolchain
+	PREVIEW=1 go test -run TestPreviewCallbackPages ./internal/auth/ -count=1 -v
 
 # Run smoke tests against a live HEY server.
 # Requires: a running server (default http://app.hey.localhost:3003) and Chrome.

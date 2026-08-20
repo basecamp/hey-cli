@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Authorize HEY CLI</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+
+      --rgb-ink: 35, 28, 51;
+      --rgb-white: 255, 255, 255;
+      --rgb-background: 237, 234, 230;
+      --rgb-black: 0, 0, 0;
+      --rgb-green: 41, 152, 80;
+      --rgb-orange: 248, 121, 23;
+      --rgb-red: 201, 36, 0;
+      --rgb-purple: 85, 34, 250;
+
+      --color-background: rgb(var(--rgb-background));
+      --color-text: rgb(var(--rgb-ink));
+      --color-text-subtle: rgba(var(--rgb-ink), 0.66);
+      --color-positive: rgb(var(--rgb-green));
+      --color-alert: rgb(var(--rgb-orange));
+      --color-negative: rgb(var(--rgb-red));
+      --color-sheet:  rgb(var(--rgb-white));
+      --color-shadow: rgba(var(--rgb-ink), 0.25);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --rgb-ink: 236, 233, 230;
+        --rgb-background: 27, 39, 51;
+        --rgb-green: 105, 240, 174;
+        --rgb-orange: 255, 184, 92;
+        --rgb-red: 255, 120, 120;
+        --rgb-purple: 134, 126, 255;
+
+        --color-sheet: rgb(38, 47, 58);
+        --color-shadow: rgba(0, 0, 0, 0.25);
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      align-items: center;
+      background: var(--color-background);
+      color: var(--color-text);
+      display: flex;
+      font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+      font-size: 17px;
+      justify-content: center;
+      line-height: 1.4;
+      min-height: 100vh;
+    }
+
+    .card {
+      background: var(--color-sheet);
+      border-radius: 8px;
+      box-shadow: 0 0 0 1px rgba(var(--rgb-black), 0.02), 
+        0 0.2em 1.6em -0.8em rgba(var(--rgb-black), 0.2), 
+        0 0.4em 2.4em -1.0em rgba(var(--rgb-black), 0.3), 
+        0 0.4em 0.8em -1.2em rgba(var(--rgb-black), 0.4), 
+        0 0.8em 1.2em -1.6em rgba(var(--rgb-black), 0.5), 
+        0 1.2em 1.6em -2.0em rgba(var(--rgb-black), 0.6);
+      inline-size: 100%;
+      max-inline-size: 460px;
+      padding: 32px 25px;
+      text-align: center;
+    }
+
+    .logo {
+      display: inline-block;
+      margin-block-end: 12px;
+      position: relative;
+    }
+
+    .logo svg {
+      block-size: auto;
+      display: block;
+      inline-size: 120px;
+    }
+
+    .logo .logo-dark { display: none; }
+
+    @media (prefers-color-scheme: dark) {
+      .logo .logo-light { display: none; }
+      .logo .logo-dark { display: block; }
+    }
+
+    .badge {
+      align-items: center;
+      block-size: 25px;
+      border: 2px solid var(--color-sheet);
+      border-radius: 50%;
+      bottom: -6px;
+      color: var(--color-sheet);
+      display: flex;
+      inline-size: 25px;
+      inset-inline-end: -14px;
+      place-items: center;
+      position: absolute;
+    }
+
+    .badge svg {
+      block-size: 14px;
+      inline-size: 14px;
+      margin: auto;
+    }
+
+    .badge-success { background: var(--color-positive); }
+    .badge-error   { background: var(--color-negative); }
+
+    .badge-warning {
+      background: var(--color-alert);
+
+      svg {
+        block-size: 18px;
+        inline-size: 18px;
+      }
+    }
+
+    h1 {
+      font-size: 24px;
+      font-weight: 700;
+      line-height: 1.2;
+      margin: 0 0 4px;
+    }
+
+    p {
+      color: var(--color-text-subtle);
+      font-size: 16px;
+      margin: 0;
+    }
+
+    code {
+      background: rgba(var(--rgb-purple), 0.1);
+      border-radius: 0.5em;
+      color: rgb(var(--rgb-purple));
+      font-family: monospace;
+      font-weight: 500;
+      padding-inline: 0.5ch;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    {{.}}
+  </div>
+</body>
+</html>
