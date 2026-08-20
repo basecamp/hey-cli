@@ -13,8 +13,8 @@ github.com/atotto/clipboard v0.1.4 h1:EH0zSVneZPSuFR11BlR9YppQTVDbh5+16AmcJi4g1z
 github.com/atotto/clipboard v0.1.4/go.mod h1:ZY9tmq7sm5xIbd9bOK4onWV4S6X0u6GY7Vn0Yu86PYI=
 github.com/aymanbagabas/go-udiff v0.4.1 h1:OEIrQ8maEeDBXQDoGCbbTTXYJMYRCRO1fnodZ12Gv5o=
 github.com/aymanbagabas/go-udiff v0.4.1/go.mod h1:0L9PGwj20lrtmEMeyw4WKJ/TMyDtvAoK9bf2u/mNo3w=
-github.com/basecamp/hey-sdk/go v0.6.0 h1:maoTjI41fb25L7d3KUbZq/CdzNTH96JGu8/oOukUnTs=
-github.com/basecamp/hey-sdk/go v0.6.0/go.mod h1:k6sO2XhMkU3UY8lD2ozp0735Ic3q8xoMQt7YUT3TlYk=
+github.com/basecamp/hey-sdk/go v0.6.1 h1:NlruAUq1GOk+VCkc1HyxAsvLCbNf54n0kZ6kNfhZkyc=
+github.com/basecamp/hey-sdk/go v0.6.1/go.mod h1:k6sO2XhMkU3UY8lD2ozp0735Ic3q8xoMQt7YUT3TlYk=
 github.com/bmatcuk/doublestar v1.1.1/go.mod h1:UD6OnuiIn0yFxxA2le/rnRU1G4RaI4UvFv1sNto9p6w=
 github.com/charmbracelet/colorprofile v0.4.3 h1:QPa1IWkYI+AOB+fE+mg/5/4HRMZcaXex9t5KX76i20Q=
 github.com/charmbracelet/colorprofile v0.4.3/go.mod h1:/zT4BhpD5aGFpqQQqw7a+VtHCzu+zrQtt1zhMt9mR4Q=

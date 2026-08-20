@@ -15,6 +15,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	attachmentfiles "github.com/basecamp/hey-cli/internal/attachments"
+	internalfolders "github.com/basecamp/hey-cli/internal/folders"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/models"
 )
@@ -37,11 +38,22 @@ const (
 
 type boxesLoadedMsg []models.Box
 
-type postingsLoadedMsg struct {
+type mailSourcesLoadedMsg struct {
 	requestID uint64
-	boxID     int64
-	postings  []models.Posting
-	err       error
+	sources   []models.Box
+	folderErr error
+}
+
+type postingsLoadedMsg struct {
+	requestID   uint64
+	boxID       int64
+	sourceKind  string
+	page        string
+	pageHistory []string
+	nextPage    string
+	totalCount  int
+	postings    []models.Posting
+	err         error
 }
 
 type topicLoadedMsg struct {
@@ -88,11 +100,20 @@ const (
 )
 
 type postingActionDoneMsg struct {
-	action    string
-	boxID     int64
-	postingID int64
-	effect    postingActionEffect
-	err       error
+	action     string
+	boxID      int64
+	sourceKind string
+	postingID  int64
+	effect     postingActionEffect
+	err        error
+}
+
+type folderActionDoneMsg struct {
+	action     string
+	sourceID   int64
+	sourceKind string
+	created    bool
+	err        error
 }
 
 // --- Mail section view ---
@@ -100,8 +121,12 @@ type postingActionDoneMsg struct {
 type mailView struct {
 	vc *viewContext
 
-	boxes    []models.Box
-	boxIndex int
+	boxes             []models.Box
+	boxIndex          int
+	folderPage        string
+	folderNextPage    string
+	folderPageHistory []string
+	folderTotalCount  int
 
 	postingList      contentList
 	topicViewport    viewport.Model
@@ -115,20 +140,23 @@ type mailView struct {
 	inThread         bool
 	loading          bool
 
-	compose           *composeForm    // non-nil while a message, reply or forward is being written
-	bulkReply         *bulkReplyForm  // non-nil while a bulk reply is being previewed or written
-	movePicker        *movePicker     // non-nil while a destination box is being selected
-	searchForm        *mailSearchForm // non-nil while a search query is being entered
-	searchList        contentList
-	searchActive      bool
-	searchQuery       string
-	searchPage        int
-	lastBulkReplyID   int64  // delayed delivery currently available for undo
-	pendingMutations  int    // writes that must finish before changing the account context
-	notice            string // one-shot confirmation shown above the posting list
-	activeRequestID   uint64 // identifies the only mail read allowed to update the view
-	activeRequestKind mailRequestKind
-	requestCancel     context.CancelFunc
+	compose            *composeForm    // non-nil while a message, reply or forward is being written
+	bulkReply          *bulkReplyForm  // non-nil while a bulk reply is being previewed or written
+	movePicker         *movePicker     // non-nil while a destination box is being selected
+	folderPicker       *folderPicker   // non-nil while folder labels are being managed
+	searchForm         *mailSearchForm // non-nil while a search query is being entered
+	searchList         contentList
+	searchActive       bool
+	searchQuery        string
+	searchPage         int
+	lastBulkReplyID    int64  // delayed delivery currently available for undo
+	pendingMutations   int    // writes that must finish before changing the account context
+	notice             string // one-shot confirmation shown above the posting list
+	activeRequestID    uint64 // identifies the only mail read allowed to update the view
+	activeRequestKind  mailRequestKind
+	sourceRequestID    uint64
+	folderDiscoveryErr string
+	requestCancel      context.CancelFunc
 }
 
 func newMailView(vc *viewContext) *mailView {
@@ -141,28 +169,39 @@ func newMailView(vc *viewContext) *mailView {
 
 func (v *mailView) Init() tea.Cmd {
 	if len(v.boxes) == 0 {
-		v.loading = true
-		return v.fetchBoxes()
+		return v.requestSources()
 	}
 	if v.boxIndex < len(v.boxes) {
-		return v.requestPostings(v.boxes[v.boxIndex].ID)
+		return v.requestPostings(v.boxes[v.boxIndex])
 	}
 	return nil
 }
 
 func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
-	case boxesLoadedMsg:
-		v.boxes = orderBoxes([]models.Box(msg))
-		v.loading = false
-		if len(v.boxes) > 0 {
-			v.boxIndex = 0
-			return v.requestPostings(v.boxes[0].ID), true
+	case mailSourcesLoadedMsg:
+		if msg.requestID != v.sourceRequestID {
+			return nil, true
 		}
-		return nil, true
+		sources := msg.sources
+		if msg.folderErr != nil {
+			v.folderDiscoveryErr = msg.folderErr.Error()
+			for _, source := range v.boxes {
+				if source.Kind == mailSourceKindFolder {
+					sources = append(sources, source)
+				}
+			}
+			v.notice = "Could not load labels — press g to retry"
+		} else {
+			v.folderDiscoveryErr = ""
+		}
+		return v.applySources(sources), true
+
+	case boxesLoadedMsg:
+		return v.applySources([]models.Box(msg)), true
 
 	case postingsLoadedMsg:
-		if msg.requestID != v.activeRequestID || msg.boxID != v.currentBoxID() {
+		if msg.requestID != v.activeRequestID || msg.boxID != v.currentBoxID() || (msg.sourceKind != "" && msg.sourceKind != v.currentSourceKind()) {
 			return nil, true
 		}
 		v.finishRequest(msg.requestID)
@@ -170,6 +209,15 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return func() tea.Msg { return errMsg{msg.err} }, true
 		}
 		v.postingList.setPostings(msg.postings)
+		if v.currentSourceKind() == mailSourceKindFolder {
+			v.folderPage = msg.page
+			v.folderPageHistory = msg.pageHistory
+			v.folderNextPage = msg.nextPage
+			v.folderTotalCount = msg.totalCount
+			if v.notice == "" {
+				v.notice = v.folderPageNotice()
+			}
+		}
 		return nil, true
 
 	case searchResultsLoadedMsg:
@@ -357,7 +405,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if msg.err != nil {
 			return func() tea.Msg { return errMsg{msg.err} }, true
 		}
-		if msg.boxID != v.currentBoxID() {
+		if msg.boxID != v.currentBoxID() || (msg.sourceKind != "" && msg.sourceKind != v.currentSourceKind()) {
 			return nil, true
 		}
 		v.notice = msg.action
@@ -383,7 +431,28 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			}
 		}
 		if v.activeRequestKind == mailRequestPostings {
-			return v.requestPostings(v.currentBoxID()), true
+			if source := v.currentSource(); source != nil {
+				return v.requestPostings(*source), true
+			}
+		}
+		return nil, true
+
+	case folderActionDoneMsg:
+		v.finishMutation()
+		if msg.err != nil {
+			if msg.sourceID == v.currentBoxID() && msg.sourceKind == v.currentSourceKind() {
+				v.notice = "Could not update labels: " + msg.err.Error()
+			}
+			return nil, true
+		}
+		if msg.sourceID == v.currentBoxID() && msg.sourceKind == v.currentSourceKind() {
+			v.notice = msg.action
+		}
+		if msg.created {
+			return v.requestSources(), true
+		}
+		if source := v.currentSource(); source != nil && msg.sourceID == source.ID && msg.sourceKind == source.Kind {
+			return v.requestPostings(*source), true
 		}
 		return nil, true
 	}
@@ -398,6 +467,9 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 	}
 	if v.searchForm != nil {
 		return v.searchForm.update(msg), true
+	}
+	if v.folderPicker != nil && v.folderPicker.creating {
+		return v.folderPicker.update(msg), true
 	}
 
 	// Pass through to viewport if in thread
@@ -423,6 +495,9 @@ func (v *mailView) View() string {
 	if v.movePicker != nil {
 		return v.movePicker.view(v.vc.styles, v.vc.width)
 	}
+	if v.folderPicker != nil {
+		return v.folderPicker.view(v.vc.styles, v.vc.width)
+	}
 	if v.inThread {
 		if v.notice != "" {
 			return v.vc.styles.title.Render(v.notice) + "\n" + v.topicViewport.View()
@@ -443,7 +518,7 @@ func (v *mailView) View() string {
 
 // CapturingInput reports whether a form or picker is open and wants every key.
 func (v *mailView) CapturingInput() bool {
-	return v.compose != nil || v.bulkReply != nil || v.movePicker != nil || v.searchForm != nil
+	return v.compose != nil || v.bulkReply != nil || v.movePicker != nil || v.folderPicker != nil || v.searchForm != nil
 }
 
 func (v *mailView) AccountSwitchBlocked() bool {
@@ -462,6 +537,9 @@ func (v *mailView) HelpBindings() []helpBinding {
 	}
 	if v.movePicker != nil {
 		return v.movePicker.helpBindings()
+	}
+	if v.folderPicker != nil {
+		return v.folderPicker.helpBindings()
 	}
 	if v.inThread {
 		bindings := []helpBinding{{"r", "reply"}, {"f", "forward"}}
@@ -482,6 +560,10 @@ func (v *mailView) HelpBindings() []helpBinding {
 	if selected := v.postingList.selectedPosting(); selected != nil && selected.Muted {
 		ignoreBinding = helpBinding{"+", "stop ignoring"}
 	}
+	folderBinding := helpBinding{"g", "labels"}
+	if v.folderDiscoveryErr != "" {
+		folderBinding = helpBinding{"g", "retry labels"}
+	}
 	bindings := []helpBinding{
 		{"/", "search"},
 		{"c", "compose"},
@@ -490,6 +572,7 @@ func (v *mailView) HelpBindings() []helpBinding {
 		{"r", "reply"},
 		{"f", "forward"},
 		{"m", "move"},
+		folderBinding,
 		{"e", "seen"},
 		{"l", "reply later"},
 		{"a", "set aside"},
@@ -498,6 +581,14 @@ func (v *mailView) HelpBindings() []helpBinding {
 		{"t", "trash"},
 		{"s", "spam"},
 		ignoreBinding,
+	}
+	if v.currentSourceKind() == mailSourceKindFolder {
+		if v.folderNextPage != "" {
+			bindings = append(bindings, helpBinding{"n", "next page"})
+		}
+		if len(v.folderPageHistory) > 0 {
+			bindings = append(bindings, helpBinding{"p", "previous page"})
+		}
 	}
 	if v.lastBulkReplyID != 0 {
 		bindings = append(bindings, helpBinding{"u", "undo bulk reply"})
@@ -516,6 +607,10 @@ func (v *mailView) SubnavItems() ([]navItem, int, string, bool) {
 	label := "Mail"
 	if v.boxIndex >= 0 && v.boxIndex < len(v.boxes) {
 		label = v.boxes[v.boxIndex].Name
+		if v.boxes[v.boxIndex].Kind == mailSourceKindFolder {
+			label = terminalSafeFolderText(label)
+			label = fmt.Sprintf("%s (page %d)", label, len(v.folderPageHistory)+1)
+		}
 	}
 	return boxNavItems(v.boxes), v.boxIndex, label, true
 }
@@ -592,6 +687,49 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 
+	if v.folderPicker != nil {
+		picker := v.folderPicker
+		if msg.Key().Code == tea.KeyEscape {
+			if picker.creating {
+				picker.cancelCreate()
+				return nil
+			}
+			v.folderPicker = nil
+			return nil
+		}
+		if picker.creating {
+			if msg.Key().Code == tea.KeyEnter {
+				name, ok := picker.createName()
+				if !ok {
+					return nil
+				}
+				v.folderPicker = nil
+				return v.createFolderForPosting(picker.posting.ID, name)
+			}
+			return picker.handleKey(msg)
+		}
+		if msg.Key().Code == tea.KeyEnter {
+			selection := picker.selected()
+			if selection == nil {
+				return nil
+			}
+			switch selection.kind {
+			case folderPickerExisting:
+				v.folderPicker = nil
+				if picker.postingHasFolder(selection.folder.ID) {
+					return v.unfilePosting(picker.posting.ID, selection.folder.ID, selection.folder.Name)
+				}
+				return v.filePosting(picker.posting.ID, selection.folder.ID, selection.folder.Name)
+			case folderPickerCreate:
+				return picker.startCreate()
+			case folderPickerRemoveAll:
+				v.folderPicker = nil
+				return v.unfilePosting(picker.posting.ID, 0, "")
+			}
+		}
+		return picker.handleKey(msg)
+	}
+
 	if v.inThread {
 		switch msg.String() {
 		case "r":
@@ -650,6 +788,14 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	case tea.KeyEnter:
 		return v.openSelected()
 	default:
+		if v.currentSourceKind() == mailSourceKindFolder {
+			switch msg.String() {
+			case "n":
+				return v.nextFolderPage()
+			case "p":
+				return v.previousFolderPage()
+			}
+		}
 		switch msg.String() {
 		case "/":
 			return v.startSearch()
@@ -665,6 +811,8 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		case "m":
 			v.startMove()
 			return nil
+		case "g":
+			return v.startFolderPicker()
 		default:
 			return v.handlePostingAction(msg.String())
 		}
@@ -692,6 +840,7 @@ func (v *mailView) ExitThread() {
 		v.inThread = false
 		v.compose = nil
 		v.movePicker = nil
+		v.folderPicker = nil
 		v.cancelRequest()
 		return
 	}
@@ -728,6 +877,9 @@ func (v *mailView) Resize(width, height int) {
 	if v.searchForm != nil {
 		v.searchForm.resize(width, height)
 	}
+	if v.folderPicker != nil {
+		v.folderPicker.resize(width, height)
+	}
 	v.postingList.setSize(width, height)
 	v.searchList.setSize(width, height)
 	v.topicViewport.SetWidth(width)
@@ -749,14 +901,65 @@ func (v *mailView) switchBox(index int) tea.Cmd {
 	v.notice = ""
 	v.postingList.setPostings(nil)
 	v.boxIndex = index
-	return v.requestPostings(v.boxes[index].ID)
+	v.resetFolderPagination()
+	return v.requestPostings(v.boxes[index])
+}
+
+func (v *mailView) currentSource() *models.Box {
+	if v.boxIndex < 0 || v.boxIndex >= len(v.boxes) {
+		return nil
+	}
+	return &v.boxes[v.boxIndex]
 }
 
 func (v *mailView) currentBoxID() int64 {
-	if v.boxIndex < 0 || v.boxIndex >= len(v.boxes) {
-		return 0
+	if source := v.currentSource(); source != nil {
+		return source.ID
 	}
-	return v.boxes[v.boxIndex].ID
+	return 0
+}
+
+func (v *mailView) currentSourceKind() string {
+	if source := v.currentSource(); source != nil {
+		return source.Kind
+	}
+	return ""
+}
+
+func (v *mailView) currentSourceIdentity() (int64, string) {
+	if source := v.currentSource(); source != nil {
+		return source.ID, source.Kind
+	}
+	return 0, ""
+}
+
+func sourceIndex(sources []models.Box, id int64, kind string) int {
+	for i, source := range sources {
+		if source.ID == id && source.Kind == kind {
+			return i
+		}
+	}
+	return 0
+}
+
+func (v *mailView) applySources(sources []models.Box) tea.Cmd {
+	currentID, currentKind := v.currentSourceIdentity()
+	v.boxes = orderBoxes(sources)
+	v.loading = false
+	if len(v.boxes) == 0 {
+		return nil
+	}
+	v.boxIndex = sourceIndex(v.boxes, currentID, currentKind)
+	if v.boxes[v.boxIndex].ID != currentID || v.boxes[v.boxIndex].Kind != currentKind {
+		v.resetFolderPagination()
+	}
+	return v.requestPostings(v.boxes[v.boxIndex])
+}
+
+func (v *mailView) requestSources() tea.Cmd {
+	v.sourceRequestID++
+	v.loading = true
+	return v.fetchSources(v.sourceRequestID)
 }
 
 func (v *mailView) beginRequest(kind mailRequestKind) (uint64, context.Context) {
@@ -793,9 +996,48 @@ func (v *mailView) cancelRequest() {
 	v.loading = false
 }
 
-func (v *mailView) requestPostings(boxID int64) tea.Cmd {
+func (v *mailView) requestPostings(source models.Box) tea.Cmd {
+	return v.requestPostingsPage(source, v.folderPage, v.folderPageHistory)
+}
+
+func (v *mailView) requestPostingsPage(source models.Box, page string, history []string) tea.Cmd {
 	requestID, ctx := v.beginRequest(mailRequestPostings)
-	return v.fetchPostings(ctx, requestID, boxID)
+	return v.fetchPostings(ctx, requestID, source, page, append([]string(nil), history...))
+}
+
+func (v *mailView) nextFolderPage() tea.Cmd {
+	source := v.currentSource()
+	if source == nil || source.Kind != mailSourceKindFolder || v.folderNextPage == "" {
+		return nil
+	}
+	history := append(append([]string(nil), v.folderPageHistory...), v.folderPage)
+	return v.requestPostingsPage(*source, v.folderNextPage, history)
+}
+
+func (v *mailView) previousFolderPage() tea.Cmd {
+	source := v.currentSource()
+	if source == nil || source.Kind != mailSourceKindFolder || len(v.folderPageHistory) == 0 {
+		return nil
+	}
+	last := len(v.folderPageHistory) - 1
+	page := v.folderPageHistory[last]
+	history := append([]string(nil), v.folderPageHistory[:last]...)
+	return v.requestPostingsPage(*source, page, history)
+}
+
+func (v *mailView) resetFolderPagination() {
+	v.folderPage = ""
+	v.folderNextPage = ""
+	v.folderPageHistory = nil
+	v.folderTotalCount = 0
+}
+
+func (v *mailView) folderPageNotice() string {
+	page := len(v.folderPageHistory) + 1
+	if v.folderTotalCount > 0 {
+		return fmt.Sprintf("Label page %d — %d threads total", page, v.folderTotalCount)
+	}
+	return fmt.Sprintf("Label page %d", page)
 }
 
 func (v *mailView) startSearch() tea.Cmd {
@@ -935,8 +1177,58 @@ func (v *mailView) startMove() {
 	v.movePicker = picker
 }
 
+func (v *mailView) startFolderPicker() tea.Cmd {
+	if v.folderDiscoveryErr != "" {
+		v.notice = "Retrying labels…"
+		return v.requestSources()
+	}
+	selected := v.postingList.selectedPosting()
+	if selected == nil {
+		return nil
+	}
+	v.folderPicker = newFolderPicker(*selected, v.boxes)
+	v.folderPicker.resize(v.vc.width, v.vc.height)
+	return nil
+}
+
+func (v *mailView) filePosting(postingID, folderID int64, folderName string) tea.Cmd {
+	return v.doFolderAction("Label "+terminalSafeFolderText(folderName)+" added", false, func() error {
+		return v.vc.sdk.Postings().File(v.vc.ctx, folderID, postingID)
+	})
+}
+
+func (v *mailView) createFolderForPosting(postingID int64, folderName string) tea.Cmd {
+	return v.doFolderAction("Label "+terminalSafeFolderText(folderName)+" created", true, func() error {
+		return v.vc.sdk.Postings().CreateFolder(v.vc.ctx, folderName, postingID)
+	})
+}
+
+func (v *mailView) unfilePosting(postingID, folderID int64, folderName string) tea.Cmd {
+	label := "All labels removed"
+	if folderID != 0 {
+		label = "Label " + terminalSafeFolderText(folderName) + " removed"
+	}
+	return v.doFolderAction(label, false, func() error {
+		return v.vc.sdk.Postings().Unfile(v.vc.ctx, folderID, postingID)
+	})
+}
+
+func (v *mailView) doFolderAction(label string, created bool, fn func() error) tea.Cmd {
+	sourceID, sourceKind := v.currentSourceIdentity()
+	v.pendingMutations++
+	return func() tea.Msg {
+		return folderActionDoneMsg{
+			action:     label,
+			sourceID:   sourceID,
+			sourceKind: sourceKind,
+			created:    created,
+			err:        fn(),
+		}
+	}
+}
+
 func (v *mailView) movePostingToBox(postingID int64, destination models.Box) tea.Cmd {
-	return v.doPostingAction("Thread moved to "+destination.Name, postingActionRemove, v.currentBoxID(), postingID, func() error {
+	return v.doPostingAction("Thread moved to "+destination.Name, v.boxMoveEffect(), v.currentBoxID(), postingID, func() error {
 		return v.vc.sdk.Postings().Move(v.vc.ctx, destination.ID, postingID)
 	})
 }
@@ -1015,7 +1307,14 @@ func (v *mailView) moveSelectedToKnownBox(name, kind string, boxID, postingID in
 		v.notice = "Already in " + name
 		return nil
 	}
-	return v.doPostingAction("Thread moved to "+name, postingActionRemove, boxID, postingID, fn)
+	return v.doPostingAction("Thread moved to "+name, v.boxMoveEffect(), boxID, postingID, fn)
+}
+
+func (v *mailView) boxMoveEffect() postingActionEffect {
+	if v.currentSourceKind() == mailSourceKindFolder {
+		return postingActionNone
+	}
+	return postingActionRemove
 }
 
 func (v *mailView) movesOutOfCurrentBox(destinationKind string) bool {
@@ -1026,15 +1325,17 @@ func (v *mailView) movesOutOfCurrentBox(destinationKind string) bool {
 }
 
 func (v *mailView) doPostingAction(label string, effect postingActionEffect, boxID, postingID int64, fn func() error) tea.Cmd {
+	sourceKind := v.currentSourceKind()
 	v.pendingMutations++
 	return func() tea.Msg {
 		err := fn()
 		return postingActionDoneMsg{
-			action:    label,
-			boxID:     boxID,
-			postingID: postingID,
-			effect:    effect,
-			err:       err,
+			action:     label,
+			boxID:      boxID,
+			sourceKind: sourceKind,
+			postingID:  postingID,
+			effect:     effect,
+			err:        err,
 		}
 	}
 }
@@ -1052,6 +1353,10 @@ func sdkBoxToModel(b generated.Box) models.Box {
 }
 
 func sdkPostingToModel(p generated.Posting) models.Posting {
+	folders := make([]models.Folder, len(p.Folders))
+	for i, folder := range p.Folders {
+		folders[i] = models.Folder{ID: folder.Id, Name: folder.Name, AppURL: folder.AppUrl}
+	}
 	return models.Posting{
 		ID:                    p.Id,
 		CreatedAt:             formatTimestamp(p.CreatedAt),
@@ -1067,6 +1372,7 @@ func sdkPostingToModel(p generated.Posting) models.Posting {
 		AlternativeSenderName: p.AlternativeSenderName,
 		VisibleEntryCount:     p.VisibleEntryCount,
 		Extenzions:            sdkExtenzionsToModel(p.Extenzions),
+		Folders:               folders,
 		Creator: models.Contact{
 			ID:           p.Creator.Id,
 			Name:         p.Creator.Name,
@@ -1156,7 +1462,7 @@ func sdkMessageToEntry(entry generated.Entry, message generated.Message) models.
 
 // --- Fetch commands ---
 
-func (v *mailView) fetchBoxes() tea.Cmd {
+func (v *mailView) fetchSources(requestID uint64) tea.Cmd {
 	return func() tea.Msg {
 		result, err := v.vc.sdk.Boxes().List(v.vc.ctx)
 		if err != nil {
@@ -1166,25 +1472,58 @@ func (v *mailView) fetchBoxes() tea.Cmd {
 		if result != nil {
 			sdkBoxes = *result
 		}
-		boxes := make([]models.Box, len(sdkBoxes))
-		for i, b := range sdkBoxes {
-			boxes[i] = sdkBoxToModel(b)
+		boxes := make([]models.Box, 0, len(sdkBoxes))
+		for _, box := range sdkBoxes {
+			boxes = append(boxes, sdkBoxToModel(box))
 		}
-		return boxesLoadedMsg(boxes)
+
+		folders, folderErr := internalfolders.List(v.vc.ctx, v.vc.sdk)
+		if folderErr == nil {
+			for _, folder := range folders {
+				boxes = append(boxes, models.Box{ID: folder.Id, Kind: mailSourceKindFolder, Name: folder.Name, AppURL: folder.AppUrl})
+			}
+		}
+		return mailSourcesLoadedMsg{requestID: requestID, sources: boxes, folderErr: folderErr}
 	}
 }
 
-func (v *mailView) fetchPostings(ctx context.Context, requestID uint64, boxID int64) tea.Cmd {
+func (v *mailView) fetchPostings(ctx context.Context, requestID uint64, source models.Box, page string, history []string) tea.Cmd {
 	return func() tea.Msg {
-		resp, err := v.vc.sdk.Boxes().Get(ctx, boxID, nil)
-		if err != nil {
-			return postingsLoadedMsg{requestID: requestID, boxID: boxID, err: err}
+		var sdkPostings []generated.Posting
+		message := postingsLoadedMsg{requestID: requestID, boxID: source.ID, sourceKind: source.Kind, page: page, pageHistory: history}
+		if source.Kind == mailSourceKindFolder {
+			var params *generated.GetFolderParams
+			if page != "" {
+				params = &generated.GetFolderParams{Page: &page}
+			}
+			result, err := v.vc.sdk.Folders().GetPage(ctx, source.ID, params)
+			if err != nil {
+				message.err = err
+				return message
+			}
+			if result != nil {
+				message.nextPage = result.NextPage
+				message.totalCount = result.TotalCount
+				if result.Folder != nil {
+					sdkPostings = result.Folder.Postings
+				}
+			}
+		} else {
+			box, err := v.vc.sdk.Boxes().Get(ctx, source.ID, nil)
+			if err != nil {
+				message.err = err
+				return message
+			}
+			if box != nil {
+				sdkPostings = box.Postings
+			}
 		}
-		postings := make([]models.Posting, 0, len(resp.Postings))
-		for _, p := range resp.Postings {
-			postings = append(postings, sdkPostingToModel(p))
+		postings := make([]models.Posting, 0, len(sdkPostings))
+		for _, posting := range sdkPostings {
+			postings = append(postings, sdkPostingToModel(posting))
 		}
-		return postingsLoadedMsg{requestID: requestID, boxID: boxID, postings: postings}
+		message.postings = postings
+		return message
 	}
 }
 

@@ -78,21 +78,27 @@ var knownBoxes = []boxSpec{
 // in their predefined order; unknown boxes are appended at the end.
 func orderBoxes(boxes []models.Box) []models.Box {
 	ordered := make([]models.Box, 0, len(boxes))
-	used := make(map[int64]bool)
+	type sourceKey struct {
+		id   int64
+		kind string
+	}
+	used := make(map[sourceKey]bool)
 
 	// Add known boxes in preferred order
 	for _, spec := range knownBoxes {
 		for _, b := range boxes {
-			if strings.EqualFold(b.Name, spec.name) && !used[b.ID] {
+			key := sourceKey{id: b.ID, kind: b.Kind}
+			if b.Kind != mailSourceKindFolder && strings.EqualFold(b.Name, spec.name) && !used[key] {
 				ordered = append(ordered, b)
-				used[b.ID] = true
+				used[key] = true
 				break
 			}
 		}
 	}
 	// Append any remaining boxes
 	for _, b := range boxes {
-		if !used[b.ID] {
+		key := sourceKey{id: b.ID, kind: b.Kind}
+		if !used[key] {
 			ordered = append(ordered, b)
 		}
 	}
@@ -105,12 +111,16 @@ func boxNavItems(boxes []models.Box) []navItem {
 	for i, b := range boxes {
 		icon := ""
 		for _, spec := range knownBoxes {
-			if strings.EqualFold(b.Name, spec.name) {
+			if b.Kind != mailSourceKindFolder && strings.EqualFold(b.Name, spec.name) {
 				icon = spec.icon
 				break
 			}
 		}
-		items[i] = navItem{icon: icon, label: b.Name}
+		label := b.Name
+		if b.Kind == mailSourceKindFolder {
+			label = terminalSafeFolderText(label)
+		}
+		items[i] = navItem{icon: icon, label: label}
 	}
 	return items
 }
@@ -120,7 +130,7 @@ func boxForShortcut(key string, boxes []models.Box) int {
 	for _, spec := range knownBoxes {
 		if spec.key == key {
 			for i, b := range boxes {
-				if strings.EqualFold(b.Name, spec.name) {
+				if b.Kind != mailSourceKindFolder && strings.EqualFold(b.Name, spec.name) {
 					return i
 				}
 			}

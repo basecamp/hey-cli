@@ -301,6 +301,24 @@ func TestWriterOK_MarkdownIncludesOptionalFieldsFromLaterRows(t *testing.T) {
 	}
 }
 
+func TestWriterOK_MarkdownSanitizesTerminalControlsAndLayout(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatMarkdown, Stdout: &buf})
+
+	data := []map[string]any{{"name": "Receipts\x1b]2;owned\a\nArchive|2026\tQ3"}}
+	if err := w.OK(data); err != nil {
+		t.Fatal(err)
+	}
+
+	output := buf.String()
+	if strings.Contains(output, "\x1b") || strings.Contains(output, "\a") || strings.Contains(output, "\nArchive") {
+		t.Errorf("unsafe controls reached markdown output: %q", output)
+	}
+	if !strings.Contains(output, "<br>Archive\\|2026 Q3") {
+		t.Errorf("sanitized markdown value missing from %q", output)
+	}
+}
+
 func TestWriterErr_JSON(t *testing.T) {
 	var buf bytes.Buffer
 	w := New(Options{Format: FormatJSON, Stderr: &buf})

@@ -199,6 +199,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateHelpBindings()
 		return m, nil
 
+	case mailSourcesLoadedMsg:
+		if m.activeView != m.mailView {
+			cmd, _ := m.mailView.Update(msg)
+			return m, m.stampViewCmd(cmd)
+		}
+
+	case postingsLoadedMsg:
+		if m.activeView != m.mailView {
+			if msg.err != nil {
+				m.mailView.finishRequest(msg.requestID)
+				m.mailView.notice = "Could not load mail: " + msg.err.Error()
+				return m, nil
+			}
+			cmd, _ := m.mailView.Update(msg)
+			return m, m.stampViewCmd(cmd)
+		}
+
 	case errMsg:
 		m.loading = false
 		m.err = msg.err

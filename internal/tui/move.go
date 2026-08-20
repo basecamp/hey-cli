@@ -21,7 +21,7 @@ type movePicker struct {
 func newMovePicker(posting models.Posting, boxes []models.Box, currentBoxID int64) *movePicker {
 	destinations := make([]models.Box, 0, len(boxes))
 	for _, box := range boxes {
-		if box.ID == currentBoxID || strings.EqualFold(box.Kind, hey.BoxKindBubbleUp) || strings.EqualFold(box.Name, "Bubble Up") {
+		if box.Kind == mailSourceKindFolder || box.ID == currentBoxID || strings.EqualFold(box.Kind, hey.BoxKindBubbleUp) || strings.EqualFold(box.Name, "Bubble Up") {
 			continue
 		}
 		destinations = append(destinations, box)

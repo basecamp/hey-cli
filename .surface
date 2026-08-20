@@ -104,6 +104,18 @@ hey journal list --limit
 hey journal read
 hey journal write
 hey journal write --content
+hey label
+hey label --all
+hey label --limit
+hey label --page
+hey label add
+hey label add --to
+hey label create
+hey label remove
+hey label remove --from
+hey labels
+hey labels --all
+hey labels --limit
 hey move
 hey move --to
 hey recordings

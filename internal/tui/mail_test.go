@@ -62,6 +62,15 @@ func currentPostingsLoaded(v *mailView, postings []models.Posting) postingsLoade
 	}
 }
 
+func hasHelpBinding(bindings []helpBinding, key string) bool {
+	for _, binding := range bindings {
+		if binding.key == key {
+			return true
+		}
+	}
+	return false
+}
+
 type recordedMailRequest struct {
 	method     string
 	path       string
@@ -70,6 +79,10 @@ type recordedMailRequest struct {
 	body       struct {
 		PostingIDs []int64 `json:"posting_ids"`
 		BoxID      *int64  `json:"box_id"`
+		FolderID   *int64  `json:"folder_id"`
+		Folder     struct {
+			Name string `json:"name"`
+		} `json:"folder"`
 	}
 }
 
@@ -491,6 +504,376 @@ func TestMailViewMovePickerCancelsWithoutRequest(t *testing.T) {
 	}
 	if len(recorded.requests) != 0 {
 		t.Errorf("canceling made requests: %v", recorded.requests)
+	}
+}
+
+func TestMailViewLoadsFolderSourcesAndPostings(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/boxes.json":
+			_, _ = w.Write([]byte(`[{"id":1,"kind":"imbox","name":"Imbox"}]`))
+		case "/my/navigation.json":
+			_, _ = w.Write([]byte(`{"items":[{"title":"Labels","menu_items":[{"title":"All Labels","app_url":"/folders"},{"title":"Receipts","app_url":"/folders/12"}]}]}`))
+		case "/folders/12.json":
+			_, _ = w.Write([]byte(`{"id":12,"name":"Receipts","postings":[{"id":100,"kind":"topic","summary":"Hotel receipt","folders":[{"id":12,"name":"Receipts"}]}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
+	vc := testVC()
+	vc.sdk = client
+	v := newMailView(vc)
+
+	loaded, ok := runCmd(v.Init()).(mailSourcesLoadedMsg)
+	if !ok {
+		t.Fatalf("initial command returned %T, want mailSourcesLoadedMsg", loaded)
+	}
+	postingsCmd, consumed := v.Update(loaded)
+	if !consumed || postingsCmd == nil {
+		t.Fatal("folder sources should be loaded and start the first mailbox request")
+	}
+	if len(v.boxes) != 2 || v.boxes[1].Kind != mailSourceKindFolder || v.boxes[1].Name != "Receipts" {
+		t.Fatalf("mail sources = %+v", v.boxes)
+	}
+
+	folderCmd := v.SubnavRight()
+	folderLoaded, ok := runCmd(folderCmd).(postingsLoadedMsg)
+	if !ok || folderLoaded.err != nil {
+		t.Fatalf("folder command returned %#v", folderLoaded)
+	}
+	v.Update(folderLoaded)
+	if len(v.postingList.postings) != 1 || v.postingList.postings[0].Summary != "Hotel receipt" {
+		t.Errorf("folder postings = %+v", v.postingList.postings)
+	}
+	if len(v.postingList.postings[0].Folders) != 1 || v.postingList.postings[0].Folders[0].ID != 12 {
+		t.Errorf("posting folders = %+v", v.postingList.postings[0].Folders)
+	}
+	if v.notice != "Label page 1" {
+		t.Errorf("folder pagination notice = %q", v.notice)
+	}
+}
+
+func TestMailViewFolderPagination(t *testing.T) {
+	var folderQueries []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/boxes.json":
+			_, _ = w.Write([]byte(`[{"id":1,"kind":"imbox","name":"Imbox"}]`))
+		case "/my/navigation.json":
+			_, _ = w.Write([]byte(`{"items":[{"title":"Labels","menu_items":[{"title":"Receipts","app_url":"/folders/12"}]}]}`))
+		case "/folders/12.json":
+			folderQueries = append(folderQueries, r.URL.Query().Get("page"))
+			w.Header().Set("X-Total-Count", "2")
+			if r.URL.Query().Get("page") == "next-cursor" {
+				_, _ = w.Write([]byte(`{"id":12,"name":"Receipts","postings":[{"id":101,"kind":"topic","summary":"Second page"}]}`))
+				return
+			}
+			w.Header().Set("Link", "<http://"+r.Host+"/folders/12.json?page=next-cursor>; rel=\"next\"")
+			_, _ = w.Write([]byte(`{"id":12,"name":"Receipts","postings":[{"id":100,"kind":"topic","summary":"First page"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
+	vc := testVC()
+	vc.sdk = client
+	v := newMailView(vc)
+	v.Update(runCmd(v.Init()))
+	first := runCmd(v.SubnavRight()).(postingsLoadedMsg)
+	v.Update(first)
+	if v.folderNextPage != "next-cursor" || v.notice != "Label page 1 — 2 threads total" {
+		t.Errorf("first page state = next:%q notice:%q", v.folderNextPage, v.notice)
+	}
+	if !hasHelpBinding(v.HelpBindings(), "n") {
+		t.Error("first folder page should offer next-page navigation")
+	}
+
+	second := runCmd(v.HandleContentKey(keyPress("n"))).(postingsLoadedMsg)
+	v.Update(second)
+	if len(v.postingList.postings) != 1 || v.postingList.postings[0].Summary != "Second page" || len(v.folderPageHistory) != 1 {
+		t.Errorf("second page state = postings:%+v history:%v", v.postingList.postings, v.folderPageHistory)
+	}
+	_, _, label, _ := v.SubnavItems()
+	if !strings.Contains(label, "page 2") || v.notice != "Label page 2 — 2 threads total" {
+		t.Errorf("second page label=%q notice=%q", label, v.notice)
+	}
+	if !hasHelpBinding(v.HelpBindings(), "p") {
+		t.Error("second folder page should offer previous-page navigation")
+	}
+
+	previous := runCmd(v.HandleContentKey(keyPress("p"))).(postingsLoadedMsg)
+	v.Update(previous)
+	if len(v.folderPageHistory) != 0 || len(v.postingList.postings) != 1 || v.postingList.postings[0].Summary != "First page" {
+		t.Errorf("previous page state = postings:%+v history:%v", v.postingList.postings, v.folderPageHistory)
+	}
+	if fmt.Sprint(folderQueries) != "[ next-cursor ]" {
+		t.Errorf("folder page queries = %q", folderQueries)
+	}
+}
+
+func TestMailViewFolderDiscoveryFailurePreservesMailAndRetries(t *testing.T) {
+	var navigationRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/boxes.json":
+			_, _ = w.Write([]byte(`[{"id":1,"kind":"imbox","name":"Imbox"}]`))
+		case "/my/navigation.json":
+			if navigationRequests.Add(1) == 1 {
+				http.Error(w, "navigation unavailable", http.StatusBadRequest)
+				return
+			}
+			_, _ = w.Write([]byte(`{"items":[{"title":"Labels","menu_items":[{"title":"Receipts","app_url":"/folders/12"}]}]}`))
+		case "/boxes/1.json":
+			_, _ = w.Write([]byte(`{"id":1,"kind":"imbox","name":"Imbox","postings":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
+	vc := testVC()
+	vc.sdk = client
+	v := newMailView(vc)
+
+	failed := runCmd(v.Init()).(mailSourcesLoadedMsg)
+	firstPostings, consumed := v.Update(failed)
+	if !consumed || firstPostings == nil || len(v.boxes) != 1 || v.folderDiscoveryErr == "" {
+		t.Fatalf("folder failure state = consumed:%v command:%v sources:%+v error:%q", consumed, firstPostings != nil, v.boxes, v.folderDiscoveryErr)
+	}
+	if !strings.Contains(v.notice, "press g to retry") {
+		t.Errorf("notice = %q", v.notice)
+	}
+	v.Update(runCmd(firstPostings))
+
+	retry := v.HandleContentKey(keyPress("g"))
+	if retry == nil || !v.loading {
+		t.Fatal("g should retry failed folder discovery")
+	}
+	recovered := runCmd(retry).(mailSourcesLoadedMsg)
+	v.Update(recovered)
+	if v.folderDiscoveryErr != "" || len(v.boxes) != 2 || v.boxes[1].Name != "Receipts" {
+		t.Errorf("recovered sources = %+v error=%q", v.boxes, v.folderDiscoveryErr)
+	}
+}
+
+func TestMailViewFolderDiscoveryFailurePreservesKnownFolders(t *testing.T) {
+	v := mailWithPostings()
+	v.boxes = append(v.boxes, models.Box{ID: 12, Kind: mailSourceKindFolder, Name: "Receipts"})
+	v.sourceRequestID = 1
+
+	v.Update(mailSourcesLoadedMsg{
+		requestID: 1,
+		sources:   testBoxes(),
+		folderErr: fmt.Errorf("navigation unavailable"),
+	})
+	if sourceIndex(v.boxes, 12, mailSourceKindFolder) == 0 || v.folderDiscoveryErr == "" {
+		t.Errorf("sources = %+v error=%q", v.boxes, v.folderDiscoveryErr)
+	}
+}
+
+func TestMailViewIgnoresStaleFolderDiscovery(t *testing.T) {
+	v := mailWithPostings()
+	v.sourceRequestID = 2
+	v.Update(mailSourcesLoadedMsg{requestID: 1, sources: []models.Box{{ID: 99, Kind: mailSourceKindFolder, Name: "Stale"}}})
+	if len(v.boxes) != len(testBoxes()) {
+		t.Errorf("stale discovery replaced sources: %+v", v.boxes)
+	}
+}
+
+func TestMailViewFolderPickerFilesAndUnfilesThread(t *testing.T) {
+	t.Run("file", func(t *testing.T) {
+		v, recorded := mailWithTestServer(t, http.StatusNoContent)
+		v.boxes = append(v.boxes, models.Box{ID: 12, Kind: mailSourceKindFolder, Name: "Receipts"})
+
+		v.HandleContentKey(keyPress("g"))
+		if v.folderPicker == nil || !v.CapturingInput() {
+			t.Fatal("folder picker should capture input")
+		}
+		if view := v.View(); !strings.Contains(view, "Label thread") || !strings.Contains(view, "[ ] Receipts") || !strings.Contains(view, "Create a new label") {
+			t.Errorf("folder picker view = %q", view)
+		}
+
+		done, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(folderActionDoneMsg)
+		if !ok || done.err != nil {
+			t.Fatalf("folder action returned %#v", done)
+		}
+		if recorded.path != "/postings/filings.json" || recorded.body.FolderID == nil || *recorded.body.FolderID != 12 {
+			t.Errorf("folder request = %s body=%+v", recorded.path, recorded.body)
+		}
+		if len(recorded.body.PostingIDs) != 1 || recorded.body.PostingIDs[0] != 100 {
+			t.Errorf("posting_ids = %v", recorded.body.PostingIDs)
+		}
+		refresh, consumed := v.Update(done)
+		if !consumed || refresh == nil || v.notice != "Label Receipts added" {
+			t.Errorf("completion = consumed:%v refresh:%v notice:%q", consumed, refresh != nil, v.notice)
+		}
+	})
+
+	t.Run("unfile", func(t *testing.T) {
+		v, recorded := mailWithTestServer(t, http.StatusNoContent)
+		v.boxes = append(v.boxes, models.Box{ID: 12, Kind: mailSourceKindFolder, Name: "Receipts"})
+		v.postingList.postings[0].Folders = []models.Folder{{ID: 12, Name: "Receipts"}}
+
+		v.HandleContentKey(keyPress("g"))
+		if view := v.View(); !strings.Contains(view, "[x] Receipts") || !strings.Contains(view, "Remove all labels") {
+			t.Errorf("folder picker view = %q", view)
+		}
+		done, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(folderActionDoneMsg)
+		if !ok || done.err != nil {
+			t.Fatalf("folder action returned %#v", done)
+		}
+		if recorded.method != http.MethodDelete || recorded.path != "/postings/filings.json" {
+			t.Errorf("request = %s %s", recorded.method, recorded.path)
+		}
+		if len(recorded.rawQueries) == 0 || !strings.Contains(recorded.rawQueries[len(recorded.rawQueries)-1], "folder_id=12") {
+			t.Errorf("queries = %v", recorded.rawQueries)
+		}
+	})
+
+	t.Run("remove all", func(t *testing.T) {
+		v, recorded := mailWithTestServer(t, http.StatusNoContent)
+		v.boxes = append(v.boxes, models.Box{ID: 12, Kind: mailSourceKindFolder, Name: "Receipts"})
+		v.postingList.postings[0].Folders = []models.Folder{{ID: 12, Name: "Receipts"}}
+
+		v.HandleContentKey(keyPress("g"))
+		v.HandleContentKey(keyPress("down"))
+		v.HandleContentKey(keyPress("down"))
+		done, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(folderActionDoneMsg)
+		if !ok || done.err != nil {
+			t.Fatalf("folder action returned %#v", done)
+		}
+		if len(recorded.rawQueries) == 0 || strings.Contains(recorded.rawQueries[len(recorded.rawQueries)-1], "folder_id=") {
+			t.Errorf("queries = %v, want no folder_id", recorded.rawQueries)
+		}
+		v.Update(done)
+		if v.notice != "All labels removed" {
+			t.Errorf("notice = %q", v.notice)
+		}
+	})
+}
+
+func TestMailViewFolderPickerCreatesFolder(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+
+	v.HandleContentKey(keyPress("g"))
+	if cmd := v.HandleContentKey(keyPress("enter")); cmd == nil || v.folderPicker == nil || !v.folderPicker.creating {
+		t.Fatal("selecting create should focus the folder name input")
+	}
+	v.folderPicker.input.SetValue("Travel receipts")
+	done, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(folderActionDoneMsg)
+	if !ok || done.err != nil || !done.created {
+		t.Fatalf("create command returned %#v", done)
+	}
+	if recorded.path != "/postings/folders.json" || recorded.body.Folder.Name != "Travel receipts" {
+		t.Errorf("create request = %s body=%+v", recorded.path, recorded.body)
+	}
+	if len(recorded.body.PostingIDs) != 1 || recorded.body.PostingIDs[0] != 100 {
+		t.Errorf("posting_ids = %v", recorded.body.PostingIDs)
+	}
+	refresh, consumed := v.Update(done)
+	if !consumed || refresh == nil || v.notice != "Label Travel receipts created" {
+		t.Errorf("completion = consumed:%v refresh:%v notice:%q", consumed, refresh != nil, v.notice)
+	}
+}
+
+func TestMailViewFolderPickerScrollsAndSanitizesNames(t *testing.T) {
+	v := mailWithPostings()
+	v.vc.height = 8
+	for id := int64(1); id <= 20; id++ {
+		name := fmt.Sprintf("Label %02d", id)
+		if id == 20 {
+			name = "Archive\x1b]2;owned\a\n2026"
+		}
+		v.boxes = append(v.boxes, models.Box{ID: id + 100, Kind: mailSourceKindFolder, Name: name})
+	}
+
+	v.HandleContentKey(keyPress("g"))
+	for range 19 {
+		v.HandleContentKey(keyPress("down"))
+	}
+	view := v.View()
+	if strings.Contains(view, "Label 01") || !strings.Contains(view, "Archive�]2;owned��2026") {
+		t.Errorf("scrolled folder picker = %q", view)
+	}
+	if strings.Contains(view, "\x1b]2;owned") {
+		t.Errorf("unsafe folder name reached picker: %q", view)
+	}
+
+	v.boxIndex = len(v.boxes) - 1
+	_, _, label, _ := v.SubnavItems()
+	if strings.Contains(label, "\x1b]2;owned") || !strings.Contains(label, "Archive�]2;owned��2026") {
+		t.Errorf("folder navigation label = %q", label)
+	}
+}
+
+func TestMailViewFolderActionFailureKeepsThread(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusInternalServerError)
+	v.boxes = append(v.boxes, models.Box{ID: 12, Kind: mailSourceKindFolder, Name: "Receipts"})
+
+	v.HandleContentKey(keyPress("g"))
+	done, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(folderActionDoneMsg)
+	if !ok || done.err == nil {
+		t.Fatalf("folder action returned %#v, want an error", done)
+	}
+	cmd, consumed := v.Update(done)
+	if !consumed || cmd != nil {
+		t.Error("failed folder action should stay in the current view")
+	}
+	if v.postingIndex(100) < 0 || !strings.Contains(v.notice, "Could not update labels") {
+		t.Errorf("posting present=%v notice=%q", v.postingIndex(100) >= 0, v.notice)
+	}
+	if v.pendingMutations != 0 {
+		t.Errorf("pending mutations = %d, want 0", v.pendingMutations)
+	}
+}
+
+func TestMailViewFolderPickerRequiresNameAndCancels(t *testing.T) {
+	v := mailWithPostings()
+	v.HandleContentKey(keyPress("g"))
+	v.HandleContentKey(keyPress("enter"))
+	if cmd := v.HandleContentKey(keyPress("enter")); cmd != nil {
+		t.Fatal("empty folder name should not submit")
+	}
+	if v.folderPicker == nil || !strings.Contains(v.View(), "Enter a label name") {
+		t.Error("empty folder name should keep the form open with guidance")
+	}
+	v.HandleContentKey(keyPress("esc"))
+	if v.folderPicker == nil || v.folderPicker.creating {
+		t.Error("first escape should return to the folder choices")
+	}
+	v.HandleContentKey(keyPress("esc"))
+	if v.folderPicker != nil || v.CapturingInput() {
+		t.Error("second escape should close the folder picker")
+	}
+}
+
+func TestMailViewMoveFromFolderKeepsFiledThreadVisible(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	v.boxes = []models.Box{
+		{ID: 12, Kind: mailSourceKindFolder, Name: "Receipts"},
+		{ID: 2, Kind: hey.BoxKindFeed, Name: "The Feed"},
+	}
+	v.boxIndex = 0
+
+	done, ok := runCmd(v.HandleContentKey(keyPress("d"))).(postingActionDoneMsg)
+	if !ok || done.err != nil {
+		t.Fatalf("move command returned %#v", done)
+	}
+	if done.effect != postingActionNone {
+		t.Errorf("folder move effect = %v, want postingActionNone", done.effect)
+	}
+	v.Update(done)
+	if v.postingIndex(100) < 0 {
+		t.Error("moving boxes should preserve a thread's folder label")
 	}
 }
 
@@ -1715,7 +2098,7 @@ func TestMailViewHelpBindings(t *testing.T) {
 	for _, b := range bindings {
 		keys[b.key] = true
 	}
-	for _, expected := range []string{"/", "r", "f", "m", "e", "l", "a", "t", "s", "-"} {
+	for _, expected := range []string{"/", "r", "f", "m", "g", "e", "l", "a", "t", "s", "-"} {
 		if !keys[expected] {
 			t.Errorf("missing help binding for key %q", expected)
 		}
@@ -1742,6 +2125,16 @@ func TestMailViewHelpBindingsInMovePicker(t *testing.T) {
 	bindings := v.HelpBindings()
 	if len(bindings) != 3 || bindings[0].key != "↑↓" || bindings[1].key != "enter" || bindings[2].key != "esc" {
 		t.Errorf("move picker help = %v", bindings)
+	}
+}
+
+func TestMailViewHelpBindingsInFolderPicker(t *testing.T) {
+	v := mailWithPostings()
+	v.HandleContentKey(keyPress("g"))
+
+	bindings := v.HelpBindings()
+	if len(bindings) != 3 || bindings[0].key != "↑↓" || bindings[1].key != "enter" || bindings[2].key != "esc" {
+		t.Errorf("folder picker help = %v", bindings)
 	}
 }
 

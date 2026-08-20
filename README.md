@@ -90,7 +90,7 @@ accounts, press Ctrl+A to switch between All Accounts and individual email addre
 Switching cancels requests from the previous account and reloads the active section;
 Calendar and Journal remain identity-wide.
 
-Navigate between Mail, Contacts, Calendar, and Journal. In Mail, use `/` to search, Enter to open a thread, `r` to reply, `f` to forward, `m` to move, `t` to trash, `s` to mark as spam, `-` to ignore, and `+` to stop ignoring. Select threads with Space and press `b` to preview every bulk-reply recipient before writing and sending one reply to all selected threads. A delayed bulk reply can be recalled with `u` while HEY's undo window remains open. Search results retain the matching-message summary; use `n` and `p` to move between result pages.
+Navigate between Mail, Contacts, Calendar, and Journal. Mail navigation includes HEY boxes followed by your labels. Use `n` and `p` to page through a label. Use `/` to search, Enter to open a thread, `r` to reply, `f` to forward, `m` to move, `g` to add, create, or remove labels, `t` to trash, `s` to mark as spam, `-` to ignore, and `+` to stop ignoring. Select threads with Space and press `b` to preview every bulk-reply recipient before writing and sending one reply to all selected threads. A delayed bulk reply can be recalled with `u` while HEY's undo window remains open. Search results retain the matching-message summary; use `n` and `p` to move between result pages.
 
 Thread attachments always appear with their filename, media type, and size. Use `[` and `]` to select an attachment, `s` to save it without replacing an existing file, and `o` to download and open it in an external application. Attachments never open automatically. Kitty and Ghostty can show inline images. Foot and other terminals use visible text markers.
 
@@ -117,6 +117,12 @@ hey boxes --quiet --jq '.[].id'
 ```bash
 hey boxes                          # list mailboxes
 hey box imbox                      # list email threads in a box (by name or ID)
+hey labels                          # list labels and their IDs
+hey label 789 --all                 # list all email threads with a label
+hey label add 12345 --to 789        # add a label to a thread
+hey label create "Travel receipts" 12345  # create and add a label
+hey label remove 12345 --from 789   # remove one label
+hey label remove 12345 --from all   # remove every label
 hey search "quarterly planning"    # search threads and matching messages
 hey search --from jane@example.com --date last_30_days  # refine a search
 hey search filters                 # list available refinement values
@@ -159,7 +165,7 @@ Contact updates preserve omitted name, email, and alias fields. Supplying `--ali
 
 `--attach` is repeatable on `hey compose`, `hey reply`, and `hey bulk-reply send`, and attachment-only messages are supported. The CLI validates and uploads every file before sending the email. `hey attachments <topic_id>` returns stable message-and-position IDs such as `456:1`; pass an ID to `hey attachments save`. Saving uses the original filename by default, accepts `--output` for a file or directory, and preserves existing files unless `--force` is set.
 
-Organization actions take the `id` values returned by `hey box --json` or `hey search --json`. Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Bubble Up requires a scheduled date and is not available through `hey move`. Trashing a shared thread removes your access instead of deleting it for everyone. Ignored threads remain in their box and can be restored with `hey stop-ignoring`.
+Organization actions take the `id` values returned by `hey box --json`, `hey label --json`, or `hey search --json`. Label IDs come from `hey labels`; `hey label` returns `next_page` and `total_count`, accepts `--page <next_page>` for continuation, and supports `--all` for complete traversal. HEY creates a label while adding it to at least one thread, so `hey label create` requires thread item IDs. Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Bubble Up requires a scheduled date and is not available through `hey move`. Trashing a shared thread removes your access instead of deleting it for everyone. Ignored threads remain in their box and can be restored with `hey stop-ignoring`.
 
 ### Calendars
 

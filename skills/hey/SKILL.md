@@ -2,7 +2,7 @@
 name: hey
 description: |
   Interact with HEY via the HEY CLI. Read and send emails, manage contacts,
-  boxes, calendars, todos, habits, time tracking, and journal entries. Use for ANY
+  boxes, labels, calendars, todos, habits, time tracking, and journal entries. Use for ANY
   HEY-related question or action.
 triggers:
   # Direct invocations
@@ -12,6 +12,8 @@ triggers:
   - hey accounts
   - hey boxes
   - hey box
+  - hey labels
+  - hey label
   - hey search
   - hey contacts
   - hey threads
@@ -92,7 +94,7 @@ argument-hint: "[command] [args...]"
 
 # /hey - HEY Email Workflow Command
 
-CLI for HEY: mailboxes, email threads, contacts, replies, compose, calendars, todos, habits, time tracking, and journal entries.
+CLI for HEY: mailboxes, labels, email threads, contacts, replies, compose, calendars, todos, habits, time tracking, and journal entries.
 
 ## Agent Invariants
 
@@ -125,6 +127,11 @@ hey boxes --quiet --jq '.[].name'
 | Trust this repository's settings | `hey config trust-local` (requires explicit user approval) |
 | List mailboxes | `hey boxes --json` |
 | List emails in a box | `hey box imbox --json` |
+| List labels | `hey labels --json` |
+| List emails with a label | `hey label <label_id> --all --json` |
+| Add a label to a thread | `hey label add <id> --to <label_id>` |
+| Create and add a label | `hey label create "Travel receipts" <id>` |
+| Remove labels | `hey label remove <id> --from <label_id\|all>` |
 | Search email | `hey search "quarterly planning" --json` |
 | List search filters | `hey search filters --json` |
 | List contacts | `hey contacts list --json` |
@@ -179,6 +186,8 @@ hey boxes --quiet --jq '.[].name'
 Want to read email?
 ├── Which mailbox? → hey boxes --json
 ├── List emails in box? → hey box <name|id> --json
+├── List labels or labeled email? → hey labels --json / hey label <label_id> --json
+├── Add, create, or remove a label? → hey label add|create|remove
 ├── Search threads and messages? → hey search <query> --json
 ├── Need available refinements? → hey search filters --json
 ├── List or view contacts? → hey contacts list --json / hey contacts show <id> --json
@@ -235,7 +244,20 @@ hey box 123 --json                            # List emails in box (by ID)
 
 Box names: `imbox`, `feedbox`, `trailbox`, `asidebox`, `laterbox`, `bubblebox`
 
-**Response format:** `hey box` returns `{"box": {...}, "postings": [...]}`. The `postings` array is the API representation of the email threads in that box. Each item has: `id` (box item ID), `topic_id` (thread ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`. Use `id` for `hey seen`, `hey unseen`, `hey move`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring`. Use `topic_id` for `hey threads`, `hey reply`, and `hey forward`.
+**Response format:** `hey box` returns `{"box": {...}, "postings": [...]}`. The `postings` array is the API representation of the email threads in that box. Each item has: `id` (box item ID), `topic_id` (thread ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`. Use `id` for `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring`. Use `topic_id` for `hey threads`, `hey reply`, and `hey forward`.
+
+### Email - Labels
+
+```bash
+hey labels --json                              # List labels and stable IDs
+hey label 789 --all --json                     # List every thread with a label
+hey label add 12345 --to 789                   # Add an existing label
+hey label create "Travel receipts" 12345       # Create and add a label
+hey label remove 12345 --from 789              # Remove one label
+hey label remove 12345 --from all              # Remove every label
+```
+
+Label mutations take box item IDs from `hey box`, `hey label`, or active `hey search` results. Label IDs come from `hey labels`. `hey label` returns `next_page` and `total_count`; pass `--page <next_page>` to continue or `--all` to fetch every page. HEY creates a label while adding it to at least one thread, so `label create` requires one or more thread item IDs.
 
 ### Email - Search
 
@@ -281,7 +303,7 @@ hey threads <topic_id> --json                 # Read full email thread
 hey threads <topic_id> --html                 # Read with raw HTML content
 ```
 
-**ID note:** Every email thread returned by `hey box` has an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, `hey move`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring` expect `id`. `hey threads`, `hey attachments`, `hey reply`, and `hey forward` expect `topic_id`. The `app_url` field also contains the thread ID as a fallback (e.g. `https://app.hey.com/topics/123` → `123`).
+**ID note:** Every email thread returned by `hey box` or `hey label` has an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring` expect `id`. `hey threads`, `hey attachments`, `hey reply`, and `hey forward` expect `topic_id`. The `app_url` field also contains the thread ID as a fallback (e.g. `https://app.hey.com/topics/123` → `123`).
 
 ### Email - Attachments
 

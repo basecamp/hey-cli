@@ -9,7 +9,12 @@ import (
 	"testing"
 )
 
-func runStyledDraftsCommand(t *testing.T, handler http.Handler, args ...string) (string, error) {
+func runStyledCommand(t *testing.T, handler http.Handler, args ...string) (string, error) {
+	t.Helper()
+	return runFormattedCommand(t, handler, []string{"--styled"}, args...)
+}
+
+func runFormattedCommand(t *testing.T, handler http.Handler, formatArgs []string, args ...string) (string, error) {
 	t.Helper()
 	previousColorDisabled := colorDisabled
 	colorDisabled = false
@@ -30,7 +35,9 @@ func runStyledDraftsCommand(t *testing.T, handler http.Handler, args ...string) 
 	var stdout, stderr bytes.Buffer
 	root.SetOut(&stdout)
 	root.SetErr(&stderr)
-	root.SetArgs(append([]string{"--styled", "--base-url", server.URL, "drafts"}, args...))
+	rootArgs := append([]string{}, formatArgs...)
+	rootArgs = append(rootArgs, "--base-url", server.URL)
+	root.SetArgs(append(rootArgs, args...))
 
 	err := root.Execute()
 	return stdout.String(), err
@@ -90,13 +97,13 @@ func TestDraftsCommandAllOverridesLimit(t *testing.T) {
 
 func TestDraftsCommandStyledTable(t *testing.T) {
 	const fullSummary = "Notes from the quarterly planning meeting including decisions and follow-up assignments"
-	stdout, err := runStyledDraftsCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	stdout, err := runStyledCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `[
 			{"id":101,"summary":"`+fullSummary+`","subject":"Quarterly planning follow-up","updated_at":"2026-08-20T09:30:00Z"},
 			{"id":102,"summary":"Travel details","subject":"Team retreat itinerary","updated_at":"2026-08-19T14:00:00Z"}
 		]`)
-	}), "--limit", "1")
+	}), "drafts", "--limit", "1")
 	if err != nil {
 		t.Fatalf("execute styled drafts: %v", err)
 	}
@@ -111,9 +118,9 @@ func TestDraftsCommandStyledTable(t *testing.T) {
 }
 
 func TestDraftsCommandStyledEmpty(t *testing.T) {
-	stdout, err := runStyledDraftsCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	stdout, err := runStyledCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
-	}))
+	}), "drafts")
 	if err != nil {
 		t.Fatalf("execute styled drafts: %v", err)
 	}

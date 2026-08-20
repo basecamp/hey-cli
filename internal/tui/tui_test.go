@@ -9,6 +9,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
 	"github.com/basecamp/hey-cli/internal/models"
 )
 
@@ -162,6 +164,46 @@ func TestOrderBoxes(t *testing.T) {
 }
 
 // --- Navigation: Tab cycles focus rows ---
+
+func TestOrderBoxesPreservesFolderWithCollidingIDAndName(t *testing.T) {
+	boxes := []models.Box{
+		{ID: 1, Kind: hey.BoxKindImbox, Name: "Imbox"},
+		{ID: 1, Kind: mailSourceKindFolder, Name: "Imbox"},
+	}
+	ordered := orderBoxes(boxes)
+	if len(ordered) != 2 || ordered[0].Kind != hey.BoxKindImbox || ordered[1].Kind != mailSourceKindFolder {
+		t.Errorf("ordered sources = %+v", ordered)
+	}
+	if index := boxForShortcut("I", ordered); index != 0 {
+		t.Errorf("Imbox shortcut index = %d, want box index 0", index)
+	}
+	items := boxNavItems(ordered)
+	if items[0].icon == "" || items[1].icon != "" {
+		t.Errorf("navigation icons = %+v", items)
+	}
+}
+
+func TestFolderDiscoveryCompletesWhileAnotherSectionIsActive(t *testing.T) {
+	m := newModel()
+	m.section = sectionCalendar
+	m.activeView = m.calendarView
+	m.mailView.sourceRequestID = 1
+
+	updated, cmd := m.Update(mailSourcesLoadedMsg{
+		requestID: 1,
+		sources: []models.Box{
+			{ID: 1, Kind: hey.BoxKindImbox, Name: "Imbox"},
+			{ID: 12, Kind: mailSourceKindFolder, Name: "Receipts"},
+		},
+	})
+	m = updated.(model)
+	if len(m.mailView.boxes) != 2 || m.mailView.boxes[1].Name != "Receipts" {
+		t.Errorf("mail sources = %+v", m.mailView.boxes)
+	}
+	if cmd == nil {
+		t.Error("inactive Mail view should continue loading its selected source")
+	}
+}
 
 func TestTabCyclesFocus(t *testing.T) {
 	m := modelWithBoxes()

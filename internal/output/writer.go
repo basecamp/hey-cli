@@ -299,7 +299,7 @@ func (w *Writer) writeMarkdown(data any) error {
 		}
 		keys := sortedKeys(m)
 		for _, k := range keys {
-			fmt.Fprintf(w.opts.Stdout, "**%s:** %v\n", k, m[k])
+			fmt.Fprintf(w.opts.Stdout, "**%s:** %s\n", markdownCell(k), markdownCell(fmt.Sprintf("%v", m[k])))
 		}
 		return nil
 	}
@@ -326,7 +326,7 @@ func (w *Writer) writeMarkdown(data any) error {
 	sb.WriteString("|")
 	for _, h := range headers {
 		sb.WriteString(" ")
-		sb.WriteString(h)
+		sb.WriteString(markdownCell(h))
 		sb.WriteString(" |")
 	}
 	sb.WriteString("\n|")
@@ -347,7 +347,7 @@ func (w *Writer) writeMarkdown(data any) error {
 				}
 			}
 			sb.WriteString(" ")
-			sb.WriteString(v)
+			sb.WriteString(markdownCell(v))
 			sb.WriteString(" |")
 		}
 		sb.WriteString("\n")
@@ -355,6 +355,13 @@ func (w *Writer) writeMarkdown(data any) error {
 
 	fmt.Fprint(w.opts.Stdout, sb.String())
 	return nil
+}
+
+func markdownCell(value string) string {
+	value = sanitizeTerminal(value)
+	value = strings.ReplaceAll(value, "|", `\|`)
+	value = strings.ReplaceAll(value, "\t", " ")
+	return strings.ReplaceAll(value, "\n", "<br>")
 }
 
 func isTTY(w io.Writer) bool {

@@ -30,7 +30,7 @@ func TestCuratedCommandHelpUsesUserFacingLanguage(t *testing.T) {
 
 func TestEmailCommandHelpKeepsPostingAsAnInternalTerm(t *testing.T) {
 	root := newRootCmd()
-	for _, name := range []string{"boxes", "box", "search", "seen", "unseen", "move", "trash", "spam", "ignore", "stop-ignoring"} {
+	for _, name := range []string{"boxes", "box", "labels", "label", "search", "seen", "unseen", "move", "trash", "spam", "ignore", "stop-ignoring"} {
 		t.Run(name, func(t *testing.T) {
 			command, _, err := root.Find([]string{name})
 			if err != nil {
@@ -94,6 +94,8 @@ USAGE
 EMAIL
   boxes          List your HEY boxes
   box            List email threads in a box
+  labels         List your email labels
+  label          View and manage an email label
   search         Search email threads and messages
   contacts       Manage contacts
   threads        Read a thread

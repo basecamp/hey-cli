@@ -14,6 +14,12 @@ type Box struct {
 	PostingChangesURL string `json:"posting_changes_url"`
 }
 
+type Folder struct {
+	ID     int64  `json:"id"`
+	Name   string `json:"name"`
+	AppURL string `json:"app_url"`
+}
+
 type Posting struct {
 	ID                    int64       `json:"id"`
 	CreatedAt             string      `json:"created_at"`
@@ -33,6 +39,7 @@ type Posting struct {
 	AlternativeSenderName string      `json:"alternative_sender_name"`
 	VisibleEntryCount     int32       `json:"visible_entry_count"`
 	Extenzions            []Extenzion `json:"extenzions,omitempty"`
+	Folders               []Folder    `json:"folders,omitempty"`
 	TopicID               int64       `json:"topic_id"`
 	Topic                 *Topic      `json:"topic,omitempty"`
 }
