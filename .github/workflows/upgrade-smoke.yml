@@ -110,6 +110,10 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          # This workflow also runs on release events; a cache shared with that
+          # trigger is a poisoning vector, and the fake 0.0.1 build here is too
+          # small to need one.
+          cache: false
 
       - name: Build a stale 0.0.1 binary under HOME
         run: |
