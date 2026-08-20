@@ -95,8 +95,18 @@ func walkNode(b *strings.Builder, n *html.Node) {
 			return
 		case "figure":
 			if att := parseTrixAttachment(n); att != nil {
-				fmt.Fprintf(b, "\n[%s]\n", att.Filename)
-				return
+				if att.Filename != "" {
+					fmt.Fprintf(b, "\n[%s]\n", att.Filename)
+					return
+				}
+				// HEY wraps pasted rich HTML in text/html trix attachments
+				// whose markup sits in the JSON "content" field. Render it.
+				if att.Content != "" {
+					if doc, err := html.Parse(strings.NewReader(att.Content)); err == nil {
+						walkNode(b, doc)
+						return
+					}
+				}
 			}
 		case "p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote":
 			b.WriteString("\n")
@@ -126,6 +136,7 @@ type trixAttachment struct {
 	ContentType string `json:"contentType"`
 	Filesize    *int64 `json:"filesize"`
 	SGID        string `json:"sgid"`
+	Content     string `json:"content"`
 }
 
 func parseTrixAttachment(n *html.Node) *trixAttachment {
@@ -135,9 +146,6 @@ func parseTrixAttachment(n *html.Node) *trixAttachment {
 	}
 	var att trixAttachment
 	if err := json.Unmarshal([]byte(raw), &att); err != nil {
-		return nil
-	}
-	if att.Filename == "" {
 		return nil
 	}
 	return &att
@@ -174,7 +182,7 @@ func findAttachments(n *html.Node, attachments *[]Attachment) {
 				*attachments = append(*attachments, attachment)
 			}
 		case "figure":
-			if trix := parseTrixAttachment(n); trix != nil && trix.URL != "" {
+			if trix := parseTrixAttachment(n); trix != nil && trix.URL != "" && trix.Filename != "" {
 				*attachments = append(*attachments, Attachment{
 					URL:         trix.URL,
 					Filename:    trix.Filename,
@@ -227,7 +235,7 @@ func findImages(n *html.Node, urls *[]string) {
 				*urls = append(*urls, imageURL)
 			}
 		case "figure":
-			if att := parseTrixAttachment(n); att != nil && att.URL != "" && isImageContentType(att.ContentType) {
+			if att := parseTrixAttachment(n); att != nil && att.URL != "" && att.Filename != "" && isImageContentType(att.ContentType) {
 				*urls = append(*urls, att.URL)
 			}
 		}

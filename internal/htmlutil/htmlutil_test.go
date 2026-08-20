@@ -205,3 +205,25 @@ func TestExtractImageURLsTrixFigure(t *testing.T) {
 		t.Errorf("url[0] = %q, want %q", urls[0], "/rails/blobs/abc/image.png")
 	}
 }
+
+func TestToTextRendersInlineHTMLTrixAttachments(t *testing.T) {
+	// HEY wraps pasted rich HTML in text/html trix attachments: the markup
+	// sits inside the JSON attribute, and the figure element has no children.
+	content := `<figure data-trix-attachment="{&quot;contentType&quot;:&quot;text/html&quot;,&quot;content&quot;:&quot;<shadow-content><template><p>Please join us for the parent retreat on Saturday.</p></template></shadow-content>&quot;,&quot;data&quot;:&quot;{}&quot;}"></figure>` +
+		`<figure data-trix-attachment="{&quot;contentType&quot;:&quot;text/html&quot;,&quot;content&quot;:&quot;<shadow-content><template><p>RSVP to maria.gonzalez@example.org by Friday.</p></template></shadow-content>&quot;,&quot;data&quot;:&quot;{}&quot;}"></figure>`
+
+	got := ToText(content)
+	if !strings.Contains(got, "Please join us for the parent retreat on Saturday.") {
+		t.Errorf("ToText dropped the first inline HTML segment: %q", got)
+	}
+	if !strings.Contains(got, "RSVP to maria.gonzalez@example.org by Friday.") {
+		t.Errorf("ToText dropped the second inline HTML segment: %q", got)
+	}
+}
+
+func TestToTextKeepsFileAttachmentPlaceholders(t *testing.T) {
+	content := `<figure data-trix-attachment="{&quot;contentType&quot;:&quot;application/pdf&quot;,&quot;filename&quot;:&quot;retreat-schedule.pdf&quot;,&quot;url&quot;:&quot;/attachments/12&quot;}"></figure>`
+	if got := ToText(content); !strings.Contains(got, "[retreat-schedule.pdf]") {
+		t.Errorf("ToText should keep the filename placeholder: %q", got)
+	}
+}
