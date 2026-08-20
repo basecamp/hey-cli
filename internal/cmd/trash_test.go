@@ -74,13 +74,14 @@ func TestTrashAndSpam(t *testing.T) {
 		name    string
 		command string
 		args    []string
+		wantIDs []int64
 		path    string
 		summary string
 	}{
-		{"trash one", "trash", []string{"12345"}, "/postings/trash.json", "1 thread moved to Trash"},
-		{"trash multiple", "trash", []string{"12345", "67890"}, "/postings/trash.json", "2 threads moved to Trash"},
-		{"spam one", "spam", []string{"12345"}, "/postings/spam.json", "1 thread marked as spam"},
-		{"spam multiple", "spam", []string{"12345", "67890"}, "/postings/spam.json", "2 threads marked as spam"},
+		{"trash one", "trash", []string{"12345", "--kind", "topic"}, []int64{12345}, "/postings/trash.json", "1 thread moved to Trash"},
+		{"trash multiple", "trash", []string{"12345", "67890", "--kind", "topic"}, []int64{12345, 67890}, "/postings/trash.json", "2 threads moved to Trash"},
+		{"spam one", "spam", []string{"12345"}, []int64{12345}, "/postings/spam.json", "1 thread marked as spam"},
+		{"spam multiple", "spam", []string{"12345", "67890"}, []int64{12345, 67890}, "/postings/spam.json", "2 threads marked as spam"},
 	}
 
 	for _, tt := range tests {
@@ -93,10 +94,10 @@ func TestTrashAndSpam(t *testing.T) {
 			if recorded.method != http.MethodPost || recorded.path != tt.path {
 				t.Errorf("request = %s %s, want POST %s", recorded.method, recorded.path, tt.path)
 			}
-			if len(recorded.postingIDs) != len(tt.args) {
-				t.Fatalf("posting_ids = %v, want %d IDs", recorded.postingIDs, len(tt.args))
+			if len(recorded.postingIDs) != len(tt.wantIDs) {
+				t.Fatalf("posting_ids = %v, want %d IDs", recorded.postingIDs, len(tt.wantIDs))
 			}
-			for i, want := range []int64{12345, 67890}[:len(tt.args)] {
+			for i, want := range tt.wantIDs {
 				if recorded.postingIDs[i] != want {
 					t.Errorf("posting_ids[%d] = %d, want %d", i, recorded.postingIDs[i], want)
 				}
@@ -127,7 +128,11 @@ func TestTrashAndSpamRejectInvalidIDsBeforeRequest(t *testing.T) {
 	for _, command := range []string{"trash", "spam"} {
 		t.Run(command, func(t *testing.T) {
 			server, recorded := removalServer(t)
-			_, err := runRemoval(t, server, command, "not-an-id")
+			args := []string{"not-an-id"}
+			if command == "trash" {
+				args = append(args, "--kind", "topic")
+			}
+			_, err := runRemoval(t, server, command, args...)
 			var cliErr *apierr.Error
 			if !errors.As(err, &cliErr) || cliErr.Code != "usage" {
 				t.Fatalf("invalid ID should produce a usage error, got %v", err)
@@ -144,7 +149,11 @@ func TestTrashAndSpamReportServerFailures(t *testing.T) {
 		t.Run(command, func(t *testing.T) {
 			server, recorded := removalServer(t)
 			recorded.status = http.StatusUnprocessableEntity
-			if _, err := runRemoval(t, server, command, "12345"); err == nil {
+			args := []string{"12345"}
+			if command == "trash" {
+				args = append(args, "--kind", "topic")
+			}
+			if _, err := runRemoval(t, server, command, args...); err == nil {
 				t.Fatal("server failure should be reported")
 			}
 		})

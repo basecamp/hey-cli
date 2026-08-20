@@ -143,11 +143,11 @@ hey compose --to user@example.com --subject "Hello"  # compose a new message
 hey compose --to user@example.com --subject "Report" -m "Attached." --attach ./report.pdf
 hey compose --to user@example.com --cc bob@example.com --bcc carol@example.org --subject "Hello"  # with CC/BCC
 hey drafts                         # list drafts
-hey move 12345 --to feed           # move a thread to another box
-hey move 12345 67890 --to "paper trail"  # move multiple threads
-hey trash 12345                    # move a thread to Trash
+hey move 12345 --to feed --kind topic  # move an email thread to another box
+hey move 12345 67890 --to "paper trail" --kind topic  # move multiple email threads
+hey trash 12345 --kind topic       # move an email thread to Trash
 hey spam 12345                     # mark a thread as spam
-hey ignore 12345                   # ignore future activity on a thread
+hey ignore 12345 --kind topic      # ignore future activity on an email thread
 hey stop-ignoring 12345            # resume attention for a thread
 ```
 
@@ -159,7 +159,7 @@ Contact updates preserve omitted name, email, and alias fields. Supplying `--ali
 
 `--attach` is repeatable on `hey compose`, `hey reply`, and `hey bulk-reply send`, and attachment-only messages are supported. The CLI validates and uploads every file before sending the email. `hey attachments <topic_id>` returns stable message-and-position IDs such as `456:1`; pass an ID to `hey attachments save`. Saving uses the original filename by default, accepts `--output` for a file or directory, and preserves existing files unless `--force` is set.
 
-Organization actions take the `id` values returned by `hey box --json` or `hey search --json`. Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Bubble Up requires a scheduled date and is not available through `hey move`. Trashing a shared thread removes your access instead of deleting it for everyone. Ignored threads remain in their box and can be restored with `hey stop-ignoring`.
+Organization actions take the `id` values returned by `hey box --json` or `hey search --json`. `move`, `trash`, and `ignore` only manage email threads and require the exact flag `--kind topic`; missing and non-email kinds are rejected before setup or any request. The CLI does not manage HEY World posts. Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Bubble Up requires a scheduled date and is not available through `hey move`. Trashing a shared thread removes your access instead of deleting it for everyone. Ignored threads remain in their box and can be restored with `hey stop-ignoring`.
 
 ### Calendars
 

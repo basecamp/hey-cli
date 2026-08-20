@@ -80,7 +80,7 @@ func runMove(t *testing.T, server *httptest.Server, args ...string) (output.Resp
 func TestMovePostingsToNamedBox(t *testing.T) {
 	server, recorded := moveServer(t)
 
-	resp, err := runMove(t, server, "12345", "67890", "--to", "paper-trail")
+	resp, err := runMove(t, server, "12345", "67890", "--to", "paper-trail", "--kind", "topic")
 	if err != nil {
 		t.Fatalf("move failed: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestMoveDestinationAliases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.to, func(t *testing.T) {
 			server, recorded := moveServer(t)
-			if _, err := runMove(t, server, "12345", "--to", tt.to); err != nil {
+			if _, err := runMove(t, server, "12345", "--to", tt.to, "--kind", "topic"); err != nil {
 				t.Fatalf("move failed: %v", err)
 			}
 			if recorded.boxID != tt.boxID {
@@ -132,7 +132,7 @@ func TestMoveRejectsBubbleUp(t *testing.T) {
 	for _, to := range []string{"bubble", "Bubble Up", "bubblebox", "6"} {
 		t.Run(to, func(t *testing.T) {
 			server, recorded := moveServer(t)
-			_, err := runMove(t, server, "12345", "--to", to)
+			_, err := runMove(t, server, "12345", "--to", to, "--kind", "topic")
 			var cliErr *apierr.Error
 			if !errors.As(err, &cliErr) || cliErr.Code != "usage" {
 				t.Fatalf("Bubble Up should produce a usage error, got %v", err)
@@ -147,7 +147,7 @@ func TestMoveRejectsBubbleUp(t *testing.T) {
 func TestMoveRequiresDestination(t *testing.T) {
 	server, recorded := moveServer(t)
 
-	_, err := runMove(t, server, "12345")
+	_, err := runMove(t, server, "12345", "--kind", "topic")
 	var cliErr *apierr.Error
 	if !errors.As(err, &cliErr) || cliErr.Code != "usage" {
 		t.Fatalf("missing destination should produce a usage error, got %v", err)
@@ -160,7 +160,7 @@ func TestMoveRequiresDestination(t *testing.T) {
 func TestMoveRejectsInvalidPostingIDBeforeRequests(t *testing.T) {
 	server, recorded := moveServer(t)
 
-	_, err := runMove(t, server, "not-an-id", "--to", "feed")
+	_, err := runMove(t, server, "not-an-id", "--to", "feed", "--kind", "topic")
 	var cliErr *apierr.Error
 	if !errors.As(err, &cliErr) || cliErr.Code != "usage" {
 		t.Fatalf("invalid posting should produce a usage error, got %v", err)
@@ -173,7 +173,7 @@ func TestMoveRejectsInvalidPostingIDBeforeRequests(t *testing.T) {
 func TestMoveRejectsUnknownDestination(t *testing.T) {
 	server, recorded := moveServer(t)
 
-	_, err := runMove(t, server, "12345", "--to", "archive")
+	_, err := runMove(t, server, "12345", "--to", "archive", "--kind", "topic")
 	var cliErr *apierr.Error
 	if !errors.As(err, &cliErr) || cliErr.Code != "not_found" {
 		t.Fatalf("unknown destination should produce a not-found error, got %v", err)
@@ -187,7 +187,7 @@ func TestMoveReportsServerFailure(t *testing.T) {
 	server, recorded := moveServer(t)
 	recorded.moveStatus = http.StatusUnprocessableEntity
 
-	_, err := runMove(t, server, "12345", "--to", "feed")
+	_, err := runMove(t, server, "12345", "--to", "feed", "--kind", "topic")
 	if err == nil {
 		t.Fatal("move should report the server failure")
 	}

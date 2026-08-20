@@ -51,6 +51,28 @@ func TestEmailCommandHelpKeepsPostingAsAnInternalTerm(t *testing.T) {
 	}
 }
 
+func TestEmailActionAgentNotesUseBoxItemIDs(t *testing.T) {
+	root := newRootCmd()
+	for _, name := range []string{"move", "trash", "ignore"} {
+		t.Run(name, func(t *testing.T) {
+			command, _, err := root.Find([]string{name})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			notes := command.Annotations["agent_notes"]
+			for _, want := range []string{"box item IDs (id)", "kind=topic", "--kind topic"} {
+				if !strings.Contains(notes, want) {
+					t.Errorf("%s agent notes missing %q: %s", name, want, notes)
+				}
+			}
+			if strings.Contains(notes, "topic IDs") {
+				t.Errorf("%s agent notes confuse topic_id with id: %s", name, notes)
+			}
+		})
+	}
+}
+
 func TestContactCommandHelpUsesHEYTerminology(t *testing.T) {
 	root := newRootCmd()
 	contacts, _, err := root.Find([]string{"contacts"})
