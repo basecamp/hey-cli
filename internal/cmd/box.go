@@ -40,7 +40,7 @@ var boxListing = postingsListing{
 	},
 	breadcrumbs: []output.Breadcrumb{
 		{Action: "read", Command: "hey threads <topic-id>", Description: "Read an email thread"},
-		{Action: "move", Command: "hey move <id> --to <box>", Description: "Move an email thread to another box"},
+		{Action: "move", Command: "hey move <id> --to <box> --kind topic", Description: "Move an email thread to another box"},
 		{Action: "compose", Command: "hey compose --to <email> --subject <subject>", Description: "Compose a new message"},
 	},
 }

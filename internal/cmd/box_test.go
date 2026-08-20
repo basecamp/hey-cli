@@ -59,6 +59,18 @@ func TestValidateBoxArgs(t *testing.T) {
 	}
 }
 
+func TestBoxListingMoveBreadcrumbIncludesEmailKind(t *testing.T) {
+	for _, breadcrumb := range boxListing.breadcrumbs {
+		if breadcrumb.Action == "move" {
+			if breadcrumb.Command != "hey move <id> --to <box> --kind topic" {
+				t.Fatalf("move breadcrumb = %q", breadcrumb.Command)
+			}
+			return
+		}
+	}
+	t.Fatal("move breadcrumb not found")
+}
+
 func TestBoxCommandNamedRoutes(t *testing.T) {
 	tests := []struct {
 		name string

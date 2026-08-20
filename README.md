@@ -400,11 +400,11 @@ hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org 
 hey drafts                         # list drafts
 hey seen 12345                     # mark a thread as seen
 hey unseen 12345 67890             # mark threads as unseen
-hey move 12345 --to feed           # move a thread to another box
-hey move 12345 67890 --to "paper trail"  # move multiple threads
-hey trash 12345                    # move a thread to Trash
+hey move 12345 --to feed --kind topic  # move an email thread to another box
+hey move 12345 67890 --to "paper trail" --kind topic  # move multiple email threads
+hey trash 12345 --kind topic       # move an email thread to Trash
 hey spam 12345                     # mark a thread as spam
-hey ignore 12345                   # ignore future activity on a thread
+hey ignore 12345 --kind topic      # ignore future activity on an email thread
 hey stop-ignoring 12345            # resume attention for a thread
 ```
 
@@ -424,7 +424,7 @@ The Screener is where first-time senders wait. `hey screener list` returns clear
 
 `--attach` is repeatable on `hey compose`, `hey reply`, and `hey bulk-reply send`, and attachment-only messages are supported. The CLI validates and uploads every file before sending the email. `hey attachments <topic_id>` returns stable message-and-position IDs such as `456:1`; pass an ID to `hey attachments save`. Saving uses the original filename by default, accepts `--output` for a file or directory, and preserves existing files unless `--force` is set.
 
-Organization actions take the `id` values returned by `hey box view --json`, `hey label view --json`, or `hey search --json`. Reading, replying to, and forwarding a thread take its `topic_id` instead, which `hey box view --json`, `hey label view --json`, `hey collection view --json` and `hey search --json` all carry alongside `id`. `hey box view` also returns `next_page` and accepts `--page <next_page>` to continue a box listing; it keeps `next_history_url` for the sync clients that read it, and `--page` accepts that URL as readily as the cursor inside it. Label IDs come from `hey label list`; `hey label view` returns `next_page` and `total_count`, accepts `--page <next_page>` for continuation, and supports `--all` for complete traversal. HEY creates a label while adding it to at least one thread, so `hey label create` requires thread item IDs.
+Organization actions take the `id` values returned by `hey box view --json`, `hey label view --json`, or `hey search --json`. For box and label results, select a record whose `kind` is exactly `topic`; search returns only email threads and does not include a `kind` field. `move`, `trash`, and `ignore` only manage email threads and require the exact flag `--kind topic`; missing and non-email kinds are rejected before setup or any request. The CLI does not manage HEY World posts. Reading, replying to, and forwarding a thread take its `topic_id` instead, which `hey box view --json`, `hey label view --json`, `hey collection view --json` and `hey search --json` all carry alongside `id`. `hey box view` also returns `next_page` and accepts `--page <next_page>` to continue a box listing; it keeps `next_history_url` for the sync clients that read it, and `--page` accepts that URL as readily as the cursor inside it. Label IDs come from `hey label list`; `hey label view` returns `next_page` and `total_count`, accepts `--page <next_page>` for continuation, and supports `--all` for complete traversal. HEY creates a label while adding it to at least one thread, so `hey label create` requires thread item IDs.
 
 Collection IDs come from `hey collection list`. `hey collection view` returns both each posting `id` and its `topic_id`, plus `next_page` and `total_count`. Collection membership commands take `topic_id`; posting organization commands continue to take `id`. Creating a collection returns a confirmed mutation, and `hey collection list` provides its ID for subsequent commands. Collection updates accept a non-empty name, summary, or both.
 

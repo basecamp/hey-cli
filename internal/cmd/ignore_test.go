@@ -87,12 +87,13 @@ func TestIgnoreAndStopIgnoring(t *testing.T) {
 		command string
 		method  string
 		args    []string
+		wantIDs []int64
 		summary string
 	}{
-		{"ignore one", "ignore", http.MethodPost, []string{"12345"}, "1 thread ignored"},
-		{"ignore multiple", "ignore", http.MethodPost, []string{"12345", "67890"}, "2 threads ignored"},
-		{"stop ignoring one", "stop-ignoring", http.MethodDelete, []string{"12345"}, "Stopped ignoring 1 thread"},
-		{"stop ignoring multiple", "stop-ignoring", http.MethodDelete, []string{"12345", "67890"}, "Stopped ignoring 2 threads"},
+		{"ignore one", "ignore", http.MethodPost, []string{"12345", "--kind", "topic"}, []int64{12345}, "1 thread ignored"},
+		{"ignore multiple", "ignore", http.MethodPost, []string{"12345", "67890", "--kind", "topic"}, []int64{12345, 67890}, "2 threads ignored"},
+		{"stop ignoring one", "stop-ignoring", http.MethodDelete, []string{"12345"}, []int64{12345}, "Stopped ignoring 1 thread"},
+		{"stop ignoring multiple", "stop-ignoring", http.MethodDelete, []string{"12345", "67890"}, []int64{12345, 67890}, "Stopped ignoring 2 threads"},
 	}
 
 	for _, tt := range tests {
@@ -105,10 +106,10 @@ func TestIgnoreAndStopIgnoring(t *testing.T) {
 			if recorded.method != tt.method || recorded.path != "/postings/mutings.json" {
 				t.Errorf("request = %s %s, want %s /postings/mutings.json", recorded.method, recorded.path, tt.method)
 			}
-			if len(recorded.postingIDs) != len(tt.args) {
-				t.Fatalf("posting_ids = %v, want %d IDs", recorded.postingIDs, len(tt.args))
+			if len(recorded.postingIDs) != len(tt.wantIDs) {
+				t.Fatalf("posting_ids = %v, want %d IDs", recorded.postingIDs, len(tt.wantIDs))
 			}
-			for i, want := range []int64{12345, 67890}[:len(tt.args)] {
+			for i, want := range tt.wantIDs {
 				if recorded.postingIDs[i] != want {
 					t.Errorf("posting_ids[%d] = %d, want %d", i, recorded.postingIDs[i], want)
 				}
@@ -139,7 +140,11 @@ func TestIgnoreAndStopIgnoringRejectInvalidIDsBeforeRequest(t *testing.T) {
 	for _, command := range []string{"ignore", "stop-ignoring"} {
 		t.Run(command, func(t *testing.T) {
 			server, recorded := ignoringServer(t)
-			_, err := runIgnoring(t, server, command, "not-an-id")
+			args := []string{"not-an-id"}
+			if command == "ignore" {
+				args = append(args, "--kind", "topic")
+			}
+			_, err := runIgnoring(t, server, command, args...)
 			var cliErr *apierr.Error
 			if !errors.As(err, &cliErr) || cliErr.Code != "usage" {
 				t.Fatalf("invalid ID should produce a usage error, got %v", err)
@@ -156,7 +161,11 @@ func TestIgnoreAndStopIgnoringReportServerFailures(t *testing.T) {
 		t.Run(command, func(t *testing.T) {
 			server, recorded := ignoringServer(t)
 			recorded.status = http.StatusUnprocessableEntity
-			if _, err := runIgnoring(t, server, command, "12345"); err == nil {
+			args := []string{"12345"}
+			if command == "ignore" {
+				args = append(args, "--kind", "topic")
+			}
+			if _, err := runIgnoring(t, server, command, args...); err == nil {
 				t.Fatal("server failure should be reported")
 			}
 		})
