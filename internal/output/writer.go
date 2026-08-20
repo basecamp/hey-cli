@@ -359,9 +359,31 @@ func (w *Writer) writeMarkdown(data any) error {
 
 func markdownCell(value string) string {
 	value = sanitizeTerminal(value)
-	value = strings.ReplaceAll(value, "|", `\|`)
+	value = escapeMarkdownTablePipes(value)
 	value = strings.ReplaceAll(value, "\t", " ")
 	return strings.ReplaceAll(value, "\n", "<br>")
+}
+
+func escapeMarkdownTablePipes(value string) string {
+	var escaped strings.Builder
+	for index := 0; index < len(value); {
+		start := index
+		for index < len(value) && value[index] == '\\' {
+			index++
+		}
+		if index < len(value) && value[index] == '|' {
+			escaped.WriteString(strings.Repeat(`\`, 2*(index-start)+1))
+			escaped.WriteByte('|')
+			index++
+			continue
+		}
+		escaped.WriteString(value[start:index])
+		if index < len(value) {
+			escaped.WriteByte(value[index])
+			index++
+		}
+	}
+	return escaped.String()
 }
 
 func isTTY(w io.Writer) bool {

@@ -305,7 +305,7 @@ func TestWriterOK_MarkdownSanitizesTerminalControlsAndLayout(t *testing.T) {
 	var buf bytes.Buffer
 	w := New(Options{Format: FormatMarkdown, Stdout: &buf})
 
-	data := []map[string]any{{"name": "Receipts\x1b]2;owned\a\nArchive|2026\tQ3"}}
+	data := []map[string]any{{"name": "Receipts\x1b]2;owned\a\nArchive|2026\tQ3 " + `Path\|Receipts`}}
 	if err := w.OK(data); err != nil {
 		t.Fatal(err)
 	}
@@ -314,8 +314,18 @@ func TestWriterOK_MarkdownSanitizesTerminalControlsAndLayout(t *testing.T) {
 	if strings.Contains(output, "\x1b") || strings.Contains(output, "\a") || strings.Contains(output, "\nArchive") {
 		t.Errorf("unsafe controls reached markdown output: %q", output)
 	}
-	if !strings.Contains(output, "<br>Archive\\|2026 Q3") {
+	if !strings.Contains(output, `<br>Archive\|2026 Q3 Path\\\|Receipts`) {
 		t.Errorf("sanitized markdown value missing from %q", output)
+	}
+}
+
+func TestEscapeMarkdownTablePipesPreservesBackslashes(t *testing.T) {
+	for backslashes := range 4 {
+		input := strings.Repeat(`\`, backslashes) + "|"
+		want := strings.Repeat(`\`, 2*backslashes+1) + "|"
+		if got := escapeMarkdownTablePipes(input); got != want {
+			t.Errorf("escapeMarkdownTablePipes(%q) = %q, want %q", input, got, want)
+		}
 	}
 }
 

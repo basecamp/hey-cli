@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"net/url"
 	"strconv"
 	"strings"
@@ -39,8 +40,8 @@ func TestLabelsAndLabel(t *testing.T) {
 		t.Errorf("label detail = %+v, want %+v", data, folder)
 	}
 
-	html := fetchHTML(t, baseURL+"/folders")
-	if !strings.Contains(html, folder.Name) {
+	page := html.UnescapeString(fetchHTML(t, baseURL+"/folders"))
+	if !strings.Contains(page, folder.Name) {
 		t.Errorf("folder page does not contain %q", folder.Name)
 	}
 }
