@@ -153,11 +153,11 @@ func TestOrderBoxes(t *testing.T) {
 	if ordered[0].Name != "Imbox" {
 		t.Errorf("first box = %q, want Imbox", ordered[0].Name)
 	}
-	if ordered[1].Name != "Paper Trail" {
-		t.Errorf("second box = %q, want Paper Trail", ordered[1].Name)
+	if ordered[1].Name != "The Feed" {
+		t.Errorf("second box = %q, want The Feed", ordered[1].Name)
 	}
-	if ordered[2].Name != "The Feed" {
-		t.Errorf("third box = %q, want The Feed", ordered[2].Name)
+	if ordered[2].Name != "Paper Trail" {
+		t.Errorf("third box = %q, want Paper Trail", ordered[2].Name)
 	}
 	if ordered[3].Name != "Custom Box" {
 		t.Errorf("last box = %q, want Custom Box", ordered[3].Name)
@@ -175,7 +175,7 @@ func TestOrderBoxesPreservesFolderWithCollidingIDAndName(t *testing.T) {
 	if len(ordered) != 2 || ordered[0].Kind != hey.BoxKindImbox || ordered[1].Kind != mailSourceKindFolder {
 		t.Errorf("ordered sources = %+v", ordered)
 	}
-	if index := boxForShortcut("I", ordered); index != 0 {
+	if index := boxForShortcut("1", ordered); index != 0 {
 		t.Errorf("Imbox shortcut index = %d, want box index 0", index)
 	}
 	items := boxNavItems(ordered)
@@ -583,7 +583,7 @@ func TestBoxShortcutExitsThread(t *testing.T) {
 	m := modelWithBoxes()
 	m.mailView.inThread = true
 
-	updated, _ := m.Update(keyPress("F"))
+	updated, _ := m.Update(keyPress("2"))
 	result := updated.(model)
 	if result.activeView.InThread() {
 		t.Error("switching boxes should exit thread")

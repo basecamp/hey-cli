@@ -544,6 +544,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Mail box shortcuts (global when in mail section)
 	if m.section == sectionMail {
 		if cmd := m.mailView.handleBoxShortcut(key); cmd != nil {
+			m.updateHelpBindings()
 			return m, m.syncLoading(cmd)
 		}
 	}

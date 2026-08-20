@@ -559,7 +559,10 @@ func TestMailViewLoadsFolderSourcesAndPostings(t *testing.T) {
 		t.Fatalf("mail sources = %+v", v.boxes)
 	}
 
-	folderCmd := v.SubnavRight()
+	if cmd := v.SubnavRight(); cmd != nil || v.collections == nil {
+		t.Fatal("moving right past the last box should open the Collections picker")
+	}
+	folderCmd := v.HandleContentKey(keyPress("enter"))
 	folderLoaded, ok := runCmd(folderCmd).(postingsLoadedMsg)
 	if !ok || folderLoaded.err != nil {
 		t.Fatalf("folder command returned %#v", folderLoaded)
@@ -605,7 +608,8 @@ func TestMailViewFolderPagination(t *testing.T) {
 	vc.sdk = client
 	v := newMailView(vc)
 	v.Update(runCmd(v.Init()))
-	first := runCmd(v.SubnavRight()).(postingsLoadedMsg)
+	v.SubnavRight()
+	first := runCmd(v.HandleContentKey(keyPress("enter"))).(postingsLoadedMsg)
 	v.Update(first)
 	if v.folderNextPage != "next-cursor" || v.notice != "Label page 1 — 2 threads total" {
 		t.Errorf("first page state = next:%q notice:%q", v.folderNextPage, v.notice)
@@ -2235,7 +2239,7 @@ func TestMailViewBoxShortcut(t *testing.T) {
 	v := mailWithPostings()
 	v.inThread = true
 	v.notice = "previous action"
-	cmd := v.handleBoxShortcut("F") // The Feed
+	cmd := v.handleBoxShortcut("2") // The Feed
 	if cmd == nil {
 		t.Fatal("box shortcut 'F' should return a command")
 	}
@@ -2255,8 +2259,122 @@ func TestMailViewBoxShortcut(t *testing.T) {
 
 func TestMailViewBoxShortcutNoOp(t *testing.T) {
 	v := mailWithPostings()
-	cmd := v.handleBoxShortcut("I") // Imbox — already selected
+	cmd := v.handleBoxShortcut("1") // Imbox — already selected
 	if cmd != nil {
 		t.Error("shortcut for current box should be no-op")
+	}
+}
+
+func mailWithCollections() *mailView {
+	v := newMailView(testVC())
+	v.vc.width = 60
+	v.vc.height = 20
+	v.boxes = orderBoxes(append(testBoxes(),
+		models.Box{ID: 12, Kind: mailSourceKindFolder, Name: "Receipts"},
+		models.Box{ID: 13, Kind: mailSourceKindFolder, Name: "Travel Plans"},
+	))
+	v.boxIndex = 0
+	v.postingList.setSize(60, 20)
+	v.Update(currentPostingsLoaded(v, testPostings()))
+	return v
+}
+
+func TestMailViewCollectionsTabAndPicker(t *testing.T) {
+	v := mailWithCollections()
+
+	items, selected, _, _ := v.SubnavItems()
+	if last := items[len(items)-1]; last.label != "Collections" || last.shortcut != "I" {
+		t.Fatalf("the last tab should be Collections with the I shortcut: %+v", items)
+	}
+	if len(items) != len(testBoxes())+1 {
+		t.Errorf("collections should not appear as their own tabs: %+v", items)
+	}
+	if selected != 0 {
+		t.Errorf("selected tab = %d, want 0", selected)
+	}
+
+	// Moving right from the last box opens the picker instead of switching.
+	v.boxIndex = len(v.tabBoxIndexes()) - 1
+	if cmd := v.SubnavRight(); cmd != nil || v.collections == nil {
+		t.Fatal("moving right past the last box should open the picker")
+	}
+	if !v.CapturingInput() {
+		t.Error("the open picker should capture input")
+	}
+
+	view := v.View()
+	if !strings.Contains(view, "Collections") || !strings.Contains(view, "Receipts") || !strings.Contains(view, "Travel Plans") {
+		t.Errorf("the picker should list the collections: %q", view)
+	}
+
+	// Choose the second collection.
+	v.HandleContentKey(keyPress("down"))
+	if cmd := v.HandleContentKey(keyPress("enter")); cmd == nil {
+		t.Fatal("choosing a collection should load it")
+	}
+	if v.collections != nil {
+		t.Error("choosing should close the picker")
+	}
+	if got := v.currentSource(); got == nil || got.Name != "Travel Plans" {
+		t.Errorf("current source = %+v, want Travel Plans", got)
+	}
+
+	// The Collections tab is now the selected one.
+	items, selected, _, _ = v.SubnavItems()
+	if selected != len(items)-1 {
+		t.Errorf("selected tab = %d, want the Collections tab %d", selected, len(items)-1)
+	}
+
+	// Escape closes the picker without switching.
+	v.openCollections()
+	v.HandleContentKey(keyPress("esc"))
+	if v.collections != nil || v.currentSource().Name != "Travel Plans" {
+		t.Error("escape should close the picker and keep the current collection")
+	}
+
+	// Left from the Collections tab returns to the last box tab.
+	if cmd := v.SubnavLeft(); cmd == nil || v.currentSourceKind() == mailSourceKindFolder {
+		t.Error("left from Collections should return to the last box tab")
+	}
+
+	// Shift+I opens the picker from anywhere in the mail section.
+	if cmd := v.handleBoxShortcut("I"); cmd == nil || v.collections == nil {
+		t.Error("the I shortcut should open the Collections picker")
+	}
+	if cmd := v.handleBoxShortcut("I"); cmd != nil {
+		t.Error("the I shortcut should be inert while the picker is open")
+	}
+}
+
+func TestSectionsAndUnreadDotAreImboxOnly(t *testing.T) {
+	v := mailWithPostings() // box 0 is the Imbox
+	v.vc.width, v.vc.height = 80, 30
+	v.Resize(80, 30)
+	view := stripANSI(v.View())
+	if !strings.Contains(view, "New for You") || !strings.Contains(view, "●") {
+		t.Errorf("the Imbox should show sections and the unread dot: %q", view)
+	}
+
+	feed := -1
+	for i, b := range v.boxes {
+		if b.Name == "The Feed" {
+			feed = i
+		}
+	}
+	if feed < 0 {
+		t.Fatalf("test boxes lack The Feed: %+v", v.boxes)
+	}
+	v.switchBox(feed)
+	v.Update(currentPostingsLoaded(v, testPostings()))
+
+	view = stripANSI(v.View())
+	if strings.Contains(view, "New for You") || strings.Contains(view, "Previously Seen") {
+		t.Errorf("The Feed should be one flat list: %q", view)
+	}
+	if strings.Contains(view, "●") {
+		t.Errorf("The Feed should not show the unread dot: %q", view)
+	}
+	if !strings.Contains(view, "Hello world") || !strings.Contains(view, "Meeting notes") {
+		t.Errorf("The Feed should still list every thread: %q", view)
 	}
 }

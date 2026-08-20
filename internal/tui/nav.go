@@ -61,16 +61,16 @@ func sectionForShortcut(key string) section {
 
 type boxSpec struct {
 	name string
-	key  string // shift+letter shortcut
+	key  string // number shortcut, matching the web app
 }
 
 var knownBoxes = []boxSpec{
-	{"Imbox", "I"},
-	{"Bubble up", "B"},
-	{"Paper Trail", "P"},
-	{"The Feed", "F"},
-	{"Set Aside", "A"},
-	{"Reply Later", "R"},
+	{"Imbox", "1"},
+	{"The Feed", "2"},
+	{"Paper Trail", "3"},
+	{"Reply Later", "4"},
+	{"Set Aside", "5"},
+	{"Bubble up", "6"},
 }
 
 // orderBoxes sorts boxes by the preferred order. Known boxes appear first
@@ -181,13 +181,15 @@ func renderRule(width int, label string) string {
 
 // renderNavLabel renders a nav label in the given style, underlining the
 // first occurrence of the shortcut letter (the Windows menu convention).
+// A shortcut absent from the label — a number — is shown as an underlined
+// prefix instead: "1 Imbox".
 func renderNavLabel(label, shortcut string, base lipgloss.Style) string {
 	if shortcut == "" {
 		return base.Render(label)
 	}
 	idx := strings.Index(strings.ToLower(label), strings.ToLower(shortcut))
 	if idx < 0 {
-		return base.Render(label)
+		return base.Underline(true).Render(shortcut) + base.Render(" "+label)
 	}
 	end := idx + len(shortcut)
 	out := base.Underline(true).Render(label[idx:end])

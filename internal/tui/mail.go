@@ -146,11 +146,12 @@ type mailView struct {
 	inThread         bool
 	loading          bool
 
-	compose            *composeForm    // non-nil while a message, reply or forward is being written
-	bulkReply          *bulkReplyForm  // non-nil while a bulk reply is being previewed or written
-	movePicker         *movePicker     // non-nil while a destination box is being selected
-	folderPicker       *folderPicker   // non-nil while folder labels are being managed
-	searchForm         *mailSearchForm // non-nil while a search query is being entered
+	compose            *composeForm      // non-nil while a message, reply or forward is being written
+	bulkReply          *bulkReplyForm    // non-nil while a bulk reply is being previewed or written
+	movePicker         *movePicker       // non-nil while a destination box is being selected
+	folderPicker       *folderPicker     // non-nil while folder labels are being managed
+	collections        *collectionPicker // non-nil while a collection is being chosen
+	searchForm         *mailSearchForm   // non-nil while a search query is being entered
 	searchList         contentList
 	searchActive       bool
 	searchQuery        string
@@ -225,6 +226,9 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if msg.err != nil {
 			return func() tea.Msg { return errMsg{msg.err} }, true
 		}
+		// Only the Imbox separates New for You from Previously Seen and marks
+		// unread threads with the dot; every other source is one flat list.
+		v.postingList.hideSeenState = !v.currentBoxIsImbox()
 		v.postingList.setPostings(msg.postings)
 		if v.currentSourceKind() == mailSourceKindFolder {
 			v.folderPage = msg.page
@@ -516,6 +520,10 @@ func (v *mailView) View() string {
 	if v.folderPicker != nil {
 		return v.folderPicker.view(v.vc.styles, v.vc.width)
 	}
+	if v.collections != nil {
+		base := v.listHeader() + v.postingList.view()
+		return v.collections.overlay(base, v.vc.width, v.vc.height)
+	}
 	if v.inThread {
 		if v.notice != "" {
 			return v.vc.styles.title.Render(v.notice) + "\n" + v.topicViewport.View()
@@ -563,7 +571,7 @@ func firstTimeSenderNoun(count int) string {
 
 // CapturingInput reports whether a form or picker is open and wants every key.
 func (v *mailView) CapturingInput() bool {
-	return v.compose != nil || v.bulkReply != nil || v.movePicker != nil || v.folderPicker != nil || v.searchForm != nil
+	return v.compose != nil || v.bulkReply != nil || v.movePicker != nil || v.folderPicker != nil || v.collections != nil || v.searchForm != nil
 }
 
 func (v *mailView) AccountSwitchBlocked() bool {
@@ -585,6 +593,9 @@ func (v *mailView) HelpBindings() []helpBinding {
 	}
 	if v.folderPicker != nil {
 		return v.folderPicker.helpBindings()
+	}
+	if v.collections != nil {
+		return v.collections.helpBindings()
 	}
 	if v.inThread {
 		bindings := []helpBinding{{"r", "reply"}, {"f", "forward"}}
@@ -662,21 +673,96 @@ func (v *mailView) SubnavItems() ([]navItem, int, string, bool) {
 			label = fmt.Sprintf("%s (page %d)", label, len(v.folderPageHistory)+1)
 		}
 	}
-	return boxNavItems(v.boxes), v.boxIndex, label, true
+
+	// The tab row shows the known boxes plus one Collections tab; the
+	// collections themselves live in a modal picker.
+	tabIndexes := v.tabBoxIndexes()
+	boxes := make([]models.Box, len(tabIndexes))
+	selected := 0
+	for i, boxIndex := range tabIndexes {
+		boxes[i] = v.boxes[boxIndex]
+		if boxIndex == v.boxIndex {
+			selected = i
+		}
+	}
+	items := boxNavItems(boxes)
+	if v.hasCollections() {
+		items = append(items, navItem{shortcut: "I", label: "Collections"})
+		if v.currentSourceKind() == mailSourceKindFolder {
+			selected = len(items) - 1
+		}
+	}
+	return items, selected, label, true
+}
+
+// tabBoxIndexes returns the indexes into v.boxes shown as their own tabs —
+// every source except collections.
+func (v *mailView) tabBoxIndexes() []int {
+	indexes := make([]int, 0, len(v.boxes))
+	for i, b := range v.boxes {
+		if b.Kind != mailSourceKindFolder {
+			indexes = append(indexes, i)
+		}
+	}
+	return indexes
+}
+
+func (v *mailView) hasCollections() bool {
+	for _, b := range v.boxes {
+		if b.Kind == mailSourceKindFolder {
+			return true
+		}
+	}
+	return false
+}
+
+func (v *mailView) openCollections() {
+	v.collections = newCollectionPicker(v.boxes, v.boxIndex)
 }
 
 func (v *mailView) SubnavLeft() tea.Cmd {
 	if v.searchActive || v.searchForm != nil {
 		return nil
 	}
-	return v.switchBox(v.boxIndex - 1)
+	tabIndexes := v.tabBoxIndexes()
+	if v.currentSourceKind() == mailSourceKindFolder {
+		// From the Collections tab, step back to the last box tab.
+		if len(tabIndexes) == 0 {
+			return nil
+		}
+		return v.switchBox(tabIndexes[len(tabIndexes)-1])
+	}
+	for i, boxIndex := range tabIndexes {
+		if boxIndex == v.boxIndex && i > 0 {
+			return v.switchBox(tabIndexes[i-1])
+		}
+	}
+	return nil
 }
 
 func (v *mailView) SubnavRight() tea.Cmd {
 	if v.searchActive || v.searchForm != nil {
 		return nil
 	}
-	return v.switchBox(v.boxIndex + 1)
+	if v.currentSourceKind() == mailSourceKindFolder {
+		// Already on the Collections tab: reopen the picker.
+		v.openCollections()
+		return nil
+	}
+	tabIndexes := v.tabBoxIndexes()
+	for i, boxIndex := range tabIndexes {
+		if boxIndex != v.boxIndex {
+			continue
+		}
+		if i+1 < len(tabIndexes) {
+			return v.switchBox(tabIndexes[i+1])
+		}
+		if v.hasCollections() {
+			v.openCollections()
+		}
+		return nil
+	}
+	return nil
 }
 
 func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
@@ -734,6 +820,23 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 			return v.movePostingToBox(picker.postingID, *destination)
 		}
 		v.movePicker.update(msg)
+		return nil
+	}
+
+	if v.collections != nil {
+		switch msg.Key().Code {
+		case tea.KeyEscape:
+			v.collections = nil
+			return nil
+		case tea.KeyEnter:
+			index := v.collections.selectedBoxIndex()
+			v.collections = nil
+			if index < 0 {
+				return nil
+			}
+			return v.switchBox(index)
+		}
+		v.collections.update(msg)
 		return nil
 	}
 
@@ -938,6 +1041,11 @@ func (v *mailView) Resize(width, height int) {
 
 // handleBoxShortcut handles number-key shortcuts for switching boxes.
 func (v *mailView) handleBoxShortcut(key string) tea.Cmd {
+	if key == "I" && v.hasCollections() && !v.CapturingInput() {
+		v.openCollections()
+		// A no-op command tells the caller the key was handled.
+		return func() tea.Msg { return nil }
+	}
 	return v.switchBox(boxForShortcut(key, v.boxes))
 }
 
@@ -967,6 +1075,15 @@ func (v *mailView) currentBoxID() int64 {
 		return source.ID
 	}
 	return 0
+}
+
+// currentBoxIsImbox reports whether the active source is the Imbox.
+func (v *mailView) currentBoxIsImbox() bool {
+	source := v.currentSource()
+	if source == nil {
+		return false
+	}
+	return strings.EqualFold(source.Kind, hey.BoxKindImbox) || strings.EqualFold(source.Name, "Imbox")
 }
 
 func (v *mailView) currentSourceKind() string {
