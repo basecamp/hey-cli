@@ -95,7 +95,6 @@ jobs:
           owner: basecamp
           repositories: skills
           permission-contents: ${{ inputs.dry_run && 'read' || 'write' }}
-          permission-pull-requests: ${{ inputs.dry_run && 'read' || 'write' }}
 
       # github.sha is the dispatching ref's SHA (main), not the tag's, so
       # resolve the tagged commit from its own checkout — otherwise the sync

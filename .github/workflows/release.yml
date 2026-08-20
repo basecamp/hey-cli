@@ -558,7 +558,6 @@ jobs:
           owner: basecamp
           repositories: skills
           permission-contents: write
-          permission-pull-requests: write
 
       - name: Sync skills to distribution repo
         id: sync
