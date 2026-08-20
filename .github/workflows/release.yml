@@ -128,8 +128,12 @@ jobs:
       - name: Install Syft
         uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
 
-      # Repo-gated: forks have no signing secrets and release unnotarized
-      # snapshots; the canonical repo must never ship an unsigned macOS binary.
+      # Fail fast: goreleaser's notarize block turns itself off when any of
+      # these secrets is empty, so without this check a misconfigured canonical
+      # run would ship an unsigned macOS binary instead of failing. Gated to
+      # the canonical repo only because forks have none of these secrets;
+      # a tag pushed to a fork is not a supported release path (the tap-token
+      # step above needs the release app as well).
       - name: Verify macOS signing secrets
         if: github.repository == 'basecamp/hey-cli'
         run: |
