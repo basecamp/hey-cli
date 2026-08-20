@@ -336,8 +336,9 @@ func TestNativeSelfUpdateSuccess(t *testing.T) {
 	run := executeUpgradeCommand(t)
 	mustNoError(t, run.err)
 
-	assertContains(t, run.stderr, "update available: 1.1.0")
-	assertContains(t, run.stderr, "Upgraded 1.0.0 → 1.1.0")
+	if run.stderr != "" {
+		t.Errorf("machine mode must not narrate on stderr, got %q", run.stderr)
+	}
 	data := run.data(t)
 	if data["status"] != "upgraded" || data["method"] != "native" || data["from"] != "1.0.0" || data["to"] != "1.1.0" {
 		t.Errorf("unexpected envelope data: %v", data)
@@ -436,7 +437,9 @@ func TestNativeSelfUpdateNoPlatformAsset(t *testing.T) {
 	apiErr := requireUpgradeError(t, run.err, "upgrade_required")
 	assertContains(t, apiErr.Message, "no prebuilt binary")
 	assertContains(t, apiErr.Hint, "releases/tag/v1.1.0")
-	assertContains(t, run.stderr, "releases/tag/v1.1.0")
+	if run.stderr != "" {
+		t.Errorf("machine mode must not narrate on stderr, got %q", run.stderr)
+	}
 	assertTargetUntouched(t, f)
 }
 

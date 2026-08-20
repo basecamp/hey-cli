@@ -79,11 +79,14 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 		return output.ErrUsage("--ids-only requires list data — hey upgrade reports a single result")
 	}
 
-	// Progress narration goes to stdout when styled and to stderr otherwise,
-	// so the JSON envelope on stdout stays parseable.
-	w := cmd.OutOrStdout()
+	// Progress narration is human-facing and exists only in styled mode. The
+	// machine formats discard it — success reserves stdout for the envelope,
+	// and failure reserves stderr for the JSON error envelope Execute writes,
+	// which narration mixed into either stream would corrupt. Package-manager
+	// subprocess output follows the same rule.
+	w, procErr := cmd.OutOrStdout(), cmd.ErrOrStderr()
 	if !writer.IsStyled() {
-		w = cmd.ErrOrStderr()
+		w, procErr = io.Discard, io.Discard
 	}
 
 	current := version.Version
@@ -122,7 +125,7 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 
 	if homebrewChecker(ctx) {
 		fmt.Fprintln(w, "Upgrading via Homebrew…")
-		if brewErr := homebrewUpgrader(ctx, w, cmd.ErrOrStderr()); brewErr != nil {
+		if brewErr := homebrewUpgrader(ctx, w, procErr); brewErr != nil {
 			return &output.Error{
 				Code:    "upgrade_failed",
 				Message: fmt.Sprintf("brew upgrade failed for cask %s: %v", homebrewCask, brewErr),
@@ -136,7 +139,7 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 	if scoopChecker(ctx) {
 		global := scoopGlobalScopeChecker(ctx)
 		fmt.Fprintln(w, "Upgrading via Scoop…")
-		if scoopErr := scoopUpgrader(ctx, global, w, cmd.ErrOrStderr()); scoopErr != nil {
+		if scoopErr := scoopUpgrader(ctx, global, w, procErr); scoopErr != nil {
 			return &output.Error{
 				Code:    "upgrade_failed",
 				Message: fmt.Sprintf("scoop update failed for app %s: %v", scoopApp, scoopErr),

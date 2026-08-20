@@ -255,7 +255,6 @@ func TestUpgradeAlreadyCurrent(t *testing.T) {
 
 	run := executeUpgradeCommand(t)
 	mustNoError(t, run.err)
-	assertContains(t, run.stderr, "already up to date")
 	if got := run.data(t)["status"]; got != "up_to_date" {
 		t.Errorf("status = %q, want up_to_date", got)
 	}
@@ -271,8 +270,6 @@ func TestUpgradeAvailableButUnappliableFails(t *testing.T) {
 
 	run := executeUpgradeCommand(t)
 	apiErr := requireUpgradeError(t, run.err, "upgrade_required")
-	assertContains(t, run.stderr, "update available: 1.3.0")
-	assertContains(t, run.stderr, "releases/tag/v1.3.0")
 	assertContains(t, apiErr.Hint, "releases/tag/v1.3.0")
 	if run.stdout != "" {
 		t.Errorf("a failed upgrade must not write an envelope to stdout, got %q", run.stdout)
@@ -285,12 +282,15 @@ func TestUpgradeSuppressesOlderLatestRelease(t *testing.T) {
 
 	run := executeUpgradeCommand(t)
 	mustNoError(t, run.err)
-	assertContains(t, run.stderr, "already up to date")
-	assertNotContains(t, run.stderr, "update available")
+	if got := run.data(t)["status"]; got != "up_to_date" {
+		t.Errorf("status = %q, want up_to_date", got)
+	}
 }
 
-// Styled output narrates on stdout; machine output keeps stdout for the
-// envelope and narrates on stderr. Neither leaks to os.Stdout.
+// Styled output narrates on stdout. Machine output suppresses narration
+// entirely: stdout carries only the envelope, and stderr stays reserved for
+// the JSON error envelope Execute writes on failure — human text mixed into
+// either stream breaks automation parsing the documented formats.
 func TestUpgradeNarrationFollowsOutputMode(t *testing.T) {
 	stubVersion(t, "1.0.0")
 	stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "1.0.0"})
@@ -306,8 +306,10 @@ func TestUpgradeNarrationFollowsOutputMode(t *testing.T) {
 
 	run := executeUpgradeCommand(t)
 	mustNoError(t, run.err)
-	assertContains(t, run.stderr, "Current version: 1.0.0")
 	assertNotContains(t, run.stdout, "Current version")
+	if run.stderr != "" {
+		t.Errorf("machine mode must not narrate on stderr, got %q", run.stderr)
+	}
 }
 
 // A styled success ends with its narration: output.Writer.OK has no styled
@@ -366,7 +368,10 @@ func TestUpgradeUnresolvableExecutable(t *testing.T) {
 	run := executeUpgradeCommand(t)
 	apiErr := requireUpgradeError(t, run.err, "upgrade_required")
 	assertContains(t, apiErr.Message, "could not be resolved")
-	assertContains(t, run.stderr, "releases/tag/v1.1.0")
+	assertContains(t, apiErr.Hint, "releases/tag/v1.1.0")
+	if run.stderr != "" {
+		t.Errorf("machine mode must not narrate on stderr, got %q", run.stderr)
+	}
 }
 
 // upgrade and version never need a mail account: they must not trigger the
@@ -406,7 +411,6 @@ func TestUpgradeHomebrewConfirmedSuccess(t *testing.T) {
 
 	run := executeUpgradeCommand(t)
 	mustNoError(t, run.err)
-	assertContains(t, run.stderr, "Upgrading via Homebrew…")
 	data := run.data(t)
 	if data["status"] != "upgraded" || data["method"] != "homebrew" || data["to"] != "1.3.0" {
 		t.Errorf("unexpected envelope data: %v", data)
@@ -506,7 +510,6 @@ func TestUpgradeScoopConfirmedSuccess(t *testing.T) {
 
 	run := executeUpgradeCommand(t)
 	mustNoError(t, run.err)
-	assertContains(t, run.stderr, "Upgrading via Scoop…")
 	if got := run.data(t)["method"]; got != "scoop" {
 		t.Errorf("method = %q, want scoop", got)
 	}
