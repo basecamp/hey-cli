@@ -25,7 +25,7 @@ var curatedCategories = []struct {
 	},
 	{
 		heading: "AUTH & CONFIG",
-		names:   []string{"auth", "accounts", "config", "setup", "doctor"},
+		names:   []string{"auth", "accounts", "config", "setup", "doctor", "upgrade", "version"},
 	},
 }
 

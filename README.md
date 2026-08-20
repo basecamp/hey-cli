@@ -95,6 +95,29 @@ That command is for cosign v3. With cosign v2.6–v2.x add `--new-bundle-format=
 
 </details>
 
+## Upgrading
+
+```bash
+hey upgrade
+```
+
+What happens depends on how hey was installed:
+
+- **Installer script / tarball** (a binary under your home directory, e.g. `~/.local/bin` or `~/bin`): upgrades in place. hey downloads the release for your platform, verifies its Sigstore signature (the keyless `checksums.txt.bundle` published by the release pipeline, identity-pinned to the release workflow and tag) and SHA-256 checksum, swaps the executable transactionally, and confirms the installed binary reports the new version. On failure the previous binary is restored; in the worst case — restoration itself fails mid-swap — the error names the preserved backup file next to the binary so you can put it back by hand.
+- **Homebrew / Scoop**: delegates to `brew upgrade --cask basecamp/tap/hey` / `scoop update hey`, then verifies the manager-installed binary actually reports the new version.
+- **System packages** (apt/dnf/apk, AUR, Nix) and **`go install` builds**: never touched. `hey upgrade` exits nonzero with upgrade guidance for that install method (the exact command where it can be known, e.g. `go install` or `yay -S hey-cli`; otherwise which package manager to use).
+
+`hey upgrade` exits 0 only when there is no update, or the update was applied *and confirmed*. Every other outcome is a structured failure (`"ok": false` in JSON) with one of these codes:
+
+| Code | Meaning |
+|---|---|
+| `upgrade_required` | An update exists but hey won't apply it for this install method (or this is not a release build) — the hint carries the right next step |
+| `upgrade_incomplete` | The package manager exited 0 but the binary still reports the old version |
+| `upgrade_unverified` | The upgrade may have worked, but the installed version could not be confirmed |
+| `upgrade_failed` | The update check, download, signature/checksum verification, or executable swap failed — the previous binary remains installed (or the error names the preserved backup if restoration also failed) |
+
+`hey version` prints the installed version; `hey version --json` adds the commit, build date, Go version and build source (`release`, `go install` or `dev`). `hey doctor` warns when a newer release is available.
+
 ## Authentication
 
 ```bash
@@ -283,6 +306,8 @@ hey skill install   # install the skill globally for your agent
 
 ```bash
 hey doctor           # Check CLI health and diagnose issues
+hey version --json   # Installed version, commit, build date and build source
+hey upgrade          # Upgrade to the latest release (see Upgrading)
 ```
 
 ### Windows: Smart App Control and SmartScreen

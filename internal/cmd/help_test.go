@@ -127,6 +127,8 @@ AUTH & CONFIG
   config    View and change settings
   setup     Set up HEY for first use
   doctor    Find login and configuration problems
+  upgrade   Upgrade hey to the latest release
+  version   Show the installed hey version
 
 FLAGS
       --account    Select a linked mail account ID or all

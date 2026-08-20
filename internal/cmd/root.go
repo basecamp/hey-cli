@@ -94,6 +94,8 @@ func newRootCmd() *cobra.Command {
 				return err
 			}
 
+			cleanupUpgradeSidecars()
+
 			if os.Getenv("HEY_DEBUG") != "" && verboseFlag == 0 {
 				verboseFlag = 1
 			}
@@ -184,6 +186,8 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newCompletionCommand())
 	root.AddCommand(newDoctorCommand())
 	root.AddCommand(newConfigCommand().cmd)
+	root.AddCommand(newUpgradeCommand().cmd)
+	root.AddCommand(newVersionCommand().cmd)
 
 	return root
 }
@@ -194,7 +198,7 @@ func commandUsesAccountScope(cmd *cobra.Command) bool {
 		return true
 	}
 	switch parts[1] {
-	case "accounts", "auth", "commands", "completion", "config", "doctor", "setup", "skill":
+	case "accounts", "auth", "commands", "completion", "config", "doctor", "setup", "skill", "upgrade", "version":
 		return false
 	default:
 		return true

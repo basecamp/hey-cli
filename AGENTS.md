@@ -162,6 +162,7 @@ The dev server must be running at `http://app.hey.localhost:3003` (override with
 3. Helper functions (`hey()`, `heyOK()`, `heyJSON()`, `heyFail()`) run the binary and parse output. `dataAs[T]()` generically unmarshals response data.
 4. Tests that depend on write operations (compose, todo add, journal write, reply, timetrack start) skip gracefully when the server returns errors, since the SDK's parameter format may not match the server's expectations.
 5. Test data uses `uniqueID()` (nanosecond timestamps) to avoid collisions. Cleanup happens via `t.Cleanup()`.
+6. `hey upgrade` is covered only as far as a dev build's `upgrade_required` refusal (and `hey version --json`). The live self-update against a real release runs in `.github/workflows/upgrade-smoke.yml`, never against the dev server.
 
 **How to add a new test:**
 
@@ -171,6 +172,27 @@ The dev server must be running at `http://app.hey.localhost:3003` (override with
 4. For write operations that may fail server-side, use `hey(t, ...)` directly and skip on non-zero exit: `if code != 0 { t.Skipf("... (exit %d): %s", code, stderr) }`.
 5. Use `dataAs[T](t, resp)` to unmarshal response data into typed structs.
 6. For browser cross-verification, use `browserPageText(t, url)` to get page content.
+
+### Upgrade command
+
+`hey upgrade` (`internal/cmd/upgrade.go`, `upgrade_selfupdate.go`, `release.go`) self-updates
+installer/tarball installs under `$HOME` and delegates Homebrew and Scoop installs to their
+package manager; system packages, Nix and `go install` builds are refused with guidance, as is
+any build whose version is not a semantic version (`dev` included). The native path trusts
+nothing it downloaded until the release's `checksums.txt.bundle` verifies with sigstore-go
+against the Sigstore public-good trusted root (TUF-cached under `config.CacheDir()/sigstore-tuf`),
+with the signing identity pinned to
+`https://github.com/basecamp/hey-cli/.github/workflows/release.yml@refs/tags/v<version>` and
+the GitHub Actions OIDC issuer. Only then is the archive's SHA-256 checked against the verified
+`checksums.txt`, the binary extracted with hardening (no links, no nested paths, size caps),
+probed with `--version`, and swapped in behind a `flock` with the old binary preserved until
+the installed one is confirmed.
+
+The verification tests in `upgrade_selfupdate_test.go` run hermetically against real release
+fixtures in `internal/cmd/testdata/selfupdate/` (see its README for provenance — they are from
+basecamp-cli until hey-cli has a signed release of its own). Everything else goes through the
+seam variables (`releaseFetcher`, `bundleVerifier`, `binaryVersionProber`, …) so no test talks
+to GitHub or runs a package manager.
 
 ### Running
 

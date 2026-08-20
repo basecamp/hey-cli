@@ -1,8 +1,9 @@
 ---
-# Upgrade smoke: installer legs pinning the cosign version→flag capability gate
-# against the REAL published bundle format of the latest release — real
-# download, real Sigstore verification. A native `hey upgrade` matrix joins
-# once the command exists.
+# Upgrade smoke: end-to-end proof that `hey upgrade` self-updates a stale
+# binary against the REAL latest release — real download, real Sigstore
+# verification, and (on Windows) the real locked-exe rename shuffle — plus
+# installer legs pinning the cosign version→flag capability gate against the
+# published bundle format.
 #
 # Branch pushes necessarily verify the previous release, so the workflow also
 # runs on every published release (pinned to that release's tag) -- the first
@@ -25,12 +26,24 @@ on:
   push:
     branches: [main]
     paths:
+      - "internal/cmd/upgrade*"
+      - "internal/cmd/release.go"
+      - "internal/cmd/doctor.go"
+      - "internal/version/**"
+      - "go.mod"
+      - "go.sum"
       - ".goreleaser.yaml"
       - "scripts/install.sh"
       - "scripts/install.ps1"
       - ".github/workflows/upgrade-smoke.yml"
   pull_request:
     paths:
+      - "internal/cmd/upgrade*"
+      - "internal/cmd/release.go"
+      - "internal/cmd/doctor.go"
+      - "internal/version/**"
+      - "go.mod"
+      - "go.sum"
       - ".goreleaser.yaml"
       - "scripts/install.sh"
       - "scripts/install.ps1"
@@ -76,6 +89,61 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
             echo "::warning::No published release yet — the upgrade smoke legs are skipped. They arm automatically once the first release is published."
           fi
+  native-upgrade:
+    name: native self-update (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build a stale 0.0.1 binary under HOME
+        run: |
+          ext=""
+          [[ "$RUNNER_OS" == "Windows" ]] && ext=".exe"
+          mkdir -p "$HOME/bin"
+          go build \
+            -ldflags "-X github.com/basecamp/hey-cli/internal/version.Version=0.0.1" \
+            -o "$HOME/bin/hey$ext" ./cmd/hey
+          "$HOME/bin/hey$ext" --version
+
+      - name: Run hey upgrade against the real latest release
+        env:
+          HEY_NO_KEYRING: "1"
+          # Anonymous api.github.com requests share the runner egress IP's
+          # rate limit; the CLI attaches this token to its releases/latest
+          # lookup (attachGitHubAuth) so the check can't 403.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          ext=""
+          [[ "$RUNNER_OS" == "Windows" ]] && ext=".exe"
+          "$HOME/bin/hey$ext" upgrade
+
+      - name: Assert the installed binary reports the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ext=""
+          [[ "$RUNNER_OS" == "Windows" ]] && ext=".exe"
+          latest=$(gh api repos/basecamp/hey-cli/releases/latest --jq .tag_name)
+          latest="${latest#v}"
+          got=$("$HOME/bin/hey$ext" --version | awk '{print $NF}')
+          echo "latest=$latest installed=$got"
+          test "$got" = "$latest"
 
   installer-sh:
     name: install.sh cosign ${{ matrix.cosign }}

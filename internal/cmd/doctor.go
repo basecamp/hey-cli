@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -20,7 +21,7 @@ func newDoctorCommand() *cobra.Command {
 		Use:   "doctor",
 		Short: "Find login and configuration problems",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			checks := runDoctorChecks()
+			checks := runDoctorChecks(cmd.Context())
 
 			if writer.IsStyled() {
 				w := cmd.OutOrStdout()
@@ -33,6 +34,9 @@ func newDoctorCommand() *cobra.Command {
 						allOK = false
 					}
 					fmt.Fprintf(w, "[%s] %s: %s\n", icon, c["name"], c["message"])
+					if hint := c["hint"]; hint != "" {
+						fmt.Fprintf(w, "     hint: %s\n", hint)
+					}
 				}
 				if allOK {
 					fmt.Fprintln(w, "\nAll checks passed.")
@@ -45,15 +49,11 @@ func newDoctorCommand() *cobra.Command {
 	}
 }
 
-func runDoctorChecks() []map[string]string {
+func runDoctorChecks(ctx context.Context) []map[string]string {
 	var checks []map[string]string
 
 	// CLI Version
-	checks = append(checks, map[string]string{
-		"name":    "CLI Version",
-		"status":  "ok",
-		"message": fmt.Sprintf("%s (%s, %s)", version.Version, version.Commit, version.Date),
-	})
+	checks = append(checks, checkVersion(ctx))
 
 	// Go Version
 	checks = append(checks, map[string]string{
@@ -175,4 +175,35 @@ func runDoctorChecks() []map[string]string {
 	}
 
 	return checks
+}
+
+// checkVersion reports the build and, for release builds, whether a newer
+// release exists. The lookup is best-effort and bounded: a slow or offline
+// api.github.com must not stall doctor. Dev and other non-semver builds have
+// nothing to compare against and skip it.
+func checkVersion(ctx context.Context) map[string]string {
+	message := fmt.Sprintf("%s (%s, %s)", version.Version, version.Commit, version.Date)
+	if goInstallChecker() {
+		message += " [go install]"
+	}
+	check := map[string]string{
+		"name":    "CLI Version",
+		"status":  "ok",
+		"message": message,
+	}
+
+	if !isReleaseVersion(version.Version) {
+		return check
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	release, err := releaseFetcher(ctx)
+	if err == nil && isUpdateAvailable(version.Version, release.Version) {
+		check["status"] = "warning"
+		check["message"] = fmt.Sprintf("%s (update available: %s)", message, release.Version)
+		check["hint"] = "hey upgrade"
+	}
+
+	return check
 }
