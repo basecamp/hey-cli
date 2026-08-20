@@ -645,9 +645,9 @@ func TestPostProbeRestoreAndPreserveFailureKeepsOldBackupSafe(t *testing.T) {
 
 // --- real-bundle authenticity (hermetic: vendored fixtures, no network) ---
 
-// The fixtures are basecamp-cli's v0.8.1 release artifacts (see
+// The fixtures are hey-cli's v0.1.1 release artifacts (see
 // testdata/selfupdate/README.md), so they verify under that repo's identity.
-const fixtureIdentity = "https://github.com/basecamp/basecamp-cli/.github/workflows/release.yml@refs/tags/v0.8.1"
+const fixtureIdentity = "https://github.com/basecamp/hey-cli/.github/workflows/release.yml@refs/tags/v0.1.1"
 
 func loadSelfUpdateFixtures(t *testing.T) (trusted root.TrustedMaterial, checksums, bundleBytes []byte) {
 	t.Helper()
@@ -672,7 +672,7 @@ func TestVerifyBundleRejectsWrongIdentity(t *testing.T) {
 		t.Fatal("bundle from another repository verified under hey-cli's identity")
 	}
 	// Same repository, different tag.
-	otherTag := strings.Replace(fixtureIdentity, "v0.8.1", "v9.9.9", 1)
+	otherTag := strings.Replace(fixtureIdentity, "v0.1.1", "v9.9.9", 1)
 	if err := verifyBundleWithRoot(trusted, checksums, bundleBytes, otherTag); err == nil {
 		t.Fatal("bundle verified under a different release tag")
 	}
