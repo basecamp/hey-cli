@@ -125,6 +125,26 @@ jobs:
             -o "$HOME/bin/hey$ext" ./cmd/hey
           "$HOME/bin/hey$ext" --version
 
+      # goreleaser publishes the release before its assets finish uploading,
+      # so a release-triggered run waits for everything the native updater
+      # needs: this platform's archive, checksums.txt, and its bundle.
+      - name: Wait for release assets
+        if: env.RELEASE_TAG != ''
+        run: |
+          ver="${RELEASE_TAG#v}"
+          ext="tar.gz"
+          [[ "$RUNNER_OS" == "Windows" ]] && ext="zip"
+          archive="hey_${ver}_$(go env GOOS)_$(go env GOARCH).${ext}"
+          for asset in "$archive" checksums.txt checksums.txt.bundle; do
+            url="https://github.com/basecamp/hey-cli/releases/download/v${ver}/${asset}"
+            for _ in $(seq 1 30); do
+              if curl -fsSIL "$url" >/dev/null; then continue 2; fi
+              sleep 20
+            done
+            echo "::error::${url} never appeared" >&2
+            exit 1
+          done
+
       - name: Run hey upgrade against the real latest release
         env:
           HEY_NO_KEYRING: "1"
