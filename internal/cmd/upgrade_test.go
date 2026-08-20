@@ -203,6 +203,30 @@ func isolateCommandEnv(t *testing.T) {
 
 // --- command tests ---
 
+// --count and --ids-only can never render upgrade's map data; output.Writer
+// rejects them only at write time — after the binary has already been
+// replaced. That failure order reports a structured error for a completed
+// mutation, so the formats must be refused before the upgrade starts.
+func TestUpgradeRejectsListOnlyFormatsBeforeUpgrading(t *testing.T) {
+	for _, flag := range []string{"--count", "--ids-only"} {
+		t.Run(flag, func(t *testing.T) {
+			stubVersion(t, "1.0.0")
+			fetched := false
+			stubReleaseFetcher(t, func(context.Context) (releaseInfo, error) {
+				fetched = true
+				return releaseInfo{Version: "1.1.0"}, nil
+			})
+
+			run := executeUpgradeCommandAs(t, flag)
+			requireUpgradeError(t, run.err, "usage")
+			assertContains(t, output.AsError(run.err).Message, flag)
+			if fetched {
+				t.Error("the format must be rejected before the upgrade starts")
+			}
+		})
+	}
+}
+
 // A dev build, or anything else that is not a semantic version, has no
 // release lineage and must refuse before touching the network.
 func TestUpgradeRefusesNonReleaseBuilds(t *testing.T) {

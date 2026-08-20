@@ -68,6 +68,17 @@ exits nonzero with the right next step for that install method.`,
 }
 
 func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
+	// Upgrade reports a single result map. --count and --ids-only can only
+	// render lists, and output.Writer would reject them at write time — after
+	// the binary had already been replaced, turning a completed upgrade into
+	// a structured failure. Refuse them before anything runs.
+	switch writer.EffectiveFormat() {
+	case output.FormatCount:
+		return output.ErrUsage("--count requires list data — hey upgrade reports a single result")
+	case output.FormatIDs:
+		return output.ErrUsage("--ids-only requires list data — hey upgrade reports a single result")
+	}
+
 	// Progress narration goes to stdout when styled and to stderr otherwise,
 	// so the JSON envelope on stdout stays parseable.
 	w := cmd.OutOrStdout()
