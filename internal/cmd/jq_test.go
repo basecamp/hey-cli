@@ -18,23 +18,25 @@ func TestRootRegistersJQFlag(t *testing.T) {
 
 func TestValidateJQFlags(t *testing.T) {
 	tests := []struct {
-		name   string
-		args   []string
-		filter string
-		ids    bool
-		count  bool
-		want   string
+		name      string
+		args      []string
+		filter    string
+		requested bool
+		ids       bool
+		count     bool
+		want      string
 	}{
-		{name: "empty", args: []string{"auth", "status"}},
-		{name: "valid", args: []string{"auth", "status"}, filter: ".data[].id"},
-		{name: "invalid", args: []string{"auth", "status"}, filter: ".[invalid", want: "invalid --jq expression"},
-		{name: "ids conflict", args: []string{"auth", "status"}, filter: ".data", ids: true, want: "cannot use --jq with --ids-only"},
-		{name: "count conflict", args: []string{"auth", "status"}, filter: ".data", count: true, want: "cannot use --jq with --count"},
-		{name: "root app", filter: ".", want: "--jq is not supported by the interactive app"},
-		{name: "auth token", args: []string{"auth", "token"}, filter: ".", want: "--jq is not supported by the auth token command"},
-		{name: "completion", args: []string{"completion"}, filter: ".", want: "--jq is not supported by the completion command"},
-		{name: "skill display", args: []string{"skill"}, filter: ".", want: "--jq is not supported by the skill display command"},
-		{name: "tui", args: []string{"tui"}, filter: ".", want: "--jq is not supported by the interactive app"},
+		{name: "absent", args: []string{"auth", "status"}},
+		{name: "empty", args: []string{"auth", "status"}, requested: true, want: "invalid --jq expression: expression cannot be empty"},
+		{name: "valid", args: []string{"auth", "status"}, filter: ".data[].id", requested: true},
+		{name: "invalid", args: []string{"auth", "status"}, filter: ".[invalid", requested: true, want: "invalid --jq expression"},
+		{name: "ids conflict", args: []string{"auth", "status"}, filter: ".data", requested: true, ids: true, want: "cannot use --jq with --ids-only"},
+		{name: "count conflict", args: []string{"auth", "status"}, filter: ".data", requested: true, count: true, want: "cannot use --jq with --count"},
+		{name: "root app", filter: ".", requested: true, want: "--jq is not supported by the interactive app"},
+		{name: "auth token", args: []string{"auth", "token"}, filter: ".", requested: true, want: "--jq is not supported by the auth token command"},
+		{name: "completion", args: []string{"completion"}, filter: ".", requested: true, want: "--jq is not supported by the completion command"},
+		{name: "skill display", args: []string{"skill"}, filter: ".", requested: true, want: "--jq is not supported by the skill display command"},
+		{name: "tui", args: []string{"tui"}, filter: ".", requested: true, want: "--jq is not supported by the interactive app"},
 	}
 
 	for _, tt := range tests {
@@ -44,7 +46,7 @@ func TestValidateJQFlags(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = validateJQFlags(cmd, tt.filter, tt.ids, tt.count)
+			err = validateJQFlags(cmd, tt.filter, tt.requested, tt.ids, tt.count)
 			if tt.want == "" {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
@@ -55,6 +57,15 @@ func TestValidateJQFlags(t *testing.T) {
 				t.Fatalf("expected %q, got %v", tt.want, err)
 			}
 		})
+	}
+}
+
+func TestRootRejectsExplicitEmptyJQExpression(t *testing.T) {
+	root := newRootCmd()
+	root.SetArgs([]string{"auth", "status", "--jq="})
+	err := root.Execute()
+	if err == nil || err.Error() != "invalid --jq expression: expression cannot be empty" {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

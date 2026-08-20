@@ -26,7 +26,7 @@ func ensureLocalConfigTrusted(cmd *cobra.Command) error {
 	if local == nil || !commandUsesRuntimeConfig(cmd) {
 		return nil
 	}
-	if machineReadableOutput() || !stdinIsTerminal() || !stdoutIsTerminal() {
+	if machineReadableOutput(cmd) || !stdinIsTerminal() || !stdoutIsTerminal() {
 		return untrustedLocalConfigError(local)
 	}
 
@@ -60,8 +60,8 @@ func commandUsesRuntimeConfig(cmd *cobra.Command) bool {
 	}
 }
 
-func machineReadableOutput() bool {
-	return jsonFlag || quietFlag || idsOnly || countFlag || markdownF || agentFlag
+func machineReadableOutput(cmd *cobra.Command) bool {
+	return jsonFlag || quietFlag || idsOnly || countFlag || markdownF || agentFlag || cmd.Flags().Changed("jq")
 }
 
 func promptForLocalConfigTrust(cmd *cobra.Command, local *config.LocalConfig) (localConfigTrustChoice, error) {

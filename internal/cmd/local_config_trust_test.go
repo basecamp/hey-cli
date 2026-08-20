@@ -34,6 +34,20 @@ func TestUntrustedLocalConfigFailsBeforeNetworkRequest(t *testing.T) {
 	}
 }
 
+func TestJQIsMachineReadableForLocalConfigTrust(t *testing.T) {
+	root := newRootCmd()
+	command, _, err := root.Find([]string{"boxes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := command.ParseFlags([]string{"--jq", ".data"}); err != nil {
+		t.Fatal(err)
+	}
+	if !machineReadableOutput(command) {
+		t.Fatal("--jq output was treated as interactive")
+	}
+}
+
 func TestTrustLocalAllowsRequestsAndChangesRequireTrustAgain(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -161,13 +175,16 @@ func runLocalTrustCLI(t *testing.T, args ...string) error {
 func resetRootFlagsForTrustTest(t *testing.T) {
 	t.Helper()
 	previousJSON := jsonFlag
+	previousJQ := jqFlag
 	previousAccount := accountFlag
 	previousBaseURL := baseURL
 	jsonFlag = false
+	jqFlag = ""
 	accountFlag = ""
 	baseURL = ""
 	t.Cleanup(func() {
 		jsonFlag = previousJSON
+		jqFlag = previousJQ
 		accountFlag = previousAccount
 		baseURL = previousBaseURL
 	})

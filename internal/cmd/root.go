@@ -56,7 +56,8 @@ func newRootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			format := output.FormatFromFlags(jsonFlag || jqFlag != "", quietFlag, idsOnly, countFlag, markdownF, styledFlag, agentFlag)
+			jqRequested := cmd.Flags().Changed("jq")
+			format := output.FormatFromFlags(jsonFlag || jqRequested, quietFlag, idsOnly, countFlag, markdownF, styledFlag, agentFlag)
 			writer = output.New(output.Options{
 				Format:   format,
 				Stdout:   cmd.OutOrStdout(),
@@ -64,12 +65,12 @@ func newRootCmd() *cobra.Command {
 				JQFilter: jqFlag,
 			})
 			if versionFlag {
-				if jqFlag != "" {
+				if jqRequested {
 					return output.ErrJQNotSupported("the version command")
 				}
 				return nil
 			}
-			if err := validateJQFlags(cmd, jqFlag, idsOnly, countFlag); err != nil {
+			if err := validateJQFlags(cmd, jqFlag, jqRequested, idsOnly, countFlag); err != nil {
 				return err
 			}
 
@@ -219,12 +220,15 @@ func Execute() {
 	}
 }
 
-func validateJQFlags(cmd *cobra.Command, filter string, ids, count bool) error {
-	if err := output.ValidateJQFilter(filter); err != nil {
-		return err
+func validateJQFlags(cmd *cobra.Command, filter string, requested, ids, count bool) error {
+	if !requested {
+		return nil
 	}
 	if filter == "" {
-		return nil
+		return output.ErrJQValidation(errors.New("expression cannot be empty"))
+	}
+	if err := output.ValidateJQFilter(filter); err != nil {
+		return err
 	}
 	if ids {
 		return output.ErrJQConflict("--ids-only")
