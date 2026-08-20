@@ -12,6 +12,7 @@ import (
 func TestSkillInstallReplacesExistingLink(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	symlinkDir := filepath.Join(home, ".claude", "skills")
 	if err := os.MkdirAll(symlinkDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -44,6 +45,7 @@ func TestSkillInstallReplacesExistingLink(t *testing.T) {
 func TestSkillInstallReportsExistingDirectory(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	symlinkPath := filepath.Join(home, ".claude", "skills", "hey")
 	if err := os.MkdirAll(symlinkPath, 0o755); err != nil {
 		t.Fatal(err)
