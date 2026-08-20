@@ -32,11 +32,12 @@ func TestValidateJQFlags(t *testing.T) {
 		{name: "invalid", args: []string{"auth", "status"}, filter: ".[invalid", requested: true, want: "invalid --jq expression"},
 		{name: "ids conflict", args: []string{"auth", "status"}, filter: ".data", requested: true, ids: true, want: "cannot use --jq with --ids-only"},
 		{name: "count conflict", args: []string{"auth", "status"}, filter: ".data", requested: true, count: true, want: "cannot use --jq with --count"},
-		{name: "root app", filter: ".", requested: true, want: "--jq is not supported by the interactive app"},
+		{name: "root help", filter: ".", requested: true},
 		{name: "auth token", args: []string{"auth", "token"}, filter: ".", requested: true, want: "--jq is not supported by the auth token command"},
 		{name: "completion", args: []string{"completion"}, filter: ".", requested: true, want: "--jq is not supported by the completion command"},
 		{name: "skill display", args: []string{"skill"}, filter: ".", requested: true, want: "--jq is not supported by the skill display command"},
 		{name: "tui", args: []string{"tui"}, filter: ".", requested: true, want: "--jq is not supported by the interactive app"},
+		{name: "hey alias", args: []string{"hey"}, filter: ".", requested: true, want: "--jq is not supported by the interactive app"},
 	}
 
 	for _, tt := range tests {

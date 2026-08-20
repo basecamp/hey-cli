@@ -15,7 +15,6 @@ import (
 	"github.com/basecamp/hey-cli/internal/auth"
 	"github.com/basecamp/hey-cli/internal/config"
 	"github.com/basecamp/hey-cli/internal/output"
-	"github.com/basecamp/hey-cli/internal/tui"
 	"github.com/basecamp/hey-cli/internal/version"
 )
 
@@ -120,13 +119,7 @@ func newRootCmd() *cobra.Command {
 				fmt.Fprintf(cmd.OutOrStdout(), "hey version %s\n", version.Version)
 				return nil
 			}
-			if !stdinIsTerminal() || !stdoutIsTerminal() {
-				return cmd.Help()
-			}
-			if err := requireAuth(); err != nil {
-				return err
-			}
-			return tui.Run(rootSDK, sdk, cfg.AccountID)
+			return cmd.Help()
 		},
 	}
 
@@ -183,6 +176,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newStopIgnoringCommand().cmd)
 	root.AddCommand(newSetupCommand())
 	root.AddCommand(newTuiCommand().cmd)
+	root.AddCommand(newHeyCommand().cmd)
 	root.AddCommand(newSkillCommand().cmd)
 	root.AddCommand(newCommandsCommand())
 	root.AddCommand(newCompletionCommand())
@@ -246,15 +240,13 @@ func validateJQFlags(cmd *cobra.Command, filter string, requested, ids, count bo
 	}
 
 	switch cmd.CommandPath() {
-	case "hey":
-		return output.ErrJQNotSupported("the interactive app")
 	case "hey auth token":
 		return output.ErrJQNotSupported("the auth token command")
 	case "hey completion":
 		return output.ErrJQNotSupported("the completion command")
 	case "hey skill":
 		return output.ErrJQNotSupported("the skill display command")
-	case "hey tui":
+	case "hey tui", "hey hey":
 		return output.ErrJQNotSupported("the interactive app")
 	default:
 		return nil

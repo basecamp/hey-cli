@@ -89,7 +89,10 @@ func TestRenderRootHelpUsesUserFacingLanguage(t *testing.T) {
 
 USAGE
   hey <command> [flags]
-  hey                     Open the interactive app
+  hey tui                 Open the interactive app
+
+INTERACTIVE
+  tui  Launch the interactive terminal UI
 
 EMAIL
   boxes          List your HEY boxes

@@ -11,10 +11,18 @@ type tuiCommand struct {
 }
 
 func newTuiCommand() *tuiCommand {
-	c := &tuiCommand{}
-	c.cmd = &cobra.Command{
-		Use:   "tui",
-		Short: "Launch the interactive terminal UI",
+	return &tuiCommand{cmd: newTuiRunner("tui", false)}
+}
+
+func newHeyCommand() *tuiCommand {
+	return &tuiCommand{cmd: newTuiRunner("hey", true)}
+}
+
+func newTuiRunner(use string, hidden bool) *cobra.Command {
+	return &cobra.Command{
+		Use:    use,
+		Short:  "Launch the interactive terminal UI",
+		Hidden: hidden,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireAuth(); err != nil {
 				return err
@@ -22,5 +30,4 @@ func newTuiCommand() *tuiCommand {
 			return tui.Run(rootSDK, sdk, cfg.AccountID)
 		},
 	}
-	return c
 }

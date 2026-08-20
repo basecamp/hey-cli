@@ -176,8 +176,9 @@ identity-wide.
 
 ## TUI
 
-Run `hey` to launch the interactive terminal UI. For identities with multiple linked mail
-accounts, press Ctrl+A to switch between All Accounts and individual email addresses.
+Run `hey tui` to launch the interactive terminal UI. Bare `hey` prints the help. For
+identities with multiple linked mail accounts, press Ctrl+A to switch between All Accounts
+and individual email addresses.
 Switching cancels requests from the previous account and reloads the active section;
 Calendar and Journal remain identity-wide.
 

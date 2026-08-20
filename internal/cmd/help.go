@@ -16,6 +16,10 @@ var curatedCategories = []struct {
 	names   []string
 }{
 	{
+		heading: "INTERACTIVE",
+		names:   []string{"tui"},
+	},
+	{
 		heading: "EMAIL",
 		names:   []string{"boxes", "box", "labels", "label", "search", "contacts", "screener", "threads", "attachments", "compose", "reply", "bulk-reply", "forward", "drafts", "seen", "unseen", "move", "trash", "spam", "ignore", "stop-ignoring", "watch"},
 	},
@@ -60,7 +64,7 @@ func renderRootHelp(w io.Writer, cmd *cobra.Command) {
 	b.WriteString("\n")
 	b.WriteString(bold.format("USAGE") + "\n")
 	b.WriteString("  hey <command> [flags]\n")
-	b.WriteString("  hey                     Open the interactive app\n")
+	b.WriteString("  hey tui                 Open the interactive app\n")
 
 	// Build lookup from command name → registered cobra.Command
 	registered := make(map[string]*cobra.Command, len(cmd.Commands()))
