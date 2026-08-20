@@ -36,5 +36,11 @@ if [[ "$CHECK" -eq 1 ]]; then
   exit 0
 fi
 
-jq --arg v "$VERSION" '.version = $v' "$PLUGIN_JSON" > "${PLUGIN_JSON}.tmp"
-mv "${PLUGIN_JSON}.tmp" "$PLUGIN_JSON"
+# Write through a temp file in the same directory so the rename is atomic, and
+# remove it on any failure: a leftover untracked file would fail release.sh's
+# clean-tree check on the next attempt, and its rollback only restores the
+# tracked metadata files.
+TMP=$(mktemp "${PLUGIN_JSON}.XXXXXX")
+trap 'rm -f "$TMP"' EXIT
+jq --arg v "$VERSION" '.version = $v' "$PLUGIN_JSON" > "$TMP"
+mv "$TMP" "$PLUGIN_JSON"

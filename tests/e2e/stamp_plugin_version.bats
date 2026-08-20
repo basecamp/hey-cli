@@ -54,3 +54,13 @@ teardown() {
   run "$STAMP" --check
   [ "$status" -ne 0 ]
 }
+
+@test "a failed stamp leaves no temporary file behind" {
+  # release.sh's rollback restores only the tracked metadata files, so an
+  # untracked leftover here would fail the next run's clean-tree check.
+  echo '{ "broken":' > .claude-plugin/plugin.json
+  run "$STAMP" 0.2.0
+  [ "$status" -ne 0 ]
+  [ "$(ls -A .claude-plugin)" = "plugin.json" ]
+  [ "$(cat .claude-plugin/plugin.json)" = '{ "broken":' ]
+}
