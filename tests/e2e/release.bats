@@ -57,6 +57,20 @@ STUB
 echo "make $*" >> "$LOG"
 STUB
   chmod +x "$STUB_DIR/make"
+
+  # macOS's stock sort has no -V/--version-sort. Shadow sort with a stub that
+  # refuses those flags so every test fails if release.sh reaches for them.
+  cat > "$STUB_DIR/sort" <<'STUB'
+#!/usr/bin/env bash
+for arg in "$@"; do
+  if [[ "$arg" == "--version-sort" || ( "$arg" == -[a-zA-Z]* && "$arg" == *V* ) ]]; then
+    echo "sort: illegal option -- V" >&2
+    exit 2
+  fi
+done
+exec /usr/bin/sort "$@"
+STUB
+  chmod +x "$STUB_DIR/sort"
   PATH="$STUB_DIR:$PATH"
 }
 

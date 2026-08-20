@@ -98,14 +98,26 @@ fi
 
 # A stable version below the latest stable tag would roll the Nix flake and
 # plugin metadata on main backwards, and sync-skills would mirror the older
-# tree. Compare with sort -V (GNU and BSD), never lexically.
+# tree. Compare numerically, never lexically — and never with sort -V, which
+# macOS's stock sort does not provide (same reasoning as check-lint-lockstep.sh).
+# Git's version:refname ordering picks the latest stable tag, and a field
+# compare orders it against the new version; both sides are stable X.Y.Z here.
+version_lt() {
+  local -a a b
+  local i
+  IFS=. read -r -a a <<< "${1#v}"
+  IFS=. read -r -a b <<< "${2#v}"
+  for i in 0 1 2; do
+    if (( ${a[i]:-0} < ${b[i]:-0} )); then return 0; fi
+    if (( ${a[i]:-0} > ${b[i]:-0} )); then return 1; fi
+  done
+  return 1
+}
+
 if [[ "$PRERELEASE" -eq 0 ]]; then
-  LATEST_STABLE=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | awk '!/-/' | sort -V | tail -1)
-  if [[ -n "$LATEST_STABLE" && "$LATEST_STABLE" != "$TAG" ]]; then
-    NEWEST=$(printf '%s\n%s\n' "$LATEST_STABLE" "$TAG" | sort -V | tail -1)
-    if [[ "$NEWEST" != "$TAG" ]]; then
-      die "Version $VERSION is older than the latest stable release ${LATEST_STABLE#v}. Stable releases cannot go backwards."
-    fi
+  LATEST_STABLE=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname | awk '!/-/ { print; exit }')
+  if [[ -n "$LATEST_STABLE" && "$LATEST_STABLE" != "$TAG" ]] && version_lt "$TAG" "$LATEST_STABLE"; then
+    die "Version $VERSION is older than the latest stable release ${LATEST_STABLE#v}. Stable releases cannot go backwards."
   fi
 fi
 
