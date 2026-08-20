@@ -192,12 +192,13 @@ release:
 	@DRY_RUN=$(DRY_RUN) scripts/release.sh $(VERSION)
 
 # Dry-run the goreleaser pipeline. Signing env is blanked so notarization and
-# Authenticode are skipped rather than failing on missing secrets.
+# Authenticode are skipped rather than failing on missing secrets. SBOMs are
+# skipped when syft is not on PATH (it is only installed in CI).
 test-release:
 	MACOS_SIGN_P12= MACOS_SIGN_PASSWORD= MACOS_NOTARY_KEY= MACOS_NOTARY_KEY_ID= MACOS_NOTARY_ISSUER_ID= \
 	SM_API_KEY= SM_CLIENT_CERT_FILE= SM_CLIENT_CERT_PASSWORD= \
 	HOMEBREW_TAP_TOKEN= \
-	goreleaser release --snapshot --skip=publish,sign --clean
+	goreleaser release --snapshot --skip=publish,sign$$(command -v syft >/dev/null || echo ,sbom) --clean
 
 # Run benchmarks
 bench: check-toolchain
