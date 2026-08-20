@@ -195,6 +195,14 @@ else
 fi
 
 # --- Commit release prep ---
+# Committed here, pushed below together with the tag. The tag was validated
+# against origin before anything mutated, but that check has a window: another
+# operator can push the same tag (or move main) while release-check runs.
+# Pushing main on its own and discovering the tag collision afterwards would
+# leave main stamped for a tag that points elsewhere and cannot be moved, so
+# the two refs go up in one --atomic push — an existing remote tag or a
+# non-fast-forward main rejects both, and origin is left exactly as found.
+PREP_BASE="$LOCAL"
 if [[ "$PRERELEASE" -eq 0 && "$DRY_RUN" -eq 0 ]]; then
   git add nix/package.nix .claude-plugin/plugin.json
   if ! git diff --cached --quiet; then
@@ -211,9 +219,8 @@ if [[ "$PRERELEASE" -eq 0 && "$DRY_RUN" -eq 0 ]]; then
       COMMIT_MSG="Update plugin version for ${TAG}"
     fi
     git commit -m "$COMMIT_MSG"
-    git push origin "$DEFAULT_BRANCH" --quiet
     LOCAL=$(git rev-parse HEAD)
-    info "Pushed release prep (${LOCAL:0:7})"
+    info "Committed release prep (${LOCAL:0:7})"
   fi
 fi
 
@@ -238,8 +245,23 @@ else
   git tag -a "$TAG" -m "Release $TAG"
 fi
 
-info "Pushing $TAG to origin"
-git push origin "$TAG"
+# On rejection, put the clone back where a re-run can start: drop the local
+# prep commit and tag so the next attempt (under a new version, if the tag was
+# taken) is not blocked by an unpushed main or a stale local tag.
+PUSH_REFS=("$TAG")
+if [[ "$LOCAL" != "$PREP_BASE" ]]; then
+  PUSH_REFS=("$DEFAULT_BRANCH" "$TAG")
+fi
+info "Pushing ${PUSH_REFS[*]} to origin"
+if ! git push --atomic origin "${PUSH_REFS[@]}"; then
+  git tag -d "$TAG" >/dev/null
+  git reset --quiet --hard "$PREP_BASE"
+  git fetch origin --tags --quiet
+  die "Push rejected: origin changed while the release was being prepared (another push of $TAG or $DEFAULT_BRANCH). Nothing was pushed; main and the tag were reset locally. Re-run after pulling — or choose a new version if $TAG is now taken."
+fi
+if [[ "$LOCAL" != "$PREP_BASE" ]]; then
+  info "Pushed release prep (${LOCAL:0:7})"
+fi
 
 echo ""
 info "Release $TAG triggered"

@@ -350,3 +350,58 @@ HOOK
   [ ! -s "$PUSH_LOG" ]
   [ ! -f "$LOG" ]
 }
+
+@test "a tag pushed by someone else during the checks reaches neither main nor the tag" {
+  # The tag check runs before make release-check; the pushes run after it.
+  # Another operator landing the same tag in that window must not leave main
+  # carrying stable metadata for a tag that points somewhere else — the tag
+  # cannot be moved, so that main would be stuck. Nothing may reach origin.
+  git clone -q "$WORK/origin.git" "$WORK/other"
+  git -C "$WORK/other" config user.email other@example.com
+  git -C "$WORK/other" config user.name "Other Operator"
+  cat > "$STUB_DIR/make" <<STUB
+#!/usr/bin/env bash
+echo "make \$*" >> "$LOG"
+git -C "$WORK/other" tag -a v0.2.0 -m "Release v0.2.0" v0.1.0
+git -C "$WORK/other" push -q origin v0.2.0
+STUB
+  OTHER=$(git -C "$WORK/other" rev-parse v0.1.0^{commit})
+
+  run scripts/release.sh 0.2.0
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"v0.2.0"* ]]
+
+  [ "$(origin rev-parse main)" = "$BASE" ]
+  [ "$(origin rev-parse v0.2.0^{commit})" = "$OTHER" ]
+  [ "$(cat "$PUSH_LOG")" = "refs/tags/v0.2.0" ]
+
+  # The local clone is left where a re-run (with a new version) can start:
+  # no unpushed prep commit, no stray local tag, clean tree.
+  [ -z "$(git status --porcelain)" ]
+  [ "$(git rev-parse HEAD)" = "$BASE" ]
+  ! git rev-parse -q --verify refs/tags/v0.2.0 >/dev/null || [ "$(git rev-parse v0.2.0^{commit})" = "$OTHER" ]
+  [ "$(plugin_version)" = "0.1.0" ]
+}
+
+@test "main moved by someone else during the checks reaches neither main nor the tag" {
+  git clone -q "$WORK/origin.git" "$WORK/other"
+  git -C "$WORK/other" config user.email other@example.com
+  git -C "$WORK/other" config user.name "Other Operator"
+  cat > "$STUB_DIR/make" <<STUB
+#!/usr/bin/env bash
+echo "make \$*" >> "$LOG"
+git -C "$WORK/other" commit -q --allow-empty -m "Concurrent work"
+git -C "$WORK/other" push -q origin main
+STUB
+  : > "$PUSH_LOG"
+
+  run scripts/release.sh 0.2.0
+  [ "$status" -ne 0 ]
+
+  [ "$(origin rev-parse main)" = "$(git -C "$WORK/other" rev-parse HEAD)" ]
+  ! origin rev-parse -q --verify refs/tags/v0.2.0 >/dev/null
+  [ "$(cat "$PUSH_LOG")" = "refs/heads/main" ]
+  [ -z "$(git status --porcelain)" ]
+  [ "$(git rev-parse HEAD)" = "$BASE" ]
+  ! git rev-parse -q --verify refs/tags/v0.2.0 >/dev/null
+}
