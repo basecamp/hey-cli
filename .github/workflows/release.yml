@@ -153,6 +153,56 @@ jobs:
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
 
+      - name: Verify Windows signing secrets
+        if: github.repository == 'basecamp/hey-cli'
+        run: |
+          missing=()
+          for var in SM_API_KEY SM_CLIENT_CERT_FILE_B64 SM_CLIENT_CERT_PASSWORD; do
+            if [ -z "${!var}" ]; then
+              missing+=("$var")
+            fi
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing Windows signing secrets: ${missing[*]}"
+            exit 1
+          fi
+          echo "All Windows signing secrets present"
+        env:
+          SM_API_KEY: ${{ secrets.SM_API_KEY }}
+          SM_CLIENT_CERT_FILE_B64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
+          SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
+
+      - name: Set up Java for jsign
+        if: github.repository == 'basecamp/hey-cli'
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # Guarded like the preflight above: on forks this must not run at all —
+      # decoding an empty secret would export a nonempty SM_CLIENT_CERT_FILE,
+      # which the wrapper correctly treats as partial configuration and fails.
+      # With no SM_* env exported, forks take the wrapper's skip path instead
+      # and release unsigned.
+      - name: Prepare Windows signing
+        if: github.repository == 'basecamp/hey-cli'
+        env:
+          SM_CLIENT_CERT_FILE_B64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
+        run: |
+          # jsign >= 7.5 is mandatory: 7.1-7.3 are broken against DigiCert
+          # ONE's current API.
+          JSIGN_VERSION=7.5
+          JSIGN_SHA256=602a51c3545a6dc4fb99bd2ea7152b26d1345916d0c93ddfbd5936cb735af91c
+          umask 077
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/jsign-$JSIGN_VERSION.jar" \
+            "https://github.com/ebourg/jsign/releases/download/$JSIGN_VERSION/jsign-$JSIGN_VERSION.jar"
+          echo "$JSIGN_SHA256  $RUNNER_TEMP/jsign-$JSIGN_VERSION.jar" | sha256sum -c -
+          printf '%s' "$SM_CLIENT_CERT_FILE_B64" | base64 -d > "$RUNNER_TEMP/digicert-client-cert.p12"
+          {
+            echo "JSIGN_JAR=$RUNNER_TEMP/jsign-$JSIGN_VERSION.jar"
+            echo "SM_CLIENT_CERT_FILE=$RUNNER_TEMP/digicert-client-cert.p12"
+          } >> "$GITHUB_ENV"
+
       - name: Install GoReleaser
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
@@ -185,11 +235,24 @@ jobs:
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          # Windows Authenticode signing via DigiCert KeyLocker (jsign).
+          # JSIGN_JAR and SM_CLIENT_CERT_FILE arrive via GITHUB_ENV from the
+          # "Prepare Windows signing" step above.
+          SM_API_KEY: ${{ secrets.SM_API_KEY }}
+          SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
+          # DigiCert ONE certificate ID (not the keypair alias) for the OV cert
+          # CN=37signals LLC, expires 2027-04-30. Shared with basecamp-cli and
+          # bc3-desktop.
+          SIGN_ALIAS: 1346fa41-d9f0-4580-b7b9-a95cf5674354
         run: goreleaser release --clean
 
       # The gate itself runs as a goreleaser build hook (.goreleaser.yaml),
       # before archives, signing and publishing; this pass over dist/ is the
       # consolidated per-platform table for the job summary.
+      - name: Clean up Windows signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/digicert-client-cert.p12" "$RUNNER_TEMP"/jsign-*.jar
+
       - name: Report release size budget
         run: scripts/check-size-budget.sh
 
@@ -387,6 +450,83 @@ jobs:
             echo "::error::Nix flake built ${out#hey version }, expected ${TAG#v}. nix/package.nix was not bumped before tagging."
             exit 1
           }
+  windows-verify:
+    name: Verify Windows signing
+    needs: [release]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - name: Download release binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\verify" | Out-Null
+          gh release download $env:GITHUB_REF_NAME `
+            --repo $env:GITHUB_REPOSITORY `
+            --pattern "hey_*_windows_${{ matrix.arch }}.zip" `
+            --dir "$env:RUNNER_TEMP\verify"
+          if ($LASTEXITCODE -ne 0) { throw 'gh release download failed' }
+          $zip = Get-ChildItem "$env:RUNNER_TEMP\verify\hey_*_windows_${{ matrix.arch }}.zip"
+          Expand-Archive -Path $zip.FullName -DestinationPath "$env:RUNNER_TEMP\verify\extract" -Force
+
+      - name: Verify Authenticode signature
+        shell: pwsh
+        run: |
+          # Signature validation of an arm64 PE needs no execution, so both
+          # arches verify on the x64 runner.
+          $sig = Get-AuthenticodeSignature "$env:RUNNER_TEMP\verify\extract\hey.exe"
+          Write-Host "Status (${{ matrix.arch }}): $($sig.Status) - $($sig.StatusMessage)"
+          Write-Host "Signer: $($sig.SignerCertificate.Subject)"
+          if ($sig.Status -ne 'Valid') {
+            Write-Host "::error::Authenticode status (${{ matrix.arch }}): $($sig.Status) - $($sig.StatusMessage)"
+            exit 1
+          }
+          if ($sig.SignerCertificate.Subject -notmatch 'CN=37signals LLC') {
+            Write-Host "::error::Unexpected signer (${{ matrix.arch }}): $($sig.SignerCertificate.Subject)"
+            exit 1
+          }
+          if (-not $sig.TimeStamperCertificate) {
+            Write-Host "::error::No timestamp countersignature (${{ matrix.arch }}) - signature would expire with the cert on 2027-04-30"
+            exit 1
+          }
+          Write-Host "Signature valid, signer and timestamp verified (${{ matrix.arch }})"
+
+      - name: Download installer asset
+        if: matrix.arch == 'amd64'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh release download $env:GITHUB_REF_NAME `
+            --repo $env:GITHUB_REPOSITORY `
+            --pattern 'hey_installer.ps1' `
+            --dir "$env:RUNNER_TEMP\verify"
+          if ($LASTEXITCODE -ne 0) { throw 'gh release download failed' }
+
+      # Both engines: confirms jsign's ps1 content-hash encoding matches what
+      # PowerShell computes, on Core and on Windows PowerShell 5.1.
+      - name: Verify installer signature (pwsh)
+        if: matrix.arch == 'amd64'
+        shell: pwsh
+        run: |
+          $sig = Get-AuthenticodeSignature "$env:RUNNER_TEMP\verify\hey_installer.ps1"
+          Write-Host "Installer status (pwsh): $($sig.Status) - $($sig.StatusMessage)"
+          if ($sig.Status -ne 'Valid') { exit 1 }
+
+      - name: Verify installer signature (Windows PowerShell 5.1)
+        if: matrix.arch == 'amd64'
+        shell: powershell
+        run: |
+          $sig = Get-AuthenticodeSignature "$env:RUNNER_TEMP\verify\hey_installer.ps1"
+          Write-Host "Installer status (powershell): $($sig.Status) - $($sig.StatusMessage)"
+          if ($sig.Status -ne 'Valid') { exit 1 }
 
   sync-skills:
     name: Sync skills

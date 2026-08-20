@@ -14,6 +14,16 @@ before:
     # after the release is already public. Prereleases and snapshots leave
     # stable metadata on the latest stable version.
     - sh -c '{{ if or .Prerelease .IsSnapshot }}echo "Skipping stable metadata check for {{ .Version }}"{{ else }}scripts/check-stable-metadata.sh {{ .Version }}{{ end }}'
+    # Authenticode-sign a copy of the PowerShell installer inside the pipeline
+    # so it lands in checksums.txt (cosign-signed, provenance-attested) and on
+    # the release as hey_installer.ps1. Staged outside dist/ because goreleaser
+    # requires dist to be empty after before-hooks run. Unsigned copy when the
+    # SM_* env is absent (forks, make test-release). Raw-main install.ps1 stays
+    # unsigned and LF -- that is the `irm | iex` path, which needs neither. The
+    # staging step converts to CRLF and rejects non-ASCII, without which
+    # PowerShell reports HashMismatch (see the script for why both invariants
+    # are load-bearing).
+    - sh -c 'scripts/stage-installer-ps1.sh scripts/install.ps1 .release-extra/hey_installer.ps1 && scripts/sign-windows.sh windows .release-extra/hey_installer.ps1'
 
 builds:
   - id: hey
@@ -38,11 +48,17 @@ builds:
       - -X github.com/basecamp/hey-cli/internal/version.Commit={{.Commit}}
       - -X github.com/basecamp/hey-cli/internal/version.Date={{.Date}}
     hooks:
-      # Size gate per binary, before anything is archived, signed or
-      # published. Report-only while .size-budget has enforce = false. The
-      # release workflow prints the consolidated table afterwards, so the
-      # per-binary run stays out of the job summary.
       post:
+        # Authenticode-sign Windows binaries in place before archiving, so the
+        # zip, checksums.txt, cosign bundle, and provenance attestation all
+        # cover the signed binary. No-op for non-windows targets and when the
+        # SM_* signing env is absent (forks, make test-release).
+        - cmd: scripts/sign-windows.sh "{{ .Target }}" "{{ .Path }}"
+          output: true
+        # Size gate per binary, after signing and before anything is archived
+        # or published. Report-only while .size-budget has enforce = false. The
+        # release workflow prints the consolidated table afterwards, so the
+        # per-binary run stays out of the job summary.
         - sh -c 'GITHUB_STEP_SUMMARY= scripts/check-size-budget.sh {{ .Path }}'
 
 archives:
@@ -61,6 +77,8 @@ archives:
 checksum:
   name_template: checksums.txt
   algorithm: sha256
+  extra_files:
+    - glob: .release-extra/hey_installer.ps1
 
 sboms:
   - artifacts: archive
@@ -109,6 +127,8 @@ release:
   prerelease: auto
   make_latest: "{{ if .Prerelease }}false{{ else }}auto{{ end }}"
   replace_existing_artifacts: true
+  extra_files:
+    - glob: .release-extra/hey_installer.ps1
   name_template: "{{.ProjectName}} v{{.Version}}"
   header: |
     ### Install
