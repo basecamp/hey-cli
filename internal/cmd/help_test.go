@@ -30,7 +30,7 @@ func TestCuratedCommandHelpUsesUserFacingLanguage(t *testing.T) {
 
 func TestEmailCommandHelpKeepsPostingAsAnInternalTerm(t *testing.T) {
 	root := newRootCmd()
-	for _, name := range []string{"boxes", "box", "labels", "label", "search", "seen", "unseen", "move", "trash", "spam", "ignore", "stop-ignoring"} {
+	for _, name := range []string{"boxes", "box", "labels", "label", "search", "seen", "unseen", "move", "trash", "spam", "ignore", "stop-ignoring", "watch"} {
 		t.Run(name, func(t *testing.T) {
 			command, _, err := root.Find([]string{name})
 			if err != nil {
@@ -112,6 +112,7 @@ EMAIL
   spam           Mark email threads as spam
   ignore         Ignore email threads
   stop-ignoring  Stop ignoring email threads
+  watch          Follow email threads as they change
 
 CALENDAR & TASKS
   calendars   List calendars

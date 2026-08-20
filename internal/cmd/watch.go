@@ -47,15 +47,15 @@ func newWatchCommand() *watchCommand {
 	watchCommand := &watchCommand{}
 	watchCommand.cmd = &cobra.Command{
 		Use:   "watch",
-		Short: "Print postings as they change, without polling",
-		Long: `Print postings as they change, one JSON object per line. Runs until interrupted.
+		Short: "Follow email threads as they change",
+		Long: `Print email threads as they change, one JSON object per line. Runs until interrupted.
 
 Changes can drive a command instead of being printed, and that is a choice between two
 behaviours: --run-async spawns the command per change and moves on, so a slow one never
 holds up the watch and two can overlap; --run-sync waits for each and runs them in order.
 Pass one or the other.`,
 		Annotations: map[string]string{
-			"agent_notes": "Long-running. Writes one JSON object per changed posting to stdout (NDJSON), not the usual envelope. Use --exit-on-first to block until one change lands and then exit.",
+			"agent_notes": "Long-running. Writes one JSON object per changed thread to stdout (NDJSON), not the usual envelope. Use --exit-on-first to block until one change lands and then exit.",
 		},
 		Example: `  hey watch
   hey watch --box imbox --events added
