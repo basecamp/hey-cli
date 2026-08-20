@@ -369,6 +369,29 @@ jobs:
             echo "::warning::Notarization not yet accepted for ${{ matrix.arch }} (ticket propagation may lag)"
           fi
 
+  # Not continue-on-error: a broken flake is a broken release artifact, so it
+  # must colour the run even though it lands after publication.
+  nix-verify:
+    name: Verify Nix flake
+    needs: [release]
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31.11.0
+
+      - name: Build and verify
+        run: |
+          STORE_PATH=$(nix build --no-link --print-out-paths)
+          "$STORE_PATH/bin/hey" --version
+
   sync-skills:
     name: Sync skills
     needs: [release]

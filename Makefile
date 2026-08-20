@@ -1,7 +1,7 @@
 .PHONY: build test test-unit test-e2e test-smoke preview-callback coverage fmt fmt-check vet lint tidy tidy-check \
 	race-test vuln secrets replace-check check-toolchain check security \
 	release-check release test-release bench bench-save bench-compare \
-	check-surface check-surface-compat check-lint-lockstep tools clean install help
+	check-surface check-surface-compat check-lint-lockstep update-nix-hash tools clean install help
 
 BINARY := $(CURDIR)/bin/hey
 COVERAGE_FLOOR ?= 70.8
@@ -52,6 +52,7 @@ help:
 	@echo ""
 	@echo "  make check-surface        Generate CLI surface snapshot"
 	@echo "  make check-surface-compat Compare surface against previous tag"
+	@echo "  make update-nix-hash      Recompute the Nix vendorHash via Docker"
 	@echo "  make tools                Install dev tools"
 
 # Toolchain guard — fails fast when PATH go and GOROOT go disagree
@@ -185,6 +186,15 @@ check-surface-compat: build
 			echo "Baseline ($$PREV_TAG) does not support --help --agent — skipping surface diff"; \
 		fi; \
 	fi
+
+# Recompute Nix vendorHash via Docker and update nix/package.nix.
+# 0 = updated, 2 = nothing to do. Anything else is a real failure and must
+# propagate: a blanket `|| true` here would silently undo the script's own
+# fail-closed check.
+update-nix-hash:
+	@VERSION=$$(sed -n 's/.*version = "\([^"]*\)".*/\1/p' nix/package.nix | head -1); \
+	scripts/update-nix-flake.sh "$$VERSION"; RC=$$?; \
+	if [ $$RC -ne 0 ] && [ $$RC -ne 2 ]; then exit $$RC; fi
 
 # Security suite
 security: lint vuln secrets

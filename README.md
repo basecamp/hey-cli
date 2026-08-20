@@ -69,6 +69,11 @@ scoop bucket add basecamp https://github.com/basecamp/homebrew-tap
 scoop install hey
 ```
 
+**Nix:**
+```bash
+nix profile install github:basecamp/hey-cli
+```
+
 **Go install:**
 ```bash
 go install github.com/basecamp/hey-cli/cmd/hey@latest
