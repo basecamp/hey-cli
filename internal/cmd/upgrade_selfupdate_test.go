@@ -1328,3 +1328,54 @@ func TestExtractZipRejectsOversizedMember(t *testing.T) {
 	err := extractZipMember(archive, "hey.exe", filepath.Join(t.TempDir(), "out.exe"))
 	assertErrorContains(t, err, "exceeds")
 }
+
+// A power loss between the swap and the backup's deletion must not leave a
+// truncated binary with nothing to recover from: the staged file is synced
+// before it is renamed over the target, and the directory entry is synced
+// before the backup goes.
+func TestNativeSelfUpdateSyncsBeforeDiscardingBackup(t *testing.T) {
+	f := setupNativeFlow(t, "1.0.0", "1.1.0")
+
+	var events []string
+	origFile, origDir := fileSyncer, dirSyncer
+	fileSyncer = func(file *os.File) error {
+		events = append(events, "sync-file "+file.Name())
+		return origFile(file)
+	}
+	dirSyncer = func(dir string) error {
+		events = append(events, "sync-dir "+dir)
+		return origDir(dir)
+	}
+	t.Cleanup(func() { fileSyncer, dirSyncer = origFile, origDir })
+	stubRenameFile(t, func(oldpath, newpath string) error {
+		events = append(events, "rename "+oldpath+" -> "+newpath)
+		return os.Rename(oldpath, newpath)
+	})
+	origRemove := removeFile
+	removeFile = func(path string) error {
+		events = append(events, "remove "+path)
+		return origRemove(path)
+	}
+	t.Cleanup(func() { removeFile = origRemove })
+
+	run := executeUpgradeCommand(t)
+	mustNoError(t, run.err)
+	assertFileContent(t, f.target, f.newContent)
+
+	index := func(prefix string) int {
+		for i, e := range events {
+			if strings.HasPrefix(e, prefix) {
+				return i
+			}
+		}
+		t.Fatalf("no %q event in %q", prefix, events)
+		return -1
+	}
+	syncFile := index("sync-file " + filepath.Join(filepath.Dir(f.target), upgradeStagePrefix))
+	install := index("rename " + filepath.Join(filepath.Dir(f.target), upgradeStagePrefix))
+	syncDir := index("sync-dir " + filepath.Dir(f.target))
+	remove := index("remove " + f.target + ".old-")
+	if !(syncFile < install && install < syncDir && syncDir < remove) {
+		t.Errorf("want staged sync < install rename < dir sync < backup removal, got %q", events)
+	}
+}

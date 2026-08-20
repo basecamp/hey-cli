@@ -65,6 +65,8 @@ var (
 	linkFile                 = os.Link
 	renameFile               = os.Rename
 	removeFile               = os.Remove
+	fileSyncer               = (*os.File).Sync
+	dirSyncer                = syncDirectory
 	upgradeLocker            = acquireUpgradeLock
 	selfUpdateHTTPClient     = &http.Client{Timeout: 5 * time.Minute}
 )
@@ -597,15 +599,20 @@ func extractZipMember(archivePath, member, dest string) error {
 	return nil
 }
 
-// writeExtractedFile copies r to dest, capped at maxBinaryBytes. The reader is
-// bounded by io.LimitReader, which is the decompression-bomb guard gosec's
-// G110 looks for around io.Copy.
+// writeExtractedFile copies r to dest, capped at maxBinaryBytes, and fsyncs
+// it: the staged file is renamed over the installed binary and the backup
+// deleted on the strength of its contents, so they must be on disk and not
+// only in the page cache. The reader is bounded by io.LimitReader, which is
+// the decompression-bomb guard gosec's G110 looks for around io.Copy.
 func writeExtractedFile(dest string, r io.Reader) error {
 	f, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o755) //nolint:gosec // G302: it's the executable being installed
 	if err != nil {
 		return err
 	}
 	n, err := io.Copy(f, io.LimitReader(r, maxBinaryBytes+1)) //nolint:gosec // G110: bounded by LimitReader and checked below
+	if err == nil {
+		err = fileSyncer(f) // the bytes must be durable before the rename makes them the binary
+	}
 	if closeErr := f.Close(); err == nil {
 		err = closeErr
 	}
@@ -619,7 +626,10 @@ func writeExtractedFile(dest string, r io.Reader) error {
 }
 
 // replaceExecutable swaps staged into place at target, returning the path of
-// the preserved previous binary. The target path is continuously occupied on
+// the preserved previous binary. The directory is fsynced after the rename so
+// the new entry is durable before the caller discards the backup; a failed
+// directory sync is not fatal (Windows has no equivalent, and the staged
+// file's own contents were synced at extraction). The target path is continuously occupied on
 // unix: the old inode is preserved via hard link (or a synced copy when the
 // filesystem refuses links) and a single rename-over installs the new binary.
 // On Windows a loaded exe cannot be renamed over, so the running exe moves to
@@ -641,6 +651,7 @@ func replaceExecutable(goos, target, staged string) (string, error) {
 			}
 			return "", fmt.Errorf("install new binary: %w", err)
 		}
+		_ = dirSyncer(filepath.Dir(target))
 		return backup, nil
 	}
 
@@ -654,6 +665,7 @@ func replaceExecutable(goos, target, staged string) (string, error) {
 		_ = os.Remove(backup)
 		return "", fmt.Errorf("install new binary: %w", err)
 	}
+	_ = dirSyncer(filepath.Dir(target))
 	return backup, nil
 }
 
@@ -762,6 +774,20 @@ func copyFileSync(src, dst string) error {
 		return err
 	}
 	return nil
+}
+
+// syncDirectory fsyncs a directory so renames within it are durable. Windows
+// cannot open a directory for syncing; the error is the caller's to ignore.
+func syncDirectory(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	err = d.Sync()
+	if closeErr := d.Close(); err == nil {
+		err = closeErr
+	}
+	return err
 }
 
 // probeBinaryVersion runs `path --version` and returns the reported semantic
