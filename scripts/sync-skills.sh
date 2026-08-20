@@ -7,13 +7,17 @@ set -euo pipefail
 #   SKILLS_TOKEN  - GitHub token with push access to basecamp/skills (required unless DRY_RUN=local)
 #   RELEASE_TAG   - Release tag, e.g. v1.2.3 (required)
 #   SOURCE_SHA    - Source commit SHA (required)
+#   SKILLS_SOURCE - Optional: directory holding the skills tree (default: skills)
 #   DRY_RUN       - Optional: "local" (no network) or "remote" (clone but skip push)
 
 RELEASE_TAG="${RELEASE_TAG:?RELEASE_TAG is required}"
 SOURCE_SHA="${SOURCE_SHA:?SOURCE_SHA is required}"
 DRY_RUN="${DRY_RUN:-}"
 
-SKILLS_SOURCE="skills"
+# The skills tree to mirror. The manual recovery workflow (sync-skills.yml)
+# points this at a separate checkout of the release tag, so the sync logic can
+# come from a newer ref (with fixes) than the content it mirrors.
+SKILLS_SOURCE="${SKILLS_SOURCE:-skills}"
 TARGET_REPO="basecamp/skills"
 TARGET_BRANCH="main"
 SKILLS_SUBDIR="skills"

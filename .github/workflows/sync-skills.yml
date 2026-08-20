@@ -63,11 +63,22 @@ jobs:
             exit 1
           fi
 
-      # Check out the tag itself, not main: the sync must mirror the skills tree
-      # as it was released, even if main has moved on since.
+      # Two checkouts: sync logic from the dispatching ref, skills content from
+      # the release tag. A defect in scripts/sync-skills.sh is one of the ways
+      # the automatic sync fails, and running the tagged copy here would just
+      # re-run the defective script — recovery must be able to run a fix merged
+      # to main without cutting a new tag.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The content still mirrors the skills tree as it was released, even if
+      # main has moved on since: SKILLS_SOURCE points the script at this
+      # checkout.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.tag }}
+          path: release
           persist-credentials: false
 
       # Needed for dry runs too: the honest preview clones the target, so it
@@ -84,12 +95,12 @@ jobs:
           permission-contents: ${{ inputs.dry_run && 'read' || 'write' }}
           permission-pull-requests: ${{ inputs.dry_run && 'read' || 'write' }}
 
-      # github.sha is the dispatching ref's SHA (main), not the tag's, so resolve
-      # the commit actually checked out — otherwise the sync records the wrong
-      # provenance for the release it claims to mirror.
+      # github.sha is the dispatching ref's SHA (main), not the tag's, so
+      # resolve the tagged commit from its own checkout — otherwise the sync
+      # records the wrong provenance for the release it claims to mirror.
       - name: Resolve the tagged commit
         id: source
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        run: echo "sha=$(git -C release rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       # DRY_RUN=remote clones the actual target and stops before the push, so
       # the preview shows the real diff including deletions.
@@ -98,5 +109,6 @@ jobs:
           SKILLS_TOKEN: ${{ steps.skills-token.outputs.token }}
           RELEASE_TAG: ${{ inputs.tag }}
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          SKILLS_SOURCE: release/skills
           DRY_RUN: ${{ inputs.dry_run && 'remote' || '' }}
         run: scripts/sync-skills.sh

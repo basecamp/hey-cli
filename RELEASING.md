@@ -174,7 +174,10 @@ account, store the private key as `AUR_KEY`.
 Stable releases mirror `skills/` into `basecamp/skills`. If that job fails, a
 `skills-sync`-labeled issue is filed; recover with the `Sync skills` workflow
 (`workflow_dispatch`, stable tag, optional dry run). It refuses anything but the
-latest stable release so it cannot roll the distribution repo back.
+latest stable release so it cannot roll the distribution repo back, and it runs
+the sync script from the dispatching branch against the tag's skills tree — so
+when the failure was a defect in `sync-skills.sh` itself, merge the fix to main
+and dispatch; no new release needed.
 
 ## Local dry runs
 
