@@ -46,12 +46,13 @@ Sign in now?" → OAuth → the command continues); piped, machine-output or dec
 login`, `hey auth logout`, `hey auth status`), the `hey login`/`hey logout` shortcuts,
 `hey setup` and `hey doctor` work without authentication.
 
-Bare `hey` at an interactive terminal routes on auth state: logged out runs the setup wizard
+Bare `hey` at an interactive terminal runs the setup wizard when logged out
 (`runSetupWizard` in `internal/cmd/setup.go` — welcome, OAuth sign-in, linked-account
-greeting, coding-agent setup, summary) and stops at the summary; logged in opens the TUI.
-`config.json`'s `onboarded` flag only trims a later logged-out run to the sign-in step.
-Without a terminal, or with any machine-output flag, bare `hey` prints help. `HEY_NONINTERACTIVE=1`
-disables every prompt regardless of TTY detection.
+greeting, coding-agent setup, summary) and stops at the summary; in every other case it
+prints help. The TUI lives at `hey tui` (plus the hidden `hey hey`). `config.json`'s
+`onboarded` flag only trims a later logged-out run to the sign-in step. `HEY_NONINTERACTIVE=1`
+disables every prompt regardless of TTY detection: the wizard skips OAuth and answers its
+own confirmations with their defaults.
 
 Coding-agent integration lives in `internal/harness` (agent registry, Claude Code / Codex
 detection, plugin and skill health checks) and `internal/cmd/setup_agent*.go` (`hey setup

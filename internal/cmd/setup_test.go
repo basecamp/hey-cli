@@ -335,3 +335,106 @@ func TestShowWizardSuccessText(t *testing.T) {
 		t.Errorf("skipped summary:\n%s", out.String())
 	}
 }
+
+func stubStdinTerminal(t *testing.T, isTerminal bool) {
+	t.Helper()
+	orig := stdinIsTerminal
+	stdinIsTerminal = func() bool { return isTerminal }
+	t.Cleanup(func() { stdinIsTerminal = orig })
+}
+
+func stubConfirmAgentSetup(t *testing.T, answer bool, err error) *int {
+	t.Helper()
+	calls := 0
+	orig := confirmAgentSetup
+	confirmAgentSetup = func() (bool, error) {
+		calls++
+		return answer, err
+	}
+	t.Cleanup(func() { confirmAgentSetup = orig })
+	return &calls
+}
+
+// HEY_NONINTERACTIVE must disable every wizard interaction even on a real
+// PTY: no agent-setup prompt (the default answer applies) and no OAuth wait.
+func TestSetupStyledNonInteractiveNeverPromptsNorSignsIn(t *testing.T) {
+	isolateAgents(t)
+	stubStdinTerminal(t, true) // a PTY — but HEY_NONINTERACTIVE wins
+	t.Setenv("HEY_NONINTERACTIVE", "1")
+	confirms := stubConfirmAgentSetup(t, false, nil)
+	server := quietServer(t)
+	configHome := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(configHome, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	origColor := colorDisabled
+	colorDisabled = true
+	t.Cleanup(func() { colorDisabled = origColor })
+
+	stdout, _, err := runAuthCommand(t, configHome, server.URL, "", false, "setup", "--styled")
+	if err != nil {
+		t.Fatalf("setup --styled: %v", err)
+	}
+	if *confirms != 0 {
+		t.Errorf("the agent-setup prompt ran %d times with HEY_NONINTERACTIVE=1", *confirms)
+	}
+	// No OAuth wait: the run completed and reported the missing login.
+	if !strings.Contains(stdout, "Setup finished") || !strings.Contains(stdout, "Not logged in") {
+		t.Errorf("expected an incomplete summary, got:\n%s", stdout)
+	}
+	// The agent step proceeded with the prompt's default answer.
+	if _, err := os.Stat(filepath.Join(configHome, ".agents", "skills", "hey", "SKILL.md")); err != nil {
+		t.Errorf("agent step should auto-proceed without a prompt: %v", err)
+	}
+}
+
+// The interactive path still prompts, and declining skips the agent step.
+func TestSetupStyledInteractiveDeclineSkipsAgents(t *testing.T) {
+	isolateAgents(t)
+	stubInteractive(t, true)
+	confirms := stubConfirmAgentSetup(t, false, nil)
+	server := identityServer(t)
+	configHome := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(configHome, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "session-cookie"); err != nil {
+		t.Fatalf("auth login: %v", err)
+	}
+
+	origColor := colorDisabled
+	colorDisabled = true
+	t.Cleanup(func() { colorDisabled = origColor })
+
+	stdout, _, err := runAuthCommand(t, configHome, server.URL, "", false, "setup", "--styled")
+	if err != nil {
+		t.Fatalf("setup --styled: %v", err)
+	}
+	if *confirms != 1 {
+		t.Errorf("prompt ran %d times, want 1", *confirms)
+	}
+	if !strings.Contains(stdout, "You can set up agents later:") || !strings.Contains(stdout, "Coding agent setup skipped") {
+		t.Errorf("declined setup should skip:\n%s", stdout)
+	}
+	if _, err := os.Stat(filepath.Join(configHome, ".agents", "skills", "hey", "SKILL.md")); !os.IsNotExist(err) {
+		t.Error("declined setup must not install the skill")
+	}
+}
+
+// Machine output plus HEY_NONINTERACTIVE on a terminal must not start OAuth.
+func TestSetupJSONNonInteractiveEnvSkipsSignIn(t *testing.T) {
+	isolateAgents(t)
+	stubStdinTerminal(t, true)
+	t.Setenv("HEY_NONINTERACTIVE", "1")
+	server := quietServer(t)
+
+	_, response, err := runAuthCommand(t, t.TempDir(), server.URL, "", true, "setup")
+	if err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	data := wizardData(t, response)
+	if data["status"] != "incomplete" {
+		t.Errorf("status = %v, want incomplete", data["status"])
+	}
+}

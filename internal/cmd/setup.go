@@ -83,6 +83,11 @@ type setupWizard struct {
 	outcome agentSetupOutcome
 }
 
+// confirmAgentSetup is the wizard's one prompt, a seam so tests can answer it.
+var confirmAgentSetup = func() (bool, error) {
+	return tui.Confirm("  Set up HEY for your coding agents?", true)
+}
+
 // runSetupWizard is the entry point shared by `hey setup` and bare `hey`.
 func runSetupWizard(cmd *cobra.Command, opts wizardOptions) error {
 	wizard := &setupWizard{
@@ -135,13 +140,17 @@ func (s *setupWizard) welcome(w io.Writer) {
 	fmt.Fprintln(w)
 }
 
-// signIn makes sure we are authenticated. Reports whether we are: a styled
-// run always signs in (or fails); a machine run signs in only when stdin is a
-// terminal to type into, and otherwise reports "not logged in" so a piped
-// `hey setup --json` never hangs waiting for a browser.
+// signIn makes sure we are authenticated. Reports whether we are. Sign-in
+// runs only when somebody can see it through: stdin is a terminal and
+// HEY_NONINTERACTIVE is not engaged. Otherwise — a piped `hey setup --json`,
+// an agent harness on a pseudo-terminal — it reports "not logged in" instead
+// of parking a six-minute browser wait.
 func (s *setupWizard) signIn() (bool, error) {
 	if authMgr.IsAuthenticated() {
 		return true, nil
+	}
+	if !canSignInInteractively() {
+		return false, nil
 	}
 
 	if s.styled {
@@ -155,13 +164,17 @@ func (s *setupWizard) signIn() (bool, error) {
 		return true, nil
 	}
 
-	if !stdinIsTerminal() {
-		return false, nil
-	}
 	if err := loginInteractively(s.cmd.ErrOrStderr()); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+// canSignInInteractively reports whether the OAuth flow may start: a human on
+// stdin, prompts not disabled. Deliberately looser than interactiveStdio() —
+// `hey setup --json` from a terminal still signs in, with progress on stderr.
+func canSignInInteractively() bool {
+	return stdinIsTerminal() && !config.NonInteractiveEnv()
 }
 
 // loginInteractively runs the OAuth flow with progress on out, then selects
@@ -291,18 +304,24 @@ func (s *setupWizard) setupAgents() agentSetupOutcome {
 		}
 		fmt.Fprintln(w)
 
-		install, confirmErr := tui.Confirm("  Set up HEY for your coding agents?", true)
-		if confirmErr != nil || !install {
-			fmt.Fprintln(w, muted.format("  You can set up agents later:"))
-			for _, a := range agents {
-				if _, ok := agentSetupHandlers[a.ID]; ok {
-					fmt.Fprintln(w, bold.format("    hey setup "+a.ID))
+		// The prompt runs only when it can be answered: styled output alone
+		// does not prove a human (HEY_NONINTERACTIVE on a PTY, --styled while
+		// piped). Without one, proceed with the prompt's default answer —
+		// exactly what the machine-mode wizard does.
+		if interactiveStdio() {
+			install, confirmErr := confirmAgentSetup()
+			if confirmErr != nil || !install {
+				fmt.Fprintln(w, muted.format("  You can set up agents later:"))
+				for _, a := range agents {
+					if _, ok := agentSetupHandlers[a.ID]; ok {
+						fmt.Fprintln(w, bold.format("    hey setup "+a.ID))
+					}
 				}
+				fmt.Fprintln(w)
+				// Skipped carries the snapshot for the checklist but records no
+				// issues, so a deliberate skip stays "complete".
+				return agentSetupOutcome{Skipped: true, Checks: preChecks}
 			}
-			fmt.Fprintln(w)
-			// Skipped carries the snapshot for the checklist but records no
-			// issues, so a deliberate skip stays "complete".
-			return agentSetupOutcome{Skipped: true, Checks: preChecks}
 		}
 		fmt.Fprintln(w)
 	}
