@@ -98,8 +98,19 @@ Press Shift+O to open Contacts. Use Enter to view a contact, `a` to add, `e` to 
 
 ## CLI Commands
 
-All commands support `--json` for raw JSON output, `--base-url` to override the server URL,
-and `--account <id|all>` to select a linked mail account.
+Structured data commands support `--json` for full output and `--jq '<expression>'` to
+filter that output without an external `jq` binary. `--jq` implies `--json` and filters
+the full success envelope; combine it with `--quiet` to filter result data directly.
+Errors retain their complete structured envelope. Commands with dedicated raw output
+(`auth token`, `completion`, `skill`, `tui`, and `--version`) reject `--jq`.
+
+Use `--base-url` to override the server URL and `--account <id|all>` to select a linked
+mail account.
+
+```bash
+hey boxes --jq '.data[] | {id, name}'
+hey boxes --quiet --jq '.[].id'
+```
 
 ### Email
 

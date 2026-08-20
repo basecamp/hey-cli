@@ -104,6 +104,7 @@ func renderRootHelp(w io.Writer, cmd *cobra.Command) {
 	flags := []flagEntry{
 		{"", "--account", "Select a linked mail account ID or all"},
 		{"", "--json", "Output JSON with metadata"},
+		{"", "--jq", "Filter JSON with a built-in jq expression"},
 		{"", "--markdown", "Output as Markdown"},
 		{"", "--quiet", "Output result data only"},
 		{"-v", "--verbose", "Show request details"},

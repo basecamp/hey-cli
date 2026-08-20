@@ -98,11 +98,21 @@ CLI for HEY: mailboxes, email threads, contacts, replies, compose, calendars, to
 
 **MUST follow these rules:**
 
-1. **Always use `--json`** for structured, predictable output
+1. **Choose the right structured output** — use `--jq '<expression>'` to filter or extract fields and `--json` for the full response. Never pipe to an external `jq`; `--jq` is built in and implies `--json`.
 2. **Authentication required** for all data commands — run `hey auth login` first
 3. **HTML output** is available via `--html` for commands that return HTML content
 4. **Linked mail accounts share one login** — use `hey accounts list --json`, then `--account <id|all>` when a task must target one account
 5. **Local HEY configuration requires human trust** — never run `hey config trust-local` without the user's explicit approval
+
+## Output Filtering
+
+`--jq` filters the full JSON success envelope, so result data is under `.data`. String results print as plain text; objects and arrays print as formatted JSON. Use `--quiet --jq` when the expression should run against result data directly. Errors retain their complete structured envelope. Commands with dedicated raw output (`auth token`, `completion`, `skill`, `tui`, and `--version`) reject `--jq`.
+
+```bash
+hey boxes --jq '.data[] | {id, name}'
+hey search "quarterly planning" --jq '.data[].id'
+hey boxes --quiet --jq '.[].name'
+```
 
 ## Quick Reference
 
@@ -355,7 +365,7 @@ hey calendars --json                          # List calendars (returns array of
 hey recordings 123 --json                     # List events in calendar
 ```
 
-**Response format:** `hey recordings` returns recordings grouped by type (e.g. `{"Calendar::Event": [...], "Calendar::Habit": [...], "Calendar::Todo": [...]}`). Each recording has: `id`, `title`, `starts_at`, `ends_at`, `all_day`, `recurring`, `starts_at_time_zone`. Access by type key in jq, e.g. `.["Calendar::Event"]`.
+**Response format:** `hey recordings` returns recordings grouped by type (e.g. `{"Calendar::Event": [...], "Calendar::Habit": [...], "Calendar::Todo": [...]}`). Each recording has: `id`, `title`, `starts_at`, `ends_at`, `all_day`, `recurring`, `starts_at_time_zone`. Access a type with the built-in filter, e.g. `hey recordings 123 --quiet --jq '.["Calendar::Event"]'`.
 
 ### Todos
 

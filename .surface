@@ -5,12 +5,14 @@ hey --base-url
 hey --count
 hey --html
 hey --ids-only
+hey --jq
 hey --json
 hey --markdown
 hey --quiet
 hey --stats
 hey --styled
 hey --verbose
+hey --version
 hey accounts
 hey accounts list
 hey accounts use

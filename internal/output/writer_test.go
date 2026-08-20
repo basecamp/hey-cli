@@ -53,6 +53,199 @@ func TestWriterOK_Quiet(t *testing.T) {
 	}
 }
 
+func TestWriterOK_JQFiltersEnvelope(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatJSON, Stdout: &buf, JQFilter: ".data.name"})
+
+	if err := w.OK(map[string]any{"name": "Jane"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := buf.String(); got != "Jane\n" {
+		t.Errorf("expected scalar text, got %q", got)
+	}
+}
+
+func TestWriterOK_JQFiltersQuietData(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatQuiet, Stdout: &buf, JQFilter: ".[0].id"})
+
+	if err := w.OK([]map[string]any{{"id": 42}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := buf.String(); got != "42\n" {
+		t.Errorf("expected data-only result, got %q", got)
+	}
+}
+
+func TestWriterOK_JQFormatsObjectsAndArrays(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatJSON, Stdout: &buf, JQFilter: ".data"})
+
+	if err := w.OK(map[string]any{"names": []string{"Jane", "Lin"}}); err != nil {
+		t.Fatal(err)
+	}
+	const expected = "{\n  \"names\": [\n    \"Jane\",\n    \"Lin\"\n  ]\n}\n"
+	if got := buf.String(); got != expected {
+		t.Errorf("expected formatted JSON:\n%s\ngot:\n%s", expected, got)
+	}
+}
+
+func TestWriterOK_JQWritesMultipleAndEmptyResults(t *testing.T) {
+	t.Run("multiple", func(t *testing.T) {
+		var buf bytes.Buffer
+		w := New(Options{Format: FormatJSON, Stdout: &buf, JQFilter: ".data[].name"})
+		if err := w.OK([]map[string]any{{"name": "Jane"}, {"name": "Lin"}}); err != nil {
+			t.Fatal(err)
+		}
+		if got := buf.String(); got != "Jane\nLin\n" {
+			t.Errorf("unexpected results: %q", got)
+		}
+	})
+
+	t.Run("empty", func(t *testing.T) {
+		var buf bytes.Buffer
+		w := New(Options{Format: FormatJSON, Stdout: &buf, JQFilter: ".data[] | select(.active)"})
+		if err := w.OK([]map[string]any{{"active": false}}); err != nil {
+			t.Fatal(err)
+		}
+		if got := buf.String(); got != "" {
+			t.Errorf("expected no output, got %q", got)
+		}
+	})
+}
+
+func TestWriterOK_JQPreservesLargeIntegers(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatJSON, Stdout: &buf, JQFilter: ".data.id"})
+
+	if err := w.OK(map[string]any{"id": json.Number("1234567890123456789")}); err != nil {
+		t.Fatal(err)
+	}
+	if got := buf.String(); got != "1234567890123456789\n" {
+		t.Errorf("integer precision changed: %q", got)
+	}
+}
+
+func TestWriterOK_JQUsesEnvironmentVariables(t *testing.T) {
+	t.Setenv("HEY_JQ_TEST_NAME", "Jane")
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatJSON, Stdout: &buf, JQFilter: "env.HEY_JQ_TEST_NAME"})
+
+	if err := w.OK(nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := buf.String(); got != "Jane\n" {
+		t.Errorf("expected environment value, got %q", got)
+	}
+}
+
+func TestWriterOK_JQReportsExpressionErrors(t *testing.T) {
+	t.Run("invalid", func(t *testing.T) {
+		w := New(Options{Format: FormatJSON, Stdout: &bytes.Buffer{}, JQFilter: ".[invalid"})
+		err := w.OK(nil)
+		if err == nil || !strings.Contains(err.Error(), "invalid --jq expression") {
+			t.Fatalf("expected validation error, got %v", err)
+		}
+		if AsError(err).Code != "usage" {
+			t.Errorf("expected usage code, got %q", AsError(err).Code)
+		}
+	})
+
+	t.Run("runtime", func(t *testing.T) {
+		w := New(Options{Format: FormatJSON, Stdout: &bytes.Buffer{}, JQFilter: ".data.id[]"})
+		err := w.OK(map[string]any{"id": 42})
+		if err == nil || !strings.Contains(err.Error(), "jq filter error") {
+			t.Fatalf("expected runtime error, got %v", err)
+		}
+		if AsError(err).Code != "usage" {
+			t.Errorf("expected usage code, got %q", AsError(err).Code)
+		}
+	})
+}
+
+func TestWriterErr_JQKeepsErrorEnvelope(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatJSON, Stderr: &buf, JQFilter: ".data.id"})
+
+	w.Err(ErrNotFound("topic", "123"))
+
+	var resp ErrorResponse
+	if err := json.Unmarshal(buf.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid error JSON: %v", err)
+	}
+	if resp.Code != "not_found" {
+		t.Errorf("expected unfiltered error, got %#v", resp)
+	}
+}
+
+func TestWriterJQSanitizesTerminalResults(t *testing.T) {
+	const unsafe = "safe\x1b]8;;https://example.com\x07link\x1b]8;;\x07\u009b31m!"
+
+	t.Run("string", func(t *testing.T) {
+		var buf bytes.Buffer
+		w := New(Options{Stdout: &buf})
+		if err := w.writeJQResult(unsafe, true); err != nil {
+			t.Fatal(err)
+		}
+		if got := buf.String(); got != "safelink31m!\n" {
+			t.Errorf("unexpected sanitized string: %q", got)
+		}
+	})
+
+	t.Run("compound", func(t *testing.T) {
+		var buf bytes.Buffer
+		w := New(Options{Stdout: &buf})
+		if err := w.writeJQResult(map[string]any{unsafe: []any{unsafe}}, true); err != nil {
+			t.Fatal(err)
+		}
+		if strings.ContainsAny(buf.String(), "\x1b\u009b") {
+			t.Errorf("terminal controls remain in compound output: %q", buf.String())
+		}
+		if !strings.Contains(buf.String(), `"safelink31m!"`) {
+			t.Errorf("sanitized value missing: %q", buf.String())
+		}
+	})
+
+	t.Run("key collisions preserve every field", func(t *testing.T) {
+		var buf bytes.Buffer
+		w := New(Options{Stdout: &buf})
+		input := map[string]any{
+			"title":            "clean",
+			"\\u001b[31mtitle": "literal",
+			"\x1b[31mtitle":    "escaped",
+		}
+		if err := w.writeJQResult(input, true); err != nil {
+			t.Fatal(err)
+		}
+		var result map[string]any
+		if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		if len(result) != len(input) {
+			t.Fatalf("sanitization dropped a field: %#v", result)
+		}
+		if result["title"] != "clean" || result["\\u001b[31mtitle"] != "literal" {
+			t.Errorf("sanitization replaced a clean field: %#v", result)
+		}
+		for key := range result {
+			if strings.ContainsRune(key, '\x1b') {
+				t.Errorf("terminal escape remains in key %q", key)
+			}
+		}
+	})
+
+	t.Run("pipe preserves bytes", func(t *testing.T) {
+		var buf bytes.Buffer
+		w := New(Options{Stdout: &buf})
+		if err := w.writeJQResult(unsafe, false); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.TrimSuffix(buf.String(), "\n"); got != unsafe {
+			t.Errorf("piped bytes changed: %q", got)
+		}
+	})
+}
+
 func TestWriterOK_Count(t *testing.T) {
 	var buf bytes.Buffer
 	w := New(Options{Format: FormatCount, Stdout: &buf})

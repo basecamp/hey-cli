@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
+	"github.com/itchyny/gojq"
 	"golang.org/x/term"
 )
 
@@ -26,13 +28,15 @@ const (
 )
 
 type Options struct {
-	Format Format
-	Stdout io.Writer
-	Stderr io.Writer
+	Format   Format
+	Stdout   io.Writer
+	Stderr   io.Writer
+	JQFilter string
 }
 
 type Writer struct {
 	opts Options
+	jq   *gojq.Code
 }
 
 func New(opts Options) *Writer {
@@ -42,7 +46,11 @@ func New(opts Options) *Writer {
 	if opts.Stderr == nil {
 		opts.Stderr = os.Stderr
 	}
-	return &Writer{opts: opts}
+	w := &Writer{opts: opts}
+	if opts.JQFilter != "" {
+		w.jq, _ = compileJQ(opts.JQFilter)
+	}
+	return w
 }
 
 func (w *Writer) EffectiveFormat() Format {
@@ -61,6 +69,16 @@ func (w *Writer) IsStyled() bool {
 
 func (w *Writer) OK(data any, opts ...ResponseOption) error {
 	format := w.EffectiveFormat()
+	if w.opts.JQFilter != "" {
+		resp := Response{OK: true, Data: data}
+		for _, opt := range opts {
+			opt(&resp)
+		}
+		if format == FormatQuiet {
+			return w.writeJQ(resp.Data)
+		}
+		return w.writeJQ(resp)
+	}
 
 	switch format {
 	case FormatQuiet:
@@ -109,6 +127,133 @@ func (w *Writer) writeJSON(data any, opts ...ResponseOption) error {
 	enc := json.NewEncoder(w.opts.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(resp)
+}
+
+func (w *Writer) writeJQ(target any) error {
+	code := w.jq
+	if code == nil {
+		var err error
+		code, err = compileJQ(w.opts.JQFilter)
+		if err != nil {
+			return ErrJQValidation(err)
+		}
+	}
+
+	raw, err := json.Marshal(target)
+	if err != nil {
+		return ErrJQRuntime(fmt.Errorf("encode input: %w", err))
+	}
+	input, err := NormalizeJSONNumbers(raw)
+	if err != nil {
+		return ErrJQRuntime(fmt.Errorf("decode input: %w", err))
+	}
+
+	iter := code.Run(input)
+	for {
+		result, ok := iter.Next()
+		if !ok {
+			return nil
+		}
+		if err, ok := result.(error); ok {
+			return ErrJQRuntime(err)
+		}
+		if err := w.writeJQResult(result, isTTY(w.opts.Stdout)); err != nil {
+			return err
+		}
+	}
+}
+
+func (w *Writer) writeJQResult(result any, tty bool) error {
+	if tty {
+		result = sanitizeJSONValue(result)
+	}
+	if text, ok := result.(string); ok {
+		_, err := fmt.Fprintln(w.opts.Stdout, text)
+		return err
+	}
+
+	raw, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return ErrJQRuntime(fmt.Errorf("encode result: %w", err))
+	}
+	_, err = fmt.Fprintln(w.opts.Stdout, string(raw))
+	return err
+}
+
+func compileJQ(filter string) (*gojq.Code, error) {
+	query, err := gojq.Parse(filter)
+	if err != nil {
+		return nil, err
+	}
+	return gojq.Compile(query, gojq.WithEnvironLoader(os.Environ))
+}
+
+// ValidateJQFilter confirms that a built-in jq expression is ready to run.
+func ValidateJQFilter(filter string) error {
+	if filter == "" {
+		return nil
+	}
+	if _, err := compileJQ(filter); err != nil {
+		return ErrJQValidation(err)
+	}
+	return nil
+}
+
+func sanitizeJSONValue(value any) any {
+	switch value := value.(type) {
+	case string:
+		return sanitizeTerminal(value)
+	case []any:
+		result := make([]any, len(value))
+		for i, item := range value {
+			result[i] = sanitizeJSONValue(item)
+		}
+		return result
+	case map[string]any:
+		return sanitizeJSONMap(value)
+	default:
+		return value
+	}
+}
+
+func sanitizeJSONMap(value map[string]any) map[string]any {
+	result := make(map[string]any, len(value))
+	var changed []string
+	for key, item := range value {
+		if sanitizeTerminal(key) == key {
+			result[key] = sanitizeJSONValue(item)
+		} else {
+			changed = append(changed, key)
+		}
+	}
+
+	sort.Strings(changed)
+	for _, key := range changed {
+		quoted := strconv.Quote(key)
+		name := quoted[1 : len(quoted)-1]
+		for {
+			if _, exists := result[name]; !exists {
+				break
+			}
+			name = strconv.Quote(name)
+		}
+		result[name] = sanitizeJSONValue(value[key])
+	}
+	return result
+}
+
+func sanitizeTerminal(value string) string {
+	value = ansi.Strip(value)
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r == '\n' || r == '\t':
+			return r
+		case r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f):
+			return -1
+		default:
+			return r
+		}
+	}, value)
 }
 
 func (w *Writer) writeQuiet(data any) error {

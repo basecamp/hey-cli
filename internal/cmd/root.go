@@ -29,6 +29,8 @@ var (
 	styledFlag  bool
 	agentFlag   bool
 	statsFlag   bool
+	jqFlag      string
+	versionFlag bool
 	verboseFlag int
 	baseURL     string
 	accountFlag string
@@ -54,12 +56,22 @@ func newRootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			format := output.FormatFromFlags(jsonFlag, quietFlag, idsOnly, countFlag, markdownF, styledFlag, agentFlag)
+			format := output.FormatFromFlags(jsonFlag || jqFlag != "", quietFlag, idsOnly, countFlag, markdownF, styledFlag, agentFlag)
 			writer = output.New(output.Options{
-				Format: format,
-				Stdout: cmd.OutOrStdout(),
-				Stderr: cmd.ErrOrStderr(),
+				Format:   format,
+				Stdout:   cmd.OutOrStdout(),
+				Stderr:   cmd.ErrOrStderr(),
+				JQFilter: jqFlag,
 			})
+			if versionFlag {
+				if jqFlag != "" {
+					return output.ErrJQNotSupported("the version command")
+				}
+				return nil
+			}
+			if err := validateJQFlags(cmd, jqFlag, idsOnly, countFlag); err != nil {
+				return err
+			}
 
 			var err error
 			cfg, err = config.Load()
@@ -101,6 +113,10 @@ func newRootCmd() *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if versionFlag {
+				fmt.Fprintf(cmd.OutOrStdout(), "hey version %s\n", version.Version)
+				return nil
+			}
 			if !stdinIsTerminal() || !stdoutIsTerminal() {
 				return cmd.Help()
 			}
@@ -126,9 +142,8 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().StringVar(&accountFlag, "account", "", "Select a linked mail account ID or all")
 	root.PersistentFlags().CountVarP(&verboseFlag, "verbose", "v", "Show request details")
 	root.PersistentFlags().BoolVar(&statsFlag, "stats", false, "Include request stats in response meta")
-
-	root.Version = version.Version
-	root.SetVersionTemplate("hey version {{.Version}}\n")
+	root.PersistentFlags().StringVar(&jqFlag, "jq", "", "Filter JSON with a built-in jq expression")
+	root.Flags().BoolVar(&versionFlag, "version", false, "Show version")
 
 	// Override help with styled categories and curated flags
 	root.SetHelpFunc(customHelpFunc(root.HelpFunc()))
@@ -191,7 +206,8 @@ func Execute() {
 		err = normalizeCobraError(err)
 		if writer == nil {
 			writer = output.New(output.Options{
-				Format: output.FormatFromFlags(jsonFlag, quietFlag, idsOnly, countFlag, markdownF, styledFlag, agentFlag),
+				Format:   output.FormatFromFlags(jsonFlag || jqFlag != "", quietFlag, idsOnly, countFlag, markdownF, styledFlag, agentFlag),
+				JQFilter: jqFlag,
 			})
 		}
 		if writer.IsStyled() && strings.HasPrefix(err.Error(), "Usage:") {
@@ -200,6 +216,36 @@ func Execute() {
 		}
 		writer.Err(err)
 		os.Exit(output.ExitCodeFor(err))
+	}
+}
+
+func validateJQFlags(cmd *cobra.Command, filter string, ids, count bool) error {
+	if err := output.ValidateJQFilter(filter); err != nil {
+		return err
+	}
+	if filter == "" {
+		return nil
+	}
+	if ids {
+		return output.ErrJQConflict("--ids-only")
+	}
+	if count {
+		return output.ErrJQConflict("--count")
+	}
+
+	switch cmd.CommandPath() {
+	case "hey":
+		return output.ErrJQNotSupported("the interactive app")
+	case "hey auth token":
+		return output.ErrJQNotSupported("the auth token command")
+	case "hey completion":
+		return output.ErrJQNotSupported("the completion command")
+	case "hey skill":
+		return output.ErrJQNotSupported("the skill display command")
+	case "hey tui":
+		return output.ErrJQNotSupported("the interactive app")
+	default:
+		return nil
 	}
 }
 
