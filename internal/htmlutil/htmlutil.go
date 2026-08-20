@@ -17,7 +17,7 @@ func ToText(s string) string {
 		return s
 	}
 	var b strings.Builder
-	walkNode(&b, doc)
+	walkNode(&b, doc, 0)
 	// Collapse runs of 3+ newlines into 2
 	result := b.String()
 	for strings.Contains(result, "\n\n\n") {
@@ -45,7 +45,7 @@ func ExtractImageURLs(s string) []string {
 		return nil
 	}
 	var urls []string
-	findImages(doc, &urls)
+	findImages(doc, &urls, 0)
 	return urls
 }
 
@@ -69,7 +69,7 @@ func ExtractAttachments(s string) []Attachment {
 	return attachments
 }
 
-func walkNode(b *strings.Builder, n *html.Node) {
+func walkNode(b *strings.Builder, n *html.Node, depth int) {
 	switch n.Type { //nolint:exhaustive // only text and element nodes need handling
 	case html.TextNode:
 		b.WriteString(n.Data)
@@ -102,24 +102,24 @@ func walkNode(b *strings.Builder, n *html.Node) {
 				// HEY wraps pasted rich HTML in text/html trix attachments
 				// whose markup sits in the JSON "content" field. Render it.
 				if att.Content != "" {
-					if doc, err := html.Parse(strings.NewReader(att.Content)); err == nil {
-						walkNode(b, doc)
+					if doc := parseEmbeddedContent(att.Content, depth); doc != nil {
+						walkNode(b, doc, depth+1)
 						return
 					}
 				}
 			}
 		case "p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote":
 			b.WriteString("\n")
-			walkChildren(b, n)
+			walkChildren(b, n, depth)
 			b.WriteString("\n")
 			return
 		case "li":
 			b.WriteString("\n  • ")
-			walkChildren(b, n)
+			walkChildren(b, n, depth)
 			return
 		case "ul", "ol":
 			b.WriteString("\n")
-			walkChildren(b, n)
+			walkChildren(b, n, depth)
 			b.WriteString("\n")
 			return
 		case "hr":
@@ -127,7 +127,7 @@ func walkNode(b *strings.Builder, n *html.Node) {
 			return
 		}
 	}
-	walkChildren(b, n)
+	walkChildren(b, n, depth)
 }
 
 type trixAttachment struct {
@@ -160,10 +160,27 @@ func getAttr(n *html.Node, key string) string {
 	return ""
 }
 
-func walkChildren(b *strings.Builder, n *html.Node) {
+func walkChildren(b *strings.Builder, n *html.Node, depth int) {
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		walkNode(b, c)
+		walkNode(b, c, depth)
 	}
+}
+
+// embeddedContentDepthLimit stops a pathological chain of attachments that
+// each embed another from recursing without end.
+const embeddedContentDepthLimit = 4
+
+// parseEmbeddedContent parses the markup inside a text/html Trix attachment,
+// returning nil once the nesting passes embeddedContentDepthLimit.
+func parseEmbeddedContent(content string, depth int) *html.Node {
+	if depth >= embeddedContentDepthLimit {
+		return nil
+	}
+	doc, err := html.Parse(strings.NewReader(content))
+	if err != nil {
+		return nil
+	}
+	return doc
 }
 
 func findAttachments(n *html.Node, attachments *[]Attachment) {
@@ -221,7 +238,7 @@ func nonnegativeAttachmentByteSize(size *int64) *int64 {
 	return size
 }
 
-func findImages(n *html.Node, urls *[]string) {
+func findImages(n *html.Node, urls *[]string, depth int) {
 	if n.Type == html.ElementNode {
 		switch n.Data {
 		case "img":
@@ -235,12 +252,21 @@ func findImages(n *html.Node, urls *[]string) {
 				*urls = append(*urls, imageURL)
 			}
 		case "figure":
-			if att := parseTrixAttachment(n); att != nil && att.URL != "" && att.Filename != "" && isImageContentType(att.ContentType) {
+			att := parseTrixAttachment(n)
+			switch {
+			case att == nil:
+			case att.Filename != "" && att.URL != "" && isImageContentType(att.ContentType):
 				*urls = append(*urls, att.URL)
+			case att.Content != "":
+				// An inbound email's inline images are inside the embedded
+				// markup, not on the figure that wraps it.
+				if doc := parseEmbeddedContent(att.Content, depth); doc != nil {
+					findImages(doc, urls, depth+1)
+				}
 			}
 		}
 	}
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		findImages(c, urls)
+		findImages(c, urls, depth)
 	}
 }

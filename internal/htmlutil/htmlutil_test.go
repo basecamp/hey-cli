@@ -97,6 +97,32 @@ func TestToTextTrixFigure(t *testing.T) {
 	}
 }
 
+func TestToTextEmbeddedContentStopsRecursing(t *testing.T) {
+	nested := `<figure data-trix-attachment='{"contentType":"text/html","content":"<p>innermost</p>"}'></figure>`
+	for range embeddedContentDepthLimit + 2 {
+		nested = `<figure data-trix-attachment='{"contentType":"text/html","content":"` +
+			strings.ReplaceAll(nested, `"`, `\"`) + `"}'></figure>`
+	}
+
+	if got := ToText(nested); strings.Contains(got, "innermost") {
+		t.Errorf("ToText = %q, should stop before the innermost level", got)
+	}
+}
+
+func TestExtractImageURLsInsideEmbeddedHTMLAttachment(t *testing.T) {
+	urls := ExtractImageURLs(`<figure data-trix-attachment='{"contentType":"text/html","content":"<p><img src=\"https://example.com/logo.png\"></p>"}'></figure>`)
+	if len(urls) != 1 || urls[0] != "https://example.com/logo.png" {
+		t.Errorf("ExtractImageURLs = %v, want the image inside the embedded body", urls)
+	}
+}
+
+func TestExtractAttachmentsSkipsEmbeddedHTMLAttachment(t *testing.T) {
+	attachments := ExtractAttachments(`<figure data-trix-attachment='{"contentType":"text/html","content":"<p>body</p>"}'></figure>`)
+	if len(attachments) != 0 {
+		t.Errorf("ExtractAttachments = %+v, an embedded body is not a downloadable file", attachments)
+	}
+}
+
 func TestPrependText(t *testing.T) {
 	got := PrependText(`<div>Forwarded message</div>`, "For your review\nThanks & take care")
 	want := `<div>For your review<br>Thanks &amp; take care</div><br><div>Forwarded message</div>`
