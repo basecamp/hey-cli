@@ -62,21 +62,30 @@ func TestSurfaceSnapshot(t *testing.T) {
 		}
 	}
 
-	if len(removed) > 0 {
-		t.Errorf("Surface compatibility break — removed commands/flags:\n%s",
-			strings.Join(removed, "\n"))
+	if len(removed) == 0 && len(added) == 0 {
+		return
 	}
 
-	if len(added) > 0 {
-		if *updateSurface {
-			if err := os.WriteFile(baselineFile, []byte(snapshot), 0644); err != nil {
-				t.Fatalf("writing updated baseline: %v", err)
-			}
-			t.Logf("Surface baseline updated with additions:\n%s", strings.Join(added, "\n"))
-		} else {
-			t.Errorf("Surface has new commands/flags:\n%s\n\nRun with -update-surface to accept.",
-				strings.Join(added, "\n"))
+	if *updateSurface {
+		if err := os.WriteFile(baselineFile, []byte(snapshot), 0644); err != nil {
+			t.Fatalf("writing updated baseline: %v", err)
 		}
+		if len(removed) > 0 {
+			t.Logf("Surface baseline updated, dropping:\n%s", strings.Join(removed, "\n"))
+		}
+		if len(added) > 0 {
+			t.Logf("Surface baseline updated, adding:\n%s", strings.Join(added, "\n"))
+		}
+		return
+	}
+
+	if len(removed) > 0 {
+		t.Errorf("Surface compatibility break — removed commands/flags:\n%s\n\nRun with -update-surface to accept (and list each line in .surface-breaking).",
+			strings.Join(removed, "\n"))
+	}
+	if len(added) > 0 {
+		t.Errorf("Surface has new commands/flags:\n%s\n\nRun with -update-surface to accept.",
+			strings.Join(added, "\n"))
 	}
 }
 

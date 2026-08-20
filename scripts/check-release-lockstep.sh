@@ -11,8 +11,9 @@
 #      hook and CI cannot disagree on a finding.
 #   3. Every scripts/*.sh named in docs, workflows, the Makefile, goreleaser
 #      config, other scripts or tests exists, and every scripts/*.sh is named
-#      somewhere — a renamed or orphaned script fails here rather than at the
-#      moment a release step or a README command reaches for it.
+#      somewhere other than in itself — a renamed or orphaned script fails here
+#      rather than at the moment a release step or a README command reaches
+#      for it.
 #
 # Each check prints its own FAIL; the script exits 1 if any failed.
 set -euo pipefail
@@ -25,8 +26,12 @@ failed=0
 fail() { echo "FAIL: $*"; failed=1; }
 
 # --- 0. golangci-lint lockstep across workflows ---
+# The umbrella check must not pass by omission: a missing or non-executable
+# helper is a failure, not a skip.
 if [ -x "$SCRIPT_DIR/check-lint-lockstep.sh" ]; then
   "$SCRIPT_DIR/check-lint-lockstep.sh" || failed=1
+else
+  fail "$SCRIPT_DIR/check-lint-lockstep.sh is missing or not executable"
 fi
 
 # --- 1. goreleaser: .mise.toml vs release.yml ---
@@ -95,9 +100,14 @@ collect_files() {
       ! -name 'sensitive-change-gate.yml'; } 2>/dev/null | LC_ALL=C sort -u
 }
 script_refs() {
-  # Tokens of the form scripts/<name>.sh, printed as the bare <name>.sh.
-  grep -hoE '[A-Za-z0-9_./-]*[A-Za-z0-9_-]+\.sh\b' "$@" 2>/dev/null \
-    | grep -E '(^|/)scripts/[A-Za-z0-9_-]+\.sh$' | sed -E 's#.*scripts/##' | LC_ALL=C sort -u || true
+  # Tokens of the form scripts/<name>.sh, or "$SCRIPT_DIR/<name>.sh" as scripts
+  # call their siblings, printed as the bare <name>.sh.
+  grep -hoE '(\$\{?SCRIPT_DIR\}?|(^|[^A-Za-z0-9_-])scripts)/[A-Za-z0-9_-]+\.sh\b' "$@" 2>/dev/null \
+    | sed -E 's#.*/##' | LC_ALL=C sort -u || true
+}
+ref_sites() {
+  # Files naming scripts/<name> or $SCRIPT_DIR/<name>, for the failure message.
+  grep -lE "(scripts|SCRIPT_DIR\}?)/${1//./\\.}\b" "${@:2}" 2>/dev/null | head -3 | tr '\n' ' '
 }
 
 ref_files=()
@@ -106,16 +116,17 @@ usage_files=()
 while IFS= read -r f; do usage_files+=("$f"); done < <(collect_files .github scripts tests)
 
 referenced=$(script_refs "${ref_files[@]}")
-used=$(script_refs "${usage_files[@]}")
 
 for name in $referenced; do
-  [ -f "scripts/$name" ] || fail "scripts/$name is referenced but does not exist ($(grep -rlE "scripts/$name" "${ref_files[@]}" | head -3 | tr '\n' ' '))"
+  [ -f "scripts/$name" ] || fail "scripts/$name is referenced but does not exist ($(ref_sites "$name" "${ref_files[@]}"))"
 done
 for name in "${existing[@]}"; do
-  # A script may be referenced by other scripts under its bare name via
-  # "$SCRIPT_DIR/name.sh" — count those too.
-  if ! grep -qx "$name" <<<"$used" && ! grep -rqE "/${name}\b" scripts/ --include='*.sh' 2>/dev/null; then
-    fail "scripts/$name is not referenced anywhere (docs, workflows, Makefile, goreleaser, scripts, tests)"
+  # A script's own text does not count: a "# Usage: scripts/<name>" header
+  # would otherwise make every orphan look used.
+  others=()
+  for f in "${usage_files[@]}"; do [ "$f" = "scripts/$name" ] || others+=("$f"); done
+  if ! grep -qx "$name" <<<"$(script_refs "${others[@]}")"; then
+    fail "scripts/$name is not referenced anywhere (docs, workflows, Makefile, goreleaser, other scripts, tests)"
   fi
 done
 [ "$failed" -eq 0 ] && echo "scripts/*.sh references resolve (${#existing[@]} scripts)"

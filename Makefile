@@ -174,9 +174,11 @@ check-surface: check-toolchain
 		exit 1; \
 	}
 
-# Regenerate .surface from the current command tree
+# Regenerate .surface from the current command tree (additions and removals
+# alike; removals still have to be acknowledged in .surface-breaking for
+# check-surface-compat), then verify the fresh snapshot passes.
 update-surface: check-toolchain
-	@HEY_NO_KEYRING=1 go test ./internal/cmd/ -run TestSurfaceSnapshot -count=1 -update-surface >/dev/null || true
+	@HEY_NO_KEYRING=1 go test ./internal/cmd/ -run TestSurfaceSnapshot -count=1 -update-surface >/dev/null
 	@HEY_NO_KEYRING=1 go test ./internal/cmd/ -run TestSurfaceSnapshot -count=1
 	@echo ".surface updated"
 
@@ -185,9 +187,10 @@ update-surface: check-toolchain
 check-surface-compat:
 	@scripts/check-surface-compat.sh
 
-# Check the built binary against .size-budget
+# Check the binary just built against .size-budget. Passed explicitly so a
+# stale dist/ from an earlier snapshot is never what gets measured.
 check-size: build
-	@scripts/check-size-budget.sh
+	@scripts/check-size-budget.sh $(BINARY)
 
 # Verify release tool pins and script references agree (wraps check-lint-lockstep)
 check-release-lockstep:

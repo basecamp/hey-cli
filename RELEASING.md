@@ -147,9 +147,10 @@ in `.surface-breaking` in the same PR; prune entries after the release ships.
 ## Release size budget
 
 `.size-budget` holds per-platform ceilings (`stripped_max_mib`, `gzip_max_mib`);
-`scripts/check-size-budget.sh` checks every goreleaser output in `dist/` at
-release time (after the build, before attestation) and `./bin/hey` on PRs
-(`make check-size`), printing a per-platform table into the job summary.
+`scripts/check-size-budget.sh` runs as a goreleaser build hook on each binary
+(so a breach stops the release before anything is archived, signed or
+published), again over `dist/` afterwards for the per-platform table in the job
+summary, and on `./bin/hey` on PRs (`make check-size`).
 
 Baseline: pre-Sigstore `v0.1.x` measured 15.1 MiB stripped / 5.4 MiB gzipped
 (linux_amd64). The file is **report-only** (`enforce = false`) until the first

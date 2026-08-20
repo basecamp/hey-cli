@@ -187,10 +187,10 @@ jobs:
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
         run: goreleaser release --clean
 
-      # After the build, before attestation: a binary over budget should not
-      # get a provenance statement as if it were fine. Report-only while
-      # .size-budget has enforce = false.
-      - name: Check release size budget
+      # The gate itself runs as a goreleaser build hook (.goreleaser.yaml),
+      # before archives, signing and publishing; this pass over dist/ is the
+      # consolidated per-platform table for the job summary.
+      - name: Report release size budget
         run: scripts/check-size-budget.sh
 
       - name: Attest build provenance

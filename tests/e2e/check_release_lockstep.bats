@@ -100,7 +100,7 @@ teardown() {
 }
 
 @test "fails when a script exists but nothing references it" {
-  printf '#!/usr/bin/env bash\n' > scripts/orphan.sh
+  printf '#!/usr/bin/env bash\n# Usage: scripts/orphan.sh\n' > scripts/orphan.sh
   run scripts/check-release-lockstep.sh
   [ "$status" -eq 1 ]
   [[ "$output" == *"scripts/orphan.sh is not referenced anywhere"* ]]
@@ -124,6 +124,21 @@ teardown() {
   printf '#!/usr/bin/env bash\n"$SCRIPT_DIR/helper.sh"\n' > scripts/publish.sh
   run scripts/check-release-lockstep.sh
   [ "$status" -eq 0 ]
+}
+
+@test "a script referenced via SCRIPT_DIR must exist" {
+  printf '#!/usr/bin/env bash\n"${SCRIPT_DIR}/vanished.sh"\n' > scripts/publish.sh
+  run scripts/check-release-lockstep.sh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"scripts/vanished.sh is referenced but does not exist"* ]]
+  [[ "$output" == *"scripts/publish.sh"* ]]
+}
+
+@test "fails when the lint lockstep helper is missing" {
+  rm scripts/check-lint-lockstep.sh
+  run scripts/check-release-lockstep.sh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"check-lint-lockstep.sh is missing or not executable"* ]]
 }
 
 @test "ignores the sensitive-change gate's pattern list" {

@@ -37,6 +37,13 @@ builds:
       - -X github.com/basecamp/hey-cli/internal/version.Version={{.Version}}
       - -X github.com/basecamp/hey-cli/internal/version.Commit={{.Commit}}
       - -X github.com/basecamp/hey-cli/internal/version.Date={{.Date}}
+    hooks:
+      # Size gate per binary, before anything is archived, signed or
+      # published. Report-only while .size-budget has enforce = false. The
+      # release workflow prints the consolidated table afterwards, so the
+      # per-binary run stays out of the job summary.
+      post:
+        - sh -c 'GITHUB_STEP_SUMMARY= scripts/check-size-budget.sh {{ .Path }}'
 
 archives:
   - id: default
