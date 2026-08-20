@@ -1,0 +1,53 @@
+internal/cmd/config.go
+  s_e2b9c41f2f9ae5::t_7a78fc460847ce 48-58,60
+  s_e2b9c41f2f9ae5::t_c051d4cadda06f 5,167-170
+  s_e2b9c41f2f9ae5::t_0f2b7befadff75 171
+internal/cmd/tui.go
+  s_e2b9c41f2f9ae5::t_738dd37a9c0633 20
+internal/cmd/local_config_trust.go
+  s_e2b9c41f2f9ae5::t_6e649a154857da 29
+internal/auth/auth_test.go
+  s_e2b9c41f2f9ae5::t_9bf4cd50990882 608-609
+  s_e2b9c41f2f9ae5::t_f7841cfdbdd9eb 606-607,610-662
+  s_e2b9c41f2f9ae5::t_764be92a78d6fd 13
+internal/cmd/formatting.go
+  s_e2b9c41f2f9ae5::t_abc5738991d45c 125-127,131,135-138
+  s_e2b9c41f2f9ae5::t_6e649a154857da 15,75-80
+  s_e2b9c41f2f9ae5::t_a319d98d27cf25 139-140
+internal/tui/brand.go
+  s_e2b9c41f2f9ae5::t_2f1cae6b1dc894 1-26
+internal/cmd/root.go
+  s_e2b9c41f2f9ae5::t_764be92a78d6fd 47-49
+  s_e2b9c41f2f9ae5::t_738dd37a9c0633 42-44,123
+internal/config/config.go
+  s_e2b9c41f2f9ae5::t_797d0d6068898c 41,52
+  s_e2b9c41f2f9ae5::t_3ad0a723c75954 150-154
+  s_e2b9c41f2f9ae5::t_8ed53d660a0c7e 353-367
+  s_e2b9c41f2f9ae5::t_2077979729b9d0 456-484
+internal/auth/auth.go
+  s_e2b9c41f2f9ae5::t_201bac29ae107d 145-159
+  s_e2b9c41f2f9ae5::t_5eb1689086c611 369,371,374
+internal/tui/prompt_test.go
+  s_e2b9c41f2f9ae5::t_6d037b459d3746 71
+  s_e2b9c41f2f9ae5::t_bfe7e1384a1949 1-70,72-77
+internal/config/config_test.go
+  s_e2b9c41f2f9ae5::t_32930c3e939af9 485-576
+internal/tui/prompt.go
+  s_e2b9c41f2f9ae5::t_6e1f73fd5dae86 1-107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "7be9dc06b0f11f92c1e86c5b691ecc7293031266",
+  "prompts": {},
+  "sessions": {
+    "s_e2b9c41f2f9ae5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c6e9f2bf-e587-4622-a299-7b18cdf6665e",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
