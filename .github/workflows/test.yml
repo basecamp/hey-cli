@@ -134,6 +134,176 @@ jobs:
       - name: Run tests with race detector
         run: go test -race -count=1 ./...
 
+  e2e:
+    name: Bats e2e
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      HEY_NO_KEYRING: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Cache BATS
+        id: cache-bats
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        # zizmor: ignore[cache-poisoning] -- cache is branch-isolated; fork PRs cannot write to the cache used by tag-push workflows
+        with:
+          path: ~/.local
+          key: bats-1.11.0-home
+
+      - name: Install BATS
+        if: steps.cache-bats.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch v1.11.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
+          /tmp/bats-core/install.sh ~/.local
+
+      - name: Add BATS to PATH
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run bats suite
+        run: make test-e2e
+
+  installer-bash32:
+    name: Installer (bash 3.2)
+    runs-on: macos-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read  # dorny/paths-filter enumerates PR files via the REST API
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check for installer changes
+        id: filter
+        uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        with:
+          # test.yml is in its own filter so the job proves itself on the PR
+          # that introduces or edits it.
+          filters: |
+            installer:
+              - 'scripts/install.sh'
+              - 'tests/e2e/installer.bats'
+              - '.github/workflows/test.yml'
+
+      - name: Assert /bin/bash is Bash 3.2
+        if: steps.filter.outputs.installer == 'true'
+        run: |
+          # Same guard as the installer-smoke canary: honest 3.2 coverage
+          # instead of silently degrading if a future runner image changes
+          # /bin/bash. The bats suite cannot provide this — bats execs
+          # `env bash` at every layer, so the interpreter is not pinnable
+          # through it.
+          /bin/bash -c '[[ "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}" == "3.2" ]]' \
+            || { echo "/bin/bash is not Bash 3.2:" >&2; /bin/bash --version >&2; exit 1; }
+
+      - name: Syntax-check installer under Bash 3.2
+        if: steps.filter.outputs.installer == 'true'
+        run: /bin/bash -n scripts/install.sh
+
+      - name: Piped execution under Bash 3.2
+        if: steps.filter.outputs.installer == 'true'
+        run: |
+          # PATH=/nonexistent forces the curl guard: the run must fail with
+          # the guard's own message, never with an unbound-variable error.
+          # A bare out=$(...) assignment of the failing pipeline would exit
+          # this step immediately under the runner's `bash -e -o pipefail`,
+          # so capture via if-else.
+          status=0
+          if out=$(cat scripts/install.sh | PATH=/nonexistent /bin/bash 2>&1); then
+            status=0
+          else
+            status=$?
+          fi
+          printf '%s\n' "$out"
+          if [ "$status" -eq 0 ]; then
+            echo "expected the curl guard to fail without curl on PATH" >&2
+            exit 1
+          fi
+          printf '%s\n' "$out" | grep -q 'curl is required but not installed'
+          if printf '%s\n' "$out" | grep -q 'unbound variable'; then
+            echo "installer emitted an unbound variable error under Bash 3.2" >&2
+            exit 1
+          fi
+
+      - name: Offline full install under Bash 3.2
+        if: steps.filter.outputs.installer == 'true'
+        run: |
+          # The curl-guard step above never gets past the prerequisite check,
+          # and `bash -n` only checks grammar — neither catches Bash-4-only
+          # constructs (declare -A, mapfile, 4.x expansions) in the download,
+          # checksum, extract, or post-install code. Run one complete install
+          # under real 3.2: a fixture curl serves a local release from disk,
+          # and a pinned HEY_VERSION skips version resolution. PATH is
+          # restricted to fixture + system dirs so Homebrew tools (bash 4+,
+          # cosign) cannot leak in.
+          fixture_root=$(mktemp -d)
+          mkdir -p "$fixture_root/bin" "$fixture_root/release" "$fixture_root/home" "$fixture_root/install"
+
+          cat > "$fixture_root/release/hey" <<'STUB'
+          #!/bin/bash
+          if [ "$1" = "--version" ]; then echo "hey version 9.9.9"; fi
+          exit 0
+          STUB
+          chmod +x "$fixture_root/release/hey"
+          for arch in arm64 amd64; do
+            tar -czf "$fixture_root/release/hey_9.9.9_darwin_${arch}.tar.gz" -C "$fixture_root/release" hey
+          done
+          (cd "$fixture_root/release" && shasum -a 256 ./*.tar.gz | sed 's|\./||' > checksums.txt)
+
+          cat > "$fixture_root/bin/curl" <<'STUB'
+          #!/bin/bash
+          # Fixture curl: serves the local release dir. Handles the two shapes
+          # install.sh uses: `--version` and `[-flags] <url> -o <dest>`.
+          out=""; url=""
+          while [ $# -gt 0 ]; do
+            case "$1" in
+              --version) echo "curl 8.0.0 (fixture)"; exit 0 ;;
+              -o) out="$2"; shift ;;
+              http://*|https://*) url="$1" ;;
+            esac
+            shift
+          done
+          name="${url##*/}"
+          if [ -n "$out" ] && [ -f "$FIXTURE_RELEASE_DIR/$name" ]; then
+            cp "$FIXTURE_RELEASE_DIR/$name" "$out"
+            exit 0
+          fi
+          echo "fixture curl: no fixture for: $url" >&2
+          exit 22
+          STUB
+          chmod +x "$fixture_root/bin/curl"
+
+          status=0
+          if out=$(cat scripts/install.sh | \
+              HOME="$fixture_root/home" \
+              FIXTURE_RELEASE_DIR="$fixture_root/release" \
+              HEY_BIN_DIR="$fixture_root/install" \
+              HEY_VERSION=9.9.9 \
+              PATH="$fixture_root/bin:/usr/bin:/bin" \
+              /bin/bash 2>&1); then
+            status=0
+          else
+            status=$?
+          fi
+          printf '%s\n' "$out"
+          if [ "$status" -ne 0 ]; then
+            echo "offline install failed under Bash 3.2 (exit $status)" >&2
+            exit 1
+          fi
+          printf '%s\n' "$out" | grep -q 'Installed hey to'
+          printf '%s\n' "$out" | grep -q 'version 9.9.9 installed'
+          if printf '%s\n' "$out" | grep -q 'unbound variable'; then
+            echo "installer emitted an unbound variable error under Bash 3.2" >&2
+            exit 1
+          fi
+          "$fixture_root/install/hey" --version
+
   cli-surface:
     name: CLI Surface Check
     runs-on: ubuntu-latest

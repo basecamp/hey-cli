@@ -3,7 +3,8 @@
 ## Prerequisites
 
 - [Go](https://go.dev/dl/) (version in `go.mod`)
-- [golangci-lint](https://golangci-lint.run/) v2+
+- [golangci-lint](https://golangci-lint.run/) v2+ (`make tools` installs the pinned version)
+- [bats-core](https://github.com/bats-core/bats-core) and `jq` for `make test-e2e`
 - [mise](https://mise.jdx.dev/) (optional, for toolchain management)
 
 Install dev tools:
@@ -31,6 +32,15 @@ Run with race detector:
 ```sh
 make race-test
 ```
+
+The bats suite covers the installers and release scripts (`scripts/install.sh`,
+`scripts/install.ps1`, `scripts/notify-issue.sh`, …), which Go tests cannot reach:
+
+```sh
+make test-e2e
+```
+
+Tests that exercise `install.ps1` need `pwsh` and skip without it locally.
 
 ## Lint
 

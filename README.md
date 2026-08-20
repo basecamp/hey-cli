@@ -25,12 +25,69 @@ A CLI and TUI for [HEY](https://hey.com).
 
 ## Install
 
-Requires Go 1.26+. Use [mise](https://mise.jdx.dev) to install the correct version:
+**macOS / Linux / WSL2**
 
+```bash
+curl -fsSL https://raw.githubusercontent.com/basecamp/hey-cli/main/scripts/install.sh | bash
+```
+
+**Windows (PowerShell)**
+
+```powershell
+irm https://raw.githubusercontent.com/basecamp/hey-cli/main/scripts/install.ps1 | iex
+```
+
+On Windows 11 with Smart App Control, see [Troubleshooting](#windows-smart-app-control-and-smartscreen) if the install is blocked.
+
+Both scripts download the release for your platform, verify its SHA-256 checksum, and — when `cosign` is installed — verify the release's keyless Sigstore signature (cosign v3 as-is, v2.6+ with `--new-bundle-format=true`; older versions skip signature verification with a warning). Set `HEY_VERSION` to pin a release and `HEY_BIN_DIR` to choose the install directory.
+
+<details>
+<summary>Other installation methods</summary>
+
+**Homebrew (macOS / Linux):**
+```bash
+brew install --cask basecamp/tap/hey
+```
+
+**Arch Linux / Omarchy (AUR):**
+```bash
+yay -S hey-cli
+```
+
+**Linux (deb/rpm/apk):**
+```bash
+# Download from https://github.com/basecamp/hey-cli/releases/latest
+sudo apt install ./hey-cli_*_linux_amd64.deb                 # Debian/Ubuntu
+sudo dnf install ./hey-cli_*_linux_amd64.rpm                 # Fedora/RHEL
+sudo apk add --allow-untrusted ./hey-cli_*_linux_amd64.apk   # Alpine
+```
+Arm64: substitute `arm64` for `amd64` in the filename. Verify the SHA-256 checksum from `checksums.txt` before installing unsigned Alpine packages.
+
+**Scoop (Windows):**
+```powershell
+scoop bucket add basecamp https://github.com/basecamp/homebrew-tap
+scoop install hey
+```
+
+**Go install:**
+```bash
+go install github.com/basecamp/hey-cli/cmd/hey@latest
+```
+
+**From source** (requires Go 1.26+; [mise](https://mise.jdx.dev) installs the right version):
 ```bash
 mise install       # install Go 1.26
 make install       # build and install into /usr/local/bin/hey
 ```
+
+**GitHub Release:** download from [Releases](https://github.com/basecamp/hey-cli/releases). Every release ships `checksums.txt` and a keyless Sigstore signature `checksums.txt.bundle`, verifiable with:
+```bash
+cosign verify-blob --bundle checksums.txt.bundle \
+  --certificate-identity "https://github.com/basecamp/hey-cli/.github/workflows/release.yml@refs/tags/v<VERSION>" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt
+```
+
+</details>
 
 ## Authentication
 
@@ -215,6 +272,41 @@ hey-cli ships with an embedded agent skill so your agent can interact with HEY o
 ```bash
 hey skill install   # install the skill globally for your agent
 ```
+
+## Troubleshooting
+
+```bash
+hey doctor           # Check CLI health and diagnose issues
+```
+
+### Windows: Smart App Control and SmartScreen
+
+To check whether your installed binary is signed:
+
+```powershell
+Get-AuthenticodeSignature (Get-Command hey).Source
+```
+
+**Smart App Control** (Windows 11) blocks unsigned executables no matter where
+they were downloaded from, and it has no per-app exceptions — this applies to
+the PowerShell installer, Scoop installs, and manual downloads alike. If it
+blocks an unsigned `hey.exe`, two options:
+
+1. **Use WSL2 (preferred).** Install the Linux build inside WSL2 — Smart App
+   Control doesn't apply there and your Windows security setup is untouched:
+   `wsl --install`, then inside the WSL terminal:
+   `curl -fsSL https://raw.githubusercontent.com/basecamp/hey-cli/main/scripts/install.sh | bash`
+2. **Turn Smart App Control off** (Windows Security → App & browser control →
+   Smart App Control settings) **and leave it off while using the unsigned
+   build.** Because there are no per-app exceptions, turning it back on
+   re-blocks `hey.exe` on its next run — only re-enable after upgrading to a
+   signed build. Windows 11 with the March/April 2026 updates can re-enable
+   Smart App Control from Windows Security without a reset; on older builds
+   re-enabling requires resetting Windows, so prefer WSL2 there.
+
+**SmartScreen** (without Smart App Control) may warn on first run of an
+unrecognized executable — choose "More info" → "Run anyway" if you downloaded
+the release from this repository.
 
 ## Development
 

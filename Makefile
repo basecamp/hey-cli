@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-smoke preview-callback coverage fmt fmt-check vet lint tidy tidy-check \
+.PHONY: build test test-unit test-e2e test-smoke preview-callback coverage fmt fmt-check vet lint tidy tidy-check \
 	race-test vuln secrets replace-check check-toolchain check security \
 	release-check release test-release bench bench-save bench-compare \
 	check-surface check-surface-compat check-lint-lockstep tools clean install help
@@ -22,6 +22,7 @@ help:
 	@echo "  make build           Build the CLI"
 	@echo "  make test-unit       Run unit tests"
 	@echo "  make test            Alias for test-unit"
+	@echo "  make test-e2e        Run the bats suite (installer and script contracts)"
 	@echo "  make test-smoke      Run smoke tests against a live server"
 	@echo "  make preview-callback Preview the OAuth callback screens in a browser"
 	@echo "  make coverage        Run cross-package coverage and enforce the 70.8% floor"
@@ -89,6 +90,10 @@ coverage: check-toolchain
 # and refresh the browser. Ctrl-C to stop.
 preview-callback: check-toolchain
 	PREVIEW=1 go test -run TestPreviewCallbackPages ./internal/auth/ -count=1 -v -timeout=0
+
+# Run the bats end-to-end suite (installers, release scripts). Needs bats-core.
+test-e2e:
+	@./tests/e2e/run.sh
 
 # Run smoke tests against a live HEY server.
 # Requires: a running server (default http://app.hey.localhost:3003) and Chrome.

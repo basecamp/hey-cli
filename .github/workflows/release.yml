@@ -47,9 +47,26 @@ jobs:
           version: v2.11.1  # keep in lockstep with test.yml Lint
           install-only: true
 
+      - name: Cache BATS
+        id: cache-bats
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        # zizmor: ignore[cache-poisoning] -- cache is branch-isolated; fork PRs cannot write to the cache used by tag-push workflows
+        with:
+          path: ~/.local
+          key: bats-1.11.0-home
+
+      - name: Install BATS
+        if: steps.cache-bats.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch v1.11.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
+          /tmp/bats-core/install.sh ~/.local
+
+      - name: Add BATS to PATH
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
       - name: Run release quality gate
         run: |
-          make check-lint-lockstep fmt-check vet lint test tidy-check
+          make check-lint-lockstep fmt-check vet lint test test-e2e tidy-check
           go test ./internal/cmd/ -run TestSurfaceSnapshot -count=1
           go test -race -count=1 ./...
 

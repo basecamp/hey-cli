@@ -1,0 +1,149 @@
+name: Installer Smoke
+
+# Post-deploy canary for the published installer. The install endpoint serves
+# main, so merge == deploy for scripts/install.sh: the bats suite gates
+# pre-merge, and this catches a broken published installer after. Runs the
+# documented Quick Start shape (curl pipe to bash), not a checkout.
+#
+# TODO(hey.com/install-cli): switch the curl URLs to
+# https://hey.com/install-cli?sha=... once the haystack redirect is live. The
+# raw URL is the documented shape until then; ?sha= still cache-busts
+# raw.githubusercontent.com (max-age=300), so a push-triggered run cannot
+# fetch the pre-push installer and falsely pass.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - scripts/install.sh
+      - scripts/install.ps1
+      - .github/workflows/installer-smoke.yml
+
+permissions: {}
+
+concurrency:
+  group: installer-smoke-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  linux:
+    name: Linux (modern bash)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Install from the published endpoint
+        run: |
+          # Scratch HOME + explicit HEY_BIN_DIR contain the installer's writes
+          # (it edits shell config for PATH).
+          smoke_root=$(mktemp -d)
+          mkdir -p "$smoke_root/home" "$smoke_root/bin"
+          export HOME="$smoke_root/home"
+          export HEY_BIN_DIR="$smoke_root/bin"
+
+          curl -fsSL "https://raw.githubusercontent.com/basecamp/hey-cli/main/scripts/install.sh?sha=${GITHUB_SHA}" | bash
+
+          # Assert the deterministic installed path, not ambient PATH.
+          "$HEY_BIN_DIR/hey" --version
+
+  macos:
+    name: macOS (stock bash 3.2)
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - name: Install via stock /bin/bash
+        run: |
+          # Assert exactly Bash 3.2, through the same interpreter that runs
+          # the install — honest 3.2 coverage instead of silently degrading
+          # if a future runner image changes /bin/bash.
+          /bin/bash -c '[[ "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}" == "3.2" ]]' \
+            || { echo "/bin/bash is not Bash 3.2:" >&2; /bin/bash --version >&2; exit 1; }
+
+          smoke_root=$(mktemp -d)
+          mkdir -p "$smoke_root/home" "$smoke_root/bin"
+          export HOME="$smoke_root/home"
+          export HEY_BIN_DIR="$smoke_root/bin"
+
+          curl -fsSL "https://raw.githubusercontent.com/basecamp/hey-cli/main/scripts/install.sh?sha=${GITHUB_SHA}" | /bin/bash
+
+          "$HEY_BIN_DIR/hey" --version
+
+  windows:
+    name: Windows (${{ matrix.shell }})
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # powershell (5.1) is the stock interpreter the README's `irm | iex`
+        # shape targets and exercises install.ps1's 5.1-specific branches;
+        # pwsh covers PowerShell 7.
+        shell: [powershell, pwsh]
+    steps:
+      - name: Install from the published endpoint
+        # GitHub Actions does not evaluate expressions in steps[*].shell, so a
+        # pwsh launcher step invokes the matrix interpreter explicitly. The
+        # documented `irm | iex` shape — fetch and execution both — runs
+        # entirely inside the target interpreter; the launcher only sets env
+        # (inherited by the child) and asserts afterwards.
+        shell: pwsh
+        env:
+          SMOKE_SHELL: ${{ matrix.shell }}
+        run: |
+          # Scratch USERPROFILE + explicit HEY_BIN_DIR contain the installer's
+          # writes (Go os.UserHomeDir reads USERPROFILE). Ensure-UserPath's
+          # HKCU PATH write is unavoidable but disposable on ephemeral runners.
+          $smokeRoot = Join-Path $env:RUNNER_TEMP 'installer-smoke'
+          New-Item -ItemType Directory -Force -Path (Join-Path $smokeRoot 'home') | Out-Null
+          New-Item -ItemType Directory -Force -Path (Join-Path $smokeRoot 'bin') | Out-Null
+          $env:USERPROFILE = Join-Path $smokeRoot 'home'
+          $env:HEY_BIN_DIR = Join-Path $smokeRoot 'bin'
+
+          # Documented Quick Start shape, cache-busted. Single-quoted so the
+          # inner interpreter expands $env:GITHUB_SHA itself.
+          & $env:SMOKE_SHELL -NoProfile -Command 'irm "https://raw.githubusercontent.com/basecamp/hey-cli/main/scripts/install.ps1?sha=$env:GITHUB_SHA" | iex'
+          if ($LASTEXITCODE -ne 0) { throw "installer exited $LASTEXITCODE under $env:SMOKE_SHELL" }
+
+          & "$env:HEY_BIN_DIR\hey.exe" --version
+          if ($LASTEXITCODE -ne 0) { throw "hey --version exited $LASTEXITCODE" }
+
+  notify:
+    name: Notify on failure
+    needs: [linux, macos, windows]
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: File or update canary failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_SLUG: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EVENT_NAME: ${{ github.event_name }}
+          LINUX_RESULT: ${{ needs.linux.result }}
+          MACOS_RESULT: ${{ needs.macos.result }}
+          WINDOWS_RESULT: ${{ needs.windows.result }}
+        run: |
+          BODY="The installer canary failed (event: ${EVENT_NAME}). Legs: linux=${LINUX_RESULT}, macos=${MACOS_RESULT}, windows=${WINDOWS_RESULT}. See ${RUN_URL} for details."
+
+          # Deduped by label via notify-issue.sh (shared with release.yml and
+          # aur-publish.yml): a retitled issue does not spawn a duplicate, and
+          # a failed lookup files nothing rather than guessing.
+          notify_status=0
+          scripts/notify-issue.sh \
+            --repo "$REPO_SLUG" \
+            --label installer-canary \
+            --title "Installer canary failure" \
+            --body "$BODY" || notify_status=$?
+
+          echo "::error::Installer canary failed. See ${RUN_URL}"
+          exit "$notify_status"
