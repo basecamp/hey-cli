@@ -74,10 +74,12 @@ jobs:
 
       # The content still mirrors the skills tree as it was released, even if
       # main has moved on since: SKILLS_SOURCE points the script at this
-      # checkout.
+      # checkout. Fully qualified: actions/checkout resolves a bare name as a
+      # branch before a tag, so a branch sharing the tag's name would win and
+      # mirror unreleased content.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.tag }}
+          ref: refs/tags/${{ inputs.tag }}
           path: release
           persist-credentials: false
 
@@ -100,7 +102,9 @@ jobs:
       # records the wrong provenance for the release it claims to mirror.
       - name: Resolve the tagged commit
         id: source
-        run: echo "sha=$(git -C release rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        env:
+          TAG: ${{ inputs.tag }}
+        run: echo "sha=$(git -C release rev-parse --verify "refs/tags/${TAG}^{commit}")" >> "$GITHUB_OUTPUT"
 
       # DRY_RUN=remote clones the actual target and stops before the push, so
       # the preview shows the real diff including deletions.
