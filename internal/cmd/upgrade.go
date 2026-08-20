@@ -17,13 +17,13 @@ import (
 )
 
 const (
-	homebrewCask         = "basecamp/tap/hey"
-	homebrewCaskroomPath = "/caskroom/hey/"
-	scoopApp             = "hey"
-	scoopAppPath         = "/scoop/apps/hey/"
-	scoopShimPath        = "/scoop/shims/"
-	globalScoopRootPath  = "/programdata/scoop/"
-	scoopCommandBaseName = "hey"
+	homebrewCask           = "basecamp/tap/hey"
+	homebrewCaskroomPath   = "/caskroom/hey/"
+	scoopApp               = "hey"
+	scoopAppPath           = "/scoop/apps/hey/"
+	scoopShimPath          = "/scoop/shims/"
+	defaultGlobalScoopRoot = "/programdata/scoop"
+	scoopCommandBaseName   = "hey"
 )
 
 // Package-manager seams, swappable for tests. The self-update seams live in
@@ -486,9 +486,21 @@ func isGlobalScoopInstall(_ context.Context) bool {
 }
 
 func hasGlobalScoopPathPrefix(path string) bool {
-	prefix := strings.TrimSuffix(globalScoopRootPath, "/")
+	prefix := globalScoopRoot()
 	path = stripWindowsVolume(path)
 	return path == prefix || strings.HasPrefix(path, prefix+"/")
+}
+
+// globalScoopRoot is Scoop's global install root in the same lowercased,
+// forward-slash, volume-less form as resolvedExecutablePath: SCOOP_GLOBAL
+// when set (Scoop's documented override), otherwise %ProgramData%\scoop.
+func globalScoopRoot() string {
+	root := strings.TrimSpace(os.Getenv("SCOOP_GLOBAL"))
+	if root == "" {
+		return defaultGlobalScoopRoot
+	}
+	root = stripWindowsVolume(strings.ToLower(strings.ReplaceAll(root, `\`, "/")))
+	return strings.TrimRight(root, "/")
 }
 
 func stripWindowsVolume(path string) string {

@@ -895,3 +895,31 @@ func TestIsGlobalScoopInstallUsesExecutablePathProvenance(t *testing.T) {
 		}
 	}
 }
+
+// Scoop's global root follows SCOOP_GLOBAL when set (Scoop's documented
+// override), so a payload under a relocated global root is still global and
+// the default ProgramData root no longer is.
+func TestIsGlobalScoopInstallHonoursScoopGlobal(t *testing.T) {
+	t.Setenv("SCOOP_GLOBAL", `D:\Tools\Scoop`)
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"d:/tools/scoop/apps/hey/current/hey.exe", true},
+		{"d:/tools/scoop/shims/hey.exe", true},
+		{"c:/programdata/scoop/apps/hey/current/hey.exe", false},
+		{"d:/tools/scoopier/apps/hey/current/hey.exe", false},
+	}
+	for _, tt := range tests {
+		stubExecutablePathResolver(t, tt.path, true)
+		if got := isGlobalScoopInstall(context.Background()); got != tt.want {
+			t.Errorf("SCOOP_GLOBAL set: isGlobalScoopInstall(%q) = %v, want %v", tt.path, got, tt.want)
+		}
+	}
+
+	t.Setenv("SCOOP_GLOBAL", "")
+	stubExecutablePathResolver(t, "c:/programdata/scoop/apps/hey/current/hey.exe", true)
+	if !isGlobalScoopInstall(context.Background()) {
+		t.Error("SCOOP_GLOBAL unset: the ProgramData root must be global")
+	}
+}
