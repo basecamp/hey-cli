@@ -29,9 +29,11 @@ const defaultShellJSON = `{
 `
 
 // testOmarchyEnv fakes an Omarchy install: a home dir, an OMARCHY_PATH with the
-// default shell.json, and a recorder for the commands setup would run.
+// default shell.json, a sandboxed state dir, and a recorder for the commands
+// setup would run.
 func testOmarchyEnv(t *testing.T) (omarchyEnv, *[]string) {
 	t.Helper()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	home := t.TempDir()
 	omarchyPath := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(omarchyPath, "config", "omarchy"), 0o755); err != nil {
@@ -135,6 +137,9 @@ func TestOmarchySetupRemoveReversesEveryPiece(t *testing.T) {
 		t.Fatal(err)
 	}
 	setup.apply()
+	if err := saveOmarchyPollState(omarchyPollState{Seen: map[string]int32{"1": 1}}); err != nil {
+		t.Fatal(err)
+	}
 
 	if menu := readText(t, env.menuPath()); !strings.Contains(menu, `"notes"`) || !strings.Contains(menu, `"hey-tui"`) {
 		t.Errorf("install should keep the user's rows alongside ours:\n%s", menu)
@@ -145,6 +150,9 @@ func TestOmarchySetupRemoveReversesEveryPiece(t *testing.T) {
 		if status != "removed" {
 			t.Errorf("%s: remove = %q, want removed", name, status)
 		}
+	}
+	if _, err := os.Stat(omarchyPollStatePath()); !os.IsNotExist(err) {
+		t.Error("poll state still present")
 	}
 	if _, err := os.Stat(env.desktopPath()); !os.IsNotExist(err) {
 		t.Error("desktop entry still present")
@@ -843,6 +851,9 @@ func imboxServer(t *testing.T, postings string) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == "GET" && r.URL.Path == "/identity.json":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id": 7, "name": "Maria Delgado"}`))
 		case r.Method == "GET" && r.URL.Path == "/imbox.json":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"id": 1, "name": "Imbox", "kind": "inbox", "postings": ` + postings + `}`))
@@ -852,7 +863,14 @@ func imboxServer(t *testing.T, postings string) *httptest.Server {
 	}))
 }
 
-func runBarStatus(t *testing.T, serverURL string, authenticated bool) (string, error) {
+func runBarStatus(t *testing.T, serverURL string, authenticated bool, extraArgs ...string) (string, error) {
+	t.Helper()
+	return runBarStatusWithState(t, t.TempDir(), serverURL, authenticated, extraArgs...)
+}
+
+// runBarStatusWithState runs bar-status against a given state directory, so a
+// test can tick more than once over the same fingerprints.
+func runBarStatusWithState(t *testing.T, stateHome, serverURL string, authenticated bool, extraArgs ...string) (string, error) {
 	t.Helper()
 	if authenticated {
 		t.Setenv("HEY_TOKEN", "test-token")
@@ -863,14 +881,14 @@ func runBarStatus(t *testing.T, serverURL string, authenticated bool) (string, e
 	t.Setenv("HEY_BASE_URL", "")
 	tmpDir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", tmpDir)
-	t.Setenv("XDG_STATE_HOME", tmpDir)
+	t.Setenv("XDG_STATE_HOME", stateHome)
 	t.Setenv("XDG_CACHE_HOME", tmpDir)
 
 	root := newRootCmd()
 	var buf bytes.Buffer
 	root.SetOut(&buf)
 	root.SetErr(&buf)
-	root.SetArgs([]string{"omarchy", "bar-status", "--base-url", serverURL})
+	root.SetArgs(append([]string{"omarchy", "bar-status", "--base-url", serverURL}, extraArgs...))
 	err := root.Execute()
 	return buf.String(), err
 }

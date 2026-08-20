@@ -158,6 +158,8 @@ hey search filters
 hey seen
 hey setup
 hey setup omarchy
+hey setup omarchy --no-notify
+hey setup omarchy --notify
 hey setup omarchy --remove
 hey skill
 hey skill install

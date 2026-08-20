@@ -353,6 +353,7 @@ read from `~/.local/state/omarchy/current/theme/`, and restyles live when you ru
 ```bash
 yay -S hey-cli               # hey-cli is on the AUR
 hey setup omarchy            # install into the desktop
+hey setup omarchy --notify   # also toast new Imbox mail (--no-notify turns it off)
 hey setup omarchy --remove   # take it all out again
 ```
 
@@ -361,7 +362,12 @@ indicator that lights when the Imbox has unread mail (no count, by design), and 
 `hey.toml.tpl` theme template so theme authors can tune the overlay. It prints the
 `bindings.lua` snippet for a keybinding rather than editing your file. Omarchy's shipped
 HEY web app, its SUPER+SHIFT+E binding and the mailto handler are left untouched.
-See [docs/omarchy.md](docs/omarchy.md) for the details and what is planned next.
+
+`--notify` turns on new-mail toasts, off by default: the bar indicator's poll also sends
+at most one notification per interval — `Sender — Subject` for one new thread, `N new in
+Imbox` for more — replacing the previous toast rather than stacking, and clicking it
+focuses the TUI. Omarchy's notification silencing (SUPER+CTRL+comma) mutes them like any
+other app. See [docs/omarchy.md](docs/omarchy.md) for the details and what is planned next.
 
 ## Agent Skill
 

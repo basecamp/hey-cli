@@ -16,6 +16,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
+
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -61,6 +63,7 @@ type omarchyEnv struct {
 	omarchyPath string
 	iconRoots   []string // icon theme roots searched for Omarchy's HEY icon
 	run         func(name string, args ...string) error
+	runOutput   func(name string, args ...string) (string, error)
 }
 
 func liveOmarchyEnv() omarchyEnv {
@@ -78,6 +81,15 @@ func liveOmarchyEnv() omarchyEnv {
 			cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // G204: fixed omarchy command names
 			cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
 			return cmd.Run()
+		},
+		runOutput: func(name string, args ...string) (string, error) {
+			if _, err := exec.LookPath(name); err != nil {
+				return "", err
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), omarchyCommandTimeout)
+			defer cancel()
+			out, err := exec.CommandContext(ctx, name, args...).Output() //nolint:gosec // G204: fixed omarchy command names
+			return string(out), err
 		},
 	}
 }
@@ -146,7 +158,8 @@ type omarchyStep struct {
 }
 
 type omarchySetup struct {
-	env omarchyEnv
+	env    omarchyEnv
+	notify *bool // nil keeps the bar module's current exec as it is
 }
 
 func (s omarchySetup) apply() []omarchyStep {
@@ -159,12 +172,20 @@ func (s omarchySetup) apply() []omarchyStep {
 }
 
 func (s omarchySetup) remove() []omarchyStep {
-	return []omarchyStep{
+	steps := []omarchyStep{
 		s.removeDesktop(),
 		s.removeMenu(),
 		s.removeBar(),
 		s.removeTemplate(),
 	}
+	// The fingerprints go only once the module that uses them is gone: while a
+	// failed bar removal leaves the poller scheduled, deleting them would make
+	// its next tick reseed and swallow the mail that arrived in between.
+	if steps[2].failure != nil {
+		return append(steps, omarchyStep{Name: "poll state", Path: omarchyPollStatePath(), Status: "kept",
+			Detail: "bar module still installed; fingerprints kept for its next tick"})
+	}
+	return append(steps, s.removePollState())
 }
 
 func stepResult(name, path string, changed bool, err error, installed, unchanged string) omarchyStep {
@@ -321,17 +342,33 @@ func stripMenuBlock(content string) string {
 }
 
 // Bar: an inline command module in shell.json's bar layout. The shell hot-reloads
-// the file, so the indicator appears as soon as it is written.
+// the file, so the indicator appears as soon as it is written. Toast enablement
+// lives in the module's exec string — no config key, visible where it acts,
+// removed with --remove.
 
-func omarchyBarModule() map[string]any {
+func omarchyBarExec(notify bool) string {
+	if notify {
+		return "hey omarchy bar-status --notify"
+	}
+	return "hey omarchy bar-status"
+}
+
+func omarchyBarModule(notify bool) map[string]any {
 	return map[string]any{
 		"id":       omarchyBarModuleID,
 		"type":     "command",
-		"exec":     "hey omarchy bar-status",
+		"exec":     omarchyBarExec(notify),
 		"interval": 180,
 		"tooltip":  "HEY",
 		"onClick":  omarchyFocusCommand,
 	}
+}
+
+func notifyDetail(notify bool) string {
+	if notify {
+		return "notifications on"
+	}
+	return "notifications off"
 }
 
 func (s omarchySetup) installBar() omarchyStep {
@@ -345,19 +382,46 @@ func (s omarchySetup) installBar() omarchyStep {
 		return stepResult("bar indicator", path, false, err, "", "")
 	}
 	module := barLayoutModule(layout, omarchyBarModuleID)
+	notify := s.notify != nil && *s.notify
 	if module == nil {
+		if notify {
+			// Enabling toasts with stale fingerprints around would toast the
+			// accumulated diff; if they cannot be dropped, do not enable.
+			if _, err := removeFileIfPresent(omarchyPollStatePath()); err != nil {
+				return stepResult("bar indicator", path, false, fmt.Errorf("cannot drop stale poll state: %w", err), "", "")
+			}
+		}
 		right, ok := layout["right"].([]any)
 		if raw, present := layout["right"]; present && raw != nil && !ok {
 			return stepResult("bar indicator", path, false, fmt.Errorf("shell.json: bar.layout.right is %T, not a list", raw), "", "")
 		}
-		layout["right"] = append([]any{omarchyBarModule()}, right...)
+		layout["right"] = append([]any{omarchyBarModule(notify)}, right...)
 		changed, err := writeJSONFile(path, shell)
-		return stepResult("bar indicator", path, changed, err, "installed", "unchanged")
+		step := stepResult("bar indicator", path, changed, err, "installed", "unchanged")
+		if err == nil && s.notify != nil {
+			step.Detail = notifyDetail(notify)
+		}
+		return step
 	}
 	// An existing module is reconciled field by field, keeping its section and
 	// position, so a re-run after an upgrade picks up a changed exec, click
-	// command or interval instead of reporting a stale module unchanged.
-	desired := omarchyBarModule()
+	// command or interval; only the notify choice is preserved when the caller
+	// did not state one.
+	exec, _ := module["exec"].(string)
+	wasNotifying := strings.HasSuffix(exec, " --notify")
+	if s.notify == nil {
+		notify = wasNotifying
+	}
+	if notify && !wasNotifying {
+		// Turning toasts (back) on: drop any stale fingerprints so the first
+		// tick reseeds from the current Imbox instead of toasting whatever
+		// accumulated while they were off. If they cannot be dropped, fail
+		// rather than enable a poller that would toast the backlog.
+		if _, err := removeFileIfPresent(omarchyPollStatePath()); err != nil {
+			return stepResult("bar indicator", path, false, fmt.Errorf("cannot drop stale poll state: %w", err), "", "")
+		}
+	}
+	desired := omarchyBarModule(notify)
 	changed := !sameJSON(module, desired)
 	if changed {
 		clear(module)
@@ -368,21 +432,19 @@ func (s omarchySetup) installBar() omarchyStep {
 			return stepResult("bar indicator", path, false, err, "", "")
 		}
 	}
-	return stepResult("bar indicator", path, changed, nil, "installed", "unchanged")
+	step := stepResult("bar indicator", path, changed, nil, "installed", "unchanged")
+	if s.notify != nil {
+		step.Detail = notifyDetail(notify)
+	}
+	return step
 }
 
-// barLayoutModule finds our inline module map by id. String-form entries are
-// not ours — setup always writes maps — so they are ignored here.
-func barLayoutModule(layout map[string]any, id string) map[string]any {
-	for _, entries := range layout {
-		list, _ := entries.([]any)
-		for _, entry := range list {
-			if module, ok := entry.(map[string]any); ok && barEntryID(module) == id {
-				return module
-			}
-		}
-	}
-	return nil
+// sameJSON compares two values by their JSON encoding, which is what makes a
+// decoded float64(180) and a literal 180 read as equal.
+func sameJSON(a, b any) bool {
+	left, errA := json.Marshal(a)
+	right, errB := json.Marshal(b)
+	return errA == nil && errB == nil && bytes.Equal(left, right)
 }
 
 func (s omarchySetup) removeBar() omarchyStep {
@@ -467,14 +529,6 @@ func decodeJSONObject(data []byte) (map[string]any, error) {
 	return object, nil
 }
 
-// sameJSON compares two values by their JSON encoding, which is what makes a
-// decoded json.Number("180") and a literal 180 read as equal.
-func sameJSON(a, b any) bool {
-	left, errA := json.Marshal(a)
-	right, errB := json.Marshal(b)
-	return errA == nil && errB == nil && bytes.Equal(left, right)
-}
-
 // barLayout returns the user's bar layout, seeding it from Omarchy's default layout
 // when the user has never customized the bar — the shell treats a missing layout
 // as "use the defaults", so adding one module means spelling the rest out too.
@@ -520,6 +574,20 @@ func (s omarchySetup) defaultBarLayout() (map[string]any, error) {
 		return nil, errors.New("default shell.json has no bar layout")
 	}
 	return layout, nil
+}
+
+// barLayoutModule finds our inline module map by id. String-form entries are
+// not ours — setup always writes maps — so they are ignored here.
+func barLayoutModule(layout map[string]any, id string) map[string]any {
+	for _, entries := range layout {
+		list, _ := entries.([]any)
+		for _, entry := range list {
+			if module, ok := entry.(map[string]any); ok && barEntryID(module) == id {
+				return module
+			}
+		}
+	}
+	return nil
 }
 
 func barEntryID(entry any) string {
@@ -600,6 +668,15 @@ func (s omarchySetup) removeTemplate() omarchyStep {
 	return stepResult("theme template", path, changed, err, "removed", "absent")
 }
 
+// Poll state: the new-mail fingerprint file bar-status --notify keeps. Setup
+// never creates it, but --remove takes it out with everything else.
+
+func (s omarchySetup) removePollState() omarchyStep {
+	path := omarchyPollStatePath()
+	changed, err := removeFileIfPresent(path)
+	return stepResult("poll state", path, changed, err, "removed", "absent")
+}
+
 // --- File helpers ---
 
 // writeFileIfChanged writes via a temp file and rename, the way Omarchy's own
@@ -664,9 +741,11 @@ func writeJSONFile(path string, value any) (bool, error) {
 // --- hey setup omarchy ---
 
 type setupOmarchyCommand struct {
-	cmd    *cobra.Command
-	remove bool
-	env    omarchyEnv
+	cmd      *cobra.Command
+	remove   bool
+	notify   bool
+	noNotify bool
+	env      omarchyEnv
 }
 
 func newSetupOmarchyCommand() *setupOmarchyCommand {
@@ -679,8 +758,13 @@ func newSetupOmarchyCommand() *setupOmarchyCommand {
 menu, an unread indicator on the bar, and a theme template so themes can tune the
 TUI's accent colors. Every piece is idempotent and --remove takes them all out again.
 
+--notify also toasts new Imbox mail on the indicator's poll — at most one toast per
+interval, replaced rather than stacked, silenced by the notification DND toggle.
+--no-notify turns the toasts back off; a plain re-run leaves them as they are.
+
 Theming needs none of this: on Omarchy the TUI already follows the active theme.`,
 		Example: `  hey setup omarchy
+  hey setup omarchy --notify
   hey setup omarchy --remove`,
 		Annotations: map[string]string{
 			"agent_notes": "Only meaningful on Omarchy Linux. Writes to ~/.config/omarchy and ~/.local/share/applications; never edits Hyprland keybindings.",
@@ -688,6 +772,11 @@ Theming needs none of this: on Omarchy the TUI already follows the active theme.
 		RunE: setupOmarchyCommand.run,
 	}
 	setupOmarchyCommand.cmd.Flags().BoolVar(&setupOmarchyCommand.remove, "remove", false, "Remove everything hey setup omarchy installed")
+	setupOmarchyCommand.cmd.Flags().BoolVar(&setupOmarchyCommand.notify, "notify", false, "Toast new Imbox mail when the bar indicator polls")
+	setupOmarchyCommand.cmd.Flags().BoolVar(&setupOmarchyCommand.noNotify, "no-notify", false, "Turn new-mail toasts back off")
+	setupOmarchyCommand.cmd.MarkFlagsMutuallyExclusive("notify", "no-notify")
+	setupOmarchyCommand.cmd.MarkFlagsMutuallyExclusive("notify", "remove")
+	setupOmarchyCommand.cmd.MarkFlagsMutuallyExclusive("no-notify", "remove")
 	return setupOmarchyCommand
 }
 
@@ -709,6 +798,9 @@ func (c *setupOmarchyCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	setup := omarchySetup{env: c.env}
+	if c.notify || c.noNotify {
+		setup.notify = &c.notify
+	}
 	var steps []omarchyStep
 	if c.remove {
 		steps = setup.remove()
@@ -782,20 +874,26 @@ func newOmarchyCommand() *omarchyCommand {
 }
 
 type omarchyBarStatusCommand struct {
-	cmd *cobra.Command
+	cmd    *cobra.Command
+	notify bool
+	env    omarchyEnv
 }
 
 func newOmarchyBarStatusCommand() *omarchyBarStatusCommand {
-	omarchyBarStatusCommand := &omarchyBarStatusCommand{}
+	omarchyBarStatusCommand := &omarchyBarStatusCommand{env: liveOmarchyEnv()}
 	omarchyBarStatusCommand.cmd = &cobra.Command{
 		Use:   "bar-status",
 		Short: "Print the bar indicator for unread Imbox mail",
 		Long: `Print a Waybar-style JSON module when the Imbox has unread mail and nothing when
 it does not. Never fails: when hey is logged out or offline the indicator simply
-stays dark, because a bar is no place for an error message.`,
+stays dark, because a bar is no place for an error message.
+
+With --notify, also toast newly unseen Imbox mail via omarchy-notification-send —
+at most one toast per run, replacing the previous one rather than stacking.`,
 		Args: cobra.NoArgs,
 		RunE: omarchyBarStatusCommand.run,
 	}
+	omarchyBarStatusCommand.cmd.Flags().BoolVar(&omarchyBarStatusCommand.notify, "notify", false, "Toast new unseen Imbox mail")
 	return omarchyBarStatusCommand
 }
 
@@ -815,7 +913,29 @@ func (c *omarchyBarStatusCommand) run(cmd *cobra.Command, args []string) error {
 	if err := selectConfiguredAccount(cmd.Context()); err != nil {
 		return nil //nolint:nilerr // a bar is no place for an error message
 	}
-	if !imboxHasUnread(cmd.Context()) {
+	// The indicator only needs to know whether anything is unseen, which the
+	// first page answers. Toasts need the unseen set: capped on a steady-state
+	// tick (new mail always lands on page 1), exhaustive when seeding — a first
+	// run or a new identity — so no pre-existing thread can later read as new.
+	pages, identity, notify := 1, "", c.notify
+	if notify {
+		var ok bool
+		if identity, ok = omarchyPollIdentity(cmd.Context()); !ok {
+			notify = false
+		} else if state, existed := loadOmarchyPollState(); !existed || state.Identity != identity {
+			pages = unseenSeedPageCap
+		} else {
+			pages = unseenPageCap
+		}
+	}
+	unseen, complete, ok := unseenImboxPostings(cmd.Context(), pages)
+	if !ok {
+		return nil
+	}
+	if notify {
+		notifyNewMail(c.env, identity, unseen, complete)
+	}
+	if len(unseen) == 0 {
 		return nil
 	}
 	_, err := fmt.Fprintln(cmd.OutOrStdout(), omarchyBarModuleJSON())
@@ -833,17 +953,50 @@ func omarchyBarModuleJSON() string {
 	return string(module)
 }
 
-// imboxHasUnread reports unread Imbox mail. Unknown (offline, server error)
-// counts as clear: the indicator stays dark rather than lying either way loudly.
-func imboxHasUnread(ctx context.Context) bool {
-	resp, err := sdk.Boxes().GetImbox(ctx, nil)
-	if err != nil || resp == nil {
-		return false
+// Page limits for following an all-unseen Imbox. A steady-state tick stops at
+// ten pages — three hundred unseen threads — because new mail always lands on
+// page 1 and older threads are already fingerprinted. Seeding reads the whole
+// unseen set (bounded only as the box command is) so that no pre-existing
+// thread can later surface as new; it happens once per identity.
+var (
+	unseenPageCap = 10
+	// The +1 is the initial page: maxAdditionalPages caps pages fetched after
+	// it (as in paginateBoxPostings), so a box whose unseen set spans exactly
+	// the cap still finds its closing seen page and seeds completely.
+	unseenSeedPageCap = maxAdditionalPages + 1
+)
+
+// unseenImboxPostings returns the unseen Imbox postings, whether they are the
+// complete unseen set, and whether the fetch succeeded. HEY orders Imbox
+// postings unseen-first, so a page holding any seen posting (or nothing at
+// all) closes the unseen set; while a page is all unseen the next one is
+// fetched, up to maxPages. Unknown (offline, server error) counts as clear:
+// the indicator stays dark rather than lying either way loudly, and the notify
+// fingerprints stay untouched.
+func unseenImboxPostings(ctx context.Context, maxPages int) (unseen []generated.Posting, complete, ok bool) {
+	page, err := sdk.Boxes().GetImbox(ctx, nil)
+	if err != nil || page == nil {
+		return nil, false, false
 	}
-	for _, posting := range resp.Postings {
-		if !posting.Seen {
-			return true
+	for pages := 1; ; pages++ {
+		seenOnPage := false
+		for _, posting := range page.Postings {
+			if posting.Seen {
+				seenOnPage = true
+			} else {
+				unseen = append(unseen, posting)
+			}
+		}
+		if seenOnPage || len(page.Postings) == 0 || page.NextHistoryUrl == "" {
+			return unseen, true, true
+		}
+		if pages >= maxPages {
+			return unseen, false, true
+		}
+		// A page that cannot be fetched leaves what was read as a truncated
+		// snapshot: still enough to light the bar, not enough to prune by.
+		if page, err = fetchNextBoxPage(ctx, page.NextHistoryUrl); err != nil || page == nil {
+			return unseen, false, true
 		}
 	}
-	return false
 }
