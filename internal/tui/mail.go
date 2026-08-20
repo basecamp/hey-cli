@@ -441,6 +441,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 				v.postingList.ensureVisible()
 			case postingActionSeen:
 				v.postingList.postings[idx].Seen = true
+				v.postingList.resort()
 			case postingActionIgnore:
 				v.postingList.postings[idx].Muted = true
 			case postingActionStopIgnoring:

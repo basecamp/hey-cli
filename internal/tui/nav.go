@@ -29,17 +29,17 @@ const (
 
 // navItem is a single item in a navigation row.
 type navItem struct {
-	icon  string // squared unicode char (e.g. 🄼) or empty
-	label string
+	shortcut string // Shift+letter shortcut, underlined inside the label
+	label    string
 }
 
 // --- Row 1: sections (static) ---
 
 var sectionItems = []navItem{
-	{"🄼", "Mail"},
-	{"🄾", "Contacts"},
-	{"🄲", "Calendar"},
-	{"🄹", "Journal"},
+	{"M", "Mail"},
+	{"O", "Contacts"},
+	{"C", "Calendar"},
+	{"J", "Journal"},
 }
 
 // sectionForShortcut returns the section for a Shift+letter shortcut, or -1.
@@ -61,17 +61,16 @@ func sectionForShortcut(key string) section {
 
 type boxSpec struct {
 	name string
-	icon string
 	key  string // shift+letter shortcut
 }
 
 var knownBoxes = []boxSpec{
-	{"Imbox", "🄸", "I"},
-	{"Bubble up", "🄱", "B"},
-	{"Paper Trail", "🄿", "P"},
-	{"The Feed", "🄵", "F"},
-	{"Set Aside", "🄰", "A"},
-	{"Reply Later", "🄻", "R"},
+	{"Imbox", "I"},
+	{"Bubble up", "B"},
+	{"Paper Trail", "P"},
+	{"The Feed", "F"},
+	{"Set Aside", "A"},
+	{"Reply Later", "R"},
 }
 
 // orderBoxes sorts boxes by the preferred order. Known boxes appear first
@@ -105,14 +104,14 @@ func orderBoxes(boxes []models.Box) []models.Box {
 	return ordered
 }
 
-// boxNavItems builds nav items for the box row, applying icons to known boxes.
+// boxNavItems builds nav items for the box row, attaching shortcuts to known boxes.
 func boxNavItems(boxes []models.Box) []navItem {
 	items := make([]navItem, len(boxes))
 	for i, b := range boxes {
-		icon := ""
+		shortcut := ""
 		for _, spec := range knownBoxes {
 			if b.Kind != mailSourceKindFolder && strings.EqualFold(b.Name, spec.name) {
-				icon = spec.icon
+				shortcut = spec.key
 				break
 			}
 		}
@@ -120,7 +119,7 @@ func boxNavItems(boxes []models.Box) []navItem {
 		if b.Kind == mailSourceKindFolder {
 			label = terminalSafeFolderText(label)
 		}
-		items[i] = navItem{icon: icon, label: label}
+		items[i] = navItem{shortcut: shortcut, label: label}
 	}
 	return items
 }
@@ -166,8 +165,9 @@ func renderRule(width int, label string) string {
 	if width <= 0 {
 		return ""
 	}
+	rule := lipgloss.NewStyle().Foreground(colorChrome)
 	if label == "" || width < 3 {
-		return lipgloss.NewStyle().Foreground(colorMuted).Render(strings.Repeat("─", width))
+		return rule.Render(strings.Repeat("─", width))
 	}
 	label = truncateStr(label, width-2)
 	padded := " " + label + " "
@@ -176,7 +176,28 @@ func renderRule(width int, label string) string {
 	left := ruleLen / 2
 	right := ruleLen - left
 	line := strings.Repeat("─", left) + padded + strings.Repeat("─", right)
-	return lipgloss.NewStyle().Foreground(colorMuted).Render(line)
+	return rule.Render(line)
+}
+
+// renderNavLabel renders a nav label in the given style, underlining the
+// first occurrence of the shortcut letter (the Windows menu convention).
+func renderNavLabel(label, shortcut string, base lipgloss.Style) string {
+	if shortcut == "" {
+		return base.Render(label)
+	}
+	idx := strings.Index(strings.ToLower(label), strings.ToLower(shortcut))
+	if idx < 0 {
+		return base.Render(label)
+	}
+	end := idx + len(shortcut)
+	out := base.Underline(true).Render(label[idx:end])
+	if idx > 0 {
+		out = base.Render(label[:idx]) + out
+	}
+	if end < len(label) {
+		out += base.Render(label[end:])
+	}
+	return out
 }
 
 // renderNavRow draws a row of nav items with the selected one bolded.
@@ -195,21 +216,12 @@ func renderNavRow(items []navItem, selected int, focused bool, width int, center
 	all := make([]rendered, len(items))
 	totalW := 0
 	for i, item := range items {
-		text := item.label
-		if item.icon != "" {
-			text = item.icon + " " + text
-		}
-
-		var s string
+		// Tabs are always bold; the selected one changes color instead.
+		style := lipgloss.NewStyle().Foreground(colorChrome).Bold(true)
 		if i == selected {
-			style := lipgloss.NewStyle().Bold(true)
-			if focused {
-				style = style.Foreground(colorPrimary)
-			}
-			s = style.Render(text)
-		} else {
-			s = lipgloss.NewStyle().Foreground(colorMuted).Render(text)
+			style = style.Foreground(colorActive)
 		}
+		s := renderNavLabel(item.label, item.shortcut, style)
 		w := lipgloss.Width(s)
 		all[i] = rendered{s, w}
 		totalW += w
@@ -230,8 +242,8 @@ func renderNavRow(items []navItem, selected int, focused bool, width int, center
 	}
 
 	// Scrolling: find the largest window of items around `selected` that fits.
-	leftArrow := lipgloss.NewStyle().Foreground(colorMuted).Render("‹ ")
-	rightArrow := lipgloss.NewStyle().Foreground(colorMuted).Render(" ›")
+	leftArrow := lipgloss.NewStyle().Foreground(colorChrome).Render("‹ ")
+	rightArrow := lipgloss.NewStyle().Foreground(colorChrome).Render(" ›")
 	arrowW := lipgloss.Width(leftArrow) // both arrows have the same width
 
 	// Start with the selected item and expand outward.
@@ -310,13 +322,45 @@ func centerText(text string, width int) string {
 	return strings.Repeat(" ", pad) + text
 }
 
+// renderTopRule draws the top rule with HEY centered and the account
+// aligned to the right, both bold:
+//
+//	─────────── HEY ─────────── jz@example.com ──
+func renderTopRule(width int, account string) string {
+	ruleStyle := lipgloss.NewStyle().Foreground(colorChrome)
+	labelStyle := lipgloss.NewStyle().Foreground(colorChrome).Bold(true)
+
+	accountWidth := 0
+	if account != "" {
+		accountWidth = lipgloss.Width(account) + 2 // surrounding spaces
+	}
+	const heyWidth = 5 // " HEY "
+	const tail = 2
+	// Center HEY; when the account leaves no room, shift HEY left instead
+	// of giving up the right alignment.
+	left := min((width-heyWidth)/2, width-heyWidth-accountWidth-tail-1)
+	mid := width - left - heyWidth - accountWidth - tail
+	if left < 1 || mid < 1 {
+		return renderRule(width, strings.TrimSuffix("HEY · "+account, " · "))
+	}
+
+	var b strings.Builder
+	b.WriteString(ruleStyle.Render(strings.Repeat("─", left)))
+	b.WriteString(" " + labelStyle.Render("HEY") + " ")
+	b.WriteString(ruleStyle.Render(strings.Repeat("─", mid)))
+	if account != "" {
+		b.WriteString(" " + labelStyle.Render(account) + " ")
+	}
+	b.WriteString(ruleStyle.Render(strings.Repeat("─", tail)))
+	return b.String()
+}
+
 // renderHeader renders the full 3-row navigation header.
 func renderHeader(m *model) string {
 	var b strings.Builder
 
 	// Row 1: section rule + items
-	sectionLabel := "HEY · " + m.mailAccount.label
-	b.WriteString(renderRule(m.width, sectionLabel))
+	b.WriteString(renderTopRule(m.width, m.mailAccount.label))
 	b.WriteString("\n")
 	b.WriteString(renderNavRow(sectionItems, int(m.section), m.focus == rowSection, m.width, true))
 	b.WriteString("\n")

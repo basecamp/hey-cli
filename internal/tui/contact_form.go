@@ -144,7 +144,7 @@ func (f *contactForm) view() string {
 		title = "Edit contact"
 	}
 	labels := []string{"Name", "Email", "Aliases"}
-	labelStyle := lipgloss.NewStyle().Foreground(colorMuted)
+	labelStyle := styleMuted
 	var b strings.Builder
 	b.WriteString(f.styles.title.Render(title))
 	b.WriteString("\n\n")
@@ -221,7 +221,7 @@ func (f *contactNoteForm) view() string {
 	b.WriteString("\n\n")
 	b.WriteString(f.input.View())
 	if f.status != "" {
-		style := lipgloss.NewStyle().Foreground(colorMuted)
+		style := styleMuted
 		if f.isError {
 			style = lipgloss.NewStyle().Foreground(colorError)
 		}

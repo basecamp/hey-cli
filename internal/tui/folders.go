@@ -155,7 +155,7 @@ func (p *folderPicker) view(styles styles, width int) string {
 	if p.creating {
 		b.WriteString(styles.title.Render("Create label"))
 		b.WriteString("\n\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(colorMuted).Render("Name: "))
+		b.WriteString(styleMuted.Render("Name: "))
 		b.WriteString(p.input.View())
 		if p.status != "" {
 			b.WriteString("\n\n")

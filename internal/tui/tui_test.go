@@ -179,8 +179,8 @@ func TestOrderBoxesPreservesFolderWithCollidingIDAndName(t *testing.T) {
 		t.Errorf("Imbox shortcut index = %d, want box index 0", index)
 	}
 	items := boxNavItems(ordered)
-	if items[0].icon == "" || items[1].icon != "" {
-		t.Errorf("navigation icons = %+v", items)
+	if items[0].shortcut == "" || items[1].shortcut != "" {
+		t.Errorf("navigation shortcuts = %+v", items)
 	}
 }
 
@@ -627,6 +627,199 @@ func TestContentListSelectedPosting(t *testing.T) {
 	}
 }
 
+func TestContentListStylesSeenAndUnseenRows(t *testing.T) {
+	unseen := models.Posting{
+		ID:        200,
+		Name:      "Quarterly planning kickoff",
+		Summary:   "Draft agenda attached for review",
+		CreatedAt: "2026-08-20T10:00:00Z",
+		Creator:   models.Contact{Name: "Maria Gonzalez"},
+	}
+	seen := unseen
+	seen.ID = 201
+	seen.Seen = true
+
+	cl := &contentList{}
+	cl.setPostings([]models.Posting{{ID: 199, Name: "Cursor row", CreatedAt: "2026-08-20T09:00:00Z"}, unseen, seen})
+	cl.setSize(100, 20)
+
+	lines := strings.Split(cl.view(), "\n")
+	newHeader := lines[0]
+	cursorLine1 := lines[1]
+	unseenLine1, unseenLine2 := lines[3], lines[4]
+	seenHeader := lines[5]
+	seenLine1, seenLine2 := lines[6], lines[7]
+
+	if !strings.Contains(newHeader, "New for You") || !strings.Contains(newHeader, "\x1b[1;34m") {
+		t.Errorf("the unseen section should open with a bold chrome header: %q", newHeader)
+	}
+	if !strings.Contains(seenHeader, "Previously Seen") {
+		t.Errorf("the seen section should open with its header: %q", seenHeader)
+	}
+	if !strings.Contains(cursorLine1, "\x1b[1;94m") || !strings.Contains(cursorLine1, "│") {
+		t.Errorf("cursor row should show the primary-colored bar: %q", cursorLine1)
+	}
+	if !strings.Contains(unseenLine1, "●") || !strings.Contains(unseenLine1, "\x1b[1;31m") {
+		t.Errorf("unseen row should show the unread dot in the alert color: %q", unseenLine1)
+	}
+	if strings.Contains(seenLine1, "●") {
+		t.Errorf("seen row should not show the unread dot: %q", seenLine1)
+	}
+
+	// Seen rows look the same as unseen rows — the section carries the state.
+	if !strings.Contains(seenLine1, "\x1b[1;97m") || !strings.Contains(seenLine1, "\x1b[2m") {
+		t.Errorf("seen row should keep the full row styling: %q", seenLine1)
+	}
+	if !strings.Contains(unseenLine2, "\x1b[2m") || !strings.Contains(seenLine2, "\x1b[2m") {
+		t.Errorf("second lines should be faint secondary text in both sections: %q / %q", unseenLine2, seenLine2)
+	}
+}
+
+func TestContentListMovesSeenPostingToItsSection(t *testing.T) {
+	cl := &contentList{}
+	cl.setPostings([]models.Posting{
+		{ID: 1, Name: "Weekly release notes", CreatedAt: "2026-08-20T10:00:00Z"},
+		{ID: 2, Name: "Invoice for July hosting", CreatedAt: "2026-08-20T09:00:00Z"},
+		{ID: 3, Name: "Standup notes", CreatedAt: "2026-08-19T10:00:00Z", Seen: true},
+	})
+	cl.setSize(80, 20)
+
+	cl.postings[0].Seen = true
+	cl.resort()
+
+	if cl.postings[0].ID != 2 || cl.postings[1].ID != 1 {
+		t.Errorf("seen posting should move below the unseen ones: %+v", cl.postings)
+	}
+	if got := cl.selectedPosting(); got == nil || got.ID != 1 {
+		t.Errorf("cursor should follow the moved posting: %+v", got)
+	}
+}
+
+func TestContentListAlignsDateColumn(t *testing.T) {
+	long := models.Posting{
+		ID:        300,
+		Name:      strings.Repeat("Quarterly planning update for the leadership group ", 3),
+		Summary:   strings.Repeat("Agenda items and pre-reads for the quarterly review ", 3),
+		CreatedAt: "2026-08-20T10:00:00Z",
+		Creator:   models.Contact{Name: "Maria Gonzalez"},
+	}
+	short := models.Posting{
+		ID:        301,
+		Name:      "Lunch on Friday?",
+		Summary:   "Trattoria at noon",
+		CreatedAt: "2026-08-04T09:00:00Z",
+		Seen:      true,
+		Creator:   models.Contact{Name: "Ana Lucia Ortiz"},
+	}
+
+	cl := &contentList{}
+	cl.setPostings([]models.Posting{long, short})
+	cl.setSize(60, 20)
+
+	// Lines: 0 "New for You", 1-2 long row, 3 "Previously Seen", 4-5 short row.
+	lines := strings.Split(cl.view(), "\n")
+	firstWidth, secondWidth := lipgloss.Width(lines[1]), lipgloss.Width(lines[4])
+	if firstWidth != secondWidth {
+		t.Errorf("dates should end in the same column: row widths %d and %d", firstWidth, secondWidth)
+	}
+	if firstWidth > 60 {
+		t.Errorf("row width %d exceeds the list width 60", firstWidth)
+	}
+
+	dateCol := lipgloss.Width("Aug 20, 2026")
+	for _, second := range []string{lines[2], lines[5]} {
+		if lipgloss.Width(second) > firstWidth-dateCol-2 {
+			t.Errorf("second line reaches into the date column: %q", second)
+		}
+	}
+}
+
+func TestChromeUsesBlueBoldConvention(t *testing.T) {
+	if rule := renderRule(40, "Imbox"); !strings.Contains(rule, "\x1b[34m") {
+		t.Errorf("rules should render in regular blue: %q", rule)
+	}
+
+	items := []navItem{{label: "Mail"}, {label: "Contacts"}, {label: "Calendar"}}
+	row := renderNavRow(items, 0, true, 60, false)
+	if !strings.Contains(row, "\x1b[1;33mMail") {
+		t.Errorf("the selected tab should be bold yellow: %q", row)
+	}
+	if !strings.Contains(row, "\x1b[1;34mContacts") {
+		t.Errorf("inactive tabs should be bold blue: %q", row)
+	}
+	if unfocused := renderNavRow(items, 0, false, 60, false); !strings.Contains(unfocused, "\x1b[1;33mMail") {
+		t.Errorf("the selected tab should stay bold yellow without focus: %q", unfocused)
+	}
+
+	shortcuts := renderNavRow([]navItem{{shortcut: "I", label: "Imbox"}, {shortcut: "O", label: "Contacts"}}, 0, true, 60, false)
+	if !strings.Contains(shortcuts, "\x1b[1;4;33;4mI\x1b[m") {
+		t.Errorf("the selected tab should underline its shortcut letter: %q", shortcuts)
+	}
+	if !strings.Contains(shortcuts, "\x1b[1;4;34;4mo\x1b[m") {
+		t.Errorf("inactive tabs should underline the shortcut letter inside the word: %q", shortcuts)
+	}
+
+	bar := newHelpBar(newStyles())
+	bar.setWidth(60)
+	bar.setBindings([]helpBinding{{"r", "reply"}})
+	view := bar.view()
+	if !strings.Contains(view, "\x1b[1;34mr") || !strings.Contains(view, "\x1b[34mreply") {
+		t.Errorf("hotkeys should be bold blue with regular blue labels: %q", view)
+	}
+}
+
+func TestTopRuleCentersHeyAndRightAlignsAccount(t *testing.T) {
+	line := renderTopRule(80, "frank.castillo@example.com")
+	if got := lipgloss.Width(line); got != 80 {
+		t.Errorf("top rule width = %d, want 80", got)
+	}
+	if !strings.Contains(line, "\x1b[1;34mHEY") {
+		t.Errorf("HEY should be bold chrome: %q", line)
+	}
+	if !strings.Contains(line, "\x1b[1;34mfrank.castillo@example.com\x1b[m \x1b[34m──") {
+		t.Errorf("the account should be bold and sit before the closing rule: %q", line)
+	}
+
+	stripped := stripANSI(line)
+	heyStart := lipgloss.Width(stripped[:strings.Index(stripped, "HEY")])
+	if heyStart < 36 || heyStart > 40 {
+		t.Errorf("HEY should be centered at width 80, found at column %d: %q", heyStart, stripped)
+	}
+	if !strings.HasSuffix(stripped, "frank.castillo@example.com ──") {
+		t.Errorf("the account should be right-aligned: %q", stripped)
+	}
+}
+
+func stripANSI(s string) string {
+	var b strings.Builder
+	inEscape := false
+	for _, r := range s {
+		switch {
+		case inEscape:
+			if r == 'm' {
+				inEscape = false
+			}
+		case r == '\x1b':
+			inEscape = true
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func TestTruncateToWidth(t *testing.T) {
+	if got := truncateToWidth("short", 10); got != "short" {
+		t.Errorf("truncateToWidth kept = %q, want %q", got, "short")
+	}
+	if got := truncateToWidth("a much longer sentence", 10); got != "a much ..." {
+		t.Errorf("truncateToWidth cut = %q, want %q", got, "a much ...")
+	}
+	if got := truncateToWidth("abcdef", 3); got != "" {
+		t.Errorf("truncateToWidth narrow = %q, want empty", got)
+	}
+}
+
 // --- View rendering ---
 
 func TestRenderRuleBoundsLongLabels(t *testing.T) {
@@ -640,11 +833,11 @@ func TestRenderRuleBoundsLongLabels(t *testing.T) {
 
 func TestViewShowsHeader(t *testing.T) {
 	m := modelWithBoxes()
-	v := m.View()
-	if !strings.Contains(v.Content, "HEY") {
+	content := stripANSI(m.View().Content)
+	if !strings.Contains(content, "HEY") {
 		t.Error("View should contain HEY header")
 	}
-	if !strings.Contains(v.Content, "Mail") {
+	if !strings.Contains(content, "Mail") {
 		t.Error("View should contain Mail section")
 	}
 }
@@ -652,7 +845,7 @@ func TestViewShowsHeader(t *testing.T) {
 func TestViewShowsBoxNames(t *testing.T) {
 	m := modelWithBoxes()
 	v := m.View()
-	if !strings.Contains(v.Content, "Imbox") {
+	if !strings.Contains(stripANSI(v.Content), "Imbox") {
 		t.Error("View should contain Imbox")
 	}
 }

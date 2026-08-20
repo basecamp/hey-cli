@@ -276,7 +276,7 @@ func (f *composeForm) view() string {
 	b.WriteString("\n")
 
 	labels := []string{"To", "Cc", "Bcc", "Subject"}
-	labelStyle := lipgloss.NewStyle().Foreground(colorMuted)
+	labelStyle := styleMuted
 	for i := range f.inputs {
 		b.WriteString(labelStyle.Render(fmt.Sprintf("%8s: ", labels[i])))
 		b.WriteString(f.inputs[i].View())
@@ -291,7 +291,7 @@ func (f *composeForm) view() string {
 	}
 
 	if f.status != "" {
-		st := lipgloss.NewStyle().Foreground(colorMuted)
+		st := styleMuted
 		if f.isError {
 			st = lipgloss.NewStyle().Foreground(colorError)
 		}

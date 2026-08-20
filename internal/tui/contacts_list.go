@@ -78,13 +78,13 @@ func (l *contactList) remove(id int64) {
 
 func (l *contactList) view() string {
 	if len(l.contacts) == 0 {
-		return lipgloss.NewStyle().Foreground(colorMuted).Render("  (no contacts)")
+		return styleMuted.Render("  (no contacts)")
 	}
 	visible := max(l.height/2, 1)
 	end := min(l.scrollOff+visible, len(l.contacts))
 	selected := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
 	normal := lipgloss.NewStyle().Foreground(colorBright)
-	muted := lipgloss.NewStyle().Foreground(colorMuted)
+	muted := styleMuted
 
 	var b strings.Builder
 	for i := l.scrollOff; i < end; i++ {

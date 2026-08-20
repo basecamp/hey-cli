@@ -162,7 +162,7 @@ func loadingView(width, contentHeight int, phase float64) string {
 	frame := hourglassFrames[hourglassFrameIndex(phase)]
 
 	glass := lipgloss.NewStyle().Foreground(colorPrimary)
-	label := lipgloss.NewStyle().Foreground(colorMuted)
+	label := styleMuted
 
 	// Build centered lines
 	padLeft := (width - hourglassVisualWidth) / 2

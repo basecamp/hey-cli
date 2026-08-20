@@ -148,7 +148,7 @@ func (f *bulkReplyForm) previewContent(width int) string {
 	}
 	b.WriteString("\n\n")
 
-	labelStyle := lipgloss.NewStyle().Foreground(colorMuted)
+	labelStyle := styleMuted
 	for i, entry := range f.draft.Entries {
 		writeBulkReplyWrappedLine(&b, fmt.Sprintf("%d. ", i+1), terminalSafeAttachmentText(entry.TopicName), width)
 		writeBulkReplyContacts(&b, "To", entry.Addressed.Directly, width, labelStyle)
@@ -171,12 +171,12 @@ func (f *bulkReplyForm) previewContent(width int) string {
 func (f *bulkReplyForm) composeView() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n", f.styles.title.Render(fmt.Sprintf("Bulk reply to %d %s", len(f.draft.Entries), tuiThreadNoun(len(f.draft.Entries)))))
-	b.WriteString(lipgloss.NewStyle().Foreground(colorMuted).Render("The exact recipients from the preview and HEY's name tag will be preserved."))
+	b.WriteString(styleMuted.Render("The exact recipients from the preview and HEY's name tag will be preserved."))
 	b.WriteString("\n\n")
 	b.WriteString(f.body.View())
 	b.WriteString("\n")
 	if f.status != "" {
-		statusStyle := lipgloss.NewStyle().Foreground(colorMuted)
+		statusStyle := styleMuted
 		if f.isError {
 			statusStyle = lipgloss.NewStyle().Foreground(colorError)
 		}

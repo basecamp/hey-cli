@@ -59,7 +59,7 @@ func (f *mailSearchForm) view() string {
 	var b strings.Builder
 	b.WriteString(f.styles.title.Render("Search email"))
 	b.WriteString("\n\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(colorMuted).Render("Search: "))
+	b.WriteString(styleMuted.Render("Search: "))
 	b.WriteString(f.input.View())
 	if f.status != "" {
 		b.WriteString("\n\n")

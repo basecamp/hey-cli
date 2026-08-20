@@ -174,7 +174,7 @@ type placedEvent struct {
 
 func renderDayView(events, todos, habits []models.Recording, _ time.Time, width, _ int) string {
 	var b strings.Builder
-	muted := lipgloss.NewStyle().Foreground(colorMuted)
+	muted := styleMuted
 	primary := lipgloss.NewStyle().Foreground(colorPrimary)
 
 	// Habits ribbon above columns
@@ -427,7 +427,7 @@ type weekDayInfo struct {
 
 func renderWeekView(events, todos, habits []models.Recording, anchor time.Time, firstWeekDay time.Weekday, width, _ int, dayLabels map[string]string) string {
 	var b strings.Builder
-	muted := lipgloss.NewStyle().Foreground(colorMuted)
+	muted := styleMuted
 	bright := lipgloss.NewStyle().Foreground(colorBright)
 	primary := lipgloss.NewStyle().Foreground(colorPrimary)
 
@@ -603,10 +603,10 @@ func weekDayColumnLabel(d time.Time, isFirstCol bool) string {
 
 func renderYearView(events []models.Recording, anchor time.Time, firstWeekDay time.Weekday, width, _ int, dayLabels map[string]string) string {
 	var b strings.Builder
-	muted := lipgloss.NewStyle().Foreground(colorMuted)
+	muted := styleMuted
 	bright := lipgloss.NewStyle().Foreground(colorBright)
 	primary := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
-	faint := lipgloss.NewStyle().Foreground(colorMuted).Faint(true)
+	faint := styleMuted.Foreground(colorMuted) // extra-dim filler days outside the year
 
 	loc := anchor.Location()
 	yearStart := time.Date(anchor.Year(), 1, 1, 0, 0, 0, 0, loc)

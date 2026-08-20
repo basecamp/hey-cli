@@ -38,10 +38,51 @@ type contentList struct {
 }
 
 func (c *contentList) setPostings(postings []models.Posting) {
+	if !c.hideSeenState {
+		postings = partitionSeen(postings)
+	}
 	c.postings = postings
 	c.cursor = 0
 	c.scrollOff = 0
 	c.clearSelected()
+}
+
+// partitionSeen orders unseen postings before seen ones, keeping the
+// relative order inside each group. This forms the "New for You" and
+// "Previously Seen" sections, as in the HEY web app.
+func partitionSeen(postings []models.Posting) []models.Posting {
+	ordered := make([]models.Posting, 0, len(postings))
+	for _, p := range postings {
+		if !p.Seen {
+			ordered = append(ordered, p)
+		}
+	}
+	for _, p := range postings {
+		if p.Seen {
+			ordered = append(ordered, p)
+		}
+	}
+	return ordered
+}
+
+// resort re-partitions the list after a posting changes its seen state and
+// keeps the cursor on the same posting.
+func (c *contentList) resort() {
+	if c.hideSeenState {
+		return
+	}
+	var id int64
+	if p := c.selectedPosting(); p != nil {
+		id = p.ID
+	}
+	c.postings = partitionSeen(c.postings)
+	for i := range c.postings {
+		if c.postings[i].ID == id {
+			c.cursor = i
+			break
+		}
+	}
+	c.ensureVisible()
 }
 
 func (c *contentList) setSize(w, h int) {
@@ -63,11 +104,29 @@ func (c *contentList) moveDown() {
 	}
 }
 
-func (c *contentList) ensureVisible() {
-	visibleItems := c.height / 2 // 2 lines per posting
-	if visibleItems < 1 {
-		visibleItems = 1
+// headerCount reports how many section headers the list shows.
+func (c *contentList) headerCount() int {
+	if c.hideSeenState || len(c.postings) == 0 {
+		return 0
 	}
+	n := 0
+	if !c.postings[0].Seen {
+		n++ // "New for You"
+	}
+	if c.postings[len(c.postings)-1].Seen {
+		n++ // "Previously Seen"
+	}
+	return n
+}
+
+// visibleItems reports how many postings fit: 2 lines per posting, minus
+// one line per section header.
+func (c *contentList) visibleItems() int {
+	return max((c.height-c.headerCount())/2, 1)
+}
+
+func (c *contentList) ensureVisible() {
+	visibleItems := c.visibleItems()
 	if c.cursor < c.scrollOff {
 		c.scrollOff = c.cursor
 	}
@@ -115,31 +174,60 @@ func (c *contentList) clearSelected() {
 
 func (c *contentList) view() string {
 	if len(c.postings) == 0 {
-		return lipgloss.NewStyle().Foreground(colorMuted).Render("  (empty)")
-	}
-
-	visibleItems := c.height / 2
-	if visibleItems < 1 {
-		visibleItems = 1
+		return styleMuted.Render("  (empty)")
 	}
 
 	var b strings.Builder
-	end := min(c.scrollOff+visibleItems, len(c.postings))
+	end := min(c.scrollOff+c.visibleItems(), len(c.postings))
 
-	selected := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
-	normal := lipgloss.NewStyle().Foreground(colorBright)
-	muted := lipgloss.NewStyle().Foreground(colorMuted)
-	unseenDot := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
+	cursorBar := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
+	unseenDot := lipgloss.NewStyle().Foreground(colorAlert).Bold(true)
 	selectedMark := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
+
+	// Every row uses the same styles: bold bright subject; date, sender and
+	// excerpt in the faint secondary style. Read state shows as the section a
+	// row sits in ("New for You" / "Previously Seen") plus the alert dot; the
+	// cursor row renders bold on top of the base styles.
+	subjectBase := lipgloss.NewStyle().Foreground(colorBright).Bold(true)
+	dateBase := styleMuted
+	senderBase := styleMuted
+	excerptBase := styleMuted
+
+	// The date gets its own right-hand column, as in the HEY web app. Both
+	// lines of a row stop before the column, so the right edge stays clean.
+	dateCol := 0
+	for i := c.scrollOff; i < end; i++ {
+		dateCol = max(dateCol, lipgloss.Width(formatDisplayDate(c.postings[i].CreatedAt)))
+	}
+	prefixWidth := 4 // "│ ● " or "    "
+	textWidth := max(c.width-prefixWidth-2-dateCol, 10)
 
 	for i := c.scrollOff; i < end; i++ {
 		p := c.postings[i]
 		isCursor := i == c.cursor
 
+		if !c.hideSeenState {
+			if i == 0 && !p.Seen {
+				fmt.Fprintln(&b, sectionHeader("New for You", c.width))
+			}
+			if p.Seen && (i == 0 || !c.postings[i-1].Seen) {
+				fmt.Fprintln(&b, sectionHeader("Previously Seen", c.width))
+			}
+		}
+
+		emphasize := func(base lipgloss.Style) lipgloss.Style {
+			if isCursor {
+				base = base.Bold(true)
+			}
+			return base
+		}
+
 		// Line 1: [│] [●] Subject (count)                Nov 24, 2025
+		// The cursor shows only as the bar on the left; the row keeps its
+		// seen/unseen colors.
 		var line1 strings.Builder
 		if isCursor {
-			line1.WriteString(selected.Render("│") + " ")
+			line1.WriteString(cursorBar.Render("│") + " ")
 		} else {
 			line1.WriteString("  ")
 		}
@@ -170,31 +258,18 @@ func (c *contentList) view() string {
 		}
 
 		date := formatDisplayDate(p.CreatedAt)
+		subject = truncateToWidth(subject, textWidth)
+		// Pad through the gap and right-align the date within its column.
+		gap := max(textWidth-lipgloss.Width(subject)+2+dateCol-lipgloss.Width(date), 1)
 
-		// Calculate available width for subject
-		dateWidth := len(date)
-		prefixWidth := 4                                         // "│ ● " or "    "
-		subjectWidth := max(c.width-prefixWidth-dateWidth-2, 10) // 2 for gap
-		if len(subject) > subjectWidth {
-			subject = subject[:subjectWidth-3] + "..."
-		}
-		gap := max(c.width-prefixWidth-len(subject)-dateWidth, 1)
-
-		// Subject always bright/white, date always muted (cursor adds bold+color)
-		if isCursor {
-			line1.WriteString(selected.Render(subject))
-			line1.WriteString(strings.Repeat(" ", gap))
-			line1.WriteString(selected.Render(date))
-		} else {
-			line1.WriteString(normal.Render(subject))
-			line1.WriteString(strings.Repeat(" ", gap))
-			line1.WriteString(muted.Render(date))
-		}
+		line1.WriteString(emphasize(subjectBase).Render(subject))
+		line1.WriteString(strings.Repeat(" ", gap))
+		line1.WriteString(emphasize(dateBase).Render(date))
 
 		// Line 2: [│]   extension@ Creator Name — excerpt...
 		var line2 strings.Builder
 		if isCursor {
-			line2.WriteString(selected.Render("│") + "   ")
+			line2.WriteString(cursorBar.Render("│") + "   ")
 		} else {
 			line2.WriteString("    ")
 		}
@@ -208,36 +283,56 @@ func (c *contentList) view() string {
 		}
 
 		// Build: [extension@] Creator Name — Summary excerpt
-		var desc string
+		sender := name
 		if len(p.Extenzions) > 0 {
-			desc = p.Extenzions[0].Name + "@ " + name
-		} else {
-			desc = name
+			sender = p.Extenzions[0].Name + "@ " + name
 		}
 
 		// Summary is the last message excerpt — always show it
+		var excerpt string
 		if p.Summary != "" && p.Summary != p.Name {
-			desc += " — " + p.Summary
+			excerpt = " — " + p.Summary
 		}
 
-		descWidth := max(c.width-4-2, 10) // 4 prefix + 2 margin
-		if lipgloss.Width(desc) > descWidth {
-			runes := []rune(desc)
-			for lipgloss.Width(string(runes)) > descWidth-3 && len(runes) > 0 {
-				runes = runes[:len(runes)-1]
-			}
-			desc = string(runes) + "..."
-		}
-
-		if isCursor {
-			line2.WriteString(selected.Render(desc))
+		if lipgloss.Width(sender) > textWidth {
+			sender = truncateToWidth(sender, textWidth)
+			excerpt = ""
 		} else {
-			line2.WriteString(muted.Render(desc))
+			excerpt = truncateToWidth(excerpt, textWidth-lipgloss.Width(sender))
 		}
+
+		line2.WriteString(emphasize(senderBase).Render(sender))
+		line2.WriteString(emphasize(excerptBase).Render(excerpt))
 
 		fmt.Fprintln(&b, line1.String())
 		fmt.Fprintln(&b, line2.String())
 	}
 
 	return b.String()
+}
+
+// sectionHeader renders a list section label with a rule filling the rest
+// of the width: "New for You ──────────".
+func sectionHeader(label string, width int) string {
+	s := lipgloss.NewStyle().Foreground(colorChrome).Bold(true).Render(label)
+	if fill := width - lipgloss.Width(label) - 3; fill > 0 {
+		s += " " + lipgloss.NewStyle().Foreground(colorChrome).Render(strings.Repeat("─", fill))
+	}
+	return s
+}
+
+// truncateToWidth trims s so its rendered width fits in w cells, appending
+// "..." when anything was cut. Returns "" when w cannot hold the ellipsis.
+func truncateToWidth(s string, w int) string {
+	if lipgloss.Width(s) <= w {
+		return s
+	}
+	if w <= 3 {
+		return ""
+	}
+	runes := []rune(s)
+	for lipgloss.Width(string(runes)) > w-3 && len(runes) > 0 {
+		runes = runes[:len(runes)-1]
+	}
+	return string(runes) + "..."
 }
