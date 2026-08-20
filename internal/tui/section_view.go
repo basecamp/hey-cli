@@ -62,6 +62,10 @@ type sectionView interface {
 
 	// Loading reports whether the section is waiting on data.
 	Loading() bool
+
+	// Restyle re-renders anything the section cached with the previous palette.
+	// The new styles are already in viewContext when it is called.
+	Restyle()
 }
 
 // inputCapturer is implemented by section views that can open a text form.

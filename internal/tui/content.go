@@ -203,7 +203,8 @@ func (c *contentList) view() string {
 	var b strings.Builder
 	end := min(c.scrollOff+c.visibleItemsFrom(c.scrollOff), len(c.postings))
 
-	cursorBar := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
+	cursorMarker, _ := cursorStyles()
+	selectedGap := selectionStyle(lipgloss.NewStyle())
 	unseenDot := lipgloss.NewStyle().Foreground(colorAlert).Bold(true)
 	selectedMark := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
 
@@ -233,11 +234,18 @@ func (c *contentList) view() string {
 			fmt.Fprintln(&b, sectionHeader(label, c.width))
 		}
 
+		// The cursor row renders bold on top of the base styles and, when the
+		// theme has a usable selection, paints every segment — gaps included —
+		// with the selection background so it reads as one highlighted line.
 		emphasize := func(base lipgloss.Style) lipgloss.Style {
 			if isCursor {
-				base = base.Bold(true)
+				base = selectionStyle(base.Bold(true))
 			}
 			return base
+		}
+		gapStyle, dot, mark := lipgloss.NewStyle(), unseenDot, selectedMark
+		if isCursor {
+			gapStyle, dot, mark = selectedGap, selectionStyle(unseenDot), selectionStyle(selectedMark)
 		}
 
 		// Line 1: [│] [●] Subject (count)                Nov 24, 2025
@@ -245,16 +253,16 @@ func (c *contentList) view() string {
 		// seen/unseen colors.
 		var line1 strings.Builder
 		if isCursor {
-			line1.WriteString(cursorBar.Render("│") + " ")
+			line1.WriteString(cursorMarker.Render("│") + gapStyle.Render(" "))
 		} else {
 			line1.WriteString("  ")
 		}
 		if _, isSelected := c.selected[p.ID]; isSelected {
-			line1.WriteString(selectedMark.Render("✓") + " ")
+			line1.WriteString(mark.Render("✓") + gapStyle.Render(" "))
 		} else if !p.Seen && !c.hideSeenState {
-			line1.WriteString(unseenDot.Render("●") + " ")
+			line1.WriteString(dot.Render("●") + gapStyle.Render(" "))
 		} else {
-			line1.WriteString("  ")
+			line1.WriteString(gapStyle.Render("  "))
 		}
 
 		// Subject: Posting.Name is the thread title, Summary is the last message excerpt
@@ -281,13 +289,13 @@ func (c *contentList) view() string {
 		gap := max(textWidth-lipgloss.Width(subject)+2+dateCol-lipgloss.Width(date), 1)
 
 		line1.WriteString(emphasize(subjectBase).Render(subject))
-		line1.WriteString(strings.Repeat(" ", gap))
+		line1.WriteString(gapStyle.Render(strings.Repeat(" ", gap)))
 		line1.WriteString(emphasize(dateBase).Render(date))
 
 		// Line 2: [│]   extension@ Creator Name — excerpt...
 		var line2 strings.Builder
 		if isCursor {
-			line2.WriteString(cursorBar.Render("│") + "   ")
+			line2.WriteString(cursorMarker.Render("│") + gapStyle.Render("   "))
 		} else {
 			line2.WriteString("    ")
 		}

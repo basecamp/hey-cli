@@ -82,7 +82,8 @@ func (l *contactList) view() string {
 	}
 	visible := max(l.height/2, 1)
 	end := min(l.scrollOff+visible, len(l.contacts))
-	selected := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
+	cursorMarker, selected := cursorStyles()
+	selectedGap := selectionStyle(lipgloss.NewStyle())
 	normal := lipgloss.NewStyle().Foreground(colorBright)
 	muted := styleMuted
 
@@ -92,14 +93,14 @@ func (l *contactList) view() string {
 		cursor := i == l.cursor
 		prefix := "  "
 		if cursor {
-			prefix = selected.Render("│") + " "
+			prefix = cursorMarker.Render("│") + selectedGap.Render(" ")
 		}
 		name := truncateStr(contact.Name, max(l.width-4, 10))
 		email := truncateStr(contact.EmailAddress, max(l.width-18, 10))
 		line2 := fmt.Sprintf("#%d  %s", contact.ID, email)
 		if cursor {
 			fmt.Fprintf(&b, "%s%s\n", prefix, selected.Render(name))
-			fmt.Fprintf(&b, "%s  %s\n", selected.Render("│"), selected.Render(line2))
+			fmt.Fprintf(&b, "%s%s%s\n", cursorMarker.Render("│"), selectedGap.Render("  "), selected.Render(line2))
 		} else {
 			fmt.Fprintf(&b, "%s%s\n", prefix, normal.Render(name))
 			fmt.Fprintf(&b, "    %s\n", muted.Render(line2))

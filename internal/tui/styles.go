@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"image/color"
+	"math"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -14,12 +16,16 @@ import (
 // Omarchy's mapping (default/themed/*.tpl): White=foreground,
 // BrightWhite=bright_foreground, BrightBlack=muted, Black=background,
 // and the color names map to their theme keys (BrightYellow=bright_yellow…).
+//
+// applyTheme lays a Theme's accent overlay on top of the themed slots. They are
+// mutated only from the Bubble Tea event loop (startup and ThemeChangedMsg),
+// which is also the only place that renders.
 var (
-	colorPrimary = lipgloss.BrightBlue  // titles, selected items, sender names
-	colorMuted   = lipgloss.BrightBlack // decorative filler only — see styleMuted
-	colorBright  = lipgloss.BrightWhite // emphasized text
-	colorAlert   = lipgloss.Red         // attention: Omarchy themes signal alerts with red
-	colorError   = lipgloss.Red         // errors
+	colorPrimary color.Color = lipgloss.BrightBlue  // titles, selected items, sender names
+	colorMuted   color.Color = lipgloss.BrightBlack // decorative filler only — see styleMuted
+	colorBright  color.Color = lipgloss.BrightWhite // emphasized text
+	colorAlert               = lipgloss.Red         // attention: Omarchy themes signal alerts with red
+	colorError   color.Color = lipgloss.Red         // errors
 
 	// Interface chrome (rules, tabs, hotkeys) follows eza's convention for
 	// dates and directories: regular Blue for secondary chrome, bold Blue
@@ -29,6 +35,9 @@ var (
 	// The selected tab uses eza's file-owner yellow. Tabs are always bold;
 	// color alone marks the selection.
 	colorActive = lipgloss.Yellow
+
+	colorSelection color.Color                  // cursor row background; nil means none
+	colorOnAccent  color.Color = lipgloss.Black // pill text on an accent-filled background
 )
 
 // styleMuted dims the theme's default foreground with the SGR faint
@@ -37,6 +46,80 @@ var (
 // dimmed foreground stays legible everywhere. Use this for all secondary
 // text, borders and separators.
 var styleMuted = lipgloss.NewStyle().Faint(true)
+
+// applyTheme makes theme the active palette. Styles built before the call keep the
+// old colors — rebuild them with newStyles.
+func applyTheme(theme Theme) {
+	colorPrimary = theme.Accent
+	colorMuted = theme.Muted
+	colorBright = theme.Bright
+	colorError = theme.Error
+	colorSelection = nil
+	if theme.Selection != nil && (theme.Trusted || contrastRatio(theme.Accent, theme.Selection) >= minSelectionContrast) {
+		colorSelection = theme.Selection
+	}
+	// The pill keeps its classic black text on the ANSI accent, but a themed
+	// accent can be dark enough that black is unreadable on it — lupine's blue
+	// carries black at only 3.7:1 — so pick whichever of black or white reads
+	// better there.
+	colorOnAccent = lipgloss.Black
+	if nc, ok := theme.Accent.(lipgloss.NoColor); ok {
+		colorOnAccent = nc
+	} else if theme.Accent != color.Color(lipgloss.BrightBlue) &&
+		contrastRatio(lipgloss.BrightWhite, theme.Accent) > contrastRatio(lipgloss.Black, theme.Accent) {
+		colorOnAccent = lipgloss.BrightWhite
+	}
+	if !theme.Dark && theme.Bright == lipgloss.BrightWhite {
+		// Bright white is the background on a light terminal; ANSI black is its text.
+		colorBright = lipgloss.Black
+	}
+}
+
+// selectionStyle returns a style that paints the selection background when the
+// theme has one, and the style unchanged otherwise. Every segment of a cursor row
+// goes through it so the row reads as one highlighted line.
+func selectionStyle(s lipgloss.Style) lipgloss.Style {
+	if colorSelection == nil {
+		return s
+	}
+	return s.Background(colorSelection)
+}
+
+// applyTheme keeps colorSelection only when the accent still reads on it: the
+// cursor row is accent-colored text, and on a third of Omarchy's themes the
+// accent-on-selection pair falls under 3:1 while 4.5:1 is where bold text
+// stays crisp. Below that the row keeps the accent and drops the tint.
+const minSelectionContrast = 4.5
+
+// cursorStyles returns the styles for the cursor row of a list: the marker (the
+// │ bar) and the text. Both are the accent, bold — the accent is what makes the
+// row read as selected — over the selection background when the theme has a
+// usable one.
+func cursorStyles() (marker, text lipgloss.Style) {
+	marker = selectionStyle(lipgloss.NewStyle().Foreground(colorPrimary).Bold(true))
+	return marker, marker
+}
+
+// contrastRatio is WCAG relative-luminance contrast, 1 (identical) to 21.
+func contrastRatio(a, b color.Color) float64 {
+	la, lb := relativeLuminance(a), relativeLuminance(b)
+	if la < lb {
+		la, lb = lb, la
+	}
+	return (la + 0.05) / (lb + 0.05)
+}
+
+func relativeLuminance(c color.Color) float64 {
+	r, g, b, _ := c.RGBA()
+	channel := func(v uint32) float64 {
+		s := float64(v) / 0xffff
+		if s <= 0.03928 {
+			return s / 12.92
+		}
+		return math.Pow((s+0.055)/1.055, 2.4)
+	}
+	return 0.2126*channel(r) + 0.7152*channel(g) + 0.0722*channel(b)
+}
 
 type styles struct {
 	app       lipgloss.Style
@@ -55,7 +138,7 @@ func newStyles() styles {
 	return styles{
 		app:       lipgloss.NewStyle().Padding(1, 2),
 		title:     lipgloss.NewStyle().Foreground(colorPrimary).Bold(true),
-		pill:      lipgloss.NewStyle().Foreground(lipgloss.Black).Background(colorPrimary).Bold(true).Padding(0, 1),
+		pill:      lipgloss.NewStyle().Foreground(colorOnAccent).Background(colorPrimary).Bold(true).Padding(0, 1),
 		entryFrom: lipgloss.NewStyle().Foreground(colorPrimary).Bold(true),
 		entryDate: styleMuted,
 		entryBody: lipgloss.NewStyle(),

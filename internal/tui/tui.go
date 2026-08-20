@@ -34,6 +34,7 @@ type model struct {
 	vc      *viewContext
 	rootSDK *hey.Client
 	cancel  context.CancelFunc
+	theme   Theme
 	styles  styles
 	help    helpBar
 
@@ -76,6 +77,8 @@ func newModel() model {
 }
 
 func newModelWithMailAccounts(rootSDK, sdk *hey.Client, selected string) model {
+	theme := ResolveTheme()
+	applyTheme(theme)
 	s := newStyles()
 	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118: cancel stored, called on ctrl+c
 	vc := newViewContext(ctx, rootSDK, sdk, s)
@@ -93,6 +96,7 @@ func newModelWithMailAccounts(rootSDK, sdk *hey.Client, selected string) model {
 		vc:                  vc,
 		rootSDK:             rootSDK,
 		cancel:              cancel,
+		theme:               theme,
 		styles:              s,
 		help:                newHelpBar(s),
 		section:             sectionMail,
@@ -133,7 +137,24 @@ func (m model) Init() tea.Cmd {
 		m.stampViewCmd(m.activeView.Init()),
 		loadMailAccounts(m.vc.ctx, m.rootSDK, strconv.FormatInt(m.mailAccount.id, 10)),
 		spinnerTick(),
+		tea.RequestBackgroundColor,
+		watchThemeCmd(omarchyWatchDir(userHomeDir())),
 	)
+}
+
+// restyle makes theme the active palette and refreshes every copy of the styles:
+// the model's, the view context's, the help bar's, and whatever the sections cached.
+func (m *model) restyle(theme Theme) {
+	m.theme = theme
+	applyTheme(theme)
+	m.styles = newStyles()
+	m.vc.styles = m.styles
+	m.help.setStyles(m.styles)
+	for _, view := range []sectionView{m.mailView, m.contactsView, m.calendarView, m.journalView} {
+		if view != nil {
+			view.Restyle()
+		}
+	}
 }
 
 // --- Update ---
@@ -203,6 +224,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ctrlCOnce = false
 		m.updateHelpBindings()
 		return m, nil
+
+	case tea.BackgroundColorMsg:
+		// The terminal knows its background; a theme file that states a mode knows better.
+		if !m.theme.HasMode && m.theme.Dark != msg.IsDark() {
+			theme := m.theme
+			theme.Dark = msg.IsDark()
+			m.restyle(theme)
+		}
+		return m, nil
+
+	case themeChangedMsg:
+		// omarchy-theme-set removes the theme directory before moving the new one in.
+		// Mid-swap there is nothing to read yet; keep the current palette and wait
+		// for the move.
+		if theme := ResolveTheme(); theme.Source != "" || omarchyThemeDir(userHomeDir()) == "" {
+			if !theme.HasMode {
+				// Carry the last known mode for now and ask the terminal again:
+				// the switch usually retints the terminal too, and the
+				// BackgroundColorMsg reply corrects a mode-less theme.
+				theme.Dark = m.theme.Dark
+			}
+			m.restyle(theme)
+		}
+		return m, tea.Batch(watchThemeCmd(omarchyWatchDir(userHomeDir())), tea.RequestBackgroundColor)
 
 	case screenerClosedMsg:
 		return m.closeScreener()

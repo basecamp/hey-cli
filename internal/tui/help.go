@@ -31,6 +31,10 @@ func (h *helpBar) setBindings(bindings []helpBinding) {
 	h.bindings = bindings
 }
 
+func (h *helpBar) setStyles(s styles) {
+	h.styles = s
+}
+
 // height returns the number of lines the help bar occupies.
 func (h helpBar) height() int {
 	v := h.view()

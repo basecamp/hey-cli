@@ -189,6 +189,14 @@ func (v *calendarView) InThread() bool { return v.inThread }
 func (v *calendarView) ExitThread()    { v.inThread = false }
 func (v *calendarView) Loading() bool  { return v.loading }
 
+// Restyle re-renders the day/week/year grid, which caches styled output in its
+// viewport. The recording detail is plain text and needs nothing.
+func (v *calendarView) Restyle() {
+	offset := v.contentVP.YOffset()
+	v.rebuildView()
+	v.contentVP.SetYOffset(offset)
+}
+
 func (v *calendarView) Resize(width, height int) {
 	v.contentVP.SetWidth(width)
 	v.contentVP.SetHeight(height)

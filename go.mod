@@ -9,6 +9,7 @@ require (
 	github.com/basecamp/actioncable-go v0.0.0-20260819125529-39dd29b8e4d1
 	github.com/basecamp/hey-sdk/go v0.7.0
 	github.com/charmbracelet/x/ansi v0.11.8
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/gofrs/flock v0.13.0
 	github.com/itchyny/gojq v0.12.19
 	github.com/mattn/go-runewidth v0.0.28

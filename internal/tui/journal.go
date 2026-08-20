@@ -124,6 +124,10 @@ func (v *journalView) InThread() bool { return v.inThread }
 func (v *journalView) ExitThread()    {} // no-op: journal always shows content
 func (v *journalView) Loading() bool  { return v.loading }
 
+// Restyle is a no-op: the journal caches plain text and Kitty placeholders, neither
+// of which carries palette colors. The date list renders live.
+func (v *journalView) Restyle() {}
+
 func (v *journalView) Resize(width, height int) {
 	v.topicViewport.SetWidth(width)
 	v.topicViewport.SetHeight(height)

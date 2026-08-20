@@ -155,6 +155,9 @@ func (v *screenerView) Init() tea.Cmd {
 	return v.requestPending(1)
 }
 
+// Restyle is a no-op: the screener keeps plain rows and styles them on every View.
+func (v *screenerView) Restyle() {}
+
 func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case screenerPendingLoadedMsg:
@@ -556,7 +559,12 @@ func screenerRowName(row screenerRow) string {
 }
 
 func renderScreenerRows(pane *screenerPane, visible, width int) string {
-	selected := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
+	// The cursor row goes through the same helpers as Mail and Contacts so a
+	// theme's selection background tints every segment of it, gaps included.
+	// Every text segment on it takes the accent, as in Mail: the selection is
+	// gated for accent-on-selection contrast, not muted-on-selection.
+	marker, selected := cursorStyles()
+	selectedGap := selectionStyle(lipgloss.NewStyle())
 	normal := lipgloss.NewStyle().Foreground(colorBright)
 	muted := lipgloss.NewStyle().Foreground(colorMuted)
 
@@ -566,32 +574,24 @@ func renderScreenerRows(pane *screenerPane, visible, width int) string {
 		row := pane.rows[index]
 		isCursor := index == pane.cursor
 
-		prefix := "  "
-		if isCursor {
-			prefix = selected.Render("│") + " "
-		}
-
 		trailing := truncateStr(row.trailing, max(width/2, 10))
 		name := truncateStr(screenerRowName(row), max(width-lipgloss.Width(trailing)-6, 10))
-		gap := max(width-4-lipgloss.Width(name)-lipgloss.Width(trailing), 1)
+		gap := strings.Repeat(" ", max(width-4-lipgloss.Width(name)-lipgloss.Width(trailing), 1))
+		detail := truncateStr(row.detail, max(width-6, 10))
 
-		b.WriteString(prefix)
 		if isCursor {
-			b.WriteString(selected.Render(name))
-		} else {
-			b.WriteString(normal.Render(name))
+			b.WriteString(marker.Render("│") + selectedGap.Render(" ") + selected.Render(name) + selectedGap.Render(gap))
+			if trailing != "" {
+				b.WriteString(selected.Render(trailing))
+			}
+			b.WriteString("\n" + marker.Render("│") + selectedGap.Render("   ") + selected.Render(detail) + "\n")
+			continue
 		}
-		b.WriteString(strings.Repeat(" ", gap))
+		b.WriteString("  " + normal.Render(name) + gap)
 		if trailing != "" {
 			b.WriteString(muted.Render(trailing))
 		}
-		b.WriteString("\n")
-
-		detailPrefix := "    "
-		if isCursor {
-			detailPrefix = selected.Render("│") + "   "
-		}
-		b.WriteString(detailPrefix + muted.Render(truncateStr(row.detail, max(width-6, 10))) + "\n")
+		b.WriteString("\n    " + muted.Render(detail) + "\n")
 	}
 	return b.String()
 }

@@ -1020,6 +1020,27 @@ func (v *mailView) CancelPendingDetail() bool {
 
 func (v *mailView) Loading() bool { return v.loading }
 
+// Restyle rebuilds the cached thread content and hands the new styles to any open
+// form. The Kitty image placeholders in imageContent encode image IDs as colors, so
+// they are reused as-is rather than recolored.
+func (v *mailView) Restyle() {
+	if v.inThread {
+		offset := v.topicViewport.YOffset()
+		v.rebuildTopicContent()
+		v.topicViewport.SetYOffset(offset)
+	}
+	if v.compose != nil {
+		v.compose.styles = v.vc.styles
+	}
+	if v.searchForm != nil {
+		v.searchForm.styles = v.vc.styles
+	}
+	if v.bulkReply != nil {
+		v.bulkReply.styles = v.vc.styles
+		v.bulkReply.resize(v.bulkReply.width, v.bulkReply.height)
+	}
+}
+
 func (v *mailView) Resize(width, height int) {
 	if v.compose != nil {
 		v.compose.resize(width, height)

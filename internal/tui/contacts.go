@@ -437,6 +437,22 @@ func (v *contactsView) Resize(width, height int) {
 
 func (v *contactsView) Loading() bool { return v.loading }
 
+// Restyle re-renders the cached contact detail and hands the new styles to any
+// open form. The contact list renders live.
+func (v *contactsView) Restyle() {
+	if v.inDetail {
+		offset := v.detailView.YOffset()
+		v.detailView.SetContent(v.renderContactDetail())
+		v.detailView.SetYOffset(offset)
+	}
+	if v.contactForm != nil {
+		v.contactForm.styles = v.vc.styles
+	}
+	if v.noteForm != nil {
+		v.noteForm.styles = v.vc.styles
+	}
+}
+
 func (v *contactsView) beginRequest(kind contactRequestKind) (uint64, context.Context) {
 	if v.requestCancel != nil {
 		v.requestCancel()

@@ -342,6 +342,14 @@ hey journal read                   # read today's entry (or pass YYYY-MM-DD)
 hey journal write "..."            # write today's entry (or omit content for $EDITOR)
 ```
 
+## Omarchy
+
+On [Omarchy](https://omarchy.org) the TUI follows the active theme with no setup: it lays
+the theme's `accent`, `selection`, `muted`, `foreground` and `red` over its ANSI palette,
+read from `~/.local/state/omarchy/current/theme/`, and restyles live when you run
+`omarchy theme set`. Set `HEY_THEME=/path/to/file.toml` to use your own overlay anywhere
+— an explicitly chosen file is trusted as written — or `NO_COLOR=1` to turn color off.
+
 ## Agent Skill
 
 hey-cli ships with an embedded agent skill so your agent can interact with HEY on your behalf.
