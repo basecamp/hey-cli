@@ -11,6 +11,13 @@ jobs:
     uses: basecamp/.github/.github/workflows/sensitive-change-gate.yml@a667bfaac8b33b9c8a6c61019664463a98055995
     with:
       extra-patterns: |
+        .goreleaser.yaml
+        .github/workflows/release.yml
+        scripts/release.sh
+        scripts/sign-windows.sh
+        scripts/install.sh
+        scripts/install.ps1
+        scripts/stage-installer-ps1.sh
         scripts/publish-aur.sh
         scripts/sync-skills.sh
     permissions:

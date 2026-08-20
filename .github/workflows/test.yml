@@ -1,20 +1,25 @@
 name: Test
 
 on:
-  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+  # release.yml still reuses this as its PR-equivalent gate; it grows its own
+  # tag-SHA test job next, at which point this trigger goes away.
   workflow_call:
 
 permissions: {}
 
 jobs:
   test:
+    name: Tests
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      HEY_NO_KEYRING: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -25,22 +30,22 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Verify go.mod tidiness
-        run: |
-          cp go.mod go.mod.bak && cp go.sum go.sum.bak
-          go mod tidy
-          diff go.mod go.mod.bak && diff go.sum go.sum.bak
+      - name: Check module tidiness
+        run: make tidy-check
 
       - name: Run tests with coverage floor
         run: make coverage
 
-      - name: Build
-        run: go build -o bin/hey ./cmd/hey
+      - name: Build binary
+        run: make build
 
-      - name: Verify binary runs
-        run: ./bin/hey --help
+      - name: Smoke test
+        run: |
+          ./bin/hey --version
+          ./bin/hey --help | head -5
 
   lint:
+    name: Lint
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -55,17 +60,41 @@ jobs:
           go-version-file: go.mod
 
       - name: Check formatting
-        run: test -z "$(gofmt -l .)"
+        run: make fmt-check
 
       - name: Run go vet
-        run: go vet ./...
+        run: make vet
 
-      - name: golangci-lint
+      # Runs before the linter: if the pins have drifted, say so plainly rather
+      # than letting the odd job out fail later on a version-specific finding.
+      - name: Check golangci-lint pins are in lockstep
+        run: make check-lint-lockstep
+
+      - name: Run golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: v2.10.1
+          version: v2.11.1
+
+  lint-actions:
+    name: GitHub Actions audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run actionlint
+        uses: rhysd/actionlint@914e7df21a07ef503a81201c76d2b11c789d3fca # v1.7.12
+
+      - name: Run zizmor
+        uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054 # v0.6.2
+        with:
+          advanced-security: false
 
   security:
+    name: Security
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -79,15 +108,20 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: govulncheck
+      - name: Run govulncheck
+        # @latest intentional — pinning delays scanning improvements and
+        # new Go version support for no meaningful reproducibility gain.
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
 
   race-check:
+    name: Race Detection
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      HEY_NO_KEYRING: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -98,5 +132,28 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Race detector
-        run: go test -race -count=1 ./internal/...
+      - name: Run tests with race detector
+        run: go test -race -count=1 ./...
+
+  cli-surface:
+    name: CLI Surface Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      HEY_NO_KEYRING: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      # .surface is the committed snapshot of the CLI's commands and flags. A
+      # change that is not reflected there fails here; `make update-surface`
+      # regenerates it so the diff is reviewed, not discovered at release time.
+      - name: Compare CLI surface snapshot
+        run: go test ./internal/cmd/ -run TestSurfaceSnapshot -v

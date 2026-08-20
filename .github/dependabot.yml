@@ -10,6 +10,8 @@ updates:
       semver-minor-days: 3
       semver-patch-days: 2
       default-days: 7
+    commit-message:
+      prefix: "deps"
 
   - package-ecosystem: github-actions
     directory: "/"
@@ -22,3 +24,5 @@ updates:
     open-pull-requests-limit: 10
     cooldown:
       default-days: 7
+    commit-message:
+      prefix: "ci"

@@ -1,2 +1,4 @@
 * @basecamp/cli
-.github/workflows/ @basecamp/cli
+.goreleaser.yaml      @basecamp/cli
+.github/workflows/    @basecamp/cli
+scripts/release.sh    @basecamp/cli

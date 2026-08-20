@@ -1,0 +1,43 @@
+commands:
+  - changed-files:
+      - any-glob-to-any-file: "internal/cmd/**"
+
+tui:
+  - changed-files:
+      - any-glob-to-any-file: "internal/tui/**"
+
+auth:
+  - changed-files:
+      - any-glob-to-any-file: "internal/auth/**"
+
+output:
+  - changed-files:
+      - any-glob-to-any-file: "internal/output/**"
+
+skills:
+  - changed-files:
+      - any-glob-to-any-file: "skills/**"
+
+plugin:
+  - changed-files:
+      - any-glob-to-any-file: ".claude-plugin/**"
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "tests/**"
+          - "**/*_test.go"
+
+docs:
+  - changed-files:
+      - any-glob-to-any-file: "*.md"
+
+deps:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "go.mod"
+          - "go.sum"
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file: ".github/**"

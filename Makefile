@@ -1,7 +1,7 @@
 .PHONY: build test test-unit test-smoke coverage fmt fmt-check vet lint tidy tidy-check \
 	race-test vuln secrets replace-check check-toolchain check security \
 	release-check release bench bench-save bench-compare \
-	check-surface check-surface-compat tools clean install help
+	check-surface check-surface-compat check-lint-lockstep tools clean install help
 
 BINARY := $(CURDIR)/bin/hey
 COVERAGE_FLOOR ?= 70.8
@@ -32,6 +32,7 @@ help:
 	@echo "  make vet             Run go vet"
 	@echo "  make lint            Run golangci-lint"
 	@echo "  make tidy-check      Verify go.mod/go.sum tidiness"
+	@echo "  make check-lint-lockstep  Verify golangci-lint pins agree across workflows"
 	@echo "  make race-test       Run unit tests with race detector"
 	@echo "  make vuln            Run govulncheck"
 	@echo "  make secrets         Run gitleaks secret scan"
@@ -140,7 +141,11 @@ replace-check:
 	fi
 
 # Local CI gate
-check: fmt-check vet lint test-unit tidy-check
+check: fmt-check vet lint test-unit tidy-check check-lint-lockstep
+
+# Verify every workflow lints with the same golangci-lint version
+check-lint-lockstep:
+	@scripts/check-lint-lockstep.sh
 
 # Generate CLI surface snapshot
 check-surface: build
@@ -200,8 +205,11 @@ bench-compare:
 	benchstat "$$PREV" "$$LATEST"
 
 # Install dev tools
+# golangci-lint is pinned to the CI version (see scripts/check-lint-lockstep.sh)
+# so local and CI findings agree. govulncheck stays @latest on purpose: pinning
+# it only delays new advisories and Go version support.
 tools:
-	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.1
 	go install golang.org/x/vuln/cmd/govulncheck@latest
 	@echo "For gitleaks, install via: brew install gitleaks (or see https://github.com/gitleaks/gitleaks)"
 	@echo "For benchstat: go install golang.org/x/perf/cmd/benchstat@latest"
