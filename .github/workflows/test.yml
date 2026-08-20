@@ -3,8 +3,9 @@ name: Test
 on:
   push:
     branches: [main]
+  # No branch filter on pull_request: stacked PRs target a sibling branch and
+  # must still get the full gate before they reach main.
   pull_request:
-    branches: [main]
   workflow_dispatch:
   # release.yml still reuses this as its PR-equivalent gate; it grows its own
   # tag-SHA test job next, at which point this trigger goes away.
