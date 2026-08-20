@@ -47,11 +47,11 @@ func TestIsReleaseVersion(t *testing.T) {
 	}
 }
 
-func stubReleasesLatestURL(t *testing.T, url string) {
+func stubReleasesAPIBase(t *testing.T, url string) {
 	t.Helper()
-	orig := releasesLatestURL
-	releasesLatestURL = url
-	t.Cleanup(func() { releasesLatestURL = orig })
+	orig := releasesAPIBase
+	releasesAPIBase = url
+	t.Cleanup(func() { releasesAPIBase = orig })
 }
 
 func TestFetchLatestReleaseParsesTagAndAssets(t *testing.T) {
@@ -68,7 +68,7 @@ func TestFetchLatestReleaseParsesTagAndAssets(t *testing.T) {
 		}`))
 	}))
 	t.Cleanup(srv.Close)
-	stubReleasesLatestURL(t, srv.URL)
+	stubReleasesAPIBase(t, srv.URL)
 	t.Setenv("GITHUB_TOKEN", "ghp_example_token")
 
 	release, err := fetchLatestRelease(context.Background())
@@ -91,12 +91,31 @@ func TestFetchLatestReleaseParsesTagAndAssets(t *testing.T) {
 	}
 }
 
+func TestFetchReleaseByTagUsesTagPath(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = w.Write([]byte(`{"tag_name": "v1.5.0-rc.1", "assets": []}`))
+	}))
+	t.Cleanup(srv.Close)
+	stubReleasesAPIBase(t, srv.URL)
+
+	release, err := fetchReleaseByTag(context.Background(), "1.5.0-rc.1")
+	mustNoError(t, err)
+	if gotPath != "/tags/v1.5.0-rc.1" {
+		t.Errorf("path = %q, want /tags/v1.5.0-rc.1", gotPath)
+	}
+	if release.Version != "1.5.0-rc.1" {
+		t.Errorf("version = %q, want 1.5.0-rc.1", release.Version)
+	}
+}
+
 func TestFetchLatestReleaseNonOKStatus(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 	}))
 	t.Cleanup(srv.Close)
-	stubReleasesLatestURL(t, srv.URL)
+	stubReleasesAPIBase(t, srv.URL)
 
 	_, err := fetchLatestRelease(context.Background())
 	assertErrorContains(t, err, "unexpected status: 403")

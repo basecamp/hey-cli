@@ -428,6 +428,30 @@ func TestNativeSelfUpdatePassesReleaseVersionToVerifier(t *testing.T) {
 	}
 }
 
+// The full native flow, pinned to a specific release: the tag lookup feeds
+// the same download → verify → swap pipeline.
+func TestNativeSelfUpdatePinnedVersionSuccess(t *testing.T) {
+	f := setupNativeFlow(t, "1.0.0", "1.1.0")
+	stubReleaseFetcher(t, func(context.Context) (releaseInfo, error) {
+		t.Error("a pinned upgrade must not consult /releases/latest")
+		return releaseInfo{}, nil
+	})
+	stubReleaseByTagFetcher(t, func(_ context.Context, ver string) (releaseInfo, error) {
+		if ver != "1.1.0" {
+			t.Errorf("fetched tag for %q, want 1.1.0", ver)
+		}
+		return f.release, nil
+	})
+
+	run := executeUpgradeCommandAs(t, "--json", "1.1.0")
+	mustNoError(t, run.err)
+	data := run.data(t)
+	if data["status"] != "upgraded" || data["to"] != "1.1.0" {
+		t.Errorf("unexpected envelope data: %v", data)
+	}
+	assertFileContent(t, f.target, f.newContent)
+}
+
 func TestNativeSelfUpdateNoPlatformAsset(t *testing.T) {
 	f := setupNativeFlow(t, "1.0.0", "1.1.0")
 

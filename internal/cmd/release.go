@@ -38,18 +38,32 @@ func (r releaseInfo) asset(name string) (releaseAsset, bool) {
 	return releaseAsset{}, false
 }
 
-// releasesLatestURL is swappable so tests can point release fetching at a
-// local httptest server.
-var releasesLatestURL = "https://api.github.com/repos/basecamp/hey-cli/releases/latest"
+// releasesAPIBase is the GitHub releases API root, swappable so tests can
+// point release fetching at a local httptest server.
+var releasesAPIBase = "https://api.github.com/repos/basecamp/hey-cli/releases"
 
-// releaseFetcher is the seam through which upgrade and doctor look up the
-// latest release; tests replace it.
-var releaseFetcher = fetchLatestRelease
+// releaseFetcher and releaseByTagFetcher are the seams through which upgrade
+// and doctor look up releases; tests replace them.
+var (
+	releaseFetcher      = fetchLatestRelease
+	releaseByTagFetcher = fetchReleaseByTag
+)
 
 // fetchLatestRelease fetches the latest release metadata from GitHub. Callers
 // bound ctx themselves: doctor's best-effort check is short, upgrade's is not.
 func fetchLatestRelease(ctx context.Context) (releaseInfo, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, releasesLatestURL, nil)
+	return fetchRelease(ctx, releasesAPIBase+"/latest")
+}
+
+// fetchReleaseByTag fetches one specific release by its bare version
+// ("1.2.3"). Unlike /latest, the tag lookup also answers for prereleases,
+// which are published with make_latest disabled.
+func fetchReleaseByTag(ctx context.Context, ver string) (releaseInfo, error) {
+	return fetchRelease(ctx, releasesAPIBase+"/tags/v"+ver)
+}
+
+func fetchRelease(ctx context.Context, url string) (releaseInfo, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return releaseInfo{}, err
 	}

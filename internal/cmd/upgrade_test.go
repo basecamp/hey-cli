@@ -90,6 +90,13 @@ func stubReleaseFetcher(t *testing.T, fetch func(context.Context) (releaseInfo, 
 	t.Cleanup(func() { releaseFetcher = orig })
 }
 
+func stubReleaseByTagFetcher(t *testing.T, fetch func(context.Context, string) (releaseInfo, error)) {
+	t.Helper()
+	orig := releaseByTagFetcher
+	releaseByTagFetcher = fetch
+	t.Cleanup(func() { releaseByTagFetcher = orig })
+}
+
 type upgradeCheckersStub struct {
 	latestVersion   string
 	release         *releaseInfo // optional richer release (assets); read at call time so tests can mutate
@@ -174,7 +181,7 @@ func executeStyledUpgradeCommand(t *testing.T) upgradeRun {
 	return executeUpgradeCommandAs(t, "--styled")
 }
 
-func executeUpgradeCommandAs(t *testing.T, formatFlag string) upgradeRun {
+func executeUpgradeCommandAs(t *testing.T, args ...string) upgradeRun {
 	t.Helper()
 	isolateCommandEnv(t)
 
@@ -182,7 +189,7 @@ func executeUpgradeCommandAs(t *testing.T, formatFlag string) upgradeRun {
 	var stdout, stderr bytes.Buffer
 	root.SetOut(&stdout)
 	root.SetErr(&stderr)
-	root.SetArgs([]string{"upgrade", formatFlag})
+	root.SetArgs(append([]string{"upgrade"}, args...))
 
 	err := root.Execute()
 	return upgradeRun{stdout: stdout.String(), stderr: stderr.String(), err: err}
@@ -225,6 +232,98 @@ func TestUpgradeRejectsListOnlyFormatsBeforeUpgrading(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A pinned version must be a semantic version, rejected before any lookup.
+func TestUpgradeInvalidPinnedVersionIsUsageError(t *testing.T) {
+	stubVersion(t, "1.0.0")
+	stubReleaseFetcher(t, func(context.Context) (releaseInfo, error) {
+		t.Error("an invalid version argument must not reach the release lookup")
+		return releaseInfo{}, nil
+	})
+	stubReleaseByTagFetcher(t, func(context.Context, string) (releaseInfo, error) {
+		t.Error("an invalid version argument must not reach the release lookup")
+		return releaseInfo{}, nil
+	})
+
+	run := executeUpgradeCommandAs(t, "--json", "not-a-version")
+	requireUpgradeError(t, run.err, "usage")
+}
+
+// A pinned version targets that release's tag, not /releases/latest —
+// prereleases are published without make_latest and are invisible there.
+func TestUpgradePinnedVersionUsesTagLookup(t *testing.T) {
+	stubVersion(t, "1.0.0")
+	stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "9.9.9"})
+	stubReleaseFetcher(t, func(context.Context) (releaseInfo, error) {
+		t.Error("a pinned upgrade must not consult /releases/latest")
+		return releaseInfo{}, nil
+	})
+	stubReleaseByTagFetcher(t, func(_ context.Context, ver string) (releaseInfo, error) {
+		if ver != "1.1.0-rc.1" {
+			t.Errorf("fetched tag for %q, want 1.1.0-rc.1", ver)
+		}
+		return releaseInfo{Version: "1.1.0-rc.1"}, nil
+	})
+	stubGoInstallChecker(t, false)
+	stubSelfUpdateTarget(t, "", errors.New("no exe"))
+
+	run := executeUpgradeCommandAs(t, "--json", "v1.1.0-rc.1")
+	apiErr := requireUpgradeError(t, run.err, "upgrade_required")
+	assertContains(t, apiErr.Message, "1.1.0-rc.1")
+}
+
+// Pinning never downgrades: a version at or below the installed one is the
+// same no-op as an up-to-date check.
+func TestUpgradePinnedOlderVersionIsUpToDate(t *testing.T) {
+	stubVersion(t, "1.2.0")
+	stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "1.2.0"})
+	stubReleaseByTagFetcher(t, func(context.Context, string) (releaseInfo, error) {
+		return releaseInfo{Version: "1.1.0"}, nil
+	})
+
+	run := executeUpgradeCommandAs(t, "--json", "1.1.0")
+	mustNoError(t, run.err)
+	if got := run.data(t)["status"]; got != "up_to_date" {
+		t.Errorf("status = %q, want up_to_date", got)
+	}
+}
+
+// Package managers install their manifest's version; a pin they can't honor
+// must be refused, not silently replaced with whatever they would install.
+func TestUpgradePinnedManagedInstallRefused(t *testing.T) {
+	stubVersion(t, "1.0.0")
+	stubReleaseByTagFetcher(t, func(context.Context, string) (releaseInfo, error) {
+		return releaseInfo{Version: "1.5.0"}, nil
+	})
+
+	t.Run("homebrew", func(t *testing.T) {
+		stubUpgradeCheckers(t, upgradeCheckersStub{
+			isBrew: true,
+			homebrewUpgrade: func(context.Context, io.Writer, io.Writer) error {
+				t.Error("a refused pin must not run brew")
+				return nil
+			},
+		})
+		run := executeUpgradeCommandAs(t, "--json", "1.5.0")
+		apiErr := requireUpgradeError(t, run.err, "upgrade_required")
+		assertContains(t, apiErr.Message, "managed by Homebrew")
+		assertContains(t, apiErr.Hint, "brew upgrade --cask")
+	})
+
+	t.Run("scoop", func(t *testing.T) {
+		stubUpgradeCheckers(t, upgradeCheckersStub{
+			isScoop: true,
+			scoopUpgrade: func(context.Context, bool, io.Writer, io.Writer) error {
+				t.Error("a refused pin must not run scoop")
+				return nil
+			},
+		})
+		run := executeUpgradeCommandAs(t, "--json", "1.5.0")
+		apiErr := requireUpgradeError(t, run.err, "upgrade_required")
+		assertContains(t, apiErr.Message, "managed by Scoop")
+		assertContains(t, apiErr.Hint, "scoop update")
+	})
 }
 
 // A dev build, or anything else that is not a semantic version, has no
@@ -342,6 +441,21 @@ func TestUpgradeCheckFailureIsStructured(t *testing.T) {
 	apiErr := requireUpgradeError(t, run.err, "upgrade_failed")
 	assertContains(t, apiErr.Message, "could not check for updates")
 	assertContains(t, apiErr.Hint, "GITHUB_TOKEN")
+}
+
+// A pinned go-install upgrade hints the module toolchain command at that
+// version rather than @latest.
+func TestUpgradeGoInstallPinnedHint(t *testing.T) {
+	stubVersion(t, "1.0.0")
+	stubUpgradeCheckers(t, upgradeCheckersStub{})
+	stubReleaseByTagFetcher(t, func(context.Context, string) (releaseInfo, error) {
+		return releaseInfo{Version: "1.5.0"}, nil
+	})
+	stubGoInstallChecker(t, true)
+
+	run := executeUpgradeCommandAs(t, "--json", "1.5.0")
+	apiErr := requireUpgradeError(t, run.err, "upgrade_required")
+	assertContains(t, apiErr.Hint, "go install github.com/basecamp/hey-cli/cmd/hey@v1.5.0")
 }
 
 func TestUpgradeGoInstallProvenance(t *testing.T) {

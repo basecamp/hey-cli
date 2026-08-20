@@ -6,8 +6,9 @@
 # published bundle format.
 #
 # Branch pushes necessarily verify the previous release, so the workflow also
-# runs on every published release (pinned to that release's tag) -- the first
-# bundle a changed .goreleaser.yaml actually produces gets exercised. Normal
+# runs on every published release, with the native upgrade and both installers
+# pinned to that release's tag -- the first bundle a changed .goreleaser.yaml
+# actually produces gets exercised, prereleases included. Normal
 # releases arrive as a workflow_dispatch from release.yml: goreleaser publishes
 # with the built-in GITHUB_TOKEN, whose release event never starts another
 # workflow. The `release: published` trigger covers releases published by a
@@ -145,29 +146,41 @@ jobs:
             exit 1
           done
 
-      - name: Run hey upgrade against the real latest release
+      # A run with RELEASE_TAG pins the upgrade to that release: /releases/
+      # latest never returns prereleases (make_latest is off for them) and a
+      # dispatch may select an older release, so an unpinned upgrade would
+      # silently exercise a different release than the one selected.
+      - name: Run hey upgrade against the selected release
         env:
           HEY_NO_KEYRING: "1"
           # Anonymous api.github.com requests share the runner egress IP's
-          # rate limit; the CLI attaches this token to its releases/latest
-          # lookup (attachGitHubAuth) so the check can't 403.
+          # rate limit; the CLI attaches this token to its release lookup
+          # (attachGitHubAuth) so the check can't 403.
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           ext=""
           [[ "$RUNNER_OS" == "Windows" ]] && ext=".exe"
-          "$HOME/bin/hey$ext" upgrade
+          if [[ -n "$RELEASE_TAG" ]]; then
+            "$HOME/bin/hey$ext" upgrade "${RELEASE_TAG#v}"
+          else
+            "$HOME/bin/hey$ext" upgrade
+          fi
 
-      - name: Assert the installed binary reports the latest release
+      - name: Assert the installed binary reports the selected release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           ext=""
           [[ "$RUNNER_OS" == "Windows" ]] && ext=".exe"
-          latest=$(gh api repos/basecamp/hey-cli/releases/latest --jq .tag_name)
-          latest="${latest#v}"
+          if [[ -n "$RELEASE_TAG" ]]; then
+            expected="${RELEASE_TAG#v}"
+          else
+            expected=$(gh api repos/basecamp/hey-cli/releases/latest --jq .tag_name)
+            expected="${expected#v}"
+          fi
           got=$("$HOME/bin/hey$ext" --version | awk '{print $NF}')
-          echo "latest=$latest installed=$got"
-          test "$got" = "$latest"
+          echo "expected=$expected installed=$got"
+          test "$got" = "$expected"
 
   installer-sh:
     name: install.sh cosign ${{ matrix.cosign }}

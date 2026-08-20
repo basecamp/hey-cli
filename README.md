@@ -99,7 +99,12 @@ That command is for cosign v3. With cosign v2.6–v2.x add `--new-bundle-format=
 
 ```bash
 hey upgrade
+hey upgrade 0.2.0-rc.1   # target a specific release, e.g. a prerelease
 ```
+
+Upgrading only ever moves forward: a requested version at or below the installed one is a
+no-op, and package-manager installs always follow their manager's own version (a pinned
+version is refused there).
 
 What happens depends on how hey was installed:
 

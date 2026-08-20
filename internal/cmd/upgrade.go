@@ -46,7 +46,7 @@ type upgradeCommand struct {
 func newUpgradeCommand() *upgradeCommand {
 	upgradeCommand := &upgradeCommand{}
 	upgradeCommand.cmd = &cobra.Command{
-		Use:   "upgrade",
+		Use:   "upgrade [version]",
 		Short: "Upgrade hey to the latest release",
 		Long: `Check for a newer release and upgrade hey in place.
 
@@ -54,13 +54,19 @@ Installer-script and tarball installs under your home directory are replaced
 with the verified release binary (Sigstore signature and SHA-256 checksum).
 Homebrew and Scoop installs are upgraded through their package manager.
 System packages, Nix and go install builds are never touched; the command
-exits nonzero with the right next step for that install method.`,
+exits nonzero with the right next step for that install method.
+
+A version argument targets that release instead of the latest — the way to
+reach a release not yet marked latest, such as a prerelease. Upgrading only
+ever moves forward: a version at or below the installed one is a no-op, and
+Homebrew and Scoop installs always follow their package manager's version.`,
 		Example: `  hey upgrade
-  hey upgrade --json`,
+  hey upgrade --json
+  hey upgrade 0.2.0-rc.1`,
 		Annotations: map[string]string{
-			"agent_notes": "Exits 0 only when already current or when the upgrade was applied and confirmed. Error codes: upgrade_required (an update exists but this install method must be upgraded another way — follow the hint), upgrade_incomplete, upgrade_unverified, upgrade_failed.",
+			"agent_notes": "Exits 0 only when already current or when the upgrade was applied and confirmed. An optional version argument pins the target release (self-updating installs only; never downgrades). Error codes: upgrade_required (an update exists but this install method must be upgraded another way — follow the hint), upgrade_incomplete, upgrade_unverified, upgrade_failed.",
 		},
-		Args: cobra.NoArgs,
+		Args: cobra.MaximumNArgs(1),
 		RunE: upgradeCommand.run,
 	}
 
@@ -77,6 +83,7 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 		return output.ErrUsage("--count requires list data — hey upgrade reports a single result")
 	case output.FormatIDs:
 		return output.ErrUsage("--ids-only requires list data — hey upgrade reports a single result")
+	default: // every other format renders upgrade's single result map
 	}
 
 	// Progress narration is human-facing and exists only in styled mode. The
@@ -87,6 +94,14 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 	w, procErr := cmd.OutOrStdout(), cmd.ErrOrStderr()
 	if !writer.IsStyled() {
 		w, procErr = io.Discard, io.Discard
+	}
+
+	requested := ""
+	if len(args) == 1 {
+		requested = strings.TrimPrefix(strings.TrimSpace(args[0]), "v")
+		if !isReleaseVersion(requested) {
+			return output.ErrUsage(fmt.Sprintf("%q is not a release version — pass a semantic version like 1.2.3", args[0]))
+		}
 	}
 
 	current := version.Version
@@ -102,12 +117,22 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 	fmt.Fprint(w, "Checking for updates… ")
 
 	ctx := cmd.Context()
-	release, err := releaseFetcher(ctx)
+	var release releaseInfo
+	var err error
+	if requested != "" {
+		release, err = releaseByTagFetcher(ctx, requested)
+	} else {
+		release, err = releaseFetcher(ctx)
+	}
 	if err != nil {
 		fmt.Fprintln(w, "failed")
+		detail := "could not check for updates"
+		if requested != "" {
+			detail = fmt.Sprintf("could not fetch release v%s", requested)
+		}
 		return &output.Error{
 			Code:    "upgrade_failed",
-			Message: fmt.Sprintf("could not check for updates: %v", err),
+			Message: fmt.Sprintf("%s: %v", detail, err),
 			Hint:    "Check network access to api.github.com and retry. In CI, set GITHUB_TOKEN to avoid anonymous rate limits.",
 		}
 	}
@@ -124,6 +149,10 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(w, "update available: %s\n", latest)
 
 	if homebrewChecker(ctx) {
+		if requested != "" {
+			return errPinnedManagedInstall(current, latest, "Homebrew",
+				fmt.Sprintf("brew upgrade --cask %s", homebrewCask))
+		}
 		fmt.Fprintln(w, "Upgrading via Homebrew…")
 		if brewErr := homebrewUpgrader(ctx, w, procErr); brewErr != nil {
 			return &output.Error{
@@ -138,6 +167,10 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 
 	if scoopChecker(ctx) {
 		global := scoopGlobalScopeChecker(ctx)
+		if requested != "" {
+			return errPinnedManagedInstall(current, latest, "Scoop",
+				fmt.Sprintf("scoop update%s %s", scoopGlobalFlag(global), scoopApp))
+		}
 		fmt.Fprintln(w, "Upgrading via Scoop…")
 		if scoopErr := scoopUpgrader(ctx, global, w, procErr); scoopErr != nil {
 			return &output.Error{
@@ -153,10 +186,14 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 	// A `go install` build (stable or pseudo version alike) has no release
 	// asset lineage to swap in — the module toolchain owns it.
 	if goInstallChecker() {
+		ref := "latest"
+		if requested != "" {
+			ref = "v" + requested
+		}
 		return &output.Error{
 			Code:    "upgrade_required",
 			Message: fmt.Sprintf("update available (%s → %s) but this binary was built with go install — upgrade it the same way", current, latest),
-			Hint:    "Run: go install github.com/basecamp/hey-cli/cmd/hey@latest",
+			Hint:    "Run: go install github.com/basecamp/hey-cli/cmd/hey@" + ref,
 		}
 	}
 
@@ -195,6 +232,18 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 	defer func() { _ = lock.Unlock() }()
 
 	return runNativeSelfUpdate(ctx, w, target, current, release)
+}
+
+// errPinnedManagedInstall refuses a version-pinned upgrade of a
+// package-manager install: brew and scoop install whatever their manifests
+// currently say, so a pin can't be honored — silently upgrading to something
+// else would betray the request.
+func errPinnedManagedInstall(current, requested, manager, managerCmd string) *output.Error {
+	return &output.Error{
+		Code:    "upgrade_required",
+		Message: fmt.Sprintf("hey %s can't be upgraded to a specific version (%s) — this install is managed by %s, which installs its own current version", current, requested, manager),
+		Hint:    "Upgrade to the manager's version instead: " + managerCmd,
+	}
 }
 
 // confirmManagedUpgrade verifies a package-manager upgrade actually landed by
