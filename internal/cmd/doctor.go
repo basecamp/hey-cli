@@ -182,8 +182,9 @@ func runDoctorChecks(ctx context.Context) []map[string]string {
 // api.github.com must not stall doctor. Dev and other non-semver builds have
 // nothing to compare against and skip it.
 func checkVersion(ctx context.Context) map[string]string {
+	goInstall := goInstallChecker()
 	message := fmt.Sprintf("%s (%s, %s)", version.Version, version.Commit, version.Date)
-	if goInstallChecker() {
+	if goInstall {
 		message += " [go install]"
 	}
 	check := map[string]string{
@@ -202,7 +203,13 @@ func checkVersion(ctx context.Context) map[string]string {
 	if err == nil && isUpdateAvailable(version.Version, release.Version) {
 		check["status"] = "warning"
 		check["message"] = fmt.Sprintf("%s (update available: %s)", message, release.Version)
-		check["hint"] = "hey upgrade"
+		// hey upgrade refuses go-install builds by design, so hint the module
+		// toolchain command those users actually need.
+		if goInstall {
+			check["hint"] = "go install github.com/basecamp/hey-cli/cmd/hey@latest"
+		} else {
+			check["hint"] = "hey upgrade"
+		}
 	}
 
 	return check

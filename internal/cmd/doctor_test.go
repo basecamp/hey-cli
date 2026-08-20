@@ -70,6 +70,25 @@ func TestDoctorVersionSkipsLookupForNonReleaseBuilds(t *testing.T) {
 	}
 }
 
+// A go-install build can't run hey upgrade — that command is guaranteed to
+// refuse with the goInstallChecker branch — so doctor must hint the module
+// toolchain command directly instead of routing through a failing operation.
+func TestDoctorVersionGoInstallUpdateHint(t *testing.T) {
+	stubVersion(t, "1.0.0")
+	stubReleaseFetcher(t, func(context.Context) (releaseInfo, error) {
+		return releaseInfo{Version: "1.1.0"}, nil
+	})
+	stubGoInstallChecker(t, true)
+
+	check := versionCheck(t, runDoctorChecks(context.Background()))
+	if check["status"] != "warning" {
+		t.Errorf("status = %q, want warning", check["status"])
+	}
+	if check["hint"] != "go install github.com/basecamp/hey-cli/cmd/hey@latest" {
+		t.Errorf("hint = %q, want the go install command", check["hint"])
+	}
+}
+
 func TestDoctorVersionMarksGoInstallBuilds(t *testing.T) {
 	stubVersion(t, "1.0.0")
 	stubReleaseFetcher(t, func(context.Context) (releaseInfo, error) {
