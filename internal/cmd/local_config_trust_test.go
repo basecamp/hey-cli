@@ -189,3 +189,36 @@ func resetRootFlagsForTrustTest(t *testing.T) {
 		baseURL = previousBaseURL
 	})
 }
+
+// upgrade and version never read the local server or account, so an
+// untrusted local config must not block them (machine-readable mode would
+// otherwise fail them outright with a trust error).
+func TestConfigIndependentCommandsSkipLocalConfigTrust(t *testing.T) {
+	root := newRootCmd()
+	for _, test := range []struct {
+		args []string
+		want bool
+	}{
+		{args: []string{"boxes"}, want: true},
+		{args: []string{"doctor"}, want: true},
+		{args: []string{"config", "show"}, want: false},
+		{args: []string{"upgrade"}, want: false},
+		{args: []string{"version"}, want: false},
+	} {
+		command, _, err := root.Find(test.args)
+		if err != nil {
+			t.Fatalf("Find(%v): %v", test.args, err)
+		}
+		if got := commandUsesRuntimeConfig(command); got != test.want {
+			t.Errorf("commandUsesRuntimeConfig(%v) = %v, want %v", test.args, got, test.want)
+		}
+	}
+}
+
+func TestVersionRunsWithUntrustedLocalConfig(t *testing.T) {
+	setupLocalTrustTest(t, "https://mail.example.com", "all")
+
+	if err := runLocalTrustCLI(t, "--json", "version"); err != nil {
+		t.Fatalf("version with an untrusted local config: %v", err)
+	}
+}

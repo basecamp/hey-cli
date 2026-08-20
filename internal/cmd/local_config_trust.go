@@ -47,13 +47,17 @@ func ensureLocalConfigTrusted(cmd *cobra.Command) error {
 	}
 }
 
+// commandUsesRuntimeConfig reports whether a command reads the effective
+// server or account, which is what trusting a local config approves. upgrade
+// and version talk only to GitHub and the local install, so an untrusted
+// checkout must not block them.
 func commandUsesRuntimeConfig(cmd *cobra.Command) bool {
 	parts := strings.Fields(cmd.CommandPath())
 	if len(parts) < 2 {
 		return true
 	}
 	switch parts[1] {
-	case "commands", "completion", "config", "skill":
+	case "commands", "completion", "config", "skill", "upgrade", "version":
 		return false
 	default:
 		return true
