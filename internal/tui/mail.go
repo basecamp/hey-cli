@@ -17,6 +17,7 @@ import (
 	attachmentfiles "github.com/basecamp/hey-cli/internal/attachments"
 	internalfolders "github.com/basecamp/hey-cli/internal/folders"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
+	"github.com/basecamp/hey-cli/internal/markdown"
 	"github.com/basecamp/hey-cli/internal/models"
 )
 
@@ -1646,7 +1647,7 @@ func sdkMessageToEntry(entry generated.Entry, message generated.Message) models.
 		Summary:               summary,
 		Kind:                  entry.Kind,
 		AppURL:                appURL,
-		Body:                  message.Content,
+		Body:                  htmlToMarkdown(message.Content),
 		BodyHTML:              message.Content,
 		Creator: models.Contact{
 			ID:           creator.Id,
@@ -1804,7 +1805,7 @@ func (v *mailView) fetchTopic(ctx context.Context, requestID uint64, boxID, topi
 		var images [][]byte
 		if v.vc.imageRenderer.protocol() == imageProtocolKitty && v.vc.imageFetcher != nil {
 			for _, entry := range entries {
-				for _, imageURL := range extractImageURLs(entry.Body) {
+				for _, imageURL := range extractImageURLs(entry.BodyHTML) {
 					data, fetchErr := v.vc.imageFetcher.Fetch(ctx, imageURL)
 					if fetchErr == nil && len(data) > 0 {
 						images = append(images, data)
@@ -1855,7 +1856,7 @@ func (v *mailView) renderEntries(entries []models.Entry) string {
 			fmt.Fprintf(&b, "%s\n", e.Summary)
 		}
 		if e.Body != "" {
-			fmt.Fprintf(&b, "\n%s\n", v.vc.styles.entryBody.Render(htmlToText(e.Body)))
+			fmt.Fprintf(&b, "\n%s\n", v.vc.styles.entryBody.Render(markdown.Render(e.Body, sepWidth)))
 		}
 		entryAttachments := attachmentsForMessage(v.attachments, e.ID)
 		if panel := renderAttachmentPanel(entryAttachments, selectedAttachmentForMessage(v.attachments, v.attachmentCursor, e.ID)); panel != "" {

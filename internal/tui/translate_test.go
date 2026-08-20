@@ -75,7 +75,7 @@ func TestSDKMessageToEntry(t *testing.T) {
 		AlternativeSenderName: "Support", AppUrl: "https://app.hey.com/messages/501",
 		Creator: generated.Contact{Id: 42, Name: "Jane Dawson", EmailAddress: "jane@example.com"},
 	}, generated.Message{
-		Id: 501, Subject: "Thread subject", Content: "<p>Message body</p>", UpdatedAt: updated,
+		Id: 501, Subject: "Thread subject", Content: `<p>Message body with a <a href="https://example.com/plan">plan</a></p>`, UpdatedAt: updated,
 	})
 
 	if got.ID != 501 || got.Kind != "message" || got.Summary != "Thread summary" {
@@ -84,8 +84,11 @@ func TestSDKMessageToEntry(t *testing.T) {
 	if got.CreatedAt != "2026-08-18T09:30:00Z" || got.UpdatedAt != "2026-08-18T11:00:00Z" {
 		t.Errorf("timestamps = %q / %q", got.CreatedAt, got.UpdatedAt)
 	}
-	if got.Body != "<p>Message body</p>" || got.BodyHTML != got.Body {
-		t.Errorf("body = %q / %q", got.Body, got.BodyHTML)
+	if got.Body != "Message body with a [plan](https://example.com/plan)" {
+		t.Errorf("body = %q, want Markdown", got.Body)
+	}
+	if got.BodyHTML != `<p>Message body with a <a href="https://example.com/plan">plan</a></p>` {
+		t.Errorf("bodyHTML = %q, want the original HTML", got.BodyHTML)
 	}
 	if got.Creator.ID != 42 || got.Creator.EmailAddress != "jane@example.com" {
 		t.Errorf("creator = %+v", got.Creator)

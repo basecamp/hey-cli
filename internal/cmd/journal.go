@@ -8,6 +8,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/editor"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
+	"github.com/basecamp/hey-cli/internal/markdown"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -166,7 +167,7 @@ func (c *journalReadCommand) run(cmd *cobra.Command, args []string) error {
 		}
 
 		fmt.Fprintf(w, "Journal — %s\n\n", date)
-		fmt.Fprintln(w, htmlutil.ToText(content))
+		fmt.Fprintln(w, markdown.Render(htmlutil.ToMarkdown(content), stdoutWidth()))
 		return nil
 	}
 

@@ -67,10 +67,48 @@ and two TUI paths use `internal/htmlutil`'s `ParseTopicEntriesHTML` and
 topic's entries as of SDK v0.4.0, so this can go; `resolveThreadReply` in
 `internal/cmd/thread_reply.go` is the one place to change.
 
-`internal/htmlutil` also provides `ToText` (HTML→plain text) and `ExtractImageURLs`, which
-are presentation helpers rather than scrapers and are staying. HEY uses the Trix editor
-with `<figure data-trix-attachment="{...}">` for attachments — image URLs in those
-attributes are relative paths requiring authentication via `sdk.Get`.
+`internal/htmlutil` also provides `ToMarkdown` (HTML→Markdown), `ToText` (HTML→plain text)
+and `ExtractImageURLs`, which are presentation helpers rather than scrapers and are
+staying. HEY uses the Trix editor with `<figure data-trix-attachment="{...}">` for
+attachments — image URLs in those attributes are relative paths requiring authentication
+via `sdk.Get`.
+
+### Email bodies are Markdown
+
+An email body reaches the CLI and the TUI as HEY's Trix HTML and is converted once, at the
+edge, by `htmlutil.ToMarkdown`. Everything downstream — `models.Entry.Body`, `--json`, the
+TUI viewport — carries Markdown, so links keep their URLs and headings, lists, quotes,
+tables and code survive. `Entry.BodyHTML` keeps the original HTML for `--html` and for
+`ExtractImageURLs`/`ExtractAttachments`, which need the attributes the Markdown drops.
+
+`internal/markdown` renders that Markdown for a terminal: `Render(md, width)` wraps
+glamour, and `LinkifyURLs` wraps bare URLs in OSC 8 so they stay clickable. The style in
+`style.go` uses ANSI color slots rather than glamour's fixed palettes, for the same reason
+`internal/tui/styles.go` does — the user's terminal theme wins. `Render` never fails
+loudly: if glamour cannot be set up it returns the Markdown source, so a styling problem
+costs formatting rather than the message.
+
+`ToText` is still right where the result is not shown to anyone — the name tag
+`hey bulk-reply` reads out of a draft, for instance.
+
+#### Inbound email hides its body in an attachment
+
+`/messages/{id}` serves `content` through haystack's `trix_html_for_rich_text_editing`,
+which has to hand Trix something Trix can edit. An HTML email from outside HEY is not
+that, so the whole body is wrapped in one `<figure data-trix-attachment>` whose JSON
+carries no `filename` and no `url` — just `contentType: "text/html"` and a `content`
+string holding the original markup inside `<shadow-content><template>…`.
+
+Treat that figure as a file attachment and the body vanishes: the TUI then shows nothing
+but `Entry.Summary`, HEY's ~105-character preview ending in an ellipsis, which reads as a
+truncated email. `htmlutil` tells the two apart on `filename` and parses the embedded
+markup instead, bounded by `embeddedContentDepthLimit` so a chain of attachments that
+each embed another cannot recurse without end. `ExtractImageURLs` looks inside it too,
+since that is where an inbound email's inline images are; `ExtractAttachments` does not
+list it, because an embedded body is not a downloadable file.
+
+The web app has the same content and renders it in a sandboxed iframe, which is why the
+`srcdoc` scrape in `ParseTopicEntriesHTML` never hit this.
 
 ### TUI structure
 

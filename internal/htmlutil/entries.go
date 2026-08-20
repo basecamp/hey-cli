@@ -101,7 +101,7 @@ func ParseTopicEntriesHTML(html string) []models.Entry {
 	}
 
 	// Extract bodies from srcdoc iframes - they appear in entry order
-	type body struct{ html, text string }
+	type body struct{ html, markdown string }
 	bodyMatches := srcdocRe.FindAllStringSubmatch(html, -1)
 	bodies := make([]body, 0, len(bodyMatches))
 	for _, m := range bodyMatches {
@@ -111,7 +111,7 @@ func ParseTopicEntriesHTML(html string) []models.Entry {
 		raw = strings.ReplaceAll(raw, "&quot;", "\"")
 		raw = strings.ReplaceAll(raw, "&amp;", "&")
 		raw = strings.ReplaceAll(raw, "&#39;", "'")
-		bodies = append(bodies, body{html: raw, text: ToText(raw)})
+		bodies = append(bodies, body{html: raw, markdown: ToMarkdown(raw)})
 	}
 
 	entries := make([]models.Entry, 0, len(entryIDs))
@@ -125,7 +125,7 @@ func ParseTopicEntriesHTML(html string) []models.Entry {
 			e.Creator = models.Contact{Name: name}
 		}
 		if i < len(bodies) {
-			e.Body = bodies[i].text
+			e.Body = bodies[i].markdown
 			e.BodyHTML = bodies[i].html
 		}
 		entries = append(entries, e)

@@ -5,6 +5,8 @@ import (
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/basecamp/hey-cli/internal/markdown"
 )
 
 // --- Journal messages ---
@@ -53,8 +55,7 @@ func (v *journalView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.loading = false
 		v.inThread = true
-		body := msg.body
-		v.topicContent = body
+		v.topicContent = markdown.Render(msg.body, max(v.vc.width-4, 40))
 		v.topicViewport.SetContent(v.topicContent)
 		v.topicViewport.GotoTop()
 		var uploadCmds []tea.Cmd
@@ -142,7 +143,7 @@ func (v *journalView) fetchJournalEntry(date string) tea.Cmd {
 			return journalDetailMsg{title: date, body: "(empty)"}
 		}
 
-		body := htmlToText(content)
+		body := htmlToMarkdown(content)
 
 		var images [][]byte
 		if v.vc.imageRenderer.protocol() == imageProtocolKitty && v.vc.imageFetcher != nil {

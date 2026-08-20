@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/hey-cli/internal/htmlutil"
+	"github.com/basecamp/hey-cli/internal/markdown"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -21,7 +22,7 @@ func newThreadsCommand() *topicCommand {
 		Use:   "threads <id>",
 		Short: "Read a thread",
 		Annotations: map[string]string{
-			"agent_notes": "Returns a thread with all entries. Use the topic ID with hey reply or hey forward.",
+			"agent_notes": "Returns a thread with all entries. Entry bodies are Markdown; --html returns HEY's original HTML instead. Use the topic ID with hey reply or hey forward.",
 		},
 		Example: `  hey threads 12345
   hey threads 12345 --json`,
@@ -74,7 +75,7 @@ func (c *topicCommand) run(cmd *cobra.Command, args []string) error {
 				fmt.Fprintln(w, e.BodyHTML)
 			} else if e.Body != "" {
 				fmt.Fprintln(w)
-				fmt.Fprintln(w, e.Body)
+				fmt.Fprintln(w, markdown.Render(e.Body, stdoutWidth()))
 			}
 			fmt.Fprintln(w)
 		}

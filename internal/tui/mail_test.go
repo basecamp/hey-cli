@@ -23,6 +23,7 @@ import (
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/models"
 )
 
@@ -1870,7 +1871,9 @@ func TestMailViewAlwaysRendersAttachmentPanelAndTextMarker(t *testing.T) {
 		entries: []models.Entry{{
 			ID:      501,
 			Creator: models.Contact{Name: "Alice"},
-			Body:    `<p>Review this image:</p><action-text-attachment url="/rails/blobs/chart.png" filename="chart.png" content-type="image/png" filesize="1536"></action-text-attachment><p>Thank you.</p>`,
+			Body: htmlutil.ToMarkdown(
+				`<p>Review this image:</p><action-text-attachment url="/rails/blobs/chart.png" filename="chart.png" content-type="image/png" filesize="1536"></action-text-attachment><p>Thank you.</p>`,
+			),
 		}},
 		attachments: []messageAttachment{{
 			ID:          "501:1",
@@ -1883,7 +1886,7 @@ func TestMailViewAlwaysRendersAttachmentPanelAndTextMarker(t *testing.T) {
 	})
 
 	view := v.View()
-	for _, want := range []string{"[chart.png]", "Attachments", "chart.png", "image/png", "1.5 KB"} {
+	for _, want := range []string{"Image: ", "Attachments", "chart.png", "image/png", "1.5 KB"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("thread view does not contain %q: %q", want, view)
 		}

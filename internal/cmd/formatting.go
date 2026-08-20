@@ -12,6 +12,7 @@ import (
 	"github.com/mattn/go-runewidth"
 	"golang.org/x/term"
 
+	"github.com/basecamp/hey-cli/internal/markdown"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -124,6 +125,16 @@ func stdinIsTerminal() bool {
 
 func stdoutIsTerminal() bool {
 	return term.IsTerminal(int(os.Stdout.Fd())) //nolint:gosec // G115: fd fits in int
+}
+
+// stdoutWidth reports the width to wrap prose to, staying comfortable to read
+// on wide terminals and falling back to 80 columns when stdout is not one.
+func stdoutWidth() int {
+	width, _, err := term.GetSize(int(os.Stdout.Fd())) //nolint:gosec // G115: fd fits in int
+	if err != nil || width <= 0 {
+		return markdown.DefaultWidth
+	}
+	return min(width-2, 100)
 }
 
 func readStdin() (string, error) {
