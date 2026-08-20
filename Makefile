@@ -86,7 +86,7 @@ coverage: check-toolchain
 # Pages re-render from disk on every request: edit internal/auth/callback*.html
 # and refresh the browser. Ctrl-C to stop.
 preview-callback: check-toolchain
-	PREVIEW=1 go test -run TestPreviewCallbackPages ./internal/auth/ -count=1 -v
+	PREVIEW=1 go test -run TestPreviewCallbackPages ./internal/auth/ -count=1 -v -timeout=0
 
 # Run smoke tests against a live HEY server.
 # Requires: a running server (default http://app.hey.localhost:3003) and Chrome.
