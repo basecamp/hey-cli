@@ -33,28 +33,37 @@ make release VERSION=0.2.0 DRY_RUN=1
    `.claude-plugin/plugin.json`, and pushes that commit to main
 4. Creates the annotated tag and pushes it
 
+Before touching anything it fetches tags and refuses a tag that already exists at
+another commit, or a stable version older than the latest stable tag, so a
+rejected release leaves main untouched. Pushing a stable tag by hand skips the
+metadata commit; GoReleaser then fails the release at its plugin stamp check
+rather than publishing stale plugin metadata.
+
 The [release workflow](.github/workflows/release.yml) then runs **against the tag
 SHA** (which is why the prep commit is pushed first):
 
 - `test`: lint lockstep, fmt, vet, lint, unit tests, bats suite, tidy, surface
   snapshot, race detector, govulncheck, CLI surface compatibility vs the previous tag
 - `security`: gitleaks, Trivy, gosec
-- `release`: preflights the macOS and Windows signing secrets, then GoReleaser
-  builds darwin/linux/windows/freebsd/openbsd × amd64/arm64, deb/rpm/apk packages,
-  signs and notarizes macOS binaries, Authenticode-signs the Windows binaries and
-  a staged copy of `install.ps1` (`hey_installer.ps1`), signs `checksums.txt`
-  with cosign (keyless, `checksums.txt.bundle`), generates SBOMs, publishes the
-  GitHub release, and updates the Homebrew cask and Scoop manifest; the checksums
-  are then attested with GitHub build provenance
-- After publication: `macos-verify`, `windows-verify`, `nix-verify` (stable only),
-  `aur-publish` (stable only, non-blocking), `sync-skills` (stable only, non-blocking)
+- `release`: preflights the macOS signing secrets, verifies the tag is on main,
+  then GoReleaser checks that a stable tag carries the plugin stamp, builds
+  darwin/linux/windows/freebsd/openbsd × amd64/arm64 and deb/rpm/apk packages,
+  signs and notarizes macOS binaries, signs `checksums.txt` with cosign (keyless,
+  `checksums.txt.bundle`), generates SBOMs, publishes the GitHub release, and
+  updates the Homebrew cask and Scoop manifest; the checksums are then attested
+  with GitHub build provenance
+- After publication: `macos-verify`, `nix-verify` (stable only), `aur-publish`
+  (stable only, non-blocking), `sync-skills` (stable only, non-blocking)
+
+Windows binaries and `install.ps1` are **not** Authenticode-signed yet; see
+[Windows signing](#windows-signing).
 
 ## Stable vs prerelease
 
 | Surface | Stable `0.2.0` | Prerelease `0.2.0-rc.1` |
 |---------|----------------|-------------------------|
 | GitHub Releases | Normal release, marked Latest | Marked prerelease; Latest stays on stable |
-| Release assets | Archives, checksums + bundle, SBOMs, deb/rpm/apk, signed installer | Same |
+| Release assets | Archives, checksums + bundle, SBOMs, deb/rpm/apk | Same |
 | Homebrew cask `hey` | Updated in `basecamp/homebrew-tap` | Unchanged |
 | Scoop `hey` | Updated in `basecamp/homebrew-tap` | Unchanged |
 | AUR `hey-cli` | Updated by `publish-aur.sh` | Unchanged |
@@ -88,32 +97,24 @@ converges the environment across the CLI repos and copies secrets in from
 | `MACOS_NOTARY_KEY` | secret | Base64 App Store Connect API key (.p8) |
 | `MACOS_NOTARY_KEY_ID` | secret | App Store Connect key ID |
 | `MACOS_NOTARY_ISSUER_ID` | secret | App Store Connect issuer UUID |
-| `SM_API_KEY` | secret | DigiCert ONE API key for KeyLocker |
-| `SM_CLIENT_CERT_FILE_B64` | secret | Base64 DigiCert ONE mTLS client certificate (.p12) |
-| `SM_CLIENT_CERT_PASSWORD` | secret | Client certificate password |
 | `AUR_KEY` | secret | ed25519 SSH private key for the AUR (optional; publish skips without it) |
 
-The macOS and Windows preflights are gated on `github.repository == 'basecamp/hey-cli'`:
-the canonical repo refuses to release unsigned, forks release unsigned snapshots.
+The macOS preflight is gated on `github.repository == 'basecamp/hey-cli'`, so the
+canonical repo refuses to release unsigned. Forks cannot release at all: the
+GitHub App token step needs the `release` environment and GoReleaser publishes to
+`basecamp/hey-cli`.
 
 ## Windows signing
 
-Windows binaries and the installer copy are Authenticode-signed from Linux CI via
-[jsign](https://ebourg.github.io/jsign/) against DigiCert KeyLocker (cloud HSM).
-bc3-desktop's `docs/windows-signing.md` is the canonical runbook; this repo and
-basecamp-cli are further consumers of the same certificate.
-
-- Certificate: OV code signing, `CN=37signals LLC`, expires **2027-04-30**. The
-  DigiCert ONE certificate ID is pinned once, as `SIGN_ALIAS` in
-  `release.yml` — keep it in sync with bc3-desktop when the certificate is renewed.
-- jsign version and jar sha256 are pinned in the "Prepare Windows signing" step.
-  jsign ≥ 7.5 is required; 7.1–7.3 are broken against DigiCert ONE's current API.
-- Quota: KeyLocker signatures draw from a budget shared with bc3-desktop and
-  basecamp-cli. Each tag consumes **3 signatures** (two exes + the installer copy);
-  rc(s) + stable is ≥ 6, and re-runs after post-signing failures consume more.
-  Confirm headroom with the certificate owner before a release burst.
-- Signing failures abort the release during the build phase — nothing is published.
-  Re-run the workflow on the same tag after the outage clears.
+Not wired yet. `release.yml` has no Windows signing step and `.goreleaser.yaml`
+does not sign Windows artifacts, so the `hey.exe` binaries and `install.ps1` are
+published unsigned; `install.ps1` only consults the Authenticode status when
+diagnosing a first-run failure. The port from basecamp-cli (Authenticode via
+[jsign](https://ebourg.github.io/jsign/) against DigiCert KeyLocker, with
+`SM_API_KEY`, `SM_CLIENT_CERT_FILE_B64` and `SM_CLIENT_CERT_PASSWORD` on the
+`release` environment) is a separate change; `scripts/stage-installer-ps1.sh` and
+`tests/e2e/installer_signing.bats` are already here for it. Until it lands, do
+not tell users the Windows artifacts are signed.
 
 ## Nix flake maintenance
 
@@ -181,7 +182,8 @@ make test-release                      # goreleaser snapshot, no publish/sign
 ```
 
 `make test-release` needs `syft` on PATH for the SBOM step (`mise use syft`); it
-blanks the signing env so notarization and Authenticode are skipped.
+blanks the signing env so notarization is skipped, and the plugin stamp check
+does not run for snapshots.
 
 ## Distribution channels
 

@@ -84,6 +84,31 @@ if ! command -v jq >/dev/null 2>&1; then
   die "jq is required but not found. Install with your package manager."
 fi
 
+# --- Validate the tag before anything mutates ---
+# Everything below this point that touches main (the stable metadata commit)
+# happens before the tag is created, so a release that is going to be refused
+# must be refused here, while main is still untouched.
+git fetch origin --tags --quiet
+if git rev-parse -q --verify "refs/tags/${TAG}^{commit}" >/dev/null; then
+  EXISTING_SHA=$(git rev-parse "refs/tags/${TAG}^{commit}")
+  if [[ "$EXISTING_SHA" != "$LOCAL" ]]; then
+    die "Tag $TAG already exists at ${EXISTING_SHA:0:7} (not HEAD). Delete it first or choose a different version."
+  fi
+fi
+
+# A stable version below the latest stable tag would roll the Nix flake and
+# plugin metadata on main backwards, and sync-skills would mirror the older
+# tree. Compare with sort -V (GNU and BSD), never lexically.
+if [[ "$PRERELEASE" -eq 0 ]]; then
+  LATEST_STABLE=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | awk '!/-/' | sort -V | tail -1)
+  if [[ -n "$LATEST_STABLE" && "$LATEST_STABLE" != "$TAG" ]]; then
+    NEWEST=$(printf '%s\n%s\n' "$LATEST_STABLE" "$TAG" | sort -V | tail -1)
+    if [[ "$NEWEST" != "$TAG" ]]; then
+      die "Version $VERSION is older than the latest stable release ${LATEST_STABLE#v}. Stable releases cannot go backwards."
+    fi
+  fi
+fi
+
 # --- Run pre-flight checks ---
 info "Running release checks"
 info "  Branch: $BRANCH"
@@ -152,16 +177,15 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   exit 0
 fi
 
-# --- Fetch tags to ensure we see remote state ---
-git fetch origin --tags --quiet
-
 # --- Handle tag ---
-if git rev-parse "$TAG" >/dev/null 2>&1; then
-  EXISTING_SHA=$(git rev-parse "${TAG}^{commit}")
+# Validated above against the pre-release-prep HEAD; the only way it can still
+# disagree is a tag that already existed at an unstamped commit.
+if git rev-parse -q --verify "refs/tags/${TAG}^{commit}" >/dev/null; then
+  EXISTING_SHA=$(git rev-parse "refs/tags/${TAG}^{commit}")
   if [[ "$EXISTING_SHA" == "$LOCAL" ]]; then
     info "Tag $TAG already exists at HEAD"
   else
-    die "Tag $TAG already exists at ${EXISTING_SHA:0:7} (not HEAD). Delete it first or choose a different version."
+    die "Tag $TAG exists at ${EXISTING_SHA:0:7} but the release prep commit moved HEAD to ${LOCAL:0:7}. Delete the tag and re-run."
   fi
 else
   info "Creating tag $TAG"

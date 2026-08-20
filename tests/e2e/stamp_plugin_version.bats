@@ -1,8 +1,9 @@
 #!/usr/bin/env bats
 # stamp_plugin_version.bats - scripts/stamp-plugin-version.sh writes the release
 # version into .claude-plugin/plugin.json, which Claude Code reads to detect
-# plugin updates. release.sh runs it for stable tags; goreleaser re-runs it
-# before the build.
+# plugin updates. release.sh runs it for stable tags; goreleaser runs the
+# --check form before the build so a hand-pushed stable tag without the stamp
+# commit fails instead of shipping stale metadata.
 
 setup() {
   STAMP="${BATS_TEST_DIRNAME}/../../scripts/stamp-plugin-version.sh"
@@ -35,4 +36,21 @@ teardown() {
   run "$STAMP"
   [ "$status" -ne 0 ]
   [ "$(jq -r .version .claude-plugin/plugin.json)" = "0.1.0" ]
+}
+
+@test "--check passes when the file already carries the version" {
+  run "$STAMP" --check 0.1.0
+  [ "$status" -eq 0 ]
+}
+
+@test "--check fails on a stale version and does not rewrite the file" {
+  run "$STAMP" --check 0.2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"is at version 0.1.0, expected 0.2.0"* ]]
+  [ "$(jq -r .version .claude-plugin/plugin.json)" = "0.1.0" ]
+}
+
+@test "--check requires a version argument" {
+  run "$STAMP" --check
+  [ "$status" -ne 0 ]
 }
