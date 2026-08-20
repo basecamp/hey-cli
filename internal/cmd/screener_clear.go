@@ -17,7 +17,7 @@ func newScreenerClearCommand() *screenerClearCommand {
 	clearCommand.cmd = &cobra.Command{
 		Use:   "clear",
 		Short: "Empty the Screener without deciding",
-		Long:  "Drop everyone waiting in The Screener. Nobody is screened in or out — each sender is asked about again the next time they write.",
+		Long:  "Drop everyone waiting in The Screener. Nobody is approved or denied — each sender is asked about again the next time they write.",
 		Annotations: map[string]string{
 			"agent_notes": "Clears the whole queue for the account, not one sender, and takes no confirmation. It decides nothing: senders reappear in The Screener on their next email, so what they already sent stays hidden until then. HEY queues the work, so `hey screener list` may still show the queue for a moment afterwards.",
 		},

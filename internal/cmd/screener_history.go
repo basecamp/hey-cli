@@ -31,9 +31,9 @@ func newScreenerHistoryCommand() *screenerHistoryCommand {
 	historyCommand.cmd = &cobra.Command{
 		Use:   "history",
 		Short: "List the senders already screened",
-		Long:  "Review who has been screened in or out, most recent decision first.",
+		Long:  "Review who has been approved or denied, most recent decision first.",
 		Annotations: map[string]string{
-			"agent_notes": "Only senders already decided on — the pending queue is `hey screener list`. Change a decision with `hey screener in <id>` or `hey screener out <id>` using the ID from here.",
+			"agent_notes": "Only senders already decided on — the pending queue is `hey screener list`. Change a decision with `hey screener approve <id>` or `hey screener deny <id>` using the ID from here.",
 		},
 		Example: `  hey screener history
   hey screener history --json
@@ -99,7 +99,7 @@ func (c *screenerHistoryCommand) run(cmd *cobra.Command, _ []string) error {
 		output.WithMeta("pages_fetched", pages),
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "rescreen",
-			Command:     "hey screener in <id>",
+			Command:     "hey screener approve <id>",
 			Description: "Change a decision",
 		}),
 	)

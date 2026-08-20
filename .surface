@@ -127,19 +127,19 @@ hey reply
 hey reply --attach
 hey reply --message
 hey screener
+hey screener approve
+hey screener approve --box
+hey screener approve --seen
 hey screener clear
+hey screener deny
+hey screener deny --spam
 hey screener history
 hey screener history --all
 hey screener history --page
-hey screener in
-hey screener in --box
-hey screener in --seen
 hey screener list
 hey screener list --all
 hey screener list --count
 hey screener list --page
-hey screener out
-hey screener out --spam
 hey search
 hey search --all
 hey search --any

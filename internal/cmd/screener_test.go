@@ -186,19 +186,19 @@ func TestScreenerListPaginates(t *testing.T) {
 	}
 }
 
-func TestScreenerIn(t *testing.T) {
+func TestScreenerApprove(t *testing.T) {
 	server, recorded := screenerServer(t)
 
-	resp, err := runScreener(t, server, "in", "91")
+	resp, err := runScreener(t, server, "approve", "91")
 	if err != nil {
-		t.Fatalf("in failed: %v; requests=%+v", err, recorded.snapshot())
+		t.Fatalf("approve failed: %v; requests=%+v", err, recorded.snapshot())
 	}
 
 	results := decodeScreenerData[[]screenedResult](t, resp.Data)
 	if len(results) != 1 || results[0].Status != "approved" || results[0].Name != "Hollis Heimboch" {
 		t.Errorf("results = %+v", results)
 	}
-	if resp.Summary != "1 sender screened in" {
+	if resp.Summary != "1 sender approved" {
 		t.Errorf("summary = %q", resp.Summary)
 	}
 
@@ -216,11 +216,11 @@ func TestScreenerIn(t *testing.T) {
 	}
 }
 
-func TestScreenerInResolvesTheDeliveryBoxByName(t *testing.T) {
+func TestScreenerApproveResolvesTheDeliveryBoxByName(t *testing.T) {
 	server, recorded := screenerServer(t)
 
-	if _, err := runScreener(t, server, "in", "91", "--box", "The Feed", "--seen"); err != nil {
-		t.Fatalf("in --box failed: %v; requests=%+v", err, recorded.snapshot())
+	if _, err := runScreener(t, server, "approve", "91", "--box", "The Feed", "--seen"); err != nil {
+		t.Fatalf("approve --box failed: %v; requests=%+v", err, recorded.snapshot())
 	}
 
 	requests := recorded.snapshot()
@@ -239,13 +239,13 @@ func TestScreenerInResolvesTheDeliveryBoxByName(t *testing.T) {
 
 // The bulk endpoint takes neither a delivery box nor a seen flag, so combining them with
 // several senders would silently drop them.
-func TestScreenerInRefusesPerSenderFlagsForManySenders(t *testing.T) {
+func TestScreenerApproveRefusesPerSenderFlagsForManySenders(t *testing.T) {
 	server, recorded := screenerServer(t)
 
-	if _, err := runScreener(t, server, "in", "91", "92", "--box", "The Feed"); err == nil {
+	if _, err := runScreener(t, server, "approve", "91", "92", "--box", "The Feed"); err == nil {
 		t.Fatal("expected --box with several senders to be refused")
 	}
-	if _, err := runScreener(t, server, "in", "91", "92", "--seen"); err == nil {
+	if _, err := runScreener(t, server, "approve", "91", "92", "--seen"); err == nil {
 		t.Fatal("expected --seen with several senders to be refused")
 	}
 	if requests := recorded.snapshot(); len(requests) != 0 {
@@ -253,19 +253,19 @@ func TestScreenerInRefusesPerSenderFlagsForManySenders(t *testing.T) {
 	}
 }
 
-func TestScreenerOutSeveralSendersGoesThroughBulk(t *testing.T) {
+func TestScreenerDenySeveralSendersGoesThroughBulk(t *testing.T) {
 	server, recorded := screenerServer(t)
 
-	resp, err := runScreener(t, server, "out", "91", "92", "--spam")
+	resp, err := runScreener(t, server, "deny", "91", "92", "--spam")
 	if err != nil {
-		t.Fatalf("out failed: %v; requests=%+v", err, recorded.snapshot())
+		t.Fatalf("deny failed: %v; requests=%+v", err, recorded.snapshot())
 	}
 
 	results := decodeScreenerData[[]screenedResult](t, resp.Data)
 	if len(results) != 2 {
 		t.Fatalf("results = %+v", results)
 	}
-	if resp.Summary != "2 senders screened out" {
+	if resp.Summary != "2 senders denied" {
 		t.Errorf("summary = %q", resp.Summary)
 	}
 
@@ -284,7 +284,7 @@ func TestScreenerRejectsBadClearanceIDs(t *testing.T) {
 	server, recorded := screenerServer(t)
 
 	for _, id := range []string{"abc", "0", "-1"} {
-		if _, err := runScreener(t, server, "out", id); err == nil {
+		if _, err := runScreener(t, server, "deny", id); err == nil {
 			t.Errorf("expected %q to be refused", id)
 		}
 	}
@@ -342,7 +342,7 @@ func TestScreenerSurfacesServerRefusals(t *testing.T) {
 	server, recorded := screenerServer(t)
 	recorded.statuses[http.MethodPatch+" /clearances/91.json"] = http.StatusForbidden
 
-	if _, err := runScreener(t, server, "in", "91"); err == nil {
+	if _, err := runScreener(t, server, "approve", "91"); err == nil {
 		t.Fatal("expected a forbidden response to be surfaced")
 	}
 }

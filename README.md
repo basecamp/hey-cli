@@ -229,10 +229,10 @@ hey contacts note set 12345 "Prefers email"
 hey contacts note delete 12345
 hey screener list                  # who is waiting to be screened
 hey screener list --count          # just the number waiting
-hey screener in 91                 # let a sender through
-hey screener in 91 --box "The Feed"  # let them through, into another box
-hey screener out 91 92             # turn several senders away
-hey screener out 91 --spam         # turn them away and mark what they sent as spam
+hey screener approve 91            # let a sender through
+hey screener approve 91 --box "The Feed"  # let them through, into another box
+hey screener deny 91 92            # turn several senders away
+hey screener deny 91 --spam        # turn them away and mark what they sent as spam
 hey screener history               # who has already been screened
 hey screener clear                 # empty the queue without deciding
 hey threads 123                    # read a full email thread
@@ -260,7 +260,7 @@ Search accepts free text plus `--required`, `--any`, `--none`, `--exact`, `--fro
 
 Contact updates preserve omitted name, email, and alias fields. Supplying `--alias` replaces the complete alias list; `--alias=` clears it. Contact notes accept positional content, `--note`, stdin, or `$EDITOR`. HEY hides contacts rather than permanently deleting them; hidden contacts leave lists, autocomplete, and search, and can be shown again by ID. Bundling groups a contact's mail into one row without merging or deleting the underlying threads; unbundling lists those threads separately again. HEY applies bundling when the contact's current delivery setting supports bundles.
 
-The Screener is where first-time senders wait. `hey screener list` returns clearance IDs — not contact IDs — with the sender and the subject of what they sent, plus `topic_id` for reading the thread before deciding. `--count` asks for the number alone, which is a far cheaper request than the queue. Screening in delivers everything the sender has waiting; screening out hides it. Either is reversible with the opposite command, and `hey screener history` shows what was already decided. `--box` and `--seen` screen in one sender at a time; several IDs go through HEY's bulk endpoint, which takes neither. `--spam` also trains HEY's filter, which is harder to undo than screening out. `hey screener clear` empties the queue without deciding anything — those senders reappear on their next email.
+The Screener is where first-time senders wait. `hey screener list` returns clearance IDs — not contact IDs — with the sender and the subject of what they sent, plus `topic_id` for reading the thread before deciding. `--count` asks for the number alone, which is a far cheaper request than the queue. Approving delivers everything the sender has waiting; denying hides it. Either is reversible with the opposite command, and `hey screener history` shows what was already decided. `--box` and `--seen` approve one sender at a time; several IDs go through HEY's bulk endpoint, which takes neither. `--spam` also trains HEY's filter, which is harder to undo than denying. `hey screener clear` empties the queue without deciding anything — those senders reappear on their next email.
 
 `hey bulk-reply preview` is read-only and resolves each posting to its latest replyable entry. `hey bulk-reply send` resolves the selection again, skips threads without a replyable entry, keeps HEY's server-provided name tag, and returns the exact reply count, delivery ID, delayed state, undo URL, and undo command. Posting IDs must be positive and unique. The message can come from `-m`, stdin, or `$EDITOR`; `--attach` is repeatable.
 
