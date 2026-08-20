@@ -13,7 +13,7 @@ import (
 //
 // or directly:
 //
-//	PREVIEW=1 go test -run TestPreviewCallbackPages ./internal/auth/ -count=1 -v
+//	PREVIEW=1 go test -run TestPreviewCallbackPages ./internal/auth/ -count=1 -v -timeout=0
 //
 // Then open http://127.0.0.1:9999 in your browser. Pages re-render from the
 // HTML files on disk on every request, so edit a template and refresh the
