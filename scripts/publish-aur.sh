@@ -54,7 +54,7 @@ package() {
   install -Dm755 "hey" "\${pkgdir}/usr/bin/hey"
   install -Dm644 "LICENSE.md" "\${pkgdir}/usr/share/licenses/\${pkgname}/LICENSE.md"
   install -Dm644 "completions/hey.bash" "\${pkgdir}/usr/share/bash-completion/completions/hey"
-  install -Dm644 "completions/hey.zsh" "\${pkgdir}/usr/share/zsh/site-functions/_hey"
+  install -Dm644 "completions/_hey" "\${pkgdir}/usr/share/zsh/site-functions/_hey"
   install -Dm644 "completions/hey.fish" "\${pkgdir}/usr/share/fish/vendor_completions.d/hey.fish"
 }
 PKGBUILD
