@@ -242,6 +242,41 @@ STUB
   [ ! -s "$PUSH_LOG" ]
 }
 
+@test "refuses a hand-pushed stable tag at an unstamped HEAD before touching main" {
+  # The recovery-run trap: an operator hand-pushes the tag, GoReleaser's stamp
+  # check rejects it, and they re-run the script. The tag sits at HEAD, so the
+  # existing-elsewhere check passes — but HEAD's metadata was never stamped.
+  # Pushing the metadata commit would move main past the tag and leave a
+  # proxy-cached tag that can never be reused; the script must refuse first.
+  git tag -a v0.2.0 -m "Release v0.2.0"
+  git push -q origin v0.2.0
+  : > "$PUSH_LOG"
+
+  run scripts/release.sh 0.2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"release metadata is not stamped"* ]]
+  [[ "$output" == *"choose a new version"* ]]
+  grep -q 'version = "0.1.0"' nix/package.nix
+  [ "$(git rev-parse HEAD)" = "$BASE" ]
+  [ "$(origin rev-parse main)" = "$BASE" ]
+  [ ! -s "$PUSH_LOG" ]
+}
+
+@test "an existing tag elsewhere is refused without suggesting a tag move" {
+  git commit -q --allow-empty -m "later work"
+  ELSEWHERE=$(git rev-parse HEAD~0)
+  git tag -a v0.2.0 -m "Release v0.2.0" HEAD
+  git push -q origin v0.2.0 main
+  git commit -q --allow-empty -m "even later" && git push -q origin main
+  : > "$PUSH_LOG"
+
+  run scripts/release.sh 0.2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"must not move"* ]]
+  [[ "$output" == *"choose a new version"* ]]
+  [[ "$output" != *"Delete it first"* ]]
+}
+
 @test "refuses to release from a branch other than the default" {
   git checkout -q -b topic
   run scripts/release.sh 0.2.0

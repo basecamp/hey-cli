@@ -108,7 +108,22 @@ git fetch origin --tags --quiet
 if git rev-parse -q --verify "refs/tags/${TAG}^{commit}" >/dev/null; then
   EXISTING_SHA=$(git rev-parse "refs/tags/${TAG}^{commit}")
   if [[ "$EXISTING_SHA" != "$LOCAL" ]]; then
-    die "Tag $TAG already exists at ${EXISTING_SHA:0:7} (not HEAD). Delete it first or choose a different version."
+    # Never suggest moving a tag: proxy.golang.org caches tags as it first saw
+    # them, so a moved tag is at best ignored and at worst a checksum mismatch
+    # for everyone who fetched the original.
+    die "Tag $TAG already exists at ${EXISTING_SHA:0:7} (not HEAD). Published tags are cached by the Go module proxy and must not move — choose a new version."
+  fi
+  # Tag at HEAD: only re-runnable if HEAD already carries the stable metadata.
+  # A hand-pushed tag at an unstamped commit must be refused HERE, before the
+  # metadata commit moves main out from under the tag — otherwise the script
+  # mutates main, then discovers the mismatch and the operator is stuck with a
+  # proxy-cached tag that cannot be reused.
+  if [[ "$PRERELEASE" -eq 0 ]]; then
+    STAMPED_NIX=$(sed -n 's/.*version = "\([^"]*\)".*/\1/p' nix/package.nix | head -1)
+    STAMPED_PLUGIN=$(jq -r .version .claude-plugin/plugin.json)
+    if [[ "$STAMPED_NIX" != "$VERSION" || "$STAMPED_PLUGIN" != "$VERSION" ]]; then
+      die "Tag $TAG already exists at HEAD, but HEAD's release metadata is not stamped for it (nix ${STAMPED_NIX}, plugin ${STAMPED_PLUGIN}). The tag may already be cached by the Go module proxy — choose a new version."
+    fi
   fi
 fi
 
