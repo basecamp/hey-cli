@@ -48,8 +48,39 @@ env:
   RELEASE_TAG: ${{ github.event.release.tag_name || inputs.version }}
 
 jobs:
+  # Until the first release is published there is nothing real to verify, and a
+  # permanently red canary blocks merges on a condition only a release can
+  # clear. The gate skips the legs with a visible warning instead — and
+  # self-arms: the moment a release exists (or a run pins a version), the legs
+  # run for real. Pinned runs bypass the probe on purpose: asking for a version
+  # that does not exist should fail loudly, not skip.
+  has-release:
+    name: Resolve release under test
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      exists: ${{ steps.probe.outputs.exists }}
+    steps:
+      - name: Probe for a published release
+        id: probe
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "$RELEASE_TAG" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          elif gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No published release yet — the upgrade smoke legs are skipped. They arm automatically once the first release is published."
+          fi
+
   installer-sh:
     name: install.sh cosign ${{ matrix.cosign }}
+    needs: [has-release]
+    if: needs.has-release.outputs.exists == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -120,6 +151,8 @@ jobs:
 
   installer-ps1:
     name: install.ps1 cosign ${{ matrix.cosign }}
+    needs: [has-release]
+    if: needs.has-release.outputs.exists == 'true'
     runs-on: windows-latest
     strategy:
       fail-fast: false
