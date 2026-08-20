@@ -593,10 +593,10 @@ func (w *postingsWatch) writeJSON(event watchEvent) {
 
 func shellCommand(ctx context.Context, script string) *exec.Cmd {
 	if runtime.GOOS == "windows" {
-		return exec.CommandContext(ctx, "cmd", "/c", script) //nolint:gosec // G204: running the command the caller asked for is the point
+		return exec.CommandContext(ctx, "cmd", "/c", script) // #nosec G204 -- running the command the caller asked for is the point
 	}
 
-	return exec.CommandContext(ctx, "sh", "-c", script) //nolint:gosec // G204: running the command the caller asked for is the point
+	return exec.CommandContext(ctx, "sh", "-c", script) // #nosec G204 -- running the command the caller asked for is the point
 }
 
 func (e watchEvent) environment() []string {
