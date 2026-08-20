@@ -51,6 +51,23 @@ func TestEmailCommandHelpKeepsPostingAsAnInternalTerm(t *testing.T) {
 	}
 }
 
+func TestEmailActionExamplesCarryTopicKind(t *testing.T) {
+	root := newRootCmd()
+	for _, name := range []string{"seen", "unseen", "move", "trash", "spam", "ignore", "stop-ignoring"} {
+		t.Run(name, func(t *testing.T) {
+			command, _, err := root.Find([]string{name})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, example := range strings.Split(strings.TrimSpace(command.Example), "\n") {
+				if !strings.Contains(example, "--kind topic") {
+					t.Errorf("example does not preserve email kind: %q", example)
+				}
+			}
+		})
+	}
+}
+
 func TestContactCommandHelpUsesHEYTerminology(t *testing.T) {
 	root := newRootCmd()
 	contacts, _, err := root.Find([]string{"contacts"})

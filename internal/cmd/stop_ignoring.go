@@ -19,8 +19,8 @@ func newStopIgnoringCommand() *stopIgnoringCommand {
 		Use:   "stop-ignoring <id>...",
 		Short: "Stop ignoring email threads",
 		Long:  "Stop ignoring one or more email threads so new replies can bring them back to your attention.",
-		Example: `  hey stop-ignoring 12345
-  hey stop-ignoring 12345 67890`,
+		Example: `  hey stop-ignoring 12345 --kind topic
+  hey stop-ignoring 12345 67890 --kind topic`,
 		Annotations: map[string]string{
 			"agent_notes": "Accepts one or more box item IDs from hey box output. Pass --kind exactly as returned by hey box --json. HEY World posts are rejected before any email action is requested. Reverses hey ignore for each thread.",
 		},

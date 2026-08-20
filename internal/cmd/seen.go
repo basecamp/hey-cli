@@ -19,8 +19,8 @@ func newSeenCommand() *seenCommand {
 	seenCommand.cmd = &cobra.Command{
 		Use:   "seen <id>...",
 		Short: "Mark email threads as seen",
-		Example: `  hey seen 12345
-  hey seen 12345 67890`,
+		Example: `  hey seen 12345 --kind topic
+  hey seen 12345 67890 --kind topic`,
 		Annotations: map[string]string{
 			"agent_notes": "Accepts one or more box item IDs from hey box output. Pass --kind exactly as returned by hey box --json. HEY World posts are rejected before any email action is requested. Marks each email thread as seen/read.",
 		},
@@ -71,8 +71,8 @@ func newUnseenCommand() *unseenCommand {
 	unseenCommand.cmd = &cobra.Command{
 		Use:   "unseen <id>...",
 		Short: "Mark email threads as unseen",
-		Example: `  hey unseen 12345
-  hey unseen 12345 67890`,
+		Example: `  hey unseen 12345 --kind topic
+  hey unseen 12345 67890 --kind topic`,
 		Annotations: map[string]string{
 			"agent_notes": "Accepts one or more box item IDs from hey box output. Pass --kind exactly as returned by hey box --json. HEY World posts are rejected before any email action is requested. Marks each email thread as unseen/unread.",
 		},

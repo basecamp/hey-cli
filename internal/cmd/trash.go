@@ -19,8 +19,8 @@ func newTrashCommand() *trashCommand {
 		Use:   "trash <id>...",
 		Short: "Move email threads to Trash",
 		Long:  "Move one or more email threads to Trash. For a shared thread, HEY removes your access instead of deleting it for everyone.",
-		Example: `  hey trash 12345
-  hey trash 12345 67890`,
+		Example: `  hey trash 12345 --kind topic
+  hey trash 12345 67890 --kind topic`,
 		Annotations: map[string]string{
 			"agent_notes": "Accepts one or more box item IDs from hey box output. Pass --kind exactly as returned by hey box --json. HEY World posts are rejected before any email action is requested. Shared threads lose your access rather than being deleted for everyone.",
 		},
