@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -131,10 +132,13 @@ func stubUpgradeCheckers(t *testing.T, stub upgradeCheckersStub) {
 	t.Cleanup(func() { homebrewUpgrader = origHU })
 
 	// The upgrade binds to the installation that owns the running binary, so
-	// give a stubbed brew install a plausible cask payload path. Tests that
-	// exercise the binding itself stub their own path afterwards.
+	// give each stubbed install method a plausible executable path. Tests
+	// that exercise the binding itself stub their own path afterwards.
 	if stub.isBrew {
 		stubRawExecutablePathResolver(t, "/opt/homebrew/Caskroom/hey/1.2.3/hey", true)
+	}
+	if stub.isGlobalScoop {
+		stubExecutablePathResolver(t, "c:/programdata/scoop/apps/hey/current/hey.exe", true)
 	}
 
 	origSC := scoopChecker
@@ -743,15 +747,46 @@ func TestUpgradeGlobalScoopUsesGlobalUpdate(t *testing.T) {
 			return nil
 		},
 	})
-	stubScoopPrefixResolver(t, func(context.Context, string) (string, bool) {
-		return "c:/programdata/scoop/apps/hey/current", true
-	})
 	stubBinaryVersionProber(t, func(context.Context, string) (string, error) { return "1.3.0", nil })
 
 	run := executeUpgradeCommand(t)
 	mustNoError(t, run.err)
 	if !gotGlobal {
 		t.Error("global scoop install must run `scoop update -g`")
+	}
+}
+
+// `scoop prefix` resolves the local install first and has no scope flag, so
+// when the same app exists in both scopes a global upgrade probed through it
+// would inspect the user-scope binary — confirming against a copy the
+// mutation never touched. The global probe must derive from the running
+// executable instead, whether it is the app payload or the shim.
+func TestUpgradeGlobalScoopProbesGlobalInstallNotLocalShadow(t *testing.T) {
+	for name, exe := range map[string]string{
+		"payload": "c:/programdata/scoop/apps/hey/1.2.3/hey.exe",
+		"shim":    "c:/programdata/scoop/shims/hey.exe",
+	} {
+		t.Run(name, func(t *testing.T) {
+			stubVersion(t, "1.2.3")
+			stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "1.3.0", isScoop: true, isGlobalScoop: true})
+			stubExecutablePathResolver(t, exe, true)
+			stubScoopPrefixResolver(t, func(context.Context, string) (string, bool) {
+				t.Error("a global probe must not consult `scoop prefix`, which resolves the local scope first")
+				return "c:/users/alice/scoop/apps/hey/current", true
+			})
+			var probed string
+			stubBinaryVersionProber(t, func(_ context.Context, path string) (string, error) {
+				probed = path
+				return "1.3.0", nil
+			})
+
+			run := executeUpgradeCommand(t)
+			mustNoError(t, run.err)
+			want := filepath.Join(filepath.FromSlash("c:/programdata"), "scoop", "apps", "hey", "current", "hey.exe")
+			if probed != want {
+				t.Errorf("probed %q, want the global install's %q", probed, want)
+			}
+		})
 	}
 }
 

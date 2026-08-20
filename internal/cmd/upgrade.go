@@ -200,7 +200,7 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 				Hint:    fmt.Sprintf("Run manually for detail: scoop update%s %s", scoopGlobalFlag(global), scoopApp),
 			}
 		}
-		return confirmManagedUpgrade(ctx, w, "scoop", scoopBinaryPath(ctx), current, latest,
+		return confirmManagedUpgrade(ctx, w, "scoop", scoopBinaryPath(ctx, global), current, latest,
 			fmt.Sprintf("scoop uninstall%s %s && scoop install%s %s", scoopGlobalFlag(global), scoopApp, scoopGlobalFlag(global), scoopApp))
 	}
 
@@ -348,14 +348,41 @@ func homebrewPrefixFromExecutable() (string, bool) {
 	return filepath.Dir(caskroomDir), true
 }
 
-// scoopBinaryPath derives the scoop-managed entrypoint from `scoop prefix`
-// (the loaded module on Windows is the exe, not the shim, and may be stale).
-func scoopBinaryPath(ctx context.Context) string {
+// scoopBinaryPath locates the entrypoint of the installation the upgrade just
+// mutated. `scoop prefix` resolves the local install first and has no scope
+// flag, so when the same app exists in both scopes a global upgrade probed
+// through it would inspect the user-scope binary instead — the global path is
+// derived from the running executable, which is known to live under the
+// global root.
+func scoopBinaryPath(ctx context.Context, global bool) string {
+	if global {
+		return globalScoopBinaryPath()
+	}
+
 	prefix, ok := scoopPrefixResolver(ctx, scoopApp)
 	if !ok || prefix == "" {
 		return ""
 	}
 	return filepath.Join(filepath.FromSlash(prefix), "hey.exe")
+}
+
+// globalScoopBinaryPath rebuilds <root>/scoop/apps/hey/current/hey.exe from
+// the running executable — the app payload (whose own versioned directory is
+// stale after the upgrade; "current" is re-resolved by the OS at probe time)
+// or the shim. The lowercased path is probeable because Scoop only runs on
+// Windows, where paths are case-insensitive.
+func globalScoopBinaryPath() string {
+	exe, ok := executablePathResolver()
+	if !ok {
+		return ""
+	}
+
+	for _, marker := range []string{scoopAppPath, scoopShimPath} {
+		if root, _, found := strings.Cut(exe, marker); found {
+			return filepath.Join(filepath.FromSlash(root), "scoop", "apps", scoopApp, "current", "hey.exe")
+		}
+	}
+	return ""
 }
 
 func upgradeHomebrew(ctx context.Context, brew string, stdout io.Writer, stderr io.Writer) error {
@@ -423,9 +450,10 @@ func isScoopShimExecutable(exe string) bool {
 	return name == scoopCommandBaseName
 }
 
-// resolveScoopPrefix returns the installed app root reported by `scoop prefix`.
-// Scoop already checks local installs first, then global installs, so there is
-// no separate scope flag to thread through here.
+// resolveScoopPrefix returns the installed app root reported by `scoop
+// prefix`, which checks local installs first and only then global ones — so
+// it can only speak for the local scope; global probes derive their path from
+// the running executable instead (globalScoopBinaryPath).
 func resolveScoopPrefix(ctx context.Context, app string) (string, bool) {
 	if app != scoopApp {
 		return "", false
