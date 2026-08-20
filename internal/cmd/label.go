@@ -163,10 +163,13 @@ func (c *labelCommand) run(cmd *cobra.Command, args []string) error {
 		table := newTable(cmd.OutOrStdout())
 		table.addRow([]string{"ID", "Thread", "From", "Summary", "Date"})
 		for _, posting := range folder.Postings {
-			topicID := resolvePostingTopicID(posting)
+			topicID := ""
+			if id := resolvePostingTopicID(posting); id != 0 {
+				topicID = fmt.Sprintf("%d", id)
+			}
 			creator := terminalSafeText(posting.Creator.Name)
 			summary := truncate(terminalSafeText(posting.Summary), 60)
-			table.addRow([]string{fmt.Sprintf("%d", posting.Id), fmt.Sprintf("%d", topicID), creator, summary, formatDate(posting.CreatedAt)})
+			table.addRow([]string{fmt.Sprintf("%d", posting.Id), topicID, creator, summary, formatDate(posting.CreatedAt)})
 		}
 		table.print()
 		if notice != "" {

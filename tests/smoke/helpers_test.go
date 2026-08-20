@@ -24,6 +24,7 @@ var (
 	baseURL       string
 	configDir     string
 	sessionCookie string
+	smokeEmail    string
 )
 
 // Response mirrors the CLI's JSON envelope.
@@ -51,7 +52,7 @@ type Breadcrumb struct {
 
 func TestMain(m *testing.M) {
 	baseURL = envOr("HEY_SMOKE_BASE_URL", "http://app.hey.localhost:3003")
-	email := envOr("HEY_SMOKE_EMAIL", "david@basecamp.com")
+	smokeEmail = envOr("HEY_SMOKE_EMAIL", "david@basecamp.com")
 	password := envOr("HEY_SMOKE_PASSWORD", "secret123456")
 
 	// Locate the pre-built binary.
@@ -76,7 +77,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	// Launch headless Chrome browser and log in to obtain a session cookie.
-	sessionCookie, err = browserLogin(baseURL, email, password)
+	sessionCookie, err = browserLogin(baseURL, smokeEmail, password)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Browser login failed: %v\n", err)
 		os.Exit(1)

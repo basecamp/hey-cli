@@ -138,6 +138,16 @@ func TestLabelCommandReturnsContinuation(t *testing.T) {
 	if !ok || folder["next_page"] != "next-cursor" || folder["total_count"] != float64(3) {
 		t.Fatalf("pagination metadata = %#v", response.Data)
 	}
+	postings, ok := folder["postings"].([]any)
+	if !ok || len(postings) != 2 {
+		t.Fatalf("postings = %#v", folder["postings"])
+	}
+	for _, raw := range postings {
+		posting := raw.(map[string]any)
+		if _, exists := posting["topic_id"]; exists {
+			t.Errorf("posting without a topic URL exposed topic_id: %#v", posting)
+		}
+	}
 	if response.Notice != "Showing 2 of 3 results. Use --all to see everything." {
 		t.Errorf("notice = %q", response.Notice)
 	}

@@ -90,6 +90,9 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 		table.addRow([]string{"Thread", "From", "Summary", "Date"})
 		for _, p := range postings {
 			displayID := resolvePostingTopicID(p)
+			if displayID == 0 {
+				displayID = p.Id
+			}
 			table.addRow([]string{fmt.Sprintf("%d", displayID), p.Creator.Name, truncate(p.Summary, 60), formatDate(p.CreatedAt)})
 		}
 		table.print()

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -202,6 +203,40 @@ func TestFolderDiscoveryCompletesWhileAnotherSectionIsActive(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Error("inactive Mail view should continue loading its selected source")
+	}
+}
+
+func TestInactiveMailIgnoresStalePostingErrors(t *testing.T) {
+	m := newModel()
+	m.section = sectionCalendar
+	m.activeView = m.calendarView
+	m.mailView.boxes = []models.Box{{ID: 1, Kind: hey.BoxKindImbox, Name: "Imbox"}}
+	m.mailView.boxIndex = 0
+	m.mailView.activeRequestID = 2
+	m.mailView.activeRequestKind = mailRequestPostings
+	m.mailView.loading = true
+	m.mailView.notice = "Current mail state"
+
+	updated, cmd := m.Update(postingsLoadedMsg{
+		requestID:  1,
+		boxID:      1,
+		sourceKind: hey.BoxKindImbox,
+		err:        fmt.Errorf("stale failure"),
+	})
+	m = updated.(model)
+	if cmd != nil || m.mailView.notice != "Current mail state" || !m.mailView.loading || m.mailView.activeRequestID != 2 {
+		t.Errorf("stale error changed inactive Mail: notice=%q loading=%v request=%d", m.mailView.notice, m.mailView.loading, m.mailView.activeRequestID)
+	}
+
+	updated, cmd = m.Update(postingsLoadedMsg{
+		requestID:  2,
+		boxID:      1,
+		sourceKind: hey.BoxKindImbox,
+		err:        fmt.Errorf("current failure"),
+	})
+	m = updated.(model)
+	if cmd != nil || m.mailView.notice != "Could not load mail: current failure" || m.mailView.loading {
+		t.Errorf("current error state = notice:%q loading:%v", m.mailView.notice, m.mailView.loading)
 	}
 }
 

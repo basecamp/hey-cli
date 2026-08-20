@@ -179,7 +179,7 @@ func resolvePostingTopicID(p generated.Posting) int64 {
 			return id
 		}
 	}
-	return p.Id
+	return 0
 }
 
 // --- Calendar helpers ---

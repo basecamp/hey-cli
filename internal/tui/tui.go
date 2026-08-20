@@ -207,6 +207,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case postingsLoadedMsg:
 		if m.activeView != m.mailView {
+			if !m.mailView.acceptsPostingsLoaded(msg) {
+				return m, nil
+			}
 			if msg.err != nil {
 				m.mailView.finishRequest(msg.requestID)
 				m.mailView.notice = "Could not load mail: " + msg.err.Error()

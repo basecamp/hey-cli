@@ -204,7 +204,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return v.applySources([]models.Box(msg)), true
 
 	case postingsLoadedMsg:
-		if msg.requestID != v.activeRequestID || msg.boxID != v.currentBoxID() || (msg.sourceKind != "" && msg.sourceKind != v.currentSourceKind()) {
+		if !v.acceptsPostingsLoaded(msg) {
 			return nil, true
 		}
 		v.finishRequest(msg.requestID)
@@ -979,6 +979,12 @@ func (v *mailView) beginRequest(kind mailRequestKind) (uint64, context.Context) 
 	v.requestCancel = cancel
 	v.loading = true
 	return v.activeRequestID, ctx
+}
+
+func (v *mailView) acceptsPostingsLoaded(msg postingsLoadedMsg) bool {
+	return msg.requestID == v.activeRequestID &&
+		msg.boxID == v.currentBoxID() &&
+		(msg.sourceKind == "" || msg.sourceKind == v.currentSourceKind())
 }
 
 func (v *mailView) finishRequest(requestID uint64) {
