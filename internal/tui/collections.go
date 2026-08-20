@@ -56,7 +56,7 @@ func (p *collectionPicker) update(msg tea.KeyPressMsg) {
 // overlay composites the picker as a centered modal over the base content
 // using a lipgloss layer compositor.
 func (p *collectionPicker) overlay(base string, width, height int) string {
-	modal := p.view(height)
+	modal := p.view(width, height)
 	x := max((width-lipgloss.Width(modal))/2, 0)
 	y := max((height-lipgloss.Height(modal))/2, 0)
 	compositor := lipgloss.NewCompositor(
@@ -68,8 +68,10 @@ func (p *collectionPicker) overlay(base string, width, height int) string {
 	return canvas.Render()
 }
 
-func (p *collectionPicker) view(height int) string {
-	title := lipgloss.NewStyle().Foreground(colorChrome).Bold(true).Render("Collections")
+func (p *collectionPicker) view(width, height int) string {
+	// Rounded borders and two cells of padding on each side use six columns.
+	contentWidth := max(width-6, 1)
+	title := lipgloss.NewStyle().Foreground(colorChrome).Bold(true).Render(truncateToWidth("Collections", contentWidth))
 	selected := lipgloss.NewStyle().Foreground(colorActive).Bold(true)
 
 	// Scroll the list when it cannot fit: border, padding and title take 6 lines.
@@ -80,10 +82,11 @@ func (p *collectionPicker) view(height int) string {
 	}
 	rows := make([]string, 0, maxRows)
 	for i := start; i < min(start+maxRows, len(p.names)); i++ {
+		name := truncateToWidth(p.names[i], max(contentWidth-2, 1))
 		if i == p.cursor {
-			rows = append(rows, selected.Render("› "+p.names[i]))
+			rows = append(rows, selected.Render("› "+name))
 		} else {
-			rows = append(rows, "  "+p.names[i])
+			rows = append(rows, "  "+name)
 		}
 	}
 
