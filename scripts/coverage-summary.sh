@@ -47,7 +47,7 @@ cat "$package_summary"
 echo
 echo "Lowest-covered functions (up to 15)"
 printf "FUNCTION\tCOVERAGE\n"
-awk 'NR > 1 && $1 != "total:" { gsub(/%$/, "", $3); print $1 " " $2 "\t" $3 "%" }' "$function_summary" \
+awk '$1 != "total:" { gsub(/%$/, "", $3); print $1 " " $2 "\t" $3 "%" }' "$function_summary" \
   | sort -t $'\t' -k2,2n \
   | awk 'NR <= 15'
 
