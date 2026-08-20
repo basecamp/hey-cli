@@ -218,10 +218,15 @@ func renderNavRow(items []navItem, selected int, focused bool, width int, center
 	all := make([]rendered, len(items))
 	totalW := 0
 	for i, item := range items {
-		// Tabs are always bold; the selected one changes color instead.
+		// Tabs are always bold. The selected tab uses the active color when
+		// its row has focus and the less prominent primary color otherwise.
 		style := lipgloss.NewStyle().Foreground(colorChrome).Bold(true)
 		if i == selected {
-			style = style.Foreground(colorActive)
+			if focused {
+				style = style.Foreground(colorActive)
+			} else {
+				style = style.Foreground(colorPrimary)
+			}
 		}
 		s := renderNavLabel(item.label, item.shortcut, style)
 		w := lipgloss.Width(s)

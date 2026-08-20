@@ -747,8 +747,8 @@ func TestChromeUsesBlueBoldConvention(t *testing.T) {
 	if !strings.Contains(row, "\x1b[1;34mContacts") {
 		t.Errorf("inactive tabs should be bold blue: %q", row)
 	}
-	if unfocused := renderNavRow(items, 0, false, 60, false); !strings.Contains(unfocused, "\x1b[1;33mMail") {
-		t.Errorf("the selected tab should stay bold yellow without focus: %q", unfocused)
+	if unfocused := renderNavRow(items, 0, false, 60, false); !strings.Contains(unfocused, "\x1b[1;94mMail") {
+		t.Errorf("the selected tab in an unfocused row should use the less prominent primary color: %q", unfocused)
 	}
 
 	shortcuts := renderNavRow([]navItem{{shortcut: "I", label: "Imbox"}, {shortcut: "O", label: "Contacts"}}, 0, true, 60, false)
