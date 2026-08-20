@@ -92,6 +92,8 @@ jobs:
           fi
   native-upgrade:
     name: native self-update (${{ matrix.os }})
+    needs: [has-release]
+    if: needs.has-release.outputs.exists == 'true'
     strategy:
       fail-fast: false
       matrix:
