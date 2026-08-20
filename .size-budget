@@ -1,11 +1,12 @@
 # Release binary size budget, per platform. Checked by scripts/check-size-budget.sh
 # against the goreleaser dist/ layout at release time and ./bin/hey on PRs.
 #
-# Baseline: v0.1.x pre-sigstore linux_amd64 measured 15.1 MiB stripped / 5.4 MiB
-# gzipped. The bounds below are placeholders until the first release carrying
-# in-process Sigstore verification (`hey upgrade`) has been measured; they are
-# then set to ceil(max observed x 1.15) and enforce flips to true. Raising them
-# afterwards needs a review of what grew, not a budget bump.
-stripped_max_mib = 30
+# Baseline (goreleaser snapshot at the hey upgrade change, 2026-08-20): the
+# largest target, windows_amd64, measured 25.2 MiB stripped / 8.8 MiB gzipped;
+# pre-sigstore the same target was 15.2 / 5.4. sigstore-go's in-process
+# verification cost ~10 MiB stripped, accepted so releases verify without a
+# cosign dependency. Bounds are ceil(max x 1.15). An increase beyond either
+# needs a review of what grew, not a budget bump.
+stripped_max_mib = 29
 gzip_max_mib = 11
-enforce = false
+enforce = true

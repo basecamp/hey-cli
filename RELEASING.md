@@ -152,12 +152,12 @@ in `.surface-breaking` in the same PR; prune entries after the release ships.
 published), again over `dist/` afterwards for the per-platform table in the job
 summary, and on `./bin/hey` on PRs (`make check-size`).
 
-Baseline: pre-Sigstore `v0.1.x` measured 15.1 MiB stripped / 5.4 MiB gzipped
-(linux_amd64). The file is **report-only** (`enforce = false`) until the first
-release carrying in-process Sigstore verification for `hey upgrade` has been
-measured; the ceilings are then set to ceil(max observed × 1.15) and enforcement
-switched on. An increase beyond a ceiling after that needs a review of what grew,
-not a budget bump.
+Baseline (goreleaser snapshot at the `hey upgrade` change): the largest target,
+windows_amd64, measured **25.2 MiB stripped / 8.8 MiB gzipped**; pre-Sigstore the
+same target was 15.2 / 5.4 MiB. sigstore-go's in-process verification cost
+~10 MiB stripped, accepted so releases verify without a cosign dependency. The
+ceilings are ceil(max × 1.15) = **29 / 11 MiB**, enforced. An increase beyond a
+ceiling needs a review of what grew, not a budget bump.
 
 ## Pin and reference lockstep
 
