@@ -128,11 +128,13 @@ func TestPersistedAccountScopesMailRequests(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(configDir, "hey-cli"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(
-		filepath.Join(configDir, "hey-cli", "config.json"),
-		[]byte(`{"account_id":"2"}`),
-		0600,
-	); err != nil {
+	data, err := json.Marshal(map[string]any{
+		"account_defaults": map[string]string{server.URL: "2"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "hey-cli", "config.json"), data, 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -241,11 +243,15 @@ func TestConfigSetDoesNotPersistAccountOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var file map[string]string
+	var file struct {
+		BaseURL         string            `json:"base_url"`
+		AccountID       string            `json:"account_id"`
+		AccountDefaults map[string]string `json:"account_defaults"`
+	}
 	if err := json.Unmarshal(data, &file); err != nil {
 		t.Fatal(err)
 	}
-	if file["base_url"] != "https://new.hey.com" || file["account_id"] != "1" {
+	if file.BaseURL != "https://new.hey.com" || file.AccountID != "" || file.AccountDefaults["https://old.hey.com"] != "1" {
 		t.Fatalf("saved config = %#v", file)
 	}
 }
@@ -264,12 +270,46 @@ func TestAccountsUseValidatesAndPersistsDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var file map[string]any
+	var file struct {
+		AccountDefaults map[string]string `json:"account_defaults"`
+	}
 	if err := json.Unmarshal(data, &file); err != nil {
 		t.Fatal(err)
 	}
-	if file["account_id"] != "2" {
-		t.Fatalf("saved account = %#v", file["account_id"])
+	if file.AccountDefaults[server.URL] != "2" {
+		t.Fatalf("saved account defaults = %#v", file.AccountDefaults)
+	}
+}
+
+func TestBaseURLFlagDoesNotCarryGlobalAccountAcrossOrigins(t *testing.T) {
+	var boxesAccounts []string
+	server := linkedAccountServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/boxes.json" {
+			http.NotFound(w, r)
+			return
+		}
+		boxesAccounts = append(boxesAccounts, r.URL.Query().Get("filtered_account_id"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`))
+	})
+	configDir := t.TempDir()
+	dir := filepath.Join(configDir, "hey-cli")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	global := `{"base_url":"https://app.hey.com","account_defaults":{"https://app.hey.com":"1"}}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(global), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := runAccountsCLIWithConfig(t, server, configDir, "boxes"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runAccountsCLIWithConfig(t, server, configDir, "--account", "2", "boxes"); err != nil {
+		t.Fatal(err)
+	}
+	if len(boxesAccounts) != 2 || boxesAccounts[0] != "" || boxesAccounts[1] != "2" {
+		t.Fatalf("boxes account filters = %#v, want [all, 2]", boxesAccounts)
 	}
 }
 

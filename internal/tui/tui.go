@@ -397,7 +397,7 @@ func (m *model) updateHelpBindings() {
 			bindings = append(bindings, extra...)
 		}
 	}
-	if m.canSwitchMailAccounts() && !m.mailAccountPicker && !m.loading && !m.activeView.InThread() {
+	if m.canOpenMailAccountPicker() && !m.mailAccountPicker {
 		if ic, ok := m.activeView.(inputCapturer); !ok || !ic.CapturingInput() {
 			description := "mail account"
 			if m.mailAccountDiscoveryErr != "" {
@@ -448,7 +448,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	if key == "ctrl+a" && m.canSwitchMailAccounts() && !m.loading && !m.activeView.InThread() {
+	if key == "ctrl+a" && m.canOpenMailAccountPicker() {
 		if m.mailAccountDiscoveryErr != "" {
 			m.mailAccountDiscoveryErr = ""
 			m.updateHelpBindings()
@@ -529,6 +529,26 @@ func (m model) canSwitchMailAccounts() bool {
 	return m.mailAccountDiscoveryErr != "" || len(m.mailAccounts) > 2 || (m.mailAccountUnavailable && len(m.mailAccounts) > 0)
 }
 
+func (m model) canOpenMailAccountPicker() bool {
+	return m.canSwitchMailAccounts() && !m.loading && !m.activeView.InThread() && !m.hasPendingMutation()
+}
+
+func (m model) hasPendingMutation() bool {
+	views := []sectionView{m.activeView}
+	if m.mailView != nil && m.activeView != m.mailView {
+		views = append(views, m.mailView)
+	}
+	if m.contactsView != nil && m.activeView != m.contactsView {
+		views = append(views, m.contactsView)
+	}
+	for _, view := range views {
+		if blocker, ok := view.(accountSwitchBlocker); ok && blocker.AccountSwitchBlocked() {
+			return true
+		}
+	}
+	return false
+}
+
 func (m model) handleMailAccountKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 	if msg.Key().Code == tea.KeyEscape || key == "q" {
@@ -569,7 +589,7 @@ func (m model) handleMailAccountKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) switchSection(sec section) (tea.Model, tea.Cmd) {
-	if sec == m.section {
+	if sec == m.section || m.hasPendingMutation() {
 		return m, nil
 	}
 	m.section = sec

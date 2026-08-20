@@ -100,6 +100,7 @@ CLI for HEY: mailboxes, email threads, contacts, replies, compose, calendars, to
 2. **Authentication required** for all data commands — run `hey auth login` first
 3. **HTML output** is available via `--html` for commands that return HTML content
 4. **Linked mail accounts share one login** — use `hey accounts list --json`, then `--account <id|all>` when a task must target one account
+5. **Local HEY configuration requires human trust** — never run `hey config trust-local` without the user's explicit approval
 
 ## Quick Reference
 
@@ -108,6 +109,8 @@ CLI for HEY: mailboxes, email threads, contacts, replies, compose, calendars, to
 | List linked mail accounts | `hey accounts list --json` |
 | Set default mail account | `hey accounts use <id\|all>` |
 | Run once for one account | `hey --account <id> boxes --json` |
+| Review trusted local settings | `hey config trusted-locals --json` |
+| Trust this repository's settings | `hey config trust-local` (requires explicit user approval) |
 | List mailboxes | `hey boxes --json` |
 | List emails in a box | `hey box imbox --json` |
 | Search email | `hey search "quarterly planning" --json` |

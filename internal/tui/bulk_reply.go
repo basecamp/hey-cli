@@ -303,6 +303,7 @@ func (v *mailView) undoBulkReply() tea.Cmd {
 		v.notice = "No delayed bulk reply is available to undo"
 		return nil
 	}
+	v.pendingMutations++
 	return func() tea.Msg {
 		err := v.vc.sdk.BulkReplies().Undo(v.vc.ctx, id)
 		return bulkReplyUndoneMsg{id: id, err: err}

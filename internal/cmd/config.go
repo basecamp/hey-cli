@@ -5,6 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-cli/internal/config"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -21,6 +22,9 @@ func newConfigCommand() *configCommand {
 
 	configCommand.cmd.AddCommand(newConfigShowCommand())
 	configCommand.cmd.AddCommand(newConfigSetCommand())
+	configCommand.cmd.AddCommand(newConfigTrustLocalCommand())
+	configCommand.cmd.AddCommand(newConfigUntrustLocalCommand())
+	configCommand.cmd.AddCommand(newConfigTrustedLocalsCommand())
 
 	return configCommand
 }
@@ -59,11 +63,88 @@ func newConfigSetCommand() *cobra.Command {
 	}
 }
 
+func newConfigTrustLocalCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "trust-local",
+		Short: "Trust this repository's local HEY settings",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			local := cfg.LocalConfig()
+			if local == nil {
+				return output.ErrUsage("no local .hey/config.json with a server or account setting was found")
+			}
+			if err := cfg.TrustLocalConfig(); err != nil {
+				return err
+			}
+			if writer.IsStyled() {
+				fmt.Fprintf(cmd.OutOrStdout(), "Trusted local HEY configuration: %s\n", terminalSafeText(local.Path))
+				return nil
+			}
+			return writeOK(cfg.LocalConfig(), output.WithSummary("Trusted local HEY configuration"))
+		},
+	}
+}
+
+func newConfigUntrustLocalCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "untrust-local",
+		Short: "Remove trust for this repository's local HEY settings",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			local := cfg.LocalConfig()
+			if local == nil {
+				return output.ErrUsage("no local .hey/config.json with a server or account setting was found")
+			}
+			if err := cfg.UntrustLocalConfig(); err != nil {
+				return err
+			}
+			if writer.IsStyled() {
+				fmt.Fprintf(cmd.OutOrStdout(), "Removed trust for local HEY configuration: %s\n", terminalSafeText(local.Path))
+				return nil
+			}
+			return writeOK(cfg.LocalConfig(), output.WithSummary("Removed trust for local HEY configuration"))
+		},
+	}
+}
+
+func newConfigTrustedLocalsCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "trusted-locals",
+		Short: "List trusted repository-local HEY settings",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			trusted, err := config.TrustedLocalConfigs()
+			if err != nil {
+				return err
+			}
+			if writer.IsStyled() {
+				table := newTable(cmd.OutOrStdout())
+				table.addRow([]string{"Configuration", "Server", "Account", "Digest"})
+				for _, local := range trusted {
+					digest := local.Digest
+					if len(digest) > 12 {
+						digest = digest[:12]
+					}
+					table.addRow([]string{
+						terminalSafeText(local.Path),
+						terminalSafeText(local.ServerOrigin),
+						terminalSafeText(local.AccountID),
+						terminalSafeText(digest),
+					})
+				}
+				table.print()
+				return nil
+			}
+			return writeOK(trusted, output.WithSummary(fmt.Sprintf("%d trusted local configurations", len(trusted))))
+		},
+	}
+}
+
 func newConfigShowCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "show",
 		Short: "Show current configuration with sources",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			entries := []map[string]string{
 				{
 					"key":    "base_url",
@@ -75,6 +156,17 @@ func newConfigShowCommand() *cobra.Command {
 					"value":  cfg.AccountID,
 					"source": string(cfg.SourceOf("account_id")),
 				},
+			}
+			if local := cfg.LocalConfig(); local != nil {
+				trust := "untrusted"
+				if local.Trusted {
+					trust = "trusted"
+				}
+				entries = append(entries, map[string]string{
+					"key":    "local_config_trust",
+					"value":  trust,
+					"source": "local",
+				})
 			}
 
 			if writer.IsStyled() {

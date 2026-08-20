@@ -294,7 +294,11 @@ func TestMailViewPostingKeysCallExpectedEndpoints(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			v, recorded := mailWithTestServer(t, http.StatusNoContent)
 
-			msg := runCmd(v.HandleContentKey(keyPress(tt.key)))
+			cmd := v.HandleContentKey(keyPress(tt.key))
+			if !v.AccountSwitchBlocked() {
+				t.Fatal("posting mutation did not block account switching")
+			}
+			msg := runCmd(cmd)
 			done, ok := msg.(postingActionDoneMsg)
 			if !ok || done.err != nil {
 				t.Fatalf("posting command returned %#v", msg)
@@ -306,6 +310,9 @@ func TestMailViewPostingKeysCallExpectedEndpoints(t *testing.T) {
 				t.Errorf("action effect = %v, want %v", done.effect, tt.effect)
 			}
 			v.Update(done)
+			if v.AccountSwitchBlocked() {
+				t.Fatal("completed posting mutation still blocks account switching")
+			}
 
 			if recorded.method != http.MethodPost || recorded.path != tt.path {
 				t.Errorf("request = %s %s, want POST %s", recorded.method, recorded.path, tt.path)

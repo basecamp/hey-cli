@@ -54,6 +54,9 @@ hey compose --to
 hey config
 hey config set
 hey config show
+hey config trust-local
+hey config trusted-locals
+hey config untrust-local
 hey contacts
 hey contacts add
 hey contacts add --account-user-id

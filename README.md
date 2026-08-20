@@ -67,12 +67,21 @@ hey --account 12345 boxes         # override the default for one invocation
 HEY_ACCOUNT_ID=12345 hey search "quarterly planning"
 ```
 
-The default is `all`. Selection precedence is `--account`, `HEY_ACCOUNT_ID`, local
-`.hey/config.json`, global `~/.config/hey-cli/config.json`, then All Accounts. Explicit
-and persisted IDs are validated against the signed-in identity before mail requests, so
-an unavailable account fails closed. Compose and contact creation use an individually
-selected account; replies and forwards use the thread's account. Calendars, todos, habits, time
-tracking, and journal entries remain identity-wide.
+The default is `all`. Selection precedence is `--account`, `HEY_ACCOUNT_ID`, trusted local
+`.hey/config.json`, the global default for the active server, then All Accounts. Global
+account defaults are stored separately for each server origin, so development and production
+selections cannot affect one another. Explicit and persisted IDs are validated against the
+signed-in identity before mail requests, so an unavailable account fails closed.
+
+The first command that would use a repository-local server or account setting asks whether to
+use it once, always trust its current values, or cancel. Non-interactive and JSON commands fail
+closed until you explicitly run `hey config trust-local` from that directory. Changes to the
+local server or account invalidate trust. Review trust with `hey config trusted-locals` and
+remove it with `hey config untrust-local`.
+
+Compose and contact creation use an individually selected account; replies and forwards use
+the thread's account. Calendars, todos, habits, time tracking, and journal entries remain
+identity-wide.
 
 ## TUI
 

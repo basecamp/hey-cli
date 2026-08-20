@@ -419,6 +419,10 @@ func (v *contactsView) CapturingInput() bool {
 	return v.contactForm != nil || v.noteForm != nil
 }
 
+func (v *contactsView) AccountSwitchBlocked() bool {
+	return v.loading && v.activeRequestKind == contactRequestMutation
+}
+
 func (v *contactsView) Resize(width, height int) {
 	v.list.setSize(width, height)
 	v.detailView.SetWidth(width)

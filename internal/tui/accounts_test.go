@@ -136,6 +136,35 @@ func TestCtrlAOpensAccountPicker(t *testing.T) {
 	}
 }
 
+func TestAccountPickerWaitsForPendingMutation(t *testing.T) {
+	m := newModel()
+	m.loading = false
+	m.mailAccounts = []mailAccountChoice{
+		{label: "All Accounts"},
+		{id: 1, label: "jane@example.com"},
+		{id: 2, label: "jane@company.example"},
+	}
+	m.mailView.pendingMutations = 1
+
+	updated, cmd := m.handleKey(tea.KeyPressMsg(tea.Key{Code: 'a', Mod: tea.ModCtrl}))
+	m = updated.(model)
+	if cmd != nil || m.mailAccountPicker {
+		t.Fatal("ctrl+a opened the account picker during a pending mutation")
+	}
+	updated, cmd = m.switchSection(sectionCalendar)
+	m = updated.(model)
+	if cmd != nil || m.section != sectionMail {
+		t.Fatal("section changed before the pending mutation could report its result")
+	}
+
+	m.mailView.pendingMutations = 0
+	updated, cmd = m.handleKey(tea.KeyPressMsg(tea.Key{Code: 'a', Mod: tea.ModCtrl}))
+	m = updated.(model)
+	if cmd != nil || !m.mailAccountPicker {
+		t.Fatal("ctrl+a did not open the account picker after the mutation finished")
+	}
+}
+
 func TestAccountSwitchRebuildsViewsAndCancelsOldGeneration(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

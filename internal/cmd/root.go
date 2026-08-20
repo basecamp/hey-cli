@@ -77,6 +77,10 @@ func newRootCmd() *cobra.Command {
 				}
 			}
 
+			if err := ensureLocalConfigTrusted(cmd); err != nil {
+				return err
+			}
+
 			if os.Getenv("HEY_DEBUG") != "" && verboseFlag == 0 {
 				verboseFlag = 1
 			}

@@ -124,6 +124,7 @@ type mailView struct {
 	searchQuery       string
 	searchPage        int
 	lastBulkReplyID   int64  // delayed delivery currently available for undo
+	pendingMutations  int    // writes that must finish before changing the account context
 	notice            string // one-shot confirmation shown above the posting list
 	activeRequestID   uint64 // identifies the only mail read allowed to update the view
 	activeRequestKind mailRequestKind
@@ -299,6 +300,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 
 	case bulkReplyUndoneMsg:
+		v.finishMutation()
 		if msg.id != v.lastBulkReplyID {
 			return nil, true
 		}
@@ -351,6 +353,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 
 	case postingActionDoneMsg:
+		v.finishMutation()
 		if msg.err != nil {
 			return func() tea.Msg { return errMsg{msg.err} }, true
 		}
@@ -441,6 +444,10 @@ func (v *mailView) View() string {
 // CapturingInput reports whether a form or picker is open and wants every key.
 func (v *mailView) CapturingInput() bool {
 	return v.compose != nil || v.bulkReply != nil || v.movePicker != nil || v.searchForm != nil
+}
+
+func (v *mailView) AccountSwitchBlocked() bool {
+	return v.pendingMutations > 0
 }
 
 func (v *mailView) HelpBindings() []helpBinding {
@@ -1019,6 +1026,7 @@ func (v *mailView) movesOutOfCurrentBox(destinationKind string) bool {
 }
 
 func (v *mailView) doPostingAction(label string, effect postingActionEffect, boxID, postingID int64, fn func() error) tea.Cmd {
+	v.pendingMutations++
 	return func() tea.Msg {
 		err := fn()
 		return postingActionDoneMsg{
@@ -1028,6 +1036,12 @@ func (v *mailView) doPostingAction(label string, effect postingActionEffect, box
 			effect:    effect,
 			err:       err,
 		}
+	}
+}
+
+func (v *mailView) finishMutation() {
+	if v.pendingMutations > 0 {
+		v.pendingMutations--
 	}
 }
 

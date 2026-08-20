@@ -173,7 +173,7 @@ func TestSaveAccountIDPreservesGlobalSettings(t *testing.T) {
 	if err := json.Unmarshal(data, &file); err != nil {
 		t.Fatal(err)
 	}
-	if file.BaseURL != "https://global.hey.com" || file.AccountID != "42" {
+	if file.BaseURL != "https://global.hey.com" || file.AccountID != "" || file.AccountDefaults["https://env.hey.com"] != "42" {
 		t.Fatalf("saved config = %#v", file)
 	}
 }
@@ -211,8 +211,150 @@ func TestSaveBaseURLPreservesGlobalAccount(t *testing.T) {
 	if err := json.Unmarshal(data, &file); err != nil {
 		t.Fatal(err)
 	}
-	if file.BaseURL != "https://new.hey.com" || file.AccountID != "101" {
+	if file.BaseURL != "https://new.hey.com" || file.AccountID != "" || file.AccountDefaults["https://old.hey.com"] != "101" {
 		t.Fatalf("saved config = %#v", file)
+	}
+}
+
+func TestAccountDefaultsAreBoundToServerOrigin(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HEY_ACCOUNT_ID", "")
+	dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), configDirName)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	data := `{
+		"base_url":"https://app.hey.com",
+		"account_defaults":{
+			"https://app.hey.com":"101",
+			"http://app.hey.localhost:3003":"202"
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(dir, configFile), []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		baseURL string
+		want    string
+	}{
+		{"https://app.hey.com", "101"},
+		{"http://app.hey.localhost:3003", "202"},
+		{"https://staging.hey.com", AllAccounts},
+	} {
+		t.Run(test.baseURL, func(t *testing.T) {
+			t.Setenv("HEY_BASE_URL", test.baseURL)
+			cfg, err := Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.AccountID != test.want {
+				t.Fatalf("account for %s = %q, want %q", test.baseURL, cfg.AccountID, test.want)
+			}
+		})
+	}
+}
+
+func TestBaseURLFlagResolvesAccountForNewOrigin(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HEY_BASE_URL", "")
+	t.Setenv("HEY_ACCOUNT_ID", "")
+	dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), configDirName)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	data := `{
+		"base_url":"https://app.hey.com",
+		"account_defaults":{
+			"https://app.hey.com":"101",
+			"https://staging.hey.com":"202"
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(dir, configFile), []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SetFromFlag("base_url", "https://staging.hey.com"); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AccountID != "202" {
+		t.Fatalf("staging account = %q, want 202", cfg.AccountID)
+	}
+	if err := cfg.SetFromFlag("base_url", "https://other.hey.com"); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AccountID != AllAccounts || cfg.SourceOf("account_id") != SourceDefault {
+		t.Fatalf("unknown-origin account = %q (%s), want all (default)", cfg.AccountID, cfg.SourceOf("account_id"))
+	}
+	if err := cfg.SetFromFlag("account_id", "303"); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AccountID != "303" || cfg.SourceOf("account_id") != SourceFlag {
+		t.Fatalf("explicit account = %q (%s), want 303 (flag)", cfg.AccountID, cfg.SourceOf("account_id"))
+	}
+}
+
+func TestLocalConfigTrustTracksPathAndSensitiveValues(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, "config"))
+	t.Setenv("HEY_BASE_URL", "")
+	t.Setenv("HEY_ACCOUNT_ID", "")
+	workspace := filepath.Join(tmp, "workspace")
+	localDir := filepath.Join(workspace, ".hey")
+	if err := os.MkdirAll(localDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(workspace)
+	path := filepath.Join(localDir, configFile)
+	if err := os.WriteFile(path, []byte(`{"base_url":"https://app.hey.com","account_id":"202"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.UntrustedLocalConfig() == nil {
+		t.Fatal("new local config was trusted without user approval")
+	}
+	if err := cfg.TrustLocalConfig(); err != nil {
+		t.Fatal(err)
+	}
+	globalPath := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), configDirName, configFile)
+	if info, err := os.Stat(globalPath); err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("global config permissions = %v, %v; want 0600", info, err)
+	}
+	reloaded, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if local := reloaded.LocalConfig(); local == nil || !local.Trusted || reloaded.UntrustedLocalConfig() != nil {
+		t.Fatalf("trusted local config = %#v", local)
+	}
+
+	t.Setenv("HEY_BASE_URL", "https://staging.hey.com")
+	otherServer, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if otherServer.UntrustedLocalConfig() == nil {
+		t.Fatal("local account trust carried to another server origin")
+	}
+	t.Setenv("HEY_BASE_URL", "")
+
+	if err := os.WriteFile(path, []byte(`{"base_url":"https://app.hey.com","account_id":"303"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if local := changed.UntrustedLocalConfig(); local == nil || local.AccountID != "303" {
+		t.Fatalf("changed local config did not invalidate trust: %#v", local)
 	}
 }
 
