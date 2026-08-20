@@ -17,6 +17,7 @@ var (
 type styles struct {
 	app       lipgloss.Style
 	title     lipgloss.Style // bold primary for inline titles
+	pill      lipgloss.Style // filled button, for a call to action above a list
 	entryFrom lipgloss.Style
 	entryDate lipgloss.Style
 	entryBody lipgloss.Style
@@ -30,6 +31,7 @@ func newStyles() styles {
 	return styles{
 		app:       lipgloss.NewStyle().Padding(1, 2),
 		title:     lipgloss.NewStyle().Foreground(colorPrimary).Bold(true),
+		pill:      lipgloss.NewStyle().Foreground(lipgloss.Black).Background(colorPrimary).Bold(true).Padding(0, 1),
 		entryFrom: lipgloss.NewStyle().Foreground(colorPrimary).Bold(true),
 		entryDate: lipgloss.NewStyle().Foreground(colorMuted),
 		entryBody: lipgloss.NewStyle(),

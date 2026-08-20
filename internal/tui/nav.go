@@ -224,9 +224,7 @@ func renderNavRow(items []navItem, selected int, focused bool, width int, center
 		}
 		row := strings.Join(parts, sep)
 		if centered {
-			rowWidth := lipgloss.Width(row)
-			pad := max((width-rowWidth)/2, 0)
-			return strings.Repeat(" ", pad) + row
+			return centerText(row, width)
 		}
 		return row
 	}
@@ -301,11 +299,15 @@ func renderNavRow(items []navItem, selected int, focused bool, width int, center
 
 	row := b.String()
 	if centered {
-		rowWidth := lipgloss.Width(row)
-		pad := max((width-rowWidth)/2, 0)
-		return strings.Repeat(" ", pad) + row
+		return centerText(row, width)
 	}
 	return row
+}
+
+// centerText pads text so it sits in the middle of width.
+func centerText(text string, width int) string {
+	pad := max((width-lipgloss.Width(text))/2, 0)
+	return strings.Repeat(" ", pad) + text
 }
 
 // renderHeader renders the full 3-row navigation header.

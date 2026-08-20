@@ -184,6 +184,11 @@ Calendar and Journal remain identity-wide.
 
 Navigate between Mail, Contacts, Calendar, and Journal. Mail navigation includes HEY boxes followed by your labels. Use `n` and `p` to page through a label. Use `/` to search, Enter to open a thread, `r` to reply, `f` to forward, `m` to move, `g` to add, create, or remove labels, `t` to trash, `s` to mark as spam, `-` to ignore, and `+` to stop ignoring. Select threads with Space and press `b` to preview every bulk-reply recipient before writing and sending one reply to all selected threads. A delayed bulk reply can be recalled with `u` while HEY's undo window remains open. Search results retain the matching-message summary; use `n` and `p` to move between result pages.
 
+Press Ctrl+S from the mail list to open The Screener. When senders are waiting, the mail
+list says so above the threads. In The Screener, `y` screens the selected sender in and `n`
+screens them out, Tab moves to Screener History and back, `[` and `]` page through either
+list, `X` clears the whole Screener after a confirmation, and Escape or `q` returns to mail.
+
 Thread attachments always appear with their filename, media type, and size. Use `[` and `]` to select an attachment, `s` to save it without replacing an existing file, and `o` to download and open it in an external application. Attachments never open automatically. Kitty and Ghostty can show inline images. Foot and other terminals use visible text markers.
 
 Press Shift+O to open Contacts. Use Enter to view a contact, `a` to add, `e` to edit, `n` to edit the private note, `x` twice to delete a note, `h` to hide, and `u` to show the most recently hidden contact again. Escape or `q` goes back.

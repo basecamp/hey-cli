@@ -48,6 +48,9 @@ type model struct {
 	calendarView *calendarView
 	journalView  *journalView
 
+	// The Screener, opened over the mail section with ctrl+s
+	screenerView *screenerView
+
 	// Linked mail accounts
 	mailAccounts            []mailAccountChoice
 	mailAccount             mailAccountChoice
@@ -80,6 +83,7 @@ func newModelWithMailAccounts(rootSDK, sdk *hey.Client, selected string) model {
 	ov := newContactsView(vc)
 	cv := newCalendarView(vc)
 	jv := newJournalView(vc)
+	sv := newScreenerView(vc)
 	account := mailAccountChoice{label: "All Accounts"}
 	if accountID, err := strconv.ParseInt(selected, 10, 64); err == nil && accountID > 0 {
 		account = mailAccountChoice{id: accountID, label: fmt.Sprintf("Account %d", accountID)}
@@ -98,6 +102,7 @@ func newModelWithMailAccounts(rootSDK, sdk *hey.Client, selected string) model {
 		contactsView:        ov,
 		calendarView:        cv,
 		journalView:         jv,
+		screenerView:        sv,
 		mailAccounts:        []mailAccountChoice{{label: "All Accounts"}},
 		mailAccount:         account,
 		viewGenerationToken: &atomic.Uint64{},
@@ -199,7 +204,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateHelpBindings()
 		return m, nil
 
+	case screenerClosedMsg:
+		return m.closeScreener()
+
 	case mailSourcesLoadedMsg:
+		if m.activeView != m.mailView {
+			cmd, _ := m.mailView.Update(msg)
+			return m, m.stampViewCmd(cmd)
+		}
+
+	case screenerCountLoadedMsg:
 		if m.activeView != m.mailView {
 			cmd, _ := m.mailView.Update(msg)
 			return m, m.stampViewCmd(cmd)
@@ -293,6 +307,7 @@ func (m model) applyMailAccount(account mailAccountChoice, client *hey.Client) (
 	m.contactsView = newContactsView(m.vc)
 	m.calendarView = newCalendarView(m.vc)
 	m.journalView = newJournalView(m.vc)
+	m.screenerView = newScreenerView(m.vc)
 	switch m.section {
 	case sectionMail:
 		m.activeView = m.mailView
@@ -468,6 +483,10 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	if key == "ctrl+s" && m.canOpenScreener() {
+		return m.openScreener()
+	}
+
 	if key == "ctrl+a" && m.canOpenMailAccountPicker() {
 		if m.mailAccountDiscoveryErr != "" {
 			m.mailAccountDiscoveryErr = ""
@@ -606,6 +625,32 @@ func (m model) handleMailAccountKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, switchMailAccount(m.vc.ctx, m.rootSDK, account, m.mailAccountRequestID)
 	}
 	return m, nil
+}
+
+// canOpenScreener reports whether ctrl+s should open The Screener: from the mail list,
+// with no thread, search or form in the way.
+func (m model) canOpenScreener() bool {
+	return m.section == sectionMail && m.activeView == m.mailView && !m.loading && m.err == nil &&
+		!m.mailView.InThread() && !m.hasPendingMutation()
+}
+
+func (m model) openScreener() (tea.Model, tea.Cmd) {
+	m.activeView = m.screenerView
+	m.activeView.Resize(m.vc.width, m.vc.height)
+	cmd := m.syncLoading(m.activeView.Init())
+	m.updateHelpBindings()
+	return m, cmd
+}
+
+func (m model) closeScreener() (tea.Model, tea.Cmd) {
+	if m.activeView != m.screenerView {
+		return m, nil
+	}
+	m.activeView = m.mailView
+	m.activeView.Resize(m.vc.width, m.vc.height)
+	cmd := m.syncLoading(m.mailView.refreshScreenerCount())
+	m.updateHelpBindings()
+	return m, cmd
 }
 
 func (m model) switchSection(sec section) (tea.Model, tea.Cmd) {

@@ -39,9 +39,10 @@ const (
 type boxesLoadedMsg []models.Box
 
 type mailSourcesLoadedMsg struct {
-	requestID uint64
-	sources   []models.Box
-	folderErr error
+	requestID     uint64
+	sources       []models.Box
+	screenerCount int
+	folderErr     error
 }
 
 type postingsLoadedMsg struct {
@@ -108,6 +109,11 @@ type postingActionDoneMsg struct {
 	err        error
 }
 
+type screenerCountLoadedMsg struct {
+	count int
+	err   error
+}
+
 type folderActionDoneMsg struct {
 	action     string
 	sourceID   int64
@@ -149,6 +155,7 @@ type mailView struct {
 	searchActive       bool
 	searchQuery        string
 	searchPage         int
+	screenerCount      int    // senders waiting in The Screener
 	lastBulkReplyID    int64  // delayed delivery currently available for undo
 	pendingMutations   int    // writes that must finish before changing the account context
 	notice             string // one-shot confirmation shown above the posting list
@@ -183,6 +190,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if msg.requestID != v.sourceRequestID {
 			return nil, true
 		}
+		v.screenerCount = msg.screenerCount
 		sources := msg.sources
 		if msg.folderErr != nil {
 			v.folderDiscoveryErr = msg.folderErr.Error()
@@ -202,6 +210,12 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 
 	case boxesLoadedMsg:
 		return v.applySources([]models.Box(msg)), true
+
+	case screenerCountLoadedMsg:
+		if msg.err == nil {
+			v.screenerCount = msg.count
+		}
+		return nil, true
 
 	case postingsLoadedMsg:
 		if !v.acceptsPostingsLoaded(msg) {
@@ -513,10 +527,37 @@ func (v *mailView) View() string {
 		}
 		return v.searchList.view()
 	}
+	return v.listHeader() + v.postingList.view()
+}
+
+// listHeader carries the one-shot notice and the Screener's standing invitation above
+// the posting list.
+func (v *mailView) listHeader() string {
+	var lines []string
 	if v.notice != "" {
-		return v.vc.styles.title.Render(v.notice) + "\n" + v.postingList.view()
+		lines = append(lines, v.vc.styles.title.Render(v.notice))
 	}
-	return v.postingList.view()
+	if hint := v.screenerHint(); hint != "" {
+		lines = append(lines, centerText(v.vc.styles.pill.Render(hint), v.vc.width), "")
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func (v *mailView) screenerHint() string {
+	if v.screenerCount <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("Screen %d %s · ctrl+s", v.screenerCount, firstTimeSenderNoun(v.screenerCount))
+}
+
+func firstTimeSenderNoun(count int) string {
+	if count == 1 {
+		return "first-time sender"
+	}
+	return "first-time senders"
 }
 
 // CapturingInput reports whether a form or picker is open and wants every key.
@@ -569,6 +610,7 @@ func (v *mailView) HelpBindings() []helpBinding {
 	}
 	bindings := []helpBinding{
 		{"/", "search"},
+		{"ctrl+s", "screener"},
 		{"c", "compose"},
 		{"space", "select"},
 		{"b", "bulk reply"},
@@ -1497,7 +1539,15 @@ func (v *mailView) fetchSources(requestID uint64) tea.Cmd {
 				boxes = append(boxes, models.Box{ID: label.ID, Kind: mailSourceKindFolder, Name: label.Name, AppURL: label.AppURL})
 			}
 		}
-		return mailSourcesLoadedMsg{requestID: requestID, sources: boxes, folderErr: folderErr}
+		screenerCount, _ := v.vc.sdk.Clearances().PendingCount(v.vc.ctx)
+		return mailSourcesLoadedMsg{requestID: requestID, sources: boxes, screenerCount: screenerCount, folderErr: folderErr}
+	}
+}
+
+func (v *mailView) refreshScreenerCount() tea.Cmd {
+	return func() tea.Msg {
+		count, err := v.vc.sdk.Clearances().PendingCount(v.vc.ctx)
+		return screenerCountLoadedMsg{count: count, err: err}
 	}
 }
 

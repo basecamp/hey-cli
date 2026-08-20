@@ -76,8 +76,11 @@ attributes are relative paths requiring authentication via `sdk.Get`.
 
 The TUI uses the `sectionView` interface pattern. Each top-level section (Mail, Calendar, Journal) implements `sectionView` and owns its data, fetch commands, key handling, rendering, and help bindings. The main model delegates to the active view.
 
-Three files implement `sectionView` -- `mail.go`, `calendar.go` and `journal.go`, one per
-section. The rest of `internal/tui/` is shared infrastructure: `tui.go` (model and
+Four files implement `sectionView` -- `mail.go`, `contacts.go`, `calendar.go` and
+`journal.go`, one per section. `screener.go` implements it too, but The Screener is not a
+section: ctrl+s from the mail list swaps it in as the active view, it captures every key
+while it is open, and it asks to be closed again with `screenerClosedMsg`.
+The rest of `internal/tui/` is shared infrastructure: `tui.go` (model and
 router), `section_view.go` (the interface), plus `nav.go`, `content.go`, `help.go`,
 `styles.go`, `loading.go`, `kitty.go`, `html.go` and `calendar_views.go`. Read the directory rather than a
 table here.
