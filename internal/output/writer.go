@@ -112,6 +112,7 @@ func (w *Writer) Err(err error) {
 		Error: e.Message,
 		Code:  e.Code,
 		Hint:  e.Hint,
+		Meta:  e.Meta,
 	}
 	enc := json.NewEncoder(w.opts.Stderr)
 	enc.SetIndent("", "  ")

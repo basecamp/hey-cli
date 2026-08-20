@@ -12,7 +12,7 @@ import (
 )
 
 func newSetupCommand() *cobra.Command {
-	return &cobra.Command{
+	setup := &cobra.Command{
 		Use:   "setup",
 		Short: "Set up HEY for first use",
 		Long:  "Sign in and prepare HEY for first use.",
@@ -63,4 +63,6 @@ func newSetupCommand() *cobra.Command {
 			)
 		},
 	}
+	setup.AddCommand(newSetupOmarchyCommand().cmd)
+	return setup
 }

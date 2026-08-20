@@ -47,6 +47,21 @@ func ensureLocalConfigTrusted(cmd *cobra.Command) error {
 	}
 }
 
+// commandIgnoresLocalConfig reports whether a command reads only the global and
+// environment configuration, so a repository-local .hey/config.json is never
+// even parsed for it. The bar poller runs from the shell's working directory,
+// wherever that happens to be: a local config must neither redirect it to
+// another server nor fail it (trust gate or malformed file) — the indicator
+// has to stay dark rather than error. setup omarchy only edits fixed desktop
+// paths and must not be blocked by a checkout's config either.
+func commandIgnoresLocalConfig(cmd *cobra.Command) bool {
+	parts := strings.Fields(cmd.CommandPath())
+	if len(parts) < 2 {
+		return false
+	}
+	return parts[1] == "omarchy" || (len(parts) >= 3 && parts[1] == "setup" && parts[2] == "omarchy")
+}
+
 // commandUsesRuntimeConfig reports whether a command reads the effective
 // server or account, which is what trusting a local config approves. upgrade
 // and version talk only to GitHub and the local install, so an untrusted

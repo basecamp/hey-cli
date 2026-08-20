@@ -126,8 +126,25 @@ func localConfigPath() string {
 	return ""
 }
 
+// Load reads the effective configuration: defaults, the global file, a
+// repository-local .hey/config.json found from the working directory, then the
+// environment.
 func Load() (*Config, error) {
-	cfg := &Config{
+	return load(localConfigPath())
+}
+
+// LoadGlobal reads the configuration without any repository-local file. It is
+// for commands that run from an arbitrary working directory on the user's
+// behalf — a desktop bar poller, say — where a checkout's config must neither
+// redirect them nor trip the local-config trust gate.
+func LoadGlobal() (*Config, error) {
+	return load("")
+}
+
+// Defaults is the configuration before any file or environment is consulted:
+// the fallback for commands that must run even when the global file is broken.
+func Defaults() *Config {
+	return &Config{
 		BaseURL:   defaultBase,
 		AccountID: AllAccounts,
 		sources: map[string]Source{
@@ -135,6 +152,10 @@ func Load() (*Config, error) {
 			"account_id": SourceDefault,
 		},
 	}
+}
+
+func load(localPath string) (*Config, error) {
+	cfg := Defaults()
 
 	global, err := readFileConfig(globalConfigPath())
 	if err != nil {
@@ -147,7 +168,6 @@ func Load() (*Config, error) {
 	}
 
 	var local fileConfig
-	localPath := localConfigPath()
 	if localPath != "" {
 		local, err = readFileConfig(localPath)
 		if err != nil {

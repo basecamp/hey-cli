@@ -157,6 +157,8 @@ hey search --to
 hey search filters
 hey seen
 hey setup
+hey setup omarchy
+hey setup omarchy --remove
 hey skill
 hey skill install
 hey spam

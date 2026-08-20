@@ -14,6 +14,11 @@ type Error struct {
 	HTTPStatus int
 	Retryable  bool
 	Cause      error
+
+	// Meta carries structured context into the JSON error envelope — e.g. the
+	// per-step results of a partially failed setup, which a scripting caller
+	// needs to know what did land.
+	Meta map[string]any
 }
 
 func (e *Error) Error() string {
