@@ -5,8 +5,11 @@ on:
   workflow_call:
   push:
     branches: [main]
+  # No branch filter on pull_request: Secret scanning is a required check on
+  # main, and a stacked PR that is auto-retargeted to main after its parent
+  # merges gets no new pull_request event — the check must already exist on
+  # the head SHA from its ordinary PR runs.
   pull_request:
-    branches: [main]
   schedule:
     - cron: '0 6 * * 1'
 
