@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -29,6 +30,15 @@ import (
 )
 
 const changesChannel = "Postings::ChangesChannel"
+
+// A failed read of the changes feed is retried on its own, doubling the wait each time so
+// a server that stays down isn't hammered, and asyncScriptLimit caps how many --run-async
+// commands run at once so a catch-up of thousands of changes can't fork a process for each.
+const (
+	firstWatchRetry   = 2 * time.Second
+	longestWatchRetry = 2 * time.Minute
+	asyncScriptLimit  = 16
+)
 
 var watchableChanges = []string{"added", "updated", "deleted"}
 
@@ -116,6 +126,8 @@ func (c *watchCommand) run(cmd *cobra.Command, args []string) error {
 		errOut:      cmd.ErrOrStderr(),
 		styled:      writer.IsStyled(),
 		catchUp:     make(chan struct{}, 1),
+		unread:      map[int64]bool{},
+		running:     make(chan struct{}, asyncScriptLimit),
 	}
 
 	client, err := cable.Dial(ctx, cfg.BaseURL, authMgr)
@@ -129,7 +141,8 @@ func (c *watchCommand) run(cmd *cobra.Command, args []string) error {
 			if reconnected {
 				watch.askForCatchUp()
 			}
-		}))
+		}),
+		actioncable.OnRejected(func() { watch.rejected.Store(true) }))
 	if err != nil {
 		return output.ErrAPI(0, fmt.Sprintf("could not subscribe to posting changes: %v", err))
 	}
@@ -289,6 +302,11 @@ type postingsWatch struct {
 	errOut         io.Writer
 	styled         bool
 	catchUp        chan struct{}
+	rejected       atomic.Bool
+	unread         map[int64]bool
+	backoff        time.Duration
+	retry          <-chan time.Time
+	running        chan struct{}
 	reported       int
 	lastScriptExit int
 }
@@ -307,9 +325,14 @@ func (w *postingsWatch) listen(ctx context.Context, subscription *actioncable.Su
 			if err := w.readEveryBox(ctx); err != nil {
 				return err
 			}
+		case <-w.retry:
+			w.retry = nil
+			if err := w.readUnreadBoxes(ctx); err != nil {
+				return err
+			}
 		case message, open := <-subscription.Messages():
 			if !open {
-				return nil
+				return w.closedError(ctx)
 			}
 			if err := w.read(ctx, message); err != nil {
 				return err
@@ -318,6 +341,21 @@ func (w *postingsWatch) listen(ctx context.Context, subscription *actioncable.Su
 	}
 
 	return nil
+}
+
+// closedError tells the two ways the subscription's messages dry up apart: the watch was
+// interrupted or timed out, which is how it's meant to end, or the connection went away
+// for good and there is nothing left listening — which a watch left running unattended
+// has to hear about rather than exiting quietly.
+func (w *postingsWatch) closedError(ctx context.Context) error {
+	switch {
+	case ctx.Err() != nil:
+		return nil //nolint:nilerr // an interrupt or a --timeout is how a watch is meant to end
+	case w.rejected.Load():
+		return output.ErrAuth("HEY's cable server turned this subscription down — run `hey auth login` again, or log in with `hey auth login --cookie` if the server doesn't take access tokens on a websocket yet")
+	default:
+		return output.ErrNetwork(errors.New("HEY's cable server hung up for good — nothing is watching for changes any more"))
+	}
 }
 
 // askForCatchUp is called from the cable client's own goroutine, so it drops the ask
@@ -331,6 +369,18 @@ func (w *postingsWatch) askForCatchUp() {
 
 func (w *postingsWatch) readEveryBox(ctx context.Context) error {
 	for _, id := range slices.Sorted(maps.Keys(w.boxes)) {
+		if err := w.readBox(ctx, w.boxes[id]); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// readUnreadBoxes retries the boxes whose last read failed. Their cursors haven't moved,
+// so the changes they missed are still ahead of them.
+func (w *postingsWatch) readUnreadBoxes(ctx context.Context) error {
+	for _, id := range slices.Sorted(maps.Keys(w.unread)) {
 		if err := w.readBox(ctx, w.boxes[id]); err != nil {
 			return err
 		}
@@ -360,9 +410,11 @@ func (w *postingsWatch) readBox(ctx context.Context, box *watchedBox) error {
 	if err != nil { //nolint:nilerr // a watch reports a failed read and keeps listening
 		if ctx.Err() == nil {
 			fmt.Fprintf(w.errOut, "warning: could not read changes in %s: %v\n", box.name, err)
+			w.readAgainLater(box)
 		}
 		return nil
 	}
+	w.wasRead(box)
 
 	if changes.FullSyncRequired {
 		fmt.Fprintf(w.errOut, "notice: too much changed in %s to follow one change at a time — skipping ahead, read the box with `hey box %s`\n", box.name, box.kind)
@@ -384,6 +436,26 @@ func (w *postingsWatch) readBox(ctx context.Context, box *watchedBox) error {
 	}
 
 	return nil
+}
+
+// readAgainLater keeps a box that couldn't be read on the list, and arms the retry that
+// comes back to it. Without it a failed read consumes the notification that prompted it,
+// and the change stays invisible until the next email happens along.
+func (w *postingsWatch) readAgainLater(box *watchedBox) {
+	w.unread[box.id] = true
+
+	if w.retry == nil {
+		w.backoff = min(max(2*w.backoff, firstWatchRetry), longestWatchRetry)
+		w.retry = time.After(w.backoff)
+	}
+}
+
+func (w *postingsWatch) wasRead(box *watchedBox) {
+	delete(w.unread, box.id)
+
+	if len(w.unread) == 0 {
+		w.backoff = 0
+	}
 }
 
 // skipAhead moves a box's cursor to the server's current one, which is the only way
@@ -441,6 +513,11 @@ func (w *postingsWatch) finished() bool {
 // spawnScript starts the script and leaves it to get on with it. Whether it worked,
 // and whether it overlaps with the next one, is the script's business — and it outlives
 // the watch, so interrupting `hey` doesn't cut a script off halfway.
+//
+// Only asyncScriptLimit of them run at once, though: a --since catch-up carries thousands
+// of changes, and a slow script would have a process per change all fighting for the
+// machine. Once they're all busy the watch waits for one to finish — or for an interrupt,
+// which drops the change rather than hanging on a script that never ends.
 func (w *postingsWatch) spawnScript(ctx context.Context, event watchEvent) {
 	command, err := w.scriptCommand(context.WithoutCancel(ctx), w.asyncScript, event)
 	if err != nil {
@@ -448,12 +525,22 @@ func (w *postingsWatch) spawnScript(ctx context.Context, event watchEvent) {
 		return
 	}
 
+	select {
+	case w.running <- struct{}{}:
+	case <-ctx.Done():
+		return
+	}
+
 	if err := command.Start(); err != nil {
+		<-w.running
 		fmt.Fprintf(w.errOut, "warning: could not run %q: %v\n", w.asyncScript, err)
 		return
 	}
 
-	go func() { _ = command.Wait() }()
+	go func() {
+		_ = command.Wait()
+		<-w.running
+	}()
 }
 
 func (w *postingsWatch) runScript(ctx context.Context, event watchEvent) int {

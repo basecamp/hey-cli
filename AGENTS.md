@@ -106,7 +106,10 @@ box_kind, posting_ids, at}` — a doorbell, not the change itself.
 The change is then read through `Postings().AllChanges`, the same incremental sync feed the
 mail clients use, starting from the cursor in the box's `posting_changes_url`. That is what
 makes a reconnect safe: the cursor, not the notification, is the source of truth, so a
-missed broadcast costs nothing, and a 409 means catch up in full instead.
+missed broadcast costs nothing, and a 409 means catch up in full instead. A read that
+fails leaves the cursor where it was and is retried on a doubling backoff, so a change
+isn't lost with the notification that announced it, and a subscription that closes without
+the watch being interrupted is an error rather than a quiet exit.
 
 ### API documentation
 
