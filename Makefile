@@ -1,11 +1,11 @@
-.PHONY: build build-pgo test test-unit test-smoke fmt fmt-check vet lint tidy tidy-check \
+.PHONY: build test test-unit test-smoke fmt fmt-check vet lint tidy tidy-check \
 	race-test vuln secrets replace-check check-toolchain check security \
-	release-check release bench bench-cpu bench-mem bench-save bench-compare \
-	collect-profile clean-pgo check-surface check-surface-compat tools clean \
-	install help
+	release-check release bench bench-save bench-compare \
+	check-surface check-surface-compat tools clean install help
 
 BINARY := $(CURDIR)/bin/hey
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+# Local builds are "dev": a git-describe SHA would make them look like releases.
+VERSION ?= dev
 LDFLAGS := -s -w \
 	-X github.com/basecamp/hey-cli/internal/version.Version=$(VERSION) \
 	-X github.com/basecamp/hey-cli/internal/version.Commit=$(shell git rev-parse --short HEAD 2>/dev/null || echo none) \
@@ -16,7 +16,6 @@ help:
 	@echo ""
 	@echo "Usage:"
 	@echo "  make build           Build the CLI"
-	@echo "  make build-pgo       Build with PGO profile"
 	@echo "  make test-unit       Run unit tests"
 	@echo "  make test            Alias for test-unit"
 	@echo "  make test-smoke      Run smoke tests against a live server"
@@ -36,15 +35,11 @@ help:
 	@echo "  make check           fmt-check + vet + lint + test-unit + tidy-check"
 	@echo "  make security        lint + vuln + secrets"
 	@echo "  make release-check   check + replace-check + vuln + race-test"
-	@echo "  make release         Run release preflight and tag"
+	@echo "  make release         Run release preflight and tag (VERSION=v1.2.3 [DRY_RUN=1])"
 	@echo ""
 	@echo "  make bench           Run benchmarks"
-	@echo "  make bench-cpu       Benchmarks with CPU profile"
-	@echo "  make bench-mem       Benchmarks with memory profile"
 	@echo "  make bench-save      Save benchmark results"
 	@echo "  make bench-compare   Compare saved benchmarks"
-	@echo "  make collect-profile Collect PGO profile"
-	@echo "  make clean-pgo       Remove PGO artifacts"
 	@echo ""
 	@echo "  make check-surface        Generate CLI surface snapshot"
 	@echo "  make check-surface-compat Compare surface against previous tag"
@@ -67,17 +62,6 @@ check-toolchain:
 build: check-toolchain
 	@mkdir -p bin
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/hey
-
-# Build with PGO profile
-build-pgo: check-toolchain
-	@mkdir -p bin
-	@if [ -f default.pgo ]; then \
-		echo "Building with PGO profile ($$(du -h default.pgo | cut -f1))"; \
-		go build -pgo=auto -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/hey; \
-	else \
-		echo "No PGO profile found — building without PGO"; \
-		go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/hey; \
-	fi
 
 # Run unit tests
 test-unit: check-toolchain
@@ -181,43 +165,11 @@ release-check: check replace-check vuln race-test
 
 # Release (delegates to script)
 release:
-	@scripts/release.sh
+	@DRY_RUN=$(DRY_RUN) scripts/release.sh $(VERSION)
 
 # Run benchmarks
 bench: check-toolchain
 	go test -bench=. -benchmem ./internal/...
-
-# Benchmarks with CPU profile (iterates packages since -cpuprofile requires single package)
-bench-cpu: check-toolchain
-	@mkdir -p profiles
-	@failed=0; \
-	for pkg in $$(go list ./internal/...); do \
-		name=$$(basename "$$pkg"); \
-		echo "Profiling $$name..."; \
-		if ! go test -bench=. -cpuprofile="profiles/$${name}.cpu.pprof" "$$pkg" 2>&1; then \
-			echo "  WARNING: $$name benchmarks failed"; \
-			failed=$$((failed + 1)); \
-		fi; \
-	done; \
-	rm -f *.test; \
-	echo "CPU profiles saved to profiles/"; \
-	if [ "$$failed" -gt 0 ]; then echo "WARNING: $$failed package(s) had failures"; fi
-
-# Benchmarks with memory profile (iterates packages since -memprofile requires single package)
-bench-mem: check-toolchain
-	@mkdir -p profiles
-	@failed=0; \
-	for pkg in $$(go list ./internal/...); do \
-		name=$$(basename "$$pkg"); \
-		echo "Profiling $$name..."; \
-		if ! go test -bench=. -memprofile="profiles/$${name}.mem.pprof" "$$pkg" 2>&1; then \
-			echo "  WARNING: $$name benchmarks failed"; \
-			failed=$$((failed + 1)); \
-		fi; \
-	done; \
-	rm -f *.test; \
-	echo "Memory profiles saved to profiles/"; \
-	if [ "$$failed" -gt 0 ]; then echo "WARNING: $$failed package(s) had failures"; fi
 
 # Save benchmark results for comparison
 bench-save: check-toolchain
@@ -235,15 +187,6 @@ bench-compare:
 	fi; \
 	echo "Comparing $$PREV → $$LATEST"; \
 	benchstat "$$PREV" "$$LATEST"
-
-# Collect PGO profile from benchmarks
-collect-profile:
-	@scripts/collect-profile.sh
-
-# Remove PGO artifacts
-clean-pgo:
-	rm -f default.pgo
-	rm -rf profiles/
 
 # Install dev tools
 tools:

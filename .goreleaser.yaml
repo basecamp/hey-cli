@@ -4,8 +4,7 @@ project_name: hey
 
 before:
   hooks:
-    - go mod tidy
-    - sh -c 'mkdir -p completions && go run ./cmd/hey completion bash > completions/hey.bash && go run ./cmd/hey completion zsh > completions/hey.zsh && go run ./cmd/hey completion fish > completions/hey.fish'
+    - sh -c 'mkdir -p completions && go run ./cmd/hey completion bash > completions/hey.bash && go run ./cmd/hey completion zsh > completions/_hey && go run ./cmd/hey completion fish > completions/hey.fish'
 
 builds:
   - id: hey
@@ -23,7 +22,7 @@ builds:
       - amd64
       - arm64
     flags:
-      - -pgo=auto
+      - -trimpath
     ldflags:
       - -s -w
       - -X github.com/basecamp/hey-cli/internal/version.Version={{.Version}}
@@ -50,16 +49,24 @@ checksum:
 sboms:
   - artifacts: archive
 
+# Sign checksums with cosign (keyless via Sigstore).
+# Requires: permissions.id-token: write in workflow for OIDC.
 signs:
   - cmd: cosign
-    artifacts: checksum
-    output: true
+    signature: '${artifact}.bundle'
     args:
       - sign-blob
-      - --yes
-      - --output-certificate=${certificate}
-      - --output-signature=${signature}
-      - ${artifact}
+      - '--bundle=${signature}'
+      # Pin the published bundle format explicitly (protobuf, v0.3+json) so it
+      # no longer depends on the CI cosign default. The installers and `hey
+      # upgrade` verify this format; cosign v3 defaults to it anyway, and v3
+      # dropped the --output-certificate/--output-signature flags that broke
+      # the v0.1.0 release.
+      - '--new-bundle-format=true'
+      - '${artifact}'
+      - '--yes'
+    artifacts: checksum
+    output: true
 
 notarize:
   macos:
@@ -84,6 +91,8 @@ release:
     name: hey-cli
   draft: false
   prerelease: auto
+  make_latest: "{{ if .Prerelease }}false{{ else }}auto{{ end }}"
+  replace_existing_artifacts: true
   name_template: "{{.ProjectName}} v{{.Version}}"
   header: |
     ### Install
@@ -114,8 +123,9 @@ homebrew_casks:
     description: "Command-line interface for HEY email"
     completions:
       bash: "completions/hey.bash"
-      zsh: "completions/hey.zsh"
+      zsh: "completions/_hey"
       fish: "completions/hey.fish"
+    skip_upload: auto
 
 scoops:
   - name: hey
@@ -127,6 +137,7 @@ scoops:
     homepage: "https://github.com/basecamp/hey-cli"
     description: "Command-line interface for HEY email"
     license: MIT
+    skip_upload: auto
 
 nfpms:
   - id: packages
@@ -140,10 +151,18 @@ nfpms:
     formats:
       - deb
       - rpm
+      - apk
     contents:
       - src: completions/hey.bash
         dst: /usr/share/bash-completion/completions/hey
-      - src: completions/hey.zsh
+      - src: completions/_hey
         dst: /usr/share/zsh/vendor-completions/_hey
+        packager: deb
+      - src: completions/_hey
+        dst: /usr/share/zsh/vendor-completions/_hey
+        packager: apk
+      - src: completions/_hey
+        dst: /usr/share/zsh/site-functions/_hey
+        packager: rpm
       - src: completions/hey.fish
         dst: /usr/share/fish/vendor_completions.d/hey.fish

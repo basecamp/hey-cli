@@ -50,44 +50,11 @@ jobs:
           git fetch origin main
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
 
-      - name: Collect PGO profile
-        run: |
-          echo "Collecting PGO profile from benchmarks..."
-          mkdir -p profiles
-          failed=0
-          for pkg in $(go list ./internal/...); do
-            pkg_name=$(basename "$pkg")
-            echo "  Profiling $pkg_name..."
-            if ! go test -cpuprofile="profiles/${pkg_name}.pprof" -bench=. -benchtime=3s "$pkg" 2>&1; then
-              echo "  WARNING: $pkg_name benchmarks failed"
-              failed=$((failed + 1))
-            fi
-          done
-          rm -f ./*.test
-          if [ "$failed" -gt 0 ]; then
-            echo "WARNING: $failed package(s) failed benchmarking — PGO profile may be incomplete"
-          fi
-          if ls profiles/*.pprof >/dev/null 2>&1; then
-            go tool pprof -proto profiles/*.pprof > default.pgo
-            echo "PGO profile generated: $(du -h default.pgo | cut -f1)"
-          else
-            echo "No PGO profiles generated — build will use standard optimization"
-          fi
-
       - name: Install Cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Install Syft
         uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
-
-      - name: Generate shell completions
-        run: |
-          go build -o hey-tmp ./cmd/hey
-          mkdir -p completions
-          ./hey-tmp completion bash > completions/hey.bash
-          ./hey-tmp completion zsh > completions/hey.zsh
-          ./hey-tmp completion fish > completions/hey.fish
-          rm hey-tmp
 
       - name: Verify macOS signing secrets
         run: |
@@ -113,7 +80,7 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ vars.RELEASE_APP_ID }}
+          client-id: ${{ vars.RELEASE_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           repositories: homebrew-tap
           permission-contents: write
@@ -121,7 +88,7 @@ jobs:
       - name: Install GoReleaser
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
-          version: 'v2.14.1'
+          version: 'v2.15.4'
           install-only: true
 
       - name: Run GoReleaser
@@ -276,7 +243,7 @@ jobs:
         id: skills-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ vars.RELEASE_APP_ID }}
+          client-id: ${{ vars.RELEASE_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           owner: basecamp
           repositories: skills

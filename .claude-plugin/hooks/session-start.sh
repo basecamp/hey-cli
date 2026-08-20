@@ -6,7 +6,7 @@ if ! command -v hey &>/dev/null; then
   cat << 'EOF'
 <hook-output>
 HEY plugin active — CLI not found on PATH.
-Install: https://github.com/basecamp/hey-cli#installation
+Install: https://github.com/basecamp/hey-cli#install
 </hook-output>
 EOF
   exit 0

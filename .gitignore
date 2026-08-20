@@ -3,7 +3,7 @@
 dist/
 completions/
 profiles/
-default.pgo
 benchmarks-*.txt
-*.pprof
 *.test
+.release-extra/
+result
