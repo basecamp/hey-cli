@@ -35,7 +35,7 @@ func TestAttachmentSendListAndSave(t *testing.T) {
 	}
 
 	var result smokeSearchResult
-	for attempt := 0; attempt < 10 && result.TopicID == 0; attempt++ {
+	for attempt := 0; attempt < 60 && result.TopicID == 0; attempt++ {
 		searchOut, _, searchCode := hey(t, "search", "--subject", subject, "--all", "--json")
 		if searchCode == 0 {
 			var response Response
@@ -53,7 +53,7 @@ func TestAttachmentSendListAndSave(t *testing.T) {
 		}
 	}
 	if result.TopicID == 0 {
-		t.Skip("sent attachment thread was not searchable yet")
+		t.Fatal("sent attachment thread was not searchable after waiting for indexing")
 	}
 	if result.ID != 0 {
 		t.Cleanup(func() { _, _, _ = hey(t, "trash", fmt.Sprint(result.ID), "--json") })
