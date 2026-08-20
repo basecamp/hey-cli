@@ -120,6 +120,10 @@ func newRootCmd() *cobra.Command {
 
 			return nil
 		},
+		PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
+			maybeRefreshSkills(cmd)
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if versionFlag {
 				fmt.Fprintf(cmd.OutOrStdout(), "hey version %s\n", version.Version)

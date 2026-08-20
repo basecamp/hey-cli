@@ -220,8 +220,8 @@ func TestDoctorCommandReportsEnvironment(t *testing.T) {
 	if got := byName["Shell"]["message"]; got != "/bin/zsh" {
 		t.Errorf("shell = %q", got)
 	}
-	if got := byName["Claude Skill"]["status"]; got != "ok" {
-		t.Errorf("Claude Skill status = %q", got)
+	if got := byName["Agent Skill"]["status"]; got != "ok" {
+		t.Errorf("Agent Skill status = %q", got)
 	}
 	if _, ok := byName["CLI Version"]; !ok {
 		t.Error("CLI Version check missing")

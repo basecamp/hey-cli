@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/hey-cli/internal/config"
+	"github.com/basecamp/hey-cli/internal/harness"
 	"github.com/basecamp/hey-cli/internal/output"
 	"github.com/basecamp/hey-cli/internal/version"
 )
@@ -132,7 +133,8 @@ func runDoctorChecks(ctx context.Context) []map[string]string {
 		checks = append(checks, map[string]string{
 			"name":    "Authentication",
 			"status":  "error",
-			"message": "Not authenticated — run `hey auth login`",
+			"message": "Not authenticated",
+			"hint":    "hey auth login",
 		})
 	}
 
@@ -146,21 +148,21 @@ func runDoctorChecks(ctx context.Context) []map[string]string {
 		})
 	}
 
-	// Claude Plugin
-	if _, err := os.Stat(".claude-plugin/plugin.json"); err == nil {
-		checks = append(checks, map[string]string{
-			"name":    "Claude Plugin",
-			"status":  "ok",
-			"message": "Found .claude-plugin/plugin.json",
-		})
-	} else {
-		// Check if installed globally
-		home, _ := os.UserHomeDir()
-		if _, err := os.Stat(home + "/.agents/skills/hey/SKILL.md"); err == nil {
+	// Agent skill + detected coding agents
+	checks = append(checks, checkBaselineSkill())
+	for _, agent := range harness.DetectedAgents() {
+		var agentChecks []*harness.StatusCheck
+		if agent.Diagnostics != nil {
+			agentChecks = agent.Diagnostics(ctx)
+		} else if agent.Checks != nil {
+			agentChecks = agent.Checks()
+		}
+		for _, c := range agentChecks {
 			checks = append(checks, map[string]string{
-				"name":    "Claude Skill",
-				"status":  "ok",
-				"message": "Installed at ~/.agents/skills/hey/",
+				"name":    c.Name,
+				"status":  doctorStatus(c.Status),
+				"message": c.Message,
+				"hint":    c.Hint,
 			})
 		}
 	}
@@ -175,6 +177,52 @@ func runDoctorChecks(ctx context.Context) []map[string]string {
 	}
 
 	return checks
+}
+
+// doctorStatus maps a harness check status onto doctor's status vocabulary.
+func doctorStatus(status string) string {
+	switch status {
+	case "pass":
+		return "ok"
+	case "warn":
+		return "warning"
+	case "fail":
+		return "error"
+	default:
+		return status
+	}
+}
+
+// checkBaselineSkill reports whether the shared agent skill is installed and
+// current. Not installed is a warning, not an error: the CLI works without it,
+// coding agents just get no HEY skill.
+func checkBaselineSkill() map[string]string {
+	if !baselineSkillInstalled() {
+		return map[string]string{
+			"name":    "Agent Skill",
+			"status":  "warning",
+			"message": "Not installed",
+			"hint":    "hey skill install",
+		}
+	}
+	check := map[string]string{
+		"name":   "Agent Skill",
+		"status": "ok",
+	}
+	installed := installedSkillVersion()
+	switch {
+	case installed == "":
+		check["message"] = "Installed (version not tracked)"
+	case version.IsDev():
+		check["message"] = fmt.Sprintf("Installed (%s, dev build)", installed)
+	case installed == version.Version:
+		check["message"] = fmt.Sprintf("Up to date (%s)", installed)
+	default:
+		check["status"] = "warning"
+		check["message"] = fmt.Sprintf("Stale (installed: %s, current: %s)", installed, version.Version)
+		check["hint"] = "hey skill install"
+	}
+	return check
 }
 
 // checkVersion reports the build and, for release builds, whether a newer
