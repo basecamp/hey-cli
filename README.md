@@ -240,12 +240,13 @@ hey compose --to user@example.com --subject "Hello"  # compose a new message
 hey compose --to user@example.com --subject "Report" -m "Attached." --attach ./report.pdf
 hey compose --to user@example.com --cc bob@example.com --bcc carol@example.org --subject "Hello"  # with CC/BCC
 hey drafts                         # list drafts
-hey move 12345 --to feed           # move a thread to another box
-hey move 12345 67890 --to "paper trail"  # move multiple threads
-hey trash 12345                    # move a thread to Trash
-hey spam 12345                     # mark a thread as spam
-hey ignore 12345                   # ignore future activity on a thread
-hey stop-ignoring 12345            # resume attention for a thread
+hey move 12345 --to feed --kind topic  # move an email thread to another box
+hey move 12345 67890 --to "paper trail" --kind topic  # move multiple email threads
+hey trash 12345 --kind topic       # move an email thread to Trash
+hey spam 12345 --kind topic        # mark an email thread as spam
+hey ignore 12345 --kind topic      # ignore future activity on an email thread
+hey stop-ignoring 12345 --kind topic # resume attention for an email thread
+hey world delete abc123 --confirm  # permanently remove a published HEY World post
 ```
 
 Search accepts free text plus `--required`, `--any`, `--none`, `--exact`, `--from`, `--to`, `--subject`, `--date`, `--in`, `--label`, and `--attachment`. Use `--page` for one page or `--all` to fetch up to 100 pages; capped searches report the next page for continuation. Search results include `topic_id` for reading the thread and the matching message summaries. Results with an active box item also include `id` for organization actions.
@@ -256,7 +257,7 @@ Contact updates preserve omitted name, email, and alias fields. Supplying `--ali
 
 `--attach` is repeatable on `hey compose`, `hey reply`, and `hey bulk-reply send`, and attachment-only messages are supported. The CLI validates and uploads every file before sending the email. `hey attachments <topic_id>` returns stable message-and-position IDs such as `456:1`; pass an ID to `hey attachments save`. Saving uses the original filename by default, accepts `--output` for a file or directory, and preserves existing files unless `--force` is set.
 
-Organization actions take the `id` values returned by `hey box --json`, `hey label --json`, or `hey search --json`. Label IDs come from `hey labels`; `hey label` returns `next_page` and `total_count`, accepts `--page <next_page>` for continuation, and supports `--all` for complete traversal. HEY creates a label while adding it to at least one thread, so `hey label create` requires thread item IDs. Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Bubble Up requires a scheduled date and is not available through `hey move`. Trashing a shared thread removes your access instead of deleting it for everyone. Ignored threads remain in their box and can be restored with `hey stop-ignoring`.
+Organization actions take the `id` values returned by `hey box --json`, `hey label --json`, or `hey search --json`. Pass the accompanying `kind` with `--kind` when it is available. Email actions reject `world/post`; published HEY World content has a separate `hey world delete <token> --confirm` path. Label IDs come from `hey labels`; `hey label` returns `next_page` and `total_count`, accepts `--page <next_page>` for continuation, and supports `--all` for complete traversal. HEY creates a label while adding it to at least one thread, so `hey label create` requires thread item IDs. Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Bubble Up requires a scheduled date and is not available through `hey move`. Trashing a shared thread removes your access instead of deleting it for everyone. Ignored threads remain in their box and can be restored with `hey stop-ignoring`.
 
 ### Watching for changes
 

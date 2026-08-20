@@ -12,6 +12,7 @@ func TestSeenUnseen(t *testing.T) {
 	type Posting struct {
 		ID     int    `json:"id"`
 		AppURL string `json:"app_url"`
+		Kind   string `json:"kind"`
 	}
 	type BoxResp struct {
 		Postings []Posting `json:"postings"`
@@ -21,11 +22,22 @@ func TestSeenUnseen(t *testing.T) {
 		t.Fatal("no postings in imbox to test seen/unseen")
 	}
 
-	posting := data.Postings[0]
+	var posting Posting
+	found := false
+	for _, candidate := range data.Postings {
+		if candidate.Kind == "topic" {
+			posting = candidate
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Skip("no email topics in Imbox to test seen/unseen")
+	}
 	postingID := intStr(posting.ID)
 
 	// Mark as unseen.
-	stdout := heyOK(t, "unseen", postingID, "--json")
+	stdout := heyOK(t, "unseen", postingID, "--kind", posting.Kind, "--json")
 	var unseenResp Response
 	if err := json.Unmarshal([]byte(stdout), &unseenResp); err != nil {
 		t.Fatalf("failed to parse unseen response: %v", err)
@@ -42,7 +54,7 @@ func TestSeenUnseen(t *testing.T) {
 	}
 
 	// Mark as seen.
-	stdout = heyOK(t, "seen", postingID, "--json")
+	stdout = heyOK(t, "seen", postingID, "--kind", posting.Kind, "--json")
 	var seenResp Response
 	if err := json.Unmarshal([]byte(stdout), &seenResp); err != nil {
 		t.Fatalf("failed to parse seen response: %v", err)
@@ -53,20 +65,27 @@ func TestSeenUnseen(t *testing.T) {
 func TestSeenMultiple(t *testing.T) {
 	resp := heyJSON(t, "box", "imbox")
 	type Posting struct {
-		ID int `json:"id"`
+		ID   int    `json:"id"`
+		Kind string `json:"kind"`
 	}
 	type BoxResp struct {
 		Postings []Posting `json:"postings"`
 	}
 	data := dataAs[BoxResp](t, resp)
-	if len(data.Postings) < 2 {
+	var topicIDs []string
+	for _, posting := range data.Postings {
+		if posting.Kind == "topic" {
+			topicIDs = append(topicIDs, intStr(posting.ID))
+			if len(topicIDs) == 2 {
+				break
+			}
+		}
+	}
+	if len(topicIDs) < 2 {
 		t.Fatal("need at least 2 postings to test multi-seen")
 	}
 
-	id1 := intStr(data.Postings[0].ID)
-	id2 := intStr(data.Postings[1].ID)
-
-	stdout := heyOK(t, "seen", id1, id2, "--json")
+	stdout := heyOK(t, "seen", topicIDs[0], topicIDs[1], "--kind", "topic", "--json")
 	var resp2 Response
 	if err := json.Unmarshal([]byte(stdout), &resp2); err != nil {
 		t.Fatalf("failed to parse response: %v", err)

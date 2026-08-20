@@ -150,3 +150,18 @@ func TestTrashAndSpamReportServerFailures(t *testing.T) {
 		})
 	}
 }
+
+func TestTrashAndSpamRejectWorldPostsBeforeRequest(t *testing.T) {
+	for _, command := range []string{"trash", "spam"} {
+		t.Run(command, func(t *testing.T) {
+			server, recorded := removalServer(t)
+			_, err := runRemoval(t, server, command, "12345", "--kind", "world/post")
+			if err == nil || !strings.Contains(err.Error(), "cannot act on a HEY World post") {
+				t.Fatalf("error = %v, want HEY World rejection", err)
+			}
+			if recorded.requests != 0 {
+				t.Errorf("HEY World rejection made %d requests", recorded.requests)
+			}
+		})
+	}
+}

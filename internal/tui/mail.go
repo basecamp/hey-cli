@@ -1164,6 +1164,10 @@ func (v *mailView) openSelected() tea.Cmd {
 	if selected == nil {
 		return nil
 	}
+	if isWorldPosting(selected) {
+		v.notice = "HEY World posts are published content; email thread actions are unavailable"
+		return nil
+	}
 	topicID := selected.ResolveTopicID()
 	if topicID == 0 {
 		topicID = selected.ID
@@ -1181,6 +1185,10 @@ func (v *mailView) startMove() {
 	selected := v.postingList.selectedPosting()
 	currentSource := v.currentSource()
 	if selected == nil || currentSource == nil {
+		return
+	}
+	if isWorldPosting(selected) {
+		v.notice = "HEY World posts cannot be moved with email actions"
 		return
 	}
 	picker := newMovePicker(*selected, v.boxes, *currentSource)
@@ -1252,6 +1260,10 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 	if selected == nil {
 		return nil
 	}
+	if isWorldPosting(selected) {
+		v.notice = "HEY World posts are published content; email actions are unavailable"
+		return nil
+	}
 	p := *selected
 	boxID := v.currentBoxID()
 
@@ -1314,6 +1326,10 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 		return v.loadForwardContext(topicID, p.Summary)
 	}
 	return nil
+}
+
+func isWorldPosting(posting *models.Posting) bool {
+	return posting != nil && strings.EqualFold(strings.TrimSpace(posting.Kind), "world/post")
 }
 
 func (v *mailView) moveSelectedToKnownBox(name, kind string, boxID, postingID int64, fn func() error) tea.Cmd {

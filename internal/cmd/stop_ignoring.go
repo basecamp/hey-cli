@@ -9,7 +9,8 @@ import (
 )
 
 type stopIgnoringCommand struct {
-	cmd *cobra.Command
+	cmd  *cobra.Command
+	kind string
 }
 
 func newStopIgnoringCommand() *stopIgnoringCommand {
@@ -18,19 +19,23 @@ func newStopIgnoringCommand() *stopIgnoringCommand {
 		Use:   "stop-ignoring <id>...",
 		Short: "Stop ignoring email threads",
 		Long:  "Stop ignoring one or more email threads so new replies can bring them back to your attention.",
-		Example: `  hey stop-ignoring 12345
-  hey stop-ignoring 12345 67890`,
+		Example: `  hey stop-ignoring 12345 --kind topic
+  hey stop-ignoring 12345 67890 --kind topic`,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts one or more box item IDs from hey box output. Reverses hey ignore for each thread.",
+			"agent_notes": "Accepts one or more box item IDs from hey box output. Pass --kind exactly as returned by hey box --json. HEY World posts are rejected before any email action is requested. Reverses hey ignore for each thread.",
 		},
 		RunE: stopIgnoringCommand.run,
 		Args: usageMinOneArg(),
 	}
+	stopIgnoringCommand.cmd.Flags().StringVar(&stopIgnoringCommand.kind, "kind", "", "Item kind from hey box --json")
 
 	return stopIgnoringCommand
 }
 
 func (c *stopIgnoringCommand) run(cmd *cobra.Command, args []string) error {
+	if err := validateEmailPostingKind(c.cmd.Name(), c.kind); err != nil {
+		return err
+	}
 	if err := requireAuth(); err != nil {
 		return err
 	}

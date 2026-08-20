@@ -15,8 +15,9 @@ import (
 )
 
 type moveCommand struct {
-	cmd *cobra.Command
-	to  string
+	cmd  *cobra.Command
+	to   string
+	kind string
 }
 
 func newMoveCommand() *moveCommand {
@@ -25,22 +26,26 @@ func newMoveCommand() *moveCommand {
 		Use:   "move <id>...",
 		Short: "Move email threads to another box",
 		Long:  "Move one or more email threads to Imbox, The Feed, Set Aside, Reply Later, or Paper Trail.",
-		Example: `  hey move 12345 --to feed
-  hey move 12345 67890 --to "paper trail"
-  hey move 12345 --to 987`,
+		Example: `  hey move 12345 --to feed --kind topic
+  hey move 12345 67890 --to "paper trail" --kind topic
+  hey move 12345 --to 987 --kind topic`,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts box item IDs from hey box output. --to accepts a box name, kind, or ID. Use HEY's scheduled Bubble Up flow for Bubble Up.",
+			"agent_notes": "Accepts box item IDs from hey box output. Pass --kind exactly as returned by hey box --json. HEY World posts are rejected before any email action is requested. --to accepts a box name, kind, or ID. Use HEY's scheduled Bubble Up flow for Bubble Up.",
 		},
 		RunE: moveCommand.run,
 		Args: usageMinOneArg(),
 	}
 
 	moveCommand.cmd.Flags().StringVar(&moveCommand.to, "to", "", "Destination box name, kind, or ID (required)")
+	moveCommand.cmd.Flags().StringVar(&moveCommand.kind, "kind", "", "Item kind from hey box --json")
 
 	return moveCommand
 }
 
 func (c *moveCommand) run(cmd *cobra.Command, args []string) error {
+	if err := validateEmailPostingKind(c.cmd.Name(), c.kind); err != nil {
+		return err
+	}
 	if err := requireAuth(); err != nil {
 		return err
 	}

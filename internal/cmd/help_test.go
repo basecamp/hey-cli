@@ -51,6 +51,23 @@ func TestEmailCommandHelpKeepsPostingAsAnInternalTerm(t *testing.T) {
 	}
 }
 
+func TestEmailActionExamplesCarryTopicKind(t *testing.T) {
+	root := newRootCmd()
+	for _, name := range []string{"seen", "unseen", "move", "trash", "spam", "ignore", "stop-ignoring"} {
+		t.Run(name, func(t *testing.T) {
+			command, _, err := root.Find([]string{name})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, example := range strings.Split(strings.TrimSpace(command.Example), "\n") {
+				if !strings.Contains(example, "--kind topic") {
+					t.Errorf("example does not preserve email kind: %q", example)
+				}
+			}
+		})
+	}
+}
+
 func TestContactCommandHelpUsesHEYTerminology(t *testing.T) {
 	root := newRootCmd()
 	contacts, _, err := root.Find([]string{"contacts"})
@@ -93,7 +110,7 @@ USAGE
 
 EMAIL
   boxes          List your HEY boxes
-  box            List email threads in a box
+  box            List email and HEY World items in a box
   labels         List your email labels
   label          View and manage an email label
   search         Search email threads and messages
@@ -113,6 +130,9 @@ EMAIL
   ignore         Ignore email threads
   stop-ignoring  Stop ignoring email threads
   watch          Follow email threads as they change
+
+HEY WORLD
+  world  Manage HEY World posts
 
 CALENDAR & TASKS
   calendars   List calendars

@@ -20,6 +20,10 @@ var curatedCategories = []struct {
 		names:   []string{"boxes", "box", "labels", "label", "search", "contacts", "threads", "attachments", "compose", "reply", "bulk-reply", "forward", "drafts", "seen", "unseen", "move", "trash", "spam", "ignore", "stop-ignoring", "watch"},
 	},
 	{
+		heading: "HEY WORLD",
+		names:   []string{"world"},
+	},
+	{
 		heading: "CALENDAR & TASKS",
 		names:   []string{"calendars", "recordings", "todo", "habit", "timetrack", "journal"},
 	},

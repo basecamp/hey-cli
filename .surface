@@ -97,6 +97,7 @@ hey habit complete --date
 hey habit uncomplete
 hey habit uncomplete --date
 hey ignore
+hey ignore --kind
 hey journal
 hey journal list
 hey journal list --all
@@ -117,6 +118,7 @@ hey labels
 hey labels --all
 hey labels --limit
 hey move
+hey move --kind
 hey move --to
 hey recordings
 hey recordings --all
@@ -142,11 +144,14 @@ hey search --subject
 hey search --to
 hey search filters
 hey seen
+hey seen --kind
 hey setup
 hey skill
 hey skill install
 hey spam
+hey spam --kind
 hey stop-ignoring
+hey stop-ignoring --kind
 hey threads
 hey timetrack
 hey timetrack current
@@ -166,8 +171,10 @@ hey todo list --all
 hey todo list --limit
 hey todo uncomplete
 hey trash
+hey trash --kind
 hey tui
 hey unseen
+hey unseen --kind
 hey upgrade
 hey version
 hey watch
@@ -178,3 +185,6 @@ hey watch --run-async
 hey watch --run-sync
 hey watch --since
 hey watch --timeout
+hey world
+hey world delete
+hey world delete --confirm

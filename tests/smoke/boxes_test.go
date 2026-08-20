@@ -174,17 +174,20 @@ func TestBoxesAll(t *testing.T) {
 func TestMovePosting(t *testing.T) {
 	resp := heyJSON(t, "box", "imbox", "--limit", "10")
 	type Posting struct {
-		ID   int  `json:"id"`
-		Seen bool `json:"seen"`
+		ID   int    `json:"id"`
+		Kind string `json:"kind"`
+		Seen bool   `json:"seen"`
 	}
 	type BoxResponse struct {
 		Postings []Posting `json:"postings"`
 	}
 	imbox := dataAs[BoxResponse](t, resp)
 	postingID := 0
+	postingKind := ""
 	for _, posting := range imbox.Postings {
-		if posting.Seen {
+		if posting.Kind == "topic" && posting.Seen {
 			postingID = posting.ID
+			postingKind = posting.Kind
 			break
 		}
 	}
@@ -192,12 +195,12 @@ func TestMovePosting(t *testing.T) {
 		t.Skip("no seen postings in Imbox to move without changing unread state")
 	}
 
-	stdout, stderr, code := hey(t, "move", intStr(postingID), "--to", "feedbox", "--json")
+	stdout, stderr, code := hey(t, "move", intStr(postingID), "--to", "feedbox", "--kind", postingKind, "--json")
 	if code != 0 {
 		t.Skipf("moving postings is unavailable on this server (exit %d): %s", code, stderr)
 	}
 	t.Cleanup(func() {
-		_, cleanupStderr, cleanupCode := hey(t, "move", intStr(postingID), "--to", "imbox", "--json")
+		_, cleanupStderr, cleanupCode := hey(t, "move", intStr(postingID), "--to", "imbox", "--kind", postingKind, "--json")
 		if cleanupCode != 0 {
 			t.Logf("could not restore posting %d to Imbox: %s", postingID, cleanupStderr)
 		}

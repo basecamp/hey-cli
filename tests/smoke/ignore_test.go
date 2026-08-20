@@ -6,8 +6,9 @@ import (
 )
 
 type ignorePosting struct {
-	ID    int  `json:"id"`
-	Muted bool `json:"muted"`
+	ID    int    `json:"id"`
+	Kind  string `json:"kind"`
+	Muted bool   `json:"muted"`
 }
 
 func TestIgnoreAndStopIgnoring(t *testing.T) {
@@ -19,17 +20,28 @@ func TestIgnoreAndStopIgnoring(t *testing.T) {
 	if len(box.Postings) == 0 {
 		t.Skip("no threads in Imbox to ignore")
 	}
-	posting := box.Postings[0]
+	var posting ignorePosting
+	found := false
+	for _, candidate := range box.Postings {
+		if candidate.Kind == "topic" {
+			posting = candidate
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Skip("no email topics in Imbox to ignore")
+	}
 	postingID := intStr(posting.ID)
 
 	if posting.Muted {
-		heyOK(t, "stop-ignoring", postingID, "--json")
-		t.Cleanup(func() { heyOK(t, "ignore", postingID, "--json") })
+		heyOK(t, "stop-ignoring", postingID, "--kind", posting.Kind, "--json")
+		t.Cleanup(func() { heyOK(t, "ignore", postingID, "--kind", posting.Kind, "--json") })
 	} else {
-		t.Cleanup(func() { heyOK(t, "stop-ignoring", postingID, "--json") })
+		t.Cleanup(func() { heyOK(t, "stop-ignoring", postingID, "--kind", posting.Kind, "--json") })
 	}
 
-	stdout := heyOK(t, "ignore", postingID, "--json")
+	stdout := heyOK(t, "ignore", postingID, "--kind", posting.Kind, "--json")
 	var ignoreResp Response
 	if err := json.Unmarshal([]byte(stdout), &ignoreResp); err != nil {
 		t.Fatalf("failed to parse ignore response: %v", err)
@@ -45,7 +57,7 @@ func TestIgnoreAndStopIgnoring(t *testing.T) {
 		t.Error("thread is not ignored after hey ignore")
 	}
 
-	stdout = heyOK(t, "stop-ignoring", postingID, "--json")
+	stdout = heyOK(t, "stop-ignoring", postingID, "--kind", posting.Kind, "--json")
 	var stopResp Response
 	if err := json.Unmarshal([]byte(stdout), &stopResp); err != nil {
 		t.Fatalf("failed to parse stop-ignoring response: %v", err)
