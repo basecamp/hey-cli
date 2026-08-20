@@ -9,7 +9,7 @@ require (
 	github.com/basecamp/hey-sdk/go v0.6.0
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/itchyny/gojq v0.12.19
-	github.com/mattn/go-runewidth v0.0.27
+	github.com/mattn/go-runewidth v0.0.28
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/zalando/go-keyring v0.2.8
