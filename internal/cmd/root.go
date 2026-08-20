@@ -121,7 +121,7 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().BoolVar(&markdownF, "markdown", false, "Output as Markdown")
 	root.PersistentFlags().BoolVar(&styledFlag, "styled", false, "Force styled output even when piped")
 	root.PersistentFlags().BoolVar(&agentFlag, "agent", false, "Agent mode (JSON envelope, no TTY formatting)")
-	root.PersistentFlags().MarkHidden("agent") //nolint:errcheck,gosec // flag exists
+	_ = root.PersistentFlags().MarkHidden("agent") // flag is registered immediately above
 	root.PersistentFlags().StringVar(&baseURL, "base-url", "", "Override server URL")
 	root.PersistentFlags().StringVar(&accountFlag, "account", "", "Select a linked mail account ID or all")
 	root.PersistentFlags().CountVarP(&verboseFlag, "verbose", "v", "Show request details")

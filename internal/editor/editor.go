@@ -27,7 +27,7 @@ func Open(initialContent string) (string, error) {
 	}
 	_ = tmpFile.Close()
 
-	cmd := exec.CommandContext(context.Background(), editor, tmpFile.Name()) //nolint:gosec // G204: intentional — launches user's $EDITOR
+	cmd := exec.CommandContext(context.Background(), editor, tmpFile.Name()) // #nosec G204 G702 -- the user explicitly selects the editor executable
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

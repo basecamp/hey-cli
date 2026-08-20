@@ -24,7 +24,7 @@ func openExternalFile(path string) error {
 		return fmt.Errorf("opening attachments is not supported on %s", runtime.GOOS)
 	}
 
-	command := exec.CommandContext(context.Background(), name, args...) //nolint:gosec // The user explicitly asks to open the selected local attachment.
+	command := exec.CommandContext(context.Background(), name, args...) // #nosec G204 -- fixed OS launcher receives the selected local path as one argument
 	if err := command.Start(); err != nil {
 		return err
 	}

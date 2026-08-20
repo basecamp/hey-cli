@@ -102,7 +102,7 @@ func (s *Store) loadFromKeyring(origin string) (*Credentials, error) {
 }
 
 func (s *Store) saveToKeyring(origin string, creds *Credentials) error {
-	data, err := json.Marshal(creds) //nolint:gosec // G117: intentional credential marshaling for storage
+	data, err := json.Marshal(creds) // #nosec G117 -- credentials are intentionally serialized into the system keyring
 	if err != nil {
 		return err
 	}
@@ -134,7 +134,7 @@ func (s *Store) saveAllToFile(all map[string]*Credentials) error {
 		return err
 	}
 
-	data, err := json.MarshalIndent(all, "", "  ") //nolint:gosec // G117: intentional credential marshaling for storage
+	data, err := json.MarshalIndent(all, "", "  ") // #nosec G117 -- credentials are intentionally serialized into a mode-0600 fallback file
 	if err != nil {
 		return err
 	}

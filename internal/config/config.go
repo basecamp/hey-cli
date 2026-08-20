@@ -200,7 +200,7 @@ func readFileConfig(path string) (fileConfig, error) {
 	if path == "" {
 		return fileConfig{}, nil
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is the discovered global or repository configuration file
 	if err != nil {
 		if os.IsNotExist(err) {
 			return fileConfig{}, nil
@@ -318,7 +318,7 @@ func (c *Config) Values() []Value {
 func LoadOld() (*OldConfig, error) {
 	path := globalConfigPath()
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is the fixed user configuration file used for migration
 	if err != nil {
 		return nil, err
 	}
@@ -400,7 +400,7 @@ func saveGlobalConfig(file fileConfig) error {
 	if err := os.MkdirAll(directory, 0700); err != nil {
 		return fmt.Errorf("could not create config directory: %w", err)
 	}
-	if err := os.Chmod(directory, 0700); err != nil {
+	if err := os.Chmod(directory, 0700); err != nil { // #nosec G302 -- this is a directory permission, not a file mode
 		return fmt.Errorf("could not secure config directory: %w", err)
 	}
 

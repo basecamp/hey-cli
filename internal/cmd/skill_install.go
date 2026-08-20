@@ -38,19 +38,21 @@ func runSkillInstall(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create skill directory and write file
-	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+	if err := os.MkdirAll(skillDir, 0o755); err != nil { // #nosec G301 -- installed skills contain public documentation
 		return output.ErrAPI(0, fmt.Sprintf("creating skill directory: %v", err))
 	}
-	if err := os.WriteFile(skillFile, data, 0o644); err != nil {
+	if err := os.WriteFile(skillFile, data, 0o644); err != nil { // #nosec G306 -- installed skills are intentionally user-readable
 		return output.ErrAPI(0, fmt.Sprintf("writing skill file: %v", err))
 	}
 
 	// Create symlink directory and symlink
-	if err := os.MkdirAll(symlinkDir, 0o755); err != nil {
+	if err := os.MkdirAll(symlinkDir, 0o755); err != nil { // #nosec G301 -- standard user-level skills directory
 		return output.ErrAPI(0, fmt.Sprintf("creating symlink directory: %v", err))
 	}
 	// Remove existing symlink/file if present
-	os.Remove(symlinkPath)
+	if err := os.Remove(symlinkPath); err != nil && !os.IsNotExist(err) {
+		return output.ErrAPI(0, fmt.Sprintf("removing existing skill link: %v", err))
+	}
 	if err := os.Symlink(filepath.Join("..", "..", ".agents", "skills", "hey"), symlinkPath); err != nil {
 		return output.ErrAPI(0, fmt.Sprintf("creating symlink: %v", err))
 	}

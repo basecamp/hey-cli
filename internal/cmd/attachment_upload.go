@@ -77,7 +77,7 @@ func prepareAttachments(paths []string) ([]preparedAttachment, error) {
 			closePreparedAttachments(attachments)
 			return nil, output.ErrUsage(fmt.Sprintf("attachment %q is not a regular file", path))
 		}
-		file, err := os.Open(path)
+		file, err := os.Open(path) // #nosec G304 -- the user explicitly selected this local attachment
 		if err != nil {
 			closePreparedAttachments(attachments)
 			return nil, output.ErrUsage(fmt.Sprintf("could not open attachment %q: %v", path, err))

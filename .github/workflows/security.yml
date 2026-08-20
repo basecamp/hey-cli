@@ -66,9 +66,12 @@ jobs:
         with:
           persist-credentials: false
       - uses: securego/gosec@9e6a9843d7a4a6e3e9a8539b02612c8a4aa3f889 # v2.27.1
+        env:
+          GOTOOLCHAIN: auto
         with:
           args: -fmt sarif -out gosec-results.sarif ./...
       - uses: github/codeql-action/upload-sarif@87557b9c84dde89fdd9b10e88954ac2f4248e463 # v4.36.1
+        if: ${{ always() && hashFiles('gosec-results.sarif') != '' }}
         with:
           sarif_file: gosec-results.sarif
           category: gosec

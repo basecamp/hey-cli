@@ -26,5 +26,5 @@ func openBrowser(url string) error {
 		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
 	}
 
-	return exec.CommandContext(context.Background(), cmd, args...).Start() //nolint:gosec // intentional: opens user's browser
+	return exec.CommandContext(context.Background(), cmd, args...).Start() // #nosec G204 -- fixed OS launcher receives the OAuth URL as a single argument
 }
