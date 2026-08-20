@@ -200,7 +200,9 @@ func checkVersion(ctx context.Context) map[string]string {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	release, err := releaseFetcher(ctx)
-	if err == nil && isUpdateAvailable(version.Version, release.Version) {
+	// A non-semver latest tag (say `nightly`) is nothing hey upgrade can
+	// install, so it is not an update worth recommending.
+	if err == nil && isReleaseVersion(release.Version) && isUpdateAvailable(version.Version, release.Version) {
 		check["status"] = "warning"
 		check["message"] = fmt.Sprintf("%s (update available: %s)", message, release.Version)
 		// hey upgrade refuses go-install builds by design, so hint the module

@@ -103,3 +103,18 @@ func TestDoctorVersionMarksGoInstallBuilds(t *testing.T) {
 	check = versionCheck(t, runDoctorChecks(context.Background()))
 	assertContains(t, check["message"], "1.0.0 (none, unknown) [go install]")
 }
+
+// A non-semver latest tag (a `nightly` or a blank) is not something
+// `hey upgrade` can install, so doctor must not recommend it.
+func TestDoctorVersionIgnoresNonReleaseLatestTag(t *testing.T) {
+	for _, latest := range []string{"nightly", ""} {
+		stubVersion(t, "1.0.0")
+		stubReleaseFetcher(t, func(context.Context) (releaseInfo, error) {
+			return releaseInfo{Version: latest}, nil
+		})
+		check := versionCheck(t, runDoctorChecks(context.Background()))
+		if check["status"] != "ok" || check["hint"] != "" {
+			t.Errorf("latest %q: doctor must not warn about a non-release tag: %v", latest, check)
+		}
+	}
+}
