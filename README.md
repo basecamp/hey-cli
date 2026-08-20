@@ -39,6 +39,22 @@ irm https://hey.com/install-cli.ps1 | iex
 
 On Windows 11 with Smart App Control, see [Troubleshooting](#windows-smart-app-control-and-smartscreen) if the install is blocked.
 
+## Getting started
+
+```bash
+hey
+```
+
+The first time you run `hey` at a terminal it walks you through setup: it signs you in
+(browser-based OAuth), shows the mail accounts linked to your HEY identity, and offers to
+connect your coding agents (Claude Code, Codex). After that, `hey tui` opens the app and
+bare `hey` prints the help. `hey setup` reruns the wizard any time; `hey login` and
+`hey logout` are shortcuts for `hey auth login` and `hey auth logout`.
+
+Logged-out data commands at a terminal (`hey boxes`, say) offer to sign you in on the spot.
+Piped or `--json` runs never prompt: they fail with `Not logged in` (exit 3) so scripts and
+agents can handle it.
+
 Both scripts download the release for your platform, verify its SHA-256 checksum, and — when `cosign` is installed — verify the release's keyless Sigstore signature (cosign v3 as-is, v2.6+ with `--new-bundle-format=true`; older versions skip signature verification with a warning). Set `HEY_VERSION` to pin a release and `HEY_BIN_DIR` to choose the install directory.
 
 <details>
@@ -145,6 +161,8 @@ hey auth refresh  # force token refresh
 hey auth logout   # clear credentials
 ```
 
+`hey login` and `hey logout` are top-level shortcuts for `hey auth login` and `hey auth logout`.
+
 ### Linked accounts
 
 One HEY login exposes every mail account linked to that identity. List the available
@@ -176,9 +194,10 @@ identity-wide.
 
 ## TUI
 
-Run `hey tui` to launch the interactive terminal UI. Bare `hey` prints the help. For
-identities with multiple linked mail accounts, press Ctrl+A to switch between All Accounts
-and individual email addresses.
+Run `hey tui` to launch the interactive terminal UI (it offers to sign you in first if
+needed). Bare `hey` prints the help — or, logged out at a terminal, runs first-time setup.
+For identities with multiple linked mail accounts, press Ctrl+A to switch between All
+Accounts and individual email addresses.
 Switching cancels requests from the previous account and reloads the active section;
 Calendar and Journal remain identity-wide.
 
@@ -431,13 +450,26 @@ Imbox` for more — replacing the previous toast rather than stacking, and click
 focuses the TUI. Omarchy's notification silencing (SUPER+CTRL+comma) mutes them like any
 other app. See [docs/omarchy.md](docs/omarchy.md) for the details and what is planned next.
 
-## Agent Skill
+## AI agent integration
 
-hey-cli ships with an embedded agent skill so your agent can interact with HEY on your behalf.
+hey-cli ships with an embedded agent skill so your coding agent can work with HEY on your
+behalf, and a Claude Code plugin (`hey@37signals` from the `basecamp/claude-plugins`
+marketplace). The setup wizard offers to connect detected agents; these commands do it on
+their own:
 
 ```bash
-hey skill install   # install the skill globally for your agent
+hey setup claude    # install the skill and the hey@37signals plugin for Claude Code
+hey setup codex     # install the skill for Codex
+hey skill install   # install the skill only (~/.agents/skills/hey, linked for detected agents)
+hey setup agents    # non-interactive: skill + a single detected agent (the installer uses this)
+hey doctor          # check skill and plugin health per detected agent
 ```
+
+`hey setup agents` never prompts and never guesses: with several agents detected it installs
+the skill only and lists the `hey setup <agent>` choices. `HEY_SETUP_AGENT=claude|codex|all|none`
+picks explicitly. `HEY_NONINTERACTIVE=1` disables every prompt (the sign-in offer, the
+wizard's confirmations) for harnesses that run hey under a pseudo-terminal. The installed
+skill is refreshed automatically the first time a new hey release runs.
 
 ## Troubleshooting
 

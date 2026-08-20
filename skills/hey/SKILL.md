@@ -512,6 +512,9 @@ hey journal write                             # Write entry via $EDITOR
 hey auth login                                # Log in (browser-based OAuth)
 hey auth status                               # Check if authenticated
 hey auth logout                               # Log out
+hey login / hey logout                        # Shortcuts for the two above
+hey setup                                     # First-run wizard: sign in + connect coding agents
+hey setup --json                              # Never prompts; reports status and issues
 ```
 
 If a command fails with an auth error, run `hey auth status` to check, then `hey auth login` to re-authenticate.

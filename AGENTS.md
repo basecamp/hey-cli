@@ -39,11 +39,35 @@ Authentication supports four methods, all managed through `internal/auth/`:
 
 The auth Manager (`internal/auth/auth.go`) proactively refreshes tokens with a 5-minute expiry buffer. The SDK uses the Manager to authenticate requests via a bridge in `internal/cmd/sdk.go`.
 
-All data-access commands call `requireAuth()` before making API calls. Auth subcommands (`hey auth login`, `hey auth logout`, `hey auth status`) work without authentication.
+All data-access commands call `requireAuth()` before making API calls. At an interactive
+terminal with styled output, `requireAuth()` offers to sign in on the spot ("Not logged in.
+Sign in now?" → OAuth → the command continues); piped, machine-output or declined runs get
+`Error: Not logged in` / `Run: hey auth login` with exit code 3. Auth subcommands (`hey auth
+login`, `hey auth logout`, `hey auth status`), the `hey login`/`hey logout` shortcuts,
+`hey setup` and `hey doctor` work without authentication.
+
+Bare `hey` at an interactive terminal routes on auth state: logged out runs the setup wizard
+(`runSetupWizard` in `internal/cmd/setup.go` — welcome, OAuth sign-in, linked-account
+greeting, coding-agent setup, summary) and stops at the summary; logged in opens the TUI.
+`config.json`'s `onboarded` flag only trims a later logged-out run to the sign-in step.
+Without a terminal, or with any machine-output flag, bare `hey` prints help. `HEY_NONINTERACTIVE=1`
+disables every prompt regardless of TTY detection.
+
+Coding-agent integration lives in `internal/harness` (agent registry, Claude Code / Codex
+detection, plugin and skill health checks) and `internal/cmd/setup_agent*.go` (`hey setup
+claude|codex|agents`). Claude Code gets the `hey@37signals` plugin from `basecamp/claude-plugins`
+plus a skill link; Codex gets the skill only until a `.codex-plugin` ships. `HEY_SETUP_AGENT`
+selects the target for `hey setup agents`. `hey doctor` reports per-agent diagnostics, and a
+`PersistentPostRunE` hook (`skill_refresh.go`) re-syncs installed skill copies once per release
+version change.
+
+New top-level commands and subcommands need the `.surface` snapshot updated
+(`go test ./internal/cmd -run TestSurfaceSnapshot -update-surface`), and anything listed in
+root help needs the byte-exact literal in `help_test.go` updated.
 
 ### State storage
 
-Configuration (the base URL, the default linked account, and the Imbox's cover) is stored in `~/.config/hey-cli/config.json`. Credentials are stored in the system keyring (service name: `hey`) with automatic fallback to `~/.config/hey-cli/credentials.json` when the keyring is unavailable. Set `HEY_NO_KEYRING=1` to force file storage.
+Configuration (the base URL, the default linked account, the Imbox's cover, and the `onboarded` flag) is stored in `~/.config/hey-cli/config.json`; `onboarded` is read from the global file only, never from a repository's `.hey/config.json`. Credentials are stored in the system keyring (service name: `hey`) with automatic fallback to `~/.config/hey-cli/credentials.json` when the keyring is unavailable. Set `HEY_NO_KEYRING=1` to force file storage.
 
 ### CLI
 

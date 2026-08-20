@@ -78,3 +78,19 @@ func TestAuthLogoutAndRelogin(t *testing.T) {
 		t.Errorf("expected authenticated=true after re-login")
 	}
 }
+
+func TestLoginLogoutShortcuts(t *testing.T) {
+	// hey logout == hey auth logout.
+	heyOK(t, "logout")
+	status := heyJSON(t, "auth", "status")
+	if data := dataAs[map[string]any](t, status); data["authenticated"] == true {
+		t.Errorf("expected authenticated=false after hey logout")
+	}
+
+	// hey login == hey auth login.
+	heyOK(t, "login", "--cookie", sessionCookie)
+	status = heyJSON(t, "auth", "status")
+	if data := dataAs[map[string]any](t, status); data["authenticated"] != true {
+		t.Errorf("expected authenticated=true after hey login --cookie")
+	}
+}
