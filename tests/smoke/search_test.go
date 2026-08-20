@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 type smokeSearchResult struct {
@@ -51,9 +52,16 @@ func TestSearchFreeTextAndRefinements(t *testing.T) {
 		t.Skip("no Imbox thread available for read-only search validation")
 	}
 
-	freeText := dataAs[[]smokeSearchResult](t, heyJSON(t, "search", subject))
+	var freeText []smokeSearchResult
+	deadline := time.Now().Add(10 * time.Second)
+	for len(freeText) == 0 && time.Now().Before(deadline) {
+		freeText = dataAs[[]smokeSearchResult](t, heyJSON(t, "search", subject))
+		if len(freeText) == 0 {
+			time.Sleep(250 * time.Millisecond)
+		}
+	}
 	if len(freeText) == 0 {
-		t.Fatal("free-text search did not find the known Imbox thread")
+		t.Fatal("free-text search did not find the known Imbox thread after waiting for indexing")
 	}
 	for _, result := range freeText {
 		if result.TopicID == 0 {

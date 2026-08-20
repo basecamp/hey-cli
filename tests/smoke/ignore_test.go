@@ -36,7 +36,7 @@ func TestIgnoreAndStopIgnoring(t *testing.T) {
 	}
 	assertContains(t, ignoreResp.Summary, "1 thread ignored")
 
-	afterIgnore := dataAs[BoxResp](t, heyJSON(t, "box", "imbox"))
+	afterIgnore := dataAs[BoxResp](t, heyJSON(t, "box", "imbox", "--all"))
 	muted, found := findPostingMute(afterIgnore.Postings, posting.ID)
 	if !found {
 		t.Fatal("ignored thread disappeared from Imbox")
@@ -52,7 +52,7 @@ func TestIgnoreAndStopIgnoring(t *testing.T) {
 	}
 	assertContains(t, stopResp.Summary, "Stopped ignoring 1 thread")
 
-	afterStop := dataAs[BoxResp](t, heyJSON(t, "box", "imbox"))
+	afterStop := dataAs[BoxResp](t, heyJSON(t, "box", "imbox", "--all"))
 	muted, found = findPostingMute(afterStop.Postings, posting.ID)
 	if !found {
 		t.Fatal("thread disappeared from Imbox after hey stop-ignoring")
