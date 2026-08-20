@@ -24,20 +24,26 @@ WORKFLOW_DIR=".github/workflows"
 # pins, so the floor and the pins never disagree in a merged tree.
 MIN_VERSION="v2.11.1"
 
-# Compare with sort -V, never lexically or arithmetically. As strings v2.9.0
+# Compare numerically, field by field, never lexically. As strings v2.9.0
 # sorts *above* v2.11.1 — 9 > 1 — so a lexical test would wave through the exact
 # version that failed the release tag. `[ -gt ]` cannot parse either one.
-# (sort -V is in both GNU coreutils and macOS's BSD sort.)
+# Pure Bash rather than `sort -V`: this runs locally under `make check` as well
+# as in CI, and a field compare has nothing to disagree about between GNU and
+# BSD userlands.
 #
-# Only the numeric core is compared: sort -V orders v2.11.1-rc.1 *after*
-# v2.11.1, so feeding it a prerelease suffix would be wrong in the direction
-# that matters. Pinning a prerelease is a deliberate act; the floor asks only
-# that its numeric part is not stale.
+# Only the numeric core is compared: a prerelease suffix would otherwise order
+# v2.11.1-rc.1 relative to v2.11.1 in whichever direction the compare happened
+# to pick. Pinning a prerelease is a deliberate act; the floor asks only that
+# its numeric part is not stale.
 version_gte() {
-  local a b
-  a=$(printf '%s' "$1" | sed 's/[-+].*//')
-  b=$(printf '%s' "$2" | sed 's/[-+].*//')
-  printf '%s\n%s\n' "$b" "$a" | sort -V | head -1 | grep -qx -- "$b"
+  local a b i
+  IFS=. read -r -a a <<< "$(printf '%s' "${1#v}" | sed 's/[-+].*//')"
+  IFS=. read -r -a b <<< "$(printf '%s' "${2#v}" | sed 's/[-+].*//')"
+  for i in 0 1 2; do
+    if (( ${a[i]:-0} > ${b[i]:-0} )); then return 0; fi
+    if (( ${a[i]:-0} < ${b[i]:-0} )); then return 1; fi
+  done
+  return 0
 }
 
 # Both spellings: every workflow here is .yml today, but GitHub honours .yaml
@@ -73,7 +79,9 @@ done < <(
       # A new list item ends the previous step, pinned or not.
       /^[[:space:]]*-[[:space:]]/ { close_step() }
       /uses:.*golangci-lint-action/ { in_step = 1; next }
-      in_step && /^[[:space:]]*version:[[:space:]]*v[0-9]/ {
+      # The scalar may be bare or quoted: release.yml already writes action
+      # versions as 'vX.Y.Z', and a quoted pin is a pin, not a missing one.
+      in_step && /^[[:space:]]*version:[[:space:]]*["'"'"']?v[0-9]/ {
         match($0, /v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]*)?/)
         print file ":" substr($0, RSTART, RLENGTH)
         in_step = 0
