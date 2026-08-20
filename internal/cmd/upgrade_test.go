@@ -257,6 +257,38 @@ func TestUpgradeInvalidPinnedVersionIsUsageError(t *testing.T) {
 	requireUpgradeError(t, run.err, "usage")
 }
 
+// A release fetch that yields a non-semver tag (a manually published
+// release, or a response missing tag_name) must fail before any upgrade
+// starts: isUpdateAvailable's inequality fallback would otherwise treat the
+// bogus value as an update and mutate a package-manager install before its
+// confirmation step could refuse it.
+func TestUpgradeNonSemverReleaseMetadataFailsBeforeUpgrade(t *testing.T) {
+	for name, latest := range map[string]string{
+		"non-semver tag":   "nightly",
+		"missing tag_name": "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			stubVersion(t, "1.2.3")
+			mutated := false
+			stubUpgradeCheckers(t, upgradeCheckersStub{
+				latestVersion: latest,
+				isBrew:        true,
+				homebrewUpgrade: func(context.Context, string, io.Writer, io.Writer) error {
+					mutated = true
+					return nil
+				},
+			})
+
+			run := executeUpgradeCommand(t)
+			apiErr := requireUpgradeError(t, run.err, "upgrade_failed")
+			assertContains(t, apiErr.Message, "not a semantic version")
+			if mutated {
+				t.Error("invalid release metadata must fail before the package manager runs")
+			}
+		})
+	}
+}
+
 // A pinned version targets that release's tag, not /releases/latest —
 // prereleases are published without make_latest and are invisible there.
 func TestUpgradePinnedVersionUsesTagLookup(t *testing.T) {

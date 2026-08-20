@@ -138,6 +138,20 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	latest := release.Version
 
+	// Validate the metadata before the availability check: a manually
+	// published release with a non-semver tag (or a response missing
+	// tag_name) would otherwise fall into isUpdateAvailable's inequality
+	// fallback and start an upgrade toward a version nothing downstream can
+	// compare or build asset names from — mutating a package-manager install
+	// before its confirmation step could refuse the bogus version.
+	if !isReleaseVersion(latest) {
+		fmt.Fprintln(w, "failed")
+		return errUpgradeFailedHint(
+			fmt.Sprintf("release metadata is unusable: tag %q is not a semantic version", latest),
+			"Retry once the release carries a semantic-version tag (vX.Y.Z): https://github.com/basecamp/hey-cli/releases",
+		)
+	}
+
 	if !isUpdateAvailable(current, latest) {
 		fmt.Fprintln(w, "already up to date")
 		return writeUpgradeOK(
