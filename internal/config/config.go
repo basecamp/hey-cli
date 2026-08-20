@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -447,7 +448,19 @@ func serverOrigin(base string) (string, error) {
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return "", apierr.ErrUsage(fmt.Sprintf("invalid base URL %q", base))
 	}
-	return strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host), nil
+	scheme := strings.ToLower(u.Scheme)
+	hostname := strings.ToLower(u.Hostname())
+	port := u.Port()
+	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
+		port = ""
+	}
+	host := hostname
+	if port != "" {
+		host = net.JoinHostPort(hostname, port)
+	} else if strings.Contains(hostname, ":") {
+		host = "[" + hostname + "]"
+	}
+	return (&url.URL{Scheme: scheme, Host: host}).String(), nil
 }
 
 func validateBaseURL(base string) error {

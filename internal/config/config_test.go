@@ -255,6 +255,74 @@ func TestAccountDefaultsAreBoundToServerOrigin(t *testing.T) {
 	}
 }
 
+func TestServerOriginCanonicalizesDefaultPorts(t *testing.T) {
+	tests := []struct {
+		base string
+		want string
+	}{
+		{"https://APP.HEY.COM:443/path", "https://app.hey.com"},
+		{"http://app.hey.localhost:80/path", "http://app.hey.localhost"},
+		{"https://app.hey.com:8443/path", "https://app.hey.com:8443"},
+		{"http://[::1]:80/path", "http://[::1]"},
+		{"https://[2001:db8::1]:8443/path", "https://[2001:db8::1]:8443"},
+		{"https://[fe80::1%25eth0]:8443/path", "https://[fe80::1%25eth0]:8443"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.base, func(t *testing.T) {
+			got, err := serverOrigin(tt.base)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Fatalf("serverOrigin(%q) = %q, want %q", tt.base, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAccountDefaultMatchesEquivalentDefaultPortOrigin(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HEY_BASE_URL", "https://app.hey.com:443")
+	t.Setenv("HEY_ACCOUNT_ID", "")
+	dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), configDirName)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	data := `{"account_defaults":{"https://app.hey.com":"101"}}`
+	if err := os.WriteFile(filepath.Join(dir, configFile), []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AccountID != "101" || cfg.SourceOf("account_id") != SourceGlobal {
+		t.Fatalf("default-port account = %q (%s), want 101 (global)", cfg.AccountID, cfg.SourceOf("account_id"))
+	}
+}
+
+func TestZoneScopedOriginAccountDefaultRoundTrips(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HEY_BASE_URL", "https://[fe80::1%25eth0]:8443")
+	t.Setenv("HEY_ACCOUNT_ID", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SaveAccountID("101"); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.AccountID != "101" || reloaded.SourceOf("account_id") != SourceGlobal {
+		t.Fatalf("zone-scoped account = %q (%s), want 101 (global)", reloaded.AccountID, reloaded.SourceOf("account_id"))
+	}
+}
+
 func TestBaseURLFlagResolvesAccountForNewOrigin(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HEY_BASE_URL", "")
