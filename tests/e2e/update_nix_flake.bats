@@ -236,11 +236,38 @@ NIX_BUILD_EXIT=1"
   [[ "$output" != *"verified (build succeeded)"* ]]
 }
 
-@test "stages only tracked files into the build source" {
-  # An untracked scratch .go file must not reach the temporary flake source:
-  # an import it adds could shift the computed vendorHash away from what a
-  # clean checkout produces, and CI would then reject the "verified" update.
+@test "refuses to verify when an untracked Go file would be omitted" {
+  # The build source stages tracked files only, so an untracked .go file never
+  # reaches the verification build — but once committed it reaches CI's build,
+  # and an import it adds shifts `go mod vendor`'s output and the vendorHash
+  # with it (demonstrated on this repo: identical go.mod/go.sum vendor to
+  # different trees with and without the file). Verifying anyway would stamp
+  # "verified" on a hash CI then rejects. The script must refuse instead,
+  # before any build runs or any edit lands.
   echo 'package scratch' > scratch.go
+  # Any docker invocation is itself a failure: the guard must fire first.
+  cat > "$STUB_DIR/docker" <<'STUB'
+#!/usr/bin/env bash
+echo "error: build ran despite untracked Go source"
+echo "NIX_BUILD_EXIT=1"
+STUB
+  chmod +x "$STUB_DIR/docker"
+
+  run scripts/update-nix-flake.sh 0.2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"untracked Go source"* ]]
+  [[ "$output" == *"scratch.go"* ]]
+  [[ "$output" != *"build ran despite"* ]]
+  [[ "$output" != *"verified (build succeeded)"* ]]
+  # Refused before the version edit — nothing to clean up or accidentally commit.
+  grep -q 'version = "0.1.1";' nix/package.nix
+}
+
+@test "stages tracked files only, and untracked non-Go files do not block" {
+  # Untracked files that cannot move the vendorHash (notes, scratch dirs) are
+  # excluded from the build source but must not stop the tool — the guard is
+  # scoped to the Go build graph, not to a pristine tree.
+  echo 'draft release notes' > NOTES.md
 
   cat > "$STUB_DIR/docker" <<'STUB'
 #!/usr/bin/env bash
@@ -253,7 +280,7 @@ done
 grep -q 'version = "0.1.1";' "$SRC/nix/package.nix" || {
   echo "error: tracked file missing from stage"; echo "NIX_BUILD_EXIT=1"; exit 0; }
 # ...and untracked files do not arrive at all.
-if [ -e "$SRC/scratch.go" ]; then
+if [ -e "$SRC/NOTES.md" ]; then
   echo "error: untracked file staged into build source"
   echo "NIX_BUILD_EXIT=1"
   exit 0
@@ -261,6 +288,20 @@ fi
 echo "NIX_BUILD_EXIT=0"
 STUB
   chmod +x "$STUB_DIR/docker"
+
+  run scripts/update-nix-flake.sh 0.1.1
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"verified (build succeeded)"* ]]
+}
+
+@test "a gitignored Go file does not block verification" {
+  # Ignored files are never committed, so they cannot cause the local/CI
+  # divergence the guard exists for — and gitignoring is the documented way
+  # to keep a scratch .go file while running the tool.
+  echo 'scratch.go' > .gitignore
+  git add .gitignore && git commit -qm ignore
+  echo 'package scratch' > scratch.go
+  stub_docker "NIX_BUILD_EXIT=0"
 
   run scripts/update-nix-flake.sh 0.1.1
   [ "$status" -eq 2 ]

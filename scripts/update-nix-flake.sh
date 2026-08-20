@@ -19,6 +19,25 @@ fi
 NIX_PKG="nix/package.nix"
 CHANGED=false
 
+# The build source below is staged from tracked files only, so an untracked
+# .go file never reaches the verification build — but once committed it does
+# reach CI's build, and an import it adds shifts `go mod vendor`'s output and
+# with it the vendorHash. Verifying without it would stamp "verified" on a
+# hash CI then rejects. Refuse to verify a tree that diverges from what will
+# be committed, rather than silently verifying the wrong one. Scoped to files
+# that feed the Go build graph: untracked notes or scratch dirs cannot move
+# the vendorHash and must not block the tool.
+UNTRACKED_GO=$(git ls-files --others --exclude-standard -- \
+  '*.go' 'go.mod' 'go.sum' 'go.work' 'go.work.sum')
+if [[ -n "$UNTRACKED_GO" ]]; then
+  echo "ERROR: untracked Go source would be missing from the verified build:"
+  while IFS= read -r f; do echo "  $f"; done <<<"$UNTRACKED_GO"
+  echo "The build stages tracked files only, so the vendorHash verified here"
+  echo "would not match what CI computes once these files are committed."
+  echo "\`git add\` them (or gitignore them) and re-run."
+  exit 1
+fi
+
 # Leave no partial edits behind: restore nix/package.nix on any failure so a
 # failed run is indistinguishable from no run. Otherwise a leftover version
 # bump makes the next invocation report "no changes needed" (exit 2) while an
