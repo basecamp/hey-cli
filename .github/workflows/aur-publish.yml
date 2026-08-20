@@ -125,25 +125,27 @@ jobs:
           fi
           echo "AUR is at ${current}; publishing ${VERSION}"
 
-      - name: Verify AUR key is configured
+      # Fails here, named, when the secret is missing or does not load as a
+      # key — the install script repairs the usual paste damage (CRLF, dropped
+      # trailing newline, flattened lines) and diagnoses the rest without
+      # printing key material.
+      - name: Install AUR key
         env:
-          AUR_KEY: ${{ secrets.AUR_KEY }}
+          SSH_KEY: ${{ secrets.AUR_KEY }}
         run: |
-          if [ -z "$AUR_KEY" ]; then
+          if [ -z "$SSH_KEY" ]; then
             echo "::error::AUR_KEY is not configured for the release environment"
             exit 1
           fi
+          mkdir -p ~/.ssh
+          scripts/install-ssh-key.sh ~/.ssh/aur
+          echo -e "Host aur.archlinux.org\n  IdentityFile ~/.ssh/aur\n  User aur\n  StrictHostKeyChecking accept-new" >> ~/.ssh/config
 
       - name: Publish to AUR
         id: publish
         env:
-          AUR_KEY: ${{ secrets.AUR_KEY }}
           VERSION: ${{ inputs.version }}
         run: |
-          mkdir -p ~/.ssh
-          echo "$AUR_KEY" > ~/.ssh/aur
-          chmod 600 ~/.ssh/aur
-          echo -e "Host aur.archlinux.org\n  IdentityFile ~/.ssh/aur\n  User aur\n  StrictHostKeyChecking accept-new" >> ~/.ssh/config
           git config --global user.name "37signals"
           git config --global user.email "dev@37signals.com"
           for attempt in 1 2 3; do

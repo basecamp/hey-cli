@@ -102,7 +102,7 @@ converges the environment across the CLI repos and copies secrets in from
 | `SM_API_KEY` | secret | DigiCert ONE API key for KeyLocker |
 | `SM_CLIENT_CERT_FILE_B64` | secret | Base64 (single line) of the DigiCert ONE mTLS client certificate `.p12` attachment |
 | `SM_CLIENT_CERT_PASSWORD` | secret | Client certificate password |
-| `AUR_KEY` | secret | ed25519 SSH private key for the AUR (optional; publish skips without it) |
+| `AUR_KEY` | secret | ed25519 SSH private key for the AUR (optional; publish skips without it) — set it from the key file, never a paste: `gh secret set AUR_KEY --env release < ~/.ssh/aur_hey_cli` |
 
 The `SM_*` values come from the **DigiCert CodeSigning Cert** item (Development
 vault): the two text fields byte-exact with no trailing newline, and the `.p12`

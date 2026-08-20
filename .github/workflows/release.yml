@@ -312,16 +312,23 @@ jobs:
             echo "enabled=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Publish to AUR
+      # Its own step so a key that does not load fails here, named, instead of
+      # surfacing three attempts later as "Permission denied (publickey)" and
+      # filing an AUR-outage issue for what is a secrets problem.
+      - name: Install AUR key
         if: steps.aur-config.outputs.enabled == 'true'
         env:
-          AUR_KEY: ${{ secrets.AUR_KEY }}
+          SSH_KEY: ${{ secrets.AUR_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          scripts/install-ssh-key.sh ~/.ssh/aur
+          echo -e "Host aur.archlinux.org\n  IdentityFile ~/.ssh/aur\n  User aur\n  StrictHostKeyChecking accept-new" >> ~/.ssh/config
+
+      - name: Publish to AUR
+        id: publish
+        if: steps.aur-config.outputs.enabled == 'true'
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          mkdir -p ~/.ssh
-          echo "$AUR_KEY" > ~/.ssh/aur
-          chmod 600 ~/.ssh/aur
-          echo -e "Host aur.archlinux.org\n  IdentityFile ~/.ssh/aur\n  User aur\n  StrictHostKeyChecking accept-new" >> ~/.ssh/config
           git config --global user.name "37signals"
           git config --global user.email "dev@37signals.com"
           # publish-aur.sh derives everything from the published release assets
@@ -338,8 +345,11 @@ jobs:
           echo "AUR publish failed after 3 attempts"
           exit 1
 
+      # Scoped to the publish step, as in aur-publish.yml: a key that fails to
+      # load is an operator problem the run annotates itself, not the outage
+      # this issue's "retry once the AUR is reachable" advice is written for.
       - name: Notify on AUR publish failure
-        if: failure()
+        if: failure() && steps.publish.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO_SLUG: ${{ github.repository }}
