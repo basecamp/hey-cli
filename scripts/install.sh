@@ -340,7 +340,14 @@ setup_path() {
   local path_line="export PATH=\"$BIN_DIR:\$PATH\""
   case "${SHELL:-}" in
     */zsh)  shell_rc="$HOME/.zshrc" ;;
-    */bash) shell_rc="$HOME/.bashrc" ;;
+    # macOS terminals start bash as a login shell, which reads ~/.bash_profile
+    # and not ~/.bashrc. Linux login shells (consoles, SSH) reach ~/.bashrc
+    # through the distros' stock profile files.
+    */bash) if [[ "$(uname -s)" == "Darwin" ]]; then
+              shell_rc="$HOME/.bash_profile"
+            else
+              shell_rc="$HOME/.bashrc"
+            fi ;;
     # fish sources neither ~/.profile nor Bourne syntax; fish_add_path
     # (fish >= 3.2) persists the entry and is idempotent across runs.
     */fish) shell_rc="${XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish"

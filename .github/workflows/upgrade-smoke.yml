@@ -6,8 +6,11 @@
 #
 # Branch pushes necessarily verify the previous release, so the workflow also
 # runs on every published release (pinned to that release's tag) -- the first
-# bundle a changed .goreleaser.yaml actually produces gets exercised. Manual
-# runs can pin a version too.
+# bundle a changed .goreleaser.yaml actually produces gets exercised. Normal
+# releases arrive as a workflow_dispatch from release.yml: goreleaser publishes
+# with the built-in GITHUB_TOKEN, whose release event never starts another
+# workflow. The `release: published` trigger covers releases published by a
+# person (e.g. a draft in the UI). Manual runs can pin a version too.
 name: Upgrade Smoke
 
 on:

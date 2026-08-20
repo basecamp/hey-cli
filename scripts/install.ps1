@@ -1,3 +1,10 @@
+# The documented install path is `irm ... | iex`, and Invoke-Expression
+# evaluates this file in the caller's scope. The invoked script block below
+# gives the installer its own scope, so $ErrorActionPreference and the helper
+# functions do not leak into (or clobber) the interactive session. The body
+# stays unindented: the here-strings' closing "@ must sit at column zero.
+& {
+
 $ErrorActionPreference = 'Stop'
 
 try {
@@ -243,7 +250,7 @@ function Normalize-PathEntry([string]$PathValue) {
     return ''
   }
 
-  return $PathValue.Trim().TrimEnd('\\')
+  return $PathValue.Trim().TrimEnd('\')
 }
 
 function Get-DefaultBinDir {
@@ -284,7 +291,7 @@ function Ensure-UserPath([string]$Dir) {
 function Main {
   $arch = Get-PlatformArch
   if (-not $BinDir) {
-    $script:BinDir = Get-DefaultBinDir
+    $BinDir = Get-DefaultBinDir
   }
 
   $resolvedVersion = if ($Version) { $Version } else { Get-LatestVersion }
@@ -367,3 +374,5 @@ function Main {
 }
 
 Main
+
+}

@@ -253,6 +253,42 @@ EOF
   [[ ! -f "$home/.profile" ]]
 }
 
+# Linux bash login shells (consoles, SSH) reach ~/.bashrc through the
+# distros' stock profile files, so the entry lands there.
+@test "setup_path appends to .bashrc for bash on linux" {
+  local home="$STUB_DIR/home"
+  mkdir -p "$home"
+  printf '#!/bin/sh\necho Linux\n' > "$STUB_DIR/uname"
+  chmod +x "$STUB_DIR/uname"
+  run bash -c "
+    export HOME='$home' SHELL=/bin/bash PATH='$STUB_DIR':/usr/bin:/bin
+    source '$INSTALL_SH'
+    BIN_DIR='$home/.local/bin'
+    setup_path
+  "
+  [[ "$status" -eq 0 ]]
+  grep -qF "export PATH=\"$home/.local/bin:\$PATH\"" "$home/.bashrc"
+  [[ ! -f "$home/.bash_profile" ]]
+}
+
+# macOS terminals start bash as a login shell, which reads ~/.bash_profile
+# and never ~/.bashrc, so .bashrc would configure PATH for nobody there.
+@test "setup_path appends to .bash_profile for bash on darwin" {
+  local home="$STUB_DIR/home"
+  mkdir -p "$home"
+  printf '#!/bin/sh\necho Darwin\n' > "$STUB_DIR/uname"
+  chmod +x "$STUB_DIR/uname"
+  run bash -c "
+    export HOME='$home' SHELL=/bin/bash PATH='$STUB_DIR':/usr/bin:/bin
+    source '$INSTALL_SH'
+    BIN_DIR='$home/.local/bin'
+    setup_path
+  "
+  [[ "$status" -eq 0 ]]
+  grep -qF "export PATH=\"$home/.local/bin:\$PATH\"" "$home/.bash_profile"
+  [[ ! -f "$home/.bashrc" ]]
+}
+
 @test "setup_path appends export PATH to .profile for other shells" {
   local home="$STUB_DIR/home"
   mkdir -p "$home"
@@ -513,4 +549,40 @@ EOF
   [[ "$output" == *"v26-ok"* ]]
   [[ "$output" == *"v24-ok"* ]]
   [[ "$output" == *"garbage-ok"* ]]
+}
+
+# The documented install path is `irm ... | iex`, and Invoke-Expression
+# evaluates install.ps1 in the caller's scope. The invoked script block must
+# keep the installer's state there: $ErrorActionPreference and the helper
+# functions may not survive into (or clobber) the invoking session.
+@test "install.ps1 leaves no state behind when evaluated via iex" {
+  if ! command -v pwsh >/dev/null 2>&1; then
+    if [[ -n "${CI:-}" ]]; then
+      echo "pwsh is required in CI for install.ps1 iex scope coverage" >&2
+      return 1
+    fi
+    skip "pwsh not installed"
+  fi
+
+  cat > "$STUB_DIR/iex-driver.ps1" <<'EOF'
+$ErrorActionPreference = 'Continue'
+# An unsupported architecture makes Main fail fast in Get-PlatformArch --
+# before any network access -- which is all this needs: the file was
+# evaluated in this scope exactly the way `irm | iex` evaluates it.
+$env:PROCESSOR_ARCHITEW6432 = 'MIPS'
+try { Invoke-Expression (Get-Content -Raw $env:INSTALL_PS1_PATH) } catch { }
+if ($ErrorActionPreference -ne 'Continue') { throw "leaked ErrorActionPreference=$ErrorActionPreference" }
+foreach ($name in @('Step', 'Info', 'Fail', 'Main', 'Get-DefaultBinDir')) {
+  if (Get-Command $name -CommandType Function -ErrorAction SilentlyContinue) { throw "leaked function $name" }
+}
+'iex-scope-ok'
+EOF
+
+  run bash -c "
+    set -euo pipefail
+    export INSTALL_PS1_PATH='$INSTALL_PS1'
+    pwsh -NoProfile -File '$STUB_DIR/iex-driver.ps1'
+  "
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"iex-scope-ok"* ]]
 }

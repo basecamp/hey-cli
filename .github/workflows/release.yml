@@ -112,6 +112,9 @@ jobs:
       contents: write
       id-token: write
       attestations: write
+      # Dispatch the upgrade smoke: goreleaser publishes with GITHUB_TOKEN,
+      # whose release event does not start other workflows.
+      actions: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -210,6 +213,18 @@ jobs:
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-checksums: ./dist/checksums.txt
+
+      # A release published with the built-in GITHUB_TOKEN does not fire the
+      # `release: published` trigger (GitHub suppresses workflow-to-workflow
+      # events except workflow_dispatch/repository_dispatch), so start the
+      # upgrade smoke explicitly, pinned to this release. The tag ref makes
+      # the smoke run this release's installers, not main's.
+      - name: Trigger the upgrade smoke against this release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run upgrade-smoke.yml --repo "$GITHUB_REPOSITORY" \
+            --ref "$GITHUB_REF_NAME" -f version="${GITHUB_REF_NAME#v}"
 
   # The AUR goes down for maintenance often enough that a release must not
   # depend on it being reachable — isolated and continue-on-error, an AUR outage
