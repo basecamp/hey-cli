@@ -19,6 +19,22 @@ fi
 NIX_PKG="nix/package.nix"
 CHANGED=false
 
+# Leave no partial edits behind: restore nix/package.nix on any failure so a
+# failed run is indistinguishable from no run. Otherwise a leftover version
+# bump makes the next invocation report "no changes needed" (exit 2) while an
+# unverified edit sits in the worktree waiting to be committed.
+ORIG_PKG="$(mktemp)"
+cp "$NIX_PKG" "$ORIG_PKG"
+# shellcheck disable=SC2329  # invoked via the EXIT trap below
+restore_on_failure() {
+  local status=$?
+  if [[ $status -ne 0 && $status -ne 2 ]]; then
+    cp "$ORIG_PKG" "$NIX_PKG"
+  fi
+  rm -f "$ORIG_PKG"
+}
+trap restore_on_failure EXIT
+
 # --- Update version ---
 CURRENT_VERSION=$(sed -n 's/.*version = "\([^"]*\)".*/\1/p' "$NIX_PKG" | head -1)
 if [[ "$CURRENT_VERSION" != "$VERSION" ]]; then

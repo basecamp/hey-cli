@@ -94,15 +94,18 @@ NIX_BUILD_EXIT=0"
 }
 
 @test "does not write a version when the build fails" {
-  # A version bump and a broken flake must not be half-committed: the literal
-  # is rewritten before the build, so the non-zero exit is what keeps the
-  # caller from committing it.
+  # A failed run must leave no trace: the version literal is rewritten before
+  # the build, and the EXIT trap restores it when the build fails. Otherwise a
+  # re-run would report "no changes needed" while an unverified bump sat in
+  # the worktree waiting to be committed.
   stub_docker "error: builder failed with exit code 1
 NIX_BUILD_EXIT=1"
 
   run scripts/update-nix-flake.sh 0.2.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"not because of the vendorHash"* ]]
+  grep -q 'version = "0.1.1";' nix/package.nix
+  ! grep -q 'version = "0.2.0";' nix/package.nix
 }
 
 @test "does not write the Go source tarball's hash into vendorHash" {
@@ -172,6 +175,9 @@ NIX_BUILD_EXIT=1"
   run scripts/update-nix-flake.sh 0.1.1
   [ "$status" -eq 1 ]
   [[ "$output" == *"still fails after updating the vendorHash"* ]]
+  # The unproven hash must not survive the failure.
+  grep -q 'sha256-OLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDA=' nix/package.nix
+  ! grep -q 'sha256-NEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWB=' nix/package.nix
 }
 
 @test "does not mistake an unrelated 'got:' line for a hash mismatch" {
