@@ -36,6 +36,8 @@ hey box --limit
 hey boxes
 hey boxes --all
 hey boxes --limit
+hey bubble-up-now
+hey bubble-up-now --topic-id
 hey bulk-reply
 hey bulk-reply preview
 hey bulk-reply send
@@ -118,6 +120,8 @@ hey labels --all
 hey labels --limit
 hey move
 hey move --to
+hey pop
+hey pop --topic-id
 hey recordings
 hey recordings --all
 hey recordings --ends-on

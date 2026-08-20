@@ -12,7 +12,9 @@ The remaining HTML-reading gaps use the SDK's authenticated HTML helper and are 
 | `/trailbox.json` | GET | SDK `Boxes().GetTrailbox` | `hey box trailbox` | covered |
 | `/asidebox.json` | GET | SDK `Boxes().GetAsidebox` | `hey box asidebox` | covered |
 | `/laterbox.json` | GET | SDK `Boxes().GetLaterbox` | `hey box laterbox` | covered |
-| `/bubblebox.json` | GET | SDK `Boxes().GetBubblebox` | `hey box bubblebox` | covered |
+| `/bubble_up.json` | GET | SDK `Boxes().GetBubblebox` | `hey box bubblebox`, Bubble Up target verification | covered |
+| `/postings/bulk_bubble_up_now.json` | POST | SDK `Postings().BubbleUpNow` | `hey bubble-up-now <posting-id> --topic-id <topic-id>` | covered: exact-pair preflight + verification reads |
+| `/postings/bubble_up.json` | DELETE | SDK `Postings().CancelBubbleUp` | `hey pop <posting-id> --topic-id <topic-id>` | covered: exact-pair preflight + verification reads |
 | `/my/navigation.json` | GET | SDK `Identity().GetNavigation` | `hey labels`, Mail TUI navigation | covered |
 | `/folders/{id}.json` | GET | SDK `Folders().GetPage` | `hey label <id>`, Mail TUI labels | covered |
 | `/postings/filings.json` | POST | SDK `Postings().File` | `hey label add`, TUI `g` | covered |
