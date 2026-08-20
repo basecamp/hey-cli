@@ -171,6 +171,54 @@ plugin_version() { jq -r .version .claude-plugin/plugin.json; }
   [ "$(origin rev-parse v0.10.0^{commit})" = "$(origin rev-parse main)" ]
 }
 
+@test "a failed nix update restores the metadata and leaves the tree clean" {
+  cat > scripts/update-nix-flake.sh <<'STUB'
+#!/usr/bin/env bash
+printf '{\n  version = "%s";\n}\n' "$1" > nix/package.nix
+echo "ERROR: nix build failed, and not because of the vendorHash"
+exit 1
+STUB
+  git add scripts/update-nix-flake.sh
+  git commit -qm "Break the nix update"
+  git push -q origin main
+  : > "$PUSH_LOG"
+  BASE=$(git rev-parse HEAD)
+
+  run scripts/release.sh 0.2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"update-nix-flake.sh failed (exit 1)"* ]]
+
+  [ -z "$(git status --porcelain)" ]
+  grep -q 'version = "0.1.0"' nix/package.nix
+  [ "$(git rev-parse HEAD)" = "$BASE" ]
+  [ "$(origin rev-parse main)" = "$BASE" ]
+  [ ! -s "$PUSH_LOG" ]
+}
+
+@test "a failed plugin stamp restores the metadata and leaves the tree clean" {
+  cat > scripts/stamp-plugin-version.sh <<'STUB'
+#!/usr/bin/env bash
+echo '{ "broken":' > .claude-plugin/plugin.json
+exit 1
+STUB
+  git add scripts/stamp-plugin-version.sh
+  git commit -qm "Break the plugin stamp"
+  git push -q origin main
+  : > "$PUSH_LOG"
+  BASE=$(git rev-parse HEAD)
+
+  run scripts/release.sh 0.2.0
+  [ "$status" -eq 1 ]
+
+  # The nix update succeeded before the stamp failed; both files come back.
+  [ -z "$(git status --porcelain)" ]
+  grep -q 'version = "0.1.0"' nix/package.nix
+  [ "$(plugin_version)" = "0.1.0" ]
+  [ "$(git rev-parse HEAD)" = "$BASE" ]
+  [ "$(origin rev-parse main)" = "$BASE" ]
+  [ ! -s "$PUSH_LOG" ]
+}
+
 @test "prerelease below the latest stable is not a downgrade of any channel" {
   git tag -a v0.3.0 -m "Release v0.3.0"
   git push -q origin v0.3.0
