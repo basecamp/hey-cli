@@ -31,6 +31,7 @@ var (
 	statsFlag   bool
 	verboseFlag int
 	baseURL     string
+	accountFlag string
 	cfg         *config.Config
 	authMgr     *auth.Manager
 	writer      *output.Writer
@@ -70,6 +71,11 @@ func newRootCmd() *cobra.Command {
 					return err
 				}
 			}
+			if accountFlag != "" {
+				if err := cfg.SetFromFlag("account_id", accountFlag); err != nil {
+					return err
+				}
+			}
 
 			if os.Getenv("HEY_DEBUG") != "" && verboseFlag == 0 {
 				verboseFlag = 1
@@ -81,6 +87,12 @@ func newRootCmd() *cobra.Command {
 			initSDK(authMgr, cfg.BaseURL)
 
 			migrateOldCredentials(configDir)
+
+			if authMgr.IsAuthenticated() && commandUsesAccountScope(cmd) {
+				if err := selectConfiguredAccount(cmd.Context()); err != nil {
+					return err
+				}
+			}
 
 			return nil
 		},
@@ -107,6 +119,7 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().BoolVar(&agentFlag, "agent", false, "Agent mode (JSON envelope, no TTY formatting)")
 	root.PersistentFlags().MarkHidden("agent") //nolint:errcheck,gosec // flag exists
 	root.PersistentFlags().StringVar(&baseURL, "base-url", "", "Override server URL")
+	root.PersistentFlags().StringVar(&accountFlag, "account", "", "Select a linked mail account ID or all")
 	root.PersistentFlags().CountVarP(&verboseFlag, "verbose", "v", "Show request details")
 	root.PersistentFlags().BoolVar(&statsFlag, "stats", false, "Include request stats in response meta")
 
@@ -117,6 +130,7 @@ func newRootCmd() *cobra.Command {
 	root.SetHelpFunc(customHelpFunc(root.HelpFunc()))
 
 	root.AddCommand(newAuthCommand().cmd)
+	root.AddCommand(newAccountsCommand().cmd)
 	root.AddCommand(newBoxesCommand().cmd)
 	root.AddCommand(newBoxCommand().cmd)
 	root.AddCommand(newSearchCommand().cmd)
@@ -150,6 +164,19 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newConfigCommand().cmd)
 
 	return root
+}
+
+func commandUsesAccountScope(cmd *cobra.Command) bool {
+	parts := strings.Fields(cmd.CommandPath())
+	if len(parts) < 2 {
+		return true
+	}
+	switch parts[1] {
+	case "accounts", "auth", "commands", "completion", "config", "doctor", "setup", "skill":
+		return false
+	default:
+		return true
+	}
 }
 
 func Execute() {
@@ -214,7 +241,7 @@ func migrateOldCredentials(_ string) {
 		return
 	}
 
-	if err := cfg.Save(); err != nil {
+	if err := cfg.SaveBaseURL(old.BaseURL); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not update config after migration: %v\n", err)
 	}
 

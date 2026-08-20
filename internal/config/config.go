@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
@@ -15,6 +16,7 @@ const (
 	configDirName = "hey-cli"
 	configFile    = "config.json"
 	defaultBase   = "https://app.hey.com"
+	AllAccounts   = "all"
 )
 
 type Source string
@@ -33,9 +35,15 @@ type Value struct {
 }
 
 type Config struct {
-	BaseURL string `json:"base_url"`
+	BaseURL   string `json:"base_url"`
+	AccountID string `json:"account_id,omitempty"`
 
 	sources map[string]Source
+}
+
+type fileConfig struct {
+	BaseURL   string `json:"base_url,omitempty"`
+	AccountID string `json:"account_id,omitempty"`
 }
 
 // OldConfig represents the legacy config format with embedded credentials.
@@ -114,8 +122,12 @@ func localConfigPath() string {
 
 func Load() (*Config, error) {
 	cfg := &Config{
-		BaseURL: defaultBase,
-		sources: map[string]Source{"base_url": SourceDefault},
+		BaseURL:   defaultBase,
+		AccountID: AllAccounts,
+		sources: map[string]Source{
+			"base_url":   SourceDefault,
+			"account_id": SourceDefault,
+		},
 	}
 
 	// Layer 1: global config
@@ -135,8 +147,15 @@ func Load() (*Config, error) {
 		cfg.BaseURL = env
 		cfg.sources["base_url"] = SourceEnv
 	}
+	if env := os.Getenv("HEY_ACCOUNT_ID"); env != "" {
+		accountID, err := normalizeAccountID(env)
+		if err != nil {
+			return nil, err
+		}
+		cfg.AccountID = accountID
+		cfg.sources["account_id"] = SourceEnv
+	}
 
-	// Validate base URL
 	if err := validateBaseURL(cfg.BaseURL); err != nil {
 		return nil, err
 	}
@@ -157,9 +176,7 @@ func (c *Config) loadFile(path string, source Source) error {
 		return fmt.Errorf("could not read config %s: %w", path, err)
 	}
 
-	var file struct {
-		BaseURL string `json:"base_url"`
-	}
+	var file fileConfig
 	if err := json.Unmarshal(data, &file); err != nil {
 		return fmt.Errorf("could not parse config %s: %w", path, err)
 	}
@@ -167,6 +184,14 @@ func (c *Config) loadFile(path string, source Source) error {
 	if file.BaseURL != "" {
 		c.BaseURL = file.BaseURL
 		c.sources["base_url"] = source
+	}
+	if file.AccountID != "" {
+		accountID, err := normalizeAccountID(file.AccountID)
+		if err != nil {
+			return fmt.Errorf("could not parse config %s: %w", path, err)
+		}
+		c.AccountID = accountID
+		c.sources["account_id"] = source
 	}
 
 	return nil
@@ -194,6 +219,16 @@ func (c *Config) SetFromFlag(key, value string) error {
 			c.sources = map[string]Source{}
 		}
 		c.sources["base_url"] = SourceFlag
+	case "account_id":
+		accountID, err := normalizeAccountID(value)
+		if err != nil {
+			return err
+		}
+		c.AccountID = accountID
+		if c.sources == nil {
+			c.sources = map[string]Source{}
+		}
+		c.sources["account_id"] = SourceFlag
 	}
 	return nil
 }
@@ -201,6 +236,7 @@ func (c *Config) SetFromFlag(key, value string) error {
 func (c *Config) Values() []Value {
 	return []Value{
 		{Value: c.BaseURL, Source: c.SourceOf("base_url")},
+		{Value: c.AccountID, Source: c.SourceOf("account_id")},
 	}
 }
 
@@ -221,22 +257,75 @@ func LoadOld() (*OldConfig, error) {
 	return &cfg, nil
 }
 
-func (c *Config) Save() error {
-	path := globalConfigPath()
+// SaveBaseURL stores the global server URL while preserving the global account default.
+func (c *Config) SaveBaseURL(baseURL string) error {
+	file, err := loadGlobalFileConfig()
+	if err != nil {
+		return err
+	}
+	file.BaseURL = baseURL
+	return saveGlobalConfig(file)
+}
 
+// SaveAccountID stores the default linked-account filter without replacing
+// other global settings with local, environment, or flag overrides.
+func (c *Config) SaveAccountID(accountID string) error {
+	accountID, err := normalizeAccountID(accountID)
+	if err != nil {
+		return err
+	}
+
+	file, err := loadGlobalFileConfig()
+	if err != nil {
+		return err
+	}
+	file.AccountID = accountID
+	return saveGlobalConfig(file)
+}
+
+func loadGlobalFileConfig() (fileConfig, error) {
+	path := globalConfigPath()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fileConfig{}, nil
+		}
+		return fileConfig{}, fmt.Errorf("could not read config %s: %w", path, err)
+	}
+
+	var file fileConfig
+	if err := json.Unmarshal(data, &file); err != nil {
+		return fileConfig{}, fmt.Errorf("could not parse config %s: %w", path, err)
+	}
+	return file, nil
+}
+
+func saveGlobalConfig(file fileConfig) error {
+	path := globalConfigPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return fmt.Errorf("could not create config directory: %w", err)
 	}
 
-	data, err := json.MarshalIndent(c, "", "  ")
+	data, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
 		return fmt.Errorf("could not marshal config: %w", err)
 	}
-
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("could not write config: %w", err)
 	}
 	return nil
+}
+
+func normalizeAccountID(accountID string) (string, error) {
+	accountID = strings.TrimSpace(accountID)
+	if strings.EqualFold(accountID, AllAccounts) {
+		return AllAccounts, nil
+	}
+	id, err := strconv.ParseInt(accountID, 10, 64)
+	if err != nil || id <= 0 {
+		return "", apierr.ErrUsage(fmt.Sprintf("account must be a positive ID or %q (got %q)", AllAccounts, accountID))
+	}
+	return strconv.FormatInt(id, 10), nil
 }
 
 func validateBaseURL(base string) error {

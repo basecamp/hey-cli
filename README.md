@@ -54,6 +54,26 @@ hey auth refresh  # force token refresh
 hey auth logout   # clear credentials
 ```
 
+### Linked accounts
+
+One HEY login exposes every mail account linked to that identity. List the available
+filters, persist a default, or select one for a single invocation:
+
+```bash
+hey accounts list                 # list All Accounts and each linked account
+hey accounts use 12345            # persist a linked account as the default mail filter
+hey accounts use all              # return to All Accounts
+hey --account 12345 boxes         # override the default for one invocation
+HEY_ACCOUNT_ID=12345 hey search "quarterly planning"
+```
+
+The default is `all`. Selection precedence is `--account`, `HEY_ACCOUNT_ID`, local
+`.hey/config.json`, global `~/.config/hey-cli/config.json`, then All Accounts. Explicit
+and persisted IDs are validated against the signed-in identity before mail requests, so
+an unavailable account fails closed. Compose and contact creation use an individually
+selected account; replies and forwards use the thread's account. Calendars, todos, habits, time
+tracking, and journal entries remain identity-wide.
+
 ## TUI
 
 Run `hey` to launch the interactive terminal UI.
@@ -66,7 +86,8 @@ Press Shift+O to open Contacts. Use Enter to view a contact, `a` to add, `e` to 
 
 ## CLI Commands
 
-All commands support `--json` for raw JSON output and `--base-url` to override the server URL.
+All commands support `--json` for raw JSON output, `--base-url` to override the server URL,
+and `--account <id|all>` to select a linked mail account.
 
 ### Email
 

@@ -16,11 +16,15 @@ import (
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/auth"
+	"github.com/basecamp/hey-cli/internal/config"
 	"github.com/basecamp/hey-cli/internal/output"
 	"github.com/basecamp/hey-cli/internal/version"
 )
 
-var sdk *hey.Client
+var (
+	rootSDK *hey.Client
+	sdk     *hey.Client
+)
 
 // cliAuthStrategy bridges the CLI's auth.Manager to the SDK's AuthStrategy interface.
 // This preserves session cookie support (which the SDK's BearerAuth doesn't have).
@@ -74,7 +78,44 @@ func initSDK(authMgr *auth.Manager, baseURL string) {
 	sdkStats = &statsHooks{}
 	opts = append(opts, hey.WithHooks(sdkStats))
 
-	sdk = hey.NewClient(sdkCfg, nil, opts...)
+	rootSDK = hey.NewClient(sdkCfg, nil, opts...)
+	sdk = rootSDK
+}
+
+func selectConfiguredAccount(ctx context.Context) error {
+	client, err := clientForAccountSelection(ctx, rootSDK, cfg.AccountID)
+	if err != nil {
+		return err
+	}
+	sdk = client
+	return nil
+}
+
+func clientForAccountSelection(ctx context.Context, client *hey.Client, accountID string) (*hey.Client, error) {
+	if accountID == "" || accountID == config.AllAccounts {
+		return client, nil
+	}
+
+	id, err := strconv.ParseInt(accountID, 10, 64)
+	if err != nil || id <= 0 {
+		return nil, output.ErrUsage(fmt.Sprintf("invalid account selection: %s", accountID))
+	}
+	scoped, err := client.ForAccount(ctx, id)
+	if err != nil {
+		return nil, convertSDKError(err)
+	}
+	return scoped, nil
+}
+
+func clientForResourceAccount(ctx context.Context, accountID int64) (*hey.Client, error) {
+	if accountID <= 0 {
+		return nil, output.ErrAPI(0, "thread did not identify its mail account")
+	}
+	scoped, err := sdk.ForAccount(ctx, accountID)
+	if err != nil {
+		return nil, convertSDKError(err)
+	}
+	return scoped, nil
 }
 
 // convertSDKError maps hey.Error to apierr.Error for CLI error display.

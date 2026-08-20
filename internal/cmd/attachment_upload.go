@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -31,6 +33,10 @@ type preparedAttachment struct {
 }
 
 func attachFiles(ctx context.Context, content string, paths []string) (string, error) {
+	return attachFilesWithClient(ctx, sdk, content, paths)
+}
+
+func attachFilesWithClient(ctx context.Context, client *hey.Client, content string, paths []string) (string, error) {
 	if len(paths) == 0 {
 		return content, nil
 	}
@@ -40,13 +46,17 @@ func attachFiles(ctx context.Context, content string, paths []string) (string, e
 		return "", err
 	}
 	defer closePreparedAttachments(attachments)
-	return attachPreparedFiles(ctx, content, attachments)
+	return attachPreparedFilesWithClient(ctx, client, content, attachments)
 }
 
 func attachPreparedFiles(ctx context.Context, content string, attachments []preparedAttachment) (string, error) {
+	return attachPreparedFilesWithClient(ctx, sdk, content, attachments)
+}
+
+func attachPreparedFilesWithClient(ctx context.Context, client *hey.Client, content string, attachments []preparedAttachment) (string, error) {
 	uploads := make([]uploadedAttachment, 0, len(attachments))
 	for _, attachment := range attachments {
-		upload, err := uploadAttachment(ctx, attachment)
+		upload, err := uploadAttachment(ctx, client, attachment)
 		if err != nil {
 			return "", err
 		}
@@ -106,8 +116,8 @@ func closePreparedAttachments(attachments []preparedAttachment) {
 	}
 }
 
-func uploadAttachment(ctx context.Context, attachment preparedAttachment) (uploadedAttachment, error) {
-	upload, err := sdk.Attachments().Upload(ctx, attachment.filename, attachment.contentType, attachment.file)
+func uploadAttachment(ctx context.Context, client *hey.Client, attachment preparedAttachment) (uploadedAttachment, error) {
+	upload, err := client.Attachments().Upload(ctx, attachment.filename, attachment.contentType, attachment.file)
 	if err != nil {
 		return uploadedAttachment{}, convertSDKError(err)
 	}

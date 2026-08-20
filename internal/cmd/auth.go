@@ -127,8 +127,10 @@ func newAuthStatusCommand() *cobra.Command {
 		Short: "Show authentication status",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			status := map[string]any{
-				"base_url":      cfg.BaseURL,
-				"authenticated": false,
+				"base_url":       cfg.BaseURL,
+				"mail_account":   cfg.AccountID,
+				"account_source": cfg.SourceOf("account_id"),
+				"authenticated":  false,
 			}
 
 			if os.Getenv("HEY_TOKEN") != "" {
@@ -138,6 +140,7 @@ func newAuthStatusCommand() *cobra.Command {
 				if writer.IsStyled() {
 					w := cmd.OutOrStdout()
 					fmt.Fprintf(w, "Base URL:  %s\n", cfg.BaseURL)
+					fmt.Fprintf(w, "Mail:      %s (%s)\n", cfg.AccountID, cfg.SourceOf("account_id"))
 					fmt.Fprintln(w, "Status:    Logged in (via HEY_TOKEN env var)")
 					return nil
 				}
@@ -150,6 +153,7 @@ func newAuthStatusCommand() *cobra.Command {
 				if writer.IsStyled() {
 					w := cmd.OutOrStdout()
 					fmt.Fprintf(w, "Base URL:  %s\n", cfg.BaseURL)
+					fmt.Fprintf(w, "Mail:      %s (%s)\n", cfg.AccountID, cfg.SourceOf("account_id"))
 					fmt.Fprintln(w, "Status:    Not logged in")
 					return nil
 				}
@@ -183,6 +187,7 @@ func newAuthStatusCommand() *cobra.Command {
 			if writer.IsStyled() {
 				w := cmd.OutOrStdout()
 				fmt.Fprintf(w, "Base URL:  %s\n", cfg.BaseURL)
+				fmt.Fprintf(w, "Mail:      %s (%s)\n", cfg.AccountID, cfg.SourceOf("account_id"))
 				fmt.Fprintln(w, "Status:    Logged in")
 
 				if creds.OAuthType != "" {

@@ -85,6 +85,9 @@ func TestComposeSubjectRequiredOnlyForANewMessage(t *testing.T) {
 	if !strings.Contains(sent.Content, "the reply body") {
 		t.Errorf("content = %q", sent.Content)
 	}
+	if sent.ActingSenderID != 42 {
+		t.Errorf("acting sender = %d, want thread account sender 42", sent.ActingSenderID)
+	}
 	if len(sent.To) != 1 || sent.To[0] != "jane@example.com" {
 		t.Errorf("to = %v, want the thread's recipients", sent.To)
 	}

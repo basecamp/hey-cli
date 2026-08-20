@@ -53,6 +53,10 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	replySDK, err := clientForResourceAccount(ctx, target.AccountID)
+	if err != nil {
+		return err
+	}
 
 	message := c.message
 	if message == "" && !stdinIsTerminal() {
@@ -73,11 +77,11 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	message, err = attachFiles(ctx, message, c.attachments)
+	message, err = attachFilesWithClient(ctx, replySDK, message, c.attachments)
 	if err != nil {
 		return err
 	}
-	if err = sdk.Entries().CreateReply(ctx, target.EntryID, message, target.Addressed.To, target.Addressed.CC, target.Addressed.BCC); err != nil {
+	if err = replySDK.Entries().CreateReply(ctx, target.EntryID, message, target.Addressed.To, target.Addressed.CC, target.Addressed.BCC); err != nil {
 		return convertSDKError(err)
 	}
 

@@ -24,14 +24,15 @@ const (
 
 // sentReply is what the server saw a reply arrive as.
 type sentReply struct {
-	Path    string
-	Content string
-	To      []string
-	CC      []string
-	BCC     []string
+	Path           string
+	Content        string
+	ActingSenderID int64
+	To             []string
+	CC             []string
+	BCC            []string
 }
 
-// threadReplyServer answers the two topic pages resolveThreadReply reads, the identity
+// threadReplyServer answers the typed topic, its rendered recipient header, the identity
 // the SDK needs for a sending operation, and the reply itself — recording it so a test
 // can say what actually went out.
 func threadReplyServer(t *testing.T, topicHTML, entriesHTML string) (*httptest.Server, *sentReply) {
@@ -40,8 +41,12 @@ func threadReplyServer(t *testing.T, topicHTML, entriesHTML string) (*httptest.S
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(r.URL.Path, "/replies"):
+			if got := r.URL.Query().Get("filtered_account_id"); got != "9" {
+				t.Errorf("reply account = %q, want 9", got)
+			}
 			var body struct {
-				Message struct {
+				ActingSenderID int64 `json:"acting_sender_id"`
+				Message        struct {
 					Content string `json:"content"`
 				} `json:"message"`
 				Entry struct {
@@ -55,16 +60,24 @@ func threadReplyServer(t *testing.T, topicHTML, entriesHTML string) (*httptest.S
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			sent.Path = r.URL.Path
 			sent.Content = body.Message.Content
+			sent.ActingSenderID = body.ActingSenderID
 			sent.To, sent.CC, sent.BCC = body.Entry.Addressed.Directly, body.Entry.Addressed.Copied, body.Entry.Addressed.Blindcopied
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
 			fmt.Fprint(w, `{}`)
 		case strings.Contains(r.URL.Path, "identity"):
+			if got := r.URL.Query().Get("filtered_account_id"); got != "" {
+				t.Errorf("identity account = %q, want unscoped", got)
+			}
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"id":1,"senders":[{"id":42,"default":true}]}`)
-		case strings.HasSuffix(r.URL.Path, "/entries"):
-			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprint(w, entriesHTML)
+			fmt.Fprint(w, `{"id":1,"accounts":[{"id":9,"status":"active"}],"senders":[{"id":42,"account_id":9,"default":true}]}`)
+		case r.URL.Path == "/topics/7.json":
+			w.Header().Set("Content-Type", "application/json")
+			if strings.Contains(entriesHTML, "12") {
+				fmt.Fprint(w, `{"id":7,"account_id":9,"entries":[{"id":11},{"id":12}]}`)
+			} else {
+				fmt.Fprint(w, `{"id":7,"account_id":9,"entries":[]}`)
+			}
 		default:
 			w.Header().Set("Content-Type", "text/html")
 			fmt.Fprint(w, topicHTML)
@@ -82,7 +95,11 @@ func withSDKPointedAt(t *testing.T, server *httptest.Server) {
 	t.Setenv("HEY_NO_KEYRING", "1")
 
 	previous := sdk
-	t.Cleanup(func() { sdk = previous })
+	previousRoot := rootSDK
+	t.Cleanup(func() {
+		sdk = previous
+		rootSDK = previousRoot
+	})
 	initSDK(nil, server.URL)
 }
 
@@ -98,6 +115,9 @@ func TestResolveThreadReply(t *testing.T) {
 	// HEY replies to the last entry on the thread, not the first.
 	if target.EntryID != 12 {
 		t.Errorf("entry = %d, want the last one (12)", target.EntryID)
+	}
+	if target.AccountID != 9 {
+		t.Errorf("account = %d, want 9", target.AccountID)
 	}
 	if len(target.Addressed.To) != 1 || target.Addressed.To[0] != "jane@example.com" {
 		t.Errorf("to = %v", target.Addressed.To)

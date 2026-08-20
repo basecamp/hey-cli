@@ -23,6 +23,12 @@ func TestDefaultConfig(t *testing.T) {
 	if src := cfg.SourceOf("base_url"); src != SourceDefault {
 		t.Errorf("source = %q, want %q", src, SourceDefault)
 	}
+	if cfg.AccountID != AllAccounts {
+		t.Errorf("AccountID = %q, want %q", cfg.AccountID, AllAccounts)
+	}
+	if src := cfg.SourceOf("account_id"); src != SourceDefault {
+		t.Errorf("account source = %q, want %q", src, SourceDefault)
+	}
 }
 
 func TestGlobalConfigOverride(t *testing.T) {
@@ -90,6 +96,123 @@ func TestFlagOverride(t *testing.T) {
 	}
 	if src := cfg.SourceOf("base_url"); src != SourceFlag {
 		t.Errorf("source = %q, want %q", src, SourceFlag)
+	}
+}
+
+func TestAccountIDPrecedence(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, "config"))
+	t.Setenv("HEY_BASE_URL", "")
+	t.Setenv("HEY_ACCOUNT_ID", "303")
+	if err := os.MkdirAll(filepath.Join(tmp, "workspace", ".hey"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(filepath.Join(tmp, "workspace"))
+
+	globalDir := filepath.Join(tmp, "config", configDirName)
+	if err := os.MkdirAll(globalDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(globalDir, configFile), []byte(`{"account_id":"101"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "workspace", ".hey", configFile), []byte(`{"account_id":"202"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AccountID != "303" || cfg.SourceOf("account_id") != SourceEnv {
+		t.Fatalf("environment account = %q (%s), want 303 (env)", cfg.AccountID, cfg.SourceOf("account_id"))
+	}
+	if err := cfg.SetFromFlag("account_id", "00404"); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AccountID != "404" || cfg.SourceOf("account_id") != SourceFlag {
+		t.Fatalf("flag account = %q (%s), want 404 (flag)", cfg.AccountID, cfg.SourceOf("account_id"))
+	}
+}
+
+func TestInvalidAccountID(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HEY_ACCOUNT_ID", "personal")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load returned no error for invalid account")
+	}
+}
+
+func TestSaveAccountIDPreservesGlobalSettings(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+	t.Setenv("HEY_BASE_URL", "https://env.hey.com")
+	t.Setenv("HEY_ACCOUNT_ID", "")
+
+	dir := filepath.Join(tmp, configDirName)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, configFile), []byte(`{"base_url":"https://global.hey.com"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SaveAccountID("42"); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, configFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file fileConfig
+	if err := json.Unmarshal(data, &file); err != nil {
+		t.Fatal(err)
+	}
+	if file.BaseURL != "https://global.hey.com" || file.AccountID != "42" {
+		t.Fatalf("saved config = %#v", file)
+	}
+}
+
+func TestSaveBaseURLPreservesGlobalAccount(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+	t.Setenv("HEY_BASE_URL", "")
+	t.Setenv("HEY_ACCOUNT_ID", "202")
+
+	dir := filepath.Join(tmp, configDirName)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, configFile), []byte(`{"base_url":"https://old.hey.com","account_id":"101"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SetFromFlag("base_url", "https://new.hey.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SaveBaseURL(cfg.BaseURL); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, configFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file fileConfig
+	if err := json.Unmarshal(data, &file); err != nil {
+		t.Fatal(err)
+	}
+	if file.BaseURL != "https://new.hey.com" || file.AccountID != "101" {
+		t.Fatalf("saved config = %#v", file)
 	}
 }
 

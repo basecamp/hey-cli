@@ -25,7 +25,7 @@ var curatedCategories = []struct {
 	},
 	{
 		heading: "AUTH & CONFIG",
-		names:   []string{"auth", "config", "setup", "doctor"},
+		names:   []string{"auth", "accounts", "config", "setup", "doctor"},
 	},
 }
 
@@ -102,6 +102,7 @@ func renderRootHelp(w io.Writer, cmd *cobra.Command) {
 		desc  string
 	}
 	flags := []flagEntry{
+		{"", "--account", "Select a linked mail account ID or all"},
 		{"", "--json", "Output JSON with metadata"},
 		{"", "--markdown", "Output as Markdown"},
 		{"", "--quiet", "Output result data only"},
@@ -244,6 +245,7 @@ func renderCommandHelp(cmd *cobra.Command) {
 // salientRootFlags is the curated set of root-level global flags shown in
 // INHERITED FLAGS for subcommands.
 var salientRootFlags = map[string]bool{
+	"account":  true,
 	"json":     true,
 	"markdown": true,
 	"quiet":    true,

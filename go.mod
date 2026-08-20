@@ -6,7 +6,7 @@ require (
 	charm.land/bubbles/v2 v2.1.1
 	charm.land/bubbletea/v2 v2.0.8
 	charm.land/lipgloss/v2 v2.0.6
-	github.com/basecamp/hey-sdk/go v0.5.0
+	github.com/basecamp/hey-sdk/go v0.6.0
 	github.com/mattn/go-runewidth v0.0.27
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10

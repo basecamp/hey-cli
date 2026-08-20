@@ -13,12 +13,13 @@ import (
 )
 
 type sentForward struct {
-	Requests []string
-	Subject  string
-	Content  string
-	To       []string
-	CC       []string
-	BCC      []string
+	Requests       []string
+	ActingSenderID int64
+	Subject        string
+	Content        string
+	To             []string
+	CC             []string
+	BCC            []string
 }
 
 func forwardServer(t *testing.T, entriesJSON string) (*httptest.Server, *sentForward) {
@@ -29,14 +30,24 @@ func forwardServer(t *testing.T, entriesJSON string) (*httptest.Server, *sentFor
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/topics/7.json":
-			fmt.Fprintf(w, `{"id":7,"name":"Quarterly planning","entries":%s}`, entriesJSON)
+			fmt.Fprintf(w, `{"id":7,"account_id":9,"name":"Quarterly planning","entries":%s}`, entriesJSON)
 		case "/entries/12/forwards/new.json":
+			if got := r.URL.Query().Get("filtered_account_id"); got != "9" {
+				t.Errorf("forward draft account = %q, want 9", got)
+			}
 			fmt.Fprint(w, `{"subject":"Fwd: Quarterly planning","content":"<div>Quoted message</div>"}`)
 		case "/identity.json":
-			fmt.Fprint(w, `{"id":1,"senders":[{"id":42,"default":true}]}`)
+			if got := r.URL.Query().Get("filtered_account_id"); got != "" {
+				t.Errorf("identity account = %q, want unscoped", got)
+			}
+			fmt.Fprint(w, `{"id":1,"accounts":[{"id":9,"status":"active"}],"senders":[{"id":42,"account_id":9,"default":true}]}`)
 		case "/messages.json":
+			if got := r.URL.Query().Get("filtered_account_id"); got != "9" {
+				t.Errorf("forward message account = %q, want 9", got)
+			}
 			var body struct {
-				Message struct {
+				ActingSenderID int64 `json:"acting_sender_id"`
+				Message        struct {
 					Subject string `json:"subject"`
 					Content string `json:"content"`
 				} `json:"message"`
@@ -49,6 +60,7 @@ func forwardServer(t *testing.T, entriesJSON string) (*httptest.Server, *sentFor
 				} `json:"entry"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
+			sent.ActingSenderID = body.ActingSenderID
 			sent.Subject = body.Message.Subject
 			sent.Content = body.Message.Content
 			sent.To = body.Entry.Addressed.Directly
@@ -79,12 +91,15 @@ func TestForwardSendsLatestEntryDraft(t *testing.T) {
 
 	wantRequests := []string{
 		"GET /topics/7.json",
-		"GET /entries/12/forwards/new.json",
 		"GET /identity.json",
+		"GET /entries/12/forwards/new.json",
 		"POST /messages.json",
 	}
 	if strings.Join(sent.Requests, ",") != strings.Join(wantRequests, ",") {
 		t.Errorf("requests = %v, want %v", sent.Requests, wantRequests)
+	}
+	if sent.ActingSenderID != 42 {
+		t.Errorf("acting sender = %d, want thread account sender 42", sent.ActingSenderID)
 	}
 	if sent.Subject != "Fwd: Quarterly planning" {
 		t.Errorf("subject = %q", sent.Subject)

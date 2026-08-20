@@ -20,6 +20,7 @@ type attachmentServerState struct {
 	mu             sync.Mutex
 	directUploads  int
 	storageUploads int
+	uploadAccounts []string
 	sentContents   []string
 	events         []string
 	blobStatus     int
@@ -66,6 +67,7 @@ func attachmentServer(t *testing.T) (*httptest.Server, *attachmentServerState) {
 		case r.Method == http.MethodPost && r.URL.Path == "/rails/active_storage/direct_uploads.json":
 			state.mu.Lock()
 			state.directUploads++
+			state.uploadAccounts = append(state.uploadAccounts, r.URL.Query().Get("filtered_account_id"))
 			state.events = append(state.events, "reserve")
 			state.mu.Unlock()
 			_, _ = fmt.Fprintf(w, `{
@@ -80,14 +82,19 @@ func attachmentServer(t *testing.T) (*httptest.Server, *attachmentServerState) {
 			state.mu.Unlock()
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodGet && r.URL.Path == "/identity.json":
-			_, _ = w.Write([]byte(`{"id":1,"senders":[{"id":42,"default":true}]}`))
+			if got := r.URL.Query().Get("filtered_account_id"); got != "" {
+				t.Errorf("identity account = %q, want unscoped", got)
+			}
+			_, _ = w.Write([]byte(`{"id":1,"accounts":[{"id":9,"status":"active"}],"senders":[{"id":42,"account_id":9,"default":true}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/topics/7.json":
+			_, _ = w.Write([]byte(`{"id":7,"account_id":9,"entries":[{"id":11},{"id":12}]}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/topics/7":
 			w.Header().Set("Content-Type", "text/html")
 			_, _ = w.Write([]byte(topicWithRecipients))
-		case r.Method == http.MethodGet && r.URL.Path == "/topics/7/entries":
-			w.Header().Set("Content-Type", "text/html")
-			_, _ = w.Write([]byte(topicEntries))
 		case r.Method == http.MethodPost && r.URL.Path == "/entries/12/replies.json":
+			if got := r.URL.Query().Get("filtered_account_id"); got != "9" {
+				t.Errorf("reply account = %q, want 9", got)
+			}
 			var body struct {
 				Message struct {
 					Content string `json:"content"`
@@ -328,6 +335,9 @@ func TestReplyUploadsAttachmentsBeforeSending(t *testing.T) {
 	defer state.mu.Unlock()
 	if strings.Join(state.events, ",") != "reserve,upload,send" || len(state.sentContents) != 1 || !strings.Contains(state.sentContents[0], `sgid="sgid-upload"`) {
 		t.Errorf("reply attachment state = %+v", state)
+	}
+	if len(state.uploadAccounts) != 1 || state.uploadAccounts[0] != "9" {
+		t.Errorf("reply upload accounts = %v, want [9]", state.uploadAccounts)
 	}
 }
 

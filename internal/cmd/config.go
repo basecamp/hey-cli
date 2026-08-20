@@ -44,7 +44,7 @@ func newConfigSetCommand() *cobra.Command {
 				return output.ErrUsage(fmt.Sprintf("unknown config key: %s (available: base_url)", key))
 			}
 
-			if err := cfg.Save(); err != nil {
+			if err := cfg.SaveBaseURL(cfg.BaseURL); err != nil {
 				return err
 			}
 
@@ -69,6 +69,11 @@ func newConfigShowCommand() *cobra.Command {
 					"key":    "base_url",
 					"value":  cfg.BaseURL,
 					"source": string(cfg.SourceOf("base_url")),
+				},
+				{
+					"key":    "account_id",
+					"value":  cfg.AccountID,
+					"source": string(cfg.SourceOf("account_id")),
 				},
 			}
 

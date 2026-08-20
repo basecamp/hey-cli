@@ -120,12 +120,14 @@ CALENDAR & TASKS
   journal     Read and write journal entries
 
 AUTH & CONFIG
-  auth    Sign in, sign out, and check login status
-  config  View and change settings
-  setup   Set up HEY for first use
-  doctor  Find login and configuration problems
+  auth      Sign in, sign out, and check login status
+  accounts  List and select linked mail accounts
+  config    View and change settings
+  setup     Set up HEY for first use
+  doctor    Find login and configuration problems
 
 FLAGS
+      --account    Select a linked mail account ID or all
       --json       Output JSON with metadata
       --markdown   Output as Markdown
       --quiet      Output result data only

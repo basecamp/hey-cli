@@ -13,16 +13,22 @@ import (
 // the recipients are not optional.
 type threadReplyTarget struct {
 	EntryID   int64
+	AccountID int64
 	Addressed *htmlutil.TopicAddressed
 }
 
-// resolveThreadReply works out what replying to a thread means: the last entry on it, and
-// who that entry went to.
-//
-// It still reads the topic's HTML pages. The SDK gained typed reads for both in v0.4.0 —
-// Topics.Get carries the topic's entries — and this is the one place to change when the
-// CLI moves onto them.
+// resolveThreadReply returns the thread's latest entry, linked account, and addressed
+// recipients. The typed topic carries entry and account data; the rendered topic header
+// carries the recipient groups HEY expects on a reply.
 func resolveThreadReply(ctx context.Context, threadID int64) (*threadReplyTarget, error) {
+	topic, err := sdk.Topics().Get(ctx, threadID)
+	if err != nil {
+		return nil, convertSDKError(err)
+	}
+	if topic == nil || len(topic.Entries) == 0 {
+		return nil, output.ErrNotFound("entries for thread", fmt.Sprintf("%d", threadID))
+	}
+
 	topicResp, err := sdk.GetHTML(ctx, fmt.Sprintf("/topics/%d", threadID))
 	if err != nil {
 		return nil, convertSDKError(err)
@@ -32,14 +38,9 @@ func resolveThreadReply(ctx context.Context, threadID int64) (*threadReplyTarget
 		return nil, output.ErrUsage("could not determine thread recipients")
 	}
 
-	entriesResp, err := sdk.GetHTML(ctx, fmt.Sprintf("/topics/%d/entries", threadID))
-	if err != nil {
-		return nil, convertSDKError(err)
-	}
-	entries := htmlutil.ParseTopicEntriesHTML(string(entriesResp.Data))
-	if len(entries) == 0 {
-		return nil, output.ErrNotFound("entries for thread", fmt.Sprintf("%d", threadID))
-	}
-
-	return &threadReplyTarget{EntryID: entries[len(entries)-1].ID, Addressed: addressed}, nil
+	return &threadReplyTarget{
+		EntryID:   topic.Entries[len(topic.Entries)-1].Id,
+		AccountID: topic.AccountId,
+		Addressed: addressed,
+	}, nil
 }

@@ -65,9 +65,13 @@ func (c *forwardCommand) run(cmd *cobra.Command, args []string) error {
 	if topic == nil || len(topic.Entries) == 0 {
 		return output.ErrNotFound("entries for thread", args[0])
 	}
+	forwardSDK, err := clientForResourceAccount(ctx, topic.AccountId)
+	if err != nil {
+		return err
+	}
 	entryID := topic.Entries[len(topic.Entries)-1].Id
 
-	draft, err := sdk.Entries().NewForward(ctx, entryID)
+	draft, err := forwardSDK.Entries().NewForward(ctx, entryID)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -76,7 +80,7 @@ func (c *forwardCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	content := htmlutil.PrependText(draft.Content, c.message)
-	if err := sdk.Messages().Create(ctx, draft.Subject, content, to, cc, bcc); err != nil {
+	if err := forwardSDK.Messages().Create(ctx, draft.Subject, content, to, cc, bcc); err != nil {
 		return convertSDKError(err)
 	}
 
