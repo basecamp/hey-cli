@@ -1155,6 +1155,18 @@ func TestExtractTarGzMember(t *testing.T) {
 	assertFileContent(t, dest, []byte("the-binary"))
 }
 
+// Some tar producers prefix root entries with "./" — that is still literally
+// a root entry and must extract.
+func TestExtractTarGzToleratesDotSlashRootMember(t *testing.T) {
+	archive := writeArchiveFile(t, buildTarGz(t, []tarEntry{
+		{name: "./hey", body: []byte("the-binary")},
+	}))
+	dest := filepath.Join(t.TempDir(), "out")
+
+	mustNoError(t, extractTarGzMember(archive, "hey", dest))
+	assertFileContent(t, dest, []byte("the-binary"))
+}
+
 func TestExtractTarGzRejectsBadArchives(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -1174,6 +1186,11 @@ func TestExtractTarGzRejectsBadArchives(t *testing.T) {
 		{
 			name:    "path traversal spelling",
 			entries: []tarEntry{{name: "../hey", body: []byte("escape")}},
+			wantErr: "does not contain",
+		},
+		{
+			name:    "dot-segment alias of the root member",
+			entries: []tarEntry{{name: "nested/../hey", body: []byte("aliased")}},
 			wantErr: "does not contain",
 		},
 		{
@@ -1255,6 +1272,11 @@ func TestExtractZipRejectsBadArchives(t *testing.T) {
 		{
 			name:    "path traversal spelling",
 			entries: []zipEntry{{name: "../hey.exe", body: []byte("escape")}},
+			wantErr: "does not contain",
+		},
+		{
+			name:    "dot-segment alias of the root member",
+			entries: []zipEntry{{name: "nested/../hey.exe", body: []byte("aliased")}},
 			wantErr: "does not contain",
 		},
 	}

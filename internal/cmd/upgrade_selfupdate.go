@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -507,6 +506,14 @@ func upgradeRandSuffix() string {
 	return hex.EncodeToString(b[:])
 }
 
+// isArchiveRootMember reports whether an archive entry name denotes the
+// expected root member literally. Only the conventional "./" prefix is
+// tolerated — dot-segment aliases such as "nested/../hey", which path.Clean
+// would collapse to the member, are not root entries and must not match.
+func isArchiveRootMember(name, member string) bool {
+	return name == member || name == "./"+member
+}
+
 // extractTarGzMember writes exactly the archive-root member named `member` to
 // dest. Hardened: link and symlink entries anywhere in the archive are
 // rejected, duplicate members are rejected, and the uncompressed size is
@@ -537,7 +544,7 @@ func extractTarGzMember(archivePath, member, dest string) error {
 		if hdr.Typeflag == tar.TypeLink || hdr.Typeflag == tar.TypeSymlink {
 			return fmt.Errorf("archive contains link entry %q — refusing to extract", hdr.Name)
 		}
-		if hdr.Typeflag != tar.TypeReg || path.Clean(hdr.Name) != member {
+		if hdr.Typeflag != tar.TypeReg || !isArchiveRootMember(hdr.Name, member) {
 			continue
 		}
 		if found {
@@ -566,7 +573,7 @@ func extractZipMember(archivePath, member, dest string) error {
 		if zf.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("archive contains symlink entry %q — refusing to extract", zf.Name)
 		}
-		if zf.FileInfo().IsDir() || path.Clean(zf.Name) != member {
+		if zf.FileInfo().IsDir() || !isArchiveRootMember(zf.Name, member) {
 			continue
 		}
 		if found {
