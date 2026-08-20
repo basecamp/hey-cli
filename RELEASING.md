@@ -36,8 +36,9 @@ make release VERSION=0.2.0 DRY_RUN=1
 Before touching anything it fetches tags and refuses a tag that already exists at
 another commit, or a stable version older than the latest stable tag, so a
 rejected release leaves main untouched. Pushing a stable tag by hand skips the
-metadata commit; GoReleaser then fails the release at its plugin stamp check
-rather than publishing stale plugin metadata.
+metadata commit; GoReleaser then fails the release at its stable metadata check
+(`scripts/check-stable-metadata.sh`, covering the plugin stamp and the Nix
+package version) rather than publishing stale metadata.
 
 The [release workflow](.github/workflows/release.yml) then runs **against the tag
 SHA** (which is why the prep commit is pushed first):
@@ -46,7 +47,8 @@ SHA** (which is why the prep commit is pushed first):
   snapshot, race detector, govulncheck, CLI surface compatibility vs the previous tag
 - `security`: gitleaks, Trivy, gosec
 - `release`: preflights the macOS signing secrets, verifies the tag is on main,
-  then GoReleaser checks that a stable tag carries the plugin stamp, builds
+  then GoReleaser checks that a stable tag carries the plugin stamp and the
+  Nix package version, builds
   darwin/linux/windows/freebsd/openbsd × amd64/arm64 and deb/rpm/apk packages,
   signs and notarizes macOS binaries, signs `checksums.txt` with cosign (keyless,
   `checksums.txt.bundle`), generates SBOMs, publishes the GitHub release, and
@@ -182,8 +184,8 @@ make test-release                      # goreleaser snapshot, no publish/sign
 ```
 
 `make test-release` needs `syft` on PATH for the SBOM step (`mise use syft`); it
-blanks the signing env so notarization is skipped, and the plugin stamp check
-does not run for snapshots.
+blanks the signing env so notarization is skipped, and the stable metadata
+check does not run for snapshots.
 
 ## Distribution channels
 

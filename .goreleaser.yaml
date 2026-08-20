@@ -5,13 +5,15 @@ project_name: hey
 before:
   hooks:
     - sh -c 'mkdir -p completions && go run ./cmd/hey completion bash > completions/hey.bash && go run ./cmd/hey completion zsh > completions/_hey && go run ./cmd/hey completion fish > completions/hey.fish'
-    # release.sh commits the plugin stamp to main before tagging a stable
-    # release. Nothing here can repair a tag pushed by hand without that commit
-    # (plugin.json ships from the tag, not from these archives), so a stable
-    # tag whose metadata disagrees with its version fails before anything is
-    # published. Prereleases and snapshots leave plugin metadata on the latest
-    # stable version.
-    - sh -c '{{ if or .Prerelease .IsSnapshot }}echo "Skipping plugin version check for {{ .Version }}"{{ else }}scripts/stamp-plugin-version.sh --check {{ .Version }}{{ end }}'
+    # release.sh commits the stable metadata stamps (plugin.json and
+    # nix/package.nix) to main before tagging a stable release. Nothing here
+    # can repair a tag pushed by hand without that commit (both files ship
+    # from the tag, not from these archives), so a stable tag whose metadata
+    # disagrees with its version fails before anything is published — the
+    # post-publication nix-verify job would otherwise be the first to notice,
+    # after the release is already public. Prereleases and snapshots leave
+    # stable metadata on the latest stable version.
+    - sh -c '{{ if or .Prerelease .IsSnapshot }}echo "Skipping stable metadata check for {{ .Version }}"{{ else }}scripts/check-stable-metadata.sh {{ .Version }}{{ end }}'
 
 builds:
   - id: hey
