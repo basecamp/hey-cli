@@ -255,3 +255,28 @@ STUB
   [ "$status" -eq 1 ]
   [[ "$output" == *"Invalid version"* ]]
 }
+
+@test "a failed release commit restores the metadata, index included, and the next attempt is not blocked" {
+  cat > .git/hooks/pre-commit <<'HOOK'
+#!/bin/sh
+echo "pre-commit: gpg signing failed" >&2
+exit 1
+HOOK
+  chmod +x .git/hooks/pre-commit
+
+  run scripts/release.sh 0.2.0
+  [ "$status" -eq 1 ]
+
+  # git add ran before the commit failed; the rollback must unstage too.
+  [ -z "$(git status --porcelain)" ]
+  grep -q 'version = "0.1.0"' nix/package.nix
+  [ "$(plugin_version)" = "0.1.0" ]
+  [ "$(git rev-parse HEAD)" = "$BASE" ]
+  [ "$(origin rev-parse main)" = "$BASE" ]
+  [ ! -s "$PUSH_LOG" ]
+
+  rm .git/hooks/pre-commit
+  run scripts/release.sh 0.2.0
+  [ "$status" -eq 0 ]
+  [ "$(origin rev-parse v0.2.0^{commit})" = "$(origin rev-parse main)" ]
+}

@@ -69,10 +69,13 @@ fi
 # From here on the tree is known clean, so on failure the stable metadata
 # files can be checked out to undo any half-made edits — a failed nix update
 # or plugin stamp must not leave a dirty tree that blocks the next attempt.
-# Once the release prep commit lands, the checkout is a no-op.
+# Checkout from HEAD, not the index: a failed release commit (hook, signing)
+# leaves the files staged, and a plain `git checkout --` would restore the
+# staged copies and leave the index dirty. Once the release prep commit
+# lands, HEAD contains the new metadata and the checkout is a no-op.
 restore_release_metadata() {
   if [[ "${1:-1}" -ne 0 ]]; then
-    git checkout --quiet -- nix/package.nix .claude-plugin/plugin.json || true
+    git checkout --quiet HEAD -- nix/package.nix .claude-plugin/plugin.json || true
   fi
 }
 trap 'restore_release_metadata "$?"' EXIT
