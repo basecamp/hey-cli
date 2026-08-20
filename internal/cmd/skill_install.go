@@ -17,7 +17,26 @@ import (
 const (
 	skillFilename        = "SKILL.md"
 	installedVersionFile = ".installed-version"
+
+	// ownershipMarkerFile marks a skill directory as written by hey-cli.
+	// Replacement and automatic refresh require it: a directory that merely
+	// looks like ours (a user-authored skill happens to be one SKILL.md too)
+	// must never be destroyed or rewritten.
+	ownershipMarkerFile = ".managed-by-hey-cli"
 )
+
+// writeOwnershipMarker stamps dir as hey-cli-managed. Best-effort: a failed
+// stamp only means later automatic maintenance declines to touch the dir.
+func writeOwnershipMarker(dir string) {
+	content := []byte("This skill is managed by hey-cli. Manual edits will be overwritten on upgrade.\n")
+	_ = os.WriteFile(filepath.Join(dir, ownershipMarkerFile), content, 0o644) // #nosec G306 -- not a secret
+}
+
+// ownedSkillDir reports whether hey-cli wrote the skill directory.
+func ownedSkillDir(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, ownershipMarkerFile))
+	return err == nil
+}
 
 func newSkillInstallCommand() *cobra.Command {
 	return &cobra.Command{
@@ -94,8 +113,10 @@ func installSkillFiles() (string, error) {
 		return "", fmt.Errorf("writing skill file: %w", err)
 	}
 
-	// Best-effort: stamp installed version so doctor can spot staleness.
+	// Best-effort: stamp installed version so doctor can spot staleness, and
+	// ownership so replacement and refresh can prove this directory is ours.
 	_ = os.WriteFile(filepath.Join(skillDir, installedVersionFile), []byte(version.Version), 0o644) // #nosec G306 -- not a secret
+	writeOwnershipMarker(skillDir)
 
 	return skillFile, nil
 }
@@ -138,9 +159,10 @@ var makeSkillSymlink = os.Symlink
 
 // removeExistingSkillLink clears the way for a fresh Claude skill link. The
 // interesting case is a real directory: a prior run's copy fallback leaves
-// one holding only our own files, and it must be replaceable on the next run
-// (os.Remove fails on a non-empty directory). Recognize exactly that shape
-// and remove it; any other populated directory is user content and an error.
+// one behind, and it must be replaceable on the next run (os.Remove fails on
+// a non-empty directory). Only a directory carrying our ownership marker is
+// removed — shape is not ownership, so a user-authored skill that happens to
+// be a single SKILL.md stays untouched and errors instead.
 func removeExistingSkillLink(path string) error {
 	err := os.Remove(path)
 	if err == nil || os.IsNotExist(err) {
@@ -155,8 +177,10 @@ func removeExistingSkillLink(path string) error {
 	return nil
 }
 
-// isManagedSkillCopy reports whether path is a plain directory containing
-// only the files our copy fallback writes (SKILL.md and its version stamp).
+// isManagedSkillCopy reports whether path is a plain directory hey-cli's copy
+// fallback wrote: it carries the ownership marker and nothing but the files
+// we write. Both conditions are required — the marker proves provenance, and
+// the allowlist keeps anything a user added alongside it safe.
 func isManagedSkillCopy(path string) bool {
 	info, err := os.Lstat(path)
 	if err != nil || !info.IsDir() {
@@ -166,20 +190,20 @@ func isManagedSkillCopy(path string) bool {
 	if err != nil {
 		return false
 	}
-	sawSkill := false
+	sawMarker := false
 	for _, entry := range entries {
 		if entry.IsDir() {
 			return false
 		}
 		switch entry.Name() {
-		case skillFilename:
-			sawSkill = true
-		case installedVersionFile:
+		case ownershipMarkerFile:
+			sawMarker = true
+		case skillFilename, installedVersionFile:
 		default:
 			return false
 		}
 	}
-	return sawSkill
+	return sawMarker
 }
 
 // installSkillToCodex copies the embedded SKILL.md into Codex's skills
@@ -201,6 +225,7 @@ func installSkillToCodex() (string, error) {
 	if err := os.WriteFile(skillPath, data, 0o644); err != nil { // #nosec G306 -- installed skills are intentionally user-readable
 		return "", fmt.Errorf("writing Codex skill file: %w", err)
 	}
+	writeOwnershipMarker(filepath.Dir(skillPath))
 	return skillPath, nil
 }
 
@@ -232,6 +257,10 @@ func copySkillFiles(src, dst string) error {
 	if err := os.MkdirAll(dst, 0o755); err != nil { // #nosec G301 -- installed skills contain public documentation
 		return err
 	}
+	// Claim the directory first: removeExistingSkillLink already proved dst is
+	// ours to (re)create, and marking before copying means a partially copied
+	// directory is still recognized and replaced on the next attempt.
+	writeOwnershipMarker(dst)
 	entries, err := os.ReadDir(src)
 	if err != nil {
 		return err

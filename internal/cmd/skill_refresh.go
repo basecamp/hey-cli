@@ -48,26 +48,29 @@ func refreshSkillsIfVersionChanged() bool {
 		return false
 	}
 
-	refreshed := refreshInstalledSkills()
+	updated, failed := refreshInstalledSkills()
 
 	// Repair the Claude symlink if broken (e.g. baseline dir was recreated).
 	if harness.DetectClaude() {
 		repairClaudeSkillLink()
 	}
 
-	// Update the sentinel only when no refresh was needed or it succeeded.
-	// On transient failure, leave it stale so the next run retries.
-	if !baselineSkillInstalled() || refreshed {
+	// Advance the sentinel unless something failed: nothing owned to refresh
+	// and a fully successful refresh both mean this version is done. On
+	// transient failure, leave it stale so the next run retries.
+	if failed == 0 {
 		// 0o700: ConfigDir can hold credentials.json; keep it owner-only.
 		_ = os.MkdirAll(filepath.Dir(sentinelPath), 0o700)
 		_ = os.WriteFile(sentinelPath, []byte(version.Version), 0o644) // #nosec G306 -- not a secret
 	}
 
-	return refreshed
+	return updated > 0 && failed == 0
 }
 
 // skillRefreshLocations lists every absolute path an agent reads the hey
-// skill from. Only existing files are refreshed — refresh never installs.
+// skill from. Only existing files in directories hey-cli owns (per the
+// ownership marker) are refreshed — refresh never installs, and never
+// rewrites a skill it cannot prove it wrote.
 func skillRefreshLocations() []string {
 	var locations []string
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
@@ -82,18 +85,23 @@ func skillRefreshLocations() []string {
 	return locations
 }
 
-func refreshInstalledSkills() bool {
+func refreshInstalledSkills() (updated, failed int) {
 	embedded, err := skills.FS.ReadFile("hey/SKILL.md")
 	if err != nil {
-		return false
+		return 0, 1
 	}
 
-	updated, failed := 0, 0
 	for _, location := range skillRefreshLocations() {
 		if _, statErr := os.Stat(location); statErr != nil {
 			if !os.IsNotExist(statErr) {
 				failed++ // permission or IO error on a known location
 			}
+			continue
+		}
+		// Ownership gate: a SKILL.md in an unmarked directory is somebody
+		// else's work — a hand-authored skill that happens to share the
+		// name — and is left exactly as found.
+		if !ownedSkillDir(filepath.Dir(location)) {
 			continue
 		}
 		if writeErr := os.WriteFile(location, embedded, 0o644); writeErr == nil { // #nosec G306 -- installed skills are intentionally user-readable
@@ -103,15 +111,18 @@ func refreshInstalledSkills() bool {
 		}
 	}
 
-	// Stamp the installed version in the baseline directory only on full success.
+	// Stamp the installed version in the baseline directory only on full
+	// success, and only when that directory is ours to stamp.
 	if failed == 0 && updated > 0 {
 		if home, err := os.UserHomeDir(); err == nil {
-			stamp := filepath.Join(home, ".agents", "skills", "hey", installedVersionFile)
-			_ = os.WriteFile(stamp, []byte(version.Version), 0o644) // #nosec G306 -- not a secret
+			baselineDir := filepath.Join(home, ".agents", "skills", "hey")
+			if ownedSkillDir(baselineDir) {
+				_ = os.WriteFile(filepath.Join(baselineDir, installedVersionFile), []byte(version.Version), 0o644) // #nosec G306 -- not a secret
+			}
 		}
 	}
 
-	return updated > 0 && failed == 0
+	return updated, failed
 }
 
 // repairClaudeSkillLink repairs a broken symlink at ~/.claude/skills/hey.

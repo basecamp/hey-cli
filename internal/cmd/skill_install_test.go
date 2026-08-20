@@ -105,3 +105,36 @@ func TestSkillInstallCopyFallbackIsIdempotent(t *testing.T) {
 		}
 	}
 }
+
+// Shape is not ownership: a user-authored ~/.claude/skills/hey holding only a
+// SKILL.md — the exact shape our copy fallback produces, minus the marker —
+// must be refused and preserved, not silently replaced by a symlink.
+func TestSkillInstallRefusesUnmarkedSkillOnlyDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	skillDir := filepath.Join(home, ".claude", "skills", "hey")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	custom := "# my own hey skill"
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(custom), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	previousWriter := writer
+	t.Cleanup(func() { writer = previousWriter })
+	writer = output.New(output.Options{Format: output.FormatJSON, Stdout: &bytes.Buffer{}})
+
+	if err := runSkillInstall(newSkillInstallCommand(), nil); err == nil {
+		t.Fatal("install replaced a user-authored skill directory")
+	}
+	info, err := os.Lstat(skillDir)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("user directory replaced: %v %v", info, err)
+	}
+	data, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil || string(data) != custom {
+		t.Fatalf("user skill content changed: %q, %v", data, err)
+	}
+}

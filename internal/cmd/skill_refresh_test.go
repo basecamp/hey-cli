@@ -19,15 +19,26 @@ func refreshFixture(t *testing.T) (home string) {
 	return home
 }
 
+// installStaleSkill lays down a hey-cli-written baseline install (marker and
+// all) whose content is stale.
 func installStaleSkill(t *testing.T, home string) string {
 	t.Helper()
-	skillDir := filepath.Join(home, ".agents", "skills", "hey")
-	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+	return writeSkillFixture(t, filepath.Join(home, ".agents", "skills", "hey"), "# stale skill", true)
+}
+
+// writeSkillFixture writes dir/SKILL.md with the given content, marked as
+// hey-cli-managed or not.
+func writeSkillFixture(t *testing.T, dir, content string, managed bool) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	skillPath := filepath.Join(skillDir, "SKILL.md")
-	if err := os.WriteFile(skillPath, []byte("# stale skill"), 0o644); err != nil {
+	skillPath := filepath.Join(dir, "SKILL.md")
+	if err := os.WriteFile(skillPath, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
+	}
+	if managed {
+		writeOwnershipMarker(dir)
 	}
 	return skillPath
 }
@@ -46,13 +57,7 @@ func TestRefreshSkillsUpdatesInstalledCopiesOnce(t *testing.T) {
 	skillPath := installStaleSkill(t, home)
 
 	// A Codex copy must be refreshed too.
-	codexSkill := filepath.Join(home, ".codex", "skills", "hey", "SKILL.md")
-	if err := os.MkdirAll(filepath.Dir(codexSkill), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(codexSkill, []byte("# stale skill"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	codexSkill := writeSkillFixture(t, filepath.Join(home, ".codex", "skills", "hey"), "# stale skill", true)
 
 	if !refreshSkillsIfVersionChanged() {
 		t.Fatal("first run on a new version should refresh")
@@ -122,5 +127,39 @@ func TestRefreshSkillsRepairsBrokenClaudeLink(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(linkPath, "SKILL.md")); err != nil {
 		t.Errorf("broken Claude link was not repaired: %v", err)
+	}
+}
+
+// Refresh must prove ownership before rewriting: a SKILL.md in a directory
+// without our marker is somebody else's skill that shares the name, and a new
+// release running any command must leave it byte-for-byte alone.
+func TestRefreshSkillsPreservesUnmanagedSkills(t *testing.T) {
+	home := refreshFixture(t)
+	stubVersion(t, "9.9.9")
+
+	custom := "# my own hey skill\n\nhand-authored, not hey-cli's\n"
+	locations := []string{
+		writeSkillFixture(t, filepath.Join(home, ".agents", "skills", "hey"), custom, false),
+		writeSkillFixture(t, filepath.Join(home, ".claude", "skills", "hey"), custom, false),
+		writeSkillFixture(t, filepath.Join(home, ".codex", "skills", "hey"), custom, false),
+	}
+
+	if refreshSkillsIfVersionChanged() {
+		t.Error("nothing owned: refresh must report no work done")
+	}
+	for _, path := range locations {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != custom {
+			t.Errorf("%s was rewritten without ownership", path)
+		}
+	}
+	// The sentinel still advances — leaving foreign skills alone is this
+	// version's finished state, not a failure to retry.
+	sentinel, err := os.ReadFile(filepath.Join(home, ".config", "hey-cli", ".last-run-version"))
+	if err != nil || strings.TrimSpace(string(sentinel)) != "9.9.9" {
+		t.Errorf("sentinel = %q, %v", sentinel, err)
 	}
 }
