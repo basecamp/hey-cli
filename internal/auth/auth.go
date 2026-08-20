@@ -142,6 +142,21 @@ func (m *Manager) IsAuthenticated() bool {
 // LoginOptions configures the login flow.
 type LoginOptions struct {
 	NoBrowser bool
+
+	// Logger receives login progress messages (browser hand-off, the
+	// authorization URL, waiting notice). Nil keeps the default os.Stderr
+	// output unchanged. Messages may span multiple lines.
+	Logger func(msg string)
+}
+
+// log routes a progress message to the configured Logger, or to os.Stderr
+// verbatim when none is set so `hey auth login` output stays as it was.
+func (o LoginOptions) log(msg string) {
+	if o.Logger != nil {
+		o.Logger(msg)
+		return
+	}
+	fmt.Fprint(os.Stderr, msg)
 }
 
 // Login initiates the browser-based OAuth login flow with PKCE.
@@ -351,12 +366,12 @@ func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL, c
 
 	if !opts.NoBrowser {
 		if err := openBrowser(authURL); err != nil {
-			fmt.Fprintf(os.Stderr, "\nCouldn't open browser automatically.\nOpen this URL in your browser:\n%s\n\nWaiting for authentication...\n", authURL)
+			opts.log(fmt.Sprintf("\nCouldn't open browser automatically.\nOpen this URL in your browser:\n%s\n\nWaiting for authentication...\n", authURL))
 		} else {
-			fmt.Fprintf(os.Stderr, "\nOpening browser for authentication...\nIf the browser doesn't open, visit: %s\n\nWaiting for authentication...\n", authURL)
+			opts.log(fmt.Sprintf("\nOpening browser for authentication...\nIf the browser doesn't open, visit: %s\n\nWaiting for authentication...\n", authURL))
 		}
 	} else {
-		fmt.Fprintf(os.Stderr, "\nOpen this URL in your browser:\n%s\n\nWaiting for authentication...\n", authURL)
+		opts.log(fmt.Sprintf("\nOpen this URL in your browser:\n%s\n\nWaiting for authentication...\n", authURL))
 	}
 
 	select {

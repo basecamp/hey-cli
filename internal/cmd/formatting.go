@@ -12,6 +12,7 @@ import (
 	"github.com/mattn/go-runewidth"
 	"golang.org/x/term"
 
+	"github.com/basecamp/hey-cli/internal/config"
 	"github.com/basecamp/hey-cli/internal/markdown"
 	"github.com/basecamp/hey-cli/internal/output"
 )
@@ -72,9 +73,12 @@ func (t *table) updateColumnWidths(row []string) {
 type style string
 
 const (
-	plain  style = ""
-	bold   style = "1;34"
-	italic style = "3;94"
+	plain   style = ""
+	bold    style = "1;34"
+	italic  style = "3;94"
+	success style = "32"
+	warning style = "33"
+	muted   style = "90"
 )
 
 func (s style) format(value string) string {
@@ -119,11 +123,13 @@ func threadNoun(count int) string {
 	return "threads"
 }
 
-func stdinIsTerminal() bool {
+// stdinIsTerminal and stdoutIsTerminal are seam variables (house pattern:
+// askLocalConfigTrust) so tests can simulate an interactive terminal.
+var stdinIsTerminal = func() bool {
 	return term.IsTerminal(int(os.Stdin.Fd())) //nolint:gosec // G115: fd fits in int
 }
 
-func stdoutIsTerminal() bool {
+var stdoutIsTerminal = func() bool {
 	return term.IsTerminal(int(os.Stdout.Fd())) //nolint:gosec // G115: fd fits in int
 }
 
@@ -135,6 +141,12 @@ func stdoutWidth() int {
 		return markdown.DefaultWidth
 	}
 	return min(width-2, 100)
+}
+
+// interactiveStdio reports whether the CLI may prompt: both stdio fds are
+// terminals and the HEY_NONINTERACTIVE escape hatch is not engaged.
+var interactiveStdio = func() bool {
+	return stdinIsTerminal() && stdoutIsTerminal() && !config.NonInteractiveEnv()
 }
 
 func readStdin() (string, error) {

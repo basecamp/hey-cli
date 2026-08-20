@@ -38,6 +38,7 @@ type Value struct {
 type Config struct {
 	BaseURL   string `json:"base_url"`
 	AccountID string `json:"account_id,omitempty"`
+	Onboarded bool   `json:"onboarded,omitempty"`
 
 	sources             map[string]Source
 	globalConfig        fileConfig
@@ -48,6 +49,7 @@ type Config struct {
 type fileConfig struct {
 	BaseURL             string                              `json:"base_url,omitempty"`
 	AccountID           string                              `json:"account_id,omitempty"`
+	Onboarded           *bool                               `json:"onboarded,omitempty"`
 	Cover               string                              `json:"cover,omitempty"`
 	AccountDefaults     map[string]string                   `json:"account_defaults,omitempty"`
 	TrustedLocalConfigs map[string]trustedLocalConfigRecord `json:"trusted_local_configs,omitempty"`
@@ -166,6 +168,11 @@ func load(localPath string) (*Config, error) {
 	if global.BaseURL != "" {
 		cfg.BaseURL = global.BaseURL
 		cfg.sources["base_url"] = SourceGlobal
+	}
+	// Onboarded is deliberately global-only: a repository's .hey/config.json
+	// must not be able to suppress (or force) the first-run wizard.
+	if global.Onboarded != nil {
+		cfg.Onboarded = *global.Onboarded
 	}
 
 	var local fileConfig
@@ -393,6 +400,21 @@ func SaveCover(preset string) error {
 	return saveGlobalConfig(file)
 }
 
+// SaveOnboarded stores the onboarding flag in the global config so later
+// logged-out runs of bare `hey` skip the full first-run wizard.
+func (c *Config) SaveOnboarded(onboarded bool) error {
+	file, err := loadGlobalFileConfig()
+	if err != nil {
+		return err
+	}
+	file.Onboarded = &onboarded
+	if err := saveGlobalConfig(file); err != nil {
+		return err
+	}
+	c.Onboarded = onboarded
+	return nil
+}
+
 // SaveAccountID stores the default linked-account filter for the effective server
 // without replacing settings for any other server.
 func (c *Config) SaveAccountID(accountID string) error {
@@ -479,6 +501,35 @@ func saveGlobalConfig(file fileConfig) error {
 		return fmt.Errorf("could not replace config: %w", err)
 	}
 	return nil
+}
+
+// NonInteractiveEnv reports whether HEY_NONINTERACTIVE is set to a truthy
+// value. When true, the CLI must not show interactive prompts regardless of
+// TTY detection. This is an escape hatch for agents and harnesses that run
+// the CLI under an allocated PTY (where stdio looks like a terminal) and want
+// to avoid a prompt wedging the session — without forcing a machine output
+// format the way --agent does.
+func NonInteractiveEnv() bool {
+	if v := os.Getenv("HEY_NONINTERACTIVE"); v != "" {
+		if b, ok := parseEnvBool(v); ok {
+			return b
+		}
+	}
+	return false
+}
+
+// parseEnvBool parses a boolean environment variable strictly. Returns
+// (value, true) for recognized values, (false, false) for unrecognized ones,
+// which are ignored rather than guessed at.
+func parseEnvBool(v string) (bool, bool) {
+	switch strings.ToLower(v) {
+	case "true", "1":
+		return true, true
+	case "false", "0":
+		return false, true
+	default:
+		return false, false
+	}
 }
 
 func normalizeAccountID(accountID string) (string, error) {

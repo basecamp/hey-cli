@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/spf13/cobra"
 
@@ -44,12 +45,19 @@ func newConfigSetCommand() *cobra.Command {
 				if err := cfg.SetFromFlag(key, value); err != nil {
 					return err
 				}
+				if err := cfg.SaveBaseURL(cfg.BaseURL); err != nil {
+					return err
+				}
+			case "onboarded":
+				onboarded, err := strconv.ParseBool(value)
+				if err != nil {
+					return output.ErrUsage(fmt.Sprintf("onboarded must be true or false (got %q)", value))
+				}
+				if err := cfg.SaveOnboarded(onboarded); err != nil {
+					return err
+				}
 			default:
-				return output.ErrUsage(fmt.Sprintf("unknown config key: %s (available: base_url)", key))
-			}
-
-			if err := cfg.SaveBaseURL(cfg.BaseURL); err != nil {
-				return err
+				return output.ErrUsage(fmt.Sprintf("unknown config key: %s (available: base_url, onboarded)", key))
 			}
 
 			if writer.IsStyled() {
@@ -155,6 +163,11 @@ func newConfigShowCommand() *cobra.Command {
 					"key":    "account_id",
 					"value":  cfg.AccountID,
 					"source": string(cfg.SourceOf("account_id")),
+				},
+				{
+					"key":    "onboarded",
+					"value":  strconv.FormatBool(cfg.Onboarded),
+					"source": "global",
 				},
 			}
 			if local := cfg.LocalConfig(); local != nil {

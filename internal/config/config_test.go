@@ -558,3 +558,95 @@ func TestSaveCoverKeepsOtherSettings(t *testing.T) {
 		t.Errorf("cover = %q, want peace", after.Cover)
 	}
 }
+
+func TestOnboardedRoundTrip(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+	t.Setenv("HEY_BASE_URL", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Onboarded {
+		t.Error("fresh config should not be onboarded")
+	}
+
+	if err := cfg.SaveOnboarded(true); err != nil {
+		t.Fatalf("SaveOnboarded: %v", err)
+	}
+	if !cfg.Onboarded {
+		t.Error("SaveOnboarded should update the in-memory config")
+	}
+
+	data, err := os.ReadFile(filepath.Join(tmp, configDirName, configFile))
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("parse config: %v", err)
+	}
+	if onboarded, ok := raw["onboarded"].(bool); !ok || !onboarded {
+		t.Errorf("config file onboarded = %v, want JSON bool true", raw["onboarded"])
+	}
+
+	reloaded, err := Load()
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if !reloaded.Onboarded {
+		t.Error("reloaded config should be onboarded")
+	}
+}
+
+func TestOnboardedIgnoresLocalConfig(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+	t.Setenv("HEY_BASE_URL", "")
+
+	repo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repo, ".hey"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := json.Marshal(map[string]any{"onboarded": true})
+	if err := os.WriteFile(filepath.Join(repo, ".hey", configFile), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Onboarded {
+		t.Error("a repository .hey/config.json must not set onboarded")
+	}
+}
+
+func TestNonInteractiveEnv(t *testing.T) {
+	tests := map[string]bool{
+		"":        false,
+		"true":    true,
+		"1":       true,
+		"TRUE":    true,
+		"false":   false,
+		"0":       false,
+		"bananas": false,
+	}
+	for value, want := range tests {
+		t.Run("value="+value, func(t *testing.T) {
+			t.Setenv("HEY_NONINTERACTIVE", value)
+			if got := NonInteractiveEnv(); got != want {
+				t.Errorf("NonInteractiveEnv() with %q = %v, want %v", value, got, want)
+			}
+		})
+	}
+}

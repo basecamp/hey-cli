@@ -26,7 +26,7 @@ func ensureLocalConfigTrusted(cmd *cobra.Command) error {
 	if local == nil || !commandUsesRuntimeConfig(cmd) {
 		return nil
 	}
-	if machineReadableOutput(cmd) || !stdinIsTerminal() || !stdoutIsTerminal() {
+	if machineReadableOutput(cmd) || !interactiveStdio() {
 		return untrustedLocalConfigError(local)
 	}
 

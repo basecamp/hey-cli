@@ -2,8 +2,6 @@ package cmd
 
 import (
 	"github.com/spf13/cobra"
-
-	"github.com/basecamp/hey-cli/internal/tui"
 )
 
 type tuiCommand struct {
@@ -27,7 +25,7 @@ func newTuiRunner(use string, hidden bool) *cobra.Command {
 			if err := requireAuth(); err != nil {
 				return err
 			}
-			return tui.Run(rootSDK, sdk, cfg.AccountID, tuiWatchers())
+			return runTUI(rootSDK, sdk, cfg.AccountID, tuiWatchers())
 		},
 	}
 }

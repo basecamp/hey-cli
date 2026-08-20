@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -600,5 +601,62 @@ func TestRefreshFailuresPreserveCredentials(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestLoginOptionsLoggerReceivesProgress(t *testing.T) {
+	listenConfig := &net.ListenConfig{}
+	listener, err := listenConfig.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	mgr := NewManager("http://example.test", http.DefaultClient, t.TempDir())
+	mgr.listen = func(context.Context, string, string) (net.Listener, error) {
+		return listener, nil
+	}
+
+	// Capture stderr: a configured Logger must own all progress output.
+	origStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	t.Cleanup(func() { os.Stderr = origStderr })
+
+	var logged []string
+	opts := LoginOptions{NoBrowser: true, Logger: func(msg string) { logged = append(logged, msg) }}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = mgr.waitForCallback(t.Context(), "expected", "http://example.test/authorize", "addr", opts)
+	}()
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	response, err := client.Get("http://" + listener.Addr().String() + "/callback?state=expected&code=abc123") //nolint:noctx // local one-shot test request
+	if err != nil {
+		t.Fatalf("GET callback: %v", err)
+	}
+	_ = response.Body.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("waitForCallback did not return")
+	}
+
+	_ = w.Close()
+	os.Stderr = origStderr
+	captured, _ := io.ReadAll(r)
+
+	all := strings.Join(logged, "\n")
+	if !strings.Contains(all, "http://example.test/authorize") {
+		t.Errorf("Logger did not receive the authorization URL: %q", all)
+	}
+	if !strings.Contains(all, "Waiting for authentication") {
+		t.Errorf("Logger did not receive the waiting notice: %q", all)
+	}
+	if len(captured) != 0 {
+		t.Errorf("stderr should stay silent when a Logger is set, got %q", captured)
 	}
 }
