@@ -31,8 +31,8 @@ jobs:
           go mod tidy
           diff go.mod go.mod.bak && diff go.sum go.sum.bak
 
-      - name: Run tests
-        run: go test -v ./...
+      - name: Run tests with coverage floor
+        run: make coverage
 
       - name: Build
         run: go build -o bin/hey ./cmd/hey

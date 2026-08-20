@@ -20,20 +20,27 @@ const (
 	installID     = "hey-cli"
 )
 
+type callbackWaiter func(context.Context, string, string, string, LoginOptions) (string, error)
+type listenerFactory func(context.Context, string, string) (net.Listener, error)
+
 // Manager handles OAuth authentication.
 type Manager struct {
-	baseURL    string
-	store      *Store
-	httpClient *http.Client
-	mu         sync.Mutex
+	baseURL      string
+	store        *Store
+	httpClient   *http.Client
+	callbackWait callbackWaiter
+	listen       listenerFactory
+	mu           sync.Mutex
 }
 
 // NewManager creates a new auth manager.
 func NewManager(baseURL string, httpClient *http.Client, configDir string) *Manager {
+	listenConfig := &net.ListenConfig{}
 	return &Manager{
 		baseURL:    normalizeBaseURL(baseURL),
 		store:      NewStore(configDir),
 		httpClient: httpClient,
+		listen:     listenConfig.Listen,
 	}
 }
 
@@ -165,7 +172,11 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
 	authURL := u.String()
 
 	// Start local callback server
-	code, err := m.waitForCallback(ctx, state, authURL, callbackAddr, opts)
+	waitForCallback := m.callbackWait
+	if waitForCallback == nil {
+		waitForCallback = m.waitForCallback
+	}
+	code, err := waitForCallback(ctx, state, authURL, callbackAddr, opts)
 	if err != nil {
 		return err
 	}
@@ -267,8 +278,7 @@ func (m *Manager) CredentialKey() string {
 }
 
 func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL, callbackAddr string, opts LoginOptions) (string, error) {
-	lc := net.ListenConfig{}
-	listener, err := lc.Listen(ctx, "tcp", callbackAddr)
+	listener, err := m.listen(ctx, "tcp", callbackAddr)
 	if err != nil {
 		return "", fmt.Errorf("failed to start callback server: %w", err)
 	}

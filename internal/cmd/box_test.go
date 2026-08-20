@@ -3,7 +3,10 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
@@ -79,6 +82,111 @@ func mockFetcher(pages []generated.BoxShowResponse) pageFetcher {
 		page := pages[idx]
 		idx++
 		return &page, nil
+	}
+}
+
+func TestBoxCommandNamedRoutes(t *testing.T) {
+	tests := []struct {
+		name string
+		box  string
+		path string
+	}{
+		{name: "Imbox", box: "imbox", path: "/imbox.json"},
+		{name: "Feed", box: "the feed", path: "/feedbox.json"},
+		{name: "Paper Trail", box: "paper trail", path: "/paper_trail.json"},
+		{name: "Set Aside", box: "set aside", path: "/set_aside.json"},
+		{name: "Reply Later", box: "reply later", path: "/reply_later.json"},
+		{name: "Bubbled Up", box: "bubbled up", path: "/bubble_up.json"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var requests atomic.Int32
+			response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				if r.Method != http.MethodGet || r.URL.Path != tt.path {
+					t.Errorf("request = %s %s, want GET %s", r.Method, r.URL.Path, tt.path)
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{"id":1,"kind":%q,"name":%q,"postings":[]}`, tt.box, tt.name)
+			}), "box", tt.box)
+			if err != nil {
+				t.Fatalf("execute box: %v", err)
+			}
+			if requests.Load() != 1 {
+				t.Errorf("requests = %d, want one named lookup", requests.Load())
+			}
+			if response.Summary != "0 threads in "+tt.name {
+				t.Errorf("summary = %q", response.Summary)
+			}
+		})
+	}
+}
+
+func TestBoxCommandNumericIDAndLimit(t *testing.T) {
+	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/boxes/17.json" {
+			t.Errorf("request = %s %s, want GET /boxes/17.json", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":17,"kind":"custom","name":"Receipts","next_history_url":"https://example.invalid/page-2","postings":[{"id":1,"summary":"First"},{"id":2,"summary":"Second"}]}`)
+	}), "box", "17", "--limit", "1")
+	if err != nil {
+		t.Fatalf("execute box: %v", err)
+	}
+	if response.Summary != "1 thread in Receipts" {
+		t.Errorf("summary = %q", response.Summary)
+	}
+	if response.Notice != "Showing 1 of 2 results. Use --all to see everything." {
+		t.Errorf("notice = %q", response.Notice)
+	}
+	data, ok := response.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("data = %T", response.Data)
+	}
+	if postings, ok := data["postings"].([]any); !ok || len(postings) != 1 {
+		t.Errorf("postings = %#v, want one", data["postings"])
+	}
+	if next, _ := data["next_history_url"].(string); next != "" {
+		t.Errorf("next_history_url = %q, want cleared after client truncation", next)
+	}
+}
+
+func TestBoxCommandUnknownNameFallsBackToList(t *testing.T) {
+	var requests []string
+	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/boxes.json":
+			_, _ = io.WriteString(w, `[{"id":17,"kind":"receipts","name":"Receipts"}]`)
+		case "/boxes/17.json":
+			_, _ = io.WriteString(w, `{"id":17,"kind":"receipts","name":"Receipts","postings":[]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}), "box", "receipts")
+	if err != nil {
+		t.Fatalf("execute box: %v", err)
+	}
+	if got, want := fmt.Sprint(requests), "[GET /boxes.json GET /boxes/17.json]"; got != want {
+		t.Errorf("requests = %s, want %s", got, want)
+	}
+	if response.Summary != "0 threads in Receipts" {
+		t.Errorf("summary = %q", response.Summary)
+	}
+}
+
+func TestBoxCommandUnknownNameReturnsNotFound(t *testing.T) {
+	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `[{"id":17,"kind":"receipts","name":"Receipts"}]`)
+	}), "box", "newsletters")
+	if err == nil || !strings.Contains(err.Error(), `box "newsletters" not found`) {
+		t.Fatalf("error = %v, want box not found", err)
 	}
 }
 

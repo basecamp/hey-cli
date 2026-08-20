@@ -4,6 +4,9 @@ dist/
 completions/
 profiles/
 benchmarks-*.txt
+coverage.out
+coverage.func.txt
+coverage.packages.txt
 *.test
 .release-extra/
 result

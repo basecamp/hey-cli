@@ -213,11 +213,14 @@ hey skill install   # install the skill globally for your agent
 ## Development
 
 ```bash
-make build   # build binary
-make test    # run tests
-make lint    # run golangci-lint
-make clean   # remove build artifacts
+make build      # build binary
+make test       # run tests
+make coverage   # run cross-package coverage and enforce the 70.8% floor
+make lint       # run golangci-lint
+make clean      # remove build artifacts
 ```
+
+`make coverage` writes `coverage.out`, `coverage.func.txt`, and `coverage.packages.txt`, then prints a concise package summary and the lowest-covered functions.
 
 ## License
 

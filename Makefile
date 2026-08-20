@@ -1,9 +1,13 @@
-.PHONY: build test test-unit test-smoke fmt fmt-check vet lint tidy tidy-check \
+.PHONY: build test test-unit test-smoke coverage fmt fmt-check vet lint tidy tidy-check \
 	race-test vuln secrets replace-check check-toolchain check security \
 	release-check release bench bench-save bench-compare \
 	check-surface check-surface-compat tools clean install help
 
 BINARY := $(CURDIR)/bin/hey
+COVERAGE_FLOOR ?= 70.8
+COVERAGE_PROFILE ?= coverage.out
+COVERAGE_FUNCTIONS ?= coverage.func.txt
+COVERAGE_PACKAGES ?= coverage.packages.txt
 # Local builds are "dev": a git-describe SHA would make them look like releases.
 VERSION ?= dev
 LDFLAGS := -s -w \
@@ -19,6 +23,7 @@ help:
 	@echo "  make test-unit       Run unit tests"
 	@echo "  make test            Alias for test-unit"
 	@echo "  make test-smoke      Run smoke tests against a live server"
+	@echo "  make coverage        Run cross-package coverage and enforce the 70.8% floor"
 	@echo "  make clean           Remove build artifacts"
 	@echo "  make tidy            Tidy dependencies"
 	@echo ""
@@ -69,6 +74,12 @@ test-unit: check-toolchain
 
 # Alias for test-unit
 test: test-unit
+
+# Run repository-wide cross-package statement coverage and enforce the regression floor.
+coverage: check-toolchain
+	GOWORK=off go test ./... -coverpkg=./... -covermode=atomic -coverprofile=$(COVERAGE_PROFILE)
+	@./scripts/coverage-summary.sh $(COVERAGE_PROFILE) $(COVERAGE_FUNCTIONS) $(COVERAGE_PACKAGES)
+	@./scripts/check-coverage.sh $(COVERAGE_PROFILE) $(COVERAGE_FLOOR)
 
 # Run smoke tests against a live HEY server.
 # Requires: a running server (default http://app.hey.localhost:3003) and Chrome.
@@ -198,6 +209,7 @@ tools:
 # Clean build artifacts
 clean:
 	rm -rf bin/
+	rm -f $(COVERAGE_PROFILE) $(COVERAGE_FUNCTIONS) $(COVERAGE_PACKAGES)
 	go clean
 
 # Install binary to /usr/local/bin
