@@ -459,7 +459,7 @@ func resolveScoopPrefix(ctx context.Context, app string) (string, bool) {
 		return "", false
 	}
 
-	out, err := exec.CommandContext(ctx, "scoop", "prefix", app).Output() //nolint:gosec // G204: app is validated against the known constant above
+	out, err := exec.CommandContext(ctx, "scoop", "prefix", app).Output() // #nosec G204 -- app is validated against the known constant above
 	if err != nil {
 		return "", false
 	}

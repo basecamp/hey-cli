@@ -357,7 +357,7 @@ func downloadFileSHA256(ctx context.Context, url, dest string, limit int64) (str
 	}
 	defer resp.Body.Close()
 
-	f, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) // #nosec G304 -- dest is inside the staging directory this process created
 	if err != nil {
 		return "", err
 	}
@@ -521,7 +521,7 @@ func isArchiveRootMember(name, member string) bool {
 // rejected, duplicate members are rejected, and the uncompressed size is
 // capped. Archive entry names are never joined into paths.
 func extractTarGzMember(archivePath, member, dest string) error {
-	f, err := os.Open(archivePath)
+	f, err := os.Open(archivePath) // #nosec G304 -- archivePath is the download this process wrote into its staging directory
 	if err != nil {
 		return err
 	}
@@ -605,7 +605,7 @@ func extractZipMember(archivePath, member, dest string) error {
 // only in the page cache. The reader is bounded by io.LimitReader, which is
 // the decompression-bomb guard gosec's G110 looks for around io.Copy.
 func writeExtractedFile(dest string, r io.Reader) error {
-	f, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o755) //nolint:gosec // G302: it's the executable being installed
+	f, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o755) // #nosec G302 G304 -- the staged executable, inside the staging directory this process created
 	if err != nil {
 		return err
 	}
@@ -747,7 +747,7 @@ func discardBackup(target, backup string) {
 // copyFileSync writes a fully-synced copy of src at dst, preserving src's
 // mode. Fallback for filesystems without hard-link support.
 func copyFileSync(src, dst string) error {
-	in, err := os.Open(src)
+	in, err := os.Open(src) // #nosec G304 -- src is the verified staged binary
 	if err != nil {
 		return err
 	}
@@ -758,7 +758,7 @@ func copyFileSync(src, dst string) error {
 		return err
 	}
 
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm())
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm()) // #nosec G304 -- dst is a sidecar next to the install target
 	if err != nil {
 		return err
 	}
@@ -779,7 +779,7 @@ func copyFileSync(src, dst string) error {
 // syncDirectory fsyncs a directory so renames within it are durable. Windows
 // cannot open a directory for syncing; the error is the caller's to ignore.
 func syncDirectory(dir string) error {
-	d, err := os.Open(dir)
+	d, err := os.Open(dir) // #nosec G304 -- dir is the install target's directory, opened only to fsync it
 	if err != nil {
 		return err
 	}
