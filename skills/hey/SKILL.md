@@ -153,10 +153,10 @@ hey boxes --quiet --jq '.[].name'
 | Delete todo | `hey todo delete 123` |
 | Mark as seen | `hey seen 12345` |
 | Mark as unseen | `hey unseen 12345` |
-| Move email threads | `hey move 12345 --to feed` |
-| Move email threads to Trash | `hey trash 12345` |
+| Move email threads | `hey move 12345 --to feed --kind topic` |
+| Move email threads to Trash | `hey trash 12345 --kind topic` |
 | Mark email threads as spam | `hey spam 12345` |
-| Ignore email threads | `hey ignore 12345` |
+| Ignore email threads | `hey ignore 12345 --kind topic` |
 | Stop ignoring email threads | `hey stop-ignoring 12345` |
 | Complete habit | `hey habit complete 123` |
 | Uncomplete habit | `hey habit uncomplete 123` |
@@ -185,10 +185,10 @@ Want to read email?
 ├── Read full thread? → hey threads <topic_id> --json
 ├── Mark as seen? → hey seen <id>
 ├── Mark as unseen? → hey unseen <id>
-├── Move to another box? → hey move <id> --to <box>
-├── Move to Trash? → hey trash <id>
+├── Move to another box? → select a kind=topic item, then hey move <id> --to <box> --kind topic
+├── Move to Trash? → select a kind=topic item, then hey trash <id> --kind topic
 ├── Mark as spam? → hey spam <id>
-├── Ignore future activity? → hey ignore <id>
+├── Ignore future activity? → select a kind=topic item, then hey ignore <id> --kind topic
 ├── Stop ignoring? → hey stop-ignoring <id>
 └── Launch interactive UI? → hey (no args, launches TUI)
 ```
@@ -235,7 +235,7 @@ hey box 123 --json                            # List emails in box (by ID)
 
 Box names: `imbox`, `feedbox`, `trailbox`, `asidebox`, `laterbox`, `bubblebox`
 
-**Response format:** `hey box` returns `{"box": {...}, "postings": [...]}`. The `postings` array is the API representation of the email threads in that box. Each item has: `id` (box item ID), `topic_id` (thread ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`. Use `id` for `hey seen`, `hey unseen`, `hey move`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring`. Use `topic_id` for `hey threads`, `hey reply`, and `hey forward`.
+**Response format:** `hey box` returns `{"box": {...}, "postings": [...]}`. The `postings` array is the API representation of the email threads in that box. Each item has: `id` (box item ID), `topic_id` (thread ID), `kind`, `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`. Use `id` for `hey seen`, `hey unseen`, `hey move`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring`. Before `move`, `trash`, or `ignore`, select a record whose `kind` is exactly `topic` and pass `--kind topic`; the CLI does not manage HEY World posts. Use `topic_id` for `hey threads`, `hey reply`, and `hey forward`.
 
 ### Email - Search
 
@@ -324,33 +324,33 @@ Takes box item IDs (the `id` field from `hey box` output).
 ### Email - Moving Threads
 
 ```bash
-hey move 12345 --to imbox                     # Move one thread
-hey move 12345 67890 --to "paper trail"       # Move multiple threads
+hey move 12345 --to imbox --kind topic                     # Move one email thread
+hey move 12345 67890 --to "paper trail" --kind topic       # Move multiple email threads
 ```
 
-Takes box item IDs (the `id` field from `hey box --json`). `--to` accepts a box name, kind, or ID. Supported destinations are Imbox, The Feed, Set Aside, Reply Later, and Paper Trail. Bubble Up requires a scheduled date and is not supported by this command.
+Takes box item IDs from records whose `kind` is exactly `topic` (the `id` and `kind` fields from `hey box --json`). Pass `--kind topic`; missing and non-email kinds are rejected before setup. `--to` accepts a box name, kind, or ID. Supported destinations are Imbox, The Feed, Set Aside, Reply Later, and Paper Trail. Bubble Up requires a scheduled date and is not supported by this command.
 
 ### Email - Trash and Spam
 
 ```bash
-hey trash 12345                               # Move one thread to Trash
-hey trash 12345 67890                         # Move multiple threads to Trash
+hey trash 12345 --kind topic                  # Move one email thread to Trash
+hey trash 12345 67890 --kind topic            # Move multiple email threads to Trash
 hey spam 12345                                # Mark one thread as spam
 hey spam 12345 67890                          # Mark multiple threads as spam
 ```
 
-Takes box item IDs (the `id` field from `hey box --json`). Trashing a shared thread removes your access instead of deleting it for everyone. Marking a thread as spam moves it to Spam and trains HEY's filters.
+Takes box item IDs (the `id` field from `hey box --json`). `trash` requires `--kind topic` and rejects every other kind; `spam` is unchanged. Trashing a shared thread removes your access instead of deleting it for everyone. Marking a thread as spam moves it to Spam and trains HEY's filters.
 
 ### Email - Ignoring Threads
 
 ```bash
-hey ignore 12345                              # Ignore one thread
-hey ignore 12345 67890                        # Ignore multiple threads
+hey ignore 12345 --kind topic                 # Ignore one email thread
+hey ignore 12345 67890 --kind topic           # Ignore multiple email threads
 hey stop-ignoring 12345                       # Stop ignoring one thread
 hey stop-ignoring 12345 67890                 # Stop ignoring multiple threads
 ```
 
-Takes box item IDs (the `id` field from `hey box --json`). Ignored threads remain in their box; new replies do not bring them back to your attention. `hey stop-ignoring` reverses the action.
+Takes box item IDs (the `id` field from `hey box --json`). `ignore` requires `--kind topic` and rejects every other kind; `stop-ignoring` is unchanged. Ignored threads remain in their box; new replies do not bring them back to your attention. `hey stop-ignoring` reverses the action.
 
 ### Drafts
 

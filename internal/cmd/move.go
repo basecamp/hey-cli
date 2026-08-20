@@ -15,8 +15,9 @@ import (
 )
 
 type moveCommand struct {
-	cmd *cobra.Command
-	to  string
+	cmd  *cobra.Command
+	to   string
+	kind string
 }
 
 func newMoveCommand() *moveCommand {
@@ -25,17 +26,18 @@ func newMoveCommand() *moveCommand {
 		Use:   "move <id>...",
 		Short: "Move email threads to another box",
 		Long:  "Move one or more email threads to Imbox, The Feed, Set Aside, Reply Later, or Paper Trail.",
-		Example: `  hey move 12345 --to feed
-  hey move 12345 67890 --to "paper trail"
-  hey move 12345 --to 987`,
+		Example: `  hey move 12345 --to feed --kind topic
+  hey move 12345 67890 --to "paper trail" --kind topic
+  hey move 12345 --to 987 --kind topic`,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts box item IDs from hey box output. --to accepts a box name, kind, or ID. Use HEY's scheduled Bubble Up flow for Bubble Up.",
+			"agent_notes": "Accepts one or more box item IDs (id) from hey box or hey search output. For hey box, select kind=topic records. Pass --kind topic. --to accepts a box name, kind, or ID. Use HEY's scheduled Bubble Up flow for Bubble Up.",
 		},
 		RunE: moveCommand.run,
-		Args: usageMinOneArg(),
+		Args: emailPostingArgs(&moveCommand.kind, usageMinOneArg()),
 	}
 
 	moveCommand.cmd.Flags().StringVar(&moveCommand.to, "to", "", "Destination box name, kind, or ID (required)")
+	moveCommand.cmd.Flags().StringVar(&moveCommand.kind, "kind", "", "Email thread kind; must be topic (required)")
 
 	return moveCommand
 }

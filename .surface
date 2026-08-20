@@ -97,6 +97,7 @@ hey habit complete --date
 hey habit uncomplete
 hey habit uncomplete --date
 hey ignore
+hey ignore --kind
 hey journal
 hey journal list
 hey journal list --all
@@ -105,6 +106,7 @@ hey journal read
 hey journal write
 hey journal write --content
 hey move
+hey move --kind
 hey move --to
 hey recordings
 hey recordings --all
@@ -154,5 +156,6 @@ hey todo list --all
 hey todo list --limit
 hey todo uncomplete
 hey trash
+hey trash --kind
 hey tui
 hey unseen
