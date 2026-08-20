@@ -77,7 +77,7 @@ test: test-unit
 
 # Run repository-wide cross-package statement coverage and enforce the regression floor.
 coverage: check-toolchain
-	GOWORK=off go test ./... -coverpkg=./... -covermode=atomic -coverprofile=$(COVERAGE_PROFILE)
+	HEY_NO_KEYRING=1 GOWORK=off go test ./... -coverpkg=./... -covermode=atomic -coverprofile=$(COVERAGE_PROFILE)
 	@./scripts/coverage-summary.sh $(COVERAGE_PROFILE) $(COVERAGE_FUNCTIONS) $(COVERAGE_PACKAGES)
 	@./scripts/check-coverage.sh $(COVERAGE_PROFILE) $(COVERAGE_FLOOR)
 

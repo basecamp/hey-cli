@@ -180,6 +180,21 @@ func TestBoxCommandUnknownNameFallsBackToList(t *testing.T) {
 	}
 }
 
+func TestBoxCommandRejectsCrossOriginPagination(t *testing.T) {
+	var requests atomic.Int32
+	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":1,"kind":"imbox","name":"Imbox","next_history_url":"https://attacker.example/page-2","postings":[{"id":1}]}`)
+	}), "box", "imbox", "--all")
+	if err == nil || !strings.Contains(err.Error(), "pagination URL origin") {
+		t.Fatalf("error = %v, want cross-origin pagination rejection", err)
+	}
+	if requests.Load() != 1 {
+		t.Errorf("requests = %d, want no request to pagination origin", requests.Load())
+	}
+}
+
 func TestBoxCommandUnknownNameReturnsNotFound(t *testing.T) {
 	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

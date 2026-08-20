@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,6 +21,7 @@ func runAuthCommand(t *testing.T, configHome, baseURL, envToken string, jsonOutp
 	t.Setenv("HEY_TOKEN", envToken)
 	t.Setenv("HEY_NO_KEYRING", "1")
 	t.Setenv("HEY_BASE_URL", "")
+	t.Setenv("HOME", configHome)
 	t.Setenv("XDG_CONFIG_HOME", configHome)
 	t.Setenv("XDG_STATE_HOME", configHome)
 	t.Setenv("XDG_CACHE_HOME", configHome)
@@ -181,6 +183,13 @@ func TestDoctorCommandReportsEnvironment(t *testing.T) {
 	defer server.Close()
 	configHome := t.TempDir()
 	t.Setenv("SHELL", "/bin/zsh")
+	skillPath := filepath.Join(configHome, ".agents", "skills", "hey", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skillPath), 0755); err != nil {
+		t.Fatalf("create skill directory: %v", err)
+	}
+	if err := os.WriteFile(skillPath, []byte("# HEY"), 0600); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
 
 	_, response, err := runAuthCommand(t, configHome, server.URL, "environment-token", true, "doctor")
 	if err != nil {
@@ -210,6 +219,9 @@ func TestDoctorCommandReportsEnvironment(t *testing.T) {
 	}
 	if got := byName["Shell"]["message"]; got != "/bin/zsh" {
 		t.Errorf("shell = %q", got)
+	}
+	if got := byName["Claude Skill"]["status"]; got != "ok" {
+		t.Errorf("Claude Skill status = %q", got)
 	}
 	if _, ok := byName["CLI Version"]; !ok {
 		t.Error("CLI Version check missing")

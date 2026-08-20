@@ -13,24 +13,10 @@ import (
 
 const serviceName = "hey"
 
-type credentialKeyring interface {
-	Set(service, user, password string) error
-	Get(service, user string) (string, error)
-	Delete(service, user string) error
-}
-
-type systemKeyring struct{}
-
-func (systemKeyring) Set(service, user, password string) error {
-	return keyring.Set(service, user, password)
-}
-
-func (systemKeyring) Get(service, user string) (string, error) {
-	return keyring.Get(service, user)
-}
-
-func (systemKeyring) Delete(service, user string) error {
-	return keyring.Delete(service, user)
+type credentialKeyring struct {
+	set    func(service, user, password string) error
+	get    func(service, user string) (string, error)
+	delete func(service, user string) error
 }
 
 // Credentials holds OAuth tokens and metadata.
@@ -58,7 +44,11 @@ func NewStore(fallbackDir string) *Store {
 	return &Store{
 		fallbackDir: fallbackDir,
 		noKeyring:   os.Getenv("HEY_NO_KEYRING") != "",
-		keyring:     systemKeyring{},
+		keyring: credentialKeyring{
+			set:    keyring.Set,
+			get:    keyring.Get,
+			delete: keyring.Delete,
+		},
 	}
 }
 
@@ -68,9 +58,9 @@ func (s *Store) ensureInit() {
 			return
 		}
 		testKey := "hey::test"
-		err := s.keyring.Set(serviceName, testKey, "test")
+		err := s.keyring.set(serviceName, testKey, "test")
 		if err == nil {
-			_ = s.keyring.Delete(serviceName, testKey)
+			_ = s.keyring.delete(serviceName, testKey)
 			s.useKeyring = true
 			return
 		}
@@ -105,13 +95,13 @@ func (s *Store) Save(origin string, creds *Credentials) error {
 func (s *Store) Delete(origin string) error {
 	s.ensureInit()
 	if s.useKeyring {
-		return s.keyring.Delete(serviceName, key(origin))
+		return s.keyring.delete(serviceName, key(origin))
 	}
 	return s.deleteFile(origin)
 }
 
 func (s *Store) loadFromKeyring(origin string) (*Credentials, error) {
-	data, err := s.keyring.Get(serviceName, key(origin))
+	data, err := s.keyring.get(serviceName, key(origin))
 	if err != nil {
 		return nil, fmt.Errorf("credentials not found: %w", err)
 	}
@@ -128,7 +118,7 @@ func (s *Store) saveToKeyring(origin string, creds *Credentials) error {
 	if err != nil {
 		return err
 	}
-	return s.keyring.Set(serviceName, key(origin), string(data))
+	return s.keyring.set(serviceName, key(origin), string(data))
 }
 
 func (s *Store) credentialsPath() string {

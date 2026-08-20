@@ -61,7 +61,11 @@ func keyringStore(t *testing.T, fake *fakeKeyring) *Store {
 	t.Helper()
 	t.Setenv("HEY_NO_KEYRING", "")
 	store := NewStore(t.TempDir())
-	store.keyring = fake
+	store.keyring = credentialKeyring{
+		set:    fake.Set,
+		get:    fake.Get,
+		delete: fake.Delete,
+	}
 	return store
 }
 
