@@ -307,3 +307,32 @@ STUB
   [ "$status" -eq 2 ]
   [[ "$output" == *"verified (build succeeded)"* ]]
 }
+
+@test "fails when staging the tracked source fails" {
+  # `git ls-files` lists a tracked file deleted from the worktree with plain
+  # `rm`, so the staging tar exits nonzero while still emitting the readable
+  # files — a partial tree. Left unchecked (errexit is stripped inside the
+  # $(run_nix_build) substitution), the build runs against that partial source
+  # and can report "verified" for a tree that is not what CI will build, or
+  # compute a vendorHash from a partial import graph. The script must abort
+  # before invoking Docker.
+  echo 'tracked' > notes.md
+  git add notes.md && git commit -qm notes
+  rm notes.md
+  # Any docker invocation is itself a failure: staging must abort first.
+  cat > "$STUB_DIR/docker" <<'STUB'
+#!/usr/bin/env bash
+echo "error: build ran despite a failed staging pipeline"
+echo "NIX_BUILD_EXIT=0"
+STUB
+  chmod +x "$STUB_DIR/docker"
+
+  run scripts/update-nix-flake.sh 0.2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"staging tracked files for the build failed"* ]]
+  [[ "$output" != *"build ran despite"* ]]
+  [[ "$output" != *"verified (build succeeded)"* ]]
+  # The version edit precedes the build; the failure must roll it back.
+  grep -q 'version = "0.1.1";' nix/package.nix
+  ! grep -q 'version = "0.2.0";' nix/package.nix
+}

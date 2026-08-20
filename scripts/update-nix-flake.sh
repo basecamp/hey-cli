@@ -111,7 +111,17 @@ NIX_IMAGE="${NIX_IMAGE:-nixos/nix@sha256:b9c9611c8530fa8049a1215b20638536e1e71dc
 run_nix_build() {
   local stage rc=0 out
   stage=$(mktemp -d)
-  git ls-files -z | tar -cf - --null -T - | tar -xf - -C "$stage"
+  # Errexit does not survive into this $()-invoked function (bash strips it in
+  # command substitution), so the staging pipeline must be checked by hand.
+  # tar still emits a partial archive — alongside a nonzero status — when a
+  # tracked file is missing or unreadable (a plain `rm` without `git rm`, a
+  # sparse checkout), and building that partial tree would verify source CI
+  # never sees.
+  if ! git ls-files -z | tar -cf - --null -T - | tar -xf - -C "$stage"; then
+    rm -rf "$stage"
+    echo "ERROR: staging tracked files for the build failed" >&2
+    return 1
+  fi
   out=$(docker run --rm -v "$stage:/src:ro" "$NIX_IMAGE" bash -c '
     cp -a /src /build && cd /build
     git config --global --add safe.directory /build
@@ -133,7 +143,15 @@ nix_build_failed() {
   [[ "$(tail -n1 <<<"$1")" != "NIX_BUILD_EXIT=0" ]]
 }
 
-BUILD_OUTPUT=$(run_nix_build)
+# The || is load-bearing twice over: it makes the abort explicit rather than
+# leaning on errexit-through-assignment, and it surfaces the captured output
+# when docker itself fails (daemon down, image pull) — previously that path
+# died via errexit with the diagnostic swallowed by the substitution.
+BUILD_OUTPUT=$(run_nix_build) || {
+  echo "ERROR: could not run the Nix build"
+  tail -25 <<<"$BUILD_OUTPUT"
+  exit 1
+}
 
 if nix_build_failed "$BUILD_OUTPUT"; then
   # Classification lives in extract-nix-vendor-hash.sh, shared with CI's
@@ -160,7 +178,11 @@ if nix_build_failed "$BUILD_OUTPUT"; then
   # Prove the corrected hash actually builds. The old code trusted the hash it
   # had just written without ever rebuilding.
   echo "  verifying the updated vendorHash builds..."
-  BUILD_OUTPUT=$(run_nix_build)
+  BUILD_OUTPUT=$(run_nix_build) || {
+    echo "ERROR: could not run the Nix build"
+    tail -25 <<<"$BUILD_OUTPUT"
+    exit 1
+  }
   if nix_build_failed "$BUILD_OUTPUT"; then
     echo "ERROR: nix build still fails after updating the vendorHash"
     tail -25 <<<"$BUILD_OUTPUT"
