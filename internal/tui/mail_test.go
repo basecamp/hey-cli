@@ -2378,3 +2378,21 @@ func TestSectionsAndUnreadDotAreImboxOnly(t *testing.T) {
 		t.Errorf("The Feed should still list every thread: %q", view)
 	}
 }
+
+func TestCollectionNamedImboxDoesNotGetImboxSeenSections(t *testing.T) {
+	v := mailWithPostings()
+	v.vc.width, v.vc.height = 80, 30
+	v.Resize(80, 30)
+	v.boxes = orderBoxes(append(v.boxes,
+		models.Box{ID: 12, Kind: mailSourceKindFolder, Name: "Imbox"},
+	))
+
+	collection := len(v.boxes) - 1
+	v.switchBox(collection)
+	v.Update(currentPostingsLoaded(v, testPostings()))
+
+	view := stripANSI(v.View())
+	if strings.Contains(view, "New for You") || strings.Contains(view, "Previously Seen") || strings.Contains(view, "●") {
+		t.Errorf("a collection named Imbox should remain a flat list without unread dots: %q", view)
+	}
+}

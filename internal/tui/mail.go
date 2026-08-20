@@ -1083,7 +1083,8 @@ func (v *mailView) currentBoxIsImbox() bool {
 	if source == nil {
 		return false
 	}
-	return strings.EqualFold(source.Kind, hey.BoxKindImbox) || strings.EqualFold(source.Name, "Imbox")
+	return strings.EqualFold(source.Kind, hey.BoxKindImbox) ||
+		(source.Kind != mailSourceKindFolder && strings.EqualFold(source.Name, "Imbox"))
 }
 
 func (v *mailView) currentSourceKind() string {
