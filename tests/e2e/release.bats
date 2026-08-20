@@ -280,3 +280,38 @@ HOOK
   [ "$status" -eq 0 ]
   [ "$(origin rev-parse v0.2.0^{commit})" = "$(origin rev-parse main)" ]
 }
+
+@test "rejects leading-zero version fields" {
+  git tag -a v0.9.0 -m "Release v0.9.0"
+  git push -q origin v0.9.0
+  : > "$PUSH_LOG"
+
+  # 0.08.0 would read as older than 0.9.0 to a human, but bash arithmetic
+  # rejects 08 as octal, so a naive field compare lets it through.
+  run scripts/release.sh 0.08.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Invalid version"* ]]
+
+  [ "$(origin rev-parse main)" = "$BASE" ]
+  [ "$(plugin_version)" = "0.1.0" ]
+  [ ! -s "$PUSH_LOG" ]
+  [ ! -f "$LOG" ]
+}
+
+@test "orders an existing leading-zero tag numerically when refusing a downgrade" {
+  # The script can no longer create leading-zero tags, but a hand-pushed one
+  # can still be the latest per git's version sort. Its fields must compare
+  # as decimal, not as broken octal that would wave the downgrade through.
+  git tag -a v1.09.0 -m "Release v1.09.0"
+  git push -q origin v1.09.0
+  : > "$PUSH_LOG"
+
+  run scripts/release.sh 1.8.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"older than the latest stable release 1.09.0"* ]]
+
+  [ "$(origin rev-parse main)" = "$BASE" ]
+  [ "$(plugin_version)" = "0.1.0" ]
+  [ ! -s "$PUSH_LOG" ]
+  [ ! -f "$LOG" ]
+}

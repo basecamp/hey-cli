@@ -38,8 +38,10 @@ fi
 
 # --- Normalise and validate the version ---
 VERSION="${VERSION#v}"
-if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
-  die "Invalid version '${VERSION}' (expected X.Y.Z or X.Y.Z-suffix, optionally v-prefixed)"
+# Leading zeros are refused (semver forbids them, and bash arithmetic would
+# read 08 as broken octal in the version comparison below).
+if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[a-zA-Z0-9.]+)?$ ]]; then
+  die "Invalid version '${VERSION}' (expected X.Y.Z or X.Y.Z-suffix without leading zeros, optionally v-prefixed)"
 fi
 
 TAG="v${VERSION}"
@@ -116,14 +118,17 @@ fi
 # macOS's stock sort does not provide (same reasoning as check-lint-lockstep.sh).
 # Git's version:refname ordering picks the latest stable tag, and a field
 # compare orders it against the new version; both sides are stable X.Y.Z here.
+# Force base 10: the requested version is validated against leading zeros
+# above, but an already-pushed tag like v1.09.0 is not, and bash would
+# otherwise read its fields as octal and error the comparison into a no.
 version_lt() {
   local -a a b
   local i
   IFS=. read -r -a a <<< "${1#v}"
   IFS=. read -r -a b <<< "${2#v}"
   for i in 0 1 2; do
-    if (( ${a[i]:-0} < ${b[i]:-0} )); then return 0; fi
-    if (( ${a[i]:-0} > ${b[i]:-0} )); then return 1; fi
+    if (( 10#${a[i]:-0} < 10#${b[i]:-0} )); then return 0; fi
+    if (( 10#${a[i]:-0} > 10#${b[i]:-0} )); then return 1; fi
   done
   return 1
 }
