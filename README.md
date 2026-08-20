@@ -350,6 +350,19 @@ read from `~/.local/state/omarchy/current/theme/`, and restyles live when you ru
 `omarchy theme set`. Set `HEY_THEME=/path/to/file.toml` to use your own overlay anywhere
 — an explicitly chosen file is trusted as written — or `NO_COLOR=1` to turn color off.
 
+```bash
+yay -S hey-cli               # hey-cli is on the AUR
+hey setup omarchy            # install into the desktop
+hey setup omarchy --remove   # take it all out again
+```
+
+Setup installs a `HEY TUI` launcher entry, a `HEY` row in the SUPER+SPACE menu, a bar
+indicator that lights when the Imbox has unread mail (no count, by design), and a
+`hey.toml.tpl` theme template so theme authors can tune the overlay. It prints the
+`bindings.lua` snippet for a keybinding rather than editing your file. Omarchy's shipped
+HEY web app, its SUPER+SHIFT+E binding and the mailto handler are left untouched.
+See [docs/omarchy.md](docs/omarchy.md) for the details and what is planned next.
+
 ## Agent Skill
 
 hey-cli ships with an embedded agent skill so your agent can interact with HEY on your behalf.
