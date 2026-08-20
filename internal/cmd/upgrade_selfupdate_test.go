@@ -1375,7 +1375,7 @@ func TestNativeSelfUpdateSyncsBeforeDiscardingBackup(t *testing.T) {
 	install := index("rename " + filepath.Join(filepath.Dir(f.target), upgradeStagePrefix))
 	syncDir := index("sync-dir " + filepath.Dir(f.target))
 	remove := index("remove " + f.target + ".old-")
-	if !(syncFile < install && install < syncDir && syncDir < remove) {
+	if syncFile >= install || install >= syncDir || syncDir >= remove {
 		t.Errorf("want staged sync < install rename < dir sync < backup removal, got %q", events)
 	}
 }
