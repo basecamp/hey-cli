@@ -1,6 +1,6 @@
 .PHONY: build test test-unit test-smoke preview-callback coverage fmt fmt-check vet lint tidy tidy-check \
 	race-test vuln secrets replace-check check-toolchain check security \
-	release-check release bench bench-save bench-compare \
+	release-check release test-release bench bench-save bench-compare \
 	check-surface check-surface-compat check-lint-lockstep tools clean install help
 
 BINARY := $(CURDIR)/bin/hey
@@ -43,6 +43,7 @@ help:
 	@echo "  make security        lint + vuln + secrets"
 	@echo "  make release-check   check + replace-check + vuln + race-test"
 	@echo "  make release         Run release preflight and tag (VERSION=v1.2.3 [DRY_RUN=1])"
+	@echo "  make test-release    Dry-run the goreleaser pipeline (snapshot, no publish/sign)"
 	@echo ""
 	@echo "  make bench           Run benchmarks"
 	@echo "  make bench-save      Save benchmark results"
@@ -189,6 +190,14 @@ release-check: check replace-check vuln race-test
 # Release (delegates to script)
 release:
 	@DRY_RUN=$(DRY_RUN) scripts/release.sh $(VERSION)
+
+# Dry-run the goreleaser pipeline. Signing env is blanked so notarization and
+# Authenticode are skipped rather than failing on missing secrets.
+test-release:
+	MACOS_SIGN_P12= MACOS_SIGN_PASSWORD= MACOS_NOTARY_KEY= MACOS_NOTARY_KEY_ID= MACOS_NOTARY_ISSUER_ID= \
+	SM_API_KEY= SM_CLIENT_CERT_FILE= SM_CLIENT_CERT_PASSWORD= \
+	HOMEBREW_TAP_TOKEN= \
+	goreleaser release --snapshot --skip=publish,sign --clean
 
 # Run benchmarks
 bench: check-toolchain
