@@ -284,15 +284,30 @@ func (f *nativeFlowFixture) upgradeTempLeftovers(t *testing.T) []string {
 	return matches
 }
 
+// sidecarLeftovers globs the `.hey*` namespace next to target, excluding
+// only the lock file — a designed leftover an upgrade never removes itself
+// (deleting a held flock file is racy); the next invocation's startup
+// cleanup reaps it.
+func sidecarLeftovers(t *testing.T, target string) []string {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(filepath.Dir(target), ".hey*"))
+	mustNoError(t, err)
+	kept := matches[:0]
+	for _, m := range matches {
+		if m != upgradeLockPath(target) {
+			kept = append(kept, m)
+		}
+	}
+	return kept
+}
+
 // assertTargetUntouched verifies the installed binary and its directory
 // survived a failed upgrade unchanged, and no temp dirs leaked.
 func assertTargetUntouched(t *testing.T, f *nativeFlowFixture) {
 	t.Helper()
 	assertFileContent(t, f.target, f.oldContent)
 
-	leftovers, err := filepath.Glob(filepath.Join(filepath.Dir(f.target), ".hey*"))
-	mustNoError(t, err)
-	if len(leftovers) > 0 {
+	if leftovers := sidecarLeftovers(t, f.target); len(leftovers) > 0 {
 		t.Errorf("sidecars left next to the binary: %v", leftovers)
 	}
 	if tmp := f.upgradeTempLeftovers(t); len(tmp) > 0 {
@@ -337,9 +352,7 @@ func TestNativeSelfUpdateSuccess(t *testing.T) {
 	}
 
 	// No staging or backup sidecars remain next to the binary.
-	leftovers, err := filepath.Glob(filepath.Join(filepath.Dir(f.target), ".hey*"))
-	mustNoError(t, err)
-	if len(leftovers) > 0 {
+	if leftovers := sidecarLeftovers(t, f.target); len(leftovers) > 0 {
 		t.Errorf("sidecars left after success: %v", leftovers)
 	}
 	if tmp := f.upgradeTempLeftovers(t); len(tmp) > 0 {
@@ -988,6 +1001,34 @@ func TestCleanupSkipsWhileUpgradeLockHeld(t *testing.T) {
 	assertNotExists(t, sidecars[0], "staging file is reaped after the lock is released")
 	assertExists(t, sidecars[1], ".old-* backups are never reaped by cleanup")
 	assertNotExists(t, upgradeLockPath(exe), "lock file itself is reaped once no upgrade holds it")
+}
+
+// The lock is directory-wide because the staging namespace is: every hey
+// binary in a directory stages into the same `.hey-upgrade-*` glob whatever
+// its own filename, so a sibling install (hey next to hey-preview) running
+// cleanup while the other upgrades must be locked out too.
+func TestCleanupSkipsWhileSiblingUpgradeLockHeld(t *testing.T) {
+	dir := t.TempDir()
+	upgrading := filepath.Join(dir, "hey-preview")
+	bystander := filepath.Join(dir, "hey")
+	mustWriteFile(t, upgrading, []byte("bin"), 0o755)
+	mustWriteFile(t, bystander, []byte("bin"), 0o755)
+	staged := filepath.Join(dir, ".hey-upgrade-live")
+	mustWriteFile(t, staged, []byte("staged"), 0o644)
+
+	lock := flock.New(upgradeLockPath(upgrading))
+	locked, err := lock.TryLock()
+	mustNoError(t, err)
+	if !locked {
+		t.Fatal("test could not take the upgrade lock")
+	}
+
+	cleanupUpgradeSidecarsFor(bystander)
+	assertExists(t, staged, "sibling cleanup must not reap another upgrade's live staging file")
+
+	mustNoError(t, lock.Unlock())
+	cleanupUpgradeSidecarsFor(bystander)
+	assertNotExists(t, staged, "staging file is reaped once no upgrade holds the directory lock")
 }
 
 func TestCleanupUpgradeSidecars(t *testing.T) {

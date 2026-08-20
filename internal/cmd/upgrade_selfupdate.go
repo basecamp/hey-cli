@@ -70,18 +70,23 @@ var (
 	selfUpdateHTTPClient     = &http.Client{Timeout: 5 * time.Minute}
 )
 
-// upgradeLockPath names the lock file that serializes upgrades of target
-// against each other and against sidecar cleanup.
+// upgradeLockPath names the lock file that serializes upgrades and sidecar
+// cleanup across target's install directory. Directory-wide on purpose: the
+// staging namespace (`.hey-upgrade-*`) is shared by every hey binary in the
+// directory regardless of its filename, so a per-target lock would let a
+// sibling install (say hey-preview next to hey) pass its own lock and reap
+// another upgrade's live staging files. The dot before "lock" keeps the lock
+// file itself out of the always-reapable `.hey-upgrade-*` glob.
 func upgradeLockPath(target string) string {
-	return target + ".upgrade.lock"
+	return filepath.Join(filepath.Dir(target), ".hey-upgrade.lock")
 }
 
-// acquireUpgradeLock takes the exclusive upgrade lock for target without
-// blocking. Held across staging, replacement, verification, and rollback so
-// a concurrent upgrade cannot mutate the same executable and a concurrent
-// invocation's sidecar cleanup cannot reap this upgrade's live staging
-// files. The lock file itself is left behind and reaped by
-// cleanupUpgradeSidecars on a later invocation.
+// acquireUpgradeLock takes the exclusive upgrade lock for target's install
+// directory without blocking. Held across staging, replacement, verification,
+// and rollback so a concurrent upgrade cannot mutate the same directory's
+// staging namespace and a concurrent invocation's sidecar cleanup cannot
+// reap this upgrade's live staging files. The lock file itself is left
+// behind and reaped by cleanupUpgradeSidecars on a later invocation.
 func acquireUpgradeLock(target string) (*flock.Flock, error) {
 	lock := flock.New(upgradeLockPath(target))
 	locked, err := lock.TryLock()

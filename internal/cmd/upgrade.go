@@ -167,10 +167,10 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	// Serialize the mutating phase. The release-metadata check above is
-	// read-only and runs unlocked; the lock is taken before any asset
-	// download or filesystem mutation so a concurrent upgrade cannot touch
-	// the same executable and a concurrent invocation's sidecar cleanup
-	// cannot reap this upgrade's live files.
+	// read-only and runs unlocked; the directory-wide lock is taken before
+	// any asset download or filesystem mutation so a concurrent upgrade
+	// cannot touch the same install directory and a concurrent invocation's
+	// sidecar cleanup cannot reap this upgrade's live files.
 	lock, err := upgradeLocker(target)
 	if err != nil {
 		return errUpgradeFailedHint(
