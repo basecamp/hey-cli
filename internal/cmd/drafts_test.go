@@ -11,6 +11,10 @@ import (
 
 func runStyledDraftsCommand(t *testing.T, handler http.Handler, args ...string) (string, error) {
 	t.Helper()
+	previousColorDisabled := colorDisabled
+	colorDisabled = false
+	t.Cleanup(func() { colorDisabled = previousColorDisabled })
+
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
