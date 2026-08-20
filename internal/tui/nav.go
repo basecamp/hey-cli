@@ -303,7 +303,7 @@ func renderHeader(m *model) string {
 	var b strings.Builder
 
 	// Row 1: section rule + items
-	sectionLabel := "HEY"
+	sectionLabel := "HEY · " + m.mailAccount.label
 	b.WriteString(renderRule(m.width, sectionLabel))
 	b.WriteString("\n")
 	b.WriteString(renderNavRow(sectionItems, int(m.section), m.focus == rowSection, m.width, true))

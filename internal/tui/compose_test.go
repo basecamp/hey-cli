@@ -36,24 +36,30 @@ func runCmd(cmd tea.Cmd) tea.Msg {
 // the send request. It returns the mailView wired to it and the recorder.
 func composeTestServer(t *testing.T) (*mailView, *struct {
 	method, path string
+	account      string
 	body         map[string]any
 }) {
 	t.Helper()
 	rec := &struct {
 		method, path string
+		account      string
 		body         map[string]any
 	}{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/identity.json":
-			_, _ = w.Write([]byte(`{"id":1,"email_address":"me@hey.com","senders":[{"id":42,"default":true}]}`))
+			_, _ = w.Write([]byte(`{"id":1,"accounts":[{"id":9,"status":"active"}],"senders":[{"id":42,"account_id":9,"default":true}]}`))
 		case "/topics/100.json":
-			_, _ = w.Write([]byte(`{"id":100,"name":"Quarterly planning","entries":[{"id":500},{"id":501}]}`))
+			_, _ = w.Write([]byte(`{"id":100,"account_id":9,"name":"Quarterly planning","entries":[{"id":500},{"id":501}]}`))
+		case "/topics/100":
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte(`<span class="entry__full-recipients"><a title="jane@example.com">Jane</a></span>`))
 		case "/entries/501/forwards/new.json":
 			_, _ = w.Write([]byte(`{"subject":"Fwd: Quarterly planning","content":"<div>Quoted message</div>"}`))
 		default:
 			rec.method, rec.path = r.Method, r.URL.Path
+			rec.account = r.URL.Query().Get("filtered_account_id")
 			if b, _ := io.ReadAll(r.Body); len(b) > 0 {
 				_ = json.Unmarshal(b, &rec.body)
 			}
@@ -64,6 +70,7 @@ func composeTestServer(t *testing.T) (*mailView, *struct {
 	t.Cleanup(srv.Close)
 	sdk := hey.NewClient(&hey.Config{BaseURL: srv.URL}, &hey.StaticTokenProvider{Token: "t"}, hey.WithMaxRetries(0))
 	vc := testVC()
+	vc.rootSDK = sdk
 	vc.sdk = sdk
 	vc.ctx = context.Background()
 	v := newMailView(vc)
@@ -242,6 +249,29 @@ func TestReplyFormPrefillsAndSends(t *testing.T) {
 	}
 }
 
+func TestReplyLoadsAndSendsThroughThreadAccount(t *testing.T) {
+	v, rec := composeTestServer(t)
+	v.Resize(80, 30)
+
+	loaded := runCmd(v.loadReplyContext(100, "Quarterly planning"))
+	ctxMsg, ok := loaded.(replyContextLoadedMsg)
+	if !ok || ctxMsg.err != nil {
+		t.Fatalf("reply command returned %#v", loaded)
+	}
+	if accountID, ok := ctxMsg.sdk.AccountID(); !ok || accountID != 9 {
+		t.Fatalf("reply SDK account = %d, %v", accountID, ok)
+	}
+	v.Update(ctxMsg)
+	typeText(v, "Thanks!")
+	msg := runCmd(v.HandleContentKey(ctrlS()))
+	if sent, ok := msg.(composeSentMsg); !ok || sent.err != nil {
+		t.Fatalf("reply send returned %#v", msg)
+	}
+	if rec.path != "/entries/501/replies.json" || rec.account != "9" {
+		t.Fatalf("reply path/account = %s/%q, want /entries/501/replies.json/9", rec.path, rec.account)
+	}
+}
+
 func TestForwardFormLoadsLatestEntryAndSends(t *testing.T) {
 	v, rec := composeTestServer(t)
 	v.Resize(80, 30)
@@ -280,6 +310,9 @@ func TestForwardFormLoadsLatestEntryAndSends(t *testing.T) {
 	}
 	if rec.method != http.MethodPost || rec.path != "/messages.json" {
 		t.Errorf("sent %s %s, want POST /messages.json", rec.method, rec.path)
+	}
+	if rec.account != "9" {
+		t.Errorf("forward account = %q, want 9", rec.account)
 	}
 	message := rec.body["message"].(map[string]any)
 	if message["subject"] != "Fwd: Quarterly planning" {

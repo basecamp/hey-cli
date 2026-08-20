@@ -2,8 +2,12 @@ package tui
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -25,12 +29,13 @@ type spinnerTickMsg struct{}
 // --- Model ---
 
 type model struct {
-	width  int
-	height int
-	vc     *viewContext
-	cancel context.CancelFunc
-	styles styles
-	help   helpBar
+	width   int
+	height  int
+	vc      *viewContext
+	rootSDK *hey.Client
+	cancel  context.CancelFunc
+	styles  styles
+	help    helpBar
 
 	// Navigation
 	section    section
@@ -43,6 +48,19 @@ type model struct {
 	calendarView *calendarView
 	journalView  *journalView
 
+	// Linked mail accounts
+	mailAccounts            []mailAccountChoice
+	mailAccount             mailAccountChoice
+	mailAccountCursor       int
+	mailAccountPicker       bool
+	mailAccountSwitching    bool
+	mailAccountUnavailable  bool
+	mailAccountDiscoveryErr string
+	mailAccountErr          string
+	mailAccountRequestID    uint64
+	viewGeneration          uint64
+	viewGenerationToken     *atomic.Uint64
+
 	// Loading & error
 	loading      bool
 	spinnerPhase float64
@@ -50,13 +68,49 @@ type model struct {
 	ctrlCOnce    bool
 }
 
-func newModel(sdk *hey.Client) model {
+func newModel() model {
+	return newModelWithMailAccounts(nil, nil, "all")
+}
+
+func newModelWithMailAccounts(rootSDK, sdk *hey.Client, selected string) model {
 	s := newStyles()
 	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118: cancel stored, called on ctrl+c
-	vc := &viewContext{
+	vc := newViewContext(ctx, rootSDK, sdk, s)
+	mv := newMailView(vc)
+	ov := newContactsView(vc)
+	cv := newCalendarView(vc)
+	jv := newJournalView(vc)
+	account := mailAccountChoice{label: "All Accounts"}
+	if accountID, err := strconv.ParseInt(selected, 10, 64); err == nil && accountID > 0 {
+		account = mailAccountChoice{id: accountID, label: fmt.Sprintf("Account %d", accountID)}
+	}
+
+	return model{
+		vc:                  vc,
+		rootSDK:             rootSDK,
+		cancel:              cancel,
+		styles:              s,
+		help:                newHelpBar(s),
+		section:             sectionMail,
+		focus:               rowContent,
+		activeView:          mv,
+		mailView:            mv,
+		contactsView:        ov,
+		calendarView:        cv,
+		journalView:         jv,
+		mailAccounts:        []mailAccountChoice{{label: "All Accounts"}},
+		mailAccount:         account,
+		viewGenerationToken: &atomic.Uint64{},
+		loading:             true,
+	}
+}
+
+func newViewContext(ctx context.Context, rootSDK, sdk *hey.Client, styles styles) *viewContext {
+	return &viewContext{
+		rootSDK:       rootSDK,
 		sdk:           sdk,
 		ctx:           ctx,
-		styles:        s,
+		styles:        styles,
 		imageRenderer: environmentImageRenderer(),
 		imageFetcher:  newTrustedImageFetcher(sdk),
 		saveAttachment: func(ctx context.Context, destination, sourceURL string, force bool) (int64, error) {
@@ -67,36 +121,58 @@ func newModel(sdk *hey.Client) model {
 			return os.MkdirTemp("", "hey-cli-attachment-*")
 		},
 	}
-
-	mv := newMailView(vc)
-	ov := newContactsView(vc)
-	cv := newCalendarView(vc)
-	jv := newJournalView(vc)
-
-	return model{
-		vc:           vc,
-		cancel:       cancel,
-		styles:       s,
-		help:         newHelpBar(s),
-		section:      sectionMail,
-		focus:        rowContent,
-		activeView:   mv,
-		mailView:     mv,
-		contactsView: ov,
-		calendarView: cv,
-		journalView:  jv,
-		loading:      true,
-	}
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(m.activeView.Init(), spinnerTick())
+	return tea.Batch(
+		m.stampViewCmd(m.activeView.Init()),
+		loadMailAccounts(m.vc.ctx, m.rootSDK, strconv.FormatInt(m.mailAccount.id, 10)),
+		spinnerTick(),
+	)
 }
 
 // --- Update ---
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case viewGenerationMsg:
+		if msg.generation != m.viewGeneration {
+			return m, nil
+		}
+		return m.Update(msg.msg)
+
+	case mailAccountsLoadedMsg:
+		if msg.err != nil {
+			m.mailAccountDiscoveryErr = msg.err.Error()
+			m.updateHelpBindings()
+			return m, nil
+		}
+		m.mailAccountDiscoveryErr = ""
+		m.mailAccounts = msg.accounts
+		m.mailAccountUnavailable = msg.selectedUnavailable
+		if msg.selectedUnavailable {
+			m.loading = false
+			m.mailAccountErr = fmt.Sprintf("Selected mail account %d is no longer available", m.mailAccount.id)
+			m.err = errors.New(m.mailAccountErr)
+		} else if msg.loaded && msg.selected >= 0 && msg.selected < len(msg.accounts) {
+			m.mailAccount = msg.accounts[msg.selected]
+			m.mailAccountCursor = msg.selected
+		}
+		m.updateHelpBindings()
+		return m, nil
+
+	case mailAccountSwitchedMsg:
+		if msg.requestID != m.mailAccountRequestID {
+			return m, nil
+		}
+		m.mailAccountSwitching = false
+		if msg.err != nil {
+			m.mailAccountErr = msg.err.Error()
+			m.updateHelpBindings()
+			return m, nil
+		}
+		return m.applyMailAccount(msg.account, msg.client)
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -137,12 +213,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if consumed {
 		cmd = m.syncLoading(cmd)
 		m.updateHelpBindings()
+		return m, cmd
 	}
-	return m, cmd
+	return m, m.stampViewCmd(cmd)
 }
 
 // syncLoading synchronizes the main loading state with the active section view.
 func (m *model) syncLoading(cmd tea.Cmd) tea.Cmd {
+	cmd = m.stampViewCmd(cmd)
 	nowLoading := m.activeView.Loading()
 	if nowLoading && !m.loading {
 		m.loading = true
@@ -152,6 +230,70 @@ func (m *model) syncLoading(cmd tea.Cmd) tea.Cmd {
 		m.loading = false
 	}
 	return cmd
+}
+
+func (m model) stampViewCmd(cmd tea.Cmd) tea.Cmd {
+	if cmd == nil {
+		return nil
+	}
+	generation := m.viewGeneration
+	token := m.viewGenerationToken
+	return func() tea.Msg {
+		if token != nil && token.Load() != generation {
+			return nil
+		}
+		msg := cmd()
+		if msg == nil || (token != nil && token.Load() != generation) {
+			return nil
+		}
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			stamped := make(tea.BatchMsg, len(batch))
+			for index, batchCmd := range batch {
+				stamped[index] = m.stampViewCmd(batchCmd)
+			}
+			return stamped
+		}
+		if _, ok := msg.(tea.RawMsg); ok {
+			return msg
+		}
+		return viewGenerationMsg{generation: generation, msg: msg}
+	}
+}
+
+func (m model) applyMailAccount(account mailAccountChoice, client *hey.Client) (tea.Model, tea.Cmd) {
+	m.viewGeneration++
+	m.viewGenerationToken.Store(m.viewGeneration)
+	m.cancel()
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118: cancel stored, called on switch or quit
+	m.cancel = cancel
+	m.vc = newViewContext(ctx, m.rootSDK, client, m.styles)
+	m.vc.width = m.width
+	m.vc.height = max(m.height-headerHeight-m.help.height()-3, 1)
+	m.mailView = newMailView(m.vc)
+	m.contactsView = newContactsView(m.vc)
+	m.calendarView = newCalendarView(m.vc)
+	m.journalView = newJournalView(m.vc)
+	switch m.section {
+	case sectionMail:
+		m.activeView = m.mailView
+	case sectionContacts:
+		m.activeView = m.contactsView
+	case sectionCalendar:
+		m.activeView = m.calendarView
+	case sectionJournal:
+		m.activeView = m.journalView
+	}
+	m.mailAccount = account
+	m.mailAccountPicker = false
+	m.mailAccountUnavailable = false
+	m.mailAccountErr = ""
+	m.err = nil
+	m.focus = rowContent
+	m.loading = false
+	m.activeView.Resize(m.vc.width, m.vc.height)
+	cmd := m.syncLoading(m.activeView.Init())
+	m.updateHelpBindings()
+	return m, cmd
 }
 
 // --- View ---
@@ -164,7 +306,9 @@ func (m model) View() tea.View {
 	b.WriteString(renderHeader(&m))
 	b.WriteString("\n")
 
-	if m.err != nil {
+	if m.mailAccountPicker {
+		b.WriteString(renderMailAccountPicker(&m))
+	} else if m.err != nil {
 		b.WriteString(errorView(m.err.Error(), m.width))
 	} else if m.loading {
 		contentH := m.height - headerHeight - m.help.height() - 3
@@ -206,7 +350,14 @@ func (m *model) updateHelpBindings() {
 
 	var bindings []helpBinding
 
-	if ic, ok := m.activeView.(inputCapturer); ok && ic.CapturingInput() {
+	if m.mailAccountPicker {
+		bindings = []helpBinding{
+			{"↑↓", "account"},
+			{"enter", "switch"},
+			{"esc/q", "cancel"},
+			quitHint,
+		}
+	} else if ic, ok := m.activeView.(inputCapturer); ok && ic.CapturingInput() {
 		bindings = append(m.activeView.HelpBindings(), quitHint)
 	} else if m.activeView.InThread() {
 		extra := m.activeView.HelpBindings()
@@ -246,6 +397,15 @@ func (m *model) updateHelpBindings() {
 			bindings = append(bindings, extra...)
 		}
 	}
+	if m.canSwitchMailAccounts() && !m.mailAccountPicker && !m.loading && !m.activeView.InThread() {
+		if ic, ok := m.activeView.(inputCapturer); !ok || !ic.CapturingInput() {
+			description := "mail account"
+			if m.mailAccountDiscoveryErr != "" {
+				description = "retry accounts"
+			}
+			bindings = append(bindings, helpBinding{"ctrl+a", description})
+		}
+	}
 	m.help.setBindings(bindings)
 	contentHeight := m.height - headerHeight - m.help.height() - 3
 	if contentHeight < 1 {
@@ -276,12 +436,34 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.updateHelpBindings()
 	}
 
+	if m.mailAccountPicker {
+		return m.handleMailAccountKey(msg)
+	}
+
 	// A view with an open text form gets every key (esc, tab, letters, ...).
 	if ic, ok := m.activeView.(inputCapturer); ok && ic.CapturingInput() {
 		cmd := m.activeView.HandleContentKey(msg)
 		cmd = m.syncLoading(cmd)
 		m.updateHelpBindings()
 		return m, cmd
+	}
+
+	if key == "ctrl+a" && m.canSwitchMailAccounts() && !m.loading && !m.activeView.InThread() {
+		if m.mailAccountDiscoveryErr != "" {
+			m.mailAccountDiscoveryErr = ""
+			m.updateHelpBindings()
+			return m, loadMailAccounts(m.vc.ctx, m.rootSDK, strconv.FormatInt(m.mailAccount.id, 10))
+		}
+		m.mailAccountPicker = true
+		m.mailAccountErr = ""
+		for index, account := range m.mailAccounts {
+			if account.id == m.mailAccount.id {
+				m.mailAccountCursor = index
+				break
+			}
+		}
+		m.updateHelpBindings()
+		return m, nil
 	}
 
 	if msg.Key().Code == tea.KeyEscape || key == "q" {
@@ -343,6 +525,49 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) canSwitchMailAccounts() bool {
+	return m.mailAccountDiscoveryErr != "" || len(m.mailAccounts) > 2 || (m.mailAccountUnavailable && len(m.mailAccounts) > 0)
+}
+
+func (m model) handleMailAccountKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+	if msg.Key().Code == tea.KeyEscape || key == "q" {
+		if !m.mailAccountSwitching {
+			m.mailAccountPicker = false
+			m.mailAccountErr = ""
+			m.updateHelpBindings()
+		}
+		return m, nil
+	}
+	if m.mailAccountSwitching {
+		return m, nil
+	}
+	switch msg.Key().Code {
+	case tea.KeyUp:
+		if m.mailAccountCursor > 0 {
+			m.mailAccountCursor--
+		}
+	case tea.KeyDown:
+		if m.mailAccountCursor < len(m.mailAccounts)-1 {
+			m.mailAccountCursor++
+		}
+	case tea.KeyEnter:
+		account := m.mailAccounts[m.mailAccountCursor]
+		if account.id == m.mailAccount.id {
+			m.mailAccountPicker = false
+			m.mailAccountErr = ""
+			m.updateHelpBindings()
+			return m, nil
+		}
+		m.mailAccountRequestID++
+		m.mailAccountSwitching = true
+		m.mailAccountErr = ""
+		m.updateHelpBindings()
+		return m, switchMailAccount(m.vc.ctx, m.rootSDK, account, m.mailAccountRequestID)
+	}
+	return m, nil
+}
+
 func (m model) switchSection(sec section) (tea.Model, tea.Cmd) {
 	if sec == m.section {
 		return m, nil
@@ -398,9 +623,10 @@ func formatTimestamp(ts time.Time) string {
 	return ts.UTC().Format("2006-01-02T15:04:05Z")
 }
 
-// Run starts the TUI program.
-func Run(sdk *hey.Client) error {
-	p := tea.NewProgram(newModel(sdk))
+// Run starts the TUI with the resolved mail account and the identity root client used
+// for interactive account switching.
+func Run(rootSDK, sdk *hey.Client, selected string) error {
+	p := tea.NewProgram(newModelWithMailAccounts(rootSDK, sdk, selected))
 	_, err := p.Run()
 	return err
 }

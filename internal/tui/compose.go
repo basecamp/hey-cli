@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -8,6 +9,8 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 )
@@ -22,6 +25,7 @@ type replyContextLoadedMsg struct {
 	topicID   int64
 	topicName string
 	entryID   int64
+	sdk       *hey.Client
 	to, cc    []string
 	bcc       []string
 	err       error
@@ -34,6 +38,7 @@ type forwardContextLoadedMsg struct {
 	boxID     int64
 	topicID   int64
 	topicName string
+	sdk       *hey.Client
 	subject   string
 	content   string
 	err       error
@@ -73,6 +78,7 @@ type composeForm struct {
 	mode             composeMode
 	topicName        string
 	entryID          int64 // reply target (composeReply only)
+	sendSDK          *hey.Client
 	forwardedContent string
 
 	inputs []textinput.Model // to, cc, bcc, subject (subject omitted for replies)
@@ -123,6 +129,7 @@ func newReplyForm(ctxMsg replyContextLoadedMsg, s styles) *composeForm {
 	f := newComposeForm(composeReply, s)
 	f.topicName = ctxMsg.topicName
 	f.entryID = ctxMsg.entryID
+	f.sendSDK = ctxMsg.sdk
 	f.inputs[fieldTo].SetValue(strings.Join(ctxMsg.to, ", "))
 	f.inputs[fieldCc].SetValue(strings.Join(ctxMsg.cc, ", "))
 	f.inputs[fieldBcc].SetValue(strings.Join(ctxMsg.bcc, ", "))
@@ -133,6 +140,7 @@ func newReplyForm(ctxMsg replyContextLoadedMsg, s styles) *composeForm {
 func newForwardForm(ctxMsg forwardContextLoadedMsg, s styles) *composeForm {
 	f := newComposeForm(composeForward, s)
 	f.topicName = ctxMsg.topicName
+	f.sendSDK = ctxMsg.sdk
 	f.forwardedContent = ctxMsg.content
 	f.inputs[fieldSubject].SetValue(ctxMsg.subject)
 	f.body.Placeholder = "Add a note…"
@@ -312,37 +320,40 @@ func (v *mailView) startCompose() tea.Cmd {
 	return v.compose.init()
 }
 
-// loadReplyContext fetches the thread's recipients and latest entry, the same
-// way `hey reply` does, then opens the reply form on replyContextLoadedMsg.
+// loadReplyContext fetches the thread's account, latest entry, and recipients,
+// then opens a reply form bound to that account's sender.
 func (v *mailView) loadReplyContext(topicID int64, topicName string) tea.Cmd {
 	sdk := v.vc.sdk
 	boxID := v.currentBoxID()
 	requestID, ctx := v.beginRequest(mailRequestReply)
 	return func() tea.Msg {
-		topicResp, err := sdk.GetHTML(ctx, fmt.Sprintf("/topics/%d", topicID))
+		topic, err := sdk.Topics().Get(ctx, topicID)
 		if err != nil {
 			return replyContextLoadedMsg{requestID: requestID, boxID: boxID, err: err}
 		}
-		addressed := htmlutil.ParseTopicAddressed(string(topicResp.Data))
-
-		entriesResp, err := sdk.GetHTML(ctx, fmt.Sprintf("/topics/%d/entries", topicID))
-		if err != nil {
-			return replyContextLoadedMsg{requestID: requestID, boxID: boxID, err: err}
-		}
-		entries := htmlutil.ParseTopicEntriesHTML(string(entriesResp.Data))
-		if len(entries) == 0 {
+		if topic == nil || len(topic.Entries) == 0 {
 			return replyContextLoadedMsg{
 				requestID: requestID,
 				boxID:     boxID,
 				err:       fmt.Errorf("no entries found in thread %d", topicID),
 			}
 		}
+		accountSDK, err := v.clientForTopicAccount(ctx, topic.AccountId)
+		if err != nil {
+			return replyContextLoadedMsg{requestID: requestID, boxID: boxID, err: err}
+		}
+		topicResp, err := accountSDK.GetHTML(ctx, fmt.Sprintf("/topics/%d", topicID))
+		if err != nil {
+			return replyContextLoadedMsg{requestID: requestID, boxID: boxID, err: err}
+		}
+		addressed := htmlutil.ParseTopicAddressed(string(topicResp.Data))
 		return replyContextLoadedMsg{
 			requestID: requestID,
 			boxID:     boxID,
 			topicID:   topicID,
 			topicName: topicName,
-			entryID:   entries[len(entries)-1].ID,
+			entryID:   topic.Entries[len(topic.Entries)-1].Id,
+			sdk:       accountSDK,
 			to:        addressed.To,
 			cc:        addressed.CC,
 			bcc:       addressed.BCC,
@@ -368,8 +379,12 @@ func (v *mailView) loadForwardContext(topicID int64, topicName string) tea.Cmd {
 				err:       fmt.Errorf("no entries found in thread %d", topicID),
 			}
 		}
+		accountSDK, err := v.clientForTopicAccount(ctx, topic.AccountId)
+		if err != nil {
+			return forwardContextLoadedMsg{requestID: requestID, boxID: boxID, err: err}
+		}
 		entryID := topic.Entries[len(topic.Entries)-1].Id
-		draft, err := sdk.Entries().NewForward(ctx, entryID)
+		draft, err := accountSDK.Entries().NewForward(ctx, entryID)
 		if err != nil {
 			return forwardContextLoadedMsg{requestID: requestID, boxID: boxID, err: err}
 		}
@@ -385,10 +400,21 @@ func (v *mailView) loadForwardContext(topicID int64, topicName string) tea.Cmd {
 			boxID:     boxID,
 			topicID:   topicID,
 			topicName: topicName,
+			sdk:       accountSDK,
 			subject:   draft.Subject,
 			content:   draft.Content,
 		}
 	}
+}
+
+func (v *mailView) clientForTopicAccount(ctx context.Context, accountID int64) (*hey.Client, error) {
+	if accountID <= 0 {
+		return nil, fmt.Errorf("thread did not identify its mail account")
+	}
+	if v.vc.rootSDK == nil {
+		return nil, fmt.Errorf("mail account switching is unavailable")
+	}
+	return v.vc.rootSDK.ForAccount(ctx, accountID)
 }
 
 // send submits the open form through the SDK.
@@ -397,6 +423,9 @@ func (v *mailView) send() tea.Cmd {
 	to, cc, bcc, subject, body := f.values()
 	ctx := v.vc.ctx
 	sdk := v.vc.sdk
+	if f.sendSDK != nil {
+		sdk = f.sendSDK
+	}
 	switch f.mode {
 	case composeReply:
 		entryID := f.entryID

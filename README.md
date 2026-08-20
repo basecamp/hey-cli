@@ -76,7 +76,10 @@ tracking, and journal entries remain identity-wide.
 
 ## TUI
 
-Run `hey` to launch the interactive terminal UI.
+Run `hey` to launch the interactive terminal UI. For identities with multiple linked mail
+accounts, press Ctrl+A to switch between All Accounts and individual email addresses.
+Switching cancels requests from the previous account and reloads the active section;
+Calendar and Journal remain identity-wide.
 
 Navigate between Mail, Contacts, Calendar, and Journal. In Mail, use `/` to search, Enter to open a thread, `r` to reply, `f` to forward, `m` to move, `t` to trash, `s` to mark as spam, `-` to ignore, and `+` to stop ignoring. Select threads with Space and press `b` to preview every bulk-reply recipient before writing and sending one reply to all selected threads. A delayed bulk reply can be recalled with `u` while HEY's undo window remains open. Search results retain the matching-message summary; use `n` and `p` to move between result pages.
 

@@ -103,7 +103,7 @@ func newRootCmd() *cobra.Command {
 			if err := requireAuth(); err != nil {
 				return err
 			}
-			return tui.Run(sdk)
+			return tui.Run(rootSDK, sdk, cfg.AccountID)
 		},
 	}
 

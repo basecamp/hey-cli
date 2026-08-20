@@ -152,7 +152,7 @@ CLI for HEY: mailboxes, email threads, contacts, replies, compose, calendars, to
 | Write journal entry | `hey journal write "Today was great"` |
 | Check auth status | `hey auth status` |
 | Print access token | `hey auth token` |
-| Launch TUI | `hey` |
+| Launch TUI | `hey` (Ctrl+A switches linked mail accounts) |
 
 ## Decision Trees
 

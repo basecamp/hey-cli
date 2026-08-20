@@ -13,6 +13,7 @@ type attachmentSaveFunc func(context.Context, string, string, bool) (int64, erro
 type attachmentOpenFunc func(string) error
 
 type viewContext struct {
+	rootSDK              *hey.Client
 	sdk                  *hey.Client
 	ctx                  context.Context
 	styles               styles
