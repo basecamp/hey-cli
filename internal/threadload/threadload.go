@@ -105,6 +105,15 @@ const (
 	StateFailed State = "failed"
 )
 
+// Truncation is what stopped the index walk short of its end.
+type Truncation string
+
+const (
+	TruncatedByPages    Truncation = "pages"
+	TruncatedByEntries  Truncation = "entries"
+	TruncatedByDeadline Truncation = "deadline"
+)
+
 // Entry is one entry of the thread with whatever was read for it.
 type Entry struct {
 	Entry   generated.Entry
@@ -118,9 +127,11 @@ type Entry struct {
 // what is missing.
 type Thread struct {
 	Entries []Entry
-	// IndexTruncated reports that the index had more pages than MaxPages, or more
-	// entries than MaxEntries, so entries older than the last one here exist unseen.
-	IndexTruncated bool
+	// IndexTruncated reports that the index was not read to its end — more pages than
+	// MaxPages, more entries than MaxEntries, or the Deadline passed — so entries older
+	// than the last one here exist unseen. IndexTruncatedBy names which.
+	IndexTruncated   bool
+	IndexTruncatedBy Truncation
 	// Omitted counts the entries whose body was wanted and not read: over_limit or
 	// failed.
 	Omitted int
@@ -150,7 +161,7 @@ func Load(ctx context.Context, source Source, request Request) (*Thread, error) 
 		return nil, err
 	}
 
-	thread := &Thread{Entries: make([]Entry, len(entries)), IndexTruncated: truncated}
+	thread := &Thread{Entries: make([]Entry, len(entries)), IndexTruncated: truncated != "", IndexTruncatedBy: truncated}
 	for i, entry := range entries {
 		thread.Entries[i] = Entry{Entry: entry, State: StateNotRequested}
 	}
@@ -173,31 +184,35 @@ func Load(ctx context.Context, source Source, request Request) (*Thread, error) 
 // The loader's own deadline running out part way is a limit like the page cap — what
 // was read is returned as truncated — where the caller's context ending, or a page
 // that fails, is an error.
-func readIndex(ctx, caller context.Context, source Source, topicID int64, limits Limits) (entries []generated.Entry, truncated bool, err error) {
+func readIndex(ctx, caller context.Context, source Source, topicID int64, limits Limits) (entries []generated.Entry, truncated Truncation, err error) {
 	cursor := ""
 	for page := 0; ; page++ {
 		if page >= limits.MaxPages {
-			return entries, true, nil
+			return entries, TruncatedByPages, nil
 		}
 		result, err := source.EntriesPage(ctx, topicID, cursor)
 		if err != nil {
 			if page > 0 && ctx.Err() != nil && caller.Err() == nil {
-				return entries, true, nil
+				return entries, TruncatedByDeadline, nil
 			}
 			if page == 0 {
-				return nil, false, err
+				return nil, "", err
 			}
-			return nil, false, fmt.Errorf("thread %d: entries page %d: %w", topicID, page+1, err)
+			return nil, "", fmt.Errorf("thread %d: entries page %d: %w", topicID, page+1, err)
 		}
 		for _, entry := range result.Entries {
 			if len(entries) >= limits.MaxEntries {
-				return entries, true, nil
+				return entries, TruncatedByEntries, nil
 			}
 			entries = append(entries, entry)
 		}
-		// An empty page ends the index whatever cursor came with it.
+		// An empty page ends the index whatever cursor came with it; a page that
+		// brought the count exactly to the cap ends the walk before another request.
 		if result.Next == "" || len(result.Entries) == 0 {
-			return entries, false, nil
+			return entries, "", nil
+		}
+		if len(entries) >= limits.MaxEntries {
+			return entries, TruncatedByEntries, nil
 		}
 		cursor = result.Next
 	}
@@ -238,12 +253,16 @@ func hydrate(ctx context.Context, source Source, thread *Thread, limits Limits) 
 				entry.State = StateOverLimit
 			case err != nil:
 				entry.State, entry.Err = StateFailed, err
-			case message.Content == "":
-				entry.Message, entry.State = message, StateBodyless
-			case !budget.admit(int64(len(message.Content))):
-				entry.State = StateOverLimit
 			default:
-				entry.Message, entry.State = message, StateHydrated
+				kept, size := retained(message)
+				switch {
+				case !budget.admit(size):
+					entry.State = StateOverLimit
+				case kept.Content == "":
+					entry.Message, entry.State = kept, StateBodyless
+				default:
+					entry.Message, entry.State = kept, StateHydrated
+				}
 			}
 			return nil
 		})
@@ -293,6 +312,29 @@ func readMessage(ctx context.Context, source Source, entryID int64, retries int)
 	}
 	return nil, lastErr
 }
+
+// retained is the part of a message a thread keeps — the body and what names the
+// entry — and how many bytes it costs the budget. The rest of what HEY serves on a
+// message, the recipient lists above all, is dropped here rather than held: the budget
+// bounds what is kept, so it has to be charged for everything that is.
+func retained(message *generated.Message) (*generated.Message, int64) {
+	kept := &generated.Message{
+		Id:        message.Id,
+		Content:   message.Content,
+		Subject:   message.Subject,
+		Url:       message.Url,
+		Creator:   message.Creator,
+		CreatedAt: message.CreatedAt,
+		UpdatedAt: message.UpdatedAt,
+	}
+	size := int64(len(kept.Content)+len(kept.Subject)+len(kept.Url)+
+		len(kept.Creator.Name)+len(kept.Creator.EmailAddress)) + retainedOverhead
+	return kept, size
+}
+
+// retainedOverhead is what a kept message costs beyond its strings: the struct, the
+// entry, the timestamps.
+const retainedOverhead = 512
 
 type byteBudget struct {
 	mu        sync.Mutex

@@ -20,6 +20,7 @@ type fakeSource struct {
 	bodies    map[int64]string
 	failing   map[int64]int // failures before a message succeeds; -1 fails forever
 	systemic  map[int64]bool
+	subjects  map[int64]string
 	pageErr   map[int]error
 	slow      time.Duration
 	slowPages time.Duration
@@ -80,7 +81,8 @@ func (f *fakeSource) Message(ctx context.Context, id int64) (*generated.Message,
 		return nil, fmt.Errorf("message %d: boom", id)
 	}
 	f.mu.Unlock()
-	return &generated.Message{Id: id, Content: f.bodies[id]}, nil
+	return &generated.Message{Id: id, Content: f.bodies[id], Subject: f.subjects[id],
+		Addressed: generated.Addressed{Directly: []generated.Contact{{Name: "Rick Sanchez"}}}}, nil
 }
 
 func ids(entries []Entry) []int64 {
@@ -190,11 +192,50 @@ func TestLoadStopsAtTheEntryCap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !thread.IndexTruncated || fmt.Sprint(ids(thread.Entries)) != "[14 15]" {
+	if !thread.IndexTruncated || thread.IndexTruncatedBy != TruncatedByEntries || fmt.Sprint(ids(thread.Entries)) != "[14 15]" {
 		t.Errorf("thread = %+v", thread)
 	}
 	if source.index.Load() != 1 {
 		t.Errorf("read %d pages, want the cap to stop the walk", source.index.Load())
+	}
+
+	// A page that brings the count exactly to the cap ends the walk before another
+	// request is made for a page nothing from would be kept.
+	source = &fakeSource{pages: [][]int64{{15, 14}, {13}}}
+	l.MaxEntries = 2
+	thread, err = Load(context.Background(), source, Request{TopicID: 7, Limits: l})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !thread.IndexTruncated || source.index.Load() != 1 {
+		t.Errorf("thread = %+v after %d page reads, want truncated after one", thread, source.index.Load())
+	}
+}
+
+// What a thread keeps of a message is charged to the budget whole — body, subject,
+// URL, creator — and what is not kept is not held: the recipient lists go.
+func TestLoadChargesWhatItKeeps(t *testing.T) {
+	source := &fakeSource{pages: [][]int64{{12, 11}}, bodies: map[int64]string{12: "x", 11: "y"}, subjects: map[int64]string{12: strings.Repeat("s", 200)}}
+	l := limits()
+	l.MaxRetainedBytes = retainedOverhead + 100
+	l.Concurrency = 1
+	thread, err := Load(context.Background(), source, Request{TopicID: 7, Hydrate: true, Limits: l})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Newest first: 12's subject does not fit, so nothing is kept.
+	if got := states(thread.Entries); got[StateOverLimit] != 2 {
+		t.Errorf("states = %v, want both over the limit once the subject is charged", got)
+	}
+	l.MaxRetainedBytes = 2 * (retainedOverhead + 300)
+	thread, err = Load(context.Background(), source, Request{TopicID: 7, Hydrate: true, Limits: l})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range thread.Entries {
+		if entry.Message == nil || len(entry.Message.Addressed.Directly) != 0 {
+			t.Errorf("entry %d kept %+v, want the body without the recipient lists", entry.Entry.Id, entry.Message)
+		}
 	}
 }
 
@@ -231,7 +272,7 @@ func TestLoadSpendsTheByteBudgetNewestFirst(t *testing.T) {
 		14: strings.Repeat("a", 10), 13: strings.Repeat("b", 10), 12: strings.Repeat("c", 10), 11: "d",
 	}}
 	l := limits()
-	l.MaxRetainedBytes = 25
+	l.MaxRetainedBytes = 2*retainedOverhead + 25
 	l.Concurrency = 1
 	for range 5 {
 		thread, err := Load(context.Background(), source, Request{TopicID: 7, Hydrate: true, Limits: l})

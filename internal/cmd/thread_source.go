@@ -30,9 +30,9 @@ func (s sdkThreadSource) EntriesPage(ctx context.Context, topicID int64, cursor 
 	return threadload.Page{Entries: page.Entries, Next: page.NextPage}, nil
 }
 
-// Message reads one entry's message. A rate limit, an expired credential or a server
-// error is about the service, not the message, and is marked systemic so the loader
-// stops the fan-out rather than asking two thousand more times.
+// Message reads one entry's message. A rate limit, an expired credential, a server
+// error or a lost connection is about the service, not the message, and is marked
+// systemic so the loader stops the fan-out rather than asking two thousand more times.
 func (s sdkThreadSource) Message(ctx context.Context, entryID int64) (*generated.Message, error) {
 	message, err := s.client.Messages().Get(ctx, entryID)
 	if err != nil {
@@ -46,7 +46,7 @@ func systemic(err error) error {
 	if errors.As(err, &apiErr) {
 		switch {
 		case apiErr.Code == apierr.CodeRateLimit, apiErr.Code == apierr.CodeAuth, apiErr.Code == apierr.CodeForbidden,
-			apiErr.HTTPStatus >= 500:
+			apiErr.Code == apierr.CodeNetwork, apiErr.HTTPStatus >= 500:
 			return fmt.Errorf("%w: %w", threadload.ErrSystemic, err)
 		}
 	}
@@ -77,8 +77,16 @@ func loadThread(ctx context.Context, threadID int64, hydrate bool) (*threadload.
 func threadNotice(thread *threadload.Thread) string {
 	var parts []string
 	if thread.IndexTruncated {
-		parts = append(parts, fmt.Sprintf("only the newest %d entries were read; older ones exist beyond the %d-page, %d-entry limit",
-			len(thread.Entries), threadLimits.MaxPages, threadLimits.MaxEntries))
+		reason := ""
+		switch thread.IndexTruncatedBy {
+		case threadload.TruncatedByPages:
+			reason = fmt.Sprintf("beyond the %d-page limit", threadLimits.MaxPages)
+		case threadload.TruncatedByEntries:
+			reason = fmt.Sprintf("beyond the %d-entry limit", threadLimits.MaxEntries)
+		case threadload.TruncatedByDeadline:
+			reason = fmt.Sprintf("the %s read limit passed before the index was read to its end", threadLimits.Deadline)
+		}
+		parts = append(parts, fmt.Sprintf("only the newest %d entries were read; older ones exist, %s", len(thread.Entries), reason))
 	}
 	if thread.Omitted > 0 {
 		failed, overLimit := 0, 0
