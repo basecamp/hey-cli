@@ -36,6 +36,11 @@ func (s sdkThreadSource) EntriesPage(ctx context.Context, topicID int64, cursor 
 func (s sdkThreadSource) Message(ctx context.Context, entryID int64) (*generated.Message, error) {
 	message, err := s.client.Messages().Get(ctx, entryID)
 	if err != nil {
+		// A request the context ended mid-flight surfaces as a network error; that
+		// is the context ending, which the loader handles, not the service failing.
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, systemic(apierr.FromSDK(err))
 	}
 	return message, nil
@@ -83,6 +88,8 @@ func threadNotice(thread *threadload.Thread) string {
 			reason = fmt.Sprintf("beyond the %d-page limit", threadLimits.MaxPages)
 		case threadload.TruncatedByEntries:
 			reason = fmt.Sprintf("beyond the %d-entry limit", threadLimits.MaxEntries)
+		case threadload.TruncatedByBytes:
+			reason = fmt.Sprintf("beyond the %d-byte limit on what a read keeps", threadLimits.MaxRetainedBytes)
 		case threadload.TruncatedByDeadline:
 			reason = fmt.Sprintf("the %s read limit passed before the index was read to its end", threadLimits.Deadline)
 		}

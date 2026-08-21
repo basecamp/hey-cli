@@ -16,17 +16,18 @@ import (
 // fakeSource serves a thread the way HEY does: the index newest first, a page at a
 // time, and a message per entry.
 type fakeSource struct {
-	pages     [][]int64
-	bodies    map[int64]string
-	failing   map[int64]int // failures before a message succeeds; -1 fails forever
-	systemic  map[int64]bool
-	subjects  map[int64]string
-	pageErr   map[int]error
-	slow      time.Duration
-	slowPages time.Duration
-	mu        sync.Mutex
-	messages  atomic.Int64
-	index     atomic.Int64
+	pages          [][]int64
+	bodies         map[int64]string
+	failing        map[int64]int // failures before a message succeeds; -1 fails forever
+	systemic       map[int64]bool
+	subjects       map[int64]string
+	failureMessage string
+	pageErr        map[int]error
+	slow           time.Duration
+	slowPages      time.Duration
+	mu             sync.Mutex
+	messages       atomic.Int64
+	index          atomic.Int64
 }
 
 func (f *fakeSource) EntriesPage(ctx context.Context, _ int64, cursor string) (Page, error) {
@@ -78,6 +79,9 @@ func (f *fakeSource) Message(ctx context.Context, id int64) (*generated.Message,
 			f.failing[id]--
 		}
 		f.mu.Unlock()
+		if f.failureMessage != "" {
+			return nil, errors.New(f.failureMessage)
+		}
 		return nil, fmt.Errorf("message %d: boom", id)
 	}
 	f.mu.Unlock()
@@ -212,12 +216,41 @@ func TestLoadStopsAtTheEntryCap(t *testing.T) {
 	}
 }
 
+// The index is charged to the budget too: a walk that would keep more than the budget
+// stops, and says why.
+func TestLoadChargesTheIndexToTheBudget(t *testing.T) {
+	source := &fakeSource{pages: [][]int64{{15, 14, 13}, {12, 11}}}
+	l := limits()
+	l.MaxRetainedBytes = 3*retainedOverhead + 60
+	thread, err := Load(context.Background(), source, Request{TopicID: 7, Limits: l})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !thread.IndexTruncated || thread.IndexTruncatedBy != TruncatedByBytes || len(thread.Entries) != 3 {
+		t.Errorf("thread = %+v, want three entries truncated by bytes", thread)
+	}
+}
+
+// A failed read keeps a bounded reason, not the failure.
+func TestLoadBoundsTheReasonAFailedReadKeeps(t *testing.T) {
+	source := &fakeSource{pages: [][]int64{{11}}, bodies: map[int64]string{}, failing: map[int64]int{11: -1}, failureMessage: strings.Repeat("x", 5000)}
+	l := limits()
+	l.MaxRetries = 0
+	thread, err := Load(context.Background(), source, Request{TopicID: 7, Hydrate: true, Limits: l})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry := thread.Entries[0]; entry.State != StateFailed || len(entry.Err.Error()) > 300 {
+		t.Errorf("entry = %+v (err %d bytes), want failed with a bounded reason", entry, len(entry.Err.Error()))
+	}
+}
+
 // What a thread keeps of a message is charged to the budget whole — body, subject,
 // URL, creator — and what is not kept is not held: the recipient lists go.
 func TestLoadChargesWhatItKeeps(t *testing.T) {
 	source := &fakeSource{pages: [][]int64{{12, 11}}, bodies: map[int64]string{12: "x", 11: "y"}, subjects: map[int64]string{12: strings.Repeat("s", 200)}}
 	l := limits()
-	l.MaxRetainedBytes = retainedOverhead + 100
+	l.MaxRetainedBytes = 3*retainedOverhead + 100
 	l.Concurrency = 1
 	thread, err := Load(context.Background(), source, Request{TopicID: 7, Hydrate: true, Limits: l})
 	if err != nil {
@@ -227,7 +260,7 @@ func TestLoadChargesWhatItKeeps(t *testing.T) {
 	if got := states(thread.Entries); got[StateOverLimit] != 2 {
 		t.Errorf("states = %v, want both over the limit once the subject is charged", got)
 	}
-	l.MaxRetainedBytes = 2 * (retainedOverhead + 300)
+	l.MaxRetainedBytes = 4 * (retainedOverhead + 300)
 	thread, err = Load(context.Background(), source, Request{TopicID: 7, Hydrate: true, Limits: l})
 	if err != nil {
 		t.Fatal(err)
@@ -272,9 +305,9 @@ func TestLoadSpendsTheByteBudgetNewestFirst(t *testing.T) {
 		14: strings.Repeat("a", 10), 13: strings.Repeat("b", 10), 12: strings.Repeat("c", 10), 11: "d",
 	}}
 	l := limits()
-	l.MaxRetainedBytes = 2*retainedOverhead + 25
-	l.Concurrency = 1
-	for range 5 {
+	// Four index entries and the two newest bodies fit; the third body does not.
+	l.MaxRetainedBytes = 6*(retainedOverhead+int64(len("summary 14"))) + 1
+	for range 20 {
 		thread, err := Load(context.Background(), source, Request{TopicID: 7, Hydrate: true, Limits: l})
 		if err != nil {
 			t.Fatal(err)

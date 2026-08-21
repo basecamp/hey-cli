@@ -58,8 +58,9 @@ type Limits struct {
 	MaxRetries int
 	// Concurrency is how many message requests are in flight at once.
 	Concurrency int
-	// MaxRetainedBytes is how much message content is kept in total; an entry whose
-	// content would exceed it is over_limit.
+	// MaxRetainedBytes is how much is kept in total — the index entries and then the
+	// message content; an entry whose content would exceed it is over_limit, and an
+	// index that would exceed it is truncated.
 	MaxRetainedBytes int64
 	// Deadline is how long the whole load may take; entries not yet requested when it
 	// passes are over_limit.
@@ -111,6 +112,7 @@ type Truncation string
 const (
 	TruncatedByPages    Truncation = "pages"
 	TruncatedByEntries  Truncation = "entries"
+	TruncatedByBytes    Truncation = "bytes"
 	TruncatedByDeadline Truncation = "deadline"
 )
 
@@ -156,7 +158,8 @@ func Load(ctx context.Context, source Source, request Request) (*Thread, error) 
 		defer cancel()
 	}
 
-	entries, truncated, err := readIndex(ctx, caller, source, request.TopicID, limits)
+	budget := &byteBudget{remaining: limits.MaxRetainedBytes}
+	entries, truncated, err := readIndex(ctx, caller, source, request.TopicID, limits, budget)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +169,7 @@ func Load(ctx context.Context, source Source, request Request) (*Thread, error) 
 		thread.Entries[i] = Entry{Entry: entry, State: StateNotRequested}
 	}
 	if request.Hydrate {
-		if err := hydrate(ctx, source, thread, limits); err != nil {
+		if err := hydrate(ctx, source, thread, limits, budget); err != nil {
 			return nil, err
 		}
 		if err := caller.Err(); err != nil {
@@ -184,7 +187,7 @@ func Load(ctx context.Context, source Source, request Request) (*Thread, error) 
 // The loader's own deadline running out part way is a limit like the page cap — what
 // was read is returned as truncated — where the caller's context ending, or a page
 // that fails, is an error.
-func readIndex(ctx, caller context.Context, source Source, topicID int64, limits Limits) (entries []generated.Entry, truncated Truncation, err error) {
+func readIndex(ctx, caller context.Context, source Source, topicID int64, limits Limits, budget *byteBudget) (entries []generated.Entry, truncated Truncation, err error) {
 	cursor := ""
 	for page := 0; ; page++ {
 		if page >= limits.MaxPages {
@@ -204,6 +207,11 @@ func readIndex(ctx, caller context.Context, source Source, topicID int64, limits
 			if len(entries) >= limits.MaxEntries {
 				return entries, TruncatedByEntries, nil
 			}
+			// The index is charged to the same budget as the bodies: a page is capped
+			// by the transport, but a hundred of them are not.
+			if !budget.admit(entrySize(entry)) {
+				return entries, TruncatedByBytes, nil
+			}
 			entries = append(entries, entry)
 		}
 		// An empty page ends the index whatever cursor came with it; a page that
@@ -219,16 +227,16 @@ func readIndex(ctx, caller context.Context, source Source, topicID int64, limits
 }
 
 // hydrate reads each entry's message, newest first, Concurrency at a time, within the
-// request, byte and time limits. The byte budget is enforced twice: as each request
-// completes, so that no more than MaxRetainedBytes of content is ever held, and then
-// in entry order, so that what a large thread keeps is a contiguous newest-first run
-// — a body that did not fit means nothing older is kept either. Under the budget the
-// result is the same on every run; over it, the run kept may be shorter than the
-// budget allowed, never longer. Entries past a limit are over_limit; a request that
-// fails after its retries leaves its entry failed; a systemic error — ErrSystemic from
-// the Source — stops every request in flight and is returned.
-func hydrate(ctx context.Context, source Source, thread *Thread, limits Limits) error {
-	budget := &byteBudget{remaining: limits.MaxRetainedBytes}
+// request, byte and time limits. Requests run concurrently, but each one's result is
+// admitted into the byte budget in entry order — a worker that finishes early waits
+// its turn — so what a large thread keeps is decided newest first and is the same on
+// every run, and no more than the budget plus the requests in flight is ever held.
+// Once a body did not fit, nothing older is kept either, so the kept run is
+// contiguous. Entries past a limit are over_limit; a request that fails after its
+// retries leaves its entry failed, with its reason bounded; a systemic error —
+// ErrSystemic from the Source — stops every request in flight and is returned.
+func hydrate(ctx context.Context, source Source, thread *Thread, limits Limits, budget *byteBudget) error {
+	turns := newTurns()
 	group, groupCtx := errgroup.WithContext(ctx)
 	group.SetLimit(max(limits.Concurrency, 1))
 	for i := range thread.Entries {
@@ -238,6 +246,7 @@ func hydrate(ctx context.Context, source Source, thread *Thread, limits Limits) 
 			continue
 		}
 		group.Go(func() error {
+			defer turns.done(i)
 			// The group's context ending is the deadline, or a systemic error in
 			// another request; an entry it reaches is over the limit, not failed.
 			if groupCtx.Err() != nil {
@@ -252,9 +261,10 @@ func hydrate(ctx context.Context, source Source, thread *Thread, limits Limits) 
 			case err != nil && groupCtx.Err() != nil:
 				entry.State = StateOverLimit
 			case err != nil:
-				entry.State, entry.Err = StateFailed, err
+				entry.State, entry.Err = StateFailed, boundedError(err)
 			default:
 				kept, size := retained(message)
+				turns.wait(i)
 				switch {
 				case !budget.admit(size):
 					entry.State = StateOverLimit
@@ -311,6 +321,58 @@ func readMessage(ctx context.Context, source Source, entryID int64, retries int)
 		}
 	}
 	return nil, lastErr
+}
+
+// turns hands the byte budget to workers in entry order: a worker waits until every
+// entry before it has taken its turn, whether that entry was admitted, refused, failed
+// or skipped, so admission is newest first however the requests finished.
+type turns struct {
+	mu   sync.Mutex
+	cond *sync.Cond
+	next int
+}
+
+func newTurns() *turns {
+	t := &turns{}
+	t.cond = sync.NewCond(&t.mu)
+	return t
+}
+
+func (t *turns) wait(i int) {
+	t.mu.Lock()
+	for t.next != i {
+		t.cond.Wait()
+	}
+	t.mu.Unlock()
+}
+
+// done is called by every worker on its way out, turn taken or not; it waits for its
+// turn first so that the order holds even for a worker that had nothing to admit.
+func (t *turns) done(i int) {
+	t.mu.Lock()
+	for t.next != i {
+		t.cond.Wait()
+	}
+	t.next++
+	t.cond.Broadcast()
+	t.mu.Unlock()
+}
+
+// entrySize is what an index entry costs the budget: its strings and an overhead.
+func entrySize(entry generated.Entry) int64 {
+	return int64(len(entry.Summary)+len(entry.Subject)+len(entry.AppUrl)+
+		len(entry.AlternativeSenderName)+len(entry.Creator.Name)+len(entry.Creator.EmailAddress)) + retainedOverhead
+}
+
+// boundedError keeps why a read failed without keeping the failure: an error carrying
+// a response body is cut to a sentence.
+func boundedError(err error) error {
+	const limit = 256
+	message := err.Error()
+	if len(message) > limit {
+		message = message[:limit] + "…"
+	}
+	return errors.New(message)
 }
 
 // retained is the part of a message a thread keeps — the body and what names the
