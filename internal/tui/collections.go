@@ -222,7 +222,7 @@ func (p *collectionMembershipPicker) view(styles styles, width int) string {
 	var body strings.Builder
 	body.WriteString(styles.title.Render("Thread collections"))
 	if p.posting.Summary != "" {
-		fmt.Fprintf(&body, "\n%s", truncateStr(p.posting.Summary, contentWidth))
+		fmt.Fprintf(&body, "\n%s", truncateStr(terminal.SanitizeLine(p.posting.Summary), contentWidth))
 	}
 	body.WriteString("\n\n")
 	end := min(p.offset+p.visibleRows(), len(p.collections))

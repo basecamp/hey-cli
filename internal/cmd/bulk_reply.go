@@ -211,7 +211,7 @@ func (c *bulkReplySendCommand) run(cmd *cobra.Command, args []string) error {
 	case output.FormatCount:
 		fmt.Fprintln(cmd.OutOrStdout(), delivery.EntriesCount)
 		return nil
-	case output.FormatAuto, output.FormatJSON, output.FormatStyled, output.FormatQuiet, output.FormatMarkdown:
+	case output.FormatAuto, output.FormatJSON, output.FormatStyled, output.FormatQuiet, output.FormatMarkdown, output.FormatHTML:
 	}
 
 	options := []output.ResponseOption{
@@ -298,7 +298,7 @@ func (c *bulkReplyUndoCommand) run(cmd *cobra.Command, args []string) error {
 	case output.FormatCount:
 		fmt.Fprintln(cmd.OutOrStdout(), 1)
 		return nil
-	case output.FormatAuto, output.FormatJSON, output.FormatStyled, output.FormatQuiet, output.FormatMarkdown:
+	case output.FormatAuto, output.FormatJSON, output.FormatStyled, output.FormatQuiet, output.FormatMarkdown, output.FormatHTML:
 	}
 	return writeOK(map[string]any{"id": ids[0], "undone": true}, output.WithSummary("Bulk reply recalled"))
 }

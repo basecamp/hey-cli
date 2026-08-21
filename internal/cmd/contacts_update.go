@@ -10,6 +10,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 type contactsUpdateCommand struct {
@@ -106,7 +107,7 @@ func (c *contactsUpdateCommand) run(cmd *cobra.Command, args []string) error {
 		return apierr.ErrNotFound("contact", args[0])
 	}
 	return writeMutationLine(cmd,
-		fmt.Sprintf("Contact updated: %s <%s> (#%d)", contact.Name, contact.EmailAddress, contact.Id),
+		fmt.Sprintf("Contact updated: %s <%s> (#%d)", terminal.SanitizeLine(contact.Name), terminal.SanitizeLine(contact.EmailAddress), contact.Id),
 		"Contact updated",
 		contact,
 		output.WithBreadcrumbs(output.Breadcrumb{Action: "view", Command: fmt.Sprintf("hey contacts show %d", contact.Id), Description: "View the contact"}),

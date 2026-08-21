@@ -1,0 +1,62 @@
+# What TestSinksAreSanitized enforces: a listed sink may not be handed a listed field
+# except through a listed sanitizer. Lines are "kind name [reason]".
+#
+# The fields are the ones HEY fills in from what somebody else wrote — a sender, a
+# subject, a filename, a body. The sanitizers are the functions that make such a value
+# safe for where it is going: terminal.Sanitize and SanitizeLine for a terminal,
+# markdown.Render for a body, markdownSafeText for a Markdown table cell,
+# htmlutil.ToMarkdown for Markdown that a JSON reader gets. An exemption names a
+# function, as file:function, and says why its writes are safe as they are.
+
+field Name
+field EmailAddress
+field Email
+field Summary
+field Subject
+field Title
+field Filename
+field ContentType
+field Body
+field BodyHTML
+field Content
+field Note
+field NoteHtml
+field NoteHTML
+field TopicName
+field AlternativeSenderName
+field Url
+field AppUrl
+field UndoSendUrl
+field Purpose
+field Status
+
+sanitizer terminal.Sanitize
+sanitizer terminal.SanitizeLine
+sanitizer markdown.Render
+sanitizer markdownSafeText
+sanitizer htmlutil.ToMarkdown
+sanitizer htmlToMarkdown
+sanitizer addRow
+
+sink fmt.Fprint
+sink fmt.Fprintf
+sink fmt.Fprintln
+sink fmt.Print
+sink fmt.Printf
+sink fmt.Println
+sink fmt.Sprint
+sink fmt.Sprintf
+sink fmt.Sprintln
+sink fmt.Errorf
+sink io.WriteString
+sink WriteString
+sink Render
+
+exempt internal/cmd/attachment_upload.go:appendUploadedAttachments HTML-escaped into the message body sent to HEY, not written to a terminal
+exempt internal/cmd/omarchy.go:run the step names and statuses are this program's own constants
+exempt internal/cmd/setup_agent.go:newSetupAgentCommands agent names are this program's own constants
+exempt internal/cmd/setup_agent.go:runSetupAgent agent names are this program's own constants
+exempt internal/cmd/setup.go:setupAgents agent names are this program's own constants
+exempt internal/cmd/setup.go:showWizardSuccess check names and statuses are this program's own constants
+exempt internal/cmd/upgrade_selfupdate.go:extractTarGzMember archive member names come from a release whose signature was verified first
+exempt internal/cmd/upgrade_selfupdate.go:extractZipMember archive member names come from a release whose signature was verified first

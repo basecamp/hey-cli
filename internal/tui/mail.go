@@ -2058,9 +2058,9 @@ func (v *mailView) renderEntries(entries []mail.Entry) string {
 			from = e.AlternativeSenderName
 		}
 
-		fmt.Fprintf(&b, "%s  %s\n", v.vc.styles.entryFrom.Render(from), v.vc.styles.entryDate.Render(formatDisplayDateTime(e.CreatedAt)))
+		fmt.Fprintf(&b, "%s  %s\n", v.vc.styles.entryFrom.Render(terminal.SanitizeLine(from)), v.vc.styles.entryDate.Render(formatDisplayDateTime(e.CreatedAt)))
 		if e.Summary != "" {
-			fmt.Fprintf(&b, "%s\n", e.Summary)
+			fmt.Fprintf(&b, "%s\n", terminal.SanitizeLine(e.Summary))
 		}
 		if e.Body != "" {
 			fmt.Fprintf(&b, "\n%s\n", v.vc.styles.entryBody.Render(markdown.Render(e.Body, sepWidth)))

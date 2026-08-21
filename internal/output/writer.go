@@ -28,6 +28,10 @@ const (
 	FormatIDs
 	FormatCount
 	FormatMarkdown
+	// FormatHTML is the raw writer behind --html: the original HTML of the one thing a
+	// command reads, written to a pipe or a file. It carries no envelope, so OK refuses
+	// it; the commands that support it write the HTML themselves.
+	FormatHTML
 )
 
 type Options struct {
@@ -99,6 +103,8 @@ func (w *Writer) OK(data any, opts ...ResponseOption) error {
 		return w.writeCount(data)
 	case FormatMarkdown:
 		return w.writeMarkdown(data)
+	case FormatHTML:
+		return apierr.ErrUsage("--html is not supported by this output")
 	default:
 		return w.writeJSON(data, opts...)
 	}
@@ -125,7 +131,9 @@ func (w *Writer) Err(err error) {
 	e := apierr.AsError(err)
 	format := w.EffectiveFormat()
 
-	if format == FormatStyled {
+	// An --html run is a person redirecting to a file: the error reads as text on
+	// stderr, as it does on a terminal, rather than as a JSON envelope.
+	if format == FormatStyled || format == FormatHTML {
 		msg := "Error: " + e.Message
 		if e.Hint != "" {
 			msg += "\n" + e.Hint

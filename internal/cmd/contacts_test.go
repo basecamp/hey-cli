@@ -175,21 +175,22 @@ func TestContactsShowIncludesAliasesAndPrivateNote(t *testing.T) {
 	}
 }
 
-func TestContactsShowHonorsHTMLOutput(t *testing.T) {
-	original := htmlOutput
-	htmlOutput = true
-	t.Cleanup(func() { htmlOutput = original })
-
+// The styled detail never prints HTML; --html is a format of its own and writes the
+// note's markup alone. Either way the text HEY served is inert on a terminal.
+func TestContactsShowStyledDetailIsPlainAndSanitized(t *testing.T) {
 	var output bytes.Buffer
 	command := &cobra.Command{}
 	command.SetOut(&output)
 	printContactDetails(command, contactShowResult{
-		ContactDetail: generated.ContactDetail{Id: 7, Name: "Jane Doe", EmailAddress: "jane@example.com"},
-		Note:          "Plain note",
+		ContactDetail: generated.ContactDetail{Id: 7, Name: "Jane \x1b[31mDoe", EmailAddress: "jane@example.com"},
+		Note:          "Plain \x1b]0;note\x07note",
 		NoteHTML:      "<p>Rich note</p>",
 	})
-	if !strings.Contains(output.String(), "<p>Rich note</p>") || strings.Contains(output.String(), "Plain note") {
-		t.Errorf("HTML contact detail output = %q", output.String())
+	if strings.Contains(output.String(), "<p>") || strings.Contains(output.String(), "\x1b") {
+		t.Errorf("styled contact detail = %q", output.String())
+	}
+	if !strings.Contains(output.String(), "Jane Doe") || !strings.Contains(output.String(), "Plain note") {
+		t.Errorf("styled contact detail = %q, want the text kept", output.String())
 	}
 }
 

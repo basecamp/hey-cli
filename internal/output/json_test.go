@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
 // encoding/json writes the C1 controls raw; a terminal reading the envelope sees an
 // 8-bit CSI. Escaping them leaves the decoded string identical.
 func TestWriterEscapesC1ControlsInEveryJSONFormat(t *testing.T) {
-	name := "Ryan31mSinger"
+	name := "Ryan\u009b31mSinger"
 	for _, test := range []struct {
 		name   string
 		format Format
@@ -26,7 +28,7 @@ func TestWriterEscapesC1ControlsInEveryJSONFormat(t *testing.T) {
 			if err := w.OK(map[string]any{"name": name}); err != nil {
 				t.Fatal(err)
 			}
-			if strings.Contains(buf.String(), "") {
+			if strings.Contains(buf.String(), "\u009b") {
 				t.Errorf("output = %q carries a raw C1 control", buf.String())
 			}
 			if !strings.Contains(buf.String(), `\u009b`) {
@@ -52,8 +54,8 @@ func TestWriterEscapesC1ControlsInEveryJSONFormat(t *testing.T) {
 func TestWriterErrEscapesC1Controls(t *testing.T) {
 	var stderr bytes.Buffer
 	w := New(Options{Format: FormatJSON, Stderr: &stderr})
-	w.Err(ErrUsage("bad label 31m"))
-	if strings.Contains(stderr.String(), "") || !strings.Contains(stderr.String(), `\u009b`) {
+	w.Err(apierr.ErrUsage("bad label \u009b31m"))
+	if strings.Contains(stderr.String(), "\u009b") || !strings.Contains(stderr.String(), `\u009b`) {
 		t.Errorf("stderr = %q, want the control escaped", stderr.String())
 	}
 }

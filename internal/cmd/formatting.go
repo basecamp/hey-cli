@@ -41,9 +41,15 @@ func newTable(w io.Writer) *table {
 	}
 }
 
+// addRow adds a row, sanitizing every cell on the way in: a table is where server
+// data lands most often, and a cell is one line by construction.
 func (t *table) addRow(row []string) {
-	t.updateColumnWidths(row)
-	t.rows = append(t.rows, row)
+	cells := make([]string, len(row))
+	for i, cell := range row {
+		cells[i] = terminal.SanitizeLine(cell)
+	}
+	t.updateColumnWidths(cells)
+	t.rows = append(t.rows, cells)
 }
 
 func (t *table) print() {

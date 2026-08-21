@@ -548,7 +548,7 @@ func wizardSummaryLine(result wizardResult) string {
 		headline = "Setup finished with issues"
 	}
 	if result.Identity != nil && result.Identity.Email != "" {
-		return fmt.Sprintf("%s - %s", headline, result.Identity.Email)
+		return fmt.Sprintf("%s - %s", headline, terminal.SanitizeLine(result.Identity.Email))
 	}
 	return headline
 }

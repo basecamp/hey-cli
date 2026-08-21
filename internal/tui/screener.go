@@ -9,6 +9,8 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 // --- Screener messages ---
@@ -684,10 +686,10 @@ func pendingScreenerRow(clearance generated.Clearance) screenerRow {
 	}
 	return screenerRow{
 		id:       clearance.Id,
-		name:     clearance.Petitioner.Name,
-		email:    clearance.Petitioner.EmailAddress,
-		detail:   detail,
-		trailing: clearance.Petitioner.EmailAddress,
+		name:     terminal.SanitizeLine(clearance.Petitioner.Name),
+		email:    terminal.SanitizeLine(clearance.Petitioner.EmailAddress),
+		detail:   terminal.SanitizeLine(detail),
+		trailing: terminal.SanitizeLine(clearance.Petitioner.EmailAddress),
 	}
 }
 
@@ -698,9 +700,9 @@ func screenedScreenerRow(clearance generated.Clearance) screenerRow {
 	}
 	return screenerRow{
 		id:       clearance.Id,
-		name:     clearance.Petitioner.Name,
-		email:    clearance.Petitioner.EmailAddress,
-		detail:   clearance.Petitioner.EmailAddress,
+		name:     terminal.SanitizeLine(clearance.Petitioner.Name),
+		email:    terminal.SanitizeLine(clearance.Petitioner.EmailAddress),
+		detail:   terminal.SanitizeLine(clearance.Petitioner.EmailAddress),
 		trailing: trailing,
 	}
 }

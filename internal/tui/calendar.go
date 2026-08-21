@@ -9,6 +9,7 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 // --- Calendar view types ---
@@ -236,7 +237,7 @@ func (v *calendarView) View() string {
 		heading = v.vc.styles.title.Render(v.notice) + "\n"
 	}
 	if habit := v.selectedHabit(); habit != nil {
-		heading += styleMuted.Render(fmt.Sprintf("Selected habit %d/%d: %s (ID %d)", v.habitIndex+1, len(v.manageableHabits()), habit.Title, habit.ID)) + "\n"
+		heading += styleMuted.Render(fmt.Sprintf("Selected habit %d/%d: %s (ID %d)", v.habitIndex+1, len(v.manageableHabits()), terminal.SanitizeLine(habit.Title), habit.ID)) + "\n"
 	}
 	return heading + v.contentVP.View()
 }
@@ -342,7 +343,7 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		if habit := v.selectedHabit(); habit != nil {
 			if v.confirmedHabitDeleteID != habit.ID {
 				v.confirmedHabitDeleteID = habit.ID
-				v.notice = fmt.Sprintf("Press x again to permanently delete %s and its history", habit.Title)
+				v.notice = fmt.Sprintf("Press x again to permanently delete %s and its history", terminal.SanitizeLine(habit.Title))
 				return nil
 			}
 			return v.deleteHabit(*habit)
@@ -562,8 +563,10 @@ func (v *calendarView) deleteHabit(recording Recording) tea.Cmd {
 
 // --- SDK type converters ---
 
+// sdkCalendarToModel and sdkRecordingToModel sanitize the text HEY served once, here,
+// so that every view of a calendar or an event shows it inert.
 func sdkCalendarToModel(c generated.Calendar) Calendar {
-	return Calendar{ID: c.Id, Name: c.Name, Personal: c.Personal}
+	return Calendar{ID: c.Id, Name: terminal.SanitizeLine(c.Name), Personal: c.Personal}
 }
 
 func sdkRecordingToModel(r generated.Recording) Recording {

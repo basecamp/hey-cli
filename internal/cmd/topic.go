@@ -3,6 +3,8 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"html"
+	"io"
 	"slices"
 	"strconv"
 	"strings"
@@ -16,6 +18,7 @@ import (
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/markdown"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 // maxThreadEntryPages is how many pages of a thread's entries one command reads, counting
@@ -84,23 +87,24 @@ func (c *topicCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	if writer.EffectiveFormat() == output.FormatHTML {
+		return writeThreadHTML(cmd.OutOrStdout(), entries)
+	}
+
 	if writer.IsStyled() {
 		w := cmd.OutOrStdout()
 		for i, e := range entries {
 			if i > 0 {
 				fmt.Fprintln(w, strings.Repeat("─", threadEntrySeparatorWidth))
 			}
-			fmt.Fprintf(w, "From: %s  [%s]  #%d\n", threadEntrySender(e), e.CreatedAt, e.ID)
+			fmt.Fprintf(w, "From: %s  [%s]  #%d\n", terminal.SanitizeLine(threadEntrySender(e)), e.CreatedAt, e.ID)
 			switch {
-			case htmlOutput && e.BodyHTML != "":
-				fmt.Fprintln(w)
-				fmt.Fprintln(w, e.BodyHTML)
 			case e.Body != "":
 				fmt.Fprintln(w)
 				fmt.Fprintln(w, markdown.Render(e.Body, stdoutWidth()))
 			case e.Summary != "":
 				fmt.Fprintln(w)
-				fmt.Fprintln(w, e.Summary)
+				fmt.Fprintln(w, terminal.SanitizeLine(e.Summary))
 			}
 			fmt.Fprintln(w)
 		}
@@ -122,6 +126,35 @@ func (c *topicCommand) run(cmd *cobra.Command, args []string) error {
 			},
 		),
 	)
+}
+
+// writeThreadHTML is what --html writes for a thread: each entry's original HTML, oldest
+// first, each introduced by a comment naming the entry, its sender and its date, with a
+// blank line between entries. An entry HEY served without a body says so in its
+// comment. A write that fails is the command's error.
+func writeThreadHTML(w io.Writer, entries []threadEntry) error {
+	for i, e := range entries {
+		if i > 0 {
+			if _, err := io.WriteString(w, "\n"); err != nil {
+				return fmt.Errorf("write thread HTML: %w", err)
+			}
+		}
+		body := e.BodyHTML
+		if body == "" {
+			body = "<!-- no body -->"
+		}
+		_, err := fmt.Fprintf(w, "<!-- hey entry %d from %s at %s -->\n%s\n",
+			e.ID, html.EscapeString(htmlCommentSafe(threadEntrySender(e))), e.CreatedAt, body)
+		if err != nil {
+			return fmt.Errorf("write thread HTML: %w", err)
+		}
+	}
+	return nil
+}
+
+// htmlCommentSafe keeps a value from ending the comment it is written into.
+func htmlCommentSafe(value string) string {
+	return strings.ReplaceAll(terminal.SanitizeLine(value), "--", "- -")
 }
 
 func threadEntrySender(entry threadEntry) string {

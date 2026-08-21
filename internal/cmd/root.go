@@ -53,6 +53,9 @@ func newRootCmd() *cobra.Command {
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			jqRequested := cmd.Flags().Changed("jq")
 			format := output.FormatFromFlags(jsonFlag || jqRequested, quietFlag, idsOnly, countFlag, markdownF, styledFlag, agentFlag)
+			if htmlOutput {
+				format = output.FormatHTML
+			}
 			writer = output.New(output.Options{
 				Format:   format,
 				Stdout:   cmd.OutOrStdout(),
@@ -66,6 +69,9 @@ func newRootCmd() *cobra.Command {
 				return nil
 			}
 			if err := validateJQFlags(cmd, jqFlag, jqRequested, idsOnly, countFlag); err != nil {
+				return err
+			}
+			if err := validateHTMLFlag(cmd); err != nil {
 				return err
 			}
 
@@ -153,7 +159,7 @@ func newRootCmd() *cobra.Command {
 	root.CompletionOptions.HiddenDefaultCmd = true
 
 	root.PersistentFlags().BoolVar(&jsonFlag, "json", false, "Output JSON with metadata")
-	root.PersistentFlags().BoolVar(&htmlOutput, "html", false, "Output raw HTML (for commands that return HTML content)")
+	root.PersistentFlags().BoolVar(&htmlOutput, "html", false, "Write the original HTML to a pipe or file (threads, journal read, contacts show, contacts note show)")
 	root.PersistentFlags().BoolVar(&quietFlag, "quiet", false, "Output result data only")
 	root.PersistentFlags().BoolVar(&idsOnly, "ids-only", false, "Output only IDs, one per line")
 	root.PersistentFlags().BoolVar(&countFlag, "count", false, "Output only the count of results")
@@ -274,6 +280,51 @@ func Execute() {
 		writer.Err(err)
 		os.Exit(output.ExitCodeFor(err))
 	}
+}
+
+// htmlCommands are the commands that read something HEY holds as HTML, and so the only
+// ones --html means anything to.
+var htmlCommands = map[string]bool{
+	"hey threads":            true,
+	"hey journal read":       true,
+	"hey contacts show":      true,
+	"hey contacts note show": true,
+}
+
+// validateHTMLFlag settles what --html may be combined with, before any configuration
+// is read or any request made. It is a format of its own, so every other output
+// selector conflicts with it; it writes markup, so a terminal is refused with the
+// redirect that was meant; and it is only offered by the commands that have HTML.
+func validateHTMLFlag(cmd *cobra.Command) error {
+	if !htmlOutput {
+		return nil
+	}
+	for _, selector := range []struct {
+		set  bool
+		flag string
+	}{
+		{jsonFlag, "--json"},
+		{markdownF, "--markdown"},
+		{quietFlag, "--quiet"},
+		{idsOnly, "--ids-only"},
+		{countFlag, "--count"},
+		{styledFlag, "--styled"},
+		{agentFlag, "--agent"},
+		{statsFlag, "--stats"},
+		{cmd.Flags().Changed("jq"), "--jq"},
+	} {
+		if selector.set {
+			return apierr.ErrUsage("cannot use --html with " + selector.flag)
+		}
+	}
+	if !htmlCommands[cmd.CommandPath()] {
+		return apierr.ErrUsage("--html is not supported by " + cmd.CommandPath())
+	}
+	if stdoutIsTerminal() {
+		return apierr.ErrUsageHint("--html writes raw HTML, which a terminal would show as markup",
+			fmt.Sprintf("redirect it to a file or a pipe: %s --html > out.html", cmd.CommandPath()))
+	}
+	return nil
 }
 
 func validateJQFlags(cmd *cobra.Command, filter string, requested, ids, count bool) error {

@@ -12,6 +12,7 @@ import (
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 type moveCommand struct {
@@ -62,7 +63,7 @@ func (c *moveCommand) run(cmd *cobra.Command, args []string) error {
 		return apierr.FromSDK(err)
 	}
 
-	return writeMutation(cmd, fmt.Sprintf("%d %s moved to %s", len(ids), threadNoun(len(ids)), destination.Name), nil)
+	return writeMutation(cmd, fmt.Sprintf("%d %s moved to %s", len(ids), threadNoun(len(ids)), terminal.SanitizeLine(destination.Name)), nil)
 }
 
 func resolveMoveDestination(ctx context.Context, nameOrID string) (*generated.Box, error) {

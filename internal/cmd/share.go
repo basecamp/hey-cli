@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 type shareCommand struct {
@@ -49,7 +50,7 @@ func (c *shareCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	return writeMutationLine(cmd,
-		fmt.Sprintf("Sharing link: %s", publication.Url),
+		fmt.Sprintf("Sharing link: %s", terminal.SanitizeLine(publication.Url)),
 		"Sharing link turned on",
 		publication)
 }

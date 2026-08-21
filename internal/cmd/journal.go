@@ -165,13 +165,13 @@ func (c *journalReadCommand) run(cmd *cobra.Command, args []string) error {
 		return writeOK(nil, output.WithSummary(fmt.Sprintf("No journal entry for %s", date)))
 	}
 
+	if writer.EffectiveFormat() == output.FormatHTML {
+		_, err := fmt.Fprintln(cmd.OutOrStdout(), content)
+		return err
+	}
+
 	if writer.IsStyled() {
 		w := cmd.OutOrStdout()
-		if htmlOutput {
-			fmt.Fprintln(w, content)
-			return nil
-		}
-
 		fmt.Fprintf(w, "Journal — %s\n\n", date)
 		fmt.Fprintln(w, markdown.Render(htmlutil.ToMarkdown(content), stdoutWidth()))
 		return nil

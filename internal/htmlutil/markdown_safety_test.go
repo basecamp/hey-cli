@@ -151,7 +151,7 @@ func TestToMarkdownTextStripsControls(t *testing.T) {
 		"escape":          "<p>\x1b[31mRED</p>",
 		"osc":             "<p>\x1b]0;title\x07name</p>",
 		"numeric entity":  "<p>&#27;[31mRED</p>",
-		"c1":              "<p>cafe</p>",
+		"c1":              "<p>caf\u009ce</p>",
 		"del":             "<p>note\x7f</p>",
 		"carriage return": "<p>Invoice\rPAID</p>",
 	} {
@@ -393,7 +393,7 @@ func FuzzToMarkdownTerminalSafety(f *testing.F) {
 		`<img alt="&amp;#x1b;" src="&amp;#27;">`,
 		`<table><tr><td>&amp;#27;|</td></tr></table>`,
 		`<figure data-trix-attachment='{"filename":"&amp;#27;","url":"javascript:1","contentType":"image/png"}'></figure>`,
-		"<p>cafe</p>",
+		"<p>caf\u009c\u0085e</p>",
 	} {
 		f.Add(seed)
 	}

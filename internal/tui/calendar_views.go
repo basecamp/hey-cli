@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 // calendarViewMode represents the calendar display mode.
@@ -584,11 +585,11 @@ func buildWeekDayColumn(d weekDayInfo, width int, primary, bright, muted lipglos
 		if timeStr != "" {
 			lines = append(lines, muted.Render(timeStr))
 		}
-		lines = append(lines, bright.Render(truncateStr(e.Title, width)))
+		lines = append(lines, bright.Render(truncateStr(terminal.SanitizeLine(e.Title), width)))
 	}
 
 	for _, e := range d.allDay {
-		lines = append(lines, primary.Render(truncateStr(e.Title, width)))
+		lines = append(lines, primary.Render(truncateStr(terminal.SanitizeLine(e.Title), width)))
 	}
 
 	return lines

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 type contactsShowCommand struct {
@@ -79,6 +81,9 @@ func (c *contactsShowCommand) run(cmd *cobra.Command, args []string) error {
 		result.Note = note.Note
 		result.NoteHTML = note.NoteHtml
 	}
+	if writer.EffectiveFormat() == output.FormatHTML {
+		return writeNoteHTML(cmd.OutOrStdout(), result.NoteHTML)
+	}
 	if writer.IsStyled() {
 		printContactDetails(cmd, result)
 		return nil
@@ -92,27 +97,35 @@ func (c *contactsShowCommand) run(cmd *cobra.Command, args []string) error {
 	)
 }
 
+// writeNoteHTML is what --html writes for a contact: the note's original HTML, and
+// nothing at all when there is no note.
+func writeNoteHTML(w io.Writer, noteHTML string) error {
+	if noteHTML == "" {
+		return nil
+	}
+	_, err := fmt.Fprintln(w, noteHTML)
+	return err
+}
+
 func printContactDetails(cmd *cobra.Command, result contactShowResult) {
 	w := cmd.OutOrStdout()
-	fmt.Fprintf(w, "%s\n", result.Name)
+	fmt.Fprintf(w, "%s\n", terminal.SanitizeLine(result.Name))
 	fmt.Fprintf(w, "ID: %d\n", result.Id)
-	fmt.Fprintf(w, "Email: %s\n", result.EmailAddress)
+	fmt.Fprintf(w, "Email: %s\n", terminal.SanitizeLine(result.EmailAddress))
 	if len(result.Aliases) > 0 {
 		aliases := make([]string, 0, len(result.Aliases))
 		for _, alias := range result.Aliases {
-			aliases = append(aliases, alias.EmailAddress)
+			aliases = append(aliases, terminal.SanitizeLine(alias.EmailAddress))
 		}
 		fmt.Fprintf(w, "Aliases: %s\n", strings.Join(aliases, ", "))
 	}
 	if result.Clearance.Status != "" {
-		fmt.Fprintf(w, "Screening: %s\n", result.Clearance.Status)
+		fmt.Fprintf(w, "Screening: %s\n", terminal.SanitizeLine(result.Clearance.Status))
 	}
 	fmt.Fprintln(w, "\nPrivate note:")
 	if result.Note == "" {
 		fmt.Fprintln(w, "(empty)")
-	} else if htmlOutput && result.NoteHTML != "" {
-		fmt.Fprintln(w, result.NoteHTML)
 	} else {
-		fmt.Fprintln(w, result.Note)
+		fmt.Fprintln(w, terminal.Sanitize(result.Note))
 	}
 }

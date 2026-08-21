@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
+
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 // Posting is one row of a source: a thread, a bundle or a single entry as HEY lists it.
@@ -63,15 +65,16 @@ func Postings(postings []generated.Posting) []Posting {
 	return described
 }
 
-// NewPosting describes one posting HEY answered with.
+// NewPosting describes one posting HEY answered with. Its text is sanitized here, once,
+// so that every row, picker and notice that shows a posting shows it inert.
 func NewPosting(posting generated.Posting) Posting {
 	return Posting{
 		ID:                    posting.Id,
 		TopicID:               TopicIDIn(posting.AppUrl),
 		CreatedAt:             posting.CreatedAt,
-		Name:                  posting.Name,
-		Summary:               posting.Summary,
-		AlternativeSenderName: posting.AlternativeSenderName,
+		Name:                  terminal.SanitizeLine(posting.Name),
+		Summary:               terminal.SanitizeLine(posting.Summary),
+		AlternativeSenderName: terminal.SanitizeLine(posting.AlternativeSenderName),
 		Seen:                  posting.Seen,
 		BubbledUp:             posting.BubbledUp,
 		Muted:                 posting.Muted,
@@ -84,7 +87,11 @@ func NewPosting(posting generated.Posting) Posting {
 }
 
 func contactOf(contact generated.Contact) Contact {
-	return Contact{ID: contact.Id, Name: contact.Name, EmailAddress: contact.EmailAddress}
+	return Contact{
+		ID:           contact.Id,
+		Name:         terminal.SanitizeLine(contact.Name),
+		EmailAddress: terminal.SanitizeLine(contact.EmailAddress),
+	}
 }
 
 func extenzionsOf(extenzions []generated.Extenzion) []Extenzion {
@@ -93,7 +100,7 @@ func extenzionsOf(extenzions []generated.Extenzion) []Extenzion {
 	}
 	described := make([]Extenzion, len(extenzions))
 	for i, extenzion := range extenzions {
-		described[i] = Extenzion{ID: extenzion.Id, Name: extenzion.Name}
+		described[i] = Extenzion{ID: extenzion.Id, Name: terminal.SanitizeLine(extenzion.Name)}
 	}
 	return described
 }
@@ -104,7 +111,7 @@ func foldersOf(folders []generated.Folder) []Folder {
 	}
 	described := make([]Folder, len(folders))
 	for i, folder := range folders {
-		described[i] = Folder{ID: folder.Id, Name: folder.Name}
+		described[i] = Folder{ID: folder.Id, Name: terminal.SanitizeLine(folder.Name)}
 	}
 	return described
 }
@@ -115,7 +122,7 @@ func collectionsOf(collections []generated.Collection) []Collection {
 	}
 	described := make([]Collection, len(collections))
 	for i, collection := range collections {
-		described[i] = Collection{ID: collection.Id, Name: collection.Name}
+		described[i] = Collection{ID: collection.Id, Name: terminal.SanitizeLine(collection.Name)}
 	}
 	return described
 }

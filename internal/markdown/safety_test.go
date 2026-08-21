@@ -84,7 +84,7 @@ func TestRenderStripsRawControls(t *testing.T) {
 	for name, md := range map[string]string{
 		"escape":     "hello \x1b[31mRED",
 		"osc title":  "hello \x1b]0;pwned\x07",
-		"c1":         "cafe ",
+		"c1":         "caf\u0085e \u009c",
 		"del":        "note\x7f",
 		"bel":        "ding\x07",
 		"in code":    "`\x1b[31m`",
@@ -233,7 +233,7 @@ func FuzzContainment(f *testing.F) {
 		"\x1b]0;title\x07",
 		"| a |\n| --- |\n| &#x1b;[31m |",
 		"![&#27;](/rails/blobs/x.png)",
-		"abc",
+		"a\u0085b\u009cc",
 	} {
 		f.Add(seed)
 	}

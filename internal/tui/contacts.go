@@ -12,6 +12,7 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 // Contact is someone in the reader's address book. An alias is a contact in its own
@@ -595,12 +596,12 @@ func (v *contactsView) refreshDetailView() {
 
 func (v *contactsView) renderContactDetail() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s\n", v.vc.styles.title.Render(v.detail.Name))
-	fmt.Fprintf(&b, "%s\n", v.detail.EmailAddress)
+	fmt.Fprintf(&b, "%s\n", v.vc.styles.title.Render(terminal.SanitizeLine(v.detail.Name)))
+	fmt.Fprintf(&b, "%s\n", terminal.SanitizeLine(v.detail.EmailAddress))
 	if len(v.detail.Aliases) > 0 {
 		aliases := make([]string, 0, len(v.detail.Aliases))
 		for _, alias := range v.detail.Aliases {
-			aliases = append(aliases, alias.EmailAddress)
+			aliases = append(aliases, terminal.SanitizeLine(alias.EmailAddress))
 		}
 		fmt.Fprintf(&b, "Aliases: %s\n", strings.Join(aliases, ", "))
 	}
@@ -611,7 +612,7 @@ func (v *contactsView) renderContactDetail() string {
 	if v.note == "" {
 		b.WriteString(v.vc.styles.entryDate.Render("(empty)"))
 	} else {
-		b.WriteString(v.note)
+		b.WriteString(terminal.Sanitize(v.note))
 	}
 	b.WriteString("\n")
 	return b.String()
@@ -709,8 +710,8 @@ func sdkContactToModel(contact generated.Contact) Contact {
 func sdkContactDetailToModel(contact generated.ContactDetail) Contact {
 	result := Contact{
 		ID:           contact.Id,
-		Name:         contact.Name,
-		EmailAddress: contact.EmailAddress,
+		Name:         terminal.SanitizeLine(contact.Name),
+		EmailAddress: terminal.SanitizeLine(contact.EmailAddress),
 		Aliases:      make([]Contact, 0, len(contact.Aliases)),
 	}
 	for _, alias := range contact.Aliases {

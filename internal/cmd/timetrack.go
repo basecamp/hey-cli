@@ -159,7 +159,7 @@ func (c *timetrackCurrentCommand) run(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(w, "Active time track #%d\n", track.Id)
 		fmt.Fprintf(w, "Started: %s\n", formatTimestamp(track.StartsAt))
 		if track.Title != "" {
-			fmt.Fprintf(w, "Title:   %s\n", track.Title)
+			fmt.Fprintf(w, "Title:   %s\n", terminal.SanitizeLine(track.Title))
 		}
 		return nil
 	}

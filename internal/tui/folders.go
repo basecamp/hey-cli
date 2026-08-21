@@ -222,7 +222,7 @@ func (p *folderPicker) view(styles styles, width int) string {
 
 	b.WriteString(styles.title.Render("Label thread"))
 	if p.posting.Summary != "" {
-		fmt.Fprintf(&b, "\n%s", truncateStr(p.posting.Summary, contentWidth))
+		fmt.Fprintf(&b, "\n%s", truncateStr(terminal.SanitizeLine(p.posting.Summary), contentWidth))
 	}
 	b.WriteString("\n\n")
 	choices := p.choices()
