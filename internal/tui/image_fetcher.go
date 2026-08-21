@@ -37,6 +37,11 @@ const (
 	maxInlineImagePixels int64 = 100 * 1000 * 1000
 )
 
+// errImageRefused is the error a fetcher answers for a URL it will not request at all —
+// malformed, carrying credentials, or from an origin it does not trust. No request was
+// made, which is what a budget counting requests needs to know.
+var errImageRefused = errors.New("image URL refused")
+
 type trustedImageFetcher struct {
 	heyOrigin     *url.URL
 	hey           imageBlobDownloader
@@ -104,7 +109,7 @@ func newTrustedImageFetcherWithOrigins(client imageBlobDownloader, heyOrigin str
 func (f *trustedImageFetcher) Fetch(ctx context.Context, source string, maxBytes int64) ([]byte, error) {
 	parsed, err := url.Parse(source)
 	if err != nil {
-		return nil, fmt.Errorf("invalid image URL: %w", err)
+		return nil, fmt.Errorf("%w: invalid image URL: %w", errImageRefused, err)
 	}
 	limit := f.maxBytes
 	if maxBytes > 0 && maxBytes < limit {
@@ -112,10 +117,10 @@ func (f *trustedImageFetcher) Fetch(ctx context.Context, source string, maxBytes
 	}
 
 	if parsed.User != nil {
-		return nil, fmt.Errorf("image URL must not contain credentials")
+		return nil, fmt.Errorf("%w: image URL must not contain credentials", errImageRefused)
 	}
 	if !parsed.IsAbs() && parsed.Host != "" {
-		return nil, fmt.Errorf("image URL must be relative or use an explicit trusted origin")
+		return nil, fmt.Errorf("%w: image URL must be relative or use an explicit trusted origin", errImageRefused)
 	}
 
 	if !parsed.IsAbs() || sameURLOrigin(parsed, f.heyOrigin) {
@@ -135,7 +140,7 @@ func (f *trustedImageFetcher) Fetch(ctx context.Context, source string, maxBytes
 	}
 
 	if _, trusted := f.gopherOrigins[urlOrigin(parsed)]; !trusted {
-		return nil, fmt.Errorf("image URL is not from HEY or Gopher")
+		return nil, fmt.Errorf("%w: image URL is not from HEY or Gopher", errImageRefused)
 	}
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)

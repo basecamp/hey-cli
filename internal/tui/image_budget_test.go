@@ -18,11 +18,15 @@ type countingFetcher struct {
 	calls      atomic.Int64
 	size       int
 	fail       map[string]bool
+	refuse     map[string]bool // answered errImageRefused without a request
 	slow       time.Duration
 	allowances []int64
 }
 
 func (f *countingFetcher) Fetch(ctx context.Context, source string, maxBytes int64) ([]byte, error) {
+	if f.refuse[source] {
+		return nil, errImageRefused
+	}
 	f.calls.Add(1)
 	f.allowances = append(f.allowances, maxBytes)
 	if f.slow > 0 {
@@ -70,6 +74,24 @@ func TestImageBudgetChargesEveryRequestToTheCount(t *testing.T) {
 	images := newImageBudget().fetchImages(context.Background(), fetcher, urls)
 	if len(images) != 0 || fetcher.calls.Load() != maxImagesPerView {
 		t.Errorf("fetched %d images with %d requests, want none and no request past the count", len(images), fetcher.calls.Load())
+	}
+}
+
+// A URL the fetcher refuses on sight — a third-party origin — was never requested, so
+// it is not charged: a page of them ahead of HEY's own images leaves the count intact.
+func TestImageBudgetDoesNotChargeARefusedURL(t *testing.T) {
+	urls := make([]string, 0, maxImagesPerView+1)
+	refuse := map[string]bool{}
+	for i := range maxImagesPerView {
+		source := fmt.Sprintf("https://tracker.example/%d.png", i)
+		urls = append(urls, source)
+		refuse[source] = true
+	}
+	urls = append(urls, "/rails/blobs/chart.png")
+	fetcher := &countingFetcher{size: 10, refuse: refuse}
+	images := newImageBudget().fetchImages(context.Background(), fetcher, urls)
+	if len(images) != 1 || fetcher.calls.Load() != 1 {
+		t.Errorf("fetched %d images with %d requests, want HEY's own image fetched after the refusals", len(images), fetcher.calls.Load())
 	}
 }
 

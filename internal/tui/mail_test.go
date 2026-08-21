@@ -355,6 +355,23 @@ func TestMailViewKeepsAPartialThreadsNoticeAndLeavesItUnseen(t *testing.T) {
 		t.Errorf("a key press dismissed the partial-thread notice: %q", v.View())
 	}
 
+	// The notice takes a row the viewport gives up, so the section draws the rows it
+	// has and no more, whatever the notices do.
+	v.Resize(80, 20)
+	if rows := strings.Count(v.View(), "\n") + 1; rows != 20 {
+		t.Errorf("thread view draws %d rows in 20, notice included", rows)
+	}
+	v.notice = "Saved attachment to agenda.pdf"
+	if rows := strings.Count(v.View(), "\n") + 1; rows != 20 {
+		t.Errorf("thread view draws %d rows in 20 with two notices", rows)
+	}
+	v.notice = ""
+	v.threadNotice = ""
+	if rows := strings.Count(v.View(), "\n") + 1; rows != 20 {
+		t.Errorf("thread view draws %d rows in 20 with no notice", rows)
+	}
+	v.threadNotice = "1 of 1 bodies could not be read (failed)"
+
 	v.ExitThread()
 	if v.inThread || v.threadNotice != "" {
 		t.Errorf("leaving the thread left inThread=%v notice=%q", v.inThread, v.threadNotice)

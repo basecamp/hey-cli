@@ -75,8 +75,12 @@ func TestTrustedImageFetcherRejectsLookalikeAndUnsafeOrigins(t *testing.T) {
 		"file:///etc/passwd",
 	} {
 		t.Run(source, func(t *testing.T) {
-			if _, err := fetcher.Fetch(context.Background(), source, 0); err == nil {
+			_, err := fetcher.Fetch(context.Background(), source, 0)
+			if err == nil {
 				t.Fatalf("unsafe image URL succeeded: %s", source)
+			}
+			if !errors.Is(err, errImageRefused) {
+				t.Errorf("error = %v, want a refusal without a request", err)
 			}
 		})
 	}

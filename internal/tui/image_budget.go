@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"path"
 	"strings"
@@ -49,10 +50,12 @@ func newImageBudget() *imageBudget {
 }
 
 // fetchImages fetches the images a view may show, in the order their URLs were found,
-// within the budget and the deadline. A URL that repeats or points outside HEY's blob
-// paths is not requested; one that fails or would not fit in what is left of the byte
-// budget is skipped. Every request made is charged to the count, whatever it answers:
-// the content chose the URLs, and a URL that fails is still a request it caused.
+// within the budget and the deadline. A URL that repeats, points outside HEY's blob
+// paths or the fetcher refuses on sight is not requested; one that fails or would not
+// fit in what is left of the byte budget is skipped. Every request made is charged to
+// the count, whatever it answers: the content chose the URLs, and a URL that fails is
+// still a request it caused. A refusal is not a request, so it costs nothing — two
+// dozen third-party images ahead of HEY's own cannot use up the count.
 func (b *imageBudget) fetchImages(ctx context.Context, fetcher imageFetcher, urls []string) [][]byte {
 	if fetcher == nil || len(urls) == 0 {
 		return nil
@@ -72,6 +75,10 @@ func (b *imageBudget) fetchImages(ctx context.Context, fetcher imageFetcher, url
 		// The fetcher is told what is left, so an image that would not fit is stopped
 		// on the wire rather than downloaded whole and then discarded.
 		data, err := fetcher.Fetch(ctx, source, b.remainingBytes)
+		if errors.Is(err, errImageRefused) {
+			b.remaining++
+			continue
+		}
 		if err != nil || len(data) == 0 || int64(len(data)) > b.remainingBytes {
 			continue
 		}

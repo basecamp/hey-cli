@@ -209,6 +209,7 @@ type mailView struct {
 	imageContent     string
 	inThread         bool
 	threadNotice     string // what the open thread's read did not get; stays until the thread is left
+	contentHeight    int    // the rows the section has, which the thread's notices and viewport share
 
 	modal                  modal       // the form or picker over the list, and the only one there can be
 	cover                  coverPreset // the session's cover; HEY does not serve one to read
@@ -387,6 +388,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.attachments = msg.attachments
 		v.attachmentCursor = 0
 		v.threadNotice = msg.notice
+		v.fitThreadViewport()
 		var imageContent strings.Builder
 		var uploadCmds []tea.Cmd
 		for _, imgData := range msg.images {
@@ -649,11 +651,10 @@ func (v *mailView) View() string {
 		return v.modal.draw(v)
 	}
 	if v.inThread {
+		v.fitThreadViewport()
 		var lines []string
-		for _, notice := range []string{v.threadNotice, v.notice} {
-			if notice != "" {
-				lines = append(lines, v.vc.styles.title.Render(notice))
-			}
+		for _, notice := range v.threadNotices() {
+			lines = append(lines, v.vc.styles.title.Render(notice))
 		}
 		return strings.Join(append(lines, v.topicViewport.View()), "\n")
 	}
@@ -1122,7 +1123,31 @@ func (v *mailView) Resize(width, height int) {
 	v.postingList.setSize(width, height)
 	v.searchList.setSize(width, height)
 	v.topicViewport.SetWidth(width)
-	v.topicViewport.SetHeight(height)
+	v.contentHeight = height
+	v.fitThreadViewport()
+}
+
+// threadNotices is what is shown above an open thread's viewport: the partial-read
+// notice for as long as the thread is open, and the one-shot notice while it is up. Each
+// is one row, truncated to the width, so the rows they take can be counted.
+func (v *mailView) threadNotices() []string {
+	var notices []string
+	for _, notice := range []string{v.threadNotice, v.notice} {
+		if notice != "" {
+			notices = append(notices, truncateToWidth(notice, max(v.vc.width, 4)))
+		}
+	}
+	return notices
+}
+
+// fitThreadViewport gives the thread's viewport the rows its notices leave, so the
+// section never draws more rows than it has. The one-shot notice comes and goes from
+// dozens of sites, so the fit is also checked where the thread is drawn.
+func (v *mailView) fitThreadViewport() {
+	height := max(v.contentHeight-len(v.threadNotices()), 1)
+	if v.topicViewport.Height() != height {
+		v.topicViewport.SetHeight(height)
+	}
 }
 
 // handleBoxShortcut handles number-key shortcuts for switching boxes.
