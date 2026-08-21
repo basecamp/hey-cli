@@ -23,6 +23,11 @@ type sdkThreadSource struct {
 func (s sdkThreadSource) EntriesPage(ctx context.Context, topicID int64, cursor string) (threadload.Page, error) {
 	page, err := s.client.Topics().GetEntriesPage(ctx, topicID, cursor)
 	if err != nil {
+		// A request the context ended mid-flight surfaces as a network error; that
+		// is the context ending, which the loader handles, not the index failing.
+		if ctx.Err() != nil {
+			return threadload.Page{}, ctx.Err()
+		}
 		return threadload.Page{}, apierr.FromSDK(err)
 	}
 	if page == nil {

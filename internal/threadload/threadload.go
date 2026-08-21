@@ -264,6 +264,7 @@ func hydrate(ctx context.Context, source Source, thread *Thread, limits Limits, 
 			switch {
 			case errors.Is(err, ErrSystemic):
 				entry.State = StateOverLimit
+				turns.abort()
 				return err
 			case errors.Is(err, ErrOverLimit):
 				entry.State = StateOverLimit
@@ -337,9 +338,10 @@ func readMessage(ctx context.Context, source Source, entryID int64, retries int)
 // entry before it has taken its turn, whether that entry was admitted, refused, failed
 // or skipped, so admission is newest first however the requests finished.
 type turns struct {
-	mu   sync.Mutex
-	cond *sync.Cond
-	next int
+	mu      sync.Mutex
+	cond    *sync.Cond
+	next    int
+	aborted bool
 }
 
 func newTurns() *turns {
@@ -350,7 +352,7 @@ func newTurns() *turns {
 
 func (t *turns) wait(i int) {
 	t.mu.Lock()
-	for t.next != i {
+	for t.next != i && !t.aborted {
 		t.cond.Wait()
 	}
 	t.mu.Unlock()
@@ -360,7 +362,7 @@ func (t *turns) wait(i int) {
 // turn first so that the order holds even for a worker that had nothing to admit.
 func (t *turns) done(i int) {
 	t.mu.Lock()
-	for t.next != i {
+	for t.next != i && !t.aborted {
 		t.cond.Wait()
 	}
 	t.next++
@@ -368,9 +370,18 @@ func (t *turns) done(i int) {
 	t.mu.Unlock()
 }
 
+// abort releases every worker from its turn: a systemic error is about to end the
+// load, and the worker carrying it must not queue behind slower requests to say so.
+func (t *turns) abort() {
+	t.mu.Lock()
+	t.aborted = true
+	t.cond.Broadcast()
+	t.mu.Unlock()
+}
+
 // entrySize is what an index entry costs the budget: its strings and an overhead.
 func entrySize(entry generated.Entry) int64 {
-	return int64(len(entry.Summary)+len(entry.Subject)+len(entry.AppUrl)+
+	return int64(len(entry.Summary)+len(entry.Subject)+len(entry.AppUrl)+len(entry.Kind)+
 		len(entry.AlternativeSenderName)+len(entry.Creator.Name)+len(entry.Creator.EmailAddress)) + retainedOverhead
 }
 

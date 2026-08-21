@@ -21,6 +21,7 @@ type fakeSource struct {
 	failing        map[int64]int // failures before a message succeeds; -1 fails forever
 	systemic       map[int64]bool
 	oversized      map[int64]bool
+	slowFor        map[int64]time.Duration
 	subjects       map[int64]string
 	failureMessage string
 	pageErr        map[int]error
@@ -63,9 +64,9 @@ func (f *fakeSource) EntriesPage(ctx context.Context, _ int64, cursor string) (P
 
 func (f *fakeSource) Message(ctx context.Context, id int64) (*generated.Message, error) {
 	f.messages.Add(1)
-	if f.slow > 0 {
+	if delay := max(f.slow, f.slowFor[id]); delay > 0 {
 		select {
-		case <-time.After(f.slow):
+		case <-time.After(delay):
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
@@ -310,7 +311,8 @@ func TestLoadSpendsTheByteBudgetNewestFirst(t *testing.T) {
 	}}
 	l := limits()
 	// Four index entries and the two newest bodies fit; the third body does not.
-	l.MaxRetainedBytes = 6*(retainedOverhead+int64(len("summary 14"))) + 1
+	indexEntry := retainedOverhead + int64(len("summary 14")+len("message"))
+	l.MaxRetainedBytes = 4*indexEntry + 2*(retainedOverhead+10) + 1
 	for range 20 {
 		thread, err := Load(context.Background(), source, Request{TopicID: 7, Hydrate: true, Limits: l})
 		if err != nil {
@@ -365,6 +367,23 @@ func TestLoadMarksAnOversizedMessageOverLimitWithoutRetrying(t *testing.T) {
 	}
 	if source.messages.Load() != 2 {
 		t.Errorf("requested %d messages, want one each with no retry", source.messages.Load())
+	}
+}
+
+// A systemic error observed by a fast request ends the load without queueing behind a
+// slower, earlier one for its admission turn.
+func TestLoadStopsOnASystemicErrorWithoutWaitingForEarlierRequests(t *testing.T) {
+	source := &fakeSource{pages: [][]int64{{14, 13, 12, 11}}, bodies: map[int64]string{}, systemic: map[int64]bool{13: true},
+		slowFor: map[int64]time.Duration{14: 3 * time.Second}}
+	l := limits()
+	l.Concurrency = 4
+	start := time.Now()
+	_, err := Load(context.Background(), source, Request{TopicID: 7, Hydrate: true, Limits: l})
+	if !errors.Is(err, ErrSystemic) {
+		t.Fatalf("error = %v, want ErrSystemic", err)
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Errorf("load took %s, want the refusal to end it before the slow request", time.Since(start))
 	}
 }
 
