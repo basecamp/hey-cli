@@ -214,10 +214,13 @@ func TestCalendarViewInThread(t *testing.T) {
 func TestCalendarViewHelpBindingsShowsViewToggle(t *testing.T) {
 	v := calendarWithRecordings()
 	bindings := v.HelpBindings()
-	if len(bindings) != 1 {
-		t.Fatalf("expected 1 binding, got %d", len(bindings))
+	if len(bindings) != 2 {
+		t.Fatalf("expected 2 bindings, got %d", len(bindings))
 	}
 	if bindings[0].key != "v" {
 		t.Errorf("binding key = %q, want \"v\"", bindings[0].key)
+	}
+	if bindings[1].key != "c" {
+		t.Errorf("binding key = %q, want \"c\"", bindings[1].key)
 	}
 }

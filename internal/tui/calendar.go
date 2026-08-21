@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"time"
 
 	"charm.land/bubbles/v2/viewport"
@@ -28,6 +29,16 @@ type identityLoadedMsg struct {
 	firstWeekDay time.Weekday
 }
 
+type timeTrackCategoriesLoadedMsg struct {
+	categories []generated.TimeTrackCategory
+	err        error
+}
+
+type timeTrackCategorySavedMsg struct {
+	summary string
+	err     error
+}
+
 // --- Calendar section view ---
 
 type calendarView struct {
@@ -53,6 +64,8 @@ type calendarView struct {
 	topicContent  string
 	inThread      bool
 	loading       bool
+
+	timeTrackCategories *timeTrackCategoryManager
 }
 
 func newCalendarView(vc *viewContext) *calendarView {
@@ -107,6 +120,31 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.topicViewport.SetContent(v.topicContent)
 		v.topicViewport.GotoTop()
 		return nil, true
+
+	case timeTrackCategoriesLoadedMsg:
+		v.loading = false
+		if v.timeTrackCategories == nil {
+			return nil, true
+		}
+		if msg.err != nil {
+			v.timeTrackCategories.status = "Could not load categories: " + msg.err.Error()
+			return nil, true
+		}
+		v.timeTrackCategories.setCategories(msg.categories)
+		return nil, true
+
+	case timeTrackCategorySavedMsg:
+		v.loading = false
+		if v.timeTrackCategories == nil {
+			return nil, true
+		}
+		if msg.err != nil {
+			v.timeTrackCategories.status = msg.err.Error()
+			return nil, true
+		}
+		v.timeTrackCategories.status = msg.summary
+		v.loading = true
+		return v.fetchTimeTrackCategories(), true
 	}
 
 	if v.inThread {
@@ -119,6 +157,9 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 }
 
 func (v *calendarView) View() string {
+	if v.timeTrackCategories != nil {
+		return v.timeTrackCategories.view(v.vc.styles, v.vc.width, v.vc.height)
+	}
 	if v.inThread {
 		return v.topicViewport.View()
 	}
@@ -126,11 +167,15 @@ func (v *calendarView) View() string {
 }
 
 func (v *calendarView) HelpBindings() []helpBinding {
+	if v.timeTrackCategories != nil {
+		return v.timeTrackCategories.helpBindings()
+	}
 	if v.inThread {
 		return nil
 	}
 	return []helpBinding{
 		{"v", v.viewMode.next().String() + " view"},
+		{"c", "time categories"},
 	}
 }
 
@@ -162,6 +207,9 @@ func (v *calendarView) SubnavRight() tea.Cmd {
 }
 
 func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
+	if v.timeTrackCategories != nil {
+		return v.handleTimeTrackCategoryKey(msg)
+	}
 	if v.inThread {
 		var cmd tea.Cmd
 		v.topicViewport, cmd = v.topicViewport.Update(msg)
@@ -169,6 +217,10 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 
 	switch msg.String() {
+	case "c":
+		v.timeTrackCategories = newTimeTrackCategoryManager()
+		v.loading = true
+		return v.fetchTimeTrackCategories()
 	case "v":
 		v.viewMode = v.viewMode.next()
 		if v.calIndex >= 0 && v.calIndex < len(v.calendars) {
@@ -185,9 +237,73 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	return cmd
 }
 
+func (v *calendarView) handleTimeTrackCategoryKey(msg tea.KeyPressMsg) tea.Cmd {
+	manager := v.timeTrackCategories
+	if v.loading {
+		return nil
+	}
+	if manager.mode != timeTrackCategoryBrowse {
+		switch msg.Key().Code {
+		case tea.KeyEscape:
+			manager.cancelEdit()
+			return nil
+		case tea.KeyEnter:
+			title, ok := manager.title()
+			if !ok {
+				return nil
+			}
+			mode := manager.mode
+			selected := manager.selected()
+			manager.cancelEdit()
+			v.loading = true
+			if mode == timeTrackCategoryCreate {
+				return v.createTimeTrackCategory(title)
+			}
+			if selected != nil {
+				return v.renameTimeTrackCategory(selected.Id, title)
+			}
+			v.loading = false
+			manager.status = "Choose a category to rename"
+			return nil
+		default:
+			return manager.update(msg)
+		}
+	}
+
+	switch msg.String() {
+	case "esc", "q":
+		v.timeTrackCategories = nil
+		return nil
+	case "n":
+		return manager.startCreate()
+	case "enter", "r":
+		return manager.startRename()
+	case "x":
+		selected := manager.selected()
+		if selected == nil {
+			manager.status = "Choose a category to delete"
+			return nil
+		}
+		if !manager.confirmingDelete {
+			manager.confirmingDelete = true
+			manager.status = ""
+			return nil
+		}
+		manager.confirmingDelete = false
+		v.loading = true
+		return v.deleteTimeTrackCategory(selected.Id, selected.Title)
+	default:
+		manager.move(msg.Key())
+		return nil
+	}
+}
+
 func (v *calendarView) InThread() bool { return v.inThread }
 func (v *calendarView) ExitThread()    { v.inThread = false }
 func (v *calendarView) Loading() bool  { return v.loading }
+func (v *calendarView) CapturingInput() bool {
+	return v.timeTrackCategories != nil
+}
 
 func (v *calendarView) Resize(width, height int) {
 	v.contentVP.SetWidth(width)
@@ -308,5 +424,36 @@ func (v *calendarView) fetchRecordings(calID int64) tea.Cmd {
 			}
 		}
 		return recordingsLoadedMsg{recordings: all}
+	}
+}
+
+func (v *calendarView) fetchTimeTrackCategories() tea.Cmd {
+	return func() tea.Msg {
+		if v.vc.sdk == nil || v.vc.ctx == nil {
+			return timeTrackCategoriesLoadedMsg{err: fmt.Errorf("time track categories are unavailable")}
+		}
+		categories, err := v.vc.sdk.TimeTracks().Categories(v.vc.ctx)
+		return timeTrackCategoriesLoadedMsg{categories: categories, err: err}
+	}
+}
+
+func (v *calendarView) createTimeTrackCategory(title string) tea.Cmd {
+	return func() tea.Msg {
+		err := v.vc.sdk.TimeTracks().CreateCategory(v.vc.ctx, title)
+		return timeTrackCategorySavedMsg{summary: fmt.Sprintf("Created %q", title), err: err}
+	}
+}
+
+func (v *calendarView) renameTimeTrackCategory(categoryID int64, title string) tea.Cmd {
+	return func() tea.Msg {
+		err := v.vc.sdk.TimeTracks().UpdateCategory(v.vc.ctx, categoryID, title)
+		return timeTrackCategorySavedMsg{summary: fmt.Sprintf("Renamed category to %q", title), err: err}
+	}
+}
+
+func (v *calendarView) deleteTimeTrackCategory(categoryID int64, title string) tea.Cmd {
+	return func() tea.Msg {
+		err := v.vc.sdk.TimeTracks().DeleteCategory(v.vc.ctx, categoryID)
+		return timeTrackCategorySavedMsg{summary: fmt.Sprintf("Deleted %q", title), err: err}
 	}
 }

@@ -193,6 +193,8 @@ Thread attachments always appear with their filename, media type, and size. Use 
 
 Press Shift+O to open Contacts. Use Enter to view a contact, `a` to add, `e` to edit, `n` to edit the private note, `x` twice to delete a note, `h` to hide, and `u` to show the most recently hidden contact again. Escape or `q` goes back.
 
+Press Shift+C to open Calendar, then `c` to manage time track categories. Create a category with `n`, rename the selected category with Enter or `r`, and press `x` twice to delete it. Time tracks in a deleted category become uncategorized.
+
 ## CLI Commands
 
 Structured data commands support `--json` for full output and `--jq '<expression>'` to
@@ -332,6 +334,10 @@ hey timetrack start                # start tracking
 hey timetrack stop                 # stop tracking
 hey timetrack current              # show active track
 hey timetrack list                 # list all tracks
+hey timetrack categories           # list categories
+hey timetrack category create "Client work"
+hey timetrack category rename 123 "Planning"
+hey timetrack category delete 123
 ```
 
 ### Journal

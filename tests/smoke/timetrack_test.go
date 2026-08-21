@@ -90,6 +90,47 @@ func TestTimetrackListAll(t *testing.T) {
 	_ = resp
 }
 
+func TestTimetrackCategories(t *testing.T) {
+	title := "Client work " + uniqueID()
+	_, stderr, code := hey(t, "timetrack", "category", "create", title)
+	if code != 0 {
+		t.Skipf("timetrack category create unavailable (exit %d): %s", code, stderr)
+	}
+
+	categoryID := findTimeTrackCategory(t, title)
+	t.Cleanup(func() {
+		hey(t, "timetrack", "category", "delete", categoryID)
+	})
+
+	renamed := "Planning " + uniqueID()
+	_, stderr, code = hey(t, "timetrack", "category", "rename", categoryID, renamed)
+	if code != 0 {
+		t.Fatalf("timetrack category rename failed (exit %d): %s", code, stderr)
+	}
+	findTimeTrackCategory(t, renamed)
+
+	_, stderr, code = hey(t, "timetrack", "category", "delete", categoryID)
+	if code != 0 {
+		t.Fatalf("timetrack category delete failed (exit %d): %s", code, stderr)
+	}
+}
+
+func findTimeTrackCategory(t *testing.T, title string) string {
+	t.Helper()
+	resp := heyJSON(t, "timetrack", "categories")
+	type Category struct {
+		ID    json.Number `json:"id"`
+		Title string      `json:"title"`
+	}
+	for _, category := range dataAs[[]Category](t, resp) {
+		if category.Title == title {
+			return category.ID.String()
+		}
+	}
+	t.Fatalf("time track category %q not found", title)
+	return ""
+}
+
 func TestTimetrackCurrentNoActive(t *testing.T) {
 	// Stop any existing time track first.
 	hey(t, "timetrack", "stop")

@@ -351,3 +351,105 @@ func TestTimetrackListCommand(t *testing.T) {
 		t.Errorf("notice = %q", response.Notice)
 	}
 }
+
+func TestTimetrackCategoriesCommand(t *testing.T) {
+	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/calendar/time_tracks/categories.json" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `[{"id":31,"title":"Client work"},{"id":32,"title":"Planning"}]`)
+	}), "timetrack", "categories")
+	if err != nil {
+		t.Fatalf("execute timetrack categories: %v", err)
+	}
+	if response.Summary != "2 time track categories" {
+		t.Errorf("summary = %q", response.Summary)
+	}
+	if len(response.Breadcrumbs) != 1 || response.Breadcrumbs[0].Action != "create" {
+		t.Errorf("breadcrumbs = %#v", response.Breadcrumbs)
+	}
+}
+
+func TestTimetrackCategoryMutations(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        []string
+		method      string
+		path        string
+		title       string
+		wantSummary string
+	}{
+		{
+			name:        "create",
+			args:        []string{"timetrack", "category", "create", "Client work"},
+			method:      http.MethodPost,
+			path:        "/calendar/time_tracks/categories",
+			title:       "Client work",
+			wantSummary: `Time track category "Client work" created`,
+		},
+		{
+			name:        "rename",
+			args:        []string{"timetrack", "category", "rename", "31", "Planning"},
+			method:      http.MethodPatch,
+			path:        "/calendar/time_tracks/categories/31",
+			title:       "Planning",
+			wantSummary: `Time track category 31 renamed to "Planning"`,
+		},
+		{
+			name:        "delete",
+			args:        []string{"timetrack", "category", "delete", "31"},
+			method:      http.MethodDelete,
+			path:        "/calendar/time_tracks/categories/31",
+			wantSummary: "Time track category 31 deleted",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != tt.method || r.URL.Path != tt.path {
+					t.Errorf("request = %s %s, want %s %s", r.Method, r.URL.Path, tt.method, tt.path)
+				}
+				if tt.title != "" {
+					if err := r.ParseForm(); err != nil {
+						t.Fatalf("parse form: %v", err)
+					}
+					if got := r.Form.Get("category[title]"); got != tt.title {
+						t.Errorf("category title = %q, want %q", got, tt.title)
+					}
+				}
+				w.WriteHeader(http.StatusNoContent)
+			}), tt.args...)
+			if err != nil {
+				t.Fatalf("execute %s: %v", tt.name, err)
+			}
+			if response.Summary != tt.wantSummary {
+				t.Errorf("summary = %q, want %q", response.Summary, tt.wantSummary)
+			}
+			if len(response.Breadcrumbs) != 1 || response.Breadcrumbs[0].Action != "list" {
+				t.Errorf("breadcrumbs = %#v", response.Breadcrumbs)
+			}
+		})
+	}
+}
+
+func TestTimetrackCategoryMutationValidationMakesNoRequest(t *testing.T) {
+	var requests atomic.Int32
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+	})
+
+	for _, args := range [][]string{
+		{"timetrack", "category", "create", "   "},
+		{"timetrack", "category", "rename", "invalid", "Planning"},
+		{"timetrack", "category", "delete", "0"},
+	} {
+		if _, err := runJSONCommand(t, handler, args...); err == nil {
+			t.Errorf("%v: expected validation error", args)
+		}
+	}
+	if requests.Load() != 0 {
+		t.Errorf("requests = %d, want 0", requests.Load())
+	}
+}

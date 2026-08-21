@@ -61,6 +61,10 @@ The remaining HTML-reading gaps use the SDK's authenticated HTML helper and are 
 | `/calendar/ongoing_time_track.json` | GET | SDK `TimeTracks().GetOngoing` | `hey timetrack current` | covered |
 | `/calendar/ongoing_time_track.json` | POST | SDK `TimeTracks().Start` | `hey timetrack start` | covered |
 | `/calendar/time_tracks/{id}.json` | PUT | SDK `TimeTracks().Stop` | `hey timetrack stop` | covered |
+| `/calendar/time_tracks/categories.json` | GET | SDK `TimeTracks().Categories` | `hey timetrack categories`, Calendar TUI `c` | covered |
+| `/calendar/time_tracks/categories` | POST | SDK `TimeTracks().CreateCategory` | `hey timetrack category create`, Calendar TUI `c` | covered |
+| `/calendar/time_tracks/categories/{id}` | PATCH | SDK `TimeTracks().UpdateCategory` | `hey timetrack category rename`, Calendar TUI `c` | covered |
+| `/calendar/time_tracks/categories/{id}` | DELETE | SDK `TimeTracks().DeleteCategory` | `hey timetrack category delete`, Calendar TUI `c` | covered |
 | `/calendar/todos.json` | POST | SDK `CalendarTodos().Create` | `hey todo add` | covered |
 | `/calendar/todos/{id}/completions.json` | POST | SDK `CalendarTodos().Complete` | `hey todo complete <id>` | covered |
 | `/calendar/todos/{id}/completions.json` | DELETE | SDK `CalendarTodos().Uncomplete` | `hey todo uncomplete <id>` | covered |

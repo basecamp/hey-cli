@@ -173,6 +173,8 @@ hey boxes --quiet --jq '.[].name'
 | Stop time tracking | `hey timetrack stop` |
 | Current timer | `hey timetrack current --json` |
 | List time entries | `hey timetrack list --json` |
+| List time track categories | `hey timetrack categories --json` |
+| Create time track category | `hey timetrack category create "Client work"` |
 | List journal entries | `hey journal list --json` |
 | Read journal entry | `hey journal read 2024-03-15 --json` |
 | Write journal entry | `hey journal write "Today was great"` |
@@ -442,6 +444,10 @@ hey timetrack start                           # Start timer
 hey timetrack stop                            # Stop timer
 hey timetrack current --json                  # Show current timer
 hey timetrack list --json                     # List time entries
+hey timetrack categories --json               # List categories
+hey timetrack category create "Client work"   # Create a category
+hey timetrack category rename 123 "Planning"  # Rename a category
+hey timetrack category delete 123              # Delete a category
 ```
 
 ### Journal

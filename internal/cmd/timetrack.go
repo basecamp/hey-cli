@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -18,7 +19,7 @@ func newTimetrackCommand() *timetrackCommand {
 		Use:   "timetrack",
 		Short: "Track time",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: start, stop, current, list. Use current to check if tracking is active before start/stop.",
+			"agent_notes": "Subcommands: start, stop, current, list, categories, category. Use current to check if tracking is active before start/stop.",
 		},
 	}
 
@@ -26,6 +27,8 @@ func newTimetrackCommand() *timetrackCommand {
 	timetrackCommand.cmd.AddCommand(newTimetrackStopCommand().cmd)
 	timetrackCommand.cmd.AddCommand(newTimetrackCurrentCommand().cmd)
 	timetrackCommand.cmd.AddCommand(newTimetrackListCommand().cmd)
+	timetrackCommand.cmd.AddCommand(newTimetrackCategoriesCommand().cmd)
+	timetrackCommand.cmd.AddCommand(newTimetrackCategoryCommand().cmd)
 
 	return timetrackCommand
 }
@@ -248,6 +251,197 @@ func (c *timetrackListCommand) run(cmd *cobra.Command, args []string) error {
 			Action:      "start",
 			Command:     "hey timetrack start",
 			Description: "Start time tracking",
+		}),
+	)
+}
+
+// categories
+
+type timetrackCategoriesCommand struct {
+	cmd *cobra.Command
+}
+
+func newTimetrackCategoriesCommand() *timetrackCategoriesCommand {
+	timetrackCategoriesCommand := &timetrackCategoriesCommand{}
+	timetrackCategoriesCommand.cmd = &cobra.Command{
+		Use:   "categories",
+		Short: "List time track categories",
+		Example: `  hey timetrack categories
+  hey timetrack categories --json`,
+		RunE: timetrackCategoriesCommand.run,
+	}
+	return timetrackCategoriesCommand
+}
+
+func (c *timetrackCategoriesCommand) run(cmd *cobra.Command, args []string) error {
+	if err := requireAuth(); err != nil {
+		return err
+	}
+
+	categories, err := sdk.TimeTracks().Categories(cmd.Context())
+	if err != nil {
+		return convertSDKError(err)
+	}
+
+	if writer.IsStyled() {
+		if len(categories) == 0 {
+			fmt.Fprintln(cmd.OutOrStdout(), "No time track categories.")
+			return nil
+		}
+
+		table := newTable(cmd.OutOrStdout())
+		table.addRow([]string{"ID", "Title"})
+		for _, category := range categories {
+			table.addRow([]string{fmt.Sprintf("%d", category.Id), category.Title})
+		}
+		table.print()
+		return nil
+	}
+
+	return writeOK(categories,
+		output.WithSummary(fmt.Sprintf("%d time track categories", len(categories))),
+		output.WithBreadcrumbs(output.Breadcrumb{
+			Action:      "create",
+			Command:     "hey timetrack category create <title>",
+			Description: "Create a time track category",
+		}),
+	)
+}
+
+// category
+
+type timetrackCategoryCommand struct {
+	cmd *cobra.Command
+}
+
+func newTimetrackCategoryCommand() *timetrackCategoryCommand {
+	timetrackCategoryCommand := &timetrackCategoryCommand{}
+	timetrackCategoryCommand.cmd = &cobra.Command{
+		Use:   "category",
+		Short: "Manage time track categories",
+	}
+	timetrackCategoryCommand.cmd.AddCommand(newTimetrackCategoryCreateCommand().cmd)
+	timetrackCategoryCommand.cmd.AddCommand(newTimetrackCategoryRenameCommand().cmd)
+	timetrackCategoryCommand.cmd.AddCommand(newTimetrackCategoryDeleteCommand().cmd)
+	return timetrackCategoryCommand
+}
+
+type timetrackCategoryCreateCommand struct {
+	cmd *cobra.Command
+}
+
+func newTimetrackCategoryCreateCommand() *timetrackCategoryCreateCommand {
+	timetrackCategoryCreateCommand := &timetrackCategoryCreateCommand{}
+	timetrackCategoryCreateCommand.cmd = &cobra.Command{
+		Use:     "create <title>",
+		Short:   "Create a time track category",
+		Example: `  hey timetrack category create "Client work"`,
+		RunE:    timetrackCategoryCreateCommand.run,
+		Args:    usageExactOneArg(),
+	}
+	return timetrackCategoryCreateCommand
+}
+
+func (c *timetrackCategoryCreateCommand) run(cmd *cobra.Command, args []string) error {
+	if err := requireAuth(); err != nil {
+		return err
+	}
+
+	title := strings.TrimSpace(args[0])
+	if title == "" {
+		return output.ErrUsage("category title is required")
+	}
+	if err := sdk.TimeTracks().CreateCategory(cmd.Context(), title); err != nil {
+		return convertSDKError(err)
+	}
+	return writeTimetrackCategoryMutation(cmd, fmt.Sprintf("Time track category %q created", title))
+}
+
+type timetrackCategoryRenameCommand struct {
+	cmd *cobra.Command
+}
+
+func newTimetrackCategoryRenameCommand() *timetrackCategoryRenameCommand {
+	timetrackCategoryRenameCommand := &timetrackCategoryRenameCommand{}
+	timetrackCategoryRenameCommand.cmd = &cobra.Command{
+		Use:     "rename <id> <title>",
+		Short:   "Rename a time track category",
+		Example: `  hey timetrack category rename 123 "Planning"`,
+		RunE:    timetrackCategoryRenameCommand.run,
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 2 {
+				return nil
+			}
+			if len(args) == 0 {
+				return usageErrorf("%s", cleanUseLine(cmd.UseLine()))
+			}
+			return fmt.Errorf("expected 2 arguments, got %d", len(args))
+		},
+	}
+	return timetrackCategoryRenameCommand
+}
+
+func (c *timetrackCategoryRenameCommand) run(cmd *cobra.Command, args []string) error {
+	if err := requireAuth(); err != nil {
+		return err
+	}
+
+	categoryID, err := parsePositiveID(args[0], "category")
+	if err != nil {
+		return err
+	}
+	title := strings.TrimSpace(args[1])
+	if title == "" {
+		return output.ErrUsage("category title is required")
+	}
+	if err := sdk.TimeTracks().UpdateCategory(cmd.Context(), categoryID, title); err != nil {
+		return convertSDKError(err)
+	}
+	return writeTimetrackCategoryMutation(cmd, fmt.Sprintf("Time track category %d renamed to %q", categoryID, title))
+}
+
+type timetrackCategoryDeleteCommand struct {
+	cmd *cobra.Command
+}
+
+func newTimetrackCategoryDeleteCommand() *timetrackCategoryDeleteCommand {
+	timetrackCategoryDeleteCommand := &timetrackCategoryDeleteCommand{}
+	timetrackCategoryDeleteCommand.cmd = &cobra.Command{
+		Use:     "delete <id>",
+		Short:   "Delete a time track category",
+		Example: `  hey timetrack category delete 123`,
+		RunE:    timetrackCategoryDeleteCommand.run,
+		Args:    usageExactOneArg(),
+	}
+	return timetrackCategoryDeleteCommand
+}
+
+func (c *timetrackCategoryDeleteCommand) run(cmd *cobra.Command, args []string) error {
+	if err := requireAuth(); err != nil {
+		return err
+	}
+
+	categoryID, err := parsePositiveID(args[0], "category")
+	if err != nil {
+		return err
+	}
+	if err := sdk.TimeTracks().DeleteCategory(cmd.Context(), categoryID); err != nil {
+		return convertSDKError(err)
+	}
+	return writeTimetrackCategoryMutation(cmd, fmt.Sprintf("Time track category %d deleted", categoryID))
+}
+
+func writeTimetrackCategoryMutation(cmd *cobra.Command, summary string) error {
+	if writer.IsStyled() {
+		fmt.Fprintln(cmd.OutOrStdout(), summary+".")
+		return nil
+	}
+	return writeOK(nil,
+		output.WithSummary(summary),
+		output.WithBreadcrumbs(output.Breadcrumb{
+			Action:      "list",
+			Command:     "hey timetrack categories",
+			Description: "List time track categories",
 		}),
 	)
 }
