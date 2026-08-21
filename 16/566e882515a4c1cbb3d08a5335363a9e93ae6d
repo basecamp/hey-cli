@@ -1,0 +1,25 @@
+internal/cmd/skill_install_test.go
+  s_e2b9c41f2f9ae5::t_bad105dc6d8eb3 108-140
+internal/cmd/skill_refresh.go
+  s_e2b9c41f2f9ae5::t_db66a725ef2d69 51,58-61,67,71-73,88,91,101-106,114-115,118-121,125
+internal/cmd/skill_refresh_test.go
+  s_e2b9c41f2f9ae5::t_bad105dc6d8eb3 22-23,26-33,36-37,40-42,60,132-165
+internal/cmd/skill_install.go
+  s_e2b9c41f2f9ae5::t_d79a5e069eb7cc 20-25,28-40,116-117,119,162-165,180-183,193,199-201,206,228,260-263
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "16566e882515a4c1cbb3d08a5335363a9e93ae6d",
+  "prompts": {},
+  "sessions": {
+    "s_e2b9c41f2f9ae5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c6e9f2bf-e587-4622-a299-7b18cdf6665e",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}

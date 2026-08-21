@@ -1,0 +1,48 @@
+internal/harness/claude.go
+  s_e2b9c41f2f9ae5::t_bb21381e8b2eb9 1-321
+internal/cmd/skill_refresh_test.go
+  s_e2b9c41f2f9ae5::t_712cc308502cc7 1-126
+internal/harness/harness.go
+  s_e2b9c41f2f9ae5::t_c1fbe94bfb5acf 1-10
+internal/cmd/doctor.go
+  s_e2b9c41f2f9ae5::t_d98362c5b67398 136-137
+  s_e2b9c41f2f9ae5::t_232b9fb6d1f96b 15
+  s_e2b9c41f2f9ae5::t_1aee5ff75b4881 151-160,162-165
+  s_e2b9c41f2f9ae5::t_d0ded40edddc5c 182-227
+internal/harness/codex.go
+  s_e2b9c41f2f9ae5::t_0bb4ec8cee8957 1-104
+internal/harness/agent.go
+  s_e2b9c41f2f9ae5::t_97af918e9527e3 1-81
+internal/cmd/root.go
+  s_e2b9c41f2f9ae5::t_dd1b9bbb8dc931 123-126
+internal/harness/codex_test.go
+  s_e2b9c41f2f9ae5::t_189063fb180006 1-62
+internal/cmd/skill_install.go
+  s_e2b9c41f2f9ae5::t_6c8ac0965aec09 7,11,13,17-21,25-26,32-76,79,83,87,91,94,97-117,119,122,124,126-131,133-134,136-150,152-156,158-202
+internal/harness/claude_test.go
+  s_e2b9c41f2f9ae5::t_b0dffdcea7e180 97-99
+  s_e2b9c41f2f9ae5::t_a229052d4ad5a8 1-96,100-132
+internal/cmd/skill_refresh.go
+  s_e2b9c41f2f9ae5::t_50874fa205fb31 1-138
+internal/cmd/auth_commands_test.go
+  s_e2b9c41f2f9ae5::t_5c651be065a84e 223-224
+internal/harness/agent_test.go
+  s_e2b9c41f2f9ae5::t_623b2da975c23d 1-4,7-86
+  s_e2b9c41f2f9ae5::t_bb406c7fad8ed1 5-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "819eacb8c24951510e88d4b8a71f1ecc6b0cf133",
+  "prompts": {},
+  "sessions": {
+    "s_e2b9c41f2f9ae5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c6e9f2bf-e587-4622-a299-7b18cdf6665e",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}

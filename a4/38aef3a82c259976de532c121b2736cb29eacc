@@ -1,0 +1,27 @@
+README.md
+  s_e2b9c41f2f9ae5::t_50698e15cf5de3 42-47,53-57,164-165,391,393-396,399-403,406-410
+  s_e2b9c41f2f9ae5::t_f957c2b07fdf6e 411
+  s_e2b9c41f2f9ae5::t_9f732a7a7b4c08 48-52,197-200
+AGENTS.md
+  s_e2b9c41f2f9ae5::t_50698e15cf5de3 42-66,70
+skills/hey/SKILL.md
+  s_e2b9c41f2f9ae5::t_50698e15cf5de3 462-464
+tests/smoke/auth_test.go
+  s_e2b9c41f2f9ae5::t_50698e15cf5de3 81-96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "a438aef3a82c259976de532c121b2736cb29eacc",
+  "prompts": {},
+  "sessions": {
+    "s_e2b9c41f2f9ae5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c6e9f2bf-e587-4622-a299-7b18cdf6665e",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
