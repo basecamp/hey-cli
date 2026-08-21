@@ -73,6 +73,9 @@ func (c *collectionsCommand) run(cmd *cobra.Command, args []string) error {
 		}
 		return nil
 	}
+	if stderrNotice := paginationNoticeForStderr(writer.EffectiveFormat(), notice); stderrNotice != "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), stderrNotice)
+	}
 
 	return writeOK(collections,
 		output.WithSummary(fmt.Sprintf("%d %s", len(collections), collectionNoun(len(collections)))),
@@ -175,6 +178,12 @@ func (c *collectionCommand) run(cmd *cobra.Command, args []string) error {
 	case output.FormatStyled:
 		return writeStyledCollection(cmd, collection, notice)
 	case output.FormatIDs, output.FormatCount:
+		if stderrNotice := paginationNoticeForStderr(writer.EffectiveFormat(), notice); stderrNotice != "" {
+			fmt.Fprintln(cmd.ErrOrStderr(), stderrNotice)
+		}
+		if nextPage != "" {
+			fmt.Fprintf(cmd.ErrOrStderr(), "next_page: %s\n", terminalSafeText(nextPage))
+		}
 		return writeOK(collection.Postings)
 	case output.FormatMarkdown:
 		return writeMarkdownCollection(cmd, collection, nextPage, total, notice)

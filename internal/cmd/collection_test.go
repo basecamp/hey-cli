@@ -209,6 +209,29 @@ func TestCollectionCommandOutputFormats(t *testing.T) {
 	}
 }
 
+func TestCollectionDataOnlyFormatsReportPaginationOnStderr(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Total-Count", "3")
+		w.Header().Set("Link", "<http://"+r.Host+"/collections/12.json?page=next-cursor>; rel=\"next\"")
+		_, _ = io.WriteString(w, `{"id":12,"name":"Kitchen remodel","postings":[{"id":101,"kind":"topic"},{"id":102,"kind":"topic"}]}`)
+	})
+
+	for _, format := range []string{"--ids-only", "--count"} {
+		t.Run(format, func(t *testing.T) {
+			_, stderr, err := runFormattedCommandWithStderr(t, handler, []string{format}, "collection", "12")
+			if err != nil {
+				t.Fatalf("collection %s: %v", format, err)
+			}
+			for _, want := range []string{"notice: Showing 2 of 3 results", "next_page: next-cursor"} {
+				if !strings.Contains(stderr, want) {
+					t.Errorf("stderr %q does not contain %q", stderr, want)
+				}
+			}
+		})
+	}
+}
+
 func TestCollectionMutationCommands(t *testing.T) {
 	tests := []struct {
 		name        string

@@ -16,6 +16,12 @@ func runStyledCommand(t *testing.T, handler http.Handler, args ...string) (strin
 
 func runFormattedCommand(t *testing.T, handler http.Handler, formatArgs []string, args ...string) (string, error) {
 	t.Helper()
+	stdout, _, err := runFormattedCommandWithStderr(t, handler, formatArgs, args...)
+	return stdout, err
+}
+
+func runFormattedCommandWithStderr(t *testing.T, handler http.Handler, formatArgs []string, args ...string) (string, string, error) {
+	t.Helper()
 	previousColorDisabled := colorDisabled
 	colorDisabled = false
 	t.Cleanup(func() { colorDisabled = previousColorDisabled })
@@ -40,7 +46,7 @@ func runFormattedCommand(t *testing.T, handler http.Handler, formatArgs []string
 	root.SetArgs(append(rootArgs, args...))
 
 	err := root.Execute()
-	return stdout.String(), err
+	return stdout.String(), stderr.String(), err
 }
 
 func TestDraftsCommandLimitsResults(t *testing.T) {
