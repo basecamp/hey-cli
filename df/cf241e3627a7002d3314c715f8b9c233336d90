@@ -1,0 +1,45 @@
+internal/cmd/skill_refresh.go
+  s_e2b9c41f2f9ae5::t_145aab04d3d752 44-48,94-95,101-107,134-137
+  s_e2b9c41f2f9ae5::t_5016062e883f01 138
+internal/cmd/auth_commands_test.go
+  s_e2b9c41f2f9ae5::t_2ded6c401cb4f2 193
+internal/cmd/skill_install_test.go
+  s_e2b9c41f2f9ae5::t_2ded6c401cb4f2 13-14,24,143-215,217-251
+  s_e2b9c41f2f9ae5::t_f99f2444264d32 216
+internal/cmd/skill_refresh_test.go
+  s_e2b9c41f2f9ae5::t_f99f2444264d32 213-214,217,233
+  s_e2b9c41f2f9ae5::t_cb3cd5098410fc 198-212,215-216,218-232,234-256
+AGENTS.md
+  s_e2b9c41f2f9ae5::t_e7db506680058d 63-67
+README.md
+  s_e2b9c41f2f9ae5::t_e7db506680058d 385-389
+internal/cmd/root.go
+  s_e2b9c41f2f9ae5::t_145aab04d3d752 102-108
+internal/cmd/skill_install.go
+  s_e2b9c41f2f9ae5::t_f99f2444264d32 28-29,31,44-45,53,55,62,220,227,233
+  s_e2b9c41f2f9ae5::t_145aab04d3d752 30,32-43,46-52,54,56-61,63-70,150-151,157,204-208,210-211,214-215,217-219,221-226,228-232,280-281,317-319
+internal/cmd/doctor.go
+  s_e2b9c41f2f9ae5::t_145aab04d3d752 208-215
+internal/cmd/setup_agents_test.go
+  s_e2b9c41f2f9ae5::t_d48d2c0d99d94b 4
+  s_e2b9c41f2f9ae5::t_cb3cd5098410fc 225-349
+internal/cmd/setup_agent.go
+  s_e2b9c41f2f9ae5::t_145aab04d3d752 143-155,334,345,349-360
+  s_e2b9c41f2f9ae5::t_ba70444017de84 361-362
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "dfcf241e3627a7002d3314c715f8b9c233336d90",
+  "prompts": {},
+  "sessions": {
+    "s_e2b9c41f2f9ae5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c6e9f2bf-e587-4622-a299-7b18cdf6665e",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
