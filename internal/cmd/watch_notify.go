@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -53,8 +54,10 @@ type desktopNotifier struct {
 }
 
 // newDesktopNotifier finds notify-send, or says on stderr why the watch will
-// run without notifications and returns nil.
-func newDesktopNotifier(errOut io.Writer) *desktopNotifier {
+// run without notifications and returns nil. started is the moment before which
+// activity is backlog, on the server's clock, since that is the clock every
+// posting's active_at is on.
+func newDesktopNotifier(errOut io.Writer, started time.Time) *desktopNotifier {
 	if _, err := exec.LookPath("notify-send"); err != nil {
 		fmt.Fprintln(errOut, "notice: --notify needs notify-send (libnotify); watching without notifications")
 		return nil
@@ -67,9 +70,30 @@ func newDesktopNotifier(errOut io.Writer) *desktopNotifier {
 		send:     runNotifySend,
 		omarchy:  omarchyErr == nil,
 		now:      time.Now,
-		started:  time.Now(),
+		started:  started,
 		activeAt: map[int64]time.Time{},
 	}
+}
+
+// serverNow is HEY's clock, read off the Date header of one cheap request, so
+// that the cutoff between backlog and new mail sits on the same clock as every
+// posting's active_at and a workstation running fast or slow can neither toast
+// the backlog nor sit on new mail. Date is whole seconds, rounded down, which
+// errs towards a toast for mail a moment old rather than silence for mail a
+// moment new. The SDK caches GETs by URL, so a query the server ignores keeps
+// this one out of the cache; and when the server's clock can't be read, the
+// local one stands in.
+func serverNow(ctx context.Context) time.Time {
+	now := time.Now()
+	response, err := rootSDK.Get(ctx, "/identity.json?clock="+strconv.FormatInt(now.UnixNano(), 10))
+	if err != nil || response == nil || response.FromCache {
+		return now
+	}
+	if at, err := http.ParseTime(response.Headers.Get("Date")); err == nil {
+		return at
+	}
+
+	return now
 }
 
 func runNotifySend(args ...string) (string, error) {

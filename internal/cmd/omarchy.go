@@ -420,8 +420,11 @@ func barPluginNotifies(plugin map[string]any) bool {
 }
 
 // removeBar takes out what setup wrote into the bar layout: a legacy hey-unread
-// module and the plugin entry's notify key. The plugin entry itself stays — it
-// is the user's, added with omarchy plugin add.
+// module. The plugin entry and its notify setting stay — the entry is the
+// user's, added with omarchy plugin add, and the setting is the plugin's, set
+// as readily from its panel or `omarchy bar set` as from here, so removal
+// cannot tell a preference it wrote from one it didn't. --no-notify is the
+// explicit way to turn the toasts off.
 func (s omarchySetup) removeBar() []omarchyStep {
 	path := s.env.shellPath()
 	shell, err := s.loadShellConfig()
@@ -431,16 +434,16 @@ func (s omarchySetup) removeBar() []omarchyStep {
 	bar, _ := shell["bar"].(map[string]any)
 	layout, _ := bar["layout"].(map[string]any)
 	legacy, _ := s.removeLegacyBarModule(shell, layout)
-	notified := false
-	if plugin := barLayoutModule(layout, omarchyBarPluginID); plugin != nil {
-		_, notified = plugin["notify"]
-		delete(plugin, "notify")
+	plugin := omarchyStep{Name: "bar plugin", Path: path, Status: "absent"}
+	if entry := barLayoutModule(layout, omarchyBarPluginID); entry != nil {
+		plugin.Status = "kept"
+		plugin.Detail = "the plugin and its notify setting are yours; hey setup omarchy --no-notify turns the toasts off"
+		if !barPluginNotifies(entry) {
+			plugin.Detail = "the plugin is yours; notifications are off"
+		}
 	}
-	steps := []omarchyStep{
-		stepResult("bar indicator", path, legacy, nil, "removed", "absent"),
-		stepResult("bar plugin", path, notified, nil, "removed", "absent"),
-	}
-	return s.writeBarSteps(steps, shell, legacy || notified)
+	steps := []omarchyStep{stepResult("bar indicator", path, legacy, nil, "removed", "absent"), plugin}
+	return s.writeBarSteps(steps, shell, legacy)
 }
 
 // removeLegacyBarModule drops the inline hey-unread module earlier releases
@@ -742,7 +745,8 @@ func newSetupOmarchyCommand() *setupOmarchyCommand {
 		Short: "Install hey into the Omarchy desktop",
 		Long: `Install hey into the Omarchy desktop: a launcher entry, rows in the SUPER+SPACE
 menu, and a theme template so themes can tune the TUI's accent colors. Every piece
-is idempotent and --remove takes them all out again.
+is idempotent and --remove takes them all out again — all but the bar plugin's notify
+setting, which is the plugin's own; --no-notify is how to turn that off.
 
 The bar indicator is the 37signals.hey plugin, which runs hey watch; install it
 with omarchy plugin add https://github.com/basecamp/omarchy-hey-plugin.git --enable.

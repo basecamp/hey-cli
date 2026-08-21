@@ -141,14 +141,19 @@ func TestOmarchySetupRemoveReversesEveryPiece(t *testing.T) {
 
 	removed := statuses(omarchySetup{env: env}.remove())
 	for name, status := range removed {
-		if name == "bar indicator" {
+		switch name {
+		case "bar indicator":
 			if status != "absent" {
 				t.Errorf("no legacy module was installed, got %q", status)
 			}
-			continue
-		}
-		if status != "removed" {
-			t.Errorf("%s: remove = %q, want removed", name, status)
+		case "bar plugin":
+			if status != "kept" {
+				t.Errorf("the plugin's notify setting is the plugin's own, got %q", status)
+			}
+		default:
+			if status != "removed" {
+				t.Errorf("%s: remove = %q, want removed", name, status)
+			}
 		}
 	}
 	if _, err := os.Stat(env.desktopPath()); !os.IsNotExist(err) {
@@ -160,18 +165,25 @@ func TestOmarchySetupRemoveReversesEveryPiece(t *testing.T) {
 	if menu := readText(t, env.menuPath()); menu != menuBefore {
 		t.Errorf("menu should be restored byte for byte:\n%s", menu)
 	}
-	// The plugin entry is the user's (omarchy plugin add wrote it); only our
-	// notify key goes.
+	// The plugin entry is the user's (omarchy plugin add wrote it), and its
+	// notify setting is set as readily from the panel as from here: removal
+	// cannot tell a preference it wrote from one it didn't, so it leaves it.
 	entry := pluginEntry(t, env)
 	if entry == nil {
 		t.Fatal("remove must not delete the plugin's layout entry")
 	}
-	if _, has := entry["notify"]; has {
-		t.Errorf("remove should delete the notify key, got %v", entry)
+	if entry["notify"] != true {
+		t.Errorf("remove must leave the plugin's notify setting alone, got %v", entry)
 	}
 
 	again := statuses(omarchySetup{env: env}.remove())
 	for name, status := range again {
+		if name == "bar plugin" {
+			if status != "kept" {
+				t.Errorf("second remove: bar plugin = %q, want kept", status)
+			}
+			continue
+		}
 		if status != "absent" {
 			t.Errorf("%s: second remove = %q, want absent", name, status)
 		}

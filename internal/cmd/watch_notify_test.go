@@ -340,11 +340,55 @@ func TestWatchNotifyWarnsAndTriesAgainAfterAFailedSend(t *testing.T) {
 	}
 }
 
+func TestServerNowReadsTheServersClock(t *testing.T) {
+	t.Setenv("HEY_TOKEN", "test-token")
+	var requested []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested = append(requested, r.URL.String())
+		w.Header().Set("Date", "Fri, 21 Aug 2026 09:00:05 GMT")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":1}`))
+	}))
+	defer server.Close()
+	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
+
+	got := serverNow(context.Background())
+	if !got.Equal(time.Date(2026, 8, 21, 9, 0, 5, 0, time.UTC)) {
+		t.Errorf("serverNow = %v, want the Date header, whatever the local clock says", got)
+	}
+	if len(requested) != 1 || !strings.Contains(requested[0], "/identity.json?clock=") {
+		t.Errorf("requested %v, want one uncacheable identity request", requested)
+	}
+
+	second := serverNow(context.Background())
+	if len(requested) != 2 || requested[1] == requested[0] {
+		t.Errorf("requested %v, want a fresh request each time, never the cache", requested)
+	}
+	if !second.Equal(got) {
+		t.Errorf("second = %v, want the server's clock again", second)
+	}
+}
+
+func TestServerNowFallsBackToTheLocalClock(t *testing.T) {
+	t.Setenv("HEY_TOKEN", "test-token")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "down", http.StatusBadGateway)
+	}))
+	defer server.Close()
+	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
+
+	before := time.Now()
+	got := serverNow(context.Background())
+	if got.Before(before) || got.After(time.Now()) {
+		t.Errorf("serverNow = %v, want the local clock when the server's can't be read", got)
+	}
+}
+
 func TestWatchNotifyWithoutNotifySendKeepsWatching(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	errOut := &bytes.Buffer{}
 
-	if notifier := newDesktopNotifier(errOut); notifier != nil {
+	if notifier := newDesktopNotifier(errOut, watchStarted); notifier != nil {
 		t.Error("without notify-send there is nothing to notify with")
 	}
 	if !strings.Contains(errOut.String(), "notice: --notify needs notify-send (libnotify); watching without notifications") {

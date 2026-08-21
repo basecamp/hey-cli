@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -135,13 +136,13 @@ func newTestWatch(changes ...string) (*postingsWatch, *bytes.Buffer) {
 
 	out := &bytes.Buffer{}
 	return &postingsWatch{
-		boxes:   map[int64]*watchedBox{24088: {id: 24088, kind: "imbox", name: "Imbox"}},
-		changes: watched,
-		out:     out,
-		errOut:  &bytes.Buffer{},
-		catchUp: make(chan struct{}, 1),
-		unread:  map[int64]bool{},
-		running: make(chan struct{}, asyncScriptLimit),
+		boxes:      map[int64]*watchedBox{24088: {id: 24088, kind: "imbox", name: "Imbox"}},
+		changes:    watched,
+		out:        out,
+		errOut:     &bytes.Buffer{},
+		connection: make(chan struct{}, 1),
+		unread:     map[int64]bool{},
+		running:    make(chan struct{}, asyncScriptLimit),
 	}, out
 }
 
@@ -519,16 +520,46 @@ func TestWatchRunsBoundedAsyncScripts(t *testing.T) {
 	}
 }
 
-func TestAskForCatchUpNeverBlocks(t *testing.T) {
+func TestConnectionChangesQueueInOrderAndNeverBlock(t *testing.T) {
 	watch, _ := newTestWatch("added")
 
-	watch.askForCatchUp()
-	watch.askForCatchUp()
+	watch.noteConnection(false)
+	watch.noteConnection(true)
+	watch.noteConnection(false)
 
 	select {
-	case <-watch.catchUp:
+	case <-watch.connection:
 	default:
-		t.Fatal("a catch-up should be waiting")
+		t.Fatal("a wake-up should be waiting")
+	}
+	if transitions := watch.drainTransitions(); !slices.Equal(transitions, []bool{false, true, false}) {
+		t.Errorf("transitions = %v, want every change in the order it happened", transitions)
+	}
+	if watch.drainTransitions() != nil {
+		t.Error("draining empties the queue")
+	}
+}
+
+func TestWatchAnnouncesADropBeforeTheReconnectThatFollowedIt(t *testing.T) {
+	server := changesServer(t, `{}`)
+	watch, _ := newTestWatch("added")
+	cursor, err := watchCursor(server.URL+"/boxes/24088/postings/changes.json?since=2026-08-21T09%3A00%3A00.000Z&v=2", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	watch.boxes[24088].cursor = cursor
+
+	// The reconnect completed before the loop got round to the drop: the
+	// reader still has to see them in this order, or it ends up offline.
+	watch.noteConnection(false)
+	watch.noteConnection(true)
+	if err := watch.followConnection(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(watch.out.(*bytes.Buffer).String()), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], `"change":"disconnected"`) || !strings.Contains(lines[1], `"change":"ready"`) {
+		t.Errorf("wrote %q, want disconnected then ready", lines)
 	}
 }
 

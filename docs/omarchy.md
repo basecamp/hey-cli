@@ -61,14 +61,15 @@ not themed — that is the point of ANSI.
 
 ### `hey setup omarchy`
 
-Idempotent; `--remove` reverses every piece; each step is reported separately and one
-failing step does not stop the others.
+Idempotent; `--remove` reverses every piece but one — the bar plugin's `notify` setting,
+which is the plugin's own (see its row) — and each step is reported separately; one failing
+step does not stop the others.
 
 | Piece | Where | Notes |
 |---|---|---|
 | Desktop entry | `~/.local/share/applications/HEY TUI.desktop` | Distinct from Omarchy's shipped `HEY.desktop` web app. Launches under app-id `org.omarchy.hey` |
 | Menu row | marker block in `~/.config/omarchy/extensions/omarchy-menu.jsonc` | one root `HEY` row that focuses or launches the TUI; its guard is a PATH lookup, never network or `hey` itself. Becomes a submenu once there is more than one thing to open |
-| Bar plugin | the `37signals.hey` entry in `~/.config/omarchy/shell.json`'s bar layout | not installed by setup — `omarchy plugin add https://github.com/basecamp/omarchy-hey-plugin.git --enable` does that — but configured by it: `--notify` / `--no-notify` set or delete the entry's `notify` key, which the shell hot-reloads and the plugin passes to `hey watch`. An earlier inline `hey-unread` module is removed on sight, its notify choice carried over |
+| Bar plugin | the `37signals.hey` entry in `~/.config/omarchy/shell.json`'s bar layout | not installed by setup — `omarchy plugin add https://github.com/basecamp/omarchy-hey-plugin.git --enable` does that — but configured by it: `--notify` / `--no-notify` set or delete the entry's `notify` key, which the shell hot-reloads and the plugin passes to `hey watch`. `--remove` leaves the key alone: it is set as readily from the panel or `omarchy bar set` as from here, so removal cannot tell a preference it wrote from one it didn't — `--no-notify` is the off switch. An earlier inline `hey-unread` module is removed on sight, its notify choice carried over |
 | Theme template | `~/.config/omarchy/themed/hey.toml.tpl` | renders `hey.toml` into every theme so theme authors can override the overlay; triggers `omarchy-theme-refresh` |
 | Keybinding | printed, never written | `o.bind("SUPER + SHIFT + ALT + H", "HEY TUI", "omarchy-launch-or-focus-tui --app-id=org.omarchy.hey hey tui")`; SUPER+SHIFT+E keeps opening the web app unless you `hl.unbind` it. Spelled out rather than `{ tui = "hey tui" }` because the lua helper quotes that into one word and the app-id derived from it would never match |
 
@@ -138,7 +139,10 @@ most one toast**.
   not being watched is a usage error, not a toast nobody will see.
 - **What counts as new**: a posting that is unseen, not muted, and whose `active_at` is
   later than the watch last recorded for it — or later than the watch's start, when it has
-  no record. `active_at` moves on new mail only, not on a seen flip, a mute or a move, so
+  no record. That start is read off HEY's own clock (the `Date` header of one request), the
+  clock every `active_at` is on, so a workstation running fast or slow neither toasts the
+  backlog nor sits on new mail; whole seconds, rounded down, so the doubt falls on the side
+  of a toast for mail a moment old. `active_at` moves on new mail only, not on a seen flip, a mute or a move, so
   reading a thread, marking it unseen again or moving it into the box never toasts, and a
   reply on a known thread does. A box's first read is its catch-up from the server's cursor
   — the box's last activity, not this moment — so it carries backlog, which the start-time

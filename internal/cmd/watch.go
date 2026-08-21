@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -134,7 +135,7 @@ func (c *watchCommand) run(cmd *cobra.Command, args []string) error {
 	// the boxes' cursors are read: nothing can then change between the two.
 	var notifier *desktopNotifier
 	if c.notify {
-		notifier = newDesktopNotifier(cmd.ErrOrStderr())
+		notifier = newDesktopNotifier(cmd.ErrOrStderr(), serverNow(ctx))
 	}
 
 	boxes, err := c.watchedBoxes(ctx)
@@ -161,8 +162,7 @@ func (c *watchCommand) run(cmd *cobra.Command, args []string) error {
 		out:         cmd.OutOrStdout(),
 		errOut:      cmd.ErrOrStderr(),
 		styled:      writer.IsStyled(),
-		catchUp:     make(chan struct{}, 1),
-		dropped:     make(chan struct{}, 1),
+		connection:  make(chan struct{}, 1),
 		unread:      map[int64]bool{},
 		running:     make(chan struct{}, asyncScriptLimit),
 	}
@@ -176,10 +176,10 @@ func (c *watchCommand) run(cmd *cobra.Command, args []string) error {
 	subscription, err := client.Subscribe(ctx, actioncable.Identifier{Channel: changesChannel},
 		actioncable.OnConnected(func(reconnected bool) {
 			if reconnected {
-				watch.askForCatchUp()
+				watch.noteConnection(true)
 			}
 		}),
-		actioncable.OnDisconnected(func(willReconnect bool) { watch.noteDisconnect() }),
+		actioncable.OnDisconnected(func(willReconnect bool) { watch.noteConnection(false) }),
 		actioncable.OnRejected(func() { watch.rejected.Store(true) }))
 	if err != nil {
 		return apierr.ErrAPI(0, fmt.Sprintf("could not subscribe to posting changes: %v", err))
@@ -380,8 +380,9 @@ type postingsWatch struct {
 	out            io.Writer
 	errOut         io.Writer
 	styled         bool
-	catchUp        chan struct{}
-	dropped        chan struct{}
+	connection     chan struct{}
+	transitionsMu  sync.Mutex
+	transitions    []bool
 	rejected       atomic.Bool
 	unread         map[int64]bool
 	backoff        time.Duration
@@ -404,13 +405,10 @@ func (w *postingsWatch) listen(ctx context.Context, subscription *actioncable.Su
 		case <-ctx.Done():
 			// An interrupt or a --timeout is how a watch is meant to end.
 			return nil
-		case <-w.catchUp:
-			if err := w.readEveryBox(ctx); err != nil {
+		case <-w.connection:
+			if err := w.followConnection(ctx); err != nil {
 				return err
 			}
-			w.announce(watchReady)
-		case <-w.dropped:
-			w.announce(watchDisconnected)
 		case <-w.retry:
 			w.retry = nil
 			if err := w.readUnreadBoxes(ctx); err != nil {
@@ -444,21 +442,47 @@ func (w *postingsWatch) closedError(ctx context.Context) error {
 	}
 }
 
-// askForCatchUp is called from the cable client's own goroutine, so it drops the ask
-// when one is already waiting rather than blocking the connection.
-func (w *postingsWatch) askForCatchUp() {
+// noteConnection is called from the cable client's own goroutine with every drop
+// and reconnect. The transitions queue up in the order they happened, and the
+// signal never blocks the connection: one wake-up drains them all.
+func (w *postingsWatch) noteConnection(connected bool) {
+	w.transitionsMu.Lock()
+	w.transitions = append(w.transitions, connected)
+	w.transitionsMu.Unlock()
+
 	select {
-	case w.catchUp <- struct{}{}:
+	case w.connection <- struct{}{}:
 	default:
 	}
 }
 
-// noteDisconnect likewise: one note is as good as two.
-func (w *postingsWatch) noteDisconnect() {
-	select {
-	case w.dropped <- struct{}{}:
-	default:
+// followConnection acts on the queued transitions in order: a drop is announced,
+// a reconnect catches every box up and then announces ready. Order is what keeps
+// a reader's picture right — a reconnect that completed while a slow catch-up
+// held the loop must not have its earlier drop announced after its ready.
+func (w *postingsWatch) followConnection(ctx context.Context) error {
+	for _, connected := range w.drainTransitions() {
+		if !connected {
+			w.announce(watchDisconnected)
+			continue
+		}
+		if err := w.readEveryBox(ctx); err != nil {
+			return err
+		}
+		w.announce(watchReady)
 	}
+
+	return nil
+}
+
+func (w *postingsWatch) drainTransitions() []bool {
+	w.transitionsMu.Lock()
+	defer w.transitionsMu.Unlock()
+
+	transitions := w.transitions
+	w.transitions = nil
+
+	return transitions
 }
 
 func (w *postingsWatch) readEveryBox(ctx context.Context) error {
