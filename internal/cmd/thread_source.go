@@ -30,9 +30,9 @@ func (s sdkThreadSource) EntriesPage(ctx context.Context, topicID int64, cursor 
 	return threadload.Page{Entries: page.Entries, Next: page.NextPage}, nil
 }
 
-// Message reads one entry's message. A rate limit or an expired credential is about
-// the client, not the message, and is marked systemic so the loader stops the fan-out
-// rather than asking two thousand more times.
+// Message reads one entry's message. A rate limit, an expired credential or a server
+// error is about the service, not the message, and is marked systemic so the loader
+// stops the fan-out rather than asking two thousand more times.
 func (s sdkThreadSource) Message(ctx context.Context, entryID int64) (*generated.Message, error) {
 	message, err := s.client.Messages().Get(ctx, entryID)
 	if err != nil {
@@ -44,8 +44,9 @@ func (s sdkThreadSource) Message(ctx context.Context, entryID int64) (*generated
 func systemic(err error) error {
 	var apiErr *apierr.Error
 	if errors.As(err, &apiErr) {
-		switch apiErr.Code {
-		case apierr.CodeRateLimit, apierr.CodeAuth, apierr.CodeForbidden:
+		switch {
+		case apiErr.Code == apierr.CodeRateLimit, apiErr.Code == apierr.CodeAuth, apiErr.Code == apierr.CodeForbidden,
+			apiErr.HTTPStatus >= 500:
 			return fmt.Errorf("%w: %w", threadload.ErrSystemic, err)
 		}
 	}

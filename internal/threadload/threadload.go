@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -203,12 +204,16 @@ func readIndex(ctx, caller context.Context, source Source, topicID int64, limits
 }
 
 // hydrate reads each entry's message, newest first, Concurrency at a time, within the
-// request and time limits, and then admits content into the byte budget in entry
-// order, so which bodies a large thread keeps is a contiguous newest-first run rather
-// than whichever requests finished first. Entries past a limit are over_limit; a
-// request that fails after its retries leaves its entry failed; a systemic error —
-// ErrSystemic from the Source — stops every request in flight and is returned.
+// request, byte and time limits. The byte budget is enforced twice: as each request
+// completes, so that no more than MaxRetainedBytes of content is ever held, and then
+// in entry order, so that what a large thread keeps is a contiguous newest-first run
+// — a body that did not fit means nothing older is kept either. Under the budget the
+// result is the same on every run; over it, the run kept may be shorter than the
+// budget allowed, never longer. Entries past a limit are over_limit; a request that
+// fails after its retries leaves its entry failed; a systemic error — ErrSystemic from
+// the Source — stops every request in flight and is returned.
 func hydrate(ctx context.Context, source Source, thread *Thread, limits Limits) error {
+	budget := &byteBudget{remaining: limits.MaxRetainedBytes}
 	group, groupCtx := errgroup.WithContext(ctx)
 	group.SetLimit(max(limits.Concurrency, 1))
 	for i := range thread.Entries {
@@ -235,6 +240,8 @@ func hydrate(ctx context.Context, source Source, thread *Thread, limits Limits) 
 				entry.State, entry.Err = StateFailed, err
 			case message.Content == "":
 				entry.Message, entry.State = message, StateBodyless
+			case !budget.admit(int64(len(message.Content))):
+				entry.State = StateOverLimit
 			default:
 				entry.Message, entry.State = message, StateHydrated
 			}
@@ -245,19 +252,16 @@ func hydrate(ctx context.Context, source Source, thread *Thread, limits Limits) 
 		return err
 	}
 
-	remaining := limits.MaxRetainedBytes
+	// Once a body did not fit, nothing older is kept either: the run of kept bodies
+	// stays contiguous from the newest entry.
+	dropping := false
 	for i := range thread.Entries {
 		entry := &thread.Entries[i]
-		if entry.State != StateHydrated {
-			continue
-		}
-		if size := int64(len(entry.Message.Content)); size <= remaining {
-			remaining -= size
-		} else {
-			// Once a body does not fit, nothing older is kept either: the run of
-			// kept bodies stays contiguous from the newest entry.
-			remaining = -1
+		switch {
+		case dropping && entry.State == StateHydrated:
 			entry.Message, entry.State = nil, StateOverLimit
+		case entry.State == StateOverLimit && i < limits.MaxMessageRequests:
+			dropping = true
 		}
 	}
 
@@ -288,4 +292,20 @@ func readMessage(ctx context.Context, source Source, entryID int64, retries int)
 		}
 	}
 	return nil, lastErr
+}
+
+type byteBudget struct {
+	mu        sync.Mutex
+	remaining int64
+}
+
+// admit reserves size bytes of the budget, reporting false when they do not fit.
+func (b *byteBudget) admit(size int64) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if size > b.remaining {
+		return false
+	}
+	b.remaining -= size
+	return true
 }

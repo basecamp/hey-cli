@@ -298,3 +298,31 @@ func TestThreadsStyledCallsAnEmptyHydratedBodyEmpty(t *testing.T) {
 		t.Errorf("stdout = %q", stdout)
 	}
 }
+
+// A server error is systemic: the fan-out stops and the command fails rather than
+// reporting a partial thread over hundreds of failing requests.
+func TestThreadsStopOnAServerError(t *testing.T) {
+	reads := &threadEntriesReads{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/topics/7/entries.json":
+			fmt.Fprint(w, `[{"id":13,"kind":"message"},{"id":12,"kind":"message"},{"id":11,"kind":"message"}]`)
+		default:
+			reads.mu.Lock()
+			reads.messages++
+			reads.mu.Unlock()
+			http.Error(w, `{"error":"down"}`, http.StatusServiceUnavailable)
+		}
+	}))
+	t.Cleanup(server.Close)
+	limits := threadload.DefaultLimits
+	limits.Concurrency = 1
+	withThreadLimits(t, limits)
+	stdoutTerminal(t, false)
+
+	_, _, err := runCLIRaw(t, server, "--json", "threads", "7", "--allow-partial")
+	if !errors.Is(err, threadload.ErrSystemic) {
+		t.Fatalf("error = %v, want the systemic error even with --allow-partial", err)
+	}
+}

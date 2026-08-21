@@ -224,14 +224,15 @@ func TestLoadStopsRequestingMessagesAtTheRequestCap(t *testing.T) {
 	}
 }
 
-// The byte budget is spent newest first, whatever order the requests finished in, and
-// once a body does not fit nothing older is kept: the kept run is contiguous.
+// Once a body does not fit the byte budget nothing older is kept, so the kept run is
+// contiguous from the newest entry, and no more than the budget is ever held.
 func TestLoadSpendsTheByteBudgetNewestFirst(t *testing.T) {
 	source := &fakeSource{pages: [][]int64{{14, 13, 12, 11}}, bodies: map[int64]string{
 		14: strings.Repeat("a", 10), 13: strings.Repeat("b", 10), 12: strings.Repeat("c", 10), 11: "d",
 	}}
 	l := limits()
 	l.MaxRetainedBytes = 25
+	l.Concurrency = 1
 	for range 5 {
 		thread, err := Load(context.Background(), source, Request{TopicID: 7, Hydrate: true, Limits: l})
 		if err != nil {
