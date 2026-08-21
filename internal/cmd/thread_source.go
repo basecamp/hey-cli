@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
@@ -29,12 +30,26 @@ func (s sdkThreadSource) EntriesPage(ctx context.Context, topicID int64, cursor 
 	return threadload.Page{Entries: page.Entries, Next: page.NextPage}, nil
 }
 
+// Message reads one entry's message. A rate limit or an expired credential is about
+// the client, not the message, and is marked systemic so the loader stops the fan-out
+// rather than asking two thousand more times.
 func (s sdkThreadSource) Message(ctx context.Context, entryID int64) (*generated.Message, error) {
 	message, err := s.client.Messages().Get(ctx, entryID)
 	if err != nil {
-		return nil, apierr.FromSDK(err)
+		return nil, systemic(apierr.FromSDK(err))
 	}
 	return message, nil
+}
+
+func systemic(err error) error {
+	var apiErr *apierr.Error
+	if errors.As(err, &apiErr) {
+		switch apiErr.Code {
+		case apierr.CodeRateLimit, apierr.CodeAuth, apierr.CodeForbidden:
+			return fmt.Errorf("%w: %w", threadload.ErrSystemic, err)
+		}
+	}
+	return err
 }
 
 // threadLimits is what the CLI reads a thread within. A variable so tests can lower it.

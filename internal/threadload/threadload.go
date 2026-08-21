@@ -16,7 +16,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -30,6 +29,12 @@ type Source interface {
 	EntriesPage(ctx context.Context, topicID int64, cursor string) (Page, error)
 	Message(ctx context.Context, entryID int64) (*generated.Message, error)
 }
+
+// ErrSystemic marks an error a Source returns that is about the client rather than
+// the one request — a rate limit, an expired credential. A message request that fails
+// with it is not retried and not recorded as one failed body: the whole load stops and
+// returns the error, since every request that follows would meet the same answer.
+var ErrSystemic = errors.New("the service is refusing requests")
 
 // Page is one page of the entries index, newest first, and the cursor for the next one
 // — empty on the last page.
@@ -139,7 +144,7 @@ func Load(ctx context.Context, source Source, request Request) (*Thread, error) 
 		defer cancel()
 	}
 
-	entries, truncated, err := readIndex(ctx, source, request.TopicID, limits)
+	entries, truncated, err := readIndex(ctx, caller, source, request.TopicID, limits)
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +154,9 @@ func Load(ctx context.Context, source Source, request Request) (*Thread, error) 
 		thread.Entries[i] = Entry{Entry: entry, State: StateNotRequested}
 	}
 	if request.Hydrate {
-		hydrate(ctx, source, thread, limits)
+		if err := hydrate(ctx, source, thread, limits); err != nil {
+			return nil, err
+		}
 		if err := caller.Err(); err != nil {
 			return nil, err
 		}
@@ -162,7 +169,10 @@ func Load(ctx context.Context, source Source, request Request) (*Thread, error) 
 }
 
 // readIndex walks the entries index newest first until it ends or a limit is reached.
-func readIndex(ctx context.Context, source Source, topicID int64, limits Limits) (entries []generated.Entry, truncated bool, err error) {
+// The loader's own deadline running out part way is a limit like the page cap — what
+// was read is returned as truncated — where the caller's context ending, or a page
+// that fails, is an error.
+func readIndex(ctx, caller context.Context, source Source, topicID int64, limits Limits) (entries []generated.Entry, truncated bool, err error) {
 	cursor := ""
 	for page := 0; ; page++ {
 		if page >= limits.MaxPages {
@@ -170,6 +180,9 @@ func readIndex(ctx context.Context, source Source, topicID int64, limits Limits)
 		}
 		result, err := source.EntriesPage(ctx, topicID, cursor)
 		if err != nil {
+			if page > 0 && ctx.Err() != nil && caller.Err() == nil {
+				return entries, true, nil
+			}
 			if page == 0 {
 				return nil, false, err
 			}
@@ -190,10 +203,12 @@ func readIndex(ctx context.Context, source Source, topicID int64, limits Limits)
 }
 
 // hydrate reads each entry's message, newest first, Concurrency at a time, within the
-// request, byte and time limits. Entries past a limit are over_limit; a request that
-// fails after its retries leaves its entry failed.
-func hydrate(ctx context.Context, source Source, thread *Thread, limits Limits) {
-	budget := &byteBudget{remaining: limits.MaxRetainedBytes}
+// request and time limits, and then admits content into the byte budget in entry
+// order, so which bodies a large thread keeps is a contiguous newest-first run rather
+// than whichever requests finished first. Entries past a limit are over_limit; a
+// request that fails after its retries leaves its entry failed; a systemic error —
+// ErrSystemic from the Source — stops every request in flight and is returned.
+func hydrate(ctx context.Context, source Source, thread *Thread, limits Limits) error {
 	group, groupCtx := errgroup.WithContext(ctx)
 	group.SetLimit(max(limits.Concurrency, 1))
 	for i := range thread.Entries {
@@ -203,20 +218,21 @@ func hydrate(ctx context.Context, source Source, thread *Thread, limits Limits) 
 			continue
 		}
 		group.Go(func() error {
-			// Nothing returned here is an error: the group's context ending is the
-			// deadline, and an entry it reaches is over the limit, not failed.
+			// The group's context ending is the deadline, or a systemic error in
+			// another request; an entry it reaches is over the limit, not failed.
 			if groupCtx.Err() != nil {
 				entry.State = StateOverLimit
 				return nil //nolint:nilerr // the deadline is a state, not a failure
 			}
 			message, err := readMessage(groupCtx, source, entry.Entry.Id, limits.MaxRetries)
 			switch {
+			case errors.Is(err, ErrSystemic):
+				entry.State = StateOverLimit
+				return err
 			case err != nil && groupCtx.Err() != nil:
 				entry.State = StateOverLimit
 			case err != nil:
 				entry.State, entry.Err = StateFailed, err
-			case !budget.admit(int64(len(message.Content))):
-				entry.State = StateOverLimit
 			case message.Content == "":
 				entry.Message, entry.State = message, StateBodyless
 			default:
@@ -225,13 +241,32 @@ func hydrate(ctx context.Context, source Source, thread *Thread, limits Limits) 
 			return nil
 		})
 	}
-	_ = group.Wait()
+	if err := group.Wait(); err != nil {
+		return err
+	}
+
+	remaining := limits.MaxRetainedBytes
+	for i := range thread.Entries {
+		entry := &thread.Entries[i]
+		if entry.State != StateHydrated {
+			continue
+		}
+		if size := int64(len(entry.Message.Content)); size <= remaining {
+			remaining -= size
+		} else {
+			// Once a body does not fit, nothing older is kept either: the run of
+			// kept bodies stays contiguous from the newest entry.
+			remaining = -1
+			entry.Message, entry.State = nil, StateOverLimit
+		}
+	}
 
 	for _, entry := range thread.Entries {
 		if entry.State == StateOverLimit || entry.State == StateFailed {
 			thread.Omitted++
 		}
 	}
+	return nil
 }
 
 func readMessage(ctx context.Context, source Source, entryID int64, retries int) (*generated.Message, error) {
@@ -242,6 +277,8 @@ func readMessage(ctx context.Context, source Source, entryID int64, retries int)
 		}
 		message, err := source.Message(ctx, entryID)
 		switch {
+		case errors.Is(err, ErrSystemic):
+			return nil, err
 		case err != nil:
 			lastErr = err
 		case message == nil:
@@ -251,20 +288,4 @@ func readMessage(ctx context.Context, source Source, entryID int64, retries int)
 		}
 	}
 	return nil, lastErr
-}
-
-type byteBudget struct {
-	mu        sync.Mutex
-	remaining int64
-}
-
-// admit reserves size bytes of the budget, reporting false when they do not fit.
-func (b *byteBudget) admit(size int64) bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if size > b.remaining {
-		return false
-	}
-	b.remaining -= size
-	return true
 }

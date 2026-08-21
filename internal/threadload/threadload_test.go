@@ -16,21 +16,30 @@ import (
 // fakeSource serves a thread the way HEY does: the index newest first, a page at a
 // time, and a message per entry.
 type fakeSource struct {
-	pages    [][]int64
-	bodies   map[int64]string
-	failing  map[int64]int // failures before a message succeeds; -1 fails forever
-	pageErr  map[int]error
-	slow     time.Duration
-	mu       sync.Mutex
-	messages atomic.Int64
-	index    atomic.Int64
+	pages     [][]int64
+	bodies    map[int64]string
+	failing   map[int64]int // failures before a message succeeds; -1 fails forever
+	systemic  map[int64]bool
+	pageErr   map[int]error
+	slow      time.Duration
+	slowPages time.Duration
+	mu        sync.Mutex
+	messages  atomic.Int64
+	index     atomic.Int64
 }
 
-func (f *fakeSource) EntriesPage(_ context.Context, _ int64, cursor string) (Page, error) {
+func (f *fakeSource) EntriesPage(ctx context.Context, _ int64, cursor string) (Page, error) {
 	f.index.Add(1)
 	page := 0
 	if cursor != "" {
 		_, _ = fmt.Sscanf(cursor, "page-%d", &page)
+	}
+	if f.slowPages > 0 {
+		select {
+		case <-time.After(f.slowPages):
+		case <-ctx.Done():
+			return Page{}, ctx.Err()
+		}
 	}
 	if err := f.pageErr[page]; err != nil {
 		return Page{}, err
@@ -57,6 +66,9 @@ func (f *fakeSource) Message(ctx context.Context, id int64) (*generated.Message,
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
+	}
+	if f.systemic[id] {
+		return nil, fmt.Errorf("%w: rate limited", ErrSystemic)
 	}
 	f.mu.Lock()
 	remaining, failing := f.failing[id]
@@ -212,22 +224,64 @@ func TestLoadStopsRequestingMessagesAtTheRequestCap(t *testing.T) {
 	}
 }
 
-func TestLoadStopsRetainingContentAtTheByteCap(t *testing.T) {
-	source := &fakeSource{pages: [][]int64{{12, 11}}, bodies: map[int64]string{12: strings.Repeat("x", 10), 11: strings.Repeat("y", 10)}}
+// The byte budget is spent newest first, whatever order the requests finished in, and
+// once a body does not fit nothing older is kept: the kept run is contiguous.
+func TestLoadSpendsTheByteBudgetNewestFirst(t *testing.T) {
+	source := &fakeSource{pages: [][]int64{{14, 13, 12, 11}}, bodies: map[int64]string{
+		14: strings.Repeat("a", 10), 13: strings.Repeat("b", 10), 12: strings.Repeat("c", 10), 11: "d",
+	}}
 	l := limits()
-	l.MaxRetainedBytes = 15
+	l.MaxRetainedBytes = 25
+	for range 5 {
+		thread, err := Load(context.Background(), source, Request{TopicID: 7, Hydrate: true, Limits: l})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := map[int64]State{14: StateHydrated, 13: StateHydrated, 12: StateOverLimit, 11: StateOverLimit}
+		for _, entry := range thread.Entries {
+			if entry.State != want[entry.Entry.Id] {
+				t.Errorf("entry %d = %s, want %s", entry.Entry.Id, entry.State, want[entry.Entry.Id])
+			}
+			if entry.State == StateOverLimit && entry.Message != nil {
+				t.Error("an over-limit entry must not keep its content")
+			}
+		}
+	}
+}
+
+// The loader's own deadline running out on a later index page is a truncation, like
+// the page cap; the caller's deadline is still an error.
+func TestLoadTreatsItsOwnIndexDeadlineAsTruncation(t *testing.T) {
+	source := &fakeSource{pages: [][]int64{{13, 12}, {11}}, slowPages: 150 * time.Millisecond}
+	l := limits()
+	l.Deadline = 220 * time.Millisecond
+	thread, err := Load(context.Background(), source, Request{TopicID: 7, Limits: l})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !thread.IndexTruncated || fmt.Sprint(ids(thread.Entries)) != "[12 13]" {
+		t.Errorf("thread = %+v, want the first page, truncated", thread)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 220*time.Millisecond)
+	defer cancel()
+	if _, err := Load(ctx, source, Request{TopicID: 7, Limits: limits()}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("error = %v, want the caller's deadline", err)
+	}
+}
+
+// A systemic error — a rate limit — stops the fan-out and is the load's error: no
+// retry, no two thousand more requests, no partial thread reported as read.
+func TestLoadStopsOnASystemicError(t *testing.T) {
+	source := &fakeSource{pages: [][]int64{{14, 13, 12, 11}}, bodies: map[int64]string{}, systemic: map[int64]bool{14: true}}
+	l := limits()
 	l.Concurrency = 1
 	thread, err := Load(context.Background(), source, Request{TopicID: 7, Hydrate: true, Limits: l})
-	if err != nil {
-		t.Fatal(err)
+	if !errors.Is(err, ErrSystemic) || thread != nil {
+		t.Fatalf("Load = %+v, %v; want ErrSystemic", thread, err)
 	}
-	if got := states(thread.Entries); got[StateHydrated] != 1 || got[StateOverLimit] != 1 {
-		t.Errorf("states = %v, want one kept and one over the byte limit", got)
-	}
-	for _, entry := range thread.Entries {
-		if entry.State == StateOverLimit && entry.Message != nil {
-			t.Error("an over-limit entry must not keep its content")
-		}
+	if source.messages.Load() > 2 {
+		t.Errorf("requested %d messages after the first refusal, want the fan-out stopped", source.messages.Load())
 	}
 }
 
