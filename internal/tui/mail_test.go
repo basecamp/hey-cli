@@ -371,6 +371,14 @@ func TestMailViewKeepsAPartialThreadsNoticeAndLeavesItUnseen(t *testing.T) {
 		t.Errorf("thread view draws %d rows in 20 with no notice", rows)
 	}
 	v.threadNotice = "1 of 1 bodies could not be read (failed)"
+	v.notice = "Saved attachment to agenda.pdf"
+	for _, height := range []int{1, 2, 3} {
+		v.Resize(80, height)
+		if rows := strings.Count(v.View(), "\n") + 1; rows != height {
+			t.Errorf("thread view draws %d rows in %d with two notices: a notice gives way, the thread keeps a row", rows, height)
+		}
+	}
+	v.notice = ""
 
 	v.ExitThread()
 	if v.inThread || v.threadNotice != "" {

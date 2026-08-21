@@ -1129,13 +1129,18 @@ func (v *mailView) Resize(width, height int) {
 
 // threadNotices is what is shown above an open thread's viewport: the partial-read
 // notice for as long as the thread is open, and the one-shot notice while it is up. Each
-// is one row, truncated to the width, so the rows they take can be counted.
+// is one row, truncated to the width, so the rows they take can be counted, and the
+// thread itself keeps at least one: in a section too short for both, a notice gives
+// way rather than pushing the viewport out.
 func (v *mailView) threadNotices() []string {
 	var notices []string
 	for _, notice := range []string{v.threadNotice, v.notice} {
 		if notice != "" {
 			notices = append(notices, truncateToWidth(notice, max(v.vc.width, 4)))
 		}
+	}
+	if room := max(v.contentHeight-1, 0); len(notices) > room {
+		notices = notices[:room]
 	}
 	return notices
 }
@@ -2031,6 +2036,8 @@ func (v *mailView) fetchTopic(ctx context.Context, requestID uint64, boxID, topi
 		entries := make([]mail.Entry, len(thread.Entries))
 		var attachments []messageAttachment
 		var imageURLs []string
+		// Only a terminal that can draw the images pays for finding them.
+		wantImages := v.vc.imageRenderer.protocol() == imageProtocolKitty && v.vc.imageFetcher != nil
 		for i, loaded := range thread.Entries {
 			entries[i] = mail.LoadedEntry(loaded)
 			if loaded.Message == nil {
@@ -2046,13 +2053,15 @@ func (v *mailView) fetchTopic(ctx context.Context, requestID uint64, boxID, topi
 					URL:         attachment.URL,
 				})
 			}
-			imageURLs = append(imageURLs, extractImageURLs(loaded.Message.Content)...)
+			if wantImages {
+				imageURLs = append(imageURLs, extractImageURLs(loaded.Message.Content)...)
+			}
 			// The loader's copy is released once the entry has what it shows.
 			thread.Entries[i].Message = nil
 		}
 
 		var images [][]byte
-		if v.vc.imageRenderer.protocol() == imageProtocolKitty && v.vc.imageFetcher != nil {
+		if wantImages {
 			images = newImageBudget().fetchImages(ctx, v.vc.imageFetcher, imageURLs)
 		}
 
