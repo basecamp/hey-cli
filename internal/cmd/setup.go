@@ -33,7 +33,7 @@ func newSetupCommand() *setupCommand {
 		Long:  "Sign in and connect your coding agents.",
 		Args:  cobra.NoArgs,
 		Annotations: map[string]string{
-			"agent_notes": "Runs the first-run wizard: OAuth sign-in, a look at the linked accounts, and coding-agent setup. Set HEY_NONINTERACTIVE=1 for a status-only run: --json changes only the output format, and a terminal on stdin (an allocated PTY included) still starts browser OAuth and waits for it. Logged out and non-interactive reports status incomplete with a remediation breadcrumb. Use `hey setup agents` to connect agents without signing in.",
+			"agent_notes": "Runs the first-run wizard: OAuth sign-in, a look at the linked accounts, and coding-agent setup. HEY_NONINTERACTIVE=1 suppresses OAuth and every prompt, but the wizard still connects detected agents (writing skill files) and persists the onboarded flag — there is no read-only mode; use `hey doctor` to inspect without changing anything. --json changes only the output format: a terminal on stdin (an allocated PTY included) still starts browser OAuth and waits for it. Logged out and non-interactive reports status incomplete with a remediation breadcrumb.",
 		},
 		RunE: setupCommand.run,
 	}

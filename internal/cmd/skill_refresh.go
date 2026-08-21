@@ -63,15 +63,20 @@ func refreshSkillsIfVersionChanged() bool {
 	// Advance the sentinel unless something failed: nothing owned to refresh
 	// and a fully successful refresh both mean this version is done. On
 	// transient failure, leave it stale so the next run retries.
-	if failed == 0 {
-		// 0o700: ConfigDir can hold credentials.json; keep it owner-only.
-		// writeSkillFile refuses to follow a symlink planted at the sentinel
-		// path, the same rule as every other file this feature writes.
-		_ = os.MkdirAll(filepath.Dir(sentinelPath), 0o700)
-		_ = writeSkillFile(sentinelPath, []byte(sentinelState))
+	if failed != 0 {
+		return false
+	}
+	// 0o700: ConfigDir can hold credentials.json; keep it owner-only.
+	// writeSkillFile refuses to follow a symlink planted at the sentinel
+	// path, the same rule as every other file this feature writes.
+	_ = os.MkdirAll(filepath.Dir(sentinelPath), 0o700)
+	if err := writeSkillFile(sentinelPath, []byte(sentinelState)); err != nil {
+		// Without the sentinel every later run rescans; report no completed
+		// refresh so the update notice cannot repeat on each of them.
+		return false
 	}
 
-	return updated > 0 && failed == 0
+	return updated > 0
 }
 
 // skillRefreshLocations lists every absolute path an agent reads the hey

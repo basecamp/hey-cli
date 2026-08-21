@@ -345,6 +345,19 @@ func migrateOldCredentials(_ string) {
 	store := authMgr.GetStore()
 	credKey := authMgr.CredentialKey()
 
+	// The legacy fields carry their own server: migrate (and later scrub)
+	// only when it is the server this run is talking to. With HEY_BASE_URL
+	// pointed elsewhere, the current store key says nothing about the legacy
+	// credential — saving it there would misfile it, and scrubbing it would
+	// delete the only copy for its real origin.
+	legacyOrigin := strings.TrimRight(old.BaseURL, "/")
+	if legacyOrigin == "" {
+		legacyOrigin = strings.TrimRight(config.Defaults().BaseURL, "/")
+	}
+	if legacyOrigin != credKey {
+		return
+	}
+
 	if existing, err := store.Load(credKey); err == nil {
 		// A prior run already migrated. If its scrub failed, the legacy
 		// fields are still in config.json (we just loaded them above) —

@@ -310,3 +310,25 @@ func TestRefreshSkillsNeverWritesThroughSymlinkedSentinel(t *testing.T) {
 		t.Errorf("sentinel write followed a symlink: %q", got)
 	}
 }
+
+// A refresh whose sentinel cannot be written is not complete: reporting it
+// as one would repeat the update notice on every subsequent command.
+func TestRefreshSkillsSentinelFailureIsNotCompletion(t *testing.T) {
+	home := refreshFixture(t)
+	stubVersion(t, "9.9.9")
+	installStaleSkill(t, home)
+
+	// The sentinel's parent exists but is unwritable.
+	configDir := filepath.Join(home, ".config", "hey-cli")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(configDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(configDir, 0o700) })
+
+	if refreshSkillsIfVersionChanged() {
+		t.Error("a refresh without a sentinel must not report completion")
+	}
+}

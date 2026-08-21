@@ -316,12 +316,12 @@ func TestSetupAgentsDoesNotMigrateLegacyCredentials(t *testing.T) {
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	legacy := `{"base_url":"https://app.hey.com","access_token":"legacy-token"}`
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+	legacy := `{"base_url":"` + server.URL + `","access_token":"legacy-token"}`
 	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(legacy), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(http.NotFoundHandler())
-	defer server.Close()
 
 	if _, _, err := runAuthCommand(t, home, server.URL, "", true, "setup", "agents"); err != nil {
 		t.Fatalf("setup agents: %v", err)
@@ -388,12 +388,12 @@ func TestConfigSetMigratesLegacyCredentialsBeforeRewriting(t *testing.T) {
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	legacy := `{"base_url":"https://app.hey.com","access_token":"legacy-token","refresh_token":"legacy-refresh"}`
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+	legacy := `{"base_url":"` + server.URL + `","access_token":"legacy-token","refresh_token":"legacy-refresh"}`
 	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(legacy), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(http.NotFoundHandler())
-	defer server.Close()
 
 	if _, _, err := runAuthCommand(t, home, server.URL, "", true, "config", "set", "onboarded", "true"); err != nil {
 		t.Fatalf("config set: %v", err)
@@ -417,7 +417,9 @@ func TestConfigRewritesPreserveLegacyCredentialsWhenMigrationFails(t *testing.T)
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	legacy := `{"base_url":"https://app.hey.com","access_token":"legacy-token"}`
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+	legacy := `{"base_url":"` + server.URL + `","access_token":"legacy-token"}`
 	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(legacy), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -426,8 +428,6 @@ func TestConfigRewritesPreserveLegacyCredentialsWhenMigrationFails(t *testing.T)
 	if err := os.MkdirAll(filepath.Join(configDir, "credentials.json"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(http.NotFoundHandler())
-	defer server.Close()
 
 	if _, _, err := runAuthCommand(t, home, server.URL, "", true, "config", "set", "onboarded", "true"); err != nil {
 		t.Fatalf("config set: %v", err)
@@ -538,6 +538,7 @@ func TestMigrationRetriesScrubWhenStoreAlreadyPopulated(t *testing.T) {
 	if err := json.Unmarshal(raw, &cfgMap); err != nil {
 		t.Fatal(err)
 	}
+	cfgMap["base_url"] = server.URL
 	cfgMap["access_token"] = "legacy-token"
 	cfgMap["session_cookie"] = "legacy-cookie"
 	cfgMap["future_setting"] = map[string]any{"nested": true}
@@ -570,5 +571,55 @@ func TestMigrationRetriesScrubWhenStoreAlreadyPopulated(t *testing.T) {
 	storedAfter, err := os.ReadFile(filepath.Join(configDir, "credentials.json"))
 	if err != nil || string(storedAfter) != string(storedBefore) {
 		t.Errorf("stored credentials changed during the retry: %v", err)
+	}
+}
+
+// Legacy credentials belong to the server recorded beside them. With the
+// effective base URL pointed elsewhere, migration must neither misfile them
+// under the wrong store key nor scrub the only copy for their real origin.
+func TestMigrationLeavesForeignOriginLegacyCredentialsAlone(t *testing.T) {
+	isolateAgents(t)
+	home := t.TempDir()
+	configDir := filepath.Join(home, "hey-cli")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	// Store already holds credentials for the dev server this run targets.
+	if _, _, err := runAuthCommand(t, home, server.URL, "", true, "auth", "login", "--token", "dev-token"); err != nil {
+		t.Fatalf("auth login: %v", err)
+	}
+	// The legacy fields target production.
+	raw, err := os.ReadFile(filepath.Join(configDir, "config.json"))
+	if os.IsNotExist(err) {
+		raw = []byte("{}")
+	} else if err != nil {
+		t.Fatal(err)
+	}
+	var cfgMap map[string]any
+	if err := json.Unmarshal(raw, &cfgMap); err != nil {
+		t.Fatal(err)
+	}
+	cfgMap["access_token"] = "production-token"
+	seeded, _ := json.Marshal(cfgMap)
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), seeded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := runAuthCommand(t, home, server.URL, "", true, "auth", "status"); err != nil {
+		t.Fatalf("auth status: %v", err)
+	}
+	after, err := os.ReadFile(filepath.Join(configDir, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(after), "production-token") {
+		t.Fatalf("foreign-origin legacy credential scrubbed: %s", after)
+	}
+	creds, err := os.ReadFile(filepath.Join(configDir, "credentials.json"))
+	if err != nil || strings.Contains(string(creds), "production-token") {
+		t.Errorf("foreign-origin legacy credential misfiled into the store: %v", err)
 	}
 }

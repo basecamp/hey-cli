@@ -514,9 +514,11 @@ hey auth status                               # Check if authenticated
 hey auth logout                               # Log out
 hey login / hey logout                        # Shortcuts for the two above
 hey setup                                     # First-run wizard: sign in + connect coding agents
-HEY_NONINTERACTIVE=1 hey setup --json         # Status-only: no prompts and no OAuth wait
-                                              # (without HEY_NONINTERACTIVE, a terminal on
-                                              # stdin still starts browser sign-in)
+HEY_NONINTERACTIVE=1 hey setup --json         # No prompts and no OAuth wait — but still
+                                              # installs agent skills and records onboarding;
+                                              # use `hey doctor` to inspect without changes.
+                                              # (Without HEY_NONINTERACTIVE, a terminal on
+                                              # stdin still starts browser sign-in.)
 ```
 
 If a command fails with an auth error, run `hey auth status` to check, then `hey auth login` to re-authenticate.
