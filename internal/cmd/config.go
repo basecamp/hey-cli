@@ -6,8 +6,10 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/config"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 type configCommand struct {
@@ -57,16 +59,11 @@ func newConfigSetCommand() *cobra.Command {
 					return err
 				}
 			default:
-				return output.ErrUsage(fmt.Sprintf("unknown config key: %s (available: base_url, onboarded)", key))
+				return apierr.ErrUsage(fmt.Sprintf("unknown config key: %s (available: base_url, onboarded)", key))
 			}
 
-			if writer.IsStyled() {
-				fmt.Fprintf(cmd.OutOrStdout(), "Set %s = %s\n", key, value)
-				return nil
-			}
-			return writeOK(map[string]string{"key": key, "value": value},
-				output.WithSummary(fmt.Sprintf("Set %s = %s", key, value)),
-			)
+			summary := fmt.Sprintf("Set %s = %s", key, value)
+			return writeMutationLine(cmd, summary, summary, map[string]string{"key": key, "value": value})
 		},
 	}
 }
@@ -79,16 +76,15 @@ func newConfigTrustLocalCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			local := cfg.LocalConfig()
 			if local == nil {
-				return output.ErrUsage("no local .hey/config.json with a server or account setting was found")
+				return apierr.ErrUsage("no local .hey/config.json with a server or account setting was found")
 			}
 			if err := cfg.TrustLocalConfig(); err != nil {
 				return err
 			}
-			if writer.IsStyled() {
-				fmt.Fprintf(cmd.OutOrStdout(), "Trusted local HEY configuration: %s\n", terminalSafeText(local.Path))
-				return nil
-			}
-			return writeOK(cfg.LocalConfig(), output.WithSummary("Trusted local HEY configuration"))
+			return writeMutationLine(cmd,
+				fmt.Sprintf("Trusted local HEY configuration: %s", local.Path),
+				"Trusted local HEY configuration",
+				cfg.LocalConfig())
 		},
 	}
 }
@@ -101,16 +97,15 @@ func newConfigUntrustLocalCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			local := cfg.LocalConfig()
 			if local == nil {
-				return output.ErrUsage("no local .hey/config.json with a server or account setting was found")
+				return apierr.ErrUsage("no local .hey/config.json with a server or account setting was found")
 			}
 			if err := cfg.UntrustLocalConfig(); err != nil {
 				return err
 			}
-			if writer.IsStyled() {
-				fmt.Fprintf(cmd.OutOrStdout(), "Removed trust for local HEY configuration: %s\n", terminalSafeText(local.Path))
-				return nil
-			}
-			return writeOK(cfg.LocalConfig(), output.WithSummary("Removed trust for local HEY configuration"))
+			return writeMutationLine(cmd,
+				fmt.Sprintf("Removed trust for local HEY configuration: %s", local.Path),
+				"Removed trust for local HEY configuration",
+				cfg.LocalConfig())
 		},
 	}
 }
@@ -134,10 +129,10 @@ func newConfigTrustedLocalsCommand() *cobra.Command {
 						digest = digest[:12]
 					}
 					table.addRow([]string{
-						terminalSafeText(local.Path),
-						terminalSafeText(local.ServerOrigin),
-						terminalSafeText(local.AccountID),
-						terminalSafeText(digest),
+						terminal.SanitizeLine(local.Path),
+						terminal.SanitizeLine(local.ServerOrigin),
+						terminal.SanitizeLine(local.AccountID),
+						terminal.SanitizeLine(digest),
 					})
 				}
 				table.print()

@@ -5,15 +5,31 @@ import (
 	"time"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
+	"github.com/basecamp/hey-sdk/go/pkg/hey"
 )
 
+// The SDK asks for this at runtime, when a 401 comes back and it wants to know whether
+// these credentials can be renewed before surfacing the failure. A signature that drifts
+// out of shape would go unnoticed there until a token expired mid-session.
+var _ hey.TokenRefresher = (*cliAuthStrategy)(nil)
+
 func TestFormatTimestampUTC(t *testing.T) {
-	// 2024-01-15 00:00:00 UTC
-	// In a non-UTC local timezone (e.g. America/Los_Angeles, UTC-8) this
-	// would render as 2024-01-14 if formatted in local time.
 	ts := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
 	got := formatTimestamp(ts)
 	want := "2024-01-15T00:00"
+	if got != want {
+		t.Errorf("formatTimestamp = %q, want %q", got, want)
+	}
+}
+
+// A recording carries the zone it was recorded in, and that is the wall-clock time the
+// reader recognizes. Converting to UTC first moved every hour it printed: a time track
+// started at 09:00 in Berlin read as 07:00.
+func TestFormatTimestampKeepsTheRecordingsOwnZone(t *testing.T) {
+	berlin := time.FixedZone("CEST", 2*60*60)
+	ts := time.Date(2026, 8, 21, 9, 0, 0, 0, berlin)
+	got := formatTimestamp(ts)
+	want := "2026-08-21T09:00"
 	if got != want {
 		t.Errorf("formatTimestamp = %q, want %q", got, want)
 	}
@@ -37,10 +53,22 @@ func TestFormatTimestampZero(t *testing.T) {
 }
 
 func TestFormatDateUTC(t *testing.T) {
-	// 2024-01-15 00:00:00 UTC — must stay 2024-01-15 regardless of local timezone
 	ts := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
 	got := formatDate(ts)
 	want := "2024-01-15"
+	if got != want {
+		t.Errorf("formatDate = %q, want %q", got, want)
+	}
+}
+
+// A day that starts at midnight east of Greenwich is a day earlier in UTC, and the date
+// this prints is fed straight back to `hey journal read`, which would then read an empty
+// day.
+func TestFormatDateKeepsTheRecordingsOwnDay(t *testing.T) {
+	berlin := time.FixedZone("CEST", 2*60*60)
+	ts := time.Date(2026, 8, 21, 0, 0, 0, 0, berlin)
+	got := formatDate(ts)
+	want := "2026-08-21"
 	if got != want {
 		t.Errorf("formatDate = %q, want %q", got, want)
 	}
@@ -92,10 +120,12 @@ func TestFindPersonalCalendarIDNotFound(t *testing.T) {
 	}
 }
 
+// An empty listing has to marshal as `[]`, not `null`, or the documented
+// `--jq '.data[]'` recipe cannot iterate it.
 func TestUnwrapCalendarsNil(t *testing.T) {
 	result := unwrapCalendars(nil)
-	if result != nil {
-		t.Errorf("unwrapCalendars(nil) = %v, want nil", result)
+	if result == nil || len(result) != 0 {
+		t.Errorf("unwrapCalendars(nil) = %v, want an empty non-nil slice", result)
 	}
 }
 
@@ -125,11 +155,25 @@ func TestFilterRecordingsByType(t *testing.T) {
 		t.Errorf("unexpected todos: %v", todos)
 	}
 	missing := filterRecordingsByType(resp, "Calendar::TimeTrack")
-	if missing != nil {
-		t.Errorf("expected nil for missing type, got %v", missing)
+	if missing == nil || len(missing) != 0 {
+		t.Errorf("expected an empty non-nil slice for a missing type, got %v", missing)
 	}
 	nilResult := filterRecordingsByType(nil, "Calendar::Todo")
-	if nilResult != nil {
-		t.Errorf("expected nil for nil resp, got %v", nilResult)
+	if nilResult == nil || len(nilResult) != 0 {
+		t.Errorf("expected an empty non-nil slice for a nil response, got %v", nilResult)
+	}
+}
+
+func TestFlattenRecordingsSortsByType(t *testing.T) {
+	resp := &generated.CalendarRecordingsResponse{
+		"Calendar::Todo":         {{Id: 3, Title: "Water the plants"}},
+		"Calendar::JournalEntry": {{Id: 1, Title: "Journal"}, {Id: 2, Title: "Journal"}},
+	}
+	flattened := flattenRecordings(resp)
+	if len(flattened) != 3 || flattened[0].Id != 1 || flattened[1].Id != 2 || flattened[2].Id != 3 {
+		t.Errorf("flattenRecordings = %+v", flattened)
+	}
+	if empty := flattenRecordings(nil); empty == nil || len(empty) != 0 {
+		t.Errorf("flattenRecordings(nil) = %v, want an empty non-nil slice", empty)
 	}
 }

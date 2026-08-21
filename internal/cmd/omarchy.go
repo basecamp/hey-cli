@@ -17,7 +17,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
+	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/mail"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -784,17 +787,17 @@ func (c *setupOmarchyCommand) run(cmd *cobra.Command, args []string) error {
 	// List-only formats cannot render the step report; refuse them before any
 	// file is touched rather than failing after a successful install.
 	if format := writer.EffectiveFormat(); format == output.FormatIDs || format == output.FormatCount {
-		return output.ErrUsageHint("hey setup omarchy reports steps, not a list", "use --json for machine-readable output")
+		return apierr.ErrUsageHint("hey setup omarchy reports steps, not a list", "use --json for machine-readable output")
 	}
 	// Every path is under the home directory; without one they would resolve
 	// relative to the working directory, and --remove would delete from there.
 	if !filepath.IsAbs(c.env.home) {
-		return &output.Error{Code: "setup_failed", Message: "cannot resolve an absolute home directory", Hint: "set HOME to an absolute path and run hey setup omarchy again"}
+		return &apierr.Error{Code: "setup_failed", Message: "cannot resolve an absolute home directory", Hint: "set HOME to an absolute path and run hey setup omarchy again"}
 	}
 	// Detection gates installation only: removal operates on fixed user paths
 	// and must still work after Omarchy itself is gone.
 	if !c.remove && !c.env.detected() {
-		return output.ErrUsageHint("Omarchy not detected", "hey setup omarchy needs ~/.local/state/omarchy or OMARCHY_PATH")
+		return apierr.ErrUsageHint("Omarchy not detected", "hey setup omarchy needs ~/.local/state/omarchy or OMARCHY_PATH")
 	}
 
 	setup := omarchySetup{env: c.env}
@@ -846,7 +849,7 @@ func (c *setupOmarchyCommand) run(cmd *cobra.Command, args []string) error {
 		// An operational failure, not a usage error: some steps already changed
 		// files, and they ride along in the error meta so a scripting caller can
 		// see which pieces landed and which did not.
-		return &output.Error{
+		return &apierr.Error{
 			Code:    "setup_failed",
 			Message: strings.Join(failures, "; "),
 			Hint:    "fix the paths above and run hey setup omarchy again",
@@ -960,10 +963,10 @@ func omarchyBarModuleJSON() string {
 // thread can later surface as new; it happens once per identity.
 var (
 	unseenPageCap = 10
-	// The +1 is the initial page: maxAdditionalPages caps pages fetched after
-	// it (as in paginateBoxPostings), so a box whose unseen set spans exactly
-	// the cap still finds its closing seen page and seeds completely.
-	unseenSeedPageCap = maxAdditionalPages + 1
+	// maxPostingPages counts the initial page, as `hey box` does, so a box whose
+	// unseen set spans exactly the cap still finds its closing seen page and
+	// seeds completely.
+	unseenSeedPageCap = maxPostingPages
 )
 
 // unseenImboxPostings returns the unseen Imbox postings, whether they are the
@@ -974,10 +977,12 @@ var (
 // the indicator stays dark rather than lying either way loudly, and the notify
 // fingerprints stay untouched.
 func unseenImboxPostings(ctx context.Context, maxPages int) (unseen []generated.Posting, complete, ok bool) {
-	page, err := sdk.Boxes().GetImbox(ctx, nil)
-	if err != nil || page == nil {
+	imbox, err := sdk.Boxes().GetImbox(ctx, nil)
+	if err != nil || imbox == nil {
 		return nil, false, false
 	}
+	source := mail.Source{Kind: mail.KindBox, ID: imbox.Id, BoxKind: hey.BoxKindImbox}
+	page := mail.Page{Postings: imbox.Postings, Cursor: imbox.NextHistoryUrl}
 	for pages := 1; ; pages++ {
 		seenOnPage := false
 		for _, posting := range page.Postings {
@@ -987,7 +992,7 @@ func unseenImboxPostings(ctx context.Context, maxPages int) (unseen []generated.
 				unseen = append(unseen, posting)
 			}
 		}
-		if seenOnPage || len(page.Postings) == 0 || page.NextHistoryUrl == "" {
+		if seenOnPage || len(page.Postings) == 0 || page.Cursor == "" {
 			return unseen, true, true
 		}
 		if pages >= maxPages {
@@ -995,7 +1000,7 @@ func unseenImboxPostings(ctx context.Context, maxPages int) (unseen []generated.
 		}
 		// A page that cannot be fetched leaves what was read as a truncated
 		// snapshot: still enough to light the bar, not enough to prune by.
-		if page, err = fetchNextBoxPage(ctx, page.NextHistoryUrl); err != nil || page == nil {
+		if page, err = mail.ReadPage(ctx, sdk, source, page.Cursor); err != nil {
 			return unseen, false, true
 		}
 	}

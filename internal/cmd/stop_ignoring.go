@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
 type stopIgnoringCommand struct {
@@ -41,14 +41,8 @@ func (c *stopIgnoringCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := sdk.Postings().Unmute(cmd.Context(), ids...); err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
-	summary := fmt.Sprintf("Stopped ignoring %d %s", len(ids), threadNoun(len(ids)))
-	if writer.IsStyled() {
-		fmt.Fprintln(cmd.OutOrStdout(), summary+".")
-		return nil
-	}
-
-	return writeOK(nil, output.WithSummary(summary))
+	return writeMutation(cmd, fmt.Sprintf("Stopped ignoring %d %s", len(ids), threadNoun(len(ids))), nil)
 }

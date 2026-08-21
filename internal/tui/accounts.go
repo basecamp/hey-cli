@@ -10,6 +10,8 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 type mailAccountChoice struct {
@@ -61,7 +63,7 @@ func loadMailAccounts(ctx context.Context, client *hey.Client, selected string) 
 			if label == "" {
 				label = fmt.Sprintf("Account %d", account.Id)
 			}
-			accounts = append(accounts, mailAccountChoice{id: account.Id, label: terminalSafeAttachmentText(label)})
+			accounts = append(accounts, mailAccountChoice{id: account.Id, label: terminal.SanitizeLine(label)})
 		}
 
 		selectedIndex := 0
@@ -129,7 +131,7 @@ func renderMailAccountPicker(m *model) string {
 		content.WriteString("\n" + m.styles.entryDate.Render("Switching account…"))
 	}
 	if m.mailAccountErr != "" {
-		content.WriteString("\n" + m.styles.entryDate.Render("Error: "+terminalSafeAttachmentText(m.mailAccountErr)))
+		content.WriteString("\n" + m.styles.entryDate.Render("Error: "+terminal.SanitizeLine(m.mailAccountErr)))
 	}
 	return content.String()
 }

@@ -27,8 +27,8 @@ import (
 	"github.com/sigstore/sigstore-go/pkg/verify"
 	"golang.org/x/mod/semver"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/config"
-	"github.com/basecamp/hey-cli/internal/output"
 	"github.com/basecamp/hey-cli/internal/version"
 )
 
@@ -207,7 +207,7 @@ func probeDirWritable(dir string) error {
 
 // runNativeSelfUpdate performs the download → verify → swap → confirm flow.
 // Returns writeUpgradeOK on confirmed success; every other outcome is a
-// *output.Error.
+// *apierr.Error.
 func runNativeSelfUpdate(ctx context.Context, w io.Writer, target, current string, release releaseInfo) error {
 	latest := release.Version
 
@@ -221,7 +221,7 @@ func runNativeSelfUpdate(ctx context.Context, w io.Writer, target, current strin
 	if !found {
 		fmt.Fprintln(w)
 		fmt.Fprintf(w, "No prebuilt binary for %s/%s — download the release from:\n  %s\n", runtime.GOOS, runtime.GOARCH, releaseTagURL(latest))
-		return &output.Error{
+		return &apierr.Error{
 			Code:    "upgrade_required",
 			Message: fmt.Sprintf("update available (%s → %s) but release v%s has no prebuilt binary for %s/%s", current, latest, latest, runtime.GOOS, runtime.GOARCH),
 			Hint:    "Download manually: " + releaseTagURL(latest),
@@ -340,12 +340,12 @@ func sameVersion(a, b string) bool {
 	return semver.IsValid(a) && semver.IsValid(b) && semver.Compare(a, b) == 0
 }
 
-func errUpgradeFailed(msg string) *output.Error {
+func errUpgradeFailed(msg string) *apierr.Error {
 	return errUpgradeFailedHint(msg, "The existing install was left in place. Re-run hey upgrade, or reinstall: "+installerHint())
 }
 
-func errUpgradeFailedHint(msg, hint string) *output.Error {
-	return &output.Error{Code: "upgrade_failed", Message: msg, Hint: hint}
+func errUpgradeFailedHint(msg, hint string) *apierr.Error {
+	return &apierr.Error{Code: "upgrade_failed", Message: msg, Hint: hint}
 }
 
 // downloadFileSHA256 streams url to dest, returning the sha256 of the bytes
@@ -687,7 +687,7 @@ func (e *swapCatastropheError) Error() string {
 // swapFailureError maps a replaceExecutable failure to the user-facing error.
 // The ordinary case leaves the previous binary installed; the catastrophic
 // case must not claim that — it names the preserved backup and how to recover.
-func swapFailureError(target string, err error) *output.Error {
+func swapFailureError(target string, err error) *apierr.Error {
 	var cat *swapCatastropheError
 	if errors.As(err, &cat) {
 		return errUpgradeFailedHint(

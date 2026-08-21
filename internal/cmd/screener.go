@@ -9,6 +9,7 @@ import (
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -38,7 +39,7 @@ func newScreenerCommand() *screenerCommand {
 func parseClearanceID(value string) (int64, error) {
 	id, err := strconv.ParseInt(value, 10, 64)
 	if err != nil || id <= 0 {
-		return 0, output.ErrUsage(fmt.Sprintf("invalid clearance ID: %s", value))
+		return 0, apierr.ErrUsage(fmt.Sprintf("invalid clearance ID: %s", value))
 	}
 	return id, nil
 }
@@ -88,14 +89,14 @@ func screenSenders(cmd *cobra.Command, ids []int64, status string, opts hey.Scre
 	if len(ids) == 1 {
 		clearance, err := sdk.Clearances().Screen(cmd.Context(), ids[0], status, opts)
 		if err != nil {
-			return convertSDKError(err)
+			return apierr.FromSDK(err)
 		}
 		return reportScreened(cmd, []generated.Clearance{*clearance}, status, reverse)
 	}
 
 	clearances, err := sdk.Clearances().ScreenMany(cmd.Context(), ids, status, opts.Spam)
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 	return reportScreened(cmd, clearances, status, reverse)
 }

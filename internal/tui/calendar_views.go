@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -139,25 +140,39 @@ func dateKey(t time.Time) string {
 	return t.Format("2006-01-02")
 }
 
-// dayLabelsFromEvents builds a map of date → custom label from recordings
-// that have a Label set (named days in HEY).
-func dayLabelsFromEvents(events []models.Recording) map[string]string {
-	m := make(map[string]string)
-	for _, e := range events {
-		if e.Label == "" {
-			continue
-		}
-		t := parseEventTime(e.StartsAt)
-		if t.IsZero() {
-			continue
-		}
-		// First label wins
-		key := dateKey(t)
-		if _, exists := m[key]; !exists {
-			m[key] = e.Label
+// dayLabelsFromRecordings builds a map of date → custom label from recordings
+// that have a Label set (named days in HEY). A named day carries its label on
+// whichever recording HEY hung it on, which can be a todo or a habit as much as
+// an event, so every group the day holds is read.
+func dayLabelsFromRecordings(groups ...[]models.Recording) map[string]string {
+	labels := make(map[string]string)
+	for _, group := range groups {
+		for _, recording := range group {
+			if recording.Label == "" {
+				continue
+			}
+			day := parseEventTime(recording.StartsAt)
+			if day.IsZero() {
+				continue
+			}
+			// First label wins
+			key := dateKey(day)
+			if _, exists := labels[key]; !exists {
+				labels[key] = recording.Label
+			}
 		}
 	}
-	return m
+	return labels
+}
+
+// daysBetween counts whole calendar days from one date to another. The clock time
+// and the hours in the days are beside the point: an hour lost or gained to a
+// daylight saving shift in between must not move the count, which subtracting the
+// timestamps and dividing by 24 hours does.
+func daysBetween(from, to time.Time) int {
+	fromDay := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, from.Location())
+	toDay := time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, to.Location())
+	return int(math.Round(toDay.Sub(fromDay).Hours() / 24))
 }
 
 // ============================================================

@@ -17,18 +17,30 @@ import (
 
 // Dial connects to the cable server for a HEY base URL, authorizing the upgrade
 // request with the same credentials the SDK sends on an API request.
+//
+// The credentials are asked for again on every dial, not only the first: a client
+// reconnects on its own for as long as `hey tui` or `hey watch` is running, which is
+// longer than an access token lives, and a reconnect carrying the token the first dial
+// used would be turned down for good while a working refresh token sat on disk.
 func Dial(ctx context.Context, baseURL string, authMgr *auth.Manager, options ...actioncable.Option) (*actioncable.Client, error) {
 	cableURL, err := URL(baseURL)
 	if err != nil {
 		return nil, err
 	}
 
-	header, err := authHeader(ctx, baseURL, authMgr)
-	if err != nil {
+	// The first dial's header is taken here so that credentials the server won't take
+	// are reported now, rather than becoming a reconnect loop inside the client.
+	if _, err := authHeader(ctx, baseURL, authMgr); err != nil {
 		return nil, err
 	}
 
-	client := actioncable.New(cableURL, append([]actioncable.Option{actioncable.WithHeader(header)}, options...)...)
+	settings := make([]actioncable.Option, 0, 1+len(options))
+	settings = append(settings, actioncable.WithHeaderFunc(func(ctx context.Context) (http.Header, error) {
+		return authHeader(ctx, baseURL, authMgr)
+	}))
+	settings = append(settings, options...)
+
+	client := actioncable.New(cableURL, settings...)
 	if err := client.Connect(ctx); err != nil {
 		return nil, err
 	}

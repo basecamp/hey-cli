@@ -11,7 +11,7 @@ import (
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
-	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
 type moveCommand struct {
@@ -45,7 +45,7 @@ func (c *moveCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if strings.TrimSpace(c.to) == "" {
-		return output.ErrUsage("destination box is required (use --to <box>)")
+		return apierr.ErrUsage("destination box is required (use --to <box>)")
 	}
 
 	ids, err := parseIntArgs(args)
@@ -59,25 +59,19 @@ func (c *moveCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := sdk.Postings().Move(cmd.Context(), destination.Id, ids...); err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
-	summary := fmt.Sprintf("%d %s moved to %s", len(ids), threadNoun(len(ids)), destination.Name)
-	if writer.IsStyled() {
-		fmt.Fprintln(cmd.OutOrStdout(), summary+".")
-		return nil
-	}
-
-	return writeOK(nil, output.WithSummary(summary))
+	return writeMutation(cmd, fmt.Sprintf("%d %s moved to %s", len(ids), threadNoun(len(ids)), destination.Name), nil)
 }
 
 func resolveMoveDestination(ctx context.Context, nameOrID string) (*generated.Box, error) {
 	boxes, err := sdk.Boxes().List(ctx)
 	if err != nil {
-		return nil, convertSDKError(err)
+		return nil, apierr.FromSDK(err)
 	}
 	if boxes == nil {
-		return nil, output.ErrNotFound("box", nameOrID)
+		return nil, apierr.ErrNotFound("box", nameOrID)
 	}
 
 	if id, err := strconv.ParseInt(nameOrID, 10, 64); err == nil {
@@ -86,7 +80,7 @@ func resolveMoveDestination(ctx context.Context, nameOrID string) (*generated.Bo
 				return validateMoveDestination(&(*boxes)[i])
 			}
 		}
-		return nil, output.ErrNotFound("box", nameOrID)
+		return nil, apierr.ErrNotFound("box", nameOrID)
 	}
 
 	query := canonicalBoxName(nameOrID)
@@ -97,12 +91,12 @@ func resolveMoveDestination(ctx context.Context, nameOrID string) (*generated.Bo
 		}
 	}
 
-	return nil, output.ErrNotFound("box", nameOrID)
+	return nil, apierr.ErrNotFound("box", nameOrID)
 }
 
 func validateMoveDestination(box *generated.Box) (*generated.Box, error) {
 	if strings.EqualFold(box.Kind, hey.BoxKindBubbleUp) {
-		return nil, output.ErrUsage("Bubble Up requires a scheduled date and is not supported by hey move")
+		return nil, apierr.ErrUsage("Bubble Up requires a scheduled date and is not supported by hey move")
 	}
 	return box, nil
 }

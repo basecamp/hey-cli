@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/htmlutil"
@@ -211,33 +212,39 @@ func (f *composeForm) setStatus(s string, isErr bool) {
 	f.isError = isErr
 }
 
-// handleKey routes keys while the form is open. It returns (cmd, send) where
-// send=true means the caller should submit the form.
-func (f *composeForm) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+// handleKey routes keys while the form is open. A form that is sending holds on to
+// every key, including escape: the send is already on its way.
+func (f *composeForm) handleKey(view *mailView, msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	if f.sending {
-		return nil, false
+		return nil, true
 	}
 	switch {
+	case msg.Key().Code == tea.KeyEscape:
+		return nil, false
 	case msg.Key().Code == tea.KeyTab && msg.Key().Mod == tea.ModShift:
 		f.focus = (f.focus + f.bodyIndex()) % (f.bodyIndex() + 1)
-		return f.focusCurrent(), false
+		return f.focusCurrent(), true
 	case msg.Key().Code == tea.KeyTab:
 		f.focus = (f.focus + 1) % (f.bodyIndex() + 1)
-		return f.focusCurrent(), false
+		return f.focusCurrent(), true
 	case msg.Key().Code == tea.KeyEnter && f.focus != f.bodyIndex():
 		// Enter on a header field moves on, like tab.
 		f.focus++
-		return f.focusCurrent(), false
+		return f.focusCurrent(), true
 	case msg.String() == "ctrl+s":
 		if problem := f.validate(); problem != "" {
 			f.setStatus(problem, true)
-			return nil, false
+			return nil, true
 		}
 		f.sending = true
 		f.setStatus("Sending…", false)
-		return nil, true
+		return view.send(f), true
 	}
-	return f.update(msg), false
+	return f.update(msg), true
+}
+
+func (f *composeForm) handleMsg(msg tea.Msg) (tea.Cmd, bool) {
+	return f.update(msg), true
 }
 
 // update forwards a message to the focused input (keys, cursor blinks, ...).
@@ -257,6 +264,14 @@ func (f *composeForm) helpBindings() []helpBinding {
 		{"ctrl+s", "send"},
 		{"esc", "cancel"},
 	}
+}
+
+func (f *composeForm) restyle(s styles) {
+	f.styles = s
+}
+
+func (f *composeForm) draw(_ *mailView) string {
+	return f.view()
 }
 
 func (f *composeForm) view() string {
@@ -315,9 +330,9 @@ func parseAddressList(s string) []string {
 
 // startCompose opens an empty new-message form.
 func (v *mailView) startCompose() tea.Cmd {
-	v.compose = newComposeForm(composeNew, v.vc.styles)
-	v.compose.resize(v.vc.width, v.vc.height)
-	return v.compose.init()
+	form := newComposeForm(composeNew, v.vc.styles)
+	v.openModal(form)
+	return form.init()
 }
 
 // loadReplyContext fetches the thread's account, latest entry, and recipients,
@@ -325,7 +340,7 @@ func (v *mailView) startCompose() tea.Cmd {
 func (v *mailView) loadReplyContext(topicID int64, topicName string) tea.Cmd {
 	sdk := v.vc.sdk
 	boxID := v.currentBoxID()
-	requestID, ctx := v.beginRequest(mailRequestReply)
+	requestID, ctx := v.requests.begin(v.vc.ctx, mailRequestReply)
 	return func() tea.Msg {
 		topic, err := sdk.Topics().Get(ctx, topicID)
 		if err != nil {
@@ -342,23 +357,64 @@ func (v *mailView) loadReplyContext(topicID int64, topicName string) tea.Cmd {
 		if err != nil {
 			return replyContextLoadedMsg{requestID: requestID, boxID: boxID, err: err}
 		}
-		topicResp, err := accountSDK.GetHTML(ctx, fmt.Sprintf("/topics/%d", topicID))
+		entryID := topic.Entries[len(topic.Entries)-1].Id
+		message, err := accountSDK.Messages().Get(ctx, entryID)
 		if err != nil {
 			return replyContextLoadedMsg{requestID: requestID, boxID: boxID, err: err}
 		}
-		addressed := htmlutil.ParseTopicAddressed(string(topicResp.Data))
+		if message == nil {
+			return replyContextLoadedMsg{
+				requestID: requestID,
+				boxID:     boxID,
+				err:       fmt.Errorf("message %d returned no data", entryID),
+			}
+		}
+		to, cc, bcc := recipientsForReplyTo(*message)
 		return replyContextLoadedMsg{
 			requestID: requestID,
 			boxID:     boxID,
 			topicID:   topicID,
 			topicName: topicName,
-			entryID:   topic.Entries[len(topic.Entries)-1].Id,
+			entryID:   entryID,
 			sdk:       accountSDK,
-			to:        addressed.To,
-			cc:        addressed.CC,
-			bcc:       addressed.BCC,
+			to:        to,
+			cc:        cc,
+			bcc:       bcc,
 		}
 	}
+}
+
+// recipientsForReplyTo answers who a reply to this message goes to: the message's own
+// recipients, with whoever sent it moved onto the To line. That is what HEY does in
+// Entry::Addressed#participating_contacts_in_reply_by_kind, so a reply reaches the
+// person who wrote the message as well as everyone they wrote to.
+func recipientsForReplyTo(message generated.Message) (to, cc, bcc []string) {
+	sender := message.Sender.EmailAddress
+	if sender == "" {
+		sender = message.Creator.EmailAddress
+	}
+
+	to = addressesOf(message.Addressed.Directly, sender)
+	if sender != "" {
+		to = append(to, sender)
+	}
+	return to, addressesOf(message.Addressed.Copied, sender), addressesOf(message.Addressed.Blindcopied, sender)
+}
+
+// addressesOf answers the contacts' email addresses, dropping blanks, repeats, and the
+// one address HEY addresses directly instead.
+func addressesOf(contacts []generated.Contact, excluding string) []string {
+	seen := map[string]bool{strings.ToLower(excluding): true}
+	var addresses []string
+	for _, contact := range contacts {
+		address := strings.TrimSpace(contact.EmailAddress)
+		key := strings.ToLower(address)
+		if address != "" && !seen[key] {
+			seen[key] = true
+			addresses = append(addresses, address)
+		}
+	}
+	return addresses
 }
 
 // loadForwardContext fetches HEY's prefilled forward for the latest entry in
@@ -366,7 +422,7 @@ func (v *mailView) loadReplyContext(topicID int64, topicName string) tea.Cmd {
 func (v *mailView) loadForwardContext(topicID int64, topicName string) tea.Cmd {
 	sdk := v.vc.sdk
 	boxID := v.currentBoxID()
-	requestID, ctx := v.beginRequest(mailRequestForward)
+	requestID, ctx := v.requests.begin(v.vc.ctx, mailRequestForward)
 	return func() tea.Msg {
 		topic, err := sdk.Topics().Get(ctx, topicID)
 		if err != nil {
@@ -418,8 +474,7 @@ func (v *mailView) clientForTopicAccount(ctx context.Context, accountID int64) (
 }
 
 // send submits the open form through the SDK.
-func (v *mailView) send() tea.Cmd {
-	f := v.compose
+func (v *mailView) send(f *composeForm) tea.Cmd {
 	to, cc, bcc, subject, body := f.values()
 	ctx := v.vc.ctx
 	sdk := v.vc.sdk

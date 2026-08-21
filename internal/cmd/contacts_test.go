@@ -490,21 +490,28 @@ func TestContactConflictIncludesMergeIDs(t *testing.T) {
 func TestCollectContactsReportsPageCap(t *testing.T) {
 	calls := 0
 	lastPage := 0
-	contacts, pages, truncated, err := collectContacts(t.Context(), 7, true,
-		func(_ context.Context, params *generated.ListContactsParams) (*generated.ListContactsResponseContent, error) {
-			calls++
-			lastPage, _ = strconv.Atoi(*params.Page)
-			result := generated.ListContactsResponseContent{{Id: int64(calls)}}
-			return &result, nil
-		})
+	read := func(_ context.Context, cursor string) (pageResult[generated.Contact], error) {
+		calls++
+		lastPage, _ = strconv.Atoi(cursor)
+		return pageResult[generated.Contact]{
+			Items:  []generated.Contact{{Id: int64(calls)}},
+			Cursor: strconv.Itoa(lastPage + 1),
+		}, nil
+	}
+
+	first, err := read(t.Context(), "7")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if calls != maxContactPages || pages != maxContactPages || len(contacts) != maxContactPages || !truncated || lastPage != 106 {
-		t.Errorf("calls=%d pages=%d contacts=%d truncated=%v lastPage=%d", calls, pages, len(contacts), truncated, lastPage)
+	collected, err := collectPages(t.Context(), first, pageRequest{All: true, MaxPages: maxContactPages}, read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != maxContactPages || collected.Read != maxContactPages || len(collected.Items) != maxContactPages || !collected.Truncated || lastPage != 106 {
+		t.Errorf("calls=%d read=%d contacts=%d truncated=%v lastPage=%d", calls, collected.Read, len(collected.Items), collected.Truncated, lastPage)
 	}
 	want := "Contact listing stopped after 100 pages. Continue with --page 107."
-	if got := contactTruncationNotice(7, pages, truncated); got != want {
+	if got := contactTruncationNotice(7, collected.Read, collected.Truncated); got != want {
 		t.Errorf("notice = %q, want %q", got, want)
 	}
 }
@@ -523,17 +530,13 @@ func TestParseContactIDAndNoun(t *testing.T) {
 	}
 }
 
-func TestCollectContactsRejectsNilFetcher(t *testing.T) {
-	if _, _, _, err := collectContacts(t.Context(), 1, false, nil); err == nil || !strings.Contains(err.Error(), "nil") {
-		t.Fatalf("error = %v", err)
-	}
-}
-
 func TestContactListPageErrorIsReturned(t *testing.T) {
 	want := fmt.Errorf("list failed")
-	_, _, _, err := collectContacts(t.Context(), 1, false, func(context.Context, *generated.ListContactsParams) (*generated.ListContactsResponseContent, error) {
-		return nil, want
-	})
+	first := pageResult[generated.Contact]{Items: []generated.Contact{{Id: 1}}, Cursor: "2"}
+	_, err := collectPages(t.Context(), first, pageRequest{All: true, MaxPages: maxContactPages},
+		func(context.Context, string) (pageResult[generated.Contact], error) {
+			return pageResult[generated.Contact]{}, want
+		})
 	if !errors.Is(err, want) {
 		t.Fatalf("error = %v, want %v", err, want)
 	}

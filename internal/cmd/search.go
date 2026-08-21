@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,12 +14,16 @@ import (
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
 const maxSearchPages = 100
 
 var searchYearPattern = regexp.MustCompile(`^20\d{2}$`)
+
+// searchAttachmentKinds is what `hey search filters` lists under attachments.
+var searchAttachmentKinds = []string{"any", "images", "pdfs", "calendar_invites", "documents", "spreadsheets", "presentations", "media", "zip_files"}
 
 type searchCommand struct {
 	cmd *cobra.Command
@@ -45,8 +51,6 @@ type searchResult struct {
 	Messages  []generated.Entry `json:"messages"`
 }
 
-type searchPageFetcher func(context.Context, hey.SearchParams) (*generated.AdvancedSearchResult, error)
-
 func newSearchCommand() *searchCommand {
 	searchCommand := &searchCommand{}
 	searchCommand.cmd = &cobra.Command{
@@ -58,7 +62,7 @@ func newSearchCommand() *searchCommand {
 		},
 		Example: `  hey search "quarterly planning"
   hey search --from jane@example.com --date last_30_days
-  hey search --subject invoice --attachment pdf --all
+  hey search --subject invoice --attachment pdfs --all
   hey search filters --json`,
 		RunE: searchCommand.run,
 		Args: cobra.MaximumNArgs(1),
@@ -75,7 +79,7 @@ func newSearchCommand() *searchCommand {
 	flags.StringVar(&searchCommand.date, "date", "", "Date range: last_7_days, last_30_days, last_90_days, or year")
 	flags.StringVar(&searchCommand.in, "in", "", "Box: imbox, feed, papertrail, or trash")
 	flags.StringVar(&searchCommand.label, "label", "", "Label name")
-	flags.StringVar(&searchCommand.attachment, "attachment", "", "Attachment kind, or any")
+	flags.StringVar(&searchCommand.attachment, "attachment", "", "Attachment kind: any, images, pdfs, calendar_invites, documents, spreadsheets, presentations, media, or zip_files")
 	flags.IntVar(&searchCommand.page, "page", 1, "Results page")
 	flags.BoolVar(&searchCommand.all, "all", false, "Fetch up to 100 results pages from --page onward")
 
@@ -90,25 +94,24 @@ func (c *searchCommand) run(cmd *cobra.Command, args []string) error {
 
 	params := c.params(args)
 	if !hasSearchCriteria(params) {
-		return output.ErrUsage("provide a query or at least one search refinement")
+		return apierr.ErrUsage("provide a query or at least one search refinement")
 	}
 	if err := validateSearchParams(params); err != nil {
 		return err
 	}
 
-	matches, pages, truncated, err := collectSearchMatches(cmd.Context(), params, c.all, func(ctx context.Context, pageParams hey.SearchParams) (*generated.AdvancedSearchResult, error) {
-		result, searchErr := sdk.Search().Search(ctx, pageParams)
-		if searchErr != nil {
-			return nil, convertSDKError(searchErr)
-		}
-		return result, nil
-	})
+	read := searchPageReader(params)
+	first, err := read(cmd.Context(), strconv.Itoa(params.Page))
 	if err != nil {
 		return err
 	}
-	results := makeSearchResults(matches)
+	collected, err := collectPages(cmd.Context(), first, pageRequest{All: c.all, MaxPages: maxSearchPages}, read)
+	if err != nil {
+		return err
+	}
+	results := makeSearchResults(collected.Items)
 
-	notice := searchTruncationNotice(params.Page, pages, truncated)
+	notice := searchTruncationNotice(params.Page, collected.Read, collected.Truncated)
 	if writer.IsStyled() {
 		printSearchResults(cmd, results)
 		if notice != "" {
@@ -123,7 +126,7 @@ func (c *searchCommand) run(cmd *cobra.Command, args []string) error {
 		output.WithSummary(searchSummary(len(results))),
 		output.WithNotice(notice),
 		output.WithMeta("page", params.Page),
-		output.WithMeta("pages_fetched", pages),
+		output.WithMeta("pages_fetched", collected.Read),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "read",
@@ -164,14 +167,14 @@ func hasSearchCriteria(params hey.SearchParams) bool {
 
 func validateSearchParams(params hey.SearchParams) error {
 	if params.Page < 1 {
-		return output.ErrUsage("--page must be at least 1")
+		return apierr.ErrUsage("--page must be at least 1")
 	}
 	if params.Date != "" {
 		switch params.Date {
 		case "last_7_days", "last_30_days", "last_90_days":
 		default:
 			if !searchYearPattern.MatchString(params.Date) {
-				return output.ErrUsage("--date must be last_7_days, last_30_days, last_90_days, or a four-digit year beginning with 20")
+				return apierr.ErrUsage("--date must be last_7_days, last_30_days, last_90_days, or a four-digit year beginning with 20")
 			}
 		}
 	}
@@ -179,41 +182,37 @@ func validateSearchParams(params hey.SearchParams) error {
 		switch params.In {
 		case "imbox", "feed", "papertrail", "trash":
 		default:
-			return output.ErrUsage("--in must be imbox, feed, papertrail, or trash")
+			return apierr.ErrUsage("--in must be imbox, feed, papertrail, or trash")
 		}
+	}
+	// HEY answers an unrecognized attachment kind with a 500, and the kinds are plural:
+	// the search filters call them pdfs, images, zip_files.
+	if params.Attachment != "" && !slices.Contains(searchAttachmentKinds, params.Attachment) {
+		return apierr.ErrUsage("--attachment must be " + strings.Join(searchAttachmentKinds, ", "))
 	}
 	return nil
 }
 
-func collectSearchMatches(ctx context.Context, params hey.SearchParams, all bool, fetch searchPageFetcher) ([]generated.SearchMatch, int, bool, error) {
-	if fetch == nil {
-		return nil, 0, false, fmt.Errorf("collectSearchMatches: fetch function is nil")
-	}
-
-	page := params.Page
-	if page < 1 {
-		page = 1
-	}
-	var matches []generated.SearchMatch
-	for pages := 1; pages <= maxSearchPages; pages++ {
-		params.Page = page
-		result, err := fetch(ctx, params)
+// searchPageReader reads one page of results. Search is the one list here that numbers
+// its pages rather than handing out a cursor — `Search::Matches::Page` is a shim over
+// geared_pagination — so the cursor it answers with is the next page's number.
+func searchPageReader(params hey.SearchParams) pageReader[generated.SearchMatch] {
+	return func(ctx context.Context, cursor string) (pageResult[generated.SearchMatch], error) {
+		page, err := strconv.Atoi(cursor)
 		if err != nil {
-			return nil, pages - 1, false, err
+			return pageResult[generated.SearchMatch]{}, fmt.Errorf("unreadable search page %q: %w", cursor, err)
 		}
-		if result == nil || len(result.Matches) == 0 {
-			return matches, pages, false, nil
+
+		params.Page = page
+		result, err := sdk.Search().Search(ctx, params)
+		if err != nil {
+			return pageResult[generated.SearchMatch]{}, apierr.FromSDK(err)
 		}
-		matches = append(matches, result.Matches...)
-		if !all {
-			return matches, 1, false, nil
+		if result == nil {
+			return pageResult[generated.SearchMatch]{}, nil
 		}
-		if pages == maxSearchPages {
-			return matches, pages, true, nil
-		}
-		page++
+		return pageResult[generated.SearchMatch]{Items: result.Matches, Cursor: strconv.Itoa(page + 1)}, nil
 	}
-	return matches, maxSearchPages, true, nil
 }
 
 func makeSearchResults(matches []generated.SearchMatch) []searchResult {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -42,7 +43,7 @@ func (c *searchFiltersCommand) run(cmd *cobra.Command, _ []string) error {
 
 	result, err := sdk.Search().Filters(cmd.Context())
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 	filters := makeSearchFilters(result)
 

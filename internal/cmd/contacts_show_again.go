@@ -5,6 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -37,17 +38,15 @@ func (c *contactsShowAgainCommand) run(cmd *cobra.Command, args []string) error 
 	}
 	contact, err := sdk.Contacts().Reveal(cmd.Context(), contactID)
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 	if contact == nil {
-		return output.ErrNotFound("contact", args[0])
+		return apierr.ErrNotFound("contact", args[0])
 	}
-	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Contact shown again: %s <%s> (#%d)\n", contact.Name, contact.EmailAddress, contact.Id)
-		return nil
-	}
-	return writeOK(contact,
-		output.WithSummary("Contact shown again"),
+	return writeMutationLine(cmd,
+		fmt.Sprintf("Contact shown again: %s <%s> (#%d)", contact.Name, contact.EmailAddress, contact.Id),
+		"Contact shown again",
+		contact,
 		output.WithBreadcrumbs(output.Breadcrumb{Action: "view", Command: fmt.Sprintf("hey contacts show %d", contact.Id), Description: "View the contact"}),
 	)
 }

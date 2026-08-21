@@ -3,7 +3,7 @@ package cmd
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
 func newCompletionCommand() *cobra.Command {
@@ -52,7 +52,7 @@ PowerShell:
 			case "powershell":
 				return root.GenPowerShellCompletionWithDesc(cmd.OutOrStdout())
 			default:
-				return output.ErrUsage("unsupported shell: " + args[0])
+				return apierr.ErrUsage("unsupported shell: " + args[0])
 			}
 		},
 	}

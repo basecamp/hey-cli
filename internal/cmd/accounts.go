@@ -8,8 +8,10 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/config"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 type accountsCommand struct {
@@ -51,10 +53,10 @@ func newAccountsListCommand() *cobra.Command {
 			}
 			identity, err := rootSDK.Identity().GetIdentity(cmd.Context())
 			if err != nil {
-				return convertSDKError(err)
+				return apierr.FromSDK(err)
 			}
 			if identity == nil {
-				return output.ErrAPI(0, "HEY returned no identity data")
+				return apierr.ErrAPI(0, "HEY returned no identity data")
 			}
 
 			accounts := linkedAccountList(identity, cfg.AccountID)
@@ -69,10 +71,10 @@ func newAccountsListCommand() *cobra.Command {
 					}
 					table.addRow([]string{
 						account.ID,
-						terminalSafeText(account.Email),
-						terminalSafeText(account.Name),
-						terminalSafeText(account.Purpose),
-						terminalSafeText(account.Status),
+						terminal.SanitizeLine(account.Email),
+						terminal.SanitizeLine(account.Name),
+						terminal.SanitizeLine(account.Purpose),
+						terminal.SanitizeLine(account.Status),
 						active,
 					})
 				}
@@ -107,7 +109,7 @@ func newAccountsUseCommand() *cobra.Command {
 				}
 				id, _ := strconv.ParseInt(cfg.AccountID, 10, 64)
 				if _, err := rootSDK.ForAccount(cmd.Context(), id); err != nil {
-					return convertSDKError(err)
+					return apierr.FromSDK(err)
 				}
 			}
 			if err := cfg.SaveAccountID(cfg.AccountID); err != nil {

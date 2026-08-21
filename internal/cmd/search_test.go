@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
-	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
@@ -36,7 +35,7 @@ func searchServer(t *testing.T) (*httptest.Server, *recordedSearch) {
 				"refine_in":[{"title":"Imbox","value":"imbox"}],
 				"refine_dates":[{"title":"Within the last 7 days","value":"last_7_days"}],
 				"refine_labels":[{"title":"Receipts","value":"Receipts"}],
-				"refine_attachments":[{"title":"PDF","value":"pdf"}]
+				"refine_attachments":[{"title":"PDFs","value":"pdfs"}]
 			}`))
 			return
 		}
@@ -123,7 +122,7 @@ func TestSearchSendsQueryAndEveryRefinement(t *testing.T) {
 		"--date", "last_30_days",
 		"--in", "imbox",
 		"--label", "Projects",
-		"--attachment", "pdf",
+		"--attachment", "pdfs",
 		"--page", "2",
 	)
 	if err != nil {
@@ -146,7 +145,7 @@ func TestSearchSendsQueryAndEveryRefinement(t *testing.T) {
 		"refine[date]":         "last_30_days",
 		"refine[in]":           "imbox",
 		"refine[label]":        "Projects",
-		"refine[attachment]":   "pdf",
+		"refine[attachment]":   "pdfs",
 	}
 	for key, want := range wants {
 		if got := query.Get(key); got != want {
@@ -196,6 +195,8 @@ func TestSearchValidatesPageDateAndBoxBeforeRequest(t *testing.T) {
 		{"planning", "--page", "0"},
 		{"planning", "--date", "yesterday"},
 		{"planning", "--in", "set-aside"},
+		// The kinds are plural, and the singular used to reach HEY as a 500.
+		{"planning", "--attachment", "pdf"},
 	}
 	for _, args := range tests {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
@@ -207,6 +208,25 @@ func TestSearchValidatesPageDateAndBoxBeforeRequest(t *testing.T) {
 			}
 			if recorded.requests != 0 {
 				t.Errorf("requests = %d, want 0", recorded.requests)
+			}
+		})
+	}
+}
+
+func TestSearchNamesTheAttachmentKindsItRefuses(t *testing.T) {
+	server, _ := searchServer(t)
+	_, err := runSearch(t, server, "planning", "--attachment", "pdf")
+	if err == nil || !strings.Contains(err.Error(), "any, images, pdfs, calendar_invites, documents, spreadsheets, presentations, media, zip_files") {
+		t.Fatalf("error = %v, want the valid attachment kinds", err)
+	}
+}
+
+func TestSearchAcceptsEveryAttachmentKindHEYLists(t *testing.T) {
+	for _, kind := range searchAttachmentKinds {
+		t.Run(kind, func(t *testing.T) {
+			server, _ := searchServer(t)
+			if _, err := runSearch(t, server, "planning", "--attachment", kind); err != nil {
+				t.Fatalf("search --attachment %s: %v", kind, err)
 			}
 		})
 	}
@@ -236,22 +256,28 @@ func TestSearchAllReportsContinuationAtPageLimit(t *testing.T) {
 	calls := 0
 	lastPage := 0
 	firstPage := 7
-	matches, pages, truncated, err := collectSearchMatches(t.Context(), hey.SearchParams{Query: "planning", Page: firstPage}, true,
-		func(_ context.Context, params hey.SearchParams) (*generated.AdvancedSearchResult, error) {
-			calls++
-			lastPage = params.Page
-			return &generated.AdvancedSearchResult{Matches: []generated.SearchMatch{{
-				Topic: generated.Topic{Id: 1},
-			}}}, nil
-		})
+	read := func(_ context.Context, cursor string) (pageResult[generated.SearchMatch], error) {
+		calls++
+		lastPage, _ = strconv.Atoi(cursor)
+		return pageResult[generated.SearchMatch]{
+			Items:  []generated.SearchMatch{{Topic: generated.Topic{Id: 1}}},
+			Cursor: strconv.Itoa(lastPage + 1),
+		}, nil
+	}
+
+	first, err := read(t.Context(), strconv.Itoa(firstPage))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if calls != maxSearchPages || pages != maxSearchPages || len(matches) != maxSearchPages || !truncated || lastPage != 106 {
-		t.Errorf("calls=%d pages=%d matches=%d truncated=%v lastPage=%d", calls, pages, len(matches), truncated, lastPage)
+	collected, err := collectPages(t.Context(), first, pageRequest{All: true, MaxPages: maxSearchPages}, read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != maxSearchPages || collected.Read != maxSearchPages || len(collected.Items) != maxSearchPages || !collected.Truncated || lastPage != 106 {
+		t.Errorf("calls=%d read=%d matches=%d truncated=%v lastPage=%d", calls, collected.Read, len(collected.Items), collected.Truncated, lastPage)
 	}
 	want := "Search stopped after 100 pages. Continue with --page 107."
-	if got := searchTruncationNotice(firstPage, pages, truncated); got != want {
+	if got := searchTruncationNotice(firstPage, collected.Read, collected.Truncated); got != want {
 		t.Errorf("notice = %q, want %q", got, want)
 	}
 }
@@ -310,13 +336,6 @@ func TestSearchFiltersReturnsAvailableValues(t *testing.T) {
 	}
 	if len(filters.Dates) != 1 || len(filters.Labels) != 1 || len(filters.Attachments) != 1 {
 		t.Errorf("filters = %+v", filters)
-	}
-}
-
-func TestCollectSearchMatchesRejectsNilFetcher(t *testing.T) {
-	_, _, _, err := collectSearchMatches(t.Context(), hey.SearchParams{Query: "planning", Page: 1}, false, nil)
-	if err == nil {
-		t.Fatal("expected nil fetcher error")
 	}
 }
 

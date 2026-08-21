@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
 type shareCommand struct {
@@ -42,18 +42,16 @@ func (c *shareCommand) run(cmd *cobra.Command, args []string) error {
 
 	publication, err := sdk.Publications().Create(cmd.Context(), threadID)
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 	if publication == nil || !publication.Published || publication.Url == "" {
-		return output.ErrAPI(0, "HEY did not return a sharing link")
+		return apierr.ErrAPI(0, "HEY did not return a sharing link")
 	}
 
-	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Sharing link: %s\n", terminalSafeText(publication.Url))
-		return nil
-	}
-
-	return writeOK(publication, output.WithSummary("Sharing link turned on"))
+	return writeMutationLine(cmd,
+		fmt.Sprintf("Sharing link: %s", publication.Url),
+		"Sharing link turned on",
+		publication)
 }
 
 type unshareCommand struct {
@@ -88,13 +86,8 @@ func (c *unshareCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := sdk.Publications().Delete(cmd.Context(), threadID); err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
-	if writer.IsStyled() {
-		fmt.Fprintln(cmd.OutOrStdout(), "Sharing link turned off.")
-		return nil
-	}
-
-	return writeOK(nil, output.WithSummary("Sharing link turned off"))
+	return writeMutation(cmd, "Sharing link turned off", nil)
 }

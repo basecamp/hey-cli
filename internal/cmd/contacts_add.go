@@ -8,6 +8,7 @@ import (
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -47,10 +48,10 @@ func (c *contactsAddCommand) run(cmd *cobra.Command, _ []string) error {
 	name := strings.TrimSpace(c.name)
 	email := strings.TrimSpace(c.email)
 	if name == "" {
-		return output.ErrUsage("--name is required")
+		return apierr.ErrUsage("--name is required")
 	}
 	if email == "" {
-		return output.ErrUsage("--email is required")
+		return apierr.ErrUsage("--email is required")
 	}
 	aliases := cleanContactAliases(c.aliases)
 	if err := validateDistinctContactEmails(email, aliases); err != nil {
@@ -67,14 +68,12 @@ func (c *contactsAddCommand) run(cmd *cobra.Command, _ []string) error {
 		return convertContactWriteError(err)
 	}
 	if contact == nil {
-		return output.ErrAPI(0, "contact add returned no data")
+		return apierr.ErrAPI(0, "contact add returned no data")
 	}
-	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Contact added: %s <%s> (#%d)\n", contact.Name, contact.EmailAddress, contact.Id)
-		return nil
-	}
-	return writeOK(contact,
-		output.WithSummary("Contact added"),
+	return writeMutationLine(cmd,
+		fmt.Sprintf("Contact added: %s <%s> (#%d)", contact.Name, contact.EmailAddress, contact.Id),
+		"Contact added",
+		contact,
 		output.WithBreadcrumbs(output.Breadcrumb{Action: "view", Command: fmt.Sprintf("hey contacts show %d", contact.Id), Description: "View the contact"}),
 	)
 }
@@ -94,7 +93,7 @@ func validateDistinctContactEmails(email string, aliases []string) error {
 	for _, alias := range aliases {
 		key := strings.ToLower(alias)
 		if seen[key] {
-			return output.ErrUsage(fmt.Sprintf("duplicate contact email address: %s", alias))
+			return apierr.ErrUsage(fmt.Sprintf("duplicate contact email address: %s", alias))
 		}
 		seen[key] = true
 	}

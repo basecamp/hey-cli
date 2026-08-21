@@ -7,15 +7,18 @@ import (
 	"os"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/mattn/go-runewidth"
 	"golang.org/x/term"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/config"
 	"github.com/basecamp/hey-cli/internal/markdown"
-	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
+
+// dateLayout is how HEY writes and reads a calendar day.
+const dateLayout = "2006-01-02"
 
 var colorDisabled bool
 
@@ -88,19 +91,10 @@ func (s style) format(value string) string {
 	return "\033[" + string(s) + "m" + value + "\033[0m"
 }
 
-func terminalSafeText(value string) string {
-	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return '�'
-		}
-		return r
-	}, value)
-}
-
 func markdownSafeText(value string) string {
 	const punctuation = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
 	var safe strings.Builder
-	for _, r := range terminalSafeText(value) {
+	for _, r := range terminal.SanitizeLine(value) {
 		if strings.ContainsRune(punctuation, r) {
 			safe.WriteByte('\\')
 		}
@@ -158,14 +152,26 @@ var interactiveStdio = func() bool {
 func readStdin() (string, error) {
 	data, err := io.ReadAll(os.Stdin)
 	if err != nil {
-		return "", output.ErrUsage(fmt.Sprintf("could not read from stdin: %v", err))
+		return "", apierr.ErrUsage(fmt.Sprintf("could not read from stdin: %v", err))
 	}
 	return strings.TrimSpace(string(data)), nil
 }
 
 func isDateArg(s string) bool {
-	_, err := time.Parse("2006-01-02", s)
+	_, err := time.Parse(dateLayout, s)
 	return err == nil
+}
+
+// parseDateArg reads a YYYY-MM-DD date, naming the flag or argument it came from so a
+// typo is reported where the user typed it rather than answered with a 404.
+func parseDateArg(label, value string) (time.Time, error) {
+	parsed, err := time.Parse(dateLayout, value)
+	if err != nil {
+		return time.Time{}, apierr.ErrUsageHint(
+			fmt.Sprintf("invalid %s: %s", label, value),
+			"dates are YYYY-MM-DD, for example 2026-01-31")
+	}
+	return parsed, nil
 }
 
 func extractMutationInfo(data []byte) string {

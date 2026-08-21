@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	attachmentfiles "github.com/basecamp/hey-cli/internal/attachments"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/output"
@@ -58,14 +59,14 @@ func (c *attachmentsSaveCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	message, err := sdk.Messages().Get(cmd.Context(), messageID)
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 	if message == nil {
-		return output.ErrNotFound("message", strconv.FormatInt(messageID, 10))
+		return apierr.ErrNotFound("message", strconv.FormatInt(messageID, 10))
 	}
 	attachments := htmlutil.ExtractAttachments(message.Content)
 	if position > len(attachments) {
-		return output.ErrNotFound("attachment", args[0])
+		return apierr.ErrNotFound("attachment", args[0])
 	}
 	attachment := attachments[position-1]
 
@@ -84,15 +85,14 @@ func (c *attachmentsSaveCommand) run(cmd *cobra.Command, args []string) error {
 		Path:     destination,
 		ByteSize: byteSize,
 	}
-	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Saved %s (%s)\n", destination, formatByteSize(result.ByteSize))
-		return nil
-	}
 	outputResult := result
 	if writer.EffectiveFormat() == output.FormatMarkdown {
 		outputResult = savedAttachmentForMarkdown(outputResult)
 	}
-	return writeOK(outputResult, output.WithSummary(fmt.Sprintf("Attachment saved to %s", destination)))
+	return writeMutationLine(cmd,
+		fmt.Sprintf("Saved %s (%s)", destination, formatByteSize(result.ByteSize)),
+		fmt.Sprintf("Attachment saved to %s", destination),
+		outputResult)
 }
 
 func savedAttachmentForMarkdown(attachment savedAttachment) savedAttachment {
@@ -104,12 +104,12 @@ func savedAttachmentForMarkdown(attachment savedAttachment) savedAttachment {
 func parseAttachmentID(id string) (int64, int, error) {
 	parts := strings.Split(id, ":")
 	if len(parts) != 2 {
-		return 0, 0, output.ErrUsage(fmt.Sprintf("invalid attachment ID: %s", id))
+		return 0, 0, apierr.ErrUsage(fmt.Sprintf("invalid attachment ID: %s", id))
 	}
 	messageID, messageErr := strconv.ParseInt(parts[0], 10, 64)
 	position, positionErr := strconv.Atoi(parts[1])
 	if messageErr != nil || positionErr != nil || messageID <= 0 || position <= 0 {
-		return 0, 0, output.ErrUsage(fmt.Sprintf("invalid attachment ID: %s", id))
+		return 0, 0, apierr.ErrUsage(fmt.Sprintf("invalid attachment ID: %s", id))
 	}
 	return messageID, position, nil
 }
@@ -123,9 +123,9 @@ func downloadAttachmentFile(ctx context.Context, destination, sourceURL string, 
 	if err == nil {
 		return written, nil
 	}
-	var attachmentErr *output.Error
+	var attachmentErr *apierr.Error
 	if errors.As(err, &attachmentErr) {
 		return written, err
 	}
-	return written, convertSDKError(err)
+	return written, apierr.FromSDK(err)
 }

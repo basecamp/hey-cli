@@ -5,14 +5,30 @@ import (
 	"fmt"
 )
 
+// The codes an Error carries. output.ExitCodeFor maps them onto exit codes and
+// they reach a scripting caller as the envelope's "code", so both sides read
+// them from here rather than spelling them out and hoping.
+const (
+	CodeUsage      = "usage"
+	CodeNotFound   = "not_found"
+	CodeAuth       = "auth"
+	CodeForbidden  = "forbidden"
+	CodeRateLimit  = "rate_limit"
+	CodeNetwork    = "network"
+	CodeAPI        = "api"
+	CodeAmbiguous  = "ambiguous"
+	CodeValidation = "validation"
+	CodeConflict   = "conflict"
+	CodeUnknown    = "unknown"
+)
+
 // Error is a typed error carrying a machine-readable code, human message,
-// optional hint, and metadata used for retry and exit-code decisions.
+// optional hint, and metadata used for exit-code decisions.
 type Error struct {
 	Code       string
 	Message    string
 	Hint       string
 	HTTPStatus int
-	Retryable  bool
 	Cause      error
 
 	// Meta carries structured context into the JSON error envelope — e.g. the
@@ -30,16 +46,16 @@ func (e *Error) Unwrap() error {
 }
 
 func ErrUsage(msg string) *Error {
-	return &Error{Code: "usage", Message: msg}
+	return &Error{Code: CodeUsage, Message: msg}
 }
 
 func ErrUsageHint(msg, hint string) *Error {
-	return &Error{Code: "usage", Message: msg, Hint: hint}
+	return &Error{Code: CodeUsage, Message: msg, Hint: hint}
 }
 
 func ErrNotFound(resource, identifier string) *Error {
 	return &Error{
-		Code:       "not_found",
+		Code:       CodeNotFound,
 		Message:    fmt.Sprintf("%s %q not found", resource, identifier),
 		HTTPStatus: 404,
 	}
@@ -47,7 +63,7 @@ func ErrNotFound(resource, identifier string) *Error {
 
 func ErrAuth(msg string) *Error {
 	return &Error{
-		Code:       "auth",
+		Code:       CodeAuth,
 		Message:    msg,
 		Hint:       "Run: hey auth login",
 		HTTPStatus: 401,
@@ -56,7 +72,7 @@ func ErrAuth(msg string) *Error {
 
 func ErrForbidden(msg string) *Error {
 	return &Error{
-		Code:       "forbidden",
+		Code:       CodeForbidden,
 		Message:    msg,
 		HTTPStatus: 403,
 	}
@@ -68,34 +84,51 @@ func ErrRateLimit(retryAfter int) *Error {
 		msg = fmt.Sprintf("rate limited — retry after %d seconds", retryAfter)
 	}
 	return &Error{
-		Code:       "rate_limit",
+		Code:       CodeRateLimit,
 		Message:    msg,
 		HTTPStatus: 429,
-		Retryable:  true,
 	}
 }
 
 func ErrNetwork(cause error) *Error {
 	return &Error{
-		Code:      "network",
-		Message:   fmt.Sprintf("network error: %v", cause),
-		Retryable: true,
-		Cause:     cause,
+		Code:    CodeNetwork,
+		Message: fmt.Sprintf("network error: %v", cause),
+		Cause:   cause,
 	}
 }
 
 func ErrAPI(status int, msg string) *Error {
 	return &Error{
-		Code:       "api",
+		Code:       CodeAPI,
 		Message:    msg,
 		HTTPStatus: status,
-		Retryable:  status >= 500,
+	}
+}
+
+func ErrValidation(status int, msg, hint string, cause error) *Error {
+	return &Error{
+		Code:       CodeValidation,
+		Message:    msg,
+		Hint:       hint,
+		HTTPStatus: status,
+		Cause:      cause,
+	}
+}
+
+func ErrConflict(status int, msg, hint string, cause error) *Error {
+	return &Error{
+		Code:       CodeConflict,
+		Message:    msg,
+		Hint:       hint,
+		HTTPStatus: status,
+		Cause:      cause,
 	}
 }
 
 func ErrAmbiguous(resource string, matches []string) *Error {
 	return &Error{
-		Code:    "ambiguous",
+		Code:    CodeAmbiguous,
 		Message: fmt.Sprintf("ambiguous %s — multiple matches found", resource),
 		Hint:    fmt.Sprintf("Matches: %v", matches),
 	}
@@ -106,5 +139,5 @@ func AsError(err error) *Error {
 	if errors.As(err, &e) {
 		return e
 	}
-	return &Error{Code: "unknown", Message: err.Error()}
+	return &Error{Code: CodeUnknown, Message: err.Error()}
 }

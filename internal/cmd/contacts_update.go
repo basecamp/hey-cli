@@ -8,6 +8,7 @@ import (
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -52,20 +53,20 @@ func (c *contactsUpdateCommand) run(cmd *cobra.Command, args []string) error {
 	emailChanged := cmd.Flags().Changed("email")
 	aliasesChanged := cmd.Flags().Changed("alias")
 	if !nameChanged && !emailChanged && !aliasesChanged {
-		return output.ErrUsage("provide at least one of --name, --email, or --alias")
+		return apierr.ErrUsage("provide at least one of --name, --email, or --alias")
 	}
 
 	params := hey.ContactParams{}
 	if nameChanged {
 		params.Name = strings.TrimSpace(c.name)
 		if params.Name == "" {
-			return output.ErrUsage("--name cannot be empty")
+			return apierr.ErrUsage("--name cannot be empty")
 		}
 	}
 	if emailChanged {
 		params.EmailAddress = strings.TrimSpace(c.email)
 		if params.EmailAddress == "" {
-			return output.ErrUsage("--email cannot be empty")
+			return apierr.ErrUsage("--email cannot be empty")
 		}
 	}
 	if aliasesChanged {
@@ -77,10 +78,10 @@ func (c *contactsUpdateCommand) run(cmd *cobra.Command, args []string) error {
 		if validationEmail == "" || validationAliases == nil {
 			current, getErr := sdk.Contacts().Get(cmd.Context(), contactID)
 			if getErr != nil {
-				return convertSDKError(getErr)
+				return apierr.FromSDK(getErr)
 			}
 			if current == nil {
-				return output.ErrNotFound("contact", args[0])
+				return apierr.ErrNotFound("contact", args[0])
 			}
 			if validationEmail == "" {
 				validationEmail = current.EmailAddress
@@ -102,14 +103,12 @@ func (c *contactsUpdateCommand) run(cmd *cobra.Command, args []string) error {
 		return convertContactWriteError(err)
 	}
 	if contact == nil {
-		return output.ErrNotFound("contact", args[0])
+		return apierr.ErrNotFound("contact", args[0])
 	}
-	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Contact updated: %s <%s> (#%d)\n", contact.Name, contact.EmailAddress, contact.Id)
-		return nil
-	}
-	return writeOK(contact,
-		output.WithSummary("Contact updated"),
+	return writeMutationLine(cmd,
+		fmt.Sprintf("Contact updated: %s <%s> (#%d)", contact.Name, contact.EmailAddress, contact.Id),
+		"Contact updated",
+		contact,
 		output.WithBreadcrumbs(output.Breadcrumb{Action: "view", Command: fmt.Sprintf("hey contacts show %d", contact.Id), Description: "View the contact"}),
 	)
 }

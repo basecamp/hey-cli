@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/editor"
 	"github.com/basecamp/hey-cli/internal/output"
 )
@@ -21,12 +22,17 @@ func newReplyCommand() *replyCommand {
 	replyCommand.cmd = &cobra.Command{
 		Use:   "reply <thread-id>",
 		Short: "Reply to a thread",
+		Long: `Reply to a thread's latest entry.
+
+The reply is addressed the way HEY's own web app addresses one: everyone that entry was
+addressed to, with whoever wrote it on the To line. HEY saves an unaddressed reply as a
+draft rather than sending it, so the command fails when it cannot work the recipients out.`,
 		Annotations: map[string]string{
-			"agent_notes": "Replies to the latest entry in a thread. Accepts message via -m, stdin, or $EDITOR, plus repeatable --attach files; an attachment can be sent without body text.",
+			"agent_notes": "Replies to the latest entry in a thread, addressed the way HEY addresses a reply: everyone that entry was addressed to, plus its sender on the To line. Accepts message via -m, stdin, or $EDITOR, plus repeatable --attach files; an attachment can be sent without body text.",
 		},
-		Example: `  hey reply 12345 -m "Thanks!"
+		Example: `  hey reply 12345 -m "Friday works for me — I'll send an agenda."
   hey reply 12345 -m "Attached is the report." --attach ./report.pdf
-  echo "Detailed reply" | hey reply 12345`,
+  echo "Longer reply from a file or a heredoc" | hey reply 12345`,
 		RunE: replyCommand.run,
 		Args: usageExactOneArg(),
 	}
@@ -44,7 +50,7 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 
 	threadID, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil {
-		return output.ErrUsage(fmt.Sprintf("invalid thread ID: %s", args[0]))
+		return apierr.ErrUsage(fmt.Sprintf("invalid thread ID: %s", args[0]))
 	}
 
 	ctx := cmd.Context()
@@ -62,15 +68,15 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		if message == "" && len(c.attachments) == 0 {
-			return output.ErrUsage("no message provided (use -m or --message to provide inline, or pipe to stdin)")
+			return apierr.ErrUsage("no message provided (use -m or --message to provide inline, or pipe to stdin)")
 		}
 	} else if message == "" && len(c.attachments) == 0 {
 		message, err = editor.Open("")
 		if err != nil {
-			return output.ErrAPI(0, fmt.Sprintf("could not open editor: %v", err))
+			return apierr.ErrAPI(0, fmt.Sprintf("could not open editor: %v", err))
 		}
 		if message == "" {
-			return output.ErrUsage("empty message, aborting")
+			return apierr.ErrUsage("empty message, aborting")
 		}
 	}
 
@@ -79,17 +85,10 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if err = replySDK.Entries().CreateReply(ctx, target.EntryID, message, target.Addressed.To, target.Addressed.CC, target.Addressed.BCC); err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
-	summary := sentWithAttachmentsSummary("Reply sent", len(c.attachments))
-	if writer.IsStyled() {
-		fmt.Fprintln(cmd.OutOrStdout(), summary+".")
-		return nil
-	}
-
-	return writeOK(nil,
-		output.WithSummary(summary),
+	return writeMutation(cmd, sentWithAttachmentsSummary("Reply sent", len(c.attachments)), nil,
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "view",
 			Command:     fmt.Sprintf("hey threads %d", threadID),

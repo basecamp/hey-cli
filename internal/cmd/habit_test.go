@@ -127,6 +127,8 @@ func TestHabitMutationValidationMakesNoRequest(t *testing.T) {
 		{name: "edit color", args: []string{"habit", "edit", "42", "--color", "orange"}, want: "color must be one of"},
 		{name: "edit changes", args: []string{"habit", "edit", "42"}, want: "provide at least one"},
 		{name: "delete ID", args: []string{"habit", "delete", "0"}, want: "invalid habit ID"},
+		{name: "complete date", args: []string{"habit", "complete", "42", "--date", "yesterday"}, want: "invalid date"},
+		{name: "uncomplete date", args: []string{"habit", "uncomplete", "42", "--date", "2026-13-01"}, want: "invalid date"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

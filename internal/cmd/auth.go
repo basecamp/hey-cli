@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/auth"
 	"github.com/basecamp/hey-cli/internal/harness"
 	"github.com/basecamp/hey-cli/internal/output"
@@ -58,9 +59,10 @@ func buildLoginCommand(path string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Authenticate with the HEY server",
-		Long: `Authenticate with the HEY server via Launchpad OAuth.
+		Long: `Authenticate with the HEY server.
 
-Opens a browser for OAuth authentication. Use --token or --cookie for non-interactive login.`,
+Opens a browser for OAuth authentication against HEY's own OAuth server, using PKCE.
+Use --token or --cookie for non-interactive login.`,
 		Example: strings.Join([]string{
 			"  " + path,
 			"  " + path + " --token YOUR_BEARER_TOKEN",
@@ -70,31 +72,23 @@ Opens a browser for OAuth authentication. Use --token or --cookie for non-intera
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if token != "" {
 				if err := authMgr.LoginWithToken(token); err != nil {
-					return output.ErrAuth(fmt.Sprintf("could not save token: %v", err))
+					return apierr.ErrAuth(fmt.Sprintf("could not save token: %v", err))
 				}
-				if writer.IsStyled() {
-					fmt.Fprintln(cmd.OutOrStdout(), "Logged in with token.")
-					return nil
-				}
-				return writeOK(map[string]string{"method": "token"}, output.WithSummary("Logged in with token"))
+				return writeMutation(cmd, "Logged in with token", map[string]string{"method": "token"})
 			}
 
 			if cookie != "" {
 				if err := authMgr.LoginWithCookie(cookie); err != nil {
-					return output.ErrAuth(fmt.Sprintf("could not save cookie: %v", err))
+					return apierr.ErrAuth(fmt.Sprintf("could not save cookie: %v", err))
 				}
-				if writer.IsStyled() {
-					fmt.Fprintln(cmd.OutOrStdout(), "Logged in with session cookie.")
-					return nil
-				}
-				return writeOK(map[string]string{"method": "cookie"}, output.WithSummary("Logged in with session cookie"))
+				return writeMutation(cmd, "Logged in with session cookie", map[string]string{"method": "cookie"})
 			}
 
-			ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+			ctx, cancel := context.WithTimeout(cmd.Context(), 6*time.Minute)
 			defer cancel()
 
 			if err := authMgr.Login(ctx, auth.LoginOptions{NoBrowser: noBrowser}); err != nil {
-				return output.ErrAuth(fmt.Sprintf("login failed: %v", err))
+				return apierr.ErrAuth(fmt.Sprintf("login failed: %v", err))
 			}
 
 			if writer.IsStyled() {
@@ -132,13 +126,9 @@ func buildLogoutCommand(path string) *cobra.Command {
 		Example: "  " + path,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := authMgr.Logout(); err != nil {
-				return output.ErrAuth(fmt.Sprintf("could not clear credentials: %v", err))
+				return apierr.ErrAuth(fmt.Sprintf("could not clear credentials: %v", err))
 			}
-			if writer.IsStyled() {
-				fmt.Fprintln(cmd.OutOrStdout(), "Logged out.")
-				return nil
-			}
-			return writeOK(nil, output.WithSummary("Logged out"))
+			return writeMutation(cmd, "Logged out", nil)
 		},
 	}
 }
@@ -261,15 +251,10 @@ func newAuthRefreshCommand() *cobra.Command {
 		Use:   "refresh",
 		Short: "Force token refresh",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := context.Background()
-			if err := authMgr.Refresh(ctx); err != nil {
-				return output.ErrAuth(fmt.Sprintf("refresh failed: %v", err))
+			if err := authMgr.Refresh(cmd.Context()); err != nil {
+				return apierr.ErrAuth(fmt.Sprintf("refresh failed: %v", err))
 			}
-			if writer.IsStyled() {
-				fmt.Fprintln(cmd.OutOrStdout(), "Token refreshed.")
-				return nil
-			}
-			return writeOK(nil, output.WithSummary("Token refreshed"))
+			return writeMutation(cmd, "Token refreshed", nil)
 		},
 	}
 }
@@ -282,6 +267,10 @@ func newAuthTokenCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "token",
 		Short: "Print access token to stdout",
+		Long: `Print the stored bearer token to stdout, for use as "Authorization: Bearer <token>".
+
+A login made with --cookie stores a browser session cookie instead. HEY sends that as a
+Cookie header, so it is not a bearer token and this command refuses to print it.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !stored {
 				if envToken := os.Getenv("HEY_TOKEN"); envToken != "" {
@@ -290,10 +279,13 @@ func newAuthTokenCommand() *cobra.Command {
 				}
 			}
 
-			ctx := context.Background()
-			token, err := authMgr.AccessToken(ctx)
+			if err := refuseSessionCookieAsToken(); err != nil {
+				return err
+			}
+
+			token, err := authMgr.AccessToken(cmd.Context())
 			if err != nil {
-				return output.ErrAuth(fmt.Sprintf("could not get token: %v", err))
+				return apierr.ErrAuth(fmt.Sprintf("could not get token: %v", err))
 			}
 			fmt.Fprint(cmd.OutOrStdout(), token)
 			return nil
@@ -303,6 +295,22 @@ func newAuthTokenCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&stored, "stored", false, "Only print stored OAuth token (ignore HEY_TOKEN env var)")
 
 	return cmd
+}
+
+// refuseSessionCookieAsToken stops `hey auth token` from printing a session cookie.
+// AccessToken falls back to one, and a cookie sent as a bearer token 401s with
+// nothing to explain it — besides leaving the cookie in the caller's shell history.
+func refuseSessionCookieAsToken() error {
+	creds, err := authMgr.GetStore().Load(authMgr.CredentialKey())
+	if err == nil && creds.AccessToken == "" && creds.SessionCookie != "" {
+		return &apierr.Error{
+			Code:       apierr.CodeAuth,
+			Message:    "the stored credential is a browser session cookie, not a bearer token",
+			Hint:       "Run: hey auth login   (HEY sends a session cookie as a Cookie header, so it cannot be used as Bearer)",
+			HTTPStatus: 401,
+		}
+	}
+	return nil
 }
 
 // printAgentNudge prints a hint about coding agent setup after login.

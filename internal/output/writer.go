@@ -6,13 +6,15 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/x/ansi"
 	"github.com/itchyny/gojq"
 	"golang.org/x/term"
+
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 type Format int
@@ -53,6 +55,12 @@ func New(opts Options) *Writer {
 	return w
 }
 
+// RequestedFormat reports the format the caller asked for by flag, FormatAuto when
+// they asked for nothing and the writer is left to read the terminal.
+func (w *Writer) RequestedFormat() Format {
+	return w.opts.Format
+}
+
 func (w *Writer) EffectiveFormat() Format {
 	if w.opts.Format != FormatAuto {
 		return w.opts.Format
@@ -68,6 +76,7 @@ func (w *Writer) IsStyled() bool {
 }
 
 func (w *Writer) OK(data any, opts ...ResponseOption) error {
+	data = normalizeData(data)
 	format := w.EffectiveFormat()
 	if w.opts.JQFilter != "" {
 		resp := Response{OK: true, Data: data}
@@ -91,6 +100,23 @@ func (w *Writer) OK(data any, opts ...ResponseOption) error {
 		return w.writeMarkdown(data)
 	default:
 		return w.writeJSON(data, opts...)
+	}
+}
+
+// normalizeData settles what a typed nil means to the envelope. `omitempty` drops a
+// nil interface but neither a nil slice nor an interface holding a nil pointer, so an
+// empty listing would otherwise marshal as `"data": null` and the documented
+// `--jq '.data[]'` recipe would fail on it, and a mutation the API answered with
+// nothing would report `"data": null` rather than leaving the key out.
+func normalizeData(data any) any {
+	value := reflect.ValueOf(data)
+	switch {
+	case value.Kind() == reflect.Slice && value.IsNil():
+		return reflect.MakeSlice(value.Type(), 0, 0).Interface()
+	case value.Kind() == reflect.Pointer && value.IsNil():
+		return nil
+	default:
+		return data
 	}
 }
 
@@ -203,7 +229,7 @@ func ValidateJQFilter(filter string) error {
 func sanitizeJSONValue(value any) any {
 	switch value := value.(type) {
 	case string:
-		return sanitizeTerminal(value)
+		return terminal.Sanitize(value)
 	case []any:
 		result := make([]any, len(value))
 		for i, item := range value {
@@ -221,7 +247,7 @@ func sanitizeJSONMap(value map[string]any) map[string]any {
 	result := make(map[string]any, len(value))
 	var changed []string
 	for key, item := range value {
-		if sanitizeTerminal(key) == key {
+		if terminal.Sanitize(key) == key {
 			result[key] = sanitizeJSONValue(item)
 		} else {
 			changed = append(changed, key)
@@ -241,20 +267,6 @@ func sanitizeJSONMap(value map[string]any) map[string]any {
 		result[name] = sanitizeJSONValue(value[key])
 	}
 	return result
-}
-
-func sanitizeTerminal(value string) string {
-	value = ansi.Strip(value)
-	return strings.Map(func(r rune) rune {
-		switch {
-		case r == '\n' || r == '\t':
-			return r
-		case r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f):
-			return -1
-		default:
-			return r
-		}
-	}, value)
 }
 
 func (w *Writer) writeQuiet(data any) error {
@@ -359,7 +371,7 @@ func (w *Writer) writeMarkdown(data any) error {
 }
 
 func markdownCell(value string) string {
-	value = sanitizeTerminal(value)
+	value = terminal.Sanitize(value)
 	value = escapeMarkdownTablePipes(value)
 	value = strings.ReplaceAll(value, "\t", " ")
 	return strings.ReplaceAll(value, "\n", "<br>")
@@ -473,13 +485,6 @@ func TruncationNotice(shown, total int) string {
 		return ""
 	}
 	return fmt.Sprintf("Showing %d of %d results. Use --all to see everything.", shown, total)
-}
-
-func TruncationNoticeWithCmd(shown, total int, cmd string) string {
-	if total <= shown {
-		return ""
-	}
-	return fmt.Sprintf("Showing %d of %d results. %s", shown, total, cmd)
 }
 
 func FormatFromFlags(jsonFlag, quiet, idsOnly, count, markdown, styled, agent bool) Format {

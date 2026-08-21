@@ -9,6 +9,7 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -54,7 +55,7 @@ func (c *contactsShowCommand) run(cmd *cobra.Command, args []string) error {
 		var getErr error
 		contact, getErr = sdk.Contacts().Get(ctx, contactID)
 		if getErr != nil {
-			return convertSDKError(getErr)
+			return apierr.FromSDK(getErr)
 		}
 		return nil
 	})
@@ -62,7 +63,7 @@ func (c *contactsShowCommand) run(cmd *cobra.Command, args []string) error {
 		var getErr error
 		note, getErr = sdk.Contacts().Note(ctx, contactID)
 		if getErr != nil {
-			return convertSDKError(getErr)
+			return apierr.FromSDK(getErr)
 		}
 		return nil
 	})
@@ -70,7 +71,7 @@ func (c *contactsShowCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if contact == nil {
-		return output.ErrNotFound("contact", args[0])
+		return apierr.ErrNotFound("contact", args[0])
 	}
 
 	result := contactShowResult{ContactDetail: *contact}

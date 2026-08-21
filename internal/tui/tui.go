@@ -61,10 +61,13 @@ type model struct {
 	watchCtx     context.Context
 	stopWatching context.CancelFunc
 
-	// The Screener's stream, which can only be opened once HEY has served its name
+	// The Screener's stream, which can only be opened once HEY has served its name, and
+	// the context that holds it open. Cancelling that context is how the stream behind an
+	// old name is given up, so a new one does not stack on top of it.
 	watchScreener      ScreenerWatcher
 	screenerChanges    <-chan struct{}
 	screenerStream     string
+	stopScreenerWatch  context.CancelFunc
 	screenerRefreshDue bool
 
 	// Linked mail accounts
@@ -192,7 +195,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case mailAccountsLoadedMsg:
 		if msg.err != nil {
-			m.mailAccountDiscoveryErr = msg.err.Error()
+			m.mailAccountDiscoveryErr = errorNotice("Could not load the mail accounts", msg.err)
 			m.updateHelpBindings()
 			return m, nil
 		}
@@ -216,7 +219,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.mailAccountSwitching = false
 		if msg.err != nil {
-			m.mailAccountErr = msg.err.Error()
+			m.mailAccountErr = errorNotice("Could not switch account", msg.err)
 			m.updateHelpBindings()
 			return m, nil
 		}
@@ -299,23 +302,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.stampViewCmd(cmd)
 
 	case screenerWatchStartedMsg:
+		if msg.stream != m.screenerStream {
+			return m, nil
+		}
 		if msg.err != nil {
-			m.screenerStream = ""
+			m.dropScreenerWatch()
 			m.mailView.screenerUpdatesUnavailable(msg.err)
 			return m, nil
 		}
 		m.screenerChanges = msg.changes
-		return m, waitForScreenerChangeCmd(m.screenerChanges)
+		return m, waitForScreenerChangeCmd(m.screenerStream, m.screenerChanges)
 
 	case screenerChangedMsg:
+		if msg.stream != m.screenerStream {
+			return m, nil
+		}
 		if msg.closed {
-			m.screenerChanges = nil
 			// Letting the name go means the next read of the count opens the stream again.
-			m.screenerStream = ""
+			m.dropScreenerWatch()
 			m.mailView.screenerUpdatesStopped()
 			return m, nil
 		}
-		return m, tea.Batch(m.screenerChanged(), waitForScreenerChangeCmd(m.screenerChanges))
+		return m, tea.Batch(m.screenerChanged(), waitForScreenerChangeCmd(m.screenerStream, m.screenerChanges))
 
 	case screenerRefreshDueMsg:
 		return m, m.refreshScreener()
@@ -325,8 +333,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.stampViewCmd(cmd)
 
 	case mailSourcesLoadedMsg:
-		// HEY serves The Screener's stream name with its count, so this read is the only
-		// place the watch can be opened from.
+		// HEY serves The Screener's stream name with its count, and the sources read asks
+		// for both, so this is where the watch is opened first.
 		watch := m.startScreenerWatch(msg.screenerStream)
 		if m.activeView != m.mailView {
 			cmd, _ := m.mailView.Update(msg)
@@ -338,10 +346,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmd, watch)
 
 	case screenerCountLoadedMsg:
+		// The count comes with the stream name, so every re-read of the count — ctrl+r,
+		// closing The Screener, the doorbell — is a chance to open a stream that closed.
+		watch := m.startScreenerWatch(msg.screenerStream)
 		if m.activeView != m.mailView {
 			cmd, _ := m.mailView.Update(msg)
-			return m, m.stampViewCmd(cmd)
+			return m, tea.Batch(m.stampViewCmd(cmd), watch)
 		}
+		cmd, _ := m.activeView.Update(msg)
+		cmd = m.syncLoading(cmd)
+		m.updateHelpBindings()
+		return m, tea.Batch(cmd, watch)
 
 	case postingsLoadedMsg:
 		if m.activeView != m.mailView {
@@ -349,8 +364,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if msg.err != nil {
-				m.mailView.finishRequest(msg.requestID)
-				m.mailView.notice = "Could not load mail: " + msg.err.Error()
+				m.mailView.requests.finish(msg.requestID)
+				m.mailView.notice = errorNotice("Could not load mail", msg.err)
 				return m, nil
 			}
 			cmd, _ := m.mailView.Update(msg)
@@ -419,6 +434,9 @@ func (m model) stampViewCmd(cmd tea.Cmd) tea.Cmd {
 }
 
 func (m model) applyMailAccount(account mailAccountChoice, client *hey.Client) (tea.Model, tea.Cmd) {
+	// The Screener's stream is the account's, unlike the changes stream, and the new
+	// account's sources read names its own. Until then there is nothing to follow.
+	m.dropScreenerWatch()
 	m.viewGeneration++
 	m.viewGenerationToken.Store(m.viewGeneration)
 	m.cancel()
@@ -787,8 +805,24 @@ func (m *model) startScreenerWatch(signedStreamName string) tea.Cmd {
 	if signedStreamName == "" || signedStreamName == m.screenerStream {
 		return nil
 	}
+	m.dropScreenerWatch()
+	watchCtx, stop := context.WithCancel(m.watchCtx) //nolint:gosec // G118: cancel stored, called on the next watch, an account switch or ctrl+c
 	m.screenerStream = signedStreamName
-	return startScreenerWatchCmd(m.watchCtx, m.watchScreener, signedStreamName)
+	m.stopScreenerWatch = stop
+	return startScreenerWatchCmd(watchCtx, m.watchScreener, signedStreamName)
+}
+
+// dropScreenerWatch gives up the stream the TUI was following. The subscription behind it
+// belongs to the watch's context, so cancelling is what ends it: left open it goes on
+// ringing the doorbell for a name nobody is showing, and holds a subscription, a channel
+// and two goroutines for as long as the TUI runs.
+func (m *model) dropScreenerWatch() {
+	if m.stopScreenerWatch != nil {
+		m.stopScreenerWatch()
+	}
+	m.stopScreenerWatch = nil
+	m.screenerStream = ""
+	m.screenerChanges = nil
 }
 
 // screenerChanged is the Screener's doorbell. Screening a queue in one go rings it once

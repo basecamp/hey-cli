@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/harness"
 	"github.com/basecamp/hey-cli/internal/output"
 )
@@ -151,7 +152,7 @@ func runSetupAgent(cmd *cobra.Command, agent harness.AgentInfo, handler agentSet
 			fmt.Fprintln(w, muted.format("  Start a new "+agent.Name+" session to use HEY commands."))
 			return nil
 		}
-		return &output.Error{
+		return &apierr.Error{
 			Code:    "setup_incomplete",
 			Message: agent.Name + " not connected",
 			Hint:    "Run: hey doctor",
@@ -204,7 +205,7 @@ func runSetupAgent(cmd *cobra.Command, agent harness.AgentInfo, handler agentSet
 		if len(manualCommands) > 0 {
 			hint = strings.Join(manualCommands, "; ")
 		}
-		return &output.Error{Code: "setup_incomplete", Message: summary, Hint: hint}
+		return &apierr.Error{Code: "setup_incomplete", Message: summary, Hint: hint}
 	}
 
 	breadcrumbs := []output.Breadcrumb{

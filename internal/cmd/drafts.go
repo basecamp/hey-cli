@@ -7,6 +7,7 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -44,7 +45,7 @@ func (c *draftsCommand) run(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	result, err := sdk.Entries().ListDrafts(ctx, nil)
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
 	var drafts []generated.DraftMessage

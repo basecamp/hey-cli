@@ -69,13 +69,3 @@ func TestLinkifyURLsBalancesParentheses(t *testing.T) {
 		t.Errorf("LinkifyURLs = %q, should keep balanced parentheses in the URL", got)
 	}
 }
-
-func TestLinkifyMarkdownLinks(t *testing.T) {
-	got := LinkifyMarkdownLinks("See the [Q3 report](https://example.com/reports/q3).")
-	if strings.Contains(got, "](") {
-		t.Errorf("LinkifyMarkdownLinks = %q, should consume the Markdown syntax", got)
-	}
-	if !strings.Contains(got, "Q3 report") || !strings.Contains(got, "\x1b]8;") {
-		t.Errorf("LinkifyMarkdownLinks = %q", got)
-	}
-}

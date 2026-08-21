@@ -115,6 +115,25 @@ func runScreener(t *testing.T, server *httptest.Server, args ...string) (output.
 	return resp, err
 }
 
+func runScreenerRaw(t *testing.T, server *httptest.Server, args ...string) (string, error) {
+	t.Helper()
+	t.Setenv("HEY_TOKEN", "test-token")
+	t.Setenv("HEY_NO_KEYRING", "1")
+	t.Setenv("HEY_BASE_URL", "")
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	t.Setenv("XDG_STATE_HOME", tmpDir)
+	t.Setenv("XDG_CACHE_HOME", tmpDir)
+
+	root := newRootCmd()
+	var stdout bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetErr(&stdout)
+	root.SetArgs(append([]string{"screener", "--base-url", server.URL}, args...))
+	err := root.Execute()
+	return stdout.String(), err
+}
+
 func decodeScreenerData[T any](t *testing.T, data any) T {
 	t.Helper()
 	encoded, err := json.Marshal(data)
@@ -154,18 +173,18 @@ func TestScreenerListCarriesTheSenderAndWhatTheySent(t *testing.T) {
 }
 
 // The queue costs the server real work, so asking only for the number must not drag it
-// along.
+// along -- and --count means a bare number here as it does everywhere else, so that
+// `n=$(hey screener list --count)` is that number.
 func TestScreenerListCountAsksForTheCountAlone(t *testing.T) {
 	server, recorded := screenerServer(t)
 
-	resp, err := runScreener(t, server, "list", "--count")
+	stdout, err := runScreenerRaw(t, server, "list", "--count")
 	if err != nil {
 		t.Fatalf("count failed: %v", err)
 	}
 
-	result := decodeScreenerData[map[string]int](t, resp.Data)
-	if result["pending_count"] != 3 {
-		t.Errorf("result = %+v", result)
+	if strings.TrimSpace(stdout) != "3" {
+		t.Errorf("stdout = %q, want the bare count", stdout)
 	}
 	requests := recorded.snapshot()
 	if len(requests) != 1 || strings.Contains(requests[0].Query, "include_clearances") {

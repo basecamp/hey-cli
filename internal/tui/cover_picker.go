@@ -11,6 +11,8 @@ import (
 // as long as the session: HEY serves a box's cover to the web app but not over
 // JSON, so there is nothing to read it back from and nowhere it belongs on disk.
 type coverPicker struct {
+	plainModal
+
 	choices []coverPreset
 	cursor  int
 	art     coverRenderer
@@ -40,6 +42,22 @@ func (p *coverPicker) selected() coverPreset {
 		return coverNone
 	}
 	return p.choices[p.cursor]
+}
+
+func (p *coverPicker) handleKey(view *mailView, msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	switch msg.Key().Code {
+	case tea.KeyEscape:
+		return nil, false
+	case tea.KeyEnter:
+		view.applyCover(p.selected())
+		return nil, false
+	}
+	p.update(msg)
+	return nil, true
+}
+
+func (p *coverPicker) draw(view *mailView) string {
+	return p.view(view.vc.styles, view.vc.width)
 }
 
 func (p *coverPicker) update(msg tea.KeyPressMsg) {

@@ -3,21 +3,19 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
-const (
-	maxAttachmentThreadPages              = 100
-	maxConcurrentAttachmentMessageFetches = 8
-)
+const maxConcurrentAttachmentMessageFetches = 8
 
 type attachmentsCommand struct {
 	cmd *cobra.Command
@@ -57,9 +55,9 @@ func (c *attachmentsCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	threadID, err := strconv.ParseInt(args[0], 10, 64)
-	if err != nil || threadID <= 0 {
-		return output.ErrUsage(fmt.Sprintf("invalid thread ID: %s", args[0]))
+	threadID, err := parsePositiveID(args[0], "thread")
+	if err != nil {
+		return err
 	}
 
 	attachments, truncated, err := attachmentsInThread(cmd.Context(), threadID)
@@ -69,7 +67,7 @@ func (c *attachmentsCommand) run(cmd *cobra.Command, args []string) error {
 
 	notice := ""
 	if truncated {
-		notice = fmt.Sprintf("Attachment discovery stopped after %d pages of thread messages", maxAttachmentThreadPages)
+		notice = fmt.Sprintf("Thread has more entries than the %d pages read; attachments below those are missing.", maxThreadEntryPages)
 	}
 	if writer.IsStyled() {
 		if len(attachments) == 0 {
@@ -80,8 +78,8 @@ func (c *attachmentsCommand) run(cmd *cobra.Command, args []string) error {
 			for _, attachment := range attachments {
 				table.addRow([]string{
 					attachment.ID,
-					terminalSafeText(attachment.Filename),
-					terminalSafeText(attachment.ContentType),
+					terminal.SanitizeLine(attachment.Filename),
+					terminal.SanitizeLine(attachment.ContentType),
 					formatOptionalByteSize(attachment.ByteSize),
 				})
 			}
@@ -127,53 +125,50 @@ func attachmentsForMarkdown(attachments []threadAttachment) []threadAttachment {
 	return safe
 }
 
+// attachmentsInThread reads every message in a thread and lists what each one carries.
+// The bool reports that the thread has more entries than the page cap allows, so the list
+// is missing whatever hangs off them.
 func attachmentsInThread(ctx context.Context, threadID int64) ([]threadAttachment, bool, error) {
-	var attachments []threadAttachment
-	for page := 1; page <= maxAttachmentThreadPages; page++ {
-		pageValue := strconv.Itoa(page)
-		entries, err := sdk.Topics().GetEntries(ctx, threadID, &generated.GetTopicEntriesParams{Page: &pageValue})
-		if err != nil {
-			return nil, false, convertSDKError(err)
-		}
-		if entries == nil || len(*entries) == 0 {
-			return attachments, false, nil
-		}
+	collected, err := threadEntryPages(ctx, threadID)
+	if err != nil {
+		return nil, false, err
+	}
 
-		messages := make([]*generated.Message, len(*entries))
-		group, groupCtx := errgroup.WithContext(ctx)
-		group.SetLimit(maxConcurrentAttachmentMessageFetches)
-		for index, entry := range *entries {
-			group.Go(func() error {
-				message, getErr := sdk.Messages().Get(groupCtx, entry.Id)
-				if getErr != nil {
-					return getErr
-				}
-				if message == nil {
-					return fmt.Errorf("message %d returned no data", entry.Id)
-				}
-				messages[index] = message
-				return nil
+	entries := collected.Items
+	messages := make([]*generated.Message, len(entries))
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.SetLimit(maxConcurrentAttachmentMessageFetches)
+	for index, entry := range entries {
+		group.Go(func() error {
+			message, getErr := sdk.Messages().Get(groupCtx, entry.Id)
+			if getErr != nil {
+				return getErr
+			}
+			if message == nil {
+				return fmt.Errorf("message %d returned no data", entry.Id)
+			}
+			messages[index] = message
+			return nil
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return nil, false, apierr.FromSDK(err)
+	}
+
+	var attachments []threadAttachment
+	for entryIndex, entry := range entries {
+		for attachmentIndex, attachment := range htmlutil.ExtractAttachments(messages[entryIndex].Content) {
+			attachments = append(attachments, threadAttachment{
+				ID:          attachmentID(entry.Id, attachmentIndex+1),
+				MessageID:   entry.Id,
+				Filename:    attachment.Filename,
+				ContentType: attachment.ContentType,
+				ByteSize:    attachment.ByteSize,
+				URL:         attachment.URL,
 			})
 		}
-		if err := group.Wait(); err != nil {
-			return nil, false, convertSDKError(err)
-		}
-
-		for entryIndex, entry := range *entries {
-			message := messages[entryIndex]
-			for attachmentIndex, attachment := range htmlutil.ExtractAttachments(message.Content) {
-				attachments = append(attachments, threadAttachment{
-					ID:          attachmentID(entry.Id, attachmentIndex+1),
-					MessageID:   entry.Id,
-					Filename:    attachment.Filename,
-					ContentType: attachment.ContentType,
-					ByteSize:    attachment.ByteSize,
-					URL:         attachment.URL,
-				})
-			}
-		}
 	}
-	return attachments, true, nil
+	return attachments, collected.Truncated, nil
 }
 
 func attachmentID(messageID int64, position int) string {

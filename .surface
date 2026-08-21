@@ -33,6 +33,7 @@ hey auth token --stored
 hey box
 hey box --all
 hey box --limit
+hey box --page
 hey boxes
 hey boxes --all
 hey boxes --limit
@@ -170,7 +171,6 @@ hey screener history --all
 hey screener history --page
 hey screener list
 hey screener list --all
-hey screener list --count
 hey screener list --page
 hey search
 hey search --all

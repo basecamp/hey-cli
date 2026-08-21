@@ -7,8 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/config"
-	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 type localConfigTrustChoice int
@@ -105,11 +106,11 @@ func promptForLocalConfigTrust(cmd *cobra.Command, local *config.LocalConfig) (l
 	w := cmd.ErrOrStderr()
 	fmt.Fprintln(w, "This repository contains local HEY configuration:")
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "  Configuration:       %s\n", terminalSafeText(local.Path))
+	fmt.Fprintf(w, "  Configuration:       %s\n", terminal.SanitizeLine(local.Path))
 	fmt.Fprintf(w, "  Local server:        %s\n", localTrustDisplayValue(local.BaseURL))
 	fmt.Fprintf(w, "  Local mail account:  %s\n", localTrustDisplayValue(local.AccountID))
-	fmt.Fprintf(w, "  Effective server:    %s\n", terminalSafeText(cfg.BaseURL))
-	fmt.Fprintf(w, "  Effective account:   %s\n", terminalSafeText(cfg.AccountID))
+	fmt.Fprintf(w, "  Effective server:    %s\n", terminal.SanitizeLine(cfg.BaseURL))
+	fmt.Fprintf(w, "  Effective account:   %s\n", terminal.SanitizeLine(cfg.AccountID))
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Always trust approves the exact local values above for this effective server origin.")
 	fmt.Fprintln(w, "Commands run here may send credentials to that server and read or send mail using that account.")
@@ -137,12 +138,12 @@ func localTrustDisplayValue(value string) string {
 	if value == "" {
 		return "(not set)"
 	}
-	return terminalSafeText(value)
+	return terminal.SanitizeLine(value)
 }
 
 func untrustedLocalConfigError(local *config.LocalConfig) error {
-	path := terminalSafeText(local.Path)
-	return output.ErrUsageHint(
+	path := terminal.SanitizeLine(local.Path)
+	return apierr.ErrUsageHint(
 		fmt.Sprintf("local HEY configuration is not trusted: %s", path),
 		"Review it, then run `hey config trust-local` from that directory.",
 	)

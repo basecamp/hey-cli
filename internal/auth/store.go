@@ -36,6 +36,7 @@ type Store struct {
 	noKeyring   bool
 	fallbackDir string
 	keyring     credentialKeyring
+	lockMu      sync.Mutex
 }
 
 // NewStore creates a credential store. Keyring availability is probed lazily
@@ -75,6 +76,38 @@ func key(origin string) string {
 
 // Load retrieves credentials for the given origin.
 func (s *Store) Load(origin string) (*Credentials, error) {
+	return s.load(origin)
+}
+
+// Save stores credentials for the given origin.
+func (s *Store) Save(origin string, creds *Credentials) error {
+	unlock, err := s.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	return s.save(origin, creds)
+}
+
+// Delete removes credentials for the given origin.
+func (s *Store) Delete(origin string) error {
+	unlock, err := s.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	s.ensureInit()
+	if s.useKeyring {
+		return s.keyring.delete(serviceName, key(origin))
+	}
+	return s.deleteFile(origin)
+}
+
+// load and save are the unlocked pair, for a caller already holding the lock over a
+// whole read-modify-write. Everything else goes through Load and Save.
+func (s *Store) load(origin string) (*Credentials, error) {
 	s.ensureInit()
 	if s.useKeyring {
 		return s.loadFromKeyring(origin)
@@ -82,22 +115,12 @@ func (s *Store) Load(origin string) (*Credentials, error) {
 	return s.loadFromFile(origin)
 }
 
-// Save stores credentials for the given origin.
-func (s *Store) Save(origin string, creds *Credentials) error {
+func (s *Store) save(origin string, creds *Credentials) error {
 	s.ensureInit()
 	if s.useKeyring {
 		return s.saveToKeyring(origin, creds)
 	}
 	return s.saveToFile(origin, creds)
-}
-
-// Delete removes credentials for the given origin.
-func (s *Store) Delete(origin string) error {
-	s.ensureInit()
-	if s.useKeyring {
-		return s.keyring.delete(serviceName, key(origin))
-	}
-	return s.deleteFile(origin)
 }
 
 func (s *Store) loadFromKeyring(origin string) (*Credentials, error) {

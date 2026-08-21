@@ -10,9 +10,11 @@ import (
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/editor"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 type bulkReplyCommand struct {
@@ -100,15 +102,12 @@ func (c *bulkReplyPreviewCommand) run(cmd *cobra.Command, args []string) error {
 	draft, err := sdk.BulkReplies().Draft(cmd.Context(), postingIDs)
 	if err != nil {
 		if hey.AsError(err).Code != hey.CodeNotFound {
-			return convertSDKError(err)
+			return apierr.FromSDK(err)
 		}
 		draft = &generated.BulkReplyDraft{}
 	}
 	entries := makeBulkReplyEntries(draft)
-	skipped := len(postingIDs) - len(entries)
-	if skipped < 0 {
-		skipped = 0
-	}
+	skipped := max(len(postingIDs)-len(entries), 0)
 
 	if writer.IsStyled() {
 		printBulkReplyPreview(cmd, entries, draftContent(draft), skipped)
@@ -173,13 +172,13 @@ func (c *bulkReplySendCommand) run(cmd *cobra.Command, args []string) error {
 	draft, err := sdk.BulkReplies().Draft(ctx, postingIDs)
 	if err != nil {
 		if hey.AsError(err).Code == hey.CodeNotFound {
-			return output.ErrUsage("no replyable threads resolved; no reply was sent")
+			return apierr.ErrUsage("no replyable threads resolved; no reply was sent")
 		}
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 	entries := makeBulkReplyEntries(draft)
 	if len(entries) == 0 {
-		return output.ErrUsage("no replyable threads resolved; no reply was sent")
+		return apierr.ErrUsage("no replyable threads resolved; no reply was sent")
 	}
 	entryIDs := make([]int64, len(entries))
 	for i, entry := range entries {
@@ -193,16 +192,13 @@ func (c *bulkReplySendCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	delivery, err := sdk.BulkReplies().Send(ctx, entryIDs, content)
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 	if delivery == nil {
-		return output.ErrAPI(0, "HEY returned an empty bulk reply delivery")
+		return apierr.ErrAPI(0, "HEY returned an empty bulk reply delivery")
 	}
 
-	skipped := len(postingIDs) - len(entries)
-	if skipped < 0 {
-		skipped = 0
-	}
+	skipped := max(len(postingIDs)-len(entries), 0)
 	summary := bulkReplyDeliverySummary(delivery, len(c.attachments), skipped)
 	if writer.IsStyled() {
 		printBulkReplyDelivery(cmd, delivery, summary)
@@ -251,16 +247,16 @@ func readBulkReplyMessage(message string, attachmentCount int, stdinTerminal boo
 		var err error
 		message, err = openEditor("")
 		if err != nil {
-			return "", output.ErrAPI(0, fmt.Sprintf("could not open editor: %v", err))
+			return "", apierr.ErrAPI(0, fmt.Sprintf("could not open editor: %v", err))
 		}
 	}
 
 	message = strings.TrimSpace(message)
 	if message == "" && attachmentCount == 0 {
 		if inputSource == "stdin" {
-			return "", output.ErrUsage("no message provided (use -m or --message to provide inline, or pipe to stdin)")
+			return "", apierr.ErrUsage("no message provided (use -m or --message to provide inline, or pipe to stdin)")
 		}
-		return "", output.ErrUsage("empty message, aborting")
+		return "", apierr.ErrUsage("empty message, aborting")
 	}
 	return message, nil
 }
@@ -289,7 +285,7 @@ func (c *bulkReplyUndoCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if err := sdk.BulkReplies().Undo(cmd.Context(), ids[0]); err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 	if writer.IsStyled() {
 		fmt.Fprintln(cmd.OutOrStdout(), "Bulk reply recalled.")
@@ -313,10 +309,10 @@ func parsePositiveUniqueIDs(kind string, values []string) ([]int64, error) {
 	for _, value := range values {
 		id, err := strconv.ParseInt(value, 10, 64)
 		if err != nil || id <= 0 {
-			return nil, output.ErrUsage(fmt.Sprintf("invalid %s ID: %s (must be a positive integer)", kind, value))
+			return nil, apierr.ErrUsage(fmt.Sprintf("invalid %s ID: %s (must be a positive integer)", kind, value))
 		}
 		if _, exists := seen[id]; exists {
-			return nil, output.ErrUsage(fmt.Sprintf("duplicate %s ID: %d", kind, id))
+			return nil, apierr.ErrUsage(fmt.Sprintf("duplicate %s ID: %d", kind, id))
 		}
 		seen[id] = struct{}{}
 		ids = append(ids, id)
@@ -386,7 +382,7 @@ func printBulkReplyPreview(cmd *cobra.Command, entries []bulkReplyEntry, content
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Entry: %d\n", entry.ID)
 			fmt.Fprintf(cmd.OutOrStdout(), "Thread: %d\n", entry.TopicID)
-			fmt.Fprintf(cmd.OutOrStdout(), "Subject: %s\n", terminalSafeText(entry.TopicName))
+			fmt.Fprintf(cmd.OutOrStdout(), "Subject: %s\n", terminal.SanitizeLine(entry.TopicName))
 			fmt.Fprintf(cmd.OutOrStdout(), "To: %s\n", formatBulkReplyRecipients(entry.To))
 			fmt.Fprintf(cmd.OutOrStdout(), "CC: %s\n", formatBulkReplyRecipients(entry.CC))
 			fmt.Fprintf(cmd.OutOrStdout(), "BCC: %s\n", formatBulkReplyRecipients(entry.BCC))
@@ -394,15 +390,15 @@ func printBulkReplyPreview(cmd *cobra.Command, entries []bulkReplyEntry, content
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "\n%s.\n", bulkReplyPreviewSummary(len(entries), skipped))
 	if text := htmlutil.ToText(content); text != "" {
-		fmt.Fprintf(cmd.OutOrStdout(), "HEY will preserve this name tag: %s\n", terminalSafeText(text))
+		fmt.Fprintf(cmd.OutOrStdout(), "HEY will preserve this name tag: %s\n", terminal.SanitizeLine(text))
 	}
 }
 
 func formatBulkReplyRecipients(recipients []bulkReplyRecipient) string {
 	formatted := make([]string, 0, len(recipients))
 	for _, recipient := range recipients {
-		name := terminalSafeText(recipient.Name)
-		email := terminalSafeText(recipient.EmailAddress)
+		name := terminal.SanitizeLine(recipient.Name)
+		email := terminal.SanitizeLine(recipient.EmailAddress)
 		switch {
 		case name != "" && email != "":
 			formatted = append(formatted, fmt.Sprintf("%s <%s>", name, email))
@@ -455,7 +451,7 @@ func printBulkReplyDelivery(cmd *cobra.Command, delivery *generated.BulkReplyDel
 	fmt.Fprintf(cmd.OutOrStdout(), "Delivery ID: %d\n", delivery.Id)
 	fmt.Fprintf(cmd.OutOrStdout(), "Delayed: %t\n", delivery.Delayed)
 	if delivery.UndoSendUrl != "" {
-		fmt.Fprintf(cmd.OutOrStdout(), "Undo URL: %s\n", terminalSafeText(delivery.UndoSendUrl))
+		fmt.Fprintf(cmd.OutOrStdout(), "Undo URL: %s\n", terminal.SanitizeLine(delivery.UndoSendUrl))
 		fmt.Fprintf(cmd.OutOrStdout(), "Undo: hey bulk-reply undo %d\n", delivery.Id)
 	}
 }

@@ -80,25 +80,52 @@ Remember to update the examples in the README when you change, add or remove CLI
 
 ### HTML content
 
-**Scraping is being removed, not extended.** HEY grew JSON for the endpoints the CLI reads,
-the SDK dropped its scrapers in v0.4.0, and what is left here is on its way out. Do not
-answer "the JSON looks incomplete" by parsing a web page — check whether the SDK already
-has a typed operation, and if HEY does not serve JSON for what you need, add it there
-rather than working around it here.
+**Nothing scrapes a web page any more.** HEY grew JSON for every endpoint the CLI reads,
+the SDK dropped its own scrapers, and the last three scrapes here are gone. Do not answer
+"the JSON looks incomplete" by parsing a web page — check whether the SDK already has a
+typed operation, and if HEY does not serve JSON for what you need, add it to the SDK
+rather than working around it here. `sdk.GetHTML` has no callers left; if you find yourself
+reaching for it, that is the signal to stop.
 
 The journal used to be the example of this: a day with an entry answered 204, so the
 content was scraped from the Trix input on `/calendar/days/{date}/journal_entry/edit`.
 HEY answers the entry itself now, a 204 means the day is empty, and the scrape is gone.
 
-What still reads HTML, and only until the typed reads replace it: `hey reply`, `hey topic`
-and two TUI paths use `internal/htmlutil`'s `ParseTopicEntriesHTML` and
-`ParseTopicAddressed` to find a thread's entries and recipients. `Topics.Get` carries the
-topic's entries as of SDK v0.4.0, so this can go; `resolveThreadReply` in
-`internal/cmd/thread_reply.go` is the one place to change.
+The last three went the same way. Two facts about the typed reads are worth keeping,
+because both were mis-stated here before:
 
-`internal/htmlutil` also provides `ToMarkdown` (HTML→Markdown), `ToText` (HTML→plain text)
-and `ExtractImageURLs`, which are presentation helpers rather than scrapers and are
-staying. HEY uses the Trix editor with `<figure data-trix-attachment="{...}">` for
+- **`Topics.Get` does not carry bodies.** It carries the topic's first page of entries as
+  summaries; the SDK says so at `generated/client.gen.go`. A body comes from
+  `Messages().Get` per entry, which is why `hey threads` (`entriesInThread` in
+  `internal/cmd/topic.go`) pages `Topics().GetEntriesPage` and then fans out over
+  `Messages().Get` behind an errgroup, and why `mailView.fetchTopic` does the same for one
+  page. HEY serves the entry index newest first; `entriesInThread` gathers the pages and
+  reverses them, so a thread reads oldest first.
+
+  The entry index is geared_pagination like every other list here, so its page is a cursor
+  out of the `Link` header and a number is answered with the first page forever.
+  `threadEntryPages` in `topic.go` walks it through `collectPages`, and `hey attachments`
+  walks the same list — `Topics().GetEntries` throws that header away, which is what
+  `GetEntriesPage` exists for.
+- **A reply's recipients come from the entry it answers.** `Messages().Get` carries that
+  entry's `Addressed` (`directly`/`copied`/`blindcopied`), and `recipientsForReplyTo` —
+  in `internal/cmd/thread_reply.go` for `hey reply`, and in `internal/tui/compose.go` for
+  the TUI's reply form — turns it into To/CC/BCC with the entry's sender moved onto the To
+  line. That last part is haystack's `directly_address_sender`, and without it a reply to
+  an inbound email reaches everyone except the person who wrote it. What HEY also does and
+  this cannot is *remove* the acting user and their aliases, catch-alls and redelivery
+  contacts: that needs `GET /entries/{id}/replies/new.json`, which the SDK does not expose
+  yet. Until it does, a reply may CC the sender back to themselves. Add that operation to
+  the SDK rather than reimplementing the exclusion rules here.
+
+`internal/htmlutil` provides `ToMarkdown` (HTML→Markdown), `ToText` (HTML→plain text),
+`ExtractImageURLs` and `ExtractAttachments`, which are presentation helpers rather than
+scrapers and are staying. It no longer depends on `internal/models`, and neither does
+`internal/cmd` — the CLI's output shapes are local to the commands that print them.
+What is left of `internal/models` is the TUI's own: `Entry` for a thread's messages, and
+`Contact`, `Calendar` and `Recording` for the Contacts and Calendar sections. Mail's own
+shapes moved to `internal/mail`, and the rest should follow the section that reads them.
+HEY uses the Trix editor with `<figure data-trix-attachment="{...}">` for
 attachments — image URLs in those attributes are relative paths requiring authentication
 via `sdk.Get`.
 
@@ -119,6 +146,31 @@ costs formatting rather than the message.
 
 `ToText` is still right where the result is not shown to anyone — the name tag
 `hey bulk-reply` reads out of a draft, for instance.
+
+### Text somebody else wrote goes through `internal/terminal`
+
+A sender's name, a subject, a filename, a label — a terminal acts on the escape
+sequences in all of it, so nothing HEY serves is printed raw. `terminal.Sanitize`
+strips the sequences with `ansi.Strip` and then drops the leftover control
+characters, keeping `\n` and `\t` because a body, a jq result and a Markdown cell
+carry them on purpose. `terminal.SanitizeLine` is the same thing where only one
+line fits — a table cell, a mutation confirmation — and turns those two into
+spaces so nothing can move what comes after them.
+
+Strip the sequence; do not deface it. Replacing the ESC byte with U+FFFD, which
+this repo used to do in six places — three of them the TUI's own
+`terminalSafeFolderText`, `terminalSafeCollectionText` and
+`terminalSafeAttachmentText` — leaves the payload on screen as debris of
+somebody else's choosing — and `runewidth` then measures that debris when it lays
+out a table, so the column width is theirs to pick.
+
+### One line for a person, the envelope for everyone else
+
+Every command that writes something confirms it through `writeMutation` (or
+`writeMutationLine`, where the line carries an id or a name the summary does not).
+It prints the sanitized line under `--styled` and hands `writeOK` the data and the
+summary otherwise. Do not hand-roll the `if writer.IsStyled()` branch again: it was
+copy-pasted about forty times, and three of the copies had drifted.
 
 #### Inbound email hides its body in an attachment
 
@@ -169,6 +221,11 @@ cursor came with it. On the SDK side the header is what `Boxes().GetPage`,
 `Clearances().PendingPage`, `Clearances().ScreenedPage` and `Search().SearchPage` exist for —
 `Get`, `Pending`, `Screened` and `Search` throw it away.
 
+A box is the exception, and not because of the TUI: `mail.ReadPage` reads it on its own
+route, where the cursor is HEY's `next_history_url` rather than the `Link` header. What
+`listPaging` holds is whatever `mail.Page.Cursor` answered, opaque either way, so the four
+request lanes and `refreshHead` never learn which kind of source they are following.
+
 Search is the exception to the cursor: `Search::Matches::Page` is a shim over geared's page
 rather than the real thing, and it numbers its pages, so the search results carry
 `searchNextPage int` instead of a `listPaging`. There is nothing to keep a `headIDs` for
@@ -184,9 +241,65 @@ the top. The cursor for what comes next belongs to the deepest page, so a re-rea
 only moves it while the top page is the whole list.
 
 A read the user asked for, a page below, and a live re-read are separate lanes
-(`activeRequestID`, `moreRequestID` — `searchMoreID` for the results — and `liveRequestID`)
-with a message each, so growing a list never shows the spinner, never cancels the read the
-reader is waiting on, and never carries the cursor back to the top.
+(`requests`, the shared `requestLane`; `moreRequestID` — `searchMoreID` for the results —
+and `liveRequestID`, which are bare counters for exactly that reason) with a message each,
+so growing a list never shows the spinner, never cancels the read the reader is waiting on,
+and never carries the cursor back to the top.
+
+### A mail source reads its own page
+
+`internal/mail` is where a box, a label and a collection stop being three endpoints and
+become one `Source` with one `ReadPage`. It follows the shape `internal/folders` and
+`internal/habit` already set: a domain package taking `client *hey.Client`, imported by
+whoever needs it.
+
+**A source knows what it is from the kind HEY served, never from its name.**
+`Source.BoxKind` holds `hey.BoxKindImbox` and friends, and `Coverable()` is the one place
+that asks — haystack's `Box::Imbox#coverable?` in Go. A display name is the user's to
+change; a kind is not.
+
+**Which route a page comes from is not a detail.** The Feed, the Paper Trail and Bubbled Up
+override `render_box`'s ordering and per_page, so `/boxes/{id}` pages a named box in a
+different order than its own route does — follow a cursor across the two and postings
+repeat or vanish. `readBox` therefore dispatches on `BoxKind` to `GetImbox`, `GetFeedbox`
+and the rest, and only an unfamiliar kind falls through to `Boxes().Get`.
+
+**`Page.Cursor` is opaque and per-kind.** A label and a collection carry a geared_pagination
+cursor; a box carries HEY's own `next_history_url`, which is what `hey box --json` reports
+and is the only cursor the named routes hand out. The URL is never fetched: `historyPageCursor`
+takes the `page` parameter out of it and gives that to the typed operation, which is why
+there is no same-origin check here to get wrong. A foreign URL is refused for carrying no
+cursor rather than declined for pointing elsewhere.
+
+**`mail.Posting` is a row, not the JSON.** `Page.Postings` stays `[]generated.Posting`
+because `hey box --json` publishes those fields verbatim; `mail.Postings` describes them as
+the rows a reader acts on, and everything the TUI never reads — `bundled`, `entry_kind`,
+`kind`, `updated_at` — is left in the SDK type where the CLI can still reach it. `TopicID`
+is resolved once, out of `app_url`: HEY's `_posting.jbuilder` serves neither `topic` nor
+`topic_id`, so the URL is the only place a thread is named, and a bundle's URL names a
+contact instead and answers zero.
+
+Timestamps stay `time.Time` all the way through. Formatting one for display and parsing it
+back is how `hey journal list` printed the wrong day; a domain type is not the place to
+start that again. HEY's JSON is always UTC — `ApiRequest#set_utc_timezone` sets
+`Time.zone` for every JSON request — so whatever shows a date converts it: the TUI's
+`formatDisplayDate` renders `.Local()`, because a 23:30Z thread belongs to the next day
+east of UTC.
+
+The TUI's own source of sources is `mailView.boxes []mail.Source`: HEY's boxes through
+`mail.ListedBoxSource`, then the labels and the collections as `KindFolder` and
+`KindCollection` sources. Everything downstream switches on `mail.Kind` —
+`isOrganizedMailSource` is the one predicate that asks "not one of HEY's boxes" — and
+`showsImbox` asks `Coverable()`, so the box HEY splits into sections and lets you cover is
+the one HEY says it is.
+
+On the CLI side `collectPages` in `internal/cmd/pages.go` is the other half: `mail.ReadPage`
+answers one page, and `collectPages` decides how many pages this invocation wants from
+`--limit`, `--all` and a page cap. An empty page ends the list whatever cursor came with it.
+Search is the exception it does not cover the same way — `Search::Matches::Page` numbers its
+pages instead of handing out a cursor, so `searchPageReader` returns the next page's number
+as its cursor and owns the increment.
+
 ### Imbox cover art
 
 A cover is a lid over Previously Seen, not a decoration next to it. When the Imbox is
@@ -287,7 +400,8 @@ art — the hint is worth more than a smear.
 hidden count, where the web app puts its buttons. Setting a cover closes it, so a box
 arrives covered rather than however the last one was left. Only the Imbox is coverable —
 that is haystack's rule (`Box::Imbox#coverable?`), and it is the same box that gets the
-seen sections at all.
+seen sections at all. `mail.Source.Coverable()` is where that is decided, off the kind HEY
+served rather than the box's name: a label somebody called "Imbox" is a label.
 
 `ctrl+v` opens `coverPicker`, which draws whichever preset is highlighted — a cover is
 picked by looking at it. The choice is stored locally, by `config.Cover` and
@@ -369,6 +483,14 @@ arrival is the whole message, and the count is read again behind it. The SDK's
 `Clearances().Summary` is that read: the same cheap request as `PendingCount`, keeping
 the stream name it used to throw away.
 
+Every read of the count carries that name, which is what lets a stream that closed be
+opened again: `startScreenerWatch` opens one whenever the name it is handed is new, so
+ctrl+r, closing The Screener, or the doorbell itself will all reopen a watch the server
+hung up on. Opening one gives up the one before it — the subscription belongs to the
+watch's context, and cancelling is what unsubscribes it, so a stream nobody is following
+does not go on ringing. A mail account switch gives it up for the same reason: the signed
+name is the account's, and the new account's sources read serves its own.
+
 The doorbell always re-reads the count, wherever the user is, because the mail list is
 where The Screener announces itself. When The Screener is what's on screen the queue is
 re-read too, through `screenerPane.refreshHead` — the same keep-your-place trick as the
@@ -376,6 +498,9 @@ mail list — and held while a decision is in flight or the clear-everything que
 On the history tab nothing is read; the pending pane is just marked unloaded, which is
 what `switchTab` already looks at. Both watches share one websocket
 (`tuiCableClient` in `internal/cmd/tui_watch.go`): two subscriptions, one authorization.
+A client that stopped itself — the server said don't come back — answers every `Subscribe`
+with `ErrClosed` and never dials again, so `tuiSubscribe` drops it and dials a fresh one
+rather than handing a reopened watch a dead connection.
 
 ### API documentation
 

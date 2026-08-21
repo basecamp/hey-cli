@@ -1,19 +1,19 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
-	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	internalfolders "github.com/basecamp/hey-cli/internal/folders"
+	"github.com/basecamp/hey-cli/internal/mail"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 type labelsCommand struct {
@@ -37,7 +37,7 @@ func newLabelsCommand() *labelsCommand {
 	}
 
 	labelsCommand.cmd.Flags().IntVar(&labelsCommand.limit, "limit", 0, "Maximum number of labels to show")
-	labelsCommand.cmd.Flags().BoolVar(&labelsCommand.all, "all", false, "Show all results (override --limit)")
+	labelsCommand.cmd.Flags().BoolVar(&labelsCommand.all, "all", false, "Fetch all results (override --limit)")
 
 	return labelsCommand
 }
@@ -49,7 +49,7 @@ func (c *labelsCommand) run(cmd *cobra.Command, args []string) error {
 
 	folders, err := internalfolders.List(cmd.Context(), sdk)
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
 	total := len(folders)
@@ -62,7 +62,7 @@ func (c *labelsCommand) run(cmd *cobra.Command, args []string) error {
 		table := newTable(cmd.OutOrStdout())
 		table.addRow([]string{"ID", "Name"})
 		for _, label := range folders {
-			table.addRow([]string{fmt.Sprintf("%d", label.ID), terminalSafeText(label.Name)})
+			table.addRow([]string{fmt.Sprintf("%d", label.ID), terminal.SanitizeLine(label.Name)})
 		}
 		table.print()
 		if notice != "" {
@@ -89,20 +89,19 @@ type labelCommand struct {
 	page  string
 }
 
-type folderOutput struct {
-	ID         int64                 `json:"id"`
-	Name       string                `json:"name,omitempty"`
-	AppURL     string                `json:"app_url,omitempty"`
-	CreatedAt  *time.Time            `json:"created_at,omitempty"`
-	UpdatedAt  *time.Time            `json:"updated_at,omitempty"`
-	Postings   []folderPostingOutput `json:"postings"`
-	NextPage   string                `json:"next_page,omitempty"`
-	TotalCount int                   `json:"total_count"`
-}
-
-type folderPostingOutput struct {
-	generated.Posting
-	TopicID int64 `json:"topic_id,omitempty"`
+var labelListing = postingsListing{
+	heading: "Label",
+	summary: func(count int, name string) string {
+		return fmt.Sprintf("%d %s labeled %s", count, threadNoun(count), name)
+	},
+	cursorNotice: func(shown, total int) string {
+		return fmt.Sprintf("Showing %d remaining results from this cursor (%d threads with the label).", shown, total)
+	},
+	breadcrumbs: []output.Breadcrumb{
+		{Action: "read", Command: "hey threads <id>", Description: "Read an email thread"},
+		{Action: "add_label", Command: "hey label add <id> --to <label-id>", Description: "Add another label to a thread"},
+		{Action: "remove_label", Command: "hey label remove <id> --from <label-id|all>", Description: "Remove labels from a thread"},
+	},
 }
 
 func newLabelCommand() *labelCommand {
@@ -111,10 +110,11 @@ func newLabelCommand() *labelCommand {
 		Use:   "label <id>",
 		Short: "View and manage an email label",
 		Annotations: map[string]string{
-			"agent_notes": "The ID comes from hey labels. Returns labeled email threads; subcommands add, create, and remove labels.",
+			"agent_notes": "The ID comes from hey labels. Returns labeled email threads with topic_id for reading them, and answers --json, --styled, --markdown, --ids-only and --count. Subcommands add, create, and remove labels.",
 		},
 		Example: `  hey label 123
-  hey label 123 --limit 10
+  hey label 123 --page next-cursor
+  hey label 123 --all
   hey label 123 --json`,
 		RunE: labelCommand.run,
 		Args: usageExactOneArg(),
@@ -144,49 +144,17 @@ func (c *labelCommand) run(cmd *cobra.Command, args []string) error {
 	if c.page != "" {
 		params = &generated.GetFolderParams{Page: &c.page}
 	}
-	page, err := sdk.Folders().GetPage(cmd.Context(), folderID, params)
+	first, err := sdk.Folders().GetPage(cmd.Context(), folderID, params)
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
-	if page == nil || page.Folder == nil {
-		return output.ErrNotFound("label", args[0])
-	}
-
-	folder, nextPage, total, err := paginateFolder(cmd.Context(), folderID, page, c.limit, c.all)
-	if err != nil {
-		return err
-	}
-	notice := folderTruncationNotice(len(folder.Postings), total, nextPage != "", c.all, c.page != "")
-
-	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Label: %s\n\n", terminalSafeText(folder.Name))
-		table := newTable(cmd.OutOrStdout())
-		table.addRow([]string{"ID", "Thread", "From", "Summary", "Date"})
-		for _, posting := range folder.Postings {
-			topicID := ""
-			if id := resolvePostingTopicID(posting); id != 0 {
-				topicID = fmt.Sprintf("%d", id)
-			}
-			creator := terminalSafeText(posting.Creator.Name)
-			summary := truncate(terminalSafeText(posting.Summary), 60)
-			table.addRow([]string{fmt.Sprintf("%d", posting.Id), topicID, creator, summary, formatDate(posting.CreatedAt)})
-		}
-		table.print()
-		if notice != "" {
-			fmt.Fprintln(cmd.OutOrStdout(), notice)
-		}
-		return nil
+	if first == nil || first.Folder == nil {
+		return apierr.ErrNotFound("label", args[0])
 	}
 
-	return writeOK(makeFolderOutput(folder, nextPage, total),
-		output.WithSummary(fmt.Sprintf("%d %s labeled %s", len(folder.Postings), threadNoun(len(folder.Postings)), folder.Name)),
-		output.WithNotice(notice),
-		output.WithBreadcrumbs(
-			output.Breadcrumb{Action: "read", Command: "hey threads <id>", Description: "Read an email thread"},
-			output.Breadcrumb{Action: "add_label", Command: "hey label add <id> --to <label-id>", Description: "Add another label to a thread"},
-			output.Breadcrumb{Action: "remove_label", Command: "hey label remove <id> --from <label-id|all>", Description: "Remove labels from a thread"},
-		),
-	)
+	seed := pageResult[generated.Posting]{Items: first.Folder.Postings, Cursor: first.NextPage, Total: first.TotalCount}
+	request := pageRequest{Limit: c.limit, All: c.all, MaxPages: maxPostingPages}
+	return labelListing.write(cmd, mail.FolderSource(first.Folder), seed, request, c.page != "")
 }
 
 type labelAddCommand struct {
@@ -213,7 +181,7 @@ func (c *labelAddCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if strings.TrimSpace(c.to) == "" {
-		return output.ErrUsage("label is required (use --to <label-id>)")
+		return apierr.ErrUsage("label is required (use --to <label-id>)")
 	}
 
 	folderID, err := parsePositiveID(c.to, "label")
@@ -225,7 +193,7 @@ func (c *labelAddCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if err := sdk.Postings().File(cmd.Context(), folderID, postingIDs...); err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
 	summary := fmt.Sprintf("Label %d added to %d %s", folderID, len(postingIDs), threadNoun(len(postingIDs)))
@@ -244,12 +212,7 @@ func newLabelCreateCommand() *labelCreateCommand {
 		Example: `  hey label create "Travel receipts" 12345
   hey label create "Project Apollo" 12345 67890`,
 		RunE: labelCreateCommand.run,
-		Args: func(cmd *cobra.Command, args []string) error {
-			if len(args) < 2 {
-				return usageErrorf("%s <name> <id>...", cmd.CommandPath())
-			}
-			return nil
-		},
+		Args: usageMinArgs(2),
 	}
 	return labelCreateCommand
 }
@@ -261,14 +224,14 @@ func (c *labelCreateCommand) run(cmd *cobra.Command, args []string) error {
 
 	name := strings.TrimSpace(args[0])
 	if name == "" {
-		return output.ErrUsage("label name is required")
+		return apierr.ErrUsage("label name is required")
 	}
 	postingIDs, err := parsePositivePostingIDs(args[1:])
 	if err != nil {
 		return err
 	}
 	if err := sdk.Postings().CreateFolder(cmd.Context(), name, postingIDs...); err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
 	summary := fmt.Sprintf("Label %q created and added to %d %s", name, len(postingIDs), threadNoun(len(postingIDs)))
@@ -301,7 +264,7 @@ func (c *labelRemoveCommand) run(cmd *cobra.Command, args []string) error {
 
 	from := strings.TrimSpace(c.from)
 	if from == "" {
-		return output.ErrUsage("label is required (use --from <label-id|all>)")
+		return apierr.ErrUsage("label is required (use --from <label-id|all>)")
 	}
 	folderID := int64(0)
 	if !strings.EqualFold(from, "all") {
@@ -316,7 +279,7 @@ func (c *labelRemoveCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if err := sdk.Postings().Unfile(cmd.Context(), folderID, postingIDs...); err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
 	summary := fmt.Sprintf("Label %d removed from %d %s", folderID, len(postingIDs), threadNoun(len(postingIDs)))
@@ -326,84 +289,9 @@ func (c *labelRemoveCommand) run(cmd *cobra.Command, args []string) error {
 	return writeLabelMutation(cmd, summary)
 }
 
-func paginateFolder(ctx context.Context, folderID int64, first *hey.FolderPage, limit int, all bool) (*generated.FolderWithPostings, string, int, error) {
-	folder := *first.Folder
-	folder.Postings = append([]generated.Posting(nil), first.Folder.Postings...)
-	nextPage := first.NextPage
-	total := max(first.TotalCount, len(folder.Postings))
-
-	needMore := all || (limit > 0 && len(folder.Postings) < limit)
-	for page := 1; page <= maxAdditionalPages && needMore && nextPage != ""; page++ {
-		cursor := nextPage
-		result, err := sdk.Folders().GetPage(ctx, folderID, &generated.GetFolderParams{Page: &cursor})
-		if err != nil {
-			return nil, "", 0, convertSDKError(err)
-		}
-		if result == nil || result.Folder == nil {
-			return nil, "", 0, fmt.Errorf("label %d page %q returned no data", folderID, cursor)
-		}
-		folder.Postings = append(folder.Postings, result.Folder.Postings...)
-		nextPage = result.NextPage
-		total = max(total, result.TotalCount, len(folder.Postings))
-		needMore = all || (limit > 0 && len(folder.Postings) < limit)
-	}
-
-	if limit > 0 && !all && len(folder.Postings) > limit {
-		folder.Postings = folder.Postings[:limit]
-		nextPage = ""
-	}
-	return &folder, nextPage, total, nil
-}
-
-func folderTruncationNotice(shown, total int, hasMore, all, fromCursor bool) string {
-	if all {
-		if hasMore {
-			return fmt.Sprintf("Showing %d results. Pagination limit reached; continue with --page using next_page.", shown)
-		}
-		if shown < total {
-			if fromCursor {
-				return fmt.Sprintf("Showing %d remaining results from this cursor (%d threads with the label).", shown, total)
-			}
-			return fmt.Sprintf("Showing %d of %d results; HEY returned no additional page cursor.", shown, total)
-		}
-		return ""
-	}
-	if shown < total {
-		return fmt.Sprintf("Showing %d of %d results. Use --all to see everything.", shown, total)
-	}
-	if hasMore {
-		return fmt.Sprintf("Showing %d results. More available; use --all to fetch all.", shown)
-	}
-	return ""
-}
-
-func makeFolderOutput(folder *generated.FolderWithPostings, nextPage string, total int) folderOutput {
-	postings := make([]folderPostingOutput, len(folder.Postings))
-	for i, posting := range folder.Postings {
-		postings[i] = folderPostingOutput{Posting: posting, TopicID: resolvePostingTopicID(posting)}
-	}
-	return folderOutput{
-		ID:         folder.Id,
-		Name:       folder.Name,
-		AppURL:     folder.AppUrl,
-		CreatedAt:  nonZeroTime(folder.CreatedAt),
-		UpdatedAt:  nonZeroTime(folder.UpdatedAt),
-		Postings:   postings,
-		NextPage:   nextPage,
-		TotalCount: total,
-	}
-}
-
-func nonZeroTime(value time.Time) *time.Time {
-	if value.IsZero() {
-		return nil
-	}
-	return &value
-}
-
 func writeLabelMutation(cmd *cobra.Command, summary string) error {
 	if writer.IsStyled() {
-		fmt.Fprintln(cmd.OutOrStdout(), terminalSafeText(summary)+".")
+		fmt.Fprintln(cmd.OutOrStdout(), terminal.SanitizeLine(summary)+".")
 		return nil
 	}
 	return writeOK(nil, output.WithSummary(summary))
@@ -412,7 +300,7 @@ func writeLabelMutation(cmd *cobra.Command, summary string) error {
 func parsePositiveID(value, kind string) (int64, error) {
 	id, err := strconv.ParseInt(value, 10, 64)
 	if err != nil || id <= 0 {
-		return 0, output.ErrUsage(fmt.Sprintf("invalid %s ID: %s", kind, value))
+		return 0, apierr.ErrUsage(fmt.Sprintf("invalid %s ID: %s", kind, value))
 	}
 	return id, nil
 }
@@ -426,7 +314,7 @@ func parsePositivePostingIDs(values []string) ([]int64, error) {
 			return nil, err
 		}
 		if seen[id] {
-			return nil, output.ErrUsage(fmt.Sprintf("duplicate thread ID: %d", id))
+			return nil, apierr.ErrUsage(fmt.Sprintf("duplicate thread ID: %d", id))
 		}
 		seen[id] = true
 		ids[i] = id

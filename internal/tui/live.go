@@ -85,16 +85,24 @@ func refreshMailLaterCmd(boxID int64, delay time.Duration) tea.Cmd {
 
 // --- The Screener ---
 
-// screenerWatchStartedMsg carries the stream a watcher opened, or the reason there isn't one.
+// screenerWatchStartedMsg carries the stream a watcher opened, or the reason there isn't
+// one. It names the signed stream it is about, because a watch given up on — HEY has
+// named another one, or the account changed — must not be mistaken for the current one.
 type screenerWatchStartedMsg struct {
+	stream  string
 	changes <-chan struct{}
 	err     error
 }
 
 // screenerChangedMsg reports that someone arrived in or left The Screener, or that the
 // stream has closed. HEY broadcasts the Screener's own rendering, so the message says
-// nothing the TUI can use: it is a doorbell and the count is read again behind it.
-type screenerChangedMsg struct{ closed bool }
+// nothing the TUI can use: it is a doorbell and the count is read again behind it. The
+// stream it came from is named for the same reason screenerWatchStartedMsg names it: a
+// stream given up closes, and that close is not news about the one that replaced it.
+type screenerChangedMsg struct {
+	stream string
+	closed bool
+}
 
 // screenerRefreshDueMsg is the re-read a Screener change asked for, once its delay has passed.
 type screenerRefreshDueMsg struct{}
@@ -105,17 +113,17 @@ func startScreenerWatchCmd(ctx context.Context, watch ScreenerWatcher, signedStr
 	}
 	return func() tea.Msg {
 		changes, err := watch(ctx, signedStreamName)
-		return screenerWatchStartedMsg{changes: changes, err: err}
+		return screenerWatchStartedMsg{stream: signedStreamName, changes: changes, err: err}
 	}
 }
 
-func waitForScreenerChangeCmd(changes <-chan struct{}) tea.Cmd {
+func waitForScreenerChangeCmd(stream string, changes <-chan struct{}) tea.Cmd {
 	if changes == nil {
 		return nil
 	}
 	return func() tea.Msg {
 		_, open := <-changes
-		return screenerChangedMsg{closed: !open}
+		return screenerChangedMsg{stream: stream, closed: !open}
 	}
 }
 

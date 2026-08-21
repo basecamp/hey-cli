@@ -604,6 +604,159 @@ func TestRefreshFailuresPreserveCredentials(t *testing.T) {
 	}
 }
 
+func TestRefreshWithoutAnAccessTokenKeepsTheWorkingOne(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"refresh_token":"rotated-refresh","expires_in":3600}`)
+	}))
+	defer server.Close()
+
+	t.Setenv("HEY_TOKEN", "")
+	mgr := testManager(t, server)
+	if err := mgr.GetStore().Save(mgr.CredentialKey(), &Credentials{AccessToken: "working-access", RefreshToken: "old-refresh"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	err := mgr.Refresh(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "no access token") {
+		t.Fatalf("error = %v, want a refresh without an access token reported", err)
+	}
+
+	stored, err := mgr.GetStore().Load(mgr.CredentialKey())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if stored.AccessToken != "working-access" || stored.RefreshToken != "old-refresh" {
+		t.Errorf("stored credentials = %#v, want the working ones left alone", stored)
+	}
+	if !mgr.IsAuthenticated() {
+		t.Error("a refresh that answered nothing left the CLI unauthenticated")
+	}
+}
+
+func TestRefreshForgetsAnExpiryTheServerStopsSending(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"access_token":"fresh-access","refresh_token":"rotated-refresh"}`)
+	}))
+	defer server.Close()
+
+	t.Setenv("HEY_TOKEN", "")
+	mgr := testManager(t, server)
+	creds := &Credentials{
+		AccessToken:  "expired-access",
+		RefreshToken: "old-refresh",
+		ExpiresAt:    time.Now().Add(-time.Hour).Unix(),
+	}
+	if err := mgr.GetStore().Save(mgr.CredentialKey(), creds); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	if err := mgr.Refresh(t.Context()); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	stored, err := mgr.GetStore().Load(mgr.CredentialKey())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if stored.ExpiresAt != 0 {
+		t.Errorf("ExpiresAt = %d, want no expiry rather than the one it just replaced", stored.ExpiresAt)
+	}
+}
+
+func TestRefreshAdoptsATokenAnotherProcessStored(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"access_token":"ours","refresh_token":"rotated-refresh","expires_in":3600}`)
+	}))
+	defer server.Close()
+
+	t.Setenv("HEY_TOKEN", "")
+	mgr := testManager(t, server)
+	if err := mgr.GetStore().Save(mgr.CredentialKey(), &Credentials{AccessToken: "elsewhere", RefreshToken: "rotated-refresh"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	stale := &Credentials{AccessToken: "waited-with-this", RefreshToken: "consumed-refresh"}
+	if err := mgr.refreshLocked(t.Context(), stale); err != nil {
+		t.Fatalf("refreshLocked: %v", err)
+	}
+
+	if calls != 0 {
+		t.Errorf("refresh requests = %d, want none once another process had already refreshed", calls)
+	}
+	stored, err := mgr.GetStore().Load(mgr.CredentialKey())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if stored.AccessToken != "elsewhere" {
+		t.Errorf("stored access token = %q, want the one the other process left", stored.AccessToken)
+	}
+}
+
+func TestConcurrentManagersRefreshOnce(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		// Rotation: the refresh token is spent by the first refresh that presents it.
+		if r.Form.Get("refresh_token") != "first-refresh" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"access_token":"fresh-access","refresh_token":"second-refresh","expires_in":3600}`)
+	}))
+	defer server.Close()
+
+	t.Setenv("HEY_TOKEN", "")
+	t.Setenv("HEY_NO_KEYRING", "1")
+	configDir := t.TempDir()
+	watching := NewManager(server.URL, server.Client(), configDir)
+	reading := NewManager(server.URL, server.Client(), configDir)
+
+	expired := &Credentials{
+		AccessToken:  "expired-access",
+		RefreshToken: "first-refresh",
+		ExpiresAt:    time.Now().Add(-time.Hour).Unix(),
+	}
+	if err := watching.GetStore().Save(watching.CredentialKey(), expired); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	tokens := make(chan string, 2)
+	failures := make(chan error, 2)
+	for _, mgr := range []*Manager{watching, reading} {
+		go func() {
+			token, err := mgr.AccessToken(t.Context())
+			if err != nil {
+				failures <- err
+				return
+			}
+			tokens <- token
+		}()
+	}
+
+	for range 2 {
+		select {
+		case err := <-failures:
+			t.Fatalf("AccessToken: %v", err)
+		case token := <-tokens:
+			if token != "fresh-access" {
+				t.Errorf("token = %q, want both processes on the refreshed token", token)
+			}
+		}
+	}
+	if calls != 1 {
+		t.Errorf("refresh requests = %d, want one for the two processes sharing the credentials", calls)
+	}
+}
+
 func TestLoginOptionsLoggerReceivesProgress(t *testing.T) {
 	listenConfig := &net.ListenConfig{}
 	listener, err := listenConfig.Listen(t.Context(), "tcp", "127.0.0.1:0")

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -408,6 +409,37 @@ func TestFilePermissions(t *testing.T) {
 	}
 	if got := dirInfo.Mode().Perm(); got&0077 != 0 {
 		t.Errorf("directory permissions = %o, want no group/other access", got)
+	}
+}
+
+func TestConcurrentSavesKeepEveryOrigin(t *testing.T) {
+	t.Setenv("HEY_NO_KEYRING", "1")
+	configDir := t.TempDir()
+	origins := []string{"https://app.hey.com", "https://app.hey.localhost:3003", "https://work.hey.com", "https://family.hey.com"}
+
+	saved := make(chan error, len(origins))
+	for i, origin := range origins {
+		// A store each, standing in for the separate processes that share the file.
+		store := NewStore(configDir)
+		go func() {
+			saved <- store.Save(origin, &Credentials{AccessToken: "token-" + strconv.Itoa(i)})
+		}()
+	}
+	for range origins {
+		if err := <-saved; err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+	}
+
+	reader := NewStore(configDir)
+	for i, origin := range origins {
+		creds, err := reader.Load(origin)
+		if err != nil {
+			t.Fatalf("Load(%q): %v", origin, err)
+		}
+		if want := "token-" + strconv.Itoa(i); creds.AccessToken != want {
+			t.Errorf("Load(%q) access token = %q, want %q", origin, creds.AccessToken, want)
+		}
 	}
 }
 

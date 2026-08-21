@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -200,7 +201,7 @@ func TestSetupAgentCommandEnvelope(t *testing.T) {
 	// An explicitly requested integration that is not detected is a failed
 	// command: error envelope, nonzero exit.
 	_, _, err = runAuthCommand(t, home, server.URL, "", true, "setup", "claude")
-	var cliErr *output.Error
+	var cliErr *apierr.Error
 	if !errors.As(err, &cliErr) || cliErr.Code != "setup_incomplete" || cliErr.Message != "Claude Code not detected" {
 		t.Fatalf("error = %v, want setup_incomplete/Claude Code not detected", err)
 	}
@@ -269,7 +270,7 @@ func TestSetupCodexDoesNotFabricateCodex(t *testing.T) {
 	defer server.Close()
 
 	_, _, err := runAuthCommand(t, home, server.URL, "", true, "setup", "codex")
-	var cliErr *output.Error
+	var cliErr *apierr.Error
 	if !errors.As(err, &cliErr) || cliErr.Code != "setup_incomplete" || cliErr.Message != "Codex not detected" {
 		t.Fatalf("error = %v, want setup_incomplete/Codex not detected", err)
 	}
@@ -293,7 +294,7 @@ func TestSetupAgentStyledReportsNotConnected(t *testing.T) {
 	t.Cleanup(func() { colorDisabled = origColor })
 
 	stdout, _, err := runAuthCommand(t, home, server.URL, "", false, "setup", "claude", "--styled")
-	var cliErr *output.Error
+	var cliErr *apierr.Error
 	if !errors.As(err, &cliErr) || cliErr.Code != "setup_incomplete" {
 		t.Fatalf("error = %v, want setup_incomplete", err)
 	}

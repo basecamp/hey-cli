@@ -10,8 +10,8 @@ import (
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	habitvalues "github.com/basecamp/hey-cli/internal/habit"
-	"github.com/basecamp/hey-cli/internal/output"
 )
 
 type habitCommand struct {
@@ -75,7 +75,7 @@ func (c *habitCreateCommand) run(cmd *cobra.Command, args []string) error {
 	name := strings.TrimSpace(c.name)
 	nameFlagSet := cmd.Flags().Changed("name")
 	if nameFlagSet && len(args) > 0 {
-		return output.ErrUsage("--name and positional argument are mutually exclusive")
+		return apierr.ErrUsage("--name and positional argument are mutually exclusive")
 	}
 	if len(args) > 0 {
 		name = strings.TrimSpace(args[0])
@@ -89,33 +89,29 @@ func (c *habitCreateCommand) run(cmd *cobra.Command, args []string) error {
 		name = strings.TrimSpace(name)
 	}
 	if name == "" {
-		return output.ErrUsageHint("name is required", "hey habit create \"Morning strength training\"")
+		return apierr.ErrUsageHint("name is required", "hey habit create \"Morning strength training\"")
 	}
 	icon := strings.TrimSpace(c.icon)
 	color := strings.TrimSpace(c.color)
 	if icon == "" || color == "" {
-		return output.ErrUsage("icon and color cannot be empty")
+		return apierr.ErrUsage("icon and color cannot be empty")
 	}
 	if err := habitvalues.ValidateIcon(icon); err != nil {
-		return output.ErrUsage(err.Error())
+		return apierr.ErrUsage(err.Error())
 	}
 	if err := habitvalues.ValidateColor(color); err != nil {
-		return output.ErrUsage(err.Error())
+		return apierr.ErrUsage(err.Error())
 	}
 	days, err := habitvalues.ParseDays(c.days)
 	if err != nil {
-		return output.ErrUsage(err.Error())
+		return apierr.ErrUsage(err.Error())
 	}
 
 	recording, err := sdk.Habits().Create(cmd.Context(), hey.HabitParams{Name: name, Icon: icon, Color: color, Days: days})
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
-	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Habit %q created.\n", name)
-		return nil
-	}
-	return writeHabitMutation(recording, "Habit created")
+	return writeMutationLine(cmd, fmt.Sprintf("Habit %q created.", name), "Habit created", recording)
 }
 
 // edit
@@ -160,7 +156,7 @@ func (c *habitEditCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	nameChanged := cmd.Flags().Changed("name") || len(args) == 2
 	if cmd.Flags().Changed("name") && len(args) == 2 {
-		return output.ErrUsage("--name and positional name are mutually exclusive")
+		return apierr.ErrUsage("--name and positional name are mutually exclusive")
 	}
 	name := strings.TrimSpace(c.name)
 	if len(args) == 2 {
@@ -170,46 +166,42 @@ func (c *habitEditCommand) run(cmd *cobra.Command, args []string) error {
 	colorChanged := cmd.Flags().Changed("color")
 	daysChanged := cmd.Flags().Changed("days")
 	if !nameChanged && !iconChanged && !colorChanged && !daysChanged {
-		return output.ErrUsage("provide at least one of name, --icon, --color, or --days")
+		return apierr.ErrUsage("provide at least one of name, --icon, --color, or --days")
 	}
 	if nameChanged && name == "" {
-		return output.ErrUsage("name cannot be empty")
+		return apierr.ErrUsage("name cannot be empty")
 	}
 	icon := strings.TrimSpace(c.icon)
 	color := strings.TrimSpace(c.color)
 	if iconChanged && icon == "" {
-		return output.ErrUsage("icon cannot be empty")
+		return apierr.ErrUsage("icon cannot be empty")
 	}
 	if iconChanged {
 		if validationErr := habitvalues.ValidateIcon(icon); validationErr != nil {
-			return output.ErrUsage(validationErr.Error())
+			return apierr.ErrUsage(validationErr.Error())
 		}
 	}
 	if colorChanged && color == "" {
-		return output.ErrUsage("color cannot be empty")
+		return apierr.ErrUsage("color cannot be empty")
 	}
 	if colorChanged {
 		if validationErr := habitvalues.ValidateColor(color); validationErr != nil {
-			return output.ErrUsage(validationErr.Error())
+			return apierr.ErrUsage(validationErr.Error())
 		}
 	}
 	var days []int32
 	if daysChanged {
 		days, err = habitvalues.ParseDays(c.days)
 		if err != nil {
-			return output.ErrUsage(err.Error())
+			return apierr.ErrUsage(err.Error())
 		}
 	}
 
 	recording, err := sdk.Habits().Update(cmd.Context(), id, hey.HabitParams{Name: name, Icon: icon, Color: color, Days: days})
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
-	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Habit %d updated.\n", id)
-		return nil
-	}
-	return writeHabitMutation(recording, "Habit updated")
+	return writeMutationLine(cmd, fmt.Sprintf("Habit %d updated.", id), "Habit updated", recording)
 }
 
 // delete
@@ -239,29 +231,17 @@ func (c *habitDeleteCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if err := sdk.Habits().Delete(cmd.Context(), id); err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
-	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Habit %d deleted.\n", id)
-		return nil
-	}
-	return writeOK(nil, output.WithSummary("Habit deleted"))
+	return writeMutationLine(cmd, fmt.Sprintf("Habit %d deleted.", id), "Habit deleted", nil)
 }
 
 func parseHabitID(value string) (int64, error) {
 	id, err := strconv.ParseInt(value, 10, 64)
 	if err != nil || id <= 0 {
-		return 0, output.ErrUsage(fmt.Sprintf("invalid habit ID: %s", value))
+		return 0, apierr.ErrUsage(fmt.Sprintf("invalid habit ID: %s", value))
 	}
 	return id, nil
-}
-
-func writeHabitMutation(recording any, summary string) error {
-	normalized, err := normalizeAny(recording)
-	if err != nil {
-		return writeOK(nil, output.WithSummary(summary))
-	}
-	return writeOK(normalized, output.WithSummary(summary))
 }
 
 // complete
@@ -277,7 +257,7 @@ func newHabitCompleteCommand() *habitCompleteCommand {
 		Use:   "complete <id>",
 		Short: "Mark a habit as complete for a date",
 		Example: `  hey habit complete 789
-  hey habit complete 789 --date 2024-01-15`,
+  hey habit complete 789 --date 2026-01-15`,
 		RunE: habitCompleteCommand.run,
 		Args: usageExactOneArg(),
 	}
@@ -297,27 +277,21 @@ func (c *habitCompleteCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	date := c.date
-	if date == "" {
-		date = time.Now().Format("2006-01-02")
+	date, err := habitCompletionDate(c.date)
+	if err != nil {
+		return err
 	}
 
 	ctx := cmd.Context()
 	result, err := sdk.Habits().Complete(ctx, date, id)
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
-	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Habit %s completed for %s.%s\n", args[0], date, extractMutationInfoFromResult(result))
-		return nil
-	}
-
-	normalized, nerr := normalizeAny(result)
-	if nerr != nil {
-		return writeOK(nil, output.WithSummary(fmt.Sprintf("Habit %s completed for %s", args[0], date)))
-	}
-	return writeOK(normalized, output.WithSummary(fmt.Sprintf("Habit %s completed for %s", args[0], date)))
+	return writeMutationLine(cmd,
+		fmt.Sprintf("Habit %s completed for %s.%s", args[0], date, extractMutationInfoFromResult(result)),
+		fmt.Sprintf("Habit %s completed for %s", args[0], date),
+		result)
 }
 
 // uncomplete
@@ -333,7 +307,7 @@ func newHabitUncompleteCommand() *habitUncompleteCommand {
 		Use:   "uncomplete <id>",
 		Short: "Remove a habit completion for a date",
 		Example: `  hey habit uncomplete 789
-  hey habit uncomplete 789 --date 2024-01-15`,
+  hey habit uncomplete 789 --date 2026-01-15`,
 		RunE: habitUncompleteCommand.run,
 		Args: usageExactOneArg(),
 	}
@@ -353,25 +327,31 @@ func (c *habitUncompleteCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	date := c.date
-	if date == "" {
-		date = time.Now().Format("2006-01-02")
+	date, err := habitCompletionDate(c.date)
+	if err != nil {
+		return err
 	}
 
 	ctx := cmd.Context()
 	result, err := sdk.Habits().Uncomplete(ctx, date, id)
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
-	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Habit %s uncompleted for %s.%s\n", args[0], date, extractMutationInfoFromResult(result))
-		return nil
-	}
+	return writeMutationLine(cmd,
+		fmt.Sprintf("Habit %s uncompleted for %s.%s", args[0], date, extractMutationInfoFromResult(result)),
+		fmt.Sprintf("Habit %s uncompleted for %s", args[0], date),
+		result)
+}
 
-	normalized, nerr := normalizeAny(result)
-	if nerr != nil {
-		return writeOK(nil, output.WithSummary(fmt.Sprintf("Habit %s uncompleted for %s", args[0], date)))
+// habitCompletionDate reads the --date flag, defaulting to today. A date the server
+// cannot read would otherwise be sent as a URL segment and answered with a 404.
+func habitCompletionDate(flag string) (string, error) {
+	if flag == "" {
+		return time.Now().Format(dateLayout), nil
 	}
-	return writeOK(normalized, output.WithSummary(fmt.Sprintf("Habit %s uncompleted for %s", args[0], date)))
+	if _, err := parseDateArg("date", flag); err != nil {
+		return "", err
+	}
+	return flag, nil
 }

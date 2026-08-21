@@ -117,6 +117,32 @@ func TestAuthTokenLoginAndStoredTokenOutput(t *testing.T) {
 	}
 }
 
+// A session cookie is sent as a Cookie header, so printing it as a bearer token gave
+// the caller something that 401s with nothing to explain it -- and put the cookie in
+// their shell history.
+func TestAuthTokenRefusesToPrintASessionCookie(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+	configHome := t.TempDir()
+
+	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "session-cookie"); err != nil {
+		t.Fatalf("auth login: %v", err)
+	}
+
+	stdout, _, err := runAuthCommand(t, configHome, server.URL, "", false, "auth", "token")
+	if err == nil {
+		t.Fatal("auth token printed a session cookie")
+	}
+	if !strings.Contains(err.Error(), "session cookie") {
+		t.Errorf("error = %v", err)
+	}
+	if strings.Contains(stdout, "session-cookie") {
+		t.Errorf("stdout = %q, the cookie must not be printed", stdout)
+	}
+}
+
 func TestAuthStatusUsesEnvironmentTokenWithoutStorage(t *testing.T) {
 	server := httptest.NewServer(http.NotFoundHandler())
 	defer server.Close()

@@ -129,6 +129,31 @@ func TestRecordingsDefaultsEndDateFromStart(t *testing.T) {
 	}
 }
 
+// Recordings arrive grouped by type, which --count and --ids-only cannot read. Both
+// used to fail on the main calendar listing with "requires list data".
+func TestRecordingsCountsAndListsIDsAcrossTypes(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"Calendar::Event":[{"id":1,"title":"Planning"},{"id":2,"title":"Review"}],"Calendar::Todo":[{"id":3,"title":"Send notes"}]}`)
+	})
+
+	count, err := runFormattedCommand(t, handler, []string{"--count"}, "recordings", "7")
+	if err != nil {
+		t.Fatalf("execute recordings --count: %v", err)
+	}
+	if strings.TrimSpace(count) != "3" {
+		t.Errorf("count = %q, want 3", count)
+	}
+
+	ids, err := runFormattedCommand(t, handler, []string{"--ids-only"}, "recordings", "7")
+	if err != nil {
+		t.Fatalf("execute recordings --ids-only: %v", err)
+	}
+	if strings.Fields(ids)[0] != "1" || len(strings.Fields(ids)) != 3 {
+		t.Errorf("ids = %q, want the three IDs with the types in name order", ids)
+	}
+}
+
 func TestRecordingsValidationMakesNoRequest(t *testing.T) {
 	tests := []struct {
 		name string
@@ -137,6 +162,12 @@ func TestRecordingsValidationMakesNoRequest(t *testing.T) {
 	}{
 		{name: "calendar ID", args: []string{"recordings", "not-an-id"}, want: "invalid calendar ID"},
 		{name: "start date", args: []string{"recordings", "7", "--starts-on", "tomorrow"}, want: "invalid starts-on date"},
+		{name: "end date", args: []string{"recordings", "7", "--ends-on", "alsobad"}, want: "invalid ends-on date"},
+		{
+			name: "backwards window",
+			args: []string{"recordings", "7", "--starts-on", "2026-08-31", "--ends-on", "2026-08-01"},
+			want: "ends-on 2026-08-01 is before starts-on 2026-08-31",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

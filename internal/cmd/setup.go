@@ -13,10 +13,12 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/auth"
 	"github.com/basecamp/hey-cli/internal/config"
 	"github.com/basecamp/hey-cli/internal/harness"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/terminal"
 	"github.com/basecamp/hey-cli/internal/tui"
 	"github.com/basecamp/hey-cli/internal/version"
 )
@@ -61,9 +63,9 @@ func (c *setupCommand) run(cmd *cobra.Command, _ []string) error {
 func rejectListOnlyFormats(command string) error {
 	switch writer.EffectiveFormat() {
 	case output.FormatIDs:
-		return output.ErrUsage("--ids-only is not supported by " + command)
+		return apierr.ErrUsage("--ids-only is not supported by " + command)
 	case output.FormatCount:
-		return output.ErrUsage("--count is not supported by " + command)
+		return apierr.ErrUsage("--count is not supported by " + command)
 	default:
 		return nil
 	}
@@ -214,7 +216,7 @@ func loginInteractively(out io.Writer) error {
 		}
 	}
 	if err := authMgr.Login(ctx, auth.LoginOptions{Logger: logger}); err != nil {
-		return output.ErrAuth(fmt.Sprintf("login failed: %v", err))
+		return apierr.ErrAuth(fmt.Sprintf("login failed: %v", err))
 	}
 	return selectConfiguredAccount(context.Background())
 }
@@ -265,9 +267,9 @@ func (s *setupWizard) greet() {
 	// needs no list.
 	if len(s.result.Accounts) > 2 {
 		for _, account := range s.result.Accounts[1:] {
-			label := terminalSafeText(account.Name)
+			label := terminal.SanitizeLine(account.Name)
 			if account.Email != "" {
-				label += " (" + terminalSafeText(account.Email) + ")"
+				label += " (" + terminal.SanitizeLine(account.Email) + ")"
 			}
 			fmt.Fprintln(w, muted.format("    • "+label))
 		}
@@ -285,14 +287,14 @@ func isAuthError(err error) bool {
 	if err == nil {
 		return false
 	}
-	converted := convertSDKError(err)
-	var cliErr *output.Error
-	return errors.As(converted, &cliErr) && cliErr.Code == "auth"
+	converted := apierr.FromSDK(err)
+	var cliErr *apierr.Error
+	return errors.As(converted, &cliErr) && cliErr.Code == apierr.CodeAuth
 }
 
 func identityGreeting(identity *generated.Identity) string {
-	name := terminalSafeText(identity.Name)
-	email := terminalSafeText(identity.PrimaryContact.EmailAddress)
+	name := terminal.SanitizeLine(identity.Name)
+	email := terminal.SanitizeLine(identity.PrimaryContact.EmailAddress)
 	switch {
 	case name != "" && email != "":
 		return fmt.Sprintf("Signed in as %s (%s)", name, email)

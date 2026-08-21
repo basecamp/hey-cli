@@ -131,12 +131,63 @@ func TestNextImageID(t *testing.T) {
 		t.Error("ids must not repeat")
 	}
 	for _, id := range []int{first, second} {
-		if id>>16&0xFF == 0 || id>>8&0xFF == 0 || id&0xFF == 0 {
-			t.Errorf("id %#x has a zero color byte", id)
+		assertUsableImageID(t, id)
+	}
+}
+
+// Every byte of an id is a base-255 digit offset by one, so carrying from one digit to the
+// next never leaves a zero byte behind — which is where plain addition went wrong: the
+// 255th id it handed out was 0x010200, and a terminal reads a color with a zero byte as a
+// palette index and loses the image.
+func TestNextImageIDCarriesWithoutAZeroByte(t *testing.T) {
+	t.Cleanup(func() { imageIDs.Store(0) })
+
+	imageIDs.Store(250)
+	seen := make(map[int]struct{}, 12)
+	for range 12 {
+		id := nextImageID()
+		assertUsableImageID(t, id)
+		if _, repeated := seen[id]; repeated {
+			t.Errorf("id %#x was handed out twice across a byte boundary", id)
 		}
-		if id > lastImageID {
-			t.Errorf("id %#x needs more than three bytes of color", id)
-		}
+		seen[id] = struct{}{}
+	}
+
+	// The same boundary a digit further up.
+	imageIDs.Store(imageIDDigit*imageIDDigit - 2)
+	for range 4 {
+		assertUsableImageID(t, nextImageID())
+	}
+}
+
+// There is nothing safe left to hand out once every id has been: an image drawn under a
+// reused id takes over one that is still on screen, so the ids run out rather than round.
+func TestNextImageIDStopsMintingWhenItRunsOut(t *testing.T) {
+	t.Cleanup(func() { imageIDs.Store(0) })
+
+	imageIDs.Store(imageIDCount - 1)
+	if last := nextImageID(); last != lastImageID {
+		t.Errorf("last id = %#x, want %#x", last, lastImageID)
+	}
+	if exhausted := nextImageID(); exhausted != noImageID {
+		t.Errorf("id past the last = %#x, want none", exhausted)
+	}
+	if drawn := renderImagePlaceholder(noImageID, 4, 2); drawn != "" {
+		t.Errorf("an image without an id drew %q", drawn)
+	}
+	if uploaded := kittyUploadAndPlace(pngImage(t, 40, 20), noImageID, 4, 2); uploaded != "" {
+		t.Errorf("an image without an id was uploaded: %q", uploaded)
+	}
+}
+
+func assertUsableImageID(t *testing.T, id int) {
+	t.Helper()
+
+	if id>>16&0xFF == 0 || id>>8&0xFF == 0 || id&0xFF == 0 {
+		t.Errorf("id %#x has a zero color byte", id)
+	}
+	if id < firstImageID || id > lastImageID {
+		t.Errorf("id %#x is outside the three bytes of color that carry it", id)
 	}
 }
 

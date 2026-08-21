@@ -6,13 +6,13 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/basecamp/hey-cli/internal/models"
+	"github.com/basecamp/hey-cli/internal/mail"
 )
 
 func TestLabelPickerConstrainsLongNamesToModalWidth(t *testing.T) {
-	picker := newLabelPicker([]models.Box{{
+	picker := newLabelPicker([]mail.Source{{
+		Kind: mail.KindFolder,
 		ID:   12,
-		Kind: mailSourceKindFolder,
 		Name: "Receipts and invoices from every supplier for the annual financial review",
 	}}, 0)
 

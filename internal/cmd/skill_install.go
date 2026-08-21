@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/harness"
 	"github.com/basecamp/hey-cli/internal/output"
 	"github.com/basecamp/hey-cli/internal/version"
@@ -107,7 +108,7 @@ func newSkillInstallCommand() *cobra.Command {
 func runSkillInstall(cmd *cobra.Command, args []string) error {
 	skillPath, err := installSkillFiles()
 	if err != nil {
-		return output.ErrAPI(0, err.Error())
+		return apierr.ErrAPI(0, err.Error())
 	}
 
 	result := map[string]string{"skill_path": skillPath}
@@ -116,7 +117,7 @@ func runSkillInstall(cmd *cobra.Command, args []string) error {
 	if harness.DetectClaude() {
 		notice, linkErr := linkSkillToClaude()
 		if linkErr != nil {
-			return output.ErrAPI(0, linkErr.Error())
+			return apierr.ErrAPI(0, linkErr.Error())
 		}
 		home, _ := os.UserHomeDir()
 		result["symlink_path"] = filepath.Join(home, ".claude", "skills", harness.ClaudePluginName)
@@ -131,7 +132,7 @@ func runSkillInstall(cmd *cobra.Command, args []string) error {
 	if harness.DetectCodex() {
 		codexPath, codexErr := installSkillToCodex()
 		if codexErr != nil {
-			return output.ErrAPI(0, codexErr.Error())
+			return apierr.ErrAPI(0, codexErr.Error())
 		}
 		result["codex_skill_path"] = codexPath
 		lines = append(lines, "Copied skill to "+codexPath)

@@ -34,6 +34,65 @@ func TestWriterOK_JSON(t *testing.T) {
 	}
 }
 
+// `omitempty` drops a nil interface but never a typed nil slice, so an empty listing
+// used to marshal as `"data": null` and the documented `--jq '.data[]'` recipe failed
+// with "cannot iterate over: null".
+func TestWriterOK_EmptyListMarshalsAsAnArray(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatJSON, Stdout: &buf})
+
+	var recordings []map[string]any
+	if err := w.OK(recordings); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), `"data": []`) {
+		t.Errorf("output = %q, want an empty array", buf.String())
+	}
+}
+
+func TestWriterOK_NoDataIsStillOmitted(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatJSON, Stdout: &buf})
+
+	if err := w.OK(nil, WithSummary("Journal entry for 2026-01-31 saved")); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), `"data"`) {
+		t.Errorf("output = %q, want no data field", buf.String())
+	}
+}
+
+// A mutation the API answered with nothing hands OK a typed nil pointer, which
+// `omitempty` keeps: it is a non-nil interface. Left alone it reports "data": null.
+func TestWriterOK_TypedNilDataIsOmitted(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatJSON, Stdout: &buf})
+
+	type recording struct {
+		ID int64 `json:"id"`
+	}
+	var missing *recording
+	if err := w.OK(missing, WithSummary("Todo created")); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), `"data"`) {
+		t.Errorf("output = %q, want no data field", buf.String())
+	}
+}
+
+func TestWriterOK_EmptyListJQIteratesToNothing(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatJSON, Stdout: &buf, JQFilter: ".data[]"})
+
+	var recordings []map[string]any
+	if err := w.OK(recordings); err != nil {
+		t.Fatalf("iterating an empty listing failed: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("output = %q, want nothing", buf.String())
+	}
+}
+
 func TestWriterOK_Quiet(t *testing.T) {
 	var buf bytes.Buffer
 	w := New(Options{Format: FormatQuiet, Stdout: &buf})

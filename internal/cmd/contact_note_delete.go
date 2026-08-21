@@ -5,6 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -34,14 +35,12 @@ func (c *contactNoteDeleteCommand) run(cmd *cobra.Command, args []string) error 
 		return err
 	}
 	if err := sdk.Contacts().DeleteNote(cmd.Context(), contactID); err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
-	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Private note for contact %d deleted.\n", contactID)
-		return nil
-	}
-	return writeOK(map[string]int64{"id": contactID},
-		output.WithSummary("Private contact note deleted"),
+	return writeMutationLine(cmd,
+		fmt.Sprintf("Private note for contact %d deleted.", contactID),
+		"Private contact note deleted",
+		map[string]int64{"id": contactID},
 		output.WithBreadcrumbs(output.Breadcrumb{Action: "write", Command: fmt.Sprintf("hey contacts note set %d", contactID), Description: "Add a private note"}),
 	)
 }

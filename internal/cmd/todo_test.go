@@ -129,6 +129,21 @@ func TestTodoAddConflict(t *testing.T) {
 	}
 }
 
+// An unreadable due date used to reach the server, which accepted the todo and dropped
+// the date.
+func TestTodoAddRejectsAnUnreadableDate(t *testing.T) {
+	server := todoServer(t)
+	defer server.Close()
+
+	_, err := runTodoAdd(t, server, "Buy groceries", "--date", "next friday")
+	if err == nil {
+		t.Fatal("expected error for an unreadable due date")
+	}
+	if !strings.Contains(err.Error(), "invalid date: next friday") {
+		t.Errorf("error = %q", err.Error())
+	}
+}
+
 func TestTodoAddEmpty(t *testing.T) {
 	server := todoServer(t)
 	defer server.Close()

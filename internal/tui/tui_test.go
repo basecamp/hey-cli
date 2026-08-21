@@ -13,6 +13,7 @@ import (
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
+	"github.com/basecamp/hey-cli/internal/mail"
 	"github.com/basecamp/hey-cli/internal/models"
 )
 
@@ -37,29 +38,29 @@ func modelWithBoxes() model {
 	return updated.(model)
 }
 
-func testBoxes() []models.Box {
-	return []models.Box{
-		{ID: 1, Name: "Imbox", Kind: "inbox"},
-		{ID: 2, Name: "The Feed", Kind: "feed"},
-		{ID: 3, Name: "Paper Trail", Kind: "paper_trail"},
+func testBoxes() []mail.Source {
+	return []mail.Source{
+		{Kind: mail.KindBox, ID: 1, Name: "Imbox", BoxKind: hey.BoxKindImbox},
+		{Kind: mail.KindBox, ID: 2, Name: "The Feed", BoxKind: hey.BoxKindFeed},
+		{Kind: mail.KindBox, ID: 3, Name: "Paper Trail", BoxKind: hey.BoxKindTrail},
 	}
 }
 
-func testPostings() []models.Posting {
-	return []models.Posting{
+func testPostings() []mail.Posting {
+	return []mail.Posting{
 		{
 			ID:        100,
 			Summary:   "Hello world",
-			CreatedAt: "2025-03-01T10:00:00Z",
+			CreatedAt: time.Date(2025, 3, 1, 10, 0, 0, 0, time.UTC),
 			Seen:      false,
-			Creator:   models.Contact{Name: "Alice"},
+			Creator:   mail.Contact{Name: "Alice"},
 		},
 		{
 			ID:        101,
 			Summary:   "Meeting notes",
-			CreatedAt: "2025-03-01T09:00:00Z",
+			CreatedAt: time.Date(2025, 3, 1, 9, 0, 0, 0, time.UTC),
 			Seen:      true,
-			Creator:   models.Contact{Name: "Bob"},
+			Creator:   mail.Contact{Name: "Bob"},
 		},
 	}
 }
@@ -118,8 +119,8 @@ func TestModelResizesContentWhenThreadHelpChangesHeight(t *testing.T) {
 			m := modelWithBoxes()
 			updated, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 30})
 			m = updated.(model)
-			m.mailView.activeRequestID = 7
-			m.mailView.activeRequestKind = mailRequestTopic
+			m.mailView.requests.id = 7
+			m.mailView.requests.kind = mailRequestTopic
 			updated, _ = m.Update(topicLoadedMsg{
 				requestID:   7,
 				boxID:       1,
@@ -144,11 +145,11 @@ func TestModelResizesContentWhenThreadHelpChangesHeight(t *testing.T) {
 // --- Box ordering ---
 
 func TestOrderBoxes(t *testing.T) {
-	boxes := []models.Box{
-		{ID: 1, Name: "The Feed"},
-		{ID: 2, Name: "Imbox"},
-		{ID: 3, Name: "Custom Box"},
-		{ID: 4, Name: "Paper Trail"},
+	boxes := []mail.Source{
+		{Kind: mail.KindBox, ID: 1, Name: "The Feed"},
+		{Kind: mail.KindBox, ID: 2, Name: "Imbox"},
+		{Kind: mail.KindBox, ID: 3, Name: "Custom Box"},
+		{Kind: mail.KindBox, ID: 4, Name: "Paper Trail"},
 	}
 	ordered := orderBoxes(boxes)
 	if ordered[0].Name != "Imbox" {
@@ -168,12 +169,12 @@ func TestOrderBoxes(t *testing.T) {
 // --- Navigation: Tab cycles focus rows ---
 
 func TestOrderBoxesPreservesFolderWithCollidingIDAndName(t *testing.T) {
-	boxes := []models.Box{
-		{ID: 1, Kind: hey.BoxKindImbox, Name: "Imbox"},
-		{ID: 1, Kind: mailSourceKindFolder, Name: "Imbox"},
+	boxes := []mail.Source{
+		{Kind: mail.KindBox, ID: 1, BoxKind: hey.BoxKindImbox, Name: "Imbox"},
+		{Kind: mail.KindFolder, ID: 1, Name: "Imbox"},
 	}
 	ordered := orderBoxes(boxes)
-	if len(ordered) != 2 || ordered[0].Kind != hey.BoxKindImbox || ordered[1].Kind != mailSourceKindFolder {
+	if len(ordered) != 2 || ordered[0].Kind != mail.KindBox || ordered[1].Kind != mail.KindFolder {
 		t.Errorf("ordered sources = %+v", ordered)
 	}
 	if index := boxForShortcut("1", ordered); index != 0 {
@@ -193,9 +194,9 @@ func TestFolderDiscoveryCompletesWhileAnotherSectionIsActive(t *testing.T) {
 
 	updated, cmd := m.Update(mailSourcesLoadedMsg{
 		requestID: 1,
-		sources: []models.Box{
-			{ID: 1, Kind: hey.BoxKindImbox, Name: "Imbox"},
-			{ID: 12, Kind: mailSourceKindFolder, Name: "Receipts"},
+		sources: []mail.Source{
+			{Kind: mail.KindBox, ID: 1, BoxKind: hey.BoxKindImbox, Name: "Imbox"},
+			{ID: 12, Kind: mail.KindFolder, Name: "Receipts"},
 		},
 	})
 	m = updated.(model)
@@ -211,33 +212,33 @@ func TestInactiveMailIgnoresStalePostingErrors(t *testing.T) {
 	m := newModel()
 	m.section = sectionCalendar
 	m.activeView = m.calendarView
-	m.mailView.boxes = []models.Box{{ID: 1, Kind: hey.BoxKindImbox, Name: "Imbox"}}
+	m.mailView.boxes = []mail.Source{{Kind: mail.KindBox, ID: 1, BoxKind: hey.BoxKindImbox, Name: "Imbox"}}
 	m.mailView.boxIndex = 0
-	m.mailView.activeRequestID = 2
-	m.mailView.activeRequestKind = mailRequestPostings
-	m.mailView.loading = true
+	m.mailView.requests.id = 2
+	m.mailView.requests.kind = mailRequestPostings
+	m.mailView.requests.loading = true
 	m.mailView.notice = "Current mail state"
 
 	updated, cmd := m.Update(postingsLoadedMsg{
 		requestID:  1,
 		boxID:      1,
-		sourceKind: hey.BoxKindImbox,
+		sourceKind: mail.KindBox,
 		err:        fmt.Errorf("stale failure"),
 	})
 	m = updated.(model)
-	if cmd != nil || m.mailView.notice != "Current mail state" || !m.mailView.loading || m.mailView.activeRequestID != 2 {
-		t.Errorf("stale error changed inactive Mail: notice=%q loading=%v request=%d", m.mailView.notice, m.mailView.loading, m.mailView.activeRequestID)
+	if cmd != nil || m.mailView.notice != "Current mail state" || !m.mailView.requests.loading || m.mailView.requests.id != 2 {
+		t.Errorf("stale error changed inactive Mail: notice=%q loading=%v request=%d", m.mailView.notice, m.mailView.requests.loading, m.mailView.requests.id)
 	}
 
 	updated, cmd = m.Update(postingsLoadedMsg{
 		requestID:  2,
 		boxID:      1,
-		sourceKind: hey.BoxKindImbox,
+		sourceKind: mail.KindBox,
 		err:        fmt.Errorf("current failure"),
 	})
 	m = updated.(model)
-	if cmd != nil || m.mailView.notice != "Could not load mail: current failure" || m.mailView.loading {
-		t.Errorf("current error state = notice:%q loading:%v", m.mailView.notice, m.mailView.loading)
+	if cmd != nil || m.mailView.notice != "Could not load mail: current failure" || m.mailView.requests.loading {
+		t.Errorf("current error state = notice:%q loading:%v", m.mailView.notice, m.mailView.requests.loading)
 	}
 }
 
@@ -310,7 +311,7 @@ func TestSingleCtrlCDoesNotQuit(t *testing.T) {
 func TestLoadingViewKeepsItsSectionUntilResponse(t *testing.T) {
 	m := modelWithBoxes()
 	m.loading = true
-	m.mailView.loading = true
+	m.mailView.requests.loading = true
 
 	updated, cmd := m.Update(keyPress("O"))
 	result := updated.(model)
@@ -347,7 +348,7 @@ func TestSectionNavigationIncludesContacts(t *testing.T) {
 func TestSubnavNavigationUpdatesHelpWhenItOpensLabels(t *testing.T) {
 	m := modelWithBoxes()
 	m.mailView.boxes = orderBoxes(append(m.mailView.boxes,
-		models.Box{ID: 12, Kind: mailSourceKindFolder, Name: "Receipts"},
+		mail.Source{ID: 12, Kind: mail.KindFolder, Name: "Receipts"},
 	))
 	m.mailView.boxIndex = len(m.mailView.tabBoxIndexes()) - 1
 	m.focus = rowSubnav
@@ -356,7 +357,7 @@ func TestSubnavNavigationUpdatesHelpWhenItOpensLabels(t *testing.T) {
 	updated, _ := m.Update(keyPress("right"))
 	m = updated.(model)
 
-	if m.mailView.labels == nil {
+	if labelsModal(m.mailView) == nil {
 		t.Fatal("right from the last mail tab should open Labels")
 	}
 	for _, want := range []helpBinding{{"↑/↓", "choose"}, {"enter", "open"}, {"esc", "cancel"}} {
@@ -384,39 +385,25 @@ func TestThreadHelpIncludesMailActions(t *testing.T) {
 	}
 }
 
-func TestCalendarDetailHelpOmitsListActions(t *testing.T) {
-	m := sizedModel()
-	m.section = sectionCalendar
-	m.activeView = m.calendarView
-	m.calendarView.inThread = true
-	m.updateHelpBindings()
-
-	for _, binding := range m.help.bindings {
-		if binding.key == "v" {
-			t.Errorf("calendar detail help advertises inactive view toggle: %v", m.help.bindings)
-		}
-	}
-}
-
 func TestMovePickerOwnsNavigationKeys(t *testing.T) {
 	m := modelWithBoxes()
 	m.focus = rowContent
 
 	updated, _ := m.Update(keyPress("m"))
 	m = updated.(model)
-	if m.mailView.movePicker == nil || !m.mailView.CapturingInput() {
+	if moveModal(m.mailView) == nil || !m.mailView.CapturingInput() {
 		t.Fatal("m should open the move picker")
 	}
 
 	updated, _ = m.Update(keyPress("tab"))
 	m = updated.(model)
-	if m.focus != rowContent || m.mailView.movePicker == nil {
+	if m.focus != rowContent || moveModal(m.mailView) == nil {
 		t.Error("tab should remain inside the move picker")
 	}
 
 	updated, _ = m.Update(keyPress("esc"))
 	m = updated.(model)
-	if m.mailView.movePicker != nil || m.mailView.CapturingInput() {
+	if moveModal(m.mailView) != nil || m.mailView.CapturingInput() {
 		t.Error("escape should close the move picker")
 	}
 }
@@ -427,19 +414,19 @@ func TestSearchFormOwnsNavigationKeys(t *testing.T) {
 
 	updated, _ := m.Update(keyPress("/"))
 	m = updated.(model)
-	if m.mailView.searchForm == nil || !m.mailView.CapturingInput() {
+	if searchModal(m.mailView) == nil || !m.mailView.CapturingInput() {
 		t.Fatal("/ should open the search form")
 	}
 
 	updated, _ = m.Update(keyPress("tab"))
 	m = updated.(model)
-	if m.focus != rowContent || m.mailView.searchForm == nil {
+	if m.focus != rowContent || searchModal(m.mailView) == nil {
 		t.Error("tab should remain inside the search form")
 	}
 
 	updated, _ = m.Update(keyPress("esc"))
 	m = updated.(model)
-	if m.mailView.searchForm != nil || m.mailView.CapturingInput() {
+	if searchModal(m.mailView) != nil || m.mailView.CapturingInput() {
 		t.Error("escape should close the search form")
 	}
 }
@@ -464,7 +451,7 @@ func TestEscCancelsPendingSearchResultAndPreservesResults(t *testing.T) {
 	m := modelWithBoxes()
 	m.mailView.searchActive = true
 	m.mailView.searchQuery = "quarterly planning"
-	m.mailView.searchList.setPostings([]models.Posting{{ID: 10, TopicID: 100, Name: "Hello world"}})
+	m.mailView.searchList.setPostings([]mail.Posting{{ID: 10, TopicID: 100, Name: "Hello world"}})
 	m.mailView.requestTopic(m.mailView.currentBoxID(), 100, 10, "Hello world")
 	m.loading = true
 
@@ -473,7 +460,7 @@ func TestEscCancelsPendingSearchResultAndPreservesResults(t *testing.T) {
 	if !result.mailView.searchActive || result.mailView.searchQuery != "quarterly planning" || len(result.mailView.searchList.postings) != 1 {
 		t.Error("escape during thread load should preserve search results")
 	}
-	if result.mailView.loading || result.loading {
+	if result.mailView.requests.loading || result.loading {
 		t.Error("escape should cancel the pending thread load")
 	}
 }
@@ -482,7 +469,7 @@ func TestQExitsSearchDuringPendingResult(t *testing.T) {
 	m := modelWithBoxes()
 	m.mailView.searchActive = true
 	m.mailView.searchQuery = "quarterly planning"
-	m.mailView.searchList.setPostings([]models.Posting{{ID: 10, TopicID: 100, Name: "Hello world"}})
+	m.mailView.searchList.setPostings([]mail.Posting{{ID: 10, TopicID: 100, Name: "Hello world"}})
 	m.mailView.requestTopic(m.mailView.currentBoxID(), 100, 10, "Hello world")
 	m.loading = true
 
@@ -491,7 +478,7 @@ func TestQExitsSearchDuringPendingResult(t *testing.T) {
 	if result.mailView.searchActive || len(result.mailView.searchList.postings) != 0 {
 		t.Error("q during thread load should exit search results")
 	}
-	if result.mailView.loading || result.loading {
+	if result.mailView.requests.loading || result.loading {
 		t.Error("q should cancel the pending thread load")
 	}
 }
@@ -526,13 +513,13 @@ func TestQExitsPendingReplyLoad(t *testing.T) {
 
 	updated, _ := m.Update(keyPress("r"))
 	m = updated.(model)
-	if !m.mailView.loading || !m.loading {
+	if !m.mailView.requests.loading || !m.loading {
 		t.Fatal("reply should start loading")
 	}
 
 	updated, _ = m.Update(keyPress("q"))
 	result := updated.(model)
-	if result.mailView.loading || result.loading {
+	if result.mailView.requests.loading || result.loading {
 		t.Error("q should stop a canceled reply load")
 	}
 }
@@ -542,17 +529,17 @@ func TestQExitsPendingReplyLoadFromPostingList(t *testing.T) {
 
 	updated, cmd := m.Update(keyPress("r"))
 	m = updated.(model)
-	if cmd == nil || !m.mailView.loading || !m.loading {
+	if cmd == nil || !m.mailView.requests.loading || !m.loading {
 		t.Fatal("reply from the posting list should start loading")
 	}
-	requestID := m.mailView.activeRequestID
+	requestID := m.mailView.requests.id
 
 	updated, _ = m.Update(keyPress("q"))
 	m = updated.(model)
-	if m.mailView.loading || m.loading {
+	if m.mailView.requests.loading || m.loading {
 		t.Error("q should stop a reply started from the posting list")
 	}
-	if m.mailView.activeRequestKind != mailRequestNone || m.mailView.requestCancel != nil {
+	if m.mailView.requests.kind != mailRequestNone || m.mailView.requests.requestCancel != nil {
 		t.Error("q should clear the pending reply request")
 	}
 
@@ -565,7 +552,7 @@ func TestQExitsPendingReplyLoadFromPostingList(t *testing.T) {
 		to:        []string{"jane@example.com"},
 	})
 	m = updated.(model)
-	if m.mailView.compose != nil {
+	if composeModal(m.mailView) != nil {
 		t.Error("a canceled reply load should not open the reply form")
 	}
 }
@@ -575,14 +562,14 @@ func TestQExitsPendingForwardLoadFromPostingList(t *testing.T) {
 
 	updated, cmd := m.Update(keyPress("f"))
 	m = updated.(model)
-	if cmd == nil || !m.mailView.loading || m.mailView.activeRequestKind != mailRequestForward {
+	if cmd == nil || !m.mailView.requests.loading || m.mailView.requests.kind != mailRequestForward {
 		t.Fatal("forward from the posting list should start loading")
 	}
-	requestID := m.mailView.activeRequestID
+	requestID := m.mailView.requests.id
 
 	updated, _ = m.Update(keyPress("q"))
 	m = updated.(model)
-	if m.mailView.loading || m.loading {
+	if m.mailView.requests.loading || m.loading {
 		t.Error("q should stop a forward started from the posting list")
 	}
 
@@ -595,7 +582,7 @@ func TestQExitsPendingForwardLoadFromPostingList(t *testing.T) {
 		content:   "<div>Hello world</div>",
 	})
 	m = updated.(model)
-	if m.mailView.compose != nil {
+	if composeModal(m.mailView) != nil {
 		t.Error("a canceled forward load should not open the forward form")
 	}
 }
@@ -649,9 +636,9 @@ func TestContentListSelectedPosting(t *testing.T) {
 }
 
 func TestContentListUsesRowsReleasedByScrolledOffHeader(t *testing.T) {
-	postings := make([]models.Posting, 5)
+	postings := make([]mail.Posting, 5)
 	for i := range postings {
-		postings[i] = models.Posting{ID: int64(i + 1), Name: fmt.Sprintf("Thread %d", i+1)}
+		postings[i] = mail.Posting{ID: int64(i + 1), Name: fmt.Sprintf("Thread %d", i+1)}
 	}
 
 	cl := &contentList{}
@@ -672,20 +659,37 @@ func TestContentListUsesRowsReleasedByScrolledOffHeader(t *testing.T) {
 	}
 }
 
+// HEY serves every timestamp in UTC — its JSON requests set Time.zone — so the day a row
+// shows is the reader's own day or the wrong one. A thread that arrived late in the
+// evening must not read as the day after.
+func TestFormatDisplayDateReadsTheDayInTheReadersZone(t *testing.T) {
+	lateEvening := time.Date(2026, 8, 20, 23, 30, 0, 0, time.Local)
+
+	if got := formatDisplayDate(lateEvening); got != "Aug 20, 2026" {
+		t.Errorf("date = %q, want Aug 20, 2026", got)
+	}
+	if got := formatDisplayDate(lateEvening.UTC()); got != "Aug 20, 2026" {
+		t.Errorf("the same instant as HEY serves it = %q, want Aug 20, 2026", got)
+	}
+	if got := formatDisplayDate(time.Time{}); got != "" {
+		t.Errorf("a posting with no timestamp = %q, want no date", got)
+	}
+}
+
 func TestContentListStylesSeenAndUnseenRows(t *testing.T) {
-	unseen := models.Posting{
+	unseen := mail.Posting{
 		ID:        200,
 		Name:      "Quarterly planning kickoff",
 		Summary:   "Draft agenda attached for review",
-		CreatedAt: "2026-08-20T10:00:00Z",
-		Creator:   models.Contact{Name: "Maria Gonzalez"},
+		CreatedAt: time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC),
+		Creator:   mail.Contact{Name: "Maria Gonzalez"},
 	}
 	seen := unseen
 	seen.ID = 201
 	seen.Seen = true
 
 	cl := &contentList{}
-	cl.setPostings([]models.Posting{{ID: 199, Name: "Cursor row", CreatedAt: "2026-08-20T09:00:00Z"}, unseen, seen})
+	cl.setPostings([]mail.Posting{{ID: 199, Name: "Cursor row", CreatedAt: time.Date(2026, 8, 20, 9, 0, 0, 0, time.UTC)}, unseen, seen})
 	cl.setSize(100, 20)
 
 	lines := strings.Split(cl.view(), "\n")
@@ -722,10 +726,10 @@ func TestContentListStylesSeenAndUnseenRows(t *testing.T) {
 
 func TestContentListMovesSeenPostingToItsSection(t *testing.T) {
 	cl := &contentList{}
-	cl.setPostings([]models.Posting{
-		{ID: 1, Name: "Weekly release notes", CreatedAt: "2026-08-20T10:00:00Z"},
-		{ID: 2, Name: "Invoice for July hosting", CreatedAt: "2026-08-20T09:00:00Z"},
-		{ID: 3, Name: "Standup notes", CreatedAt: "2026-08-19T10:00:00Z", Seen: true},
+	cl.setPostings([]mail.Posting{
+		{ID: 1, Name: "Weekly release notes", CreatedAt: time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)},
+		{ID: 2, Name: "Invoice for July hosting", CreatedAt: time.Date(2026, 8, 20, 9, 0, 0, 0, time.UTC)},
+		{ID: 3, Name: "Standup notes", CreatedAt: time.Date(2026, 8, 19, 10, 0, 0, 0, time.UTC), Seen: true},
 	})
 	cl.setSize(80, 20)
 
@@ -742,10 +746,10 @@ func TestContentListMovesSeenPostingToItsSection(t *testing.T) {
 
 func TestContentListOpensWithTheBubbledUpSection(t *testing.T) {
 	cl := &contentList{}
-	cl.setPostings([]models.Posting{
-		{ID: 1, Name: "Weekly release notes", CreatedAt: "2026-08-20T10:00:00Z"},
-		{ID: 2, Name: "Standup notes", CreatedAt: "2026-08-19T10:00:00Z", Seen: true},
-		{ID: 3, Name: "Invoice for July hosting", CreatedAt: "2026-08-18T09:00:00Z", BubbledUp: true},
+	cl.setPostings([]mail.Posting{
+		{ID: 1, Name: "Weekly release notes", CreatedAt: time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)},
+		{ID: 2, Name: "Standup notes", CreatedAt: time.Date(2026, 8, 19, 10, 0, 0, 0, time.UTC), Seen: true},
+		{ID: 3, Name: "Invoice for July hosting", CreatedAt: time.Date(2026, 8, 18, 9, 0, 0, 0, time.UTC), BubbledUp: true},
 	})
 	cl.setSize(80, 20)
 
@@ -767,9 +771,9 @@ func TestContentListOpensWithTheBubbledUpSection(t *testing.T) {
 
 func TestContentListMovesSeenBubbledUpPostingToItsSection(t *testing.T) {
 	cl := &contentList{}
-	cl.setPostings([]models.Posting{
-		{ID: 1, Name: "Invoice for July hosting", CreatedAt: "2026-08-20T10:00:00Z", BubbledUp: true},
-		{ID: 2, Name: "Weekly release notes", CreatedAt: "2026-08-19T10:00:00Z"},
+	cl.setPostings([]mail.Posting{
+		{ID: 1, Name: "Invoice for July hosting", CreatedAt: time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC), BubbledUp: true},
+		{ID: 2, Name: "Weekly release notes", CreatedAt: time.Date(2026, 8, 19, 10, 0, 0, 0, time.UTC)},
 	})
 	cl.setSize(80, 20)
 
@@ -787,24 +791,24 @@ func TestContentListMovesSeenBubbledUpPostingToItsSection(t *testing.T) {
 }
 
 func TestContentListAlignsDateColumn(t *testing.T) {
-	long := models.Posting{
+	long := mail.Posting{
 		ID:        300,
 		Name:      strings.Repeat("Quarterly planning update for the leadership group ", 3),
 		Summary:   strings.Repeat("Agenda items and pre-reads for the quarterly review ", 3),
-		CreatedAt: "2026-08-20T10:00:00Z",
-		Creator:   models.Contact{Name: "Maria Gonzalez"},
+		CreatedAt: time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC),
+		Creator:   mail.Contact{Name: "Maria Gonzalez"},
 	}
-	short := models.Posting{
+	short := mail.Posting{
 		ID:        301,
 		Name:      "Lunch on Friday?",
 		Summary:   "Trattoria at noon",
-		CreatedAt: "2026-08-04T09:00:00Z",
+		CreatedAt: time.Date(2026, 8, 4, 9, 0, 0, 0, time.UTC),
 		Seen:      true,
-		Creator:   models.Contact{Name: "Ana Lucia Ortiz"},
+		Creator:   mail.Contact{Name: "Ana Lucia Ortiz"},
 	}
 
 	cl := &contentList{}
-	cl.setPostings([]models.Posting{long, short})
+	cl.setPostings([]mail.Posting{long, short})
 	cl.setSize(60, 20)
 
 	// Lines: 0 "New for You", 1-2 long row, 3 "Previously Seen", 4-5 short row.

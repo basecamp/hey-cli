@@ -7,23 +7,17 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/basecamp/hey-cli/internal/models"
+	"github.com/basecamp/hey-cli/internal/mail"
 )
 
-// formatDisplayDate converts an ISO timestamp to "Nov 24, 2025" format.
-func formatDisplayDate(ts string) string {
-	if len(ts) < 10 {
-		return ts
+// formatDisplayDate renders a timestamp as "Nov 24, 2025" in the reader's own zone, which
+// is the only zone the day is right in: a thread that arrived at 23:30 UTC belongs to the
+// next day east of it.
+func formatDisplayDate(ts time.Time) string {
+	if ts.IsZero() {
+		return ""
 	}
-	t, err := time.Parse("2006-01-02", ts[:10])
-	if err != nil {
-		// Try full ISO format
-		t, err = time.Parse("2006-01-02T15:04:05Z", ts)
-		if err != nil {
-			return ts[:10]
-		}
-	}
-	return t.Format("Jan 2, 2006")
+	return ts.Local().Format("Jan 2, 2006")
 }
 
 // listPaging is where a list that grows as the reader scrolls keeps its place in what the
@@ -82,9 +76,13 @@ func (p *listPaging) hasMore() bool {
 // rather than after the cursor has already stopped against the end.
 const loadMoreThreshold = 5
 
+// noSelection is the cursor of a list with nothing the reader can reach: every row is
+// under the cover, so there is nothing to open, act on or select.
+const noSelection = -1
+
 // contentList renders a scrollable list of postings with a cursor.
 type contentList struct {
-	postings      []models.Posting
+	postings      []mail.Posting
 	cursor        int
 	scrollOff     int
 	width         int
@@ -98,10 +96,12 @@ type contentList struct {
 }
 
 // setCover puts art over Previously Seen. Setting it closes the cover, so a box
-// arrives covered rather than however the last one was left.
+// arrives covered rather than however the last one was left, and whatever the
+// cursor and the selection were on goes out from under the art with it.
 func (c *contentList) setCover(preset coverPreset) {
 	c.cover = preset
 	c.coverPeeked = false
+	c.settleCover()
 }
 
 // toggleCoverPeek lifts the cover off Previously Seen, or puts it back.
@@ -154,14 +154,22 @@ func (c *contentList) dropCoveredSelection() {
 	}
 }
 
+// clampCursor keeps the cursor on a row the reader can reach. With everything under the
+// cover there is no such row, and the cursor says so rather than resting on the first
+// hidden posting.
 func (c *contentList) clampCursor() {
-	last := max(c.itemCount()-1, 0)
-	c.cursor = min(c.cursor, last)
+	if c.itemCount() == 0 {
+		c.cursor = noSelection
+		c.scrollOff = 0
+		return
+	}
+	last := c.itemCount() - 1
+	c.cursor = min(max(c.cursor, 0), last)
 	c.scrollOff = min(c.scrollOff, last)
 	c.ensureVisible()
 }
 
-func (c *contentList) setPostings(postings []models.Posting) {
+func (c *contentList) setPostings(postings []mail.Posting) {
 	if !c.hideSeenState {
 		postings = partitionSections(postings)
 	}
@@ -169,12 +177,13 @@ func (c *contentList) setPostings(postings []models.Posting) {
 	c.cursor = 0
 	c.scrollOff = 0
 	c.clearSelected()
+	c.clampCursor()
 }
 
 // growPostings adds the page after the one at the bottom of the list. A posting the list
 // already shows is dropped rather than added again: a thread that sank in the ordering
 // between two reads would otherwise arrive on two pages.
-func (c *contentList) growPostings(more []models.Posting) {
+func (c *contentList) growPostings(more []mail.Posting) {
 	grown := c.postings
 	shown := postingIDs(c.postings)
 	for _, posting := range more {
@@ -189,9 +198,9 @@ func (c *contentList) growPostings(more []models.Posting) {
 // the reader scrolled down to as they were read. headIDs is what the top page held the
 // last time it was read, so a thread that has since left it goes with it rather than
 // sinking into the list below.
-func (c *contentList) refreshHead(head []models.Posting, headIDs map[int64]struct{}) {
+func (c *contentList) refreshHead(head []mail.Posting, headIDs map[int64]struct{}) {
 	fresh := postingIDs(head)
-	refreshed := append([]models.Posting(nil), head...)
+	refreshed := append([]mail.Posting(nil), head...)
 	for _, posting := range c.postings {
 		_, wasInHead := headIDs[posting.ID]
 		_, isInHead := fresh[posting.ID]
@@ -202,7 +211,7 @@ func (c *contentList) refreshHead(head []models.Posting, headIDs map[int64]struc
 	c.keepPlaceIn(refreshed)
 }
 
-func postingIDs(postings []models.Posting) map[int64]struct{} {
+func postingIDs(postings []mail.Posting) map[int64]struct{} {
 	ids := make(map[int64]struct{}, len(postings))
 	for _, posting := range postings {
 		ids[posting.ID] = struct{}{}
@@ -214,7 +223,7 @@ func postingIDs(postings []models.Posting) map[int64]struct{} {
 // at it, so the reader keeps their place: the cursor stays on the posting it was on, the
 // window stays where it was scrolled to, and a multi-selection keeps every row that is
 // still there. A posting that left the box takes the cursor or its selection with it.
-func (c *contentList) keepPlaceIn(postings []models.Posting) {
+func (c *contentList) keepPlaceIn(postings []mail.Posting) {
 	if !c.hideSeenState {
 		postings = partitionSections(postings)
 	}
@@ -263,7 +272,7 @@ const (
 
 var postingSections = []postingSection{sectionBubbledUp, sectionNewForYou, sectionPreviouslySeen}
 
-func sectionOf(p models.Posting) postingSection {
+func sectionOf(p mail.Posting) postingSection {
 	switch {
 	case p.BubbledUp:
 		return sectionBubbledUp
@@ -287,8 +296,8 @@ func (s postingSection) label() string {
 
 // partitionSections groups postings by section, keeping the relative order
 // inside each group.
-func partitionSections(postings []models.Posting) []models.Posting {
-	ordered := make([]models.Posting, 0, len(postings))
+func partitionSections(postings []mail.Posting) []mail.Posting {
+	ordered := make([]mail.Posting, 0, len(postings))
 	for _, section := range postingSections {
 		for _, p := range postings {
 			if sectionOf(p) == section {
@@ -390,6 +399,13 @@ func (c *contentList) sectionLabelAt(index int) string {
 // hasRowsBelow reports whether the list carries on past the bottom of the window. A list
 // that does not is a list the reader can see the end of, which is a reason to read the page
 // below it without waiting to be asked.
+//
+// Rows under the cover count. They are not rows the reader can scroll into, but a covered
+// Imbox that has run out of unseen threads has nothing worth reading on for: the box is
+// ordered by seen first (haystack's `render_box` sorts `[ :seen, observed_at: :desc ]`), so
+// every posting after the first seen one is seen too. Counting only what the reader can
+// reach makes such a list read the box to its end a page at a time, each page landing
+// entirely under the art and asking for the next.
 func (c *contentList) hasRowsBelow() bool {
 	return c.scrollOff+c.visibleItemsFrom(c.scrollOff) < len(c.postings)
 }
@@ -416,8 +432,11 @@ func (c *contentList) ensureVisible() {
 	c.scrollOff = start
 }
 
-func (c *contentList) selectedPosting() *models.Posting {
-	if c.cursor < 0 || c.cursor >= len(c.postings) {
+// selectedPosting is the posting under the cursor, or nil when the cursor is on nothing the
+// reader can reach. What is under the cover is not on screen, so it is not what a key press
+// means either.
+func (c *contentList) selectedPosting() *mail.Posting {
+	if c.cursor < 0 || c.cursor >= c.itemCount() {
 		return nil
 	}
 	return &c.postings[c.cursor]
@@ -439,9 +458,11 @@ func (c *contentList) toggleSelected() bool {
 	return true
 }
 
+// selectedIDs is what a bulk action aims at: the selected postings the reader can reach.
+// A thread that went under the cover between the selection and the action goes with it.
 func (c *contentList) selectedIDs() []int64 {
 	ids := make([]int64, 0, len(c.selected))
-	for _, posting := range c.postings {
+	for _, posting := range c.postings[:c.itemCount()] {
 		if _, exists := c.selected[posting.ID]; exists {
 			ids = append(ids, posting.ID)
 		}
@@ -531,9 +552,6 @@ func (c *contentList) view() string {
 
 		// Subject: Posting.Name is the thread title, Summary is the last message excerpt
 		subject := p.Name
-		if subject == "" && p.Topic != nil {
-			subject = p.Topic.Name
-		}
 		if subject == "" {
 			subject = p.Summary
 		}

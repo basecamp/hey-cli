@@ -198,8 +198,8 @@ func finishHabitMutation(t *testing.T, view *calendarView, cmd tea.Cmd) {
 		t.Fatalf("mutation update = consumed:%v refresh:%v", consumed, refresh)
 	}
 	view.Update(refresh())
-	if view.loading || view.habitMutating {
-		t.Errorf("mutation did not finish: loading=%v mutating=%v", view.loading, view.habitMutating)
+	if view.requests.loading || view.requests.kind != calendarRequestNone {
+		t.Errorf("mutation did not finish: loading=%v kind=%v", view.requests.loading, view.requests.kind)
 	}
 }
 
@@ -211,7 +211,7 @@ func TestCalendarHabitCreateMutationAndRefresh(t *testing.T) {
 	view.habitForm.inputs[habitFieldColor].SetValue("green")
 	view.habitForm.inputs[habitFieldDays].SetValue("Mon,Wed,Fri")
 	cmd := view.HandleContentKey(keyPress("ctrl+s"))
-	if cmd == nil || !view.habitMutating {
+	if cmd == nil || view.requests.kind != calendarRequestHabitMutation {
 		t.Fatal("ctrl+s should start habit creation")
 	}
 	finishHabitMutation(t, view, cmd)
@@ -274,8 +274,8 @@ func TestCalendarHabitSaveFailuresUnlockAndPreserveFormValues(t *testing.T) {
 			if !consumed || refresh != nil {
 				t.Fatalf("failed mutation update = consumed:%v refresh:%v", consumed, refresh)
 			}
-			if view.habitForm == nil || view.habitForm.saving || view.habitMutating || view.loading {
-				t.Fatalf("failed save state = form:%v saving:%v mutating:%v loading:%v", view.habitForm, view.habitForm != nil && view.habitForm.saving, view.habitMutating, view.loading)
+			if view.habitForm == nil || view.habitForm.saving || view.requests.loading || view.requests.kind != calendarRequestNone {
+				t.Fatalf("failed save state = form:%v saving:%v kind:%v loading:%v", view.habitForm, view.habitForm != nil && view.habitForm.saving, view.requests.kind, view.requests.loading)
 			}
 			if !strings.Contains(view.habitForm.status, "Save failed") {
 				t.Errorf("status = %q", view.habitForm.status)
@@ -301,8 +301,8 @@ func TestCalendarHabitDeleteFailurePreservesConfirmationAndSelection(t *testing.
 	if !consumed || refresh != nil {
 		t.Fatalf("failed delete update = consumed:%v refresh:%v", consumed, refresh)
 	}
-	if !view.habitDeleteConfirmed() || view.habitMutating || view.loading {
-		t.Errorf("failed delete state = confirmed ID:%d mutating:%v loading:%v", view.confirmedHabitDeleteID, view.habitMutating, view.loading)
+	if !view.habitDeleteConfirmed() || view.requests.loading || view.requests.kind != calendarRequestNone {
+		t.Errorf("failed delete state = confirmed ID:%d kind:%v loading:%v", view.confirmedHabitDeleteID, view.requests.kind, view.requests.loading)
 	}
 	if current := view.selectedHabit(); current == nil || selected == nil || current.ID != selected.ID || view.habitIndex != 0 {
 		t.Errorf("selection changed after delete failure: before=%+v after=%+v index=%d", selected, current, view.habitIndex)
@@ -336,7 +336,7 @@ func TestCalendarHabitDeleteRequiresConfirmationAndRefresh(t *testing.T) {
 		t.Fatalf("first x = cmd:%v confirmed ID:%d notice:%q", cmd, view.confirmedHabitDeleteID, view.notice)
 	}
 	cmd := view.HandleContentKey(keyPress("x"))
-	if cmd == nil || !view.habitMutating {
+	if cmd == nil || view.requests.kind != calendarRequestHabitMutation {
 		t.Fatal("second x should start deletion")
 	}
 	finishHabitMutation(t, view, cmd)

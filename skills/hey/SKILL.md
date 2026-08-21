@@ -22,9 +22,14 @@ triggers:
   - hey share
   - hey unshare
   - hey reply
+  - hey bulk-reply
   - hey forward
   - hey compose
   - hey drafts
+  - hey screener
+  - screen a sender
+  - approve a sender
+  - deny a sender
   # Calendar actions
   - hey calendars
   - hey recordings
@@ -122,6 +127,17 @@ hey search "quarterly planning" --jq '.data[].id'
 hey boxes --quiet --jq '.[].name'
 ```
 
+An empty result is an empty array rather than `null`, so `.data[]` is safe to run against a
+listing that found nothing.
+
+For the two commonest shapes there is no need for an expression at all: `--ids-only` prints
+one ID per line and `--count` prints a bare number, both on stdout with any pagination
+notice on stderr. Both need list data, so they work on `hey boxes`, `hey box`,
+`hey labels`, `hey label`, `hey collections`, `hey collection`, `hey drafts`, `hey search`,
+`hey contacts list`, `hey screener list`, `hey screener history`, `hey calendars`,
+`hey recordings`, `hey todo list`, `hey timetrack list`, `hey journal list` and
+`hey attachments`. On `hey box` they count and list its postings, not the box itself.
+
 ## Quick Reference
 
 | Task | Command |
@@ -160,15 +176,23 @@ hey boxes --quiet --jq '.[].name'
 | Read email thread | `hey threads <topic_id> --json` |
 | Get a sharing link | `hey share <thread_id>` |
 | Turn off a sharing link | `hey unshare <thread_id>` |
-| Reply to email | `hey reply <topic_id> -m "Thanks!"` |
+| Reply to email | `hey reply <topic_id> -m "Friday works for me."` |
 | Forward email | `hey forward <topic_id> --to alice@example.com -m "For your review"` |
-| Compose email | `hey compose --to user@example.com --subject "Hello"` |
-| Compose with CC/BCC | `hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Hello"` |
+| Compose email | `hey compose --to alice@example.com --subject "Lunch plans" -m "Are you free Friday?"` |
+| Compose with CC/BCC | `hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Kitchen remodel timeline"` |
 | List drafts | `hey drafts --json` |
+| Who is waiting in The Screener | `hey screener list --json` (clearance IDs) |
+| Number waiting | `hey screener list --count` |
+| Let a sender through | `hey screener approve <clearance_id>` |
+| Turn a sender away | `hey screener deny <clearance_id>` |
+| Who was already screened | `hey screener history --json` |
+| Preview a bulk reply | `hey bulk-reply preview <id> <id> --json` |
+| Send a bulk reply | `hey bulk-reply send <id> <id> -m "Thanks for the update."` |
+| Recall a bulk reply | `hey bulk-reply undo <delivery_id>` |
 | List calendars | `hey calendars --json` |
 | List calendar events | `hey recordings 123 --json` |
 | List todos | `hey todo list --json` |
-| Add todo | `hey todo add "Buy milk"` |
+| Add todo | `hey todo add "Draft the quarterly report"` |
 | Complete todo | `hey todo complete 123` |
 | Uncomplete todo | `hey todo uncomplete 123` |
 | Delete todo | `hey todo delete 123` |
@@ -190,15 +214,15 @@ hey boxes --quiet --jq '.[].name'
 | Stop time tracking | `hey timetrack stop` |
 | Current timer | `hey timetrack current --json` |
 | List time entries | `hey timetrack list --json` |
-| Export completed time entries | `hey timetrack export > tracked-time.csv` |
+| Export completed time entries | `hey timetrack export > tracked-time.csv` (`--json` etc. need `--output`) |
 | Save a time tracking export | `hey timetrack export --output tracked-time.csv --json` |
 | List time track categories | `hey timetrack categories --json` |
 | Create time track category | `hey timetrack category create "Client work"` |
 | List journal entries | `hey journal list --json` |
 | Read journal entry | `hey journal read 2024-03-15 --json` |
-| Write journal entry | `hey journal write "Today was great"` |
+| Write journal entry | `hey journal write "Shipped the pagination fix."` (empty content removes the entry) |
 | Check auth status | `hey auth status` |
-| Print access token | `hey auth token` |
+| Print bearer token | `hey auth token` (refuses a `--cookie` login) |
 | Launch TUI | `hey tui` (Ctrl+A switches linked mail accounts) |
 
 ## Decision Trees
@@ -226,6 +250,8 @@ Want to read email?
 ├── Mark as spam? → hey spam <id>
 ├── Ignore future activity? → hey ignore <id>
 ├── Stop ignoring? → hey stop-ignoring <id>
+├── Who is waiting to be screened? → hey screener list --json
+├── Screen a sender in or out? → hey screener approve|deny <clearance_id>
 └── Launch interactive UI? → hey tui
 ```
 
@@ -236,6 +262,8 @@ Want to send email?
 ├── Reply to thread? → hey reply <topic_id> -m "message"
 │   ├── Open editor? → hey reply <topic_id> (omit -m to open $EDITOR)
 │   └── Attach files? → add --attach ./report.pdf (repeatable)
+├── Reply to many threads at once? → hey bulk-reply preview <id>... first, then send
+│   └── Sent by mistake? → hey bulk-reply undo <delivery_id> (while the window is open)
 ├── Forward latest message? → hey forward <topic_id> --to <email>
 │   └── Add a note? → add -m "note"
 ├── Compose new? → hey compose --to <email> --subject "Subject"
@@ -267,11 +295,16 @@ Want to manage todos?
 hey boxes --json                              # List all mailboxes
 hey box imbox --json                          # List emails in Imbox (by name)
 hey box 123 --json                            # List emails in box (by ID)
+hey box imbox --page next-cursor --json       # Continue from an earlier listing
 ```
 
 Box names: `imbox`, `feedbox`, `trailbox`, `asidebox`, `laterbox`, `bubblebox`
 
-**Response format:** `hey box` returns `{"box": {...}, "postings": [...]}`. The `postings` array is the API representation of the email threads in that box. Each item has: `id` (box item ID), `topic_id` (thread ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`. Use `id` for `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring`. Use `topic_id` for `hey threads`, `hey reply`, and `hey forward`.
+**Response format:** `hey box --json` returns the box itself — `id`, `kind`, `name`, `app_url`, `next_history_url`, `next_page` — with a `postings` array of the email threads in it. Each posting has: `id` (box item ID), `topic_id` (thread ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`, `visible_entry_count`. Use `id` for `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring`, and `topic_id` for `hey threads`, `hey reply`, `hey forward`, `hey share` and `hey attachments`. A box item `id` passed to `hey threads` answers `not_found`, and so does a `topic_id` passed to `hey move`.
+
+`next_page` is the cursor `--page` takes, and it is the cursor inside `next_history_url` — `--page` accepts either. `--all` reads to the end instead.
+
+`--ids-only` and `--count` work here too, and answer for the postings: one box item ID per line, or how many threads were read.
 
 ### Email - Labels
 
@@ -304,11 +337,13 @@ Collection IDs come from `hey collections`. `hey collection` returns posting `id
 ```bash
 hey search "quarterly planning" --json         # Free-text search
 hey search --from jane@example.com --date last_30_days --json  # Refined search
-hey search --subject invoice --attachment pdf --all --json     # Search up to 100 pages
+hey search --subject invoice --attachment pdfs --all --json    # Search up to 100 pages
 hey search filters --json                      # Available box, date, label, and attachment values
 ```
 
 Search refinements are `--required`, `--any`, `--none`, `--exact`, `--from`, `--to`, `--subject`, `--date`, `--in`, `--label`, and `--attachment`. `--page` selects one result page; `--all` fetches up to 100 pages from that point onward. When the cap is reached, the response notice provides the next `--page` value for continuation.
+
+`--in`, `--date`, `--label` and `--attachment` accept only the values `hey search filters` lists: boxes are `imbox`, `feed`, `papertrail`, `trash`; dates are `last_7_days`, `last_30_days`, `last_90_days` or a four-digit year; attachment kinds are `any`, `images`, `pdfs`, `calendar_invites`, `documents`, `spreadsheets`, `presentations`, `media`, `zip_files`. The kinds are plural — `--attachment pdfs`, not `pdf`. An unrecognized `--in`, `--date` or `--attachment` is refused as a usage error naming the values it accepts, before anything is sent; `--label` is not checked, so read `hey search filters` when unsure of a label.
 
 **Response format:** `data` contains one item per matching thread. Each result has `id` (box item ID for organization actions), `topic_id` (thread ID for `hey threads`, `hey reply`, and `hey forward`), `subject`, `updated_at`, and `messages` containing the matching message IDs, senders, dates, and summaries. A result can omit `id` when the thread has no active box item.
 
@@ -345,9 +380,17 @@ hey share <thread_id>                         # Get a sharing link
 hey unshare <thread_id>                       # Turn off the sharing link
 ```
 
+`hey threads` returns every entry in the thread, oldest first. Each entry's `body` is
+**Markdown**, converted from HEY's Trix HTML at the edge, so headings, lists, quotes,
+tables and code survive and links keep their URLs — read it as structure rather than as
+flattened text. `--html` returns the original HTML instead. There is no `recipients` field
+on an entry; use `hey reply`, which works the addressing out itself.
+
 `hey share` returns a URL that shows the entire thread and future emails or replies sent to it. Anyone with the link can open it. `hey unshare` turns off the sharing link.
 
-**ID note:** Every email thread returned by `hey box`, `hey label`, or `hey collection` has an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring` expect `id`. `hey threads`, `hey share`, `hey unshare`, `hey attachments`, `hey reply`, `hey forward`, `hey collection add`, and `hey collection remove` expect `topic_id`. The `app_url` field also contains the thread ID as a fallback (e.g. `https://app.hey.com/topics/123` → `123`).
+**ID note:** Every email thread has two IDs: an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring` expect `id`. `hey threads`, `hey share`, `hey unshare`, `hey attachments`, `hey reply`, `hey forward`, `hey collection add`, and `hey collection remove` expect `topic_id`. Passing the wrong one answers `not_found`, not a redirect.
+
+`hey box --json`, `hey label --json`, `hey collection --json` and `hey search --json` all carry both.
 
 ### Email - Attachments
 
@@ -363,18 +406,62 @@ An attachment ID combines its message ID and position, so `67890:1` identifies t
 ### Email - Reply, Forward & Compose
 
 ```bash
-hey reply <topic_id> -m "Thanks!"             # Reply with inline message
+hey reply <topic_id> -m "Friday works for me — I'll send an agenda."  # Inline message
 hey reply <topic_id>                          # Reply via $EDITOR
-hey reply <topic_id> -m "Attached." --attach ./diagram.png
+hey reply <topic_id> -m "Here is the wiring diagram." --attach ./diagram.png
 hey forward <topic_id> --to alice@example.com                 # Forward the latest message
-hey forward <topic_id> --to alice@example.com -m "Please review"  # Forward with a note
-hey compose --to user@example.com --subject "Hello"         # Compose new (opens $EDITOR)
-hey compose --to user@example.com --subject "Hi" -m "Body"  # With inline body
-hey compose --to user@example.com --subject "Report" --attach ./report.pdf  # Attachment-only message
-hey compose --to user@example.com --subject "Report" -m "Attached." --attach ./report.pdf --attach ./chart.png
-hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Project update" -m "Body"  # With CC/BCC
-hey compose --thread-id 12345 -m "msg"                       # Reply to an existing thread (no subject: it carries the thread's)
+hey forward <topic_id> --to alice@example.com -m "Please review before Thursday."
+hey compose --to alice@example.com --subject "Lunch plans"    # Body from $EDITOR
+hey compose --to alice@example.com --subject "Lunch plans" -m "Are you free Friday?"
+hey compose --to alice@example.com --subject "Q3 revenue report" --attach ./report.pdf  # Attachment-only message
+hey compose --to alice@example.com --subject "Q3 revenue report" -m "The numbers are attached." --attach ./report.pdf --attach ./chart.png
+hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Kitchen remodel timeline" -m "Cabinets land the week of the 14th."
+hey compose --thread-id 12345 -m "Confirmed — see you then."  # Reply into an existing thread (no subject: it carries the thread's)
 ```
+
+`hey reply` answers the thread's **latest** entry. HEY addresses the reply the way its own
+web app does: everyone that entry was addressed to, plus whoever wrote it, on the To line.
+A reply HEY cannot address is saved as a draft rather than sent, so the command fails
+rather than guessing when it cannot work out the recipients.
+
+### Email - The Screener
+
+```bash
+hey screener list --json                      # Who is waiting to be screened
+hey screener list --count                     # Just the number waiting (cheap)
+hey screener approve 91                       # Let a sender through, into the Imbox
+hey screener approve 91 --box "The Feed"      # Let them through, into another box
+hey screener approve 91 --seen                # Deliver what they sent, already read
+hey screener deny 91 92                       # Turn several senders away
+hey screener deny 91 --spam                   # Turn away and train the spam filter
+hey screener history --json                   # Who has already been decided
+hey screener clear                            # Empty the queue without deciding
+```
+
+The Screener is where first-time senders wait. `hey screener list` returns **clearance
+IDs** — not contact IDs and not posting IDs — with the sender, what they sent, and a
+`topic_id` for reading the thread before deciding. `--count` is a far cheaper request than
+the queue and prints a bare number.
+
+Approving delivers everything that sender has waiting; denying hides it. Either is
+reversible with the opposite command. `--box` and `--seen` apply to one sender at a time;
+several IDs go through HEY's bulk endpoint, which takes neither. `--spam` also trains HEY's
+filter, which is harder to undo than a plain deny. `hey screener clear` decides nothing —
+those senders are asked about again on their next email.
+
+### Email - Bulk reply
+
+```bash
+hey bulk-reply preview 12345 67890 --json     # Read-only: threads and exact recipients
+hey bulk-reply send 12345 67890 -m "Thanks for the update — noted."
+hey bulk-reply undo 98765                     # Recall a delayed bulk reply
+```
+
+Takes posting IDs, which must be positive and unique. **Always run `preview` first** — it
+resolves each posting to the entry a reply would answer and shows the exact To/CC/BCC, so
+the blast radius is visible before anything sends. `send` resolves the selection again and
+skips threads with no replyable entry, then returns the reply count, delivery ID, delayed
+state, undo URL and undo command. `undo` works only while HEY's undo window is open.
 
 ### Email - Seen/Unseen
 
@@ -452,20 +539,29 @@ hey drafts --json                             # List drafts
 
 ```bash
 hey calendars --json                          # List calendars (returns array of {id, name, kind})
-hey recordings 123 --json                     # List events in calendar
+hey recordings 123 --json                     # List events in calendar, from today onward
+hey recordings 123 --starts-on 2026-01-01 --ends-on 2026-01-31 --json
 ```
 
-**Response format:** `hey recordings` returns recordings grouped by type (e.g. `{"Calendar::Event": [...], "Calendar::Habit": [...], "Calendar::Todo": [...]}`). Each recording has: `id`, `title`, `starts_at`, `ends_at`, `all_day`, `recurring`, `starts_at_time_zone`. Access a type with the built-in filter, e.g. `hey recordings 123 --quiet --jq '.["Calendar::Event"]'`.
+`--starts-on` defaults to today, `--ends-on` to thirty days after it. Both want
+`YYYY-MM-DD`; an unreadable date, or an `--ends-on` before `--starts-on`, is a usage error
+rather than an empty result.
+
+**Response format:** `hey recordings` returns recordings grouped by type (e.g. `{"Calendar::Event": [...], "Calendar::Habit": [...], "Calendar::Todo": [...]}`). Each recording has: `id`, `title`, `starts_at`, `ends_at`, `all_day`, `recurring`, `starts_at_time_zone`. Access a type with the built-in filter, e.g. `hey recordings 123 --quiet --jq '.["Calendar::Event"]'`. `--count` and `--ids-only` read across every type, with the types in name order.
 
 ### Todos
 
 ```bash
 hey todo list --json                          # List all todos
-hey todo add "Task description"                        # Add a todo
+hey todo add "Draft the quarterly report"     # Add a todo
+hey todo add "Book the venue" --date 2026-09-04  # With a due date
 hey todo complete 123                         # Mark complete
 hey todo uncomplete 123                       # Mark incomplete
 hey todo delete 123                           # Delete a todo
 ```
+
+Todo IDs must be positive; `hey todo complete 0` or a negative ID is a usage error rather
+than a request. `--date` wants `YYYY-MM-DD` and is validated before the request.
 
 ### Habits
 
@@ -476,7 +572,7 @@ hey habit edit 123 --name "Evening walk"      # Omitted fields remain unchanged
 hey habit edit 123 --days 0,6                 # Sunday and Saturday
 hey habit delete 123                          # Permanently delete habit and history
 hey habit complete 123                        # Mark habit complete for today
-hey habit complete 123 --date 2024-01-15      # Mark complete for specific date
+hey habit complete 123 --date 2026-03-15      # Mark complete for specific date
 hey habit uncomplete 123                      # Unmark habit for today
 ```
 
@@ -490,21 +586,32 @@ hey timetrack stop                            # Stop timer
 hey timetrack current --json                  # Show current timer
 hey timetrack list --json                     # List time entries
 hey timetrack export > tracked-time.csv        # Write the complete CSV export
-hey timetrack export -o tracked-time.csv       # Safely save the CSV to a file
+hey timetrack export -o tracked-time.csv --json # Save the CSV, return file metadata
 hey timetrack categories --json               # List categories
 hey timetrack category create "Client work"   # Create a category
 hey timetrack category rename 123 "Planning"  # Rename a category
 hey timetrack category delete 123              # Delete a category
 ```
 
+Without `--output`, `hey timetrack export` writes CSV to stdout — redirect it to a file.
+The output formatting flags cannot reshape a CSV, so `--json`, `--quiet`, `--markdown`,
+`--ids-only`, `--count` and `--html` are refused with a usage error unless `--output` is
+given, which returns file metadata for them to format.
+
 ### Journal
 
 ```bash
 hey journal list --json                       # List journal entries
-hey journal read 2024-03-15 --json            # Read entry by date
-hey journal write "Today's entry"                     # Write entry inline
+hey journal read 2026-03-15 --json            # Read entry by date
+hey journal write "Shipped the pagination fix and paired with Jane on the cover art."
+hey journal write 2026-03-15 "Retrospective: the migration took two days longer than planned."
 hey journal write                             # Write entry via $EDITOR
 ```
+
+Writing empty content **removes** the day's entry, and the command says "removed" rather
+than "saved" — so never pass an empty string, and never save an empty `$EDITOR` buffer
+unless removal is the intent. A day with no entry reads back as empty content, not an
+error.
 
 ### Authentication
 

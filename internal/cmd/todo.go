@@ -2,10 +2,10 @@ package cmd
 
 import (
 	"fmt"
-	"strconv"
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -130,7 +130,7 @@ func newTodoAddCommand() *todoAddCommand {
 		Use:   "add [title]",
 		Short: "Create a new todo",
 		Example: `  hey todo add "Buy groceries"
-  hey todo add -t "Meeting prep" --date 2024-01-20
+  hey todo add -t "Meeting prep" --date 2026-01-20
   hey todo add --title "Review PR" --json
   echo "Buy milk" | hey todo add`,
 		RunE: todoAddCommand.run,
@@ -148,9 +148,15 @@ func (c *todoAddCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	if c.date != "" {
+		if _, err := parseDateArg("date", c.date); err != nil {
+			return err
+		}
+	}
+
 	title := c.title
 	if title != "" && len(args) > 0 {
-		return output.ErrUsage("--title and positional argument are mutually exclusive")
+		return apierr.ErrUsage("--title and positional argument are mutually exclusive")
 	}
 	if title == "" && len(args) > 0 {
 		title = args[0]
@@ -163,26 +169,17 @@ func (c *todoAddCommand) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 	if title == "" {
-		return output.ErrUsageHint("title is required",
+		return apierr.ErrUsageHint("title is required",
 			"hey todo add \"Buy milk\"  or  hey todo add --title \"Buy milk\"")
 	}
 
 	ctx := cmd.Context()
 	result, err := sdk.CalendarTodos().Create(ctx, title, c.date)
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
-	if writer.IsStyled() {
-		fmt.Fprintln(cmd.OutOrStdout(), "Todo created.")
-		return nil
-	}
-
-	normalized, nerr := normalizeAny(result)
-	if nerr != nil {
-		return writeOK(nil, output.WithSummary("Todo created"))
-	}
-	return writeOK(normalized, output.WithSummary("Todo created"))
+	return writeMutation(cmd, "Todo created", result)
 }
 
 // complete
@@ -209,27 +206,21 @@ func (c *todoCompleteCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	id, err := strconv.ParseInt(args[0], 10, 64)
+	id, err := parsePositiveID(args[0], "todo")
 	if err != nil {
-		return output.ErrUsage(fmt.Sprintf("invalid todo ID: %s", args[0]))
+		return err
 	}
 
 	ctx := cmd.Context()
 	result, err := sdk.CalendarTodos().Complete(ctx, id)
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
-	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Todo completed.%s\n", extractMutationInfoFromResult(result))
-		return nil
-	}
-
-	normalized, nerr := normalizeAny(result)
-	if nerr != nil {
-		return writeOK(nil, output.WithSummary("Todo completed"))
-	}
-	return writeOK(normalized, output.WithSummary("Todo completed"))
+	return writeMutationLine(cmd,
+		fmt.Sprintf("Todo completed.%s", extractMutationInfoFromResult(result)),
+		"Todo completed",
+		result)
 }
 
 // uncomplete
@@ -256,27 +247,21 @@ func (c *todoUncompleteCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	id, err := strconv.ParseInt(args[0], 10, 64)
+	id, err := parsePositiveID(args[0], "todo")
 	if err != nil {
-		return output.ErrUsage(fmt.Sprintf("invalid todo ID: %s", args[0]))
+		return err
 	}
 
 	ctx := cmd.Context()
 	result, err := sdk.CalendarTodos().Uncomplete(ctx, id)
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
-	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Todo marked incomplete.%s\n", extractMutationInfoFromResult(result))
-		return nil
-	}
-
-	normalized, nerr := normalizeAny(result)
-	if nerr != nil {
-		return writeOK(nil, output.WithSummary("Todo marked incomplete"))
-	}
-	return writeOK(normalized, output.WithSummary("Todo marked incomplete"))
+	return writeMutationLine(cmd,
+		fmt.Sprintf("Todo marked incomplete.%s", extractMutationInfoFromResult(result)),
+		"Todo marked incomplete",
+		result)
 }
 
 // delete
@@ -303,21 +288,15 @@ func (c *todoDeleteCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	id, err := strconv.ParseInt(args[0], 10, 64)
+	id, err := parsePositiveID(args[0], "todo")
 	if err != nil {
-		return output.ErrUsage(fmt.Sprintf("invalid todo ID: %s", args[0]))
+		return err
 	}
 
 	ctx := cmd.Context()
-	err = sdk.CalendarTodos().Delete(ctx, id)
-	if err != nil {
-		return convertSDKError(err)
+	if err := sdk.CalendarTodos().Delete(ctx, id); err != nil {
+		return apierr.FromSDK(err)
 	}
 
-	if writer.IsStyled() {
-		fmt.Fprintln(cmd.OutOrStdout(), "Todo deleted.")
-		return nil
-	}
-
-	return writeOK(nil, output.WithSummary("Todo deleted"))
+	return writeMutation(cmd, "Todo deleted", nil)
 }

@@ -15,34 +15,46 @@ import (
 
 // --- Calendar messages ---
 
-type calendarsLoadedMsg []models.Calendar
+type calendarRequestKind int
+
+const (
+	calendarRequestNone calendarRequestKind = iota
+	calendarRequestCalendars
+	calendarRequestRecordings
+	calendarRequestHabitMutation
+	calendarRequestCategories
+)
+
+type calendarsLoadedMsg struct {
+	requestResult
+	calendars []models.Calendar
+}
 
 type recordingsLoadedMsg struct {
+	requestResult
 	recordings []models.Recording
 }
 
-type recordingDetailMsg struct {
-	title string
-	body  string
-}
-
+// identityLoadedMsg stays off the request lane: the first day of the week is read
+// once, alongside the calendars rather than instead of them, so putting it on the
+// lane would cancel the read it was batched with.
 type identityLoadedMsg struct {
 	firstWeekDay time.Weekday
 }
 
 type timeTrackCategoriesLoadedMsg struct {
+	requestResult
 	categories []generated.TimeTrackCategory
-	err        error
 }
 
 type timeTrackCategorySavedMsg struct {
+	requestResult
 	summary string
-	err     error
 }
 
 type habitMutationMsg struct {
+	requestResult
 	action string
-	err    error
 }
 
 // --- Calendar section view ---
@@ -55,7 +67,11 @@ type calendarView struct {
 
 	viewMode     calendarViewMode
 	firstWeekDay time.Weekday
-	anchorDate   time.Time
+
+	// now is the clock the calendar anchors on. It is read on every fetch and
+	// every render, so a TUI left open overnight moves to the new day instead of
+	// fetching around the day it started on while the grid highlights today.
+	now func() time.Time
 
 	// Recordings split by type
 	events []models.Recording
@@ -65,27 +81,21 @@ type calendarView struct {
 	// Scrollable content viewport for the calendar views
 	contentVP viewport.Model
 
-	// Detail view
-	topicViewport viewport.Model
-	topicContent  string
-	inThread      bool
-	loading       bool
-
 	timeTrackCategories    *timeTrackCategoryManager
 	habitForm              *habitForm
 	habitIndex             int
-	habitMutating          bool
 	confirmedHabitDeleteID int64
 	notice                 string
+
+	requests requestLane[calendarRequestKind]
 }
 
 func newCalendarView(vc *viewContext) *calendarView {
 	return &calendarView{
-		vc:            vc,
-		anchorDate:    time.Now(),
-		firstWeekDay:  time.Monday,
-		topicViewport: viewport.New(viewport.WithWidth(0), viewport.WithHeight(0)),
-		contentVP:     viewport.New(viewport.WithWidth(0), viewport.WithHeight(0)),
+		vc:           vc,
+		now:          time.Now,
+		firstWeekDay: time.Monday,
+		contentVP:    viewport.New(viewport.WithWidth(0), viewport.WithHeight(0)),
 	}
 }
 
@@ -93,11 +103,9 @@ func (v *calendarView) Init() tea.Cmd {
 	v.confirmedHabitDeleteID = 0
 	cmds := []tea.Cmd{v.fetchIdentity()}
 	if len(v.calendars) == 0 {
-		v.loading = true
-		cmds = append(cmds, v.fetchCalendars())
+		cmds = append(cmds, v.requestCalendars())
 	} else if v.calIndex < len(v.calendars) {
-		v.loading = true
-		cmds = append(cmds, v.fetchRecordings(v.calendars[v.calIndex].ID))
+		cmds = append(cmds, v.requestRecordings(v.calendars[v.calIndex].ID))
 	}
 	return tea.Batch(cmds...)
 }
@@ -110,17 +118,20 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 
 	case calendarsLoadedMsg:
-		v.loading = false
-		v.calendars = []models.Calendar(msg)
+		if cmd, ok := v.requests.settle(msg.requestResult); !ok {
+			return cmd, true
+		}
+		v.calendars = msg.calendars
 		if len(v.calendars) > 0 {
 			v.calIndex = 0
-			v.loading = true
-			return v.fetchRecordings(v.calendars[0].ID), true
+			return v.requestRecordings(v.calendars[0].ID), true
 		}
 		return nil, true
 
 	case recordingsLoadedMsg:
-		v.loading = false
+		if cmd, ok := v.requests.settle(msg.requestResult); !ok {
+			return cmd, true
+		}
 		v.confirmedHabitDeleteID = 0
 		v.events, v.todos, v.habits = splitRecordings(msg.recordings)
 		v.normalizeHabitSelection()
@@ -128,15 +139,17 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 
 	case habitMutationMsg:
-		v.loading = false
-		v.habitMutating = false
+		if !v.requests.accepts(msg.requestResult) {
+			return nil, true
+		}
+		v.requests.finish(msg.requestID)
 		if msg.err != nil {
 			if v.habitForm != nil {
 				v.habitForm.saving = false
-				v.habitForm.status = "Save failed: " + msg.err.Error()
+				v.habitForm.status = errorNotice("Save failed", msg.err)
 				v.habitForm.isError = true
 			} else {
-				v.notice = "Delete failed: " + msg.err.Error()
+				v.notice = errorNotice("Delete failed", msg.err)
 			}
 			return nil, true
 		}
@@ -144,52 +157,43 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.confirmedHabitDeleteID = 0
 		v.notice = msg.action
 		if v.calIndex >= 0 && v.calIndex < len(v.calendars) {
-			v.loading = true
-			return v.fetchRecordings(v.calendars[v.calIndex].ID), true
+			return v.requestRecordings(v.calendars[v.calIndex].ID), true
 		}
 		return nil, true
 
-	case recordingDetailMsg:
-		v.loading = false
-		v.inThread = true
-		v.topicContent = msg.body
-		v.topicViewport.SetContent(v.topicContent)
-		v.topicViewport.GotoTop()
-		return nil, true
-
 	case timeTrackCategoriesLoadedMsg:
-		v.loading = false
+		if !v.requests.accepts(msg.requestResult) {
+			return nil, true
+		}
+		v.requests.finish(msg.requestID)
 		if v.timeTrackCategories == nil {
 			return nil, true
 		}
 		if msg.err != nil {
-			v.timeTrackCategories.status = "Could not load categories: " + msg.err.Error()
+			v.timeTrackCategories.status = errorNotice("Could not load categories", msg.err)
 			return nil, true
 		}
 		v.timeTrackCategories.setCategories(msg.categories)
 		return nil, true
 
 	case timeTrackCategorySavedMsg:
-		v.loading = false
+		if !v.requests.accepts(msg.requestResult) {
+			return nil, true
+		}
+		v.requests.finish(msg.requestID)
 		if v.timeTrackCategories == nil {
 			return nil, true
 		}
 		if msg.err != nil {
-			v.timeTrackCategories.status = msg.err.Error()
+			v.timeTrackCategories.status = errorNotice("Could not save the category", msg.err)
 			return nil, true
 		}
 		v.timeTrackCategories.status = msg.summary
-		v.loading = true
-		return v.fetchTimeTrackCategories(), true
+		return v.requestTimeTrackCategories(), true
 	}
 
 	if v.habitForm != nil {
 		return v.habitForm.update(msg), true
-	}
-	if v.inThread {
-		var cmd tea.Cmd
-		v.topicViewport, cmd = v.topicViewport.Update(msg)
-		return cmd, cmd != nil
 	}
 
 	return nil, false
@@ -201,9 +205,6 @@ func (v *calendarView) View() string {
 	}
 	if v.habitForm != nil {
 		return v.habitForm.view()
-	}
-	if v.inThread {
-		return v.topicViewport.View()
 	}
 	var heading string
 	if v.notice != "" {
@@ -221,9 +222,6 @@ func (v *calendarView) HelpBindings() []helpBinding {
 	}
 	if v.habitForm != nil {
 		return v.habitForm.helpBindings()
-	}
-	if v.inThread {
-		return nil
 	}
 	bindings := []helpBinding{{"v", v.viewMode.next().String() + " view"}, {"c", "time categories"}}
 	if v.viewingPersonalCalendar() {
@@ -252,8 +250,7 @@ func (v *calendarView) SubnavItems() ([]navItem, int, string, bool) {
 func (v *calendarView) SubnavLeft() tea.Cmd {
 	if v.calIndex > 0 {
 		v.calIndex--
-		v.loading = true
-		return v.fetchRecordings(v.calendars[v.calIndex].ID)
+		return v.requestRecordings(v.calendars[v.calIndex].ID)
 	}
 	return nil
 }
@@ -261,8 +258,7 @@ func (v *calendarView) SubnavLeft() tea.Cmd {
 func (v *calendarView) SubnavRight() tea.Cmd {
 	if v.calIndex < len(v.calendars)-1 {
 		v.calIndex++
-		v.loading = true
-		return v.fetchRecordings(v.calendars[v.calIndex].ID)
+		return v.requestRecordings(v.calendars[v.calIndex].ID)
 	}
 	return nil
 }
@@ -282,10 +278,8 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return cmd
 	}
-	if v.inThread {
-		var cmd tea.Cmd
-		v.topicViewport, cmd = v.topicViewport.Update(msg)
-		return cmd
+	if v.requests.kind == calendarRequestHabitMutation {
+		return nil
 	}
 
 	if msg.String() != "x" {
@@ -295,13 +289,11 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "c":
 		v.timeTrackCategories = newTimeTrackCategoryManager()
-		v.loading = true
-		return v.fetchTimeTrackCategories()
+		return v.requestTimeTrackCategories()
 	case "v":
 		v.viewMode = v.viewMode.next()
 		if v.calIndex >= 0 && v.calIndex < len(v.calendars) {
-			v.loading = true
-			return v.fetchRecordings(v.calendars[v.calIndex].ID)
+			return v.requestRecordings(v.calendars[v.calIndex].ID)
 		}
 		v.rebuildView()
 		return nil
@@ -340,7 +332,7 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 
 func (v *calendarView) handleTimeTrackCategoryKey(msg tea.KeyPressMsg) tea.Cmd {
 	manager := v.timeTrackCategories
-	if v.loading {
+	if v.requests.loading {
 		return nil
 	}
 	if manager.mode != timeTrackCategoryBrowse {
@@ -356,14 +348,12 @@ func (v *calendarView) handleTimeTrackCategoryKey(msg tea.KeyPressMsg) tea.Cmd {
 			mode := manager.mode
 			selected := manager.selected()
 			manager.cancelEdit()
-			v.loading = true
 			if mode == timeTrackCategoryCreate {
 				return v.createTimeTrackCategory(title)
 			}
 			if selected != nil {
 				return v.renameTimeTrackCategory(selected.Id, title)
 			}
-			v.loading = false
 			manager.status = "Choose a category to rename"
 			return nil
 		default:
@@ -391,7 +381,6 @@ func (v *calendarView) handleTimeTrackCategoryKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		manager.confirmingDelete = false
-		v.loading = true
 		return v.deleteTimeTrackCategory(selected.Id, selected.Title)
 	default:
 		manager.move(msg.Key())
@@ -399,14 +388,17 @@ func (v *calendarView) handleTimeTrackCategoryKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 }
 
-func (v *calendarView) InThread() bool { return v.inThread }
-func (v *calendarView) ExitThread()    { v.inThread = false }
-func (v *calendarView) Loading() bool  { return v.loading }
+// The calendar has no thread to be in: a recording is read where it sits in the grid.
+func (v *calendarView) InThread() bool { return false }
+func (v *calendarView) ExitThread()    {}
+func (v *calendarView) Loading() bool  { return v.requests.loading }
 func (v *calendarView) CapturingInput() bool {
 	return v.timeTrackCategories != nil || v.habitForm != nil
 }
 
-func (v *calendarView) AccountSwitchBlocked() bool { return v.habitMutating }
+func (v *calendarView) AccountSwitchBlocked() bool {
+	return v.requests.kind == calendarRequestHabitMutation
+}
 
 // Restyle re-renders the day/week/year grid, which caches styled output in its
 // viewport. The recording detail is plain text and needs nothing.
@@ -419,8 +411,6 @@ func (v *calendarView) Restyle() {
 func (v *calendarView) Resize(width, height int) {
 	v.contentVP.SetWidth(width)
 	v.contentVP.SetHeight(max(height-2, 1))
-	v.topicViewport.SetWidth(width)
-	v.topicViewport.SetHeight(height)
 	if v.habitForm != nil {
 		v.habitForm.resize(width, height)
 	}
@@ -435,25 +425,25 @@ func (v *calendarView) rebuildView() {
 		return
 	}
 
-	dayLabels := dayLabelsFromEvents(v.events)
+	anchor := v.now()
+	dayLabels := dayLabelsFromRecordings(v.events, v.todos, v.habits)
 
 	var content string
 	switch v.viewMode {
 	case viewDay:
-		content = renderDayView(v.events, v.todos, v.habits, v.anchorDate, w, h)
+		content = renderDayView(v.events, v.todos, v.habits, anchor, w, h)
 	case viewWeek:
-		content = renderWeekView(v.events, v.todos, v.habits, v.anchorDate, v.firstWeekDay, w, h, dayLabels)
+		content = renderWeekView(v.events, v.todos, v.habits, anchor, v.firstWeekDay, w, h, dayLabels)
 	case viewYear:
-		content = renderYearView(v.events, v.anchorDate, v.firstWeekDay, w, h, dayLabels)
+		content = renderYearView(v.events, anchor, v.firstWeekDay, w, h, dayLabels)
 	}
 
 	v.contentVP.SetContent(content)
 
 	// For year view, scroll to the current week
 	if v.viewMode == viewYear {
-		today := time.Now()
-		gridStart := weekStartDate(time.Date(v.anchorDate.Year(), 1, 1, 0, 0, 0, 0, v.anchorDate.Location()), v.firstWeekDay)
-		weeksToToday := int(today.Sub(gridStart).Hours()/24) / 7
+		gridStart := weekStartDate(time.Date(anchor.Year(), 1, 1, 0, 0, 0, 0, anchor.Location()), v.firstWeekDay)
+		weeksToToday := daysBetween(gridStart, anchor) / 7
 		// Center today's week in the viewport (+2 for header rows)
 		offset := max(weeksToToday-h/2+2, 0)
 		v.contentVP.SetYOffset(offset)
@@ -523,27 +513,25 @@ func (v *calendarView) saveHabit() tea.Cmd {
 	form := v.habitForm
 	name, icon, color, days, _ := form.values()
 	params := hey.HabitParams{Name: name, Icon: icon, Color: color, Days: days}
-	v.habitMutating = true
-	v.loading = true
+	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestHabitMutation)
 	return func() tea.Msg {
 		var err error
 		action := "Habit created"
 		if form.mode == habitFormCreate {
-			_, err = v.vc.sdk.Habits().Create(v.vc.ctx, params)
+			_, err = v.vc.sdk.Habits().Create(ctx, params)
 		} else {
 			action = "Habit updated"
-			_, err = v.vc.sdk.Habits().Update(v.vc.ctx, form.habitID, params)
+			_, err = v.vc.sdk.Habits().Update(ctx, form.habitID, params)
 		}
-		return habitMutationMsg{action: action, err: err}
+		return habitMutationMsg{requestResult: newRequestResult(requestID, err), action: action}
 	}
 }
 
 func (v *calendarView) deleteHabit(recording models.Recording) tea.Cmd {
-	v.habitMutating = true
-	v.loading = true
+	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestHabitMutation)
 	return func() tea.Msg {
-		err := v.vc.sdk.Habits().Delete(v.vc.ctx, recording.ID)
-		return habitMutationMsg{action: "Habit deleted", err: err}
+		err := v.vc.sdk.Habits().Delete(ctx, recording.ID)
+		return habitMutationMsg{requestResult: newRequestResult(requestID, err), action: "Habit deleted"}
 	}
 }
 
@@ -562,7 +550,7 @@ func sdkRecordingToModel(r generated.Recording) models.Recording {
 		StartsAt: formatTimestamp(r.StartsAt), EndsAt: formatTimestamp(r.EndsAt),
 		StartsAtTimeZone: r.StartsAtTimeZone, EndsAtTimeZone: r.EndsAtTimeZone,
 		CreatedAt: formatTimestamp(r.CreatedAt), UpdatedAt: formatTimestamp(r.UpdatedAt),
-		Type: r.Type, Content: r.Content, RemindersLabel: r.RemindersLabel,
+		Type: r.Type, RemindersLabel: r.RemindersLabel,
 		CompletedAt: formatTimestamp(r.CompletedAt), Label: r.Label,
 		Icon: r.Icon, Color: r.Color, Days: append([]int32(nil), r.Days...),
 	}
@@ -587,33 +575,38 @@ func (v *calendarView) fetchIdentity() tea.Cmd {
 	}
 }
 
-func (v *calendarView) fetchCalendars() tea.Cmd {
+func (v *calendarView) requestCalendars() tea.Cmd {
+	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestCalendars)
 	return func() tea.Msg {
-		payload, err := v.vc.sdk.Calendars().List(v.vc.ctx)
+		payload, err := v.vc.sdk.Calendars().List(ctx)
 		if err != nil {
-			return errMsg{err}
+			return calendarsLoadedMsg{requestResult: newRequestResult(requestID, err)}
 		}
 		if payload == nil {
-			return calendarsLoadedMsg(nil)
+			return calendarsLoadedMsg{requestResult: newRequestResult(requestID, nil)}
 		}
 		calendars := make([]models.Calendar, 0, len(payload.Calendars))
 		for _, cw := range payload.Calendars {
 			calendars = append(calendars, sdkCalendarToModel(cw.Calendar))
 		}
-		return calendarsLoadedMsg(calendars)
+		return calendarsLoadedMsg{requestResult: newRequestResult(requestID, nil), calendars: calendars}
 	}
 }
 
-func (v *calendarView) fetchRecordings(calID int64) tea.Cmd {
-	start, end := dateRangeForMode(v.viewMode, v.anchorDate, v.firstWeekDay)
+// requestRecordings reads the range the current view mode covers around today. The
+// range is fixed when the read starts, which is why the answer has to be discarded
+// when the mode or the calendar has moved on since.
+func (v *calendarView) requestRecordings(calID int64) tea.Cmd {
+	start, end := dateRangeForMode(v.viewMode, v.now(), v.firstWeekDay)
+	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestRecordings)
 	return func() tea.Msg {
 		startsOn, endsOn := start.Format("2006-01-02"), end.Format("2006-01-02")
-		resp, err := v.vc.sdk.Calendars().GetRecordings(v.vc.ctx, calID, &generated.GetCalendarRecordingsParams{
+		resp, err := v.vc.sdk.Calendars().GetRecordings(ctx, calID, &generated.GetCalendarRecordingsParams{
 			StartsOn: &startsOn,
 			EndsOn:   &endsOn,
 		})
 		if err != nil {
-			return errMsg{err}
+			return recordingsLoadedMsg{requestResult: newRequestResult(requestID, err)}
 		}
 		var all []models.Recording
 		if resp != nil {
@@ -623,37 +616,42 @@ func (v *calendarView) fetchRecordings(calID int64) tea.Cmd {
 				}
 			}
 		}
-		return recordingsLoadedMsg{recordings: all}
+		return recordingsLoadedMsg{requestResult: newRequestResult(requestID, nil), recordings: all}
 	}
 }
 
-func (v *calendarView) fetchTimeTrackCategories() tea.Cmd {
+func (v *calendarView) requestTimeTrackCategories() tea.Cmd {
+	if v.vc.sdk == nil || v.vc.ctx == nil {
+		v.timeTrackCategories.status = "Could not load categories: time track categories are unavailable"
+		return nil
+	}
+	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestCategories)
 	return func() tea.Msg {
-		if v.vc.sdk == nil || v.vc.ctx == nil {
-			return timeTrackCategoriesLoadedMsg{err: fmt.Errorf("time track categories are unavailable")}
-		}
-		categories, err := v.vc.sdk.TimeTracks().Categories(v.vc.ctx)
-		return timeTrackCategoriesLoadedMsg{categories: categories, err: err}
+		categories, err := v.vc.sdk.TimeTracks().Categories(ctx)
+		return timeTrackCategoriesLoadedMsg{requestResult: newRequestResult(requestID, err), categories: categories}
 	}
 }
 
 func (v *calendarView) createTimeTrackCategory(title string) tea.Cmd {
+	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestCategories)
 	return func() tea.Msg {
-		err := v.vc.sdk.TimeTracks().CreateCategory(v.vc.ctx, title)
-		return timeTrackCategorySavedMsg{summary: fmt.Sprintf("Created %q", title), err: err}
+		err := v.vc.sdk.TimeTracks().CreateCategory(ctx, title)
+		return timeTrackCategorySavedMsg{requestResult: newRequestResult(requestID, err), summary: fmt.Sprintf("Created %q", title)}
 	}
 }
 
 func (v *calendarView) renameTimeTrackCategory(categoryID int64, title string) tea.Cmd {
+	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestCategories)
 	return func() tea.Msg {
-		err := v.vc.sdk.TimeTracks().UpdateCategory(v.vc.ctx, categoryID, title)
-		return timeTrackCategorySavedMsg{summary: fmt.Sprintf("Renamed category to %q", title), err: err}
+		err := v.vc.sdk.TimeTracks().UpdateCategory(ctx, categoryID, title)
+		return timeTrackCategorySavedMsg{requestResult: newRequestResult(requestID, err), summary: fmt.Sprintf("Renamed category to %q", title)}
 	}
 }
 
 func (v *calendarView) deleteTimeTrackCategory(categoryID int64, title string) tea.Cmd {
+	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestCategories)
 	return func() tea.Msg {
-		err := v.vc.sdk.TimeTracks().DeleteCategory(v.vc.ctx, categoryID)
-		return timeTrackCategorySavedMsg{summary: fmt.Sprintf("Deleted %q", title), err: err}
+		err := v.vc.sdk.TimeTracks().DeleteCategory(ctx, categoryID)
+		return timeTrackCategorySavedMsg{requestResult: newRequestResult(requestID, err), summary: fmt.Sprintf("Deleted %q", title)}
 	}
 }

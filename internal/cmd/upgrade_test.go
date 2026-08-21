@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
 	"github.com/basecamp/hey-cli/internal/version"
 )
@@ -39,12 +40,12 @@ func assertNotContains(t *testing.T, s, substr string) {
 
 // requireUpgradeError asserts the command failed the success/exit contract
 // way: structured error with the expected code and a nonzero exit code.
-func requireUpgradeError(t *testing.T, err error, code string) *output.Error {
+func requireUpgradeError(t *testing.T, err error, code string) *apierr.Error {
 	t.Helper()
 	if err == nil {
 		t.Fatalf("expected an %s error, got nil", code)
 	}
-	apiErr := output.AsError(err)
+	apiErr := apierr.AsError(err)
 	if apiErr.Code != code {
 		t.Fatalf("error code = %q, want %q (message: %s)", apiErr.Code, code, apiErr.Message)
 	}
@@ -237,7 +238,7 @@ func TestUpgradeRejectsListOnlyFormatsBeforeUpgrading(t *testing.T) {
 
 			run := executeUpgradeCommandAs(t, flag)
 			requireUpgradeError(t, run.err, "usage")
-			assertContains(t, output.AsError(run.err).Message, flag)
+			assertContains(t, apierr.AsError(run.err).Message, flag)
 			if fetched {
 				t.Error("the format must be rejected before the upgrade starts")
 			}

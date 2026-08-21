@@ -10,6 +10,7 @@ import (
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
 	"github.com/basecamp/hey-cli/internal/tui"
 )
@@ -159,7 +160,7 @@ func TestRequireAuthPromptsOnlyWhenInteractiveAndStyled(t *testing.T) {
 		t.Cleanup(func() { writer = prev })
 
 		err := requireAuth()
-		var cliErr *output.Error
+		var cliErr *apierr.Error
 		if !errors.As(err, &cliErr) || cliErr.Code != "auth" || cliErr.Message != "Not logged in" {
 			t.Fatalf("error = %v, want auth/Not logged in", err)
 		}
@@ -212,7 +213,7 @@ func TestDataCommandWithoutAuthReturnsAuthErrorWhenPiped(t *testing.T) {
 	server := quietServer(t)
 
 	_, _, err := runAuthCommand(t, t.TempDir(), server.URL, "", true, "boxes")
-	var cliErr *output.Error
+	var cliErr *apierr.Error
 	if !errors.As(err, &cliErr) || cliErr.Code != "auth" {
 		t.Fatalf("error = %v, want auth", err)
 	}

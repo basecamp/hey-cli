@@ -20,27 +20,44 @@ func usageErrorf(format string, args ...any) error {
 }
 
 func usageExactOneArg() cobra.PositionalArgs {
-	return func(cmd *cobra.Command, args []string) error {
-		if len(args) == 1 {
-			return nil
-		}
-
-		if len(args) == 0 {
-			return usageErrorf("%s", cleanUseLine(cmd.UseLine()))
-		}
-
-		return fmt.Errorf("expected 1 argument, got %d", len(args))
-	}
+	return usageExactArgs(1)
 }
 
 func usageMinOneArg() cobra.PositionalArgs {
+	return usageMinArgs(1)
+}
+
+// usageExactArgs answers the bare command with its usage line — somebody who typed
+// no arguments is asking what it takes — and any other wrong count with the count,
+// which is the only thing they got wrong.
+func usageExactArgs(n int) cobra.PositionalArgs {
 	return func(cmd *cobra.Command, args []string) error {
-		if len(args) >= 1 {
+		switch {
+		case len(args) == n:
+			return nil
+		case len(args) == 0:
+			return usageErrorf("%s", cleanUseLine(cmd.UseLine()))
+		default:
+			return fmt.Errorf("expected %d %s, got %d", n, argNoun(n), len(args))
+		}
+	}
+}
+
+func usageMinArgs(n int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) >= n {
 			return nil
 		}
 
 		return usageErrorf("%s", cleanUseLine(cmd.UseLine()))
 	}
+}
+
+func argNoun(count int) string {
+	if count == 1 {
+		return "argument"
+	}
+	return "arguments"
 }
 
 func cleanUseLine(useLine string) string {

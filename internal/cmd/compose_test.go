@@ -66,7 +66,7 @@ func TestParseAddresses(t *testing.T) {
 // A reply carries the thread's subject with it, so --subject is only wanted when
 // starting a new thread. Requiring it either way made people pass one that HEY ignores.
 func TestComposeSubjectRequiredOnlyForANewMessage(t *testing.T) {
-	server, sent := threadReplyServer(t, topicWithRecipients, topicEntries)
+	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
 
 	err := runCLI(t, server, "compose", "-m", "body")
 	var cliErr *apierr.Error
@@ -88,14 +88,14 @@ func TestComposeSubjectRequiredOnlyForANewMessage(t *testing.T) {
 	if sent.TopicAccountFilter != "" {
 		t.Errorf("topic account filter = %q, want unscoped discovery", sent.TopicAccountFilter)
 	}
-	if sent.HTMLAccountFilter != "9" {
-		t.Errorf("topic HTML account filter = %q, want thread account 9", sent.HTMLAccountFilter)
+	if sent.MessageAccountFilter != "9" {
+		t.Errorf("message account filter = %q, want thread account 9", sent.MessageAccountFilter)
 	}
 	if sent.ActingSenderID != 42 {
 		t.Errorf("acting sender = %d, want thread account sender 42", sent.ActingSenderID)
 	}
-	if len(sent.To) != 1 || sent.To[0] != "jane@example.com" {
-		t.Errorf("to = %v, want the thread's recipients", sent.To)
+	if len(sent.To) != 2 || sent.To[0] != "jane@example.com" || sent.To[1] != "rick@example.com" {
+		t.Errorf("to = %v, want the entry's recipients and its sender", sent.To)
 	}
 	if len(sent.CC) != 1 || sent.CC[0] != "cc@example.com" {
 		t.Errorf("cc = %v", sent.CC)

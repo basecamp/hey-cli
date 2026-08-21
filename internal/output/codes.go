@@ -1,9 +1,12 @@
 package output
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/basecamp/hey-cli/internal/apierr"
+)
 
 const (
-	ExitOK        = 0
 	ExitUsage     = 1
 	ExitNotFound  = 2
 	ExitAuth      = 3
@@ -15,28 +18,28 @@ const (
 )
 
 func ExitCodeFor(err error) int {
-	var e *Error
+	var e *apierr.Error
 	if !errors.As(err, &e) {
-		return 1
+		return ExitUsage
 	}
 	switch e.Code {
-	case "usage":
+	case apierr.CodeUsage:
 		return ExitUsage
-	case "not_found":
+	case apierr.CodeNotFound:
 		return ExitNotFound
-	case "auth":
+	case apierr.CodeAuth:
 		return ExitAuth
-	case "forbidden":
+	case apierr.CodeForbidden:
 		return ExitForbidden
-	case "rate_limit":
+	case apierr.CodeRateLimit:
 		return ExitRateLimit
-	case "network":
+	case apierr.CodeNetwork:
 		return ExitNetwork
-	case "api":
+	case apierr.CodeAPI:
 		return ExitAPI
-	case "ambiguous":
+	case apierr.CodeAmbiguous:
 		return ExitAmbiguous
 	default:
-		return 1
+		return ExitUsage
 	}
 }

@@ -30,16 +30,23 @@ func (f *mailSearchForm) resize(width, _ int) {
 	f.input.SetWidth(max(width-12, 10))
 }
 
-func (f *mailSearchForm) handleKey(msg tea.KeyPressMsg) (tea.Cmd, string, bool) {
-	if msg.Key().Code == tea.KeyEnter {
+func (f *mailSearchForm) handleKey(view *mailView, msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	switch msg.Key().Code {
+	case tea.KeyEscape:
+		return nil, false
+	case tea.KeyEnter:
 		query := strings.TrimSpace(f.input.Value())
 		if query == "" {
 			f.status = "Enter words to search for"
-			return nil, "", false
+			return nil, true
 		}
-		return nil, query, true
+		return view.requestSearch(query), false
 	}
-	return f.update(msg), "", false
+	return f.update(msg), true
+}
+
+func (f *mailSearchForm) handleMsg(msg tea.Msg) (tea.Cmd, bool) {
+	return f.update(msg), true
 }
 
 func (f *mailSearchForm) update(msg tea.Msg) tea.Cmd {
@@ -53,6 +60,14 @@ func (f *mailSearchForm) helpBindings() []helpBinding {
 		{"enter", "search"},
 		{"esc", "cancel"},
 	}
+}
+
+func (f *mailSearchForm) restyle(s styles) {
+	f.styles = s
+}
+
+func (f *mailSearchForm) draw(_ *mailView) string {
+	return f.view()
 }
 
 func (f *mailSearchForm) view() string {

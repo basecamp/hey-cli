@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/mod/semver"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
 	"github.com/basecamp/hey-cli/internal/version"
 )
@@ -80,9 +81,9 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 	// a structured failure. Refuse them before anything runs.
 	switch writer.EffectiveFormat() {
 	case output.FormatCount:
-		return output.ErrUsage("--count requires list data — hey upgrade reports a single result")
+		return apierr.ErrUsage("--count requires list data — hey upgrade reports a single result")
 	case output.FormatIDs:
-		return output.ErrUsage("--ids-only requires list data — hey upgrade reports a single result")
+		return apierr.ErrUsage("--ids-only requires list data — hey upgrade reports a single result")
 	default: // every other format renders upgrade's single result map
 	}
 
@@ -100,13 +101,13 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 	if len(args) == 1 {
 		requested = strings.TrimPrefix(strings.TrimSpace(args[0]), "v")
 		if !isReleaseVersion(requested) {
-			return output.ErrUsage(fmt.Sprintf("%q is not a release version — pass a semantic version like 1.2.3", args[0]))
+			return apierr.ErrUsage(fmt.Sprintf("%q is not a release version — pass a semantic version like 1.2.3", args[0]))
 		}
 	}
 
 	current := version.Version
 	if !isReleaseVersion(current) {
-		return &output.Error{
+		return &apierr.Error{
 			Code:    "upgrade_required",
 			Message: fmt.Sprintf("hey %s is not a release build — upgrade is only available for released versions", current),
 			Hint:    "Rebuild from source, or install a release: " + installerHint(),
@@ -130,7 +131,7 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 		if requested != "" {
 			detail = fmt.Sprintf("could not fetch release v%s", requested)
 		}
-		return &output.Error{
+		return &apierr.Error{
 			Code:    "upgrade_failed",
 			Message: fmt.Sprintf("%s: %v", detail, err),
 			Hint:    "Check network access to api.github.com and retry. In CI, set GITHUB_TOKEN to avoid anonymous rate limits.",
@@ -176,7 +177,7 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Fprintln(w, "Upgrading via Homebrew…")
 		if brewErr := homebrewUpgrader(ctx, filepath.Join(prefix, "bin", "brew"), w, procErr); brewErr != nil {
-			return &output.Error{
+			return &apierr.Error{
 				Code:    "upgrade_failed",
 				Message: fmt.Sprintf("brew upgrade failed for cask %s: %v", homebrewCask, brewErr),
 				Hint:    fmt.Sprintf("Run manually for detail: brew upgrade --cask %s", homebrewCask),
@@ -194,7 +195,7 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Fprintln(w, "Upgrading via Scoop…")
 		if scoopErr := scoopUpgrader(ctx, global, w, procErr); scoopErr != nil {
-			return &output.Error{
+			return &apierr.Error{
 				Code:    "upgrade_failed",
 				Message: fmt.Sprintf("scoop update failed for app %s: %v", scoopApp, scoopErr),
 				Hint:    fmt.Sprintf("Run manually for detail: scoop update%s %s", scoopGlobalFlag(global), scoopApp),
@@ -211,7 +212,7 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 		if requested != "" {
 			ref = "v" + requested
 		}
-		return &output.Error{
+		return &apierr.Error{
 			Code:    "upgrade_required",
 			Message: fmt.Sprintf("update available (%s → %s) but this binary was built with go install — upgrade it the same way", current, latest),
 			Hint:    "Run: go install github.com/basecamp/hey-cli/cmd/hey@" + ref,
@@ -223,7 +224,7 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 		downloadURL := releaseTagURL(latest)
 		fmt.Fprintln(w)
 		fmt.Fprintf(w, "Download the latest release from:\n  %s\n", downloadURL)
-		return &output.Error{
+		return &apierr.Error{
 			Code:    "upgrade_required",
 			Message: fmt.Sprintf("update available (%s → %s) but the running executable could not be resolved: %v", current, latest, err),
 			Hint:    "Download manually: " + downloadURL,
@@ -231,7 +232,7 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if reason, hint := selfUpdateIneligibility(target); reason != "" {
-		return &output.Error{
+		return &apierr.Error{
 			Code:    "upgrade_required",
 			Message: fmt.Sprintf("update available (%s → %s) but this install can't be self-updated (%s)", current, latest, reason),
 			Hint:    hint,
@@ -259,8 +260,8 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 // package-manager install: brew and scoop install whatever their manifests
 // currently say, so a pin can't be honored — silently upgrading to something
 // else would betray the request.
-func errPinnedManagedInstall(current, requested, manager, managerCmd string) *output.Error {
-	return &output.Error{
+func errPinnedManagedInstall(current, requested, manager, managerCmd string) *apierr.Error {
+	return &apierr.Error{
 		Code:    "upgrade_required",
 		Message: fmt.Sprintf("hey %s can't be upgraded to a specific version (%s) — this install is managed by %s, which installs its own current version", current, requested, manager),
 		Hint:    "Upgrade to the manager's version instead: " + managerCmd,
@@ -273,7 +274,7 @@ func errPinnedManagedInstall(current, requested, manager, managerCmd string) *ou
 // that reports anything but the latest version is upgrade_incomplete.
 func confirmManagedUpgrade(ctx context.Context, w io.Writer, method, probePath, current, latest, reinstallCmd string) error {
 	unverified := func(detail string) error {
-		return &output.Error{
+		return &apierr.Error{
 			Code:    "upgrade_unverified",
 			Message: fmt.Sprintf("%s reported success but %s", method, detail),
 			Hint:    fmt.Sprintf("Run `hey version` to confirm; if it still reports %s, run: %s", current, reinstallCmd),
@@ -298,7 +299,7 @@ func confirmManagedUpgrade(ctx context.Context, w io.Writer, method, probePath, 
 		return unverified(fmt.Sprintf("the installed version %q could not be interpreted (expected %s)", reported, latest))
 	}
 	if semver.Compare(reportedSemver, latestSemver) < 0 {
-		return &output.Error{
+		return &apierr.Error{
 			Code:    "upgrade_incomplete",
 			Message: fmt.Sprintf("%s exited successfully but hey still reports %s (expected %s, upgrading from %s)", method, reported, latest, current),
 			Hint:    "Try: " + reinstallCmd,

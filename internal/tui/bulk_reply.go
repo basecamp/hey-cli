@@ -14,6 +14,7 @@ import (
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/htmlutil"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 type bulkReplyDraftLoadedMsg struct {
@@ -85,33 +86,42 @@ func (f *bulkReplyForm) resize(width, height int) {
 	f.body.SetHeight(max(height-8, 3))
 }
 
-func (f *bulkReplyForm) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+// handleKey routes keys while the preview or the editor is open. A form that is sending
+// holds on to every key, including escape: the send is already on its way.
+func (f *bulkReplyForm) handleKey(view *mailView, msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	if f.sending {
+		return nil, true
+	}
+	if msg.Key().Code == tea.KeyEscape {
 		return nil, false
 	}
 	if !f.composing {
 		if msg.Key().Code == tea.KeyEnter {
 			f.composing = true
-			return f.body.Focus(), false
+			return f.body.Focus(), true
 		}
 		var cmd tea.Cmd
 		f.preview, cmd = f.preview.Update(msg)
-		return cmd, false
+		return cmd, true
 	}
 	if msg.String() == "ctrl+s" {
 		if strings.TrimSpace(f.body.Value()) == "" {
 			f.status = "Message is empty"
 			f.isError = true
-			return nil, false
+			return nil, true
 		}
 		f.sending = true
 		f.status = "Sending…"
 		f.isError = false
-		return nil, true
+		return view.sendBulkReply(f), true
 	}
 	var cmd tea.Cmd
 	f.body, cmd = f.body.Update(msg)
-	return cmd, false
+	return cmd, true
+}
+
+func (f *bulkReplyForm) handleMsg(msg tea.Msg) (tea.Cmd, bool) {
+	return f.update(msg), true
 }
 
 func (f *bulkReplyForm) update(msg tea.Msg) tea.Cmd {
@@ -129,6 +139,17 @@ func (f *bulkReplyForm) helpBindings() []helpBinding {
 		return []helpBinding{{"↑↓", "review recipients"}, {"enter", "write reply"}, {"esc", "cancel"}}
 	}
 	return []helpBinding{{"ctrl+s", "send to all"}, {"esc", "cancel"}}
+}
+
+// restyle re-renders the preview, whose content is built with the styles it was drawn
+// with rather than styled on the way out.
+func (f *bulkReplyForm) restyle(s styles) {
+	f.styles = s
+	f.resize(f.width, f.height)
+}
+
+func (f *bulkReplyForm) draw(_ *mailView) string {
+	return f.view()
 }
 
 func (f *bulkReplyForm) view() string {
@@ -150,7 +171,7 @@ func (f *bulkReplyForm) previewContent(width int) string {
 
 	labelStyle := styleMuted
 	for i, entry := range f.draft.Entries {
-		writeBulkReplyWrappedLine(&b, fmt.Sprintf("%d. ", i+1), terminalSafeAttachmentText(entry.TopicName), width)
+		writeBulkReplyWrappedLine(&b, fmt.Sprintf("%d. ", i+1), terminal.SanitizeLine(entry.TopicName), width)
 		writeBulkReplyContacts(&b, "To", entry.Addressed.Directly, width, labelStyle)
 		writeBulkReplyContacts(&b, "CC", entry.Addressed.Copied, width, labelStyle)
 		writeBulkReplyContacts(&b, "BCC", entry.Addressed.Blindcopied, width, labelStyle)
@@ -159,7 +180,7 @@ func (f *bulkReplyForm) previewContent(width int) string {
 	if nameTag := htmlutil.ToText(f.draft.Content); nameTag != "" {
 		b.WriteString(labelStyle.Render("HEY will preserve your name tag:"))
 		b.WriteString("\n")
-		for _, line := range wrapBulkReplyText(terminalSafeAttachmentText(nameTag), max(width-4, 10)) {
+		for _, line := range wrapBulkReplyText(terminal.SanitizeLine(nameTag), max(width-4, 10)) {
 			fmt.Fprintf(&b, "  %s\n", line)
 		}
 		b.WriteString("\n")
@@ -197,8 +218,8 @@ func writeBulkReplyContacts(b *strings.Builder, label string, contacts []generat
 }
 
 func formatBulkReplyContact(contact generated.Contact) string {
-	name := terminalSafeAttachmentText(contact.Name)
-	email := terminalSafeAttachmentText(contact.EmailAddress)
+	name := terminal.SanitizeLine(contact.Name)
+	email := terminal.SanitizeLine(contact.EmailAddress)
 	switch {
 	case name != "" && email != "":
 		return fmt.Sprintf("%s <%s>", name, email)
@@ -265,7 +286,7 @@ func (v *mailView) startBulkReply() tea.Cmd {
 		v.notice = "Select threads with space before starting a bulk reply"
 		return nil
 	}
-	requestID, ctx := v.beginRequest(mailRequestBulkReply)
+	requestID, ctx := v.requests.begin(v.vc.ctx, mailRequestBulkReply)
 	boxID := v.currentBoxID()
 	return func() tea.Msg {
 		draft, err := v.vc.sdk.BulkReplies().Draft(ctx, postingIDs)
@@ -283,8 +304,7 @@ func (v *mailView) startBulkReply() tea.Cmd {
 	}
 }
 
-func (v *mailView) sendBulkReply() tea.Cmd {
-	form := v.bulkReply
+func (v *mailView) sendBulkReply(form *bulkReplyForm) tea.Cmd {
 	entryIDs := make([]int64, len(form.draft.Entries))
 	for i, entry := range form.draft.Entries {
 		entryIDs[i] = entry.Id

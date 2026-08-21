@@ -5,7 +5,9 @@ import (
 
 	"charm.land/lipgloss/v2"
 
+	"github.com/basecamp/hey-cli/internal/mail"
 	"github.com/basecamp/hey-cli/internal/models"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 // section identifies the top-level navigation area.
@@ -75,11 +77,11 @@ var knownBoxes = []boxSpec{
 
 // orderBoxes sorts boxes by the preferred order. Known boxes appear first
 // in their predefined order; unknown boxes are appended at the end.
-func orderBoxes(boxes []models.Box) []models.Box {
-	ordered := make([]models.Box, 0, len(boxes))
+func orderBoxes(boxes []mail.Source) []mail.Source {
+	ordered := make([]mail.Source, 0, len(boxes))
 	type sourceKey struct {
 		id   int64
-		kind string
+		kind mail.Kind
 	}
 	used := make(map[sourceKey]bool)
 
@@ -105,7 +107,7 @@ func orderBoxes(boxes []models.Box) []models.Box {
 }
 
 // boxNavItems builds nav items for the box row, attaching shortcuts to known boxes.
-func boxNavItems(boxes []models.Box) []navItem {
+func boxNavItems(boxes []mail.Source) []navItem {
 	items := make([]navItem, len(boxes))
 	for i, b := range boxes {
 		shortcut := ""
@@ -117,7 +119,7 @@ func boxNavItems(boxes []models.Box) []navItem {
 		}
 		label := b.Name
 		if isOrganizedMailSource(b.Kind) {
-			label = terminalSafeFolderText(label)
+			label = terminal.SanitizeLine(label)
 		}
 		items[i] = navItem{shortcut: shortcut, label: label}
 	}
@@ -125,7 +127,7 @@ func boxNavItems(boxes []models.Box) []navItem {
 }
 
 // boxForShortcut returns the index of the box matching a Shift+letter shortcut, or -1.
-func boxForShortcut(key string, boxes []models.Box) int {
+func boxForShortcut(key string, boxes []mail.Source) int {
 	for _, spec := range knownBoxes {
 		if spec.key == key {
 			for i, b := range boxes {

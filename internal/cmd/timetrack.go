@@ -8,8 +8,10 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	safefiles "github.com/basecamp/hey-cli/internal/attachments"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 type timetrackCommand struct {
@@ -64,20 +66,10 @@ func (c *timetrackStartCommand) run(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	result, err := sdk.TimeTracks().Start(ctx)
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
-	if writer.IsStyled() {
-		fmt.Fprintln(cmd.OutOrStdout(), "Time tracking started.")
-		return nil
-	}
-
-	normalized, nerr := normalizeAny(result)
-	if nerr != nil {
-		return writeOK(nil, output.WithSummary("Time tracking started"))
-	}
-	return writeOK(normalized,
-		output.WithSummary("Time tracking started"),
+	return writeMutation(cmd, "Time tracking started", result,
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "stop",
 			Command:     "hey timetrack stop",
@@ -113,23 +105,18 @@ func (c *timetrackStopCommand) run(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	track, err := sdk.TimeTracks().GetOngoing(ctx)
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
 	if track == nil {
-		return output.ErrNotFound("time track", "active")
+		return apierr.ErrNotFound("time track", "active")
 	}
 
 	if err = sdk.TimeTracks().Stop(ctx, track.Id); err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
-	if writer.IsStyled() {
-		fmt.Fprintln(cmd.OutOrStdout(), "Time tracking stopped.")
-		return nil
-	}
-
-	return writeOK(nil, output.WithSummary("Time tracking stopped"))
+	return writeMutation(cmd, "Time tracking stopped", nil)
 }
 
 // current
@@ -159,7 +146,7 @@ func (c *timetrackCurrentCommand) run(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	track, err := sdk.TimeTracks().GetOngoing(ctx)
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
 	if writer.IsStyled() {
@@ -277,7 +264,12 @@ func newTimetrackExportCommand() *timetrackExportCommand {
 	timetrackExportCommand.cmd = &cobra.Command{
 		Use:   "export",
 		Short: "Export completed time tracks as CSV",
-		Long:  "Export every completed time track as CSV, newest first. Without --output, the CSV is written directly to stdout. With --output, the command safely saves the CSV and returns file metadata.",
+		Long: `Export every completed time track as CSV, newest first.
+
+Without --output the CSV goes straight to stdout, so redirecting it to a file is the whole
+recipe. The output formatting flags have nothing to reshape there and are refused rather
+than ignored: --json, --quiet, --markdown, --ids-only, --count and --html all need
+--output, which returns file metadata they can format.`,
 		Example: `  hey timetrack export > time-tracking.csv
   hey timetrack export --output time-tracking.csv
   hey timetrack export --output time-tracking.csv --force`,
@@ -300,10 +292,10 @@ func (c *timetrackExportCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	if c.output == "" {
 		if c.force {
-			return output.ErrUsage("--force requires --output")
+			return apierr.ErrUsage("--force requires --output")
 		}
 		if timetrackExportStructuredOutputRequested(cmd) {
-			return output.ErrUsage("output formatting flags require --output for time track exports")
+			return apierr.ErrUsage("output formatting flags require --output for time track exports")
 		}
 	} else if err := ensureTimetrackExportDestination(c.output, c.force); err != nil {
 		return err
@@ -311,12 +303,12 @@ func (c *timetrackExportCommand) run(cmd *cobra.Command, args []string) error {
 
 	data, err := sdk.TimeTracks().Export(cmd.Context())
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
 	if c.output == "" {
 		if _, writeErr := cmd.OutOrStdout().Write(data); writeErr != nil {
-			return output.ErrAPI(0, fmt.Sprintf("could not write time track export: %v", writeErr))
+			return apierr.ErrAPI(0, fmt.Sprintf("could not write time track export: %v", writeErr))
 		}
 		return nil
 	}
@@ -326,16 +318,18 @@ func (c *timetrackExportCommand) run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	result := timeTrackExportResult{Path: destination, ByteSize: written}
-	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Exported time tracks to %s (%s)\n", terminalSafeText(destination), formatByteSize(written))
-		return nil
-	}
-	return writeOK(result, output.WithSummary(fmt.Sprintf("Time tracks exported to %s", destination)))
+	return writeMutationLine(cmd,
+		fmt.Sprintf("Exported time tracks to %s (%s)", destination, formatByteSize(written)),
+		fmt.Sprintf("Time tracks exported to %s", destination),
+		timeTrackExportResult{Path: destination, ByteSize: written})
 }
 
+// timetrackExportStructuredOutputRequested reports whether the caller asked for
+// formatted output, which the export cannot give them without a file to report on:
+// stdout carries the CSV itself. Asking the writer covers every output flag,
+// including the two — --quiet and --html — the hand-written list used to miss.
 func timetrackExportStructuredOutputRequested(cmd *cobra.Command) bool {
-	return jsonFlag || idsOnly || countFlag || markdownF || styledFlag || agentFlag || statsFlag || cmd.Flags().Changed("jq")
+	return writer.RequestedFormat() != output.FormatAuto || htmlOutput || statsFlag || cmd.Flags().Changed("jq")
 }
 
 func ensureTimetrackExportDestination(destination string, force bool) error {
@@ -343,9 +337,9 @@ func ensureTimetrackExportDestination(destination string, force bool) error {
 		return nil
 	}
 	if _, err := os.Lstat(destination); err == nil {
-		return output.ErrUsage(fmt.Sprintf("destination already exists: %s (use --force to replace it)", destination))
+		return apierr.ErrUsage(fmt.Sprintf("destination already exists: %s (use --force to replace it)", destination))
 	} else if !os.IsNotExist(err) {
-		return output.ErrAPI(0, fmt.Sprintf("could not inspect destination: %v", err))
+		return apierr.ErrAPI(0, fmt.Sprintf("could not inspect destination: %v", err))
 	}
 	return nil
 }
@@ -375,7 +369,7 @@ func (c *timetrackCategoriesCommand) run(cmd *cobra.Command, args []string) erro
 
 	categories, err := sdk.TimeTracks().Categories(cmd.Context())
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
 	if writer.IsStyled() {
@@ -387,7 +381,7 @@ func (c *timetrackCategoriesCommand) run(cmd *cobra.Command, args []string) erro
 		table := newTable(cmd.OutOrStdout())
 		table.addRow([]string{"ID", "Title"})
 		for _, category := range categories {
-			table.addRow([]string{fmt.Sprintf("%d", category.Id), terminalSafeText(category.Title)})
+			table.addRow([]string{fmt.Sprintf("%d", category.Id), terminal.SanitizeLine(category.Title)})
 		}
 		table.print()
 		return nil
@@ -444,10 +438,10 @@ func (c *timetrackCategoryCreateCommand) run(cmd *cobra.Command, args []string) 
 
 	title := strings.TrimSpace(args[0])
 	if title == "" {
-		return output.ErrUsage("category title is required")
+		return apierr.ErrUsage("category title is required")
 	}
 	if err := sdk.TimeTracks().CreateCategory(cmd.Context(), title); err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 	return writeTimetrackCategoryMutation(cmd, fmt.Sprintf("Time track category %q created", title))
 }
@@ -463,15 +457,7 @@ func newTimetrackCategoryRenameCommand() *timetrackCategoryRenameCommand {
 		Short:   "Rename a time track category",
 		Example: `  hey timetrack category rename 123 "Planning"`,
 		RunE:    timetrackCategoryRenameCommand.run,
-		Args: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 2 {
-				return nil
-			}
-			if len(args) == 0 {
-				return usageErrorf("%s", cleanUseLine(cmd.UseLine()))
-			}
-			return fmt.Errorf("expected 2 arguments, got %d", len(args))
-		},
+		Args:    usageExactArgs(2),
 	}
 	return timetrackCategoryRenameCommand
 }
@@ -487,10 +473,10 @@ func (c *timetrackCategoryRenameCommand) run(cmd *cobra.Command, args []string) 
 	}
 	title := strings.TrimSpace(args[1])
 	if title == "" {
-		return output.ErrUsage("category title is required")
+		return apierr.ErrUsage("category title is required")
 	}
 	if err := sdk.TimeTracks().UpdateCategory(cmd.Context(), categoryID, title); err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 	return writeTimetrackCategoryMutation(cmd, fmt.Sprintf("Time track category %d renamed to %q", categoryID, title))
 }
@@ -521,18 +507,13 @@ func (c *timetrackCategoryDeleteCommand) run(cmd *cobra.Command, args []string) 
 		return err
 	}
 	if err := sdk.TimeTracks().DeleteCategory(cmd.Context(), categoryID); err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 	return writeTimetrackCategoryMutation(cmd, fmt.Sprintf("Time track category %d deleted", categoryID))
 }
 
 func writeTimetrackCategoryMutation(cmd *cobra.Command, summary string) error {
-	if writer.IsStyled() {
-		fmt.Fprintln(cmd.OutOrStdout(), terminalSafeText(summary)+".")
-		return nil
-	}
-	return writeOK(nil,
-		output.WithSummary(summary),
+	return writeMutation(cmd, summary, nil,
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "list",
 			Command:     "hey timetrack categories",

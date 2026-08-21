@@ -6,8 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
-	"github.com/basecamp/hey-cli/internal/output"
 )
 
 type forwardCommand struct {
@@ -47,23 +47,23 @@ func (c *forwardCommand) run(cmd *cobra.Command, args []string) error {
 
 	threadID, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil {
-		return output.ErrUsage(fmt.Sprintf("invalid thread ID: %s", args[0]))
+		return apierr.ErrUsage(fmt.Sprintf("invalid thread ID: %s", args[0]))
 	}
 
 	to := parseAddresses(c.to)
 	cc := parseAddresses(c.cc)
 	bcc := parseAddresses(c.bcc)
 	if len(to)+len(cc)+len(bcc) == 0 {
-		return output.ErrUsageHint("at least one recipient is required", "hey forward <thread-id> --to <email>")
+		return apierr.ErrUsageHint("at least one recipient is required", "hey forward <thread-id> --to <email>")
 	}
 
 	ctx := cmd.Context()
 	topic, err := rootSDK.Topics().Get(ctx, threadID)
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 	if topic == nil || len(topic.Entries) == 0 {
-		return output.ErrNotFound("entries for thread", args[0])
+		return apierr.ErrNotFound("entries for thread", args[0])
 	}
 	forwardSDK, err := clientForResourceAccount(ctx, topic.AccountId)
 	if err != nil {
@@ -73,28 +73,23 @@ func (c *forwardCommand) run(cmd *cobra.Command, args []string) error {
 
 	draft, err := forwardSDK.Entries().NewForward(ctx, entryID)
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 	if draft == nil {
-		return output.ErrNotFound("forward draft for thread", args[0])
+		return apierr.ErrNotFound("forward draft for thread", args[0])
 	}
 
 	content := htmlutil.PrependText(draft.Content, c.message)
 	if err := forwardSDK.Messages().Create(ctx, draft.Subject, content, to, cc, bcc); err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
-	if writer.IsStyled() {
-		fmt.Fprintln(cmd.OutOrStdout(), "Message forwarded.")
-		return nil
-	}
-
-	return writeOK(map[string]any{
+	return writeMutation(cmd, "Message forwarded", map[string]any{
 		"thread_id": threadID,
 		"entry_id":  entryID,
 		"subject":   draft.Subject,
 		"to":        to,
 		"cc":        cc,
 		"bcc":       bcc,
-	}, output.WithSummary("Message forwarded"))
+	})
 }

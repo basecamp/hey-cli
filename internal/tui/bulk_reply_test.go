@@ -144,7 +144,7 @@ func TestTUIBulkReplySelectionAndPreviewShowExactRecipients(t *testing.T) {
 		t.Fatalf("draft command returned %#v", msg)
 	}
 	view.Update(loaded)
-	if view.bulkReply == nil || !view.CapturingInput() {
+	if bulkReplyModal(view) == nil || !view.CapturingInput() {
 		t.Fatal("draft should open a capturing preview")
 	}
 	preview := view.View()
@@ -181,8 +181,9 @@ func TestTUIBulkReplyPreviewScrollsThroughEveryRecipient(t *testing.T) {
 	if strings.Contains(form.view(), "recipient-12@example.com") {
 		t.Fatal("last recipient should begin below the viewport")
 	}
+	view := newMailView(testVC())
 	for range 100 {
-		_, _ = form.handleKey(keyPress("down"))
+		_, _ = form.handleKey(view, keyPress("down"))
 	}
 	if form.preview.YOffset() == 0 {
 		t.Fatal("down should scroll the recipient preview")
@@ -227,12 +228,12 @@ func TestTUIBulkReplyReviewsThenSendsAndOffersUndo(t *testing.T) {
 	if cmd := view.HandleContentKey(keyPress("enter")); cmd == nil {
 		t.Error("enter should focus the bulk reply editor")
 	}
-	if view.bulkReply == nil || !view.bulkReply.composing {
+	if bulkReplyModal(view) == nil || !bulkReplyModal(view).composing {
 		t.Fatal("preview should advance to the editor")
 	}
 	typeText(view, "Thanks everyone")
 	cmd := view.HandleContentKey(ctrlS())
-	if cmd == nil || !view.bulkReply.sending {
+	if cmd == nil || !bulkReplyModal(view).sending {
 		t.Fatal("ctrl+s should submit the bulk reply")
 	}
 	sent, ok := runCmd(cmd).(bulkReplySentMsg)
@@ -240,7 +241,7 @@ func TestTUIBulkReplyReviewsThenSendsAndOffersUndo(t *testing.T) {
 		t.Fatalf("send returned %#v", sent)
 	}
 	view.Update(sent)
-	if view.bulkReply != nil || len(view.postingList.selectedIDs()) != 0 {
+	if bulkReplyModal(view) != nil || len(view.postingList.selectedIDs()) != 0 {
 		t.Error("successful send should close the form and clear selection")
 	}
 	if view.lastBulkReplyID != 900 || !strings.Contains(view.notice, "2 bulk replies queued with undo available") || !strings.Contains(view.notice, "press u to undo") {
@@ -284,8 +285,8 @@ func TestTUIBulkReplyEmptyDraftNeverSends(t *testing.T) {
 			selectTwoThreads(view)
 			loaded := runCmd(view.HandleContentKey(keyPress("b"))).(bulkReplyDraftLoadedMsg)
 			view.Update(loaded)
-			if view.bulkReply != nil || !strings.Contains(view.notice, "nothing was sent") {
-				t.Errorf("empty draft state = form:%v notice:%q", view.bulkReply, view.notice)
+			if bulkReplyModal(view) != nil || !strings.Contains(view.notice, "nothing was sent") {
+				t.Errorf("empty draft state = form:%v notice:%q", bulkReplyModal(view), view.notice)
 			}
 			if requests := state.snapshot(); len(requests) != 1 || requests[0].method != http.MethodGet {
 				t.Errorf("empty draft made a mutation request: %+v", requests)
@@ -306,8 +307,8 @@ func TestTUIBulkReplySendFailureKeepsEditor(t *testing.T) {
 		t.Fatal("send should fail")
 	}
 	view.Update(sent)
-	if view.bulkReply == nil || view.bulkReply.sending || !view.bulkReply.isError || !strings.Contains(view.bulkReply.status, "Send failed") {
-		t.Errorf("failed editor state = %#v", view.bulkReply)
+	if bulkReplyModal(view) == nil || bulkReplyModal(view).sending || !bulkReplyModal(view).isError || !strings.Contains(bulkReplyModal(view).status, "Send failed") {
+		t.Errorf("failed editor state = %#v", bulkReplyModal(view))
 	}
 }
 
@@ -360,7 +361,7 @@ func TestTUIBulkReplyCanCancelPreviewAndEditor(t *testing.T) {
 		if cmd := view.HandleContentKey(keyPress("esc")); cmd != nil {
 			t.Error("cancel should not start a command")
 		}
-		if view.bulkReply != nil || view.CapturingInput() {
+		if bulkReplyModal(view) != nil || view.CapturingInput() {
 			t.Errorf("cancel did not close bulk reply (advance=%v)", advance)
 		}
 	}
@@ -370,7 +371,7 @@ func TestBulkReplyFormRequiresBodyBeforeSend(t *testing.T) {
 	form := newBulkReplyForm([]int64{100}, nil, newStyles())
 	form.draft.Entries = append(form.draft.Entries, generated.BulkReplyEntry{Id: 501})
 	form.composing = true
-	if _, submit := form.handleKey(tea.KeyPressMsg(tea.Key{Code: 's', Mod: tea.ModCtrl})); submit {
+	if cmd, _ := form.handleKey(newMailView(testVC()), tea.KeyPressMsg(tea.Key{Code: 's', Mod: tea.ModCtrl})); cmd != nil {
 		t.Fatal("empty bulk reply should not submit")
 	}
 	if !form.isError || form.status != "Message is empty" {

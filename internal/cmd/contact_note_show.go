@@ -5,6 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -35,10 +36,10 @@ func (c *contactNoteShowCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	note, err := sdk.Contacts().Note(cmd.Context(), contactID)
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 	if note == nil {
-		return output.ErrNotFound("contact note", args[0])
+		return apierr.ErrNotFound("contact note", args[0])
 	}
 	if writer.IsStyled() {
 		if note.Note == "" {

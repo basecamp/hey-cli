@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/config"
-	"github.com/basecamp/hey-cli/internal/output"
 )
 
 const defaultShellJSON = `{
@@ -533,7 +533,7 @@ func TestSetupOmarchyFailureCarriesStepsInMeta(t *testing.T) {
 	if err == nil {
 		t.Fatal("a failing step must fail the command")
 	}
-	typed := output.AsError(err)
+	typed := apierr.AsError(err)
 	if typed.Meta == nil || typed.Meta["steps"] == nil {
 		t.Errorf("a partial failure must carry the per-step results for scripting callers, got %+v", typed)
 	}

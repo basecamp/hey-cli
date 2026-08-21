@@ -14,7 +14,7 @@ import (
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
-	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
 type uploadedAttachment struct {
@@ -71,27 +71,27 @@ func prepareAttachments(paths []string) ([]preparedAttachment, error) {
 		pathInfo, err := os.Stat(path)
 		if err != nil {
 			closePreparedAttachments(attachments)
-			return nil, output.ErrUsage(fmt.Sprintf("could not inspect attachment %q: %v", path, err))
+			return nil, apierr.ErrUsage(fmt.Sprintf("could not inspect attachment %q: %v", path, err))
 		}
 		if !pathInfo.Mode().IsRegular() {
 			closePreparedAttachments(attachments)
-			return nil, output.ErrUsage(fmt.Sprintf("attachment %q is not a regular file", path))
+			return nil, apierr.ErrUsage(fmt.Sprintf("attachment %q is not a regular file", path))
 		}
 		file, err := os.Open(path) // #nosec G304 -- the user explicitly selected this local attachment
 		if err != nil {
 			closePreparedAttachments(attachments)
-			return nil, output.ErrUsage(fmt.Sprintf("could not open attachment %q: %v", path, err))
+			return nil, apierr.ErrUsage(fmt.Sprintf("could not open attachment %q: %v", path, err))
 		}
 		info, err := file.Stat()
 		if err != nil {
 			_ = file.Close()
 			closePreparedAttachments(attachments)
-			return nil, output.ErrUsage(fmt.Sprintf("could not inspect attachment %q: %v", path, err))
+			return nil, apierr.ErrUsage(fmt.Sprintf("could not inspect attachment %q: %v", path, err))
 		}
 		if !info.Mode().IsRegular() {
 			_ = file.Close()
 			closePreparedAttachments(attachments)
-			return nil, output.ErrUsage(fmt.Sprintf("attachment %q is not a regular file", path))
+			return nil, apierr.ErrUsage(fmt.Sprintf("attachment %q is not a regular file", path))
 		}
 		contentType, err := attachmentContentType(file, path)
 		if err != nil {
@@ -119,7 +119,7 @@ func closePreparedAttachments(attachments []preparedAttachment) {
 func uploadAttachment(ctx context.Context, client *hey.Client, attachment preparedAttachment) (uploadedAttachment, error) {
 	upload, err := client.Attachments().Upload(ctx, attachment.filename, attachment.contentType, attachment.file)
 	if err != nil {
-		return uploadedAttachment{}, convertSDKError(err)
+		return uploadedAttachment{}, apierr.FromSDK(err)
 	}
 	if upload == nil || upload.AttachableSgid == "" {
 		return uploadedAttachment{}, fmt.Errorf("HEY returned an empty attachment reference for %q", attachment.path)

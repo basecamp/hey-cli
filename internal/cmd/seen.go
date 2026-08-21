@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
 type seenCommand struct {
@@ -41,17 +41,10 @@ func (c *seenCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := sdk.Postings().MarkSeen(cmd.Context(), ids); err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
-	summary := fmt.Sprintf("%d %s marked as seen", len(ids), threadNoun(len(ids)))
-
-	if writer.IsStyled() {
-		fmt.Fprintln(cmd.OutOrStdout(), summary+".")
-		return nil
-	}
-
-	return writeOK(nil, output.WithSummary(summary))
+	return writeMutation(cmd, fmt.Sprintf("%d %s marked as seen", len(ids), threadNoun(len(ids))), nil)
 }
 
 // unseen
@@ -88,17 +81,10 @@ func (c *unseenCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := sdk.Postings().MarkUnseen(cmd.Context(), ids); err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
-	summary := fmt.Sprintf("%d %s marked as unseen", len(ids), threadNoun(len(ids)))
-
-	if writer.IsStyled() {
-		fmt.Fprintln(cmd.OutOrStdout(), summary+".")
-		return nil
-	}
-
-	return writeOK(nil, output.WithSummary(summary))
+	return writeMutation(cmd, fmt.Sprintf("%d %s marked as unseen", len(ids), threadNoun(len(ids))), nil)
 }
 
 func parseIntArgs(args []string) ([]int64, error) {
@@ -106,7 +92,7 @@ func parseIntArgs(args []string) ([]int64, error) {
 	for _, arg := range args {
 		id, err := strconv.ParseInt(arg, 10, 64)
 		if err != nil {
-			return nil, output.ErrUsage(fmt.Sprintf("invalid ID: %s", arg))
+			return nil, apierr.ErrUsage(fmt.Sprintf("invalid ID: %s", arg))
 		}
 		ids = append(ids, id)
 	}

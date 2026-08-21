@@ -9,6 +9,8 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
+
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 type timeTrackCategoryEditMode int
@@ -75,7 +77,7 @@ func (m *timeTrackCategoryManager) startRename() tea.Cmd {
 	m.mode = timeTrackCategoryRename
 	m.confirmingDelete = false
 	m.status = ""
-	m.input.SetValue(terminalSafeFolderText(selected.Title))
+	m.input.SetValue(terminal.SanitizeLine(selected.Title))
 	m.input.CursorEnd()
 	return m.input.Focus()
 }
@@ -157,7 +159,7 @@ func (m *timeTrackCategoryManager) view(styles styles, width, height int) string
 		for i := start; i < end; i++ {
 			category := m.categories[i]
 			prefix := "  "
-			line := fmt.Sprintf("%d  %s", category.Id, terminalSafeFolderText(category.Title))
+			line := fmt.Sprintf("%d  %s", category.Id, terminal.SanitizeLine(category.Title))
 			line = truncateStr(line, max(contentWidth-2, 1))
 			if i == m.cursor {
 				prefix = "› "
@@ -172,7 +174,7 @@ func (m *timeTrackCategoryManager) view(styles styles, width, height int) string
 		b.WriteString(lipgloss.NewStyle().Foreground(colorError).Render("Press x again to delete this category. Its time tracks will become uncategorized."))
 	} else if m.status != "" {
 		b.WriteString("\n")
-		b.WriteString(styleMuted.Render(terminalSafeFolderText(m.status)))
+		b.WriteString(styleMuted.Render(terminal.SanitizeLine(m.status)))
 	}
 	return b.String()
 }

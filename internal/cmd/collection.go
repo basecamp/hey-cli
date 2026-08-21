@@ -1,18 +1,19 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/mail"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 type collectionsCommand struct {
@@ -36,7 +37,7 @@ func newCollectionsCommand() *collectionsCommand {
 	}
 
 	collectionsCommand.cmd.Flags().IntVar(&collectionsCommand.limit, "limit", 0, "Maximum number of collections to show")
-	collectionsCommand.cmd.Flags().BoolVar(&collectionsCommand.all, "all", false, "Show all results (override --limit)")
+	collectionsCommand.cmd.Flags().BoolVar(&collectionsCommand.all, "all", false, "Fetch all results (override --limit)")
 
 	return collectionsCommand
 }
@@ -48,7 +49,7 @@ func (c *collectionsCommand) run(cmd *cobra.Command, args []string) error {
 
 	result, err := sdk.Collections().List(cmd.Context())
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
 	collections := make([]generated.Collection, 0)
@@ -65,7 +66,7 @@ func (c *collectionsCommand) run(cmd *cobra.Command, args []string) error {
 		table := newTable(cmd.OutOrStdout())
 		table.addRow([]string{"ID", "Name"})
 		for _, collection := range collections {
-			table.addRow([]string{fmt.Sprintf("%d", collection.Id), terminalSafeText(collection.Name)})
+			table.addRow([]string{fmt.Sprintf("%d", collection.Id), terminal.SanitizeLine(collection.Name)})
 		}
 		table.print()
 		if notice != "" {
@@ -95,28 +96,19 @@ type collectionCommand struct {
 	page  string
 }
 
-type collectionOutput struct {
-	ID         int64                     `json:"id"`
-	Name       string                    `json:"name,omitempty"`
-	AppURL     string                    `json:"app_url,omitempty"`
-	CreatedAt  *time.Time                `json:"created_at,omitempty"`
-	UpdatedAt  *time.Time                `json:"updated_at,omitempty"`
-	Postings   []collectionPostingOutput `json:"postings"`
-	NextPage   string                    `json:"next_page,omitempty"`
-	TotalCount int                       `json:"total_count"`
-}
-
-type collectionPostingOutput struct {
-	generated.Posting
-	TopicID int64 `json:"topic_id,omitempty"`
-}
-
-type collectionPostingMarkdown struct {
-	ID      int64  `json:"id"`
-	TopicID int64  `json:"topic_id,omitempty"`
-	From    string `json:"from,omitempty"`
-	Summary string `json:"summary,omitempty"`
-	Date    string `json:"date,omitempty"`
+var collectionListing = postingsListing{
+	heading: "Collection",
+	summary: func(count int, name string) string {
+		return fmt.Sprintf("%d %s in %s", count, threadNoun(count), name)
+	},
+	cursorNotice: func(shown, total int) string {
+		return fmt.Sprintf("Showing %d remaining results from this cursor (%d threads in the collection).", shown, total)
+	},
+	breadcrumbs: []output.Breadcrumb{
+		{Action: "read", Command: "hey threads <topic-id>", Description: "Read an email thread"},
+		{Action: "add_to_collection", Command: "hey collection add <topic-id> --to <collection-id>", Description: "Add a thread to a collection"},
+		{Action: "remove_from_collection", Command: "hey collection remove <topic-id> --from <collection-id>", Description: "Remove a thread from a collection"},
+	},
 }
 
 func newCollectionCommand() *collectionCommand {
@@ -125,7 +117,7 @@ func newCollectionCommand() *collectionCommand {
 		Use:   "collection <id>",
 		Short: "View and manage an email collection",
 		Annotations: map[string]string{
-			"agent_notes": "The ID comes from hey collections. Detail returns posting IDs for organization actions and topic_id for reading threads and collection membership changes.",
+			"agent_notes": "The ID comes from hey collections. Detail returns posting IDs for organization actions and topic_id for reading threads, and answers --json, --styled, --markdown, --ids-only and --count.",
 		},
 		Example: `  hey collection 123
   hey collection 123 --page next-cursor
@@ -160,93 +152,17 @@ func (c *collectionCommand) run(cmd *cobra.Command, args []string) error {
 	if c.page != "" {
 		params = &generated.GetCollectionParams{Page: &c.page}
 	}
-	page, err := sdk.Collections().GetPage(cmd.Context(), collectionID, params)
+	first, err := sdk.Collections().GetPage(cmd.Context(), collectionID, params)
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
-	if page == nil || page.Collection == nil {
-		return output.ErrNotFound("collection", args[0])
+	if first == nil || first.Collection == nil {
+		return apierr.ErrNotFound("collection", args[0])
 	}
 
-	collection, nextPage, total, err := paginateCollection(cmd.Context(), collectionID, page, c.limit, c.all)
-	if err != nil {
-		return err
-	}
-	notice := collectionTruncationNotice(len(collection.Postings), total, nextPage != "", c.all, c.page != "")
-
-	switch writer.EffectiveFormat() {
-	case output.FormatStyled:
-		return writeStyledCollection(cmd, collection, notice)
-	case output.FormatIDs, output.FormatCount:
-		if stderrNotice := paginationNoticeForStderr(writer.EffectiveFormat(), notice); stderrNotice != "" {
-			fmt.Fprintln(cmd.ErrOrStderr(), stderrNotice)
-		}
-		if nextPage != "" {
-			fmt.Fprintf(cmd.ErrOrStderr(), "next_page: %s\n", terminalSafeText(nextPage))
-		}
-		return writeOK(collection.Postings)
-	case output.FormatMarkdown:
-		return writeMarkdownCollection(cmd, collection, nextPage, total, notice)
-	default:
-		return writeOK(makeCollectionOutput(collection, nextPage, total),
-			output.WithSummary(fmt.Sprintf("%d %s in %s", len(collection.Postings), threadNoun(len(collection.Postings)), collection.Name)),
-			output.WithNotice(notice),
-			output.WithBreadcrumbs(
-				output.Breadcrumb{Action: "read", Command: "hey threads <topic-id>", Description: "Read an email thread"},
-				output.Breadcrumb{Action: "add_to_collection", Command: "hey collection add <topic-id> --to <collection-id>", Description: "Add a thread to a collection"},
-				output.Breadcrumb{Action: "remove_from_collection", Command: "hey collection remove <topic-id> --from <collection-id>", Description: "Remove a thread from a collection"},
-			),
-		)
-	}
-}
-
-func writeStyledCollection(cmd *cobra.Command, collection *generated.CollectionWithPostings, notice string) error {
-	fmt.Fprintf(cmd.OutOrStdout(), "Collection: %s\n\n", terminalSafeText(collection.Name))
-	table := newTable(cmd.OutOrStdout())
-	table.addRow([]string{"ID", "Thread", "From", "Summary", "Date"})
-	for _, posting := range collection.Postings {
-		topicID := ""
-		if id := resolvePostingTopicID(posting); id != 0 {
-			topicID = fmt.Sprintf("%d", id)
-		}
-		table.addRow([]string{
-			fmt.Sprintf("%d", posting.Id),
-			topicID,
-			terminalSafeText(posting.Creator.Name),
-			truncate(terminalSafeText(posting.Summary), 60),
-			formatDate(posting.CreatedAt),
-		})
-	}
-	table.print()
-	if notice != "" {
-		fmt.Fprintln(cmd.OutOrStdout(), notice)
-	}
-	return nil
-}
-
-func writeMarkdownCollection(cmd *cobra.Command, collection *generated.CollectionWithPostings, nextPage string, total int, notice string) error {
-	fmt.Fprintf(cmd.OutOrStdout(), "# %s\n\n", markdownSafeText(collection.Name))
-	rows := make([]collectionPostingMarkdown, len(collection.Postings))
-	for i, posting := range collection.Postings {
-		rows[i] = collectionPostingMarkdown{
-			ID:      posting.Id,
-			TopicID: resolvePostingTopicID(posting),
-			From:    posting.Creator.Name,
-			Summary: posting.Summary,
-			Date:    formatDate(posting.CreatedAt),
-		}
-	}
-	if err := writeOK(rows); err != nil {
-		return err
-	}
-	fmt.Fprintf(cmd.OutOrStdout(), "\n**Total threads:** %d\n", total)
-	if nextPage != "" {
-		fmt.Fprintf(cmd.OutOrStdout(), "**Next page:** `%s`\n", terminalSafeText(nextPage))
-	}
-	if notice != "" {
-		fmt.Fprintf(cmd.OutOrStdout(), "\n%s\n", markdownSafeText(notice))
-	}
-	return nil
+	seed := pageResult[generated.Posting]{Items: first.Collection.Postings, Cursor: first.NextPage, Total: first.TotalCount}
+	request := pageRequest{Limit: c.limit, All: c.all, MaxPages: maxPostingPages}
+	return collectionListing.write(cmd, mail.CollectionSource(first.Collection), seed, request, c.page != "")
 }
 
 type collectionCreateCommand struct {
@@ -275,7 +191,7 @@ func (c *collectionCreateCommand) run(cmd *cobra.Command, args []string) error {
 
 	name := strings.TrimSpace(args[0])
 	if name == "" {
-		return output.ErrUsage("collection name is required")
+		return apierr.ErrUsage("collection name is required")
 	}
 	accountID, _ := sdk.AccountID()
 	if err := sdk.Collections().Create(cmd.Context(), hey.CreateCollectionParams{
@@ -283,7 +199,7 @@ func (c *collectionCreateCommand) run(cmd *cobra.Command, args []string) error {
 		Summary:   strings.TrimSpace(c.summary),
 		AccountID: accountID,
 	}); err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
 	return writeCollectionMutation(cmd, fmt.Sprintf("Collection %q created", name), output.Breadcrumb{
@@ -326,24 +242,24 @@ func (c *collectionUpdateCommand) run(cmd *cobra.Command, args []string) error {
 	nameChanged := cmd.Flags().Changed("name")
 	summaryChanged := cmd.Flags().Changed("summary")
 	if !nameChanged && !summaryChanged {
-		return output.ErrUsage("at least one of --name or --summary is required")
+		return apierr.ErrUsage("at least one of --name or --summary is required")
 	}
 
 	params := hey.UpdateCollectionParams{}
 	if nameChanged {
 		params.Name = strings.TrimSpace(c.name)
 		if params.Name == "" {
-			return output.ErrUsage("collection name is required")
+			return apierr.ErrUsage("collection name is required")
 		}
 	}
 	if summaryChanged {
 		params.Summary = strings.TrimSpace(c.summary)
 		if params.Summary == "" {
-			return output.ErrUsage("collection summary is required")
+			return apierr.ErrUsage("collection summary is required")
 		}
 	}
 	if err := sdk.Collections().Update(cmd.Context(), collectionID, params); err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
 	return writeCollectionMutation(cmd, fmt.Sprintf("Collection %d updated", collectionID))
@@ -373,7 +289,7 @@ func (c *collectionAddCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if strings.TrimSpace(c.to) == "" {
-		return output.ErrUsage("collection is required (use --to <collection-id>)")
+		return apierr.ErrUsage("collection is required (use --to <collection-id>)")
 	}
 	collectionID, err := parsePositiveID(c.to, "collection")
 	if err != nil {
@@ -385,7 +301,7 @@ func (c *collectionAddCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	for _, topicID := range topicIDs {
 		if err := sdk.Collections().AddTopic(cmd.Context(), topicID, collectionID); err != nil {
-			return convertSDKError(err)
+			return apierr.FromSDK(err)
 		}
 	}
 
@@ -417,7 +333,7 @@ func (c *collectionRemoveCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if strings.TrimSpace(c.from) == "" {
-		return output.ErrUsage("collection is required (use --from <collection-id>)")
+		return apierr.ErrUsage("collection is required (use --from <collection-id>)")
 	}
 	collectionID, err := parsePositiveID(c.from, "collection")
 	if err != nil {
@@ -429,7 +345,7 @@ func (c *collectionRemoveCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	for _, topicID := range topicIDs {
 		if err := sdk.Collections().RemoveTopic(cmd.Context(), topicID, collectionID); err != nil {
-			return convertSDKError(err)
+			return apierr.FromSDK(err)
 		}
 	}
 
@@ -437,77 +353,9 @@ func (c *collectionRemoveCommand) run(cmd *cobra.Command, args []string) error {
 	return writeCollectionMutation(cmd, summary)
 }
 
-func paginateCollection(ctx context.Context, collectionID int64, first *hey.CollectionPage, limit int, all bool) (*generated.CollectionWithPostings, string, int, error) {
-	collection := *first.Collection
-	collection.Postings = append([]generated.Posting(nil), first.Collection.Postings...)
-	nextPage := first.NextPage
-	total := max(first.TotalCount, len(collection.Postings))
-
-	needMore := all || (limit > 0 && len(collection.Postings) < limit)
-	for page := 1; page <= maxAdditionalPages && needMore && nextPage != ""; page++ {
-		cursor := nextPage
-		result, err := sdk.Collections().GetPage(ctx, collectionID, &generated.GetCollectionParams{Page: &cursor})
-		if err != nil {
-			return nil, "", 0, convertSDKError(err)
-		}
-		if result == nil || result.Collection == nil {
-			return nil, "", 0, fmt.Errorf("collection %d page %q returned no data", collectionID, cursor)
-		}
-		collection.Postings = append(collection.Postings, result.Collection.Postings...)
-		nextPage = result.NextPage
-		total = max(total, result.TotalCount, len(collection.Postings))
-		needMore = all || (limit > 0 && len(collection.Postings) < limit)
-	}
-
-	if limit > 0 && !all && len(collection.Postings) > limit {
-		collection.Postings = collection.Postings[:limit]
-		nextPage = ""
-	}
-	return &collection, nextPage, total, nil
-}
-
-func collectionTruncationNotice(shown, total int, hasMore, all, fromCursor bool) string {
-	if all {
-		if hasMore {
-			return fmt.Sprintf("Showing %d results. Pagination limit reached; continue with --page using next_page.", shown)
-		}
-		if shown < total {
-			if fromCursor {
-				return fmt.Sprintf("Showing %d remaining results from this cursor (%d threads in the collection).", shown, total)
-			}
-			return fmt.Sprintf("Showing %d of %d results; HEY returned no additional page cursor.", shown, total)
-		}
-		return ""
-	}
-	if shown < total {
-		return fmt.Sprintf("Showing %d of %d results. Use --all to see everything.", shown, total)
-	}
-	if hasMore {
-		return fmt.Sprintf("Showing %d results. More available; use --all to fetch all.", shown)
-	}
-	return ""
-}
-
-func makeCollectionOutput(collection *generated.CollectionWithPostings, nextPage string, total int) collectionOutput {
-	postings := make([]collectionPostingOutput, len(collection.Postings))
-	for i, posting := range collection.Postings {
-		postings[i] = collectionPostingOutput{Posting: posting, TopicID: resolvePostingTopicID(posting)}
-	}
-	return collectionOutput{
-		ID:         collection.Id,
-		Name:       collection.Name,
-		AppURL:     collection.AppUrl,
-		CreatedAt:  nonZeroTime(collection.CreatedAt),
-		UpdatedAt:  nonZeroTime(collection.UpdatedAt),
-		Postings:   postings,
-		NextPage:   nextPage,
-		TotalCount: total,
-	}
-}
-
 func writeCollectionMutation(cmd *cobra.Command, summary string, breadcrumbs ...output.Breadcrumb) error {
 	if writer.IsStyled() {
-		fmt.Fprintln(cmd.OutOrStdout(), terminalSafeText(summary)+".")
+		fmt.Fprintln(cmd.OutOrStdout(), terminal.SanitizeLine(summary)+".")
 		return nil
 	}
 	options := []output.ResponseOption{output.WithSummary(summary)}
@@ -523,10 +371,10 @@ func parsePositiveTopicIDs(values []string) ([]int64, error) {
 	for i, value := range values {
 		id, err := strconv.ParseInt(value, 10, 64)
 		if err != nil || id <= 0 {
-			return nil, output.ErrUsage(fmt.Sprintf("invalid topic ID: %s", value))
+			return nil, apierr.ErrUsage(fmt.Sprintf("invalid topic ID: %s", value))
 		}
 		if seen[id] {
-			return nil, output.ErrUsage(fmt.Sprintf("duplicate topic ID: %d", id))
+			return nil, apierr.ErrUsage(fmt.Sprintf("duplicate topic ID: %d", id))
 		}
 		seen[id] = true
 		ids[i] = id

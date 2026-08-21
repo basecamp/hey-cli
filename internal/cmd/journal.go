@@ -1,11 +1,14 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/editor"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/markdown"
@@ -125,7 +128,7 @@ func newJournalReadCommand() *journalReadCommand {
 		Use:   "read [date]",
 		Short: "Read a journal entry (default: today)",
 		Example: `  hey journal read
-  hey journal read 2024-01-15
+  hey journal read 2026-03-15
   hey journal read --html
   hey journal read --json`,
 		RunE: journalReadCommand.run,
@@ -140,15 +143,18 @@ func (c *journalReadCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	date := time.Now().Format("2006-01-02")
+	date := time.Now().Format(dateLayout)
 	if len(args) > 0 {
+		if _, err := parseDateArg("date", args[0]); err != nil {
+			return err
+		}
 		date = args[0]
 	}
 
 	ctx := cmd.Context()
 	content, err := sdk.Journal().GetContent(ctx, date)
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
 	if content == "" {
@@ -193,10 +199,15 @@ func newJournalWriteCommand() *journalWriteCommand {
 	journalWriteCommand.cmd = &cobra.Command{
 		Use:   "write [date] [content]",
 		Short: "Write or edit a journal entry (default: today)",
-		Example: `  hey journal write "Today was great"
-  hey journal write 2024-01-15 "Retrospective"
-  hey journal write -c "Today was great"
-  echo "Journal content" | hey journal write`,
+		Long: `Write or edit a journal entry, today's by default.
+
+Writing empty content removes the day's entry, and the command says "removed" rather than
+"saved". Omitting content opens $EDITOR on the day's existing entry; if that entry cannot
+be read the command stops rather than opening a blank buffer over it.`,
+		Example: `  hey journal write "Shipped the pagination fix and paired with Jane on the cover art."
+  hey journal write 2026-03-15 "Retrospective: the migration took two days longer than planned."
+  hey journal write -c "Reviewed the Q3 numbers with Alice."
+  echo "Notes from the offsite" | hey journal write`,
 		RunE: journalWriteCommand.run,
 		Args: cobra.MaximumNArgs(2),
 	}
@@ -211,18 +222,18 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	date := time.Now().Format("2006-01-02")
+	date := ""
 	content := c.content
 
 	switch len(args) {
 	case 2:
 		if content != "" {
-			return output.ErrUsage("--content and positional content are mutually exclusive")
+			return apierr.ErrUsage("--content and positional content are mutually exclusive")
 		}
 		if !isDateArg(args[0]) {
-			return output.ErrUsageHint(
+			return apierr.ErrUsageHint(
 				"first argument must be a date (YYYY-MM-DD) when two positional arguments are given",
-				"hey journal write 2024-01-15 \"Content\"  or  hey journal write \"Content\"")
+				"hey journal write 2026-03-15 \"Retrospective\"  or  hey journal write \"Retrospective\"")
 		}
 		date = args[0]
 		content = args[1]
@@ -231,48 +242,68 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 			date = args[0]
 		} else {
 			if content != "" {
-				return output.ErrUsage("--content and positional content are mutually exclusive")
+				return apierr.ErrUsage("--content and positional content are mutually exclusive")
 			}
 			content = args[0]
 		}
 	}
 	ctx := cmd.Context()
-	if content == "" {
-		if !stdinIsTerminal() {
-			var err error
-			content, err = readStdin()
-			if err != nil {
-				return err
-			}
-			if content == "" {
-				return output.ErrUsage("no content provided (use --content to provide inline, or pipe to stdin)")
-			}
-		} else {
-			existing, _ := sdk.Journal().GetContent(ctx, date)
+	if content == "" && !stdinIsTerminal() {
+		piped, err := readStdin()
+		if err != nil {
+			return err
+		}
+		if piped == "" {
+			return apierr.ErrUsage("no content provided (use --content to provide inline, or pipe to stdin)")
+		}
+		content = piped
+	}
 
-			var err error
-			content, err = editor.Open(existing)
-			if err != nil {
-				return output.ErrAPI(0, fmt.Sprintf("could not open editor: %v", err))
-			}
+	if date == "" {
+		date = time.Now().Format(dateLayout)
+	}
+
+	if content == "" {
+		var err error
+		content, err = journalEntryFromEditor(ctx, date, sdk.Journal().GetContent, editor.Open)
+		if err != nil {
+			return err
 		}
 	}
 
+	content = strings.TrimSpace(content)
+
 	if _, err := sdk.Journal().Update(ctx, date, content); err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
-	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Journal entry for %s saved.\n", date)
-		return nil
+	verb := "saved"
+	if content == "" {
+		verb = "removed"
 	}
 
-	return writeOK(nil,
-		output.WithSummary(fmt.Sprintf("Journal entry for %s saved", date)),
+	return writeMutation(cmd, fmt.Sprintf("Journal entry for %s %s", date, verb), nil,
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "read",
 			Command:     fmt.Sprintf("hey journal read %s", date),
 			Description: "Read the journal entry",
 		}),
 	)
+}
+
+type journalContentFetcher func(context.Context, string) (string, error)
+
+// journalEntryFromEditor opens $EDITOR on the day's entry. A read that fails is fatal:
+// an empty day answers 204 as an empty string, so anything else means we do not know
+// what the day holds -- and saving an empty editor over it would replace the entry.
+func journalEntryFromEditor(ctx context.Context, date string, fetch journalContentFetcher, open func(string) (string, error)) (string, error) {
+	existing, err := fetch(ctx, date)
+	if err != nil {
+		return "", apierr.FromSDK(err)
+	}
+	edited, err := open(existing)
+	if err != nil {
+		return "", apierr.ErrAPI(0, fmt.Sprintf("could not open editor: %v", err))
+	}
+	return edited, nil
 }

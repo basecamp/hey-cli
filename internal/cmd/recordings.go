@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 	"time"
 
@@ -9,6 +11,7 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -29,7 +32,7 @@ func newRecordingsCommand() *recordingsCommand {
 			"agent_notes": "Returns recordings grouped by type for a calendar. Defaults to today + 30 days.",
 		},
 		Example: `  hey recordings 123
-  hey recordings 123 --starts-on 2024-01-01 --ends-on 2024-01-31
+  hey recordings 123 --starts-on 2026-01-01 --ends-on 2026-01-31
   hey recordings 123 --limit 5 --json`,
 		RunE: recordingsCommand.run,
 		Args: usageExactOneArg(),
@@ -50,21 +53,28 @@ func (c *recordingsCommand) run(cmd *cobra.Command, args []string) error {
 
 	calendarID, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil {
-		return output.ErrUsage(fmt.Sprintf("invalid calendar ID: %s", args[0]))
+		return apierr.ErrUsage(fmt.Sprintf("invalid calendar ID: %s", args[0]))
 	}
 
 	startsOn := c.startsOn
 	if startsOn == "" {
-		startsOn = time.Now().Format("2006-01-02")
+		startsOn = time.Now().Format(dateLayout)
 	}
+	start, err := parseDateArg("starts-on date", startsOn)
+	if err != nil {
+		return err
+	}
+
 	endsOn := c.endsOn
 	if endsOn == "" {
-		var start time.Time
-		start, err = time.Parse("2006-01-02", startsOn)
-		if err != nil {
-			return output.ErrUsage(fmt.Sprintf("invalid starts-on date: %s", startsOn))
-		}
-		endsOn = start.AddDate(0, 0, 30).Format("2006-01-02")
+		endsOn = start.AddDate(0, 0, 30).Format(dateLayout)
+	}
+	end, err := parseDateArg("ends-on date", endsOn)
+	if err != nil {
+		return err
+	}
+	if end.Before(start) {
+		return apierr.ErrUsage(fmt.Sprintf("ends-on %s is before starts-on %s", endsOn, startsOn))
 	}
 
 	ctx := cmd.Context()
@@ -73,7 +83,7 @@ func (c *recordingsCommand) run(cmd *cobra.Command, args []string) error {
 		EndsOn:   &endsOn,
 	})
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
 	if resp == nil {
@@ -96,7 +106,8 @@ func (c *recordingsCommand) run(cmd *cobra.Command, args []string) error {
 	notice := output.TruncationNotice(shown, total)
 
 	if writer.IsStyled() {
-		for recType, recordings := range *resp {
+		for _, recType := range slices.Sorted(maps.Keys(*resp)) {
+			recordings := (*resp)[recType]
 			if len(recordings) == 0 {
 				continue
 			}
@@ -114,8 +125,27 @@ func (c *recordingsCommand) run(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return writeOK(resp,
-		output.WithSummary(fmt.Sprintf("Recordings for calendar %d (%s to %s)", calendarID, startsOn, endsOn)),
-		output.WithNotice(notice),
-	)
+	summary := output.WithSummary(fmt.Sprintf("Recordings for calendar %d (%s to %s)", calendarID, startsOn, endsOn))
+
+	// --count and --ids-only can only read a list, and recordings arrive grouped
+	// by type. Hand those two formats the same recordings flattened.
+	switch writer.EffectiveFormat() {
+	case output.FormatCount, output.FormatIDs:
+		return writeOK(flattenRecordings(resp), summary, output.WithNotice(notice))
+	default:
+		return writeOK(resp, summary, output.WithNotice(notice))
+	}
+}
+
+// flattenRecordings drops the grouping by type, ordering the types by name so the
+// same window always lists the same way.
+func flattenRecordings(resp *generated.CalendarRecordingsResponse) []generated.Recording {
+	flattened := []generated.Recording{}
+	if resp == nil {
+		return flattened
+	}
+	for _, recType := range slices.Sorted(maps.Keys(*resp)) {
+		flattened = append(flattened, (*resp)[recType]...)
+	}
+	return flattened
 }

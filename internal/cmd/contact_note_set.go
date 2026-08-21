@@ -9,6 +9,7 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/editor"
 	"github.com/basecamp/hey-cli/internal/output"
 )
@@ -58,17 +59,17 @@ func (c *contactNoteSetCommand) run(cmd *cobra.Command, args []string) error {
 		} else {
 			existing, getErr := contactNoteForEditor(cmd.Context(), contactID, sdk.Contacts().Note)
 			if getErr != nil {
-				return convertSDKError(getErr)
+				return apierr.FromSDK(getErr)
 			}
 			content, err = editor.Open(existing)
 			if err != nil {
-				return output.ErrAPI(0, fmt.Sprintf("could not open editor: %v", err))
+				return apierr.ErrAPI(0, fmt.Sprintf("could not open editor: %v", err))
 			}
 		}
 	}
 	content = strings.TrimSpace(content)
 	if content == "" {
-		return output.ErrUsage("note cannot be empty; use `hey contacts note delete <id>` to clear it")
+		return apierr.ErrUsage("note cannot be empty; use `hey contacts note delete <id>` to clear it")
 	}
 
 	note, err := sdk.Contacts().SetNote(cmd.Context(), contactID, content)
@@ -76,14 +77,12 @@ func (c *contactNoteSetCommand) run(cmd *cobra.Command, args []string) error {
 		return convertContactWriteError(err)
 	}
 	if note == nil {
-		return output.ErrAPI(0, "contact note save returned no data")
+		return apierr.ErrAPI(0, "contact note save returned no data")
 	}
-	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Private note for contact %d saved.\n", contactID)
-		return nil
-	}
-	return writeOK(note,
-		output.WithSummary("Private contact note saved"),
+	return writeMutationLine(cmd,
+		fmt.Sprintf("Private note for contact %d saved.", contactID),
+		"Private contact note saved",
+		note,
 		output.WithBreadcrumbs(output.Breadcrumb{Action: "read", Command: fmt.Sprintf("hey contacts note show %d", contactID), Description: "Read the private note"}),
 	)
 }
@@ -91,7 +90,7 @@ func (c *contactNoteSetCommand) run(cmd *cobra.Command, args []string) error {
 func contactNoteInput(flagChanged bool, flagValue string, args []string) (string, bool, error) {
 	if len(args) == 2 {
 		if flagChanged {
-			return "", false, output.ErrUsage("--note and positional note are mutually exclusive")
+			return "", false, apierr.ErrUsage("--note and positional note are mutually exclusive")
 		}
 		return args[1], true, nil
 	}

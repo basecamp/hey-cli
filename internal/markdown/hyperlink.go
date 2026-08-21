@@ -7,10 +7,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// reMarkdownLink matches markdown-style links [text](url).
-// Handles one level of balanced parentheses in URLs (e.g., Wikipedia links).
-var reMarkdownLink = regexp.MustCompile(`\[([^\]]+)\]\((https?://(?:[^()\s]*|\([^()\s]*\))*)\)`)
-
 // reBareURL matches bare http/https URLs not already inside an OSC 8 sequence.
 // Trailing punctuation is trimmed by trimURL to preserve balanced parentheses.
 var reBareURL = regexp.MustCompile(`https?://[^\s\x1b\x07<>"\x00-\x1f]+`)
@@ -23,17 +19,6 @@ func Hyperlink(text, url string) string {
 		return text
 	}
 	return ansi.SetHyperlink(url) + text + ansi.ResetHyperlink()
-}
-
-// LinkifyMarkdownLinks turns [text](url) into OSC 8 hyperlinks on the link
-// text. Use it on paths that bypass Render.
-func LinkifyMarkdownLinks(text string) string {
-	return reMarkdownLink.ReplaceAllStringFunc(text, func(s string) string {
-		if m := reMarkdownLink.FindStringSubmatch(s); len(m) >= 3 {
-			return Hyperlink(m[1], m[2])
-		}
-		return s
-	})
 }
 
 // LinkifyURLs wraps bare URLs in OSC 8 hyperlink sequences, leaving URLs that

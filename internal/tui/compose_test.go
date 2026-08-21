@@ -6,11 +6,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 )
 
@@ -52,9 +54,9 @@ func composeTestServer(t *testing.T) (*mailView, *struct {
 			_, _ = w.Write([]byte(`{"id":1,"accounts":[{"id":9,"status":"active"}],"senders":[{"id":42,"account_id":9,"default":true}]}`))
 		case "/topics/100.json":
 			_, _ = w.Write([]byte(`{"id":100,"account_id":9,"name":"Quarterly planning","entries":[{"id":500},{"id":501}]}`))
-		case "/topics/100":
-			w.Header().Set("Content-Type", "text/html")
-			_, _ = w.Write([]byte(`<span class="entry__full-recipients"><a title="jane@example.com">Jane</a></span>`))
+		case "/messages/501.json":
+			_, _ = w.Write([]byte(`{"id":501,"sender":{"id":3,"name":"Rick Sanchez","email_address":"rick@example.com"},
+				"addressed":{"directly":[{"id":1,"name":"Jane Doe","email_address":"jane@example.com"}]}}`))
 		case "/entries/501/forwards/new.json":
 			_, _ = w.Write([]byte(`{"subject":"Fwd: Quarterly planning","content":"<div>Quoted message</div>"}`))
 		default:
@@ -85,7 +87,7 @@ func TestComposeOpensAndCancels(t *testing.T) {
 		t.Fatal("no form should be open initially")
 	}
 	v.HandleContentKey(keyPress("c"))
-	if !v.CapturingInput() || v.compose == nil || v.compose.mode != composeNew {
+	if !v.CapturingInput() || composeModal(v) == nil || composeModal(v).mode != composeNew {
 		t.Fatal("'c' should open a new-message form")
 	}
 	if !strings.Contains(v.View(), "New message") {
@@ -103,7 +105,7 @@ func TestComposeOpensAndCancels(t *testing.T) {
 func TestComposeTabCyclesFields(t *testing.T) {
 	v := mailWithPostings()
 	v.HandleContentKey(keyPress("c"))
-	f := v.compose
+	f := composeModal(v)
 	if f.focus != int(fieldTo) {
 		t.Fatalf("focus should start on To, got %d", f.focus)
 	}
@@ -130,8 +132,8 @@ func TestComposeValidatesBeforeSending(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("ctrl+s on an empty form must not send")
 	}
-	if !v.compose.isError || !strings.Contains(v.compose.status, "recipient") {
-		t.Errorf("expected a recipient error, got %q", v.compose.status)
+	if !composeModal(v).isError || !strings.Contains(composeModal(v).status, "recipient") {
+		t.Errorf("expected a recipient error, got %q", composeModal(v).status)
 	}
 	typeText(v, "a@b.com")
 	v.HandleContentKey(keyPress("tab")) // cc
@@ -140,8 +142,8 @@ func TestComposeValidatesBeforeSending(t *testing.T) {
 	if cmd := v.HandleContentKey(ctrlS()); cmd != nil {
 		t.Fatal("missing subject must not send")
 	}
-	if !strings.Contains(v.compose.status, "Subject") {
-		t.Errorf("expected a subject error, got %q", v.compose.status)
+	if !strings.Contains(composeModal(v).status, "Subject") {
+		t.Errorf("expected a subject error, got %q", composeModal(v).status)
 	}
 }
 
@@ -162,7 +164,7 @@ func TestComposeSendsMessage(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected a send command")
 	}
-	if !v.compose.sending {
+	if !composeModal(v).sending {
 		t.Error("form should be marked sending")
 	}
 	msg := runCmd(cmd)
@@ -186,7 +188,7 @@ func TestComposeSendsMessage(t *testing.T) {
 	}
 
 	v.Update(sent)
-	if v.compose != nil {
+	if composeModal(v) != nil {
 		t.Error("form should close after a successful send")
 	}
 	if v.notice != "Message sent" || !strings.Contains(v.View(), "Message sent") {
@@ -201,13 +203,13 @@ func TestComposeSendsMessage(t *testing.T) {
 func TestComposeSendFailureKeepsForm(t *testing.T) {
 	v := mailWithPostings()
 	v.HandleContentKey(keyPress("c"))
-	v.compose.sending = true
+	composeModal(v).sending = true
 	v.Update(composeSentMsg{label: "Message sent", err: io.ErrUnexpectedEOF})
-	if v.compose == nil {
+	if composeModal(v) == nil {
 		t.Fatal("form should stay open so the user can retry")
 	}
-	if v.compose.sending || !v.compose.isError || !strings.Contains(v.compose.status, "Send failed") {
-		t.Errorf("expected an inline error, got sending=%v status=%q", v.compose.sending, v.compose.status)
+	if composeModal(v).sending || !composeModal(v).isError || !strings.Contains(composeModal(v).status, "Send failed") {
+		t.Errorf("expected an inline error, got sending=%v status=%q", composeModal(v).sending, composeModal(v).status)
 	}
 }
 
@@ -218,7 +220,7 @@ func TestReplyFormPrefillsAndSends(t *testing.T) {
 		boxID: 1, topicID: 7, topicName: "Kitchen", entryID: 99,
 		to: []string{"jane@x.com"}, cc: []string{"bob@x.com"},
 	})
-	f := v.compose
+	f := composeModal(v)
 	if f == nil || f.mode != composeReply {
 		t.Fatal("reply context should open a reply form")
 	}
@@ -261,6 +263,10 @@ func TestReplyLoadsAndSendsThroughThreadAccount(t *testing.T) {
 	if accountID, ok := ctxMsg.sdk.AccountID(); !ok || accountID != 9 {
 		t.Fatalf("reply SDK account = %d, %v", accountID, ok)
 	}
+	// The recipients come from the entry the reply answers, and reach whoever wrote it.
+	if want := []string{"jane@example.com", "rick@example.com"}; !slices.Equal(ctxMsg.to, want) {
+		t.Errorf("to = %v, want %v", ctxMsg.to, want)
+	}
 	v.Update(ctxMsg)
 	typeText(v, "Thanks!")
 	msg := runCmd(v.HandleContentKey(ctrlS()))
@@ -269,6 +275,70 @@ func TestReplyLoadsAndSendsThroughThreadAccount(t *testing.T) {
 	}
 	if rec.path != "/entries/501/replies.json" || rec.account != "9" {
 		t.Fatalf("reply path/account = %s/%q, want /entries/501/replies.json/9", rec.path, rec.account)
+	}
+}
+
+func TestRecipientsForReplyTo(t *testing.T) {
+	contact := func(address string) generated.Contact {
+		return generated.Contact{EmailAddress: address}
+	}
+
+	for _, testCase := range []struct {
+		name           string
+		message        generated.Message
+		wantTo, wantCC []string
+		wantBCC        []string
+	}{
+		{
+			name: "the sender joins the To line",
+			message: generated.Message{
+				Sender: contact("rick@example.com"),
+				Addressed: generated.Addressed{
+					Directly:    []generated.Contact{contact("jane@example.com")},
+					Copied:      []generated.Contact{contact("cc@example.com")},
+					Blindcopied: []generated.Contact{contact("bcc@example.com")},
+				},
+			},
+			wantTo:  []string{"jane@example.com", "rick@example.com"},
+			wantCC:  []string{"cc@example.com"},
+			wantBCC: []string{"bcc@example.com"},
+		},
+		{
+			name: "the creator stands in for a missing sender",
+			message: generated.Message{
+				Creator:   contact("rick@example.com"),
+				Addressed: generated.Addressed{Directly: []generated.Contact{contact("jane@example.com")}},
+			},
+			wantTo: []string{"jane@example.com", "rick@example.com"},
+		},
+		{
+			name: "the sender is never addressed twice",
+			message: generated.Message{
+				Sender: contact("Rick@example.com"),
+				Addressed: generated.Addressed{
+					Directly: []generated.Contact{contact("rick@example.com")},
+					Copied:   []generated.Contact{contact("RICK@example.com")},
+				},
+			},
+			wantTo: []string{"Rick@example.com"},
+		},
+		{
+			name:    "an entry HEY tells us nothing about addresses nobody",
+			message: generated.Message{},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			to, cc, bcc := recipientsForReplyTo(testCase.message)
+			if !slices.Equal(to, testCase.wantTo) {
+				t.Errorf("to = %v, want %v", to, testCase.wantTo)
+			}
+			if !slices.Equal(cc, testCase.wantCC) {
+				t.Errorf("cc = %v, want %v", cc, testCase.wantCC)
+			}
+			if !slices.Equal(bcc, testCase.wantBCC) {
+				t.Errorf("bcc = %v, want %v", bcc, testCase.wantBCC)
+			}
+		})
 	}
 }
 
@@ -286,7 +356,7 @@ func TestForwardFormLoadsLatestEntryAndSends(t *testing.T) {
 	}
 	v.Update(ctxMsg)
 
-	f := v.compose
+	f := composeModal(v)
 	if f == nil || f.mode != composeForward {
 		t.Fatal("forward context should open a forward form")
 	}
@@ -328,8 +398,8 @@ func TestForwardFormLoadsLatestEntryAndSends(t *testing.T) {
 	}
 
 	v.Update(sent)
-	if v.compose != nil || v.notice != "Message forwarded" {
-		t.Errorf("forward completion = compose %v notice %q", v.compose, v.notice)
+	if composeModal(v) != nil || v.notice != "Message forwarded" {
+		t.Errorf("forward completion = compose %v notice %q", composeModal(v), v.notice)
 	}
 }
 
@@ -338,7 +408,7 @@ func TestForwardCompletionNoticeIsVisibleInThread(t *testing.T) {
 	v.Resize(80, 30)
 	v.inThread = true
 	v.topicViewport.SetContent("Original thread")
-	v.compose = newForwardForm(forwardContextLoadedMsg{
+	v.modal = newForwardForm(forwardContextLoadedMsg{
 		topicName: "Quarterly planning",
 		subject:   "Fwd: Quarterly planning",
 		content:   "<div>Quoted message</div>",
@@ -346,7 +416,7 @@ func TestForwardCompletionNoticeIsVisibleInThread(t *testing.T) {
 
 	v.Update(composeSentMsg{label: "Message forwarded"})
 
-	if v.compose != nil {
+	if composeModal(v) != nil {
 		t.Error("forward form should close after sending")
 	}
 	if view := v.View(); !strings.Contains(view, "Message forwarded") || !strings.Contains(view, "Original thread") {
@@ -359,7 +429,7 @@ func TestForwardKeyInThreadLoadsContext(t *testing.T) {
 	v.inThread = true
 	v.topicID = 123
 	cmd := v.HandleContentKey(keyPress("f"))
-	if cmd == nil || !v.loading || v.activeRequestKind != mailRequestForward {
+	if cmd == nil || !v.requests.loading || v.requests.kind != mailRequestForward {
 		t.Fatal("'f' in a thread should start loading the forward context")
 	}
 }
@@ -369,7 +439,7 @@ func TestReplyKeyInThreadLoadsContext(t *testing.T) {
 	v.inThread = true
 	v.topicID = 123
 	cmd := v.HandleContentKey(keyPress("r"))
-	if cmd == nil || !v.loading {
+	if cmd == nil || !v.requests.loading {
 		t.Fatal("'r' in a thread should start loading the reply context")
 	}
 }
@@ -385,8 +455,8 @@ func TestModelRoutesAllKeysToOpenForm(t *testing.T) {
 	// reach the form instead.
 	updated, _ = m.Update(keyPress("q"))
 	m = updated.(model)
-	if m.mailView.compose == nil || m.mailView.compose.inputs[fieldTo].Value() != "q" {
-		t.Errorf("'q' should be typed into the form, got %q", m.mailView.compose.inputs[fieldTo].Value())
+	if composeModal(m.mailView) == nil || composeModal(m.mailView).inputs[fieldTo].Value() != "q" {
+		t.Errorf("'q' should be typed into the form, got %q", composeModal(m.mailView).inputs[fieldTo].Value())
 	}
 	focusBefore := m.focus
 	updated, _ = m.Update(keyPress("tab"))
@@ -394,8 +464,8 @@ func TestModelRoutesAllKeysToOpenForm(t *testing.T) {
 	if m.focus != focusBefore {
 		t.Error("tab must not change the focus row while a form is open")
 	}
-	if m.mailView.compose.focus != int(fieldCc) {
-		t.Errorf("tab should move to Cc, got %d", m.mailView.compose.focus)
+	if composeModal(m.mailView).focus != int(fieldCc) {
+		t.Errorf("tab should move to Cc, got %d", composeModal(m.mailView).focus)
 	}
 	updated, _ = m.Update(keyPress("esc"))
 	m = updated.(model)

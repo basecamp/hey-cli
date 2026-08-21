@@ -1,10 +1,9 @@
 package cmd
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -34,14 +33,12 @@ func (c *screenerClearCommand) run(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if err := sdk.Clearances().Punt(cmd.Context()); err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
-	if writer.IsStyled() {
-		fmt.Fprintln(cmd.OutOrStdout(), "Screener cleared. Everyone waiting will be asked about again on their next email.")
-		return nil
-	}
-	return writeOK(map[string]any{"action": "clear", "queued": true},
-		output.WithSummary("Screener cleared"),
+	return writeMutationLine(cmd,
+		"Screener cleared. Everyone waiting will be asked about again on their next email.",
+		"Screener cleared",
+		map[string]any{"action": "clear", "queued": true},
 		output.WithBreadcrumbs(output.Breadcrumb{Action: "list", Command: "hey screener list", Description: "Check the queue"}),
 	)
 }

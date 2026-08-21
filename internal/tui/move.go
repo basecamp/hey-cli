@@ -8,21 +8,26 @@ import (
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
-	"github.com/basecamp/hey-cli/internal/models"
+	"github.com/basecamp/hey-cli/internal/mail"
 )
 
 type movePicker struct {
+	plainModal
+
 	postingID    int64
 	summary      string
-	destinations []models.Box
+	destinations []mail.Source
 	cursor       int
 }
 
-func newMovePicker(posting models.Posting, boxes []models.Box, currentSource models.Box) *movePicker {
-	destinations := make([]models.Box, 0, len(boxes))
+// newMovePicker offers the boxes a thread can be moved to: not where it already is, not
+// somewhere the reader organizes mail themselves, and not Bubble Up, which HEY schedules
+// rather than files into.
+func newMovePicker(posting mail.Posting, boxes []mail.Source, currentSource mail.Source) *movePicker {
+	destinations := make([]mail.Source, 0, len(boxes))
 	for _, box := range boxes {
 		isCurrentSource := box.ID == currentSource.ID && box.Kind == currentSource.Kind
-		if isOrganizedMailSource(box.Kind) || isCurrentSource || strings.EqualFold(box.Kind, hey.BoxKindBubbleUp) || strings.EqualFold(box.Name, "Bubble Up") {
+		if isOrganizedMailSource(box.Kind) || isCurrentSource || box.BoxKind == hey.BoxKindBubbleUp {
 			continue
 		}
 		destinations = append(destinations, box)
@@ -34,11 +39,29 @@ func newMovePicker(posting models.Posting, boxes []models.Box, currentSource mod
 	}
 }
 
-func (p *movePicker) selected() *models.Box {
+func (p *movePicker) selected() *mail.Source {
 	if p.cursor < 0 || p.cursor >= len(p.destinations) {
 		return nil
 	}
 	return &p.destinations[p.cursor]
+}
+
+func (p *movePicker) handleKey(view *mailView, msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	switch msg.Key().Code {
+	case tea.KeyEscape:
+		return nil, false
+	case tea.KeyEnter:
+		if destination := p.selected(); destination != nil {
+			return view.movePostingToBox(p.postingID, *destination), false
+		}
+		return nil, false
+	}
+	p.update(msg)
+	return nil, true
+}
+
+func (p *movePicker) draw(view *mailView) string {
+	return p.view(view.vc.styles, view.vc.width)
 }
 
 func (p *movePicker) update(msg tea.KeyPressMsg) {

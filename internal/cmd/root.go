@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/auth"
 	"github.com/basecamp/hey-cli/internal/config"
 	"github.com/basecamp/hey-cli/internal/output"
@@ -404,12 +405,12 @@ func migrateOldCredentials(_ string) {
 }
 
 func normalizeCobraError(err error) error {
-	var e *output.Error
+	var e *apierr.Error
 	if errors.As(err, &e) {
 		return err
 	}
 	if isCobraParseError(err) {
-		return output.ErrUsageHint(err.Error(), "Run 'hey --help' for usage information")
+		return apierr.ErrUsageHint(err.Error(), "Run 'hey --help' for usage information")
 	}
 	return err
 }

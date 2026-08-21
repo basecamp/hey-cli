@@ -10,7 +10,7 @@ import (
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
-	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
 type contactsCommand struct {
@@ -43,7 +43,7 @@ func newContactsCommand() *contactsCommand {
 func parseContactID(value string) (int64, error) {
 	id, err := strconv.ParseInt(value, 10, 64)
 	if err != nil || id <= 0 {
-		return 0, output.ErrUsage(fmt.Sprintf("invalid contact ID: %s", value))
+		return 0, apierr.ErrUsage(fmt.Sprintf("invalid contact ID: %s", value))
 	}
 	return id, nil
 }
@@ -58,7 +58,7 @@ func contactNoun(count int) string {
 func convertContactWriteError(err error) error {
 	var conflict *hey.ContactConflictError
 	if !errors.As(err, &conflict) {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 	ids := make([]string, 0, len(conflict.ConflictingContactIDs))
 	for _, id := range conflict.ConflictingContactIDs {
@@ -68,5 +68,5 @@ func convertContactWriteError(err error) error {
 	if len(ids) > 0 {
 		hint += " Conflicting contact IDs: " + strings.Join(ids, ", ") + "."
 	}
-	return &output.Error{Code: "conflict", Message: conflict.Error(), Hint: hint, HTTPStatus: 409, Cause: err}
+	return apierr.ErrConflict(409, conflict.Error(), hint, err)
 }

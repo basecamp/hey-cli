@@ -24,6 +24,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
+	"github.com/basecamp/hey-cli/internal/mail"
 	"github.com/basecamp/hey-cli/internal/models"
 )
 
@@ -56,9 +57,9 @@ func mailWithPostings() *mailView {
 	return v
 }
 
-func currentPostingsLoaded(v *mailView, postings []models.Posting) postingsLoadedMsg {
+func currentPostingsLoaded(v *mailView, postings []mail.Posting) postingsLoadedMsg {
 	return postingsLoadedMsg{
-		requestID: v.activeRequestID,
+		requestID: v.requests.id,
 		boxID:     v.currentBoxID(),
 		postings:  postings,
 	}
@@ -155,7 +156,7 @@ func TestMailViewInitFetchesBoxes(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("Init with no boxes should return a fetch command")
 	}
-	if !v.loading {
+	if !v.requests.loading {
 		t.Error("Init should set loading = true")
 	}
 }
@@ -168,7 +169,7 @@ func TestMailViewInitRefetchesWhenBoxesLoaded(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("Init with boxes should return a fetch command for current box")
 	}
-	if !v.loading {
+	if !v.requests.loading {
 		t.Error("Init should set loading = true")
 	}
 }
@@ -189,13 +190,13 @@ func TestMailViewHandlesBoxesLoaded(t *testing.T) {
 func TestMailViewHandlesPostingsLoaded(t *testing.T) {
 	v := newMailView(testVC())
 	v.boxes = testBoxes()
-	v.loading = true
+	v.requests.loading = true
 
 	_, consumed := v.Update(currentPostingsLoaded(v, testPostings()))
 	if !consumed {
 		t.Error("postingsLoadedMsg should be consumed")
 	}
-	if v.loading {
+	if v.requests.loading {
 		t.Error("loading should be false after postings loaded")
 	}
 	if len(v.postingList.postings) != 2 {
@@ -207,9 +208,9 @@ func TestMailViewIgnoresPostingLoadFromEarlierBoxVisit(t *testing.T) {
 	v := mailWithPostings()
 
 	v.SubnavRight()
-	stale := currentPostingsLoaded(v, []models.Posting{{ID: 200, Summary: "The Feed message"}})
+	stale := currentPostingsLoaded(v, []mail.Posting{{ID: 200, Summary: "The Feed message"}})
 	v.SubnavLeft()
-	current := currentPostingsLoaded(v, []models.Posting{{ID: 300, Summary: "Current Imbox message"}})
+	current := currentPostingsLoaded(v, []mail.Posting{{ID: 300, Summary: "Current Imbox message"}})
 	v.Update(current)
 	v.Update(stale)
 
@@ -233,7 +234,7 @@ func TestMailViewReportsCurrentPostingLoadFailure(t *testing.T) {
 	if _, ok := runCmd(cmd).(errMsg); !ok {
 		t.Error("current posting load error should produce errMsg")
 	}
-	if v.loading {
+	if v.requests.loading {
 		t.Error("failed current posting load should stop loading")
 	}
 }
@@ -250,14 +251,14 @@ func TestMailViewIgnoresPostingErrorFromEarlierBoxVisit(t *testing.T) {
 	if !consumed || cmd != nil {
 		t.Error("an earlier box error should be ignored")
 	}
-	if !v.loading {
+	if !v.requests.loading {
 		t.Error("an earlier box error should not stop the current box load")
 	}
 }
 
 func TestMailViewHandlesTopicLoaded(t *testing.T) {
 	v := mailWithPostings()
-	v.loading = true
+	v.requests.loading = true
 
 	_, consumed := v.Update(topicLoadedMsg{
 		boxID:   1,
@@ -271,7 +272,7 @@ func TestMailViewHandlesTopicLoaded(t *testing.T) {
 	if !v.inThread || v.topicID != 100 || v.topicName != "Test topic" {
 		t.Errorf("thread state = open:%v id:%d name:%q", v.inThread, v.topicID, v.topicName)
 	}
-	if v.loading {
+	if v.requests.loading {
 		t.Error("loading should be false")
 	}
 }
@@ -531,23 +532,23 @@ func TestMailViewIgnoreActionsSkipThreadsAlreadyInRequestedState(t *testing.T) {
 
 func TestMailViewMovePickerMovesToSelectedBox(t *testing.T) {
 	v, recorded := mailWithTestServer(t, http.StatusNoContent)
-	v.boxes = []models.Box{
-		{ID: 1, Kind: hey.BoxKindImbox, Name: "Imbox"},
-		{ID: 2, Kind: hey.BoxKindFeed, Name: "The Feed"},
-		{ID: 3, Kind: hey.BoxKindSetAside, Name: "Set Aside"},
-		{ID: 4, Kind: hey.BoxKindLater, Name: "Reply Later"},
-		{ID: 5, Kind: hey.BoxKindTrail, Name: "Paper Trail"},
-		{ID: 6, Kind: hey.BoxKindBubbleUp, Name: "Bubble Up"},
+	v.boxes = []mail.Source{
+		{Kind: mail.KindBox, ID: 1, BoxKind: hey.BoxKindImbox, Name: "Imbox"},
+		{Kind: mail.KindBox, ID: 2, BoxKind: hey.BoxKindFeed, Name: "The Feed"},
+		{Kind: mail.KindBox, ID: 3, BoxKind: hey.BoxKindSetAside, Name: "Set Aside"},
+		{Kind: mail.KindBox, ID: 4, BoxKind: hey.BoxKindLater, Name: "Reply Later"},
+		{Kind: mail.KindBox, ID: 5, BoxKind: hey.BoxKindTrail, Name: "Paper Trail"},
+		{Kind: mail.KindBox, ID: 6, BoxKind: hey.BoxKindBubbleUp, Name: "Bubble Up"},
 	}
 
 	if cmd := v.HandleContentKey(keyPress("m")); cmd != nil {
 		t.Fatal("opening the move picker should not start a request")
 	}
-	if !v.CapturingInput() || v.movePicker == nil {
+	if !v.CapturingInput() || moveModal(v) == nil {
 		t.Fatal("move picker should capture input")
 	}
-	if len(v.movePicker.destinations) != 4 {
-		t.Fatalf("destinations = %v, want four boxes", v.movePicker.destinations)
+	if len(moveModal(v).destinations) != 4 {
+		t.Fatalf("destinations = %v, want four boxes", moveModal(v).destinations)
 	}
 	if view := v.View(); !strings.Contains(view, "Move thread") || !strings.Contains(view, "marks the thread as seen") {
 		t.Errorf("move picker does not use thread terminology: %q", view)
@@ -560,7 +561,7 @@ func TestMailViewMovePickerMovesToSelectedBox(t *testing.T) {
 	if !ok || done.err != nil {
 		t.Fatalf("move command returned %#v", msg)
 	}
-	if v.movePicker != nil || v.CapturingInput() {
+	if moveModal(v) != nil || v.CapturingInput() {
 		t.Error("move picker should close after choosing a destination")
 	}
 	if recorded.body.BoxID == nil || *recorded.body.BoxID != 2 {
@@ -581,28 +582,28 @@ func TestMailViewMovePickerMovesToSelectedBox(t *testing.T) {
 
 func TestMailViewMovePickerKeepsBoxWithCollidingLabelID(t *testing.T) {
 	v := mailWithPostings()
-	v.boxes = []models.Box{
-		{ID: 12, Kind: hey.BoxKindImbox, Name: "Imbox"},
-		{ID: 12, Kind: mailSourceKindFolder, Name: "Receipts"},
+	v.boxes = []mail.Source{
+		{Kind: mail.KindBox, ID: 12, BoxKind: hey.BoxKindImbox, Name: "Imbox"},
+		{Kind: mail.KindFolder, ID: 12, Name: "Receipts"},
 	}
 	v.boxIndex = 1
 
 	v.HandleContentKey(keyPress("m"))
-	if v.movePicker == nil || len(v.movePicker.destinations) != 1 {
-		t.Fatalf("move destinations = %+v", v.movePicker)
+	if moveModal(v) == nil || len(moveModal(v).destinations) != 1 {
+		t.Fatalf("move destinations = %+v", moveModal(v))
 	}
-	destination := v.movePicker.destinations[0]
-	if destination.ID != 12 || destination.Kind != hey.BoxKindImbox {
+	destination := moveModal(v).destinations[0]
+	if destination.ID != 12 || destination.BoxKind != hey.BoxKindImbox {
 		t.Errorf("destination = %+v, want colliding Imbox", destination)
 	}
 }
 
 func TestMailViewMovePickerSelectsWithArrowKeys(t *testing.T) {
 	v, recorded := mailWithTestServer(t, http.StatusNoContent)
-	v.boxes = []models.Box{
-		{ID: 1, Kind: hey.BoxKindImbox, Name: "Imbox"},
-		{ID: 2, Kind: hey.BoxKindFeed, Name: "The Feed"},
-		{ID: 3, Kind: hey.BoxKindSetAside, Name: "Set Aside"},
+	v.boxes = []mail.Source{
+		{Kind: mail.KindBox, ID: 1, BoxKind: hey.BoxKindImbox, Name: "Imbox"},
+		{Kind: mail.KindBox, ID: 2, BoxKind: hey.BoxKindFeed, Name: "The Feed"},
+		{Kind: mail.KindBox, ID: 3, BoxKind: hey.BoxKindSetAside, Name: "Set Aside"},
 	}
 
 	v.HandleContentKey(keyPress("m"))
@@ -618,16 +619,16 @@ func TestMailViewMovePickerSelectsWithArrowKeys(t *testing.T) {
 
 func TestMailViewMovePickerCancelsWithoutRequest(t *testing.T) {
 	v, recorded := mailWithTestServer(t, http.StatusNoContent)
-	v.boxes = []models.Box{
-		{ID: 1, Kind: hey.BoxKindImbox, Name: "Imbox"},
-		{ID: 2, Kind: hey.BoxKindFeed, Name: "The Feed"},
+	v.boxes = []mail.Source{
+		{Kind: mail.KindBox, ID: 1, BoxKind: hey.BoxKindImbox, Name: "Imbox"},
+		{Kind: mail.KindBox, ID: 2, BoxKind: hey.BoxKindFeed, Name: "The Feed"},
 	}
 
 	v.HandleContentKey(keyPress("m"))
 	if cmd := v.HandleContentKey(keyPress("esc")); cmd != nil {
 		t.Fatal("canceling the move picker should not return a command")
 	}
-	if v.movePicker != nil || v.CapturingInput() {
+	if moveModal(v) != nil || v.CapturingInput() {
 		t.Error("escape should close the move picker")
 	}
 	if len(recorded.requests) != 0 {
@@ -666,11 +667,11 @@ func TestMailViewLoadsFolderSourcesAndPostings(t *testing.T) {
 	if !consumed || postingsCmd == nil {
 		t.Fatal("folder sources should be loaded and start the first mailbox request")
 	}
-	if len(v.boxes) != 2 || v.boxes[1].Kind != mailSourceKindFolder || v.boxes[1].Name != "Receipts" {
+	if len(v.boxes) != 2 || v.boxes[1].Kind != mail.KindFolder || v.boxes[1].Name != "Receipts" {
 		t.Fatalf("mail sources = %+v", v.boxes)
 	}
 
-	if cmd := v.SubnavRight(); cmd != nil || v.labels == nil {
+	if cmd := v.SubnavRight(); cmd != nil || labelsModal(v) == nil {
 		t.Fatal("moving right past the last box should open the Labels picker")
 	}
 	folderCmd := v.HandleContentKey(keyPress("enter"))
@@ -751,18 +752,20 @@ func TestMailViewFolderGrowsAsTheReaderScrolls(t *testing.T) {
 
 // --- Growing a list as the reader scrolls ---
 
+// A box grows by following the next_history_url HEY hands back, on the box's own route —
+// the cursor the named routes are the only ones to serve, and the only one whose ordering
+// matches the page it came from.
 func TestMailViewBoxGrowsAsTheReaderScrolls(t *testing.T) {
-	var pages []string
+	var reads []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		pages = append(pages, r.URL.Query().Get("page"))
+		reads = append(reads, r.URL.Path+"?"+r.URL.Query().Get("page"))
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Query().Get("page") == "cursor-2" {
 			_, _ = w.Write([]byte(`{"id":1,"kind":"imbox","name":"Imbox","postings":[
 				{"id":102,"summary":"Third","created_at":"2025-03-01T08:00:00Z","seen":true}]}`))
 			return
 		}
-		w.Header().Set("Link", "<http://"+r.Host+"/boxes/1.json?page=cursor-2>; rel=\"next\"")
-		_, _ = w.Write([]byte(`{"id":1,"kind":"imbox","name":"Imbox","postings":[
+		_, _ = w.Write([]byte(`{"id":1,"kind":"imbox","name":"Imbox","next_history_url":"/imbox.json?page=cursor-2","postings":[
 			{"id":100,"summary":"First","created_at":"2025-03-01T10:00:00Z","seen":true},
 			{"id":101,"summary":"Second","created_at":"2025-03-01T09:00:00Z","seen":true}]}`))
 	}))
@@ -787,8 +790,50 @@ func TestMailViewBoxGrowsAsTheReaderScrolls(t *testing.T) {
 	if len(v.postingList.postings) != 3 || v.postingList.postings[2].Summary != "Third" {
 		t.Errorf("grown list = %+v", v.postingList.postings)
 	}
-	if strings.Join(pages, ",") != ",cursor-2" {
-		t.Errorf("page requests = %v", pages)
+	if strings.Join(reads, ",") != "/imbox.json?,/imbox.json?cursor-2" {
+		t.Errorf("reads = %v", reads)
+	}
+}
+
+// The Feed orders and pages its postings its own way, so it is read on its own route
+// rather than through /boxes/{id} — follow one route's cursor into the other's ordering
+// and postings repeat or go missing.
+func TestMailViewReadsTheFeedOnItsOwnRoute(t *testing.T) {
+	var reads []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reads = append(reads, r.URL.Path+"?"+r.URL.Query().Get("page"))
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/feedbox.json" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":2,"kind":"feedbox","name":"The Feed","next_history_url":"https://app.hey.com/feedbox.json?page=feed-cursor-2","postings":[
+			{"id":300,"summary":"The Whale Weekly","created_at":"2025-03-01T10:00:00Z","seen":true}]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	vc := testVC()
+	vc.sdk = hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
+	v := newMailView(vc)
+	v.Resize(vc.width, vc.height)
+	v.boxes = orderBoxes(testBoxes())
+	v.boxIndex = 1
+
+	loaded := runCmd(v.requestPostings(v.boxes[1])).(postingsLoadedMsg)
+	if loaded.err != nil {
+		t.Fatalf("reading the Feed failed: %v", loaded.err)
+	}
+	more, _ := v.Update(loaded)
+	if v.postingPaging.nextPage != "https://app.hey.com/feedbox.json?page=feed-cursor-2" {
+		t.Errorf("next cursor = %q, want the Feed's own next_history_url", v.postingPaging.nextPage)
+	}
+	if more == nil {
+		t.Fatal("a Feed the reader can see the end of should read on")
+	}
+
+	v.Update(runCmd(more))
+	if strings.Join(reads, ",") != "/feedbox.json?,/feedbox.json?feed-cursor-2" {
+		t.Errorf("reads = %v, want both pages on the Feed's route", reads)
 	}
 }
 
@@ -796,9 +841,9 @@ func TestMailViewReadsOnOnlyAsTheCursorNearsTheBottom(t *testing.T) {
 	v := mailWithPostings()
 	v.postingList.hideSeenState = true
 	v.postingList.setSize(80, 20)
-	postings := make([]models.Posting, 0, 20)
+	postings := make([]mail.Posting, 0, 20)
 	for id := range 20 {
-		postings = append(postings, models.Posting{ID: int64(200 + id), Seen: true})
+		postings = append(postings, mail.Posting{ID: int64(200 + id), Seen: true})
 	}
 	v.postingList.setPostings(postings)
 	v.postingPaging.nextPage = "cursor-2"
@@ -828,7 +873,7 @@ func TestMailViewGrowingSkipsPostingsAlreadyShown(t *testing.T) {
 		requestID:  v.moreRequestID,
 		boxID:      v.currentBoxID(),
 		sourceKind: v.currentSourceKind(),
-		postings: []models.Posting{
+		postings: []mail.Posting{
 			testPostings()[1],
 			{ID: 102, Summary: "Third", Seen: true},
 		},
@@ -881,7 +926,7 @@ func TestMailViewFolderDiscoveryFailurePreservesMailAndRetries(t *testing.T) {
 	v.Update(runCmd(firstPostings))
 
 	retry := v.HandleContentKey(keyPress("g"))
-	if retry == nil || !v.loading {
+	if retry == nil || !v.requests.loading {
 		t.Fatal("g should retry failed folder discovery")
 	}
 	recovered := runCmd(retry).(mailSourcesLoadedMsg)
@@ -896,7 +941,7 @@ func TestMailViewFolderDiscoveryFailurePreservesMailAndRetries(t *testing.T) {
 
 func TestMailViewFolderDiscoveryFailurePreservesKnownFolders(t *testing.T) {
 	v := mailWithPostings()
-	v.boxes = append(v.boxes, models.Box{ID: 12, Kind: mailSourceKindFolder, Name: "Receipts"})
+	v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindFolder, Name: "Receipts"})
 	v.sourceRequestID = 1
 
 	v.Update(mailSourcesLoadedMsg{
@@ -904,7 +949,7 @@ func TestMailViewFolderDiscoveryFailurePreservesKnownFolders(t *testing.T) {
 		sources:   testBoxes(),
 		folderErr: fmt.Errorf("navigation unavailable"),
 	})
-	if sourceIndex(v.boxes, 12, mailSourceKindFolder) == 0 || v.folderDiscoveryErr == "" {
+	if sourceIndex(v.boxes, 12, mail.KindFolder) == 0 || v.folderDiscoveryErr == "" {
 		t.Errorf("sources = %+v error=%q", v.boxes, v.folderDiscoveryErr)
 	}
 }
@@ -912,7 +957,7 @@ func TestMailViewFolderDiscoveryFailurePreservesKnownFolders(t *testing.T) {
 func TestMailViewIgnoresStaleFolderDiscovery(t *testing.T) {
 	v := mailWithPostings()
 	v.sourceRequestID = 2
-	v.Update(mailSourcesLoadedMsg{requestID: 1, sources: []models.Box{{ID: 99, Kind: mailSourceKindFolder, Name: "Stale"}}})
+	v.Update(mailSourcesLoadedMsg{requestID: 1, sources: []mail.Source{{ID: 99, Kind: mail.KindFolder, Name: "Stale"}}})
 	if len(v.boxes) != len(testBoxes()) {
 		t.Errorf("stale discovery replaced sources: %+v", v.boxes)
 	}
@@ -921,10 +966,10 @@ func TestMailViewIgnoresStaleFolderDiscovery(t *testing.T) {
 func TestMailViewFolderPickerFilesAndUnfilesThread(t *testing.T) {
 	t.Run("file", func(t *testing.T) {
 		v, recorded := mailWithTestServer(t, http.StatusNoContent)
-		v.boxes = append(v.boxes, models.Box{ID: 12, Kind: mailSourceKindFolder, Name: "Receipts"})
+		v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindFolder, Name: "Receipts"})
 
 		v.HandleContentKey(keyPress("g"))
-		if v.folderPicker == nil || !v.CapturingInput() {
+		if folderModal(v) == nil || !v.CapturingInput() {
 			t.Fatal("folder picker should capture input")
 		}
 		if view := v.View(); !strings.Contains(view, "Label thread") || !strings.Contains(view, "[ ] Receipts") || !strings.Contains(view, "Create a new label") {
@@ -949,8 +994,8 @@ func TestMailViewFolderPickerFilesAndUnfilesThread(t *testing.T) {
 
 	t.Run("unfile", func(t *testing.T) {
 		v, recorded := mailWithTestServer(t, http.StatusNoContent)
-		v.boxes = append(v.boxes, models.Box{ID: 12, Kind: mailSourceKindFolder, Name: "Receipts"})
-		v.postingList.postings[0].Folders = []models.Folder{{ID: 12, Name: "Receipts"}}
+		v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindFolder, Name: "Receipts"})
+		v.postingList.postings[0].Folders = []mail.Folder{{ID: 12, Name: "Receipts"}}
 
 		v.HandleContentKey(keyPress("g"))
 		if view := v.View(); !strings.Contains(view, "[x] Receipts") || !strings.Contains(view, "Remove all labels") {
@@ -970,8 +1015,8 @@ func TestMailViewFolderPickerFilesAndUnfilesThread(t *testing.T) {
 
 	t.Run("remove all", func(t *testing.T) {
 		v, recorded := mailWithTestServer(t, http.StatusNoContent)
-		v.boxes = append(v.boxes, models.Box{ID: 12, Kind: mailSourceKindFolder, Name: "Receipts"})
-		v.postingList.postings[0].Folders = []models.Folder{{ID: 12, Name: "Receipts"}}
+		v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindFolder, Name: "Receipts"})
+		v.postingList.postings[0].Folders = []mail.Folder{{ID: 12, Name: "Receipts"}}
 
 		v.HandleContentKey(keyPress("g"))
 		v.HandleContentKey(keyPress("down"))
@@ -994,10 +1039,10 @@ func TestMailViewFolderPickerCreatesFolder(t *testing.T) {
 	v, recorded := mailWithTestServer(t, http.StatusNoContent)
 
 	v.HandleContentKey(keyPress("g"))
-	if cmd := v.HandleContentKey(keyPress("enter")); cmd == nil || v.folderPicker == nil || !v.folderPicker.creating {
+	if cmd := v.HandleContentKey(keyPress("enter")); cmd == nil || folderModal(v) == nil || !folderModal(v).creating {
 		t.Fatal("selecting create should focus the folder name input")
 	}
-	v.folderPicker.input.SetValue("Travel receipts")
+	folderModal(v).input.SetValue("Travel receipts")
 	done, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(folderActionDoneMsg)
 	if !ok || done.err != nil || !done.created {
 		t.Fatalf("create command returned %#v", done)
@@ -1022,32 +1067,34 @@ func TestMailViewFolderPickerScrollsAndSanitizesNames(t *testing.T) {
 		if id == 20 {
 			name = "Archive\x1b]2;owned\a\n2026"
 		}
-		v.boxes = append(v.boxes, models.Box{ID: id + 100, Kind: mailSourceKindFolder, Name: name})
+		v.boxes = append(v.boxes, mail.Source{ID: id + 100, Kind: mail.KindFolder, Name: name})
 	}
 
 	v.HandleContentKey(keyPress("g"))
 	for range 19 {
 		v.HandleContentKey(keyPress("down"))
 	}
+	// The window-title sequence goes with its payload, rather than leaving the payload
+	// behind as debris with its escape defaced: a name is one line of plain text.
 	view := v.View()
-	if strings.Contains(view, "Label 01") || !strings.Contains(view, "Archive�]2;owned��2026") {
+	if strings.Contains(view, "Label 01") || !strings.Contains(view, "Archive 2026") {
 		t.Errorf("scrolled folder picker = %q", view)
 	}
-	if strings.Contains(view, "\x1b]2;owned") {
+	if strings.Contains(view, "owned") {
 		t.Errorf("unsafe folder name reached picker: %q", view)
 	}
 
 	v.boxIndex = len(v.boxes) - 1
 	_, _, label, _ := v.SubnavItems()
-	if strings.Contains(label, "\x1b]2;owned") || !strings.Contains(label, "Archive�]2;owned��2026") {
+	if strings.Contains(label, "owned") || !strings.Contains(label, "Archive 2026") {
 		t.Errorf("folder navigation label = %q", label)
 	}
 }
 
 func TestMailViewFolderPickerTruncatesLongNamesToOneRow(t *testing.T) {
-	posting := models.Posting{ID: 100, Summary: "Receipt"}
-	picker := newFolderPicker(posting, []models.Box{{
-		ID: 12, Kind: mailSourceKindFolder,
+	posting := mail.Posting{ID: 100, Summary: "Receipt"}
+	picker := newFolderPicker(posting, []mail.Source{{
+		ID: 12, Kind: mail.KindFolder,
 		Name: "A label name that is much wider than the picker",
 	}})
 	picker.resize(24, 8)
@@ -1065,7 +1112,7 @@ func TestMailViewFolderPickerTruncatesLongNamesToOneRow(t *testing.T) {
 
 func TestMailViewFolderActionFailureKeepsThread(t *testing.T) {
 	v, _ := mailWithTestServer(t, http.StatusInternalServerError)
-	v.boxes = append(v.boxes, models.Box{ID: 12, Kind: mailSourceKindFolder, Name: "Receipts"})
+	v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindFolder, Name: "Receipts"})
 
 	v.HandleContentKey(keyPress("g"))
 	done, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(folderActionDoneMsg)
@@ -1091,24 +1138,24 @@ func TestMailViewFolderPickerRequiresNameAndCancels(t *testing.T) {
 	if cmd := v.HandleContentKey(keyPress("enter")); cmd != nil {
 		t.Fatal("empty folder name should not submit")
 	}
-	if v.folderPicker == nil || !strings.Contains(v.View(), "Enter a label name") {
+	if folderModal(v) == nil || !strings.Contains(v.View(), "Enter a label name") {
 		t.Error("empty folder name should keep the form open with guidance")
 	}
 	v.HandleContentKey(keyPress("esc"))
-	if v.folderPicker == nil || v.folderPicker.creating {
+	if folderModal(v) == nil || folderModal(v).creating {
 		t.Error("first escape should return to the folder choices")
 	}
 	v.HandleContentKey(keyPress("esc"))
-	if v.folderPicker != nil || v.CapturingInput() {
+	if folderModal(v) != nil || v.CapturingInput() {
 		t.Error("second escape should close the folder picker")
 	}
 }
 
 func TestMailViewMoveFromFolderKeepsFiledThreadVisible(t *testing.T) {
 	v, _ := mailWithTestServer(t, http.StatusNoContent)
-	v.boxes = []models.Box{
-		{ID: 12, Kind: mailSourceKindFolder, Name: "Receipts"},
-		{ID: 2, Kind: hey.BoxKindFeed, Name: "The Feed"},
+	v.boxes = []mail.Source{
+		{Kind: mail.KindFolder, ID: 12, Name: "Receipts"},
+		{Kind: mail.KindBox, ID: 2, BoxKind: hey.BoxKindFeed, Name: "The Feed"},
 	}
 	v.boxIndex = 0
 
@@ -1142,7 +1189,7 @@ func TestMailViewMoveWithinCurrentBoxSkipsRequest(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			v, recorded := mailWithTestServer(t, http.StatusNoContent)
-			v.boxes = []models.Box{{ID: tt.boxID, Kind: tt.kind, Name: tt.name}}
+			v.boxes = []mail.Source{{Kind: mail.KindBox, ID: tt.boxID, BoxKind: tt.kind, Name: tt.name}}
 			v.boxIndex = 0
 
 			if cmd := v.HandleContentKey(keyPress(tt.key)); cmd != nil {
@@ -1211,7 +1258,7 @@ func TestMailViewPostingCompletionInvalidatesConcurrentReload(t *testing.T) {
 
 	v.SubnavRight()
 	v.SubnavLeft()
-	staleRequestID := v.activeRequestID
+	staleRequestID := v.requests.id
 	stale := currentPostingsLoaded(v, testPostings())
 
 	refresh, consumed := v.Update(postingActionDoneMsg{
@@ -1220,7 +1267,7 @@ func TestMailViewPostingCompletionInvalidatesConcurrentReload(t *testing.T) {
 	if !consumed || refresh == nil {
 		t.Fatal("action completion should replace a concurrent reload with a fresh reload")
 	}
-	if v.activeRequestID == staleRequestID {
+	if v.requests.id == staleRequestID {
 		t.Fatal("action completion should invalidate the concurrent reload")
 	}
 
@@ -1228,7 +1275,7 @@ func TestMailViewPostingCompletionInvalidatesConcurrentReload(t *testing.T) {
 	if v.postingIndex(100) >= 0 {
 		t.Error("stale reload restored the posting removed by the completed action")
 	}
-	if !v.loading {
+	if !v.requests.loading {
 		t.Error("stale reload should not stop the post-action refresh")
 	}
 }
@@ -1265,7 +1312,7 @@ func TestMailViewIgnoresPostingCompletionAfterBoxSwitch(t *testing.T) {
 		t.Fatalf("posting command returned %T, want postingActionDoneMsg", msg)
 	}
 	v.SubnavRight()
-	v.Update(currentPostingsLoaded(v, []models.Posting{{ID: 200, Summary: "Other box"}}))
+	v.Update(currentPostingsLoaded(v, []mail.Posting{{ID: 200, Summary: "Other box"}}))
 	v.Update(done)
 
 	if len(v.postingList.postings) != 1 || v.postingList.postings[0].ID != 200 {
@@ -1285,7 +1332,7 @@ func TestMailViewReportsPostingFailureAfterBoxSwitch(t *testing.T) {
 		t.Fatalf("posting command returned %#v, want an action error", msg)
 	}
 	v.SubnavRight()
-	v.Update(currentPostingsLoaded(v, []models.Posting{{ID: 200, Summary: "Other box"}}))
+	v.Update(currentPostingsLoaded(v, []mail.Posting{{ID: 200, Summary: "Other box"}}))
 	errCmd, consumed := v.Update(done)
 
 	if !consumed || errCmd == nil {
@@ -1655,7 +1702,7 @@ func TestMailViewIgnoresThreadLoadAfterReturningToOriginBox(t *testing.T) {
 	if v.inThread {
 		t.Error("a stale thread load should not reopen after returning to its source box")
 	}
-	if !v.loading {
+	if !v.requests.loading {
 		t.Error("a stale thread load should not stop the current box load")
 	}
 }
@@ -1671,7 +1718,7 @@ func TestMailViewIgnoresEarlierThreadLoadInSameBox(t *testing.T) {
 	if v.inThread {
 		t.Error("an earlier thread load should not replace a newer open request")
 	}
-	if !v.loading {
+	if !v.requests.loading {
 		t.Error("an earlier thread load should not stop the newer open request")
 	}
 }
@@ -1681,7 +1728,7 @@ func TestMailViewIgnoresReplyLoadAfterBoxSwitch(t *testing.T) {
 	v.inThread = true
 	_ = v.loadReplyContext(100, "Hello world")
 	loaded := replyContextLoadedMsg{
-		requestID: v.activeRequestID,
+		requestID: v.requests.id,
 		boxID:     1,
 		topicID:   100,
 		topicName: "Hello world",
@@ -1695,7 +1742,7 @@ func TestMailViewIgnoresReplyLoadAfterBoxSwitch(t *testing.T) {
 	if !consumed {
 		t.Error("stale reply context should be consumed")
 	}
-	if cmd != nil || v.compose != nil {
+	if cmd != nil || composeModal(v) != nil {
 		t.Error("stale reply context should not open the reply form")
 	}
 }
@@ -1704,7 +1751,7 @@ func TestMailViewIgnoresForwardLoadAfterBoxSwitch(t *testing.T) {
 	v := mailWithPostings()
 	_ = v.loadForwardContext(100, "Hello world")
 	loaded := forwardContextLoadedMsg{
-		requestID: v.activeRequestID,
+		requestID: v.requests.id,
 		boxID:     1,
 		topicID:   100,
 		topicName: "Hello world",
@@ -1718,7 +1765,7 @@ func TestMailViewIgnoresForwardLoadAfterBoxSwitch(t *testing.T) {
 	if !consumed || cmd != nil {
 		t.Error("stale forward context should be ignored")
 	}
-	if v.compose != nil {
+	if composeModal(v) != nil {
 		t.Error("stale forward context should not open the forward form")
 	}
 }
@@ -1728,7 +1775,7 @@ func TestMailViewIgnoresReplyLoadAfterThreadExit(t *testing.T) {
 	v.inThread = true
 	_ = v.loadReplyContext(100, "Hello world")
 	loaded := replyContextLoadedMsg{
-		requestID: v.activeRequestID,
+		requestID: v.requests.id,
 		boxID:     1,
 		topicID:   100,
 		topicName: "Hello world",
@@ -1742,10 +1789,10 @@ func TestMailViewIgnoresReplyLoadAfterThreadExit(t *testing.T) {
 	if !consumed || cmd != nil {
 		t.Error("a canceled reply load should be ignored")
 	}
-	if v.compose != nil {
+	if composeModal(v) != nil {
 		t.Error("a canceled reply load should not open the reply form")
 	}
-	if v.loading {
+	if v.requests.loading {
 		t.Error("a canceled reply load should not keep loading")
 	}
 }
@@ -1813,7 +1860,7 @@ func TestMailViewSubnavLeftRight(t *testing.T) {
 	if v.boxIndex != 1 {
 		t.Errorf("after SubnavRight: boxIndex = %d, want 1", v.boxIndex)
 	}
-	if !v.loading {
+	if !v.requests.loading {
 		t.Error("SubnavRight should set loading")
 	}
 	if v.inThread {
@@ -1823,14 +1870,14 @@ func TestMailViewSubnavLeftRight(t *testing.T) {
 		t.Errorf("SubnavRight should clear the previous notice, got %q", v.notice)
 	}
 
-	v.loading = false
+	v.requests.loading = false
 	v.SubnavRight()
 	if v.boxIndex != 2 {
 		t.Errorf("after second SubnavRight: boxIndex = %d, want 2", v.boxIndex)
 	}
 
 	// Can't go right past last box
-	v.loading = false
+	v.requests.loading = false
 	v.SubnavRight()
 	if v.boxIndex != 2 {
 		t.Errorf("SubnavRight at end: boxIndex = %d, want 2", v.boxIndex)
@@ -2120,18 +2167,18 @@ func TestMailViewRendersEmptyList(t *testing.T) {
 
 func TestMailViewSearchWaitsForMailboxLoad(t *testing.T) {
 	v := newMailView(testVC())
-	v.loading = true
-	if cmd := v.HandleContentKey(keyPress("/")); cmd != nil || v.searchForm != nil {
+	v.requests.loading = true
+	if cmd := v.HandleContentKey(keyPress("/")); cmd != nil || searchModal(v) != nil {
 		t.Error("search should not start before boxes load")
 	}
 
 	v.Update(boxesLoadedMsg(testBoxes()))
-	if cmd := v.HandleContentKey(keyPress("/")); cmd != nil || v.searchForm != nil {
+	if cmd := v.HandleContentKey(keyPress("/")); cmd != nil || searchModal(v) != nil {
 		t.Error("search should not start while the first box loads")
 	}
 
 	v.Update(currentPostingsLoaded(v, testPostings()))
-	if cmd := v.HandleContentKey(keyPress("/")); cmd == nil || v.searchForm == nil {
+	if cmd := v.HandleContentKey(keyPress("/")); cmd == nil || searchModal(v) == nil {
 		t.Error("search should start after the mailbox finishes loading")
 	}
 }
@@ -2141,13 +2188,13 @@ func TestMailViewSearchFormSubmitsQueryAndRendersResults(t *testing.T) {
 	if cmd := v.HandleContentKey(keyPress("/")); cmd == nil {
 		t.Fatal("opening search should focus the input")
 	}
-	if v.searchForm == nil || !v.CapturingInput() {
+	if searchModal(v) == nil || !v.CapturingInput() {
 		t.Fatal("search form should capture input")
 	}
-	v.searchForm.input.SetValue("quarterly planning")
+	searchModal(v).input.SetValue("quarterly planning")
 
 	cmd := v.HandleContentKey(keyPress("enter"))
-	if cmd == nil || !v.loading {
+	if cmd == nil || !v.requests.loading {
 		t.Fatal("submitting search should start a request")
 	}
 	msg := cmd()
@@ -2163,7 +2210,7 @@ func TestMailViewSearchFormSubmitsQueryAndRendersResults(t *testing.T) {
 	if !v.searchActive || v.searchQuery != "quarterly planning" || v.searchNextPage != 0 {
 		t.Errorf("search state = active:%v query:%q next:%d", v.searchActive, v.searchQuery, v.searchNextPage)
 	}
-	if len(v.searchList.postings) != 1 || v.searchList.postings[0].ResolveTopicID() != 100 {
+	if len(v.searchList.postings) != 1 || v.searchList.postings[0].TopicID != 100 {
 		t.Errorf("search postings = %+v", v.searchList.postings)
 	}
 	view := v.View()
@@ -2185,7 +2232,7 @@ func TestMailViewSearchRequiresWords(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("empty search should not submit")
 	}
-	if v.searchForm == nil || !strings.Contains(v.searchForm.view(), "Enter words to search for") {
+	if searchModal(v) == nil || !strings.Contains(searchModal(v).view(), "Enter words to search for") {
 		t.Error("empty search should keep the form open with guidance")
 	}
 }
@@ -2194,7 +2241,7 @@ func TestMailViewSearchEscapeClosesForm(t *testing.T) {
 	v := mailWithPostings()
 	v.HandleContentKey(keyPress("/"))
 	v.HandleContentKey(keyPress("esc"))
-	if v.searchForm != nil || v.CapturingInput() {
+	if searchModal(v) != nil || v.CapturingInput() {
 		t.Error("escape should close the search form")
 	}
 }
@@ -2209,11 +2256,11 @@ func TestMailViewSearchFormConsumesComponentMessages(t *testing.T) {
 
 func TestMailViewIgnoresStaleSearchResults(t *testing.T) {
 	v := mailWithPostings()
-	v.activeRequestID = 2
+	v.requests.id = 2
 	v.Update(searchResultsLoadedMsg{
 		requestID: 1,
 		query:     "stale",
-		postings:  []models.Posting{{ID: 99}},
+		postings:  []mail.Posting{{ID: 99}},
 	})
 	if v.searchActive || len(v.searchList.postings) != 0 {
 		t.Error("stale search results changed the view")
@@ -2254,7 +2301,7 @@ func TestMailViewSearchGrowsAsTheReaderScrolls(t *testing.T) {
 	if cmd, _ := v.Update(appended); cmd != nil {
 		t.Error("a page with no next page should end the results")
 	}
-	if len(v.searchList.postings) != 2 || v.searchList.postings[1].ResolveTopicID() != 101 {
+	if len(v.searchList.postings) != 2 || v.searchList.postings[1].TopicID != 101 {
 		t.Errorf("grown results = %+v", v.searchList.postings)
 	}
 	if v.searchNextPage != 0 {
@@ -2273,7 +2320,7 @@ func TestMailViewEmptySearchPageEndsTheResults(t *testing.T) {
 	v.searchActive = true
 	v.searchQuery = "quarterly planning"
 	v.searchNextPage = 2
-	v.searchList.setPostings([]models.Posting{{ID: 10, TopicID: 100}})
+	v.searchList.setPostings([]mail.Posting{{ID: 10, TopicID: 100}})
 
 	cmd, _ := v.Update(searchResultsAppendedMsg{requestID: v.searchMoreID, query: v.searchQuery, nextPage: 3})
 	if cmd != nil || v.searchNextPage != 0 || len(v.searchList.postings) != 1 {
@@ -2285,20 +2332,20 @@ func TestMailViewCancelPendingSearchResultPreservesResults(t *testing.T) {
 	v := mailWithPostings()
 	v.searchActive = true
 	v.searchQuery = "quarterly planning"
-	v.searchList.setPostings([]models.Posting{{ID: 10, TopicID: 100, Name: "Hello world"}})
+	v.searchList.setPostings([]mail.Posting{{ID: 10, TopicID: 100, Name: "Hello world"}})
 
 	if cmd := v.HandleContentKey(keyPress("enter")); cmd == nil {
 		t.Fatal("enter should start loading the selected thread")
 	}
-	if v.activeRequestKind != mailRequestTopic || !v.loading {
-		t.Fatalf("request state = kind:%d loading:%v", v.activeRequestKind, v.loading)
+	if v.requests.kind != mailRequestTopic || !v.requests.loading {
+		t.Fatalf("request state = kind:%d loading:%v", v.requests.kind, v.requests.loading)
 	}
 	v.ExitThread()
 	if !v.searchActive || v.searchQuery != "quarterly planning" || len(v.searchList.postings) != 1 {
 		t.Error("canceling a pending searched thread should preserve search results")
 	}
-	if v.loading || v.activeRequestKind != mailRequestNone {
-		t.Errorf("pending request was not canceled: kind=%d loading=%v", v.activeRequestKind, v.loading)
+	if v.requests.loading || v.requests.kind != mailRequestNone {
+		t.Errorf("pending request was not canceled: kind=%d loading=%v", v.requests.kind, v.requests.loading)
 	}
 }
 
@@ -2306,7 +2353,7 @@ func TestMailViewSearchResultOpensThreadAndReturnsToResults(t *testing.T) {
 	v, _ := mailWithTestServer(t, http.StatusNoContent)
 	v.searchActive = true
 	v.searchQuery = "quarterly planning"
-	v.searchList.setPostings([]models.Posting{{ID: 10, TopicID: 100, Name: "Hello world"}})
+	v.searchList.setPostings([]mail.Posting{{ID: 10, TopicID: 100, Name: "Hello world"}})
 
 	open := v.HandleContentKey(keyPress("enter"))
 	if open == nil {
@@ -2327,7 +2374,7 @@ func TestMailViewSearchResultOpensThreadAndReturnsToResults(t *testing.T) {
 	}
 }
 
-func TestSDKSearchMatchToModelPreservesActionAndThreadIDs(t *testing.T) {
+func TestSearchMatchToPostingPreservesActionAndThreadIDs(t *testing.T) {
 	match := generated.SearchMatch{
 		PostingId: 10,
 		Topic: generated.Topic{
@@ -2341,8 +2388,8 @@ func TestSDKSearchMatchToModelPreservesActionAndThreadIDs(t *testing.T) {
 			Creator: generated.Contact{Name: "Alice"},
 		}},
 	}
-	posting := sdkSearchMatchToModel(match)
-	if posting.ID != 10 || posting.ResolveTopicID() != 100 || posting.Name != "Hello world" || posting.Summary != "Matching message summary" || posting.Creator.Name != "Alice" {
+	posting := searchMatchToPosting(match)
+	if posting.ID != 10 || posting.TopicID != 100 || posting.Name != "Hello world" || posting.Summary != "Matching message summary" || posting.Creator.Name != "Alice" {
 		t.Errorf("posting = %+v", posting)
 	}
 }
@@ -2371,7 +2418,7 @@ func TestMailViewHelpBindings(t *testing.T) {
 // paper trail.
 func TestMailViewLabelHelpOffersNoPageKeys(t *testing.T) {
 	v := mailWithPostings()
-	v.boxes = append(v.boxes, models.Box{ID: 12, Kind: mailSourceKindFolder, Name: "Receipts"})
+	v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindFolder, Name: "Receipts"})
 	v.boxIndex = len(v.boxes) - 1
 	v.postingPaging.nextPage = "next-cursor"
 
@@ -2465,7 +2512,7 @@ func TestMailViewBoxShortcut(t *testing.T) {
 	if v.boxIndex == 0 {
 		t.Error("boxIndex should have changed")
 	}
-	if !v.loading {
+	if !v.requests.loading {
 		t.Error("should be loading after box switch")
 	}
 	if v.notice != "" {
@@ -2489,8 +2536,8 @@ func mailWithLabels() *mailView {
 	v.vc.width = 60
 	v.vc.height = 20
 	v.boxes = orderBoxes(append(testBoxes(),
-		models.Box{ID: 12, Kind: mailSourceKindFolder, Name: "Receipts"},
-		models.Box{ID: 13, Kind: mailSourceKindFolder, Name: "Travel Plans"},
+		mail.Source{ID: 12, Kind: mail.KindFolder, Name: "Receipts"},
+		mail.Source{ID: 13, Kind: mail.KindFolder, Name: "Travel Plans"},
 	))
 	v.boxIndex = 0
 	v.postingList.setSize(60, 20)
@@ -2514,7 +2561,7 @@ func TestMailViewLabelsTabAndPicker(t *testing.T) {
 
 	// Moving right from the last box opens the picker instead of switching.
 	v.boxIndex = len(v.tabBoxIndexes()) - 1
-	if cmd := v.SubnavRight(); cmd != nil || v.labels == nil {
+	if cmd := v.SubnavRight(); cmd != nil || labelsModal(v) == nil {
 		t.Fatal("moving right past the last box should open the picker")
 	}
 	if !v.CapturingInput() {
@@ -2531,7 +2578,7 @@ func TestMailViewLabelsTabAndPicker(t *testing.T) {
 	if cmd := v.HandleContentKey(keyPress("enter")); cmd == nil {
 		t.Fatal("choosing a label should load it")
 	}
-	if v.labels != nil {
+	if labelsModal(v) != nil {
 		t.Error("choosing should close the picker")
 	}
 	if got := v.currentSource(); got == nil || got.Name != "Travel Plans" {
@@ -2547,17 +2594,17 @@ func TestMailViewLabelsTabAndPicker(t *testing.T) {
 	// Escape closes the picker without switching.
 	v.openLabels()
 	v.HandleContentKey(keyPress("esc"))
-	if v.labels != nil || v.currentSource().Name != "Travel Plans" {
+	if labelsModal(v) != nil || v.currentSource().Name != "Travel Plans" {
 		t.Error("escape should close the picker and keep the current label")
 	}
 
 	// Left from the Labels tab returns to the last box tab.
-	if cmd := v.SubnavLeft(); cmd == nil || v.currentSourceKind() == mailSourceKindFolder {
+	if cmd := v.SubnavLeft(); cmd == nil || v.currentSourceKind() == mail.KindFolder {
 		t.Error("left from Labels should return to the last box tab")
 	}
 
 	// Shift+L opens the picker from anywhere in the mail section.
-	if cmd := v.handleBoxShortcut("L"); cmd == nil || v.labels == nil {
+	if cmd := v.handleBoxShortcut("L"); cmd == nil || labelsModal(v) == nil {
 		t.Error("the L shortcut should open the Labels picker")
 	}
 	if cmd := v.handleBoxShortcut("L"); cmd != nil {
@@ -2603,7 +2650,7 @@ func TestLabelNamedImboxDoesNotGetImboxSeenSections(t *testing.T) {
 	v.vc.width, v.vc.height = 80, 30
 	v.Resize(80, 30)
 	v.boxes = orderBoxes(append(v.boxes,
-		models.Box{ID: 12, Kind: mailSourceKindFolder, Name: "Imbox"},
+		mail.Source{ID: 12, Kind: mail.KindFolder, Name: "Imbox"},
 	))
 
 	label := len(v.boxes) - 1

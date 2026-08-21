@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -180,6 +182,63 @@ func TestJournalWriteConflictFlagAndTwoPositionals(t *testing.T) {
 	}
 }
 
+// A failed pre-fill read used to hand $EDITOR an empty file, and saving that replaced
+// the day's entry. An empty day is a 204 and reads as "" with no error, so an error
+// means we do not know what the day holds and must not offer to overwrite it.
+func TestJournalEntryFromEditorRefusesAFailedPrefillRead(t *testing.T) {
+	opened := false
+	_, err := journalEntryFromEditor(t.Context(), "2026-01-31",
+		func(context.Context, string) (string, error) {
+			return "", errors.New("500 Internal Server Error")
+		},
+		func(string) (string, error) {
+			opened = true
+			return "", nil
+		})
+
+	if err == nil {
+		t.Fatal("a failed pre-fill read must not open the editor at all")
+	}
+	if opened {
+		t.Error("the editor was opened over an unknown entry")
+	}
+}
+
+func TestJournalEntryFromEditorPrefillsTheDaysEntry(t *testing.T) {
+	prefilled := ""
+	content, err := journalEntryFromEditor(t.Context(), "2026-01-31",
+		func(context.Context, string) (string, error) {
+			return "<div>Ran six miles</div>", nil
+		},
+		func(existing string) (string, error) {
+			prefilled = existing
+			return existing + " and swam", nil
+		})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if prefilled != "<div>Ran six miles</div>" {
+		t.Errorf("editor was pre-filled with %q", prefilled)
+	}
+	if content != "<div>Ran six miles</div> and swam" {
+		t.Errorf("content = %q", content)
+	}
+}
+
+// Empty content removes the day's entry, so saying "saved" was a lie about a deletion.
+func TestJournalWriteReportsAnEmptyEntryAsRemoved(t *testing.T) {
+	server := journalServer(t)
+	defer server.Close()
+
+	resp, err := runJournalWrite(t, server, "2026-01-31", "   ")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !strings.Contains(resp.Summary, "removed") {
+		t.Errorf("summary = %q, want it to say the entry was removed", resp.Summary)
+	}
+}
+
 // --- Journal read tests ---
 
 func runJournalRead(t *testing.T, server *httptest.Server, args ...string) (output.Response, error) {
@@ -204,6 +263,19 @@ func runJournalRead(t *testing.T, server *httptest.Server, args ...string) (outp
 		_ = json.Unmarshal(buf.Bytes(), &resp)
 	}
 	return resp, err
+}
+
+func TestJournalReadRejectsAnUnreadableDate(t *testing.T) {
+	server := journalServer(t)
+	defer server.Close()
+
+	_, err := runJournalRead(t, server, "last tuesday")
+	if err == nil {
+		t.Fatal("expected error for an unreadable date")
+	}
+	if !strings.Contains(err.Error(), "invalid date: last tuesday") {
+		t.Errorf("error = %q", err.Error())
+	}
 }
 
 func TestJournalReadReturns200WithContent(t *testing.T) {

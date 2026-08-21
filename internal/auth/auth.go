@@ -256,7 +256,25 @@ func (m *Manager) Refresh(ctx context.Context) error {
 	return m.refreshLocked(ctx, creds)
 }
 
+// refreshLocked holds the store's cross-process lock for the whole load-refresh-save,
+// because `hey tui` and `hey watch` are separate processes and the mutex only serializes
+// this one. Credentials are read again inside the lock: a token another process refreshed
+// while we waited for it is the one to keep, and with rotation the refresh token we came
+// in with has already been consumed.
 func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
+	unlock, err := m.store.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	if stored, loadErr := m.store.load(m.baseURL); loadErr == nil {
+		if stored.AccessToken != "" && stored.AccessToken != creds.AccessToken {
+			return nil
+		}
+		creds = stored
+	}
+
 	if creds.RefreshToken == "" {
 		return fmt.Errorf("no refresh token available")
 	}
@@ -270,16 +288,23 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 	if err != nil {
 		return fmt.Errorf("token refresh failed: %w", err)
 	}
+	// A 200 without an access token is not a refresh. Storing the empty string would
+	// take the working token with it and leave nothing to authenticate with.
+	if token.AccessToken == "" {
+		return fmt.Errorf("token refresh returned no access token")
+	}
 
 	creds.AccessToken = token.AccessToken
 	if token.RefreshToken != "" {
 		creds.RefreshToken = token.RefreshToken
 	}
-	if !token.ExpiresAt.IsZero() {
+	if token.ExpiresAt.IsZero() {
+		creds.ExpiresAt = 0
+	} else {
 		creds.ExpiresAt = token.ExpiresAt.Unix()
 	}
 
-	return m.store.Save(m.baseURL, creds)
+	return m.store.save(m.baseURL, creds)
 }
 
 // GetStore returns the credential store.

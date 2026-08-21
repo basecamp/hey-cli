@@ -17,8 +17,10 @@ import (
 	attachmentfiles "github.com/basecamp/hey-cli/internal/attachments"
 	internalfolders "github.com/basecamp/hey-cli/internal/folders"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
+	"github.com/basecamp/hey-cli/internal/mail"
 	"github.com/basecamp/hey-cli/internal/markdown"
 	"github.com/basecamp/hey-cli/internal/models"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 // --- Mail messages ---
@@ -37,11 +39,11 @@ const (
 	mailRequestBulkReply
 )
 
-type boxesLoadedMsg []models.Box
+type boxesLoadedMsg []mail.Source
 
 type mailSourcesLoadedMsg struct {
 	requestID uint64
-	sources   []models.Box
+	sources   []mail.Source
 	// screenerCount is what The Screener holds, and screenerStream is the signed stream
 	// name to follow to be told when that changes. HEY serves both from the one read.
 	screenerCount  int
@@ -53,9 +55,9 @@ type mailSourcesLoadedMsg struct {
 type postingsLoadedMsg struct {
 	requestID  uint64
 	boxID      int64
-	sourceKind string
+	sourceKind mail.Kind
 	nextPage   string
-	postings   []models.Posting
+	postings   []mail.Posting
 	err        error
 }
 
@@ -66,9 +68,9 @@ type postingsLoadedMsg struct {
 type postingsAppendedMsg struct {
 	requestID  uint64
 	boxID      int64
-	sourceKind string
+	sourceKind mail.Kind
 	nextPage   string
-	postings   []models.Posting
+	postings   []mail.Posting
 	err        error
 }
 
@@ -78,9 +80,9 @@ type postingsAppendedMsg struct {
 type postingsRefreshedMsg struct {
 	requestID  uint64
 	boxID      int64
-	sourceKind string
+	sourceKind mail.Kind
 	nextPage   string
-	postings   []models.Posting
+	postings   []mail.Posting
 	err        error
 }
 
@@ -100,7 +102,7 @@ type searchResultsLoadedMsg struct {
 	requestID uint64
 	query     string
 	nextPage  int
-	postings  []models.Posting
+	postings  []mail.Posting
 	err       error
 }
 
@@ -110,7 +112,7 @@ type searchResultsAppendedMsg struct {
 	requestID uint64
 	query     string
 	nextPage  int
-	postings  []models.Posting
+	postings  []mail.Posting
 	err       error
 }
 
@@ -141,7 +143,7 @@ const (
 type postingActionDoneMsg struct {
 	action     string
 	boxID      int64
-	sourceKind string
+	sourceKind mail.Kind
 	postingID  int64
 	effect     postingActionEffect
 	err        error
@@ -151,20 +153,25 @@ type postingActionDoneMsg struct {
 // own, as the web app does out of band once it has rendered the topic.
 type postingSeenMsg struct {
 	boxID      int64
-	sourceKind string
+	sourceKind mail.Kind
 	postingID  int64
 	err        error
 }
 
+// screenerCountLoadedMsg is the Screener's count read again, and with it the signed
+// stream name HEY serves alongside it. Carrying the name is what lets a closed stream be
+// opened again: this read is reachable from ctrl+r and from the doorbell, and the read
+// that discovers the mail sources is not.
 type screenerCountLoadedMsg struct {
-	count int
-	err   error
+	count          int
+	screenerStream string
+	err            error
 }
 
 type folderActionDoneMsg struct {
 	action     string
 	sourceID   int64
-	sourceKind string
+	sourceKind mail.Kind
 	created    bool
 	err        error
 }
@@ -172,9 +179,9 @@ type folderActionDoneMsg struct {
 type collectionActionDoneMsg struct {
 	action     string
 	sourceID   int64
-	sourceKind string
+	sourceKind mail.Kind
 	postingID  int64
-	collection models.Collection
+	collection mail.Collection
 	added      bool
 	err        error
 }
@@ -184,7 +191,7 @@ type collectionActionDoneMsg struct {
 type mailView struct {
 	vc *viewContext
 
-	boxes    []models.Box
+	boxes    []mail.Source
 	boxIndex int
 
 	postingPaging    listPaging
@@ -198,18 +205,9 @@ type mailView struct {
 	attachmentCursor int
 	imageContent     string
 	inThread         bool
-	loading          bool
 
-	compose                *composeForm                // non-nil while a message, reply or forward is being written
-	bulkReply              *bulkReplyForm              // non-nil while a bulk reply is being previewed or written
-	movePicker             *movePicker                 // non-nil while a destination box is being selected
-	coverPicker            *coverPicker                // non-nil while the Imbox's cover is being chosen
-	cover                  coverPreset                 // the session's cover; HEY does not serve one to read
-	folderPicker           *folderPicker               // non-nil while folder labels are being managed
-	collectionPicker       *collectionMembershipPicker // non-nil while collection membership is being managed
-	labels                 *labelPicker                // non-nil while a label is being chosen
-	collections            *collectionNavPicker        // non-nil while a collection is being chosen
-	searchForm             *mailSearchForm             // non-nil while a search query is being entered
+	modal                  modal       // the form or picker over the list, and the only one there can be
+	cover                  coverPreset // the session's cover; HEY does not serve one to read
 	searchList             contentList
 	searchActive           bool
 	searchQuery            string
@@ -219,12 +217,10 @@ type mailView struct {
 	lastBulkReplyID        int64  // delayed delivery currently available for undo
 	pendingMutations       int    // writes that must finish before changing the account context
 	notice                 string // one-shot confirmation shown above the posting list
-	activeRequestID        uint64 // identifies the only mail read allowed to update the view
-	activeRequestKind      mailRequestKind
+	requests               requestLane[mailRequestKind]
 	sourceRequestID        uint64
 	folderDiscoveryErr     string
 	collectionDiscoveryErr string
-	requestCancel          context.CancelFunc
 
 	liveRequestID   uint64 // identifies the only live re-read allowed to update the list
 	liveRefreshDue  bool   // a re-read is already on its way
@@ -266,7 +262,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if msg.folderErr != nil {
 			v.folderDiscoveryErr = msg.folderErr.Error()
 			for _, source := range v.boxes {
-				if source.Kind == mailSourceKindFolder {
+				if source.Kind == mail.KindFolder {
 					sources = append(sources, source)
 				}
 			}
@@ -276,7 +272,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if msg.collectionErr != nil {
 			v.collectionDiscoveryErr = msg.collectionErr.Error()
 			for _, source := range v.boxes {
-				if source.Kind == mailSourceKindCollection {
+				if source.Kind == mail.KindCollection {
 					sources = append(sources, source)
 				}
 			}
@@ -287,7 +283,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return v.applySources(sources), true
 
 	case boxesLoadedMsg:
-		return v.applySources([]models.Box(msg)), true
+		return v.applySources([]mail.Source(msg)), true
 
 	case screenerCountLoadedMsg:
 		if msg.err == nil {
@@ -299,14 +295,14 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if !v.acceptsPostingsLoaded(msg) {
 			return nil, true
 		}
-		v.finishRequest(msg.requestID)
+		v.requests.finish(msg.requestID)
 		if msg.err != nil {
 			return func() tea.Msg { return errMsg{msg.err} }, true
 		}
 		// Only the Imbox separates New for You from Previously Seen and marks
 		// unread threads with the dot; every other source is one flat list. The
 		// Imbox is also the only box HEY lets you cover.
-		isImbox := v.currentBoxIsImbox()
+		isImbox := v.showsImbox()
 		v.postingList.hideSeenState = !isImbox
 		if isImbox {
 			v.postingList.setCover(v.cover)
@@ -323,7 +319,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.postingPaging.loading = false
 		if msg.err != nil {
-			v.notice = "Could not load more mail: " + msg.err.Error()
+			v.noteFailure("Could not load more mail", msg.err)
 			return nil, true
 		}
 		v.postingList.growPostings(msg.postings)
@@ -338,7 +334,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		if msg.err != nil {
-			v.notice = "Could not refresh mail: " + msg.err.Error()
+			v.noteFailure("Could not refresh mail", msg.err)
 			return nil, true
 		}
 		v.postingList.refreshHead(msg.postings, v.postingPaging.headIDs)
@@ -346,12 +342,8 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 
 	case searchResultsLoadedMsg:
-		if msg.requestID != v.activeRequestID {
-			return nil, true
-		}
-		v.finishRequest(msg.requestID)
-		if msg.err != nil {
-			return func() tea.Msg { return errMsg{msg.err} }, true
+		if cmd, ok := v.requests.settle(newRequestResult(msg.requestID, msg.err)); !ok {
+			return cmd, true
 		}
 		v.searchActive = true
 		v.searchQuery = msg.query
@@ -366,7 +358,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.searchLoadingMore = false
 		if msg.err != nil {
-			v.notice = "Could not load more results: " + msg.err.Error()
+			v.noteFailure("Could not load more results", msg.err)
 			return nil, true
 		}
 		v.searchList.growPostings(msg.postings)
@@ -378,12 +370,11 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return v.loadMoreSearchResults(), true
 
 	case topicLoadedMsg:
-		if msg.requestID != v.activeRequestID || msg.boxID != v.currentBoxID() {
+		if msg.boxID != v.currentBoxID() {
 			return nil, true
 		}
-		v.finishRequest(msg.requestID)
-		if msg.err != nil {
-			return func() tea.Msg { return errMsg{msg.err} }, true
+		if cmd, ok := v.requests.settle(newRequestResult(msg.requestID, msg.err)); !ok {
+			return cmd, true
 		}
 		v.inThread = true
 		v.topicID = msg.topicID
@@ -409,63 +400,62 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return tea.Batch(append(uploadCmds, v.markPostingSeen(msg.boxID, msg.postingID))...), true
 
 	case replyContextLoadedMsg:
-		if msg.requestID != v.activeRequestID || msg.boxID != v.currentBoxID() {
+		if msg.boxID != v.currentBoxID() {
 			return nil, true
 		}
-		v.finishRequest(msg.requestID)
-		if msg.err != nil {
-			return func() tea.Msg { return errMsg{msg.err} }, true
+		if cmd, ok := v.requests.settle(newRequestResult(msg.requestID, msg.err)); !ok {
+			return cmd, true
 		}
-		v.compose = newReplyForm(msg, v.vc.styles)
-		v.compose.resize(v.vc.width, v.vc.height)
-		return v.compose.init(), true
+		form := newReplyForm(msg, v.vc.styles)
+		v.openModal(form)
+		return form.init(), true
 
 	case forwardContextLoadedMsg:
-		if msg.requestID != v.activeRequestID || msg.boxID != v.currentBoxID() {
+		if msg.boxID != v.currentBoxID() {
 			return nil, true
 		}
-		v.finishRequest(msg.requestID)
-		if msg.err != nil {
-			return func() tea.Msg { return errMsg{msg.err} }, true
+		if cmd, ok := v.requests.settle(newRequestResult(msg.requestID, msg.err)); !ok {
+			return cmd, true
 		}
-		v.compose = newForwardForm(msg, v.vc.styles)
-		v.compose.resize(v.vc.width, v.vc.height)
-		return v.compose.init(), true
+		form := newForwardForm(msg, v.vc.styles)
+		v.openModal(form)
+		return form.init(), true
 
 	case bulkReplyDraftLoadedMsg:
-		if msg.requestID != v.activeRequestID || msg.boxID != v.currentBoxID() {
+		if !v.requests.accepts(newRequestResult(msg.requestID, msg.err)) || msg.boxID != v.currentBoxID() {
 			return nil, true
 		}
-		v.finishRequest(msg.requestID)
+		v.requests.finish(msg.requestID)
 		if msg.err != nil {
-			v.notice = "Could not preview bulk reply: " + msg.err.Error()
+			v.noteFailure("Could not preview bulk reply", msg.err)
 			return nil, true
 		}
 		if msg.draft == nil || len(msg.draft.Entries) == 0 {
 			v.notice = "No replyable threads found; nothing was sent"
 			return nil, true
 		}
-		v.bulkReply = newBulkReplyForm(msg.postingIDs, msg.draft, v.vc.styles)
-		v.bulkReply.resize(v.vc.width, v.vc.height)
-		return v.bulkReply.init(), true
+		form := newBulkReplyForm(msg.postingIDs, msg.draft, v.vc.styles)
+		v.openModal(form)
+		return form.init(), true
 
 	case bulkReplySentMsg:
-		if v.bulkReply == nil {
+		form := modalOf[*bulkReplyForm](v)
+		if form == nil {
 			return nil, true
 		}
 		if msg.err != nil {
-			v.bulkReply.sending = false
-			v.bulkReply.status = "Send failed: " + msg.err.Error()
-			v.bulkReply.isError = true
+			form.sending = false
+			form.status = errorNotice("Send failed", msg.err)
+			form.isError = true
 			return nil, true
 		}
 		if msg.delivery == nil {
-			v.bulkReply.sending = false
-			v.bulkReply.status = "Send failed: HEY returned no delivery"
-			v.bulkReply.isError = true
+			form.sending = false
+			form.status = "Send failed: HEY returned no delivery"
+			form.isError = true
 			return nil, true
 		}
-		v.bulkReply = nil
+		v.modal = nil
 		v.postingList.clearSelected()
 		count := int(msg.delivery.EntriesCount)
 		v.notice = fmt.Sprintf("%d bulk %s sent", count, replyNoun(count))
@@ -488,7 +478,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		if msg.err != nil {
-			v.notice = "Could not undo bulk reply: " + msg.err.Error()
+			v.noteFailure("Could not undo bulk reply", msg.err)
 			return nil, true
 		}
 		v.lastBulkReplyID = 0
@@ -496,15 +486,16 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 
 	case composeSentMsg:
-		if v.compose == nil {
+		form := modalOf[*composeForm](v)
+		if form == nil {
 			return nil, true
 		}
 		if msg.err != nil {
-			v.compose.sending = false
-			v.compose.setStatus("Send failed: "+msg.err.Error(), true)
+			form.sending = false
+			form.setStatus(errorNotice("Send failed", msg.err), true)
 			return nil, true
 		}
-		v.compose = nil
+		v.modal = nil
 		v.notice = msg.label
 		return nil, true
 
@@ -515,13 +506,13 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if msg.err != nil {
 			saveErr := apierr.AsError(msg.err)
 			if saveErr.Code == "usage" && strings.HasPrefix(saveErr.Message, "destination already exists:") {
-				v.notice = "Attachment already exists: " + terminalSafeAttachmentText(msg.path)
+				v.notice = "Attachment already exists: " + terminal.SanitizeLine(msg.path)
 			} else {
-				v.notice = "Could not save attachment: " + msg.err.Error()
+				v.noteFailure("Could not save attachment", msg.err)
 			}
 			return nil, true
 		}
-		v.notice = "Saved attachment to " + terminalSafeAttachmentText(msg.path)
+		v.notice = "Saved attachment to " + terminal.SanitizeLine(msg.path)
 		return nil, true
 
 	case attachmentOpenedMsg:
@@ -529,10 +520,10 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		if msg.err != nil {
-			v.notice = "Could not open attachment: " + msg.err.Error()
+			v.noteFailure("Could not open attachment", msg.err)
 			return nil, true
 		}
-		v.notice = "Opened attachment " + terminalSafeAttachmentText(msg.filename)
+		v.notice = "Opened attachment " + terminal.SanitizeLine(msg.filename)
 		return nil, true
 
 	case postingActionDoneMsg:
@@ -549,14 +540,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			switch msg.effect {
 			case postingActionNone:
 			case postingActionRemove:
-				v.postingList.postings = append(v.postingList.postings[:idx], v.postingList.postings[idx+1:]...)
-				if v.postingList.cursor > idx {
-					v.postingList.cursor--
-				}
-				if v.postingList.cursor >= len(v.postingList.postings) && v.postingList.cursor > 0 {
-					v.postingList.cursor--
-				}
-				v.postingList.ensureVisible()
+				v.removePostingAt(idx)
 			case postingActionSeen:
 				v.postingList.markSeen(idx)
 			case postingActionIgnore:
@@ -565,7 +549,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 				v.postingList.postings[idx].Muted = false
 			}
 		}
-		if v.activeRequestKind == mailRequestPostings {
+		if v.requests.kind == mailRequestPostings {
 			if source := v.currentSource(); source != nil {
 				return v.requestPostings(*source), true
 			}
@@ -577,7 +561,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 	case postingSeenMsg:
 		v.finishMutation()
 		if msg.err != nil {
-			v.notice = "Could not mark thread as seen: " + msg.err.Error()
+			v.noteFailure("Could not mark thread as seen", msg.err)
 			return nil, true
 		}
 		if msg.boxID == v.currentBoxID() && msg.sourceKind == v.currentSourceKind() {
@@ -591,7 +575,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.finishMutation()
 		if msg.err != nil {
 			if msg.sourceID == v.currentBoxID() && msg.sourceKind == v.currentSourceKind() {
-				v.notice = "Could not update labels: " + msg.err.Error()
+				v.noteFailure("Could not update labels", msg.err)
 			}
 			return nil, true
 		}
@@ -612,17 +596,17 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		if msg.err != nil {
-			v.notice = "Could not update collections: " + terminalSafeCollectionText(msg.err.Error())
+			v.notice = terminal.SanitizeLine(errorNotice("Could not update collections", msg.err))
 			return nil, true
 		}
 		v.notice = msg.action
 		if index := v.postingIndex(msg.postingID); index >= 0 {
 			v.updatePostingCollection(index, msg.collection, msg.added)
-			if !msg.added && msg.sourceKind == mailSourceKindCollection && msg.collection.ID == msg.sourceID {
+			if !msg.added && msg.sourceKind == mail.KindCollection && msg.collection.ID == msg.sourceID {
 				v.removePostingAt(index)
 			}
 		}
-		if msg.sourceKind == mailSourceKindCollection && msg.collection.ID == msg.sourceID {
+		if msg.sourceKind == mail.KindCollection && msg.collection.ID == msg.sourceID {
 			if source := v.currentSource(); source != nil {
 				return v.requestPostings(*source), true
 			}
@@ -630,19 +614,13 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 	}
 
-	// Cursor blinks and other component messages go to the open form. The
-	// form owns the message while it is open, whether or not it yields a cmd.
-	if v.compose != nil {
-		return v.compose.update(msg), true
-	}
-	if v.bulkReply != nil {
-		return v.bulkReply.update(msg), true
-	}
-	if v.searchForm != nil {
-		return v.searchForm.update(msg), true
-	}
-	if v.folderPicker != nil && v.folderPicker.creating {
-		return v.folderPicker.update(msg), true
+	// Cursor blinks and other component messages go to the open modal. A form owns
+	// the message while it is open, whether or not it yields a cmd; a picker has no
+	// use for one and leaves it to whatever is on screen behind it.
+	if v.modal != nil {
+		if cmd, taken := v.modal.handleMsg(msg); taken {
+			return cmd, true
+		}
 	}
 
 	// Pass through to viewport if in thread
@@ -656,34 +634,8 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 }
 
 func (v *mailView) View() string {
-	if v.compose != nil {
-		return v.compose.view()
-	}
-	if v.bulkReply != nil {
-		return v.bulkReply.view()
-	}
-	if v.searchForm != nil {
-		return v.searchForm.view()
-	}
-	if v.movePicker != nil {
-		return v.movePicker.view(v.vc.styles, v.vc.width)
-	}
-	if v.coverPicker != nil {
-		return v.coverPicker.view(v.vc.styles, v.vc.width)
-	}
-	if v.folderPicker != nil {
-		return v.folderPicker.view(v.vc.styles, v.vc.width)
-	}
-	if v.collectionPicker != nil {
-		return v.collectionPicker.view(v.vc.styles, v.vc.width)
-	}
-	if v.labels != nil {
-		base := v.listHeader() + v.postingList.view()
-		return v.labels.overlay(base, v.vc.width, v.vc.height)
-	}
-	if v.collections != nil {
-		base := v.listHeader() + v.postingList.view()
-		return v.collections.overlay(base, v.vc.width, v.vc.height)
+	if v.modal != nil {
+		return v.modal.draw(v)
 	}
 	if v.inThread {
 		if v.notice != "" {
@@ -697,7 +649,19 @@ func (v *mailView) View() string {
 		}
 		return v.searchList.view()
 	}
+	return v.listView()
+}
+
+// listView is the posting list and whatever stands above it, which is what an overlay
+// modal draws itself over.
+func (v *mailView) listView() string {
 	return v.listHeader() + v.postingList.view()
+}
+
+// openModal puts a form or a picker over the list, sized to the screen it opens on.
+func (v *mailView) openModal(open modal) {
+	v.modal = open
+	open.resize(v.vc.width, v.vc.height)
 }
 
 // listHeader carries the one-shot notice, the standing word that the list has stopped
@@ -748,9 +712,7 @@ func (v *mailView) updateSourceDiscoveryNotice() {
 
 // CapturingInput reports whether a form or picker is open and wants every key.
 func (v *mailView) CapturingInput() bool {
-	return v.compose != nil || v.bulkReply != nil || v.movePicker != nil || v.coverPicker != nil ||
-		v.folderPicker != nil || v.collectionPicker != nil || v.labels != nil || v.collections != nil ||
-		v.searchForm != nil
+	return v.modal != nil
 }
 
 func (v *mailView) AccountSwitchBlocked() bool {
@@ -758,32 +720,8 @@ func (v *mailView) AccountSwitchBlocked() bool {
 }
 
 func (v *mailView) HelpBindings() []helpBinding {
-	if v.compose != nil {
-		return v.compose.helpBindings()
-	}
-	if v.bulkReply != nil {
-		return v.bulkReply.helpBindings()
-	}
-	if v.searchForm != nil {
-		return v.searchForm.helpBindings()
-	}
-	if v.movePicker != nil {
-		return v.movePicker.helpBindings()
-	}
-	if v.coverPicker != nil {
-		return v.coverPicker.helpBindings()
-	}
-	if v.folderPicker != nil {
-		return v.folderPicker.helpBindings()
-	}
-	if v.collectionPicker != nil {
-		return v.collectionPicker.helpBindings()
-	}
-	if v.labels != nil {
-		return v.labels.helpBindings()
-	}
-	if v.collections != nil {
-		return v.collections.helpBindings()
+	if v.modal != nil {
+		return v.modal.helpBindings()
 	}
 	if v.inThread {
 		bindings := []helpBinding{{"r", "reply"}, {"f", "forward"}}
@@ -842,7 +780,7 @@ func (v *mailView) HelpBindings() []helpBinding {
 		}
 		bindings = append(bindings, peek)
 	}
-	if v.currentBoxIsImbox() {
+	if v.showsImbox() {
 		bindings = append(bindings, helpBinding{"ctrl+v", "cover art"})
 	}
 	if v.lastBulkReplyID != 0 {
@@ -852,7 +790,7 @@ func (v *mailView) HelpBindings() []helpBinding {
 }
 
 func (v *mailView) SubnavItems() ([]navItem, int, string, bool) {
-	if v.searchActive || v.searchForm != nil {
+	if v.searchActive || v.searchOpen() {
 		label := "Search"
 		if v.searchQuery != "" {
 			label = "Search: " + v.searchQuery
@@ -866,7 +804,7 @@ func (v *mailView) SubnavItems() ([]navItem, int, string, bool) {
 	if v.boxIndex >= 0 && v.boxIndex < len(v.boxes) {
 		label = v.boxes[v.boxIndex].Name
 		if isOrganizedMailSource(v.boxes[v.boxIndex].Kind) {
-			label = terminalSafeFolderText(label)
+			label = terminal.SanitizeLine(label)
 		}
 		if v.postingPaging.loading {
 			label += " · loading more…"
@@ -875,7 +813,7 @@ func (v *mailView) SubnavItems() ([]navItem, int, string, bool) {
 
 	// Labels and Collections each use one tab whose modal chooses the source.
 	tabIndexes := v.tabBoxIndexes()
-	boxes := make([]models.Box, len(tabIndexes))
+	boxes := make([]mail.Source, len(tabIndexes))
 	selected := 0
 	for i, boxIndex := range tabIndexes {
 		boxes[i] = v.boxes[boxIndex]
@@ -886,13 +824,13 @@ func (v *mailView) SubnavItems() ([]navItem, int, string, bool) {
 	items := boxNavItems(boxes)
 	if v.hasLabels() {
 		items = append(items, navItem{shortcut: "L", label: "Labels"})
-		if v.currentSourceKind() == mailSourceKindFolder {
+		if v.currentSourceKind() == mail.KindFolder {
 			selected = len(items) - 1
 		}
 	}
 	if v.hasCollections() {
 		items = append(items, navItem{shortcut: "K", label: "Collections"})
-		if v.currentSourceKind() == mailSourceKindCollection {
+		if v.currentSourceKind() == mail.KindCollection {
 			selected = len(items) - 1
 		}
 	}
@@ -911,14 +849,14 @@ func (v *mailView) tabBoxIndexes() []int {
 }
 
 func (v *mailView) hasLabels() bool {
-	return v.hasSourceKind(mailSourceKindFolder)
+	return v.hasSourceKind(mail.KindFolder)
 }
 
 func (v *mailView) hasCollections() bool {
-	return v.hasSourceKind(mailSourceKindCollection)
+	return v.hasSourceKind(mail.KindCollection)
 }
 
-func (v *mailView) hasSourceKind(kind string) bool {
+func (v *mailView) hasSourceKind(kind mail.Kind) bool {
 	for _, source := range v.boxes {
 		if source.Kind == kind {
 			return true
@@ -927,21 +865,27 @@ func (v *mailView) hasSourceKind(kind string) bool {
 	return false
 }
 
+// searchOpen reports whether the search form is up, which is what puts the subnav on
+// the search rather than on a box.
+func (v *mailView) searchOpen() bool {
+	return modalOf[*mailSearchForm](v) != nil
+}
+
 func (v *mailView) openLabels() {
-	v.labels = newLabelPicker(v.boxes, v.boxIndex)
+	v.openModal(newLabelPicker(v.boxes, v.boxIndex))
 }
 
 func (v *mailView) openCollections() {
-	v.collections = newCollectionNavPicker(v.boxes, v.boxIndex)
+	v.openModal(newCollectionNavPicker(v.boxes, v.boxIndex))
 }
 
 func (v *mailView) SubnavLeft() tea.Cmd {
-	if v.searchActive || v.searchForm != nil {
+	if v.searchActive || v.searchOpen() {
 		return nil
 	}
 	tabIndexes := v.tabBoxIndexes()
 	switch v.currentSourceKind() {
-	case mailSourceKindCollection:
+	case mail.KindCollection:
 		if v.hasLabels() {
 			v.openLabels()
 			return nil
@@ -950,50 +894,52 @@ func (v *mailView) SubnavLeft() tea.Cmd {
 			return v.switchBox(tabIndexes[len(tabIndexes)-1])
 		}
 		return nil
-	case mailSourceKindFolder:
+	case mail.KindFolder:
 		if len(tabIndexes) > 0 {
 			return v.switchBox(tabIndexes[len(tabIndexes)-1])
 		}
 		return nil
-	}
-	for i, boxIndex := range tabIndexes {
-		if boxIndex == v.boxIndex && i > 0 {
-			return v.switchBox(tabIndexes[i-1])
+	case mail.KindBox:
+		for i, boxIndex := range tabIndexes {
+			if boxIndex == v.boxIndex && i > 0 {
+				return v.switchBox(tabIndexes[i-1])
+			}
 		}
 	}
 	return nil
 }
 
 func (v *mailView) SubnavRight() tea.Cmd {
-	if v.searchActive || v.searchForm != nil {
+	if v.searchActive || v.searchOpen() {
 		return nil
 	}
 	switch v.currentSourceKind() {
-	case mailSourceKindFolder:
+	case mail.KindFolder:
 		if v.hasCollections() {
 			v.openCollections()
 		} else {
 			v.openLabels()
 		}
 		return nil
-	case mailSourceKindCollection:
+	case mail.KindCollection:
 		v.openCollections()
 		return nil
-	}
-	tabIndexes := v.tabBoxIndexes()
-	for i, boxIndex := range tabIndexes {
-		if boxIndex != v.boxIndex {
-			continue
+	case mail.KindBox:
+		tabIndexes := v.tabBoxIndexes()
+		for i, boxIndex := range tabIndexes {
+			if boxIndex != v.boxIndex {
+				continue
+			}
+			if i+1 < len(tabIndexes) {
+				return v.switchBox(tabIndexes[i+1])
+			}
+			if v.hasLabels() {
+				v.openLabels()
+			} else if v.hasCollections() {
+				v.openCollections()
+			}
+			return nil
 		}
-		if i+1 < len(tabIndexes) {
-			return v.switchBox(tabIndexes[i+1])
-		}
-		if v.hasLabels() {
-			v.openLabels()
-		} else if v.hasCollections() {
-			v.openCollections()
-		}
-		return nil
 	}
 	return nil
 }
@@ -1001,186 +947,14 @@ func (v *mailView) SubnavRight() tea.Cmd {
 func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	v.notice = ""
 
-	if v.compose != nil {
-		if msg.Key().Code == tea.KeyEscape && !v.compose.sending {
-			v.compose = nil
-			return nil
-		}
-		cmd, submit := v.compose.handleKey(msg)
-		if submit {
-			return v.send()
+	// The open modal has every key. Escaping out of one and committing a choice in one
+	// both end here, which is why a modal says it is finished rather than closing itself.
+	if v.modal != nil {
+		cmd, open := v.modal.handleKey(v, msg)
+		if !open {
+			v.modal = nil
 		}
 		return cmd
-	}
-
-	if v.bulkReply != nil {
-		if msg.Key().Code == tea.KeyEscape && !v.bulkReply.sending {
-			v.bulkReply = nil
-			return nil
-		}
-		cmd, submit := v.bulkReply.handleKey(msg)
-		if submit {
-			return v.sendBulkReply()
-		}
-		return cmd
-	}
-
-	if v.searchForm != nil {
-		if msg.Key().Code == tea.KeyEscape {
-			v.searchForm = nil
-			return nil
-		}
-		cmd, query, submit := v.searchForm.handleKey(msg)
-		if submit {
-			v.searchForm = nil
-			return v.requestSearch(query)
-		}
-		return cmd
-	}
-
-	if v.movePicker != nil {
-		if msg.Key().Code == tea.KeyEscape {
-			v.movePicker = nil
-			return nil
-		}
-		if msg.Key().Code == tea.KeyEnter {
-			picker := v.movePicker
-			destination := picker.selected()
-			v.movePicker = nil
-			if destination == nil {
-				return nil
-			}
-			return v.movePostingToBox(picker.postingID, *destination)
-		}
-		v.movePicker.update(msg)
-		return nil
-	}
-
-	if v.coverPicker != nil {
-		switch msg.Key().Code {
-		case tea.KeyEscape:
-			v.coverPicker = nil
-			return nil
-		case tea.KeyEnter:
-			v.cover = v.coverPicker.selected()
-			v.coverPicker = nil
-			v.postingList.setCover(v.cover)
-			// The cover is on screen either way; failing to write it only costs
-			// the choice on the next run, which is worth a notice and not a
-			// refusal to change the cover.
-			if v.vc.saveCover != nil {
-				if err := v.vc.saveCover(string(v.cover)); err != nil {
-					v.notice = "Could not remember the cover: " + err.Error()
-				}
-			}
-			return nil
-		}
-		v.coverPicker.update(msg)
-		return nil
-	}
-
-	if v.labels != nil {
-		switch msg.Key().Code {
-		case tea.KeyEscape:
-			v.labels = nil
-			return nil
-		case tea.KeyEnter:
-			index := v.labels.selectedBoxIndex()
-			v.labels = nil
-			if index < 0 {
-				return nil
-			}
-			return v.switchBox(index)
-		}
-		v.labels.update(msg)
-		return nil
-	}
-
-	if v.collections != nil {
-		switch msg.Key().Code {
-		case tea.KeyEscape:
-			v.collections = nil
-			return nil
-		case tea.KeyEnter:
-			index := v.collections.selectedSourceIndex()
-			v.collections = nil
-			if index < 0 {
-				return nil
-			}
-			return v.switchBox(index)
-		}
-		v.collections.update(msg)
-		return nil
-	}
-
-	if v.folderPicker != nil {
-		picker := v.folderPicker
-		if msg.Key().Code == tea.KeyEscape {
-			if picker.creating {
-				picker.cancelCreate()
-				return nil
-			}
-			v.folderPicker = nil
-			return nil
-		}
-		if picker.creating {
-			if msg.Key().Code == tea.KeyEnter {
-				name, ok := picker.createName()
-				if !ok {
-					return nil
-				}
-				v.folderPicker = nil
-				return v.createFolderForPosting(picker.posting.ID, name)
-			}
-			return picker.handleKey(msg)
-		}
-		if msg.Key().Code == tea.KeyEnter {
-			selection := picker.selected()
-			if selection == nil {
-				return nil
-			}
-			switch selection.kind {
-			case folderPickerExisting:
-				v.folderPicker = nil
-				if picker.postingHasFolder(selection.folder.ID) {
-					return v.unfilePosting(picker.posting.ID, selection.folder.ID, selection.folder.Name)
-				}
-				return v.filePosting(picker.posting.ID, selection.folder.ID, selection.folder.Name)
-			case folderPickerCreate:
-				return picker.startCreate()
-			case folderPickerRemoveAll:
-				v.folderPicker = nil
-				return v.unfilePosting(picker.posting.ID, 0, "")
-			}
-		}
-		return picker.handleKey(msg)
-	}
-
-	if v.collectionPicker != nil {
-		picker := v.collectionPicker
-		if msg.Key().Code == tea.KeyEscape {
-			v.collectionPicker = nil
-			return nil
-		}
-		if msg.Key().Code == tea.KeyEnter {
-			collection := picker.selected()
-			if collection == nil {
-				return nil
-			}
-			topicID := picker.posting.ResolveTopicID()
-			if topicID == 0 {
-				v.collectionPicker = nil
-				v.notice = "This item does not identify an email thread"
-				return nil
-			}
-			v.collectionPicker = nil
-			if picker.postingHasCollection(collection.ID) {
-				return v.removePostingFromCollection(picker.posting.ID, topicID, *collection)
-			}
-			return v.addPostingToCollection(picker.posting.ID, topicID, *collection)
-		}
-		picker.update(msg)
-		return nil
 	}
 
 	if v.inThread {
@@ -1271,8 +1045,8 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 func (v *mailView) InThread() bool { return v.inThread || v.searchActive }
 
 func (v *mailView) ExitDetail(key string) {
-	if key == "q" && v.searchActive && !v.inThread && (v.activeRequestKind == mailRequestTopic || v.activeRequestKind == mailRequestSearch) {
-		v.cancelRequest()
+	if key == "q" && v.searchActive && !v.inThread && (v.requests.kind == mailRequestTopic || v.requests.kind == mailRequestSearch) {
+		v.requests.cancel()
 		v.clearSearch()
 		return
 	}
@@ -1280,22 +1054,18 @@ func (v *mailView) ExitDetail(key string) {
 }
 
 func (v *mailView) ExitThread() {
-	if v.searchActive && !v.inThread && (v.activeRequestKind == mailRequestTopic || v.activeRequestKind == mailRequestSearch) {
-		v.cancelRequest()
+	if v.searchActive && !v.inThread && (v.requests.kind == mailRequestTopic || v.requests.kind == mailRequestSearch) {
+		v.requests.cancel()
 		return
 	}
 	if v.inThread {
 		v.inThread = false
-		v.compose = nil
-		v.movePicker = nil
-		v.coverPicker = nil
-		v.folderPicker = nil
-		v.collectionPicker = nil
-		v.cancelRequest()
+		v.modal = nil
+		v.requests.cancel()
 		return
 	}
 	v.clearSearch()
-	v.cancelRequest()
+	v.requests.cancel()
 }
 
 func (v *mailView) clearSearch() {
@@ -1306,18 +1076,18 @@ func (v *mailView) clearSearch() {
 	v.searchLoadingMore = false
 	v.searchMoreID++
 	v.searchList.setPostings(nil)
-	v.searchForm = nil
+	v.modal = nil
 }
 
 func (v *mailView) CancelPendingDetail() bool {
-	if v.activeRequestKind != mailRequestTopic && v.activeRequestKind != mailRequestReply && v.activeRequestKind != mailRequestForward && v.activeRequestKind != mailRequestSearch && v.activeRequestKind != mailRequestBulkReply {
+	if v.requests.kind != mailRequestTopic && v.requests.kind != mailRequestReply && v.requests.kind != mailRequestForward && v.requests.kind != mailRequestSearch && v.requests.kind != mailRequestBulkReply {
 		return false
 	}
-	v.cancelRequest()
+	v.requests.cancel()
 	return true
 }
 
-func (v *mailView) Loading() bool { return v.loading }
+func (v *mailView) Loading() bool { return v.requests.loading }
 
 // Restyle rebuilds the cached thread content and hands the new styles to any open
 // form. The Kitty image placeholders in imageContent encode image IDs as colors, so
@@ -1328,33 +1098,14 @@ func (v *mailView) Restyle() {
 		v.rebuildTopicContent()
 		v.topicViewport.SetYOffset(offset)
 	}
-	if v.compose != nil {
-		v.compose.styles = v.vc.styles
-	}
-	if v.searchForm != nil {
-		v.searchForm.styles = v.vc.styles
-	}
-	if v.bulkReply != nil {
-		v.bulkReply.styles = v.vc.styles
-		v.bulkReply.resize(v.bulkReply.width, v.bulkReply.height)
+	if v.modal != nil {
+		v.modal.restyle(v.vc.styles)
 	}
 }
 
 func (v *mailView) Resize(width, height int) {
-	if v.compose != nil {
-		v.compose.resize(width, height)
-	}
-	if v.bulkReply != nil {
-		v.bulkReply.resize(width, height)
-	}
-	if v.searchForm != nil {
-		v.searchForm.resize(width, height)
-	}
-	if v.folderPicker != nil {
-		v.folderPicker.resize(width, height)
-	}
-	if v.collectionPicker != nil {
-		v.collectionPicker.resize(height)
+	if v.modal != nil {
+		v.modal.resize(width, height)
 	}
 	v.postingList.setSize(width, height)
 	v.searchList.setSize(width, height)
@@ -1388,14 +1139,14 @@ func (v *mailView) switchBox(index int) tea.Cmd {
 	}
 	v.inThread = false
 	v.clearSearch()
-	v.cancelRequest()
+	v.requests.cancel()
 	v.notice = ""
 	v.postingList.setPostings(nil)
 	v.boxIndex = index
 	return v.requestPostings(v.boxes[index])
 }
 
-func (v *mailView) currentSource() *models.Box {
+func (v *mailView) currentSource() *mail.Source {
 	if v.boxIndex < 0 || v.boxIndex >= len(v.boxes) {
 		return nil
 	}
@@ -1409,31 +1160,29 @@ func (v *mailView) currentBoxID() int64 {
 	return 0
 }
 
-// currentBoxIsImbox reports whether the active source is the Imbox.
-func (v *mailView) currentBoxIsImbox() bool {
+// showsImbox reports whether the source on screen is the Imbox: the only box HEY splits
+// New for You from Previously Seen in, and the only one it lets you cover. A source is
+// asked what it is rather than what it is called — a label named "Imbox" is a label.
+func (v *mailView) showsImbox() bool {
 	source := v.currentSource()
-	if source == nil {
-		return false
-	}
-	return strings.EqualFold(source.Kind, hey.BoxKindImbox) ||
-		(!isOrganizedMailSource(source.Kind) && strings.EqualFold(source.Name, "Imbox"))
+	return source != nil && source.Coverable()
 }
 
-func (v *mailView) currentSourceKind() string {
+func (v *mailView) currentSourceKind() mail.Kind {
 	if source := v.currentSource(); source != nil {
 		return source.Kind
 	}
 	return ""
 }
 
-func (v *mailView) currentSourceIdentity() (int64, string) {
+func (v *mailView) currentSourceIdentity() (int64, mail.Kind) {
 	if source := v.currentSource(); source != nil {
 		return source.ID, source.Kind
 	}
 	return 0, ""
 }
 
-func sourceIndex(sources []models.Box, id int64, kind string) int {
+func sourceIndex(sources []mail.Source, id int64, kind mail.Kind) int {
 	for i, source := range sources {
 		if source.ID == id && source.Kind == kind {
 			return i
@@ -1442,10 +1191,10 @@ func sourceIndex(sources []models.Box, id int64, kind string) int {
 	return 0
 }
 
-func (v *mailView) applySources(sources []models.Box) tea.Cmd {
+func (v *mailView) applySources(sources []mail.Source) tea.Cmd {
 	currentID, currentKind := v.currentSourceIdentity()
 	v.boxes = orderBoxes(sources)
-	v.loading = false
+	v.requests.loading = false
 	if len(v.boxes) == 0 {
 		return nil
 	}
@@ -1453,59 +1202,28 @@ func (v *mailView) applySources(sources []models.Box) tea.Cmd {
 	return v.requestPostings(v.boxes[v.boxIndex])
 }
 
+// requestSources reads the boxes, labels and collections. It is not the lane's read —
+// there is nothing to cancel and nothing else it could be confused with — but it is the
+// same spinner, so it turns the lane's light on and applySources turns it off again.
 func (v *mailView) requestSources() tea.Cmd {
 	v.sourceRequestID++
-	v.loading = true
+	v.requests.loading = true
 	return v.fetchSources(v.sourceRequestID)
 }
 
-func (v *mailView) beginRequest(kind mailRequestKind) (uint64, context.Context) {
-	if v.requestCancel != nil {
-		v.requestCancel()
-	}
-	v.activeRequestID++
-	ctx, cancel := context.WithCancel(v.vc.ctx)
-	v.activeRequestKind = kind
-	v.requestCancel = cancel
-	v.loading = true
-	return v.activeRequestID, ctx
-}
-
 func (v *mailView) acceptsPostingsLoaded(msg postingsLoadedMsg) bool {
-	return msg.requestID == v.activeRequestID &&
+	return v.requests.accepts(newRequestResult(msg.requestID, msg.err)) &&
 		msg.boxID == v.currentBoxID() &&
 		(msg.sourceKind == "" || msg.sourceKind == v.currentSourceKind())
-}
-
-func (v *mailView) finishRequest(requestID uint64) {
-	if requestID != v.activeRequestID {
-		return
-	}
-	if v.requestCancel != nil {
-		v.requestCancel()
-	}
-	v.activeRequestKind = mailRequestNone
-	v.requestCancel = nil
-	v.loading = false
-}
-
-func (v *mailView) cancelRequest() {
-	if v.requestCancel != nil {
-		v.requestCancel()
-	}
-	v.activeRequestID++
-	v.activeRequestKind = mailRequestNone
-	v.requestCancel = nil
-	v.loading = false
 }
 
 // requestPostings reads a source from its top page. Every list starts there and grows
 // downwards from it, so a read the user asked for is also what puts the list back to the
 // depth it opens at.
-func (v *mailView) requestPostings(source models.Box) tea.Cmd {
+func (v *mailView) requestPostings(source mail.Source) tea.Cmd {
 	v.postingPaging.reset()
 	v.moreRequestID++
-	requestID, ctx := v.beginRequest(mailRequestPostings)
+	requestID, ctx := v.requests.begin(v.vc.ctx, mailRequestPostings)
 	return v.fetchPostings(ctx, requestID, source, "")
 }
 
@@ -1601,18 +1319,19 @@ func (v *mailView) screenerUpdatesStopped() {
 	v.notice = "The Screener stopped updating live"
 }
 
-// noteFailure keeps the reason to a line. `hey watch` is where the whole of it is.
+// noteFailure keeps the reason to a line, in the words the CLI would use for it.
+// `hey watch` is where the whole of it is.
 func (v *mailView) noteFailure(what string, err error) {
-	v.notice = truncateToWidth(what+": "+err.Error(), max(v.vc.width-2, 40))
+	v.notice = truncateToWidth(errorNotice(what, err), max(v.vc.width-2, 40))
 }
 
 func (v *mailView) startSearch() tea.Cmd {
-	if v.loading || len(v.boxes) == 0 {
+	if v.requests.loading || len(v.boxes) == 0 {
 		return nil
 	}
-	v.searchForm = newMailSearchForm(v.searchQuery, v.vc.styles)
-	v.searchForm.resize(v.vc.width, v.vc.height)
-	return v.searchForm.init()
+	form := newMailSearchForm(v.searchQuery, v.vc.styles)
+	v.openModal(form)
+	return form.init()
 }
 
 // requestSearch runs a search from its first page. Results grow downwards from there, the
@@ -1621,7 +1340,7 @@ func (v *mailView) requestSearch(query string) tea.Cmd {
 	v.searchNextPage = 0
 	v.searchLoadingMore = false
 	v.searchMoreID++
-	requestID, ctx := v.beginRequest(mailRequestSearch)
+	requestID, ctx := v.requests.begin(v.vc.ctx, mailRequestSearch)
 	return v.fetchSearchResults(ctx, requestID, query, 1)
 }
 
@@ -1641,7 +1360,7 @@ func (v *mailView) loadMoreSearchResults() tea.Cmd {
 }
 
 func (v *mailView) requestTopic(boxID, topicID, postingID int64, title string) tea.Cmd {
-	requestID, ctx := v.beginRequest(mailRequestTopic)
+	requestID, ctx := v.requests.begin(v.vc.ctx, mailRequestTopic)
 	return v.fetchTopic(ctx, requestID, boxID, topicID, postingID, title)
 }
 
@@ -1662,10 +1381,7 @@ func (v *mailView) removePostingAt(index int) {
 	if v.postingList.cursor > index {
 		v.postingList.cursor--
 	}
-	if v.postingList.cursor >= len(v.postingList.postings) && v.postingList.cursor > 0 {
-		v.postingList.cursor--
-	}
-	v.postingList.ensureVisible()
+	v.postingList.settleCover()
 }
 
 func (v *mailView) moveAttachmentCursor(delta int) {
@@ -1751,7 +1467,7 @@ func (v *mailView) openSelected() tea.Cmd {
 	if selected == nil {
 		return nil
 	}
-	topicID := selected.ResolveTopicID()
+	topicID := selected.TopicID
 	if topicID == 0 {
 		topicID = selected.ID
 	}
@@ -1780,7 +1496,7 @@ func (v *mailView) markPostingSeen(boxID, postingID int64) tea.Cmd {
 	}
 }
 
-func (v *mailView) openedPosting(postingID int64) *models.Posting {
+func (v *mailView) openedPosting(postingID int64) *mail.Posting {
 	list := &v.postingList
 	if v.searchActive {
 		list = &v.searchList
@@ -1806,18 +1522,31 @@ func (v *mailView) startMove() {
 		v.notice = "No other boxes available"
 		return
 	}
-	v.movePicker = picker
+	v.openModal(picker)
 }
 
 // startCoverPicker opens the cover picker. Only the Imbox can be covered, which
 // is haystack's rule, so anywhere else the key says why rather than doing nothing.
 func (v *mailView) startCoverPicker() tea.Cmd {
-	if !v.currentBoxIsImbox() {
+	if !v.showsImbox() {
 		v.notice = "Only the Imbox can be covered"
 		return nil
 	}
-	v.coverPicker = newCoverPicker(v.cover)
+	v.openModal(newCoverPicker(v.cover))
 	return nil
+}
+
+// applyCover puts the chosen art over Previously Seen and remembers it. The cover is
+// on screen either way; failing to write it only costs the choice on the next run,
+// which is worth a notice and not a refusal to change the cover.
+func (v *mailView) applyCover(preset coverPreset) {
+	v.cover = preset
+	v.postingList.setCover(v.cover)
+	if v.vc.saveCover != nil {
+		if err := v.vc.saveCover(string(v.cover)); err != nil {
+			v.notice = "Could not remember the cover: " + err.Error()
+		}
+	}
 }
 
 func (v *mailView) startFolderPicker() tea.Cmd {
@@ -1829,19 +1558,18 @@ func (v *mailView) startFolderPicker() tea.Cmd {
 	if selected == nil {
 		return nil
 	}
-	v.folderPicker = newFolderPicker(*selected, v.boxes)
-	v.folderPicker.resize(v.vc.width, v.vc.height)
+	v.openModal(newFolderPicker(*selected, v.boxes))
 	return nil
 }
 
 func (v *mailView) filePosting(postingID, folderID int64, folderName string) tea.Cmd {
-	return v.doFolderAction("Label "+terminalSafeFolderText(folderName)+" added", false, func() error {
+	return v.doFolderAction("Label "+terminal.SanitizeLine(folderName)+" added", false, func() error {
 		return v.vc.sdk.Postings().File(v.vc.ctx, folderID, postingID)
 	})
 }
 
 func (v *mailView) createFolderForPosting(postingID int64, folderName string) tea.Cmd {
-	return v.doFolderAction("Label "+terminalSafeFolderText(folderName)+" created", true, func() error {
+	return v.doFolderAction("Label "+terminal.SanitizeLine(folderName)+" created", true, func() error {
 		return v.vc.sdk.Postings().CreateFolder(v.vc.ctx, folderName, postingID)
 	})
 }
@@ -1849,7 +1577,7 @@ func (v *mailView) createFolderForPosting(postingID int64, folderName string) te
 func (v *mailView) unfilePosting(postingID, folderID int64, folderName string) tea.Cmd {
 	label := "All labels removed"
 	if folderID != 0 {
-		label = "Label " + terminalSafeFolderText(folderName) + " removed"
+		label = "Label " + terminal.SanitizeLine(folderName) + " removed"
 	}
 	return v.doFolderAction(label, false, func() error {
 		return v.vc.sdk.Postings().Unfile(v.vc.ctx, folderID, postingID)
@@ -1879,7 +1607,7 @@ func (v *mailView) startCollectionPicker() tea.Cmd {
 	if selected == nil {
 		return nil
 	}
-	if selected.ResolveTopicID() == 0 {
+	if selected.TopicID == 0 {
 		v.notice = "This item does not identify an email thread"
 		return nil
 	}
@@ -1888,22 +1616,21 @@ func (v *mailView) startCollectionPicker() tea.Cmd {
 		v.notice = "No collections available"
 		return nil
 	}
-	picker.resize(v.vc.height)
-	v.collectionPicker = picker
+	v.openModal(picker)
 	return nil
 }
 
-func (v *mailView) addPostingToCollection(postingID, topicID int64, collection models.Collection) tea.Cmd {
-	label := "Added to collection " + terminalSafeCollectionText(collection.Name)
+func (v *mailView) addPostingToCollection(postingID, topicID int64, collection mail.Collection) tea.Cmd {
+	label := "Added to collection " + terminal.SanitizeLine(collection.Name)
 	return v.doCollectionAction(label, postingID, topicID, collection, true)
 }
 
-func (v *mailView) removePostingFromCollection(postingID, topicID int64, collection models.Collection) tea.Cmd {
-	label := "Removed from collection " + terminalSafeCollectionText(collection.Name)
+func (v *mailView) removePostingFromCollection(postingID, topicID int64, collection mail.Collection) tea.Cmd {
+	label := "Removed from collection " + terminal.SanitizeLine(collection.Name)
 	return v.doCollectionAction(label, postingID, topicID, collection, false)
 }
 
-func (v *mailView) doCollectionAction(label string, postingID, topicID int64, collection models.Collection, added bool) tea.Cmd {
+func (v *mailView) doCollectionAction(label string, postingID, topicID int64, collection mail.Collection, added bool) tea.Cmd {
 	sourceID, sourceKind := v.currentSourceIdentity()
 	v.pendingMutations++
 	return func() tea.Msg {
@@ -1925,7 +1652,7 @@ func (v *mailView) doCollectionAction(label string, postingID, topicID int64, co
 	}
 }
 
-func (v *mailView) updatePostingCollection(index int, collection models.Collection, added bool) {
+func (v *mailView) updatePostingCollection(index int, collection mail.Collection, added bool) {
 	memberships := v.postingList.postings[index].Collections
 	for i, membership := range memberships {
 		if membership.ID != collection.ID {
@@ -1941,7 +1668,7 @@ func (v *mailView) updatePostingCollection(index int, collection models.Collecti
 	}
 }
 
-func (v *mailView) movePostingToBox(postingID int64, destination models.Box) tea.Cmd {
+func (v *mailView) movePostingToBox(postingID int64, destination mail.Source) tea.Cmd {
 	return v.doPostingAction("Thread moved to "+destination.Name, v.boxMoveEffect(), v.currentBoxID(), postingID, func() error {
 		return v.vc.sdk.Postings().Move(v.vc.ctx, destination.ID, postingID)
 	})
@@ -2001,13 +1728,13 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 			return v.vc.sdk.Postings().Unmute(v.vc.ctx, p.ID)
 		})
 	case "r":
-		topicID := p.ResolveTopicID()
+		topicID := p.TopicID
 		if topicID == 0 {
 			topicID = p.ID
 		}
 		return v.loadReplyContext(topicID, p.Summary)
 	case "f":
-		topicID := p.ResolveTopicID()
+		topicID := p.TopicID
 		if topicID == 0 {
 			topicID = p.ID
 		}
@@ -2031,11 +1758,15 @@ func (v *mailView) boxMoveEffect() postingActionEffect {
 	return postingActionRemove
 }
 
-func (v *mailView) movesOutOfCurrentBox(destinationKind string) bool {
-	if v.boxIndex < 0 || v.boxIndex >= len(v.boxes) {
+// movesOutOfCurrentBox reports whether a key that files a thread somewhere would move it
+// at all. The destination is one of HEY's own box kinds, so it is the box's kind that
+// answers — a label or a collection carries none and is never the destination.
+func (v *mailView) movesOutOfCurrentBox(destinationBoxKind string) bool {
+	source := v.currentSource()
+	if source == nil {
 		return true
 	}
-	return !strings.EqualFold(v.boxes[v.boxIndex].Kind, destinationKind)
+	return source.BoxKind != destinationBoxKind
 }
 
 func (v *mailView) doPostingAction(label string, effect postingActionEffect, boxID, postingID int64, fn func() error) tea.Cmd {
@@ -2062,54 +1793,16 @@ func (v *mailView) finishMutation() {
 
 // --- SDK type converters ---
 
-func sdkBoxToModel(b generated.Box) models.Box {
-	return models.Box{ID: b.Id, Kind: b.Kind, Name: b.Name}
-}
-
-func sdkPostingToModel(p generated.Posting) models.Posting {
-	folders := make([]models.Folder, len(p.Folders))
-	for i, folder := range p.Folders {
-		folders[i] = models.Folder{ID: folder.Id, Name: folder.Name, AppURL: folder.AppUrl}
-	}
-	collections := make([]models.Collection, len(p.Collections))
-	for i, collection := range p.Collections {
-		collections[i] = models.Collection{ID: collection.Id, Name: collection.Name, AppURL: collection.AppUrl}
-	}
-	return models.Posting{
-		ID:                    p.Id,
-		CreatedAt:             formatTimestamp(p.CreatedAt),
-		UpdatedAt:             formatTimestamp(p.UpdatedAt),
-		Kind:                  p.Kind,
-		Name:                  p.Name,
-		Seen:                  p.Seen,
-		BubbledUp:             p.BubbledUp,
-		Bundled:               p.Bundled,
-		Muted:                 p.Muted,
-		Summary:               p.Summary,
-		EntryKind:             p.EntryKind,
-		AppURL:                p.AppUrl,
-		AlternativeSenderName: p.AlternativeSenderName,
-		VisibleEntryCount:     p.VisibleEntryCount,
-		Extenzions:            sdkExtenzionsToModel(p.Extenzions),
-		Folders:               folders,
-		Collections:           collections,
-		Creator: models.Contact{
-			ID:           p.Creator.Id,
-			Name:         p.Creator.Name,
-			EmailAddress: p.Creator.EmailAddress,
-		},
-	}
-}
-
-func sdkSearchMatchToModel(match generated.SearchMatch) models.Posting {
-	posting := models.Posting{
+// searchMatchToPosting makes a search match look like a posting, so the results list is
+// the same list as a box's. A match names its own topic, where a posting only carries the
+// URL of one, and the entry that matched is the row's date, excerpt and sender.
+func searchMatchToPosting(match generated.SearchMatch) mail.Posting {
+	posting := mail.Posting{
 		ID:        match.PostingId,
 		TopicID:   match.Topic.Id,
 		Name:      match.Topic.Name,
-		AppURL:    match.Topic.AppUrl,
-		CreatedAt: formatTimestamp(match.Topic.UpdatedAt),
-		UpdatedAt: formatTimestamp(match.Topic.UpdatedAt),
-		Creator: models.Contact{
+		CreatedAt: match.Topic.UpdatedAt,
+		Creator: mail.Contact{
 			ID:           match.Topic.Creator.Id,
 			Name:         match.Topic.Creator.Name,
 			EmailAddress: match.Topic.Creator.EmailAddress,
@@ -2117,27 +1810,16 @@ func sdkSearchMatchToModel(match generated.SearchMatch) models.Posting {
 	}
 	if len(match.Entries) > 0 {
 		entry := match.Entries[0]
-		posting.CreatedAt = formatTimestamp(entry.CreatedAt)
+		posting.CreatedAt = entry.CreatedAt
 		posting.Summary = entry.Summary
 		posting.AlternativeSenderName = entry.AlternativeSenderName
-		posting.Creator = models.Contact{
+		posting.Creator = mail.Contact{
 			ID:           entry.Creator.Id,
 			Name:         entry.Creator.Name,
 			EmailAddress: entry.Creator.EmailAddress,
 		}
 	}
 	return posting
-}
-
-func sdkExtenzionsToModel(exts []generated.Extenzion) []models.Extenzion {
-	if len(exts) == 0 {
-		return nil
-	}
-	result := make([]models.Extenzion, len(exts))
-	for i, e := range exts {
-		result[i] = models.Extenzion{ID: e.Id, Name: e.Name}
-	}
-	return result
 }
 
 func sdkMessageToEntry(entry generated.Entry, message generated.Message) models.Entry {
@@ -2192,24 +1874,24 @@ func (v *mailView) fetchSources(requestID uint64) tea.Cmd {
 		if result != nil {
 			sdkBoxes = *result
 		}
-		boxes := make([]models.Box, 0, len(sdkBoxes))
+		sources := make([]mail.Source, 0, len(sdkBoxes))
 		for _, box := range sdkBoxes {
-			boxes = append(boxes, sdkBoxToModel(box))
+			sources = append(sources, mail.ListedBoxSource(box))
 		}
 
 		folders, folderErr := internalfolders.List(v.vc.ctx, v.vc.sdk)
 		if folderErr == nil {
 			for _, label := range folders {
-				boxes = append(boxes, models.Box{ID: label.ID, Kind: mailSourceKindFolder, Name: label.Name, AppURL: label.AppURL})
+				sources = append(sources, mail.Source{Kind: mail.KindFolder, ID: label.ID, Name: label.Name, AppURL: label.AppURL})
 			}
 		}
 		collections, collectionErr := v.vc.sdk.Collections().List(v.vc.ctx)
 		if collectionErr == nil && collections != nil {
 			for _, collection := range *collections {
-				boxes = append(boxes, models.Box{ID: collection.Id, Kind: mailSourceKindCollection, Name: collection.Name, AppURL: collection.AppUrl})
+				sources = append(sources, mail.Source{Kind: mail.KindCollection, ID: collection.Id, Name: collection.Name, AppURL: collection.AppUrl})
 			}
 		}
-		message := mailSourcesLoadedMsg{requestID: requestID, sources: boxes, folderErr: folderErr, collectionErr: collectionErr}
+		message := mailSourcesLoadedMsg{requestID: requestID, sources: sources, folderErr: folderErr, collectionErr: collectionErr}
 		if screener, err := v.vc.sdk.Clearances().Summary(v.vc.ctx); err == nil && screener != nil {
 			message.screenerCount = int(screener.PendingClearancesCount)
 			message.screenerStream = screener.SignedStreamName
@@ -2220,12 +1902,21 @@ func (v *mailView) fetchSources(requestID uint64) tea.Cmd {
 
 func (v *mailView) refreshScreenerCount() tea.Cmd {
 	return func() tea.Msg {
-		count, err := v.vc.sdk.Clearances().PendingCount(v.vc.ctx)
-		return screenerCountLoadedMsg{count: count, err: err}
+		summary, err := v.vc.sdk.Clearances().Summary(v.vc.ctx)
+		if err != nil {
+			return screenerCountLoadedMsg{err: err}
+		}
+		if summary == nil {
+			return screenerCountLoadedMsg{}
+		}
+		return screenerCountLoadedMsg{
+			count:          int(summary.PendingClearancesCount),
+			screenerStream: summary.SignedStreamName,
+		}
 	}
 }
 
-func (v *mailView) fetchPostings(ctx context.Context, requestID uint64, source models.Box, page string) tea.Cmd {
+func (v *mailView) fetchPostings(ctx context.Context, requestID uint64, source mail.Source, page string) tea.Cmd {
 	return func() tea.Msg {
 		postings, nextPage, err := v.readPostingsPage(ctx, source, page)
 		return postingsLoadedMsg{
@@ -2237,7 +1928,7 @@ func (v *mailView) fetchPostings(ctx context.Context, requestID uint64, source m
 
 // fetchMorePostings reads the page below the list, in the growing lane and without the
 // spinner: what the reader is looking at is already on screen.
-func (v *mailView) fetchMorePostings(ctx context.Context, requestID uint64, source models.Box, page string) tea.Cmd {
+func (v *mailView) fetchMorePostings(ctx context.Context, requestID uint64, source mail.Source, page string) tea.Cmd {
 	return func() tea.Msg {
 		postings, nextPage, err := v.readPostingsPage(ctx, source, page)
 		return postingsAppendedMsg{
@@ -2250,7 +1941,7 @@ func (v *mailView) fetchMorePostings(ctx context.Context, requestID uint64, sour
 // fetchBoxRefresh re-reads the top page of a box for the live update. It reads that and
 // nothing else: the pages the reader scrolled down to, a search and a thread all stay as
 // they were.
-func (v *mailView) fetchBoxRefresh(ctx context.Context, requestID uint64, source models.Box) tea.Cmd {
+func (v *mailView) fetchBoxRefresh(ctx context.Context, requestID uint64, source mail.Source) tea.Cmd {
 	return func() tea.Msg {
 		postings, nextPage, err := v.readPostingsPage(ctx, source, "")
 		return postingsRefreshedMsg{
@@ -2262,63 +1953,14 @@ func (v *mailView) fetchBoxRefresh(ctx context.Context, requestID uint64, source
 
 // readPostingsPage reads one page of a source and answers the cursor for the page after
 // it, empty once the source has nothing more to give. An empty page reads the first one.
-func (v *mailView) readPostingsPage(ctx context.Context, source models.Box, page string) ([]models.Posting, string, error) {
-	var sdkPostings []generated.Posting
-	var nextPage string
-
-	switch source.Kind {
-	case mailSourceKindFolder:
-		var params *generated.GetFolderParams
-		if page != "" {
-			params = &generated.GetFolderParams{Page: &page}
-		}
-		result, err := v.vc.sdk.Folders().GetPage(ctx, source.ID, params)
-		if err != nil {
-			return nil, "", err
-		}
-		if result != nil {
-			nextPage = result.NextPage
-			if result.Folder != nil {
-				sdkPostings = result.Folder.Postings
-			}
-		}
-	case mailSourceKindCollection:
-		var params *generated.GetCollectionParams
-		if page != "" {
-			params = &generated.GetCollectionParams{Page: &page}
-		}
-		result, err := v.vc.sdk.Collections().GetPage(ctx, source.ID, params)
-		if err != nil {
-			return nil, "", err
-		}
-		if result != nil {
-			nextPage = result.NextPage
-			if result.Collection != nil {
-				sdkPostings = result.Collection.Postings
-			}
-		}
-	default:
-		var params *generated.GetBoxParams
-		if page != "" {
-			params = &generated.GetBoxParams{Page: &page}
-		}
-		result, err := v.vc.sdk.Boxes().GetPage(ctx, source.ID, params)
-		if err != nil {
-			return nil, "", err
-		}
-		if result != nil {
-			nextPage = result.NextPage
-			if result.Box != nil {
-				sdkPostings = result.Box.Postings
-			}
-		}
+// Which endpoint that is is internal/mail's business: a box is read on its own route,
+// where HEY's ordering for it lives.
+func (v *mailView) readPostingsPage(ctx context.Context, source mail.Source, page string) ([]mail.Posting, string, error) {
+	read, err := mail.ReadPage(ctx, v.vc.sdk, source, page)
+	if err != nil {
+		return nil, "", err
 	}
-
-	postings := make([]models.Posting, 0, len(sdkPostings))
-	for _, posting := range sdkPostings {
-		postings = append(postings, sdkPostingToModel(posting))
-	}
-	return postings, nextPage, nil
+	return mail.Postings(read.Postings), read.Cursor, nil
 }
 
 func (v *mailView) fetchSearchResults(ctx context.Context, requestID uint64, query string, page int) tea.Cmd {
@@ -2340,7 +1982,7 @@ func (v *mailView) fetchMoreSearchResults(ctx context.Context, requestID uint64,
 // readSearchPage reads one page of matches and answers the number of the page after it,
 // zero once the search has nothing more to give. Search numbers its pages where a box
 // cursors them, so this is a page number rather than a token.
-func (v *mailView) readSearchPage(ctx context.Context, query string, page int) ([]models.Posting, int, error) {
+func (v *mailView) readSearchPage(ctx context.Context, query string, page int) ([]mail.Posting, int, error) {
 	results, err := v.vc.sdk.Search().SearchPage(ctx, hey.SearchParams{Query: query, Page: max(page, 1)})
 	if err != nil {
 		return nil, 0, err
@@ -2349,9 +1991,9 @@ func (v *mailView) readSearchPage(ctx context.Context, query string, page int) (
 	if results != nil && results.Result != nil {
 		matches = results.Result.Matches
 	}
-	postings := make([]models.Posting, 0, len(matches))
+	postings := make([]mail.Posting, 0, len(matches))
 	for _, match := range matches {
-		postings = append(postings, sdkSearchMatchToModel(match))
+		postings = append(postings, searchMatchToPosting(match))
 	}
 	nextPage := 0
 	if results != nil {

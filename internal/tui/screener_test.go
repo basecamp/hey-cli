@@ -3,6 +3,8 @@ package tui
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +15,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
+	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
 // --- Test helpers ---
@@ -210,6 +214,46 @@ func TestScreenerReportsFailedDecision(t *testing.T) {
 	if !strings.HasPrefix(view.notice, "Could not screen Jane Doe:") {
 		t.Errorf("notice = %q", view.notice)
 	}
+	if view.notice != "Could not screen Jane Doe: "+apierr.AsError(apierr.FromSDK(done.err)).Message {
+		t.Errorf("notice = %q, want the words the CLI prints for the same failure", view.notice)
+	}
+}
+
+func TestScreenerNoticesSayWhatTheCLISays(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "a refusal carries the hint the server sent with it",
+			err:  &hey.Error{Code: hey.CodeValidation, Message: "that sender is no longer waiting", Hint: "Reload The Screener", HTTPStatus: 422},
+			want: "Could not screen Jane Doe: that sender is no longer waiting — Reload The Screener",
+		},
+		{
+			name: "a rate limit reads as a wait rather than as a status",
+			err:  &hey.Error{Code: hey.CodeRateLimit, Message: "429 Too Many Requests", Hint: "30 seconds", HTTPStatus: 429},
+			want: "Could not screen Jane Doe: rate limited — retry after 30 seconds",
+		},
+		{
+			name: "an expired token does not send somebody in a full-screen app to a shell prompt",
+			err:  &hey.Error{Code: hey.CodeAuth, Message: "not authenticated", HTTPStatus: 401},
+			want: "Could not screen Jane Doe: not authenticated",
+		},
+		{
+			name: "an error that never went near the API keeps its own text",
+			err:  errors.New("no route to host"),
+			want: "Could not screen Jane Doe: no route to host",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := errorNotice("Could not screen Jane Doe", tt.err); got != tt.want {
+				t.Errorf("notice = %q, want %q", got, tt.want)
+			}
+		})
+	}
 }
 
 // --- Screener history ---
@@ -396,6 +440,48 @@ func TestScreenerGrowingSkipsSendersAlreadyShown(t *testing.T) {
 
 	if len(view.pending.rows) != 3 || view.pending.rows[2].id != 93 {
 		t.Errorf("grown queue = %+v", view.pending.rows)
+	}
+}
+
+// Screening the senders off the bottom of a queue the reader has scrolled down must not
+// leave the window past the last row. It used to: the pane drew nothing at all, which
+// reads as an empty queue rather than as one with senders still in it.
+func TestScreenerKeepsDrawingAfterScreeningOffTheBottom(t *testing.T) {
+	view, _ := screenerTestView(t)
+	view.vc.height = 12
+	rows := make([]screenerRow, 0, 20)
+	for index := range 20 {
+		rows = append(rows, screenerRow{
+			id:     int64(300 + index),
+			name:   fmt.Sprintf("Sender %02d", index),
+			email:  fmt.Sprintf("sender%02d@example.com", index),
+			detail: "Wants to hear back",
+		})
+	}
+	view.pending.setRows(rows, "")
+	view.pendingCount = len(rows)
+	for range len(rows) {
+		view.pending.moveDown(view.visibleRows())
+	}
+	if view.pending.scroll == 0 {
+		t.Fatal("the reader is still on the first screenful of the queue")
+	}
+
+	for range 5 {
+		row := view.pending.selected()
+		if row == nil {
+			t.Fatalf("the cursor left the queue with %d senders in it", len(view.pending.rows))
+		}
+		view.Update(screenerDecisionDoneMsg{clearanceID: row.id, name: row.name, status: hey.ClearanceApproved})
+
+		rendered := plainText(view.View())
+		if !strings.Contains(rendered, view.pending.rows[view.pending.cursor].name) {
+			t.Fatalf("the pane drew nothing where the queue is: scroll %d, cursor %d, %d rows",
+				view.pending.scroll, view.pending.cursor, len(view.pending.rows))
+		}
+	}
+	if len(view.pending.rows) != 15 {
+		t.Errorf("queue holds %d senders, want 15", len(view.pending.rows))
 	}
 }
 

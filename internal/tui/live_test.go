@@ -11,7 +11,7 @@ import (
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
-	"github.com/basecamp/hey-cli/internal/models"
+	"github.com/basecamp/hey-cli/internal/mail"
 )
 
 // --- The changes stream ---
@@ -150,7 +150,7 @@ func TestMailViewIgnoresChangesItIsNotShowing(t *testing.T) {
 		t.Error("a reconnect stands for the box on screen")
 	}
 
-	v.boxes = append(v.boxes, models.Box{ID: 900, Kind: mailSourceKindFolder, Name: "Receipts"})
+	v.boxes = append(v.boxes, mail.Source{Kind: mail.KindFolder, ID: 900, Name: "Receipts"})
 	v.boxIndex = len(v.boxes) - 1
 	if cmd := v.boxChanged(900); cmd != nil {
 		t.Error("a label pages through its own feed, not a box's")
@@ -172,7 +172,7 @@ func TestMailViewHoldsAReReadWhileAFormIsOpen(t *testing.T) {
 		t.Errorf("nothing should have been read yet, got %v", recorded.paths)
 	}
 
-	v.movePicker = nil
+	v.modal = nil
 	if cmd := v.refreshBox(v.currentBoxID()); cmd == nil {
 		t.Fatal("closing the picker should let the re-read through")
 	}
@@ -208,10 +208,10 @@ func TestMailViewReReadKeepsTheReadersPlace(t *testing.T) {
 	if ids := v.postingList.selectedIDs(); len(ids) != 1 || ids[0] != 101 {
 		t.Errorf("selection = %v, want Meeting notes still selected", ids)
 	}
-	if paths := recorded.paths; len(paths) != 1 || !strings.HasSuffix(paths[0], "/boxes/1.json") {
-		t.Errorf("read = %v, want the one box", paths)
+	if paths := recorded.paths; len(paths) != 1 || !strings.HasSuffix(paths[0], "/imbox.json") {
+		t.Errorf("read = %v, want the Imbox's own route", paths)
 	}
-	if v.loading {
+	if v.requests.loading {
 		t.Error("a re-read is not the user waiting on something")
 	}
 }
@@ -243,7 +243,7 @@ func TestMailViewReReadReplacesOnlyTheTopPage(t *testing.T) {
 		boxID:      v.currentBoxID(),
 		sourceKind: v.currentSourceKind(),
 		nextPage:   "cursor-3",
-		postings:   []models.Posting{{ID: 102, Summary: "Scrolled to", Seen: true}},
+		postings:   []mail.Posting{{ID: 102, Summary: "Scrolled to", Seen: true}},
 	})
 
 	v.Update(postingsRefreshedMsg{
@@ -251,7 +251,7 @@ func TestMailViewReReadReplacesOnlyTheTopPage(t *testing.T) {
 		boxID:      v.currentBoxID(),
 		sourceKind: v.currentSourceKind(),
 		nextPage:   "cursor-2",
-		postings:   []models.Posting{{ID: 103, Summary: "Just arrived"}, testPostings()[1]},
+		postings:   []mail.Posting{{ID: 103, Summary: "Just arrived"}, testPostings()[1]},
 	})
 
 	ids := make([]int64, 0, len(v.postingList.postings))
@@ -299,7 +299,7 @@ func TestMailViewReloadsOnCtrlR(t *testing.T) {
 	if cmd := v.HandleContentKey(keyPress("ctrl+r")); cmd == nil {
 		t.Fatal("ctrl+r should read the box again")
 	}
-	if !v.loading {
+	if !v.requests.loading {
 		t.Error("a reload the user asked for should show as loading")
 	}
 	if !hasHelpBinding(v.HelpBindings(), "ctrl+r") {
@@ -317,7 +317,7 @@ func TestContentListRefreshDropsWhatLeftTheBox(t *testing.T) {
 		t.Fatal("the posting under the cursor should end up selected")
 	}
 
-	list.refreshHead([]models.Posting{testPostings()[0]}, postingIDs(testPostings()))
+	list.refreshHead([]mail.Posting{testPostings()[0]}, postingIDs(testPostings()))
 	if list.cursor != 0 {
 		t.Errorf("cursor = %d, want the top once its posting left", list.cursor)
 	}
@@ -331,15 +331,16 @@ func TestContentListRefreshDropsWhatLeftTheBox(t *testing.T) {
 func TestWaitForScreenerChangeReportsTheRingAndTheClose(t *testing.T) {
 	changes := make(chan struct{}, 1)
 	changes <- struct{}{}
-	if changed := waitForScreenerChangeCmd(changes)().(screenerChangedMsg); changed.closed {
-		t.Error("a ring is not a closed stream")
+	changed := waitForScreenerChangeCmd("stream-one", changes)().(screenerChangedMsg)
+	if changed.closed || changed.stream != "stream-one" {
+		t.Errorf("changed = %+v, want a ring from the stream it was waiting on", changed)
 	}
 
 	close(changes)
-	if changed := waitForScreenerChangeCmd(changes)().(screenerChangedMsg); !changed.closed {
+	if changed := waitForScreenerChangeCmd("stream-one", changes)().(screenerChangedMsg); !changed.closed {
 		t.Error("a closed stream should say so")
 	}
-	if cmd := waitForScreenerChangeCmd(nil); cmd != nil {
+	if cmd := waitForScreenerChangeCmd("stream-one", nil); cmd != nil {
 		t.Error("nothing to wait on should be no command")
 	}
 }
@@ -364,12 +365,92 @@ func TestModelOpensTheScreenerStreamOnlyWhenItsNameChanges(t *testing.T) {
 	}
 }
 
+func TestModelGivesUpTheOldScreenerStreamWhenItOpensANewOne(t *testing.T) {
+	m := newModel()
+	var opened []context.Context
+	m.watchScreener = func(ctx context.Context, _ string) (<-chan struct{}, error) {
+		opened = append(opened, ctx)
+		return make(chan struct{}), nil
+	}
+
+	runCmd(m.startScreenerWatch("stream-one"))
+	runCmd(m.startScreenerWatch("stream-two"))
+
+	if len(opened) != 2 {
+		t.Fatalf("opened %d streams, want 2", len(opened))
+	}
+	if opened[0].Err() == nil {
+		t.Error("the stream behind the old name should be given up, not left ringing")
+	}
+	if opened[1].Err() != nil {
+		t.Error("the stream just opened should still be open")
+	}
+}
+
+func TestModelReopensTheScreenerStreamFromACountRead(t *testing.T) {
+	m := newModel()
+	opened := make(chan string, 2)
+	m.watchScreener = func(_ context.Context, signedStreamName string) (<-chan struct{}, error) {
+		opened <- signedStreamName
+		return make(chan struct{}), nil
+	}
+
+	updated, cmd := m.Update(screenerCountLoadedMsg{count: 2, screenerStream: "stream-one"})
+	m = updated.(model)
+	runCmd(cmd)
+
+	if m.screenerStream != "stream-one" {
+		t.Errorf("stream = %q, want the one the count read named", m.screenerStream)
+	}
+	if name := <-opened; name != "stream-one" {
+		t.Errorf("opened %q, want the stream the count read named", name)
+	}
+	if m.mailView.screenerCount != 2 {
+		t.Errorf("count = %d, want the 2 the read answered", m.mailView.screenerCount)
+	}
+}
+
+func TestMailViewReadsTheScreenerCountWithItsStreamName(t *testing.T) {
+	v := mailWithScreenerSummaryServer(t, "stream-one")
+
+	msg, ok := runCmd(v.refreshScreenerCount()).(screenerCountLoadedMsg)
+	if !ok {
+		t.Fatalf("msg = %#v, want screenerCountLoadedMsg", msg)
+	}
+	if msg.err != nil {
+		t.Fatalf("err = %v", msg.err)
+	}
+	if msg.count != 2 || msg.screenerStream != "stream-one" {
+		t.Errorf("msg = %+v, want the count and the stream name HEY serves with it", msg)
+	}
+}
+
+func TestModelGivesUpTheScreenerStreamOnAMailAccountSwitch(t *testing.T) {
+	m := newModel()
+	var opened []context.Context
+	m.watchScreener = func(ctx context.Context, _ string) (<-chan struct{}, error) {
+		opened = append(opened, ctx)
+		return make(chan struct{}), nil
+	}
+	runCmd(m.startScreenerWatch("stream-one"))
+
+	updated, _ := m.applyMailAccount(mailAccountChoice{id: 42, label: "Work"}, nil)
+	m = updated.(model)
+
+	if m.screenerStream != "" {
+		t.Errorf("stream = %q, want the old account's stream let go of", m.screenerStream)
+	}
+	if len(opened) != 1 || opened[0].Err() == nil {
+		t.Error("the old account's stream should stop ringing when the account changes")
+	}
+}
+
 func TestModelSaysWhenTheScreenerStreamCloses(t *testing.T) {
 	m := newModel()
 	m.screenerStream = "stream-one"
 	m.screenerChanges = make(chan struct{})
 
-	updated, cmd := m.Update(screenerChangedMsg{closed: true})
+	updated, cmd := m.Update(screenerChangedMsg{stream: "stream-one", closed: true})
 	m = updated.(model)
 	if cmd != nil {
 		t.Error("a closed stream should not be waited on again")
@@ -379,6 +460,27 @@ func TestModelSaysWhenTheScreenerStreamCloses(t *testing.T) {
 	}
 	if !strings.Contains(m.mailView.notice, "stopped updating live") {
 		t.Errorf("notice = %q, want the Screener's own word", m.mailView.notice)
+	}
+}
+
+func TestModelIgnoresTheCloseOfAScreenerStreamItGaveUp(t *testing.T) {
+	m := newModel()
+	m.watchScreener = func(context.Context, string) (<-chan struct{}, error) {
+		return make(chan struct{}), nil
+	}
+	runCmd(m.startScreenerWatch("stream-one"))
+	runCmd(m.startScreenerWatch("stream-two"))
+
+	// Giving the first one up closes it, and that close arrives after the second one
+	// has been opened. It is not news about the stream now being followed.
+	updated, _ := m.Update(screenerChangedMsg{stream: "stream-one", closed: true})
+	m = updated.(model)
+
+	if m.screenerStream != "stream-two" {
+		t.Errorf("stream = %q, want the one being followed left alone", m.screenerStream)
+	}
+	if m.mailView.notice != "" {
+		t.Errorf("notice = %q, want nothing said about a live stream", m.mailView.notice)
 	}
 }
 
@@ -482,6 +584,23 @@ func TestScreenerRefreshMarksTheQueueStaleFromHistory(t *testing.T) {
 }
 
 // --- Helpers ---
+
+// mailWithScreenerSummaryServer answers what HEY serves about The Screener without its
+// queue: the pending count and the signed name of the stream that says it changed.
+func mailWithScreenerSummaryServer(t *testing.T, signedStreamName string) *mailView {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"pending_clearances_count":2,"signed_stream_name":"` + signedStreamName + `"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	vc := testVC()
+	vc.ctx = context.Background()
+	vc.sdk = hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
+	return newMailView(vc)
+}
 
 type recordedReads struct{ paths []string }
 

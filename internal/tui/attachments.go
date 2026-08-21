@@ -3,7 +3,8 @@ package tui
 import (
 	"fmt"
 	"strings"
-	"unicode"
+
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 type messageAttachment struct {
@@ -50,11 +51,11 @@ func renderAttachmentPanel(attachments []messageAttachment, selected int) string
 		if index == selected {
 			marker = "›"
 		}
-		contentType := terminalSafeAttachmentText(attachment.ContentType)
+		contentType := terminal.SanitizeLine(attachment.ContentType)
 		if contentType == "" {
 			contentType = "unknown type"
 		}
-		fmt.Fprintf(&b, "│ %s %d. %s\n", marker, index+1, terminalSafeAttachmentText(attachment.Filename))
+		fmt.Fprintf(&b, "│ %s %d. %s\n", marker, index+1, terminal.SanitizeLine(attachment.Filename))
 		fmt.Fprintf(&b, "│     %s · %s\n", contentType, formatAttachmentSize(attachment.ByteSize))
 	}
 	b.WriteString("╰─")
@@ -73,13 +74,4 @@ func formatAttachmentSize(size *int64) string {
 	default:
 		return fmt.Sprintf("%.1f MB", float64(*size)/(1024*1024))
 	}
-}
-
-func terminalSafeAttachmentText(value string) string {
-	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return '�'
-		}
-		return r
-	}, value)
 }

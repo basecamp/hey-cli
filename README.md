@@ -142,7 +142,7 @@ What happens depends on how hey was installed:
 ## Authentication
 
 ```bash
-# Browser-based OAuth via Launchpad (primary method)
+# Browser-based OAuth against HEY's own OAuth server (primary method)
 hey auth login
 
 # Or use a pre-generated token
@@ -156,7 +156,7 @@ Tokens refresh automatically on expiry. Credentials are stored in the system key
 
 ```bash
 hey auth status   # check auth status
-hey auth token    # print access token for scripting
+hey auth token    # print the bearer token for scripting (refuses a --cookie login)
 hey auth refresh  # force token refresh
 hey auth logout   # clear credentials
 ```
@@ -259,6 +259,16 @@ hey boxes --jq '.data[] | {id, name}'
 hey boxes --quiet --jq '.[].id'
 ```
 
+Listing commands also answer `--markdown` for a table, `--styled` to force the human
+rendering when the output is piped, `--ids-only` for one ID per line, and `--count` for a
+bare number. `--ids-only` and `--count` need list data, so they work on `hey boxes`,
+`hey box`, `hey labels`, `hey label`, `hey collections`, `hey collection`, `hey drafts`, `hey search`,
+`hey contacts list`, `hey screener list`, `hey screener history`, `hey calendars`,
+`hey recordings`, `hey todo list`, `hey timetrack list` and `hey journal list`. The
+data-only formats print any pagination notice on stderr, so the IDs on stdout stay
+pipeable. `--html` returns the original HTML for the commands that carry it
+(`hey threads`, `hey journal read`).
+
 ### Email
 
 ```bash
@@ -288,6 +298,7 @@ hey contacts show-again 12345      # show a hidden contact again
 hey contacts bundle 12345          # group this contact's mail into one row
 hey contacts unbundle 12345        # list this contact's mail separately
 hey contacts note set 12345 "Prefers email"
+hey contacts note show 12345       # read the private note
 hey contacts note delete 12345
 hey screener list                  # who is waiting to be screened
 hey screener list --count          # just the number waiting
@@ -302,16 +313,18 @@ hey share 123                      # get a sharing link for a thread
 hey unshare 123                    # turn off the sharing link
 hey attachments 123                # list files attached to the thread
 hey attachments save 456:1         # save a file using its attachment ID
-hey reply 123 -m "Thanks!"        # reply to a thread (or omit -m to open $EDITOR)
-hey reply 123 -m "Attached." --attach ./diagram.png
+hey reply 123 -m "Friday works for me — I'll send an agenda."  # or omit -m for $EDITOR
+hey reply 123 -m "Here is the wiring diagram." --attach ./diagram.png
 hey bulk-reply preview 12345 67890  # inspect threads and exact To/CC/BCC recipients
 hey bulk-reply send 12345 67890 -m "Thanks for the update."
 hey bulk-reply undo 98765            # recall a delayed bulk reply
 hey forward 123 --to alice@example.com -m "For your review"  # forward the latest message
-hey compose --to user@example.com --subject "Hello"  # compose a new message
-hey compose --to user@example.com --subject "Report" -m "Attached." --attach ./report.pdf
-hey compose --to user@example.com --cc bob@example.com --bcc carol@example.org --subject "Hello"  # with CC/BCC
+hey compose --to alice@example.com --subject "Lunch plans"  # body from $EDITOR
+hey compose --to alice@example.com --subject "Q3 revenue report" -m "The numbers are attached." --attach ./report.pdf
+hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Kitchen remodel timeline"  # with CC/BCC
 hey drafts                         # list drafts
+hey seen 12345                     # mark a thread as seen
+hey unseen 12345 67890             # mark threads as unseen
 hey move 12345 --to feed           # move a thread to another box
 hey move 12345 67890 --to "paper trail"  # move multiple threads
 hey trash 12345                    # move a thread to Trash
@@ -320,23 +333,27 @@ hey ignore 12345                   # ignore future activity on a thread
 hey stop-ignoring 12345            # resume attention for a thread
 ```
 
+`hey threads` reads a whole thread, oldest entry first, however many pages HEY serves it in. `hey reply` answers the thread's latest entry and addresses the reply the way HEY does: everyone that entry was addressed to, plus whoever wrote it.
+
 Email bodies come back as Markdown. `hey threads` and the TUI render that Markdown for the terminal — headings, emphasis, lists, quotes, tables and code survive, and links keep their URLs and stay clickable where the terminal supports it. `--json` carries the same Markdown in `body`, so an agent reading a thread sees the structure a human sees rather than a flattened wall of text. `--html` still returns HEY's original HTML.
 
 `hey share <thread_id>` gets a sharing link for a thread. Anyone with the link can see the entire thread and future emails or replies sent to it. `hey unshare <thread_id>` turns off the sharing link.
 
-Search accepts free text plus `--required`, `--any`, `--none`, `--exact`, `--from`, `--to`, `--subject`, `--date`, `--in`, `--label`, and `--attachment`. Use `--page` for one page or `--all` to fetch up to 100 pages; capped searches report the next page for continuation. Search results include `topic_id` for reading the thread and the matching message summaries. Results with an active box item also include `id` for organization actions.
+Search accepts free text plus `--required`, `--any`, `--none`, `--exact`, `--from`, `--to`, `--subject`, `--date`, `--in`, `--label`, and `--attachment`. `--in`, `--date`, `--label` and `--attachment` take one of the values `hey search filters` lists — the attachment kinds are `any`, `images`, `pdfs`, `calendar_invites`, `documents`, `spreadsheets`, `presentations`, `media` and `zip_files`, so it is `--attachment pdfs` rather than `pdf`, and an unrecognized `--in`, `--date` or `--attachment` is refused with the values it accepts before anything is sent. Use `--page` for one page or `--all` to fetch up to 100 pages; capped searches report the next page for continuation. Search results include `topic_id` for reading the thread and the matching message summaries. Results with an active box item also include `id` for organization actions.
 
 Contact updates preserve omitted name, email, and alias fields. Supplying `--alias` replaces the complete alias list; `--alias=` clears it. Contact notes accept positional content, `--note`, stdin, or `$EDITOR`. HEY hides contacts rather than permanently deleting them; hidden contacts leave lists, autocomplete, and search, and can be shown again by ID. Bundling groups a contact's mail into one row without merging or deleting the underlying threads; unbundling lists those threads separately again. HEY applies bundling when the contact's current delivery setting supports bundles.
 
-The Screener is where first-time senders wait. `hey screener list` returns clearance IDs — not contact IDs — with the sender and the subject of what they sent, plus `topic_id` for reading the thread before deciding. `--count` asks for the number alone, which is a far cheaper request than the queue. Approving delivers everything the sender has waiting; denying hides it. Either is reversible with the opposite command, and `hey screener history` shows what was already decided. `--box` and `--seen` approve one sender at a time; several IDs go through HEY's bulk endpoint, which takes neither. `--spam` also trains HEY's filter, which is harder to undo than denying. `hey screener clear` empties the queue without deciding anything — those senders reappear on their next email.
+The Screener is where first-time senders wait. `hey screener list` returns clearance IDs — not contact IDs — with the sender and the subject of what they sent, plus `topic_id` for reading the thread before deciding. `--count` asks for the number alone, which is a far cheaper request than the queue, and prints it as a bare number like every other command's `--count`, so `n=$(hey screener list --count)` reads it directly. Approving delivers everything the sender has waiting; denying hides it. Either is reversible with the opposite command, and `hey screener history` shows what was already decided. `--box` and `--seen` approve one sender at a time; several IDs go through HEY's bulk endpoint, which takes neither. `--spam` also trains HEY's filter, which is harder to undo than denying. `hey screener clear` empties the queue without deciding anything — those senders reappear on their next email.
 
 `hey bulk-reply preview` is read-only and resolves each posting to its latest replyable entry. `hey bulk-reply send` resolves the selection again, skips threads without a replyable entry, keeps HEY's server-provided name tag, and returns the exact reply count, delivery ID, delayed state, undo URL, and undo command. Posting IDs must be positive and unique. The message can come from `-m`, stdin, or `$EDITOR`; `--attach` is repeatable.
 
 `--attach` is repeatable on `hey compose`, `hey reply`, and `hey bulk-reply send`, and attachment-only messages are supported. The CLI validates and uploads every file before sending the email. `hey attachments <topic_id>` returns stable message-and-position IDs such as `456:1`; pass an ID to `hey attachments save`. Saving uses the original filename by default, accepts `--output` for a file or directory, and preserves existing files unless `--force` is set.
 
-Organization actions take the `id` values returned by `hey box --json`, `hey label --json`, or `hey search --json`. Label IDs come from `hey labels`; `hey label` returns `next_page` and `total_count`, accepts `--page <next_page>` for continuation, and supports `--all` for complete traversal. HEY creates a label while adding it to at least one thread, so `hey label create` requires thread item IDs.
+Organization actions take the `id` values returned by `hey box --json`, `hey label --json`, or `hey search --json`. Reading, replying to, and forwarding a thread take its `topic_id` instead, which `hey box --json`, `hey label --json`, `hey collection --json` and `hey search --json` all carry alongside `id`. `hey box` also returns `next_page` and accepts `--page <next_page>` to continue a box listing; it keeps `next_history_url` for the sync clients that read it, and `--page` accepts that URL as readily as the cursor inside it. Label IDs come from `hey labels`; `hey label` returns `next_page` and `total_count`, accepts `--page <next_page>` for continuation, and supports `--all` for complete traversal. HEY creates a label while adding it to at least one thread, so `hey label create` requires thread item IDs.
 
 Collection IDs come from `hey collections`. `hey collection` returns both each posting `id` and its `topic_id`, plus `next_page` and `total_count`. Collection membership commands take `topic_id`; posting organization commands continue to take `id`. Creating a collection returns a confirmed mutation, and `hey collections` provides its ID for subsequent commands. Collection updates accept a non-empty name, summary, or both.
+
+`hey box <name|id>`, `hey label <id>` and `hey collection <id>` list the same postings and answer the same formats: `--json`, `--styled`, `--markdown`, `--ids-only`, and `--count`. The data-only formats print the pagination notice and any `next_page` cursor on stderr, so the IDs on stdout stay pipeable. `--json` differs only in what wraps the postings: a box answers with HEY's box payload, a label and a collection with the source and its `total_count`.
 
 Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Bubble Up requires a scheduled date and is not available through `hey move`. Trashing a shared thread removes your access instead of deleting it for everyone. Ignored threads remain in their box and can be restored with `hey stop-ignoring`.
 
@@ -370,9 +387,17 @@ Both hand the JSON to the command on its stdin, and the same fields as `HEY_CHAN
 ### Calendars
 
 ```bash
-hey calendars                      # list calendars
-hey recordings 1 --starts-on 2026-01-01 --ends-on 2026-01-31  # list events in a calendar
+hey calendars                      # list calendars and their IDs
+hey recordings 123              # list this calendar's entries from today onward
+hey recordings 123 --starts-on 2026-01-01 --ends-on 2026-01-31  # over a date range
+hey recordings 123 --count      # how many entries, across every type
 ```
+
+Calendar IDs come from `hey calendars`. `--starts-on` defaults to today and `--ends-on` to
+thirty days after it; both want `YYYY-MM-DD`, and an unreadable date or an `--ends-on`
+before `--starts-on` is a usage error rather than an empty result. `hey recordings` groups
+its entries by type, so `--limit` caps each type separately while `--count` and
+`--ids-only` read across all of them.
 
 ### Todos
 
@@ -415,6 +440,11 @@ hey timetrack category delete 123
 
 The time tracking export contains every completed entry, newest first, with Start, End, Duration, Category, and Notes columns. Ongoing time tracking is excluded. `--output` preserves an existing file unless `--force` is set.
 
+Without `--output` the CSV goes to stdout as CSV, so redirecting it to a file is the whole
+recipe. The output formatting flags have nothing to reshape there and are refused rather
+than ignored: `--json`, `--quiet`, `--markdown`, `--ids-only`, `--count` and `--html` all
+need `--output`, which returns file metadata they can format.
+
 ### Journal
 
 ```bash
@@ -422,6 +452,11 @@ hey journal list                   # list entries
 hey journal read                   # read today's entry (or pass YYYY-MM-DD)
 hey journal write "..."            # write today's entry (or omit content for $EDITOR)
 ```
+
+Saving an empty buffer in `$EDITOR` removes the day's entry, and `hey journal write` says
+so rather than reporting a save. An empty day answers with an empty entry, so if the read
+that pre-fills the editor fails for any other reason the command stops there instead of
+opening a blank buffer over an entry it could not see.
 
 ## Omarchy
 
@@ -480,8 +515,12 @@ is never overwritten or claimed. `hey doctor` flags an unmanaged baseline and ho
 
 ```bash
 hey doctor           # Check CLI health and diagnose issues
+hey config show      # Current settings and where each one came from
+hey config set base_url https://app.hey.com
 hey version --json   # Installed version, commit, build date and build source
 hey upgrade          # Upgrade to the latest release (see Upgrading)
+hey commands --json  # Every command, subcommand and flag, for an agent to read
+hey completion zsh   # Shell completions (bash, zsh, fish, powershell)
 ```
 
 ### Windows: Smart App Control and SmartScreen

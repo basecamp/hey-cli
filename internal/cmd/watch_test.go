@@ -362,6 +362,111 @@ func TestWatchReadsAgainAfterAFailedRead(t *testing.T) {
 	}
 }
 
+func TestWatchStopsOnAReadThatCannotWork(t *testing.T) {
+	t.Setenv("HEY_TOKEN", "test-token")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("the server was asked for %s, want a read the SDK turns down on its own", r.URL)
+	}))
+	defer server.Close()
+	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
+
+	watch, _ := newTestWatch("added")
+	errOut := &bytes.Buffer{}
+	watch.errOut = errOut
+
+	// An empty cursor is a usage error on every read: waiting won't fill it in.
+	err := watch.readBox(context.Background(), watch.boxes[24088])
+	if err == nil {
+		t.Fatal("expected a read that can never work to be reported")
+	}
+	if len(watch.unread) != 0 {
+		t.Errorf("unread = %v, want no retry armed for a permanent error", watch.unread)
+	}
+	if watch.retry != nil {
+		t.Error("a permanent error should not arm a retry")
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("stderr = %q, want the error reported rather than warned about", errOut.String())
+	}
+}
+
+// boxesAndChanges answers the two reads a skip-ahead makes: a changes feed that is too far
+// behind to follow, and the box list it then looks for a fresh cursor in.
+func boxesAndChanges(t *testing.T, boxes string) *httptest.Server {
+	t.Helper()
+
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/boxes.json":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(boxes))
+		default:
+			w.WriteHeader(http.StatusConflict)
+		}
+	}))
+}
+
+func TestWatchSkipsAheadToTheBoxesOwnCursor(t *testing.T) {
+	t.Setenv("HEY_TOKEN", "test-token")
+	server := boxesAndChanges(t, `[{"id":24088,"kind":"imbox","name":"Imbox","posting_changes_url":"/boxes/24088/postings/changes.json?since=2026-08-21T11%3A02%3A00.000Z&v=2"}]`)
+	defer server.Close()
+	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
+
+	watch, _ := newTestWatch("added")
+	watch.errOut = &bytes.Buffer{}
+	watch.boxes[24088].cursor.Since = "2026-08-01T00:00:00.000Z"
+
+	if err := watch.readBox(context.Background(), watch.boxes[24088]); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if watch.boxes[24088] == nil {
+		t.Fatal("the box should still be watched")
+	}
+	if got := watch.boxes[24088].cursor.Since; got != "2026-08-21T11:02:00.000Z" {
+		t.Errorf("cursor = %q, want the server's current one", got)
+	}
+}
+
+func TestWatchGivesUpOnABoxThatHasGone(t *testing.T) {
+	t.Setenv("HEY_TOKEN", "test-token")
+	server := boxesAndChanges(t, `[{"id":31145,"kind":"papertrail","name":"The Paper Trail","posting_changes_url":"/boxes/31145/postings/changes.json?since=2026-08-21T11%3A02%3A00.000Z&v=2"}]`)
+	defer server.Close()
+	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
+
+	watch, _ := newTestWatch("added")
+	errOut := &bytes.Buffer{}
+	watch.errOut = errOut
+	watch.boxes[31145] = &watchedBox{id: 31145, kind: "papertrail", name: "The Paper Trail"}
+	watch.boxes[24088].cursor.Since = "2026-08-01T00:00:00.000Z"
+
+	if err := watch.readBox(context.Background(), watch.boxes[24088]); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if _, watching := watch.boxes[24088]; watching {
+		t.Error("a box the server no longer lists should stop being watched")
+	}
+	if !strings.Contains(errOut.String(), "can no longer be followed") {
+		t.Errorf("stderr = %q, want the box's departure reported", errOut.String())
+	}
+
+	// Now the last box goes too, and there is nothing left to wait for.
+	watch.boxes[31145].cursor.Since = "2026-08-01T00:00:00.000Z"
+	server.Close()
+	gone := boxesAndChanges(t, `[]`)
+	defer gone.Close()
+	initSDK(auth.NewManager(gone.URL, gone.Client(), t.TempDir()), gone.URL)
+
+	err := watch.readBox(context.Background(), watch.boxes[31145])
+	if err == nil {
+		t.Fatal("expected an error once every watched box has gone")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error = %v, want it to say the box is gone", err)
+	}
+}
+
 func TestWatchClosedSubscriptionIsOnlyFineWhenItWasInterrupted(t *testing.T) {
 	watch, _ := newTestWatch("added")
 

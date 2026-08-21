@@ -4,3 +4,8 @@
 # command or flag that the previous release had. List the dropped line here in
 # the same PR (e.g. `hey todo --legacy-flag`) to acknowledge the break; prune
 # entries after the release that ships them.
+
+# `hey screener list --count` was a command-local flag shadowing the global one, so it
+# answered with an envelope where every other command answers with a bare number. The
+# flag is gone; the global --count now does the same cheap count request.
+hey screener list --count

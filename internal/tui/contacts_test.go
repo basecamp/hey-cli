@@ -118,8 +118,8 @@ func openTUIContact(t *testing.T, view *contactsView) {
 func TestContactsViewLoadsListsAndPages(t *testing.T) {
 	view, recorded := contactsWithTestServer(t)
 	loadTUIContacts(t, view)
-	if view.loading || !view.loaded || len(view.list.contacts) != 1 || view.list.contacts[0].ID != 7 {
-		t.Errorf("list state = loading:%v loaded:%v contacts:%+v", view.loading, view.loaded, view.list.contacts)
+	if view.requests.loading || !view.loaded || len(view.list.contacts) != 1 || view.list.contacts[0].ID != 7 {
+		t.Errorf("list state = loading:%v loaded:%v contacts:%+v", view.requests.loading, view.loaded, view.list.contacts)
 	}
 
 	next := view.HandleContentKey(keyPress("n"))
@@ -153,12 +153,12 @@ func TestContactsViewOpensDetailWithAliasesAndNote(t *testing.T) {
 
 func TestContactsViewIgnoresStaleResponses(t *testing.T) {
 	view, _ := contactsWithTestServer(t)
-	view.activeRequestID = 2
-	view.Update(contactsLoadedMsg{requestID: 1, page: 1, contacts: []models.Contact{{ID: 99}}})
+	view.requests.id = 2
+	view.Update(contactsLoadedMsg{requestResult: requestResult{requestID: 1}, page: 1, contacts: []models.Contact{{ID: 99}}})
 	if len(view.list.contacts) != 0 {
 		t.Error("stale contacts changed the list")
 	}
-	view.Update(contactDetailLoadedMsg{requestID: 1, contact: models.Contact{ID: 99}})
+	view.Update(contactDetailLoadedMsg{requestResult: requestResult{requestID: 1}, contact: models.Contact{ID: 99}})
 	if view.inDetail {
 		t.Error("stale detail opened")
 	}
@@ -259,13 +259,13 @@ func TestContactsViewEditsContact(t *testing.T) {
 func TestContactsViewReplacesPromotedAliasContactID(t *testing.T) {
 	view, _ := contactsWithTestServer(t)
 	view.list.setContacts([]models.Contact{{ID: 7, Name: "Jane Doe"}})
-	view.activeRequestID = 3
-	view.loading = true
+	view.requests.id = 3
+	view.requests.loading = true
 
 	cmd, _ := view.Update(contactSavedMsg{
-		requestID:  3,
-		originalID: 7,
-		contact:    models.Contact{ID: 17, Name: "Jane Doe"},
+		requestResult: requestResult{requestID: 3},
+		originalID:    7,
+		contact:       models.Contact{ID: 17, Name: "Jane Doe"},
 	})
 	if cmd == nil {
 		t.Fatal("saved contact should load returned contact detail")
@@ -365,10 +365,10 @@ func TestContactsViewEditsAndDeletesNote(t *testing.T) {
 func TestContactsViewCannotExitDuringMutation(t *testing.T) {
 	view, _ := contactsWithTestServer(t)
 	view.inDetail = true
-	view.loading = true
-	view.activeRequestKind = contactRequestMutation
+	view.requests.loading = true
+	view.requests.kind = contactRequestMutation
 	view.ExitDetail("q")
-	if !view.inDetail || !view.loading || view.activeRequestKind != contactRequestMutation {
+	if !view.inDetail || !view.requests.loading || view.requests.kind != contactRequestMutation {
 		t.Error("detail exited while a contact mutation was pending")
 	}
 }
@@ -377,10 +377,10 @@ func TestContactsViewCancelsPendingDetail(t *testing.T) {
 	view, _ := contactsWithTestServer(t)
 	loadTUIContacts(t, view)
 	cmd := view.HandleContentKey(keyPress("enter"))
-	if cmd == nil || !view.loading || view.activeRequestKind != contactRequestDetail {
+	if cmd == nil || !view.requests.loading || view.requests.kind != contactRequestDetail {
 		t.Fatal("opening should start detail request")
 	}
-	if !view.CancelPendingDetail() || view.loading || view.activeRequestKind != contactRequestNone {
+	if !view.CancelPendingDetail() || view.requests.loading || view.requests.kind != contactRequestNone {
 		t.Error("pending detail was not canceled")
 	}
 	view.Update(cmd())

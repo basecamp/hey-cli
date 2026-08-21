@@ -5,6 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -37,14 +38,12 @@ func (c *contactsHideCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if err := sdk.Contacts().Hide(cmd.Context(), contactID); err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
-	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Contact %d hidden.\n", contactID)
-		return nil
-	}
-	return writeOK(map[string]int64{"id": contactID},
-		output.WithSummary("Contact hidden"),
+	return writeMutationLine(cmd,
+		fmt.Sprintf("Contact %d hidden.", contactID),
+		"Contact hidden",
+		map[string]int64{"id": contactID},
 		output.WithBreadcrumbs(output.Breadcrumb{Action: "show_again", Command: fmt.Sprintf("hey contacts show-again %d", contactID), Description: "Show the contact again"}),
 	)
 }

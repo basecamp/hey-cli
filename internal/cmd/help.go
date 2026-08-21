@@ -111,6 +111,12 @@ func renderRootHelp(w io.Writer, cmd *cobra.Command) {
 		{"", "--jq", "Filter JSON with a built-in jq expression"},
 		{"", "--markdown", "Output as Markdown"},
 		{"", "--quiet", "Output result data only"},
+		{"", "--ids-only", "Output only IDs, one per line"},
+		{"", "--count", "Output only the count of results"},
+		{"", "--styled", "Force styled output even when piped"},
+		{"", "--html", "Output raw HTML (for commands that return HTML content)"},
+		{"", "--stats", "Include request stats in response meta"},
+		{"", "--base-url", "Override server URL"},
 		{"-v", "--verbose", "Show request details"},
 		{"", "--help", "Show help"},
 		{"", "--version", "Show version"},
@@ -252,8 +258,15 @@ func renderCommandHelp(cmd *cobra.Command) {
 var salientRootFlags = map[string]bool{
 	"account":  true,
 	"json":     true,
+	"jq":       true,
 	"markdown": true,
 	"quiet":    true,
+	"ids-only": true,
+	"count":    true,
+	"styled":   true,
+	"html":     true,
+	"stats":    true,
+	"base-url": true,
 	"verbose":  true,
 }
 

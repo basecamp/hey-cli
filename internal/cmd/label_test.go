@@ -224,7 +224,7 @@ func TestLabelStyledOutputSanitizesPostingText(t *testing.T) {
 	if strings.Contains(stdout, "\x1b]2;owned") || strings.Contains(stdout, "\nDoe") || strings.Contains(stdout, "\nArchive") {
 		t.Errorf("unsafe posting text reached terminal output: %q", stdout)
 	}
-	for _, want := range []string{"Jane�]2;owned��Doe", "Receipt�]2;owned��Archive"} {
+	for _, want := range []string{"Jane Doe", "Receipt Archive"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("sanitized output %q does not contain %q", stdout, want)
 		}
@@ -243,7 +243,7 @@ func TestLabelStyledOutputSanitizesFolderNames(t *testing.T) {
 	if strings.Contains(stdout, "\x1b]2;owned") || strings.Contains(stdout, "\nArchive\n") {
 		t.Errorf("unsafe label name reached terminal output: %q", stdout)
 	}
-	if !strings.Contains(stdout, "Receipts�]2;owned��Archive") {
+	if !strings.Contains(stdout, "Receipts Archive") {
 		t.Errorf("sanitized label name missing from %q", stdout)
 	}
 }
@@ -270,6 +270,60 @@ func TestLabelMarkdownOutputSanitizesFolderNames(t *testing.T) {
 	}
 }
 
+// `hey label` answers every format `hey collection` does: the two list the same postings
+// and used to disagree about --ids-only, --count and --markdown for no chosen reason.
+func TestLabelCommandOutputFormats(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Total-Count", "2")
+		_, _ = io.WriteString(w, `{"id":12,"name":"Receipts","postings":[
+			{"id":101,"kind":"topic","summary":"Hotel receipt","app_url":"https://app.hey.com/topics/501","creator":{"name":"Jane Doe"}},
+			{"id":102,"kind":"topic","summary":"Train receipt","app_url":"https://app.hey.com/topics/502"}
+		]}`)
+	})
+
+	ids, err := runFormattedCommand(t, handler, []string{"--ids-only"}, "label", "12")
+	if err != nil || ids != "101\n102\n" {
+		t.Errorf("ids output = %q, err = %v", ids, err)
+	}
+	count, err := runFormattedCommand(t, handler, []string{"--count"}, "label", "12")
+	if err != nil || count != "2\n" {
+		t.Errorf("count output = %q, err = %v", count, err)
+	}
+	markdown, err := runFormattedCommand(t, handler, []string{"--markdown"}, "label", "12")
+	if err != nil {
+		t.Fatalf("markdown label: %v", err)
+	}
+	for _, want := range []string{"# Receipts", "| id |", "topic_id", "Hotel receipt", "**Total threads:** 2"} {
+		if !strings.Contains(markdown, want) {
+			t.Errorf("markdown %q does not contain %q", markdown, want)
+		}
+	}
+}
+
+func TestLabelDataOnlyFormatsReportPaginationOnStderr(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Total-Count", "3")
+		w.Header().Set("Link", "<http://"+r.Host+"/folders/12.json?page=next-cursor>; rel=\"next\"")
+		_, _ = io.WriteString(w, `{"id":12,"name":"Receipts","postings":[{"id":101,"kind":"topic"},{"id":102,"kind":"topic"}]}`)
+	})
+
+	for _, format := range []string{"--ids-only", "--count"} {
+		t.Run(format, func(t *testing.T) {
+			_, stderr, err := runFormattedCommandWithStderr(t, handler, []string{format}, "label", "12")
+			if err != nil {
+				t.Fatalf("label %s: %v", format, err)
+			}
+			for _, want := range []string{"notice: Showing 2 of 3 results", "next_page: next-cursor"} {
+				if !strings.Contains(stderr, want) {
+					t.Errorf("stderr %q does not contain %q", stderr, want)
+				}
+			}
+		})
+	}
+}
+
 func TestLabelTruncationNotice(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -288,7 +342,7 @@ func TestLabelTruncationNotice(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := folderTruncationNotice(tt.shown, tt.total, tt.hasMore, tt.all, tt.fromCursor); got != tt.want {
+			if got := labelListing.notice(tt.shown, tt.total, tt.hasMore, tt.all, tt.fromCursor); got != tt.want {
 				t.Errorf("notice = %q, want %q", got, tt.want)
 			}
 		})

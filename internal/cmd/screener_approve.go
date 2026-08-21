@@ -7,6 +7,7 @@ import (
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -46,15 +47,15 @@ func (c *screenerApproveCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if len(ids) > 1 && c.box != "" {
-		return output.ErrUsage("--box approves one sender at a time")
+		return apierr.ErrUsage("--box approves one sender at a time")
 	}
 	if len(ids) > 1 && c.seen {
-		return output.ErrUsage("--seen approves one sender at a time")
+		return apierr.ErrUsage("--seen approves one sender at a time")
 	}
 
 	opts := hey.ScreenOptions{MarkTopicsAsSeen: c.seen}
 	if c.box != "" {
-		box, resolveErr := resolveBox(cmd.Context(), c.box)
+		box, resolveErr := resolveBox(cmd.Context(), c.box, "")
 		if resolveErr != nil {
 			return resolveErr
 		}

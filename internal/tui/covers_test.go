@@ -10,7 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/basecamp/hey-cli/internal/models"
+	"github.com/basecamp/hey-cli/internal/mail"
 )
 
 var allCoverPresets = []coverPreset{coverBlobs, coverGrid, coverPeace, coverTerrazzo, coverTopo, coverWaves}
@@ -322,16 +322,16 @@ func TestCoverPickerAppliesToTheImbox(t *testing.T) {
 	if cmd := v.HandleContentKey(keyPress("ctrl+v")); cmd != nil {
 		t.Fatal("opening the cover picker should not start a request")
 	}
-	if v.coverPicker == nil || !v.CapturingInput() {
+	if coverModal(v) == nil || !v.CapturingInput() {
 		t.Fatal("ctrl+v did not open a picker that captures input")
 	}
 
-	for v.coverPicker.selected() != coverTopo {
+	for coverModal(v).selected() != coverTopo {
 		v.HandleContentKey(keyPress("down"))
 	}
 	v.HandleContentKey(keyPress("enter"))
 
-	if v.coverPicker != nil {
+	if coverModal(v) != nil {
 		t.Error("enter left the picker open")
 	}
 	if v.cover != coverTopo || v.postingList.cover != coverTopo {
@@ -353,7 +353,7 @@ func TestCoverPickerRefusesOtherBoxes(t *testing.T) {
 	v.Update(currentPostingsLoaded(v, testPostings()))
 
 	v.HandleContentKey(keyPress("ctrl+v"))
-	if v.coverPicker != nil {
+	if coverModal(v) != nil {
 		t.Error("picker opened on a box that cannot be covered")
 	}
 	if v.notice == "" {
@@ -383,7 +383,7 @@ func TestCoverPickerRemembersTheChoice(t *testing.T) {
 	v.boxes = orderBoxes(testBoxes())
 	v.Update(currentPostingsLoaded(v, testPostings()))
 	v.HandleContentKey(keyPress("ctrl+v"))
-	for v.coverPicker.selected() != coverPeace {
+	for coverModal(v).selected() != coverPeace {
 		v.HandleContentKey(keyPress("down"))
 	}
 	v.HandleContentKey(keyPress("enter"))
@@ -397,7 +397,7 @@ func TestCoverPickerRemembersTheChoice(t *testing.T) {
 
 	// Uncovering is stored too, or the cover comes back on the next run.
 	v.HandleContentKey(keyPress("ctrl+v"))
-	for v.coverPicker.selected() != coverNone {
+	for coverModal(v).selected() != coverNone {
 		v.HandleContentKey(keyPress("up"))
 	}
 	v.HandleContentKey(keyPress("enter"))
@@ -417,7 +417,7 @@ func TestCoverPickerSurvivesAFailedWrite(t *testing.T) {
 	v.Update(currentPostingsLoaded(v, testPostings()))
 
 	v.HandleContentKey(keyPress("ctrl+v"))
-	for v.coverPicker.selected() != coverTopo {
+	for coverModal(v).selected() != coverTopo {
 		v.HandleContentKey(keyPress("down"))
 	}
 	v.HandleContentKey(keyPress("enter"))
@@ -431,37 +431,57 @@ func TestCoverPickerSurvivesAFailedWrite(t *testing.T) {
 }
 
 // A list grows when the reader can see the end of it, and a covered list ends at the
-// divider with most of its rows still under the art. That must not read on: there
-// is nothing to scroll into, and every page arriving would go under the cover too
-// and ask for the next one.
+// divider with most of its rows still under the art. That must not read on: there is
+// nothing to scroll into, and every page arriving would go under the cover too and ask
+// for the next one.
+//
+// Nothing is lost by stopping. The Imbox is ordered by seen first, so a page that has
+// begun serving seen threads is the last page with an unseen thread on it — there is no
+// unseen mail further down to go looking for.
 func TestACoveredListDoesNotReadOnForever(t *testing.T) {
-	v := mailWithPostings()
-	v.cover = coverTopo
-	v.postingList.setCover(coverTopo)
-	v.postingList.setSize(80, 20)
-
-	postings := make([]models.Posting, 0, 31)
-	postings = append(postings, models.Posting{ID: 1, Name: "Unread thread"})
-	for id := range 30 {
-		postings = append(postings, models.Posting{ID: int64(200 + id), Name: "Read thread", Seen: true})
-	}
-	v.postingList.setPostings(postings)
-	v.postingPaging.nextPage = "cursor-2"
+	v := coveredMailView(t)
 
 	if v.postingList.itemCount() != 1 {
 		t.Fatalf("the cover left %d threads reachable, want 1", v.postingList.itemCount())
 	}
 	if cmd := v.loadMorePostings(); cmd != nil {
-		t.Error("a covered list read on although the rows below it are under the art")
+		t.Error("a covered list read the page below, which would arrive under the art and ask for the next")
 	}
+}
 
-	// Lifting the cover puts them back within reach, and then the rule applies as
-	// it does to any other list.
+// The cover is what stops the reading on, not the paging itself: a reader working down an
+// uncovered list still gets the page below.
+func TestScrollingToTheEndStillReadsOn(t *testing.T) {
+	v := coveredMailView(t)
 	v.postingList.toggleCoverPeek()
-	v.postingList.cursor = len(postings) - 2
-	if cmd := v.loadMorePostings(); cmd == nil {
-		t.Error("a peeked list did not read on with the cursor near the bottom")
+	v.postingList.cursor = len(v.postingList.postings) - 2
+	v.postingList.ensureVisible()
+
+	if v.postingList.scrollOff == 0 {
+		t.Fatalf("the reader is still on the first screenful, scrolled to %d", v.postingList.scrollOff)
 	}
+	if cmd := v.loadMorePostings(); cmd == nil {
+		t.Error("a list the reader scrolled to the bottom of did not read the page below")
+	}
+}
+
+// A covered Imbox holding one unseen thread and thirty read ones, with another page behind it.
+func coveredMailView(t *testing.T) *mailView {
+	t.Helper()
+
+	v := mailWithPostings()
+	v.cover = coverTopo
+	v.postingList.setCover(coverTopo)
+	v.postingList.setSize(80, 20)
+
+	postings := make([]mail.Posting, 0, 31)
+	postings = append(postings, mail.Posting{ID: 1, Name: "Unread thread"})
+	for id := range 30 {
+		postings = append(postings, mail.Posting{ID: int64(200 + id), Name: "Read thread", Seen: true})
+	}
+	v.postingList.setPostings(postings)
+	v.postingPaging.read(postingIDs(postings), "cursor-2")
+	return v
 }
 
 // The chorded keys sit at the end of the help bar, together, keeping their order.
@@ -490,13 +510,13 @@ func TestModifiersLast(t *testing.T) {
 // --- The cover as a lid ---
 
 func coveredList(cover coverPreset, height int, seen ...bool) *contentList {
-	postings := make([]models.Posting, len(seen))
+	postings := make([]mail.Posting, len(seen))
 	for i, isSeen := range seen {
-		postings[i] = models.Posting{
+		postings[i] = mail.Posting{
 			ID:      int64(i + 1),
 			Name:    coveredThreadName(isSeen, i),
 			Seen:    isSeen,
-			Creator: models.Contact{Name: "Jason Fried"},
+			Creator: mail.Contact{Name: "Jason Fried"},
 		}
 	}
 	list := &contentList{width: 60, height: height, cover: cover}
@@ -648,10 +668,95 @@ func TestMarkingSeenSlidesAThreadUnderTheCover(t *testing.T) {
 	}
 }
 
+// An Imbox the reader has worked through is the art and nothing else, so there is nothing
+// for a key to mean. The cursor said index 0 before, and t, s, enter and space all reached
+// the first thread under the cover.
+func TestAnAllReadCoveredImboxHasNothingToActOn(t *testing.T) {
+	list := coveredList(coverPeace, 20, true, true)
+
+	if list.cursor != noSelection {
+		t.Errorf("cursor = %d, want nothing selectable", list.cursor)
+	}
+	if posting := list.selectedPosting(); posting != nil {
+		t.Errorf("a key press would have reached %q under the cover", posting.Name)
+	}
+	if list.toggleSelected() {
+		t.Error("space selected a thread under the cover")
+	}
+	if ids := list.selectedIDs(); len(ids) != 0 {
+		t.Errorf("a bulk action would aim at %v", ids)
+	}
+
+	list.moveDown()
+	list.moveUp()
+	if list.cursor != noSelection {
+		t.Errorf("the cursor moved to %d in a list with nothing to move through", list.cursor)
+	}
+
+	// Lifting the cover is what gets at them, and puts the cursor back on the first one.
+	list.toggleCoverPeek()
+	if posting := list.selectedPosting(); posting == nil || posting.ID != 1 {
+		t.Errorf("peeking left the cursor on %v, want the first thread", posting)
+	}
+}
+
+// Reading the last unseen thread slides it under the cover and empties the box above it,
+// which used to leave the cursor holding a thread the reader had just put away.
+func TestReadingTheLastUnseenThreadLeavesNothingSelected(t *testing.T) {
+	list := coveredList(coverTopo, 24, false, true)
+	list.toggleSelected()
+
+	list.markSeen(0)
+
+	if list.itemCount() != 0 || list.cursor != noSelection {
+		t.Errorf("cursor = %d over %d reachable threads, want nothing selectable", list.cursor, list.itemCount())
+	}
+	if posting := list.selectedPosting(); posting != nil {
+		t.Errorf("the thread just read is still what a key press means: %q", posting.Name)
+	}
+	if ids := list.selectedIDs(); len(ids) != 0 {
+		t.Errorf("a bulk action would aim at %v", ids)
+	}
+}
+
+// Picking a cover hides Previously Seen underneath it there and then. Whatever the cursor
+// and the selection were on goes with it, or the reader's next key press lands on a thread
+// that left the screen when they chose the art.
+func TestPickingACoverTakesTheCursorOutFromUnderIt(t *testing.T) {
+	v := mailWithPostings()
+	v.HandleContentKey(keyPress("down"))
+	v.HandleContentKey(tea.KeyPressMsg(tea.Key{Code: ' ', Text: " "}))
+	if selected := v.postingList.selectedPosting(); selected == nil || !selected.Seen {
+		t.Fatalf("the cursor is on %v, want the seen thread", selected)
+	}
+	if ids := v.postingList.selectedIDs(); len(ids) != 1 || ids[0] != 101 {
+		t.Fatalf("space selected %v, want the seen thread", ids)
+	}
+
+	v.HandleContentKey(keyPress("ctrl+v"))
+	for coverModal(v).selected() != coverTopo {
+		v.HandleContentKey(keyPress("down"))
+	}
+	v.HandleContentKey(keyPress("enter"))
+
+	if got := v.postingList.itemCount(); got != 1 {
+		t.Fatalf("the cover left %d threads reachable, want 1", got)
+	}
+	if posting := v.postingList.selectedPosting(); posting == nil || posting.Seen {
+		t.Errorf("the cursor stayed under the art on %v", posting)
+	}
+	if ids := v.postingList.selectedIDs(); len(ids) != 0 {
+		t.Errorf("a bulk reply would aim at %v, threads the reader put away", ids)
+	}
+	if cmd := v.HandleContentKey(keyPress("b")); cmd != nil {
+		t.Error("a bulk reply started on a selection that is under the cover")
+	}
+}
+
 // The Imbox stacks three sections and only the last one is covered.
 func TestBubbledUpAndNewStayVisible(t *testing.T) {
 	list := &contentList{width: 60, height: 24, cover: coverTopo}
-	list.setPostings([]models.Posting{
+	list.setPostings([]mail.Posting{
 		{ID: 1, Name: "Bubbled thread", BubbledUp: true},
 		{ID: 2, Name: "Unread thread"},
 		{ID: 3, Name: "Read thread", Seen: true},

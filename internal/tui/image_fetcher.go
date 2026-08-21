@@ -159,12 +159,14 @@ func (f *trustedImageFetcher) Fetch(ctx context.Context, source string) ([]byte,
 }
 
 func validateImageData(data []byte, headers http.Header) error {
-	declaredType, _, err := mime.ParseMediaType(headers.Get("Content-Type"))
-	if err != nil {
-		return fmt.Errorf("image has an invalid media type: %w", err)
-	}
-	if declaredType != "" && !strings.HasPrefix(declaredType, "image/") && declaredType != "application/octet-stream" {
-		return fmt.Errorf("image response has media type %s", declaredType)
+	if contentType := headers.Get("Content-Type"); contentType != "" {
+		declaredType, _, err := mime.ParseMediaType(contentType)
+		if err != nil {
+			return fmt.Errorf("image has an invalid media type: %w", err)
+		}
+		if !strings.HasPrefix(declaredType, "image/") && declaredType != "application/octet-stream" {
+			return fmt.Errorf("image response has media type %s", declaredType)
+		}
 	}
 
 	detectedType := http.DetectContentType(data)

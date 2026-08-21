@@ -42,13 +42,22 @@ const (
 	cellHeightPixels = 20
 )
 
-// The first id hands the placeholder's foreground color a non-zero byte in every
+// Every id hands the placeholder's foreground color a non-zero byte in every
 // position: a color like rgb(0,0,1) reads as a palette index to some terminals,
 // which then lose the image the cell belongs to. Ids stay under 0xFFFFFF so three
 // bytes of color can carry them without a fourth diacritic per cell.
 const (
 	firstImageID = 0x010101
 	lastImageID  = 0xFFFFFF
+
+	// imageIDDigit is how many values a color byte has left once zero is spent, so
+	// the ids are base-255 numbers with each digit offset by one: 16,581,375 of them.
+	imageIDDigit = 255
+	imageIDCount = imageIDDigit * imageIDDigit * imageIDDigit
+
+	// noImageID is what is left to hand out once every id has been: nothing. An
+	// image drawn under it would take over one still on screen.
+	noImageID = 0
 )
 
 var imageIDs atomic.Int64
@@ -56,19 +65,24 @@ var imageIDs atomic.Int64
 // nextImageID hands out an id that no earlier image has used. Reusing one replaces
 // the image the terminal holds under it while the placement drawn for the old
 // geometry is still on screen, which renders the new image clipped into the old
-// image's cells.
+// image's cells — so past the last id it stops minting rather than starting over.
 func nextImageID() int {
-	id := firstImageID + imageIDs.Add(1)
-	if id > lastImageID {
-		imageIDs.Store(0)
-		id = firstImageID
+	minted := imageIDs.Add(1) - 1
+	if minted >= imageIDCount {
+		return noImageID
 	}
-	return int(id)
+	return int(1+minted%imageIDDigit)<<16 |
+		int(1+(minted/imageIDDigit)%imageIDDigit)<<8 |
+		int(1+(minted/(imageIDDigit*imageIDDigit))%imageIDDigit)
 }
 
 // kittyUploadAndPlace returns escape sequences to upload image data and create
 // a virtual Unicode placement. The result should be sent via tea.Raw().
 func kittyUploadAndPlace(data []byte, id, cols, rows int) string {
+	if id <= noImageID || id > lastImageID {
+		return ""
+	}
+
 	encoded := base64.StdEncoding.EncodeToString(pngEncoded(data))
 	const chunkSize = 4096
 
@@ -103,7 +117,7 @@ func kittyUploadAndPlace(data []byte, id, cols, rows int) string {
 // renderImagePlaceholder returns U+10EEEE characters with combining diacritics
 // that encode image position for Kitty's unicode placeholder rendering.
 func renderImagePlaceholder(id, cols, rows int) string {
-	if cols <= 0 || rows <= 0 {
+	if cols <= 0 || rows <= 0 || id <= noImageID || id > lastImageID {
 		return ""
 	}
 

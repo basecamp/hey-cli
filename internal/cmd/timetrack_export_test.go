@@ -122,16 +122,21 @@ func TestTimetrackExportValidatesRawOutputFlagsWithoutRequest(t *testing.T) {
 		})
 	}
 
-	t.Run("styled", func(t *testing.T) {
-		var requests atomic.Int32
-		_, err := runFormattedCommand(t, timeTrackExportHandler(t, &requests), []string{"--styled"}, "timetrack", "export")
-		if err == nil {
-			t.Fatal("expected usage error")
-		}
-		if requests.Load() != 0 {
-			t.Errorf("requests = %d, want 0", requests.Load())
-		}
-	})
+	// --quiet and --html were missing from the hand-written flag list, so they dumped
+	// the raw CSV where every other format was refused.
+	for _, format := range []string{"--styled", "--quiet", "--html", "--markdown", "--count", "--ids-only"} {
+		t.Run(format, func(t *testing.T) {
+			var requests atomic.Int32
+			_, err := runFormattedCommand(t, timeTrackExportHandler(t, &requests), []string{format}, "timetrack", "export")
+			if err == nil {
+				t.Fatalf("%s: expected usage error", format)
+			}
+			if requests.Load() != 0 {
+				t.Errorf("requests = %d, want 0", requests.Load())
+			}
+		})
+	}
+
 }
 
 func timeTrackExportHandler(t *testing.T, requests *atomic.Int32) http.Handler {

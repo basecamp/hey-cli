@@ -18,6 +18,7 @@ import (
 
 type attachmentServerState struct {
 	mu             sync.Mutex
+	entryReads     int
 	directUploads  int
 	storageUploads int
 	uploadAccounts []string
@@ -35,11 +36,10 @@ func attachmentServer(t *testing.T) (*httptest.Server, *attachmentServerState) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/topics/42/entries.json":
-			if r.URL.Query().Get("page") == "1" {
-				_, _ = w.Write([]byte(`[{"id":101,"kind":"message"},{"id":102,"kind":"message"}]`))
-			} else {
-				_, _ = w.Write([]byte(`[]`))
-			}
+			state.mu.Lock()
+			state.entryReads++
+			state.mu.Unlock()
+			_, _ = w.Write([]byte(`[{"id":101,"kind":"message"},{"id":102,"kind":"message"}]`))
 		case r.Method == http.MethodGet && r.URL.Path == "/messages/101.json":
 			_, _ = w.Write([]byte(`{
 				"id":101,
@@ -88,9 +88,8 @@ func attachmentServer(t *testing.T) (*httptest.Server, *attachmentServerState) {
 			_, _ = w.Write([]byte(`{"id":1,"accounts":[{"id":9,"status":"active"}],"senders":[{"id":42,"account_id":9,"default":true}]}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/topics/7.json":
 			_, _ = w.Write([]byte(`{"id":7,"account_id":9,"entries":[{"id":11},{"id":12}]}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/topics/7":
-			w.Header().Set("Content-Type", "text/html")
-			_, _ = w.Write([]byte(topicWithRecipients))
+		case r.Method == http.MethodGet && r.URL.Path == "/messages/12.json":
+			_, _ = w.Write([]byte(messageAddressedToJane))
 		case r.Method == http.MethodPost && r.URL.Path == "/entries/12/replies.json":
 			if got := r.URL.Query().Get("filtered_account_id"); got != "9" {
 				t.Errorf("reply account = %q, want 9", got)
@@ -169,7 +168,7 @@ func runAttachmentCommandWithStdin(t *testing.T, server *httptest.Server, input 
 }
 
 func TestAttachmentsListsFilesFromKnownThread(t *testing.T) {
-	server, _ := attachmentServer(t)
+	server, state := attachmentServer(t)
 	stdout, err := runAttachmentCommand(t, server, "attachments", "42")
 	if err != nil {
 		t.Fatal(err)
@@ -187,6 +186,75 @@ func TestAttachmentsListsFilesFromKnownThread(t *testing.T) {
 	attachment := response.Data[0]
 	if attachment.ID != "101:1" || attachment.MessageID != 101 || attachment.Filename != "quarterly-report.pdf" || attachment.ByteSize == nil || *attachment.ByteSize != 23 {
 		t.Errorf("attachment = %+v", attachment)
+	}
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.entryReads != 1 {
+		t.Errorf("read the entry index %d times, want once for a thread that fits on a page", state.entryReads)
+	}
+}
+
+// A thread longer than one page is walked by following HEY's cursor, so each attachment
+// is listed once and the list is not claimed to be truncated.
+func TestAttachmentsFollowsTheCursorThroughALongThread(t *testing.T) {
+	pages := [][]int64{{103, 102}, {101}}
+	reads := &threadEntriesReads{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/topics/42/entries.json":
+			reads.mu.Lock()
+			reads.entries++
+			reads.mu.Unlock()
+			index := threadEntriesPageIndex(len(pages), r.URL.Query().Get("page"))
+			if index+1 < len(pages) {
+				w.Header().Set("Link", fmt.Sprintf(`<http://%s/topics/42/entries.json?page=%s>; rel="next"`,
+					r.Host, threadEntriesCursor(index+1)))
+			}
+			entries := make([]string, 0, len(pages[index]))
+			for _, id := range pages[index] {
+				entries = append(entries, fmt.Sprintf(`{"id":%d,"kind":"message"}`, id))
+			}
+			_, _ = fmt.Fprintf(w, `[%s]`, strings.Join(entries, ","))
+		case strings.HasPrefix(r.URL.Path, "/messages/"):
+			var id int64
+			_, _ = fmt.Sscanf(strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/messages/"), ".json"), "%d", &id)
+			_, _ = fmt.Fprintf(w, `{"id":%d,"content":%q}`, id, fmt.Sprintf(
+				`<figure data-trix-attachment='{"sgid":"sgid-%d","url":"/rails/active_storage/blobs/%d.pdf","filename":"quarterly-report-%d.pdf","contentType":"application/pdf","filesize":23}'></figure>`,
+				id, id, id))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.RequestURI())
+			http.Error(w, "not found", http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	stdout, err := runAttachmentCommand(t, server, "attachments", "42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response struct {
+		Data   []threadAttachment `json:"data"`
+		Notice string             `json:"notice"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &response); err != nil {
+		t.Fatalf("decode response: %v\n%s", err, stdout)
+	}
+
+	if len(response.Data) != 3 {
+		t.Fatalf("listed %d attachments, want 3", len(response.Data))
+	}
+	for index, want := range []string{"103:1", "102:1", "101:1"} {
+		if response.Data[index].ID != want {
+			t.Errorf("attachment %d = %q, want %q", index, response.Data[index].ID, want)
+		}
+	}
+	if response.Notice != "" {
+		t.Errorf("notice = %q, want none for a thread that was read to the end", response.Notice)
+	}
+	if entryReads, _ := reads.counts(); entryReads != 2 {
+		t.Errorf("read %d entry pages, want 2", entryReads)
 	}
 }
 
@@ -461,10 +529,10 @@ func TestAttachmentByteSizeDistinguishesEmptyFromUnknown(t *testing.T) {
 	}
 }
 
-func TestTerminalSafeTextReplacesControls(t *testing.T) {
-	safe := terminalSafeText("report\x1b[31m\r\n.pdf")
+func TestMarkdownSafeTextRemovesControls(t *testing.T) {
+	safe := markdownSafeText("report\x1b[31m\r\n.pdf")
 	if strings.ContainsAny(safe, "\x1b\r\n") {
-		t.Errorf("terminal-safe text still contains controls: %q", safe)
+		t.Errorf("Markdown-safe text still contains controls: %q", safe)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -51,21 +52,19 @@ func (c *screenerHistoryCommand) run(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if c.page < 1 {
-		return output.ErrUsage("--page must be at least 1")
+		return apierr.ErrUsage("--page must be at least 1")
 	}
 
-	screened, pages, truncated, err := collectScreenedClearances(cmd.Context(), c.page, c.all,
-		func(ctx context.Context, page string) ([]generated.Clearance, error) {
-			clearances, listErr := sdk.Clearances().Screened(ctx, page)
-			if listErr != nil {
-				return nil, convertSDKError(listErr)
-			}
-			return clearances, nil
-		})
+	first, err := readScreenedClearances(cmd.Context(), strconv.Itoa(c.page))
 	if err != nil {
 		return err
 	}
-	notice := screenerTruncationNotice(c.page, pages, truncated)
+	collected, err := collectPages(cmd.Context(), first, pageRequest{All: c.all, MaxPages: maxScreenerPages}, readScreenedClearances)
+	if err != nil {
+		return err
+	}
+	screened := collected.Items
+	notice := screenerTruncationNotice(c.page, collected.Read, collected.Truncated)
 
 	if writer.IsStyled() {
 		if len(screened) == 0 {
@@ -96,7 +95,7 @@ func (c *screenerHistoryCommand) run(cmd *cobra.Command, _ []string) error {
 		output.WithSummary(fmt.Sprintf("%d %s screened", len(screened), senderNoun(len(screened)))),
 		output.WithNotice(notice),
 		output.WithMeta("page", c.page),
-		output.WithMeta("pages_fetched", pages),
+		output.WithMeta("pages_fetched", collected.Read),
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "rescreen",
 			Command:     "hey screener approve <id>",
@@ -105,34 +104,22 @@ func (c *screenerHistoryCommand) run(cmd *cobra.Command, _ []string) error {
 	)
 }
 
-type screenedPageFetcher func(context.Context, string) ([]generated.Clearance, error)
+func readScreenedClearances(ctx context.Context, cursor string) (pageResult[screenedClearance], error) {
+	page, err := nextScreenerPage(cursor)
+	if err != nil {
+		return pageResult[screenedClearance]{}, err
+	}
 
-func collectScreenedClearances(ctx context.Context, startPage int, all bool, fetch screenedPageFetcher) ([]screenedClearance, int, bool, error) {
-	if fetch == nil {
-		return nil, 0, false, fmt.Errorf("collectScreenedClearances: fetch function is nil")
+	clearances, err := sdk.Clearances().Screened(ctx, cursor)
+	if err != nil {
+		return pageResult[screenedClearance]{}, apierr.FromSDK(err)
 	}
-	page := max(startPage, 1)
+
 	var screened []screenedClearance
-	for pages := 1; pages <= maxScreenerPages; pages++ {
-		clearances, err := fetch(ctx, strconv.Itoa(page))
-		if err != nil {
-			return nil, pages - 1, false, err
-		}
-		if len(clearances) == 0 {
-			return screened, pages, false, nil
-		}
-		for _, clearance := range clearances {
-			screened = append(screened, screenedClearanceFor(clearance))
-		}
-		if !all {
-			return screened, 1, false, nil
-		}
-		if pages == maxScreenerPages {
-			return screened, pages, true, nil
-		}
-		page++
+	for _, clearance := range clearances {
+		screened = append(screened, screenedClearanceFor(clearance))
 	}
-	return screened, maxScreenerPages, true, nil
+	return pageResult[screenedClearance]{Items: screened, Cursor: page}, nil
 }
 
 func screenedClearanceFor(clearance generated.Clearance) screenedClearance {

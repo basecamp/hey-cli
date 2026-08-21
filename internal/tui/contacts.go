@@ -26,44 +26,38 @@ const (
 )
 
 type contactsLoadedMsg struct {
-	requestID uint64
-	page      int
-	contacts  []models.Contact
-	err       error
+	requestResult
+	page     int
+	contacts []models.Contact
 }
 
 type contactDetailLoadedMsg struct {
-	requestID uint64
-	contact   models.Contact
-	note      string
-	err       error
+	requestResult
+	contact models.Contact
+	note    string
 }
 
 type contactSavedMsg struct {
-	requestID  uint64
+	requestResult
 	originalID int64
 	contact    models.Contact
 	created    bool
-	err        error
 }
 
 type contactHiddenMsg struct {
-	requestID uint64
-	contact   models.Contact
-	err       error
+	requestResult
+	contact models.Contact
 }
 
 type contactRevealedMsg struct {
-	requestID uint64
-	contact   models.Contact
-	err       error
+	requestResult
+	contact models.Contact
 }
 
 type contactNoteSavedMsg struct {
-	requestID uint64
-	note      string
-	deleted   bool
-	err       error
+	requestResult
+	note    string
+	deleted bool
 }
 
 type contactsView struct {
@@ -83,11 +77,8 @@ type contactsView struct {
 	pendingOriginalID   int64
 	confirmNoteDelete   bool
 	notice              string
-	loading             bool
 
-	activeRequestID   uint64
-	activeRequestKind contactRequestKind
-	requestCancel     context.CancelFunc
+	requests requestLane[contactRequestKind]
 }
 
 func newContactsView(vc *viewContext) *contactsView {
@@ -108,12 +99,8 @@ func (v *contactsView) Init() tea.Cmd {
 func (v *contactsView) Update(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case contactsLoadedMsg:
-		if msg.requestID != v.activeRequestID {
-			return nil, true
-		}
-		v.finishRequest(msg.requestID)
-		if msg.err != nil {
-			return func() tea.Msg { return errMsg{msg.err} }, true
+		if cmd, ok := v.requests.settle(msg.requestResult); !ok {
+			return cmd, true
 		}
 		if len(msg.contacts) == 0 && v.loaded && msg.page > v.page {
 			v.notice = "No more contacts"
@@ -125,10 +112,10 @@ func (v *contactsView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 
 	case contactDetailLoadedMsg:
-		if msg.requestID != v.activeRequestID {
+		if !v.requests.accepts(msg.requestResult) {
 			return nil, true
 		}
-		v.finishRequest(msg.requestID)
+		v.requests.finish(msg.requestID)
 		if msg.err != nil {
 			v.pendingSavedContact = false
 			v.pendingOriginalID = 0
@@ -149,10 +136,10 @@ func (v *contactsView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 
 	case contactSavedMsg:
-		if msg.requestID != v.activeRequestID {
+		if !v.requests.accepts(msg.requestResult) {
 			return nil, true
 		}
-		v.finishRequest(msg.requestID)
+		v.requests.finish(msg.requestID)
 		if msg.err != nil {
 			var conflict *hey.ContactConflictError
 			if errors.As(msg.err, &conflict) && conflict.ContactID != 0 {
@@ -182,12 +169,8 @@ func (v *contactsView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return v.requestContactDetail(msg.contact.ID), true
 
 	case contactHiddenMsg:
-		if msg.requestID != v.activeRequestID {
-			return nil, true
-		}
-		v.finishRequest(msg.requestID)
-		if msg.err != nil {
-			return func() tea.Msg { return errMsg{msg.err} }, true
+		if cmd, ok := v.requests.settle(msg.requestResult); !ok {
+			return cmd, true
 		}
 		v.lastHiddenID = msg.contact.ID
 		v.list.remove(msg.contact.ID)
@@ -198,26 +181,22 @@ func (v *contactsView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 
 	case contactRevealedMsg:
-		if msg.requestID != v.activeRequestID {
-			return nil, true
-		}
-		v.finishRequest(msg.requestID)
-		if msg.err != nil {
-			return func() tea.Msg { return errMsg{msg.err} }, true
+		if cmd, ok := v.requests.settle(msg.requestResult); !ok {
+			return cmd, true
 		}
 		v.lastHiddenID = 0
 		v.notice = "Contact shown again"
 		return v.requestContacts(v.page), true
 
 	case contactNoteSavedMsg:
-		if msg.requestID != v.activeRequestID {
+		if !v.requests.accepts(msg.requestResult) {
 			return nil, true
 		}
-		v.finishRequest(msg.requestID)
+		v.requests.finish(msg.requestID)
 		if msg.err != nil {
 			if v.noteForm != nil {
 				v.noteForm.saving = false
-				v.noteForm.status = "Save failed: " + msg.err.Error()
+				v.noteForm.status = errorNotice("Save failed", msg.err)
 				v.noteForm.isError = true
 				return nil, true
 			}
@@ -300,7 +279,7 @@ func (v *contactsView) SubnavLeft() tea.Cmd  { return nil }
 func (v *contactsView) SubnavRight() tea.Cmd { return nil }
 
 func (v *contactsView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
-	if v.loading {
+	if v.requests.loading {
 		return nil
 	}
 	if msg.String() != "x" {
@@ -387,7 +366,7 @@ func (v *contactsView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 func (v *contactsView) InThread() bool { return v.inDetail }
 
 func (v *contactsView) ExitDetail(_ string) {
-	if v.loading && v.activeRequestKind == contactRequestMutation {
+	if v.requests.loading && v.requests.kind == contactRequestMutation {
 		return
 	}
 	v.ExitThread()
@@ -402,16 +381,16 @@ func (v *contactsView) ExitThread() {
 	v.detail = models.Contact{}
 	v.note = ""
 	v.confirmNoteDelete = false
-	v.cancelRequest()
+	v.requests.cancel()
 }
 
 func (v *contactsView) CancelPendingDetail() bool {
-	if v.activeRequestKind != contactRequestDetail {
+	if v.requests.kind != contactRequestDetail {
 		return false
 	}
 	v.pendingSavedContact = false
 	v.pendingOriginalID = 0
-	v.cancelRequest()
+	v.requests.cancel()
 	return true
 }
 
@@ -420,7 +399,7 @@ func (v *contactsView) CapturingInput() bool {
 }
 
 func (v *contactsView) AccountSwitchBlocked() bool {
-	return v.loading && v.activeRequestKind == contactRequestMutation
+	return v.requests.loading && v.requests.kind == contactRequestMutation
 }
 
 func (v *contactsView) Resize(width, height int) {
@@ -435,7 +414,7 @@ func (v *contactsView) Resize(width, height int) {
 	}
 }
 
-func (v *contactsView) Loading() bool { return v.loading }
+func (v *contactsView) Loading() bool { return v.requests.loading }
 
 // Restyle re-renders the cached contact detail and hands the new styles to any
 // open form. The contact list renders live.
@@ -453,47 +432,13 @@ func (v *contactsView) Restyle() {
 	}
 }
 
-func (v *contactsView) beginRequest(kind contactRequestKind) (uint64, context.Context) {
-	if v.requestCancel != nil {
-		v.requestCancel()
-	}
-	v.activeRequestID++
-	ctx, cancel := context.WithCancel(v.vc.ctx)
-	v.activeRequestKind = kind
-	v.requestCancel = cancel
-	v.loading = true
-	return v.activeRequestID, ctx
-}
-
-func (v *contactsView) finishRequest(requestID uint64) {
-	if requestID != v.activeRequestID {
-		return
-	}
-	if v.requestCancel != nil {
-		v.requestCancel()
-	}
-	v.activeRequestKind = contactRequestNone
-	v.requestCancel = nil
-	v.loading = false
-}
-
-func (v *contactsView) cancelRequest() {
-	if v.requestCancel != nil {
-		v.requestCancel()
-	}
-	v.activeRequestID++
-	v.activeRequestKind = contactRequestNone
-	v.requestCancel = nil
-	v.loading = false
-}
-
 func (v *contactsView) requestContacts(page int) tea.Cmd {
-	requestID, ctx := v.beginRequest(contactRequestList)
+	requestID, ctx := v.requests.begin(v.vc.ctx, contactRequestList)
 	return v.fetchContacts(ctx, requestID, max(page, 1))
 }
 
 func (v *contactsView) requestContactDetail(contactID int64) tea.Cmd {
-	requestID, ctx := v.beginRequest(contactRequestDetail)
+	requestID, ctx := v.requests.begin(v.vc.ctx, contactRequestDetail)
 	return v.fetchContactDetail(ctx, requestID, contactID)
 }
 
@@ -518,7 +463,7 @@ func (v *contactsView) startNote() tea.Cmd {
 func (v *contactsView) saveContact() tea.Cmd {
 	form := v.contactForm
 	name, email, aliases := form.values()
-	requestID, ctx := v.beginRequest(contactRequestMutation)
+	requestID, ctx := v.requests.begin(v.vc.ctx, contactRequestMutation)
 	return func() tea.Msg {
 		params := hey.ContactParams{Name: name, EmailAddress: email, AliasEmailAddresses: aliases}
 		var contact *generated.Contact
@@ -529,61 +474,61 @@ func (v *contactsView) saveContact() tea.Cmd {
 		} else {
 			contact, err = v.vc.sdk.Contacts().Update(ctx, form.contactID, params)
 		}
+		if err == nil && contact == nil {
+			err = fmt.Errorf("contact save returned no data")
+		}
 		if err != nil {
-			return contactSavedMsg{requestID: requestID, originalID: form.contactID, created: created, err: err}
+			return contactSavedMsg{requestResult: newRequestResult(requestID, err), originalID: form.contactID, created: created}
 		}
-		if contact == nil {
-			return contactSavedMsg{requestID: requestID, originalID: form.contactID, created: created, err: fmt.Errorf("contact save returned no data")}
-		}
-		return contactSavedMsg{requestID: requestID, originalID: form.contactID, contact: sdkContactToModel(*contact), created: created}
+		return contactSavedMsg{requestResult: newRequestResult(requestID, nil), originalID: form.contactID, contact: sdkContactToModel(*contact), created: created}
 	}
 }
 
 func (v *contactsView) hideContact() tea.Cmd {
 	contact := v.detail
-	requestID, ctx := v.beginRequest(contactRequestMutation)
+	requestID, ctx := v.requests.begin(v.vc.ctx, contactRequestMutation)
 	return func() tea.Msg {
 		err := v.vc.sdk.Contacts().Hide(ctx, contact.ID)
-		return contactHiddenMsg{requestID: requestID, contact: contact, err: err}
+		return contactHiddenMsg{requestResult: newRequestResult(requestID, err), contact: contact}
 	}
 }
 
 func (v *contactsView) revealContact(contactID int64) tea.Cmd {
-	requestID, ctx := v.beginRequest(contactRequestMutation)
+	requestID, ctx := v.requests.begin(v.vc.ctx, contactRequestMutation)
 	return func() tea.Msg {
 		contact, err := v.vc.sdk.Contacts().Reveal(ctx, contactID)
+		if err == nil && contact == nil {
+			err = fmt.Errorf("contact reveal returned no data")
+		}
 		if err != nil {
-			return contactRevealedMsg{requestID: requestID, err: err}
+			return contactRevealedMsg{requestResult: newRequestResult(requestID, err)}
 		}
-		if contact == nil {
-			return contactRevealedMsg{requestID: requestID, err: fmt.Errorf("contact reveal returned no data")}
-		}
-		return contactRevealedMsg{requestID: requestID, contact: sdkContactToModel(*contact)}
+		return contactRevealedMsg{requestResult: newRequestResult(requestID, nil), contact: sdkContactToModel(*contact)}
 	}
 }
 
 func (v *contactsView) saveNote() tea.Cmd {
 	form := v.noteForm
 	content := strings.TrimSpace(form.input.Value())
-	requestID, ctx := v.beginRequest(contactRequestMutation)
+	requestID, ctx := v.requests.begin(v.vc.ctx, contactRequestMutation)
 	return func() tea.Msg {
 		note, err := v.vc.sdk.Contacts().SetNote(ctx, form.contactID, content)
+		if err == nil && note == nil {
+			err = fmt.Errorf("contact note save returned no data")
+		}
 		if err != nil {
-			return contactNoteSavedMsg{requestID: requestID, err: err}
+			return contactNoteSavedMsg{requestResult: newRequestResult(requestID, err)}
 		}
-		if note == nil {
-			return contactNoteSavedMsg{requestID: requestID, err: fmt.Errorf("contact note save returned no data")}
-		}
-		return contactNoteSavedMsg{requestID: requestID, note: note.Note}
+		return contactNoteSavedMsg{requestResult: newRequestResult(requestID, nil), note: note.Note}
 	}
 }
 
 func (v *contactsView) deleteNote() tea.Cmd {
 	contactID := v.detail.ID
-	requestID, ctx := v.beginRequest(contactRequestMutation)
+	requestID, ctx := v.requests.begin(v.vc.ctx, contactRequestMutation)
 	return func() tea.Msg {
 		err := v.vc.sdk.Contacts().DeleteNote(ctx, contactID)
-		return contactNoteSavedMsg{requestID: requestID, deleted: true, err: err}
+		return contactNoteSavedMsg{requestResult: newRequestResult(requestID, err), deleted: true}
 	}
 }
 
@@ -632,7 +577,7 @@ func (v *contactsView) fetchContacts(ctx context.Context, requestID uint64, page
 		params := &generated.ListContactsParams{Page: &pageValue}
 		result, err := v.vc.sdk.Contacts().List(ctx, params)
 		if err != nil {
-			return contactsLoadedMsg{requestID: requestID, page: page, err: err}
+			return contactsLoadedMsg{requestResult: newRequestResult(requestID, err), page: page}
 		}
 		var sdkContacts []generated.Contact
 		if result != nil {
@@ -642,7 +587,7 @@ func (v *contactsView) fetchContacts(ctx context.Context, requestID uint64, page
 		for _, contact := range sdkContacts {
 			contacts = append(contacts, sdkContactToModel(contact))
 		}
-		return contactsLoadedMsg{requestID: requestID, page: page, contacts: contacts}
+		return contactsLoadedMsg{requestResult: newRequestResult(requestID, nil), page: page, contacts: contacts}
 	}
 }
 
@@ -661,17 +606,18 @@ func (v *contactsView) fetchContactDetail(ctx context.Context, requestID uint64,
 			note, err = v.vc.sdk.Contacts().Note(groupCtx, contactID)
 			return err
 		})
-		if err := group.Wait(); err != nil {
-			return contactDetailLoadedMsg{requestID: requestID, err: err}
+		err := group.Wait()
+		if err == nil && detail == nil {
+			err = fmt.Errorf("contact %d returned no data", contactID)
 		}
-		if detail == nil {
-			return contactDetailLoadedMsg{requestID: requestID, err: fmt.Errorf("contact %d returned no data", contactID)}
+		if err != nil {
+			return contactDetailLoadedMsg{requestResult: newRequestResult(requestID, err)}
 		}
 		content := ""
 		if note != nil {
 			content = note.Note
 		}
-		return contactDetailLoadedMsg{requestID: requestID, contact: sdkContactDetailToModel(*detail), note: content}
+		return contactDetailLoadedMsg{requestResult: newRequestResult(requestID, nil), contact: sdkContactDetailToModel(*detail), note: content}
 	}
 }
 
@@ -684,7 +630,7 @@ func contactSaveFailure(err error) string {
 		}
 		return message
 	}
-	return "Save failed: " + err.Error()
+	return errorNotice("Save failed", err)
 }
 
 func sdkContactToModel(contact generated.Contact) models.Contact {

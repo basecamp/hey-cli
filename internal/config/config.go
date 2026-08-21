@@ -30,11 +30,6 @@ const (
 	SourceFlag    Source = "flag"
 )
 
-type Value struct {
-	Value  string `json:"value"`
-	Source Source `json:"source"`
-}
-
 type Config struct {
 	BaseURL   string `json:"base_url"`
 	AccountID string `json:"account_id,omitempty"`
@@ -62,9 +57,6 @@ type OldConfig struct {
 	AccessToken   string `json:"access_token,omitempty"`
 	RefreshToken  string `json:"refresh_token,omitempty"`
 	TokenExpiry   int64  `json:"token_expiry,omitempty"`
-	ClientID      string `json:"client_id,omitempty"`
-	ClientSecret  string `json:"client_secret,omitempty"`
-	InstallID     string `json:"install_id,omitempty"`
 	SessionCookie string `json:"session_cookie,omitempty"`
 }
 
@@ -332,13 +324,6 @@ func (c *Config) SetFromFlag(key, value string) error {
 		c.sources["account_id"] = SourceFlag
 	}
 	return nil
-}
-
-func (c *Config) Values() []Value {
-	return []Value{
-		{Value: c.BaseURL, Source: c.SourceOf("base_url")},
-		{Value: c.AccountID, Source: c.SourceOf("account_id")},
-	}
 }
 
 // LoadOld reads the config file as the old format (with embedded credentials).

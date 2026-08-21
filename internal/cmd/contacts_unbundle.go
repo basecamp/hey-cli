@@ -5,6 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -37,14 +38,12 @@ func (c *contactsUnbundleCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if err := sdk.Contacts().Unbundle(cmd.Context(), contactID); err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
-	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Unbundle request accepted for contact %d.\n", contactID)
-		return nil
-	}
-	return writeOK(contactBundleResult{ID: contactID, Action: "unbundle"},
-		output.WithSummary("Unbundle request accepted"),
+	return writeMutationLine(cmd,
+		fmt.Sprintf("Unbundle request accepted for contact %d.", contactID),
+		"Unbundle request accepted",
+		contactBundleResult{ID: contactID, Action: "unbundle"},
 		output.WithBreadcrumbs(output.Breadcrumb{Action: "bundle", Command: fmt.Sprintf("hey contacts bundle %d", contactID), Description: "Bundle this contact's mail"}),
 	)
 }

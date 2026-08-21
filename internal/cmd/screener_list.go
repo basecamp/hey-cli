@@ -9,16 +9,16 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
 const maxScreenerPages = 100
 
 type screenerListCommand struct {
-	cmd   *cobra.Command
-	page  int
-	all   bool
-	count bool
+	cmd  *cobra.Command
+	page int
+	all  bool
 }
 
 type pendingClearance struct {
@@ -47,7 +47,6 @@ func newScreenerListCommand() *screenerListCommand {
 	}
 	listCommand.cmd.Flags().IntVar(&listCommand.page, "page", 1, "Results page")
 	listCommand.cmd.Flags().BoolVar(&listCommand.all, "all", false, "Fetch up to 100 results pages from --page onward")
-	listCommand.cmd.Flags().BoolVar(&listCommand.count, "count", false, "Print how many senders are waiting, without listing them")
 	return listCommand
 }
 
@@ -56,24 +55,22 @@ func (c *screenerListCommand) run(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if c.page < 1 {
-		return output.ErrUsage("--page must be at least 1")
+		return apierr.ErrUsage("--page must be at least 1")
 	}
-	if c.count {
+	if writer.EffectiveFormat() == output.FormatCount {
 		return c.runCount(cmd)
 	}
 
-	pending, pages, truncated, err := collectPendingClearances(cmd.Context(), c.page, c.all,
-		func(ctx context.Context, page string) (*generated.ClearanceSummary, error) {
-			summary, listErr := sdk.Clearances().Pending(ctx, page)
-			if listErr != nil {
-				return nil, convertSDKError(listErr)
-			}
-			return summary, nil
-		})
+	first, err := readPendingClearances(cmd.Context(), strconv.Itoa(c.page))
 	if err != nil {
 		return err
 	}
-	notice := screenerTruncationNotice(c.page, pages, truncated)
+	collected, err := collectPages(cmd.Context(), first, pageRequest{All: c.all, MaxPages: maxScreenerPages}, readPendingClearances)
+	if err != nil {
+		return err
+	}
+	pending := collected.Items
+	notice := screenerTruncationNotice(c.page, collected.Read, collected.Truncated)
 
 	if writer.IsStyled() {
 		if len(pending) == 0 {
@@ -103,7 +100,7 @@ func (c *screenerListCommand) run(cmd *cobra.Command, _ []string) error {
 		output.WithSummary(fmt.Sprintf("%d %s waiting", len(pending), senderNoun(len(pending)))),
 		output.WithNotice(notice),
 		output.WithMeta("page", c.page),
-		output.WithMeta("pages_fetched", pages),
+		output.WithMeta("pages_fetched", collected.Read),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{Action: "approve", Command: "hey screener approve <id>", Description: "Let a sender through"},
 			output.Breadcrumb{Action: "deny", Command: "hey screener deny <id>", Description: "Turn a sender away"},
@@ -111,49 +108,47 @@ func (c *screenerListCommand) run(cmd *cobra.Command, _ []string) error {
 	)
 }
 
+// runCount answers the global --count with the number alone, which is a much cheaper
+// request than the queue. It writes the number itself: --count is a bare count on every
+// other command, and `n=$(hey screener list --count)` has to be that number.
 func (c *screenerListCommand) runCount(cmd *cobra.Command) error {
 	count, err := sdk.Clearances().PendingCount(cmd.Context())
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
-	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "%d %s waiting to be screened\n", count, senderNoun(count))
-		return nil
-	}
-	return writeOK(map[string]any{"pending_count": count},
-		output.WithSummary(fmt.Sprintf("%d %s waiting", count, senderNoun(count))),
-		output.WithBreadcrumbs(output.Breadcrumb{Action: "list", Command: "hey screener list", Description: "See who is waiting"}),
-	)
+	fmt.Fprintln(cmd.OutOrStdout(), count)
+	return nil
 }
 
-type pendingPageFetcher func(context.Context, string) (*generated.ClearanceSummary, error)
+// readPendingClearances reads one page of the queue. The Screener numbers its pages, so
+// the cursor is the next page's number.
+func readPendingClearances(ctx context.Context, cursor string) (pageResult[pendingClearance], error) {
+	page, err := nextScreenerPage(cursor)
+	if err != nil {
+		return pageResult[pendingClearance]{}, err
+	}
 
-func collectPendingClearances(ctx context.Context, startPage int, all bool, fetch pendingPageFetcher) ([]pendingClearance, int, bool, error) {
-	if fetch == nil {
-		return nil, 0, false, fmt.Errorf("collectPendingClearances: fetch function is nil")
+	summary, err := sdk.Clearances().Pending(ctx, cursor)
+	if err != nil {
+		return pageResult[pendingClearance]{}, apierr.FromSDK(err)
 	}
-	page := max(startPage, 1)
+	if summary == nil {
+		return pageResult[pendingClearance]{}, nil
+	}
+
 	var pending []pendingClearance
-	for pages := 1; pages <= maxScreenerPages; pages++ {
-		summary, err := fetch(ctx, strconv.Itoa(page))
-		if err != nil {
-			return nil, pages - 1, false, err
-		}
-		if summary == nil || len(summary.Clearances) == 0 {
-			return pending, pages, false, nil
-		}
-		for _, clearance := range summary.Clearances {
-			pending = append(pending, pendingClearanceFor(clearance))
-		}
-		if !all {
-			return pending, 1, false, nil
-		}
-		if pages == maxScreenerPages {
-			return pending, pages, true, nil
-		}
-		page++
+	for _, clearance := range summary.Clearances {
+		pending = append(pending, pendingClearanceFor(clearance))
 	}
-	return pending, maxScreenerPages, true, nil
+	return pageResult[pendingClearance]{Items: pending, Cursor: page}, nil
+}
+
+func nextScreenerPage(cursor string) (string, error) {
+	page, err := strconv.Atoi(cursor)
+	if err != nil {
+		return "", fmt.Errorf("unreadable screener page %q: %w", cursor, err)
+	}
+	return strconv.Itoa(page + 1), nil
 }
 
 func pendingClearanceFor(clearance generated.Clearance) pendingClearance {

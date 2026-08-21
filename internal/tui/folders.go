@@ -3,19 +3,20 @@ package tui
 import (
 	"fmt"
 	"strings"
-	"unicode"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/basecamp/hey-cli/internal/models"
+	"github.com/basecamp/hey-cli/internal/mail"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
-const mailSourceKindFolder = "folder"
-
-func isOrganizedMailSource(kind string) bool {
-	return kind == mailSourceKindFolder || kind == mailSourceKindCollection
+// isOrganizedMailSource reports whether a source is one of the reader's own ways of
+// organizing mail rather than one of HEY's boxes. Those page through their own feeds and
+// have no box to be told about.
+func isOrganizedMailSource(kind mail.Kind) bool {
+	return kind == mail.KindFolder || kind == mail.KindCollection
 }
 
 type folderPickerChoice int
@@ -28,12 +29,14 @@ const (
 
 type folderPickerSelection struct {
 	kind   folderPickerChoice
-	folder models.Box
+	folder mail.Source
 }
 
 type folderPicker struct {
-	posting  models.Posting
-	folders  []models.Box
+	plainModal
+
+	posting  mail.Posting
+	folders  []mail.Source
 	cursor   int
 	offset   int
 	height   int
@@ -42,10 +45,10 @@ type folderPicker struct {
 	status   string
 }
 
-func newFolderPicker(posting models.Posting, sources []models.Box) *folderPicker {
-	folders := make([]models.Box, 0, len(sources))
+func newFolderPicker(posting mail.Posting, sources []mail.Source) *folderPicker {
+	folders := make([]mail.Source, 0, len(sources))
 	for _, source := range sources {
-		if source.Kind == mailSourceKindFolder {
+		if source.Kind == mail.KindFolder {
 			folders = append(folders, source)
 		}
 	}
@@ -106,6 +109,59 @@ func (p *folderPicker) createName() (string, bool) {
 	return name, true
 }
 
+// handleKey routes keys through the picker's two states. Escape while a label is being
+// named steps back to the list rather than closing the picker, which is the one place
+// escape does not mean cancel.
+func (p *folderPicker) handleKey(view *mailView, msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	if msg.Key().Code == tea.KeyEscape {
+		if p.creating {
+			p.cancelCreate()
+			return nil, true
+		}
+		return nil, false
+	}
+	if p.creating {
+		if msg.Key().Code == tea.KeyEnter {
+			name, ok := p.createName()
+			if !ok {
+				return nil, true
+			}
+			return view.createFolderForPosting(p.posting.ID, name), false
+		}
+		return p.update(msg), true
+	}
+	if msg.Key().Code == tea.KeyEnter {
+		if selection := p.selected(); selection != nil {
+			switch selection.kind {
+			case folderPickerExisting:
+				if p.postingHasFolder(selection.folder.ID) {
+					return view.unfilePosting(p.posting.ID, selection.folder.ID, selection.folder.Name), false
+				}
+				return view.filePosting(p.posting.ID, selection.folder.ID, selection.folder.Name), false
+			case folderPickerCreate:
+				return p.startCreate(), true
+			case folderPickerRemoveAll:
+				return view.unfilePosting(p.posting.ID, 0, ""), false
+			}
+		}
+		return nil, true
+	}
+	p.moveCursor(msg)
+	return nil, true
+}
+
+// handleMsg gives the name field its cursor blinks, and only while it is up.
+func (p *folderPicker) handleMsg(msg tea.Msg) (tea.Cmd, bool) {
+	if p.creating {
+		return p.update(msg), true
+	}
+	return nil, false
+}
+
+func (p *folderPicker) draw(view *mailView) string {
+	return p.view(view.vc.styles, view.vc.width)
+}
+
 func (p *folderPicker) update(msg tea.Msg) tea.Cmd {
 	if !p.creating {
 		return nil
@@ -115,10 +171,7 @@ func (p *folderPicker) update(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-func (p *folderPicker) handleKey(msg tea.KeyPressMsg) tea.Cmd {
-	if p.creating {
-		return p.update(msg)
-	}
+func (p *folderPicker) moveCursor(msg tea.KeyPressMsg) {
 	switch msg.Key().Code {
 	case tea.KeyUp:
 		if p.cursor > 0 {
@@ -130,7 +183,6 @@ func (p *folderPicker) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	}
 	p.ensureVisible()
-	return nil
 }
 
 func (p *folderPicker) resize(width, height int) {
@@ -188,7 +240,7 @@ func (p *folderPicker) view(styles styles, width int) string {
 			if p.postingHasFolder(choice.folder.ID) {
 				mark = "[x]"
 			}
-			label = mark + " " + terminalSafeFolderText(choice.folder.Name)
+			label = mark + " " + terminal.SanitizeLine(choice.folder.Name)
 		case folderPickerCreate:
 			label = "+ Create a new label…"
 		case folderPickerRemoveAll:
@@ -201,15 +253,6 @@ func (p *folderPicker) view(styles styles, width int) string {
 		fmt.Fprintf(&b, "%s%s\n", prefix, label)
 	}
 	return b.String()
-}
-
-func terminalSafeFolderText(value string) string {
-	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return '�'
-		}
-		return r
-	}, value)
 }
 
 func (p *folderPicker) helpBindings() []helpBinding {

@@ -5,6 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -36,7 +37,7 @@ func (c *calendarsCommand) run(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	payload, err := sdk.Calendars().List(ctx)
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 
 	calendars := unwrapCalendars(payload)

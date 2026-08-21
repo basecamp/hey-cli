@@ -25,8 +25,8 @@ import (
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/cable"
-	"github.com/basecamp/hey-cli/internal/output"
 )
 
 const changesChannel = "Postings::ChangesChannel"
@@ -99,7 +99,7 @@ func (c *watchCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if c.asyncScript != "" && c.syncScript != "" {
-		return output.ErrUsage("pass either --run-async or --run-sync, not both")
+		return apierr.ErrUsage("pass either --run-async or --run-sync, not both")
 	}
 
 	ctx, stopListeningForSignals := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
@@ -144,7 +144,7 @@ func (c *watchCommand) run(cmd *cobra.Command, args []string) error {
 		}),
 		actioncable.OnRejected(func() { watch.rejected.Store(true) }))
 	if err != nil {
-		return output.ErrAPI(0, fmt.Sprintf("could not subscribe to posting changes: %v", err))
+		return apierr.ErrAPI(0, fmt.Sprintf("could not subscribe to posting changes: %v", err))
 	}
 
 	if err := watch.listen(ctx, subscription); err != nil {
@@ -165,10 +165,10 @@ func (c *watchCommand) run(cmd *cobra.Command, args []string) error {
 func watchDialError(err error) error {
 	var disconnect *actioncable.DisconnectError
 	if errors.As(err, &disconnect) && disconnect.Reason == actioncable.ReasonUnauthorized {
-		return output.ErrAuth("HEY's cable server turned these credentials down — run `hey auth login` again, or log in with `hey auth login --cookie` if the server doesn't take access tokens on a websocket yet")
+		return apierr.ErrAuth("HEY's cable server turned these credentials down — run `hey auth login` again, or log in with `hey auth login --cookie` if the server doesn't take access tokens on a websocket yet")
 	}
 
-	return output.ErrNetwork(fmt.Errorf("could not connect to HEY's cable server: %w", err))
+	return apierr.ErrNetwork(fmt.Errorf("could not connect to HEY's cable server: %w", err))
 }
 
 func (c *watchCommand) watchedChanges() (map[string]bool, error) {
@@ -176,13 +176,13 @@ func (c *watchCommand) watchedChanges() (map[string]bool, error) {
 	for _, event := range c.events {
 		event = strings.ToLower(strings.TrimSpace(event))
 		if !slices.Contains(watchableChanges, event) {
-			return nil, output.ErrUsage(fmt.Sprintf("unknown event %q — pass any of %s", event, strings.Join(watchableChanges, ", ")))
+			return nil, apierr.ErrUsage(fmt.Sprintf("unknown event %q — pass any of %s", event, strings.Join(watchableChanges, ", ")))
 		}
 		changes[event] = true
 	}
 
 	if len(changes) == 0 {
-		return nil, output.ErrUsage("--events needs at least one of " + strings.Join(watchableChanges, ", "))
+		return nil, apierr.ErrUsage("--events needs at least one of " + strings.Join(watchableChanges, ", "))
 	}
 
 	return changes, nil
@@ -191,10 +191,10 @@ func (c *watchCommand) watchedChanges() (map[string]bool, error) {
 func (c *watchCommand) watchedBoxes(ctx context.Context) (map[int64]*watchedBox, error) {
 	listed, err := sdk.Boxes().List(ctx)
 	if err != nil {
-		return nil, convertSDKError(err)
+		return nil, apierr.FromSDK(err)
 	}
 	if listed == nil {
-		return nil, output.ErrAPI(0, "could not list boxes")
+		return nil, apierr.ErrAPI(0, "could not list boxes")
 	}
 
 	watched := map[int64]*watchedBox{}
@@ -215,7 +215,7 @@ func (c *watchCommand) watchedBoxes(ctx context.Context) (map[int64]*watchedBox,
 	}
 
 	if len(watched) == 0 {
-		return nil, output.ErrNotFound("box", strings.Join(c.boxes, ", "))
+		return nil, apierr.ErrNotFound("box", strings.Join(c.boxes, ", "))
 	}
 
 	return watched, nil
@@ -264,7 +264,7 @@ func parseWatchSince(since string) (time.Time, error) {
 	if at, err := time.Parse("2006-01-02", since); err == nil {
 		return at, nil
 	}
-	return time.Time{}, output.ErrUsage(fmt.Sprintf("could not read --since %q — pass an RFC 3339 time or YYYY-MM-DD", since))
+	return time.Time{}, apierr.ErrUsage(fmt.Sprintf("could not read --since %q — pass an RFC 3339 time or YYYY-MM-DD", since))
 }
 
 type watchedBox struct {
@@ -352,9 +352,9 @@ func (w *postingsWatch) closedError(ctx context.Context) error {
 	case ctx.Err() != nil:
 		return nil //nolint:nilerr // an interrupt or a --timeout is how a watch is meant to end
 	case w.rejected.Load():
-		return output.ErrAuth("HEY's cable server turned this subscription down — run `hey auth login` again, or log in with `hey auth login --cookie` if the server doesn't take access tokens on a websocket yet")
+		return apierr.ErrAuth("HEY's cable server turned this subscription down — run `hey auth login` again, or log in with `hey auth login --cookie` if the server doesn't take access tokens on a websocket yet")
 	default:
-		return output.ErrNetwork(errors.New("HEY's cable server hung up for good — nothing is watching for changes any more"))
+		return apierr.ErrNetwork(errors.New("HEY's cable server hung up for good — nothing is watching for changes any more"))
 	}
 }
 
@@ -407,12 +407,17 @@ func (w *postingsWatch) read(ctx context.Context, message actioncable.Message) e
 
 func (w *postingsWatch) readBox(ctx context.Context, box *watchedBox) error {
 	changes, err := sdk.Postings().AllChanges(ctx, box.id, box.cursor)
-	if err != nil { //nolint:nilerr // a watch reports a failed read and keeps listening
-		if ctx.Err() == nil {
+	if err != nil {
+		switch {
+		case ctx.Err() != nil:
+			return nil //nolint:nilerr // an interrupt or a --timeout is how a watch is meant to end
+		case permanentReadError(err):
+			return apierr.FromSDK(err)
+		default:
 			fmt.Fprintf(w.errOut, "warning: could not read changes in %s: %v\n", box.name, err)
 			w.readAgainLater(box)
+			return nil
 		}
-		return nil
 	}
 	w.wasRead(box)
 
@@ -438,6 +443,18 @@ func (w *postingsWatch) readBox(ctx context.Context, box *watchedBox) error {
 	return nil
 }
 
+// permanentReadError tells a read that will never work from one that might. A malformed
+// cursor or credentials the server won't take doesn't get better by waiting two minutes,
+// and a watch that retried it silently would sit there for hours and still exit 0.
+func permanentReadError(err error) bool {
+	switch hey.AsError(err).Code {
+	case hey.CodeUsage, hey.CodeAuth:
+		return true
+	default:
+		return false
+	}
+}
+
 // readAgainLater keeps a box that couldn't be read on the list, and arms the retry that
 // comes back to it. Without it a failed read consumes the notification that prompted it,
 // and the change stays invisible until the next email happens along.
@@ -460,13 +477,18 @@ func (w *postingsWatch) wasRead(box *watchedBox) {
 
 // skipAhead moves a box's cursor to the server's current one, which is the only way
 // back once a box has changed more than an increment can carry.
+//
+// A box the server no longer lists, or no longer serves a changes feed for, has no
+// cursor to skip to: keeping the one it had would answer 409 on every read, and
+// installing an empty one would be a usage error on every read instead. Either way the
+// box can't be followed any more, so it stops being watched.
 func (w *postingsWatch) skipAhead(ctx context.Context, box *watchedBox) error {
 	listed, err := sdk.Boxes().List(ctx)
 	if err != nil {
-		return convertSDKError(err)
+		return apierr.FromSDK(err)
 	}
 	if listed == nil {
-		return output.ErrAPI(0, "could not list boxes")
+		return apierr.ErrAPI(0, "could not list boxes")
 	}
 
 	for _, listedBox := range *listed {
@@ -475,8 +497,26 @@ func (w *postingsWatch) skipAhead(ctx context.Context, box *watchedBox) error {
 			if err != nil {
 				return err
 			}
-			box.cursor = cursor
+			if cursor.Since != "" {
+				box.cursor = cursor
+				return nil
+			}
 		}
+	}
+
+	return w.stopWatching(box)
+}
+
+// stopWatching drops a box the watch can't follow any longer. When it was the last one
+// there is nothing left to wait for, and saying so beats a watch that sits there for
+// good, reading nothing.
+func (w *postingsWatch) stopWatching(box *watchedBox) error {
+	fmt.Fprintf(w.errOut, "notice: %s can no longer be followed — it is gone from this account\n", box.name)
+	delete(w.boxes, box.id)
+	delete(w.unread, box.id)
+
+	if len(w.boxes) == 0 {
+		return apierr.ErrNotFound("box", box.name)
 	}
 
 	return nil

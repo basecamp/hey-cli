@@ -9,6 +9,7 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -19,8 +20,6 @@ type contactsListCommand struct {
 	page int
 	all  bool
 }
-
-type contactPageFetcher func(context.Context, *generated.ListContactsParams) (*generated.ListContactsResponseContent, error)
 
 func newContactsListCommand() *contactsListCommand {
 	listCommand := &contactsListCommand{}
@@ -46,21 +45,19 @@ func (c *contactsListCommand) run(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if c.page < 1 {
-		return output.ErrUsage("--page must be at least 1")
+		return apierr.ErrUsage("--page must be at least 1")
 	}
 
-	contacts, pages, truncated, err := collectContacts(cmd.Context(), c.page, c.all,
-		func(ctx context.Context, params *generated.ListContactsParams) (*generated.ListContactsResponseContent, error) {
-			result, listErr := sdk.Contacts().List(ctx, params)
-			if listErr != nil {
-				return nil, convertSDKError(listErr)
-			}
-			return result, nil
-		})
+	first, err := readContactsPage(cmd.Context(), strconv.Itoa(c.page))
 	if err != nil {
 		return err
 	}
-	notice := contactTruncationNotice(c.page, pages, truncated)
+	collected, err := collectPages(cmd.Context(), first, pageRequest{All: c.all, MaxPages: maxContactPages}, readContactsPage)
+	if err != nil {
+		return err
+	}
+	contacts := collected.Items
+	notice := contactTruncationNotice(c.page, collected.Read, collected.Truncated)
 
 	if writer.IsStyled() {
 		if len(contacts) == 0 {
@@ -90,7 +87,7 @@ func (c *contactsListCommand) run(cmd *cobra.Command, _ []string) error {
 		output.WithSummary(fmt.Sprintf("%d %s", len(contacts), contactNoun(len(contacts)))),
 		output.WithNotice(notice),
 		output.WithMeta("page", c.page),
-		output.WithMeta("pages_fetched", pages),
+		output.WithMeta("pages_fetched", collected.Read),
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "view",
 			Command:     "hey contacts show <id>",
@@ -99,32 +96,20 @@ func (c *contactsListCommand) run(cmd *cobra.Command, _ []string) error {
 	)
 }
 
-func collectContacts(ctx context.Context, startPage int, all bool, fetch contactPageFetcher) ([]generated.Contact, int, bool, error) {
-	if fetch == nil {
-		return nil, 0, false, fmt.Errorf("collectContacts: fetch function is nil")
+func readContactsPage(ctx context.Context, cursor string) (pageResult[generated.Contact], error) {
+	page, err := strconv.Atoi(cursor)
+	if err != nil {
+		return pageResult[generated.Contact]{}, fmt.Errorf("unreadable contacts page %q: %w", cursor, err)
 	}
-	page := max(startPage, 1)
-	var contacts []generated.Contact
-	for pages := 1; pages <= maxContactPages; pages++ {
-		pageValue := strconv.Itoa(page)
-		params := &generated.ListContactsParams{Page: &pageValue}
-		result, err := fetch(ctx, params)
-		if err != nil {
-			return nil, pages - 1, false, err
-		}
-		if result == nil || len(*result) == 0 {
-			return contacts, pages, false, nil
-		}
-		contacts = append(contacts, (*result)...)
-		if !all {
-			return contacts, 1, false, nil
-		}
-		if pages == maxContactPages {
-			return contacts, pages, true, nil
-		}
-		page++
+
+	result, err := sdk.Contacts().List(ctx, &generated.ListContactsParams{Page: &cursor})
+	if err != nil {
+		return pageResult[generated.Contact]{}, apierr.FromSDK(err)
 	}
-	return contacts, maxContactPages, true, nil
+	if result == nil {
+		return pageResult[generated.Contact]{}, nil
+	}
+	return pageResult[generated.Contact]{Items: *result, Cursor: strconv.Itoa(page + 1)}, nil
 }
 
 func contactTruncationNotice(startPage, pages int, truncated bool) string {

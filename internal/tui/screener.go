@@ -170,6 +170,9 @@ func (p *screenerPane) selected() *screenerRow {
 	return &p.rows[p.cursor]
 }
 
+// remove takes a sender the pane has finished with out of it. The window comes with them:
+// screening off the bottom of a queue the reader has scrolled down would otherwise leave
+// the window past the last row, drawing nothing at all where the rows were.
 func (p *screenerPane) remove(id int64) {
 	for index, row := range p.rows {
 		if row.id != id {
@@ -179,6 +182,7 @@ func (p *screenerPane) remove(id int64) {
 		if p.cursor >= len(p.rows) && p.cursor > 0 {
 			p.cursor--
 		}
+		p.scroll = min(p.scroll, p.cursor)
 		return
 	}
 }
@@ -250,7 +254,7 @@ func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.loading = false
 		if msg.err != nil {
-			v.notice = "Could not load The Screener: " + msg.err.Error()
+			v.notice = errorNotice("Could not load The Screener", msg.err)
 			return nil, true
 		}
 		v.pendingCount = msg.count
@@ -262,7 +266,7 @@ func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		if msg.err != nil {
-			v.notice = "Could not refresh The Screener: " + msg.err.Error()
+			v.notice = errorNotice("Could not refresh The Screener", msg.err)
 			return nil, true
 		}
 		v.pendingCount = msg.count
@@ -276,7 +280,7 @@ func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.loading = false
 		if msg.err != nil {
-			v.notice = "Could not load Screener History: " + msg.err.Error()
+			v.notice = errorNotice("Could not load Screener History", msg.err)
 			return nil, true
 		}
 		v.history.setRows(msg.rows, msg.nextPage)
@@ -289,7 +293,7 @@ func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		pane := v.pane()
 		pane.paging.loading = false
 		if msg.err != nil {
-			v.notice = "Could not load more senders: " + msg.err.Error()
+			v.notice = errorNotice("Could not load more senders", msg.err)
 			return nil, true
 		}
 		if msg.tab == screenerPendingTab {
@@ -303,7 +307,7 @@ func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			v.mutations--
 		}
 		if msg.err != nil {
-			v.notice = "Could not screen " + msg.name + ": " + msg.err.Error()
+			v.notice = errorNotice("Could not screen "+msg.name, msg.err)
 			return nil, true
 		}
 		v.pending.remove(msg.clearanceID)
@@ -319,7 +323,7 @@ func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			v.mutations--
 		}
 		if msg.err != nil {
-			v.notice = "Could not clear The Screener: " + msg.err.Error()
+			v.notice = errorNotice("Could not clear The Screener", msg.err)
 			return nil, true
 		}
 		v.pending.setRows(nil, "")
@@ -689,7 +693,7 @@ func pendingScreenerRow(clearance generated.Clearance) screenerRow {
 
 func screenedScreenerRow(clearance generated.Clearance) screenerRow {
 	trailing := screenedVerb(clearance.Status)
-	if decided := formatDisplayDate(formatTimestamp(clearance.UpdatedAt)); decided != "" {
+	if decided := formatDisplayDate(clearance.UpdatedAt); decided != "" {
 		trailing += " · " + decided
 	}
 	return screenerRow{

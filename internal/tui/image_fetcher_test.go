@@ -186,6 +186,31 @@ func TestTrustedImageFetcherLoadsImageFromGopherWithoutHEYCredentials(t *testing
 	}
 }
 
+// A missing Content-Type is not a wrong one: mime.ParseMediaType("") errors, which used
+// to reject every image served without the header before the magic bytes were sniffed.
+func TestTrustedImageFetcherAcceptsAnImageWithNoContentType(t *testing.T) {
+	imageData := testPNG(t)
+	gopher := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header()["Content-Type"] = nil
+		_, _ = w.Write(imageData)
+	}))
+	t.Cleanup(gopher.Close)
+
+	fetcher := newTrustedImageFetcherWithOrigins(
+		rejectingImageBlobDownloader(t),
+		"https://app.hey.com",
+		gopher.URL,
+	)
+
+	got, err := fetcher.Fetch(context.Background(), gopher.URL+"/image.png")
+	if err != nil {
+		t.Fatalf("image without a Content-Type was rejected: %v", err)
+	}
+	if string(got) != string(imageData) {
+		t.Fatal("Gopher image data changed")
+	}
+}
+
 func TestTrustedImageFetcherRejectsNonImageContent(t *testing.T) {
 	gopher := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")

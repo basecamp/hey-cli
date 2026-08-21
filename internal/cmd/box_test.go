@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,7 +8,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	"github.com/spf13/cobra"
 )
 
@@ -59,29 +57,6 @@ func TestValidateBoxArgs(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 		})
-	}
-}
-
-// makePostings creates n test postings with sequential IDs starting at offset+1.
-func makePostings(n, offset int) []generated.Posting {
-	postings := make([]generated.Posting, n)
-	for i := range postings {
-		postings[i] = generated.Posting{Id: int64(offset + i + 1)}
-	}
-	return postings
-}
-
-// mockFetcher returns a pageFetcher that serves a predefined sequence of pages.
-// Each call returns the next page; after all pages are exhausted it returns an error.
-func mockFetcher(pages []generated.BoxShowResponse) pageFetcher {
-	idx := 0
-	return func(_ context.Context, _ string) (*generated.BoxShowResponse, error) {
-		if idx >= len(pages) {
-			return nil, fmt.Errorf("unexpected fetch beyond %d pages", len(pages))
-		}
-		page := pages[idx]
-		idx++
-		return &page, nil
 	}
 }
 
@@ -180,18 +155,142 @@ func TestBoxCommandUnknownNameFallsBackToList(t *testing.T) {
 	}
 }
 
-func TestBoxCommandRejectsCrossOriginPagination(t *testing.T) {
+// A next_history_url is never fetched, so a foreign one cannot take the credentials with
+// it. Only the page cursor inside the URL is read, and this one carries none.
+func TestBoxCommandNeverFetchesAForeignPaginationURL(t *testing.T) {
 	var requests atomic.Int32
 	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"id":1,"kind":"imbox","name":"Imbox","next_history_url":"https://attacker.example/page-2","postings":[{"id":1}]}`)
 	}), "box", "imbox", "--all")
-	if err == nil || !strings.Contains(err.Error(), "pagination URL origin") {
-		t.Fatalf("error = %v, want cross-origin pagination rejection", err)
+	if err == nil || !strings.Contains(err.Error(), "carries no page cursor") {
+		t.Fatalf("error = %v, want an unusable pagination cursor", err)
 	}
 	if requests.Load() != 1 {
 		t.Errorf("requests = %d, want no request to pagination origin", requests.Load())
+	}
+}
+
+// Pagination stays on the route the box is served by: the Feed, the Paper Trail and
+// Bubbled Up order and page differently from /boxes/{id}, so a cursor from one route is
+// meaningless to the other.
+func TestBoxCommandFollowsPagesOnTheNamedRoute(t *testing.T) {
+	var requests []string
+	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.Path+"?"+r.URL.RawQuery)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("page") {
+		case "":
+			_, _ = io.WriteString(w, `{"id":3,"kind":"feedbox","name":"The Feed","next_history_url":"https://app.hey.com/feedbox.json?page=cursor-2","postings":[{"id":1}]}`)
+		case "cursor-2":
+			_, _ = io.WriteString(w, `{"id":3,"kind":"feedbox","name":"The Feed","postings":[{"id":2}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}), "box", "the feed", "--all")
+	if err != nil {
+		t.Fatalf("execute box: %v", err)
+	}
+	want := "[/feedbox.json? /feedbox.json?page=cursor-2]"
+	if got := fmt.Sprint(requests); got != want {
+		t.Errorf("requests = %s, want %s", got, want)
+	}
+	if response.Summary != "2 threads in The Feed" {
+		t.Errorf("summary = %q", response.Summary)
+	}
+}
+
+// A numeric ID reaches the same named route, because the box says what kind it is.
+func TestBoxCommandFollowsPagesForANumericImbox(t *testing.T) {
+	var requests []string
+	if _, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.Path+"?"+r.URL.RawQuery)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("page") {
+		case "":
+			_, _ = io.WriteString(w, `{"id":9,"kind":"imbox","name":"Imbox","next_history_url":"/imbox.json?page=cursor-2","postings":[{"id":1}]}`)
+		default:
+			_, _ = io.WriteString(w, `{"id":9,"kind":"imbox","name":"Imbox","postings":[]}`)
+		}
+	}), "box", "9", "--all"); err != nil {
+		t.Fatalf("execute box: %v", err)
+	}
+	want := "[/boxes/9.json? /imbox.json?page=cursor-2]"
+	if got := fmt.Sprint(requests); got != want {
+		t.Errorf("requests = %s, want %s", got, want)
+	}
+}
+
+// A box of an unfamiliar kind falls back to the generic route.
+func TestBoxCommandFollowsPagesForACustomBox(t *testing.T) {
+	var requests []string
+	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.Path+"?"+r.URL.RawQuery)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("page") {
+		case "":
+			_, _ = io.WriteString(w, `{"id":17,"kind":"receipts","name":"Receipts","next_history_url":"/boxes/17.json?page=cursor-2","postings":[{"id":1}]}`)
+		default:
+			_, _ = io.WriteString(w, `{"id":17,"kind":"receipts","name":"Receipts","next_history_url":"/boxes/17.json?page=cursor-3","postings":[{"id":2}]}`)
+		}
+	}), "box", "17", "--limit", "2")
+	if err != nil {
+		t.Fatalf("execute box: %v", err)
+	}
+	want := "[/boxes/17.json? /boxes/17.json?page=cursor-2]"
+	if got := fmt.Sprint(requests); got != want {
+		t.Errorf("requests = %s, want %s", got, want)
+	}
+	if response.Summary != "2 threads in Receipts" {
+		t.Errorf("summary = %q", response.Summary)
+	}
+	data, _ := response.Data.(map[string]any)
+	if next, _ := data["next_history_url"].(string); next != "/boxes/17.json?page=cursor-3" {
+		t.Errorf("next_history_url = %q, want the last page read", next)
+	}
+}
+
+// Nothing beyond the first page is read unless --all or a --limit asks for it.
+func TestBoxCommandReadsOnePageByDefault(t *testing.T) {
+	var requests atomic.Int32
+	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":1,"kind":"imbox","name":"Imbox","next_history_url":"/imbox.json?page=cursor-2","postings":[{"id":1}]}`)
+	}), "box", "imbox")
+	if err != nil {
+		t.Fatalf("execute box: %v", err)
+	}
+	if requests.Load() != 1 {
+		t.Errorf("requests = %d, want one", requests.Load())
+	}
+	if response.Notice != "Showing 1 results. More available; use --all to fetch all." {
+		t.Errorf("notice = %q", response.Notice)
+	}
+}
+
+// An empty page ends the list, whatever cursor came with it.
+func TestBoxCommandStopsAtAnEmptyPage(t *testing.T) {
+	var requests atomic.Int32
+	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("page") {
+		case "":
+			_, _ = io.WriteString(w, `{"id":1,"kind":"imbox","name":"Imbox","next_history_url":"/imbox.json?page=cursor-2","postings":[{"id":1}]}`)
+		default:
+			_, _ = io.WriteString(w, `{"id":1,"kind":"imbox","name":"Imbox","postings":[]}`)
+		}
+	}), "box", "imbox", "--all")
+	if err != nil {
+		t.Fatalf("execute box: %v", err)
+	}
+	if requests.Load() != 2 {
+		t.Errorf("requests = %d, want two", requests.Load())
+	}
+	if response.Summary != "1 thread in Imbox" || response.Notice != "" {
+		t.Errorf("summary = %q notice = %q", response.Summary, response.Notice)
 	}
 }
 
@@ -224,176 +323,159 @@ func TestBoxSummaryUsesThreadTerminology(t *testing.T) {
 	}
 }
 
-func TestPaginateBoxPostings_NoFlagsSinglePage(t *testing.T) {
-	first := &generated.BoxShowResponse{
-		Postings:       makePostings(30, 0),
-		NextHistoryUrl: "https://app.hey.com/page2",
-	}
-	postings, nextURL, err := paginateBoxPostings(context.Background(), first, 0, false, nil)
+// The thread ID is the point of a listing: whatever `hey box --json` calls topic_id is
+// what `hey threads` reads, and the box item ID is not.
+func TestBoxCommandCarriesAThreadIDThatThreadsReads(t *testing.T) {
+	var paths []string
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/imbox.json":
+			_, _ = io.WriteString(w, `{"id":1,"kind":"imbox","name":"Imbox","postings":[{"id":1220478425,"app_url":"https://app.hey.com/topics/2080632163","summary":"Studio invoice"}]}`)
+		case "/topics/2080632163/entries.json":
+			_, _ = io.WriteString(w, `[{"id":55,"summary":"Studio invoice"}]`)
+		case "/messages/55.json":
+			_, _ = io.WriteString(w, `{"id":55,"content":"<div>Attached</div>"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	response, err := runJSONCommand(t, handler, "box", "imbox")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("execute box: %v", err)
 	}
-	if len(postings) != 30 {
-		t.Errorf("expected 30 postings, got %d", len(postings))
+	data, ok := response.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("data = %T", response.Data)
 	}
-	if nextURL == "" {
-		t.Error("expected non-empty nextURL when next_history_url is present")
+	postings, ok := data["postings"].([]any)
+	if !ok || len(postings) != 1 {
+		t.Fatalf("postings = %#v, want one", data["postings"])
+	}
+	posting := postings[0].(map[string]any)
+	if id, _ := posting["id"].(float64); int64(id) != 1220478425 {
+		t.Errorf("id = %v, want the box item ID", posting["id"])
+	}
+	topicID, _ := posting["topic_id"].(float64)
+	if int64(topicID) != 2080632163 {
+		t.Fatalf("topic_id = %v, want the thread ID", posting["topic_id"])
+	}
+	threadID := fmt.Sprintf("%d", int64(topicID))
+
+	if _, err := runJSONCommand(t, handler, "threads", threadID); err != nil {
+		t.Fatalf("execute threads %s: %v", threadID, err)
+	}
+	if got, want := paths[1], "/topics/2080632163/entries.json"; got != want {
+		t.Errorf("threads read %s, want %s", got, want)
 	}
 }
 
-func TestPaginateBoxPostings_AllFlag(t *testing.T) {
-	first := &generated.BoxShowResponse{
-		Postings:       makePostings(30, 0),
-		NextHistoryUrl: "https://app.hey.com/page2",
-	}
-	pages := []generated.BoxShowResponse{
-		{Postings: makePostings(30, 30), NextHistoryUrl: "https://app.hey.com/page3"},
-		{Postings: makePostings(15, 60)},
-	}
-
-	postings, nextURL, err := paginateBoxPostings(context.Background(), first, 0, true, mockFetcher(pages))
+// Adding the thread ID takes nothing away: the box payload a consumer already reads is
+// still the box HEY answered with.
+func TestBoxCommandKeepsHEYsBoxPayload(t *testing.T) {
+	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":1,"kind":"imbox","name":"Imbox","app_url":"https://app.hey.com/imbox","url":"https://app.hey.com/imbox.json","signed_stream_name":"stream-token","next_incremental_sync_url":"/imbox.json?since=1","posting_changes_url":"/imbox/postings/changes.json?since=1","next_history_url":"/imbox.json?page=cursor-2","postings":[{"id":101}]}`)
+	}), "box", "imbox")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("execute box: %v", err)
 	}
-	if len(postings) != 75 {
-		t.Errorf("expected 75 postings, got %d", len(postings))
+	data := response.Data.(map[string]any)
+	want := map[string]string{
+		"id":                        "1",
+		"kind":                      "imbox",
+		"name":                      "Imbox",
+		"app_url":                   "https://app.hey.com/imbox",
+		"url":                       "https://app.hey.com/imbox.json",
+		"signed_stream_name":        "stream-token",
+		"next_incremental_sync_url": "/imbox.json?since=1",
+		"posting_changes_url":       "/imbox/postings/changes.json?since=1",
+		"next_history_url":          "/imbox.json?page=cursor-2",
+		"next_page":                 "cursor-2",
 	}
-	if nextURL != "" {
-		t.Errorf("expected empty nextURL when last page has no next URL, got %q", nextURL)
+	for field, value := range want {
+		if got := fmt.Sprint(data[field]); got != value {
+			t.Errorf("%s = %v, want %q", field, data[field], value)
+		}
 	}
 }
 
-func TestPaginateBoxPostings_LimitExceedsFirstPage(t *testing.T) {
-	first := &generated.BoxShowResponse{
-		Postings:       makePostings(30, 0),
-		NextHistoryUrl: "https://app.hey.com/page2",
-	}
-	pages := []generated.BoxShowResponse{
-		{Postings: makePostings(30, 30), NextHistoryUrl: "https://app.hey.com/page3"},
-	}
+func TestBoxCommandContinuesFromAPageCursor(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("page"); got != "cursor-2" {
+			t.Errorf("page = %q, want cursor-2", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":1,"kind":"imbox","name":"Imbox","postings":[{"id":102}]}`)
+	})
 
-	postings, nextURL, err := paginateBoxPostings(context.Background(), first, 50, false, mockFetcher(pages))
+	// The cursor is accepted on its own, and inside the next_history_url it arrived in.
+	for _, page := range []string{"cursor-2", "https://app.hey.com/imbox.json?page=cursor-2"} {
+		response, err := runJSONCommand(t, handler, "box", "imbox", "--page", page)
+		if err != nil {
+			t.Fatalf("execute box --page %s: %v", page, err)
+		}
+		if response.Summary != "1 thread in Imbox" {
+			t.Errorf("summary = %q", response.Summary)
+		}
+	}
+}
+
+func TestBoxCommandOutputFormats(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":1,"kind":"imbox","name":"Imbox","postings":[
+			{"id":101,"summary":"Studio invoice","app_url":"https://app.hey.com/topics/501","creator":{"name":"Jane Doe"}},
+			{"id":102,"summary":"Tile samples","app_url":"https://app.hey.com/topics/502"}
+		]}`)
+	})
+
+	ids, err := runFormattedCommand(t, handler, []string{"--ids-only"}, "box", "imbox")
+	if err != nil || ids != "101\n102\n" {
+		t.Errorf("ids output = %q, err = %v", ids, err)
+	}
+	count, err := runFormattedCommand(t, handler, []string{"--count"}, "box", "imbox")
+	if err != nil || count != "2\n" {
+		t.Errorf("count output = %q, err = %v", count, err)
+	}
+	markdown, err := runFormattedCommand(t, handler, []string{"--markdown"}, "box", "imbox")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("markdown box: %v", err)
 	}
-	if len(postings) != 60 {
-		t.Errorf("expected 60 postings, got %d", len(postings))
+	for _, want := range []string{"# Imbox", "| id |", "topic_id", "Studio invoice", "**Total threads:** 2"} {
+		if !strings.Contains(markdown, want) {
+			t.Errorf("markdown %q does not contain %q", markdown, want)
+		}
 	}
-	if nextURL == "" {
-		t.Error("expected non-empty nextURL when stopped by limit with more pages available")
-	}
-}
-
-func TestPaginateBoxPostings_LimitSatisfiedByFirstPage(t *testing.T) {
-	first := &generated.BoxShowResponse{
-		Postings:       makePostings(30, 0),
-		NextHistoryUrl: "https://app.hey.com/page2",
-	}
-
-	postings, nextURL, err := paginateBoxPostings(context.Background(), first, 10, false, nil)
+	styled, err := runStyledCommand(t, handler, "box", "imbox")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("styled box: %v", err)
 	}
-	if len(postings) != 30 {
-		t.Errorf("expected 30 postings (full first page), got %d", len(postings))
-	}
-	if nextURL == "" {
-		t.Error("expected non-empty nextURL")
-	}
-}
-
-func TestPaginateBoxPostings_NoNextURL(t *testing.T) {
-	first := &generated.BoxShowResponse{
-		Postings: makePostings(10, 0),
-	}
-
-	postings, nextURL, err := paginateBoxPostings(context.Background(), first, 0, true, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(postings) != 10 {
-		t.Errorf("expected 10 postings, got %d", len(postings))
-	}
-	if nextURL != "" {
-		t.Errorf("expected empty nextURL when no next URL, got %q", nextURL)
+	for _, want := range []string{"Box: Imbox (imbox)", "Thread", "Jane Doe", "Studio invoice", "101", "501"} {
+		if !strings.Contains(styled, want) {
+			t.Errorf("styled output %q does not contain %q", styled, want)
+		}
 	}
 }
 
-func TestPaginateBoxPostings_EmptyPageStopsPagination(t *testing.T) {
-	first := &generated.BoxShowResponse{
-		Postings:       makePostings(30, 0),
-		NextHistoryUrl: "https://app.hey.com/page2",
-	}
-	pages := []generated.BoxShowResponse{
-		{Postings: nil},
-	}
+func TestBoxDataOnlyFormatsReportPaginationOnStderr(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":1,"kind":"imbox","name":"Imbox","next_history_url":"/imbox.json?page=cursor-2","postings":[{"id":101}]}`)
+	})
 
-	postings, nextURL, err := paginateBoxPostings(context.Background(), first, 0, true, mockFetcher(pages))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(postings) != 30 {
-		t.Errorf("expected 30 postings, got %d", len(postings))
-	}
-	if nextURL != "" {
-		t.Errorf("expected empty nextURL after empty page, got %q", nextURL)
-	}
-}
-
-func TestPaginateBoxPostings_NilFetchReturnsError(t *testing.T) {
-	first := &generated.BoxShowResponse{
-		Postings:       makePostings(30, 0),
-		NextHistoryUrl: "https://app.hey.com/page2",
-	}
-	_, _, err := paginateBoxPostings(context.Background(), first, 0, true, nil)
-	if err == nil {
-		t.Fatal("expected error when fetch is nil and pagination is required")
-	}
-}
-
-func TestValidateSameOrigin(t *testing.T) {
-	tests := []struct {
-		name    string
-		base    string
-		target  string
-		wantErr bool
-	}{
-		{"same origin", "https://app.hey.com", "https://app.hey.com/page2", false},
-		{"different host", "https://app.hey.com", "https://evil.com/page2", true},
-		{"different scheme", "https://app.hey.com", "http://app.hey.com/page2", true},
-		{"with port match", "https://app.hey.com:443", "https://app.hey.com:443/page2", false},
-		{"port mismatch", "https://app.hey.com:443", "https://app.hey.com:8080/page2", true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validateSameOrigin(tt.base, tt.target)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("validateSameOrigin(%q, %q) error = %v, wantErr %v", tt.base, tt.target, err, tt.wantErr)
+	for _, format := range []string{"--ids-only", "--count"} {
+		t.Run(format, func(t *testing.T) {
+			_, stderr, err := runFormattedCommandWithStderr(t, handler, []string{format}, "box", "imbox")
+			if err != nil {
+				t.Fatalf("box %s: %v", format, err)
 			}
-		})
-	}
-}
-
-func TestBoxTruncationNotice(t *testing.T) {
-	tests := []struct {
-		name    string
-		shown   int
-		fetched int
-		hasMore bool
-		all     bool
-		want    string
-	}{
-		{"client truncated", 10, 30, false, false, "Showing 10 of 30 results. Use --all to see everything."},
-		{"more pages available", 30, 30, true, false, "Showing 30 results. More available; use --all to fetch all."},
-		{"all shown no more", 30, 30, false, false, ""},
-		{"truncated with more", 10, 30, true, false, "Showing 10 of 30 results. Use --all to see everything."},
-		{"all flag pagination capped", 30, 30, true, true, "Showing 30 results. Pagination limit reached; not all results could be fetched."},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := boxTruncationNotice(tt.shown, tt.fetched, tt.hasMore, tt.all)
-			if got != tt.want {
-				t.Errorf("boxTruncationNotice(%d, %d, %v, %v) = %q, want %q", tt.shown, tt.fetched, tt.hasMore, tt.all, got, tt.want)
+			for _, want := range []string{"notice: Showing 1 results. More available; use --all to fetch all.", "next_page: cursor-2"} {
+				if !strings.Contains(stderr, want) {
+					t.Errorf("stderr %q does not contain %q", stderr, want)
+				}
 			}
 		})
 	}

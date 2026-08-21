@@ -15,9 +15,9 @@ import (
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/auth"
 	"github.com/basecamp/hey-cli/internal/config"
-	"github.com/basecamp/hey-cli/internal/output"
 	"github.com/basecamp/hey-cli/internal/version"
 )
 
@@ -34,6 +34,13 @@ type cliAuthStrategy struct {
 
 func (a *cliAuthStrategy) Authenticate(ctx context.Context, req *http.Request) error {
 	return a.mgr.AuthenticateRequest(ctx, req)
+}
+
+// Refresh satisfies the SDK's TokenRefresher, which is how a 401 gets one retry with
+// renewed credentials rather than being surfaced. Without this the SDK has no way to
+// know these credentials can be renewed at all, since it did not issue them.
+func (a *cliAuthStrategy) Refresh(ctx context.Context) error {
+	return a.mgr.Refresh(ctx)
 }
 
 // statsHooks implements hey.Hooks for --stats tracking.
@@ -98,70 +105,46 @@ func clientForAccountSelection(ctx context.Context, client *hey.Client, accountI
 
 	id, err := strconv.ParseInt(accountID, 10, 64)
 	if err != nil || id <= 0 {
-		return nil, output.ErrUsage(fmt.Sprintf("invalid account selection: %s", accountID))
+		return nil, apierr.ErrUsage(fmt.Sprintf("invalid account selection: %s", accountID))
 	}
 	scoped, err := client.ForAccount(ctx, id)
 	if err != nil {
-		return nil, convertSDKError(err)
+		return nil, apierr.FromSDK(err)
 	}
 	return scoped, nil
 }
 
 func clientForResourceAccount(ctx context.Context, accountID int64) (*hey.Client, error) {
 	if accountID <= 0 {
-		return nil, output.ErrAPI(0, "thread did not identify its mail account")
+		return nil, apierr.ErrAPI(0, "thread did not identify its mail account")
 	}
 	scoped, err := rootSDK.ForAccount(ctx, accountID)
 	if err != nil {
-		return nil, convertSDKError(err)
+		return nil, apierr.FromSDK(err)
 	}
 	return scoped, nil
 }
 
-// convertSDKError maps hey.Error to apierr.Error for CLI error display.
-func convertSDKError(err error) error {
-	if err == nil {
-		return nil
-	}
-	sdkErr := hey.AsError(err)
-	switch sdkErr.Code {
-	case hey.CodeAuth:
-		return output.ErrAuth(sdkErr.Message)
-	case hey.CodeNotFound:
-		return &output.Error{Code: "not_found", Message: sdkErr.Message, HTTPStatus: 404}
-	case hey.CodeForbidden:
-		return output.ErrForbidden(sdkErr.Message)
-	case hey.CodeRateLimit:
-		var retryAfter int
-		_, _ = fmt.Sscanf(sdkErr.Hint, "%d", &retryAfter)
-		return output.ErrRateLimit(retryAfter)
-	case hey.CodeNetwork:
-		return output.ErrNetwork(err)
-	case hey.CodeValidation:
-		return &output.Error{Code: "validation", Message: sdkErr.Message, Hint: sdkErr.Hint, HTTPStatus: sdkErr.HTTPStatus, Cause: err}
-	case hey.CodeConflict:
-		return &output.Error{Code: "conflict", Message: sdkErr.Message, Hint: sdkErr.Hint, HTTPStatus: sdkErr.HTTPStatus, Cause: err}
-	default:
-		return output.ErrAPI(sdkErr.HTTPStatus, sdkErr.Message)
-	}
-}
-
 // --- Timestamp formatting helpers ---
 
-// formatTimestamp formats a time.Time to "YYYY-MM-DDTHH:MM" display format.
+// formatTimestamp formats a time.Time to "YYYY-MM-DDTHH:MM" display format, in the
+// zone the recording carries. Converting to UTC first moved every wall-clock time it
+// printed: a 09:00 Berlin time track read as 07:00.
 func formatTimestamp(ts time.Time) string {
 	if ts.IsZero() {
 		return ""
 	}
-	return ts.UTC().Format("2006-01-02T15:04")
+	return ts.Format("2006-01-02T15:04")
 }
 
-// formatDate formats a time.Time to "YYYY-MM-DD" display format.
+// formatDate formats a time.Time to "YYYY-MM-DD" display format, in the zone the
+// recording carries. In UTC a day starting at midnight east of Greenwich printed as
+// the day before, which `hey journal read` then read as an empty day.
 func formatDate(ts time.Time) string {
 	if ts.IsZero() {
 		return ""
 	}
-	return ts.UTC().Format("2006-01-02")
+	return ts.Format(dateLayout)
 }
 
 // --- Posting topic ID helper ---
@@ -187,7 +170,7 @@ func resolvePostingTopicID(p generated.Posting) int64 {
 // unwrapCalendars extracts []generated.Calendar from a CalendarListPayload.
 func unwrapCalendars(payload *generated.CalendarListPayload) []generated.Calendar {
 	if payload == nil {
-		return nil
+		return []generated.Calendar{}
 	}
 	calendars := make([]generated.Calendar, 0, len(payload.Calendars))
 	for _, cw := range payload.Calendars {
@@ -221,13 +204,13 @@ const (
 func listPersonalRecordings(ctx context.Context) (*generated.CalendarRecordingsResponse, error) {
 	payload, err := sdk.Calendars().List(ctx)
 	if err != nil {
-		return nil, convertSDKError(err)
+		return nil, apierr.FromSDK(err)
 	}
 
 	calendars := unwrapCalendars(payload)
 	calID, err := findPersonalCalendarID(calendars)
 	if err != nil {
-		return nil, output.ErrNotFound("calendar", "personal")
+		return nil, apierr.ErrNotFound("calendar", "personal")
 	}
 
 	now := time.Now()
@@ -239,19 +222,21 @@ func listPersonalRecordings(ctx context.Context) (*generated.CalendarRecordingsR
 		EndsOn:   &endsOn,
 	})
 	if err != nil {
-		return nil, convertSDKError(err)
+		return nil, apierr.FromSDK(err)
 	}
 	return resp, nil
 }
 
-// filterRecordingsByType returns recordings matching the given type string.
+// filterRecordingsByType returns recordings matching the given type string. The empty
+// result is an empty slice rather than nil so that `--json` gives `"data": []` and a
+// `.data[]` filter has something to iterate.
 func filterRecordingsByType(resp *generated.CalendarRecordingsResponse, recType string) []generated.Recording {
 	if resp == nil {
-		return nil
+		return []generated.Recording{}
 	}
 	recordings, ok := (*resp)[recType]
 	if !ok {
-		return nil
+		return []generated.Recording{}
 	}
 	return recordings
 }
@@ -269,14 +254,4 @@ func extractMutationInfoFromResult(v any) string {
 		return ""
 	}
 	return extractMutationInfo(data)
-}
-
-// normalizeAny converts a typed SDK response to an any suitable for writeOK
-// by JSON round-tripping through json.Number-preserving decoder.
-func normalizeAny(v any) (any, error) {
-	data, err := json.Marshal(v)
-	if err != nil {
-		return nil, err
-	}
-	return output.NormalizeJSONNumbers(data)
 }
