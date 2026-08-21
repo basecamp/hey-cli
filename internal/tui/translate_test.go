@@ -121,11 +121,11 @@ func TestSDKRecordingToModel(t *testing.T) {
 		Id: 99, Title: "Standup", AllDay: false, Recurring: true,
 		StartsAt: starts, EndsAt: ends,
 		StartsAtTimeZone: "UTC", EndsAtTimeZone: "UTC",
-		Type: "Calendar::Event", Content: "notes", RemindersLabel: "10 minutes before",
-		CompletedAt: done, Label: "work",
+		Type: "Calendar::Habit", Content: "notes", RemindersLabel: "10 minutes before",
+		CompletedAt: done, Label: "work", Icon: "book", Color: "blue", Days: []int32{1, 3, 5},
 	})
 
-	if got.ID != 99 || got.Title != "Standup" || got.Type != "Calendar::Event" {
+	if got.ID != 99 || got.Title != "Standup" || got.Type != "Calendar::Habit" {
 		t.Errorf("recording = %+v", got)
 	}
 	if got.StartsAt != "2026-08-18T14:00:00Z" || got.EndsAt != "2026-08-18T15:00:00Z" {
@@ -139,6 +139,9 @@ func TestSDKRecordingToModel(t *testing.T) {
 	}
 	if got.Content != "notes" || got.RemindersLabel != "10 minutes before" || got.Label != "work" {
 		t.Errorf("detail = %+v", got)
+	}
+	if got.Icon != "book" || got.Color != "blue" || len(got.Days) != 3 || got.Days[1] != 3 {
+		t.Errorf("habit fields = %+v", got)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
+	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/models"
 )
@@ -39,6 +40,11 @@ type timeTrackCategorySavedMsg struct {
 	err     error
 }
 
+type habitMutationMsg struct {
+	action string
+	err    error
+}
+
 // --- Calendar section view ---
 
 type calendarView struct {
@@ -66,6 +72,11 @@ type calendarView struct {
 	loading       bool
 
 	timeTrackCategories *timeTrackCategoryManager
+	habitForm           *habitForm
+	habitIndex          int
+	habitMutating       bool
+	confirmHabitDelete  bool
+	notice              string
 }
 
 func newCalendarView(vc *viewContext) *calendarView {
@@ -110,7 +121,30 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 	case recordingsLoadedMsg:
 		v.loading = false
 		v.events, v.todos, v.habits = splitRecordings(msg.recordings)
+		v.normalizeHabitSelection()
 		v.rebuildView()
+		return nil, true
+
+	case habitMutationMsg:
+		v.loading = false
+		v.habitMutating = false
+		if msg.err != nil {
+			if v.habitForm != nil {
+				v.habitForm.saving = false
+				v.habitForm.status = "Save failed: " + msg.err.Error()
+				v.habitForm.isError = true
+			} else {
+				v.notice = "Delete failed: " + msg.err.Error()
+			}
+			return nil, true
+		}
+		v.habitForm = nil
+		v.confirmHabitDelete = false
+		v.notice = msg.action
+		if v.calIndex >= 0 && v.calIndex < len(v.calendars) {
+			v.loading = true
+			return v.fetchRecordings(v.calendars[v.calIndex].ID), true
+		}
 		return nil, true
 
 	case recordingDetailMsg:
@@ -147,6 +181,9 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return v.fetchTimeTrackCategories(), true
 	}
 
+	if v.habitForm != nil {
+		return v.habitForm.update(msg), true
+	}
 	if v.inThread {
 		var cmd tea.Cmd
 		v.topicViewport, cmd = v.topicViewport.Update(msg)
@@ -160,23 +197,42 @@ func (v *calendarView) View() string {
 	if v.timeTrackCategories != nil {
 		return v.timeTrackCategories.view(v.vc.styles, v.vc.width, v.vc.height)
 	}
+	if v.habitForm != nil {
+		return v.habitForm.view()
+	}
 	if v.inThread {
 		return v.topicViewport.View()
 	}
-	return v.contentVP.View()
+	var heading string
+	if v.notice != "" {
+		heading = v.vc.styles.title.Render(v.notice) + "\n"
+	}
+	if habit := v.selectedHabit(); habit != nil {
+		heading += styleMuted.Render(fmt.Sprintf("Selected habit %d/%d: %s (ID %d)", v.habitIndex+1, len(v.manageableHabits()), habit.Title, habit.ID)) + "\n"
+	}
+	return heading + v.contentVP.View()
 }
 
 func (v *calendarView) HelpBindings() []helpBinding {
 	if v.timeTrackCategories != nil {
 		return v.timeTrackCategories.helpBindings()
 	}
+	if v.habitForm != nil {
+		return v.habitForm.helpBindings()
+	}
 	if v.inThread {
 		return nil
 	}
-	return []helpBinding{
-		{"v", v.viewMode.next().String() + " view"},
-		{"c", "time categories"},
+	bindings := []helpBinding{{"v", v.viewMode.next().String() + " view"}, {"c", "time categories"}, {"a", "create habit"}}
+	if len(v.manageableHabits()) > 0 {
+		bindings = append(bindings, helpBinding{"[/]", "select habit"}, helpBinding{"e", "edit habit"})
+		deleteLabel := "delete habit"
+		if v.confirmHabitDelete {
+			deleteLabel = "confirm delete"
+		}
+		bindings = append(bindings, helpBinding{"x", deleteLabel})
 	}
+	return bindings
 }
 
 func (v *calendarView) SubnavItems() ([]navItem, int, string, bool) {
@@ -210,12 +266,27 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	if v.timeTrackCategories != nil {
 		return v.handleTimeTrackCategoryKey(msg)
 	}
+	if v.habitForm != nil {
+		if msg.Key().Code == tea.KeyEscape && !v.habitForm.saving {
+			v.habitForm = nil
+			return nil
+		}
+		cmd, submit := v.habitForm.handleKey(msg)
+		if submit {
+			return v.saveHabit()
+		}
+		return cmd
+	}
 	if v.inThread {
 		var cmd tea.Cmd
 		v.topicViewport, cmd = v.topicViewport.Update(msg)
 		return cmd
 	}
 
+	if msg.String() != "x" {
+		v.confirmHabitDelete = false
+	}
+	v.notice = ""
 	switch msg.String() {
 	case "c":
 		v.timeTrackCategories = newTimeTrackCategoryManager()
@@ -229,6 +300,27 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		v.rebuildView()
 		return nil
+	case "a":
+		return v.startHabitForm(habitFormCreate, models.Recording{})
+	case "[":
+		v.moveHabitSelection(-1)
+		return nil
+	case "]":
+		v.moveHabitSelection(1)
+		return nil
+	case "e":
+		if habit := v.selectedHabit(); habit != nil {
+			return v.startHabitForm(habitFormEdit, *habit)
+		}
+	case "x":
+		if habit := v.selectedHabit(); habit != nil {
+			if !v.confirmHabitDelete {
+				v.confirmHabitDelete = true
+				v.notice = fmt.Sprintf("Press x again to permanently delete %s and its history", habit.Title)
+				return nil
+			}
+			return v.deleteHabit(*habit)
+		}
 	}
 
 	// Delegate scrolling to the content viewport
@@ -302,8 +394,10 @@ func (v *calendarView) InThread() bool { return v.inThread }
 func (v *calendarView) ExitThread()    { v.inThread = false }
 func (v *calendarView) Loading() bool  { return v.loading }
 func (v *calendarView) CapturingInput() bool {
-	return v.timeTrackCategories != nil
+	return v.timeTrackCategories != nil || v.habitForm != nil
 }
+
+func (v *calendarView) AccountSwitchBlocked() bool { return v.habitMutating }
 
 // Restyle re-renders the day/week/year grid, which caches styled output in its
 // viewport. The recording detail is plain text and needs nothing.
@@ -315,9 +409,12 @@ func (v *calendarView) Restyle() {
 
 func (v *calendarView) Resize(width, height int) {
 	v.contentVP.SetWidth(width)
-	v.contentVP.SetHeight(height)
+	v.contentVP.SetHeight(max(height-2, 1))
 	v.topicViewport.SetWidth(width)
 	v.topicViewport.SetHeight(height)
+	if v.habitForm != nil {
+		v.habitForm.resize(width, height)
+	}
 	v.rebuildView()
 }
 
@@ -356,6 +453,82 @@ func (v *calendarView) rebuildView() {
 	}
 }
 
+func (v *calendarView) manageableHabits() []models.Recording {
+	seen := make(map[int64]bool)
+	habits := make([]models.Recording, 0, len(v.habits))
+	for _, habit := range v.habits {
+		if habit.ID <= 0 || seen[habit.ID] {
+			continue
+		}
+		seen[habit.ID] = true
+		habits = append(habits, habit)
+	}
+	return habits
+}
+
+func (v *calendarView) selectedHabit() *models.Recording {
+	habits := v.manageableHabits()
+	if len(habits) == 0 {
+		return nil
+	}
+	v.habitIndex = max(0, min(v.habitIndex, len(habits)-1))
+	habit := habits[v.habitIndex]
+	return &habit
+}
+
+func (v *calendarView) normalizeHabitSelection() {
+	habits := v.manageableHabits()
+	if len(habits) == 0 {
+		v.habitIndex = 0
+		return
+	}
+	v.habitIndex = max(0, min(v.habitIndex, len(habits)-1))
+}
+
+func (v *calendarView) moveHabitSelection(delta int) {
+	habits := v.manageableHabits()
+	if len(habits) == 0 {
+		v.habitIndex = 0
+		return
+	}
+	v.habitIndex = (v.habitIndex + delta + len(habits)) % len(habits)
+}
+
+func (v *calendarView) startHabitForm(mode habitFormMode, recording models.Recording) tea.Cmd {
+	v.confirmHabitDelete = false
+	v.habitForm = newHabitForm(mode, recording, v.vc.styles)
+	v.habitForm.resize(v.vc.width, v.vc.height)
+	return v.habitForm.init()
+}
+
+func (v *calendarView) saveHabit() tea.Cmd {
+	form := v.habitForm
+	name, icon, color, days, _ := form.values()
+	params := hey.HabitParams{Name: name, Icon: icon, Color: color, Days: days}
+	v.habitMutating = true
+	v.loading = true
+	return func() tea.Msg {
+		var err error
+		action := "Habit created"
+		if form.mode == habitFormCreate {
+			_, err = v.vc.sdk.Habits().Create(v.vc.ctx, params)
+		} else {
+			action = "Habit updated"
+			_, err = v.vc.sdk.Habits().Update(v.vc.ctx, form.habitID, params)
+		}
+		return habitMutationMsg{action: action, err: err}
+	}
+}
+
+func (v *calendarView) deleteHabit(recording models.Recording) tea.Cmd {
+	v.habitMutating = true
+	v.loading = true
+	return func() tea.Msg {
+		err := v.vc.sdk.Habits().Delete(v.vc.ctx, recording.ID)
+		return habitMutationMsg{action: "Habit deleted", err: err}
+	}
+}
+
 // --- SDK type converters ---
 
 func sdkCalendarToModel(c generated.Calendar) models.Calendar {
@@ -373,6 +546,7 @@ func sdkRecordingToModel(r generated.Recording) models.Recording {
 		CreatedAt: formatTimestamp(r.CreatedAt), UpdatedAt: formatTimestamp(r.UpdatedAt),
 		Type: r.Type, Content: r.Content, RemindersLabel: r.RemindersLabel,
 		CompletedAt: formatTimestamp(r.CompletedAt), Label: r.Label,
+		Icon: r.Icon, Color: r.Color, Days: append([]int32(nil), r.Days...),
 	}
 }
 

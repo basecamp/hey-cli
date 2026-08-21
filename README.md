@@ -195,6 +195,8 @@ Press Shift+O to open Contacts. Use Enter to view a contact, `a` to add, `e` to 
 
 Press Shift+C to open Calendar, then `c` to manage time track categories. Create a category with `n`, rename the selected category with Enter or `r`, and press `x` twice to delete it. Time tracks in a deleted category become uncategorized.
 
+In Calendar, press `a` to create a habit. Habits visible in the current calendar range can be selected with `[` and `]`, edited with `e`, and deleted by pressing `x` twice. Habit forms use Tab to move between fields and Ctrl+S to save.
+
 ## CLI Commands
 
 Structured data commands support `--json` for full output and `--jq '<expression>'` to
@@ -325,9 +327,16 @@ hey todo delete 1                  # delete
 ### Habits
 
 ```bash
-hey habit complete 1               # mark habit done (today or --date YYYY-MM-DD)
-hey habit uncomplete 1             # undo habit completion
+hey habit create "Morning strength training"  # create every day with weights and blue defaults
+hey habit create "Practice piano" --icon music --color green --days mon,wed,fri
+hey habit edit 1 --name "Evening strength training"  # edit only the supplied fields
+hey habit edit 1 --days 0,6         # Sunday and Saturday (names also work)
+hey habit delete 1                  # permanently delete the habit and its history
+hey habit complete 1                # mark habit done (today or --date YYYY-MM-DD)
+hey habit uncomplete 1              # undo habit completion
 ```
+
+Habit IDs come from calendar recordings. Weekdays use `0` for Sunday through `6` for Saturday; full names and common abbreviations are accepted too.
 
 ### Time tracking
 

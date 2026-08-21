@@ -122,7 +122,7 @@ CALENDAR & TASKS
   calendars   List calendars
   recordings  List events, to-dos, and other calendar entries
   todo        Create and manage to-dos
-  habit       Track completed habits
+  habit       Create and manage habits
   timetrack   Track time
   journal     Read and write journal entries
 

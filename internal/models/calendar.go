@@ -29,6 +29,9 @@ type Recording struct {
 	Type             string    `json:"type"`
 	CompletedAt      string    `json:"completed_at,omitempty"`
 	Label            string    `json:"label,omitempty"`
+	Icon             string    `json:"icon,omitempty"`
+	Color            string    `json:"color,omitempty"`
+	Days             []int32   `json:"days,omitempty"`
 	Calendar         *Calendar `json:"calendar,omitempty"`
 	RemindersLabel   string    `json:"reminders_label,omitempty"`
 	OccurrencesURL   string    `json:"occurrences_url,omitempty"`

@@ -167,6 +167,9 @@ hey boxes --quiet --jq '.[].name'
 | Mark email threads as spam | `hey spam 12345` |
 | Ignore email threads | `hey ignore 12345` |
 | Stop ignoring email threads | `hey stop-ignoring 12345` |
+| Create habit | `hey habit create "Morning strength training"` |
+| Edit habit | `hey habit edit 123 --days mon,wed,fri` |
+| Delete habit | `hey habit delete 123` |
 | Complete habit | `hey habit complete 123` |
 | Uncomplete habit | `hey habit uncomplete 123` |
 | Start time tracking | `hey timetrack start` |
@@ -430,12 +433,17 @@ hey todo delete 123                           # Delete a todo
 ### Habits
 
 ```bash
+hey habit create "Morning strength training" # Create with weights, blue, every day
+hey habit create "Practice piano" --icon music --color green --days mon,wed,fri
+hey habit edit 123 --name "Evening walk"      # Omitted fields remain unchanged
+hey habit edit 123 --days 0,6                 # Sunday and Saturday
+hey habit delete 123                          # Permanently delete habit and history
 hey habit complete 123                        # Mark habit complete for today
 hey habit complete 123 --date 2024-01-15      # Mark complete for specific date
 hey habit uncomplete 123                      # Unmark habit for today
 ```
 
-Habit IDs can be found via `hey recordings <calendar-id> --json`.
+Habit IDs can be found via `hey recordings <calendar-id> --json`. Days accept full weekday names, common abbreviations, or `0` (Sunday) through `6` (Saturday).
 
 ### Time Tracking
 

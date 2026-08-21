@@ -94,6 +94,17 @@ hey forward --to
 hey habit
 hey habit complete
 hey habit complete --date
+hey habit create
+hey habit create --color
+hey habit create --days
+hey habit create --icon
+hey habit create --name
+hey habit delete
+hey habit edit
+hey habit edit --color
+hey habit edit --days
+hey habit edit --icon
+hey habit edit --name
 hey habit uncomplete
 hey habit uncomplete --date
 hey ignore
