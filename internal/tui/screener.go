@@ -22,6 +22,17 @@ type screenerPendingLoadedMsg struct {
 	err       error
 }
 
+// screenerPendingRefreshedMsg is the queue read again after someone arrived in or left
+// The Screener while it was open. Its own lane, so it can never be taken for a page the
+// user asked for, and the rows land under the cursor rather than replacing it.
+type screenerPendingRefreshedMsg struct {
+	requestID uint64
+	page      int
+	rows      []screenerRow
+	count     int
+	err       error
+}
+
 type screenerScreenedLoadedMsg struct {
 	requestID uint64
 	page      int
@@ -79,6 +90,28 @@ func (p *screenerPane) setRows(rows []screenerRow, page int) {
 	p.scroll = 0
 	p.page = page
 	p.loaded = true
+}
+
+// refreshRows replaces the rows with a newly read page while someone is working through
+// it: the cursor stays on the sender it was on, and the window stays where it was. A
+// sender who has been dealt with elsewhere takes the cursor with them.
+func (p *screenerPane) refreshRows(rows []screenerRow, page int) {
+	var cursorID int64
+	if row := p.selected(); row != nil {
+		cursorID = row.id
+	}
+
+	p.rows = rows
+	p.page = page
+	p.loaded = true
+	p.cursor = 0
+	for index := range p.rows {
+		if p.rows[index].id == cursorID {
+			p.cursor = index
+			break
+		}
+	}
+	p.scroll = min(p.scroll, max(len(p.rows)-1, 0))
 }
 
 func (p *screenerPane) selected() *screenerRow {
@@ -141,6 +174,7 @@ type screenerView struct {
 	notice          string
 	loading         bool
 	requestID       uint64
+	liveRequestID   uint64 // identifies the only live re-read allowed to update the queue
 	mutations       int
 }
 
@@ -175,6 +209,19 @@ func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.pendingCount = msg.count
 		v.pending.setRows(msg.rows, msg.page)
+		return nil, true
+
+	case screenerPendingRefreshedMsg:
+		if msg.requestID != v.liveRequestID || v.tab != screenerPendingTab {
+			return nil, true
+		}
+		if msg.err != nil {
+			v.notice = "Could not refresh The Screener: " + msg.err.Error()
+			return nil, true
+		}
+		v.pendingCount = msg.count
+		v.pending.refreshRows(msg.rows, msg.page)
+		v.pending.ensureVisible(v.visibleRows())
 		return nil, true
 
 	case screenerScreenedLoadedMsg:
@@ -384,6 +431,23 @@ func (v *screenerView) requestPending(page int) tea.Cmd {
 	return v.fetchPending(v.requestID, max(page, 1))
 }
 
+// refreshPending is what the doorbell asks of The Screener: read the queue again under
+// the cursor. It waits while a decision is in flight or the clear-everything question is
+// on screen — held says so, and the caller comes back to it. When the queue isn't what
+// is on screen there is nothing to read now, only to mark for the next look at it.
+func (v *screenerView) refreshPending() (cmd tea.Cmd, held bool) {
+	if v.mutations > 0 || v.confirmingClear {
+		return nil, true
+	}
+	if v.tab != screenerPendingTab {
+		v.pending.loaded = false
+		return nil, false
+	}
+
+	v.liveRequestID++
+	return v.fetchPendingRefresh(v.liveRequestID, max(v.pending.page, 1)), false
+}
+
 func (v *screenerView) requestScreened(page int) tea.Cmd {
 	v.requestID++
 	v.loading = true
@@ -483,6 +547,25 @@ func (v *screenerView) fetchPending(requestID uint64, page int) tea.Cmd {
 			return screenerPendingLoadedMsg{requestID: requestID, page: page, err: err}
 		}
 		message := screenerPendingLoadedMsg{requestID: requestID, page: page}
+		if summary != nil {
+			message.count = int(summary.PendingClearancesCount)
+			for _, clearance := range summary.Clearances {
+				message.rows = append(message.rows, pendingScreenerRow(clearance))
+			}
+		}
+		return message
+	}
+}
+
+// fetchPendingRefresh reads the same page fetchPending reads, in the live lane and
+// without the spinner: nobody is waiting on it.
+func (v *screenerView) fetchPendingRefresh(requestID uint64, page int) tea.Cmd {
+	return func() tea.Msg {
+		summary, err := v.vc.sdk.Clearances().Pending(v.vc.ctx, strconv.Itoa(page))
+		if err != nil {
+			return screenerPendingRefreshedMsg{requestID: requestID, page: page, err: err}
+		}
+		message := screenerPendingRefreshedMsg{requestID: requestID, page: page}
 		if summary != nil {
 			message.count = int(summary.PendingClearancesCount)
 			for _, clearance := range summary.Clearances {

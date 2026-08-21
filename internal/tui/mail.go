@@ -40,10 +40,13 @@ const (
 type boxesLoadedMsg []models.Box
 
 type mailSourcesLoadedMsg struct {
-	requestID     uint64
-	sources       []models.Box
-	screenerCount int
-	folderErr     error
+	requestID uint64
+	sources   []models.Box
+	// screenerCount is what The Screener holds, and screenerStream is the signed stream
+	// name to follow to be told when that changes. HEY serves both from the one read.
+	screenerCount  int
+	screenerStream string
+	folderErr      error
 }
 
 type postingsLoadedMsg struct {
@@ -56,6 +59,17 @@ type postingsLoadedMsg struct {
 	totalCount  int
 	postings    []models.Posting
 	err         error
+}
+
+// postingsRefreshedMsg is a box re-read after it changed underneath the reader. It has
+// its own lane so it can never be mistaken for a read the user asked for, and so a list
+// that is on screen is updated in place rather than replaced.
+type postingsRefreshedMsg struct {
+	requestID  uint64
+	boxID      int64
+	sourceKind string
+	postings   []models.Posting
+	err        error
 }
 
 type topicLoadedMsg struct {
@@ -176,6 +190,10 @@ type mailView struct {
 	sourceRequestID    uint64
 	folderDiscoveryErr string
 	requestCancel      context.CancelFunc
+
+	liveRequestID   uint64 // identifies the only live re-read allowed to update the list
+	liveRefreshDue  bool   // a re-read is already on its way
+	liveUpdatesOver bool   // the changes stream closed, so the list is a snapshot again
 }
 
 func newMailView(vc *viewContext) *mailView {
@@ -250,6 +268,20 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 				v.notice = v.folderPageNotice()
 			}
 		}
+		return nil, true
+
+	case mailRefreshDueMsg:
+		return v.refreshBox(msg.boxID), true
+
+	case postingsRefreshedMsg:
+		if msg.requestID != v.liveRequestID || msg.boxID != v.currentBoxID() || msg.sourceKind != v.currentSourceKind() {
+			return nil, true
+		}
+		if msg.err != nil {
+			v.notice = "Could not refresh mail: " + msg.err.Error()
+			return nil, true
+		}
+		v.postingList.refreshPostings(msg.postings)
 		return nil, true
 
 	case searchResultsLoadedMsg:
@@ -560,12 +592,15 @@ func (v *mailView) View() string {
 	return v.listHeader() + v.postingList.view()
 }
 
-// listHeader carries the one-shot notice and the Screener's standing invitation above
-// the posting list.
+// listHeader carries the one-shot notice, the standing word that the list has stopped
+// following the server, and the Screener's standing invitation above the posting list.
 func (v *mailView) listHeader() string {
 	var lines []string
 	if v.notice != "" {
 		lines = append(lines, v.vc.styles.title.Render(v.notice))
+	}
+	if v.liveUpdatesOver {
+		lines = append(lines, v.vc.styles.title.Render("Not live any more — press ctrl+r to reload"))
 	}
 	if hint := v.screenerHint(); hint != "" {
 		lines = append(lines, centerText(v.vc.styles.pill.Render(hint), v.vc.width), "")
@@ -672,6 +707,7 @@ func (v *mailView) HelpBindings() []helpBinding {
 			bindings = append(bindings, helpBinding{"p", "previous page"})
 		}
 	}
+	bindings = append(bindings, helpBinding{"ctrl+r", "reload"})
 	if v.lastBulkReplyID != 0 {
 		bindings = append(bindings, helpBinding{"u", "undo bulk reply"})
 	}
@@ -987,6 +1023,8 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		case "g":
 			return v.startFolderPicker()
+		case "ctrl+r":
+			return v.reloadPostings()
 		default:
 			return v.handlePostingAction(msg.String())
 		}
@@ -1219,6 +1257,85 @@ func (v *mailView) requestPostings(source models.Box) tea.Cmd {
 func (v *mailView) requestPostingsPage(source models.Box, page string, history []string) tea.Cmd {
 	requestID, ctx := v.beginRequest(mailRequestPostings)
 	return v.fetchPostings(ctx, requestID, source, page, append([]string(nil), history...))
+}
+
+// reloadPostings reads the box on screen again, on the user's say-so. It is how a list
+// that stopped being live is caught up, and how anything else is put right.
+func (v *mailView) reloadPostings() tea.Cmd {
+	source := v.currentSource()
+	if source == nil {
+		return nil
+	}
+	v.liveUpdatesOver = false
+	return v.requestPostings(*source)
+}
+
+// boxChanged is the doorbell: something arrived in, left, or was changed in a box. Only
+// the box on screen is worth re-reading, and one re-read is armed at a time — a delivery
+// rings once per posting, and a catch-up after a reconnect rings for everything at once.
+func (v *mailView) boxChanged(boxID int64) tea.Cmd {
+	if v.liveRefreshDue || !v.showsBox(boxID) {
+		return nil
+	}
+	v.liveRefreshDue = true
+	return refreshMailLaterCmd(boxID, liveRefreshDelay)
+}
+
+// refreshBox re-reads the box, unless something is open over the list — a form, a picker,
+// a write that hasn't landed. Then the change waits: it is the reader's place in the list
+// that a re-read would disturb, and holding onto it costs a timer rather than the change.
+func (v *mailView) refreshBox(boxID int64) tea.Cmd {
+	v.liveRefreshDue = false
+	if !v.showsBox(boxID) {
+		return nil
+	}
+	if v.CapturingInput() || v.pendingMutations > 0 {
+		v.liveRefreshDue = true
+		return refreshMailLaterCmd(boxID, liveRetryDelay)
+	}
+
+	v.liveRequestID++
+	return v.fetchBoxRefresh(v.vc.ctx, v.liveRequestID, *v.currentSource())
+}
+
+// showsBox reports whether the list on screen is that box's. Labels page through their
+// own feed rather than a box's, and a change that names no box stands for all of them.
+func (v *mailView) showsBox(boxID int64) bool {
+	source := v.currentSource()
+	if source == nil || source.Kind == mailSourceKindFolder {
+		return false
+	}
+	return boxID == AnyBoxChanged || boxID == source.ID
+}
+
+// liveUpdatesStopped stands above the list until the box is read again: what was live is
+// a snapshot now, and a reader has no other way of telling.
+func (v *mailView) liveUpdatesStopped() {
+	v.liveUpdatesOver = true
+	v.liveRefreshDue = false
+}
+
+// liveUpdatesUnavailable is the other way it goes wrong: there was never a stream to
+// begin with, which is worth saying once rather than standing over the list forever.
+func (v *mailView) liveUpdatesUnavailable(err error) {
+	v.noteFailure("Live updates unavailable", err)
+}
+
+// screenerUpdatesUnavailable is said in the mail list because that is where The Screener
+// announces itself — the count above the threads is what stops keeping up.
+func (v *mailView) screenerUpdatesUnavailable(err error) {
+	v.noteFailure("The Screener won't update live", err)
+}
+
+// screenerUpdatesStopped is said once rather than standing over the list: opening The
+// Screener reads the count again anyway, and so does the next look at the labels.
+func (v *mailView) screenerUpdatesStopped() {
+	v.notice = "The Screener stopped updating live"
+}
+
+// noteFailure keeps the reason to a line. `hey watch` is where the whole of it is.
+func (v *mailView) noteFailure(what string, err error) {
+	v.notice = truncateToWidth(what+": "+err.Error(), max(v.vc.width-2, 40))
 }
 
 func (v *mailView) nextFolderPage() tea.Cmd {
@@ -1729,8 +1846,12 @@ func (v *mailView) fetchSources(requestID uint64) tea.Cmd {
 				boxes = append(boxes, models.Box{ID: label.ID, Kind: mailSourceKindFolder, Name: label.Name, AppURL: label.AppURL})
 			}
 		}
-		screenerCount, _ := v.vc.sdk.Clearances().PendingCount(v.vc.ctx)
-		return mailSourcesLoadedMsg{requestID: requestID, sources: boxes, screenerCount: screenerCount, folderErr: folderErr}
+		message := mailSourcesLoadedMsg{requestID: requestID, sources: boxes, folderErr: folderErr}
+		if screener, err := v.vc.sdk.Clearances().Summary(v.vc.ctx); err == nil && screener != nil {
+			message.screenerCount = int(screener.PendingClearancesCount)
+			message.screenerStream = screener.SignedStreamName
+		}
+		return message
 	}
 }
 
@@ -1777,6 +1898,27 @@ func (v *mailView) fetchPostings(ctx context.Context, requestID uint64, source m
 			postings = append(postings, sdkPostingToModel(posting))
 		}
 		message.postings = postings
+		return message
+	}
+}
+
+// fetchBoxRefresh re-reads a box for the live update. It reads the box and nothing else:
+// a label's page, a search and a thread all stay as they were.
+func (v *mailView) fetchBoxRefresh(ctx context.Context, requestID uint64, source models.Box) tea.Cmd {
+	return func() tea.Msg {
+		message := postingsRefreshedMsg{requestID: requestID, boxID: source.ID, sourceKind: source.Kind}
+		box, err := v.vc.sdk.Boxes().Get(ctx, source.ID, nil)
+		if err != nil {
+			message.err = err
+			return message
+		}
+		if box != nil {
+			postings := make([]models.Posting, 0, len(box.Postings))
+			for _, posting := range box.Postings {
+				postings = append(postings, sdkPostingToModel(posting))
+			}
+			message.postings = postings
+		}
 		return message
 	}
 }

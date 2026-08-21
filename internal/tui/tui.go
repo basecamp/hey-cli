@@ -52,6 +52,20 @@ type model struct {
 	// The Screener, opened over the mail section with ctrl+s
 	screenerView *screenerView
 
+	// Live mail updates: the watcher, the stream it opened, and the context that keeps
+	// the stream open. It outlives the view context, which a mail account switch throws
+	// away — the changes stream is the same one whichever account is being read.
+	watchMail    MailWatcher
+	mailChanges  <-chan int64
+	watchCtx     context.Context
+	stopWatching context.CancelFunc
+
+	// The Screener's stream, which can only be opened once HEY has served its name
+	watchScreener      ScreenerWatcher
+	screenerChanges    <-chan struct{}
+	screenerStream     string
+	screenerRefreshDue bool
+
 	// Linked mail accounts
 	mailAccounts            []mailAccountChoice
 	mailAccount             mailAccountChoice
@@ -73,14 +87,15 @@ type model struct {
 }
 
 func newModel() model {
-	return newModelWithMailAccounts(nil, nil, "all")
+	return newModelWithMailAccounts(nil, nil, "all", Watchers{})
 }
 
-func newModelWithMailAccounts(rootSDK, sdk *hey.Client, selected string) model {
+func newModelWithMailAccounts(rootSDK, sdk *hey.Client, selected string, watchers Watchers) model {
 	theme := ResolveTheme()
 	applyTheme(theme)
 	s := newStyles()
-	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118: cancel stored, called on ctrl+c
+	ctx, cancel := context.WithCancel(context.Background())            //nolint:gosec // G118: cancel stored, called on ctrl+c
+	watchCtx, stopWatching := context.WithCancel(context.Background()) //nolint:gosec // G118: cancel stored, called on ctrl+c
 	vc := newViewContext(ctx, rootSDK, sdk, s)
 	mv := newMailView(vc)
 	ov := newContactsView(vc)
@@ -107,6 +122,10 @@ func newModelWithMailAccounts(rootSDK, sdk *hey.Client, selected string) model {
 		calendarView:        cv,
 		journalView:         jv,
 		screenerView:        sv,
+		watchMail:           watchers.Mail,
+		watchScreener:       watchers.Screener,
+		watchCtx:            watchCtx,
+		stopWatching:        stopWatching,
 		mailAccounts:        []mailAccountChoice{{label: "All Accounts"}},
 		mailAccount:         account,
 		viewGenerationToken: &atomic.Uint64{},
@@ -139,6 +158,7 @@ func (m model) Init() tea.Cmd {
 		spinnerTick(),
 		tea.RequestBackgroundColor,
 		watchThemeCmd(omarchyWatchDir(userHomeDir())),
+		startMailWatchCmd(m.watchCtx, m.watchMail),
 	)
 }
 
@@ -252,11 +272,67 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case screenerClosedMsg:
 		return m.closeScreener()
 
+	case mailWatchStartedMsg:
+		if msg.err != nil {
+			m.mailView.liveUpdatesUnavailable(msg.err)
+			return m, nil
+		}
+		m.mailChanges = msg.changes
+		return m, waitForMailChangeCmd(m.mailChanges)
+
+	case mailChangedMsg:
+		if msg.closed {
+			m.mailChanges = nil
+			m.mailView.liveUpdatesStopped()
+			return m, nil
+		}
+		// The stream is listened to for as long as the TUI runs, whichever section is
+		// on screen: mail that arrived while the user was in the calendar is there when
+		// they come back.
+		return m, tea.Batch(m.stampViewCmd(m.mailView.boxChanged(msg.boxID)), waitForMailChangeCmd(m.mailChanges))
+
+	case mailRefreshDueMsg, postingsRefreshedMsg:
+		cmd, _ := m.mailView.Update(msg)
+		return m, m.stampViewCmd(cmd)
+
+	case screenerWatchStartedMsg:
+		if msg.err != nil {
+			m.screenerStream = ""
+			m.mailView.screenerUpdatesUnavailable(msg.err)
+			return m, nil
+		}
+		m.screenerChanges = msg.changes
+		return m, waitForScreenerChangeCmd(m.screenerChanges)
+
+	case screenerChangedMsg:
+		if msg.closed {
+			m.screenerChanges = nil
+			// Letting the name go means the next read of the count opens the stream again.
+			m.screenerStream = ""
+			m.mailView.screenerUpdatesStopped()
+			return m, nil
+		}
+		return m, tea.Batch(m.screenerChanged(), waitForScreenerChangeCmd(m.screenerChanges))
+
+	case screenerRefreshDueMsg:
+		return m, m.refreshScreener()
+
+	case screenerPendingRefreshedMsg:
+		cmd, _ := m.screenerView.Update(msg)
+		return m, m.stampViewCmd(cmd)
+
 	case mailSourcesLoadedMsg:
+		// HEY serves The Screener's stream name with its count, so this read is the only
+		// place the watch can be opened from.
+		watch := m.startScreenerWatch(msg.screenerStream)
 		if m.activeView != m.mailView {
 			cmd, _ := m.mailView.Update(msg)
-			return m, m.stampViewCmd(cmd)
+			return m, tea.Batch(m.stampViewCmd(cmd), watch)
 		}
+		cmd, _ := m.activeView.Update(msg)
+		cmd = m.syncLoading(cmd)
+		m.updateHelpBindings()
+		return m, tea.Batch(cmd, watch)
 
 	case screenerCountLoadedMsg:
 		if m.activeView != m.mailView {
@@ -505,6 +581,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if key == "ctrl+c" {
 		if m.ctrlCOnce {
 			m.cancel()
+			m.stopWatching()
 			return m, tea.Quit
 		}
 		m.ctrlCOnce = true
@@ -700,6 +777,44 @@ func (m model) closeScreener() (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// startScreenerWatch opens the Screener's stream the first time HEY names it, and again
+// only if the name changes. Every read of the count carries the name, so without this the
+// watch would be reopened on each one.
+func (m *model) startScreenerWatch(signedStreamName string) tea.Cmd {
+	if signedStreamName == "" || signedStreamName == m.screenerStream {
+		return nil
+	}
+	m.screenerStream = signedStreamName
+	return startScreenerWatchCmd(m.watchCtx, m.watchScreener, signedStreamName)
+}
+
+// screenerChanged is the Screener's doorbell. Screening a queue in one go rings it once
+// per sender, so the re-read is delayed and one is armed at a time.
+func (m *model) screenerChanged() tea.Cmd {
+	if m.screenerRefreshDue {
+		return nil
+	}
+	m.screenerRefreshDue = true
+	return refreshScreenerLaterCmd(liveRefreshDelay)
+}
+
+// refreshScreener reads the count again wherever the user is — it is the mail list's
+// standing invitation — and reads the queue again as well when The Screener is what is
+// on screen.
+func (m *model) refreshScreener() tea.Cmd {
+	m.screenerRefreshDue = false
+	if m.activeView != m.screenerView {
+		return m.stampViewCmd(m.mailView.refreshScreenerCount())
+	}
+
+	queue, held := m.screenerView.refreshPending()
+	if held {
+		m.screenerRefreshDue = true
+		return refreshScreenerLaterCmd(liveRetryDelay)
+	}
+	return tea.Batch(m.stampViewCmd(m.mailView.refreshScreenerCount()), m.stampViewCmd(queue))
+}
+
 func (m model) switchSection(sec section) (tea.Model, tea.Cmd) {
 	if sec == m.section || m.hasPendingMutation() {
 		return m, nil
@@ -755,10 +870,10 @@ func formatTimestamp(ts time.Time) string {
 	return ts.UTC().Format("2006-01-02T15:04:05Z")
 }
 
-// Run starts the TUI with the resolved mail account and the identity root client used
-// for interactive account switching.
-func Run(rootSDK, sdk *hey.Client, selected string) error {
-	p := tea.NewProgram(newModelWithMailAccounts(rootSDK, sdk, selected))
+// Run starts the TUI with the resolved mail account, the identity root client used for
+// interactive account switching, and the watchers that tell it when things changed.
+func Run(rootSDK, sdk *hey.Client, selected string, watchers Watchers) error {
+	p := tea.NewProgram(newModelWithMailAccounts(rootSDK, sdk, selected, watchers))
 	_, err := p.Run()
 	return err
 }

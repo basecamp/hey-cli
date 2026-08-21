@@ -27,7 +27,7 @@ func newTuiRunner(use string, hidden bool) *cobra.Command {
 			if err := requireAuth(); err != nil {
 				return err
 			}
-			return tui.Run(rootSDK, sdk, cfg.AccountID)
+			return tui.Run(rootSDK, sdk, cfg.AccountID, tuiWatchers())
 		},
 	}
 }

@@ -56,7 +56,7 @@ func TestUnavailableSelectedAccountFailsClosedAndAllowsRecovery(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	root := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "token"}, hey.WithMaxRetries(0))
-	m := newModelWithMailAccounts(root, root, "99")
+	m := newModelWithMailAccounts(root, root, "99", Watchers{})
 
 	loaded := loadMailAccounts(t.Context(), root, "99")().(mailAccountsLoadedMsg)
 	if !loaded.selectedUnavailable {
@@ -83,7 +83,7 @@ func TestAccountDiscoveryFailureCanRetry(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	root := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "token"}, hey.WithMaxRetries(0))
-	m := newModelWithMailAccounts(root, root, "all")
+	m := newModelWithMailAccounts(root, root, "all", Watchers{})
 	m.loading = false
 
 	failed := loadMailAccounts(t.Context(), root, "all")().(mailAccountsLoadedMsg)
@@ -179,7 +179,7 @@ func TestAccountSwitchRebuildsViewsAndCancelsOldGeneration(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	root := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "token"}, hey.WithMaxRetries(0))
-	m := newModelWithMailAccounts(root, root, "all")
+	m := newModelWithMailAccounts(root, root, "all", Watchers{})
 	m.mailAccounts = []mailAccountChoice{
 		{label: "All Accounts"},
 		{id: 1, label: "jane@example.com"},
@@ -227,7 +227,7 @@ func TestFailedAccountSwitchPreservesCurrentViews(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	root := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "token"}, hey.WithMaxRetries(0))
-	m := newModelWithMailAccounts(root, root, "all")
+	m := newModelWithMailAccounts(root, root, "all", Watchers{})
 	m.mailAccounts = []mailAccountChoice{{label: "All Accounts"}, {id: 1, label: "jane@example.com"}, {id: 2, label: "missing@example.com"}}
 	m.mailAccountPicker = true
 	m.mailAccountCursor = 2

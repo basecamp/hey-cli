@@ -184,6 +184,17 @@ Calendar and Journal remain identity-wide.
 
 Navigate between Mail, Contacts, Calendar, and Journal. Mail navigation includes HEY boxes followed by your labels. Use `n` and `p` to page through a label. Use `/` to search, Enter to open a thread, `r` to reply, `f` to forward, `m` to move, `g` to add, create, or remove labels, `t` to trash, `s` to mark as spam, `-` to ignore, and `+` to stop ignoring. Select threads with Space and press `b` to preview every bulk-reply recipient before writing and sending one reply to all selected threads. A delayed bulk reply can be recalled with `u` while HEY's undo window remains open. Search results retain the matching-message summary; use `n` and `p` to move between result pages.
 
+The mail list follows the server. HEY tells the TUI when a box changed over the same
+Action Cable connection `hey watch` uses, and the box on screen is read again a moment
+later, keeping your place in the list and anything you had selected. A change that arrives
+while a form or a picker is open waits for it to close. Press Ctrl+R to read the box again
+yourself; if the connection goes away for good, the list says so and Ctrl+R is how you
+catch up.
+
+The Screener keeps up too. When a first-time sender writes, the count above the threads
+changes on its own, and if you have The Screener open the new sender appears in the queue
+without moving your place in it.
+
 Press Ctrl+S from the mail list to open The Screener. When senders are waiting, the mail
 list says so above the threads. In The Screener, `y` screens the selected sender in and `n`
 screens them out, Tab moves to Screener History and back, `[` and `]` page through either

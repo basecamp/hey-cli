@@ -47,6 +47,46 @@ func (c *contentList) setPostings(postings []models.Posting) {
 	c.clearSelected()
 }
 
+// refreshPostings replaces the list with a newly read one while the user is looking at
+// it, so the reader keeps their place: the cursor stays on the posting it was on, the
+// window stays where it was scrolled to, and a multi-selection keeps every row that is
+// still there. A posting that left the box takes the cursor or its selection with it.
+func (c *contentList) refreshPostings(postings []models.Posting) {
+	if !c.hideSeenState {
+		postings = partitionSeen(postings)
+	}
+	var cursorID int64
+	if posting := c.selectedPosting(); posting != nil {
+		cursorID = posting.ID
+	}
+
+	c.postings = postings
+	c.cursor = 0
+	for i := range c.postings {
+		if c.postings[i].ID == cursorID {
+			c.cursor = i
+			break
+		}
+	}
+	c.keepSelected()
+	c.scrollOff = min(c.scrollOff, max(len(c.postings)-1, 0))
+	c.ensureVisible()
+}
+
+// keepSelected drops the postings that are no longer in the list from the selection.
+func (c *contentList) keepSelected() {
+	if len(c.selected) == 0 {
+		return
+	}
+	remaining := make(map[int64]struct{}, len(c.selected))
+	for _, posting := range c.postings {
+		if _, wasSelected := c.selected[posting.ID]; wasSelected {
+			remaining[posting.ID] = struct{}{}
+		}
+	}
+	c.selected = remaining
+}
+
 // partitionSeen orders unseen postings before seen ones, keeping the
 // relative order inside each group. This forms the "New for You" and
 // "Previously Seen" sections, as in the HEY web app.

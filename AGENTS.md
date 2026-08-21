@@ -120,7 +120,7 @@ section: ctrl+s from the mail list swaps it in as the active view, it captures e
 while it is open, and it asks to be closed again with `screenerClosedMsg`.
 The rest of `internal/tui/` is shared infrastructure: `tui.go` (model and
 router), `section_view.go` (the interface), plus `nav.go`, `content.go`, `help.go`,
-`styles.go`, `loading.go`, `kitty.go`, `html.go` and `calendar_views.go`. Read the directory rather than a
+`styles.go`, `loading.go`, `kitty.go`, `html.go`, `live.go` and `calendar_views.go`. Read the directory rather than a
 table here.
 
 To add a new section: implement the `sectionView` interface in a new file, add a field and constructor call in `newModel`, and add a case in `switchSection`.
@@ -151,6 +151,45 @@ missed broadcast costs nothing, and a 409 means catch up in full instead. A read
 fails leaves the cursor where it was and is retried on a doubling backoff, so a change
 isn't lost with the notification that announced it, and a subscription that closes without
 the watch being interrupted is an error rather than a quiet exit.
+
+The TUI's mail list follows the same channel and wants less from it. `internal/cmd/tui_watch.go`
+subscribes and relays the changed box IDs down a channel; `internal/tui/live.go` defines
+that contract as `tui.MailWatcher`, so the TUI never sees cable or auth, and a test hands
+it a plain channel. There is no cursor: the doorbell says which box changed and
+`mailView.refreshBox` reads that box again in full, which is what the list renders anyway.
+A reconnect sends `tui.AnyBoxChanged`, standing for the changes broadcast while the
+connection was down.
+
+`internal/tui/live.go` is also where the two delays live. `liveRefreshDelay` collects one
+delivery's changes into a single re-read — a thread rings the doorbell once per posting.
+`liveRetryDelay` is how long a re-read waits when a form or a picker is open over the list,
+or a write hasn't landed: the change is held rather than dropped, because a re-read
+replaces what the reader is looking at. `contentList.refreshPostings` is what makes that
+safe — unlike `setPostings` it keeps the cursor on its posting and keeps a selection —
+and the re-read has its own request lane (`liveRequestID`, `postingsRefreshedMsg`) so it
+can never be confused with a read the user asked for, or show the spinner.
+
+The watch outlives the view context, which a mail account switch throws away; that is what
+`model.watchCtx` is for. When the stream closes for good the mail list says so and stays
+saying so until ctrl+r reads the box again.
+
+The Screener is told over a different stream, because haystack has no channel for it:
+`Clearance::Broadcasting` re-renders the Screener's own button over a Turbo stream, and
+`clearances/index.jbuilder` serves that stream's signed name next to the pending count.
+So the TUI subscribes to `Turbo::StreamsChannel` with `signed_stream_name` (that is
+`tui.ScreenerWatcher`, and the name is why the watch can only be opened after a read).
+What HEY broadcasts there is markup for the web app — nothing is parsed out of it, the
+arrival is the whole message, and the count is read again behind it. The SDK's
+`Clearances().Summary` is that read: the same cheap request as `PendingCount`, keeping
+the stream name it used to throw away.
+
+The doorbell always re-reads the count, wherever the user is, because the mail list is
+where The Screener announces itself. When The Screener is what's on screen the queue is
+re-read too, through `screenerPane.refreshRows` — the same keep-your-place trick as the
+mail list — and held while a decision is in flight or the clear-everything question is up.
+On the history tab nothing is read; the pending pane is just marked unloaded, which is
+what `switchTab` already looks at. Both watches share one websocket
+(`tuiCableClient` in `internal/cmd/tui_watch.go`): two subscriptions, one authorization.
 
 ### API documentation
 
