@@ -143,8 +143,9 @@ func (p coverPalette) current() coverPalette {
 // bright foreground is dark: exactly inverted, and only on the themes the cover
 // was supposed to be fixing.
 var coverPalettes = map[coverPreset]coverPalette{
-	coverBlobs: {field: lipgloss.Cyan, ink: [4]color.Color{lipgloss.BrightYellow}},
-	coverGrid:  {field: lipgloss.Black, ink: [4]color.Color{lipgloss.Blue, lipgloss.BrightBlue}},
+	coverBlobs: {field: lipgloss.Magenta, ink: [4]color.Color{
+		lipgloss.BrightYellow, lipgloss.Red, lipgloss.BrightMagenta, lipgloss.Blue}},
+	coverGrid: {field: lipgloss.Black, ink: [4]color.Color{lipgloss.Blue, lipgloss.BrightBlue}},
 
 	// HEY draws the hand white on a yellow card. Yellow is the lightest hue a theme
 	// has, so a whole cover of it glares in every one of them, and there is no
@@ -161,9 +162,8 @@ var coverPalettes = map[coverPreset]coverPalette{
 	// read as too bright across a whole cover, and there is nothing darker than a
 	// hue except the background. So the field is the background and the contours
 	// keep the violet end of the palette.
-	coverTopo: {field: lipgloss.Black, ink: [4]color.Color{lipgloss.Magenta}},
-	coverWaves: {field: lipgloss.Magenta, ink: [4]color.Color{
-		lipgloss.BrightYellow, lipgloss.Red, lipgloss.BrightMagenta, lipgloss.Blue}},
+	coverTopo:  {field: lipgloss.Black, ink: [4]color.Color{lipgloss.Magenta}},
+	coverWaves: {field: lipgloss.Cyan, ink: [4]color.Color{lipgloss.BrightYellow}},
 }
 
 // --- Canvas ---
@@ -581,33 +581,33 @@ func (l *brailleLayer) peaceHand(x, y, width, height float64) {
 	}
 }
 
-// maxBlobSlope is the steepest a ribbon may climb, in rows per column. A cell is
+// maxWaveSlope is the steepest a ribbon may climb, in rows per column. A cell is
 // about twice as tall as it is wide, so half a row per column is a ribbon at
 // roughly forty-five degrees on screen — a sweep. Past that they read as
 // chevrons.
-const maxBlobSlope = 0.5
+const maxWaveSlope = 0.5
 
-// blobRibbonShape is how tall and how long a ribbon is on a cover this size.
+// waveRibbonShape is how tall and how long a ribbon is on a cover this size.
 // Both scale with the block, so the pattern looks the same at any aspect ratio.
 // The wavelength takes whichever is larger of two floors: a quarter of the width,
 // so a wide cover shows a handful of sweeps instead of one lazy curve, and
-// whatever the amplitude needs to stay under maxBlobSlope, which is what keeps a
+// whatever the amplitude needs to stay under maxWaveSlope, which is what keeps a
 // tall cover from turning into chevrons.
-func blobRibbonShape(width, height int) (amplitude, wavelength float64) {
+func waveRibbonShape(width, height int) (amplitude, wavelength float64) {
 	amplitude = float64(height) / 3
-	return amplitude, max(float64(width)/4, amplitude/maxBlobSlope)
+	return amplitude, max(float64(width)/4, amplitude/maxWaveSlope)
 }
 
-// paintBlobs lays HEY's yellow ribbons over mint. They are solid blocks rather
+// paintWaves lays HEY's yellow ribbons over mint. They are solid blocks rather
 // than the field's background color so the shape survives a colorless terminal.
-func (c *coverCanvas) paintBlobs() {
+func (c *coverCanvas) paintWaves() {
 	// Each ribbon is stretched from the base wavelength and given its own phase.
 	// Sharing a wavelength and offsetting the phase is tempting and wrong: half a
 	// wavelength apart makes the second ribbon an exact reflection of the first,
 	// and the field comes out symmetrical. Stretch factors are all at or above 1
 	// so no ribbon runs steeper than the base one.
 	ribbons := []struct{ stretch, phase float64 }{{1, 0}, {1.3, 1.7}, {1.7, 4.1}}
-	amplitude, wavelength := blobRibbonShape(c.width, c.height)
+	amplitude, wavelength := waveRibbonShape(c.width, c.height)
 	center := float64(c.height-1) / 2
 	thickness := max(float64(c.height)/14, 1)
 
@@ -623,15 +623,15 @@ func (c *coverCanvas) paintBlobs() {
 	}
 }
 
-// paintWaves sweeps a gradient from the top left to the bottom right, warped by
-// a wave so the bands roll instead of stepping straight. Each band gets both a
-// color and a step of the shade ramp: the shades read as a gradient on their own
-// where there is no color, and blend one band into the next where there is.
+// paintBlobs sweeps soft bands of color from the top left to the bottom right,
+// warped so they roll instead of stepping straight. Each band gets both a color
+// and a step of the shade ramp: the shades read as a gradient on their own where
+// there is no color, and blend one band into the next where there is.
 //
 // The web app's version is concentric arcs. A cover is far wider than it is
 // tall, and over that block arcs flatten into vertical stripes, so the curve
 // comes from the warp rather than from a radius.
-func (c *coverCanvas) paintWaves() {
+func (c *coverCanvas) paintBlobs() {
 	shades := []string{"░", "▒", "▓", "█"}
 	const (
 		wavelength = 11

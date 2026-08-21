@@ -134,15 +134,15 @@ func TestPeaceHandFitsEveryCover(t *testing.T) {
 // columns drew chevrons on a tall cover, because only the amplitude scaled with
 // the height; a wavelength taken from the height alone then drew a busy repeat on
 // a wide short one. Both properties are pinned here.
-func TestBlobRibbonShapeHoldsAtAnyAspect(t *testing.T) {
+func TestWaveRibbonShapeHoldsAtAnyAspect(t *testing.T) {
 	for _, size := range []struct{ width, height int }{
 		{92, 12}, {190, 55}, {60, 30}, {240, 20}, {40, 6}, {300, 90},
 	} {
-		amplitude, wavelength := blobRibbonShape(size.width, size.height)
+		amplitude, wavelength := waveRibbonShape(size.width, size.height)
 
-		if slope := amplitude / wavelength; slope > maxBlobSlope {
+		if slope := amplitude / wavelength; slope > maxWaveSlope {
 			t.Errorf("%dx%d: ribbons climb %.2f rows per column, want at most %.2f",
-				size.width, size.height, slope, maxBlobSlope)
+				size.width, size.height, slope, maxWaveSlope)
 		}
 		if sweeps := float64(size.width) / wavelength; sweeps > 4.01 {
 			t.Errorf("%dx%d: %.1f sweeps across, want at most 4 so it reads as ribbons",
@@ -154,12 +154,12 @@ func TestBlobRibbonShapeHoldsAtAnyAspect(t *testing.T) {
 	}
 }
 
-// Ribbons cover some of the field, not all of it and not none: HEY's blobs are
+// Ribbons cover some of the field, not all of it and not none: HEY's waves are
 // yellow on mint, and both colors have to be in the picture.
-func TestBlobsLeaveTheFieldShowing(t *testing.T) {
+func TestWavesLeaveTheFieldShowing(t *testing.T) {
 	for _, size := range []struct{ width, height int }{{92, 12}, {190, 55}, {240, 20}} {
 		canvas := newCoverCanvas(size.width, size.height, coverPalette{})
-		canvas.paintBlobs()
+		canvas.paintWaves()
 
 		inked := strings.Count(canvas.plain(), "█")
 		share := float64(inked) / float64(size.width*size.height)

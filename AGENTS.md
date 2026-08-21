@@ -208,9 +208,9 @@ selector is not reliable protection. Draw the shape instead.
 
 **Scale every dimension with the block, then check the extremes.** A cover is anywhere from
 40×6 to 300×90, so a constant tuned at one size is a constant that only looks right there.
-`blobRibbonShape` is the worked example: the amplitude follows the height, and the
+`waveRibbonShape` is the worked example: the amplitude follows the height, and the
 wavelength takes whichever is larger of a quarter of the width and whatever the amplitude
-needs to stay under `maxBlobSlope`. Scaling by height alone drew chevrons on a tall cover;
+needs to stay under `maxWaveSlope`. Scaling by height alone drew chevrons on a tall cover;
 by width alone, a busy repeat on a wide short one. `peaceRadius` is the same lesson in one
 line: a circle that does not fit is a pair of brackets. Pin both with a test over a spread
 of aspect ratios — it is much cheaper than looking.
