@@ -65,8 +65,10 @@ func refreshSkillsIfVersionChanged() bool {
 	// transient failure, leave it stale so the next run retries.
 	if failed == 0 {
 		// 0o700: ConfigDir can hold credentials.json; keep it owner-only.
+		// writeSkillFile refuses to follow a symlink planted at the sentinel
+		// path, the same rule as every other file this feature writes.
 		_ = os.MkdirAll(filepath.Dir(sentinelPath), 0o700)
-		_ = os.WriteFile(sentinelPath, []byte(sentinelState), 0o644) // #nosec G306 -- not a secret
+		_ = writeSkillFile(sentinelPath, []byte(sentinelState))
 	}
 
 	return updated > 0 && failed == 0

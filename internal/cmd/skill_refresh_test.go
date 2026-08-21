@@ -286,3 +286,27 @@ func TestRefreshSkillsRescansWhenCodexHomeChanges(t *testing.T) {
 		t.Error("stable again: refresh must be a no-op")
 	}
 }
+
+// The sentinel gets the same no-follow rule as every other file this feature
+// writes: a symlink planted at its path is never truncated.
+func TestRefreshSkillsNeverWritesThroughSymlinkedSentinel(t *testing.T) {
+	home := refreshFixture(t)
+	stubVersion(t, "9.9.9")
+
+	configDir := filepath.Join(home, ".config", "hey-cli")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	precious := filepath.Join(home, "precious")
+	if err := os.WriteFile(precious, []byte("do not truncate"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(precious, filepath.Join(configDir, ".last-run-version")); err != nil {
+		t.Fatal(err)
+	}
+
+	refreshSkillsIfVersionChanged()
+	if got, _ := os.ReadFile(precious); string(got) != "do not truncate" {
+		t.Errorf("sentinel write followed a symlink: %q", got)
+	}
+}

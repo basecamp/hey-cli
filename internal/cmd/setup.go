@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -231,12 +232,19 @@ func (s *setupWizard) greet() {
 		// a complete setup that cannot run a single data command. Other
 		// failures (offline, transient) keep the best-effort greeting.
 		if isAuthError(err) {
+			// The remediation must match the credential actually in use:
+			// HEY_TOKEN outranks anything hey auth login saves, so sending
+			// the user there would repeat the same failure forever.
+			issue := agentIssue{Check: "Stored sign-in rejected", Hint: "Run: hey auth login"}
+			if os.Getenv("HEY_TOKEN") != "" {
+				issue = agentIssue{Check: "HEY_TOKEN rejected", Hint: "Update or unset HEY_TOKEN"}
+			}
 			if s.styled {
-				fmt.Fprintln(w, warning.format("  Stored sign-in was rejected by HEY."))
+				fmt.Fprintln(w, warning.format("  "+issue.Check+" by HEY — "+issue.Hint))
 				fmt.Fprintln(w)
 			}
 			s.result.Status = "incomplete"
-			s.result.Issues = append(s.result.Issues, agentIssue{Check: "Stored sign-in rejected", Hint: "Run: hey auth login"})
+			s.result.Issues = append(s.result.Issues, issue)
 			return
 		}
 		if s.styled {
@@ -528,7 +536,7 @@ func hasIssue(issues []agentIssue, check string) bool {
 // login — missing or rejected. Both mean the same thing to a caller: repair
 // authentication before anything else.
 func hasAuthIssue(issues []agentIssue) bool {
-	return hasIssue(issues, "Not logged in") || hasIssue(issues, "Stored sign-in rejected")
+	return hasIssue(issues, "Not logged in") || hasIssue(issues, "Stored sign-in rejected") || hasIssue(issues, "HEY_TOKEN rejected")
 }
 
 // wizardSummaryLine builds a concise summary for the output envelope.

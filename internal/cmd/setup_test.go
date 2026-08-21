@@ -568,3 +568,27 @@ func TestSetupRejectsListOnlyFormatsBeforeSideEffects(t *testing.T) {
 		}
 	}
 }
+
+// A rejected HEY_TOKEN outranks anything hey auth login saves, so the
+// remediation must point at the environment, not at a login that cannot win.
+func TestSetupJSONRejectedEnvTokenPointsAtEnvironment(t *testing.T) {
+	isolateAgents(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	_, response, err := runAuthCommand(t, t.TempDir(), server.URL, "revoked-env-token", true, "setup")
+	if err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	data := wizardData(t, response)
+	if data["status"] != "incomplete" {
+		t.Errorf("status = %v", data["status"])
+	}
+	issues := data["issues"].([]any)
+	issue := issues[0].(map[string]any)
+	if issue["check"] != "HEY_TOKEN rejected" || issue["hint"] != "Update or unset HEY_TOKEN" {
+		t.Errorf("issue = %v", issue)
+	}
+}
