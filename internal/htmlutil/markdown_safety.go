@@ -100,11 +100,19 @@ func codeSpan(content string) string {
 		return ""
 	}
 	delimiter := strings.Repeat("`", backtickRun(content)+1)
-	if strings.HasPrefix(content, "`") || strings.HasSuffix(content, "`") ||
-		(strings.HasPrefix(content, " ") && strings.HasSuffix(content, " ")) {
+	if needsPadding(content) || needsPadding(terminal.Sanitize(content)) {
 		content = " " + content + " "
 	}
 	return delimiter + content + delimiter
+}
+
+// needsPadding reports code-span content that would run into its delimiters: a backtick
+// at either end, or a space at both. It is asked of the content as written and as the
+// renderer's sanitizer leaves it, since a stripped character before a leading backtick
+// would otherwise bring that backtick up against the delimiter on screen.
+func needsPadding(content string) bool {
+	return strings.HasPrefix(content, "`") || strings.HasSuffix(content, "`") ||
+		(strings.HasPrefix(content, " ") && strings.HasSuffix(content, " "))
 }
 
 // codeFence is the fence that contains content: at least three backticks and, whatever

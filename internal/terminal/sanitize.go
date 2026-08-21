@@ -136,7 +136,7 @@ type pass struct {
 
 func (p *pass) keep(r rune) {
 	if p.joiner != 0 {
-		if joinable(r) && !isCombiningMark(r) {
+		if isBase(r) {
 			p.write(p.joiner)
 		} else {
 			p.diverge(p.joinerAt)
@@ -150,6 +150,13 @@ func (p *pass) keep(r rune) {
 	}
 }
 
+// isBase reports a rune a joiner can join: non-ASCII text that is neither a space, a
+// mark nor a format character. The marks on a base ride along with it; a tag or any
+// other format character ends it, so a joiner after one has nothing to join.
+func isBase(r rune) bool {
+	return joinable(r) && !isCombiningMark(r) && !unicode.Is(unicode.Cf, r)
+}
+
 func (p *pass) drop(i int) {
 	if p.joiner != 0 {
 		i = p.joinerAt
@@ -161,7 +168,7 @@ func (p *pass) drop(i int) {
 // left, or one held while another is pending, is dropped.
 func (p *pass) hold(i int, r rune) {
 	switch {
-	case p.joiner != 0 || !joinable(p.base):
+	case p.joiner != 0 || !isBase(p.base):
 		p.drop(i)
 	default:
 		p.joiner, p.joinerAt = r, i

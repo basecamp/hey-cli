@@ -218,6 +218,8 @@ func TestToMarkdownInlineCodeSizesItsDelimiters(t *testing.T) {
 func TestToMarkdownCodeDelimitersOutlastTheSanitizer(t *testing.T) {
 	for _, test := range []struct{ in, want string }{
 		{"<p><code>``\u200b``</code></p>", "````` ``\u200b`` `````"},
+		{"<p><code>\u200b`x</code></p>", "`` \u200b`x ``"},
+		{"<p><code>x`\u200b</code></p>", "`` x`\u200b ``"},
 		{"<pre>``\u200b``\nafter</pre>", "`````\n``\u200b``\nafter\n`````"},
 		{"<pre>``\u200d``</pre>", "`````\n``\u200d``\n`````"},
 	} {

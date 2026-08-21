@@ -135,6 +135,10 @@ func TestCalendarTimeTrackCategoryMutations(t *testing.T) {
 	if view.timeTrackCategories.mode != timeTrackCategoryRename {
 		t.Fatal("enter should open category rename")
 	}
+	if cmd := view.HandleContentKey(keyPress("enter")); cmd != nil || view.timeTrackCategories.mode != timeTrackCategoryBrowse {
+		t.Fatal("an unedited rename should send nothing")
+	}
+	view.HandleContentKey(keyPress("enter"))
 	view.timeTrackCategories.input.SetValue("Customer work")
 	rename := view.HandleContentKey(keyPress("enter"))
 	if rename == nil {

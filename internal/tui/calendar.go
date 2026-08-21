@@ -379,6 +379,11 @@ func (v *calendarView) handleTimeTrackCategoryKey(msg tea.KeyPressMsg) tea.Cmd {
 				return v.createTimeTrackCategory(title)
 			}
 			if selected != nil {
+				// The input was filled with the title sanitized for the screen, so an
+				// unedited rename is no rename — saving it would rewrite the title.
+				if title == selected.Title || title == terminal.SanitizeLine(selected.Title) {
+					return nil
+				}
 				return v.renameTimeTrackCategory(selected.Id, title)
 			}
 			manager.status = "Choose a category to rename"
