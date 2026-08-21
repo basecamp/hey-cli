@@ -56,7 +56,16 @@ func TestCheckCodexSkill(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# hey"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Present but unmarked is somebody else's skill occupying the path —
+	// never reported as a connected integration.
+	if check := CheckCodexSkill(); check.Status != "fail" || check.Hint != "Move it aside, then run: hey setup codex" {
+		t.Errorf("unmanaged skill: %+v", check)
+	}
+
+	if err := os.WriteFile(filepath.Join(skillDir, SkillOwnershipMarker), []byte("hey-cli"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if check := CheckCodexSkill(); check.Status != "pass" {
-		t.Errorf("present skill: %+v", check)
+		t.Errorf("managed skill: %+v", check)
 	}
 }

@@ -249,3 +249,36 @@ func TestClaimSkillDirAcceptsEmptyAndMarkedDirectories(t *testing.T) {
 		t.Errorf("missing dir: %v, owned=%v", err, ownedSkillDir(missing))
 	}
 }
+
+// A marker only proves the directory; each file write still refuses to
+// follow a symlink planted inside it — a link's target was never inspected,
+// and truncating it would destroy a file we do not own.
+func TestSkillInstallRefusesSymlinkedSkillFileInManagedDir(t *testing.T) {
+	home := agentHome(t, ".codex")
+	precious := filepath.Join(home, "precious.md")
+	if err := os.WriteFile(precious, []byte("# do not truncate"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{
+		filepath.Join(home, ".agents", "skills", "hey"),
+		filepath.Join(home, ".codex", "skills", "hey"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeOwnershipMarker(dir)
+		if err := os.Symlink(precious, filepath.Join(dir, "SKILL.md")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := installSkillFiles(); err == nil {
+		t.Error("baseline install wrote through a symlinked SKILL.md")
+	}
+	if _, err := installSkillToCodex(); err == nil {
+		t.Error("Codex install wrote through a symlinked SKILL.md")
+	}
+	if data, _ := os.ReadFile(precious); string(data) != "# do not truncate" {
+		t.Errorf("symlink target was truncated: %q", data)
+	}
+}

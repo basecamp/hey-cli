@@ -19,10 +19,11 @@ const (
 	installedVersionFile = ".installed-version"
 
 	// ownershipMarkerFile marks a skill directory as written by hey-cli.
-	// Replacement and automatic refresh require it: a directory that merely
-	// looks like ours (a user-authored skill happens to be one SKILL.md too)
-	// must never be destroyed or rewritten.
-	ownershipMarkerFile = ".managed-by-hey-cli"
+	// Replacement, automatic refresh, and the harness health checks all
+	// require it: a directory that merely looks like ours (a user-authored
+	// skill happens to be one SKILL.md too) is never destroyed, rewritten,
+	// or reported as a working integration.
+	ownershipMarkerFile = harness.SkillOwnershipMarker
 )
 
 // unmanagedSkillDirError reports a skill directory hey-cli did not write.
@@ -70,7 +71,22 @@ func claimSkillDir(dir string) error {
 // calls it, after proving the directory is ours to claim.
 func writeOwnershipMarker(dir string) {
 	content := []byte("This skill is managed by hey-cli. Manual edits will be overwritten on upgrade.\n")
-	_ = os.WriteFile(filepath.Join(dir, ownershipMarkerFile), content, 0o644) // #nosec G306 -- not a secret
+	_ = writeSkillFile(filepath.Join(dir, ownershipMarkerFile), content)
+}
+
+// writeSkillFile writes one skill file, refusing to write through a symlink
+// or any other non-regular file: a link's target was never inspected by the
+// ownership gate, so following it could truncate a file we do not own — even
+// inside a directory that carries our marker.
+func writeSkillFile(path string, data []byte) error {
+	if info, err := os.Lstat(path); err == nil {
+		if !info.Mode().IsRegular() {
+			return &unmanagedSkillDirError{dir: path}
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("inspecting %s: %w", path, err)
+	}
+	return os.WriteFile(path, data, 0o644) // #nosec G306 -- installed skills are intentionally user-readable
 }
 
 // ownedSkillDir reports whether hey-cli wrote the skill directory.
@@ -150,12 +166,12 @@ func installSkillFiles() (string, error) {
 	if err := claimSkillDir(skillDir); err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(skillFile, data, 0o644); err != nil { // #nosec G306 -- installed skills are intentionally user-readable
+	if err := writeSkillFile(skillFile, data); err != nil {
 		return "", fmt.Errorf("writing skill file: %w", err)
 	}
 
 	// Best-effort: stamp installed version so doctor can spot staleness.
-	_ = os.WriteFile(filepath.Join(skillDir, installedVersionFile), []byte(version.Version), 0o644) // #nosec G306 -- not a secret
+	_ = writeSkillFile(filepath.Join(skillDir, installedVersionFile), []byte(version.Version))
 
 	return skillFile, nil
 }
@@ -280,7 +296,7 @@ func installSkillToCodex() (string, error) {
 	if err := claimSkillDir(filepath.Dir(skillPath)); err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(skillPath, data, 0o644); err != nil { // #nosec G306 -- installed skills are intentionally user-readable
+	if err := writeSkillFile(skillPath, data); err != nil {
 		return "", fmt.Errorf("writing Codex skill file: %w", err)
 	}
 	return skillPath, nil
@@ -329,7 +345,7 @@ func copySkillFiles(src, dst string) error {
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(filepath.Join(dst, e.Name()), data, 0o644); err != nil { // #nosec G306 -- installed skills are intentionally user-readable
+		if err := writeSkillFile(filepath.Join(dst, e.Name()), data); err != nil {
 			return err
 		}
 	}

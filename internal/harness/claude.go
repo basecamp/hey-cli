@@ -133,7 +133,8 @@ func CheckClaudeSkillLink() *StatusCheck {
 		}
 	}
 
-	skillPath := filepath.Join(filepath.Clean(home), ".claude", "skills", ClaudePluginName, "SKILL.md")
+	skillDir := filepath.Join(filepath.Clean(home), ".claude", "skills", ClaudePluginName)
+	skillPath := filepath.Join(skillDir, "SKILL.md")
 	if _, err := os.Stat(skillPath); err != nil {
 		if os.IsNotExist(err) {
 			return &StatusCheck{
@@ -148,6 +149,16 @@ func CheckClaudeSkillLink() *StatusCheck {
 			Status:  "warn",
 			Message: "Cannot check skill link",
 			Hint:    "Unable to stat " + skillPath,
+		}
+	}
+	// Presence is not health: a skill hey-cli did not write is somebody
+	// else's work occupying the path, not a connected integration.
+	if !SkillDirOwned(skillDir) {
+		return &StatusCheck{
+			Name:    "Claude Code Skill",
+			Status:  "fail",
+			Message: "A skill not written by hey-cli occupies " + skillDir,
+			Hint:    "Move it aside, then run: hey setup claude",
 		}
 	}
 

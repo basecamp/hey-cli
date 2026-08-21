@@ -96,6 +96,16 @@ func CheckCodexSkill() *StatusCheck {
 			Hint:    "Unable to stat " + skillPath,
 		}
 	}
+	// Presence is not health: a skill hey-cli did not write is somebody
+	// else's work occupying the path, not a connected integration.
+	if skillDir := filepath.Dir(skillPath); !SkillDirOwned(skillDir) {
+		return &StatusCheck{
+			Name:    "Codex Skill",
+			Status:  "fail",
+			Message: "A skill not written by hey-cli occupies " + skillDir,
+			Hint:    "Move it aside, then run: hey setup codex",
+		}
+	}
 	return &StatusCheck{
 		Name:    "Codex Skill",
 		Status:  "pass",

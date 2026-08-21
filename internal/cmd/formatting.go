@@ -143,10 +143,16 @@ func stdoutWidth() int {
 	return min(width-2, 100)
 }
 
-// interactiveStdio reports whether the CLI may prompt: both stdio fds are
-// terminals and the HEY_NONINTERACTIVE escape hatch is not engaged.
+var stderrIsTerminal = func() bool {
+	return term.IsTerminal(int(os.Stderr.Fd())) //nolint:gosec // G115: fd fits in int
+}
+
+// interactiveStdio reports whether the CLI may prompt: stdin, stdout AND
+// stderr are terminals — prompts render on stderr so stdout stays data, and
+// an invisible prompt must never sit waiting for input — and the
+// HEY_NONINTERACTIVE escape hatch is not engaged.
 var interactiveStdio = func() bool {
-	return stdinIsTerminal() && stdoutIsTerminal() && !config.NonInteractiveEnv()
+	return stdinIsTerminal() && stdoutIsTerminal() && stderrIsTerminal() && !config.NonInteractiveEnv()
 }
 
 func readStdin() (string, error) {

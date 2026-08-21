@@ -468,3 +468,80 @@ func TestSetupJSONStaleCredentialsReportIncomplete(t *testing.T) {
 		t.Errorf("issue = %v", issues[0])
 	}
 }
+
+// The wizard records a handler refusal as an issue even when the health
+// snapshot alone would miss it, so "Setup complete!" can never follow an
+// installation warning.
+func TestSetupWizardRecordsHandlerFailures(t *testing.T) {
+	isolateAgents(t)
+	server := identityServer(t)
+	configHome := t.TempDir()
+	custom := "# my own hey skill\n"
+	codexSkill := filepath.Join(configHome, ".codex", "skills", "hey")
+	if err := os.MkdirAll(codexSkill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(codexSkill, "SKILL.md"), []byte(custom), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "session-cookie"); err != nil {
+		t.Fatalf("auth login: %v", err)
+	}
+
+	_, response, err := runAuthCommand(t, configHome, server.URL, "", true, "setup")
+	if err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	data := wizardData(t, response)
+	if data["status"] != "incomplete" {
+		t.Errorf("status = %v, want incomplete over a refused install", data["status"])
+	}
+	rawIssues := data["issues"].([]any)
+	checks := make([]string, 0, len(rawIssues))
+	for _, raw := range rawIssues {
+		checks = append(checks, raw.(map[string]any)["check"].(string))
+	}
+	if !contains(checks, "Codex setup failed") {
+		t.Errorf("handler failure not recorded: %v", checks)
+	}
+	if got, _ := os.ReadFile(filepath.Join(codexSkill, "SKILL.md")); string(got) != custom {
+		t.Errorf("user skill changed: %q", got)
+	}
+}
+
+// The checklist and the issue list must agree: rejected stored credentials
+// render as not signed in.
+func TestShowWizardSuccessRejectedCredentialsChecklist(t *testing.T) {
+	origColor := colorDisabled
+	colorDisabled = true
+	t.Cleanup(func() { colorDisabled = origColor })
+
+	var out bytes.Buffer
+	issues := []agentIssue{{Check: "Stored sign-in rejected", Hint: "Run: hey auth login"}}
+	showWizardSuccess(&out, wizardResult{Status: "incomplete", Issues: issues}, agentSetupOutcome{})
+	if !strings.Contains(out.String(), "✗ Signed in") {
+		t.Errorf("rejected credentials must render as not signed in:\n%s", out.String())
+	}
+}
+
+// Prompts render on stderr, so a redirected stderr means no prompting: an
+// invisible prompt must never sit waiting for input.
+func TestInteractiveStdioRequiresStderrTerminal(t *testing.T) {
+	stubTerminal := func(v *func() bool, value bool) {
+		orig := *v
+		*v = func() bool { return value }
+		t.Cleanup(func() { *v = orig })
+	}
+	stubTerminal(&stdinIsTerminal, true)
+	stubTerminal(&stdoutIsTerminal, true)
+	stubTerminal(&stderrIsTerminal, false)
+	t.Setenv("HEY_NONINTERACTIVE", "")
+
+	if interactiveStdio() {
+		t.Error("a redirected stderr must disable prompting")
+	}
+	stubTerminal(&stderrIsTerminal, true)
+	if !interactiveStdio() {
+		t.Error("three terminals and no escape hatch should allow prompting")
+	}
+}

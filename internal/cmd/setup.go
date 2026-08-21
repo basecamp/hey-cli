@@ -365,12 +365,18 @@ func (s *setupWizard) setupAgents() agentSetupOutcome {
 		if !ok {
 			continue
 		}
+		var handlerErr error
 		if s.styled {
 			if handler.Run != nil {
-				_ = handler.Run(s.cmd) // interactive handlers warn and continue
+				handlerErr = handler.Run(s.cmd) // interactive handlers warn and continue
 			}
 		} else if handler.RunNonInteractive != nil {
-			_ = handler.RunNonInteractive(s.cmd) // the snapshot below reports failures
+			handlerErr = handler.RunNonInteractive(s.cmd)
+		}
+		// A handler failure is an issue in its own right: the snapshot below
+		// catches most of them, but not every refusal leaves a failing check.
+		if handlerErr != nil {
+			issues = append(issues, agentIssue{Agent: a.Name, Check: a.Name + " setup failed", Hint: handlerErr.Error()})
 		}
 	}
 
@@ -444,7 +450,7 @@ func showWizardSuccess(w io.Writer, result wizardResult, outcome agentSetupOutco
 	fmt.Fprintln(w, divider)
 	fmt.Fprintln(w)
 
-	signedIn := result.Identity != nil || !hasIssue(result.Issues, "Not logged in")
+	signedIn := !hasIssue(result.Issues, "Not logged in") && !hasIssue(result.Issues, "Stored sign-in rejected")
 	fmt.Fprintln(w, statusLine(signedIn, "Signed in"))
 	if outcome.Skipped {
 		fmt.Fprintln(w, muted.format("  Coding agent setup skipped — run: hey setup"))

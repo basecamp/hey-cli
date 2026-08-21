@@ -128,7 +128,7 @@ func refreshInstalledSkills() (updated, failed int) {
 		if home, err := os.UserHomeDir(); err == nil {
 			baselineDir := filepath.Join(home, ".agents", "skills", "hey")
 			if ownedSkillDir(baselineDir) {
-				_ = os.WriteFile(filepath.Join(baselineDir, installedVersionFile), []byte(version.Version), 0o644) // #nosec G306 -- not a secret
+				_ = writeSkillFile(filepath.Join(baselineDir, installedVersionFile), []byte(version.Version))
 			}
 		}
 	}
