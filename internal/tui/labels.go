@@ -9,17 +9,16 @@ import (
 	"github.com/basecamp/hey-cli/internal/models"
 )
 
-// collectionPicker is a modal for choosing a collection (folder) to open.
-// Collections stay out of the box tab row; a single "Collections" tab opens
-// this picker instead.
-type collectionPicker struct {
-	boxIndexes []int // indexes into mailView.boxes, one per collection
+// labelPicker is a modal for choosing a label (folder) to open.
+// Labels stay out of the box tab row; a single "Labels" tab opens this picker.
+type labelPicker struct {
+	boxIndexes []int // indexes into mailView.boxes, one per label
 	names      []string
 	cursor     int
 }
 
-func newCollectionPicker(boxes []models.Box, currentIndex int) *collectionPicker {
-	p := &collectionPicker{}
+func newLabelPicker(boxes []models.Box, currentIndex int) *labelPicker {
+	p := &labelPicker{}
 	for i, b := range boxes {
 		if b.Kind != mailSourceKindFolder {
 			continue
@@ -33,14 +32,14 @@ func newCollectionPicker(boxes []models.Box, currentIndex int) *collectionPicker
 	return p
 }
 
-func (p *collectionPicker) selectedBoxIndex() int {
+func (p *labelPicker) selectedBoxIndex() int {
 	if p.cursor < 0 || p.cursor >= len(p.boxIndexes) {
 		return -1
 	}
 	return p.boxIndexes[p.cursor]
 }
 
-func (p *collectionPicker) update(msg tea.KeyPressMsg) {
+func (p *labelPicker) update(msg tea.KeyPressMsg) {
 	switch msg.Key().Code {
 	case tea.KeyUp:
 		if p.cursor > 0 {
@@ -55,7 +54,7 @@ func (p *collectionPicker) update(msg tea.KeyPressMsg) {
 
 // overlay composites the picker as a centered modal over the base content
 // using a lipgloss layer compositor.
-func (p *collectionPicker) overlay(base string, width, height int) string {
+func (p *labelPicker) overlay(base string, width, height int) string {
 	modal := p.view(width, height)
 	x := max((width-lipgloss.Width(modal))/2, 0)
 	y := max((height-lipgloss.Height(modal))/2, 0)
@@ -68,10 +67,10 @@ func (p *collectionPicker) overlay(base string, width, height int) string {
 	return canvas.Render()
 }
 
-func (p *collectionPicker) view(width, height int) string {
+func (p *labelPicker) view(width, height int) string {
 	// Rounded borders and two cells of padding on each side use six columns.
 	contentWidth := max(width-6, 1)
-	title := lipgloss.NewStyle().Foreground(colorChrome).Bold(true).Render(truncateToWidth("Collections", contentWidth))
+	title := lipgloss.NewStyle().Foreground(colorChrome).Bold(true).Render(truncateToWidth("Labels", contentWidth))
 	selected := lipgloss.NewStyle().Foreground(colorActive).Bold(true)
 
 	// Scroll the list when it cannot fit: border, padding and title take 6 lines.
@@ -98,7 +97,7 @@ func (p *collectionPicker) view(width, height int) string {
 		Render(body)
 }
 
-func (p *collectionPicker) helpBindings() []helpBinding {
+func (p *labelPicker) helpBindings() []helpBinding {
 	return []helpBinding{
 		{"↑/↓", "choose"},
 		{"enter", "open"},

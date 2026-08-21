@@ -146,12 +146,12 @@ type mailView struct {
 	inThread         bool
 	loading          bool
 
-	compose            *composeForm      // non-nil while a message, reply or forward is being written
-	bulkReply          *bulkReplyForm    // non-nil while a bulk reply is being previewed or written
-	movePicker         *movePicker       // non-nil while a destination box is being selected
-	folderPicker       *folderPicker     // non-nil while folder labels are being managed
-	collections        *collectionPicker // non-nil while a collection is being chosen
-	searchForm         *mailSearchForm   // non-nil while a search query is being entered
+	compose            *composeForm    // non-nil while a message, reply or forward is being written
+	bulkReply          *bulkReplyForm  // non-nil while a bulk reply is being previewed or written
+	movePicker         *movePicker     // non-nil while a destination box is being selected
+	folderPicker       *folderPicker   // non-nil while folder labels are being managed
+	labels             *labelPicker    // non-nil while a label is being chosen
+	searchForm         *mailSearchForm // non-nil while a search query is being entered
 	searchList         contentList
 	searchActive       bool
 	searchQuery        string
@@ -520,9 +520,9 @@ func (v *mailView) View() string {
 	if v.folderPicker != nil {
 		return v.folderPicker.view(v.vc.styles, v.vc.width)
 	}
-	if v.collections != nil {
+	if v.labels != nil {
 		base := v.listHeader() + v.postingList.view()
-		return v.collections.overlay(base, v.vc.width, v.vc.height)
+		return v.labels.overlay(base, v.vc.width, v.vc.height)
 	}
 	if v.inThread {
 		if v.notice != "" {
@@ -571,7 +571,7 @@ func firstTimeSenderNoun(count int) string {
 
 // CapturingInput reports whether a form or picker is open and wants every key.
 func (v *mailView) CapturingInput() bool {
-	return v.compose != nil || v.bulkReply != nil || v.movePicker != nil || v.folderPicker != nil || v.collections != nil || v.searchForm != nil
+	return v.compose != nil || v.bulkReply != nil || v.movePicker != nil || v.folderPicker != nil || v.labels != nil || v.searchForm != nil
 }
 
 func (v *mailView) AccountSwitchBlocked() bool {
@@ -594,8 +594,8 @@ func (v *mailView) HelpBindings() []helpBinding {
 	if v.folderPicker != nil {
 		return v.folderPicker.helpBindings()
 	}
-	if v.collections != nil {
-		return v.collections.helpBindings()
+	if v.labels != nil {
+		return v.labels.helpBindings()
 	}
 	if v.inThread {
 		bindings := []helpBinding{{"r", "reply"}, {"f", "forward"}}
@@ -674,8 +674,8 @@ func (v *mailView) SubnavItems() ([]navItem, int, string, bool) {
 		}
 	}
 
-	// The tab row shows the known boxes plus one Collections tab; the
-	// collections themselves live in a modal picker.
+	// The tab row shows the known boxes plus one Labels tab; the labels
+	// themselves live in a modal picker.
 	tabIndexes := v.tabBoxIndexes()
 	boxes := make([]models.Box, len(tabIndexes))
 	selected := 0
@@ -686,8 +686,8 @@ func (v *mailView) SubnavItems() ([]navItem, int, string, bool) {
 		}
 	}
 	items := boxNavItems(boxes)
-	if v.hasCollections() {
-		items = append(items, navItem{shortcut: "I", label: "Collections"})
+	if v.hasLabels() {
+		items = append(items, navItem{shortcut: "L", label: "Labels"})
 		if v.currentSourceKind() == mailSourceKindFolder {
 			selected = len(items) - 1
 		}
@@ -696,7 +696,7 @@ func (v *mailView) SubnavItems() ([]navItem, int, string, bool) {
 }
 
 // tabBoxIndexes returns the indexes into v.boxes shown as their own tabs —
-// every source except collections.
+// every source except labels.
 func (v *mailView) tabBoxIndexes() []int {
 	indexes := make([]int, 0, len(v.boxes))
 	for i, b := range v.boxes {
@@ -707,7 +707,7 @@ func (v *mailView) tabBoxIndexes() []int {
 	return indexes
 }
 
-func (v *mailView) hasCollections() bool {
+func (v *mailView) hasLabels() bool {
 	for _, b := range v.boxes {
 		if b.Kind == mailSourceKindFolder {
 			return true
@@ -716,8 +716,8 @@ func (v *mailView) hasCollections() bool {
 	return false
 }
 
-func (v *mailView) openCollections() {
-	v.collections = newCollectionPicker(v.boxes, v.boxIndex)
+func (v *mailView) openLabels() {
+	v.labels = newLabelPicker(v.boxes, v.boxIndex)
 }
 
 func (v *mailView) SubnavLeft() tea.Cmd {
@@ -726,7 +726,7 @@ func (v *mailView) SubnavLeft() tea.Cmd {
 	}
 	tabIndexes := v.tabBoxIndexes()
 	if v.currentSourceKind() == mailSourceKindFolder {
-		// From the Collections tab, step back to the last box tab.
+		// From the Labels tab, step back to the last box tab.
 		if len(tabIndexes) == 0 {
 			return nil
 		}
@@ -745,8 +745,8 @@ func (v *mailView) SubnavRight() tea.Cmd {
 		return nil
 	}
 	if v.currentSourceKind() == mailSourceKindFolder {
-		// Already on the Collections tab: reopen the picker.
-		v.openCollections()
+		// Already on the Labels tab: reopen the picker.
+		v.openLabels()
 		return nil
 	}
 	tabIndexes := v.tabBoxIndexes()
@@ -757,8 +757,8 @@ func (v *mailView) SubnavRight() tea.Cmd {
 		if i+1 < len(tabIndexes) {
 			return v.switchBox(tabIndexes[i+1])
 		}
-		if v.hasCollections() {
-			v.openCollections()
+		if v.hasLabels() {
+			v.openLabels()
 		}
 		return nil
 	}
@@ -823,20 +823,20 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 
-	if v.collections != nil {
+	if v.labels != nil {
 		switch msg.Key().Code {
 		case tea.KeyEscape:
-			v.collections = nil
+			v.labels = nil
 			return nil
 		case tea.KeyEnter:
-			index := v.collections.selectedBoxIndex()
-			v.collections = nil
+			index := v.labels.selectedBoxIndex()
+			v.labels = nil
 			if index < 0 {
 				return nil
 			}
 			return v.switchBox(index)
 		}
-		v.collections.update(msg)
+		v.labels.update(msg)
 		return nil
 	}
 
@@ -1041,8 +1041,8 @@ func (v *mailView) Resize(width, height int) {
 
 // handleBoxShortcut handles number-key shortcuts for switching boxes.
 func (v *mailView) handleBoxShortcut(key string) tea.Cmd {
-	if key == "I" && v.hasCollections() && !v.CapturingInput() {
-		v.openCollections()
+	if key == "L" && v.hasLabels() && !v.CapturingInput() {
+		v.openLabels()
 		// A no-op command tells the caller the key was handled.
 		return func() tea.Msg { return nil }
 	}

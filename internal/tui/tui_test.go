@@ -344,7 +344,7 @@ func TestSectionNavigationIncludesContacts(t *testing.T) {
 	}
 }
 
-func TestSubnavNavigationUpdatesHelpWhenItOpensCollections(t *testing.T) {
+func TestSubnavNavigationUpdatesHelpWhenItOpensLabels(t *testing.T) {
 	m := modelWithBoxes()
 	m.mailView.boxes = orderBoxes(append(m.mailView.boxes,
 		models.Box{ID: 12, Kind: mailSourceKindFolder, Name: "Receipts"},
@@ -356,12 +356,12 @@ func TestSubnavNavigationUpdatesHelpWhenItOpensCollections(t *testing.T) {
 	updated, _ := m.Update(keyPress("right"))
 	m = updated.(model)
 
-	if m.mailView.collections == nil {
-		t.Fatal("right from the last mail tab should open Collections")
+	if m.mailView.labels == nil {
+		t.Fatal("right from the last mail tab should open Labels")
 	}
 	for _, want := range []helpBinding{{"↑/↓", "choose"}, {"enter", "open"}, {"esc", "cancel"}} {
 		if !slices.Contains(m.help.bindings, want) {
-			t.Errorf("Collections help is missing %+v: %v", want, m.help.bindings)
+			t.Errorf("Labels help is missing %+v: %v", want, m.help.bindings)
 		}
 	}
 }

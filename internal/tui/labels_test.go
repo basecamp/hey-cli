@@ -9,8 +9,8 @@ import (
 	"github.com/basecamp/hey-cli/internal/models"
 )
 
-func TestCollectionPickerConstrainsLongNamesToModalWidth(t *testing.T) {
-	picker := newCollectionPicker([]models.Box{{
+func TestLabelPickerConstrainsLongNamesToModalWidth(t *testing.T) {
+	picker := newLabelPicker([]models.Box{{
 		ID:   12,
 		Kind: mailSourceKindFolder,
 		Name: "Receipts and invoices from every supplier for the annual financial review",
@@ -18,6 +18,9 @@ func TestCollectionPickerConstrainsLongNamesToModalWidth(t *testing.T) {
 
 	const width = 30
 	view := stripANSI(picker.overlay("", width, 10))
+	if !strings.Contains(view, "Labels") || strings.Contains(view, "Collections") {
+		t.Errorf("picker title should identify folders as Labels: %q", view)
+	}
 	foundSelection := false
 	for _, line := range strings.Split(view, "\n") {
 		if lipgloss.Width(line) > width {
@@ -33,6 +36,6 @@ func TestCollectionPickerConstrainsLongNamesToModalWidth(t *testing.T) {
 		}
 	}
 	if !foundSelection {
-		t.Fatal("picker did not render the selected collection")
+		t.Fatal("picker did not render the selected label")
 	}
 }
