@@ -127,9 +127,11 @@ func (t *Thread) Complete() bool {
 
 // Load reads one thread. An error is a thread that could not be read at all — the
 // first page failed, or the index failed part way, since an index with a hole in it
-// is not a thread. A body that could not be read is an entry in the failed state, not
-// an error.
+// is not a thread — or a caller that stopped waiting: its context ending is its
+// decision, not a limit, and is returned as the error it is. A body that could not be
+// read within the limits is an entry in the failed or over_limit state, not an error.
 func Load(ctx context.Context, source Source, request Request) (*Thread, error) {
+	caller := ctx
 	limits := request.Limits
 	if limits.Deadline > 0 {
 		var cancel context.CancelFunc
@@ -148,6 +150,9 @@ func Load(ctx context.Context, source Source, request Request) (*Thread, error) 
 	}
 	if request.Hydrate {
 		hydrate(ctx, source, thread, limits)
+		if err := caller.Err(); err != nil {
+			return nil, err
+		}
 	}
 
 	// Admission is newest first, which is the order the index serves; reading order

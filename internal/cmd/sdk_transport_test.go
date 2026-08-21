@@ -17,12 +17,20 @@ func cappedClient(t *testing.T) *http.Client {
 	return &http.Client{Transport: &cappedTransport{inner: http.DefaultTransport, limit: 1024}}
 }
 
+// get asks the way the SDK's generated client does, for JSON; getAccepting asks for
+// whatever the caller names, the way a blob or an export does.
 func get(t *testing.T, client *http.Client, url string) ([]byte, error) {
+	t.Helper()
+	return getAccepting(t, client, url, "application/json")
+}
+
+func getAccepting(t *testing.T, client *http.Client, url, accept string) ([]byte, error) {
 	t.Helper()
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	req.Header.Set("Accept", accept)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -106,40 +114,59 @@ func TestCappedTransportCapsErrorBodiesToo(t *testing.T) {
 	}
 }
 
-// A blob is not a parser's body: the SDK streams it to a destination of any size, so
-// the cap leaves it alone.
-func TestCappedTransportLeavesBlobsAlone(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/pdf")
+// A body of exactly the limit is read whole; one byte more is refused.
+func TestCappedTransportAcceptsABodyExactlyAtTheLimit(t *testing.T) {
+	for _, size := range []int{1024, 1025} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			flusher, _ := w.(http.Flusher)
+			_, _ = io.WriteString(w, strings.Repeat("x", size))
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}))
+		body, err := get(t, cappedClient(t), server.URL)
+		server.Close()
+		switch size {
+		case 1024:
+			if err != nil || len(body) != 1024 {
+				t.Errorf("exactly at the limit: %d bytes, err = %v, want the whole body", len(body), err)
+			}
+		default:
+			if !errors.Is(err, ErrResponseTooLarge) {
+				t.Errorf("one past the limit: err = %v, want ErrResponseTooLarge", err)
+			}
+		}
+	}
+}
+
+// What is capped is decided by the request. A blob the SDK asked for with */* streams
+// whole whatever it turns out to be — a text file included — and a JSON answer the
+// server labels as an image is capped all the same.
+func TestCappedTransportDecidesByTheRequest(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", r.URL.Query().Get("type"))
 		_, _ = io.WriteString(w, strings.Repeat("%", 4096))
 	}))
 	t.Cleanup(server.Close)
 
-	body, err := get(t, cappedClient(t), server.URL)
-	if err != nil || len(body) != 4096 {
-		t.Fatalf("blob = %d bytes, err = %v, want the whole blob", len(body), err)
-	}
-}
-
-func TestIsTextResponse(t *testing.T) {
-	for contentType, want := range map[string]bool{
-		"application/json":                true,
-		"application/json; charset=utf-8": true,
-		"application/problem+json":        true,
-		"text/html":                       true,
-		"text/plain; charset=utf-8":       true,
-		"":                                true,
-		"not a type":                      true,
-		"image/png":                       false,
-		"application/pdf":                 false,
-		"application/octet-stream":        false,
+	for _, test := range []struct {
+		accept, contentType string
+		capped              bool
+	}{
+		{"*/*", "application/pdf", false},
+		{"*/*", "text/plain", false},
+		{"*/*", "application/json", false},
+		{"text/csv", "text/csv", false},
+		{"application/json", "application/json", true},
+		{"application/json", "image/png", true},
+		{"application/json", "application/octet-stream", true},
+		{"text/html", "text/html", true},
+		{"", "application/json", true},
 	} {
-		resp := &http.Response{Header: http.Header{}}
-		if contentType != "" {
-			resp.Header.Set("Content-Type", contentType)
-		}
-		if got := isTextResponse(resp); got != want {
-			t.Errorf("isTextResponse(%q) = %v, want %v", contentType, got, want)
+		body, err := getAccepting(t, cappedClient(t), server.URL+"?type="+test.contentType, test.accept)
+		if capped := errors.Is(err, ErrResponseTooLarge); capped != test.capped {
+			t.Errorf("Accept %q, Content-Type %q: capped = %v (err %v, %d bytes), want %v", test.accept, test.contentType, capped, err, len(body), test.capped)
 		}
 	}
 }

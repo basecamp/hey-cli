@@ -94,6 +94,13 @@ func (c *topicCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	entries := threadEntries(thread)
 
+	// The envelope carries the notice and the styled view prints it; every other
+	// format — a count, IDs, --quiet, --html — gets it on stderr, so what is missing
+	// is said wherever the output cannot say it.
+	if stderrNotice := paginationNoticeForStderr(format, notice); stderrNotice != "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), stderrNotice)
+	}
+
 	switch format {
 	case output.FormatHTML:
 		return writeThreadHTML(cmd.OutOrStdout(), entries)
@@ -101,9 +108,6 @@ func (c *topicCommand) run(cmd *cobra.Command, args []string) error {
 		printThreadStyled(cmd.OutOrStdout(), entries, notice)
 		return nil
 	case output.FormatCount, output.FormatIDs:
-		if stderrNotice := paginationNoticeForStderr(format, notice); stderrNotice != "" {
-			fmt.Fprintln(cmd.ErrOrStderr(), stderrNotice)
-		}
 		return writeOK(entries)
 	case output.FormatAuto, output.FormatJSON, output.FormatQuiet, output.FormatMarkdown:
 	}
@@ -126,9 +130,10 @@ func (c *topicCommand) run(cmd *cobra.Command, args []string) error {
 	)
 }
 
-// printThreadStyled writes a thread for a terminal. A body is rendered; an entry HEY
-// served no body for shows its summary, which is all HEY has for it; an entry whose body
-// was not read says so rather than passing a preview off as the message.
+// printThreadStyled writes a thread for a terminal. A body is rendered; a body that was
+// read and has nothing to show says so; an entry HEY served no body for shows its
+// summary, which is all HEY has for it; an entry whose body was not read says so rather
+// than passing a preview off as the message.
 func printThreadStyled(w io.Writer, entries []threadEntry, notice string) {
 	for i, e := range entries {
 		if i > 0 {
@@ -139,6 +144,8 @@ func printThreadStyled(w io.Writer, entries []threadEntry, notice string) {
 		switch {
 		case e.Body != "":
 			fmt.Fprintln(w, markdown.Render(e.Body, stdoutWidth()))
+		case e.BodyState == string(threadload.StateHydrated):
+			fmt.Fprintln(w, "(empty body)")
 		case e.BodyState == string(threadload.StateBodyless) && e.Summary != "":
 			fmt.Fprintln(w, terminal.SanitizeLine(e.Summary))
 		case e.BodyState == string(threadload.StateBodyless):

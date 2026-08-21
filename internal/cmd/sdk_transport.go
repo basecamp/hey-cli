@@ -22,9 +22,12 @@ import (
 // apply. It reads decompressed bytes: the transport it wraps is the one that
 // negotiated the encoding, and what comes out of it is what the parser would keep.
 //
-// Only JSON and text responses are capped. A blob is either streamed by the SDK to a
-// destination of any size (DownloadBlob) or buffered under the SDK's own
-// MaxResponseBodyBytes (GetBlob), and neither goes through a generated parser.
+// Which responses are capped is decided by the request, not by what the server says
+// it answered with: the SDK asks for application/json where a generated parser will
+// buffer the answer and for text/html where GetHTML will, and asks for */* for a blob,
+// which it streams to a destination of any size (DownloadBlob) or buffers under its
+// own MaxResponseBodyBytes (GetBlob). A server that labels a JSON answer as a PNG is
+// still capped; an attachment that happens to be a text file is still streamed.
 
 // maxTextResponseBytes is the most a JSON or text response may deliver: 16 MiB, which
 // is a message with a very large HTML body several times over.
@@ -55,7 +58,7 @@ func newCappedTransport(limit int64) *cappedTransport {
 
 func (t *cappedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := t.inner.RoundTrip(req)
-	if err != nil || resp == nil || resp.Body == nil || !isTextResponse(resp) {
+	if err != nil || resp == nil || resp.Body == nil || !isParsedRequest(req) {
 		return resp, err
 	}
 	if resp.ContentLength > t.limit {
@@ -66,18 +69,24 @@ func (t *cappedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
-// isTextResponse reports a body a generated parser would buffer: JSON, or any text.
-// A response without a content type is treated as text, since the SDK parses it.
-func isTextResponse(resp *http.Response) bool {
-	contentType := resp.Header.Get("Content-Type")
-	if contentType == "" {
+// isParsedRequest reports a request whose answer the SDK buffers and parses, by what
+// the request asked for. Anything it did not ask for as JSON or HTML — a blob's */*, an
+// export's text/csv — it handles by streaming or under its own bound.
+func isParsedRequest(req *http.Request) bool {
+	accept := req.Header.Get("Accept")
+	if accept == "" {
 		return true
 	}
-	mediaType, _, err := mime.ParseMediaType(contentType)
-	if err != nil {
-		return true
+	for _, part := range strings.Split(accept, ",") {
+		mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(part))
+		if err != nil {
+			continue
+		}
+		if mediaType == "application/json" || strings.HasSuffix(mediaType, "+json") || mediaType == "text/html" {
+			return true
+		}
 	}
-	return mediaType == "application/json" || strings.HasSuffix(mediaType, "+json") || strings.HasPrefix(mediaType, "text/")
+	return false
 }
 
 type cappedBody struct {
@@ -86,9 +95,12 @@ type cappedBody struct {
 	request   *http.Request
 }
 
+// Read delivers up to the limit and fails on the first byte past it. A body that is
+// exactly the limit is read whole: with nothing remaining, the next read still asks the
+// wrapped body for one byte, and gets its EOF rather than a refusal.
 func (b *cappedBody) Read(p []byte) (int, error) {
-	if b.remaining <= 0 {
-		return 0, fmt.Errorf("%s %s: %w", b.request.Method, b.request.URL.Path, ErrResponseTooLarge)
+	if len(p) == 0 {
+		return 0, nil
 	}
 	if int64(len(p)) > b.remaining+1 {
 		p = p[:b.remaining+1]

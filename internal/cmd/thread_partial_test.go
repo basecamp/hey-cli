@@ -261,3 +261,40 @@ func TestAttachmentsReadBodiesInEveryFormatAndRefusePartialUnlessAllowed(t *test
 		}
 	}
 }
+
+// The formats whose output cannot carry a notice get it on stderr — --quiet and --html
+// included, not only the count and the IDs.
+func TestThreadsPartialNoticeReachesStderrForQuietAndHTML(t *testing.T) {
+	limits := threadload.DefaultLimits
+	limits.MaxPages = 1
+	withThreadLimits(t, limits)
+	stdoutTerminal(t, false)
+
+	for _, flag := range []string{"--quiet", "--html"} {
+		server, _ := partialThreadServer(t, [][]int64{{13, 12}, {11}})
+		stdout, stderr, err := runCLIRaw(t, server, flag, "threads", "7", "--allow-partial")
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", flag, err)
+		}
+		if !strings.Contains(stderr, "notice: only the newest 2 entries were read") {
+			t.Errorf("%s: stderr = %q, want the notice", flag, stderr)
+		}
+		if stdout == "" {
+			t.Errorf("%s: stdout empty, want the partial output", flag)
+		}
+	}
+}
+
+// A body that was read and rendered to nothing is an empty body, not an unread one.
+func TestThreadsStyledCallsAnEmptyHydratedBodyEmpty(t *testing.T) {
+	server, _ := threadEntriesServer(t, [][]int64{{11}}, map[int64]string{11: "<p><br></p>"})
+	stdoutTerminal(t, false)
+
+	stdout, _, err := runCLIRaw(t, server, "--styled", "threads", "7")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "(empty body)") || strings.Contains(stdout, "not read") {
+		t.Errorf("stdout = %q", stdout)
+	}
+}

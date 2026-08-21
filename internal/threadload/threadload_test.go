@@ -308,3 +308,19 @@ func TestLoadEndsTheIndexOnAnEmptyPage(t *testing.T) {
 		t.Errorf("thread = %+v, want the walk to stop at the empty page without claiming truncation", thread)
 	}
 }
+
+// A caller that stops waiting gets its cancellation back as the error it is, not a
+// partial thread whose unread entries look like a limit was reached.
+func TestLoadReturnsTheCallersCancellation(t *testing.T) {
+	source := &fakeSource{pages: [][]int64{{14, 13, 12, 11}}, bodies: map[int64]string{}, slow: 100 * time.Millisecond}
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	l := limits()
+	l.Concurrency = 1
+	l.MaxRetries = 0
+
+	thread, err := Load(ctx, source, Request{TopicID: 7, Hydrate: true, Limits: l})
+	if !errors.Is(err, context.DeadlineExceeded) || thread != nil {
+		t.Fatalf("Load = %+v, %v; want the caller's deadline as the error", thread, err)
+	}
+}
