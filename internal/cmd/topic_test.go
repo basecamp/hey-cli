@@ -100,7 +100,7 @@ func readThreadEntries(ctx context.Context) ([]threadEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	return threadEntries(thread), nil
+	return threadEntries(thread, false), nil
 }
 
 // A thread reads oldest first, however many pages HEY serves it in.
@@ -228,8 +228,16 @@ func TestEntriesInThreadConvertsBodiesToMarkdown(t *testing.T) {
 	if !strings.Contains(entries[0].Body, "https://example.com/plan") {
 		t.Errorf("body = %q, want the link to keep its URL", entries[0].Body)
 	}
-	if entries[0].BodyHTML != trix {
-		t.Errorf("body_html = %q, want HEY's original", entries[0].BodyHTML)
+	// A body is held in one form: Markdown here, and the HTML only under --html.
+	if entries[0].BodyHTML != "" {
+		t.Errorf("body_html = %q, want it released once converted", entries[0].BodyHTML)
+	}
+	thread, err := loadThread(context.Background(), 7, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if html := threadEntries(thread, true); html[0].BodyHTML != trix || html[0].Body != "" {
+		t.Errorf("--html entry = %+v, want HEY's original HTML and no Markdown", html[0])
 	}
 }
 
