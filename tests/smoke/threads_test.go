@@ -139,15 +139,18 @@ func TestThreadsReadsALongThreadAsMarkdown(t *testing.T) {
 	}
 }
 
-// Every output format answers a thread the way the contract says.
+// Every output format answers the same thread — one longer than a geared page — the
+// way the contract says.
 func TestThreadsFormats(t *testing.T) {
-	topicID, _ := longThread(t, 2)
+	const replies = 11
+	const entries = replies + 1
+	topicID, _ := longThread(t, replies)
 
 	t.Run("json", func(t *testing.T) {
 		resp := heyJSON(t, "threads", topicID)
-		entries := dataAs[[]threadEntry](t, resp)
-		if len(entries) != 3 || resp.Summary != fmt.Sprintf("3 entries in thread %s", topicID) {
-			t.Errorf("entries = %d, summary = %q", len(entries), resp.Summary)
+		got := dataAs[[]threadEntry](t, resp)
+		if len(got) != entries || resp.Summary != fmt.Sprintf("%d entries in thread %s", entries, topicID) {
+			t.Errorf("entries = %d, summary = %q", len(got), resp.Summary)
 		}
 	})
 
@@ -156,7 +159,7 @@ func TestThreadsFormats(t *testing.T) {
 		if !strings.HasPrefix(out, "# Thread "+topicID+"\n") {
 			t.Errorf("markdown = %q, want a document heading", out)
 		}
-		if strings.Count(out, "\n## From: ") != 3 || strings.Count(out, "\n---\n") != 3 {
+		if strings.Count(out, "\n## From: ") != entries || strings.Count(out, "\n---\n") != entries {
 			t.Errorf("markdown = %q, want a heading and a rule per entry", out)
 		}
 		if strings.Contains(out, "<p") || strings.Contains(out, "<div") {
@@ -167,8 +170,8 @@ func TestThreadsFormats(t *testing.T) {
 	t.Run("ids", func(t *testing.T) {
 		out := heyOK(t, "threads", topicID, "--ids-only")
 		ids := strings.Fields(out)
-		if len(ids) != 3 {
-			t.Errorf("--ids-only = %q, want three IDs", out)
+		if len(ids) != entries {
+			t.Errorf("--ids-only = %q, want %d IDs", out, entries)
 		}
 		for _, id := range ids {
 			if _, err := strconv.ParseInt(id, 10, 64); err != nil {
@@ -178,29 +181,29 @@ func TestThreadsFormats(t *testing.T) {
 	})
 
 	t.Run("count", func(t *testing.T) {
-		if out := strings.TrimSpace(heyOK(t, "threads", topicID, "--count")); out != "3" {
-			t.Errorf("--count = %q, want 3", out)
+		if out := strings.TrimSpace(heyOK(t, "threads", topicID, "--count")); out != strconv.Itoa(entries) {
+			t.Errorf("--count = %q, want %d", out, entries)
 		}
 	})
 
 	t.Run("quiet", func(t *testing.T) {
 		out := heyOK(t, "threads", topicID, "--quiet")
-		var entries []threadEntry
-		if err := json.Unmarshal([]byte(out), &entries); err != nil || len(entries) != 3 {
+		var got []threadEntry
+		if err := json.Unmarshal([]byte(out), &got); err != nil || len(got) != entries {
 			t.Errorf("--quiet = %q, err = %v, want the bare entries", out, err)
 		}
 	})
 
 	t.Run("jq", func(t *testing.T) {
 		out := heyOK(t, "threads", topicID, "--jq", ".data | length")
-		if strings.TrimSpace(out) != "3" {
-			t.Errorf("--jq = %q, want 3", out)
+		if strings.TrimSpace(out) != strconv.Itoa(entries) {
+			t.Errorf("--jq = %q, want %d", out, entries)
 		}
 	})
 
 	t.Run("styled", func(t *testing.T) {
 		out := heyOK(t, "threads", topicID, "--styled")
-		if strings.Count(out, "From: ") != 3 {
+		if strings.Count(out, "From: ") != entries {
 			t.Errorf("styled = %q, want a From line per entry", out)
 		}
 		// The composed text had literal asterisks, which render as the asterisks they
@@ -213,7 +216,7 @@ func TestThreadsFormats(t *testing.T) {
 
 	t.Run("html to a pipe", func(t *testing.T) {
 		out := heyOK(t, "threads", topicID, "--html")
-		if strings.Count(out, "<!-- hey entry ") != 3 {
+		if strings.Count(out, "<!-- hey entry ") != entries {
 			t.Errorf("--html = %q, want a comment per entry", out)
 		}
 		if !strings.Contains(out, "<div") && !strings.Contains(out, "<p") {
