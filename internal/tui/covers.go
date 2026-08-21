@@ -153,10 +153,23 @@ func (p coverPalette) current() coverPalette {
 var coverPalettes = map[coverPreset]coverPalette{
 	coverBlobs: {field: lipgloss.Cyan, ink: [4]color.Color{lipgloss.BrightYellow}},
 	coverGrid:  {field: lipgloss.Black, ink: [4]color.Color{lipgloss.Blue, lipgloss.BrightBlue}},
-	coverPeace: {field: lipgloss.Yellow, ink: [4]color.Color{lipgloss.BrightWhite}},
+
+	// HEY draws the hand white on a yellow card. Yellow is the lightest hue a theme
+	// has, so a whole cover of it glares in every one of them, and there is no
+	// darker yellow to reach for — a palette has one. The yellow moves to the hand
+	// instead: the cover still reads yellow, but as line work on the reader's own
+	// paper rather than as a lit panel.
+	coverPeace: {field: lipgloss.Black, ink: [4]color.Color{lipgloss.Yellow}},
+
 	coverTerrazzo: {field: lipgloss.Black, ink: [4]color.Color{
 		lipgloss.BrightWhite, lipgloss.Red, lipgloss.Cyan}},
-	coverTopo: {field: lipgloss.Magenta, ink: [4]color.Color{lipgloss.Black}},
+
+	// A contour map on the reader's own paper. The web's violet is between blue and
+	// magenta and no palette has it; blue is the darkest hue on offer and still
+	// read as too bright across a whole cover, and there is nothing darker than a
+	// hue except the background. So the field is the background and the contours
+	// keep the violet end of the palette.
+	coverTopo: {field: lipgloss.Black, ink: [4]color.Color{lipgloss.Magenta}},
 	coverWaves: {field: lipgloss.Magenta, ink: [4]color.Color{
 		lipgloss.BrightYellow, lipgloss.Red, lipgloss.BrightMagenta, lipgloss.Blue}},
 }
