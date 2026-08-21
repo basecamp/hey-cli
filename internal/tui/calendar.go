@@ -71,12 +71,12 @@ type calendarView struct {
 	inThread      bool
 	loading       bool
 
-	timeTrackCategories *timeTrackCategoryManager
-	habitForm           *habitForm
-	habitIndex          int
-	habitMutating       bool
-	confirmHabitDelete  bool
-	notice              string
+	timeTrackCategories    *timeTrackCategoryManager
+	habitForm              *habitForm
+	habitIndex             int
+	habitMutating          bool
+	confirmedHabitDeleteID int64
+	notice                 string
 }
 
 func newCalendarView(vc *viewContext) *calendarView {
@@ -90,6 +90,7 @@ func newCalendarView(vc *viewContext) *calendarView {
 }
 
 func (v *calendarView) Init() tea.Cmd {
+	v.confirmedHabitDeleteID = 0
 	cmds := []tea.Cmd{v.fetchIdentity()}
 	if len(v.calendars) == 0 {
 		v.loading = true
@@ -120,6 +121,7 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 
 	case recordingsLoadedMsg:
 		v.loading = false
+		v.confirmedHabitDeleteID = 0
 		v.events, v.todos, v.habits = splitRecordings(msg.recordings)
 		v.normalizeHabitSelection()
 		v.rebuildView()
@@ -139,7 +141,7 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		v.habitForm = nil
-		v.confirmHabitDelete = false
+		v.confirmedHabitDeleteID = 0
 		v.notice = msg.action
 		if v.calIndex >= 0 && v.calIndex < len(v.calendars) {
 			v.loading = true
@@ -230,7 +232,7 @@ func (v *calendarView) HelpBindings() []helpBinding {
 	if len(v.manageableHabits()) > 0 {
 		bindings = append(bindings, helpBinding{"[/]", "select habit"}, helpBinding{"e", "edit habit"})
 		deleteLabel := "delete habit"
-		if v.confirmHabitDelete {
+		if v.habitDeleteConfirmed() {
 			deleteLabel = "confirm delete"
 		}
 		bindings = append(bindings, helpBinding{"x", deleteLabel})
@@ -287,7 +289,7 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 
 	if msg.String() != "x" {
-		v.confirmHabitDelete = false
+		v.confirmedHabitDeleteID = 0
 	}
 	v.notice = ""
 	switch msg.String() {
@@ -321,8 +323,8 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	case "x":
 		if habit := v.selectedHabit(); habit != nil {
-			if !v.confirmHabitDelete {
-				v.confirmHabitDelete = true
+			if v.confirmedHabitDeleteID != habit.ID {
+				v.confirmedHabitDeleteID = habit.ID
 				v.notice = fmt.Sprintf("Press x again to permanently delete %s and its history", habit.Title)
 				return nil
 			}
@@ -505,8 +507,13 @@ func (v *calendarView) moveHabitSelection(delta int) {
 	v.habitIndex = (v.habitIndex + delta + len(habits)) % len(habits)
 }
 
+func (v *calendarView) habitDeleteConfirmed() bool {
+	habit := v.selectedHabit()
+	return habit != nil && v.confirmedHabitDeleteID == habit.ID
+}
+
 func (v *calendarView) startHabitForm(mode habitFormMode, recording models.Recording) tea.Cmd {
-	v.confirmHabitDelete = false
+	v.confirmedHabitDeleteID = 0
 	v.habitForm = newHabitForm(mode, recording, v.vc.styles)
 	v.habitForm.resize(v.vc.width, v.vc.height)
 	return v.habitForm.init()

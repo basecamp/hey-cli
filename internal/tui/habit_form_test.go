@@ -301,8 +301,8 @@ func TestCalendarHabitDeleteFailurePreservesConfirmationAndSelection(t *testing.
 	if !consumed || refresh != nil {
 		t.Fatalf("failed delete update = consumed:%v refresh:%v", consumed, refresh)
 	}
-	if !view.confirmHabitDelete || view.habitMutating || view.loading {
-		t.Errorf("failed delete state = confirm:%v mutating:%v loading:%v", view.confirmHabitDelete, view.habitMutating, view.loading)
+	if !view.habitDeleteConfirmed() || view.habitMutating || view.loading {
+		t.Errorf("failed delete state = confirmed ID:%d mutating:%v loading:%v", view.confirmedHabitDeleteID, view.habitMutating, view.loading)
 	}
 	if current := view.selectedHabit(); current == nil || selected == nil || current.ID != selected.ID || view.habitIndex != 0 {
 		t.Errorf("selection changed after delete failure: before=%+v after=%+v index=%d", selected, current, view.habitIndex)
@@ -312,18 +312,36 @@ func TestCalendarHabitDeleteFailurePreservesConfirmationAndSelection(t *testing.
 	}
 }
 
+func TestCalendarHabitDeleteConfirmationIsBoundToSelectedHabit(t *testing.T) {
+	view, _ := calendarHabitsWithServer(t)
+	view.HandleContentKey(keyPress("x"))
+	if view.confirmedHabitDeleteID != 7 {
+		t.Fatalf("confirmed habit ID = %d, want 7", view.confirmedHabitDeleteID)
+	}
+
+	view.Update(recordingsLoadedMsg{recordings: []models.Recording{{
+		ID: 8, Title: "Evening walk", Type: "CalendarHabit", Icon: "walk", Color: "gold", Days: []int32{1, 3, 5},
+	}}})
+	if view.confirmedHabitDeleteID != 0 {
+		t.Fatalf("recordings reload preserved confirmed habit ID %d", view.confirmedHabitDeleteID)
+	}
+	if cmd := view.HandleContentKey(keyPress("x")); cmd != nil || view.confirmedHabitDeleteID != 8 {
+		t.Fatalf("first x for reloaded habit = cmd:%v confirmed ID:%d", cmd, view.confirmedHabitDeleteID)
+	}
+}
+
 func TestCalendarHabitDeleteRequiresConfirmationAndRefresh(t *testing.T) {
 	view, recorded := calendarHabitsWithServer(t)
-	if cmd := view.HandleContentKey(keyPress("x")); cmd != nil || !view.confirmHabitDelete || !strings.Contains(view.notice, "Press x again") {
-		t.Fatalf("first x = cmd:%v confirm:%v notice:%q", cmd, view.confirmHabitDelete, view.notice)
+	if cmd := view.HandleContentKey(keyPress("x")); cmd != nil || !view.habitDeleteConfirmed() || !strings.Contains(view.notice, "Press x again") {
+		t.Fatalf("first x = cmd:%v confirmed ID:%d notice:%q", cmd, view.confirmedHabitDeleteID, view.notice)
 	}
 	cmd := view.HandleContentKey(keyPress("x"))
 	if cmd == nil || !view.habitMutating {
 		t.Fatal("second x should start deletion")
 	}
 	finishHabitMutation(t, view, cmd)
-	if view.notice != "Habit deleted" || view.confirmHabitDelete {
-		t.Errorf("delete state = notice:%q confirm:%v", view.notice, view.confirmHabitDelete)
+	if view.notice != "Habit deleted" || view.confirmedHabitDeleteID != 0 {
+		t.Errorf("delete state = notice:%q confirmed ID:%d", view.notice, view.confirmedHabitDeleteID)
 	}
 	requests, _ := recorded.snapshot()
 	if len(requests) < 2 || requests[0] != "DELETE /calendar/habits/7.json" || requests[1] != "GET /calendars/10/recordings.json" {
