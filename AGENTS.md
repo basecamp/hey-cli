@@ -162,8 +162,10 @@ handed. The model has three layers, and it is worth knowing which one a change t
   it does not follow a value through a local variable — so it is an inventory of the
   direct pattern, not a taint analysis; treat a new exemption as something to justify in
   the manifest.
-- **Bodies** are Markdown from `htmlutil.ToMarkdown`, which serializes each context on
-  its own terms: prose escapes metacharacters and writes every `&` as `&amp;` (the live
+- **Bodies** are `htmlutil.Markdown`, a sealed type only `htmlutil.ToMarkdown` can make
+  (unexported field, no constructor, marshals as the string it holds) and the only thing
+  `markdown.Render` accepts — so a string from anywhere else cannot reach glamour by
+  looking like Markdown. `ToMarkdown` serializes each context on its own terms: prose escapes metacharacters and writes every `&` as `&amp;` (the live
   bug this closed was `&amp;#27;[31m` decoding twice, once in the HTML parser and once in
   the Markdown renderer, into a red terminal); inline code and fences are verbatim inside
   delimiters longer than any run they hold; destinations percent-encode what would end

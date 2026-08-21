@@ -10,7 +10,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/text"
 	"golang.org/x/net/html"
 )
 
@@ -461,6 +463,52 @@ func TestToMarkdownDeepNestingIsText(t *testing.T) {
 	}
 }
 
+// assertSafeTree holds the serializer property on goldmark's own tree: Markdown from
+// ToMarkdown parses to no raw HTML, links and images only to allowed destinations, and
+// text with no control character in it. It is the AST-level statement of what the four
+// serializers promise, and the one a future serializer has to keep.
+func assertSafeTree(t *testing.T, md string) {
+	t.Helper()
+	source := []byte(md)
+	doc := conformant.Parser().Parse(text.NewReader(source))
+	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		switch n := n.(type) {
+		case *ast.RawHTML, *ast.HTMLBlock:
+			t.Errorf("ToMarkdown produced raw HTML in %q", md)
+		case *ast.Link:
+			if !allowedScheme(string(n.Destination)) || hasControl(string(n.Destination)) {
+				t.Errorf("ToMarkdown linked to %q in %q", n.Destination, md)
+			}
+		case *ast.Image:
+			if !allowedScheme(string(n.Destination)) || hasControl(string(n.Destination)) {
+				t.Errorf("ToMarkdown imaged %q in %q", n.Destination, md)
+			}
+		case *ast.AutoLink:
+			if url := string(n.URL(source)); !allowedScheme(url) || hasControl(url) {
+				t.Errorf("ToMarkdown autolinked %q in %q", url, md)
+			}
+		case *ast.Text:
+			if hasControl(string(n.Segment.Value(source))) {
+				t.Errorf("ToMarkdown left a control in %q", md)
+			}
+		}
+		return ast.WalkContinue, nil
+	})
+}
+
+func TestToMarkdownTreeIsSafe(t *testing.T) {
+	for _, in := range []string{
+		`<p>hello &amp;#27;[31mRED <a href="javascript:alert(1)">x</a> <img src="data:x" alt="a"> <b>&lt;script&gt;</b></p>`,
+		`<p><a href=")&#27;[31m">x</a> <a href="https://example.com/a?b=1&amp;c=2">q</a></p>`,
+		"<pre>```\n&amp;#27;</pre><table><tr><td>&amp;#27;|</td></tr></table>",
+	} {
+		assertSafeTree(t, toMarkdown(in))
+	}
+}
+
 // Whatever the HTML, the Markdown carries no control character, and neither does
 // what a conformant renderer makes of it: an entity that survives to the renderer
 // is decoded there, so this is the property that closes the double decode.
@@ -494,5 +542,6 @@ func FuzzToMarkdownTerminalSafety(f *testing.F) {
 		if text := domText(t, out.String()); hasControl(text) {
 			t.Fatalf("toMarkdown(%q) = %q renders with a control character: %q", in, md, text)
 		}
+		assertSafeTree(t, md)
 	})
 }
