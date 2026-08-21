@@ -100,7 +100,9 @@ func TestCappedTransportCountsDecompressedBytes(t *testing.T) {
 	}
 }
 
-func TestCappedTransportCapsErrorBodiesToo(t *testing.T) {
+// An error body past the limit is cut off at the limit, not refused: the status is
+// what matters about an error, and a read failure would hide it.
+func TestCappedTransportTruncatesErrorBodies(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -108,9 +110,16 @@ func TestCappedTransportCapsErrorBodiesToo(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	_, err := get(t, cappedClient(t), server.URL)
-	if !errors.Is(err, ErrResponseTooLarge) {
-		t.Fatalf("err = %v, want ErrResponseTooLarge for an oversized error body", err)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
+	req.Header.Set("Accept", "application/json")
+	resp, err := cappedClient(t).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil || resp.StatusCode != http.StatusInternalServerError || len(body) != 1024 {
+		t.Fatalf("status %d, %d bytes, err %v; want the status with the body cut at the limit", resp.StatusCode, len(body), err)
 	}
 }
 

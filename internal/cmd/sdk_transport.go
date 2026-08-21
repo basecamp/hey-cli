@@ -22,8 +22,11 @@ import (
 // apply. It reads decompressed bytes: the transport it wraps is the one that
 // negotiated the encoding, and what comes out of it is what the parser would keep.
 //
-// Which responses are capped is decided by the request, not by what the server says
-// it answered with: the SDK asks for application/json where a generated parser will
+// A success body past the limit is refused — its first read past the cap fails — since
+// a parser that buffers it would buffer it whole. An error body past the limit is cut
+// off at the cap instead: the status is what matters about an error, and a refusal
+// would hide it behind a read failure. Which responses are capped is decided by the
+// request, not by what the server says it answered with: the SDK asks for application/json where a generated parser will
 // buffer the answer and for text/html where GetHTML will, and asks for */* for a blob,
 // which it streams to a destination of any size (DownloadBlob) or buffers under its
 // own MaxResponseBodyBytes (GetBlob). A server that labels a JSON answer as a PNG is
@@ -64,6 +67,10 @@ func (t *cappedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// A body declared past the limit is refused on its first read rather than at the
 	// round trip: a round-trip error is one the SDK retries, and the body would be too
 	// large again; a read error is the same failure the streamed case produces.
+	if resp.StatusCode >= 400 {
+		resp.Body = &truncatedBody{Reader: io.LimitReader(resp.Body, t.limit), closer: resp.Body}
+		return resp, nil
+	}
 	remaining := t.limit
 	if resp.ContentLength > t.limit {
 		remaining = -1
@@ -91,6 +98,15 @@ func isParsedRequest(req *http.Request) bool {
 	}
 	return false
 }
+
+// truncatedBody is an error body cut off at the cap: what the server said, up to the
+// limit, with the status still standing.
+type truncatedBody struct {
+	io.Reader
+	closer io.Closer
+}
+
+func (b *truncatedBody) Close() error { return b.closer.Close() }
 
 type cappedBody struct {
 	io.ReadCloser

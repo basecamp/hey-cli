@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -244,6 +245,7 @@ func readIndex(ctx, caller context.Context, source Source, topicID int64, limits
 func hydrate(ctx context.Context, source Source, thread *Thread, limits Limits, budget *byteBudget) error {
 	turns := newTurns()
 	refused := make([]bool, len(thread.Entries))
+	var exhausted atomic.Bool
 	group, groupCtx := errgroup.WithContext(ctx)
 	group.SetLimit(max(limits.Concurrency, 1))
 	for i := range thread.Entries {
@@ -255,8 +257,10 @@ func hydrate(ctx context.Context, source Source, thread *Thread, limits Limits, 
 		group.Go(func() error {
 			defer turns.done(i)
 			// The group's context ending is the deadline, or a systemic error in
-			// another request; an entry it reaches is over the limit, not failed.
-			if groupCtx.Err() != nil {
+			// another request; an entry it reaches is over the limit, not failed. So
+			// is one reached after the budget refused a body: nothing older would be
+			// kept, so nothing older is asked for.
+			if groupCtx.Err() != nil || exhausted.Load() {
 				entry.State = StateOverLimit
 				return nil //nolint:nilerr // the deadline is a state, not a failure
 			}
@@ -278,6 +282,7 @@ func hydrate(ctx context.Context, source Source, thread *Thread, limits Limits, 
 				switch {
 				case !budget.admit(size):
 					entry.State, refused[i] = StateOverLimit, true
+					exhausted.Store(true)
 				case kept.Content == "":
 					entry.Message, entry.State = kept, StateBodyless
 				default:
@@ -298,7 +303,7 @@ func hydrate(ctx context.Context, source Source, thread *Thread, limits Limits, 
 	for i := range thread.Entries {
 		entry := &thread.Entries[i]
 		switch {
-		case dropping && entry.State == StateHydrated:
+		case dropping && (entry.State == StateHydrated || entry.State == StateBodyless):
 			entry.Message, entry.State = nil, StateOverLimit
 		case refused[i]:
 			dropping = true

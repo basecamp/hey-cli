@@ -221,6 +221,34 @@ func TestLoadStopsAtTheEntryCap(t *testing.T) {
 	}
 }
 
+// After the budget refuses a body, nothing older is asked for — the in-flight requests
+// finish and the rest are over_limit without a request — and an older bodyless message
+// that would have fitted is dropped too, so the cutoff is one line.
+func TestLoadStopsAskingAfterTheBudgetRefuses(t *testing.T) {
+	bodies := map[int64]string{}
+	var pages []int64
+	for id := int64(40); id >= 11; id-- {
+		pages = append(pages, id)
+		bodies[id] = strings.Repeat("x", 100)
+	}
+	bodies[11] = "" // bodyless, and the oldest
+	source := &fakeSource{pages: [][]int64{pages}, bodies: bodies}
+	l := limits()
+	l.Concurrency = 1
+	l.MaxRetainedBytes = int64(len(pages))*(retainedOverhead+int64(len("summary 40")+len("message"))) + 3*(retainedOverhead+100) + 1
+	thread, err := Load(context.Background(), source, Request{TopicID: 7, Hydrate: true, Limits: l})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := states(thread.Entries); got[StateHydrated] != 3 || got[StateBodyless] != 0 || got[StateOverLimit] != len(pages)-3 {
+		t.Errorf("states = %v, want three kept and the rest over_limit", got)
+	}
+	// Three admitted, one refused, none asked for after that.
+	if source.messages.Load() != 4 {
+		t.Errorf("requested %d messages, want 4", source.messages.Load())
+	}
+}
+
 // The index is charged to the budget too: a walk that would keep more than the budget
 // stops, and says why.
 func TestLoadChargesTheIndexToTheBudget(t *testing.T) {
