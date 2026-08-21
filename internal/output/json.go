@@ -39,7 +39,7 @@ func escapeC1(data []byte) []byte {
 	if !bytes.ContainsFunc(data, func(r rune) bool { return r >= 0x80 && r <= 0x9f }) {
 		return data
 	}
-	escaped := make([]byte, 0, len(data)+16)
+	escaped := make([]byte, 0, len(data))
 	for i := 0; i < len(data); i++ {
 		if data[i] == 0xc2 && i+1 < len(data) && data[i+1] >= 0x80 && data[i+1] <= 0x9f {
 			escaped = fmt.Appendf(escaped, `\u%04x`, rune(data[i+1]))
