@@ -205,7 +205,9 @@ func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.pendingCount = max(v.pendingCount-1, 0)
 		v.history.loaded = false
 		v.notice = msg.name + " " + screenedVerb(msg.status)
-		return nil, true
+		// An approved sender's mail lands in the Imbox; the bar plugin shows
+		// the Screener count too. Either way its view is stale now.
+		return omarchyRefresh(), true
 
 	case screenerClearedMsg:
 		if v.mutations > 0 {
@@ -218,7 +220,7 @@ func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.pending.setRows(nil, 1)
 		v.pendingCount = 0
 		v.notice = "The Screener is clearing. Everyone waiting will be asked about again on their next email."
-		return nil, true
+		return omarchyRefresh(), true
 	}
 	return nil, false
 }

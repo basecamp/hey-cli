@@ -129,6 +129,10 @@ hey labels --all
 hey labels --limit
 hey move
 hey move --to
+hey omarchy
+hey omarchy poll
+hey omarchy poll --limit
+hey omarchy poll --notify
 hey recordings
 hey recordings --all
 hey recordings --ends-on

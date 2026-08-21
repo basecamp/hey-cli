@@ -426,38 +426,9 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if msg.err != nil {
 			return func() tea.Msg { return errMsg{msg.err} }, true
 		}
-		if msg.boxID != v.currentBoxID() || (msg.sourceKind != "" && msg.sourceKind != v.currentSourceKind()) {
-			return nil, true
-		}
-		v.notice = msg.action
-		idx := v.postingIndex(msg.postingID)
-		if idx >= 0 {
-			switch msg.effect {
-			case postingActionNone:
-			case postingActionRemove:
-				v.postingList.postings = append(v.postingList.postings[:idx], v.postingList.postings[idx+1:]...)
-				if v.postingList.cursor > idx {
-					v.postingList.cursor--
-				}
-				if v.postingList.cursor >= len(v.postingList.postings) && v.postingList.cursor > 0 {
-					v.postingList.cursor--
-				}
-				v.postingList.ensureVisible()
-			case postingActionSeen:
-				v.postingList.postings[idx].Seen = true
-				v.postingList.resort()
-			case postingActionIgnore:
-				v.postingList.postings[idx].Muted = true
-			case postingActionStopIgnoring:
-				v.postingList.postings[idx].Muted = false
-			}
-		}
-		if v.activeRequestKind == mailRequestPostings {
-			if source := v.currentSource(); source != nil {
-				return v.requestPostings(*source), true
-			}
-		}
-		return nil, true
+		// The mutation landed whether or not this view still shows the box, and
+		// the bar plugin's unread set changed with it.
+		return tea.Batch(v.applyPostingAction(msg), omarchyRefresh()), true
 
 	case folderActionDoneMsg:
 		v.finishMutation()
@@ -1252,6 +1223,44 @@ func (v *mailView) requestSearch(query string, page int) tea.Cmd {
 func (v *mailView) requestTopic(boxID, topicID int64, title string) tea.Cmd {
 	requestID, ctx := v.beginRequest(mailRequestTopic)
 	return v.fetchTopic(ctx, requestID, boxID, topicID, title)
+}
+
+// applyPostingAction reflects a completed posting mutation in the list and
+// reloads it when a load was already in flight, so the reload cannot restore
+// what the action removed.
+func (v *mailView) applyPostingAction(msg postingActionDoneMsg) tea.Cmd {
+	if msg.boxID != v.currentBoxID() || (msg.sourceKind != "" && msg.sourceKind != v.currentSourceKind()) {
+		return nil
+	}
+	v.notice = msg.action
+	idx := v.postingIndex(msg.postingID)
+	if idx >= 0 {
+		switch msg.effect {
+		case postingActionNone:
+		case postingActionRemove:
+			v.postingList.postings = append(v.postingList.postings[:idx], v.postingList.postings[idx+1:]...)
+			if v.postingList.cursor > idx {
+				v.postingList.cursor--
+			}
+			if v.postingList.cursor >= len(v.postingList.postings) && v.postingList.cursor > 0 {
+				v.postingList.cursor--
+			}
+			v.postingList.ensureVisible()
+		case postingActionSeen:
+			v.postingList.postings[idx].Seen = true
+			v.postingList.resort()
+		case postingActionIgnore:
+			v.postingList.postings[idx].Muted = true
+		case postingActionStopIgnoring:
+			v.postingList.postings[idx].Muted = false
+		}
+	}
+	if v.activeRequestKind == mailRequestPostings {
+		if source := v.currentSource(); source != nil {
+			return v.requestPostings(*source)
+		}
+	}
+	return nil
 }
 
 func (v *mailView) postingIndex(postingID int64) int {

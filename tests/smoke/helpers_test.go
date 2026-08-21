@@ -23,6 +23,7 @@ var (
 	binaryPath    string
 	baseURL       string
 	configDir     string
+	stateDir      string
 	sessionCookie string
 	smokeEmail    string
 )
@@ -74,6 +75,13 @@ func TestMain(m *testing.M) {
 	configDir, err = os.MkdirTemp("", "hey-smoke-*")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create temp config dir: %v\n", err)
+		os.Exit(1)
+	}
+	// And an isolated state directory: hey omarchy poll --notify keeps its
+	// toast fingerprints there.
+	stateDir, err = os.MkdirTemp("", "hey-smoke-state-*")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create temp state dir: %v\n", err)
 		os.Exit(1)
 	}
 	// Launch headless Chrome browser and log in to obtain a session cookie.
@@ -176,6 +184,7 @@ func cliEnv() []string {
 	env = append(env,
 		"HEY_BASE_URL="+baseURL,
 		"XDG_CONFIG_HOME="+configDir,
+		"XDG_STATE_HOME="+stateDir,
 		"HEY_NO_KEYRING=1",
 		"NO_COLOR=1",
 		"TERM=dumb",

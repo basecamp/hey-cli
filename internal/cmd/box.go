@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/url"
 	"strconv"
 	"strings"
@@ -84,21 +85,7 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 	notice := boxTruncationNotice(len(postings), total, hasMore, c.all)
 
 	if writer.IsStyled() {
-		fmt.Fprintf(cmd.OutOrStdout(), "Box: %s (%s)\n\n", resp.Name, resp.Kind)
-
-		table := newTable(cmd.OutOrStdout())
-		table.addRow([]string{"Thread", "From", "Summary", "Date"})
-		for _, p := range postings {
-			displayID := resolvePostingTopicID(p)
-			if displayID == 0 {
-				displayID = p.Id
-			}
-			table.addRow([]string{fmt.Sprintf("%d", displayID), p.Creator.Name, truncate(p.Summary, 60), formatDate(p.CreatedAt)})
-		}
-		table.print()
-		if notice != "" {
-			fmt.Fprintln(cmd.OutOrStdout(), notice)
-		}
+		printBoxTable(cmd.OutOrStdout(), resp, postings, notice)
 		return nil
 	}
 
@@ -124,6 +111,24 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 			},
 		),
 	)
+}
+
+func printBoxTable(w io.Writer, resp *generated.BoxShowResponse, postings []generated.Posting, notice string) {
+	fmt.Fprintf(w, "Box: %s (%s)\n\n", resp.Name, resp.Kind)
+
+	table := newTable(w)
+	table.addRow([]string{"Thread", "From", "Summary", "Date"})
+	for _, p := range postings {
+		displayID := resolvePostingTopicID(p)
+		if displayID == 0 {
+			displayID = p.Id
+		}
+		table.addRow([]string{fmt.Sprintf("%d", displayID), p.Creator.Name, truncate(p.Summary, 60), formatDate(p.CreatedAt)})
+	}
+	table.print()
+	if notice != "" {
+		fmt.Fprintln(w, notice)
+	}
 }
 
 func boxSummary(count int, name string) string {

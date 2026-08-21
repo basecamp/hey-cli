@@ -85,6 +85,21 @@ func omarchyPollStatePath() string {
 	return filepath.Join(config.StateDir(), "omarchy-poll.json")
 }
 
+func omarchyPollLockPath() string {
+	return omarchyPollStatePath() + ".lock"
+}
+
+// removeOmarchyPollState forgets the fingerprints and the lock beside them.
+// A poll that is not notifying calls this on every run, so turning toasts on
+// — by any route: hey setup omarchy --notify, the plugin's own toggle, omarchy
+// bar set — always starts from a silent seed instead of toasting whatever
+// accumulated while they were off.
+func removeOmarchyPollState() error {
+	_, err := removeFileIfPresent(omarchyPollStatePath())
+	_, _ = removeFileIfPresent(omarchyPollLockPath())
+	return err
+}
+
 // loadOmarchyPollState returns the saved state and whether a state file
 // existed. No file means first run: seed the fingerprints, toast nothing —
 // never toast the backlog.
@@ -104,8 +119,7 @@ func loadOmarchyPollState() (omarchyPollState, bool) {
 }
 
 func saveOmarchyPollState(state omarchyPollState) error {
-	_, err := writeJSONFile(omarchyPollStatePath(), state)
-	return err
+	return writeJSONFile(omarchyPollStatePath(), state)
 }
 
 // notifyNewMail diffs the unseen postings against the fingerprint file and

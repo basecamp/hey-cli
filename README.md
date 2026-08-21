@@ -368,23 +368,30 @@ read from `~/.local/state/omarchy/current/theme/`, and restyles live when you ru
 — an explicitly chosen file is trusted as written — or `NO_COLOR=1` to turn color off.
 
 ```bash
-yay -S hey-cli               # hey-cli is on the AUR
+omarchy pkg aur add hey-cli  # hey-cli is on the AUR
+omarchy plugin add https://github.com/basecamp/omarchy-hey-plugin.git --enable
 hey setup omarchy            # install into the desktop
-hey setup omarchy --notify   # also toast new Imbox mail (--no-notify turns it off)
+hey setup omarchy --notify   # toast new Imbox mail (--no-notify turns it off)
 hey setup omarchy --remove   # take it all out again
 ```
 
-Setup installs a `HEY TUI` launcher entry, a `HEY` row in the SUPER+SPACE menu, a bar
-indicator that lights when the Imbox has unread mail (no count, by design), and a
+The bar gets the [HEY plugin](https://github.com/basecamp/omarchy-hey-plugin): the HEY
+logo lights when the Imbox has unseen mail and opens a panel of recent threads. hey-cli is
+its engine — the plugin runs `hey omarchy poll` for the Imbox and the toasts, and
+`hey tui` nudges it to refresh the moment you archive or mark a thread.
+
+Setup installs a `HEY TUI` launcher entry, a `HEY` row in the SUPER+SPACE menu, and a
 `hey.toml.tpl` theme template so theme authors can tune the overlay. It prints the
 `bindings.lua` snippet for a keybinding rather than editing your file. Omarchy's shipped
 HEY web app, its SUPER+SHIFT+E binding and the mailto handler are left untouched.
 
-`--notify` turns on new-mail toasts, off by default: the bar indicator's poll also sends
-at most one notification per interval — `Sender — Subject` for one new thread, `N new in
-Imbox` for more — replacing the previous toast rather than stacking, and clicking it
-focuses the TUI. Omarchy's notification silencing (SUPER+CTRL+comma) mutes them like any
-other app. See [docs/omarchy.md](docs/omarchy.md) for the details and what is planned next.
+`--notify` turns on new-mail toasts, off by default, by flipping the plugin's `notify`
+setting (the panel's toggle and `omarchy bar set 37signals.hey notify true --json` do the
+same): each poll sends at most one notification — `Sender — Subject` for one new thread,
+`N new in Imbox` for more — replacing the previous toast rather than stacking, and
+clicking it focuses the TUI. Omarchy's notification silencing (SUPER+CTRL+comma) mutes
+them like any other app. See [docs/omarchy.md](docs/omarchy.md) for the details and what
+is planned next.
 
 ## Agent Skill
 
