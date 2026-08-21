@@ -21,6 +21,12 @@ func (l *contactList) setContacts(contacts []Contact) {
 	l.scrollOff = 0
 }
 
+// growContacts adds the page below the list, leaving the cursor and the scroll where the
+// reader left them.
+func (l *contactList) growContacts(contacts []Contact) {
+	l.contacts = append(l.contacts, contacts...)
+}
+
 func (l *contactList) setSize(width, height int) {
 	l.width = width
 	l.height = height
@@ -40,8 +46,20 @@ func (l *contactList) moveDown() {
 	}
 }
 
+// visibleCount is how many contacts the window holds. Each one takes two lines.
+func (l *contactList) visibleCount() int {
+	return max(l.height/2, 1)
+}
+
+// hasRowsBelow reports whether the list carries on past the bottom of the window. A list
+// that does not is a list the reader can see the end of, which is a reason to read the page
+// below it without waiting to be asked.
+func (l *contactList) hasRowsBelow() bool {
+	return l.scrollOff+l.visibleCount() < len(l.contacts)
+}
+
 func (l *contactList) ensureVisible() {
-	visible := max(l.height/2, 1)
+	visible := l.visibleCount()
 	if l.cursor < l.scrollOff {
 		l.scrollOff = l.cursor
 	}
@@ -78,8 +96,7 @@ func (l *contactList) view() string {
 	if len(l.contacts) == 0 {
 		return styleMuted.Render("  (no contacts)")
 	}
-	visible := max(l.height/2, 1)
-	end := min(l.scrollOff+visible, len(l.contacts))
+	end := min(l.scrollOff+l.visibleCount(), len(l.contacts))
 	cursorMarker, selected := cursorStyles()
 	selectedGap := selectionStyle(lipgloss.NewStyle())
 	normal := lipgloss.NewStyle().Foreground(colorBright)

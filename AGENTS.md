@@ -208,11 +208,11 @@ To add a new section: implement the `sectionView` interface in a new file, add a
 
 ### Lists grow as the reader scrolls
 
-Every mail list — a box, a label, a collection, a search — and both of The Screener's panes
-read one page and then grow downwards. There are no page keys: the cursor coming within
-`loadMoreThreshold` of the bottom reads the page below, and so does a list the reader can
-already see the end of, which is why a first page too short to fill the window keeps reading
-until it does.
+Every mail list — a box, a label, a collection, a search — both of The Screener's panes and
+the contact list read one page and then grow downwards. There are no page keys: the cursor
+coming within `loadMoreThreshold` of the bottom reads the page below, and so does a list the
+reader can already see the end of, which is why a first page too short to fill the window
+keeps reading until it does.
 
 The pages come from geared_pagination, which is not offset paging: every JSON read carries
 a `Link` header whose `page` is a cursor into the ordering, and the last page carries none.
@@ -230,6 +230,14 @@ Search is the exception to the cursor: `Search::Matches::Page` is a shim over ge
 rather than the real thing, and it numbers its pages, so the search results carry
 `searchNextPage int` instead of a `listPaging`. There is nothing to keep a `headIDs` for
 either — search results are never re-read live.
+
+Contacts are the same kind of exception, for a different reason. `ContactsController#index`
+pages an Elasticsearch relation with no `ordered_by`, so geared hands out offsets and its
+`Link` header carries a page number; `contactsView` keeps a `nextPage int` and zeroes it on
+the first empty page, the way `hey contacts` already does in `readContactsPage`. The `Link`
+header is not read at all — `Contacts().List` throws it away, and an empty page is a
+cheaper way to learn the same thing than a `ListPage` in the SDK. Contacts are never
+re-read live either, so there is no `headIDs` here.
 
 The subtle part is the live re-read. It reads the box's *top* page, because that is where a
 change shows up, so it may only replace that much of a list that has grown past it:

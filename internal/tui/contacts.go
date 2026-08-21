@@ -34,8 +34,15 @@ const (
 
 type contactsLoadedMsg struct {
 	requestResult
-	page     int
 	contacts []Contact
+	nextPage int
+}
+
+type contactsAppendedMsg struct {
+	requestID uint64
+	contacts  []Contact
+	nextPage  int
+	err       error
 }
 
 type contactDetailLoadedMsg struct {
@@ -72,7 +79,8 @@ type contactsView struct {
 
 	list                contactList
 	loaded              bool
-	page                int
+	nextPage            int  // the page after the contacts on screen, zero at the last one
+	loadingMore         bool // the page below is already on its way
 	detail              Contact
 	note                string
 	inDetail            bool
@@ -85,13 +93,13 @@ type contactsView struct {
 	confirmNoteDelete   bool
 	notice              string
 
-	requests requestLane[contactRequestKind]
+	requests      requestLane[contactRequestKind]
+	moreRequestID uint64 // identifies the only page-below read allowed to grow the list
 }
 
 func newContactsView(vc *viewContext) *contactsView {
 	return &contactsView{
 		vc:         vc,
-		page:       1,
 		detailView: viewport.New(viewport.WithWidth(0), viewport.WithHeight(0)),
 	}
 }
@@ -100,7 +108,7 @@ func (v *contactsView) Init() tea.Cmd {
 	if v.loaded {
 		return nil
 	}
-	return v.requestContacts(1)
+	return v.requestContacts()
 }
 
 func (v *contactsView) Update(msg tea.Msg) (tea.Cmd, bool) {
@@ -109,14 +117,28 @@ func (v *contactsView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if cmd, ok := v.requests.settle(msg.requestResult); !ok {
 			return cmd, true
 		}
-		if len(msg.contacts) == 0 && v.loaded && msg.page > v.page {
-			v.notice = "No more contacts"
+		v.loaded = true
+		v.loadingMore = false
+		v.nextPage = msg.nextPage
+		v.list.setContacts(msg.contacts)
+		return v.loadMoreContacts(), true
+
+	case contactsAppendedMsg:
+		if msg.requestID != v.moreRequestID {
 			return nil, true
 		}
-		v.loaded = true
-		v.page = msg.page
-		v.list.setContacts(msg.contacts)
-		return nil, true
+		v.loadingMore = false
+		if msg.err != nil {
+			v.notice = errorNotice("Could not load more contacts", msg.err)
+			return nil, true
+		}
+		v.list.growContacts(msg.contacts)
+		if len(msg.contacts) == 0 {
+			v.nextPage = 0
+		} else {
+			v.nextPage = msg.nextPage
+		}
+		return v.loadMoreContacts(), true
 
 	case contactDetailLoadedMsg:
 		if !v.requests.accepts(msg.requestResult) {
@@ -185,7 +207,7 @@ func (v *contactsView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.detail = Contact{}
 		v.note = ""
 		v.notice = "Contact hidden"
-		return nil, true
+		return v.loadMoreContacts(), true
 
 	case contactRevealedMsg:
 		if cmd, ok := v.requests.settle(msg.requestResult); !ok {
@@ -193,7 +215,7 @@ func (v *contactsView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.lastHiddenID = 0
 		v.notice = "Contact shown again"
-		return v.requestContacts(v.page), true
+		return v.requestContacts(), true
 
 	case contactNoteSavedMsg:
 		if !v.requests.accepts(msg.requestResult) {
@@ -271,7 +293,7 @@ func (v *contactsView) HelpBindings() []helpBinding {
 		}
 		return bindings
 	}
-	bindings := []helpBinding{{"a", "add"}, {"r", "refresh"}, {"n/p", "pages"}}
+	bindings := []helpBinding{{"a", "add"}, {"r", "refresh"}}
 	if v.lastHiddenID != 0 {
 		bindings = append(bindings, helpBinding{"u", "show again"})
 	}
@@ -279,7 +301,7 @@ func (v *contactsView) HelpBindings() []helpBinding {
 }
 
 func (v *contactsView) SubnavItems() ([]navItem, int, string, bool) {
-	return nil, 0, fmt.Sprintf("Contacts (page %d)", v.page), true
+	return nil, 0, "Contacts", true
 }
 
 func (v *contactsView) SubnavLeft() tea.Cmd  { return nil }
@@ -344,6 +366,7 @@ func (v *contactsView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		v.list.moveUp()
 	case tea.KeyDown:
 		v.list.moveDown()
+		return v.loadMoreContacts()
 	case tea.KeyEnter:
 		if contact := v.list.selected(); contact != nil {
 			return v.requestContactDetail(contact.ID)
@@ -353,14 +376,7 @@ func (v *contactsView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		case "a":
 			return v.startAddContact()
 		case "r":
-			return v.requestContacts(v.page)
-		case "n":
-			return v.requestContacts(v.page + 1)
-		case "p":
-			if v.page > 1 {
-				return v.requestContacts(v.page - 1)
-			}
-			v.notice = "Already on the first contacts page"
+			return v.requestContacts()
 		case "u":
 			if v.lastHiddenID != 0 {
 				return v.revealContact(v.lastHiddenID)
@@ -439,9 +455,32 @@ func (v *contactsView) Restyle() {
 	}
 }
 
-func (v *contactsView) requestContacts(page int) tea.Cmd {
+// requestContacts reads the contacts from their first page. The list starts there and
+// grows downwards from it, so a read the user asked for is also what puts the list back to
+// the depth it opens at.
+func (v *contactsView) requestContacts() tea.Cmd {
+	v.nextPage = 0
+	v.loadingMore = false
+	v.moreRequestID++
 	requestID, ctx := v.requests.begin(v.vc.ctx, contactRequestList)
-	return v.fetchContacts(ctx, requestID, max(page, 1))
+	return v.fetchContacts(ctx, requestID)
+}
+
+// loadMoreContacts reads the page below the one the reader has scrolled to, or the one
+// below a list they can already see the end of. One page is asked for at a time, in its own
+// lane and on the view's own context: the reader is still looking at what is there, so this
+// must not cancel or be cancelled by the read they are waiting on.
+func (v *contactsView) loadMoreContacts() tea.Cmd {
+	if v.loadingMore || v.nextPage == 0 {
+		return nil
+	}
+	if v.list.hasRowsBelow() && len(v.list.contacts)-v.list.cursor > loadMoreThreshold {
+		return nil
+	}
+
+	v.loadingMore = true
+	v.moreRequestID++
+	return v.fetchMoreContacts(v.vc.ctx, v.moreRequestID, v.nextPage)
 }
 
 func (v *contactsView) requestContactDetail(contactID int64) tea.Cmd {
@@ -578,24 +617,43 @@ func (v *contactsView) renderContactDetail() string {
 	return b.String()
 }
 
-func (v *contactsView) fetchContacts(ctx context.Context, requestID uint64, page int) tea.Cmd {
+func (v *contactsView) fetchContacts(ctx context.Context, requestID uint64) tea.Cmd {
 	return func() tea.Msg {
-		pageValue := fmt.Sprintf("%d", page)
-		params := &generated.ListContactsParams{Page: &pageValue}
-		result, err := v.vc.sdk.Contacts().List(ctx, params)
-		if err != nil {
-			return contactsLoadedMsg{requestResult: newRequestResult(requestID, err), page: page}
-		}
-		var sdkContacts []generated.Contact
-		if result != nil {
-			sdkContacts = *result
-		}
-		contacts := make([]Contact, 0, len(sdkContacts))
-		for _, contact := range sdkContacts {
-			contacts = append(contacts, sdkContactToModel(contact))
-		}
-		return contactsLoadedMsg{requestResult: newRequestResult(requestID, nil), page: page, contacts: contacts}
+		contacts, nextPage, err := v.readContactsPage(ctx, 1)
+		return contactsLoadedMsg{requestResult: newRequestResult(requestID, err), contacts: contacts, nextPage: nextPage}
 	}
+}
+
+// fetchMoreContacts reads the page below the list, in the growing lane and without the
+// spinner: what the reader is looking at is already on screen.
+func (v *contactsView) fetchMoreContacts(ctx context.Context, requestID uint64, page int) tea.Cmd {
+	return func() tea.Msg {
+		contacts, nextPage, err := v.readContactsPage(ctx, page)
+		return contactsAppendedMsg{requestID: requestID, contacts: contacts, nextPage: nextPage, err: err}
+	}
+}
+
+// readContactsPage reads one page of contacts and answers the number of the page after it.
+// HEY numbers the contact index's pages where a box cursors them, and the last page is only
+// known once the page after it comes back empty, which is where the caller zeroes this.
+func (v *contactsView) readContactsPage(ctx context.Context, page int) ([]Contact, int, error) {
+	pageValue := fmt.Sprintf("%d", max(page, 1))
+	result, err := v.vc.sdk.Contacts().List(ctx, &generated.ListContactsParams{Page: &pageValue})
+	if err != nil {
+		return nil, 0, err
+	}
+	var sdkContacts []generated.Contact
+	if result != nil {
+		sdkContacts = *result
+	}
+	contacts := make([]Contact, 0, len(sdkContacts))
+	for _, contact := range sdkContacts {
+		contacts = append(contacts, sdkContactToModel(contact))
+	}
+	if len(contacts) == 0 {
+		return contacts, 0, nil
+	}
+	return contacts, max(page, 1) + 1, nil
 }
 
 func (v *contactsView) fetchContactDetail(ctx context.Context, requestID uint64, contactID int64) tea.Cmd {

@@ -2,11 +2,16 @@ package tui
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
@@ -42,11 +47,14 @@ func contactsWithTestServer(t *testing.T) (*contactsView, *recordedTUIContacts) 
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case req.Method == http.MethodGet && req.URL.Path == "/contacts.json":
-			if req.URL.Query().Get("page") == "2" {
+			switch req.URL.Query().Get("page") {
+			case "2":
+				_, _ = w.Write([]byte(`[{"id":21,"name":"Alex Nakamura","email_address":"alex@example.com"},{"id":22,"name":"Priya Raman","email_address":"priya@example.org"}]`))
+			case "3":
 				_, _ = w.Write([]byte(`[]`))
-				return
+			default:
+				_, _ = w.Write([]byte(`[{"id":7,"name":"Jane Doe","email_address":"jane@example.com"}]`))
 			}
-			_, _ = w.Write([]byte(`[{"id":7,"name":"Jane Doe","email_address":"jane@example.com"}]`))
 		case req.Method == http.MethodPost && req.URL.Path == "/contacts.json":
 			if conflict {
 				w.WriteHeader(http.StatusConflict)
@@ -101,7 +109,21 @@ func loadTUIContacts(t *testing.T, view *contactsView) {
 	if _, ok := msg.(contactsLoadedMsg); !ok {
 		t.Fatalf("contacts init returned %T", msg)
 	}
-	view.Update(msg)
+	drainContactPages(t, view, msg)
+}
+
+// drainContactPages applies a contacts response and every page it goes on to read below
+// it, the way the runtime does, so a test sees the list at the depth a reader would.
+func drainContactPages(t *testing.T, view *contactsView, msg tea.Msg) {
+	t.Helper()
+	for range 20 {
+		cmd, _ := view.Update(msg)
+		if cmd == nil {
+			return
+		}
+		msg = cmd()
+	}
+	t.Fatal("contacts never stopped reading pages")
 }
 
 func openTUIContact(t *testing.T, view *contactsView) {
@@ -113,25 +135,123 @@ func openTUIContact(t *testing.T, view *contactsView) {
 	view.Update(cmd())
 }
 
-func TestContactsViewLoadsListsAndPages(t *testing.T) {
+func TestContactsViewGrowsUntilTheListRunsOut(t *testing.T) {
 	view, recorded := contactsWithTestServer(t)
 	loadTUIContacts(t, view)
-	if view.requests.loading || !view.loaded || len(view.list.contacts) != 1 || view.list.contacts[0].ID != 7 {
-		t.Errorf("list state = loading:%v loaded:%v contacts:%+v", view.requests.loading, view.loaded, view.list.contacts)
+	if view.requests.loading || !view.loaded || view.loadingMore || view.nextPage != 0 {
+		t.Errorf("list state = loading:%v loaded:%v growing:%v nextPage:%d", view.requests.loading, view.loaded, view.loadingMore, view.nextPage)
 	}
-
-	next := view.HandleContentKey(keyPress("n"))
-	if next == nil {
-		t.Fatal("next page returned no command")
-	}
-	view.Update(next())
-	if view.page != 1 || len(view.list.contacts) != 1 || view.notice != "No more contacts" {
-		t.Errorf("empty next page changed results: page=%d contacts=%+v notice=%q", view.page, view.list.contacts, view.notice)
+	if ids := contactIDs(view.list.contacts); !slices.Equal(ids, []int64{7, 21, 22}) {
+		t.Errorf("contacts = %v, want the first page and the one below it", ids)
 	}
 	requests, _ := recorded.snapshot()
-	if !strings.Contains(strings.Join(requests, "\n"), "page=2") {
+	if !slices.Equal(requests, []string{
+		"GET /contacts.json?page=1",
+		"GET /contacts.json?page=2",
+		"GET /contacts.json?page=3",
+	}) {
 		t.Errorf("requests = %v", requests)
 	}
+
+	// The reader can see the end of the list, and the empty page said that is all there is.
+	if cmd := view.HandleContentKey(keyPress("down")); cmd != nil {
+		t.Error("scrolling a finished list read another page")
+	}
+}
+
+func TestContactsViewReadsThePageBelowTheCursorOnce(t *testing.T) {
+	view, _ := contactsWithTestServer(t)
+	view.loaded = true
+	view.nextPage = 2
+	view.list.setSize(80, 4)
+	view.list.setContacts(testContactRows(40))
+
+	view.list.cursor = 10
+	if cmd := view.HandleContentKey(keyPress("down")); cmd != nil {
+		t.Error("a list with plenty left below it read the page below")
+	}
+
+	view.list.cursor = len(view.list.contacts) - 2
+	cmd := view.HandleContentKey(keyPress("down"))
+	if cmd == nil || !view.loadingMore {
+		t.Fatal("scrolling to the bottom should read the page below")
+	}
+	if again := view.HandleContentKey(keyPress("down")); again != nil {
+		t.Error("the page below was asked for twice")
+	}
+
+	msg, ok := cmd().(contactsAppendedMsg)
+	if !ok {
+		t.Fatalf("page below answered %T", cmd())
+	}
+	view.Update(msg)
+	if view.nextPage != 3 {
+		t.Errorf("nextPage = %d, want the page after the one that arrived", view.nextPage)
+	}
+	if ids := contactIDs(view.list.contacts[40:]); !slices.Equal(ids, []int64{21, 22}) {
+		t.Errorf("appended contacts = %v", ids)
+	}
+}
+
+func TestContactsViewIgnoresASupersededPageBelow(t *testing.T) {
+	view, _ := contactsWithTestServer(t)
+	view.loaded = true
+	view.nextPage = 2
+	view.loadingMore = true
+	view.moreRequestID = 3
+	view.list.setContacts([]Contact{{ID: 7}})
+
+	view.Update(contactsAppendedMsg{requestID: 2, contacts: []Contact{{ID: 99}}, nextPage: 3})
+	if len(view.list.contacts) != 1 || !view.loadingMore {
+		t.Errorf("stale page grew the list: contacts=%+v growing:%v", view.list.contacts, view.loadingMore)
+	}
+
+	view.Update(contactsAppendedMsg{requestID: 3, err: errors.New("read failed")})
+	if view.loadingMore || !strings.Contains(view.notice, "Could not load more contacts") {
+		t.Errorf("failed page state = growing:%v notice:%q", view.loadingMore, view.notice)
+	}
+}
+
+func TestContactsViewRefreshReadsFromTheTop(t *testing.T) {
+	view, recorded := contactsWithTestServer(t)
+	loadTUIContacts(t, view)
+	view.list.cursor = 2
+
+	cmd := view.HandleContentKey(keyPress("r"))
+	if cmd == nil || view.nextPage != 0 {
+		t.Fatalf("refresh state = cmd:%v nextPage:%d", cmd != nil, view.nextPage)
+	}
+	drainContactPages(t, view, cmd())
+	if ids := contactIDs(view.list.contacts); !slices.Equal(ids, []int64{7, 21, 22}) {
+		t.Errorf("refreshed contacts = %v", ids)
+	}
+	if view.list.cursor != 0 {
+		t.Errorf("refresh left the cursor at %d", view.list.cursor)
+	}
+	requests, _ := recorded.snapshot()
+	if requests[len(requests)-3] != "GET /contacts.json?page=1" {
+		t.Errorf("refresh did not start over: %v", requests)
+	}
+}
+
+func contactIDs(contacts []Contact) []int64 {
+	ids := make([]int64, 0, len(contacts))
+	for _, contact := range contacts {
+		ids = append(ids, contact.ID)
+	}
+	return ids
+}
+
+func testContactRows(count int) []Contact {
+	contacts := make([]Contact, 0, count)
+	for i := range count {
+		contacts = append(contacts, Contact{
+			ID:           int64(100 + i),
+			Name:         fmt.Sprintf("Contact %d", i),
+			EmailAddress: fmt.Sprintf("contact%d@example.com", i),
+		})
+	}
+	return contacts
 }
 
 func TestContactsViewOpensDetailWithAliasesAndNote(t *testing.T) {
@@ -152,7 +272,7 @@ func TestContactsViewOpensDetailWithAliasesAndNote(t *testing.T) {
 func TestContactsViewIgnoresStaleResponses(t *testing.T) {
 	view, _ := contactsWithTestServer(t)
 	view.requests.id = 2
-	view.Update(contactsLoadedMsg{requestResult: requestResult{requestID: 1}, page: 1, contacts: []Contact{{ID: 99}}})
+	view.Update(contactsLoadedMsg{requestResult: requestResult{requestID: 1}, contacts: []Contact{{ID: 99}}})
 	if len(view.list.contacts) != 0 {
 		t.Error("stale contacts changed the list")
 	}
@@ -218,7 +338,7 @@ func TestContactsViewCreateConflictLoadsWrittenContact(t *testing.T) {
 	if !view.inDetail || view.detail.ID != 9 {
 		t.Errorf("written conflict contact was not loaded: %+v", view.detail)
 	}
-	if len(view.list.contacts) != 2 || view.list.contacts[0].ID != 9 {
+	if len(view.list.contacts) != 4 || view.list.contacts[0].ID != 9 {
 		t.Errorf("written conflict contact was not added to the list: %+v", view.list.contacts)
 	}
 }
@@ -290,6 +410,7 @@ func TestContactFormBlankAliasesCreatesExplicitEmptyReplacement(t *testing.T) {
 func TestContactsViewValidatesFormBeforeSaving(t *testing.T) {
 	view, recorded := contactsWithTestServer(t)
 	loadTUIContacts(t, view)
+	loadRequests, _ := recorded.snapshot()
 	view.HandleContentKey(keyPress("a"))
 	if cmd := view.HandleContentKey(keyPress("ctrl+s")); cmd != nil {
 		t.Fatal("invalid form should not save")
@@ -298,8 +419,8 @@ func TestContactsViewValidatesFormBeforeSaving(t *testing.T) {
 		t.Errorf("form status = %q", view.contactForm.status)
 	}
 	requests, _ := recorded.snapshot()
-	if len(requests) != 1 {
-		t.Errorf("validation made requests: %v", requests)
+	if len(requests) != len(loadRequests) {
+		t.Errorf("validation made requests: %v", requests[len(loadRequests):])
 	}
 }
 
@@ -309,7 +430,7 @@ func TestContactsViewHidesAndShowsAgain(t *testing.T) {
 	openTUIContact(t, view)
 	hide := view.HandleContentKey(keyPress("h"))
 	view.Update(hide())
-	if view.inDetail || len(view.list.contacts) != 0 || view.lastHiddenID != 7 || view.notice != "Contact hidden" {
+	if view.inDetail || len(view.list.contacts) != 2 || view.lastHiddenID != 7 || view.notice != "Contact hidden" {
 		t.Errorf("hide state = detail:%v contacts:%+v hidden:%d notice:%q", view.inDetail, view.list.contacts, view.lastHiddenID, view.notice)
 	}
 	reveal := view.HandleContentKey(keyPress("u"))
@@ -317,8 +438,8 @@ func TestContactsViewHidesAndShowsAgain(t *testing.T) {
 	if refresh == nil {
 		t.Fatal("successful reveal should refresh contacts")
 	}
-	view.Update(refresh())
-	if view.lastHiddenID != 0 || len(view.list.contacts) != 1 || view.notice != "Contact shown again" {
+	drainContactPages(t, view, refresh())
+	if view.lastHiddenID != 0 || len(view.list.contacts) != 3 || view.notice != "Contact shown again" {
 		t.Errorf("reveal state = contacts:%+v hidden:%d notice:%q", view.list.contacts, view.lastHiddenID, view.notice)
 	}
 	requests, _ := recorded.snapshot()
@@ -418,7 +539,7 @@ func TestContactsViewHelpBindings(t *testing.T) {
 	for _, binding := range view.HelpBindings() {
 		keys[binding.key] = true
 	}
-	for _, want := range []string{"a", "r", "n/p"} {
+	for _, want := range []string{"a", "r"} {
 		if !keys[want] {
 			t.Errorf("list help missing %q: %v", want, view.HelpBindings())
 		}
