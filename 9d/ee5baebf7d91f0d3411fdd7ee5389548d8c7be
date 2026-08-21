@@ -1,0 +1,37 @@
+tests/e2e/installer.bats
+  s_e2b9c41f2f9ae5::t_e686364a7e5a9c 824-850
+internal/config/config_test.go
+  s_e2b9c41f2f9ae5::t_e686364a7e5a9c 577-633
+internal/cmd/root.go
+  s_e2b9c41f2f9ae5::t_fc1ecff6f94bff 360-362,367-371
+internal/cmd/setup_agents_test.go
+  s_e2b9c41f2f9ae5::t_e686364a7e5a9c 418-454
+internal/config/config.go
+  s_e2b9c41f2f9ae5::t_fc1ecff6f94bff 436-456,458-465,478-501
+skills/hey/SKILL.md
+  s_e2b9c41f2f9ae5::t_e686364a7e5a9c 186,209
+internal/cmd/setup.go
+  s_e2b9c41f2f9ae5::t_fc1ecff6f94bff 453,509-515,530
+internal/cmd/setup_test.go
+  s_e2b9c41f2f9ae5::t_e686364a7e5a9c 470-473
+internal/cmd/skill_refresh.go
+  s_e2b9c41f2f9ae5::t_fc1ecff6f94bff 24-26
+scripts/install.sh
+  s_e2b9c41f2f9ae5::t_fc1ecff6f94bff 470-476
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "9dee5baebf7d91f0d3411fdd7ee5389548d8c7be",
+  "prompts": {},
+  "sessions": {
+    "s_e2b9c41f2f9ae5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c6e9f2bf-e587-4622-a299-7b18cdf6665e",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}

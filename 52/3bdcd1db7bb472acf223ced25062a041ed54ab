@@ -1,0 +1,24 @@
+scripts/install.ps1
+  s_e2b9c41f2f9ae5::t_bc54df630900be 17-23,32,297-361,429-430,432-454
+tests/e2e/installer.bats
+  s_e2b9c41f2f9ae5::t_3e701eff838821 12-14,20,44-160,162-172,174-280
+scripts/install.sh
+  s_e2b9c41f2f9ae5::t_bc54df630900be 12-18,448-452,457-478,482,487-553
+  s_e2b9c41f2f9ae5::t_8144f3dc331e2c 554
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "523bdcd1db7bb472acf223ced25062a041ed54ab",
+  "prompts": {},
+  "sessions": {
+    "s_e2b9c41f2f9ae5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c6e9f2bf-e587-4622-a299-7b18cdf6665e",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}

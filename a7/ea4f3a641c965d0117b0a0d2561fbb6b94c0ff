@@ -1,0 +1,33 @@
+internal/harness/claude.go
+  s_e2b9c41f2f9ae5::t_62f7dad31e0423 154-165
+internal/harness/codex.go
+  s_e2b9c41f2f9ae5::t_62f7dad31e0423 99-110
+internal/cmd/setup_agents.go
+  s_e2b9c41f2f9ae5::t_62f7dad31e0423 141,148-150,152
+internal/harness/harness.go
+  s_e2b9c41f2f9ae5::t_62f7dad31e0423 25-35
+internal/cmd/setup_agents_test.go
+  s_e2b9c41f2f9ae5::t_2354101dc5b7d4 199-204,270-273,445-472,475-476,478-483
+  s_e2b9c41f2f9ae5::t_b55fcdc2985f36 473-474,477
+internal/cmd/skill_install.go
+  s_e2b9c41f2f9ae5::t_62f7dad31e0423 89,305-308,314,324
+internal/cmd/setup_agent.go
+  s_e2b9c41f2f9ae5::t_62f7dad31e0423 113,195-204
+  s_e2b9c41f2f9ae5::t_68ccf7c163e3fa 205-206
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "a7ea4f3a641c965d0117b0a0d2561fbb6b94c0ff",
+  "prompts": {},
+  "sessions": {
+    "s_e2b9c41f2f9ae5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c6e9f2bf-e587-4622-a299-7b18cdf6665e",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
