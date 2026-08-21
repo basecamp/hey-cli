@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -191,7 +192,7 @@ func cliEnv() []string {
 // where a check that did not run is not a check that passed.
 func skipf(t *testing.T, format string, args ...any) {
 	t.Helper()
-	if os.Getenv("HEY_SMOKE_STRICT") != "" {
+	if strict, _ := strconv.ParseBool(os.Getenv("HEY_SMOKE_STRICT")); strict {
 		t.Fatalf("strict: "+format, args...)
 	}
 	t.Skipf(format, args...)
