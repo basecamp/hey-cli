@@ -89,14 +89,17 @@ func omarchyPollLockPath() string {
 	return omarchyPollStatePath() + ".lock"
 }
 
-// removeOmarchyPollState forgets the fingerprints and the lock beside them.
-// A poll that is not notifying calls this on every run, so turning toasts on
-// — by any route: hey setup omarchy --notify, the plugin's own toggle, omarchy
-// bar set — always starts from a silent seed instead of toasting whatever
-// accumulated while they were off.
+// removeOmarchyPollState forgets the fingerprints. A poll that is not
+// notifying calls this on every run, so turning toasts on — by any route: hey
+// setup omarchy --notify, the plugin's own toggle, omarchy bar set — always
+// starts from a silent seed instead of toasting whatever accumulated while
+// they were off. It takes the poll lock, so a notifying poll on another
+// monitor that is mid-diff finishes writing before the file goes, and it
+// leaves the lock sidecar alone: unlinking an inode another poller holds would
+// let the next poll lock a fresh one and the two diff at once.
 func removeOmarchyPollState() error {
-	_, err := removeFileIfPresent(omarchyPollStatePath())
-	_, _ = removeFileIfPresent(omarchyPollLockPath())
+	var err error
+	withOmarchyPollLock(func() { _, err = removeFileIfPresent(omarchyPollStatePath()) })
 	return err
 }
 

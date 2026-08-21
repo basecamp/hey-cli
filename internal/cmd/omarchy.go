@@ -368,7 +368,6 @@ func (s omarchySetup) configureBarPlugin() []omarchyStep {
 		return []omarchyStep{stepResult("bar plugin", path, false, err, "", "")}
 	}
 	legacy, legacyNotified := s.removeLegacyBarModule(shell, layout)
-	changed := legacy
 	var steps []omarchyStep
 	if legacy {
 		steps = append(steps, omarchyStep{Name: "bar indicator", Path: path, Status: "removed",
@@ -382,7 +381,7 @@ func (s omarchySetup) configureBarPlugin() []omarchyStep {
 			detail += "; then hey setup omarchy --notify to keep the toasts"
 		}
 		steps = append(steps, omarchyStep{Name: "bar plugin", Path: path, Status: "skipped", Detail: detail})
-		return s.writeBarSteps(steps, shell, changed)
+		return s.writeBarSteps(steps, shell, legacy)
 	}
 
 	want := s.notify
@@ -395,6 +394,9 @@ func (s omarchySetup) configureBarPlugin() []omarchyStep {
 			want = &on
 		}
 	}
+	// The plugin step reports its own setting only: a legacy removal in the
+	// same pass is the other step's news.
+	settingChanged := false
 	if want != nil {
 		current, has := plugin["notify"]
 		switch {
@@ -405,20 +407,20 @@ func (s omarchySetup) configureBarPlugin() []omarchyStep {
 			// rather than enable a poll that would toast the backlog.
 			if err := removeOmarchyPollState(); err != nil {
 				steps = append(steps, stepResult("bar plugin", path, false, fmt.Errorf("cannot drop stale poll state: %w", err), "", ""))
-				return s.writeBarSteps(steps, shell, changed)
+				return s.writeBarSteps(steps, shell, legacy)
 			}
 			plugin["notify"] = true
-			changed = true
+			settingChanged = true
 		case !*want && has:
 			delete(plugin, "notify")
-			changed = true
+			settingChanged = true
 		}
 	}
 	step := omarchyStep{Name: "bar plugin", Path: path, Status: "unchanged", Detail: notifyDetail(barPluginNotifies(plugin))}
-	if changed {
+	if settingChanged {
 		step.Status = "installed"
 	}
-	return s.writeBarSteps(append(steps, step), shell, changed)
+	return s.writeBarSteps(append(steps, step), shell, legacy || settingChanged)
 }
 
 // writeBarSteps writes shell.json when anything changed and turns every
@@ -696,6 +698,10 @@ func (s omarchySetup) removePollState() omarchyStep {
 		existed = true
 	}
 	err := removeOmarchyPollState()
+	// The lock sidecar goes only here, at teardown: a live poller holding it
+	// would otherwise be left with an unlinked inode while the next poll
+	// locks a fresh one, and the two would diff at once.
+	_, _ = removeFileIfPresent(omarchyPollLockPath())
 	return stepResult("poll state", path, existed && err == nil, err, "removed", "absent")
 }
 

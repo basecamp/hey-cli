@@ -86,10 +86,12 @@ the current defaults, the layout goes too and the user is back to inheriting the
 ### `hey omarchy poll`
 
 The engine under the bar plugin, and the one command the plugin depends on for the Imbox.
-`hey omarchy poll --limit N --json` answers with the same envelope `hey box imbox --json`
-does — `{"ok":true,"data":{...box, "postings":[...]}}`, newest first, cut to `--limit`
-with `next_history_url` cleared when the cut dropped postings — so the plugin's parser did
-not change. Errors are errors: logged out is the `auth` envelope the plugin turns into its
+`hey omarchy poll --limit N --json` answers with the same `data` `hey box imbox --json`
+does — `{"ok":true,"data":{...box, "postings":[...]}}`, the box and its postings newest
+first, byte-identical for the same Imbox, cut to `--limit` with `next_history_url` cleared
+when the cut dropped postings — so the plugin's parser did not change. The envelope
+around it is the poll's own: a summary, a truncation notice that says to raise `--limit`
+rather than pass `--all`, and none of `hey box`'s breadcrumbs. Errors are errors: logged out is the `auth` envelope the plugin turns into its
 sign-in button, a global config that cannot be loaded is `config_error`, and a later page
 that cannot be fetched fails the poll rather than handing the panel a short list to replace
 its last complete one. The one thing that never fails the command is the toast.
@@ -129,8 +131,10 @@ serves the panel, the icon and the toasts.
   toast instead of stacking; a stale id after a shell restart just makes a fresh toast.
 - **One toast across monitors.** The shell builds its bar once per monitor, so a
   two-monitor desktop runs two plugin instances and two concurrent polls. The diff and the
-  send happen under a `flock` on the state file, so the second poll reads the fingerprints
-  the first one just wrote and finds nothing new.
+  send happen under a `flock` on the sidecar `omarchy-poll.json.lock` next to the state
+  file, so the second poll reads the fingerprints the first one just wrote and finds
+  nothing new. The sidecar is never unlinked while polls run (only `--remove` takes it
+  out) — a fresh inode would be a fresh lock.
 - **DND is honored.** The toast passes `--app-name HEY` deliberately: omarchy's default
   app-name `omarchy-action` bypasses notification silencing, so identifying as HEY is
   what makes SUPER+CTRL+comma mute the toasts (into history) like any other app.
@@ -185,8 +189,9 @@ mutations (`hey seen`, `hey move`) do not push yet; agents driving the CLI are a
   CLI owns what needs HEY's semantics — pagination, what counts as new, a toast that
   honors DND — where it is Go-tested once instead of re-derived in QML. The plugin's panel
   does show an unread *number* per account; the bar icon itself stays a glyph that lights
-  or does not, and the toast never carries a count either. That divergence is the
-  plugin's call and is recorded here rather than papered over.
+  or does not, and the toast never carries the unread total either — `N new in Imbox` is
+  how many threads arrived since the last poll, not how many are waiting. That divergence
+  is the plugin's call and is recorded here rather than papered over.
 
 ## Follow-ups, in rough order
 

@@ -811,8 +811,8 @@ func TestOmarchySetupRemovesTheLegacyBarModule(t *testing.T) {
 	// An explicit plugin setting, or an explicit flag, wins over the legacy
 	// module's choice.
 	writeShell(t, env, `{"version":1,"bar":{"layout":{"right":[{"id":"hey-unread","type":"command","exec":"hey omarchy bar-status --notify"},{"id":"37signals.hey","notify":false}]}}}`)
-	if bar := stepNamed(omarchySetup{env: env}.apply(), "bar plugin"); bar.Detail != "notifications off" {
-		t.Errorf("an explicit plugin setting is kept, got %q", bar.Detail)
+	if bar := stepNamed(omarchySetup{env: env}.apply(), "bar plugin"); bar.Detail != "notifications off" || bar.Status != "unchanged" {
+		t.Errorf("an explicit plugin setting is kept, and the legacy removal is the other step's news, got %q %q", bar.Status, bar.Detail)
 	}
 	off := false
 	writeShell(t, env, `{"version":1,"bar":{"layout":{"right":[{"id":"hey-unread","type":"command","exec":"hey omarchy bar-status --notify"},{"id":"37signals.hey"}]}}}`)

@@ -99,6 +99,7 @@ func TestMain(m *testing.M) {
 
 	code := m.Run()
 	os.RemoveAll(configDir)
+	os.RemoveAll(stateDir)
 	os.Exit(code)
 }
 

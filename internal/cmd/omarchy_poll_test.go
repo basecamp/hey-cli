@@ -159,8 +159,9 @@ func TestPollAnswersLikeBoxImbox(t *testing.T) {
 	if err := json.Unmarshal([]byte(box), &boxEnvelope); err != nil {
 		t.Fatal(err)
 	}
-	// The plugin parses hey box imbox --json; the poll has to be the same shape,
-	// byte for byte, so the panel renders either.
+	// The plugin parses the data of hey box imbox --json; the poll's data has
+	// to be the same, byte for byte, so the panel renders either. The envelope
+	// around it (summary, notice, breadcrumbs) is the poll's own.
 	if !bytes.Equal(poll.raw, boxEnvelope.Data) {
 		t.Errorf("poll data differs from hey box imbox:\n%s\n%s", poll.raw, boxEnvelope.Data)
 	}
