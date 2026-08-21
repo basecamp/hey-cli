@@ -282,3 +282,28 @@ func TestSkillInstallRefusesSymlinkedSkillFileInManagedDir(t *testing.T) {
 		t.Errorf("symlink target was truncated: %q", data)
 	}
 }
+
+// A marker planted as a symlink or directory confers no ownership, so the
+// unmanaged-content refusal still protects the regular SKILL.md next to it.
+func TestClaimSkillDirRejectsNonRegularMarker(t *testing.T) {
+	home := agentHome(t)
+	dir := filepath.Join(home, "skills", "hey")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	custom := "# my own hey skill"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(custom), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, ownershipMarkerFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var unmanaged *unmanagedSkillDirError
+	if err := claimSkillDir(dir); !errors.As(err, &unmanaged) {
+		t.Fatalf("claimSkillDir = %v, want unmanaged refusal", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "SKILL.md")); string(got) != custom {
+		t.Errorf("user skill changed: %q", got)
+	}
+}

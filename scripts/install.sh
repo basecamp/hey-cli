@@ -497,65 +497,27 @@ binary_supports_setup_agents() {
   "$1" setup --help 2>/dev/null | grep -qE '^[[:space:]]+agents[[:space:]]'
 }
 
-# binary_supports_setup_agent reports whether the binary exposes a per-agent
-# `setup <id>` subcommand for the given agent id (claude or codex).
-binary_supports_setup_agent() {
-  "$1" setup --help 2>/dev/null | grep -qE "^[[:space:]]+$2[[:space:]]"
-}
-
-# post_install_setup installs the agent skill and connects coding agents
-# without prompting. It honors HEY_SETUP_AGENT (claude|codex|all|none; unset =
-# auto-detect). Never runs the interactive wizard.
+# post_install_setup connects coding agents without prompting, but only when
+# the installed binary has the ownership-aware `setup agents` (it honors
+# HEY_SETUP_AGENT itself: claude|codex|all|none, unset = auto-detect one).
 #
-# Cross-version: newer binaries get the intent-neutral `setup agents`. Older
-# release binaries (no `setup agents`) fall back without guessing an agent —
-# only an *explicitly* selected agent is connected. `all` runs every per-agent
-# setup the binary supports; an unset, auto, or ambiguous selector installs the
-# shared skill only (`skill install`).
+# Releases that predate `setup agents` also predate the ownership gate on
+# `skill install` — their legacy implementation overwrites whatever occupies
+# the skill paths — so the installer never invokes an old binary's setup or
+# skill commands. The printed next steps are the fallback: setup belongs to
+# the user, on a binary that refuses to destroy their files.
 #
-# Every real invocation carries HEY_NO_KEYRING=1, per-command rather than
-# exported: these calls never touch credentials, but a locked headless keychain
-# (CI, ssh) can block the keyring probe forever. The `setup --help` capability
-# probes stay bare — help short-circuits before any probe.
+# The real invocation carries HEY_NO_KEYRING=1, per-command rather than
+# exported: it never touches credentials, and a locked headless keychain
+# (CI, ssh) could otherwise block the keyring probe forever. The
+# `setup --help` capability probe stays bare — help short-circuits first.
 post_install_setup() {
   local binary_name="$1"
   local bin="$BIN_DIR/$binary_name"
 
   if binary_supports_setup_agents "$bin"; then
     HEY_NO_KEYRING=1 "$bin" setup agents || true
-    return 0
   fi
-
-  case "${HEY_SETUP_AGENT:-}" in
-    claude|codex)
-      # Capability-check first: an old `setup` parent could accept an
-      # unadvertised agent id as a stray positional arg and launch the
-      # INTERACTIVE wizard, violating the non-interactive contract. Degrade to
-      # the shared skill.
-      if binary_supports_setup_agent "$bin" "${HEY_SETUP_AGENT}"; then
-        HEY_NO_KEYRING=1 "$bin" setup "${HEY_SETUP_AGENT}" || true
-      else
-        HEY_NO_KEYRING=1 "$bin" skill install || true
-      fi
-      ;;
-    all)
-      # Explicit "every agent": dispatch each per-agent setup the binary knows,
-      # falling back to the shared skill if it supports none of them.
-      local ran_agent=0 agent
-      for agent in claude codex; do
-        if binary_supports_setup_agent "$bin" "$agent"; then
-          HEY_NO_KEYRING=1 "$bin" setup "$agent" || true
-          ran_agent=1
-        fi
-      done
-      [[ "$ran_agent" -eq 1 ]] || HEY_NO_KEYRING=1 "$bin" skill install || true
-      ;;
-    *)
-      # Intent-neutral on old binaries: install the shared skill, never pick an
-      # agent. The user connects one via the printed "Next steps".
-      HEY_NO_KEYRING=1 "$bin" skill install || true
-      ;;
-  esac
 }
 
 # Guard so sourcing the script (e.g. from tests) doesn't run the installer.

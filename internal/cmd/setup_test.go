@@ -549,3 +549,22 @@ func TestInteractiveStdioRequiresStderrTerminal(t *testing.T) {
 		t.Error("three terminals and no escape hatch should allow prompting")
 	}
 }
+
+// --ids-only and --count cannot render a wizard result, so they are rejected
+// before any side effect — never OAuth-then-"requires list data".
+func TestSetupRejectsListOnlyFormatsBeforeSideEffects(t *testing.T) {
+	isolateAgents(t)
+	server := quietServer(t)
+	for _, flag := range []string{"--ids-only", "--count"} {
+		for _, args := range [][]string{{"setup"}, {"setup", "agents"}, {"setup", "codex"}} {
+			configHome := t.TempDir()
+			_, _, err := runAuthCommand(t, configHome, server.URL, "", false, append(args, flag)...)
+			if err == nil || !strings.Contains(err.Error(), flag+" is not supported") {
+				t.Fatalf("%v %s: error = %v", args, flag, err)
+			}
+			if _, statErr := os.Stat(filepath.Join(configHome, ".agents")); !os.IsNotExist(statErr) {
+				t.Errorf("%v %s ran side effects before rejecting the format", args, flag)
+			}
+		}
+	}
+}

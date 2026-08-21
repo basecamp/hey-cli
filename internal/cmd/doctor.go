@@ -197,7 +197,16 @@ func doctorStatus(status string) string {
 // current. Not installed is a warning, not an error: the CLI works without it,
 // coding agents just get no HEY skill.
 func checkBaselineSkill() map[string]string {
-	if !baselineSkillInstalled() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return map[string]string{
+			"name":    "Agent Skill",
+			"status":  "warning",
+			"message": "Cannot determine home directory",
+		}
+	}
+	skillPath := filepath.Join(home, ".agents", "skills", "hey", "SKILL.md")
+	if _, statErr := os.Lstat(skillPath); statErr != nil {
 		return map[string]string{
 			"name":    "Agent Skill",
 			"status":  "warning",
@@ -205,11 +214,14 @@ func checkBaselineSkill() map[string]string {
 			"hint":    "hey skill install",
 		}
 	}
-	if home, err := os.UserHomeDir(); err == nil && !ownedSkillDir(filepath.Join(home, ".agents", "skills", "hey")) {
+	// Something occupies the path but fails the health rules (unmarked
+	// hand-authored skill, pre-ownership hey-cli install, symlinked file):
+	// hey skill install would refuse it, so the remediation is move-aside.
+	if !baselineSkillInstalled() {
 		return map[string]string{
 			"name":    "Agent Skill",
 			"status":  "warning",
-			"message": "Installed, but not written by hey-cli (or by a release before ownership tracking); it will not be kept up to date",
+			"message": "Present, but not a hey-cli-managed install (hand-authored, or from a release before ownership tracking); it will not be kept up to date",
 			"hint":    "Move it aside and run: hey skill install",
 		}
 	}

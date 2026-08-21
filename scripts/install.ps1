@@ -306,17 +306,16 @@ function Test-InteractiveSession {
   }
 }
 
-# Invoke-PostInstallSetup installs the agent skill and connects coding agents
-# without prompting. It honors HEY_SETUP_AGENT (claude|codex|all|none; unset =
-# auto-detect). Never runs the interactive wizard. Newer binaries get the
-# intent-neutral `setup agents`; older ones (no `setup agents`) only connect an
-# explicitly selected agent, capability-checked, and otherwise install the
-# shared skill. Every call is best-effort: a failure here must not fail the
-# install.
+# Invoke-PostInstallSetup connects coding agents without prompting, but only
+# when the installed binary has the ownership-aware `setup agents` (it honors
+# HEY_SETUP_AGENT itself). Releases that predate `setup agents` also predate
+# the ownership gate on `skill install`, so the installer never invokes an
+# old binary's legacy setup or skill commands - the printed next steps are
+# the fallback. Best-effort: a failure here must not fail the install.
 function Invoke-PostInstallSetup([string]$Binary) {
-  # None of these calls touch credentials, but a locked headless keychain can
-  # block the keyring probe forever. Set the escape hatch for the duration of
-  # setup only, restoring the caller's value (or absence) on the way out.
+  # The call never touches credentials, but a locked headless keychain can
+  # block the keyring probe forever. Set the escape hatch for the duration
+  # only, restoring the caller's value (or absence) on the way out.
   $savedNoKeyring = $env:HEY_NO_KEYRING
   $env:HEY_NO_KEYRING = '1'
   try {
@@ -324,31 +323,6 @@ function Invoke-PostInstallSetup([string]$Binary) {
 
     if ($help -match '(?m)^\s+agents\s') {
       try { & $Binary setup agents } catch { }
-      return
-    }
-
-    $selector = $env:HEY_SETUP_AGENT
-    if ($selector -in @('claude', 'codex')) {
-      # Capability-check first: an old `setup` parent could accept an
-      # unadvertised agent id as a stray arg and launch the INTERACTIVE wizard.
-      # Degrade to the skill.
-      if ($help -match "(?m)^\s+$selector\s") {
-        try { & $Binary setup $selector } catch { }
-      } else {
-        try { & $Binary skill install } catch { }
-      }
-    } elseif ($selector -eq 'all') {
-      $ranAgent = $false
-      foreach ($agent in @('claude', 'codex')) {
-        if ($help -match "(?m)^\s+$agent\s") {
-          # Mark attempted (not succeeded) -- matches install.sh's `ran_agent=1`.
-          $ranAgent = $true
-          try { & $Binary setup $agent } catch { }
-        }
-      }
-      if (-not $ranAgent) { try { & $Binary skill install } catch { } }
-    } else {
-      try { & $Binary skill install } catch { }
     }
   } finally {
     if ($null -eq $savedNoKeyring) {

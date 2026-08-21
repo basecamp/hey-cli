@@ -12,14 +12,12 @@ import (
 const SkillOwnershipMarker = ".managed-by-hey-cli"
 
 // SkillDirOwned reports whether hey-cli wrote the skill directory at dir.
-// The path is checked with Stat, so ownership is visible through hey-cli's
-// own canonical symlink.
+// The marker itself must be a regular file — the same shape rule as every
+// other skill file, so a planted symlink or directory in the marker's name
+// cannot confer ownership. Intermediate directory links still resolve, so
+// ownership stays visible through hey-cli's own canonical Claude symlink.
 func SkillDirOwned(dir string) bool {
-	if dir == "" {
-		return false
-	}
-	_, err := os.Stat(filepath.Join(dir, SkillOwnershipMarker))
-	return err == nil
+	return dir != "" && RegularSkillFile(filepath.Join(dir, SkillOwnershipMarker))
 }
 
 // RegularSkillFile reports whether path is a regular file (Lstat, so a

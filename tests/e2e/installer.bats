@@ -118,42 +118,27 @@ run_post_install_setup() {
   [[ "$output" != *"setup claude"* ]]
 }
 
-@test "old binary + unset selector falls back to 'skill install', never 'setup claude'" {
+# Releases that predate `setup agents` also predate the ownership gate on
+# `skill install`: their legacy implementation overwrites whatever occupies
+# the skill paths. The installer therefore never invokes an old binary's
+# setup or skill commands — whatever the selector — and leaves setup to the
+# printed next steps.
+@test "old binary: nothing is invoked beyond the capability probe" {
   write_stub old
-  run_post_install_setup
-  [[ "$status" -eq 0 ]]
-  [[ "$output" == *"skill install"* ]]
-  [[ "$output" != *"setup claude"* ]]
-  [[ "$output" != *"setup agents"$'\n'* ]]  # the unknown command is never left as the outcome
-}
-
-@test "old binary + HEY_SETUP_AGENT=claude connects claude explicitly" {
-  write_stub old
-  run_post_install_setup "export HEY_SETUP_AGENT=claude"
-  [[ "$status" -eq 0 ]]
-  [[ "$output" == *"setup claude"* ]]
-  [[ "$output" != *"skill install"* ]]
-}
-
-# Explicit `all` intent must dispatch every per-agent setup the old binary
-# supports (here the stub advertises only `claude`), never collapse to skill-only.
-@test "old binary + HEY_SETUP_AGENT=all runs the supported per-agent setups" {
-  write_stub old
-  run_post_install_setup "export HEY_SETUP_AGENT=all"
-  [[ "$status" -eq 0 ]]
-  [[ "$output" == *"setup claude"* ]]
-  [[ "$output" != *"setup codex"* ]]  # codex unadvertised -> never invoked
-}
-
-# Explicit `codex` on an old binary that lacks `setup codex` must NOT run the
-# unknown subcommand (which would launch the interactive wizard) -- it degrades
-# to the shared skill.
-@test "old binary + HEY_SETUP_AGENT=codex degrades to 'skill install', never 'setup codex'" {
-  write_stub old
-  run_post_install_setup "export HEY_SETUP_AGENT=codex"
-  [[ "$status" -eq 0 ]]
-  [[ "$output" == *"skill install"* ]]
-  [[ "$output" != *"setup codex"* ]]
+  for selector in "" claude codex all none; do
+    : > "$LOG"
+    if [[ -n "$selector" ]]; then
+      run_post_install_setup "export HEY_SETUP_AGENT=$selector"
+    else
+      run_post_install_setup
+    fi
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == *"setup --help"* ]]
+    [[ "$output" != *"skill install"* ]]
+    [[ "$output" != *"setup claude"* ]]
+    [[ "$output" != *"setup codex"* ]]
+    [[ "$output" != *"setup agents"$'\n'* ]]
+  done
 }
 
 @test "install.sh has no residual 'setup claude' dispatch" {
@@ -181,15 +166,16 @@ run_post_install_setup() {
   grep -qF '& $installedBinary setup' "$INSTALL_PS1"
 }
 
-@test "install.ps1 helper is guarded and cross-version aware" {
+@test "install.ps1 helper is guarded and never invokes legacy setup commands" {
   grep -q 'function Invoke-PostInstallSetup' "$INSTALL_PS1"
   grep -q 'setup agents' "$INSTALL_PS1"
-  grep -q 'skill install' "$INSTALL_PS1"
   grep -q 'catch {' "$INSTALL_PS1"
-  # Explicit claude|codex selectors must be capability-checked before dispatch,
-  # so an old binary never gets an unadvertised subcommand as a stray arg.
-  grep -qF 'match "(?m)^\s+$selector\s"' "$INSTALL_PS1"
   grep -q 'HEY_NO_KEYRING' "$INSTALL_PS1"
+  # Only the ownership-aware `setup agents` may be invoked automatically: no
+  # legacy skill-install or per-agent dispatch survives in the helper.
+  helper=$(awk '/function Invoke-PostInstallSetup/,/^}/' "$INSTALL_PS1")
+  [[ "$helper" != *"skill install"* ]]
+  [[ "$helper" != *'setup $'* ]]
 }
 
 # The installer's best-effort children never touch credentials, but a locked
@@ -211,7 +197,7 @@ run_post_install_setup() {
   [[ "$output" == *"nk=1 setup agents"* ]]
 }
 
-@test "old binary: skill install fallback carries HEY_NO_KEYRING=1" {
+@test "old binary: only the bare capability probe runs" {
   write_nk_stub old
   run bash -c "
     set -euo pipefail
@@ -223,7 +209,7 @@ run_post_install_setup() {
   "
   [[ "$status" -eq 0 ]]
   [[ "$output" == *"nk=unset setup --help"* ]]
-  [[ "$output" == *"nk=1 skill install"* ]]
+  [[ "$output" != *"skill install"* ]]
 }
 
 # The function under test is extracted from install.ps1's AST and evaluated

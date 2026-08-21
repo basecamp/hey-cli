@@ -47,7 +47,25 @@ func newSetupCommand() *setupCommand {
 }
 
 func (c *setupCommand) run(cmd *cobra.Command, _ []string) error {
+	if err := rejectListOnlyFormats("the setup wizard"); err != nil {
+		return err
+	}
 	return runSetupWizard(cmd, wizardOptions{full: true})
+}
+
+// rejectListOnlyFormats fails fast on --ids-only and --count: setup results
+// are not list data, and the writer's late refusal would otherwise land
+// after OAuth ran, agents were connected and onboarded was persisted —
+// side effects dressed up as a failed command.
+func rejectListOnlyFormats(command string) error {
+	switch writer.EffectiveFormat() {
+	case output.FormatIDs:
+		return output.ErrUsage("--ids-only is not supported by " + command)
+	case output.FormatCount:
+		return output.ErrUsage("--count is not supported by " + command)
+	default:
+		return nil
+	}
 }
 
 // wizardOptions tunes the first-run wizard. full runs every step; a lite run

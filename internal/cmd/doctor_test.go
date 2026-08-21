@@ -3,6 +3,8 @@ package cmd
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -116,5 +118,53 @@ func TestDoctorVersionIgnoresNonReleaseLatestTag(t *testing.T) {
 		if check["status"] != "ok" || check["hint"] != "" {
 			t.Errorf("latest %q: doctor must not warn about a non-release tag: %v", latest, check)
 		}
+	}
+}
+
+// Presence and health are reported separately: an unmanaged skill gets the
+// move-aside remediation (hey skill install would refuse it), a missing one
+// gets the install hint, and a marker that is not a regular file confers no
+// ownership.
+func TestDoctorBaselineSkillDiagnostics(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	check := checkBaselineSkill()
+	if check["message"] != "Not installed" || check["hint"] != "hey skill install" {
+		t.Errorf("missing skill: %v", check)
+	}
+
+	dir := filepath.Join(home, ".agents", "skills", "hey")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("# mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	check = checkBaselineSkill()
+	if check["status"] != "warning" || !strings.Contains(check["message"], "not a hey-cli-managed install") {
+		t.Errorf("unmanaged skill: %v", check)
+	}
+	if check["hint"] != "Move it aside and run: hey skill install" {
+		t.Errorf("unmanaged hint = %q", check["hint"])
+	}
+
+	// A directory planted in the marker's name confers no ownership.
+	if err := os.MkdirAll(filepath.Join(dir, ".managed-by-hey-cli"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	check = checkBaselineSkill()
+	if !strings.Contains(check["message"], "not a hey-cli-managed install") {
+		t.Errorf("non-regular marker treated as ownership: %v", check)
+	}
+
+	if err := os.RemoveAll(filepath.Join(dir, ".managed-by-hey-cli")); err != nil {
+		t.Fatal(err)
+	}
+	writeOwnershipMarker(dir)
+	check = checkBaselineSkill()
+	if check["status"] != "ok" {
+		t.Errorf("managed skill: %v", check)
 	}
 }

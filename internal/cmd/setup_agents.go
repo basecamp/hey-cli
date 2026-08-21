@@ -60,6 +60,9 @@ type agentSetupRecord struct {
 // where every safety-critical outcome lives in a top-level flat field (the
 // `agents` array is per-agent detail).
 func runNonInteractiveAgentSetup(cmd *cobra.Command) error {
+	if err := rejectListOnlyFormats("hey setup agents"); err != nil {
+		return err
+	}
 	// Baseline skill: installed regardless of selector.
 	_, skillErr := installSkillFiles()
 	skillInstalled := skillErr == nil

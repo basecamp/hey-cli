@@ -89,10 +89,10 @@ func writeSkillFile(path string, data []byte) error {
 	return os.WriteFile(path, data, 0o644) // #nosec G306 G703 -- fixed skill locations under the user's own home, gated by claimSkillDir and the Lstat above
 }
 
-// ownedSkillDir reports whether hey-cli wrote the skill directory.
+// ownedSkillDir reports whether hey-cli wrote the skill directory: the
+// harness predicate, which requires the marker to be a regular file.
 func ownedSkillDir(dir string) bool {
-	_, err := os.Stat(filepath.Join(dir, ownershipMarkerFile))
-	return err == nil
+	return harness.SkillDirOwned(dir)
 }
 
 func newSkillInstallCommand() *cobra.Command {

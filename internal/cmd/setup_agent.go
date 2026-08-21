@@ -121,6 +121,9 @@ func newSetupAgentCommands() []*cobra.Command {
 }
 
 func runSetupAgent(cmd *cobra.Command, agent harness.AgentInfo, handler agentSetupHandler) error {
+	if err := rejectListOnlyFormats("hey setup " + agent.ID); err != nil {
+		return err
+	}
 	_, skillErr := installSkillFiles()
 
 	var setupErrors, manualCommands []string
