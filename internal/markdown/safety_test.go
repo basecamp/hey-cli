@@ -224,6 +224,16 @@ func TestPrepareSourceLeavesQuoteMarkersInCodeAlone(t *testing.T) {
 	if lines[3] == code {
 		t.Errorf("prose line = %q, want it bounded", lines[3])
 	}
+
+	// A four-backtick fence holds a "```" line; it closes only at four or more.
+	safe, _ = prepareSource("````\n```\n" + code + "\n````\n" + code)
+	lines = strings.Split(safe, "\n")
+	if lines[2] != code {
+		t.Errorf("line inside the longer fence = %q, want it untouched", lines[2])
+	}
+	if lines[4] == code {
+		t.Errorf("prose line after the fence = %q, want it bounded", lines[4])
+	}
 }
 
 func TestRendererCacheIsBounded(t *testing.T) {

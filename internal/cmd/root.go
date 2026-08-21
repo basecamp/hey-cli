@@ -268,10 +268,14 @@ func Execute() {
 	if err != nil {
 		err = normalizeCobraError(err)
 		if writer == nil {
-			writer = output.New(output.Options{
-				Format:   output.FormatFromFlags(jsonFlag || jqFlag != "", quietFlag, idsOnly, countFlag, markdownF, styledFlag, agentFlag),
-				JQFilter: jqFlag,
-			})
+			// An error Cobra raised before the pre-run — an unknown flag — gets the
+			// writer the pre-run would have built, --html included, so an --html
+			// invocation's error reads as text on stderr rather than as JSON.
+			format := output.FormatFromFlags(jsonFlag || jqFlag != "", quietFlag, idsOnly, countFlag, markdownF, styledFlag, agentFlag)
+			if htmlOutput {
+				format = output.FormatHTML
+			}
+			writer = output.New(output.Options{Format: format, JQFilter: jqFlag})
 		}
 		if writer.IsStyled() && strings.HasPrefix(err.Error(), "Usage:") {
 			fmt.Fprintln(os.Stderr, err.Error())

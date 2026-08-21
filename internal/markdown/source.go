@@ -55,16 +55,29 @@ func boundQuoteDepth(md string) string {
 	for i, line := range lines {
 		trimmed := strings.TrimLeft(line, " ")
 		switch {
-		case fence != "" && strings.HasPrefix(trimmed, fence):
+		case fence != "" && closesFence(trimmed, fence):
 			fence = ""
 		case fence != "":
 		case strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~"):
-			fence = trimmed[:3]
+			fence = fenceRun(trimmed)
 		default:
 			lines[i] = boundedQuoteLine(line)
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// fenceRun is the run of fence characters a line opens with, whole: a fence of four
+// backticks is closed only by four or more, which is how a fence can hold "```".
+func fenceRun(line string) string {
+	return line[:len(line)-len(strings.TrimLeft(line, line[:1]))]
+}
+
+// closesFence reports a line that closes the fence: a run of the same character at
+// least as long, and nothing else but spaces.
+func closesFence(line, fence string) bool {
+	run := fenceRun(line)
+	return run != "" && run[0] == fence[0] && len(run) >= len(fence) && strings.TrimSpace(line[len(run):]) == ""
 }
 
 // boundedQuoteLine collapses the markers past maxQuoteDepth on one line. A marker is a
