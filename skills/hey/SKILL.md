@@ -515,6 +515,7 @@ hey watch --exit-on-first         # Wait for one change, print it, exit
 hey watch --timeout 30m           # Give up waiting after a while
 hey watch --since 2026-03-15      # Report changes since then first, then follow
 hey watch --run-sync ./triage.sh  # Run a command per change instead of printing
+hey watch --notify                # Also show a desktop notification for new mail
 ```
 
 Long-running, and driven by a websocket rather than polling — never poll `hey box` in a
@@ -528,6 +529,11 @@ To drive a command per change, choose one of two behaviours — passing both is 
 two can overlap; `--run-sync` waits for each and runs them in order. Both get the JSON on
 stdin and the fields as `HEY_CHANGE`, `HEY_AT`, `HEY_BOX_ID`, `HEY_BOX_KIND`,
 `HEY_BOX_NAME`, `HEY_POSTING_ID` and `HEY_THREAD_ID`, and both take over stdout.
+
+`--notify` adds a desktop notification through `notify-send` for new unseen mail among the
+changes — at most one per batch, replacing the last rather than stacking — and composes
+with every flag above without changing what is written. It needs libnotify; without it the
+watch says so once on stderr and carries on.
 
 ### Drafts
 

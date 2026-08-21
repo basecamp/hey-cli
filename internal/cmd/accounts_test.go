@@ -28,7 +28,6 @@ func TestCommandAccountScopePolicy(t *testing.T) {
 		{args: []string{"accounts", "list"}, want: false},
 		{args: []string{"auth", "status"}, want: false},
 		{args: []string{"config", "show"}, want: false},
-		{args: []string{"omarchy", "bar-status"}, want: false},
 	} {
 		command, _, err := root.Find(test.args)
 		if err != nil {

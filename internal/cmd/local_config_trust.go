@@ -50,18 +50,15 @@ func ensureLocalConfigTrusted(cmd *cobra.Command) error {
 
 // commandIgnoresLocalConfig reports whether a command reads only the global and
 // environment configuration, so a repository-local .hey/config.json is never
-// even parsed for it. The bar poller runs from the shell's working directory,
-// wherever that happens to be: a local config must neither redirect it to
-// another server nor fail it (trust gate or malformed file) — the indicator
-// has to stay dark rather than error. setup omarchy only edits fixed desktop
-// paths and must not be blocked by a checkout's config either.
+// even parsed for it — neither to redirect it to another server nor to fail it
+// (trust gate or malformed file).
 func commandIgnoresLocalConfig(cmd *cobra.Command) bool {
 	parts := strings.Fields(cmd.CommandPath())
 	if len(parts) < 2 {
 		return false
 	}
 	switch parts[1] {
-	case "omarchy", "skill":
+	case "skill":
 		return true
 	case "setup":
 		// The wizard itself uses the effective server; its subcommands

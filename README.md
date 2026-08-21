@@ -388,6 +388,7 @@ hey watch                               # follow every box, a line of JSON per c
 hey watch --box imbox --events added    # only new postings in the Imbox
 hey watch --box imbox --exit-on-first   # block until something lands, then exit
 hey watch --since 2026-08-18T09:00:00Z  # catch up from a time first, then follow
+hey watch --notify                      # desktop notification for new mail (libnotify)
 hey watch --run-async 'notify-send "New mail in $HEY_BOX_KIND"'
 hey watch --run-sync ./triage.sh        # one at a time, waiting for each
 ```
@@ -491,23 +492,31 @@ read from `~/.local/state/omarchy/current/theme/`, and restyles live when you ru
 — an explicitly chosen file is trusted as written — or `NO_COLOR=1` to turn color off.
 
 ```bash
-yay -S hey-cli               # hey-cli is on the AUR
+omarchy pkg aur add hey-cli  # hey-cli is on the AUR
+omarchy plugin add https://github.com/basecamp/omarchy-hey-plugin.git --enable
 hey setup omarchy            # install into the desktop
-hey setup omarchy --notify   # also toast new Imbox mail (--no-notify turns it off)
+hey setup omarchy --notify   # toast new mail from the bar plugin (--no-notify turns it off)
 hey setup omarchy --remove   # take it all out again
 ```
 
-Setup installs a `HEY TUI` launcher entry, a `HEY` row in the SUPER+SPACE menu, a bar
-indicator that lights when the Imbox has unread mail (no count, by design), and a
+The bar gets the [HEY plugin](https://github.com/basecamp/omarchy-hey-plugin): the HEY
+logo lights when the Imbox has unseen mail and opens a panel of recent threads. hey-cli is
+its engine — the plugin reads the Imbox with `hey box imbox` and runs `hey watch` so the
+bar is live: a thread you archive in the TUI, on your phone or in the web app leaves the
+panel within a second, and after a disconnect the watch catches up from where it left off.
+
+Setup installs a `HEY TUI` launcher entry, a `HEY` row in the SUPER+SPACE menu, and a
 `hey.toml.tpl` theme template so theme authors can tune the overlay. It prints the
 `bindings.lua` snippet for a keybinding rather than editing your file. Omarchy's shipped
 HEY web app, its SUPER+SHIFT+E binding and the mailto handler are left untouched.
 
-`--notify` turns on new-mail toasts, off by default: the bar indicator's poll also sends
-at most one notification per interval — `Sender — Subject` for one new thread, `N new in
-Imbox` for more — replacing the previous toast rather than stacking, and clicking it
-focuses the TUI. Omarchy's notification silencing (SUPER+CTRL+comma) mutes them like any
-other app. See [docs/omarchy.md](docs/omarchy.md) for the details and what is planned next.
+`--notify` turns on new-mail toasts, off by default, by flipping the plugin's `notify`
+setting (the panel's toggle and `omarchy bar set 37signals.hey notify true --json` do the
+same); the plugin then runs `hey watch --notify`, which sends at most one notification per
+batch of changes — `Sender — Subject` for one new thread, `N new in Imbox` for more —
+replacing the previous toast rather than stacking, and clicking it focuses the TUI.
+Omarchy's notification silencing (SUPER+CTRL+comma) mutes them like any other app. See
+[docs/omarchy.md](docs/omarchy.md) for the details and what is planned next.
 
 ## AI agent integration
 

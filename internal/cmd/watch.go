@@ -52,6 +52,7 @@ type watchCommand struct {
 	asyncScript string
 	syncScript  string
 	exitOnFirst bool
+	notify      bool
 	timeout     time.Duration
 }
 
@@ -65,13 +66,18 @@ func newWatchCommand() *watchCommand {
 Changes can drive a command instead of being printed, and that is a choice between two
 behaviours: --run-async spawns the command per change and moves on, so a slow one never
 holds up the watch and two can overlap; --run-sync waits for each and runs them in order.
-Pass one or the other.`,
+Pass one or the other.
+
+--notify shows a desktop notification for new mail among the changes: at most one per
+batch, replacing the last rather than stacking, under the app-name HEY so notification
+silencing applies. It needs notify-send (libnotify).`,
 		Annotations: map[string]string{
 			"agent_notes": "Long-running. Writes one JSON object per changed thread to stdout (NDJSON), not the usual envelope. Use --exit-on-first to block until one change lands and then exit.",
 		},
 		Example: `  hey watch
   hey watch --box imbox --events added
   hey watch --box imbox --exit-on-first
+  hey watch --notify
   hey watch --run-async 'notify-send "New mail in $HEY_BOX_KIND"'
   hey watch --run-sync ./triage.sh
   hey watch --since 2026-08-18T09:00:00Z`,
@@ -86,6 +92,7 @@ Pass one or the other.`,
 	flags.StringVar(&watchCommand.asyncScript, "run-async", "", "Shell command to spawn per change, without waiting for it")
 	flags.StringVar(&watchCommand.syncScript, "run-sync", "", "Shell command to run per change, one at a time, waiting for each")
 	flags.BoolVar(&watchCommand.exitOnFirst, "exit-on-first", false, "Exit after the first change")
+	flags.BoolVar(&watchCommand.notify, "notify", false, "Show a desktop notification for new mail among the watched changes")
 	flags.DurationVar(&watchCommand.timeout, "timeout", 0, "Give up waiting after this long (for example 30m)")
 
 	return watchCommand
@@ -113,6 +120,13 @@ func (c *watchCommand) run(cmd *cobra.Command, args []string) error {
 		ctx = timed
 	}
 
+	// The notifier measures new activity against its start, so it starts before
+	// the boxes' cursors are read: nothing can then change between the two.
+	var notifier *desktopNotifier
+	if c.notify {
+		notifier = newDesktopNotifier(cmd.ErrOrStderr())
+	}
+
 	boxes, err := c.watchedBoxes(ctx)
 	if err != nil {
 		return err
@@ -124,6 +138,7 @@ func (c *watchCommand) run(cmd *cobra.Command, args []string) error {
 		asyncScript: c.asyncScript,
 		syncScript:  c.syncScript,
 		exitOnFirst: c.exitOnFirst,
+		notifier:    notifier,
 		out:         cmd.OutOrStdout(),
 		errOut:      cmd.ErrOrStderr(),
 		styled:      writer.IsStyled(),
@@ -300,6 +315,7 @@ type postingsWatch struct {
 	asyncScript    string
 	syncScript     string
 	exitOnFirst    bool
+	notifier       *desktopNotifier
 	out            io.Writer
 	errOut         io.Writer
 	styled         bool
@@ -432,14 +448,25 @@ func (w *postingsWatch) readBox(ctx context.Context, box *watchedBox) error {
 		box.cursor = *changes.NextCursor
 	}
 
+	// The notification covers what was reported — the same --events filter, the
+	// same stop at the first change — and one read is one batch, so a burst of
+	// mail is one toast.
+	var added, updated []generated.Posting
 	for _, posting := range changes.Added {
-		w.report(ctx, watchEvent{Change: "added", At: watchTime(posting.CreatedAt), PostingID: posting.Id}, box, &posting)
+		if w.report(ctx, watchEvent{Change: "added", At: watchTime(posting.CreatedAt), PostingID: posting.Id}, box, &posting) {
+			added = append(added, posting)
+		}
 	}
 	for _, posting := range changes.Updated {
-		w.report(ctx, watchEvent{Change: "updated", At: watchTime(posting.UpdatedAt), PostingID: posting.Id}, box, &posting)
+		if w.report(ctx, watchEvent{Change: "updated", At: watchTime(posting.UpdatedAt), PostingID: posting.Id}, box, &posting) {
+			updated = append(updated, posting)
+		}
 	}
 	for _, posting := range changes.Deleted {
 		w.report(ctx, watchEvent{Change: "deleted", At: watchTime(posting.DeletedAt), PostingID: posting.Id}, box, nil)
+	}
+	if w.notifier != nil {
+		w.notifier.batch(box, added, updated)
 	}
 
 	return nil
@@ -524,9 +551,11 @@ func (w *postingsWatch) stopWatching(box *watchedBox) error {
 	return nil
 }
 
-func (w *postingsWatch) report(ctx context.Context, event watchEvent, box *watchedBox, posting *generated.Posting) {
+// report hands one change on — printed, or run through the script — and says
+// whether it did.
+func (w *postingsWatch) report(ctx context.Context, event watchEvent, box *watchedBox, posting *generated.Posting) bool {
 	if w.finished() || !w.changes[event.Change] {
-		return
+		return false
 	}
 
 	event.Box = watchEventBox{ID: box.id, Kind: box.kind, Name: box.name}
@@ -546,6 +575,8 @@ func (w *postingsWatch) report(ctx context.Context, event watchEvent, box *watch
 	default:
 		w.writeJSON(event)
 	}
+
+	return true
 }
 
 func (w *postingsWatch) finished() bool {

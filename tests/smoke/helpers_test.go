@@ -24,6 +24,7 @@ var (
 	binaryPath    string
 	baseURL       string
 	configDir     string
+	stateDir      string
 	sessionCookie string
 	smokeEmail    string
 )
@@ -77,6 +78,13 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "Failed to create temp config dir: %v\n", err)
 		os.Exit(1)
 	}
+	// And an isolated state directory, so nothing a command keeps under
+	// XDG_STATE_HOME leaks into or out of the developer's own.
+	stateDir, err = os.MkdirTemp("", "hey-smoke-state-*")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create temp state dir: %v\n", err)
+		os.Exit(1)
+	}
 	// Launch headless Chrome browser and log in to obtain a session cookie.
 	sessionCookie, err = browserLogin(baseURL, smokeEmail, password)
 	if err != nil {
@@ -92,6 +100,7 @@ func TestMain(m *testing.M) {
 
 	code := m.Run()
 	os.RemoveAll(configDir)
+	os.RemoveAll(stateDir)
 	os.Exit(code)
 }
 
@@ -177,6 +186,7 @@ func cliEnv() []string {
 	env = append(env,
 		"HEY_BASE_URL="+baseURL,
 		"XDG_CONFIG_HOME="+configDir,
+		"XDG_STATE_HOME="+stateDir,
 		"HEY_NO_KEYRING=1",
 		"NO_COLOR=1",
 		"TERM=dumb",

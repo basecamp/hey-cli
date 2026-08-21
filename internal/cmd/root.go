@@ -76,14 +76,12 @@ func newRootCmd() *cobra.Command {
 			}
 
 			var err error
-			configDegraded = false
 			if commandIgnoresLocalConfig(cmd) {
-				// These commands never fail on configuration: a malformed global
-				// file leaves them on the baseline defaults, where the bar poller
-				// simply finds no credentials and stays dark.
+				// setup omarchy never fails on configuration: a malformed global
+				// file leaves it on the baseline defaults, which is all it needs
+				// to edit fixed desktop paths — so --remove still works.
 				if cfg, err = config.LoadGlobal(); err != nil {
 					cfg, err = config.Defaults(), nil
-					configDegraded = true
 				}
 			} else {
 				cfg, err = config.Load()
@@ -214,7 +212,6 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newIgnoreCommand().cmd)
 	root.AddCommand(newStopIgnoringCommand().cmd)
 	root.AddCommand(newSetupCommand().cmd)
-	root.AddCommand(newOmarchyCommand().cmd)
 	root.AddCommand(newTuiCommand().cmd)
 	root.AddCommand(newHeyCommand().cmd)
 	root.AddCommand(newSkillCommand().cmd)
@@ -252,9 +249,7 @@ func commandUsesAccountScope(cmd *cobra.Command) bool {
 		return true
 	}
 	switch parts[1] {
-	// omarchy is exempt because its bar-status must never fail: it selects the
-	// configured account itself and treats a failed selection as a dark indicator.
-	case "accounts", "auth", "commands", "completion", "config", "doctor", "login", "logout", "omarchy", "setup", "skill", "upgrade", "version":
+	case "accounts", "auth", "commands", "completion", "config", "doctor", "login", "logout", "setup", "skill", "upgrade", "version":
 		return false
 	default:
 		return true

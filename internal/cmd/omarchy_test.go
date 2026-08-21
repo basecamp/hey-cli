@@ -4,15 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
-	"github.com/basecamp/hey-cli/internal/config"
 )
 
 const defaultShellJSON = `{
@@ -29,11 +26,9 @@ const defaultShellJSON = `{
 `
 
 // testOmarchyEnv fakes an Omarchy install: a home dir, an OMARCHY_PATH with the
-// default shell.json, a sandboxed state dir, and a recorder for the commands
-// setup would run.
+// default shell.json, and a recorder for the commands setup would run.
 func testOmarchyEnv(t *testing.T) (omarchyEnv, *[]string) {
 	t.Helper()
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	home := t.TempDir()
 	omarchyPath := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(omarchyPath, "config", "omarchy"), 0o755); err != nil {
@@ -73,13 +68,22 @@ func readText(t *testing.T, path string) string {
 
 func TestOmarchySetupInstallsEverythingOnce(t *testing.T) {
 	env, ran := testOmarchyEnv(t)
+	writeShell(t, env, pluginShellJSON)
 	setup := omarchySetup{env: env}
 
-	first := statuses(setup.apply())
-	for _, name := range []string{"desktop entry", "menu", "bar indicator", "theme template"} {
-		if first[name] != "installed" {
-			t.Errorf("%s: first run = %q, want installed", name, first[name])
+	first := setup.apply()
+	for _, name := range []string{"desktop entry", "menu", "theme template"} {
+		if status := statuses(first)[name]; status != "installed" {
+			t.Errorf("%s: first run = %q, want installed", name, status)
 		}
+	}
+	// The plugin entry is already there and nothing asked for a change: the
+	// step reports the current notify setting without rewriting shell.json.
+	if bar := stepNamed(first, "bar plugin"); bar.Status != "unchanged" || bar.Detail != "notifications off" {
+		t.Errorf("bar plugin: first run = %q %q, want unchanged / notifications off", bar.Status, bar.Detail)
+	}
+	if readText(t, env.shellPath()) != pluginShellJSON {
+		t.Error("a plain run must not rewrite shell.json")
 	}
 
 	desktop := readText(t, env.desktopPath())
@@ -93,18 +97,6 @@ func TestOmarchySetupInstallsEverythingOnce(t *testing.T) {
 	menu := readText(t, env.menuPath())
 	if !strings.Contains(menu, `"hey-tui"`) || !strings.HasPrefix(menu, "{\n"+omarchyMenuBegin) {
 		t.Errorf("menu block not written:\n%s", menu)
-	}
-
-	var shell map[string]any
-	if err := json.Unmarshal([]byte(readText(t, env.shellPath())), &shell); err != nil {
-		t.Fatal(err)
-	}
-	right := shell["bar"].(map[string]any)["layout"].(map[string]any)["right"].([]any)
-	if barEntryID(right[0]) != "hey-unread" || barEntryID(right[1]) != "omarchy.tray" {
-		t.Errorf("bar module should lead the right section seeded from defaults: %v", right)
-	}
-	if module := right[0].(map[string]any); module["exec"] != "hey omarchy bar-status" || module["type"] != "command" {
-		t.Errorf("bar module malformed: %v", module)
 	}
 
 	if readText(t, env.templatePath()) != omarchyThemeTemplate {
@@ -127,7 +119,9 @@ func TestOmarchySetupInstallsEverythingOnce(t *testing.T) {
 
 func TestOmarchySetupRemoveReversesEveryPiece(t *testing.T) {
 	env, _ := testOmarchyEnv(t)
-	setup := omarchySetup{env: env}
+	writeShell(t, env, pluginShellJSON)
+	on := true
+	setup := omarchySetup{env: env, notify: &on}
 
 	menuBefore := "{\n  // my rows\n  \"notes\": {\"icon\":\"\",\"label\":\"Notes\",\"action\":\"omarchy-launch-editor ~/notes\"},\n}\n"
 	if err := os.MkdirAll(filepath.Dir(env.menuPath()), 0o755); err != nil {
@@ -137,22 +131,25 @@ func TestOmarchySetupRemoveReversesEveryPiece(t *testing.T) {
 		t.Fatal(err)
 	}
 	setup.apply()
-	if err := saveOmarchyPollState(omarchyPollState{Seen: map[string]int32{"1": 1}}); err != nil {
-		t.Fatal(err)
-	}
 
 	if menu := readText(t, env.menuPath()); !strings.Contains(menu, `"notes"`) || !strings.Contains(menu, `"hey-tui"`) {
 		t.Errorf("install should keep the user's rows alongside ours:\n%s", menu)
 	}
+	if entry := pluginEntry(t, env); entry["notify"] != true {
+		t.Fatalf("--notify should set notify on the plugin entry, got %v", entry)
+	}
 
-	removed := statuses(setup.remove())
+	removed := statuses(omarchySetup{env: env}.remove())
 	for name, status := range removed {
+		if name == "bar indicator" {
+			if status != "absent" {
+				t.Errorf("no legacy module was installed, got %q", status)
+			}
+			continue
+		}
 		if status != "removed" {
 			t.Errorf("%s: remove = %q, want removed", name, status)
 		}
-	}
-	if _, err := os.Stat(omarchyPollStatePath()); !os.IsNotExist(err) {
-		t.Error("poll state still present")
 	}
 	if _, err := os.Stat(env.desktopPath()); !os.IsNotExist(err) {
 		t.Error("desktop entry still present")
@@ -163,40 +160,21 @@ func TestOmarchySetupRemoveReversesEveryPiece(t *testing.T) {
 	if menu := readText(t, env.menuPath()); menu != menuBefore {
 		t.Errorf("menu should be restored byte for byte:\n%s", menu)
 	}
-	if shell := readText(t, env.shellPath()); strings.Contains(shell, "hey-unread") {
-		t.Errorf("bar module still present:\n%s", shell)
+	// The plugin entry is the user's (omarchy plugin add wrote it); only our
+	// notify key goes.
+	entry := pluginEntry(t, env)
+	if entry == nil {
+		t.Fatal("remove must not delete the plugin's layout entry")
+	}
+	if _, has := entry["notify"]; has {
+		t.Errorf("remove should delete the notify key, got %v", entry)
 	}
 
-	again := statuses(setup.remove())
+	again := statuses(omarchySetup{env: env}.remove())
 	for name, status := range again {
 		if status != "absent" {
 			t.Errorf("%s: second remove = %q, want absent", name, status)
 		}
-	}
-}
-
-func TestOmarchySetupKeepsExistingBarLayout(t *testing.T) {
-	env, _ := testOmarchyEnv(t)
-	if err := os.MkdirAll(env.configDir(), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	custom := `{"version":1,"bar":{"layout":{"left":[{"id":"omarchy.menu"}],"center":[],"right":["omarchy.audio"]}},"idle":{"lock":600}}`
-	if err := os.WriteFile(env.shellPath(), []byte(custom), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	omarchySetup{env: env}.apply()
-
-	var shell map[string]any
-	if err := json.Unmarshal([]byte(readText(t, env.shellPath())), &shell); err != nil {
-		t.Fatal(err)
-	}
-	if shell["idle"].(map[string]any)["lock"] != float64(600) {
-		t.Error("unrelated settings must survive")
-	}
-	right := shell["bar"].(map[string]any)["layout"].(map[string]any)["right"].([]any)
-	if len(right) != 2 || barEntryID(right[1]) != "omarchy.audio" {
-		t.Errorf("string-form entries must be kept: %v", right)
 	}
 }
 
@@ -209,8 +187,8 @@ func TestOmarchySetupRejectsNonJSONShellConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	steps := statuses(omarchySetup{env: env}.apply())
-	if steps["bar indicator"] != "failed" {
-		t.Errorf("a shell.json we cannot round-trip must fail rather than be rewritten, got %q", steps["bar indicator"])
+	if steps["bar plugin"] != "failed" {
+		t.Errorf("a shell.json we cannot round-trip must fail rather than be rewritten, got %q", steps["bar plugin"])
 	}
 	if steps["menu"] != "installed" {
 		t.Error("one failing step must not stop the others")
@@ -227,8 +205,8 @@ func TestOmarchySetupRejectsMalformedShellConfig(t *testing.T) {
 	if err := os.WriteFile(env.shellPath(), []byte("null"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if steps := statuses(omarchySetup{env: env}.apply()); steps["bar indicator"] != "failed" {
-		t.Errorf("a null shell.json must fail the bar step, got %q", steps["bar indicator"])
+	if steps := statuses(omarchySetup{env: env}.apply()); steps["bar plugin"] != "failed" {
+		t.Errorf("a null shell.json must fail the bar step, got %q", steps["bar plugin"])
 	}
 
 	// A version-less object is ignored by the shell; refuse to edit it.
@@ -237,7 +215,7 @@ func TestOmarchySetupRejectsMalformedShellConfig(t *testing.T) {
 	}
 	steps := omarchySetup{env: env}.apply()
 	for _, step := range steps {
-		if step.Name == "bar indicator" {
+		if step.Name == "bar plugin" {
 			if step.Status != "failed" || !strings.Contains(step.Detail, "version") {
 				t.Errorf("a version-less shell.json must fail with a version hint, got %q %q", step.Status, step.Detail)
 			}
@@ -259,44 +237,12 @@ func TestOmarchySetupRefusesWrongTypedBarFields(t *testing.T) {
 		if err := os.WriteFile(env.shellPath(), []byte(shell), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if steps := statuses(omarchySetup{env: env}.apply()); steps["bar indicator"] != "failed" {
-			t.Errorf("%s: a wrong-typed value must fail, not be replaced, got %q", shell, steps["bar indicator"])
+		if steps := statuses(omarchySetup{env: env}.apply()); steps["bar plugin"] != "failed" {
+			t.Errorf("%s: a wrong-typed value must fail, not be replaced, got %q", shell, steps["bar plugin"])
 		}
 		if readText(t, env.shellPath()) != shell {
 			t.Errorf("%s: the file must be left untouched", shell)
 		}
-	}
-}
-
-func TestBarStatusIgnoresRepositoryLocalConfig(t *testing.T) {
-	repo := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(repo, ".hey"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(repo, ".hey", "config.json"), []byte(`{"base_url":"https://untrusted.example.com"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Chdir(repo)
-	server := imboxServer(t, `[]`)
-	defer server.Close()
-
-	// An untrusted checkout must neither fail the poller at the trust gate
-	// nor point it at the checkout's server.
-	out, err := runBarStatus(t, server.URL, true)
-	if err != nil || out != "" {
-		t.Errorf("the poller must stay dark and silent from an untrusted checkout, got %q, %v", out, err)
-	}
-	if cfg.UntrustedLocalConfig() != nil || cfg.SourceOf("base_url") != config.SourceFlag {
-		t.Errorf("the poller must load global configuration only, got base_url from %v", cfg.SourceOf("base_url"))
-	}
-
-	root := newRootCmd()
-	command, _, _ := root.Find([]string{"setup", "omarchy"})
-	if !commandIgnoresLocalConfig(command) {
-		t.Error("setup omarchy edits fixed desktop paths only and must ignore a checkout's config too")
-	}
-	if boxes, _, _ := root.Find([]string{"boxes"}); commandIgnoresLocalConfig(boxes) {
-		t.Error("ordinary commands keep honouring repository-local config")
 	}
 }
 
@@ -344,111 +290,6 @@ func TestSetupOmarchyFailsWithoutAHomeDirectory(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(cwd, ".config")); !os.IsNotExist(err) {
 		t.Error("nothing may be created relative to the working directory")
-	}
-}
-
-func TestOmarchySetupSeedsVersionAndRestoresDefaultsOnRemove(t *testing.T) {
-	env, _ := testOmarchyEnv(t)
-	setup := omarchySetup{env: env}
-
-	setup.apply()
-	var shell map[string]any
-	if err := json.Unmarshal([]byte(readText(t, env.shellPath())), &shell); err != nil {
-		t.Fatal(err)
-	}
-	if shell["version"] != float64(1) {
-		t.Errorf(`a freshly created shell.json needs "version": 1 or the shell ignores it: %v`, shell)
-	}
-
-	removed := setup.remove()
-	if steps := statuses(removed); steps["bar indicator"] != "removed" {
-		for _, step := range removed {
-			t.Logf("%s: %s %s", step.Name, step.Status, step.Detail)
-		}
-		t.Fatalf("bar step = %q, want removed", steps["bar indicator"])
-	}
-	var after map[string]any // a fresh map: Unmarshal into a non-nil map merges keys
-	if err := json.Unmarshal([]byte(readText(t, env.shellPath())), &after); err != nil {
-		t.Fatal(err)
-	}
-	if _, has := after["bar"]; has {
-		t.Errorf("removing from a defaults-seeded layout should restore inheriting the defaults: %v", after)
-	}
-}
-
-func TestOmarchySetupReconcilesStaleBarModule(t *testing.T) {
-	env, _ := testOmarchyEnv(t)
-	if err := os.MkdirAll(env.configDir(), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	stale := `{"version":1,"bar":{"layout":{"left":[],"center":[],"right":[
-	  {"id":"hey-unread","type":"command","exec":"hey omarchy bar-status --old-flag","interval":60,
-	   "tooltip":"HEY","onClick":"omarchy-launch-or-focus-tui --app-id=org.omarchy.hey hey"},
-	  {"id":"omarchy.tray"}]}}}`
-	if err := os.WriteFile(env.shellPath(), []byte(stale), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	if steps := statuses(omarchySetup{env: env}.apply()); steps["bar indicator"] != "installed" {
-		t.Errorf("a stale module should be rewritten, got %q", steps["bar indicator"])
-	}
-	var shell map[string]any
-	if err := json.Unmarshal([]byte(readText(t, env.shellPath())), &shell); err != nil {
-		t.Fatal(err)
-	}
-	layout := shell["bar"].(map[string]any)["layout"].(map[string]any)
-	module := barLayoutModule(layout, omarchyBarModuleID)
-	if module["exec"] != "hey omarchy bar-status" || module["onClick"] != omarchyFocusCommand || module["interval"] != float64(180) {
-		t.Errorf("stale fields should be reconciled: %v", module)
-	}
-	if right := layout["right"].([]any); len(right) != 2 || barEntryID(right[1]) != "omarchy.tray" {
-		t.Errorf("module position and neighbours must be kept: %v", right)
-	}
-	if neighbour := barLayoutModule(layout, "omarchy.tray"); neighbour == nil || neighbour["id"] != "omarchy.tray" {
-		t.Errorf("other inline modules must be findable too: %v", neighbour)
-	}
-	if again := statuses(omarchySetup{env: env}.apply()); again["bar indicator"] != "unchanged" {
-		t.Errorf("reconciled module must be stable, got %q", again["bar indicator"])
-	}
-	// A string-form entry that happens to share our id is not ours: neither
-	// found by the module lookup nor deleted on removal.
-	layout["left"] = append(layout["left"].([]any), "hey-unread")
-	if barLayoutModule(layout, omarchyBarModuleID)["type"] != "command" {
-		t.Error("the string-form entry must not shadow the managed map")
-	}
-	withString, err := json.Marshal(shell)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(env.shellPath(), withString, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	setup := omarchySetup{env: env}
-	if steps := statuses(setup.remove()); steps["bar indicator"] != "removed" {
-		t.Errorf("remove should still find the managed map, got %q", steps["bar indicator"])
-	}
-	if err := json.Unmarshal([]byte(readText(t, env.shellPath())), &shell); err != nil {
-		t.Fatal(err)
-	}
-	left := shell["bar"].(map[string]any)["layout"].(map[string]any)["left"].([]any)
-	if len(left) != 1 || left[0] != "hey-unread" {
-		t.Errorf("a string-form entry sharing our id is unowned and must survive removal: %v", left)
-	}
-}
-
-func TestOmarchyDefaultShellPathFallsBackToUserTree(t *testing.T) {
-	env, _ := testOmarchyEnv(t)
-	env.omarchyPath = "" // no OMARCHY_PATH, as in a non-login or agent shell
-	userTree := filepath.Join(env.home, ".local", "share", "omarchy", "config", "omarchy")
-	if err := os.MkdirAll(userTree, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(userTree, "shell.json"), []byte(defaultShellJSON), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	if steps := statuses(omarchySetup{env: env}.apply()); steps["bar indicator"] != "installed" {
-		t.Errorf("the per-user omarchy tree should seed the layout, got %q", steps["bar indicator"])
 	}
 }
 
@@ -665,17 +506,12 @@ func TestSetupOmarchyIsNotBlockedByAnUntrustedLocalConfig(t *testing.T) {
 
 func TestOmarchySetupPreservesLargeIntegersInShellConfig(t *testing.T) {
 	env, _ := testOmarchyEnv(t)
-	if err := os.MkdirAll(env.configDir(), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	// 2^53+1 is not representable as a float64; a naive round trip would round it.
-	shell := `{"version":1,"bar":{"layout":{"left":[],"center":[],"right":[]}},"custom":{"token":9007199254740993}}`
-	if err := os.WriteFile(env.shellPath(), []byte(shell), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeShell(t, env, `{"version":1,"bar":{"layout":{"left":[],"center":[],"right":[{"id":"37signals.hey"}]}},"custom":{"token":9007199254740993}}`)
+	on := true
 
-	if steps := statuses(omarchySetup{env: env}.apply()); steps["bar indicator"] != "installed" {
-		t.Fatalf("bar step = %q", steps["bar indicator"])
+	if steps := statuses(omarchySetup{env: env, notify: &on}.apply()); steps["bar plugin"] != "installed" {
+		t.Fatalf("bar step = %q", steps["bar plugin"])
 	}
 	if out := readText(t, env.shellPath()); !strings.Contains(out, "9007199254740993") {
 		t.Errorf("an unrelated large integer must survive the rewrite exactly:\n%s", out)
@@ -722,43 +558,6 @@ func TestOmarchySetupKeepsDanglingTemplateSymlink(t *testing.T) {
 	}
 	if info, err := os.Lstat(env.templatePath()); err != nil || info.Mode()&os.ModeSymlink == 0 {
 		t.Error("the dangling symlink must survive")
-	}
-}
-
-func TestBarStatusStaysDarkOnAMalformedGlobalConfig(t *testing.T) {
-	server := imboxServer(t, `[{"id": 1, "name": "Invoice #4021", "seen": false}]`)
-	defer server.Close()
-	t.Setenv("HEY_TOKEN", "test-token")
-	t.Setenv("HEY_NO_KEYRING", "1")
-	t.Setenv("HEY_BASE_URL", "")
-	configHome := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configHome)
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	if err := os.MkdirAll(filepath.Join(configHome, "hey-cli"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(configHome, "hey-cli", "config.json"), []byte("{broken"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	root := newRootCmd()
-	var buf bytes.Buffer
-	root.SetOut(&buf)
-	root.SetErr(&buf)
-	root.SetArgs([]string{"omarchy", "bar-status", "--base-url", server.URL})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("a broken global config must not make the poller exit nonzero, got %v", err)
-	}
-	if buf.String() != "" {
-		t.Errorf("with no trustworthy configuration the poller must stay dark, not light against a guessed server: %q", buf.String())
-	}
-
-	root = newRootCmd()
-	root.SetOut(&buf)
-	root.SetErr(&buf)
-	root.SetArgs([]string{"boxes"})
-	if err := root.Execute(); err == nil {
-		t.Error("ordinary commands still report a broken global config")
 	}
 }
 
@@ -847,91 +646,210 @@ func TestSetupOmarchyRequiresOmarchy(t *testing.T) {
 	}
 }
 
-func imboxServer(t *testing.T, postings string) *httptest.Server {
+// pluginShellJSON is a shell.json whose bar layout carries the 37signals.hey
+// plugin entry, as `omarchy plugin add --enable` writes it.
+const pluginShellJSON = `{"version":1,"bar":{"layout":{"left":[{"id":"omarchy.menu"}],"center":[{"id":"omarchy.clock"}],"right":[{"id":"37signals.hey"},{"id":"omarchy.tray"}]}}}`
+
+// legacyShellJSON is what an earlier `hey setup omarchy` wrote: the layout
+// seeded from Omarchy's defaults with the inline hey-unread module in front.
+const legacyShellJSON = `{"version":1,"bar":{"layout":{"left":[{"id":"omarchy.menu"}],"center":[{"id":"omarchy.clock"}],"right":[
+  {"id":"hey-unread","type":"command","exec":"hey omarchy bar-status --notify","interval":180,"tooltip":"HEY","onClick":"omarchy-launch-or-focus-tui --app-id=org.omarchy.hey hey tui"},
+  {"id":"omarchy.tray"},{"id":"omarchy.power"}]}}}`
+
+func writeShell(t *testing.T, env omarchyEnv, content string) {
 	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == "GET" && r.URL.Path == "/identity.json":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"id": 7, "name": "Maria Delgado"}`))
-		case r.Method == "GET" && r.URL.Path == "/imbox.json":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"id": 1, "name": "Imbox", "kind": "inbox", "postings": ` + postings + `}`))
-		default:
-			w.WriteHeader(404)
-		}
-	}))
-}
-
-func runBarStatus(t *testing.T, serverURL string, authenticated bool, extraArgs ...string) (string, error) {
-	t.Helper()
-	return runBarStatusWithState(t, t.TempDir(), serverURL, authenticated, extraArgs...)
-}
-
-// runBarStatusWithState runs bar-status against a given state directory, so a
-// test can tick more than once over the same fingerprints.
-func runBarStatusWithState(t *testing.T, stateHome, serverURL string, authenticated bool, extraArgs ...string) (string, error) {
-	t.Helper()
-	if authenticated {
-		t.Setenv("HEY_TOKEN", "test-token")
-	} else {
-		t.Setenv("HEY_TOKEN", "")
-	}
-	t.Setenv("HEY_NO_KEYRING", "1")
-	t.Setenv("HEY_BASE_URL", "")
-	tmpDir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmpDir)
-	t.Setenv("XDG_STATE_HOME", stateHome)
-	t.Setenv("XDG_CACHE_HOME", tmpDir)
-
-	root := newRootCmd()
-	var buf bytes.Buffer
-	root.SetOut(&buf)
-	root.SetErr(&buf)
-	root.SetArgs(append([]string{"omarchy", "bar-status", "--base-url", serverURL}, extraArgs...))
-	err := root.Execute()
-	return buf.String(), err
-}
-
-func TestBarStatusLightsOnUnread(t *testing.T) {
-	server := imboxServer(t, `[{"id": 1, "name": "Lunch on Thursday?", "seen": true}, {"id": 2, "name": "Invoice #4021", "seen": false}]`)
-	defer server.Close()
-
-	out, err := runBarStatus(t, server.URL, true)
-	if err != nil {
+	if err := os.MkdirAll(env.configDir(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	var module map[string]any
-	if err := json.Unmarshal([]byte(out), &module); err != nil {
-		t.Fatalf("output is not JSON: %q", out)
-	}
-	if module["class"] != "active" || module["text"] != omarchyBarGlyph {
-		t.Errorf("unexpected module: %v", module)
+	if err := os.WriteFile(env.shellPath(), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestBarStatusSilentWhenClear(t *testing.T) {
-	server := imboxServer(t, `[{"id": 1, "name": "Lunch on Thursday?", "seen": true}]`)
-	defer server.Close()
+func readShell(t *testing.T, env omarchyEnv) map[string]any {
+	t.Helper()
+	var shell map[string]any
+	if err := json.Unmarshal([]byte(readText(t, env.shellPath())), &shell); err != nil {
+		t.Fatal(err)
+	}
+	return shell
+}
 
-	out, err := runBarStatus(t, server.URL, true)
-	if err != nil || out != "" {
-		t.Errorf("clear imbox should print nothing and succeed, got %q, %v", out, err)
+// pluginEntry returns the 37signals.hey layout entry, or nil.
+func pluginEntry(t *testing.T, env omarchyEnv) map[string]any {
+	t.Helper()
+	bar, _ := readShell(t, env)["bar"].(map[string]any)
+	layout, _ := bar["layout"].(map[string]any)
+	return barLayoutModule(layout, omarchyBarPluginID)
+}
+
+func stepNamed(steps []omarchyStep, name string) omarchyStep {
+	for _, step := range steps {
+		if step.Name == name {
+			return step
+		}
+	}
+	return omarchyStep{}
+}
+
+func TestOmarchySetupSkipsTheBarWithoutThePlugin(t *testing.T) {
+	env, _ := testOmarchyEnv(t)
+	on := true
+
+	// No shell.json at all: nothing to configure, and nothing is created —
+	// setup never adds a layout entry, the plugin install does.
+	bar := stepNamed(omarchySetup{env: env, notify: &on}.apply(), "bar plugin")
+	if bar.Status != "skipped" || !strings.Contains(bar.Detail, omarchyBarPluginInstall) {
+		t.Errorf("without the plugin the bar step should say how to install it, got %q %q", bar.Status, bar.Detail)
+	}
+	if _, err := os.Stat(env.shellPath()); !os.IsNotExist(err) {
+		t.Error("setup must not create a shell.json just to skip")
+	}
+
+	// A layout without the plugin entry is the same thing.
+	writeShell(t, env, defaultShellJSON)
+	if bar := stepNamed(omarchySetup{env: env}.apply(), "bar plugin"); bar.Status != "skipped" {
+		t.Errorf("a layout without the plugin should be skipped, got %q", bar.Status)
+	}
+	if readText(t, env.shellPath()) != defaultShellJSON {
+		t.Error("skipping must leave shell.json untouched")
 	}
 }
 
-func TestBarStatusSilentWhenUnauthenticatedOrOffline(t *testing.T) {
-	server := imboxServer(t, `[]`)
-	defer server.Close()
+func TestOmarchySetupNotifyTogglesThePluginSetting(t *testing.T) {
+	env, _ := testOmarchyEnv(t)
+	writeShell(t, env, pluginShellJSON)
+	on, off := true, false
 
-	out, err := runBarStatus(t, server.URL, false)
-	if err != nil || out != "" {
-		t.Errorf("logged out should print nothing and succeed, got %q, %v", out, err)
+	bar := stepNamed(omarchySetup{env: env, notify: &on}.apply(), "bar plugin")
+	if bar.Status != "installed" || bar.Detail != "notifications on" || pluginEntry(t, env)["notify"] != true {
+		t.Errorf("--notify should set notify on the entry, got %q %q %v", bar.Status, bar.Detail, pluginEntry(t, env))
+	}
+	if bar := stepNamed(omarchySetup{env: env, notify: &on}.apply(), "bar plugin"); bar.Status != "unchanged" {
+		t.Errorf("--notify twice should be idempotent, got %q", bar.Status)
+	}
+	bar = stepNamed(omarchySetup{env: env}.apply(), "bar plugin")
+	if bar.Status != "unchanged" || bar.Detail != "notifications on" || pluginEntry(t, env)["notify"] != true {
+		t.Errorf("a plain re-run must leave notifications as they are, got %q %q", bar.Status, bar.Detail)
+	}
+	bar = stepNamed(omarchySetup{env: env, notify: &off}.apply(), "bar plugin")
+	if _, has := pluginEntry(t, env)["notify"]; bar.Status != "installed" || bar.Detail != "notifications off" || has {
+		t.Errorf("--no-notify should delete the key, got %q %q %v", bar.Status, bar.Detail, pluginEntry(t, env))
+	}
+	if bar := stepNamed(omarchySetup{env: env, notify: &off}.apply(), "bar plugin"); bar.Status != "unchanged" {
+		t.Errorf("--no-notify twice should be idempotent, got %q", bar.Status)
+	}
+	// Only a JSON true counts, as in the plugin's own setting() read.
+	writeShell(t, env, `{"version":1,"bar":{"layout":{"right":[{"id":"37signals.hey","notify":"yes"}]}}}`)
+	if bar := stepNamed(omarchySetup{env: env}.apply(), "bar plugin"); bar.Detail != "notifications off" {
+		t.Errorf("a non-boolean notify is off, got %q", bar.Detail)
+	}
+}
+
+func TestOmarchySetupFindsThePluginInAnySection(t *testing.T) {
+	env, _ := testOmarchyEnv(t)
+	writeShell(t, env, `{"version":1,"bar":{"layout":{"left":[{"id":"omarchy.menu"}],"center":[{"id":"37signals.hey"},{"id":"omarchy.clock"}],"right":[]}}}`)
+	on := true
+
+	if bar := stepNamed(omarchySetup{env: env, notify: &on}.apply(), "bar plugin"); bar.Status != "installed" {
+		t.Fatalf("bar step = %q %q", bar.Status, bar.Detail)
+	}
+	center := readShell(t, env)["bar"].(map[string]any)["layout"].(map[string]any)["center"].([]any)
+	if entry := center[0].(map[string]any); entry["id"] != "37signals.hey" || entry["notify"] != true {
+		t.Errorf("the entry should be updated in place: %v", center)
+	}
+}
+
+func TestOmarchySetupRemovesTheLegacyBarModule(t *testing.T) {
+	env, _ := testOmarchyEnv(t)
+	writeShell(t, env, legacyShellJSON)
+
+	// No plugin yet: the legacy module goes, reported as its own step, and the
+	// plugin step says what to install — and how to keep the toasts the module
+	// had on. The layout equalled the defaults once the module was out, so it
+	// goes too and the user is back to inheriting Omarchy's defaults.
+	steps := omarchySetup{env: env}.apply()
+	if legacy := stepNamed(steps, "bar indicator"); legacy.Status != "removed" || !strings.Contains(legacy.Detail, "hey-unread") {
+		t.Errorf("legacy removal should be its own step, got %q %q", legacy.Status, legacy.Detail)
+	}
+	if bar := stepNamed(steps, "bar plugin"); bar.Status != "skipped" || !strings.Contains(bar.Detail, omarchyBarPluginInstall) || !strings.Contains(bar.Detail, "--notify") {
+		t.Errorf("the plugin step should say how to install and how to keep notifying, got %q %q", bar.Status, bar.Detail)
+	}
+	if shell := readShell(t, env); shell["bar"] != nil {
+		t.Errorf("a defaults-seeded layout should be dropped with the module: %v", shell)
+	}
+	steps = omarchySetup{env: env}.apply()
+	if stepNamed(steps, "bar indicator").Name != "" || stepNamed(steps, "bar plugin").Status != "skipped" {
+		t.Errorf("once migrated there is no legacy step and the plugin step skips, got %v", statuses(steps))
 	}
 
-	server.Close()
-	out, err = runBarStatus(t, server.URL, true)
-	if err != nil || out != "" {
-		t.Errorf("offline should print nothing and succeed, got %q, %v", out, err)
+	// With the plugin present and silent on notify, the legacy module's
+	// --notify carries over; a string-form entry sharing its id is unowned
+	// and survives.
+	writeShell(t, env, `{"version":1,"bar":{"layout":{"left":[],"center":[],"right":[
+	  {"id":"hey-unread","type":"command","exec":"hey omarchy bar-status --notify","interval":180},
+	  {"id":"37signals.hey"},"hey-unread",{"id":"omarchy.tray"}]}}}`)
+	steps = omarchySetup{env: env}.apply()
+	if bar := stepNamed(steps, "bar plugin"); bar.Status != "installed" || bar.Detail != "notifications on" {
+		t.Errorf("the notify choice should move to the plugin, got %q %q", bar.Status, bar.Detail)
+	}
+	right := readShell(t, env)["bar"].(map[string]any)["layout"].(map[string]any)["right"].([]any)
+	if len(right) != 3 || right[0].(map[string]any)["notify"] != true || right[1] != "hey-unread" || barEntryID(right[2]) != "omarchy.tray" {
+		t.Errorf("only the map-form legacy module goes and notify lands on the plugin: %v", right)
+	}
+
+	// An explicit plugin setting, or an explicit flag, wins over the legacy
+	// module's choice.
+	writeShell(t, env, `{"version":1,"bar":{"layout":{"right":[{"id":"hey-unread","type":"command","exec":"hey omarchy bar-status --notify"},{"id":"37signals.hey","notify":false}]}}}`)
+	if bar := stepNamed(omarchySetup{env: env}.apply(), "bar plugin"); bar.Detail != "notifications off" || bar.Status != "unchanged" {
+		t.Errorf("an explicit plugin setting is kept, and the legacy removal is the other step's news, got %q %q", bar.Status, bar.Detail)
+	}
+	off := false
+	writeShell(t, env, `{"version":1,"bar":{"layout":{"right":[{"id":"hey-unread","type":"command","exec":"hey omarchy bar-status --notify"},{"id":"37signals.hey"}]}}}`)
+	if bar := stepNamed(omarchySetup{env: env, notify: &off}.apply(), "bar plugin"); bar.Detail != "notifications off" {
+		t.Errorf("--no-notify wins over the legacy choice, got %q", bar.Detail)
+	}
+	if _, has := pluginEntry(t, env)["notify"]; has {
+		t.Error("--no-notify must not leave a notify key behind")
+	}
+
+	// --remove takes the legacy module out as well.
+	writeShell(t, env, legacyShellJSON)
+	if legacy := stepNamed(omarchySetup{env: env}.remove(), "bar indicator"); legacy.Status != "removed" {
+		t.Errorf("remove should take the legacy module out, got %q", legacy.Status)
+	}
+	if strings.Contains(readText(t, env.shellPath()), "hey-unread") {
+		t.Error("legacy module still present after remove")
+	}
+}
+
+func TestOmarchyDefaultShellPathFallsBackToUserTree(t *testing.T) {
+	env, _ := testOmarchyEnv(t)
+	env.omarchyPath = "" // no OMARCHY_PATH, as in a non-login or agent shell
+	userTree := filepath.Join(env.home, ".local", "share", "omarchy", "config", "omarchy")
+	if err := os.MkdirAll(userTree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(userTree, "shell.json"), []byte(defaultShellJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeShell(t, env, legacyShellJSON)
+
+	if legacy := stepNamed(omarchySetup{env: env}.apply(), "bar indicator"); legacy.Status != "removed" {
+		t.Fatalf("legacy step = %q %q", legacy.Status, legacy.Detail)
+	}
+	if shell := readShell(t, env); shell["bar"] != nil {
+		t.Errorf("the per-user omarchy tree should supply the defaults the layout is compared to: %v", shell)
+	}
+}
+
+func TestSetupOmarchyIgnoresRepositoryLocalConfig(t *testing.T) {
+	root := newRootCmd()
+	command, _, _ := root.Find([]string{"setup", "omarchy"})
+	if !commandIgnoresLocalConfig(command) {
+		t.Error("setup omarchy edits fixed desktop paths only and must ignore a checkout's config")
+	}
+	if boxes, _, _ := root.Find([]string{"boxes"}); commandIgnoresLocalConfig(boxes) {
+		t.Error("ordinary commands keep honouring repository-local config")
 	}
 }
