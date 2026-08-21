@@ -60,3 +60,4 @@ exempt internal/cmd/setup.go:setupAgents agent names are this program's own cons
 exempt internal/cmd/setup.go:showWizardSuccess check names and statuses are this program's own constants
 exempt internal/cmd/upgrade_selfupdate.go:extractTarGzMember archive member names come from a release whose signature was verified first
 exempt internal/cmd/upgrade_selfupdate.go:extractZipMember archive member names come from a release whose signature was verified first
+exempt internal/cmd/topic.go:printThreadMarkdown the body it writes is the Markdown ToMarkdown produced, which carries no control characters, and the document is Markdown for a reader rather than a terminal

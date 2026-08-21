@@ -59,6 +59,7 @@ func newThreadsCommand() *topicCommand {
 		},
 		Example: `  hey threads 12345
   hey threads 12345 --json
+  hey threads 12345 --markdown
   hey threads 12345 --count
   hey threads 12345 --allow-partial`,
 		RunE: threadsCommand.run,
@@ -107,9 +108,12 @@ func (c *topicCommand) run(cmd *cobra.Command, args []string) error {
 	case output.FormatStyled:
 		printThreadStyled(cmd.OutOrStdout(), entries, notice)
 		return nil
+	case output.FormatMarkdown:
+		printThreadMarkdown(cmd.OutOrStdout(), threadID, entries, notice)
+		return nil
 	case output.FormatCount, output.FormatIDs:
 		return writeOK(entries)
-	case output.FormatAuto, output.FormatJSON, output.FormatQuiet, output.FormatMarkdown:
+	case output.FormatAuto, output.FormatJSON, output.FormatQuiet:
 	}
 
 	return writeOK(entries,
@@ -157,6 +161,34 @@ func printThreadStyled(w io.Writer, entries []threadEntry, notice string) {
 	}
 	if notice != "" {
 		fmt.Fprintf(w, "notice: %s\n", notice)
+	}
+}
+
+// printThreadMarkdown writes a thread as one Markdown document: a heading per entry
+// naming the sender, the date and the entry ID, the body as the Markdown it already is,
+// and a rule between entries. The metadata is escaped for a Markdown reader the way the
+// body already was by ToMarkdown; an entry HEY served no body for shows its summary,
+// and one whose body was not read says so.
+func printThreadMarkdown(w io.Writer, threadID int64, entries []threadEntry, notice string) {
+	fmt.Fprintf(w, "# Thread %d\n", threadID)
+	for _, e := range entries {
+		fmt.Fprintln(w)
+		fmt.Fprintf(w, "## From: %s — %s (#%d)\n\n", markdownSafeText(threadEntrySender(e)), e.CreatedAt, e.ID)
+		switch {
+		case e.Body != "":
+			fmt.Fprintln(w, e.Body)
+		case e.BodyState == string(threadload.StateBodyless) && e.Summary != "":
+			fmt.Fprintln(w, markdownSafeText(e.Summary))
+		case e.BodyState == string(threadload.StateBodyless):
+			fmt.Fprintln(w, "*(no body)*")
+		default:
+			fmt.Fprintf(w, "*(body not read: %s)*\n", e.BodyState)
+		}
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "---")
+	}
+	if notice != "" {
+		fmt.Fprintf(w, "\n**Notice:** %s\n", markdownSafeText(notice))
 	}
 }
 
