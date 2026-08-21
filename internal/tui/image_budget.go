@@ -94,10 +94,13 @@ func (b *imageBudget) fetchImages(ctx context.Context, fetcher imageFetcher, url
 // path that is not already clean is refused rather than rewritten — HEY never serves
 // one, so there is nothing to fetch behind it.
 func (b *imageBudget) admit(source string) bool {
-	if _, seen := b.seen[source]; seen {
+	// A fragment never goes on the wire, so two URLs that differ only there are one
+	// request, and one image.
+	request, _, _ := strings.Cut(source, "#")
+	if _, seen := b.seen[request]; seen {
 		return false
 	}
-	b.seen[source] = struct{}{}
+	b.seen[request] = struct{}{}
 	parsed, err := url.Parse(source)
 	if err != nil {
 		return false

@@ -97,9 +97,9 @@ func TestImageBudgetDoesNotChargeARefusedURL(t *testing.T) {
 
 func TestImageBudgetFetchesEachURLOnce(t *testing.T) {
 	fetcher := &countingFetcher{size: 10}
-	images := newImageBudget().fetchImages(context.Background(), fetcher, []string{"/rails/blobs/a.png", "/rails/blobs/a.png", "/rails/blobs/b.png"})
+	images := newImageBudget().fetchImages(context.Background(), fetcher, []string{"/rails/blobs/a.png", "/rails/blobs/a.png", "/rails/blobs/a.png#1", "/rails/blobs/a.png#2", "/rails/blobs/b.png"})
 	if len(images) != 2 || fetcher.calls.Load() != 2 {
-		t.Errorf("fetched %d images with %d requests, want 2 and 2", len(images), fetcher.calls.Load())
+		t.Errorf("fetched %d images with %d requests, want 2 and 2: a fragment does not make a new request", len(images), fetcher.calls.Load())
 	}
 }
 
