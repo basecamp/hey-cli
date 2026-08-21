@@ -120,13 +120,50 @@ because both were mis-stated here before:
 
 `internal/htmlutil` provides `ToMarkdown` (HTML→Markdown), `ToText` (HTML→plain text),
 `ExtractImageURLs` and `ExtractAttachments`, which are presentation helpers rather than
-scrapers and are staying. There is no `internal/models` any more: the CLI's output shapes
+scrapers and are staying. `ToMarkdown` is also where email content stops being trusted:
+see "Terminal safety" below. There is no `internal/models` any more: the CLI's output shapes
 are local to the commands that print them, mail's shapes are `internal/mail`'s `Source`,
 `Posting` and `Entry`, and `Contact`, `Calendar` and `Recording` are plain view types
 declared next to the Contacts and Calendar sections that read them.
 HEY uses the Trix editor with `<figure data-trix-attachment="{...}">` for
 attachments — image URLs in those attributes are relative paths requiring authentication
 via `sdk.Get`.
+
+### Terminal safety
+
+Everything HEY serves was written by somebody else, and a terminal acts on what it is
+handed. The model has three layers, and it is worth knowing which one a change touches:
+
+- **Metadata** — a sender, a subject, a filename, a box name, a habit title — goes through
+  `terminal.Sanitize`/`SanitizeLine` (`internal/terminal`), which strips escape
+  sequences, C0/C1 controls and the `Bidi_Control` set. It is applied once where it
+  covers the most: the CLI's `table.addRow` sanitizes its cells, and the TUI's models
+  (`mail.NewPosting`, `sdkMessageToEntry`, `sdkContactToModel`, `sdkRecordingToModel`)
+  are sanitized as they are built. `TestSinksAreSanitized` (`internal/cmd/
+  sink_manifest_test.go`, manifest in `testdata/sink_manifest.txt`) fails on a direct
+  write of a listed field to a listed sink without a sanitizer. That check is syntactic —
+  it does not follow a value through a local variable — so it is an inventory of the
+  direct pattern, not a taint analysis; treat a new exemption as something to justify in
+  the manifest.
+- **Bodies** are Markdown from `htmlutil.ToMarkdown`, which serializes each context on
+  its own terms: prose escapes metacharacters and writes every `&` as `&amp;` (the live
+  bug this closed was `&amp;#27;[31m` decoding twice, once in the HTML parser and once in
+  the Markdown renderer, into a red terminal); inline code and fences are verbatim inside
+  delimiters longer than any run they hold; destinations percent-encode what would end
+  them, keep a query string's `&`, and link only http, https, mailto and relative paths.
+  Every context strips controls first. `markdown.Render` then rewrites the spans glamour
+  decodes so that its extra entity decode is the identity, bounds quote nesting, and
+  checks its own output: anything but SGR and OSC 8 to an allowed scheme strips all
+  styling rather than guessing. That last check is a backstop, not the guarantee — an
+  injected SGR is byte-identical to one of ours.
+- **JSON** is lossless and escapes the C1 controls (`output.MarshalJSON`), which
+  `encoding/json` would otherwise write raw. A `--jq` string result on a pipe stays raw,
+  as `jq -r` writes it.
+
+The Markdown in `--json` is standard CommonMark; what a conformant renderer shows for it
+is the literal text and URL the email held, which is what the htmlutil tests assert
+through goldmark. Fuzz targets hold the invariants: `FuzzToMarkdownTerminalSafety` in
+htmlutil and `FuzzContainment` in markdown.
 
 ### Email bodies are Markdown
 

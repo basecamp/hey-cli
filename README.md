@@ -266,8 +266,14 @@ bare number. `--ids-only` and `--count` need list data, so they work on `hey box
 `hey contacts list`, `hey screener list`, `hey screener history`, `hey calendars`,
 `hey recordings`, `hey todo list`, `hey timetrack list` and `hey journal list`. The
 data-only formats print any pagination notice on stderr, so the IDs on stdout stay
-pipeable. `--html` returns the original HTML for the commands that carry it
-(`hey threads`, `hey journal read`).
+pipeable.
+
+`--html` writes the original HTML, for the commands that hold some: `hey threads`,
+`hey journal read`, `hey contacts show` and `hey contacts note show`. It is a format of
+its own — it cannot be combined with the other output flags, every other command refuses
+it, and it is meant for a file or a pipe: on a terminal it is refused with the redirect
+spelled out, since markup on a terminal is neither readable nor safe. A thread writes each
+entry's HTML, oldest first, behind a comment naming the entry, its sender and its date.
 
 ### Email
 
