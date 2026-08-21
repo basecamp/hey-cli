@@ -13,6 +13,7 @@ import (
 	actioncable "github.com/basecamp/actioncable-go"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
+	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/auth"
 )
@@ -27,9 +28,13 @@ func newPosting(id int64, sender, subject string, activeAt time.Time) generated.
 // does — every posting decided against the record from before the read, then the
 // whole read recorded — and answers which were new.
 func classifyRead(tracker *newMail, postings ...generated.Posting) []int64 {
+	return classifyReadOf(tracker, 24088, postings...)
+}
+
+func classifyReadOf(tracker *newMail, boxID int64, postings ...generated.Posting) []int64 {
 	var fresh []int64
 	for _, posting := range postings {
-		if tracker.isNew(posting) {
+		if tracker.isNew(boxID, posting) {
 			fresh = append(fresh, posting.Id)
 		}
 	}
@@ -117,6 +122,33 @@ func TestNewMailRemembersEveryBox(t *testing.T) {
 	}
 	if fresh := classifyRead(tracker, newsletter); len(fresh) != 0 {
 		t.Errorf("new = %v, want a thread moved in from another box left alone", fresh)
+	}
+}
+
+func TestNewMailAfterASkipAheadIsSinceTheSkip(t *testing.T) {
+	tracker := trackNewMail(watchStarted)
+	skipped := hey.PostingChangesCursor{Since: "2026-08-21T10:00:00.000Z", Version: "2"}
+	tracker.skippedTo(24088, skipped)
+	inTheGap := watchStarted.Add(30 * time.Minute)
+	afterTheSkip := watchStarted.Add(61 * time.Minute)
+
+	// A thread that arrived in the gap the watch skipped over, then moved or
+	// labelled while still unseen: backlog the watch never read, not new.
+	if fresh := classifyRead(tracker, newPosting(101, "Maria Delgado", "Lunch on Thursday?", inTheGap)); len(fresh) != 0 {
+		t.Errorf("new = %v, want a thread active in the skipped gap left alone", fresh)
+	}
+	if fresh := classifyRead(tracker, newPosting(102, "Northwind Invoicing", "Invoice #4021", afterTheSkip)); len(fresh) != 1 {
+		t.Errorf("new = %v, want mail since the skip", fresh)
+	}
+	// The cutoff is the box's alone: another box measures against the start.
+	if fresh := classifyReadOf(tracker, 24089, newPosting(103, "Weekend Deals", "48 hours only", inTheGap)); len(fresh) != 1 {
+		t.Errorf("new = %v, want another box unaffected by this one's skip", fresh)
+	}
+
+	// A cursor that cannot be read moves nothing.
+	tracker.skippedTo(24089, hey.PostingChangesCursor{Since: "later"})
+	if _, has := tracker.skipped[24089]; has {
+		t.Error("an unreadable cursor must not become a cutoff")
 	}
 }
 

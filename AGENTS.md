@@ -546,7 +546,10 @@ makes a reconnect safe: the cursor, not the notification, is the source of truth
 missed broadcast costs nothing, and a 409 means catch up in full instead. A read that
 fails leaves the cursor where it was and is retried on a doubling backoff, so a change
 isn't lost with the notification that announced it, and a subscription that closes without
-the watch being interrupted is an error rather than a quiet exit.
+the watch being interrupted is an error rather than a quiet exit. `ready` waits for that
+retry too (`catchUp`/`retryUnread`/`readyOnceCaughtUp`): a catch-up that left a box behind
+owes its ready until the box is read, and a drop in between cancels the debt — the
+reconnect's catch-up announces its own.
 
 New mail is a watch event, not a flag: every added and updated line carries `"new":
 true|false` and `--events new` selects the true ones (`internal/cmd/watch_new.go`). New is

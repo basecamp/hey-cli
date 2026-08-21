@@ -529,7 +529,7 @@ or since the watch began for a thread it has not seen; the backlog a watch start
 never new, nor is reading, muting or moving a thread, and a reply on a known thread is.
 `--events new` selects the new ones, alone or in a union with the other three. A deleted
 posting carries no `posting`, `thread_id` or `new`. Three more lines
-describe the watch itself: `{"change": "ready"}` once the cursor is set and the subscription
+describe the watch itself: `{"change": "ready"}` once every box is caught up and the subscription
 is live (again after every reconnect's catch-up), `{"change": "disconnected"}` when the
 connection drops, and `{"change": "resync", "box": {...}}` when a box changed more than the
 feed can list and the watch skipped ahead — re-read that box. A resync is a change

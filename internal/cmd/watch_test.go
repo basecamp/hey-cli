@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	actioncable "github.com/basecamp/actioncable-go"
 
@@ -160,7 +161,7 @@ func TestWatchReportsJSONPerPosting(t *testing.T) {
 	watch, out := newTestWatch("added", "updated", "deleted")
 	posting := &generated.Posting{Id: 9001, AppUrl: "https://app.hey.com/topics/5511"}
 
-	watch.report(context.Background(), watchEvent{Change: "added", At: "2026-08-18T09:14:22.031Z", PostingID: 9001, New: watch.classify(*posting)}, watch.boxes[24088], posting)
+	watch.report(context.Background(), watchEvent{Change: "added", At: "2026-08-18T09:14:22.031Z", PostingID: 9001, New: watch.classify(watch.boxes[24088], *posting)}, watch.boxes[24088], posting)
 	watch.report(context.Background(), watchEvent{Change: "deleted", At: "2026-08-18T09:15:00.000Z", PostingID: 9003}, watch.boxes[24088], nil)
 
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
@@ -451,6 +452,111 @@ func TestWatchSkipsAheadToTheBoxesOwnCursor(t *testing.T) {
 	}
 	if got := watch.boxes[24088].cursor.Since; got != "2026-08-21T11:02:00.000Z" {
 		t.Errorf("cursor = %q, want the server's current one", got)
+	}
+	if got := watch.newMail.skipped[24088]; !got.Equal(time.Date(2026, 8, 21, 11, 2, 0, 0, time.UTC)) {
+		t.Errorf("new-mail cutoff = %v, want the box's cutoff moved to the cursor it skipped to", got)
+	}
+}
+
+func TestWatchReadyWaitsForAFailedCatchUpRead(t *testing.T) {
+	t.Setenv("HEY_TOKEN", "test-token")
+	broken := true
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if broken {
+			http.Error(w, "boom", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Link", `<`+r.URL.Path+`?since=2026-08-18T09%3A14%3A22.031Z&v=2>; rel="next"`)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
+
+	watch, out := newTestWatch("added")
+	cursor, err := watchCursor(server.URL+"/boxes/24088/postings/changes.json?since=2026-08-18T09%3A00%3A00.000Z&v=2", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	watch.boxes[24088].cursor = cursor
+
+	// The catch-up's read fails: the box waits for its retry, and so does ready.
+	if err := watch.catchUp(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("wrote %q, want no ready while a box is still behind", out.String())
+	}
+	if !watch.catchingUp || !watch.unread[24088] {
+		t.Fatalf("catchingUp = %v, unread = %v; want the ready owed and the box waiting", watch.catchingUp, watch.unread)
+	}
+
+	// The retry reads it: now ready.
+	broken = false
+	if err := watch.retryUnread(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"change":"ready"`) || watch.catchingUp {
+		t.Errorf("wrote %q, want ready once the last box is read", out.String())
+	}
+
+	// A later retry with nothing owed announces nothing.
+	out.Reset()
+	if err := watch.retryUnread(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Len() != 0 {
+		t.Errorf("wrote %q, want no ready when none is owed", out.String())
+	}
+}
+
+func TestWatchDropWhileCatchingUpCancelsTheReadyItOwed(t *testing.T) {
+	t.Setenv("HEY_TOKEN", "test-token")
+	broken := true
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if broken {
+			http.Error(w, "boom", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Link", `<`+r.URL.Path+`?since=2026-08-18T09%3A14%3A22.031Z&v=2>; rel="next"`)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
+
+	watch, out := newTestWatch("added")
+	cursor, err := watchCursor(server.URL+"/boxes/24088/postings/changes.json?since=2026-08-18T09%3A00%3A00.000Z&v=2", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	watch.boxes[24088].cursor = cursor
+
+	if err := watch.catchUp(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// The connection drops before the retry: disconnected, and the ready that
+	// was owed is not — the reconnect will catch up and announce its own.
+	watch.noteConnection(false)
+	if err := watch.followConnection(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	broken = false
+	if err := watch.retryUnread(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 1 || !strings.Contains(lines[0], `"change":"disconnected"`) {
+		t.Errorf("wrote %q, want disconnected alone — no ready while the connection is down", out.String())
+	}
+
+	// The reconnect catches up and says ready.
+	watch.noteConnection(true)
+	if err := watch.followConnection(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"change":"ready"`) {
+		t.Errorf("wrote %q, want ready after the reconnect's catch-up", out.String())
 	}
 }
 

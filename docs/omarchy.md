@@ -102,7 +102,7 @@ the service once, so one `hey watch` runs per shell however many monitors carry 
 and every bar widget reads the shared service. A watch event is a wake-up, not a delta —
 any line on the watch's stdout re-reads `hey box imbox`, debounced so a burst of changes
 costs one read (plus one follow-up when changes land while a read is in flight, since that
-read may predate them). `hey watch` says `ready` once its cursors are set and its
+read may predate them). `hey watch` says `ready` once every box is caught up and its
 subscription is live, and again after every reconnect's catch-up; the plugin's read on that
 line is what makes the picture gap-free — anything before the cursor is in the read,
 anything after it is an event — rather than the order the two processes were started in.

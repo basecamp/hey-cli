@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
+	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 )
 
 // New mail is a watch event: every added and updated line says whether the
@@ -24,6 +25,7 @@ import (
 // was filtered out, is not mistaken for new when its next change comes.
 type newMail struct {
 	started  time.Time
+	skipped  map[int64]time.Time
 	activeAt map[int64]time.Time
 }
 
@@ -31,7 +33,22 @@ type newMail struct {
 // is backlog, on the server's clock, since that is the clock every posting's
 // active_at is on.
 func trackNewMail(started time.Time) *newMail {
-	return &newMail{started: started, activeAt: map[int64]time.Time{}}
+	return &newMail{started: started, skipped: map[int64]time.Time{}, activeAt: map[int64]time.Time{}}
+}
+
+// skippedTo moves a box's cutoff up to the cursor the watch skipped ahead to.
+// A box that changed more than the feed can list was never read across that
+// gap, so the threads active in it are backlog the watch knows nothing about:
+// without this, one of them updated later while still unseen — moved, say —
+// would measure its gap activity against the watch's start and read as new.
+// The cursor is the box's last posting activity, which bounds every thread in
+// it, and it is the box's alone — a gap thread that moves to another box is
+// measured there, and may still read as new once. The resync line is the
+// reader's cue to re-read the box either way.
+func (n *newMail) skippedTo(boxID int64, cursor hey.PostingChangesCursor) {
+	if at, err := time.Parse(watchCursorTimeLayout, cursor.Since); err == nil {
+		n.skipped[boxID] = at
+	}
 }
 
 // serverNow is HEY's clock, read off the Date header of one cheap request, so
@@ -61,10 +78,13 @@ func serverNow(ctx context.Context) time.Time {
 // backlog a box's first read carries from the server's cursor, or a thread that
 // merely moved in. active_at moves on new mail only, not when a thread is read,
 // muted or moved, so none of those is new and a reply on a known thread is.
-func (n *newMail) isNew(posting generated.Posting) bool {
+func (n *newMail) isNew(boxID int64, posting generated.Posting) bool {
 	last, known := n.activeAt[posting.Id]
 	if !known {
 		last = n.started
+		if skipped, ok := n.skipped[boxID]; ok && skipped.After(last) {
+			last = skipped
+		}
 	}
 
 	return !posting.Seen && !posting.Muted && posting.ActiveAt.After(last)

@@ -80,8 +80,8 @@ seen, so the backlog a box's first read carries is not new. Reading a thread, mu
 moving it is not new activity; a reply on a known thread is. --events new selects the new
 ones, alone or alongside added, updated and deleted, and a script sees HEY_NEW=1 for them.
 
-Besides the thread changes, three lines describe the watch itself: "ready" once the
-cursor is set and the subscription is live (again after every reconnect's catch-up),
+Besides the thread changes, three lines describe the watch itself: "ready" once every box
+is caught up and the subscription is live (again after every reconnect's catch-up),
 "disconnected" when the connection drops, and "resync" when a box changed more than the
 feed can list one change at a time and the watch skipped ahead. A resync is a change —
 scripts run for it and --exit-on-first counts it; ready and disconnected are written to
@@ -282,10 +282,12 @@ func watchCursor(changesURL, since string) (hey.PostingChangesCursor, error) {
 	if err != nil {
 		return hey.PostingChangesCursor{}, err
 	}
-	cursor.Since = at.UTC().Format("2006-01-02T15:04:05.000Z")
+	cursor.Since = at.UTC().Format(watchCursorTimeLayout)
 
 	return cursor, nil
 }
+
+const watchCursorTimeLayout = "2006-01-02T15:04:05.000Z"
 
 func parseWatchSince(since string) (time.Time, error) {
 	if at, err := time.Parse(time.RFC3339, since); err == nil {
@@ -353,6 +355,7 @@ type postingsWatch struct {
 	transitionsMu  sync.Mutex
 	transitions    []bool
 	rejected       atomic.Bool
+	catchingUp     bool
 	unread         map[int64]bool
 	backoff        time.Duration
 	retry          <-chan time.Time
@@ -362,12 +365,9 @@ type postingsWatch struct {
 }
 
 func (w *postingsWatch) listen(ctx context.Context, subscription *actioncable.Subscription) error {
-	if err := w.readEveryBox(ctx); err != nil {
+	if err := w.catchUp(ctx); err != nil {
 		return err
 	}
-	// From here on, anything after the cursors is reported: a reader that wants
-	// a gap-free picture reads its own state now, not before.
-	w.announce(watchReady)
 
 	for !w.finished() {
 		select {
@@ -380,7 +380,7 @@ func (w *postingsWatch) listen(ctx context.Context, subscription *actioncable.Su
 			}
 		case <-w.retry:
 			w.retry = nil
-			if err := w.readUnreadBoxes(ctx); err != nil {
+			if err := w.retryUnread(ctx); err != nil {
 				return err
 			}
 		case message, open := <-subscription.Messages():
@@ -432,16 +432,53 @@ func (w *postingsWatch) noteConnection(connected bool) {
 func (w *postingsWatch) followConnection(ctx context.Context) error {
 	for _, connected := range w.drainTransitions() {
 		if !connected {
+			// A ready still owed by a catch-up is owed no longer: the next
+			// reconnect catches up afresh and announces its own.
+			w.catchingUp = false
 			w.announce(watchDisconnected)
 			continue
 		}
-		if err := w.readEveryBox(ctx); err != nil {
+		if err := w.catchUp(ctx); err != nil {
 			return err
 		}
-		w.announce(watchReady)
 	}
 
 	return nil
+}
+
+// catchUp reads every box and announces ready — but only once every box has
+// been read. A read that failed is retried on the backoff with the box's cursor
+// where it was, and ready waits for it: a reader told ready while a box is
+// still behind would take the gap for a clean picture. From ready on, anything
+// after the cursors is reported: a reader that wants a gap-free picture reads
+// its own state now, not before.
+func (w *postingsWatch) catchUp(ctx context.Context) error {
+	if err := w.readEveryBox(ctx); err != nil {
+		return err
+	}
+	w.catchingUp = true
+	w.readyOnceCaughtUp()
+
+	return nil
+}
+
+// retryUnread reads the boxes whose last read failed, and announces the ready a
+// catch-up left owing once the last of them is read.
+func (w *postingsWatch) retryUnread(ctx context.Context) error {
+	if err := w.readUnreadBoxes(ctx); err != nil {
+		return err
+	}
+	w.readyOnceCaughtUp()
+
+	return nil
+}
+
+func (w *postingsWatch) readyOnceCaughtUp() {
+	if !w.catchingUp || len(w.unread) > 0 {
+		return
+	}
+	w.catchingUp = false
+	w.announce(watchReady)
 }
 
 func (w *postingsWatch) drainTransitions() []bool {
@@ -526,10 +563,10 @@ func (w *postingsWatch) readBox(ctx context.Context, box *watchedBox) error {
 	// every box and whatever --events asks for, so a thread's activity is known
 	// when its next change comes, even when this one was filtered out.
 	for _, posting := range changes.Added {
-		w.report(ctx, watchEvent{Change: "added", At: watchTime(posting.CreatedAt), PostingID: posting.Id, New: w.classify(posting)}, box, &posting)
+		w.report(ctx, watchEvent{Change: "added", At: watchTime(posting.CreatedAt), PostingID: posting.Id, New: w.classify(box, posting)}, box, &posting)
 	}
 	for _, posting := range changes.Updated {
-		w.report(ctx, watchEvent{Change: "updated", At: watchTime(posting.UpdatedAt), PostingID: posting.Id, New: w.classify(posting)}, box, &posting)
+		w.report(ctx, watchEvent{Change: "updated", At: watchTime(posting.UpdatedAt), PostingID: posting.Id, New: w.classify(box, posting)}, box, &posting)
 	}
 	for _, posting := range changes.Deleted {
 		w.report(ctx, watchEvent{Change: "deleted", At: watchTime(posting.DeletedAt), PostingID: posting.Id}, box, nil)
@@ -540,8 +577,8 @@ func (w *postingsWatch) readBox(ctx context.Context, box *watchedBox) error {
 	return nil
 }
 
-func (w *postingsWatch) classify(posting generated.Posting) *bool {
-	isNew := w.newMail.isNew(posting)
+func (w *postingsWatch) classify(box *watchedBox, posting generated.Posting) *bool {
+	isNew := w.newMail.isNew(box.id, posting)
 	return &isNew
 }
 
@@ -601,6 +638,7 @@ func (w *postingsWatch) skipAhead(ctx context.Context, box *watchedBox) error {
 			}
 			if cursor.Since != "" {
 				box.cursor = cursor
+				w.newMail.skippedTo(box.id, cursor)
 				return nil
 			}
 		}
