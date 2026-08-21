@@ -27,6 +27,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/cable"
+	"github.com/basecamp/hey-cli/internal/output"
 )
 
 const changesChannel = "Postings::ChangesChannel"
@@ -622,7 +623,7 @@ func (w *postingsWatch) scriptCommand(ctx context.Context, script string, event 
 }
 
 func (w *postingsWatch) writeJSON(event watchEvent) {
-	payload, err := json.Marshal(event)
+	payload, err := output.MarshalJSON(event)
 	if err != nil {
 		fmt.Fprintf(w.errOut, "warning: could not write a change: %v\n", err)
 		return

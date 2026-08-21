@@ -17,6 +17,9 @@ func TestSanitize(t *testing.T) {
 		{"DEL is removed", "note\x7f", "note"},
 		{"newlines and tabs survive", "line one\nline\ttwo", "line one\nline\ttwo"},
 		{"emoji and accents survive", "Café ☕", "Café ☕"},
+		{"a right-to-left override cannot reverse a filename", "invoice\u202efdp.exe", "invoicefdp.exe"},
+		{"every bidi control goes", "\u061ca\u200eb\u200fc\u202ad\u202be\u202cf\u202dg\u2066h\u2067i\u2068j\u2069k", "abcdefghijk"},
+		{"right-to-left text itself survives", "שלום", "שלום"},
 	}
 
 	for _, test := range tests {

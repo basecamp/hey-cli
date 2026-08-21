@@ -141,9 +141,7 @@ func (w *Writer) Err(err error) {
 		Hint:  e.Hint,
 		Meta:  e.Meta,
 	}
-	enc := json.NewEncoder(w.opts.Stderr)
-	enc.SetIndent("", "  ")
-	_ = enc.Encode(resp)
+	_ = writeIndentedJSON(w.opts.Stderr, resp)
 }
 
 func (w *Writer) writeJSON(data any, opts ...ResponseOption) error {
@@ -151,10 +149,18 @@ func (w *Writer) writeJSON(data any, opts ...ResponseOption) error {
 	for _, opt := range opts {
 		opt(&resp)
 	}
+	return writeIndentedJSON(w.opts.Stdout, resp)
+}
 
-	enc := json.NewEncoder(w.opts.Stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(resp)
+// writeIndentedJSON writes one value the way json.Encoder would, indented and
+// newline-terminated, with the C1 controls escaped on the way.
+func writeIndentedJSON(out io.Writer, v any) error {
+	data, err := MarshalIndentJSON(v)
+	if err != nil {
+		return err
+	}
+	_, err = out.Write(append(data, '\n'))
+	return err
 }
 
 func (w *Writer) writeJQ(target any) error {
@@ -191,6 +197,10 @@ func (w *Writer) writeJQ(target any) error {
 	}
 }
 
+// writeJQResult writes one jq result. A string result is written raw, as `jq -r`
+// writes it: on a terminal it is sanitized first, and on a pipe it is the value
+// itself, control characters included, because the bytes are the value and the
+// consumer is a program. Anything else is JSON, with the C1 controls escaped.
 func (w *Writer) writeJQResult(result any, tty bool) error {
 	if tty {
 		result = sanitizeJSONValue(result)
@@ -200,12 +210,10 @@ func (w *Writer) writeJQResult(result any, tty bool) error {
 		return err
 	}
 
-	raw, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
+	if err := writeIndentedJSON(w.opts.Stdout, result); err != nil {
 		return ErrJQRuntime(fmt.Errorf("encode result: %w", err))
 	}
-	_, err = fmt.Fprintln(w.opts.Stdout, string(raw))
-	return err
+	return nil
 }
 
 func compileJQ(filter string) (*gojq.Code, error) {
@@ -271,9 +279,7 @@ func sanitizeJSONMap(value map[string]any) map[string]any {
 }
 
 func (w *Writer) writeQuiet(data any) error {
-	enc := json.NewEncoder(w.opts.Stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(data)
+	return writeIndentedJSON(w.opts.Stdout, data)
 }
 
 func (w *Writer) writeIDs(data any) error {

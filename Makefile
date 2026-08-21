@@ -142,13 +142,18 @@ race-test: check-toolchain
 vuln:
 	govulncheck ./...
 
-# Run gitleaks secret scan
+# Run gitleaks secret scan. The scan is part of the security gate, so a missing
+# binary or config fails it rather than passing it by skipping.
 secrets:
-	@if ! command -v gitleaks >/dev/null 2>&1 || [ ! -f .gitleaks.toml ]; then \
-		echo "Skipping gitleaks (binary not found or .gitleaks.toml absent)"; \
-	else \
-		gitleaks detect --source . --verbose; \
+	@if ! command -v gitleaks >/dev/null 2>&1; then \
+		echo "ERROR: gitleaks not found; run make tools or see https://github.com/gitleaks/gitleaks"; \
+		exit 1; \
 	fi
+	@if [ ! -f .gitleaks.toml ]; then \
+		echo "ERROR: .gitleaks.toml absent"; \
+		exit 1; \
+	fi
+	gitleaks detect --source . --verbose
 
 # Guard against replace directives in go.mod
 replace-check:
