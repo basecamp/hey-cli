@@ -284,6 +284,78 @@ func TestMailViewIgnoresUnrelatedMessages(t *testing.T) {
 	}
 }
 
+func TestMailViewMarksOpenedThreadSeen(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+
+	loaded, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(topicLoadedMsg)
+	if !ok || loaded.err != nil || loaded.postingID != 100 {
+		t.Fatalf("opened topic = posting %d error %v", loaded.postingID, loaded.err)
+	}
+
+	cmd, _ := v.Update(loaded)
+	if !v.AccountSwitchBlocked() {
+		t.Fatal("marking the opened thread seen did not block account switching")
+	}
+	seen, ok := runCmd(cmd).(postingSeenMsg)
+	if !ok || seen.err != nil {
+		t.Fatalf("mark seen returned %#v", seen)
+	}
+	if recorded.method != http.MethodPost || recorded.path != "/postings/seen.json" {
+		t.Errorf("request = %s %s, want POST /postings/seen.json", recorded.method, recorded.path)
+	}
+	if len(recorded.body.PostingIDs) != 1 || recorded.body.PostingIDs[0] != 100 {
+		t.Errorf("posting_ids = %v, want [100]", recorded.body.PostingIDs)
+	}
+
+	v.Update(seen)
+	if v.AccountSwitchBlocked() {
+		t.Error("completed mark seen still blocks account switching")
+	}
+	if !v.postingList.postings[v.postingIndex(100)].Seen {
+		t.Error("the opened thread should be seen in the list")
+	}
+	if v.notice != "" {
+		t.Errorf("opening a thread should not announce itself: %q", v.notice)
+	}
+}
+
+func TestMailViewLeavesSeenThreadAloneWhenOpened(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v.postingList.postings[0].Seen = true
+
+	loaded, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(topicLoadedMsg)
+	if !ok || loaded.err != nil || loaded.postingID != 100 {
+		t.Fatalf("opened topic = posting %d error %v", loaded.postingID, loaded.err)
+	}
+
+	cmd, _ := v.Update(loaded)
+	if cmd != nil {
+		t.Errorf("opening a seen thread should not mark it again: %#v", runCmd(cmd))
+	}
+	if recorded.path == "/postings/seen.json" {
+		t.Error("opening a seen thread hit the mark seen endpoint")
+	}
+}
+
+func TestMailViewReportsFailureToMarkOpenedThreadSeen(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusInternalServerError)
+
+	loaded := runCmd(v.HandleContentKey(keyPress("enter"))).(topicLoadedMsg)
+	cmd, _ := v.Update(loaded)
+	seen := runCmd(cmd).(postingSeenMsg)
+	if seen.err == nil {
+		t.Fatal("a failed mark seen should carry its error")
+	}
+
+	v.Update(seen)
+	if !strings.HasPrefix(v.notice, "Could not mark thread as seen") {
+		t.Errorf("notice = %q, want the mark seen failure", v.notice)
+	}
+	if v.postingList.postings[v.postingIndex(100)].Seen {
+		t.Error("a failed mark seen should leave the thread unseen")
+	}
+}
+
 // --- Posting actions ---
 
 func TestMailViewPostingKeysCallExpectedEndpoints(t *testing.T) {
@@ -1191,7 +1263,7 @@ func TestMailViewDownloadsImageDataOnlyForKittyRenderer(t *testing.T) {
 	vc.sdk = client
 	vc.imageFetcher = newTrustedImageFetcher(client)
 	v := newMailView(vc)
-	loaded := v.fetchTopic(context.Background(), 1, 1, 100, "Latest image")().(topicLoadedMsg)
+	loaded := v.fetchTopic(context.Background(), 1, 1, 100, 500, "Latest image")().(topicLoadedMsg)
 
 	if loaded.err != nil || len(loaded.attachments) != 1 {
 		t.Fatalf("text fallback topic = attachments:%d error:%v", len(loaded.attachments), loaded.err)
@@ -1202,7 +1274,7 @@ func TestMailViewDownloadsImageDataOnlyForKittyRenderer(t *testing.T) {
 
 	vc.imageRenderer = kittyImageRenderer{}
 	v = newMailView(vc)
-	loaded = v.fetchTopic(context.Background(), 2, 1, 100, "Latest image")().(topicLoadedMsg)
+	loaded = v.fetchTopic(context.Background(), 2, 1, 100, 500, "Latest image")().(topicLoadedMsg)
 	if loaded.err != nil || len(loaded.images) != 1 || imageRequests.Load() != 1 {
 		t.Errorf("Kitty topic = images:%d requests:%d error:%v", len(loaded.images), imageRequests.Load(), loaded.err)
 	}
@@ -1244,7 +1316,7 @@ func TestMailViewDoesNotFetchImagesOutsideHEYOrGopher(t *testing.T) {
 	vc.imageFetcher = newTrustedImageFetcher(client)
 	v := newMailView(vc)
 
-	loaded := v.fetchTopic(context.Background(), 1, 1, 100, "Untrusted image")().(topicLoadedMsg)
+	loaded := v.fetchTopic(context.Background(), 1, 1, 100, 500, "Untrusted image")().(topicLoadedMsg)
 
 	if loaded.err != nil {
 		t.Fatalf("fetch topic: %v", loaded.err)

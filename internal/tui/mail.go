@@ -62,6 +62,7 @@ type topicLoadedMsg struct {
 	requestID   uint64
 	boxID       int64
 	topicID     int64
+	postingID   int64
 	title       string
 	entries     []models.Entry
 	attachments []messageAttachment
@@ -107,6 +108,15 @@ type postingActionDoneMsg struct {
 	sourceKind string
 	postingID  int64
 	effect     postingActionEffect
+	err        error
+}
+
+// postingSeenMsg reports the mark-seen that opening a thread triggers on its
+// own, as the web app does out of band once it has rendered the topic.
+type postingSeenMsg struct {
+	boxID      int64
+	sourceKind string
+	postingID  int64
 	err        error
 }
 
@@ -289,10 +299,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.imageContent = imageContent.String()
 		v.rebuildTopicContent()
 		v.topicViewport.GotoTop()
-		if len(uploadCmds) > 0 {
-			return tea.Batch(uploadCmds...), true
-		}
-		return nil, true
+		return tea.Batch(append(uploadCmds, v.markPostingSeen(msg.boxID, msg.postingID))...), true
 
 	case replyContextLoadedMsg:
 		if msg.requestID != v.activeRequestID || msg.boxID != v.currentBoxID() {
@@ -455,6 +462,20 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if v.activeRequestKind == mailRequestPostings {
 			if source := v.currentSource(); source != nil {
 				return v.requestPostings(*source), true
+			}
+		}
+		return nil, true
+
+	case postingSeenMsg:
+		v.finishMutation()
+		if msg.err != nil {
+			v.notice = "Could not mark thread as seen: " + msg.err.Error()
+			return nil, true
+		}
+		if msg.boxID == v.currentBoxID() && msg.sourceKind == v.currentSourceKind() {
+			if idx := v.postingIndex(msg.postingID); idx >= 0 {
+				v.postingList.postings[idx].Seen = true
+				v.postingList.resort()
 			}
 		}
 		return nil, true
@@ -1249,9 +1270,9 @@ func (v *mailView) requestSearch(query string, page int) tea.Cmd {
 	return v.fetchSearchResults(ctx, requestID, query, max(page, 1))
 }
 
-func (v *mailView) requestTopic(boxID, topicID int64, title string) tea.Cmd {
+func (v *mailView) requestTopic(boxID, topicID, postingID int64, title string) tea.Cmd {
 	requestID, ctx := v.beginRequest(mailRequestTopic)
-	return v.fetchTopic(ctx, requestID, boxID, topicID, title)
+	return v.fetchTopic(ctx, requestID, boxID, topicID, postingID, title)
 }
 
 func (v *mailView) postingIndex(postingID int64) int {
@@ -1354,7 +1375,36 @@ func (v *mailView) openSelected() tea.Cmd {
 	if v.searchActive {
 		title = selected.Name
 	}
-	return v.requestTopic(v.currentBoxID(), topicID, title)
+	return v.requestTopic(v.currentBoxID(), topicID, selected.ID, title)
+}
+
+// markPostingSeen marks a thread as seen once it has been opened, the way the
+// web app beacons an observation after it renders a topic. A thread that is
+// already seen costs no request.
+func (v *mailView) markPostingSeen(boxID, postingID int64) tea.Cmd {
+	opened := v.openedPosting(postingID)
+	if opened == nil || opened.Seen {
+		return nil
+	}
+	sourceKind := v.currentSourceKind()
+	v.pendingMutations++
+	return func() tea.Msg {
+		err := v.vc.sdk.Postings().MarkSeen(v.vc.ctx, []int64{postingID})
+		return postingSeenMsg{boxID: boxID, sourceKind: sourceKind, postingID: postingID, err: err}
+	}
+}
+
+func (v *mailView) openedPosting(postingID int64) *models.Posting {
+	list := &v.postingList
+	if v.searchActive {
+		list = &v.searchList
+	}
+	for i := range list.postings {
+		if list.postings[i].ID == postingID {
+			return &list.postings[i]
+		}
+	}
+	return nil
 }
 
 // --- Posting actions ---
@@ -1749,7 +1799,7 @@ func (v *mailView) fetchSearchResults(ctx context.Context, requestID uint64, que
 	}
 }
 
-func (v *mailView) fetchTopic(ctx context.Context, requestID uint64, boxID, topicID int64, title string) tea.Cmd {
+func (v *mailView) fetchTopic(ctx context.Context, requestID uint64, boxID, topicID, postingID int64, title string) tea.Cmd {
 	return func() tea.Msg {
 		topic, err := v.vc.sdk.Topics().Get(ctx, topicID)
 		if err != nil {
@@ -1817,6 +1867,7 @@ func (v *mailView) fetchTopic(ctx context.Context, requestID uint64, boxID, topi
 			requestID:   requestID,
 			boxID:       boxID,
 			topicID:     topicID,
+			postingID:   postingID,
 			title:       title,
 			entries:     entries,
 			attachments: attachments,

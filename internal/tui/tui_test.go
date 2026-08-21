@@ -466,7 +466,7 @@ func TestEscCancelsPendingSearchResultAndPreservesResults(t *testing.T) {
 	m.mailView.searchQuery = "quarterly planning"
 	m.mailView.searchPage = 1
 	m.mailView.searchList.setPostings([]models.Posting{{ID: 10, TopicID: 100, Name: "Hello world"}})
-	m.mailView.requestTopic(m.mailView.currentBoxID(), 100, "Hello world")
+	m.mailView.requestTopic(m.mailView.currentBoxID(), 100, 10, "Hello world")
 	m.loading = true
 
 	updated, _ := m.Update(keyPress("esc"))
@@ -485,7 +485,7 @@ func TestQExitsSearchDuringPendingResult(t *testing.T) {
 	m.mailView.searchQuery = "quarterly planning"
 	m.mailView.searchPage = 1
 	m.mailView.searchList.setPostings([]models.Posting{{ID: 10, TopicID: 100, Name: "Hello world"}})
-	m.mailView.requestTopic(m.mailView.currentBoxID(), 100, "Hello world")
+	m.mailView.requestTopic(m.mailView.currentBoxID(), 100, 10, "Hello world")
 	m.loading = true
 
 	updated, _ := m.Update(keyPress("q"))
