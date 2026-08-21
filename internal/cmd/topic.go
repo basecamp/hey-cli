@@ -237,6 +237,14 @@ func writeThreadMarkdown(w io.Writer, threadID int64, entries []threadEntry, not
 // it is written as text or as an attribute; the date and state are this program's own
 // and are escaped all the same. A write that fails is the command's error: a document
 // cut short by a full disk must not exit 0.
+//
+// The body itself is written as HEY served it, which is the point of --html, so nothing
+// here keeps a body from carrying an </article> of its own. It cannot: a body is Trix
+// output, and article is not among the tags Trix keeps; an inbound email's markup
+// arrives attribute-escaped inside the figure's JSON (see htmlutil). Re-serializing
+// the body through a parser would hold the framing against HTML HEY does not serve, at
+// the price of the verbatim contract. A reader that needs each entry as its own value
+// has --json.
 func writeThreadHTML(w io.Writer, threadID int64, entries []threadEntry, notice string) error {
 	write := func(s string) error {
 		if _, err := io.WriteString(w, s); err != nil {
