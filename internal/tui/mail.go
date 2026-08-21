@@ -208,6 +208,7 @@ type mailView struct {
 	attachments      []messageAttachment
 	attachmentCursor int
 	imageContent     string
+	entryOffsets     []int // line where each message starts in the thread content
 	inThread         bool
 	threadNotice     string // what the open thread's read did not get; stays until the thread is left
 	contentHeight    int    // the rows the section has, which the thread's notices and viewport share
@@ -743,6 +744,9 @@ func (v *mailView) HelpBindings() []helpBinding {
 	}
 	if v.inThread {
 		bindings := []helpBinding{{"r", "reply"}, {"f", "forward"}}
+		if len(v.entries) > 1 {
+			bindings = append(bindings, helpBinding{"j/k", "next/previous message"})
+		}
 		if len(v.attachments) > 0 {
 			bindings = append(bindings,
 				helpBinding{"[", "previous attachment"},
@@ -994,6 +998,12 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 			return v.saveSelectedAttachment()
 		case "o":
 			return v.openSelectedAttachment()
+		case "j":
+			v.jumpEntry(1)
+			return nil
+		case "k":
+			v.jumpEntry(-1)
+			return nil
 		}
 		var cmd tea.Cmd
 		v.topicViewport, cmd = v.topicViewport.Update(msg)
@@ -1498,8 +1508,35 @@ func (v *mailView) currentAttachmentAction(topicID int64, attachmentID string) b
 	return false
 }
 
+// jumpEntry scrolls the thread to the next or previous message header.
+func (v *mailView) jumpEntry(delta int) {
+	if len(v.entryOffsets) == 0 {
+		return
+	}
+	current := v.topicViewport.YOffset()
+	if delta > 0 {
+		for _, offset := range v.entryOffsets {
+			if offset > current {
+				v.topicViewport.SetYOffset(offset)
+				return
+			}
+		}
+		v.topicViewport.GotoBottom()
+		return
+	}
+	for i := len(v.entryOffsets) - 1; i >= 0; i-- {
+		if v.entryOffsets[i] < current {
+			v.topicViewport.SetYOffset(v.entryOffsets[i])
+			return
+		}
+	}
+	v.topicViewport.GotoTop()
+}
+
 func (v *mailView) rebuildTopicContent() {
-	v.topicContent = v.renderEntries(v.entries) + v.imageContent
+	rendered, offsets := v.renderEntries(v.entries)
+	v.topicContent = rendered + v.imageContent
+	v.entryOffsets = offsets
 	v.topicViewport.SetContent(v.topicContent)
 }
 
@@ -2110,8 +2147,11 @@ func (v *mailView) fetchTopic(ctx context.Context, requestID uint64, boxID, topi
 
 // --- Entry rendering ---
 
-func (v *mailView) renderEntries(entries []mail.Entry) string {
+// renderEntries renders the thread's messages and returns the content along
+// with the line each message header starts on, for j/k jumps.
+func (v *mailView) renderEntries(entries []mail.Entry) (string, []int) {
 	var b strings.Builder
+	offsets := make([]int, 0, len(entries))
 	sepWidth := max(v.vc.width-4, 40)
 	sep := v.vc.styles.separator.Render(strings.Repeat("─", sepWidth))
 
@@ -2119,6 +2159,7 @@ func (v *mailView) renderEntries(entries []mail.Entry) string {
 		if i > 0 {
 			fmt.Fprintf(&b, "%s\n", sep)
 		}
+		offsets = append(offsets, strings.Count(b.String(), "\n"))
 
 		from := e.Creator.Name
 		if from == "" {
@@ -2145,5 +2186,5 @@ func (v *mailView) renderEntries(entries []mail.Entry) string {
 		b.WriteString("\n")
 	}
 
-	return b.String()
+	return b.String(), offsets
 }

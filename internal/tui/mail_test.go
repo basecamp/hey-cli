@@ -2941,7 +2941,8 @@ func TestThreadEntriesCarryTheTimeOfDay(t *testing.T) {
 		{ID: 502, Creator: mail.Contact{Name: "Bob"}, CreatedAt: time.Date(2026, 8, 18, 16, 5, 0, 0, time.UTC)},
 	}
 
-	rendered := stripANSI(v.renderEntries(entries))
+	renderedEntries, _ := v.renderEntries(entries)
+	rendered := stripANSI(renderedEntries)
 
 	for _, want := range []string{
 		formatDisplayDateTime(entries[0].CreatedAt),
@@ -2996,11 +2997,51 @@ func TestMailViewReadsEveryPageOfAThreadAndMarksUnreadBodies(t *testing.T) {
 		t.Errorf("notice = %q", loaded.notice)
 	}
 
-	view := v.renderEntries(loaded.entries)
+	view, _ := v.renderEntries(loaded.entries)
 	if !strings.Contains(view, "body 501") || !strings.Contains(view, "body 503") {
 		t.Errorf("view lacks the read bodies: %q", view)
 	}
 	if !strings.Contains(view, "(body not read: failed)") {
 		t.Errorf("view does not mark the unread body: %q", view)
+	}
+}
+
+func TestThreadJKJumpsBetweenMessages(t *testing.T) {
+	v := newMailView(testVC())
+	v.vc.width = 80
+	v.vc.height = 10
+	v.topicViewport.SetWidth(80)
+	v.topicViewport.SetHeight(10)
+	v.inThread = true
+	v.entries = []mail.Entry{
+		{ID: 1, Creator: mail.Contact{Name: "Maria Gonzalez"}, Body: htmlutil.ToMarkdown(strings.Repeat("<p>First message paragraph.</p>", 8))},
+		{ID: 2, Creator: mail.Contact{Name: "Sam Rivera"}, Body: htmlutil.ToMarkdown(strings.Repeat("<p>Second message paragraph.</p>", 8))},
+		{ID: 3, Creator: mail.Contact{Name: "Ana Ortiz"}, Body: htmlutil.ToMarkdown(strings.Repeat("<p>Third message paragraph.</p>", 8))},
+	}
+	v.rebuildTopicContent()
+
+	if len(v.entryOffsets) != 3 || v.entryOffsets[0] != 0 {
+		t.Fatalf("entry offsets = %v", v.entryOffsets)
+	}
+	if v.entryOffsets[1] <= v.entryOffsets[0] || v.entryOffsets[2] <= v.entryOffsets[1] {
+		t.Fatalf("entry offsets should grow: %v", v.entryOffsets)
+	}
+
+	v.HandleContentKey(keyPress("j"))
+	if got := v.topicViewport.YOffset(); got != v.entryOffsets[1] {
+		t.Errorf("j should jump to the second message: offset %d, want %d", got, v.entryOffsets[1])
+	}
+	v.HandleContentKey(keyPress("j"))
+	if got := v.topicViewport.YOffset(); got != v.entryOffsets[2] {
+		t.Errorf("j should jump to the third message: offset %d, want %d", got, v.entryOffsets[2])
+	}
+	v.HandleContentKey(keyPress("k"))
+	if got := v.topicViewport.YOffset(); got != v.entryOffsets[1] {
+		t.Errorf("k should jump back to the second message: offset %d, want %d", got, v.entryOffsets[1])
+	}
+	v.HandleContentKey(keyPress("k"))
+	v.HandleContentKey(keyPress("k"))
+	if got := v.topicViewport.YOffset(); got != 0 {
+		t.Errorf("k at the first message should go to the top: offset %d", got)
 	}
 }

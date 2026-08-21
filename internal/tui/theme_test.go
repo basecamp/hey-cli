@@ -284,7 +284,7 @@ func TestCursorStylesCarryTheSelectionBackground(t *testing.T) {
 	if marker.GetBackground() != want || text.GetBackground() != want || gap.GetBackground() != want {
 		t.Error("every cursor-row segment a section renders through the helpers must carry the selection background")
 	}
-	if renderScreenerRows(&screenerPane{rows: []screenerRow{{detail: "maria@example.com"}}}, 5, 40) == "" {
+	if renderScreenerRows(&screenerPane{rows: []screenerRow{{subject: "maria@example.com"}}}, 5, 40) == "" {
 		t.Error("screener rows should render")
 	}
 }

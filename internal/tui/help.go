@@ -77,7 +77,13 @@ func (h helpBar) view() string {
 
 	var items []item
 	for _, b := range h.bindings {
-		rendered := h.styles.helpKey.Render(b.key) + " " + h.styles.helpDesc.Render(b.desc)
+		var rendered string
+		if b.desc == "" {
+			// A pre-styled segment the caller rendered itself.
+			rendered = b.key
+		} else {
+			rendered = h.styles.helpKey.Render(b.key) + " " + h.styles.helpDesc.Render(b.desc)
+		}
 		items = append(items, item{str: rendered, width: lipgloss.Width(rendered)})
 	}
 

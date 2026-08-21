@@ -84,8 +84,9 @@ type screenerRow struct {
 	id       int64
 	name     string
 	email    string
-	detail   string // what they sent, or the address they write from
-	trailing string // their address, or the decision and when it was made
+	subject  string // subject of what they sent, or the address they write from
+	summary  string // excerpt of what they sent
+	trailing string // when they wrote, or the decision and when it was made
 }
 
 type screenerPane struct {
@@ -226,6 +227,7 @@ type screenerView struct {
 
 	pendingCount    int
 	confirmingClear bool
+	emphaticNo      bool // undocumented Shift+F toggle: "No" becomes "Fuck no!"
 	notice          string
 	loading         bool
 	requestID       uint64
@@ -374,8 +376,7 @@ func (v *screenerView) HelpBindings() []helpBinding {
 	bindings := []helpBinding{{"↑↓", "navigate"}}
 	if v.tab == screenerPendingTab {
 		bindings = append(bindings,
-			helpBinding{"y", "screen in"},
-			helpBinding{"n", "screen out"},
+			helpBinding{key: v.screenQuestion()},
 			helpBinding{"tab", "screener history"},
 		)
 	} else {
@@ -383,6 +384,19 @@ func (v *screenerView) HelpBindings() []helpBinding {
 	}
 	bindings = append(bindings, helpBinding{"X", "clear all"})
 	return append(bindings, helpBinding{"esc/q", "back to mail"})
+}
+
+// screenQuestion renders the screening prompt for the help bar: the question
+// in chrome, then Yes and No as keys with their hotkey letters underlined.
+func (v *screenerView) screenQuestion() string {
+	question := v.vc.styles.helpDesc.Render("Want to get emails from them?")
+	yes := renderNavLabel("Yes", "Y", v.vc.styles.helpKey)
+	noLabel := "No"
+	if v.emphaticNo {
+		noLabel = "Fuck no!"
+	}
+	no := renderNavLabel(noLabel, "N", v.vc.styles.helpKey)
+	return question + " " + yes + " " + no
 }
 
 func (v *screenerView) SubnavItems() ([]navItem, int, string, bool) {
@@ -404,6 +418,10 @@ func (v *screenerView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 
 	key := msg.String()
+	if key == "F" {
+		v.emphaticNo = !v.emphaticNo
+		return nil
+	}
 	switch msg.Key().Code {
 	case tea.KeyEscape:
 		return v.close()
@@ -575,7 +593,6 @@ func (v *screenerView) explanation() string {
 	for _, line := range lines {
 		b.WriteString(muted.Render("  "+line) + "\n")
 	}
-	b.WriteString(v.vc.styles.title.Render("  Want to get emails from them?") + "\n")
 	return b.String()
 }
 
@@ -676,20 +693,14 @@ func (v *screenerView) readScreenedPage(page string) ([]screenerRow, string, err
 // --- Rendering ---
 
 func pendingScreenerRow(clearance generated.Clearance) screenerRow {
-	detail := clearance.MostRecentEntry.Subject
-	if summary := clearance.MostRecentEntry.Summary; summary != "" {
-		if detail == "" {
-			detail = summary
-		} else {
-			detail += " – " + summary
-		}
-	}
+	subject, summary := clearanceEntryParts(clearance)
 	return screenerRow{
 		id:       clearance.Id,
 		name:     terminal.SanitizeLine(clearance.Petitioner.Name),
 		email:    terminal.SanitizeLine(clearance.Petitioner.EmailAddress),
-		detail:   terminal.SanitizeLine(detail),
-		trailing: terminal.SanitizeLine(clearance.Petitioner.EmailAddress),
+		subject:  subject,
+		summary:  summary,
+		trailing: formatDisplayDate(clearance.MostRecentEntry.CreatedAt),
 	}
 }
 
@@ -698,13 +709,26 @@ func screenedScreenerRow(clearance generated.Clearance) screenerRow {
 	if decided := formatDisplayDate(clearance.UpdatedAt); decided != "" {
 		trailing += " · " + decided
 	}
+	subject, summary := clearanceEntryParts(clearance)
 	return screenerRow{
 		id:       clearance.Id,
 		name:     terminal.SanitizeLine(clearance.Petitioner.Name),
 		email:    terminal.SanitizeLine(clearance.Petitioner.EmailAddress),
-		detail:   terminal.SanitizeLine(clearance.Petitioner.EmailAddress),
+		subject:  subject,
+		summary:  summary,
 		trailing: trailing,
 	}
+}
+
+// clearanceEntryParts returns the subject and excerpt of what the petitioner
+// sent, falling back to their address when HEY serves no entry data.
+func clearanceEntryParts(clearance generated.Clearance) (subject, summary string) {
+	subject = clearance.MostRecentEntry.Subject
+	summary = clearance.MostRecentEntry.Summary
+	if subject == "" && summary == "" {
+		subject = clearance.Petitioner.EmailAddress
+	}
+	return terminal.SanitizeLine(subject), terminal.SanitizeLine(summary)
 }
 
 func screenedVerb(status string) string {
@@ -724,15 +748,26 @@ func screenerRowName(row screenerRow) string {
 	return fmt.Sprintf("clearance %d", row.id)
 }
 
+// screenerRowLabel is the first-line label: the name with the address in
+// angle brackets, as an email From header writes it.
+func screenerRowLabel(row screenerRow) string {
+	if row.name != "" && row.email != "" {
+		return row.name + " <" + row.email + ">"
+	}
+	return screenerRowName(row)
+}
+
 func renderScreenerRows(pane *screenerPane, visible, width int) string {
-	// The cursor row goes through the same helpers as Mail and Contacts so a
-	// theme's selection background tints every segment of it, gaps included.
-	// Every text segment on it takes the accent, as in Mail: the selection is
-	// gated for accent-on-selection contrast, not muted-on-selection.
-	marker, selected := cursorStyles()
+	// Rows mirror the mail lists: a bold bright first line ("Name <address>")
+	// with a bright trailing date, then an indented second line whose subject
+	// takes the hyperlink color and whose excerpt is faint. The cursor row
+	// adds only the bar and the selection background, gaps included.
+	marker, _ := cursorStyles()
 	selectedGap := selectionStyle(lipgloss.NewStyle())
-	normal := lipgloss.NewStyle().Foreground(colorBright)
-	muted := lipgloss.NewStyle().Foreground(colorMuted)
+	labelBase := lipgloss.NewStyle().Foreground(colorBright).Bold(true)
+	trailingBase := lipgloss.NewStyle().Foreground(colorBright)
+	subjectBase := lipgloss.NewStyle().Foreground(colorLink).Bold(true)
+	summaryBase := styleMuted
 
 	var b strings.Builder
 	end := min(pane.scroll+visible, len(pane.rows))
@@ -740,24 +775,61 @@ func renderScreenerRows(pane *screenerPane, visible, width int) string {
 		row := pane.rows[index]
 		isCursor := index == pane.cursor
 
+		emphasize := func(base lipgloss.Style) lipgloss.Style {
+			if isCursor {
+				return selectionStyle(base)
+			}
+			return base
+		}
+		gapStyle := lipgloss.NewStyle()
+		if isCursor {
+			gapStyle = selectedGap
+		}
+
 		trailing := truncateStr(row.trailing, max(width/2, 10))
-		name := truncateStr(screenerRowName(row), max(width-lipgloss.Width(trailing)-6, 10))
-		gap := strings.Repeat(" ", max(width-4-lipgloss.Width(name)-lipgloss.Width(trailing), 1))
-		detail := truncateStr(row.detail, max(width-6, 10))
+		label := truncateStr(screenerRowLabel(row), max(width-lipgloss.Width(trailing)-6, 10))
+		gap := strings.Repeat(" ", max(width-4-lipgloss.Width(label)-lipgloss.Width(trailing), 1))
+
+		// Line 2: Subject — excerpt, colored like a mail row's second line.
+		subject := row.subject
+		var summary string
+		if row.summary != "" {
+			summary = " — " + row.summary
+		}
+		detailWidth := max(width-6, 10)
+		if lipgloss.Width(subject) > detailWidth {
+			subject = truncateStr(subject, detailWidth)
+			summary = ""
+		} else {
+			summary = truncateStr(summary, max(detailWidth-lipgloss.Width(subject), 0))
+		}
 
 		if isCursor {
-			b.WriteString(marker.Render("│") + selectedGap.Render(" ") + selected.Render(name) + selectedGap.Render(gap))
-			if trailing != "" {
-				b.WriteString(selected.Render(trailing))
-			}
-			b.WriteString("\n" + marker.Render("│") + selectedGap.Render("   ") + selected.Render(detail) + "\n")
-			continue
+			b.WriteString(marker.Render("│") + gapStyle.Render(" "))
+		} else {
+			b.WriteString("  ")
 		}
-		b.WriteString("  " + normal.Render(name) + gap)
+		b.WriteString(emphasize(labelBase).Render(label) + gapStyle.Render(gap))
 		if trailing != "" {
-			b.WriteString(muted.Render(trailing))
+			b.WriteString(emphasize(trailingBase).Render(trailing))
 		}
-		b.WriteString("\n    " + muted.Render(detail) + "\n")
+		b.WriteString("\n")
+		if isCursor {
+			b.WriteString(marker.Render("│") + gapStyle.Render("   "))
+		} else {
+			b.WriteString("    ")
+		}
+		b.WriteString(emphasize(subjectBase).Render(subject))
+		b.WriteString(emphasize(summaryBase).Render(summary))
+		if isCursor {
+			// Pad to the first line's width so the selection background
+			// covers the whole row.
+			pad := width - 6 - lipgloss.Width(subject) - lipgloss.Width(summary)
+			if pad > 0 {
+				b.WriteString(gapStyle.Render(strings.Repeat(" ", pad)))
+			}
+		}
+		b.WriteString("\n")
 	}
 	return b.String()
 }

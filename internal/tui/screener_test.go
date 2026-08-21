@@ -112,7 +112,7 @@ func TestScreenerLoadsPendingSenders(t *testing.T) {
 		t.Fatalf("pending = count:%d rows:%d, want 2 and 2", view.pendingCount, len(view.pending.rows))
 	}
 	first := view.pending.rows[0]
-	if first.id != 91 || first.name != "Jane Doe" || first.detail != "Quarterly planning – Can we meet Thursday?" {
+	if first.id != 91 || first.name != "Jane Doe" || first.subject != "Quarterly planning" || first.summary != "Can we meet Thursday?" {
 		t.Errorf("first sender = %+v", first)
 	}
 	if view.loading {
@@ -127,13 +127,25 @@ func TestScreenerViewCarriesHeyWording(t *testing.T) {
 	for _, want := range []string{
 		"The people below are trying to email you for the first time.",
 		"You get to decide if you want to hear from them.",
-		"Want to get emails from them?",
 		"Jane Doe",
 		"Quarterly planning",
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Errorf("screener view is missing %q:\n%s", want, rendered)
 		}
+	}
+
+	// The screening question lives in the help bar, with Yes and No as
+	// underlined hotkeys.
+	bar := newHelpBar(newStyles())
+	bar.setWidth(120)
+	bar.setBindings(view.HelpBindings())
+	barView := bar.view()
+	if !strings.Contains(plainText(barView), "Want to get emails from them? Yes No") {
+		t.Errorf("help bar is missing the screening question: %q", barView)
+	}
+	if !strings.Contains(barView, "\x1b[1;4;34;4mY\x1b[m") || !strings.Contains(barView, "\x1b[1;4;34;4mN\x1b[m") {
+		t.Errorf("Y and N should be underlined hotkeys: %q", barView)
 	}
 }
 
@@ -452,10 +464,10 @@ func TestScreenerKeepsDrawingAfterScreeningOffTheBottom(t *testing.T) {
 	rows := make([]screenerRow, 0, 20)
 	for index := range 20 {
 		rows = append(rows, screenerRow{
-			id:     int64(300 + index),
-			name:   fmt.Sprintf("Sender %02d", index),
-			email:  fmt.Sprintf("sender%02d@example.com", index),
-			detail: "Wants to hear back",
+			id:      int64(300 + index),
+			name:    fmt.Sprintf("Sender %02d", index),
+			email:   fmt.Sprintf("sender%02d@example.com", index),
+			subject: "Wants to hear back",
 		})
 	}
 	view.pending.setRows(rows, "")
@@ -590,7 +602,7 @@ func TestModelRoutesScreenerKeysToTheScreener(t *testing.T) {
 	m.screenerView.Update(screenerPendingLoadedMsg{
 		requestID: m.screenerView.requestID,
 		count:     1,
-		rows:      []screenerRow{{id: 91, name: "Jane Doe", detail: "Quarterly planning"}},
+		rows:      []screenerRow{{id: 91, name: "Jane Doe", subject: "Quarterly planning"}},
 	})
 	m.loading = false
 
@@ -608,3 +620,20 @@ func TestModelRoutesScreenerKeysToTheScreener(t *testing.T) {
 }
 
 var _ tea.Model = model{}
+
+func TestScreenerShiftFTogglesEmphaticNo(t *testing.T) {
+	view, _ := loadedScreener(t)
+
+	view.HandleContentKey(keyPress("F"))
+	if !strings.Contains(plainText(view.screenQuestion()), "Fuck no!") {
+		t.Errorf("Shift+F should swap the No label: %q", view.screenQuestion())
+	}
+	if !strings.Contains(view.screenQuestion(), "\x1b[1;4;34;4mn\x1b[m") {
+		t.Errorf("the n hotkey should stay underlined in the swapped label: %q", view.screenQuestion())
+	}
+
+	view.HandleContentKey(keyPress("F"))
+	if strings.Contains(plainText(view.screenQuestion()), "Fuck no!") {
+		t.Errorf("Shift+F should toggle back to No: %q", view.screenQuestion())
+	}
+}

@@ -25,6 +25,7 @@ var (
 	colorMuted   color.Color = lipgloss.BrightBlack // decorative filler only — see styleMuted
 	colorBright  color.Color = lipgloss.BrightWhite // emphasized text
 	colorAlert               = lipgloss.Red         // attention: Omarchy themes signal alerts with red
+	colorLink                = lipgloss.BrightCyan  // hyperlinks in email bodies (markdown style "14"); subjects match it
 	colorError   color.Color = lipgloss.Red         // errors
 
 	// Interface chrome (rules, tabs, hotkeys) follows eza's convention for
