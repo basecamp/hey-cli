@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 type threadEntry struct {
@@ -22,10 +23,15 @@ type threadEntry struct {
 	} `json:"creator"`
 }
 
+// firstMessage is the plain text the long thread starts with. compose sends it as
+// text, so in the thread it is prose: the asterisks and the list dashes come back
+// escaped, and the URL comes back as the literal it is.
+const firstMessage = "First: the **quarterly** numbers are at https://example.com/reports/q3 — see the bullets\n\n- Revenue up\n- Churn down"
+
 // longThread composes a message and replies to it until the thread is longer than one
 // geared page, so every format is exercised against a thread the entries index serves
 // in more than one page. It skips — or fails, under HEY_SMOKE_STRICT — when the server
-// will not let the CLI write.
+// will not let the CLI write, and trashes the thread when the test is done.
 func longThread(t *testing.T, replies int) (topicID string, subject string) {
 	t.Helper()
 	uid := uniqueID()
@@ -33,13 +39,19 @@ func longThread(t *testing.T, replies int) (topicID string, subject string) {
 	_, stderr, code := hey(t, "compose",
 		"--to", smokeEmail,
 		"--subject", subject,
-		"-m", "First: the **quarterly** numbers are at https://example.com/reports/q3 — see the bullets\n\n- Revenue up\n- Churn down",
+		"-m", firstMessage,
 		"--json",
 	)
 	if code != 0 {
 		skipf(t, "could not compose the thread's first message (exit %d): %s", code, stderr)
 	}
+	t.Cleanup(func() { cleanupThreadBySubject(t, subject) })
 
+	// Delivery to the Imbox is asynchronous; wait for the posting the way the other
+	// mutation tests do.
+	if _, err := waitForPostingIDBySubject(t, subject); err != nil {
+		skipf(t, "the composed thread %q did not appear in the Imbox: %v", subject, err)
+	}
 	resp := heyJSON(t, "box", "imbox", "--all")
 	type posting struct {
 		AppURL  string `json:"app_url"`
@@ -56,7 +68,7 @@ func longThread(t *testing.T, replies int) (topicID string, subject string) {
 		}
 	}
 	if topicID == "" {
-		skipf(t, "the composed thread %q did not appear in the Imbox", subject)
+		skipf(t, "the composed thread %q has no topic in the Imbox", subject)
 	}
 
 	for i := range replies {
@@ -69,7 +81,7 @@ func longThread(t *testing.T, replies int) (topicID string, subject string) {
 }
 
 // A thread longer than a page reads whole, oldest first, with every entry's body as
-// Markdown: the composed links and emphasis survive, and no HTML tag does.
+// Markdown: the composed text survives as prose, its URL intact, and no HTML tag does.
 func TestThreadsReadsALongThreadAsMarkdown(t *testing.T) {
 	const replies = 11
 	topicID, _ := longThread(t, replies)
@@ -100,28 +112,24 @@ func TestThreadsReadsALongThreadAsMarkdown(t *testing.T) {
 		}
 	}
 
+	// The text was sent as text, so it is prose in the Markdown: the asterisks are
+	// escaped rather than emphasis, the URL is the literal it was, and the em dash —
+	// a multibyte character — survives intact.
 	first := entries[0].Body
-	if !strings.Contains(first, "**quarterly**") || !strings.Contains(first, "https://example.com/reports/q3") {
-		t.Errorf("first body = %q, want the emphasis and the link as Markdown", first)
+	for _, want := range []string{`\*\*quarterly\*\*`, "https://example.com/reports/q3", "— see the bullets", "Revenue up", "Churn down"} {
+		if !strings.Contains(first, want) {
+			t.Errorf("first body = %q, want %q in it", first, want)
+		}
 	}
-	if !strings.Contains(first, "- Revenue up") {
-		t.Errorf("first body = %q, want the list as Markdown", first)
+	if strings.Contains(first, "**quarterly**") {
+		t.Errorf("first body = %q, want the asterisks escaped, not emphasis", first)
 	}
 	if last := entries[len(entries)-1].Body; !strings.Contains(last, fmt.Sprintf("Reply %d of %d", replies, replies)) {
 		t.Errorf("last body = %q, want the last reply", last)
 	}
-
-	// Every entry's summary is a prefix of its body, compared rune by rune: HEY's
-	// preview ends in an ellipsis and a byte-wise prefix check would slice a multibyte
-	// character in half.
 	for _, entry := range entries {
-		summary := []rune(strings.TrimSuffix(strings.TrimSpace(entry.Summary), "…"))
-		body := []rune(strings.Join(strings.Fields(entry.Body), " "))
-		if len(summary) == 0 || len(body) < len(summary) {
-			continue
-		}
-		if !strings.HasPrefix(string(body), strings.TrimSpace(string(summary[:min(len(summary), 20)]))) {
-			t.Logf("entry %d summary %q is not a prefix of its body %q (HEY previews may differ from rendered Markdown)", entry.ID, entry.Summary, entry.Body)
+		if !utf8.ValidString(entry.Summary) || !utf8.ValidString(entry.Body) {
+			t.Errorf("entry %d carries invalid UTF-8: summary %q body %q", entry.ID, entry.Summary, entry.Body)
 		}
 	}
 

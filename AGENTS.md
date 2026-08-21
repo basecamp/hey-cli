@@ -638,7 +638,7 @@ The dev server must be running at `http://app.hey.localhost:3003` (override with
 1. Create or edit a `*_test.go` file in `tests/smoke/` (package `smoke_test`).
 2. Use `heyJSON(t, "command", "args...")` for commands that should succeed and return JSON.
 3. Use `heyFail(t, "command", "args...")` for commands that should fail.
-4. For write operations that may fail server-side, use `hey(t, ...)` directly and skip on non-zero exit: `if code != 0 { t.Skipf("... (exit %d): %s", code, stderr) }`.
+4. For write operations that may fail server-side, use `hey(t, ...)` directly and skip on non-zero exit through the strict-aware helper: `if code != 0 { skipf(t, "... (exit %d): %s", code, stderr) }`. Never call `t.Skip` directly — `skipf` is what turns a skip into a failure under `HEY_SMOKE_STRICT=1`.
 5. Use `dataAs[T](t, resp)` to unmarshal response data into typed structs.
 6. For browser cross-verification, use `browserPageText(t, url)` to get page content.
 

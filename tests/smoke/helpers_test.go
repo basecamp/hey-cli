@@ -194,7 +194,7 @@ func skipf(t *testing.T, format string, args ...any) {
 	if os.Getenv("HEY_SMOKE_STRICT") != "" {
 		t.Fatalf("strict: "+format, args...)
 	}
-	skipf(t, format, args...)
+	t.Skipf(format, args...)
 }
 
 func envOr(key, fallback string) string {
