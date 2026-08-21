@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"time"
 
 	"charm.land/bubbles/v2/viewport"
@@ -11,8 +12,15 @@ import (
 
 // --- Journal messages ---
 
+type journalRequestKind int
+
+const (
+	journalRequestNone journalRequestKind = iota
+	journalRequestEntry
+)
+
 type journalDetailMsg struct {
-	title  string
+	requestResult
 	body   string
 	images [][]byte
 }
@@ -28,7 +36,7 @@ type journalView struct {
 	topicViewport viewport.Model
 	topicContent  string
 	inThread      bool
-	loading       bool
+	requests      requestLane[journalRequestKind]
 }
 
 func newJournalView(vc *viewContext) *journalView {
@@ -42,18 +50,15 @@ func newJournalView(vc *viewContext) *journalView {
 func (v *journalView) Init() tea.Cmd {
 	v.dates = generateJournalDates(30)
 	v.dateIndex = len(v.dates) - 1
-	v.loading = true
-	return v.fetchJournalEntry(v.dates[v.dateIndex])
+	return v.requestJournalEntry()
 }
 
 func (v *journalView) Update(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case journalDetailMsg:
-		// Guard against stale async responses from a previously selected date.
-		if v.dateIndex >= 0 && v.dateIndex < len(v.dates) && msg.title != v.dates[v.dateIndex] {
-			return nil, true
+		if cmd, ok := v.requests.settle(msg.requestResult); !ok {
+			return cmd, true
 		}
-		v.loading = false
 		v.inThread = true
 		v.topicContent = markdown.Render(msg.body, max(v.vc.width-4, 40))
 		v.topicViewport.SetContent(v.topicContent)
@@ -99,8 +104,7 @@ func (v *journalView) SubnavItems() ([]navItem, int, string, bool) {
 func (v *journalView) SubnavLeft() tea.Cmd {
 	if v.dateIndex > 0 {
 		v.dateIndex--
-		v.loading = true
-		return v.fetchJournalEntry(v.dates[v.dateIndex])
+		return v.requestJournalEntry()
 	}
 	return nil
 }
@@ -108,8 +112,7 @@ func (v *journalView) SubnavLeft() tea.Cmd {
 func (v *journalView) SubnavRight() tea.Cmd {
 	if v.dateIndex < len(v.dates)-1 {
 		v.dateIndex++
-		v.loading = true
-		return v.fetchJournalEntry(v.dates[v.dateIndex])
+		return v.requestJournalEntry()
 	}
 	return nil
 }
@@ -123,7 +126,7 @@ func (v *journalView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 
 func (v *journalView) InThread() bool { return v.inThread }
 func (v *journalView) ExitThread()    {} // no-op: journal always shows content
-func (v *journalView) Loading() bool  { return v.loading }
+func (v *journalView) Loading() bool  { return v.requests.loading }
 
 // Restyle is a no-op: the journal caches plain text and Kitty placeholders, neither
 // of which carries palette colors. The date list renders live.
@@ -136,26 +139,32 @@ func (v *journalView) Resize(width, height int) {
 
 // --- Fetch command ---
 
-func (v *journalView) fetchJournalEntry(date string) tea.Cmd {
-	return func() tea.Msg {
-		content, err := v.vc.sdk.Journal().GetContent(v.vc.ctx, date)
-		if err != nil || content == "" {
-			return journalDetailMsg{title: date, body: "(empty)"}
-		}
+func (v *journalView) requestJournalEntry() tea.Cmd {
+	requestID, ctx := v.requests.begin(v.vc.ctx, journalRequestEntry)
+	return v.fetchJournalEntry(ctx, requestID, v.dates[v.dateIndex])
+}
 
-		body := htmlToMarkdown(content)
+// A day HEY has nothing for answers 204, and a day it cannot answer for reads the same
+// way rather than as an error: the journal is a page of prose, and "(empty)" is what an
+// empty one says.
+func (v *journalView) fetchJournalEntry(ctx context.Context, requestID uint64, date string) tea.Cmd {
+	return func() tea.Msg {
+		content, err := v.vc.sdk.Journal().GetContent(ctx, date)
+		if err != nil || content == "" {
+			return journalDetailMsg{requestResult: newRequestResult(requestID, nil), body: "(empty)"}
+		}
 
 		var images [][]byte
 		if v.vc.imageRenderer.protocol() == imageProtocolKitty && v.vc.imageFetcher != nil {
 			for _, imageURL := range extractImageURLs(content) {
-				data, fetchErr := v.vc.imageFetcher.Fetch(v.vc.ctx, imageURL)
+				data, fetchErr := v.vc.imageFetcher.Fetch(ctx, imageURL)
 				if fetchErr == nil && len(data) > 0 {
 					images = append(images, data)
 				}
 			}
 		}
 
-		return journalDetailMsg{title: date, body: body, images: images}
+		return journalDetailMsg{requestResult: newRequestResult(requestID, nil), body: htmlToMarkdown(content), images: images}
 	}
 }
 

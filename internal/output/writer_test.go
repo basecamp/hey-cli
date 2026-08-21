@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
 func TestWriterOK_JSON(t *testing.T) {
@@ -205,8 +207,8 @@ func TestWriterOK_JQReportsExpressionErrors(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "invalid --jq expression") {
 			t.Fatalf("expected validation error, got %v", err)
 		}
-		if AsError(err).Code != "usage" {
-			t.Errorf("expected usage code, got %q", AsError(err).Code)
+		if apierr.AsError(err).Code != "usage" {
+			t.Errorf("expected usage code, got %q", apierr.AsError(err).Code)
 		}
 	})
 
@@ -216,8 +218,8 @@ func TestWriterOK_JQReportsExpressionErrors(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "jq filter error") {
 			t.Fatalf("expected runtime error, got %v", err)
 		}
-		if AsError(err).Code != "usage" {
-			t.Errorf("expected usage code, got %q", AsError(err).Code)
+		if apierr.AsError(err).Code != "usage" {
+			t.Errorf("expected usage code, got %q", apierr.AsError(err).Code)
 		}
 	})
 }
@@ -226,7 +228,7 @@ func TestWriterErr_JQKeepsErrorEnvelope(t *testing.T) {
 	var buf bytes.Buffer
 	w := New(Options{Format: FormatJSON, Stderr: &buf, JQFilter: ".data.id"})
 
-	w.Err(ErrNotFound("topic", "123"))
+	w.Err(apierr.ErrNotFound("topic", "123"))
 
 	var resp ErrorResponse
 	if err := json.Unmarshal(buf.Bytes(), &resp); err != nil {
@@ -392,7 +394,7 @@ func TestWriterErr_JSON(t *testing.T) {
 	var buf bytes.Buffer
 	w := New(Options{Format: FormatJSON, Stderr: &buf})
 
-	w.Err(ErrNotFound("topic", "123"))
+	w.Err(apierr.ErrNotFound("topic", "123"))
 
 	var resp ErrorResponse
 	if err := json.Unmarshal(buf.Bytes(), &resp); err != nil {
@@ -410,36 +412,13 @@ func TestWriterErr_Styled(t *testing.T) {
 	var buf bytes.Buffer
 	w := New(Options{Format: FormatStyled, Stderr: &buf})
 
-	w.Err(ErrAuth("please log in"))
+	w.Err(apierr.ErrAuth("please log in"))
 
 	if !strings.Contains(buf.String(), "Error: please log in") {
 		t.Errorf("expected styled error, got %q", buf.String())
 	}
 	if !strings.Contains(buf.String(), "Run: hey auth login") {
 		t.Errorf("expected hint, got %q", buf.String())
-	}
-}
-
-func TestExitCodeFor(t *testing.T) {
-	tests := []struct {
-		err  error
-		want int
-	}{
-		{ErrUsage("bad"), ExitUsage},
-		{ErrNotFound("x", "y"), ExitNotFound},
-		{ErrAuth("no"), ExitAuth},
-		{ErrForbidden("no"), ExitForbidden},
-		{ErrRateLimit(0), ExitRateLimit},
-		{ErrNetwork(nil), ExitNetwork},
-		{ErrAPI(500, "oops"), ExitAPI},
-		{ErrAmbiguous("x", nil), ExitAmbiguous},
-	}
-
-	for _, tt := range tests {
-		got := ExitCodeFor(tt.err)
-		if got != tt.want {
-			t.Errorf("ExitCodeFor(%v) = %d, want %d", tt.err, got, tt.want)
-		}
 	}
 }
 

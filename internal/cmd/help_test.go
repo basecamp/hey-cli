@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 func TestCuratedCommandHelpUsesUserFacingLanguage(t *testing.T) {
@@ -169,4 +171,59 @@ LEARN MORE
 	if output.String() != expected {
 		t.Fatalf("unexpected root help:\n%s", output.String())
 	}
+}
+
+func TestHelpListsEveryGlobalFlag(t *testing.T) {
+	originalColorDisabled := colorDisabled
+	colorDisabled = true
+	t.Cleanup(func() { colorDisabled = originalColorDisabled })
+
+	root := newRootCmd()
+
+	var global []string
+	root.PersistentFlags().VisitAll(func(f *pflag.Flag) {
+		if !f.Hidden {
+			global = append(global, f.Name)
+		}
+	})
+	if len(global) == 0 {
+		t.Fatal("the root command registers no global flags")
+	}
+
+	var rootHelp strings.Builder
+	renderRootHelp(&rootHelp, root)
+	for _, name := range global {
+		if !strings.Contains(rootHelp.String(), "--"+name+" ") {
+			t.Errorf("root help does not list the global --%s:\n%s", name, rootHelp.String())
+		}
+	}
+	if strings.Contains(rootHelp.String(), "--agent") {
+		t.Errorf("root help lists the hidden --agent:\n%s", rootHelp.String())
+	}
+
+	for _, command := range descendants(root) {
+		t.Run(command.CommandPath(), func(t *testing.T) {
+			var help bytes.Buffer
+			command.SetOut(&help)
+			renderCommandHelp(command)
+
+			for _, name := range global {
+				if !strings.Contains(help.String(), "--"+name+" ") {
+					t.Errorf("%s help does not list the global --%s:\n%s", command.CommandPath(), name, help.String())
+				}
+			}
+			if strings.Contains(help.String(), "--agent") {
+				t.Errorf("%s help lists the hidden --agent:\n%s", command.CommandPath(), help.String())
+			}
+		})
+	}
+}
+
+func descendants(command *cobra.Command) []*cobra.Command {
+	found := make([]*cobra.Command, 0, len(command.Commands()))
+	for _, child := range command.Commands() {
+		found = append(found, child)
+		found = append(found, descendants(child)...)
+	}
+	return found
 }

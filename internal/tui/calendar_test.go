@@ -9,19 +9,17 @@ import (
 	"time"
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
-
-	"github.com/basecamp/hey-cli/internal/models"
 )
 
-func testCalendars() []models.Calendar {
-	return []models.Calendar{
-		{ID: 10, Name: "Work", Kind: "owned"},
-		{ID: 11, Name: "Personal", Kind: "personal", Personal: true},
+func testCalendars() []Calendar {
+	return []Calendar{
+		{ID: 10, Name: "Work"},
+		{ID: 11, Name: "Personal", Personal: true},
 	}
 }
 
-func testRecordings() []models.Recording {
-	return []models.Recording{
+func testRecordings() []Recording {
+	return []Recording{
 		{ID: 200, Title: "Standup", StartsAt: "2025-03-01T09:00:00Z", EndsAt: "2025-03-01T09:30:00Z", Type: "CalendarEvent"},
 		{ID: 201, Title: "Lunch", StartsAt: "2025-03-01T12:00:00Z", EndsAt: "2025-03-01T13:00:00Z", AllDay: false, Type: "CalendarEvent"},
 		{ID: 202, Title: "Read a book", StartsAt: "2025-03-01T06:00:00Z", Type: "Habit"},
@@ -204,7 +202,7 @@ func TestCalendarViewIgnoresStaleRecordings(t *testing.T) {
 
 	v.viewMode = viewWeek
 	v.requestRecordings(10)
-	fresh := recordingsLoadedMsg{requestResult: currentRequest(v), recordings: []models.Recording{
+	fresh := recordingsLoadedMsg{requestResult: currentRequest(v), recordings: []Recording{
 		{ID: 300, Title: "Design review", StartsAt: "2025-03-04T15:00:00Z", EndsAt: "2025-03-04T16:00:00Z", Type: "CalendarEvent"},
 	}}
 
@@ -227,7 +225,7 @@ func TestCalendarViewIgnoresStaleCalendars(t *testing.T) {
 	stale := calendarsLoadedMsg{requestResult: currentRequest(v), calendars: testCalendars()}
 
 	v.requestCalendars()
-	v.Update(calendarsLoadedMsg{requestResult: currentRequest(v), calendars: []models.Calendar{{ID: 12, Name: "Rob Zolkos", Personal: true}}})
+	v.Update(calendarsLoadedMsg{requestResult: currentRequest(v), calendars: []Calendar{{ID: 12, Name: "Rob Zolkos", Personal: true}}})
 
 	v.Update(stale)
 	if len(v.calendars) != 1 || v.calendars[0].ID != 12 {
@@ -255,7 +253,7 @@ func TestCalendarViewFailedReadFinishesTheLane(t *testing.T) {
 func TestCalendarViewKeysDoNotSupersedeAHabitWrite(t *testing.T) {
 	v := calendarWithRecordings()
 	v.calIndex = 1
-	v.deleteHabit(models.Recording{ID: 202, Title: "Read a book"})
+	v.deleteHabit(Recording{ID: 202, Title: "Read a book"})
 
 	requestID := v.requests.id
 	if cmd := v.HandleContentKey(keyPress("v")); cmd != nil || v.viewMode != viewDay || v.requests.id != requestID {
@@ -323,9 +321,9 @@ func TestDaysBetweenIgnoresDaylightSavingShifts(t *testing.T) {
 
 func TestDayLabelsCoverTodosAndHabits(t *testing.T) {
 	labels := dayLabelsFromRecordings(
-		[]models.Recording{{ID: 200, StartsAt: "2025-03-01T09:00:00Z", Type: "CalendarEvent", Label: "Launch day"}},
-		[]models.Recording{{ID: 203, StartsAt: "2025-03-02T00:00:00Z", Type: "CalendarTodo", Label: "Moving day"}},
-		[]models.Recording{{ID: 202, StartsAt: "2025-03-03T06:00:00Z", Type: "Habit", Label: "Rest day"}},
+		[]Recording{{ID: 200, StartsAt: "2025-03-01T09:00:00Z", Type: "CalendarEvent", Label: "Launch day"}},
+		[]Recording{{ID: 203, StartsAt: "2025-03-02T00:00:00Z", Type: "CalendarTodo", Label: "Moving day"}},
+		[]Recording{{ID: 202, StartsAt: "2025-03-03T06:00:00Z", Type: "Habit", Label: "Rest day"}},
 	)
 	want := map[string]string{
 		"2025-03-01": "Launch day",

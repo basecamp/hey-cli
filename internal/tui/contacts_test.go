@@ -10,8 +10,6 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
-
-	"github.com/basecamp/hey-cli/internal/models"
 )
 
 type recordedTUIContacts struct {
@@ -154,11 +152,11 @@ func TestContactsViewOpensDetailWithAliasesAndNote(t *testing.T) {
 func TestContactsViewIgnoresStaleResponses(t *testing.T) {
 	view, _ := contactsWithTestServer(t)
 	view.requests.id = 2
-	view.Update(contactsLoadedMsg{requestResult: requestResult{requestID: 1}, page: 1, contacts: []models.Contact{{ID: 99}}})
+	view.Update(contactsLoadedMsg{requestResult: requestResult{requestID: 1}, page: 1, contacts: []Contact{{ID: 99}}})
 	if len(view.list.contacts) != 0 {
 		t.Error("stale contacts changed the list")
 	}
-	view.Update(contactDetailLoadedMsg{requestResult: requestResult{requestID: 1}, contact: models.Contact{ID: 99}})
+	view.Update(contactDetailLoadedMsg{requestResult: requestResult{requestID: 1}, contact: Contact{ID: 99}})
 	if view.inDetail {
 		t.Error("stale detail opened")
 	}
@@ -258,14 +256,14 @@ func TestContactsViewEditsContact(t *testing.T) {
 
 func TestContactsViewReplacesPromotedAliasContactID(t *testing.T) {
 	view, _ := contactsWithTestServer(t)
-	view.list.setContacts([]models.Contact{{ID: 7, Name: "Jane Doe"}})
+	view.list.setContacts([]Contact{{ID: 7, Name: "Jane Doe"}})
 	view.requests.id = 3
 	view.requests.loading = true
 
 	cmd, _ := view.Update(contactSavedMsg{
 		requestResult: requestResult{requestID: 3},
 		originalID:    7,
-		contact:       models.Contact{ID: 17, Name: "Jane Doe"},
+		contact:       Contact{ID: 17, Name: "Jane Doe"},
 	})
 	if cmd == nil {
 		t.Fatal("saved contact should load returned contact detail")
@@ -276,11 +274,11 @@ func TestContactsViewReplacesPromotedAliasContactID(t *testing.T) {
 }
 
 func TestContactFormBlankAliasesCreatesExplicitEmptyReplacement(t *testing.T) {
-	form := newContactForm(contactFormEdit, models.Contact{
+	form := newContactForm(contactFormEdit, Contact{
 		ID:           7,
 		Name:         "Jane Doe",
 		EmailAddress: "jane@example.com",
-		Aliases:      []models.Contact{{EmailAddress: "jane.doe@example.org"}},
+		Aliases:      []Contact{{EmailAddress: "jane.doe@example.org"}},
 	}, newStyles())
 	form.inputs[contactFieldAliases].SetValue("")
 	_, _, aliases := form.values()
@@ -392,7 +390,7 @@ func TestContactsViewCancelsPendingDetail(t *testing.T) {
 func TestContactsListNavigationAndRendering(t *testing.T) {
 	list := contactList{}
 	list.setSize(80, 10)
-	list.setContacts([]models.Contact{
+	list.setContacts([]Contact{
 		{ID: 1, Name: "Jane Doe", EmailAddress: "jane@example.com"},
 		{ID: 2, Name: "Sam Rivera", EmailAddress: "sam@example.org"},
 	})
@@ -415,7 +413,7 @@ func TestContactsListNavigationAndRendering(t *testing.T) {
 func TestContactsViewHelpBindings(t *testing.T) {
 	view, _ := contactsWithTestServer(t)
 	view.loaded = true
-	view.list.setContacts([]models.Contact{{ID: 7}})
+	view.list.setContacts([]Contact{{ID: 7}})
 	keys := map[string]bool{}
 	for _, binding := range view.HelpBindings() {
 		keys[binding.key] = true

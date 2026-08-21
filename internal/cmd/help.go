@@ -97,37 +97,15 @@ func renderRootHelp(w io.Writer, cmd *cobra.Command) {
 		}
 	}
 
-	// FLAGS — curated subset of global flags
+	// FLAGS — the global flags, as registered on the root command
 	b.WriteString("\n")
 	b.WriteString(bold.format("FLAGS") + "\n")
-	type flagEntry struct {
-		short string
-		long  string
-		desc  string
+	for _, f := range globalFlags(cmd) {
+		writeFlagLine(&b, f.Shorthand, "--"+f.Name, f.Usage)
 	}
-	flags := []flagEntry{
-		{"", "--account", "Select a linked mail account ID or all"},
-		{"", "--json", "Output JSON with metadata"},
-		{"", "--jq", "Filter JSON with a built-in jq expression"},
-		{"", "--markdown", "Output as Markdown"},
-		{"", "--quiet", "Output result data only"},
-		{"", "--ids-only", "Output only IDs, one per line"},
-		{"", "--count", "Output only the count of results"},
-		{"", "--styled", "Force styled output even when piped"},
-		{"", "--html", "Output raw HTML (for commands that return HTML content)"},
-		{"", "--stats", "Include request stats in response meta"},
-		{"", "--base-url", "Override server URL"},
-		{"-v", "--verbose", "Show request details"},
-		{"", "--help", "Show help"},
-		{"", "--version", "Show version"},
-	}
-	for _, f := range flags {
-		if f.short != "" {
-			fmt.Fprintf(&b, "  %s, %-12s %s\n", f.short, f.long, f.desc)
-		} else {
-			fmt.Fprintf(&b, "      %-12s %s\n", f.long, f.desc)
-		}
-	}
+	// Cobra owns --help and --version, so neither is a persistent flag to read.
+	writeFlagLine(&b, "", "--help", "Show help")
+	writeFlagLine(&b, "", "--version", "Show version")
 
 	// EXAMPLES
 	b.WriteString("\n")
@@ -253,21 +231,41 @@ func renderCommandHelp(cmd *cobra.Command) {
 	fmt.Fprint(w, b.String())
 }
 
-// salientRootFlags is the curated set of root-level global flags shown in
-// INHERITED FLAGS for subcommands.
-var salientRootFlags = map[string]bool{
-	"account":  true,
-	"json":     true,
-	"jq":       true,
-	"markdown": true,
-	"quiet":    true,
-	"ids-only": true,
-	"count":    true,
-	"styled":   true,
-	"html":     true,
-	"stats":    true,
-	"base-url": true,
-	"verbose":  true,
+// globalFlagReadingOrder is how the global flags read in root help: the
+// account first, then the output shaping, then verbosity. It orders the
+// flags rather than choosing them, so a flag registered without a place
+// here still gets listed, at the end.
+var globalFlagReadingOrder = []string{"account", "json", "jq", "markdown", "quiet", "ids-only", "count", "styled", "html", "stats", "base-url", "verbose"}
+
+// globalFlags returns the root command's persistent flags — every flag help
+// calls global, described by the registration in root.go — in reading order,
+// leaving out the hidden ones.
+func globalFlags(cmd *cobra.Command) []*pflag.Flag {
+	persistent := cmd.Root().PersistentFlags()
+
+	var ordered []*pflag.Flag
+	listed := map[string]bool{}
+	for _, name := range globalFlagReadingOrder {
+		if f := persistent.Lookup(name); f != nil && !f.Hidden {
+			ordered = append(ordered, f)
+			listed[name] = true
+		}
+	}
+	persistent.VisitAll(func(f *pflag.Flag) {
+		if !f.Hidden && !listed[f.Name] {
+			ordered = append(ordered, f)
+		}
+	})
+
+	return ordered
+}
+
+func writeFlagLine(b *strings.Builder, shorthand, name, desc string) {
+	if shorthand != "" {
+		fmt.Fprintf(b, "  -%s, %-12s %s\n", shorthand, name, desc)
+	} else {
+		fmt.Fprintf(b, "      %-12s %s\n", name, desc)
+	}
 }
 
 // parentScopedFlags returns inherited flags that originate from a non-root
@@ -287,19 +285,15 @@ func parentScopedFlags(cmd *cobra.Command) *pflag.FlagSet {
 }
 
 // filterInheritedFlags returns formatted flag usages for INHERITED FLAGS,
-// containing only the curated subset of root-level globals.
+// containing the global flags this command actually inherits. Parent-scoped
+// flags are left out — they are already promoted to FLAGS.
 func filterInheritedFlags(cmd *cobra.Command) string {
-	root := cmd.Root()
+	inherited := cmd.InheritedFlags()
 	filtered := pflag.NewFlagSet("inherited", pflag.ContinueOnError)
-	cmd.InheritedFlags().VisitAll(func(f *pflag.Flag) {
-		rootFlag := root.PersistentFlags().Lookup(f.Name)
-		if rootFlag == nil || rootFlag != f {
-			return // parent-scoped — already promoted to FLAGS
+	for _, f := range globalFlags(cmd) {
+		if inherited.Lookup(f.Name) == f {
+			filtered.AddFlag(f)
 		}
-		if !salientRootFlags[f.Name] {
-			return
-		}
-		filtered.AddFlag(f)
-	})
+	}
 	return strings.TrimRight(filtered.FlagUsages(), "\n")
 }

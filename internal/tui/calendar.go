@@ -9,9 +9,34 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
-
-	"github.com/basecamp/hey-cli/internal/models"
 )
+
+// --- Calendar view types ---
+
+// Calendar is one of the reader's calendars, as the subnav and the habit form need it.
+// Personal is the one HEY files a habit or a todo on when no calendar is named.
+type Calendar struct {
+	ID       int64
+	Name     string
+	Personal bool
+}
+
+// Recording is anything HEY keeps on a calendar — an event, a todo, a habit, a time
+// track — told apart by Type. Its times are strings because that is the shape the
+// calendar views read them in; giving them time.Time is the next thing to do here.
+type Recording struct {
+	ID          int64
+	Title       string
+	AllDay      bool
+	StartsAt    string
+	EndsAt      string
+	Type        string
+	CompletedAt string
+	Label       string
+	Icon        string
+	Color       string
+	Days        []int32
+}
 
 // --- Calendar messages ---
 
@@ -27,12 +52,12 @@ const (
 
 type calendarsLoadedMsg struct {
 	requestResult
-	calendars []models.Calendar
+	calendars []Calendar
 }
 
 type recordingsLoadedMsg struct {
 	requestResult
-	recordings []models.Recording
+	recordings []Recording
 }
 
 // identityLoadedMsg stays off the request lane: the first day of the week is read
@@ -62,7 +87,7 @@ type habitMutationMsg struct {
 type calendarView struct {
 	vc *viewContext
 
-	calendars []models.Calendar
+	calendars []Calendar
 	calIndex  int
 
 	viewMode     calendarViewMode
@@ -74,9 +99,9 @@ type calendarView struct {
 	now func() time.Time
 
 	// Recordings split by type
-	events []models.Recording
-	todos  []models.Recording
-	habits []models.Recording
+	events []Recording
+	todos  []Recording
+	habits []Recording
 
 	// Scrollable content viewport for the calendar views
 	contentVP viewport.Model
@@ -302,7 +327,7 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 			v.notice = "Habits can only be created from the personal calendar"
 			return nil
 		}
-		return v.startHabitForm(habitFormCreate, models.Recording{})
+		return v.startHabitForm(habitFormCreate, Recording{})
 	case "[":
 		v.moveHabitSelection(-1)
 		return nil
@@ -456,9 +481,9 @@ func (v *calendarView) viewingPersonalCalendar() bool {
 	return v.calIndex >= 0 && v.calIndex < len(v.calendars) && v.calendars[v.calIndex].Personal
 }
 
-func (v *calendarView) manageableHabits() []models.Recording {
+func (v *calendarView) manageableHabits() []Recording {
 	seen := make(map[int64]bool)
-	habits := make([]models.Recording, 0, len(v.habits))
+	habits := make([]Recording, 0, len(v.habits))
 	for _, habit := range v.habits {
 		if habit.ID <= 0 || seen[habit.ID] {
 			continue
@@ -469,7 +494,7 @@ func (v *calendarView) manageableHabits() []models.Recording {
 	return habits
 }
 
-func (v *calendarView) selectedHabit() *models.Recording {
+func (v *calendarView) selectedHabit() *Recording {
 	habits := v.manageableHabits()
 	if len(habits) == 0 {
 		return nil
@@ -502,7 +527,7 @@ func (v *calendarView) habitDeleteConfirmed() bool {
 	return habit != nil && v.confirmedHabitDeleteID == habit.ID
 }
 
-func (v *calendarView) startHabitForm(mode habitFormMode, recording models.Recording) tea.Cmd {
+func (v *calendarView) startHabitForm(mode habitFormMode, recording Recording) tea.Cmd {
 	v.confirmedHabitDeleteID = 0
 	v.habitForm = newHabitForm(mode, recording, v.vc.styles)
 	v.habitForm.resize(v.vc.width, v.vc.height)
@@ -527,7 +552,7 @@ func (v *calendarView) saveHabit() tea.Cmd {
 	}
 }
 
-func (v *calendarView) deleteHabit(recording models.Recording) tea.Cmd {
+func (v *calendarView) deleteHabit(recording Recording) tea.Cmd {
 	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestHabitMutation)
 	return func() tea.Msg {
 		err := v.vc.sdk.Habits().Delete(ctx, recording.ID)
@@ -537,20 +562,14 @@ func (v *calendarView) deleteHabit(recording models.Recording) tea.Cmd {
 
 // --- SDK type converters ---
 
-func sdkCalendarToModel(c generated.Calendar) models.Calendar {
-	return models.Calendar{
-		ID: c.Id, Name: c.Name, Kind: c.Kind,
-		Owned: c.Owned, Personal: c.Personal, External: c.External,
-	}
+func sdkCalendarToModel(c generated.Calendar) Calendar {
+	return Calendar{ID: c.Id, Name: c.Name, Personal: c.Personal}
 }
 
-func sdkRecordingToModel(r generated.Recording) models.Recording {
-	return models.Recording{
-		ID: r.Id, Title: r.Title, AllDay: r.AllDay, Recurring: r.Recurring,
+func sdkRecordingToModel(r generated.Recording) Recording {
+	return Recording{
+		ID: r.Id, Title: r.Title, AllDay: r.AllDay, Type: r.Type,
 		StartsAt: formatTimestamp(r.StartsAt), EndsAt: formatTimestamp(r.EndsAt),
-		StartsAtTimeZone: r.StartsAtTimeZone, EndsAtTimeZone: r.EndsAtTimeZone,
-		CreatedAt: formatTimestamp(r.CreatedAt), UpdatedAt: formatTimestamp(r.UpdatedAt),
-		Type: r.Type, RemindersLabel: r.RemindersLabel,
 		CompletedAt: formatTimestamp(r.CompletedAt), Label: r.Label,
 		Icon: r.Icon, Color: r.Color, Days: append([]int32(nil), r.Days...),
 	}
@@ -585,7 +604,7 @@ func (v *calendarView) requestCalendars() tea.Cmd {
 		if payload == nil {
 			return calendarsLoadedMsg{requestResult: newRequestResult(requestID, nil)}
 		}
-		calendars := make([]models.Calendar, 0, len(payload.Calendars))
+		calendars := make([]Calendar, 0, len(payload.Calendars))
 		for _, cw := range payload.Calendars {
 			calendars = append(calendars, sdkCalendarToModel(cw.Calendar))
 		}
@@ -608,7 +627,7 @@ func (v *calendarView) requestRecordings(calID int64) tea.Cmd {
 		if err != nil {
 			return recordingsLoadedMsg{requestResult: newRequestResult(requestID, err)}
 		}
-		var all []models.Recording
+		var all []Recording
 		if resp != nil {
 			for _, recs := range *resp {
 				for _, r := range recs {

@@ -120,11 +120,10 @@ because both were mis-stated here before:
 
 `internal/htmlutil` provides `ToMarkdown` (HTML→Markdown), `ToText` (HTML→plain text),
 `ExtractImageURLs` and `ExtractAttachments`, which are presentation helpers rather than
-scrapers and are staying. It no longer depends on `internal/models`, and neither does
-`internal/cmd` — the CLI's output shapes are local to the commands that print them.
-What is left of `internal/models` is the TUI's own: `Entry` for a thread's messages, and
-`Contact`, `Calendar` and `Recording` for the Contacts and Calendar sections. Mail's own
-shapes moved to `internal/mail`, and the rest should follow the section that reads them.
+scrapers and are staying. There is no `internal/models` any more: the CLI's output shapes
+are local to the commands that print them, mail's shapes are `internal/mail`'s `Source`,
+`Posting` and `Entry`, and `Contact`, `Calendar` and `Recording` are plain view types
+declared next to the Contacts and Calendar sections that read them.
 HEY uses the Trix editor with `<figure data-trix-attachment="{...}">` for
 attachments — image URLs in those attributes are relative paths requiring authentication
 via `sdk.Get`.
@@ -132,9 +131,10 @@ via `sdk.Get`.
 ### Email bodies are Markdown
 
 An email body reaches the CLI and the TUI as HEY's Trix HTML and is converted once, at the
-edge, by `htmlutil.ToMarkdown`. Everything downstream — `models.Entry.Body`, `--json`, the
-TUI viewport — carries Markdown, so links keep their URLs and headings, lists, quotes,
-tables and code survive. `Entry.BodyHTML` keeps the original HTML for `--html` and for
+edge, by `htmlutil.ToMarkdown` — for a thread's messages that edge is `mail.NewEntry`.
+Everything downstream — `mail.Entry.Body`, `--json`, the TUI viewport — carries Markdown, so
+links keep their URLs and headings, lists, quotes, tables and code survive.
+`Entry.BodyHTML` keeps the original HTML for `--html` and for
 `ExtractImageURLs`/`ExtractAttachments`, which need the attributes the Markdown drops.
 
 `internal/markdown` renders that Markdown for a terminal: `Render(md, width)` wraps
@@ -246,6 +246,10 @@ and `liveRequestID`, which are bare counters for exactly that reason) with a mes
 so growing a list never shows the spinner, never cancels the read the reader is waiting on,
 and never carries the cursor back to the top.
 
+All four sections wait on a `requestLane` — the journal's is one kind deep, since its whole
+question is which day is selected — so "is this answer still the one the reader asked for"
+has one answer in the TUI rather than one per section.
+
 ### A mail source reads its own page
 
 `internal/mail` is where a box, a label and a collection stop being three endpoints and
@@ -277,7 +281,14 @@ the rows a reader acts on, and everything the TUI never reads — `bundled`, `en
 `kind`, `updated_at` — is left in the SDK type where the CLI can still reach it. `TopicID`
 is resolved once, out of `app_url`: HEY's `_posting.jbuilder` serves neither `topic` nor
 `topic_id`, so the URL is the only place a thread is named, and a bundle's URL names a
-contact instead and answers zero.
+contact instead and answers zero. `mail.TopicIDIn` is that parse, and it is exported
+because `internal/cmd` needs the same answer — `resolvePostingTopicID` in `sdk.go` is a
+call to it, not a second copy.
+
+**`mail.Entry` is one message in a thread**, described by `mail.NewEntry` against the
+message HEY served for it, because a topic's entry list and a message read on its own
+disagree about what they carry: an entry under a bundle has no creator and no timestamp,
+and the subject is the message's.
 
 Timestamps stay `time.Time` all the way through. Formatting one for display and parsing it
 back is how `hey journal list` printed the wrong day; a domain type is not the place to

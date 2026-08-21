@@ -20,6 +20,16 @@ func formatDisplayDate(ts time.Time) string {
 	return ts.Local().Format("Jan 2, 2006")
 }
 
+// formatDisplayDateTime is for a thread's entries, where the day is not enough: a
+// back-and-forth answered within the hour is several entries on one date, and which
+// came when is the thing the reader is reading down the thread to find out.
+func formatDisplayDateTime(ts time.Time) string {
+	if ts.IsZero() {
+		return ""
+	}
+	return ts.Local().Format("Jan 2, 2006 15:04")
+}
+
 // listPaging is where a list that grows as the reader scrolls keeps its place in what the
 // server holds: the cursor for the page after the deepest one read, empty once there is
 // nothing left to read; what the top page held when it was last read, which is exactly how

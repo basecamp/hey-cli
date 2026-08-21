@@ -9,7 +9,6 @@ import (
 	"charm.land/lipgloss/v2"
 
 	habitvalues "github.com/basecamp/hey-cli/internal/habit"
-	"github.com/basecamp/hey-cli/internal/models"
 )
 
 type habitFormMode int
@@ -38,7 +37,7 @@ type habitForm struct {
 	styles  styles
 }
 
-func newHabitForm(mode habitFormMode, recording models.Recording, styles styles) *habitForm {
+func newHabitForm(mode habitFormMode, recording Recording, styles styles) *habitForm {
 	form := &habitForm{mode: mode, habitID: recording.ID, styles: styles}
 	placeholders := []string{"Morning strength training", habitvalues.DefaultIcon, habitvalues.DefaultColor, "monday,wednesday,friday"}
 	for _, placeholder := range placeholders {

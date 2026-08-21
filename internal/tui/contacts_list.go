@@ -5,19 +5,17 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-
-	"github.com/basecamp/hey-cli/internal/models"
 )
 
 type contactList struct {
-	contacts  []models.Contact
+	contacts  []Contact
 	cursor    int
 	scrollOff int
 	width     int
 	height    int
 }
 
-func (l *contactList) setContacts(contacts []models.Contact) {
+func (l *contactList) setContacts(contacts []Contact) {
 	l.contacts = contacts
 	l.cursor = 0
 	l.scrollOff = 0
@@ -52,7 +50,7 @@ func (l *contactList) ensureVisible() {
 	}
 }
 
-func (l *contactList) selected() *models.Contact {
+func (l *contactList) selected() *Contact {
 	if l.cursor < 0 || l.cursor >= len(l.contacts) {
 		return nil
 	}

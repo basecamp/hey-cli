@@ -328,7 +328,7 @@ func requireAuth() error {
 			return loginInteractively(os.Stderr)
 		}
 	}
-	return output.ErrAuth("Not logged in")
+	return apierr.ErrAuth("Not logged in")
 }
 
 // migrateOldCredentials migrates credentials from the old config.json format

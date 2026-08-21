@@ -6,21 +6,6 @@ import (
 	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
-// What is left of a re-export shim, kept only because writer.go and its test
-// build these from inside the package. Everything outside names apierr
-// directly, and these go when writer.go next does.
-var (
-	AsError      = apierr.AsError
-	ErrUsage     = apierr.ErrUsage
-	ErrNotFound  = apierr.ErrNotFound
-	ErrAuth      = apierr.ErrAuth
-	ErrForbidden = apierr.ErrForbidden
-	ErrRateLimit = apierr.ErrRateLimit
-	ErrNetwork   = apierr.ErrNetwork
-	ErrAPI       = apierr.ErrAPI
-	ErrAmbiguous = apierr.ErrAmbiguous
-)
-
 // ErrJQValidation reports an invalid built-in jq expression.
 func ErrJQValidation(cause error) *apierr.Error {
 	return &apierr.Error{

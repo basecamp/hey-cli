@@ -6,7 +6,6 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/hey-cli/internal/mail"
-	"github.com/basecamp/hey-cli/internal/models"
 	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
@@ -141,7 +140,7 @@ func boxForShortcut(key string, boxes []mail.Source) int {
 }
 
 // calendarNavItems builds nav items for the calendar row.
-func calendarNavItems(calendars []models.Calendar) []navItem {
+func calendarNavItems(calendars []Calendar) []navItem {
 	items := make([]navItem, len(calendars))
 	for i, c := range calendars {
 		items[i] = navItem{label: c.Name}

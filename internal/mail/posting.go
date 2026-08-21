@@ -67,7 +67,7 @@ func Postings(postings []generated.Posting) []Posting {
 func NewPosting(posting generated.Posting) Posting {
 	return Posting{
 		ID:                    posting.Id,
-		TopicID:               topicIDIn(posting.AppUrl),
+		TopicID:               TopicIDIn(posting.AppUrl),
 		CreatedAt:             posting.CreatedAt,
 		Name:                  posting.Name,
 		Summary:               posting.Summary,
@@ -120,11 +120,11 @@ func collectionsOf(collections []generated.Collection) []Collection {
 	return described
 }
 
-// topicIDIn reads the thread out of a posting's app_url, which is the only place HEY's
+// TopicIDIn reads the thread out of a posting's app_url, which is the only place HEY's
 // posting JSON says which topic a posting is: `_posting.jbuilder` serves no topic and no
 // topic_id, and the web app follows the URL. A posting that addresses something else has
 // no topic — a bundle's app_url is its sender's contact page — and answers zero.
-func topicIDIn(appURL string) int64 {
+func TopicIDIn(appURL string) int64 {
 	marker := strings.LastIndex(appURL, "/topics/")
 	if marker < 0 {
 		return 0

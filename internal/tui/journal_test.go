@@ -16,9 +16,14 @@ import (
 func journalWithEntry() *journalView {
 	v := newJournalView(testVC())
 	v.Init()
-	today := v.dates[v.dateIndex]
-	v.Update(journalDetailMsg{title: today, body: "Today was great"})
+	v.Update(journalDetailMsg{requestResult: currentJournalRequest(v), body: "Today was great"})
 	return v
+}
+
+// currentJournalRequest tags a response as the answer to the read the journal is
+// waiting on, the way the fetch command that started it would.
+func currentJournalRequest(v *journalView) requestResult {
+	return requestResult{requestID: v.requests.id}
 }
 
 // --- Init ---
@@ -29,7 +34,7 @@ func TestJournalViewInitFetchesEntry(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("Init should return a fetch command")
 	}
-	if !v.loading {
+	if !v.requests.loading {
 		t.Error("Init should set loading = true")
 	}
 }
@@ -79,7 +84,7 @@ func TestJournalTextFallbackDoesNotFetchImages(t *testing.T) {
 	vc.imageFetcher = newTrustedImageFetcher(client)
 	v := newJournalView(vc)
 
-	loaded := v.fetchJournalEntry("2026-08-19")().(journalDetailMsg)
+	loaded := v.fetchJournalEntry(vc.ctx, 1, "2026-08-19")().(journalDetailMsg)
 
 	if got := imageRequests.Load(); got != 0 {
 		t.Fatalf("text journal fetched an image %d time(s)", got)
@@ -92,14 +97,12 @@ func TestJournalTextFallbackDoesNotFetchImages(t *testing.T) {
 func TestJournalViewHandlesDetailLoaded(t *testing.T) {
 	v := newJournalView(testVC())
 	v.Init() // sets dateIndex to today
-	v.loading = true
 
-	today := v.dates[v.dateIndex]
-	_, consumed := v.Update(journalDetailMsg{title: today, body: "Entry body"})
+	_, consumed := v.Update(journalDetailMsg{requestResult: currentJournalRequest(v), body: "Entry body"})
 	if !consumed {
 		t.Error("journalDetailMsg should be consumed")
 	}
-	if v.loading {
+	if v.requests.loading {
 		t.Error("loading should be false after detail loaded")
 	}
 	if !v.inThread {
@@ -110,15 +113,13 @@ func TestJournalViewHandlesDetailLoaded(t *testing.T) {
 func TestJournalViewIgnoresStaleResponse(t *testing.T) {
 	v := newJournalView(testVC())
 	v.Init()
-	v.loading = true
 
-	// Simulate a response for a different date than currently selected
-	staleDate := "1999-01-01"
-	_, consumed := v.Update(journalDetailMsg{title: staleDate, body: "old content"})
+	// A response to the read the reader has since moved off
+	_, consumed := v.Update(journalDetailMsg{requestResult: requestResult{requestID: v.requests.id - 1}, body: "old content"})
 	if !consumed {
 		t.Error("stale journalDetailMsg should still be consumed")
 	}
-	if !v.loading {
+	if !v.requests.loading {
 		t.Error("loading should remain true after stale response")
 	}
 	if v.topicContent == "old content" {
@@ -176,18 +177,16 @@ func TestJournalViewSubnavLeftRight(t *testing.T) {
 	if v.dateIndex != lastIdx-1 {
 		t.Errorf("after SubnavLeft: dateIndex = %d, want %d", v.dateIndex, lastIdx-1)
 	}
-	if !v.loading {
+	if !v.requests.loading {
 		t.Error("SubnavLeft should set loading")
 	}
 
-	v.loading = false
 	v.SubnavRight()
 	if v.dateIndex != lastIdx {
 		t.Errorf("after SubnavRight: dateIndex = %d, want %d", v.dateIndex, lastIdx)
 	}
 
 	// Can't go right past the end
-	v.loading = false
 	v.SubnavRight()
 	if v.dateIndex != lastIdx {
 		t.Errorf("SubnavRight at end: dateIndex = %d, want %d", v.dateIndex, lastIdx)

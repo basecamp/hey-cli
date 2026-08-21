@@ -14,7 +14,6 @@ import (
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/mail"
-	"github.com/basecamp/hey-cli/internal/models"
 )
 
 // --- Test helpers ---
@@ -126,7 +125,7 @@ func TestModelResizesContentWhenThreadHelpChangesHeight(t *testing.T) {
 				boxID:       1,
 				topicID:     100,
 				title:       "Quarterly planning",
-				entries:     []models.Entry{{ID: 501, Creator: models.Contact{Name: "Alice"}}},
+				entries:     []mail.Entry{{ID: 501, Creator: mail.Contact{Name: "Alice"}}},
 				attachments: []messageAttachment{{ID: "501:1", MessageID: 501, Filename: "agenda.pdf"}},
 			})
 			m = updated.(model)

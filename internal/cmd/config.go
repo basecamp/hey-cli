@@ -53,7 +53,7 @@ func newConfigSetCommand() *cobra.Command {
 			case "onboarded":
 				onboarded, err := strconv.ParseBool(value)
 				if err != nil {
-					return output.ErrUsage(fmt.Sprintf("onboarded must be true or false (got %q)", value))
+					return apierr.ErrUsage(fmt.Sprintf("onboarded must be true or false (got %q)", value))
 				}
 				if err := cfg.SaveOnboarded(onboarded); err != nil {
 					return err

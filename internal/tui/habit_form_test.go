@@ -14,12 +14,11 @@ import (
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	habitvalues "github.com/basecamp/hey-cli/internal/habit"
-	"github.com/basecamp/hey-cli/internal/models"
 )
 
 func TestHabitFormValidationAndKeyRouting(t *testing.T) {
 	view := newCalendarView(testVC())
-	view.calendars = []models.Calendar{{ID: 10, Name: "Rob Zolkos", Personal: true}}
+	view.calendars = []Calendar{{ID: 10, Name: "Rob Zolkos", Personal: true}}
 	view.Resize(80, 30)
 	if cmd := view.HandleContentKey(keyPress("a")); cmd == nil || view.habitForm == nil || !view.CapturingInput() {
 		t.Fatal("a should open and focus the habit form")
@@ -57,7 +56,7 @@ func TestHabitFormValidationAndKeyRouting(t *testing.T) {
 }
 
 func TestHabitFormGuidanceListsAcceptedIconsAndColors(t *testing.T) {
-	form := newHabitForm(habitFormCreate, models.Recording{}, testVC().styles)
+	form := newHabitForm(habitFormCreate, Recording{}, testVC().styles)
 	form.resize(50, 30)
 	rendered := form.view()
 	for _, value := range strings.Split(habitvalues.IconValues, ", ") {
@@ -74,7 +73,7 @@ func TestHabitFormGuidanceListsAcceptedIconsAndColors(t *testing.T) {
 
 func TestCalendarHabitCreateRequiresPersonalCalendarMetadata(t *testing.T) {
 	view := newCalendarView(testVC())
-	view.calendars = []models.Calendar{{ID: 10, Name: "Personal", Personal: false}}
+	view.calendars = []Calendar{{ID: 10, Name: "Personal", Personal: false}}
 
 	for _, binding := range view.HelpBindings() {
 		if binding.key == "a" {
@@ -91,7 +90,7 @@ func TestCalendarHabitCreateRequiresPersonalCalendarMetadata(t *testing.T) {
 
 func TestCalendarHabitSelectionAndEditPrefill(t *testing.T) {
 	view := newCalendarView(testVC())
-	view.habits = []models.Recording{
+	view.habits = []Recording{
 		{ID: 7, Title: "Read before bed", Icon: "read", Color: "blue", Days: []int32{1, 3, 5}},
 		{ID: 8, Title: "Evening walk", Icon: "walk", Color: "green", Days: []int32{0, 6}},
 		{ID: 7, Title: "Read before bed"},
@@ -161,8 +160,8 @@ func calendarHabitsWithServer(t *testing.T) (*calendarView, *recordedHabitReques
 	vc := testVC()
 	vc.sdk = client
 	view := newCalendarView(vc)
-	view.calendars = []models.Calendar{{ID: 10, Name: "Rob Zolkos", Personal: true}}
-	view.habits = []models.Recording{{ID: 7, Title: "Read before bed", Icon: "read", Color: "blue", Days: []int32{1, 3, 5}}}
+	view.calendars = []Calendar{{ID: 10, Name: "Rob Zolkos", Personal: true}}
+	view.habits = []Recording{{ID: 7, Title: "Read before bed", Icon: "read", Color: "blue", Days: []int32{1, 3, 5}}}
 	view.Resize(vc.width, vc.height)
 	return view, recorded
 }
@@ -180,8 +179,8 @@ func calendarHabitsWithFailingServer(t *testing.T, status int) *calendarView {
 	vc := testVC()
 	vc.sdk = client
 	view := newCalendarView(vc)
-	view.calendars = []models.Calendar{{ID: 10, Name: "Rob Zolkos", Personal: true}}
-	view.habits = []models.Recording{{ID: 7, Title: "Read before bed", Icon: "read", Color: "blue", Days: []int32{1, 3, 5}}}
+	view.calendars = []Calendar{{ID: 10, Name: "Rob Zolkos", Personal: true}}
+	view.habits = []Recording{{ID: 7, Title: "Read before bed", Icon: "read", Color: "blue", Days: []int32{1, 3, 5}}}
 	view.Resize(vc.width, vc.height)
 	return view
 }
@@ -319,7 +318,7 @@ func TestCalendarHabitDeleteConfirmationIsBoundToSelectedHabit(t *testing.T) {
 		t.Fatalf("confirmed habit ID = %d, want 7", view.confirmedHabitDeleteID)
 	}
 
-	view.Update(recordingsLoadedMsg{recordings: []models.Recording{{
+	view.Update(recordingsLoadedMsg{recordings: []Recording{{
 		ID: 8, Title: "Evening walk", Type: "CalendarHabit", Icon: "walk", Color: "gold", Days: []int32{1, 3, 5},
 	}}})
 	if view.confirmedHabitDeleteID != 0 {

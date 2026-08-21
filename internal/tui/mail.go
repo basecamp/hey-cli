@@ -19,7 +19,6 @@ import (
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/mail"
 	"github.com/basecamp/hey-cli/internal/markdown"
-	"github.com/basecamp/hey-cli/internal/models"
 	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
@@ -92,7 +91,7 @@ type topicLoadedMsg struct {
 	topicID     int64
 	postingID   int64
 	title       string
-	entries     []models.Entry
+	entries     []mail.Entry
 	attachments []messageAttachment
 	images      [][]byte
 	err         error
@@ -200,7 +199,7 @@ type mailView struct {
 	topicContent     string
 	topicID          int64
 	topicName        string
-	entries          []models.Entry
+	entries          []mail.Entry
 	attachments      []messageAttachment
 	attachmentCursor int
 	imageContent     string
@@ -1822,46 +1821,6 @@ func searchMatchToPosting(match generated.SearchMatch) mail.Posting {
 	return posting
 }
 
-func sdkMessageToEntry(entry generated.Entry, message generated.Message) models.Entry {
-	creator := entry.Creator
-	if creator.Id == 0 {
-		creator = message.Creator
-	}
-	createdAt := entry.CreatedAt
-	if createdAt.IsZero() {
-		createdAt = message.CreatedAt
-	}
-	updatedAt := entry.UpdatedAt
-	if updatedAt.IsZero() {
-		updatedAt = message.UpdatedAt
-	}
-	summary := entry.Summary
-	if summary == "" {
-		summary = message.Subject
-	}
-	appURL := entry.AppUrl
-	if appURL == "" {
-		appURL = message.Url
-	}
-
-	return models.Entry{
-		ID:                    entry.Id,
-		CreatedAt:             formatTimestamp(createdAt),
-		UpdatedAt:             formatTimestamp(updatedAt),
-		AlternativeSenderName: entry.AlternativeSenderName,
-		Summary:               summary,
-		Kind:                  entry.Kind,
-		AppURL:                appURL,
-		Body:                  htmlToMarkdown(message.Content),
-		BodyHTML:              message.Content,
-		Creator: models.Contact{
-			ID:           creator.Id,
-			Name:         creator.Name,
-			EmailAddress: creator.EmailAddress,
-		},
-	}
-}
-
 // --- Fetch commands ---
 
 func (v *mailView) fetchSources(requestID uint64) tea.Cmd {
@@ -2038,10 +1997,10 @@ func (v *mailView) fetchTopic(ctx context.Context, requestID uint64, boxID, topi
 			}
 		}
 
-		entries := make([]models.Entry, len(topic.Entries))
+		entries := make([]mail.Entry, len(topic.Entries))
 		var attachments []messageAttachment
 		for i, entry := range topic.Entries {
-			entries[i] = sdkMessageToEntry(entry, messages[i])
+			entries[i] = mail.NewEntry(entry, messages[i])
 			for position, attachment := range htmlutil.ExtractAttachments(messages[i].Content) {
 				attachments = append(attachments, messageAttachment{
 					ID:          fmt.Sprintf("%d:%d", entry.Id, position+1),
@@ -2081,7 +2040,7 @@ func (v *mailView) fetchTopic(ctx context.Context, requestID uint64, boxID, topi
 
 // --- Entry rendering ---
 
-func (v *mailView) renderEntries(entries []models.Entry) string {
+func (v *mailView) renderEntries(entries []mail.Entry) string {
 	var b strings.Builder
 	sepWidth := max(v.vc.width-4, 40)
 	sep := v.vc.styles.separator.Render(strings.Repeat("─", sepWidth))
@@ -2099,12 +2058,7 @@ func (v *mailView) renderEntries(entries []models.Entry) string {
 			from = e.AlternativeSenderName
 		}
 
-		date := ""
-		if len(e.CreatedAt) >= 16 {
-			date = e.CreatedAt[:16]
-		}
-
-		fmt.Fprintf(&b, "%s  %s\n", v.vc.styles.entryFrom.Render(from), v.vc.styles.entryDate.Render(date))
+		fmt.Fprintf(&b, "%s  %s\n", v.vc.styles.entryFrom.Render(from), v.vc.styles.entryDate.Render(formatDisplayDateTime(e.CreatedAt)))
 		if e.Summary != "" {
 			fmt.Fprintf(&b, "%s\n", e.Summary)
 		}

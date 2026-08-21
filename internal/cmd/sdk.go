@@ -18,6 +18,7 @@ import (
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/auth"
 	"github.com/basecamp/hey-cli/internal/config"
+	"github.com/basecamp/hey-cli/internal/mail"
 	"github.com/basecamp/hey-cli/internal/version"
 )
 
@@ -149,20 +150,11 @@ func formatDate(ts time.Time) string {
 
 // --- Posting topic ID helper ---
 
-// resolvePostingTopicID extracts the topic ID from an SDK Posting.
-// The SDK Posting doesn't have a TopicID field, so we parse from AppUrl.
+// resolvePostingTopicID extracts the topic ID from an SDK Posting. The SDK Posting has
+// no TopicID field, so the thread is read out of app_url — the one parse of it lives in
+// internal/mail, which is where a posting is described.
 func resolvePostingTopicID(p generated.Posting) int64 {
-	if i := strings.LastIndex(p.AppUrl, "/topics/"); i >= 0 {
-		segment := p.AppUrl[i+len("/topics/"):]
-		// Strip trailing path components or query strings
-		if j := strings.IndexAny(segment, "/?#"); j >= 0 {
-			segment = segment[:j]
-		}
-		if id, err := strconv.ParseInt(segment, 10, 64); err == nil {
-			return id
-		}
-	}
-	return 0
+	return mail.TopicIDIn(p.AppUrl)
 }
 
 // --- Calendar helpers ---

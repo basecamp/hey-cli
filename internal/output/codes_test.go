@@ -3,6 +3,8 @@ package output
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"testing"
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
@@ -82,6 +84,10 @@ func TestExitCodeForEveryCodeAnErrorCanCarry(t *testing.T) {
 		{apierr.ErrValidation(422, "blank", "", nil), ExitUsage},
 		{apierr.ErrConflict(409, "exists", "", nil), ExitUsage},
 		{&apierr.Error{Code: "upgrade_required", Message: "build too old"}, ExitUsage},
+		// Something that never went through apierr at all — a bare error out of the
+		// standard library or a dependency still has to exit with something.
+		{errors.New("a plain error nobody wrapped"), ExitUsage},
+		{fmt.Errorf("wrapped: %w", apierr.ErrNotFound("topic", "3011")), ExitNotFound},
 	}
 
 	for _, tt := range tests {

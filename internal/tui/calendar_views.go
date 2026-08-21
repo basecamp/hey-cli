@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
-
-	"github.com/basecamp/hey-cli/internal/models"
 )
 
 // calendarViewMode represents the calendar display mode.
@@ -66,7 +64,7 @@ func weekStartDate(t time.Time, firstDay time.Weekday) time.Time {
 
 // splitRecordings separates recordings into events, todos, and habits.
 // The API returns Type values like "CalendarEvent", "CalendarTodo", "Habit".
-func splitRecordings(recs []models.Recording) (events, todos, habits []models.Recording) {
+func splitRecordings(recs []Recording) (events, todos, habits []Recording) {
 	for _, r := range recs {
 		t := strings.ToLower(r.Type)
 		switch {
@@ -104,8 +102,8 @@ func parseEventTime(ts string) time.Time {
 
 // eventsByDate groups events by date (YYYY-MM-DD), expanding multi-day events
 // so they appear on every day they span.
-func eventsByDate(events []models.Recording) map[string][]models.Recording {
-	m := make(map[string][]models.Recording)
+func eventsByDate(events []Recording) map[string][]Recording {
+	m := make(map[string][]Recording)
 	for _, e := range events {
 		st := parseEventTime(e.StartsAt)
 		if st.IsZero() {
@@ -144,7 +142,7 @@ func dateKey(t time.Time) string {
 // that have a Label set (named days in HEY). A named day carries its label on
 // whichever recording HEY hung it on, which can be a todo or a habit as much as
 // an event, so every group the day holds is read.
-func dayLabelsFromRecordings(groups ...[]models.Recording) map[string]string {
+func dayLabelsFromRecordings(groups ...[]Recording) map[string]string {
 	labels := make(map[string]string)
 	for _, group := range groups {
 		for _, recording := range group {
@@ -181,13 +179,13 @@ func daysBetween(from, to time.Time) int {
 
 // placedEvent stores an event's position in the day grid.
 type placedEvent struct {
-	rec      models.Recording
+	rec      Recording
 	startCol int
 	endCol   int
 	lane     int
 }
 
-func renderDayView(events, todos, habits []models.Recording, _ time.Time, width, _ int) string {
+func renderDayView(events, todos, habits []Recording, _ time.Time, width, _ int) string {
 	var b strings.Builder
 	muted := styleMuted
 	primary := lipgloss.NewStyle().Foreground(colorPrimary)
@@ -215,7 +213,7 @@ func renderDayView(events, todos, habits []models.Recording, _ time.Time, width,
 	b.WriteString("\n")
 
 	// Separate timed and all-day events
-	var timed, allDay []models.Recording
+	var timed, allDay []Recording
 	for _, e := range events {
 		if e.AllDay {
 			allDay = append(allDay, e)
@@ -435,12 +433,12 @@ func renderDayLane(lane []placedEvent, gridWidth int, primary, muted lipgloss.St
 
 type weekDayInfo struct {
 	date   time.Time
-	habits []models.Recording
-	events []models.Recording
-	allDay []models.Recording
+	habits []Recording
+	events []Recording
+	allDay []Recording
 }
 
-func renderWeekView(events, todos, habits []models.Recording, anchor time.Time, firstWeekDay time.Weekday, width, _ int, dayLabels map[string]string) string {
+func renderWeekView(events, todos, habits []Recording, anchor time.Time, firstWeekDay time.Weekday, width, _ int, dayLabels map[string]string) string {
 	var b strings.Builder
 	muted := styleMuted
 	bright := lipgloss.NewStyle().Foreground(colorBright)
@@ -616,7 +614,7 @@ func weekDayColumnLabel(d time.Time, isFirstCol bool) string {
 // Year View — bordered grid, one box per day
 // ===============================================
 
-func renderYearView(events []models.Recording, anchor time.Time, firstWeekDay time.Weekday, width, _ int, dayLabels map[string]string) string {
+func renderYearView(events []Recording, anchor time.Time, firstWeekDay time.Weekday, width, _ int, dayLabels map[string]string) string {
 	var b strings.Builder
 	muted := styleMuted
 	bright := lipgloss.NewStyle().Foreground(colorBright)
@@ -709,7 +707,7 @@ func renderYearView(events []models.Recording, anchor time.Time, firstWeekDay ti
 
 // buildYearDayCell returns styled lines for one day cell in the year grid.
 // Line 0: day label. Lines 1+: truncated event titles.
-func buildYearDayCell(d time.Time, dayEvents []models.Recording, colWidth, maxEvents int,
+func buildYearDayCell(d time.Time, dayEvents []Recording, colWidth, maxEvents int,
 	isToday, isCurrentYear bool, primary, bright, muted, faint lipgloss.Style,
 	dayLabels map[string]string,
 ) []string {
@@ -769,7 +767,7 @@ func dayLabelOrDefault(d time.Time, isFirstCol bool, dayLabels map[string]string
 
 // --- Ribbons ---
 
-func renderHabitsRibbon(habits []models.Recording, width int) string {
+func renderHabitsRibbon(habits []Recording, width int) string {
 	parts := make([]string, 0, len(habits))
 	for _, h := range habits {
 		marker := "○"
@@ -789,7 +787,7 @@ func renderHabitsRibbon(habits []models.Recording, width int) string {
 	return ribbon
 }
 
-func renderTodosRibbon(todos []models.Recording, width int) string {
+func renderTodosRibbon(todos []Recording, width int) string {
 	parts := make([]string, 0, len(todos))
 	for _, t := range todos {
 		marker := "□"

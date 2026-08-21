@@ -25,7 +25,6 @@ import (
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/mail"
-	"github.com/basecamp/hey-cli/internal/models"
 )
 
 func testPNG(t *testing.T) []byte {
@@ -264,7 +263,7 @@ func TestMailViewHandlesTopicLoaded(t *testing.T) {
 		boxID:   1,
 		topicID: 100,
 		title:   "Test topic",
-		entries: []models.Entry{{Creator: models.Contact{Name: "Alice"}, Body: "hello"}},
+		entries: []mail.Entry{{Creator: mail.Contact{Name: "Alice"}, Body: "hello"}},
 	})
 	if !consumed {
 		t.Error("topicLoadedMsg should be consumed")
@@ -1936,7 +1935,7 @@ func TestMailViewAttachmentNavigationUpdatesSelectionAndHelp(t *testing.T) {
 		boxID:   1,
 		topicID: 100,
 		title:   "Quarterly planning",
-		entries: []models.Entry{{ID: 501, Creator: models.Contact{Name: "Alice"}}, {ID: 502, Creator: models.Contact{Name: "Bob"}}},
+		entries: []mail.Entry{{ID: 501, Creator: mail.Contact{Name: "Alice"}}, {ID: 502, Creator: mail.Contact{Name: "Bob"}}},
 		attachments: []messageAttachment{
 			{ID: "501:1", MessageID: 501, Filename: "agenda.pdf"},
 			{ID: "502:1", MessageID: 502, Filename: "chart.png"},
@@ -1981,7 +1980,7 @@ func TestMailViewSavesSelectedAttachmentOnlyAfterExplicitAction(t *testing.T) {
 		boxID:   1,
 		topicID: 100,
 		title:   "Quarterly planning",
-		entries: []models.Entry{{ID: 501, Creator: models.Contact{Name: "Alice"}}},
+		entries: []mail.Entry{{ID: 501, Creator: mail.Contact{Name: "Alice"}}},
 		attachments: []messageAttachment{
 			{ID: "501:1", MessageID: 501, Filename: "agenda.pdf", URL: "/rails/blobs/agenda.pdf"},
 			{ID: "501:2", MessageID: 501, Filename: "chart.png", URL: "/rails/blobs/chart.png"},
@@ -2019,7 +2018,7 @@ func TestMailViewExplainsThatSaveWillNotReplaceExistingAttachment(t *testing.T) 
 		boxID:       1,
 		topicID:     100,
 		title:       "Quarterly planning",
-		entries:     []models.Entry{{ID: 501, Creator: models.Contact{Name: "Alice"}}},
+		entries:     []mail.Entry{{ID: 501, Creator: mail.Contact{Name: "Alice"}}},
 		attachments: []messageAttachment{{ID: "501:1", MessageID: 501, Filename: "agenda.pdf", URL: "/rails/blobs/agenda.pdf"}},
 	})
 
@@ -2052,7 +2051,7 @@ func TestMailViewDownloadsBeforeExplicitExternalOpen(t *testing.T) {
 		boxID:       1,
 		topicID:     100,
 		title:       "Quarterly planning",
-		entries:     []models.Entry{{ID: 501, Creator: models.Contact{Name: "Alice"}}},
+		entries:     []mail.Entry{{ID: 501, Creator: mail.Contact{Name: "Alice"}}},
 		attachments: []messageAttachment{{ID: "501:1", MessageID: 501, Filename: "chart.png", URL: "/rails/blobs/chart.png"}},
 	})
 	if len(events) != 0 {
@@ -2095,7 +2094,7 @@ func TestMailViewDoesNotOpenAttachmentWhenDownloadFails(t *testing.T) {
 		boxID:       1,
 		topicID:     100,
 		title:       "Quarterly planning",
-		entries:     []models.Entry{{ID: 501, Creator: models.Contact{Name: "Alice"}}},
+		entries:     []mail.Entry{{ID: 501, Creator: mail.Contact{Name: "Alice"}}},
 		attachments: []messageAttachment{{ID: "501:1", MessageID: 501, Filename: "chart.png", URL: "/rails/blobs/chart.png"}},
 	})
 
@@ -2117,9 +2116,9 @@ func TestMailViewAlwaysRendersAttachmentPanelAndTextMarker(t *testing.T) {
 		boxID:   1,
 		topicID: 100,
 		title:   "Quarterly planning",
-		entries: []models.Entry{{
+		entries: []mail.Entry{{
 			ID:      501,
-			Creator: models.Contact{Name: "Alice"},
+			Creator: mail.Contact{Name: "Alice"},
 			Body: htmlutil.ToMarkdown(
 				`<p>Review this image:</p><action-text-attachment url="/rails/blobs/chart.png" filename="chart.png" content-type="image/png" filesize="1536"></action-text-attachment><p>Thank you.</p>`,
 			),
@@ -2660,5 +2659,30 @@ func TestLabelNamedImboxDoesNotGetImboxSeenSections(t *testing.T) {
 	view := stripANSI(v.View())
 	if strings.Contains(view, "New for You") || strings.Contains(view, "Previously Seen") || strings.Contains(view, "●") {
 		t.Errorf("a label named Imbox should remain a flat list without unread dots: %q", view)
+	}
+}
+
+// Two entries the same afternoon are two rows the reader has to tell apart, so a
+// thread dates its entries to the minute rather than to the day.
+func TestThreadEntriesCarryTheTimeOfDay(t *testing.T) {
+	v := mailWithPostings()
+	v.Resize(80, 30)
+	entries := []mail.Entry{
+		{ID: 501, Creator: mail.Contact{Name: "Alice"}, CreatedAt: time.Date(2026, 8, 18, 9, 30, 0, 0, time.UTC)},
+		{ID: 502, Creator: mail.Contact{Name: "Bob"}, CreatedAt: time.Date(2026, 8, 18, 16, 5, 0, 0, time.UTC)},
+	}
+
+	rendered := stripANSI(v.renderEntries(entries))
+
+	for _, want := range []string{
+		formatDisplayDateTime(entries[0].CreatedAt),
+		formatDisplayDateTime(entries[1].CreatedAt),
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("thread is missing the entry time %q:\n%s", want, rendered)
+		}
+	}
+	if formatDisplayDateTime(entries[0].CreatedAt) == formatDisplayDateTime(entries[1].CreatedAt) {
+		t.Error("two entries on the same day rendered identically, so the reader cannot order them")
 	}
 }

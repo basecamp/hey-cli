@@ -14,6 +14,7 @@ import (
 	"github.com/itchyny/gojq"
 	"golang.org/x/term"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
@@ -121,7 +122,7 @@ func normalizeData(data any) any {
 }
 
 func (w *Writer) Err(err error) {
-	e := AsError(err)
+	e := apierr.AsError(err)
 	format := w.EffectiveFormat()
 
 	if format == FormatStyled {
@@ -278,7 +279,7 @@ func (w *Writer) writeQuiet(data any) error {
 func (w *Writer) writeIDs(data any) error {
 	items, ok := toSlice(data)
 	if !ok {
-		return ErrUsage("--ids-only requires list data")
+		return apierr.ErrUsage("--ids-only requires list data")
 	}
 	extracted := 0
 	for _, item := range items {
@@ -288,7 +289,7 @@ func (w *Writer) writeIDs(data any) error {
 		}
 	}
 	if len(items) > 0 && extracted == 0 {
-		return ErrUsage("--ids-only: no 'id' field found in results")
+		return apierr.ErrUsage("--ids-only: no 'id' field found in results")
 	}
 	return nil
 }
@@ -296,7 +297,7 @@ func (w *Writer) writeIDs(data any) error {
 func (w *Writer) writeCount(data any) error {
 	items, ok := toSlice(data)
 	if !ok {
-		return ErrUsage("--count requires list data")
+		return apierr.ErrUsage("--count requires list data")
 	}
 	fmt.Fprintln(w.opts.Stdout, len(items))
 	return nil

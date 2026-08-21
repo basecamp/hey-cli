@@ -12,9 +12,16 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
-
-	"github.com/basecamp/hey-cli/internal/models"
 )
+
+// Contact is someone in the reader's address book. An alias is a contact in its own
+// right — another address the same person writes from — which is why Aliases nests.
+type Contact struct {
+	ID           int64
+	Name         string
+	EmailAddress string
+	Aliases      []Contact
+}
 
 type contactRequestKind int
 
@@ -28,30 +35,30 @@ const (
 type contactsLoadedMsg struct {
 	requestResult
 	page     int
-	contacts []models.Contact
+	contacts []Contact
 }
 
 type contactDetailLoadedMsg struct {
 	requestResult
-	contact models.Contact
+	contact Contact
 	note    string
 }
 
 type contactSavedMsg struct {
 	requestResult
 	originalID int64
-	contact    models.Contact
+	contact    Contact
 	created    bool
 }
 
 type contactHiddenMsg struct {
 	requestResult
-	contact models.Contact
+	contact Contact
 }
 
 type contactRevealedMsg struct {
 	requestResult
-	contact models.Contact
+	contact Contact
 }
 
 type contactNoteSavedMsg struct {
@@ -66,7 +73,7 @@ type contactsView struct {
 	list                contactList
 	loaded              bool
 	page                int
-	detail              models.Contact
+	detail              Contact
 	note                string
 	inDetail            bool
 	detailView          viewport.Model
@@ -175,7 +182,7 @@ func (v *contactsView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.lastHiddenID = msg.contact.ID
 		v.list.remove(msg.contact.ID)
 		v.inDetail = false
-		v.detail = models.Contact{}
+		v.detail = Contact{}
 		v.note = ""
 		v.notice = "Contact hidden"
 		return nil, true
@@ -378,7 +385,7 @@ func (v *contactsView) ExitThread() {
 	v.pendingOriginalID = 0
 	v.contactForm = nil
 	v.noteForm = nil
-	v.detail = models.Contact{}
+	v.detail = Contact{}
 	v.note = ""
 	v.confirmNoteDelete = false
 	v.requests.cancel()
@@ -443,7 +450,7 @@ func (v *contactsView) requestContactDetail(contactID int64) tea.Cmd {
 }
 
 func (v *contactsView) startAddContact() tea.Cmd {
-	v.contactForm = newContactForm(contactFormAdd, models.Contact{}, v.vc.styles)
+	v.contactForm = newContactForm(contactFormAdd, Contact{}, v.vc.styles)
 	v.contactForm.resize(v.vc.width, v.vc.height)
 	return v.contactForm.init()
 }
@@ -532,14 +539,14 @@ func (v *contactsView) deleteNote() tea.Cmd {
 	}
 }
 
-func (v *contactsView) updateContactInList(contact models.Contact) {
+func (v *contactsView) updateContactInList(contact Contact) {
 	for i := range v.list.contacts {
 		if v.list.contacts[i].ID == contact.ID {
 			v.list.contacts[i] = contact
 			return
 		}
 	}
-	v.list.contacts = append([]models.Contact{contact}, v.list.contacts...)
+	v.list.contacts = append([]Contact{contact}, v.list.contacts...)
 }
 
 func (v *contactsView) refreshDetailView() {
@@ -583,7 +590,7 @@ func (v *contactsView) fetchContacts(ctx context.Context, requestID uint64, page
 		if result != nil {
 			sdkContacts = *result
 		}
-		contacts := make([]models.Contact, 0, len(sdkContacts))
+		contacts := make([]Contact, 0, len(sdkContacts))
 		for _, contact := range sdkContacts {
 			contacts = append(contacts, sdkContactToModel(contact))
 		}
@@ -633,26 +640,20 @@ func contactSaveFailure(err error) string {
 	return errorNotice("Save failed", err)
 }
 
-func sdkContactToModel(contact generated.Contact) models.Contact {
-	return models.Contact{
+func sdkContactToModel(contact generated.Contact) Contact {
+	return Contact{
 		ID:           contact.Id,
-		AccountID:    contact.AccountId,
 		Name:         contact.Name,
 		EmailAddress: contact.EmailAddress,
-		Avatar:       contact.AvatarUrl,
-		UpdatedAt:    formatTimestamp(contact.UpdatedAt),
 	}
 }
 
-func sdkContactDetailToModel(contact generated.ContactDetail) models.Contact {
-	result := models.Contact{
+func sdkContactDetailToModel(contact generated.ContactDetail) Contact {
+	result := Contact{
 		ID:           contact.Id,
-		AccountID:    contact.AccountId,
 		Name:         contact.Name,
 		EmailAddress: contact.EmailAddress,
-		Avatar:       contact.AvatarUrl,
-		UpdatedAt:    formatTimestamp(contact.UpdatedAt),
-		Aliases:      make([]models.Contact, 0, len(contact.Aliases)),
+		Aliases:      make([]Contact, 0, len(contact.Aliases)),
 	}
 	for _, alias := range contact.Aliases {
 		result.Aliases = append(result.Aliases, sdkContactToModel(alias))
