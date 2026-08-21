@@ -190,6 +190,7 @@ func TestDoctorCommandReportsEnvironment(t *testing.T) {
 	if err := os.WriteFile(skillPath, []byte("# HEY"), 0600); err != nil {
 		t.Fatalf("write skill: %v", err)
 	}
+	writeOwnershipMarker(filepath.Dir(skillPath)) // a hey-cli-written install
 
 	_, response, err := runAuthCommand(t, configHome, server.URL, "environment-token", true, "doctor")
 	if err != nil {

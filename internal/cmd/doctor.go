@@ -205,6 +205,14 @@ func checkBaselineSkill() map[string]string {
 			"hint":    "hey skill install",
 		}
 	}
+	if home, err := os.UserHomeDir(); err == nil && !ownedSkillDir(filepath.Join(home, ".agents", "skills", "hey")) {
+		return map[string]string{
+			"name":    "Agent Skill",
+			"status":  "warning",
+			"message": "Installed, but not written by hey-cli (or by a release before ownership tracking); it will not be kept up to date",
+			"hint":    "Move it aside and run: hey skill install",
+		}
+	}
 	check := map[string]string{
 		"name":   "Agent Skill",
 		"status": "ok",

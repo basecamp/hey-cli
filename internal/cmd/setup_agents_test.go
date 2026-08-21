@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -219,5 +220,130 @@ func TestJoinNames(t *testing.T) {
 		if got := joinNames(names); got != want {
 			t.Errorf("joinNames(%v) = %q, want %q", names, got, want)
 		}
+	}
+}
+
+// The installer's automatic handoff must never destroy a hand-authored
+// baseline skill, whatever the selector: it reports the refusal instead.
+func TestSetupAgentsPreservesUnmarkedBaselineSkill(t *testing.T) {
+	isolateAgents(t)
+	t.Setenv(agentSetupEnv, "none")
+	home := t.TempDir()
+	custom := "# my own hey skill\n"
+	dir := filepath.Join(home, ".agents", "skills", "hey")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(custom), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	_, response, err := runAuthCommand(t, home, server.URL, "", true, "setup", "agents")
+	if err != nil {
+		t.Fatalf("setup agents: %v", err)
+	}
+	data := response.Data.(map[string]any)
+	if data["skill_installed"] != false {
+		t.Error("must not report the skill installed over a refused directory")
+	}
+	errs := stringList(t, data["errors"])
+	if len(errs) != 1 || !strings.Contains(errs[0], "not written by hey-cli") {
+		t.Errorf("errors = %v", errs)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "SKILL.md")); string(got) != custom {
+		t.Errorf("user skill changed: %q", got)
+	}
+	if ownedSkillDir(dir) {
+		t.Error("user directory was claimed")
+	}
+	if response.Summary != "Baseline skill installation failed" {
+		t.Errorf("summary = %q", response.Summary)
+	}
+}
+
+// `hey setup codex` on a machine without Codex must not create ~/.codex and
+// then count its own creation as detection.
+func TestSetupCodexDoesNotFabricateCodex(t *testing.T) {
+	isolateAgents(t)
+	home := t.TempDir()
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	_, response, err := runAuthCommand(t, home, server.URL, "", true, "setup", "codex")
+	if err != nil {
+		t.Fatalf("setup codex: %v", err)
+	}
+	data := response.Data.(map[string]any)
+	if data["agent_detected"] != false || data["plugin_installed"] != false {
+		t.Errorf("data = %v", data)
+	}
+	if response.Summary != "Codex not detected" {
+		t.Errorf("summary = %q", response.Summary)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".codex")); !os.IsNotExist(err) {
+		t.Error("~/.codex was fabricated")
+	}
+}
+
+// A styled `hey setup <agent>` that did not connect must say so and exit
+// nonzero — never "start a new session" over a failed integration.
+func TestSetupAgentStyledReportsNotConnected(t *testing.T) {
+	isolateAgents(t)
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+	origColor := colorDisabled
+	colorDisabled = true
+	t.Cleanup(func() { colorDisabled = origColor })
+
+	stdout, _, err := runAuthCommand(t, home, server.URL, "", false, "setup", "claude", "--styled")
+	var cliErr *output.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != "setup_incomplete" {
+		t.Fatalf("error = %v, want setup_incomplete", err)
+	}
+	if strings.Contains(stdout, "Start a new Claude Code session") {
+		t.Errorf("claimed success over a failed setup:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "Claude Code setup failed") {
+		t.Errorf("failure not surfaced:\n%s", stdout)
+	}
+}
+
+// Commands that never touch the server must not move secrets around: the
+// installer runs `setup agents` with HEY_NO_KEYRING=1, which would otherwise
+// migrate legacy config.json tokens into plaintext credentials.json.
+func TestSetupAgentsDoesNotMigrateLegacyCredentials(t *testing.T) {
+	isolateAgents(t)
+	t.Setenv(agentSetupEnv, "none")
+	home := t.TempDir()
+	configDir := filepath.Join(home, "hey-cli")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"base_url":"https://app.hey.com","access_token":"legacy-token"}`
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	if _, _, err := runAuthCommand(t, home, server.URL, "", true, "setup", "agents"); err != nil {
+		t.Fatalf("setup agents: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(configDir, "credentials.json")); !os.IsNotExist(err) {
+		t.Fatal("setup agents migrated legacy credentials into credentials.json")
+	}
+
+	// A command that does use credentials still migrates them.
+	if _, _, err := runAuthCommand(t, home, server.URL, "", true, "auth", "status"); err != nil {
+		t.Fatalf("auth status: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(configDir, "credentials.json")); err != nil {
+		t.Errorf("auth status should have migrated legacy credentials: %v", err)
 	}
 }

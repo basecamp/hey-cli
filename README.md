@@ -471,6 +471,11 @@ picks explicitly. `HEY_NONINTERACTIVE=1` disables every prompt (the sign-in offe
 wizard's confirmations) for harnesses that run hey under a pseudo-terminal. The installed
 skill is refreshed automatically the first time a new hey release runs.
 
+hey only ever writes skill directories it owns: each one it creates carries a
+`.managed-by-hey-cli` marker, and install, replacement and automatic refresh all refuse a
+`hey` skill directory (or symlink) without it — a hand-authored skill at one of those paths
+is never overwritten or claimed. `hey doctor` flags an unmanaged baseline and how to adopt it.
+
 ## Troubleshooting
 
 ```bash

@@ -60,7 +60,11 @@ claude|codex|agents`). Claude Code gets the `hey@37signals` plugin from `basecam
 plus a skill link; Codex gets the skill only until a `.codex-plugin` ships. `HEY_SETUP_AGENT`
 selects the target for `hey setup agents`. `hey doctor` reports per-agent diagnostics, and a
 `PersistentPostRunE` hook (`skill_refresh.go`) re-syncs installed skill copies once per release
-version change.
+version change. Ownership is explicit: every skill write goes through `claimSkillDir`, which
+marks a directory it creates (`.managed-by-hey-cli`) and refuses a populated one without the
+marker; removal (`removeExistingSkillLink`) touches only our canonical symlink or a marked
+copy; refresh writes only marked, non-symlinked files. Do not add a write path that bypasses
+the gate.
 
 New top-level commands and subcommands need the `.surface` snapshot updated
 (`go test ./internal/cmd -run TestSurfaceSnapshot -update-surface`), and anything listed in

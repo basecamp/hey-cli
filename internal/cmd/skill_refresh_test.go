@@ -195,3 +195,62 @@ func TestRefreshSkillsPreservesUnmanagedSkills(t *testing.T) {
 		t.Errorf("sentinel = %q, %v", sentinel, err)
 	}
 }
+
+// Refresh never writes through a symlink, even inside a marked directory: a
+// SKILL.md that is itself a link, or a skill directory that is a link, points
+// somewhere hey-cli never inspected.
+func TestRefreshSkillsNeverWritesThroughSymlinks(t *testing.T) {
+	home := refreshFixture(t)
+	stubVersion(t, "9.9.9")
+
+	// Marked baseline whose SKILL.md is a link to the user's real file.
+	baseline := filepath.Join(home, ".agents", "skills", "hey")
+	if err := os.MkdirAll(baseline, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeOwnershipMarker(baseline)
+	custom := "# the user's real skill\n"
+	realSkill := filepath.Join(home, "real-skill.md")
+	if err := os.WriteFile(realSkill, []byte(custom), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realSkill, filepath.Join(baseline, "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Codex skill directory that is itself a link to a user directory.
+	elsewhere := writeSkillFixture(t, filepath.Join(home, "elsewhere"), custom, true)
+	if err := os.MkdirAll(filepath.Join(home, ".codex", "skills"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Dir(elsewhere), filepath.Join(home, ".codex", "skills", "hey")); err != nil {
+		t.Fatal(err)
+	}
+
+	if refreshSkillsIfVersionChanged() {
+		t.Error("nothing writable: refresh must report no work done")
+	}
+	for _, path := range []string{realSkill, elsewhere} {
+		if got, _ := os.ReadFile(path); string(got) != custom {
+			t.Errorf("%s was written through a symlink", path)
+		}
+	}
+}
+
+// With no config directory at all there is nowhere to keep the sentinel, and
+// it must not land in the current directory.
+func TestRefreshSkillsSkipsWithoutConfigDir(t *testing.T) {
+	stubVersion(t, "9.9.9")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+
+	if refreshSkillsIfVersionChanged() {
+		t.Error("refresh should not run without a config dir")
+	}
+	if _, err := os.Stat(filepath.Join(cwd, ".last-run-version")); !os.IsNotExist(err) {
+		t.Error("sentinel written into the current directory")
+	}
+}

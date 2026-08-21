@@ -110,7 +110,13 @@ func newRootCmd() *cobra.Command {
 			authMgr = auth.NewManager(cfg.BaseURL, httpClient, configDir)
 			initSDK(authMgr, cfg.BaseURL)
 
-			migrateOldCredentials(configDir)
+			// Commands that never touch the server (setup agents|claude|codex,
+			// skill, version, …) must not move secrets around as a side
+			// effect — the installer runs setup agents with HEY_NO_KEYRING=1,
+			// which would otherwise migrate legacy tokens into plaintext.
+			if commandUsesRuntimeConfig(cmd) {
+				migrateOldCredentials(configDir)
+			}
 
 			if authMgr.IsAuthenticated() && commandUsesAccountScope(cmd) {
 				if err := selectConfiguredAccount(cmd.Context()); err != nil {

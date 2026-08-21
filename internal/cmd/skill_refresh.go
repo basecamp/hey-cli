@@ -41,7 +41,11 @@ func refreshSkillsIfVersionChanged() bool {
 		return false
 	}
 
-	sentinelPath := filepath.Join(config.ConfigDir(), ".last-run-version")
+	configDir := config.ConfigDir()
+	if configDir == "" {
+		return false // no home to keep state in; never drop a sentinel in the cwd
+	}
+	sentinelPath := filepath.Join(configDir, ".last-run-version")
 
 	data, err := os.ReadFile(sentinelPath) // #nosec G304 -- fixed path under the user config dir
 	if err == nil && strings.TrimSpace(string(data)) == version.Version {
@@ -87,10 +91,18 @@ func refreshInstalledSkills() (updated, failed int) {
 	}
 
 	for _, location := range skillRefreshLocations() {
-		if _, statErr := os.Stat(location); statErr != nil {
+		info, statErr := os.Lstat(location)
+		if statErr != nil {
 			if !os.IsNotExist(statErr) {
 				failed++ // permission or IO error on a known location
 			}
+			continue
+		}
+		// Never write through a symlink — neither a linked SKILL.md nor a
+		// linked directory (our own Claude link resolves to the baseline,
+		// which is refreshed as itself; a user's link resolves to somewhere
+		// we never inspected).
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || isSymlink(filepath.Dir(location)) {
 			continue
 		}
 		// Ownership gate: a SKILL.md in an unmarked directory is somebody
@@ -118,4 +130,9 @@ func refreshInstalledSkills() (updated, failed int) {
 	}
 
 	return updated, failed
+}
+
+func isSymlink(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode()&os.ModeSymlink != 0
 }

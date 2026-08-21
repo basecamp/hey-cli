@@ -140,8 +140,19 @@ func runSetupAgent(cmd *cobra.Command, agent harness.AgentInfo, handler agentSet
 				return err
 			}
 		}
-		fmt.Fprintln(w, muted.format("  Start a new "+agent.Name+" session to use HEY commands."))
-		return nil
+		// Interactive handlers warn and continue (the wizard needs that), so
+		// the verdict comes from a fresh health snapshot, not from the
+		// handler's return value: never tell the user to start a session
+		// against an integration that is not connected.
+		if skillErr == nil && agent.Detect != nil && agent.Detect() && agentChecksPass(agent) {
+			fmt.Fprintln(w, muted.format("  Start a new "+agent.Name+" session to use HEY commands."))
+			return nil
+		}
+		return &output.Error{
+			Code:    "setup_incomplete",
+			Message: agent.Name + " not connected",
+			Hint:    "Run: hey doctor",
+		}
 	}
 
 	if handler.RunNonInteractive != nil {
@@ -320,7 +331,7 @@ func agentCommandFailure(out []byte, err error) string {
 // hey has no Codex plugin yet, so the skill is the whole integration.
 func runCodexSetup(cmd *cobra.Command) error {
 	w := cmd.OutOrStdout()
-	path, err := installSkillToCodex()
+	path, err := installCodexSkill()
 	if err != nil {
 		fmt.Fprintln(w, warning.format("  Codex skill install failed: "+err.Error()))
 		fmt.Fprintln(w, muted.format("  Then verify with: hey doctor"))
@@ -331,8 +342,22 @@ func runCodexSetup(cmd *cobra.Command) error {
 }
 
 func runCodexSetupNonInteractive(*cobra.Command) error {
-	_, err := installSkillToCodex()
+	_, err := installCodexSkill()
 	return err
+}
+
+// installCodexSkill is the Codex handler's one step. Like Claude, it never
+// fabricates the agent: creating ~/.codex on a machine without Codex would
+// make every later detection — and this command's own verdict — report it
+// installed.
+func installCodexSkill() (string, error) {
+	if !harness.DetectCodex() {
+		return "", &agentSetupError{
+			Summary: "Codex not detected — install Codex, then run: hey setup codex",
+			Manual:  []string{"hey setup codex"},
+		}
+	}
+	return installSkillToCodex()
 }
 
 // --- Shared helpers ---
