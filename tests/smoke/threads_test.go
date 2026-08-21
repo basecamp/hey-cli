@@ -45,13 +45,13 @@ func longThread(t *testing.T, replies int) (topicID string, subject string) {
 	if code != 0 {
 		skipf(t, "could not compose the thread's first message (exit %d): %s", code, stderr)
 	}
-	t.Cleanup(func() { cleanupThreadBySubject(t, subject) })
-
 	// Delivery to the Imbox is asynchronous; wait for the posting the way the other
-	// mutation tests do.
+	// mutation tests do. The cleanup is registered once the posting is known to exist,
+	// so a thread that never arrived does not turn a skip into a cleanup failure.
 	if _, err := waitForPostingIDBySubject(t, subject); err != nil {
 		skipf(t, "the composed thread %q did not appear in the Imbox: %v", subject, err)
 	}
+	t.Cleanup(func() { cleanupThreadBySubject(t, subject) })
 	resp := heyJSON(t, "box", "imbox", "--all")
 	type posting struct {
 		AppURL  string `json:"app_url"`
