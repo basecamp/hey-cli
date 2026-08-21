@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -499,5 +500,75 @@ func TestBaselineSkillInstalledRequiresRegularFile(t *testing.T) {
 	writeOwnershipMarker(dir)
 	if !baselineSkillInstalled() {
 		t.Error("a marked regular SKILL.md is installed")
+	}
+}
+
+// A prior run's save-success/scrub-failure must not strand secrets in
+// config.json forever: with a usable stored credential, the next run retries
+// the scrub — removing the legacy fields, preserving unrelated keys, and
+// leaving the stored credentials untouched.
+func TestMigrationRetriesScrubWhenStoreAlreadyPopulated(t *testing.T) {
+	isolateAgents(t)
+	home := t.TempDir()
+	configDir := filepath.Join(home, "hey-cli")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	// A populated credential store, as a completed earlier migration leaves it.
+	if _, _, err := runAuthCommand(t, home, server.URL, "", true, "auth", "login", "--token", "stored-token"); err != nil {
+		t.Fatalf("auth login: %v", err)
+	}
+	storedBefore, err := os.ReadFile(filepath.Join(configDir, "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The scrub failed back then: legacy fields still sit in config.json,
+	// alongside a key from some future version.
+	raw, err := os.ReadFile(filepath.Join(configDir, "config.json"))
+	if os.IsNotExist(err) {
+		raw = []byte("{}")
+	} else if err != nil {
+		t.Fatal(err)
+	}
+	var cfgMap map[string]any
+	if err := json.Unmarshal(raw, &cfgMap); err != nil {
+		t.Fatal(err)
+	}
+	cfgMap["access_token"] = "legacy-token"
+	cfgMap["session_cookie"] = "legacy-cookie"
+	cfgMap["future_setting"] = map[string]any{"nested": true}
+	seeded, _ := json.Marshal(cfgMap)
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), seeded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := runAuthCommand(t, home, server.URL, "", true, "auth", "status"); err != nil {
+		t.Fatalf("auth status: %v", err)
+	}
+
+	after, err := os.ReadFile(filepath.Join(configDir, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved map[string]any
+	if err := json.Unmarshal(after, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := saved["access_token"]; ok {
+		t.Errorf("legacy token not scrubbed on retry: %s", after)
+	}
+	if _, ok := saved["session_cookie"]; ok {
+		t.Errorf("legacy cookie not scrubbed on retry: %s", after)
+	}
+	if _, ok := saved["future_setting"]; !ok {
+		t.Errorf("unrelated key destroyed by the retry: %s", after)
+	}
+	storedAfter, err := os.ReadFile(filepath.Join(configDir, "credentials.json"))
+	if err != nil || string(storedAfter) != string(storedBefore) {
+		t.Errorf("stored credentials changed during the retry: %v", err)
 	}
 }

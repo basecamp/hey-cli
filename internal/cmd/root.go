@@ -345,7 +345,17 @@ func migrateOldCredentials(_ string) {
 	store := authMgr.GetStore()
 	credKey := authMgr.CredentialKey()
 
-	if _, err := store.Load(credKey); err == nil {
+	if existing, err := store.Load(credKey); err == nil {
+		// A prior run already migrated. If its scrub failed, the legacy
+		// fields are still in config.json (we just loaded them above) —
+		// retry the scrub now, but only when the stored record is actually
+		// usable: an empty record must never destroy the one recoverable
+		// copy of the credentials.
+		if existing.AccessToken != "" || existing.SessionCookie != "" {
+			if scrubErr := config.ScrubLegacyCredentials(); scrubErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not remove migrated credentials from config.json: %v\n", scrubErr)
+			}
+		}
 		return
 	}
 

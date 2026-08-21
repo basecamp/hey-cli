@@ -20,12 +20,14 @@ func SkillDirOwned(dir string) bool {
 	return dir != "" && RegularSkillFile(filepath.Join(dir, SkillOwnershipMarker))
 }
 
-// RegularSkillFile reports whether path is a regular file (Lstat, so a
-// symlinked SKILL.md does not count — its target was never inspected).
-// Intermediate directories may still be symlinks: hey-cli's own canonical
-// Claude link is a directory link whose SKILL.md is the baseline's regular
-// file. This is the read-side twin of the install paths' write rule, so a
-// state installation refuses is never reported healthy.
+// RegularSkillFile reports whether path's final component is a regular file
+// (Lstat, so a symlinked SKILL.md does not count — its target was never
+// inspected). Intermediate directories may still be symlinks: hey-cli's own
+// canonical Claude link is a directory link whose SKILL.md is the baseline's
+// regular file. That deliberate resolution bounds what this proves: a
+// user-symlinked skill *directory* can pass reads that the write paths
+// refuse — a non-destructive asymmetry, since every write, removal and
+// refresh still declines to touch it.
 func RegularSkillFile(path string) bool {
 	info, err := os.Lstat(path)
 	return err == nil && info.Mode().IsRegular()
