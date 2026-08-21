@@ -263,3 +263,31 @@ func TestSetupAgentsRunsWithUntrustedLocalConfig(t *testing.T) {
 		t.Errorf("skill was not installed: %v", err)
 	}
 }
+
+// The installer pipes curl from an arbitrary directory: a malformed
+// .hey/config.json there must not stop a local-only command before its
+// trust exemption is even consulted. Runtime-config commands still surface
+// the parse error.
+func TestSetupAgentsRunsWithMalformedLocalConfig(t *testing.T) {
+	isolateAgents(t)
+	t.Setenv(agentSetupEnv, "none")
+	path := setupLocalTrustTest(t, "https://mail.example.com", "all")
+	if err := os.WriteFile(path, []byte("{not json"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	if err := runLocalTrustCLI(t, "--json", "setup", "agents"); err != nil {
+		t.Fatalf("setup agents must survive a malformed local config: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".agents", "skills", "hey", "SKILL.md")); err != nil {
+		t.Errorf("skill was not installed: %v", err)
+	}
+
+	err := runLocalTrustCLI(t, "--json", "boxes")
+	if err == nil || !strings.Contains(err.Error(), "could not parse config") {
+		t.Fatalf("runtime-config commands must still report the parse error, got %v", err)
+	}
+}

@@ -303,15 +303,17 @@ func installSkillToCodex() (string, error) {
 }
 
 // baselineSkillInstalled reports whether ~/.agents/skills/hey/SKILL.md is a
-// healthy install: a regular file, per harness.RegularSkillFile — the same
-// shape rule every write path enforces, so a state install refuses (say a
-// symlinked SKILL.md) is never simultaneously reported healthy.
+// healthy install: a regular file in a directory hey-cli owns — the same
+// shape and ownership rules every write path enforces, so a state install
+// refuses (a symlinked SKILL.md, an unmarked hand-authored skill) is never
+// simultaneously reported healthy.
 func baselineSkillInstalled() bool {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return false
 	}
-	return harness.RegularSkillFile(filepath.Join(home, ".agents", "skills", "hey", skillFilename))
+	skillDir := filepath.Join(home, ".agents", "skills", "hey")
+	return harness.RegularSkillFile(filepath.Join(skillDir, skillFilename)) && ownedSkillDir(skillDir)
 }
 
 // installedSkillVersion reads the .installed-version stamp from the baseline

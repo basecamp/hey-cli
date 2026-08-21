@@ -477,7 +477,27 @@ func TestBaselineSkillInstalledRequiresRegularFile(t *testing.T) {
 	if err := os.Symlink(elsewhere, filepath.Join(dir, "SKILL.md")); err != nil {
 		t.Fatal(err)
 	}
+	writeOwnershipMarker(dir)
 	if baselineSkillInstalled() {
-		t.Error("a symlinked SKILL.md must not count as installed")
+		t.Error("a symlinked SKILL.md must not count as installed, marker or not")
+	}
+
+	// A regular file without the marker is a hand-authored skill: refused by
+	// install, so never reported as a healthy installation either.
+	if err := os.Remove(filepath.Join(dir, "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, ownershipMarkerFile)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("# mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if baselineSkillInstalled() {
+		t.Error("an unmarked SKILL.md must not count as installed")
+	}
+	writeOwnershipMarker(dir)
+	if !baselineSkillInstalled() {
+		t.Error("a marked regular SKILL.md is installed")
 	}
 }

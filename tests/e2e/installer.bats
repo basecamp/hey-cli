@@ -848,3 +848,8 @@ STUB
   [[ "$output" == *"installer-continued"* ]]
   [[ "$output" == *"hey auth login"* ]]
 }
+
+@test "install.ps1 treats a failing interactive wizard as optional setup" {
+  grep -qF 'try { & $installedBinary setup } catch { }' "$INSTALL_PS1"
+  grep -q 'if ($LASTEXITCODE -ne 0)' "$INSTALL_PS1"
+}

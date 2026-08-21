@@ -440,7 +440,21 @@ function Main {
       Write-Host '    hey --help        See what you can do'
       Write-Host ''
     } elseif ($isInteractive) {
-      & $installedBinary setup
+      # Setup is optional: a declined OAuth, a timeout or a busy callback port
+      # must not turn an already-successful install into a failure. Windows
+      # PowerShell 5.1 does not throw on native nonzero exits, but strict
+      # configurations can, so guard the call and check $LASTEXITCODE.
+      try { & $installedBinary setup } catch { }
+      if ($LASTEXITCODE -ne 0) {
+        Write-Host ''
+        Write-Host "  Setup didn't finish - hey is installed; run it again any time:"
+        Write-Host ''
+        Write-Host '  Next steps:'
+        Write-Host '    hey auth login    Authenticate with HEY'
+        Write-Host '    hey setup         Run the setup wizard'
+        Write-Host '    hey --help        See what you can do'
+        Write-Host ''
+      }
     } else {
       Info 'Skipping interactive setup because PowerShell is running non-interactively.'
       # Install the agent skill and connect coding agents (best-effort).

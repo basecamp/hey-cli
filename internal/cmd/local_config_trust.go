@@ -59,7 +59,18 @@ func commandIgnoresLocalConfig(cmd *cobra.Command) bool {
 	if len(parts) < 2 {
 		return false
 	}
-	return parts[1] == "omarchy" || (len(parts) >= 3 && parts[1] == "setup" && parts[2] == "omarchy")
+	switch parts[1] {
+	case "omarchy", "skill":
+		return true
+	case "setup":
+		// The wizard itself uses the effective server; its subcommands
+		// (agents, claude, codex, omarchy) touch only local files and must
+		// work from any directory — the installer pipes curl from wherever
+		// the user happens to be, malformed .hey/config.json included.
+		return len(parts) >= 3
+	default:
+		return false
+	}
 }
 
 // commandUsesRuntimeConfig reports whether a command reads the effective
