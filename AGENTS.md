@@ -96,17 +96,31 @@ because both were mis-stated here before:
 
 - **`Topics.Get` does not carry bodies.** It carries the topic's first page of entries as
   summaries; the SDK says so at `generated/client.gen.go`. A body comes from
-  `Messages().Get` per entry, which is why `hey threads` (`entriesInThread` in
-  `internal/cmd/topic.go`) pages `Topics().GetEntriesPage` and then fans out over
-  `Messages().Get` behind an errgroup, and why `mailView.fetchTopic` does the same for one
-  page. HEY serves the entry index newest first; `entriesInThread` gathers the pages and
-  reverses them, so a thread reads oldest first.
+  `Messages().Get` per entry. `internal/threadload` is the one place that read is done
+  for the CLI: it walks `Topics().GetEntriesPage` newest first and then fans out over
+  `Messages().Get`, within literal limits (`threadload.DefaultLimits`: pages, entries,
+  message requests, retries, concurrency, retained bytes, deadline), and reports per
+  entry whether the body was `hydrated`, `bodyless`, `not_requested`, `over_limit` or
+  `failed`. Hydration is the caller's decision: `hey threads --count` and `--ids-only` read
+  the index only, `hey attachments` always reads bodies because attachment metadata lives
+  in the HTML. A thread that could be read only in part is refused without
+  `--allow-partial`; with it the notice says what is missing (`threadNotice` in
+  `internal/cmd/thread_source.go`). The package takes a `Source` interface rather than the
+  SDK, so `cmd` hands it `sdkThreadSource`; `tui` could do the same without an import
+  cycle, but `mailView.fetchTopic` still reads one page, deliberately, until its image
+  loading has budgets of its own (#246). HEY serves the entry index newest first; the
+  loader admits newest first and reverses once, so a thread reads oldest first.
 
   The entry index is geared_pagination like every other list here, so its page is a cursor
-  out of the `Link` header and a number is answered with the first page forever.
-  `threadEntryPages` in `topic.go` walks it through `collectPages`, and `hey attachments`
-  walks the same list — `Topics().GetEntries` throws that header away, which is what
-  `GetEntriesPage` exists for.
+  out of the `Link` header and a number is answered with the first page forever —
+  `Topics().GetEntries` throws that header away, which is what `GetEntriesPage` exists
+  for.
+
+  The SDK's generated parsers read a response with `io.ReadAll`, so until it bounds its
+  own reads (#248) `internal/cmd/sdk_transport.go` hands it a transport that caps JSON and
+  text bodies at 16 MiB, success and error alike, decompressed, and leaves blobs — which
+  the SDK streams or caps itself — alone. It sits inside the SDK's own http.Client, so the
+  SDK's timeout, redirect credential stripping, logging and hooks still apply.
 - **A reply's recipients come from the entry it answers.** `Messages().Get` carries that
   entry's `Addressed` (`directly`/`copied`/`blindcopied`), and `recipientsForReplyTo` —
   in `internal/cmd/thread_reply.go` for `hey reply`, and in `internal/tui/compose.go` for

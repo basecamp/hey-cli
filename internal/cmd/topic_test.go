@@ -93,6 +93,16 @@ func threadEntriesPageIndex(pages int, cursor string) int {
 	return 0
 }
 
+// readThreadEntries reads thread 7, the one every server here serves, with its bodies
+// the way `hey threads` does.
+func readThreadEntries(ctx context.Context) ([]threadEntry, error) {
+	thread, err := loadThread(ctx, 7, true)
+	if err != nil {
+		return nil, err
+	}
+	return threadEntries(thread), nil
+}
+
 // A thread reads oldest first, however many pages HEY serves it in.
 func TestEntriesInThreadReadsEveryPageOldestFirst(t *testing.T) {
 	server, reads := threadEntriesServer(t,
@@ -104,7 +114,7 @@ func TestEntriesInThreadReadsEveryPageOldestFirst(t *testing.T) {
 		})
 	withSDKPointedAt(t, server)
 
-	entries, err := entriesInThread(context.Background(), 7)
+	entries, err := readThreadEntries(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -143,7 +153,7 @@ func TestEntriesInThreadReadsATwoEntryThreadOnce(t *testing.T) {
 		})
 	withSDKPointedAt(t, server)
 
-	entries, err := entriesInThread(context.Background(), 7)
+	entries, err := readThreadEntries(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -171,7 +181,7 @@ func TestEntriesInThreadFollowsTheCursorThroughALongThread(t *testing.T) {
 	server, reads := threadEntriesServer(t, [][]int64{newest, oldest}, bodies)
 	withSDKPointedAt(t, server)
 
-	entries, err := entriesInThread(context.Background(), 7)
+	entries, err := readThreadEntries(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -195,7 +205,7 @@ func TestEntriesInThreadWithoutEntries(t *testing.T) {
 	server, _ := threadEntriesServer(t, nil, nil)
 	withSDKPointedAt(t, server)
 
-	if _, err := entriesInThread(context.Background(), 7); err == nil {
+	if _, err := readThreadEntries(context.Background()); err == nil {
 		t.Fatal("expected an error for a thread with no entries")
 	}
 }
@@ -207,7 +217,7 @@ func TestEntriesInThreadConvertsBodiesToMarkdown(t *testing.T) {
 	server, _ := threadEntriesServer(t, [][]int64{{11}}, map[int64]string{11: trix})
 	withSDKPointedAt(t, server)
 
-	entries, err := entriesInThread(context.Background(), 7)
+	entries, err := readThreadEntries(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -231,7 +241,7 @@ func TestEntriesInThreadReadsAnInboundEmailsEmbeddedBody(t *testing.T) {
 	server, _ := threadEntriesServer(t, [][]int64{{11}}, map[int64]string{11: inbound})
 	withSDKPointedAt(t, server)
 
-	entries, err := entriesInThread(context.Background(), 7)
+	entries, err := readThreadEntries(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

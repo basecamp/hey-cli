@@ -17,6 +17,7 @@ hey accounts
 hey accounts list
 hey accounts use
 hey attachments
+hey attachments --allow-partial
 hey attachments save
 hey attachments save --force
 hey attachments save --output
@@ -202,6 +203,7 @@ hey skill install
 hey spam
 hey stop-ignoring
 hey threads
+hey threads --allow-partial
 hey timetrack
 hey timetrack categories
 hey timetrack category

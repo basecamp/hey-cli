@@ -1,33 +1,23 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"html"
 	"io"
-	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/sync/errgroup"
-
-	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/markdown"
 	"github.com/basecamp/hey-cli/internal/output"
 	"github.com/basecamp/hey-cli/internal/terminal"
+	"github.com/basecamp/hey-cli/internal/threadload"
 )
 
-// maxThreadEntryPages is how many pages of a thread's entries one command reads, counting
-// the page it already has: that one plus a hundred cursors beyond it.
-const (
-	maxThreadEntryPages         = 101
-	maxConcurrentEntryBodyReads = 8
-	threadEntrySeparatorWidth   = 60
-)
+const threadEntrySeparatorWidth = 60
 
 // threadContact is whoever wrote an entry.
 type threadContact struct {
@@ -37,7 +27,9 @@ type threadContact struct {
 }
 
 // threadEntry is one message in a thread. Body is Markdown, converted once here from
-// HEY's Trix HTML; BodyHTML keeps that HTML for --html.
+// HEY's Trix HTML; BodyHTML keeps that HTML for --html. BodyState says what became of
+// the body: hydrated, bodyless (HEY served none), over_limit or failed (it was not
+// read), or not_requested (the format did not need it).
 type threadEntry struct {
 	ID                    int64         `json:"id"`
 	CreatedAt             string        `json:"created_at"`
@@ -48,11 +40,13 @@ type threadEntry struct {
 	Kind                  string        `json:"kind"`
 	AppURL                string        `json:"app_url"`
 	Body                  string        `json:"body,omitempty"`
+	BodyState             string        `json:"body_state,omitempty"`
 	BodyHTML              string        `json:"-"`
 }
 
 type topicCommand struct {
-	cmd *cobra.Command
+	cmd          *cobra.Command
+	allowPartial bool
 }
 
 func newThreadsCommand() *topicCommand {
@@ -61,13 +55,17 @@ func newThreadsCommand() *topicCommand {
 		Use:   "threads <id>",
 		Short: "Read a thread",
 		Annotations: map[string]string{
-			"agent_notes": "Returns a thread with all entries, oldest first. Entry bodies are Markdown; --html returns HEY's original HTML instead. Use the topic ID with hey reply or hey forward.",
+			"agent_notes": "Returns a thread with all entries, oldest first. Entry bodies are Markdown; --html returns HEY's original HTML instead. A thread that could only be read in part is refused unless --allow-partial is passed, in which case each entry's body_state says what was read. Use the topic ID with hey reply or hey forward.",
 		},
 		Example: `  hey threads 12345
-  hey threads 12345 --json`,
+  hey threads 12345 --json
+  hey threads 12345 --count
+  hey threads 12345 --allow-partial`,
 		RunE: threadsCommand.run,
 		Args: usageExactOneArg(),
 	}
+	threadsCommand.cmd.Flags().BoolVar(&threadsCommand.allowPartial, "allow-partial", false,
+		"Take a thread that could only be read in part, with a notice saying what is missing")
 
 	return threadsCommand
 }
@@ -82,37 +80,37 @@ func (c *topicCommand) run(cmd *cobra.Command, args []string) error {
 		return apierr.ErrUsage(fmt.Sprintf("invalid thread ID: %s", args[0]))
 	}
 
-	entries, err := entriesInThread(cmd.Context(), threadID)
+	// A count or a list of IDs needs the index and nothing else; every other format
+	// shows bodies, so it reads them.
+	format := writer.EffectiveFormat()
+	hydrate := format != output.FormatCount && format != output.FormatIDs
+	thread, err := loadThread(cmd.Context(), threadID, hydrate)
 	if err != nil {
 		return err
 	}
-
-	if writer.EffectiveFormat() == output.FormatHTML {
-		return writeThreadHTML(cmd.OutOrStdout(), entries)
+	notice := threadNotice(thread)
+	if notice != "" && !c.allowPartial {
+		return errPartialThread(threadID, notice)
 	}
+	entries := threadEntries(thread)
 
-	if writer.IsStyled() {
-		w := cmd.OutOrStdout()
-		for i, e := range entries {
-			if i > 0 {
-				fmt.Fprintln(w, strings.Repeat("─", threadEntrySeparatorWidth))
-			}
-			fmt.Fprintf(w, "From: %s  [%s]  #%d\n", terminal.SanitizeLine(threadEntrySender(e)), e.CreatedAt, e.ID)
-			switch {
-			case e.Body != "":
-				fmt.Fprintln(w)
-				fmt.Fprintln(w, markdown.Render(e.Body, stdoutWidth()))
-			case e.Summary != "":
-				fmt.Fprintln(w)
-				fmt.Fprintln(w, terminal.SanitizeLine(e.Summary))
-			}
-			fmt.Fprintln(w)
-		}
+	switch format {
+	case output.FormatHTML:
+		return writeThreadHTML(cmd.OutOrStdout(), entries)
+	case output.FormatStyled:
+		printThreadStyled(cmd.OutOrStdout(), entries, notice)
 		return nil
+	case output.FormatCount, output.FormatIDs:
+		if stderrNotice := paginationNoticeForStderr(format, notice); stderrNotice != "" {
+			fmt.Fprintln(cmd.ErrOrStderr(), stderrNotice)
+		}
+		return writeOK(entries)
+	case output.FormatAuto, output.FormatJSON, output.FormatQuiet, output.FormatMarkdown:
 	}
 
 	return writeOK(entries,
 		output.WithSummary(fmt.Sprintf("%d entries in thread %d", len(entries), threadID)),
+		output.WithNotice(notice),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "reply",
@@ -128,10 +126,37 @@ func (c *topicCommand) run(cmd *cobra.Command, args []string) error {
 	)
 }
 
+// printThreadStyled writes a thread for a terminal. A body is rendered; an entry HEY
+// served no body for shows its summary, which is all HEY has for it; an entry whose body
+// was not read says so rather than passing a preview off as the message.
+func printThreadStyled(w io.Writer, entries []threadEntry, notice string) {
+	for i, e := range entries {
+		if i > 0 {
+			fmt.Fprintln(w, strings.Repeat("─", threadEntrySeparatorWidth))
+		}
+		fmt.Fprintf(w, "From: %s  [%s]  #%d\n", terminal.SanitizeLine(threadEntrySender(e)), e.CreatedAt, e.ID)
+		fmt.Fprintln(w)
+		switch {
+		case e.Body != "":
+			fmt.Fprintln(w, markdown.Render(e.Body, stdoutWidth()))
+		case e.BodyState == string(threadload.StateBodyless) && e.Summary != "":
+			fmt.Fprintln(w, terminal.SanitizeLine(e.Summary))
+		case e.BodyState == string(threadload.StateBodyless):
+			fmt.Fprintln(w, "(no body)")
+		default:
+			fmt.Fprintf(w, "(body not read: %s)\n", e.BodyState)
+		}
+		fmt.Fprintln(w)
+	}
+	if notice != "" {
+		fmt.Fprintf(w, "notice: %s\n", notice)
+	}
+}
+
 // writeThreadHTML is what --html writes for a thread: each entry's original HTML, oldest
 // first, each introduced by a comment naming the entry, its sender and its date, with a
-// blank line between entries. An entry HEY served without a body says so in its
-// comment. A write that fails is the command's error.
+// blank line between entries. An entry without a body says why in its comment. A write
+// that fails is the command's error.
 func writeThreadHTML(w io.Writer, entries []threadEntry) error {
 	for i, e := range entries {
 		if i > 0 {
@@ -141,7 +166,7 @@ func writeThreadHTML(w io.Writer, entries []threadEntry) error {
 		}
 		body := e.BodyHTML
 		if body == "" {
-			body = "<!-- no body -->"
+			body = "<!-- no body: " + htmlCommentSafe(e.BodyState) + " -->"
 		}
 		_, err := fmt.Fprintf(w, "<!-- hey entry %d from %s at %s -->\n%s\n",
 			e.ID, html.EscapeString(htmlCommentSafe(threadEntrySender(e))), e.CreatedAt, body)
@@ -168,92 +193,43 @@ func threadEntrySender(entry threadEntry) string {
 	}
 }
 
-// entriesInThread reads a thread's entries and then each entry's body. HEY serves the
-// entry list newest first, a page at a time, and carries the body on the message rather
-// than the entry, so the pages are gathered and reversed into reading order.
-func entriesInThread(ctx context.Context, threadID int64) ([]threadEntry, error) {
-	collected, err := threadEntryPages(ctx, threadID)
-	if err != nil {
-		return nil, err
+// threadEntries is a loaded thread in the CLI's shape, oldest first, each body
+// converted to Markdown once.
+func threadEntries(thread *threadload.Thread) []threadEntry {
+	entries := make([]threadEntry, len(thread.Entries))
+	for i, loaded := range thread.Entries {
+		entries[i] = newThreadEntry(loaded)
 	}
-
-	entries := collected.Items
-	if len(entries) == 0 {
-		return nil, apierr.ErrNotFound("entries for thread", strconv.FormatInt(threadID, 10))
-	}
-	slices.Reverse(entries)
-
-	messages := make([]generated.Message, len(entries))
-	group, groupCtx := errgroup.WithContext(ctx)
-	group.SetLimit(maxConcurrentEntryBodyReads)
-	for index, entry := range entries {
-		group.Go(func() error {
-			message, err := sdk.Messages().Get(groupCtx, entry.Id)
-			if err != nil {
-				return err
-			}
-			if message == nil {
-				return fmt.Errorf("message %d returned no data", entry.Id)
-			}
-			messages[index] = *message
-			return nil
-		})
-	}
-	if err := group.Wait(); err != nil {
-		return nil, apierr.FromSDK(err)
-	}
-
-	threadEntries := make([]threadEntry, len(entries))
-	for index, entry := range entries {
-		threadEntries[index] = messageToThreadEntry(entry, messages[index])
-	}
-	return threadEntries, nil
+	return entries
 }
 
-// threadEntryPages reads a thread's entries a page at a time, newest first, following the
-// cursor HEY answers each page with. `hey attachments` walks the same list.
-func threadEntryPages(ctx context.Context, threadID int64) (collectedPages[generated.Entry], error) {
-	read := readThreadEntryPage(threadID)
-	first, err := read(ctx, "")
-	if err != nil {
-		return collectedPages[generated.Entry]{}, err
-	}
-	return collectPages(ctx, first, pageRequest{All: true, MaxPages: maxThreadEntryPages}, read)
-}
-
-func readThreadEntryPage(threadID int64) pageReader[generated.Entry] {
-	return func(ctx context.Context, cursor string) (pageResult[generated.Entry], error) {
-		page, err := sdk.Topics().GetEntriesPage(ctx, threadID, cursor)
-		if err != nil {
-			return pageResult[generated.Entry]{}, apierr.FromSDK(err)
-		}
-		if page == nil {
-			return pageResult[generated.Entry]{}, fmt.Errorf("thread %d answered no entry page at cursor %q", threadID, cursor)
-		}
-		return pageResult[generated.Entry]{Items: page.Entries, Cursor: page.NextPage}, nil
-	}
-}
-
-func messageToThreadEntry(entry generated.Entry, message generated.Message) threadEntry {
+func newThreadEntry(loaded threadload.Entry) threadEntry {
+	entry := loaded.Entry
 	creator := entry.Creator
-	if creator.Id == 0 {
-		creator = message.Creator
-	}
 	createdAt := entry.CreatedAt
-	if createdAt.IsZero() {
-		createdAt = message.CreatedAt
-	}
 	updatedAt := entry.UpdatedAt
-	if updatedAt.IsZero() {
-		updatedAt = message.UpdatedAt
-	}
 	summary := entry.Summary
-	if summary == "" {
-		summary = message.Subject
-	}
 	appURL := entry.AppUrl
-	if appURL == "" {
-		appURL = message.Url
+	body, bodyHTML := "", ""
+
+	if message := loaded.Message; message != nil {
+		if creator.Id == 0 {
+			creator = message.Creator
+		}
+		if createdAt.IsZero() {
+			createdAt = message.CreatedAt
+		}
+		if updatedAt.IsZero() {
+			updatedAt = message.UpdatedAt
+		}
+		if summary == "" {
+			summary = message.Subject
+		}
+		if appURL == "" {
+			appURL = message.Url
+		}
+		body = htmlutil.ToMarkdown(message.Content)
+		bodyHTML = message.Content
 	}
 
 	return threadEntry{
@@ -264,8 +240,9 @@ func messageToThreadEntry(entry generated.Entry, message generated.Message) thre
 		Summary:               summary,
 		Kind:                  entry.Kind,
 		AppURL:                appURL,
-		Body:                  htmlutil.ToMarkdown(message.Content),
-		BodyHTML:              message.Content,
+		Body:                  body,
+		BodyState:             string(loaded.State),
+		BodyHTML:              bodyHTML,
 		Creator: threadContact{
 			ID:           creator.Id,
 			Name:         creator.Name,

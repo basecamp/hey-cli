@@ -63,7 +63,7 @@ func TestThreadsHTMLWritesEachEntryToAPipe(t *testing.T) {
 		t.Fatalf("unexpected error: %v (stderr %q)", err, stderr)
 	}
 	want := "<!-- hey entry 11 from Rick Sanchez at 2026-04-12T09:30 -->\n<div>the first <b>word</b></div>\n" +
-		"\n<!-- hey entry 12 from Rick Sanchez at 2026-04-13T09:30 -->\n<!-- no body -->\n"
+		"\n<!-- hey entry 12 from Rick Sanchez at 2026-04-13T09:30 -->\n<!-- no body: bodyless -->\n"
 	if stdout != want {
 		t.Errorf("stdout =\n%q\nwant\n%q", stdout, want)
 	}
