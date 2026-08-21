@@ -151,8 +151,18 @@ func CheckClaudeSkillLink() *StatusCheck {
 			Hint:    "Unable to stat " + skillPath,
 		}
 	}
-	// Presence is not health: a skill hey-cli did not write is somebody
-	// else's work occupying the path, not a connected integration.
+	// Presence is not health: the file must be a regular file (a symlinked
+	// SKILL.md points somewhere never inspected)...
+	if !RegularSkillFile(skillPath) {
+		return &StatusCheck{
+			Name:    "Claude Code Skill",
+			Status:  "fail",
+			Message: "SKILL.md at " + skillDir + " is not a regular file",
+			Hint:    "Move it aside, then run: hey setup claude",
+		}
+	}
+	// ...written by hey-cli — anything else is somebody's work occupying
+	// the path, not a connected integration.
 	if !SkillDirOwned(skillDir) {
 		return &StatusCheck{
 			Name:    "Claude Code Skill",

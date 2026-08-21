@@ -138,15 +138,18 @@ func runNonInteractiveAgentSetup(cmd *cobra.Command) error {
 			for _, m := range r.manualCommands {
 				manualUnion.add(m)
 			}
-			if r.binaryAbsent {
+			if r.binaryAbsent && !r.pluginInstalled {
 				manualUnion.add("hey setup " + r.id)
 			}
 		}
 	}
 
 	// warnings: synthesized missing-binary remediation, sorted-agent order.
+	// Only when the absence actually prevented the connection — Codex is
+	// routinely detected by its home directory alone and its skill-only
+	// setup succeeds without a binary.
 	for _, r := range records {
-		if r.binaryAbsent {
+		if r.binaryAbsent && !r.pluginInstalled {
 			warnings = append(warnings, fmt.Sprintf("%s: %s binary not found; install %s, then run: hey setup %s", r.id, r.name, r.name, r.id))
 		}
 	}

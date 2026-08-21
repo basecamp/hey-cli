@@ -22,6 +22,17 @@ func SkillDirOwned(dir string) bool {
 	return err == nil
 }
 
+// RegularSkillFile reports whether path is a regular file (Lstat, so a
+// symlinked SKILL.md does not count — its target was never inspected).
+// Intermediate directories may still be symlinks: hey-cli's own canonical
+// Claude link is a directory link whose SKILL.md is the baseline's regular
+// file. This is the read-side twin of the install paths' write rule, so a
+// state installation refuses is never reported healthy.
+func RegularSkillFile(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode().IsRegular()
+}
+
 // StatusCheck represents a single agent integration health check result.
 type StatusCheck struct {
 	Name    string `json:"name"`

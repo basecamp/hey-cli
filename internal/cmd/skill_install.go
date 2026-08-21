@@ -86,7 +86,7 @@ func writeSkillFile(path string, data []byte) error {
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("inspecting %s: %w", path, err)
 	}
-	return os.WriteFile(path, data, 0o644) // #nosec G306 -- installed skills are intentionally user-readable
+	return os.WriteFile(path, data, 0o644) // #nosec G306 G703 -- fixed skill locations under the user's own home, gated by claimSkillDir and the Lstat above
 }
 
 // ownedSkillDir reports whether hey-cli wrote the skill directory.
@@ -302,14 +302,16 @@ func installSkillToCodex() (string, error) {
 	return skillPath, nil
 }
 
-// baselineSkillInstalled reports whether ~/.agents/skills/hey/SKILL.md exists.
+// baselineSkillInstalled reports whether ~/.agents/skills/hey/SKILL.md is a
+// healthy install: a regular file, per harness.RegularSkillFile — the same
+// shape rule every write path enforces, so a state install refuses (say a
+// symlinked SKILL.md) is never simultaneously reported healthy.
 func baselineSkillInstalled() bool {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return false
 	}
-	_, err = os.Stat(filepath.Join(home, ".agents", "skills", "hey", skillFilename))
-	return err == nil
+	return harness.RegularSkillFile(filepath.Join(home, ".agents", "skills", "hey", skillFilename))
 }
 
 // installedSkillVersion reads the .installed-version stamp from the baseline
@@ -319,7 +321,7 @@ func installedSkillVersion() string {
 	if err != nil {
 		return ""
 	}
-	data, err := os.ReadFile(filepath.Join(home, ".agents", "skills", "hey", installedVersionFile))
+	data, err := os.ReadFile(filepath.Join(home, ".agents", "skills", "hey", installedVersionFile)) // #nosec G304 -- the fixed baseline version stamp under the user's home
 	if err != nil {
 		return ""
 	}

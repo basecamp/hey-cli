@@ -196,16 +196,12 @@ func TestSetupAgentCommandEnvelope(t *testing.T) {
 		t.Errorf("summary = %q", response.Summary)
 	}
 
-	_, response, err = runAuthCommand(t, home, server.URL, "", true, "setup", "claude")
-	if err != nil {
-		t.Fatalf("setup claude: %v", err)
-	}
-	data = response.Data.(map[string]any)
-	if data["agent_detected"] != false || data["plugin_installed"] != false {
-		t.Errorf("undetected claude data = %v", data)
-	}
-	if response.Summary != "Claude Code not detected" {
-		t.Errorf("summary = %q", response.Summary)
+	// An explicitly requested integration that is not detected is a failed
+	// command: error envelope, nonzero exit.
+	_, _, err = runAuthCommand(t, home, server.URL, "", true, "setup", "claude")
+	var cliErr *output.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != "setup_incomplete" || cliErr.Message != "Claude Code not detected" {
+		t.Fatalf("error = %v, want setup_incomplete/Claude Code not detected", err)
 	}
 }
 
@@ -271,16 +267,10 @@ func TestSetupCodexDoesNotFabricateCodex(t *testing.T) {
 	server := httptest.NewServer(http.NotFoundHandler())
 	defer server.Close()
 
-	_, response, err := runAuthCommand(t, home, server.URL, "", true, "setup", "codex")
-	if err != nil {
-		t.Fatalf("setup codex: %v", err)
-	}
-	data := response.Data.(map[string]any)
-	if data["agent_detected"] != false || data["plugin_installed"] != false {
-		t.Errorf("data = %v", data)
-	}
-	if response.Summary != "Codex not detected" {
-		t.Errorf("summary = %q", response.Summary)
+	_, _, err := runAuthCommand(t, home, server.URL, "", true, "setup", "codex")
+	var cliErr *output.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != "setup_incomplete" || cliErr.Message != "Codex not detected" {
+		t.Fatalf("error = %v, want setup_incomplete/Codex not detected", err)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".codex")); !os.IsNotExist(err) {
 		t.Error("~/.codex was fabricated")
@@ -450,5 +440,44 @@ func TestConfigRewritesPreserveLegacyCredentialsWhenMigrationFails(t *testing.T)
 	}
 	if !strings.Contains(string(raw), `"onboarded": true`) {
 		t.Errorf("rewrite lost its own change: %s", raw)
+	}
+}
+
+// An agent detected by its home directory alone, whose setup succeeded,
+// gets no missing-binary remediation: the warning is for absences that
+// actually prevented the connection.
+func TestSetupAgentsNoBinaryWarningAfterSuccessfulSetup(t *testing.T) {
+	data, response := runSetupAgents(t, "", ".codex")
+	if got := stringList(t, data["warnings"]); len(got) != 0 {
+		t.Errorf("warnings = %v, want none after a successful skill-only setup", got)
+	}
+	if got := stringList(t, data["manual_commands"]); len(got) != 0 {
+		t.Errorf("manual_commands = %v, want none after success", got)
+	}
+	if response.Summary != "Installed baseline skill; connected Codex" {
+		t.Errorf("summary = %q", response.Summary)
+	}
+}
+
+// A symlinked baseline SKILL.md is the state every write path refuses, so
+// the read-side predicates must not report it healthy.
+func TestBaselineSkillInstalledRequiresRegularFile(t *testing.T) {
+	isolateAgents(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	dir := filepath.Join(home, ".agents", "skills", "hey")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	elsewhere := filepath.Join(home, "elsewhere.md")
+	if err := os.WriteFile(elsewhere, []byte("# elsewhere"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(elsewhere, filepath.Join(dir, "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	if baselineSkillInstalled() {
+		t.Error("a symlinked SKILL.md must not count as installed")
 	}
 }

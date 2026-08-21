@@ -110,7 +110,7 @@ func newSetupAgentCommands() []*cobra.Command {
 			Long:  fmt.Sprintf("Install the HEY agent skill and set up the %s integration so %s can work with your HEY mail.", agent.Name, agent.Name),
 			Args:  cobra.NoArgs,
 			Annotations: map[string]string{
-				"agent_notes": "Non-interactive when output is piped or --json is set; returns plugin_installed, agent_detected, errors and manual_commands.",
+				"agent_notes": "Non-interactive when output is piped or --json is set. Succeeds with {plugin_installed, agent_detected}; a not-detected or not-connected outcome is an error envelope (code setup_incomplete, manual steps in the hint) with a nonzero exit.",
 			},
 			RunE: func(cmd *cobra.Command, _ []string) error {
 				return runSetupAgent(cmd, agent, handler)
@@ -190,6 +190,18 @@ func runSetupAgent(cmd *cobra.Command, agent harness.AgentInfo, handler agentSet
 	}
 	if len(manualCommands) > 0 {
 		result["manual_commands"] = manualCommands
+	}
+
+	// An explicitly requested integration that did not connect is a failed
+	// command: automation keys off the exit status, not just the fields.
+	// The aggregate `setup agents` keeps its own in-band contract — its core
+	// outcome is the skill, and per-agent detail rides in the envelope.
+	if !installed || len(setupErrors) > 0 {
+		hint := "Run: hey doctor"
+		if len(manualCommands) > 0 {
+			hint = strings.Join(manualCommands, "; ")
+		}
+		return &output.Error{Code: "setup_incomplete", Message: summary, Hint: hint}
 	}
 
 	breadcrumbs := []output.Breadcrumb{
