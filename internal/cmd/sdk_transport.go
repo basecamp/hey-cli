@@ -61,11 +61,14 @@ func (t *cappedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if err != nil || resp == nil || resp.Body == nil || !isParsedRequest(req) {
 		return resp, err
 	}
+	// A body declared past the limit is refused on its first read rather than at the
+	// round trip: a round-trip error is one the SDK retries, and the body would be too
+	// large again; a read error is the same failure the streamed case produces.
+	remaining := t.limit
 	if resp.ContentLength > t.limit {
-		_ = resp.Body.Close()
-		return nil, fmt.Errorf("%s %s: declared %d bytes: %w", req.Method, req.URL.Path, resp.ContentLength, ErrResponseTooLarge)
+		remaining = -1
 	}
-	resp.Body = &cappedBody{ReadCloser: resp.Body, remaining: t.limit, request: req}
+	resp.Body = &cappedBody{ReadCloser: resp.Body, remaining: remaining, request: req}
 	return resp, nil
 }
 
@@ -97,10 +100,14 @@ type cappedBody struct {
 
 // Read delivers up to the limit and fails on the first byte past it. A body that is
 // exactly the limit is read whole: with nothing remaining, the next read still asks the
-// wrapped body for one byte, and gets its EOF rather than a refusal.
+// wrapped body for one byte, and gets its EOF rather than a refusal. A body declared
+// past the limit starts with a negative remainder and fails on its first read.
 func (b *cappedBody) Read(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
+	}
+	if b.remaining < 0 {
+		return 0, fmt.Errorf("%s %s: declared past the limit: %w", b.request.Method, b.request.URL.Path, ErrResponseTooLarge)
 	}
 	if int64(len(p)) > b.remaining+1 {
 		p = p[:b.remaining+1]

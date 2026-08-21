@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -324,5 +326,41 @@ func TestThreadsStopOnAServerError(t *testing.T) {
 	_, _, err := runCLIRaw(t, server, "--json", "threads", "7", "--allow-partial")
 	if !errors.Is(err, threadload.ErrSystemic) {
 		t.Fatalf("error = %v, want the systemic error even with --allow-partial", err)
+	}
+}
+
+// A message the transport refuses as too large is over_limit for that entry alone:
+// read once, not retried, and not the command's error.
+func TestThreadsMarkAnOversizedMessageOverLimit(t *testing.T) {
+	reads := &threadEntriesReads{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/topics/7/entries.json":
+			fmt.Fprint(w, `[{"id":12,"kind":"message"},{"id":11,"kind":"message"}]`)
+		case "/messages/12.json":
+			reads.mu.Lock()
+			reads.messages++
+			reads.mu.Unlock()
+			w.Header().Set("Content-Length", strconv.FormatInt(maxTextResponseBytes+1, 10))
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, `{"id":12,"content":"`)
+		default:
+			fmt.Fprint(w, `{"id":11,"content":"<p>fits</p>"}`)
+		}
+	}))
+	t.Cleanup(server.Close)
+	stdoutTerminal(t, false)
+
+	stdout, _, err := runCLIRaw(t, server, "--json", "threads", "7", "--allow-partial")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	response := decodeThread(t, stdout)
+	if response.Data[1].ID != 12 || response.Data[1].BodyState != "over_limit" || response.Data[0].BodyState != "hydrated" {
+		t.Errorf("response = %+v", response.Data)
+	}
+	if _, messages := reads.counts(); messages != 1 {
+		t.Errorf("read the oversized message %d times, want once", messages)
 	}
 }

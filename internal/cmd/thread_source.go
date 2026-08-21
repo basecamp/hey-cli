@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
@@ -40,6 +41,9 @@ func (s sdkThreadSource) Message(ctx context.Context, entryID int64) (*generated
 		// is the context ending, which the loader handles, not the service failing.
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
+		}
+		if errors.Is(err, ErrResponseTooLarge) || strings.Contains(err.Error(), ErrResponseTooLarge.Error()) {
+			return nil, fmt.Errorf("%w: %w", threadload.ErrOverLimit, err)
 		}
 		return nil, systemic(apierr.FromSDK(err))
 	}

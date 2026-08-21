@@ -37,6 +37,12 @@ type Source interface {
 // returns the error, since every request that follows would meet the same answer.
 var ErrSystemic = errors.New("the service is refusing requests")
 
+// ErrOverLimit marks an error a Source returns for one message that was too large to
+// read — a response past the transport's cap. It is not retried, since it would be
+// too large again, and not a failed body: the entry is over_limit, like one the byte
+// budget refused.
+var ErrOverLimit = errors.New("the message was too large to read")
+
 // Page is one page of the entries index, newest first, and the cursor for the next one
 // — empty on the last page.
 type Page struct {
@@ -237,6 +243,7 @@ func readIndex(ctx, caller context.Context, source Source, topicID int64, limits
 // ErrSystemic from the Source — stops every request in flight and is returned.
 func hydrate(ctx context.Context, source Source, thread *Thread, limits Limits, budget *byteBudget) error {
 	turns := newTurns()
+	refused := make([]bool, len(thread.Entries))
 	group, groupCtx := errgroup.WithContext(ctx)
 	group.SetLimit(max(limits.Concurrency, 1))
 	for i := range thread.Entries {
@@ -258,6 +265,8 @@ func hydrate(ctx context.Context, source Source, thread *Thread, limits Limits, 
 			case errors.Is(err, ErrSystemic):
 				entry.State = StateOverLimit
 				return err
+			case errors.Is(err, ErrOverLimit):
+				entry.State = StateOverLimit
 			case err != nil && groupCtx.Err() != nil:
 				entry.State = StateOverLimit
 			case err != nil:
@@ -267,7 +276,7 @@ func hydrate(ctx context.Context, source Source, thread *Thread, limits Limits, 
 				turns.wait(i)
 				switch {
 				case !budget.admit(size):
-					entry.State = StateOverLimit
+					entry.State, refused[i] = StateOverLimit, true
 				case kept.Content == "":
 					entry.Message, entry.State = kept, StateBodyless
 				default:
@@ -281,15 +290,16 @@ func hydrate(ctx context.Context, source Source, thread *Thread, limits Limits, 
 		return err
 	}
 
-	// Once a body did not fit, nothing older is kept either: the run of kept bodies
-	// stays contiguous from the newest entry.
+	// Once the budget refused a body, nothing older is kept either: the run of kept
+	// bodies stays contiguous from the newest entry. A single message too large to
+	// read is its own over_limit and casts no shadow on older ones.
 	dropping := false
 	for i := range thread.Entries {
 		entry := &thread.Entries[i]
 		switch {
 		case dropping && entry.State == StateHydrated:
 			entry.Message, entry.State = nil, StateOverLimit
-		case entry.State == StateOverLimit && i < limits.MaxMessageRequests:
+		case refused[i]:
 			dropping = true
 		}
 	}
@@ -310,7 +320,7 @@ func readMessage(ctx context.Context, source Source, entryID int64, retries int)
 		}
 		message, err := source.Message(ctx, entryID)
 		switch {
-		case errors.Is(err, ErrSystemic):
+		case errors.Is(err, ErrSystemic), errors.Is(err, ErrOverLimit):
 			return nil, err
 		case err != nil:
 			lastErr = err

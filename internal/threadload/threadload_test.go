@@ -20,6 +20,7 @@ type fakeSource struct {
 	bodies         map[int64]string
 	failing        map[int64]int // failures before a message succeeds; -1 fails forever
 	systemic       map[int64]bool
+	oversized      map[int64]bool
 	subjects       map[int64]string
 	failureMessage string
 	pageErr        map[int]error
@@ -71,6 +72,9 @@ func (f *fakeSource) Message(ctx context.Context, id int64) (*generated.Message,
 	}
 	if f.systemic[id] {
 		return nil, fmt.Errorf("%w: rate limited", ErrSystemic)
+	}
+	if f.oversized[id] {
+		return nil, fmt.Errorf("%w: 17 MiB", ErrOverLimit)
 	}
 	f.mu.Lock()
 	remaining, failing := f.failing[id]
@@ -342,6 +346,25 @@ func TestLoadTreatsItsOwnIndexDeadlineAsTruncation(t *testing.T) {
 	defer cancel()
 	if _, err := Load(ctx, source, Request{TopicID: 7, Limits: limits()}); !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("error = %v, want the caller's deadline", err)
+	}
+}
+
+// A message too large to read is over_limit, asked for once, and not the load's error.
+func TestLoadMarksAnOversizedMessageOverLimitWithoutRetrying(t *testing.T) {
+	source := &fakeSource{pages: [][]int64{{12, 11}}, bodies: map[int64]string{11: "x"}, oversized: map[int64]bool{12: true}}
+	thread, err := Load(context.Background(), source, Request{TopicID: 7, Hydrate: true, Limits: limits()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[int64]Entry{}
+	for _, entry := range thread.Entries {
+		byID[entry.Entry.Id] = entry
+	}
+	if byID[12].State != StateOverLimit || byID[11].State != StateHydrated {
+		t.Errorf("states = %v", states(thread.Entries))
+	}
+	if source.messages.Load() != 2 {
+		t.Errorf("requested %d messages, want one each with no retry", source.messages.Load())
 	}
 }
 
