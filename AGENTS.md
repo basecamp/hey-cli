@@ -43,7 +43,7 @@ All data-access commands call `requireAuth()` before making API calls. Auth subc
 
 ### State storage
 
-Configuration (base URL only) is stored in `~/.config/hey-cli/config.json`. Credentials are stored in the system keyring (service name: `hey`) with automatic fallback to `~/.config/hey-cli/credentials.json` when the keyring is unavailable. Set `HEY_NO_KEYRING=1` to force file storage.
+Configuration (the base URL, the default linked account, and the Imbox's cover) is stored in `~/.config/hey-cli/config.json`. Credentials are stored in the system keyring (service name: `hey`) with automatic fallback to `~/.config/hey-cli/credentials.json` when the keyring is unavailable. Set `HEY_NO_KEYRING=1` to force file storage.
 
 ### CLI
 
@@ -261,13 +261,22 @@ that is haystack's rule (`Box::Imbox#coverable?`), and it is the same box that g
 seen sections at all.
 
 `ctrl+v` opens `coverPicker`, which draws whichever preset is highlighted — a cover is
-picked by looking at it. The choice lives on `mailView.cover` and lasts the session, and
-that is not laziness: `boxes/_box.jbuilder` does not serve `cover`, so the SDK cannot carry
-it and there is nothing to read a cover back from. Persisting a local choice would only
-compete with the real one once HEY starts serving it. Serving the preset name (and, for
-uploads, a blob URL) is a five-line haystack change; then the picker seeds from the box and
-writes back to it. An uploaded cover has no honest character version — that one wants the
-Kitty path in `kitty.go`.
+picked by looking at it. The choice is stored locally, by `config.Cover` and
+`config.SaveCover`, reached through the `loadCover` and `saveCover` seams on the view
+context so the TUI does not depend on where it lives. A failed write is a notice, not a
+refusal: the cover is on screen either way and all that is lost is remembering it.
+
+**Local storage is the deliberate answer here, not a stopgap.** haystack does keep a cover
+per box, in a `box_covers` table with a real `preset_image` column — but it serves it to
+nobody. There is no `cover` in any jbuilder, and both native apps went their own way rather
+than wait for one: `CoverArtPersistenceManager` on iOS keeps the choice in `Preferences`,
+`CoverArtRepository` on Android keeps it in `CachePrefs`, each with its own numbered presets
+and bundled assets, neither ever asking the server. So a cover set here does not show up on
+the web, and that is true of every HEY client. Before adding a read of `box_covers`, work
+out why two mobile teams decided against it.
+
+An uploaded cover has no honest character version — that one wants the Kitty path in
+`kitty.go`.
 
 The help bar puts chorded keys last, via `modifiersLast`. The single-key bindings are what
 a reader reaches for while working through mail; a `ctrl+` chord in the middle of them

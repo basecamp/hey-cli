@@ -15,6 +15,7 @@ import (
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	attachmentfiles "github.com/basecamp/hey-cli/internal/attachments"
+	"github.com/basecamp/hey-cli/internal/config"
 )
 
 // --- Shared messages ---
@@ -148,6 +149,8 @@ func newViewContext(ctx context.Context, rootSDK, sdk *hey.Client, styles styles
 		newAttachmentTempDir: func() (string, error) {
 			return os.MkdirTemp("", "hey-cli-attachment-*")
 		},
+		loadCover: config.Cover,
+		saveCover: config.SaveCover,
 	}
 }
 

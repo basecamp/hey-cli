@@ -234,11 +234,15 @@ type mailView struct {
 }
 
 func newMailView(vc *viewContext) *mailView {
-	return &mailView{
+	view := &mailView{
 		vc:            vc,
 		topicViewport: viewport.New(viewport.WithWidth(0), viewport.WithHeight(0)),
 		searchList:    contentList{hideSeenState: true},
 	}
+	if vc.loadCover != nil {
+		view.cover = parseCoverPreset(vc.loadCover())
+	}
+	return view
 }
 
 func (v *mailView) Init() tea.Cmd {
@@ -1061,6 +1065,14 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 			v.cover = v.coverPicker.selected()
 			v.coverPicker = nil
 			v.postingList.setCover(v.cover)
+			// The cover is on screen either way; failing to write it only costs
+			// the choice on the next run, which is worth a notice and not a
+			// refusal to change the cover.
+			if v.vc.saveCover != nil {
+				if err := v.vc.saveCover(string(v.cover)); err != nil {
+					v.notice = "Could not remember the cover: " + err.Error()
+				}
+			}
 			return nil
 		}
 		v.coverPicker.update(msg)

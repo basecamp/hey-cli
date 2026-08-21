@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"testing"
@@ -480,5 +481,80 @@ func TestSourceTracking(t *testing.T) {
 	}
 	if cfg.SourceOf("base_url") != SourceFlag {
 		t.Errorf("flag source = %q, want %q", cfg.SourceOf("base_url"), SourceFlag)
+	}
+}
+
+func TestCoverRoundTrip(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+	t.Setenv("HEY_BASE_URL", "")
+
+	if got := Cover(); got != "" {
+		t.Errorf("Cover before anything was saved = %q, want empty", got)
+	}
+	if err := SaveCover("topo"); err != nil {
+		t.Fatalf("SaveCover: %v", err)
+	}
+	if got := Cover(); got != "topo" {
+		t.Errorf("Cover = %q, want topo", got)
+	}
+
+	// Uncovering writes no key rather than a blank one.
+	if err := SaveCover(""); err != nil {
+		t.Fatalf("SaveCover(\"\"): %v", err)
+	}
+	if got := Cover(); got != "" {
+		t.Errorf("Cover after uncovering = %q, want empty", got)
+	}
+	data, err := os.ReadFile(filepath.Join(tmp, "hey-cli", "config.json"))
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	var file map[string]any
+	if err := json.Unmarshal(data, &file); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	if _, present := file["cover"]; present {
+		t.Errorf("uncovering left a cover key behind: %s", data)
+	}
+}
+
+// A cover is one setting in a shared file; saving it must not take the others out.
+func TestSaveCoverKeepsOtherSettings(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+	t.Setenv("HEY_BASE_URL", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := cfg.SaveAccountID("12345"); err != nil {
+		t.Fatalf("SaveAccountID: %v", err)
+	}
+	if err := cfg.SaveBaseURL("https://app.hey.localhost:3003"); err != nil {
+		t.Fatalf("SaveBaseURL: %v", err)
+	}
+	before, err := loadGlobalFileConfig()
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+
+	if err := SaveCover("peace"); err != nil {
+		t.Fatalf("SaveCover: %v", err)
+	}
+
+	after, err := loadGlobalFileConfig()
+	if err != nil {
+		t.Fatalf("read config after saving: %v", err)
+	}
+	if after.BaseURL != before.BaseURL {
+		t.Errorf("base_url = %q, want %q", after.BaseURL, before.BaseURL)
+	}
+	if !maps.Equal(after.AccountDefaults, before.AccountDefaults) {
+		t.Errorf("account defaults = %v, want %v", after.AccountDefaults, before.AccountDefaults)
+	}
+	if after.Cover != "peace" {
+		t.Errorf("cover = %q, want peace", after.Cover)
 	}
 }

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"image/color"
 	"slices"
 	"strings"
@@ -360,6 +361,72 @@ func TestCoverPickerRefusesOtherBoxes(t *testing.T) {
 	}
 	if hasHelpBinding(v.HelpBindings(), "ctrl+v") {
 		t.Error("help offers cover art on a box that cannot be covered")
+	}
+}
+
+// The cover outlives the session, so a reader picks one once. It is stored
+// locally rather than read from HEY, the way the iOS and Android apps do it.
+func TestCoverPickerRemembersTheChoice(t *testing.T) {
+	saved := "grid"
+	vc := testVC()
+	vc.loadCover = func() string { return saved }
+	vc.saveCover = func(preset string) error {
+		saved = preset
+		return nil
+	}
+
+	v := newMailView(vc)
+	if v.cover != coverGrid {
+		t.Fatalf("a new mail view opened with %q, want the stored grid", v.cover)
+	}
+
+	v.boxes = orderBoxes(testBoxes())
+	v.Update(currentPostingsLoaded(v, testPostings()))
+	v.HandleContentKey(keyPress("ctrl+v"))
+	for v.coverPicker.selected() != coverPeace {
+		v.HandleContentKey(keyPress("down"))
+	}
+	v.HandleContentKey(keyPress("enter"))
+
+	if saved != "peace" {
+		t.Errorf("stored cover = %q, want peace", saved)
+	}
+	if v.notice != "" {
+		t.Errorf("a cover that stored cleanly left a notice: %q", v.notice)
+	}
+
+	// Uncovering is stored too, or the cover comes back on the next run.
+	v.HandleContentKey(keyPress("ctrl+v"))
+	for v.coverPicker.selected() != coverNone {
+		v.HandleContentKey(keyPress("up"))
+	}
+	v.HandleContentKey(keyPress("enter"))
+	if saved != "" {
+		t.Errorf("stored cover after uncovering = %q, want empty", saved)
+	}
+}
+
+// Failing to store the choice must not stop it taking effect: the cover is on
+// screen either way, and all that is lost is remembering it next time.
+func TestCoverPickerSurvivesAFailedWrite(t *testing.T) {
+	vc := testVC()
+	vc.saveCover = func(string) error { return errors.New("read-only file system") }
+
+	v := newMailView(vc)
+	v.boxes = orderBoxes(testBoxes())
+	v.Update(currentPostingsLoaded(v, testPostings()))
+
+	v.HandleContentKey(keyPress("ctrl+v"))
+	for v.coverPicker.selected() != coverTopo {
+		v.HandleContentKey(keyPress("down"))
+	}
+	v.HandleContentKey(keyPress("enter"))
+
+	if v.cover != coverTopo || v.postingList.cover != coverTopo {
+		t.Errorf("cover = %q, list = %q, want topo despite the failed write", v.cover, v.postingList.cover)
+	}
+	if !strings.Contains(v.notice, "read-only file system") {
+		t.Errorf("notice = %q, want it to say why the cover was not remembered", v.notice)
 	}
 }
 

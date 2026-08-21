@@ -12,6 +12,11 @@ import (
 type attachmentSaveFunc func(context.Context, string, string, bool) (int64, error)
 type attachmentOpenFunc func(string) error
 
+// The Imbox's cover crosses the seam as a preset name rather than a coverPreset,
+// so that what stores it does not have to know how covers are drawn.
+type coverLoadFunc func() string
+type coverSaveFunc func(preset string) error
+
 type viewContext struct {
 	rootSDK              *hey.Client
 	sdk                  *hey.Client
@@ -22,6 +27,8 @@ type viewContext struct {
 	saveAttachment       attachmentSaveFunc
 	openAttachment       attachmentOpenFunc
 	newAttachmentTempDir func() (string, error)
+	loadCover            coverLoadFunc
+	saveCover            coverSaveFunc
 	width                int
 	height               int // content area height
 }

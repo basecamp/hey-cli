@@ -48,6 +48,7 @@ type Config struct {
 type fileConfig struct {
 	BaseURL             string                              `json:"base_url,omitempty"`
 	AccountID           string                              `json:"account_id,omitempty"`
+	Cover               string                              `json:"cover,omitempty"`
 	AccountDefaults     map[string]string                   `json:"account_defaults,omitempty"`
 	TrustedLocalConfigs map[string]trustedLocalConfigRecord `json:"trusted_local_configs,omitempty"`
 }
@@ -360,6 +361,35 @@ func (c *Config) SaveBaseURL(baseURL string) error {
 		return err
 	}
 	file.BaseURL = baseURL
+	return saveGlobalConfig(file)
+}
+
+// Cover is the art over the Imbox's Previously Seen, or "" for none.
+//
+// It is stored here rather than read from HEY on purpose. The web app keeps a
+// cover per box in its own table, but no client reads that: the iOS and Android
+// apps each keep their own choice in device preferences, with their own set of
+// presets, and never ask the server. This is the same decision, and it is the
+// reason a cover set here does not show up on the web.
+func Cover() string {
+	file, err := loadGlobalFileConfig()
+	if err != nil {
+		return ""
+	}
+	return file.Cover
+}
+
+// SaveCover stores the Imbox's cover, leaving every other setting alone. An empty
+// preset drops the key rather than writing a blank one.
+func SaveCover(preset string) error {
+	file, err := loadGlobalFileConfig()
+	if err != nil {
+		return err
+	}
+	if err := migrateLegacyAccountDefault(&file); err != nil {
+		return err
+	}
+	file.Cover = preset
 	return saveGlobalConfig(file)
 }
 
