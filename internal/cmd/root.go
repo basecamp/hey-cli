@@ -272,7 +272,7 @@ func Execute() {
 			// writer the pre-run would have built, --html included, so an --html
 			// invocation's error reads as text on stderr rather than as JSON.
 			format := output.FormatFromFlags(jsonFlag || jqFlag != "", quietFlag, idsOnly, countFlag, markdownF, styledFlag, agentFlag)
-			if htmlOutput {
+			if htmlOutput || htmlRequested(os.Args[1:]) {
 				format = output.FormatHTML
 			}
 			writer = output.New(output.Options{Format: format, JQFilter: jqFlag})
@@ -284,6 +284,21 @@ func Execute() {
 		writer.Err(err)
 		os.Exit(output.ExitCodeFor(err))
 	}
+}
+
+// htmlRequested reports --html among raw arguments. Parsing stops at the first unknown
+// flag, so when the error is the flag before --html the parsed boolean is still false;
+// the arguments themselves say what was asked for.
+func htmlRequested(args []string) bool {
+	for _, arg := range args {
+		if arg == "--" {
+			return false
+		}
+		if arg == "--html" || arg == "--html=true" || arg == "--html=1" {
+			return true
+		}
+	}
+	return false
 }
 
 // htmlCommands are the commands that read something HEY holds as HTML, and so the only

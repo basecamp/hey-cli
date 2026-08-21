@@ -32,6 +32,19 @@ func TestHTMLIsValidatedBeforeVersionAndJQ(t *testing.T) {
 	}
 }
 
+func TestHTMLRequestedReadsTheRawArguments(t *testing.T) {
+	for args, want := range map[string]bool{
+		"threads 7 --bogus --html": true,
+		"threads 7 --html=true":    true,
+		"threads 7 --json":         false,
+		"threads 7 -- --html":      false,
+	} {
+		if got := htmlRequested(strings.Fields(args)); got != want {
+			t.Errorf("htmlRequested(%q) = %v, want %v", args, got, want)
+		}
+	}
+}
+
 // A day without an entry writes nothing under --html rather than a usage error.
 func TestJournalReadHTMLWritesNothingForAnEmptyDay(t *testing.T) {
 	server := journalServerWithReadBehavior(t, "204")
