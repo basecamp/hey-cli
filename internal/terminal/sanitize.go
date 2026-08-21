@@ -12,33 +12,172 @@
 // "invoice" and "fdp.exe" shows a PDF on screen and an executable on disk, and an
 // isolate can swap the order of a sender's name and address. Nothing HEY shows in a single line needs
 // them — an RTL name still reads right-to-left without an explicit override.
+//
+// # Confusables
+//
+// Past the controls lies text that reads as one thing and is another. The policy,
+// class by class:
+//
+// Format characters that draw nothing are stripped: the soft hyphen, the zero
+// width space, the word joiner, the byte order mark, the combining grapheme joiner,
+// the Mongolian vowel separator, the invisible mathematical operators and the
+// deprecated format controls next to them. A zero width space in "paypal" or a soft
+// hyphen in "invoicepdf.exe" renders as the honest spelling while being a different
+// string, which is the same class as a bidi override. They are stripped rather than
+// replaced, since a replacement mark is visible debris in a name column. The list is
+// enumerated; it is not the Cf category wholesale, which also holds the joiners
+// below, the Arabic number and verse signs that are visible, and the tag characters
+// a subdivision flag is made of.
+//
+// The zero width joiner and non-joiner are kept where they can join. They carry
+// text: an emoji family is emoji joined by U+200D, and Persian, Urdu and the Indic
+// scripts write with both. A joiner survives only between two non-ASCII,
+// non-space runes, and a run of them collapses to one; at the start or end of a
+// string, or next to an ASCII letter — a joiner inside "paypal" — it joins nothing
+// and is dropped.
+//
+// Combining marks are kept up to four on a base and the rest of the run dropped.
+// The deepest stacks a writing system produces reach four — a Hebrew letter with
+// its shin dot, dagesh, vowel and cantillation; a Tibetan stack with two subjoined
+// letters and a vowel sign — where decomposed Vietnamese, Hindi and the keycap
+// emoji use two. Zalgo needs dozens to climb out of its cell. Variation selectors
+// are marks and sit under the same cap, so the U+FE0F that makes a heart red stays.
+//
+// Spaces that are not U+0020 are left alone. A no-break space is ordinary in text
+// that came out of HTML, as are the fixed-width spaces; they render as a space and
+// read as one, and normalizing them would rewrite names for no safety gain.
+//
+// Homoglyphs — a Cyrillic "а" in a Latin name — are not detected. Without
+// confusable tables and a script heuristic the check cannot tell a forged name from
+// a multilingual one, and the false positives land on real people. What a link's
+// label says against where it goes is the Markdown serializer's business: a label
+// that reads as a URL is written beside its destination rather than collapsed into
+// it (see htmlutil.ToMarkdown).
 package terminal
 
 import (
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
 )
 
 var lineBreaks = strings.NewReplacer("\n", " ", "\t", " ")
 
-// Sanitize removes escape sequences, control characters and bidirectional controls
-// from text on its way to a terminal. Newlines and tabs survive, because text is not
-// necessarily one line: a message body, a jq result and a Markdown cell all carry
-// them on purpose.
+// maxCombiningMarks is how many combining marks may follow one base before the
+// rest of the run is dropped.
+const maxCombiningMarks = 4
+
+const (
+	zeroWidthNonJoiner = 0x200c
+	zeroWidthJoiner    = 0x200d
+)
+
+// Sanitize removes escape sequences, control characters, bidirectional controls
+// and the confusables described in the package doc from text on its way to a
+// terminal. Newlines and tabs survive, because text is not necessarily one line: a
+// message body, a jq result and a Markdown cell all carry them on purpose.
+//
+// One pass, and no allocation for text that needs nothing removed. Every decision
+// is made on what has been kept, so sanitizing twice is the same as once.
 func Sanitize(value string) string {
-	return strings.Map(func(r rune) rune {
+	p := pass{in: ansi.Strip(value), kept: -1}
+	for i, r := range p.in {
 		switch {
 		case r == '\n' || r == '\t':
-			return r
-		case r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f):
-			return -1
-		case isBidiControl(r):
-			return -1
+			p.keep(r)
+			p.marks = 0
+		case isControl(r), isBidiControl(r), isInvisible(r):
+			p.drop(i)
+		case r == zeroWidthJoiner || r == zeroWidthNonJoiner:
+			p.hold(i, r)
+		case isCombiningMark(r):
+			if p.marks < maxCombiningMarks {
+				p.keep(r)
+				p.marks++
+			} else {
+				p.drop(i)
+			}
 		default:
-			return r
+			p.keep(r)
+			p.marks = 0
 		}
-	}, ansi.Strip(value))
+	}
+	return p.String()
+}
+
+// pass is one walk over the input. The output is only built once something is
+// dropped; until then the input is its own output. A joiner is held back until the
+// rune after it is kept, and written only when that rune is something it can join.
+type pass struct {
+	in       string
+	out      *strings.Builder
+	kept     rune // the last rune written, other than a joiner
+	marks    int  // combining marks written since the last base
+	joiner   rune // a joiner waiting for its right-hand side, or zero
+	joinerAt int  // its byte offset
+}
+
+func (p *pass) keep(r rune) {
+	if p.joiner != 0 {
+		if joinable(r) {
+			p.write(p.joiner)
+		} else {
+			p.diverge(p.joinerAt)
+		}
+		p.joiner = 0
+	}
+	p.write(r)
+	p.kept = r
+}
+
+func (p *pass) drop(i int) {
+	if p.joiner != 0 {
+		i = p.joinerAt
+	}
+	p.diverge(i)
+}
+
+// hold keeps a joiner back until keep decides it. A joiner with nothing kept on
+// its left, or one held while another is pending, is dropped.
+func (p *pass) hold(i int, r rune) {
+	switch {
+	case p.joiner != 0 || !joinable(p.kept):
+		p.drop(i)
+	default:
+		p.joiner, p.joinerAt = r, i
+	}
+}
+
+func (p *pass) write(r rune) {
+	if p.out != nil {
+		p.out.WriteRune(r)
+	}
+}
+
+// diverge starts the output at the point the first dropped rune would have gone,
+// which is i or the joiner pending before it.
+func (p *pass) diverge(i int) {
+	if p.out == nil {
+		p.out = &strings.Builder{}
+		p.out.Grow(len(p.in))
+		p.out.WriteString(p.in[:i])
+	}
+}
+
+func (p *pass) String() string {
+	if p.joiner != 0 {
+		p.diverge(p.joinerAt)
+	}
+	if p.out == nil {
+		return p.in
+	}
+	return p.out.String()
+}
+
+func isControl(r rune) bool {
+	return r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f)
 }
 
 // isBidiControl reports the Unicode Bidi_Control property: the Arabic letter mark,
@@ -55,6 +194,33 @@ func isBidiControl(r rune) bool {
 	default:
 		return false
 	}
+}
+
+// isInvisible reports the format characters that draw nothing and carry no text:
+// the soft hyphen, the combining grapheme joiner, the Mongolian vowel separator,
+// the zero width space, the word joiner and the invisible operators after it, the
+// deprecated format controls, and the byte order mark.
+func isInvisible(r rune) bool {
+	switch {
+	case r == 0x00ad, r == 0x034f, r == 0x180e, r == 0x200b, r == 0xfeff:
+		return true
+	case r >= 0x2060 && r <= 0x2064:
+		return true
+	case r >= 0x206a && r <= 0x206f:
+		return true
+	default:
+		return false
+	}
+}
+
+// joinable reports whether r is something a joiner next to it can join: non-ASCII
+// text that is not a space.
+func joinable(r rune) bool {
+	return r >= utf8.RuneSelf && !unicode.IsSpace(r)
+}
+
+func isCombiningMark(r rune) bool {
+	return r >= 0x300 && unicode.In(r, unicode.Mn, unicode.Me, unicode.Mc)
 }
 
 // SanitizeLine is Sanitize for somewhere only one line fits — a table cell, a

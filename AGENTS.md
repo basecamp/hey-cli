@@ -150,7 +150,12 @@ handed. The model has three layers, and it is worth knowing which one a change t
 
 - **Metadata** — a sender, a subject, a filename, a box name, a habit title — goes through
   `terminal.Sanitize`/`SanitizeLine` (`internal/terminal`), which strips escape
-  sequences, C0/C1 controls and the `Bidi_Control` set. It is applied once where it
+  sequences, C0/C1 controls and the `Bidi_Control` set. Its confusable policy (in the
+  package doc) strips the format characters that draw nothing (zero width space, word
+  joiner, soft hyphen, BOM, …) and combining marks past four on a base, keeps ZWJ/ZWNJ
+  where they join (emoji families, Persian, Devanagari), leaves NBSP and friends alone,
+  and does not detect homoglyphs — a URL-shaped link label is shown beside its
+  destination by `htmlutil.ToMarkdown` instead. It is applied once where it
   covers the most: the CLI's `table.addRow` sanitizes its cells, and the TUI's read-only
   models (`mail.NewPosting`, `mail.NewEntry`, `searchMatchToPosting`) are sanitized as
   they are built. The
