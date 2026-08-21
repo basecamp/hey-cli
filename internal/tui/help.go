@@ -12,6 +12,24 @@ type helpBinding struct {
 	desc string
 }
 
+// modifiersLast moves the chorded keys to the end of the bar, keeping the order
+// within each group. The single-key bindings are the ones a reader reaches for
+// while working through mail, and scattering ctrl+ chords among them pushes those
+// onto a second line and makes the whole bar read as a lookup table. Held
+// together at the end they are a group you can skip past.
+func modifiersLast(bindings []helpBinding) []helpBinding {
+	plain := make([]helpBinding, 0, len(bindings))
+	chorded := make([]helpBinding, 0, len(bindings))
+	for _, binding := range bindings {
+		if strings.Contains(binding.key, "+") {
+			chorded = append(chorded, binding)
+		} else {
+			plain = append(plain, binding)
+		}
+	}
+	return append(plain, chorded...)
+}
+
 // helpBar renders a row of key bindings at the bottom of the screen.
 type helpBar struct {
 	width    int

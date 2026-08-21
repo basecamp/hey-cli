@@ -120,7 +120,7 @@ section: ctrl+s from the mail list swaps it in as the active view, it captures e
 while it is open, and it asks to be closed again with `screenerClosedMsg`.
 The rest of `internal/tui/` is shared infrastructure: `tui.go` (model and
 router), `section_view.go` (the interface), plus `nav.go`, `content.go`, `help.go`,
-`styles.go`, `loading.go`, `kitty.go`, `html.go`, `live.go`, `covers.go` and `calendar_views.go`. Read the directory rather than a
+`styles.go`, `loading.go`, `kitty.go`, `html.go`, `live.go`, `covers.go`, `cover_picker.go` and `calendar_views.go`. Read the directory rather than a
 table here.
 
 To add a new section: implement the `sectionView` interface in a new file, add a field and constructor call in `newModel`, and add a case in `switchSection`.
@@ -260,11 +260,18 @@ arrives covered rather than however the last one was left. Only the Imbox is cov
 that is haystack's rule (`Box::Imbox#coverable?`), and it is the same box that gets the
 seen sections at all.
 
-**The preset is still a stub.** `boxes/_box.jbuilder` does not serve `cover`, so the SDK
-cannot carry it and `imboxCover()` reads `HEY_COVER` instead. Serving the preset name
-(and, for uploads, a blob URL) is a five-line haystack change; then `imboxCover` reads the
-box and the env var goes away. An uploaded cover has no honest character version — that
-one wants the Kitty path in `kitty.go`.
+`ctrl+v` opens `coverPicker`, which draws whichever preset is highlighted — a cover is
+picked by looking at it. The choice lives on `mailView.cover` and lasts the session, and
+that is not laziness: `boxes/_box.jbuilder` does not serve `cover`, so the SDK cannot carry
+it and there is nothing to read a cover back from. Persisting a local choice would only
+compete with the real one once HEY starts serving it. Serving the preset name (and, for
+uploads, a blob URL) is a five-line haystack change; then the picker seeds from the box and
+writes back to it. An uploaded cover has no honest character version — that one wants the
+Kitty path in `kitty.go`.
+
+The help bar puts chorded keys last, via `modifiersLast`. The single-key bindings are what
+a reader reaches for while working through mail; a `ctrl+` chord in the middle of them
+pushes the everyday ones onto a second line and makes the bar read as a lookup table.
 
 ### Inline images in the TUI
 

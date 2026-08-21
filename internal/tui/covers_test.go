@@ -2,9 +2,11 @@ package tui
 
 import (
 	"image/color"
+	"slices"
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/hey-cli/internal/models"
@@ -243,6 +245,144 @@ func TestCoverRepaintsWhenColorGoesAway(t *testing.T) {
 	applyTheme(noColorTheme())
 	if renderer.view(coverTerrazzo, 40, 8) == colored {
 		t.Error("cover kept its colors after color was turned off")
+	}
+}
+
+// --- Picking a cover ---
+
+func TestCoverPickerOffersEveryPresetAndNone(t *testing.T) {
+	picker := newCoverPicker(coverNone)
+
+	if len(picker.choices) != len(allCoverPresets)+1 {
+		t.Fatalf("picker offers %d choices, want every preset plus none", len(picker.choices))
+	}
+	if picker.choices[0] != coverNone {
+		t.Errorf("first choice is %q, want no cover", picker.choices[0])
+	}
+	for _, preset := range allCoverPresets {
+		if !slices.Contains(picker.choices, preset) {
+			t.Errorf("picker does not offer %s", preset)
+		}
+	}
+}
+
+// The picker opens on what is already covering the Imbox, so enter is a no-op
+// rather than a surprise.
+func TestCoverPickerStartsOnTheCurrentCover(t *testing.T) {
+	for _, preset := range append([]coverPreset{coverNone}, allCoverPresets...) {
+		if got := newCoverPicker(preset).selected(); got != preset {
+			t.Errorf("picker opened on %q, want %q", got, preset)
+		}
+	}
+}
+
+func TestCoverPickerMovesAndStops(t *testing.T) {
+	picker := newCoverPicker(coverNone)
+	last := len(picker.choices) - 1
+
+	for range len(picker.choices) + 3 {
+		picker.update(tea.KeyPressMsg{Code: tea.KeyDown})
+	}
+	if picker.cursor != last {
+		t.Errorf("cursor ran to %d, want to stop at %d", picker.cursor, last)
+	}
+
+	for range len(picker.choices) + 3 {
+		picker.update(tea.KeyPressMsg{Code: tea.KeyUp})
+	}
+	if picker.cursor != 0 {
+		t.Errorf("cursor ran to %d, want to stop at 0", picker.cursor)
+	}
+}
+
+// A cover is chosen by looking at it, so the picker draws the highlighted one.
+func TestCoverPickerPreviewsTheHighlightedCover(t *testing.T) {
+	picker := newCoverPicker(coverTopo)
+	view := picker.view(newStyles(), 60)
+
+	if !strings.Contains(view, "Topo") {
+		t.Error("picker does not name the highlighted cover")
+	}
+	preview := (&coverRenderer{}).view(coverTopo, 56, coverPreviewRows)
+	if !strings.Contains(view, preview) {
+		t.Error("picker does not draw the highlighted cover")
+	}
+
+	if strings.Contains(newCoverPicker(coverNone).view(newStyles(), 60), preview) {
+		t.Error("picker drew art for no cover")
+	}
+}
+
+// ctrl+v picks the cover, and the choice outlives the box it was made in: there
+// is nowhere to read a cover back from, so the session is what remembers it.
+func TestCoverPickerAppliesToTheImbox(t *testing.T) {
+	v := mailWithPostings()
+
+	if cmd := v.HandleContentKey(keyPress("ctrl+v")); cmd != nil {
+		t.Fatal("opening the cover picker should not start a request")
+	}
+	if v.coverPicker == nil || !v.CapturingInput() {
+		t.Fatal("ctrl+v did not open a picker that captures input")
+	}
+
+	for v.coverPicker.selected() != coverTopo {
+		v.HandleContentKey(keyPress("down"))
+	}
+	v.HandleContentKey(keyPress("enter"))
+
+	if v.coverPicker != nil {
+		t.Error("enter left the picker open")
+	}
+	if v.cover != coverTopo || v.postingList.cover != coverTopo {
+		t.Errorf("cover = %q, list = %q, want topo", v.cover, v.postingList.cover)
+	}
+
+	// A re-read of the box keeps it, and so does coming back from another box.
+	v.Update(currentPostingsLoaded(v, testPostings()))
+	if v.postingList.cover != coverTopo {
+		t.Errorf("reading the Imbox again dropped the cover: %q", v.postingList.cover)
+	}
+}
+
+// Only the Imbox is coverable, which is haystack's rule. Elsewhere the key says so
+// rather than doing nothing.
+func TestCoverPickerRefusesOtherBoxes(t *testing.T) {
+	v := mailWithPostings()
+	v.boxIndex = 1
+	v.Update(currentPostingsLoaded(v, testPostings()))
+
+	v.HandleContentKey(keyPress("ctrl+v"))
+	if v.coverPicker != nil {
+		t.Error("picker opened on a box that cannot be covered")
+	}
+	if v.notice == "" {
+		t.Error("picker refused silently")
+	}
+	if hasHelpBinding(v.HelpBindings(), "ctrl+v") {
+		t.Error("help offers cover art on a box that cannot be covered")
+	}
+}
+
+// The chorded keys sit at the end of the help bar, together, keeping their order.
+// Scattered among the single keys they push the everyday ones onto a second line.
+func TestModifiersLast(t *testing.T) {
+	got := modifiersLast([]helpBinding{
+		{"/", "search"},
+		{"ctrl+s", "screener"},
+		{"c", "compose"},
+		{"ctrl+r", "reload"},
+		{"u", "undo"},
+	})
+
+	want := []helpBinding{
+		{"/", "search"},
+		{"c", "compose"},
+		{"u", "undo"},
+		{"ctrl+s", "screener"},
+		{"ctrl+r", "reload"},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("bindings = %v, want %v", got, want)
 	}
 }
 

@@ -3,7 +3,6 @@ package tui
 import (
 	"image/color"
 	"math"
-	"os"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -44,13 +43,6 @@ const coverMinRows = 5
 // Nothing here needs to know whether the theme is light or dark — see
 // coverPalettes for why not.
 var coverColorless = false
-
-// imboxCover is the preset the Imbox is covered with. HEY serves a box's cover to
-// the web app but not over JSON, so HEY_COVER stands in until boxes carry it and
-// this reads the box instead. An unset or unknown value draws nothing.
-func imboxCover() coverPreset {
-	return parseCoverPreset(os.Getenv("HEY_COVER"))
-}
 
 func parseCoverPreset(name string) coverPreset {
 	switch coverPreset(strings.ToLower(strings.TrimSpace(name))) {

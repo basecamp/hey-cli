@@ -203,6 +203,8 @@ type mailView struct {
 	compose                *composeForm                // non-nil while a message, reply or forward is being written
 	bulkReply              *bulkReplyForm              // non-nil while a bulk reply is being previewed or written
 	movePicker             *movePicker                 // non-nil while a destination box is being selected
+	coverPicker            *coverPicker                // non-nil while the Imbox's cover is being chosen
+	cover                  coverPreset                 // the session's cover; HEY does not serve one to read
 	folderPicker           *folderPicker               // non-nil while folder labels are being managed
 	collectionPicker       *collectionMembershipPicker // non-nil while collection membership is being managed
 	labels                 *labelPicker                // non-nil while a label is being chosen
@@ -303,7 +305,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		isImbox := v.currentBoxIsImbox()
 		v.postingList.hideSeenState = !isImbox
 		if isImbox {
-			v.postingList.setCover(imboxCover())
+			v.postingList.setCover(v.cover)
 		} else {
 			v.postingList.setCover(coverNone)
 		}
@@ -662,6 +664,9 @@ func (v *mailView) View() string {
 	if v.movePicker != nil {
 		return v.movePicker.view(v.vc.styles, v.vc.width)
 	}
+	if v.coverPicker != nil {
+		return v.coverPicker.view(v.vc.styles, v.vc.width)
+	}
 	if v.folderPicker != nil {
 		return v.folderPicker.view(v.vc.styles, v.vc.width)
 	}
@@ -739,7 +744,9 @@ func (v *mailView) updateSourceDiscoveryNotice() {
 
 // CapturingInput reports whether a form or picker is open and wants every key.
 func (v *mailView) CapturingInput() bool {
-	return v.compose != nil || v.bulkReply != nil || v.movePicker != nil || v.folderPicker != nil || v.collectionPicker != nil || v.labels != nil || v.collections != nil || v.searchForm != nil
+	return v.compose != nil || v.bulkReply != nil || v.movePicker != nil || v.coverPicker != nil ||
+		v.folderPicker != nil || v.collectionPicker != nil || v.labels != nil || v.collections != nil ||
+		v.searchForm != nil
 }
 
 func (v *mailView) AccountSwitchBlocked() bool {
@@ -758,6 +765,9 @@ func (v *mailView) HelpBindings() []helpBinding {
 	}
 	if v.movePicker != nil {
 		return v.movePicker.helpBindings()
+	}
+	if v.coverPicker != nil {
+		return v.coverPicker.helpBindings()
 	}
 	if v.folderPicker != nil {
 		return v.folderPicker.helpBindings()
@@ -828,10 +838,13 @@ func (v *mailView) HelpBindings() []helpBinding {
 		}
 		bindings = append(bindings, peek)
 	}
+	if v.currentBoxIsImbox() {
+		bindings = append(bindings, helpBinding{"ctrl+v", "cover art"})
+	}
 	if v.lastBulkReplyID != 0 {
 		bindings = append(bindings, helpBinding{"u", "undo bulk reply"})
 	}
-	return bindings
+	return modifiersLast(bindings)
 }
 
 func (v *mailView) SubnavItems() ([]navItem, int, string, bool) {
@@ -1039,6 +1052,21 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 
+	if v.coverPicker != nil {
+		switch msg.Key().Code {
+		case tea.KeyEscape:
+			v.coverPicker = nil
+			return nil
+		case tea.KeyEnter:
+			v.cover = v.coverPicker.selected()
+			v.coverPicker = nil
+			v.postingList.setCover(v.cover)
+			return nil
+		}
+		v.coverPicker.update(msg)
+		return nil
+	}
+
 	if v.labels != nil {
 		switch msg.Key().Code {
 		case tea.KeyEscape:
@@ -1217,6 +1245,8 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		case "v":
 			v.postingList.toggleCoverPeek()
 			return nil
+		case "ctrl+v":
+			return v.startCoverPicker()
 		case "ctrl+r":
 			return v.reloadPostings()
 		default:
@@ -1246,6 +1276,7 @@ func (v *mailView) ExitThread() {
 		v.inThread = false
 		v.compose = nil
 		v.movePicker = nil
+		v.coverPicker = nil
 		v.folderPicker = nil
 		v.collectionPicker = nil
 		v.cancelRequest()
@@ -1764,6 +1795,17 @@ func (v *mailView) startMove() {
 		return
 	}
 	v.movePicker = picker
+}
+
+// startCoverPicker opens the cover picker. Only the Imbox can be covered, which
+// is haystack's rule, so anywhere else the key says why rather than doing nothing.
+func (v *mailView) startCoverPicker() tea.Cmd {
+	if !v.currentBoxIsImbox() {
+		v.notice = "Only the Imbox can be covered"
+		return nil
+	}
+	v.coverPicker = newCoverPicker(v.cover)
+	return nil
 }
 
 func (v *mailView) startFolderPicker() tea.Cmd {

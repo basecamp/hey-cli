@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -245,8 +246,8 @@ func TestTUIBulkReplyReviewsThenSendsAndOffersUndo(t *testing.T) {
 	if view.lastBulkReplyID != 900 || !strings.Contains(view.notice, "2 bulk replies queued with undo available") || !strings.Contains(view.notice, "press u to undo") {
 		t.Errorf("delivery state = id:%d notice:%q", view.lastBulkReplyID, view.notice)
 	}
-	if help := view.HelpBindings(); help[len(help)-1].key != "u" {
-		t.Errorf("help does not offer undo: %v", help)
+	if !slices.ContainsFunc(view.HelpBindings(), func(b helpBinding) bool { return b.key == "u" }) {
+		t.Errorf("help does not offer undo: %v", view.HelpBindings())
 	}
 
 	requests := state.snapshot()
