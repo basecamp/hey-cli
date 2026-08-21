@@ -21,7 +21,9 @@ func maybeRefreshSkills(cmd *cobra.Command) {
 	if !refreshSkillsIfVersionChanged() {
 		return
 	}
-	if machineReadableOutput(cmd) {
+	// Machine consumers get no stderr chatter — whether they asked with a
+	// flag or got JSON automatically because stdout is not a terminal.
+	if machineReadableOutput(cmd) || (writer != nil && !writer.IsStyled()) {
 		return
 	}
 	fmt.Fprintf(os.Stderr, "Agent skill updated to match CLI %s\n", version.Version)

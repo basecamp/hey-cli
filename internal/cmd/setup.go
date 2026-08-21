@@ -450,8 +450,7 @@ func showWizardSuccess(w io.Writer, result wizardResult, outcome agentSetupOutco
 	fmt.Fprintln(w, divider)
 	fmt.Fprintln(w)
 
-	signedIn := !hasIssue(result.Issues, "Not logged in") && !hasIssue(result.Issues, "Stored sign-in rejected")
-	fmt.Fprintln(w, statusLine(signedIn, "Signed in"))
+	fmt.Fprintln(w, statusLine(!hasAuthIssue(result.Issues), "Signed in"))
 	if outcome.Skipped {
 		fmt.Fprintln(w, muted.format("  Coding agent setup skipped — run: hey setup"))
 	} else {
@@ -507,6 +506,13 @@ func hasIssue(issues []agentIssue, check string) bool {
 	return false
 }
 
+// hasAuthIssue reports whether the wizard could not establish a working
+// login — missing or rejected. Both mean the same thing to a caller: repair
+// authentication before anything else.
+func hasAuthIssue(issues []agentIssue) bool {
+	return hasIssue(issues, "Not logged in") || hasIssue(issues, "Stored sign-in rejected")
+}
+
 // wizardSummaryLine builds a concise summary for the output envelope.
 func wizardSummaryLine(result wizardResult) string {
 	headline := "Setup complete"
@@ -521,7 +527,7 @@ func wizardSummaryLine(result wizardResult) string {
 
 // wizardBreadcrumbs returns next-step breadcrumbs based on wizard outcome.
 func wizardBreadcrumbs(result wizardResult) []output.Breadcrumb {
-	if hasIssue(result.Issues, "Not logged in") {
+	if hasAuthIssue(result.Issues) {
 		return []output.Breadcrumb{
 			{Action: "login", Command: "hey auth login", Description: "Authenticate with HEY"},
 			{Action: "doctor", Command: "hey doctor", Description: "Check CLI health"},

@@ -199,7 +199,7 @@ hey boxes --quiet --jq '.[].name'
 | Write journal entry | `hey journal write "Today was great"` |
 | Check auth status | `hey auth status` |
 | Print access token | `hey auth token` |
-| Launch TUI | `hey` (Ctrl+A switches linked mail accounts) |
+| Launch TUI | `hey tui` (Ctrl+A switches linked mail accounts) |
 
 ## Decision Trees
 
@@ -226,7 +226,7 @@ Want to read email?
 ├── Mark as spam? → hey spam <id>
 ├── Ignore future activity? → hey ignore <id>
 ├── Stop ignoring? → hey stop-ignoring <id>
-└── Launch interactive UI? → hey (no args, launches TUI)
+└── Launch interactive UI? → hey tui
 ```
 
 ### Sending Email

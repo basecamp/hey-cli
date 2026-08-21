@@ -821,3 +821,30 @@ EOF
   [[ "$status" -eq 0 ]]
   [[ "$output" == *"iex-scope-ok"* ]]
 }
+
+# Setup is optional: a wizard the user cancels (declined OAuth, timeout) must
+# not turn a successful install into a failure under set -e.
+@test "install.sh TTY wizard failure falls back to next steps, not an install failure" {
+  grep -qE 'if ! "\$BIN_DIR/\$binary_name" setup; then' "$INSTALL_SH"
+  run bash -c "
+    set -euo pipefail
+    source '$INSTALL_SH'
+    BIN_DIR='$STUB_DIR'
+    cat > '$STUB_DIR/hey' <<'STUB'
+#!/usr/bin/env bash
+if [[ \"\$1\" == \"setup\" && -z \"\${2:-}\" ]]; then exit 3; fi
+exit 0
+STUB
+    chmod +x '$STUB_DIR/hey'
+    binary_name=hey
+    if ! \"\$BIN_DIR/\$binary_name\" setup; then
+      echo 'fallback-ran'
+      print_next_steps
+    fi
+    echo 'installer-continued'
+  "
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"fallback-ran"* ]]
+  [[ "$output" == *"installer-continued"* ]]
+  [[ "$output" == *"hey auth login"* ]]
+}

@@ -463,7 +463,36 @@ func migrateLegacyAccountDefault(file *fileConfig) error {
 	return nil
 }
 
+// fileConfigKeys are the keys the fileConfig schema owns. A rewrite replaces
+// exactly these; every other key in the file is preserved verbatim.
+var fileConfigKeys = []string{"base_url", "account_id", "onboarded", "cover", "account_defaults", "trusted_local_configs"}
+
+// legacyCredentialKeys are the embedded-credential fields of the pre-store
+// config format. They survive every ordinary rewrite (deleting a credential
+// is never a side effect) and are removed only by ScrubLegacyCredentials
+// after a successful migration.
+var legacyCredentialKeys = []string{"access_token", "refresh_token", "token_expiry", "client_id", "client_secret", "install_id", "session_cookie"}
+
+// ScrubLegacyCredentials removes migrated embedded credentials from the
+// global config file. Call only after the credential store confirmed the
+// save.
+func ScrubLegacyCredentials() error {
+	file, err := loadGlobalFileConfig()
+	if err != nil {
+		return err
+	}
+	return saveGlobalConfigScrubbing(file, legacyCredentialKeys)
+}
+
 func saveGlobalConfig(file fileConfig) error {
+	return saveGlobalConfigScrubbing(file, nil)
+}
+
+// saveGlobalConfigScrubbing rewrites the schema-owned keys while carrying
+// every unknown key through verbatim — a config rewrite must never delete
+// state it does not understand (unmigrated legacy credentials, a newer
+// version's settings) — except the keys explicitly listed in scrub.
+func saveGlobalConfigScrubbing(file fileConfig, scrub []string) error {
 	path := globalConfigPath()
 	if path == "" {
 		return fmt.Errorf("could not determine config path")
@@ -476,7 +505,30 @@ func saveGlobalConfig(file fileConfig) error {
 		return fmt.Errorf("could not secure config directory: %w", err)
 	}
 
-	data, err := json.MarshalIndent(file, "", "  ")
+	merged := map[string]json.RawMessage{}
+	if existing, readErr := os.ReadFile(path); readErr == nil { // #nosec G304 -- the fixed global config path
+		// Best-effort: an unparsable file is replaced by the schema keys.
+		_ = json.Unmarshal(existing, &merged)
+	}
+	for _, key := range fileConfigKeys {
+		delete(merged, key)
+	}
+	for _, key := range scrub {
+		delete(merged, key)
+	}
+	known, err := json.Marshal(file)
+	if err != nil {
+		return fmt.Errorf("could not marshal config: %w", err)
+	}
+	var knownMap map[string]json.RawMessage
+	if unmarshalErr := json.Unmarshal(known, &knownMap); unmarshalErr != nil {
+		return fmt.Errorf("could not merge config: %w", unmarshalErr)
+	}
+	for key, value := range knownMap {
+		merged[key] = value
+	}
+
+	data, err := json.MarshalIndent(merged, "", "  ")
 	if err != nil {
 		return fmt.Errorf("could not marshal config: %w", err)
 	}

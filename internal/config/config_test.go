@@ -650,3 +650,60 @@ func TestNonInteractiveEnv(t *testing.T) {
 		})
 	}
 }
+
+// A config rewrite must never delete state it does not understand: legacy
+// embedded credentials awaiting migration and any future version's keys ride
+// through verbatim. ScrubLegacyCredentials is the one deliberate removal.
+func TestSaveGlobalConfigPreservesUnknownKeys(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+	t.Setenv("HEY_BASE_URL", "")
+
+	dir := filepath.Join(tmp, configDirName)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	seed := `{"base_url":"https://app.hey.com","access_token":"legacy-token","future_setting":{"nested":true}}`
+	if err := os.WriteFile(filepath.Join(dir, configFile), []byte(seed), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := cfg.SaveOnboarded(true); err != nil {
+		t.Fatalf("SaveOnboarded: %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, configFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved map[string]any
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if saved["access_token"] != "legacy-token" {
+		t.Errorf("rewrite deleted unmigrated credentials: %s", raw)
+	}
+	if _, ok := saved["future_setting"]; !ok {
+		t.Errorf("rewrite deleted an unknown key: %s", raw)
+	}
+	if saved["onboarded"] != true {
+		t.Errorf("rewrite lost its own change: %s", raw)
+	}
+
+	if err := ScrubLegacyCredentials(); err != nil {
+		t.Fatalf("ScrubLegacyCredentials: %v", err)
+	}
+	raw, _ = os.ReadFile(filepath.Join(dir, configFile))
+	saved = map[string]any{}
+	_ = json.Unmarshal(raw, &saved)
+	if _, ok := saved["access_token"]; ok {
+		t.Errorf("scrub left migrated credentials behind: %s", raw)
+	}
+	if _, ok := saved["future_setting"]; !ok {
+		t.Errorf("scrub removed an unrelated key: %s", raw)
+	}
+}

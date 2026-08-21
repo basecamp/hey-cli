@@ -415,3 +415,40 @@ func TestConfigSetMigratesLegacyCredentialsBeforeRewriting(t *testing.T) {
 		t.Errorf("migrated credentials missing the token: %s", creds)
 	}
 }
+
+// When migration itself fails, the legacy credentials must survive every
+// config rewrite — including the wizard's onboarded flag — until a later run
+// migrates them.
+func TestConfigRewritesPreserveLegacyCredentialsWhenMigrationFails(t *testing.T) {
+	isolateAgents(t)
+	home := t.TempDir()
+	configDir := filepath.Join(home, "hey-cli")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"base_url":"https://app.hey.com","access_token":"legacy-token"}`
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A directory where credentials.json should be makes the file store's
+	// load and save both fail, so migration cannot complete.
+	if err := os.MkdirAll(filepath.Join(configDir, "credentials.json"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	if _, _, err := runAuthCommand(t, home, server.URL, "", true, "config", "set", "onboarded", "true"); err != nil {
+		t.Fatalf("config set: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(configDir, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "legacy-token") {
+		t.Fatalf("failed migration + rewrite deleted the only credentials: %s", raw)
+	}
+	if !strings.Contains(string(raw), `"onboarded": true`) {
+		t.Errorf("rewrite lost its own change: %s", raw)
+	}
+}

@@ -361,10 +361,18 @@ func migrateOldCredentials(_ string) {
 	}
 
 	if err := store.Save(credKey, creds); err != nil {
+		// Leave the legacy fields in place: config rewrites preserve keys
+		// they do not own, so the credentials survive until a later run
+		// migrates them successfully.
 		fmt.Fprintf(os.Stderr, "warning: could not migrate credentials: %v\n", err)
 		return
 	}
 
+	// Only after the store confirmed the save do the embedded secrets leave
+	// the config file.
+	if err := config.ScrubLegacyCredentials(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not remove migrated credentials from config.json: %v\n", err)
+	}
 	if err := cfg.SaveBaseURL(old.BaseURL); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not update config after migration: %v\n", err)
 	}

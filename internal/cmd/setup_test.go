@@ -467,6 +467,10 @@ func TestSetupJSONStaleCredentialsReportIncomplete(t *testing.T) {
 	if issue, _ := issues[0].(map[string]any); issue["check"] != "Stored sign-in rejected" {
 		t.Errorf("issue = %v", issues[0])
 	}
+	// Machine clients must be routed to repair auth, not to hey tui.
+	if len(response.Breadcrumbs) == 0 || response.Breadcrumbs[0].Command != "hey auth login" {
+		t.Errorf("breadcrumbs = %+v", response.Breadcrumbs)
+	}
 }
 
 // The wizard records a handler refusal as an issue even when the health

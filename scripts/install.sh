@@ -467,7 +467,13 @@ main() {
     post_install_setup "$binary_name"
     print_next_steps
   elif [[ -t 0 ]] && [[ -t 1 ]]; then
-    "$BIN_DIR/$binary_name" setup
+    # Setup is optional: a declined OAuth, a timeout or a busy callback port
+    # must not turn an already-successful install into a failure under set -e.
+    if ! "$BIN_DIR/$binary_name" setup; then
+      echo ""
+      echo "  Setup didn't finish — hey is installed; run it again any time:"
+      print_next_steps
+    fi
   else
     info "Skipping interactive setup (no terminal detected)."
     post_install_setup "$binary_name"
