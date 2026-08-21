@@ -139,3 +139,13 @@ func TestCheckClaudePluginVersion(t *testing.T) {
 		t.Errorf("dev build must not nag: %+v", check)
 	}
 }
+
+// An unparseable registry proves nothing — Claude itself cannot read it — so
+// raw text containing the plugin key must not count as installed.
+func TestCheckClaudePluginRejectsMalformedRegistry(t *testing.T) {
+	home := tempHome(t)
+	writeInstalledPlugins(t, home, `{"version": 2, "plugins": {"hey@37signals": [{"version"`)
+	if check := CheckClaudePlugin(); check.Status != "fail" {
+		t.Errorf("malformed registry: %+v", check)
+	}
+}

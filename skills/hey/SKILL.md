@@ -514,7 +514,9 @@ hey auth status                               # Check if authenticated
 hey auth logout                               # Log out
 hey login / hey logout                        # Shortcuts for the two above
 hey setup                                     # First-run wizard: sign in + connect coding agents
-hey setup --json                              # Never prompts; reports status and issues
+HEY_NONINTERACTIVE=1 hey setup --json         # Status-only: no prompts and no OAuth wait
+                                              # (without HEY_NONINTERACTIVE, a terminal on
+                                              # stdin still starts browser sign-in)
 ```
 
 If a command fails with an auth error, run `hey auth status` to check, then `hey auth login` to re-authenticate.

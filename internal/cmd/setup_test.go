@@ -591,4 +591,7 @@ func TestSetupJSONRejectedEnvTokenPointsAtEnvironment(t *testing.T) {
 	if issue["check"] != "HEY_TOKEN rejected" || issue["hint"] != "Update or unset HEY_TOKEN" {
 		t.Errorf("issue = %v", issue)
 	}
+	if len(response.Breadcrumbs) == 0 || response.Breadcrumbs[0].Command != "unset HEY_TOKEN" {
+		t.Errorf("breadcrumbs must point at the environment, got %+v", response.Breadcrumbs)
+	}
 }

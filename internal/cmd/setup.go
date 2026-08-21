@@ -553,6 +553,14 @@ func wizardSummaryLine(result wizardResult) string {
 
 // wizardBreadcrumbs returns next-step breadcrumbs based on wizard outcome.
 func wizardBreadcrumbs(result wizardResult) []output.Breadcrumb {
+	if hasIssue(result.Issues, "HEY_TOKEN rejected") {
+		// HEY_TOKEN outranks anything hey auth login saves: the structured
+		// remediation must point at the environment or it loops forever.
+		return []output.Breadcrumb{
+			{Action: "fix_token", Command: "unset HEY_TOKEN", Description: "Remove or replace the rejected environment token"},
+			{Action: "doctor", Command: "hey doctor", Description: "Check CLI health"},
+		}
+	}
 	if hasAuthIssue(result.Issues) {
 		return []output.Breadcrumb{
 			{Action: "login", Command: "hey auth login", Description: "Authenticate with HEY"},

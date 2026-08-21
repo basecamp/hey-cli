@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/basecamp/hey-cli/internal/version"
 )
@@ -319,10 +318,9 @@ func pluginInstalled(data []byte) bool {
 		return false
 	}
 
-	// Fallback: raw string search for the fully-qualified key. The bare name
-	// is deliberately not matched here — "hey" is far too generic a string to
-	// prove anything about an unparseable schema.
-	return strings.Contains(string(data), `"`+ClaudeExpectedPluginKey+`"`)
+	// An unparseable registry proves nothing: Claude itself cannot read it,
+	// so the plugin is not usable regardless of what raw text it contains.
+	return false
 }
 
 func matchesHeyPlugin(p map[string]any) bool {
