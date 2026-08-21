@@ -699,6 +699,9 @@ func contactSaveFailure(err error) string {
 	return errorNotice("Save failed", err)
 }
 
+// sdkContactToModel keeps a contact's text as HEY served it: the edit form sends these
+// fields back, so sanitizing them here would rewrite a name on an unrelated save.
+// Every view sanitizes what it shows instead.
 func sdkContactToModel(contact generated.Contact) Contact {
 	return Contact{
 		ID:           contact.Id,
@@ -710,8 +713,8 @@ func sdkContactToModel(contact generated.Contact) Contact {
 func sdkContactDetailToModel(contact generated.ContactDetail) Contact {
 	result := Contact{
 		ID:           contact.Id,
-		Name:         terminal.SanitizeLine(contact.Name),
-		EmailAddress: terminal.SanitizeLine(contact.EmailAddress),
+		Name:         contact.Name,
+		EmailAddress: contact.EmailAddress,
 		Aliases:      make([]Contact, 0, len(contact.Aliases)),
 	}
 	for _, alias := range contact.Aliases {

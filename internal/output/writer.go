@@ -132,11 +132,12 @@ func (w *Writer) Err(err error) {
 	format := w.EffectiveFormat()
 
 	// An --html run is a person redirecting to a file: the error reads as text on
-	// stderr, as it does on a terminal, rather than as a JSON envelope.
+	// stderr, as it does on a terminal, rather than as a JSON envelope. Either way the
+	// message and hint may have come from the server, so they are sanitized first.
 	if format == FormatStyled || format == FormatHTML {
-		msg := "Error: " + e.Message
+		msg := "Error: " + terminal.Sanitize(e.Message)
 		if e.Hint != "" {
-			msg += "\n" + e.Hint
+			msg += "\n" + terminal.Sanitize(e.Hint)
 		}
 		fmt.Fprintln(w.opts.Stderr, msg)
 		return

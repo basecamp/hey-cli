@@ -34,9 +34,12 @@ type markdownizer struct {
 	quoteDepth    int
 }
 
+// listLevel is one level of list nesting: its kind, its count so far, and the prefix
+// its items' markers sit behind, which is the prefix in force where the list began.
 type listLevel struct {
 	ordered bool
 	number  int
+	prefix  string
 }
 
 func inlineMarkdown(n *html.Node) string {
@@ -155,27 +158,33 @@ func (m *markdownizer) trimBlankLines(start int) {
 
 func (m *markdownizer) list(n *html.Node) {
 	if len(m.lists) >= maxNestingDepth {
-		m.children(n)
+		// A list nested past the cap is rendered at the current level: each of its
+		// items is still an item, with its marker and its own line.
+		m.listItems(n, m.lists[len(m.lists)-1])
 		return
 	}
 
-	level := &listLevel{ordered: n.Data == "ol"}
+	level := &listLevel{ordered: n.Data == "ol", prefix: m.prefix}
 	m.lists = append(m.lists, level)
 	m.flushLine()
 	if len(m.lists) == 1 {
 		m.blank()
 	}
+	m.listItems(n, level)
+	m.flushLine()
+	m.lists = m.lists[:len(m.lists)-1]
+	if len(m.lists) == 0 {
+		m.blank()
+	}
+}
+
+func (m *markdownizer) listItems(n *html.Node, level *listLevel) {
 	for child := n.FirstChild; child != nil; child = child.NextSibling {
 		if child.Type == html.ElementNode && child.Data == "li" {
 			m.listItem(child, level)
 		} else {
 			m.walk(child)
 		}
-	}
-	m.flushLine()
-	m.lists = m.lists[:len(m.lists)-1]
-	if len(m.lists) == 0 {
-		m.blank()
 	}
 }
 
@@ -188,8 +197,8 @@ func (m *markdownizer) listItem(n *html.Node, level *listLevel) {
 
 	outer := m.prefix
 	m.flushLine()
-	m.pendingPrefix = outer + marker
-	m.prefix = outer + strings.Repeat(" ", len(marker))
+	m.pendingPrefix = level.prefix + marker
+	m.prefix = level.prefix + strings.Repeat(" ", len(marker))
 	m.children(n)
 	m.flushLine()
 	m.pendingPrefix = ""

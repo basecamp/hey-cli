@@ -201,6 +201,18 @@ func TestRenderBoundsQuoteDepth(t *testing.T) {
 	}
 }
 
+// What a fallback shows is the source as written, controls stripped — not the copy
+// rewritten for glamour, which reads "&amp;" where the source read "&".
+func TestPrepareSourceKeepsTheShownSourceApartFromGlamours(t *testing.T) {
+	safe, forGlamour := prepareSource("Fried & Hansson `a && b` \x1b[31m")
+	if safe != "Fried & Hansson `a && b` [31m" {
+		t.Errorf("safe = %q", safe)
+	}
+	if forGlamour != "Fried &amp; Hansson `a &amp;&amp; b` [31m" {
+		t.Errorf("forGlamour = %q", forGlamour)
+	}
+}
+
 func TestRendererCacheIsBounded(t *testing.T) {
 	renderersMutex.Lock()
 	renderers = map[int]*glamour.TermRenderer{}

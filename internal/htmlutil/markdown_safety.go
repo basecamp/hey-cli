@@ -53,12 +53,23 @@ func escapeText(s, line string) string {
 			continue
 		case strings.ContainsRune(inlineMetacharacters, r),
 			line == "" && i == 0 && strings.ContainsRune(lineStartMetacharacters, r),
-			(r == '.' || r == ')') && endsOrderedMarker(line+s[:i]):
+			(r == '.' || r == ')') && closesOrderedMarker(line, s[:i]):
 			b.WriteByte('\\')
 		}
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+// closesOrderedMarker reports whether the line so far — what was already on it and the
+// run up to here — is the digits of a list marker about to be closed by "." or ")".
+// The length check comes before the two are joined: a marker is at most nine digits,
+// and joining a long line for every "." in a long run would be quadratic.
+func closesOrderedMarker(line, run string) bool {
+	if len(line)+len(run) > 9 {
+		return false
+	}
+	return endsOrderedMarker(line + run)
 }
 
 // endsOrderedMarker reports whether prefix is the digits of a list marker about to be
@@ -76,15 +87,20 @@ func endsOrderedMarker(prefix string) bool {
 }
 
 // codeSpan serializes inline code. Backslashes mean nothing inside a code span, so the
-// content is carried verbatim and the delimiters are chosen to be a longer run of
-// backticks than any the content holds.
+// content is carried verbatim — a run of spaces included, since it can mean something in
+// code — with only the line endings turned into the spaces CommonMark would make of
+// them, and the delimiters are chosen to be a longer run of backticks than any the
+// content holds. A renderer strips one space from each end of content that both begins
+// and ends with one, so such content is padded by one more on each side, as is content
+// that begins or ends with a backtick, which would otherwise run into the delimiter.
 func codeSpan(content string) string {
-	content = strings.Join(strings.Fields(stripControls(content)), " ")
-	if content == "" {
+	content = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(stripControls(content))
+	if strings.TrimSpace(content) == "" {
 		return ""
 	}
 	delimiter := strings.Repeat("`", longestRun(content, '`')+1)
-	if strings.HasPrefix(content, "`") || strings.HasSuffix(content, "`") {
+	if strings.HasPrefix(content, "`") || strings.HasSuffix(content, "`") ||
+		(strings.HasPrefix(content, " ") && strings.HasSuffix(content, " ")) {
 		content = " " + content + " "
 	}
 	return delimiter + content + delimiter

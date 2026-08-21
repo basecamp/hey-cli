@@ -801,10 +801,7 @@ func (v *mailView) SubnavItems() ([]navItem, int, string, bool) {
 	}
 	label := "Mail"
 	if v.boxIndex >= 0 && v.boxIndex < len(v.boxes) {
-		label = v.boxes[v.boxIndex].Name
-		if isOrganizedMailSource(v.boxes[v.boxIndex].Kind) {
-			label = terminal.SanitizeLine(label)
-		}
+		label = terminal.SanitizeLine(v.boxes[v.boxIndex].Name)
 		if v.postingPaging.loading {
 			label += " · loading more…"
 		}

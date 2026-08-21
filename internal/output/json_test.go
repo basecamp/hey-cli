@@ -60,6 +60,19 @@ func TestWriterErrEscapesC1Controls(t *testing.T) {
 	}
 }
 
+// An error printed as text — on a terminal, or on stderr beside an --html redirect —
+// may carry a server's words, and is sanitized like any other terminal text.
+func TestWriterErrSanitizesTextErrors(t *testing.T) {
+	for _, format := range []Format{FormatStyled, FormatHTML} {
+		var stderr bytes.Buffer
+		w := New(Options{Format: format, Stderr: &stderr})
+		w.Err(apierr.ErrUsageHint("bad \x1b[31mlabel", "try \x1b]0;x\x07again"))
+		if got := stderr.String(); got != "Error: bad label\ntry again\n" {
+			t.Errorf("format %d: stderr = %q", format, got)
+		}
+	}
+}
+
 // A jq string result on a pipe is the value itself, as `jq -r` writes it.
 func TestWriterJQStringResultIsRawOnAPipe(t *testing.T) {
 	var buf bytes.Buffer

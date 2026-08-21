@@ -563,10 +563,11 @@ func (v *calendarView) deleteHabit(recording Recording) tea.Cmd {
 
 // --- SDK type converters ---
 
-// sdkCalendarToModel and sdkRecordingToModel sanitize the text HEY served once, here,
-// so that every view of a calendar or an event shows it inert.
+// sdkCalendarToModel and sdkRecordingToModel keep the text as HEY served it: a habit's
+// title goes back through the edit form, so sanitizing it here would rewrite it on an
+// unrelated save. Every view sanitizes what it shows instead.
 func sdkCalendarToModel(c generated.Calendar) Calendar {
-	return Calendar{ID: c.Id, Name: terminal.SanitizeLine(c.Name), Personal: c.Personal}
+	return Calendar{ID: c.Id, Name: c.Name, Personal: c.Personal}
 }
 
 func sdkRecordingToModel(r generated.Recording) Recording {

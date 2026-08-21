@@ -62,6 +62,9 @@ func newRootCmd() *cobra.Command {
 				Stderr:   cmd.ErrOrStderr(),
 				JQFilter: jqFlag,
 			})
+			if err := validateHTMLFlag(cmd); err != nil {
+				return err
+			}
 			if versionFlag {
 				if jqRequested {
 					return output.ErrJQNotSupported("the version command")
@@ -69,9 +72,6 @@ func newRootCmd() *cobra.Command {
 				return nil
 			}
 			if err := validateJQFlags(cmd, jqFlag, jqRequested, idsOnly, countFlag); err != nil {
-				return err
-			}
-			if err := validateHTMLFlag(cmd); err != nil {
 				return err
 			}
 

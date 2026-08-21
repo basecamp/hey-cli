@@ -9,6 +9,7 @@ import (
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/mail"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 type movePicker struct {
@@ -87,7 +88,7 @@ func (p *movePicker) view(styles styles, width int) string {
 	b.WriteString("\n\n")
 	for i, box := range p.destinations {
 		prefix := "  "
-		name := box.Name
+		name := terminal.SanitizeLine(box.Name)
 		if i == p.cursor {
 			prefix = "› "
 			name = styles.title.Render(name)

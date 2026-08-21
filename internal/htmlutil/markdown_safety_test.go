@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/yuin/goldmark"
@@ -174,6 +175,9 @@ func TestToMarkdownInlineCodeEntityCannotDecode(t *testing.T) {
 func TestToMarkdownInlineCodeSizesItsDelimiters(t *testing.T) {
 	for _, test := range []struct{ in, want, literal string }{
 		{"<code>a ` b</code>", "``a ` b``", "a ` b"},
+		{"<code>a  b\tc</code>", "`a  b\tc`", "a  b\tc"},
+		{"<code> x </code>", "`  x  `", " x "},
+		{"<code>   </code>", "", ""},
 		{"<code>`tick</code>", "`` `tick ``", "`tick"},
 		{"<code>``</code>", "``` `` ```", "``"},
 		{"<code>\x1b[31m x</code>", "`[31m x`", "[31m x"},
@@ -184,8 +188,15 @@ func TestToMarkdownInlineCodeSizesItsDelimiters(t *testing.T) {
 		if got != test.want {
 			t.Errorf("%s: ToMarkdown = %q, want %q", test.in, got, test.want)
 		}
-		if text := renderedText(t, got); text != test.literal {
-			t.Errorf("%s: rendered = %q, want %q", test.in, text, test.literal)
+		// The code element in the rendered HTML holds the content exactly, padding
+		// and all, which is more than the trimmed text oracle can say.
+		rendered := renderedHTML(t, got)
+		wantCode := "<code>" + html.EscapeString(test.literal) + "</code>"
+		if test.literal == "" {
+			wantCode = ""
+		}
+		if (wantCode == "" && strings.Contains(rendered, "<code>")) || (wantCode != "" && !strings.Contains(rendered, wantCode)) {
+			t.Errorf("%s: rendered = %q, want %q", test.in, rendered, wantCode)
 		}
 	}
 }
@@ -348,6 +359,20 @@ func TestToMarkdownTableCellsEscapePipes(t *testing.T) {
 	}
 }
 
+// A run of dots on a long line is linear work: the ordered-marker check looks at the
+// length before it joins the line to the run.
+func TestToMarkdownEscapesALongLineInLinearTime(t *testing.T) {
+	long := strings.Repeat("a.b)c. ", 100_000)
+	start := time.Now()
+	got := ToMarkdown("<p>" + long + "</p>")
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("ToMarkdown took %s on a %d-byte line", elapsed, len(long))
+	}
+	if !strings.HasPrefix(got, "a.b)c. a.b)c.") {
+		t.Errorf("ToMarkdown = %.40q, want the dots unescaped mid-line", got)
+	}
+}
+
 func TestToMarkdownBoundsQuoteAndListDepth(t *testing.T) {
 	quotes := ToMarkdown(strings.Repeat("<blockquote>", 40) + "deep" + strings.Repeat("</blockquote>", 40))
 	if got := strings.Count(quotes, ">"); got != maxNestingDepth {
@@ -364,8 +389,25 @@ func TestToMarkdownBoundsQuoteAndListDepth(t *testing.T) {
 			t.Errorf("list indented %d columns, want at most %d: %q", indent, 2*(maxNestingDepth-1), line)
 		}
 	}
-	if got := strings.Count(lists, "item"); got != 40 {
-		t.Errorf("kept %d items, want 40", got)
+	if got := strings.Count(lists, "- item"); got != 40 {
+		t.Errorf("kept %d items with markers, want 40: %q", got, lists)
+	}
+}
+
+// Past the cap, sibling items keep their markers and their lines rather than running
+// into one another.
+func TestToMarkdownCappedListItemsStayApart(t *testing.T) {
+	var b strings.Builder
+	for range maxNestingDepth {
+		b.WriteString("<ul><li>outer")
+	}
+	b.WriteString("<ul><li>b</li><li>c</li></ul>")
+	got := ToMarkdown(b.String())
+	if strings.Contains(got, "bc") || !strings.Contains(got, "- b\n") || !strings.Contains(got, "- c") {
+		t.Errorf("ToMarkdown = %q, want b and c as separate items", got)
+	}
+	if rendered := renderedHTML(t, got); strings.Count(rendered, "<li>") != maxNestingDepth+2 {
+		t.Errorf("rendered %d items, want %d: %q", strings.Count(rendered, "<li>"), maxNestingDepth+2, rendered)
 	}
 }
 

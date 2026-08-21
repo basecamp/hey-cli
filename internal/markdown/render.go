@@ -32,8 +32,8 @@ var (
 // characters it was written with, because the HTML it came from already decoded
 // the entities that were meant to be decoded.
 func Render(md string, width int) string {
-	md = prepareSource(md)
-	if strings.TrimSpace(md) == "" {
+	safe, forGlamour := prepareSource(md)
+	if strings.TrimSpace(safe) == "" {
 		return ""
 	}
 	if width <= 0 {
@@ -42,12 +42,12 @@ func Render(md string, width int) string {
 
 	renderer, err := cachedRenderer(width)
 	if err != nil {
-		return contain(LinkifyURLs(md))
+		return contain(LinkifyURLs(safe))
 	}
 
-	out, err := renderer.Render(md)
+	out, err := renderer.Render(forGlamour)
 	if err != nil {
-		return contain(LinkifyURLs(md))
+		return contain(LinkifyURLs(safe))
 	}
 
 	return contain(trimBlankLines(LinkifyURLs(out)))

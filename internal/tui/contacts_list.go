@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 type contactList struct {
@@ -110,8 +111,8 @@ func (l *contactList) view() string {
 		if cursor {
 			prefix = cursorMarker.Render("│") + selectedGap.Render(" ")
 		}
-		name := truncateStr(contact.Name, max(l.width-4, 10))
-		email := truncateStr(contact.EmailAddress, max(l.width-18, 10))
+		name := truncateStr(terminal.SanitizeLine(contact.Name), max(l.width-4, 10))
+		email := truncateStr(terminal.SanitizeLine(contact.EmailAddress), max(l.width-18, 10))
 		line2 := fmt.Sprintf("#%d  %s", contact.ID, email)
 		if cursor {
 			fmt.Fprintf(&b, "%s%s\n", prefix, selected.Render(name))

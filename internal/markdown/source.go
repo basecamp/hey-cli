@@ -29,11 +29,15 @@ import (
 
 var sourceParser = goldmark.New(goldmark.WithExtensions(extension.GFM, extension.DefinitionList))
 
-// prepareSource makes md safe to hand to glamour: control characters are stripped,
-// quote nesting is bounded and entity decoding is neutralized. Newlines and tabs stay,
-// since Markdown is made of them.
-func prepareSource(md string) string {
-	return neutralizeEntities(boundQuoteDepth(stripControls(md)))
+// prepareSource makes md safe to show and safe to hand to glamour. The first result
+// is the source with its control characters stripped and its quote nesting bounded,
+// which is what a fallback shows when glamour cannot render; the second is that source
+// with entity decoding neutralized, which only glamour should see — its rewrite is
+// glamour's quirk, and shown directly it reads "&amp;" where the source read "&".
+// Newlines and tabs stay, since Markdown is made of them.
+func prepareSource(md string) (safe, forGlamour string) {
+	safe = boundQuoteDepth(stripControls(md))
+	return safe, neutralizeEntities(safe)
 }
 
 // maxQuoteDepth is how many block quote markers a line keeps. glamour's rendering cost

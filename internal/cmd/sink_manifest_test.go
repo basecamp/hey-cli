@@ -44,14 +44,20 @@ type sinkManifest struct {
 	exempt     map[string]string
 }
 
-// isSink and isSanitizer match a call by its full name or by the bare function or
-// method name, so "table.addRow" is addRow and "terminal.SanitizeLine" is itself.
+// isSink matches a call by its full name or by the bare function or method name, so
+// "table.addRow" is addRow. isSanitizer is stricter: a sanitizer listed with its
+// package, like markdown.Render, matches only that qualified call — a lipgloss style's
+// Render is a sink, not a sanitizer, and must not pass for one by sharing the name.
 func (m sinkManifest) isSink(name string) bool {
 	return m.sinks[name] || m.sinks[shortName(name)]
 }
 
 func (m sinkManifest) isSanitizer(name string) bool {
-	return m.sanitizers[name] || m.sanitizers[shortName(name)]
+	if m.sanitizers[name] {
+		return true
+	}
+	short := shortName(name)
+	return short == name && m.sanitizers[short]
 }
 
 func readSinkManifest(t *testing.T, path string) sinkManifest {
@@ -252,18 +258,27 @@ func sanitized(w io.Writer, e entry) {
 	fmt.Fprintln(w, truncate(terminal.SanitizeLine(e.Summary), 10))
 }
 
+type style struct{}
+
+func (style) Render(s string) string { return s }
+
+func styled(w io.Writer, e entry, title style) {
+	fmt.Fprintln(w, title.Render(e.Name))
+}
+
 func truncate(s string, n int) string { return s }
 `
 	if err := os.WriteFile(filepath.Join(dir, "probe.go"), []byte(source), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
+	// The styled write is seen twice: once by Fprintln and once by the Render inside it.
 	violations := sinkViolations(t, dir, manifest)
-	if len(violations) != 2 {
-		t.Fatalf("violations = %q, want the two direct writes", violations)
+	if len(violations) != 4 {
+		t.Fatalf("violations = %q, want the two direct writes and the styled one twice", violations)
 	}
 	for _, violation := range violations {
-		if !strings.Contains(violation, ":direct in the manifest") {
+		if !strings.Contains(violation, ":direct in the manifest") && !strings.Contains(violation, ":styled in the manifest") {
 			t.Errorf("violation %q names the wrong function", violation)
 		}
 	}

@@ -157,17 +157,21 @@ func (c *journalReadCommand) run(cmd *cobra.Command, args []string) error {
 		return apierr.FromSDK(err)
 	}
 
+	// --html writes the entry's HTML and, for a day without one, nothing at all.
+	if writer.EffectiveFormat() == output.FormatHTML {
+		if content == "" {
+			return nil
+		}
+		_, err := fmt.Fprintln(cmd.OutOrStdout(), content)
+		return err
+	}
+
 	if content == "" {
 		if writer.IsStyled() {
 			fmt.Fprintf(cmd.OutOrStdout(), "Journal — %s\n\n(empty)\n", date)
 			return nil
 		}
 		return writeOK(nil, output.WithSummary(fmt.Sprintf("No journal entry for %s", date)))
-	}
-
-	if writer.EffectiveFormat() == output.FormatHTML {
-		_, err := fmt.Fprintln(cmd.OutOrStdout(), content)
-		return err
 	}
 
 	if writer.IsStyled() {
