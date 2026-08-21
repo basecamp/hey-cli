@@ -87,14 +87,32 @@ func (c *unseenCommand) run(cmd *cobra.Command, args []string) error {
 	return writeMutation(cmd, fmt.Sprintf("%d %s marked as unseen", len(ids), threadNoun(len(ids))), nil)
 }
 
+// parseIntArgs parses posting IDs, rejecting non-positive values and dropping
+// duplicates. Zero and negatives are not valid posting IDs, so including one in
+// the posting_ids payload asks the server to act on something the client already
+// knows is invalid; rejecting locally gives a clearer message than whatever
+// comes back. Duplicates are dropped, first occurrence wins — for the bulk
+// seen/unseen calls that only trims the payload, but it matters more for any
+// caller that issues one request per ID, where a repeat can come back as a
+// failure.
 func parseIntArgs(args []string) ([]int64, error) {
 	ids := make([]int64, 0, len(args))
+	seen := make(map[int64]bool, len(args))
+
 	for _, arg := range args {
 		id, err := strconv.ParseInt(arg, 10, 64)
 		if err != nil {
 			return nil, apierr.ErrUsage(fmt.Sprintf("invalid ID: %s", arg))
 		}
+		if id <= 0 {
+			return nil, output.ErrUsage(fmt.Sprintf("invalid posting ID: %d (must be positive)", id))
+		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
 		ids = append(ids, id)
 	}
+
 	return ids, nil
 }
