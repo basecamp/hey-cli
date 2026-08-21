@@ -24,8 +24,12 @@ type imageBlobDownloader interface {
 	DownloadBlob(context.Context, string, io.Writer) (int64, http.Header, error)
 }
 
+// An imageFetcher reads one image, within its own bounds and within maxBytes, which is
+// what the caller has left to spend on it: a body past that is stopped on the wire, not
+// downloaded whole and then refused. A maxBytes of zero or less leaves the fetcher's own
+// bound as the only one.
 type imageFetcher interface {
-	Fetch(context.Context, string) ([]byte, error)
+	Fetch(ctx context.Context, source string, maxBytes int64) ([]byte, error)
 }
 
 const (
@@ -97,10 +101,14 @@ func newTrustedImageFetcherWithOrigins(client imageBlobDownloader, heyOrigin str
 	}
 }
 
-func (f *trustedImageFetcher) Fetch(ctx context.Context, source string) ([]byte, error) {
+func (f *trustedImageFetcher) Fetch(ctx context.Context, source string, maxBytes int64) ([]byte, error) {
 	parsed, err := url.Parse(source)
 	if err != nil {
 		return nil, fmt.Errorf("invalid image URL: %w", err)
+	}
+	limit := f.maxBytes
+	if maxBytes > 0 && maxBytes < limit {
+		limit = maxBytes
 	}
 
 	if parsed.User != nil {
@@ -111,11 +119,11 @@ func (f *trustedImageFetcher) Fetch(ctx context.Context, source string) ([]byte,
 	}
 
 	if !parsed.IsAbs() || sameURLOrigin(parsed, f.heyOrigin) {
-		destination := &limitedImageBuffer{limit: f.maxBytes}
+		destination := &limitedImageBuffer{limit: limit}
 		_, headers, downloadErr := f.hey.DownloadBlob(ctx, source, destination)
 		if downloadErr != nil {
 			if errors.Is(downloadErr, errImageTooLarge) {
-				return nil, fmt.Errorf("HEY image exceeds the %d byte limit", f.maxBytes)
+				return nil, fmt.Errorf("HEY image exceeds the %d byte limit", limit)
 			}
 			return nil, downloadErr
 		}
@@ -142,15 +150,15 @@ func (f *trustedImageFetcher) Fetch(ctx context.Context, source string) ([]byte,
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("gopher returned HTTP %d", response.StatusCode)
 	}
-	if response.ContentLength > f.maxBytes {
-		return nil, fmt.Errorf("gopher image exceeds the %d byte limit", f.maxBytes)
+	if response.ContentLength > limit {
+		return nil, fmt.Errorf("gopher image exceeds the %d byte limit", limit)
 	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, f.maxBytes+1))
+	data, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(data)) > f.maxBytes {
-		return nil, fmt.Errorf("gopher image exceeds the %d byte limit", f.maxBytes)
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("gopher image exceeds the %d byte limit", limit)
 	}
 	if err := validateImageData(data, response.Header); err != nil {
 		return nil, err

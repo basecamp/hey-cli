@@ -319,6 +319,48 @@ func TestMailViewMarksOpenedThreadSeen(t *testing.T) {
 	}
 }
 
+// A thread read only in part keeps saying so for as long as it is open — the notice is
+// thread state, not the one-shot kind a key press clears — and opening it does not mark
+// it seen: the reader has not had all of it, and seen would put it under the cover.
+func TestMailViewKeepsAPartialThreadsNoticeAndLeavesItUnseen(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v.requests.loading = true
+	v.requests.kind = mailRequestTopic
+
+	cmd, _ := v.Update(topicLoadedMsg{
+		requestID: v.requests.id,
+		boxID:     1,
+		topicID:   100,
+		postingID: 100,
+		title:     "Hello world",
+		entries:   []mail.Entry{{ID: 501, Creator: mail.Contact{Name: "Alice"}, BodyState: "failed"}},
+		notice:    "1 of 1 bodies could not be read (failed)",
+		complete:  false,
+	})
+	if msg := runCmd(cmd); msg != nil {
+		t.Fatalf("opening a partial thread sent %#v, want no mark seen", msg)
+	}
+	if recorded.method != "" {
+		t.Errorf("request = %s %s, want none", recorded.method, recorded.path)
+	}
+	if v.postingList.postings[v.postingIndex(100)].Seen {
+		t.Error("a partial thread should stay unseen")
+	}
+	if !strings.Contains(v.View(), "1 of 1 bodies could not be read") {
+		t.Errorf("view lacks the notice: %q", v.View())
+	}
+
+	v.HandleContentKey(keyPress("j"))
+	if !strings.Contains(v.View(), "1 of 1 bodies could not be read") {
+		t.Errorf("a key press dismissed the partial-thread notice: %q", v.View())
+	}
+
+	v.ExitThread()
+	if v.inThread || v.threadNotice != "" {
+		t.Errorf("leaving the thread left inThread=%v notice=%q", v.inThread, v.threadNotice)
+	}
+}
+
 func TestMailViewLeavesBubbledUpThreadAloneWhenOpened(t *testing.T) {
 	v, recorded := mailWithTestServer(t, http.StatusNoContent)
 	v.postingList.postings[0].BubbledUp = true

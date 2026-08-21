@@ -94,9 +94,11 @@ type topicLoadedMsg struct {
 	entries     []mail.Entry
 	attachments []messageAttachment
 	images      [][]byte
-	// notice says what the read did not get, or is empty.
-	notice string
-	err    error
+	// notice says what the read did not get, or is empty; complete is whether it got
+	// everything — every entry in the index, every body within the limits.
+	notice   string
+	complete bool
+	err      error
 }
 
 type searchResultsLoadedMsg struct {
@@ -206,6 +208,7 @@ type mailView struct {
 	attachmentCursor int
 	imageContent     string
 	inThread         bool
+	threadNotice     string // what the open thread's read did not get; stays until the thread is left
 
 	modal                  modal       // the form or picker over the list, and the only one there can be
 	cover                  coverPreset // the session's cover; HEY does not serve one to read
@@ -383,7 +386,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.entries = msg.entries
 		v.attachments = msg.attachments
 		v.attachmentCursor = 0
-		v.notice = msg.notice
+		v.threadNotice = msg.notice
 		var imageContent strings.Builder
 		var uploadCmds []tea.Cmd
 		for _, imgData := range msg.images {
@@ -399,7 +402,13 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.imageContent = imageContent.String()
 		v.rebuildTopicContent()
 		v.topicViewport.GotoTop()
-		return tea.Batch(append(uploadCmds, v.markPostingSeen(msg.boxID, msg.postingID))...), true
+		// A thread read only in part is not marked seen by being opened: the reader has
+		// not had all of it, and seen would slide it under the Imbox's cover. The seen
+		// key is there for a thread they are done with anyway.
+		if msg.complete {
+			uploadCmds = append(uploadCmds, v.markPostingSeen(msg.boxID, msg.postingID))
+		}
+		return tea.Batch(uploadCmds...), true
 
 	case replyContextLoadedMsg:
 		if msg.boxID != v.currentBoxID() {
@@ -640,10 +649,13 @@ func (v *mailView) View() string {
 		return v.modal.draw(v)
 	}
 	if v.inThread {
-		if v.notice != "" {
-			return v.vc.styles.title.Render(v.notice) + "\n" + v.topicViewport.View()
+		var lines []string
+		for _, notice := range []string{v.threadNotice, v.notice} {
+			if notice != "" {
+				lines = append(lines, v.vc.styles.title.Render(notice))
+			}
 		}
-		return v.topicViewport.View()
+		return strings.Join(append(lines, v.topicViewport.View()), "\n")
 	}
 	if v.searchActive {
 		if v.notice != "" {
@@ -1059,6 +1071,7 @@ func (v *mailView) ExitThread() {
 	}
 	if v.inThread {
 		v.inThread = false
+		v.threadNotice = ""
 		v.modal = nil
 		v.requests.cancel()
 		return
@@ -1137,6 +1150,7 @@ func (v *mailView) switchBox(index int) tea.Cmd {
 		return nil
 	}
 	v.inThread = false
+	v.threadNotice = ""
 	v.clearSearch()
 	v.requests.cancel()
 	v.notice = ""
@@ -2027,6 +2041,7 @@ func (v *mailView) fetchTopic(ctx context.Context, requestID uint64, boxID, topi
 			attachments: attachments,
 			images:      images,
 			notice:      thread.Notice(tuiThreadLimits),
+			complete:    thread.Complete(),
 		}
 	}
 }

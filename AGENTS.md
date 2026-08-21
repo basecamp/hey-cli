@@ -109,7 +109,11 @@ because both were mis-stated here before:
   SDK; `threadload.NewSDKSource` is the adapter both the CLI and the TUI hand it, and the TUI's `mailView.fetchTopic` reads through it
   too — every page, oldest first, unread bodies marked and a notice for a partial read —
   and then fetches inline images within `imageBudget` (`internal/tui/image_budget.go`:
-  count, bytes, deadline, de-dup, HEY blob paths only). HEY serves the entry index newest first; the
+  requests, bytes, deadline, de-dup, clean HEY blob paths only — every request is charged
+  to the count whatever it answers, and each fetch is told what is left of the bytes so an
+  oversized image stops on the wire). A thread read only in part keeps its notice on
+  screen for as long as it is open (`mailView.threadNotice`) and is not marked seen by
+  being opened; the seen key still is. HEY serves the entry index newest first; the
   loader admits newest first and reverses once, so a thread reads oldest first.
 
   The entry index is geared_pagination like every other list here, so its page is a cursor
