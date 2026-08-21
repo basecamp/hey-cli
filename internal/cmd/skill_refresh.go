@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -47,8 +46,13 @@ func refreshSkillsIfVersionChanged() bool {
 	}
 	sentinelPath := filepath.Join(configDir, ".last-run-version")
 
+	// The sentinel records the active Codex home alongside the version:
+	// skill locations depend on CODEX_HOME, so switching homes mid-release
+	// triggers one rescan instead of leaving the other home's marked skill
+	// stale until the next release.
+	sentinelState := version.Version + "\n" + harness.CodexHome() + "\n"
 	data, err := os.ReadFile(sentinelPath) // #nosec G304 -- fixed path under the user config dir
-	if err == nil && strings.TrimSpace(string(data)) == version.Version {
+	if err == nil && string(data) == sentinelState {
 		return false
 	}
 
@@ -60,7 +64,7 @@ func refreshSkillsIfVersionChanged() bool {
 	if failed == 0 {
 		// 0o700: ConfigDir can hold credentials.json; keep it owner-only.
 		_ = os.MkdirAll(filepath.Dir(sentinelPath), 0o700)
-		_ = os.WriteFile(sentinelPath, []byte(version.Version), 0o644) // #nosec G306 -- not a secret
+		_ = os.WriteFile(sentinelPath, []byte(sentinelState), 0o644) // #nosec G306 -- not a secret
 	}
 
 	return updated > 0 && failed == 0

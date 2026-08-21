@@ -110,11 +110,15 @@ func newRootCmd() *cobra.Command {
 			authMgr = auth.NewManager(cfg.BaseURL, httpClient, configDir)
 			initSDK(authMgr, cfg.BaseURL)
 
-			// Commands that never touch the server (setup agents|claude|codex,
-			// skill, version, …) must not move secrets around as a side
-			// effect — the installer runs setup agents with HEY_NO_KEYRING=1,
-			// which would otherwise migrate legacy tokens into plaintext.
-			if commandUsesRuntimeConfig(cmd) {
+			// The agent-local setup subcommands and skill commands never read
+			// credentials and never rewrite the global config, so they defer
+			// migration — the installer runs them with HEY_NO_KEYRING=1, which
+			// would otherwise move legacy tokens into plaintext. Every other
+			// command migrates first: anything that rewrites config.json
+			// (config set, trust-local, the wizard's onboarded flag) would
+			// silently DELETE legacy embedded credentials otherwise, because
+			// fileConfig has no fields to carry them through the rewrite.
+			if !commandSkipsCredentialMigration(cmd) {
 				migrateOldCredentials(configDir)
 			}
 
@@ -215,6 +219,24 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newVersionCommand().cmd)
 
 	return root
+}
+
+// commandSkipsCredentialMigration lists the commands safe to run without
+// first migrating legacy config.json credentials: they neither use
+// credentials nor rewrite the global config file.
+func commandSkipsCredentialMigration(cmd *cobra.Command) bool {
+	parts := strings.Fields(cmd.CommandPath())
+	if len(parts) < 2 {
+		return false
+	}
+	switch parts[1] {
+	case "skill":
+		return true
+	case "setup":
+		return len(parts) > 2 // the wizard itself persists onboarded; subcommands touch only agent files
+	default:
+		return false
+	}
 }
 
 func commandUsesAccountScope(cmd *cobra.Command) bool {

@@ -347,3 +347,71 @@ func TestSetupAgentsDoesNotMigrateLegacyCredentials(t *testing.T) {
 		t.Errorf("auth status should have migrated legacy credentials: %v", err)
 	}
 }
+
+// A targeted agent whose skill path is occupied by an unmanaged skill is a
+// conflict, not a connection: the presence check alone must not flip
+// plugin_installed back to true over the handler's refusal.
+func TestSetupAgentsConflictedInstallIsNotConnected(t *testing.T) {
+	isolateAgents(t)
+	t.Setenv(agentSetupEnv, "codex")
+	home := t.TempDir()
+	custom := "# my own hey skill\n"
+	codexSkill := filepath.Join(home, ".codex", "skills", "hey")
+	if err := os.MkdirAll(codexSkill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(codexSkill, "SKILL.md"), []byte(custom), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	_, response, err := runAuthCommand(t, home, server.URL, "", true, "setup", "agents")
+	if err != nil {
+		t.Fatalf("setup agents: %v", err)
+	}
+	data := response.Data.(map[string]any)
+	errs := stringList(t, data["errors"])
+	if len(errs) == 0 || !strings.Contains(errs[0], "not written by hey-cli") {
+		t.Fatalf("errors = %v", errs)
+	}
+	agents := data["agents"].([]any)
+	if agents[0].(map[string]any)["plugin_installed"] != false {
+		t.Error("a refused install must not report plugin_installed")
+	}
+	if response.Summary != "Installed baseline skill; attempted Codex" {
+		t.Errorf("summary = %q", response.Summary)
+	}
+	if got, _ := os.ReadFile(filepath.Join(codexSkill, "SKILL.md")); string(got) != custom {
+		t.Errorf("user skill changed: %q", got)
+	}
+}
+
+// Config-writing commands rewrite config.json through a struct with no
+// credential fields, so they must migrate legacy credentials FIRST — skipping
+// migration there would delete the tokens instead of moving them.
+func TestConfigSetMigratesLegacyCredentialsBeforeRewriting(t *testing.T) {
+	isolateAgents(t)
+	home := t.TempDir()
+	configDir := filepath.Join(home, "hey-cli")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"base_url":"https://app.hey.com","access_token":"legacy-token","refresh_token":"legacy-refresh"}`
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	if _, _, err := runAuthCommand(t, home, server.URL, "", true, "config", "set", "onboarded", "true"); err != nil {
+		t.Fatalf("config set: %v", err)
+	}
+	creds, err := os.ReadFile(filepath.Join(configDir, "credentials.json"))
+	if err != nil {
+		t.Fatalf("legacy credentials were not migrated before the rewrite: %v", err)
+	}
+	if !strings.Contains(string(creds), "legacy-token") {
+		t.Errorf("migrated credentials missing the token: %s", creds)
+	}
+}

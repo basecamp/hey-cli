@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -207,6 +208,19 @@ func (s *setupWizard) greet() {
 
 	identity, err := rootSDK.Identity().GetIdentity(s.cmd.Context())
 	if err != nil || identity == nil {
+		// Stored credentials that HEY rejects mean we are not signed in at
+		// all, however present they are — surface that instead of reporting
+		// a complete setup that cannot run a single data command. Other
+		// failures (offline, transient) keep the best-effort greeting.
+		if isAuthError(err) {
+			if s.styled {
+				fmt.Fprintln(w, warning.format("  Stored sign-in was rejected by HEY."))
+				fmt.Fprintln(w)
+			}
+			s.result.Status = "incomplete"
+			s.result.Issues = append(s.result.Issues, agentIssue{Check: "Stored sign-in rejected", Hint: "Run: hey auth login"})
+			return
+		}
 		if s.styled {
 			fmt.Fprintln(w, success.format("  Signed in."))
 			fmt.Fprintln(w)
@@ -238,6 +252,16 @@ func (s *setupWizard) greet() {
 		}
 	}
 	fmt.Fprintln(w)
+}
+
+// isAuthError reports whether err is HEY rejecting our credentials.
+func isAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	converted := convertSDKError(err)
+	var cliErr *output.Error
+	return errors.As(converted, &cliErr) && cliErr.Code == "auth"
 }
 
 func identityGreeting(identity *generated.Identity) string {

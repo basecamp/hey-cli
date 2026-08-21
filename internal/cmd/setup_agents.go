@@ -214,7 +214,11 @@ func runAgentSetupHandler(cmd *cobra.Command, agent harness.AgentInfo) agentSetu
 	}
 
 	rec.detectedAfter = agent.Detect != nil && agent.Detect()
-	rec.pluginInstalled = agentChecksPass(agent)
+	// Connected means the handler succeeded AND health checks pass. Checks
+	// alone are not enough: an unmanaged skill at the canonical path makes
+	// the handler refuse while the presence check still passes — that is a
+	// conflict, not a connection.
+	rec.pluginInstalled = len(rec.errors) == 0 && agentChecksPass(agent)
 	return rec
 }
 

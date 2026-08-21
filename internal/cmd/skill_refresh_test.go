@@ -83,7 +83,7 @@ func TestRefreshSkillsUpdatesInstalledCopiesOnce(t *testing.T) {
 	}
 
 	sentinel, err := os.ReadFile(filepath.Join(home, ".config", "hey-cli", ".last-run-version"))
-	if err != nil || strings.TrimSpace(string(sentinel)) != "1.2.3" {
+	if err != nil || !strings.HasPrefix(string(sentinel), "1.2.3\n") {
 		t.Errorf("sentinel = %q, %v", sentinel, err)
 	}
 
@@ -191,7 +191,7 @@ func TestRefreshSkillsPreservesUnmanagedSkills(t *testing.T) {
 	// The sentinel still advances — leaving foreign skills alone is this
 	// version's finished state, not a failure to retry.
 	sentinel, err := os.ReadFile(filepath.Join(home, ".config", "hey-cli", ".last-run-version"))
-	if err != nil || strings.TrimSpace(string(sentinel)) != "9.9.9" {
+	if err != nil || !strings.HasPrefix(string(sentinel), "9.9.9\n") {
 		t.Errorf("sentinel = %q, %v", sentinel, err)
 	}
 }
@@ -252,5 +252,37 @@ func TestRefreshSkillsSkipsWithoutConfigDir(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(cwd, ".last-run-version")); !os.IsNotExist(err) {
 		t.Error("sentinel written into the current directory")
+	}
+}
+
+// The sentinel tracks the active Codex home: a marked, stale skill in a
+// Codex home that was inactive during the first post-upgrade run is
+// refreshed as soon as that home becomes active, not at the next release.
+func TestRefreshSkillsRescansWhenCodexHomeChanges(t *testing.T) {
+	home := refreshFixture(t)
+	stubVersion(t, "9.9.9")
+	installStaleSkill(t, home)
+
+	homeA := t.TempDir()
+	t.Setenv("CODEX_HOME", homeA)
+	if !refreshSkillsIfVersionChanged() {
+		t.Fatal("first run should refresh")
+	}
+	if refreshSkillsIfVersionChanged() {
+		t.Fatal("same home: second run is a no-op")
+	}
+
+	homeB := t.TempDir()
+	staleB := writeSkillFixture(t, filepath.Join(homeB, "skills", "hey"), "# stale skill", true)
+	t.Setenv("CODEX_HOME", homeB)
+	if !refreshSkillsIfVersionChanged() {
+		t.Fatal("switching Codex homes should rescan")
+	}
+	data, err := os.ReadFile(staleB)
+	if err != nil || string(data) == "# stale skill" {
+		t.Errorf("skill in the newly active Codex home was not refreshed: %v", err)
+	}
+	if refreshSkillsIfVersionChanged() {
+		t.Error("stable again: refresh must be a no-op")
 	}
 }

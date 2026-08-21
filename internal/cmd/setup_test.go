@@ -438,3 +438,33 @@ func TestSetupJSONNonInteractiveEnvSkipsSignIn(t *testing.T) {
 		t.Errorf("status = %v, want incomplete", data["status"])
 	}
 }
+
+// Credentials that merely exist are not a login: when HEY rejects them, the
+// wizard must not skip OAuth and then report a complete, signed-in setup.
+func TestSetupJSONStaleCredentialsReportIncomplete(t *testing.T) {
+	isolateAgents(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+	}))
+	defer server.Close()
+	configHome := t.TempDir()
+	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "stale-cookie"); err != nil {
+		t.Fatalf("auth login: %v", err)
+	}
+
+	_, response, err := runAuthCommand(t, configHome, server.URL, "", true, "setup")
+	if err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	data := wizardData(t, response)
+	if data["status"] != "incomplete" {
+		t.Errorf("status = %v, want incomplete for rejected credentials", data["status"])
+	}
+	issues, _ := data["issues"].([]any)
+	if len(issues) != 1 {
+		t.Fatalf("issues = %v", data["issues"])
+	}
+	if issue, _ := issues[0].(map[string]any); issue["check"] != "Stored sign-in rejected" {
+		t.Errorf("issue = %v", issues[0])
+	}
+}
