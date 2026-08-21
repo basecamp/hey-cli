@@ -13,6 +13,10 @@ import (
 // DefaultWidth is the word wrap used when the caller has no width of its own.
 const DefaultWidth = 80
 
+// maxCachedRenderers bounds the renderers kept, one per wrap width. A TUI being
+// resized by hand passes through many widths; a glamour renderer is not small.
+const maxCachedRenderers = 8
+
 var (
 	renderersMutex sync.Mutex
 	renderers      = map[int]*glamour.TermRenderer{}
@@ -21,7 +25,14 @@ var (
 // Render renders Markdown as styled terminal output wrapped to width. It falls
 // back to the Markdown source when glamour cannot be set up, so a rendering
 // problem costs formatting rather than the message itself.
+//
+// The Markdown is treated as untrusted on the way in and the output is checked on
+// the way out: see prepareSource and contain. One consequence worth knowing is that
+// `&` is always literal here — an entity reference in the source is shown as the
+// characters it was written with, because the HTML it came from already decoded
+// the entities that were meant to be decoded.
 func Render(md string, width int) string {
+	md = prepareSource(md)
 	if strings.TrimSpace(md) == "" {
 		return ""
 	}
@@ -31,15 +42,15 @@ func Render(md string, width int) string {
 
 	renderer, err := cachedRenderer(width)
 	if err != nil {
-		return LinkifyURLs(md)
+		return contain(LinkifyURLs(md))
 	}
 
 	out, err := renderer.Render(md)
 	if err != nil {
-		return LinkifyURLs(md)
+		return contain(LinkifyURLs(md))
 	}
 
-	return trimBlankLines(LinkifyURLs(out))
+	return contain(trimBlankLines(LinkifyURLs(out)))
 }
 
 // trimBlankLines strips the padding glamour adds out to the wrap width, so a
@@ -77,6 +88,12 @@ func cachedRenderer(width int) (*glamour.TermRenderer, error) {
 	)
 	if err != nil {
 		return nil, err
+	}
+	if len(renderers) >= maxCachedRenderers {
+		for cached := range renderers {
+			delete(renderers, cached)
+			break
+		}
 	}
 	renderers[width] = renderer
 	return renderer, nil
