@@ -108,9 +108,9 @@ func TestRefreshSkillsWithoutInstallNeverInstalls(t *testing.T) {
 	}
 }
 
-// A dangling ~/.claude/skills/hey that hey-cli did not write — a user's link
-// to a volume that is merely unmounted right now — must survive the refresh
-// untouched, even when a marked baseline exists next to it.
+// Refresh never touches symlinks: a dangling ~/.claude/skills/hey — a user's
+// link to a volume that is merely unmounted right now — survives untouched,
+// even when a marked baseline exists next to it.
 func TestRefreshSkillsPreservesForeignBrokenClaudeLink(t *testing.T) {
 	home := refreshFixture(t)
 	stubVersion(t, "9.9.9")
@@ -132,44 +132,6 @@ func TestRefreshSkillsPreservesForeignBrokenClaudeLink(t *testing.T) {
 	target, err := os.Readlink(linkPath)
 	if err != nil || target != foreign {
 		t.Errorf("foreign broken link was replaced: target = %q, %v", target, err)
-	}
-}
-
-// The provenance gate itself: only the canonical target over a marked
-// baseline counts as ours.
-func TestClaudeSkillLinkIsOurs(t *testing.T) {
-	home := refreshFixture(t)
-	claudeSkills := filepath.Join(home, ".claude", "skills")
-	if err := os.MkdirAll(claudeSkills, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	linkPath := filepath.Join(claudeSkills, "hey")
-	relink := func(target string) {
-		t.Helper()
-		_ = os.Remove(linkPath)
-		if err := os.Symlink(target, linkPath); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	relink(claudeSkillLinkTarget)
-	if claudeSkillLinkIsOurs(linkPath) {
-		t.Error("canonical target over an unmarked baseline is not ours")
-	}
-
-	installStaleSkill(t, home) // marks the baseline
-	if !claudeSkillLinkIsOurs(linkPath) {
-		t.Error("canonical target over a marked baseline is ours")
-	}
-
-	relink("../../../Volumes/offline/custom-hey-skill")
-	if claudeSkillLinkIsOurs(linkPath) {
-		t.Error("a foreign target is never ours, marker or not")
-	}
-
-	relink(filepath.Join(home, ".agents", "skills", "hey")) // same place, absolute spelling
-	if claudeSkillLinkIsOurs(linkPath) {
-		t.Error("only the exact canonical relative target is ours")
 	}
 }
 

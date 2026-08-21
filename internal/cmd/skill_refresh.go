@@ -50,11 +50,6 @@ func refreshSkillsIfVersionChanged() bool {
 
 	updated, failed := refreshInstalledSkills()
 
-	// Repair the Claude symlink if broken (e.g. baseline dir was recreated).
-	if harness.DetectClaude() {
-		repairClaudeSkillLink()
-	}
-
 	// Advance the sentinel unless something failed: nothing owned to refresh
 	// and a fully successful refresh both mean this version is done. On
 	// transient failure, leave it stale so the next run retries.
@@ -123,48 +118,4 @@ func refreshInstalledSkills() (updated, failed int) {
 	}
 
 	return updated, failed
-}
-
-// repairClaudeSkillLink repairs a broken ~/.claude/skills/hey symlink that
-// hey-cli wrote. If the path is a directory (copy fallback), the file refresh
-// handled it. A broken link is only ours when its target is exactly our
-// canonical relative path and the baseline it points at carries the ownership
-// marker; any other dangling link — a user's link to a temporarily unmounted
-// volume, say — is their state and is left alone.
-func repairClaudeSkillLink() {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return
-	}
-
-	symlinkPath := filepath.Join(home, ".claude", "skills", harness.ClaudePluginName)
-	info, err := os.Lstat(symlinkPath)
-	if err != nil {
-		return // doesn't exist, nothing to repair
-	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		return // not a symlink (copy fallback), file refresh handled it
-	}
-	if _, statErr := os.Stat(symlinkPath); statErr == nil {
-		return // symlink is healthy
-	}
-	if !claudeSkillLinkIsOurs(symlinkPath) {
-		return // somebody else's broken link: not ours to fix
-	}
-
-	_, _ = linkSkillToClaude()
-}
-
-// claudeSkillLinkIsOurs reports whether the symlink at path carries hey-cli's
-// provenance: the canonical relative target, pointing at a marked baseline.
-func claudeSkillLinkIsOurs(path string) bool {
-	target, err := os.Readlink(path)
-	if err != nil || target != claudeSkillLinkTarget {
-		return false
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return false
-	}
-	return ownedSkillDir(filepath.Join(home, ".agents", "skills", "hey"))
 }
