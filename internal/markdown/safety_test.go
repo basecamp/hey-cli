@@ -80,6 +80,36 @@ func TestRenderKeepsQueryStringsInHyperlinks(t *testing.T) {
 	}
 }
 
+// A label that reads as one host while pointing at another shows its destination in
+// the rendering, and the hyperlink goes where the destination says.
+func TestRenderDeceptiveLabelShowsTheDestination(t *testing.T) {
+	out := Render("[https://p\u0430ypal.com/login](https://evil.example/login)", 200)
+	if !strings.Contains(visible(out), "https://evil.example/login") {
+		t.Errorf("Render = %q, want the destination visible", out)
+	}
+	if !strings.Contains(out, ";https://evil.example/login\x07") {
+		t.Errorf("Render = %q, want a hyperlink to the destination", out)
+	}
+	if strings.Contains(out, ";https://p\u0430ypal.com") {
+		t.Errorf("Render = %q, want no hyperlink to the label's host", out)
+	}
+}
+
+// A body goes through the same confusable policy as a subject line: invisible
+// format characters go, a stack of combining marks is cut, and an emoji family keeps
+// its joiners.
+func TestRenderStripsConfusables(t *testing.T) {
+	for md, want := range map[string]string{
+		"pay\u200bpal and invoice\u00adpdf.exe":     "paypal and invoicepdf.exe",
+		"Z" + strings.Repeat("\u0336", 50) + "algo": "Z" + strings.Repeat("\u0336", 4) + "algo",
+		"the 👨\u200d👩\u200d👧 family":                "the 👨\u200d👩\u200d👧 family",
+	} {
+		if out := visible(Render(md, 200)); !strings.Contains(out, want) {
+			t.Errorf("Render(%q) shows %q, want %q in it", md, out, want)
+		}
+	}
+}
+
 func TestRenderStripsRawControls(t *testing.T) {
 	for name, md := range map[string]string{
 		"escape":     "hello \x1b[31mRED",
@@ -282,6 +312,7 @@ func FuzzContainment(f *testing.F) {
 		"| a |\n| --- |\n| &#x1b;[31m |",
 		"![&#27;](/rails/blobs/x.png)",
 		"a\u0085b\u009cc",
+		"pay\u200bpal Z" + strings.Repeat("\u0336", 8) + "algo [https://p\u0430ypal.com](https://evil.example)",
 	} {
 		f.Add(seed)
 	}

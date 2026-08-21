@@ -328,13 +328,33 @@ func TestToMarkdownAutolinkOnlyForAbsoluteURLs(t *testing.T) {
 	}
 }
 
-// A label that reads as one URL while pointing at another never collapses into an
-// autolink: the destination is written beside the label, where it can be compared.
+// A label that reads as one URL or host while pointing at another never collapses
+// into an autolink: the destination is written beside the label, where it can be
+// compared. That holds for a homoglyph host as much as an honest one — the Cyrillic
+// а in "pаypal" is not detected, it simply is not the href — and a conformant
+// renderer links to the destination while showing the label.
 func TestToMarkdownDeceptiveLabelShowsTheDestination(t *testing.T) {
-	got := toMarkdown(`<p><a href="https://evil.example/login">https://bank.example/login</a></p>`)
-	want := "[https://bank.example/login](https://evil.example/login)"
-	if got != want {
-		t.Errorf("ToMarkdown = %q, want %q", got, want)
+	const homoglyphHost = "https://p\u0430ypal.com/login"
+	for _, test := range []struct {
+		name, label, href, want string
+	}{
+		{"a URL", "https://bank.example/login", "https://evil.example/login", "[https://bank.example/login](https://evil.example/login)"},
+		{"a homoglyph URL", homoglyphHost, "https://evil.example/login", "[" + homoglyphHost + "](https://evil.example/login)"},
+		{"a www host", "www.bank.example", "https://evil.example", "[www.bank.example](https://evil.example)"},
+		{"a bare host and path", "bank.example/login", "https://evil.example/login", "[bank.example/login](https://evil.example/login)"},
+		{"the same host, a different path", "https://bank.example/", "https://bank.example/login", "[https://bank.example/](https://bank.example/login)"},
+		{"a label that is its href", homoglyphHost, homoglyphHost, "<" + homoglyphHost + ">"},
+	} {
+		got := toMarkdown(`<p><a href="` + test.href + `">` + test.label + `</a></p>`)
+		if got != test.want {
+			t.Errorf("%s: ToMarkdown = %q, want %q", test.name, got, test.want)
+		}
+		if links := renderedLinks(t, got); len(links) != 1 || links[0] != test.href {
+			t.Errorf("%s: rendered links = %q, want the destination %q", test.name, links, test.href)
+		}
+		if text := renderedText(t, got); text != test.label {
+			t.Errorf("%s: rendered = %q, want the label %q", test.name, text, test.label)
+		}
 	}
 }
 
@@ -524,6 +544,7 @@ func FuzzToMarkdownTerminalSafety(f *testing.F) {
 		`<table><tr><td>&amp;#27;|</td></tr></table>`,
 		`<figure data-trix-attachment='{"filename":"&amp;#27;","url":"javascript:1","contentType":"image/png"}'></figure>`,
 		"<p>caf\u009c\u0085e</p>",
+		`<p><a href="https://evil.example/login">https://p\u0430ypal.com/login</a></p>`,
 	} {
 		f.Add(seed)
 	}

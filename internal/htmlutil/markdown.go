@@ -339,6 +339,12 @@ func (m *markdownizer) code(n *html.Node) {
 // link writes an anchor. A destination that cannot be linked leaves its text behind as
 // prose, and a label that is itself a URL never hides the destination it points at: the
 // destination is written out beside it, where a reader comparing the two can see both.
+// Only a label that is its href, character for character, collapses into an autolink,
+// so the visible host is the destination's host by construction — a label of
+// "https://pаypal.com" with a Cyrillic а pointed at https://evil.example is written
+// `[https://pаypal.com](https://evil.example)`, and no confusable table is needed to
+// get there. Whether the label's host is itself a homoglyph of something is not
+// detected; see the terminal package's policy.
 func (m *markdownizer) link(n *html.Node) {
 	href := getAttr(n, "href")
 	dest, linkable := destination(href)
