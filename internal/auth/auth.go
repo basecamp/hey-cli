@@ -340,7 +340,11 @@ func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL, c
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second) //nolint:gosec // G118: cancel deferred in goroutine; async shutdown required to avoid handler self-deadlock
 			go func() {
 				defer cancel()
-				if shutdownErr := server.Shutdown(shutdownCtx); shutdownErr != nil && !errors.Is(shutdownErr, http.ErrServerClosed) {
+				// The listener is closed on the way out of waitForCallback, and
+				// Shutdown closes it too; whichever gets there second sees
+				// net.ErrClosed, which is the server being down, not a failure.
+				if shutdownErr := server.Shutdown(shutdownCtx); shutdownErr != nil &&
+					!errors.Is(shutdownErr, http.ErrServerClosed) && !errors.Is(shutdownErr, net.ErrClosed) {
 					fmt.Fprintf(os.Stderr, "warning: callback server shutdown failed: %v\n", shutdownErr)
 				}
 			}()
