@@ -360,11 +360,15 @@ hey timetrack start                # start tracking
 hey timetrack stop                 # stop tracking
 hey timetrack current              # show active track
 hey timetrack list                 # list all tracks
+hey timetrack export > tracked-time.csv
+hey timetrack export --output tracked-time.csv
 hey timetrack categories           # list categories
 hey timetrack category create "Client work"
 hey timetrack category rename 123 "Planning"
 hey timetrack category delete 123
 ```
+
+The time tracking export contains every completed entry, newest first, with Start, End, Duration, Category, and Notes columns. Ongoing time tracking is excluded. `--output` preserves an existing file unless `--force` is set.
 
 ### Journal
 

@@ -60,6 +60,18 @@ func TestDestinationPreservesPortableFilenameBehavior(t *testing.T) {
 	}
 }
 
+func TestSaveBytesWritesContentSafely(t *testing.T) {
+	destination := filepath.Join(t.TempDir(), "tracked-time.csv")
+	written, err := SaveBytes(destination, []byte("Start,End\n09:00,10:00\n"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if written != int64(len("Start,End\n09:00,10:00\n")) {
+		t.Errorf("written = %d", written)
+	}
+	assertFileContent(t, destination, "Start,End\n09:00,10:00\n")
+}
+
 func TestSavePreservesExistingFileUnlessForced(t *testing.T) {
 	destination := filepath.Join(t.TempDir(), "quarterly-report.pdf")
 	if err := os.WriteFile(destination, []byte("keep me"), 0o600); err != nil {
@@ -149,7 +161,7 @@ func assertNoTemporaryFiles(t *testing.T, directory string) {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".hey-attachment-") {
+		if strings.HasPrefix(entry.Name(), ".hey-file-") {
 			t.Errorf("temporary file was not removed: %s", entry.Name())
 		}
 	}

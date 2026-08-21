@@ -1,7 +1,11 @@
 package smoke_test
 
 import (
+	"encoding/csv"
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -88,6 +92,46 @@ func TestTimetrackListLimit(t *testing.T) {
 func TestTimetrackListAll(t *testing.T) {
 	resp := heyJSON(t, "timetrack", "list", "--all")
 	_ = resp
+}
+
+func TestTimetrackExport(t *testing.T) {
+	stdout, stderr, code := hey(t, "timetrack", "export")
+	if code != 0 {
+		t.Fatalf("timetrack export failed (exit %d): %s", code, stderr)
+	}
+	assertTimeTrackExportCSV(t, stdout)
+
+	destination := filepath.Join(t.TempDir(), "tracked-time.csv")
+	output, stderr, code := hey(t, "timetrack", "export", "--output", destination, "--json")
+	if code != 0 {
+		t.Fatalf("timetrack export --output failed (exit %d): %s", code, stderr)
+	}
+	var response Response
+	if err := json.Unmarshal([]byte(output), &response); err != nil {
+		t.Fatalf("parse export response: %v", err)
+	}
+	assertContains(t, response.Summary, destination)
+
+	contents, err := os.ReadFile(destination)
+	if err != nil {
+		t.Fatalf("read time track export: %v", err)
+	}
+	assertTimeTrackExportCSV(t, string(contents))
+}
+
+func assertTimeTrackExportCSV(t *testing.T, contents string) {
+	t.Helper()
+	rows, err := csv.NewReader(strings.NewReader(contents)).ReadAll()
+	if err != nil {
+		t.Fatalf("parse time track CSV: %v", err)
+	}
+	if len(rows) == 0 {
+		t.Fatal("time track export has no header")
+	}
+	want := []string{"Start", "End", "Duration", "Category", "Notes"}
+	if strings.Join(rows[0], ",") != strings.Join(want, ",") {
+		t.Errorf("CSV header = %v, want %v", rows[0], want)
+	}
 }
 
 func TestTimetrackCategories(t *testing.T) {

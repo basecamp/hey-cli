@@ -182,6 +182,8 @@ hey boxes --quiet --jq '.[].name'
 | Stop time tracking | `hey timetrack stop` |
 | Current timer | `hey timetrack current --json` |
 | List time entries | `hey timetrack list --json` |
+| Export completed time entries | `hey timetrack export > tracked-time.csv` |
+| Save a time tracking export | `hey timetrack export --output tracked-time.csv --json` |
 | List time track categories | `hey timetrack categories --json` |
 | Create time track category | `hey timetrack category create "Client work"` |
 | List journal entries | `hey journal list --json` |
@@ -464,6 +466,8 @@ hey timetrack start                           # Start timer
 hey timetrack stop                            # Stop timer
 hey timetrack current --json                  # Show current timer
 hey timetrack list --json                     # List time entries
+hey timetrack export > tracked-time.csv        # Write the complete CSV export
+hey timetrack export -o tracked-time.csv       # Safely save the CSV to a file
 hey timetrack categories --json               # List categories
 hey timetrack category create "Client work"   # Create a category
 hey timetrack category rename 123 "Planning"  # Rename a category

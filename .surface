@@ -185,6 +185,9 @@ hey timetrack category create
 hey timetrack category delete
 hey timetrack category rename
 hey timetrack current
+hey timetrack export
+hey timetrack export --force
+hey timetrack export --output
 hey timetrack list
 hey timetrack list --all
 hey timetrack list --limit

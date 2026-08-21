@@ -2,10 +2,13 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	safefiles "github.com/basecamp/hey-cli/internal/attachments"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -19,7 +22,7 @@ func newTimetrackCommand() *timetrackCommand {
 		Use:   "timetrack",
 		Short: "Track time",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: start, stop, current, list, categories, category. Use current to check if tracking is active before start/stop.",
+			"agent_notes": "Subcommands: start, stop, current, list, export, categories, category. Use current to check if tracking is active before start/stop. Export writes CSV to stdout or safely saves it with --output.",
 		},
 	}
 
@@ -27,6 +30,7 @@ func newTimetrackCommand() *timetrackCommand {
 	timetrackCommand.cmd.AddCommand(newTimetrackStopCommand().cmd)
 	timetrackCommand.cmd.AddCommand(newTimetrackCurrentCommand().cmd)
 	timetrackCommand.cmd.AddCommand(newTimetrackListCommand().cmd)
+	timetrackCommand.cmd.AddCommand(newTimetrackExportCommand().cmd)
 	timetrackCommand.cmd.AddCommand(newTimetrackCategoriesCommand().cmd)
 	timetrackCommand.cmd.AddCommand(newTimetrackCategoryCommand().cmd)
 
@@ -253,6 +257,97 @@ func (c *timetrackListCommand) run(cmd *cobra.Command, args []string) error {
 			Description: "Start time tracking",
 		}),
 	)
+}
+
+// export
+
+type timetrackExportCommand struct {
+	cmd    *cobra.Command
+	output string
+	force  bool
+}
+
+type timeTrackExportResult struct {
+	Path     string `json:"path"`
+	ByteSize int64  `json:"byte_size"`
+}
+
+func newTimetrackExportCommand() *timetrackExportCommand {
+	timetrackExportCommand := &timetrackExportCommand{}
+	timetrackExportCommand.cmd = &cobra.Command{
+		Use:   "export",
+		Short: "Export completed time tracks as CSV",
+		Long:  "Export every completed time track as CSV, newest first. Without --output, the CSV is written directly to stdout. With --output, the command safely saves the CSV and returns file metadata.",
+		Example: `  hey timetrack export > time-tracking.csv
+  hey timetrack export --output time-tracking.csv
+  hey timetrack export --output time-tracking.csv --force`,
+		Annotations: map[string]string{
+			"agent_notes": "Writes HEY's CSV unchanged to stdout. Use --output to save it to a file; existing paths are preserved unless --force is set. The columns are Start, End, Duration, Category, and Notes.",
+		},
+		RunE: timetrackExportCommand.run,
+		Args: cobra.NoArgs,
+	}
+
+	timetrackExportCommand.cmd.Flags().StringVarP(&timetrackExportCommand.output, "output", "o", "", "Save CSV to this file instead of stdout")
+	timetrackExportCommand.cmd.Flags().BoolVar(&timetrackExportCommand.force, "force", false, "Replace an existing output file")
+
+	return timetrackExportCommand
+}
+
+func (c *timetrackExportCommand) run(cmd *cobra.Command, args []string) error {
+	if err := requireAuth(); err != nil {
+		return err
+	}
+	if c.output == "" {
+		if c.force {
+			return output.ErrUsage("--force requires --output")
+		}
+		if timetrackExportStructuredOutputRequested(cmd) {
+			return output.ErrUsage("output formatting flags require --output for time track exports")
+		}
+	} else if err := ensureTimetrackExportDestination(c.output, c.force); err != nil {
+		return err
+	}
+
+	data, err := sdk.TimeTracks().Export(cmd.Context())
+	if err != nil {
+		return convertSDKError(err)
+	}
+
+	if c.output == "" {
+		if _, writeErr := cmd.OutOrStdout().Write(data); writeErr != nil {
+			return output.ErrAPI(0, fmt.Sprintf("could not write time track export: %v", writeErr))
+		}
+		return nil
+	}
+
+	destination := filepath.Clean(c.output)
+	written, err := safefiles.SaveBytes(destination, data, c.force)
+	if err != nil {
+		return err
+	}
+	result := timeTrackExportResult{Path: destination, ByteSize: written}
+	if writer.IsStyled() {
+		fmt.Fprintf(cmd.OutOrStdout(), "Exported time tracks to %s (%s)\n", terminalSafeText(destination), formatByteSize(written))
+		return nil
+	}
+	return writeOK(result, output.WithSummary(fmt.Sprintf("Time tracks exported to %s", destination)))
+}
+
+func timetrackExportStructuredOutputRequested(cmd *cobra.Command) bool {
+	return jsonFlag || idsOnly || countFlag || markdownF || styledFlag || agentFlag || statsFlag || cmd.Flags().Changed("jq")
+}
+
+func ensureTimetrackExportDestination(destination string, force bool) error {
+	if force {
+		return nil
+	}
+	if _, err := os.Lstat(destination); err == nil {
+		return output.ErrUsage(fmt.Sprintf("destination already exists: %s (use --force to replace it)", destination))
+	} else if !os.IsNotExist(err) {
+		return output.ErrAPI(0, fmt.Sprintf("could not inspect destination: %v", err))
+	}
+	return nil
 }
 
 // categories

@@ -1,6 +1,7 @@
 package attachments
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -58,19 +59,31 @@ func PortableFilename(filename string) (string, error) {
 	return filename, nil
 }
 
+// SaveBytes safely writes data to destination. Existing paths are preserved unless force is set.
+func SaveBytes(destination string, data []byte, force bool) (int64, error) {
+	return Save(context.Background(), byteDownloader(data), destination, "", force)
+}
+
+type byteDownloader []byte
+
+func (data byteDownloader) DownloadBlob(_ context.Context, _ string, writer io.Writer) (int64, http.Header, error) {
+	written, err := io.Copy(writer, bytes.NewReader(data))
+	return written, nil, err
+}
+
 func Save(ctx context.Context, downloader Downloader, destination, sourceURL string, force bool) (int64, error) {
 	if !force {
 		if _, err := os.Lstat(destination); err == nil {
 			return 0, apierr.ErrUsage(fmt.Sprintf("destination already exists: %s (use --force to replace it)", destination))
 		} else if !os.IsNotExist(err) {
-			return 0, apierr.ErrAPI(0, fmt.Sprintf("could not inspect attachment destination: %v", err))
+			return 0, apierr.ErrAPI(0, fmt.Sprintf("could not inspect destination: %v", err))
 		}
 	}
 
 	directory := filepath.Dir(destination)
-	temporary, err := os.CreateTemp(directory, ".hey-attachment-*")
+	temporary, err := os.CreateTemp(directory, ".hey-file-*")
 	if err != nil {
-		return 0, apierr.ErrAPI(0, fmt.Sprintf("could not create temporary attachment file: %v", err))
+		return 0, apierr.ErrAPI(0, fmt.Sprintf("could not create temporary file: %v", err))
 	}
 	temporaryPath := temporary.Name()
 	defer func() { _ = os.Remove(temporaryPath) }()
@@ -81,19 +94,19 @@ func Save(ctx context.Context, downloader Downloader, destination, sourceURL str
 		return written, err
 	}
 	if err := temporary.Close(); err != nil {
-		return written, apierr.ErrAPI(0, fmt.Sprintf("could not close attachment file: %v", err))
+		return written, apierr.ErrAPI(0, fmt.Sprintf("could not close temporary file: %v", err))
 	}
 
 	if force {
 		if err := replaceFile(temporaryPath, destination); err != nil {
-			return written, apierr.ErrAPI(0, fmt.Sprintf("could not replace attachment file: %v", err))
+			return written, apierr.ErrAPI(0, fmt.Sprintf("could not replace file: %v", err))
 		}
 		return written, nil
 	}
 	if err := commitFileNoReplace(temporaryPath, destination); os.IsExist(err) {
 		return written, apierr.ErrUsage(fmt.Sprintf("destination already exists: %s (use --force to replace it)", destination))
 	} else if err != nil {
-		return written, apierr.ErrAPI(0, fmt.Sprintf("could not save attachment file: %v", err))
+		return written, apierr.ErrAPI(0, fmt.Sprintf("could not save file: %v", err))
 	}
 	return written, nil
 }
