@@ -60,8 +60,8 @@ func newHabitCreateCommand() *habitCreateCommand {
 	}
 
 	habitCreateCommand.cmd.Flags().StringVar(&habitCreateCommand.name, "name", "", "Habit name")
-	habitCreateCommand.cmd.Flags().StringVar(&habitCreateCommand.icon, "icon", habitvalues.DefaultIcon, "Habit icon")
-	habitCreateCommand.cmd.Flags().StringVar(&habitCreateCommand.color, "color", habitvalues.DefaultColor, "Habit color")
+	habitCreateCommand.cmd.Flags().StringVar(&habitCreateCommand.icon, "icon", habitvalues.DefaultIcon, "Habit icon. Accepted values: "+habitvalues.IconValues)
+	habitCreateCommand.cmd.Flags().StringVar(&habitCreateCommand.color, "color", habitvalues.DefaultColor, "Habit color. Accepted values: "+habitvalues.ColorValues)
 	habitCreateCommand.cmd.Flags().StringVar(&habitCreateCommand.days, "days", habitvalues.FormatDays(habitvalues.EveryDay), "Weekdays (names or 0-6, comma-separated)")
 
 	return habitCreateCommand
@@ -95,6 +95,12 @@ func (c *habitCreateCommand) run(cmd *cobra.Command, args []string) error {
 	color := strings.TrimSpace(c.color)
 	if icon == "" || color == "" {
 		return output.ErrUsage("icon and color cannot be empty")
+	}
+	if err := habitvalues.ValidateIcon(icon); err != nil {
+		return output.ErrUsage(err.Error())
+	}
+	if err := habitvalues.ValidateColor(color); err != nil {
+		return output.ErrUsage(err.Error())
 	}
 	days, err := habitvalues.ParseDays(c.days)
 	if err != nil {
@@ -130,14 +136,14 @@ func newHabitEditCommand() *habitEditCommand {
 		Short:   "Edit a habit",
 		Example: `  hey habit edit 789 --name "Evening walk"
   hey habit edit 789 --days monday,tuesday,wednesday,thursday,friday
-  hey habit update 789 --icon walking --color orange`,
+  hey habit update 789 --icon walk --color gold`,
 		RunE: habitEditCommand.run,
 		Args: cobra.RangeArgs(1, 2),
 	}
 
 	habitEditCommand.cmd.Flags().StringVar(&habitEditCommand.name, "name", "", "New habit name")
-	habitEditCommand.cmd.Flags().StringVar(&habitEditCommand.icon, "icon", "", "New habit icon")
-	habitEditCommand.cmd.Flags().StringVar(&habitEditCommand.color, "color", "", "New habit color")
+	habitEditCommand.cmd.Flags().StringVar(&habitEditCommand.icon, "icon", "", "New habit icon. Accepted values: "+habitvalues.IconValues)
+	habitEditCommand.cmd.Flags().StringVar(&habitEditCommand.color, "color", "", "New habit color. Accepted values: "+habitvalues.ColorValues)
 	habitEditCommand.cmd.Flags().StringVar(&habitEditCommand.days, "days", "", "New weekdays (names or 0-6, comma-separated)")
 
 	return habitEditCommand
@@ -174,8 +180,18 @@ func (c *habitEditCommand) run(cmd *cobra.Command, args []string) error {
 	if iconChanged && icon == "" {
 		return output.ErrUsage("icon cannot be empty")
 	}
+	if iconChanged {
+		if validationErr := habitvalues.ValidateIcon(icon); validationErr != nil {
+			return output.ErrUsage(validationErr.Error())
+		}
+	}
 	if colorChanged && color == "" {
 		return output.ErrUsage("color cannot be empty")
+	}
+	if colorChanged {
+		if validationErr := habitvalues.ValidateColor(color); validationErr != nil {
+			return output.ErrUsage(validationErr.Error())
+		}
 	}
 	var days []int32
 	if daysChanged {

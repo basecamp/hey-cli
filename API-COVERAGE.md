@@ -53,6 +53,9 @@ The remaining HTML-reading gaps use the SDK's authenticated HTML helper and are 
 | `/postings/spam.json` | POST | SDK `Postings().MarkSpam` | `hey spam <id>`, TUI `s` | covered |
 | `/postings/mutings.json` | POST | SDK `Postings().Mute` | `hey ignore <id>`, TUI `-` | covered |
 | `/postings/mutings.json` | DELETE | SDK `Postings().Unmute` | `hey stop-ignoring <id>`, TUI `+` | covered |
+| `/calendar/habits.json` | POST | SDK `Habits().Create` | `hey habit create`, Calendar TUI `a` | covered |
+| `/calendar/habits/{id}.json` | PATCH | SDK `Habits().Update` | `hey habit edit <id>`, Calendar TUI `e` | covered |
+| `/calendar/habits/{id}.json` | DELETE | SDK `Habits().Delete` | `hey habit delete <id>`, Calendar TUI `x` | covered |
 | `/calendar/days/{date}/habits/{id}/completions.json` | POST | SDK `Habits().Complete` | `hey habit complete <id>` | covered |
 | `/calendar/days/{date}/habits/{id}/completions.json` | DELETE | SDK `Habits().Uncomplete` | `hey habit uncomplete <id>` | covered |
 | `/calendar/days/{date}/journal_entry.json` | GET | SDK `Journal().Get` | `hey journal read [date]` | partial: falls back to legacy |

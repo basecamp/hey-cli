@@ -7,6 +7,10 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/spf13/cobra"
+
+	habitvalues "github.com/basecamp/hey-cli/internal/habit"
 )
 
 func TestHabitCreateCommand(t *testing.T) {
@@ -70,12 +74,12 @@ func TestHabitEditSendsPartialPayload(t *testing.T) {
 			t.Errorf("request = %s %s, want PATCH /calendar/habits/42.json", r.Method, r.URL.Path)
 		}
 		body, _ := io.ReadAll(r.Body)
-		if got := string(body); got != `{"calendar_habit":{"color":"orange","days":[0,6]}}` {
+		if got := string(body); got != `{"calendar_habit":{"color":"gold","days":[0,6]}}` {
 			t.Errorf("payload = %q", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"id":42,"title":"Morning strength training","type":"CalendarHabit","color":"orange","days":[0,6]}`)
-	}), "habit", "edit", "42", "--color", "orange", "--days", "Saturday,0")
+		_, _ = io.WriteString(w, `{"id":42,"title":"Morning strength training","type":"CalendarHabit","color":"gold","days":[0,6]}`)
+	}), "habit", "edit", "42", "--color", "gold", "--days", "Saturday,0")
 	if err != nil {
 		t.Fatalf("execute habit edit: %v", err)
 	}
@@ -99,6 +103,17 @@ func TestHabitDeleteCommand(t *testing.T) {
 	}
 }
 
+func TestHabitFlagHelpListsAcceptedIconsAndColors(t *testing.T) {
+	for _, command := range []*cobra.Command{newHabitCreateCommand().cmd, newHabitEditCommand().cmd} {
+		if usage := command.Flags().Lookup("icon").Usage; !strings.Contains(usage, habitvalues.IconValues) {
+			t.Errorf("%s icon help does not list all values: %q", command.Name(), usage)
+		}
+		if usage := command.Flags().Lookup("color").Usage; !strings.Contains(usage, habitvalues.ColorValues) {
+			t.Errorf("%s color help does not list all values: %q", command.Name(), usage)
+		}
+	}
+}
+
 func TestHabitMutationValidationMakesNoRequest(t *testing.T) {
 	tests := []struct {
 		name string
@@ -106,8 +121,10 @@ func TestHabitMutationValidationMakesNoRequest(t *testing.T) {
 		want string
 	}{
 		{name: "create name", args: []string{"habit", "create", ""}, want: "name is required"},
+		{name: "create icon", args: []string{"habit", "create", "Read every day", "--icon", "walking"}, want: "icon must be one of"},
 		{name: "create days", args: []string{"habit", "create", "Read every day", "--days", "funday"}, want: "invalid weekday"},
 		{name: "edit ID", args: []string{"habit", "edit", "nope", "--color", "blue"}, want: "invalid habit ID"},
+		{name: "edit color", args: []string{"habit", "edit", "42", "--color", "orange"}, want: "color must be one of"},
 		{name: "edit changes", args: []string{"habit", "edit", "42"}, want: "provide at least one"},
 		{name: "delete ID", args: []string{"habit", "delete", "0"}, want: "invalid habit ID"},
 	}

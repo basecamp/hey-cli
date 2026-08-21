@@ -34,6 +34,7 @@ type habitForm struct {
 	status  string
 	isError bool
 	saving  bool
+	width   int
 	styles  styles
 }
 
@@ -69,6 +70,7 @@ func (f *habitForm) focusCurrent() tea.Cmd {
 }
 
 func (f *habitForm) resize(width, _ int) {
+	f.width = width
 	for i := range f.inputs {
 		f.inputs[i].SetWidth(max(width-12, 10))
 	}
@@ -90,8 +92,14 @@ func (f *habitForm) validate() string {
 	if icon == "" {
 		return "Icon is required"
 	}
+	if problem := habitvalues.ValidateIcon(icon); problem != nil {
+		return problem.Error()
+	}
 	if color == "" {
 		return "Color is required"
+	}
+	if problem := habitvalues.ValidateColor(color); problem != nil {
+		return problem.Error()
 	}
 	if err != nil {
 		return err.Error()
@@ -146,7 +154,16 @@ func (f *habitForm) view() string {
 	for i := range f.inputs {
 		fmt.Fprintf(&b, "%s %s\n", styleMuted.Render(fmt.Sprintf("%8s:", labels[i])), f.inputs[i].View())
 	}
-	b.WriteString(styleMuted.Render("Days accept weekday names or 0 (Sunday) through 6 (Saturday)."))
+	guidance := []string{
+		"Icons: " + habitvalues.IconValues,
+		"Colors: " + habitvalues.ColorValues,
+		"Days accept weekday names or 0 (Sunday) through 6 (Saturday).",
+	}
+	for _, text := range guidance {
+		for _, line := range wrapText(text, max(f.width, 20)) {
+			b.WriteString(styleMuted.Render(line) + "\n")
+		}
+	}
 	if f.status != "" {
 		statusStyle := styleMuted
 		if f.isError {

@@ -223,7 +223,10 @@ func (v *calendarView) HelpBindings() []helpBinding {
 	if v.inThread {
 		return nil
 	}
-	bindings := []helpBinding{{"v", v.viewMode.next().String() + " view"}, {"c", "time categories"}, {"a", "create habit"}}
+	bindings := []helpBinding{{"v", v.viewMode.next().String() + " view"}, {"c", "time categories"}}
+	if v.viewingPersonalCalendar() {
+		bindings = append(bindings, helpBinding{"a", "create habit"})
+	}
 	if len(v.manageableHabits()) > 0 {
 		bindings = append(bindings, helpBinding{"[/]", "select habit"}, helpBinding{"e", "edit habit"})
 		deleteLabel := "delete habit"
@@ -301,6 +304,10 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		v.rebuildView()
 		return nil
 	case "a":
+		if !v.viewingPersonalCalendar() {
+			v.notice = "Habits can only be created from the personal calendar"
+			return nil
+		}
 		return v.startHabitForm(habitFormCreate, models.Recording{})
 	case "[":
 		v.moveHabitSelection(-1)
@@ -451,6 +458,10 @@ func (v *calendarView) rebuildView() {
 	} else {
 		v.contentVP.GotoTop()
 	}
+}
+
+func (v *calendarView) viewingPersonalCalendar() bool {
+	return v.calIndex >= 0 && v.calIndex < len(v.calendars) && v.calendars[v.calIndex].Personal
 }
 
 func (v *calendarView) manageableHabits() []models.Recording {

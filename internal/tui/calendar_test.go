@@ -10,7 +10,7 @@ import (
 func testCalendars() []models.Calendar {
 	return []models.Calendar{
 		{ID: 10, Name: "Work", Kind: "owned"},
-		{ID: 11, Name: "Personal", Kind: "personal"},
+		{ID: 11, Name: "Personal", Kind: "personal", Personal: true},
 	}
 }
 
@@ -213,6 +213,7 @@ func TestCalendarViewInThread(t *testing.T) {
 
 func TestCalendarViewHelpBindingsShowsViewToggle(t *testing.T) {
 	v := calendarWithRecordings()
+	v.calIndex = 1
 	bindings := v.HelpBindings()
 	if len(bindings) != 6 {
 		t.Fatalf("expected 6 bindings, got %d", len(bindings))
