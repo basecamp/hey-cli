@@ -7,9 +7,10 @@ import (
 	"image"
 	_ "image/gif"  // register GIF decoder for image.DecodeConfig
 	_ "image/jpeg" // register JPEG decoder
-	_ "image/png"  // register PNG decoder
+	"image/png"
 	"math"
 	"strings"
+	"sync/atomic"
 )
 
 // Diacritics for encoding row/column indices in Kitty unicode placeholders.
@@ -30,10 +31,45 @@ var diacritics = []rune{
 
 const placeholder = '\U0010EEEE'
 
+const (
+	maxImageCols = 60
+	maxImageRows = 40
+
+	// A cell for terminals that report their window without pixel dimensions.
+	// Only the ratio and the order of magnitude matter here: they keep an image
+	// from being blown up far past the pixels it actually has.
+	cellWidthPixels  = 10
+	cellHeightPixels = 20
+)
+
+// The first id hands the placeholder's foreground color a non-zero byte in every
+// position: a color like rgb(0,0,1) reads as a palette index to some terminals,
+// which then lose the image the cell belongs to. Ids stay under 0xFFFFFF so three
+// bytes of color can carry them without a fourth diacritic per cell.
+const (
+	firstImageID = 0x010101
+	lastImageID  = 0xFFFFFF
+)
+
+var imageIDs atomic.Int64
+
+// nextImageID hands out an id that no earlier image has used. Reusing one replaces
+// the image the terminal holds under it while the placement drawn for the old
+// geometry is still on screen, which renders the new image clipped into the old
+// image's cells.
+func nextImageID() int {
+	id := firstImageID + imageIDs.Add(1)
+	if id > lastImageID {
+		imageIDs.Store(0)
+		id = firstImageID
+	}
+	return int(id)
+}
+
 // kittyUploadAndPlace returns escape sequences to upload image data and create
 // a virtual Unicode placement. The result should be sent via tea.Raw().
 func kittyUploadAndPlace(data []byte, id, cols, rows int) string {
-	encoded := base64.StdEncoding.EncodeToString(data)
+	encoded := base64.StdEncoding.EncodeToString(pngEncoded(data))
 	const chunkSize = 4096
 
 	if len(encoded) == 0 {
@@ -99,8 +135,33 @@ func renderImagePlaceholder(id, cols, rows int) string {
 	return b.String()
 }
 
-// imageDimensions calculates display size in terminal cells for an image.
-// Terminal cells are roughly 2:1 (height:width ratio).
+// pngEncoded returns data the terminal will read the way the upload describes it.
+// The upload declares f=100, which is PNG, so a JPEG or a GIF sent as-is is dropped
+// by the terminal and the email shows an empty gap where its image was. Anything
+// that is not already a PNG is re-encoded, at the fastest compression setting since
+// this runs while the thread is being drawn.
+func pngEncoded(data []byte) []byte {
+	if len(data) == 0 || bytes.HasPrefix(data, []byte("\x89PNG\r\n\x1a\n")) {
+		return data
+	}
+
+	decoded, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return data
+	}
+
+	var encoded bytes.Buffer
+	encoder := png.Encoder{CompressionLevel: png.BestSpeed}
+	if err := encoder.Encode(&encoded, decoded); err != nil {
+		return data
+	}
+	return encoded.Bytes()
+}
+
+// imageDimensions calculates display size in terminal cells for an image. The
+// terminal scales the image to fill the cells it is placed in, one cell at a time,
+// so a small image stretched over many cells comes out smeared and seamed rather
+// than merely soft -- an image never gets more cells than its own pixels cover.
 func imageDimensions(data []byte, maxCols int) (cols, rows int) {
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil || cfg.Width == 0 || cfg.Height == 0 {
@@ -111,9 +172,18 @@ func imageDimensions(data []byte, maxCols int) (cols, rows int) {
 		return maxCols, 10
 	}
 
-	cols = min(maxCols, 60)
-	// Divide by 2 because terminal cells are ~2x taller than wide
-	rows = max(int(math.Round(float64(cols)*float64(cfg.Height)/float64(cfg.Width)/2.0)), 1)
-	rows = min(rows, 40)
+	naturalCols := int(math.Ceil(float64(cfg.Width) / cellWidthPixels))
+	cols = max(min(maxCols, maxImageCols, naturalCols), 1)
+	rows = imageRows(cols, cfg)
+
+	if rows > maxImageRows {
+		cols = max(cols*maxImageRows/rows, 1)
+		rows = maxImageRows
+	}
 	return cols, rows
+}
+
+func imageRows(cols int, cfg image.Config) int {
+	pixelsPerCol := float64(cfg.Width) / float64(cols)
+	return max(int(math.Round(float64(cfg.Height)/pixelsPerCol*cellWidthPixels/cellHeightPixels)), 1)
 }

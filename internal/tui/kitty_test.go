@@ -1,6 +1,11 @@
 package tui
 
 import (
+	"bytes"
+	"image"
+	"image/color"
+	"image/jpeg"
+	"image/png"
 	"strings"
 	"testing"
 )
@@ -65,6 +70,104 @@ func TestRenderImagePlaceholderZero(t *testing.T) {
 	if result != "" {
 		t.Errorf("zero dimensions should return empty string, got %q", result)
 	}
+}
+
+func TestImageDimensionsStaysWithinTheImagesOwnPixels(t *testing.T) {
+	// A logo the size of the one Sentry puts at the top of its notifications.
+	cols, rows := imageDimensions(pngImage(t, 234, 64), 100)
+	if cols != 24 || rows != 3 {
+		t.Errorf("dimensions = (%d, %d), want (24, 3)", cols, rows)
+	}
+
+	// An icon must not be blown up over half the thread either.
+	cols, rows = imageDimensions(pngImage(t, 32, 32), 100)
+	if cols != 4 || rows != 2 {
+		t.Errorf("dimensions = (%d, %d), want (4, 2)", cols, rows)
+	}
+}
+
+func TestImageDimensionsCaps(t *testing.T) {
+	cols, rows := imageDimensions(pngImage(t, 2000, 1000), 100)
+	if cols != maxImageCols || rows != 15 {
+		t.Errorf("wide image = (%d, %d), want (%d, 15)", cols, rows, maxImageCols)
+	}
+
+	cols, rows = imageDimensions(pngImage(t, 2000, 1000), 30)
+	if cols != 30 || rows != 7 {
+		t.Errorf("narrow viewport = (%d, %d), want (30, 7)", cols, rows)
+	}
+
+	// A tall screenshot loses columns rather than its proportions.
+	cols, rows = imageDimensions(pngImage(t, 600, 4000), 100)
+	if cols != 12 || rows != maxImageRows {
+		t.Errorf("tall image = (%d, %d), want (12, %d)", cols, rows, maxImageRows)
+	}
+}
+
+func TestPngEncodedRewritesWhatTheTerminalWouldDrop(t *testing.T) {
+	original := pngImage(t, 40, 20)
+	if !bytes.Equal(pngEncoded(original), original) {
+		t.Error("a PNG should be passed through untouched")
+	}
+
+	encoded := pngEncoded(jpegImage(t, 40, 20))
+	if !bytes.HasPrefix(encoded, []byte("\x89PNG\r\n\x1a\n")) {
+		t.Error("a JPEG should be re-encoded as PNG")
+	}
+
+	config, format, err := image.DecodeConfig(bytes.NewReader(encoded))
+	if err != nil || format != "png" || config.Width != 40 || config.Height != 20 {
+		t.Errorf("re-encoded image = %s %dx%d, err %v", format, config.Width, config.Height, err)
+	}
+
+	if got := pngEncoded([]byte("not an image")); string(got) != "not an image" {
+		t.Errorf("undecodable data should be left alone, got %q", got)
+	}
+}
+
+func TestNextImageID(t *testing.T) {
+	first, second := nextImageID(), nextImageID()
+	if first == second {
+		t.Error("ids must not repeat")
+	}
+	for _, id := range []int{first, second} {
+		if id>>16&0xFF == 0 || id>>8&0xFF == 0 || id&0xFF == 0 {
+			t.Errorf("id %#x has a zero color byte", id)
+		}
+		if id > lastImageID {
+			t.Errorf("id %#x needs more than three bytes of color", id)
+		}
+	}
+}
+
+func pngImage(t *testing.T, width, height int) []byte {
+	t.Helper()
+
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, filledImage(width, height)); err != nil {
+		t.Fatalf("encoding PNG: %v", err)
+	}
+	return encoded.Bytes()
+}
+
+func jpegImage(t *testing.T, width, height int) []byte {
+	t.Helper()
+
+	var encoded bytes.Buffer
+	if err := jpeg.Encode(&encoded, filledImage(width, height), nil); err != nil {
+		t.Fatalf("encoding JPEG: %v", err)
+	}
+	return encoded.Bytes()
+}
+
+func filledImage(width, height int) image.Image {
+	filled := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := range height {
+		for x := range width {
+			filled.Set(x, y, color.RGBA{R: uint8(x % 256), G: uint8(y % 256), B: 128, A: 255})
+		}
+	}
+	return filled
 }
 
 func TestImageDimensionsFallback(t *testing.T) {

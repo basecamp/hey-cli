@@ -58,8 +58,8 @@ func (v *journalView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.topicViewport.SetContent(v.topicContent)
 		v.topicViewport.GotoTop()
 		var uploadCmds []tea.Cmd
-		for i, imgData := range msg.images {
-			imageID := i + 1
+		for _, imgData := range msg.images {
+			imageID := nextImageID()
 			cols, rows := imageDimensions(imgData, v.vc.width-4)
 			v.topicContent += "\n\n" + renderImagePlaceholder(imageID, cols, rows)
 			v.topicViewport.SetContent(v.topicContent)

@@ -275,9 +275,8 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.attachmentCursor = 0
 		var imageContent strings.Builder
 		var uploadCmds []tea.Cmd
-		for i, imgData := range msg.images {
-			imageID := i + 1
-			rendered := v.vc.imageRenderer.render(imgData, imageID, v.vc.width-4)
+		for _, imgData := range msg.images {
+			rendered := v.vc.imageRenderer.render(imgData, nextImageID(), v.vc.width-4)
 			if rendered.content != "" {
 				imageContent.WriteString("\n\n")
 				imageContent.WriteString(rendered.content)
