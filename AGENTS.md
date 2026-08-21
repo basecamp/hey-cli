@@ -106,9 +106,10 @@ because both were mis-stated here before:
   in the HTML. A thread that could be read only in part is refused without
   `--allow-partial`; with it the notice says what is missing (`threadNotice` in
   `internal/cmd/thread_source.go`). The package takes a `Source` interface rather than the
-  SDK, so `cmd` hands it `sdkThreadSource`; `tui` could do the same without an import
-  cycle, but `mailView.fetchTopic` still reads one page, deliberately, until its image
-  loading has budgets of its own (#246). HEY serves the entry index newest first; the
+  SDK; `threadload.NewSDKSource` is the adapter both the CLI and the TUI hand it, and the TUI's `mailView.fetchTopic` reads through it
+  too — every page, oldest first, unread bodies marked and a notice for a partial read —
+  and then fetches inline images within `imageBudget` (`internal/tui/image_budget.go`:
+  count, bytes, deadline, de-dup, HEY blob paths only). HEY serves the entry index newest first; the
   loader admits newest first and reverses once, so a thread reads oldest first.
 
   The entry index is geared_pagination like every other list here, so its page is a cursor

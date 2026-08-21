@@ -1,13 +1,14 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"mime"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/basecamp/hey-cli/internal/threadload"
 )
 
 // The SDK's generated parsers read every response body with io.ReadAll before
@@ -36,8 +37,10 @@ import (
 // is a message with a very large HTML body several times over.
 const maxTextResponseBytes int64 = 16 << 20
 
-// ErrResponseTooLarge is the error a capped body ends with once it passes the cap.
-var ErrResponseTooLarge = errors.New("response body exceeded the size limit")
+// ErrResponseTooLarge is the error a capped body ends with once it passes the cap. It
+// wraps threadload.ErrOverLimit, so a loader that meets it through the SDK knows the
+// one message was too large rather than the service failing.
+var ErrResponseTooLarge = fmt.Errorf("%w: response body exceeded the size limit", threadload.ErrOverLimit)
 
 // cappedTransport wraps an http.RoundTripper so that text-bearing responses cannot
 // deliver more than limit decompressed bytes.

@@ -160,12 +160,7 @@ func (v *journalView) fetchJournalEntry(ctx context.Context, requestID uint64, d
 
 		var images [][]byte
 		if v.vc.imageRenderer.protocol() == imageProtocolKitty && v.vc.imageFetcher != nil {
-			for _, imageURL := range extractImageURLs(content) {
-				data, fetchErr := v.vc.imageFetcher.Fetch(ctx, imageURL)
-				if fetchErr == nil && len(data) > 0 {
-					images = append(images, data)
-				}
-			}
+			images = newImageBudget().fetchImages(ctx, v.vc.imageFetcher, extractImageURLs(content))
 		}
 
 		return journalDetailMsg{requestResult: newRequestResult(requestID, nil), body: htmlToMarkdown(content), images: images}

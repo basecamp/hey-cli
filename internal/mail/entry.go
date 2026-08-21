@@ -7,6 +7,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/terminal"
+	"github.com/basecamp/hey-cli/internal/threadload"
 )
 
 // Entry is one message in a thread. CreatedAt is the time HEY served, not a string of it,
@@ -23,6 +24,22 @@ type Entry struct {
 	Summary               string
 	Body                  htmlutil.Markdown
 	BodyHTML              string
+	// BodyState is what became of the body when the entry came through threadload:
+	// hydrated, bodyless, over_limit or failed. Empty for an entry read another way.
+	BodyState string
+}
+
+// LoadedEntry describes an entry threadload read: the message when there is one, and
+// what became of the body either way.
+func LoadedEntry(loaded threadload.Entry) Entry {
+	if loaded.Message == nil {
+		entry := NewEntry(loaded.Entry, generated.Message{})
+		entry.BodyState = string(loaded.State)
+		return entry
+	}
+	entry := NewEntry(loaded.Entry, *loaded.Message)
+	entry.BodyState = string(loaded.State)
+	return entry
 }
 
 // NewEntry describes a thread's entry against the message HEY served for it. A topic

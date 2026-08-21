@@ -113,8 +113,8 @@ func mailWithTestServer(t *testing.T, status int) (*mailView, *recordedMailReque
 		switch r.URL.Path {
 		case "/advanced_search.json":
 			_, _ = w.Write([]byte(`{"matches":[{"topic":{"id":100,"name":"Hello world","app_url":"https://app.hey.com/topics/100","updated_at":"2026-08-19T09:00:00Z"},"posting_id":10,"entries":[{"id":501,"kind":"message","summary":"Matching message summary","created_at":"2026-08-19T09:00:00Z","creator":{"id":10,"name":"Alice"}}]}]}`))
-		case "/topics/100.json":
-			_, _ = w.Write([]byte(`{"id":100,"name":"Hello world","entries":[{"id":501,"kind":"message","summary":"Hello world","created_at":"2026-08-19T09:00:00Z","creator":{"id":10,"name":"Alice"}}]}`))
+		case "/topics/100/entries.json":
+			_, _ = w.Write([]byte(`[{"id":501,"kind":"message","summary":"Hello world","created_at":"2026-08-19T09:00:00Z","creator":{"id":10,"name":"Alice"}}]`))
 		case "/messages/501.json":
 			_, _ = w.Write([]byte(`{"id":501,"subject":"Hello world","content":"<p>Message body</p>","created_at":"2026-08-19T09:00:00Z","creator":{"id":10,"name":"Alice"}}`))
 		default:
@@ -1397,7 +1397,7 @@ func TestMailViewEnterOpensSelectedThread(t *testing.T) {
 	}
 	v.Update(loaded)
 
-	wantRequests := "GET /topics/100.json,GET /messages/501.json"
+	wantRequests := "GET /topics/100/entries.json,GET /messages/501.json"
 	if got := strings.Join(recorded.requests, ","); got != wantRequests {
 		t.Errorf("requests = %q, want %q", got, wantRequests)
 	}
@@ -1414,9 +1414,9 @@ func TestMailViewDownloadsImageDataOnlyForKittyRenderer(t *testing.T) {
 	imageData := testPNG(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/topics/100.json":
+		case "/topics/100/entries.json":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"id":100,"name":"Latest image","entries":[{"id":501,"kind":"message"}]}`))
+			_, _ = w.Write([]byte(`[{"id":501,"kind":"message"}]`))
 		case "/messages/501.json":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"id":501,"content":"<action-text-attachment url=\"/rails/blobs/chart.png\" filename=\"chart.png\" content-type=\"image/png\"></action-text-attachment>"}`))
@@ -1468,8 +1468,8 @@ func TestMailViewDoesNotFetchImagesOutsideHEYOrGopher(t *testing.T) {
 	heyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/topics/100.json":
-			_, _ = w.Write([]byte(`{"id":100,"name":"Untrusted image","entries":[{"id":501,"kind":"message"}]}`))
+		case "/topics/100/entries.json":
+			_, _ = w.Write([]byte(`[{"id":501,"kind":"message"}]`))
 		case "/messages/501.json":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"id":      501,
@@ -1515,12 +1515,13 @@ func TestMailViewFetchesThreadMessagesConcurrentlyInOrder(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path == "/topics/100.json" {
+		if r.URL.Path == "/topics/100/entries.json" {
+			// The index is served newest first, as HEY serves it.
 			entries := make([]map[string]any, entryCount)
 			for i := range entries {
-				entries[i] = map[string]any{"id": 501 + i, "kind": "message"}
+				entries[i] = map[string]any{"id": 501 + entryCount - 1 - i, "kind": "message"}
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"id": 100, "name": "Thread", "entries": entries})
+			_ = json.NewEncoder(w).Encode(entries)
 			return
 		}
 
@@ -1622,8 +1623,8 @@ func TestMailViewCancelPendingDetailStopsMessageRequests(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/topics/100.json":
-			_, _ = w.Write([]byte(`{"id":100,"name":"Hello world","entries":[{"id":501,"kind":"message"}]}`))
+		case "/topics/100/entries.json":
+			_, _ = w.Write([]byte(`[{"id":501,"kind":"message"}]`))
 		case "/messages/501.json":
 			close(messageStarted)
 			<-r.Context().Done()
@@ -2684,5 +2685,54 @@ func TestThreadEntriesCarryTheTimeOfDay(t *testing.T) {
 	}
 	if formatDisplayDateTime(entries[0].CreatedAt) == formatDisplayDateTime(entries[1].CreatedAt) {
 		t.Error("two entries on the same day rendered identically, so the reader cannot order them")
+	}
+}
+
+// A thread longer than one geared page is read whole in the TUI, oldest first, through
+// the same loader the CLI uses; a body that could not be read is marked, not faked.
+func TestMailViewReadsEveryPageOfAThreadAndMarksUnreadBodies(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/topics/100/entries.json" && r.URL.Query().Get("page") == "":
+			w.Header().Set("Link", fmt.Sprintf(`<http://%s/topics/100/entries.json?page=eyJwYWdlIjoy>; rel="next"`, r.Host))
+			_, _ = w.Write([]byte(`[{"id":503,"kind":"message","summary":"third"},{"id":502,"kind":"message","summary":"second"}]`))
+		case r.URL.Path == "/topics/100/entries.json":
+			_, _ = w.Write([]byte(`[{"id":501,"kind":"message","summary":"first"}]`))
+		case r.URL.Path == "/messages/502.json":
+			http.Error(w, `{"error":"gone"}`, http.StatusNotFound)
+		case strings.HasPrefix(r.URL.Path, "/messages/"):
+			id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/messages/"), ".json")
+			fmt.Fprintf(w, `{"id":%s,"content":"<p>body %s</p>"}`, id, id)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
+	vc := testVC()
+	vc.sdk = client
+	v := newMailView(vc)
+	loaded := v.fetchTopic(context.Background(), 1, 1, 100, 500, "Long thread")().(topicLoadedMsg)
+	if loaded.err != nil {
+		t.Fatalf("fetch topic: %v", loaded.err)
+	}
+	if len(loaded.entries) != 3 || loaded.entries[0].ID != 501 || loaded.entries[2].ID != 503 {
+		t.Fatalf("entries = %+v, want three, oldest first", loaded.entries)
+	}
+	if loaded.entries[1].BodyState != "failed" || !loaded.entries[1].Body.IsEmpty() {
+		t.Errorf("entry 502 = %+v, want failed with no body", loaded.entries[1])
+	}
+	if !strings.Contains(loaded.notice, "1 of 3 bodies could not be read") {
+		t.Errorf("notice = %q", loaded.notice)
+	}
+
+	view := v.renderEntries(loaded.entries)
+	if !strings.Contains(view, "body 501") || !strings.Contains(view, "body 503") {
+		t.Errorf("view lacks the read bodies: %q", view)
+	}
+	if !strings.Contains(view, "(body not read: failed)") {
+		t.Errorf("view does not mark the unread body: %q", view)
 	}
 }
