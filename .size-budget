@@ -7,6 +7,16 @@
 # verification cost ~10 MiB stripped, accepted so releases verify without a
 # cosign dependency. Bounds are ceil(max x 1.15). An increase beyond either
 # needs a review of what grew, not a budget bump.
-stripped_max_mib = 29
-gzip_max_mib = 11
+#
+# Raised at the Markdown email bodies change, 2026-08-20: terminal Markdown
+# rendering through glamour costs ~5 MiB stripped, and nearly all of that is
+# chroma's lexer registry plus its HTML and SVG formatters, which
+# glamour/v2/ansi/codeblock.go imports unconditionally -- so we carry every
+# syntax-highlighting lexer even though the style config in
+# internal/markdown/style.go configures no Chroma style at all. Accepted so
+# email bodies keep their links, headings, lists and quotes instead of being
+# flattened to plain text. Measured across all ten release targets: the largest,
+# darwin_amd64 and windows_amd64, are 31.6 MiB stripped / 10.7 MiB gzipped.
+stripped_max_mib = 37
+gzip_max_mib = 13
 enforce = true
