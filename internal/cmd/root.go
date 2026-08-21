@@ -165,6 +165,8 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newContactsCommand().cmd)
 	root.AddCommand(newScreenerCommand().cmd)
 	root.AddCommand(newThreadsCommand().cmd)
+	root.AddCommand(newShareCommand().cmd)
+	root.AddCommand(newUnshareCommand().cmd)
 	root.AddCommand(newAttachmentsCommand().cmd)
 	root.AddCommand(newReplyCommand().cmd)
 	root.AddCommand(newBulkReplyCommand().cmd)

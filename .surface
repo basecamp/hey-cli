@@ -172,6 +172,7 @@ hey setup omarchy
 hey setup omarchy --no-notify
 hey setup omarchy --notify
 hey setup omarchy --remove
+hey share
 hey skill
 hey skill install
 hey spam
@@ -202,6 +203,7 @@ hey todo uncomplete
 hey trash
 hey tui
 hey unseen
+hey unshare
 hey upgrade
 hey version
 hey watch

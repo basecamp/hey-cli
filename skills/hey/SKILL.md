@@ -17,6 +17,8 @@ triggers:
   - hey search
   - hey contacts
   - hey threads
+  - hey share
+  - hey unshare
   - hey reply
   - hey forward
   - hey compose
@@ -57,6 +59,8 @@ triggers:
   - send email
   - reply to email
   - forward email
+  - share email thread
+  - turn off sharing link
   - compose email
   - list mailboxes
   - search email
@@ -146,6 +150,8 @@ hey boxes --quiet --jq '.[].name'
 | Set private contact note | `hey contacts note set <id> "Prefers email"` |
 | Delete private contact note | `hey contacts note delete <id>` |
 | Read email thread | `hey threads <topic_id> --json` |
+| Get a sharing link | `hey share <thread_id>` |
+| Turn off a sharing link | `hey unshare <thread_id>` |
 | Reply to email | `hey reply <topic_id> -m "Thanks!"` |
 | Forward email | `hey forward <topic_id> --to alice@example.com -m "For your review"` |
 | Compose email | `hey compose --to user@example.com --subject "Hello"` |
@@ -199,6 +205,8 @@ Want to read email?
 ├── Need available refinements? → hey search filters --json
 ├── List or view contacts? → hey contacts list --json / hey contacts show <id> --json
 ├── Read full thread? → hey threads <topic_id> --json
+├── Get a sharing link? → hey share <thread_id>
+├── Turn off the sharing link? → hey unshare <thread_id>
 ├── Mark as seen? → hey seen <id>
 ├── Mark as unseen? → hey unseen <id>
 ├── Move to another box? → hey move <id> --to <box>
@@ -308,9 +316,13 @@ HEY hides contacts instead of permanently deleting them. A hidden contact leaves
 ```bash
 hey threads <topic_id> --json                 # Read full email thread
 hey threads <topic_id> --html                 # Read with raw HTML content
+hey share <thread_id>                         # Get a sharing link
+hey unshare <thread_id>                       # Turn off the sharing link
 ```
 
-**ID note:** Every email thread returned by `hey box` or `hey label` has an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring` expect `id`. `hey threads`, `hey attachments`, `hey reply`, and `hey forward` expect `topic_id`. The `app_url` field also contains the thread ID as a fallback (e.g. `https://app.hey.com/topics/123` → `123`).
+`hey share` returns a URL that shows the entire thread and future emails or replies sent to it. Anyone with the link can open it. `hey unshare` turns off the sharing link.
+
+**ID note:** Every email thread returned by `hey box` or `hey label` has an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring` expect `id`. `hey threads`, `hey share`, `hey unshare`, `hey attachments`, `hey reply`, and `hey forward` expect `topic_id`. The `app_url` field also contains the thread ID as a fallback (e.g. `https://app.hey.com/topics/123` → `123`).
 
 ### Email - Attachments
 

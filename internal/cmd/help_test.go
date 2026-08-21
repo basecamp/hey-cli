@@ -103,6 +103,8 @@ EMAIL
   contacts       Manage contacts
   screener       Decide who gets to email you
   threads        Read a thread
+  share          Get a sharing link for an email thread
+  unshare        Turn off an email thread's sharing link
   attachments    List and save files from a thread
   compose        Write and send a new email
   reply          Reply to a thread

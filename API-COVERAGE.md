@@ -35,6 +35,9 @@ The remaining HTML-reading gaps use the SDK's authenticated HTML helper and are 
 | `/calendars/{id}/recordings.json` | GET | SDK `Calendars().GetRecordings` | `hey recordings <calendar-id>`, `hey todo list`, `hey timetrack list`, `hey journal list` | covered |
 | `/topics/{id}/entries` | GET (HTML) | SDK `GetHTML` | `hey threads <id>` | gap: SDK Entry lacks body |
 | `/topics/{id}/entries.json` | GET | SDK `Topics().GetEntries` | `hey attachments <topic-id>` | covered |
+| `/topics/{id}/publication` | POST | SDK `Publications().Create` | `hey share <thread-id>` | covered |
+| `/topics/{id}/publication.json` | GET | SDK `Publications().Create` readback | `hey share <thread-id>` | covered |
+| `/topics/{id}/publication` | DELETE | SDK `Publications().Delete` | `hey unshare <thread-id>` | covered |
 | `/messages/{id}.json` | GET | SDK `Messages().Get` | `hey attachments <topic-id>`, `hey attachments save <id>` | covered |
 | `/entries/drafts.json` | GET | SDK `Entries().ListDrafts` | `hey drafts` | covered |
 | `/rails/active_storage/direct_uploads.json` | POST | SDK `Attachments().Upload` | `hey compose --attach`, `hey reply --attach`, `hey bulk-reply send --attach` | covered |
