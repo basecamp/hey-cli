@@ -742,6 +742,52 @@ func TestContentListMovesSeenPostingToItsSection(t *testing.T) {
 	}
 }
 
+func TestContentListOpensWithTheBubbledUpSection(t *testing.T) {
+	cl := &contentList{}
+	cl.setPostings([]models.Posting{
+		{ID: 1, Name: "Weekly release notes", CreatedAt: "2026-08-20T10:00:00Z"},
+		{ID: 2, Name: "Standup notes", CreatedAt: "2026-08-19T10:00:00Z", Seen: true},
+		{ID: 3, Name: "Invoice for July hosting", CreatedAt: "2026-08-18T09:00:00Z", BubbledUp: true},
+	})
+	cl.setSize(80, 20)
+
+	if cl.postings[0].ID != 3 || cl.postings[1].ID != 1 || cl.postings[2].ID != 2 {
+		t.Errorf("bubbled up postings should sort above the unseen and seen ones: %+v", cl.postings)
+	}
+
+	lines := strings.Split(stripANSI(cl.view()), "\n")
+	if !strings.HasPrefix(lines[0], "Bubbled Up") {
+		t.Errorf("the list should open with the bubbled up header: %q", lines[0])
+	}
+	if !strings.Contains(lines[1], "Invoice for July hosting") || !strings.Contains(lines[1], "●") {
+		t.Errorf("a bubbled up row should show the unread dot: %q", lines[1])
+	}
+	if !strings.HasPrefix(lines[3], "New for You") || !strings.HasPrefix(lines[6], "Previously Seen") {
+		t.Errorf("the other sections should follow with their headers: %q / %q", lines[3], lines[6])
+	}
+}
+
+func TestContentListMovesSeenBubbledUpPostingToItsSection(t *testing.T) {
+	cl := &contentList{}
+	cl.setPostings([]models.Posting{
+		{ID: 1, Name: "Invoice for July hosting", CreatedAt: "2026-08-20T10:00:00Z", BubbledUp: true},
+		{ID: 2, Name: "Weekly release notes", CreatedAt: "2026-08-19T10:00:00Z"},
+	})
+	cl.setSize(80, 20)
+
+	cl.markSeen(0)
+
+	if cl.postings[0].ID != 2 || cl.postings[1].ID != 1 {
+		t.Errorf("a seen bubbled up posting should move below the unseen ones: %+v", cl.postings)
+	}
+	if cl.postings[1].BubbledUp {
+		t.Error("marking a bubbled up posting seen should clear its bubbled up state")
+	}
+	if got := cl.selectedPosting(); got == nil || got.ID != 1 {
+		t.Errorf("cursor should follow the moved posting: %+v", got)
+	}
+}
+
 func TestContentListAlignsDateColumn(t *testing.T) {
 	long := models.Posting{
 		ID:        300,

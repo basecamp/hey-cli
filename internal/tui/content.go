@@ -39,7 +39,7 @@ type contentList struct {
 
 func (c *contentList) setPostings(postings []models.Posting) {
 	if !c.hideSeenState {
-		postings = partitionSeen(postings)
+		postings = partitionSections(postings)
 	}
 	c.postings = postings
 	c.cursor = 0
@@ -53,7 +53,7 @@ func (c *contentList) setPostings(postings []models.Posting) {
 // still there. A posting that left the box takes the cursor or its selection with it.
 func (c *contentList) refreshPostings(postings []models.Posting) {
 	if !c.hideSeenState {
-		postings = partitionSeen(postings)
+		postings = partitionSections(postings)
 	}
 	var cursorID int64
 	if posting := c.selectedPosting(); posting != nil {
@@ -87,22 +87,61 @@ func (c *contentList) keepSelected() {
 	c.selected = remaining
 }
 
-// partitionSeen orders unseen postings before seen ones, keeping the
-// relative order inside each group. This forms the "New for You" and
-// "Previously Seen" sections, as in the HEY web app.
-func partitionSeen(postings []models.Posting) []models.Posting {
-	ordered := make([]models.Posting, 0, len(postings))
-	for _, p := range postings {
-		if !p.Seen {
-			ordered = append(ordered, p)
-		}
+// postingSection is the group a posting belongs to in the Imbox. On the server
+// a posting's read state is one of unseen, bubbled up or seen, and the web app
+// stacks the sections in that order.
+type postingSection int
+
+const (
+	sectionBubbledUp postingSection = iota
+	sectionNewForYou
+	sectionPreviouslySeen
+)
+
+var postingSections = []postingSection{sectionBubbledUp, sectionNewForYou, sectionPreviouslySeen}
+
+func sectionOf(p models.Posting) postingSection {
+	switch {
+	case p.BubbledUp:
+		return sectionBubbledUp
+	case !p.Seen:
+		return sectionNewForYou
+	default:
+		return sectionPreviouslySeen
 	}
-	for _, p := range postings {
-		if p.Seen {
-			ordered = append(ordered, p)
+}
+
+func (s postingSection) label() string {
+	switch s {
+	case sectionBubbledUp:
+		return "Bubbled Up"
+	case sectionNewForYou:
+		return "New for You"
+	default:
+		return "Previously Seen"
+	}
+}
+
+// partitionSections groups postings by section, keeping the relative order
+// inside each group.
+func partitionSections(postings []models.Posting) []models.Posting {
+	ordered := make([]models.Posting, 0, len(postings))
+	for _, section := range postingSections {
+		for _, p := range postings {
+			if sectionOf(p) == section {
+				ordered = append(ordered, p)
+			}
 		}
 	}
 	return ordered
+}
+
+// markSeen moves a posting into "Previously Seen", clearing the bubbled up
+// state the way Postings::SeenController does.
+func (c *contentList) markSeen(index int) {
+	c.postings[index].Seen = true
+	c.postings[index].BubbledUp = false
+	c.resort()
 }
 
 // resort re-partitions the list after a posting changes its seen state and
@@ -115,7 +154,7 @@ func (c *contentList) resort() {
 	if p := c.selectedPosting(); p != nil {
 		id = p.ID
 	}
-	c.postings = partitionSeen(c.postings)
+	c.postings = partitionSections(c.postings)
 	for i := range c.postings {
 		if c.postings[i].ID == id {
 			c.cursor = i
@@ -167,11 +206,9 @@ func (c *contentList) sectionLabelAt(index int) string {
 	if c.hideSeenState || index < 0 || index >= len(c.postings) {
 		return ""
 	}
-	if index == 0 && !c.postings[index].Seen {
-		return "New for You"
-	}
-	if c.postings[index].Seen && (index == 0 || !c.postings[index-1].Seen) {
-		return "Previously Seen"
+	section := sectionOf(c.postings[index])
+	if index == 0 || sectionOf(c.postings[index-1]) != section {
+		return section.label()
 	}
 	return ""
 }
@@ -250,8 +287,8 @@ func (c *contentList) view() string {
 
 	// Every row uses the same styles: bold bright subject; date, sender and
 	// excerpt in the faint secondary style. Read state shows as the section a
-	// row sits in ("New for You" / "Previously Seen") plus the alert dot; the
-	// cursor row renders bold on top of the base styles.
+	// row sits in ("Bubbled Up" / "New for You" / "Previously Seen") plus the
+	// alert dot; the cursor row renders bold on top of the base styles.
 	subjectBase := lipgloss.NewStyle().Foreground(colorBright).Bold(true)
 	dateBase := styleMuted
 	senderBase := styleMuted

@@ -319,6 +319,42 @@ func TestMailViewMarksOpenedThreadSeen(t *testing.T) {
 	}
 }
 
+func TestMailViewLeavesBubbledUpThreadAloneWhenOpened(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v.postingList.postings[0].BubbledUp = true
+
+	loaded := runCmd(v.HandleContentKey(keyPress("enter"))).(topicLoadedMsg)
+	cmd, _ := v.Update(loaded)
+	if cmd != nil {
+		t.Errorf("opening a bubbled up thread should not mark it seen: %#v", runCmd(cmd))
+	}
+	if recorded.path == "/postings/seen.json" {
+		t.Error("opening a bubbled up thread hit the mark seen endpoint")
+	}
+	if !v.postingList.postings[v.postingIndex(100)].BubbledUp {
+		t.Error("reading a bubbled up thread should leave it in its section")
+	}
+}
+
+func TestMailViewSeenKeyDismissesBubbledUpThread(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v.postingList.postings[0].BubbledUp = true
+
+	done := runCmd(v.HandleContentKey(keyPress("e"))).(postingActionDoneMsg)
+	if done.err != nil {
+		t.Fatalf("marking a bubbled up thread seen failed: %v", done.err)
+	}
+	if recorded.path != "/postings/seen.json" {
+		t.Errorf("request path = %q, want /postings/seen.json", recorded.path)
+	}
+
+	v.Update(done)
+	posting := v.postingList.postings[v.postingIndex(100)]
+	if !posting.Seen || posting.BubbledUp {
+		t.Errorf("the seen key should dismiss a bubbled up thread: seen %v bubbled up %v", posting.Seen, posting.BubbledUp)
+	}
+}
+
 func TestMailViewLeavesSeenThreadAloneWhenOpened(t *testing.T) {
 	v, recorded := mailWithTestServer(t, http.StatusNoContent)
 	v.postingList.postings[0].Seen = true

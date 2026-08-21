@@ -483,8 +483,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 				}
 				v.postingList.ensureVisible()
 			case postingActionSeen:
-				v.postingList.postings[idx].Seen = true
-				v.postingList.resort()
+				v.postingList.markSeen(idx)
 			case postingActionIgnore:
 				v.postingList.postings[idx].Muted = true
 			case postingActionStopIgnoring:
@@ -506,8 +505,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		if msg.boxID == v.currentBoxID() && msg.sourceKind == v.currentSourceKind() {
 			if idx := v.postingIndex(msg.postingID); idx >= 0 {
-				v.postingList.postings[idx].Seen = true
-				v.postingList.resort()
+				v.postingList.markSeen(idx)
 			}
 		}
 		return nil, true
@@ -1497,10 +1495,12 @@ func (v *mailView) openSelected() tea.Cmd {
 
 // markPostingSeen marks a thread as seen once it has been opened, the way the
 // web app beacons an observation after it renders a topic. A thread that is
-// already seen costs no request.
+// already seen costs no request, and a bubbled up one is left alone: reading it
+// does not dismiss it, only the seen key does. The server draws the same line
+// in Posting#observed.
 func (v *mailView) markPostingSeen(boxID, postingID int64) tea.Cmd {
 	opened := v.openedPosting(postingID)
-	if opened == nil || opened.Seen {
+	if opened == nil || opened.Seen || opened.BubbledUp {
 		return nil
 	}
 	sourceKind := v.currentSourceKind()
@@ -1727,6 +1727,7 @@ func sdkPostingToModel(p generated.Posting) models.Posting {
 		Kind:                  p.Kind,
 		Name:                  p.Name,
 		Seen:                  p.Seen,
+		BubbledUp:             p.BubbledUp,
 		Bundled:               p.Bundled,
 		Muted:                 p.Muted,
 		Summary:               p.Summary,
