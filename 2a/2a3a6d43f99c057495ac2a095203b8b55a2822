@@ -1,0 +1,19 @@
+internal/cmd/setup.go
+  s_e2b9c41f2f9ae5::t_bdfb6321ceea38 36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "2a2a3a6d43f99c057495ac2a095203b8b55a2822",
+  "prompts": {},
+  "sessions": {
+    "s_e2b9c41f2f9ae5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c6e9f2bf-e587-4622-a299-7b18cdf6665e",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
