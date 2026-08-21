@@ -83,12 +83,21 @@ func isControl(r rune) bool {
 	return r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f)
 }
 
-// sourceSpan is a byte range of the source that glamour will decode as text. Inside
-// code a backslash is a backslash, so only the ampersand itself is rewritten there.
+// sourceSpan is a byte range of the source that glamour will read as text, and how it
+// reads it: prose is decoded with backslash escapes honored, code is decoded verbatim,
+// and an image's alt text is not decoded at all.
 type sourceSpan struct {
 	start, stop int
-	code        bool
+	kind        spanKind
 }
+
+type spanKind int
+
+const (
+	proseSpan spanKind = iota
+	codeSpan
+	altSpan
+)
 
 func neutralizeEntities(md string) string {
 	if !strings.Contains(md, "&") {
@@ -107,7 +116,7 @@ func neutralizeEntities(md string) string {
 			continue
 		}
 		b.Write(source[last:span.start])
-		b.WriteString(neutralized(string(source[span.start:span.stop]), span.code))
+		b.WriteString(neutralized(string(source[span.start:span.stop]), span.kind))
 		last = span.stop
 	}
 	b.Write(source[last:])
@@ -122,21 +131,24 @@ func textSpans(doc ast.Node) []sourceSpan {
 		}
 		switch n := n.(type) {
 		case *ast.Text:
-			if underImage(n) {
-				return ast.WalkContinue, nil
+			kind := proseSpan
+			if _, code := n.Parent().(*ast.CodeSpan); code {
+				kind = codeSpan
 			}
-			_, code := n.Parent().(*ast.CodeSpan)
-			spans = append(spans, sourceSpan{n.Segment.Start, n.Segment.Stop, code})
+			if underImage(n) {
+				kind = altSpan
+			}
+			spans = append(spans, sourceSpan{n.Segment.Start, n.Segment.Stop, kind})
 		case *ast.HTMLBlock:
 			lines := n.Lines()
 			for i := range lines.Len() {
 				line := lines.At(i)
-				spans = append(spans, sourceSpan{line.Start, line.Stop, true})
+				spans = append(spans, sourceSpan{line.Start, line.Stop, codeSpan})
 			}
 		case *ast.RawHTML:
 			for i := range n.Segments.Len() {
 				segment := n.Segments.At(i)
-				spans = append(spans, sourceSpan{segment.Start, segment.Stop, true})
+				spans = append(spans, sourceSpan{segment.Start, segment.Stop, codeSpan})
 			}
 		}
 		return ast.WalkContinue, nil
@@ -153,14 +165,27 @@ func underImage(n ast.Node) bool {
 	return false
 }
 
+// In prose an "&amp;" is left as it is: that is how ToMarkdown writes every ampersand,
+// and glamour's one decode turns it back into the "&" it stands for. Any other "&" —
+// one that begins an entity the source spelled out, or a bare one from a caller that
+// did not come through ToMarkdown — is encoded so that the decode shows it literally.
+// Code is verbatim, so every "&" there is encoded; an "&amp;" in a code sample is the
+// five characters it reads as. Alt text glamour shows as written, so the one decode
+// ToMarkdown's "&amp;" needs is done here, and only that one: nothing else in alt text
+// is touched, so an entity the email spelled out stays the characters it was.
 var (
 	codeAmpersands = strings.NewReplacer("&", "&amp;")
-	textAmpersands = strings.NewReplacer(`\&`, "&amp;", "&", "&amp;")
+	textAmpersands = strings.NewReplacer("&amp;", "&amp;", `\&`, "&amp;", "&", "&amp;")
+	altAmpersands  = strings.NewReplacer("&amp;", "&")
 )
 
-func neutralized(s string, code bool) string {
-	if code {
+func neutralized(s string, kind spanKind) string {
+	switch kind {
+	case codeSpan:
 		return codeAmpersands.Replace(s)
+	case altSpan:
+		return altAmpersands.Replace(s)
+	default:
+		return textAmpersands.Replace(s)
 	}
-	return textAmpersands.Replace(s)
 }
