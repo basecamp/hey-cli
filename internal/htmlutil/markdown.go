@@ -398,14 +398,16 @@ func collectText(n *html.Node, b *strings.Builder) {
 	}
 }
 
+// image writes an image, or — when its source may not be linked — its alt text as the
+// prose it then is, escaped against the line it lands on rather than as a label.
 func (m *markdownizer) image(n *html.Node) {
-	alt := escapeText(strings.Join(strings.Fields(getAttr(n, "alt")), " "), "alt")
+	alt := strings.Join(strings.Fields(getAttr(n, "alt")), " ")
 	src, linkable := destination(getAttr(n, "src"))
 	switch {
 	case linkable:
-		m.write("![" + alt + "](" + src + ")")
+		m.write("![" + escapeText(alt, "alt") + "](" + src + ")")
 	case alt != "":
-		m.write(alt)
+		m.write(escapeText(alt, m.line.String()))
 	}
 }
 

@@ -347,6 +347,18 @@ func TestToMarkdownImageAltAndSourceAreSerialized(t *testing.T) {
 	}
 }
 
+// An image whose source may not be linked leaves its alt text as prose, escaped as
+// prose: at the start of a line "# title" is a heading unless it is escaped there.
+func TestToMarkdownUnlinkableImageAltIsProse(t *testing.T) {
+	got := ToMarkdown(`<p><img alt="# title" src="javascript:x"></p>`)
+	if got != `\# title` {
+		t.Errorf("ToMarkdown = %q", got)
+	}
+	if text := renderedText(t, got); text != "# title" {
+		t.Errorf("rendered = %q, want the literal alt text", text)
+	}
+}
+
 func TestToMarkdownAttachmentNamesAreSerialized(t *testing.T) {
 	got := ToMarkdown(`<figure data-trix-attachment='{"url":"javascript:x","filename":"*report*.png","contentType":"image/png"}'></figure>` +
 		`<figure data-trix-attachment='{"url":"/rails/blobs/q3.pdf","filename":"[q3].pdf","contentType":"application/pdf"}'></figure>`)
