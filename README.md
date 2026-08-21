@@ -182,7 +182,7 @@ and individual email addresses.
 Switching cancels requests from the previous account and reloads the active section;
 Calendar and Journal remain identity-wide.
 
-Navigate between Mail, Contacts, Calendar, and Journal. Mail navigation includes HEY boxes plus separate Labels and Collections tabs. Press Shift+L or Shift+K to choose one, then use `n` and `p` to page through its threads. Use `/` to search, Enter to open a thread, `r` to reply, `f` to forward, `m` to move, `g` to manage labels, `k` to add or remove the selected thread from collections, `t` to trash, `s` to mark as spam, `-` to ignore, and `+` to stop ignoring. Select threads with Space and press `b` to preview every bulk-reply recipient before writing and sending one reply to all selected threads. A delayed bulk reply can be recalled with `u` while HEY's undo window remains open. Search results retain the matching-message summary; use `n` and `p` to move between result pages.
+Navigate between Mail, Contacts, Calendar, and Journal. Mail navigation includes HEY boxes plus separate Labels and Collections tabs. Press Shift+L or Shift+K to choose one. Every list keeps going: scroll towards the bottom of a box, label, or collection and the next threads are read in behind you, so there are no pages to step through. Use `/` to search, Enter to open a thread, `r` to reply, `f` to forward, `m` to move, `g` to manage labels, `k` to add or remove the selected thread from collections, `t` to trash, `s` to mark as spam, `-` to ignore, and `+` to stop ignoring. Select threads with Space and press `b` to preview every bulk-reply recipient before writing and sending one reply to all selected threads. A delayed bulk reply can be recalled with `u` while HEY's undo window remains open. Search results retain the matching-message summary and keep going as you scroll, like every other list.
 
 The mail list follows the server. HEY tells the TUI when a box changed over the same
 Action Cable connection `hey watch` uses, and the box on screen is read again a moment
@@ -197,8 +197,9 @@ without moving your place in it.
 
 Press Ctrl+S from the mail list to open The Screener. When senders are waiting, the mail
 list says so above the threads. In The Screener, `y` screens the selected sender in and `n`
-screens them out, Tab moves to Screener History and back, `[` and `]` page through either
-list, `X` clears the whole Screener after a confirmation, and Escape or `q` returns to mail.
+screens them out, Tab moves to Screener History and back, `X` clears the whole Screener
+after a confirmation, and Escape or `q` returns to mail. Both lists keep going as you
+scroll, the same way the mail list does.
 
 Thread attachments always appear with their filename, media type, and size. Use `[` and `]` to select an attachment, `s` to save it without replacing an existing file, and `o` to download and open it in an external application. Attachments never open automatically. Kitty and Ghostty can show inline images. Foot and other terminals use visible text markers.
 

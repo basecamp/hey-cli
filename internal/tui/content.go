@@ -26,6 +26,62 @@ func formatDisplayDate(ts string) string {
 	return t.Format("Jan 2, 2006")
 }
 
+// listPaging is where a list that grows as the reader scrolls keeps its place in what the
+// server holds: the cursor for the page after the deepest one read, empty once there is
+// nothing left to read; what the top page held when it was last read, which is exactly how
+// much of the list a live re-read replaces; how many pages deep the list has grown; and
+// whether the next page is already on its way, so the bottom is only asked for once.
+type listPaging struct {
+	nextPage string
+	headIDs  map[int64]struct{}
+	pages    int
+	loading  bool
+}
+
+func (p *listPaging) reset() {
+	*p = listPaging{}
+}
+
+// read starts the list over at its top page.
+func (p *listPaging) read(headIDs map[int64]struct{}, nextPage string) {
+	p.headIDs = headIDs
+	p.pages = 1
+	p.nextPage = nextPage
+	p.loading = false
+}
+
+// grew records a page arriving below the list. An empty page is the end of it whatever
+// cursor came with it: paging on from there would ask the same question forever.
+func (p *listPaging) grew(rowsRead int, nextPage string) {
+	p.pages++
+	p.loading = false
+	if rowsRead == 0 {
+		p.nextPage = ""
+	} else {
+		p.nextPage = nextPage
+	}
+}
+
+// refreshed records the top page having been read again. The cursor for what comes next
+// belongs to the deepest page, so a re-read of the top only moves it while the top page is
+// the whole list — below that the reader has already walked past it.
+func (p *listPaging) refreshed(headIDs map[int64]struct{}, nextPage string) {
+	p.headIDs = headIDs
+	if p.pages <= 1 {
+		p.pages = 1
+		p.nextPage = nextPage
+	}
+}
+
+func (p *listPaging) hasMore() bool {
+	return p.nextPage != ""
+}
+
+// loadMoreThreshold is how close to the bottom of a list the cursor comes before the next
+// page is read. A page arrives while there is still something left to scroll through,
+// rather than after the cursor has already stopped against the end.
+const loadMoreThreshold = 5
+
 // contentList renders a scrollable list of postings with a cursor.
 type contentList struct {
 	postings      []models.Posting
@@ -47,11 +103,50 @@ func (c *contentList) setPostings(postings []models.Posting) {
 	c.clearSelected()
 }
 
-// refreshPostings replaces the list with a newly read one while the user is looking at
-// it, so the reader keeps their place: the cursor stays on the posting it was on, the
+// growPostings adds the page after the one at the bottom of the list. A posting the list
+// already shows is dropped rather than added again: a thread that sank in the ordering
+// between two reads would otherwise arrive on two pages.
+func (c *contentList) growPostings(more []models.Posting) {
+	grown := c.postings
+	shown := postingIDs(c.postings)
+	for _, posting := range more {
+		if _, alreadyShown := shown[posting.ID]; !alreadyShown {
+			grown = append(grown, posting)
+		}
+	}
+	c.keepPlaceIn(grown)
+}
+
+// refreshHead replaces the top page of the list with a newly read one and leaves the pages
+// the reader scrolled down to as they were read. headIDs is what the top page held the
+// last time it was read, so a thread that has since left it goes with it rather than
+// sinking into the list below.
+func (c *contentList) refreshHead(head []models.Posting, headIDs map[int64]struct{}) {
+	fresh := postingIDs(head)
+	refreshed := append([]models.Posting(nil), head...)
+	for _, posting := range c.postings {
+		_, wasInHead := headIDs[posting.ID]
+		_, isInHead := fresh[posting.ID]
+		if !wasInHead && !isInHead {
+			refreshed = append(refreshed, posting)
+		}
+	}
+	c.keepPlaceIn(refreshed)
+}
+
+func postingIDs(postings []models.Posting) map[int64]struct{} {
+	ids := make(map[int64]struct{}, len(postings))
+	for _, posting := range postings {
+		ids[posting.ID] = struct{}{}
+	}
+	return ids
+}
+
+// keepPlaceIn puts the list on a newly assembled set of postings while the user is looking
+// at it, so the reader keeps their place: the cursor stays on the posting it was on, the
 // window stays where it was scrolled to, and a multi-selection keeps every row that is
 // still there. A posting that left the box takes the cursor or its selection with it.
-func (c *contentList) refreshPostings(postings []models.Posting) {
+func (c *contentList) keepPlaceIn(postings []models.Posting) {
 	if !c.hideSeenState {
 		postings = partitionSections(postings)
 	}
@@ -211,6 +306,13 @@ func (c *contentList) sectionLabelAt(index int) string {
 		return section.label()
 	}
 	return ""
+}
+
+// hasRowsBelow reports whether the list carries on past the bottom of the window. A list
+// that does not is a list the reader can see the end of, which is a reason to read the page
+// below it without waiting to be asked.
+func (c *contentList) hasRowsBelow() bool {
+	return c.scrollOff+c.visibleItemsFrom(c.scrollOff) < len(c.postings)
 }
 
 func (c *contentList) ensureVisible() {

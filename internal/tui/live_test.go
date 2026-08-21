@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -231,6 +232,40 @@ func TestMailViewReadsTheBoxWhenTheDelayIsUp(t *testing.T) {
 	}
 }
 
+// A re-read reads the top page of the box, so it may only replace that much: the pages the
+// reader scrolled down to stay as they were read, and a thread that has left the top page
+// leaves the list with it rather than sinking below the fresh rows.
+func TestMailViewReReadReplacesOnlyTheTopPage(t *testing.T) {
+	v := mailWithPostings()
+	v.postingPaging.read(postingIDs(testPostings()), "cursor-2")
+	v.Update(postingsAppendedMsg{
+		requestID:  v.moreRequestID,
+		boxID:      v.currentBoxID(),
+		sourceKind: v.currentSourceKind(),
+		nextPage:   "cursor-3",
+		postings:   []models.Posting{{ID: 102, Summary: "Scrolled to", Seen: true}},
+	})
+
+	v.Update(postingsRefreshedMsg{
+		requestID:  v.liveRequestID,
+		boxID:      v.currentBoxID(),
+		sourceKind: v.currentSourceKind(),
+		nextPage:   "cursor-2",
+		postings:   []models.Posting{{ID: 103, Summary: "Just arrived"}, testPostings()[1]},
+	})
+
+	ids := make([]int64, 0, len(v.postingList.postings))
+	for _, posting := range v.postingList.postings {
+		ids = append(ids, posting.ID)
+	}
+	if fmt.Sprint(ids) != "[103 101 102]" {
+		t.Errorf("list = %v, want the fresh top page above the page below it", ids)
+	}
+	if v.postingPaging.nextPage != "cursor-3" {
+		t.Errorf("next page = %q, want the cursor the deepest page answered with", v.postingPaging.nextPage)
+	}
+}
+
 func TestMailViewIgnoresAReReadOfAnotherBox(t *testing.T) {
 	v := mailWithPostings()
 	v.liveRequestID = 3
@@ -282,7 +317,7 @@ func TestContentListRefreshDropsWhatLeftTheBox(t *testing.T) {
 		t.Fatal("the posting under the cursor should end up selected")
 	}
 
-	list.refreshPostings([]models.Posting{testPostings()[0]})
+	list.refreshHead([]models.Posting{testPostings()[0]}, postingIDs(testPostings()))
 	if list.cursor != 0 {
 		t.Errorf("cursor = %d, want the top once its posting left", list.cursor)
 	}

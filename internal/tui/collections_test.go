@@ -91,7 +91,7 @@ func TestMailViewLoadsAndPagesCollections(t *testing.T) {
 		t.Fatal("right from the last box should open Collections")
 	}
 	first := runCmd(v.HandleContentKey(keyPress("enter"))).(postingsLoadedMsg)
-	v.Update(first)
+	more, _ := v.Update(first)
 	if v.currentSourceKind() != mailSourceKindCollection || len(v.postingList.postings) != 1 {
 		t.Fatalf("collection source = %q postings = %+v", v.currentSourceKind(), v.postingList.postings)
 	}
@@ -99,21 +99,23 @@ func TestMailViewLoadsAndPagesCollections(t *testing.T) {
 	if posting.ResolveTopicID() != 501 || len(posting.Collections) != 1 || posting.Collections[0].ID != 12 {
 		t.Errorf("posting = %+v", posting)
 	}
-	if v.notice != "Collection page 1 — 2 threads total" || v.folderNextPage != "next-cursor" {
-		t.Errorf("page state = notice:%q next:%q", v.notice, v.folderNextPage)
+	if v.postingPaging.nextPage != "next-cursor" {
+		t.Errorf("next page = %q, want next-cursor", v.postingPaging.nextPage)
 	}
 
-	second := runCmd(v.HandleContentKey(keyPress("n"))).(postingsLoadedMsg)
-	v.Update(second)
-	if len(v.folderPageHistory) != 1 || v.postingList.postings[0].Summary != "Second page" {
-		t.Errorf("second page = history:%v postings:%+v", v.folderPageHistory, v.postingList.postings)
+	// The first page does not fill the window, so the collection reads on without being
+	// asked and the second page lands under the first.
+	second := runCmd(more).(postingsAppendedMsg)
+	if cmd, _ := v.Update(second); cmd != nil {
+		t.Error("a page with no next cursor should end the collection")
 	}
-	previous := runCmd(v.HandleContentKey(keyPress("p"))).(postingsLoadedMsg)
-	v.Update(previous)
-	if len(v.folderPageHistory) != 0 || v.postingList.postings[0].Summary != "First page" {
-		t.Errorf("previous page = history:%v postings:%+v", v.folderPageHistory, v.postingList.postings)
+	if len(v.postingList.postings) != 2 || v.postingList.postings[1].Summary != "Second page" {
+		t.Errorf("grown list = %+v", v.postingList.postings)
 	}
-	if fmt.Sprint(collectionQueries) != "[ next-cursor ]" {
+	if v.postingPaging.hasMore() {
+		t.Errorf("next page = %q, want none", v.postingPaging.nextPage)
+	}
+	if fmt.Sprint(collectionQueries) != "[ next-cursor]" {
 		t.Errorf("collection page queries = %q", collectionQueries)
 	}
 }
@@ -316,11 +318,14 @@ func TestMailViewCollectionActionUsesTopicNotPostingID(t *testing.T) {
 	}
 }
 
-func TestMailViewCollectionPageHelpUsesPreviousInsteadOfPaperTrail(t *testing.T) {
+// A collection scrolls rather than paging, so p is free to mean what it means everywhere
+// else in the mail list.
+func TestMailViewCollectionHelpOffersPaperTrail(t *testing.T) {
 	v := mailWithPostings()
 	v.boxes = append(v.boxes, models.Box{ID: 12, Kind: mailSourceKindCollection, Name: "Kitchen remodel"})
 	v.boxIndex = len(v.boxes) - 1
-	v.folderPageHistory = []string{""}
+	v.postingPaging.nextPage = "next-cursor"
+
 	previous, paperTrail := 0, 0
 	for _, binding := range v.HelpBindings() {
 		if binding.key != "p" {
@@ -333,7 +338,7 @@ func TestMailViewCollectionPageHelpUsesPreviousInsteadOfPaperTrail(t *testing.T)
 			paperTrail++
 		}
 	}
-	if previous != 1 || paperTrail != 0 {
+	if previous != 0 || paperTrail != 1 {
 		t.Errorf("bindings = %v", v.HelpBindings())
 	}
 }
@@ -471,14 +476,15 @@ func TestMailViewCollectionPageMessageRejectsWrongSource(t *testing.T) {
 	}
 }
 
-func TestMailViewCollectionEmptySourceStillPages(t *testing.T) {
+func TestMailViewCollectionEmptySourceHasNothingMoreToRead(t *testing.T) {
 	v := mailWithPostings()
 	v.boxes = append(v.boxes, models.Box{ID: 12, Kind: mailSourceKindCollection, Name: "Kitchen remodel"})
 	v.boxIndex = len(v.boxes) - 1
 	v.activeRequestID = 1
-	v.Update(postingsLoadedMsg{requestID: 1, boxID: 12, sourceKind: mailSourceKindCollection, totalCount: 0})
-	if v.notice != "Collection page 1" || len(v.postingList.postings) != 0 {
-		t.Errorf("empty collection state = notice:%q postings:%+v", v.notice, v.postingList.postings)
+
+	cmd, _ := v.Update(postingsLoadedMsg{requestID: 1, boxID: 12, sourceKind: mailSourceKindCollection})
+	if cmd != nil || len(v.postingList.postings) != 0 || v.postingPaging.hasMore() {
+		t.Errorf("empty collection state = postings:%+v next:%q", v.postingList.postings, v.postingPaging.nextPage)
 	}
 }
 

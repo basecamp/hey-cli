@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -16,27 +15,38 @@ import (
 
 type screenerPendingLoadedMsg struct {
 	requestID uint64
-	page      int
 	rows      []screenerRow
 	count     int
+	nextPage  string
 	err       error
 }
 
-// screenerPendingRefreshedMsg is the queue read again after someone arrived in or left
-// The Screener while it was open. Its own lane, so it can never be taken for a page the
-// user asked for, and the rows land under the cursor rather than replacing it.
+// screenerPendingRefreshedMsg is the top of the queue read again after someone arrived in
+// or left The Screener while it was open. Its own lane, so it can never be taken for a
+// page the user asked for, and the rows land under the cursor rather than replacing it.
 type screenerPendingRefreshedMsg struct {
 	requestID uint64
-	page      int
 	rows      []screenerRow
 	count     int
+	nextPage  string
 	err       error
 }
 
 type screenerScreenedLoadedMsg struct {
 	requestID uint64
-	page      int
 	rows      []screenerRow
+	nextPage  string
+	err       error
+}
+
+// screenerRowsAppendedMsg is the page below the one on screen in either pane, read because
+// the reader scrolled towards the bottom of it. count is only answered for the queue.
+type screenerRowsAppendedMsg struct {
+	requestID uint64
+	tab       screenerTab
+	rows      []screenerRow
+	count     int
+	nextPage  string
 	err       error
 }
 
@@ -80,29 +90,68 @@ type screenerPane struct {
 	rows   []screenerRow
 	cursor int
 	scroll int
-	page   int
+	paging listPaging
 	loaded bool
 }
 
-func (p *screenerPane) setRows(rows []screenerRow, page int) {
+func (p *screenerPane) setRows(rows []screenerRow, nextPage string) {
 	p.rows = rows
 	p.cursor = 0
 	p.scroll = 0
-	p.page = page
 	p.loaded = true
+	p.paging.read(screenerRowIDs(rows), nextPage)
 }
 
-// refreshRows replaces the rows with a newly read page while someone is working through
-// it: the cursor stays on the sender it was on, and the window stays where it was. A
-// sender who has been dealt with elsewhere takes the cursor with them.
-func (p *screenerPane) refreshRows(rows []screenerRow, page int) {
+// growRows adds the page below the one at the bottom of the pane, skipping anyone it
+// already shows: a sender whose place in the ordering changed between two reads would
+// otherwise turn up twice.
+func (p *screenerPane) growRows(more []screenerRow, nextPage string) {
+	grown := p.rows
+	shown := screenerRowIDs(p.rows)
+	for _, row := range more {
+		if _, alreadyShown := shown[row.id]; !alreadyShown {
+			grown = append(grown, row)
+		}
+	}
+	p.keepPlaceIn(grown)
+	p.paging.grew(len(more), nextPage)
+}
+
+// refreshHead replaces the top page of the pane with a newly read one and leaves the pages
+// below it as they were read. A sender who has left the top page goes with it rather than
+// sinking into the rows underneath.
+func (p *screenerPane) refreshHead(head []screenerRow, nextPage string) {
+	fresh := screenerRowIDs(head)
+	refreshed := append([]screenerRow(nil), head...)
+	for _, row := range p.rows {
+		_, wasInHead := p.paging.headIDs[row.id]
+		_, isInHead := fresh[row.id]
+		if !wasInHead && !isInHead {
+			refreshed = append(refreshed, row)
+		}
+	}
+	p.keepPlaceIn(refreshed)
+	p.paging.refreshed(fresh, nextPage)
+}
+
+func screenerRowIDs(rows []screenerRow) map[int64]struct{} {
+	ids := make(map[int64]struct{}, len(rows))
+	for _, row := range rows {
+		ids[row.id] = struct{}{}
+	}
+	return ids
+}
+
+// keepPlaceIn puts the pane on a newly assembled set of rows while someone is working
+// through it: the cursor stays on the sender it was on, and the window stays where it was.
+// A sender who has been dealt with elsewhere takes the cursor with them.
+func (p *screenerPane) keepPlaceIn(rows []screenerRow) {
 	var cursorID int64
 	if row := p.selected(); row != nil {
 		cursorID = row.id
 	}
 
 	p.rows = rows
-	p.page = page
 	p.loaded = true
 	p.cursor = 0
 	for index := range p.rows {
@@ -175,6 +224,7 @@ type screenerView struct {
 	loading         bool
 	requestID       uint64
 	liveRequestID   uint64 // identifies the only live re-read allowed to update the queue
+	moreRequestID   uint64 // identifies the only page-below read allowed to grow a pane
 	mutations       int
 }
 
@@ -186,7 +236,7 @@ func (v *screenerView) Init() tea.Cmd {
 	v.notice = ""
 	v.confirmingClear = false
 	v.tab = screenerPendingTab
-	return v.requestPending(1)
+	return v.requestPending()
 }
 
 // Restyle is a no-op: the screener keeps plain rows and styles them on every View.
@@ -203,13 +253,9 @@ func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			v.notice = "Could not load The Screener: " + msg.err.Error()
 			return nil, true
 		}
-		if len(msg.rows) == 0 && msg.page > v.pending.page {
-			v.notice = "No more senders waiting"
-			return nil, true
-		}
 		v.pendingCount = msg.count
-		v.pending.setRows(msg.rows, msg.page)
-		return nil, true
+		v.pending.setRows(msg.rows, msg.nextPage)
+		return v.loadMoreRows(), true
 
 	case screenerPendingRefreshedMsg:
 		if msg.requestID != v.liveRequestID || v.tab != screenerPendingTab {
@@ -220,7 +266,7 @@ func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		v.pendingCount = msg.count
-		v.pending.refreshRows(msg.rows, msg.page)
+		v.pending.refreshHead(msg.rows, msg.nextPage)
 		v.pending.ensureVisible(v.visibleRows())
 		return nil, true
 
@@ -233,12 +279,24 @@ func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			v.notice = "Could not load Screener History: " + msg.err.Error()
 			return nil, true
 		}
-		if len(msg.rows) == 0 && msg.page > v.history.page {
-			v.notice = "No more decisions"
+		v.history.setRows(msg.rows, msg.nextPage)
+		return v.loadMoreRows(), true
+
+	case screenerRowsAppendedMsg:
+		if msg.requestID != v.moreRequestID || msg.tab != v.tab {
 			return nil, true
 		}
-		v.history.setRows(msg.rows, msg.page)
-		return nil, true
+		pane := v.pane()
+		pane.paging.loading = false
+		if msg.err != nil {
+			v.notice = "Could not load more senders: " + msg.err.Error()
+			return nil, true
+		}
+		if msg.tab == screenerPendingTab {
+			v.pendingCount = msg.count
+		}
+		pane.growRows(msg.rows, msg.nextPage)
+		return v.loadMoreRows(), true
 
 	case screenerDecisionDoneMsg:
 		if v.mutations > 0 {
@@ -252,7 +310,9 @@ func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.pendingCount = max(v.pendingCount-1, 0)
 		v.history.loaded = false
 		v.notice = msg.name + " " + screenedVerb(msg.status)
-		return nil, true
+		// A sender being dealt with can uncover the bottom of the queue, so the senders
+		// behind them come up rather than leaving an empty pane with a count over it.
+		return v.loadMoreRows(), true
 
 	case screenerClearedMsg:
 		if v.mutations > 0 {
@@ -262,7 +322,7 @@ func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			v.notice = "Could not clear The Screener: " + msg.err.Error()
 			return nil, true
 		}
-		v.pending.setRows(nil, 1)
+		v.pending.setRows(nil, "")
 		v.pendingCount = 0
 		v.notice = "The Screener is clearing. Everyone waiting will be asked about again on their next email."
 		return nil, true
@@ -287,8 +347,8 @@ func (v *screenerView) View() string {
 		return b.String()
 	}
 	b.WriteString(renderScreenerRows(pane, v.visibleRows(), v.vc.width))
-	if pane.page > 1 {
-		b.WriteString(lipgloss.NewStyle().Foreground(colorMuted).Render(fmt.Sprintf("  Page %d", pane.page)))
+	if pane.paging.loading {
+		b.WriteString(lipgloss.NewStyle().Foreground(colorMuted).Render("  Loading more…"))
 	}
 	return b.String()
 }
@@ -316,13 +376,6 @@ func (v *screenerView) HelpBindings() []helpBinding {
 		bindings = append(bindings, helpBinding{"tab", "the screener"})
 	}
 	bindings = append(bindings, helpBinding{"X", "clear all"})
-	pane := v.pane()
-	if len(pane.rows) > 0 {
-		bindings = append(bindings, helpBinding{"]", "next page"})
-	}
-	if pane.page > 1 {
-		bindings = append(bindings, helpBinding{"[", "previous page"})
-	}
 	return append(bindings, helpBinding{"esc/q", "back to mail"})
 }
 
@@ -355,7 +408,7 @@ func (v *screenerView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case tea.KeyDown:
 		v.pane().moveDown(v.visibleRows())
-		return nil
+		return v.loadMoreRows()
 	}
 
 	switch key {
@@ -365,6 +418,7 @@ func (v *screenerView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		v.pane().moveUp(v.visibleRows())
 	case "j":
 		v.pane().moveDown(v.visibleRows())
+		return v.loadMoreRows()
 	case "y", "i":
 		return v.screen(hey.ClearanceApproved)
 	case "n":
@@ -372,12 +426,6 @@ func (v *screenerView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "X":
 		v.confirmingClear = true
 		v.notice = ""
-	case "]":
-		return v.requestPage(v.pane().page + 1)
-	case "[":
-		if v.pane().page > 1 {
-			return v.requestPage(v.pane().page - 1)
-		}
 	}
 	return nil
 }
@@ -415,20 +463,36 @@ func (v *screenerView) switchTab(tab screenerTab) tea.Cmd {
 	if v.pane().loaded {
 		return nil
 	}
-	return v.requestPage(1)
-}
-
-func (v *screenerView) requestPage(page int) tea.Cmd {
 	if v.tab == screenerHistoryTab {
-		return v.requestScreened(page)
+		return v.requestScreened()
 	}
-	return v.requestPending(page)
+	return v.requestPending()
 }
 
-func (v *screenerView) requestPending(page int) tea.Cmd {
+func (v *screenerView) requestPending() tea.Cmd {
 	v.requestID++
+	v.moreRequestID++
 	v.loading = true
-	return v.fetchPending(v.requestID, max(page, 1))
+	v.pending.paging.reset()
+	return v.fetchPending(v.requestID)
+}
+
+// loadMoreRows reads the page below the one the reader has scrolled to in the pane they are
+// in, or the one below a pane whose end they can already see. One page is asked for at a
+// time, in its own lane: the rows already on screen are what they are working through.
+func (v *screenerView) loadMoreRows() tea.Cmd {
+	pane := v.pane()
+	if pane.paging.loading || !pane.paging.hasMore() {
+		return nil
+	}
+	rowsBelow := len(pane.rows)-pane.scroll > v.visibleRows()
+	if rowsBelow && len(pane.rows)-pane.cursor > loadMoreThreshold {
+		return nil
+	}
+
+	pane.paging.loading = true
+	v.moreRequestID++
+	return v.fetchMoreRows(v.moreRequestID, v.tab, pane.paging.nextPage)
 }
 
 // refreshPending is what the doorbell asks of The Screener: read the queue again under
@@ -445,13 +509,15 @@ func (v *screenerView) refreshPending() (cmd tea.Cmd, held bool) {
 	}
 
 	v.liveRequestID++
-	return v.fetchPendingRefresh(v.liveRequestID, max(v.pending.page, 1)), false
+	return v.fetchPendingRefresh(v.liveRequestID), false
 }
 
-func (v *screenerView) requestScreened(page int) tea.Cmd {
+func (v *screenerView) requestScreened() tea.Cmd {
 	v.requestID++
+	v.moreRequestID++
 	v.loading = true
-	return v.fetchScreened(v.requestID, max(page, 1))
+	v.history.paging.reset()
+	return v.fetchScreened(v.requestID)
 }
 
 func (v *screenerView) screen(status string) tea.Cmd {
@@ -540,54 +606,65 @@ func (v *screenerView) clearConfirmationView() string {
 
 // --- Fetch commands ---
 
-func (v *screenerView) fetchPending(requestID uint64, page int) tea.Cmd {
+func (v *screenerView) fetchPending(requestID uint64) tea.Cmd {
 	return func() tea.Msg {
-		summary, err := v.vc.sdk.Clearances().Pending(v.vc.ctx, strconv.Itoa(page))
-		if err != nil {
-			return screenerPendingLoadedMsg{requestID: requestID, page: page, err: err}
-		}
-		message := screenerPendingLoadedMsg{requestID: requestID, page: page}
-		if summary != nil {
-			message.count = int(summary.PendingClearancesCount)
-			for _, clearance := range summary.Clearances {
-				message.rows = append(message.rows, pendingScreenerRow(clearance))
-			}
+		rows, count, nextPage, err := v.readPendingPage("")
+		return screenerPendingLoadedMsg{requestID: requestID, rows: rows, count: count, nextPage: nextPage, err: err}
+	}
+}
+
+// fetchPendingRefresh reads the top of the queue in the live lane and without the spinner:
+// nobody is waiting on it.
+func (v *screenerView) fetchPendingRefresh(requestID uint64) tea.Cmd {
+	return func() tea.Msg {
+		rows, count, nextPage, err := v.readPendingPage("")
+		return screenerPendingRefreshedMsg{requestID: requestID, rows: rows, count: count, nextPage: nextPage, err: err}
+	}
+}
+
+func (v *screenerView) fetchScreened(requestID uint64) tea.Cmd {
+	return func() tea.Msg {
+		rows, nextPage, err := v.readScreenedPage("")
+		return screenerScreenedLoadedMsg{requestID: requestID, rows: rows, nextPage: nextPage, err: err}
+	}
+}
+
+// fetchMoreRows reads the page below whichever pane the reader is in, in the growing lane
+// and without the spinner.
+func (v *screenerView) fetchMoreRows(requestID uint64, tab screenerTab, page string) tea.Cmd {
+	return func() tea.Msg {
+		message := screenerRowsAppendedMsg{requestID: requestID, tab: tab}
+		if tab == screenerHistoryTab {
+			message.rows, message.nextPage, message.err = v.readScreenedPage(page)
+		} else {
+			message.rows, message.count, message.nextPage, message.err = v.readPendingPage(page)
 		}
 		return message
 	}
 }
 
-// fetchPendingRefresh reads the same page fetchPending reads, in the live lane and
-// without the spinner: nobody is waiting on it.
-func (v *screenerView) fetchPendingRefresh(requestID uint64, page int) tea.Cmd {
-	return func() tea.Msg {
-		summary, err := v.vc.sdk.Clearances().Pending(v.vc.ctx, strconv.Itoa(page))
-		if err != nil {
-			return screenerPendingRefreshedMsg{requestID: requestID, page: page, err: err}
-		}
-		message := screenerPendingRefreshedMsg{requestID: requestID, page: page}
-		if summary != nil {
-			message.count = int(summary.PendingClearancesCount)
-			for _, clearance := range summary.Clearances {
-				message.rows = append(message.rows, pendingScreenerRow(clearance))
-			}
-		}
-		return message
+func (v *screenerView) readPendingPage(page string) ([]screenerRow, int, string, error) {
+	result, err := v.vc.sdk.Clearances().PendingPage(v.vc.ctx, page)
+	if err != nil || result == nil {
+		return nil, 0, "", err
 	}
+	rows := make([]screenerRow, 0, len(result.Clearances))
+	for _, clearance := range result.Clearances {
+		rows = append(rows, pendingScreenerRow(clearance))
+	}
+	return rows, result.PendingCount, result.NextPage, nil
 }
 
-func (v *screenerView) fetchScreened(requestID uint64, page int) tea.Cmd {
-	return func() tea.Msg {
-		clearances, err := v.vc.sdk.Clearances().Screened(v.vc.ctx, strconv.Itoa(page))
-		if err != nil {
-			return screenerScreenedLoadedMsg{requestID: requestID, page: page, err: err}
-		}
-		message := screenerScreenedLoadedMsg{requestID: requestID, page: page}
-		for _, clearance := range clearances {
-			message.rows = append(message.rows, screenedScreenerRow(clearance))
-		}
-		return message
+func (v *screenerView) readScreenedPage(page string) ([]screenerRow, string, error) {
+	result, err := v.vc.sdk.Clearances().ScreenedPage(v.vc.ctx, page)
+	if err != nil || result == nil {
+		return nil, "", err
 	}
+	rows := make([]screenerRow, 0, len(result.Clearances))
+	for _, clearance := range result.Clearances {
+		rows = append(rows, screenedScreenerRow(clearance))
+	}
+	return rows, result.NextPage, nil
 }
 
 // --- Rendering ---

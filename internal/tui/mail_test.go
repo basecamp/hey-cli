@@ -685,12 +685,12 @@ func TestMailViewLoadsFolderSourcesAndPostings(t *testing.T) {
 	if len(v.postingList.postings[0].Folders) != 1 || v.postingList.postings[0].Folders[0].ID != 12 {
 		t.Errorf("posting folders = %+v", v.postingList.postings[0].Folders)
 	}
-	if v.notice != "Label page 1" {
-		t.Errorf("folder pagination notice = %q", v.notice)
+	if v.postingPaging.hasMore() {
+		t.Errorf("a label with one page should have nothing more to read, got %q", v.postingPaging.nextPage)
 	}
 }
 
-func TestMailViewFolderPagination(t *testing.T) {
+func TestMailViewFolderGrowsAsTheReaderScrolls(t *testing.T) {
 	var folderQueries []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -723,34 +723,122 @@ func TestMailViewFolderPagination(t *testing.T) {
 	v.Update(runCmd(v.Init()))
 	v.SubnavRight()
 	first := runCmd(v.HandleContentKey(keyPress("enter"))).(postingsLoadedMsg)
-	v.Update(first)
-	if v.folderNextPage != "next-cursor" || v.notice != "Label page 1 — 2 threads total" {
-		t.Errorf("first page state = next:%q notice:%q", v.folderNextPage, v.notice)
+	more, _ := v.Update(first)
+	if v.postingPaging.nextPage != "next-cursor" {
+		t.Errorf("first page next cursor = %q, want next-cursor", v.postingPaging.nextPage)
 	}
-	if !hasHelpBinding(v.HelpBindings(), "n") {
-		t.Error("first folder page should offer next-page navigation")
-	}
-
-	second := runCmd(v.HandleContentKey(keyPress("n"))).(postingsLoadedMsg)
-	v.Update(second)
-	if len(v.postingList.postings) != 1 || v.postingList.postings[0].Summary != "Second page" || len(v.folderPageHistory) != 1 {
-		t.Errorf("second page state = postings:%+v history:%v", v.postingList.postings, v.folderPageHistory)
-	}
-	_, _, label, _ := v.SubnavItems()
-	if !strings.Contains(label, "page 2") || v.notice != "Label page 2 — 2 threads total" {
-		t.Errorf("second page label=%q notice=%q", label, v.notice)
-	}
-	if !hasHelpBinding(v.HelpBindings(), "p") {
-		t.Error("second folder page should offer previous-page navigation")
+	if more == nil {
+		t.Fatal("a label the reader can see the end of should read on")
 	}
 
-	previous := runCmd(v.HandleContentKey(keyPress("p"))).(postingsLoadedMsg)
-	v.Update(previous)
-	if len(v.folderPageHistory) != 0 || len(v.postingList.postings) != 1 || v.postingList.postings[0].Summary != "First page" {
-		t.Errorf("previous page state = postings:%+v history:%v", v.postingList.postings, v.folderPageHistory)
+	second := runCmd(more).(postingsAppendedMsg)
+	if cmd, _ := v.Update(second); cmd != nil {
+		t.Error("a page with no next cursor should end the label")
 	}
-	if fmt.Sprint(folderQueries) != "[ next-cursor ]" {
+	if len(v.postingList.postings) != 2 || v.postingList.postings[1].Summary != "Second page" {
+		t.Errorf("grown list = %+v", v.postingList.postings)
+	}
+	if v.postingPaging.hasMore() {
+		t.Errorf("next cursor = %q, want none", v.postingPaging.nextPage)
+	}
+	if _, _, label, _ := v.SubnavItems(); label != "Receipts" {
+		t.Errorf("label = %q, want Receipts", label)
+	}
+	if fmt.Sprint(folderQueries) != "[ next-cursor]" {
 		t.Errorf("folder page queries = %q", folderQueries)
+	}
+}
+
+// --- Growing a list as the reader scrolls ---
+
+func TestMailViewBoxGrowsAsTheReaderScrolls(t *testing.T) {
+	var pages []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pages = append(pages, r.URL.Query().Get("page"))
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("page") == "cursor-2" {
+			_, _ = w.Write([]byte(`{"id":1,"kind":"imbox","name":"Imbox","postings":[
+				{"id":102,"summary":"Third","created_at":"2025-03-01T08:00:00Z","seen":true}]}`))
+			return
+		}
+		w.Header().Set("Link", "<http://"+r.Host+"/boxes/1.json?page=cursor-2>; rel=\"next\"")
+		_, _ = w.Write([]byte(`{"id":1,"kind":"imbox","name":"Imbox","postings":[
+			{"id":100,"summary":"First","created_at":"2025-03-01T10:00:00Z","seen":true},
+			{"id":101,"summary":"Second","created_at":"2025-03-01T09:00:00Z","seen":true}]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	vc := testVC()
+	vc.sdk = hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
+	v := newMailView(vc)
+	v.Resize(vc.width, vc.height)
+	v.boxes = orderBoxes(testBoxes())
+
+	first := runCmd(v.requestPostings(v.boxes[0])).(postingsLoadedMsg)
+	more, _ := v.Update(first)
+	if more == nil {
+		t.Fatal("a box the reader can see the end of should read on")
+	}
+
+	appended := runCmd(more).(postingsAppendedMsg)
+	if cmd, _ := v.Update(appended); cmd != nil {
+		t.Error("a page with no next cursor should end the box")
+	}
+	if len(v.postingList.postings) != 3 || v.postingList.postings[2].Summary != "Third" {
+		t.Errorf("grown list = %+v", v.postingList.postings)
+	}
+	if strings.Join(pages, ",") != ",cursor-2" {
+		t.Errorf("page requests = %v", pages)
+	}
+}
+
+func TestMailViewReadsOnOnlyAsTheCursorNearsTheBottom(t *testing.T) {
+	v := mailWithPostings()
+	v.postingList.hideSeenState = true
+	v.postingList.setSize(80, 20)
+	postings := make([]models.Posting, 0, 20)
+	for id := range 20 {
+		postings = append(postings, models.Posting{ID: int64(200 + id), Seen: true})
+	}
+	v.postingList.setPostings(postings)
+	v.postingPaging.nextPage = "cursor-2"
+
+	if cmd := v.loadMorePostings(); cmd != nil {
+		t.Error("a cursor at the top of a full list should not read on")
+	}
+	v.postingList.cursor = len(postings) - 2
+	if cmd := v.loadMorePostings(); cmd == nil {
+		t.Error("a cursor near the bottom should read on")
+	}
+	if !v.postingPaging.loading {
+		t.Error("the page on its way should be marked as such")
+	}
+	if cmd := v.loadMorePostings(); cmd != nil {
+		t.Error("only one page should be asked for at a time")
+	}
+}
+
+// A thread the list already shows is not shown twice when the page below turns it up
+// again, which is what happens when a reply moves it in the ordering between two reads.
+func TestMailViewGrowingSkipsPostingsAlreadyShown(t *testing.T) {
+	v := mailWithPostings()
+	v.postingPaging.nextPage = "cursor-2"
+
+	v.Update(postingsAppendedMsg{
+		requestID:  v.moreRequestID,
+		boxID:      v.currentBoxID(),
+		sourceKind: v.currentSourceKind(),
+		postings: []models.Posting{
+			testPostings()[1],
+			{ID: 102, Summary: "Third", Seen: true},
+		},
+	})
+
+	if len(v.postingList.postings) != 3 {
+		t.Fatalf("grown list = %+v", v.postingList.postings)
+	}
+	if v.postingList.postings[2].ID != 102 {
+		t.Errorf("last posting = %+v, want the one page two added", v.postingList.postings[2])
 	}
 }
 
@@ -2072,8 +2160,8 @@ func TestMailViewSearchFormSubmitsQueryAndRendersResults(t *testing.T) {
 	if recorded.path != "/advanced_search.json" || len(recorded.rawQueries) == 0 || !strings.Contains(recorded.rawQueries[len(recorded.rawQueries)-1], "q=quarterly+planning") {
 		t.Errorf("search request = %s?%v", recorded.path, recorded.rawQueries)
 	}
-	if !v.searchActive || v.searchQuery != "quarterly planning" || v.searchPage != 1 {
-		t.Errorf("search state = active:%v query:%q page:%d", v.searchActive, v.searchQuery, v.searchPage)
+	if !v.searchActive || v.searchQuery != "quarterly planning" || v.searchNextPage != 0 {
+		t.Errorf("search state = active:%v query:%q next:%d", v.searchActive, v.searchQuery, v.searchNextPage)
 	}
 	if len(v.searchList.postings) != 1 || v.searchList.postings[0].ResolveTopicID() != 100 {
 		t.Errorf("search postings = %+v", v.searchList.postings)
@@ -2085,8 +2173,7 @@ func TestMailViewSearchFormSubmitsQueryAndRendersResults(t *testing.T) {
 	if strings.Contains(view, "●") {
 		t.Errorf("search result shows an unread marker without a read state: %q", view)
 	}
-	_, _, label, _ := v.SubnavItems()
-	if !strings.Contains(label, "quarterly planning") || !strings.Contains(label, "page 1") {
+	if _, _, label, _ := v.SubnavItems(); label != "Search: quarterly planning" {
 		t.Errorf("search label = %q", label)
 	}
 }
@@ -2126,7 +2213,6 @@ func TestMailViewIgnoresStaleSearchResults(t *testing.T) {
 	v.Update(searchResultsLoadedMsg{
 		requestID: 1,
 		query:     "stale",
-		page:      1,
 		postings:  []models.Posting{{ID: 99}},
 	})
 	if v.searchActive || len(v.searchList.postings) != 0 {
@@ -2134,48 +2220,64 @@ func TestMailViewIgnoresStaleSearchResults(t *testing.T) {
 	}
 }
 
-func TestMailViewSearchPagination(t *testing.T) {
-	v, recorded := mailWithTestServer(t, http.StatusNoContent)
-	v.searchActive = true
-	v.searchQuery = "quarterly planning"
-	v.searchPage = 1
-	v.searchList.setPostings([]models.Posting{{ID: 10, TopicID: 100, Name: "Hello world"}})
+func TestMailViewSearchGrowsAsTheReaderScrolls(t *testing.T) {
+	var pages []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pages = append(pages, r.URL.Query().Get("page"))
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("page") == "2" {
+			_, _ = w.Write([]byte(`{"matches":[{"topic":{"id":101,"name":"Cabinet estimate"},"posting_id":11}]}`))
+			return
+		}
+		w.Header().Set("Link", `<http://`+r.Host+`/advanced_search.json?page=2>; rel="next"`)
+		_, _ = w.Write([]byte(`{"matches":[{"topic":{"id":100,"name":"Hello world"},"posting_id":10}]}`))
+	}))
+	t.Cleanup(server.Close)
 
-	next := v.HandleContentKey(keyPress("n"))
-	if next == nil {
-		t.Fatal("next page should start a request")
+	vc := testVC()
+	vc.ctx = context.Background()
+	vc.sdk = hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
+	v := newMailView(vc)
+	v.Resize(vc.width, vc.height)
+	v.boxes = orderBoxes(testBoxes())
+
+	first := runCmd(v.requestSearch("cabinets")).(searchResultsLoadedMsg)
+	more, _ := v.Update(first)
+	if v.searchNextPage != 2 {
+		t.Fatalf("next page = %d, want 2", v.searchNextPage)
 	}
-	nextMsg := next().(searchResultsLoadedMsg)
-	v.Update(nextMsg)
-	if v.searchPage != 2 || !strings.Contains(recorded.rawQueries[len(recorded.rawQueries)-1], "page=2") {
-		t.Errorf("next page state = %d, queries = %v", v.searchPage, recorded.rawQueries)
+	if more == nil {
+		t.Fatal("results the reader can see the end of should read on")
 	}
 
-	previous := v.HandleContentKey(keyPress("p"))
-	if previous == nil {
-		t.Fatal("previous page should start a request")
+	appended := runCmd(more).(searchResultsAppendedMsg)
+	if cmd, _ := v.Update(appended); cmd != nil {
+		t.Error("a page with no next page should end the results")
 	}
-	previousMsg := previous().(searchResultsLoadedMsg)
-	v.Update(previousMsg)
-	if v.searchPage != 1 {
-		t.Errorf("previous page = %d, want 1", v.searchPage)
+	if len(v.searchList.postings) != 2 || v.searchList.postings[1].ResolveTopicID() != 101 {
+		t.Errorf("grown results = %+v", v.searchList.postings)
+	}
+	if v.searchNextPage != 0 {
+		t.Errorf("next page = %d, want none", v.searchNextPage)
+	}
+	// The first page is the one you get for asking for nothing, so only the second is named.
+	if strings.Join(pages, ",") != ",2" {
+		t.Errorf("page requests = %v", pages)
 	}
 }
 
-func TestMailViewEmptyNextSearchPagePreservesResults(t *testing.T) {
+// An empty page ends the results whatever the server says comes next, or the search would
+// ask the same question forever.
+func TestMailViewEmptySearchPageEndsTheResults(t *testing.T) {
 	v := mailWithPostings()
 	v.searchActive = true
 	v.searchQuery = "quarterly planning"
-	v.searchPage = 1
+	v.searchNextPage = 2
 	v.searchList.setPostings([]models.Posting{{ID: 10, TopicID: 100}})
-	v.activeRequestID = 3
 
-	v.Update(searchResultsLoadedMsg{requestID: 3, query: v.searchQuery, page: 2})
-	if v.searchPage != 1 || len(v.searchList.postings) != 1 {
-		t.Errorf("empty next page replaced results: page=%d postings=%v", v.searchPage, v.searchList.postings)
-	}
-	if v.notice != "No more search results" {
-		t.Errorf("notice = %q", v.notice)
+	cmd, _ := v.Update(searchResultsAppendedMsg{requestID: v.searchMoreID, query: v.searchQuery, nextPage: 3})
+	if cmd != nil || v.searchNextPage != 0 || len(v.searchList.postings) != 1 {
+		t.Errorf("empty page = next:%d postings:%v", v.searchNextPage, v.searchList.postings)
 	}
 }
 
@@ -2183,7 +2285,6 @@ func TestMailViewCancelPendingSearchResultPreservesResults(t *testing.T) {
 	v := mailWithPostings()
 	v.searchActive = true
 	v.searchQuery = "quarterly planning"
-	v.searchPage = 1
 	v.searchList.setPostings([]models.Posting{{ID: 10, TopicID: 100, Name: "Hello world"}})
 
 	if cmd := v.HandleContentKey(keyPress("enter")); cmd == nil {
@@ -2193,7 +2294,7 @@ func TestMailViewCancelPendingSearchResultPreservesResults(t *testing.T) {
 		t.Fatalf("request state = kind:%d loading:%v", v.activeRequestKind, v.loading)
 	}
 	v.ExitThread()
-	if !v.searchActive || v.searchQuery != "quarterly planning" || v.searchPage != 1 || len(v.searchList.postings) != 1 {
+	if !v.searchActive || v.searchQuery != "quarterly planning" || len(v.searchList.postings) != 1 {
 		t.Error("canceling a pending searched thread should preserve search results")
 	}
 	if v.loading || v.activeRequestKind != mailRequestNone {
@@ -2205,7 +2306,6 @@ func TestMailViewSearchResultOpensThreadAndReturnsToResults(t *testing.T) {
 	v, _ := mailWithTestServer(t, http.StatusNoContent)
 	v.searchActive = true
 	v.searchQuery = "quarterly planning"
-	v.searchPage = 1
 	v.searchList.setPostings([]models.Posting{{ID: 10, TopicID: 100, Name: "Hello world"}})
 
 	open := v.HandleContentKey(keyPress("enter"))
@@ -2267,29 +2367,25 @@ func TestMailViewHelpBindings(t *testing.T) {
 	}
 }
 
-func TestMailViewLabelHelpUsesPOnlyForPreviousPage(t *testing.T) {
+// A label scrolls rather than paging, so it advertises no page keys and p keeps meaning
+// paper trail.
+func TestMailViewLabelHelpOffersNoPageKeys(t *testing.T) {
 	v := mailWithPostings()
 	v.boxes = append(v.boxes, models.Box{ID: 12, Kind: mailSourceKindFolder, Name: "Receipts"})
 	v.boxIndex = len(v.boxes) - 1
+	v.postingPaging.nextPage = "next-cursor"
 
+	var paperTrail int
 	for _, binding := range v.HelpBindings() {
-		if binding.key == "p" {
-			t.Errorf("first label page advertised p binding: %+v", binding)
-		}
-	}
-
-	v.folderPageHistory = []string{""}
-	var previous, paperTrail int
-	for _, binding := range v.HelpBindings() {
-		if binding.key == "p" && binding.desc == "previous page" {
-			previous++
+		if binding.desc == "next page" || binding.desc == "previous page" {
+			t.Errorf("label advertised a page binding: %+v", binding)
 		}
 		if binding.key == "p" && binding.desc == "paper trail" {
 			paperTrail++
 		}
 	}
-	if previous != 1 || paperTrail != 0 {
-		t.Errorf("label p bindings = previous:%d paper-trail:%d; all=%v", previous, paperTrail, v.HelpBindings())
+	if paperTrail != 1 {
+		t.Errorf("label p bindings = paper-trail:%d; all=%v", paperTrail, v.HelpBindings())
 	}
 }
 
@@ -2343,9 +2439,15 @@ func TestMailViewHelpBindingsInSearchResults(t *testing.T) {
 	for _, binding := range bindings {
 		keys[binding.key] = true
 	}
-	for _, expected := range []string{"enter", "/", "n", "p"} {
+	for _, expected := range []string{"enter", "/"} {
 		if !keys[expected] {
 			t.Errorf("search results missing help binding %q: %v", expected, bindings)
+		}
+	}
+	// Results scroll on rather than paging, so there are no page keys to advertise.
+	for _, gone := range []string{"n", "p"} {
+		if keys[gone] {
+			t.Errorf("search results advertised a page binding %q: %v", gone, bindings)
 		}
 	}
 }

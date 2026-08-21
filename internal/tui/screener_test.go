@@ -332,23 +332,70 @@ func TestScreenerOffersClearOnBothPanes(t *testing.T) {
 	}
 }
 
-// --- Pagination ---
+// --- Growing the queue ---
 
-func TestScreenerKeepsQueueWhenNextPageIsEmpty(t *testing.T) {
-	view, state := loadedScreener(t)
-	state.pending = `{"pending_clearances_count":2,"clearances":[]}`
+func TestScreenerGrowsTheQueueAsTheReaderScrolls(t *testing.T) {
+	var pages []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pages = append(pages, r.URL.Query().Get("page"))
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("page") == "cursor-2" {
+			_, _ = w.Write([]byte(`{"pending_clearances_count":3,"clearances":[
+				{"id":93,"status":"pending","petitioner":{"id":13,"name":"Ann Wu"}}]}`))
+			return
+		}
+		w.Header().Set("Link", `<http://`+r.Host+`/clearances.json?page=cursor-2>; rel="next"`)
+		_, _ = w.Write([]byte(`{"pending_clearances_count":3,"clearances":[
+			{"id":91,"status":"pending","petitioner":{"id":11,"name":"Jane Doe"}},
+			{"id":92,"status":"pending","petitioner":{"id":12,"name":"Bob Smith"}}]}`))
+	}))
+	t.Cleanup(server.Close)
 
-	loaded := runCmd(view.HandleContentKey(keyPress("]"))).(screenerPendingLoadedMsg)
-	if loaded.page != 2 {
-		t.Fatalf("next page = %d, want 2", loaded.page)
+	vc := testVC()
+	vc.ctx = context.Background()
+	vc.sdk = hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "t"}, hey.WithMaxRetries(0))
+	view := newScreenerView(vc)
+
+	loaded := runCmd(view.Init()).(screenerPendingLoadedMsg)
+	more, _ := view.Update(loaded)
+	if more == nil {
+		t.Fatal("a queue the reader can see the end of should read on")
 	}
-	view.Update(loaded)
 
-	if len(view.pending.rows) != 2 || view.notice != "No more senders waiting" {
-		t.Errorf("empty next page = rows:%d notice:%q", len(view.pending.rows), view.notice)
+	appended := runCmd(more).(screenerRowsAppendedMsg)
+	if cmd, _ := view.Update(appended); cmd != nil {
+		t.Error("a page with no next cursor should end the queue")
 	}
-	if requests := state.snapshot(); !strings.Contains(requests[len(requests)-1].query, "page=2") {
-		t.Errorf("page request = %+v", requests[len(requests)-1])
+	if len(view.pending.rows) != 3 || view.pending.rows[2].name != "Ann Wu" {
+		t.Errorf("grown queue = %+v", view.pending.rows)
+	}
+	if view.pending.paging.hasMore() {
+		t.Errorf("next page = %q, want none", view.pending.paging.nextPage)
+	}
+	if strings.Join(pages, ",") != ",cursor-2" {
+		t.Errorf("page requests = %v", pages)
+	}
+}
+
+// A sender the queue shows already is not shown twice when the page below turns them up
+// again, which is what happens when someone else's decision shifts the ordering between
+// two reads.
+func TestScreenerGrowingSkipsSendersAlreadyShown(t *testing.T) {
+	view, _ := loadedScreener(t)
+	view.pending.paging.nextPage = "cursor-2"
+
+	view.Update(screenerRowsAppendedMsg{
+		requestID: view.moreRequestID,
+		tab:       screenerPendingTab,
+		count:     3,
+		rows: []screenerRow{
+			{id: 92, name: "Bob Smith"},
+			{id: 93, name: "Ann Wu"},
+		},
+	})
+
+	if len(view.pending.rows) != 3 || view.pending.rows[2].id != 93 {
+		t.Errorf("grown queue = %+v", view.pending.rows)
 	}
 }
 
@@ -456,7 +503,6 @@ func TestModelRoutesScreenerKeysToTheScreener(t *testing.T) {
 	m = updated.(model)
 	m.screenerView.Update(screenerPendingLoadedMsg{
 		requestID: m.screenerView.requestID,
-		page:      1,
 		count:     1,
 		rows:      []screenerRow{{id: 91, name: "Jane Doe", detail: "Quarterly planning"}},
 	})

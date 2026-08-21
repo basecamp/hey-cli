@@ -51,15 +51,25 @@ type mailSourcesLoadedMsg struct {
 }
 
 type postingsLoadedMsg struct {
-	requestID   uint64
-	boxID       int64
-	sourceKind  string
-	page        string
-	pageHistory []string
-	nextPage    string
-	totalCount  int
-	postings    []models.Posting
-	err         error
+	requestID  uint64
+	boxID      int64
+	sourceKind string
+	nextPage   string
+	postings   []models.Posting
+	err        error
+}
+
+// postingsAppendedMsg is the page below the one on screen, read because the reader
+// scrolled towards the bottom of the list. It has its own lane so it can never be mistaken
+// for the read the user is waiting on, and so it lands under the cursor rather than
+// carrying it back to the top.
+type postingsAppendedMsg struct {
+	requestID  uint64
+	boxID      int64
+	sourceKind string
+	nextPage   string
+	postings   []models.Posting
+	err        error
 }
 
 // postingsRefreshedMsg is a box re-read after it changed underneath the reader. It has
@@ -69,6 +79,7 @@ type postingsRefreshedMsg struct {
 	requestID  uint64
 	boxID      int64
 	sourceKind string
+	nextPage   string
 	postings   []models.Posting
 	err        error
 }
@@ -88,7 +99,17 @@ type topicLoadedMsg struct {
 type searchResultsLoadedMsg struct {
 	requestID uint64
 	query     string
-	page      int
+	nextPage  int
+	postings  []models.Posting
+	err       error
+}
+
+// searchResultsAppendedMsg is the page of matches below the ones on screen, read because
+// the reader scrolled towards the bottom of the results. Its own lane, like a box's.
+type searchResultsAppendedMsg struct {
+	requestID uint64
+	query     string
+	nextPage  int
 	postings  []models.Posting
 	err       error
 }
@@ -163,13 +184,10 @@ type collectionActionDoneMsg struct {
 type mailView struct {
 	vc *viewContext
 
-	boxes             []models.Box
-	boxIndex          int
-	folderPage        string
-	folderNextPage    string
-	folderPageHistory []string
-	folderTotalCount  int
+	boxes    []models.Box
+	boxIndex int
 
+	postingPaging    listPaging
 	postingList      contentList
 	topicViewport    viewport.Model
 	topicContent     string
@@ -193,7 +211,8 @@ type mailView struct {
 	searchList             contentList
 	searchActive           bool
 	searchQuery            string
-	searchPage             int
+	searchNextPage         int    // the page of matches after the ones on screen, zero at the last
+	searchLoadingMore      bool   // a page of matches is already on its way
 	screenerCount          int    // senders waiting in The Screener
 	lastBulkReplyID        int64  // delayed delivery currently available for undo
 	pendingMutations       int    // writes that must finish before changing the account context
@@ -208,6 +227,8 @@ type mailView struct {
 	liveRequestID   uint64 // identifies the only live re-read allowed to update the list
 	liveRefreshDue  bool   // a re-read is already on its way
 	liveUpdatesOver bool   // the changes stream closed, so the list is a snapshot again
+	moreRequestID   uint64 // identifies the only page-below read allowed to grow the list
+	searchMoreID    uint64 // the same, for the search results
 }
 
 func newMailView(vc *viewContext) *mailView {
@@ -280,16 +301,21 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		// unread threads with the dot; every other source is one flat list.
 		v.postingList.hideSeenState = !v.currentBoxIsImbox()
 		v.postingList.setPostings(msg.postings)
-		if isOrganizedMailSource(v.currentSourceKind()) {
-			v.folderPage = msg.page
-			v.folderPageHistory = msg.pageHistory
-			v.folderNextPage = msg.nextPage
-			v.folderTotalCount = msg.totalCount
-			if v.notice == "" {
-				v.notice = v.folderPageNotice()
-			}
+		v.postingPaging.read(postingIDs(msg.postings), msg.nextPage)
+		return v.loadMorePostings(), true
+
+	case postingsAppendedMsg:
+		if msg.requestID != v.moreRequestID || msg.boxID != v.currentBoxID() || msg.sourceKind != v.currentSourceKind() {
+			return nil, true
 		}
-		return nil, true
+		v.postingPaging.loading = false
+		if msg.err != nil {
+			v.notice = "Could not load more mail: " + msg.err.Error()
+			return nil, true
+		}
+		v.postingList.growPostings(msg.postings)
+		v.postingPaging.grew(len(msg.postings), msg.nextPage)
+		return v.loadMorePostings(), true
 
 	case mailRefreshDueMsg:
 		return v.refreshBox(msg.boxID), true
@@ -302,7 +328,8 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			v.notice = "Could not refresh mail: " + msg.err.Error()
 			return nil, true
 		}
-		v.postingList.refreshPostings(msg.postings)
+		v.postingList.refreshHead(msg.postings, v.postingPaging.headIDs)
+		v.postingPaging.refreshed(postingIDs(msg.postings), msg.nextPage)
 		return nil, true
 
 	case searchResultsLoadedMsg:
@@ -313,15 +340,29 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if msg.err != nil {
 			return func() tea.Msg { return errMsg{msg.err} }, true
 		}
-		if len(msg.postings) == 0 && v.searchActive && msg.page > v.searchPage {
-			v.notice = "No more search results"
-			return nil, true
-		}
 		v.searchActive = true
 		v.searchQuery = msg.query
-		v.searchPage = msg.page
+		v.searchNextPage = msg.nextPage
+		v.searchLoadingMore = false
 		v.searchList.setPostings(msg.postings)
-		return nil, true
+		return v.loadMoreSearchResults(), true
+
+	case searchResultsAppendedMsg:
+		if msg.requestID != v.searchMoreID || !v.searchActive || msg.query != v.searchQuery {
+			return nil, true
+		}
+		v.searchLoadingMore = false
+		if msg.err != nil {
+			v.notice = "Could not load more results: " + msg.err.Error()
+			return nil, true
+		}
+		v.searchList.growPostings(msg.postings)
+		if len(msg.postings) == 0 {
+			v.searchNextPage = 0
+		} else {
+			v.searchNextPage = msg.nextPage
+		}
+		return v.loadMoreSearchResults(), true
 
 	case topicLoadedMsg:
 		if msg.requestID != v.activeRequestID || msg.boxID != v.currentBoxID() {
@@ -516,7 +557,9 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 				return v.requestPostings(*source), true
 			}
 		}
-		return nil, true
+		// A thread leaving the list can uncover the bottom of it, so what is below comes up
+		// to fill the gap rather than leaving a short list with more waiting behind it.
+		return v.loadMorePostings(), true
 
 	case postingSeenMsg:
 		v.finishMutation()
@@ -734,7 +777,7 @@ func (v *mailView) HelpBindings() []helpBinding {
 		return bindings
 	}
 	if v.searchActive {
-		return []helpBinding{{"enter", "open"}, {"/", "new search"}, {"n", "next page"}, {"p", "previous page"}}
+		return []helpBinding{{"enter", "open"}, {"/", "new search"}}
 	}
 	ignoreBinding := helpBinding{"-", "ignore"}
 	if selected := v.postingList.selectedPosting(); selected != nil && selected.Muted {
@@ -764,23 +807,13 @@ func (v *mailView) HelpBindings() []helpBinding {
 		{"a", "set aside"},
 		{"d", "feed"},
 	}
-	if !isOrganizedMailSource(v.currentSourceKind()) {
-		bindings = append(bindings, helpBinding{"p", "paper trail"})
-	}
 	bindings = append(bindings,
+		helpBinding{"p", "paper trail"},
 		helpBinding{"t", "trash"},
 		helpBinding{"s", "spam"},
 		ignoreBinding,
+		helpBinding{"ctrl+r", "reload"},
 	)
-	if isOrganizedMailSource(v.currentSourceKind()) {
-		if v.folderNextPage != "" {
-			bindings = append(bindings, helpBinding{"n", "next page"})
-		}
-		if len(v.folderPageHistory) > 0 {
-			bindings = append(bindings, helpBinding{"p", "previous page"})
-		}
-	}
-	bindings = append(bindings, helpBinding{"ctrl+r", "reload"})
 	if v.lastBulkReplyID != 0 {
 		bindings = append(bindings, helpBinding{"u", "undo bulk reply"})
 	}
@@ -791,7 +824,10 @@ func (v *mailView) SubnavItems() ([]navItem, int, string, bool) {
 	if v.searchActive || v.searchForm != nil {
 		label := "Search"
 		if v.searchQuery != "" {
-			label = fmt.Sprintf("Search: %s (page %d)", v.searchQuery, max(v.searchPage, 1))
+			label = "Search: " + v.searchQuery
+		}
+		if v.searchLoadingMore {
+			label += " · loading more…"
 		}
 		return nil, 0, label, true
 	}
@@ -800,7 +836,9 @@ func (v *mailView) SubnavItems() ([]navItem, int, string, bool) {
 		label = v.boxes[v.boxIndex].Name
 		if isOrganizedMailSource(v.boxes[v.boxIndex].Kind) {
 			label = terminalSafeFolderText(label)
-			label = fmt.Sprintf("%s (page %d)", label, len(v.folderPageHistory)+1)
+		}
+		if v.postingPaging.loading {
+			label += " · loading more…"
 		}
 	}
 
@@ -964,7 +1002,7 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		cmd, query, submit := v.searchForm.handleKey(msg)
 		if submit {
 			v.searchForm = nil
-			return v.requestSearch(query, 1)
+			return v.requestSearch(query)
 		}
 		return cmd
 	}
@@ -1123,19 +1161,12 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 			v.searchList.moveUp()
 		case tea.KeyDown:
 			v.searchList.moveDown()
+			return v.loadMoreSearchResults()
 		case tea.KeyEnter:
 			return v.openSelected()
 		default:
-			switch msg.String() {
-			case "/":
+			if msg.String() == "/" {
 				return v.startSearch()
-			case "n":
-				return v.requestSearch(v.searchQuery, v.searchPage+1)
-			case "p":
-				if v.searchPage > 1 {
-					return v.requestSearch(v.searchQuery, v.searchPage-1)
-				}
-				v.notice = "Already on the first search page"
 			}
 		}
 		return nil
@@ -1146,17 +1177,10 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		v.postingList.moveUp()
 	case tea.KeyDown:
 		v.postingList.moveDown()
+		return v.loadMorePostings()
 	case tea.KeyEnter:
 		return v.openSelected()
 	default:
-		if isOrganizedMailSource(v.currentSourceKind()) {
-			switch msg.String() {
-			case "n":
-				return v.nextFolderPage()
-			case "p":
-				return v.previousFolderPage()
-			}
-		}
 		switch msg.String() {
 		case "/":
 			return v.startSearch()
@@ -1218,7 +1242,9 @@ func (v *mailView) clearSearch() {
 	v.searchActive = false
 	v.searchQuery = ""
 	v.notice = ""
-	v.searchPage = 0
+	v.searchNextPage = 0
+	v.searchLoadingMore = false
+	v.searchMoreID++
 	v.searchList.setPostings(nil)
 	v.searchForm = nil
 }
@@ -1306,7 +1332,6 @@ func (v *mailView) switchBox(index int) tea.Cmd {
 	v.notice = ""
 	v.postingList.setPostings(nil)
 	v.boxIndex = index
-	v.resetFolderPagination()
 	return v.requestPostings(v.boxes[index])
 }
 
@@ -1365,9 +1390,6 @@ func (v *mailView) applySources(sources []models.Box) tea.Cmd {
 		return nil
 	}
 	v.boxIndex = sourceIndex(v.boxes, currentID, currentKind)
-	if v.boxes[v.boxIndex].ID != currentID || v.boxes[v.boxIndex].Kind != currentKind {
-		v.resetFolderPagination()
-	}
 	return v.requestPostings(v.boxes[v.boxIndex])
 }
 
@@ -1417,13 +1439,32 @@ func (v *mailView) cancelRequest() {
 	v.loading = false
 }
 
+// requestPostings reads a source from its top page. Every list starts there and grows
+// downwards from it, so a read the user asked for is also what puts the list back to the
+// depth it opens at.
 func (v *mailView) requestPostings(source models.Box) tea.Cmd {
-	return v.requestPostingsPage(source, v.folderPage, v.folderPageHistory)
+	v.postingPaging.reset()
+	v.moreRequestID++
+	requestID, ctx := v.beginRequest(mailRequestPostings)
+	return v.fetchPostings(ctx, requestID, source, "")
 }
 
-func (v *mailView) requestPostingsPage(source models.Box, page string, history []string) tea.Cmd {
-	requestID, ctx := v.beginRequest(mailRequestPostings)
-	return v.fetchPostings(ctx, requestID, source, page, append([]string(nil), history...))
+// loadMorePostings reads the page below the one the reader has scrolled to, or the one
+// below a list they can already see the end of. One page is asked for at a time, in its own
+// lane and on the view's own context: the reader is still looking at what is there, so this
+// must not cancel or be cancelled by the read they are waiting on.
+func (v *mailView) loadMorePostings() tea.Cmd {
+	source := v.currentSource()
+	if source == nil || v.postingPaging.loading || !v.postingPaging.hasMore() {
+		return nil
+	}
+	if v.postingList.hasRowsBelow() && len(v.postingList.postings)-v.postingList.cursor > loadMoreThreshold {
+		return nil
+	}
+
+	v.postingPaging.loading = true
+	v.moreRequestID++
+	return v.fetchMorePostings(v.vc.ctx, v.moreRequestID, *source, v.postingPaging.nextPage)
 }
 
 // reloadPostings reads the box on screen again, on the user's say-so. It is how a list
@@ -1505,45 +1546,6 @@ func (v *mailView) noteFailure(what string, err error) {
 	v.notice = truncateToWidth(what+": "+err.Error(), max(v.vc.width-2, 40))
 }
 
-func (v *mailView) nextFolderPage() tea.Cmd {
-	source := v.currentSource()
-	if source == nil || !isOrganizedMailSource(source.Kind) || v.folderNextPage == "" {
-		return nil
-	}
-	history := append(append([]string(nil), v.folderPageHistory...), v.folderPage)
-	return v.requestPostingsPage(*source, v.folderNextPage, history)
-}
-
-func (v *mailView) previousFolderPage() tea.Cmd {
-	source := v.currentSource()
-	if source == nil || !isOrganizedMailSource(source.Kind) || len(v.folderPageHistory) == 0 {
-		return nil
-	}
-	last := len(v.folderPageHistory) - 1
-	page := v.folderPageHistory[last]
-	history := append([]string(nil), v.folderPageHistory[:last]...)
-	return v.requestPostingsPage(*source, page, history)
-}
-
-func (v *mailView) resetFolderPagination() {
-	v.folderPage = ""
-	v.folderNextPage = ""
-	v.folderPageHistory = nil
-	v.folderTotalCount = 0
-}
-
-func (v *mailView) folderPageNotice() string {
-	page := len(v.folderPageHistory) + 1
-	name := "Label"
-	if v.currentSourceKind() == mailSourceKindCollection {
-		name = "Collection"
-	}
-	if v.folderTotalCount > 0 {
-		return fmt.Sprintf("%s page %d — %d threads total", name, page, v.folderTotalCount)
-	}
-	return fmt.Sprintf("%s page %d", name, page)
-}
-
 func (v *mailView) startSearch() tea.Cmd {
 	if v.loading || len(v.boxes) == 0 {
 		return nil
@@ -1553,9 +1555,29 @@ func (v *mailView) startSearch() tea.Cmd {
 	return v.searchForm.init()
 }
 
-func (v *mailView) requestSearch(query string, page int) tea.Cmd {
+// requestSearch runs a search from its first page. Results grow downwards from there, the
+// same way a box does.
+func (v *mailView) requestSearch(query string) tea.Cmd {
+	v.searchNextPage = 0
+	v.searchLoadingMore = false
+	v.searchMoreID++
 	requestID, ctx := v.beginRequest(mailRequestSearch)
-	return v.fetchSearchResults(ctx, requestID, query, max(page, 1))
+	return v.fetchSearchResults(ctx, requestID, query, 1)
+}
+
+// loadMoreSearchResults reads the page of matches below the ones the reader has scrolled
+// to, or below results they can already see the end of.
+func (v *mailView) loadMoreSearchResults() tea.Cmd {
+	if !v.searchActive || v.searchLoadingMore || v.searchNextPage == 0 {
+		return nil
+	}
+	if v.searchList.hasRowsBelow() && len(v.searchList.postings)-v.searchList.cursor > loadMoreThreshold {
+		return nil
+	}
+
+	v.searchLoadingMore = true
+	v.searchMoreID++
+	return v.fetchMoreSearchResults(v.vc.ctx, v.searchMoreID, v.searchQuery, v.searchNextPage)
 }
 
 func (v *mailView) requestTopic(boxID, topicID, postingID int64, title string) tea.Cmd {
@@ -2132,101 +2154,139 @@ func (v *mailView) refreshScreenerCount() tea.Cmd {
 	}
 }
 
-func (v *mailView) fetchPostings(ctx context.Context, requestID uint64, source models.Box, page string, history []string) tea.Cmd {
+func (v *mailView) fetchPostings(ctx context.Context, requestID uint64, source models.Box, page string) tea.Cmd {
 	return func() tea.Msg {
-		var sdkPostings []generated.Posting
-		message := postingsLoadedMsg{requestID: requestID, boxID: source.ID, sourceKind: source.Kind, page: page, pageHistory: history}
-		switch source.Kind {
-		case mailSourceKindFolder:
-			var params *generated.GetFolderParams
-			if page != "" {
-				params = &generated.GetFolderParams{Page: &page}
-			}
-			result, err := v.vc.sdk.Folders().GetPage(ctx, source.ID, params)
-			if err != nil {
-				message.err = err
-				return message
-			}
-			if result != nil {
-				message.nextPage = result.NextPage
-				message.totalCount = result.TotalCount
-				if result.Folder != nil {
-					sdkPostings = result.Folder.Postings
-				}
-			}
-		case mailSourceKindCollection:
-			var params *generated.GetCollectionParams
-			if page != "" {
-				params = &generated.GetCollectionParams{Page: &page}
-			}
-			result, err := v.vc.sdk.Collections().GetPage(ctx, source.ID, params)
-			if err != nil {
-				message.err = err
-				return message
-			}
-			if result != nil {
-				message.nextPage = result.NextPage
-				message.totalCount = result.TotalCount
-				if result.Collection != nil {
-					sdkPostings = result.Collection.Postings
-				}
-			}
-		default:
-			box, err := v.vc.sdk.Boxes().Get(ctx, source.ID, nil)
-			if err != nil {
-				message.err = err
-				return message
-			}
-			if box != nil {
-				sdkPostings = box.Postings
-			}
+		postings, nextPage, err := v.readPostingsPage(ctx, source, page)
+		return postingsLoadedMsg{
+			requestID: requestID, boxID: source.ID, sourceKind: source.Kind,
+			postings: postings, nextPage: nextPage, err: err,
 		}
-		postings := make([]models.Posting, 0, len(sdkPostings))
-		for _, posting := range sdkPostings {
-			postings = append(postings, sdkPostingToModel(posting))
-		}
-		message.postings = postings
-		return message
 	}
 }
 
-// fetchBoxRefresh re-reads a box for the live update. It reads the box and nothing else:
-// a label's page, a search and a thread all stay as they were.
+// fetchMorePostings reads the page below the list, in the growing lane and without the
+// spinner: what the reader is looking at is already on screen.
+func (v *mailView) fetchMorePostings(ctx context.Context, requestID uint64, source models.Box, page string) tea.Cmd {
+	return func() tea.Msg {
+		postings, nextPage, err := v.readPostingsPage(ctx, source, page)
+		return postingsAppendedMsg{
+			requestID: requestID, boxID: source.ID, sourceKind: source.Kind,
+			postings: postings, nextPage: nextPage, err: err,
+		}
+	}
+}
+
+// fetchBoxRefresh re-reads the top page of a box for the live update. It reads that and
+// nothing else: the pages the reader scrolled down to, a search and a thread all stay as
+// they were.
 func (v *mailView) fetchBoxRefresh(ctx context.Context, requestID uint64, source models.Box) tea.Cmd {
 	return func() tea.Msg {
-		message := postingsRefreshedMsg{requestID: requestID, boxID: source.ID, sourceKind: source.Kind}
-		box, err := v.vc.sdk.Boxes().Get(ctx, source.ID, nil)
-		if err != nil {
-			message.err = err
-			return message
+		postings, nextPage, err := v.readPostingsPage(ctx, source, "")
+		return postingsRefreshedMsg{
+			requestID: requestID, boxID: source.ID, sourceKind: source.Kind,
+			postings: postings, nextPage: nextPage, err: err,
 		}
-		if box != nil {
-			postings := make([]models.Posting, 0, len(box.Postings))
-			for _, posting := range box.Postings {
-				postings = append(postings, sdkPostingToModel(posting))
-			}
-			message.postings = postings
-		}
-		return message
 	}
+}
+
+// readPostingsPage reads one page of a source and answers the cursor for the page after
+// it, empty once the source has nothing more to give. An empty page reads the first one.
+func (v *mailView) readPostingsPage(ctx context.Context, source models.Box, page string) ([]models.Posting, string, error) {
+	var sdkPostings []generated.Posting
+	var nextPage string
+
+	switch source.Kind {
+	case mailSourceKindFolder:
+		var params *generated.GetFolderParams
+		if page != "" {
+			params = &generated.GetFolderParams{Page: &page}
+		}
+		result, err := v.vc.sdk.Folders().GetPage(ctx, source.ID, params)
+		if err != nil {
+			return nil, "", err
+		}
+		if result != nil {
+			nextPage = result.NextPage
+			if result.Folder != nil {
+				sdkPostings = result.Folder.Postings
+			}
+		}
+	case mailSourceKindCollection:
+		var params *generated.GetCollectionParams
+		if page != "" {
+			params = &generated.GetCollectionParams{Page: &page}
+		}
+		result, err := v.vc.sdk.Collections().GetPage(ctx, source.ID, params)
+		if err != nil {
+			return nil, "", err
+		}
+		if result != nil {
+			nextPage = result.NextPage
+			if result.Collection != nil {
+				sdkPostings = result.Collection.Postings
+			}
+		}
+	default:
+		var params *generated.GetBoxParams
+		if page != "" {
+			params = &generated.GetBoxParams{Page: &page}
+		}
+		result, err := v.vc.sdk.Boxes().GetPage(ctx, source.ID, params)
+		if err != nil {
+			return nil, "", err
+		}
+		if result != nil {
+			nextPage = result.NextPage
+			if result.Box != nil {
+				sdkPostings = result.Box.Postings
+			}
+		}
+	}
+
+	postings := make([]models.Posting, 0, len(sdkPostings))
+	for _, posting := range sdkPostings {
+		postings = append(postings, sdkPostingToModel(posting))
+	}
+	return postings, nextPage, nil
 }
 
 func (v *mailView) fetchSearchResults(ctx context.Context, requestID uint64, query string, page int) tea.Cmd {
 	return func() tea.Msg {
-		result, err := v.vc.sdk.Search().Search(ctx, hey.SearchParams{Query: query, Page: page})
-		if err != nil {
-			return searchResultsLoadedMsg{requestID: requestID, query: query, page: page, err: err}
-		}
-		var matches []generated.SearchMatch
-		if result != nil {
-			matches = result.Matches
-		}
-		postings := make([]models.Posting, 0, len(matches))
-		for _, match := range matches {
-			postings = append(postings, sdkSearchMatchToModel(match))
-		}
-		return searchResultsLoadedMsg{requestID: requestID, query: query, page: page, postings: postings}
+		postings, nextPage, err := v.readSearchPage(ctx, query, page)
+		return searchResultsLoadedMsg{requestID: requestID, query: query, postings: postings, nextPage: nextPage, err: err}
 	}
+}
+
+// fetchMoreSearchResults reads the page of matches below the ones on screen, in the growing
+// lane and without the spinner.
+func (v *mailView) fetchMoreSearchResults(ctx context.Context, requestID uint64, query string, page int) tea.Cmd {
+	return func() tea.Msg {
+		postings, nextPage, err := v.readSearchPage(ctx, query, page)
+		return searchResultsAppendedMsg{requestID: requestID, query: query, postings: postings, nextPage: nextPage, err: err}
+	}
+}
+
+// readSearchPage reads one page of matches and answers the number of the page after it,
+// zero once the search has nothing more to give. Search numbers its pages where a box
+// cursors them, so this is a page number rather than a token.
+func (v *mailView) readSearchPage(ctx context.Context, query string, page int) ([]models.Posting, int, error) {
+	results, err := v.vc.sdk.Search().SearchPage(ctx, hey.SearchParams{Query: query, Page: max(page, 1)})
+	if err != nil {
+		return nil, 0, err
+	}
+	var matches []generated.SearchMatch
+	if results != nil && results.Result != nil {
+		matches = results.Result.Matches
+	}
+	postings := make([]models.Posting, 0, len(matches))
+	for _, match := range matches {
+		postings = append(postings, sdkSearchMatchToModel(match))
+	}
+	nextPage := 0
+	if results != nil {
+		nextPage = results.NextPage
+	}
+	return postings, nextPage, nil
 }
 
 func (v *mailView) fetchTopic(ctx context.Context, requestID uint64, boxID, topicID, postingID int64, title string) tea.Cmd {

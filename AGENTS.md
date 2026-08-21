@@ -125,6 +125,40 @@ table here.
 
 To add a new section: implement the `sectionView` interface in a new file, add a field and constructor call in `newModel`, and add a case in `switchSection`.
 
+### Lists grow as the reader scrolls
+
+Every mail list — a box, a label, a collection, a search — and both of The Screener's panes
+read one page and then grow downwards. There are no page keys: the cursor coming within
+`loadMoreThreshold` of the bottom reads the page below, and so does a list the reader can
+already see the end of, which is why a first page too short to fill the window keeps reading
+until it does.
+
+The pages come from geared_pagination, which is not offset paging: every JSON read carries
+a `Link` header whose `page` is a cursor into the ordering, and the last page carries none.
+`listPaging` in `content.go` holds that cursor, and an empty page ends the list whatever
+cursor came with it. On the SDK side the header is what `Boxes().GetPage`,
+`Clearances().PendingPage`, `Clearances().ScreenedPage` and `Search().SearchPage` exist for —
+`Get`, `Pending`, `Screened` and `Search` throw it away.
+
+Search is the exception to the cursor: `Search::Matches::Page` is a shim over geared's page
+rather than the real thing, and it numbers its pages, so the search results carry
+`searchNextPage int` instead of a `listPaging`. There is nothing to keep a `headIDs` for
+either — search results are never re-read live.
+
+The subtle part is the live re-read. It reads the box's *top* page, because that is where a
+change shows up, so it may only replace that much of a list that has grown past it:
+`contentList.refreshHead` (and `screenerPane.refreshHead`) splices the fresh page in front
+of the rows below it, and `listPaging.headIDs` — what the top page held last time — is how a
+thread that has left the top page leaves the list with it instead of sinking below the fresh
+rows. The pages further down stay as they were read until ctrl+r reads the list again from
+the top. The cursor for what comes next belongs to the deepest page, so a re-read of the top
+only moves it while the top page is the whole list.
+
+A read the user asked for, a page below, and a live re-read are separate lanes
+(`activeRequestID`, `moreRequestID` — `searchMoreID` for the results — and `liveRequestID`)
+with a message each, so growing a list never shows the spinner, never cancels the read the
+reader is waiting on, and never carries the cursor back to the top.
+
 ### Inline images in the TUI
 
 The TUI renders inline images using the Kitty graphics protocol's Unicode Placeholder extension (`internal/tui/kitty.go`). This works because Bubble Tea's cell-based renderer corrupts raw APC escape sequences, but Unicode placeholders are regular text that survives rendering. The approach has three steps:
@@ -155,8 +189,8 @@ the watch being interrupted is an error rather than a quiet exit.
 The TUI's mail list follows the same channel and wants less from it. `internal/cmd/tui_watch.go`
 subscribes and relays the changed box IDs down a channel; `internal/tui/live.go` defines
 that contract as `tui.MailWatcher`, so the TUI never sees cable or auth, and a test hands
-it a plain channel. There is no cursor: the doorbell says which box changed and
-`mailView.refreshBox` reads that box again in full, which is what the list renders anyway.
+it a plain channel. There is no sync cursor: the doorbell says which box changed and
+`mailView.refreshBox` reads that box's top page again, which is where a change shows up.
 A reconnect sends `tui.AnyBoxChanged`, standing for the changes broadcast while the
 connection was down.
 
@@ -164,7 +198,7 @@ connection was down.
 delivery's changes into a single re-read — a thread rings the doorbell once per posting.
 `liveRetryDelay` is how long a re-read waits when a form or a picker is open over the list,
 or a write hasn't landed: the change is held rather than dropped, because a re-read
-replaces what the reader is looking at. `contentList.refreshPostings` is what makes that
+replaces what the reader is looking at. `contentList.refreshHead` is what makes that
 safe — unlike `setPostings` it keeps the cursor on its posting and keeps a selection —
 and the re-read has its own request lane (`liveRequestID`, `postingsRefreshedMsg`) so it
 can never be confused with a read the user asked for, or show the spinner.
@@ -185,7 +219,7 @@ the stream name it used to throw away.
 
 The doorbell always re-reads the count, wherever the user is, because the mail list is
 where The Screener announces itself. When The Screener is what's on screen the queue is
-re-read too, through `screenerPane.refreshRows` — the same keep-your-place trick as the
+re-read too, through `screenerPane.refreshHead` — the same keep-your-place trick as the
 mail list — and held while a decision is in flight or the clear-everything question is up.
 On the history tab nothing is read; the pending pane is just marked unloaded, which is
 what `switchTab` already looks at. Both watches share one websocket
