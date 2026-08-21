@@ -104,35 +104,58 @@ func (c *contentList) moveDown() {
 	}
 }
 
-// headerCount reports how many section headers the list shows.
-func (c *contentList) headerCount() int {
-	if c.hideSeenState || len(c.postings) == 0 {
-		return 0
+// visibleItemsFrom reports how many postings fit from start, including only
+// the section headers that the resulting window renders.
+func (c *contentList) visibleItemsFrom(start int) int {
+	rows := 0
+	count := 0
+	for i := start; i < len(c.postings); i++ {
+		postingRows := 2
+		if c.sectionLabelAt(i) != "" {
+			postingRows++
+		}
+		if rows+postingRows > c.height {
+			break
+		}
+		rows += postingRows
+		count++
 	}
-	n := 0
-	if !c.postings[0].Seen {
-		n++ // "New for You"
-	}
-	if c.postings[len(c.postings)-1].Seen {
-		n++ // "Previously Seen"
-	}
-	return n
+	return max(count, 1)
 }
 
-// visibleItems reports how many postings fit: 2 lines per posting, minus
-// one line per section header.
-func (c *contentList) visibleItems() int {
-	return max((c.height-c.headerCount())/2, 1)
+func (c *contentList) sectionLabelAt(index int) string {
+	if c.hideSeenState || index < 0 || index >= len(c.postings) {
+		return ""
+	}
+	if index == 0 && !c.postings[index].Seen {
+		return "New for You"
+	}
+	if c.postings[index].Seen && (index == 0 || !c.postings[index-1].Seen) {
+		return "Previously Seen"
+	}
+	return ""
 }
 
 func (c *contentList) ensureVisible() {
-	visibleItems := c.visibleItems()
 	if c.cursor < c.scrollOff {
 		c.scrollOff = c.cursor
+		return
 	}
-	if c.cursor >= c.scrollOff+visibleItems {
-		c.scrollOff = c.cursor - visibleItems + 1
+	if c.cursor < c.scrollOff+c.visibleItemsFrom(c.scrollOff) {
+		return
 	}
+
+	// Fill the window backwards from the cursor without moving above the
+	// previous offset. Capacity can grow after a section header scrolls away.
+	start := c.cursor
+	for start > c.scrollOff {
+		candidate := start - 1
+		if c.cursor >= candidate+c.visibleItemsFrom(candidate) {
+			break
+		}
+		start = candidate
+	}
+	c.scrollOff = start
 }
 
 func (c *contentList) selectedPosting() *models.Posting {
@@ -178,7 +201,7 @@ func (c *contentList) view() string {
 	}
 
 	var b strings.Builder
-	end := min(c.scrollOff+c.visibleItems(), len(c.postings))
+	end := min(c.scrollOff+c.visibleItemsFrom(c.scrollOff), len(c.postings))
 
 	cursorBar := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
 	unseenDot := lipgloss.NewStyle().Foreground(colorAlert).Bold(true)
@@ -206,13 +229,8 @@ func (c *contentList) view() string {
 		p := c.postings[i]
 		isCursor := i == c.cursor
 
-		if !c.hideSeenState {
-			if i == 0 && !p.Seen {
-				fmt.Fprintln(&b, sectionHeader("New for You", c.width))
-			}
-			if p.Seen && (i == 0 || !c.postings[i-1].Seen) {
-				fmt.Fprintln(&b, sectionHeader("Previously Seen", c.width))
-			}
+		if label := c.sectionLabelAt(i); label != "" {
+			fmt.Fprintln(&b, sectionHeader(label, c.width))
 		}
 
 		emphasize := func(base lipgloss.Style) lipgloss.Style {

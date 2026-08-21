@@ -650,6 +650,30 @@ func TestContentListSelectedPosting(t *testing.T) {
 	}
 }
 
+func TestContentListUsesRowsReleasedByScrolledOffHeader(t *testing.T) {
+	postings := make([]models.Posting, 5)
+	for i := range postings {
+		postings[i] = models.Posting{ID: int64(i + 1), Name: fmt.Sprintf("Thread %d", i+1)}
+	}
+
+	cl := &contentList{}
+	cl.setPostings(postings)
+	cl.setSize(80, 6)
+	cl.moveDown()
+	cl.moveDown()
+	cl.moveDown()
+
+	if cl.scrollOff != 1 {
+		t.Errorf("scroll offset = %d, want 1 while three rows fit below the scrolled-off header", cl.scrollOff)
+	}
+	view := stripANSI(cl.view())
+	for _, want := range []string{"Thread 2", "Thread 3", "Thread 4"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("visible list is missing %q after its section header scrolled away: %q", want, view)
+		}
+	}
+}
+
 func TestContentListStylesSeenAndUnseenRows(t *testing.T) {
 	unseen := models.Posting{
 		ID:        200,
