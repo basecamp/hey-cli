@@ -367,3 +367,26 @@ func TestCopyFallbackSkipsUserFilesInBaseline(t *testing.T) {
 		t.Error("user file was copied into the Claude skill directory")
 	}
 }
+
+// Claude is never linked to a baseline the install paths refused to claim.
+func TestLinkSkillToClaudeRequiresManagedBaseline(t *testing.T) {
+	home := agentHome(t)
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(home, ".agents", "skills", "hey")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("# mine"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var unmanaged *unmanagedSkillDirError
+	if _, err := linkSkillToClaude(); !errors.As(err, &unmanaged) {
+		t.Fatalf("linkSkillToClaude = %v, want unmanaged refusal", err)
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".claude", "skills", "hey")); !os.IsNotExist(err) {
+		t.Error("a link to unmanaged content was created")
+	}
+}

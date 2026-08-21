@@ -509,6 +509,10 @@ func saveGlobalConfigScrubbing(file fileConfig, scrub []string) error {
 	if existing, readErr := os.ReadFile(path); readErr == nil { // #nosec G304 -- the fixed global config path
 		// Best-effort: an unparsable file is replaced by the schema keys.
 		_ = json.Unmarshal(existing, &merged)
+		if merged == nil {
+			// A literal JSON null decodes to a nil map without error.
+			merged = map[string]json.RawMessage{}
+		}
 	}
 	for _, key := range fileConfigKeys {
 		delete(merged, key)

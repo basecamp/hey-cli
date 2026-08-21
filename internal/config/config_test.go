@@ -707,3 +707,30 @@ func TestSaveGlobalConfigPreservesUnknownKeys(t *testing.T) {
 		t.Errorf("scrub removed an unrelated key: %s", raw)
 	}
 }
+
+// A config file containing JSON null decodes to a nil map; rewrites must
+// recover rather than panic.
+func TestSaveGlobalConfigSurvivesNullFile(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+	t.Setenv("HEY_BASE_URL", "")
+	dir := filepath.Join(tmp, configDirName)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, configFile), []byte("null"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := cfg.SaveOnboarded(true); err != nil {
+		t.Fatalf("SaveOnboarded over a null file: %v", err)
+	}
+	reloaded, err := Load()
+	if err != nil || !reloaded.Onboarded {
+		t.Fatalf("reload: %v, onboarded=%v", err, reloaded.Onboarded)
+	}
+}

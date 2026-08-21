@@ -191,6 +191,13 @@ func linkSkillToClaude() (string, error) {
 	symlinkDir := filepath.Join(home, ".claude", "skills")
 	symlinkPath := filepath.Join(symlinkDir, harness.ClaudePluginName)
 
+	// Never link Claude to a baseline the install paths refused to claim: a
+	// link to unmanaged content would modify Claude while the same command
+	// reports the integration unhealthy.
+	if !baselineSkillInstalled() {
+		return "", &unmanagedSkillDirError{dir: skillDir}
+	}
+
 	if err := os.MkdirAll(symlinkDir, 0o755); err != nil { // #nosec G301 -- standard user-level skills directory
 		return "", fmt.Errorf("creating symlink directory: %w", err)
 	}
