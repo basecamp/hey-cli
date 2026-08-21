@@ -83,7 +83,7 @@ func TestRenderKeepsQueryStringsInHyperlinks(t *testing.T) {
 // A label that reads as one host while pointing at another shows its destination in
 // the rendering, and the hyperlink goes where the destination says.
 func TestRenderDeceptiveLabelShowsTheDestination(t *testing.T) {
-	out := Render("[https://p\u0430ypal.com/login](https://evil.example/login)", 200)
+	out := render("[https://p\u0430ypal.com/login](https://evil.example/login)", 200)
 	if !strings.Contains(visible(out), "https://evil.example/login") {
 		t.Errorf("Render = %q, want the destination visible", out)
 	}
@@ -104,7 +104,7 @@ func TestRenderStripsConfusables(t *testing.T) {
 		"Z" + strings.Repeat("\u0336", 50) + "algo": "Z" + strings.Repeat("\u0336", 8) + "algo",
 		"the 👨\u200d👩\u200d👧 family":                "the 👨\u200d👩\u200d👧 family",
 	} {
-		if out := visible(Render(md, 200)); !strings.Contains(out, want) {
+		if out := visible(render(md, 200)); !strings.Contains(out, want) {
 			t.Errorf("Render(%q) shows %q, want %q in it", md, out, want)
 		}
 	}

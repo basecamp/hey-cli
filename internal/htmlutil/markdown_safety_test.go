@@ -223,7 +223,7 @@ func TestToMarkdownCodeDelimitersOutlastTheSanitizer(t *testing.T) {
 		{"<pre>``\u200b``\nafter</pre>", "`````\n``\u200b``\nafter\n`````"},
 		{"<pre>``\u200d``</pre>", "`````\n``\u200d``\n`````"},
 	} {
-		got := ToMarkdown(test.in)
+		got := toMarkdown(test.in)
 		if got != test.want {
 			t.Errorf("ToMarkdown(%q) = %q, want %q", test.in, got, test.want)
 		}

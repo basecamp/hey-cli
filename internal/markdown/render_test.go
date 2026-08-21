@@ -62,7 +62,7 @@ func TestRenderLinksAreClickable(t *testing.T) {
 // character in the href is dropped from the OSC 8 target the same way it is dropped from
 // the label, so the link goes where the reader sees it going.
 func TestRenderLinksToWhatItShows(t *testing.T) {
-	got := Render("[https://example.com/a\u200bb](https://example.com/a\u200bb)", 80)
+	got := render("[https://example.com/a\u200bb](https://example.com/a\u200bb)", 80)
 	if strings.Contains(got, "\u200b") {
 		t.Errorf("Render = %q, a zero-width space survived", got)
 	}
