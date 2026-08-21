@@ -58,6 +58,8 @@ func applyTheme(theme Theme) {
 	if theme.Selection != nil && (theme.Trusted || contrastRatio(theme.Accent, theme.Selection) >= minSelectionContrast) {
 		colorSelection = theme.Selection
 	}
+	coverDarkMode = theme.Dark
+	_, coverColorless = theme.Accent.(lipgloss.NoColor)
 	// The pill keeps its classic black text on the ANSI accent, but a themed
 	// accent can be dark enough that black is unreadable on it — lupine's blue
 	// carries black at only 3.7:1 — so pick whichever of black or white reads

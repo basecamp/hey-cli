@@ -91,6 +91,74 @@ type contentList struct {
 	height        int // visible rows (each posting takes 2 lines)
 	hideSeenState bool
 	selected      map[int64]struct{}
+
+	cover       coverPreset // art that hides Previously Seen, coverNone for none
+	coverPeeked bool        // the reader lifted the cover to get at what is under it
+	coverArt    coverRenderer
+}
+
+// setCover puts art over Previously Seen. Setting it closes the cover, so a box
+// arrives covered rather than however the last one was left.
+func (c *contentList) setCover(preset coverPreset) {
+	c.cover = preset
+	c.coverPeeked = false
+}
+
+// toggleCoverPeek lifts the cover off Previously Seen, or puts it back.
+func (c *contentList) toggleCoverPeek() {
+	c.coverPeeked = !c.coverPeeked
+	c.settleCover()
+}
+
+// settleCover keeps the cursor and the selection out from under the cover. A
+// re-read, or a thread the reader just opened turning seen, otherwise slides
+// them under it, leaving a cursor on a row nobody can see and a bulk action
+// aimed at threads the reader thinks are put away.
+func (c *contentList) settleCover() {
+	c.dropCoveredSelection()
+	c.clampCursor()
+}
+
+// coveredFrom is the index of the first Previously Seen posting while the cover
+// is down, or -1 when nothing is hidden. Everything from there on is under the
+// art: out of reach, and not rendered.
+func (c *contentList) coveredFrom() int {
+	if c.cover == coverNone || c.coverPeeked || c.hideSeenState {
+		return -1
+	}
+	for i := range c.postings {
+		if sectionOf(c.postings[i]) == sectionPreviouslySeen {
+			return i
+		}
+	}
+	return -1
+}
+
+// itemCount is how many postings the reader can move through and act on.
+func (c *contentList) itemCount() int {
+	if from := c.coveredFrom(); from >= 0 {
+		return from
+	}
+	return len(c.postings)
+}
+
+func (c *contentList) dropCoveredSelection() {
+	count := c.itemCount()
+	for id := range c.selected {
+		for i := count; i < len(c.postings); i++ {
+			if c.postings[i].ID == id {
+				delete(c.selected, id)
+				break
+			}
+		}
+	}
+}
+
+func (c *contentList) clampCursor() {
+	last := max(c.itemCount()-1, 0)
+	c.cursor = min(c.cursor, last)
+	c.scrollOff = min(c.scrollOff, last)
+	c.ensureVisible()
 }
 
 func (c *contentList) setPostings(postings []models.Posting) {
@@ -165,7 +233,7 @@ func (c *contentList) keepPlaceIn(postings []models.Posting) {
 	}
 	c.keepSelected()
 	c.scrollOff = min(c.scrollOff, max(len(c.postings)-1, 0))
-	c.ensureVisible()
+	c.settleCover()
 }
 
 // keepSelected drops the postings that are no longer in the list from the selection.
@@ -256,7 +324,7 @@ func (c *contentList) resort() {
 			break
 		}
 	}
-	c.ensureVisible()
+	c.settleCover()
 }
 
 func (c *contentList) setSize(w, h int) {
@@ -272,10 +340,20 @@ func (c *contentList) moveUp() {
 }
 
 func (c *contentList) moveDown() {
-	if c.cursor < len(c.postings)-1 {
+	if c.cursor < c.itemCount()-1 {
 		c.cursor++
 		c.ensureVisible()
 	}
+}
+
+// listHeight is the rows the postings get. A cover holds back its divider and
+// the art's floor at the bottom of the list, so the cover is always on screen
+// rather than something you could scroll past.
+func (c *contentList) listHeight() int {
+	if c.coveredFrom() < 0 {
+		return c.height
+	}
+	return max(c.height-1-coverMinRows, 2)
 }
 
 // visibleItemsFrom reports how many postings fit from start, including only
@@ -283,12 +361,13 @@ func (c *contentList) moveDown() {
 func (c *contentList) visibleItemsFrom(start int) int {
 	rows := 0
 	count := 0
-	for i := start; i < len(c.postings); i++ {
+	height := c.listHeight()
+	for i := start; i < c.itemCount(); i++ {
 		postingRows := 2
 		if c.sectionLabelAt(i) != "" {
 			postingRows++
 		}
-		if rows+postingRows > c.height {
+		if rows+postingRows > height {
 			break
 		}
 		rows += postingRows
@@ -380,7 +459,8 @@ func (c *contentList) view() string {
 	}
 
 	var b strings.Builder
-	end := min(c.scrollOff+c.visibleItemsFrom(c.scrollOff), len(c.postings))
+	rendered := 0
+	end := min(c.scrollOff+c.visibleItemsFrom(c.scrollOff), c.itemCount())
 
 	cursorMarker, _ := cursorStyles()
 	selectedGap := selectionStyle(lipgloss.NewStyle())
@@ -410,7 +490,12 @@ func (c *contentList) view() string {
 		isCursor := i == c.cursor
 
 		if label := c.sectionLabelAt(i); label != "" {
-			fmt.Fprintln(&b, sectionHeader(label, c.width))
+			if c.cover != coverNone && sectionOf(p) == sectionPreviouslySeen {
+				fmt.Fprintln(&b, coverHeader(label, "v to cover", c.width))
+			} else {
+				fmt.Fprintln(&b, sectionHeader(label, c.width))
+			}
+			rendered++
 		}
 
 		// The cursor row renders bold on top of the base styles and, when the
@@ -511,9 +596,28 @@ func (c *contentList) view() string {
 
 		fmt.Fprintln(&b, line1.String())
 		fmt.Fprintln(&b, line2.String())
+		rendered += 2
 	}
 
+	if from := c.coveredFrom(); from >= 0 {
+		b.WriteString(c.coverView(len(c.postings)-from, rendered))
+	}
 	return b.String()
+}
+
+// coverView is the lid over Previously Seen: its divider, saying how much is
+// under there and how to look, and then the art filling the list to the bottom.
+// The threads themselves are not rendered at all — that is the whole point of a
+// cover, and it is why the art can have every row the postings did not use.
+func (c *contentList) coverView(hidden, rowsUsed int) string {
+	hint := fmt.Sprintf("%d hidden · v to peek", hidden)
+	header := coverHeader(sectionPreviouslySeen.label(), hint, c.width)
+
+	rows := c.height - rowsUsed - 1
+	if rows < coverMinRows {
+		return header
+	}
+	return header + "\n" + c.coverArt.view(c.cover, c.width, rows)
 }
 
 // sectionHeader renders a list section label with a rule filling the rest
@@ -524,6 +628,19 @@ func sectionHeader(label string, width int) string {
 		s += " " + lipgloss.NewStyle().Foreground(colorChrome).Render(strings.Repeat("─", fill))
 	}
 	return s
+}
+
+// coverHeader is a section label with a hint on its right, where the HEY web app
+// puts the cover's buttons: "Previously Seen ──── 34 hidden · v to peek".
+func coverHeader(label, hint string, width int) string {
+	rule := lipgloss.NewStyle().Foreground(colorChrome)
+	fill := width - lipgloss.Width(label) - lipgloss.Width(hint) - 4
+	if fill < 1 {
+		return sectionHeader(label, width)
+	}
+	return rule.Bold(true).Render(label) + " " +
+		rule.Render(strings.Repeat("─", fill)) + " " +
+		styleMuted.Render(hint)
 }
 
 // truncateToWidth trims s so its rendered width fits in w cells, appending

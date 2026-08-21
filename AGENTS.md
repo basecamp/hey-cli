@@ -120,7 +120,7 @@ section: ctrl+s from the mail list swaps it in as the active view, it captures e
 while it is open, and it asks to be closed again with `screenerClosedMsg`.
 The rest of `internal/tui/` is shared infrastructure: `tui.go` (model and
 router), `section_view.go` (the interface), plus `nav.go`, `content.go`, `help.go`,
-`styles.go`, `loading.go`, `kitty.go`, `html.go`, `live.go` and `calendar_views.go`. Read the directory rather than a
+`styles.go`, `loading.go`, `kitty.go`, `html.go`, `live.go`, `covers.go` and `calendar_views.go`. Read the directory rather than a
 table here.
 
 To add a new section: implement the `sectionView` interface in a new file, add a field and constructor call in `newModel`, and add a case in `switchSection`.
@@ -158,6 +158,97 @@ A read the user asked for, a page below, and a live re-read are separate lanes
 (`activeRequestID`, `moreRequestID` — `searchMoreID` for the results — and `liveRequestID`)
 with a message each, so growing a list never shows the spinner, never cancels the read the
 reader is waiting on, and never carries the cursor back to the top.
+### Imbox cover art
+
+A cover is a lid over Previously Seen, not a decoration next to it. When the Imbox is
+covered the threads the reader has already read are not drawn at all — the box ends at
+what still wants attention — and the art fills the list to the bottom of the screen. That
+is the whole point of the feature in the web app, and it is why `hey`'s version hides
+rather than merely paints.
+
+`internal/tui/covers.go` draws the art. HEY's covers are SVG assets
+(`box-covers/{light,dark}/*.svg` in haystack) and a terminal cannot draw an SVG, so these
+are the same six patterns — blobs, grid, peace, terrazzo, topo, waves — drawn as
+characters. That is not a fallback: a blueprint grid is what box-drawing characters are
+for.
+
+**Curves go in braille.** A `brailleLayer` is a dot grid at 2×4 the resolution of the
+canvas, with `arc` and `ellipse` on it, folded into cells by `drawInto`. `paintTopo` draws
+contours into one; `paintPeace` draws HEY's hand — the two fingers up in a V over a fist,
+which is what the "peace" cover is, not the CND symbol. The dots are square, incidentally:
+a cell is about twice as tall as it is wide and the 2×4 split cancels that exactly, so
+nothing drawn there needs aspect correction. Reach for braille whenever a pattern wants a
+curve, because the cell grid cannot hold one: those same contours in box-drawing characters
+are cell-wide staircases that read as noise, and the hand as five cells of line art read,
+accurately, as a broken television.
+
+Drawing a mark this small is mostly subtraction, and `peaceHand` is worth reading before
+attempting another one. Three things it took several tries to get right:
+
+- **One shape means one outline, and that means a union, not butted arcs.** `silhouette`
+  fills the union of some ellipses and keeps the dots with a neighbor outside it, so the
+  palm, the fingers and the thumb come out as a single continuous stroke around the whole
+  hand. Drawing them as arcs cut to meet each other does not work: the ends never quite
+  land on one another, so the joins show as notches and tails, and every arc that crosses
+  another leaves its own line running through the inside of the shape. The thumb's loop is
+  drawn back over the silhouette afterwards, and is the only interior line the mark has.
+- **A finger pivots about its base, not its center.** Leaning an ellipse about its center
+  swings the base sideways, so each finger's base crosses to the other's side and the loops
+  cross halfway up. The mark then reads, unmistakably, as a rabbit seen from behind.
+- **Four outlines is the ceiling.** The curled fingers belong on the left of a drawn hand
+  and were tried twice, as small ovals and as arcs following the palm; both came out as
+  blobs and took the palm down with them. The V is what carries the mark.
+
+Two traps a new pattern will walk into:
+
+**No emoji codepoints, however apt.** A color font ignores the foreground color it is
+handed, so the glyph arrives in its own colors — U+270C on HEY's yellow came out a muddy
+yellow hand — and it can measure one cell while occupying two. A text presentation
+selector is not reliable protection. Draw the shape instead.
+
+**Scale every dimension with the block, then check the extremes.** A cover is anywhere from
+40×6 to 300×90, so a constant tuned at one size is a constant that only looks right there.
+`blobRibbonShape` is the worked example: the amplitude follows the height, and the
+wavelength takes whichever is larger of a quarter of the width and whatever the amplitude
+needs to stay under `maxBlobSlope`. Scaling by height alone drew chevrons on a tall cover;
+by width alone, a busy repeat on a wide short one. `peaceRadius` is the same lesson in one
+line: a circle that does not fit is a pair of brackets. Pin both with a test over a spread
+of aspect ratios — it is much cheaper than looking.
+
+A painter writes glyphs into a `coverCanvas` and the field is whatever it leaves blank,
+which is why a colorless terminal still gets the art instead of an empty band. This is
+also the one place the TUI paints brand hex instead of the ANSI slots `styles.go` insists
+on — the art *is* HEY's yellow and mint, and a theme-tinted terrazzo would be worse than
+one that ignores the theme. `applyTheme` sets the two things a cover reads: which of the
+two palettes to use, and whether to paint at all.
+
+Everything is deterministic: the scatter and the noise come from a cell's own hash, so a
+cover is the same picture every time, the way the web app's asset is. `coverRenderer`
+memoizes the last one it drew, because the posting list re-renders on every keystroke and
+a cover is a thousand styled cells. Its memo key includes the palette, so a theme switch
+repaints.
+
+What the lid costs the list is in `contentList`. `coveredFrom` is the index the cover
+starts at and `itemCount` is what the reader can still reach, so the cursor cannot land
+under the art and a bulk action cannot aim at threads the reader thinks are put away.
+`settleCover` is what keeps that true as the list changes underneath: opening a thread
+turns it seen, which slides it under the cover, and a live re-read can do the same to a
+selection. `listHeight` holds back the divider and `coverMinRows` at the bottom so the
+cover can never be scrolled past, and `coverView` then gives the art every row the threads
+above it did not use. A list too short for even the floor keeps the divider and skips the
+art — the hint is worth more than a smear.
+
+`v` lifts the cover (`coverPeeked`) and puts it back; the divider carries the hint and the
+hidden count, where the web app puts its buttons. Setting a cover closes it, so a box
+arrives covered rather than however the last one was left. Only the Imbox is coverable —
+that is haystack's rule (`Box::Imbox#coverable?`), and it is the same box that gets the
+seen sections at all.
+
+**The preset is still a stub.** `boxes/_box.jbuilder` does not serve `cover`, so the SDK
+cannot carry it and `imboxCover()` reads `HEY_COVER` instead. Serving the preset name
+(and, for uploads, a blob URL) is a five-line haystack change; then `imboxCover` reads the
+box and the env var goes away. An uploaded cover has no honest character version — that
+one wants the Kitty path in `kitty.go`.
 
 ### Inline images in the TUI
 

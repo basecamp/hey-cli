@@ -298,8 +298,15 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return func() tea.Msg { return errMsg{msg.err} }, true
 		}
 		// Only the Imbox separates New for You from Previously Seen and marks
-		// unread threads with the dot; every other source is one flat list.
-		v.postingList.hideSeenState = !v.currentBoxIsImbox()
+		// unread threads with the dot; every other source is one flat list. The
+		// Imbox is also the only box HEY lets you cover.
+		isImbox := v.currentBoxIsImbox()
+		v.postingList.hideSeenState = !isImbox
+		if isImbox {
+			v.postingList.setCover(imboxCover())
+		} else {
+			v.postingList.setCover(coverNone)
+		}
 		v.postingList.setPostings(msg.postings)
 		v.postingPaging.read(postingIDs(msg.postings), msg.nextPage)
 		return v.loadMorePostings(), true
@@ -814,6 +821,13 @@ func (v *mailView) HelpBindings() []helpBinding {
 		ignoreBinding,
 		helpBinding{"ctrl+r", "reload"},
 	)
+	if v.postingList.cover != coverNone {
+		peek := helpBinding{"v", "peek under cover"}
+		if v.postingList.coverPeeked {
+			peek = helpBinding{"v", "cover"}
+		}
+		bindings = append(bindings, peek)
+	}
 	if v.lastBulkReplyID != 0 {
 		bindings = append(bindings, helpBinding{"u", "undo bulk reply"})
 	}
@@ -1200,6 +1214,9 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 			return v.startFolderPicker()
 		case "k":
 			return v.startCollectionPicker()
+		case "v":
+			v.postingList.toggleCoverPeek()
+			return nil
 		case "ctrl+r":
 			return v.reloadPostings()
 		default:

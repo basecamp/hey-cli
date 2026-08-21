@@ -201,6 +201,16 @@ screens them out, Tab moves to Screener History and back, `X` clears the whole S
 after a confirmation, and Escape or `q` returns to mail. Both lists keep going as you
 scroll, the same way the mail list does.
 
+The Imbox can wear cover art, the way the HEY web app does: everything you have already
+read goes under it, so the box ends at what still wants your attention instead of trailing
+off into a month of receipts. The divider stays and says how much is under there — press
+`v` to peek, `v` again to close it.
+
+Set `HEY_COVER` to `blobs`, `grid`, `peace`, `terrazzo`, `topo` or `waves` — the same six
+covers, redrawn as characters, so they work in any terminal rather than only the ones that
+can show images. HEY does not serve a box's cover over its API yet, so for now the choice
+is `HEY_COVER` rather than the one you made on the web.
+
 Thread attachments always appear with their filename, media type, and size. Use `[` and `]` to select an attachment, `s` to save it without replacing an existing file, and `o` to download and open it in an external application. Attachments never open automatically. Kitty and Ghostty can show inline images. Foot and other terminals use visible text markers.
 
 Press Shift+O to open Contacts. Use Enter to view a contact, `a` to add, `e` to edit, `n` to edit the private note, `x` twice to delete a note, `h` to hide, and `u` to show the most recently hidden contact again. Escape or `q` goes back.
