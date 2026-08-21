@@ -147,6 +147,13 @@ func TestToMarkdownTextIsNeverSyntaxAcrossNodes(t *testing.T) {
 	}
 }
 
+func TestToMarkdownKeepsTheReplacementCharacter(t *testing.T) {
+	got := ToMarkdown("<p>caf\uFFFDe <code>\uFFFD</code></p>")
+	if got != "caf\uFFFDe `\uFFFD`" {
+		t.Errorf("ToMarkdown = %q", got)
+	}
+}
+
 func TestToMarkdownTextStripsControls(t *testing.T) {
 	for name, in := range map[string]string{
 		"escape":          "<p>\x1b[31mRED</p>",

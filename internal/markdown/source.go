@@ -44,13 +44,25 @@ func prepareSource(md string) (safe, forGlamour string) {
 // doubles every few levels of quote nesting, and a line of a hundred `>` is a hang.
 const maxQuoteDepth = 16
 
+// boundQuoteDepth collapses the markers past maxQuoteDepth on every line outside a
+// fence: inside one, a line of ">" is code and stays as written.
 func boundQuoteDepth(md string) string {
 	if strings.Count(md, ">") <= maxQuoteDepth {
 		return md
 	}
 	lines := strings.Split(md, "\n")
+	fence := ""
 	for i, line := range lines {
-		lines[i] = boundedQuoteLine(line)
+		trimmed := strings.TrimLeft(line, " ")
+		switch {
+		case fence != "" && strings.HasPrefix(trimmed, fence):
+			fence = ""
+		case fence != "":
+		case strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~"):
+			fence = trimmed[:3]
+		default:
+			lines[i] = boundedQuoteLine(line)
+		}
 	}
 	return strings.Join(lines, "\n")
 }

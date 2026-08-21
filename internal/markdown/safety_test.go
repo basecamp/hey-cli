@@ -213,6 +213,19 @@ func TestPrepareSourceKeepsTheShownSourceApartFromGlamours(t *testing.T) {
 	}
 }
 
+// A line of ">" inside a fence is code, not quoting, and is shown as written.
+func TestPrepareSourceLeavesQuoteMarkersInCodeAlone(t *testing.T) {
+	code := strings.Repeat("> ", maxQuoteDepth+4) + "x"
+	safe, _ := prepareSource("```\n" + code + "\n```\n" + code)
+	lines := strings.Split(safe, "\n")
+	if lines[1] != code {
+		t.Errorf("fenced line = %q, want it untouched", lines[1])
+	}
+	if lines[3] == code {
+		t.Errorf("prose line = %q, want it bounded", lines[3])
+	}
+}
+
 func TestRendererCacheIsBounded(t *testing.T) {
 	renderersMutex.Lock()
 	renderers = map[int]*glamour.TermRenderer{}

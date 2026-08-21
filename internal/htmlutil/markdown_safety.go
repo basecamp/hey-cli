@@ -3,7 +3,6 @@ package htmlutil
 import (
 	"regexp"
 	"strings"
-	"unicode/utf8"
 )
 
 // Everything ToMarkdown writes came out of somebody else's email, and the Markdown it
@@ -135,8 +134,10 @@ func stripControls(s string) string {
 	}, s)
 }
 
+// isControl reports C0, DEL and C1. U+FFFD is none of those: a replacement character,
+// whether the email carried it or an invalid byte became one, is a printable glyph.
 func isControl(r rune) bool {
-	return r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) || r == utf8.RuneError
+	return r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f)
 }
 
 func longestRun(s string, c byte) int {
