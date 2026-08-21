@@ -1,0 +1,43 @@
+tests/e2e/installer.bats
+  s_e2b9c41f2f9ae5::t_3cb405e92de9e4 121-126,128-141,169,174-178,200,212
+internal/cmd/setup_agents.go
+  s_e2b9c41f2f9ae5::t_084f245d917db1 63-65
+internal/cmd/doctor_test.go
+  s_e2b9c41f2f9ae5::t_48df58cf9b5413 6-7
+  s_e2b9c41f2f9ae5::t_ab16feec188f5f 123-170
+scripts/install.ps1
+  s_e2b9c41f2f9ae5::t_6f09b1d95e8b1d 309-314,316-318
+scripts/install.sh
+  s_e2b9c41f2f9ae5::t_084f245d917db1 500-502,504-508,510-513
+internal/cmd/doctor.go
+  s_e2b9c41f2f9ae5::t_084f245d917db1 200-209,217-220,224
+internal/cmd/skill_install.go
+  s_e2b9c41f2f9ae5::t_084f245d917db1 92-93,95
+internal/cmd/skill_install_test.go
+  s_e2b9c41f2f9ae5::t_ab16feec188f5f 285-309
+internal/cmd/setup.go
+  s_e2b9c41f2f9ae5::t_084f245d917db1 50-52,56-68
+  s_e2b9c41f2f9ae5::t_dbb6d3e4c1fb60 69-70
+internal/harness/harness.go
+  s_e2b9c41f2f9ae5::t_084f245d917db1 15-18,20
+internal/cmd/setup_agent.go
+  s_e2b9c41f2f9ae5::t_084f245d917db1 124-126
+internal/cmd/setup_test.go
+  s_e2b9c41f2f9ae5::t_ab16feec188f5f 552-570
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "693c4b8b64d1500eb492569104b0abbd3728d9c7",
+  "prompts": {},
+  "sessions": {
+    "s_e2b9c41f2f9ae5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c6e9f2bf-e587-4622-a299-7b18cdf6665e",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
