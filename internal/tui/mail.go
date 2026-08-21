@@ -1793,26 +1793,28 @@ func (v *mailView) finishMutation() {
 // the same list as a box's. A match names its own topic, where a posting only carries the
 // URL of one, and the entry that matched is the row's date, excerpt and sender.
 func searchMatchToPosting(match generated.SearchMatch) mail.Posting {
+	// A search match is sanitized here as a posting is in mail.NewPosting: it is a row
+	// in the same list.
 	posting := mail.Posting{
 		ID:        match.PostingId,
 		TopicID:   match.Topic.Id,
-		Name:      match.Topic.Name,
+		Name:      terminal.SanitizeLine(match.Topic.Name),
 		CreatedAt: match.Topic.UpdatedAt,
 		Creator: mail.Contact{
 			ID:           match.Topic.Creator.Id,
-			Name:         match.Topic.Creator.Name,
-			EmailAddress: match.Topic.Creator.EmailAddress,
+			Name:         terminal.SanitizeLine(match.Topic.Creator.Name),
+			EmailAddress: terminal.SanitizeLine(match.Topic.Creator.EmailAddress),
 		},
 	}
 	if len(match.Entries) > 0 {
 		entry := match.Entries[0]
 		posting.CreatedAt = entry.CreatedAt
-		posting.Summary = entry.Summary
-		posting.AlternativeSenderName = entry.AlternativeSenderName
+		posting.Summary = terminal.SanitizeLine(entry.Summary)
+		posting.AlternativeSenderName = terminal.SanitizeLine(entry.AlternativeSenderName)
 		posting.Creator = mail.Contact{
 			ID:           entry.Creator.Id,
-			Name:         entry.Creator.Name,
-			EmailAddress: entry.Creator.EmailAddress,
+			Name:         terminal.SanitizeLine(entry.Creator.Name),
+			EmailAddress: terminal.SanitizeLine(entry.Creator.EmailAddress),
 		}
 	}
 	return posting

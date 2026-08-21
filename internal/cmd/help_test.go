@@ -150,7 +150,7 @@ FLAGS
       --ids-only   Output only IDs, one per line
       --count      Output only the count of results
       --styled     Force styled output even when piped
-      --html       Output raw HTML (for commands that return HTML content)
+      --html       Write the original HTML to a pipe or file (threads, journal read, contacts show, contacts note show)
       --stats      Include request stats in response meta
       --base-url   Override server URL
   -v, --verbose    Show request details

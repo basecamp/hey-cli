@@ -3,6 +3,7 @@ package htmlutil
 import (
 	"bytes"
 	"net/url"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -377,6 +378,26 @@ func TestToMarkdownEscapesALongLineInLinearTime(t *testing.T) {
 	}
 	if !strings.HasPrefix(got, "a.b)c. a.b)c.") {
 		t.Errorf("ToMarkdown = %.40q, want the dots unescaped mid-line", got)
+	}
+}
+
+// Conversion is linear in the size of the body: a line is built in a buffer, not by
+// concatenating strings, so doubling the input doubles the work rather than
+// quadrupling it.
+func TestToMarkdownAllocatesLinearly(t *testing.T) {
+	allocated := func(size int) uint64 {
+		body := "<p>" + strings.Repeat("Fried &amp; Hansson <b>shipped</b> it. ", size/40) + "</p>"
+		ToMarkdown(body)
+		var before, after runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&before)
+		ToMarkdown(body)
+		runtime.ReadMemStats(&after)
+		return after.TotalAlloc - before.TotalAlloc
+	}
+	small, large := allocated(256<<10), allocated(1024<<10)
+	if ratio := float64(large) / float64(small); ratio > 6 {
+		t.Errorf("4x the input allocated %.1fx as much (%d vs %d bytes); conversion is not linear", ratio, large, small)
 	}
 }
 

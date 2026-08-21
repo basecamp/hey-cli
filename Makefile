@@ -153,7 +153,7 @@ secrets:
 		echo "ERROR: .gitleaks.toml absent"; \
 		exit 1; \
 	fi
-	gitleaks detect --source . --verbose
+	gitleaks detect --source . --verbose --redact
 
 # Guard against replace directives in go.mod
 replace-check:

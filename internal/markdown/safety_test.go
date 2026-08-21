@@ -188,57 +188,64 @@ func TestContainDropsHyperlinksToOtherSchemes(t *testing.T) {
 	}
 }
 
-func TestRenderBoundsQuoteDepth(t *testing.T) {
-	done := make(chan string, 1)
-	go func() { done <- Render(strings.Repeat(">", 400)+"deep\n"+strings.Repeat(" > ", 300)+"also deep", 40) }()
-	select {
-	case out := <-done:
-		if !strings.Contains(visible(out), "deep") {
-			t.Errorf("Render = %q lost the text", out)
+// A document nested past the cap — in any spelling glamour would honor — is shown as
+// its source rather than handed to glamour, whose cost grows exponentially with it.
+func TestRenderShowsADeeplyNestedDocumentUnrendered(t *testing.T) {
+	for name, md := range map[string]string{
+		"quotes":          strings.Repeat("> ", 100) + "deep",
+		"tab quotes":      strings.Repeat(">\t", 100) + "deep",
+		"space tab":       strings.Repeat("> \t", 100) + "deep",
+		"bare quotes":     strings.Repeat(">", 100) + "deep",
+		"lists":           strings.Repeat("- ", 100) + "deep",
+		"quotes in lists": strings.Repeat("> - ", 60) + "deep",
+		"indented quotes": "  " + strings.Repeat("> ", 100) + "deep",
+	} {
+		done := make(chan string, 1)
+		go func() { done <- Render(md, 40) }()
+		select {
+		case out := <-done:
+			if !strings.Contains(visible(out), "deep") {
+				t.Errorf("%s: Render = %q lost the text", name, out)
+			}
+			if strings.Contains(out, "\x1b[") {
+				t.Errorf("%s: Render = %q styled a document it should have shown unrendered", name, out)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s: Render hung", name)
 		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("Render hung on a deeply nested quote")
+	}
+}
+
+// Under the cap, nesting renders as usual — and a fenced line of markers is code,
+// which counts for nothing.
+func TestRenderNestsUnderTheCap(t *testing.T) {
+	out := Render(strings.Repeat("> ", maxNestingDepth)+"quoted\n\n```\n"+strings.Repeat("> ", 100)+"code\n```", 80)
+	if !strings.Contains(out, "│ quoted") || !strings.Contains(visible(out), "code") {
+		t.Errorf("Render = %q, want the quote rendered and the code kept", out)
+	}
+}
+
+// A bidirectional override in a body is stripped on the way to the terminal: what the
+// reader sees is what was written, in the order it was written.
+func TestRenderStripsBidiControlsFromBodies(t *testing.T) {
+	out := Render("invoice\u202efdp.exe", 80)
+	if strings.ContainsRune(out, 0x202e) || !strings.Contains(visible(out), "invoicefdp.exe") {
+		t.Errorf("Render = %q", out)
 	}
 }
 
 // What a fallback shows is the source as written, controls stripped — not the copy
 // rewritten for glamour, which reads "&amp;" where the source read "&".
 func TestPrepareSourceKeepsTheShownSourceApartFromGlamours(t *testing.T) {
-	safe, forGlamour := prepareSource("Fried & Hansson `a && b` \x1b[31m")
-	if safe != "Fried & Hansson `a && b` [31m" {
+	safe, forGlamour, deep := prepareSource("Fried & Hansson `a && b` \x1b[31mred")
+	if safe != "Fried & Hansson `a && b` red" {
 		t.Errorf("safe = %q", safe)
 	}
-	if forGlamour != "Fried &amp; Hansson `a &amp;&amp; b` [31m" {
+	if forGlamour != "Fried &amp; Hansson `a &amp;&amp; b` red" {
 		t.Errorf("forGlamour = %q", forGlamour)
 	}
-}
-
-// A line of ">" inside a fence is code, not quoting, and is shown as written.
-func TestPrepareSourceLeavesQuoteMarkersInCodeAlone(t *testing.T) {
-	code := strings.Repeat("> ", maxQuoteDepth+4) + "x"
-	safe, _ := prepareSource("```\n" + code + "\n```\n" + code)
-	lines := strings.Split(safe, "\n")
-	if lines[1] != code {
-		t.Errorf("fenced line = %q, want it untouched", lines[1])
-	}
-	if lines[3] == code {
-		t.Errorf("prose line = %q, want it bounded", lines[3])
-	}
-
-	// A blank line inside the fence is nothing to measure.
-	safe, _ = prepareSource("```\n\n   \n" + code + "\n```")
-	if !strings.Contains(safe, code) {
-		t.Errorf("fence with blank lines = %q, want the code untouched", safe)
-	}
-
-	// A four-backtick fence holds a "```" line; it closes only at four or more.
-	safe, _ = prepareSource("````\n```\n" + code + "\n````\n" + code)
-	lines = strings.Split(safe, "\n")
-	if lines[2] != code {
-		t.Errorf("line inside the longer fence = %q, want it untouched", lines[2])
-	}
-	if lines[4] == code {
-		t.Errorf("prose line after the fence = %q, want it bounded", lines[4])
+	if deep {
+		t.Error("a flat document is not deep")
 	}
 }
 

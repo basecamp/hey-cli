@@ -6,6 +6,7 @@ import (
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
 	"github.com/basecamp/hey-cli/internal/htmlutil"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 // Entry is one message in a thread. CreatedAt is the time HEY served, not a string of it,
@@ -46,8 +47,8 @@ func NewEntry(entry generated.Entry, message generated.Message) Entry {
 		ID:                    entry.Id,
 		CreatedAt:             createdAt,
 		Creator:               contactOf(creator),
-		AlternativeSenderName: entry.AlternativeSenderName,
-		Summary:               summary,
+		AlternativeSenderName: terminal.SanitizeLine(entry.AlternativeSenderName),
+		Summary:               terminal.SanitizeLine(summary),
 		Body:                  htmlutil.ToMarkdown(message.Content),
 		BodyHTML:              message.Content,
 	}

@@ -25,7 +25,7 @@ func ToMarkdown(s string) string {
 
 type markdownizer struct {
 	lines         []string
-	line          string
+	line          strings.Builder
 	prefix        string
 	pendingPrefix string
 	lists         []*listLevel
@@ -345,7 +345,7 @@ func (m *markdownizer) link(n *html.Node) {
 			if absolute(dest) {
 				return "<" + dest + ">"
 			}
-			return "[" + escapeText(dest, m.line) + "](" + dest + ")"
+			return "[" + escapeText(dest, m.line.String()) + "](" + dest + ")"
 		default:
 			return "[" + text + "](" + dest + ")"
 		}
@@ -466,13 +466,13 @@ func (m *markdownizer) block(render func()) {
 }
 
 func (m *markdownizer) write(s string) {
-	m.line += s
+	m.line.WriteString(s)
 }
 
 // writeSpace keeps the single space that separates inline runs without letting
 // the whitespace HTML sprinkles between tags pile up.
 func (m *markdownizer) writeSpace() {
-	if m.line != "" && !strings.HasSuffix(m.line, " ") {
+	if m.line.Len() > 0 && !strings.HasSuffix(m.line.String(), " ") {
 		m.write(" ")
 	}
 }
@@ -486,7 +486,7 @@ func (m *markdownizer) writeText(s string) {
 		return
 	}
 
-	m.write(escapeText(collapsed, m.line))
+	m.write(escapeText(collapsed, m.line.String()))
 	if endsWithSpace(s) {
 		m.writeSpace()
 	}
@@ -498,7 +498,7 @@ func (m *markdownizer) rawLine(line string) {
 	m.write(line)
 	if strings.TrimSpace(line) == "" && m.pendingPrefix == "" {
 		m.lines = append(m.lines, strings.TrimRight(m.prefix, " "))
-		m.line = ""
+		m.line.Reset()
 		return
 	}
 	m.flushLine()
@@ -519,14 +519,14 @@ func endsWithSpace(s string) bool {
 }
 
 func (m *markdownizer) hardBreak() {
-	m.breaking = m.line != ""
+	m.breaking = m.line.Len() > 0
 	m.flushLine()
 }
 
 func (m *markdownizer) flushLine() {
-	content := strings.TrimRight(m.line, " \t")
+	content := strings.TrimRight(m.line.String(), " \t")
 	breaking := m.breaking
-	m.line = ""
+	m.line.Reset()
 	m.breaking = false
 	if content == "" && m.pendingPrefix == "" {
 		return

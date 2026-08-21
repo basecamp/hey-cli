@@ -8,6 +8,8 @@ import (
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/text"
+
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 // glamour reads a Markdown document's text straight out of the source and runs most of
@@ -30,85 +32,35 @@ import (
 var sourceParser = goldmark.New(goldmark.WithExtensions(extension.GFM, extension.DefinitionList))
 
 // prepareSource makes md safe to show and safe to hand to glamour. The first result
-// is the source with its control characters stripped and its quote nesting bounded,
-// which is what a fallback shows when glamour cannot render; the second is that source
-// with entity decoding neutralized, which only glamour should see — its rewrite is
-// glamour's quirk, and shown directly it reads "&amp;" where the source read "&".
-// Newlines and tabs stay, since Markdown is made of them.
-func prepareSource(md string) (safe, forGlamour string) {
-	safe = boundQuoteDepth(stripControls(md))
-	return safe, neutralizeEntities(safe)
+// is the source with its control characters stripped, which is what a fallback shows
+// when glamour cannot render; the second is that source with entity decoding
+// neutralized, which only glamour should see — its rewrite is glamour's quirk, and
+// shown directly it reads "&amp;" where the source read "&". Newlines and tabs stay,
+// since Markdown is made of them.
+//
+// deep reports a document nested past maxNestingDepth — quotes in quotes, lists in
+// lists, in any spelling — which glamour must not be given at all: its cost doubles
+// every few levels of quote nesting, and a line of a hundred ">" is a hang. Such a
+// document is shown as its source instead. The depth is measured on goldmark's own
+// tree, so a marker written with a tab, an indent or a list inside a quote counts the
+// way glamour would count it.
+func prepareSource(md string) (safe, forGlamour string, deep bool) {
+	safe = stripControls(md)
+	forGlamour, depth := neutralizeEntities(safe)
+	return safe, forGlamour, depth > maxNestingDepth
 }
 
-// maxQuoteDepth is how many block quote markers a line keeps. glamour's rendering cost
-// doubles every few levels of quote nesting, and a line of a hundred `>` is a hang.
-const maxQuoteDepth = 16
+// maxNestingDepth is how deep quotes and lists may nest before the document is shown
+// unrendered. ToMarkdown never nests past sixteen; at twenty glamour still renders in
+// milliseconds.
+const maxNestingDepth = 20
 
-// boundQuoteDepth collapses the markers past maxQuoteDepth on every line outside a
-// fence: inside one, a line of ">" is code and stays as written.
-func boundQuoteDepth(md string) string {
-	if strings.Count(md, ">") <= maxQuoteDepth {
-		return md
-	}
-	lines := strings.Split(md, "\n")
-	fence := ""
-	for i, line := range lines {
-		trimmed := strings.TrimLeft(line, " ")
-		switch {
-		case fence != "" && closesFence(trimmed, fence):
-			fence = ""
-		case fence != "":
-		case strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~"):
-			fence = fenceRun(trimmed)
-		default:
-			lines[i] = boundedQuoteLine(line)
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
-// fenceRun is the run of fence characters a line opens with, whole: a fence of four
-// backticks is closed only by four or more, which is how a fence can hold "```".
-func fenceRun(line string) string {
-	if line == "" {
-		return ""
-	}
-	return line[:len(line)-len(strings.TrimLeft(line, line[:1]))]
-}
-
-// closesFence reports a line that closes the fence: a run of the same character at
-// least as long, and nothing else but spaces.
-func closesFence(line, fence string) bool {
-	run := fenceRun(line)
-	return run != "" && run[0] == fence[0] && len(run) >= len(fence) && strings.TrimSpace(line[len(run):]) == ""
-}
-
-// boundedQuoteLine collapses the markers past maxQuoteDepth on one line. A marker is a
-// `>` after up to three spaces of indentation, optionally followed by one space.
-func boundedQuoteLine(line string) string {
-	rest := line
-	depth := 0
-	for {
-		trimmed := strings.TrimLeft(rest, " ")
-		if len(rest)-len(trimmed) > 3 || !strings.HasPrefix(trimmed, ">") {
-			break
-		}
-		depth++
-		rest = strings.TrimPrefix(trimmed[1:], " ")
-	}
-	if depth <= maxQuoteDepth {
-		return line
-	}
-	return strings.Repeat("> ", maxQuoteDepth) + rest
-}
-
+// stripControls removes escape sequences, C0 and C1 controls and the bidirectional
+// controls, keeping newlines and tabs. A body is prose, and the Trojan-source class
+// — a right-to-left override that shows one thing and means another — is no more
+// welcome in it than in a subject line; the JSON keeps the original.
 func stripControls(s string) string {
-	return strings.Map(func(r rune) rune {
-		if r == '\n' || r == '\t' || !isControl(r) {
-			return r
-		}
-		return -1
-	}, s)
+	return terminal.Sanitize(s)
 }
 
 func isControl(r rune) bool {
@@ -131,13 +83,14 @@ const (
 	altSpan
 )
 
-func neutralizeEntities(md string) string {
-	if !strings.Contains(md, "&") {
-		return md
-	}
-
+// neutralizeEntities rewrites the source for glamour and reports how deeply the
+// document nests, both from one parse.
+func neutralizeEntities(md string) (string, int) {
 	source := []byte(md)
-	spans := textSpans(sourceParser.Parser().Parse(text.NewReader(source)))
+	spans, depth := textSpans(sourceParser.Parser().Parse(text.NewReader(source)))
+	if !strings.Contains(md, "&") {
+		return md, depth
+	}
 	sort.Slice(spans, func(i, j int) bool { return spans[i].start < spans[j].start })
 
 	var b strings.Builder
@@ -152,12 +105,23 @@ func neutralizeEntities(md string) string {
 		last = span.stop
 	}
 	b.Write(source[last:])
-	return b.String()
+	return b.String(), depth
 }
 
-func textSpans(doc ast.Node) []sourceSpan {
-	var spans []sourceSpan
+// textSpans finds the spans glamour will decode, and measures how deep quotes and
+// lists nest on the way.
+func textSpans(doc ast.Node) (spans []sourceSpan, maxDepth int) {
+	depth := 0
 	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		switch n.(type) {
+		case *ast.Blockquote, *ast.List:
+			if entering {
+				depth++
+				maxDepth = max(maxDepth, depth)
+			} else {
+				depth--
+			}
+		}
 		if !entering {
 			return ast.WalkContinue, nil
 		}
@@ -185,7 +149,7 @@ func textSpans(doc ast.Node) []sourceSpan {
 		}
 		return ast.WalkContinue, nil
 	})
-	return spans
+	return spans, maxDepth
 }
 
 func underImage(n ast.Node) bool {

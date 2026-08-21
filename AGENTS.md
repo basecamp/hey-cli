@@ -138,7 +138,8 @@ handed. The model has three layers, and it is worth knowing which one a change t
   `terminal.Sanitize`/`SanitizeLine` (`internal/terminal`), which strips escape
   sequences, C0/C1 controls and the `Bidi_Control` set. It is applied once where it
   covers the most: the CLI's `table.addRow` sanitizes its cells, and the TUI's read-only
-  models (`mail.NewPosting`, `sdkMessageToEntry`) are sanitized as they are built. The
+  models (`mail.NewPosting`, `mail.NewEntry`, `searchMatchToPosting`) are sanitized as
+  they are built. The
   editable ones — `sdkContactToModel`, `sdkRecordingToModel` — are deliberately **not**:
   their fields go back through the edit forms, and sanitizing them would rewrite a name
   on an unrelated save. Every view of a contact or a recording sanitizes what it shows. `TestSinksAreSanitized` (`internal/cmd/
@@ -153,9 +154,10 @@ handed. The model has three layers, and it is worth knowing which one a change t
   the Markdown renderer, into a red terminal); inline code and fences are verbatim inside
   delimiters longer than any run they hold; destinations percent-encode what would end
   them, keep a query string's `&`, and link only http, https, mailto and relative paths.
-  Every context strips controls first. `markdown.Render` then rewrites the spans glamour
-  decodes so that its extra entity decode is the identity, bounds quote nesting, and
-  checks its own output: anything but SGR and OSC 8 to an allowed scheme strips all
+  Every context strips controls first. `markdown.Render` then strips controls and bidi controls from the body, rewrites the
+  spans glamour decodes so that its extra entity decode is the identity, shows a
+  document nested past twenty levels unrendered rather than handing glamour something
+  exponential, and checks its own output: anything but SGR and OSC 8 to an allowed scheme strips all
   styling rather than guessing. That last check is a backstop, not the guarantee — an
   injected SGR is byte-identical to one of ours.
 - **JSON** is lossless and escapes the C1 controls (`output.MarshalJSON`), which

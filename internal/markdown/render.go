@@ -32,7 +32,7 @@ var (
 // characters it was written with, because the HTML it came from already decoded
 // the entities that were meant to be decoded.
 func Render(md string, width int) string {
-	safe, forGlamour := prepareSource(md)
+	safe, forGlamour, deep := prepareSource(md)
 	if strings.TrimSpace(safe) == "" {
 		return ""
 	}
@@ -41,7 +41,7 @@ func Render(md string, width int) string {
 	}
 
 	renderer, err := cachedRenderer(width)
-	if err != nil {
+	if err != nil || deep {
 		return contain(LinkifyURLs(safe))
 	}
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
 	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
