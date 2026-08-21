@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 )
 
@@ -190,5 +191,12 @@ func TestTimeTrackCategoryManagerValidatesAndConfirms(t *testing.T) {
 	rendered := manager.view(newStyles(), 80, 20)
 	if strings.Contains(rendered, dangerous) || strings.Contains(rendered, "\x1b]52") || strings.ContainsRune(rendered, '\a') {
 		t.Errorf("category status retained terminal controls: %q", rendered)
+	}
+
+	manager.setCategories([]generated.TimeTrackCategory{{Id: 31, Title: dangerous}})
+	manager.startRename()
+	prefill := manager.input.Value()
+	if strings.Contains(prefill, "\x1b]52") || strings.ContainsRune(prefill, '\a') {
+		t.Errorf("rename input retained terminal controls: %q", prefill)
 	}
 }

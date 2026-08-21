@@ -75,7 +75,7 @@ func (m *timeTrackCategoryManager) startRename() tea.Cmd {
 	m.mode = timeTrackCategoryRename
 	m.confirmingDelete = false
 	m.status = ""
-	m.input.SetValue(selected.Title)
+	m.input.SetValue(terminalSafeFolderText(selected.Title))
 	m.input.CursorEnd()
 	return m.input.Focus()
 }

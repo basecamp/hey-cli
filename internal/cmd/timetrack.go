@@ -292,7 +292,7 @@ func (c *timetrackCategoriesCommand) run(cmd *cobra.Command, args []string) erro
 		table := newTable(cmd.OutOrStdout())
 		table.addRow([]string{"ID", "Title"})
 		for _, category := range categories {
-			table.addRow([]string{fmt.Sprintf("%d", category.Id), category.Title})
+			table.addRow([]string{fmt.Sprintf("%d", category.Id), terminalSafeText(category.Title)})
 		}
 		table.print()
 		return nil
@@ -433,7 +433,7 @@ func (c *timetrackCategoryDeleteCommand) run(cmd *cobra.Command, args []string) 
 
 func writeTimetrackCategoryMutation(cmd *cobra.Command, summary string) error {
 	if writer.IsStyled() {
-		fmt.Fprintln(cmd.OutOrStdout(), summary+".")
+		fmt.Fprintln(cmd.OutOrStdout(), terminalSafeText(summary)+".")
 		return nil
 	}
 	return writeOK(nil,

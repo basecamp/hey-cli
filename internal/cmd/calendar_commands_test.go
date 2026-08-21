@@ -371,6 +371,43 @@ func TestTimetrackCategoriesCommand(t *testing.T) {
 	}
 }
 
+func TestTimetrackCategoryStyledOutputSanitizesTitles(t *testing.T) {
+	dangerous := "Client\x1b]52;c;secret\a\nForged"
+	assertSafe := func(t *testing.T, stdout string) {
+		t.Helper()
+		if strings.Contains(stdout, "\x1b]52") || strings.ContainsRune(stdout, '\a') || strings.Contains(stdout, "\nForged") {
+			t.Errorf("styled category output retained terminal controls: %q", stdout)
+		}
+	}
+
+	t.Run("list", func(t *testing.T) {
+		stdout, err := runStyledCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": 31, "title": dangerous}})
+		}), "timetrack", "categories")
+		if err != nil {
+			t.Fatalf("execute timetrack categories: %v", err)
+		}
+		assertSafe(t, stdout)
+	})
+
+	t.Run("mutation", func(t *testing.T) {
+		stdout, err := runStyledCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse form: %v", err)
+			}
+			if got := r.Form.Get("category[title]"); got != dangerous {
+				t.Errorf("category title = %q, want unchanged %q", got, dangerous)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}), "timetrack", "category", "create", dangerous)
+		if err != nil {
+			t.Fatalf("execute category create: %v", err)
+		}
+		assertSafe(t, stdout)
+	})
+}
+
 func TestTimetrackCategoryMutations(t *testing.T) {
 	tests := []struct {
 		name        string
