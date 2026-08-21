@@ -20,7 +20,9 @@ func withOmarchyPollLock(fn func()) {
 		fn()
 		return
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // G304: fixed path under the state dir
+	// Read-only: the descriptor exists to be flocked, nothing is ever written
+	// through it, so there is nothing a failed close could lose.
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDONLY, 0o600) //nolint:gosec // G304: fixed path under the state dir
 	if err != nil {
 		fn()
 		return
