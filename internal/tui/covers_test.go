@@ -430,6 +430,40 @@ func TestCoverPickerSurvivesAFailedWrite(t *testing.T) {
 	}
 }
 
+// A list grows when the reader can see the end of it, and a covered list ends at the
+// divider with most of its rows still under the art. That must not read on: there
+// is nothing to scroll into, and every page arriving would go under the cover too
+// and ask for the next one.
+func TestACoveredListDoesNotReadOnForever(t *testing.T) {
+	v := mailWithPostings()
+	v.cover = coverTopo
+	v.postingList.setCover(coverTopo)
+	v.postingList.setSize(80, 20)
+
+	postings := make([]models.Posting, 0, 31)
+	postings = append(postings, models.Posting{ID: 1, Name: "Unread thread"})
+	for id := range 30 {
+		postings = append(postings, models.Posting{ID: int64(200 + id), Name: "Read thread", Seen: true})
+	}
+	v.postingList.setPostings(postings)
+	v.postingPaging.nextPage = "cursor-2"
+
+	if v.postingList.itemCount() != 1 {
+		t.Fatalf("the cover left %d threads reachable, want 1", v.postingList.itemCount())
+	}
+	if cmd := v.loadMorePostings(); cmd != nil {
+		t.Error("a covered list read on although the rows below it are under the art")
+	}
+
+	// Lifting the cover puts them back within reach, and then the rule applies as
+	// it does to any other list.
+	v.postingList.toggleCoverPeek()
+	v.postingList.cursor = len(postings) - 2
+	if cmd := v.loadMorePostings(); cmd == nil {
+		t.Error("a peeked list did not read on with the cursor near the bottom")
+	}
+}
+
 // The chorded keys sit at the end of the help bar, together, keeping their order.
 // Scattered among the single keys they push the everyday ones onto a second line.
 func TestModifiersLast(t *testing.T) {
