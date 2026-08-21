@@ -94,6 +94,42 @@ func decodeThread(t *testing.T, stdout string) threadResponse {
 	return response
 }
 
+// --json carries a body only for an entry that has one: a body that was not read is
+// omitted rather than written as "", which is the contract a decoder reading the key's
+// presence depends on. decodedEntry cannot tell the two apart, so this reads the raw
+// objects.
+func TestThreadsJSONOmitsABodyItDidNotRead(t *testing.T) {
+	server, _ := partialThreadServer(t, [][]int64{{13, 12, 11}}, 12)
+	stdoutTerminal(t, false)
+
+	stdout, _, err := runCLIRaw(t, server, "--json", "threads", "7", "--allow-partial")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var response struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &response); err != nil {
+		t.Fatalf("decode %q: %v", stdout, err)
+	}
+	if len(response.Data) != 3 {
+		t.Fatalf("got %d entries, want 3", len(response.Data))
+	}
+	for _, entry := range response.Data {
+		body, present := entry["body"]
+		switch entry["id"] {
+		case float64(12):
+			if present {
+				t.Errorf("entry 12 carries body %#v, want the key omitted for a body that was not read", body)
+			}
+		default:
+			if text, ok := body.(string); !ok || text == "" {
+				t.Errorf("entry %v carries body %#v, want a Markdown string", entry["id"], body)
+			}
+		}
+	}
+}
+
 func partialError(t *testing.T, err error) {
 	t.Helper()
 	var apiErr *apierr.Error

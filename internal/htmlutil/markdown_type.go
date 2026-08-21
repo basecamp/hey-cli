@@ -1,11 +1,13 @@
 package htmlutil
 
 // Markdown is Markdown that ToMarkdown produced: every context serialized on its own
-// terms, no control character left in it. It is the only kind of Markdown
-// markdown.Render accepts, and nothing but ToMarkdown can make one — the field is
-// unexported and there is no constructor — so a body from anywhere else cannot reach a
-// terminal renderer by being a string that happens to look like Markdown. It marshals to
-// JSON as the string it holds, which is what --json carries.
+// terms, and no control character left in it other than the newlines and tabs that
+// Markdown itself is written with — a fence keeps its tabs, and a sink that shows it
+// sanitizes with the same two allowed. It is the only kind of Markdown markdown.Render
+// accepts, and nothing but ToMarkdown can make one — the field is unexported and there
+// is no constructor — so a body from anywhere else cannot reach a terminal renderer by
+// being a string that happens to look like Markdown. It marshals to JSON as the string
+// it holds, which is what --json carries.
 type Markdown struct {
 	text string
 }
