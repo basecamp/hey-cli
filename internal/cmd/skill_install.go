@@ -253,8 +253,9 @@ func removeExistingSkillLink(path string) error {
 
 // isManagedSkillCopy reports whether path is a plain directory hey-cli's copy
 // fallback wrote: it carries the ownership marker and nothing but the files
-// we write. Both conditions are required — the marker proves provenance, and
-// the allowlist keeps anything a user added alongside it safe.
+// we write, every one a regular file. All three conditions are required —
+// the marker proves provenance (and a symlink planted in its name proves
+// nothing), and the allowlist keeps anything a user added alongside it safe.
 func isManagedSkillCopy(path string) bool {
 	info, err := os.Lstat(path)
 	if err != nil || !info.IsDir() {
@@ -266,7 +267,7 @@ func isManagedSkillCopy(path string) bool {
 	}
 	sawMarker := false
 	for _, entry := range entries {
-		if entry.IsDir() {
+		if !entry.Type().IsRegular() {
 			return false
 		}
 		switch entry.Name() {
@@ -337,19 +338,18 @@ func copySkillFiles(src, dst string) error {
 	if err := claimSkillDir(dst); err != nil {
 		return err
 	}
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		return err
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			return fmt.Errorf("skill directory contains subdirectory %q; copy fallback only supports flat files", e.Name())
-		}
-		data, err := os.ReadFile(filepath.Join(src, e.Name())) // #nosec G304 -- reading the baseline skill directory we wrote
+	// Copy only the files hey-cli owns. A user may add their own files to
+	// the managed baseline; carrying them into the copy would make it fail
+	// its own allowlist on the next run and strand the fallback.
+	for _, name := range []string{skillFilename, installedVersionFile, ownershipMarkerFile} {
+		data, err := os.ReadFile(filepath.Join(src, name)) // #nosec G304 -- fixed filenames in the baseline skill directory we wrote
 		if err != nil {
+			if os.IsNotExist(err) {
+				continue // the version stamp and marker are best-effort
+			}
 			return err
 		}
-		if err := writeSkillFile(filepath.Join(dst, e.Name()), data); err != nil {
+		if err := writeSkillFile(filepath.Join(dst, name), data); err != nil {
 			return err
 		}
 	}

@@ -307,3 +307,63 @@ func TestClaimSkillDirRejectsNonRegularMarker(t *testing.T) {
 		t.Errorf("user skill changed: %q", got)
 	}
 }
+
+// The copy-fallback removal predicate applies the regular-file rule to every
+// entry: a symlink planted in the marker's name authorizes nothing, and the
+// user's SKILL.md beside it survives Claude setup.
+func TestRemoveExistingSkillLinkRejectsSymlinkedMarker(t *testing.T) {
+	home := agentHome(t)
+	dir := filepath.Join(home, ".claude", "skills", "hey")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	custom := "# my own hey skill"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(custom), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(home, "marker-target")
+	if err := os.WriteFile(target, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(dir, ownershipMarkerFile)); err != nil {
+		t.Fatal(err)
+	}
+
+	var unmanaged *unmanagedSkillDirError
+	if err := removeExistingSkillLink(dir); !errors.As(err, &unmanaged) {
+		t.Fatalf("removeExistingSkillLink = %v, want unmanaged refusal", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "SKILL.md")); string(got) != custom {
+		t.Errorf("user skill deleted: %q", got)
+	}
+}
+
+// A user file added to the managed baseline is not carried into the Claude
+// copy, so consecutive fallback installs stay repeatable.
+func TestCopyFallbackSkipsUserFilesInBaseline(t *testing.T) {
+	home := agentHome(t)
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	origSymlink := makeSkillSymlink
+	makeSkillSymlink = func(string, string) error { return errors.New("symlinks unavailable") }
+	t.Cleanup(func() { makeSkillSymlink = origSymlink })
+	jsonWriter(t)
+
+	if err := runSkillInstall(newSkillInstallCommand(), nil); err != nil {
+		t.Fatalf("first install: %v", err)
+	}
+	// The user adds their own file to the managed baseline.
+	baseline := filepath.Join(home, ".agents", "skills", "hey")
+	if err := os.WriteFile(filepath.Join(baseline, "notes.txt"), []byte("mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for run := 2; run <= 3; run++ {
+		if err := runSkillInstall(newSkillInstallCommand(), nil); err != nil {
+			t.Fatalf("run %d: %v", run, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude", "skills", "hey", "notes.txt")); !os.IsNotExist(err) {
+		t.Error("user file was copied into the Claude skill directory")
+	}
+}
