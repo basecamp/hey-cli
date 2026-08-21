@@ -139,6 +139,7 @@ const (
 	postingActionNone postingActionEffect = iota
 	postingActionRemove
 	postingActionSeen
+	postingActionUnseen
 	postingActionIgnore
 	postingActionStopIgnoring
 )
@@ -477,7 +478,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			v.notice = fmt.Sprintf("%d bulk %s queued with undo available", count, replyNoun(count))
 			if msg.delivery.Id > 0 {
 				v.lastBulkReplyID = msg.delivery.Id
-				v.notice += " — press u to undo"
+				v.notice += " — press ctrl+u to undo"
 			}
 		}
 		if msg.skipped > 0 {
@@ -541,11 +542,11 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 
 	case postingActionDoneMsg:
 		v.finishMutation()
-		if msg.err != nil {
-			return func() tea.Msg { return errMsg{msg.err} }, true
-		}
 		if msg.boxID != v.currentBoxID() || (msg.sourceKind != "" && msg.sourceKind != v.currentSourceKind()) {
 			return nil, true
+		}
+		if msg.err != nil {
+			return func() tea.Msg { return errMsg{msg.err} }, true
 		}
 		v.notice = msg.action
 		idx := v.postingIndex(msg.postingID)
@@ -556,6 +557,8 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 				v.removePostingAt(idx)
 			case postingActionSeen:
 				v.postingList.markSeen(idx)
+			case postingActionUnseen:
+				v.postingList.markUnseen(idx)
 			case postingActionIgnore:
 				v.postingList.postings[idx].Muted = true
 			case postingActionStopIgnoring:
@@ -715,11 +718,11 @@ func firstTimeSenderNoun(count int) string {
 func (v *mailView) updateSourceDiscoveryNotice() {
 	switch {
 	case v.folderDiscoveryErr != "" && v.collectionDiscoveryErr != "":
-		v.notice = "Could not load labels or collections — press g or k to retry"
+		v.notice = "Could not load labels or collections — press b or n to retry"
 	case v.folderDiscoveryErr != "":
-		v.notice = "Could not load labels — press g to retry"
+		v.notice = "Could not load labels — press b to retry"
 	case v.collectionDiscoveryErr != "":
-		v.notice = "Could not load collections — press k to retry"
+		v.notice = "Could not load collections — press n to retry"
 	case v.notice == "Retrying labels…" || v.notice == "Retrying collections…":
 		v.notice = ""
 	}
@@ -757,26 +760,28 @@ func (v *mailView) HelpBindings() []helpBinding {
 	if selected := v.postingList.selectedPosting(); selected != nil && selected.Muted {
 		ignoreBinding = helpBinding{"+", "stop ignoring"}
 	}
-	folderBinding := helpBinding{"g", "labels"}
+	folderBinding := helpBinding{"b", "labels"}
 	if v.folderDiscoveryErr != "" {
-		folderBinding = helpBinding{"g", "retry labels"}
+		folderBinding = helpBinding{"b", "retry labels"}
 	}
-	collectionBinding := helpBinding{"k", "collections"}
+	collectionBinding := helpBinding{"n", "collections"}
 	if v.collectionDiscoveryErr != "" {
-		collectionBinding = helpBinding{"k", "retry collections"}
+		collectionBinding = helpBinding{"n", "retry collections"}
 	}
 	bindings := []helpBinding{
 		{"/", "search"},
 		{"ctrl+s", "screener"},
 		{"c", "compose"},
 		{"space", "select"},
-		{"b", "bulk reply"},
+		{"ctrl+b", "bulk reply"},
 		{"r", "reply"},
 		{"f", "forward"},
-		{"m", "move"},
+		{"v", "move"},
 		folderBinding,
 		collectionBinding,
 		{"e", "seen"},
+		{"u", "unseen"},
+		{"i", "imbox"},
 		{"l", "reply later"},
 		{"a", "set aside"},
 		{"d", "feed"},
@@ -784,14 +789,14 @@ func (v *mailView) HelpBindings() []helpBinding {
 	bindings = append(bindings,
 		helpBinding{"p", "paper trail"},
 		helpBinding{"t", "trash"},
-		helpBinding{"s", "spam"},
+		helpBinding{"!", "spam"},
 		ignoreBinding,
 		helpBinding{"ctrl+r", "reload"},
 	)
 	if v.postingList.cover != coverNone {
-		peek := helpBinding{"v", "peek under cover"}
+		peek := helpBinding{"x", "peek under cover"}
 		if v.postingList.coverPeeked {
-			peek = helpBinding{"v", "cover"}
+			peek = helpBinding{"x", "cover"}
 		}
 		bindings = append(bindings, peek)
 	}
@@ -799,7 +804,7 @@ func (v *mailView) HelpBindings() []helpBinding {
 		bindings = append(bindings, helpBinding{"ctrl+v", "cover art"})
 	}
 	if v.lastBulkReplyID != 0 {
-		bindings = append(bindings, helpBinding{"u", "undo bulk reply"})
+		bindings = append(bindings, helpBinding{"ctrl+u", "undo bulk reply"})
 	}
 	return modifiersLast(bindings)
 }
@@ -835,7 +840,7 @@ func (v *mailView) SubnavItems() ([]navItem, int, string, bool) {
 	}
 	items := boxNavItems(boxes)
 	if v.hasLabels() {
-		items = append(items, navItem{shortcut: "L", label: "Labels"})
+		items = append(items, navItem{label: "Labels"})
 		if v.currentSourceKind() == mail.KindFolder {
 			selected = len(items) - 1
 		}
@@ -971,11 +976,11 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 
 	if v.inThread {
 		switch msg.String() {
-		case "r":
+		case "r", "R":
 			if v.topicID != 0 {
 				return v.loadReplyContext(v.topicID, v.topicName)
 			}
-		case "f":
+		case "f", "F":
 			if v.topicID != 0 {
 				return v.loadForwardContext(v.topicID, v.topicName)
 			}
@@ -1005,7 +1010,8 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		case tea.KeyEnter:
 			return v.openSelected()
 		default:
-			if msg.String() == "/" {
+			switch msg.String() {
+			case "/", "s", "S":
 				return v.startSearch()
 			}
 		}
@@ -1022,25 +1028,25 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		return v.openSelected()
 	default:
 		switch msg.String() {
-		case "/":
+		case "/", "s", "S":
 			return v.startSearch()
 		case "c":
 			return v.startCompose()
 		case " ", "space":
 			v.postingList.toggleSelected()
 			return nil
-		case "b":
+		case "ctrl+b":
 			return v.startBulkReply()
-		case "u":
+		case "ctrl+u":
 			return v.undoBulkReply()
-		case "m":
+		case "v", "V":
 			v.startMove()
 			return nil
-		case "g":
+		case "b", "B":
 			return v.startFolderPicker()
-		case "k":
+		case "n", "N":
 			return v.startCollectionPicker()
-		case "v":
+		case "x":
 			v.postingList.toggleCoverPeek()
 			return nil
 		case "ctrl+v":
@@ -1161,11 +1167,6 @@ func (v *mailView) handleBoxShortcut(key string) tea.Cmd {
 		return nil
 	}
 	switch key {
-	case "L":
-		if v.hasLabels() {
-			v.openLabels()
-			return func() tea.Msg { return nil }
-		}
 	case "K":
 		if v.hasCollections() {
 			v.openCollections()
@@ -1726,31 +1727,45 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 	boxID := v.currentBoxID()
 
 	switch key {
-	case "l":
+	case "l", "L":
 		return v.moveSelectedToKnownBox("Reply Later", hey.BoxKindLater, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MoveToReplyLater(v.vc.ctx, p.ID)
 		})
-	case "a":
+	case "a", "A":
 		return v.moveSelectedToKnownBox("Set Aside", hey.BoxKindSetAside, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MoveToSetAside(v.vc.ctx, p.ID)
 		})
-	case "e":
+	case "e", "E":
 		return v.doPostingAction("Thread marked as seen", postingActionSeen, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MarkSeen(v.vc.ctx, []int64{p.ID})
 		})
-	case "d":
+	case "u", "U":
+		if p.Muted {
+			v.notice = "Stop ignoring this thread to mark it unseen"
+			return nil
+		}
+		if !p.Seen && !p.BubbledUp {
+			v.notice = "Thread is already unseen"
+			return nil
+		}
+		return v.doPostingAction("Thread marked as unseen", postingActionUnseen, boxID, p.ID, func() error {
+			return v.vc.sdk.Postings().MarkUnseen(v.vc.ctx, []int64{p.ID})
+		})
+	case "i", "I":
+		return v.moveSelectedToImbox(boxID, p.ID)
+	case "d", "D":
 		return v.moveSelectedToKnownBox("The Feed", hey.BoxKindFeed, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MoveToFeed(v.vc.ctx, p.ID)
 		})
-	case "p":
+	case "p", "P":
 		return v.moveSelectedToKnownBox("Paper Trail", hey.BoxKindTrail, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MoveToPaperTrail(v.vc.ctx, p.ID)
 		})
-	case "t":
+	case "t", "T":
 		return v.doPostingAction("Thread moved to Trash", postingActionRemove, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MoveToTrash(v.vc.ctx, p.ID)
 		})
-	case "s":
+	case "!":
 		return v.doPostingAction("Thread marked as spam", postingActionRemove, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MarkSpam(v.vc.ctx, p.ID)
 		})
@@ -1770,19 +1785,32 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 		return v.doPostingAction("Stopped ignoring thread", postingActionStopIgnoring, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().Unmute(v.vc.ctx, p.ID)
 		})
-	case "r":
+	case "r", "R":
 		topicID := p.TopicID
 		if topicID == 0 {
 			topicID = p.ID
 		}
 		return v.loadReplyContext(topicID, p.Summary)
-	case "f":
+	case "f", "F":
 		topicID := p.TopicID
 		if topicID == 0 {
 			topicID = p.ID
 		}
 		return v.loadForwardContext(topicID, p.Summary)
 	}
+	return nil
+}
+
+func (v *mailView) moveSelectedToImbox(boxID, postingID int64) tea.Cmd {
+	for _, source := range v.boxes {
+		if source.Kind == mail.KindBox && source.BoxKind == hey.BoxKindImbox {
+			imboxID := source.ID
+			return v.moveSelectedToKnownBox("Imbox", hey.BoxKindImbox, boxID, postingID, func() error {
+				return v.vc.sdk.Postings().Move(v.vc.ctx, imboxID, postingID)
+			})
+		}
+	}
+	v.notice = "Imbox is unavailable"
 	return nil
 }
 

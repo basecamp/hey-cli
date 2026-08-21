@@ -30,16 +30,16 @@ since `Topics().Get` already carries the entry list.
 | `/bubblebox.json` | GET | SDK `Boxes().GetBubblebox` | `hey box bubblebox` | covered |
 | `/my/navigation.json` | GET | SDK `Identity().GetNavigation` | `hey labels`, Mail TUI navigation | covered |
 | `/folders/{id}.json` | GET | SDK `Folders().GetPage` | `hey label <id>`, Mail TUI labels | covered |
-| `/postings/filings.json` | POST | SDK `Postings().File` | `hey label add`, TUI `g` | covered |
-| `/postings/filings.json` | DELETE | SDK `Postings().Unfile` | `hey label remove`, TUI `g` | covered |
-| `/postings/folders.json` | POST | SDK `Postings().CreateFolder` | `hey label create`, TUI `g` | covered |
+| `/postings/filings.json` | POST | SDK `Postings().File` | `hey label add`, TUI `b/B` | covered |
+| `/postings/filings.json` | DELETE | SDK `Postings().Unfile` | `hey label remove`, TUI `b/B` | covered |
+| `/postings/folders.json` | POST | SDK `Postings().CreateFolder` | `hey label create`, TUI `b/B` | covered |
 | `/collections.json` | GET | SDK `Collections().List` | `hey collections`, Mail TUI navigation | covered |
 | `/collections/{id}.json` | GET | SDK `Collections().GetPage` | `hey collection <id>`, Mail TUI collections | covered |
 | `/collections` | POST | SDK `Collections().Create` | `hey collection create` | covered |
 | `/collections/{id}.json` | PATCH | SDK `Collections().Update` | `hey collection update` | covered |
-| `/topics/{id}/collecting` | POST | SDK `Collections().AddTopic` | `hey collection add`, TUI `k` | covered |
-| `/topics/{id}/collecting` | DELETE | SDK `Collections().RemoveTopic` | `hey collection remove`, TUI `k` | covered |
-| `/advanced_search.json` | GET | SDK `Search().Search`, `Search().SearchPage` | `hey search`, TUI `/` | covered |
+| `/topics/{id}/collecting` | POST | SDK `Collections().AddTopic` | `hey collection add`, TUI `n/N` | covered |
+| `/topics/{id}/collecting` | DELETE | SDK `Collections().RemoveTopic` | `hey collection remove`, TUI `n/N` | covered |
+| `/advanced_search.json` | GET | SDK `Search().Search`, `Search().SearchPage` | `hey search`, TUI `/` or `s/S` | covered |
 | `/advanced_search_filters.json` | GET | SDK `Search().Filters` | `hey search filters` | covered |
 | `/clearances.json` | GET | SDK `Clearances().Summary`, `Pending`, `PendingPage`, `PendingCount` | `hey screener list`, TUI ctrl+s | covered |
 | `/clearances/{id}` | PATCH | SDK `Clearances().Screen` | `hey screener approve`/`deny` (one ID), TUI `y`/`n` | covered |
@@ -73,15 +73,15 @@ since `Topics().Get` already carries the entry list.
 | `/entries/{id}/replies` | POST | SDK `Entries().CreateReply` | `hey reply <topic-id>` | covered |
 | `/topics/{id}.json` | GET | SDK `Topics().Get` | `hey forward <topic-id>`, `hey reply <topic-id>`, TUI `r` | covered |
 | `/entries/{id}/forwards/new.json` | GET | SDK `Entries().NewForward` | `hey forward <topic-id>` | covered |
-| `/bulk_replies/new.json` | GET | SDK `BulkReplies().Draft` | `hey bulk-reply preview`, `hey bulk-reply send`, TUI `b` | covered |
+| `/bulk_replies/new.json` | GET | SDK `BulkReplies().Draft` | `hey bulk-reply preview`, `hey bulk-reply send`, TUI `ctrl+b` | covered |
 | `/bulk_replies.json` | POST | SDK `BulkReplies().Send` | `hey bulk-reply send`, TUI bulk reply | covered |
-| `/bulk_replies/{id}/undo_send` | POST | SDK `BulkReplies().Undo` | `hey bulk-reply undo`, TUI `u` | covered |
-| `/bulk_replies/{id}` | GET (redirect target) | SDK `BulkReplies().Undo` redirect handling | `hey bulk-reply undo`, TUI `u` | covered |
-| `/postings/seen.json` | POST | SDK `Postings().MarkSeen` | `hey seen <id>`, TUI opening a thread | covered |
-| `/postings/unseen.json` | POST | SDK `Postings().MarkUnseen` | `hey unseen <id>` | covered |
-| `/postings/moves.json` | POST | SDK `Postings().Move`, `MoveToFeed`, `MoveToSetAside`, `MoveToReplyLater`, `MoveToPaperTrail` | `hey move <id> --to <box>`, TUI `m` | covered |
-| `/postings/trash.json` | POST | SDK `Postings().MoveToTrash` | `hey trash <id>`, TUI `t` | covered |
-| `/postings/spam.json` | POST | SDK `Postings().MarkSpam` | `hey spam <id>`, TUI `s` | covered |
+| `/bulk_replies/{id}/undo_send` | POST | SDK `BulkReplies().Undo` | `hey bulk-reply undo`, TUI `ctrl+u` | covered |
+| `/bulk_replies/{id}` | GET (redirect target) | SDK `BulkReplies().Undo` redirect handling | `hey bulk-reply undo`, TUI `ctrl+u` | covered |
+| `/postings/seen.json` | POST | SDK `Postings().MarkSeen` | `hey seen <id>`, TUI `e/E` and opening a thread | covered |
+| `/postings/unseen.json` | POST | SDK `Postings().MarkUnseen` | `hey unseen <id>`, TUI `u/U` | covered |
+| `/postings/moves.json` | POST | SDK `Postings().Move`, `MoveToFeed`, `MoveToSetAside`, `MoveToReplyLater`, `MoveToPaperTrail` | `hey move <id> --to <box>`, TUI `v/V` | covered |
+| `/postings/trash.json` | POST | SDK `Postings().MoveToTrash` | `hey trash <id>`, TUI `t/T` | covered |
+| `/postings/spam.json` | POST | SDK `Postings().MarkSpam` | `hey spam <id>`, TUI `!` | covered |
 | `/postings/mutings.json` | POST | SDK `Postings().Mute` | `hey ignore <id>`, TUI `-` | covered |
 | `/postings/mutings.json` | DELETE | SDK `Postings().Unmute` | `hey stop-ignoring <id>`, TUI `+` | covered |
 | `/calendar/habits.json` | POST | SDK `Habits().Create` | `hey habit create`, Calendar TUI `a` | covered |

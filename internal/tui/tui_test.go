@@ -388,10 +388,10 @@ func TestMovePickerOwnsNavigationKeys(t *testing.T) {
 	m := modelWithBoxes()
 	m.focus = rowContent
 
-	updated, _ := m.Update(keyPress("m"))
+	updated, _ := m.Update(keyPress("v"))
 	m = updated.(model)
 	if moveModal(m.mailView) == nil || !m.mailView.CapturingInput() {
-		t.Fatal("m should open the move picker")
+		t.Fatal("v should open the move picker")
 	}
 
 	updated, _ = m.Update(keyPress("tab"))
@@ -740,6 +740,42 @@ func TestContentListMovesSeenPostingToItsSection(t *testing.T) {
 	}
 	if got := cl.selectedPosting(); got == nil || got.ID != 1 {
 		t.Errorf("cursor should follow the moved posting: %+v", got)
+	}
+}
+
+func TestContentListMovesSeenAndBubbledUpPostingsToNewForYou(t *testing.T) {
+	for _, testCase := range []struct {
+		name    string
+		posting mail.Posting
+	}{
+		{"seen", mail.Posting{ID: 3, Name: "Previously read", Seen: true}},
+		{"bubbled up", mail.Posting{ID: 3, Name: "Bubbled reminder", BubbledUp: true}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			cl := &contentList{}
+			cl.setPostings([]mail.Posting{
+				{ID: 1, Name: "Already new"},
+				testCase.posting,
+				{ID: 4, Name: "Older read", Seen: true},
+				{ID: 9, Name: "Keep bubbled", BubbledUp: true},
+			})
+			cl.cursor = slices.IndexFunc(cl.postings, func(p mail.Posting) bool { return p.ID == 3 })
+
+			cl.markUnseen(cl.cursor)
+
+			wantOrder := []int64{9, 3, 1, 4}
+			gotOrder := make([]int64, len(cl.postings))
+			for i, posting := range cl.postings {
+				gotOrder[i] = posting.ID
+			}
+			index := slices.IndexFunc(cl.postings, func(p mail.Posting) bool { return p.ID == 3 })
+			if !slices.Equal(gotOrder, wantOrder) || cl.postings[index].Seen || cl.postings[index].BubbledUp {
+				t.Errorf("posting order after unseen = %v, want %v; postings=%+v", gotOrder, wantOrder, cl.postings)
+			}
+			if selected := cl.selectedPosting(); selected == nil || selected.ID != 3 {
+				t.Errorf("cursor did not follow posting: %+v", selected)
+			}
+		})
 	}
 }
 

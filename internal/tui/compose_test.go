@@ -424,23 +424,27 @@ func TestForwardCompletionNoticeIsVisibleInThread(t *testing.T) {
 	}
 }
 
-func TestForwardKeyInThreadLoadsContext(t *testing.T) {
-	v := mailWithPostings()
-	v.inThread = true
-	v.topicID = 123
-	cmd := v.HandleContentKey(keyPress("f"))
-	if cmd == nil || !v.requests.loading || v.requests.kind != mailRequestForward {
-		t.Fatal("'f' in a thread should start loading the forward context")
+func TestForwardKeysInThreadLoadContext(t *testing.T) {
+	for _, key := range []string{"f", "F"} {
+		v := mailWithPostings()
+		v.inThread = true
+		v.topicID = 123
+		cmd := v.HandleContentKey(keyPress(key))
+		if cmd == nil || !v.requests.loading || v.requests.kind != mailRequestForward {
+			t.Fatalf("%q in a thread should start loading the forward context", key)
+		}
 	}
 }
 
-func TestReplyKeyInThreadLoadsContext(t *testing.T) {
-	v := mailWithPostings()
-	v.inThread = true
-	v.topicID = 123
-	cmd := v.HandleContentKey(keyPress("r"))
-	if cmd == nil || !v.requests.loading {
-		t.Fatal("'r' in a thread should start loading the reply context")
+func TestReplyKeysInThreadLoadContext(t *testing.T) {
+	for _, key := range []string{"r", "R"} {
+		v := mailWithPostings()
+		v.inThread = true
+		v.topicID = 123
+		cmd := v.HandleContentKey(keyPress(key))
+		if cmd == nil || !v.requests.loading || v.requests.kind != mailRequestReply {
+			t.Fatalf("%q in a thread should start loading the reply context", key)
+		}
 	}
 }
 

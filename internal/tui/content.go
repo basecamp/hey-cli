@@ -326,6 +326,38 @@ func (c *contentList) markSeen(index int) {
 	c.resort()
 }
 
+// markUnseen moves a posting to the front of "New for You", including one the reader is
+// deliberately taking out of "Bubbled Up". HEY gives the restored posting a fresh
+// observation time, so it follows the bubbled-up rows and precedes every other unseen row.
+func (c *contentList) markUnseen(index int) {
+	c.postings[index].Seen = false
+	c.postings[index].BubbledUp = false
+	if c.hideSeenState {
+		return
+	}
+
+	var cursorID int64
+	if p := c.selectedPosting(); p != nil {
+		cursorID = p.ID
+	}
+	posting := c.postings[index]
+	c.postings = append(c.postings[:index], c.postings[index+1:]...)
+	insertAt := 0
+	for insertAt < len(c.postings) && sectionOf(c.postings[insertAt]) == sectionBubbledUp {
+		insertAt++
+	}
+	c.postings = append(c.postings, mail.Posting{})
+	copy(c.postings[insertAt+1:], c.postings[insertAt:])
+	c.postings[insertAt] = posting
+	for i := range c.postings {
+		if c.postings[i].ID == cursorID {
+			c.cursor = i
+			break
+		}
+	}
+	c.settleCover()
+}
+
 // resort re-partitions the list after a posting changes its seen state and
 // keeps the cursor on the same posting.
 func (c *contentList) resort() {
@@ -638,7 +670,7 @@ func (c *contentList) view() string {
 // The threads themselves are not rendered at all — that is the whole point of a
 // cover, and it is why the art can have every row the postings did not use.
 func (c *contentList) coverView(hidden, rowsUsed int) string {
-	hint := fmt.Sprintf("%d hidden · v to peek", hidden)
+	hint := fmt.Sprintf("%d hidden · x to peek", hidden)
 	header := coverHeader(sectionPreviouslySeen.label(), hint, c.width)
 
 	rows := c.height - rowsUsed - 1
@@ -659,7 +691,7 @@ func sectionHeader(label string, width int) string {
 }
 
 // coverHeader is a section label with a hint on its right, where the HEY web app
-// puts the cover's buttons: "Previously Seen ──── 34 hidden · v to peek".
+// puts the cover's buttons: "Previously Seen ──── 34 hidden · x to peek".
 func coverHeader(label, hint string, width int) string {
 	rule := lipgloss.NewStyle().Foreground(colorChrome)
 	fill := width - lipgloss.Width(label) - lipgloss.Width(hint) - 4

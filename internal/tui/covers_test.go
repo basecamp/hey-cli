@@ -556,7 +556,7 @@ func TestCoverHidesPreviouslySeen(t *testing.T) {
 	if !strings.Contains(view, sectionPreviouslySeen.label()) {
 		t.Error("covered list dropped the Previously Seen divider")
 	}
-	if !strings.Contains(view, "3 hidden · v to peek") {
+	if !strings.Contains(view, "3 hidden · x to peek") {
 		t.Error("covered list gave no hint about what is under the cover")
 	}
 	for _, posting := range list.postings[1:] {
@@ -627,7 +627,7 @@ func TestCoverDropsTheArtBeforeTheDivider(t *testing.T) {
 	list := coveredList(coverTopo, coverMinRows+2, false, false, true)
 
 	view := list.view()
-	if !strings.Contains(view, "1 hidden · v to peek") {
+	if !strings.Contains(view, "1 hidden · x to peek") {
 		t.Error("a short covered list lost its divider")
 	}
 	if rows := strings.Count(view, "\n") + 1; rows > coverMinRows+2 {
@@ -643,7 +643,7 @@ func TestCoverWithNothingUnread(t *testing.T) {
 		t.Errorf("itemCount = %d, want 0", got)
 	}
 	view := list.view()
-	if !strings.Contains(view, "2 hidden · v to peek") {
+	if !strings.Contains(view, "2 hidden · x to peek") {
 		t.Error("an all-read Imbox does not say what is under the cover")
 	}
 	if rows := strings.Count(view, "\n") + 1; rows != 20 {
@@ -681,6 +681,26 @@ func TestMarkingSeenSlidesAThreadUnderTheCover(t *testing.T) {
 	}
 	if ids := list.selectedIDs(); len(ids) != 0 {
 		t.Errorf("selection %v survived under the cover", ids)
+	}
+}
+
+func TestMarkingUnseenPullsAThreadAboveTheCover(t *testing.T) {
+	list := coveredList(coverTopo, 24, true, true)
+	list.toggleCoverPeek()
+	list.cursor = 1
+
+	list.markUnseen(1)
+	list.toggleCoverPeek()
+
+	if got := list.itemCount(); got != 1 {
+		t.Errorf("itemCount = %d, want the unseen thread reachable", got)
+	}
+	posting := list.selectedPosting()
+	if posting == nil || posting.ID != 2 || posting.Seen || posting.BubbledUp {
+		t.Errorf("selected posting above cover = %+v", posting)
+	}
+	if !strings.Contains(list.view(), "Read thread B") {
+		t.Errorf("unseen thread is not visible above cover: %q", list.view())
 	}
 }
 
@@ -764,7 +784,7 @@ func TestPickingACoverTakesTheCursorOutFromUnderIt(t *testing.T) {
 	if ids := v.postingList.selectedIDs(); len(ids) != 0 {
 		t.Errorf("a bulk reply would aim at %v, threads the reader put away", ids)
 	}
-	if cmd := v.HandleContentKey(keyPress("b")); cmd != nil {
+	if cmd := v.HandleContentKey(keyPress("ctrl+b")); cmd != nil {
 		t.Error("a bulk reply started on a selection that is under the cover")
 	}
 }

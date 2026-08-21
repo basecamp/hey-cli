@@ -471,12 +471,18 @@ func TestMailViewPostingKeysCallExpectedEndpoints(t *testing.T) {
 		notice string
 	}{
 		{"reply later", "l", "/postings/moves.json", 4, postingActionRemove, "Thread moved to Reply Later"},
+		{"reply later uppercase", "L", "/postings/moves.json", 4, postingActionRemove, "Thread moved to Reply Later"},
 		{"set aside", "a", "/postings/moves.json", 3, postingActionRemove, "Thread moved to Set Aside"},
+		{"set aside uppercase", "A", "/postings/moves.json", 3, postingActionRemove, "Thread moved to Set Aside"},
 		{"seen", "e", "/postings/seen.json", 0, postingActionSeen, "Thread marked as seen"},
+		{"seen uppercase", "E", "/postings/seen.json", 0, postingActionSeen, "Thread marked as seen"},
 		{"feed", "d", "/postings/moves.json", 2, postingActionRemove, "Thread moved to The Feed"},
+		{"feed uppercase", "D", "/postings/moves.json", 2, postingActionRemove, "Thread moved to The Feed"},
 		{"paper trail", "p", "/postings/moves.json", 5, postingActionRemove, "Thread moved to Paper Trail"},
+		{"paper trail uppercase", "P", "/postings/moves.json", 5, postingActionRemove, "Thread moved to Paper Trail"},
 		{"trash", "t", "/postings/trash.json", 0, postingActionRemove, "Thread moved to Trash"},
-		{"spam", "s", "/postings/spam.json", 0, postingActionRemove, "Thread marked as spam"},
+		{"trash uppercase", "T", "/postings/trash.json", 0, postingActionRemove, "Thread moved to Trash"},
+		{"spam", "!", "/postings/spam.json", 0, postingActionRemove, "Thread marked as spam"},
 		{"ignore", "-", "/postings/mutings.json", 0, postingActionIgnore, "Thread ignored"},
 	}
 
@@ -540,6 +546,93 @@ func TestMailViewPostingKeysCallExpectedEndpoints(t *testing.T) {
 	}
 }
 
+func TestMailViewUnseenKeysRestoreSeenAndBubbledUpThreads(t *testing.T) {
+	for _, testCase := range []struct {
+		name      string
+		key       string
+		bubbledUp bool
+	}{
+		{"lowercase", "u", false},
+		{"uppercase", "U", false},
+		{"bubbled up", "u", true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			v, recorded := mailWithTestServer(t, http.StatusNoContent)
+			v.postingList.postings[0].Seen = !testCase.bubbledUp
+			v.postingList.postings[0].BubbledUp = testCase.bubbledUp
+			v.postingList.resort()
+			v.postingList.cursor = v.postingIndex(100)
+
+			done, ok := runCmd(v.HandleContentKey(keyPress(testCase.key))).(postingActionDoneMsg)
+			if !ok || done.err != nil || done.effect != postingActionUnseen {
+				t.Fatalf("unseen command returned %#v", done)
+			}
+			if recorded.method != http.MethodPost || recorded.path != "/postings/unseen.json" {
+				t.Errorf("request = %s %s, want POST /postings/unseen.json", recorded.method, recorded.path)
+			}
+			if len(recorded.body.PostingIDs) != 1 || recorded.body.PostingIDs[0] != 100 {
+				t.Errorf("posting_ids = %v, want [100]", recorded.body.PostingIDs)
+			}
+
+			v.Update(done)
+			posting := v.postingList.selectedPosting()
+			if posting == nil || posting.ID != 100 || posting.Seen || posting.BubbledUp {
+				t.Errorf("selected posting after unseen = %+v", posting)
+			}
+			if v.postingList.postings[0].ID != 100 {
+				t.Errorf("unseen posting did not move to New for You: %+v", v.postingList.postings)
+			}
+			if v.notice != "Thread marked as unseen" {
+				t.Errorf("notice = %q", v.notice)
+			}
+		})
+	}
+}
+
+func TestMailViewUnseenSkipsThreadsTheServerLeavesAlone(t *testing.T) {
+	tests := []struct {
+		name    string
+		posting mail.Posting
+		notice  string
+	}{
+		{"already unseen", mail.Posting{ID: 100}, "Thread is already unseen"},
+		{"ignored", mail.Posting{ID: 100, Seen: true, Muted: true}, "Stop ignoring this thread to mark it unseen"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v, recorded := mailWithTestServer(t, http.StatusNoContent)
+			v.postingList.postings[0] = tt.posting
+			if cmd := v.HandleContentKey(keyPress("u")); cmd != nil {
+				t.Fatal("unseen should not start a request")
+			}
+			if len(recorded.requests) != 0 {
+				t.Errorf("requests = %v, want none", recorded.requests)
+			}
+			if v.notice != tt.notice {
+				t.Errorf("notice = %q, want %q", v.notice, tt.notice)
+			}
+		})
+	}
+}
+
+func TestMailViewUnseenFailureKeepsSeenState(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusInternalServerError)
+	v.postingList.postings[0].Seen = true
+
+	done := runCmd(v.HandleContentKey(keyPress("u"))).(postingActionDoneMsg)
+	if done.err == nil {
+		t.Fatal("unseen failure should carry an error")
+	}
+	cmd, _ := v.Update(done)
+	if _, ok := runCmd(cmd).(errMsg); !ok {
+		t.Fatal("unseen failure should report an error")
+	}
+	posting := v.postingList.postings[v.postingIndex(100)]
+	if !posting.Seen || posting.BubbledUp {
+		t.Errorf("failed unseen changed posting state: %+v", posting)
+	}
+}
+
 func TestMailViewStopIgnoringCallsDeleteAndKeepsThreadVisible(t *testing.T) {
 	v, recorded := mailWithTestServer(t, http.StatusNoContent)
 	v.postingList.postings[0].Muted = true
@@ -596,6 +689,37 @@ func TestMailViewIgnoreActionsSkipThreadsAlreadyInRequestedState(t *testing.T) {
 	}
 }
 
+func TestMailViewImboxKeysMoveToImbox(t *testing.T) {
+	for _, key := range []string{"i", "I"} {
+		t.Run(key, func(t *testing.T) {
+			v, recorded := mailWithTestServer(t, http.StatusNoContent)
+			v.boxIndex = sourceIndex(v.boxes, 2, mail.KindBox)
+
+			done, ok := runCmd(v.HandleContentKey(keyPress(key))).(postingActionDoneMsg)
+			if !ok || done.err != nil || done.effect != postingActionRemove {
+				t.Fatalf("move-to-Imbox command returned %#v", done)
+			}
+			if recorded.path != "/postings/moves.json" || recorded.body.BoxID == nil || *recorded.body.BoxID != 1 {
+				t.Errorf("request = %s body=%+v", recorded.path, recorded.body)
+			}
+			v.Update(done)
+			if v.postingIndex(100) >= 0 || v.notice != "Thread moved to Imbox" {
+				t.Errorf("posting present=%v notice=%q", v.postingIndex(100) >= 0, v.notice)
+			}
+		})
+	}
+}
+
+func TestMailViewImboxKeyDoesNotMoveWithinImbox(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	if cmd := v.HandleContentKey(keyPress("i")); cmd != nil {
+		t.Fatal("move within Imbox should not start a request")
+	}
+	if len(recorded.requests) != 0 || v.notice != "Already in Imbox" {
+		t.Errorf("requests=%v notice=%q", recorded.requests, v.notice)
+	}
+}
+
 func TestMailViewMovePickerMovesToSelectedBox(t *testing.T) {
 	v, recorded := mailWithTestServer(t, http.StatusNoContent)
 	v.boxes = []mail.Source{
@@ -607,7 +731,7 @@ func TestMailViewMovePickerMovesToSelectedBox(t *testing.T) {
 		{Kind: mail.KindBox, ID: 6, BoxKind: hey.BoxKindBubbleUp, Name: "Bubble Up"},
 	}
 
-	if cmd := v.HandleContentKey(keyPress("m")); cmd != nil {
+	if cmd := v.HandleContentKey(keyPress("v")); cmd != nil {
 		t.Fatal("opening the move picker should not start a request")
 	}
 	if !v.CapturingInput() || moveModal(v) == nil {
@@ -654,7 +778,7 @@ func TestMailViewMovePickerKeepsBoxWithCollidingLabelID(t *testing.T) {
 	}
 	v.boxIndex = 1
 
-	v.HandleContentKey(keyPress("m"))
+	v.HandleContentKey(keyPress("v"))
 	if moveModal(v) == nil || len(moveModal(v).destinations) != 1 {
 		t.Fatalf("move destinations = %+v", moveModal(v))
 	}
@@ -672,7 +796,7 @@ func TestMailViewMovePickerSelectsWithArrowKeys(t *testing.T) {
 		{Kind: mail.KindBox, ID: 3, BoxKind: hey.BoxKindSetAside, Name: "Set Aside"},
 	}
 
-	v.HandleContentKey(keyPress("m"))
+	v.HandleContentKey(keyPress("v"))
 	v.HandleContentKey(keyPress("down"))
 	msg := runCmd(v.HandleContentKey(keyPress("enter")))
 	if done, ok := msg.(postingActionDoneMsg); !ok || done.err != nil {
@@ -690,7 +814,7 @@ func TestMailViewMovePickerCancelsWithoutRequest(t *testing.T) {
 		{Kind: mail.KindBox, ID: 2, BoxKind: hey.BoxKindFeed, Name: "The Feed"},
 	}
 
-	v.HandleContentKey(keyPress("m"))
+	v.HandleContentKey(keyPress("v"))
 	if cmd := v.HandleContentKey(keyPress("esc")); cmd != nil {
 		t.Fatal("canceling the move picker should not return a command")
 	}
@@ -986,14 +1110,14 @@ func TestMailViewFolderDiscoveryFailurePreservesMailAndRetries(t *testing.T) {
 	if !consumed || firstPostings == nil || len(v.boxes) != 1 || v.folderDiscoveryErr == "" {
 		t.Fatalf("folder failure state = consumed:%v command:%v sources:%+v error:%q", consumed, firstPostings != nil, v.boxes, v.folderDiscoveryErr)
 	}
-	if !strings.Contains(v.notice, "press g to retry") {
+	if !strings.Contains(v.notice, "press b to retry") {
 		t.Errorf("notice = %q", v.notice)
 	}
 	v.Update(runCmd(firstPostings))
 
-	retry := v.HandleContentKey(keyPress("g"))
+	retry := v.HandleContentKey(keyPress("b"))
 	if retry == nil || !v.requests.loading {
-		t.Fatal("g should retry failed folder discovery")
+		t.Fatal("b should retry failed folder discovery")
 	}
 	recovered := runCmd(retry).(mailSourcesLoadedMsg)
 	v.Update(recovered)
@@ -1034,7 +1158,7 @@ func TestMailViewFolderPickerFilesAndUnfilesThread(t *testing.T) {
 		v, recorded := mailWithTestServer(t, http.StatusNoContent)
 		v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindFolder, Name: "Receipts"})
 
-		v.HandleContentKey(keyPress("g"))
+		v.HandleContentKey(keyPress("b"))
 		if folderModal(v) == nil || !v.CapturingInput() {
 			t.Fatal("folder picker should capture input")
 		}
@@ -1063,7 +1187,7 @@ func TestMailViewFolderPickerFilesAndUnfilesThread(t *testing.T) {
 		v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindFolder, Name: "Receipts"})
 		v.postingList.postings[0].Folders = []mail.Folder{{ID: 12, Name: "Receipts"}}
 
-		v.HandleContentKey(keyPress("g"))
+		v.HandleContentKey(keyPress("b"))
 		if view := v.View(); !strings.Contains(view, "[x] Receipts") || !strings.Contains(view, "Remove all labels") {
 			t.Errorf("folder picker view = %q", view)
 		}
@@ -1084,7 +1208,7 @@ func TestMailViewFolderPickerFilesAndUnfilesThread(t *testing.T) {
 		v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindFolder, Name: "Receipts"})
 		v.postingList.postings[0].Folders = []mail.Folder{{ID: 12, Name: "Receipts"}}
 
-		v.HandleContentKey(keyPress("g"))
+		v.HandleContentKey(keyPress("b"))
 		v.HandleContentKey(keyPress("down"))
 		v.HandleContentKey(keyPress("down"))
 		done, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(folderActionDoneMsg)
@@ -1104,7 +1228,7 @@ func TestMailViewFolderPickerFilesAndUnfilesThread(t *testing.T) {
 func TestMailViewFolderPickerCreatesFolder(t *testing.T) {
 	v, recorded := mailWithTestServer(t, http.StatusNoContent)
 
-	v.HandleContentKey(keyPress("g"))
+	v.HandleContentKey(keyPress("b"))
 	if cmd := v.HandleContentKey(keyPress("enter")); cmd == nil || folderModal(v) == nil || !folderModal(v).creating {
 		t.Fatal("selecting create should focus the folder name input")
 	}
@@ -1136,7 +1260,7 @@ func TestMailViewFolderPickerScrollsAndSanitizesNames(t *testing.T) {
 		v.boxes = append(v.boxes, mail.Source{ID: id + 100, Kind: mail.KindFolder, Name: name})
 	}
 
-	v.HandleContentKey(keyPress("g"))
+	v.HandleContentKey(keyPress("b"))
 	for range 19 {
 		v.HandleContentKey(keyPress("down"))
 	}
@@ -1180,7 +1304,7 @@ func TestMailViewFolderActionFailureKeepsThread(t *testing.T) {
 	v, _ := mailWithTestServer(t, http.StatusInternalServerError)
 	v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindFolder, Name: "Receipts"})
 
-	v.HandleContentKey(keyPress("g"))
+	v.HandleContentKey(keyPress("b"))
 	done, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(folderActionDoneMsg)
 	if !ok || done.err == nil {
 		t.Fatalf("folder action returned %#v, want an error", done)
@@ -1199,7 +1323,7 @@ func TestMailViewFolderActionFailureKeepsThread(t *testing.T) {
 
 func TestMailViewFolderPickerRequiresNameAndCancels(t *testing.T) {
 	v := mailWithPostings()
-	v.HandleContentKey(keyPress("g"))
+	v.HandleContentKey(keyPress("b"))
 	v.HandleContentKey(keyPress("enter"))
 	if cmd := v.HandleContentKey(keyPress("enter")); cmd != nil {
 		t.Fatal("empty folder name should not submit")
@@ -1389,26 +1513,27 @@ func TestMailViewIgnoresPostingCompletionAfterBoxSwitch(t *testing.T) {
 	}
 }
 
-func TestMailViewReportsPostingFailureAfterBoxSwitch(t *testing.T) {
+func TestMailViewIgnoresUnseenFailureAfterBoxSwitch(t *testing.T) {
 	v, _ := mailWithTestServer(t, http.StatusInternalServerError)
+	v.postingList.postings[0].Seen = true
 
-	msg := runCmd(v.HandleContentKey(keyPress("t")))
+	msg := runCmd(v.HandleContentKey(keyPress("u")))
 	done, ok := msg.(postingActionDoneMsg)
 	if !ok || done.err == nil {
 		t.Fatalf("posting command returned %#v, want an action error", msg)
 	}
 	v.SubnavRight()
 	v.Update(currentPostingsLoaded(v, []mail.Posting{{ID: 200, Summary: "Other box"}}))
-	errCmd, consumed := v.Update(done)
+	cmd, consumed := v.Update(done)
 
-	if !consumed || errCmd == nil {
-		t.Fatal("failed action should still return an error after a box switch")
-	}
-	if _, ok := runCmd(errCmd).(errMsg); !ok {
-		t.Error("failed action should produce errMsg")
+	if !consumed || cmd != nil {
+		t.Fatal("failed action from the old box should be ignored")
 	}
 	if len(v.postingList.postings) != 1 || v.postingList.postings[0].ID != 200 {
 		t.Errorf("failed action changed the new box: %v", v.postingList.postings)
+	}
+	if v.pendingMutations != 0 {
+		t.Errorf("pending mutations = %d, want 0", v.pendingMutations)
 	}
 }
 
@@ -2463,6 +2588,85 @@ func TestSearchMatchToPostingPreservesActionAndThreadIDs(t *testing.T) {
 
 // --- Help bindings ---
 
+func TestMailViewHaystackSearchAndMessageAliases(t *testing.T) {
+	for _, key := range []string{"/", "s", "S"} {
+		t.Run("search "+key, func(t *testing.T) {
+			v := mailWithPostings()
+			v.HandleContentKey(keyPress(key))
+			if searchModal(v) == nil {
+				t.Fatalf("%q did not open search", key)
+			}
+		})
+	}
+
+	for _, testCase := range []struct {
+		key  string
+		kind mailRequestKind
+	}{
+		{"r", mailRequestReply}, {"R", mailRequestReply},
+		{"f", mailRequestForward}, {"F", mailRequestForward},
+	} {
+		t.Run("message "+testCase.key, func(t *testing.T) {
+			v := mailWithPostings()
+			if cmd := v.HandleContentKey(keyPress(testCase.key)); cmd == nil || v.requests.kind != testCase.kind {
+				t.Fatalf("%q did not start request %v", testCase.key, testCase.kind)
+			}
+		})
+	}
+}
+
+func TestMailViewHaystackPickerAliases(t *testing.T) {
+	for _, key := range []string{"v", "V"} {
+		v := mailWithPostings()
+		v.HandleContentKey(keyPress(key))
+		if moveModal(v) == nil {
+			t.Errorf("%q did not open move picker", key)
+		}
+	}
+	for _, key := range []string{"b", "B"} {
+		v := mailWithPostings()
+		v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindFolder, Name: "Receipts"})
+		v.HandleContentKey(keyPress(key))
+		if folderModal(v) == nil {
+			t.Errorf("%q did not open labels picker", key)
+		}
+	}
+	for _, key := range []string{"n", "N"} {
+		v := mailWithPostings()
+		v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindCollection, Name: "Kitchen remodel"})
+		v.postingList.postings[0].TopicID = 100
+		v.HandleContentKey(keyPress(key))
+		if collectionModal(v) == nil {
+			t.Errorf("%q did not open collections picker", key)
+		}
+	}
+}
+
+func TestMailViewCoverPeekUsesX(t *testing.T) {
+	v := mailWithPostings()
+	v.postingList.setCover(coverTopo)
+	v.HandleContentKey(keyPress("x"))
+	if !v.postingList.coverPeeked {
+		t.Fatal("x did not lift the cover")
+	}
+	v.HandleContentKey(keyPress("x"))
+	if v.postingList.coverPeeked {
+		t.Fatal("x did not replace the cover")
+	}
+}
+
+func TestMailViewRemovedPostingAliasesStayUnused(t *testing.T) {
+	for _, key := range []string{"m", "g", "k"} {
+		v := mailWithPostings()
+		if cmd := v.HandleContentKey(keyPress(key)); cmd != nil {
+			t.Errorf("removed alias %q returned a command", key)
+		}
+		if v.modal != nil {
+			t.Errorf("removed alias %q opened %T", key, v.modal)
+		}
+	}
+}
+
 func TestMailViewHelpBindings(t *testing.T) {
 	v := mailWithPostings()
 	bindings := v.HelpBindings()
@@ -2474,7 +2678,7 @@ func TestMailViewHelpBindings(t *testing.T) {
 	for _, b := range bindings {
 		keys[b.key] = true
 	}
-	for _, expected := range []string{"/", "r", "f", "m", "g", "e", "l", "a", "t", "s", "-"} {
+	for _, expected := range []string{"/", "r", "f", "v", "b", "n", "e", "u", "i", "l", "a", "t", "!", "-"} {
 		if !keys[expected] {
 			t.Errorf("missing help binding for key %q", expected)
 		}
@@ -2518,7 +2722,7 @@ func TestMailViewHelpBindingsStopIgnoringForIgnoredThread(t *testing.T) {
 
 func TestMailViewHelpBindingsInMovePicker(t *testing.T) {
 	v := mailWithPostings()
-	v.HandleContentKey(keyPress("m"))
+	v.HandleContentKey(keyPress("v"))
 
 	bindings := v.HelpBindings()
 	if len(bindings) != 3 || bindings[0].key != "↑↓" || bindings[1].key != "enter" || bindings[2].key != "esc" {
@@ -2528,7 +2732,7 @@ func TestMailViewHelpBindingsInMovePicker(t *testing.T) {
 
 func TestMailViewHelpBindingsInFolderPicker(t *testing.T) {
 	v := mailWithPostings()
-	v.HandleContentKey(keyPress("g"))
+	v.HandleContentKey(keyPress("b"))
 
 	bindings := v.HelpBindings()
 	if len(bindings) != 3 || bindings[0].key != "↑↓" || bindings[1].key != "enter" || bindings[2].key != "esc" {
@@ -2616,8 +2820,8 @@ func TestMailViewLabelsTabAndPicker(t *testing.T) {
 	v := mailWithLabels()
 
 	items, selected, _, _ := v.SubnavItems()
-	if last := items[len(items)-1]; last.label != "Labels" || last.shortcut != "L" {
-		t.Fatalf("the last tab should be Labels with the L shortcut: %+v", items)
+	if last := items[len(items)-1]; last.label != "Labels" || last.shortcut != "" {
+		t.Fatalf("the last tab should be Labels without the Reply Later shortcut: %+v", items)
 	}
 	if len(items) != len(testBoxes())+1 {
 		t.Errorf("labels should not appear as their own tabs: %+v", items)
@@ -2670,12 +2874,9 @@ func TestMailViewLabelsTabAndPicker(t *testing.T) {
 		t.Error("left from Labels should return to the last box tab")
 	}
 
-	// Shift+L opens the picker from anywhere in the mail section.
-	if cmd := v.handleBoxShortcut("L"); cmd == nil || labelsModal(v) == nil {
-		t.Error("the L shortcut should open the Labels picker")
-	}
-	if cmd := v.handleBoxShortcut("L"); cmd != nil {
-		t.Error("the L shortcut should be inert while the picker is open")
+	// Shift+L belongs to Reply Later, so Labels navigation does not capture it.
+	if cmd := v.handleBoxShortcut("L"); cmd != nil || labelsModal(v) != nil {
+		t.Error("the Labels tab captured the Reply Later shortcut")
 	}
 }
 

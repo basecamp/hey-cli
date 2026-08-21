@@ -126,7 +126,7 @@ func TestMailViewCollectionMembershipAddsAndRemoves(t *testing.T) {
 		v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindCollection, Name: "Kitchen remodel"})
 		v.postingList.postings[0].TopicID = 501
 
-		v.HandleContentKey(keyPress("k"))
+		v.HandleContentKey(keyPress("n"))
 		if collectionModal(v) == nil || !v.CapturingInput() {
 			t.Fatal("collection picker should capture input")
 		}
@@ -150,7 +150,7 @@ func TestMailViewCollectionMembershipAddsAndRemoves(t *testing.T) {
 		v.postingList.postings[0].TopicID = 501
 		v.postingList.postings[0].Collections = []mail.Collection{collection}
 
-		v.HandleContentKey(keyPress("k"))
+		v.HandleContentKey(keyPress("n"))
 		done := runCmd(v.HandleContentKey(keyPress("enter"))).(collectionActionDoneMsg)
 		if recorded.method != http.MethodDelete || recorded.path != "/topics/501/collecting" || recorded.rawQueries[len(recorded.rawQueries)-1] != "collection_id=12" {
 			t.Errorf("request = %s %s?%v", recorded.method, recorded.path, recorded.rawQueries)
@@ -169,7 +169,7 @@ func TestMailViewCollectionMembershipFailureKeepsState(t *testing.T) {
 	v.postingList.postings[0].TopicID = 501
 	v.postingList.postings[0].Collections = []mail.Collection{collection}
 
-	v.HandleContentKey(keyPress("k"))
+	v.HandleContentKey(keyPress("n"))
 	done := runCmd(v.HandleContentKey(keyPress("enter"))).(collectionActionDoneMsg)
 	v.Update(done)
 	if v.pendingMutations != 0 || len(v.postingList.postings[0].Collections) != 1 {
@@ -184,7 +184,7 @@ func TestMailViewCollectionMembershipRequiresTopicID(t *testing.T) {
 	v, recorded := mailWithTestServer(t, http.StatusNoContent)
 	v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindCollection, Name: "Kitchen remodel"})
 
-	if cmd := v.HandleContentKey(keyPress("k")); cmd != nil {
+	if cmd := v.HandleContentKey(keyPress("n")); cmd != nil {
 		t.Fatal("unresolved posting should not start a mutation")
 	}
 	if collectionModal(v) != nil || v.notice != "This item does not identify an email thread" || len(recorded.requests) != 0 {
@@ -205,7 +205,7 @@ func TestMailViewCollectionDiscoveryFailurePreservesKnownCollections(t *testing.
 	if sourceIndex(v.boxes, 12, mail.KindCollection) == 0 || v.collectionDiscoveryErr == "" {
 		t.Errorf("sources = %+v error = %q", v.boxes, v.collectionDiscoveryErr)
 	}
-	if !strings.Contains(v.notice, "press k to retry") {
+	if !strings.Contains(v.notice, "press n to retry") {
 		t.Errorf("notice = %q", v.notice)
 	}
 }
@@ -265,7 +265,7 @@ func TestMailViewRemovingFromCurrentCollectionRefreshesIt(t *testing.T) {
 	v.postingList.postings[0].TopicID = 501
 	v.postingList.postings[0].Collections = []mail.Collection{collection}
 
-	v.HandleContentKey(keyPress("k"))
+	v.HandleContentKey(keyPress("n"))
 	done := runCmd(v.HandleContentKey(keyPress("enter"))).(collectionActionDoneMsg)
 	refresh, consumed := v.Update(done)
 	if !consumed || refresh == nil || v.requests.kind != mailRequestPostings || v.postingIndex(100) >= 0 {
@@ -277,7 +277,7 @@ func TestMailViewCollectionPendingMutationBlocksAccountSwitch(t *testing.T) {
 	v, _ := mailWithTestServer(t, http.StatusNoContent)
 	v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindCollection, Name: "Kitchen remodel"})
 	v.postingList.postings[0].TopicID = 501
-	v.HandleContentKey(keyPress("k"))
+	v.HandleContentKey(keyPress("n"))
 	cmd := v.HandleContentKey(keyPress("enter"))
 	if cmd == nil || !v.AccountSwitchBlocked() {
 		t.Fatal("collection write should block account switching until completion")
@@ -291,7 +291,7 @@ func TestMailViewCollectionPendingMutationBlocksAccountSwitch(t *testing.T) {
 func TestMailViewCollectionDiscoveryRetryKey(t *testing.T) {
 	v := mailWithPostings()
 	v.collectionDiscoveryErr = "unavailable"
-	cmd := v.HandleContentKey(keyPress("k"))
+	cmd := v.HandleContentKey(keyPress("n"))
 	if cmd == nil || !v.requests.loading || v.notice != "Retrying collections…" {
 		t.Errorf("retry = cmd:%v loading:%v notice:%q", cmd != nil, v.requests.loading, v.notice)
 	}
@@ -311,7 +311,7 @@ func TestMailViewCollectionActionUsesTopicNotPostingID(t *testing.T) {
 	v.boxes = []mail.Source{{Kind: mail.KindBox, ID: 1, BoxKind: hey.BoxKindImbox, Name: "Imbox"}, {ID: 12, Kind: mail.KindCollection, Name: "Kitchen remodel"}}
 	v.postingList.setPostings([]mail.Posting{{ID: 100, TopicID: 501}})
 
-	v.HandleContentKey(keyPress("k"))
+	v.HandleContentKey(keyPress("n"))
 	done := runCmd(v.HandleContentKey(keyPress("enter"))).(collectionActionDoneMsg)
 	if path != "/topics/501/collecting" || done.postingID != 100 {
 		t.Errorf("path = %q posting ID = %d", path, done.postingID)
@@ -374,7 +374,7 @@ func TestMailViewCollectionPickerEscapeMakesNoRequest(t *testing.T) {
 	v, recorded := mailWithTestServer(t, http.StatusNoContent)
 	v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindCollection, Name: "Kitchen remodel"})
 	v.postingList.postings[0].TopicID = 501
-	v.HandleContentKey(keyPress("k"))
+	v.HandleContentKey(keyPress("n"))
 	if cmd := v.HandleContentKey(keyPress("esc")); cmd != nil {
 		t.Fatal("escape should not return a command")
 	}
@@ -452,7 +452,7 @@ func TestMailViewCollectionNoticeSanitizesName(t *testing.T) {
 	v, _ := mailWithTestServer(t, http.StatusNoContent)
 	v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindCollection, Name: "Kitchen\x1b]2;owned\a\nremodel"})
 	v.postingList.postings[0].TopicID = 501
-	v.HandleContentKey(keyPress("k"))
+	v.HandleContentKey(keyPress("n"))
 	done := runCmd(v.HandleContentKey(keyPress("enter"))).(collectionActionDoneMsg)
 	v.Update(done)
 	if strings.Contains(v.notice, "\x1b") || strings.Contains(v.notice, "\nremodel") {
@@ -491,7 +491,7 @@ func TestMailViewCollectionEmptySourceHasNothingMoreToRead(t *testing.T) {
 func TestMailViewCollectionPickerNoCollections(t *testing.T) {
 	v := mailWithPostings()
 	v.postingList.postings[0].TopicID = 501
-	v.HandleContentKey(keyPress("k"))
+	v.HandleContentKey(keyPress("n"))
 	if collectionModal(v) != nil || v.notice != "No collections available" {
 		t.Errorf("picker = %v notice = %q", collectionModal(v) != nil, v.notice)
 	}
@@ -610,7 +610,7 @@ func TestMailViewCollectionListErrorNoticeIsRecoverable(t *testing.T) {
 	bindings := v.HelpBindings()
 	found := false
 	for _, binding := range bindings {
-		if binding.key == "k" && binding.desc == "retry collections" {
+		if binding.key == "n" && binding.desc == "retry collections" {
 			found = true
 		}
 	}
@@ -656,7 +656,7 @@ func TestMailViewCollectionActionCompletionMessageCarriesIdentity(t *testing.T) 
 	v, _ := mailWithTestServer(t, http.StatusNoContent)
 	v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindCollection, Name: "Kitchen remodel"})
 	v.postingList.postings[0].TopicID = 501
-	v.HandleContentKey(keyPress("k"))
+	v.HandleContentKey(keyPress("n"))
 	done := runCmd(v.HandleContentKey(keyPress("enter"))).(collectionActionDoneMsg)
 	if done.sourceID != v.currentBoxID() || done.sourceKind != v.currentSourceKind() || done.collection.ID != 12 || !done.added {
 		t.Errorf("completion = %+v", done)
@@ -676,7 +676,7 @@ func TestMailViewCollectionMutationUsesOneRequest(t *testing.T) {
 	v := newMailView(vc)
 	v.boxes = []mail.Source{{Kind: mail.KindBox, ID: 1, BoxKind: hey.BoxKindImbox, Name: "Imbox"}, {ID: 12, Kind: mail.KindCollection, Name: "Kitchen remodel"}}
 	v.postingList.setPostings([]mail.Posting{{ID: 100, TopicID: 501}})
-	v.HandleContentKey(keyPress("k"))
+	v.HandleContentKey(keyPress("n"))
 	runCmd(v.HandleContentKey(keyPress("enter")))
 	if requests.Load() != 1 {
 		t.Errorf("requests = %d, want 1", requests.Load())

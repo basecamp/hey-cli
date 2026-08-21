@@ -117,7 +117,7 @@ func selectTwoThreads(view *mailView) {
 
 func TestTUIBulkReplyRequiresExplicitSelection(t *testing.T) {
 	view, state := tuiBulkReplyServer(t)
-	if cmd := view.HandleContentKey(keyPress("b")); cmd != nil {
+	if cmd := view.HandleContentKey(keyPress("ctrl+b")); cmd != nil {
 		t.Fatal("bulk reply without a selection should not make a request")
 	}
 	if view.notice != "Select threads with space before starting a bulk reply" {
@@ -138,7 +138,7 @@ func TestTUIBulkReplySelectionAndPreviewShowExactRecipients(t *testing.T) {
 		t.Errorf("selected rows are not marked: %q", rendered)
 	}
 
-	msg := runCmd(view.HandleContentKey(keyPress("b")))
+	msg := runCmd(view.HandleContentKey(keyPress("ctrl+b")))
 	loaded, ok := msg.(bulkReplyDraftLoadedMsg)
 	if !ok || loaded.err != nil {
 		t.Fatalf("draft command returned %#v", msg)
@@ -213,7 +213,7 @@ func TestTUIBulkReplyPreviewReportsSkippedThreads(t *testing.T) {
 	view, state := tuiBulkReplyServer(t)
 	state.draft = `{"content":"","entries":[{"id":501,"topic_id":700,"topic_name":"Quarterly planning","addressed":{"directly":[{"id":31,"email_address":"jane@example.com"}]}}]}`
 	selectTwoThreads(view)
-	loaded := runCmd(view.HandleContentKey(keyPress("b"))).(bulkReplyDraftLoadedMsg)
+	loaded := runCmd(view.HandleContentKey(keyPress("ctrl+b"))).(bulkReplyDraftLoadedMsg)
 	view.Update(loaded)
 	if !strings.Contains(view.View(), "1 replyable thread · 1 skipped") {
 		t.Errorf("preview = %q", view.View())
@@ -223,7 +223,7 @@ func TestTUIBulkReplyPreviewReportsSkippedThreads(t *testing.T) {
 func TestTUIBulkReplyReviewsThenSendsAndOffersUndo(t *testing.T) {
 	view, state := tuiBulkReplyServer(t)
 	selectTwoThreads(view)
-	view.Update(runCmd(view.HandleContentKey(keyPress("b"))))
+	view.Update(runCmd(view.HandleContentKey(keyPress("ctrl+b"))))
 
 	if cmd := view.HandleContentKey(keyPress("enter")); cmd == nil {
 		t.Error("enter should focus the bulk reply editor")
@@ -244,10 +244,10 @@ func TestTUIBulkReplyReviewsThenSendsAndOffersUndo(t *testing.T) {
 	if bulkReplyModal(view) != nil || len(view.postingList.selectedIDs()) != 0 {
 		t.Error("successful send should close the form and clear selection")
 	}
-	if view.lastBulkReplyID != 900 || !strings.Contains(view.notice, "2 bulk replies queued with undo available") || !strings.Contains(view.notice, "press u to undo") {
+	if view.lastBulkReplyID != 900 || !strings.Contains(view.notice, "2 bulk replies queued with undo available") || !strings.Contains(view.notice, "press ctrl+u to undo") {
 		t.Errorf("delivery state = id:%d notice:%q", view.lastBulkReplyID, view.notice)
 	}
-	if !slices.ContainsFunc(view.HelpBindings(), func(b helpBinding) bool { return b.key == "u" }) {
+	if !slices.ContainsFunc(view.HelpBindings(), func(b helpBinding) bool { return b.key == "ctrl+u" }) {
 		t.Errorf("help does not offer undo: %v", view.HelpBindings())
 	}
 
@@ -283,7 +283,7 @@ func TestTUIBulkReplyEmptyDraftNeverSends(t *testing.T) {
 			state.draft = `{"content":"","entries":[]}`
 			state.draftStatus = test.status
 			selectTwoThreads(view)
-			loaded := runCmd(view.HandleContentKey(keyPress("b"))).(bulkReplyDraftLoadedMsg)
+			loaded := runCmd(view.HandleContentKey(keyPress("ctrl+b"))).(bulkReplyDraftLoadedMsg)
 			view.Update(loaded)
 			if bulkReplyModal(view) != nil || !strings.Contains(view.notice, "nothing was sent") {
 				t.Errorf("empty draft state = form:%v notice:%q", bulkReplyModal(view), view.notice)
@@ -299,7 +299,7 @@ func TestTUIBulkReplySendFailureKeepsEditor(t *testing.T) {
 	view, state := tuiBulkReplyServer(t)
 	state.sendStatus = http.StatusUnprocessableEntity
 	selectTwoThreads(view)
-	view.Update(runCmd(view.HandleContentKey(keyPress("b"))))
+	view.Update(runCmd(view.HandleContentKey(keyPress("ctrl+b"))))
 	view.HandleContentKey(keyPress("enter"))
 	typeText(view, "Thanks everyone")
 	sent := runCmd(view.HandleContentKey(ctrlS())).(bulkReplySentMsg)
@@ -316,7 +316,7 @@ func TestTUIBulkReplyImmediateDeliveryHasNoUndo(t *testing.T) {
 	view, state := tuiBulkReplyServer(t)
 	state.delivery = `{"id":901,"entries_count":2,"delayed":false}`
 	selectTwoThreads(view)
-	view.Update(runCmd(view.HandleContentKey(keyPress("b"))))
+	view.Update(runCmd(view.HandleContentKey(keyPress("ctrl+b"))))
 	view.HandleContentKey(keyPress("enter"))
 	typeText(view, "Thanks")
 	view.Update(runCmd(view.HandleContentKey(ctrlS())))
@@ -328,7 +328,7 @@ func TestTUIBulkReplyImmediateDeliveryHasNoUndo(t *testing.T) {
 func TestTUIBulkReplyUndoSuccessAndExpiry(t *testing.T) {
 	view, _ := tuiBulkReplyServer(t)
 	view.lastBulkReplyID = 900
-	undone, ok := runCmd(view.HandleContentKey(keyPress("u"))).(bulkReplyUndoneMsg)
+	undone, ok := runCmd(view.HandleContentKey(keyPress("ctrl+u"))).(bulkReplyUndoneMsg)
 	if !ok || undone.err != nil {
 		t.Fatalf("undo returned %#v", undone)
 	}
@@ -340,7 +340,7 @@ func TestTUIBulkReplyUndoSuccessAndExpiry(t *testing.T) {
 	view, state := tuiBulkReplyServer(t)
 	state.undoStatus = http.StatusUnprocessableEntity
 	view.lastBulkReplyID = 900
-	undone = runCmd(view.HandleContentKey(keyPress("u"))).(bulkReplyUndoneMsg)
+	undone = runCmd(view.HandleContentKey(keyPress("ctrl+u"))).(bulkReplyUndoneMsg)
 	if undone.err == nil {
 		t.Fatal("expired undo should fail")
 	}
@@ -354,7 +354,7 @@ func TestTUIBulkReplyCanCancelPreviewAndEditor(t *testing.T) {
 	for _, advance := range []bool{false, true} {
 		view, _ := tuiBulkReplyServer(t)
 		selectTwoThreads(view)
-		view.Update(runCmd(view.HandleContentKey(keyPress("b"))))
+		view.Update(runCmd(view.HandleContentKey(keyPress("ctrl+b"))))
 		if advance {
 			view.HandleContentKey(keyPress("enter"))
 		}

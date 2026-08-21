@@ -489,7 +489,7 @@ cover can never be scrolled past, and `coverView` then gives the art every row t
 above it did not use. A list too short for even the floor keeps the divider and skips the
 art — the hint is worth more than a smear.
 
-`v` lifts the cover (`coverPeeked`) and puts it back; the divider carries the hint and the
+`x` lifts the cover (`coverPeeked`) and puts it back; the divider carries the hint and the
 hidden count, where the web app puts its buttons. Setting a cover closes it, so a box
 arrives covered rather than however the last one was left. Only the Imbox is coverable —
 that is haystack's rule (`Box::Imbox#coverable?`), and it is the same box that gets the

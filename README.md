@@ -201,7 +201,7 @@ Accounts and individual email addresses.
 Switching cancels requests from the previous account and reloads the active section;
 Calendar and Journal remain identity-wide.
 
-Navigate between Mail, Contacts, Calendar, and Journal. Mail navigation includes HEY boxes plus separate Labels and Collections tabs. Press Shift+L or Shift+K to choose one. Every list keeps going: scroll towards the bottom of a box, label, or collection and the next threads are read in behind you, so there are no pages to step through. Use `/` to search, Enter to open a thread, `r` to reply, `f` to forward, `m` to move, `g` to manage labels, `k` to add or remove the selected thread from collections, `t` to trash, `s` to mark as spam, `-` to ignore, and `+` to stop ignoring. Select threads with Space and press `b` to preview every bulk-reply recipient before writing and sending one reply to all selected threads. A delayed bulk reply can be recalled with `u` while HEY's undo window remains open. Search results retain the matching-message summary and keep going as you scroll, like every other list.
+Navigate between Mail, Contacts, Calendar, and Journal. Mail navigation includes HEY boxes plus separate Labels and Collections tabs; Shift+K opens Collections directly, while Labels remains available from the navigation row. Every list keeps going: scroll towards the bottom of a box, label, or collection and the next threads are read in behind you, so there are no pages to step through. The mail actions use HEY's web shortcuts in either letter case: `/` or `s` searches, `r` replies, `f` forwards, `v` moves, `b` manages labels, `n` adds or removes the selected thread from collections, `e` marks seen, `u` marks unseen, `i` moves to the Imbox, `l` moves to Reply Later, `a` moves to Set Aside, `d` moves to The Feed, `p` moves to Paper Trail, and `t` trashes. Press `!` to mark as spam, `-` to ignore, and `+` to stop ignoring. Select threads with Space and press Ctrl+B to preview every bulk-reply recipient before writing and sending one reply to all selected threads. A delayed bulk reply can be recalled with Ctrl+U while HEY's undo window remains open. Search results retain the matching-message summary and keep going as you scroll, like every other list.
 
 The mail list follows the server. HEY tells the TUI when a box changed over the same
 Action Cable connection `hey watch` uses, and the box on screen is read again a moment
@@ -223,7 +223,7 @@ scroll, the same way the mail list does.
 The Imbox can wear cover art, the way the HEY web app does: everything you have already
 read goes under it, so the box ends at what still wants your attention instead of trailing
 off into a month of receipts. The divider stays and says how much is under there — press
-`v` to peek, `v` again to close it.
+`x` to peek, `x` again to close it.
 
 Press Ctrl+V to choose one: `blobs`, `grid`, `peace`, `terrazzo`, `topo` or `waves`, the
 same six covers redrawn as characters, so they work in any terminal rather than only the
