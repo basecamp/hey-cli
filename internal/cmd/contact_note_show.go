@@ -7,7 +7,6 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
-	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 type contactNoteShowCommand struct {
@@ -46,11 +45,7 @@ func (c *contactNoteShowCommand) run(cmd *cobra.Command, args []string) error {
 		return writeNoteHTML(cmd.OutOrStdout(), note.NoteHtml)
 	}
 	if writer.IsStyled() {
-		if note.Note == "" {
-			fmt.Fprintln(cmd.OutOrStdout(), "(empty)")
-		} else {
-			fmt.Fprintln(cmd.OutOrStdout(), terminal.Sanitize(note.Note))
-		}
+		fmt.Fprintln(cmd.OutOrStdout(), renderedNote(note.Note, note.NoteHtml))
 		return nil
 	}
 	return writeOK(note,

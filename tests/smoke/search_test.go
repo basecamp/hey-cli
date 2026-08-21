@@ -49,7 +49,7 @@ func TestSearchFreeTextAndRefinements(t *testing.T) {
 		}
 	}
 	if subject == "" {
-		t.Skip("no Imbox thread available for read-only search validation")
+		skipf(t, "no Imbox thread available for read-only search validation")
 	}
 
 	var freeText []smokeSearchResult

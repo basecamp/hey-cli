@@ -175,22 +175,32 @@ func TestContactsShowIncludesAliasesAndPrivateNote(t *testing.T) {
 	}
 }
 
-// The styled detail never prints HTML; --html is a format of its own and writes the
-// note's markup alone. Either way the text HEY served is inert on a terminal.
-func TestContactsShowStyledDetailIsPlainAndSanitized(t *testing.T) {
+// The styled detail renders the rich note and never prints its HTML; --html is a format
+// of its own and writes the markup alone. Either way the text HEY served is inert.
+func TestContactsShowStyledDetailRendersTheNoteAndSanitizes(t *testing.T) {
 	var output bytes.Buffer
 	command := &cobra.Command{}
 	command.SetOut(&output)
 	printContactDetails(command, contactShowResult{
 		ContactDetail: generated.ContactDetail{Id: 7, Name: "Jane \x1b[31mDoe", EmailAddress: "jane@example.com"},
-		Note:          "Plain \x1b]0;note\x07note",
-		NoteHTML:      "<p>Rich note</p>",
+		Note:          "Call back about the *invoice*",
+		NoteHTML:      "<p>Call back about the <strong>invoice</strong> &amp;#27;[31m</p>",
 	})
-	if strings.Contains(output.String(), "<p>") || strings.Contains(output.String(), "\x1b") {
-		t.Errorf("styled contact detail = %q", output.String())
+	shown := output.String()
+	if strings.Contains(shown, "<p>") || strings.Contains(shown, "<strong>") || strings.Contains(shown, "\x1b[31m") {
+		t.Errorf("styled contact detail = %q", shown)
 	}
-	if !strings.Contains(output.String(), "Jane Doe") || !strings.Contains(output.String(), "Plain note") {
-		t.Errorf("styled contact detail = %q, want the text kept", output.String())
+	if !strings.Contains(shown, "Jane Doe") || !strings.Contains(shown, "invoice") || !strings.Contains(shown, "&#27;[31m") {
+		t.Errorf("styled contact detail = %q, want the text kept", shown)
+	}
+}
+
+func TestRenderedNoteFallsBackToThePlainNote(t *testing.T) {
+	if got := renderedNote("Plain \x1b]0;note\x07note", ""); got != "Plain note" {
+		t.Errorf("renderedNote = %q", got)
+	}
+	if got := renderedNote("", ""); got != "(empty)" {
+		t.Errorf("renderedNote = %q", got)
 	}
 }
 

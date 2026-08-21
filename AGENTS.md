@@ -629,7 +629,7 @@ The dev server must be running at `http://app.hey.localhost:3003` (override with
 1. `TestMain` in `helpers_test.go` orchestrates setup: finds the binary, checks server reachability, launches headless Chrome via chromedp to log in and extract the `session_token` cookie, then authenticates the CLI with `hey auth login --cookie`.
 2. All CLI invocations run in an isolated environment: temp `XDG_CONFIG_HOME`, `HEY_NO_KEYRING=1`, `HEY_BASE_URL` pointing to the dev server.
 3. Helper functions (`hey()`, `heyOK()`, `heyJSON()`, `heyFail()`) run the binary and parse output. `dataAs[T]()` generically unmarshals response data.
-4. Tests that depend on write operations (compose, todo add, journal write, reply, timetrack start) skip gracefully when the server returns errors, since the SDK's parameter format may not match the server's expectations.
+4. Tests that depend on write operations (compose, todo add, journal write, reply, timetrack start) skip gracefully when the server returns errors, since the SDK's parameter format may not match the server's expectations. Set `HEY_SMOKE_STRICT=1` to turn every such skip into a failure — that is the release gate, where a skipped check is not a passed one.
 5. Test data uses `uniqueID()` (nanosecond timestamps) to avoid collisions. Cleanup happens via `t.Cleanup()`.
 6. `hey upgrade` is covered only as far as a dev build's `upgrade_required` refusal (and `hey version --json`). The live self-update against a real release runs in `.github/workflows/upgrade-smoke.yml`, never against the dev server.
 

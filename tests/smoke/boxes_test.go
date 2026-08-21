@@ -189,12 +189,12 @@ func TestMovePosting(t *testing.T) {
 		}
 	}
 	if postingID == 0 {
-		t.Skip("no seen postings in Imbox to move without changing unread state")
+		skipf(t, "no seen postings in Imbox to move without changing unread state")
 	}
 
 	stdout, stderr, code := hey(t, "move", intStr(postingID), "--to", "feedbox", "--json")
 	if code != 0 {
-		t.Skipf("moving postings is unavailable on this server (exit %d): %s", code, stderr)
+		skipf(t, "moving postings is unavailable on this server (exit %d): %s", code, stderr)
 	}
 	t.Cleanup(func() {
 		_, cleanupStderr, cleanupCode := hey(t, "move", intStr(postingID), "--to", "imbox", "--json")

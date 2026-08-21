@@ -145,11 +145,11 @@ FLAGS
       --account    Select a linked mail account ID or all
       --json       Output JSON with metadata
       --jq         Filter JSON with a built-in jq expression
-      --markdown   Output as Markdown
+      --markdown   Output Markdown: a table for a listing, a document for a thread
       --quiet      Output result data only
       --ids-only   Output only IDs, one per line
       --count      Output only the count of results
-      --styled     Force styled output even when piped
+      --styled     Human rendering, bodies as rendered Markdown — the default on a terminal; forces it when piped
       --html       Write the original HTML to a pipe or file (threads, journal read, contacts show, contacts note show)
       --stats      Include request stats in response meta
       --base-url   Override server URL

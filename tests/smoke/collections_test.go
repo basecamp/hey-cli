@@ -27,7 +27,7 @@ func TestCollectionsAndCollection(t *testing.T) {
 		t.Error("collections response omitted summary")
 	}
 	if len(collections) == 0 {
-		t.Skip("no collections available for collection detail validation")
+		skipf(t, "no collections available for collection detail validation")
 	}
 
 	collection := collections[0]
@@ -51,7 +51,7 @@ func TestCollectionsAndCollection(t *testing.T) {
 func TestCollectionOutputFormats(t *testing.T) {
 	collections := dataAs[[]smokeCollection](t, heyJSON(t, "collections"))
 	if len(collections) == 0 {
-		t.Skip("no collections available for output validation")
+		skipf(t, "no collections available for output validation")
 	}
 	id := strconv.FormatInt(collections[0].ID, 10)
 	for _, args := range [][]string{
@@ -83,7 +83,7 @@ func TestCollectionMutations(t *testing.T) {
 		"--json",
 	)
 	if code != 0 {
-		t.Skipf("could not create a disposable thread (exit %d): %s", code, stderr)
+		skipf(t, "could not create a disposable thread (exit %d): %s", code, stderr)
 	}
 	t.Cleanup(func() { cleanupThreadBySubject(t, subject) })
 
@@ -92,13 +92,13 @@ func TestCollectionMutations(t *testing.T) {
 		t.Fatalf("could not find disposable thread: %v", err)
 	}
 	if postingID == 0 || topicID == 0 || accountID == 0 {
-		t.Skip("disposable thread did not expose posting, topic, and account IDs")
+		skipf(t, "disposable thread did not expose posting, topic, and account IDs")
 	}
 
 	collectionName := "Smoke collection " + uid
 	_, stderr, code = hey(t, "collection", "create", collectionName, "--summary", "Disposable collection smoke coverage", "--account", strconv.FormatInt(accountID, 10), "--json")
 	if code != 0 {
-		t.Skipf("collection creation unavailable (exit %d): %s", code, stderr)
+		skipf(t, "collection creation unavailable (exit %d): %s", code, stderr)
 	}
 
 	collectionID, err := findCollectionIDByName(t, collectionName)
@@ -127,7 +127,7 @@ func collectionWriteJSON(t *testing.T, args ...string) Response {
 	args = append(args, "--json")
 	stdout, stderr, code := hey(t, args...)
 	if code != 0 {
-		t.Skipf("collection write unavailable (exit %d): %s", code, stderr)
+		skipf(t, "collection write unavailable (exit %d): %s", code, stderr)
 	}
 	var response Response
 	if err := json.Unmarshal([]byte(stdout), &response); err != nil {

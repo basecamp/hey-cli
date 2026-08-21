@@ -315,6 +315,8 @@ hey screener deny 91 --spam        # turn them away and mark what they sent as s
 hey screener history               # who has already been screened
 hey screener clear                 # empty the queue without deciding
 hey threads 123                    # read a full email thread
+hey threads 123 --markdown         # the thread as one Markdown document
+hey threads 123 --html > 123.html  # HEY's original HTML, to a file
 hey share 123                      # get a sharing link for a thread
 hey unshare 123                    # turn off the sharing link
 hey attachments 123                # list files attached to the thread

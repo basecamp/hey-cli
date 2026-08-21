@@ -27,7 +27,7 @@ func TestAttachmentSendListAndSave(t *testing.T) {
 		"--json",
 	)
 	if code != 0 {
-		t.Skipf("attachment sending is unavailable (exit %d): %s", code, stderr)
+		skipf(t, "attachment sending is unavailable (exit %d): %s", code, stderr)
 	}
 	var composeResponse Response
 	if err := json.Unmarshal([]byte(stdout), &composeResponse); err != nil || !composeResponse.OK {

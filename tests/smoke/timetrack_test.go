@@ -138,7 +138,7 @@ func TestTimetrackCategories(t *testing.T) {
 	title := "Client work " + uniqueID()
 	_, stderr, code := hey(t, "timetrack", "category", "create", title)
 	if code != 0 {
-		t.Skipf("timetrack category create unavailable (exit %d): %s", code, stderr)
+		skipf(t, "timetrack category create unavailable (exit %d): %s", code, stderr)
 	}
 
 	categoryID := findTimeTrackCategory(t, title)

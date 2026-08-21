@@ -17,7 +17,7 @@ func TestIgnoreAndStopIgnoring(t *testing.T) {
 
 	box := dataAs[BoxResp](t, heyJSON(t, "box", "imbox"))
 	if len(box.Postings) == 0 {
-		t.Skip("no threads in Imbox to ignore")
+		skipf(t, "no threads in Imbox to ignore")
 	}
 	posting := box.Postings[0]
 	postingID := intStr(posting.ID)

@@ -163,8 +163,8 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().BoolVar(&quietFlag, "quiet", false, "Output result data only")
 	root.PersistentFlags().BoolVar(&idsOnly, "ids-only", false, "Output only IDs, one per line")
 	root.PersistentFlags().BoolVar(&countFlag, "count", false, "Output only the count of results")
-	root.PersistentFlags().BoolVar(&markdownF, "markdown", false, "Output as Markdown")
-	root.PersistentFlags().BoolVar(&styledFlag, "styled", false, "Force styled output even when piped")
+	root.PersistentFlags().BoolVar(&markdownF, "markdown", false, "Output Markdown: a table for a listing, a document for a thread")
+	root.PersistentFlags().BoolVar(&styledFlag, "styled", false, "Human rendering, bodies as rendered Markdown — the default on a terminal; forces it when piped")
 	root.PersistentFlags().BoolVar(&agentFlag, "agent", false, "Agent mode (JSON envelope, no TTY formatting)")
 	_ = root.PersistentFlags().MarkHidden("agent") // flag is registered immediately above
 	root.PersistentFlags().StringVar(&baseURL, "base-url", "", "Override server URL")

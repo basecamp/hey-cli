@@ -158,7 +158,7 @@ func TestForward(t *testing.T) {
 	}
 	data := dataAs[BoxResp](t, resp)
 	if len(data.Postings) == 0 {
-		t.Skip("no postings in imbox to forward")
+		skipf(t, "no postings in imbox to forward")
 	}
 	topicID := extractTopicID(data.Postings[0].AppURL)
 	if topicID == "" {
@@ -171,7 +171,7 @@ func TestForward(t *testing.T) {
 		"--json",
 	)
 	if code != 0 {
-		t.Skipf("forward is unavailable on this server (exit %d): %s", code, stderr)
+		skipf(t, "forward is unavailable on this server (exit %d): %s", code, stderr)
 	}
 	var forwardResp Response
 	if err := json.Unmarshal([]byte(stdout), &forwardResp); err != nil {

@@ -27,7 +27,7 @@ func TestLabelsAndLabel(t *testing.T) {
 		t.Error("labels response omitted summary")
 	}
 	if len(folders) == 0 {
-		t.Skip("no labels available for label detail validation")
+		skipf(t, "no labels available for label detail validation")
 	}
 
 	folder := folders[0]
@@ -56,7 +56,7 @@ func TestLabelMutations(t *testing.T) {
 		"--json",
 	)
 	if code != 0 {
-		t.Skipf("could not create a disposable thread (exit %d): %s", code, stderr)
+		skipf(t, "could not create a disposable thread (exit %d): %s", code, stderr)
 	}
 	t.Cleanup(func() { cleanupThreadBySubject(t, subject) })
 
@@ -65,13 +65,13 @@ func TestLabelMutations(t *testing.T) {
 		t.Fatalf("could not find disposable thread: %v", err)
 	}
 	if postingID == 0 {
-		t.Skip("disposable thread did not appear in Imbox")
+		skipf(t, "disposable thread did not appear in Imbox")
 	}
 
 	labelName := "Smoke label " + uid
 	_, stderr, code = hey(t, "label", "create", labelName, strconv.FormatInt(postingID, 10), "--json")
 	if code != 0 {
-		t.Skipf("label creation unavailable (exit %d): %s", code, stderr)
+		skipf(t, "label creation unavailable (exit %d): %s", code, stderr)
 	}
 	t.Cleanup(func() { cleanupLabelByName(t, labelName, postingID) })
 
@@ -95,7 +95,7 @@ func labelWriteJSON(t *testing.T, args ...string) Response {
 	args = append(args, "--json")
 	stdout, stderr, code := hey(t, args...)
 	if code != 0 {
-		t.Skipf("label write unavailable (exit %d): %s", code, stderr)
+		skipf(t, "label write unavailable (exit %d): %s", code, stderr)
 	}
 	var response Response
 	if err := json.Unmarshal([]byte(stdout), &response); err != nil {

@@ -17,7 +17,7 @@ func TestShareAndUnshare(t *testing.T) {
 		"--json",
 	)
 	if code != 0 {
-		t.Skipf("could not create a controlled thread (exit %d): %s", code, stderr)
+		skipf(t, "could not create a controlled thread (exit %d): %s", code, stderr)
 	}
 
 	var composeResp Response
@@ -46,7 +46,7 @@ func TestShareAndUnshare(t *testing.T) {
 	needsCleanup = true
 	stdout, stderr, code = hey(t, "share", threadID, "--json")
 	if code != 0 {
-		t.Skipf("sharing links are unavailable on this server (exit %d): %s", code, stderr)
+		skipf(t, "sharing links are unavailable on this server (exit %d): %s", code, stderr)
 	}
 	cleanupMustSucceed = true
 	var shareResp Response

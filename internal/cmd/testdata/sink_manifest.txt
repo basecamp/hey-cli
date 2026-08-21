@@ -37,6 +37,7 @@ sanitizer markdownSafeText
 sanitizer htmlutil.ToMarkdown
 sanitizer htmlToMarkdown
 sanitizer addRow
+sanitizer renderedNote
 
 sink fmt.Fprint
 sink fmt.Fprintf

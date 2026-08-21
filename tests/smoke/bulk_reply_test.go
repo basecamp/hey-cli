@@ -14,7 +14,7 @@ func TestBulkReplyPreview(t *testing.T) {
 		} `json:"postings"`
 	}](t, heyJSON(t, "box", "imbox", "--limit", "10"))
 	if len(box.Postings) == 0 {
-		t.Skip("no Imbox postings available for a read-only bulk reply preview")
+		skipf(t, "no Imbox postings available for a read-only bulk reply preview")
 	}
 
 	args := []string{"bulk-reply", "preview"}

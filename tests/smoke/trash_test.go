@@ -16,7 +16,7 @@ func TestTrash(t *testing.T) {
 		"--json",
 	)
 	if code != 0 {
-		t.Skipf("could not create a disposable thread (exit %d): %s", code, stderr)
+		skipf(t, "could not create a disposable thread (exit %d): %s", code, stderr)
 	}
 
 	boxResp := heyJSON(t, "box", "imbox")
@@ -37,7 +37,7 @@ func TestTrash(t *testing.T) {
 		}
 	}
 	if postingID == 0 {
-		t.Skip("disposable thread did not appear in Imbox")
+		skipf(t, "disposable thread did not appear in Imbox")
 	}
 
 	stdout := heyOK(t, "trash", intStr(postingID), "--json")

@@ -11,6 +11,8 @@ import (
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/htmlutil"
+	"github.com/basecamp/hey-cli/internal/markdown"
 	"github.com/basecamp/hey-cli/internal/output"
 	"github.com/basecamp/hey-cli/internal/terminal"
 )
@@ -123,9 +125,18 @@ func printContactDetails(cmd *cobra.Command, result contactShowResult) {
 		fmt.Fprintf(w, "Screening: %s\n", terminal.SanitizeLine(result.Clearance.Status))
 	}
 	fmt.Fprintln(w, "\nPrivate note:")
-	if result.Note == "" {
-		fmt.Fprintln(w, "(empty)")
-	} else {
-		fmt.Fprintln(w, terminal.Sanitize(result.Note))
+	fmt.Fprintln(w, renderedNote(result.Note, result.NoteHTML))
+}
+
+// renderedNote is a contact note for a terminal: the rich note rendered from its HTML
+// when HEY served one, the plain note otherwise, and never the HTML itself.
+func renderedNote(note, noteHTML string) string {
+	switch {
+	case noteHTML != "":
+		return markdown.Render(htmlutil.ToMarkdown(noteHTML), stdoutWidth())
+	case note != "":
+		return terminal.Sanitize(note)
+	default:
+		return "(empty)"
 	}
 }

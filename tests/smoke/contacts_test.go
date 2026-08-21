@@ -18,7 +18,7 @@ type smokeContact struct {
 func TestContactsListAndShow(t *testing.T) {
 	contacts := dataAs[[]smokeContact](t, heyJSON(t, "contacts", "list"))
 	if len(contacts) == 0 {
-		t.Skip("no contacts available for read-only detail validation")
+		skipf(t, "no contacts available for read-only detail validation")
 	}
 	contact := dataAs[smokeContact](t, heyJSON(t, "contacts", "show", intStr(contacts[0].ID)))
 	if contact.ID != contacts[0].ID || contact.EmailAddress == "" {
@@ -99,7 +99,7 @@ func contactWriteJSON(t *testing.T, args ...string) Response {
 	args = append(args, "--json")
 	stdout, stderr, code := hey(t, args...)
 	if code != 0 {
-		t.Skipf("contact write unavailable (exit %d): %s", code, stderr)
+		skipf(t, "contact write unavailable (exit %d): %s", code, stderr)
 	}
 	var response Response
 	if err := json.Unmarshal([]byte(stdout), &response); err != nil {

@@ -187,6 +187,16 @@ func cliEnv() []string {
 // Setup helpers
 // ---------------------------------------------------------------------------
 
+// skipf skips a test the server cannot support — or fails it, under HEY_SMOKE_STRICT=1,
+// where a check that did not run is not a check that passed.
+func skipf(t *testing.T, format string, args ...any) {
+	t.Helper()
+	if os.Getenv("HEY_SMOKE_STRICT") != "" {
+		t.Fatalf("strict: "+format, args...)
+	}
+	skipf(t, format, args...)
+}
+
 func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
