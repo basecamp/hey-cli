@@ -70,6 +70,9 @@ func boundQuoteDepth(md string) string {
 // fenceRun is the run of fence characters a line opens with, whole: a fence of four
 // backticks is closed only by four or more, which is how a fence can hold "```".
 func fenceRun(line string) string {
+	if line == "" {
+		return ""
+	}
 	return line[:len(line)-len(strings.TrimLeft(line, line[:1]))]
 }
 

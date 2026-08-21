@@ -137,9 +137,11 @@ handed. The model has three layers, and it is worth knowing which one a change t
 - **Metadata** — a sender, a subject, a filename, a box name, a habit title — goes through
   `terminal.Sanitize`/`SanitizeLine` (`internal/terminal`), which strips escape
   sequences, C0/C1 controls and the `Bidi_Control` set. It is applied once where it
-  covers the most: the CLI's `table.addRow` sanitizes its cells, and the TUI's models
-  (`mail.NewPosting`, `sdkMessageToEntry`, `sdkContactToModel`, `sdkRecordingToModel`)
-  are sanitized as they are built. `TestSinksAreSanitized` (`internal/cmd/
+  covers the most: the CLI's `table.addRow` sanitizes its cells, and the TUI's read-only
+  models (`mail.NewPosting`, `sdkMessageToEntry`) are sanitized as they are built. The
+  editable ones — `sdkContactToModel`, `sdkRecordingToModel` — are deliberately **not**:
+  their fields go back through the edit forms, and sanitizing them would rewrite a name
+  on an unrelated save. Every view of a contact or a recording sanitizes what it shows. `TestSinksAreSanitized` (`internal/cmd/
   sink_manifest_test.go`, manifest in `testdata/sink_manifest.txt`) fails on a direct
   write of a listed field to a listed sink without a sanitizer. That check is syntactic —
   it does not follow a value through a local variable — so it is an inventory of the

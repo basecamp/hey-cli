@@ -225,6 +225,12 @@ func TestPrepareSourceLeavesQuoteMarkersInCodeAlone(t *testing.T) {
 		t.Errorf("prose line = %q, want it bounded", lines[3])
 	}
 
+	// A blank line inside the fence is nothing to measure.
+	safe, _ = prepareSource("```\n\n   \n" + code + "\n```")
+	if !strings.Contains(safe, code) {
+		t.Errorf("fence with blank lines = %q, want the code untouched", safe)
+	}
+
 	// A four-backtick fence holds a "```" line; it closes only at four or more.
 	safe, _ = prepareSource("````\n```\n" + code + "\n````\n" + code)
 	lines = strings.Split(safe, "\n")
