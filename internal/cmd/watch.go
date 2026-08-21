@@ -473,12 +473,24 @@ func (w *postingsWatch) retryUnread(ctx context.Context) error {
 	return nil
 }
 
+// readyOnceCaughtUp pays the ready a catch-up owes, once no box is behind —
+// and not while a drop is waiting to be acted on: the connection went away
+// during the reads, so the stream would say ready with the subscription
+// already down. The drop cancels the debt when it is drained, and the
+// reconnect's catch-up announces its own.
 func (w *postingsWatch) readyOnceCaughtUp() {
-	if !w.catchingUp || len(w.unread) > 0 {
+	if !w.catchingUp || len(w.unread) > 0 || w.dropQueued() {
 		return
 	}
 	w.catchingUp = false
 	w.announce(watchReady)
+}
+
+func (w *postingsWatch) dropQueued() bool {
+	w.transitionsMu.Lock()
+	defer w.transitionsMu.Unlock()
+
+	return slices.Contains(w.transitions, false)
 }
 
 func (w *postingsWatch) drainTransitions() []bool {
@@ -791,9 +803,22 @@ func (w *postingsWatch) scriptCommand(ctx context.Context, script string, event 
 	command.Stdin = bytes.NewReader(append(payload, '\n'))
 	command.Stdout = w.out
 	command.Stderr = w.errOut
-	command.Env = append(os.Environ(), event.environment()...)
+	command.Env = append(withoutWatchVariables(os.Environ()), event.environment()...)
 
 	return command, nil
+}
+
+// The variables a script is handed per event. Any of them already in the
+// environment — a watch started by another watch's script, say — would reach
+// the script for an event that does not set it: HEY_NEW=1 on an update that is
+// not new, a thread id on a deletion. They are the event's to set or leave unset.
+var watchVariables = []string{"HEY_CHANGE", "HEY_AT", "HEY_BOX_ID", "HEY_BOX_KIND", "HEY_BOX_NAME", "HEY_POSTING_ID", "HEY_THREAD_ID", "HEY_NEW"}
+
+func withoutWatchVariables(environment []string) []string {
+	return slices.DeleteFunc(slices.Clone(environment), func(variable string) bool {
+		name, _, _ := strings.Cut(variable, "=")
+		return slices.Contains(watchVariables, name)
+	})
 }
 
 func (w *postingsWatch) writeJSON(event watchEvent) {

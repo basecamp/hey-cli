@@ -510,6 +510,51 @@ func TestWatchReadyWaitsForAFailedCatchUpRead(t *testing.T) {
 	}
 }
 
+func TestWatchScriptDoesNotInheritAnotherEventsVariables(t *testing.T) {
+	t.Setenv("HEY_NEW", "1")
+	t.Setenv("HEY_THREAD_ID", "5511")
+	t.Setenv("HEY_TOKEN", "kept")
+	watch, out := newTestWatch("deleted")
+	watch.syncScript = `printf "%s %s %s\n" "${HEY_NEW:-unset}" "${HEY_THREAD_ID:-unset}" "$HEY_TOKEN"`
+
+	watch.report(context.Background(), watchEvent{Change: "deleted", PostingID: 9003}, watch.boxes[24088], nil)
+
+	if got := out.String(); got != "unset unset kept\n" {
+		t.Errorf("script saw %q, want the event's own variables only, and everything else kept", got)
+	}
+}
+
+func TestWatchReadyYieldsToADropQueuedDuringTheCatchUp(t *testing.T) {
+	server := changesServer(t, `{}`)
+	watch, out := newTestWatch("added")
+	cursor, err := watchCursor(server.URL+"/boxes/24088/postings/changes.json?since=2026-08-21T09%3A00%3A00.000Z&v=2", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	watch.boxes[24088].cursor = cursor
+
+	// The connection dropped while the catch-up was reading: the drop is
+	// queued, not yet acted on, and ready must not get ahead of it.
+	watch.noteConnection(false)
+	if err := watch.catchUp(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("wrote %q, want no ready with a drop waiting", out.String())
+	}
+
+	// The drop and the reconnect drain in order: disconnected, then the
+	// reconnect's own catch-up and ready.
+	watch.noteConnection(true)
+	if err := watch.followConnection(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], `"change":"disconnected"`) || !strings.Contains(lines[1], `"change":"ready"`) {
+		t.Errorf("wrote %q, want disconnected then ready", lines)
+	}
+}
+
 func TestWatchDoorbellReadPaysTheReadyACatchUpOwed(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 	broken := true
