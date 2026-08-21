@@ -643,6 +643,8 @@ func TestMailViewLoadsFolderSourcesAndPostings(t *testing.T) {
 			_, _ = w.Write([]byte(`[{"id":1,"kind":"imbox","name":"Imbox"}]`))
 		case "/my/navigation.json":
 			_, _ = w.Write([]byte(`{"items":[{"title":"Labels","menu_items":[{"title":"All Labels","app_url":"/folders"},{"title":"Receipts","app_url":"/folders/12"}]}]}`))
+		case "/collections.json":
+			_, _ = w.Write([]byte(`[]`))
 		case "/folders/12.json":
 			_, _ = w.Write([]byte(`{"id":12,"name":"Receipts","postings":[{"id":100,"kind":"topic","summary":"Hotel receipt","folders":[{"id":12,"name":"Receipts"}]}]}`))
 		default:
@@ -697,6 +699,8 @@ func TestMailViewFolderPagination(t *testing.T) {
 			_, _ = w.Write([]byte(`[{"id":1,"kind":"imbox","name":"Imbox"}]`))
 		case "/my/navigation.json":
 			_, _ = w.Write([]byte(`{"items":[{"title":"Labels","menu_items":[{"title":"Receipts","app_url":"/folders/12"}]}]}`))
+		case "/collections.json":
+			_, _ = w.Write([]byte(`[]`))
 		case "/folders/12.json":
 			folderQueries = append(folderQueries, r.URL.Query().Get("page"))
 			w.Header().Set("X-Total-Count", "2")
@@ -765,6 +769,8 @@ func TestMailViewFolderDiscoveryFailurePreservesMailAndRetries(t *testing.T) {
 			_, _ = w.Write([]byte(`{"items":[{"title":"Labels","menu_items":[{"title":"Receipts","app_url":"/folders/12"}]}]}`))
 		case "/boxes/1.json":
 			_, _ = w.Write([]byte(`{"id":1,"kind":"imbox","name":"Imbox","postings":[]}`))
+		case "/collections.json":
+			_, _ = w.Write([]byte(`[]`))
 		default:
 			http.NotFound(w, r)
 		}

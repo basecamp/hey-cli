@@ -14,6 +14,10 @@ import (
 
 const mailSourceKindFolder = "folder"
 
+func isOrganizedMailSource(kind string) bool {
+	return kind == mailSourceKindFolder || kind == mailSourceKindCollection
+}
+
 type folderPickerChoice int
 
 const (

@@ -43,6 +43,22 @@ hey bulk-reply send --attach
 hey bulk-reply send --message
 hey bulk-reply undo
 hey calendars
+hey collection
+hey collection --all
+hey collection --limit
+hey collection --page
+hey collection add
+hey collection add --to
+hey collection create
+hey collection create --summary
+hey collection remove
+hey collection remove --from
+hey collection update
+hey collection update --name
+hey collection update --summary
+hey collections
+hey collections --all
+hey collections --limit
 hey commands
 hey completion
 hey compose

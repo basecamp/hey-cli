@@ -18,6 +18,12 @@ The remaining HTML-reading gaps use the SDK's authenticated HTML helper and are 
 | `/postings/filings.json` | POST | SDK `Postings().File` | `hey label add`, TUI `g` | covered |
 | `/postings/filings.json` | DELETE | SDK `Postings().Unfile` | `hey label remove`, TUI `g` | covered |
 | `/postings/folders.json` | POST | SDK `Postings().CreateFolder` | `hey label create`, TUI `g` | covered |
+| `/collections.json` | GET | SDK `Collections().List` | `hey collections`, Mail TUI navigation | covered |
+| `/collections/{id}.json` | GET | SDK `Collections().GetPage` | `hey collection <id>`, Mail TUI collections | covered |
+| `/collections` | POST | SDK `Collections().Create` | `hey collection create` | covered |
+| `/collections/{id}.json` | PATCH | SDK `Collections().Update` | `hey collection update` | covered |
+| `/topics/{id}/collecting` | POST | SDK `Collections().AddTopic` | `hey collection add`, TUI `k` | covered |
+| `/topics/{id}/collecting` | DELETE | SDK `Collections().RemoveTopic` | `hey collection remove`, TUI `k` | covered |
 | `/advanced_search.json` | GET | SDK `Search().Search` | `hey search`, TUI `/` | covered |
 | `/advanced_search_filters.json` | GET | SDK `Search().Filters` | `hey search filters` | covered |
 | `/contacts.json` | GET | SDK `Contacts().List` | `hey contacts list`, Contacts TUI | covered |

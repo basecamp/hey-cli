@@ -87,7 +87,7 @@ func orderBoxes(boxes []models.Box) []models.Box {
 	for _, spec := range knownBoxes {
 		for _, b := range boxes {
 			key := sourceKey{id: b.ID, kind: b.Kind}
-			if b.Kind != mailSourceKindFolder && strings.EqualFold(b.Name, spec.name) && !used[key] {
+			if !isOrganizedMailSource(b.Kind) && strings.EqualFold(b.Name, spec.name) && !used[key] {
 				ordered = append(ordered, b)
 				used[key] = true
 				break
@@ -110,13 +110,13 @@ func boxNavItems(boxes []models.Box) []navItem {
 	for i, b := range boxes {
 		shortcut := ""
 		for _, spec := range knownBoxes {
-			if b.Kind != mailSourceKindFolder && strings.EqualFold(b.Name, spec.name) {
+			if !isOrganizedMailSource(b.Kind) && strings.EqualFold(b.Name, spec.name) {
 				shortcut = spec.key
 				break
 			}
 		}
 		label := b.Name
-		if b.Kind == mailSourceKindFolder {
+		if isOrganizedMailSource(b.Kind) {
 			label = terminalSafeFolderText(label)
 		}
 		items[i] = navItem{shortcut: shortcut, label: label}
@@ -129,7 +129,7 @@ func boxForShortcut(key string, boxes []models.Box) int {
 	for _, spec := range knownBoxes {
 		if spec.key == key {
 			for i, b := range boxes {
-				if b.Kind != mailSourceKindFolder && strings.EqualFold(b.Name, spec.name) {
+				if !isOrganizedMailSource(b.Kind) && strings.EqualFold(b.Name, spec.name) {
 					return i
 				}
 			}

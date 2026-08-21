@@ -99,6 +99,8 @@ EMAIL
   box            List email threads in a box
   labels         List your email labels
   label          View and manage an email label
+  collections    List your email collections
+  collection     View and manage an email collection
   search         Search email threads and messages
   contacts       Manage contacts
   screener       Decide who gets to email you

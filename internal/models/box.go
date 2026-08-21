@@ -20,28 +20,35 @@ type Folder struct {
 	AppURL string `json:"app_url"`
 }
 
+type Collection struct {
+	ID     int64  `json:"id"`
+	Name   string `json:"name"`
+	AppURL string `json:"app_url"`
+}
+
 type Posting struct {
-	ID                    int64       `json:"id"`
-	CreatedAt             string      `json:"created_at"`
-	UpdatedAt             string      `json:"updated_at"`
-	ObservedAt            string      `json:"observed_at"`
-	Kind                  string      `json:"kind"`
-	Name                  string      `json:"name"`
-	Seen                  bool        `json:"seen"`
-	Bundled               bool        `json:"bundled"`
-	Muted                 bool        `json:"muted"`
-	Summary               string      `json:"summary"`
-	EntryKind             string      `json:"entry_kind"`
-	IncludesAttachments   bool        `json:"includes_attachments"`
-	BubbledUp             bool        `json:"bubbled_up"`
-	AppURL                string      `json:"app_url"`
-	Creator               Contact     `json:"creator"`
-	AlternativeSenderName string      `json:"alternative_sender_name"`
-	VisibleEntryCount     int32       `json:"visible_entry_count"`
-	Extenzions            []Extenzion `json:"extenzions,omitempty"`
-	Folders               []Folder    `json:"folders,omitempty"`
-	TopicID               int64       `json:"topic_id"`
-	Topic                 *Topic      `json:"topic,omitempty"`
+	ID                    int64        `json:"id"`
+	CreatedAt             string       `json:"created_at"`
+	UpdatedAt             string       `json:"updated_at"`
+	ObservedAt            string       `json:"observed_at"`
+	Kind                  string       `json:"kind"`
+	Name                  string       `json:"name"`
+	Seen                  bool         `json:"seen"`
+	Bundled               bool         `json:"bundled"`
+	Muted                 bool         `json:"muted"`
+	Summary               string       `json:"summary"`
+	EntryKind             string       `json:"entry_kind"`
+	IncludesAttachments   bool         `json:"includes_attachments"`
+	BubbledUp             bool         `json:"bubbled_up"`
+	AppURL                string       `json:"app_url"`
+	Creator               Contact      `json:"creator"`
+	AlternativeSenderName string       `json:"alternative_sender_name"`
+	VisibleEntryCount     int32        `json:"visible_entry_count"`
+	Extenzions            []Extenzion  `json:"extenzions,omitempty"`
+	Folders               []Folder     `json:"folders,omitempty"`
+	Collections           []Collection `json:"collections,omitempty"`
+	TopicID               int64        `json:"topic_id"`
+	Topic                 *Topic       `json:"topic,omitempty"`
 }
 
 // Extenzion is a HEY extension (group/list) through which a topic was received.

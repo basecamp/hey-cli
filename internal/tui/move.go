@@ -22,7 +22,7 @@ func newMovePicker(posting models.Posting, boxes []models.Box, currentSource mod
 	destinations := make([]models.Box, 0, len(boxes))
 	for _, box := range boxes {
 		isCurrentSource := box.ID == currentSource.ID && box.Kind == currentSource.Kind
-		if box.Kind == mailSourceKindFolder || isCurrentSource || strings.EqualFold(box.Kind, hey.BoxKindBubbleUp) || strings.EqualFold(box.Name, "Bubble Up") {
+		if isOrganizedMailSource(box.Kind) || isCurrentSource || strings.EqualFold(box.Kind, hey.BoxKindBubbleUp) || strings.EqualFold(box.Name, "Bubble Up") {
 			continue
 		}
 		destinations = append(destinations, box)

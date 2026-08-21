@@ -20,8 +20,10 @@ func TestSDKPostingToModel(t *testing.T) {
 		Kind: "topic", Name: "Life insurance", Seen: true, Bundled: true, Muted: true,
 		Summary: "the summary", EntryKind: "message", AppUrl: "https://app.hey.com/topics/21",
 		AlternativeSenderName: "Copilot", VisibleEntryCount: 3,
-		Extenzions: []generated.Extenzion{{Id: 7, Name: "receipts"}},
-		Creator:    generated.Contact{Id: 42, Name: "Jane Dawson", EmailAddress: "jane@example.com"},
+		Extenzions:  []generated.Extenzion{{Id: 7, Name: "receipts"}},
+		Folders:     []generated.Folder{{Id: 8, Name: "Receipts", AppUrl: "/folders/8"}},
+		Collections: []generated.Collection{{Id: 9, Name: "Kitchen remodel", AppUrl: "/collections/9"}},
+		Creator:     generated.Contact{Id: 42, Name: "Jane Dawson", EmailAddress: "jane@example.com"},
 	})
 
 	if got.ID != 1233065884 || got.Name != "Life insurance" || got.Kind != "topic" {
@@ -41,6 +43,12 @@ func TestSDKPostingToModel(t *testing.T) {
 	}
 	if len(got.Extenzions) != 1 || got.Extenzions[0].Name != "receipts" {
 		t.Errorf("extenzions = %+v", got.Extenzions)
+	}
+	if len(got.Folders) != 1 || got.Folders[0].ID != 8 {
+		t.Errorf("folders = %+v", got.Folders)
+	}
+	if len(got.Collections) != 1 || got.Collections[0].ID != 9 || got.Collections[0].Name != "Kitchen remodel" {
+		t.Errorf("collections = %+v", got.Collections)
 	}
 	if got.Creator.ID != 42 || got.Creator.Name != "Jane Dawson" || got.Creator.EmailAddress != "jane@example.com" {
 		t.Errorf("creator = %+v", got.Creator)

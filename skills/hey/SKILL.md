@@ -2,7 +2,7 @@
 name: hey
 description: |
   Interact with HEY via the HEY CLI. Read and send emails, manage contacts,
-  boxes, labels, calendars, todos, habits, time tracking, and journal entries. Use for ANY
+  boxes, labels, collections, calendars, todos, habits, time tracking, and journal entries. Use for ANY
   HEY-related question or action.
 triggers:
   # Direct invocations
@@ -14,6 +14,8 @@ triggers:
   - hey box
   - hey labels
   - hey label
+  - hey collections
+  - hey collection
   - hey search
   - hey contacts
   - hey threads
@@ -98,7 +100,7 @@ argument-hint: "[command] [args...]"
 
 # /hey - HEY Email Workflow Command
 
-CLI for HEY: mailboxes, labels, email threads, contacts, replies, compose, calendars, todos, habits, time tracking, and journal entries.
+CLI for HEY: mailboxes, labels, collections, email threads, contacts, replies, compose, calendars, todos, habits, time tracking, and journal entries.
 
 ## Agent Invariants
 
@@ -136,6 +138,12 @@ hey boxes --quiet --jq '.[].name'
 | Add a label to a thread | `hey label add <id> --to <label_id>` |
 | Create and add a label | `hey label create "Travel receipts" <id>` |
 | Remove labels | `hey label remove <id> --from <label_id\|all>` |
+| List collections | `hey collections --json` |
+| List collection threads | `hey collection <collection_id> --all --json` |
+| Create a collection | `hey collection create "Kitchen remodel"` |
+| Update a collection | `hey collection update <collection_id> --name "Kitchen renovation"` |
+| Add a thread to a collection | `hey collection add <topic_id> --to <collection_id>` |
+| Remove a thread from a collection | `hey collection remove <topic_id> --from <collection_id>` |
 | Search email | `hey search "quarterly planning" --json` |
 | List search filters | `hey search filters --json` |
 | List contacts | `hey contacts list --json` |
@@ -203,6 +211,8 @@ Want to read email?
 ├── List emails in box? → hey box <name|id> --json
 ├── List labels or labeled email? → hey labels --json / hey label <label_id> --json
 ├── Add, create, or remove a label? → hey label add|create|remove
+├── List collections or collection threads? → hey collections --json / hey collection <collection_id> --json
+├── Create, update, add to, or remove from a collection? → hey collection create|update|add|remove
 ├── Search threads and messages? → hey search <query> --json
 ├── Need available refinements? → hey search filters --json
 ├── List or view contacts? → hey contacts list --json / hey contacts show <id> --json
@@ -276,6 +286,19 @@ hey label remove 12345 --from all              # Remove every label
 
 Label mutations take box item IDs from `hey box`, `hey label`, or active `hey search` results. Label IDs come from `hey labels`. `hey label` returns `next_page` and `total_count`; pass `--page <next_page>` to continue or `--all` to fetch every page. HEY creates a label while adding it to at least one thread, so `label create` requires one or more thread item IDs.
 
+### Email - Collections
+
+```bash
+hey collections --json                                      # List collections and stable IDs
+hey collection 321 --all --json                             # List every thread in a collection
+hey collection create "Kitchen remodel" --summary "Plans and decisions"
+hey collection update 321 --name "Kitchen renovation"
+hey collection add 987 --to 321                             # Add a topic ID
+hey collection remove 987 --from 321                        # Remove a topic ID
+```
+
+Collection IDs come from `hey collections`. `hey collection` returns posting `id`, thread `topic_id`, `next_page`, and `total_count`; pass `--page <next_page>` to continue or `--all` to fetch every page. Collection membership commands take `topic_id`. Creating a collection confirms the mutation, and listing collections provides its ID for later commands.
+
 ### Email - Search
 
 ```bash
@@ -324,7 +347,7 @@ hey unshare <thread_id>                       # Turn off the sharing link
 
 `hey share` returns a URL that shows the entire thread and future emails or replies sent to it. Anyone with the link can open it. `hey unshare` turns off the sharing link.
 
-**ID note:** Every email thread returned by `hey box` or `hey label` has an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring` expect `id`. `hey threads`, `hey share`, `hey unshare`, `hey attachments`, `hey reply`, and `hey forward` expect `topic_id`. The `app_url` field also contains the thread ID as a fallback (e.g. `https://app.hey.com/topics/123` → `123`).
+**ID note:** Every email thread returned by `hey box`, `hey label`, or `hey collection` has an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring` expect `id`. `hey threads`, `hey share`, `hey unshare`, `hey attachments`, `hey reply`, `hey forward`, `hey collection add`, and `hey collection remove` expect `topic_id`. The `app_url` field also contains the thread ID as a fallback (e.g. `https://app.hey.com/topics/123` → `123`).
 
 ### Email - Attachments
 
