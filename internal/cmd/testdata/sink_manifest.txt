@@ -62,3 +62,4 @@ exempt internal/cmd/setup.go:showWizardSuccess check names and statuses are this
 exempt internal/cmd/upgrade_selfupdate.go:extractTarGzMember archive member names come from a release whose signature was verified first
 exempt internal/cmd/upgrade_selfupdate.go:extractZipMember archive member names come from a release whose signature was verified first
 exempt internal/cmd/topic.go:writeThreadMarkdown the body it writes is the Markdown ToMarkdown produced, which carries no control characters, and the document is Markdown for a reader rather than a terminal
+exempt internal/cmd/topic.go:writeThreadHTML the body is HEY's HTML written as HEY served it — that is the --html format — to a file or a pipe and never a terminal (validateHTMLFlag refuses one); the sender is SanitizeLine'd and HTML-escaped before it is written

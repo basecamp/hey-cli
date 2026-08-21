@@ -216,8 +216,11 @@ func TestThreadsFormats(t *testing.T) {
 
 	t.Run("html to a pipe", func(t *testing.T) {
 		out := heyOK(t, "threads", topicID, "--html")
-		if strings.Count(out, "<!-- hey entry ") != entries {
-			t.Errorf("--html = %q, want a comment per entry", out)
+		if !strings.HasPrefix(out, "<!doctype html>\n") || !strings.Contains(out, `<meta charset="utf-8">`) || !strings.HasSuffix(out, "</body>\n</html>\n") {
+			t.Errorf("--html = %q, want an HTML document declaring its charset", out)
+		}
+		if strings.Count(out, "<article ") != entries {
+			t.Errorf("--html = %q, want an <article> per entry", out)
 		}
 		if !strings.Contains(out, "<div") && !strings.Contains(out, "<p") {
 			t.Errorf("--html = %q, want HEY's HTML", out)

@@ -94,7 +94,7 @@ func TestHTMLWritesToARealPipe(t *testing.T) {
 	if runErr != nil {
 		t.Fatalf("unexpected error: %v", runErr)
 	}
-	if !strings.Contains(out.String(), "<p>piped</p>") {
-		t.Errorf("pipe carried %q, want the HTML", out.String())
+	if !strings.HasPrefix(out.String(), "<!doctype html>\n") || !strings.Contains(out.String(), "<p>piped</p>") {
+		t.Errorf("pipe carried %q, want the HTML document", out.String())
 	}
 }

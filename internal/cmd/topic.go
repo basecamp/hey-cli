@@ -55,7 +55,7 @@ func newThreadsCommand() *topicCommand {
 		Use:   "threads <id>",
 		Short: "Read a thread",
 		Annotations: map[string]string{
-			"agent_notes": "Returns a thread with all entries, oldest first. Entry bodies are Markdown; --html returns HEY's original HTML instead. A thread that could only be read in part is refused unless --allow-partial is passed, in which case each entry's body_state says what was read. Use the topic ID with hey reply or hey forward.",
+			"agent_notes": "Returns a thread with all entries, oldest first. Entry bodies are Markdown; --html writes an HTML document instead, one <article> per entry (data-entry-id, data-created-at, data-body-state) holding HEY's original HTML. A thread that could only be read in part is refused unless --allow-partial is passed, in which case each entry's body_state says what was read. Use the topic ID with hey reply or hey forward.",
 		},
 		Example: `  hey threads 12345
   hey threads 12345 --json
@@ -95,16 +95,17 @@ func (c *topicCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	entries := threadEntries(thread, format == output.FormatHTML)
 
-	// The envelope carries the notice, the styled view and the Markdown document
-	// print it; every other format — a count, IDs, --quiet, --html — gets it on stderr,
-	// so what is missing is said wherever the output cannot say it.
+	// The envelope carries the notice, the styled view, the Markdown document and the
+	// HTML document print it; every other format — a count, IDs, --quiet — gets it on
+	// stderr, so what is missing is said wherever the output cannot say it. --html gets
+	// it on stderr as well: a comment in a file nobody opens is not a warning.
 	if stderrNotice := paginationNoticeForStderr(format, notice); stderrNotice != "" && format != output.FormatMarkdown {
 		fmt.Fprintln(cmd.ErrOrStderr(), stderrNotice)
 	}
 
 	switch format {
 	case output.FormatHTML:
-		return writeThreadHTML(cmd.OutOrStdout(), entries)
+		return writeThreadHTML(cmd.OutOrStdout(), threadID, entries, notice)
 	case output.FormatStyled:
 		printThreadStyled(cmd.OutOrStdout(), entries, notice)
 		return nil
@@ -215,28 +216,63 @@ func writeThreadMarkdown(w io.Writer, threadID int64, entries []threadEntry, not
 	return nil
 }
 
-// writeThreadHTML is what --html writes for a thread: each entry's original HTML, oldest
-// first, each introduced by a comment naming the entry, its sender and its date, with a
-// blank line between entries. An entry without a body says why in its comment. A write
-// that fails is the command's error.
-func writeThreadHTML(w io.Writer, entries []threadEntry) error {
-	for i, e := range entries {
-		if i > 0 {
-			if _, err := io.WriteString(w, "\n"); err != nil {
+// writeThreadHTML is what --html writes for a thread: one HTML5 document, parseable by
+// anything that reads HTML, titled after the thread and declaring its charset, with one
+// <article> per entry, oldest first. The article carries the entry's ID, date and body
+// state as data attributes, opens with a <header> naming the sender and the date, and
+// then holds the entry's original HTML exactly as HEY served it — the whole point of the
+// format. An entry without a body holds nothing after its header; data-body-state says
+// whether HEY served none (bodyless), the load left it unread (over_limit, failed) or it
+// was read and was empty (hydrated). A thread read in part, which --allow-partial lets
+// through as it does for every other format, ends with the notice in a comment before
+// </body>, alongside the copy on stderr.
+//
+// A thread is a document because it has entries to frame; the single-body reads —
+// journal read, contacts show, contacts note show — write a fragment instead (see
+// writeNoteHTML), one body as HEY served it and nothing for an empty one, because one
+// body is what gets pasted into something else. --stats is refused with --html like every
+// other selector: there is no envelope here to carry stats.
+//
+// The sender is whatever the entry says it is, so it is sanitized and HTML-escaped before
+// it is written as text or as an attribute; the date and state are this program's own
+// and are escaped all the same. A write that fails is the command's error: a document
+// cut short by a full disk must not exit 0.
+func writeThreadHTML(w io.Writer, threadID int64, entries []threadEntry, notice string) error {
+	write := func(s string) error {
+		if _, err := io.WriteString(w, s); err != nil {
+			return fmt.Errorf("write thread HTML: %w", err)
+		}
+		return nil
+	}
+	if err := write(fmt.Sprintf("<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Thread %d</title>\n</head>\n<body>\n", threadID)); err != nil {
+		return err
+	}
+	for _, e := range entries {
+		sender := html.EscapeString(terminal.SanitizeLine(threadEntrySender(e)))
+		createdAt := html.EscapeString(e.CreatedAt)
+		opening := fmt.Sprintf("<article id=\"entry-%d\" data-entry-id=\"%d\" data-created-at=\"%s\" data-body-state=\"%s\">\n<header>From: %s — %s</header>\n",
+			e.ID, e.ID, createdAt, html.EscapeString(e.BodyState), sender, createdAt)
+		if err := write(opening); err != nil {
+			return err
+		}
+		// The body is written straight from the entry, not through the closure, so the
+		// sink check sees the one raw write this format is made of and its exemption in
+		// the manifest says why.
+		if e.BodyHTML != "" {
+			if _, err := io.WriteString(w, e.BodyHTML+"\n"); err != nil {
 				return fmt.Errorf("write thread HTML: %w", err)
 			}
 		}
-		body := e.BodyHTML
-		if body == "" {
-			body = "<!-- no body: " + htmlCommentSafe(e.BodyState) + " -->"
-		}
-		_, err := fmt.Fprintf(w, "<!-- hey entry %d from %s at %s -->\n%s\n",
-			e.ID, html.EscapeString(htmlCommentSafe(threadEntrySender(e))), e.CreatedAt, body)
-		if err != nil {
-			return fmt.Errorf("write thread HTML: %w", err)
+		if err := write("</article>\n"); err != nil {
+			return err
 		}
 	}
-	return nil
+	if notice != "" {
+		if err := write("<!-- notice: " + htmlCommentSafe(notice) + " -->\n"); err != nil {
+			return err
+		}
+	}
+	return write("</body>\n</html>\n")
 }
 
 // htmlCommentSafe keeps a value from ending the comment it is written into.

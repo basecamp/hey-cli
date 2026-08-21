@@ -270,10 +270,26 @@ pipeable.
 
 `--html` writes the original HTML, for the commands that hold some: `hey threads`,
 `hey journal read`, `hey contacts show` and `hey contacts note show`. It is a format of
-its own — it cannot be combined with the other output flags, every other command refuses
-it, and it is meant for a file or a pipe: on a terminal it is refused with the redirect
-spelled out, since markup on a terminal is neither readable nor safe. A thread writes each
-entry's HTML, oldest first, behind a comment naming the entry, its sender and its date.
+its own — it cannot be combined with the other output flags (`--stats` included: there is
+no envelope to carry stats), every other command refuses it, and it is meant for a file or
+a pipe: on a terminal it is refused with the redirect spelled out, since markup on a
+terminal is neither readable nor safe.
+
+A thread is written as one HTML5 document, so a downstream tool can parse it rather than
+split it: `<!doctype html>`, `<html lang="en">`, a `<head>` with `<meta charset="utf-8">`
+and `<title>Thread N</title>`, then in `<body>` one
+`<article id="entry-ID" data-entry-id="ID" data-created-at="…" data-body-state="…">` per
+entry, oldest first. Each article opens with a `<header>` naming the sender and the date
+(HTML-escaped) and then holds the entry's HTML exactly as HEY served it. An entry without
+a body holds only its header, and `data-body-state` says why — `bodyless` when HEY served
+none, `over_limit` or `failed` when the load left it unread, `hydrated` when it was read
+and was empty. A thread that could only be read in part is refused as for every other
+format; with `--allow-partial` the document ends with the notice in an HTML comment
+(`<!-- notice: … -->`) just before `</body>`, and the notice goes to stderr as well.
+
+A single body — a journal entry, a contact's note — is written as a fragment instead: the
+HTML as HEY served it, nothing for an empty one. A thread has entries to frame; one body
+is what gets pasted into something else.
 
 ### Email
 
