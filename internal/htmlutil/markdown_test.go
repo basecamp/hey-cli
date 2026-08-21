@@ -213,11 +213,16 @@ func TestToMarkdownStripsScriptAndStyle(t *testing.T) {
 	}
 }
 
-func TestToMarkdownDecodesEntities(t *testing.T) {
-	got := ToMarkdown("<p>Fried &amp; Hansson &lt;hey&gt;</p>")
-	want := "Fried & Hansson <hey>"
+// An entity is decoded once, by the HTML parser, and what it stood for is then
+// escaped so that no Markdown renderer decodes it a second time.
+func TestToMarkdownDecodesEntitiesOnce(t *testing.T) {
+	got := ToMarkdown("<p>Fried &amp; Hansson &lt;hey&gt; &amp;amp;</p>")
+	want := `Fried &amp; Hansson \<hey\> &amp;amp;`
 	if got != want {
 		t.Errorf("ToMarkdown = %q, want %q", got, want)
+	}
+	if text := renderedText(t, got); text != "Fried & Hansson <hey> &amp;" {
+		t.Errorf("rendered = %q, want the literal text back", text)
 	}
 }
 
