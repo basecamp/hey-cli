@@ -523,7 +523,11 @@ func (w *postingsWatch) read(ctx context.Context, message actioncable.Message) e
 	}
 
 	if box, watching := w.boxes[notification.BoxID]; watching {
-		return w.readBox(ctx, box)
+		if err := w.readBox(ctx, box); err != nil {
+			return err
+		}
+		// The box a catch-up left behind may be the one that just rang.
+		w.readyOnceCaughtUp()
 	}
 
 	return nil

@@ -510,6 +510,42 @@ func TestWatchReadyWaitsForAFailedCatchUpRead(t *testing.T) {
 	}
 }
 
+func TestWatchDoorbellReadPaysTheReadyACatchUpOwed(t *testing.T) {
+	t.Setenv("HEY_TOKEN", "test-token")
+	broken := true
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if broken {
+			http.Error(w, "boom", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Link", `<`+r.URL.Path+`?since=2026-08-18T09%3A14%3A22.031Z&v=2>; rel="next"`)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
+
+	watch, out := newTestWatch("added")
+	cursor, err := watchCursor(server.URL+"/boxes/24088/postings/changes.json?since=2026-08-18T09%3A00%3A00.000Z&v=2", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	watch.boxes[24088].cursor = cursor
+	if err := watch.catchUp(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The box rings before its retry comes round, and the read works: ready
+	// now, not two minutes from now.
+	broken = false
+	if err := watch.read(context.Background(), actioncable.Message(`{"change":"upsert","box_id":24088}`)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"change":"ready"`) || watch.catchingUp {
+		t.Errorf("wrote %q, want ready once the doorbell read caught the box up", out.String())
+	}
+}
+
 func TestWatchDropWhileCatchingUpCancelsTheReadyItOwed(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 	broken := true
