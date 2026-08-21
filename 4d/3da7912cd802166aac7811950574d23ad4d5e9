@@ -19,6 +19,7 @@ internal/tui/brand.go
 internal/cmd/root.go
   s_e2b9c41f2f9ae5::t_764be92a78d6fd 47-49
   s_e2b9c41f2f9ae5::t_738dd37a9c0633 42-44
+  s_e2b9c41f2f9ae5::t_7b90a34c2340fc 18
 internal/config/config.go
   s_e2b9c41f2f9ae5::t_797d0d6068898c 41,52
   s_e2b9c41f2f9ae5::t_3ad0a723c75954 171-175
