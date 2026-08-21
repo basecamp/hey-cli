@@ -32,56 +32,129 @@ func recordingNotifier(printedID string) (*desktopNotifier, *[][]string) {
 		},
 		now:      func() time.Time { return watchStarted.Add(time.Minute) },
 		started:  watchStarted,
-		seeded:   map[int64]bool{24088: true},
+		boxes:    map[int64]bool{24088: true},
 		activeAt: map[int64]time.Time{},
 	}
 	return notifier, &calls
-}
-
-func TestWatchNotifySeedsSilentlyOnABoxesFirstRead(t *testing.T) {
-	notifier, calls := recordingNotifier("7\n")
-	notifier.seeded = map[int64]bool{}
-	box := &watchedBox{id: 24088, kind: "imbox", name: "Imbox"}
-	later := watchStarted.Add(30 * time.Second)
-
-	// The catch-up from the server's cursor: whatever it carries was already there.
-	backlog := newPosting(101, "Maria Delgado", "Lunch on Thursday?", later)
-	notifier.batch(box, []generated.Posting{backlog, newPosting(102, "Northwind Invoicing", "Invoice #4021", later)}, nil)
-	if len(*calls) != 0 {
-		t.Fatalf("the first read of a box is its backlog and must not toast, sent %v", *calls)
-	}
-
-	// A seen flip on one of them afterwards: the seed recorded its activity.
-	read := backlog
-	read.Seen = true
-	notifier.batch(box, nil, []generated.Posting{read})
-	if len(*calls) != 0 {
-		t.Fatalf("a backlog thread read later is not new, sent %v", *calls)
-	}
-
-	// Mail that arrives after the seed toasts, and another box seeds on its own.
-	notifier.batch(box, []generated.Posting{newPosting(103, "Sam Whitfield", "Draft agenda for Monday", later)}, nil)
-	if len(*calls) != 1 {
-		t.Errorf("the second read toasts, sent %v", *calls)
-	}
-	feed := &watchedBox{id: 24089, kind: "feedbox", name: "The Feed"}
-	notifier.batch(feed, []generated.Posting{newPosting(201, "Weekend Deals", "48 hours only", later)}, nil)
-	if len(*calls) != 1 {
-		t.Errorf("each box seeds on its own first read, sent %v", *calls)
-	}
 }
 
 func newPosting(id int64, sender, subject string, activeAt time.Time) generated.Posting {
 	return generated.Posting{Id: id, Name: subject, ActiveAt: activeAt, Creator: generated.Contact{Name: sender}}
 }
 
-func TestWatchNotifyFlagParses(t *testing.T) {
+func TestWatchNotifyKeepsTheBacklogQuietButNotMailSinceItBegan(t *testing.T) {
+	notifier, calls := recordingNotifier("7\n")
+	box := &watchedBox{id: 24088, kind: "imbox", name: "Imbox"}
+	before := watchStarted.Add(-time.Hour)
+	after := watchStarted.Add(30 * time.Second)
+
+	// A box's first read carries everything since the server's cursor — the
+	// box's last activity — which may be hours of backlog, plus mail that
+	// arrived while the watch was starting up.
+	backlog := newPosting(101, "Maria Delgado", "Lunch on Thursday?", before)
+	arrived := newPosting(102, "Northwind Invoicing", "Invoice #4021", after)
+	notifier.batch(box, []generated.Posting{backlog, arrived}, []generated.Posting{backlog, arrived})
+	if len(*calls) != 1 || !slices.Contains((*calls)[0], "Northwind Invoicing — Invoice #4021") {
+		t.Fatalf("mail since the watch began toasts, the backlog does not, sent %v", *calls)
+	}
+
+	// The backlog thread read later: recorded by the first batch, so not new.
+	read := backlog
+	read.Seen = true
+	notifier.batch(box, []generated.Posting{read}, []generated.Posting{read})
+	if len(*calls) != 1 {
+		t.Errorf("a backlog thread read later is not new, sent %v", *calls)
+	}
+}
+
+func TestWatchNotifyRecordsWhatItDoesNotReport(t *testing.T) {
+	notifier, calls := recordingNotifier("7\n")
+	box := &watchedBox{id: 24088, kind: "imbox", name: "Imbox"}
+	after := watchStarted.Add(30 * time.Second)
+
+	// --events updated: the arrival is observed but not reported, so no toast…
+	arrived := newPosting(101, "Maria Delgado", "Lunch on Thursday?", after)
+	notifier.batch(box, []generated.Posting{arrived}, nil)
+	if len(*calls) != 0 {
+		t.Fatalf("an unreported change must not toast, sent %v", *calls)
+	}
+
+	// …and its seen flip, which is reported, is not mistaken for new mail.
+	read := arrived
+	read.Seen = true
+	unread := arrived
+	notifier.batch(box, []generated.Posting{read}, []generated.Posting{read})
+	notifier.batch(box, []generated.Posting{unread}, []generated.Posting{unread})
+	if len(*calls) != 0 {
+		t.Errorf("a thread known from an unreported change keeps its activity, sent %v", *calls)
+	}
+}
+
+func TestWatchNotifyToastsTheNotifiedBoxesOnly(t *testing.T) {
+	notifier, calls := recordingNotifier("7\n")
+	after := watchStarted.Add(30 * time.Second)
+
+	feed := &watchedBox{id: 24089, kind: "feedbox", name: "The Feed"}
+	newsletter := newPosting(201, "Weekend Deals", "48 hours only", after)
+	notifier.batch(feed, []generated.Posting{newsletter}, []generated.Posting{newsletter})
+	if len(*calls) != 0 {
+		t.Fatalf("mail in a box --notify does not cover must not toast, sent %v", *calls)
+	}
+
+	// Its activity was still recorded: moved to the Imbox, it is not new.
+	imbox := &watchedBox{id: 24088, kind: "imbox", name: "Imbox"}
+	notifier.batch(imbox, []generated.Posting{newsletter}, []generated.Posting{newsletter})
+	if len(*calls) != 0 {
+		t.Errorf("a thread moved in from another box is not new mail, sent %v", *calls)
+	}
+}
+
+func TestWatchNotifiedBoxesDefaultToTheImbox(t *testing.T) {
+	watched := map[int64]*watchedBox{
+		24088: {id: 24088, kind: "imbox", name: "Imbox"},
+		24089: {id: 24089, kind: "feedbox", name: "The Feed"},
+	}
+
 	command := newWatchCommand()
-	if err := command.cmd.ParseFlags([]string{"--notify", "--box", "imbox"}); err != nil {
+	notified, err := command.notifiedBoxes(watched)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !notified[24088] || notified[24089] {
+		t.Errorf("notified = %v, want the Imbox alone by default", notified)
+	}
+
+	command.notifyBoxes = []string{"The Feed", "24088"}
+	notified, err = command.notifiedBoxes(watched)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !notified[24088] || !notified[24089] {
+		t.Errorf("notified = %v, want every --notify-box, by name or ID", notified)
+	}
+
+	command.notifyBoxes = []string{"trailbox"}
+	if _, err := command.notifiedBoxes(watched); err == nil || !strings.Contains(err.Error(), `"trailbox"`) {
+		t.Errorf("err = %v, want a refusal naming the box that isn't watched", err)
+	}
+
+	command.notifyBoxes = nil
+	delete(watched, 24088)
+	if _, err := command.notifiedBoxes(watched); err == nil || !strings.Contains(err.Error(), `"imbox"`) {
+		t.Errorf("err = %v, want a refusal when the Imbox itself isn't watched", err)
+	}
+}
+
+func TestWatchNotifyFlagsParse(t *testing.T) {
+	command := newWatchCommand()
+	if err := command.cmd.ParseFlags([]string{"--notify", "--notify-box", "imbox", "--notify-box", "The Feed"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !command.notify {
 		t.Error("--notify should be set")
+	}
+	if !slices.Equal(command.notifyBoxes, []string{"imbox", "The Feed"}) {
+		t.Errorf("notifyBoxes = %v, want both --notify-box values", command.notifyBoxes)
 	}
 }
 
@@ -90,10 +163,11 @@ func TestWatchNotifyToastsABatchOnce(t *testing.T) {
 	box := &watchedBox{id: 24088, kind: "imbox", name: "Imbox"}
 	later := watchStarted.Add(30 * time.Second)
 
-	notifier.batch(box, []generated.Posting{
+	pair := []generated.Posting{
 		newPosting(101, "Maria Delgado", "Lunch on Thursday?", later),
 		newPosting(102, "Northwind Invoicing", "Invoice #4021", later),
-	}, nil)
+	}
+	notifier.batch(box, pair, pair)
 
 	if len(*calls) != 1 {
 		t.Fatalf("want one notification for the batch, sent %v", *calls)
@@ -115,7 +189,7 @@ func TestWatchNotifyToastsABatchOnce(t *testing.T) {
 		t.Errorf("headline and senders missing from %v", argv)
 	}
 
-	notifier.batch(box, []generated.Posting{newPosting(103, "Sam Whitfield", "Draft agenda for Monday", later)}, nil)
+	notifier.batch(box, []generated.Posting{newPosting(103, "Sam Whitfield", "Draft agenda for Monday", later)}, []generated.Posting{newPosting(103, "Sam Whitfield", "Draft agenda for Monday", later)})
 
 	if len(*calls) != 2 {
 		t.Fatalf("want a second notification, sent %v", *calls)
@@ -134,10 +208,10 @@ func TestWatchNotifyDoesNotReplaceAStaleToast(t *testing.T) {
 	box := &watchedBox{id: 24088, kind: "imbox", name: "Imbox"}
 	later := watchStarted.Add(30 * time.Second)
 
-	notifier.batch(box, []generated.Posting{newPosting(101, "Maria Delgado", "Lunch on Thursday?", later)}, nil)
+	notifier.batch(box, []generated.Posting{newPosting(101, "Maria Delgado", "Lunch on Thursday?", later)}, []generated.Posting{newPosting(101, "Maria Delgado", "Lunch on Thursday?", later)})
 	// A toast id from before a shell restart may now belong to another application.
 	notifier.now = func() time.Time { return watchStarted.Add(time.Minute + toastReplaceWindow + time.Second) }
-	notifier.batch(box, []generated.Posting{newPosting(102, "Northwind Invoicing", "Invoice #4021", later)}, nil)
+	notifier.batch(box, []generated.Posting{newPosting(102, "Northwind Invoicing", "Invoice #4021", later)}, []generated.Posting{newPosting(102, "Northwind Invoicing", "Invoice #4021", later)})
 
 	if len(*calls) != 2 || slices.Contains((*calls)[1], "-r") {
 		t.Errorf("a stale toast id must not be passed as -r, sent %v", *calls)
@@ -153,7 +227,7 @@ func TestWatchNotifySkipsSeenAndMutedMail(t *testing.T) {
 	seen.Seen = true
 	muted := newPosting(103, "Weekend Deals", "48 hours only", later)
 	muted.Muted = true
-	notifier.batch(box, []generated.Posting{seen, muted}, nil)
+	notifier.batch(box, []generated.Posting{seen, muted}, []generated.Posting{seen, muted})
 
 	if len(*calls) != 0 {
 		t.Errorf("seen and muted threads must never toast, sent %v", *calls)
@@ -168,19 +242,19 @@ func TestWatchNotifyToastsNewActivityOnly(t *testing.T) {
 
 	// A thread the watch has never seen, updated without new mail: a seen flip,
 	// a move into the box. Its activity predates the watch.
-	notifier.batch(box, nil, []generated.Posting{newPosting(101, "Maria Delgado", "Lunch on Thursday?", before)})
+	notifier.batch(box, []generated.Posting{newPosting(101, "Maria Delgado", "Lunch on Thursday?", before)}, []generated.Posting{newPosting(101, "Maria Delgado", "Lunch on Thursday?", before)})
 	if len(*calls) != 0 {
 		t.Fatalf("an update without new activity must not toast, sent %v", *calls)
 	}
 
 	// A reply on it.
-	notifier.batch(box, nil, []generated.Posting{newPosting(101, "Maria Delgado", "Lunch on Thursday?", after)})
+	notifier.batch(box, []generated.Posting{newPosting(101, "Maria Delgado", "Lunch on Thursday?", after)}, []generated.Posting{newPosting(101, "Maria Delgado", "Lunch on Thursday?", after)})
 	if len(*calls) != 1 || !slices.Contains((*calls)[0], "Maria Delgado — Lunch on Thursday?") {
 		t.Fatalf("new activity on a known thread should toast, sent %v", *calls)
 	}
 
 	// Marking the reply unseen again: the same activity, no toast.
-	notifier.batch(box, nil, []generated.Posting{newPosting(101, "Maria Delgado", "Lunch on Thursday?", after)})
+	notifier.batch(box, []generated.Posting{newPosting(101, "Maria Delgado", "Lunch on Thursday?", after)}, []generated.Posting{newPosting(101, "Maria Delgado", "Lunch on Thursday?", after)})
 	if len(*calls) != 1 {
 		t.Errorf("the same activity must not toast twice, sent %v", *calls)
 	}
@@ -188,10 +262,10 @@ func TestWatchNotifyToastsNewActivityOnly(t *testing.T) {
 	// A thread that arrived during the watch, then was read: the added toast
 	// recorded its activity, so the seen flip's update is not new.
 	arrived := newPosting(102, "Northwind Invoicing", "Invoice #4021", after)
-	notifier.batch(box, []generated.Posting{arrived}, nil)
+	notifier.batch(box, []generated.Posting{arrived}, []generated.Posting{arrived})
 	read := arrived
 	read.Seen = true
-	notifier.batch(box, nil, []generated.Posting{read})
+	notifier.batch(box, []generated.Posting{read}, []generated.Posting{read})
 	if len(*calls) != 2 {
 		t.Errorf("reading a thread must not toast, sent %v", *calls)
 	}
@@ -202,14 +276,14 @@ func TestWatchNotifyCarriesOmarchyHintsOnlyOnOmarchy(t *testing.T) {
 	later := watchStarted.Add(30 * time.Second)
 
 	plain, sent := recordingNotifier("7\n")
-	plain.batch(box, []generated.Posting{newPosting(101, "Maria Delgado", "Lunch on Thursday?", later)}, nil)
+	plain.batch(box, []generated.Posting{newPosting(101, "Maria Delgado", "Lunch on Thursday?", later)}, []generated.Posting{newPosting(101, "Maria Delgado", "Lunch on Thursday?", later)})
 	if slices.Contains((*sent)[0], "-h") {
 		t.Errorf("without Omarchy the argv must carry no hints: %v", (*sent)[0])
 	}
 
 	omarchy, sent := recordingNotifier("7\n")
 	omarchy.omarchy = true
-	omarchy.batch(box, []generated.Posting{newPosting(101, "Maria Delgado", "Lunch on Thursday?", later)}, nil)
+	omarchy.batch(box, []generated.Posting{newPosting(101, "Maria Delgado", "Lunch on Thursday?", later)}, []generated.Posting{newPosting(101, "Maria Delgado", "Lunch on Thursday?", later)})
 	argv := (*sent)[0]
 	if !slices.Contains(argv, "string:omarchy-glyph:"+omarchyBarGlyph) || !slices.Contains(argv, "string:omarchy-exec:"+omarchyFocusCommand) {
 		t.Errorf("on Omarchy the toast carries the glyph and the focus exec as hints: %v", argv)
@@ -225,7 +299,7 @@ func TestWatchNotifyKeepsMailTextOutOfOptionParsing(t *testing.T) {
 
 	fresh := newPosting(101, "-r Systems Ltd", "--help with the quarterly numbers", watchStarted.Add(time.Second))
 	fresh.Summary = "-p please see attached"
-	notifier.batch(box, []generated.Posting{fresh}, nil)
+	notifier.batch(box, []generated.Posting{fresh}, []generated.Posting{fresh})
 
 	argv := (*calls)[0]
 	for _, arg := range argv {
@@ -254,13 +328,13 @@ func TestWatchNotifyWarnsAndTriesAgainAfterAFailedSend(t *testing.T) {
 	box := &watchedBox{id: 24088, kind: "imbox", name: "Imbox"}
 	later := watchStarted.Add(30 * time.Second)
 
-	notifier.batch(box, []generated.Posting{newPosting(101, "Maria Delgado", "Lunch on Thursday?", later)}, nil)
+	notifier.batch(box, []generated.Posting{newPosting(101, "Maria Delgado", "Lunch on Thursday?", later)}, []generated.Posting{newPosting(101, "Maria Delgado", "Lunch on Thursday?", later)})
 	if sent != 1 || !strings.Contains(errOut.String(), "warning: could not send a notification: no notification daemon") {
 		t.Fatalf("a failed send is a warning, got %d sends and %q", sent, errOut.String())
 	}
 
 	failing = false
-	notifier.batch(box, []generated.Posting{newPosting(102, "Northwind Invoicing", "Invoice #4021", later)}, nil)
+	notifier.batch(box, []generated.Posting{newPosting(102, "Northwind Invoicing", "Invoice #4021", later)}, []generated.Posting{newPosting(102, "Northwind Invoicing", "Invoice #4021", later)})
 	if sent != 2 {
 		t.Errorf("the next batch toasts again, got %d sends", sent)
 	}
@@ -310,10 +384,14 @@ func TestComposeMailToastListsTheFirstSenders(t *testing.T) {
 	}
 }
 
-// changesServer serves the same changes feed body for every read.
-func changesServer(t *testing.T, body string) *httptest.Server {
+// changesServer serves the changes feed bodies in turn, the last one for every
+// read after that.
+func changesServer(t *testing.T, bodies ...string) *httptest.Server {
 	t.Helper()
+	reads := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := bodies[min(reads, len(bodies)-1)]
+		reads++
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Link", `<`+r.URL.Path+`?since=2026-08-21T09%3A00%3A30.000Z&v=2>; rel="next"`)
 		_, _ = w.Write([]byte(body))
@@ -359,15 +437,24 @@ func TestWatchNotifiesOncePerRead(t *testing.T) {
 }
 
 func TestWatchNotifiesOnlyWatchedEvents(t *testing.T) {
-	server := changesServer(t, twoArrivals)
-	watch, calls := notifyingWatch(t, server, "deleted")
+	server := changesServer(t, twoArrivals,
+		`{"updated":[{"id":9001,"kind":"topic","box_id":24088,"name":"Lunch on Thursday?","active_at":"2026-08-21T09:00:20Z","creator":{"name":"Maria Delgado"}}]}`)
+	watch, calls := notifyingWatch(t, server, "updated")
 
+	// --events updated: the arrivals are not reported, so not toasted…
 	if err := watch.read(context.Background(), actioncable.Message(`{"change":"upsert","box_id":24088}`)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
 	if len(*calls) != 0 {
-		t.Errorf("--events deleted leaves nothing to toast, sent %v", *calls)
+		t.Fatalf("--events updated leaves an arrival untoasted, sent %v", *calls)
+	}
+
+	// …and a later update of one of them, which is reported, is known not to be new.
+	if err := watch.read(context.Background(), actioncable.Message(`{"change":"upsert","box_id":24088}`)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(*calls) != 0 {
+		t.Errorf("an update without new activity must not toast, even on a thread whose arrival was filtered out, sent %v", *calls)
 	}
 }
 

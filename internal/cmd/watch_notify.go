@@ -13,9 +13,10 @@ import (
 )
 
 // hey watch --notify turns each batch of changes into at most one desktop
-// notification. There is no state file: the first read of a box is its backlog
-// and is never toasted, and what the notifier remembers — when each thread was
-// last active, the id of its last toast — lives and dies with the watch.
+// notification. There is no state file: new means active since the watch began,
+// so the backlog a box's first read carries stays quiet, and what the notifier
+// remembers — when each thread was last active, the id of its last toast — lives
+// and dies with the watch.
 //
 // The toast goes through notify-send under the app-name HEY. The name matters
 // on Omarchy: its own `omarchy-action` deliberately pops through Do Not Disturb,
@@ -35,14 +36,17 @@ const (
 	toastReplaceWindow = 10 * time.Minute
 )
 
-// desktopNotifier sends one notification per batch of watched changes.
+// desktopNotifier sends one notification per batch of watched changes, for
+// the boxes it is told to — the Imbox unless --notify-box says otherwise. It
+// keeps up with every box's threads regardless, so a thread moved into a
+// notified box is not mistaken for new.
 type desktopNotifier struct {
 	errOut   io.Writer
 	send     func(args ...string) (string, error)
 	omarchy  bool
 	now      func() time.Time
 	started  time.Time
-	seeded   map[int64]bool
+	boxes    map[int64]bool
 	activeAt map[int64]time.Time
 	toastID  int
 	toastAt  time.Time
@@ -64,7 +68,6 @@ func newDesktopNotifier(errOut io.Writer) *desktopNotifier {
 		omarchy:  omarchyErr == nil,
 		now:      time.Now,
 		started:  time.Now(),
-		seeded:   map[int64]bool{},
 		activeAt: map[int64]time.Time{},
 	}
 }
@@ -77,21 +80,14 @@ func runNotifySend(args ...string) (string, error) {
 	return string(out), err
 }
 
-// batch toasts the new mail among one read of a box's changes feed. It never
-// fails the watch: a toast that could not be sent is a warning, and the next
-// batch toasts again.
-func (n *desktopNotifier) batch(box *watchedBox, added, updated []generated.Posting) {
-	fresh := n.fresh(added, updated)
-
-	// A box's first read is its catch-up: the server's cursor is the box's last
-	// activity, not this moment, and --since moves it further back. What it
-	// carries is the backlog — recorded, so later updates measure against it,
-	// but never toasted.
-	if !n.seeded[box.id] {
-		n.seeded[box.id] = true
-		return
-	}
-	if len(fresh) == 0 {
+// batch toasts the new mail among one read of a box's changes feed: observed
+// is every added and updated posting the read carried, reported the ones the
+// watch handed on. It never fails the watch: a toast that could not be sent is
+// a warning, and the next batch toasts again.
+func (n *desktopNotifier) batch(box *watchedBox, observed, reported []generated.Posting) {
+	fresh := n.fresh(reported)
+	n.record(observed)
+	if !n.boxes[box.id] || len(fresh) == 0 {
 		return
 	}
 
@@ -108,34 +104,34 @@ func (n *desktopNotifier) batch(box *watchedBox, added, updated []generated.Post
 	}
 }
 
-// fresh picks the postings worth a toast: unseen, not muted, and new — added
-// outright, or updated with activity since this watch last saw the thread.
-// active_at moves on new mail only, not when a thread is read, muted or moved,
-// so a seen flip or a move into the box never toasts; a thread the watch has no
-// record of is measured against its start, since anything active before that
-// was already there. Every posting's activity is recorded, toasted or not.
-func (n *desktopNotifier) fresh(added, updated []generated.Posting) []generated.Posting {
+// fresh picks the postings worth a toast: unseen, not muted, and active since
+// this watch last saw the thread — or since the watch began, for a thread it
+// has no record of, because anything active before that was already there: the
+// backlog a box's first read carries from the server's cursor, or a thread that
+// merely moved in. active_at moves on new mail only, not when a thread is read,
+// muted or moved, so none of those toasts and a reply on a known thread does.
+func (n *desktopNotifier) fresh(postings []generated.Posting) []generated.Posting {
 	var fresh []generated.Posting
-
-	for _, posting := range added {
-		n.activeAt[posting.Id] = posting.ActiveAt
-		if wantsToast(posting) {
-			fresh = append(fresh, posting)
-		}
-	}
-
-	for _, posting := range updated {
+	for _, posting := range postings {
 		last, known := n.activeAt[posting.Id]
 		if !known {
 			last = n.started
 		}
-		n.activeAt[posting.Id] = posting.ActiveAt
 		if wantsToast(posting) && posting.ActiveAt.After(last) {
 			fresh = append(fresh, posting)
 		}
 	}
 
 	return fresh
+}
+
+// record keeps every thread's latest activity, toasted or not, watched or not:
+// a thread first seen through a change --events filtered out is still known
+// when its next change comes.
+func (n *desktopNotifier) record(postings []generated.Posting) {
+	for _, posting := range postings {
+		n.activeAt[posting.Id] = posting.ActiveAt
+	}
 }
 
 func wantsToast(posting generated.Posting) bool {

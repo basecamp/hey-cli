@@ -388,7 +388,8 @@ hey watch                               # follow every box, a line of JSON per c
 hey watch --box imbox --events added    # only new postings in the Imbox
 hey watch --box imbox --exit-on-first   # block until something lands, then exit
 hey watch --since 2026-08-18T09:00:00Z  # catch up from a time first, then follow
-hey watch --notify                      # desktop notification for new mail (libnotify)
+hey watch --notify                      # desktop notification for new Imbox mail (libnotify)
+hey watch --notify --notify-box "The Feed" --notify-box imbox
 hey watch --run-async 'notify-send "New mail in $HEY_BOX_KIND"'
 hey watch --run-sync ./triage.sh        # one at a time, waiting for each
 ```

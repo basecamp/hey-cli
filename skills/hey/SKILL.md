@@ -515,14 +515,21 @@ hey watch --exit-on-first         # Wait for one change, print it, exit
 hey watch --timeout 30m           # Give up waiting after a while
 hey watch --since 2026-03-15      # Report changes since then first, then follow
 hey watch --run-sync ./triage.sh  # Run a command per change instead of printing
-hey watch --notify                # Also show a desktop notification for new mail
+hey watch --notify                # Also show a desktop notification for new Imbox mail
+hey watch --notify --notify-box "The Feed"  # …or for another watched box
 ```
 
 Long-running, and driven by a websocket rather than polling — never poll `hey box` in a
 loop when this will do. Writes one JSON object per changed posting to stdout, one per
 line, instead of the usual envelope: `{"change": "added", "at": ..., "box": {"id", "kind",
 "name"}, "posting_id": ..., "thread_id": ..., "posting": {...}}`. Use `thread_id` with
-`hey threads`. A deleted posting carries no `posting` or `thread_id`.
+`hey threads`. A deleted posting carries no `posting` or `thread_id`. Three more lines
+describe the watch itself: `{"change": "ready"}` once the cursor is set and the subscription
+is live (again after every reconnect's catch-up), `{"change": "disconnected"}` when the
+connection drops, and `{"change": "resync", "box": {...}}` when a box changed more than the
+feed can list and the watch skipped ahead — re-read that box. A resync is a change
+(`--run-*` scripts run for it, `--exit-on-first` counts it); `ready` and `disconnected` are
+written to stdout only and carry no `box`.
 
 To drive a command per change, choose one of two behaviours — passing both is an error.
 `--run-async` spawns the command and moves on, so a slow one never holds up the watch and
@@ -530,10 +537,11 @@ two can overlap; `--run-sync` waits for each and runs them in order. Both get th
 stdin and the fields as `HEY_CHANGE`, `HEY_AT`, `HEY_BOX_ID`, `HEY_BOX_KIND`,
 `HEY_BOX_NAME`, `HEY_POSTING_ID` and `HEY_THREAD_ID`, and both take over stdout.
 
-`--notify` adds a desktop notification through `notify-send` for new unseen mail among the
-changes — at most one per batch, replacing the last rather than stacking — and composes
-with every flag above without changing what is written. It needs libnotify; without it the
-watch says so once on stderr and carries on.
+`--notify` adds a desktop notification through `notify-send` for new unseen mail in the
+Imbox among the changes — at most one per batch, replacing the last rather than stacking —
+and composes with every flag above without changing what is written. `--notify-box`
+(repeatable) toasts another watched box instead; each one named must be watched. It needs
+libnotify; without it the watch says so once on stderr and carries on.
 
 ### Drafts
 

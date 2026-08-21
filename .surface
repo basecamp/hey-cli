@@ -240,6 +240,7 @@ hey watch --box
 hey watch --events
 hey watch --exit-on-first
 hey watch --notify
+hey watch --notify-box
 hey watch --run-async
 hey watch --run-sync
 hey watch --since

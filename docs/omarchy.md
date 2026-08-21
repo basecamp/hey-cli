@@ -98,13 +98,18 @@ and the answer was: **the CLI is the engine, the plugin is the face.**
 
 The plugin is an Omarchy `service` plugin as well as a bar widget. The shell instantiates
 the service once, so one `hey watch` runs per shell however many monitors carry the bar,
-and every bar widget reads the shared service. The service starts the watch first and reads
-the Imbox second, which closes the gap: anything that changed before the watch's cursor is
-in the read, anything after it wakes the watch. A watch event is a wake-up, not a delta —
-any line on the watch's stdout re-reads `hey box imbox`, coalesced so a burst of changes
-costs one read. `hey watch` catches up from its cursor on reconnect and skips ahead when the
-feed says too much changed, so a laptop back from suspend is current within seconds; the
-plugin's timer poll stays only as a safety net.
+and every bar widget reads the shared service. A watch event is a wake-up, not a delta —
+any line on the watch's stdout re-reads `hey box imbox`, debounced so a burst of changes
+costs one read (plus one follow-up when changes land while a read is in flight, since that
+read may predate them). `hey watch` says `ready` once its cursors are set and its
+subscription is live, and again after every reconnect's catch-up; the plugin's read on that
+line is what makes the picture gap-free — anything before the cursor is in the read,
+anything after it is an event — rather than the order the two processes were started in.
+It says `disconnected` when the cable drops, which is what the panel's live state follows,
+and `resync` when a box changed more than the feed can list, which is just another reason
+to re-read. `hey watch` catches up from its cursor on reconnect and skips ahead on that 409,
+so a laptop back from suspend is current within seconds; the plugin's timer poll stays only
+as a safety net.
 
 The watch covers every box, not just the Imbox. A move out of the Imbox writes nothing in
 the Imbox's own feed — it is an upsert in the box the thread went to — so an Imbox-only
@@ -127,18 +132,26 @@ The toasts are `hey watch`'s: a generic flag on a generic command, Omarchy-aware
 notification hints. One read of a box's changes feed is one batch, and a batch sends **at
 most one toast**.
 
-- **What counts as new**: an `added` posting that is unseen and not muted, or an `updated`
-  one that is unseen, not muted, and whose `active_at` is later than the watch last
-  recorded for it — or later than the watch's start, when it has no record. `active_at`
-  moves on new mail only, not on a seen flip, a mute or a move, so reading a thread,
-  marking it unseen again or moving it into the box never toasts, and a reply on a known
-  thread does. A box's first read is its catch-up from the server's cursor — the box's last
-  activity, not this moment — and is recorded but never toasted, so the backlog stays quiet.
+- **The Imbox, unless told otherwise.** The plugin watches every box (it has to, to see a
+  thread leave the Imbox), but HEY's attention model puts new mail in one place; `--notify`
+  toasts the Imbox and `--notify-box` names another watched box, or several. A name that is
+  not being watched is a usage error, not a toast nobody will see.
+- **What counts as new**: a posting that is unseen, not muted, and whose `active_at` is
+  later than the watch last recorded for it — or later than the watch's start, when it has
+  no record. `active_at` moves on new mail only, not on a seen flip, a mute or a move, so
+  reading a thread, marking it unseen again or moving it into the box never toasts, and a
+  reply on a known thread does. A box's first read is its catch-up from the server's cursor
+  — the box's last activity, not this moment — so it carries backlog, which the start-time
+  rule keeps quiet, alongside anything that arrived while the watch was starting, which it
+  toasts. The notifier records every posting the watch reads, in every box and whatever
+  `--events` reports, so a thread known from a filtered-out or un-notified change is never
+  mistaken for new when its next change is reported.
 - **One toast, replaced not stacked.** `Sender — Subject` for one new thread, `N new in
-  <box>` with the first few senders for more. The daemon's printed id (`-p`) is kept in
-  memory and passed back as `-r` for ten minutes, so the next batch replaces the toast on
-  screen instead of stacking; after that a fresh toast, since ids are daemon-local and a
-  shell restart may have handed the number to another application.
+  <box>` with the first few senders for more — `N new in Imbox` for the plugin. The
+  daemon's printed id (`-p`) is kept in memory and passed back as `-r` for ten minutes, so
+  the next batch replaces the toast on screen instead of stacking; after that a fresh
+  toast, since ids are daemon-local and a shell restart may have handed the number to
+  another application.
 - **No state file.** What the notifier remembers — each thread's last activity, the last
   toast's id — lives and dies with the watch. No fingerprints, no lock, no reseeding when
   toasts are switched back on: a watch that starts is silent by construction.
@@ -153,7 +166,8 @@ most one toast**.
 - **It never fails the watch.** No `notify-send`: one notice on stderr and the watch runs
   without toasts. A failed send: a warning, and the next batch toasts again.
 - **It composes.** `--box`, `--events`, `--exit-on-first` and `--run-*` all apply; the
-  toast covers exactly what the watch reported.
+  toast covers exactly what the watch reported, while the notifier's memory covers
+  everything it read.
 
 ## Decisions
 
@@ -194,9 +208,8 @@ most one toast**.
    the TUI when installed. (An AUR package already ships: `yay -S hey-cli`, published by
    the release workflow.)
 4. **Deltas applied in the plugin**: every watch event already carries the full posting,
-   but the plugin re-reads the Imbox per batch today. Applying events in place — with a
-   `resync` event from `hey watch` after a 409, so the plugin knows when a re-read is
-   due — would make a change cost no API read at all.
+   but the plugin re-reads the Imbox per batch today. Applying events in place — reading
+   only on `ready` and `resync` — would make an ordinary change cost no API read at all.
 5. **`hey watch --notify` off Linux**: the flag is libnotify-only. `terminal-notifier` or
    `osascript` on macOS would make it the same one-liner there.
 

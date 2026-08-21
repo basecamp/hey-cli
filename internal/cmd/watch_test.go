@@ -243,7 +243,7 @@ func TestWatchEventEnvironment(t *testing.T) {
 	event := watchEvent{
 		Change:    "added",
 		At:        "2026-08-18T09:14:22.031Z",
-		Box:       watchEventBox{ID: 24088, Kind: "imbox", Name: "Imbox"},
+		Box:       &watchEventBox{ID: 24088, Kind: "imbox", Name: "Imbox"},
 		PostingID: 9001,
 		ThreadID:  5511,
 	}
@@ -529,5 +529,104 @@ func TestAskForCatchUpNeverBlocks(t *testing.T) {
 	case <-watch.catchUp:
 	default:
 		t.Fatal("a catch-up should be waiting")
+	}
+}
+
+func TestWatchAnnouncesItselfOnStdoutOnly(t *testing.T) {
+	watch, out := newTestWatch("added")
+	watch.exitOnFirst = true
+
+	watch.announce(watchReady)
+	watch.announce(watchDisconnected)
+
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("wrote %d lines, want ready and disconnected: %q", len(lines), out.String())
+	}
+	var ready map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &ready); err != nil {
+		t.Fatalf("ready isn't JSON: %v", err)
+	}
+	if ready["change"] != "ready" || ready["at"] == "" {
+		t.Errorf("ready = %v, want its change and a time", ready)
+	}
+	if _, has := ready["box"]; has {
+		t.Errorf("ready is about the watch, not a box: %v", ready)
+	}
+	if _, has := ready["posting_id"]; has {
+		t.Errorf("ready has no posting: %v", ready)
+	}
+	if !strings.Contains(lines[1], `"change":"disconnected"`) {
+		t.Errorf("second line = %q, want disconnected", lines[1])
+	}
+	if watch.finished() {
+		t.Error("the watch's own news never counts towards --exit-on-first")
+	}
+
+	scripted, scriptOut := newTestWatch("added")
+	scripted.syncScript = "cat"
+	scripted.announce(watchReady)
+	if scriptOut.Len() != 0 {
+		t.Errorf("a script runs per change, and ready is not one: %q", scriptOut.String())
+	}
+}
+
+func TestWatchReportsAResyncWhateverEventsAreWatched(t *testing.T) {
+	watch, out := newTestWatch("deleted")
+	watch.exitOnFirst = true
+
+	if !watch.report(context.Background(), watchEvent{Change: watchResync, At: "2026-08-21T09:00:00.000Z"}, watch.boxes[24088], nil) {
+		t.Fatal("a resync is news whatever --events asks for")
+	}
+	if !strings.Contains(out.String(), `"change":"resync"`) || !strings.Contains(out.String(), `"kind":"imbox"`) {
+		t.Errorf("wrote %q, want the resync with its box", out.String())
+	}
+	if !watch.finished() {
+		t.Error("a resync is a change, so --exit-on-first counts it")
+	}
+}
+
+func TestWatchReportsAResyncAfterSkippingAhead(t *testing.T) {
+	t.Setenv("HEY_TOKEN", "test-token")
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/postings/changes") {
+			// As haystack answers: `head :conflict`, no body.
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"id":24088,"kind":"imbox","name":"Imbox","posting_changes_url":"` + server.URL + `/boxes/24088/postings/changes.json?since=2026-08-21T12%3A00%3A00.000Z&v=2"}]`))
+	}))
+	defer server.Close()
+	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
+
+	watch, out := newTestWatch("added")
+	cursor, err := watchCursor(server.URL+"/boxes/24088/postings/changes.json?since=2026-08-18T09%3A00%3A00.000Z&v=2", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	watch.boxes[24088].cursor = cursor
+
+	if err := watch.read(context.Background(), actioncable.Message(`{"change":"upsert","box_id":24088}`)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var event watchEvent
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out.String())), &event); err != nil {
+		t.Fatalf("output isn't one JSON line: %q (stderr %q)", out.String(), watch.errOut.(*bytes.Buffer).String())
+	}
+	if event.Change != watchResync || event.Box == nil || event.Box.ID != 24088 {
+		t.Errorf("event = %+v, want a resync for the Imbox", event)
+	}
+	if watch.boxes[24088].cursor.Since != "2026-08-21T12:00:00.000Z" {
+		t.Errorf("cursor = %+v, want it moved to the server's current one", watch.boxes[24088].cursor)
+	}
+}
+
+func TestWatchLineDescribesTheWatchsOwnNews(t *testing.T) {
+	line := watchLine(watchEvent{Change: watchReady, At: "2026-08-21T09:00:00.000Z"})
+	if !strings.Contains(line, "ready") || !strings.Contains(line, "watching for changes") {
+		t.Errorf("line = %q, want ready described without a box", line)
 	}
 }
