@@ -301,77 +301,6 @@ func (l *brailleLayer) at(x, y int) bool {
 	return l.dots[y*l.width+x]
 }
 
-// coverEllipse is a filled ellipse. Everything a cover draws with curves is built
-// out of these and outlined by silhouette; there is no stroke-an-arc primitive,
-// because filling and tracing gives a shape of any thickness and a union of any
-// number of parts for the same effort.
-type coverEllipse struct {
-	cx, cy, rx, ry, tilt float64
-}
-
-func (e coverEllipse) contains(px, py float64) bool {
-	dx, dy := px-e.cx, py-e.cy
-	sin, cos := math.Sin(e.tilt), math.Cos(e.tilt)
-	lx, ly := dx*cos+dy*sin, dy*cos-dx*sin
-	return (lx*lx)/(e.rx*e.rx)+(ly*ly)/(e.ry*e.ry) <= 1
-}
-
-// silhouette draws the outline of the union of shapes: one continuous stroke
-// around everything they cover together, with no seam where they meet.
-//
-// Abutting drawn arcs cannot do this. Their ends never quite land on each other,
-// so the joins show as notches and stray tails, and every arc that crosses
-// another leaves its own line running through the inside of the shape. Filling
-// the union and keeping the dots that have a neighbor outside it sidesteps the
-// joins altogether — there is only ever one boundary to find.
-func (l *brailleLayer) silhouette(shapes ...coverEllipse) {
-	inside := func(px, py float64) bool {
-		for _, shape := range shapes {
-			if shape.contains(px, py) {
-				return true
-			}
-		}
-		return false
-	}
-
-	// Only the shapes' own extent is scanned. A silhouette is stamped many times
-	// over a cover, and walking the whole dot grid for each one is millions of
-	// point tests to find a shape that covers a corner of it.
-	left, top := math.Inf(1), math.Inf(1)
-	right, bottom := math.Inf(-1), math.Inf(-1)
-	for _, shape := range shapes {
-		reach := max(shape.rx, shape.ry)
-		left, top = min(left, shape.cx-reach), min(top, shape.cy-reach)
-		right, bottom = max(right, shape.cx+reach), max(bottom, shape.cy+reach)
-	}
-
-	for y := max(int(top)-1, 0); y <= min(int(bottom)+1, l.height-1); y++ {
-		for x := max(int(left)-1, 0); x <= min(int(right)+1, l.width-1); x++ {
-			fx, fy := float64(x), float64(y)
-			if inside(fx, fy) && !buried(inside, fx, fy) {
-				l.set(x, y)
-			}
-		}
-	}
-}
-
-// coverStroke is how many dots thick a drawn edge is. One dot is a dotted line
-// rather than a line: braille dots do not touch, so a single-dot outline on a
-// bright field reads as a scattering of specks and the shape it describes is lost.
-const coverStroke = 2
-
-// buried reports whether everything within the stroke's reach of this dot is also
-// inside the shape, which is what puts the dot in the interior rather than on the
-// edge. Reaching further than one dot is what thickens the edge.
-func buried(inside func(x, y float64) bool, x, y float64) bool {
-	for step := 1.0; step <= coverStroke; step++ {
-		if !inside(x-step, y) || !inside(x+step, y) || !inside(x, y-step) || !inside(x, y+step) {
-			return false
-		}
-	}
-	return true
-}
-
 func (l *brailleLayer) drawInto(c *coverCanvas, ink color.Color) {
 	for y := range l.rows {
 		for x := range l.cols {
@@ -476,110 +405,40 @@ func (c *coverCanvas) paintTerrazzo() {
 	}
 }
 
-// paintPeace tiles HEY's hand in braille, offsetting alternate rows.
+// paintPeace tiles HEY's hand across the cover, offsetting alternate rows the way
+// the web app's asset repeats it.
 //
-// Character cells cannot hold this. Two earlier attempts proved it: U+270C is
-// the right gesture, but a terminal is free to take an emoji codepoint from a
-// color font, which ignores the foreground color it is handed and arrives as its
-// own dull yellow hand, invisible on yellow; box-drawing line art at five cells
-// across has too few strokes to read as anything but a broken television. At 2×4
-// dots to the cell there is room for the fingers, the fist and the thumb.
+// This is the one cover that is a mark rather than a pattern, and the terminal
+// already has the mark: U+270C is the gesture HEY draws. A tiled glyph is what
+// the asset does anyway, so nothing is lost by letting the font draw the hand.
 func (c *coverCanvas) paintPeace() {
-	dots := newBrailleLayer(c.width, c.height)
-	height := peaceHandHeight(dots.height)
-	width := int(peaceHandAspect * float64(height))
-	spacingX, spacingY := width*5/4, height*5/4
-
-	for y := 0; y < dots.height+spacingY; y += spacingY {
+	for y := peaceSpacingY / 2; y < c.height; y += peaceSpacingY {
 		offset := 0
-		if (y/spacingY)%2 == 1 {
-			offset = spacingX / 2
+		if (y/peaceSpacingY)%2 == 1 {
+			offset = peaceSpacingX / 2
 		}
-		for x := offset - spacingX; x < dots.width+spacingX; x += spacingX {
-			dots.peaceHand(float64(x), float64(y), float64(width), float64(height))
-		}
-	}
-	dots.drawInto(c, c.palette.ink[0])
-}
-
-// peaceHandAspect is the hand's width as a fraction of its height. The fingers
-// splay wide enough that the mark comes out nearly square.
-const peaceHandAspect = 0.85
-
-// peaceHandHeight is how tall the hand may be, in dots, on a cover this many dots
-// tall. It never grows past what the cover can hold — clipped, the fingers run off
-// the top and the mark stops being a hand — and it is big enough that the fingers
-// read as loops rather than strokes.
-// The preferred height is generous because the mark has six shapes in it: the
-// curled fingers stop telling themselves apart below about sixty dots, and the
-// whole thing is a smudge below twenty.
-func peaceHandHeight(dotRows int) int {
-	const preferred = 76
-	return max(min(preferred, dotRows-2), 14)
-}
-
-// peaceHand draws HEY's mark: the index and middle fingers up in a V over a
-// closed fist, with the thumb across the front of it. Everything is a fraction of
-// the mark's own box, so the same drawing works at any size the cover allows.
-//
-// The palm, the two fingers and the thumb are one silhouette — a single outline
-// around the whole hand — with the thumb's own loop drawn back over it, which is
-// the only line inside the shape. The thumb is what says the fist is a fist.
-func (l *brailleLayer) peaceHand(x, y, width, height float64) {
-	const lean = 0.42 // radians each finger tips away from vertical
-
-	// A finger is placed by its base, so the two of them rise from one point in
-	// the palm and splay apart. Leaning an ellipse about its own center instead
-	// swings the base sideways, sending each finger's base across to the other's
-	// side: the loops cross halfway up and the mark reads as a rabbit from behind.
-	finger := func(baseX, baseY, halfWidth, length, angle float64) coverEllipse {
-		return coverEllipse{
-			cx:   baseX + length*math.Sin(angle),
-			cy:   baseY - length*math.Cos(angle),
-			rx:   halfWidth,
-			ry:   length,
-			tilt: angle,
+		for x := offset; x < c.width; x += peaceSpacingX {
+			c.set(x, y, peaceHand, c.palette.ink[0])
 		}
 	}
-
-	const (
-		// The thumb lies across the front of the fist at about twenty degrees off
-		// horizontal, so its angle is measured from vertical like the fingers' but
-		// is nearly a right angle.
-		thumbAngle = math.Pi/2 - 0.35
-		// The curled fingers lie twenty degrees further round than the index, which
-		// is counter-clockwise on screen: a positive angle leans a shape clockwise.
-		curlAngle = -lean - 0.345
-	)
-
-	// The palm is a squashed oval, turned thirty degrees clockwise. Its centre
-	// sits lower than the height alone would suggest so that the fingers still
-	// root well inside it: a shallow palm whose edge only grazes the finger bases
-	// leaves the silhouette pinched where they meet, or breaks it in two.
-	// Shorter on the left than the right, which an ellipse cannot be: the long axis
-	// is trimmed and the centre slid along it by half as much, so the left end
-	// comes in and the right end stays put.
-	palm := coverEllipse{x + width*0.44, y + height*0.752, width * 0.259, height * 0.14, 0.37}
-	index := finger(x+width*0.52, y+height*0.68, width*0.07, height*0.25, -lean)
-	middle := finger(x+width*0.52, y+height*0.68, width*0.07, height*0.28, lean)
-	thumb := finger(x+width*0.545, y+height*0.705, width*0.05, height*0.16, thumbAngle)
-
-	// The last two fingers, curled along the left, overlapping the index just
-	// enough to belong to the same hand.
-	// Wide enough that a two-dot stroke still leaves them hollow: any thinner and
-	// the two edges meet in the middle and the finger is a solid smear.
-	ring := finger(x+width*0.486, y+height*0.715, width*0.065, height*0.14, curlAngle)
-	little := finger(x+width*0.42, y+height*0.745, width*0.06, height*0.12, curlAngle)
-
-	// The palm, the V and the thumb are one silhouette. The curled fingers are not
-	// in it: unioned, their outlines merge into the palm's and trail off along it,
-	// and the two of them read as one lump on the edge of the fist. Laid over a
-	// whole palm they stay two shapes.
-	l.silhouette(palm, index, middle, thumb)
-	for _, over := range []coverEllipse{thumb, ring, little} {
-		l.silhouette(over)
-	}
 }
+
+// peaceHand is U+270C on its own, with no variation selector. Bare, it measures
+// one cell wide; U+FE0F after it asks for emoji presentation and the glyph
+// becomes two cells in some terminals and one in others, which shifts every hand
+// to its right by an amount this cannot know.
+const peaceHand = "✌"
+
+// The gaps between hands, in cells. A glyph is one size whatever the cover's, so
+// these are the one thing here that does not scale with the block — a mark drawn
+// by the font cannot grow, and stretching the gaps instead would leave a large
+// cover looking emptier rather than bigger. The row gap is about half the column
+// gap because a cell is about twice as tall as it is wide, which puts the hands
+// on a roughly square lattice.
+const (
+	peaceSpacingX = 10
+	peaceSpacingY = 4
+)
 
 // maxWaveSlope is the steepest a ribbon may climb, in rows per column. A cell is
 // about twice as tall as it is wide, so half a row per column is a ribbon at

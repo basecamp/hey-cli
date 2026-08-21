@@ -326,47 +326,34 @@ characters. That is not a fallback: a blueprint grid is what box-drawing charact
 for.
 
 **Curves go in braille.** A `brailleLayer` is a dot grid at 2×4 the resolution of the
-canvas, with `arc` and `ellipse` on it, folded into cells by `drawInto`. `paintTopo` draws
-contours into one; `paintPeace` draws HEY's hand — the two fingers up in a V over a fist,
-which is what the "peace" cover is, not the CND symbol. The dots are square, incidentally:
-a cell is about twice as tall as it is wide and the 2×4 split cancels that exactly, so
-nothing drawn there needs aspect correction. Reach for braille whenever a pattern wants a
-curve, because the cell grid cannot hold one: those same contours in box-drawing characters
-are cell-wide staircases that read as noise, and the hand as five cells of line art read,
-accurately, as a broken television.
+canvas, folded into cells by `drawInto`. `paintTopo` draws contours into one. The dots are
+square, incidentally: a cell is about twice as tall as it is wide and the 2×4 split cancels
+that exactly, so nothing drawn there needs aspect correction. Reach for braille whenever a
+pattern wants a curve, because the cell grid cannot hold one: those same contours in
+box-drawing characters are cell-wide staircases that read as noise.
 
-Drawing a mark this small is mostly subtraction, and `peaceHand` is worth reading before
-attempting another one. Three things it took several tries to get right:
+**Peace is the one cover that is a mark, and the terminal already has the mark.**
+`paintPeace` tiles U+270C — two fingers up in a V, which is what the "peace" cover is, not
+the CND symbol — offsetting alternate rows the way the web app's asset repeats it. The
+glyph is deliberately bare: `peaceHand` carries no U+FE0F, because a variation selector
+asks for emoji presentation and the glyph then measures two cells in some terminals and one
+in others, which slides every hand to its right by an amount nothing here can know.
+`TestPeaceHandIsOneCellWide` pins that.
 
-- **One shape means one outline, and that means a union, not butted arcs.** `silhouette`
-  fills the union of some ellipses and keeps the dots with a neighbor outside it, so the
-  palm, the fingers and the thumb come out as a single continuous stroke around the whole
-  hand. Drawing them as arcs cut to meet each other does not work: the ends never quite
-  land on one another, so the joins show as notches and tails, and every arc that crosses
-  another leaves its own line running through the inside of the shape. The thumb's loop is
-  drawn back over the silhouette afterwards, and is the only interior line the mark has.
-- **A finger pivots about its base, not its center.** Leaning an ellipse about its center
-  swings the base sideways, so each finger's base crosses to the other's side and the loops
-  cross halfway up. The mark then reads, unmistakably, as a rabbit seen from behind.
-- **Four outlines is the ceiling.** The curled fingers belong on the left of a drawn hand
-  and were tried twice, as small ovals and as arcs following the palm; both came out as
-  blobs and took the palm down with them. The V is what carries the mark.
+Two things this costs, both accepted rather than overlooked. A color emoji font ignores the
+foreground color it is handed, so the hand arrives in the font's colors rather than the
+reader's `Yellow` — the field is still theirs, and the ink is a fallback for the terminals
+that render it monochrome. And a glyph is one size forever, so `peaceSpacingX`/`Y` are the
+only constants here that do *not* scale with the block: the lattice gets denser on a big
+cover rather than bigger, which is what a repeating asset does anyway.
 
-Two traps a new pattern will walk into:
-
-**No emoji codepoints, however apt.** A color font ignores the foreground color it is
-handed, so the glyph arrives in its own colors — U+270C on HEY's yellow came out a muddy
-yellow hand — and it can measure one cell while occupying two. A text presentation
-selector is not reliable protection. Draw the shape instead.
-
-**Scale every dimension with the block, then check the extremes.** A cover is anywhere from
-40×6 to 300×90, so a constant tuned at one size is a constant that only looks right there.
-`waveRibbonShape` is the worked example: the amplitude follows the height, and the
-wavelength takes whichever is larger of a quarter of the width and whatever the amplitude
-needs to stay under `maxWaveSlope`. Scaling by height alone drew chevrons on a tall cover;
-by width alone, a busy repeat on a wide short one. `peaceRadius` is the same lesson in one
-line: a circle that does not fit is a pair of brackets. Pin both with a test over a spread
-of aspect ratios — it is much cheaper than looking.
+**Otherwise, scale every dimension with the block, then check the extremes.** A cover is
+anywhere from 40×6 to 300×90, so a constant tuned at one size is a constant that only looks
+right there. `waveRibbonShape` is the worked example: the amplitude follows the height, and
+the wavelength takes whichever is larger of a quarter of the width and whatever the
+amplitude needs to stay under `maxWaveSlope`. Scaling by height alone drew chevrons on a
+tall cover; by width alone, a busy repeat on a wide short one. Pin it with a test over a
+spread of aspect ratios — it is much cheaper than looking.
 
 A painter writes glyphs into a `coverCanvas` and the field is whatever it leaves blank,
 which is why a colorless terminal still gets the art instead of an empty band. The colors

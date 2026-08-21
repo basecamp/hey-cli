@@ -88,13 +88,11 @@ func TestCoverGridPattern(t *testing.T) {
 	}
 }
 
-// Two presets draw curves, which characters cannot hold: contours and a circle
-// both need braille's 2×4 dots. Box-drawing was tried for each and read as noise
-// and as a broken television respectively.
+// Contours are a curve, which a character cell cannot hold: box-drawing was tried
+// and a contour a cell wide and a cell tall reads as noise rather than terrain.
 func TestBraillePaintersDrawOnlyBraille(t *testing.T) {
 	for preset, paint := range map[coverPreset]func(*coverCanvas){
-		coverTopo:  (*coverCanvas).paintTopo,
-		coverPeace: (*coverCanvas).paintPeace,
+		coverTopo: (*coverCanvas).paintTopo,
 	} {
 		canvas := newCoverCanvas(60, 16, coverPalette{})
 		paint(canvas)
@@ -115,19 +113,37 @@ func TestBraillePaintersDrawOnlyBraille(t *testing.T) {
 	}
 }
 
-// Clipped, the fingers run off the top and the mark stops being a hand, so it
-// shrinks to fit a short cover instead.
-func TestPeaceHandFitsEveryCover(t *testing.T) {
-	for _, rows := range []int{coverMinRows, 8, 12, 24, 55, 90} {
-		dotRows := rows * brailleRows
-		height := peaceHandHeight(dotRows)
+// The hand is the font's glyph, tiled with alternate rows offset. Assert the
+// lattice rather than the colors, for the reason the grid test gives.
+func TestPeacePattern(t *testing.T) {
+	canvas := newCoverCanvas(21, 8, coverPalette{})
+	canvas.paintPeace()
 
-		if height > dotRows {
-			t.Errorf("%d rows: a hand %d dots tall does not fit in %d", rows, height, dotRows)
-		}
-		if height < 14 {
-			t.Errorf("%d rows: a hand %d dots tall is too small to read", rows, height)
-		}
+	want := strings.Join([]string{
+		"                     ",
+		"                     ",
+		"✌         ✌         ✌",
+		"                     ",
+		"                     ",
+		"                     ",
+		"     ✌         ✌     ",
+		"                     ",
+	}, "\n")
+
+	if got := canvas.plain(); got != want {
+		t.Errorf("peace pattern:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// The hand has to measure one cell. U+FE0F after it asks for emoji presentation
+// and the glyph goes double-width, which slides every hand to its right and wraps
+// the row — the cover would be off by one per hand rather than obviously broken.
+func TestPeaceHandIsOneCellWide(t *testing.T) {
+	if w := lipgloss.Width(peaceHand); w != 1 {
+		t.Errorf("peaceHand measures %d cells, want 1", w)
+	}
+	if strings.ContainsRune(peaceHand, '️') {
+		t.Error("peaceHand carries a variation selector, which makes its width the terminal's guess")
 	}
 }
 
