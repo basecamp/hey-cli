@@ -2061,7 +2061,7 @@ func (v *mailView) renderEntries(entries []mail.Entry) string {
 		if e.Summary != "" {
 			fmt.Fprintf(&b, "%s\n", terminal.SanitizeLine(e.Summary))
 		}
-		if e.Body != "" {
+		if !e.Body.IsEmpty() {
 			fmt.Fprintf(&b, "\n%s\n", v.vc.styles.entryBody.Render(markdown.Render(e.Body, sepWidth)))
 		}
 		entryAttachments := attachmentsForMessage(v.attachments, e.ID)

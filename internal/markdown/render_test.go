@@ -6,13 +6,13 @@ import (
 )
 
 func TestRenderEmpty(t *testing.T) {
-	if got := Render("   \n ", 80); got != "" {
+	if got := render("   \n ", 80); got != "" {
 		t.Errorf("Render blank = %q, want empty", got)
 	}
 }
 
 func TestRenderStylesEmphasis(t *testing.T) {
-	got := Render("Hi **Ryan**", 80)
+	got := render("Hi **Ryan**", 80)
 	if !strings.Contains(got, "Ryan") {
 		t.Errorf("Render = %q, should keep the text", got)
 	}
@@ -22,7 +22,7 @@ func TestRenderStylesEmphasis(t *testing.T) {
 }
 
 func TestRenderDropsHeadingMarkers(t *testing.T) {
-	got := Render("## Quarterly update", 80)
+	got := render("## Quarterly update", 80)
 	if strings.Contains(got, "#") {
 		t.Errorf("Render = %q, should not leave heading markers", got)
 	}
@@ -32,7 +32,7 @@ func TestRenderDropsHeadingMarkers(t *testing.T) {
 }
 
 func TestRenderLeavesNoTrailingWhitespace(t *testing.T) {
-	for _, line := range strings.Split(Render("Hi **Ryan**", 80), "\n") {
+	for _, line := range strings.Split(render("Hi **Ryan**", 80), "\n") {
 		if strings.HasSuffix(line, " ") {
 			t.Errorf("line %q has trailing whitespace", line)
 		}
@@ -40,7 +40,7 @@ func TestRenderLeavesNoTrailingWhitespace(t *testing.T) {
 }
 
 func TestRenderWrapsToWidth(t *testing.T) {
-	got := Render(strings.Repeat("word ", 40), 30)
+	got := render(strings.Repeat("word ", 40), 30)
 	for _, line := range strings.Split(got, "\n") {
 		if len(line) > 30 {
 			t.Errorf("line %q is wider than 30 columns", line)
@@ -49,7 +49,7 @@ func TestRenderWrapsToWidth(t *testing.T) {
 }
 
 func TestRenderLinksAreClickable(t *testing.T) {
-	got := Render("See the [Q3 report](https://example.com/reports/q3).", 80)
+	got := render("See the [Q3 report](https://example.com/reports/q3).", 80)
 	if !strings.Contains(got, "\x1b]8;") {
 		t.Errorf("Render = %q, should emit an OSC 8 hyperlink", got)
 	}
@@ -59,7 +59,7 @@ func TestRenderLinksAreClickable(t *testing.T) {
 }
 
 func TestRenderFallsBackToDefaultWidth(t *testing.T) {
-	if Render("Hello", 0) == "" {
+	if render("Hello", 0) == "" {
 		t.Error("Render with no width returned nothing")
 	}
 }

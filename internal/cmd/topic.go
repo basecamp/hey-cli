@@ -31,17 +31,17 @@ type threadContact struct {
 // the body: hydrated, bodyless (HEY served none), over_limit or failed (it was not
 // read), or not_requested (the format did not need it).
 type threadEntry struct {
-	ID                    int64         `json:"id"`
-	CreatedAt             string        `json:"created_at"`
-	UpdatedAt             string        `json:"updated_at"`
-	Creator               threadContact `json:"creator"`
-	AlternativeSenderName string        `json:"alternative_sender_name"`
-	Summary               string        `json:"summary"`
-	Kind                  string        `json:"kind"`
-	AppURL                string        `json:"app_url"`
-	Body                  string        `json:"body,omitempty"`
-	BodyState             string        `json:"body_state,omitempty"`
-	BodyHTML              string        `json:"-"`
+	ID                    int64             `json:"id"`
+	CreatedAt             string            `json:"created_at"`
+	UpdatedAt             string            `json:"updated_at"`
+	Creator               threadContact     `json:"creator"`
+	AlternativeSenderName string            `json:"alternative_sender_name"`
+	Summary               string            `json:"summary"`
+	Kind                  string            `json:"kind"`
+	AppURL                string            `json:"app_url"`
+	Body                  htmlutil.Markdown `json:"body,omitzero"`
+	BodyState             string            `json:"body_state,omitempty"`
+	BodyHTML              string            `json:"-"`
 }
 
 type topicCommand struct {
@@ -145,7 +145,7 @@ func printThreadStyled(w io.Writer, entries []threadEntry, notice string) {
 		fmt.Fprintf(w, "From: %s  [%s]  #%d\n", terminal.SanitizeLine(threadEntrySender(e)), e.CreatedAt, e.ID)
 		fmt.Fprintln(w)
 		switch {
-		case e.Body != "":
+		case !e.Body.IsEmpty():
 			fmt.Fprintln(w, markdown.Render(e.Body, stdoutWidth()))
 		case e.BodyState == string(threadload.StateHydrated):
 			fmt.Fprintln(w, "(empty body)")
@@ -191,8 +191,8 @@ func writeThreadMarkdown(w io.Writer, threadID int64, entries []threadEntry, not
 		}
 		var body string
 		switch {
-		case e.Body != "":
-			body = e.Body + "\n"
+		case !e.Body.IsEmpty():
+			body = e.Body.String() + "\n"
 		case e.BodyState == string(threadload.StateHydrated):
 			body = "*(empty body)*\n"
 		case e.BodyState == string(threadload.StateBodyless) && e.Summary != "":
@@ -274,7 +274,8 @@ func newThreadEntry(loaded *threadload.Entry, html bool) threadEntry {
 	updatedAt := entry.UpdatedAt
 	summary := entry.Summary
 	appURL := entry.AppUrl
-	body, bodyHTML := "", ""
+	var body htmlutil.Markdown
+	bodyHTML := ""
 
 	if message := loaded.Message; message != nil {
 		if creator.Id == 0 {

@@ -49,12 +49,12 @@ func TestRenderNeverDecodesEntities(t *testing.T) {
 		"hex entity":    {"&#x1b;[31mRED", "&#x1b;[31mRED"},
 		"named entity":  {"&lpar;&#27;[31mRED", "&lpar;&#27;[31mRED"},
 	} {
-		out := Render(test.md, 80)
+		out := render(test.md, 80)
 		if strings.Contains(out, "\x1b[31m") {
-			t.Errorf("%s: Render(%q) = %q turned red", name, test.md, out)
+			t.Errorf("%s: render(%q) = %q turned red", name, test.md, out)
 		}
 		if !strings.Contains(visible(out), test.literal) {
-			t.Errorf("%s: Render(%q) = %q lost the literal text", name, test.md, out)
+			t.Errorf("%s: render(%q) = %q lost the literal text", name, test.md, out)
 		}
 	}
 }
@@ -67,14 +67,14 @@ func TestRenderShowsAmpersandsAsWritten(t *testing.T) {
 		"&copy; 2026":                 "&copy; 2026",
 		"[q](https://e.com/?a=1&b=2)": "https://e.com/?a=1&b=2",
 	} {
-		if out := visible(Render(md, 200)); !strings.Contains(out, want) {
-			t.Errorf("Render(%q) shows %q, want %q in it", md, out, want)
+		if out := visible(render(md, 200)); !strings.Contains(out, want) {
+			t.Errorf("render(%q) shows %q, want %q in it", md, out, want)
 		}
 	}
 }
 
 func TestRenderKeepsQueryStringsInHyperlinks(t *testing.T) {
-	out := Render("[q](https://example.com/?a=1&b=2)", 80)
+	out := render("[q](https://example.com/?a=1&b=2)", 80)
 	if !strings.Contains(out, "\x1b]8;id=") || !strings.Contains(out, ";https://example.com/?a=1&b=2\x07") {
 		t.Errorf("Render = %q, want an OSC 8 link to the URL with its query string", out)
 	}
@@ -91,12 +91,12 @@ func TestRenderStripsRawControls(t *testing.T) {
 		"in a fence": "```\n\x1b[31m\n```",
 		"in a link":  "[x](https://example.com/\x1b[31m)",
 	} {
-		out := Render(md, 80)
+		out := render(md, 80)
 		if strings.Contains(out, "\x1b[31m") || strings.Contains(out, "\x1b]0;") {
-			t.Errorf("%s: Render(%q) = %q carries the injected sequence", name, md, out)
+			t.Errorf("%s: render(%q) = %q carries the injected sequence", name, md, out)
 		}
 		if hasControl(visible(out)) {
-			t.Errorf("%s: Render(%q) = %q carries a control character", name, md, out)
+			t.Errorf("%s: render(%q) = %q carries a control character", name, md, out)
 		}
 	}
 }
@@ -105,7 +105,7 @@ func TestRenderOutputIsOnlySGRAndHyperlinks(t *testing.T) {
 	md := "# Title\n\nHi **Ryan**, see the [Q3 report](https://example.com/q3) and <https://example.org>.\n\n" +
 		"- one *two* ~~three~~ `four`\n- https://example.com/bare\n\n> quote\n\n```ruby\nputs 1\n```\n\n" +
 		"| a | b |\n| --- | --- |\n| 1 | 2 |\n\n---\n\n![chart](/rails/blobs/chart.png) and [relative](/rails/blobs/q3.pdf) and [mail](mailto:jane@example.com)"
-	out := Render(md, 60)
+	out := render(md, 60)
 	if !sgrOnly(out) {
 		t.Fatalf("Render = %q carries a sequence outside the allow-list", out)
 	}
@@ -118,7 +118,7 @@ func TestRenderOutputIsOnlySGRAndHyperlinks(t *testing.T) {
 }
 
 func TestRenderHyperlinksOnlyAllowedSchemes(t *testing.T) {
-	out := Render("[relative](/rails/blobs/q3.pdf) [mail](mailto:jane@example.com) [web](https://example.com) [ftp](ftp://example.com/x)", 200)
+	out := render("[relative](/rails/blobs/q3.pdf) [mail](mailto:jane@example.com) [web](https://example.com) [ftp](ftp://example.com/x)", 200)
 	for _, uri := range []string{"https://example.com", "mailto:jane@example.com"} {
 		if !strings.Contains(out, ";"+uri+"\x07") {
 			t.Errorf("Render = %q, want a hyperlink to %s", out, uri)
@@ -201,7 +201,7 @@ func TestRenderShowsADeeplyNestedDocumentUnrendered(t *testing.T) {
 		"indented quotes": "  " + strings.Repeat("> ", 100) + "deep",
 	} {
 		done := make(chan string, 1)
-		go func() { done <- Render(md, 40) }()
+		go func() { done <- render(md, 40) }()
 		select {
 		case out := <-done:
 			if !strings.Contains(visible(out), "deep") {
@@ -219,7 +219,7 @@ func TestRenderShowsADeeplyNestedDocumentUnrendered(t *testing.T) {
 // Under the cap, nesting renders as usual — and a fenced line of markers is code,
 // which counts for nothing.
 func TestRenderNestsUnderTheCap(t *testing.T) {
-	out := Render(strings.Repeat("> ", maxNestingDepth)+"quoted\n\n```\n"+strings.Repeat("> ", 100)+"code\n```", 80)
+	out := render(strings.Repeat("> ", maxNestingDepth)+"quoted\n\n```\n"+strings.Repeat("> ", 100)+"code\n```", 80)
 	if !strings.Contains(out, "│ quoted") || !strings.Contains(visible(out), "code") {
 		t.Errorf("Render = %q, want the quote rendered and the code kept", out)
 	}
@@ -228,7 +228,7 @@ func TestRenderNestsUnderTheCap(t *testing.T) {
 // A bidirectional override in a body is stripped on the way to the terminal: what the
 // reader sees is what was written, in the order it was written.
 func TestRenderStripsBidiControlsFromBodies(t *testing.T) {
-	out := Render("invoice\u202efdp.exe", 80)
+	out := render("invoice\u202efdp.exe", 80)
 	if strings.ContainsRune(out, 0x202e) || !strings.Contains(visible(out), "invoicefdp.exe") {
 		t.Errorf("Render = %q", out)
 	}
@@ -255,7 +255,7 @@ func TestRendererCacheIsBounded(t *testing.T) {
 	renderersMutex.Unlock()
 
 	for width := 20; width < 20+maxCachedRenderers*3; width++ {
-		if Render("hello", width) == "" {
+		if render("hello", width) == "" {
 			t.Fatalf("Render at width %d returned nothing", width)
 		}
 	}
@@ -289,9 +289,9 @@ func FuzzContainment(f *testing.F) {
 		if !utf8.ValidString(md) {
 			t.Skip()
 		}
-		out := Render(md, 40)
+		out := render(md, 40)
 		if !sgrOnly(out) {
-			t.Fatalf("Render(%q) = %q carries a sequence outside the allow-list", md, out)
+			t.Fatalf("render(%q) = %q carries a sequence outside the allow-list", md, out)
 		}
 		for _, open := range strings.Split(out, "\x1b]8;")[1:] {
 			params, rest, _ := strings.Cut(open, ";")
@@ -300,7 +300,7 @@ func FuzzContainment(f *testing.F) {
 				uri = uri[:i]
 			}
 			if uri != "" && !allowedHyperlink(uri) {
-				t.Fatalf("Render(%q) = %q links to %q (params %q)", md, out, uri, params)
+				t.Fatalf("render(%q) = %q links to %q (params %q)", md, out, uri, params)
 			}
 		}
 	})

@@ -127,7 +127,7 @@ func TestEntriesInThreadReadsEveryPageOldestFirst(t *testing.T) {
 			t.Errorf("entry %d = %d, want %d", index, entries[index].ID, want)
 		}
 	}
-	if entries[0].Body != "the first word" {
+	if entries[0].Body.String() != "the first word" {
 		t.Errorf("body = %q, want the oldest entry's", entries[0].Body)
 	}
 	if entries[0].CreatedAt != "2026-04-12T09:30" {
@@ -222,10 +222,10 @@ func TestEntriesInThreadConvertsBodiesToMarkdown(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if !strings.Contains(entries[0].Body, "# Quarterly planning") {
+	if !strings.Contains(entries[0].Body.String(), "# Quarterly planning") {
 		t.Errorf("body = %q, want Markdown", entries[0].Body)
 	}
-	if !strings.Contains(entries[0].Body, "https://example.com/plan") {
+	if !strings.Contains(entries[0].Body.String(), "https://example.com/plan") {
 		t.Errorf("body = %q, want the link to keep its URL", entries[0].Body)
 	}
 	// A body is held in one form: Markdown here, and the HTML only under --html.
@@ -236,7 +236,7 @@ func TestEntriesInThreadConvertsBodiesToMarkdown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if html := threadEntries(thread, true); html[0].BodyHTML != trix || html[0].Body != "" {
+	if html := threadEntries(thread, true); html[0].BodyHTML != trix || !html[0].Body.IsEmpty() {
 		t.Errorf("--html entry = %+v, want HEY's original HTML and no Markdown", html[0])
 	}
 }
@@ -254,7 +254,7 @@ func TestEntriesInThreadReadsAnInboundEmailsEmbeddedBody(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if !strings.Contains(entries[0].Body, "Your invoice is ready.") {
+	if !strings.Contains(entries[0].Body.String(), "Your invoice is ready.") {
 		t.Errorf("body = %q, want the embedded email", entries[0].Body)
 	}
 }

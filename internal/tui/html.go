@@ -6,7 +6,7 @@ func htmlToText(s string) string {
 	return htmlutil.ToText(s)
 }
 
-func htmlToMarkdown(s string) string {
+func htmlToMarkdown(s string) htmlutil.Markdown {
 	return htmlutil.ToMarkdown(s)
 }
 

@@ -263,7 +263,7 @@ func TestMailViewHandlesTopicLoaded(t *testing.T) {
 		boxID:   1,
 		topicID: 100,
 		title:   "Test topic",
-		entries: []mail.Entry{{Creator: mail.Contact{Name: "Alice"}, Body: "hello"}},
+		entries: []mail.Entry{{Creator: mail.Contact{Name: "Alice"}, Body: htmlutil.ToMarkdown("<p>hello</p>")}},
 	})
 	if !consumed {
 		t.Error("topicLoadedMsg should be consumed")

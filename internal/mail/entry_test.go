@@ -27,7 +27,7 @@ func TestNewEntry(t *testing.T) {
 	if entry.Creator.ID != 42 || entry.Creator.EmailAddress != "jane@example.com" {
 		t.Errorf("creator = %+v", entry.Creator)
 	}
-	if entry.Body != "Message body with a [plan](https://example.com/plan)" {
+	if entry.Body.String() != "Message body with a [plan](https://example.com/plan)" {
 		t.Errorf("body = %q, want Markdown", entry.Body)
 	}
 	if entry.BodyHTML != `<p>Message body with a <a href="https://example.com/plan">plan</a></p>` {

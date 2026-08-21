@@ -8,6 +8,8 @@ import (
 
 	"charm.land/glamour/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/basecamp/hey-cli/internal/htmlutil"
 )
 
 // DefaultWidth is the word wrap used when the caller has no width of its own.
@@ -26,12 +28,20 @@ var (
 // back to the Markdown source when glamour cannot be set up, so a rendering
 // problem costs formatting rather than the message itself.
 //
-// The Markdown is treated as untrusted on the way in and the output is checked on
-// the way out: see prepareSource and contain. One consequence worth knowing is that
+// Only htmlutil.ToMarkdown can produce the Markdown this accepts: the type is the
+// provenance, so a string from anywhere else cannot reach glamour. The Markdown is
+// still treated as untrusted on the way in and the output is checked on the way out:
+// see prepareSource and contain. One consequence worth knowing is that
 // `&` is always literal here — an entity reference in the source is shown as the
 // characters it was written with, because the HTML it came from already decoded
 // the entities that were meant to be decoded.
-func Render(md string, width int) string {
+func Render(md htmlutil.Markdown, width int) string {
+	return render(md.String(), width)
+}
+
+// render is Render for the package's own tests and fallbacks, which hand it Markdown
+// text directly; everything outside the package goes through the sealed type.
+func render(md string, width int) string {
 	safe, forGlamour, deep := prepareSource(md)
 	if strings.TrimSpace(safe) == "" {
 		return ""

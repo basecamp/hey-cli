@@ -11,12 +11,14 @@ import (
 	"time"
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
+	"github.com/basecamp/hey-cli/internal/htmlutil"
 )
 
 func journalWithEntry() *journalView {
 	v := newJournalView(testVC())
 	v.Init()
-	v.Update(journalDetailMsg{requestResult: currentJournalRequest(v), body: "Today was great"})
+	v.Update(journalDetailMsg{requestResult: currentJournalRequest(v), body: htmlutil.ToMarkdown("<p>Today was great</p>")})
 	return v
 }
 
@@ -98,7 +100,7 @@ func TestJournalViewHandlesDetailLoaded(t *testing.T) {
 	v := newJournalView(testVC())
 	v.Init() // sets dateIndex to today
 
-	_, consumed := v.Update(journalDetailMsg{requestResult: currentJournalRequest(v), body: "Entry body"})
+	_, consumed := v.Update(journalDetailMsg{requestResult: currentJournalRequest(v), body: htmlutil.ToMarkdown("<p>Entry body</p>")})
 	if !consumed {
 		t.Error("journalDetailMsg should be consumed")
 	}
@@ -115,7 +117,7 @@ func TestJournalViewIgnoresStaleResponse(t *testing.T) {
 	v.Init()
 
 	// A response to the read the reader has since moved off
-	_, consumed := v.Update(journalDetailMsg{requestResult: requestResult{requestID: v.requests.id - 1}, body: "old content"})
+	_, consumed := v.Update(journalDetailMsg{requestResult: requestResult{requestID: v.requests.id - 1}, body: htmlutil.ToMarkdown("<p>old content</p>")})
 	if !consumed {
 		t.Error("stale journalDetailMsg should still be consumed")
 	}

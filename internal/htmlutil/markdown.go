@@ -11,8 +11,13 @@ import (
 
 // ToMarkdown converts HTML content to Markdown. Unlike ToText it keeps what a
 // flattened email throws away: link URLs, emphasis, headings, list nesting,
-// quotes, code blocks and tables.
-func ToMarkdown(s string) string {
+// quotes, code blocks and tables. What it returns is the only Markdown
+// markdown.Render accepts; see the Markdown type.
+func ToMarkdown(s string) Markdown {
+	return Markdown{text: toMarkdown(s)}
+}
+
+func toMarkdown(s string) string {
 	m := &markdownizer{}
 	doc, err := html.Parse(strings.NewReader(s))
 	if err != nil {

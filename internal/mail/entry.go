@@ -21,7 +21,7 @@ type Entry struct {
 	Creator               Contact
 	AlternativeSenderName string
 	Summary               string
-	Body                  string
+	Body                  htmlutil.Markdown
 	BodyHTML              string
 }
 

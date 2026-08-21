@@ -71,10 +71,18 @@ func withThreadLimits(t *testing.T, limits threadload.Limits) {
 	t.Cleanup(func() { threadLimits = previous })
 }
 
+// decodedEntry is a thread entry as --json carries it, read back with a plain string
+// body: only ToMarkdown can make an htmlutil.Markdown, so the decoded form is not one.
+type decodedEntry struct {
+	ID        int64  `json:"id"`
+	Body      string `json:"body"`
+	BodyState string `json:"body_state"`
+}
+
 type threadResponse struct {
-	OK     bool          `json:"ok"`
-	Data   []threadEntry `json:"data"`
-	Notice string        `json:"notice"`
+	OK     bool           `json:"ok"`
+	Data   []decodedEntry `json:"data"`
+	Notice string         `json:"notice"`
 }
 
 func decodeThread(t *testing.T, stdout string) threadResponse {
