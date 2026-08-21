@@ -211,6 +211,23 @@ func TestToMarkdownInlineCodeSizesItsDelimiters(t *testing.T) {
 	}
 }
 
+// A delimiter is sized on the content as a terminal will see it: the renderer's
+// sanitizer drops a zero width space between two runs of backticks, joining them, so
+// the delimiter must be longer than the joined run or the code could be closed from
+// inside by text that only looks shorter.
+func TestToMarkdownCodeDelimitersOutlastTheSanitizer(t *testing.T) {
+	for _, test := range []struct{ in, want string }{
+		{"<p><code>``\u200b``</code></p>", "````` ``\u200b`` `````"},
+		{"<pre>``\u200b``\nafter</pre>", "`````\n``\u200b``\nafter\n`````"},
+		{"<pre>``\u200d``</pre>", "`````\n``\u200d``\n`````"},
+	} {
+		got := ToMarkdown(test.in)
+		if got != test.want {
+			t.Errorf("ToMarkdown(%q) = %q, want %q", test.in, got, test.want)
+		}
+	}
+}
+
 func TestToMarkdownFencedCodeCannotBeClosedFromInside(t *testing.T) {
 	got := toMarkdown("<pre>first\n```\nnot outside\n</pre><p>after</p>")
 	want := "````\nfirst\n```\nnot outside\n````\n\nafter"

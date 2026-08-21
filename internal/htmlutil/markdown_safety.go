@@ -3,6 +3,8 @@ package htmlutil
 import (
 	"regexp"
 	"strings"
+
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 // Everything ToMarkdown writes came out of somebody else's email, and the Markdown it
@@ -97,7 +99,7 @@ func codeSpan(content string) string {
 	if strings.TrimSpace(content) == "" {
 		return ""
 	}
-	delimiter := strings.Repeat("`", longestRun(content, '`')+1)
+	delimiter := strings.Repeat("`", backtickRun(content)+1)
 	if strings.HasPrefix(content, "`") || strings.HasSuffix(content, "`") ||
 		(strings.HasPrefix(content, " ") && strings.HasSuffix(content, " ")) {
 		content = " " + content + " "
@@ -108,7 +110,18 @@ func codeSpan(content string) string {
 // codeFence is the fence that contains content: at least three backticks and, whatever
 // run of them the content holds, one more than that.
 func codeFence(content string) string {
-	return strings.Repeat("`", max(3, longestRun(content, '`')+1))
+	return strings.Repeat("`", max(3, backtickRun(content)+1))
+}
+
+// backtickRun is the longest run of backticks in code content as a terminal will see
+// it. markdown.Render puts the whole document through terminal.Sanitize before
+// parsing it, and that drops characters that draw nothing, so two runs with a zero
+// width space between them are one run by the time the delimiters are read; a
+// delimiter sized on the content as written would then be closed from inside. The
+// content itself is written as it is — the JSON keeps it — and only the measure
+// looks through the sanitizer.
+func backtickRun(content string) int {
+	return max(longestRun(content, '`'), longestRun(terminal.Sanitize(content), '`'))
 }
 
 // codeFenceInfo is the info string a fence may carry: a language name, nothing else. A

@@ -47,22 +47,35 @@ var sanitizeTests = []struct {
 	{"a joiner after a stripped invisible is judged by what was kept", "a\u200b\u200dé", "aé"},
 	{"a joiner at the end of non-ASCII text goes", "é\u200d", "é"},
 	{"a joiner whose right-hand side is stripped goes", "é\u200d\u200b", "é"},
-	{"a joiner whose right-hand side is a dropped mark goes", "e" + strings.Repeat("\u0301", 4) + "\u200d\u0301", "e" + strings.Repeat("\u0301", 4)},
+	{"a joiner whose right-hand side is a dropped mark goes", "e" + strings.Repeat("\u0301", 8) + "\u200d\u0301", "e" + strings.Repeat("\u0301", 8)},
 	{"a run of joiners before a space goes", "é\u200d\u200d é", "é é"},
+	{"a joiner after a virama joins", "क\u094d\u200dष", "क\u094d\u200dष"},
+	{"a joiner after an emoji presentation selector joins", "❤\ufe0f\u200d🔥", "❤\ufe0f\u200d🔥"},
+	{"a joiner before a mark goes", "é\u200d\u0301", "é\u0301"},
+	{"a mark on an ASCII base does not make it joinable", "e\u0301\u200dé", "e\u0301é"},
 
-	// Combining marks are capped at four on a base.
+	// Combining marks are capped at eight on a base.
 	{"a precomposed accent survives", "Café", "Café"},
 	{"a decomposed accent survives", "Cafe\u0301", "Cafe\u0301"},
 	{"decomposed Vietnamese survives", "Vie\u0323\u0302t Nam", "Vie\u0323\u0302t Nam"},
 	{"Hindi survives", "हिन्दी", "हिन्दी"},
 	{"a nukta and virama survive", "क\u093c\u094dष", "क\u093c\u094dष"},
 	{"Hebrew with four marks survives", "ש\u05c1\u05bc\u05b7\u05ab", "ש\u05c1\u05bc\u05b7\u05ab"},
+	{"fully pointed Hebrew with five marks survives", "ש\u05c1\u05bc\u05b8\u05bd\u0591", "ש\u05c1\u05bc\u05b8\u05bd\u0591"},
 	{"a Tibetan stack survives", "བསྒྲུབས", "བསྒྲུབས"},
 	{"a keycap survives", "1\ufe0f\u20e3", "1\ufe0f\u20e3"},
 	{"an emoji presentation selector survives", "❤\ufe0f", "❤\ufe0f"},
-	{"Zalgo is cut at four marks", "Z" + strings.Repeat("\u0336", 50) + "algo", "Z" + strings.Repeat("\u0336", 4) + "algo"},
-	{"the cap resets on each base", "a\u0301\u0302\u0303\u0304\u0305b\u0301\u0302\u0303\u0304\u0305", "a\u0301\u0302\u0303\u0304b\u0301\u0302\u0303\u0304"},
-	{"the cap resets on a newline", "a" + strings.Repeat("\u0301", 4) + "\n" + strings.Repeat("\u0301", 5), "a" + strings.Repeat("\u0301", 4) + "\n" + strings.Repeat("\u0301", 4)},
+	{"Zalgo is cut at eight marks", "Z" + strings.Repeat("\u0336", 50) + "algo", "Z" + strings.Repeat("\u0336", 8) + "algo"},
+	{"the cap resets on each base", "a" + strings.Repeat("\u0301", 9) + "b" + strings.Repeat("\u0301", 9), "a" + strings.Repeat("\u0301", 8) + "b" + strings.Repeat("\u0301", 8)},
+	{"the cap resets on a newline", "a" + strings.Repeat("\u0301", 8) + "\n" + strings.Repeat("\u0301", 9), "a" + strings.Repeat("\u0301", 8) + "\n" + strings.Repeat("\u0301", 8)},
+	{"a kept format character is not a base", "Z" + strings.Repeat("\u0336", 8) + "\U000e0020" + strings.Repeat("\u0336", 8), "Z" + strings.Repeat("\u0336", 8) + "\U000e0020"},
+	{"a subdivision flag survives", "\U0001f3f4\U000e0067\U000e0062\U000e0073\U000e0063\U000e0074\U000e007f", "\U0001f3f4\U000e0067\U000e0062\U000e0073\U000e0063\U000e0074\U000e007f"},
+
+	// A byte that is not UTF-8 is dropped rather than reaching the terminal raw.
+	{"an invalid byte goes", "caf\xe9.txt", "caf.txt"},
+	{"a raw C1 byte goes", "a\x85b", "ab"},
+	{"a replacement character the text carried survives", "a\ufffdb", "a\ufffdb"},
+	{"a joiner whose right-hand side is an invalid byte goes", "é\u200d\xe9", "é"},
 
 	// Spaces that are not U+0020 are left alone.
 	{"a no-break space survives", "Jean\u00a0Dupont", "Jean\u00a0Dupont"},

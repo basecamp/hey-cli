@@ -32,16 +32,25 @@
 // The zero width joiner and non-joiner are kept where they can join. They carry
 // text: an emoji family is emoji joined by U+200D, and Persian, Urdu and the Indic
 // scripts write with both. A joiner survives only between two non-ASCII,
-// non-space runes, and a run of them collapses to one; at the start or end of a
-// string, or next to an ASCII letter — a joiner inside "paypal" — it joins nothing
-// and is dropped.
+// non-space base characters — the marks on the left base, a virama or an emoji
+// presentation selector, are part of it, but a mark is not a base on its own — and a
+// run of them collapses to one; at the start or end of a string, or next to an
+// ASCII letter — a joiner inside "paypal" — it joins nothing and is dropped.
 //
-// Combining marks are kept up to four on a base and the rest of the run dropped.
-// The deepest stacks a writing system produces reach four — a Hebrew letter with
-// its shin dot, dagesh, vowel and cantillation; a Tibetan stack with two subjoined
-// letters and a vowel sign — where decomposed Vietnamese, Hindi and the keycap
-// emoji use two. Zalgo needs dozens to climb out of its cell. Variation selectors
-// are marks and sit under the same cap, so the U+FE0F that makes a heart red stays.
+// Combining marks are kept up to eight on a base and the rest of the run dropped.
+// The deepest stacks a writing system produces reach five — a fully pointed Hebrew
+// letter with its shin dot, dagesh, vowel, meteg and cantillation; a Tibetan stack
+// with two subjoined letters and a vowel sign is four — where decomposed Vietnamese,
+// Hindi and the keycap emoji use two, so eight is room for any of them and Zalgo
+// needs dozens to climb out of its cell. Variation selectors are marks and sit
+// under the same cap, so the U+FE0F that makes a heart red stays. A format
+// character that is kept — a tag character, an Arabic number sign — is not a base:
+// it draws nothing of its own, so the marks after it still belong to the letter
+// before it and count against the same cap.
+//
+// A byte that is not UTF-8 is dropped. Left as it is, a stray 0x85 is a C1 control
+// to a terminal that reads bytes; and it goes the way everything else here goes,
+// stripped rather than replaced, so the output is never longer than the input.
 //
 // Spaces that are not U+0020 are left alone. A no-break space is ordinary in text
 // that came out of HTML, as are the fixed-width spaces; they render as a space and
@@ -66,8 +75,8 @@ import (
 var lineBreaks = strings.NewReplacer("\n", " ", "\t", " ")
 
 // maxCombiningMarks is how many combining marks may follow one base before the
-// rest of the run is dropped.
-const maxCombiningMarks = 4
+// rest of the run is dropped: the package doc says why eight.
+const maxCombiningMarks = 8
 
 const (
 	zeroWidthNonJoiner = 0x200c
@@ -82,12 +91,15 @@ const (
 // One pass, and no allocation for text that needs nothing removed. Every decision
 // is made on what has been kept, so sanitizing twice is the same as once.
 func Sanitize(value string) string {
-	p := pass{in: ansi.Strip(value), kept: -1}
+	p := pass{in: ansi.Strip(value), kept: -1, base: -1}
 	for i, r := range p.in {
 		switch {
 		case r == '\n' || r == '\t':
 			p.keep(r)
 			p.marks = 0
+		case r == utf8.RuneError && !strings.HasPrefix(p.in[i:], "\ufffd"):
+			// An invalid byte, not a replacement character the text carried.
+			p.drop(i)
 		case isControl(r), isBidiControl(r), isInvisible(r):
 			p.drop(i)
 		case r == zeroWidthJoiner || r == zeroWidthNonJoiner:
@@ -101,7 +113,9 @@ func Sanitize(value string) string {
 			}
 		default:
 			p.keep(r)
-			p.marks = 0
+			if !unicode.Is(unicode.Cf, r) {
+				p.marks = 0
+			}
 		}
 	}
 	return p.String()
@@ -114,6 +128,7 @@ type pass struct {
 	in       string
 	out      *strings.Builder
 	kept     rune // the last rune written, other than a joiner
+	base     rune // the last rune written that is not a mark, other than a joiner
 	marks    int  // combining marks written since the last base
 	joiner   rune // a joiner waiting for its right-hand side, or zero
 	joinerAt int  // its byte offset
@@ -121,7 +136,7 @@ type pass struct {
 
 func (p *pass) keep(r rune) {
 	if p.joiner != 0 {
-		if joinable(r) {
+		if joinable(r) && !isCombiningMark(r) {
 			p.write(p.joiner)
 		} else {
 			p.diverge(p.joinerAt)
@@ -130,6 +145,9 @@ func (p *pass) keep(r rune) {
 	}
 	p.write(r)
 	p.kept = r
+	if !isCombiningMark(r) {
+		p.base = r
+	}
 }
 
 func (p *pass) drop(i int) {
@@ -139,11 +157,11 @@ func (p *pass) drop(i int) {
 	p.diverge(i)
 }
 
-// hold keeps a joiner back until keep decides it. A joiner with nothing kept on
-// its left, or one held while another is pending, is dropped.
+// hold keeps a joiner back until keep decides it. A joiner with no base on its
+// left, or one held while another is pending, is dropped.
 func (p *pass) hold(i int, r rune) {
 	switch {
-	case p.joiner != 0 || !joinable(p.kept):
+	case p.joiner != 0 || !joinable(p.base):
 		p.drop(i)
 	default:
 		p.joiner, p.joinerAt = r, i
@@ -214,7 +232,8 @@ func isInvisible(r rune) bool {
 }
 
 // joinable reports whether r is something a joiner next to it can join: non-ASCII
-// text that is not a space.
+// text that is not a space. Whether it is a base rather than a mark is the caller's
+// question.
 func joinable(r rune) bool {
 	return r >= utf8.RuneSelf && !unicode.IsSpace(r)
 }

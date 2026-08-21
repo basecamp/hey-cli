@@ -101,7 +101,7 @@ func TestRenderDeceptiveLabelShowsTheDestination(t *testing.T) {
 func TestRenderStripsConfusables(t *testing.T) {
 	for md, want := range map[string]string{
 		"pay\u200bpal and invoice\u00adpdf.exe":     "paypal and invoicepdf.exe",
-		"Z" + strings.Repeat("\u0336", 50) + "algo": "Z" + strings.Repeat("\u0336", 4) + "algo",
+		"Z" + strings.Repeat("\u0336", 50) + "algo": "Z" + strings.Repeat("\u0336", 8) + "algo",
 		"the 👨\u200d👩\u200d👧 family":                "the 👨\u200d👩\u200d👧 family",
 	} {
 		if out := visible(Render(md, 200)); !strings.Contains(out, want) {
