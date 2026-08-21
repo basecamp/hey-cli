@@ -203,8 +203,11 @@ func TestThreadsFormats(t *testing.T) {
 		if strings.Count(out, "From: ") != 3 {
 			t.Errorf("styled = %q, want a From line per entry", out)
 		}
-		if strings.Contains(out, "<p") || strings.Contains(out, "**") {
-			t.Errorf("styled = %q, want rendered Markdown, not tags or markers", out)
+		// The composed text had literal asterisks, which render as the asterisks they
+		// are; what must not appear is markup — a tag, or a backslash escape left
+		// unrendered.
+		if strings.Contains(out, "<p") || strings.Contains(out, `\*`) {
+			t.Errorf("styled = %q, want rendered Markdown, not tags or unrendered escapes", out)
 		}
 	})
 
