@@ -216,11 +216,27 @@ line: a circle that does not fit is a pair of brackets. Pin both with a test ove
 of aspect ratios — it is much cheaper than looking.
 
 A painter writes glyphs into a `coverCanvas` and the field is whatever it leaves blank,
-which is why a colorless terminal still gets the art instead of an empty band. This is
-also the one place the TUI paints brand hex instead of the ANSI slots `styles.go` insists
-on — the art *is* HEY's yellow and mint, and a theme-tinted terrazzo would be worse than
-one that ignores the theme. `applyTheme` sets the two things a cover reads: which of the
-two palettes to use, and whether to paint at all.
+which is why a colorless terminal still gets the art instead of an empty band. The colors
+are the ANSI-16 slots, for the reason `styles.go` gives: a desktop theme defines those
+sixteen and retints running terminals over OSC 4, so a cover wears the reader's palette
+and restyles live on a theme switch without anything here being told. HEY's own covers are
+yellow and mint and violet; `coverPalettes` names the slots those stand in for. Do not put
+hex back — a cover in HEY's colors on someone's gruvbox is the one thing that will look
+wrong on every theme but one.
+
+**There is one palette per preset, not a light one and a dark one**, even though the web
+app needs both. Pick each slot for the job it does in a theme rather than for how bright it
+happens to be, and the light-versus-dark question stops being asked. `Black` is the
+background and `White` the foreground in *every* theme, so a field of `Black` is the
+reader's own paper and foreground ink is legible on it either way — that is why HEY's white
+terrazzo chips correctly turn black in light mode without a light palette existing. Hues
+are mid-tones everywhere, so a hue on a hue holds its contrast too.
+
+Choosing a slot for its brightness is the trap, and it fails in the direction that is
+hardest to notice: a light-mode field painted `BrightWhite` comes out *dark*, because on a
+light theme the bright foreground is a dark color. The cover is then inverted on exactly
+the themes the light palette was added to fix. `TestCoversDoNotDependOnTheThemeMode` is
+there to catch it — flipping `Theme.Dark` must not change a single byte of what is drawn.
 
 Everything is deterministic: the scatter and the noise come from a cell's own hash, so a
 cover is the same picture every time, the way the web app's asset is. `coverRenderer`

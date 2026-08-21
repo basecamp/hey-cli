@@ -18,11 +18,10 @@ import (
 // the better medium for two of them: a blueprint grid is what box-drawing
 // characters are for, and a contour map is a band boundary in a noise field.
 //
-// A cover is the one place the TUI paints brand colors instead of ANSI slots
-// (see styles.go): the art *is* HEY's yellow and mint, and a grey-on-grey
-// terrazzo would be worse than one that ignores the terminal theme. Colors are
-// laid over glyphs that carry the pattern on their own, so a colorless terminal
-// still gets the art rather than a blank band.
+// The art is painted in the ANSI-16 slots, so a cover wears the terminal's own
+// theme rather than HEY's hex. Colors are laid over glyphs that carry the pattern
+// on their own, so a colorless terminal still gets the art rather than a blank
+// band.
 type coverPreset string
 
 const (
@@ -40,13 +39,11 @@ const (
 // the art, rather than drawing a smear nobody can read.
 const coverMinRows = 5
 
-// The two things about the active theme a cover cares about, set by applyTheme:
-// which of the two palettes to use, and whether to paint at all. NO_COLOR leaves
-// the glyphs, which is the pattern.
-var (
-	coverDarkMode  = true
-	coverColorless = false
-)
+// The only thing about the active theme a cover cares about, set by applyTheme:
+// whether to paint at all. NO_COLOR leaves the glyphs, which is the pattern.
+// Nothing here needs to know whether the theme is light or dark — see
+// coverPalettes for why not.
+var coverColorless = false
 
 // imboxCover is the preset the Imbox is covered with. HEY serves a box's cover to
 // the web app but not over JSON, so HEY_COVER stands in until boxes carry it and
@@ -123,52 +120,45 @@ type coverPalette struct {
 	ink   [4]color.Color
 }
 
-// coverModes holds a preset's two palettes. Several presets are the same card in
-// both modes — HEY's yellow peace sign is yellow on a dark background too.
-type coverModes struct {
-	dark  coverPalette
-	light coverPalette
-}
-
-func (m coverModes) current() coverPalette {
+func (p coverPalette) current() coverPalette {
 	if coverColorless {
 		return coverPalette{}
 	}
-	if coverDarkMode {
-		return m.dark
-	}
-	return m.light
+	return p
 }
 
-func coverHex(s string) color.Color { return lipgloss.Color(s) }
-
-var coverPalettes = map[coverPreset]coverModes{
-	coverBlobs: {
-		dark:  coverPalette{field: coverHex("#5eead4"), ink: [4]color.Color{coverHex("#facc15")}},
-		light: coverPalette{field: coverHex("#99f6e4"), ink: [4]color.Color{coverHex("#fbbf24")}},
-	},
-	coverGrid: {
-		dark:  coverPalette{field: coverHex("#0f172a"), ink: [4]color.Color{coverHex("#3b82f6"), coverHex("#60a5fa")}},
-		light: coverPalette{field: coverHex("#f8fafc"), ink: [4]color.Color{coverHex("#93c5fd"), coverHex("#3b82f6")}},
-	},
-	coverPeace: {
-		dark:  coverPalette{field: coverHex("#facc15"), ink: [4]color.Color{coverHex("#ffffff")}},
-		light: coverPalette{field: coverHex("#fde047"), ink: [4]color.Color{coverHex("#ffffff")}},
-	},
-	coverTerrazzo: {
-		dark:  coverPalette{field: coverHex("#1e293b"), ink: [4]color.Color{coverHex("#ffffff"), coverHex("#f87171"), coverHex("#5eead4")}},
-		light: coverPalette{field: coverHex("#f8fafc"), ink: [4]color.Color{coverHex("#334155"), coverHex("#f87171"), coverHex("#2dd4bf")}},
-	},
-	coverTopo: {
-		dark:  coverPalette{field: coverHex("#7c3aed"), ink: [4]color.Color{coverHex("#1e1b3a")}},
-		light: coverPalette{field: coverHex("#a78bfa"), ink: [4]color.Color{coverHex("#3b0764")}},
-	},
-	coverWaves: {
-		dark: coverPalette{field: coverHex("#7c3aed"), ink: [4]color.Color{
-			coverHex("#fcd34d"), coverHex("#f9a8d4"), coverHex("#c084fc"), coverHex("#6d28d9")}},
-		light: coverPalette{field: coverHex("#a78bfa"), ink: [4]color.Color{
-			coverHex("#fde68a"), coverHex("#fbcfe8"), coverHex("#d8b4fe"), coverHex("#8b5cf6")}},
-	},
+// Covers are painted in the ANSI-16 slots, like the rest of the TUI and for the
+// same reason (see styles.go): a desktop theme defines those sixteen colors and
+// retints running terminals over OSC 4, so the art follows the theme with no work
+// here and restyles live when the theme changes. HEY's own covers are yellow and
+// mint and violet; these name the slots those stand in for, and what arrives is
+// the reader's palette.
+//
+// There is deliberately one palette per preset rather than a light one and a dark
+// one, which is what the web app needs. The slots a cover uses are chosen for the
+// job each one does in a theme, not for how bright it happens to be:
+//
+//   - Black is the background and White the foreground — in every theme, light or
+//     dark. A cover whose field is Black is a cover on the reader's own paper,
+//     and its foreground ink is legible there without anyone deciding which way
+//     round the theme is. That is what makes HEY's white terrazzo chips turn black
+//     in light mode: they are not white, they are the text color.
+//   - A hue — yellow, cyan, magenta, blue — is a mid-tone everywhere, so a hue on
+//     a hue keeps its contrast either way.
+//
+// Reaching for a slot because it looks light or dark is what goes wrong. Painting
+// a light-mode field BrightWhite gets a *dark* field, because on a light theme the
+// bright foreground is dark: exactly inverted, and only on the themes the cover
+// was supposed to be fixing.
+var coverPalettes = map[coverPreset]coverPalette{
+	coverBlobs: {field: lipgloss.Cyan, ink: [4]color.Color{lipgloss.BrightYellow}},
+	coverGrid:  {field: lipgloss.Black, ink: [4]color.Color{lipgloss.Blue, lipgloss.BrightBlue}},
+	coverPeace: {field: lipgloss.Yellow, ink: [4]color.Color{lipgloss.BrightWhite}},
+	coverTerrazzo: {field: lipgloss.Black, ink: [4]color.Color{
+		lipgloss.BrightWhite, lipgloss.Red, lipgloss.Cyan}},
+	coverTopo: {field: lipgloss.Magenta, ink: [4]color.Color{lipgloss.Black}},
+	coverWaves: {field: lipgloss.Magenta, ink: [4]color.Color{
+		lipgloss.BrightYellow, lipgloss.Red, lipgloss.BrightMagenta, lipgloss.Blue}},
 }
 
 // --- Canvas ---
@@ -306,26 +296,10 @@ func (l *brailleLayer) at(x, y int) bool {
 	return l.dots[y*l.width+x]
 }
 
-// arc plots by angle rather than by testing distance per dot: stepping the curve
-// in half-dot lengths leaves no gaps, where a distance test leaves them wherever
-// the curve runs diagonally. tilt turns the ellipse about its center, which is
-// what lets a shape lean.
-func (l *brailleLayer) arc(cx, cy, rx, ry, tilt, from, to float64) {
-	steps := max(int(2*max(rx, ry)*math.Abs(to-from)), 8)
-	sin, cos := math.Sin(tilt), math.Cos(tilt)
-	for i := 0; i <= steps; i++ {
-		angle := from + (to-from)*float64(i)/float64(steps)
-		x, y := rx*math.Cos(angle), ry*math.Sin(angle)
-		l.set(int(math.Round(cx+x*cos-y*sin)), int(math.Round(cy+x*sin+y*cos)))
-	}
-}
-
-func (l *brailleLayer) ellipse(cx, cy, rx, ry, tilt float64) {
-	l.arc(cx, cy, rx, ry, tilt, 0, 2*math.Pi)
-}
-
-// coverEllipse is a filled ellipse, used to build a silhouette out of overlapping
-// shapes rather than to draw one.
+// coverEllipse is a filled ellipse. Everything a cover draws with curves is built
+// out of these and outlined by silhouette; there is no stroke-an-arc primitive,
+// because filling and tracing gives a shape of any thickness and a union of any
+// number of parts for the same effort.
 type coverEllipse struct {
 	cx, cy, rx, ry, tilt float64
 }
@@ -369,14 +343,28 @@ func (l *brailleLayer) silhouette(shapes ...coverEllipse) {
 	for y := max(int(top)-1, 0); y <= min(int(bottom)+1, l.height-1); y++ {
 		for x := max(int(left)-1, 0); x <= min(int(right)+1, l.width-1); x++ {
 			fx, fy := float64(x), float64(y)
-			if !inside(fx, fy) {
-				continue
-			}
-			if !inside(fx-1, fy) || !inside(fx+1, fy) || !inside(fx, fy-1) || !inside(fx, fy+1) {
+			if inside(fx, fy) && !buried(inside, fx, fy) {
 				l.set(x, y)
 			}
 		}
 	}
+}
+
+// coverStroke is how many dots thick a drawn edge is. One dot is a dotted line
+// rather than a line: braille dots do not touch, so a single-dot outline on a
+// bright field reads as a scattering of specks and the shape it describes is lost.
+const coverStroke = 2
+
+// buried reports whether everything within the stroke's reach of this dot is also
+// inside the shape, which is what puts the dot in the interior rather than on the
+// edge. Reaching further than one dot is what thickens the edge.
+func buried(inside func(x, y float64) bool, x, y float64) bool {
+	for step := 1.0; step <= coverStroke; step++ {
+		if !inside(x-step, y) || !inside(x+step, y) || !inside(x, y-step) || !inside(x, y+step) {
+			return false
+		}
+	}
+	return true
 }
 
 func (l *brailleLayer) drawInto(c *coverCanvas, ink color.Color) {
@@ -573,8 +561,10 @@ func (l *brailleLayer) peaceHand(x, y, width, height float64) {
 
 	// The last two fingers, curled along the left, overlapping the index just
 	// enough to belong to the same hand.
-	ring := finger(x+width*0.486, y+height*0.715, width*0.045, height*0.14, curlAngle)
-	little := finger(x+width*0.42, y+height*0.745, width*0.04, height*0.12, curlAngle)
+	// Wide enough that a two-dot stroke still leaves them hollow: any thinner and
+	// the two edges meet in the middle and the finger is a solid smear.
+	ring := finger(x+width*0.486, y+height*0.715, width*0.065, height*0.14, curlAngle)
+	little := finger(x+width*0.42, y+height*0.745, width*0.06, height*0.12, curlAngle)
 
 	// The palm, the V and the thumb are one silhouette. The curled fingers are not
 	// in it: unioned, their outlines merge into the palm's and trail off along it,
@@ -582,7 +572,7 @@ func (l *brailleLayer) peaceHand(x, y, width, height float64) {
 	// whole palm they stay two shapes.
 	l.silhouette(palm, index, middle, thumb)
 	for _, over := range []coverEllipse{thumb, ring, little} {
-		l.ellipse(over.cx, over.cy, over.rx, over.ry, over.tilt)
+		l.silhouette(over)
 	}
 }
 

@@ -208,8 +208,9 @@ off into a month of receipts. The divider stays and says how much is under there
 
 Set `HEY_COVER` to `blobs`, `grid`, `peace`, `terrazzo`, `topo` or `waves` — the same six
 covers, redrawn as characters, so they work in any terminal rather than only the ones that
-can show images. HEY does not serve a box's cover over its API yet, so for now the choice
-is `HEY_COVER` rather than the one you made on the web.
+can show images. They are painted in your terminal's own colors, so a cover matches your
+theme and follows it when you switch. HEY does not serve a box's cover over its API yet, so
+for now the choice is `HEY_COVER` rather than the one you made on the web.
 
 Thread attachments always appear with their filename, media type, and size. Use `[` and `]` to select an attachment, `s` to save it without replacing an existing file, and `o` to download and open it in an external application. Attachments never open automatically. Kitty and Ghostty can show inline images. Foot and other terminals use visible text markers.
 

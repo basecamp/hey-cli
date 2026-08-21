@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"image/color"
 	"strings"
 	"testing"
 
@@ -167,6 +168,53 @@ func TestBlobsLeaveTheFieldShowing(t *testing.T) {
 	}
 }
 
+// Covers are painted in the ANSI-16 slots so they follow the terminal's theme.
+// A hex value here would look right on the one theme it was picked against and
+// wrong on every other, and would not follow a theme switch.
+func TestCoverPalettesUseThemeColors(t *testing.T) {
+	ansiSlots := map[color.Color]bool{}
+	for slot := lipgloss.Black; slot <= lipgloss.BrightWhite; slot++ {
+		ansiSlots[slot] = true
+	}
+	if len(ansiSlots) != 16 {
+		t.Fatalf("collected %d ANSI slots, want 16 — the check below passes on anything", len(ansiSlots))
+	}
+	if ansiSlots[lipgloss.Color("#facc15")] {
+		t.Fatal("a hex color counts as a theme color, so the check below is no check at all")
+	}
+
+	for _, preset := range allCoverPresets {
+		palette := coverPalettes[preset]
+		for _, c := range append(palette.ink[:], palette.field) {
+			if c != nil && !ansiSlots[c] {
+				t.Errorf("%s uses %v, which is not one of the sixteen theme colors", preset, c)
+			}
+		}
+	}
+}
+
+// A cover has one palette, not a light one and a dark one, because every slot it
+// uses does the same job in either kind of theme. Switching the mode must not
+// change what is drawn — if it does, some slot is being picked for its brightness,
+// which is the mistake that paints a light theme's field with its text color.
+func TestCoversDoNotDependOnTheThemeMode(t *testing.T) {
+	t.Cleanup(func() { applyTheme(defaultTheme()) })
+
+	for _, preset := range allCoverPresets {
+		dark := defaultTheme()
+		dark.Dark = true
+		applyTheme(dark)
+		inDark := (&coverRenderer{}).view(preset, 40, 8)
+
+		light := defaultTheme()
+		light.Dark = false
+		applyTheme(light)
+		if inLight := (&coverRenderer{}).view(preset, 40, 8); inLight != inDark {
+			t.Errorf("%s renders differently on a light theme", preset)
+		}
+	}
+}
+
 func TestCoverColorlessKeepsTheGlyphs(t *testing.T) {
 	t.Cleanup(func() { applyTheme(defaultTheme()) })
 	applyTheme(noColorTheme())
@@ -182,20 +230,19 @@ func TestCoverColorlessKeepsTheGlyphs(t *testing.T) {
 	}
 }
 
-// The renderer keeps the last cover it drew, so its memo has to notice a theme
-// switch — otherwise a light terminal keeps the dark palette until it resizes.
-func TestCoverRepaintsOnThemeChange(t *testing.T) {
+// The renderer keeps the last cover it drew, so its memo has to notice color being
+// turned off — otherwise a NO_COLOR terminal keeps painting until it resizes. A
+// retint needs no repaint: the ANSI slots do not change, the terminal's idea of
+// them does.
+func TestCoverRepaintsWhenColorGoesAway(t *testing.T) {
 	t.Cleanup(func() { applyTheme(defaultTheme()) })
 
 	renderer := &coverRenderer{}
-	dark := renderer.view(coverTerrazzo, 40, 8)
+	colored := renderer.view(coverTerrazzo, 40, 8)
 
-	light := defaultTheme()
-	light.Dark = false
-	applyTheme(light)
-
-	if renderer.view(coverTerrazzo, 40, 8) == dark {
-		t.Error("cover kept the dark palette after switching to a light theme")
+	applyTheme(noColorTheme())
+	if renderer.view(coverTerrazzo, 40, 8) == colored {
+		t.Error("cover kept its colors after color was turned off")
 	}
 }
 
