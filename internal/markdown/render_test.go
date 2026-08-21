@@ -58,6 +58,19 @@ func TestRenderLinksAreClickable(t *testing.T) {
 	}
 }
 
+// The confusable policy covers a link's destination as well as its text: a zero-width
+// character in the href is dropped from the OSC 8 target the same way it is dropped from
+// the label, so the link goes where the reader sees it going.
+func TestRenderLinksToWhatItShows(t *testing.T) {
+	got := Render("[https://example.com/a\u200bb](https://example.com/a\u200bb)", 80)
+	if strings.Contains(got, "\u200b") {
+		t.Errorf("Render = %q, a zero-width space survived", got)
+	}
+	if !strings.Contains(got, ";https://example.com/ab\a") {
+		t.Errorf("Render = %q, want the OSC 8 target to be the URL as shown", got)
+	}
+}
+
 func TestRenderFallsBackToDefaultWidth(t *testing.T) {
 	if render("Hello", 0) == "" {
 		t.Error("Render with no width returned nothing")

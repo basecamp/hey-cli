@@ -55,10 +55,16 @@ func prepareSource(md string) (safe, forGlamour string, deep bool) {
 // milliseconds.
 const maxNestingDepth = 20
 
-// stripControls removes escape sequences, C0 and C1 controls and the bidirectional
-// controls, keeping newlines and tabs. A body is prose, and the Trojan-source class
-// — a right-to-left override that shows one thing and means another — is no more
-// welcome in it than in a subject line; the JSON keeps the original.
+// stripControls removes escape sequences, C0 and C1 controls, the bidirectional
+// controls and the confusables terminal.Sanitize describes, keeping newlines and tabs.
+// A body is prose, and the Trojan-source class — a right-to-left override that shows
+// one thing and means another — is no more welcome in it than in a subject line; the
+// JSON keeps the original.
+//
+// It runs over the whole source, link destinations included, on purpose: what a link
+// shows and where it goes are then the same text, and a destination that differs from
+// the one shown only by a zero-width character is exactly the confusable the policy
+// removes. Sparing destinations would link a URL the reader cannot see to read.
 func stripControls(s string) string {
 	return terminal.Sanitize(s)
 }
