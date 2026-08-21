@@ -388,17 +388,25 @@ hey watch                               # follow every box, a line of JSON per c
 hey watch --box imbox --events added    # only new postings in the Imbox
 hey watch --box imbox --exit-on-first   # block until something lands, then exit
 hey watch --since 2026-08-18T09:00:00Z  # catch up from a time first, then follow
-hey watch --notify                      # desktop notification for new Imbox mail (libnotify)
-hey watch --notify --notify-box "The Feed" --notify-box imbox
-hey watch --run-async 'notify-send "New mail in $HEY_BOX_KIND"'
+hey watch --box imbox --events new      # new mail only: unseen, unmuted, active since the watch began
+hey watch --box imbox --events new --exit-on-first   # block until new mail
+hey watch --box imbox --events new --run-async 'notify-send -a HEY "New mail in HEY"'
 hey watch --run-sync ./triage.sh        # one at a time, waiting for each
 ```
 
 Runs until interrupted, printing changes as they happen, one line each:
 
 ```json
-{"change":"added","at":"2026-08-18T09:14:22.031Z","box":{"id":24088,"kind":"imbox","name":"Imbox"},"posting_id":98765,"thread_id":54321,"posting":{}}
+{"change":"added","at":"2026-08-18T09:14:22.031Z","box":{"id":24088,"kind":"imbox","name":"Imbox"},"posting_id":98765,"thread_id":54321,"new":true,"posting":{}}
 ```
+
+Every `added` and `updated` line says whether the posting is new mail: unseen, not muted,
+and active since the watch last saw the thread — or since the watch began, for a thread it
+has not seen, so a box's backlog is never new. Reading, muting or moving a thread is not new
+activity; a reply on a known thread is. `--events new` selects the new ones, alone or in a
+union with `added`, `updated` and `deleted`. The one-liner above is what any desktop does
+with it; on Omarchy the bar plugin reads the same lines and sends one batched, replacing
+toast instead.
 
 A change can drive a command instead of being printed, and there's a choice to make
 between two behaviours — pass one or the other, not both. `--run-async` spawns the
@@ -408,7 +416,8 @@ slow one delays the next.
 
 Both hand the JSON to the command on its stdin, and the same fields as `HEY_CHANGE`,
 `HEY_AT`, `HEY_BOX_ID`, `HEY_BOX_KIND`, `HEY_BOX_NAME`, `HEY_POSTING_ID` and
-`HEY_THREAD_ID`. Both also take over stdout, so the JSON isn't printed as well.
+`HEY_THREAD_ID`, with `HEY_NEW=1` for new mail. Both also take over stdout, so the JSON
+isn't printed as well.
 
 ### Calendars
 
@@ -513,11 +522,11 @@ HEY web app, its SUPER+SHIFT+E binding and the mailto handler are left untouched
 
 `--notify` turns on new-mail toasts, off by default, by flipping the plugin's `notify`
 setting (the panel's toggle and `omarchy bar set 37signals.hey notify true --json` do the
-same); the plugin then runs `hey watch --notify`, which sends at most one notification per
-batch of changes — `Sender — Subject` for one new thread, `N new in Imbox` for more —
-replacing the previous toast rather than stacking, and clicking it focuses the TUI.
-Omarchy's notification silencing (SUPER+CTRL+comma) mutes them like any other app. See
-[docs/omarchy.md](docs/omarchy.md) for the details and what is planned next.
+same). The plugin runs `hey watch` and toasts its new-mail lines for the Imbox itself — at
+most one notification per burst of changes, `Sender — Subject` for one new thread, `N new
+in Imbox` for more, replacing the previous toast rather than stacking, and clicking it
+focuses the TUI. Omarchy's notification silencing (SUPER+CTRL+comma) mutes them like any
+other app. See [docs/omarchy.md](docs/omarchy.md) for the details and what is planned next.
 
 ## AI agent integration
 

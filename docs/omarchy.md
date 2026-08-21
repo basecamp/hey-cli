@@ -69,7 +69,7 @@ step does not stop the others.
 |---|---|---|
 | Desktop entry | `~/.local/share/applications/HEY TUI.desktop` | Distinct from Omarchy's shipped `HEY.desktop` web app. Launches under app-id `org.omarchy.hey` |
 | Menu row | marker block in `~/.config/omarchy/extensions/omarchy-menu.jsonc` | one root `HEY` row that focuses or launches the TUI; its guard is a PATH lookup, never network or `hey` itself. Becomes a submenu once there is more than one thing to open |
-| Bar plugin | the `37signals.hey` entry in `~/.config/omarchy/shell.json`'s bar layout | not installed by setup — `omarchy plugin add https://github.com/basecamp/omarchy-hey-plugin.git --enable` does that — but configured by it: `--notify` / `--no-notify` set or delete the entry's `notify` key, which the shell hot-reloads and the plugin passes to `hey watch`. `--remove` leaves the key alone: it is set as readily from the panel or `omarchy bar set` as from here, so removal cannot tell a preference it wrote from one it didn't — `--no-notify` is the off switch. An earlier inline `hey-unread` module is removed on sight, its notify choice carried over |
+| Bar plugin | the `37signals.hey` entry in `~/.config/omarchy/shell.json`'s bar layout | not installed by setup — `omarchy plugin add https://github.com/basecamp/omarchy-hey-plugin.git --enable` does that — but configured by it: `--notify` / `--no-notify` set or delete the entry's `notify` key, which the shell hot-reloads and the plugin reads to decide whether to toast. `--remove` leaves the key alone: it is set as readily from the panel or `omarchy bar set` as from here, so removal cannot tell a preference it wrote from one it didn't — `--no-notify` is the off switch. An earlier inline `hey-unread` module is removed on sight, its notify choice carried over |
 | Theme template | `~/.config/omarchy/themed/hey.toml.tpl` | renders `hey.toml` into every theme so theme authors can override the overlay; triggers `omarchy-theme-refresh` |
 | Keybinding | printed, never written | `o.bind("SUPER + SHIFT + ALT + H", "HEY TUI", "omarchy-launch-or-focus-tui --app-id=org.omarchy.hey hey tui")`; SUPER+SHIFT+E keeps opening the web app unless you `hl.unbind` it. Spelled out rather than `{ tui = "hey tui" }` because the lua helper quotes that into one word and the app-id derived from it would never match |
 
@@ -125,53 +125,61 @@ Settings flow the way every Omarchy bar widget's do: the plugin's manifest decla
 live as extra keys on the `{"id":"37signals.hey"}` entry in `shell.json`, hot-reloaded by
 the shell. Three ways to flip a key, all equivalent: `hey setup omarchy --notify`, the
 toggle in the panel header, or `omarchy bar set 37signals.hey notify true --json`. Flipping
-`notify` restarts the watch with or without `--notify`; no shell restart.
+`notify` only gates the plugin's toasts; the watch runs on regardless, and nothing restarts.
 
-### `hey watch --notify`
+### New mail is a watch event
 
-The toasts are `hey watch`'s: a generic flag on a generic command, Omarchy-aware through
-notification hints. One read of a box's changes feed is one batch, and a batch sends **at
-most one toast**.
+What counts as new mail needs HEY's semantics and state across events, so the CLI decides
+it once: every `added` and `updated` line `hey watch` writes carries `"new": true|false`,
+and `--events new` selects the true ones. The rule:
 
-- **The Imbox, unless told otherwise.** The plugin watches every box (it has to, to see a
-  thread leave the Imbox), but HEY's attention model puts new mail in one place; `--notify`
-  toasts the Imbox and `--notify-box` names another watched box, or several. A name that is
-  not being watched is a usage error, not a toast nobody will see.
-- **What counts as new**: a posting that is unseen, not muted, and whose `active_at` is
-  later than the watch last recorded for it — or later than the watch's start, when it has
-  no record. That start is read off HEY's own clock (the `Date` header of one request), the
-  clock every `active_at` is on, so a workstation running fast or slow neither toasts the
-  backlog nor sits on new mail; whole seconds, rounded down, so the doubt falls on the side
-  of a toast for mail a moment old. `active_at` moves on new mail only, not on a seen flip, a mute or a move, so
-  reading a thread, marking it unseen again or moving it into the box never toasts, and a
-  reply on a known thread does. A box's first read is its catch-up from the server's cursor
-  — the box's last activity, not this moment — so it carries backlog, which the start-time
-  rule keeps quiet, alongside anything that arrived while the watch was starting, which it
-  toasts. The notifier records every posting the watch reads, in every box and whatever
-  `--events` reports, so a thread known from a filtered-out or un-notified change is never
-  mistaken for new when its next change is reported.
-- **One toast, replaced not stacked.** `Sender — Subject` for one new thread, `N new in
-  <box>` with the first few senders for more — `N new in Imbox` for the plugin. The
-  daemon's printed id (`-p`) is kept in memory and passed back as `-r` for ten minutes, so
-  the next batch replaces the toast on screen instead of stacking; after that a fresh
-  toast, since ids are daemon-local and a shell restart may have handed the number to
-  another application.
-- **No state file.** What the notifier remembers — each thread's last activity, the last
-  toast's id — lives and dies with the watch. No fingerprints, no lock, no reseeding when
-  toasts are switched back on: a watch that starts is silent by construction.
-- **DND is honoured.** The toast is `notify-send -a HEY -u low`: Omarchy's default app-name
-  `omarchy-action` bypasses notification silencing, so identifying as HEY is what makes
-  SUPER+CTRL+comma mute the toasts (into history) like any other app.
-- **Omarchy hints, when Omarchy is there.** With `omarchy-launch-or-focus-tui` on PATH the
-  toast carries `omarchy-glyph` (the bar's envelope) and `omarchy-exec` (the focus command)
-  as hints the shell's notification daemon understands — the exec runs daemon-side, so it
-  survives shell restarts — and every other daemon ignores. They are gated on detection
-  so the argv is honest elsewhere.
-- **It never fails the watch.** No `notify-send`: one notice on stderr and the watch runs
-  without toasts. A failed send: a warning, and the next batch toasts again.
-- **It composes.** `--box`, `--events`, `--exit-on-first` and `--run-*` all apply; the
-  toast covers exactly what the watch reported, while the notifier's memory covers
-  everything it read.
+- **New** is a posting that is unseen, not muted, and whose `active_at` is later than the
+  watch last recorded for the thread — or later than the watch's start, when it has no
+  record. That start is read off HEY's own clock (the `Date` header of one request), the
+  clock every `active_at` is on, so a workstation running fast or slow neither calls the
+  backlog new nor sits on new mail; whole seconds, rounded down, so the doubt falls on
+  the side of calling mail a moment old new. `active_at` moves on new mail only, not on a
+  seen flip, a mute or a move, so reading a thread, marking it unseen again or moving it
+  into a box is never new, and a reply on a known thread is. A box's first read is its
+  catch-up from the server's cursor — the box's last activity, not this moment — so it
+  carries backlog, which the start-time rule keeps out, alongside anything that arrived
+  while the watch was starting, which is new.
+- **Every posting the watch reads is recorded**, in every box and whatever `--events`
+  reports, so a thread known from a filtered-out change, or from another box, is never
+  mistaken for new when its next change is reported. A read is classified before it is
+  recorded. There is no state file: the record lives and dies with the watch.
+- **`--events` is a union.** `new` alone is new mail only; `added,new` is every arrival
+  plus new activity on known threads; the default `added,updated,deleted` is every line,
+  each saying whether it is new. `hey watch --box imbox --events new --exit-on-first` is
+  "block until new mail", and a `--run-*` script sees `HEY_NEW=1`.
+
+### The plugin toasts
+
+The toast is presentation, and a desktop's business: the plugin watches every box (it has
+to, to see a thread leave the Imbox), reads the `new` lines whose box is the Imbox — HEY's
+attention model puts new mail in one place — and sends the toast itself through
+`omarchy-notification-send`, the shell's own wrapper over `notify-send`.
+
+- **One toast per burst, replaced not stacked.** The new lines of one read arrive together;
+  a short debounce collects them into one toast — `Sender — Subject` for one thread, `N new
+  in Imbox` with the first few senders for more. The daemon's printed id (`-p`) is kept in
+  memory and passed back as `-r` for ten minutes, so the next burst replaces the toast on
+  screen instead of stacking; after that a fresh toast, since ids are daemon-local and a
+  shell restart may have handed the number to another application.
+- **DND is honoured.** The toast goes out under `--app-name HEY`: Omarchy's default
+  app-name `omarchy-action` deliberately bypasses notification silencing, so identifying
+  as HEY is what makes SUPER+CTRL+comma mute the toasts (into history) like any other app.
+- **Click focuses the TUI.** `--exec omarchy-launch-or-focus-tui --app-id=org.omarchy.hey
+  hey tui` — the shell runs it daemon-side, so it survives shell restarts — with the bar's
+  envelope as the glyph.
+- **No state file.** Nothing is remembered but the last toast's id, in the shell's memory;
+  turning toasts on is nothing more than setting the key.
+- **Mail text never reads as an option.** A subject or sender can start with a dash, and
+  `notify-send` parses one wherever it appears; a leading word joiner (U+2060) makes the
+  argument a plain positional and is invisible on screen.
+
+Any other desktop gets the same stream with its own face: `hey watch --box imbox --events
+new --run-async 'notify-send -a HEY "New mail in HEY"'` is the one-liner.
 
 ## Decisions
 
@@ -185,21 +193,26 @@ most one toast**.
   keybinding, the mailto handler left alone.
 - **No HTML scraping to feed widgets.** The plugin reads with `hey box imbox`, the same
   typed SDK read as everyone else.
-- **CLI is the engine, plugin is the face.** The plugin owns rendering and settings; the
-  CLI owns what needs HEY's semantics — the changes cursor and catching up after a
-  disconnect, what counts as new, a toast that honors DND — where it is Go-tested once
-  instead of re-derived in QML. The plugin's panel does show an unread *number* per
+- **CLI is the engine, plugin is the face.** The plugin owns rendering and settings — the
+  toast included; the CLI owns what needs HEY's semantics — the changes cursor and catching
+  up after a disconnect, what counts as new mail — where it is Go-tested once instead of
+  re-derived in QML. The plugin's panel does show an unread *number* per
   account; the bar icon itself stays a glyph that lights or does not, and the toast never
   carries the unread total either — `N new in Imbox` is how many threads arrived in one
   batch, not how many are waiting. That divergence is the plugin's call and is recorded
   here rather than papered over.
-- **Generic commands, Omarchy hints.** There is no `hey omarchy` group: the plugin
-  composes `hey box`, `hey watch`, `hey screener` and `hey seen`, and a user can run any
-  of them by hand. Omarchy-specific behaviour is carried as notification hints the shell
-  understands and other daemons ignore, never as a subcommand. (A `hey omarchy poll` —
-  one Imbox read that also diffed a fingerprint file to toast — was built and superseded
-  before release: it was ten minutes stale by construction, and an Omarchy-named command
-  that sounded watch-like sullied the CLI surface.)
+- **Generic commands; the face presents.** There is no `hey omarchy` group and nothing
+  desktop-shaped in the CLI at all: the plugin composes `hey box`, `hey watch`, `hey
+  screener` and `hey seen`, and a user can run any of them by hand. What counts as new
+  mail is a watch event — HEY semantics, decided once — and what to do about it (a toast
+  under the shell's app-name, a glyph, a click that focuses the TUI) is the plugin's.
+  (Two earlier cuts were built and superseded before release: a `hey omarchy poll` — one
+  Imbox read that also diffed a fingerprint file to toast — that was ten minutes stale by
+  construction and an Omarchy-named command on a general CLI; and a `hey watch --notify`
+  that sent the toast itself through `notify-send` with Omarchy hints, which bundled a
+  desktop's presentation into a generic command and scoped the Imbox with a flag of its
+  own, where `--events new` and the plugin's own read of the box do the same without
+  either.)
 
 ## Follow-ups, in rough order
 
@@ -214,8 +227,6 @@ most one toast**.
 4. **Deltas applied in the plugin**: every watch event already carries the full posting,
    but the plugin re-reads the Imbox per batch today. Applying events in place — reading
    only on `ready` and `resync` — would make an ordinary change cost no API read at all.
-5. **`hey watch --notify` off Linux**: the flag is libnotify-only. `terminal-notifier` or
-   `osascript` on macOS would make it the same one-liner there.
 
 ## Anti-features, recorded
 

@@ -43,7 +43,13 @@ const (
 	asyncScriptLimit  = 16
 )
 
-var watchableChanges = []string{"added", "updated", "deleted"}
+// The three changes a posting goes through, and the one that is a reading of the
+// first two: new is the added and updated postings that are new mail, as decided
+// here (watch_new.go) rather than by every reader.
+var (
+	postingChanges   = []string{"added", "updated", "deleted"}
+	watchableChanges = []string{"added", "updated", "deleted", "new"}
+)
 
 type watchCommand struct {
 	cmd         *cobra.Command
@@ -53,8 +59,6 @@ type watchCommand struct {
 	asyncScript string
 	syncScript  string
 	exitOnFirst bool
-	notify      bool
-	notifyBoxes []string
 	timeout     time.Duration
 }
 
@@ -70,25 +74,25 @@ behaviours: --run-async spawns the command per change and moves on, so a slow on
 holds up the watch and two can overlap; --run-sync waits for each and runs them in order.
 Pass one or the other.
 
-Besides the three thread changes, three lines describe the watch itself: "ready" once the
+Every added and updated line says whether the thread is new mail: unseen, not muted, and
+active since the watch last saw it — or since the watch began, for a thread it has not
+seen, so the backlog a box's first read carries is not new. Reading a thread, muting or
+moving it is not new activity; a reply on a known thread is. --events new selects the new
+ones, alone or alongside added, updated and deleted, and a script sees HEY_NEW=1 for them.
+
+Besides the thread changes, three lines describe the watch itself: "ready" once the
 cursor is set and the subscription is live (again after every reconnect's catch-up),
 "disconnected" when the connection drops, and "resync" when a box changed more than the
 feed can list one change at a time and the watch skipped ahead. A resync is a change —
 scripts run for it and --exit-on-first counts it; ready and disconnected are written to
-stdout only.
-
---notify shows a desktop notification for new mail in the Imbox among the changes: at most
-one per batch, replacing the last rather than stacking, under the app-name HEY so
-notification silencing applies. --notify-box toasts another watched box instead, or more
-than one. It needs notify-send (libnotify).`,
+stdout only.`,
 		Annotations: map[string]string{
 			"agent_notes": "Long-running. Writes one JSON object per changed thread to stdout (NDJSON), not the usual envelope. Use --exit-on-first to block until one change lands and then exit.",
 		},
 		Example: `  hey watch
   hey watch --box imbox --events added
-  hey watch --box imbox --exit-on-first
-  hey watch --notify
-  hey watch --run-async 'notify-send "New mail in $HEY_BOX_KIND"'
+  hey watch --box imbox --events new --exit-on-first
+  hey watch --box imbox --events new --run-async 'notify-send -a HEY "New mail in HEY"'
   hey watch --run-sync ./triage.sh
   hey watch --since 2026-08-18T09:00:00Z`,
 		RunE: watchCommand.run,
@@ -97,13 +101,11 @@ than one. It needs notify-send (libnotify).`,
 
 	flags := watchCommand.cmd.Flags()
 	flags.StringArrayVar(&watchCommand.boxes, "box", nil, "Box to watch by name or ID (repeatable, defaults to all)")
-	flags.StringSliceVar(&watchCommand.events, "events", watchableChanges, "Changes to report: added, updated, deleted")
+	flags.StringSliceVar(&watchCommand.events, "events", postingChanges, "Changes to report: added, updated, deleted, and new for the added and updated threads that are new mail")
 	flags.StringVar(&watchCommand.since, "since", "", "Report changes since this time first (RFC 3339 or YYYY-MM-DD)")
 	flags.StringVar(&watchCommand.asyncScript, "run-async", "", "Shell command to spawn per change, without waiting for it")
 	flags.StringVar(&watchCommand.syncScript, "run-sync", "", "Shell command to run per change, one at a time, waiting for each")
 	flags.BoolVar(&watchCommand.exitOnFirst, "exit-on-first", false, "Exit after the first change")
-	flags.BoolVar(&watchCommand.notify, "notify", false, "Show a desktop notification for new mail among the watched changes")
-	flags.StringArrayVar(&watchCommand.notifyBoxes, "notify-box", nil, "Box whose new mail --notify toasts, by name or ID (repeatable, defaults to the Imbox)")
 	flags.DurationVar(&watchCommand.timeout, "timeout", 0, "Give up waiting after this long (for example 30m)")
 
 	return watchCommand
@@ -131,25 +133,13 @@ func (c *watchCommand) run(cmd *cobra.Command, args []string) error {
 		ctx = timed
 	}
 
-	// The notifier measures new activity against its start, so it starts before
+	// New mail is measured against the watch's start, so that is taken before
 	// the boxes' cursors are read: nothing can then change between the two.
-	var notifier *desktopNotifier
-	if c.notify {
-		notifier = newDesktopNotifier(cmd.ErrOrStderr(), serverNow(ctx))
-	}
+	newMail := trackNewMail(serverNow(ctx))
 
 	boxes, err := c.watchedBoxes(ctx)
 	if err != nil {
 		return err
-	}
-	if c.notify {
-		notified, notifyErr := c.notifiedBoxes(boxes)
-		if notifyErr != nil {
-			return notifyErr
-		}
-		if notifier != nil {
-			notifier.boxes = notified
-		}
 	}
 
 	watch := &postingsWatch{
@@ -158,7 +148,7 @@ func (c *watchCommand) run(cmd *cobra.Command, args []string) error {
 		asyncScript: c.asyncScript,
 		syncScript:  c.syncScript,
 		exitOnFirst: c.exitOnFirst,
-		notifier:    notifier,
+		newMail:     newMail,
 		out:         cmd.OutOrStdout(),
 		errOut:      cmd.ErrOrStderr(),
 		styled:      writer.IsStyled(),
@@ -267,33 +257,6 @@ func (c *watchCommand) watching(box generated.Box) bool {
 	return slices.ContainsFunc(c.boxes, func(wanted string) bool { return boxIs(box, wanted) })
 }
 
-// notifiedBoxes picks the watched boxes whose new mail --notify toasts: the ones
-// --notify-box names, or the Imbox — the one box in HEY that asks for attention.
-// Every name has to be a watched box, so a toast nobody will ever see is refused
-// up front rather than waited for.
-func (c *watchCommand) notifiedBoxes(watched map[int64]*watchedBox) (map[int64]bool, error) {
-	wanted := c.notifyBoxes
-	if len(wanted) == 0 {
-		wanted = []string{"imbox"}
-	}
-
-	notified := map[int64]bool{}
-	for _, name := range wanted {
-		found := false
-		for id, box := range watched {
-			if boxIs(generated.Box{Id: box.id, Kind: box.kind, Name: box.name}, name) {
-				notified[id] = true
-				found = true
-			}
-		}
-		if !found {
-			return nil, apierr.ErrUsage(fmt.Sprintf("--notify toasts %q, which isn't being watched — watch it with --box, or name a watched box with --notify-box", name))
-		}
-	}
-
-	return notified, nil
-}
-
 func boxIs(box generated.Box, wanted string) bool {
 	return strings.EqualFold(wanted, box.Kind) ||
 		strings.EqualFold(wanted, box.Name) ||
@@ -343,14 +306,20 @@ type watchedBox struct {
 
 // watchEvent is one changed posting, as a line of NDJSON or as a script's stdin —
 // or a word about the watch itself, which has no posting and, for ready and
-// disconnected, no box either.
+// disconnected, no box either. New is set on every added and updated posting,
+// true or false, and on nothing else.
 type watchEvent struct {
 	Change    string             `json:"change"`
 	At        string             `json:"at"`
 	Box       *watchEventBox     `json:"box,omitempty"`
 	PostingID int64              `json:"posting_id,omitempty"`
 	ThreadID  int64              `json:"thread_id,omitempty"`
+	New       *bool              `json:"new,omitempty"`
 	Posting   *generated.Posting `json:"posting,omitempty"`
+}
+
+func (e watchEvent) isNew() bool {
+	return e.New != nil && *e.New
 }
 
 // The watch's own news. A resync is a change — something happened, more than the
@@ -376,7 +345,7 @@ type postingsWatch struct {
 	asyncScript    string
 	syncScript     string
 	exitOnFirst    bool
-	notifier       *desktopNotifier
+	newMail        *newMail
 	out            io.Writer
 	errOut         io.Writer
 	styled         bool
@@ -552,31 +521,28 @@ func (w *postingsWatch) readBox(ctx context.Context, box *watchedBox) error {
 		box.cursor = *changes.NextCursor
 	}
 
-	// The notifier sees every posting, so it knows a thread's activity whatever
-	// --events asks for, but toasts only what was reported — the same filter,
-	// the same stop at the first change — and one read is one batch, so a burst
-	// of mail is one toast.
-	var observed, reported []generated.Posting
+	// Every added and updated posting is classified as new or not against the
+	// record from before this read, and then the whole read is recorded — in
+	// every box and whatever --events asks for, so a thread's activity is known
+	// when its next change comes, even when this one was filtered out.
 	for _, posting := range changes.Added {
-		observed = append(observed, posting)
-		if w.report(ctx, watchEvent{Change: "added", At: watchTime(posting.CreatedAt), PostingID: posting.Id}, box, &posting) {
-			reported = append(reported, posting)
-		}
+		w.report(ctx, watchEvent{Change: "added", At: watchTime(posting.CreatedAt), PostingID: posting.Id, New: w.classify(posting)}, box, &posting)
 	}
 	for _, posting := range changes.Updated {
-		observed = append(observed, posting)
-		if w.report(ctx, watchEvent{Change: "updated", At: watchTime(posting.UpdatedAt), PostingID: posting.Id}, box, &posting) {
-			reported = append(reported, posting)
-		}
+		w.report(ctx, watchEvent{Change: "updated", At: watchTime(posting.UpdatedAt), PostingID: posting.Id, New: w.classify(posting)}, box, &posting)
 	}
 	for _, posting := range changes.Deleted {
 		w.report(ctx, watchEvent{Change: "deleted", At: watchTime(posting.DeletedAt), PostingID: posting.Id}, box, nil)
 	}
-	if w.notifier != nil {
-		w.notifier.batch(box, observed, reported)
-	}
+	w.newMail.record(changes.Added)
+	w.newMail.record(changes.Updated)
 
 	return nil
+}
+
+func (w *postingsWatch) classify(posting generated.Posting) *bool {
+	isNew := w.newMail.isNew(posting)
+	return &isNew
 }
 
 // permanentReadError tells a read that will never work from one that might. A malformed
@@ -661,7 +627,7 @@ func (w *postingsWatch) stopWatching(box *watchedBox) error {
 // report hands one change on — printed, or run through the script — and says
 // whether it did.
 func (w *postingsWatch) report(ctx context.Context, event watchEvent, box *watchedBox, posting *generated.Posting) bool {
-	if w.finished() || !w.reporting(event.Change) {
+	if w.finished() || !w.reporting(event) {
 		return false
 	}
 
@@ -686,10 +652,15 @@ func (w *postingsWatch) report(ctx context.Context, event watchEvent, box *watch
 	return true
 }
 
-// reporting says whether a change is handed on: --events filters the posting
-// changes, and a resync is news whatever was asked for.
-func (w *postingsWatch) reporting(change string) bool {
-	return !slices.Contains(watchableChanges, change) || w.changes[change]
+// reporting says whether a change is handed on. --events is a union: a posting
+// change is reported when its own change was asked for, or when new was and the
+// posting is new mail; a resync is news whatever was asked for.
+func (w *postingsWatch) reporting(event watchEvent) bool {
+	if !slices.Contains(postingChanges, event.Change) {
+		return true
+	}
+
+	return w.changes[event.Change] || (w.changes["new"] && event.isNew())
 }
 
 func (w *postingsWatch) finished() bool {
@@ -818,6 +789,9 @@ func (e watchEvent) environment() []string {
 	if e.ThreadID != 0 {
 		environment = append(environment, "HEY_THREAD_ID="+strconv.FormatInt(e.ThreadID, 10))
 	}
+	if e.isNew() {
+		environment = append(environment, "HEY_NEW=1")
+	}
 
 	return environment
 }
@@ -826,6 +800,10 @@ func watchLine(event watchEvent) string {
 	var boxName, description string
 	if event.Box != nil {
 		boxName = event.Box.Name
+	}
+	change := event.Change
+	if event.isNew() {
+		change += " (new)"
 	}
 	switch {
 	case event.Change == watchReady:
@@ -840,7 +818,7 @@ func watchLine(event watchEvent) string {
 		description = fmt.Sprintf("posting %d", event.PostingID)
 	}
 
-	return fmt.Sprintf("%s  %-12s %-24s %s", event.At, event.Change, terminal.SanitizeLine(boxName), description)
+	return fmt.Sprintf("%s  %-13s %-24s %s", event.At, change, terminal.SanitizeLine(boxName), description)
 }
 
 func watchTime(at time.Time) string {

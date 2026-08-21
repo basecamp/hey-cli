@@ -548,6 +548,16 @@ fails leaves the cursor where it was and is retried on a doubling backoff, so a 
 isn't lost with the notification that announced it, and a subscription that closes without
 the watch being interrupted is an error rather than a quiet exit.
 
+New mail is a watch event, not a flag: every added and updated line carries `"new":
+true|false` and `--events new` selects the true ones (`internal/cmd/watch_new.go`). New is
+unseen, not muted, and `active_at` later than the watch's record of the thread — or than
+the watch's start, on HEY's clock (`serverNow`), for a thread it has no record of — and
+every posting the watch reads is recorded, in every box and whatever `--events` says. That
+is HEY's semantics and state across events, so the CLI decides it once; what to do about
+it is the reader's. The Omarchy bar plugin toasts from those lines itself (app-name, glyph,
+click-to-focus and the replace-not-stack id all live in the plugin), and nothing
+desktop-shaped lives in `watch*.go`.
+
 The TUI's mail list follows the same channel and wants less from it. `internal/cmd/tui_watch.go`
 subscribes and relays the changed box IDs down a channel; `internal/tui/live.go` defines
 that contract as `tui.MailWatcher`, so the TUI never sees cable or auth, and a test hands

@@ -22,7 +22,7 @@ import (
 
 // Omarchy integration: `hey setup omarchy` installs hey-cli into the desktop
 // (launcher entry, menu rows, theme template) and configures the 37signals.hey
-// bar plugin, which runs `hey watch` (watch.go, watch_notify.go).
+// bar plugin, which runs `hey watch` (watch.go, watch_new.go).
 //
 // Omarchy already ships HEY as a web app (SUPER+SHIFT+E, the mailto handler, a
 // HEY.desktop). Everything here complements that under its own names and never
@@ -325,8 +325,8 @@ func stripMenuBlock(content string) string {
 // hot-reloads the file. Earlier releases installed an inline `hey-unread`
 // command module instead, which setup now removes — two pollers in one slot —
 // carrying its notify choice over to the plugin when the plugin has none.
-// Toasts are `hey watch --notify`'s: no state file, so turning them on is
-// nothing more than setting the key.
+// The toasts are the plugin's own, composed from the new-mail lines of `hey
+// watch`: no state file, so turning them on is nothing more than setting the key.
 
 const omarchyBarPluginInstall = "omarchy plugin add https://github.com/basecamp/omarchy-hey-plugin.git --enable"
 
@@ -750,11 +750,10 @@ setting, which is the plugin's own; --no-notify is how to turn that off.
 
 The bar indicator is the 37signals.hey plugin, which runs hey watch; install it
 with omarchy plugin add https://github.com/basecamp/omarchy-hey-plugin.git --enable.
---notify turns on new-mail notifications in the bar plugin (it runs hey watch
---notify: at most one toast per batch of changes, replaced rather than stacked,
-silenced by the notification DND toggle) by setting notify on the plugin's entry in
-shell.json. --no-notify turns the toasts back off; a plain re-run leaves them as
-they are.
+--notify turns on the bar plugin's new-mail toasts (one per batch of changes at
+most, replaced rather than stacked, silenced by the notification DND toggle) by
+setting notify on the plugin's entry in shell.json. --no-notify turns them back
+off; a plain re-run leaves them as they are.
 
 Theming needs none of this: on Omarchy the TUI already follows the active theme.`,
 		Example: `  hey setup omarchy
@@ -766,7 +765,7 @@ Theming needs none of this: on Omarchy the TUI already follows the active theme.
 		RunE: setupOmarchyCommand.run,
 	}
 	setupOmarchyCommand.cmd.Flags().BoolVar(&setupOmarchyCommand.remove, "remove", false, "Remove everything hey setup omarchy installed")
-	setupOmarchyCommand.cmd.Flags().BoolVar(&setupOmarchyCommand.notify, "notify", false, "Turn on new-mail notifications in the bar plugin (it runs hey watch --notify)")
+	setupOmarchyCommand.cmd.Flags().BoolVar(&setupOmarchyCommand.notify, "notify", false, "Turn on the bar plugin's new-mail toasts")
 	setupOmarchyCommand.cmd.Flags().BoolVar(&setupOmarchyCommand.noNotify, "no-notify", false, "Turn new-mail toasts back off")
 	setupOmarchyCommand.cmd.MarkFlagsMutuallyExclusive("notify", "no-notify")
 	setupOmarchyCommand.cmd.MarkFlagsMutuallyExclusive("notify", "remove")

@@ -38,6 +38,15 @@ func TestWatchedChanges(t *testing.T) {
 		t.Errorf("changes = %v, want added and deleted only", changes)
 	}
 
+	command.events = []string{"new"}
+	changes, err = command.watchedChanges()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !changes["new"] || changes["added"] || changes["updated"] || changes["deleted"] {
+		t.Errorf("changes = %v, want new mail alone", changes)
+	}
+
 	command.events = []string{"moved"}
 	if _, err := command.watchedChanges(); err == nil {
 		t.Error("expected an error for an unknown event")
@@ -138,6 +147,7 @@ func newTestWatch(changes ...string) (*postingsWatch, *bytes.Buffer) {
 	return &postingsWatch{
 		boxes:      map[int64]*watchedBox{24088: {id: 24088, kind: "imbox", name: "Imbox"}},
 		changes:    watched,
+		newMail:    trackNewMail(watchStarted),
 		out:        out,
 		errOut:     &bytes.Buffer{},
 		connection: make(chan struct{}, 1),
@@ -150,7 +160,7 @@ func TestWatchReportsJSONPerPosting(t *testing.T) {
 	watch, out := newTestWatch("added", "updated", "deleted")
 	posting := &generated.Posting{Id: 9001, AppUrl: "https://app.hey.com/topics/5511"}
 
-	watch.report(context.Background(), watchEvent{Change: "added", At: "2026-08-18T09:14:22.031Z", PostingID: 9001}, watch.boxes[24088], posting)
+	watch.report(context.Background(), watchEvent{Change: "added", At: "2026-08-18T09:14:22.031Z", PostingID: 9001, New: watch.classify(*posting)}, watch.boxes[24088], posting)
 	watch.report(context.Background(), watchEvent{Change: "deleted", At: "2026-08-18T09:15:00.000Z", PostingID: 9003}, watch.boxes[24088], nil)
 
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
@@ -171,6 +181,9 @@ func TestWatchReportsJSONPerPosting(t *testing.T) {
 	if added.Posting == nil {
 		t.Error("an added posting should carry the posting itself")
 	}
+	if added.New == nil || *added.New {
+		t.Errorf("new = %v, want false for a posting active before the watch began", added.New)
+	}
 
 	var deleted watchEvent
 	if err := json.Unmarshal([]byte(lines[1]), &deleted); err != nil {
@@ -181,6 +194,9 @@ func TestWatchReportsJSONPerPosting(t *testing.T) {
 	}
 	if deleted.ThreadID != 0 {
 		t.Errorf("thread = %d, want none for a deleted posting", deleted.ThreadID)
+	}
+	if strings.Contains(lines[1], `"new"`) {
+		t.Errorf("deleted = %s, want no new: a deletion is not mail", lines[1])
 	}
 }
 
@@ -254,6 +270,15 @@ func TestWatchEventEnvironment(t *testing.T) {
 		if !strings.Contains(environment, want) {
 			t.Errorf("environment = %q, want %s", environment, want)
 		}
+	}
+	if strings.Contains(environment, "HEY_NEW") {
+		t.Errorf("environment = %q, want HEY_NEW absent rather than 0 when the posting is not new", environment)
+	}
+
+	isNew := true
+	event.New = &isNew
+	if environment := strings.Join(event.environment(), "\n"); !strings.Contains(environment, "HEY_NEW=1") {
+		t.Errorf("environment = %q, want HEY_NEW=1 for new mail", environment)
 	}
 }
 
