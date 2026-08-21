@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -89,6 +90,17 @@ func omarchyPollLockPath() string {
 	return omarchyPollStatePath() + ".lock"
 }
 
+// omarchyPollStateUsable reports whether the state directory resolves to an
+// absolute path. config.StateDir is empty without HOME and relative with a
+// relative XDG_STATE_HOME; either would put the fingerprints — and their
+// deletion — in the working directory, next to whatever file happens to share
+// the name.
+func omarchyPollStateUsable() bool {
+	return filepath.IsAbs(config.StateDir())
+}
+
+var errPollStateDir = errors.New("no absolute state directory: set HOME or XDG_STATE_HOME")
+
 // removeOmarchyPollState forgets the fingerprints. A poll that is not
 // notifying calls this on every run, so turning toasts on — by any route: hey
 // setup omarchy --notify, the plugin's own toggle, omarchy bar set — always
@@ -98,6 +110,9 @@ func omarchyPollLockPath() string {
 // leaves the lock sidecar alone: unlinking an inode another poller holds would
 // let the next poll lock a fresh one and the two diff at once.
 func removeOmarchyPollState() error {
+	if !omarchyPollStateUsable() {
+		return errPollStateDir
+	}
 	var err error
 	withOmarchyPollLock(func() { _, err = removeFileIfPresent(omarchyPollStatePath()) })
 	return err
@@ -122,6 +137,9 @@ func loadOmarchyPollState() (omarchyPollState, bool) {
 }
 
 func saveOmarchyPollState(state omarchyPollState) error {
+	if !omarchyPollStateUsable() {
+		return errPollStateDir
+	}
 	return writeJSONFile(omarchyPollStatePath(), state)
 }
 

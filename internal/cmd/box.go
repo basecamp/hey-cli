@@ -93,24 +93,18 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 	return writeOK(resp,
 		output.WithSummary(boxSummary(len(postings), resp.Name)),
 		output.WithNotice(notice),
-		output.WithBreadcrumbs(
-			output.Breadcrumb{
-				Action:      "read",
-				Command:     "hey threads <id>",
-				Description: "Read an email thread",
-			},
-			output.Breadcrumb{
-				Action:      "move",
-				Command:     "hey move <id> --to <box>",
-				Description: "Move an email thread to another box",
-			},
-			output.Breadcrumb{
-				Action:      "compose",
-				Command:     "hey compose --to <email> --subject <subject>",
-				Description: "Compose a new message",
-			},
-		),
+		output.WithBreadcrumbs(boxBreadcrumbs()...),
 	)
+}
+
+// boxBreadcrumbs are the next actions an agent can take from a box listing;
+// hey omarchy poll shares them, being a box listing too.
+func boxBreadcrumbs() []output.Breadcrumb {
+	return []output.Breadcrumb{
+		{Action: "read", Command: "hey threads <id>", Description: "Read an email thread"},
+		{Action: "move", Command: "hey move <id> --to <box>", Description: "Move an email thread to another box"},
+		{Action: "compose", Command: "hey compose --to <email> --subject <subject>", Description: "Compose a new message"},
+	}
 }
 
 func printBoxTable(w io.Writer, resp *generated.BoxShowResponse, postings []generated.Posting, notice string) {

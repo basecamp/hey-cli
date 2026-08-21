@@ -98,10 +98,20 @@ func (c *omarchyPollCommand) run(cmd *cobra.Command, args []string) error {
 	// Toasts need the unseen set: capped on a steady-state poll (new mail always
 	// lands on page 1), exhaustive when seeding — a first run or a new identity —
 	// so no pre-existing thread can later read as new.
+	// With no absolute state directory (HOME and XDG_STATE_HOME unset, or a
+	// relative XDG_STATE_HOME) the state would land in the working directory,
+	// wherever the shell started us: no fingerprints are touched at all then,
+	// and the toasts stay off the way they do when the identity is unknown.
 	identity, notifyPages := "", 0
-	if !c.notify {
+	switch {
+	case !omarchyPollStateUsable():
+	case !c.notify:
 		_ = removeOmarchyPollState()
-	} else if id, ok := omarchyPollIdentity(ctx); ok {
+	default:
+		id, ok := omarchyPollIdentity(ctx)
+		if !ok {
+			break
+		}
 		identity = id
 		if state, existed := loadOmarchyPollState(); !existed || state.Identity != identity {
 			notifyPages = unseenSeedPageCap
@@ -134,7 +144,11 @@ func (c *omarchyPollCommand) run(cmd *cobra.Command, args []string) error {
 		printBoxTable(cmd.OutOrStdout(), resp, resp.Postings, notice)
 		return nil
 	}
-	return writeOK(resp, output.WithSummary(boxSummary(len(resp.Postings), resp.Name)), output.WithNotice(notice))
+	return writeOK(resp,
+		output.WithSummary(boxSummary(len(resp.Postings), resp.Name)),
+		output.WithNotice(notice),
+		output.WithBreadcrumbs(boxBreadcrumbs()...),
+	)
 }
 
 func pollTruncationNotice(shown, fetched int, hasMore bool) string {

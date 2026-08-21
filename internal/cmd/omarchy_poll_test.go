@@ -533,3 +533,66 @@ func TestPollReportsAMalformedGlobalConfig(t *testing.T) {
 		t.Error("ordinary commands still report a broken global config")
 	}
 }
+
+func TestPollLeavesTheWorkingDirectoryAloneWithoutAStateDir(t *testing.T) {
+	server := imboxServer(t, `[{"id": 5, "name": "Invoice #4021", "seen": false, "visible_entry_count": 1}]`)
+	defer server.Close()
+	calls := testPollEnv(t)
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	// A sanitized environment: no HOME, no XDG_STATE_HOME. config.StateDir()
+	// is then empty and the state path would resolve into the working
+	// directory, where an unrelated file may share the name.
+	t.Setenv("HOME", "")
+	bystander := filepath.Join(cwd, "omarchy-poll.json")
+	if err := os.WriteFile(bystander, []byte("not ours"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := runPoll(t, "", server.URL, true)
+	if err != nil || len(resp.Data.Postings) != 1 {
+		t.Fatalf("the poll still answers, got %+v, %v", resp, err)
+	}
+	if data, _ := os.ReadFile(bystander); string(data) != "not ours" {
+		t.Error("a non-notify poll must not delete from the working directory")
+	}
+	if _, err := runPoll(t, "", server.URL, true, "--notify"); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(bystander); string(data) != "not ours" {
+		t.Error("a notify poll must not write into the working directory")
+	}
+	if _, err := os.Stat(filepath.Join(cwd, "omarchy-poll.json.lock")); !os.IsNotExist(err) {
+		t.Error("no lock file may be created in the working directory")
+	}
+	if len(*calls) != 0 {
+		t.Errorf("without a state directory the toasts stay off, ran %v", *calls)
+	}
+
+	// A relative XDG_STATE_HOME is the same thing.
+	if _, err := runPoll(t, "state", server.URL, true, "--notify"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(cwd, "state")); !os.IsNotExist(err) {
+		t.Error("a relative XDG_STATE_HOME must not be created under the working directory")
+	}
+}
+
+func TestPollSharesTheBoxBreadcrumbs(t *testing.T) {
+	server := imboxServer(t, `[]`)
+	defer server.Close()
+
+	out, err := runHey(t, t.TempDir(), server.URL, true, "omarchy", "poll")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var envelope struct {
+		Breadcrumbs []struct{ Command string } `json:"breadcrumbs"`
+	}
+	if err := json.Unmarshal([]byte(out), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if len(envelope.Breadcrumbs) != 3 || envelope.Breadcrumbs[0].Command != "hey threads <id>" {
+		t.Errorf("an agent reading the poll should see the box's next actions, got %+v", envelope.Breadcrumbs)
+	}
+}
