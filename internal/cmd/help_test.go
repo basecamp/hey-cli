@@ -105,7 +105,7 @@ EMAIL
   collection     View and manage an email collection
   workflows      List your email workflows
   workflow       View and manage an email workflow
-  clips          List passages clipped from email
+  clips          List the newest page of passages clipped from email
   clip           Save and manage passages from email
   snippets       List reusable email snippets
   snippet        Create and manage reusable email snippets

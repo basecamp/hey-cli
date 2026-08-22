@@ -21,9 +21,9 @@ func newClipsCommand() *clipsCommand {
 	clipsCommand := &clipsCommand{}
 	clipsCommand.cmd = &cobra.Command{
 		Use:   "clips",
-		Short: "List passages clipped from email",
+		Short: "List the newest page of passages clipped from email",
 		Annotations: map[string]string{
-			"agent_notes": "Returns clip IDs, content, source entry IDs, and source thread context. Use an ID with hey clip delete.",
+			"agent_notes": "Returns the newest page of clip IDs, content, source entry IDs, and source thread context. The SDK does not expose the cursor for older pages. Use an ID with hey clip delete.",
 		},
 		Example: `  hey clips
   hey clips --json
@@ -42,6 +42,10 @@ func (c *clipsCommand) run(cmd *cobra.Command, _ []string) error {
 	clips, err := sdk.Clips().List(cmd.Context())
 	if err != nil {
 		return apierr.FromSDK(err)
+	}
+	notice := clipsPageNotice(clips)
+	if stderrNotice := paginationNoticeForStderr(writer.EffectiveFormat(), notice); stderrNotice != "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), stderrNotice)
 	}
 
 	switch writer.EffectiveFormat() {
@@ -62,18 +66,29 @@ func (c *clipsCommand) run(cmd *cobra.Command, _ []string) error {
 			})
 		}
 		table.print()
+		if notice != "" {
+			fmt.Fprintln(cmd.ErrOrStderr(), "Notice: "+notice)
+		}
 		return nil
 	case output.FormatMarkdown:
 		return writeClipsMarkdown(cmd, clips)
 	default:
 		return writeOK(clips,
 			output.WithSummary(fmt.Sprintf("%d %s", len(clips), clipNoun(len(clips)))),
+			output.WithNotice(notice),
 			output.WithBreadcrumbs(
 				output.Breadcrumb{Action: "create", Command: "hey clip create <entry-id> --content <text>", Description: "Save text from an email entry"},
 				output.Breadcrumb{Action: "delete", Command: "hey clip delete <clip-id>", Description: "Delete a clip"},
 			),
 		)
 	}
+}
+
+func clipsPageNotice(clips []generated.Clip) string {
+	if len(clips) == 0 {
+		return ""
+	}
+	return "Showing HEY's newest clips page. The SDK does not expose the cursor for older pages."
 }
 
 func clipTopicLabel(topic generated.ClipTopic) string {

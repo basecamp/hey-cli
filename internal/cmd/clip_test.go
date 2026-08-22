@@ -29,8 +29,8 @@ func TestClipsCommandListsClipsInEveryFormat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.Summary != "2 clips" {
-		t.Errorf("summary = %q", response.Summary)
+	if response.Summary != "2 clips" || !strings.Contains(response.Notice, "newest clips page") {
+		t.Errorf("summary = %q, notice = %q", response.Summary, response.Notice)
 	}
 	items := response.Data.([]any)
 	first := items[0].(map[string]any)
@@ -39,9 +39,9 @@ func TestClipsCommandListsClipsInEveryFormat(t *testing.T) {
 		t.Errorf("items = %#v", items)
 	}
 
-	ids, err := runFormattedCommand(t, handler, []string{"--ids-only"}, "clips")
-	if err != nil || ids != "4\n3\n" {
-		t.Errorf("ids = %q, err = %v", ids, err)
+	ids, idsStderr, err := runFormattedCommandWithStderr(t, handler, []string{"--ids-only"}, "clips")
+	if err != nil || ids != "4\n3\n" || !strings.Contains(idsStderr, "newest clips page") {
+		t.Errorf("ids = %q, stderr = %q, err = %v", ids, idsStderr, err)
 	}
 	count, err := runFormattedCommand(t, handler, []string{"--count"}, "clips")
 	if err != nil || count != "2\n" {
@@ -51,9 +51,9 @@ func TestClipsCommandListsClipsInEveryFormat(t *testing.T) {
 	if err != nil || !strings.Contains(markdown, "| 4 | The launch moves to Wednesday\\. | 987 | 55 | Launch planning |") {
 		t.Errorf("markdown = %q, err = %v", markdown, err)
 	}
-	styled, err := runStyledCommand(t, handler, "clips")
-	if err != nil || !strings.Contains(styled, "Launch planning (55)") || !strings.Contains(styled, "Entry") {
-		t.Errorf("styled = %q, err = %v", styled, err)
+	styled, styledStderr, err := runFormattedCommandWithStderr(t, handler, []string{"--styled"}, "clips")
+	if err != nil || !strings.Contains(styled, "Launch planning (55)") || !strings.Contains(styled, "Entry") || !strings.Contains(styledStderr, "newest clips page") {
+		t.Errorf("styled = %q, stderr = %q, err = %v", styled, styledStderr, err)
 	}
 }
 
@@ -74,7 +74,7 @@ func TestClipsCommandPreservesEmptyList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if items := response.Data.([]any); len(items) != 0 || response.Summary != "0 clips" {
+	if items := response.Data.([]any); len(items) != 0 || response.Summary != "0 clips" || response.Notice != "" {
 		t.Errorf("response = %#v", response)
 	}
 	markdown, err := runFormattedCommand(t, handler, []string{"--markdown"}, "clips")

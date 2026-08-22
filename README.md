@@ -266,7 +266,8 @@ bare number. `--ids-only` and `--count` need list data, so they work on `hey box
 `hey workflow`, `hey clips`, `hey snippets`, `hey drafts`, `hey search`, `hey contacts list`, `hey screener list`, `hey screener history`, `hey calendars`,
 `hey recordings`, `hey todo list`, `hey timetrack list` and `hey journal list`. The
 data-only formats print any pagination notice on stderr, so the IDs on stdout stay
-pipeable.
+pipeable. `hey clips --ids-only` and `--count` cover the newest page only because the
+released SDK does not expose HEY's cursor for older clip pages.
 
 `--html` writes the original HTML, for the commands that hold some: `hey threads`,
 `hey journal read`, `hey contacts show` and `hey contacts note show`. It is a format of
@@ -317,7 +318,7 @@ hey workflow stage update 654 321 --name "Interviewing"
 hey workflow add 987 --to 654 --stage 321       # add a topic ID to a stage
 hey workflow move 987 --workflow 654 --to 322   # move it to another stage
 hey workflow remove 987 --from 654              # remove it from the workflow
-hey clips                                        # list saved passages and source context
+hey clips                                        # newest page of saved passages and source context
 hey clip create 456 --content "The launch moves to Wednesday."
 hey clip delete 44
 hey snippets                                     # list reusable email snippets
@@ -395,7 +396,7 @@ Collection IDs come from `hey collections`. `hey collection` returns both each p
 
 Workflow IDs come from `hey workflows`, which includes the linked account ID for each workflow. `hey workflow <id>` returns stages in position order; `--ids-only` and `--count` apply to those stages. Creating a workflow needs one linked mail account, selected with `--account` when more than one is available. HEY creates new stages as `Untitled`, so create the stage, read its ID with `hey workflow <id>`, then rename it. Workflow membership commands take `topic_id`. Adding a thread creates its workflow membership before selecting the requested stage; if stage selection fails, the thread remains in the workflow's first stage and the command reports the error.
 
-Clips are passages saved from existing email entries. `hey clips` lists each clip newest first with its source entry and thread context. `hey clip create <entry-id> --content <text>` saves the selected text against that entry, and `hey clip delete <clip-id>` removes it. Clip content is plain text; the source entry ID comes from `hey threads --json`.
+Clips are passages saved from existing email entries. `hey clips` lists the newest page with each clip's source entry and thread context; its JSON `notice` and the data-only formats' stderr make that boundary explicit because the released SDK does not expose HEY's cursor for older pages. `hey clip create <entry-id> --content <text>` saves the selected text against that entry, and `hey clip delete <clip-id>` removes it. Clip content is plain text; the source entry ID comes from `hey threads --json`.
 
 Snippets are named reusable email content, separate from clips saved out of received messages. `hey snippets` lists both plain text and HEY's rich-text HTML; `hey snippet create`, `update`, and `delete` manage them. A create requires a non-empty name and content. Updates change whichever non-empty fields are supplied, while omitted fields stay as they are. In the TUI, Ctrl+T opens the picker from new-message, reply, and forward forms and inserts the snippet's plain-text representation at the current body cursor without replacing the draft.
 
