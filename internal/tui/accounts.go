@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
@@ -114,24 +115,32 @@ func tuiAccountEmail(users []generated.User, accountID int64) string {
 	return ""
 }
 
-func renderMailAccountPicker(m *model) string {
-	var content strings.Builder
-	content.WriteString(m.styles.title.Render("Select mail account"))
-	content.WriteString("\n\n")
+// renderMailAccountPicker draws the picker over the section the reader opened it from,
+// so choosing an account never blanks the screen they came from.
+func renderMailAccountPicker(m *model, base string) string {
+	labels := make([]string, len(m.mailAccounts))
 	for index, account := range m.mailAccounts {
-		prefix := "  "
-		style := m.styles.entryBody
-		if index == m.mailAccountCursor {
-			prefix = "› "
-			style = m.styles.entryFrom
-		}
-		content.WriteString(prefix + style.Render(account.label) + "\n")
+		labels[index] = account.label
 	}
+
+	var status []string
 	if m.mailAccountSwitching {
-		content.WriteString("\n" + m.styles.entryDate.Render("Switching account…"))
+		status = append(status, styleMuted.Render("Switching account…"))
 	}
 	if m.mailAccountErr != "" {
-		content.WriteString("\n" + m.styles.entryDate.Render("Error: "+terminal.SanitizeLine(m.mailAccountErr)))
+		status = append(status, lipgloss.NewStyle().
+			Foreground(colorError).
+			Render("Error: "+terminal.SanitizeLine(m.mailAccountErr)))
 	}
-	return content.String()
+
+	height := m.contentHeight()
+	visible := modalContentRows(height)
+	if len(status) > 0 {
+		visible = max(visible-len(status)-1, 1)
+	}
+	body := strings.Join(modalListRows(labels, m.mailAccountCursor, modalContentWidth(m.width), visible), "\n")
+	if len(status) > 0 {
+		body += "\n\n" + strings.Join(status, "\n")
+	}
+	return overlayModal(base, modalFrame("Select mail account", body, m.width), m.width, height)
 }

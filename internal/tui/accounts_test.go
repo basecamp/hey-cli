@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 )
@@ -118,8 +119,10 @@ func TestAccountPickerRequiresMultipleLinkedAccounts(t *testing.T) {
 	}
 }
 
-func TestCtrlAOpensAccountPicker(t *testing.T) {
+func TestCtrlAOpensAccountPickerOverTheSectionBehindIt(t *testing.T) {
 	m := newModel()
+	sized, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 40})
+	m = sized.(model)
 	m.loading = false
 	m.mailAccounts = []mailAccountChoice{
 		{label: "All Accounts"},
@@ -131,8 +134,18 @@ func TestCtrlAOpensAccountPicker(t *testing.T) {
 	if cmd != nil || !m.mailAccountPicker {
 		t.Fatal("ctrl+a did not open the account picker")
 	}
-	if view := m.View().Content; !strings.Contains(view, "Select mail account") {
+
+	view := stripANSI(m.View().Content)
+	if !strings.Contains(view, "Select mail account") || !strings.Contains(view, "› All Accounts") {
 		t.Fatalf("picker view = %q", view)
+	}
+	if !strings.Contains(view, "╭") || !strings.Contains(view, "╯") {
+		t.Errorf("picker did not draw the modal frame: %q", view)
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if lipgloss.Width(line) > 80 {
+			t.Errorf("picker line width = %d, want at most 80: %q", lipgloss.Width(line), line)
+		}
 	}
 }
 
