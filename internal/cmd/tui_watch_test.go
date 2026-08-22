@@ -3,7 +3,9 @@ package cmd
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,28 +16,46 @@ import (
 	"github.com/basecamp/hey-cli/internal/tui"
 )
 
-func TestRelayMailChangesNamesTheChangedBox(t *testing.T) {
+func TestRelayMailChangesNamesTheChangedBoxAndConnectionState(t *testing.T) {
 	messages := make(chan actioncable.Message, 1)
-	reconnects := make(chan struct{}, reconnectBacklog)
-	changes := make(chan int64, mailChangeBacklog)
+	connection := newMailConnectionNotifier()
+	events := make(chan tui.MailWatchEvent, mailChangeBacklog)
 
-	go relayMailChanges(t.Context(), messages, reconnects, changes)
+	go relayMailChanges(t.Context(), messages, connection, events)
 
 	messages <- actioncable.Message(`{"change":"upsert","box_id":24088}`)
-	if got := <-changes; got != 24088 {
-		t.Errorf("change = %d, want the box the notification named", got)
+	if got := <-events; got.BoxID != 24088 || got.Connection != tui.MailConnectionUnchanged {
+		t.Errorf("event = %+v, want the box the notification named", got)
 	}
 
-	ring(reconnects, struct{}{})
-	if got := <-changes; got != tui.AnyBoxChanged {
-		t.Errorf("change = %d, want a reconnect to stand for every box", got)
+	connection.note(tui.MailConnectionDisconnected, true)
+	if got := <-events; got.Connection != tui.MailConnectionDisconnected || !got.WillReconnect {
+		t.Errorf("event = %+v, want the temporary disconnect", got)
+	}
+	connection.note(tui.MailConnectionReconnected, false)
+	if got := <-events; got.Connection != tui.MailConnectionReconnected {
+		t.Errorf("event = %+v, want the reconnect", got)
 	}
 
 	// A notification that can't be read leaves the stream alone.
 	messages <- actioncable.Message(`not json`)
 	messages <- actioncable.Message(`{"box_id":31145}`)
-	if got := <-changes; got != 31145 {
-		t.Errorf("change = %d, want the stream to carry on past what it can't read", got)
+	if got := <-events; got.BoxID != 31145 {
+		t.Errorf("event = %+v, want the stream to carry on past what it can't read", got)
+	}
+}
+
+func TestMailConnectionNotifierKeepsTheNewestRapidTransition(t *testing.T) {
+	connection := newMailConnectionNotifier()
+	connection.note(tui.MailConnectionDisconnected, true)
+	connection.note(tui.MailConnectionReconnected, false)
+
+	event, version, changed := connection.after(0)
+	if !changed || version != 2 || event.Connection != tui.MailConnectionReconnected {
+		t.Errorf("event = %+v, version = %d, changed = %v; want the latest reconnect", event, version, changed)
+	}
+	if _, _, changed := connection.after(version); changed {
+		t.Error("the same transition should only be read once")
 	}
 }
 
@@ -62,11 +82,12 @@ func TestARelayIsTheOnlyWriterToTheStreamItCloses(t *testing.T) {
 
 	mailMessages := make(chan actioncable.Message)
 	screenerMessages := make(chan actioncable.Message)
+	connection := newMailConnectionNotifier()
 	reconnects := make(chan struct{}, reconnectBacklog)
-	mail := make(chan int64, mailChangeBacklog)
+	mail := make(chan tui.MailWatchEvent, mailChangeBacklog)
 	screener := make(chan struct{}, 1)
 
-	go relayMailChanges(relaying, mailMessages, reconnects, mail)
+	go relayMailChanges(relaying, mailMessages, connection, mail)
 	go relayScreenerChanges(relaying, screenerMessages, reconnects, screener)
 
 	stop()
@@ -78,7 +99,89 @@ func TestARelayIsTheOnlyWriterToTheStreamItCloses(t *testing.T) {
 	}
 
 	for range reconnectBacklog + 2 {
+		connection.note(tui.MailConnectionReconnected, false)
 		ring(reconnects, struct{}{})
+	}
+}
+
+func TestMailConnectionStateTakesPriorityOverAFullBoxBacklog(t *testing.T) {
+	events := make(chan tui.MailWatchEvent, 2)
+	ringMailWatchEvent(events, tui.MailWatchEvent{BoxID: 1})
+	ringMailWatchEvent(events, tui.MailWatchEvent{BoxID: 2})
+	ringMailWatchEvent(events, tui.MailWatchEvent{BoxID: 3})
+
+	ringMailWatchEvent(events, tui.MailWatchEvent{Connection: tui.MailConnectionDisconnected, WillReconnect: true})
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want stale box doorbells coalesced behind connection state", len(events))
+	}
+	if got := <-events; got.Connection != tui.MailConnectionDisconnected || !got.WillReconnect {
+		t.Errorf("event = %+v, want the disconnect", got)
+	}
+}
+
+type scriptedCableTransport struct{ conn *scriptedCableConn }
+
+func (t scriptedCableTransport) Dial(context.Context, string, actioncable.DialOptions) (actioncable.Conn, error) {
+	return t.conn, nil
+}
+
+type scriptedCableConn struct {
+	reads chan []byte
+	done  chan struct{}
+	once  sync.Once
+}
+
+func newScriptedCableConn() *scriptedCableConn {
+	return &scriptedCableConn{reads: make(chan []byte, 2), done: make(chan struct{})}
+}
+
+func (c *scriptedCableConn) Subprotocol() string { return "actioncable-v1-json" }
+
+func (c *scriptedCableConn) Read(ctx context.Context) ([]byte, error) {
+	select {
+	case payload := <-c.reads:
+		return payload, nil
+	case <-c.done:
+		return nil, io.EOF
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (c *scriptedCableConn) Write(context.Context, []byte) error { return nil }
+
+func (c *scriptedCableConn) Close() error {
+	c.once.Do(func() { close(c.done) })
+	return nil
+}
+
+func TestStoppedTuiCableErrorsIncludeTerminalServerDisconnects(t *testing.T) {
+	if !stoppedTuiCableError(actioncable.ErrClosed) {
+		t.Error("an explicitly closed client should be replaced")
+	}
+	if !stoppedTuiCableError(&actioncable.DisconnectError{Reason: actioncable.ReasonUnauthorized, Reconnect: false}) {
+		t.Error("a client the server stopped for good should be replaced")
+	}
+	if stoppedTuiCableError(&actioncable.DisconnectError{Reason: "server restart", Reconnect: true}) {
+		t.Error("a client already reconnecting should stay shared")
+	}
+}
+
+func TestServerStoppedActionCableClientIsReplaceable(t *testing.T) {
+	conn := newScriptedCableConn()
+	conn.reads <- []byte(`{"type":"welcome"}`)
+	client := actioncable.New("ws://cable.example.test/cable", actioncable.WithTransport(scriptedCableTransport{conn: conn}))
+	if err := client.Connect(t.Context()); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer client.Close()
+
+	conn.reads <- []byte(`{"type":"disconnect","reason":"unauthorized","reconnect":false}`)
+	subscribing, stop := context.WithTimeout(t.Context(), time.Second)
+	defer stop()
+	_, err := client.Subscribe(subscribing, actioncable.Identifier{Channel: changesChannel})
+	if !stoppedTuiCableError(err) {
+		t.Fatalf("subscribe error = %T %v, want a terminal server disconnect that opens a new client", err, err)
 	}
 }
 
@@ -110,7 +213,7 @@ func TestTuiSubscribeReplacesAClientThatStoppedItself(t *testing.T) {
 	dialing, giveUp := context.WithTimeout(t.Context(), 200*time.Millisecond)
 	defer giveUp()
 
-	_, err := tuiSubscribe(dialing, actioncable.Identifier{Channel: changesChannel})
+	_, err := tuiSubscribe(dialing, dialing, actioncable.Identifier{Channel: changesChannel})
 	if err == nil {
 		t.Fatal("a dial against a dead address should fail")
 	}

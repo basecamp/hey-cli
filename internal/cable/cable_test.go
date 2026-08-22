@@ -120,6 +120,14 @@ func TestEveryDialCarriesCurrentCredentials(t *testing.T) {
 	if got := headers[1+redialed].Get("Origin"); got != "https://app.hey.com" {
 		t.Errorf("redial Origin = %q, want the client's own headers kept", got)
 	}
+
+	// Connect's deadline only bounds its wait; Dial owns and stops a client that never
+	// connected so no retry goroutine is left behind after the error.
+	dialsAtReturn := len(headers)
+	time.Sleep(10 * time.Millisecond)
+	if got := len(recorded.recorded()); got != dialsAtReturn {
+		t.Errorf("dials after return = %d, want the %d attempts already made", got, dialsAtReturn)
+	}
 }
 
 func TestDialWithoutCredentialsFailsBeforeConnecting(t *testing.T) {
