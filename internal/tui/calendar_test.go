@@ -592,11 +592,17 @@ func TestCalendarStepsByTheUnitTheViewShows(t *testing.T) {
 func TestHabitCompletionsMarkTheirHabitRatherThanListingThemselves(t *testing.T) {
 	// HEY answers a habit and its completion as separate recordings, the completion
 	// carrying no title and naming its habit in parent_id.
-	events, todos, habits := splitRecordings([]Recording{
+	events, todos, habits, completions := splitRecordings([]Recording{
 		{ID: 14796085, Title: "Read", Type: "Calendar::Habit", Icon: "read"},
 		{ID: 14113260, Title: "Meditate", Type: "Calendar::Habit", Icon: "meditate"},
 		{ID: 171477412, Type: "Calendar::Habit::Completion", ParentID: 14796085, StartsAt: "2026-08-22T00:00:00Z"},
 	})
+
+	// The completion is answered as well as folded: a week needs to know which day each
+	// one landed on, which a single CompletedAt cannot say.
+	if len(completions) != 1 || completions[0].ParentID != 14796085 {
+		t.Errorf("completions = %+v, want the one that marked Read", completions)
+	}
 
 	if len(events) != 0 || len(todos) != 0 {
 		t.Errorf("a completion is neither an event nor a to-do: events=%v todos=%v", events, todos)
@@ -612,10 +618,93 @@ func TestHabitCompletionsMarkTheirHabitRatherThanListingThemselves(t *testing.T)
 	}
 }
 
+// --- Week: the habits band ---
+
+// weekWithHabits is a week where five habits were kept on the Monday, one on the Tuesday
+// and two on the Thursday, plus one event, rendered at 100 columns.
+func weekWithHabits(t *testing.T, completions []Recording) []string {
+	t.Helper()
+
+	habits := []Recording{
+		{ID: 1, Title: "Meditate", Icon: "meditate", Color: "purple", Type: "Calendar::Habit"},
+		{ID: 2, Title: "Work out", Icon: "weights", Color: "red", Type: "Calendar::Habit"},
+		{ID: 3, Title: "Write", Icon: "write", Color: "gold", Type: "Calendar::Habit"},
+		{ID: 4, Title: "Read", Icon: "read", Color: "green", Type: "Calendar::Habit"},
+		{ID: 5, Title: "Learn a language", Icon: "study", Color: "teal", Type: "Calendar::Habit"},
+	}
+	events := []Recording{
+		{ID: 9, Title: "Stanko & Kevin", CalendarColor: "blue", Type: "Calendar::Event",
+			StartsAt: "2026-08-20T14:00:00Z", EndsAt: "2026-08-20T15:00:00Z"},
+	}
+
+	anchor := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+	out := renderWeekView(events, habits, completions, anchor, time.Monday, 100, 30, nil)
+	return strings.Split(stripANSI(out), "\n")
+}
+
+func habitDone(habitID int64, day string) Recording {
+	return Recording{Type: "Calendar::Habit::Completion", ParentID: habitID, StartsAt: day + "T00:00:00Z"}
+}
+
+// The week says what was kept each day, as icons — it has room for seven days of those and
+// none for seven days of names. Every day's band is the same height, so the rule under it
+// is straight and each day's events start level with its neighbours'.
+func TestWeekDrawsTheHabitsKeptEachDay(t *testing.T) {
+	lines := weekWithHabits(t, []Recording{
+		habitDone(1, "2026-08-17"), habitDone(2, "2026-08-17"), habitDone(3, "2026-08-17"),
+		habitDone(4, "2026-08-17"), habitDone(5, "2026-08-17"),
+		habitDone(1, "2026-08-18"),
+		habitDone(1, "2026-08-20"), habitDone(4, "2026-08-20"),
+	})
+
+	// Rows 0-2 are the top border, the day names and the header rule; the band follows.
+	band := lines[3:5]
+	if !strings.Contains(band[0], "🧘") || !strings.Contains(band[0], "📖") {
+		t.Errorf("Monday's habits are not in the band: %q", band[0])
+	}
+	// Five icons do not fit one cell, so the band is two rows — for every day, not just
+	// the one that needed it.
+	if !strings.Contains(band[1], "📚") {
+		t.Errorf("the fifth habit did not wrap onto a second row: %q", band[1])
+	}
+	if lipgloss.Width(band[0]) != lipgloss.Width(band[1]) {
+		t.Errorf("band rows are %d and %d wide", lipgloss.Width(band[0]), lipgloss.Width(band[1]))
+	}
+
+	// A rule closes the band off from the day's own content.
+	if rule := lines[5]; !strings.HasPrefix(rule, "├") || !strings.Contains(rule, "┼") {
+		t.Errorf("no rule under the band: %q", rule)
+	}
+	// And the day's events are below it, not in it.
+	if !strings.Contains(lines[7], "Stanko & Kev") {
+		t.Errorf("the event is not under the band: %q", lines[6:8])
+	}
+	for _, row := range band {
+		if strings.Contains(row, "Meditate") || strings.Contains(row, "Stanko") {
+			t.Errorf("the band carries a name, not just icons: %q", row)
+		}
+	}
+}
+
+// A week nobody kept a habit in gets no band and no rule, rather than an empty stripe.
+func TestWeekWithoutHabitsHasNoBand(t *testing.T) {
+	lines := weekWithHabits(t, nil)
+
+	// The header rule is row 2, and the day's own content starts straight after it.
+	if !strings.Contains(lines[3], "14:00") {
+		t.Errorf("row 3 should be the day's content, got %q", lines[3])
+	}
+	for i, line := range lines {
+		if strings.Contains(line, "🧘") || strings.Contains(line, "📖") {
+			t.Errorf("row %d drew a habit nobody kept: %q", i, line)
+		}
+	}
+}
+
 // A calendar carries a day's own records alongside its events. Only the events are drawn:
 // a journal entry taken for one came out as a bar of bare color across the day.
 func TestOnlyEventsAreDrawnOnTheGrid(t *testing.T) {
-	events, todos, habits := splitRecordings([]Recording{
+	events, todos, habits, _ := splitRecordings([]Recording{
 		{ID: 169118695, Title: "Stanko & Kevin", Type: "Calendar::Event", StartsAt: "2026-08-20T14:00:00Z"},
 		// The journal entry behind the stray stripe, as HEY answered it: no title.
 		{ID: 171477000, Type: "Calendar::JournalEntry", AllDay: true, StartsAt: "2026-08-20T00:00:00Z"},
