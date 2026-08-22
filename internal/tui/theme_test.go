@@ -296,6 +296,9 @@ func TestPillTextReadsOnTheAccent(t *testing.T) {
 	if colorOnAccent != color.Color(lipgloss.Black) {
 		t.Errorf("the ANSI accent keeps the classic black pill text, got %v", colorOnAccent)
 	}
+	if colorLink != color.Color(lipgloss.BrightCyan) {
+		t.Errorf("the default theme keeps links cyan, got %v", colorLink)
+	}
 
 	// lupine's dark blue carries black at ~3.7:1; white reads better.
 	lupine := map[string]string{"accent": "#3264eb", "background": "#fafafa",
@@ -314,6 +317,9 @@ func TestPillTextReadsOnTheAccent(t *testing.T) {
 	applyTheme(noColorTheme())
 	if _, ok := colorOnAccent.(lipgloss.NoColor); !ok {
 		t.Errorf("NO_COLOR must keep the pill colorless, got %v", colorOnAccent)
+	}
+	if _, ok := colorLink.(lipgloss.NoColor); !ok {
+		t.Errorf("NO_COLOR must keep links colorless, got %v", colorLink)
 	}
 }
 

@@ -25,7 +25,7 @@ var (
 	colorMuted   color.Color = lipgloss.BrightBlack // decorative filler only — see styleMuted
 	colorBright  color.Color = lipgloss.BrightWhite // emphasized text
 	colorAlert               = lipgloss.Red         // attention: Omarchy themes signal alerts with red
-	colorLink                = lipgloss.BrightCyan  // hyperlinks in email bodies (markdown style "14"); subjects match it
+	colorLink    color.Color = lipgloss.BrightCyan  // hyperlinks in email bodies (markdown style "14"); subjects match it
 	colorError   color.Color = lipgloss.Red         // errors
 
 	// Interface chrome (rules, tabs, hotkeys) follows eza's convention for
@@ -54,6 +54,7 @@ func applyTheme(theme Theme) {
 	colorPrimary = theme.Accent
 	colorMuted = theme.Muted
 	colorBright = theme.Bright
+	colorLink = lipgloss.BrightCyan
 	colorError = theme.Error
 	colorSelection = nil
 	if theme.Selection != nil && (theme.Trusted || contrastRatio(theme.Accent, theme.Selection) >= minSelectionContrast) {
@@ -66,6 +67,7 @@ func applyTheme(theme Theme) {
 	// better there.
 	colorOnAccent = lipgloss.Black
 	if nc, ok := theme.Accent.(lipgloss.NoColor); ok {
+		colorLink = nc
 		colorOnAccent = nc
 	} else if theme.Accent != color.Color(lipgloss.BrightBlue) &&
 		contrastRatio(lipgloss.BrightWhite, theme.Accent) > contrastRatio(lipgloss.Black, theme.Accent) {
