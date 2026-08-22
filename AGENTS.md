@@ -121,11 +121,15 @@ because both were mis-stated here before:
   `Topics().GetEntries` throws that header away, which is what `GetEntriesPage` exists
   for.
 
-  The SDK's generated parsers read a response with `io.ReadAll`, so until it bounds its
-  own reads (#248) `internal/cmd/sdk_transport.go` hands it a transport that caps JSON and
-  text bodies at 16 MiB, success and error alike, decompressed, and leaves blobs — which
-  the SDK streams or caps itself — alone. It sits inside the SDK's own http.Client, so the
-  SDK's timeout, redirect credential stripping, logging and hooks still apply.
+  The SDK bounds its own reads: its transport caps JSON and HTML response bodies —
+  success and error alike, decompressed — at `hey.DefaultMaxResponseBodyBytes` (16 MiB;
+  `hey.WithMaxResponseBodyBytes` to change it, and there is no opt-out — a zero or
+  negative value means the default), leaving blobs to the SDK's own streaming and caps.
+  An oversized *error* response keeps its status: the refusal arrives as the `*hey.Error`
+  for the status wrapping `hey.ErrResponseTooLarge`, which is why
+  `internal/threadload/sdk.go` classifies a failed message read by status before size —
+  an oversized 500 is still systemic and an oversized 404 is still just a missing
+  message; only an oversized success is `over_limit`.
 - **A reply's recipients come from the entry it answers.** `Messages().Get` carries that
   entry's `Addressed` (`directly`/`copied`/`blindcopied`), and `recipientsForReplyTo` —
   in `internal/cmd/thread_reply.go` for `hey reply`, and in `internal/tui/compose.go` for

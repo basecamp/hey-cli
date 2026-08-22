@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 
+	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/threadload"
 )
@@ -386,7 +388,7 @@ func TestThreadsMarkAnOversizedMessageOverLimit(t *testing.T) {
 			reads.mu.Lock()
 			reads.messages++
 			reads.mu.Unlock()
-			w.Header().Set("Content-Length", strconv.FormatInt(maxTextResponseBytes+1, 10))
+			w.Header().Set("Content-Length", strconv.FormatInt(hey.DefaultMaxResponseBodyBytes+1, 10))
 			w.WriteHeader(http.StatusOK)
 			_, _ = io.WriteString(w, `{"id":12,"content":"`)
 		default:

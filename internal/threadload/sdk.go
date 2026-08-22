@@ -42,20 +42,35 @@ func (s sdkSource) EntriesPage(ctx context.Context, topicID int64, cursor string
 // Message reads one entry's message. A rate limit, an expired credential, a server
 // error or a lost connection is about the service, not the message, and is marked
 // systemic so the loader stops the fan-out rather than asking two thousand more times.
-// A response the transport refused as too large is ErrOverLimit for that entry alone.
+// A response the SDK's transport refused as too large is ErrOverLimit for that entry
+// alone — but only when the refusal carries no HTTP status. An oversized *error* body
+// arrives as the *hey.Error for its status wrapping hey.ErrResponseTooLarge, and the
+// status is what it means: an oversized 500 is still the service failing, and an
+// oversized 404 is still a message that is not there.
 func (s sdkSource) Message(ctx context.Context, entryID int64) (*generated.Message, error) {
 	message, err := s.client.Messages().Get(ctx, entryID)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		// The transport wraps ErrOverLimit; the SDK may or may not keep the chain.
-		if errors.Is(err, ErrOverLimit) || strings.Contains(err.Error(), ErrOverLimit.Error()) {
-			return nil, fmt.Errorf("%w: %w", ErrOverLimit, err)
-		}
-		return nil, systemic(apierr.FromSDK(err))
+		return nil, classifyMessageError(err)
 	}
 	return message, nil
+}
+
+// classifyMessageError sorts a failed message read by status before size: an error that
+// carries an HTTP status means the server answered, and the status is what it means
+// whether or not the body also blew the cap. Only a refusal with no status — an oversized
+// success — is about the one message being too large.
+func classifyMessageError(err error) error {
+	var statusErr *hey.Error
+	if errors.As(err, &statusErr) && statusErr.HTTPStatus != 0 {
+		return systemic(apierr.FromSDK(err))
+	}
+	if errors.Is(err, hey.ErrResponseTooLarge) {
+		return fmt.Errorf("%w: %w", ErrOverLimit, err)
+	}
+	return systemic(apierr.FromSDK(err))
 }
 
 func systemic(err error) error {

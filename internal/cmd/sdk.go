@@ -78,7 +78,6 @@ func initSDK(authMgr *auth.Manager, baseURL string) {
 	var opts []hey.ClientOption
 	opts = append(opts, hey.WithAuthStrategy(&cliAuthStrategy{mgr: authMgr}))
 	opts = append(opts, hey.WithUserAgent(version.UserAgent()+" "+hey.DefaultUserAgent))
-	opts = append(opts, hey.WithTransport(newCappedTransport(maxTextResponseBytes)))
 
 	if verboseFlag > 0 {
 		opts = append(opts, hey.WithLogger(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))))
