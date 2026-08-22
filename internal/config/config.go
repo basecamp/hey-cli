@@ -46,6 +46,7 @@ type fileConfig struct {
 	AccountID           string                              `json:"account_id,omitempty"`
 	Onboarded           *bool                               `json:"onboarded,omitempty"`
 	Cover               string                              `json:"cover,omitempty"`
+	HelpHidden          bool                                `json:"help_hidden,omitempty"`
 	AccountDefaults     map[string]string                   `json:"account_defaults,omitempty"`
 	TrustedLocalConfigs map[string]trustedLocalConfigRecord `json:"trusted_local_configs,omitempty"`
 }
@@ -385,6 +386,29 @@ func SaveCover(preset string) error {
 	return saveGlobalConfig(file)
 }
 
+// HelpHidden reports whether the TUI's shortcut help is hidden.
+func HelpHidden() bool {
+	file, err := loadGlobalFileConfig()
+	if err != nil {
+		return false
+	}
+	return file.HelpHidden
+}
+
+// SaveHelpHidden stores whether the TUI's shortcut help is hidden, leaving every
+// other setting alone.
+func SaveHelpHidden(hidden bool) error {
+	file, err := loadGlobalFileConfig()
+	if err != nil {
+		return err
+	}
+	if err := migrateLegacyAccountDefault(&file); err != nil {
+		return err
+	}
+	file.HelpHidden = hidden
+	return saveGlobalConfig(file)
+}
+
 // SaveOnboarded stores the onboarding flag in the global config so later
 // logged-out runs of bare `hey` skip the full first-run wizard.
 func (c *Config) SaveOnboarded(onboarded bool) error {
@@ -450,7 +474,7 @@ func migrateLegacyAccountDefault(file *fileConfig) error {
 
 // fileConfigKeys are the keys the fileConfig schema owns. A rewrite replaces
 // exactly these; every other key in the file is preserved verbatim.
-var fileConfigKeys = []string{"base_url", "account_id", "onboarded", "cover", "account_defaults", "trusted_local_configs"}
+var fileConfigKeys = []string{"base_url", "account_id", "onboarded", "cover", "help_hidden", "account_defaults", "trusted_local_configs"}
 
 // legacyCredentialKeys are the embedded-credential fields of the pre-store
 // config format. They survive every ordinary rewrite (deleting a credential

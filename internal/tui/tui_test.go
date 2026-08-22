@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -109,6 +110,85 @@ func TestInitReturnsCmd(t *testing.T) {
 	cmd := m.Init()
 	if cmd == nil {
 		t.Fatal("Init should return a command")
+	}
+}
+
+func TestQuestionMarkTogglesHelpAndResizesContent(t *testing.T) {
+	m := modelWithBoxes()
+	visibleHeight := m.vc.height
+	var saved []bool
+	m.saveHelpHidden = func(hidden bool) error {
+		saved = append(saved, hidden)
+		return nil
+	}
+
+	updated, _ := m.Update(keyPress("?"))
+	m = updated.(model)
+	if !m.help.hidden || m.help.view() != "" {
+		t.Error("question mark should hide shortcut help")
+	}
+	if m.vc.height <= visibleHeight {
+		t.Errorf("content height after hiding help = %d, want more than %d", m.vc.height, visibleHeight)
+	}
+	if !slices.Equal(saved, []bool{true}) {
+		t.Errorf("saved preferences = %v, want [true]", saved)
+	}
+
+	updated, _ = m.Update(keyPress("?"))
+	m = updated.(model)
+	if m.help.hidden || m.help.view() == "" {
+		t.Error("question mark should restore shortcut help")
+	}
+	if m.vc.height != visibleHeight {
+		t.Errorf("content height after restoring help = %d, want %d", m.vc.height, visibleHeight)
+	}
+	if !slices.Equal(saved, []bool{true, false}) {
+		t.Errorf("saved preferences = %v, want [true false]", saved)
+	}
+	if !slices.Contains(m.help.bindings, helpBinding{"?", "hide help"}) {
+		t.Errorf("visible shortcut help does not explain its toggle: %v", m.help.bindings)
+	}
+}
+
+func TestQuestionMarkRemainsTextInsideSearch(t *testing.T) {
+	m := modelWithBoxes()
+	updated, _ := m.Update(keyPress("/"))
+	m = updated.(model)
+
+	updated, _ = m.Update(keyPress("?"))
+	m = updated.(model)
+	form := searchModal(m.mailView)
+	if form == nil {
+		t.Fatal("search form closed after typing a question mark")
+	}
+	if form.input.Value() != "?" {
+		t.Errorf("search value = %q, want question mark", form.input.Value())
+	}
+	if m.help.hidden {
+		t.Error("typing a question mark in search should not hide help")
+	}
+}
+
+func TestQuestionMarkTogglesHelpInsideScreener(t *testing.T) {
+	m := modelWithBoxes()
+	m.activeView = m.screenerView
+	m.updateHelpBindings()
+
+	updated, _ := m.Update(keyPress("?"))
+	m = updated.(model)
+	if !m.help.hidden {
+		t.Error("question mark should hide help inside The Screener")
+	}
+}
+
+func TestHelpPreferenceFailureIsShown(t *testing.T) {
+	m := modelWithBoxes()
+	m.saveHelpHidden = func(bool) error { return errors.New("read-only file system") }
+
+	updated, _ := m.Update(keyPress("?"))
+	m = updated.(model)
+	if !strings.Contains(stripANSI(m.help.view()), "Could not save the help preference") {
+		t.Errorf("help preference failure is not visible: %q", m.help.view())
 	}
 }
 

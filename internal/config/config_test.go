@@ -519,6 +519,40 @@ func TestCoverRoundTrip(t *testing.T) {
 	}
 }
 
+func TestHelpHiddenRoundTrip(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+	t.Setenv("HEY_BASE_URL", "")
+
+	if HelpHidden() {
+		t.Error("shortcut help should be visible before a preference is saved")
+	}
+	if err := SaveHelpHidden(true); err != nil {
+		t.Fatalf("SaveHelpHidden(true): %v", err)
+	}
+	if !HelpHidden() {
+		t.Error("shortcut help should be hidden after saving the preference")
+	}
+	if err := SaveHelpHidden(false); err != nil {
+		t.Fatalf("SaveHelpHidden(false): %v", err)
+	}
+	if HelpHidden() {
+		t.Error("shortcut help should be visible after clearing the preference")
+	}
+
+	data, err := os.ReadFile(filepath.Join(tmp, "hey-cli", "config.json"))
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	var file map[string]any
+	if err := json.Unmarshal(data, &file); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	if _, present := file["help_hidden"]; present {
+		t.Errorf("showing help left a help_hidden key behind: %s", data)
+	}
+}
+
 // A cover is one setting in a shared file; saving it must not take the others out.
 func TestSaveCoverKeepsOtherSettings(t *testing.T) {
 	tmp := t.TempDir()

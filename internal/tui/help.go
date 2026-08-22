@@ -36,6 +36,8 @@ type helpBar struct {
 	width    int
 	bindings []helpBinding
 	styles   styles
+	hidden   bool
+	notice   string
 }
 
 func newHelpBar(s styles) helpBar {
@@ -54,6 +56,14 @@ func (h *helpBar) setStyles(s styles) {
 	h.styles = s
 }
 
+func (h *helpBar) setHidden(hidden bool) {
+	h.hidden = hidden
+}
+
+func (h *helpBar) setNotice(notice string) {
+	h.notice = notice
+}
+
 // height returns the number of lines the help bar occupies.
 func (h helpBar) height() int {
 	v := h.view()
@@ -64,7 +74,14 @@ func (h helpBar) height() int {
 }
 
 func (h helpBar) view() string {
-	if len(h.bindings) == 0 {
+	if h.notice != "" {
+		notice := lipgloss.NewStyle().Foreground(colorError).Render(h.notice)
+		if h.width > 0 {
+			return ansi.Wrap(notice, h.width, "")
+		}
+		return notice
+	}
+	if h.hidden || len(h.bindings) == 0 {
 		return ""
 	}
 

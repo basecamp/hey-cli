@@ -30,14 +30,15 @@ type spinnerTickMsg struct{}
 // --- Model ---
 
 type model struct {
-	width   int
-	height  int
-	vc      *viewContext
-	rootSDK *hey.Client
-	cancel  context.CancelFunc
-	theme   Theme
-	styles  styles
-	help    helpBar
+	width          int
+	height         int
+	vc             *viewContext
+	rootSDK        *hey.Client
+	cancel         context.CancelFunc
+	theme          Theme
+	styles         styles
+	help           helpBar
+	saveHelpHidden func(bool) error
 
 	// Navigation
 	section    section
@@ -574,6 +575,9 @@ func (m *model) updateHelpBindings() {
 			bindings = append(bindings, extra...)
 		}
 	}
+	if m.canToggleHelp() && !m.help.hidden {
+		bindings = append(bindings, helpBinding{"?", "hide help"})
+	}
 	if m.canOpenMailAccountPicker() && !m.mailAccountPicker {
 		if ic, ok := m.activeView.(inputCapturer); !ok || !ic.CapturingInput() {
 			description := "mail account"
@@ -599,6 +603,11 @@ func (m *model) updateHelpBindings() {
 func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
+	if m.help.notice != "" {
+		m.help.setNotice("")
+		m.updateHelpBindings()
+	}
+
 	if key == "ctrl+c" {
 		if m.ctrlCOnce {
 			m.cancel()
@@ -616,6 +625,10 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	if m.mailAccountPicker {
 		return m.handleMailAccountKey(msg)
+	}
+
+	if key == "?" && m.canToggleHelp() {
+		return m.toggleHelp()
 	}
 
 	// A view with an open text form gets every key (esc, tab, letters, ...).
@@ -706,6 +719,29 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	return m, nil
+}
+
+func (m model) canToggleHelp() bool {
+	if m.mailAccountPicker {
+		return false
+	}
+	if m.activeView == m.screenerView {
+		return true
+	}
+	capturer, ok := m.activeView.(inputCapturer)
+	return !ok || !capturer.CapturingInput()
+}
+
+func (m model) toggleHelp() (tea.Model, tea.Cmd) {
+	hidden := !m.help.hidden
+	m.help.setHidden(hidden)
+	if m.saveHelpHidden != nil {
+		if err := m.saveHelpHidden(hidden); err != nil {
+			m.help.setNotice(errorNotice("Could not save the help preference", err))
+		}
+	}
+	m.updateHelpBindings()
 	return m, nil
 }
 
@@ -910,7 +946,10 @@ func formatTimestamp(ts time.Time) string {
 // Run starts the TUI with the resolved mail account, the identity root client used for
 // interactive account switching, and the watchers that tell it when things changed.
 func Run(rootSDK, sdk *hey.Client, selected string, watchers Watchers) error {
-	p := tea.NewProgram(newModelWithMailAccounts(rootSDK, sdk, selected, watchers))
+	m := newModelWithMailAccounts(rootSDK, sdk, selected, watchers)
+	m.help.setHidden(config.HelpHidden())
+	m.saveHelpHidden = config.SaveHelpHidden
+	p := tea.NewProgram(m)
 	_, err := p.Run()
 	return err
 }
