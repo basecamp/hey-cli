@@ -11,6 +11,7 @@ import (
 
 	actioncable "github.com/basecamp/actioncable-go"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/auth"
 	"github.com/basecamp/hey-cli/internal/config"
 	"github.com/basecamp/hey-cli/internal/tui"
@@ -134,16 +135,21 @@ func (t scriptedCableTransport) Dial(context.Context, string, actioncable.DialOp
 }
 
 type scriptedCableConn struct {
-	reads chan []byte
-	done  chan struct{}
-	once  sync.Once
+	reads       chan []byte
+	done        chan struct{}
+	once        sync.Once
+	subprotocol string
 }
 
 func newScriptedCableConn() *scriptedCableConn {
-	return &scriptedCableConn{reads: make(chan []byte, 2), done: make(chan struct{})}
+	return &scriptedCableConn{
+		reads:       make(chan []byte, 2),
+		done:        make(chan struct{}),
+		subprotocol: actioncable.SubprotocolV1JSON,
+	}
 }
 
-func (c *scriptedCableConn) Subprotocol() string { return "actioncable-v1-json" }
+func (c *scriptedCableConn) Subprotocol() string { return c.subprotocol }
 
 func (c *scriptedCableConn) Read(ctx context.Context) ([]byte, error) {
 	select {
@@ -163,15 +169,26 @@ func (c *scriptedCableConn) Close() error {
 	return nil
 }
 
-func TestStoppedTuiCableErrorsIncludeTerminalServerDisconnects(t *testing.T) {
-	if !stoppedTuiCableError(actioncable.ErrClosed) {
-		t.Error("an explicitly closed client should be replaced")
+func TestSubscribeTuiCableRecognizesAnUnenumeratedTerminalFailure(t *testing.T) {
+	conn := newScriptedCableConn()
+	conn.subprotocol = "actioncable-v9-telepathy"
+	client := actioncable.New("ws://cable.example.test/cable", actioncable.WithTransport(scriptedCableTransport{conn: conn}))
+	if err := client.Connect(t.Context()); !errors.Is(err, actioncable.ErrUnsupportedSubprotocol) {
+		t.Fatalf("connect error = %v, want the unsupported protocol to stop the client", err)
 	}
-	if !stoppedTuiCableError(&actioncable.DisconnectError{Reason: actioncable.ReasonUnauthorized, Reconnect: false}) {
-		t.Error("a client the server stopped for good should be replaced")
+	tuiCable.client = client
+	t.Cleanup(func() { tuiCable.client = nil })
+
+	_, stopped, err := subscribeTuiCable(t.Context(), client, actioncable.Identifier{Channel: changesChannel})
+	if !stopped {
+		t.Fatal("a client stopped by an unenumerated terminal failure should be replaced")
 	}
-	if stoppedTuiCableError(&actioncable.DisconnectError{Reason: "server restart", Reconnect: true}) {
-		t.Error("a client already reconnecting should stay shared")
+	var known *apierr.Error
+	if !errors.As(err, &known) || known.Code != apierr.CodeNetwork {
+		t.Errorf("error = %T %v, want a retryable network error", err, err)
+	}
+	if tuiCable.client != nil {
+		t.Error("a stopped client should not remain cached")
 	}
 }
 
@@ -183,13 +200,22 @@ func TestServerStoppedActionCableClientIsReplaceable(t *testing.T) {
 		t.Fatalf("connect: %v", err)
 	}
 	defer client.Close()
+	tuiCable.client = client
+	t.Cleanup(func() { tuiCable.client = nil })
 
 	conn.reads <- []byte(`{"type":"disconnect","reason":"unauthorized","reconnect":false}`)
 	subscribing, stop := context.WithTimeout(t.Context(), time.Second)
 	defer stop()
-	_, err := client.Subscribe(subscribing, actioncable.Identifier{Channel: changesChannel})
-	if !stoppedTuiCableError(err) {
-		t.Fatalf("subscribe error = %T %v, want a terminal server disconnect that opens a new client", err, err)
+	_, stopped, err := subscribeTuiCable(subscribing, client, actioncable.Identifier{Channel: changesChannel})
+	if !stopped {
+		t.Fatalf("subscribe error = %T %v, want the terminal server disconnect to replace the client", err, err)
+	}
+	var known *apierr.Error
+	if !errors.As(err, &known) || known.Code != apierr.CodeAuth {
+		t.Errorf("error = %T %v, want an authentication error", err, err)
+	}
+	if tuiCable.client != nil {
+		t.Error("a client stopped by the server should not remain cached")
 	}
 }
 

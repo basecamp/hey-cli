@@ -251,33 +251,44 @@ func ring[T any](notifications chan<- T, notification T) {
 }
 
 // tuiSubscribe subscribes over the connection the TUI's watches share, dialling a new one
-// when the one on hand has stopped itself. A client the server hung up on for good answers
-// every Subscribe with ErrClosed and never dials again on its own, so a Screener stream
-// reopened after that would find a dead connection and stay dead. Each dial carries
-// current credentials, which is what makes redialling worth doing.
+// when the one on hand has stopped itself. A stopped client preserves its terminal failure
+// and never dials again on its own, so a reopened stream replaces it with a connection that
+// carries current credentials.
 func tuiSubscribe(ctx, connectionCtx context.Context, identifier actioncable.Identifier, options ...actioncable.SubscriptionOption) (*actioncable.Subscription, error) {
 	client, err := tuiCableClient(connectionCtx)
 	if err != nil {
 		return nil, err
 	}
 
-	subscription, err := client.Subscribe(ctx, identifier, options...)
-	if stoppedTuiCableError(err) {
-		forgetTuiCable(client)
-		if client, err = tuiCableClient(connectionCtx); err != nil {
-			return nil, err
-		}
-		subscription, err = client.Subscribe(ctx, identifier, options...)
+	subscription, stopped, err := subscribeTuiCable(ctx, client, identifier, options...)
+	if !stopped {
+		return subscription, err
 	}
+
+	client, err = tuiCableClient(connectionCtx)
+	if err != nil {
+		return nil, err
+	}
+	subscription, _, err = subscribeTuiCable(ctx, client, identifier, options...)
 	return subscription, err
 }
 
-func stoppedTuiCableError(err error) bool {
-	if errors.Is(err, actioncable.ErrClosed) {
-		return true
+// subscribeTuiCable returns stopped when the shared client needs replacing. Every shared
+// client has connected before it is cached, so Connect reports ErrAlreadyConnected while
+// it is live or reconnecting and preserves the terminal failure after it stops.
+func subscribeTuiCable(ctx context.Context, client *actioncable.Client, identifier actioncable.Identifier, options ...actioncable.SubscriptionOption) (*actioncable.Subscription, bool, error) {
+	subscription, err := client.Subscribe(ctx, identifier, options...)
+	if err == nil {
+		return subscription, false, nil
 	}
-	var disconnected *actioncable.DisconnectError
-	return errors.As(err, &disconnected) && !disconnected.Reconnect
+
+	stoppedBecause := client.Connect(ctx)
+	if errors.Is(stoppedBecause, actioncable.ErrAlreadyConnected) {
+		return nil, false, err
+	}
+
+	forgetTuiCable(client)
+	return nil, true, watchDialError(stoppedBecause)
 }
 
 // tuiCable is the one connection the TUI's watches share — two subscriptions over one

@@ -632,10 +632,11 @@ mail list — and held while a decision is in flight or the clear-everything que
 On the history tab nothing is read; the pending pane is just marked unloaded, which is
 what `switchTab` already looks at. Both watches share one websocket
 (`tuiCableClient` in `internal/cmd/tui_watch.go`): two subscriptions, one authorization.
-A client that stopped itself never dials again: depending on how it stopped, `Subscribe`
-answers `ErrClosed` or preserves the server's non-reconnecting `DisconnectError`.
-`tuiSubscribe` recognizes both, drops that client and dials a fresh one rather than handing
-a reopened watch a dead connection. Mail doorbells are coalesced when their bounded queue
+A client that stopped itself preserves its terminal failure and never dials again.
+`tuiSubscribe` detects that state after any failed subscription, drops the stopped client,
+and dials a fresh one; a replacement that also stops is dropped and its failure is
+classified as authentication or network so the TUI can respond consistently. Mail
+doorbells are coalesced when their bounded queue
 is full, while a connection transition drains those stale doorbells and takes priority;
 the reconnect catch-up reads the current state once.
 
