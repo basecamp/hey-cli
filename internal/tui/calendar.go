@@ -126,6 +126,7 @@ type calendarView struct {
 	habitPicker         *habitPicker
 	habitForm           *habitForm
 	todoPicker          *todoPicker
+	calendarPicker      *calendarPicker
 
 	requests requestLane[calendarRequestKind]
 }
@@ -257,6 +258,9 @@ func (v *calendarView) View() string {
 	if v.todoPicker != nil {
 		view = v.todoPicker.draw(view, v.vc.width, v.vc.height)
 	}
+	if v.calendarPicker != nil {
+		view = v.calendarPicker.draw(view, v.vc.width, v.vc.height)
+	}
 	if v.habitForm != nil {
 		frame := modalFrame(v.habitForm.title(), v.habitForm.view(), v.vc.width)
 		view = overlayModal(view, frame, v.vc.width, v.vc.height)
@@ -300,6 +304,9 @@ func (v *calendarView) HelpBindings() []helpBinding {
 	if v.todoPicker != nil {
 		return v.todoPicker.helpBindings()
 	}
+	if v.calendarPicker != nil {
+		return v.calendarPicker.helpBindings()
+	}
 	// The day says which keys move it on the line that names it. The week and the year
 	// have no such line, so the help bar carries it for them.
 	var bindings []helpBinding
@@ -310,7 +317,7 @@ func (v *calendarView) HelpBindings() []helpBinding {
 		}
 	}
 	bindings = append(bindings,
-		helpBinding{"v", v.viewMode.next().String() + " view"},
+		helpBinding{"1-3", "day, week, year"},
 		helpBinding{"c", "time categories"})
 	if v.showsHabits() {
 		bindings = append(bindings, helpBinding{"b", "habits"})
@@ -324,29 +331,43 @@ func (v *calendarView) showsHabits() bool {
 	return len(v.manageableHabits()) > 0 || v.viewingPersonalCalendar()
 }
 
+// SubnavItems is the span the calendar is read over — Day, Week, Year. The rule above
+// it names the calendar being read and the key that changes it, since that is a menu
+// now rather than a row.
 func (v *calendarView) SubnavItems() ([]navItem, int, string, bool) {
 	label := "Calendar"
-	if v.calIndex >= 0 && v.calIndex < len(v.calendars) {
-		label = v.calendars[v.calIndex].Name
+	if name := v.calendarName(); name != "" {
+		label = name
 	}
-	label += " · " + v.viewMode.String()
-	return calendarNavItems(v.calendars), v.calIndex, label, true
+	if len(v.calendars) > 1 {
+		label += " · C to switch"
+	}
+	return calendarNavItems(), int(v.viewMode), label, true
+}
+
+func (v *calendarView) calendarName() string {
+	if v.calIndex >= 0 && v.calIndex < len(v.calendars) {
+		return v.calendars[v.calIndex].Name
+	}
+	return ""
 }
 
 func (v *calendarView) SubnavLeft() tea.Cmd {
-	if v.calIndex > 0 {
-		v.calIndex--
-		return v.requestRecordings(v.calendars[v.calIndex].ID)
-	}
-	return nil
+	return v.setViewMode(v.viewMode - 1)
 }
 
 func (v *calendarView) SubnavRight() tea.Cmd {
-	if v.calIndex < len(v.calendars)-1 {
-		v.calIndex++
-		return v.requestRecordings(v.calendars[v.calIndex].ID)
+	return v.setViewMode(v.viewMode + 1)
+}
+
+// setViewMode reads the range the new span covers, and does nothing at either end: the
+// row stops rather than wrapping, as the box tabs do.
+func (v *calendarView) setViewMode(mode calendarViewMode) tea.Cmd {
+	if mode < viewDay || mode > viewYear || mode == v.viewMode {
+		return nil
 	}
-	return nil
+	v.viewMode = mode
+	return v.reread()
 }
 
 func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
@@ -376,6 +397,10 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		return v.handleTodoPickerKey(msg)
 	}
 
+	if v.calendarPicker != nil {
+		return v.handleCalendarPickerKey(msg)
+	}
+
 	switch msg.String() {
 	// b for habits, as in HEY's own calendar.
 	case "b":
@@ -386,12 +411,22 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		v.todoPicker = newTodoPicker(v.todos)
 		v.todoPicker.resize(v.vc.width)
 		return nil
+	case "C":
+		if len(v.calendars) > 1 {
+			v.calendarPicker = newCalendarPicker(v.calendars, v.calIndex)
+		}
+		return nil
 	case "c":
 		v.timeTrackCategories = newTimeTrackCategoryManager()
 		return v.requestTimeTrackCategories()
-	case "v":
-		v.viewMode = v.viewMode.next()
-		return v.reread()
+	// The span is picked by number, as a box is in the mail list, and the row above the
+	// grid shows which one is on.
+	case "1":
+		return v.setViewMode(viewDay)
+	case "2":
+		return v.setViewMode(viewWeek)
+	case "3":
+		return v.setViewMode(viewYear)
 	case "left", "p":
 		return v.step(-1)
 	case "right", "n":
@@ -408,6 +443,29 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 
 // handleHabitPickerKey gives the open picker every key: managing a habit is what the
 // modal is for, so a is a new habit here rather than whatever a means outside it.
+// handleCalendarPickerKey gives the open picker every key. Choosing the calendar that is
+// already open just closes it, rather than reading the same range again.
+func (v *calendarView) handleCalendarPickerKey(msg tea.KeyPressMsg) tea.Cmd {
+	picker := v.calendarPicker
+
+	switch msg.String() {
+	case "esc", "q":
+		v.calendarPicker = nil
+		return nil
+	case "enter":
+		index := picker.selected()
+		v.calendarPicker = nil
+		if index < 0 || index == v.calIndex {
+			return nil
+		}
+		v.calIndex = index
+		return v.reread()
+	}
+
+	picker.moveCursor(msg)
+	return nil
+}
+
 // handleTodoPickerKey gives the open picker every key. While it is naming a new to-do
 // every key is the input's, so a is a letter there rather than another to-do.
 func (v *calendarView) handleTodoPickerKey(msg tea.KeyPressMsg) tea.Cmd {
@@ -586,7 +644,8 @@ func (v *calendarView) Loading() bool {
 	return v.requests.loading && !v.CapturingInput() && !v.drawn
 }
 func (v *calendarView) CapturingInput() bool {
-	return v.timeTrackCategories != nil || v.habitForm != nil || v.habitPicker != nil || v.todoPicker != nil
+	return v.timeTrackCategories != nil || v.habitForm != nil ||
+		v.habitPicker != nil || v.todoPicker != nil || v.calendarPicker != nil
 }
 
 func (v *calendarView) AccountSwitchBlocked() bool {

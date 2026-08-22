@@ -139,13 +139,15 @@ func boxForShortcut(key string, boxes []mail.Source) int {
 	return -1
 }
 
-// calendarNavItems builds nav items for the calendar row.
-func calendarNavItems(calendars []Calendar) []navItem {
-	items := make([]navItem, len(calendars))
-	for i, c := range calendars {
-		items[i] = navItem{label: c.Name}
+// calendarNavItems builds nav items for the calendar row: the spans a calendar can be
+// read over. Which calendar is being read is a menu rather than a row — there can be
+// more of those than fit, and they change, while these three do not.
+func calendarNavItems() []navItem {
+	return []navItem{
+		{label: viewDay.String()},
+		{label: viewWeek.String()},
+		{label: viewYear.String()},
 	}
-	return items
 }
 
 // --- Rendering ---

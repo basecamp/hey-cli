@@ -127,60 +127,68 @@ func TestCalendarViewIgnoresUnrelatedMessages(t *testing.T) {
 
 // --- View mode cycling ---
 
-func TestCalendarViewModeCycle(t *testing.T) {
+// The span is picked by number, as a box is in the mail list.
+func TestCalendarViewModeNumberKeys(t *testing.T) {
 	v := calendarWithRecordings()
 
 	if v.viewMode != viewDay {
 		t.Fatalf("initial mode = %v, want Day", v.viewMode)
 	}
-
-	v.HandleContentKey(keyPress("v"))
-	if v.viewMode != viewWeek {
-		t.Errorf("after first v: mode = %v, want Week", v.viewMode)
+	for _, tt := range []struct {
+		key  string
+		want calendarViewMode
+	}{{"2", viewWeek}, {"3", viewYear}, {"1", viewDay}} {
+		if cmd := v.HandleContentKey(keyPress(tt.key)); cmd == nil {
+			t.Errorf("%s did not read the span it switched to", tt.key)
+		}
+		if v.viewMode != tt.want {
+			t.Errorf("after %s: mode = %v, want %v", tt.key, v.viewMode, tt.want)
+		}
 	}
 
-	v.HandleContentKey(keyPress("v"))
-	if v.viewMode != viewYear {
-		t.Errorf("after second v: mode = %v, want Year", v.viewMode)
-	}
-
-	v.HandleContentKey(keyPress("v"))
-	if v.viewMode != viewDay {
-		t.Errorf("after third v: mode = %v, want Day (wrap around)", v.viewMode)
+	// The span already on screen is not read again.
+	if cmd := v.HandleContentKey(keyPress("1")); cmd != nil {
+		t.Error("1 read the day again while the day was already showing")
 	}
 }
 
 // --- Subnav ---
 
+// The row above the grid is the span, and the rule above it names the calendar being
+// read and the key that changes it.
 func TestCalendarViewSubnavItems(t *testing.T) {
 	v := calendarWithRecordings()
 	items, selected, label, centered := v.SubnavItems()
 
-	if len(items) != 2 {
-		t.Errorf("expected 2 subnav items, got %d", len(items))
+	if len(items) != 3 || items[0].label != "Day" || items[2].label != "Year" {
+		t.Errorf("subnav items = %+v, want Day, Week and Year", items)
 	}
-	if selected != 0 {
-		t.Errorf("selected = %d, want 0", selected)
+	if selected != int(viewDay) {
+		t.Errorf("selected = %d, want the day", selected)
 	}
-	if label != "Work · Day" {
-		t.Errorf("label = %q, want \"Work · Day\"", label)
+	if label != "Work · C to switch" {
+		t.Errorf("label = %q", label)
 	}
 	if !centered {
 		t.Error("calendar subnav should be centered")
 	}
+
+	// One calendar is nothing to switch between.
+	v.calendars = v.calendars[:1]
+	if _, _, label, _ = v.SubnavItems(); label != "Work" {
+		t.Errorf("label with one calendar = %q", label)
+	}
 }
 
-func TestCalendarViewSubnavLeftRight(t *testing.T) {
+func TestCalendarViewSubnavLeftRightMovesTheSpan(t *testing.T) {
 	v := calendarWithRecordings()
 
-	v.SubnavLeft()
-	if v.calIndex != 0 {
-		t.Errorf("SubnavLeft at 0: calIndex = %d, want 0", v.calIndex)
+	if cmd := v.SubnavLeft(); cmd != nil || v.viewMode != viewDay {
+		t.Errorf("SubnavLeft on the day = cmd:%v mode:%v, want the row to stop", cmd != nil, v.viewMode)
 	}
 
-	v.SubnavRight()
-	if v.calIndex != 1 {
-		t.Errorf("after SubnavRight: calIndex = %d, want 1", v.calIndex)
+	if cmd := v.SubnavRight(); cmd == nil || v.viewMode != viewWeek {
+		t.Errorf("SubnavRight = cmd:%v mode:%v, want the week read", cmd != nil, v.viewMode)
 	}
 	if !v.requests.loading {
 		t.Error("SubnavRight should start a read")
@@ -188,8 +196,54 @@ func TestCalendarViewSubnavLeftRight(t *testing.T) {
 
 	v.requests.finish(v.requests.id)
 	v.SubnavRight()
+	if v.viewMode != viewYear {
+		t.Errorf("mode = %v, want the year", v.viewMode)
+	}
+	if cmd := v.SubnavRight(); cmd != nil || v.viewMode != viewYear {
+		t.Errorf("SubnavRight on the year = cmd:%v mode:%v, want the row to stop", cmd != nil, v.viewMode)
+	}
+}
+
+func TestCalendarPickerSwitchesTheCalendarItReads(t *testing.T) {
+	v := calendarWithRecordings()
+	v.vc.width, v.vc.height = 80, 20
+	v.requests.finish(v.requests.id)
+
+	if cmd := v.HandleContentKey(keyPress("C")); cmd != nil || v.calendarPicker == nil {
+		t.Fatal("C did not open the calendars modal")
+	}
+	if !v.CapturingInput() {
+		t.Error("the calendars modal does not hold the keys")
+	}
+	view := stripANSI(v.View())
+	if !strings.Contains(view, "Calendars") || !strings.Contains(view, "Personal") {
+		t.Errorf("the modal does not list the calendars: %q", view)
+	}
+
+	v.HandleContentKey(keyPress("down"))
+	cmd := v.HandleContentKey(keyPress("enter"))
+	if cmd == nil || v.calendarPicker != nil {
+		t.Fatal("enter should read the chosen calendar and close the modal")
+	}
 	if v.calIndex != 1 {
-		t.Errorf("SubnavRight at end: calIndex = %d, want 1", v.calIndex)
+		t.Errorf("calIndex = %d, want the second calendar", v.calIndex)
+	}
+
+	// Choosing the calendar already open is not a read.
+	v.requests.finish(v.requests.id)
+	v.HandleContentKey(keyPress("C"))
+	if cmd := v.HandleContentKey(keyPress("enter")); cmd != nil {
+		t.Error("choosing the open calendar read it again")
+	}
+}
+
+func TestCalendarPickerStaysShutWithOneCalendar(t *testing.T) {
+	v := calendarWithRecordings()
+	v.calendars = v.calendars[:1]
+
+	v.HandleContentKey(keyPress("C"))
+	if v.calendarPicker != nil {
+		t.Error("C opened a modal with nothing to choose between")
 	}
 }
 
@@ -637,14 +691,14 @@ func TestCalendarPinsTodosBelowTheGrid(t *testing.T) {
 func TestCalendarViewHelpBindingsShowsViewToggle(t *testing.T) {
 	v := calendarWithRecordings()
 	v.calIndex = 1
-	// The day view offers the view, the categories and the habits modal; creating,
+	// The day view offers the span, the categories and the habits modal; creating,
 	// editing and deleting a habit are the modal's own keys, and the keys that move the
 	// day are on the day's own line rather than in here.
 	bindings := v.HelpBindings()
 	if len(bindings) != 3 {
 		t.Fatalf("expected 3 bindings, got %d: %+v", len(bindings), bindings)
 	}
-	for _, want := range []string{"v", "c", "b"} {
+	for _, want := range []string{"1-3", "c", "b"} {
 		found := false
 		for _, binding := range bindings {
 			found = found || binding.key == want
@@ -656,7 +710,7 @@ func TestCalendarViewHelpBindingsShowsViewToggle(t *testing.T) {
 
 	// The week and the year have no date line, so the help bar carries their steps.
 	v.viewMode = viewWeek
-	for _, want := range []string{"←→", "v", "c"} {
+	for _, want := range []string{"←→", "1-3", "c"} {
 		found := false
 		for _, binding := range v.HelpBindings() {
 			found = found || binding.key == want

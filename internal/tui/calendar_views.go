@@ -33,10 +33,6 @@ func (m calendarViewMode) String() string {
 	return "Day"
 }
 
-func (m calendarViewMode) next() calendarViewMode {
-	return (m + 1) % 3
-}
-
 // unit is what one step of ← or → moves in this view, as the help bar says it.
 func (m calendarViewMode) unit() string {
 	switch m {
