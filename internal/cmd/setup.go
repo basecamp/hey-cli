@@ -511,8 +511,8 @@ func showWizardSuccess(w io.Writer, result wizardResult, outcome agentSetupOutco
 	fmt.Fprintln(w)
 	examples := []struct{ cmd, desc string }{
 		{"hey tui", "Open the app"},
-		{"hey boxes", "List your boxes"},
-		{"hey box imbox", "Read your Imbox"},
+		{"hey box list", "List your boxes"},
+		{"hey box view imbox", "Read your Imbox"},
 		{`hey search "quarterly planning"`, "Search your mail"},
 	}
 	width := 0
@@ -571,7 +571,7 @@ func wizardBreadcrumbs(result wizardResult) []output.Breadcrumb {
 	}
 	crumbs := []output.Breadcrumb{
 		{Action: "open", Command: "hey tui", Description: "Open the app"},
-		{Action: "boxes", Command: "hey boxes", Description: "List your boxes"},
+		{Action: "boxes", Command: "hey box list", Description: "List your boxes"},
 	}
 	if result.Status == "incomplete" {
 		crumbs = append(crumbs, output.Breadcrumb{Action: "doctor", Command: "hey doctor", Description: "Check CLI health"})

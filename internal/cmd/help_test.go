@@ -97,13 +97,12 @@ USAGE
 
 CORE COMMANDS
   tui        Launch the interactive terminal UI
-  box        List email threads in a box
+  box        List HEY boxes and their email threads
   threads    Read a thread
   reply      Reply to a thread
   compose    Write and send a new email
   search     Search email threads and messages
   contacts   Manage contacts
-  boxes      List your HEY boxes
   calendars  List calendars
   todo       Create and manage to-dos
   journal    Read and write journal entries
@@ -121,18 +120,13 @@ WRITE & SHARE
   unshare     Turn off an email thread's sharing link
 
 SAVED CONTENT
-  clips     List the newest page of passages clipped from email
-  clip      Save and manage passages from email
-  snippets  List reusable email snippets
-  snippet   Create and manage reusable email snippets
+  clip     List and manage passages saved from email
+  snippet  List and manage reusable email snippets
 
 ORGANIZE
-  labels         List your email labels
-  label          View and manage an email label
-  collections    List your email collections
-  collection     View and manage an email collection
-  workflows      List your email workflows
-  workflow       View and manage an email workflow
+  label          List and manage email labels
+  collection     List and manage email collections
+  workflow       List and manage email workflows
   seen           Mark email threads as seen
   unseen         Mark email threads as unseen
   move           Move email threads to another box
@@ -179,7 +173,7 @@ FLAGS
 
 EXAMPLES
   $ hey tui
-  $ hey box imbox
+  $ hey box view imbox
   $ hey compose --to alice@example.com --subject "Lunch plans" -m "Are you free Friday?"
   $ hey todo list
   $ hey threads 123 --json

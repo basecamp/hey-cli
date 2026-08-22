@@ -17,7 +17,7 @@ var curatedCategories = []struct {
 }{
 	{
 		heading: "CORE COMMANDS",
-		names:   []string{"tui", "box", "threads", "reply", "compose", "search", "contacts", "boxes", "calendars", "todo", "journal"},
+		names:   []string{"tui", "box", "threads", "reply", "compose", "search", "contacts", "calendars", "todo", "journal"},
 	},
 	{
 		heading: "MAIL",
@@ -29,11 +29,11 @@ var curatedCategories = []struct {
 	},
 	{
 		heading: "SAVED CONTENT",
-		names:   []string{"clips", "clip", "snippets", "snippet"},
+		names:   []string{"clip", "snippet"},
 	},
 	{
 		heading: "ORGANIZE",
-		names:   []string{"labels", "label", "collections", "collection", "workflows", "workflow", "seen", "unseen", "move", "trash", "spam", "ignore", "stop-ignoring"},
+		names:   []string{"label", "collection", "workflow", "seen", "unseen", "move", "trash", "spam", "ignore", "stop-ignoring"},
 	},
 	{
 		heading: "CALENDAR & TASKS",
@@ -179,7 +179,7 @@ func renderRootHelp(w io.Writer, cmd *cobra.Command) {
 	b.WriteString(bold.format("EXAMPLES") + "\n")
 	examples := []string{
 		"$ hey tui",
-		"$ hey box imbox",
+		"$ hey box view imbox",
 		`$ hey compose --to alice@example.com --subject "Lunch plans" -m "Are you free Friday?"`,
 		"$ hey todo list",
 		"$ hey threads 123 --json",

@@ -81,7 +81,7 @@ func newBulkReplyPreviewCommand() *bulkReplyPreviewCommand {
 		Use:   "preview <posting-id>...",
 		Short: "Preview threads and recipients without sending",
 		Annotations: map[string]string{
-			"agent_notes": "Read-only. Posting IDs come from `hey box` or `hey search`. The result contains the latest replyable entry and exact To, CC, and BCC recipients for each thread.",
+			"agent_notes": "Read-only. Posting IDs come from `hey box view` or `hey search`. The result contains the latest replyable entry and exact To, CC, and BCC recipients for each thread.",
 		},
 		Example: `  hey bulk-reply preview 12345 67890
   hey bulk-reply preview 12345 67890 --json`,

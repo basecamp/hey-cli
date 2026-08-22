@@ -90,7 +90,7 @@ the current defaults, the layout goes too and the user is back to inheriting the
 face: the HEY logo in the bar (tinted when there is unseen mail), the panel with its
 account switcher, `New for you` / `Previously seen` tabs, the Screener count, mark-as-seen,
 and the setup flow that installs `hey-cli` from the AUR and signs you in. hey-cli is the
-engine, and the plugin composes its generic commands: `hey box imbox --json` for the Imbox,
+engine, and the plugin composes its generic commands: `hey box view imbox --json` for the Imbox,
 `hey watch` to know when to read it again, `hey screener list --count` for the Screener,
 `hey seen` for marking, `hey accounts list` and `hey auth status` for the rest. The
 division was settled when both sides turned out to have built a bar indicator without
@@ -100,7 +100,7 @@ and the answer was: **the CLI is the engine, the plugin is the face.**
 The plugin is an Omarchy `service` plugin as well as a bar widget. The shell instantiates
 the service once, so one `hey watch` runs per shell however many monitors carry the bar,
 and every bar widget reads the shared service. A watch event is a wake-up, not a delta —
-any line on the watch's stdout re-reads `hey box imbox`, debounced so a burst of changes
+any line on the watch's stdout re-reads `hey box view imbox`, debounced so a burst of changes
 costs one read (plus one follow-up when changes land while a read is in flight, since that
 read may predate them). `hey watch` says `ready` once every box is caught up and its
 subscription is live, and again after every reconnect's catch-up; the plugin's read on that
@@ -201,7 +201,7 @@ new --run-async 'notify-send -a HEY "New mail in HEY"'` is the one-liner.
   is the cautionary precedent.
 - **Complement the shipped web app, never replace it.** Distinct desktop name, printed
   keybinding, the mailto handler left alone.
-- **No HTML scraping to feed widgets.** The plugin reads with `hey box imbox`, the same
+- **No HTML scraping to feed widgets.** The plugin reads with `hey box view imbox`, the same
   typed SDK read as everyone else.
 - **CLI is the engine, plugin is the face.** The plugin owns rendering and settings — the
   toast included; the CLI owns what needs HEY's semantics — the changes cursor and catching

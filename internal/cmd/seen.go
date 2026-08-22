@@ -21,7 +21,7 @@ func newSeenCommand() *seenCommand {
 		Example: `  hey seen 12345
   hey seen 12345 67890`,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts one or more box item IDs from hey box output. Marks each email thread as seen/read.",
+			"agent_notes": "Accepts one or more box item IDs from hey box view output. Marks each email thread as seen/read.",
 		},
 		RunE: seenCommand.run,
 		Args: usageMinOneArg(),
@@ -61,7 +61,7 @@ func newUnseenCommand() *unseenCommand {
 		Example: `  hey unseen 12345
   hey unseen 12345 67890`,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts one or more box item IDs from hey box output. Marks each email thread as unseen/unread.",
+			"agent_notes": "Accepts one or more box item IDs from hey box view output. Marks each email thread as unseen/unread.",
 		},
 		RunE: unseenCommand.run,
 		Args: usageMinOneArg(),

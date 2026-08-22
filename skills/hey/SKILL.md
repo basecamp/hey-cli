@@ -10,12 +10,12 @@ triggers:
   - /hey
   # Email actions
   - hey accounts
-  - hey boxes
   - hey box
-  - hey labels
   - hey label
-  - hey collections
   - hey collection
+  - hey workflow
+  - hey clip
+  - hey snippet
   - hey search
   - hey contacts
   - hey threads
@@ -122,9 +122,9 @@ CLI for HEY: mailboxes, labels, collections, email threads, contacts, replies, c
 `--jq` filters the full JSON success envelope, so result data is under `.data`. String results print as plain text; objects and arrays print as formatted JSON. Use `--quiet --jq` when the expression should run against result data directly. Errors retain their complete structured envelope. Commands with dedicated raw output (`auth token`, `completion`, `skill`, `tui`, and `--version`) reject `--jq`.
 
 ```bash
-hey boxes --jq '.data[] | {id, name}'
+hey box list --jq '.data[] | {id, name}'
 hey search "quarterly planning" --jq '.data[].id'
-hey boxes --quiet --jq '.[].name'
+hey box list --quiet --jq '.[].name'
 ```
 
 An empty result is an empty array rather than `null`, so `.data[]` is safe to run against a
@@ -132,11 +132,12 @@ listing that found nothing.
 
 For the two commonest shapes there is no need for an expression at all: `--ids-only` prints
 one ID per line and `--count` prints a bare number, both on stdout with any pagination
-notice on stderr. Both need list data, so they work on `hey boxes`, `hey box`,
-`hey labels`, `hey label`, `hey collections`, `hey collection`, `hey drafts`, `hey search`,
+notice on stderr. Both need list data, so they work on `hey box list`, `hey box view`,
+`hey label list`, `hey label view`, `hey collection list`, `hey collection view`, `hey workflow list`,
+`hey workflow view`, `hey clip list`, `hey snippet list`, `hey drafts`, `hey search`,
 `hey contacts list`, `hey screener list`, `hey screener history`, `hey calendars`,
 `hey recordings`, `hey todo list`, `hey timetrack list`, `hey journal list` and
-`hey attachments`. On `hey box` they count and list its postings, not the box itself.
+`hey attachments`. On `hey box view` they count and list its postings, not the box itself.
 
 ## Quick Reference
 
@@ -144,22 +145,26 @@ notice on stderr. Both need list data, so they work on `hey boxes`, `hey box`,
 |------|---------|
 | List linked mail accounts | `hey accounts list --json` |
 | Set default mail account | `hey accounts use <id\|all>` |
-| Run once for one account | `hey --account <id> boxes --json` |
+| Run once for one account | `hey --account <id> box list --json` |
 | Review trusted local settings | `hey config trusted-locals --json` |
 | Trust this repository's settings | `hey config trust-local` (requires explicit user approval) |
-| List mailboxes | `hey boxes --json` |
-| List emails in a box | `hey box imbox --json` |
-| List labels | `hey labels --json` |
-| List emails with a label | `hey label <label_id> --all --json` |
+| List mailboxes | `hey box list --json` |
+| List emails in a box | `hey box view imbox --json` |
+| List labels | `hey label list --json` |
+| List emails with a label | `hey label view <label_id> --all --json` |
 | Add a label to a thread | `hey label add <id> --to <label_id>` |
 | Create and add a label | `hey label create "Travel receipts" <id>` |
 | Remove labels | `hey label remove <id> --from <label_id\|all>` |
-| List collections | `hey collections --json` |
-| List collection threads | `hey collection <collection_id> --all --json` |
+| List collections | `hey collection list --json` |
+| List collection threads | `hey collection view <collection_id> --all --json` |
 | Create a collection | `hey collection create "Kitchen remodel"` |
 | Update a collection | `hey collection update <collection_id> --name "Kitchen renovation"` |
 | Add a thread to a collection | `hey collection add <topic_id> --to <collection_id>` |
 | Remove a thread from a collection | `hey collection remove <topic_id> --from <collection_id>` |
+| List workflows | `hey workflow list --json` |
+| View workflow stages | `hey workflow view <workflow_id> --json` |
+| List clips | `hey clip list --json` |
+| List snippets | `hey snippet list --json` |
 | Search email | `hey search "quarterly planning" --json` |
 | List search filters | `hey search filters --json` |
 | List contacts | `hey contacts list --json` |
@@ -231,11 +236,11 @@ notice on stderr. Both need list data, so they work on `hey boxes`, `hey box`,
 
 ```
 Want to read email?
-├── Which mailbox? → hey boxes --json
-├── List emails in box? → hey box <name|id> --json
-├── List labels or labeled email? → hey labels --json / hey label <label_id> --json
+├── Which mailbox? → hey box list --json
+├── List emails in box? → hey box view <name|id> --json
+├── List labels or labeled email? → hey label list --json / hey label view <label_id> --json
 ├── Add, create, or remove a label? → hey label add|create|remove
-├── List collections or collection threads? → hey collections --json / hey collection <collection_id> --json
+├── List collections or collection threads? → hey collection list --json / hey collection view <collection_id> --json
 ├── Create, update, add to, or remove from a collection? → hey collection create|update|add|remove
 ├── Search threads and messages? → hey search <query> --json
 ├── Need available refinements? → hey search filters --json
@@ -292,15 +297,15 @@ Want to manage todos?
 ### Email - Boxes
 
 ```bash
-hey boxes --json                              # List all mailboxes
-hey box imbox --json                          # List emails in Imbox (by name)
-hey box 123 --json                            # List emails in box (by ID)
-hey box imbox --page next-cursor --json       # Continue from an earlier listing
+hey box list --json                          # List all mailboxes
+hey box view imbox --json                    # List emails in Imbox (by name)
+hey box view 123 --json                      # List emails in box (by ID)
+hey box view imbox --page next-cursor --json # Continue from an earlier listing
 ```
 
 Box names: `imbox`, `feedbox`, `trailbox`, `asidebox`, `laterbox`, `bubblebox`
 
-**Response format:** `hey box --json` returns the box itself — `id`, `kind`, `name`, `app_url`, `next_history_url`, `next_page` — with a `postings` array of the email threads in it. Each posting has: `id` (box item ID), `topic_id` (thread ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`, `visible_entry_count`. Use `id` for `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring`, and `topic_id` for `hey threads`, `hey reply`, `hey forward`, `hey share` and `hey attachments`. A box item `id` passed to `hey threads` answers `not_found`, and so does a `topic_id` passed to `hey move`.
+**Response format:** `hey box view --json` returns the box itself — `id`, `kind`, `name`, `app_url`, `next_history_url`, `next_page` — with a `postings` array of the email threads in it. Each posting has: `id` (box item ID), `topic_id` (thread ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`, `visible_entry_count`. Use `id` for `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring`, and `topic_id` for `hey threads`, `hey reply`, `hey forward`, `hey share` and `hey attachments`. A box item `id` passed to `hey threads` answers `not_found`, and so does a `topic_id` passed to `hey move`.
 
 `next_page` is the cursor `--page` takes, and it is the cursor inside `next_history_url` — `--page` accepts either. `--all` reads to the end instead.
 
@@ -309,28 +314,28 @@ Box names: `imbox`, `feedbox`, `trailbox`, `asidebox`, `laterbox`, `bubblebox`
 ### Email - Labels
 
 ```bash
-hey labels --json                              # List labels and stable IDs
-hey label 789 --all --json                     # List every thread with a label
+hey label list --json                         # List labels and stable IDs
+hey label view 789 --all --json                # List every thread with a label
 hey label add 12345 --to 789                   # Add an existing label
 hey label create "Travel receipts" 12345       # Create and add a label
 hey label remove 12345 --from 789              # Remove one label
 hey label remove 12345 --from all              # Remove every label
 ```
 
-Label mutations take box item IDs from `hey box`, `hey label`, or active `hey search` results. Label IDs come from `hey labels`. `hey label` returns `next_page` and `total_count`; pass `--page <next_page>` to continue or `--all` to fetch every page. HEY creates a label while adding it to at least one thread, so `label create` requires one or more thread item IDs.
+Label mutations take box item IDs from `hey box view`, `hey label view`, or active `hey search` results. Label IDs come from `hey label list`. `hey label view` returns `next_page` and `total_count`; pass `--page <next_page>` to continue or `--all` to fetch every page. HEY creates a label while adding it to at least one thread, so `label create` requires one or more thread item IDs.
 
 ### Email - Collections
 
 ```bash
-hey collections --json                                      # List collections and stable IDs
-hey collection 321 --all --json                             # List every thread in a collection
+hey collection list --json                                 # List collections and stable IDs
+hey collection view 321 --all --json                        # List every thread in a collection
 hey collection create "Kitchen remodel" --summary "Plans and decisions"
 hey collection update 321 --name "Kitchen renovation"
 hey collection add 987 --to 321                             # Add a topic ID
 hey collection remove 987 --from 321                        # Remove a topic ID
 ```
 
-Collection IDs come from `hey collections`. `hey collection` returns posting `id`, thread `topic_id`, `next_page`, and `total_count`; pass `--page <next_page>` to continue or `--all` to fetch every page. Collection membership commands take `topic_id`. Creating a collection confirms the mutation, and listing collections provides its ID for later commands.
+Collection IDs come from `hey collection list`. `hey collection view` returns posting `id`, thread `topic_id`, `next_page`, and `total_count`; pass `--page <next_page>` to continue or `--all` to fetch every page. Collection membership commands take `topic_id`. Creating a collection confirms the mutation, and listing collections provides its ID for later commands.
 
 ### Email - Search
 
@@ -390,7 +395,7 @@ on an entry; use `hey reply`, which works the addressing out itself.
 
 **ID note:** Every email thread has two IDs: an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring` expect `id`. `hey threads`, `hey share`, `hey unshare`, `hey attachments`, `hey reply`, `hey forward`, `hey collection add`, and `hey collection remove` expect `topic_id`. Passing the wrong one answers `not_found`, not a redirect.
 
-`hey box --json`, `hey label --json`, `hey collection --json` and `hey search --json` all carry both.
+`hey box view --json`, `hey label view --json`, `hey collection view --json` and `hey search --json` all carry both.
 
 ### Email - Attachments
 
@@ -472,7 +477,7 @@ hey unseen 12345                              # Mark a thread as unseen
 hey unseen 12345 67890                        # Mark multiple threads as unseen
 ```
 
-Takes box item IDs (the `id` field from `hey box` output).
+Takes box item IDs (the `id` field from `hey box view` output).
 
 ### Email - Moving Threads
 
@@ -481,7 +486,7 @@ hey move 12345 --to imbox                     # Move one thread
 hey move 12345 67890 --to "paper trail"       # Move multiple threads
 ```
 
-Takes box item IDs (the `id` field from `hey box --json`). `--to` accepts a box name, kind, or ID. Supported destinations are Imbox, The Feed, Set Aside, Reply Later, and Paper Trail. Bubble Up requires a scheduled date and is not supported by this command.
+Takes box item IDs (the `id` field from `hey box view --json`). `--to` accepts a box name, kind, or ID. Supported destinations are Imbox, The Feed, Set Aside, Reply Later, and Paper Trail. Bubble Up requires a scheduled date and is not supported by this command.
 
 ### Email - Trash and Spam
 
@@ -492,7 +497,7 @@ hey spam 12345                                # Mark one thread as spam
 hey spam 12345 67890                          # Mark multiple threads as spam
 ```
 
-Takes box item IDs (the `id` field from `hey box --json`). Trashing a shared thread removes your access instead of deleting it for everyone. Marking a thread as spam moves it to Spam and trains HEY's filters.
+Takes box item IDs (the `id` field from `hey box view --json`). Trashing a shared thread removes your access instead of deleting it for everyone. Marking a thread as spam moves it to Spam and trains HEY's filters.
 
 ### Email - Ignoring Threads
 
@@ -503,7 +508,7 @@ hey stop-ignoring 12345                       # Stop ignoring one thread
 hey stop-ignoring 12345 67890                 # Stop ignoring multiple threads
 ```
 
-Takes box item IDs (the `id` field from `hey box --json`). Ignored threads remain in their box; new replies do not bring them back to your attention. `hey stop-ignoring` reverses the action.
+Takes box item IDs (the `id` field from `hey box view --json`). Ignored threads remain in their box; new replies do not bring them back to your attention. `hey stop-ignoring` reverses the action.
 
 ### Email - Watching for changes
 

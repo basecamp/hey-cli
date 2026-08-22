@@ -610,7 +610,7 @@ func (w *postingsWatch) readBox(ctx context.Context, box *watchedBox) error {
 	w.wasRead(box)
 
 	if changes.FullSyncRequired {
-		fmt.Fprintf(w.errOut, "notice: too much changed in %s to follow one change at a time — skipping ahead, read the box with `hey box %s`\n", box.name, box.kind)
+		fmt.Fprintf(w.errOut, "notice: too much changed in %s to follow one change at a time — skipping ahead, read the box with `hey box view %s`\n", box.name, box.kind)
 		skipped, err := w.skipAhead(ctx, box)
 		if err != nil {
 			return err

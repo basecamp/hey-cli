@@ -20,20 +20,32 @@ type clipsCommand struct {
 }
 
 func newClipsCommand() *clipsCommand {
-	clipsCommand := &clipsCommand{}
-	clipsCommand.cmd = &cobra.Command{
-		Use:   "clips",
+	command := newClipsListingCommand("clips", `  hey clips
+  hey clips --json
+  hey clips --ids-only`)
+	command.cmd.Annotations[compatibilityForAnnotation] = "clip list"
+	return command
+}
+
+func newClipListCommand() *clipsCommand {
+	return newClipsListingCommand("list", `  hey clip list
+  hey clip list --json
+  hey clip list --ids-only`)
+}
+
+func newClipsListingCommand(use, example string) *clipsCommand {
+	command := &clipsCommand{}
+	command.cmd = &cobra.Command{
+		Use:   use,
 		Short: "List the newest page of passages clipped from email",
 		Annotations: map[string]string{
 			"agent_notes": "Returns the newest page of clip IDs, content, source entry IDs, and source thread context. The SDK does not expose the cursor for older pages. Use an ID with hey clip delete.",
 		},
-		Example: `  hey clips
-  hey clips --json
-  hey clips --ids-only`,
-		RunE: clipsCommand.run,
-		Args: cobra.NoArgs,
+		Example: example,
+		RunE:    command.run,
+		Args:    cobra.NoArgs,
 	}
-	return clipsCommand
+	return command
 }
 
 func (c *clipsCommand) run(cmd *cobra.Command, _ []string) error {
@@ -138,11 +150,12 @@ func newClipCommand() *clipCommand {
 	clipCommand := &clipCommand{}
 	clipCommand.cmd = &cobra.Command{
 		Use:   "clip",
-		Short: "Save and manage passages from email",
+		Short: "List and manage passages saved from email",
 		Annotations: map[string]string{
-			"agent_notes": "Create a clip from text carried by an email entry, or delete a clip. HEY assigns a created clip to the source entry's account and resolves deletion by identity-owned clip ID across linked accounts; --account selects list presentation. The CLI verifies that the passage is source-backed by the entry's message content before saving it, with a 64 KiB passage limit and a 1 MiB source-validation limit. Find clip IDs with hey clips.",
+			"agent_notes": "List clips, create a clip from text carried by an email entry, or delete a clip. HEY assigns a created clip to the source entry's account and resolves deletion by identity-owned clip ID across linked accounts; --account selects list presentation. The CLI verifies that the passage is source-backed by the entry's message content before saving it, with a 64 KiB passage limit and a 1 MiB source-validation limit. Find clip IDs with hey clip list.",
 		},
 	}
+	clipCommand.cmd.AddCommand(newClipListCommand().cmd)
 	clipCommand.cmd.AddCommand(newClipCreateCommand().cmd)
 	clipCommand.cmd.AddCommand(newClipDeleteCommand().cmd)
 	return clipCommand
@@ -207,7 +220,7 @@ func (c *clipCreateCommand) run(cmd *cobra.Command, args []string) error {
 		return apierr.FromSDK(err)
 	}
 	return writeMutation(cmd, fmt.Sprintf("Clip from entry %d created", entryID), map[string]any{"entry_id": entryID},
-		output.WithBreadcrumbs(output.Breadcrumb{Action: "list", Command: "hey clips", Description: "Find the new clip ID"}),
+		output.WithBreadcrumbs(output.Breadcrumb{Action: "list", Command: "hey clip list", Description: "Find the new clip ID"}),
 	)
 }
 

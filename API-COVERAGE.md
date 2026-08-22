@@ -20,21 +20,21 @@ since `Topics().Get` already carries the entry list.
 
 | Endpoint | Method | Client | CLI Command | Status |
 |----------|--------|--------|-------------|--------|
-| `/boxes.json` | GET | SDK `Boxes().List` | `hey boxes` | covered |
-| `/boxes/{id}.json` | GET | SDK `Boxes().Get`, `Boxes().GetPage` | `hey box <id>`, TUI mail list growth | covered |
-| `/imbox.json` | GET | SDK `Boxes().GetImbox` | `hey box imbox` | covered |
-| `/feedbox.json` | GET | SDK `Boxes().GetFeedbox` | `hey box feedbox` | covered |
-| `/trailbox.json` | GET | SDK `Boxes().GetTrailbox` | `hey box trailbox` | covered |
-| `/asidebox.json` | GET | SDK `Boxes().GetAsidebox` | `hey box asidebox` | covered |
-| `/laterbox.json` | GET | SDK `Boxes().GetLaterbox` | `hey box laterbox` | covered |
-| `/bubblebox.json` | GET | SDK `Boxes().GetBubblebox` | `hey box bubblebox` | covered |
-| `/my/navigation.json` | GET | SDK `Identity().GetNavigation` | `hey labels`, Mail TUI navigation | covered |
-| `/folders/{id}.json` | GET | SDK `Folders().GetPage` | `hey label <id>`, Mail TUI labels | covered |
+| `/boxes.json` | GET | SDK `Boxes().List` | `hey box list` | covered |
+| `/boxes/{id}.json` | GET | SDK `Boxes().Get`, `Boxes().GetPage` | `hey box view <id>`, TUI mail list growth | covered |
+| `/imbox.json` | GET | SDK `Boxes().GetImbox` | `hey box view imbox` | covered |
+| `/feedbox.json` | GET | SDK `Boxes().GetFeedbox` | `hey box view feedbox` | covered |
+| `/trailbox.json` | GET | SDK `Boxes().GetTrailbox` | `hey box view trailbox` | covered |
+| `/asidebox.json` | GET | SDK `Boxes().GetAsidebox` | `hey box view asidebox` | covered |
+| `/laterbox.json` | GET | SDK `Boxes().GetLaterbox` | `hey box view laterbox` | covered |
+| `/bubblebox.json` | GET | SDK `Boxes().GetBubblebox` | `hey box view bubblebox` | covered |
+| `/my/navigation.json` | GET | SDK `Identity().GetNavigation` | `hey label list`, Mail TUI navigation | covered |
+| `/folders/{id}.json` | GET | SDK `Folders().GetPage` | `hey label view <id>`, Mail TUI labels | covered |
 | `/postings/filings.json` | POST | SDK `Postings().File` | `hey label add`, TUI `b/B` | covered |
 | `/postings/filings.json` | DELETE | SDK `Postings().Unfile` | `hey label remove`, TUI `b/B` | covered |
 | `/postings/folders.json` | POST | SDK `Postings().CreateFolder` | `hey label create`, TUI `b/B` | covered |
-| `/collections.json` | GET | SDK `Collections().List` | `hey collections`, Mail TUI navigation | covered |
-| `/collections/{id}.json` | GET | SDK `Collections().GetPage` | `hey collection <id>`, Mail TUI collections | covered |
+| `/collections.json` | GET | SDK `Collections().List` | `hey collection list`, Mail TUI navigation | covered |
+| `/collections/{id}.json` | GET | SDK `Collections().GetPage` | `hey collection view <id>`, Mail TUI collections | covered |
 | `/collections` | POST | SDK `Collections().Create` | `hey collection create` | covered |
 | `/collections/{id}.json` | PATCH | SDK `Collections().Update` | `hey collection update` | covered |
 | `/topics/{id}/collecting` | POST | SDK `Collections().AddTopic` | `hey collection add`, TUI `n/N` | covered |

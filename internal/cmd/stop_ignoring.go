@@ -21,7 +21,7 @@ func newStopIgnoringCommand() *stopIgnoringCommand {
 		Example: `  hey stop-ignoring 12345
   hey stop-ignoring 12345 67890`,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts one or more box item IDs from hey box output. Reverses hey ignore for each thread.",
+			"agent_notes": "Accepts one or more box item IDs from hey box view output. Reverses hey ignore for each thread.",
 		},
 		RunE: stopIgnoringCommand.run,
 		Args: usageMinOneArg(),

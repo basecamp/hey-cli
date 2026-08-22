@@ -18,20 +18,32 @@ type snippetsCommand struct {
 }
 
 func newSnippetsCommand() *snippetsCommand {
-	snippetsCommand := &snippetsCommand{}
-	snippetsCommand.cmd = &cobra.Command{
-		Use:   "snippets",
+	command := newSnippetsListingCommand("snippets", `  hey snippets
+  hey snippets --json
+  hey snippets --ids-only`)
+	command.cmd.Annotations[compatibilityForAnnotation] = "snippet list"
+	return command
+}
+
+func newSnippetListCommand() *snippetsCommand {
+	return newSnippetsListingCommand("list", `  hey snippet list
+  hey snippet list --json
+  hey snippet list --ids-only`)
+}
+
+func newSnippetsListingCommand(use, example string) *snippetsCommand {
+	command := &snippetsCommand{}
+	command.cmd = &cobra.Command{
+		Use:   use,
 		Short: "List reusable email snippets",
 		Annotations: map[string]string{
 			"agent_notes": "Returns snippet IDs, names, plain text, and rich-text HTML. Use an ID with hey snippet update or delete.",
 		},
-		Example: `  hey snippets
-  hey snippets --json
-  hey snippets --ids-only`,
-		RunE: snippetsCommand.run,
-		Args: cobra.NoArgs,
+		Example: example,
+		RunE:    command.run,
+		Args:    cobra.NoArgs,
 	}
-	return snippetsCommand
+	return command
 }
 
 func (c *snippetsCommand) run(cmd *cobra.Command, _ []string) error {
@@ -110,11 +122,12 @@ func newSnippetCommand() *snippetCommand {
 	snippetCommand := &snippetCommand{}
 	snippetCommand.cmd = &cobra.Command{
 		Use:   "snippet",
-		Short: "Create and manage reusable email snippets",
+		Short: "List and manage reusable email snippets",
 		Annotations: map[string]string{
-			"agent_notes": "Create, update, or delete snippets. Find snippet IDs with hey snippets.",
+			"agent_notes": "List, create, update, or delete snippets. Find snippet IDs with hey snippet list.",
 		},
 	}
+	snippetCommand.cmd.AddCommand(newSnippetListCommand().cmd)
 	snippetCommand.cmd.AddCommand(newSnippetCreateCommand().cmd)
 	snippetCommand.cmd.AddCommand(newSnippetUpdateCommand().cmd)
 	snippetCommand.cmd.AddCommand(newSnippetDeleteCommand().cmd)
@@ -158,7 +171,7 @@ func (c *snippetCreateCommand) run(cmd *cobra.Command, _ []string) error {
 		return apierr.FromSDK(err)
 	}
 	return writeMutation(cmd, fmt.Sprintf("Snippet %q created", name), map[string]any{"name": name},
-		output.WithBreadcrumbs(output.Breadcrumb{Action: "list", Command: "hey snippets", Description: "Find the new snippet ID"}),
+		output.WithBreadcrumbs(output.Breadcrumb{Action: "list", Command: "hey snippet list", Description: "Find the new snippet ID"}),
 	)
 }
 

@@ -46,27 +46,52 @@ var boxListing = postingsListing{
 }
 
 func newBoxCommand() *boxCommand {
-	boxCommand := &boxCommand{}
-	boxCommand.cmd = &cobra.Command{
-		Use:   "box <name|id>",
-		Short: "List email threads in a box",
-		Long:  "List email threads in a HEY box. Accepts a box name (imbox, feedbox, etc.) or numeric ID.",
+	command := newBoxReaderCommand(
+		"box <name|id>",
+		"List HEY boxes and their email threads",
+		"List HEY boxes or list email threads in one box.",
+		`  hey box list
+  hey box view imbox
+  hey box view imbox --limit 10
+  hey box view 123 --json`,
+	)
+	command.cmd.Annotations[compatibilityUsageAnnotation] = "box <name|id>"
+	command.cmd.AddCommand(newBoxListCommand().cmd)
+	command.cmd.AddCommand(newBoxViewCommand().cmd)
+	return command
+}
+
+func newBoxViewCommand() *boxCommand {
+	return newBoxReaderCommand(
+		"view <name|id>",
+		"List email threads in a box",
+		"List email threads in a HEY box. Accepts a box name (imbox, feedbox, etc.) or numeric ID.",
+		`  hey box view imbox
+  hey box view imbox --limit 10
+  hey box view imbox --page next-cursor
+  hey box view 123 --json`,
+	)
+}
+
+func newBoxReaderCommand(use, short, long, example string) *boxCommand {
+	command := &boxCommand{}
+	command.cmd = &cobra.Command{
+		Use:   use,
+		Short: short,
+		Long:  long,
 		Annotations: map[string]string{
 			"agent_notes": "Accepts a box name or numeric ID. Returns email threads. Use topic_id with hey threads, reply, and forward; use id with seen, unseen, and move. --page continues from the next_page cursor of an earlier listing of the same box.",
 		},
-		Example: `  hey box imbox
-  hey box imbox --limit 10
-  hey box imbox --page next-cursor
-  hey box 123 --json`,
-		RunE: boxCommand.run,
-		Args: validateBoxArgs,
+		Example: example,
+		RunE:    command.run,
+		Args:    validateBoxArgs,
 	}
 
-	boxCommand.cmd.Flags().IntVar(&boxCommand.limit, "limit", 0, "Maximum number of threads to show")
-	boxCommand.cmd.Flags().BoolVar(&boxCommand.all, "all", false, "Fetch all results (override --limit)")
-	boxCommand.cmd.Flags().StringVar(&boxCommand.page, "page", "", "Continue from a next_page cursor")
+	command.cmd.Flags().IntVar(&command.limit, "limit", 0, "Maximum number of threads to show")
+	command.cmd.Flags().BoolVar(&command.all, "all", false, "Fetch all results (override --limit)")
+	command.cmd.Flags().StringVar(&command.page, "page", "", "Continue from a next_page cursor")
 
-	return boxCommand
+	return command
 }
 
 func validateBoxArgs(cmd *cobra.Command, args []string) error {
@@ -74,7 +99,7 @@ func validateBoxArgs(cmd *cobra.Command, args []string) error {
 	case 1:
 		return nil
 	case 0:
-		return usageErrorf("%s <name|id> (example: hey box imbox)", cmd.CommandPath())
+		return usageErrorf("%s <name|id> (example: hey box view imbox)", cmd.CommandPath())
 	default:
 		return fmt.Errorf("expected 1 mailbox argument, got %d", len(args))
 	}

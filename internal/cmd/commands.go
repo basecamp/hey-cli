@@ -7,6 +7,11 @@ import (
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
+const (
+	compatibilityForAnnotation   = "compatibility_for"
+	compatibilityUsageAnnotation = "compatibility_usage"
+)
+
 func newCommandsCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "commands",
@@ -17,10 +22,9 @@ func newCommandsCommand() *cobra.Command {
 			if writer.IsStyled() {
 				table := newTable(cmd.OutOrStdout())
 				table.addRow([]string{"Command", "Description"})
-				for _, entry := range catalog {
+				for _, entry := range flattenCommandCatalog(catalog) {
 					path, _ := entry["path"].(string)
-					short, _ := entry["short"].(string)
-					table.addRow([]string{path, short})
+					table.addRow([]string{path, commandCatalogDescription(entry)})
 				}
 				table.print()
 				return nil
@@ -52,6 +56,12 @@ func walkCommands(cmd *cobra.Command, prefix string) []map[string]any {
 		if notes, ok := child.Annotations["agent_notes"]; ok {
 			entry["agent_notes"] = notes
 		}
+		if canonical, ok := child.Annotations[compatibilityForAnnotation]; ok {
+			entry["compatibility_for"] = canonical
+		}
+		if usage, ok := child.Annotations[compatibilityUsageAnnotation]; ok {
+			entry["compatibility_usage"] = usage
+		}
 
 		var flags []map[string]string
 		child.NonInheritedFlags().VisitAll(func(f *pflag.Flag) {
@@ -75,4 +85,26 @@ func walkCommands(cmd *cobra.Command, prefix string) []map[string]any {
 	}
 
 	return result
+}
+
+func flattenCommandCatalog(entries []map[string]any) []map[string]any {
+	var flattened []map[string]any
+	for _, entry := range entries {
+		flattened = append(flattened, entry)
+		if children, ok := entry["subcommands"].([]map[string]any); ok {
+			flattened = append(flattened, flattenCommandCatalog(children)...)
+		}
+	}
+	return flattened
+}
+
+func commandCatalogDescription(entry map[string]any) string {
+	description, _ := entry["short"].(string)
+	if canonical, ok := entry["compatibility_for"].(string); ok {
+		return description + " (compatibility for hey " + canonical + ")"
+	}
+	if usage, ok := entry["compatibility_usage"].(string); ok {
+		return description + " (also accepts compatibility form hey " + usage + ")"
+	}
+	return description
 }

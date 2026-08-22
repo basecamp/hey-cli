@@ -18,23 +18,37 @@ type boxesCommand struct {
 }
 
 func newBoxesCommand() *boxesCommand {
-	boxesCommand := &boxesCommand{}
-	boxesCommand.cmd = &cobra.Command{
-		Use:   "boxes",
+	command := newBoxesListingCommand("boxes", `  hey boxes
+  hey boxes --limit 5
+  hey boxes --json`)
+	command.cmd.Annotations[compatibilityForAnnotation] = "box list"
+	return command
+}
+
+func newBoxListCommand() *boxesCommand {
+	command := newBoxesListingCommand("list", `  hey box list
+  hey box list --limit 5
+  hey box list --json`)
+	command.cmd.Args = cobra.NoArgs
+	return command
+}
+
+func newBoxesListingCommand(use, example string) *boxesCommand {
+	command := &boxesCommand{}
+	command.cmd = &cobra.Command{
+		Use:   use,
 		Short: "List your HEY boxes",
 		Annotations: map[string]string{
-			"agent_notes": "Returns all mailbox types. Use --ids-only to pipe IDs to hey box.",
+			"agent_notes": "Returns all mailbox types. Use --ids-only to pipe IDs to hey box view.",
 		},
-		Example: `  hey boxes
-  hey boxes --limit 5
-  hey boxes --json`,
-		RunE: boxesCommand.run,
+		Example: example,
+		RunE:    command.run,
 	}
 
-	boxesCommand.cmd.Flags().IntVar(&boxesCommand.limit, "limit", 0, "Maximum number of boxes to show")
-	boxesCommand.cmd.Flags().BoolVar(&boxesCommand.all, "all", false, "Fetch all results (override --limit)")
+	command.cmd.Flags().IntVar(&command.limit, "limit", 0, "Maximum number of boxes to show")
+	command.cmd.Flags().BoolVar(&command.all, "all", false, "Fetch all results (override --limit)")
 
-	return boxesCommand
+	return command
 }
 
 func (c *boxesCommand) run(cmd *cobra.Command, args []string) error {
@@ -76,7 +90,7 @@ func (c *boxesCommand) run(cmd *cobra.Command, args []string) error {
 		output.WithNotice(notice),
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "view",
-			Command:     "hey box <name>",
+			Command:     "hey box view <name>",
 			Description: "View email threads in a box",
 		}),
 	)

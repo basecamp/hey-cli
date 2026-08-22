@@ -23,23 +23,37 @@ type collectionsCommand struct {
 }
 
 func newCollectionsCommand() *collectionsCommand {
-	collectionsCommand := &collectionsCommand{}
-	collectionsCommand.cmd = &cobra.Command{
-		Use:   "collections",
+	command := newCollectionsListingCommand("collections", `  hey collections
+  hey collections --limit 10
+  hey collections --json`)
+	command.cmd.Annotations[compatibilityForAnnotation] = "collection list"
+	return command
+}
+
+func newCollectionListCommand() *collectionsCommand {
+	command := newCollectionsListingCommand("list", `  hey collection list
+  hey collection list --limit 10
+  hey collection list --json`)
+	command.cmd.Args = cobra.NoArgs
+	return command
+}
+
+func newCollectionsListingCommand(use, example string) *collectionsCommand {
+	command := &collectionsCommand{}
+	command.cmd = &cobra.Command{
+		Use:   use,
 		Short: "List your email collections",
 		Annotations: map[string]string{
-			"agent_notes": "Returns collection IDs and names. Use an ID with hey collection and hey collection add/remove/update.",
+			"agent_notes": "Returns collection IDs and names. Use an ID with hey collection view and hey collection add/remove/update.",
 		},
-		Example: `  hey collections
-  hey collections --limit 10
-  hey collections --json`,
-		RunE: collectionsCommand.run,
+		Example: example,
+		RunE:    command.run,
 	}
 
-	collectionsCommand.cmd.Flags().IntVar(&collectionsCommand.limit, "limit", 0, "Maximum number of collections to show")
-	collectionsCommand.cmd.Flags().BoolVar(&collectionsCommand.all, "all", false, "Fetch all results (override --limit)")
+	command.cmd.Flags().IntVar(&command.limit, "limit", 0, "Maximum number of collections to show")
+	command.cmd.Flags().BoolVar(&command.all, "all", false, "Fetch all results (override --limit)")
 
-	return collectionsCommand
+	return command
 }
 
 func (c *collectionsCommand) run(cmd *cobra.Command, args []string) error {
@@ -83,7 +97,7 @@ func (c *collectionsCommand) run(cmd *cobra.Command, args []string) error {
 		output.WithNotice(notice),
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "view",
-			Command:     "hey collection <id>",
+			Command:     "hey collection view <id>",
 			Description: "View email threads in a collection",
 		}),
 	)
@@ -112,30 +126,52 @@ var collectionListing = postingsListing{
 }
 
 func newCollectionCommand() *collectionCommand {
-	collectionCommand := &collectionCommand{}
-	collectionCommand.cmd = &cobra.Command{
-		Use:   "collection <id>",
-		Short: "View and manage an email collection",
+	command := newCollectionReaderCommand(
+		"collection <id>",
+		"List and manage email collections",
+		`  hey collection list
+  hey collection view 123
+  hey collection view 123 --all
+  hey collection view 123 --json`,
+	)
+	command.cmd.Annotations[compatibilityUsageAnnotation] = "collection <id>"
+	command.cmd.AddCommand(newCollectionListCommand().cmd)
+	command.cmd.AddCommand(newCollectionViewCommand().cmd)
+	command.cmd.AddCommand(newCollectionAddCommand().cmd)
+	command.cmd.AddCommand(newCollectionCreateCommand().cmd)
+	command.cmd.AddCommand(newCollectionRemoveCommand().cmd)
+	command.cmd.AddCommand(newCollectionUpdateCommand().cmd)
+	return command
+}
+
+func newCollectionViewCommand() *collectionCommand {
+	return newCollectionReaderCommand(
+		"view <id>",
+		"List email threads in a collection",
+		`  hey collection view 123
+  hey collection view 123 --page next-cursor
+  hey collection view 123 --all
+  hey collection view 123 --json`,
+	)
+}
+
+func newCollectionReaderCommand(use, short, example string) *collectionCommand {
+	command := &collectionCommand{}
+	command.cmd = &cobra.Command{
+		Use:   use,
+		Short: short,
 		Annotations: map[string]string{
-			"agent_notes": "The ID comes from hey collections. Detail returns posting IDs for organization actions and topic_id for reading threads, and answers --json, --styled, --markdown, --ids-only and --count.",
+			"agent_notes": "The ID comes from hey collection list. Detail returns posting IDs for organization actions and topic_id for reading threads, and answers --json, --styled, --markdown, --ids-only and --count.",
 		},
-		Example: `  hey collection 123
-  hey collection 123 --page next-cursor
-  hey collection 123 --all
-  hey collection 123 --json`,
-		RunE: collectionCommand.run,
-		Args: usageExactOneArg(),
+		Example: example,
+		RunE:    command.run,
+		Args:    usageExactOneArg(),
 	}
 
-	collectionCommand.cmd.Flags().IntVar(&collectionCommand.limit, "limit", 0, "Maximum number of threads to show")
-	collectionCommand.cmd.Flags().BoolVar(&collectionCommand.all, "all", false, "Fetch all results (override --limit)")
-	collectionCommand.cmd.Flags().StringVar(&collectionCommand.page, "page", "", "Continue from a next_page cursor")
-	collectionCommand.cmd.AddCommand(newCollectionAddCommand().cmd)
-	collectionCommand.cmd.AddCommand(newCollectionCreateCommand().cmd)
-	collectionCommand.cmd.AddCommand(newCollectionRemoveCommand().cmd)
-	collectionCommand.cmd.AddCommand(newCollectionUpdateCommand().cmd)
-
-	return collectionCommand
+	command.cmd.Flags().IntVar(&command.limit, "limit", 0, "Maximum number of threads to show")
+	command.cmd.Flags().BoolVar(&command.all, "all", false, "Fetch all results (override --limit)")
+	command.cmd.Flags().StringVar(&command.page, "page", "", "Continue from a next_page cursor")
+	return command
 }
 
 func (c *collectionCommand) run(cmd *cobra.Command, args []string) error {
@@ -204,7 +240,7 @@ func (c *collectionCreateCommand) run(cmd *cobra.Command, args []string) error {
 
 	return writeCollectionMutation(cmd, fmt.Sprintf("Collection %q created", name), output.Breadcrumb{
 		Action:      "list",
-		Command:     "hey collections",
+		Command:     "hey collection list",
 		Description: "Find the new collection ID",
 	})
 }

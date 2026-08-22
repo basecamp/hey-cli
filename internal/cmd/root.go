@@ -546,6 +546,12 @@ func printAgentHelp(cmd *cobra.Command) {
 	if notes, ok := cmd.Annotations["agent_notes"]; ok {
 		info["agent_notes"] = notes
 	}
+	if canonical, ok := cmd.Annotations[compatibilityForAnnotation]; ok {
+		info["compatibility_for"] = canonical
+	}
+	if usage, ok := cmd.Annotations[compatibilityUsageAnnotation]; ok {
+		info["compatibility_usage"] = usage
+	}
 
 	var flags []map[string]string
 	addFlag := func(f *pflag.Flag) {
@@ -566,6 +572,11 @@ func printAgentHelp(cmd *cobra.Command) {
 	for _, sub := range cmd.Commands() {
 		if sub.Hidden || !sub.IsAvailableCommand() {
 			continue
+		}
+		if cmd == cmd.Root() {
+			if _, compatibility := sub.Annotations[compatibilityForAnnotation]; compatibility {
+				continue
+			}
 		}
 		subs = append(subs, map[string]string{
 			"name":  sub.Name(),

@@ -43,7 +43,7 @@ type sourcePostingRow struct {
 	Date    string `json:"date,omitempty"`
 }
 
-// postingsListing is what `hey box`, `hey label` and `hey collection` call the source they
+// postingsListing is what `hey box view`, `hey label view` and `hey collection view` call the source they
 // list. Everything else about the three — the pagination, the notices and the five output
 // formats — is the same listing.
 //

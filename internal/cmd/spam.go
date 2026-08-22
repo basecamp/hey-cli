@@ -21,7 +21,7 @@ func newSpamCommand() *spamCommand {
 		Example: `  hey spam 12345
   hey spam 12345 67890`,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts one or more box item IDs from hey box output. Marks each thread as spam and removes it from the current box.",
+			"agent_notes": "Accepts one or more box item IDs from hey box view output. Marks each thread as spam and removes it from the current box.",
 		},
 		RunE: spamCommand.run,
 		Args: usageMinOneArg(),

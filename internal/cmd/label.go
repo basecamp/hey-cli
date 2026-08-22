@@ -23,23 +23,37 @@ type labelsCommand struct {
 }
 
 func newLabelsCommand() *labelsCommand {
-	labelsCommand := &labelsCommand{}
-	labelsCommand.cmd = &cobra.Command{
-		Use:   "labels",
+	command := newLabelsListingCommand("labels", `  hey labels
+  hey labels --limit 10
+  hey labels --json`)
+	command.cmd.Annotations[compatibilityForAnnotation] = "label list"
+	return command
+}
+
+func newLabelListCommand() *labelsCommand {
+	command := newLabelsListingCommand("list", `  hey label list
+  hey label list --limit 10
+  hey label list --json`)
+	command.cmd.Args = cobra.NoArgs
+	return command
+}
+
+func newLabelsListingCommand(use, example string) *labelsCommand {
+	command := &labelsCommand{}
+	command.cmd = &cobra.Command{
+		Use:   use,
 		Short: "List your email labels",
 		Annotations: map[string]string{
-			"agent_notes": "Returns label IDs and names. Use an ID with hey label and hey label add/remove.",
+			"agent_notes": "Returns label IDs and names. Use an ID with hey label view and hey label add/remove.",
 		},
-		Example: `  hey labels
-  hey labels --limit 10
-  hey labels --json`,
-		RunE: labelsCommand.run,
+		Example: example,
+		RunE:    command.run,
 	}
 
-	labelsCommand.cmd.Flags().IntVar(&labelsCommand.limit, "limit", 0, "Maximum number of labels to show")
-	labelsCommand.cmd.Flags().BoolVar(&labelsCommand.all, "all", false, "Fetch all results (override --limit)")
+	command.cmd.Flags().IntVar(&command.limit, "limit", 0, "Maximum number of labels to show")
+	command.cmd.Flags().BoolVar(&command.all, "all", false, "Fetch all results (override --limit)")
 
-	return labelsCommand
+	return command
 }
 
 func (c *labelsCommand) run(cmd *cobra.Command, args []string) error {
@@ -76,7 +90,7 @@ func (c *labelsCommand) run(cmd *cobra.Command, args []string) error {
 		output.WithNotice(notice),
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "view",
-			Command:     "hey label <id>",
+			Command:     "hey label view <id>",
 			Description: "View email threads with a label",
 		}),
 	)
@@ -105,29 +119,51 @@ var labelListing = postingsListing{
 }
 
 func newLabelCommand() *labelCommand {
-	labelCommand := &labelCommand{}
-	labelCommand.cmd = &cobra.Command{
-		Use:   "label <id>",
-		Short: "View and manage an email label",
+	command := newLabelReaderCommand(
+		"label <id>",
+		"List and manage email labels",
+		`  hey label list
+  hey label view 123
+  hey label view 123 --all
+  hey label view 123 --json`,
+	)
+	command.cmd.Annotations[compatibilityUsageAnnotation] = "label <id>"
+	command.cmd.AddCommand(newLabelListCommand().cmd)
+	command.cmd.AddCommand(newLabelViewCommand().cmd)
+	command.cmd.AddCommand(newLabelAddCommand().cmd)
+	command.cmd.AddCommand(newLabelCreateCommand().cmd)
+	command.cmd.AddCommand(newLabelRemoveCommand().cmd)
+	return command
+}
+
+func newLabelViewCommand() *labelCommand {
+	return newLabelReaderCommand(
+		"view <id>",
+		"List email threads with a label",
+		`  hey label view 123
+  hey label view 123 --page next-cursor
+  hey label view 123 --all
+  hey label view 123 --json`,
+	)
+}
+
+func newLabelReaderCommand(use, short, example string) *labelCommand {
+	command := &labelCommand{}
+	command.cmd = &cobra.Command{
+		Use:   use,
+		Short: short,
 		Annotations: map[string]string{
-			"agent_notes": "The ID comes from hey labels. Returns labeled email threads with topic_id for reading them, and answers --json, --styled, --markdown, --ids-only and --count. Subcommands add, create, and remove labels.",
+			"agent_notes": "The ID comes from hey label list. Returns labeled email threads with topic_id for reading them, and answers --json, --styled, --markdown, --ids-only and --count.",
 		},
-		Example: `  hey label 123
-  hey label 123 --page next-cursor
-  hey label 123 --all
-  hey label 123 --json`,
-		RunE: labelCommand.run,
-		Args: usageExactOneArg(),
+		Example: example,
+		RunE:    command.run,
+		Args:    usageExactOneArg(),
 	}
 
-	labelCommand.cmd.Flags().IntVar(&labelCommand.limit, "limit", 0, "Maximum number of threads to show")
-	labelCommand.cmd.Flags().BoolVar(&labelCommand.all, "all", false, "Fetch all results (override --limit)")
-	labelCommand.cmd.Flags().StringVar(&labelCommand.page, "page", "", "Continue from a next_page cursor")
-	labelCommand.cmd.AddCommand(newLabelAddCommand().cmd)
-	labelCommand.cmd.AddCommand(newLabelCreateCommand().cmd)
-	labelCommand.cmd.AddCommand(newLabelRemoveCommand().cmd)
-
-	return labelCommand
+	command.cmd.Flags().IntVar(&command.limit, "limit", 0, "Maximum number of threads to show")
+	command.cmd.Flags().BoolVar(&command.all, "all", false, "Fetch all results (override --limit)")
+	command.cmd.Flags().StringVar(&command.page, "page", "", "Continue from a next_page cursor")
+	return command
 }
 
 func (c *labelCommand) run(cmd *cobra.Command, args []string) error {

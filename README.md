@@ -51,7 +51,7 @@ connect your coding agents (Claude Code, Codex). After that, `hey tui` opens the
 bare `hey` prints the help. `hey setup` reruns the wizard any time; `hey login` and
 `hey logout` are shortcuts for `hey auth login` and `hey auth logout`.
 
-Logged-out data commands at a terminal (`hey boxes`, say) offer to sign you in on the spot.
+Logged-out data commands at a terminal (`hey box list`, say) offer to sign you in on the spot.
 Piped or `--json` runs never prompt: they fail with `Not logged in` (exit 3) so scripts and
 agents can handle it.
 
@@ -274,18 +274,18 @@ Use `--base-url` to override the server URL and `--account <id|all>` to select a
 mail account.
 
 ```bash
-hey boxes --jq '.data[] | {id, name}'
-hey boxes --quiet --jq '.[].id'
+hey box list --jq '.data[] | {id, name}'
+hey box list --quiet --jq '.[].id'
 ```
 
 Listing commands also answer `--markdown` for a table, `--styled` to force the human
 rendering when the output is piped, `--ids-only` for one ID per line, and `--count` for a
-bare number. `--ids-only` and `--count` need list data, so they work on `hey boxes`,
-`hey box`, `hey labels`, `hey label`, `hey collections`, `hey collection`, `hey workflows`,
-`hey workflow`, `hey clips`, `hey snippets`, `hey drafts`, `hey search`, `hey contacts list`, `hey screener list`, `hey screener history`, `hey calendars`,
+bare number. `--ids-only` and `--count` need list data, so they work on `hey box list`,
+`hey box view`, `hey label list`, `hey label view`, `hey collection list`, `hey collection view`,
+`hey workflow list`, `hey workflow view`, `hey clip list`, `hey snippet list`, `hey drafts`, `hey search`, `hey contacts list`, `hey screener list`, `hey screener history`, `hey calendars`,
 `hey recordings`, `hey todo list`, `hey timetrack list` and `hey journal list`. The
 data-only formats print any pagination notice on stderr, so the IDs on stdout stay
-pipeable. `hey clips --ids-only` and `--count` cover the newest page only because the
+pipeable. `hey clip list --ids-only` and `--count` cover the newest page only because the
 released SDK does not expose HEY's cursor for older clip pages.
 
 `--html` writes the original HTML, for the commands that hold some: `hey threads`,
@@ -313,23 +313,31 @@ is what gets pasted into something else.
 
 ### Email
 
+Resource commands use one noun-first family: `box`, `label`, `collection`, `workflow`,
+`clip`, and `snippet`, with actions such as `list` and `view` underneath. The earlier
+plural listing forms and direct detail forms remain supported for compatibility; `hey
+commands --json` identifies each plural form with `compatibility_for` while the primary
+help and examples show the canonical family. `list` and `view` are reserved action names
+under `box`; a box with either display name is addressed explicitly (`hey box view list`)
+or through the direct-form escape (`hey box -- list`).
+
 ```bash
-hey boxes                          # list mailboxes
-hey box imbox                      # list email threads in a box (by name or ID)
-hey labels                          # list labels and their IDs
-hey label 789 --all                 # list all email threads with a label
-hey label add 12345 --to 789        # add a label to a thread
+hey box list                         # list mailboxes
+hey box view imbox                   # list email threads in a box (by name or ID)
+hey label list                       # list labels and their IDs
+hey label view 789 --all             # list all email threads with a label
+hey label add 12345 --to 789         # add a label to a thread
 hey label create "Travel receipts" 12345  # create and add a label
-hey label remove 12345 --from 789   # remove one label
-hey label remove 12345 --from all   # remove every label
-hey collections                     # list collections and their IDs
-hey collection 321 --all            # list every thread in a collection
+hey label remove 12345 --from 789    # remove one label
+hey label remove 12345 --from all    # remove every label
+hey collection list                  # list collections and their IDs
+hey collection view 321 --all        # list every thread in a collection
 hey collection create "Kitchen remodel" --summary "Plans and decisions"
 hey collection update 321 --name "Kitchen renovation"
 hey collection add 987 --to 321      # add a topic ID to a collection
 hey collection remove 987 --from 321 # remove a topic ID from a collection
-hey workflows                       # list workflows, account IDs, and workflow IDs
-hey workflow 654                    # list a workflow's stages and stage IDs
+hey workflow list                    # list workflows, account IDs, and workflow IDs
+hey workflow view 654                # list a workflow's stages and stage IDs
 hey workflow create "Hiring" --account 12345
 hey workflow update 654 --name "Recruiting"
 hey workflow stage create 654       # add an Untitled stage
@@ -337,10 +345,10 @@ hey workflow stage update 654 321 --name "Interviewing"
 hey workflow add 987 --to 654 --stage 321       # add a topic ID to a stage
 hey workflow move 987 --workflow 654 --to 322   # move it to another stage
 hey workflow remove 987 --from 654              # remove it from the workflow
-hey clips                                        # newest page of saved passages and source context
+hey clip list                                     # newest page of saved passages and source context
 hey clip create 456 --content "The launch moves to Wednesday."
 hey clip delete 44
-hey snippets                                     # list reusable email snippets
+hey snippet list                                  # list reusable email snippets
 hey snippet create --name "Scheduling reply" --content "Tuesday works for me."
 hey snippet update 44 --content "Wednesday works for me."
 hey snippet delete 44
@@ -409,17 +417,17 @@ The Screener is where first-time senders wait. `hey screener list` returns clear
 
 `--attach` is repeatable on `hey compose`, `hey reply`, and `hey bulk-reply send`, and attachment-only messages are supported. The CLI validates and uploads every file before sending the email. `hey attachments <topic_id>` returns stable message-and-position IDs such as `456:1`; pass an ID to `hey attachments save`. Saving uses the original filename by default, accepts `--output` for a file or directory, and preserves existing files unless `--force` is set.
 
-Organization actions take the `id` values returned by `hey box --json`, `hey label --json`, or `hey search --json`. Reading, replying to, and forwarding a thread take its `topic_id` instead, which `hey box --json`, `hey label --json`, `hey collection --json` and `hey search --json` all carry alongside `id`. `hey box` also returns `next_page` and accepts `--page <next_page>` to continue a box listing; it keeps `next_history_url` for the sync clients that read it, and `--page` accepts that URL as readily as the cursor inside it. Label IDs come from `hey labels`; `hey label` returns `next_page` and `total_count`, accepts `--page <next_page>` for continuation, and supports `--all` for complete traversal. HEY creates a label while adding it to at least one thread, so `hey label create` requires thread item IDs.
+Organization actions take the `id` values returned by `hey box view --json`, `hey label view --json`, or `hey search --json`. Reading, replying to, and forwarding a thread take its `topic_id` instead, which `hey box view --json`, `hey label view --json`, `hey collection view --json` and `hey search --json` all carry alongside `id`. `hey box view` also returns `next_page` and accepts `--page <next_page>` to continue a box listing; it keeps `next_history_url` for the sync clients that read it, and `--page` accepts that URL as readily as the cursor inside it. Label IDs come from `hey label list`; `hey label view` returns `next_page` and `total_count`, accepts `--page <next_page>` for continuation, and supports `--all` for complete traversal. HEY creates a label while adding it to at least one thread, so `hey label create` requires thread item IDs.
 
-Collection IDs come from `hey collections`. `hey collection` returns both each posting `id` and its `topic_id`, plus `next_page` and `total_count`. Collection membership commands take `topic_id`; posting organization commands continue to take `id`. Creating a collection returns a confirmed mutation, and `hey collections` provides its ID for subsequent commands. Collection updates accept a non-empty name, summary, or both.
+Collection IDs come from `hey collection list`. `hey collection view` returns both each posting `id` and its `topic_id`, plus `next_page` and `total_count`. Collection membership commands take `topic_id`; posting organization commands continue to take `id`. Creating a collection returns a confirmed mutation, and `hey collection list` provides its ID for subsequent commands. Collection updates accept a non-empty name, summary, or both.
 
-Workflow IDs come from `hey workflows`, which includes the linked account ID for each workflow. `hey workflow <id>` returns stages in position order; `--ids-only` and `--count` apply to those stages. Creating a workflow needs one linked mail account, selected with `--account` when more than one is available. HEY creates new stages as `Untitled`, so create the stage, read its ID with `hey workflow <id>`, then rename it. Workflow membership commands take `topic_id`. Adding a thread creates its workflow membership before selecting the requested stage; if stage selection fails, the thread remains in the workflow's first stage and the command reports the error.
+Workflow IDs come from `hey workflow list`, which includes the linked account ID for each workflow. `hey workflow view <id>` returns stages in position order; `--ids-only` and `--count` apply to those stages. Creating a workflow needs one linked mail account, selected with `--account` when more than one is available. HEY creates new stages as `Untitled`, so create the stage, read its ID with `hey workflow view <id>`, then rename it. Workflow membership commands take `topic_id`. Adding a thread creates its workflow membership before selecting the requested stage; if stage selection fails, the thread remains in the workflow's first stage and the command reports the error.
 
-Clips are passages saved from existing email entries. `hey clips` lists the selected account's newest page with each clip's source entry and thread context; its JSON `notice` and the data-only formats' stderr make that boundary explicit because the released SDK does not expose HEY's cursor for older pages. `hey clip create <entry-id> --content <text>` verifies that the passage is source-backed by text carried in the entry, including embedded inbound email bodies. It accepts whitespace differences while preserving the supplied text exactly for HEY's web UI; passages are capped at 64 KiB and source-message validation at 1 MiB. HEY's web UI remains authoritative for stylesheet-driven visibility. HEY assigns a created clip to its source entry's account and resolves deletion by identity-owned clip ID across linked accounts; `--account` selects list presentation. `hey clip delete <clip-id>` removes it. Clip content is plain text; the source entry ID comes from `hey threads --json`.
+Clips are passages saved from existing email entries. `hey clip list` lists the selected account's newest page with each clip's source entry and thread context; its JSON `notice` and the data-only formats' stderr make that boundary explicit because the released SDK does not expose HEY's cursor for older pages. `hey clip create <entry-id> --content <text>` verifies that the passage is source-backed by text carried in the entry, including embedded inbound email bodies. It accepts whitespace differences while preserving the supplied text exactly for HEY's web UI; passages are capped at 64 KiB and source-message validation at 1 MiB. HEY's web UI remains authoritative for stylesheet-driven visibility. HEY assigns a created clip to its source entry's account and resolves deletion by identity-owned clip ID across linked accounts; `--account` selects list presentation. `hey clip delete <clip-id>` removes it. Clip content is plain text; the source entry ID comes from `hey threads --json`.
 
-Snippets are named reusable email content, separate from clips saved out of received messages. `hey snippets` lists both plain text and HEY's rich-text HTML; `hey snippet create`, `update`, and `delete` manage them. A create requires a non-empty name and content. Updates change whichever non-empty fields are supplied, while omitted fields stay as they are. In the TUI, Ctrl+T opens the picker from new-message, reply, and forward forms and inserts the snippet's plain-text representation at the current body cursor without replacing the draft.
+Snippets are named reusable email content, separate from clips saved out of received messages. `hey snippet list` lists both plain text and HEY's rich-text HTML; `hey snippet create`, `update`, and `delete` manage them. A create requires a non-empty name and content. Updates change whichever non-empty fields are supplied, while omitted fields stay as they are. In the TUI, Ctrl+T opens the picker from new-message, reply, and forward forms and inserts the snippet's plain-text representation at the current body cursor without replacing the draft.
 
-`hey box <name|id>`, `hey label <id>` and `hey collection <id>` list the same postings and answer the same formats: `--json`, `--styled`, `--markdown`, `--ids-only`, and `--count`. The data-only formats print the pagination notice and any `next_page` cursor on stderr, so the IDs on stdout stay pipeable. `--json` differs only in what wraps the postings: a box answers with HEY's box payload, a label and a collection with the source and its `total_count`.
+`hey box view <name|id>`, `hey label view <id>` and `hey collection view <id>` list the same postings and answer the same formats: `--json`, `--styled`, `--markdown`, `--ids-only`, and `--count`. The data-only formats print the pagination notice and any `next_page` cursor on stderr, so the IDs on stdout stay pipeable. `--json` differs only in what wraps the postings: a box answers with HEY's box payload, a label and a collection with the source and its `total_count`.
 
 Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Bubble Up requires a scheduled date and is not available through `hey move`. Trashing a shared thread removes your access instead of deleting it for everyone. Ignored threads remain in their box and can be restored with `hey stop-ignoring`.
 
@@ -556,7 +564,7 @@ hey setup omarchy --remove   # take it all out again
 
 The bar gets the [HEY plugin](https://github.com/basecamp/omarchy-hey-plugin): the HEY
 logo lights when the Imbox has unseen mail and opens a panel of recent threads. hey-cli is
-its engine — the plugin reads the Imbox with `hey box imbox` and runs `hey watch` so the
+its engine — the plugin reads the Imbox with `hey box view imbox` and runs `hey watch` so the
 bar is live: a thread you archive in the TUI, on your phone or in the web app leaves the
 panel within a second, and after a disconnect the watch catches up from where it left off.
 

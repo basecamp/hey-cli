@@ -22,7 +22,7 @@ func newShareCommand() *shareCommand {
 		Example: `  hey share 12345
   hey share 12345 --json`,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts the topic_id from hey box, hey label, or hey search output. Returns the sharing link in the url field.",
+			"agent_notes": "Accepts the topic_id from hey box view, hey label view, or hey search output. Returns the sharing link in the url field.",
 		},
 		RunE: shareCommand.run,
 		Args: usageExactOneArg(),
@@ -67,7 +67,7 @@ func newUnshareCommand() *unshareCommand {
 		Long:    "Turn off the sharing link for an email thread.",
 		Example: `  hey unshare 12345`,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts the topic_id from hey box, hey label, or hey search output. The thread remains in HEY.",
+			"agent_notes": "Accepts the topic_id from hey box view, hey label view, or hey search output. The thread remains in HEY.",
 		},
 		RunE: unshareCommand.run,
 		Args: usageExactOneArg(),

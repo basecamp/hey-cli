@@ -35,6 +35,13 @@ hey box
 hey box --all
 hey box --limit
 hey box --page
+hey box list
+hey box list --all
+hey box list --limit
+hey box view
+hey box view --all
+hey box view --limit
+hey box view --page
 hey boxes
 hey boxes --all
 hey boxes --limit
@@ -49,6 +56,7 @@ hey clip
 hey clip create
 hey clip create --content
 hey clip delete
+hey clip list
 hey clips
 hey collection
 hey collection --all
@@ -58,11 +66,18 @@ hey collection add
 hey collection add --to
 hey collection create
 hey collection create --summary
+hey collection list
+hey collection list --all
+hey collection list --limit
 hey collection remove
 hey collection remove --from
 hey collection update
 hey collection update --name
 hey collection update --summary
+hey collection view
+hey collection view --all
+hey collection view --limit
+hey collection view --page
 hey collections
 hey collections --all
 hey collections --limit
@@ -145,8 +160,15 @@ hey label --page
 hey label add
 hey label add --to
 hey label create
+hey label list
+hey label list --all
+hey label list --limit
 hey label remove
 hey label remove --from
+hey label view
+hey label view --all
+hey label view --limit
+hey label view --page
 hey labels
 hey labels --all
 hey labels --limit
@@ -210,6 +232,7 @@ hey snippet create
 hey snippet create --content
 hey snippet create --name
 hey snippet delete
+hey snippet list
 hey snippet update
 hey snippet update --content
 hey snippet update --name
@@ -263,6 +286,9 @@ hey workflow add --stage
 hey workflow add --to
 hey workflow create
 hey workflow delete
+hey workflow list
+hey workflow list --all
+hey workflow list --limit
 hey workflow move
 hey workflow move --to
 hey workflow move --workflow
@@ -275,6 +301,7 @@ hey workflow stage update
 hey workflow stage update --name
 hey workflow update
 hey workflow update --name
+hey workflow view
 hey workflows
 hey workflows --all
 hey workflows --limit

@@ -371,14 +371,14 @@ repeat or vanish. `readBox` therefore dispatches on `BoxKind` to `GetImbox`, `Ge
 and the rest, and only an unfamiliar kind falls through to `Boxes().Get`.
 
 **`Page.Cursor` is opaque and per-kind.** A label and a collection carry a geared_pagination
-cursor; a box carries HEY's own `next_history_url`, which is what `hey box --json` reports
+cursor; a box carries HEY's own `next_history_url`, which is what `hey box view --json` reports
 and is the only cursor the named routes hand out. The URL is never fetched: `historyPageCursor`
 takes the `page` parameter out of it and gives that to the typed operation, which is why
 there is no same-origin check here to get wrong. A foreign URL is refused for carrying no
 cursor rather than declined for pointing elsewhere.
 
 **`mail.Posting` is a row, not the JSON.** `Page.Postings` stays `[]generated.Posting`
-because `hey box --json` publishes those fields verbatim; `mail.Postings` describes them as
+because `hey box view --json` publishes those fields verbatim; `mail.Postings` describes them as
 the rows a reader acts on, and everything the TUI never reads — `bundled`, `entry_kind`,
 `kind`, `updated_at` — is left in the SDK type where the CLI can still reach it. `TopicID`
 is resolved once, out of `app_url`: HEY's `_posting.jbuilder` serves neither `topic` nor

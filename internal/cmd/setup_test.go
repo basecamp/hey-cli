@@ -307,7 +307,7 @@ func TestShowWizardSuccessText(t *testing.T) {
 		Checks: []agentCheck{{Agent: "Claude Code", Name: "Claude Code Plugin", Status: "pass"}},
 	})
 	text := out.String()
-	for _, want := range []string{"Setup complete!", "✓ Signed in", "✓ Claude Code Plugin", "Try these commands:", "hey boxes", `hey search "quarterly planning"`} {
+	for _, want := range []string{"Setup complete!", "✓ Signed in", "✓ Claude Code Plugin", "Try these commands:", "hey box list", `hey search "quarterly planning"`} {
 		if !strings.Contains(text, want) {
 			t.Errorf("complete summary missing %q:\n%s", want, text)
 		}

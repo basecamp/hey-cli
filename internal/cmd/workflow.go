@@ -43,23 +43,36 @@ type workflowsCommand struct {
 }
 
 func newWorkflowsCommand() *workflowsCommand {
-	workflowsCommand := &workflowsCommand{}
-	workflowsCommand.cmd = &cobra.Command{
-		Use:   "workflows",
-		Short: "List your email workflows",
-		Annotations: map[string]string{
-			"agent_notes": "Returns workflow IDs, names, and linked account IDs. Use an ID with hey workflow; use --account to limit the list to one linked mail account.",
-		},
-		Example: `  hey workflows
+	command := newWorkflowsListingCommand("workflows", `  hey workflows
   hey workflows --account 12345
   hey workflows --limit 10
-  hey workflows --json`,
-		RunE: workflowsCommand.run,
-		Args: cobra.NoArgs,
+  hey workflows --json`)
+	command.cmd.Annotations[compatibilityForAnnotation] = "workflow list"
+	return command
+}
+
+func newWorkflowListCommand() *workflowsCommand {
+	return newWorkflowsListingCommand("list", `  hey workflow list
+  hey workflow list --account 12345
+  hey workflow list --limit 10
+  hey workflow list --json`)
+}
+
+func newWorkflowsListingCommand(use, example string) *workflowsCommand {
+	command := &workflowsCommand{}
+	command.cmd = &cobra.Command{
+		Use:   use,
+		Short: "List your email workflows",
+		Annotations: map[string]string{
+			"agent_notes": "Returns workflow IDs, names, and linked account IDs. Use an ID with hey workflow view; use --account to limit the list to one linked mail account.",
+		},
+		Example: example,
+		RunE:    command.run,
+		Args:    cobra.NoArgs,
 	}
-	workflowsCommand.cmd.Flags().IntVar(&workflowsCommand.limit, "limit", 0, "Maximum number of workflows to show")
-	workflowsCommand.cmd.Flags().BoolVar(&workflowsCommand.all, "all", false, "Show every workflow (override --limit)")
-	return workflowsCommand
+	command.cmd.Flags().IntVar(&command.limit, "limit", 0, "Maximum number of workflows to show")
+	command.cmd.Flags().BoolVar(&command.all, "all", false, "Show every workflow (override --limit)")
+	return command
 }
 
 func (c *workflowsCommand) run(cmd *cobra.Command, _ []string) error {
@@ -103,7 +116,7 @@ func (c *workflowsCommand) run(cmd *cobra.Command, _ []string) error {
 		output.WithNotice(notice),
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "view",
-			Command:     "hey workflow <id>",
+			Command:     "hey workflow view <id>",
 			Description: "View a workflow and its stages",
 		}),
 	)
@@ -158,27 +171,50 @@ type workflowCommand struct {
 }
 
 func newWorkflowCommand() *workflowCommand {
-	workflowCommand := &workflowCommand{}
-	workflowCommand.cmd = &cobra.Command{
-		Use:   "workflow <id>",
-		Short: "View and manage an email workflow",
+	command := newWorkflowReaderCommand(
+		"workflow <id>",
+		"List and manage email workflows",
+		`  hey workflow list
+  hey workflow view 123
+  hey workflow view 123 --json
+  hey workflow view 123 --ids-only`,
+	)
+	command.cmd.Annotations[compatibilityUsageAnnotation] = "workflow <id>"
+	command.cmd.AddCommand(newWorkflowListCommand().cmd)
+	command.cmd.AddCommand(newWorkflowViewCommand().cmd)
+	command.cmd.AddCommand(newWorkflowCreateCommand().cmd)
+	command.cmd.AddCommand(newWorkflowUpdateCommand().cmd)
+	command.cmd.AddCommand(newWorkflowDeleteCommand().cmd)
+	command.cmd.AddCommand(newWorkflowStageCommand().cmd)
+	command.cmd.AddCommand(newWorkflowAddCommand().cmd)
+	command.cmd.AddCommand(newWorkflowMoveCommand().cmd)
+	command.cmd.AddCommand(newWorkflowRemoveCommand().cmd)
+	return command
+}
+
+func newWorkflowViewCommand() *workflowCommand {
+	return newWorkflowReaderCommand(
+		"view <id>",
+		"View a workflow and its stages",
+		`  hey workflow view 123
+  hey workflow view 123 --json
+  hey workflow view 123 --ids-only`,
+	)
+}
+
+func newWorkflowReaderCommand(use, short, example string) *workflowCommand {
+	command := &workflowCommand{}
+	command.cmd = &cobra.Command{
+		Use:   use,
+		Short: short,
 		Annotations: map[string]string{
-			"agent_notes": "The workflow ID comes from hey workflows. Detail returns stage IDs in position order. Subcommands create, update, delete, stage, add, move, and remove workflows and their threads.",
+			"agent_notes": "The workflow ID comes from hey workflow list. Detail returns stage IDs in position order.",
 		},
-		Example: `  hey workflow 123
-  hey workflow 123 --json
-  hey workflow 123 --ids-only`,
-		RunE: workflowCommand.run,
-		Args: usageExactOneArg(),
+		Example: example,
+		RunE:    command.run,
+		Args:    usageExactOneArg(),
 	}
-	workflowCommand.cmd.AddCommand(newWorkflowCreateCommand().cmd)
-	workflowCommand.cmd.AddCommand(newWorkflowUpdateCommand().cmd)
-	workflowCommand.cmd.AddCommand(newWorkflowDeleteCommand().cmd)
-	workflowCommand.cmd.AddCommand(newWorkflowStageCommand().cmd)
-	workflowCommand.cmd.AddCommand(newWorkflowAddCommand().cmd)
-	workflowCommand.cmd.AddCommand(newWorkflowMoveCommand().cmd)
-	workflowCommand.cmd.AddCommand(newWorkflowRemoveCommand().cmd)
-	return workflowCommand
+	return command
 }
 
 func (c *workflowCommand) run(cmd *cobra.Command, args []string) error {
@@ -291,7 +327,7 @@ func (c *workflowCreateCommand) run(cmd *cobra.Command, args []string) error {
 		return apierr.FromSDK(err)
 	}
 	return writeMutation(cmd, fmt.Sprintf("Workflow %q created", name), nil,
-		output.WithBreadcrumbs(output.Breadcrumb{Action: "list", Command: "hey workflows", Description: "Find the new workflow ID"}),
+		output.WithBreadcrumbs(output.Breadcrumb{Action: "list", Command: "hey workflow list", Description: "Find the new workflow ID"}),
 	)
 }
 
@@ -399,7 +435,7 @@ func newWorkflowStageCommand() *workflowStageCommand {
 		Use:   "stage",
 		Short: "Manage workflow stages",
 		Annotations: map[string]string{
-			"agent_notes": "Create adds an Untitled stage; use hey workflow <id> to find its stage ID, then update it with --name.",
+			"agent_notes": "Create adds an Untitled stage; use hey workflow view <id> to find its stage ID, then update it with --name.",
 		},
 	}
 	workflowStageCommand.cmd.AddCommand(newWorkflowStageCreateCommand().cmd)
@@ -436,7 +472,7 @@ func (c *workflowStageCreateCommand) run(cmd *cobra.Command, args []string) erro
 		return apierr.FromSDK(err)
 	}
 	return writeMutation(cmd, fmt.Sprintf("Untitled stage added to workflow %d", workflowID), nil,
-		output.WithBreadcrumbs(output.Breadcrumb{Action: "view", Command: fmt.Sprintf("hey workflow %d", workflowID), Description: "Find the new stage ID"}),
+		output.WithBreadcrumbs(output.Breadcrumb{Action: "view", Command: fmt.Sprintf("hey workflow view %d", workflowID), Description: "Find the new stage ID"}),
 	)
 }
 

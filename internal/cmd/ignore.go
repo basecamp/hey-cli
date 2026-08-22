@@ -21,7 +21,7 @@ func newIgnoreCommand() *ignoreCommand {
 		Example: `  hey ignore 12345
   hey ignore 12345 67890`,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts one or more box item IDs from hey box output. Ignored threads remain in their box and can be restored with hey stop-ignoring.",
+			"agent_notes": "Accepts one or more box item IDs from hey box view output. Ignored threads remain in their box and can be restored with hey stop-ignoring.",
 		},
 		RunE: ignoreCommand.run,
 		Args: usageMinOneArg(),

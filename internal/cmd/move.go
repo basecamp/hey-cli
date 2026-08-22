@@ -30,7 +30,7 @@ func newMoveCommand() *moveCommand {
   hey move 12345 67890 --to "paper trail"
   hey move 12345 --to 987`,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts box item IDs from hey box output. --to accepts a box name, kind, or ID. Use HEY's scheduled Bubble Up flow for Bubble Up.",
+			"agent_notes": "Accepts box item IDs from hey box view output. --to accepts a box name, kind, or ID. Use HEY's scheduled Bubble Up flow for Bubble Up.",
 		},
 		RunE: moveCommand.run,
 		Args: usageMinOneArg(),
