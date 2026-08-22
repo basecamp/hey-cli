@@ -3,99 +3,197 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	stdhtml "html"
 	"io"
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	nethtml "golang.org/x/net/html"
+
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/markdown"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
-
-// --- Journal messages ---
 
 type journalRequestKind int
 
 const (
 	journalRequestNone journalRequestKind = iota
-	journalRequestEntry
+	journalRequestFeed
+	journalRequestDetail
 	journalRequestMutation
 )
 
+type journalPageLoadedMsg struct {
+	requestResult
+	entries  []journalSummary
+	nextPage string
+}
+
+type journalPageAppendedMsg struct {
+	requestID uint64
+	entries   []journalSummary
+	nextPage  string
+	err       error
+}
+
 type journalDetailMsg struct {
 	requestResult
+	date    string
 	content string
 	body    htmlutil.Markdown
 	images  [][]byte
+	edit    bool
 }
 
 type journalSavedMsg struct {
 	requestResult
+	date    string
 	removed bool
 }
 
-// --- Journal section view ---
+type journalPromptKind int
+
+const (
+	journalPromptNone journalPromptKind = iota
+	journalPromptSearch
+	journalPromptDate
+)
+
+type journalPrompt struct {
+	kind   journalPromptKind
+	input  textinput.Model
+	status string
+	styles styles
+}
+
+func newJournalPrompt(kind journalPromptKind, value string, styles styles) *journalPrompt {
+	input := textinput.New()
+	input.Prompt = ""
+	input.SetValue(value)
+	if kind == journalPromptSearch {
+		input.Placeholder = "Search your journal…"
+	} else {
+		input.Placeholder = "YYYY-MM-DD"
+	}
+	return &journalPrompt{kind: kind, input: input, styles: styles}
+}
+
+func (p *journalPrompt) init() tea.Cmd { return p.input.Focus() }
+
+func (p *journalPrompt) resize(width int) { p.input.SetWidth(max(width-14, 10)) }
+
+func (p *journalPrompt) update(msg tea.Msg) tea.Cmd {
+	var cmd tea.Cmd
+	p.input, cmd = p.input.Update(msg)
+	return cmd
+}
+
+func (p *journalPrompt) view() string {
+	title, label := "Search journal", "Search: "
+	if p.kind == journalPromptDate {
+		title, label = "Go to date", "Date: "
+	}
+	var b strings.Builder
+	b.WriteString(p.styles.title.Render(title))
+	b.WriteString("\n\n")
+	b.WriteString(styleMuted.Render(label))
+	b.WriteString(p.input.View())
+	if p.status != "" {
+		b.WriteString("\n\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(colorError).Render(terminal.SanitizeLine(p.status)))
+	}
+	return b.String()
+}
 
 type journalView struct {
 	vc *viewContext
 
-	dates     []string
-	dateIndex int
+	list        journalList
+	loaded      bool
+	query       string
+	nextPage    string
+	loadingMore bool
+	moreID      uint64
 
-	topicViewport viewport.Model
-	topicContent  string
-	editContent   string
-	inThread      bool
+	detailDate    string
+	detailContent string
+	detailBody    htmlutil.Markdown
+	detailView    viewport.Model
+	inDetail      bool
 	form          *journalForm
+	prompt        *journalPrompt
+	confirmRemove bool
+	selectDate    string
 	notice        string
-	requests      requestLane[journalRequestKind]
+
+	requests requestLane[journalRequestKind]
 }
 
 func newJournalView(vc *viewContext) *journalView {
 	return &journalView{
-		vc:            vc,
-		dates:         generateJournalDates(30),
-		topicViewport: viewport.New(viewport.WithWidth(0), viewport.WithHeight(0)),
+		vc:         vc,
+		detailView: viewport.New(viewport.WithWidth(0), viewport.WithHeight(0)),
 	}
 }
 
 func (v *journalView) Init() tea.Cmd {
-	v.dates = generateJournalDates(30)
-	v.dateIndex = len(v.dates) - 1
-	return v.requestJournalEntry()
+	if v.loaded {
+		return nil
+	}
+	return v.requestFeed("")
 }
 
 func (v *journalView) Update(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
+	case journalPageLoadedMsg:
+		if cmd, ok := v.requests.settle(msg.requestResult); !ok {
+			return cmd, true
+		}
+		v.loaded = true
+		v.loadingMore = false
+		v.nextPage = msg.nextPage
+		v.list.setEntries(msg.entries)
+		if v.selectDate != "" {
+			v.list.selectDate(v.selectDate)
+			v.selectDate = ""
+		}
+		return v.loadMoreEntries(), true
+
+	case journalPageAppendedMsg:
+		if msg.requestID != v.moreID {
+			return nil, true
+		}
+		v.loadingMore = false
+		if msg.err != nil {
+			v.notice = errorNotice("Could not load older journal entries", msg.err)
+			return nil, true
+		}
+		v.list.growEntries(msg.entries)
+		v.nextPage = msg.nextPage
+		return v.loadMoreEntries(), true
+
 	case journalDetailMsg:
 		if cmd, ok := v.requests.settle(msg.requestResult); !ok {
 			return cmd, true
 		}
-		v.inThread = true
-		v.editContent = msg.content
-		v.topicContent = markdown.Render(msg.body, max(v.vc.width-4, 40))
-		if msg.body.IsEmpty() {
-			v.topicContent = "(empty)"
+		v.detailDate = msg.date
+		v.detailContent = msg.content
+		v.detailBody = msg.body
+		v.inDetail = true
+		v.confirmRemove = false
+		uploads := v.renderDetail(msg.images)
+		if msg.edit {
+			return tea.Batch(uploads, v.startEditor()), true
 		}
-		v.topicViewport.SetContent(v.topicContent)
-		v.topicViewport.GotoTop()
-		var uploadCmds []tea.Cmd
-		for _, imgData := range msg.images {
-			imageID := nextImageID()
-			cols, rows := imageDimensions(imgData, v.vc.width-4)
-			v.topicContent += "\n\n" + renderImagePlaceholder(imageID, cols, rows)
-			v.topicViewport.SetContent(v.topicContent)
-			seq := kittyUploadAndPlace(imgData, imageID, cols, rows)
-			uploadCmds = append(uploadCmds, tea.Raw(seq))
-		}
-		if len(uploadCmds) > 0 {
-			return tea.Batch(uploadCmds...), true
-		}
-		return nil, true
+		return uploads, true
 
 	case journalSavedMsg:
 		if !v.requests.accepts(msg.requestResult) {
@@ -107,155 +205,404 @@ func (v *journalView) Update(msg tea.Msg) (tea.Cmd, bool) {
 				v.form.saving = false
 				v.form.status = errorNotice("Save failed", msg.err)
 				v.form.isError = true
+			} else {
+				v.notice = errorNotice("Could not remove journal entry", msg.err)
 			}
 			return nil, true
 		}
 		v.form = nil
-		v.setNotice("Journal entry saved")
+		v.inDetail = false
+		v.query = ""
+		v.selectDate = msg.date
+		v.notice = "Journal entry saved"
 		if msg.removed {
-			v.setNotice("Journal entry removed")
+			v.notice = "Journal entry removed"
 		}
-		return v.requestJournalEntry(), true
+		return v.requestFeed(""), true
 	}
 
+	if v.prompt != nil {
+		return v.prompt.update(msg), true
+	}
 	if v.form != nil {
 		return v.form.update(msg), true
 	}
-	if v.inThread {
+	if v.inDetail {
 		var cmd tea.Cmd
-		v.topicViewport, cmd = v.topicViewport.Update(msg)
+		v.detailView, cmd = v.detailView.Update(msg)
 		return cmd, cmd != nil
 	}
-
 	return nil, false
 }
 
 func (v *journalView) View() string {
+	if v.prompt != nil {
+		return v.prompt.view()
+	}
 	if v.form != nil {
 		return v.form.view()
 	}
-	if v.notice != "" {
-		return v.vc.styles.title.Render(v.notice) + "\n" + v.topicViewport.View()
+	if v.inDetail {
+		if v.notice != "" {
+			return v.vc.styles.title.Render(v.notice) + "\n" + v.detailView.View()
+		}
+		return v.detailView.View()
 	}
-	return v.topicViewport.View()
+
+	var heading string
+	switch {
+	case v.notice != "":
+		heading = v.vc.styles.title.Render(v.notice)
+	case v.query != "":
+		heading = fmt.Sprintf("Search: %s · %d results", terminal.SanitizeLine(v.query), len(v.list.entries))
+	case len(v.list.entries) == 0 && v.loaded:
+		heading = "No journal entries yet · press a to write about today"
+	case !v.hasToday():
+		heading = "Today is empty · press a to write"
+	default:
+		heading = "Journal · newest first"
+	}
+	if v.loadingMore {
+		heading += " · loading older entries…"
+	}
+	return v.vc.styles.title.Render(heading) + "\n" + v.list.view()
 }
 
 func (v *journalView) HelpBindings() []helpBinding {
+	if v.prompt != nil {
+		label := "search"
+		if v.prompt.kind == journalPromptDate {
+			label = "go"
+		}
+		return []helpBinding{{"enter", label}, {"esc", "cancel"}}
+	}
 	if v.form != nil {
 		return v.form.helpBindings()
 	}
-	return []helpBinding{{"e", "edit"}}
+	if v.inDetail {
+		bindings := []helpBinding{{"e", "edit"}, {"t", "today"}}
+		if strings.TrimSpace(v.detailContent) != "" {
+			label := "remove"
+			if v.confirmRemove {
+				label = "confirm remove"
+			}
+			bindings = append(bindings, helpBinding{"x", label})
+		}
+		return bindings
+	}
+	bindings := []helpBinding{{"enter", "open"}, {"a", "add today"}, {"/", "search"}, {"g", "go to date"}, {"t", "today"}, {"r", "refresh"}}
+	if v.query != "" {
+		bindings = append(bindings, helpBinding{"c", "clear search"})
+	}
+	return bindings
 }
 
 func (v *journalView) SubnavItems() ([]navItem, int, string, bool) {
 	label := "Journal"
-	if v.dateIndex >= 0 && v.dateIndex < len(v.dates) {
-		label = v.dates[v.dateIndex]
+	if v.inDetail && v.detailDate != "" {
+		label = "Journal · " + v.detailDate
+	} else if v.query != "" {
+		label = "Journal search"
 	}
-	return journalNavItems(v.dates), v.dateIndex, label, false
+	return nil, 0, label, true
 }
 
-func (v *journalView) SubnavLeft() tea.Cmd {
-	if v.dateIndex > 0 {
-		v.dateIndex--
-		v.setNotice("")
-		return v.requestJournalEntry()
-	}
-	return nil
-}
-
-func (v *journalView) SubnavRight() tea.Cmd {
-	if v.dateIndex < len(v.dates)-1 {
-		v.dateIndex++
-		v.setNotice("")
-		return v.requestJournalEntry()
-	}
-	return nil
-}
+func (v *journalView) SubnavLeft() tea.Cmd  { return nil }
+func (v *journalView) SubnavRight() tea.Cmd { return nil }
 
 func (v *journalView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
+	if v.prompt != nil {
+		return v.handlePromptKey(msg)
+	}
 	if v.form != nil {
 		if msg.Key().Code == tea.KeyEscape && !v.form.saving {
-			v.form = nil
+			if v.form.canClose() {
+				v.form = nil
+			}
 			return nil
 		}
-		cmd, submit := v.form.handleKey(msg)
-		if submit {
-			return v.saveJournalEntry()
+		cmd, action := v.form.handleKey(msg)
+		switch action {
+		case journalFormSave:
+			return v.saveJournalEntry(false)
+		case journalFormRemove:
+			return v.saveJournalEntry(true)
+		default:
+			return cmd
 		}
+	}
+	if v.requests.kind == journalRequestMutation {
+		return nil
+	}
+
+	if msg.String() != "x" {
+		v.confirmRemove = false
+	}
+	v.notice = ""
+	if v.inDetail {
+		switch msg.String() {
+		case "e":
+			return v.startEditor()
+		case "t":
+			return v.requestDate(todayJournalDate(), false)
+		case "x":
+			if strings.TrimSpace(v.detailContent) == "" {
+				return nil
+			}
+			if !v.confirmRemove {
+				v.confirmRemove = true
+				v.notice = "Press x again to permanently remove this journal entry"
+				return nil
+			}
+			return v.removeJournalEntry(v.detailDate)
+		}
+		var cmd tea.Cmd
+		v.detailView, cmd = v.detailView.Update(msg)
 		return cmd
 	}
-	if msg.String() == "e" && v.inThread {
-		v.setNotice("")
-		v.form = newJournalForm(v.dates[v.dateIndex], v.editContent, v.vc.styles)
-		v.form.resize(v.vc.width, v.vc.height)
-		return v.form.init()
+
+	switch msg.Key().Code {
+	case tea.KeyUp:
+		v.list.moveUp()
+	case tea.KeyDown:
+		v.list.moveDown()
+		return v.loadMoreEntries()
+	case tea.KeyPgDown:
+		for range v.list.visibleCount() {
+			v.list.moveDown()
+		}
+		return v.loadMoreEntries()
+	case tea.KeyPgUp:
+		for range v.list.visibleCount() {
+			v.list.moveUp()
+		}
+	case tea.KeyEnter:
+		if entry := v.list.selected(); entry != nil {
+			return v.requestDate(entry.Date, false)
+		}
+	default:
+		switch msg.String() {
+		case "j":
+			v.list.moveDown()
+			return v.loadMoreEntries()
+		case "k":
+			v.list.moveUp()
+		case "a", "t":
+			return v.requestDate(todayJournalDate(), msg.String() == "a")
+		case "e":
+			if entry := v.list.selected(); entry != nil {
+				return v.requestDate(entry.Date, true)
+			}
+		case "/":
+			return v.startPrompt(journalPromptSearch, v.query)
+		case "g":
+			return v.startPrompt(journalPromptDate, "")
+		case "c":
+			if v.query != "" {
+				v.query = ""
+				return v.requestFeed("")
+			}
+		case "r":
+			return v.requestFeed(v.query)
+		}
+	}
+	return nil
+}
+
+func (v *journalView) handlePromptKey(msg tea.KeyPressMsg) tea.Cmd {
+	if msg.Key().Code == tea.KeyEscape {
+		v.prompt = nil
+		return nil
+	}
+	if msg.Key().Code != tea.KeyEnter {
+		return v.prompt.update(msg)
 	}
 
-	// Journal always shows content in viewport.
-	var cmd tea.Cmd
-	v.topicViewport, cmd = v.topicViewport.Update(msg)
-	return cmd
+	value := strings.TrimSpace(v.prompt.input.Value())
+	if v.prompt.kind == journalPromptSearch {
+		v.prompt = nil
+		v.query = value
+		return v.requestFeed(value)
+	}
+	if _, err := time.Parse("2006-01-02", value); err != nil {
+		v.prompt.status = "Use a date in YYYY-MM-DD format"
+		return nil
+	}
+	v.prompt = nil
+	return v.requestDate(value, false)
 }
 
-func (v *journalView) InThread() bool { return v.inThread }
-func (v *journalView) ExitThread()    {} // no-op: journal always shows content
-func (v *journalView) Loading() bool  { return v.requests.loading }
-func (v *journalView) CapturingInput() bool {
-	return v.form != nil
+func (v *journalView) startPrompt(kind journalPromptKind, value string) tea.Cmd {
+	v.prompt = newJournalPrompt(kind, value, v.vc.styles)
+	v.prompt.resize(v.vc.width)
+	return v.prompt.init()
 }
+
+func (v *journalView) startEditor() tea.Cmd {
+	v.notice = ""
+	v.form = newJournalForm(v.detailDate, v.detailContent, v.vc.styles)
+	v.form.resize(v.vc.width, v.vc.height)
+	return v.form.init()
+}
+
+func (v *journalView) InThread() bool { return v.inDetail }
+
+func (v *journalView) ExitThread() {
+	v.inDetail = false
+	v.form = nil
+	v.confirmRemove = false
+	v.detailDate = ""
+	v.detailContent = ""
+	v.detailBody = htmlutil.Markdown{}
+	v.requests.cancel()
+}
+
+func (v *journalView) CancelPendingDetail() bool {
+	if v.requests.kind != journalRequestDetail {
+		return false
+	}
+	v.requests.cancel()
+	return true
+}
+
+func (v *journalView) CapturingInput() bool { return v.form != nil || v.prompt != nil }
 
 func (v *journalView) AccountSwitchBlocked() bool {
 	return v.requests.kind == journalRequestMutation
 }
 
-// Restyle hands the active palette to the form. Journal content itself is plain text
-// and Kitty placeholders, so the viewport needs no repaint.
+func (v *journalView) Loading() bool { return v.requests.loading }
+
 func (v *journalView) Restyle() {
 	if v.form != nil {
 		v.form.styles = v.vc.styles
 	}
+	if v.prompt != nil {
+		v.prompt.styles = v.vc.styles
+	}
 }
 
 func (v *journalView) Resize(width, height int) {
-	v.topicViewport.SetWidth(width)
-	v.resizeViewport(height)
+	v.list.setSize(width, max(height-1, 1))
+	v.detailView.SetWidth(width)
+	v.detailView.SetHeight(height)
 	if v.form != nil {
 		v.form.resize(width, height)
 	}
-}
-
-func (v *journalView) setNotice(notice string) {
-	v.notice = notice
-	v.resizeViewport(v.vc.height)
-}
-
-func (v *journalView) resizeViewport(height int) {
-	if v.notice != "" {
-		height--
+	if v.prompt != nil {
+		v.prompt.resize(width)
 	}
-	v.topicViewport.SetHeight(max(height, 1))
 }
 
-// --- Fetch command ---
-
-func (v *journalView) requestJournalEntry() tea.Cmd {
-	v.inThread = false
-	v.editContent = ""
-	requestID, ctx := v.requests.begin(v.vc.ctx, journalRequestEntry)
-	return v.fetchJournalEntry(ctx, requestID, v.dates[v.dateIndex])
+func (v *journalView) hasToday() bool {
+	today := todayJournalDate()
+	for _, entry := range v.list.entries {
+		if entry.Date == today {
+			return true
+		}
+	}
+	return false
 }
 
-// A day HEY has nothing for answers 204, which opens as an empty editable page. A failed
-// read remains an error so the editor cannot replace an entry whose content it never saw.
-func (v *journalView) fetchJournalEntry(ctx context.Context, requestID uint64, date string) tea.Cmd {
+func todayJournalDate() string { return time.Now().Format("2006-01-02") }
+
+func (v *journalView) requestFeed(query string) tea.Cmd {
+	v.nextPage = ""
+	v.loadingMore = false
+	v.moreID++
+	v.query = query
+	requestID, ctx := v.requests.begin(v.vc.ctx, journalRequestFeed)
+	return v.fetchJournalPage(ctx, requestID, "", query)
+}
+
+func (v *journalView) loadMoreEntries() tea.Cmd {
+	if v.loadingMore || v.nextPage == "" || v.query != "" {
+		return nil
+	}
+	if v.list.hasRowsBelow() && len(v.list.entries)-v.list.cursor > loadMoreThreshold {
+		return nil
+	}
+	v.loadingMore = true
+	v.moreID++
+	return v.fetchMoreJournalPage(v.vc.ctx, v.moreID, v.nextPage)
+}
+
+func (v *journalView) fetchJournalPage(ctx context.Context, requestID uint64, page, query string) tea.Cmd {
+	return func() tea.Msg {
+		result, err := v.vc.sdk.Journal().ListPage(ctx, page, query)
+		if err != nil {
+			return journalPageLoadedMsg{requestResult: newRequestResult(requestID, err)}
+		}
+		if result == nil {
+			return journalPageLoadedMsg{requestResult: newRequestResult(requestID, nil)}
+		}
+		return journalPageLoadedMsg{
+			requestResult: newRequestResult(requestID, nil),
+			entries:       journalSummaries(result.Entries),
+			nextPage:      result.NextPage,
+		}
+	}
+}
+
+func (v *journalView) fetchMoreJournalPage(ctx context.Context, requestID uint64, page string) tea.Cmd {
+	return func() tea.Msg {
+		result, err := v.vc.sdk.Journal().ListPage(ctx, page, "")
+		if err != nil {
+			return journalPageAppendedMsg{requestID: requestID, err: err}
+		}
+		if result == nil {
+			return journalPageAppendedMsg{requestID: requestID}
+		}
+		return journalPageAppendedMsg{
+			requestID: requestID,
+			entries:   journalSummaries(result.Entries),
+			nextPage:  result.NextPage,
+		}
+	}
+}
+
+func journalSummaries(recordings []generated.Recording) []journalSummary {
+	entries := make([]journalSummary, 0, len(recordings))
+	for _, recording := range recordings {
+		if recording.Type != "" && recording.Type != "Calendar::JournalEntry" {
+			continue
+		}
+		date, starts := journalRecordingDate(recording.StartsAt)
+		entries = append(entries, journalSummary{
+			ID:      recording.Id,
+			Date:    date,
+			Starts:  starts,
+			Preview: recording.Content,
+		})
+	}
+	return entries
+}
+
+// HEY sends a journal recording's day as midnight UTC so its calendar date survives
+// deserialization unchanged. Build the display time from that date rather than converting
+// midnight to local time, which would move the entry onto yesterday west of UTC.
+func journalRecordingDate(starts time.Time) (string, time.Time) {
+	if starts.IsZero() {
+		return "", time.Time{}
+	}
+	utc := starts.UTC()
+	year, month, day := utc.Date()
+	return utc.Format("2006-01-02"), time.Date(year, month, day, 12, 0, 0, 0, time.Local)
+}
+
+func (v *journalView) requestDate(date string, edit bool) tea.Cmd {
+	requestID, ctx := v.requests.begin(v.vc.ctx, journalRequestDetail)
+	return v.fetchJournalEntry(ctx, requestID, date, edit)
+}
+
+func (v *journalView) fetchJournalEntry(ctx context.Context, requestID uint64, date string, edit bool) tea.Cmd {
 	return func() tea.Msg {
 		recording, err := v.vc.sdk.Journal().Get(ctx, date)
 		if err != nil {
-			return journalDetailMsg{requestResult: newRequestResult(requestID, err)}
+			return journalDetailMsg{requestResult: newRequestResult(requestID, err), date: date, edit: edit}
 		}
 		if recording == nil {
-			return journalDetailMsg{requestResult: newRequestResult(requestID, nil)}
+			return journalDetailMsg{requestResult: newRequestResult(requestID, nil), date: date, edit: edit}
 		}
 
 		editableContent := recording.ContentHtml
@@ -273,16 +620,48 @@ func (v *journalView) fetchJournalEntry(ctx context.Context, requestID uint64, d
 
 		return journalDetailMsg{
 			requestResult: newRequestResult(requestID, nil),
+			date:          date,
 			content:       editableContent,
 			body:          htmlToMarkdown(renderedContent),
 			images:        images,
+			edit:          edit,
 		}
 	}
 }
 
-// journalEditorContent returns a stable rich-text document for HEY updates. It removes
-// div.trix-content presentation containers and writes every other token byte-for-byte,
-// preserving Trix attachment attributes across repeated edit-save cycles.
+func (v *journalView) renderDetail(images [][]byte) tea.Cmd {
+	content := markdown.Render(v.detailBody, max(v.vc.width-4, 40))
+	if v.detailBody.IsEmpty() {
+		content = "No entry for this day · press e to write"
+	}
+	heading := friendlyDateFromString(v.detailDate)
+	content = v.vc.styles.title.Render(heading) + "\n\n" + content
+	uploads := make([]tea.Cmd, 0, len(images))
+	for _, imageData := range images {
+		imageID := nextImageID()
+		cols, rows := imageDimensions(imageData, v.vc.width-4)
+		content += "\n\n" + renderImagePlaceholder(imageID, cols, rows)
+		uploads = append(uploads, tea.Raw(kittyUploadAndPlace(imageData, imageID, cols, rows)))
+	}
+	v.detailView.SetContent(content)
+	v.detailView.GotoTop()
+	if len(uploads) == 0 {
+		return nil
+	}
+	return tea.Batch(uploads...)
+}
+
+func friendlyDateFromString(date string) string {
+	parsed, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		return terminal.SanitizeLine(date)
+	}
+	if date == todayJournalDate() {
+		return "Today · " + parsed.Format("Monday, January 2, 2006")
+	}
+	return parsed.Format("Monday, January 2, 2006")
+}
+
 func journalEditorContent(content string) string {
 	content = strings.TrimSpace(content)
 	tokens := nethtml.NewTokenizer(strings.NewReader(content))
@@ -340,27 +719,23 @@ func hasHTMLClass(token nethtml.Token, name string) bool {
 	return false
 }
 
-func (v *journalView) saveJournalEntry() tea.Cmd {
+func (v *journalView) saveJournalEntry(remove bool) tea.Cmd {
 	content := v.form.content()
+	if remove {
+		content = ""
+	}
 	date := v.form.date
 	requestID, ctx := v.requests.begin(v.vc.ctx, journalRequestMutation)
 	return func() tea.Msg {
 		_, err := v.vc.sdk.Journal().Update(ctx, date, content)
-		return journalSavedMsg{
-			requestResult: newRequestResult(requestID, err),
-			removed:       content == "",
-		}
+		return journalSavedMsg{requestResult: newRequestResult(requestID, err), date: date, removed: remove}
 	}
 }
 
-// --- Journal date generation ---
-
-func generateJournalDates(n int) []string {
-	dates := make([]string, n)
-	today := time.Now()
-	for i := range n {
-		d := today.AddDate(0, 0, -(n - 1 - i))
-		dates[i] = d.Format("2006-01-02")
+func (v *journalView) removeJournalEntry(date string) tea.Cmd {
+	requestID, ctx := v.requests.begin(v.vc.ctx, journalRequestMutation)
+	return func() tea.Msg {
+		_, err := v.vc.sdk.Journal().Update(ctx, date, "")
+		return journalSavedMsg{requestResult: newRequestResult(requestID, err), date: date, removed: true}
 	}
-	return dates
 }

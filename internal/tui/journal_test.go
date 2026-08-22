@@ -6,549 +6,324 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 )
 
-func journalWithEntry() *journalView {
-	v := newJournalView(testVC())
-	v.Init()
-	v.Update(journalDetailMsg{
-		requestResult: currentJournalRequest(v),
-		content:       "<p>Today was great</p>",
-		body:          htmlutil.ToMarkdown("<p>Today was great</p>"),
-	})
-	return v
-}
-
-// currentJournalRequest tags a response as the answer to the read the journal is
-// waiting on, the way the fetch command that started it would.
-func currentJournalRequest(v *journalView) requestResult {
+func currentJournalResult(v *journalView) requestResult {
 	return requestResult{requestID: v.requests.id}
 }
 
-// --- Init ---
+func journalEntries(count int) []journalSummary {
+	entries := make([]journalSummary, count)
+	for index := range count {
+		starts := time.Now().AddDate(0, 0, -index)
+		entries[index] = journalSummary{
+			ID:      int64(index + 1),
+			Date:    starts.Format("2006-01-02"),
+			Starts:  starts,
+			Preview: "Reflection from the day",
+		}
+	}
+	return entries
+}
 
-func TestJournalViewInitFetchesEntry(t *testing.T) {
+func loadedJournalView(entries []journalSummary) *journalView {
+	v := newJournalView(testVC())
+	v.Resize(80, 20)
+	v.Init()
+	v.Update(journalPageLoadedMsg{requestResult: currentJournalResult(v), entries: entries})
+	return v
+}
+
+func TestJournalInitRequestsFeed(t *testing.T) {
 	v := newJournalView(testVC())
 	cmd := v.Init()
-	if cmd == nil {
-		t.Fatal("Init should return a fetch command")
-	}
-	if !v.requests.loading {
-		t.Error("Init should set loading = true")
+	if cmd == nil || !v.requests.loading || v.requests.kind != journalRequestFeed {
+		t.Fatalf("feed request = cmd:%v loading:%v kind:%v", cmd != nil, v.requests.loading, v.requests.kind)
 	}
 }
 
-func TestJournalViewInitSelectsToday(t *testing.T) {
+func TestJournalSummaryKeepsHEYsUTCCalendarDate(t *testing.T) {
+	recording := generated.Recording{
+		Id:       1,
+		Type:     "Calendar::JournalEntry",
+		StartsAt: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+		Content:  "A day worth remembering",
+	}
+
+	entries := journalSummaries([]generated.Recording{recording})
+	if len(entries) != 1 || entries[0].Date != "2026-07-01" {
+		t.Fatalf("journal date = %#v, want 2026-07-01", entries)
+	}
+	if got := entries[0].Starts.Format("2006-01-02"); got != "2026-07-01" {
+		t.Fatalf("display date = %q, want 2026-07-01", got)
+	}
+}
+
+func TestJournalFeedShowsEntriesInsteadOfDateTabs(t *testing.T) {
+	v := loadedJournalView(journalEntries(2))
+	content := stripANSI(v.View())
+	if !strings.Contains(content, "Journal · newest first") || !strings.Contains(content, "Reflection from the day") {
+		t.Fatalf("feed = %q", content)
+	}
+	items, _, label, _ := v.SubnavItems()
+	if len(items) != 0 || label != "Journal" {
+		t.Fatalf("subnav = items:%d label:%q", len(items), label)
+	}
+}
+
+func TestJournalFeedEmptyStateInvitesAddingToday(t *testing.T) {
+	v := loadedJournalView(nil)
+	if got := stripANSI(v.View()); !strings.Contains(got, "press a to write about today") {
+		t.Fatalf("empty feed = %q", got)
+	}
+}
+
+func TestJournalFeedAppendsOlderPage(t *testing.T) {
+	v := newJournalView(testVC())
+	v.Resize(80, 20)
+	v.Init()
+	loadMore, _ := v.Update(journalPageLoadedMsg{
+		requestResult: currentJournalResult(v),
+		entries:       journalEntries(2),
+		nextPage:      "older-cursor",
+	})
+	if loadMore == nil || !v.loadingMore {
+		t.Fatal("a short first page should load the page below it")
+	}
+	_, consumed := v.Update(journalPageAppendedMsg{
+		requestID: v.moreID,
+		entries: []journalSummary{{
+			ID: 9, Date: "2025-01-01", Starts: time.Date(2025, 1, 1, 12, 0, 0, 0, time.Local), Preview: "Older entry",
+		}},
+	})
+	if !consumed || len(v.list.entries) != 3 || v.list.entries[2].Preview != "Older entry" {
+		t.Fatalf("grown feed = consumed:%v entries:%#v", consumed, v.list.entries)
+	}
+}
+
+func TestJournalFeedIgnoresStalePage(t *testing.T) {
 	v := newJournalView(testVC())
 	v.Init()
-	today := time.Now().Format("2006-01-02")
-	if v.dateIndex < 0 || v.dateIndex >= len(v.dates) {
-		t.Fatalf("dateIndex = %d out of range", v.dateIndex)
-	}
-	if v.dates[v.dateIndex] != today {
-		t.Errorf("selected date = %q, want today %q", v.dates[v.dateIndex], today)
-	}
-}
-
-// --- Update: message routing ---
-
-func TestJournalFetchKeepsRichContentForEditing(t *testing.T) {
-	heyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id":           1,
-			"content":      "Today was great",
-			"content_html": `<div class="trix-content"><p><strong>Today</strong> was great</p></div>`,
-			"type":         "Calendar::JournalEntry",
-		})
-	}))
-	t.Cleanup(heyServer.Close)
-
-	client := hey.NewClient(
-		&hey.Config{BaseURL: heyServer.URL},
-		&hey.StaticTokenProvider{Token: "test-token"},
-		hey.WithMaxRetries(0),
-	)
-	vc := testVC()
-	vc.ctx = context.Background()
-	vc.sdk = client
-	v := newJournalView(vc)
-
-	loaded := v.fetchJournalEntry(vc.ctx, 1, "2026-08-19")().(journalDetailMsg)
-
-	if loaded.content != "<p><strong>Today</strong> was great</p>" {
-		t.Errorf("editable content = %q", loaded.content)
-	}
-	if loaded.body.IsEmpty() {
-		t.Error("rich-text body should be rendered")
+	v.requestFeed("planning")
+	v.Update(journalPageLoadedMsg{
+		requestResult: requestResult{requestID: v.requests.id - 1},
+		entries:       journalEntries(1),
+	})
+	if len(v.list.entries) != 0 || !v.requests.loading {
+		t.Fatalf("stale page changed feed: entries:%d loading:%v", len(v.list.entries), v.requests.loading)
 	}
 }
 
-func TestJournalEditorContentRemovesTrixContainers(t *testing.T) {
-	tests := []struct {
-		name    string
-		content string
-		want    string
-	}{
-		{
-			name:    "read wrapper",
-			content: `<div class="trix-content"><p>Today was great</p></div>`,
-			want:    `<p>Today was great</p>`,
-		},
-		{
-			name: "wrappers stored by earlier saves",
-			content: `<div class="trix-content">
-  <div class="trix-content">
-    <div>Today was great</div>
-  </div>
-  and then some
-</div>`,
-			want: "<div>Today was great</div>\n  \n  and then some",
-		},
-		{
-			name:    "attachment bytes",
-			content: `<div class="trix-content"><figure data-trix-attachment="{&quot;sgid&quot;:&quot;abc&quot;}"></figure></div>`,
-			want:    `<figure data-trix-attachment="{&quot;sgid&quot;:&quot;abc&quot;}"></figure>`,
-		},
-		{
-			name:    "ordinary div",
-			content: `<div class="note"><strong>Keep me</strong></div>`,
-			want:    `<div class="note"><strong>Keep me</strong></div>`,
-		},
+func TestJournalScrollNearBottomLoadsMore(t *testing.T) {
+	v := loadedJournalView(journalEntries(10))
+	v.nextPage = "next"
+	v.Resize(80, 6)
+	for range 6 {
+		v.HandleContentKey(keyPress("down"))
 	}
+	if !v.loadingMore {
+		t.Fatal("scrolling near the bottom should load another page")
+	}
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := journalEditorContent(tt.content); got != tt.want {
-				t.Errorf("journalEditorContent() = %q, want %q", got, tt.want)
-			}
-		})
+func TestJournalSearchAndClear(t *testing.T) {
+	v := loadedJournalView(journalEntries(1))
+	if cmd := v.HandleContentKey(keyPress("/")); cmd == nil || v.prompt == nil {
+		t.Fatal("/ should open and focus search")
+	}
+	v.prompt.input.SetValue("quarterly planning")
+	cmd := v.HandleContentKey(keyPress("enter"))
+	if cmd == nil || v.prompt != nil || v.query != "quarterly planning" || v.requests.kind != journalRequestFeed {
+		t.Fatalf("search state = cmd:%v prompt:%v query:%q kind:%v", cmd != nil, v.prompt != nil, v.query, v.requests.kind)
+	}
+	v.Update(journalPageLoadedMsg{requestResult: currentJournalResult(v)})
+	if got := stripANSI(v.View()); !strings.Contains(got, "Search: quarterly planning · 0 results") {
+		t.Fatalf("search empty state = %q", got)
+	}
+	if cmd := v.HandleContentKey(keyPress("c")); cmd == nil || v.query != "" {
+		t.Fatalf("clear search = cmd:%v query:%q", cmd != nil, v.query)
+	}
+}
+
+func TestJournalSearchEscapeKeepsFeed(t *testing.T) {
+	v := loadedJournalView(journalEntries(1))
+	v.HandleContentKey(keyPress("/"))
+	v.prompt.input.SetValue("discard me")
+	v.HandleContentKey(keyPress("esc"))
+	if v.prompt != nil || v.query != "" || len(v.list.entries) != 1 {
+		t.Fatalf("cancelled search = prompt:%v query:%q entries:%d", v.prompt != nil, v.query, len(v.list.entries))
+	}
+}
+
+func TestJournalDateJumpValidatesAndLoads(t *testing.T) {
+	v := loadedJournalView(nil)
+	v.HandleContentKey(keyPress("g"))
+	v.prompt.input.SetValue("August 19")
+	if cmd := v.HandleContentKey(keyPress("enter")); cmd != nil || v.prompt.status == "" {
+		t.Fatalf("invalid date = cmd:%v status:%q", cmd != nil, v.prompt.status)
+	}
+	v.prompt.input.SetValue("2026-08-19")
+	cmd := v.HandleContentKey(keyPress("enter"))
+	if cmd == nil || v.prompt != nil || v.requests.kind != journalRequestDetail {
+		t.Fatalf("date jump = cmd:%v prompt:%v kind:%v", cmd != nil, v.prompt != nil, v.requests.kind)
+	}
+}
+
+func TestJournalOpensSelectedEntryAndBackReturnsToFeed(t *testing.T) {
+	v := loadedJournalView(journalEntries(1))
+	if cmd := v.HandleContentKey(keyPress("enter")); cmd == nil || v.requests.kind != journalRequestDetail {
+		t.Fatal("enter should request the selected day")
+	}
+	v.Update(journalDetailMsg{
+		requestResult: currentJournalResult(v),
+		date:          v.list.entries[0].Date,
+		content:       "Today was productive",
+		body:          htmlutil.ToMarkdown("<p>Today was productive</p>"),
+	})
+	if !v.InThread() || !strings.Contains(stripANSI(v.View()), "Today was productive") {
+		t.Fatalf("detail = inDetail:%v view:%q", v.InThread(), stripANSI(v.View()))
+	}
+	v.ExitThread()
+	if v.InThread() || len(v.list.entries) != 1 {
+		t.Fatalf("back = inDetail:%v entries:%d", v.InThread(), len(v.list.entries))
+	}
+}
+
+func TestJournalAddTodayOpensEditorAfterSafeRead(t *testing.T) {
+	v := loadedJournalView(nil)
+	if cmd := v.HandleContentKey(keyPress("a")); cmd == nil {
+		t.Fatal("add should read today before editing")
+	}
+	edit, consumed := v.Update(journalDetailMsg{
+		requestResult: currentJournalResult(v),
+		date:          todayJournalDate(),
+		edit:          true,
+	})
+	if !consumed || edit == nil || v.form == nil || v.form.date != todayJournalDate() {
+		t.Fatalf("add state = consumed:%v focus:%v form:%v", consumed, edit != nil, v.form != nil)
+	}
+}
+
+func TestJournalDirtyEditorRequiresSecondEscape(t *testing.T) {
+	v := loadedJournalView(nil)
+	v.detailDate = "2026-08-19"
+	v.detailContent = "Original"
+	v.inDetail = true
+	v.startEditor()
+	v.form.input.SetValue("Changed")
+	v.HandleContentKey(keyPress("esc"))
+	if v.form == nil || !v.form.confirmDiscard {
+		t.Fatal("first escape should warn and keep the editor")
+	}
+	v.HandleContentKey(keyPress("esc"))
+	if v.form != nil {
+		t.Fatal("second escape should discard the draft")
+	}
+}
+
+func TestJournalEmptySaveRequiresExplicitConfirmedRemoval(t *testing.T) {
+	v := loadedJournalView(nil)
+	v.detailDate = "2026-08-19"
+	v.detailContent = "Original"
+	v.inDetail = true
+	v.startEditor()
+	v.form.input.SetValue("  ")
+	if cmd := v.HandleContentKey(keyPress("ctrl+s")); cmd != nil || v.form.status == "" {
+		t.Fatalf("empty save = cmd:%v status:%q", cmd != nil, v.form.status)
+	}
+	if cmd := v.HandleContentKey(keyPress("ctrl+d")); cmd != nil || !v.form.confirmRemove {
+		t.Fatalf("first removal = cmd:%v confirmed:%v", cmd != nil, v.form.confirmRemove)
+	}
+	if cmd := v.HandleContentKey(keyPress("ctrl+d")); cmd == nil || v.requests.kind != journalRequestMutation {
+		t.Fatalf("confirmed removal = cmd:%v kind:%v", cmd != nil, v.requests.kind)
+	}
+}
+
+func TestJournalNewEmptyEntryDoesNotSave(t *testing.T) {
+	v := loadedJournalView(nil)
+	v.detailDate = "2026-08-19"
+	v.inDetail = true
+	v.startEditor()
+	if cmd := v.HandleContentKey(keyPress("ctrl+s")); cmd != nil || !v.form.isError {
+		t.Fatalf("new empty save = cmd:%v error:%v", cmd != nil, v.form.isError)
+	}
+}
+
+func TestJournalDetailRemovalRequiresConfirmation(t *testing.T) {
+	v := loadedJournalView(nil)
+	v.detailDate = "2026-08-19"
+	v.detailContent = "Original"
+	v.inDetail = true
+	if cmd := v.HandleContentKey(keyPress("x")); cmd != nil || !v.confirmRemove {
+		t.Fatalf("first x = cmd:%v confirmed:%v", cmd != nil, v.confirmRemove)
+	}
+	if cmd := v.HandleContentKey(keyPress("x")); cmd == nil || v.requests.kind != journalRequestMutation {
+		t.Fatalf("second x = cmd:%v kind:%v", cmd != nil, v.requests.kind)
 	}
 }
 
 func TestJournalFailedReadDoesNotOpenEditor(t *testing.T) {
-	heyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "nope", http.StatusBadRequest)
 	}))
-	t.Cleanup(heyServer.Close)
-
+	t.Cleanup(server.Close)
 	vc := testVC()
 	vc.ctx = context.Background()
-	vc.sdk = hey.NewClient(
-		&hey.Config{BaseURL: heyServer.URL},
-		&hey.StaticTokenProvider{Token: "test-token"},
-		hey.WithMaxRetries(0),
-	)
+	vc.sdk = hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
 	v := newJournalView(vc)
-	cmd := v.Init()
-
-	errCmd, consumed := v.Update(cmd())
-	if !consumed || errCmd == nil {
-		t.Fatalf("failed read = consumed:%v error command:%v", consumed, errCmd != nil)
-	}
-	if v.inThread || v.editContent != "" {
-		t.Fatalf("failed read state = open:%v content:%q", v.inThread, v.editContent)
-	}
-	if cmd := v.HandleContentKey(keyPress("e")); cmd != nil || v.form != nil {
-		t.Fatalf("edit after failed read = cmd:%v form:%v", cmd != nil, v.form != nil)
+	v.requestDate("2026-08-19", true)
+	msg := v.fetchJournalEntry(vc.ctx, v.requests.id, "2026-08-19", true)()
+	cmd, consumed := v.Update(msg)
+	if !consumed || cmd == nil || v.form != nil || v.inDetail {
+		t.Fatalf("failed read = consumed:%v error:%v form:%v detail:%v", consumed, cmd != nil, v.form != nil, v.inDetail)
 	}
 }
 
-func TestJournalPlainTextFallbackStaysLiteral(t *testing.T) {
-	var imageRequests atomic.Int64
-	imageData := testPNG(t)
-	literal := `<img src="/rails/active_storage/blobs/redirect/tracking.png">`
-	heyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/rails/active_storage/blobs/") {
-			imageRequests.Add(1)
-			w.Header().Set("Content-Type", "image/png")
-			_, _ = w.Write(imageData)
-			return
-		}
+func TestJournalFetchKeepsRichContentForEditing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id":      1,
-			"content": literal,
-			"type":    "Calendar::JournalEntry",
+			"id": 1, "content": "Today was great",
+			"content_html": `<div class="trix-content"><p><strong>Today</strong> was great</p></div>`,
+			"type":         "Calendar::JournalEntry",
 		})
 	}))
-	t.Cleanup(heyServer.Close)
-
-	client := hey.NewClient(
-		&hey.Config{BaseURL: heyServer.URL},
-		&hey.StaticTokenProvider{Token: "test-token"},
-		hey.WithMaxRetries(0),
-	)
+	t.Cleanup(server.Close)
 	vc := testVC()
 	vc.ctx = context.Background()
-	vc.sdk = client
-	vc.imageRenderer = kittyImageRenderer{}
-	vc.imageFetcher = newTrustedImageFetcher(client)
+	vc.sdk = hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
 	v := newJournalView(vc)
-
-	loaded := v.fetchJournalEntry(vc.ctx, 1, "2026-08-19")().(journalDetailMsg)
-
-	if loaded.content != literal {
-		t.Errorf("editable content = %q, want literal %q", loaded.content, literal)
-	}
-	if got := imageRequests.Load(); got != 0 {
-		t.Fatalf("text journal fetched an image %d time(s)", got)
-	}
-	if len(loaded.images) != 0 {
-		t.Fatalf("text journal returned %d images", len(loaded.images))
+	loaded := v.fetchJournalEntry(vc.ctx, 1, "2026-08-19", false)().(journalDetailMsg)
+	if loaded.content != "<p><strong>Today</strong> was great</p>" || loaded.body.IsEmpty() {
+		t.Fatalf("loaded rich entry = content:%q empty:%v", loaded.content, loaded.body.IsEmpty())
 	}
 }
 
-func TestJournalViewHandlesDetailLoaded(t *testing.T) {
-	v := newJournalView(testVC())
-	v.Init() // sets dateIndex to today
-
-	_, consumed := v.Update(journalDetailMsg{
-		requestResult: currentJournalRequest(v),
-		content:       "Entry body",
-		body:          htmlutil.ToMarkdown("<p>Entry body</p>"),
-	})
-	if !consumed {
-		t.Error("journalDetailMsg should be consumed")
-	}
-	if v.requests.loading {
-		t.Error("loading should be false after detail loaded")
-	}
-	if !v.inThread {
-		t.Error("should be in thread after detail loaded")
-	}
-	if v.editContent != "Entry body" {
-		t.Errorf("editable content = %q", v.editContent)
+func TestJournalEditorContentPreservesAttachmentsWithoutTrixWrapper(t *testing.T) {
+	content := `<div class="trix-content"><figure data-trix-attachment="{&quot;sgid&quot;:&quot;abc&quot;}"></figure></div>`
+	want := `<figure data-trix-attachment="{&quot;sgid&quot;:&quot;abc&quot;}"></figure>`
+	if got := journalEditorContent(content); got != want {
+		t.Fatalf("journalEditorContent() = %q, want %q", got, want)
 	}
 }
 
-func TestJournalViewIgnoresStaleResponse(t *testing.T) {
-	v := newJournalView(testVC())
-	v.Init()
-
-	// A response to the read the reader has since moved off
-	_, consumed := v.Update(journalDetailMsg{requestResult: requestResult{requestID: v.requests.id - 1}, body: htmlutil.ToMarkdown("<p>old content</p>")})
-	if !consumed {
-		t.Error("stale journalDetailMsg should still be consumed")
-	}
-	if !v.requests.loading {
-		t.Error("loading should remain true after stale response")
-	}
-	if v.topicContent == "old content" {
-		t.Error("stale response should not overwrite content")
-	}
-}
-
-func TestJournalViewIgnoresUnrelatedMessages(t *testing.T) {
-	v := newJournalView(testVC())
-	_, consumed := v.Update(boxesLoadedMsg{})
-	if consumed {
-		t.Error("boxesLoadedMsg should not be consumed by journalView")
-	}
-}
-
-// --- Content key handling ---
-
-func TestJournalViewContentKeyScrolls(t *testing.T) {
-	v := journalWithEntry()
-	v.Resize(80, 30)
-
-	// Keys should go to viewport without crashing
-	v.HandleContentKey(keyPress("down"))
-	v.HandleContentKey(keyPress("up"))
-}
-
-func TestJournalViewEditsSelectedDay(t *testing.T) {
-	v := journalWithEntry()
-	v.Resize(80, 30)
-
-	if cmd := v.HandleContentKey(keyPress("e")); cmd == nil {
-		t.Fatal("edit should focus the journal form")
-	}
-	if !v.CapturingInput() {
-		t.Fatal("journal form should capture input")
-	}
-	if got := v.form.input.Value(); got != "<p>Today was great</p>" {
-		t.Errorf("form content = %q", got)
-	}
-	if got := v.form.date; got != v.dates[v.dateIndex] {
-		t.Errorf("form date = %q, want %q", got, v.dates[v.dateIndex])
-	}
-
-	v.HandleContentKey(keyPress("esc"))
-	if v.form != nil || v.CapturingInput() {
-		t.Fatal("escape should cancel the journal form")
-	}
-}
-
-func TestJournalViewSavesAndRemovesEntries(t *testing.T) {
-	tests := []struct {
-		name        string
-		input       string
-		wantContent string
-		wantNotice  string
-	}{
-		{name: "save", input: "  A better day\n", wantContent: "A better day", wantNotice: "Journal entry saved"},
-		{
-			name:        "preserve rich content",
-			input:       `<div><strong>Great</strong></div><figure data-trix-attachment="{&quot;sgid&quot;:&quot;abc&quot;}"></figure>`,
-			wantContent: `<div><strong>Great</strong></div><figure data-trix-attachment="{&quot;sgid&quot;:&quot;abc&quot;}"></figure>`,
-			wantNotice:  "Journal entry saved",
-		},
-		{name: "remove", input: " \n ", wantContent: "", wantNotice: "Journal entry removed"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var gotContent string
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method != http.MethodPatch {
-					t.Fatalf("method = %s, want PATCH", r.Method)
-				}
-				var payload struct {
-					CalendarJournalEntry struct {
-						Content string `json:"content"`
-					} `json:"calendar_journal_entry"`
-				}
-				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-					t.Fatal(err)
-				}
-				gotContent = payload.CalendarJournalEntry.Content
-				if gotContent == "" {
-					w.WriteHeader(http.StatusNoContent)
-					return
-				}
-				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"id":           1,
-					"content":      gotContent,
-					"content_html": "<p>" + gotContent + "</p>",
-					"type":         "Calendar::JournalEntry",
-				})
-			}))
-			t.Cleanup(server.Close)
-
-			vc := testVC()
-			vc.ctx = context.Background()
-			vc.sdk = hey.NewClient(
-				&hey.Config{BaseURL: server.URL},
-				&hey.StaticTokenProvider{Token: "test-token"},
-				hey.WithMaxRetries(0),
-			)
-			v := newJournalView(vc)
-			v.Init()
-			v.Update(journalDetailMsg{requestResult: currentJournalRequest(v)})
-			v.HandleContentKey(keyPress("e"))
-			v.form.input.SetValue(tt.input)
-
-			cmd := v.HandleContentKey(keyPress("ctrl+s"))
-			if cmd == nil || !v.form.saving || !v.AccountSwitchBlocked() {
-				t.Fatalf("save state = cmd:%v saving:%v blocked:%v", cmd != nil, v.form.saving, v.AccountSwitchBlocked())
-			}
-			refresh, consumed := v.Update(cmd())
-			if !consumed || refresh == nil {
-				t.Fatalf("saved message = consumed:%v refresh:%v", consumed, refresh != nil)
-			}
-			if gotContent != tt.wantContent {
-				t.Errorf("saved content = %q, want %q", gotContent, tt.wantContent)
-			}
-			if v.form != nil || v.notice != tt.wantNotice {
-				t.Errorf("saved state = form:%v notice:%q", v.form != nil, v.notice)
-			}
-			if got, want := v.topicViewport.Height(), v.vc.height-1; got != want {
-				t.Errorf("viewport height with notice = %d, want %d", got, want)
-			}
-			if v.requests.kind != journalRequestEntry {
-				t.Errorf("request kind = %v, want refresh", v.requests.kind)
-			}
-		})
-	}
-}
-
-func TestJournalRepeatedSavesDoNotAddTrixWrapper(t *testing.T) {
-	stored := `<div><strong>Today</strong> was great</div><figure data-trix-attachment="{&quot;sgid&quot;:&quot;abc&quot;}"></figure>`
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.Method {
-		case http.MethodGet:
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"id":           1,
-				"content":      "Today was great",
-				"content_html": `<div class="trix-content">` + stored + `</div>`,
-				"type":         "Calendar::JournalEntry",
-			})
-		case http.MethodPatch:
-			var payload struct {
-				CalendarJournalEntry struct {
-					Content string `json:"content"`
-				} `json:"calendar_journal_entry"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-				t.Fatal(err)
-			}
-			stored = payload.CalendarJournalEntry.Content
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"id":           1,
-				"content":      "Today was great",
-				"content_html": `<div class="trix-content">` + stored + `</div>`,
-				"type":         "Calendar::JournalEntry",
-			})
-		default:
-			t.Fatalf("method = %s", r.Method)
+func TestJournalHelpBindingsDescribeFeedSearchDateAndAdd(t *testing.T) {
+	v := loadedJournalView(journalEntries(1))
+	got := v.HelpBindings()
+	for _, want := range []helpBinding{{"enter", "open"}, {"a", "add today"}, {"/", "search"}, {"g", "go to date"}} {
+		found := false
+		for _, binding := range got {
+			found = found || binding == want
 		}
-	}))
-	t.Cleanup(server.Close)
-
-	vc := testVC()
-	vc.ctx = context.Background()
-	vc.sdk = hey.NewClient(
-		&hey.Config{BaseURL: server.URL},
-		&hey.StaticTokenProvider{Token: "test-token"},
-		hey.WithMaxRetries(0),
-	)
-	v := newJournalView(vc)
-	load := v.Init()
-	v.Update(load())
-
-	want := stored
-	for range 3 {
-		v.HandleContentKey(keyPress("e"))
-		save := v.HandleContentKey(keyPress("ctrl+s"))
-		refresh, _ := v.Update(save())
-		v.Update(refresh())
-	}
-
-	if stored != want {
-		t.Errorf("stored content after repeated saves = %q, want %q", stored, want)
-	}
-	if strings.Contains(stored, "trix-content") {
-		t.Errorf("stored content contains a Trix wrapper: %q", stored)
-	}
-}
-
-func TestJournalViewKeepsEditorOnSaveFailure(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "nope", http.StatusInternalServerError)
-	}))
-	t.Cleanup(server.Close)
-
-	vc := testVC()
-	vc.ctx = context.Background()
-	vc.sdk = hey.NewClient(
-		&hey.Config{BaseURL: server.URL},
-		&hey.StaticTokenProvider{Token: "test-token"},
-		hey.WithMaxRetries(0),
-	)
-	v := newJournalView(vc)
-	v.Init()
-	v.Update(journalDetailMsg{requestResult: currentJournalRequest(v)})
-	v.HandleContentKey(keyPress("e"))
-	v.form.input.SetValue("Keep this draft")
-
-	cmd := v.HandleContentKey(keyPress("ctrl+s"))
-	v.Update(cmd())
-
-	if v.form == nil || v.form.saving {
-		t.Fatalf("failed save state = form:%v saving:%v", v.form != nil, v.form != nil && v.form.saving)
-	}
-	if v.form.input.Value() != "Keep this draft" {
-		t.Errorf("draft = %q", v.form.input.Value())
-	}
-	if !v.form.isError || v.form.status == "" {
-		t.Errorf("failure status = error:%v status:%q", v.form.isError, v.form.status)
-	}
-}
-
-// --- Subnav ---
-
-func TestJournalViewSubnavItems(t *testing.T) {
-	v := newJournalView(testVC())
-	v.Init()
-	items, selected, label, centered := v.SubnavItems()
-
-	if len(items) != 30 {
-		t.Errorf("expected 30 subnav items, got %d", len(items))
-	}
-	if selected != len(items)-1 {
-		t.Errorf("selected = %d, want last item %d", selected, len(items)-1)
-	}
-	today := time.Now().Format("2006-01-02")
-	if label != today {
-		t.Errorf("label = %q, want %q", label, today)
-	}
-	if centered {
-		t.Error("journal subnav should not be centered")
-	}
-}
-
-func TestJournalViewSubnavLeftRight(t *testing.T) {
-	v := newJournalView(testVC())
-	v.Init()
-	lastIdx := v.dateIndex
-
-	v.SubnavLeft()
-	if v.dateIndex != lastIdx-1 {
-		t.Errorf("after SubnavLeft: dateIndex = %d, want %d", v.dateIndex, lastIdx-1)
-	}
-	if !v.requests.loading {
-		t.Error("SubnavLeft should set loading")
-	}
-
-	v.SubnavRight()
-	if v.dateIndex != lastIdx {
-		t.Errorf("after SubnavRight: dateIndex = %d, want %d", v.dateIndex, lastIdx)
-	}
-
-	// Can't go right past the end
-	v.SubnavRight()
-	if v.dateIndex != lastIdx {
-		t.Errorf("SubnavRight at end: dateIndex = %d, want %d", v.dateIndex, lastIdx)
-	}
-}
-
-// --- Thread state ---
-
-func TestJournalViewInThread(t *testing.T) {
-	v := newJournalView(testVC())
-	if v.InThread() {
-		t.Error("should not be in thread initially")
-	}
-	v.inThread = true
-	if !v.InThread() {
-		t.Error("InThread should return true")
-	}
-	// ExitThread is a no-op for journal — content always stays visible
-	v.ExitThread()
-	if !v.InThread() {
-		t.Error("ExitThread should be a no-op for journal")
-	}
-}
-
-// --- Help bindings ---
-
-func TestJournalViewHelpBindings(t *testing.T) {
-	v := journalWithEntry()
-	bindings := v.HelpBindings()
-	if len(bindings) != 1 || bindings[0] != (helpBinding{"e", "edit"}) {
-		t.Errorf("journal bindings = %#v", bindings)
-	}
-
-	v.HandleContentKey(keyPress("e"))
-	bindings = v.HelpBindings()
-	want := []helpBinding{{"ctrl+s", "save"}, {"esc", "cancel"}}
-	if len(bindings) != len(want) {
-		t.Fatalf("form bindings = %#v", bindings)
-	}
-	for i := range want {
-		if bindings[i] != want[i] {
-			t.Errorf("form binding %d = %#v, want %#v", i, bindings[i], want[i])
+		if !found {
+			t.Errorf("help bindings %#v do not contain %#v", got, want)
 		}
 	}
 }

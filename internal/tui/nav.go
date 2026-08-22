@@ -148,15 +148,6 @@ func calendarNavItems(calendars []Calendar) []navItem {
 	return items
 }
 
-// journalNavItems builds nav items for the journal date row.
-func journalNavItems(dates []string) []navItem {
-	items := make([]navItem, len(dates))
-	for i, d := range dates {
-		items[i] = navItem{label: d}
-	}
-	return items
-}
-
 // --- Rendering ---
 
 // renderRule draws a horizontal rule with a centered label:

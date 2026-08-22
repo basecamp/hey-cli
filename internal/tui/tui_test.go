@@ -1074,16 +1074,3 @@ func TestViewShowsBoxNames(t *testing.T) {
 		t.Error("View should contain Imbox")
 	}
 }
-
-// --- Journal dates ---
-
-func TestGenerateJournalDates(t *testing.T) {
-	dates := generateJournalDates(7)
-	if len(dates) != 7 {
-		t.Fatalf("expected 7 dates, got %d", len(dates))
-	}
-	today := time.Now().Format("2006-01-02")
-	if dates[6] != today {
-		t.Errorf("last date = %q, want today %q", dates[6], today)
-	}
-}

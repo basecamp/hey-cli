@@ -89,8 +89,8 @@ github.com/aymerick/douceur v0.2.0 h1:Mv+mAeH1Q+n9Fr+oyamOlAkUNPWPlA8PPGR0QAaYuP
 github.com/aymerick/douceur v0.2.0/go.mod h1:wlT5vV2O3h55X9m7iVYN0TBM0NH/MmbLnd30/FjWUq4=
 github.com/basecamp/actioncable-go v0.0.0-20260821132720-3f7811951537 h1:OE1VMvKkpI+Vo7aP5IDRG6PNXW2IVMlLUWLgBcybGNc=
 github.com/basecamp/actioncable-go v0.0.0-20260821132720-3f7811951537/go.mod h1:9+DEydJMniIKraEsd4fDJpFEnqlLUJ6XhAswxRBaITk=
-github.com/basecamp/hey-sdk/go v0.13.0 h1:aQbU/TJp1AeYTLZhAjXQv1VVHrzmrYAE7lVS9TD5D8o=
-github.com/basecamp/hey-sdk/go v0.13.0/go.mod h1:k6sO2XhMkU3UY8lD2ozp0735Ic3q8xoMQt7YUT3TlYk=
+github.com/basecamp/hey-sdk/go v0.14.1-0.20260822122305-f7b418e4b7b1 h1:eZd7EmBWQi1e52CHJ1vC+XMEE6n27ZMi58OjNttQJ+8=
+github.com/basecamp/hey-sdk/go v0.14.1-0.20260822122305-f7b418e4b7b1/go.mod h1:k6sO2XhMkU3UY8lD2ozp0735Ic3q8xoMQt7YUT3TlYk=
 github.com/blang/semver v3.5.1+incompatible h1:cQNTCjp13qL8KC3Nbxr/y2Bqb63oX6wdnnjpJbkM4JQ=
 github.com/blang/semver v3.5.1+incompatible/go.mod h1:kRBLl5iJ+tD4TcOOxsy/0fnwebNt5EWlYSAyrTnjyyk=
 github.com/bmatcuk/doublestar v1.1.1/go.mod h1:UD6OnuiIn0yFxxA2le/rnRU1G4RaI4UvFv1sNto9p6w=
