@@ -693,37 +693,27 @@ func TestDayViewRulesFallFromEveryHourWithoutCuttingIntoAnEvent(t *testing.T) {
 	day := time.Date(2026, 8, 24, 9, 0, 0, 0, time.Local)
 
 	// 98 columns leaves 96 for the hours once the closing label has its two, which puts
-	// an hour every four columns and the 11:00 event's box on the four from 44. The
+	// an hour every four columns and the 11:00 event's block on the four from 44. The
 	// day's header and the hour axis take the first two rows of the 40 it is given,
-	// leaving 38 for the grid — more than the 25 rows the event's title needs read
-	// downwards.
+	// leaving 38 for the grid.
 	lines := strings.Split(stripANSI(renderDayView(events, nil, day, "", 98, 40)), "\n")
 	grid := lines[2:]
 	if len(grid) != 38 {
 		t.Fatalf("grid is %d rows of the 38 left to it: %q", len(grid), grid)
 	}
 
-	const eventRows = 25 // "Design review with Ryan" between its two borders
+	// The event is the only thing on the day, so its block is as tall as the grid and
+	// holds the 11:00 rule for every row of it. Twenty-four hours are twenty-five rules;
+	// the block keeps one of them covered all the way down.
 	for i, line := range grid {
 		if cell := []rune(line)[0]; cell != hourRule {
 			t.Errorf("grid row %d lost midnight's rule: %q", i, line)
 		}
-		cell := []rune(line)[44]
-		if i < eventRows && cell == hourRule {
-			t.Errorf("grid row %d ruled through the event's own box: %q", i, line)
+		if cell := []rune(line)[44]; cell == hourRule {
+			t.Errorf("grid row %d ruled through the event's own block: %q", i, line)
 		}
-		if i >= eventRows && cell != hourRule {
-			t.Errorf("grid row %d below the event kept no rule at 11: %q", i, line)
-		}
-
-		// Twenty-four hours are twenty-five rules: the day closes where the next one
-		// starts. The event's box holds one of them for its own height.
-		want := 25
-		if i < eventRows {
-			want = 24
-		}
-		if rules := strings.Count(line, string(hourRule)); rules != want {
-			t.Errorf("grid row %d has %d rules, want %d: %q", i, rules, want, line)
+		if rules := strings.Count(line, string(hourRule)); rules != 24 {
+			t.Errorf("grid row %d has %d rules, want 24: %q", i, rules, line)
 		}
 	}
 
@@ -748,6 +738,95 @@ func TestEmptyDayIsItsHoursRatherThanANotice(t *testing.T) {
 		if !strings.HasPrefix(row, string(hourRule)) {
 			t.Errorf("grid row %d of an empty day is not ruled: %q", i, row)
 		}
+	}
+}
+
+// An event's box is the span it covers, not the length of its name: alone it is as tall as
+// the day, and events that overlap share the height between them.
+func TestOverlappingEventsShareTheDaysHeight(t *testing.T) {
+	for _, tt := range []struct {
+		rows, lanes int
+		want        []int
+	}{
+		{38, 1, []int{38}},
+		{38, 2, []int{19, 19}},
+		{38, 3, []int{13, 13, 12}}, // the odd rows go to the earlier lanes
+		{38, 0, nil},
+		// More overlapping events than rows: a lane keeps the three a block needs and
+		// the grid grows past the screen instead, which is what the viewport scrolls.
+		{10, 5, []int{3, 3, 3, 3, 3}},
+	} {
+		got := shareDayRows(tt.rows, tt.lanes)
+		if len(got) != len(tt.want) {
+			t.Errorf("%d rows over %d lanes = %v, want %v", tt.rows, tt.lanes, got, tt.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tt.want[i] {
+				t.Errorf("%d rows over %d lanes = %v, want %v", tt.rows, tt.lanes, got, tt.want)
+				break
+			}
+		}
+	}
+}
+
+// And on screen: one event holds its hour's rule all the way down, because its block is the
+// whole grid rather than as tall as its title.
+func TestDayViewGivesASingleEventTheWholeGrid(t *testing.T) {
+	day := time.Date(2026, 8, 24, 9, 0, 0, 0, time.Local)
+	events := []Recording{{ID: 1, Title: "Charge the car", Type: "CalendarEvent",
+		StartsAt: "2026-08-24T07:00:00Z", EndsAt: "2026-08-24T10:00:00Z"}}
+
+	// An hour every four columns, so 07:00 starts on column 28 and the block covers the
+	// rules at 28 and 32 for every one of the grid's 38 rows.
+	grid := strings.Split(stripANSI(renderDayView(events, nil, day, "", 98, 40)), "\n")[2:]
+	if len(grid) != 38 {
+		t.Fatalf("grid is %d rows, want 38: %q", len(grid), grid)
+	}
+	for i, row := range grid {
+		if cell := []rune(row)[28]; cell == hourRule {
+			t.Errorf("grid row %d ruled through the event's block at 07:00: %q", i, row)
+		}
+	}
+}
+
+// An event is drawn in the color of the calendar it is filed on, so which calendar it
+// belongs to is answered by looking at it. HEY leaves the personal calendar's color out of
+// its JSON, and those fall back to the theme's own accent rather than to no fill.
+func TestCalendarColorFillsAnEventsBlock(t *testing.T) {
+	if got := eventFillColor("teal"); got != lipgloss.Cyan {
+		t.Errorf("teal filled with %v, want cyan", got)
+	}
+	if got := eventFillColor("black"); got != lipgloss.White {
+		t.Errorf("black filled with %v — it takes the foreground slot so it survives a light theme", got)
+	}
+	if got := eventFillColor(""); got != colorPrimary {
+		t.Errorf("an event with no calendar color filled with %v, want the accent", got)
+	}
+
+	// The title inverts over the fill, using the same foreground the mail list's pills do.
+	titled := dayCell{kind: cellTitle, color: "teal"}.style(styleMuted, styleMuted, styleMuted)
+	if titled.GetBackground() != lipgloss.Cyan || titled.GetForeground() != colorOnAccent {
+		t.Errorf("title style = fg:%v bg:%v", titled.GetForeground(), titled.GetBackground())
+	}
+}
+
+// The week and the year draw an event as a filled bar too, off the same field and padded to
+// the cell so the fill reads as a block rather than as a highlight behind some words.
+func TestEventPillFillsTheCellInItsCalendarsColor(t *testing.T) {
+	pill := eventPill(Recording{Title: "Standup", CalendarColor: "gold"}, 12)
+
+	if got := stripANSI(pill); got != "Standup     " {
+		t.Errorf("pill text = %q, want the title padded to 12", got)
+	}
+	if !strings.Contains(pill, "\x1b[") {
+		t.Errorf("pill carries no styling: %q", pill)
+	}
+
+	// A title longer than the cell is cut to it rather than spilling into the next day.
+	long := eventPill(Recording{Title: "Design review with the whole team", CalendarColor: "teal"}, 12)
+	if got := lipgloss.Width(stripANSI(long)); got != 12 {
+		t.Errorf("pill is %d columns wide, want 12", got)
 	}
 }
 

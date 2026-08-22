@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"image/color"
 	"math"
 	"sort"
 	"strings"
@@ -233,6 +234,43 @@ const (
 	cellTitle
 )
 
+// dayCell is a cell's kind and, for the cells an event owns, the color of the calendar it
+// is filed on. The color rides along with the kind so consecutive cells are batched by
+// both: two events touching in the same row are two runs, not one.
+type dayCell struct {
+	kind  cellKind
+	color string
+}
+
+// style is how a cell is drawn. An event is a block filled with its calendar's color and
+// its title inverted over it, the way the web app draws its bars — colorOnAccent is the
+// same foreground the mail list's pills use on a filled background, so it stays legible on
+// either theme. Anything outside an event keeps the grid's own styles.
+func (cell dayCell) style(_, _, muted lipgloss.Style) lipgloss.Style {
+	switch cell.kind {
+	case cellChrome:
+		return lipgloss.NewStyle().Background(eventFillColor(cell.color))
+	case cellTitle:
+		return lipgloss.NewStyle().
+			Background(eventFillColor(cell.color)).
+			Foreground(colorOnAccent).
+			Bold(true)
+	default:
+		return muted
+	}
+}
+
+// eventFillColor is the block an event is drawn as. HEY leaves the personal calendar's
+// color out of its JSON, so the reader's own events fall back to the theme's accent rather
+// than to no fill at all — an unfilled event among filled ones reads as a different kind of
+// thing rather than as one without a color.
+func eventFillColor(calendarColor string) color.Color {
+	if slot, ok := heyColors[calendarColor]; ok {
+		return slot
+	}
+	return colorPrimary
+}
+
 // hourRule is dotted rather than solid so an hour's line reads as a guide behind the
 // events and not as another box's border.
 const hourRule = '┊'
@@ -379,68 +417,68 @@ func renderDayView(events, habits []Recording, anchor time.Time, hint string, wi
 // the grid, not a decoration on the events, so a day with nothing on it still reads as
 // a day. It is never shorter than the rows it is given, and grows past them for a day
 // too full to fit, which is what the viewport scrolls.
+//
+// The lanes share the height between them: one event on its own is as tall as the day, two
+// that overlap take half each, three a third. An event's box was as tall as its title used
+// to be, which left a short name looking like a short event and a long one looking like a
+// long one — the box is the span, so its size has to come from the day rather than from
+// the words in it.
 func renderDayGrid(lanes [][]placedEvent, gridWidth, colWidth, rows int, chrome, title, muted lipgloss.Style) string {
-	height := 0
-	for _, lane := range lanes {
-		height += laneHeight(lane)
+	laneRows := shareDayRows(max(rows, 1), len(lanes))
+	height := max(rows, 1)
+	if total := sumOf(laneRows); total > height {
+		height = total
 	}
-	height = max(height, rows, 1)
 
 	// A 2D grid of runes and a parallel note of what each cell is: the empty grid
-	// between events, an hour's rule, a box's own chrome, or a rune of its title.
-	// The four are styled separately so an event's name stands out of its border the
-	// way a subject stands out of the mail list's rules.
+	// between events, an hour's rule, a box's own chrome, or a rune of its title —
+	// carrying, for the last two, the color of the calendar the event is filed on.
+	// They are styled separately so an event's name stands out of its border the way a
+	// subject stands out of the mail list's rules.
 	grid := make([][]rune, height)
-	cells := make([][]cellKind, height)
+	cells := make([][]dayCell, height)
 	for row := range height {
 		grid[row] = make([]rune, gridWidth)
-		cells[row] = make([]cellKind, gridWidth)
+		cells[row] = make([]dayCell, gridWidth)
 		for col := range gridWidth {
 			grid[row][col] = ' '
 		}
 	}
 
 	offset := 0
-	for _, lane := range lanes {
-		drawDayLane(grid, cells, lane, offset)
-		offset += laneHeight(lane)
+	for i, lane := range lanes {
+		drawDayLane(grid, cells, lane, offset, laneRows[i])
+		offset += laneRows[i]
 	}
 
 	// The rules go in last and only where nothing else stands: a box is drawn over an
 	// hour, never cut by it.
 	for row := range height {
 		for col := 0; col < gridWidth; col += colWidth {
-			if cells[row][col] == cellEmpty {
+			if cells[row][col].kind == cellEmpty {
 				grid[row][col] = hourRule
-				cells[row][col] = cellRule
+				cells[row][col] = dayCell{kind: cellRule}
 			}
 		}
 	}
 
-	styleFor := map[cellKind]lipgloss.Style{
-		cellEmpty:  muted,
-		cellRule:   muted,
-		cellChrome: chrome,
-		cellTitle:  title,
-	}
-
-	// Render row by row, batching consecutive cells of the same kind
+	// Render row by row, batching consecutive cells that draw the same way
 	var b strings.Builder
 	for row := range height {
 		var seg strings.Builder
-		kind := cellEmpty
+		cell := dayCell{}
 
 		flush := func() {
 			if s := seg.String(); s != "" {
-				b.WriteString(styleFor[kind].Render(s))
+				b.WriteString(cell.style(chrome, title, muted).Render(s))
 				seg.Reset()
 			}
 		}
 
 		for col := range gridWidth {
-			if cells[row][col] != kind {
+			if cells[row][col] != cell {
 				flush()
-				kind = cells[row][col]
+				cell = cells[row][col]
 			}
 			seg.WriteRune(grid[row][col])
 		}
@@ -451,69 +489,78 @@ func renderDayGrid(lanes [][]placedEvent, gridWidth, colWidth, rows int, chrome,
 	return b.String()
 }
 
-// laneHeight is the rows a lane needs: its longest title read downwards, between the
-// top and bottom borders of its boxes.
-func laneHeight(lane []placedEvent) int {
-	longest := 0
-	for _, pe := range lane {
-		longest = max(longest, len([]rune(terminal.SanitizeLine(pe.rec.Title))))
+// shareDayRows splits the grid's height between the lanes, giving the earlier ones the odd
+// row left over. A lane never gets less than a box needs — two borders and a row of title —
+// so a day with more overlapping events than rows grows the grid and scrolls instead of
+// drawing boxes with no inside.
+func shareDayRows(rows, lanes int) []int {
+	if lanes == 0 {
+		return nil
 	}
-	return longest + 2
+
+	const minLaneRows = 3
+	share := max(rows/lanes, minLaneRows)
+	extra := 0
+	if share > minLaneRows {
+		extra = rows - share*lanes
+	}
+
+	shares := make([]int, lanes)
+	for i := range shares {
+		shares[i] = share
+		if i < extra {
+			shares[i]++
+		}
+	}
+	return shares
+}
+
+func sumOf(values []int) int {
+	total := 0
+	for _, value := range values {
+		total += value
+	}
+	return total
 }
 
 // drawDayLane draws one lane of non-overlapping events into the grid at rowOffset, as
-// boxes with vertical (90-degree rotated) title text.
-func drawDayLane(grid [][]rune, cells [][]cellKind, lane []placedEvent, rowOffset int) {
+// boxes rows tall with vertical (90-degree rotated) title text. Every cell a box owns
+// carries the color of the calendar the event is filed on, so which calendar an event
+// belongs to is answered by looking at it.
+func drawDayLane(grid [][]rune, cells [][]dayCell, lane []placedEvent, rowOffset, rows int) {
 	top := rowOffset
-	bottom := rowOffset + laneHeight(lane) - 1
+	bottom := rowOffset + rows - 1
 
 	for _, pe := range lane {
 		sc, ec := pe.startCol, pe.endCol
-		boxW := ec - sc
+		fill := dayCell{kind: cellChrome, color: pe.rec.CalendarColor}
+		titled := dayCell{kind: cellTitle, color: pe.rec.CalendarColor}
+
+		// The whole block is the event: filled with its calendar's color and carrying no
+		// border, because the fill already says where it starts and stops. Borders drawn
+		// in the color left the box reading as an outline around empty grid.
+		for row := top; row <= bottom; row++ {
+			for col := sc; col < ec; col++ {
+				grid[row][col] = ' '
+				cells[row][col] = fill
+			}
+		}
+
+		// The title reads downwards, centred in the block: a name at the top of a
+		// full-height column reads as an event that starts there and stops. It is
+		// clipped rather than shrinking the block, since the block is the span.
 		titleRunes := []rune(terminal.SanitizeLine(pe.rec.Title))
+		rows := bottom - top + 1
+		titleRow := top + max((rows-len(titleRunes))/2, 0)
+		titleCol := sc + max((ec-sc-1)/2, 0)
 
-		// Top border: ┌──┐
-		grid[top][sc] = '┌'
-		cells[top][sc] = cellChrome
-		for c := sc + 1; c < ec-1; c++ {
-			grid[top][c] = '─'
-			cells[top][c] = cellChrome
-		}
-		if boxW > 1 {
-			grid[top][ec-1] = '┐'
-			cells[top][ec-1] = cellChrome
-		}
-
-		// Middle rows: │c │  (vertical title text)
-		for row := top + 1; row < bottom; row++ {
-			grid[row][sc] = '│'
-			cells[row][sc] = cellChrome
-			if boxW > 1 {
-				grid[row][ec-1] = '│'
-				cells[row][ec-1] = cellChrome
+		for i, r := range titleRunes {
+			row := titleRow + i
+			if row > bottom {
+				break
 			}
-			// Title character
-			titleIdx := row - top - 1
-			if titleIdx < len(titleRunes) && sc+1 < ec-1 {
-				grid[row][sc+1] = titleRunes[titleIdx]
-				cells[row][sc+1] = cellTitle
-			}
-			// Fill inner space
-			for c := sc + 2; c < ec-1; c++ {
-				cells[row][c] = cellChrome
-			}
-		}
-
-		// Bottom border: └──┘
-		grid[bottom][sc] = '└'
-		cells[bottom][sc] = cellChrome
-		for c := sc + 1; c < ec-1; c++ {
-			grid[bottom][c] = '─'
-			cells[bottom][c] = cellChrome
-		}
-		if boxW > 1 {
-			grid[bottom][ec-1] = '┘'
-			cells[bottom][ec-1] = cellChrome
+			grid[row][titleCol] = r
+			cells[row][titleCol] = titled
 		}
 	}
 }
@@ -533,7 +580,6 @@ func renderWeekView(events, habits []Recording, anchor time.Time, firstWeekDay t
 	var b strings.Builder
 	muted := styleMuted
 	bright := lipgloss.NewStyle().Foreground(colorBright)
-	primary := lipgloss.NewStyle().Foreground(colorPrimary)
 
 	ws := weekStartDate(anchor, firstWeekDay)
 
@@ -595,7 +641,7 @@ func renderWeekView(events, habits []Recording, anchor time.Time, firstWeekDay t
 	// Build column content
 	cols := make([][]string, 7)
 	for i := range 7 {
-		cols[i] = buildWeekDayColumn(days[i], colWidth, primary, bright, muted)
+		cols[i] = buildWeekDayColumn(days[i], colWidth, muted)
 	}
 
 	maxH := 0
@@ -649,7 +695,7 @@ func weekGridBorder(left, mid, right string, colWidth int, muted lipgloss.Style)
 
 // buildWeekDayColumn returns styled lines for one day column.
 // Order: habits at top, timed events in the middle, all-day at bottom.
-func buildWeekDayColumn(d weekDayInfo, width int, primary, bright, muted lipgloss.Style) []string {
+func buildWeekDayColumn(d weekDayInfo, width int, muted lipgloss.Style) []string {
 	var lines []string
 
 	for _, h := range d.habits {
@@ -669,14 +715,31 @@ func buildWeekDayColumn(d weekDayInfo, width int, primary, bright, muted lipglos
 		if timeStr != "" {
 			lines = append(lines, muted.Render(timeStr))
 		}
-		lines = append(lines, bright.Render(truncateStr(terminal.SanitizeLine(e.Title), width)))
+		lines = append(lines, eventPill(e, width))
 	}
 
 	for _, e := range d.allDay {
-		lines = append(lines, primary.Render(truncateStr(terminal.SanitizeLine(e.Title), width)))
+		lines = append(lines, eventPill(e, width))
 	}
 
 	return lines
+}
+
+// eventPill is an event as the week and the year draw it: a bar filled with its calendar's
+// color, its name inverted over it, padded to the cell so the fill reads as a block rather
+// than as a highlight behind some words. It is the same thing the day view fills its column
+// with, and the same thing the web app draws in all three.
+func eventPill(event Recording, width int) string {
+	title := truncateStr(terminal.SanitizeLine(event.Title), width)
+	if pad := width - lipgloss.Width(title); pad > 0 {
+		title += strings.Repeat(" ", pad)
+	}
+
+	return lipgloss.NewStyle().
+		Background(eventFillColor(event.CalendarColor)).
+		Foreground(colorOnAccent).
+		Bold(true).
+		Render(title)
 }
 
 // weekDayColumnLabel returns the header label for a week column.
@@ -816,10 +879,9 @@ func buildYearDayCell(d time.Time, dayEvents []Recording, colWidth int,
 		return lines
 	}
 
-	// Event titles
+	// Event titles, each a bar in its calendar's color
 	for _, event := range dayEvents {
-		title := truncateStr(terminal.SanitizeLine(event.Title), colWidth)
-		lines = append(lines, bright.Render(title))
+		lines = append(lines, eventPill(event, colWidth))
 	}
 
 	return lines
