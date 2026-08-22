@@ -329,8 +329,13 @@ func TestServerNowFallsBackToTheLocalClock(t *testing.T) {
 
 	before := time.Now()
 	got := serverNow(context.Background())
-	if got.Before(before) || got.After(time.Now()) {
-		t.Errorf("serverNow = %v, want the local clock when the server's can't be read", got)
+	// The local clock at the request's start, as a cutoff: a whole millisecond,
+	// strictly before — so up to two milliseconds before the instant itself.
+	if got.Before(before.Add(-2*time.Millisecond)) || got.After(time.Now()) {
+		t.Errorf("serverNow = %v, want the local clock at the start when the server's can't be read", got)
+	}
+	if got.Nanosecond()%int(time.Millisecond) != 0 {
+		t.Errorf("serverNow = %v, want a whole millisecond", got)
 	}
 }
 
