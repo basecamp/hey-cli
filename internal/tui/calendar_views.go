@@ -230,7 +230,7 @@ func (cell dayCell) style(_, _, muted lipgloss.Style) lipgloss.Style {
 	case cellChrome:
 		return lipgloss.NewStyle().Background(eventFillColor(cell.color))
 	case cellTitle:
-		return eventTextStyle(eventFillColor(cell.color))
+		return eventTextStyle(cell.color)
 	default:
 		return muted
 	}
@@ -241,27 +241,44 @@ func (cell dayCell) style(_, _, muted lipgloss.Style) lipgloss.Style {
 // than to no fill at all — an unfilled event among filled ones reads as a different kind of
 // thing rather than as one without a color.
 func eventFillColor(calendarColor string) color.Color {
+	// The theme's own value for the hue where it gave one, since that is what the reader
+	// sees; the ANSI slot otherwise, so a terminal with no theme file still gets color.
+	if hue, ok := colorHues[calendarColor]; ok {
+		return hue
+	}
 	if slot, ok := heyColors[calendarColor]; ok {
 		return slot
 	}
 	return colorPrimary
 }
 
-// eventTextStyle is a title over its own fill, in whichever of the terminal's ink or paper
-// reads better on it. colorOnAccent picks that for the theme's accent and no further: black
-// on ANSI red or blue is about 2:1, which is what made a light terminal full of filled
-// events hard to look at even though the same fills read fine on a dark one. Every calendar
-// color is a different background, so each one is asked separately.
-func eventTextStyle(fill color.Color) lipgloss.Style {
-	text := colorOnAccent
-	if _, colorless := fill.(lipgloss.NoColor); !colorless {
-		text = color.Color(lipgloss.Black)
-		if contrastRatio(lipgloss.BrightWhite, fill) > contrastRatio(lipgloss.Black, fill) {
-			text = lipgloss.BrightWhite
-		}
+// eventTextStyle is a title over the fill of the calendar it is on, in whichever of the
+// theme's paper and its own ink reads better there. Both candidates are the reader's own,
+// so the answer is the theme's rather than a guess about it.
+//
+// It is a real measurement now because the theme says what its hues actually are. Against
+// an ANSI slot's nominal value it could only ever be wrong: #000080 for blue reads as
+// nearly black, so contrast picked white text for what a dark theme draws as a light
+// periwinkle. With the theme's own #7d82d9 the same arithmetic picks dark text, which is
+// what the eye wanted all along.
+func eventTextStyle(calendarColor string) lipgloss.Style {
+	fill := eventFillColor(calendarColor)
+
+	text := colorPaper
+	if ink := themeInk(); contrastRatio(ink, fill) > contrastRatio(colorPaper, fill) {
+		text = ink
 	}
 
 	return lipgloss.NewStyle().Background(fill).Foreground(text).Bold(true)
+}
+
+// themeInk is the color the theme writes its own text in, which is the other candidate for
+// a title on a fill.
+func themeInk() color.Color {
+	if colorBright != nil {
+		return colorBright
+	}
+	return lipgloss.BrightWhite
 }
 
 // hourRule is dotted rather than solid so an hour's line reads as a guide behind the
@@ -728,7 +745,7 @@ func eventPill(event Recording, width int) string {
 		title += strings.Repeat(" ", pad)
 	}
 
-	return eventTextStyle(eventFillColor(event.CalendarColor)).Render(title)
+	return eventTextStyle(event.CalendarColor).Render(title)
 }
 
 // weekDayColumnLabel returns the header label for a week column.

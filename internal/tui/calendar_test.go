@@ -795,39 +795,70 @@ func TestDayViewGivesASingleEventTheWholeGrid(t *testing.T) {
 // belongs to is answered by looking at it. HEY leaves the personal calendar's color out of
 // its JSON, and those fall back to the theme's own accent rather than to no fill.
 func TestCalendarColorFillsAnEventsBlock(t *testing.T) {
+	ansiTheme := Theme{Accent: lipgloss.BrightBlue, Bright: lipgloss.BrightWhite, Dark: true}
+	t.Cleanup(func() { applyTheme(ansiTheme) })
+
+	// With no theme file the ANSI slots are all there is, and their nominal values are
+	// what the terminal really draws.
+	applyTheme(ansiTheme)
 	if got := eventFillColor("teal"); got != lipgloss.Cyan {
 		t.Errorf("teal filled with %v, want cyan", got)
-	}
-	if got := eventFillColor("black"); got != lipgloss.White {
-		t.Errorf("black filled with %v — it takes the foreground slot so it survives a light theme", got)
 	}
 	if got := eventFillColor(""); got != colorPrimary {
 		t.Errorf("an event with no calendar color filled with %v, want the accent", got)
 	}
 
-	// The title sits on its own fill in whichever of ink or paper reads better there,
-	// asked per color: black on ANSI red or blue is around 2:1, which is what made a
-	// light terminal full of filled events hard to look at.
-	for _, calendarColor := range []string{"teal", "red", "blue", "gold", "green", ""} {
-		fill := eventFillColor(calendarColor)
-		style := dayCell{kind: cellTitle, color: calendarColor}.style(styleMuted, styleMuted, styleMuted)
+	// A theme that states its hues is taken at its word, because that is what the reader
+	// sees. This is the dark Omarchy palette from the screenshots: its blue is a light
+	// periwinkle, nothing like ANSI blue's nominal #000080.
+	applyTheme(Theme{
+		Accent: lipgloss.Color("#7d82d9"), Bright: lipgloss.Color("#ffcead"), Dark: true,
+		Background: lipgloss.Color("#060B1E"),
+		Hues: map[string]color.Color{
+			"blue":  lipgloss.Color("#7d82d9"),
+			"green": lipgloss.Color("#92a593"),
+			"red":   lipgloss.Color("#ED5B5A"),
+			"gold":  lipgloss.Color("#f7dc9c"),
+		},
+	})
 
-		if style.GetBackground() != fill {
-			t.Errorf("%q sits on %v, want its own fill %v", calendarColor, style.GetBackground(), fill)
+	if got := eventFillColor("blue"); got != lipgloss.Color("#7d82d9") {
+		t.Errorf("blue filled with %v, want the theme's own periwinkle", got)
+	}
+
+	// Every one of those is light, so every one takes the theme's dark paper as its ink —
+	// which is what nominal contrast got backwards on green and blue.
+	for _, calendarColor := range []string{"blue", "green", "red", "gold"} {
+		style := dayCell{kind: cellTitle, color: calendarColor}.style(styleMuted, styleMuted, styleMuted)
+		if style.GetBackground() != eventFillColor(calendarColor) {
+			t.Errorf("%q sits on %v, want its own fill", calendarColor, style.GetBackground())
 		}
-		text := style.GetForeground()
-		if contrastRatio(text, fill) < contrastRatio(oppositeInk(text), fill) {
-			t.Errorf("%q drew %v on %v at %.1f:1 when the other ink reads better",
-				calendarColor, text, fill, contrastRatio(text, fill))
+		if style.GetForeground() != colorPaper {
+			t.Errorf("%q drew %v on a light hue, want the theme's paper %v",
+				calendarColor, style.GetForeground(), colorPaper)
 		}
 	}
 }
 
-func oppositeInk(text color.Color) color.Color {
-	if text == color.Color(lipgloss.Black) {
-		return lipgloss.BrightWhite
+// The ink is whichever of the theme's paper and its own text color reads better on the
+// fill, so a light theme — where the same hues arrive deep rather than pale — gets the
+// other one without any of this knowing which mode it is in.
+func TestEventInkFollowsTheThemesOwnPalette(t *testing.T) {
+	t.Cleanup(func() { applyTheme(Theme{Accent: lipgloss.BrightBlue, Bright: lipgloss.BrightWhite, Dark: true}) })
+
+	applyTheme(Theme{
+		Accent: lipgloss.Color("#2b4c8c"), Bright: lipgloss.Color("#1c1c1c"), Dark: false,
+		Background: lipgloss.Color("#fafafa"),
+		Hues:       map[string]color.Color{"blue": lipgloss.Color("#2b4c8c")},
+	})
+
+	style := dayCell{kind: cellTitle, color: "blue"}.style(styleMuted, styleMuted, styleMuted)
+	if style.GetForeground() != colorPaper {
+		t.Errorf("a deep blue on a light theme drew %v, want the pale paper", style.GetForeground())
 	}
-	return lipgloss.Black
+	if contrastRatio(style.GetForeground(), style.GetBackground()) < 4.5 {
+		t.Errorf("ink on fill is only %.1f:1", contrastRatio(style.GetForeground(), style.GetBackground()))
+	}
 }
 
 // Omarchy retints a running terminal on a keyboard shortcut, so an event's ink cannot be
@@ -836,16 +867,22 @@ func oppositeInk(text color.Color) color.Color {
 func TestEventInkFollowsALiveThemeChange(t *testing.T) {
 	t.Cleanup(func() { applyTheme(Theme{Accent: lipgloss.BrightBlue, Bright: lipgloss.BrightWhite, Dark: true}) })
 
-	// An event with no calendar color is filled with the accent, so the accent decides
-	// its ink — and the accent is what a theme switch replaces.
-	applyTheme(Theme{Accent: lipgloss.BrightYellow, Bright: lipgloss.BrightWhite, Dark: true})
-	onLight := eventPill(Recording{Title: "Release HEY CLI 0.9"}, 20)
+	applyTheme(Theme{
+		Accent: lipgloss.BrightBlue, Bright: lipgloss.Color("#ffcead"), Dark: true,
+		Background: lipgloss.Color("#060B1E"),
+		Hues:       map[string]color.Color{"green": lipgloss.Color("#92a593")},
+	})
+	onDark := eventPill(Recording{Title: "Summer friday", CalendarColor: "green"}, 20)
 
-	applyTheme(Theme{Accent: lipgloss.Blue, Bright: lipgloss.BrightWhite, Dark: true})
-	onDark := eventPill(Recording{Title: "Release HEY CLI 0.9"}, 20)
+	applyTheme(Theme{
+		Accent: lipgloss.BrightBlue, Bright: lipgloss.Color("#1c1c1c"), Dark: false,
+		Background: lipgloss.Color("#fafafa"),
+		Hues:       map[string]color.Color{"green": lipgloss.Color("#1f5c2f")},
+	})
+	onLight := eventPill(Recording{Title: "Summer friday", CalendarColor: "green"}, 20)
 
-	if onLight == onDark {
-		t.Errorf("the pill did not follow the theme: %q", onLight)
+	if onDark == onLight {
+		t.Errorf("the pill did not follow the theme: %q", onDark)
 	}
 }
 
