@@ -57,10 +57,14 @@ type model struct {
 	// Live mail updates: the watcher, the stream it opened, and the context that keeps
 	// the stream open. It outlives the view context, which a mail account switch throws
 	// away — the changes stream is the same one whichever account is being read.
-	watchMail    MailWatcher
-	mailChanges  <-chan int64
-	watchCtx     context.Context
-	stopWatching context.CancelFunc
+	watchMail         MailWatcher
+	mailWatchEvents   <-chan MailWatchEvent
+	mailWatchAttempt  uint64
+	mailWatchFailures int
+	mailWatchStatus   mailWatchStatus
+	mailWatchReason   string
+	watchCtx          context.Context
+	stopWatching      context.CancelFunc
 
 	// The Screener's stream, which can only be opened once HEY has served its name, and
 	// the context that holds it open. Cancelling that context is how the stream behind an
@@ -129,6 +133,7 @@ func newModelWithMailAccounts(rootSDK, sdk *hey.Client, selected string, watcher
 		screenerView:        sv,
 		watchMail:           watchers.Mail,
 		watchScreener:       watchers.Screener,
+		mailWatchAttempt:    1,
 		watchCtx:            watchCtx,
 		stopWatching:        stopWatching,
 		mailAccounts:        []mailAccountChoice{{label: "All Accounts"}},
@@ -165,7 +170,7 @@ func (m model) Init() tea.Cmd {
 		spinnerTick(),
 		tea.RequestBackgroundColor,
 		watchThemeCmd(omarchyWatchDir(userHomeDir())),
-		startMailWatchCmd(m.watchCtx, m.watchMail),
+		startMailWatchCmd(m.watchCtx, m.watchMail, m.mailWatchAttempt),
 	)
 }
 
@@ -277,23 +282,55 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.closeScreener()
 
 	case mailWatchStartedMsg:
-		if msg.err != nil {
-			m.mailView.liveUpdatesUnavailable(msg.err)
+		if msg.attempt != m.mailWatchAttempt {
 			return m, nil
 		}
-		m.mailChanges = msg.changes
-		return m, waitForMailChangeCmd(m.mailChanges)
+		if msg.err != nil {
+			cmd := m.mailWatchFailed(msg.err)
+			m.updateHelpBindings()
+			return m, cmd
+		}
+		catchUp := m.mailWatchStatus != mailWatchLive || m.mailWatchFailures > 0
+		m.mailWatchEvents = msg.events
+		m.mailWatchConnected()
+		m.updateHelpBindings()
+		wait := waitForMailWatchEventCmd(m.mailWatchEvents)
+		if catchUp {
+			return m, tea.Batch(m.stampViewCmd(m.mailView.boxChanged(AnyBoxChanged)), wait)
+		}
+		return m, wait
 
-	case mailChangedMsg:
+	case mailWatchEventMsg:
 		if msg.closed {
-			m.mailChanges = nil
-			m.mailView.liveUpdatesStopped()
-			return m, nil
+			m.mailWatchEvents = nil
+			cmd := m.mailWatchStopped()
+			m.updateHelpBindings()
+			return m, cmd
+		}
+		wait := waitForMailWatchEventCmd(m.mailWatchEvents)
+		switch msg.event.Connection {
+		case MailConnectionUnchanged:
+			// The box event below is the ordinary live-update path.
+		case MailConnectionDisconnected:
+			m.mailWatchDisconnected(msg.event.WillReconnect)
+			m.updateHelpBindings()
+			return m, wait
+		case MailConnectionReconnected:
+			m.mailWatchConnected()
+			m.updateHelpBindings()
+			return m, tea.Batch(m.stampViewCmd(m.mailView.boxChanged(AnyBoxChanged)), wait)
 		}
 		// The stream is listened to for as long as the TUI runs, whichever section is
 		// on screen: mail that arrived while the user was in the calendar is there when
 		// they come back.
-		return m, tea.Batch(m.stampViewCmd(m.mailView.boxChanged(msg.boxID)), waitForMailChangeCmd(m.mailChanges))
+		return m, tea.Batch(m.stampViewCmd(m.mailView.boxChanged(msg.event.BoxID)), wait)
+
+	case mailWatchRetryMsg:
+		if msg.attempt != m.mailWatchAttempt || m.mailWatchEvents != nil {
+			return m, nil
+		}
+		m.mailWatchAttempt++
+		return m, startMailWatchCmd(m.watchCtx, m.watchMail, m.mailWatchAttempt)
 
 	case mailRefreshDueMsg, postingsRefreshedMsg:
 		cmd, _ := m.mailView.Update(msg)
@@ -480,6 +517,10 @@ func (m model) View() tea.View {
 
 	b.WriteString(renderHeader(&m))
 	b.WriteString("\n")
+	if notice := m.mailWatchNotice(); notice != "" {
+		b.WriteString(m.styles.title.Render(truncateStr(notice, max(m.width, 1))))
+		b.WriteString("\n")
+	}
 
 	if m.mailAccountPicker {
 		b.WriteString(renderMailAccountPicker(&m))
@@ -592,7 +633,11 @@ func (m model) contentHeight() int {
 	if helpHeight := m.help.height(); helpHeight > 0 {
 		footerHeight = helpHeight + 3
 	}
-	return max(m.height-headerHeight-footerHeight, 1)
+	statusHeight := 0
+	if m.mailWatchNotice() != "" {
+		statusHeight = 1
+	}
+	return max(m.height-headerHeight-footerHeight-statusHeight, 1)
 }
 
 // --- Key handling ---
@@ -842,7 +887,7 @@ func (m *model) startScreenerWatch(signedStreamName string) tea.Cmd {
 	watchCtx, stop := context.WithCancel(m.watchCtx) //nolint:gosec // G118: cancel stored, called on the next watch, an account switch or ctrl+c
 	m.screenerStream = signedStreamName
 	m.stopScreenerWatch = stop
-	return startScreenerWatchCmd(watchCtx, m.watchScreener, signedStreamName)
+	return startScreenerWatchCmd(watchCtx, m.watchCtx, m.watchScreener, signedStreamName)
 }
 
 // dropScreenerWatch gives up the stream the TUI was following. The subscription behind it

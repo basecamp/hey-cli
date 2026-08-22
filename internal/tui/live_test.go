@@ -11,54 +11,55 @@ import (
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/mail"
 )
 
 // --- The changes stream ---
 
-func TestWaitForMailChangeReportsTheChangedBox(t *testing.T) {
-	changes := make(chan int64, 1)
-	changes <- 7
+func TestWaitForMailWatchEventReportsTheChangedBox(t *testing.T) {
+	events := make(chan MailWatchEvent, 1)
+	events <- MailWatchEvent{BoxID: 7}
 
-	msg := waitForMailChangeCmd(changes)()
-	changed, ok := msg.(mailChangedMsg)
+	msg := waitForMailWatchEventCmd(events)()
+	changed, ok := msg.(mailWatchEventMsg)
 	if !ok {
-		t.Fatalf("msg = %#v, want mailChangedMsg", msg)
+		t.Fatalf("msg = %#v, want mailWatchEventMsg", msg)
 	}
-	if changed.boxID != 7 || changed.closed {
+	if changed.event.BoxID != 7 || changed.closed {
 		t.Errorf("changed = %+v, want box 7 and an open stream", changed)
 	}
 }
 
-func TestWaitForMailChangeReportsAClosedStream(t *testing.T) {
-	changes := make(chan int64)
-	close(changes)
+func TestWaitForMailWatchEventReportsAClosedStream(t *testing.T) {
+	events := make(chan MailWatchEvent)
+	close(events)
 
-	if changed := waitForMailChangeCmd(changes)().(mailChangedMsg); !changed.closed {
+	if changed := waitForMailWatchEventCmd(events)().(mailWatchEventMsg); !changed.closed {
 		t.Errorf("changed = %+v, want a closed stream", changed)
 	}
-	if cmd := waitForMailChangeCmd(nil); cmd != nil {
+	if cmd := waitForMailWatchEventCmd(nil); cmd != nil {
 		t.Error("nothing to wait on should be no command")
 	}
 }
 
-func TestStartMailWatchCarriesTheStreamOrTheReason(t *testing.T) {
-	changes := make(chan int64)
-	opened := startMailWatchCmd(context.Background(), func(context.Context) (<-chan int64, error) {
-		return changes, nil
-	})().(mailWatchStartedMsg)
-	if opened.changes == nil || opened.err != nil {
-		t.Errorf("opened = %+v, want the stream", opened)
+func TestStartMailWatchCarriesTheStreamAttemptOrReason(t *testing.T) {
+	events := make(chan MailWatchEvent)
+	opened := startMailWatchCmd(context.Background(), func(context.Context) (<-chan MailWatchEvent, error) {
+		return events, nil
+	}, 4)().(mailWatchStartedMsg)
+	if opened.events == nil || opened.err != nil || opened.attempt != 4 {
+		t.Errorf("opened = %+v, want attempt 4 and its stream", opened)
 	}
 
-	refused := startMailWatchCmd(context.Background(), func(context.Context) (<-chan int64, error) {
+	refused := startMailWatchCmd(context.Background(), func(context.Context) (<-chan MailWatchEvent, error) {
 		return nil, errors.New("cable server said no")
-	})().(mailWatchStartedMsg)
-	if refused.err == nil {
-		t.Error("a watcher that fails should say why")
+	}, 5)().(mailWatchStartedMsg)
+	if refused.err == nil || refused.attempt != 5 {
+		t.Errorf("refused = %+v, want attempt 5 and the reason it failed", refused)
 	}
 
-	if cmd := startMailWatchCmd(context.Background(), nil); cmd != nil {
+	if cmd := startMailWatchCmd(context.Background(), nil, 1); cmd != nil {
 		t.Error("no watcher should be no command")
 	}
 }
@@ -68,59 +69,131 @@ func TestStartMailWatchCarriesTheStreamOrTheReason(t *testing.T) {
 func TestModelListensForMailChanges(t *testing.T) {
 	m := newModel()
 	m.mailView.boxes = orderBoxes(testBoxes())
-	changes := make(chan int64, 1)
+	events := make(chan MailWatchEvent, 1)
 
-	updated, cmd := m.Update(mailWatchStartedMsg{changes: changes})
+	updated, cmd := m.Update(mailWatchStartedMsg{attempt: m.mailWatchAttempt, events: events})
 	m = updated.(model)
-	if m.mailChanges == nil {
+	if m.mailWatchEvents == nil {
 		t.Fatal("the model should hold on to the stream")
 	}
 	if cmd == nil {
-		t.Fatal("the model should wait for the first change")
+		t.Fatal("the model should wait for the first event")
 	}
 
-	updated, _ = m.Update(mailChangedMsg{boxID: m.mailView.currentBoxID()})
+	updated, _ = m.Update(mailWatchEventMsg{event: MailWatchEvent{BoxID: m.mailView.currentBoxID()}})
 	m = updated.(model)
 	if !m.mailView.liveRefreshDue {
 		t.Error("a change to the box on screen should arm a re-read")
 	}
 }
 
-func TestModelSaysWhenLiveUpdatesStopped(t *testing.T) {
+func TestModelShowsAStandingOfflineNoticeAndRetriesAClosedWatch(t *testing.T) {
 	m := newModel()
-	m.mailView.boxes = orderBoxes(testBoxes())
-	m.mailView.Update(currentPostingsLoaded(m.mailView, testPostings()))
-	m.mailChanges = make(chan int64)
+	m.width, m.height = 80, 30
+	m.vc.width = 80
+	m.watchMail = func(context.Context) (<-chan MailWatchEvent, error) { return nil, nil }
+	m.mailWatchEvents = make(chan MailWatchEvent)
 
-	updated, cmd := m.Update(mailChangedMsg{closed: true})
+	updated, cmd := m.Update(mailWatchEventMsg{closed: true})
 	m = updated.(model)
-	if cmd != nil {
-		t.Error("a closed stream should not be waited on again")
+	if cmd == nil {
+		t.Fatal("a closed stream should schedule a new connection")
 	}
-	if m.mailChanges != nil {
+	if m.mailWatchEvents != nil {
 		t.Error("the closed stream should be let go of")
 	}
-	if !strings.Contains(m.mailView.View(), "ctrl+r") {
-		t.Errorf("the list should say it stopped following the server:\n%s", m.mailView.View())
+	if !strings.Contains(m.View().Content, "reconnecting to HEY") {
+		t.Errorf("the whole app should say live updates are reconnecting:\n%s", m.View().Content)
+	}
+}
+
+func TestModelShowsAndClearsATemporaryDisconnectAcrossSections(t *testing.T) {
+	m := newModel()
+	m.width, m.height = 80, 30
+	m.vc.width, m.vc.height = 80, 20
+	m.help.setHidden(true)
+	m.activeView = m.calendarView
+	m.mailWatchEvents = make(chan MailWatchEvent)
+	fullHeight := m.contentHeight()
+
+	updated, cmd := m.Update(mailWatchEventMsg{event: MailWatchEvent{Connection: MailConnectionDisconnected, WillReconnect: true}})
+	m = updated.(model)
+	if cmd == nil {
+		t.Fatal("the model should keep waiting while Action Cable reconnects")
+	}
+	if !strings.Contains(m.View().Content, "Live updates disconnected") {
+		t.Errorf("the Calendar should carry the global connection notice:\n%s", m.View().Content)
+	}
+	if m.contentHeight() != fullHeight-1 {
+		t.Errorf("content height = %d, want one row held for status from %d", m.contentHeight(), fullHeight)
 	}
 
-	if cmd := m.mailView.reloadPostings(); cmd == nil {
-		t.Fatal("ctrl+r should read the box again")
+	updated, cmd = m.Update(mailWatchEventMsg{event: MailWatchEvent{Connection: MailConnectionReconnected}})
+	m = updated.(model)
+	if cmd == nil {
+		t.Fatal("a reconnect should wait for more events and catch mail up")
 	}
-	if strings.Contains(m.mailView.View(), "Not live") {
-		t.Error("a reload should take the standing word back down")
+	if strings.Contains(m.View().Content, "Live updates disconnected") {
+		t.Errorf("the reconnect should clear the notice:\n%s", m.View().Content)
+	}
+	if m.contentHeight() != fullHeight {
+		t.Errorf("content height = %d, want the status row returned", m.contentHeight())
 	}
 }
 
 func TestModelReportsAWatcherThatNeverStarted(t *testing.T) {
 	m := newModel()
+	m.width, m.height = 80, 30
 	m.vc.width = 80
 	m.mailView.boxes = orderBoxes(testBoxes())
 
-	updated, _ := m.Update(mailWatchStartedMsg{err: errors.New("cable server said no")})
+	updated, cmd := m.Update(mailWatchStartedMsg{attempt: m.mailWatchAttempt, err: errors.New("\x1b[31mcable server said no")})
 	m = updated.(model)
-	if !strings.Contains(m.mailView.notice, "cable server said no") {
-		t.Errorf("notice = %q, want the reason there are no live updates", m.mailView.notice)
+	if cmd != nil {
+		t.Error("an unclassified refusal should not enter a reconnect loop")
+	}
+	view := m.View().Content
+	if !strings.Contains(view, "cable server said no") {
+		t.Errorf("view = %q, want the reason there are no live updates", view)
+	}
+	if strings.Contains(m.mailWatchNotice(), "\x1b") {
+		t.Errorf("notice = %q, want the cable error sanitized", m.mailWatchNotice())
+	}
+}
+
+func TestModelRetriesANetworkFailureButNotAStaleTimer(t *testing.T) {
+	m := newModel()
+	m.watchMail = func(context.Context) (<-chan MailWatchEvent, error) { return nil, nil }
+	network := apierr.ErrNetwork(errors.New("no route to host"))
+
+	updated, cmd := m.Update(mailWatchStartedMsg{attempt: m.mailWatchAttempt, err: network})
+	m = updated.(model)
+	if cmd == nil || m.mailWatchFailures != 1 {
+		t.Fatal("a network failure should schedule its first retry")
+	}
+	if notice := m.mailWatchNotice(); !strings.Contains(notice, "Offline") {
+		t.Errorf("notice = %q, want the network failure identified as offline", notice)
+	}
+	if delay := mailWatchRetryDelay(10); delay != mailWatchMaximumRetry {
+		t.Errorf("retry delay = %s, want it capped at %s", delay, mailWatchMaximumRetry)
+	}
+
+	m.mailWatchEvents = make(chan MailWatchEvent)
+	_, cmd = m.Update(mailWatchRetryMsg{attempt: m.mailWatchAttempt})
+	if cmd != nil {
+		t.Error("a timer left behind after connecting must not replace the live stream")
+	}
+
+	m.mailWatchEvents = nil
+	attempt := m.mailWatchAttempt
+	updated, cmd = m.Update(mailWatchRetryMsg{attempt: attempt})
+	m = updated.(model)
+	if cmd == nil || m.mailWatchAttempt != attempt+1 {
+		t.Fatal("the current retry timer should open the next watch attempt")
+	}
+	started := cmd().(mailWatchStartedMsg)
+	if started.attempt != attempt+1 {
+		t.Errorf("started attempt = %d, want %d", started.attempt, attempt+1)
 	}
 }
 
@@ -347,7 +420,7 @@ func TestWaitForScreenerChangeReportsTheRingAndTheClose(t *testing.T) {
 
 func TestModelOpensTheScreenerStreamOnlyWhenItsNameChanges(t *testing.T) {
 	m := newModel()
-	m.watchScreener = func(context.Context, string) (<-chan struct{}, error) {
+	m.watchScreener = func(context.Context, context.Context, string) (<-chan struct{}, error) {
 		return make(chan struct{}), nil
 	}
 
@@ -367,9 +440,10 @@ func TestModelOpensTheScreenerStreamOnlyWhenItsNameChanges(t *testing.T) {
 
 func TestModelGivesUpTheOldScreenerStreamWhenItOpensANewOne(t *testing.T) {
 	m := newModel()
-	var opened []context.Context
-	m.watchScreener = func(ctx context.Context, _ string) (<-chan struct{}, error) {
+	var opened, owners []context.Context
+	m.watchScreener = func(ctx, owner context.Context, _ string) (<-chan struct{}, error) {
 		opened = append(opened, ctx)
+		owners = append(owners, owner)
 		return make(chan struct{}), nil
 	}
 
@@ -385,12 +459,15 @@ func TestModelGivesUpTheOldScreenerStreamWhenItOpensANewOne(t *testing.T) {
 	if opened[1].Err() != nil {
 		t.Error("the stream just opened should still be open")
 	}
+	if len(owners) != 2 || owners[0] != m.watchCtx || owners[1] != m.watchCtx || m.watchCtx.Err() != nil {
+		t.Error("replacing a Screener stream must leave the TUI-wide connection context alive")
+	}
 }
 
 func TestModelReopensTheScreenerStreamFromACountRead(t *testing.T) {
 	m := newModel()
 	opened := make(chan string, 2)
-	m.watchScreener = func(_ context.Context, signedStreamName string) (<-chan struct{}, error) {
+	m.watchScreener = func(_, _ context.Context, signedStreamName string) (<-chan struct{}, error) {
 		opened <- signedStreamName
 		return make(chan struct{}), nil
 	}
@@ -428,7 +505,7 @@ func TestMailViewReadsTheScreenerCountWithItsStreamName(t *testing.T) {
 func TestModelGivesUpTheScreenerStreamOnAMailAccountSwitch(t *testing.T) {
 	m := newModel()
 	var opened []context.Context
-	m.watchScreener = func(ctx context.Context, _ string) (<-chan struct{}, error) {
+	m.watchScreener = func(ctx, _ context.Context, _ string) (<-chan struct{}, error) {
 		opened = append(opened, ctx)
 		return make(chan struct{}), nil
 	}
@@ -465,7 +542,7 @@ func TestModelSaysWhenTheScreenerStreamCloses(t *testing.T) {
 
 func TestModelIgnoresTheCloseOfAScreenerStreamItGaveUp(t *testing.T) {
 	m := newModel()
-	m.watchScreener = func(context.Context, string) (<-chan struct{}, error) {
+	m.watchScreener = func(context.Context, context.Context, string) (<-chan struct{}, error) {
 		return make(chan struct{}), nil
 	}
 	runCmd(m.startScreenerWatch("stream-one"))

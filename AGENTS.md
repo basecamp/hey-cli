@@ -578,25 +578,31 @@ click-to-focus and the replace-not-stack id all live in the plugin), and nothing
 desktop-shaped lives in `watch*.go`.
 
 The TUI's mail list follows the same channel and wants less from it. `internal/cmd/tui_watch.go`
-subscribes and relays the changed box IDs down a channel; `internal/tui/live.go` defines
-that contract as `tui.MailWatcher`, so the TUI never sees cable or auth, and a test hands
-it a plain channel. There is no sync cursor: the doorbell says which box changed and
-`mailView.refreshBox` reads that box's top page again, which is where a change shows up.
-A reconnect sends `tui.AnyBoxChanged`, standing for the changes broadcast while the
-connection was down.
+subscribes and relays typed `tui.MailWatchEvent` values; `internal/tui/live.go` defines
+that `tui.MailWatcher` contract, so the TUI never sees cable or auth, and a test hands it
+a plain channel. Box events are doorbells: `mailView.refreshBox` reads that box's top page
+again, which is where a change shows up. Connection events carry disconnect/reconnect
+state. A reconnect asks for `tui.AnyBoxChanged`, standing for broadcasts sent during the
+gap, and the model re-reads the box on screen.
 
-`internal/tui/live.go` is also where the two delays live. `liveRefreshDelay` collects one
-delivery's changes into a single re-read — a thread rings the doorbell once per posting.
-`liveRetryDelay` is how long a re-read waits when a form or a picker is open over the list,
-or a write hasn't landed: the change is held rather than dropped, because a re-read
-replaces what the reader is looking at. `contentList.refreshHead` is what makes that
-safe — unlike `setPostings` it keeps the cursor on its posting and keeps a selection —
-and the re-read has its own request lane (`liveRequestID`, `postingsRefreshedMsg`) so it
-can never be confused with a read the user asked for, or show the spinner.
+`internal/tui/live.go` owns both refresh and reconnect timing. `liveRefreshDelay` collects
+one delivery's changes into a single re-read — a thread rings the doorbell once per
+posting. `liveRetryDelay` is how long a re-read waits when a form or a picker is open over
+the list, or a write hasn't landed: the change is held rather than dropped, because a
+re-read replaces what the reader is looking at. `mailWatchRetryDelay` backs a watch that
+could not start or stopped for good from two seconds up to thirty; authentication failures
+stand without retrying. `contentList.refreshHead` is what makes a re-read safe — unlike
+`setPostings` it keeps the cursor on its posting and keeps a selection — and the re-read
+has its own request lane (`liveRequestID`, `postingsRefreshedMsg`) so it can never be
+confused with a read the user asked for, or show the spinner.
 
 The watch outlives the view context, which a mail account switch throws away; that is what
-`model.watchCtx` is for. When the stream closes for good the mail list says so and stays
-saying so until ctrl+r reads the box again.
+`model.watchCtx` is for. The model holds connection state above the active section, so an
+offline or reconnecting notice remains visible in Mail, Contacts, Calendar and Journal.
+A temporary drop is followed by Action Cable's own reconnect; an initial network failure
+or a stream that closes for good gets a fresh bounded dial from the model. The initial dial
+itself is capped so it can report state instead of waiting inside Action Cable forever.
+A successful connection removes the status row and catches the current mail box up.
 
 The Screener is told over a different stream, because haystack has no channel for it:
 `Clearance::Broadcasting` re-renders the Screener's own button over a Turbo stream, and
@@ -614,7 +620,10 @@ ctrl+r, closing The Screener, or the doorbell itself will all reopen a watch the
 hung up on. Opening one gives up the one before it — the subscription belongs to the
 watch's context, and cancelling is what unsubscribes it, so a stream nobody is following
 does not go on ringing. A mail account switch gives it up for the same reason: the signed
-name is the account's, and the new account's sources read serves its own.
+name is the account's, and the new account's sources read serves its own. The subscription
+uses that short-lived context, while `tuiCableClient` is owned by the TUI-wide watch
+context; replacing a Screener name therefore unsubscribes it without closing Mail's shared
+connection.
 
 The doorbell always re-reads the count, wherever the user is, because the mail list is
 where The Screener announces itself. When The Screener is what's on screen the queue is
@@ -623,9 +632,12 @@ mail list — and held while a decision is in flight or the clear-everything que
 On the history tab nothing is read; the pending pane is just marked unloaded, which is
 what `switchTab` already looks at. Both watches share one websocket
 (`tuiCableClient` in `internal/cmd/tui_watch.go`): two subscriptions, one authorization.
-A client that stopped itself — the server said don't come back — answers every `Subscribe`
-with `ErrClosed` and never dials again, so `tuiSubscribe` drops it and dials a fresh one
-rather than handing a reopened watch a dead connection.
+A client that stopped itself never dials again: depending on how it stopped, `Subscribe`
+answers `ErrClosed` or preserves the server's non-reconnecting `DisconnectError`.
+`tuiSubscribe` recognizes both, drops that client and dials a fresh one rather than handing
+a reopened watch a dead connection. Mail doorbells are coalesced when their bounded queue
+is full, while a connection transition drains those stale doorbells and takes priority;
+the reconnect catch-up reads the current state once.
 
 ### API documentation
 
