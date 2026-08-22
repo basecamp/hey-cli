@@ -50,7 +50,7 @@ const (
 	calendarRequestNone calendarRequestKind = iota
 	calendarRequestCalendars
 	calendarRequestRecordings
-	calendarRequestHabitMutation
+	calendarRequestMutation
 	calendarRequestCategories
 )
 
@@ -81,9 +81,12 @@ type timeTrackCategorySavedMsg struct {
 	summary string
 }
 
-type habitMutationMsg struct {
+// calendarMutationMsg is the answer to a write on the calendar — a habit, a to-do —
+// carrying what to say about it either way.
+type calendarMutationMsg struct {
 	requestResult
-	action string
+	action  string // what happened, once it has
+	failure string // and what did not, when it did not
 }
 
 // --- Calendar section view ---
@@ -122,6 +125,7 @@ type calendarView struct {
 	timeTrackCategories *timeTrackCategoryManager
 	habitPicker         *habitPicker
 	habitForm           *habitForm
+	todoPicker          *todoPicker
 
 	requests requestLane[calendarRequestKind]
 }
@@ -171,24 +175,27 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if v.habitPicker != nil {
 			v.habitPicker.setHabits(v.manageableHabits())
 		}
+		if v.todoPicker != nil {
+			v.todoPicker.setTodos(v.todos)
+		}
 		v.rebuildView()
 		return nil, true
 
-	case habitMutationMsg:
+	case calendarMutationMsg:
 		if !v.requests.accepts(msg.requestResult) {
 			return nil, true
 		}
 		v.requests.finish(msg.requestID)
 		if msg.err != nil {
-			switch {
-			case v.habitForm != nil:
+			// A form that is open says so itself; everything else says it in a toast,
+			// which is over the picker the write came from.
+			if v.habitForm != nil {
 				v.habitForm.saving = false
-				v.habitForm.status = errorNotice("Save failed", msg.err)
+				v.habitForm.status = errorNotice(msg.failure, msg.err)
 				v.habitForm.isError = true
-			default:
-				return notifyError("Delete failed", msg.err), true
+				return nil, true
 			}
-			return nil, true
+			return notifyError(msg.failure, msg.err), true
 		}
 		v.habitForm = nil
 		if v.calIndex >= 0 && v.calIndex < len(v.calendars) {
@@ -247,6 +254,9 @@ func (v *calendarView) View() string {
 	if v.habitPicker != nil {
 		view = v.habitPicker.draw(view, v.vc.width, v.vc.height)
 	}
+	if v.todoPicker != nil {
+		view = v.todoPicker.draw(view, v.vc.width, v.vc.height)
+	}
 	if v.habitForm != nil {
 		frame := modalFrame(v.habitForm.title(), v.habitForm.view(), v.vc.width)
 		view = overlayModal(view, frame, v.vc.width, v.vc.height)
@@ -259,10 +269,15 @@ func (v *calendarView) View() string {
 // belong in a grid that is precise about time — and a day with a long event pushes
 // everything below it out of the viewport.
 func (v *calendarView) todosFooter() string {
-	if v.viewMode == viewYear || len(v.todos) == 0 {
+	if v.viewMode == viewYear {
 		return ""
 	}
-	return sectionHeader(todosSectionLabel, v.vc.width) + "\n" + renderTodosRibbon(v.todos, v.vc.width)
+	header := hintedSectionHeader(todosSectionLabel, "s to manage", v.vc.width)
+	if len(v.todos) == 0 {
+		// The line stays on an empty week, because it is where a to-do is added from.
+		return header + "\n" + styleMuted.Render("Nothing to do")
+	}
+	return header + "\n" + renderTodosRibbon(v.todos, v.vc.width)
 }
 
 func (v *calendarView) todosFooterHeight() int {
@@ -281,6 +296,9 @@ func (v *calendarView) HelpBindings() []helpBinding {
 	}
 	if v.habitPicker != nil {
 		return v.habitPicker.helpBindings()
+	}
+	if v.todoPicker != nil {
+		return v.todoPicker.helpBindings()
 	}
 	// The day says which keys move it on the line that names it. The week and the year
 	// have no such line, so the help bar carries it for them.
@@ -346,7 +364,7 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return cmd
 	}
-	if v.requests.kind == calendarRequestHabitMutation {
+	if v.requests.kind == calendarRequestMutation {
 		return nil
 	}
 
@@ -354,10 +372,19 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		return v.handleHabitPickerKey(msg)
 	}
 
+	if v.todoPicker != nil {
+		return v.handleTodoPickerKey(msg)
+	}
+
 	switch msg.String() {
 	// b for habits, as in HEY's own calendar.
 	case "b":
 		v.habitPicker = newHabitPicker(v.manageableHabits())
+		return nil
+	// s for the to-dos, which HEY files under "Sometime this week".
+	case "s":
+		v.todoPicker = newTodoPicker(v.todos)
+		v.todoPicker.resize(v.vc.width)
 		return nil
 	case "c":
 		v.timeTrackCategories = newTimeTrackCategoryManager()
@@ -381,6 +408,67 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 
 // handleHabitPickerKey gives the open picker every key: managing a habit is what the
 // modal is for, so a is a new habit here rather than whatever a means outside it.
+// handleTodoPickerKey gives the open picker every key. While it is naming a new to-do
+// every key is the input's, so a is a letter there rather than another to-do.
+func (v *calendarView) handleTodoPickerKey(msg tea.KeyPressMsg) tea.Cmd {
+	picker := v.todoPicker
+
+	if picker.editing() {
+		switch msg.Key().Code {
+		case tea.KeyEscape:
+			picker.stopEditing()
+			return nil
+		case tea.KeyEnter:
+			if picker.mode == todoRenaming {
+				todo, title, ok := picker.renamed()
+				picker.stopEditing()
+				if !ok {
+					return nil
+				}
+				return v.renameTodo(todo, title)
+			}
+			title, ok := picker.title()
+			if !ok {
+				return nil
+			}
+			picker.stopEditing()
+			return v.addTodo(title)
+		default:
+			return picker.update(msg)
+		}
+	}
+
+	switch msg.String() {
+	case "esc", "q":
+		v.todoPicker = nil
+		return nil
+	case "a":
+		return picker.startAdding()
+	case "e":
+		return picker.startRenaming()
+	case "enter":
+		if todo := picker.selected(); todo != nil {
+			return v.toggleTodo(*todo)
+		}
+		return nil
+	case "x":
+		todo := picker.selected()
+		if todo == nil {
+			return nil
+		}
+		if picker.confirmed != todo.ID {
+			picker.confirmed = todo.ID
+			picker.status = "Press x again to delete " + terminal.SanitizeLine(todo.Title)
+			return nil
+		}
+		return v.deleteTodo(*todo)
+	}
+
+	picker.moveCursor(msg)
+	picker.status = ""
+	return nil
+}
+
 func (v *calendarView) handleHabitPickerKey(msg tea.KeyPressMsg) tea.Cmd {
 	picker := v.habitPicker
 
@@ -498,11 +586,11 @@ func (v *calendarView) Loading() bool {
 	return v.requests.loading && !v.CapturingInput() && !v.drawn
 }
 func (v *calendarView) CapturingInput() bool {
-	return v.timeTrackCategories != nil || v.habitForm != nil || v.habitPicker != nil
+	return v.timeTrackCategories != nil || v.habitForm != nil || v.habitPicker != nil || v.todoPicker != nil
 }
 
 func (v *calendarView) AccountSwitchBlocked() bool {
-	return v.requests.kind == calendarRequestHabitMutation
+	return v.requests.kind == calendarRequestMutation
 }
 
 // Restyle re-renders the day/week/year grid, which caches styled output in its
@@ -516,6 +604,9 @@ func (v *calendarView) Restyle() {
 func (v *calendarView) Resize(width, height int) {
 	if v.habitForm != nil {
 		v.habitForm.resize(width, height)
+	}
+	if v.todoPicker != nil {
+		v.todoPicker.resize(width)
 	}
 	v.rebuildView()
 }
@@ -647,7 +738,7 @@ func (v *calendarView) saveHabit() tea.Cmd {
 	form := v.habitForm
 	name, icon, color, days := form.values()
 	params := hey.HabitParams{Name: name, Icon: icon, Color: color, Days: days}
-	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestHabitMutation)
+	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestMutation)
 	return func() tea.Msg {
 		var err error
 		action := "Habit created"
@@ -657,7 +748,7 @@ func (v *calendarView) saveHabit() tea.Cmd {
 			action = "Habit updated"
 			_, err = v.vc.sdk.Habits().Update(ctx, form.habitID, params)
 		}
-		return habitMutationMsg{requestResult: newRequestResult(requestID, err), action: action}
+		return calendarMutationMsg{requestResult: newRequestResult(requestID, err), action: action, failure: "Save failed"}
 	}
 }
 
@@ -667,7 +758,7 @@ func (v *calendarView) saveHabit() tea.Cmd {
 func (v *calendarView) toggleHabitCompletion(habit Recording) tea.Cmd {
 	day := v.day().Local().Format(time.DateOnly)
 	done := habit.CompletedAt != ""
-	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestHabitMutation)
+	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestMutation)
 	return func() tea.Msg {
 		var err error
 		action := "Habit done for today"
@@ -677,15 +768,62 @@ func (v *calendarView) toggleHabitCompletion(habit Recording) tea.Cmd {
 		} else {
 			_, err = v.vc.sdk.Habits().Complete(ctx, day, habit.ID)
 		}
-		return habitMutationMsg{requestResult: newRequestResult(requestID, err), action: action}
+		return calendarMutationMsg{requestResult: newRequestResult(requestID, err), action: action, failure: "Could not update the habit"}
 	}
 }
 
 func (v *calendarView) deleteHabit(recording Recording) tea.Cmd {
-	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestHabitMutation)
+	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestMutation)
 	return func() tea.Msg {
 		err := v.vc.sdk.Habits().Delete(ctx, recording.ID)
-		return habitMutationMsg{requestResult: newRequestResult(requestID, err), action: "Habit deleted"}
+		return calendarMutationMsg{requestResult: newRequestResult(requestID, err), action: "Habit deleted", failure: "Delete failed"}
+	}
+}
+
+// addTodo files a to-do on the day on screen, which is the week the picker is showing.
+// HEY takes a bare date so the day is the reader's rather than UTC's.
+func (v *calendarView) addTodo(title string) tea.Cmd {
+	day := v.day().Local().Format(time.DateOnly)
+	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestMutation)
+	return func() tea.Msg {
+		_, err := v.vc.sdk.CalendarTodos().Create(ctx, title, day)
+		return calendarMutationMsg{requestResult: newRequestResult(requestID, err), action: "To-do added", failure: "Could not add the to-do"}
+	}
+}
+
+// renameTodo changes a to-do's title and nothing else: TodoChanges leaves a zero field
+// alone, so the day it is filed on stays where it was.
+func (v *calendarView) renameTodo(todo Recording, title string) tea.Cmd {
+	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestMutation)
+	return func() tea.Msg {
+		_, err := v.vc.sdk.CalendarTodos().Update(ctx, todo.ID, hey.TodoChanges{Title: title})
+		return calendarMutationMsg{requestResult: newRequestResult(requestID, err), action: "To-do renamed", failure: "Could not rename the to-do"}
+	}
+}
+
+// toggleTodo ticks a to-do off or puts it back. Unlike a habit, which is done on a
+// given day, a to-do is done or it is not.
+func (v *calendarView) toggleTodo(todo Recording) tea.Cmd {
+	done := todo.CompletedAt != ""
+	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestMutation)
+	return func() tea.Msg {
+		var err error
+		action := "To-do done"
+		if done {
+			action = "To-do cleared"
+			_, err = v.vc.sdk.CalendarTodos().Uncomplete(ctx, todo.ID)
+		} else {
+			_, err = v.vc.sdk.CalendarTodos().Complete(ctx, todo.ID)
+		}
+		return calendarMutationMsg{requestResult: newRequestResult(requestID, err), action: action, failure: "Could not update the to-do"}
+	}
+}
+
+func (v *calendarView) deleteTodo(todo Recording) tea.Cmd {
+	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestMutation)
+	return func() tea.Msg {
+		err := v.vc.sdk.CalendarTodos().Delete(ctx, todo.ID)
+		return calendarMutationMsg{requestResult: newRequestResult(requestID, err), action: "To-do deleted", failure: "Could not delete the to-do"}
 	}
 }
 

@@ -254,14 +254,14 @@ func calendarHabitsWithFailingServer(t *testing.T, status int) *calendarView {
 	return view
 }
 
-// finishHabitMutation settles a habit mutation and answers the toast it raised. What a
+// finishCalendarMutation settles a habit mutation and answers the toast it raised. What a
 // mutation answers with is a batch — the toast, and the day read again behind it — so
 // this walks the batch the way the runtime does, handing the view everything but the
 // toast, which belongs to the model.
-func finishHabitMutation(t *testing.T, view *calendarView, cmd tea.Cmd) string {
+func finishCalendarMutation(t *testing.T, view *calendarView, cmd tea.Cmd) string {
 	t.Helper()
 	msg := cmd()
-	mutation, ok := msg.(habitMutationMsg)
+	mutation, ok := msg.(calendarMutationMsg)
 	if !ok {
 		t.Fatalf("mutation command returned %T", msg)
 	}
@@ -281,10 +281,10 @@ func TestCalendarHabitCreateMutationAndRefresh(t *testing.T) {
 	view.HandleContentKey(keyPress("a"))
 	fillHabitForm(view.habitForm, "Practice piano", "music", "green", 1, 3, 5)
 	cmd := view.HandleContentKey(keyPress("ctrl+s"))
-	if cmd == nil || view.requests.kind != calendarRequestHabitMutation {
+	if cmd == nil || view.requests.kind != calendarRequestMutation {
 		t.Fatal("ctrl+s should start habit creation")
 	}
-	if toast := finishHabitMutation(t, view, cmd); toast != "Habit created" || view.habitForm != nil {
+	if toast := finishCalendarMutation(t, view, cmd); toast != "Habit created" || view.habitForm != nil {
 		t.Errorf("create state = toast:%q form:%v", toast, view.habitForm)
 	}
 	requests, bodies := recorded.snapshot()
@@ -305,7 +305,7 @@ func TestCalendarHabitEditMutationAndRefresh(t *testing.T) {
 	view.HandleContentKey(keyPress("e"))
 	fillHabitForm(view.habitForm, "Read every evening", "read", "purple", 0, 6)
 	cmd := view.HandleContentKey(keyPress("ctrl+s"))
-	if toast := finishHabitMutation(t, view, cmd); toast != "Habit updated" {
+	if toast := finishCalendarMutation(t, view, cmd); toast != "Habit updated" {
 		t.Errorf("toast = %q", toast)
 	}
 	requests, _ := recorded.snapshot()
@@ -356,7 +356,7 @@ func TestCalendarHabitEnterCompletesAndClearsForTheDayOnScreen(t *testing.T) {
 	view.now = func() time.Time { return time.Date(2026, 8, 22, 9, 0, 0, 0, time.Local) }
 
 	cmd := view.HandleContentKey(keyPress("enter"))
-	if cmd == nil || view.requests.kind != calendarRequestHabitMutation {
+	if cmd == nil || view.requests.kind != calendarRequestMutation {
 		t.Fatal("enter should complete the selected habit")
 	}
 	// Ticking a habit off reads the day again behind the modal, and a spinner for that
@@ -364,7 +364,7 @@ func TestCalendarHabitEnterCompletesAndClearsForTheDayOnScreen(t *testing.T) {
 	if !view.requests.loading || view.Loading() {
 		t.Errorf("completing a habit claimed the spinner: loading=%v spinner=%v", view.requests.loading, view.Loading())
 	}
-	if toast := finishHabitMutation(t, view, cmd); toast != "Habit done for today" {
+	if toast := finishCalendarMutation(t, view, cmd); toast != "Habit done for today" {
 		t.Errorf("toast = %q", toast)
 	}
 	requests, _ := recorded.snapshot()
@@ -378,7 +378,7 @@ func TestCalendarHabitEnterCompletesAndClearsForTheDayOnScreen(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("enter should clear a habit that is already done")
 	}
-	if toast := finishHabitMutation(t, view, cmd); toast != "Habit cleared for today" {
+	if toast := finishCalendarMutation(t, view, cmd); toast != "Habit cleared for today" {
 		t.Errorf("toast = %q", toast)
 	}
 	requests, _ = recorded.snapshot()
@@ -437,10 +437,10 @@ func TestCalendarHabitDeleteRequiresConfirmationAndRefresh(t *testing.T) {
 		t.Fatalf("first x = cmd:%v confirmed ID:%d status:%q", cmd, picker.confirmed, picker.status)
 	}
 	cmd := view.HandleContentKey(keyPress("x"))
-	if cmd == nil || view.requests.kind != calendarRequestHabitMutation {
+	if cmd == nil || view.requests.kind != calendarRequestMutation {
 		t.Fatal("second x should start deletion")
 	}
-	if toast := finishHabitMutation(t, view, cmd); toast != "Habit deleted" || picker.confirmed != 0 {
+	if toast := finishCalendarMutation(t, view, cmd); toast != "Habit deleted" || picker.confirmed != 0 {
 		t.Errorf("delete state = toast:%q confirmed ID:%d", toast, picker.confirmed)
 	}
 	requests, _ := recorded.snapshot()
