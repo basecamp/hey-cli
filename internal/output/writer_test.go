@@ -3,6 +3,7 @@ package output
 import (
 	"bytes"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -264,6 +265,34 @@ func TestWriterJQSanitizesTerminalResults(t *testing.T) {
 		}
 		if !strings.Contains(buf.String(), `"safelink31m!"`) {
 			t.Errorf("sanitized value missing: %q", buf.String())
+		}
+	})
+
+	t.Run("a key past the mark cap is shown in ASCII", func(t *testing.T) {
+		var buf bytes.Buffer
+		w := New(Options{Stdout: &buf})
+		zalgo := "Z" + strings.Repeat("\u0336", 9)
+		input := map[string]any{zalgo: "stacked", "Z\u0336": "one mark"}
+		if err := w.writeJQResult(input, true); err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range buf.String() {
+			if r >= 0x80 && r != '\u0336' {
+				t.Fatalf("output carries %U: %q", r, buf.String())
+			}
+		}
+		if strings.Count(buf.String(), "\u0336") != 1 {
+			t.Errorf("the stack past the cap reached the output as it was: %q", buf.String())
+		}
+		var result map[string]any
+		if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		if len(result) != 2 || result["Z\u0336"] != "one mark" {
+			t.Errorf("fields = %#v, want both, the clean one as it was", result)
+		}
+		if _, ok := result[strings.Trim(strconv.QuoteToASCII(zalgo), "\"")]; !ok {
+			t.Errorf("escaped key missing: %#v", result)
 		}
 	})
 

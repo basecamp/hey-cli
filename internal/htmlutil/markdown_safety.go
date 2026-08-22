@@ -3,6 +3,8 @@ package htmlutil
 import (
 	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/basecamp/hey-cli/internal/terminal"
 )
@@ -47,12 +49,7 @@ var entityReference = regexp.MustCompile(`^&(#[0-9]{1,8}|#[xX][0-9a-fA-F]{1,8}|[
 // start of the next is an entity once they sit side by side. For the same reason the
 // line-start checks look at the line being built rather than at the run alone.
 func escapeText(s, line string) string {
-	s = strings.Map(func(r rune) rune {
-		if r == '\n' || r == '\t' {
-			return -1
-		}
-		return r
-	}, terminal.Sanitize(s))
+	s = sanitizeProse(s, line)
 
 	var b strings.Builder
 	b.Grow(len(s))
@@ -69,6 +66,68 @@ func escapeText(s, line string) string {
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+// sanitizeProse runs terminal.Sanitize over a run of prose the way the renderer will: in
+// the context of the line it joins. Text arrives a node at a time, and HTML can split a
+// joining sequence or a stack of marks across two of them — "👨<span>\u200d👩</span>"
+// — where a run sanitized on its own would lose the joiner for want of a base on its
+// left, and a ninth mark would pass for a first. The context is the last base on the
+// line and what rides on it (lineContext), which is all the sanitizer's decisions look
+// back at. A joiner a run ends with is kept: what follows is not known yet, the next run
+// is judged with it in its context, and one left dangling at the end of a line is
+// trimmed there (flushLine), as the renderer would trim it anyway.
+func sanitizeProse(s, line string) string {
+	s = strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			return -1
+		}
+		return r
+	}, s)
+	context := lineContext(line)
+	whole := terminal.Sanitize(context + s)
+	var tail string
+	switch head := terminal.Sanitize(context); {
+	case strings.HasPrefix(whole, context):
+		// The context as written, a joiner kept at its end included, stands.
+		tail = whole[len(context):]
+	case strings.HasPrefix(whole, head):
+		// A joiner kept at the end of the line found nothing to join; it stays on
+		// the line as the renderer's pass will see and drop it.
+		tail = whole[len(head):]
+	default:
+		return terminal.Sanitize(s)
+	}
+	// A trailing joiner that went for want of a right-hand side is kept for the next
+	// run, but only one a base would have taken: the probe asks the sanitizer itself.
+	if last, _ := utf8.DecodeLastRuneInString(s); isJoiner(last) && !strings.HasSuffix(tail, string(last)) &&
+		strings.HasSuffix(terminal.Sanitize(context+tail+string(last)+"é"), string(last)+"é") {
+		tail += string(last)
+	}
+	return tail
+}
+
+// lineContext is the end of a line that the sanitizer's decisions about what follows
+// look back at: the last rune that is neither a mark nor a joiner, and everything after
+// it. It is bounded, since a line can be long and the context cannot be — the sanitizer
+// keeps at most a handful of marks on a base.
+func lineContext(line string) string {
+	const maxContextRunes = 32
+	end := len(line)
+	for i := 0; i < maxContextRunes && end > 0; i++ {
+		r, size := utf8.DecodeLastRuneInString(line[:end])
+		end -= size
+		if !isCombiningMark(r) && !isJoiner(r) {
+			break
+		}
+	}
+	return line[end:]
+}
+
+func isJoiner(r rune) bool { return r == 0x200c || r == 0x200d }
+
+func isCombiningMark(r rune) bool {
+	return r >= 0x300 && unicode.In(r, unicode.Mn, unicode.Me, unicode.Mc)
 }
 
 // closesOrderedMarker reports whether the line so far — what was already on it and the

@@ -537,7 +537,9 @@ func (m *markdownizer) hardBreak() {
 }
 
 func (m *markdownizer) flushLine() {
-	content := strings.TrimRight(m.line.String(), " \t")
+	// A joiner kept at the end of a prose run for the run after it (sanitizeProse) has
+	// nothing to join once the line ends.
+	content := strings.TrimRight(m.line.String(), " \t\u200c\u200d")
 	breaking := m.breaking
 	m.line.Reset()
 	m.breaking = false
