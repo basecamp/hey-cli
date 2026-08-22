@@ -524,13 +524,13 @@ func TestCalendarStepsThroughDaysAndBackToToday(t *testing.T) {
 	today := time.Date(2026, 8, 22, 9, 0, 0, 0, time.Local)
 	v.now = func() time.Time { return today }
 
-	for _, key := range []string{"right", "n"} {
+	for _, key := range []string{"n", "n"} {
 		v.HandleContentKey(keyPress(key))
 	}
 	if got := v.day(); !sameDay(got, today.AddDate(0, 0, 2)) {
 		t.Errorf("two steps forward = %s, want %s", got.Format(time.DateOnly), today.AddDate(0, 0, 2).Format(time.DateOnly))
 	}
-	for _, key := range []string{"left", "p", "p"} {
+	for _, key := range []string{"p", "p", "p"} {
 		v.HandleContentKey(keyPress(key))
 	}
 	if got := v.day(); !sameDay(got, today.AddDate(0, 0, -1)) {
@@ -548,7 +548,7 @@ func TestCalendarStepsThroughDaysAndBackToToday(t *testing.T) {
 	}
 	// The keys that move the day are said on the day's own line, and t joins them once
 	// it would do something.
-	if hint := v.stepHint(); hint != "←→ day · t today" {
+	if hint := v.stepHint(); hint != "p/n day · t today" {
 		t.Errorf("hint on the date line = %q", hint)
 	}
 
@@ -569,19 +569,47 @@ func TestCalendarStepsThroughDaysAndBackToToday(t *testing.T) {
 	}
 }
 
+// Stepping away and back leaves the anchor pinned to today's own date rather than cleared,
+// so the view is on today without following the clock. The hint asks the second question:
+// a reader looking at today does not need to be told how to get to it.
+func TestCalendarHidesTheTodayHintWhenTodayIsOnScreen(t *testing.T) {
+	v := calendarWithRecordings()
+	today := time.Date(2026, 8, 22, 9, 0, 0, 0, time.Local)
+	v.now = func() time.Time { return today }
+
+	v.HandleContentKey(keyPress("n"))
+	if hint := v.stepHint(); hint != "p/n day · t today" {
+		t.Errorf("a day away, hint = %q, want t offered", hint)
+	}
+
+	v.HandleContentKey(keyPress("p"))
+	if v.onToday() {
+		t.Fatal("stepping back should leave the anchor pinned, not clear it")
+	}
+	if hint := v.stepHint(); hint != "p/n day" {
+		t.Errorf("back on today, hint = %q, want t left out", hint)
+	}
+
+	// t still has something to do — it returns the view to following the clock — it just
+	// is not worth a hint while today is already on screen.
+	if cmd := v.HandleContentKey(keyPress("t")); cmd == nil || !v.onToday() {
+		t.Error("t should clear the anchor even from today's own date")
+	}
+}
+
 func TestCalendarStepsByTheUnitTheViewShows(t *testing.T) {
 	v := calendarWithRecordings()
 	today := time.Date(2026, 8, 22, 9, 0, 0, 0, time.Local)
 	v.now = func() time.Time { return today }
 
 	v.viewMode = viewWeek
-	v.HandleContentKey(keyPress("right"))
+	v.HandleContentKey(keyPress("n"))
 	if got := v.day(); !sameDay(got, today.AddDate(0, 0, 7)) {
 		t.Errorf("a step in the week view = %s, want a week on", got.Format(time.DateOnly))
 	}
 
 	v.viewMode = viewYear
-	v.HandleContentKey(keyPress("left"))
+	v.HandleContentKey(keyPress("p"))
 	if got := v.day(); !sameDay(got, today.AddDate(0, 0, 7).AddDate(-1, 0, 0)) {
 		t.Errorf("a step in the year view = %s, want a year back", got.Format(time.DateOnly))
 	}
@@ -793,8 +821,8 @@ func TestDayViewLabelsItsSections(t *testing.T) {
 	habits := []Recording{{ID: 4, Title: "Read 20 pages"}}
 
 	day := time.Date(2026, 8, 24, 9, 0, 0, 0, time.Local)
-	view := stripANSI(renderDayView(events, habits, day, "←→ day", 100, 24))
-	for _, label := range []string{"Habits", "Monday, August 24", "←→ day", "All day"} {
+	view := stripANSI(renderDayView(events, habits, day, "p/n day", 100, 24))
+	for _, label := range []string{"Habits", "Monday, August 24", "p/n day", "All day"} {
 		if !strings.Contains(view, label) {
 			t.Errorf("day view did not label its %q section: %q", label, view)
 		}
@@ -1096,7 +1124,7 @@ func TestCalendarViewHelpBindingsShowsViewToggle(t *testing.T) {
 
 	// The week and the year have no date line, so the help bar carries their steps.
 	v.viewMode = viewWeek
-	for _, want := range []string{"←→", "c"} {
+	for _, want := range []string{"p/n", "c"} {
 		found := false
 		for _, binding := range v.HelpBindings() {
 			found = found || binding.key == want
