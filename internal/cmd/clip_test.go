@@ -185,6 +185,7 @@ func TestClipCreateRejectsTextOutsideTheEntry(t *testing.T) {
 		{name: "script text is not selectable", source: `<p>Visible text</p><script>secret value</script>`, content: "secret value"},
 		{name: "hidden text is not selectable", source: `<p>Visible text</p><p hidden>Hidden preheader</p>`, content: "Hidden preheader"},
 		{name: "block boundaries remain distinct", source: `<section>Alpha</section><section>Beta</section>`, content: "AlphaBeta"},
+		{name: "unparseable source fails closed", source: strings.Repeat("<div>", 1_000) + "not selectable" + strings.Repeat("</div>", 1_000), content: "not selectable"},
 		{name: "summary is not entry content", source: ``, content: "Preview summary"},
 	}
 	for _, tt := range tests {
@@ -230,6 +231,19 @@ func TestClipCreateRequiresAnAvailableSourceMessage(t *testing.T) {
 		})
 		_, err := runJSONCommand(t, handler, "clip", "create", "987", "--content", "Keep this")
 		if err == nil || !strings.Contains(err.Error(), "--content does not match text in entry 987") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+
+	t.Run("source over validation limit", func(t *testing.T) {
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet || r.URL.Path != "/messages/987.json" {
+				t.Fatalf("unexpected request = %s %s", r.Method, r.URL.Path)
+			}
+			writeClipSource(t, w, 987, strings.Repeat("x", maxClipSourceBytes+1), "")
+		})
+		_, err := runJSONCommand(t, handler, "clip", "create", "987", "--content", "x")
+		if err == nil || !strings.Contains(err.Error(), "content exceeds the 1 MiB clip validation limit") {
 			t.Fatalf("error = %v", err)
 		}
 	})
@@ -291,6 +305,7 @@ func TestClipCommandsValidateInput(t *testing.T) {
 	}{
 		{name: "create content", args: []string{"clip", "create", "987"}, want: "--content is required"},
 		{name: "blank content", args: []string{"clip", "create", "987", "--content", "  "}, want: "--content is required"},
+		{name: "oversized content", args: []string{"clip", "create", "987", "--content", strings.Repeat("x", maxClipContentBytes+1)}, want: "--content exceeds the 64 KiB clip limit"},
 		{name: "invalid entry", args: []string{"clip", "create", "zero", "--content", "Keep this"}, want: "invalid entry ID: zero"},
 		{name: "invalid clip", args: []string{"clip", "delete", "zero"}, want: "invalid clip ID: zero"},
 	}

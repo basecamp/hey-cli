@@ -30,7 +30,7 @@ func ToText(s string) string {
 func MessageSourceText(s string) string {
 	doc, err := html.Parse(strings.NewReader(s))
 	if err != nil {
-		return s
+		return ""
 	}
 	var b strings.Builder
 	walkMessageSourceNode(&b, doc, 0)

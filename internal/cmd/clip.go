@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/spf13/cobra"
 
@@ -139,13 +140,18 @@ func newClipCommand() *clipCommand {
 		Use:   "clip",
 		Short: "Save and manage passages from email",
 		Annotations: map[string]string{
-			"agent_notes": "Create a clip from text carried by an email entry, or delete a clip. The CLI verifies that the passage is source-backed by the entry's message content before saving it. Find clip IDs with hey clips.",
+			"agent_notes": "Create a clip from text carried by an email entry, or delete a clip. The CLI verifies that the passage is source-backed by the entry's message content before saving it, with a 64 KiB passage limit and a 1 MiB source-validation limit. Find clip IDs with hey clips.",
 		},
 	}
 	clipCommand.cmd.AddCommand(newClipCreateCommand().cmd)
 	clipCommand.cmd.AddCommand(newClipDeleteCommand().cmd)
 	return clipCommand
 }
+
+const (
+	maxClipContentBytes = 64 << 10
+	maxClipSourceBytes  = 1 << 20
+)
 
 type clipCreateCommand struct {
 	cmd     *cobra.Command
@@ -158,7 +164,7 @@ func newClipCreateCommand() *clipCreateCommand {
 		Use:     "create <entry-id>",
 		Aliases: []string{"add"},
 		Short:   "Save text from an email entry",
-		Long:    "Save a passage from an email entry. The content must be present in the entry's message text; whitespace differences are accepted.",
+		Long:    "Save a passage from an email entry. The content must be present in the entry's message text; whitespace differences are accepted. Passages are limited to 64 KiB and source entries to 1 MiB for validation.",
 		Example: `  hey clip create 987 --content "The launch moves to Wednesday."`,
 		RunE:    createCommand.run,
 		Args:    usageExactOneArg(),
@@ -178,12 +184,18 @@ func (c *clipCreateCommand) run(cmd *cobra.Command, args []string) error {
 	if strings.TrimSpace(c.content) == "" {
 		return apierr.ErrUsage("--content is required")
 	}
+	if len(c.content) > maxClipContentBytes {
+		return apierr.ErrUsage(fmt.Sprintf("--content exceeds the %d KiB clip limit", maxClipContentBytes>>10))
+	}
 	message, err := sdk.Messages().Get(cmd.Context(), entryID)
 	if err != nil {
 		return apierr.FromSDK(err)
 	}
 	if message == nil {
 		return apierr.ErrNotFound("message", fmt.Sprintf("%d", entryID))
+	}
+	if len(message.Content) > maxClipSourceBytes {
+		return apierr.ErrAPI(0, fmt.Sprintf("entry %d content exceeds the %d MiB clip validation limit", entryID, maxClipSourceBytes>>20))
 	}
 	if !clipContentMatches(c.content, message.Content) {
 		return apierr.ErrUsageHint(
@@ -206,7 +218,21 @@ func clipContentMatches(content, entryHTML string) bool {
 }
 
 func normalizeClipText(text string) string {
-	return strings.Join(strings.Fields(text), " ")
+	var normalized strings.Builder
+	normalized.Grow(len(text))
+	pendingSpace := false
+	for _, r := range text {
+		if unicode.IsSpace(r) {
+			pendingSpace = normalized.Len() > 0
+			continue
+		}
+		if pendingSpace {
+			normalized.WriteByte(' ')
+			pendingSpace = false
+		}
+		normalized.WriteRune(r)
+	}
+	return normalized.String()
 }
 
 type clipDeleteCommand struct {

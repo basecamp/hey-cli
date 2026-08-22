@@ -87,6 +87,13 @@ func TestMessageSourceTextIncludesEmbeddedEmailBody(t *testing.T) {
 	}
 }
 
+func TestMessageSourceTextFailsClosedWhenHTMLExceedsParserDepth(t *testing.T) {
+	html := strings.Repeat("<div>", 1_000) + "not selectable" + strings.Repeat("</div>", 1_000)
+	if got := MessageSourceText(html); got != "" {
+		t.Errorf("MessageSourceText returned unparsed source bytes: %q", got[:min(len(got), 80)])
+	}
+}
+
 func TestMessageSourceTextExcludesNonselectableContent(t *testing.T) {
 	html := `<p>Visible</p><script>hidden script</script><style>.hidden { content: "style text" }</style><action-text-attachment filename="report.pdf"><span>attachment internals</span></action-text-attachment>`
 	if got := strings.Join(strings.Fields(MessageSourceText(html)), " "); got != "Visible" {
