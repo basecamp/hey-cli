@@ -620,14 +620,24 @@ type weekDayInfo struct {
 	allDay []Recording
 }
 
-func renderWeekView(events, habits, completions []Recording, anchor time.Time, firstWeekDay time.Weekday, width, _ int, dayLabels map[string]string) string {
+// renderWeekView draws the week in the day's own vocabulary: a section header naming what
+// the reader is looking at with the keys that move it on the same line, chrome for the
+// structure they look past, and the dotted rule the day uses for its hours standing between
+// the days here.
+//
+// It used to be a boxed table — every cell walled in solid ─ │ ┌ ┬ ┐ — which read as a
+// spreadsheet of the week rather than as the week. The day never had a box: it is a header,
+// an axis, and events on open ground. That is what a week is too, with seven days across
+// instead of twenty-four hours.
+func renderWeekView(events, habits, completions []Recording, anchor time.Time, firstWeekDay time.Weekday, width, height int, hint string, dayLabels map[string]string) string {
 	var b strings.Builder
 	muted := styleMuted
-	bright := lipgloss.NewStyle().Foreground(colorBright)
+	chrome := lipgloss.NewStyle().Foreground(colorChrome)
 
 	ws := weekStartDate(anchor, firstWeekDay)
 
-	colWidth := (width - 8) / 7
+	// Seven days with a rule between them, and no box around the lot.
+	colWidth := (width - 6) / 7
 	if colWidth < 8 {
 		colWidth = 8
 	}
@@ -673,42 +683,50 @@ func renderWeekView(events, habits, completions []Recording, anchor time.Time, f
 		}
 	}
 
-	sep := muted.Render("│")
-
-	// Top border
-	b.WriteString(weekGridBorder("┌", "┬", "┐", colWidth, muted))
-	b.WriteString("\n")
-
-	// Column headers
-	b.WriteString(sep)
-	for i := range 7 {
-		label := dayLabelOrDefault(days[i].date, i == 0, dayLabels, weekDayColumnLabel)
-		padded := centerPad(label, colWidth)
-		b.WriteString(bright.Render(padded))
-		b.WriteString(sep)
-	}
-	b.WriteString("\n")
-
-	// Header separator
-	b.WriteString(weekGridBorder("├", "┼", "┤", colWidth, muted))
-	b.WriteString("\n")
-
-	// The habits done each day, as a band across the top with a rule under it. Every day
-	// gets the same number of rows so the rule is straight and a day's events start where
-	// its neighbours' do — the band is a row of the grid, not something each column grew.
-	// A week nobody kept a habit in has no band and no rule.
-	if band := weekHabitBand(days, colWidth); len(band) > 0 {
-		for _, row := range band {
-			b.WriteString(sep)
-			for _, cell := range row {
-				b.WriteString(cell)
+	// The rule between days is dotted for the reason the day's hours are: it is a guide
+	// behind the events, not another box's wall.
+	sep := chrome.Render(string(hourRule))
+	writeRow := func(cells []string) {
+		for i, cell := range cells {
+			if i > 0 {
 				b.WriteString(sep)
 			}
-			b.WriteString("\n")
+			b.WriteString(padTo(cell, colWidth))
 		}
-		b.WriteString(weekGridBorder("├", "┼", "┤", colWidth, muted))
 		b.WriteString("\n")
 	}
+
+	// The habits kept each day, under their own header as they are on the day. The header
+	// is the divider: a rule with a name on it says what the band above it was.
+	//
+	// The band stands whether or not anything was kept, so stepping through the weeks does
+	// not shift the grid up and down underneath the reader. It goes altogether only for
+	// somebody who keeps no habits at all, since there is nothing to head.
+	rowsUsed := 0
+	if len(habits) > 0 {
+		b.WriteString(hintedSectionHeader("Habits", "b to manage", width))
+		b.WriteString("\n")
+		rowsUsed++
+		for _, row := range weekHabitBand(days, colWidth) {
+			writeRow(row)
+			rowsUsed++
+		}
+	}
+
+	// The week names itself and carries the keys that move it, the way the day does. It
+	// used to have no line of its own and the help bar said it instead.
+	b.WriteString(hintedSectionHeader(weekLabel(ws), hint, width))
+	b.WriteString("\n")
+	rowsUsed++
+
+	// The day names are the week's axis, in the chrome the day's hours wear.
+	headers := make([]string, 7)
+	for i := range 7 {
+		label := dayLabelOrDefault(days[i].date, i == 0, dayLabels, weekDayColumnLabel)
+		headers[i] = chrome.Render(centerPad(label, colWidth))
+	}
+	writeRow(headers)
+	rowsUsed++
 
 	// Build column content
 	cols := make([][]string, 7)
@@ -722,34 +740,35 @@ func renderWeekView(events, habits, completions []Recording, anchor time.Time, f
 			maxH = len(col)
 		}
 	}
-	if maxH == 0 {
-		maxH = 1
-	}
 
-	// Render rows
+	// The days run to the bottom of the screen whether or not anything is on them, the way
+	// the day's hours do: the rules between them are the grid, so a week with a quiet
+	// Thursday still reads as seven days rather than as a paragraph that stops.
+	maxH = max(maxH, height-rowsUsed, 1)
+
+	cells := make([]string, 7)
 	for row := range maxH {
-		b.WriteString(sep)
 		for i := range 7 {
+			cells[i] = ""
 			if row < len(cols[i]) {
-				line := cols[i][row]
-				pad := colWidth - lipgloss.Width(line)
-				b.WriteString(line)
-				if pad > 0 {
-					b.WriteString(strings.Repeat(" ", pad))
-				}
-			} else {
-				b.WriteString(strings.Repeat(" ", colWidth))
+				cells[i] = cols[i][row]
 			}
-			b.WriteString(sep)
 		}
-		b.WriteString("\n")
+		writeRow(cells)
 	}
 
-	// Bottom border
-	b.WriteString(weekGridBorder("└", "┴", "┘", colWidth, muted))
-	b.WriteString("\n")
+	// No bottom border: the week ends where the screen does, as the day does.
+	return strings.TrimRight(b.String(), "\n")
+}
 
-	return b.String()
+// weekLabel names the span a week covers, saying the month once where it can — "August 17 –
+// 23" rather than repeating it, and both where the week crosses over.
+func weekLabel(start time.Time) string {
+	end := start.AddDate(0, 0, 6)
+	if start.Month() == end.Month() {
+		return fmt.Sprintf("%s %d – %d", start.Format("January"), start.Day(), end.Day())
+	}
+	return fmt.Sprintf("%s – %s", start.Format("January 2"), end.Format("January 2"))
 }
 
 // weekHabitBand is the habits kept each day, as their icons alone — the week has room for
@@ -770,9 +789,9 @@ func weekHabitBand(days []weekDayInfo, colWidth int) [][]string {
 		}
 		rows = max(rows, (len(icons[i])+perRow-1)/perRow)
 	}
-	if rows == 0 {
-		return nil
-	}
+	// A week where nothing was kept still gets its row, so the grid below does not move as
+	// the reader steps from one week to the next.
+	rows = max(rows, 1)
 
 	band := make([][]string, rows)
 	for row := range band {
