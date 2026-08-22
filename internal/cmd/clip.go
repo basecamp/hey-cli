@@ -9,6 +9,7 @@ import (
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/output"
 	"github.com/basecamp/hey-cli/internal/terminal"
 )
@@ -138,7 +139,7 @@ func newClipCommand() *clipCommand {
 		Use:   "clip",
 		Short: "Save and manage passages from email",
 		Annotations: map[string]string{
-			"agent_notes": "Create a clip from an email entry ID and selected text, or delete a clip. Find clip IDs with hey clips.",
+			"agent_notes": "Create a clip from text carried by an email entry, or delete a clip. The CLI verifies that the passage is source-backed by the entry's message content before saving it. Find clip IDs with hey clips.",
 		},
 	}
 	clipCommand.cmd.AddCommand(newClipCreateCommand().cmd)
@@ -157,6 +158,7 @@ func newClipCreateCommand() *clipCreateCommand {
 		Use:     "create <entry-id>",
 		Aliases: []string{"add"},
 		Short:   "Save text from an email entry",
+		Long:    "Save a passage from an email entry. The content must be present in the entry's message text; whitespace differences are accepted.",
 		Example: `  hey clip create 987 --content "The launch moves to Wednesday."`,
 		RunE:    createCommand.run,
 		Args:    usageExactOneArg(),
@@ -176,12 +178,35 @@ func (c *clipCreateCommand) run(cmd *cobra.Command, args []string) error {
 	if strings.TrimSpace(c.content) == "" {
 		return apierr.ErrUsage("--content is required")
 	}
+	message, err := sdk.Messages().Get(cmd.Context(), entryID)
+	if err != nil {
+		return apierr.FromSDK(err)
+	}
+	if message == nil {
+		return apierr.ErrNotFound("message", fmt.Sprintf("%d", entryID))
+	}
+	if !clipContentMatches(c.content, message.Content) {
+		return apierr.ErrUsageHint(
+			fmt.Sprintf("--content does not match text in entry %d", entryID),
+			"Copy an exact passage from the entry; whitespace differences are allowed.",
+		)
+	}
 	if err := sdk.Clips().Create(cmd.Context(), entryID, c.content); err != nil {
 		return apierr.FromSDK(err)
 	}
 	return writeMutation(cmd, fmt.Sprintf("Clip from entry %d created", entryID), map[string]any{"entry_id": entryID},
 		output.WithBreadcrumbs(output.Breadcrumb{Action: "list", Command: "hey clips", Description: "Find the new clip ID"}),
 	)
+}
+
+func clipContentMatches(content, entryHTML string) bool {
+	selected := normalizeClipText(content)
+	entry := normalizeClipText(htmlutil.MessageSourceText(entryHTML))
+	return selected != "" && strings.Contains(entry, selected)
+}
+
+func normalizeClipText(text string) string {
+	return strings.Join(strings.Fields(text), " ")
 }
 
 type clipDeleteCommand struct {

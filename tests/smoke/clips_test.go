@@ -24,7 +24,12 @@ func TestClipLifecycle(t *testing.T) {
 		t.Fatalf("thread %s has no source entry", topicID)
 	}
 	entryID := strconv.FormatInt(entries[0].ID, 10)
-	content := "Revenue up\nChurn down"
+	content := "**quarterly** numbers are at https://example.com/reports/q3"
+
+	_, stderr := heyFail(t, "clip", "create", entryID, "--content", "Text that is not present in the source entry", "--json")
+	if !strings.Contains(stderr, "does not match text in entry") {
+		t.Fatalf("unmatched clip error = %q", stderr)
+	}
 
 	_, stderr, code := hey(t, "clip", "create", entryID, "--content", content, "--json")
 	if code != 0 {
@@ -50,8 +55,12 @@ func TestClipLifecycle(t *testing.T) {
 	clipID := strconv.FormatInt(clip.ID, 10)
 
 	page := browserPageText(t, baseURL+"/clips")
-	if !strings.Contains(page, "Revenue up") || !strings.Contains(page, subject) {
-		t.Errorf("browser clips page does not show the clip and source thread")
+	if !strings.Contains(page, content) || !strings.Contains(page, subject) {
+		t.Errorf("browser clips page does not show the exact clip text and source thread")
+	}
+	html := fetchHTML(t, baseURL+"/clips")
+	if strings.Contains(html, "<strong>quarterly</strong>") {
+		t.Errorf("browser clips page interpreted plain clip content as HTML")
 	}
 
 	_, stderr, code = hey(t, "clip", "delete", clipID, "--json")

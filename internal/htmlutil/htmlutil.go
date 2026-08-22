@@ -26,6 +26,17 @@ func ToText(s string) string {
 	return strings.TrimSpace(result)
 }
 
+// MessageSourceText returns the source-backed text carried by HTML message content.
+func MessageSourceText(s string) string {
+	doc, err := html.Parse(strings.NewReader(s))
+	if err != nil {
+		return s
+	}
+	var b strings.Builder
+	walkMessageSourceNode(&b, doc, 0)
+	return strings.TrimSpace(b.String())
+}
+
 // PrependText adds a plain-text note before existing HTML content.
 func PrependText(content, note string) string {
 	note = strings.TrimSpace(strings.ReplaceAll(note, "\r\n", "\n"))
@@ -139,6 +150,142 @@ type trixAttachment struct {
 	Content     string `json:"content"`
 }
 
+func walkMessageSourceNode(b *strings.Builder, n *html.Node, depth int) {
+	switch n.Type { //nolint:exhaustive // only text and element nodes need handling
+	case html.TextNode:
+		b.WriteString(n.Data)
+	case html.ElementNode:
+		if !elementProvidesMessageSourceText(n) {
+			return
+		}
+		switch n.Data {
+		case "br":
+			b.WriteByte('\n')
+			return
+		case "hr":
+			writeMessageSourceBoundary(b)
+			return
+		case "template":
+			if depth == 0 || n.Parent == nil || n.Parent.Data != "shadow-content" {
+				return
+			}
+		case "details":
+			if !hasAttr(n, "open") {
+				walkClosedDetailsSummary(b, n, depth)
+				return
+			}
+		case "figure":
+			if att := parseTrixAttachment(n); att != nil && att.Filename == "" && att.Content != "" {
+				if doc := parseEmbeddedContent(att.Content, depth); doc != nil {
+					writeMessageSourceBoundary(b)
+					walkMessageSourceNode(b, doc, depth+1)
+					writeMessageSourceBoundary(b)
+					return
+				}
+			}
+		}
+		if messageBlockElement(n) {
+			writeMessageSourceBoundary(b)
+			walkMessageSourceChildren(b, n, depth)
+			writeMessageSourceBoundary(b)
+			return
+		}
+	}
+	walkMessageSourceChildren(b, n, depth)
+}
+
+func elementProvidesMessageSourceText(n *html.Node) bool {
+	if hasAttr(n, "hidden") || hasAttr(n, "inert") || inlineStyleHidesText(getAttr(n, "style")) {
+		return false
+	}
+	switch n.Data {
+	case "script", "style", "noscript", "head", "action-text-attachment":
+		return false
+	case "dialog":
+		return hasAttr(n, "open")
+	default:
+		return true
+	}
+}
+
+func inlineStyleHidesText(style string) bool {
+	display, _ := inlineStyleProperty(style, "display")
+	visibility, _ := inlineStyleProperty(style, "visibility")
+	contentVisibility, _ := inlineStyleProperty(style, "content-visibility")
+	userSelect, _ := inlineStyleProperty(style, "user-select", "-webkit-user-select")
+	return display == "none" || visibility == "hidden" || visibility == "collapse" ||
+		contentVisibility == "hidden" || userSelect == "none"
+}
+
+func inlineStyleProperty(style string, names ...string) (string, bool) {
+	wanted := make(map[string]bool, len(names))
+	for _, name := range names {
+		wanted[name] = true
+	}
+	var selected string
+	selectedImportant := false
+	found := false
+	for declaration := range strings.SplitSeq(strings.ToLower(style), ";") {
+		property, value, ok := strings.Cut(declaration, ":")
+		if !ok || !wanted[strings.TrimSpace(property)] {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		important := strings.HasSuffix(value, "!important")
+		if important {
+			value = strings.TrimSpace(strings.TrimSuffix(value, "!important"))
+		}
+		if !found || important || !selectedImportant {
+			selected = value
+			selectedImportant = important
+			found = true
+		}
+	}
+	return selected, found
+}
+
+func messageBlockElement(n *html.Node) bool {
+	if display, ok := inlineStyleProperty(getAttr(n, "style"), "display"); ok {
+		kind := display
+		if fields := strings.Fields(display); len(fields) > 0 {
+			kind = fields[0]
+		}
+		switch kind {
+		case "inline", "inline-block", "inline-flex", "inline-grid", "inline-table", "contents":
+			return false
+		case "block", "flow-root", "flex", "grid", "list-item", "table", "table-caption", "table-cell", "table-footer-group", "table-header-group", "table-row", "table-row-group":
+			return true
+		}
+	}
+	switch n.Data {
+	case "address", "article", "aside", "blockquote", "caption", "dd", "details", "div", "dl", "dt", "fieldset", "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hgroup", "li", "main", "menu", "nav", "ol", "p", "pre", "section", "summary", "table", "tbody", "td", "tfoot", "th", "thead", "tr", "ul":
+		return true
+	default:
+		return false
+	}
+}
+
+func walkClosedDetailsSummary(b *strings.Builder, details *html.Node, depth int) {
+	for child := details.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type == html.ElementNode && child.Data == "summary" {
+			walkMessageSourceNode(b, child, depth)
+			return
+		}
+	}
+}
+
+func walkMessageSourceChildren(b *strings.Builder, n *html.Node, depth int) {
+	for child := n.FirstChild; child != nil; child = child.NextSibling {
+		walkMessageSourceNode(b, child, depth)
+	}
+}
+
+func writeMessageSourceBoundary(b *strings.Builder) {
+	if b.Len() > 0 {
+		b.WriteByte('\n')
+	}
+}
+
 func parseTrixAttachment(n *html.Node) *trixAttachment {
 	raw := getAttr(n, "data-trix-attachment")
 	if raw == "" {
@@ -158,6 +305,15 @@ func getAttr(n *html.Node, key string) string {
 		}
 	}
 	return ""
+}
+
+func hasAttr(n *html.Node, key string) bool {
+	for _, attribute := range n.Attr {
+		if attribute.Key == key {
+			return true
+		}
+	}
+	return false
 }
 
 func walkChildren(b *strings.Builder, n *html.Node, depth int) {

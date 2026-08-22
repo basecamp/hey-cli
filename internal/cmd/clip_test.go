@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -104,20 +105,134 @@ func TestClipsCommandSanitizesHumanOutput(t *testing.T) {
 
 func TestClipCreateSendsEntryAndExactContent(t *testing.T) {
 	content := "  The launch moves to Wednesday.\nPlease tell the team.  "
-	response, err := runJSONCommand(t, clipMutationHandler(t, http.MethodPost, "/clips", func(r *http.Request) {
+	handler := clipCreateHandler(t, 987, `<p>The launch moves to Wednesday.</p><p>Please tell the team.</p>`, func(r *http.Request) {
 		if got := r.PostForm.Get("clip[entry_id]"); got != "987" {
 			t.Errorf("entry_id = %q", got)
 		}
 		if got := r.PostForm.Get("clip[content]"); got != content {
 			t.Errorf("content = %q", got)
 		}
-	}), "clip", "create", "987", "--content", content)
+	})
+	response, err := runJSONCommand(t, handler, "clip", "create", "987", "--content", content)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if response.Summary != "Clip from entry 987 created" || response.Data.(map[string]any)["entry_id"] != float64(987) {
 		t.Errorf("response = %#v", response)
 	}
+}
+
+func TestClipCreateMatchesBrowserSelectionText(t *testing.T) {
+	tests := []struct {
+		name    string
+		source  string
+		content string
+	}{
+		{
+			name:    "rich text and whitespace",
+			source:  `<p>The <strong>launch</strong> moves&nbsp;to<br>Wednesday &amp; Thursday.</p>`,
+			content: "The launch moves\r\n\tto Wednesday & Thursday.",
+		},
+		{
+			name:    "adjacent inline elements",
+			source:  `<p>quarter<strong>ly</strong> rollout</p>`,
+			content: "quarterly rollout",
+		},
+		{
+			name:    "selection across list items",
+			source:  `<ul><li>Revenue up</li><li>Churn down</li></ul>`,
+			content: "Revenue up\nChurn down",
+		},
+		{
+			name:    "unicode line separator",
+			source:  "<p>First\u2028Second</p>",
+			content: "First Second",
+		},
+		{
+			name:    "embedded inbound email body",
+			source:  `<figure data-trix-attachment='{"contentType":"text/html","content":"<shadow-content><template><p>External confirmation: BLUE-42</p></template></shadow-content>"}'></figure>`,
+			content: "External confirmation: BLUE-42",
+		},
+		{
+			name:    "literal HTML-shaped text",
+			source:  `<p>Keep &lt;strong&gt;literal&lt;/strong&gt; text.</p>`,
+			content: `<strong>literal</strong>`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := clipCreateHandler(t, 987, tt.source, func(r *http.Request) {
+				if got := r.PostForm.Get("clip[content]"); got != tt.content {
+					t.Errorf("stored content = %q, want exact input %q", got, tt.content)
+				}
+			})
+			if _, err := runJSONCommand(t, handler, "clip", "create", "987", "--content", tt.content); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestClipCreateRejectsTextOutsideTheEntry(t *testing.T) {
+	tests := []struct {
+		name    string
+		source  string
+		content string
+	}{
+		{name: "unrelated text", source: `<p>The launch moves to Wednesday.</p>`, content: "An unrelated reminder"},
+		{name: "case differs", source: `<p>Confirmation Code: BLUE-42</p>`, content: "confirmation code: BLUE-42"},
+		{name: "markup is not selected text", source: `<p>The <strong>launch</strong> moved.</p>`, content: `<strong>launch</strong>`},
+		{name: "script text is not selectable", source: `<p>Visible text</p><script>secret value</script>`, content: "secret value"},
+		{name: "hidden text is not selectable", source: `<p>Visible text</p><p hidden>Hidden preheader</p>`, content: "Hidden preheader"},
+		{name: "block boundaries remain distinct", source: `<section>Alpha</section><section>Beta</section>`, content: "AlphaBeta"},
+		{name: "summary is not entry content", source: ``, content: "Preview summary"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requests := 0
+			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				if r.Method != http.MethodGet || r.URL.Path != "/messages/987.json" {
+					t.Errorf("unexpected request = %s %s", r.Method, r.URL.Path)
+					http.Error(w, "unexpected mutation", http.StatusInternalServerError)
+					return
+				}
+				writeClipSource(t, w, 987, tt.source, "Preview summary")
+			})
+			_, err := runJSONCommand(t, handler, "clip", "create", "987", "--content", tt.content)
+			if err == nil || !strings.Contains(err.Error(), "--content does not match text in entry 987") {
+				t.Fatalf("error = %v", err)
+			}
+			if requests != 1 {
+				t.Errorf("requests = %d, want the source read without a clip mutation", requests)
+			}
+		})
+	}
+}
+
+func TestClipCreateRequiresAnAvailableSourceMessage(t *testing.T) {
+	t.Run("read failure", func(t *testing.T) {
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet || r.URL.Path != "/messages/987.json" {
+				t.Fatalf("unexpected request = %s %s", r.Method, r.URL.Path)
+			}
+			http.NotFound(w, r)
+		})
+		if _, err := runJSONCommand(t, handler, "clip", "create", "987", "--content", "Keep this"); err == nil {
+			t.Fatal("expected the source read failure")
+		}
+	})
+
+	t.Run("empty response", func(t *testing.T) {
+		handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `null`)
+		})
+		_, err := runJSONCommand(t, handler, "clip", "create", "987", "--content", "Keep this")
+		if err == nil || !strings.Contains(err.Error(), "--content does not match text in entry 987") {
+			t.Fatalf("error = %v", err)
+		}
+	})
 }
 
 func TestClipDeleteUsesClipID(t *testing.T) {
@@ -138,6 +253,8 @@ func TestClipCommandsUseTheSelectedAccount(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/clips.json":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = io.WriteString(w, `[]`)
+		case r.Method == http.MethodGet && r.URL.Path == "/messages/987.json":
+			writeClipSource(t, w, 987, "Keep this", "")
 		case r.Method == http.MethodPost && r.URL.Path == "/clips":
 			w.Header().Set("Location", "/clips")
 			w.WriteHeader(http.StatusFound)
@@ -158,7 +275,7 @@ func TestClipCommandsUseTheSelectedAccount(t *testing.T) {
 			t.Fatalf("hey %s: %v\n%s", strings.Join(args, " "), err, output)
 		}
 	}
-	if got := strings.Join(requested, "\n"); got != "GET /clips.json account=2\nPOST /clips account=2\nDELETE /clips/44 account=2" {
+	if got := strings.Join(requested, "\n"); got != "GET /clips.json account=2\nGET /messages/987.json account=2\nPOST /clips account=2\nDELETE /clips/44 account=2" {
 		t.Errorf("requests:\n%s", got)
 	}
 }
@@ -184,6 +301,36 @@ func TestClipCommandsValidateInput(t *testing.T) {
 				t.Fatalf("error = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func clipCreateHandler(t *testing.T, entryID int64, source string, validate func(*http.Request)) http.Handler {
+	t.Helper()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/messages/987.json":
+			writeClipSource(t, w, entryID, source, "")
+		case r.Method == http.MethodPost && r.URL.Path == "/clips":
+			if err := r.ParseForm(); err != nil {
+				t.Fatal(err)
+			}
+			if validate != nil {
+				validate(r)
+			}
+			w.Header().Set("Location", "/clips")
+			w.WriteHeader(http.StatusFound)
+		default:
+			t.Errorf("unexpected request = %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	})
+}
+
+func writeClipSource(t *testing.T, w http.ResponseWriter, entryID int64, content, summary string) {
+	t.Helper()
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{"id": entryID, "content": content, "summary": summary}); err != nil {
+		t.Fatal(err)
 	}
 }
 

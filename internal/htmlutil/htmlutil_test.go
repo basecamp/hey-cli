@@ -57,6 +57,70 @@ func TestToTextEmpty(t *testing.T) {
 	}
 }
 
+func TestMessageSourceTextMatchesBrowserSelectionContent(t *testing.T) {
+	tests := []struct {
+		name string
+		html string
+		want string
+	}{
+		{name: "inline formatting", html: `<p>quarter<strong>ly</strong> plan</p>`, want: "quarterly plan"},
+		{name: "blocks and list items", html: `<p>First line</p><ul><li>Revenue up</li><li>Churn down</li></ul>`, want: "First line Revenue up Churn down"},
+		{name: "section boundaries", html: `<section>Alpha</section><section>Beta</section>`, want: "Alpha Beta"},
+		{name: "computed block boundaries", html: `<span style="display:block">Alpha</span><span style="display:block">Beta</span>`, want: "Alpha Beta"},
+		{name: "computed inline flow", html: `<div style="display:inline">Alpha</div><div style="display:inline">Beta</div>`, want: "AlphaBeta"},
+		{name: "entities", html: `<p>R&amp;D uses &lt;draft&gt;&nbsp;today</p>`, want: "R&D uses <draft> today"},
+		{name: "line break", html: `<p>First<br>Second</p>`, want: "First Second"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := strings.Join(strings.Fields(MessageSourceText(tt.html)), " "); got != tt.want {
+				t.Errorf("MessageSourceText = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMessageSourceTextIncludesEmbeddedEmailBody(t *testing.T) {
+	html := `<figure data-trix-attachment='{"contentType":"text/html","content":"<shadow-content><template><p>External confirmation: BLUE-42</p></template></shadow-content>"}'></figure>`
+	if got := strings.Join(strings.Fields(MessageSourceText(html)), " "); got != "External confirmation: BLUE-42" {
+		t.Errorf("MessageSourceText = %q", got)
+	}
+}
+
+func TestMessageSourceTextExcludesNonselectableContent(t *testing.T) {
+	html := `<p>Visible</p><script>hidden script</script><style>.hidden { content: "style text" }</style><action-text-attachment filename="report.pdf"><span>attachment internals</span></action-text-attachment>`
+	if got := strings.Join(strings.Fields(MessageSourceText(html)), " "); got != "Visible" {
+		t.Errorf("MessageSourceText = %q, want visible message text only", got)
+	}
+}
+
+func TestMessageSourceTextHonorsHTMLVisibility(t *testing.T) {
+	tests := []struct {
+		name string
+		html string
+		want string
+	}{
+		{name: "hidden attribute", html: `<p>Before</p><p hidden>Secret</p><p>After</p>`, want: "Before After"},
+		{name: "inert subtree", html: `<p>Before</p><div inert>Inactive</div><p>After</p>`, want: "Before After"},
+		{name: "display none", html: `<p>Before</p><div style="DISPLAY: none !important">Hidden</div><p>After</p>`, want: "Before After"},
+		{name: "later display wins", html: `<p style="display: none; display: block">Visible</p>`, want: "Visible"},
+		{name: "important display wins", html: `<p style="display: none !important; display: block">Hidden</p>`, want: ""},
+		{name: "visibility hidden", html: `<p>Before</p><span style="visibility: hidden">Hidden</span><p>After</p>`, want: "Before After"},
+		{name: "selection disabled", html: `<p>Before</p><span style="-webkit-user-select:none">Hidden</span><p>After</p>`, want: "Before After"},
+		{name: "ordinary template", html: `<p>Before</p><template><p>Inactive template</p></template><p>After</p>`, want: "Before After"},
+		{name: "closed dialog", html: `<p>Before</p><dialog>Closed dialog</dialog><p>After</p>`, want: "Before After"},
+		{name: "closed details", html: `<details><summary>Visible summary</summary><p>Closed content</p></details>`, want: "Visible summary"},
+		{name: "open details and dialog", html: `<details open><summary>Summary</summary><p>Details</p></details><dialog open>Dialog</dialog>`, want: "Summary Details Dialog"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := strings.Join(strings.Fields(MessageSourceText(tt.html)), " "); got != tt.want {
+				t.Errorf("MessageSourceText = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestToTextImgTag(t *testing.T) {
 	got := ToText(`<p>Before</p><img src="test.png" alt="photo"><p>After</p>`)
 	if !strings.Contains(got, "[photo]") {
