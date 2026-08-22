@@ -263,7 +263,7 @@ Listing commands also answer `--markdown` for a table, `--styled` to force the h
 rendering when the output is piped, `--ids-only` for one ID per line, and `--count` for a
 bare number. `--ids-only` and `--count` need list data, so they work on `hey boxes`,
 `hey box`, `hey labels`, `hey label`, `hey collections`, `hey collection`, `hey workflows`,
-`hey workflow`, `hey snippets`, `hey drafts`, `hey search`, `hey contacts list`, `hey screener list`, `hey screener history`, `hey calendars`,
+`hey workflow`, `hey clips`, `hey snippets`, `hey drafts`, `hey search`, `hey contacts list`, `hey screener list`, `hey screener history`, `hey calendars`,
 `hey recordings`, `hey todo list`, `hey timetrack list` and `hey journal list`. The
 data-only formats print any pagination notice on stderr, so the IDs on stdout stay
 pipeable.
@@ -317,7 +317,10 @@ hey workflow stage update 654 321 --name "Interviewing"
 hey workflow add 987 --to 654 --stage 321       # add a topic ID to a stage
 hey workflow move 987 --workflow 654 --to 322   # move it to another stage
 hey workflow remove 987 --from 654              # remove it from the workflow
-hey snippets                                      # list reusable email snippets
+hey clips                                        # list saved passages and source context
+hey clip create 456 --content "The launch moves to Wednesday."
+hey clip delete 44
+hey snippets                                     # list reusable email snippets
 hey snippet create --name "Scheduling reply" --content "Tuesday works for me."
 hey snippet update 44 --content "Wednesday works for me."
 hey snippet delete 44
@@ -391,6 +394,8 @@ Organization actions take the `id` values returned by `hey box --json`, `hey lab
 Collection IDs come from `hey collections`. `hey collection` returns both each posting `id` and its `topic_id`, plus `next_page` and `total_count`. Collection membership commands take `topic_id`; posting organization commands continue to take `id`. Creating a collection returns a confirmed mutation, and `hey collections` provides its ID for subsequent commands. Collection updates accept a non-empty name, summary, or both.
 
 Workflow IDs come from `hey workflows`, which includes the linked account ID for each workflow. `hey workflow <id>` returns stages in position order; `--ids-only` and `--count` apply to those stages. Creating a workflow needs one linked mail account, selected with `--account` when more than one is available. HEY creates new stages as `Untitled`, so create the stage, read its ID with `hey workflow <id>`, then rename it. Workflow membership commands take `topic_id`. Adding a thread creates its workflow membership before selecting the requested stage; if stage selection fails, the thread remains in the workflow's first stage and the command reports the error.
+
+Clips are passages saved from existing email entries. `hey clips` lists each clip newest first with its source entry and thread context. `hey clip create <entry-id> --content <text>` saves the selected text against that entry, and `hey clip delete <clip-id>` removes it. Clip content is plain text; the source entry ID comes from `hey threads --json`.
 
 Snippets are named reusable email content, separate from clips saved out of received messages. `hey snippets` lists both plain text and HEY's rich-text HTML; `hey snippet create`, `update`, and `delete` manage them. A create requires a non-empty name and content. Updates change whichever non-empty fields are supplied, while omitted fields stay as they are. In the TUI, Ctrl+T opens the picker from new-message, reply, and forward forms and inserts the snippet's plain-text representation at the current body cursor without replacing the draft.
 

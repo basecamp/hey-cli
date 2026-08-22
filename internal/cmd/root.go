@@ -189,6 +189,8 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newCollectionCommand().cmd)
 	root.AddCommand(newWorkflowsCommand().cmd)
 	root.AddCommand(newWorkflowCommand().cmd)
+	root.AddCommand(newClipsCommand().cmd)
+	root.AddCommand(newClipCommand().cmd)
 	root.AddCommand(newSnippetsCommand().cmd)
 	root.AddCommand(newSnippetCommand().cmd)
 	root.AddCommand(newSearchCommand().cmd)

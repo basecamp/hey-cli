@@ -45,6 +45,11 @@ hey bulk-reply send --attach
 hey bulk-reply send --message
 hey bulk-reply undo
 hey calendars
+hey clip
+hey clip create
+hey clip create --content
+hey clip delete
+hey clips
 hey collection
 hey collection --all
 hey collection --limit

@@ -1,0 +1,201 @@
+package cmd
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/spf13/cobra"
+
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
+
+	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/terminal"
+)
+
+type clipsCommand struct {
+	cmd *cobra.Command
+}
+
+func newClipsCommand() *clipsCommand {
+	clipsCommand := &clipsCommand{}
+	clipsCommand.cmd = &cobra.Command{
+		Use:   "clips",
+		Short: "List passages clipped from email",
+		Annotations: map[string]string{
+			"agent_notes": "Returns clip IDs, content, source entry IDs, and source thread context. Use an ID with hey clip delete.",
+		},
+		Example: `  hey clips
+  hey clips --json
+  hey clips --ids-only`,
+		RunE: clipsCommand.run,
+		Args: cobra.NoArgs,
+	}
+	return clipsCommand
+}
+
+func (c *clipsCommand) run(cmd *cobra.Command, _ []string) error {
+	if err := requireAuth(); err != nil {
+		return err
+	}
+
+	clips, err := sdk.Clips().List(cmd.Context())
+	if err != nil {
+		return apierr.FromSDK(err)
+	}
+
+	switch writer.EffectiveFormat() {
+	case output.FormatStyled:
+		if len(clips) == 0 {
+			fmt.Fprintln(cmd.OutOrStdout(), "No clips found")
+			return nil
+		}
+		table := newTable(cmd.OutOrStdout())
+		table.addRow([]string{"ID", "Content", "Entry", "Thread", "Saved"})
+		for _, clip := range clips {
+			table.addRow([]string{
+				fmt.Sprintf("%d", clip.Id),
+				truncate(terminal.SanitizeLine(clip.Content), 60),
+				fmt.Sprintf("%d", clip.EntryId),
+				clipTopicLabel(clip.Topic),
+				formatDate(clip.CreatedAt),
+			})
+		}
+		table.print()
+		return nil
+	case output.FormatMarkdown:
+		return writeClipsMarkdown(cmd, clips)
+	default:
+		return writeOK(clips,
+			output.WithSummary(fmt.Sprintf("%d %s", len(clips), clipNoun(len(clips)))),
+			output.WithBreadcrumbs(
+				output.Breadcrumb{Action: "create", Command: "hey clip create <entry-id> --content <text>", Description: "Save text from an email entry"},
+				output.Breadcrumb{Action: "delete", Command: "hey clip delete <clip-id>", Description: "Delete a clip"},
+			),
+		)
+	}
+}
+
+func clipTopicLabel(topic generated.ClipTopic) string {
+	name := terminal.SanitizeLine(topic.Name)
+	if name == "" {
+		return fmt.Sprintf("%d", topic.Id)
+	}
+	return fmt.Sprintf("%s (%d)", name, topic.Id)
+}
+
+func writeClipsMarkdown(cmd *cobra.Command, clips []generated.Clip) error {
+	if len(clips) == 0 {
+		_, err := fmt.Fprintln(cmd.OutOrStdout(), "(no results)")
+		return err
+	}
+	var document strings.Builder
+	document.WriteString("| id | content | entry_id | topic_id | topic | saved |\n")
+	document.WriteString("| --- | --- | --- | --- | --- | --- |\n")
+	for _, clip := range clips {
+		fmt.Fprintf(&document, "| %d | %s | %d | %d | %s | %s |\n",
+			clip.Id,
+			markdownSafeText(clip.Content),
+			clip.EntryId,
+			clip.Topic.Id,
+			markdownSafeText(clip.Topic.Name),
+			formatDate(clip.CreatedAt),
+		)
+	}
+	_, err := fmt.Fprint(cmd.OutOrStdout(), document.String())
+	return err
+}
+
+func clipNoun(count int) string {
+	if count == 1 {
+		return "clip"
+	}
+	return "clips"
+}
+
+type clipCommand struct {
+	cmd *cobra.Command
+}
+
+func newClipCommand() *clipCommand {
+	clipCommand := &clipCommand{}
+	clipCommand.cmd = &cobra.Command{
+		Use:   "clip",
+		Short: "Save and manage passages from email",
+		Annotations: map[string]string{
+			"agent_notes": "Create a clip from an email entry ID and selected text, or delete a clip. Find clip IDs with hey clips.",
+		},
+	}
+	clipCommand.cmd.AddCommand(newClipCreateCommand().cmd)
+	clipCommand.cmd.AddCommand(newClipDeleteCommand().cmd)
+	return clipCommand
+}
+
+type clipCreateCommand struct {
+	cmd     *cobra.Command
+	content string
+}
+
+func newClipCreateCommand() *clipCreateCommand {
+	createCommand := &clipCreateCommand{}
+	createCommand.cmd = &cobra.Command{
+		Use:     "create <entry-id>",
+		Aliases: []string{"add"},
+		Short:   "Save text from an email entry",
+		Example: `  hey clip create 987 --content "The launch moves to Wednesday."`,
+		RunE:    createCommand.run,
+		Args:    usageExactOneArg(),
+	}
+	createCommand.cmd.Flags().StringVar(&createCommand.content, "content", "", "Text selected from the email entry (required)")
+	return createCommand
+}
+
+func (c *clipCreateCommand) run(cmd *cobra.Command, args []string) error {
+	if err := requireAuth(); err != nil {
+		return err
+	}
+	entryID, err := parsePositiveID(args[0], "entry")
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(c.content) == "" {
+		return apierr.ErrUsage("--content is required")
+	}
+	if err := sdk.Clips().Create(cmd.Context(), entryID, c.content); err != nil {
+		return apierr.FromSDK(err)
+	}
+	return writeMutation(cmd, fmt.Sprintf("Clip from entry %d created", entryID), map[string]any{"entry_id": entryID},
+		output.WithBreadcrumbs(output.Breadcrumb{Action: "list", Command: "hey clips", Description: "Find the new clip ID"}),
+	)
+}
+
+type clipDeleteCommand struct {
+	cmd *cobra.Command
+}
+
+func newClipDeleteCommand() *clipDeleteCommand {
+	deleteCommand := &clipDeleteCommand{}
+	deleteCommand.cmd = &cobra.Command{
+		Use:     "delete <clip-id>",
+		Aliases: []string{"remove", "rm"},
+		Short:   "Delete a saved clip",
+		Example: `  hey clip delete 44`,
+		RunE:    deleteCommand.run,
+		Args:    usageExactOneArg(),
+	}
+	return deleteCommand
+}
+
+func (c *clipDeleteCommand) run(cmd *cobra.Command, args []string) error {
+	if err := requireAuth(); err != nil {
+		return err
+	}
+	clipID, err := parsePositiveID(args[0], "clip")
+	if err != nil {
+		return err
+	}
+	if err := sdk.Clips().Delete(cmd.Context(), clipID); err != nil {
+		return apierr.FromSDK(err)
+	}
+	return writeMutation(cmd, fmt.Sprintf("Clip %d deleted", clipID), map[string]any{"id": clipID})
+}
