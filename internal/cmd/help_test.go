@@ -95,25 +95,28 @@ USAGE
   hey <command> [flags]
   hey tui                 Open the interactive app
 
-INTERACTIVE
-  tui  Launch the interactive terminal UI
+CORE COMMANDS
+  tui        Launch the interactive terminal UI
+  boxes      List your HEY boxes
+  box        List email threads in a box
+  threads    Read a thread
+  search     Search email threads and messages
+  compose    Write and send a new email
+  reply      Reply to a thread
+  contacts   Manage contacts
+  calendars  List calendars
+  todo       Create and manage to-dos
+  journal    Read and write journal entries
 
 MAIL
-  boxes        List your HEY boxes
-  box          List email threads in a box
-  search       Search email threads and messages
-  contacts     Manage contacts
   screener     Decide who gets to email you
-  threads      Read a thread
   attachments  List and save files from a thread
+  drafts       List draft emails
   watch        Follow email threads as they change
 
 WRITE & SHARE
-  compose     Write and send a new email
-  reply       Reply to a thread
   bulk-reply  Reply to multiple email threads
   forward     Forward the latest message in a thread
-  drafts      List draft emails
   share       Get a sharing link for an email thread
   unshare     Turn off an email thread's sharing link
 
@@ -139,12 +142,9 @@ ORGANIZE
   stop-ignoring  Stop ignoring email threads
 
 CALENDAR & TASKS
-  calendars   List calendars
   recordings  List events, to-dos, and other calendar entries
-  todo        Create and manage to-dos
   habit       Create and manage habits
   timetrack   Track time
-  journal     Read and write journal entries
 
 ACCOUNT & SYSTEM
   auth      Sign in, sign out, and check login status
@@ -208,9 +208,16 @@ func TestRootHelpStaysScannable(t *testing.T) {
 		}
 	}
 
+	seen := make(map[string]string)
 	for _, category := range curatedCategories {
 		if len(category.names) > 13 {
 			t.Errorf("%s has %d commands, want no more than 13", category.heading, len(category.names))
+		}
+		for _, name := range category.names {
+			if previous := seen[name]; previous != "" {
+				t.Errorf("%s appears in both %s and %s", name, previous, category.heading)
+			}
+			seen[name] = category.heading
 		}
 	}
 }

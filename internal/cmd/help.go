@@ -16,16 +16,16 @@ var curatedCategories = []struct {
 	names   []string
 }{
 	{
-		heading: "INTERACTIVE",
-		names:   []string{"tui"},
+		heading: "CORE COMMANDS",
+		names:   []string{"tui", "boxes", "box", "threads", "search", "compose", "reply", "contacts", "calendars", "todo", "journal"},
 	},
 	{
 		heading: "MAIL",
-		names:   []string{"boxes", "box", "search", "contacts", "screener", "threads", "attachments", "watch"},
+		names:   []string{"screener", "attachments", "drafts", "watch"},
 	},
 	{
 		heading: "WRITE & SHARE",
-		names:   []string{"compose", "reply", "bulk-reply", "forward", "drafts", "share", "unshare"},
+		names:   []string{"bulk-reply", "forward", "share", "unshare"},
 	},
 	{
 		heading: "SAVED CONTENT",
@@ -37,7 +37,7 @@ var curatedCategories = []struct {
 	},
 	{
 		heading: "CALENDAR & TASKS",
-		names:   []string{"calendars", "recordings", "todo", "habit", "timetrack", "journal"},
+		names:   []string{"recordings", "habit", "timetrack"},
 	},
 	{
 		heading: "ACCOUNT & SYSTEM",
