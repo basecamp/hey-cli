@@ -417,16 +417,16 @@ func renderDayView(events, habits []Recording, anchor time.Time, hint string, wi
 	}
 	b.WriteString(renderDayGrid(lanes, gridWidth, colWidth, height-spent, chrome, eventTitle, muted))
 
-	// All-day events as full-width horizontal bars at the bottom
+	// All-day events run the width of the day at the bottom of it, as blocks in their
+	// calendars' colors. They used to be drawn [like this─────], which said "all day" by
+	// reaching across and nothing else: an event's color is how a reader tells whose it is,
+	// and a timed one on the grid above is a solid block, so an all-day one is the same
+	// block lying on its side.
 	if len(allDay) > 0 {
 		b.WriteString(sectionHeader("All day", width))
 		b.WriteString("\n")
 		for _, e := range allDay {
-			innerLen := gridWidth - 2
-			title := truncateStr(terminal.SanitizeLine(e.Title), innerLen)
-			fill := max(innerLen-lipgloss.Width(title), 0)
-			b.WriteString(chrome.Render("[") + eventTitle.Render(title) +
-				chrome.Render(strings.Repeat("─", fill)+"]"))
+			b.WriteString(eventPill(e, gridWidth))
 			b.WriteString("\n")
 		}
 	}
@@ -721,6 +721,14 @@ func renderWeekView(events, habits, completions []Recording, anchor time.Time, f
 		}
 	}
 
+	// The all-day events are held back so they can sit at the foot of the week, under the
+	// grid rather than at whatever depth each day's timed events reached. Their rows and
+	// their header come off the space the grid has to fill.
+	allDay := weekAllDayBand(days, colWidth)
+	if len(allDay) > 0 {
+		rowsUsed += 1 + len(allDay)
+	}
+
 	// The days run to the bottom of the screen whether or not anything is on them, the way
 	// the day's hours do: the rules between them are the grid, so a week with a quiet
 	// Thursday still reads as seven days rather than as a paragraph that stops.
@@ -735,6 +743,14 @@ func renderWeekView(events, habits, completions []Recording, anchor time.Time, f
 			}
 		}
 		writeRow(cells)
+	}
+
+	if len(allDay) > 0 {
+		b.WriteString(sectionHeader("All day", width))
+		b.WriteString("\n")
+		for _, row := range allDay {
+			writeRow(row)
+		}
 	}
 
 	// No bottom border: the week ends where the screen does, as the day does.
@@ -788,23 +804,11 @@ func weekHabitBand(days []weekDayInfo, colWidth int) [][]string {
 	return band
 }
 
-func weekGridBorder(left, mid, right string, colWidth int, muted lipgloss.Style) string {
-	var s strings.Builder
-	s.WriteString(muted.Render(left))
-	for i := range 7 {
-		s.WriteString(muted.Render(strings.Repeat("─", colWidth)))
-		if i < 6 {
-			s.WriteString(muted.Render(mid))
-		}
-	}
-	s.WriteString(muted.Render(right))
-	return s.String()
-}
-
 // buildWeekDayColumn returns styled lines for one day column.
 // Order: habits at top, timed events in the middle, all-day at bottom.
 func buildWeekDayColumn(d weekDayInfo, width int, muted lipgloss.Style) []string {
-	// The day's habits are the band above the grid, not lines in the column.
+	// The day's habits are the band above the grid and its all-day events the band below
+	// it, so the column itself is the timed events alone.
 	var lines []string
 
 	for _, e := range d.events {
@@ -818,11 +822,85 @@ func buildWeekDayColumn(d weekDayInfo, width int, muted lipgloss.Style) []string
 		lines = append(lines, eventPill(e, width))
 	}
 
-	for _, e := range d.allDay {
-		lines = append(lines, eventPill(e, width))
+	return lines
+}
+
+// weekAllDayBand is the all-day events of each day, gathered at the foot of the week. They
+// belong to no hour, so they sit under the grid rather than floating at whatever depth the
+// timed events above them happened to reach — which is where the day view puts its own.
+//
+// Each event keeps one row for every day it covers, so a week-long one reads as a single bar
+// straight across. Laying each day out on its own instead put it on whatever row that day
+// had free, and a holiday spanning the week came out as a staircase.
+func weekAllDayBand(days []weekDayInfo, colWidth int) [][]string {
+	spans := weekAllDaySpans(days)
+	if len(spans) == 0 {
+		return nil
 	}
 
-	return lines
+	var lanes [][]bool // which days each lane has taken
+	rows := make([][]string, 0, len(spans))
+	for _, span := range spans {
+		lane := 0
+		for ; lane < len(lanes); lane++ {
+			if !span.overlaps(lanes[lane]) {
+				break
+			}
+		}
+		if lane == len(lanes) {
+			lanes = append(lanes, make([]bool, len(days)))
+			rows = append(rows, make([]string, len(days)))
+		}
+		for _, day := range span.days {
+			lanes[lane][day] = true
+			rows[lane][day] = eventPill(span.event, colWidth)
+		}
+	}
+	return rows
+}
+
+// weekAllDaySpan is one all-day event and the days of the week it covers. eventsByDate hands
+// a multi-day event to every day it touches, so the same event arrives seven times and is
+// gathered back into one here.
+type weekAllDaySpan struct {
+	event Recording
+	days  []int
+}
+
+func (span weekAllDaySpan) overlaps(taken []bool) bool {
+	for _, day := range span.days {
+		if taken[day] {
+			return true
+		}
+	}
+	return false
+}
+
+// weekAllDaySpans gathers the week's all-day events, longest first so the bars that reach
+// furthest take the top rows and the single days fill in around them.
+func weekAllDaySpans(days []weekDayInfo) []weekAllDaySpan {
+	var order []int64
+	spans := make(map[int64]weekAllDaySpan)
+	for i, day := range days {
+		for _, event := range day.allDay {
+			span, seen := spans[event.ID]
+			if !seen {
+				span.event = event
+				order = append(order, event.ID)
+			}
+			span.days = append(span.days, i)
+			spans[event.ID] = span
+		}
+	}
+
+	gathered := make([]weekAllDaySpan, 0, len(order))
+	for _, id := range order {
+		gathered = append(gathered, spans[id])
+	}
+	sort.SliceStable(gathered, func(i, j int) bool {
+		return len(gathered[i].days) > len(gathered[j].days)
+	})
+	return gathered
 }
 
 // eventPill is an event as the week and the year draw it: a bar filled with its calendar's
@@ -855,14 +933,22 @@ func weekDayColumnLabel(d time.Time, isFirstCol bool) string {
 }
 
 // ===============================================
-// Year View — bordered grid, one box per day
+// Year View — the whole year, a week to a row
 // ===============================================
 
+// renderYearView draws the year in the day's vocabulary, as the week does: the year names
+// itself with the keys that move it, the days are dotted apart, and there is no box around
+// the lot. A week keeps a solid rule under it, which the week view has no need of — a row
+// there is one line, and here it is as tall as its busiest day, so without one there is
+// nothing to say where January's last week ends and February's first begins.
+//
 // The year takes no day labels: a named day is a title on a recording, and a year read
-// carries no recordings to hang one on. The web app's year does not show them either.
-func renderYearView(events []Recording, anchor time.Time, firstWeekDay time.Weekday, width, _ int) string {
+// carries no recordings to hang one on. The web app's year does not show them either. It
+// takes no habits band either — a year of icons says nothing a reader can use.
+func renderYearView(events []Recording, anchor time.Time, firstWeekDay time.Weekday, width, _ int, hint string) string {
 	var b strings.Builder
 	muted := styleMuted
+	chrome := lipgloss.NewStyle().Foreground(colorChrome)
 	bright := lipgloss.NewStyle().Foreground(colorBright)
 	primary := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
 	faint := styleMuted.Foreground(colorMuted) // extra-dim filler days outside the year
@@ -876,78 +962,60 @@ func renderYearView(events []Recording, anchor time.Time, firstWeekDay time.Week
 
 	byDate := eventsByDate(events)
 
-	colWidth := max((width-8)/7, 9)
-
-	sep := muted.Render("│")
-
-	// Top border
-	b.WriteString(weekGridBorder("┌", "┬", "┐", colWidth, muted))
-	b.WriteString("\n")
-
-	// Weekday header row
-	b.WriteString(sep)
-	for i := range 7 {
-		wd := time.Weekday((int(firstWeekDay) + i) % 7)
-		name := strings.ToUpper(wd.String()[:3])
-		padded := centerPad(name, colWidth)
-		b.WriteString(muted.Render(padded))
-		b.WriteString(sep)
-	}
-	b.WriteString("\n")
-
-	// Grid rows — one multi-line row per week
-	today := time.Now()
-	d := gridStart
-	for d.Before(gridEnd) {
-		b.WriteString(weekGridBorder("├", "┼", "┤", colWidth, muted))
+	colWidth := max((width-6)/7, 9)
+	sep := chrome.Render(string(hourRule))
+	writeRow := func(cells []string) {
+		for i, cell := range cells {
+			if i > 0 {
+				b.WriteString(sep)
+			}
+			b.WriteString(padTo(cell, colWidth))
+		}
 		b.WriteString("\n")
+	}
 
+	// The year names itself and carries the keys that move it. Its cells each say their own
+	// weekday, so there is no header row to name the columns — the week needs one because
+	// its cells do not.
+	b.WriteString(hintedSectionHeader(anchor.Format("2006"), hint, width))
+	b.WriteString("\n")
+
+	weekRule := chrome.Render(strings.Repeat("─", colWidth*7+6))
+
+	today := time.Now()
+	cells := make([]string, 7)
+	for d := gridStart; d.Before(gridEnd); {
 		// Build cell content for each day in the week
-		weekDates := make([]time.Time, 7)
-		cells := make([][]string, 7)
+		columns := make([][]string, 7)
 		for i := range 7 {
-			weekDates[i] = d
-			cells[i] = buildYearDayCell(d, byDate[dateKey(d)], colWidth,
+			columns[i] = buildYearDayCell(d, byDate[dateKey(d)], colWidth,
 				sameDay(d, today), d.Year() == anchor.Year(), primary, bright, muted, faint)
 			d = d.AddDate(0, 0, 1)
 		}
 
-		// Find tallest cell
 		maxH := 0
-		for _, cell := range cells {
-			if len(cell) > maxH {
-				maxH = len(cell)
-			}
+		for _, column := range columns {
+			maxH = max(maxH, len(column))
 		}
-		if maxH == 0 {
-			maxH = 1
+		maxH = max(maxH, 1)
+
+		for row := range maxH {
+			for i := range 7 {
+				cells[i] = ""
+				if row < len(columns[i]) {
+					cells[i] = columns[i][row]
+				}
+			}
+			writeRow(cells)
 		}
 
-		// Render rows
-		for row := range maxH {
-			b.WriteString(sep)
-			for i := range 7 {
-				if row < len(cells[i]) {
-					line := cells[i][row]
-					pad := colWidth - lipgloss.Width(line)
-					b.WriteString(line)
-					if pad > 0 {
-						b.WriteString(strings.Repeat(" ", pad))
-					}
-				} else {
-					b.WriteString(strings.Repeat(" ", colWidth))
-				}
-				b.WriteString(sep)
-			}
+		if d.Before(gridEnd) {
+			b.WriteString(weekRule)
 			b.WriteString("\n")
 		}
 	}
 
-	// Bottom border
-	b.WriteString(weekGridBorder("└", "┴", "┘", colWidth, muted))
-	b.WriteString("\n")
-
-	return b.String()
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // buildYearDayCell returns styled lines for one day cell in the year grid.

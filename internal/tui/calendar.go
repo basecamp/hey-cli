@@ -398,16 +398,9 @@ func (v *calendarView) HelpBindings() []helpBinding {
 	if v.calendarPicker != nil {
 		return v.calendarPicker.helpBindings()
 	}
-	// The day and the week say which keys move them on the line that names them, where
-	// they belong to the date they act on. The year has no such line, so the help bar
-	// carries it for that one.
+	// Every span says which keys move it on the line that names it, where they belong to
+	// the date they act on, so the help bar carries none of that.
 	var bindings []helpBinding
-	if v.viewMode == viewYear {
-		bindings = append(bindings, helpBinding{"p/n", v.viewMode.unit()})
-		if !v.showingToday() {
-			bindings = append(bindings, helpBinding{"t", "today"})
-		}
-	}
 	// The spans are not in here: the row above the grid shows each one's number in the
 	// tab itself, the way the box row does. Which calendar is being read is only in the
 	// menu, so the key that opens it has to be said.
@@ -780,7 +773,7 @@ func (v *calendarView) rebuildView() {
 		// The year's events are HEY's spanned_events — the all-day and multi-day ones —
 		// because that is all a year read carries. eventsByDate spreads a multi-day event
 		// over the days it covers, so the grid fills the same way it always did.
-		content = renderYearView(v.year.SpannedEvents, anchor, v.firstWeekDay, w, h)
+		content = renderYearView(v.year.SpannedEvents, anchor, v.firstWeekDay, w, h, v.stepHint())
 	}
 
 	v.contentVP.SetContent(content)
