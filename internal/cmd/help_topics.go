@@ -43,7 +43,7 @@ EXIT CODES
   4  The signed-in identity cannot perform the operation.
   5  HEY rate-limited the request.
   6  A network connection failed.
-  7  HEY returned an API or server error.
+  7  An API, server, or local operational failure occurred.
   8  The request matched more than one resource.
 
 JSON failures also carry a machine-readable error code and an actionable hint when one is available.`,
