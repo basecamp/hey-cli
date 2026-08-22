@@ -556,7 +556,7 @@ func (c *contentList) view() string {
 
 		if label := c.sectionLabelAt(i); label != "" {
 			if c.cover != coverNone && sectionOf(p) == sectionPreviouslySeen {
-				fmt.Fprintln(&b, coverHeader(label, "v to cover", c.width))
+				fmt.Fprintln(&b, coverHeader(label, "x to cover", c.width))
 			} else {
 				fmt.Fprintln(&b, sectionHeader(label, c.width))
 			}

@@ -599,7 +599,7 @@ func TestPeekingLiftsTheCover(t *testing.T) {
 	if !strings.Contains(view, list.postings[2].Name) {
 		t.Error("peeking did not reveal the seen threads")
 	}
-	if !strings.Contains(view, "v to cover") {
+	if !strings.Contains(view, "x to cover") {
 		t.Error("a peeked list does not say how to put the cover back")
 	}
 
