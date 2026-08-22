@@ -144,9 +144,9 @@ func boxForShortcut(key string, boxes []mail.Source) int {
 // more of those than fit, and they change, while these three do not.
 func calendarNavItems() []navItem {
 	return []navItem{
-		{label: viewDay.String()},
-		{label: viewWeek.String()},
-		{label: viewYear.String()},
+		{shortcut: "1", label: viewDay.String()},
+		{shortcut: "2", label: viewWeek.String()},
+		{shortcut: "3", label: viewYear.String()},
 	}
 }
 

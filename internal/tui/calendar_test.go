@@ -154,8 +154,8 @@ func TestCalendarViewModeNumberKeys(t *testing.T) {
 
 // --- Subnav ---
 
-// The row above the grid is the span, and the rule above it names the calendar being
-// read and the key that changes it.
+// The row above the grid is the span, numbered as the boxes are, and the rule above it
+// names the one that is on.
 func TestCalendarViewSubnavItems(t *testing.T) {
 	v := calendarWithRecordings()
 	items, selected, label, centered := v.SubnavItems()
@@ -163,20 +163,27 @@ func TestCalendarViewSubnavItems(t *testing.T) {
 	if len(items) != 3 || items[0].label != "Day" || items[2].label != "Year" {
 		t.Errorf("subnav items = %+v, want Day, Week and Year", items)
 	}
+	// Each span wears its own number, as the boxes do, which is why the help bar does
+	// not carry them.
+	for i, want := range []string{"1", "2", "3"} {
+		if items[i].shortcut != want {
+			t.Errorf("%s tab shortcut = %q, want %q", items[i].label, items[i].shortcut, want)
+		}
+	}
 	if selected != int(viewDay) {
 		t.Errorf("selected = %d, want the day", selected)
 	}
-	if label != "Work · C to switch" {
+	// The rule names the span that is on, as the box row's rule names the open box.
+	if label != "Day" {
 		t.Errorf("label = %q", label)
 	}
 	if !centered {
 		t.Error("calendar subnav should be centered")
 	}
 
-	// One calendar is nothing to switch between.
-	v.calendars = v.calendars[:1]
-	if _, _, label, _ = v.SubnavItems(); label != "Work" {
-		t.Errorf("label with one calendar = %q", label)
+	v.viewMode = viewYear
+	if _, selected, label, _ = v.SubnavItems(); label != "Year" || selected != int(viewYear) {
+		t.Errorf("year row = selected:%d label:%q", selected, label)
 	}
 }
 
@@ -209,8 +216,8 @@ func TestCalendarPickerSwitchesTheCalendarItReads(t *testing.T) {
 	v.vc.width, v.vc.height = 80, 20
 	v.requests.finish(v.requests.id)
 
-	if cmd := v.HandleContentKey(keyPress("C")); cmd != nil || v.calendarPicker == nil {
-		t.Fatal("C did not open the calendars modal")
+	if cmd := v.HandleContentKey(keyPress("g")); cmd != nil || v.calendarPicker == nil {
+		t.Fatal("g did not open the calendars modal")
 	}
 	if !v.CapturingInput() {
 		t.Error("the calendars modal does not hold the keys")
@@ -231,7 +238,7 @@ func TestCalendarPickerSwitchesTheCalendarItReads(t *testing.T) {
 
 	// Choosing the calendar already open is not a read.
 	v.requests.finish(v.requests.id)
-	v.HandleContentKey(keyPress("C"))
+	v.HandleContentKey(keyPress("g"))
 	if cmd := v.HandleContentKey(keyPress("enter")); cmd != nil {
 		t.Error("choosing the open calendar read it again")
 	}
@@ -241,9 +248,9 @@ func TestCalendarPickerStaysShutWithOneCalendar(t *testing.T) {
 	v := calendarWithRecordings()
 	v.calendars = v.calendars[:1]
 
-	v.HandleContentKey(keyPress("C"))
+	v.HandleContentKey(keyPress("g"))
 	if v.calendarPicker != nil {
-		t.Error("C opened a modal with nothing to choose between")
+		t.Error("g opened a modal with nothing to choose between")
 	}
 }
 
@@ -691,14 +698,14 @@ func TestCalendarPinsTodosBelowTheGrid(t *testing.T) {
 func TestCalendarViewHelpBindingsShowsViewToggle(t *testing.T) {
 	v := calendarWithRecordings()
 	v.calIndex = 1
-	// The day view offers the span, the categories and the habits modal; creating,
-	// editing and deleting a habit are the modal's own keys, and the keys that move the
-	// day are on the day's own line rather than in here.
+	// The day view offers the categories and the habits modal. Creating, editing and
+	// deleting a habit are the modal's own keys; the keys that move the day are on the
+	// day's own line; and each span's number is in its own tab above the grid.
 	bindings := v.HelpBindings()
 	if len(bindings) != 3 {
 		t.Fatalf("expected 3 bindings, got %d: %+v", len(bindings), bindings)
 	}
-	for _, want := range []string{"1-3", "c", "b"} {
+	for _, want := range []string{"g", "c", "b"} {
 		found := false
 		for _, binding := range bindings {
 			found = found || binding.key == want
@@ -710,7 +717,7 @@ func TestCalendarViewHelpBindingsShowsViewToggle(t *testing.T) {
 
 	// The week and the year have no date line, so the help bar carries their steps.
 	v.viewMode = viewWeek
-	for _, want := range []string{"←→", "1-3", "c"} {
+	for _, want := range []string{"←→", "c"} {
 		found := false
 		for _, binding := range v.HelpBindings() {
 			found = found || binding.key == want

@@ -316,9 +316,13 @@ func (v *calendarView) HelpBindings() []helpBinding {
 			bindings = append(bindings, helpBinding{"t", "today"})
 		}
 	}
-	bindings = append(bindings,
-		helpBinding{"1-3", "day, week, year"},
-		helpBinding{"c", "time categories"})
+	// The spans are not in here: the row above the grid shows each one's number in the
+	// tab itself, the way the box row does. Which calendar is being read is only in the
+	// menu, so the key that opens it has to be said.
+	if len(v.calendars) > 1 {
+		bindings = append(bindings, helpBinding{"g", "calendars"})
+	}
+	bindings = append(bindings, helpBinding{"c", "time categories"})
 	if v.showsHabits() {
 		bindings = append(bindings, helpBinding{"b", "habits"})
 	}
@@ -331,25 +335,10 @@ func (v *calendarView) showsHabits() bool {
 	return len(v.manageableHabits()) > 0 || v.viewingPersonalCalendar()
 }
 
-// SubnavItems is the span the calendar is read over — Day, Week, Year. The rule above
-// it names the calendar being read and the key that changes it, since that is a menu
-// now rather than a row.
+// SubnavItems is the span the calendar is read over — Day, Week, Year — and the rule
+// above the row names the one that is on, as the box row's rule names the open box.
 func (v *calendarView) SubnavItems() ([]navItem, int, string, bool) {
-	label := "Calendar"
-	if name := v.calendarName(); name != "" {
-		label = name
-	}
-	if len(v.calendars) > 1 {
-		label += " · C to switch"
-	}
-	return calendarNavItems(), int(v.viewMode), label, true
-}
-
-func (v *calendarView) calendarName() string {
-	if v.calIndex >= 0 && v.calIndex < len(v.calendars) {
-		return v.calendars[v.calIndex].Name
-	}
-	return ""
+	return calendarNavItems(), int(v.viewMode), v.viewMode.String(), true
 }
 
 func (v *calendarView) SubnavLeft() tea.Cmd {
@@ -411,7 +400,9 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		v.todoPicker = newTodoPicker(v.todos)
 		v.todoPicker.resize(v.vc.width)
 		return nil
-	case "C":
+	// g for the calendars, since shift+C is the jump to this section and never reaches
+	// here — the model reads the section shortcuts before a view sees a key.
+	case "g":
 		if len(v.calendars) > 1 {
 			v.calendarPicker = newCalendarPicker(v.calendars, v.calIndex)
 		}

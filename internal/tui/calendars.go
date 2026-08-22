@@ -15,10 +15,17 @@ type calendarPicker struct {
 	cursor int
 }
 
+// newCalendarPicker opens on the calendar being read, and marks it: now that the rule
+// above the row names the span rather than the calendar, this menu is the only place
+// which calendar is on is said.
 func newCalendarPicker(calendars []Calendar, current int) *calendarPicker {
 	picker := &calendarPicker{cursor: max(current, 0)}
-	for _, calendar := range calendars {
-		picker.names = append(picker.names, terminal.SanitizeLine(calendar.Name))
+	for i, calendar := range calendars {
+		marker := "○ "
+		if i == current {
+			marker = "● "
+		}
+		picker.names = append(picker.names, marker+terminal.SanitizeLine(calendar.Name))
 	}
 	return picker
 }
