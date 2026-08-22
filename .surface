@@ -200,6 +200,15 @@ hey setup omarchy --remove
 hey share
 hey skill
 hey skill install
+hey snippet
+hey snippet create
+hey snippet create --content
+hey snippet create --name
+hey snippet delete
+hey snippet update
+hey snippet update --content
+hey snippet update --name
+hey snippets
 hey spam
 hey stop-ignoring
 hey threads

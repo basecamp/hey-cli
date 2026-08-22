@@ -500,6 +500,20 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.notice = "Bulk reply recalled"
 		return nil, true
 
+	case snippetsLoadedMsg:
+		form := modalOf[*composeForm](v)
+		if form == nil || form != msg.form || form.snippetRequestID != msg.requestID {
+			return nil, true
+		}
+		if msg.err == nil {
+			form.availableSnippets = msg.snippets
+			form.snippetsLoaded = true
+		}
+		if form.snippetPicker != nil {
+			form.snippetPicker.loaded(msg.snippets, msg.err)
+		}
+		return nil, true
+
 	case composeSentMsg:
 		form := modalOf[*composeForm](v)
 		if form == nil {

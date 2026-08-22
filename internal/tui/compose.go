@@ -90,6 +90,11 @@ type composeForm struct {
 	isError bool
 	sending bool
 
+	snippetPicker     *snippetPicker
+	availableSnippets []generated.Snippet
+	snippetsLoaded    bool
+	snippetRequestID  uint64
+
 	styles styles
 	width  int
 	height int
@@ -168,6 +173,9 @@ func (f *composeForm) focusCurrent() tea.Cmd {
 func (f *composeForm) resize(width, height int) {
 	f.width = width
 	f.height = height
+	if f.snippetPicker != nil {
+		f.snippetPicker.resize(width, height)
+	}
 	inner := max(width-4, 10)
 	for i := range f.inputs {
 		f.inputs[i].SetWidth(inner - 9) // room for the "Subject: " label
@@ -218,7 +226,25 @@ func (f *composeForm) handleKey(view *mailView, msg tea.KeyPressMsg) (tea.Cmd, b
 	if f.sending {
 		return nil, true
 	}
+	if f.snippetPicker != nil {
+		picker := f.snippetPicker
+		cmd, open, snippet := picker.handleKey(msg)
+		if !open {
+			f.snippetPicker = nil
+			f.focus = picker.returnFocus
+			return f.focusCurrent(), true
+		}
+		if snippet != nil {
+			f.body.InsertString(snippet.Content)
+			f.snippetPicker = nil
+			f.focus = f.bodyIndex()
+			return f.focusCurrent(), true
+		}
+		return cmd, true
+	}
 	switch {
+	case msg.String() == "ctrl+t":
+		return f.openSnippetPicker(view), true
 	case msg.Key().Code == tea.KeyEscape:
 		return nil, false
 	case msg.Key().Code == tea.KeyTab && msg.Key().Mod == tea.ModShift:
@@ -244,7 +270,22 @@ func (f *composeForm) handleKey(view *mailView, msg tea.KeyPressMsg) (tea.Cmd, b
 }
 
 func (f *composeForm) handleMsg(msg tea.Msg) (tea.Cmd, bool) {
+	if f.snippetPicker != nil {
+		return f.snippetPicker.handleMsg(msg), true
+	}
 	return f.update(msg), true
+}
+
+func (f *composeForm) openSnippetPicker(view *mailView) tea.Cmd {
+	picker := newSnippetPicker(f.focus)
+	picker.resize(f.width, f.height)
+	f.snippetPicker = picker
+	if f.snippetsLoaded {
+		picker.loaded(f.availableSnippets, nil)
+		return picker.focus()
+	}
+	f.snippetRequestID++
+	return tea.Batch(picker.focus(), view.loadSnippets(f, f.snippetRequestID))
 }
 
 // update forwards a message to the focused input (keys, cursor blinks, ...).
@@ -259,8 +300,12 @@ func (f *composeForm) update(msg tea.Msg) tea.Cmd {
 }
 
 func (f *composeForm) helpBindings() []helpBinding {
+	if f.snippetPicker != nil {
+		return f.snippetPicker.helpBindings()
+	}
 	return []helpBinding{
 		{"tab", "next field"},
+		{"ctrl+t", "snippets"},
 		{"ctrl+s", "send"},
 		{"esc", "cancel"},
 	}
@@ -270,7 +315,10 @@ func (f *composeForm) restyle(s styles) {
 	f.styles = s
 }
 
-func (f *composeForm) draw(_ *mailView) string {
+func (f *composeForm) draw(view *mailView) string {
+	if f.snippetPicker != nil {
+		return f.snippetPicker.view(view.vc.styles, view.vc.width)
+	}
 	return f.view()
 }
 
@@ -471,6 +519,18 @@ func (v *mailView) clientForTopicAccount(ctx context.Context, accountID int64) (
 		return nil, fmt.Errorf("mail account switching is unavailable")
 	}
 	return v.vc.rootSDK.ForAccount(ctx, accountID)
+}
+
+func (v *mailView) loadSnippets(form *composeForm, requestID uint64) tea.Cmd {
+	ctx := v.vc.ctx
+	sdk := v.vc.sdk
+	if form.sendSDK != nil {
+		sdk = form.sendSDK
+	}
+	return func() tea.Msg {
+		snippets, err := sdk.Snippets().List(ctx)
+		return snippetsLoadedMsg{form: form, requestID: requestID, snippets: snippets, err: err}
+	}
 }
 
 // send submits the open form through the SDK.

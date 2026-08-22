@@ -32,7 +32,7 @@ func TestCuratedCommandHelpUsesUserFacingLanguage(t *testing.T) {
 
 func TestEmailCommandHelpKeepsPostingAsAnInternalTerm(t *testing.T) {
 	root := newRootCmd()
-	for _, name := range []string{"boxes", "box", "labels", "label", "workflows", "workflow", "search", "seen", "unseen", "move", "trash", "spam", "ignore", "stop-ignoring", "watch"} {
+	for _, name := range []string{"boxes", "box", "labels", "label", "workflows", "workflow", "snippets", "snippet", "search", "seen", "unseen", "move", "trash", "spam", "ignore", "stop-ignoring", "watch"} {
 		t.Run(name, func(t *testing.T) {
 			command, _, err := root.Find([]string{name})
 			if err != nil {
@@ -105,6 +105,8 @@ EMAIL
   collection     View and manage an email collection
   workflows      List your email workflows
   workflow       View and manage an email workflow
+  snippets       List reusable email snippets
+  snippet        Create and manage reusable email snippets
   search         Search email threads and messages
   contacts       Manage contacts
   screener       Decide who gets to email you

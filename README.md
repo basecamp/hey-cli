@@ -201,7 +201,7 @@ Accounts and individual email addresses.
 Switching cancels requests from the previous account and reloads the active section;
 Calendar and Journal remain identity-wide.
 
-Navigate between Mail, Contacts, Calendar, and Journal. The context-sensitive shortcut bar is visible by default; press `?` to hide or restore it, and the choice is remembered across restarts. Mail navigation includes HEY boxes plus separate Labels and Collections tabs; Shift+K opens Collections directly, while Labels remains available from the navigation row. Every list keeps going: scroll towards the bottom of a box, label, or collection and the next threads are read in behind you, so there are no pages to step through. The mail actions use HEY's web shortcuts in either letter case: `/` or `s` searches, `r` replies, `f` forwards, `v` moves, `b` manages labels, `n` adds or removes the selected thread from collections, `e` marks seen, `u` marks unseen, `i` moves to the Imbox, `l` moves to Reply Later, `a` moves to Set Aside, `d` moves to The Feed, `p` moves to Paper Trail, and `t` trashes. Press `!` to mark as spam, `-` to ignore, and `+` to stop ignoring. Select threads with Space and press Ctrl+B to preview every bulk-reply recipient before writing and sending one reply to all selected threads. A delayed bulk reply can be recalled with Ctrl+U while HEY's undo window remains open. Search results retain the matching-message summary and keep going as you scroll, like every other list.
+Navigate between Mail, Contacts, Calendar, and Journal. The context-sensitive shortcut bar is visible by default; press `?` to hide or restore it, and the choice is remembered across restarts. Mail navigation includes HEY boxes plus separate Labels and Collections tabs; Shift+K opens Collections directly, while Labels remains available from the navigation row. Every list keeps going: scroll towards the bottom of a box, label, or collection and the next threads are read in behind you, so there are no pages to step through. The mail actions use HEY's web shortcuts in either letter case: `/` or `s` searches, `r` replies, `f` forwards, `v` moves, `b` manages labels, `n` adds or removes the selected thread from collections, `e` marks seen, `u` marks unseen, `i` moves to the Imbox, `l` moves to Reply Later, `a` moves to Set Aside, `d` moves to The Feed, `p` moves to Paper Trail, and `t` trashes. Press `!` to mark as spam, `-` to ignore, and `+` to stop ignoring. Select threads with Space and press Ctrl+B to preview every bulk-reply recipient before writing and sending one reply to all selected threads. A delayed bulk reply can be recalled with Ctrl+U while HEY's undo window remains open. Search results retain the matching-message summary and keep going as you scroll, like every other list. While writing a new message, reply, or forward, press Ctrl+T to open the searchable Snippets picker. HEY never chooses a default: Enter inserts the selected snippet at the body cursor, Escape returns without changing the draft, and the picker can be reopened to insert another snippet.
 
 The mail list follows the server. HEY tells the TUI when a box changed over the same
 Action Cable connection `hey watch` uses, and the box on screen is read again a moment
@@ -263,7 +263,7 @@ Listing commands also answer `--markdown` for a table, `--styled` to force the h
 rendering when the output is piped, `--ids-only` for one ID per line, and `--count` for a
 bare number. `--ids-only` and `--count` need list data, so they work on `hey boxes`,
 `hey box`, `hey labels`, `hey label`, `hey collections`, `hey collection`, `hey workflows`,
-`hey workflow`, `hey drafts`, `hey search`, `hey contacts list`, `hey screener list`, `hey screener history`, `hey calendars`,
+`hey workflow`, `hey snippets`, `hey drafts`, `hey search`, `hey contacts list`, `hey screener list`, `hey screener history`, `hey calendars`,
 `hey recordings`, `hey todo list`, `hey timetrack list` and `hey journal list`. The
 data-only formats print any pagination notice on stderr, so the IDs on stdout stay
 pipeable.
@@ -317,6 +317,10 @@ hey workflow stage update 654 321 --name "Interviewing"
 hey workflow add 987 --to 654 --stage 321       # add a topic ID to a stage
 hey workflow move 987 --workflow 654 --to 322   # move it to another stage
 hey workflow remove 987 --from 654              # remove it from the workflow
+hey snippets                                      # list reusable email snippets
+hey snippet create --name "Scheduling reply" --content "Tuesday works for me."
+hey snippet update 44 --content "Wednesday works for me."
+hey snippet delete 44
 hey search "quarterly planning"    # search threads and matching messages
 hey search --from jane@example.com --date last_30_days  # refine a search
 hey search filters                 # list available refinement values
@@ -387,6 +391,8 @@ Organization actions take the `id` values returned by `hey box --json`, `hey lab
 Collection IDs come from `hey collections`. `hey collection` returns both each posting `id` and its `topic_id`, plus `next_page` and `total_count`. Collection membership commands take `topic_id`; posting organization commands continue to take `id`. Creating a collection returns a confirmed mutation, and `hey collections` provides its ID for subsequent commands. Collection updates accept a non-empty name, summary, or both.
 
 Workflow IDs come from `hey workflows`, which includes the linked account ID for each workflow. `hey workflow <id>` returns stages in position order; `--ids-only` and `--count` apply to those stages. Creating a workflow needs one linked mail account, selected with `--account` when more than one is available. HEY creates new stages as `Untitled`, so create the stage, read its ID with `hey workflow <id>`, then rename it. Workflow membership commands take `topic_id`. Adding a thread creates its workflow membership before selecting the requested stage; if stage selection fails, the thread remains in the workflow's first stage and the command reports the error.
+
+Snippets are named reusable email content, separate from clips saved out of received messages. `hey snippets` lists both plain text and HEY's rich-text HTML; `hey snippet create`, `update`, and `delete` manage them. A create requires a non-empty name and content. Updates change whichever non-empty fields are supplied, while omitted fields stay as they are. In the TUI, Ctrl+T opens the picker from new-message, reply, and forward forms and inserts the snippet's plain-text representation at the current body cursor without replacing the draft.
 
 `hey box <name|id>`, `hey label <id>` and `hey collection <id>` list the same postings and answer the same formats: `--json`, `--styled`, `--markdown`, `--ids-only`, and `--count`. The data-only formats print the pagination notice and any `next_page` cursor on stderr, so the IDs on stdout stay pipeable. `--json` differs only in what wraps the postings: a box answers with HEY's box payload, a label and a collection with the source and its `total_count`.
 

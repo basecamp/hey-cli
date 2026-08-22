@@ -59,6 +59,10 @@ func composeTestServer(t *testing.T) (*mailView, *struct {
 				"addressed":{"directly":[{"id":1,"name":"Jane Doe","email_address":"jane@example.com"}]}}`))
 		case "/entries/501/forwards/new.json":
 			_, _ = w.Write([]byte(`{"subject":"Fwd: Quarterly planning","content":"<div>Quoted message</div>"}`))
+		case "/snippets.json":
+			rec.method, rec.path = r.Method, r.URL.Path
+			rec.account = r.URL.Query().Get("filtered_account_id")
+			_, _ = w.Write([]byte(`[{"id":1,"name":"Scheduling reply","content":"Tuesday works"}]`))
 		default:
 			rec.method, rec.path = r.Method, r.URL.Path
 			rec.account = r.URL.Query().Get("filtered_account_id")
