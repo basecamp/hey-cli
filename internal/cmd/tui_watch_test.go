@@ -109,7 +109,15 @@ func TestMailConnectionStateTakesPriorityOverAFullBoxBacklog(t *testing.T) {
 	ringMailWatchEvent(events, tui.MailWatchEvent{BoxID: 1})
 	ringMailWatchEvent(events, tui.MailWatchEvent{BoxID: 2})
 	ringMailWatchEvent(events, tui.MailWatchEvent{BoxID: 3})
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want a full box backlog coalesced", len(events))
+	}
+	if got := <-events; got.BoxID != tui.AnyBoxChanged || got.Connection != tui.MailConnectionUnchanged {
+		t.Errorf("event = %+v, want a catch-all so the box on screen cannot stay stale", got)
+	}
 
+	ringMailWatchEvent(events, tui.MailWatchEvent{BoxID: 1})
+	ringMailWatchEvent(events, tui.MailWatchEvent{BoxID: 2})
 	ringMailWatchEvent(events, tui.MailWatchEvent{Connection: tui.MailConnectionDisconnected, WillReconnect: true})
 	if len(events) != 1 {
 		t.Fatalf("events = %d, want stale box doorbells coalesced behind connection state", len(events))

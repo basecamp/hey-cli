@@ -197,8 +197,31 @@ func ringMailWatchEvent(events chan tui.MailWatchEvent, event tui.MailWatchEvent
 	if event.Connection == tui.MailConnectionUnchanged {
 		select {
 		case events <- event:
+			return
 		default:
 		}
+
+		// A full queue may contain changes for boxes other than the one on screen.
+		// Replace its box-specific doorbells with one catch-all rather than dropping
+		// this box and assuming another event will happen to refresh it. Keep a queued
+		// connection transition ahead of that catch-up.
+		var connection *tui.MailWatchEvent
+	boxBacklog:
+		for {
+			select {
+			case queued := <-events:
+				if queued.Connection != tui.MailConnectionUnchanged {
+					latest := queued
+					connection = &latest
+				}
+			default:
+				break boxBacklog
+			}
+		}
+		if connection != nil {
+			ring(events, *connection)
+		}
+		ring(events, tui.MailWatchEvent{BoxID: tui.AnyBoxChanged})
 		return
 	}
 
