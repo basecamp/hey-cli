@@ -398,10 +398,11 @@ func (v *calendarView) HelpBindings() []helpBinding {
 	if v.calendarPicker != nil {
 		return v.calendarPicker.helpBindings()
 	}
-	// The day says which keys move it on the line that names it. The week and the year
-	// have no such line, so the help bar carries it for them.
+	// The day and the week say which keys move them on the line that names them, where
+	// they belong to the date they act on. The year has no such line, so the help bar
+	// carries it for that one.
 	var bindings []helpBinding
-	if v.viewMode != viewDay {
+	if v.viewMode == viewYear {
 		bindings = append(bindings, helpBinding{"p/n", v.viewMode.unit()})
 		if !v.showingToday() {
 			bindings = append(bindings, helpBinding{"t", "today"})
@@ -774,7 +775,7 @@ func (v *calendarView) rebuildView() {
 	case viewDay:
 		content = renderDayView(v.events, v.habits, anchor, v.stepHint(), w, v.contentVP.Height())
 	case viewWeek:
-		content = renderWeekView(v.events, v.habits, v.habitCompletions, anchor, v.firstWeekDay, w, h, dayLabels)
+		content = renderWeekView(v.events, v.habits, v.habitCompletions, anchor, v.firstWeekDay, w, v.contentVP.Height(), v.stepHint(), dayLabels)
 	case viewYear:
 		// The year's events are HEY's spanned_events — the all-day and multi-day ones —
 		// because that is all a year read carries. eventsByDate spreads a multi-day event

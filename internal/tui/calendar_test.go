@@ -652,21 +652,31 @@ func TestHabitCompletionsMarkTheirHabitRatherThanListingThemselves(t *testing.T)
 // and two on the Thursday, plus one event, rendered at 100 columns.
 func weekWithHabits(t *testing.T, completions []Recording) []string {
 	t.Helper()
+	return weekView(t, testHabits(), completions)
+}
 
-	habits := []Recording{
+func testHabits() []Recording {
+	return []Recording{
 		{ID: 1, Title: "Meditate", Icon: "meditate", Color: "purple", Type: "Calendar::Habit"},
 		{ID: 2, Title: "Work out", Icon: "weights", Color: "red", Type: "Calendar::Habit"},
 		{ID: 3, Title: "Write", Icon: "write", Color: "gold", Type: "Calendar::Habit"},
 		{ID: 4, Title: "Read", Icon: "read", Color: "green", Type: "Calendar::Habit"},
 		{ID: 5, Title: "Learn a language", Icon: "study", Color: "teal", Type: "Calendar::Habit"},
 	}
+}
+
+const weekViewRows = 20
+
+func weekView(t *testing.T, habits, completions []Recording) []string {
+	t.Helper()
+
 	events := []Recording{
 		{ID: 9, Title: "Stanko & Kevin", CalendarColor: "blue", Type: "Calendar::Event",
 			StartsAt: "2026-08-20T14:00:00Z", EndsAt: "2026-08-20T15:00:00Z"},
 	}
 
 	anchor := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
-	out := renderWeekView(events, habits, completions, anchor, time.Monday, 100, 30, nil)
+	out := renderWeekView(events, habits, completions, anchor, time.Monday, 100, weekViewRows, "p/n week", nil)
 	return strings.Split(stripANSI(out), "\n")
 }
 
@@ -685,46 +695,98 @@ func TestWeekDrawsTheHabitsKeptEachDay(t *testing.T) {
 		habitDone(1, "2026-08-20"), habitDone(4, "2026-08-20"),
 	})
 
-	// Rows 0-2 are the top border, the day names and the header rule; the band follows.
-	band := lines[3:5]
+	// Found by what they say rather than by their row number, so the layout can move
+	// without the test having to be told.
+	header := rowContaining(t, lines, "Habits")
+	label := rowContaining(t, lines, "August 17 – 23")
+
+	band := lines[header+1 : label]
+	if len(band) != 2 {
+		t.Fatalf("band is %d rows, want 2 — five icons do not fit one cell: %q", len(band), band)
+	}
 	if !strings.Contains(band[0], "🧘") || !strings.Contains(band[0], "📖") {
 		t.Errorf("Monday's habits are not in the band: %q", band[0])
 	}
-	// Five icons do not fit one cell, so the band is two rows — for every day, not just
-	// the one that needed it.
 	if !strings.Contains(band[1], "📚") {
 		t.Errorf("the fifth habit did not wrap onto a second row: %q", band[1])
 	}
+	// Both rows are the full width, so the header under them is straight and each day's
+	// events start level with its neighbours'.
 	if lipgloss.Width(band[0]) != lipgloss.Width(band[1]) {
 		t.Errorf("band rows are %d and %d wide", lipgloss.Width(band[0]), lipgloss.Width(band[1]))
-	}
-
-	// A rule closes the band off from the day's own content.
-	if rule := lines[5]; !strings.HasPrefix(rule, "├") || !strings.Contains(rule, "┼") {
-		t.Errorf("no rule under the band: %q", rule)
-	}
-	// And the day's events are below it, not in it.
-	if !strings.Contains(lines[7], "Stanko & Kev") {
-		t.Errorf("the event is not under the band: %q", lines[6:8])
 	}
 	for _, row := range band {
 		if strings.Contains(row, "Meditate") || strings.Contains(row, "Stanko") {
 			t.Errorf("the band carries a name, not just icons: %q", row)
 		}
 	}
+
+	// The week's own line is what closes the band off, and the day's events are below it.
+	if event := rowContaining(t, lines, "Stanko & Kev"); event <= label {
+		t.Errorf("the event is not under the week's line: row %d against %d", event, label)
+	}
 }
 
-// A week nobody kept a habit in gets no band and no rule, rather than an empty stripe.
-func TestWeekWithoutHabitsHasNoBand(t *testing.T) {
-	lines := weekWithHabits(t, nil)
-
-	// The header rule is row 2, and the day's own content starts straight after it.
-	if !strings.Contains(lines[3], "14:00") {
-		t.Errorf("row 3 should be the day's content, got %q", lines[3])
-	}
+// rowContaining is the index of the one row holding s, so a test can say where it looked.
+func rowContaining(t *testing.T, lines []string, s string) int {
+	t.Helper()
 	for i, line := range lines {
+		if strings.Contains(line, s) {
+			return i
+		}
+	}
+	t.Fatalf("no row contains %q: %q", s, lines)
+	return -1
+}
+
+// The band keeps its place in a week where nothing was kept, so stepping from week to week
+// does not shift the grid up and down underneath the reader.
+func TestWeekKeepsTheHabitsBandWhenNothingWasKept(t *testing.T) {
+	kept := weekWithHabits(t, []Recording{habitDone(1, "2026-08-17")})
+	none := weekWithHabits(t, nil)
+
+	if rowContaining(t, kept, "August 17 – 23") != rowContaining(t, none, "August 17 – 23") {
+		t.Error("the week's line moved between a week with habits kept and one without")
+	}
+	for i, line := range none {
 		if strings.Contains(line, "🧘") || strings.Contains(line, "📖") {
 			t.Errorf("row %d drew a habit nobody kept: %q", i, line)
+		}
+	}
+	if !strings.Contains(none[0], "Habits") {
+		t.Errorf("the band lost its header: %q", none[0])
+	}
+}
+
+// Somebody who keeps no habits gets no band at all, since there is nothing to head.
+func TestWeekWithoutAnyHabitsHasNoBand(t *testing.T) {
+	lines := weekView(t, nil, nil)
+
+	if got := rowContaining(t, lines, "August 17 – 23"); got != 0 {
+		t.Errorf("the week's line is row %d, want the first: %q", got, lines[:got+1])
+	}
+	if !strings.Contains(lines[1], "MON 17") {
+		t.Errorf("the day names should follow the week's line, got %q", lines[1])
+	}
+	for i, line := range lines {
+		if strings.Contains(line, "Habits") {
+			t.Errorf("row %d headed a band that is not there: %q", i, line)
+		}
+	}
+}
+
+// The days run to the bottom of the screen: the rules between them are the grid, so a quiet
+// week still reads as seven days rather than as a paragraph that stops.
+func TestWeekRunsItsDaysToTheBottom(t *testing.T) {
+	lines := weekView(t, nil, nil)
+
+	if len(lines) != weekViewRows {
+		t.Fatalf("week is %d rows of the %d it was given: %q", len(lines), weekViewRows, lines)
+	}
+	// Six rules for seven days, on the last row as on the first.
+	for _, row := range []int{1, len(lines) - 1} {
+		if got := strings.Count(lines[row], string(hourRule)); got != 6 {
+			t.Errorf("row %d has %d rules, want 6: %q", row, got, lines[row])
 		}
 	}
 }
@@ -1122,15 +1184,24 @@ func TestCalendarViewHelpBindingsShowsViewToggle(t *testing.T) {
 		}
 	}
 
-	// The week and the year have no date line, so the help bar carries their steps.
+	// The week names itself and carries its own keys now, as the day does, so the help bar
+	// stops repeating them.
 	v.viewMode = viewWeek
+	for _, binding := range v.HelpBindings() {
+		if binding.key == "p/n" || binding.key == "t" {
+			t.Errorf("the week's own line says %q; the help bar should not: %+v", binding.key, v.HelpBindings())
+		}
+	}
+
+	// The year has no line of its own, so the help bar still carries its steps.
+	v.viewMode = viewYear
 	for _, want := range []string{"p/n", "c"} {
 		found := false
 		for _, binding := range v.HelpBindings() {
 			found = found || binding.key == want
 		}
 		if !found {
-			t.Errorf("the week view is missing binding %q: %+v", want, v.HelpBindings())
+			t.Errorf("the year view is missing binding %q: %+v", want, v.HelpBindings())
 		}
 	}
 	v.viewMode = viewDay
