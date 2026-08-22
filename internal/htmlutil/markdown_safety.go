@@ -13,7 +13,12 @@ import (
 // own grammar, so each has its own serializer here, and the invariant every one of them
 // keeps is the same: the Markdown parses back to the literal text or URL it was given,
 // with no control character left in it. The text that reads "&#27;[31m" in an email stays
-// those eight characters on screen rather than turning red.
+// those eight characters on screen rather than turning red. Prose is the one context
+// written in its sanitized form — terminal.Sanitize runs over it before anything is
+// escaped — because markdown.Render runs that sanitizer over the whole body before
+// parsing it, and an escape decided on the text as written can be undone by what the
+// sanitizer removes in front of it. Code and destinations are written as they are and
+// only measured through the sanitizer; the HTML keeps the original of everything.
 
 // inlineMetacharacters are the ASCII characters that open Markdown syntax wherever they
 // stand in a line. `&` is not among them because it is written as an entity instead.
@@ -27,10 +32,14 @@ const lineStartMetacharacters = "#>+-="
 // CommonMark decodes anywhere outside code — text, link destinations, info strings.
 var entityReference = regexp.MustCompile(`^&(#[0-9]{1,8}|#[xX][0-9a-fA-F]{1,8}|[A-Za-z][A-Za-z0-9]{1,31});`)
 
-// escapeText serializes a run of prose onto a line that already holds `line`. Controls go
-// first, so that what is left is what gets looked at — "&\x1f#27;" is "&#27;" once the
-// control is gone. Then every metacharacter is backslash-escaped, and at the start of a
-// line so is anything that would begin a block.
+// escapeText serializes a run of prose onto a line that already holds `line`. The
+// sanitizer goes first, so that what is left is what gets looked at — "&\x1f#27;" is
+// "&#27;" once the control is gone, and "\u200b# heading" is "# heading" once the zero
+// width space is. markdown.Render runs the same sanitizer over the whole body before
+// parsing it, so prose is written here in the form it will be parsed in; escaping the
+// text as written and letting the renderer strip an invisible in front of a block marker
+// would hand glamour a heading the email never had. Then every metacharacter is
+// backslash-escaped, and at the start of a line so is anything that would begin a block.
 //
 // Every `&` becomes `&amp;`, which decodes back to `&` in CommonMark and in glamour
 // alike. Escaping only the ampersands that already spell an entity is not enough: text
@@ -39,11 +48,11 @@ var entityReference = regexp.MustCompile(`^&(#[0-9]{1,8}|#[xX][0-9a-fA-F]{1,8}|[
 // line-start checks look at the line being built rather than at the run alone.
 func escapeText(s, line string) string {
 	s = strings.Map(func(r rune) rune {
-		if isControl(r) {
+		if r == '\n' || r == '\t' {
 			return -1
 		}
 		return r
-	}, s)
+	}, terminal.Sanitize(s))
 
 	var b strings.Builder
 	b.Grow(len(s))

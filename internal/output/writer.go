@@ -277,14 +277,17 @@ func sanitizeJSONMap(value map[string]any) map[string]any {
 	}
 
 	sort.Strings(changed)
+	// QuoteToASCII, not Quote: a key the sanitizer would change is shown with every
+	// non-ASCII rune escaped, since Quote leaves a printable rune — a combining mark
+	// past the cap, say — as it is, and the key would reach the terminal unchanged.
 	for _, key := range changed {
-		quoted := strconv.Quote(key)
+		quoted := strconv.QuoteToASCII(key)
 		name := quoted[1 : len(quoted)-1]
 		for {
 			if _, exists := result[name]; !exists {
 				break
 			}
-			name = strconv.Quote(name)
+			name = strconv.QuoteToASCII(name)
 		}
 		result[name] = sanitizeJSONValue(value[key])
 	}

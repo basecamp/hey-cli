@@ -184,7 +184,7 @@ handed. The model has three layers, and it is worth knowing which one a change t
   the Markdown renderer, into a red terminal); inline code and fences are verbatim inside
   delimiters longer than any run they hold; destinations percent-encode what would end
   them, keep a query string's `&`, and link only http, https, mailto and relative paths.
-  Every context strips controls first. `markdown.Render` then strips controls and bidi controls from the body, rewrites the
+  Prose goes through `terminal.Sanitize` first and is written in that form; code and destinations strip controls and are measured through the sanitizer (`backtickRun`, `needsPadding`). `markdown.Render` then strips controls and bidi controls from the body, rewrites the
   spans glamour decodes so that its extra entity decode is the identity, shows a
   document nested past twenty levels unrendered rather than handing glamour something
   exponential, and checks its own output: anything but SGR and OSC 8 to an allowed scheme strips all
@@ -195,7 +195,10 @@ handed. The model has three layers, and it is worth knowing which one a change t
   as `jq -r` writes it.
 
 The Markdown in `--json` is standard CommonMark; what a conformant renderer shows for it
-is the literal text and URL the email held, which is what the htmlutil tests assert
+is the literal text and URL the email held — less, in prose, what `terminal.Sanitize`
+removes, since prose is written in its sanitized form so that the renderer's own pass
+over the body cannot uncover a block marker the escaping did not see (`\u200b# heading`);
+the HTML keeps the original. That is what the htmlutil tests assert
 through goldmark. Fuzz targets hold the invariants: `FuzzToMarkdownTerminalSafety` in
 htmlutil and `FuzzContainment` in markdown.
 

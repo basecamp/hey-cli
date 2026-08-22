@@ -24,6 +24,8 @@ func TestRenderShowsWhatToMarkdownWrote(t *testing.T) {
 		"<p><img alt=\"&amp;#27;[31m\" src=\"https://e.com/i.png\"></p>": "&#27;[31m",
 		"<p><a href=\"https://e.com/?a=1&amp;b=2\">q</a></p>":            "https://e.com/?a=1&b=2",
 		"<p><img alt=\"a &amp; b\" src=\"https://e.com/i.png\"></p>":     "a & b",
+		"<p>\u200b# not a heading</p>":                                   "# not a heading",
+		"<p>1\u200b. not a list</p>":                                     "1. not a list",
 	} {
 		out := Render(htmlutil.ToMarkdown(html), 200)
 		if shown := visible(out); !strings.Contains(shown, want) {

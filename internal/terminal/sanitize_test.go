@@ -54,6 +54,8 @@ var sanitizeTests = []struct {
 	{"a joiner before a mark goes", "é\u200d\u0301", "é\u0301"},
 	{"a mark on an ASCII base does not make it joinable", "e\u0301\u200dé", "e\u0301é"},
 	{"a joiner before a tag character goes", "é\u200d\U000e0020", "é\U000e0020"},
+	{"a joiner before punctuation goes", "é\u200d—", "é—"},
+	{"a joiner after punctuation goes", "«\u200dé", "«é"},
 	{"a tag character is not a base for a joiner", "é\U000e0020\u200dé", "é\U000e0020é"},
 
 	// Combining marks are capped at eight on a base.

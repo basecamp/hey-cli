@@ -59,7 +59,9 @@ const maxNestingDepth = 20
 // controls and the confusables terminal.Sanitize describes, keeping newlines and tabs.
 // A body is prose, and the Trojan-source class — a right-to-left override that shows
 // one thing and means another — is no more welcome in it than in a subject line; the
-// JSON keeps the original.
+// HTML keeps the original. ToMarkdown writes prose through the same sanitizer, so over
+// prose this pass is the identity and cannot uncover a block marker the escaping did
+// not see; over code and destinations it strips what ToMarkdown measured around.
 //
 // It runs over the whole source, link destinations included, on purpose: what a link
 // shows and where it goes are then the same text, and a destination that differs from

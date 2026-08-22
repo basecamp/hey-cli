@@ -151,10 +151,11 @@ func (p *pass) keep(r rune) {
 }
 
 // isBase reports a rune a joiner can join: non-ASCII text that is neither a space, a
-// mark nor a format character. The marks on a base ride along with it; a tag or any
-// other format character ends it, so a joiner after one has nothing to join.
+// mark, a format character nor punctuation. The marks on a base ride along with it; a
+// tag or any other format character ends it, so a joiner after one has nothing to join;
+// and a dash or a quotation mark is not something letters join to.
 func isBase(r rune) bool {
-	return joinable(r) && !isCombiningMark(r) && !unicode.Is(unicode.Cf, r)
+	return joinable(r) && !isCombiningMark(r) && !unicode.Is(unicode.Cf, r) && !unicode.IsPunct(r)
 }
 
 func (p *pass) drop(i int) {
