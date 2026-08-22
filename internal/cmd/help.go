@@ -221,7 +221,8 @@ func renderCommandHelp(cmd *cobra.Command) {
 	// USAGE
 	b.WriteString("\n")
 	b.WriteString(bold.format("USAGE") + "\n")
-	if cmd.Runnable() {
+	_, hasCompatibilityUsage := cmd.Annotations[compatibilityUsageAnnotation]
+	if cmd.Runnable() && !hasCompatibilityUsage {
 		b.WriteString("  " + cmd.UseLine() + "\n")
 	}
 	if cmd.HasAvailableSubCommands() {

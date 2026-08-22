@@ -172,7 +172,7 @@ type workflowCommand struct {
 
 func newWorkflowCommand() *workflowCommand {
 	command := newWorkflowReaderCommand(
-		"workflow <id>",
+		"workflow",
 		"List and manage email workflows",
 		`  hey workflow list
   hey workflow view 123
@@ -180,6 +180,7 @@ func newWorkflowCommand() *workflowCommand {
   hey workflow view 123 --ids-only`,
 	)
 	command.cmd.Annotations[compatibilityUsageAnnotation] = "workflow <id>"
+	command.cmd.Args = cobra.MaximumNArgs(1)
 	command.cmd.AddCommand(newWorkflowListCommand().cmd)
 	command.cmd.AddCommand(newWorkflowViewCommand().cmd)
 	command.cmd.AddCommand(newWorkflowCreateCommand().cmd)
@@ -218,6 +219,9 @@ func newWorkflowReaderCommand(use, short, example string) *workflowCommand {
 }
 
 func (c *workflowCommand) run(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return cmd.Help()
+	}
 	if err := requireAuth(); err != nil {
 		return err
 	}

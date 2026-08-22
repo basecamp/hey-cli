@@ -47,7 +47,7 @@ var boxListing = postingsListing{
 
 func newBoxCommand() *boxCommand {
 	command := newBoxReaderCommand(
-		"box <name|id>",
+		"box",
 		"List HEY boxes and their email threads",
 		"List HEY boxes or list email threads in one box.",
 		`  hey box list
@@ -94,18 +94,19 @@ func newBoxReaderCommand(use, short, long, example string) *boxCommand {
 	return command
 }
 
-func validateBoxArgs(cmd *cobra.Command, args []string) error {
+func validateBoxArgs(_ *cobra.Command, args []string) error {
 	switch len(args) {
-	case 1:
+	case 0, 1:
 		return nil
-	case 0:
-		return usageErrorf("%s <name|id> (example: hey box view imbox)", cmd.CommandPath())
 	default:
 		return fmt.Errorf("expected 1 mailbox argument, got %d", len(args))
 	}
 }
 
 func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return cmd.Help()
+	}
 	if err := requireAuth(); err != nil {
 		return err
 	}

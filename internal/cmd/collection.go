@@ -127,7 +127,7 @@ var collectionListing = postingsListing{
 
 func newCollectionCommand() *collectionCommand {
 	command := newCollectionReaderCommand(
-		"collection <id>",
+		"collection",
 		"List and manage email collections",
 		`  hey collection list
   hey collection view 123
@@ -135,6 +135,7 @@ func newCollectionCommand() *collectionCommand {
   hey collection view 123 --json`,
 	)
 	command.cmd.Annotations[compatibilityUsageAnnotation] = "collection <id>"
+	command.cmd.Args = cobra.MaximumNArgs(1)
 	command.cmd.AddCommand(newCollectionListCommand().cmd)
 	command.cmd.AddCommand(newCollectionViewCommand().cmd)
 	command.cmd.AddCommand(newCollectionAddCommand().cmd)
@@ -175,6 +176,9 @@ func newCollectionReaderCommand(use, short, example string) *collectionCommand {
 }
 
 func (c *collectionCommand) run(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return cmd.Help()
+	}
 	if err := requireAuth(); err != nil {
 		return err
 	}

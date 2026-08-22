@@ -120,7 +120,7 @@ var labelListing = postingsListing{
 
 func newLabelCommand() *labelCommand {
 	command := newLabelReaderCommand(
-		"label <id>",
+		"label",
 		"List and manage email labels",
 		`  hey label list
   hey label view 123
@@ -128,6 +128,7 @@ func newLabelCommand() *labelCommand {
   hey label view 123 --json`,
 	)
 	command.cmd.Annotations[compatibilityUsageAnnotation] = "label <id>"
+	command.cmd.Args = cobra.MaximumNArgs(1)
 	command.cmd.AddCommand(newLabelListCommand().cmd)
 	command.cmd.AddCommand(newLabelViewCommand().cmd)
 	command.cmd.AddCommand(newLabelAddCommand().cmd)
@@ -167,6 +168,9 @@ func newLabelReaderCommand(use, short, example string) *labelCommand {
 }
 
 func (c *labelCommand) run(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return cmd.Help()
+	}
 	if err := requireAuth(); err != nil {
 		return err
 	}

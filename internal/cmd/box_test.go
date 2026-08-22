@@ -22,10 +22,9 @@ func TestValidateBoxArgs(t *testing.T) {
 		errContains string
 	}{
 		{
-			name:        "missing arg",
-			args:        nil,
-			wantErr:     true,
-			errContains: "Usage:",
+			name:    "no arg opens family help",
+			args:    nil,
+			wantErr: false,
 		},
 		{
 			name:    "one arg",

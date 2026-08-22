@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -248,6 +249,38 @@ func withJSONContentType(next http.Handler) http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		next.ServeHTTP(w, r)
 	})
+}
+
+func TestCanonicalFamiliesShowHelpWithoutArguments(t *testing.T) {
+	tests := []struct {
+		family             string
+		compatibilityUsage string
+	}{
+		{family: "box", compatibilityUsage: "hey box <name|id>"},
+		{family: "label", compatibilityUsage: "hey label <id>"},
+		{family: "collection", compatibilityUsage: "hey collection <id>"},
+		{family: "workflow", compatibilityUsage: "hey workflow <id>"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.family, func(t *testing.T) {
+			server := quietServer(t)
+			stdout, _, err := runAuthCommand(t, t.TempDir(), server.URL, "", false, tt.family)
+			if err != nil {
+				t.Fatalf("hey %s: %v", tt.family, err)
+			}
+			for _, want := range []string{"COMMANDS", "hey " + tt.family + " list", "hey " + tt.family + " view"} {
+				if !strings.Contains(stdout, want) {
+					t.Errorf("hey %s output is missing %q:\n%s", tt.family, want, stdout)
+				}
+			}
+			if strings.Contains(stdout, tt.compatibilityUsage) {
+				t.Errorf("hey %s help promotes compatibility usage %q:\n%s", tt.family, tt.compatibilityUsage, stdout)
+			}
+			if strings.Contains(stdout, "  hey "+tt.family+" [flags]\n") {
+				t.Errorf("hey %s help presents the compatibility runner as canonical:\n%s", tt.family, stdout)
+			}
+		})
+	}
 }
 
 func TestAgentHelpPrefersCanonicalFamilies(t *testing.T) {
