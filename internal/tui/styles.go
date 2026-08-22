@@ -39,6 +39,14 @@ var (
 
 	colorSelection color.Color                  // cursor row background; nil means none
 	colorOnAccent  color.Color = lipgloss.Black // pill text on an accent-filled background
+
+	// colorPaper is the terminal's own background and colorHues are the colors it renders
+	// the ANSI slots as, both taken from the theme when it says. They are what anything
+	// drawn *on* a hue needs: an ANSI slot's nominal value says nothing about what a
+	// reader sees, since a theme retints the running terminal over OSC 4. ANSI blue is
+	// #000080 nominally and a light periwinkle in a dark Omarchy theme.
+	colorPaper color.Color = lipgloss.Black
+	colorHues  map[string]color.Color
 )
 
 // styleMuted dims the theme's default foreground with the SGR faint
@@ -72,6 +80,14 @@ func applyTheme(theme Theme) {
 	} else if theme.Accent != color.Color(lipgloss.BrightBlue) &&
 		contrastRatio(lipgloss.BrightWhite, theme.Accent) > contrastRatio(lipgloss.Black, theme.Accent) {
 		colorOnAccent = lipgloss.BrightWhite
+	}
+	colorHues = theme.Hues
+	colorPaper = theme.Background
+	if colorPaper == nil {
+		colorPaper = lipgloss.Black
+		if !theme.Dark {
+			colorPaper = lipgloss.BrightWhite
+		}
 	}
 	if !theme.Dark && theme.Bright == lipgloss.BrightWhite {
 		// Bright white is the background on a light terminal; ANSI black is its text.
