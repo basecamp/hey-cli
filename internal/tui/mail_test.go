@@ -3006,6 +3006,30 @@ func TestMailViewReadsEveryPageOfAThreadAndMarksUnreadBodies(t *testing.T) {
 	}
 }
 
+func TestThreadJKeepsLineScrollingForOneMessage(t *testing.T) {
+	v := newMailView(testVC())
+	v.vc.width = 80
+	v.vc.height = 10
+	v.topicViewport.SetWidth(80)
+	v.topicViewport.SetHeight(10)
+	v.inThread = true
+	v.entries = []mail.Entry{{
+		ID:      1,
+		Creator: mail.Contact{Name: "Maria Gonzalez"},
+		Body:    htmlutil.ToMarkdown(strings.Repeat("<p>One long message paragraph.</p>", 20)),
+	}}
+	v.rebuildTopicContent()
+
+	v.HandleContentKey(keyPress("j"))
+	if got := v.topicViewport.YOffset(); got != 1 {
+		t.Errorf("j should scroll one line in a one-message thread: offset %d", got)
+	}
+	v.HandleContentKey(keyPress("k"))
+	if got := v.topicViewport.YOffset(); got != 0 {
+		t.Errorf("k should scroll one line back in a one-message thread: offset %d", got)
+	}
+}
+
 func TestThreadJKJumpsBetweenMessages(t *testing.T) {
 	v := newMailView(testVC())
 	v.vc.width = 80

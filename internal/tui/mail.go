@@ -999,11 +999,15 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		case "o":
 			return v.openSelectedAttachment()
 		case "j":
-			v.jumpEntry(1)
-			return nil
+			if len(v.entryOffsets) > 1 {
+				v.jumpEntry(1)
+				return nil
+			}
 		case "k":
-			v.jumpEntry(-1)
-			return nil
+			if len(v.entryOffsets) > 1 {
+				v.jumpEntry(-1)
+				return nil
+			}
 		}
 		var cmd tea.Cmd
 		v.topicViewport, cmd = v.topicViewport.Update(msg)
