@@ -3,6 +3,8 @@ package cmd
 import (
 	"bytes"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -96,31 +98,38 @@ USAGE
 INTERACTIVE
   tui  Launch the interactive terminal UI
 
-EMAIL
-  boxes          List your HEY boxes
-  box            List email threads in a box
+MAIL
+  boxes        List your HEY boxes
+  box          List email threads in a box
+  search       Search email threads and messages
+  contacts     Manage contacts
+  screener     Decide who gets to email you
+  threads      Read a thread
+  attachments  List and save files from a thread
+  watch        Follow email threads as they change
+
+WRITE & SHARE
+  compose     Write and send a new email
+  reply       Reply to a thread
+  bulk-reply  Reply to multiple email threads
+  forward     Forward the latest message in a thread
+  drafts      List draft emails
+  share       Get a sharing link for an email thread
+  unshare     Turn off an email thread's sharing link
+
+SAVED CONTENT
+  clips     List the newest page of passages clipped from email
+  clip      Save and manage passages from email
+  snippets  List reusable email snippets
+  snippet   Create and manage reusable email snippets
+
+ORGANIZE
   labels         List your email labels
   label          View and manage an email label
   collections    List your email collections
   collection     View and manage an email collection
   workflows      List your email workflows
   workflow       View and manage an email workflow
-  clips          List the newest page of passages clipped from email
-  clip           Save and manage passages from email
-  snippets       List reusable email snippets
-  snippet        Create and manage reusable email snippets
-  search         Search email threads and messages
-  contacts       Manage contacts
-  screener       Decide who gets to email you
-  threads        Read a thread
-  share          Get a sharing link for an email thread
-  unshare        Turn off an email thread's sharing link
-  attachments    List and save files from a thread
-  compose        Write and send a new email
-  reply          Reply to a thread
-  bulk-reply     Reply to multiple email threads
-  forward        Forward the latest message in a thread
-  drafts         List draft emails
   seen           Mark email threads as seen
   unseen         Mark email threads as unseen
   move           Move email threads to another box
@@ -128,7 +137,6 @@ EMAIL
   spam           Mark email threads as spam
   ignore         Ignore email threads
   stop-ignoring  Stop ignoring email threads
-  watch          Follow email threads as they change
 
 CALENDAR & TASKS
   calendars   List calendars
@@ -138,7 +146,7 @@ CALENDAR & TASKS
   timetrack   Track time
   journal     Read and write journal entries
 
-AUTH & CONFIG
+ACCOUNT & SYSTEM
   auth      Sign in, sign out, and check login status
   accounts  List and select linked mail accounts
   config    View and change settings
@@ -147,35 +155,168 @@ AUTH & CONFIG
   upgrade   Upgrade hey to the latest release
   version   Show the installed hey version
 
+HELP TOPICS
+  output           Output formats and filtering
+  exit-codes       Exit status reference
+  environment      Environment variable reference
+  linked-accounts  Linked account selection
+
 FLAGS
-      --account    Select a linked mail account ID or all
-      --json       Output JSON with metadata
-      --jq         Filter JSON with a built-in jq expression
-      --markdown   Output Markdown: a table for a listing, a document for a thread
-      --quiet      Output result data only
+      --account    Select a linked mail account
+      --json       Output a JSON response envelope
+      --jq         Filter JSON with a jq expression
+      --markdown   Output Markdown
+      --quiet      Output result data without the response envelope
       --ids-only   Output only IDs, one per line
-      --count      Output only the count of results
-      --styled     Human rendering, bodies as rendered Markdown — the default on a terminal; forces it when piped
-      --html       Write the original HTML to a pipe or file (threads, journal read, contacts show, contacts note show)
-      --stats      Include request stats in response meta
-      --base-url   Override server URL
+      --count      Output only the result count
+      --styled     Force human-readable terminal output
+      --html       Write original HTML
+      --stats      Include request statistics
+      --base-url   Override the server URL
   -v, --verbose    Show request details
-      --help       Show help
+  -h, --help       Show help
       --version    Show version
 
 EXAMPLES
-  $ hey boxes
+  $ hey tui
   $ hey box imbox
-  $ hey threads 123
   $ hey compose --to alice@example.com --subject "Lunch plans" -m "Are you free Friday?"
+  $ hey todo list
+  $ hey threads 123 --json
 
 LEARN MORE
-  hey commands      List all available commands
-  hey <command> -h  Help for any command
+  hey commands          List all available commands
+  hey help <topic>      Read a help topic
+  hey <command> --help  Help for any command
 `
 
 	if output.String() != expected {
 		t.Fatalf("unexpected root help:\n%s", output.String())
+	}
+}
+
+func TestRootHelpStaysScannable(t *testing.T) {
+	originalColorDisabled := colorDisabled
+	colorDisabled = true
+	t.Cleanup(func() { colorDisabled = originalColorDisabled })
+
+	var output strings.Builder
+	renderRootHelp(&output, newRootCmd())
+	for _, line := range strings.Split(output.String(), "\n") {
+		if len(line) > 100 {
+			t.Errorf("root help line is %d columns, want no more than 100:\n%s", len(line), line)
+		}
+	}
+
+	for _, category := range curatedCategories {
+		if len(category.names) > 13 {
+			t.Errorf("%s has %d commands, want no more than 13", category.heading, len(category.names))
+		}
+	}
+}
+
+func TestHelpTopicsAreDiscoverableReferences(t *testing.T) {
+	root := newRootCmd()
+	catalog := walkCommands(root, "")
+
+	for _, name := range curatedHelpTopics {
+		t.Run(name, func(t *testing.T) {
+			topic, _, err := root.Find([]string{name})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !topic.IsAdditionalHelpTopicCommand() {
+				t.Fatalf("%s is not registered as a help topic", name)
+			}
+
+			var output strings.Builder
+			topic.SetOut(&output)
+			renderHelpTopic(topic)
+			if !strings.Contains(output.String(), topic.Long) {
+				t.Errorf("%s help does not contain its reference text", name)
+			}
+			if strings.Contains(output.String(), "INHERITED FLAGS") || strings.Contains(output.String(), "USAGE") {
+				t.Errorf("%s help contains command scaffolding:\n%s", name, output.String())
+			}
+
+			for _, entry := range catalog {
+				if entry["name"] == name {
+					t.Errorf("help topic %s appears in the executable command catalog", name)
+				}
+			}
+		})
+	}
+}
+
+func TestHelpReferencesSkipRuntimeSetup(t *testing.T) {
+	home := t.TempDir()
+	configDir := filepath.Join(home, "hey-cli")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte("not json"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("HEY_TOKEN", "would-authenticate-a-runtime-command")
+	t.Setenv("HEY_ACCOUNT_ID", "999")
+
+	repository := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repository, ".hey"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repository, ".hey", "config.json"), []byte(`{"base_url":"http://127.0.0.1:1"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(repository)
+
+	root := newRootCmd()
+	var output strings.Builder
+	root.SetOut(&output)
+	root.SetErr(&output)
+	root.SetArgs([]string{"help", "output"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("help output: %v\n%s", err, output.String())
+	}
+	if !strings.Contains(output.String(), "DEFAULT OUTPUT") {
+		t.Errorf("help topic was not rendered:\n%s", output.String())
+	}
+}
+
+func TestHelpCompletionIncludesCommandsAndTopics(t *testing.T) {
+	root := newRootCmd()
+	help, _, err := root.Find([]string{"help"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completions, directive := help.ValidArgsFunction(help, nil, "")
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Errorf("completion directive = %v, want no file completion", directive)
+	}
+
+	joined := strings.Join(completions, "\n")
+	for _, want := range []string{"box\t", "output\t", "exit-codes\t", "environment\t", "linked-accounts\t"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("help completion does not include %q:\n%s", want, joined)
+		}
+	}
+}
+
+func TestRunnableParentHelpShowsBothUsageForms(t *testing.T) {
+	root := newRootCmd()
+	search, _, err := root.Find([]string{"search"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var output strings.Builder
+	search.SetOut(&output)
+	renderCommandHelp(search)
+	for _, want := range []string{"hey search [query] [flags]", "hey search <command> [flags]"} {
+		if !strings.Contains(output.String(), want) {
+			t.Errorf("search help does not contain %q:\n%s", want, output.String())
+		}
 	}
 }
 

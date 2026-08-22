@@ -20,15 +20,27 @@ var curatedCategories = []struct {
 		names:   []string{"tui"},
 	},
 	{
-		heading: "EMAIL",
-		names:   []string{"boxes", "box", "labels", "label", "collections", "collection", "workflows", "workflow", "clips", "clip", "snippets", "snippet", "search", "contacts", "screener", "threads", "share", "unshare", "attachments", "compose", "reply", "bulk-reply", "forward", "drafts", "seen", "unseen", "move", "trash", "spam", "ignore", "stop-ignoring", "watch"},
+		heading: "MAIL",
+		names:   []string{"boxes", "box", "search", "contacts", "screener", "threads", "attachments", "watch"},
+	},
+	{
+		heading: "WRITE & SHARE",
+		names:   []string{"compose", "reply", "bulk-reply", "forward", "drafts", "share", "unshare"},
+	},
+	{
+		heading: "SAVED CONTENT",
+		names:   []string{"clips", "clip", "snippets", "snippet"},
+	},
+	{
+		heading: "ORGANIZE",
+		names:   []string{"labels", "label", "collections", "collection", "workflows", "workflow", "seen", "unseen", "move", "trash", "spam", "ignore", "stop-ignoring"},
 	},
 	{
 		heading: "CALENDAR & TASKS",
 		names:   []string{"calendars", "recordings", "todo", "habit", "timetrack", "journal"},
 	},
 	{
-		heading: "AUTH & CONFIG",
+		heading: "ACCOUNT & SYSTEM",
 		names:   []string{"auth", "accounts", "config", "setup", "doctor", "upgrade", "version"},
 	},
 }
@@ -36,6 +48,42 @@ var curatedCategories = []struct {
 type helpEntry struct {
 	name string
 	desc string
+}
+
+func configureHelpCommand(root *cobra.Command) {
+	root.InitDefaultHelpCmd()
+	help, _, err := root.Find([]string{"help"})
+	if err != nil {
+		panic(err)
+	}
+	help.Hidden = true
+	help.ValidArgsFunction = completeHelpReference
+}
+
+func completeHelpReference(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+	target := cmd.Root()
+	if len(args) > 0 {
+		found, _, err := target.Find(args)
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		target = found
+	}
+
+	var completions []cobra.Completion
+	for _, sub := range target.Commands() {
+		if sub.Hidden || (!sub.IsAvailableCommand() && !sub.IsAdditionalHelpTopicCommand()) {
+			continue
+		}
+		if strings.HasPrefix(sub.Name(), toComplete) {
+			completions = append(completions, cobra.CompletionWithDesc(sub.Name(), sub.Short))
+		}
+	}
+	return completions, cobra.ShellCompDirectiveNoFileComp
+}
+
+func isHelpReference(cmd *cobra.Command) bool {
+	return cmd.Name() == "help" || cmd.IsAdditionalHelpTopicCommand()
 }
 
 // customHelpFunc returns a help function that renders styled help for all
@@ -49,6 +97,10 @@ func customHelpFunc(defaultHelp func(*cobra.Command, []string)) func(*cobra.Comm
 		}
 		if cmd == cmd.Root() {
 			renderRootHelp(cmd.OutOrStdout(), cmd)
+			return
+		}
+		if cmd.IsAdditionalHelpTopicCommand() {
+			renderHelpTopic(cmd)
 			return
 		}
 		renderCommandHelp(cmd)
@@ -97,24 +149,40 @@ func renderRootHelp(w io.Writer, cmd *cobra.Command) {
 		}
 	}
 
+	// HELP TOPICS
+	b.WriteString("\n")
+	b.WriteString(bold.format("HELP TOPICS") + "\n")
+	for _, name := range curatedHelpTopics {
+		topic := registered[name]
+		if topic == nil {
+			continue
+		}
+		fmt.Fprintf(&b, "  %-15s  %s\n", topic.Name(), topic.Short)
+	}
+
 	// FLAGS — the global flags, as registered on the root command
 	b.WriteString("\n")
 	b.WriteString(bold.format("FLAGS") + "\n")
 	for _, f := range globalFlags(cmd) {
-		writeFlagLine(&b, f.Shorthand, "--"+f.Name, f.Usage)
+		description := f.Usage
+		if concise, ok := rootFlagDescriptions[f.Name]; ok {
+			description = concise
+		}
+		writeFlagLine(&b, f.Shorthand, "--"+f.Name, description)
 	}
 	// Cobra owns --help and --version, so neither is a persistent flag to read.
-	writeFlagLine(&b, "", "--help", "Show help")
+	writeFlagLine(&b, "h", "--help", "Show help")
 	writeFlagLine(&b, "", "--version", "Show version")
 
 	// EXAMPLES
 	b.WriteString("\n")
 	b.WriteString(bold.format("EXAMPLES") + "\n")
 	examples := []string{
-		"$ hey boxes",
+		"$ hey tui",
 		"$ hey box imbox",
-		"$ hey threads 123",
 		`$ hey compose --to alice@example.com --subject "Lunch plans" -m "Are you free Friday?"`,
+		"$ hey todo list",
+		"$ hey threads 123 --json",
 	}
 	for _, ex := range examples {
 		b.WriteString(italic.format("  "+ex) + "\n")
@@ -123,10 +191,15 @@ func renderRootHelp(w io.Writer, cmd *cobra.Command) {
 	// LEARN MORE
 	b.WriteString("\n")
 	b.WriteString(bold.format("LEARN MORE") + "\n")
-	b.WriteString("  hey commands      List all available commands\n")
-	b.WriteString("  hey <command> -h  Help for any command\n")
+	b.WriteString("  hey commands          List all available commands\n")
+	b.WriteString("  hey help <topic>      Read a help topic\n")
+	b.WriteString("  hey <command> --help  Help for any command\n")
 
 	fmt.Fprint(w, b.String())
+}
+
+func renderHelpTopic(cmd *cobra.Command) {
+	fmt.Fprintln(cmd.OutOrStdout(), cmd.Long)
 }
 
 // renderCommandHelp renders styled help for any non-root command, reading
@@ -148,10 +221,11 @@ func renderCommandHelp(cmd *cobra.Command) {
 	// USAGE
 	b.WriteString("\n")
 	b.WriteString(bold.format("USAGE") + "\n")
-	if cmd.HasAvailableSubCommands() && !cmd.Runnable() {
-		b.WriteString("  " + cmd.CommandPath() + " <command> [flags]\n")
-	} else {
+	if cmd.Runnable() {
 		b.WriteString("  " + cmd.UseLine() + "\n")
+	}
+	if cmd.HasAvailableSubCommands() {
+		b.WriteString("  " + cmd.CommandPath() + " <command> [flags]\n")
 	}
 
 	// ALIASES
@@ -236,6 +310,21 @@ func renderCommandHelp(cmd *cobra.Command) {
 // flags rather than choosing them, so a flag registered without a place
 // here still gets listed, at the end.
 var globalFlagReadingOrder = []string{"account", "json", "jq", "markdown", "quiet", "ids-only", "count", "styled", "html", "stats", "base-url", "verbose"}
+
+var rootFlagDescriptions = map[string]string{
+	"account":  "Select a linked mail account",
+	"json":     "Output a JSON response envelope",
+	"jq":       "Filter JSON with a jq expression",
+	"markdown": "Output Markdown",
+	"quiet":    "Output result data without the response envelope",
+	"ids-only": "Output only IDs, one per line",
+	"count":    "Output only the result count",
+	"styled":   "Force human-readable terminal output",
+	"html":     "Write original HTML",
+	"stats":    "Include request statistics",
+	"base-url": "Override the server URL",
+	"verbose":  "Show request details",
+}
 
 // globalFlags returns the root command's persistent flags — every flag help
 // calls global, described by the registration in root.go — in reading order,

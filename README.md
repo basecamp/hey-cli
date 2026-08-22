@@ -111,6 +111,25 @@ That command is for cosign v3. With cosign v2.6–v2.x add `--new-bundle-format=
 
 </details>
 
+## Help and reference
+
+The root help groups commands by the work they do and keeps the common output flags concise:
+
+```bash
+hey --help                # browse the command summary
+hey compose --help        # see a command's usage, flags, and examples
+hey commands              # list the complete executable command catalog
+```
+
+Cross-cutting references are available as help topics:
+
+```bash
+hey help output            # output formats, selectors, and jq filtering
+hey help exit-codes        # stable process exit statuses
+hey help environment       # supported HEY_* environment variables
+hey help linked-accounts   # account selection and precedence
+```
+
 ## Upgrading
 
 ```bash

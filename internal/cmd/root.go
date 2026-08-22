@@ -62,6 +62,9 @@ func newRootCmd() *cobra.Command {
 				Stderr:   cmd.ErrOrStderr(),
 				JQFilter: jqFlag,
 			})
+			if isHelpReference(cmd) {
+				return nil
+			}
 			if err := validateHTMLFlag(cmd); err != nil {
 				return err
 			}
@@ -136,7 +139,9 @@ func newRootCmd() *cobra.Command {
 			return nil
 		},
 		PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
-			maybeRefreshSkills(cmd)
+			if !isHelpReference(cmd) {
+				maybeRefreshSkills(cmd)
+			}
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -221,12 +226,14 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newTuiCommand().cmd)
 	root.AddCommand(newHeyCommand().cmd)
 	root.AddCommand(newSkillCommand().cmd)
+	root.AddCommand(newHelpTopicCommands()...)
 	root.AddCommand(newCommandsCommand())
 	root.AddCommand(newCompletionCommand())
 	root.AddCommand(newDoctorCommand())
 	root.AddCommand(newConfigCommand().cmd)
 	root.AddCommand(newUpgradeCommand().cmd)
 	root.AddCommand(newVersionCommand().cmd)
+	configureHelpCommand(root)
 
 	return root
 }
