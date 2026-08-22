@@ -262,8 +262,8 @@ hey boxes --quiet --jq '.[].id'
 Listing commands also answer `--markdown` for a table, `--styled` to force the human
 rendering when the output is piped, `--ids-only` for one ID per line, and `--count` for a
 bare number. `--ids-only` and `--count` need list data, so they work on `hey boxes`,
-`hey box`, `hey labels`, `hey label`, `hey collections`, `hey collection`, `hey drafts`, `hey search`,
-`hey contacts list`, `hey screener list`, `hey screener history`, `hey calendars`,
+`hey box`, `hey labels`, `hey label`, `hey collections`, `hey collection`, `hey workflows`,
+`hey workflow`, `hey drafts`, `hey search`, `hey contacts list`, `hey screener list`, `hey screener history`, `hey calendars`,
 `hey recordings`, `hey todo list`, `hey timetrack list` and `hey journal list`. The
 data-only formats print any pagination notice on stderr, so the IDs on stdout stay
 pipeable.
@@ -308,6 +308,15 @@ hey collection create "Kitchen remodel" --summary "Plans and decisions"
 hey collection update 321 --name "Kitchen renovation"
 hey collection add 987 --to 321      # add a topic ID to a collection
 hey collection remove 987 --from 321 # remove a topic ID from a collection
+hey workflows                       # list workflows, account IDs, and workflow IDs
+hey workflow 654                    # list a workflow's stages and stage IDs
+hey workflow create "Hiring" --account 12345
+hey workflow update 654 --name "Recruiting"
+hey workflow stage create 654       # add an Untitled stage
+hey workflow stage update 654 321 --name "Interviewing"
+hey workflow add 987 --to 654 --stage 321       # add a topic ID to a stage
+hey workflow move 987 --workflow 654 --to 322   # move it to another stage
+hey workflow remove 987 --from 654              # remove it from the workflow
 hey search "quarterly planning"    # search threads and matching messages
 hey search --from jane@example.com --date last_30_days  # refine a search
 hey search filters                 # list available refinement values
@@ -376,6 +385,8 @@ The Screener is where first-time senders wait. `hey screener list` returns clear
 Organization actions take the `id` values returned by `hey box --json`, `hey label --json`, or `hey search --json`. Reading, replying to, and forwarding a thread take its `topic_id` instead, which `hey box --json`, `hey label --json`, `hey collection --json` and `hey search --json` all carry alongside `id`. `hey box` also returns `next_page` and accepts `--page <next_page>` to continue a box listing; it keeps `next_history_url` for the sync clients that read it, and `--page` accepts that URL as readily as the cursor inside it. Label IDs come from `hey labels`; `hey label` returns `next_page` and `total_count`, accepts `--page <next_page>` for continuation, and supports `--all` for complete traversal. HEY creates a label while adding it to at least one thread, so `hey label create` requires thread item IDs.
 
 Collection IDs come from `hey collections`. `hey collection` returns both each posting `id` and its `topic_id`, plus `next_page` and `total_count`. Collection membership commands take `topic_id`; posting organization commands continue to take `id`. Creating a collection returns a confirmed mutation, and `hey collections` provides its ID for subsequent commands. Collection updates accept a non-empty name, summary, or both.
+
+Workflow IDs come from `hey workflows`, which includes the linked account ID for each workflow. `hey workflow <id>` returns stages in position order; `--ids-only` and `--count` apply to those stages. Creating a workflow needs one linked mail account, selected with `--account` when more than one is available. HEY creates new stages as `Untitled`, so create the stage, read its ID with `hey workflow <id>`, then rename it. Workflow membership commands take `topic_id`. Adding a thread creates its workflow membership before selecting the requested stage; if stage selection fails, the thread remains in the workflow's first stage and the command reports the error.
 
 `hey box <name|id>`, `hey label <id>` and `hey collection <id>` list the same postings and answer the same formats: `--json`, `--styled`, `--markdown`, `--ids-only`, and `--count`. The data-only formats print the pagination notice and any `next_page` cursor on stderr, so the IDs on stdout stay pipeable. `--json` differs only in what wraps the postings: a box answers with HEY's box payload, a label and a collection with the source and its `total_count`.
 

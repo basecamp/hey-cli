@@ -243,3 +243,24 @@ hey watch --run-async
 hey watch --run-sync
 hey watch --since
 hey watch --timeout
+hey workflow
+hey workflow add
+hey workflow add --stage
+hey workflow add --to
+hey workflow create
+hey workflow delete
+hey workflow move
+hey workflow move --to
+hey workflow move --workflow
+hey workflow remove
+hey workflow remove --from
+hey workflow stage
+hey workflow stage create
+hey workflow stage delete
+hey workflow stage update
+hey workflow stage update --name
+hey workflow update
+hey workflow update --name
+hey workflows
+hey workflows --all
+hey workflows --limit
