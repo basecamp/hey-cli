@@ -66,8 +66,14 @@ type Recording struct {
 	CompletedAt string
 	Label       string
 	Icon        string
-	Color       string
-	Days        []int32
+	// Color is a habit's own color. An event has none — what it wears is its
+	// calendar's, which is CalendarColor, and the two are different fields in HEY too.
+	Color string
+	// CalendarColor is the color of the calendar this is filed on, which is how a reader
+	// tells whose event they are looking at. HEY leaves it empty for the personal
+	// calendar: `_calendar.jbuilder` serves the color `unless calendar.personal?`.
+	CalendarColor string
+	Days          []int32
 }
 
 // --- Calendar messages ---
@@ -997,7 +1003,8 @@ func sdkRecordingToModel(r generated.Recording) Recording {
 		ID: r.Id, ParentID: r.ParentId, Title: r.Title, AllDay: r.AllDay, Type: r.Type,
 		StartsAt: formatTimestamp(r.StartsAt), EndsAt: formatTimestamp(r.EndsAt),
 		CompletedAt: formatTimestamp(r.CompletedAt), Label: r.Label,
-		Icon: r.Icon, Color: r.Color, Days: append([]int32(nil), r.Days...),
+		Icon: r.Icon, Color: r.Color, CalendarColor: r.Calendar.Color,
+		Days: append([]int32(nil), r.Days...),
 	}
 }
 
