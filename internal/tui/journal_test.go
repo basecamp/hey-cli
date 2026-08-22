@@ -3,9 +3,9 @@ package tui
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -65,7 +65,7 @@ func TestJournalFetchKeepsRichContentForEditing(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id":           1,
 			"content":      "Today was great",
-			"content_html": "<p><strong>Today</strong> was great</p>",
+			"content_html": `<div class="trix-content"><p><strong>Today</strong> was great</p></div>`,
 			"type":         "Calendar::JournalEntry",
 		})
 	}))
@@ -88,6 +88,48 @@ func TestJournalFetchKeepsRichContentForEditing(t *testing.T) {
 	}
 	if loaded.body.IsEmpty() {
 		t.Error("rich-text body should be rendered")
+	}
+}
+
+func TestJournalEditorContentRemovesTrixContainers(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "read wrapper",
+			content: `<div class="trix-content"><p>Today was great</p></div>`,
+			want:    `<p>Today was great</p>`,
+		},
+		{
+			name: "wrappers stored by earlier saves",
+			content: `<div class="trix-content">
+  <div class="trix-content">
+    <div>Today was great</div>
+  </div>
+  and then some
+</div>`,
+			want: "<div>Today was great</div>\n  \n  and then some",
+		},
+		{
+			name:    "attachment bytes",
+			content: `<div class="trix-content"><figure data-trix-attachment="{&quot;sgid&quot;:&quot;abc&quot;}"></figure></div>`,
+			want:    `<figure data-trix-attachment="{&quot;sgid&quot;:&quot;abc&quot;}"></figure>`,
+		},
+		{
+			name:    "ordinary div",
+			content: `<div class="note"><strong>Keep me</strong></div>`,
+			want:    `<div class="note"><strong>Keep me</strong></div>`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := journalEditorContent(tt.content); got != tt.want {
+				t.Errorf("journalEditorContent() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -119,21 +161,21 @@ func TestJournalFailedReadDoesNotOpenEditor(t *testing.T) {
 	}
 }
 
-func TestJournalTextFallbackDoesNotFetchImages(t *testing.T) {
+func TestJournalPlainTextFallbackStaysLiteral(t *testing.T) {
 	var imageRequests atomic.Int64
 	imageData := testPNG(t)
-	untrusted := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		imageRequests.Add(1)
-		w.Header().Set("Content-Type", "image/png")
-		_, _ = w.Write(imageData)
-	}))
-	t.Cleanup(untrusted.Close)
-
-	heyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	literal := `<img src="/rails/active_storage/blobs/redirect/tracking.png">`
+	heyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/rails/active_storage/blobs/") {
+			imageRequests.Add(1)
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write(imageData)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id":      1,
-			"content": fmt.Sprintf(`<img src=%q>`, untrusted.URL+"/tracking.png"),
+			"content": literal,
 			"type":    "Calendar::JournalEntry",
 		})
 	}))
@@ -147,11 +189,15 @@ func TestJournalTextFallbackDoesNotFetchImages(t *testing.T) {
 	vc := testVC()
 	vc.ctx = context.Background()
 	vc.sdk = client
+	vc.imageRenderer = kittyImageRenderer{}
 	vc.imageFetcher = newTrustedImageFetcher(client)
 	v := newJournalView(vc)
 
 	loaded := v.fetchJournalEntry(vc.ctx, 1, "2026-08-19")().(journalDetailMsg)
 
+	if loaded.content != literal {
+		t.Errorf("editable content = %q, want literal %q", loaded.content, literal)
+	}
 	if got := imageRequests.Load(); got != 0 {
 		t.Fatalf("text journal fetched an image %d time(s)", got)
 	}
@@ -323,6 +369,67 @@ func TestJournalViewSavesAndRemovesEntries(t *testing.T) {
 				t.Errorf("request kind = %v, want refresh", v.requests.kind)
 			}
 		})
+	}
+}
+
+func TestJournalRepeatedSavesDoNotAddTrixWrapper(t *testing.T) {
+	stored := `<div><strong>Today</strong> was great</div><figure data-trix-attachment="{&quot;sgid&quot;:&quot;abc&quot;}"></figure>`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":           1,
+				"content":      "Today was great",
+				"content_html": `<div class="trix-content">` + stored + `</div>`,
+				"type":         "Calendar::JournalEntry",
+			})
+		case http.MethodPatch:
+			var payload struct {
+				CalendarJournalEntry struct {
+					Content string `json:"content"`
+				} `json:"calendar_journal_entry"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			stored = payload.CalendarJournalEntry.Content
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":           1,
+				"content":      "Today was great",
+				"content_html": `<div class="trix-content">` + stored + `</div>`,
+				"type":         "Calendar::JournalEntry",
+			})
+		default:
+			t.Fatalf("method = %s", r.Method)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	vc := testVC()
+	vc.ctx = context.Background()
+	vc.sdk = hey.NewClient(
+		&hey.Config{BaseURL: server.URL},
+		&hey.StaticTokenProvider{Token: "test-token"},
+		hey.WithMaxRetries(0),
+	)
+	v := newJournalView(vc)
+	load := v.Init()
+	v.Update(load())
+
+	want := stored
+	for range 3 {
+		v.HandleContentKey(keyPress("e"))
+		save := v.HandleContentKey(keyPress("ctrl+s"))
+		refresh, _ := v.Update(save())
+		v.Update(refresh())
+	}
+
+	if stored != want {
+		t.Errorf("stored content after repeated saves = %q, want %q", stored, want)
+	}
+	if strings.Contains(stored, "trix-content") {
+		t.Errorf("stored content contains a Trix wrapper: %q", stored)
 	}
 }
 

@@ -2,10 +2,15 @@ package tui
 
 import (
 	"context"
+	"errors"
+	stdhtml "html"
+	"io"
+	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	nethtml "golang.org/x/net/html"
 
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/markdown"
@@ -253,22 +258,86 @@ func (v *journalView) fetchJournalEntry(ctx context.Context, requestID uint64, d
 			return journalDetailMsg{requestResult: newRequestResult(requestID, nil)}
 		}
 
-		body := recording.ContentHtml
-		if body == "" {
-			body = recording.Content
+		editableContent := recording.ContentHtml
+		renderedContent := recording.ContentHtml
+		if renderedContent == "" {
+			editableContent = recording.Content
+			renderedContent = stdhtml.EscapeString(recording.Content)
+		} else {
+			editableContent = journalEditorContent(editableContent)
 		}
 		var images [][]byte
 		if v.vc.imageRenderer.protocol() == imageProtocolKitty && v.vc.imageFetcher != nil {
-			images = newImageBudget().fetchImages(ctx, v.vc.imageFetcher, extractImageURLs(body))
+			images = newImageBudget().fetchImages(ctx, v.vc.imageFetcher, extractImageURLs(renderedContent))
 		}
 
 		return journalDetailMsg{
 			requestResult: newRequestResult(requestID, nil),
-			content:       body,
-			body:          htmlToMarkdown(body),
+			content:       editableContent,
+			body:          htmlToMarkdown(renderedContent),
 			images:        images,
 		}
 	}
+}
+
+// journalEditorContent returns a stable rich-text document for HEY updates. It removes
+// div.trix-content presentation containers and writes every other token byte-for-byte,
+// preserving Trix attachment attributes across repeated edit-save cycles.
+func journalEditorContent(content string) string {
+	content = strings.TrimSpace(content)
+	tokens := nethtml.NewTokenizer(strings.NewReader(content))
+	var result strings.Builder
+	var divStack []bool
+	for {
+		tokenType := tokens.Next()
+		if tokenType == nethtml.ErrorToken {
+			if errors.Is(tokens.Err(), io.EOF) {
+				return strings.TrimSpace(result.String())
+			}
+			return content
+		}
+
+		raw := append([]byte(nil), tokens.Raw()...)
+		token := tokens.Token()
+		switch tokenType {
+		case nethtml.StartTagToken:
+			drop := token.Data == "div" && hasHTMLClass(token, "trix-content")
+			if token.Data == "div" {
+				divStack = append(divStack, drop)
+			}
+			if !drop {
+				result.Write(raw)
+			}
+		case nethtml.SelfClosingTagToken:
+			if token.Data != "div" || !hasHTMLClass(token, "trix-content") {
+				result.Write(raw)
+			}
+		case nethtml.EndTagToken:
+			drop := false
+			if token.Data == "div" && len(divStack) > 0 {
+				drop = divStack[len(divStack)-1]
+				divStack = divStack[:len(divStack)-1]
+			}
+			if !drop {
+				result.Write(raw)
+			}
+		default:
+			result.Write(raw)
+		}
+	}
+}
+
+func hasHTMLClass(token nethtml.Token, name string) bool {
+	for _, attribute := range token.Attr {
+		if attribute.Key == "class" {
+			for class := range strings.FieldsSeq(attribute.Val) {
+				if class == name {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (v *journalView) saveJournalEntry() tea.Cmd {
