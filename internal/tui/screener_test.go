@@ -122,7 +122,8 @@ func TestScreenerLoadsPendingSenders(t *testing.T) {
 
 func TestScreenerViewCarriesHeyWording(t *testing.T) {
 	view, _ := loadedScreener(t)
-	rendered := plainText(view.View())
+	styled := view.View()
+	rendered := plainText(styled)
 
 	for _, want := range []string{
 		"The people below are trying to email you for the first time.",
@@ -133,6 +134,9 @@ func TestScreenerViewCarriesHeyWording(t *testing.T) {
 		if !strings.Contains(rendered, want) {
 			t.Errorf("screener view is missing %q:\n%s", want, rendered)
 		}
+	}
+	if !strings.Contains(styled, "\x1b[1;94mJane Doe") || !strings.Contains(styled, "\x1b[1;94mQuarterly planning") {
+		t.Errorf("selected sender should use the contrast-checked primary color: %q", styled)
 	}
 
 	// The screening question lives in the help bar, with Yes and No as

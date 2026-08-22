@@ -704,8 +704,8 @@ func TestContentListStylesSeenAndUnseenRows(t *testing.T) {
 	if !strings.Contains(seenHeader, "Previously Seen") {
 		t.Errorf("the seen section should open with its header: %q", seenHeader)
 	}
-	if !strings.Contains(cursorLine1, "\x1b[1;94m") || !strings.Contains(cursorLine1, "│") {
-		t.Errorf("cursor row should show the primary-colored bar: %q", cursorLine1)
+	if !strings.Contains(cursorLine1, "\x1b[1;94mCursor row") || !strings.Contains(cursorLine1, "│") {
+		t.Errorf("cursor row should keep all text in the contrast-checked primary color: %q", cursorLine1)
 	}
 	if !strings.Contains(unseenLine1, "●") || !strings.Contains(unseenLine1, "\x1b[1;31m") {
 		t.Errorf("unseen row should show the unread dot in the alert color: %q", unseenLine1)

@@ -761,8 +761,9 @@ func renderScreenerRows(pane *screenerPane, visible, width int) string {
 	// Rows mirror the mail lists: a bold bright first line ("Name <address>")
 	// with a bright trailing date, then an indented second line whose subject
 	// takes the hyperlink color and whose excerpt is faint. The cursor row
-	// adds only the bar and the selection background, gaps included.
-	marker, _ := cursorStyles()
+	// uses the accent foreground that is checked against the selection
+	// background, with the bar and background spanning both lines.
+	marker, selectedText := cursorStyles()
 	selectedGap := selectionStyle(lipgloss.NewStyle())
 	labelBase := lipgloss.NewStyle().Foreground(colorBright).Bold(true)
 	trailingBase := lipgloss.NewStyle().Foreground(colorBright)
@@ -777,7 +778,7 @@ func renderScreenerRows(pane *screenerPane, visible, width int) string {
 
 		emphasize := func(base lipgloss.Style) lipgloss.Style {
 			if isCursor {
-				return selectionStyle(base)
+				return selectedText
 			}
 			return base
 		}

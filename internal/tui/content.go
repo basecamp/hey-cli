@@ -525,7 +525,7 @@ func (c *contentList) view() string {
 	rendered := 0
 	end := min(c.scrollOff+c.visibleItemsFrom(c.scrollOff), c.itemCount())
 
-	cursorMarker, _ := cursorStyles()
+	cursorMarker, cursorText := cursorStyles()
 	selectedGap := selectionStyle(lipgloss.NewStyle())
 	unseenDot := lipgloss.NewStyle().Foreground(colorAlert).Bold(true)
 	selectedMark := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
@@ -534,7 +534,8 @@ func (c *contentList) view() string {
 	// bold sender in the hyperlink color, and the excerpt in the faint
 	// secondary style. Read state shows as the section a row sits in
 	// ("Bubbled Up" / "New for You" / "Previously Seen") plus the alert dot;
-	// the cursor row adds only the selection background.
+	// the cursor row uses the accent foreground that the selection-background
+	// contrast gate guarantees remains legible.
 	subjectBase := lipgloss.NewStyle().Foreground(colorBright).Bold(true)
 	dateBase := lipgloss.NewStyle().Foreground(colorBright)
 	senderBase := lipgloss.NewStyle().Foreground(colorLink).Bold(true)
@@ -562,12 +563,12 @@ func (c *contentList) view() string {
 			rendered++
 		}
 
-		// When the theme has a usable selection, the cursor row paints every
-		// segment — gaps included — with the selection background so it reads
-		// as one highlighted line. The text keeps its base styles.
+		// The cursor text takes the accent foreground that applyTheme checked
+		// against the selection background. Gaps keep only the background so the
+		// two lines read as one highlighted row.
 		emphasize := func(base lipgloss.Style) lipgloss.Style {
 			if isCursor {
-				base = selectionStyle(base)
+				return cursorText
 			}
 			return base
 		}
