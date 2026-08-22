@@ -961,13 +961,6 @@ func (m model) handleSubnavKey(msg tea.KeyPressMsg) tea.Cmd {
 
 // --- Shared utilities ---
 
-func formatTimestamp(ts time.Time) string {
-	if ts.IsZero() {
-		return ""
-	}
-	return ts.UTC().Format("2006-01-02T15:04:05Z")
-}
-
 // Run starts the TUI with the resolved mail account, the identity root client used for
 // interactive account switching, and the watchers that tell it when things changed.
 func Run(rootSDK, sdk *hey.Client, selected string, watchers Watchers) error {

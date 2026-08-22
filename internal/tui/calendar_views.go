@@ -76,7 +76,7 @@ func splitRecordings(recs []Recording) (events, todos, habits, completions []Rec
 	// than a day: a habit done on three days of a week has three of them, and only the
 	// last would survive as a CompletedAt. The day view wants the fold, the week wants
 	// the list.
-	completed := make(map[int64]string)
+	completed := make(map[int64]time.Time)
 	for _, r := range recs {
 		if isHabitCompletion(r.Type) {
 			completed[r.ParentID] = r.StartsAt
@@ -100,7 +100,7 @@ func splitRecordings(recs []Recording) (events, todos, habits, completions []Rec
 		}
 	}
 	sort.Slice(events, func(i, j int) bool {
-		return events[i].StartsAt < events[j].StartsAt
+		return events[i].StartsAt.Before(events[j].StartsAt)
 	})
 	return
 }
@@ -110,34 +110,18 @@ func isHabitCompletion(recordingType string) bool {
 	return strings.Contains(t, "habit") && strings.Contains(t, "completion")
 }
 
-// parseEventTime parses a recording timestamp to time.Time.
-func parseEventTime(ts string) time.Time {
-	if ts == "" {
-		return time.Time{}
-	}
-	for _, layout := range []string{
-		"2006-01-02T15:04:05Z",
-		"2006-01-02T15:04:05-07:00",
-		"2006-01-02T15:04:05",
-		"2006-01-02",
-	} {
-		if t, err := time.Parse(layout, ts); err == nil {
-			return t
-		}
-	}
-	return time.Time{}
-}
-
-// eventsByDate groups events by date (YYYY-MM-DD), expanding multi-day events
-// so they appear on every day they span.
+// eventsByDate groups events by the day a reader would file them under, expanding multi-day
+// events so they appear on every day they span. The day is the local one: a 23:30Z meeting
+// belongs to tomorrow for anybody east of UTC, and grouping on the UTC date put it on the
+// wrong column of the week.
 func eventsByDate(events []Recording) map[string][]Recording {
 	m := make(map[string][]Recording)
 	for _, e := range events {
-		st := parseEventTime(e.StartsAt)
+		st := e.Starts()
 		if st.IsZero() {
 			continue
 		}
-		et := parseEventTime(e.EndsAt)
+		et := e.Ends()
 
 		// Single-day or no end time: just the start date
 		if et.IsZero() || !et.After(st) || dateKey(st) == dateKey(et) {
@@ -177,7 +161,7 @@ func dayLabelsFromRecordings(groups ...[]Recording) map[string]string {
 			if recording.Label == "" {
 				continue
 			}
-			day := parseEventTime(recording.StartsAt)
+			day := recording.Starts()
 			if day.IsZero() {
 				continue
 			}
@@ -355,8 +339,8 @@ func renderDayView(events, habits []Recording, anchor time.Time, hint string, wi
 	// Place events into lanes (non-overlapping groups)
 	placed := make([]placedEvent, 0, len(timed))
 	for _, e := range timed {
-		st := parseEventTime(e.StartsAt)
-		et := parseEventTime(e.EndsAt)
+		st := e.Starts()
+		et := e.Ends()
 		if st.IsZero() {
 			continue
 		}
@@ -648,7 +632,7 @@ func renderWeekView(events, habits, completions []Recording, anchor time.Time, f
 		byID[habit.ID] = habit
 	}
 	for _, completion := range completions {
-		done := parseEventTime(completion.StartsAt)
+		done := completion.Starts()
 		if done.IsZero() {
 			continue
 		}
@@ -812,9 +796,12 @@ func buildWeekDayColumn(d weekDayInfo, width int, muted lipgloss.Style) []string
 	var lines []string
 
 	for _, e := range d.events {
+		// The clock a reader keeps, not the one HEY answers in. This used to be the 11th
+		// through 16th characters of the timestamp, which is 14:00 for a 14:00Z event
+		// whatever time it is where they are.
 		timeStr := ""
-		if len(e.StartsAt) >= 16 {
-			timeStr = e.StartsAt[11:16]
+		if starts := e.Starts(); !starts.IsZero() {
+			timeStr = starts.Format("15:04")
 		}
 		if timeStr != "" {
 			lines = append(lines, muted.Render(timeStr))
@@ -1078,14 +1065,14 @@ func dayLabelOrDefault(d time.Time, isFirstCol bool, dayLabels map[string]string
 // done, the color HEY gave it, and the emoji standing in for its icon.
 func renderHabitsRibbon(habits []Recording, width int) string {
 	return renderRibbon(habits, width, func(habit Recording) (string, lipgloss.Style, string) {
-		return habitMarker(habit.CompletedAt != ""), habitMarkerStyle(habit.Color), habitLabel(habit)
+		return habitMarker(habit.Done()), habitMarkerStyle(habit.Color), habitLabel(habit)
 	})
 }
 
 func renderTodosRibbon(todos []Recording, width int) string {
 	return renderRibbon(todos, width, func(todo Recording) (string, lipgloss.Style, string) {
 		label := terminal.SanitizeLine(todo.Title)
-		if todo.CompletedAt != "" {
+		if todo.Done() {
 			return "■", styleMuted, label
 		}
 		return "□", lipgloss.NewStyle().Foreground(colorAlert).Bold(true), label
@@ -1104,7 +1091,7 @@ func renderRibbon(items []Recording, width int, describe func(Recording) (string
 	for i, item := range items {
 		marker, markerStyle, label := describe(item)
 		labelStyle := lipgloss.NewStyle().Foreground(colorBright)
-		if item.CompletedAt != "" {
+		if item.Done() {
 			labelStyle = styleMuted
 		}
 

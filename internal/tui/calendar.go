@@ -53,17 +53,21 @@ type YearDay struct {
 }
 
 // Recording is anything HEY keeps on a calendar — an event, a todo, a habit, a time
-// track — told apart by Type. Its times are strings because that is the shape the
-// calendar views read them in; giving them time.Time is the next thing to do here.
+// track — told apart by Type.
+//
+// Its times are time.Time and stay that way. They used to be strings rendered in UTC and
+// parsed back, which is how the whole calendar came to be drawn in UTC: an event at 14:00Z
+// sat on the 14:00 column wherever the reader was. Read Starts and Ends rather than these
+// fields — those answer in the zone a reader thinks in.
 type Recording struct {
 	ID          int64
 	ParentID    int64
 	Title       string
 	AllDay      bool
-	StartsAt    string
-	EndsAt      string
+	StartsAt    time.Time
+	EndsAt      time.Time
 	Type        string
-	CompletedAt string
+	CompletedAt time.Time
 	Label       string
 	Icon        string
 	// Color is a habit's own color. An event has none — what it wears is its
@@ -74,6 +78,25 @@ type Recording struct {
 	// calendar: `_calendar.jbuilder` serves the color `unless calendar.personal?`.
 	CalendarColor string
 	Days          []int32
+}
+
+// Starts and Ends are when a recording begins and ends, in the zone the reader is in.
+//
+// An all-day event is the exception, and it is not one HEY leaves to guesswork: its
+// timestamp is a calendar date, which haystack serves as UTC midnight on purpose —
+// `_recording.jbuilder` wraps it in `Time.use_zone("UTC")` so no offset creeps in. Convert
+// that and a birthday moves to the day before for every reader west of UTC.
+func (r Recording) Starts() time.Time { return localizedEventTime(r.StartsAt, r.AllDay) }
+func (r Recording) Ends() time.Time   { return localizedEventTime(r.EndsAt, r.AllDay) }
+
+// Done is whether a habit or a todo has been completed.
+func (r Recording) Done() bool { return !r.CompletedAt.IsZero() }
+
+func localizedEventTime(at time.Time, allDay bool) time.Time {
+	if at.IsZero() || allDay {
+		return at
+	}
+	return at.Local()
 }
 
 // --- Calendar messages ---
@@ -927,7 +950,7 @@ func (v *calendarView) saveHabit() tea.Cmd {
 // looked at is part of the request rather than an argument to the habit.
 func (v *calendarView) toggleHabitCompletion(habit Recording) tea.Cmd {
 	day := v.day().Local().Format(time.DateOnly)
-	done := habit.CompletedAt != ""
+	done := habit.Done()
 	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestMutation)
 	return func() tea.Msg {
 		var err error
@@ -974,7 +997,7 @@ func (v *calendarView) renameTodo(todo Recording, title string) tea.Cmd {
 // toggleTodo ticks a to-do off or puts it back. Unlike a habit, which is done on a
 // given day, a to-do is done or it is not.
 func (v *calendarView) toggleTodo(todo Recording) tea.Cmd {
-	done := todo.CompletedAt != ""
+	done := todo.Done()
 	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestMutation)
 	return func() tea.Msg {
 		var err error
@@ -1009,8 +1032,8 @@ func sdkCalendarToModel(c generated.Calendar) Calendar {
 func sdkRecordingToModel(r generated.Recording) Recording {
 	return Recording{
 		ID: r.Id, ParentID: r.ParentId, Title: r.Title, AllDay: r.AllDay, Type: r.Type,
-		StartsAt: formatTimestamp(r.StartsAt), EndsAt: formatTimestamp(r.EndsAt),
-		CompletedAt: formatTimestamp(r.CompletedAt), Label: r.Label,
+		StartsAt: r.StartsAt, EndsAt: r.EndsAt,
+		CompletedAt: r.CompletedAt, Label: r.Label,
 		Icon: r.Icon, Color: r.Color, CalendarColor: r.Calendar.Color,
 		Days: append([]int32(nil), r.Days...),
 	}
