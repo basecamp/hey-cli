@@ -402,8 +402,8 @@ func (v *calendarView) HelpBindings() []helpBinding {
 	// have no such line, so the help bar carries it for them.
 	var bindings []helpBinding
 	if v.viewMode != viewDay {
-		bindings = append(bindings, helpBinding{"←→", v.viewMode.unit()})
-		if !v.onToday() {
+		bindings = append(bindings, helpBinding{"p/n", v.viewMode.unit()})
+		if !v.showingToday() {
 			bindings = append(bindings, helpBinding{"t", "today"})
 		}
 	}
@@ -509,9 +509,9 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		return v.setViewMode(viewWeek)
 	case "3":
 		return v.setViewMode(viewYear)
-	case "left", "p":
+	case "p":
 		return v.step(-1)
-	case "right", "n":
+	case "n":
 		return v.step(1)
 	case "t":
 		return v.today()
@@ -805,23 +805,32 @@ func (v *calendarView) day() time.Time {
 	return v.anchor
 }
 
+// onToday is whether the view is following the clock rather than pinned to a date, which
+// is what decides whether t has anything to do.
 func (v *calendarView) onToday() bool {
 	return v.anchor.IsZero()
 }
 
+// showingToday is whether today is on screen, which is not the same question: stepping
+// away and back pins the anchor to today's own date rather than clearing it, and a reader
+// looking at today does not need to be told how to get to it.
+func (v *calendarView) showingToday() bool {
+	return v.onToday() || sameDay(v.day(), v.now())
+}
+
 // stepHint is the keys that move the view, said on the line that names the day rather
 // than in the help bar: they belong to the date they act on. t is only mentioned once it
-// would do something.
+// would take the reader somewhere.
 func (v *calendarView) stepHint() string {
-	hint := "←→ " + v.viewMode.unit()
-	if !v.onToday() {
+	hint := "p/n " + v.viewMode.unit()
+	if !v.showingToday() {
 		hint += " · t today"
 	}
 	return hint
 }
 
-// step moves the view by its own unit — a day, a week or a year — since ← and → mean
-// "the one before this" whatever the view is showing.
+// step moves the view by its own unit — a day, a week or a year — since p and n mean
+// "the one before this" and "the one after" whatever the view is showing.
 func (v *calendarView) step(delta int) tea.Cmd {
 	switch v.viewMode {
 	case viewWeek:
