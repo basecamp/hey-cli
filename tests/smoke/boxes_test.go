@@ -189,7 +189,20 @@ func TestMovePosting(t *testing.T) {
 		}
 	}
 	if postingID == 0 {
-		skipf(t, "no seen postings in Imbox to move without changing unread state")
+		if len(imbox.Postings) == 0 {
+			skipf(t, "no postings in Imbox to move")
+		}
+		// No seen posting to borrow: mark one seen and put its unread
+		// state back afterwards. The restore runs after the move-back
+		// cleanup below, so the posting is home before it goes unseen.
+		postingID = imbox.Postings[0].ID
+		heyOK(t, "seen", intStr(postingID), "--json")
+		t.Cleanup(func() {
+			_, cleanupStderr, cleanupCode := hey(t, "unseen", intStr(postingID), "--json")
+			if cleanupCode != 0 {
+				t.Logf("could not restore posting %d to unseen: %s", postingID, cleanupStderr)
+			}
+		})
 	}
 
 	stdout, stderr, code := hey(t, "move", intStr(postingID), "--to", "feedbox", "--json")
@@ -232,7 +245,9 @@ func TestMoveRejectsBubbleUp(t *testing.T) {
 }
 
 func TestBoxNoArgument(t *testing.T) {
-	heyFail(t, "box", "--json")
+	// box is a command group: bare "hey box" shows its help.
+	stdout := heyOK(t, "box")
+	assertContains(t, stdout, "hey box view")
 }
 
 func TestBoxInvalidName(t *testing.T) {
