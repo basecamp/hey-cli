@@ -343,6 +343,76 @@ func TestDayLabelsCoverTodosAndHabits(t *testing.T) {
 	}
 }
 
+// --- Moving between days ---
+
+func TestCalendarStepsThroughDaysAndBackToToday(t *testing.T) {
+	v := calendarWithRecordings()
+	today := time.Date(2026, 8, 22, 9, 0, 0, 0, time.Local)
+	v.now = func() time.Time { return today }
+
+	for _, key := range []string{"right", "n"} {
+		v.HandleContentKey(keyPress(key))
+	}
+	if got := v.day(); !sameDay(got, today.AddDate(0, 0, 2)) {
+		t.Errorf("two steps forward = %s, want %s", got.Format(time.DateOnly), today.AddDate(0, 0, 2).Format(time.DateOnly))
+	}
+	for _, key := range []string{"left", "p", "p"} {
+		v.HandleContentKey(keyPress(key))
+	}
+	if got := v.day(); !sameDay(got, today.AddDate(0, 0, -1)) {
+		t.Errorf("three steps back = %s, want yesterday", got.Format(time.DateOnly))
+	}
+
+	// The day on screen stays the one that was read until the new one's answer lands —
+	// a step is not a blank screen and a spinner.
+	if v.Loading() {
+		t.Error("stepping to another day claimed the spinner")
+	}
+	v.Update(recordingsLoadedMsg{requestResult: currentRequest(v)})
+	if view := stripANSI(v.View()); !strings.Contains(view, today.AddDate(0, 0, -1).Format("Monday, January 2")) {
+		t.Errorf("the view does not name the day it moved to: %q", view)
+	}
+	// The keys that move the day are said on the day's own line, and t joins them once
+	// it would do something.
+	if hint := v.stepHint(); hint != "←→ day · t today" {
+		t.Errorf("hint on the date line = %q", hint)
+	}
+
+	// t goes back to following the clock rather than to the date that is today now,
+	// so a view left open overnight keeps up.
+	if cmd := v.HandleContentKey(keyPress("t")); cmd == nil {
+		t.Error("t should read the day it returned to")
+	}
+	if !v.onToday() {
+		t.Error("t did not return the view to today")
+	}
+	v.now = func() time.Time { return today.AddDate(0, 0, 1) }
+	if got := v.day(); !sameDay(got, today.AddDate(0, 0, 1)) {
+		t.Errorf("a view on today did not follow the clock: %s", got.Format(time.DateOnly))
+	}
+	if cmd := v.HandleContentKey(keyPress("t")); cmd != nil {
+		t.Error("t read the day again while already on today")
+	}
+}
+
+func TestCalendarStepsByTheUnitTheViewShows(t *testing.T) {
+	v := calendarWithRecordings()
+	today := time.Date(2026, 8, 22, 9, 0, 0, 0, time.Local)
+	v.now = func() time.Time { return today }
+
+	v.viewMode = viewWeek
+	v.HandleContentKey(keyPress("right"))
+	if got := v.day(); !sameDay(got, today.AddDate(0, 0, 7)) {
+		t.Errorf("a step in the week view = %s, want a week on", got.Format(time.DateOnly))
+	}
+
+	v.viewMode = viewYear
+	v.HandleContentKey(keyPress("left"))
+	if got := v.day(); !sameDay(got, today.AddDate(0, 0, 7).AddDate(-1, 0, 0)) {
+		t.Errorf("a step in the year view = %s, want a year back", got.Format(time.DateOnly))
+	}
+}
+
 // --- Habits ---
 
 func TestHabitCompletionsMarkTheirHabitRatherThanListingThemselves(t *testing.T) {
@@ -435,8 +505,8 @@ func TestDayViewLabelsItsSections(t *testing.T) {
 	habits := []Recording{{ID: 4, Title: "Read 20 pages"}}
 
 	day := time.Date(2026, 8, 24, 9, 0, 0, 0, time.Local)
-	view := stripANSI(renderDayView(events, habits, day, 100, 24))
-	for _, label := range []string{"Habits", "Monday, August 24", "All day"} {
+	view := stripANSI(renderDayView(events, habits, day, "←→ day", 100, 24))
+	for _, label := range []string{"Habits", "Monday, August 24", "←→ day", "All day"} {
 		if !strings.Contains(view, label) {
 			t.Errorf("day view did not label its %q section: %q", label, view)
 		}
@@ -454,7 +524,7 @@ func TestDayViewRulesFallFromEveryHourWithoutCuttingIntoAnEvent(t *testing.T) {
 	// day's header and the hour axis take the first two rows of the 40 it is given,
 	// leaving 38 for the grid — more than the 25 rows the event's title needs read
 	// downwards.
-	lines := strings.Split(stripANSI(renderDayView(events, nil, day, 98, 40)), "\n")
+	lines := strings.Split(stripANSI(renderDayView(events, nil, day, "", 98, 40)), "\n")
 	grid := lines[2:]
 	if len(grid) != 38 {
 		t.Fatalf("grid is %d rows of the 38 left to it: %q", len(grid), grid)
@@ -492,7 +562,7 @@ func TestDayViewRulesFallFromEveryHourWithoutCuttingIntoAnEvent(t *testing.T) {
 
 func TestEmptyDayIsItsHoursRatherThanANotice(t *testing.T) {
 	day := time.Date(2026, 8, 22, 9, 0, 0, 0, time.Local)
-	view := stripANSI(renderDayView(nil, nil, day, 96, 20))
+	view := stripANSI(renderDayView(nil, nil, day, "", 96, 20))
 
 	if strings.Contains(view, "no events") {
 		t.Errorf("an empty day still announces itself: %q", view)
@@ -567,8 +637,9 @@ func TestCalendarPinsTodosBelowTheGrid(t *testing.T) {
 func TestCalendarViewHelpBindingsShowsViewToggle(t *testing.T) {
 	v := calendarWithRecordings()
 	v.calIndex = 1
-	// The calendar offers the view, the categories and the habits modal; creating,
-	// editing and deleting a habit are the modal's own keys.
+	// The day view offers the view, the categories and the habits modal; creating,
+	// editing and deleting a habit are the modal's own keys, and the keys that move the
+	// day are on the day's own line rather than in here.
 	bindings := v.HelpBindings()
 	if len(bindings) != 3 {
 		t.Fatalf("expected 3 bindings, got %d: %+v", len(bindings), bindings)
@@ -582,6 +653,19 @@ func TestCalendarViewHelpBindingsShowsViewToggle(t *testing.T) {
 			t.Errorf("missing binding %q: %+v", want, bindings)
 		}
 	}
+
+	// The week and the year have no date line, so the help bar carries their steps.
+	v.viewMode = viewWeek
+	for _, want := range []string{"←→", "v", "c"} {
+		found := false
+		for _, binding := range v.HelpBindings() {
+			found = found || binding.key == want
+		}
+		if !found {
+			t.Errorf("the week view is missing binding %q: %+v", want, v.HelpBindings())
+		}
+	}
+	v.viewMode = viewDay
 
 	v.HandleContentKey(keyPress("b"))
 	for _, want := range []string{"↑↓", "a", "e", "x", "esc"} {

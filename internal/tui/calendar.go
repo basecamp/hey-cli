@@ -102,6 +102,11 @@ type calendarView struct {
 	// fetching around the day it started on while the grid highlights today.
 	now func() time.Time
 
+	// anchor is the day the reader has moved to, and zero for today. Following the
+	// clock is the zero value on purpose: t puts the view back by clearing this, and
+	// a view left on today then keeps up with the clock overnight.
+	anchor time.Time
+
 	// Recordings split by type
 	events []Recording
 	todos  []Recording
@@ -109,6 +114,10 @@ type calendarView struct {
 
 	// Scrollable content viewport for the calendar views
 	contentVP viewport.Model
+
+	// drawn is whether a day has ever reached the screen, which is what the spinner
+	// waits for. See Loading.
+	drawn bool
 
 	timeTrackCategories *timeTrackCategoryManager
 	habitPicker         *habitPicker
@@ -273,7 +282,18 @@ func (v *calendarView) HelpBindings() []helpBinding {
 	if v.habitPicker != nil {
 		return v.habitPicker.helpBindings()
 	}
-	bindings := []helpBinding{{"v", v.viewMode.next().String() + " view"}, {"c", "time categories"}}
+	// The day says which keys move it on the line that names it. The week and the year
+	// have no such line, so the help bar carries it for them.
+	var bindings []helpBinding
+	if v.viewMode != viewDay {
+		bindings = append(bindings, helpBinding{"←→", v.viewMode.unit()})
+		if !v.onToday() {
+			bindings = append(bindings, helpBinding{"t", "today"})
+		}
+	}
+	bindings = append(bindings,
+		helpBinding{"v", v.viewMode.next().String() + " view"},
+		helpBinding{"c", "time categories"})
 	if v.showsHabits() {
 		bindings = append(bindings, helpBinding{"b", "habits"})
 	}
@@ -344,11 +364,13 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		return v.requestTimeTrackCategories()
 	case "v":
 		v.viewMode = v.viewMode.next()
-		if v.calIndex >= 0 && v.calIndex < len(v.calendars) {
-			return v.requestRecordings(v.calendars[v.calIndex].ID)
-		}
-		v.rebuildView()
-		return nil
+		return v.reread()
+	case "left", "p":
+		return v.step(-1)
+	case "right", "n":
+		return v.step(1)
+	case "t":
+		return v.today()
 	}
 
 	// Delegate scrolling to the content viewport
@@ -467,12 +489,13 @@ func (v *calendarView) handleTimeTrackCategoryKey(msg tea.KeyPressMsg) tea.Cmd {
 func (v *calendarView) InThread() bool { return false }
 func (v *calendarView) ExitThread()    {}
 
-// Loading is what puts the spinner over the content, so a read with a modal open does
-// not claim it: the reader is looking at the modal, and the calendar behind it can keep
-// the day it was showing until the new one arrives. Ticking a habit off reads the day
-// again, and a spinner for that is a flash of nothing where the day used to be.
+// Loading is what puts the spinner over the content, and only the first read claims it.
+// Once a day has been drawn, every later read — a step to the day either side, a habit
+// ticked off, another calendar — keeps what is on screen until its answer lands, the way
+// the mail list keeps its list while it reads the page below. A modal is the reader's
+// focus, so a read behind one never claims the spinner either.
 func (v *calendarView) Loading() bool {
-	return v.requests.loading && !v.CapturingInput()
+	return v.requests.loading && !v.CapturingInput() && !v.drawn
 }
 func (v *calendarView) CapturingInput() bool {
 	return v.timeTrackCategories != nil || v.habitForm != nil || v.habitPicker != nil
@@ -505,7 +528,7 @@ func (v *calendarView) rebuildView() {
 		return
 	}
 
-	anchor := v.now()
+	anchor := v.day()
 	dayLabels := dayLabelsFromRecordings(v.events, v.todos, v.habits)
 
 	// The grid scrolls; the week's to-dos do not, so the viewport gives up the rows
@@ -518,7 +541,7 @@ func (v *calendarView) rebuildView() {
 	var content string
 	switch v.viewMode {
 	case viewDay:
-		content = renderDayView(v.events, v.habits, anchor, w, v.contentVP.Height())
+		content = renderDayView(v.events, v.habits, anchor, v.stepHint(), w, v.contentVP.Height())
 	case viewWeek:
 		content = renderWeekView(v.events, v.habits, anchor, v.firstWeekDay, w, h, dayLabels)
 	case viewYear:
@@ -526,6 +549,7 @@ func (v *calendarView) rebuildView() {
 	}
 
 	v.contentVP.SetContent(content)
+	v.drawn = true
 
 	// For year view, scroll to the current week
 	if v.viewMode == viewYear {
@@ -537,6 +561,63 @@ func (v *calendarView) rebuildView() {
 	} else {
 		v.contentVP.GotoTop()
 	}
+}
+
+// day is the day the view is on: today, until the reader steps off it.
+func (v *calendarView) day() time.Time {
+	if v.anchor.IsZero() {
+		return v.now()
+	}
+	return v.anchor
+}
+
+func (v *calendarView) onToday() bool {
+	return v.anchor.IsZero()
+}
+
+// stepHint is the keys that move the view, said on the line that names the day rather
+// than in the help bar: they belong to the date they act on. t is only mentioned once it
+// would do something.
+func (v *calendarView) stepHint() string {
+	hint := "←→ " + v.viewMode.unit()
+	if !v.onToday() {
+		hint += " · t today"
+	}
+	return hint
+}
+
+// step moves the view by its own unit — a day, a week or a year — since ← and → mean
+// "the one before this" whatever the view is showing.
+func (v *calendarView) step(delta int) tea.Cmd {
+	switch v.viewMode {
+	case viewWeek:
+		v.anchor = v.day().AddDate(0, 0, 7*delta)
+	case viewYear:
+		v.anchor = v.day().AddDate(delta, 0, 0)
+	default:
+		v.anchor = v.day().AddDate(0, 0, delta)
+	}
+	return v.reread()
+}
+
+// today puts the view back on the clock rather than on the date it happens to be today,
+// so it keeps up with a TUI left open overnight.
+func (v *calendarView) today() tea.Cmd {
+	if v.onToday() {
+		return nil
+	}
+	v.anchor = time.Time{}
+	return v.reread()
+}
+
+// reread reads the range the view now covers, or redraws what is already here when
+// there is no calendar to read from.
+func (v *calendarView) reread() tea.Cmd {
+	if v.calIndex >= 0 && v.calIndex < len(v.calendars) {
+		return v.requestRecordings(v.calendars[v.calIndex].ID)
+	}
+	v.rebuildView()
+	return nil
 }
 
 func (v *calendarView) viewingPersonalCalendar() bool {
@@ -584,7 +665,7 @@ func (v *calendarView) saveHabit() tea.Cmd {
 // the doing as a recording of its own, on a day-scoped route, so which day is being
 // looked at is part of the request rather than an argument to the habit.
 func (v *calendarView) toggleHabitCompletion(habit Recording) tea.Cmd {
-	day := v.now().Local().Format(time.DateOnly)
+	day := v.day().Local().Format(time.DateOnly)
 	done := habit.CompletedAt != ""
 	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestHabitMutation)
 	return func() tea.Msg {
@@ -667,7 +748,7 @@ func (v *calendarView) requestCalendars() tea.Cmd {
 // range is fixed when the read starts, which is why the answer has to be discarded
 // when the mode or the calendar has moved on since.
 func (v *calendarView) requestRecordings(calID int64) tea.Cmd {
-	start, end := dateRangeForMode(v.viewMode, v.now(), v.firstWeekDay)
+	start, end := dateRangeForMode(v.viewMode, v.day(), v.firstWeekDay)
 	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestRecordings)
 	return func() tea.Msg {
 		startsOn, endsOn := start.Format("2006-01-02"), end.Format("2006-01-02")

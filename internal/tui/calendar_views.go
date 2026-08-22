@@ -37,6 +37,19 @@ func (m calendarViewMode) next() calendarViewMode {
 	return (m + 1) % 3
 }
 
+// unit is what one step of ← or → moves in this view, as the help bar says it.
+func (m calendarViewMode) unit() string {
+	switch m {
+	case viewDay:
+		return "day"
+	case viewWeek:
+		return "week"
+	case viewYear:
+		return "year"
+	}
+	return "day"
+}
+
 // dateRangeForMode returns the start and end dates for fetching recordings.
 func dateRangeForMode(mode calendarViewMode, anchor time.Time, firstWeekDay time.Weekday) (start, end time.Time) {
 	loc := anchor.Location()
@@ -228,7 +241,7 @@ const (
 // events and not as another box's border.
 const hourRule = '┊'
 
-func renderDayView(events, habits []Recording, anchor time.Time, width, height int) string {
+func renderDayView(events, habits []Recording, anchor time.Time, hint string, width, height int) string {
 	var b strings.Builder
 
 	// The day borrows the mail list's vocabulary: chrome for the structure a reader
@@ -253,9 +266,10 @@ func renderDayView(events, habits []Recording, anchor time.Time, width, height i
 	daySpan := colWidth * 24
 	gridWidth := daySpan + 1
 
-	// The day names itself above its hours: the subnav carries the calendar and the
-	// view mode, so which day this is has nowhere else to be said.
-	b.WriteString(sectionHeader(anchor.Local().Format("Monday, January 2"), width))
+	// The day names itself above its hours — the subnav carries the calendar and the
+	// view mode, so which day this is has nowhere else to be said — and the keys that
+	// move it sit on the same line, where the cover puts "x to peek".
+	b.WriteString(hintedSectionHeader(anchor.Local().Format("Monday, January 2"), hint, width))
 	b.WriteString("\n")
 
 	// Hour header
