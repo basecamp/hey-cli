@@ -101,6 +101,11 @@ func TestSnippetPickerLoadsFiltersAndInsertsAtCursor(t *testing.T) {
 		t.Fatalf("filtered snippets = %#v", form.snippetPicker.filtered)
 	}
 	view.HandleContentKey(keyPress("enter"))
+	if form.snippetPicker == nil || form.body.Value() != "Hello world" {
+		t.Fatal("enter without an explicit selection changed the draft")
+	}
+	view.HandleContentKey(keyPress("down"))
+	view.HandleContentKey(keyPress("enter"))
 	if form.snippetPicker != nil {
 		t.Fatal("picker should close after insertion")
 	}
@@ -126,6 +131,7 @@ func TestReplySnippetPickerUsesTheThreadAccount(t *testing.T) {
 	if recorder.path != "/snippets.json" || recorder.account != "9" {
 		t.Fatalf("snippet path/account = %s/%q", recorder.path, recorder.account)
 	}
+	view.HandleContentKey(keyPress("down"))
 	view.HandleContentKey(keyPress("enter"))
 	if form.body.Value() != "Tuesday works" {
 		t.Errorf("reply body = %q", form.body.Value())
@@ -143,6 +149,7 @@ func TestForwardFormCanInsertASnippet(t *testing.T) {
 	view.Update(contextMsg)
 	form := composeModal(view)
 	settleSnippetPickerLoad(t, view, view.HandleContentKey(ctrlT()))
+	view.HandleContentKey(keyPress("down"))
 	view.HandleContentKey(keyPress("enter"))
 	if form.body.Value() != "Tuesday works" {
 		t.Errorf("forward note = %q", form.body.Value())
@@ -178,6 +185,7 @@ func TestSnippetPickerCanInsertMoreThanOnceWithoutReloading(t *testing.T) {
 		_, _ = io.WriteString(w, `[{"id":1,"name":"Greeting","content":"Hello"}]`)
 	}))
 	form := openLoadedSnippetPicker(t, view)
+	view.HandleContentKey(keyPress("down"))
 	view.HandleContentKey(keyPress("enter"))
 	if got := form.body.Value(); got != "Hello" {
 		t.Fatalf("first insertion = %q", got)
@@ -187,6 +195,7 @@ func TestSnippetPickerCanInsertMoreThanOnceWithoutReloading(t *testing.T) {
 	if cmd == nil || form.snippetPicker == nil || form.snippetPicker.loading {
 		t.Fatal("cached snippets should open immediately")
 	}
+	view.HandleContentKey(keyPress("down"))
 	view.HandleContentKey(keyPress("enter"))
 	if got := form.body.Value(); got != "HelloHello" {
 		t.Errorf("repeated insertion = %q", got)

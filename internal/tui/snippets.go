@@ -38,7 +38,7 @@ func newSnippetPicker(returnFocus int) *snippetPicker {
 	input := textinput.New()
 	input.Prompt = ""
 	input.Placeholder = "Filter snippets…"
-	return &snippetPicker{input: input, loading: true, returnFocus: returnFocus}
+	return &snippetPicker{input: input, cursor: -1, loading: true, returnFocus: returnFocus}
 }
 
 func (p *snippetPicker) focus() tea.Cmd {
@@ -66,7 +66,9 @@ func (p *snippetPicker) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool, *generate
 	case tea.KeyEnter:
 		return nil, true, p.selected()
 	case tea.KeyUp:
-		if p.cursor > 0 {
+		if p.cursor < 0 && len(p.filtered) > 0 {
+			p.cursor = len(p.filtered) - 1
+		} else if p.cursor > 0 {
 			p.cursor--
 		}
 		p.ensureVisible()
@@ -103,7 +105,7 @@ func (p *snippetPicker) filter() {
 			p.filtered = append(p.filtered, snippet)
 		}
 	}
-	p.cursor = 0
+	p.cursor = -1
 	p.offset = 0
 	p.ensureVisible()
 }
@@ -120,11 +122,15 @@ func (p *snippetPicker) visibleRows() int {
 
 func (p *snippetPicker) ensureVisible() {
 	if len(p.filtered) == 0 {
-		p.cursor = 0
+		p.cursor = -1
 		p.offset = 0
 		return
 	}
-	p.cursor = max(0, min(p.cursor, len(p.filtered)-1))
+	if p.cursor < 0 {
+		p.offset = 0
+		return
+	}
+	p.cursor = min(p.cursor, len(p.filtered)-1)
 	if p.cursor < p.offset {
 		p.offset = p.cursor
 	}
