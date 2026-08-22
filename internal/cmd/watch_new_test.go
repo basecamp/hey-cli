@@ -127,28 +127,40 @@ func TestNewMailRemembersEveryBox(t *testing.T) {
 
 func TestNewMailAfterASkipAheadIsSinceTheSkip(t *testing.T) {
 	tracker := trackNewMail(watchStarted)
-	skipped := hey.PostingChangesCursor{Since: "2026-08-21T10:00:00.000Z", Version: "2"}
-	tracker.skippedTo(24088, skipped)
+	beforeTheWatch := watchStarted.Add(-time.Hour)
 	inTheGap := watchStarted.Add(30 * time.Minute)
 	afterTheSkip := watchStarted.Add(61 * time.Minute)
 
-	// A thread that arrived in the gap the watch skipped over, then moved or
-	// labelled while still unseen: backlog the watch never read, not new.
+	// A thread the watch knows from before the gap.
+	known := newPosting(100, "Sam Whitfield", "Draft agenda for Monday", beforeTheWatch)
+	classifyRead(tracker, known)
+
+	tracker.skippedTo(24088, hey.PostingChangesCursor{Since: "2026-08-21T10:00:00.000Z", Version: "2"})
+
+	// The known thread got a reply inside the gap — mail the watch missed —
+	// and is then moved while still unseen: its activity is at the floor, not
+	// new. The resync line was the cue to re-read the box.
+	moved := newPosting(100, "Sam Whitfield", "Draft agenda for Monday", inTheGap)
+	if fresh := classifyRead(tracker, moved); len(fresh) != 0 {
+		t.Errorf("new = %v, want a known thread's gap activity left alone", fresh)
+	}
+	// A thread that arrived in the gap, then moved or labelled while unseen.
 	if fresh := classifyRead(tracker, newPosting(101, "Maria Delgado", "Lunch on Thursday?", inTheGap)); len(fresh) != 0 {
-		t.Errorf("new = %v, want a thread active in the skipped gap left alone", fresh)
+		t.Errorf("new = %v, want an unknown thread active in the gap left alone", fresh)
 	}
-	if fresh := classifyRead(tracker, newPosting(102, "Northwind Invoicing", "Invoice #4021", afterTheSkip)); len(fresh) != 1 {
-		t.Errorf("new = %v, want mail since the skip", fresh)
+	// Mail after the cursor the watch skipped to is new, on both kinds.
+	if fresh := classifyRead(tracker, newPosting(100, "Sam Whitfield", "Draft agenda for Monday", afterTheSkip), newPosting(102, "Northwind Invoicing", "Invoice #4021", afterTheSkip)); len(fresh) != 2 {
+		t.Errorf("new = %v, want mail since the skip on a known and an unknown thread", fresh)
 	}
-	// The cutoff is the box's alone: another box measures against the start.
+	// The floor is the box's alone: another box measures against the start.
 	if fresh := classifyReadOf(tracker, 24089, newPosting(103, "Weekend Deals", "48 hours only", inTheGap)); len(fresh) != 1 {
 		t.Errorf("new = %v, want another box unaffected by this one's skip", fresh)
 	}
 
 	// A cursor that cannot be read moves nothing.
 	tracker.skippedTo(24089, hey.PostingChangesCursor{Since: "later"})
-	if _, has := tracker.skipped[24089]; has {
-		t.Error("an unreadable cursor must not become a cutoff")
+	if _, has := tracker.floors[24089]; has {
+		t.Error("an unreadable cursor must not become a floor")
 	}
 }
 

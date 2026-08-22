@@ -26,8 +26,8 @@ func TestWatchedChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !changes["added"] || !changes["updated"] || !changes["deleted"] {
-		t.Errorf("changes = %v, want every change by default", changes)
+	if !changes["added"] || !changes["updated"] || !changes["deleted"] || !changes["resync"] || changes["new"] {
+		t.Errorf("changes = %v, want every change and resync by default, and new only when asked", changes)
 	}
 
 	command.events = []string{"Added", " deleted"}
@@ -44,8 +44,8 @@ func TestWatchedChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !changes["new"] || changes["added"] || changes["updated"] || changes["deleted"] {
-		t.Errorf("changes = %v, want new mail alone", changes)
+	if !changes["new"] || changes["added"] || changes["updated"] || changes["deleted"] || changes["resync"] {
+		t.Errorf("changes = %v, want new mail alone — not a resync", changes)
 	}
 
 	command.events = []string{"moved"}
@@ -272,8 +272,8 @@ func TestWatchEventEnvironment(t *testing.T) {
 			t.Errorf("environment = %q, want %s", environment, want)
 		}
 	}
-	if strings.Contains(environment, "HEY_NEW") {
-		t.Errorf("environment = %q, want HEY_NEW absent rather than 0 when the posting is not new", environment)
+	if !strings.Contains(environment, "HEY_NEW=0") {
+		t.Errorf("environment = %q, want HEY_NEW=0 when the posting is not new", environment)
 	}
 
 	isNew := true
@@ -453,8 +453,8 @@ func TestWatchSkipsAheadToTheBoxesOwnCursor(t *testing.T) {
 	if got := watch.boxes[24088].cursor.Since; got != "2026-08-21T11:02:00.000Z" {
 		t.Errorf("cursor = %q, want the server's current one", got)
 	}
-	if got := watch.newMail.skipped[24088]; !got.Equal(time.Date(2026, 8, 21, 11, 2, 0, 0, time.UTC)) {
-		t.Errorf("new-mail cutoff = %v, want the box's cutoff moved to the cursor it skipped to", got)
+	if got := watch.newMail.floors[24088]; !got.Equal(time.Date(2026, 8, 21, 11, 2, 0, 0, time.UTC)) {
+		t.Errorf("new-mail floor = %v, want the box's floor at the cursor it skipped to", got)
 	}
 }
 
@@ -519,8 +519,8 @@ func TestWatchScriptDoesNotInheritAnotherEventsVariables(t *testing.T) {
 
 	watch.report(context.Background(), watchEvent{Change: "deleted", PostingID: 9003}, watch.boxes[24088], nil)
 
-	if got := out.String(); got != "unset unset kept\n" {
-		t.Errorf("script saw %q, want the event's own variables only, and everything else kept", got)
+	if got := out.String(); got != "0 unset kept\n" {
+		t.Errorf("script saw %q, want HEY_NEW=0 and no inherited thread id, and everything else kept", got)
 	}
 }
 
@@ -814,18 +814,29 @@ func TestWatchAnnouncesItselfOnStdoutOnly(t *testing.T) {
 	}
 }
 
-func TestWatchReportsAResyncWhateverEventsAreWatched(t *testing.T) {
-	watch, out := newTestWatch("deleted")
+func TestWatchReportsAResyncWhenAskedFor(t *testing.T) {
+	watch, out := newTestWatch("deleted", "resync")
 	watch.exitOnFirst = true
 
 	if !watch.report(context.Background(), watchEvent{Change: watchResync, At: "2026-08-21T09:00:00.000Z"}, watch.boxes[24088], nil) {
-		t.Fatal("a resync is news whatever --events asks for")
+		t.Fatal("a resync is reported when --events has it")
 	}
 	if !strings.Contains(out.String(), `"change":"resync"`) || !strings.Contains(out.String(), `"kind":"imbox"`) {
 		t.Errorf("wrote %q, want the resync with its box", out.String())
 	}
 	if !watch.finished() {
 		t.Error("a resync is a change, so --exit-on-first counts it")
+	}
+
+	// --events new is new mail only: a resync is not, so a script for new
+	// mail never runs on one and --exit-on-first never exits on one.
+	newOnly, out := newTestWatch("new")
+	newOnly.exitOnFirst = true
+	if newOnly.report(context.Background(), watchEvent{Change: watchResync, At: "2026-08-21T09:00:00.000Z"}, newOnly.boxes[24088], nil) {
+		t.Error("--events new must leave a resync out")
+	}
+	if out.Len() != 0 || newOnly.finished() {
+		t.Errorf("wrote %q, finished %v; want nothing for a resync under --events new", out.String(), newOnly.finished())
 	}
 }
 
@@ -844,7 +855,7 @@ func TestWatchReportsAResyncAfterSkippingAhead(t *testing.T) {
 	defer server.Close()
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
 
-	watch, out := newTestWatch("added")
+	watch, out := newTestWatch("added", "resync")
 	cursor, err := watchCursor(server.URL+"/boxes/24088/postings/changes.json?since=2026-08-18T09%3A00%3A00.000Z&v=2", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

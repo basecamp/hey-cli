@@ -148,10 +148,17 @@ and `--events new` selects the true ones. The rule:
   reports, so a thread known from a filtered-out change, or from another box, is never
   mistaken for new when its next change is reported. A read is classified before it is
   recorded. There is no state file: the record lives and dies with the watch.
-- **`--events` is a union.** `new` alone is new mail only; `added,new` is every arrival
-  plus new activity on known threads; the default `added,updated,deleted` is every line,
-  each saying whether it is new. `hey watch --box imbox --events new --exit-on-first` is
-  "block until new mail", and a `--run-*` script sees `HEY_NEW=1`.
+- **`--events` is a union.** `new` alone is new mail only — a `resync` is not, so a script
+  for new mail never runs on one; `added,new` is every arrival plus new activity on known
+  threads; the default `added,updated,deleted,resync` is every line, each saying whether it
+  is new. `hey watch --box imbox --events new --exit-on-first` is "block until new mail", and
+  a `--run-*` script sees `HEY_NEW=1` or `HEY_NEW=0`.
+- **A skip-ahead sets a floor.** A box that answered 409 was never read across the gap, so
+  the cursor it skips to — the box's last posting activity — becomes that box's floor:
+  activity at or before it is never new there, on a thread the watch knows or one it does
+  not, so a reply the watch missed and then a move while still unseen is not new mail. Mail
+  after the floor is. The floor is the box's own; a gap thread moved to another box is
+  measured there and may read as new once — the `resync` line is the cue to re-read.
 
 ### The plugin toasts
 

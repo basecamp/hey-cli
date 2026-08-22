@@ -404,9 +404,10 @@ Every `added` and `updated` line says whether the posting is new mail: unseen, n
 and active since the watch last saw the thread — or since the watch began, for a thread it
 has not seen, so a box's backlog is never new. Reading, muting or moving a thread is not new
 activity; a reply on a known thread is. `--events new` selects the new ones, alone or in a
-union with `added`, `updated` and `deleted`. The one-liner above is what any desktop does
-with it; on Omarchy the bar plugin reads the same lines and sends one batched, replacing
-toast instead.
+union with `added`, `updated`, `deleted` and `resync` — the default is everything but `new`,
+and `new` alone leaves a `resync` out, so a script for new mail never runs on one. The
+one-liner above is what any desktop does with it; on Omarchy the bar plugin reads the same
+lines and sends one batched, replacing toast instead.
 
 A change can drive a command instead of being printed, and there's a choice to make
 between two behaviours — pass one or the other, not both. `--run-async` spawns the
@@ -416,8 +417,8 @@ slow one delays the next.
 
 Both hand the JSON to the command on its stdin, and the same fields as `HEY_CHANGE`,
 `HEY_AT`, `HEY_BOX_ID`, `HEY_BOX_KIND`, `HEY_BOX_NAME`, `HEY_POSTING_ID` and
-`HEY_THREAD_ID`, with `HEY_NEW=1` for new mail. Both also take over stdout, so the JSON
-isn't printed as well.
+`HEY_THREAD_ID`, with `HEY_NEW=1` for new mail and `HEY_NEW=0` otherwise. Both also take over
+stdout, so the JSON isn't printed as well.
 
 ### Calendars
 

@@ -510,7 +510,7 @@ Takes box item IDs (the `id` field from `hey box --json`). Ignored threads remai
 ```bash
 hey watch                         # Follow every box until interrupted
 hey watch --box imbox             # Follow one box (repeatable, by name or ID)
-hey watch --events added,deleted  # Only these changes (added, updated, deleted, new)
+hey watch --events added,deleted  # Only these changes (added, updated, deleted, new, resync)
 hey watch --box imbox --events new  # New mail only: unseen, unmuted, active since the watch began
 hey watch --box imbox --events new --exit-on-first  # Block until new mail lands, print it, exit
 hey watch --exit-on-first         # Wait for one change of any kind, print it, exit
@@ -532,16 +532,17 @@ posting carries no `posting`, `thread_id` or `new`. Three more lines
 describe the watch itself: `{"change": "ready"}` once every box is caught up and the subscription
 is live (again after every reconnect's catch-up), `{"change": "disconnected"}` when the
 connection drops, and `{"change": "resync", "box": {...}}` when a box changed more than the
-feed can list and the watch skipped ahead — re-read that box. A resync is a change
-(`--run-*` scripts run for it, `--exit-on-first` counts it); `ready` and `disconnected` are
-written to stdout only and carry no `box`.
+feed can list and the watch skipped ahead — re-read that box. A resync is an event of its
+own: reported by default (`--run-*` scripts run for it, `--exit-on-first` counts it) and left
+out by `--events new`, so a script for new mail never runs on one; `ready` and `disconnected`
+are written to stdout only and carry no `box`.
 
 To drive a command per change, choose one of two behaviours — passing both is an error.
 `--run-async` spawns the command and moves on, so a slow one never holds up the watch and
 two can overlap; `--run-sync` waits for each and runs them in order. Both get the JSON on
 stdin and the fields as `HEY_CHANGE`, `HEY_AT`, `HEY_BOX_ID`, `HEY_BOX_KIND`,
-`HEY_BOX_NAME`, `HEY_POSTING_ID` and `HEY_THREAD_ID` — plus `HEY_NEW=1` for new mail — and
-both take over stdout.
+`HEY_BOX_NAME`, `HEY_POSTING_ID` and `HEY_THREAD_ID` — plus `HEY_NEW=1` for new mail, `HEY_NEW=0`
+otherwise — and both take over stdout.
 
 ### Drafts
 

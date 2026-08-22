@@ -25,7 +25,7 @@ import (
 // was filtered out, is not mistaken for new when its next change comes.
 type newMail struct {
 	started  time.Time
-	skipped  map[int64]time.Time
+	floors   map[int64]time.Time
 	activeAt map[int64]time.Time
 }
 
@@ -33,21 +33,22 @@ type newMail struct {
 // is backlog, on the server's clock, since that is the clock every posting's
 // active_at is on.
 func trackNewMail(started time.Time) *newMail {
-	return &newMail{started: started, skipped: map[int64]time.Time{}, activeAt: map[int64]time.Time{}}
+	return &newMail{started: started, floors: map[int64]time.Time{}, activeAt: map[int64]time.Time{}}
 }
 
-// skippedTo moves a box's cutoff up to the cursor the watch skipped ahead to.
-// A box that changed more than the feed can list was never read across that
-// gap, so the threads active in it are backlog the watch knows nothing about:
-// without this, one of them updated later while still unseen — moved, say —
-// would measure its gap activity against the watch's start and read as new.
-// The cursor is the box's last posting activity, which bounds every thread in
-// it, and it is the box's alone — a gap thread that moves to another box is
-// measured there, and may still read as new once. The resync line is the
-// reader's cue to re-read the box either way.
+// skippedTo sets a box's floor at the cursor the watch skipped ahead to. A box
+// that changed more than the feed can list was never read across that gap, so
+// whatever was active in it is mail the watch missed: a thread it knows, or
+// one it does not, updated later while still unseen — moved, say — would
+// otherwise measure its gap activity against an older record and read as
+// new. Activity at or before the floor is never new in that box; the cursor is
+// the box's last posting activity, which bounds every thread in it. The floor
+// is the box's alone — a gap thread that moves to another box is measured
+// there, and may still read as new once. The resync line is the reader's cue
+// to re-read the box either way.
 func (n *newMail) skippedTo(boxID int64, cursor hey.PostingChangesCursor) {
 	if at, err := time.Parse(watchCursorTimeLayout, cursor.Since); err == nil {
-		n.skipped[boxID] = at
+		n.floors[boxID] = at
 	}
 }
 
@@ -82,9 +83,9 @@ func (n *newMail) isNew(boxID int64, posting generated.Posting) bool {
 	last, known := n.activeAt[posting.Id]
 	if !known {
 		last = n.started
-		if skipped, ok := n.skipped[boxID]; ok && skipped.After(last) {
-			last = skipped
-		}
+	}
+	if floor, ok := n.floors[boxID]; ok && floor.After(last) {
+		last = floor
 	}
 
 	return !posting.Seen && !posting.Muted && posting.ActiveAt.After(last)

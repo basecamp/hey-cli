@@ -557,7 +557,10 @@ unseen, not muted, and `active_at` later than the watch's record of the thread �
 the watch's start, on HEY's clock (`serverNow`), for a thread it has no record of — and
 every posting the watch reads is recorded, in every box and whatever `--events` says. That
 is HEY's semantics and state across events, so the CLI decides it once; what to do about
-it is the reader's. The Omarchy bar plugin toasts from those lines itself (app-name, glyph,
+it is the reader's. A 409 skip-ahead sets that box's floor at the cursor it skipped to
+(`newMail.skippedTo`): activity at or before it is never new there, known thread or not,
+because the watch never read the gap. `resync` is an event of its own — reported by default,
+left out by `--events new` — so a script for new mail never runs on one. The Omarchy bar plugin toasts from those lines itself (app-name, glyph,
 click-to-focus and the replace-not-stack id all live in the plugin), and nothing
 desktop-shaped lives in `watch*.go`.
 

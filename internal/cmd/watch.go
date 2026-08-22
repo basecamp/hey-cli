@@ -43,12 +43,16 @@ const (
 	asyncScriptLimit  = 16
 )
 
-// The three changes a posting goes through, and the one that is a reading of the
-// first two: new is the added and updated postings that are new mail, as decided
-// here (watch_new.go) rather than by every reader.
+// The three changes a posting goes through; the one that is a reading of the
+// first two — new is the added and updated postings that are new mail, as decided
+// here (watch_new.go) rather than by every reader; and resync, the watch's word
+// that a box changed more than it could follow. All but new are reported by
+// default; new is asked for, and asking for new alone leaves a resync out, so a
+// script for new mail never runs on one.
 var (
 	postingChanges   = []string{"added", "updated", "deleted"}
-	watchableChanges = []string{"added", "updated", "deleted", "new"}
+	defaultChanges   = []string{"added", "updated", "deleted", "resync"}
+	watchableChanges = []string{"added", "updated", "deleted", "new", "resync"}
 )
 
 type watchCommand struct {
@@ -83,9 +87,10 @@ ones, alone or alongside added, updated and deleted, and a script sees HEY_NEW=1
 Besides the thread changes, three lines describe the watch itself: "ready" once every box
 is caught up and the subscription is live (again after every reconnect's catch-up),
 "disconnected" when the connection drops, and "resync" when a box changed more than the
-feed can list one change at a time and the watch skipped ahead. A resync is a change —
-scripts run for it and --exit-on-first counts it; ready and disconnected are written to
-stdout only.`,
+feed can list one change at a time and the watch skipped ahead — re-read that box. A resync
+is an event of its own: reported by default, scripts run for it and --exit-on-first counts
+it, and --events can leave it out, as --events new does. Ready and disconnected are written
+to stdout only.`,
 		Annotations: map[string]string{
 			"agent_notes": "Long-running. Writes one JSON object per changed thread to stdout (NDJSON), not the usual envelope. Use --exit-on-first to block until one change lands and then exit.",
 		},
@@ -101,7 +106,7 @@ stdout only.`,
 
 	flags := watchCommand.cmd.Flags()
 	flags.StringArrayVar(&watchCommand.boxes, "box", nil, "Box to watch by name or ID (repeatable, defaults to all)")
-	flags.StringSliceVar(&watchCommand.events, "events", postingChanges, "Changes to report: added, updated, deleted, and new for the added and updated threads that are new mail")
+	flags.StringSliceVar(&watchCommand.events, "events", defaultChanges, "Changes to report: added, updated, deleted, resync, and new for the added and updated threads that are new mail")
 	flags.StringVar(&watchCommand.since, "since", "", "Report changes since this time first (RFC 3339 or YYYY-MM-DD)")
 	flags.StringVar(&watchCommand.asyncScript, "run-async", "", "Shell command to spawn per change, without waiting for it")
 	flags.StringVar(&watchCommand.syncScript, "run-sync", "", "Shell command to run per change, one at a time, waiting for each")
@@ -325,8 +330,9 @@ func (e watchEvent) isNew() bool {
 }
 
 // The watch's own news. A resync is a change — something happened, more than the
-// feed could list — so it goes wherever changes go; ready and disconnected are
-// written to stdout only: a script runs per change, and neither is one.
+// feed could list — so it goes wherever changes go, when --events asks for it;
+// ready and disconnected are written to stdout only: a script runs per change,
+// and neither is one.
 const (
 	watchReady        = "ready"
 	watchDisconnected = "disconnected"
@@ -708,10 +714,10 @@ func (w *postingsWatch) report(ctx context.Context, event watchEvent, box *watch
 
 // reporting says whether a change is handed on. --events is a union: a posting
 // change is reported when its own change was asked for, or when new was and the
-// posting is new mail; a resync is news whatever was asked for.
+// posting is new mail; a resync when it was asked for, which it is by default.
 func (w *postingsWatch) reporting(event watchEvent) bool {
 	if !slices.Contains(postingChanges, event.Change) {
-		return true
+		return w.changes[event.Change]
 	}
 
 	return w.changes[event.Change] || (w.changes["new"] && event.isNew())
@@ -858,6 +864,8 @@ func (e watchEvent) environment() []string {
 	}
 	if e.isNew() {
 		environment = append(environment, "HEY_NEW=1")
+	} else {
+		environment = append(environment, "HEY_NEW=0")
 	}
 
 	return environment
