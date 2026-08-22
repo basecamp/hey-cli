@@ -16,12 +16,40 @@ import (
 
 // --- Calendar view types ---
 
-// Calendar is one of the reader's calendars, as the subnav and the habit form need it.
-// Personal is the one HEY files a habit or a todo on when no calendar is named.
+// Calendar is one of the reader's calendars, as the picker and the habit form need it.
+// Personal is the one HEY files a habit or a todo on when no calendar is named, and it
+// has no name of its own — HEY leaves the field empty and the web app labels the row
+// from the identity instead.
 type Calendar struct {
 	ID       int64
 	Name     string
+	Color    string
 	Personal bool
+}
+
+// listed is whether the picker offers this calendar at all. The personal calendar is
+// never offered: it holds the reader's own habits and todos, it is on in every client,
+// and with no name of its own it would be a blank row that cannot be switched off.
+func (c Calendar) listed() bool {
+	return !c.Personal
+}
+
+// CalendarYear is a year as HEY draws one: a grid of days, and the events that span more
+// than one of them. It is deliberately not a year's worth of recordings — see
+// renderYearView.
+type CalendarYear struct {
+	// PaddingDays is how many cells sit before January 1st, so the grid lines up under
+	// the reader's first weekday.
+	PaddingDays   int
+	Days          []YearDay
+	SpannedEvents []Recording
+}
+
+// YearDay is one cell of that grid. Backgrounded is whether the day carries a background
+// image, which the web app paints behind the cell.
+type YearDay struct {
+	Date         time.Time
+	Backgrounded bool
 }
 
 // Recording is anything HEY keeps on a calendar — an event, a todo, a habit, a time
@@ -50,6 +78,7 @@ const (
 	calendarRequestNone calendarRequestKind = iota
 	calendarRequestCalendars
 	calendarRequestRecordings
+	calendarRequestToggle
 	calendarRequestMutation
 	calendarRequestCategories
 )
@@ -57,11 +86,28 @@ const (
 type calendarsLoadedMsg struct {
 	requestResult
 	calendars []Calendar
+	selected  map[int64]bool
+}
+
+// calendarToggledMsg carries the selection HEY was left holding. The toggle answers it,
+// so the picker never has to guess what the next period read will cover.
+type calendarToggledMsg struct {
+	requestResult
+	selected map[int64]bool
+	name     string
+	on       bool
 }
 
 type recordingsLoadedMsg struct {
 	requestResult
 	recordings []Recording
+}
+
+// yearLoadedMsg is the year's own answer. It rides the same lane as the recordings, since
+// it is the same read from the reader's side — the span they are looking at.
+type yearLoadedMsg struct {
+	requestResult
+	year CalendarYear
 }
 
 // identityLoadedMsg stays off the request lane: the first day of the week is read
@@ -95,7 +141,12 @@ type calendarView struct {
 	vc *viewContext
 
 	calendars []Calendar
-	calIndex  int
+
+	// selected is the calendars HEY is drawing the period from, by id. It is the
+	// server's answer rather than this view's choice: a period read is scoped to the
+	// identity's selection whatever this holds, so the picker writes the toggle and
+	// takes the selection back from it instead of keeping its own.
+	selected map[int64]bool
 
 	viewMode     calendarViewMode
 	firstWeekDay time.Weekday
@@ -110,10 +161,14 @@ type calendarView struct {
 	// a view left on today then keeps up with the clock overnight.
 	anchor time.Time
 
-	// Recordings split by type
+	// Recordings split by type, for the day and the week
 	events []Recording
 	todos  []Recording
 	habits []Recording
+
+	// year is what the year span draws, and it is a different answer than the
+	// recordings above rather than a summary of them.
+	year CalendarYear
 
 	// Scrollable content viewport for the calendar views
 	contentVP viewport.Model
@@ -144,8 +199,8 @@ func (v *calendarView) Init() tea.Cmd {
 	cmds := []tea.Cmd{v.fetchIdentity()}
 	if len(v.calendars) == 0 {
 		cmds = append(cmds, v.requestCalendars())
-	} else if v.calIndex < len(v.calendars) {
-		cmds = append(cmds, v.requestRecordings(v.calendars[v.calIndex].ID))
+	} else {
+		cmds = append(cmds, v.requestRecordings())
 	}
 	return tea.Batch(cmds...)
 }
@@ -162,11 +217,28 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return cmd, true
 		}
 		v.calendars = msg.calendars
+		v.selected = msg.selected
+		if v.calendarPicker != nil {
+			v.calendarPicker.setCalendars(v.listedCalendars(), v.selected)
+		}
 		if len(v.calendars) > 0 {
-			v.calIndex = 0
-			return v.requestRecordings(v.calendars[0].ID), true
+			return v.requestRecordings(), true
 		}
 		return nil, true
+
+	case calendarToggledMsg:
+		if !v.requests.accepts(msg.requestResult) {
+			return nil, true
+		}
+		v.requests.finish(msg.requestID)
+		if msg.err != nil {
+			return notifyError("Could not switch "+msg.name, msg.err), true
+		}
+		v.selected = msg.selected
+		if v.calendarPicker != nil {
+			v.calendarPicker.setCalendars(v.listedCalendars(), v.selected)
+		}
+		return tea.Batch(notify(toggleNotice(msg.name, msg.on)), v.requestRecordings()), true
 
 	case recordingsLoadedMsg:
 		if cmd, ok := v.requests.settle(msg.requestResult); !ok {
@@ -179,6 +251,14 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if v.todoPicker != nil {
 			v.todoPicker.setTodos(v.todos)
 		}
+		v.rebuildView()
+		return nil, true
+
+	case yearLoadedMsg:
+		if cmd, ok := v.requests.settle(msg.requestResult); !ok {
+			return cmd, true
+		}
+		v.year = msg.year
 		v.rebuildView()
 		return nil, true
 
@@ -199,8 +279,8 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return notifyError(msg.failure, msg.err), true
 		}
 		v.habitForm = nil
-		if v.calIndex >= 0 && v.calIndex < len(v.calendars) {
-			return tea.Batch(notify(msg.action), v.requestRecordings(v.calendars[v.calIndex].ID)), true
+		if len(v.calendars) > 0 {
+			return tea.Batch(notify(msg.action), v.requestRecordings()), true
 		}
 		return notify(msg.action), true
 
@@ -319,7 +399,7 @@ func (v *calendarView) HelpBindings() []helpBinding {
 	// The spans are not in here: the row above the grid shows each one's number in the
 	// tab itself, the way the box row does. Which calendar is being read is only in the
 	// menu, so the key that opens it has to be said.
-	if len(v.calendars) > 1 {
+	if len(v.listedCalendars()) > 0 {
 		bindings = append(bindings, helpBinding{"g", "calendars"})
 	}
 	bindings = append(bindings, helpBinding{"c", "time categories"})
@@ -403,8 +483,8 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	// g for the calendars, since shift+C is the jump to this section and never reaches
 	// here — the model reads the section shortcuts before a view sees a key.
 	case "g":
-		if len(v.calendars) > 1 {
-			v.calendarPicker = newCalendarPicker(v.calendars, v.calIndex)
+		if listed := v.listedCalendars(); len(listed) > 0 {
+			v.calendarPicker = newCalendarPicker(listed, v.selected)
 		}
 		return nil
 	case "c":
@@ -434,8 +514,9 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 
 // handleHabitPickerKey gives the open picker every key: managing a habit is what the
 // modal is for, so a is a new habit here rather than whatever a means outside it.
-// handleCalendarPickerKey gives the open picker every key. Choosing the calendar that is
-// already open just closes it, rather than reading the same range again.
+// handleCalendarPickerKey gives the open picker every key. The picker stays open across a
+// toggle: switching calendars on and off is a few decisions at once, not one, and the
+// period behind it is read again after each so the reader sees what they just changed.
 func (v *calendarView) handleCalendarPickerKey(msg tea.KeyPressMsg) tea.Cmd {
 	picker := v.calendarPicker
 
@@ -443,14 +524,12 @@ func (v *calendarView) handleCalendarPickerKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "esc", "q":
 		v.calendarPicker = nil
 		return nil
-	case "enter":
-		index := picker.selected()
-		v.calendarPicker = nil
-		if index < 0 || index == v.calIndex {
+	case "enter", " ", "space":
+		calendar, ok := picker.highlighted()
+		if !ok || v.togglePending() {
 			return nil
 		}
-		v.calIndex = index
-		return v.reread()
+		return v.toggleCalendar(calendar)
 	}
 
 	picker.moveCursor(msg)
@@ -686,7 +765,10 @@ func (v *calendarView) rebuildView() {
 	case viewWeek:
 		content = renderWeekView(v.events, v.habits, anchor, v.firstWeekDay, w, h, dayLabels)
 	case viewYear:
-		content = renderYearView(v.events, anchor, v.firstWeekDay, w, h, dayLabels)
+		// The year's events are HEY's spanned_events — the all-day and multi-day ones —
+		// because that is all a year read carries. eventsByDate spreads a multi-day event
+		// over the days it covers, so the grid fills the same way it always did.
+		content = renderYearView(v.year.SpannedEvents, anchor, v.firstWeekDay, w, h)
 	}
 
 	v.contentVP.SetContent(content)
@@ -751,18 +833,42 @@ func (v *calendarView) today() tea.Cmd {
 	return v.reread()
 }
 
-// reread reads the range the view now covers, or redraws what is already here when
-// there is no calendar to read from.
+// reread reads the period the view now covers, or redraws what is already here when the
+// calendars have not been read yet.
 func (v *calendarView) reread() tea.Cmd {
-	if v.calIndex >= 0 && v.calIndex < len(v.calendars) {
-		return v.requestRecordings(v.calendars[v.calIndex].ID)
+	if len(v.calendars) > 0 {
+		return v.requestRecordings()
 	}
 	v.rebuildView()
 	return nil
 }
 
+// listedCalendars is what the picker offers — everything but the personal one, which is
+// always on and has no name to show.
+func (v *calendarView) listedCalendars() []Calendar {
+	listed := make([]Calendar, 0, len(v.calendars))
+	for _, calendar := range v.calendars {
+		if calendar.listed() {
+			listed = append(listed, calendar)
+		}
+	}
+	return listed
+}
+
+func (v *calendarView) togglePending() bool {
+	return v.requests.loading && v.requests.kind == calendarRequestToggle
+}
+
+// viewingPersonalCalendar is whether the reader's own calendar is among the ones being
+// drawn, which is what decides whether habits are theirs to manage. It is always among
+// them: HEY keeps it in the selection and offers no way to switch it off.
 func (v *calendarView) viewingPersonalCalendar() bool {
-	return v.calIndex >= 0 && v.calIndex < len(v.calendars) && v.calendars[v.calIndex].Personal
+	for _, calendar := range v.calendars {
+		if calendar.Personal {
+			return true
+		}
+	}
+	return false
 }
 
 func (v *calendarView) manageableHabits() []Recording {
@@ -883,7 +989,7 @@ func (v *calendarView) deleteTodo(todo Recording) tea.Cmd {
 // title goes back through the edit form, so sanitizing it here would rewrite it on an
 // unrelated save. Every view sanitizes what it shows instead.
 func sdkCalendarToModel(c generated.Calendar) Calendar {
-	return Calendar{ID: c.Id, Name: c.Name, Personal: c.Personal}
+	return Calendar{ID: c.Id, Name: c.Name, Color: c.Color, Personal: c.Personal}
 }
 
 func sdkRecordingToModel(r generated.Recording) Recording {
@@ -928,35 +1034,109 @@ func (v *calendarView) requestCalendars() tea.Cmd {
 		for _, cw := range payload.Calendars {
 			calendars = append(calendars, sdkCalendarToModel(cw.Calendar))
 		}
-		return calendarsLoadedMsg{requestResult: newRequestResult(requestID, nil), calendars: calendars}
+		return calendarsLoadedMsg{
+			requestResult: newRequestResult(requestID, nil),
+			calendars:     calendars,
+			selected:      selectionSet(payload.SelectedCalendarIds),
+		}
 	}
 }
 
-// requestRecordings reads the range the current view mode covers around today. The
-// range is fixed when the read starts, which is why the answer has to be discarded
-// when the mode or the calendar has moved on since.
-func (v *calendarView) requestRecordings(calID int64) tea.Cmd {
-	start, end := dateRangeForMode(v.viewMode, v.day(), v.firstWeekDay)
+// toggleCalendar switches one calendar and takes the selection back from the answer.
+func (v *calendarView) toggleCalendar(calendar Calendar) tea.Cmd {
+	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestToggle)
+	on := !v.selected[calendar.ID]
+	name := terminal.SanitizeLine(calendar.Name)
+	return func() tea.Msg {
+		ids, err := v.vc.sdk.Calendars().Toggle(ctx, calendar.ID)
+		return calendarToggledMsg{
+			requestResult: newRequestResult(requestID, err),
+			selected:      selectionSet(ids),
+			name:          name,
+			on:            on,
+		}
+	}
+}
+
+func selectionSet(ids []int64) map[int64]bool {
+	selected := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		selected[id] = true
+	}
+	return selected
+}
+
+func toggleNotice(name string, on bool) string {
+	if on {
+		return name + " shown"
+	}
+	return name + " hidden"
+}
+
+// requestRecordings reads the period the view is on, scoped by HEY to the calendars the
+// identity has switched on. The period is fixed when the read starts, which is why the
+// answer has to be discarded when the span or the day has moved on since.
+//
+// A period is the read to use rather than a calendar's recordings over the same dates: a
+// recurring event is one row on a calendar and HEY expands it into occurrences per
+// period, so a weekly meeting drawn from a calendar's recordings appears once, on the day
+// it was created.
+func (v *calendarView) requestRecordings() tea.Cmd {
+	date := v.day().Format("2006-01-02")
+	mode := v.viewMode
 	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestRecordings)
 	return func() tea.Msg {
-		startsOn, endsOn := start.Format("2006-01-02"), end.Format("2006-01-02")
-		resp, err := v.vc.sdk.Calendars().GetRecordings(ctx, calID, &generated.GetCalendarRecordingsParams{
-			StartsOn: &startsOn,
-			EndsOn:   &endsOn,
-		})
+		periods := v.vc.sdk.CalendarPeriods()
+
+		// The year is its own answer, and one read: HEY serves a year as the grid it is
+		// drawn as rather than as the recordings inside it.
+		if mode == viewYear {
+			year, err := periods.Year(ctx, date)
+			if err != nil {
+				return yearLoadedMsg{requestResult: newRequestResult(requestID, err)}
+			}
+			return yearLoadedMsg{requestResult: newRequestResult(requestID, nil), year: sdkYearToModel(year)}
+		}
+
+		var period *generated.CalendarPeriod
+		var err error
+		if mode == viewWeek {
+			period, err = periods.Week(ctx, date)
+		} else {
+			period, err = periods.Day(ctx, date)
+		}
 		if err != nil {
 			return recordingsLoadedMsg{requestResult: newRequestResult(requestID, err)}
 		}
-		var all []Recording
-		if resp != nil {
-			for _, recs := range *resp {
-				for _, r := range recs {
-					all = append(all, sdkRecordingToModel(r))
-				}
-			}
-		}
-		return recordingsLoadedMsg{requestResult: newRequestResult(requestID, nil), recordings: all}
+		return recordingsLoadedMsg{requestResult: newRequestResult(requestID, nil), recordings: recordingsIn(period)}
 	}
+}
+
+func sdkYearToModel(year *generated.CalendarYear) CalendarYear {
+	if year == nil {
+		return CalendarYear{}
+	}
+	model := CalendarYear{PaddingDays: int(year.PaddingDaysCount)}
+	for _, day := range year.Days {
+		model.Days = append(model.Days, YearDay{Date: day.StartsAt, Backgrounded: day.Backgrounded})
+	}
+	for _, event := range year.SpannedEvents {
+		model.SpannedEvents = append(model.SpannedEvents, sdkRecordingToModel(event))
+	}
+	return model
+}
+
+func recordingsIn(period *generated.CalendarPeriod) []Recording {
+	if period == nil {
+		return nil
+	}
+	var all []Recording
+	for _, recs := range period.Recordings {
+		for _, r := range recs {
+			all = append(all, sdkRecordingToModel(r))
+		}
+	}
+	return all
 }
 
 func (v *calendarView) requestTimeTrackCategories() tea.Cmd {

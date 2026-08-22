@@ -699,7 +699,9 @@ func weekDayColumnLabel(d time.Time, isFirstCol bool) string {
 // Year View — bordered grid, one box per day
 // ===============================================
 
-func renderYearView(events []Recording, anchor time.Time, firstWeekDay time.Weekday, width, _ int, dayLabels map[string]string) string {
+// The year takes no day labels: a named day is a title on a recording, and a year read
+// carries no recordings to hang one on. The web app's year does not show them either.
+func renderYearView(events []Recording, anchor time.Time, firstWeekDay time.Weekday, width, _ int) string {
 	var b strings.Builder
 	muted := styleMuted
 	bright := lipgloss.NewStyle().Foreground(colorBright)
@@ -716,7 +718,6 @@ func renderYearView(events []Recording, anchor time.Time, firstWeekDay time.Week
 	byDate := eventsByDate(events)
 
 	colWidth := max((width-8)/7, 9)
-	maxEventsPerCell := 2 // show at most 2 event titles per cell
 
 	sep := muted.Render("│")
 
@@ -747,8 +748,8 @@ func renderYearView(events []Recording, anchor time.Time, firstWeekDay time.Week
 		cells := make([][]string, 7)
 		for i := range 7 {
 			weekDates[i] = d
-			cells[i] = buildYearDayCell(d, byDate[dateKey(d)], colWidth, maxEventsPerCell,
-				sameDay(d, today), d.Year() == anchor.Year(), primary, bright, muted, faint, dayLabels)
+			cells[i] = buildYearDayCell(d, byDate[dateKey(d)], colWidth,
+				sameDay(d, today), d.Year() == anchor.Year(), primary, bright, muted, faint)
 			d = d.AddDate(0, 0, 1)
 		}
 
@@ -791,12 +792,12 @@ func renderYearView(events []Recording, anchor time.Time, firstWeekDay time.Week
 }
 
 // buildYearDayCell returns styled lines for one day cell in the year grid.
-// Line 0: day label. Lines 1+: truncated event titles.
-func buildYearDayCell(d time.Time, dayEvents []Recording, colWidth, maxEvents int,
+// Line 0: day label. Lines 1+: one truncated title per event, all of them — the week's row
+// is as tall as its busiest day, which is how the web app's grid behaves too.
+func buildYearDayCell(d time.Time, dayEvents []Recording, colWidth int,
 	isToday, isCurrentYear bool, primary, bright, muted, faint lipgloss.Style,
-	dayLabels map[string]string,
 ) []string {
-	label := dayLabelOrDefault(d, false, dayLabels, yearDayColumnLabel)
+	label := yearDayColumnLabel(d, false)
 
 	// Pick the style for the header line
 	headerStyle := muted
@@ -816,14 +817,9 @@ func buildYearDayCell(d time.Time, dayEvents []Recording, colWidth, maxEvents in
 	}
 
 	// Event titles
-	shown := min(len(dayEvents), maxEvents)
-	for i := range shown {
-		title := truncateStr(terminal.SanitizeLine(dayEvents[i].Title), colWidth)
+	for _, event := range dayEvents {
+		title := truncateStr(terminal.SanitizeLine(event.Title), colWidth)
 		lines = append(lines, bright.Render(title))
-	}
-	if len(dayEvents) > maxEvents {
-		more := fmt.Sprintf("+%d more", len(dayEvents)-maxEvents)
-		lines = append(lines, muted.Render(truncateStr(more, colWidth)))
 	}
 
 	return lines

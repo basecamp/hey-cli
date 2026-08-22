@@ -14,11 +14,17 @@ import (
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 )
 
+// The personal calendar carries no name and no color, which is how HEY serves it — the
+// web app labels that row from the identity instead.
 func testCalendars() []Calendar {
 	return []Calendar{
-		{ID: 10, Name: "Work"},
-		{ID: 11, Name: "Personal", Personal: true},
+		{ID: 10, Name: "Design Team", Color: "teal"},
+		{ID: 11, Personal: true},
 	}
+}
+
+func testSelection(ids ...int64) map[int64]bool {
+	return selectionSet(ids)
 }
 
 func testRecordings() []Recording {
@@ -60,7 +66,6 @@ func TestCalendarViewInitFetchesCalendars(t *testing.T) {
 func TestCalendarViewInitRefetchesWhenLoaded(t *testing.T) {
 	v := newCalendarView(testVC())
 	v.calendars = testCalendars()
-	v.calIndex = 0
 	cmd := v.Init()
 	if cmd == nil {
 		t.Fatal("Init with calendars should return a fetch command")
@@ -84,7 +89,7 @@ func TestCalendarViewHandlesRecordingsLoaded(t *testing.T) {
 	v := newCalendarView(testVC())
 	v.Resize(80, 30)
 	v.calendars = testCalendars()
-	v.requestRecordings(10)
+	v.requestRecordings()
 
 	_, consumed := v.Update(recordingsLoadedMsg{requestResult: currentRequest(v), recordings: testRecordings()})
 	if !consumed {
@@ -211,7 +216,59 @@ func TestCalendarViewSubnavLeftRightMovesTheSpan(t *testing.T) {
 	}
 }
 
-func TestCalendarPickerSwitchesTheCalendarItReads(t *testing.T) {
+// --- Year view ---
+
+// The year is read as a year, not as the recordings inside it: HEY answers a grid, and one
+// request draws it.
+func TestCalendarYearReadsTheYearItself(t *testing.T) {
+	var mu sync.Mutex
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		mu.Lock()
+		paths = append(paths, req.URL.Path)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"starts_at":"2026-01-01T00:00:00Z","ends_at":"2026-12-31T23:59:59Z","kind":"year",
+			"padding_days_count":3,
+			"days":[{"starts_at":"2026-01-01T00:00:00Z","backgrounded":false},
+			        {"starts_at":"2026-01-02T00:00:00Z","backgrounded":true}],
+			"spanned_events":[{"id":1,"type":"CalendarEvent","title":"Summer break","all_day":true,
+			                   "starts_at":"2026-07-06T00:00:00Z","ends_at":"2026-07-17T23:59:59Z"}]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	vc := testVC()
+	vc.sdk = hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
+	v := newCalendarView(vc)
+	v.Resize(80, 30)
+	v.now = func() time.Time { return time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC) }
+	v.viewMode = viewYear
+
+	msg := v.requestRecordings()()
+	mu.Lock()
+	defer mu.Unlock()
+	if len(paths) != 1 || paths[0] != "/calendar/years/2026-08-22.json" {
+		t.Fatalf("paths = %v, want one read of the year", paths)
+	}
+
+	loaded, ok := msg.(yearLoadedMsg)
+	if !ok {
+		t.Fatalf("msg = %T, want yearLoadedMsg", msg)
+	}
+	if loaded.year.PaddingDays != 3 {
+		t.Errorf("padding = %d, want 3", loaded.year.PaddingDays)
+	}
+	if len(loaded.year.Days) != 2 || !loaded.year.Days[1].Backgrounded {
+		t.Errorf("days = %+v", loaded.year.Days)
+	}
+	if len(loaded.year.SpannedEvents) != 1 || loaded.year.SpannedEvents[0].Title != "Summer break" {
+		t.Errorf("spanned events = %+v", loaded.year.SpannedEvents)
+	}
+}
+
+// The picker lists what can be switched, marks what is on, and stays open across a
+// toggle: switching calendars is a few decisions at once rather than one.
+func TestCalendarPickerTogglesTheCalendarsItLists(t *testing.T) {
 	v := calendarWithRecordings()
 	v.vc.width, v.vc.height = 80, 20
 	v.requests.finish(v.requests.id)
@@ -223,34 +280,65 @@ func TestCalendarPickerSwitchesTheCalendarItReads(t *testing.T) {
 		t.Error("the calendars modal does not hold the keys")
 	}
 	view := stripANSI(v.View())
-	if !strings.Contains(view, "Calendars") || !strings.Contains(view, "Personal") {
+	if !strings.Contains(view, "Calendars") || !strings.Contains(view, "Design Team") {
 		t.Errorf("the modal does not list the calendars: %q", view)
 	}
 
-	v.HandleContentKey(keyPress("down"))
-	cmd := v.HandleContentKey(keyPress("enter"))
-	if cmd == nil || v.calendarPicker != nil {
-		t.Fatal("enter should read the chosen calendar and close the modal")
+	cmd := v.HandleContentKey(keyPress(" "))
+	if cmd == nil {
+		t.Fatal("space did not switch the calendar")
 	}
-	if v.calIndex != 1 {
-		t.Errorf("calIndex = %d, want the second calendar", v.calIndex)
+	if v.calendarPicker == nil {
+		t.Error("the modal closed on a toggle")
+	}
+	if !v.togglePending() {
+		t.Errorf("lane = loading:%v kind:%v, want the toggle", v.requests.loading, v.requests.kind)
 	}
 
-	// Choosing the calendar already open is not a read.
-	v.requests.finish(v.requests.id)
-	v.HandleContentKey(keyPress("g"))
-	if cmd := v.HandleContentKey(keyPress("enter")); cmd != nil {
-		t.Error("choosing the open calendar read it again")
+	// A second toggle while the first is in flight would race the selection HEY answers.
+	if cmd := v.HandleContentKey(keyPress(" ")); cmd != nil {
+		t.Error("space switched a second calendar while the first was still in flight")
+	}
+
+	// The answer replaces the selection wholesale and reads the period again.
+	toggled := calendarToggledMsg{
+		requestResult: currentRequest(v),
+		selected:      testSelection(10, 11),
+		name:          "Design Team",
+		on:            true,
+	}
+	if _, consumed := v.Update(toggled); !consumed {
+		t.Error("calendarToggledMsg should be consumed")
+	}
+	if !v.selected[10] {
+		t.Errorf("selection = %v, want the shared calendar on", v.selected)
 	}
 }
 
-func TestCalendarPickerStaysShutWithOneCalendar(t *testing.T) {
+// The personal calendar is not in the picker: it has no name to show, it is on in every
+// client, and HEY offers no way to switch it off.
+func TestCalendarPickerLeavesOutThePersonalCalendar(t *testing.T) {
 	v := calendarWithRecordings()
-	v.calendars = v.calendars[:1]
+	v.vc.width, v.vc.height = 80, 20
+
+	listed := v.listedCalendars()
+	if len(listed) != 1 || listed[0].ID != 10 {
+		t.Errorf("listed calendars = %+v, want the shared one alone", listed)
+	}
+
+	// And it stays selected regardless, which is what lets habits be managed.
+	if !v.viewingPersonalCalendar() {
+		t.Error("the personal calendar should always count as being drawn")
+	}
+}
+
+func TestCalendarPickerStaysShutWithNothingToSwitch(t *testing.T) {
+	v := calendarWithRecordings()
+	v.calendars = v.calendars[1:] // the personal one alone
 
 	v.HandleContentKey(keyPress("g"))
 	if v.calendarPicker != nil {
-		t.Error("g opened a modal with nothing to choose between")
+		t.Error("g opened a modal with nothing to switch")
 	}
 }
 
@@ -261,11 +349,11 @@ func TestCalendarViewIgnoresStaleRecordings(t *testing.T) {
 	v.Resize(80, 30)
 	v.calendars = testCalendars()
 
-	v.requestRecordings(10)
+	v.requestRecordings()
 	stale := recordingsLoadedMsg{requestResult: currentRequest(v), recordings: testRecordings()}
 
 	v.viewMode = viewWeek
-	v.requestRecordings(10)
+	v.requestRecordings()
 	fresh := recordingsLoadedMsg{requestResult: currentRequest(v), recordings: []Recording{
 		{ID: 300, Title: "Design review", StartsAt: "2025-03-04T15:00:00Z", EndsAt: "2025-03-04T16:00:00Z", Type: "CalendarEvent"},
 	}}
@@ -316,7 +404,6 @@ func TestCalendarViewFailedReadFinishesTheLane(t *testing.T) {
 
 func TestCalendarViewKeysDoNotSupersedeAHabitWrite(t *testing.T) {
 	v := calendarWithRecordings()
-	v.calIndex = 1
 	v.deleteHabit(Recording{ID: 202, Title: "Read a book"})
 
 	requestID := v.requests.id
@@ -330,12 +417,14 @@ func TestCalendarViewKeysDoNotSupersedeAHabitWrite(t *testing.T) {
 
 // --- Today ---
 
+// The clock is read on every fetch, so a TUI left open overnight reads the new day rather
+// than the one it started on.
 func TestCalendarViewFetchesAroundTheCurrentDay(t *testing.T) {
 	var mu sync.Mutex
-	var queries []string
+	var paths []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		mu.Lock()
-		queries = append(queries, req.URL.RawQuery)
+		paths = append(paths, req.URL.Path)
 		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{}`))
@@ -349,21 +438,44 @@ func TestCalendarViewFetchesAroundTheCurrentDay(t *testing.T) {
 
 	firstDay := time.Date(2025, 3, 9, 23, 45, 0, 0, time.UTC)
 	v.now = func() time.Time { return firstDay }
-	v.requestRecordings(10)()
+	v.requestRecordings()()
 
 	v.now = func() time.Time { return firstDay.AddDate(0, 0, 1) }
-	v.requestRecordings(10)()
+	v.requestRecordings()()
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(queries) != 2 {
-		t.Fatalf("queries = %v", queries)
+	want := []string{"/calendar/days/2025-03-09.json", "/calendar/days/2025-03-10.json"}
+	if len(paths) != 2 || paths[0] != want[0] || paths[1] != want[1] {
+		t.Errorf("paths = %v, want %v", paths, want)
 	}
-	if queries[0] != "ends_on=2025-03-10&starts_on=2025-03-09" {
-		t.Errorf("first query = %q", queries[0])
-	}
-	if queries[1] != "ends_on=2025-03-11&starts_on=2025-03-10" {
-		t.Errorf("second query still asks for the day the TUI opened on: %q", queries[1])
+}
+
+// The week reads the week the day falls in — one request, not seven days' worth.
+func TestCalendarViewReadsTheWeekForTheWeekSpan(t *testing.T) {
+	var mu sync.Mutex
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		mu.Lock()
+		paths = append(paths, req.URL.Path)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"starts_at":"2025-03-03T00:00:00Z","ends_at":"2025-03-09T23:59:59Z","kind":"week","recordings":{}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	vc := testVC()
+	vc.sdk = hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
+	v := newCalendarView(vc)
+	v.Resize(80, 30)
+	v.now = func() time.Time { return time.Date(2025, 3, 9, 12, 0, 0, 0, time.UTC) }
+	v.viewMode = viewWeek
+
+	v.requestRecordings()()
+	mu.Lock()
+	defer mu.Unlock()
+	if len(paths) != 1 || paths[0] != "/calendar/weeks/2025-03-09.json" {
+		t.Errorf("paths = %v, want one read of the week", paths)
 	}
 }
 
@@ -697,7 +809,6 @@ func TestCalendarPinsTodosBelowTheGrid(t *testing.T) {
 
 func TestCalendarViewHelpBindingsShowsViewToggle(t *testing.T) {
 	v := calendarWithRecordings()
-	v.calIndex = 1
 	// The day view offers the categories and the habits modal. Creating, editing and
 	// deleting a habit are the modal's own keys; the keys that move the day are on the
 	// day's own line; and each span's number is in its own tab above the grid.
