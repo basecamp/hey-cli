@@ -612,6 +612,31 @@ func TestHabitCompletionsMarkTheirHabitRatherThanListingThemselves(t *testing.T)
 	}
 }
 
+// A calendar carries a day's own records alongside its events. Only the events are drawn:
+// a journal entry taken for one came out as a bar of bare color across the day.
+func TestOnlyEventsAreDrawnOnTheGrid(t *testing.T) {
+	events, todos, habits := splitRecordings([]Recording{
+		{ID: 169118695, Title: "Stanko & Kevin", Type: "Calendar::Event", StartsAt: "2026-08-20T14:00:00Z"},
+		// The journal entry behind the stray stripe, as HEY answered it: no title.
+		{ID: 171477000, Type: "Calendar::JournalEntry", AllDay: true, StartsAt: "2026-08-20T00:00:00Z"},
+		{ID: 171477001, Type: "Calendar::DayBackground", AllDay: true, StartsAt: "2026-08-20T00:00:00Z"},
+		// A time track has a name, and still is not an event.
+		{ID: 171477002, Title: "Design work", Type: "Calendar::TimeTrack", StartsAt: "2026-08-20T09:00:00Z"},
+		{ID: 171477003, Title: "Clean the attic", Type: "Calendar::Todo"},
+		{ID: 14796085, Title: "Read", Type: "Calendar::Habit"},
+	})
+
+	if len(events) != 1 || events[0].Title != "Stanko & Kevin" {
+		t.Errorf("events = %+v, want the one event alone", events)
+	}
+	if len(todos) != 1 || todos[0].Title != "Clean the attic" {
+		t.Errorf("todos = %+v", todos)
+	}
+	if len(habits) != 1 || habits[0].Title != "Read" {
+		t.Errorf("habits = %+v", habits)
+	}
+}
+
 func TestHabitsModalOpensOverTheCalendarAndManagesHabits(t *testing.T) {
 	v := newCalendarView(testVC())
 	v.vc.width, v.vc.height = 80, 20
