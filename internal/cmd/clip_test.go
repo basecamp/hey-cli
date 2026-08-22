@@ -259,7 +259,7 @@ func TestClipDeleteUsesClipID(t *testing.T) {
 	}
 }
 
-func TestClipCommandsUseTheSelectedAccount(t *testing.T) {
+func TestClipCommandsForwardTheSelectedAccountContext(t *testing.T) {
 	var requested []string
 	server := linkedAccountServer(t, func(w http.ResponseWriter, r *http.Request) {
 		requested = append(requested, r.Method+" "+r.URL.Path+" account="+r.URL.Query().Get("filtered_account_id"))

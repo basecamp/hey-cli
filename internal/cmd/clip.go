@@ -140,7 +140,7 @@ func newClipCommand() *clipCommand {
 		Use:   "clip",
 		Short: "Save and manage passages from email",
 		Annotations: map[string]string{
-			"agent_notes": "Create a clip from text carried by an email entry, or delete a clip. The CLI verifies that the passage is source-backed by the entry's message content before saving it, with a 64 KiB passage limit and a 1 MiB source-validation limit. Find clip IDs with hey clips.",
+			"agent_notes": "Create a clip from text carried by an email entry, or delete a clip. HEY assigns a created clip to the source entry's account and resolves deletion by identity-owned clip ID across linked accounts; --account selects list presentation. The CLI verifies that the passage is source-backed by the entry's message content before saving it, with a 64 KiB passage limit and a 1 MiB source-validation limit. Find clip IDs with hey clips.",
 		},
 	}
 	clipCommand.cmd.AddCommand(newClipCreateCommand().cmd)
@@ -164,7 +164,7 @@ func newClipCreateCommand() *clipCreateCommand {
 		Use:     "create <entry-id>",
 		Aliases: []string{"add"},
 		Short:   "Save text from an email entry",
-		Long:    "Save a passage from an email entry. The content must be present in the entry's message text; whitespace differences are accepted. Passages are limited to 64 KiB and source entries to 1 MiB for validation.",
+		Long:    "Save a passage from an email entry. HEY assigns the clip to the source entry's account. The content must be present in the entry's message text; whitespace differences are accepted. Passages are limited to 64 KiB and source entries to 1 MiB for validation.",
 		Example: `  hey clip create 987 --content "The launch moves to Wednesday."`,
 		RunE:    createCommand.run,
 		Args:    usageExactOneArg(),
@@ -245,6 +245,7 @@ func newClipDeleteCommand() *clipDeleteCommand {
 		Use:     "delete <clip-id>",
 		Aliases: []string{"remove", "rm"},
 		Short:   "Delete a saved clip",
+		Long:    "Delete an identity-owned clip by ID across linked accounts.",
 		Example: `  hey clip delete 44`,
 		RunE:    deleteCommand.run,
 		Args:    usageExactOneArg(),
