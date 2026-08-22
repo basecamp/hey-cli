@@ -229,11 +229,10 @@ type mailView struct {
 	folderDiscoveryErr     string
 	collectionDiscoveryErr string
 
-	liveRequestID   uint64 // identifies the only live re-read allowed to update the list
-	liveRefreshDue  bool   // a re-read is already on its way
-	liveUpdatesOver bool   // the changes stream closed, so the list is a snapshot again
-	moreRequestID   uint64 // identifies the only page-below read allowed to grow the list
-	searchMoreID    uint64 // the same, for the search results
+	liveRequestID  uint64 // identifies the only live re-read allowed to update the list
+	liveRefreshDue bool   // a re-read is already on its way
+	moreRequestID  uint64 // identifies the only page-below read allowed to grow the list
+	searchMoreID   uint64 // the same, for the search results
 }
 
 func newMailView(vc *viewContext) *mailView {
@@ -694,15 +693,13 @@ func (v *mailView) openModal(open modal) {
 	open.resize(v.vc.width, v.vc.height)
 }
 
-// listHeader carries the one-shot notice, the standing word that the list has stopped
-// following the server, and the Screener's standing invitation above the posting list.
+// listHeader carries the one-shot notice and The Screener's standing invitation above
+// the posting list. Connection status belongs to the app header, where every section
+// can see it.
 func (v *mailView) listHeader() string {
 	var lines []string
 	if v.notice != "" {
 		lines = append(lines, v.vc.styles.title.Render(v.notice))
-	}
-	if v.liveUpdatesOver && !isOrganizedMailSource(v.currentSourceKind()) {
-		lines = append(lines, v.vc.styles.title.Render("Not live any more — press ctrl+r to reload"))
 	}
 	if hint := v.screenerHint(); hint != "" {
 		lines = append(lines, centerText(v.vc.styles.pill.Render(hint), v.vc.width), "")
@@ -1314,14 +1311,12 @@ func (v *mailView) loadMorePostings() tea.Cmd {
 	return v.fetchMorePostings(v.vc.ctx, v.moreRequestID, *source, v.postingPaging.nextPage)
 }
 
-// reloadPostings reads the box on screen again, on the user's say-so. It is how a list
-// that stopped being live is caught up, and how anything else is put right.
+// reloadPostings reads the box on screen again, on the user's say-so.
 func (v *mailView) reloadPostings() tea.Cmd {
 	source := v.currentSource()
 	if source == nil {
 		return nil
 	}
-	v.liveUpdatesOver = false
 	return v.requestPostings(*source)
 }
 
@@ -1361,19 +1356,6 @@ func (v *mailView) showsBox(boxID int64) bool {
 		return false
 	}
 	return boxID == AnyBoxChanged || boxID == source.ID
-}
-
-// liveUpdatesStopped stands above the list until the box is read again: what was live is
-// a snapshot now, and a reader has no other way of telling.
-func (v *mailView) liveUpdatesStopped() {
-	v.liveUpdatesOver = true
-	v.liveRefreshDue = false
-}
-
-// liveUpdatesUnavailable is the other way it goes wrong: there was never a stream to
-// begin with, which is worth saying once rather than standing over the list forever.
-func (v *mailView) liveUpdatesUnavailable(err error) {
-	v.noteFailure("Live updates unavailable", err)
 }
 
 // screenerUpdatesUnavailable is said in the mail list because that is where The Screener

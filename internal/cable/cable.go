@@ -42,6 +42,10 @@ func Dial(ctx context.Context, baseURL string, authMgr *auth.Manager, options ..
 
 	client := actioncable.New(cableURL, settings...)
 	if err := client.Connect(ctx); err != nil {
+		// Connect's context bounds the caller's wait rather than the client's lifetime.
+		// A dial that did not complete has no owner to close it, so stop its retry loop
+		// before returning the error.
+		_ = client.Close()
 		return nil, err
 	}
 

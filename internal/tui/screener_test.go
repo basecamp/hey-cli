@@ -269,6 +269,11 @@ func TestScreenerNoticesSayWhatTheCLISays(t *testing.T) {
 			want: "Could not screen Jane Doe: not authenticated",
 		},
 		{
+			name: "a classified error keeps the CLI's message",
+			err:  apierr.ErrAuth("the cable server rejected these credentials"),
+			want: "Could not screen Jane Doe: the cable server rejected these credentials",
+		},
+		{
 			name: "an error that never went near the API keeps its own text",
 			err:  errors.New("no route to host"),
 			want: "Could not screen Jane Doe: no route to host",

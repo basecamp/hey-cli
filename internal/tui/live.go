@@ -2,9 +2,12 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
 // Watchers are the streams the TUI follows to stay live. Both are optional: without them
@@ -14,19 +17,47 @@ type Watchers struct {
 	Screener ScreenerWatcher
 }
 
-// MailWatcher opens the stream of boxes that changed, so the TUI is told when to re-read
-// a box instead of polling for it. The stream closes when ctx is done, or when whatever
-// is behind it has given up for good — which is what tells the TUI it isn't live any more.
-type MailWatcher func(ctx context.Context) (<-chan int64, error)
+// MailWatcher opens the stream of mail and connection events that keeps the TUI live.
+// Box events ask it to re-read changed mail, while connection events let it show when
+// live updates are reconnecting. The stream closes when ctx is done, or when whatever
+// is behind it has given up for good.
+type MailWatcher func(ctx context.Context) (<-chan MailWatchEvent, error)
 
-// ScreenerWatcher opens the stream that says The Screener changed. HEY signs the stream
-// name and serves it alongside the pending count, so a watcher can only be opened once
-// that name has been read — there is nothing to subscribe to before then.
-type ScreenerWatcher func(ctx context.Context, signedStreamName string) (<-chan struct{}, error)
+// MailConnection is a transition reported by the connection behind a mail watch.
+type MailConnection uint8
+
+const (
+	MailConnectionUnchanged MailConnection = iota
+	MailConnectionDisconnected
+	MailConnectionReconnected
+)
+
+// MailWatchEvent reports either a changed box or a connection transition. A disconnected
+// event says whether the connection is already retrying; a reconnect asks the TUI to
+// catch up the box on screen because broadcasts sent during the gap were missed.
+type MailWatchEvent struct {
+	BoxID         int64
+	Connection    MailConnection
+	WillReconnect bool
+}
+
+// ScreenerWatcher opens the stream that says The Screener changed. ctx owns this signed
+// subscription; connectionCtx owns the shared TUI connection that remains live when a
+// signed stream is replaced. HEY serves the signed name alongside the pending count, so
+// a watcher opens after that name has been read.
+type ScreenerWatcher func(ctx, connectionCtx context.Context, signedStreamName string) (<-chan struct{}, error)
 
 // AnyBoxChanged stands for "something changed, we don't know what" — a watcher sends it
 // after a reconnect, where the changes broadcast while it was away were missed.
 const AnyBoxChanged int64 = 0
+
+type mailWatchStatus uint8
+
+const (
+	mailWatchLive mailWatchStatus = iota
+	mailWatchReconnecting
+	mailWatchUnavailable
+)
 
 // liveRefreshDelay collects one delivery's changes into a single re-read: a thread lands
 // as several postings, and each one rings the doorbell separately.
@@ -35,47 +66,137 @@ const AnyBoxChanged int64 = 0
 // or a picker is open over the list. Nothing is read until it closes, but the change is
 // held onto rather than dropped.
 const (
-	liveRefreshDelay = 500 * time.Millisecond
-	liveRetryDelay   = 2 * time.Second
+	liveRefreshDelay      = 500 * time.Millisecond
+	liveRetryDelay        = 2 * time.Second
+	mailWatchFirstRetry   = 2 * time.Second
+	mailWatchMaximumRetry = 30 * time.Second
 )
 
 // mailWatchStartedMsg carries the stream a watcher opened, or the reason there isn't one.
 type mailWatchStartedMsg struct {
-	changes <-chan int64
+	attempt uint64
+	events  <-chan MailWatchEvent
 	err     error
 }
 
-// mailChangedMsg reports one changed box, or a stream that has closed.
-type mailChangedMsg struct {
-	boxID  int64
+// mailWatchEventMsg reports one mail-watch event, or a stream that has closed.
+type mailWatchEventMsg struct {
+	event  MailWatchEvent
 	closed bool
 }
+
+// mailWatchRetryMsg asks the model to open a new watch after a failed start or a stream
+// that stopped for good. The attempt identifies the state that scheduled it, so a timer
+// left behind by a successful connection cannot replace that connection.
+type mailWatchRetryMsg struct{ attempt uint64 }
 
 // mailRefreshDueMsg is the re-read a change asked for, once its delay has passed.
 type mailRefreshDueMsg struct{ boxID int64 }
 
-func startMailWatchCmd(ctx context.Context, watch MailWatcher) tea.Cmd {
+func startMailWatchCmd(ctx context.Context, watch MailWatcher, attempt uint64) tea.Cmd {
 	if watch == nil {
 		return nil
 	}
 	return func() tea.Msg {
-		changes, err := watch(ctx)
-		return mailWatchStartedMsg{changes: changes, err: err}
+		events, err := watch(ctx)
+		return mailWatchStartedMsg{attempt: attempt, events: events, err: err}
 	}
 }
 
-// waitForMailChangeCmd blocks until the next box changes, then reports it once. The
-// handler re-arms it, the way watchThemeCmd is re-armed.
-func waitForMailChangeCmd(changes <-chan int64) tea.Cmd {
-	if changes == nil {
+// waitForMailWatchEventCmd blocks until the next box or connection event, then reports it
+// once. The handler re-arms it, the way watchThemeCmd is re-armed.
+func waitForMailWatchEventCmd(events <-chan MailWatchEvent) tea.Cmd {
+	if events == nil {
 		return nil
 	}
 	return func() tea.Msg {
-		boxID, open := <-changes
+		event, open := <-events
 		if !open {
-			return mailChangedMsg{closed: true}
+			return mailWatchEventMsg{closed: true}
 		}
-		return mailChangedMsg{boxID: boxID}
+		return mailWatchEventMsg{event: event}
+	}
+}
+
+func retryMailWatchLaterCmd(attempt uint64, delay time.Duration) tea.Cmd {
+	return tea.Tick(delay, func(time.Time) tea.Msg { return mailWatchRetryMsg{attempt: attempt} })
+}
+
+func mailWatchRetryDelay(failures int) time.Duration {
+	delay := mailWatchFirstRetry
+	for range max(failures-1, 0) {
+		if delay >= mailWatchMaximumRetry/2 {
+			return mailWatchMaximumRetry
+		}
+		delay *= 2
+	}
+	return min(delay, mailWatchMaximumRetry)
+}
+
+func retryableMailWatchError(err error) bool {
+	var known *apierr.Error
+	if errors.As(err, &known) {
+		return known.Code == apierr.CodeNetwork
+	}
+	return apierr.AsError(apierr.FromSDK(err)).Code == apierr.CodeNetwork
+}
+
+func (m *model) mailWatchFailed(err error) tea.Cmd {
+	m.mailWatchEvents = nil
+	if retryableMailWatchError(err) {
+		m.mailWatchStatus = mailWatchReconnecting
+		m.mailWatchReason = "Offline — reconnecting to HEY"
+		return m.retryMailWatch()
+	}
+
+	m.mailWatchStatus = mailWatchUnavailable
+	m.mailWatchReason = errorNotice("Live updates unavailable", err)
+	return nil
+}
+
+func (m *model) retryMailWatch() tea.Cmd {
+	if m.watchMail == nil {
+		return nil
+	}
+	m.mailWatchStatus = mailWatchReconnecting
+	m.mailWatchFailures++
+	return retryMailWatchLaterCmd(m.mailWatchAttempt, mailWatchRetryDelay(m.mailWatchFailures))
+}
+
+func (m *model) mailWatchStopped() tea.Cmd {
+	m.mailWatchReason = "Live updates disconnected — reconnecting to HEY"
+	return m.retryMailWatch()
+}
+
+func (m *model) mailWatchDisconnected(willReconnect bool) {
+	m.mailWatchStatus = mailWatchReconnecting
+	m.mailWatchReason = "Live updates disconnected — reconnecting to HEY"
+	if !willReconnect {
+		m.mailWatchStatus = mailWatchUnavailable
+		m.mailWatchReason = "Live updates disconnected"
+	}
+}
+
+func (m *model) mailWatchConnected() {
+	m.mailWatchStatus = mailWatchLive
+	m.mailWatchReason = ""
+	m.mailWatchFailures = 0
+}
+
+func (m model) mailWatchNotice() string {
+	switch m.mailWatchStatus {
+	case mailWatchReconnecting:
+		if m.mailWatchReason != "" {
+			return m.mailWatchReason
+		}
+		return "Live updates disconnected — reconnecting to HEY"
+	case mailWatchUnavailable:
+		if m.mailWatchReason != "" {
+			return m.mailWatchReason
+		}
+		return "Live updates unavailable"
+	default:
+		return ""
 	}
 }
 
@@ -107,12 +228,12 @@ type screenerChangedMsg struct {
 // screenerRefreshDueMsg is the re-read a Screener change asked for, once its delay has passed.
 type screenerRefreshDueMsg struct{}
 
-func startScreenerWatchCmd(ctx context.Context, watch ScreenerWatcher, signedStreamName string) tea.Cmd {
+func startScreenerWatchCmd(ctx, connectionCtx context.Context, watch ScreenerWatcher, signedStreamName string) tea.Cmd {
 	if watch == nil || signedStreamName == "" {
 		return nil
 	}
 	return func() tea.Msg {
-		changes, err := watch(ctx, signedStreamName)
+		changes, err := watch(ctx, connectionCtx, signedStreamName)
 		return screenerWatchStartedMsg{stream: signedStreamName, changes: changes, err: err}
 	}
 }

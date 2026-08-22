@@ -225,9 +225,10 @@ Navigate between Mail, Contacts, Calendar, and Journal. The context-sensitive sh
 The mail list follows the server. HEY tells the TUI when a box changed over the same
 Action Cable connection `hey watch` uses, and the box on screen is read again a moment
 later, keeping your place in the list and anything you had selected. A change that arrives
-while a form or a picker is open waits for it to close. Press Ctrl+R to read the box again
-yourself; if the connection goes away for good, the list says so and Ctrl+R is how you
-catch up.
+while a form or a picker is open waits for it to close. A standing status below the header
+appears in every section while the network is offline or live updates are reconnecting.
+The TUI retries the connection, clears the status when it returns, and catches up the box
+on screen; Ctrl+R remains available whenever you want to read it yourself.
 
 The Screener keeps up too. When a first-time sender writes, the count above the threads
 changes on its own, and if you have The Screener open the new sender appears in the queue

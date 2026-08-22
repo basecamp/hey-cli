@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"errors"
+
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/terminal"
 )
@@ -11,7 +13,10 @@ import (
 // a shell prompt what to run, and this is read inside a full-screen app. The
 // message may be the server's, so the line is sanitized before it is shown.
 func errorNotice(what string, err error) string {
-	e := apierr.AsError(apierr.FromSDK(err))
+	var e *apierr.Error
+	if !errors.As(err, &e) {
+		e = apierr.AsError(apierr.FromSDK(err))
+	}
 	if e.Hint != "" && e.Code != apierr.CodeAuth {
 		return terminal.SanitizeLine(what + ": " + e.Message + " — " + e.Hint)
 	}
