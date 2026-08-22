@@ -186,7 +186,8 @@ func TestScreenerScreensSenderIn(t *testing.T) {
 	if done.err != nil {
 		t.Fatalf("screening in failed: %v", done.err)
 	}
-	view.Update(done)
+	answer, _ := view.Update(done)
+	toast := deliverToView(view, answer)
 
 	if len(view.pending.rows) != 1 || view.pending.rows[0].id != 92 {
 		t.Errorf("screened sender should leave the queue: %+v", view.pending.rows)
@@ -194,8 +195,8 @@ func TestScreenerScreensSenderIn(t *testing.T) {
 	if view.pendingCount != 1 {
 		t.Errorf("pendingCount = %d, want 1", view.pendingCount)
 	}
-	if view.notice != "Jane Doe screened in" {
-		t.Errorf("notice = %q", view.notice)
+	if toast != "Jane Doe screened in" {
+		t.Errorf("toast = %q", toast)
 	}
 
 	requests := state.snapshot()
@@ -213,9 +214,9 @@ func TestScreenerScreensSenderOut(t *testing.T) {
 	if done.status != hey.ClearanceDenied || done.name != "Bob Smith" {
 		t.Fatalf("decision = %+v", done)
 	}
-	view.Update(done)
-	if view.notice != "Bob Smith screened out" {
-		t.Errorf("notice = %q", view.notice)
+	answer, _ := view.Update(done)
+	if toast := deliverToView(view, answer); toast != "Bob Smith screened out" {
+		t.Errorf("toast = %q", toast)
 	}
 
 	requests := state.snapshot()

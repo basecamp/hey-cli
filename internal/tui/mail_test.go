@@ -505,7 +505,8 @@ func TestMailViewPostingKeysCallExpectedEndpoints(t *testing.T) {
 			if done.effect != tt.effect {
 				t.Errorf("action effect = %v, want %v", done.effect, tt.effect)
 			}
-			v.Update(done)
+			answer, _ := v.Update(done)
+			toast := deliverToView(v, answer)
 			if v.AccountSwitchBlocked() {
 				t.Fatal("completed posting mutation still blocks account switching")
 			}
@@ -539,8 +540,8 @@ func TestMailViewPostingKeysCallExpectedEndpoints(t *testing.T) {
 			if tt.effect == postingActionIgnore && !v.postingList.postings[0].Muted {
 				t.Error("selected posting should be ignored")
 			}
-			if v.notice != tt.notice || !strings.Contains(v.View(), tt.notice) {
-				t.Errorf("notice = %q, want visible %q", v.notice, tt.notice)
+			if toast != tt.notice {
+				t.Errorf("toast = %q, want %q", toast, tt.notice)
 			}
 		})
 	}
@@ -574,7 +575,8 @@ func TestMailViewUnseenKeysRestoreSeenAndBubbledUpThreads(t *testing.T) {
 				t.Errorf("posting_ids = %v, want [100]", recorded.body.PostingIDs)
 			}
 
-			v.Update(done)
+			answer, _ := v.Update(done)
+			toast := deliverToView(v, answer)
 			posting := v.postingList.selectedPosting()
 			if posting == nil || posting.ID != 100 || posting.Seen || posting.BubbledUp {
 				t.Errorf("selected posting after unseen = %+v", posting)
@@ -582,8 +584,8 @@ func TestMailViewUnseenKeysRestoreSeenAndBubbledUpThreads(t *testing.T) {
 			if v.postingList.postings[0].ID != 100 {
 				t.Errorf("unseen posting did not move to New for You: %+v", v.postingList.postings)
 			}
-			if v.notice != "Thread marked as unseen" {
-				t.Errorf("notice = %q", v.notice)
+			if toast != "Thread marked as unseen" {
+				t.Errorf("toast = %q", toast)
 			}
 		})
 	}
@@ -649,15 +651,16 @@ func TestMailViewStopIgnoringCallsDeleteAndKeepsThreadVisible(t *testing.T) {
 		t.Errorf("posting_ids = %v, want [100]", recorded.body.PostingIDs)
 	}
 
-	v.Update(done)
+	answer, _ := v.Update(done)
+	toast := deliverToView(v, answer)
 	if len(v.postingList.postings) != 2 {
 		t.Errorf("posting count = %d, want ignored thread to remain visible", len(v.postingList.postings))
 	}
 	if v.postingList.postings[0].Muted {
 		t.Error("selected posting should no longer be ignored")
 	}
-	if v.notice != "Stopped ignoring thread" {
-		t.Errorf("notice = %q, want %q", v.notice, "Stopped ignoring thread")
+	if toast != "Stopped ignoring thread" {
+		t.Errorf("toast = %q, want %q", toast, "Stopped ignoring thread")
 	}
 }
 
@@ -702,9 +705,10 @@ func TestMailViewImboxKeysMoveToImbox(t *testing.T) {
 			if recorded.path != "/postings/moves.json" || recorded.body.BoxID == nil || *recorded.body.BoxID != 1 {
 				t.Errorf("request = %s body=%+v", recorded.path, recorded.body)
 			}
-			v.Update(done)
-			if v.postingIndex(100) >= 0 || v.notice != "Thread moved to Imbox" {
-				t.Errorf("posting present=%v notice=%q", v.postingIndex(100) >= 0, v.notice)
+			answer, _ := v.Update(done)
+			toast := deliverToView(v, answer)
+			if v.postingIndex(100) >= 0 || toast != "Thread moved to Imbox" {
+				t.Errorf("posting present=%v toast=%q", v.postingIndex(100) >= 0, toast)
 			}
 		})
 	}
@@ -761,12 +765,13 @@ func TestMailViewMovePickerMovesToSelectedBox(t *testing.T) {
 		t.Errorf("posting_ids = %v, want [100]", recorded.body.PostingIDs)
 	}
 
-	v.Update(done)
+	answer, _ := v.Update(done)
+	toast := deliverToView(v, answer)
 	if v.postingIndex(100) >= 0 {
 		t.Error("moved posting should leave the current box")
 	}
-	if v.notice != "Thread moved to The Feed" {
-		t.Errorf("notice = %q", v.notice)
+	if toast != "Thread moved to The Feed" {
+		t.Errorf("toast = %q", toast)
 	}
 }
 
@@ -1176,9 +1181,9 @@ func TestMailViewFolderPickerFilesAndUnfilesThread(t *testing.T) {
 		if len(recorded.body.PostingIDs) != 1 || recorded.body.PostingIDs[0] != 100 {
 			t.Errorf("posting_ids = %v", recorded.body.PostingIDs)
 		}
-		refresh, consumed := v.Update(done)
-		if !consumed || refresh == nil || v.notice != "Label Receipts added" {
-			t.Errorf("completion = consumed:%v refresh:%v notice:%q", consumed, refresh != nil, v.notice)
+		answer, consumed := v.Update(done)
+		if toast, _ := toastAndRest(t, answer); !consumed || toast != "Label Receipts added" {
+			t.Errorf("completion = consumed:%v toast:%q", consumed, toast)
 		}
 	})
 
@@ -1218,9 +1223,9 @@ func TestMailViewFolderPickerFilesAndUnfilesThread(t *testing.T) {
 		if len(recorded.rawQueries) == 0 || strings.Contains(recorded.rawQueries[len(recorded.rawQueries)-1], "folder_id=") {
 			t.Errorf("queries = %v, want no folder_id", recorded.rawQueries)
 		}
-		v.Update(done)
-		if v.notice != "All labels removed" {
-			t.Errorf("notice = %q", v.notice)
+		answer, _ := v.Update(done)
+		if toast := deliverToView(v, answer); toast != "All labels removed" {
+			t.Errorf("toast = %q", toast)
 		}
 	})
 }
@@ -1243,9 +1248,9 @@ func TestMailViewFolderPickerCreatesFolder(t *testing.T) {
 	if len(recorded.body.PostingIDs) != 1 || recorded.body.PostingIDs[0] != 100 {
 		t.Errorf("posting_ids = %v", recorded.body.PostingIDs)
 	}
-	refresh, consumed := v.Update(done)
-	if !consumed || refresh == nil || v.notice != "Label Travel receipts created" {
-		t.Errorf("completion = consumed:%v refresh:%v notice:%q", consumed, refresh != nil, v.notice)
+	answer, consumed := v.Update(done)
+	if toast, _ := toastAndRest(t, answer); !consumed || toast != "Label Travel receipts created" {
+		t.Errorf("completion = consumed:%v toast:%q", consumed, toast)
 	}
 }
 
@@ -2191,14 +2196,15 @@ func TestMailViewSavesSelectedAttachmentOnlyAfterExplicitAction(t *testing.T) {
 	if saveCalls != 0 {
 		t.Fatal("handling the key must defer file access to the command")
 	}
-	if _, consumed := v.Update(save()); !consumed {
+	answer, consumed := v.Update(save())
+	if !consumed {
 		t.Fatal("attachment save result was not consumed")
 	}
 	if saveCalls != 1 || savedDestination != "chart.png" || savedURL != "/rails/blobs/chart.png" || savedForce {
 		t.Errorf("save call = count:%d destination:%q URL:%q force:%v", saveCalls, savedDestination, savedURL, savedForce)
 	}
-	if v.notice != "Saved attachment to chart.png" {
-		t.Errorf("save notice = %q", v.notice)
+	if toast := deliverToView(v, answer); toast != "Saved attachment to chart.png" {
+		t.Errorf("save toast = %q", toast)
 	}
 }
 
@@ -2216,9 +2222,9 @@ func TestMailViewExplainsThatSaveWillNotReplaceExistingAttachment(t *testing.T) 
 	})
 
 	save := v.HandleContentKey(keyPress("s"))
-	v.Update(save())
-	if v.notice != "Attachment already exists: agenda.pdf" {
-		t.Errorf("existing attachment notice = %q", v.notice)
+	answer, _ := v.Update(save())
+	if toast := deliverToView(v, answer); toast != "Attachment already exists: agenda.pdf" {
+		t.Errorf("existing attachment toast = %q", toast)
 	}
 }
 
@@ -2258,7 +2264,8 @@ func TestMailViewDownloadsBeforeExplicitExternalOpen(t *testing.T) {
 	if len(events) != 0 {
 		t.Fatalf("handling the key opened an attachment before the command ran: %v", events)
 	}
-	if _, consumed := v.Update(open()); !consumed {
+	answer, consumed := v.Update(open())
+	if !consumed {
 		t.Fatal("attachment open result was not consumed")
 	}
 	if fmt.Sprint(events) != "[save open]" {
@@ -2267,8 +2274,8 @@ func TestMailViewDownloadsBeforeExplicitExternalOpen(t *testing.T) {
 	if openedPath != filepath.Join(temporaryDirectory, "chart.png") {
 		t.Errorf("opened path = %q", openedPath)
 	}
-	if v.notice != "Opened attachment chart.png" {
-		t.Errorf("open notice = %q", v.notice)
+	if toast := deliverToView(v, answer); toast != "Opened attachment chart.png" {
+		t.Errorf("open toast = %q", toast)
 	}
 }
 

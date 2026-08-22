@@ -317,10 +317,9 @@ func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.pending.remove(msg.clearanceID)
 		v.pendingCount = max(v.pendingCount-1, 0)
 		v.history.loaded = false
-		v.notice = msg.name + " " + screenedVerb(msg.status)
 		// A sender being dealt with can uncover the bottom of the queue, so the senders
 		// behind them come up rather than leaving an empty pane with a count over it.
-		return v.loadMoreRows(), true
+		return tea.Batch(notify(msg.name+" "+screenedVerb(msg.status)), v.loadMoreRows()), true
 
 	case screenerClearedMsg:
 		if v.mutations > 0 {

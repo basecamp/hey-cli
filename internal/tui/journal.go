@@ -132,7 +132,6 @@ type journalView struct {
 	prompt        *journalPrompt
 	confirmRemove bool
 	selectDate    string
-	notice        string
 
 	requests requestLane[journalRequestKind]
 }
@@ -173,8 +172,7 @@ func (v *journalView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.loadingMore = false
 		if msg.err != nil {
-			v.notice = errorNotice("Could not load older journal entries", msg.err)
-			return nil, true
+			return notifyError("Could not load older journal entries", msg.err), true
 		}
 		v.list.growEntries(msg.entries)
 		v.nextPage = msg.nextPage
@@ -201,24 +199,24 @@ func (v *journalView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.requests.finish(msg.requestID)
 		if msg.err != nil {
+			// A form that is open says so itself; everything else says it in a toast.
 			if v.form != nil {
 				v.form.saving = false
 				v.form.status = errorNotice("Save failed", msg.err)
 				v.form.isError = true
-			} else {
-				v.notice = errorNotice("Could not remove journal entry", msg.err)
+				return nil, true
 			}
-			return nil, true
+			return notifyError("Could not remove journal entry", msg.err), true
 		}
 		v.form = nil
 		v.inDetail = false
 		v.query = ""
 		v.selectDate = msg.date
-		v.notice = "Journal entry saved"
+		saved := "Journal entry saved"
 		if msg.removed {
-			v.notice = "Journal entry removed"
+			saved = "Journal entry removed"
 		}
-		return v.requestFeed(""), true
+		return tea.Batch(notify(saved), v.requestFeed("")), true
 	}
 
 	if v.prompt != nil {
@@ -243,16 +241,13 @@ func (v *journalView) View() string {
 		return v.form.view()
 	}
 	if v.inDetail {
-		if v.notice != "" {
-			return v.vc.styles.title.Render(v.notice) + "\n" + v.detailView.View()
-		}
 		return v.detailView.View()
 	}
 
+	// What just happened is a toast now, so the heading is only ever about what the reader
+	// is looking at.
 	var heading string
 	switch {
-	case v.notice != "":
-		heading = v.vc.styles.title.Render(v.notice)
 	case v.query != "":
 		heading = fmt.Sprintf("Search: %s · %d results", terminal.SanitizeLine(v.query), len(v.list.entries))
 	case len(v.list.entries) == 0 && v.loaded:
@@ -338,7 +333,6 @@ func (v *journalView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	if msg.String() != "x" {
 		v.confirmRemove = false
 	}
-	v.notice = ""
 	if v.inDetail {
 		switch msg.String() {
 		case "e":
@@ -349,9 +343,10 @@ func (v *journalView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 			if strings.TrimSpace(v.detailContent) == "" {
 				return nil
 			}
+			// The help bar asks for the second x — "confirm remove" — as the habits
+			// picker does. A toast would be gone before the reader answered.
 			if !v.confirmRemove {
 				v.confirmRemove = true
-				v.notice = "Press x again to permanently remove this journal entry"
 				return nil
 			}
 			return v.removeJournalEntry(v.detailDate)
@@ -439,7 +434,6 @@ func (v *journalView) startPrompt(kind journalPromptKind, value string) tea.Cmd 
 }
 
 func (v *journalView) startEditor() tea.Cmd {
-	v.notice = ""
 	v.form = newJournalForm(v.detailDate, v.detailContent, v.vc.styles)
 	v.form.resize(v.vc.width, v.vc.height)
 	return v.form.init()
