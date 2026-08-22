@@ -225,6 +225,12 @@ func TestToMarkdownEscapesWhatTheSanitizerUncovers(t *testing.T) {
 		{"<p>\u00ad- item</p>", "\\- item"},
 		{"<p>\u202e> quoted</p>", "\\> quoted"},
 		{"<p>\x1b[31m# red</p>", "\\# red"},
+		{"<p>\u200b # heading</p>", "\\# heading"},
+		{"<p>\u200b \u200b \u200b \u200b code?</p>", "code?"},
+		{"<p>\u200b \u200b \u200b \u200b 1. item</p>", "1\\. item"},
+		{"<p>a \u200b b</p>", "a b"},
+		{"<p>a<span>\u200b b</span></p>", "a b"},
+		{"<p>a <span>\u200b b</span></p>", "a b"},
 	} {
 		if got := toMarkdown(test.in); got != test.want {
 			t.Errorf("ToMarkdown(%q) = %q, want %q", test.in, got, test.want)

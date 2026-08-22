@@ -104,7 +104,27 @@ func sanitizeProse(s, line string) string {
 		strings.HasSuffix(terminal.Sanitize(context+tail+string(last)+"é"), string(last)+"é") {
 		tail += string(last)
 	}
-	return tail
+	return recollapse(tail, line)
+}
+
+// recollapse folds the whitespace the sanitizer uncovered — "\u200b # heading" is
+// " # heading" once the zero width space is gone — the way writeText folded the run
+// before it: runs of whitespace to one space, none at the start of a line, so that a
+// block marker cannot hide behind a space the line-start escape does not look past, and
+// four of them cannot open an indented code block. A space at either edge of the run
+// stays one space between it and its neighbours, as writeSpace would have left it.
+func recollapse(s, line string) string {
+	folded := strings.Join(strings.Fields(s), " ")
+	if folded == "" {
+		return ""
+	}
+	if startsWithSpace(s) && line != "" && !strings.HasSuffix(line, " ") {
+		folded = " " + folded
+	}
+	if endsWithSpace(s) {
+		folded += " "
+	}
+	return folded
 }
 
 // lineContext is the end of a line that the sanitizer's decisions about what follows
