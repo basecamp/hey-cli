@@ -540,6 +540,163 @@ func TestDayLabelsCoverTodosAndHabits(t *testing.T) {
 
 // --- Moving between days ---
 
+// --- Walking the events with the arrows ---
+
+// dayWithEvents is a calendar sitting on one day that holds two timed events and an all-day
+// one, so the order the arrows walk can be checked against the order they are drawn in.
+func dayWithEvents(t *testing.T) *calendarView {
+	t.Helper()
+
+	v := newCalendarView(testVC())
+	v.Resize(100, 30)
+	v.now = func() time.Time { return time.Date(2026, 8, 20, 9, 0, 0, 0, time.Local) }
+	v.Update(calendarsLoadedMsg{calendars: testCalendars()})
+	v.Update(recordingsLoadedMsg{requestResult: currentRequest(v), recordings: []Recording{
+		{ID: 2, Title: "Product Planning", Type: "Calendar::Event",
+			StartsAt: atLocal("2026-08-20T17:00:00"), EndsAt: atLocal("2026-08-20T18:00:00")},
+		{ID: 1, Title: "Stanko & Kevin", Type: "Calendar::Event",
+			StartsAt: atLocal("2026-08-20T14:00:00"), EndsAt: atLocal("2026-08-20T15:00:00")},
+		{ID: 3, Title: "Summer friday", AllDay: true, Type: "Calendar::Event",
+			StartsAt: at("2026-08-20T00:00:00Z"), EndsAt: at("2026-08-20T00:00:00Z")},
+	}})
+	return v
+}
+
+// The arrows walk the events in the order they are drawn: the timed ones by the clock, then
+// the all-day ones beneath them. Traversal following the layout is the point — → should
+// never land somewhere the eye has to hunt for.
+func TestArrowsWalkTheDaysEventsInTheOrderTheyAreDrawn(t *testing.T) {
+	v := dayWithEvents(t)
+
+	if events := v.selectableEvents(); len(events) != 3 ||
+		events[0].ID != 1 || events[1].ID != 2 || events[2].ID != 3 {
+		t.Fatalf("order = %+v, want the two timed by the clock then the all-day one", events)
+	}
+
+	// Nothing is selected until an arrow is pressed, and → picks up the first.
+	if v.selectedEvent != 0 {
+		t.Errorf("a day opens with %d selected, want nothing", v.selectedEvent)
+	}
+	v.HandleContentKey(keyPress("right"))
+	if v.selectedEvent != 1 {
+		t.Errorf("first → selected %d, want the 14:00", v.selectedEvent)
+	}
+	v.HandleContentKey(keyPress("right"))
+	v.HandleContentKey(keyPress("right"))
+	if v.selectedEvent != 3 {
+		t.Errorf("walking right ended on %d, want the all-day one", v.selectedEvent)
+	}
+
+	// And back again.
+	v.HandleContentKey(keyPress("left"))
+	if v.selectedEvent != 2 {
+		t.Errorf("← from the all-day event selected %d, want the 17:00", v.selectedEvent)
+	}
+}
+
+// Stepping off either end moves the span, and lands on the far end of the one it arrives at,
+// so holding an arrow walks through the calendar rather than stopping at every screen.
+func TestArrowsStepTheSpanOffEitherEnd(t *testing.T) {
+	v := dayWithEvents(t)
+	today := v.day()
+
+	// → from the last event asks for the next day.
+	v.selectedEvent = 3
+	if cmd := v.HandleContentKey(keyPress("right")); cmd == nil {
+		t.Fatal("→ off the end did not read the next day")
+	}
+	if got := v.day(); !sameDay(got, today.AddDate(0, 0, 1)) {
+		t.Errorf("→ off the end moved to %s, want tomorrow", got.Format(time.DateOnly))
+	}
+	if v.selectFromEdge != 1 {
+		t.Errorf("selectFromEdge = %d, want the first event of what arrives", v.selectFromEdge)
+	}
+
+	// What comes back is walked into from the near side.
+	v.Update(recordingsLoadedMsg{requestResult: currentRequest(v), recordings: []Recording{
+		{ID: 9, Title: "Standup", Type: "Calendar::Event",
+			StartsAt: atLocal("2026-08-21T09:00:00"), EndsAt: atLocal("2026-08-21T09:30:00")},
+		{ID: 8, Title: "Retro", Type: "Calendar::Event",
+			StartsAt: atLocal("2026-08-21T16:00:00"), EndsAt: atLocal("2026-08-21T17:00:00")},
+	}})
+	if v.selectedEvent != 9 {
+		t.Errorf("landed on %d, want the first event of the new day", v.selectedEvent)
+	}
+	if v.selectFromEdge != 0 {
+		t.Error("selectFromEdge should be spent once it has been used")
+	}
+
+	// ← from the first event asks for the day before, and lands on its last event.
+	v.HandleContentKey(keyPress("left"))
+	if v.selectFromEdge != -1 {
+		t.Errorf("selectFromEdge = %d, want the last event of what arrives", v.selectFromEdge)
+	}
+	v.Update(recordingsLoadedMsg{requestResult: currentRequest(v), recordings: []Recording{
+		{ID: 5, Title: "Morning", Type: "Calendar::Event",
+			StartsAt: atLocal("2026-08-20T08:00:00"), EndsAt: atLocal("2026-08-20T09:00:00")},
+		{ID: 6, Title: "Evening", Type: "Calendar::Event",
+			StartsAt: atLocal("2026-08-20T20:00:00"), EndsAt: atLocal("2026-08-20T21:00:00")},
+	}})
+	if v.selectedEvent != 6 {
+		t.Errorf("landed on %d, want the last event of the day before", v.selectedEvent)
+	}
+}
+
+// A day with nothing on it has no event to step off, so an arrow moves the span directly.
+func TestArrowsStepAnEmptySpan(t *testing.T) {
+	v := dayWithEvents(t)
+	today := v.day()
+	v.Update(recordingsLoadedMsg{requestResult: currentRequest(v), recordings: nil})
+
+	if cmd := v.HandleContentKey(keyPress("right")); cmd == nil {
+		t.Fatal("→ on an empty day did not read the next one")
+	}
+	if got := v.day(); !sameDay(got, today.AddDate(0, 0, 1)) {
+		t.Errorf("moved to %s, want tomorrow", got.Format(time.DateOnly))
+	}
+}
+
+// A selection that is no longer there is let go of rather than kept pointing at nothing: the
+// event was deleted, or the reader moved to a day it is not on.
+func TestSelectionIsReleasedWhenItsEventGoes(t *testing.T) {
+	v := dayWithEvents(t)
+	v.selectedEvent = 1
+
+	v.Update(recordingsLoadedMsg{requestResult: currentRequest(v), recordings: []Recording{
+		{ID: 2, Title: "Product Planning", Type: "Calendar::Event",
+			StartsAt: atLocal("2026-08-20T17:00:00"), EndsAt: atLocal("2026-08-20T18:00:00")},
+	}})
+	if v.selectedEvent != 0 {
+		t.Errorf("selection = %d, want it let go of", v.selectedEvent)
+	}
+}
+
+// The week walks its events day by day, and the all-day band at its foot comes last — the
+// order they are drawn in. A multi-day event is walked once, not once per day it covers.
+func TestArrowsWalkTheWeekDayByDay(t *testing.T) {
+	v := dayWithEvents(t)
+	v.viewMode = viewWeek
+	v.Update(recordingsLoadedMsg{requestResult: currentRequest(v), recordings: []Recording{
+		{ID: 1, Title: "Thursday", Type: "Calendar::Event",
+			StartsAt: atLocal("2026-08-20T14:00:00"), EndsAt: atLocal("2026-08-20T15:00:00")},
+		{ID: 2, Title: "Monday", Type: "Calendar::Event",
+			StartsAt: atLocal("2026-08-17T09:00:00"), EndsAt: atLocal("2026-08-17T10:00:00")},
+		{ID: 3, Title: "On call", AllDay: true, Type: "Calendar::Event",
+			StartsAt: at("2026-08-17T00:00:00Z"), EndsAt: at("2026-08-23T00:00:00Z")},
+	}})
+
+	events := v.selectableEvents()
+	if len(events) != 3 {
+		t.Fatalf("the week offers %d events, want 3 — the week-long one once: %+v", len(events), events)
+	}
+	if events[0].ID != 2 || events[1].ID != 1 {
+		t.Errorf("timed order = %d then %d, want Monday then Thursday", events[0].ID, events[1].ID)
+	}
+	if events[2].ID != 3 {
+		t.Errorf("the all-day band should come last, got %d", events[2].ID)
+	}
+}
+
 func TestCalendarStepsThroughDaysAndBackToToday(t *testing.T) {
 	v := calendarWithRecordings()
 	today := time.Date(2026, 8, 22, 9, 0, 0, 0, time.Local)
@@ -726,7 +883,7 @@ func weekView(t *testing.T, habits, completions []Recording) []string {
 	}
 
 	anchor := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
-	out := renderWeekView(events, habits, completions, anchor, time.Monday, 100, weekViewRows, "p/n week", nil)
+	out := renderWeekView(events, habits, completions, anchor, time.Monday, 100, weekViewRows, "p/n week", nil, selection{})
 	return strings.Split(stripANSI(out), "\n")
 }
 
@@ -839,7 +996,7 @@ func TestWeekGathersAllDayEventsAtTheFoot(t *testing.T) {
 	}
 
 	anchor := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
-	out := renderWeekView(events, nil, nil, anchor, time.Monday, 100, weekViewRows, "p/n week", nil)
+	out := renderWeekView(events, nil, nil, anchor, time.Monday, 100, weekViewRows, "p/n week", nil, selection{})
 	lines := strings.Split(stripANSI(out), "\n")
 
 	// The band is under the grid, headed as the day view heads its own.
@@ -1022,7 +1179,7 @@ func TestDayViewLabelsItsSections(t *testing.T) {
 	habits := []Recording{{ID: 4, Title: "Read 20 pages"}}
 
 	day := time.Date(2026, 8, 24, 9, 0, 0, 0, time.Local)
-	view := stripANSI(renderDayView(events, habits, day, "p/n day", 100, 24))
+	view := stripANSI(renderDayView(events, habits, day, "p/n day", 100, 24, selection{}))
 	for _, label := range []string{"Habits", "Monday, August 24", "p/n day", "All day"} {
 		if !strings.Contains(view, label) {
 			t.Errorf("day view did not label its %q section: %q", label, view)
@@ -1040,7 +1197,7 @@ func TestAllDayEventsAreBlocksInTheirCalendarsColor(t *testing.T) {
 	}
 	day := time.Date(2026, 8, 21, 9, 0, 0, 0, time.Local)
 
-	rendered := renderDayView(events, nil, day, "", 100, 14)
+	rendered := renderDayView(events, nil, day, "", 100, 14, selection{})
 	lines := strings.Split(rendered, "\n")
 
 	gold := lines[rowContaining(t, lines, "Summer friday")]
@@ -1075,7 +1232,7 @@ func TestDayViewRulesFallFromEveryHourWithoutCuttingIntoAnEvent(t *testing.T) {
 	// an hour every four columns and the 11:00 event's block on the four from 44. The
 	// day's header and the hour axis take the first two rows of the 40 it is given,
 	// leaving 38 for the grid.
-	lines := strings.Split(stripANSI(renderDayView(events, nil, day, "", 98, 40)), "\n")
+	lines := strings.Split(stripANSI(renderDayView(events, nil, day, "", 98, 40, selection{})), "\n")
 	grid := lines[2:]
 	if len(grid) != 38 {
 		t.Fatalf("grid is %d rows of the 38 left to it: %q", len(grid), grid)
@@ -1104,7 +1261,7 @@ func TestDayViewRulesFallFromEveryHourWithoutCuttingIntoAnEvent(t *testing.T) {
 
 func TestEmptyDayIsItsHoursRatherThanANotice(t *testing.T) {
 	day := time.Date(2026, 8, 22, 9, 0, 0, 0, time.Local)
-	view := stripANSI(renderDayView(nil, nil, day, "", 96, 20))
+	view := stripANSI(renderDayView(nil, nil, day, "", 96, 20, selection{}))
 
 	if strings.Contains(view, "no events") {
 		t.Errorf("an empty day still announces itself: %q", view)
@@ -1158,7 +1315,7 @@ func TestDayViewGivesASingleEventTheWholeGrid(t *testing.T) {
 
 	// An hour every four columns, so 07:00 starts on column 28 and the block covers the
 	// rules at 28 and 32 for every one of the grid's 38 rows.
-	grid := strings.Split(stripANSI(renderDayView(events, nil, day, "", 98, 40)), "\n")[2:]
+	grid := strings.Split(stripANSI(renderDayView(events, nil, day, "", 98, 40, selection{})), "\n")[2:]
 	if len(grid) != 38 {
 		t.Fatalf("grid is %d rows, want 38: %q", len(grid), grid)
 	}
@@ -1250,14 +1407,14 @@ func TestEventInkFollowsALiveThemeChange(t *testing.T) {
 		Background: lipgloss.Color("#060B1E"),
 		Hues:       map[string]color.Color{"green": lipgloss.Color("#92a593")},
 	})
-	onDark := eventPill(Recording{Title: "Summer friday", CalendarColor: "green"}, 20)
+	onDark := eventPill(Recording{Title: "Summer friday", CalendarColor: "green"}, 20, false)
 
 	applyTheme(Theme{
 		Accent: lipgloss.BrightBlue, Bright: lipgloss.Color("#1c1c1c"), Dark: false,
 		Background: lipgloss.Color("#fafafa"),
 		Hues:       map[string]color.Color{"green": lipgloss.Color("#1f5c2f")},
 	})
-	onLight := eventPill(Recording{Title: "Summer friday", CalendarColor: "green"}, 20)
+	onLight := eventPill(Recording{Title: "Summer friday", CalendarColor: "green"}, 20, false)
 
 	if onDark == onLight {
 		t.Errorf("the pill did not follow the theme: %q", onDark)
@@ -1267,7 +1424,7 @@ func TestEventInkFollowsALiveThemeChange(t *testing.T) {
 // The week and the year draw an event as a filled bar too, off the same field and padded to
 // the cell so the fill reads as a block rather than as a highlight behind some words.
 func TestEventPillFillsTheCellInItsCalendarsColor(t *testing.T) {
-	pill := eventPill(Recording{Title: "Standup", CalendarColor: "gold"}, 12)
+	pill := eventPill(Recording{Title: "Standup", CalendarColor: "gold"}, 12, false)
 
 	if got := stripANSI(pill); got != "Standup     " {
 		t.Errorf("pill text = %q, want the title padded to 12", got)
@@ -1277,7 +1434,7 @@ func TestEventPillFillsTheCellInItsCalendarsColor(t *testing.T) {
 	}
 
 	// A title longer than the cell is cut to it rather than spilling into the next day.
-	long := eventPill(Recording{Title: "Design review with the whole team", CalendarColor: "teal"}, 12)
+	long := eventPill(Recording{Title: "Design review with the whole team", CalendarColor: "teal"}, 12, false)
 	if got := lipgloss.Width(stripANSI(long)); got != 12 {
 		t.Errorf("pill is %d columns wide, want 12", got)
 	}
@@ -1341,14 +1498,11 @@ func TestCalendarPinsTodosBelowTheGrid(t *testing.T) {
 
 func TestCalendarViewHelpBindingsShowsViewToggle(t *testing.T) {
 	v := calendarWithRecordings()
-	// The day view offers the categories and the habits modal. Creating, editing and
-	// deleting a habit are the modal's own keys; the keys that move the day are on the
-	// day's own line; and each span's number is in its own tab above the grid.
+	// The day view offers the arrows and a new event, the categories and the habits modal.
+	// Creating, editing and deleting a habit are the modal's own keys; the keys that move
+	// the day are on the day's own line; and each span's number is in its own tab.
 	bindings := v.HelpBindings()
-	if len(bindings) != 3 {
-		t.Fatalf("expected 3 bindings, got %d: %+v", len(bindings), bindings)
-	}
-	for _, want := range []string{"g", "c", "b"} {
+	for _, want := range []string{"←→", "a", "g", "c", "b"} {
 		found := false
 		for _, binding := range bindings {
 			found = found || binding.key == want
@@ -1356,6 +1510,36 @@ func TestCalendarViewHelpBindingsShowsViewToggle(t *testing.T) {
 		if !found {
 			t.Errorf("missing binding %q: %+v", want, bindings)
 		}
+	}
+
+	// e and x act on the event under the arrows, so they wait for one. This fixture's
+	// events are on another day, so nothing here is selectable.
+	for _, binding := range bindings {
+		if binding.key == "e" || binding.key == "x" {
+			t.Errorf("%q is offered with nothing selected: %+v", binding.key, bindings)
+		}
+	}
+
+	onEvents := dayWithEvents(t)
+	onEvents.HandleContentKey(keyPress("right"))
+	for _, want := range []string{"e", "x"} {
+		found := false
+		for _, binding := range onEvents.HelpBindings() {
+			found = found || binding.key == want
+		}
+		if !found {
+			t.Errorf("missing binding %q once an event is selected: %+v", want, onEvents.HelpBindings())
+		}
+	}
+
+	// And x says it will ask again, as deleting a habit does.
+	onEvents.HandleContentKey(keyPress("x"))
+	asked := false
+	for _, binding := range onEvents.HelpBindings() {
+		asked = asked || binding.desc == "press x again to delete"
+	}
+	if !asked {
+		t.Errorf("x did not ask twice: %+v", onEvents.HelpBindings())
 	}
 
 	// Every span names itself and carries its own keys now, as the day always did, so the

@@ -212,12 +212,22 @@ const (
 	cellTitle
 )
 
+// selection is the event the arrows have picked out, by id, and nothing when zero. It is
+// passed down to the renderers rather than looked up, so drawing an event never has to know
+// where the reader's cursor is kept.
+type selection struct{ eventID int64 }
+
+func (s selection) has(event Recording) bool {
+	return s.eventID != 0 && s.eventID == event.ID
+}
+
 // dayCell is a cell's kind and, for the cells an event owns, the color of the calendar it
 // is filed on. The color rides along with the kind so consecutive cells are batched by
 // both: two events touching in the same row are two runs, not one.
 type dayCell struct {
-	kind  cellKind
-	color string
+	kind     cellKind
+	color    string
+	selected bool
 }
 
 // style is how a cell is drawn. An event is a block filled with its calendar's color and
@@ -228,7 +238,7 @@ func (cell dayCell) style(_, _, muted lipgloss.Style) lipgloss.Style {
 	case cellChrome:
 		return lipgloss.NewStyle().Background(eventFillColor(cell.color))
 	case cellTitle:
-		return eventTextStyle(cell.color)
+		return eventTextStyle(cell.color, cell.selected)
 	default:
 		return muted
 	}
@@ -259,7 +269,10 @@ func eventFillColor(calendarColor string) color.Color {
 // nearly black, so contrast picked white text for what a dark theme draws as a light
 // periwinkle. With the theme's own #7d82d9 the same arithmetic picks dark text, which is
 // what the eye wanted all along.
-func eventTextStyle(calendarColor string) lipgloss.Style {
+// The event under the arrows swaps the two round. It keeps its calendar's color either way —
+// that is what says whose it is — so the selection cannot be a color of its own; inverting
+// the name against its own fill marks it without spending a cell or borrowing a hue.
+func eventTextStyle(calendarColor string, selected bool) lipgloss.Style {
 	fill := eventFillColor(calendarColor)
 
 	text := colorPaper
@@ -267,6 +280,9 @@ func eventTextStyle(calendarColor string) lipgloss.Style {
 		text = ink
 	}
 
+	if selected {
+		return lipgloss.NewStyle().Background(text).Foreground(fill).Bold(true)
+	}
 	return lipgloss.NewStyle().Background(fill).Foreground(text).Bold(true)
 }
 
@@ -283,7 +299,7 @@ func themeInk() color.Color {
 // events and not as another box's border.
 const hourRule = '┊'
 
-func renderDayView(events, habits []Recording, anchor time.Time, hint string, width, height int) string {
+func renderDayView(events, habits []Recording, anchor time.Time, hint string, width, height int, sel selection) string {
 	var b strings.Builder
 
 	// The day borrows the mail list's vocabulary: chrome for the structure a reader
@@ -399,7 +415,7 @@ func renderDayView(events, habits []Recording, anchor time.Time, hint string, wi
 	if len(allDay) > 0 {
 		spent += 1 + len(allDay)
 	}
-	b.WriteString(renderDayGrid(lanes, gridWidth, colWidth, height-spent, chrome, eventTitle, muted))
+	b.WriteString(renderDayGrid(lanes, gridWidth, colWidth, height-spent, chrome, eventTitle, muted, sel))
 
 	// All-day events run the width of the day at the bottom of it, as blocks in their
 	// calendars' colors. They used to be drawn [like this─────], which said "all day" by
@@ -410,7 +426,7 @@ func renderDayView(events, habits []Recording, anchor time.Time, hint string, wi
 		b.WriteString(sectionHeader("All day", width))
 		b.WriteString("\n")
 		for _, e := range allDay {
-			b.WriteString(eventPill(e, gridWidth))
+			b.WriteString(eventPill(e, gridWidth, sel.has(e)))
 			b.WriteString("\n")
 		}
 	}
@@ -431,7 +447,7 @@ func renderDayView(events, habits []Recording, anchor time.Time, hint string, wi
 // to be, which left a short name looking like a short event and a long one looking like a
 // long one — the box is the span, so its size has to come from the day rather than from
 // the words in it.
-func renderDayGrid(lanes [][]placedEvent, gridWidth, colWidth, rows int, chrome, title, muted lipgloss.Style) string {
+func renderDayGrid(lanes [][]placedEvent, gridWidth, colWidth, rows int, chrome, title, muted lipgloss.Style, sel selection) string {
 	laneRows := shareDayRows(max(rows, 1), len(lanes))
 	height := max(rows, 1)
 	if total := sumOf(laneRows); total > height {
@@ -455,7 +471,7 @@ func renderDayGrid(lanes [][]placedEvent, gridWidth, colWidth, rows int, chrome,
 
 	offset := 0
 	for i, lane := range lanes {
-		drawDayLane(grid, cells, lane, offset, laneRows[i])
+		drawDayLane(grid, cells, lane, offset, laneRows[i], sel)
 		offset += laneRows[i]
 	}
 
@@ -535,14 +551,14 @@ func sumOf(values []int) int {
 // boxes rows tall with vertical (90-degree rotated) title text. Every cell a box owns
 // carries the color of the calendar the event is filed on, so which calendar an event
 // belongs to is answered by looking at it.
-func drawDayLane(grid [][]rune, cells [][]dayCell, lane []placedEvent, rowOffset, rows int) {
+func drawDayLane(grid [][]rune, cells [][]dayCell, lane []placedEvent, rowOffset, rows int, sel selection) {
 	top := rowOffset
 	bottom := rowOffset + rows - 1
 
 	for _, pe := range lane {
 		sc, ec := pe.startCol, pe.endCol
 		fill := dayCell{kind: cellChrome, color: pe.rec.CalendarColor}
-		titled := dayCell{kind: cellTitle, color: pe.rec.CalendarColor}
+		titled := dayCell{kind: cellTitle, color: pe.rec.CalendarColor, selected: sel.has(pe.rec)}
 
 		// The whole block is the event: filled with its calendar's color and carrying no
 		// border, because the fill already says where it starts and stops. Borders drawn
@@ -593,7 +609,7 @@ type weekDayInfo struct {
 // spreadsheet of the week rather than as the week. The day never had a box: it is a header,
 // an axis, and events on open ground. That is what a week is too, with seven days across
 // instead of twenty-four hours.
-func renderWeekView(events, habits, completions []Recording, anchor time.Time, firstWeekDay time.Weekday, width, height int, hint string, dayLabels map[string]string) string {
+func renderWeekView(events, habits, completions []Recording, anchor time.Time, firstWeekDay time.Weekday, width, height int, hint string, dayLabels map[string]string, sel selection) string {
 	var b strings.Builder
 	muted := styleMuted
 	chrome := lipgloss.NewStyle().Foreground(colorChrome)
@@ -695,7 +711,7 @@ func renderWeekView(events, habits, completions []Recording, anchor time.Time, f
 	// Build column content
 	cols := make([][]string, 7)
 	for i := range 7 {
-		cols[i] = buildWeekDayColumn(days[i], colWidth, muted)
+		cols[i] = buildWeekDayColumn(days[i], colWidth, muted, sel)
 	}
 
 	maxH := 0
@@ -708,7 +724,7 @@ func renderWeekView(events, habits, completions []Recording, anchor time.Time, f
 	// The all-day events are held back so they can sit at the foot of the week, under the
 	// grid rather than at whatever depth each day's timed events reached. Their rows and
 	// their header come off the space the grid has to fill.
-	allDay := weekAllDayBand(days, colWidth)
+	allDay := weekAllDayBand(days, colWidth, sel)
 	if len(allDay) > 0 {
 		rowsUsed += 1 + len(allDay)
 	}
@@ -790,7 +806,7 @@ func weekHabitBand(days []weekDayInfo, colWidth int) [][]string {
 
 // buildWeekDayColumn returns styled lines for one day column.
 // Order: habits at top, timed events in the middle, all-day at bottom.
-func buildWeekDayColumn(d weekDayInfo, width int, muted lipgloss.Style) []string {
+func buildWeekDayColumn(d weekDayInfo, width int, muted lipgloss.Style, sel selection) []string {
 	// The day's habits are the band above the grid and its all-day events the band below
 	// it, so the column itself is the timed events alone.
 	var lines []string
@@ -806,7 +822,7 @@ func buildWeekDayColumn(d weekDayInfo, width int, muted lipgloss.Style) []string
 		if timeStr != "" {
 			lines = append(lines, muted.Render(timeStr))
 		}
-		lines = append(lines, eventPill(e, width))
+		lines = append(lines, eventPill(e, width, sel.has(e)))
 	}
 
 	return lines
@@ -819,7 +835,7 @@ func buildWeekDayColumn(d weekDayInfo, width int, muted lipgloss.Style) []string
 // Each event keeps one row for every day it covers, so a week-long one reads as a single bar
 // straight across. Laying each day out on its own instead put it on whatever row that day
 // had free, and a holiday spanning the week came out as a staircase.
-func weekAllDayBand(days []weekDayInfo, colWidth int) [][]string {
+func weekAllDayBand(days []weekDayInfo, colWidth int, sel selection) [][]string {
 	spans := weekAllDaySpans(days)
 	if len(spans) == 0 {
 		return nil
@@ -840,7 +856,7 @@ func weekAllDayBand(days []weekDayInfo, colWidth int) [][]string {
 		}
 		for _, day := range span.days {
 			lanes[lane][day] = true
-			rows[lane][day] = eventPill(span.event, colWidth)
+			rows[lane][day] = eventPill(span.event, colWidth, sel.has(span.event))
 		}
 	}
 	return rows
@@ -894,13 +910,13 @@ func weekAllDaySpans(days []weekDayInfo) []weekAllDaySpan {
 // color, its name inverted over it, padded to the cell so the fill reads as a block rather
 // than as a highlight behind some words. It is the same thing the day view fills its column
 // with, and the same thing the web app draws in all three.
-func eventPill(event Recording, width int) string {
+func eventPill(event Recording, width int, selected bool) string {
 	title := truncateStr(terminal.SanitizeLine(event.Title), width)
 	if pad := width - lipgloss.Width(title); pad > 0 {
 		title += strings.Repeat(" ", pad)
 	}
 
-	return eventTextStyle(event.CalendarColor).Render(title)
+	return eventTextStyle(event.CalendarColor, selected).Render(title)
 }
 
 // weekDayColumnLabel returns the header label for a week column.
@@ -1032,7 +1048,7 @@ func buildYearDayCell(d time.Time, dayEvents []Recording, colWidth int,
 
 	// Event titles, each a bar in its calendar's color
 	for _, event := range dayEvents {
-		lines = append(lines, eventPill(event, colWidth))
+		lines = append(lines, eventPill(event, colWidth, false))
 	}
 
 	return lines

@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"charm.land/bubbles/v2/viewport"
@@ -200,6 +202,17 @@ type calendarView struct {
 	// done on, and folding them keeps only the last.
 	habitCompletions []Recording
 
+	// selectedEvent is the event the arrows have walked to, by id. It is an id rather than
+	// an index because the list under it is read again on every step, every write and every
+	// live change, and an index would point at whatever moved into that slot.
+	selectedEvent int64
+
+	// selectFromEdge remembers which way the reader stepped off the end of a span, so the
+	// events of the one they land on can be walked into from the far side. The step is a
+	// read, so the answer arrives after the key: -1 means take the last event of what comes
+	// back, +1 the first, 0 that nothing is waiting on it.
+	selectFromEdge int
+
 	// year is what the year span draws, and it is a different answer than the
 	// recordings above rather than a summary of them.
 	year CalendarYear
@@ -216,6 +229,11 @@ type calendarView struct {
 	habitForm           *habitForm
 	todoPicker          *todoPicker
 	calendarPicker      *calendarPicker
+	eventForm           *eventForm
+
+	// confirmDelete is the event whose x has been pressed once, since removing something
+	// off a calendar asks twice — as deleting a habit does.
+	confirmDelete int64
 
 	requests requestLane[calendarRequestKind]
 }
@@ -285,6 +303,7 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if v.todoPicker != nil {
 			v.todoPicker.setTodos(v.todos)
 		}
+		v.settleSelection()
 		v.rebuildView()
 		return nil, true
 
@@ -310,9 +329,16 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 				v.habitForm.isError = true
 				return nil, true
 			}
+			if v.eventForm != nil {
+				v.eventForm.saving = false
+				v.eventForm.status = errorNotice(msg.failure, msg.err)
+				v.eventForm.isError = true
+				return nil, true
+			}
 			return notifyError(msg.failure, msg.err), true
 		}
 		v.habitForm = nil
+		v.eventForm = nil
 		if len(v.calendars) > 0 {
 			return tea.Batch(notify(msg.action), v.requestRecordings()), true
 		}
@@ -379,6 +405,12 @@ func (v *calendarView) View() string {
 		frame := modalFrame(v.habitForm.title(), v.habitForm.view(), v.vc.width)
 		view = overlayModal(view, frame, v.vc.width, v.vc.height)
 	}
+	// The event form stands over the calendar itself: an event is picked out on the grid
+	// with the arrows rather than from a list, so there is no picker underneath it.
+	if v.eventForm != nil {
+		frame := modalFrame(v.eventForm.formTitle(), v.eventForm.view(), v.vc.width)
+		view = overlayModal(view, frame, v.vc.width, v.vc.height)
+	}
 	return view
 }
 
@@ -412,6 +444,9 @@ func (v *calendarView) HelpBindings() []helpBinding {
 	if v.habitForm != nil {
 		return v.habitForm.helpBindings()
 	}
+	if v.eventForm != nil {
+		return v.eventForm.helpBindings()
+	}
 	if v.habitPicker != nil {
 		return v.habitPicker.helpBindings()
 	}
@@ -424,6 +459,20 @@ func (v *calendarView) HelpBindings() []helpBinding {
 	// Every span says which keys move it on the line that names it, where they belong to
 	// the date they act on, so the help bar carries none of that.
 	var bindings []helpBinding
+
+	// The event under the arrows is what e and x act on, so they are only offered once
+	// there is one. a stands whether or not anything is selected.
+	if v.viewMode != viewYear {
+		bindings = append(bindings, helpBinding{"←→", "event"}, helpBinding{"a", "new event"})
+		if event, ok := v.selectedRecording(); ok {
+			label := "delete"
+			if v.confirmDelete == event.ID {
+				label = "press x again to delete"
+			}
+			bindings = append(bindings, helpBinding{"e", "edit"}, helpBinding{"x", label})
+		}
+	}
+
 	// The spans are not in here: the row above the grid shows each one's number in the
 	// tab itself, the way the box row does. Which calendar is being read is only in the
 	// menu, so the key that opens it has to be said.
@@ -482,6 +531,17 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return cmd
 	}
+	if v.eventForm != nil {
+		if msg.Key().Code == tea.KeyEscape && !v.eventForm.saving {
+			v.eventForm = nil
+			return nil
+		}
+		cmd, submit := v.eventForm.handleKey(msg)
+		if submit {
+			return v.saveEvent()
+		}
+		return cmd
+	}
 	if v.requests.kind == calendarRequestMutation {
 		return nil
 	}
@@ -498,7 +558,22 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		return v.handleCalendarPickerKey(msg)
 	}
 
+	// x asks twice, so any other key is the reader changing their mind.
+	if msg.String() != "x" {
+		v.confirmDelete = 0
+	}
+
 	switch msg.String() {
+	// a, e and x on an event, as they are on a habit in its own modal.
+	case "a":
+		return v.startEventForm(eventFormCreate, Recording{})
+	case "e":
+		if event, ok := v.selectedRecording(); ok {
+			return v.startEventForm(eventFormEdit, event)
+		}
+		return nil
+	case "x":
+		return v.removeSelectedEvent()
 	// b for habits, as in HEY's own calendar.
 	case "b":
 		v.habitPicker = newHabitPicker(v.manageableHabits())
@@ -532,6 +607,11 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		return v.step(1)
 	case "t":
 		return v.today()
+	// The arrows walk the span's events, and step the span itself off either end.
+	case "left":
+		return v.moveSelection(-1)
+	case "right":
+		return v.moveSelection(1)
 	}
 
 	// Delegate scrolling to the content viewport
@@ -742,7 +822,7 @@ func (v *calendarView) Loading() bool {
 	return v.requests.loading && !v.CapturingInput() && !v.drawn
 }
 func (v *calendarView) CapturingInput() bool {
-	return v.timeTrackCategories != nil || v.habitForm != nil ||
+	return v.timeTrackCategories != nil || v.habitForm != nil || v.eventForm != nil ||
 		v.habitPicker != nil || v.todoPicker != nil || v.calendarPicker != nil
 }
 
@@ -761,6 +841,9 @@ func (v *calendarView) Restyle() {
 func (v *calendarView) Resize(width, height int) {
 	if v.habitForm != nil {
 		v.habitForm.resize(width, height)
+	}
+	if v.eventForm != nil {
+		v.eventForm.resize(width, height)
 	}
 	if v.todoPicker != nil {
 		v.todoPicker.resize(width)
@@ -789,9 +872,9 @@ func (v *calendarView) rebuildView() {
 	var content string
 	switch v.viewMode {
 	case viewDay:
-		content = renderDayView(v.events, v.habits, anchor, v.stepHint(), w, v.contentVP.Height())
+		content = renderDayView(v.events, v.habits, anchor, v.stepHint(), w, v.contentVP.Height(), v.selection())
 	case viewWeek:
-		content = renderWeekView(v.events, v.habits, v.habitCompletions, anchor, v.firstWeekDay, w, v.contentVP.Height(), v.stepHint(), dayLabels)
+		content = renderWeekView(v.events, v.habits, v.habitCompletions, anchor, v.firstWeekDay, w, v.contentVP.Height(), v.stepHint(), dayLabels, v.selection())
 	case viewYear:
 		// The year's events are HEY's spanned_events — the all-day and multi-day ones —
 		// because that is all a year read carries. eventsByDate spreads a multi-day event
@@ -880,6 +963,132 @@ func (v *calendarView) reread() tea.Cmd {
 	return nil
 }
 
+// --- Walking the events with the arrows ---
+
+func (v *calendarView) selection() selection { return selection{eventID: v.selectedEvent} }
+
+// selectableEvents is the events of the span in the order the arrows walk them, which is
+// the order they are drawn in: on the day the timed ones by the clock and then the all-day
+// ones under them, and across the week day by day and then the all-day band at its foot.
+// Traversal follows the layout so that → never jumps somewhere the eye has to hunt for.
+//
+// The year is not walked. It draws a year of days rather than a day's hours, and an event
+// there is a name in a cell rather than something with an edge to step off.
+func (v *calendarView) selectableEvents() []Recording {
+	timed, allDay := []Recording{}, []Recording{}
+	collect := func(events []Recording) {
+		for _, event := range events {
+			if event.AllDay {
+				allDay = append(allDay, event)
+			} else {
+				timed = append(timed, event)
+			}
+		}
+	}
+
+	switch v.viewMode {
+	case viewDay:
+		collect(eventsByDate(v.events)[dateKey(v.day())])
+	case viewWeek:
+		// eventsByDate hands a multi-day event to every day it touches, so the same event
+		// arrives more than once across a week and is taken the first time.
+		byDate := eventsByDate(v.events)
+		seen := make(map[int64]bool)
+		start := weekStartDate(v.day(), v.firstWeekDay)
+		for i := range 7 {
+			for _, event := range byDate[dateKey(start.AddDate(0, 0, i))] {
+				if !seen[event.ID] {
+					seen[event.ID] = true
+					collect([]Recording{event})
+				}
+			}
+		}
+	default:
+		return nil
+	}
+
+	sort.SliceStable(timed, func(i, j int) bool { return timed[i].Starts().Before(timed[j].Starts()) })
+	sort.SliceStable(allDay, func(i, j int) bool { return allDay[i].Starts().Before(allDay[j].Starts()) })
+	return append(timed, allDay...)
+}
+
+// settleSelection is what a fresh read leaves the selection on. Stepping off the end of a
+// span lands on the far end of the next one, so holding an arrow walks through the calendar
+// rather than stopping at every screen. Otherwise a selection that is no longer there — the
+// event was deleted, or the reader moved to a day it is not on — is simply let go of.
+func (v *calendarView) settleSelection() {
+	events := v.selectableEvents()
+
+	if v.selectFromEdge != 0 && len(events) > 0 {
+		if v.selectFromEdge < 0 {
+			v.selectedEvent = events[len(events)-1].ID
+		} else {
+			v.selectedEvent = events[0].ID
+		}
+		v.selectFromEdge = 0
+		return
+	}
+	v.selectFromEdge = 0
+
+	for _, event := range events {
+		if event.ID == v.selectedEvent {
+			return
+		}
+	}
+	v.selectedEvent = 0
+}
+
+// selectedRecording is the event under the arrows, and false when the selection has gone —
+// a write, a live change or a step to another day can all take it away.
+func (v *calendarView) selectedRecording() (Recording, bool) {
+	for _, event := range v.selectableEvents() {
+		if event.ID == v.selectedEvent {
+			return event, true
+		}
+	}
+	return Recording{}, false
+}
+
+// moveSelection walks the span's events by one, and steps the span itself at either end:
+// ← on the first event is the day or week before, → on the last is the one after. That is
+// what makes the arrows a way through the calendar rather than through one screen of it —
+// and it lands on the far end of the span it arrives at, so holding ← keeps going back.
+func (v *calendarView) moveSelection(delta int) tea.Cmd {
+	events := v.selectableEvents()
+	if len(events) == 0 {
+		return v.step(delta)
+	}
+
+	at := -1
+	for i, event := range events {
+		if event.ID == v.selectedEvent {
+			at = i
+			break
+		}
+	}
+
+	// Nothing selected yet: → takes the first, ← the last, so the first press picks up the
+	// end the reader is moving away from.
+	if at < 0 {
+		if delta > 0 {
+			v.selectedEvent = events[0].ID
+		} else {
+			v.selectedEvent = events[len(events)-1].ID
+		}
+		v.rebuildView()
+		return nil
+	}
+
+	next := at + delta
+	if next < 0 || next >= len(events) {
+		v.selectFromEdge = delta
+		return v.step(delta)
+	}
+	v.selectedEvent = events[next].ID
+	v.rebuildView()
+	return nil
+}
+
 // listedCalendars is what the picker offers — everything but the personal one, which is
 // always on and has no name to show.
 func (v *calendarView) listedCalendars() []Calendar {
@@ -925,6 +1134,83 @@ func (v *calendarView) startHabitForm(mode habitFormMode, recording Recording) t
 	v.habitForm = newHabitForm(mode, recording, v.vc.styles)
 	v.habitForm.resize(v.vc.width, v.vc.height)
 	return v.habitForm.init()
+}
+
+// --- Writing events ---
+
+// errNoCalendars is the one thing that stops the form opening: an event has to be filed
+// somewhere, and the calendars have not been read yet.
+var errNoCalendars = errors.New("the calendars have not been read yet")
+
+// startEventForm opens the form over the day or week, on the day the reader is looking at.
+// A new event needs somewhere to go, and the calendars a period is drawn from are the ones
+// it can go on.
+func (v *calendarView) startEventForm(mode eventFormMode, event Recording) tea.Cmd {
+	if len(v.calendars) == 0 {
+		return notifyError("Cannot add an event", errNoCalendars)
+	}
+	v.eventForm = newEventForm(mode, event, v.day(), v.calendars, v.vc.styles)
+	v.eventForm.resize(v.vc.width, v.vc.height)
+	return v.eventForm.init()
+}
+
+// saveEvent writes what the form is holding. HEY takes a calendar on create and not on
+// update, so an edit changes an event where it is rather than moving it.
+func (v *calendarView) saveEvent() tea.Cmd {
+	form := v.eventForm
+	values := form.values()
+	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestMutation)
+
+	return func() tea.Msg {
+		var err error
+		action := "Event created"
+		if form.mode == eventFormCreate {
+			_, err = v.vc.sdk.CalendarEvents().Create(ctx, hey.CreateCalendarEventParams{
+				CalendarID: values.CalendarID,
+				Title:      values.Title,
+				StartsAt:   values.StartsAt,
+				EndsAt:     values.EndsAt,
+				AllDay:     values.AllDay,
+				StartTime:  values.StartTime,
+				EndTime:    values.EndTime,
+				TimeZone:   values.TimeZone,
+				Reminders:  values.Reminders,
+			})
+		} else {
+			action = "Event updated"
+			_, err = v.vc.sdk.CalendarEvents().Update(ctx, form.eventID, hey.UpdateCalendarEventParams{
+				Title:     &values.Title,
+				StartsAt:  &values.StartsAt,
+				EndsAt:    &values.EndsAt,
+				AllDay:    &values.AllDay,
+				StartTime: &values.StartTime,
+				EndTime:   &values.EndTime,
+				TimeZone:  &values.TimeZone,
+				Reminders: values.Reminders,
+			})
+		}
+		return calendarMutationMsg{requestResult: newRequestResult(requestID, err), action: action, failure: "Save failed"}
+	}
+}
+
+// removeSelectedEvent asks twice, as deleting a habit does: an event off a shared calendar
+// is gone for everybody on it.
+func (v *calendarView) removeSelectedEvent() tea.Cmd {
+	event, ok := v.selectedRecording()
+	if !ok {
+		return nil
+	}
+	if v.confirmDelete != event.ID {
+		v.confirmDelete = event.ID
+		return nil
+	}
+	v.confirmDelete = 0
+
+	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestMutation)
+	return func() tea.Msg {
+		err := v.vc.sdk.CalendarEvents().Delete(ctx, event.ID)
+		return calendarMutationMsg{requestResult: newRequestResult(requestID, err), action: "Event deleted", failure: "Could not delete the event"}
+	}
 }
 
 func (v *calendarView) saveHabit() tea.Cmd {
