@@ -67,18 +67,29 @@ func (n *newMail) skippedTo(boxID int64, cursor hey.PostingChangesCursor) {
 // calling mail a moment old new rather than mail a moment new old. The SDK
 // caches GETs by URL, so a query the server ignores keeps this one out of the
 // cache; and when the server's clock can't be read, the local clock at the
-// start stands in.
+// start stands in. Either way the start is handed out as a cutoff: a whole
+// millisecond, strictly before the instant it stands for.
 func serverNow(ctx context.Context) time.Time {
 	started := time.Now()
 	response, err := rootSDK.Get(ctx, "/identity.json?clock="+strconv.FormatInt(started.UnixNano(), 10))
 	if err != nil || response == nil || response.FromCache {
-		return started
+		return cutoffBefore(started)
 	}
 	if at, err := http.ParseTime(response.Headers.Get("Date")); err == nil {
-		return at.Add(-time.Since(started))
+		return cutoffBefore(at.Add(-time.Since(started)))
 	}
 
-	return started
+	return cutoffBefore(started)
+}
+
+// cutoffBefore makes an instant usable as the watch's start: a cursor is
+// milliseconds and so is every active_at, the feed answers what is strictly
+// later than its cursor, and isNew asks whether activity is strictly later
+// than the start — so the start has to be a whole millisecond, and the one
+// before the instant, or mail in the instant's own millisecond would be
+// neither read nor new.
+func cutoffBefore(at time.Time) time.Time {
+	return at.Truncate(time.Millisecond).Add(-time.Millisecond)
 }
 
 // isNew says whether a posting is new mail: unseen, not muted, and active since

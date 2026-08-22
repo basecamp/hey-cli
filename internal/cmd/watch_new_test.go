@@ -211,6 +211,29 @@ func TestServerNowReadsTheServersClock(t *testing.T) {
 	}
 }
 
+func TestCutoffBeforeIsAWholeMillisecondStrictlyBefore(t *testing.T) {
+	within := time.Date(2026, 8, 21, 9, 0, 5, 123456789, time.UTC)
+	if got := cutoffBefore(within); !got.Equal(time.Date(2026, 8, 21, 9, 0, 5, 122000000, time.UTC)) {
+		t.Errorf("cutoffBefore(%v) = %v, want the millisecond before the instant's own", within, got)
+	}
+	exact := time.Date(2026, 8, 21, 9, 0, 5, 0, time.UTC)
+	if got := cutoffBefore(exact); !got.Equal(exact.Add(-time.Millisecond)) {
+		t.Errorf("cutoffBefore(%v) = %v, want strictly before even on a boundary", exact, got)
+	}
+
+	// So mail in the start's own millisecond is new, and a cursor at that
+	// millisecond is moved back to before it.
+	tracker := trackNewMail(cutoffBefore(within))
+	landed := within.Truncate(time.Millisecond)
+	if !tracker.isNew(24088, newPosting(101, "Maria Delgado", "Lunch on Thursday?", landed)) {
+		t.Error("mail in the same millisecond as the watch's start is new")
+	}
+	cursor := noLaterThan(hey.PostingChangesCursor{Since: landed.Format(watchCursorTimeLayout)}, cutoffBefore(within))
+	if cursor.Since != "2026-08-21T09:00:05.122Z" {
+		t.Errorf("cursor = %q, want it moved back to before the millisecond the mail landed in", cursor.Since)
+	}
+}
+
 func TestServerNowIsTheClockWhenTheRequestBeganNotWhenItWasAnswered(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 	const delay = 300 * time.Millisecond
@@ -230,6 +253,9 @@ func TestServerNowIsTheClockWhenTheRequestBeganNotWhenItWasAnswered(t *testing.T
 	date := time.Date(2026, 8, 21, 9, 0, 5, 0, time.UTC)
 	if date.Sub(got) < delay {
 		t.Errorf("serverNow = %v, want at least the request's %s before the Date header %v", got, delay, date)
+	}
+	if got.Nanosecond()%int(time.Millisecond) != 0 {
+		t.Errorf("serverNow = %v, want a whole millisecond, the resolution of every cursor and active_at", got)
 	}
 }
 
