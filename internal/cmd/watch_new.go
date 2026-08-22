@@ -110,11 +110,9 @@ func (n *newMail) isNew(boxID int64, posting generated.Posting) bool {
 	return !posting.Seen && !posting.Muted && posting.ActiveAt.After(last)
 }
 
-// record keeps every thread's latest activity, new or not, reported or not.
-// A batch is classified before it is recorded, so the record a posting is
-// measured against is the one from before its own read.
-func (n *newMail) record(postings []generated.Posting) {
-	for _, posting := range postings {
-		n.activeAt[posting.Id] = posting.ActiveAt
-	}
+// record keeps a thread's latest activity, new or not, reported or not. A
+// posting is classified and then recorded, so the same activity read twice —
+// or carried twice by one read — is new once.
+func (n *newMail) record(posting generated.Posting) {
+	n.activeAt[posting.Id] = posting.ActiveAt
 }

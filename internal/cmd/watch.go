@@ -105,7 +105,7 @@ to stdout only.`,
 	}
 
 	flags := watchCommand.cmd.Flags()
-	flags.StringArrayVar(&watchCommand.boxes, "box", nil, "Box to watch by name or ID (repeatable, defaults to all)")
+	flags.StringArrayVar(&watchCommand.boxes, "box", nil, "Box whose changes to report, by name or ID (repeatable, defaults to all; every box is followed either way, so new mail is judged across all of them)")
 	flags.StringSliceVar(&watchCommand.events, "events", defaultChanges, "Changes to report: added, updated, deleted, resync, and new for the added and updated threads that are new mail")
 	flags.StringVar(&watchCommand.since, "since", "", "Report changes since this time first (RFC 3339 or YYYY-MM-DD)")
 	flags.StringVar(&watchCommand.asyncScript, "run-async", "", "Shell command to spawn per change, without waiting for it")
@@ -232,12 +232,13 @@ func (c *watchCommand) watchedBoxes(ctx context.Context, started time.Time) (map
 		return nil, apierr.ErrAPI(0, "could not list boxes")
 	}
 
+	// Every box is followed, whatever --box says: a thread's activity in one
+	// box is what decides whether its next change in another is new mail — a
+	// reply in The Feed, then a move into the Imbox, is not — so the record
+	// has to see them all. --box picks the boxes whose changes are reported.
 	watched := map[int64]*watchedBox{}
+	reported := 0
 	for _, box := range *listed {
-		if !c.watching(box) {
-			continue
-		}
-
 		cursor, err := watchCursor(box.PostingChangesUrl, c.since)
 		if err != nil {
 			return nil, err
@@ -249,10 +250,13 @@ func (c *watchCommand) watchedBoxes(ctx context.Context, started time.Time) (map
 			cursor = noLaterThan(cursor, started)
 		}
 
-		watched[box.Id] = &watchedBox{id: box.Id, kind: box.Kind, name: box.Name, cursor: cursor}
+		watched[box.Id] = &watchedBox{id: box.Id, kind: box.Kind, name: box.Name, cursor: cursor, reported: c.watching(box)}
+		if watched[box.Id].reported {
+			reported++
+		}
 	}
 
-	if len(watched) == 0 {
+	if reported == 0 {
 		return nil, apierr.ErrNotFound("box", strings.Join(c.boxes, ", "))
 	}
 
@@ -326,10 +330,11 @@ func parseWatchSince(since string) (time.Time, error) {
 }
 
 type watchedBox struct {
-	id     int64
-	kind   string
-	name   string
-	cursor hey.PostingChangesCursor
+	id       int64
+	kind     string
+	name     string
+	cursor   hey.PostingChangesCursor
+	reported bool // --box named it, or named nothing
 }
 
 // watchEvent is one changed posting, as a line of NDJSON or as a script's stdin —
@@ -612,10 +617,11 @@ func (w *postingsWatch) readBox(ctx context.Context, box *watchedBox) error {
 		box.cursor = *changes.NextCursor
 	}
 
-	// Every added and updated posting is classified as new or not against the
-	// record from before this read, and then the whole read is recorded — in
-	// every box and whatever --events asks for, so a thread's activity is known
-	// when its next change comes, even when this one was filtered out.
+	// Every added and updated posting is classified as new or not, and then
+	// recorded — in every box and whatever --events or --box asks for, so a
+	// thread's activity is known when its next change comes, even when this
+	// one went unreported. Recorded one at a time, so a posting a read carries
+	// twice is new once at most.
 	for _, posting := range changes.Added {
 		w.report(ctx, watchEvent{Change: "added", At: watchTime(posting.CreatedAt), PostingID: posting.Id, New: w.classify(box, posting)}, box, &posting)
 	}
@@ -625,14 +631,14 @@ func (w *postingsWatch) readBox(ctx context.Context, box *watchedBox) error {
 	for _, posting := range changes.Deleted {
 		w.report(ctx, watchEvent{Change: "deleted", At: watchTime(posting.DeletedAt), PostingID: posting.Id}, box, nil)
 	}
-	w.newMail.record(changes.Added)
-	w.newMail.record(changes.Updated)
 
 	return nil
 }
 
+// classify decides whether a posting is new mail and records it, in that order.
 func (w *postingsWatch) classify(box *watchedBox, posting generated.Posting) *bool {
 	isNew := w.newMail.isNew(box.id, posting)
+	w.newMail.record(posting)
 	return &isNew
 }
 
@@ -719,7 +725,7 @@ func (w *postingsWatch) stopWatching(box *watchedBox) error {
 // report hands one change on — printed, or run through the script — and says
 // whether it did.
 func (w *postingsWatch) report(ctx context.Context, event watchEvent, box *watchedBox, posting *generated.Posting) bool {
-	if w.finished() || !w.reporting(event) {
+	if !box.reported || w.finished() || !w.reporting(event) {
 		return false
 	}
 

@@ -37,8 +37,8 @@ func classifyReadOf(tracker *newMail, boxID int64, postings ...generated.Posting
 		if tracker.isNew(boxID, posting) {
 			fresh = append(fresh, posting.Id)
 		}
+		tracker.record(posting)
 	}
-	tracker.record(postings)
 	return fresh
 }
 
@@ -164,18 +164,46 @@ func TestNewMailAfterASkipAheadIsSinceTheSkip(t *testing.T) {
 	}
 }
 
-func TestNewMailIsDecidedBeforeTheReadIsRecorded(t *testing.T) {
+func TestNewMailCarriedTwiceByOneReadIsNewOnce(t *testing.T) {
 	tracker := trackNewMail(watchStarted)
 	after := watchStarted.Add(30 * time.Second)
 
-	// One read carrying a thread twice — added, then updated with a seen flip —
-	// decides both against the record from before the read: the arrival is
-	// new, the flip is not, and the order within the read does not matter.
+	// One read carrying the same unseen arrival twice — added and updated,
+	// the same activity: new once, since each posting is recorded as soon as
+	// it is decided.
 	arrived := newPosting(101, "Maria Delgado", "Lunch on Thursday?", after)
-	read := arrived
-	read.Seen = true
-	if fresh := classifyRead(tracker, arrived, read); len(fresh) != 1 || fresh[0] != 101 {
-		t.Errorf("new = %v, want the arrival alone", fresh)
+	if fresh := classifyRead(tracker, arrived, arrived); len(fresh) != 1 || fresh[0] != 101 {
+		t.Errorf("new = %v, want the arrival once", fresh)
+	}
+}
+
+func TestWatchFollowsEveryBoxAndReportsTheOnesAskedFor(t *testing.T) {
+	// A reply lands on an unseen thread in The Feed, which --box imbox does not
+	// report; the thread is then moved into the Imbox. The move is not new
+	// mail — the reply was known from The Feed — which only holds if The Feed
+	// was followed all along.
+	server := changesServer(t,
+		`{"updated":[{"id":9001,"kind":"topic","box_id":24089,"name":"48 hours only","active_at":"2026-08-21T09:00:20Z","creator":{"name":"Weekend Deals"}}]}`,
+		`{"updated":[{"id":9001,"kind":"topic","box_id":24088,"name":"48 hours only","active_at":"2026-08-21T09:00:20Z","creator":{"name":"Weekend Deals"}}]}`)
+	watch, out := newTestWatch("added", "updated", "deleted", "new")
+	cursor, err := watchCursor(server.URL+"/boxes/24088/postings/changes.json?since=2026-08-21T09%3A00%3A00.000Z&v=2", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	watch.boxes[24088].cursor = cursor
+	watch.boxes[24089] = &watchedBox{id: 24089, kind: "feedbox", name: "The Feed", cursor: cursor, reported: false}
+
+	if err := watch.read(context.Background(), actioncable.Message(`{"change":"upsert","box_id":24089}`)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("wrote %q, want nothing for a box --box left out", out.String())
+	}
+	ringBox(t, watch)
+
+	lines := watchLines(t, out)
+	if len(lines) != 1 || lines[0]["change"] != "updated" || lines[0]["new"] != false || lines[0]["box"].(map[string]any)["kind"] != "imbox" {
+		t.Errorf("wrote %v, want the move into the Imbox, not new", lines)
 	}
 }
 

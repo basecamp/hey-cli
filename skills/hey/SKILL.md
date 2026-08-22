@@ -509,7 +509,7 @@ Takes box item IDs (the `id` field from `hey box --json`). Ignored threads remai
 
 ```bash
 hey watch                         # Follow every box until interrupted
-hey watch --box imbox             # Follow one box (repeatable, by name or ID)
+hey watch --box imbox             # Report one box's changes (repeatable, by name or ID); every box is followed
 hey watch --events added,deleted  # Only these changes (added, updated, deleted, new, resync)
 hey watch --box imbox --events new  # New mail only: unseen, unmuted, active since the watch began
 hey watch --box imbox --events new --exit-on-first  # Block until new mail lands, print it, exit

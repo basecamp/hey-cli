@@ -146,9 +146,10 @@ and `--events new` selects the true ones. The rule:
   catch-up from the server's cursor — the box's last activity, not this moment — so it
   carries backlog, which the start-time rule keeps out, alongside anything that arrived
   while the watch was starting, which is new.
-- **Every posting the watch reads is recorded**, in every box and whatever `--events`
-  reports, so a thread known from a filtered-out change, or from another box, is never
-  mistaken for new when its next change is reported. A read is classified before it is
+- **Every posting the watch reads is recorded**, in every box and whatever `--events` or
+  `--box` reports — `--box` picks what is reported, every box is followed — so a thread
+  known from a filtered-out change, or from another box, is never mistaken for new when its
+  next change is reported. A read is classified before it is
   recorded. There is no state file: the record lives and dies with the watch.
 - **`--events` is a union.** `new` alone is new mail only — a `resync` is not, so a script
   for new mail never runs on one; `added,new` is every arrival plus new activity on known

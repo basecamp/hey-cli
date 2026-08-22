@@ -555,7 +555,9 @@ New mail is a watch event, not a flag: every added and updated line carries `"ne
 true|false` and `--events new` selects the true ones (`internal/cmd/watch_new.go`). New is
 unseen, not muted, and `active_at` later than the watch's record of the thread — or than
 the watch's start, on HEY's clock (`serverNow`), for a thread it has no record of — and
-every posting the watch reads is recorded, in every box and whatever `--events` says. The
+every posting the watch reads is recorded, in every box and whatever `--events` or `--box`
+says (`--box` picks the boxes whose changes are reported; every box is followed), each
+posting recorded as soon as it is classified. The
 start is the Date header translated back to when the request was made (mail that lands while
 the server answers is later than the start), it is taken before the box list, and each
 box's cursor starts no later than it (`noLaterThan`): the server bakes the box's last posting

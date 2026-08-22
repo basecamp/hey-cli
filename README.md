@@ -405,7 +405,9 @@ and active since the watch last saw the thread — or since the watch began, for
 has not seen, so a box's backlog is never new. Reading, muting or moving a thread is not new
 activity; a reply on a known thread is. `--events new` selects the new ones, alone or in a
 union with `added`, `updated`, `deleted` and `resync` — the default is everything but `new`,
-and `new` alone leaves a `resync` out, so a script for new mail never runs on one. The
+and `new` alone leaves a `resync` out, so a script for new mail never runs on one. `--box`
+picks the boxes whose changes are reported; every box is followed regardless, so what is new
+is judged across all of them — a reply in The Feed and then a move into the Imbox is not. The
 one-liner above is what any desktop does with it; on Omarchy the bar plugin reads the same
 lines and sends one batched, replacing toast instead.
 

@@ -146,7 +146,7 @@ func newTestWatch(changes ...string) (*postingsWatch, *bytes.Buffer) {
 
 	out := &bytes.Buffer{}
 	return &postingsWatch{
-		boxes:      map[int64]*watchedBox{24088: {id: 24088, kind: "imbox", name: "Imbox"}},
+		boxes:      map[int64]*watchedBox{24088: {id: 24088, kind: "imbox", name: "Imbox", reported: true}},
 		changes:    watched,
 		newMail:    trackNewMail(watchStarted),
 		out:        out,
@@ -650,7 +650,7 @@ func TestWatchGivesUpOnABoxThatHasGone(t *testing.T) {
 	watch, _ := newTestWatch("added")
 	errOut := &bytes.Buffer{}
 	watch.errOut = errOut
-	watch.boxes[31145] = &watchedBox{id: 31145, kind: "papertrail", name: "The Paper Trail"}
+	watch.boxes[31145] = &watchedBox{id: 31145, kind: "papertrail", name: "The Paper Trail", reported: true}
 	watch.boxes[24088].cursor.Since = "2026-08-01T00:00:00.000Z"
 
 	if err := watch.readBox(context.Background(), watch.boxes[24088]); err != nil {
@@ -841,6 +841,25 @@ func TestWatchedBoxesStartNoLaterThanTheWatchDid(t *testing.T) {
 	if got := boxes[24089].cursor.Since; got != "2026-08-21T08:00:00.000Z" {
 		t.Errorf("Feed cursor = %q, want the box's own when it is earlier", got)
 	}
+	if !boxes[24088].reported || !boxes[24089].reported {
+		t.Error("without --box every box is reported")
+	}
+
+	// --box imbox: every box is still followed, the Imbox alone is reported;
+	// a --box that names nothing is not found.
+	command.boxes = []string{"imbox"}
+	boxes, err = command.watchedBoxes(context.Background(), watchStarted)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(boxes) != 2 || !boxes[24088].reported || boxes[24089].reported {
+		t.Errorf("boxes = %+v, want both followed and the Imbox alone reported", boxes)
+	}
+	command.boxes = []string{"trailbox"}
+	if _, err := command.watchedBoxes(context.Background(), watchStarted); err == nil {
+		t.Error("expected an error when --box names no box")
+	}
+	command.boxes = nil
 
 	// --since is the reader's choice and wins over both.
 	command.since = "2026-08-21T09:30:00Z"
