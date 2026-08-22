@@ -86,6 +86,8 @@ func keyPress(key string) tea.KeyPressMsg {
 		k = tea.Key{Code: tea.KeyUp}
 	case "down":
 		k = tea.Key{Code: tea.KeyDown}
+	case " ", "space":
+		k = tea.Key{Code: tea.KeySpace, Text: " "}
 	}
 	return tea.KeyPressMsg(k)
 }

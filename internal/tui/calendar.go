@@ -6,6 +6,7 @@ import (
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
@@ -28,6 +29,7 @@ type Calendar struct {
 // calendar views read them in; giving them time.Time is the next thing to do here.
 type Recording struct {
 	ID          int64
+	ParentID    int64
 	Title       string
 	AllDay      bool
 	StartsAt    string
@@ -108,11 +110,9 @@ type calendarView struct {
 	// Scrollable content viewport for the calendar views
 	contentVP viewport.Model
 
-	timeTrackCategories    *timeTrackCategoryManager
-	habitForm              *habitForm
-	habitIndex             int
-	confirmedHabitDeleteID int64
-	notice                 string
+	timeTrackCategories *timeTrackCategoryManager
+	habitPicker         *habitPicker
+	habitForm           *habitForm
 
 	requests requestLane[calendarRequestKind]
 }
@@ -127,7 +127,6 @@ func newCalendarView(vc *viewContext) *calendarView {
 }
 
 func (v *calendarView) Init() tea.Cmd {
-	v.confirmedHabitDeleteID = 0
 	cmds := []tea.Cmd{v.fetchIdentity()}
 	if len(v.calendars) == 0 {
 		cmds = append(cmds, v.requestCalendars())
@@ -159,9 +158,10 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if cmd, ok := v.requests.settle(msg.requestResult); !ok {
 			return cmd, true
 		}
-		v.confirmedHabitDeleteID = 0
 		v.events, v.todos, v.habits = splitRecordings(msg.recordings)
-		v.normalizeHabitSelection()
+		if v.habitPicker != nil {
+			v.habitPicker.setHabits(v.manageableHabits())
+		}
 		v.rebuildView()
 		return nil, true
 
@@ -171,22 +171,21 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.requests.finish(msg.requestID)
 		if msg.err != nil {
-			if v.habitForm != nil {
+			switch {
+			case v.habitForm != nil:
 				v.habitForm.saving = false
 				v.habitForm.status = errorNotice("Save failed", msg.err)
 				v.habitForm.isError = true
-			} else {
-				v.notice = errorNotice("Delete failed", msg.err)
+			default:
+				return notifyError("Delete failed", msg.err), true
 			}
 			return nil, true
 		}
 		v.habitForm = nil
-		v.confirmedHabitDeleteID = 0
-		v.notice = msg.action
 		if v.calIndex >= 0 && v.calIndex < len(v.calendars) {
-			return v.requestRecordings(v.calendars[v.calIndex].ID), true
+			return tea.Batch(notify(msg.action), v.requestRecordings(v.calendars[v.calIndex].ID)), true
 		}
-		return nil, true
+		return notify(msg.action), true
 
 	case timeTrackCategoriesLoadedMsg:
 		if !v.requests.accepts(msg.requestResult) {
@@ -230,17 +229,38 @@ func (v *calendarView) View() string {
 	if v.timeTrackCategories != nil {
 		return v.timeTrackCategories.view(v.vc.styles, v.vc.width, v.vc.height)
 	}
+	view := v.contentVP.View()
+	if footer := v.todosFooter(); footer != "" {
+		view += "\n" + footer
+	}
+	// The form stands over the picker it was opened from, and the picker over the
+	// calendar, so a habit is edited without the day it belongs to leaving the screen.
+	if v.habitPicker != nil {
+		view = v.habitPicker.draw(view, v.vc.width, v.vc.height)
+	}
 	if v.habitForm != nil {
-		return v.habitForm.view()
+		frame := modalFrame(v.habitForm.title(), v.habitForm.view(), v.vc.width)
+		view = overlayModal(view, frame, v.vc.width, v.vc.height)
 	}
-	var heading string
-	if v.notice != "" {
-		heading = v.vc.styles.title.Render(v.notice) + "\n"
+	return view
+}
+
+// todosFooter is the week's to-dos, standing at the bottom of the screen under the grid
+// rather than scrolling away inside it. A to-do is not due at an hour, so it does not
+// belong in a grid that is precise about time — and a day with a long event pushes
+// everything below it out of the viewport.
+func (v *calendarView) todosFooter() string {
+	if v.viewMode == viewYear || len(v.todos) == 0 {
+		return ""
 	}
-	if habit := v.selectedHabit(); habit != nil {
-		heading += styleMuted.Render(fmt.Sprintf("Selected habit %d/%d: %s (ID %d)", v.habitIndex+1, len(v.manageableHabits()), terminal.SanitizeLine(habit.Title), habit.ID)) + "\n"
+	return sectionHeader(todosSectionLabel, v.vc.width) + "\n" + renderTodosRibbon(v.todos, v.vc.width)
+}
+
+func (v *calendarView) todosFooterHeight() int {
+	if footer := v.todosFooter(); footer != "" {
+		return lipgloss.Height(footer)
 	}
-	return heading + v.contentVP.View()
+	return 0
 }
 
 func (v *calendarView) HelpBindings() []helpBinding {
@@ -250,19 +270,20 @@ func (v *calendarView) HelpBindings() []helpBinding {
 	if v.habitForm != nil {
 		return v.habitForm.helpBindings()
 	}
-	bindings := []helpBinding{{"v", v.viewMode.next().String() + " view"}, {"c", "time categories"}}
-	if v.viewingPersonalCalendar() {
-		bindings = append(bindings, helpBinding{"a", "create habit"})
+	if v.habitPicker != nil {
+		return v.habitPicker.helpBindings()
 	}
-	if len(v.manageableHabits()) > 0 {
-		bindings = append(bindings, helpBinding{"[/]", "select habit"}, helpBinding{"e", "edit habit"})
-		deleteLabel := "delete habit"
-		if v.habitDeleteConfirmed() {
-			deleteLabel = "confirm delete"
-		}
-		bindings = append(bindings, helpBinding{"x", deleteLabel})
+	bindings := []helpBinding{{"v", v.viewMode.next().String() + " view"}, {"c", "time categories"}}
+	if v.showsHabits() {
+		bindings = append(bindings, helpBinding{"b", "habits"})
 	}
 	return bindings
+}
+
+// showsHabits reports whether the day has habits to manage: the hint on the section
+// header and the h that opens the picker are the same offer.
+func (v *calendarView) showsHabits() bool {
+	return len(v.manageableHabits()) > 0 || v.viewingPersonalCalendar()
 }
 
 func (v *calendarView) SubnavItems() ([]navItem, int, string, bool) {
@@ -309,11 +330,15 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 
-	if msg.String() != "x" {
-		v.confirmedHabitDeleteID = 0
+	if v.habitPicker != nil {
+		return v.handleHabitPickerKey(msg)
 	}
-	v.notice = ""
+
 	switch msg.String() {
+	// b for habits, as in HEY's own calendar.
+	case "b":
+		v.habitPicker = newHabitPicker(v.manageableHabits())
+		return nil
 	case "c":
 		v.timeTrackCategories = newTimeTrackCategoryManager()
 		return v.requestTimeTrackCategories()
@@ -324,37 +349,55 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		v.rebuildView()
 		return nil
-	case "a":
-		if !v.viewingPersonalCalendar() {
-			v.notice = "Habits can only be created from the personal calendar"
-			return nil
-		}
-		return v.startHabitForm(habitFormCreate, Recording{})
-	case "[":
-		v.moveHabitSelection(-1)
-		return nil
-	case "]":
-		v.moveHabitSelection(1)
-		return nil
-	case "e":
-		if habit := v.selectedHabit(); habit != nil {
-			return v.startHabitForm(habitFormEdit, *habit)
-		}
-	case "x":
-		if habit := v.selectedHabit(); habit != nil {
-			if v.confirmedHabitDeleteID != habit.ID {
-				v.confirmedHabitDeleteID = habit.ID
-				v.notice = fmt.Sprintf("Press x again to permanently delete %s and its history", terminal.SanitizeLine(habit.Title))
-				return nil
-			}
-			return v.deleteHabit(*habit)
-		}
 	}
 
 	// Delegate scrolling to the content viewport
 	var cmd tea.Cmd
 	v.contentVP, cmd = v.contentVP.Update(msg)
 	return cmd
+}
+
+// handleHabitPickerKey gives the open picker every key: managing a habit is what the
+// modal is for, so a is a new habit here rather than whatever a means outside it.
+func (v *calendarView) handleHabitPickerKey(msg tea.KeyPressMsg) tea.Cmd {
+	picker := v.habitPicker
+
+	switch msg.String() {
+	case "esc", "q":
+		v.habitPicker = nil
+		return nil
+	case "a":
+		if !v.viewingPersonalCalendar() {
+			picker.status = "Habits can only be created from the personal calendar"
+			return nil
+		}
+		return v.startHabitForm(habitFormCreate, Recording{})
+	case "enter":
+		if habit := picker.selected(); habit != nil {
+			return v.toggleHabitCompletion(*habit)
+		}
+		return nil
+	case "e":
+		if habit := picker.selected(); habit != nil {
+			return v.startHabitForm(habitFormEdit, *habit)
+		}
+		return nil
+	case "x":
+		habit := picker.selected()
+		if habit == nil {
+			return nil
+		}
+		if picker.confirmed != habit.ID {
+			picker.confirmed = habit.ID
+			picker.status = fmt.Sprintf("Press x again to permanently delete %s and its history", terminal.SanitizeLine(habit.Title))
+			return nil
+		}
+		return v.deleteHabit(*habit)
+	}
+
+	picker.moveCursor(msg)
+	picker.status = ""
+	return nil
 }
 
 func (v *calendarView) handleTimeTrackCategoryKey(msg tea.KeyPressMsg) tea.Cmd {
@@ -423,9 +466,16 @@ func (v *calendarView) handleTimeTrackCategoryKey(msg tea.KeyPressMsg) tea.Cmd {
 // The calendar has no thread to be in: a recording is read where it sits in the grid.
 func (v *calendarView) InThread() bool { return false }
 func (v *calendarView) ExitThread()    {}
-func (v *calendarView) Loading() bool  { return v.requests.loading }
+
+// Loading is what puts the spinner over the content, so a read with a modal open does
+// not claim it: the reader is looking at the modal, and the calendar behind it can keep
+// the day it was showing until the new one arrives. Ticking a habit off reads the day
+// again, and a spinner for that is a flash of nothing where the day used to be.
+func (v *calendarView) Loading() bool {
+	return v.requests.loading && !v.CapturingInput()
+}
 func (v *calendarView) CapturingInput() bool {
-	return v.timeTrackCategories != nil || v.habitForm != nil
+	return v.timeTrackCategories != nil || v.habitForm != nil || v.habitPicker != nil
 }
 
 func (v *calendarView) AccountSwitchBlocked() bool {
@@ -441,8 +491,6 @@ func (v *calendarView) Restyle() {
 }
 
 func (v *calendarView) Resize(width, height int) {
-	v.contentVP.SetWidth(width)
-	v.contentVP.SetHeight(max(height-2, 1))
 	if v.habitForm != nil {
 		v.habitForm.resize(width, height)
 	}
@@ -460,12 +508,19 @@ func (v *calendarView) rebuildView() {
 	anchor := v.now()
 	dayLabels := dayLabelsFromRecordings(v.events, v.todos, v.habits)
 
+	// The grid scrolls; the week's to-dos do not, so the viewport gives up the rows
+	// they stand on. It is sized here rather than in Resize because the to-dos arrive
+	// with the recordings, long after the screen has its size — and the day fills
+	// whatever is left, so it has to be sized before it is drawn.
+	v.contentVP.SetWidth(w)
+	v.contentVP.SetHeight(max(h-2-v.todosFooterHeight(), 1))
+
 	var content string
 	switch v.viewMode {
 	case viewDay:
-		content = renderDayView(v.events, v.todos, v.habits, anchor, w, h)
+		content = renderDayView(v.events, v.habits, anchor, w, v.contentVP.Height())
 	case viewWeek:
-		content = renderWeekView(v.events, v.todos, v.habits, anchor, v.firstWeekDay, w, h, dayLabels)
+		content = renderWeekView(v.events, v.habits, anchor, v.firstWeekDay, w, h, dayLabels)
 	case viewYear:
 		content = renderYearView(v.events, anchor, v.firstWeekDay, w, h, dayLabels)
 	}
@@ -501,41 +556,7 @@ func (v *calendarView) manageableHabits() []Recording {
 	return habits
 }
 
-func (v *calendarView) selectedHabit() *Recording {
-	habits := v.manageableHabits()
-	if len(habits) == 0 {
-		return nil
-	}
-	v.habitIndex = max(0, min(v.habitIndex, len(habits)-1))
-	habit := habits[v.habitIndex]
-	return &habit
-}
-
-func (v *calendarView) normalizeHabitSelection() {
-	habits := v.manageableHabits()
-	if len(habits) == 0 {
-		v.habitIndex = 0
-		return
-	}
-	v.habitIndex = max(0, min(v.habitIndex, len(habits)-1))
-}
-
-func (v *calendarView) moveHabitSelection(delta int) {
-	habits := v.manageableHabits()
-	if len(habits) == 0 {
-		v.habitIndex = 0
-		return
-	}
-	v.habitIndex = (v.habitIndex + delta + len(habits)) % len(habits)
-}
-
-func (v *calendarView) habitDeleteConfirmed() bool {
-	habit := v.selectedHabit()
-	return habit != nil && v.confirmedHabitDeleteID == habit.ID
-}
-
 func (v *calendarView) startHabitForm(mode habitFormMode, recording Recording) tea.Cmd {
-	v.confirmedHabitDeleteID = 0
 	v.habitForm = newHabitForm(mode, recording, v.vc.styles)
 	v.habitForm.resize(v.vc.width, v.vc.height)
 	return v.habitForm.init()
@@ -543,7 +564,7 @@ func (v *calendarView) startHabitForm(mode habitFormMode, recording Recording) t
 
 func (v *calendarView) saveHabit() tea.Cmd {
 	form := v.habitForm
-	name, icon, color, days, _ := form.values()
+	name, icon, color, days := form.values()
 	params := hey.HabitParams{Name: name, Icon: icon, Color: color, Days: days}
 	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestHabitMutation)
 	return func() tea.Msg {
@@ -554,6 +575,26 @@ func (v *calendarView) saveHabit() tea.Cmd {
 		} else {
 			action = "Habit updated"
 			_, err = v.vc.sdk.Habits().Update(ctx, form.habitID, params)
+		}
+		return habitMutationMsg{requestResult: newRequestResult(requestID, err), action: action}
+	}
+}
+
+// toggleHabitCompletion does a habit for the day on screen, or undoes it. HEY records
+// the doing as a recording of its own, on a day-scoped route, so which day is being
+// looked at is part of the request rather than an argument to the habit.
+func (v *calendarView) toggleHabitCompletion(habit Recording) tea.Cmd {
+	day := v.now().Local().Format(time.DateOnly)
+	done := habit.CompletedAt != ""
+	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestHabitMutation)
+	return func() tea.Msg {
+		var err error
+		action := "Habit done for today"
+		if done {
+			action = "Habit cleared for today"
+			_, err = v.vc.sdk.Habits().Uncomplete(ctx, day, habit.ID)
+		} else {
+			_, err = v.vc.sdk.Habits().Complete(ctx, day, habit.ID)
 		}
 		return habitMutationMsg{requestResult: newRequestResult(requestID, err), action: action}
 	}
@@ -578,7 +619,7 @@ func sdkCalendarToModel(c generated.Calendar) Calendar {
 
 func sdkRecordingToModel(r generated.Recording) Recording {
 	return Recording{
-		ID: r.Id, Title: r.Title, AllDay: r.AllDay, Type: r.Type,
+		ID: r.Id, ParentID: r.ParentId, Title: r.Title, AllDay: r.AllDay, Type: r.Type,
 		StartsAt: formatTimestamp(r.StartsAt), EndsAt: formatTimestamp(r.EndsAt),
 		CompletedAt: formatTimestamp(r.CompletedAt), Label: r.Label,
 		Icon: r.Icon, Color: r.Color, Days: append([]int32(nil), r.Days...),

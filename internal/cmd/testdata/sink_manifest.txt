@@ -59,6 +59,7 @@ exempt internal/cmd/setup_agent.go:newSetupAgentCommands agent names are this pr
 exempt internal/cmd/setup_agent.go:runSetupAgent agent names are this program's own constants
 exempt internal/cmd/setup.go:setupAgents agent names are this program's own constants
 exempt internal/cmd/setup.go:showWizardSuccess check names and statuses are this program's own constants
+exempt internal/tui/habit_form.go:iconField the icon names and emoji are this program's own constants, from internal/habit's list of what HEY accepts, never a name HEY served
 exempt internal/cmd/upgrade_selfupdate.go:extractTarGzMember archive member names come from a release whose signature was verified first
 exempt internal/cmd/upgrade_selfupdate.go:extractZipMember archive member names come from a release whose signature was verified first
 exempt internal/cmd/topic.go:writeThreadMarkdown the body it writes is the Markdown ToMarkdown produced, which carries no control characters, and the document is Markdown for a reader rather than a terminal

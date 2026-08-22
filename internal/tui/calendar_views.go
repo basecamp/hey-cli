@@ -67,12 +67,29 @@ func weekStartDate(t time.Time, firstDay time.Weekday) time.Time {
 // splitRecordings separates recordings into events, todos, and habits.
 // The API returns Type values like "CalendarEvent", "CalendarTodo", "Habit".
 func splitRecordings(recs []Recording) (events, todos, habits []Recording) {
+	// Doing a habit is a recording of its own — a `Calendar::Habit::Completion`
+	// carrying nothing but the habit it belongs to, since HEY records the doing rather
+	// than flagging the habit. So a completion marks the habit it names and is never
+	// listed itself: left in, it read as a habit with no name and left every habit
+	// looking undone.
+	completed := make(map[int64]string)
+	for _, r := range recs {
+		if isHabitCompletion(r.Type) {
+			completed[r.ParentID] = r.StartsAt
+		}
+	}
+
 	for _, r := range recs {
 		t := strings.ToLower(r.Type)
 		switch {
+		case isHabitCompletion(r.Type):
+			// Already folded into the habit it completes.
 		case strings.Contains(t, "todo"):
 			todos = append(todos, r)
 		case strings.Contains(t, "habit"):
+			if done, ok := completed[r.ID]; ok {
+				r.CompletedAt = done
+			}
 			habits = append(habits, r)
 		default:
 			events = append(events, r)
@@ -82,6 +99,11 @@ func splitRecordings(recs []Recording) (events, todos, habits []Recording) {
 		return events[i].StartsAt < events[j].StartsAt
 	})
 	return
+}
+
+func isHabitCompletion(recordingType string) bool {
+	t := strings.ToLower(recordingType)
+	return strings.Contains(t, "habit") && strings.Contains(t, "completion")
 }
 
 // parseEventTime parses a recording timestamp to time.Time.
@@ -187,31 +209,65 @@ type placedEvent struct {
 	lane     int
 }
 
-func renderDayView(events, todos, habits []Recording, _ time.Time, width, _ int) string {
-	var b strings.Builder
-	muted := styleMuted
-	primary := lipgloss.NewStyle().Foreground(colorPrimary)
+// A to-do in HEY is not due at an hour, it is due around now, which is what the web app
+// means by "Sometime this week". The day and the week both say it, since both are showing
+// the same week's to-dos under a grid that is precise about time.
+const todosSectionLabel = "Sometime this week"
 
-	// Habits ribbon above columns
+// cellKind is what one cell of the day grid holds, and so which style draws it.
+type cellKind int
+
+const (
+	cellEmpty cellKind = iota
+	cellRule
+	cellChrome
+	cellTitle
+)
+
+// hourRule is dotted rather than solid so an hour's line reads as a guide behind the
+// events and not as another box's border.
+const hourRule = '┊'
+
+func renderDayView(events, habits []Recording, anchor time.Time, width, height int) string {
+	var b strings.Builder
+
+	// The day borrows the mail list's vocabulary: chrome for the structure a reader
+	// looks past — the hour axis, a box's border, a section's rule — and the bright
+	// bold that a subject wears for the one thing on the row they came to read.
+	muted := styleMuted
+	chrome := lipgloss.NewStyle().Foreground(colorChrome)
+	eventTitle := lipgloss.NewStyle().Foreground(colorBright).Bold(true)
+
 	if len(habits) > 0 {
+		b.WriteString(hintedSectionHeader("Habits", "b to manage", width))
+		b.WriteString("\n")
 		b.WriteString(renderHabitsRibbon(habits, width))
 		b.WriteString("\n")
 	}
 
-	colWidth := max(width/24, 3)
-	gridWidth := colWidth * 24
+	// A day ends where the next one begins, so the axis closes on another 00 with a
+	// rule under it: twenty-four hours are twenty-five lines, and the day reads as a
+	// span rather than as columns that stop. The two columns that last label needs are
+	// what the hours are sized against.
+	colWidth := max((width-2)/24, 3)
+	daySpan := colWidth * 24
+	gridWidth := daySpan + 1
+
+	// The day names itself above its hours: the subnav carries the calendar and the
+	// view mode, so which day this is has nowhere else to be said.
+	b.WriteString(sectionHeader(anchor.Local().Format("Monday, January 2"), width))
+	b.WriteString("\n")
 
 	// Hour header
 	var header strings.Builder
 	for h := range 24 {
-		label := fmt.Sprintf("%02d", h)
-		pad := colWidth - 2
-		header.WriteString(label)
-		if pad > 0 {
+		fmt.Fprintf(&header, "%02d", h)
+		if pad := colWidth - 2; pad > 0 {
 			header.WriteString(strings.Repeat(" ", pad))
 		}
 	}
-	b.WriteString(muted.Render(header.String()))
+	header.WriteString("00")
+	b.WriteString(chrome.Render(header.String()))
 	b.WriteString("\n")
 
 	// Separate timed and all-day events
@@ -236,18 +292,18 @@ func renderDayView(events, todos, habits []Recording, _ time.Time, width, _ int)
 			et = st.Add(time.Hour)
 		}
 
-		startPos := (st.Hour()*60 + st.Minute()) * gridWidth / (24 * 60)
-		endPos := (et.Hour()*60 + et.Minute()) * gridWidth / (24 * 60)
+		startPos := (st.Hour()*60 + st.Minute()) * daySpan / (24 * 60)
+		endPos := (et.Hour()*60 + et.Minute()) * daySpan / (24 * 60)
 		if et.Day() != st.Day() || (et.Hour() == 0 && et.Minute() == 0 && et.After(st)) {
-			endPos = gridWidth
+			endPos = daySpan
 		}
 		if endPos <= startPos {
 			endPos = startPos + colWidth
 		}
-		startPos = min(startPos, gridWidth-1)
-		endPos = min(endPos, gridWidth)
+		startPos = min(startPos, daySpan-1)
+		endPos = min(endPos, daySpan)
 		if endPos-startPos < 3 {
-			endPos = min(startPos+3, gridWidth)
+			endPos = min(startPos+3, daySpan)
 		}
 
 		placed = append(placed, placedEvent{rec: e, startCol: startPos, endCol: endPos})
@@ -278,155 +334,178 @@ func renderDayView(events, todos, habits []Recording, _ time.Time, width, _ int)
 		lanes[pe.lane] = append(lanes[pe.lane], pe)
 	}
 
-	// Render each lane as a vertical band with boxes and rotated titles
-	for _, lane := range lanes {
-		b.WriteString(renderDayLane(lane, gridWidth, primary, muted))
+	// The grid fills the room the rest of the day view leaves it, so the hours reach
+	// the bottom of the screen on a day with nothing on them.
+	spent := 2 // the day's own header and the hour axis
+	if len(habits) > 0 {
+		spent += 2
 	}
-
-	if len(timed) == 0 && len(allDay) == 0 {
-		b.WriteString(muted.Render("  (no events)"))
-		b.WriteString("\n")
+	if len(allDay) > 0 {
+		spent += 1 + len(allDay)
 	}
+	b.WriteString(renderDayGrid(lanes, gridWidth, colWidth, height-spent, chrome, eventTitle, muted))
 
 	// All-day events as full-width horizontal bars at the bottom
 	if len(allDay) > 0 {
-		b.WriteString(muted.Render(strings.Repeat("─", width)))
+		b.WriteString(sectionHeader("All day", width))
 		b.WriteString("\n")
 		for _, e := range allDay {
-			title := terminal.SanitizeLine(e.Title)
 			innerLen := gridWidth - 2
-			if len(title) > innerLen {
-				title = truncateStr(title, innerLen)
-			}
-			fill := max(innerLen-len(title), 0)
-			box := "[" + title + strings.Repeat("─", fill) + "]"
-			b.WriteString(primary.Render(box))
+			title := truncateStr(terminal.SanitizeLine(e.Title), innerLen)
+			fill := max(innerLen-lipgloss.Width(title), 0)
+			b.WriteString(chrome.Render("[") + eventTitle.Render(title) +
+				chrome.Render(strings.Repeat("─", fill)+"]"))
 			b.WriteString("\n")
 		}
 	}
 
-	// Todos ribbon
-	if len(todos) > 0 {
-		b.WriteString(muted.Render(strings.Repeat("─", width)))
-		b.WriteString("\n")
-		b.WriteString(renderTodosRibbon(todos, width))
+	// Every section here ends its own last line, so the day would otherwise carry a
+	// blank line the viewport counts — one row of scroll on a day that fits exactly.
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// renderDayGrid draws the day's hours as one canvas: the lanes of events stacked down
+// it, and an hour rule falling down every hour column no event stands on. The rules are
+// the grid, not a decoration on the events, so a day with nothing on it still reads as
+// a day. It is never shorter than the rows it is given, and grows past them for a day
+// too full to fit, which is what the viewport scrolls.
+func renderDayGrid(lanes [][]placedEvent, gridWidth, colWidth, rows int, chrome, title, muted lipgloss.Style) string {
+	height := 0
+	for _, lane := range lanes {
+		height += laneHeight(lane)
+	}
+	height = max(height, rows, 1)
+
+	// A 2D grid of runes and a parallel note of what each cell is: the empty grid
+	// between events, an hour's rule, a box's own chrome, or a rune of its title.
+	// The four are styled separately so an event's name stands out of its border the
+	// way a subject stands out of the mail list's rules.
+	grid := make([][]rune, height)
+	cells := make([][]cellKind, height)
+	for row := range height {
+		grid[row] = make([]rune, gridWidth)
+		cells[row] = make([]cellKind, gridWidth)
+		for col := range gridWidth {
+			grid[row][col] = ' '
+		}
+	}
+
+	offset := 0
+	for _, lane := range lanes {
+		drawDayLane(grid, cells, lane, offset)
+		offset += laneHeight(lane)
+	}
+
+	// The rules go in last and only where nothing else stands: a box is drawn over an
+	// hour, never cut by it.
+	for row := range height {
+		for col := 0; col < gridWidth; col += colWidth {
+			if cells[row][col] == cellEmpty {
+				grid[row][col] = hourRule
+				cells[row][col] = cellRule
+			}
+		}
+	}
+
+	styleFor := map[cellKind]lipgloss.Style{
+		cellEmpty:  muted,
+		cellRule:   muted,
+		cellChrome: chrome,
+		cellTitle:  title,
+	}
+
+	// Render row by row, batching consecutive cells of the same kind
+	var b strings.Builder
+	for row := range height {
+		var seg strings.Builder
+		kind := cellEmpty
+
+		flush := func() {
+			if s := seg.String(); s != "" {
+				b.WriteString(styleFor[kind].Render(s))
+				seg.Reset()
+			}
+		}
+
+		for col := range gridWidth {
+			if cells[row][col] != kind {
+				flush()
+				kind = cells[row][col]
+			}
+			seg.WriteRune(grid[row][col])
+		}
+		flush()
 		b.WriteString("\n")
 	}
 
 	return b.String()
 }
 
-// renderDayLane renders one lane of non-overlapping events as boxes with
-// vertical (90-degree rotated) title text.
-func renderDayLane(lane []placedEvent, gridWidth int, primary, muted lipgloss.Style) string {
-	if len(lane) == 0 {
-		return ""
-	}
-
-	// Find the tallest title to determine band height
-	maxTitle := 0
+// laneHeight is the rows a lane needs: its longest title read downwards, between the
+// top and bottom borders of its boxes.
+func laneHeight(lane []placedEvent) int {
+	longest := 0
 	for _, pe := range lane {
-		if len([]rune(terminal.SanitizeLine(pe.rec.Title))) > maxTitle {
-			maxTitle = len([]rune(terminal.SanitizeLine(pe.rec.Title)))
-		}
+		longest = max(longest, len([]rune(terminal.SanitizeLine(pe.rec.Title))))
 	}
-	bandHeight := maxTitle + 2 // top border + title rows + bottom border
+	return longest + 2
+}
 
-	// Build a 2D grid of runes and a parallel "styled" flag
-	grid := make([][]rune, bandHeight)
-	isBox := make([][]bool, bandHeight)
-	for row := range bandHeight {
-		grid[row] = make([]rune, gridWidth)
-		isBox[row] = make([]bool, gridWidth)
-		for col := range gridWidth {
-			grid[row][col] = ' '
-		}
-	}
+// drawDayLane draws one lane of non-overlapping events into the grid at rowOffset, as
+// boxes with vertical (90-degree rotated) title text.
+func drawDayLane(grid [][]rune, cells [][]cellKind, lane []placedEvent, rowOffset int) {
+	top := rowOffset
+	bottom := rowOffset + laneHeight(lane) - 1
 
-	// Draw each event box
 	for _, pe := range lane {
 		sc, ec := pe.startCol, pe.endCol
 		boxW := ec - sc
 		titleRunes := []rune(terminal.SanitizeLine(pe.rec.Title))
 
 		// Top border: ┌──┐
-		grid[0][sc] = '┌'
-		isBox[0][sc] = true
+		grid[top][sc] = '┌'
+		cells[top][sc] = cellChrome
 		for c := sc + 1; c < ec-1; c++ {
-			grid[0][c] = '─'
-			isBox[0][c] = true
+			grid[top][c] = '─'
+			cells[top][c] = cellChrome
 		}
 		if boxW > 1 {
-			grid[0][ec-1] = '┐'
-			isBox[0][ec-1] = true
+			grid[top][ec-1] = '┐'
+			cells[top][ec-1] = cellChrome
 		}
 
 		// Middle rows: │c │  (vertical title text)
-		for row := 1; row < bandHeight-1; row++ {
+		for row := top + 1; row < bottom; row++ {
 			grid[row][sc] = '│'
-			isBox[row][sc] = true
+			cells[row][sc] = cellChrome
 			if boxW > 1 {
 				grid[row][ec-1] = '│'
-				isBox[row][ec-1] = true
+				cells[row][ec-1] = cellChrome
 			}
 			// Title character
-			titleIdx := row - 1
+			titleIdx := row - top - 1
 			if titleIdx < len(titleRunes) && sc+1 < ec-1 {
 				grid[row][sc+1] = titleRunes[titleIdx]
-				isBox[row][sc+1] = true
+				cells[row][sc+1] = cellTitle
 			}
 			// Fill inner space
 			for c := sc + 2; c < ec-1; c++ {
-				isBox[row][c] = true
+				cells[row][c] = cellChrome
 			}
 		}
 
 		// Bottom border: └──┘
-		grid[bandHeight-1][sc] = '└'
-		isBox[bandHeight-1][sc] = true
+		grid[bottom][sc] = '└'
+		cells[bottom][sc] = cellChrome
 		for c := sc + 1; c < ec-1; c++ {
-			grid[bandHeight-1][c] = '─'
-			isBox[bandHeight-1][c] = true
+			grid[bottom][c] = '─'
+			cells[bottom][c] = cellChrome
 		}
 		if boxW > 1 {
-			grid[bandHeight-1][ec-1] = '┘'
-			isBox[bandHeight-1][ec-1] = true
+			grid[bottom][ec-1] = '┘'
+			cells[bottom][ec-1] = cellChrome
 		}
 	}
-
-	// Render the grid row by row, batching consecutive styled/unstyled segments
-	var b strings.Builder
-	for row := range bandHeight {
-		var seg strings.Builder
-		inStyled := false
-
-		flush := func() {
-			s := seg.String()
-			if s == "" {
-				return
-			}
-			if inStyled {
-				b.WriteString(primary.Render(s))
-			} else {
-				b.WriteString(muted.Render(s))
-			}
-			seg.Reset()
-		}
-
-		for col := range gridWidth {
-			styled := isBox[row][col]
-			if styled != inStyled {
-				flush()
-				inStyled = styled
-			}
-			seg.WriteRune(grid[row][col])
-		}
-		flush()
-		// Trim trailing spaces
-		b.WriteString("\n")
-	}
-
-	return b.String()
 }
 
 // =============================================
@@ -440,7 +519,7 @@ type weekDayInfo struct {
 	allDay []Recording
 }
 
-func renderWeekView(events, todos, habits []Recording, anchor time.Time, firstWeekDay time.Weekday, width, _ int, dayLabels map[string]string) string {
+func renderWeekView(events, habits []Recording, anchor time.Time, firstWeekDay time.Weekday, width, _ int, dayLabels map[string]string) string {
 	var b strings.Builder
 	muted := styleMuted
 	bright := lipgloss.NewStyle().Foreground(colorBright)
@@ -541,12 +620,6 @@ func renderWeekView(events, todos, habits []Recording, anchor time.Time, firstWe
 	// Bottom border
 	b.WriteString(weekGridBorder("└", "┴", "┘", colWidth, muted))
 	b.WriteString("\n")
-
-	// Todos ribbon
-	if len(todos) > 0 {
-		b.WriteString(renderTodosRibbon(todos, width))
-		b.WriteString("\n")
-	}
 
 	return b.String()
 }
@@ -769,44 +842,54 @@ func dayLabelOrDefault(d time.Time, isFirstCol bool, dayLabels map[string]string
 
 // --- Ribbons ---
 
+// renderHabitsRibbon is the day's habits, each wearing the ring HEY fills in when it is
+// done, the color HEY gave it, and the emoji standing in for its icon.
 func renderHabitsRibbon(habits []Recording, width int) string {
-	parts := make([]string, 0, len(habits))
-	for _, h := range habits {
-		marker := "○"
-		if h.CompletedAt != "" {
-			marker = "●"
-		}
-		parts = append(parts, marker+" "+terminal.SanitizeLine(h.Title))
-	}
-	ribbon := strings.Join(parts, "  ")
-	if lipgloss.Width(ribbon) > width {
-		runes := []rune(ribbon)
-		for lipgloss.Width(string(runes)) > width-1 && len(runes) > 0 {
-			runes = runes[:len(runes)-1]
-		}
-		ribbon = string(runes) + "…"
-	}
-	return ribbon
+	return renderRibbon(habits, width, func(habit Recording) (string, lipgloss.Style, string) {
+		return habitMarker(habit.CompletedAt != ""), habitMarkerStyle(habit.Color), habitLabel(habit)
+	})
 }
 
 func renderTodosRibbon(todos []Recording, width int) string {
-	parts := make([]string, 0, len(todos))
-	for _, t := range todos {
-		marker := "□"
-		if t.CompletedAt != "" {
-			marker = "■"
+	return renderRibbon(todos, width, func(todo Recording) (string, lipgloss.Style, string) {
+		label := terminal.SanitizeLine(todo.Title)
+		if todo.CompletedAt != "" {
+			return "■", styleMuted, label
 		}
-		parts = append(parts, marker+" "+terminal.SanitizeLine(t.Title))
-	}
-	ribbon := strings.Join(parts, "  ")
-	if lipgloss.Width(ribbon) > width {
-		runes := []rune(ribbon)
-		for lipgloss.Width(string(runes)) > width-1 && len(runes) > 0 {
-			runes = runes[:len(runes)-1]
+		return "□", lipgloss.NewStyle().Foreground(colorAlert).Bold(true), label
+	})
+}
+
+// renderRibbon lays out one line of markers and labels in the mail list's vocabulary:
+// something still waiting wears a bright label the way an unseen thread does, and
+// something done is muted the way a seen one is. The marker and the label are the
+// caller's, since a habit's ring is colored by the habit and carries its icon while a
+// to-do's box is colored by whether it is waiting. What is left over at the end of the
+// line is an ellipsis rather than a label cut mid-word.
+func renderRibbon(items []Recording, width int, describe func(Recording) (string, lipgloss.Style, string)) string {
+	var b strings.Builder
+	used := 0
+	for i, item := range items {
+		marker, markerStyle, label := describe(item)
+		labelStyle := lipgloss.NewStyle().Foreground(colorBright)
+		if item.CompletedAt != "" {
+			labelStyle = styleMuted
 		}
-		ribbon = string(runes) + "…"
+
+		gap := ""
+		if i > 0 {
+			gap = "  "
+		}
+		if used+lipgloss.Width(gap+marker+" "+label) > width {
+			if used < width {
+				b.WriteString(styleMuted.Render("…"))
+			}
+			break
+		}
+		used += lipgloss.Width(gap + marker + " " + label)
+		b.WriteString(gap + markerStyle.Render(marker) + " " + labelStyle.Render(label))
 	}
-	return ribbon
+	return b.String()
 }
 
 // --- Helpers ---

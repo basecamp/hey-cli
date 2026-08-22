@@ -4,9 +4,12 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"charm.land/lipgloss/v2"
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 )
@@ -340,22 +343,254 @@ func TestDayLabelsCoverTodosAndHabits(t *testing.T) {
 	}
 }
 
+// --- Habits ---
+
+func TestHabitCompletionsMarkTheirHabitRatherThanListingThemselves(t *testing.T) {
+	// HEY answers a habit and its completion as separate recordings, the completion
+	// carrying no title and naming its habit in parent_id.
+	events, todos, habits := splitRecordings([]Recording{
+		{ID: 14796085, Title: "Read", Type: "Calendar::Habit", Icon: "read"},
+		{ID: 14113260, Title: "Meditate", Type: "Calendar::Habit", Icon: "meditate"},
+		{ID: 171477412, Type: "Calendar::Habit::Completion", ParentID: 14796085, StartsAt: "2026-08-22T00:00:00Z"},
+	})
+
+	if len(events) != 0 || len(todos) != 0 {
+		t.Errorf("a completion is neither an event nor a to-do: events=%v todos=%v", events, todos)
+	}
+	if len(habits) != 2 {
+		t.Fatalf("habits = %+v, want the two habits without the completion", habits)
+	}
+	if habits[0].Title != "Read" || habits[0].CompletedAt != "2026-08-22T00:00:00Z" {
+		t.Errorf("the completed habit was not marked done: %+v", habits[0])
+	}
+	if habits[1].Title != "Meditate" || habits[1].CompletedAt != "" {
+		t.Errorf("a habit with no completion was marked done: %+v", habits[1])
+	}
+}
+
+func TestHabitsModalOpensOverTheCalendarAndManagesHabits(t *testing.T) {
+	v := newCalendarView(testVC())
+	v.vc.width, v.vc.height = 80, 20
+	v.calendars = []Calendar{{ID: 10, Name: "Personal", Personal: true}}
+	v.habits = []Recording{
+		{ID: 7, Title: "Read before bed"},
+		{ID: 8, Title: "Evening walk", CompletedAt: "2026-08-22T00:00:00Z"},
+	}
+	v.rebuildView()
+
+	v.HandleContentKey(keyPress("b"))
+	if v.habitPicker == nil || !v.CapturingInput() {
+		t.Fatal("b did not open the habits modal")
+	}
+
+	view := stripANSI(v.View())
+	if !strings.Contains(view, "Habits") || !strings.Contains(view, "○ Read before bed") {
+		t.Errorf("modal did not list the habits: %q", view)
+	}
+	if !strings.Contains(view, "● Evening walk") {
+		t.Errorf("a habit done today is not marked done: %q", view)
+	}
+	if !strings.Contains(view, "╭") {
+		t.Errorf("habits modal drew no frame: %q", view)
+	}
+
+	v.HandleContentKey(keyPress("esc"))
+	if v.habitPicker != nil {
+		t.Error("esc did not close the habits modal")
+	}
+}
+
+// --- Day view ---
+
+func TestRibbonMarksWhatIsDoneAndStopsAtTheWidth(t *testing.T) {
+	todos := []Recording{
+		{ID: 1, Title: "Renew passport"},
+		{ID: 2, Title: "Send the invoice", CompletedAt: "2026-08-24T08:00:00Z"},
+	}
+
+	ribbon := renderTodosRibbon(todos, 80)
+	if stripANSI(ribbon) != "□ Renew passport  ■ Send the invoice" {
+		t.Errorf("ribbon = %q", stripANSI(ribbon))
+	}
+	if !strings.Contains(ribbon, "\x1b[2m■") {
+		t.Errorf("a finished to-do should be muted like a seen thread: %q", ribbon)
+	}
+
+	// A ribbon too long for its line ends in an ellipsis rather than a cut title,
+	// and never draws past the width it was given.
+	narrow := renderTodosRibbon(todos, 20)
+	if stripANSI(narrow) != "□ Renew passport…" {
+		t.Errorf("narrow ribbon = %q", stripANSI(narrow))
+	}
+	if width := lipgloss.Width(narrow); width > 20 {
+		t.Errorf("narrow ribbon width = %d, want at most 20", width)
+	}
+}
+
+func TestDayViewLabelsItsSections(t *testing.T) {
+	events := []Recording{
+		{ID: 1, Title: "Design review with Ryan", StartsAt: "2026-08-24T11:00:00Z", EndsAt: "2026-08-24T12:00:00Z"},
+		{ID: 2, Title: "Dentist", AllDay: true},
+	}
+	habits := []Recording{{ID: 4, Title: "Read 20 pages"}}
+
+	day := time.Date(2026, 8, 24, 9, 0, 0, 0, time.Local)
+	view := stripANSI(renderDayView(events, habits, day, 100, 24))
+	for _, label := range []string{"Habits", "Monday, August 24", "All day"} {
+		if !strings.Contains(view, label) {
+			t.Errorf("day view did not label its %q section: %q", label, view)
+		}
+	}
+}
+
+func TestDayViewRulesFallFromEveryHourWithoutCuttingIntoAnEvent(t *testing.T) {
+	events := []Recording{
+		{ID: 1, Title: "Design review with Ryan", StartsAt: "2026-08-24T11:00:00Z", EndsAt: "2026-08-24T12:00:00Z"},
+	}
+	day := time.Date(2026, 8, 24, 9, 0, 0, 0, time.Local)
+
+	// 98 columns leaves 96 for the hours once the closing label has its two, which puts
+	// an hour every four columns and the 11:00 event's box on the four from 44. The
+	// day's header and the hour axis take the first two rows of the 40 it is given,
+	// leaving 38 for the grid — more than the 25 rows the event's title needs read
+	// downwards.
+	lines := strings.Split(stripANSI(renderDayView(events, nil, day, 98, 40)), "\n")
+	grid := lines[2:]
+	if len(grid) != 38 {
+		t.Fatalf("grid is %d rows of the 38 left to it: %q", len(grid), grid)
+	}
+
+	const eventRows = 25 // "Design review with Ryan" between its two borders
+	for i, line := range grid {
+		if cell := []rune(line)[0]; cell != hourRule {
+			t.Errorf("grid row %d lost midnight's rule: %q", i, line)
+		}
+		cell := []rune(line)[44]
+		if i < eventRows && cell == hourRule {
+			t.Errorf("grid row %d ruled through the event's own box: %q", i, line)
+		}
+		if i >= eventRows && cell != hourRule {
+			t.Errorf("grid row %d below the event kept no rule at 11: %q", i, line)
+		}
+
+		// Twenty-four hours are twenty-five rules: the day closes where the next one
+		// starts. The event's box holds one of them for its own height.
+		want := 25
+		if i < eventRows {
+			want = 24
+		}
+		if rules := strings.Count(line, string(hourRule)); rules != want {
+			t.Errorf("grid row %d has %d rules, want %d: %q", i, rules, want, line)
+		}
+	}
+
+	// The axis closes on the hour the day ends at.
+	if axis := lines[1]; !strings.HasPrefix(axis, "00") || !strings.HasSuffix(axis, "23  00") {
+		t.Errorf("hour axis does not run 00 through 00: %q", axis)
+	}
+}
+
+func TestEmptyDayIsItsHoursRatherThanANotice(t *testing.T) {
+	day := time.Date(2026, 8, 22, 9, 0, 0, 0, time.Local)
+	view := stripANSI(renderDayView(nil, nil, day, 96, 20))
+
+	if strings.Contains(view, "no events") {
+		t.Errorf("an empty day still announces itself: %q", view)
+	}
+	rows := strings.Split(strings.TrimRight(view, "\n"), "\n")
+	if len(rows) != 20 {
+		t.Fatalf("empty day is %d rows of the 20 it was given: %q", len(rows), rows)
+	}
+	for i, row := range rows[2:] {
+		if !strings.HasPrefix(row, string(hourRule)) {
+			t.Errorf("grid row %d of an empty day is not ruled: %q", i, row)
+		}
+	}
+}
+
+// A day sized to the room it has must not scroll. It used to by exactly one row: every
+// section ended its own last line, so the day carried a blank line after it that the
+// viewport counted.
+func TestDayThatFitsDoesNotScroll(t *testing.T) {
+	v := newCalendarView(testVC())
+	v.vc.width, v.vc.height = 90, 20
+	v.habits = []Recording{{ID: 1, Title: "Read", Icon: "read", Color: "green"}}
+	v.todos = []Recording{{ID: 2, Title: "Clean the attic"}}
+	v.rebuildView()
+
+	lines := strings.Count(v.contentVP.View(), "\n") + 1
+	if lines != v.contentVP.Height() {
+		t.Errorf("the day is %d lines in a %d row viewport", lines, v.contentVP.Height())
+	}
+	if !v.contentVP.AtBottom() {
+		t.Error("a day that fits its viewport still has somewhere to scroll")
+	}
+}
+
+func TestCalendarPinsTodosBelowTheGrid(t *testing.T) {
+	v := newCalendarView(testVC())
+	v.vc.width, v.vc.height = 80, 20
+	v.todos = []Recording{{ID: 1, Title: "Renew passport"}}
+	v.events = []Recording{
+		{ID: 2, Title: "A design review long enough to fill the day view twice over",
+			StartsAt: "2026-08-24T11:00:00Z", EndsAt: "2026-08-24T12:00:00Z"},
+	}
+	v.rebuildView()
+
+	// The grid is taller than the screen, so the to-dos would scroll out of sight if
+	// they were part of it. They are the last two rows of the view either way, and
+	// the grid above them is what gave up the room.
+	lines := strings.Split(stripANSI(v.View()), "\n")
+	if len(lines) > 20 {
+		t.Fatalf("view height = %d lines, want at most 20: %q", len(lines), lines)
+	}
+	if header := lines[len(lines)-2]; !strings.HasPrefix(header, todosSectionLabel) {
+		t.Errorf("to-dos header is not the second-to-last row: %q", header)
+	}
+	if ribbon := lines[len(lines)-1]; !strings.Contains(ribbon, "Renew passport") {
+		t.Errorf("to-dos ribbon is not the last row: %q", ribbon)
+	}
+	if v.contentVP.Height() != 16 {
+		t.Errorf("grid height = %d, want 16 with two rows given to the to-dos", v.contentVP.Height())
+	}
+
+	// The year has no to-dos under it, so the grid gets those rows back.
+	v.viewMode = viewYear
+	v.rebuildView()
+	if footer := v.todosFooter(); footer != "" {
+		t.Errorf("year view drew a to-dos footer: %q", footer)
+	}
+}
+
 // --- Help bindings ---
 
 func TestCalendarViewHelpBindingsShowsViewToggle(t *testing.T) {
 	v := calendarWithRecordings()
 	v.calIndex = 1
+	// The calendar offers the view, the categories and the habits modal; creating,
+	// editing and deleting a habit are the modal's own keys.
 	bindings := v.HelpBindings()
-	if len(bindings) != 6 {
-		t.Fatalf("expected 6 bindings, got %d", len(bindings))
+	if len(bindings) != 3 {
+		t.Fatalf("expected 3 bindings, got %d: %+v", len(bindings), bindings)
 	}
-	for _, want := range []string{"v", "c", "a", "[/]", "e", "x"} {
+	for _, want := range []string{"v", "c", "b"} {
 		found := false
 		for _, binding := range bindings {
 			found = found || binding.key == want
 		}
 		if !found {
 			t.Errorf("missing binding %q: %+v", want, bindings)
+		}
+	}
+
+	v.HandleContentKey(keyPress("b"))
+	for _, want := range []string{"↑↓", "a", "e", "x", "esc"} {
+		found := false
+		for _, binding := range v.HelpBindings() {
+			found = found || binding.key == want
+		}
+		if !found {
+			t.Errorf("habits modal is missing binding %q: %+v", want, v.HelpBindings())
 		}
 	}
 }
