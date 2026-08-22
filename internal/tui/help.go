@@ -98,7 +98,6 @@ func (h helpBar) view() string {
 			if lineWidth > 0 {
 				lines = append(lines, line.String())
 				line.Reset()
-				lineWidth = 0
 			}
 			wrapped := strings.Split(ansi.Wrap(it.str, maxWidth, ""), "\n")
 			lines = append(lines, wrapped[:len(wrapped)-1]...)
