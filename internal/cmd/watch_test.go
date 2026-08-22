@@ -647,7 +647,7 @@ func TestWatchGivesUpOnABoxThatHasGone(t *testing.T) {
 	defer server.Close()
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
 
-	watch, _ := newTestWatch("added")
+	watch, out := newTestWatch("added", "resync")
 	errOut := &bytes.Buffer{}
 	watch.errOut = errOut
 	watch.boxes[31145] = &watchedBox{id: 31145, kind: "papertrail", name: "The Paper Trail", reported: true}
@@ -662,6 +662,9 @@ func TestWatchGivesUpOnABoxThatHasGone(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "can no longer be followed") {
 		t.Errorf("stderr = %q, want the box's departure reported", errOut.String())
+	}
+	if out.Len() != 0 {
+		t.Errorf("wrote %q, want no resync for a box that is gone — there is nothing to re-read", out.String())
 	}
 
 	// Now the last box goes too, and there is nothing left to wait for.

@@ -611,10 +611,14 @@ func (w *postingsWatch) readBox(ctx context.Context, box *watchedBox) error {
 
 	if changes.FullSyncRequired {
 		fmt.Fprintf(w.errOut, "notice: too much changed in %s to follow one change at a time — skipping ahead, read the box with `hey box %s`\n", box.name, box.kind)
-		if err := w.skipAhead(ctx, box); err != nil {
+		skipped, err := w.skipAhead(ctx, box)
+		if err != nil {
 			return err
 		}
-		w.report(ctx, watchEvent{Change: watchResync, At: watchTime(time.Now())}, box, nil)
+		// A resync says the box is worth re-reading; a box that is gone is not.
+		if skipped {
+			w.report(ctx, watchEvent{Change: watchResync, At: watchTime(time.Now())}, box, nil)
+		}
 		return nil
 	}
 
@@ -680,36 +684,37 @@ func (w *postingsWatch) wasRead(box *watchedBox) {
 }
 
 // skipAhead moves a box's cursor to the server's current one, which is the only way
-// back once a box has changed more than an increment can carry.
+// back once a box has changed more than an increment can carry, and says whether it
+// did.
 //
 // A box the server no longer lists, or no longer serves a changes feed for, has no
 // cursor to skip to: keeping the one it had would answer 409 on every read, and
 // installing an empty one would be a usage error on every read instead. Either way the
-// box can't be followed any more, so it stops being watched.
-func (w *postingsWatch) skipAhead(ctx context.Context, box *watchedBox) error {
+// box can't be followed any more, so it stops being watched — and nothing was skipped.
+func (w *postingsWatch) skipAhead(ctx context.Context, box *watchedBox) (bool, error) {
 	listed, err := sdk.Boxes().List(ctx)
 	if err != nil {
-		return apierr.FromSDK(err)
+		return false, apierr.FromSDK(err)
 	}
 	if listed == nil {
-		return apierr.ErrAPI(0, "could not list boxes")
+		return false, apierr.ErrAPI(0, "could not list boxes")
 	}
 
 	for _, listedBox := range *listed {
 		if listedBox.Id == box.id {
 			cursor, err := watchCursor(listedBox.PostingChangesUrl, "")
 			if err != nil {
-				return err
+				return false, err
 			}
 			if cursor.Since != "" {
 				box.cursor = cursor
 				w.newMail.skippedTo(box.id, cursor)
-				return nil
+				return true, nil
 			}
 		}
 	}
 
-	return w.stopWatching(box)
+	return false, w.stopWatching(box)
 }
 
 // stopWatching drops a box the watch can't follow any longer. When it was the last one
