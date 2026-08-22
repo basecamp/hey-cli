@@ -2156,14 +2156,17 @@ func (v *mailView) fetchTopic(ctx context.Context, requestID uint64, boxID, topi
 func (v *mailView) renderEntries(entries []mail.Entry) (string, []int) {
 	var b strings.Builder
 	offsets := make([]int, 0, len(entries))
+	lineCount := 0
 	sepWidth := max(v.vc.width-4, 40)
 	sep := v.vc.styles.separator.Render(strings.Repeat("─", sepWidth))
 
 	for i, e := range entries {
 		if i > 0 {
 			fmt.Fprintf(&b, "%s\n", sep)
+			lineCount++
 		}
-		offsets = append(offsets, strings.Count(b.String(), "\n"))
+		offsets = append(offsets, lineCount)
+		entryStart := b.Len()
 
 		from := e.Creator.Name
 		if from == "" {
@@ -2188,6 +2191,7 @@ func (v *mailView) renderEntries(entries []mail.Entry) (string, []int) {
 			fmt.Fprintf(&b, "\n%s\n", panel)
 		}
 		b.WriteString("\n")
+		lineCount += strings.Count(b.String()[entryStart:], "\n")
 	}
 
 	return b.String(), offsets

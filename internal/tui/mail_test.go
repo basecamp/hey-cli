@@ -3006,6 +3006,38 @@ func TestMailViewReadsEveryPageOfAThreadAndMarksUnreadBodies(t *testing.T) {
 	}
 }
 
+func TestRenderEntriesReportsEveryMessageHeaderOffset(t *testing.T) {
+	v := newMailView(testVC())
+	v.vc.width = 60
+	v.attachments = []messageAttachment{{
+		ID:          "2:1",
+		MessageID:   2,
+		Filename:    "quarterly-plan.pdf",
+		ContentType: "application/pdf",
+	}}
+	entries := []mail.Entry{
+		{ID: 1, Creator: mail.Contact{Name: "Maria Gonzalez"}, Summary: "Opening summary", Body: htmlutil.ToMarkdown("<p>First body.</p><p>Second paragraph.</p>")},
+		{ID: 2, Creator: mail.Contact{Name: "Sam Rivera"}, Body: htmlutil.ToMarkdown("<p>Message with an attachment.</p>")},
+		{ID: 3, Creator: mail.Contact{Name: "Ana Ortiz"}, Summary: "Closing summary"},
+	}
+
+	rendered, offsets := v.renderEntries(entries)
+	searchFrom := 0
+	for i, entry := range entries {
+		name := entry.Creator.Name
+		relative := strings.Index(rendered[searchFrom:], name)
+		if relative < 0 {
+			t.Fatalf("rendered thread is missing header %q: %q", name, rendered)
+		}
+		headerStart := searchFrom + relative
+		want := strings.Count(rendered[:headerStart], "\n")
+		if offsets[i] != want {
+			t.Errorf("offset[%d] = %d, want header line %d", i, offsets[i], want)
+		}
+		searchFrom = headerStart + len(name)
+	}
+}
+
 func TestThreadJKeepsLineScrollingForOneMessage(t *testing.T) {
 	v := newMailView(testVC())
 	v.vc.width = 80
