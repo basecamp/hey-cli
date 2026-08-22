@@ -191,9 +191,12 @@ func TestServerNowReadsTheServersClock(t *testing.T) {
 	defer server.Close()
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
 
+	date := time.Date(2026, 8, 21, 9, 0, 5, 0, time.UTC)
 	got := serverNow(context.Background())
-	if !got.Equal(time.Date(2026, 8, 21, 9, 0, 5, 0, time.UTC)) {
-		t.Errorf("serverNow = %v, want the Date header, whatever the local clock says", got)
+	// The Date header, less the instant the request took: on the server's
+	// clock, whatever the local one says, and no later than the header.
+	if got.After(date) || date.Sub(got) > time.Second {
+		t.Errorf("serverNow = %v, want the Date header translated back to the request's start", got)
 	}
 	if len(requested) != 1 || !strings.Contains(requested[0], "/identity.json?clock=") {
 		t.Errorf("requested %v, want one uncacheable identity request", requested)
@@ -203,8 +206,90 @@ func TestServerNowReadsTheServersClock(t *testing.T) {
 	if len(requested) != 2 || requested[1] == requested[0] {
 		t.Errorf("requested %v, want a fresh request each time, never the cache", requested)
 	}
-	if !second.Equal(got) {
+	if second.After(date) || date.Sub(second) > time.Second {
 		t.Errorf("second = %v, want the server's clock again", second)
+	}
+}
+
+func TestServerNowIsTheClockWhenTheRequestBeganNotWhenItWasAnswered(t *testing.T) {
+	t.Setenv("HEY_TOKEN", "test-token")
+	const delay = 300 * time.Millisecond
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(delay)
+		w.Header().Set("Date", "Fri, 21 Aug 2026 09:00:05 GMT")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":1}`))
+	}))
+	defer server.Close()
+	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
+
+	got := serverNow(context.Background())
+
+	// Mail that lands while the server is answering is later than the start;
+	// a start taken at the Date header would put it before.
+	date := time.Date(2026, 8, 21, 9, 0, 5, 0, time.UTC)
+	if date.Sub(got) < delay {
+		t.Errorf("serverNow = %v, want at least the request's %s before the Date header %v", got, delay, date)
+	}
+}
+
+// TestWatchReadsMailThatLandedWhileItReadTheClock is the whole startup window
+// end to end: the clock request is slow, a posting lands in the Imbox while the
+// server is answering it, so the box's cursor — its last posting activity — is
+// earlier than the Date header. The watch's start is translated back to before
+// the posting, the cursor is moved back to the start, the catch-up reads the
+// posting, and it is new.
+func TestWatchReadsMailThatLandedWhileItReadTheClock(t *testing.T) {
+	t.Setenv("HEY_TOKEN", "test-token")
+	const delay = 300 * time.Millisecond
+	// The Date header is 09:00:05; the posting landed at 09:00:04.900, inside
+	// the request; the box's cursor is therefore 09:00:04.900 as well.
+	var changesSince []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/identity.json"):
+			time.Sleep(delay)
+			w.Header().Set("Date", "Fri, 21 Aug 2026 09:00:05 GMT")
+			_, _ = w.Write([]byte(`{"id":1}`))
+		case r.URL.Path == "/boxes.json":
+			_, _ = w.Write([]byte(`[{"id":24088,"kind":"imbox","name":"Imbox","posting_changes_url":"/boxes/24088/postings/changes.json?since=2026-08-21T09%3A00%3A04.900Z&v=2"}]`))
+		case strings.Contains(r.URL.Path, "/postings/changes"):
+			changesSince = append(changesSince, r.URL.Query().Get("since"))
+			w.Header().Set("Link", `<`+r.URL.Path+`?since=2026-08-21T09%3A00%3A04.900Z&v=2>; rel="next"`)
+			_, _ = w.Write([]byte(`{"added":[{"id":9001,"kind":"topic","box_id":24088,"name":"Lunch on Thursday?","active_at":"2026-08-21T09:00:04.900Z","creator":{"name":"Maria Delgado"}}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
+
+	// As run does: the clock, then the boxes, then the catch-up.
+	started := serverNow(context.Background())
+	command := newWatchCommand()
+	boxes, err := command.watchedBoxes(context.Background(), started)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	watch, out := newTestWatch("added")
+	watch.boxes = boxes
+	watch.newMail = trackNewMail(started)
+	if err := watch.catchUp(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	landed := time.Date(2026, 8, 21, 9, 0, 4, 900000000, time.UTC)
+	if len(changesSince) != 1 {
+		t.Fatalf("changes read %d times, want once", len(changesSince))
+	}
+	since, err := time.Parse(watchCursorTimeLayout, changesSince[0])
+	if err != nil || !since.Before(landed) {
+		t.Errorf("read the feed since %q, want a cursor moved back to before the posting landed", changesSince[0])
+	}
+	lines := watchLines(t, out)
+	if len(lines) != 2 || lines[0]["posting_id"] != float64(9001) || lines[0]["new"] != true || lines[1]["change"] != "ready" {
+		t.Errorf("wrote %v, want the posting that landed during the clock request, new, and then ready", lines)
 	}
 }
 

@@ -135,10 +135,12 @@ and `--events new` selects the true ones. The rule:
 
 - **New** is a posting that is unseen, not muted, and whose `active_at` is later than the
   watch last recorded for the thread — or later than the watch's start, when it has no
-  record. That start is read off HEY's own clock (the `Date` header of one request), the
-  clock every `active_at` is on, so a workstation running fast or slow neither calls the
-  backlog new nor sits on new mail; whole seconds, rounded down, so the doubt falls on
-  the side of calling mail a moment old new. `active_at` moves on new mail only, not on a
+  record. That start is read off HEY's own clock (the `Date` header of one request,
+  translated back to the moment the request was made), the clock every `active_at` is on,
+  so a workstation running fast or slow neither calls the backlog new nor sits on new mail;
+  whole seconds, rounded down, so the doubt falls on the side of calling mail a moment old
+  new, and every box's cursor starts no later than that start, so mail that lands while the
+  watch is starting up is read and is new. `active_at` moves on new mail only, not on a
   seen flip, a mute or a move, so reading a thread, marking it unseen again or moving it
   into a box is never new, and a reply on a known thread is. A box's first read is its
   catch-up from the server's cursor — the box's last activity, not this moment — so it

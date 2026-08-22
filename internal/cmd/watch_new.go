@@ -52,25 +52,33 @@ func (n *newMail) skippedTo(boxID int64, cursor hey.PostingChangesCursor) {
 	}
 }
 
-// serverNow is HEY's clock, read off the Date header of one cheap request, so
-// that the cutoff between backlog and new mail sits on the same clock as every
-// posting's active_at and a workstation running fast or slow can neither call
-// the backlog new nor sit on new mail. Date is whole seconds, rounded down,
-// which errs towards calling mail a moment old new rather than mail a moment
-// new old. The SDK caches GETs by URL, so a query the server ignores keeps
-// this one out of the cache; and when the server's clock can't be read, the
-// local one stands in.
+// serverNow is HEY's clock at the moment the watch began, read off the Date
+// header of one cheap request, so that the cutoff between backlog and new mail
+// sits on the same clock as every posting's active_at and a workstation running
+// fast or slow can neither call the backlog new nor sit on new mail.
+//
+// Date is the server's clock when it answered, and the watch began when it
+// asked: mail that lands in between is later than the start but no later than
+// Date, and a start taken at Date would leave it behind a box's cursor, read by
+// nothing. So the answer is translated back to the request's start by the time
+// the request took — the local monotonic clock, which a wrong wall clock does
+// not touch — and a slow request, or one the SDK retried, only moves the start
+// earlier. Date is whole seconds, rounded down, which errs the same way: towards
+// calling mail a moment old new rather than mail a moment new old. The SDK
+// caches GETs by URL, so a query the server ignores keeps this one out of the
+// cache; and when the server's clock can't be read, the local clock at the
+// start stands in.
 func serverNow(ctx context.Context) time.Time {
-	now := time.Now()
-	response, err := rootSDK.Get(ctx, "/identity.json?clock="+strconv.FormatInt(now.UnixNano(), 10))
+	started := time.Now()
+	response, err := rootSDK.Get(ctx, "/identity.json?clock="+strconv.FormatInt(started.UnixNano(), 10))
 	if err != nil || response == nil || response.FromCache {
-		return now
+		return started
 	}
 	if at, err := http.ParseTime(response.Headers.Get("Date")); err == nil {
-		return at
+		return at.Add(-time.Since(started))
 	}
 
-	return now
+	return started
 }
 
 // isNew says whether a posting is new mail: unseen, not muted, and active since
