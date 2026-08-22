@@ -116,6 +116,7 @@ func TestInitReturnsCmd(t *testing.T) {
 func TestQuestionMarkTogglesHelpAndResizesContent(t *testing.T) {
 	m := modelWithBoxes()
 	visibleHeight := m.vc.height
+	visibleView := m.View().Content
 	var saved []bool
 	m.saveHelpHidden = func(hidden bool) error {
 		saved = append(saved, hidden)
@@ -127,8 +128,12 @@ func TestQuestionMarkTogglesHelpAndResizesContent(t *testing.T) {
 	if !m.help.hidden || m.help.view() != "" {
 		t.Error("question mark should hide shortcut help")
 	}
-	if m.vc.height <= visibleHeight {
-		t.Errorf("content height after hiding help = %d, want more than %d", m.vc.height, visibleHeight)
+	if want := m.height - headerHeight; m.vc.height != want {
+		t.Errorf("content height after hiding help = %d, want %d", m.vc.height, want)
+	}
+	lines := strings.Split(strings.TrimRight(stripANSI(m.View().Content), "\n"), "\n")
+	if last := lines[len(lines)-1]; last == strings.Repeat("─", m.width) {
+		t.Error("hiding help left its bottom divider on screen")
 	}
 	if !slices.Equal(saved, []bool{true}) {
 		t.Errorf("saved preferences = %v, want [true]", saved)
@@ -141,6 +146,9 @@ func TestQuestionMarkTogglesHelpAndResizesContent(t *testing.T) {
 	}
 	if m.vc.height != visibleHeight {
 		t.Errorf("content height after restoring help = %d, want %d", m.vc.height, visibleHeight)
+	}
+	if restored := m.View().Content; restored != visibleView {
+		t.Error("restoring help did not restore the original layout")
 	}
 	if !slices.Equal(saved, []bool{true, false}) {
 		t.Errorf("saved preferences = %v, want [true false]", saved)

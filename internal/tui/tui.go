@@ -230,12 +230,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.vc.width = msg.Width
-		contentH := msg.Height - headerHeight - m.help.height() - 3
-		if contentH < 1 {
-			contentH = 1
-		}
-		m.vc.height = contentH
 		m.help.setWidth(msg.Width)
+		contentH := m.contentHeight()
+		m.vc.height = contentH
 		m.activeView.Resize(msg.Width, contentH)
 		m.updateHelpBindings()
 		return m, nil
@@ -445,7 +442,7 @@ func (m model) applyMailAccount(account mailAccountChoice, client *hey.Client) (
 	m.cancel = cancel
 	m.vc = newViewContext(ctx, m.rootSDK, client, m.styles)
 	m.vc.width = m.width
-	m.vc.height = max(m.height-headerHeight-m.help.height()-3, 1)
+	m.vc.height = m.contentHeight()
 	m.mailView = newMailView(m.vc)
 	m.contactsView = newContactsView(m.vc)
 	m.calendarView = newCalendarView(m.vc)
@@ -476,7 +473,7 @@ func (m model) applyMailAccount(account mailAccountChoice, client *hey.Client) (
 
 // --- View ---
 
-const headerHeight = 6
+const headerHeight = 6 // five drawn rows and the terminal's final safety row
 
 func (m model) View() tea.View {
 	var b strings.Builder
@@ -489,29 +486,22 @@ func (m model) View() tea.View {
 	} else if m.err != nil {
 		b.WriteString(errorView(m.err.Error(), m.width))
 	} else if m.loading {
-		contentH := m.height - headerHeight - m.help.height() - 3
-		if contentH < 1 {
-			contentH = 1
-		}
-		b.WriteString(loadingView(m.width, contentH, m.spinnerPhase))
+		b.WriteString(loadingView(m.width, m.contentHeight(), m.spinnerPhase))
 	} else {
 		b.WriteString(m.activeView.View())
 	}
 
-	contentLines := strings.Count(b.String(), "\n")
 	helpView := m.help.view()
-	helpH := 0
 	if helpView != "" {
-		helpH = strings.Count(helpView, "\n") + 1
-	}
-	footerH := 1 + helpH
-	padLines := m.height - contentLines - footerH - 1
-	for range max(padLines, 0) {
-		b.WriteString("\n")
-	}
+		contentLines := strings.Count(b.String(), "\n")
+		helpH := strings.Count(helpView, "\n") + 1
+		footerH := 1 + helpH
+		padLines := m.height - contentLines - footerH - 1
+		for range max(padLines, 0) {
+			b.WriteString("\n")
+		}
 
-	b.WriteString(renderRule(m.width, ""))
-	if helpView != "" {
+		b.WriteString(renderRule(m.width, ""))
 		b.WriteString("\n" + helpView)
 	}
 
@@ -588,14 +578,21 @@ func (m *model) updateHelpBindings() {
 		}
 	}
 	m.help.setBindings(bindings)
-	contentHeight := m.height - headerHeight - m.help.height() - 3
-	if contentHeight < 1 {
-		contentHeight = 1
-	}
+	contentHeight := m.contentHeight()
 	if contentHeight != m.vc.height {
 		m.vc.height = contentHeight
 		m.activeView.Resize(m.vc.width, contentHeight)
 	}
+}
+
+// contentHeight gives the active view every row that is not navigation or a
+// visible help footer. The footer carries two clear rows above its divider.
+func (m model) contentHeight() int {
+	footerHeight := 0
+	if helpHeight := m.help.height(); helpHeight > 0 {
+		footerHeight = helpHeight + 3
+	}
+	return max(m.height-headerHeight-footerHeight, 1)
 }
 
 // --- Key handling ---
