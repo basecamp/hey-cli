@@ -134,9 +134,9 @@ func TestMailViewCollectionMembershipAddsAndRemoves(t *testing.T) {
 		if recorded.method != http.MethodPost || recorded.path != "/topics/501/collecting" || recorded.rawQueries[len(recorded.rawQueries)-1] != "collection_id=12" {
 			t.Errorf("request = %s %s?%v", recorded.method, recorded.path, recorded.rawQueries)
 		}
-		v.Update(done)
-		if v.pendingMutations != 0 || v.notice != "Added to collection Kitchen remodel" {
-			t.Errorf("mutation state = pending:%d notice:%q", v.pendingMutations, v.notice)
+		answer, _ := v.Update(done)
+		if toast := deliverToView(v, answer); v.pendingMutations != 0 || toast != "Added to collection Kitchen remodel" {
+			t.Errorf("mutation state = pending:%d toast:%q", v.pendingMutations, toast)
 		}
 		if memberships := v.postingList.postings[0].Collections; len(memberships) != 1 || memberships[0].ID != 12 {
 			t.Errorf("memberships = %+v", memberships)
@@ -155,9 +155,9 @@ func TestMailViewCollectionMembershipAddsAndRemoves(t *testing.T) {
 		if recorded.method != http.MethodDelete || recorded.path != "/topics/501/collecting" || recorded.rawQueries[len(recorded.rawQueries)-1] != "collection_id=12" {
 			t.Errorf("request = %s %s?%v", recorded.method, recorded.path, recorded.rawQueries)
 		}
-		v.Update(done)
-		if len(v.postingList.postings[0].Collections) != 0 || v.notice != "Removed from collection Kitchen remodel" {
-			t.Errorf("posting = %+v notice = %q", v.postingList.postings[0], v.notice)
+		answer, _ := v.Update(done)
+		if toast := deliverToView(v, answer); len(v.postingList.postings[0].Collections) != 0 || toast != "Removed from collection Kitchen remodel" {
+			t.Errorf("posting = %+v toast = %q", v.postingList.postings[0], toast)
 		}
 	})
 }

@@ -240,12 +240,13 @@ func TestTUIBulkReplyReviewsThenSendsAndOffersUndo(t *testing.T) {
 	if !ok || sent.err != nil {
 		t.Fatalf("send returned %#v", sent)
 	}
-	view.Update(sent)
+	answer, _ := view.Update(sent)
 	if bulkReplyModal(view) != nil || len(view.postingList.selectedIDs()) != 0 {
 		t.Error("successful send should close the form and clear selection")
 	}
-	if view.lastBulkReplyID != 900 || !strings.Contains(view.notice, "2 bulk replies queued with undo available") || !strings.Contains(view.notice, "press ctrl+u to undo") {
-		t.Errorf("delivery state = id:%d notice:%q", view.lastBulkReplyID, view.notice)
+	toast := deliverToView(view, answer)
+	if view.lastBulkReplyID != 900 || !strings.Contains(toast, "2 bulk replies queued with undo available") || !strings.Contains(toast, "press ctrl+u to undo") {
+		t.Errorf("delivery state = id:%d toast:%q", view.lastBulkReplyID, toast)
 	}
 	if !slices.ContainsFunc(view.HelpBindings(), func(b helpBinding) bool { return b.key == "ctrl+u" }) {
 		t.Errorf("help does not offer undo: %v", view.HelpBindings())
@@ -284,9 +285,9 @@ func TestTUIBulkReplyEmptyDraftNeverSends(t *testing.T) {
 			state.draftStatus = test.status
 			selectTwoThreads(view)
 			loaded := runCmd(view.HandleContentKey(keyPress("ctrl+b"))).(bulkReplyDraftLoadedMsg)
-			view.Update(loaded)
-			if bulkReplyModal(view) != nil || !strings.Contains(view.notice, "nothing was sent") {
-				t.Errorf("empty draft state = form:%v notice:%q", bulkReplyModal(view), view.notice)
+			answer, _ := view.Update(loaded)
+			if toast := deliverToView(view, answer); bulkReplyModal(view) != nil || !strings.Contains(toast, "nothing was sent") {
+				t.Errorf("empty draft state = form:%v toast:%q", bulkReplyModal(view), toast)
 			}
 			if requests := state.snapshot(); len(requests) != 1 || requests[0].method != http.MethodGet {
 				t.Errorf("empty draft made a mutation request: %+v", requests)
@@ -332,9 +333,9 @@ func TestTUIBulkReplyUndoSuccessAndExpiry(t *testing.T) {
 	if !ok || undone.err != nil {
 		t.Fatalf("undo returned %#v", undone)
 	}
-	view.Update(undone)
-	if view.lastBulkReplyID != 0 || view.notice != "Bulk reply recalled" {
-		t.Errorf("undo state = id:%d notice:%q", view.lastBulkReplyID, view.notice)
+	answer, _ := view.Update(undone)
+	if toast := deliverToView(view, answer); view.lastBulkReplyID != 0 || toast != "Bulk reply recalled" {
+		t.Errorf("undo state = id:%d toast:%q", view.lastBulkReplyID, toast)
 	}
 
 	view, state := tuiBulkReplyServer(t)

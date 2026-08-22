@@ -24,6 +24,15 @@ type Theme struct {
 	Bright    color.Color
 	Error     color.Color
 
+	// Background is the theme's own paper, and Hues are the colors it renders the ANSI
+	// slots as — both nil when no theme file said. They matter for anything drawn *on*
+	// a hue: an ANSI slot's nominal value says nothing about what a reader sees, since
+	// a theme retints the running terminal over OSC 4. ANSI blue is #000080 nominally
+	// and a light periwinkle in a dark Omarchy theme, so ink picked against the nominal
+	// value comes out backwards. Keyed by the color names HEY uses.
+	Background color.Color
+	Hues       map[string]color.Color
+
 	// Dark reports whether the theme is for a dark background. HasMode is true when
 	// a theme file said so; otherwise Dark is a guess the terminal can correct.
 	Dark    bool
@@ -217,6 +226,10 @@ func overlayTheme(base Theme, values map[string]string, trusted bool) Theme {
 	if c, ok := themeColor(values, "error", "red"); ok {
 		theme.Error = c
 	}
+	if c, ok := themeColor(values, "background"); ok {
+		theme.Background = c
+	}
+	theme.Hues = themeHues(values)
 	switch strings.ToLower(values["mode"]) {
 	case "dark":
 		theme.Dark, theme.HasMode = true, true
@@ -265,6 +278,34 @@ func colorDistance(a, b color.Color) float64 {
 	br, bg, bb, _ := b.RGBA()
 	d := func(x, y uint32) float64 { return float64(x>>8) - float64(y>>8) }
 	return math.Sqrt(d(ar, br)*d(ar, br) + d(ag, bg)*d(ag, bg) + d(ab, bb)*d(ab, bb))
+}
+
+// themeHues reads the colors a theme renders the ANSI slots as, under the names HEY gives
+// its own. Gold and brown take the bright and the plain yellow, as heyColors does, and a
+// key a theme leaves out is simply absent — the caller falls back to the ANSI slot.
+func themeHues(values map[string]string) map[string]color.Color {
+	keys := map[string][]string{
+		"blue":   {"blue"},
+		"red":    {"red"},
+		"gold":   {"bright_yellow", "yellow"},
+		"green":  {"green"},
+		"teal":   {"cyan"},
+		"purple": {"magenta"},
+		"pink":   {"bright_magenta", "magenta"},
+		"brown":  {"brown", "yellow"},
+		"black":  {"foreground", "bright_foreground"},
+	}
+
+	hues := make(map[string]color.Color, len(keys))
+	for name, candidates := range keys {
+		if c, ok := themeColor(values, candidates...); ok {
+			hues[name] = c
+		}
+	}
+	if len(hues) == 0 {
+		return nil
+	}
+	return hues
 }
 
 // themeColor returns the first key that holds a valid hex color.

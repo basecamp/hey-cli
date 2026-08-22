@@ -172,8 +172,12 @@ func TestResolveThemeOrder(t *testing.T) {
 }
 
 func TestResolveThemeWithoutOmarchy(t *testing.T) {
+	// Theme carries a map of the theme's own hues now, so it is compared field by field
+	// rather than as a value.
 	theme := resolveTheme(envOf(nil), t.TempDir())
-	if theme != defaultTheme() {
+	if want := defaultTheme(); theme.Accent != want.Accent || theme.Muted != want.Muted ||
+		theme.Bright != want.Bright || theme.Error != want.Error || theme.Dark != want.Dark ||
+		theme.Source != want.Source || theme.Background != nil || theme.Hues != nil {
 		t.Errorf("non-omarchy machine should get the ANSI defaults, got %+v", theme)
 	}
 	if omarchyWatchDir(t.TempDir()) != "" {

@@ -188,16 +188,15 @@ func (v *contactsView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		v.contactForm = nil
+		saved := "Contact updated"
 		if msg.created {
-			v.notice = "Contact added"
-		} else {
-			v.notice = "Contact updated"
+			saved = "Contact added"
 		}
 		if msg.originalID != 0 && msg.originalID != msg.contact.ID {
 			v.list.remove(msg.originalID)
 		}
 		v.updateContactInList(msg.contact)
-		return v.requestContactDetail(msg.contact.ID), true
+		return tea.Batch(notify(saved), v.requestContactDetail(msg.contact.ID)), true
 
 	case contactHiddenMsg:
 		if cmd, ok := v.requests.settle(msg.requestResult); !ok {
@@ -208,16 +207,14 @@ func (v *contactsView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.inDetail = false
 		v.detail = Contact{}
 		v.note = ""
-		v.notice = "Contact hidden"
-		return v.loadMoreContacts(), true
+		return tea.Batch(notify("Contact hidden"), v.loadMoreContacts()), true
 
 	case contactRevealedMsg:
 		if cmd, ok := v.requests.settle(msg.requestResult); !ok {
 			return cmd, true
 		}
 		v.lastHiddenID = 0
-		v.notice = "Contact shown again"
-		return v.requestContacts(), true
+		return tea.Batch(notify("Contact shown again"), v.requestContacts()), true
 
 	case contactNoteSavedMsg:
 		if !v.requests.accepts(msg.requestResult) {
@@ -235,13 +232,12 @@ func (v *contactsView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.noteForm = nil
 		v.note = msg.note
+		saved := "Private note saved"
 		if msg.deleted {
-			v.notice = "Private note deleted"
-		} else {
-			v.notice = "Private note saved"
+			saved = "Private note deleted"
 		}
 		v.refreshDetailView()
-		return nil, true
+		return notify(saved), true
 	}
 
 	if v.contactForm != nil {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
@@ -83,6 +84,10 @@ type model struct {
 	mailAccountRequestID    uint64
 	viewGeneration          uint64
 	viewGenerationToken     *atomic.Uint64
+
+	// What just happened, in the top right corner until its clock runs out
+	toast   notifyMsg
+	toastID uint64
 
 	// Loading & error
 	loading      bool
@@ -193,6 +198,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.Update(msg.msg)
+
+	case notifyMsg:
+		return m, m.showToast(msg)
+
+	case toastExpiredMsg:
+		if msg.id == m.toastID {
+			m.toast = notifyMsg{}
+		}
+		return m, nil
 
 	case mailAccountsLoadedMsg:
 		if msg.err != nil {
@@ -475,21 +489,35 @@ func (m model) applyMailAccount(account mailAccountChoice, client *hey.Client) (
 
 const headerHeight = 6 // five drawn rows and the terminal's final safety row
 
+// contentView is the content area on its own, which is what a modal draws itself over.
+func (m model) contentView() string {
+	switch {
+	case m.err != nil:
+		return errorView(m.err.Error(), m.width)
+	case m.loading:
+		return loadingView(m.width, m.contentHeight(), m.spinnerPhase)
+	default:
+		return m.activeView.View()
+	}
+}
+
 func (m model) View() tea.View {
 	var b strings.Builder
 
 	b.WriteString(renderHeader(&m))
 	b.WriteString("\n")
 
+	content := m.contentView()
 	if m.mailAccountPicker {
-		b.WriteString(renderMailAccountPicker(&m))
-	} else if m.err != nil {
-		b.WriteString(errorView(m.err.Error(), m.width))
-	} else if m.loading {
-		b.WriteString(loadingView(m.width, m.contentHeight(), m.spinnerPhase))
-	} else {
-		b.WriteString(m.activeView.View())
+		content = renderMailAccountPicker(&m, content)
 	}
+	// The toast goes on last, over the modals too: it is the answer to what the reader
+	// just did, and a form open over the list does not make it less so.
+	if toast := m.toastView(); toast != "" {
+		x := max(m.width-lipgloss.Width(toast)-1, 0)
+		content = overlayAt(content, toast, x, 0, m.width, m.contentHeight())
+	}
+	b.WriteString(content)
 
 	helpView := m.help.view()
 	if helpView != "" {
@@ -932,13 +960,6 @@ func (m model) handleSubnavKey(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 // --- Shared utilities ---
-
-func formatTimestamp(ts time.Time) string {
-	if ts.IsZero() {
-		return ""
-	}
-	return ts.UTC().Format("2006-01-02T15:04:05Z")
-}
 
 // Run starts the TUI with the resolved mail account, the identity root client used for
 // interactive account switching, and the watchers that tell it when things changed.

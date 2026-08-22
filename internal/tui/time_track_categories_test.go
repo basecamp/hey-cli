@@ -71,11 +71,16 @@ func finishTimeTrackCategoryMutation(t *testing.T, view *calendarView, cmd tea.C
 func TestCalendarTimeTrackCategoriesLoadAndClose(t *testing.T) {
 	view, requests := timeTrackCategoryView(t)
 	cmd := view.HandleContentKey(keyPress("c"))
-	if cmd == nil || !view.CapturingInput() || !view.Loading() {
+	if cmd == nil || !view.CapturingInput() || !view.requests.loading {
 		t.Fatal("c should open and load the time track category manager")
 	}
+	// A modal is what the reader is looking at, so a read behind it does not put the
+	// spinner over the calendar.
+	if view.Loading() {
+		t.Error("a read with the manager open claimed the spinner")
+	}
 	_, consumed := view.Update(cmd())
-	if !consumed || view.Loading() {
+	if !consumed || view.requests.loading {
 		t.Fatal("category response should finish loading")
 	}
 	if got := plainText(view.View()); !strings.Contains(got, "Client work") || !strings.Contains(got, "Planning") {
@@ -104,7 +109,7 @@ func TestCalendarTimeTrackCategoriesBlockKeysWhileLoading(t *testing.T) {
 	view.HandleContentKey(keyPress("n"))
 	view.timeTrackCategories.input.SetValue("Research")
 	create := view.HandleContentKey(keyPress("enter"))
-	if create == nil || !view.Loading() {
+	if create == nil || !view.requests.loading {
 		t.Fatal("saving a category should enter a loading state")
 	}
 	view.HandleContentKey(keyPress("n"))

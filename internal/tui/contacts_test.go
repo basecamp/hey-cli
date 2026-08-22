@@ -296,11 +296,13 @@ func TestContactsViewAddsContact(t *testing.T) {
 	if save == nil {
 		t.Fatal("ctrl+s should save the contact")
 	}
-	detail, _ := view.Update(save())
-	if detail == nil {
+	answer, _ := view.Update(save())
+	if answer == nil {
 		t.Fatal("successful create should load contact detail")
 	}
-	view.Update(detail())
+	if toast := deliverToView(view, answer); toast != "Contact added" {
+		t.Errorf("toast = %q", toast)
+	}
 	if view.contactForm != nil || !view.inDetail || view.detail.ID != 8 {
 		t.Errorf("create state = form:%v detail:%+v", view.contactForm, view.detail)
 	}
@@ -429,18 +431,19 @@ func TestContactsViewHidesAndShowsAgain(t *testing.T) {
 	loadTUIContacts(t, view)
 	openTUIContact(t, view)
 	hide := view.HandleContentKey(keyPress("h"))
-	view.Update(hide())
-	if view.inDetail || len(view.list.contacts) != 2 || view.lastHiddenID != 7 || view.notice != "Contact hidden" {
-		t.Errorf("hide state = detail:%v contacts:%+v hidden:%d notice:%q", view.inDetail, view.list.contacts, view.lastHiddenID, view.notice)
+	hidden, _ := view.Update(hide())
+	if toast := deliverToView(view, hidden); view.inDetail || len(view.list.contacts) != 2 || view.lastHiddenID != 7 || toast != "Contact hidden" {
+		t.Errorf("hide state = detail:%v contacts:%+v hidden:%d toast:%q", view.inDetail, view.list.contacts, view.lastHiddenID, toast)
 	}
 	reveal := view.HandleContentKey(keyPress("u"))
-	refresh, _ := view.Update(reveal())
-	if refresh == nil {
+	revealed, _ := view.Update(reveal())
+	if revealed == nil {
 		t.Fatal("successful reveal should refresh contacts")
 	}
+	toast, refresh := toastAndRest(t, revealed)
 	drainContactPages(t, view, refresh())
-	if view.lastHiddenID != 0 || len(view.list.contacts) != 3 || view.notice != "Contact shown again" {
-		t.Errorf("reveal state = contacts:%+v hidden:%d notice:%q", view.list.contacts, view.lastHiddenID, view.notice)
+	if view.lastHiddenID != 0 || len(view.list.contacts) != 3 || toast != "Contact shown again" {
+		t.Errorf("reveal state = contacts:%+v hidden:%d toast:%q", view.list.contacts, view.lastHiddenID, toast)
 	}
 	requests, _ := recorded.snapshot()
 	joined := strings.Join(requests, "\n")
@@ -459,9 +462,9 @@ func TestContactsViewEditsAndDeletesNote(t *testing.T) {
 	}
 	view.noteForm.input.SetValue("Prefers a call")
 	save := view.HandleContentKey(keyPress("ctrl+s"))
-	view.Update(save())
-	if view.noteForm != nil || view.note != "Prefers a call" || view.notice != "Private note saved" {
-		t.Errorf("note save state = form:%v note:%q notice:%q", view.noteForm, view.note, view.notice)
+	saved, _ := view.Update(save())
+	if toast := deliverToView(view, saved); view.noteForm != nil || view.note != "Prefers a call" || toast != "Private note saved" {
+		t.Errorf("note save state = form:%v note:%q toast:%q", view.noteForm, view.note, toast)
 	}
 	if deleteCmd := view.HandleContentKey(keyPress("x")); deleteCmd != nil || !view.confirmNoteDelete || !strings.Contains(view.notice, "permanently delete") {
 		t.Fatal("first x should request note deletion confirmation")
@@ -470,9 +473,9 @@ func TestContactsViewEditsAndDeletesNote(t *testing.T) {
 	if deleteCmd == nil {
 		t.Fatal("second x should delete the note")
 	}
-	view.Update(deleteCmd())
-	if view.note != "" || view.notice != "Private note deleted" {
-		t.Errorf("note delete state = note:%q notice:%q", view.note, view.notice)
+	deleted, _ := view.Update(deleteCmd())
+	if toast := deliverToView(view, deleted); view.note != "" || toast != "Private note deleted" {
+		t.Errorf("note delete state = note:%q toast:%q", view.note, toast)
 	}
 	requests, _ := recorded.snapshot()
 	joined := strings.Join(requests, "\n")

@@ -191,16 +191,12 @@ func TestComposeSendsMessage(t *testing.T) {
 		t.Errorf("copied = %v", got)
 	}
 
-	v.Update(sent)
+	answer, _ := v.Update(sent)
 	if composeModal(v) != nil {
 		t.Error("form should close after a successful send")
 	}
-	if v.notice != "Message sent" || !strings.Contains(v.View(), "Message sent") {
-		t.Errorf("expected sent notice, got %q", v.notice)
-	}
-	v.HandleContentKey(keyPress("down"))
-	if v.notice != "" {
-		t.Error("notice should clear on the next key")
+	if toast := deliverToView(v, answer); toast != "Message sent" {
+		t.Errorf("expected a sent toast, got %q", toast)
 	}
 }
 
@@ -401,13 +397,16 @@ func TestForwardFormLoadsLatestEntryAndSends(t *testing.T) {
 		t.Errorf("directly = %v", got)
 	}
 
-	v.Update(sent)
-	if composeModal(v) != nil || v.notice != "Message forwarded" {
-		t.Errorf("forward completion = compose %v notice %q", composeModal(v), v.notice)
+	answer, _ := v.Update(sent)
+	if toast := deliverToView(v, answer); composeModal(v) != nil || toast != "Message forwarded" {
+		t.Errorf("forward completion = compose %v toast %q", composeModal(v), toast)
 	}
 }
 
-func TestForwardCompletionNoticeIsVisibleInThread(t *testing.T) {
+// Sending from inside a thread used to leave its confirmation in the posting list's
+// header, which a thread covers — so it was said to nobody. A toast belongs to the
+// model and is drawn over whatever the section is showing.
+func TestForwardCompletionIsSaidFromInsideAThread(t *testing.T) {
 	v := mailWithPostings()
 	v.Resize(80, 30)
 	v.inThread = true
@@ -418,13 +417,16 @@ func TestForwardCompletionNoticeIsVisibleInThread(t *testing.T) {
 		content:   "<div>Quoted message</div>",
 	}, v.vc.styles)
 
-	v.Update(composeSentMsg{label: "Message forwarded"})
+	answer, _ := v.Update(composeSentMsg{label: "Message forwarded"})
 
 	if composeModal(v) != nil {
 		t.Error("forward form should close after sending")
 	}
-	if view := v.View(); !strings.Contains(view, "Message forwarded") || !strings.Contains(view, "Original thread") {
-		t.Errorf("thread view should show the forwarding notice, got %q", view)
+	if toast := deliverToView(v, answer); toast != "Message forwarded" {
+		t.Errorf("toast = %q", toast)
+	}
+	if view := v.View(); !strings.Contains(view, "Original thread") {
+		t.Errorf("the thread should still be on screen, got %q", view)
 	}
 }
 

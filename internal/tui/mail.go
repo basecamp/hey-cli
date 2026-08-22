@@ -446,8 +446,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		if msg.draft == nil || len(msg.draft.Entries) == 0 {
-			v.notice = "No replyable threads found; nothing was sent"
-			return nil, true
+			return notify("No replyable threads found; nothing was sent"), true
 		}
 		form := newBulkReplyForm(msg.postingIDs, msg.draft, v.vc.styles)
 		v.openModal(form)
@@ -473,19 +472,21 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.modal = nil
 		v.postingList.clearSelected()
 		count := int(msg.delivery.EntriesCount)
-		v.notice = fmt.Sprintf("%d bulk %s sent", count, replyNoun(count))
+		sent := fmt.Sprintf("%d bulk %s sent", count, replyNoun(count))
 		v.lastBulkReplyID = 0
 		if msg.delivery.Delayed {
-			v.notice = fmt.Sprintf("%d bulk %s queued with undo available", count, replyNoun(count))
+			sent = fmt.Sprintf("%d bulk %s queued with undo available", count, replyNoun(count))
+			// The undo stands in the help bar for as long as it is available, so the
+			// toast can say so and go.
 			if msg.delivery.Id > 0 {
 				v.lastBulkReplyID = msg.delivery.Id
-				v.notice += " — press ctrl+u to undo"
+				sent += " — press ctrl+u to undo"
 			}
 		}
 		if msg.skipped > 0 {
-			v.notice += fmt.Sprintf("; %d skipped", msg.skipped)
+			sent += fmt.Sprintf("; %d skipped", msg.skipped)
 		}
-		return nil, true
+		return notify(sent), true
 
 	case bulkReplyUndoneMsg:
 		v.finishMutation()
@@ -497,8 +498,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		v.lastBulkReplyID = 0
-		v.notice = "Bulk reply recalled"
-		return nil, true
+		return notify("Bulk reply recalled"), true
 
 	case snippetsLoadedMsg:
 		form := modalOf[*composeForm](v)
@@ -525,8 +525,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		v.modal = nil
-		v.notice = msg.label
-		return nil, true
+		return notify(msg.label), true
 
 	case attachmentSavedMsg:
 		if !v.currentAttachmentAction(msg.topicID, msg.attachmentID) {
@@ -535,14 +534,12 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if msg.err != nil {
 			saveErr := apierr.AsError(msg.err)
 			if saveErr.Code == "usage" && strings.HasPrefix(saveErr.Message, "destination already exists:") {
-				v.notice = "Attachment already exists: " + terminal.SanitizeLine(msg.path)
-			} else {
-				v.noteFailure("Could not save attachment", msg.err)
+				return notify("Attachment already exists: " + msg.path), true
 			}
+			v.noteFailure("Could not save attachment", msg.err)
 			return nil, true
 		}
-		v.notice = "Saved attachment to " + terminal.SanitizeLine(msg.path)
-		return nil, true
+		return notify("Saved attachment to " + msg.path), true
 
 	case attachmentOpenedMsg:
 		if !v.currentAttachmentAction(msg.topicID, msg.attachmentID) {
@@ -552,8 +549,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			v.noteFailure("Could not open attachment", msg.err)
 			return nil, true
 		}
-		v.notice = "Opened attachment " + terminal.SanitizeLine(msg.filename)
-		return nil, true
+		return notify("Opened attachment " + msg.filename), true
 
 	case postingActionDoneMsg:
 		v.finishMutation()
@@ -563,7 +559,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if msg.err != nil {
 			return func() tea.Msg { return errMsg{msg.err} }, true
 		}
-		v.notice = msg.action
+		done := notify(msg.action)
 		idx := v.postingIndex(msg.postingID)
 		if idx >= 0 {
 			switch msg.effect {
@@ -582,12 +578,12 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		if v.requests.kind == mailRequestPostings {
 			if source := v.currentSource(); source != nil {
-				return v.requestPostings(*source), true
+				return tea.Batch(done, v.requestPostings(*source)), true
 			}
 		}
 		// A thread leaving the list can uncover the bottom of it, so what is below comes up
 		// to fill the gap rather than leaving a short list with more waiting behind it.
-		return v.loadMorePostings(), true
+		return tea.Batch(done, v.loadMorePostings()), true
 
 	case postingSeenMsg:
 		v.finishMutation()
@@ -610,16 +606,17 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			}
 			return nil, true
 		}
+		var done tea.Cmd
 		if msg.sourceID == v.currentBoxID() && msg.sourceKind == v.currentSourceKind() {
-			v.notice = msg.action
+			done = notify(msg.action)
 		}
 		if msg.created {
-			return v.requestSources(), true
+			return tea.Batch(done, v.requestSources()), true
 		}
 		if source := v.currentSource(); source != nil && msg.sourceID == source.ID && msg.sourceKind == source.Kind {
-			return v.requestPostings(*source), true
+			return tea.Batch(done, v.requestPostings(*source)), true
 		}
-		return nil, true
+		return done, true
 
 	case collectionActionDoneMsg:
 		v.finishMutation()
@@ -630,7 +627,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			v.notice = terminal.SanitizeLine(errorNotice("Could not update collections", msg.err))
 			return nil, true
 		}
-		v.notice = msg.action
+		done := notify(msg.action)
 		if index := v.postingIndex(msg.postingID); index >= 0 {
 			v.updatePostingCollection(index, msg.collection, msg.added)
 			if !msg.added && msg.sourceKind == mail.KindCollection && msg.collection.ID == msg.sourceID {
@@ -639,10 +636,10 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		if msg.sourceKind == mail.KindCollection && msg.collection.ID == msg.sourceID {
 			if source := v.currentSource(); source != nil {
-				return v.requestPostings(*source), true
+				return tea.Batch(done, v.requestPostings(*source)), true
 			}
 		}
-		return nil, true
+		return done, true
 	}
 
 	// Cursor blinks and other component messages go to the open modal. A form owns
