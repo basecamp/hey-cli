@@ -549,7 +549,9 @@ isn't lost with the notification that announced it, and a subscription that clos
 the watch being interrupted is an error rather than a quiet exit. `ready` waits for that
 retry too (`catchUp`/`retryUnread`/`readyOnceCaughtUp`): a catch-up that left a box behind
 owes its ready until the box is read, and a drop in between cancels the debt — the
-reconnect's catch-up announces its own.
+reconnect's catch-up announces its own. The look at the transition queue and the ready
+announcement are one critical section with `noteConnection`'s queueing, which is what keeps
+a drop from landing between them.
 
 New mail is a watch event, not a flag: every added and updated line carries `"new":
 true|false` and `--events new` selects the true ones (`internal/cmd/watch_new.go`). New is

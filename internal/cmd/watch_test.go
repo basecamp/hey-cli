@@ -680,6 +680,26 @@ func TestWatchGivesUpOnABoxThatHasGone(t *testing.T) {
 	}
 }
 
+func TestWatchGivesUpWhenTheLastReportedBoxHasGone(t *testing.T) {
+	t.Setenv("HEY_TOKEN", "test-token")
+	// The Feed is still listed, but --box imbox only ever reported the Imbox,
+	// and that one is gone: following The Feed for the record alone is a watch
+	// that would sit there for good, reporting nothing.
+	server := boxesAndChanges(t, `[{"id":24089,"kind":"feedbox","name":"The Feed","posting_changes_url":"/boxes/24089/postings/changes.json?since=2026-08-21T11%3A02%3A00.000Z&v=2"}]`)
+	defer server.Close()
+	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
+
+	watch, _ := newTestWatch("added")
+	watch.errOut = &bytes.Buffer{}
+	watch.boxes[24089] = &watchedBox{id: 24089, kind: "feedbox", name: "The Feed", reported: false}
+	watch.boxes[24088].cursor.Since = "2026-08-01T00:00:00.000Z"
+
+	err := watch.readBox(context.Background(), watch.boxes[24088])
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error = %v, want the watch to give up once no reported box is left", err)
+	}
+}
+
 func TestWatchClosedSubscriptionIsOnlyFineWhenItWasInterrupted(t *testing.T) {
 	watch, _ := newTestWatch("added")
 

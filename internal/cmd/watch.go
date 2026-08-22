@@ -517,19 +517,24 @@ func (w *postingsWatch) retryUnread(ctx context.Context) error {
 // reconnect's catch-up announces its own. Nor when the watch is on its way
 // out: a catch-up that reported the change --exit-on-first was waiting for,
 // or one cut short by an interrupt, is not a watch that is live.
+//
+// The look at the queue and the announcement are one critical section with
+// noteConnection's queueing, so a drop lands either before the look — and
+// withholds the ready — or after the ready is out, where the stream's order
+// is the order things happened. The cable's goroutine waits on one line of
+// output at most.
 func (w *postingsWatch) readyOnceCaughtUp(ctx context.Context) {
-	if !w.catchingUp || len(w.unread) > 0 || w.dropQueued() || w.finished() || ctx.Err() != nil {
+	if !w.catchingUp || len(w.unread) > 0 || w.finished() || ctx.Err() != nil {
+		return
+	}
+
+	w.transitionsMu.Lock()
+	defer w.transitionsMu.Unlock()
+	if slices.Contains(w.transitions, false) {
 		return
 	}
 	w.catchingUp = false
 	w.announce(watchReady)
-}
-
-func (w *postingsWatch) dropQueued() bool {
-	w.transitionsMu.Lock()
-	defer w.transitionsMu.Unlock()
-
-	return slices.Contains(w.transitions, false)
 }
 
 // nextTransition takes the oldest queued transition, if there is one.
@@ -708,18 +713,21 @@ func (w *postingsWatch) skipAhead(ctx context.Context, box *watchedBox) error {
 }
 
 // stopWatching drops a box the watch can't follow any longer. When it was the last one
-// there is nothing left to wait for, and saying so beats a watch that sits there for
-// good, reading nothing.
+// whose changes are reported there is nothing left to wait for — the others are only
+// followed for the record — and saying so beats a watch that sits there for good,
+// reporting nothing.
 func (w *postingsWatch) stopWatching(box *watchedBox) error {
 	fmt.Fprintf(w.errOut, "notice: %s can no longer be followed — it is gone from this account\n", box.name)
 	delete(w.boxes, box.id)
 	delete(w.unread, box.id)
 
-	if len(w.boxes) == 0 {
-		return apierr.ErrNotFound("box", box.name)
+	for _, remaining := range w.boxes {
+		if remaining.reported {
+			return nil
+		}
 	}
 
-	return nil
+	return apierr.ErrNotFound("box", box.name)
 }
 
 // report hands one change on — printed, or run through the script — and says
