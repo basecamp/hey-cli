@@ -55,6 +55,7 @@ var sanitizeTests = []struct {
 	{"a mark on an ASCII base does not make it joinable", "e\u0301\u200dé", "e\u0301é"},
 	{"a joiner before a tag character goes", "é\u200d\U000e0020", "é\U000e0020"},
 	{"a joiner before punctuation goes", "é\u200d—", "é—"},
+	{"Persian digits keep their suffix separator", "۱۰\u200cها", "۱۰\u200cها"},
 	{"a joiner after punctuation goes", "«\u200dé", "«é"},
 	{"a tag character is not a base for a joiner", "é\U000e0020\u200dé", "é\U000e0020é"},
 
