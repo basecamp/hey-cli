@@ -158,9 +158,30 @@ func TestWorkflowCommandOutputFormats(t *testing.T) {
 	}
 }
 
-func TestWorkflowMarkdownCellEscapesPipesAfterBackslashes(t *testing.T) {
-	if got, want := workflowMarkdownCell(`Applied\|Screen`), `Applied\\\|Screen`; got != want {
-		t.Errorf("workflowMarkdownCell = %q, want %q", got, want)
+func TestWorkflowMarkdownEscapesMetadata(t *testing.T) {
+	cmd := newWorkflowCommand().cmd
+	var output strings.Builder
+	cmd.SetOut(&output)
+	if err := writeWorkflowMarkdown(cmd, workflowDetailView{
+		ID:   8801,
+		Name: `[Hiring](https://example.invalid)`,
+		Stages: []workflowStageView{{
+			ID:   5512,
+			Name: `[Applied](https://example.invalid)`,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "[Hiring](") || !strings.Contains(output.String(), `\[Hiring\]\(https\:\/\/example\.invalid\)`) {
+		t.Errorf("unsafe Markdown output: %q", output.String())
+	}
+}
+
+func TestWorkflowMarkdownSurfacesWriteFailure(t *testing.T) {
+	cmd := newWorkflowCommand().cmd
+	cmd.SetOut(failingWriter{})
+	if err := writeWorkflowMarkdown(cmd, workflowDetailView{ID: 8801, Name: "Hiring"}); err == nil {
+		t.Fatal("expected the write failure")
 	}
 }
 

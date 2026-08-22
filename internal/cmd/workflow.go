@@ -242,40 +242,20 @@ func workflowDetailFromSDK(workflow *generated.Workflow) workflowDetailView {
 }
 
 func writeWorkflowMarkdown(cmd *cobra.Command, workflow workflowDetailView) error {
-	fmt.Fprintf(cmd.OutOrStdout(), "# %s\n\n", workflowMarkdownCell(terminal.SanitizeLine(workflow.Name)))
-	fmt.Fprintf(cmd.OutOrStdout(), "**ID:** %d\n\n", workflow.ID)
+	var document strings.Builder
+	fmt.Fprintf(&document, "# %s\n\n", markdownSafeText(workflow.Name))
+	fmt.Fprintf(&document, "**ID:** %d\n\n", workflow.ID)
 	if len(workflow.Stages) == 0 {
-		fmt.Fprintln(cmd.OutOrStdout(), "(no stages)")
-		return nil
-	}
-	fmt.Fprintln(cmd.OutOrStdout(), "| stage_id | name |")
-	fmt.Fprintln(cmd.OutOrStdout(), "| --- | --- |")
-	for _, stage := range workflow.Stages {
-		fmt.Fprintf(cmd.OutOrStdout(), "| %d | %s |\n", stage.ID, workflowMarkdownCell(terminal.SanitizeLine(stage.Name)))
-	}
-	return nil
-}
-
-func workflowMarkdownCell(value string) string {
-	var escaped strings.Builder
-	for index := 0; index < len(value); {
-		start := index
-		for index < len(value) && value[index] == '\\' {
-			index++
-		}
-		if index < len(value) && value[index] == '|' {
-			escaped.WriteString(strings.Repeat(`\`, 2*(index-start)+1))
-			escaped.WriteByte('|')
-			index++
-			continue
-		}
-		escaped.WriteString(value[start:index])
-		if index < len(value) {
-			escaped.WriteByte(value[index])
-			index++
+		document.WriteString("(no stages)\n")
+	} else {
+		document.WriteString("| stage_id | name |\n")
+		document.WriteString("| --- | --- |\n")
+		for _, stage := range workflow.Stages {
+			fmt.Fprintf(&document, "| %d | %s |\n", stage.ID, markdownSafeText(stage.Name))
 		}
 	}
-	return escaped.String()
+	_, err := fmt.Fprint(cmd.OutOrStdout(), document.String())
+	return err
 }
 
 type workflowCreateCommand struct {
