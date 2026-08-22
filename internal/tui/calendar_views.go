@@ -243,18 +243,14 @@ type dayCell struct {
 }
 
 // style is how a cell is drawn. An event is a block filled with its calendar's color and
-// its title inverted over it, the way the web app draws its bars — colorOnAccent is the
-// same foreground the mail list's pills use on a filled background, so it stays legible on
-// either theme. Anything outside an event keeps the grid's own styles.
+// its title inverted over it, the way the web app draws its bars. Anything outside an event
+// keeps the grid's own styles.
 func (cell dayCell) style(_, _, muted lipgloss.Style) lipgloss.Style {
 	switch cell.kind {
 	case cellChrome:
 		return lipgloss.NewStyle().Background(eventFillColor(cell.color))
 	case cellTitle:
-		return lipgloss.NewStyle().
-			Background(eventFillColor(cell.color)).
-			Foreground(colorOnAccent).
-			Bold(true)
+		return eventTextStyle(eventFillColor(cell.color))
 	default:
 		return muted
 	}
@@ -269,6 +265,23 @@ func eventFillColor(calendarColor string) color.Color {
 		return slot
 	}
 	return colorPrimary
+}
+
+// eventTextStyle is a title over its own fill, in whichever of the terminal's ink or paper
+// reads better on it. colorOnAccent picks that for the theme's accent and no further: black
+// on ANSI red or blue is about 2:1, which is what made a light terminal full of filled
+// events hard to look at even though the same fills read fine on a dark one. Every calendar
+// color is a different background, so each one is asked separately.
+func eventTextStyle(fill color.Color) lipgloss.Style {
+	text := colorOnAccent
+	if _, colorless := fill.(lipgloss.NoColor); !colorless {
+		text = color.Color(lipgloss.Black)
+		if contrastRatio(lipgloss.BrightWhite, fill) > contrastRatio(lipgloss.Black, fill) {
+			text = lipgloss.BrightWhite
+		}
+	}
+
+	return lipgloss.NewStyle().Background(fill).Foreground(text).Bold(true)
 }
 
 // hourRule is dotted rather than solid so an hour's line reads as a guide behind the
@@ -735,11 +748,7 @@ func eventPill(event Recording, width int) string {
 		title += strings.Repeat(" ", pad)
 	}
 
-	return lipgloss.NewStyle().
-		Background(eventFillColor(event.CalendarColor)).
-		Foreground(colorOnAccent).
-		Bold(true).
-		Render(title)
+	return eventTextStyle(eventFillColor(event.CalendarColor)).Render(title)
 }
 
 // weekDayColumnLabel returns the header label for a week column.

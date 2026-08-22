@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"image/color"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -804,10 +805,47 @@ func TestCalendarColorFillsAnEventsBlock(t *testing.T) {
 		t.Errorf("an event with no calendar color filled with %v, want the accent", got)
 	}
 
-	// The title inverts over the fill, using the same foreground the mail list's pills do.
-	titled := dayCell{kind: cellTitle, color: "teal"}.style(styleMuted, styleMuted, styleMuted)
-	if titled.GetBackground() != lipgloss.Cyan || titled.GetForeground() != colorOnAccent {
-		t.Errorf("title style = fg:%v bg:%v", titled.GetForeground(), titled.GetBackground())
+	// The title sits on its own fill in whichever of ink or paper reads better there,
+	// asked per color: black on ANSI red or blue is around 2:1, which is what made a
+	// light terminal full of filled events hard to look at.
+	for _, calendarColor := range []string{"teal", "red", "blue", "gold", "green", ""} {
+		fill := eventFillColor(calendarColor)
+		style := dayCell{kind: cellTitle, color: calendarColor}.style(styleMuted, styleMuted, styleMuted)
+
+		if style.GetBackground() != fill {
+			t.Errorf("%q sits on %v, want its own fill %v", calendarColor, style.GetBackground(), fill)
+		}
+		text := style.GetForeground()
+		if contrastRatio(text, fill) < contrastRatio(oppositeInk(text), fill) {
+			t.Errorf("%q drew %v on %v at %.1f:1 when the other ink reads better",
+				calendarColor, text, fill, contrastRatio(text, fill))
+		}
+	}
+}
+
+func oppositeInk(text color.Color) color.Color {
+	if text == color.Color(lipgloss.Black) {
+		return lipgloss.BrightWhite
+	}
+	return lipgloss.Black
+}
+
+// Omarchy retints a running terminal on a keyboard shortcut, so an event's ink cannot be
+// decided once at startup. The styles are built while rendering rather than cached in
+// newStyles, so applyTheme is all a theme switch has to do.
+func TestEventInkFollowsALiveThemeChange(t *testing.T) {
+	t.Cleanup(func() { applyTheme(Theme{Accent: lipgloss.BrightBlue, Bright: lipgloss.BrightWhite, Dark: true}) })
+
+	// An event with no calendar color is filled with the accent, so the accent decides
+	// its ink — and the accent is what a theme switch replaces.
+	applyTheme(Theme{Accent: lipgloss.BrightYellow, Bright: lipgloss.BrightWhite, Dark: true})
+	onLight := eventPill(Recording{Title: "Release HEY CLI 0.9"}, 20)
+
+	applyTheme(Theme{Accent: lipgloss.Blue, Bright: lipgloss.BrightWhite, Dark: true})
+	onDark := eventPill(Recording{Title: "Release HEY CLI 0.9"}, 20)
+
+	if onLight == onDark {
+		t.Errorf("the pill did not follow the theme: %q", onLight)
 	}
 }
 
