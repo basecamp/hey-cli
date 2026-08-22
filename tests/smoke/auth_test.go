@@ -2,7 +2,6 @@ package smoke_test
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 )
 
@@ -18,26 +17,24 @@ func TestAuthStatus(t *testing.T) {
 	}
 }
 
+// TestMain authenticates with a browser session cookie, and auth token refuses
+// to print a cookie as a bearer token: HEY sends it as a Cookie header, so
+// handing it out as "Authorization: Bearer" would 401 with nothing to explain
+// it. The refusal is the command's behavior under this suite's auth method.
 func TestAuthToken(t *testing.T) {
-	stdout, stderr, code := hey(t, "auth", "token")
-	if code != 0 {
-		t.Fatalf("auth token failed (exit %d): %s", code, stderr)
+	_, stderr, code := hey(t, "auth", "token")
+	if code != 3 {
+		t.Fatalf("expected auth token to refuse the session cookie with exit 3, got exit %d: %s", code, stderr)
 	}
-	stdout = strings.TrimSpace(stdout)
-	if stdout == "" {
-		t.Error("expected auth token to output a non-empty token")
-	}
+	assertContains(t, stderr, "browser session cookie")
 }
 
 func TestAuthTokenStored(t *testing.T) {
-	stdout, stderr, code := hey(t, "auth", "token", "--stored")
-	if code != 0 {
-		t.Fatalf("auth token --stored failed (exit %d): %s", code, stderr)
+	_, stderr, code := hey(t, "auth", "token", "--stored")
+	if code != 3 {
+		t.Fatalf("expected auth token --stored to refuse the session cookie with exit 3, got exit %d: %s", code, stderr)
 	}
-	stdout = strings.TrimSpace(stdout)
-	if stdout == "" {
-		t.Error("expected auth token --stored to output a non-empty token")
-	}
+	assertContains(t, stderr, "browser session cookie")
 }
 
 func TestAuthRefresh(t *testing.T) {
