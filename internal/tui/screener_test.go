@@ -151,6 +151,17 @@ func TestScreenerViewCarriesHeyWording(t *testing.T) {
 	if !strings.Contains(barView, "\x1b[1;4;34;4mY\x1b[m") || !strings.Contains(barView, "\x1b[1;4;34;4mN\x1b[m") {
 		t.Errorf("Y and N should be underlined hotkeys: %q", barView)
 	}
+
+	bar.setWidth(24)
+	barView = bar.view()
+	for _, line := range strings.Split(barView, "\n") {
+		if width := ansi.StringWidth(line); width > 24 {
+			t.Errorf("narrow help line width = %d, want at most 24: %q", width, line)
+		}
+	}
+	if bar.height() != strings.Count(barView, "\n")+1 {
+		t.Errorf("help height = %d, rendered %d rows", bar.height(), strings.Count(barView, "\n")+1)
+	}
 }
 
 func TestScreenerEmptyQueue(t *testing.T) {
