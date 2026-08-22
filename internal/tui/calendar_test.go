@@ -15,6 +15,27 @@ import (
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 )
 
+// at is a timestamp as HEY answers one: RFC 3339 in UTC, which is what every fixture here
+// stands in for.
+func at(ts string) time.Time {
+	parsed, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		panic("bad fixture timestamp " + ts + ": " + err.Error())
+	}
+	return parsed
+}
+
+// atLocal is the same instant said the other way round: whatever UTC time puts this clock
+// time on the reader's own zone. A test about where an event lands in the grid has to name
+// the hour the reader sees, since that is the hour the column is.
+func atLocal(ts string) time.Time {
+	parsed, err := time.ParseInLocation("2006-01-02T15:04:05", strings.TrimSuffix(ts, "Z"), time.Local)
+	if err != nil {
+		panic("bad fixture timestamp " + ts + ": " + err.Error())
+	}
+	return parsed.UTC()
+}
+
 // The personal calendar carries no name and no color, which is how HEY serves it — the
 // web app labels that row from the identity instead.
 func testCalendars() []Calendar {
@@ -30,10 +51,10 @@ func testSelection(ids ...int64) map[int64]bool {
 
 func testRecordings() []Recording {
 	return []Recording{
-		{ID: 200, Title: "Standup", StartsAt: "2025-03-01T09:00:00Z", EndsAt: "2025-03-01T09:30:00Z", Type: "CalendarEvent"},
-		{ID: 201, Title: "Lunch", StartsAt: "2025-03-01T12:00:00Z", EndsAt: "2025-03-01T13:00:00Z", AllDay: false, Type: "CalendarEvent"},
-		{ID: 202, Title: "Read a book", StartsAt: "2025-03-01T06:00:00Z", Type: "Habit"},
-		{ID: 203, Title: "Buy milk", StartsAt: "2025-03-01T00:00:00Z", Type: "CalendarTodo"},
+		{ID: 200, Title: "Standup", StartsAt: at("2025-03-01T09:00:00Z"), EndsAt: at("2025-03-01T09:30:00Z"), Type: "CalendarEvent"},
+		{ID: 201, Title: "Lunch", StartsAt: at("2025-03-01T12:00:00Z"), EndsAt: at("2025-03-01T13:00:00Z"), AllDay: false, Type: "CalendarEvent"},
+		{ID: 202, Title: "Read a book", StartsAt: at("2025-03-01T06:00:00Z"), Type: "Habit"},
+		{ID: 203, Title: "Buy milk", StartsAt: at("2025-03-01T00:00:00Z"), Type: "CalendarTodo"},
 	}
 }
 
@@ -356,7 +377,7 @@ func TestCalendarViewIgnoresStaleRecordings(t *testing.T) {
 	v.viewMode = viewWeek
 	v.requestRecordings()
 	fresh := recordingsLoadedMsg{requestResult: currentRequest(v), recordings: []Recording{
-		{ID: 300, Title: "Design review", StartsAt: "2025-03-04T15:00:00Z", EndsAt: "2025-03-04T16:00:00Z", Type: "CalendarEvent"},
+		{ID: 300, Title: "Design review", StartsAt: at("2025-03-04T15:00:00Z"), EndsAt: at("2025-03-04T16:00:00Z"), Type: "CalendarEvent"},
 	}}
 
 	v.Update(fresh)
@@ -498,9 +519,9 @@ func TestDaysBetweenIgnoresDaylightSavingShifts(t *testing.T) {
 
 func TestDayLabelsCoverTodosAndHabits(t *testing.T) {
 	labels := dayLabelsFromRecordings(
-		[]Recording{{ID: 200, StartsAt: "2025-03-01T09:00:00Z", Type: "CalendarEvent", Label: "Launch day"}},
-		[]Recording{{ID: 203, StartsAt: "2025-03-02T00:00:00Z", Type: "CalendarTodo", Label: "Moving day"}},
-		[]Recording{{ID: 202, StartsAt: "2025-03-03T06:00:00Z", Type: "Habit", Label: "Rest day"}},
+		[]Recording{{ID: 200, StartsAt: at("2025-03-01T09:00:00Z"), Type: "CalendarEvent", Label: "Launch day"}},
+		[]Recording{{ID: 203, StartsAt: at("2025-03-02T00:00:00Z"), Type: "CalendarTodo", Label: "Moving day"}},
+		[]Recording{{ID: 202, StartsAt: at("2025-03-03T06:00:00Z"), Type: "Habit", Label: "Rest day"}},
 	)
 	want := map[string]string{
 		"2025-03-01": "Launch day",
@@ -623,7 +644,7 @@ func TestHabitCompletionsMarkTheirHabitRatherThanListingThemselves(t *testing.T)
 	events, todos, habits, completions := splitRecordings([]Recording{
 		{ID: 14796085, Title: "Read", Type: "Calendar::Habit", Icon: "read"},
 		{ID: 14113260, Title: "Meditate", Type: "Calendar::Habit", Icon: "meditate"},
-		{ID: 171477412, Type: "Calendar::Habit::Completion", ParentID: 14796085, StartsAt: "2026-08-22T00:00:00Z"},
+		{ID: 171477412, Type: "Calendar::Habit::Completion", ParentID: 14796085, StartsAt: at("2026-08-22T00:00:00Z")},
 	})
 
 	// The completion is answered as well as folded: a week needs to know which day each
@@ -638,11 +659,40 @@ func TestHabitCompletionsMarkTheirHabitRatherThanListingThemselves(t *testing.T)
 	if len(habits) != 2 {
 		t.Fatalf("habits = %+v, want the two habits without the completion", habits)
 	}
-	if habits[0].Title != "Read" || habits[0].CompletedAt != "2026-08-22T00:00:00Z" {
+	if habits[0].Title != "Read" || !habits[0].CompletedAt.Equal(at("2026-08-22T00:00:00Z")) {
 		t.Errorf("the completed habit was not marked done: %+v", habits[0])
 	}
-	if habits[1].Title != "Meditate" || habits[1].CompletedAt != "" {
+	if habits[1].Title != "Meditate" || habits[1].Done() {
 		t.Errorf("a habit with no completion was marked done: %+v", habits[1])
+	}
+}
+
+// HEY answers every timestamp in UTC, so a reader east or west of it sees an event on the
+// wrong hour unless the view converts. The week said 14:00 for a 14:00Z meeting whatever
+// time it was where they were.
+func TestEventsAreShownOnTheReadersClock(t *testing.T) {
+	zone, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		t.Skipf("time zone database unavailable: %v", err)
+	}
+
+	// 23:30 in Tokyo on the 20th is 14:30Z on the same day; 23:30Z is 08:30 on the 21st.
+	utc := at("2026-08-20T23:30:00Z")
+	event := Recording{Title: "Late call", Type: "Calendar::Event", StartsAt: utc, EndsAt: utc.Add(time.Hour)}
+
+	// The instant is untouched, only the clock it is read on.
+	if !event.Starts().Equal(utc) {
+		t.Errorf("Starts() moved the instant: %v against %v", event.Starts(), utc)
+	}
+
+	// And the day it belongs to follows that clock, which is what puts it in the right
+	// column of the week.
+	inTokyo := utc.In(zone)
+	if inTokyo.Day() != 21 {
+		t.Fatalf("fixture is wrong: 23:30Z is %s in Tokyo", inTokyo.Format(time.RFC3339))
+	}
+	if got := dateKey(inTokyo); got == dateKey(utc) {
+		t.Fatalf("fixture is wrong: the UTC and Tokyo dates should differ, both %s", got)
 	}
 }
 
@@ -672,7 +722,7 @@ func weekView(t *testing.T, habits, completions []Recording) []string {
 
 	events := []Recording{
 		{ID: 9, Title: "Stanko & Kevin", CalendarColor: "blue", Type: "Calendar::Event",
-			StartsAt: "2026-08-20T14:00:00Z", EndsAt: "2026-08-20T15:00:00Z"},
+			StartsAt: at("2026-08-20T14:00:00Z"), EndsAt: at("2026-08-20T15:00:00Z")},
 	}
 
 	anchor := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
@@ -681,7 +731,7 @@ func weekView(t *testing.T, habits, completions []Recording) []string {
 }
 
 func habitDone(habitID int64, day string) Recording {
-	return Recording{Type: "Calendar::Habit::Completion", ParentID: habitID, StartsAt: day + "T00:00:00Z"}
+	return Recording{Type: "Calendar::Habit::Completion", ParentID: habitID, StartsAt: at(day + "T00:00:00Z")}
 }
 
 // The week says what was kept each day, as icons — it has room for seven days of those and
@@ -781,11 +831,11 @@ func TestWeekWithoutAnyHabitsHasNoBand(t *testing.T) {
 func TestWeekGathersAllDayEventsAtTheFoot(t *testing.T) {
 	events := []Recording{
 		{ID: 9, Title: "Stanko & Kevin", CalendarColor: "blue", Type: "Calendar::Event",
-			StartsAt: "2026-08-20T14:00:00Z", EndsAt: "2026-08-20T15:00:00Z"},
+			StartsAt: at("2026-08-20T14:00:00Z"), EndsAt: at("2026-08-20T15:00:00Z")},
 		{ID: 10, Title: "Summer friday", CalendarColor: "gold", AllDay: true, Type: "Calendar::Event",
-			StartsAt: "2026-08-21T00:00:00Z", EndsAt: "2026-08-21T23:59:59Z"},
+			StartsAt: at("2026-08-21T00:00:00Z"), EndsAt: at("2026-08-21T23:59:59Z")},
 		{ID: 11, Title: "On call", CalendarColor: "green", AllDay: true, Type: "Calendar::Event",
-			StartsAt: "2026-08-17T00:00:00Z", EndsAt: "2026-08-23T23:59:59Z"},
+			StartsAt: at("2026-08-17T00:00:00Z"), EndsAt: at("2026-08-23T23:59:59Z")},
 	}
 
 	anchor := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
@@ -837,9 +887,9 @@ func TestWeekRunsItsDaysToTheBottom(t *testing.T) {
 func TestYearIsDrawnLikeTheWeek(t *testing.T) {
 	events := []Recording{
 		{ID: 1, Title: "Switch out contact lense", CalendarColor: "blue", AllDay: true,
-			StartsAt: "2026-01-26T00:00:00Z", EndsAt: "2026-01-26T23:59:59Z", Type: "Calendar::Event"},
+			StartsAt: at("2026-01-26T00:00:00Z"), EndsAt: at("2026-01-26T23:59:59Z"), Type: "Calendar::Event"},
 		{ID: 3, Title: "MEETUP", CalendarColor: "gold", AllDay: true,
-			StartsAt: "2026-02-05T00:00:00Z", EndsAt: "2026-02-08T23:59:59Z", Type: "Calendar::Event"},
+			StartsAt: at("2026-02-05T00:00:00Z"), EndsAt: at("2026-02-08T23:59:59Z"), Type: "Calendar::Event"},
 	}
 
 	out := renderYearView(events, time.Date(2026, 8, 22, 0, 0, 0, 0, time.UTC),
@@ -884,12 +934,12 @@ func TestYearIsDrawnLikeTheWeek(t *testing.T) {
 // a journal entry taken for one came out as a bar of bare color across the day.
 func TestOnlyEventsAreDrawnOnTheGrid(t *testing.T) {
 	events, todos, habits, _ := splitRecordings([]Recording{
-		{ID: 169118695, Title: "Stanko & Kevin", Type: "Calendar::Event", StartsAt: "2026-08-20T14:00:00Z"},
+		{ID: 169118695, Title: "Stanko & Kevin", Type: "Calendar::Event", StartsAt: at("2026-08-20T14:00:00Z")},
 		// The journal entry behind the stray stripe, as HEY answered it: no title.
-		{ID: 171477000, Type: "Calendar::JournalEntry", AllDay: true, StartsAt: "2026-08-20T00:00:00Z"},
-		{ID: 171477001, Type: "Calendar::DayBackground", AllDay: true, StartsAt: "2026-08-20T00:00:00Z"},
+		{ID: 171477000, Type: "Calendar::JournalEntry", AllDay: true, StartsAt: at("2026-08-20T00:00:00Z")},
+		{ID: 171477001, Type: "Calendar::DayBackground", AllDay: true, StartsAt: at("2026-08-20T00:00:00Z")},
 		// A time track has a name, and still is not an event.
-		{ID: 171477002, Title: "Design work", Type: "Calendar::TimeTrack", StartsAt: "2026-08-20T09:00:00Z"},
+		{ID: 171477002, Title: "Design work", Type: "Calendar::TimeTrack", StartsAt: at("2026-08-20T09:00:00Z")},
 		{ID: 171477003, Title: "Clean the attic", Type: "Calendar::Todo"},
 		{ID: 14796085, Title: "Read", Type: "Calendar::Habit"},
 	})
@@ -911,7 +961,7 @@ func TestHabitsModalOpensOverTheCalendarAndManagesHabits(t *testing.T) {
 	v.calendars = []Calendar{{ID: 10, Name: "Personal", Personal: true}}
 	v.habits = []Recording{
 		{ID: 7, Title: "Read before bed"},
-		{ID: 8, Title: "Evening walk", CompletedAt: "2026-08-22T00:00:00Z"},
+		{ID: 8, Title: "Evening walk", CompletedAt: at("2026-08-22T00:00:00Z")},
 	}
 	v.rebuildView()
 
@@ -942,7 +992,7 @@ func TestHabitsModalOpensOverTheCalendarAndManagesHabits(t *testing.T) {
 func TestRibbonMarksWhatIsDoneAndStopsAtTheWidth(t *testing.T) {
 	todos := []Recording{
 		{ID: 1, Title: "Renew passport"},
-		{ID: 2, Title: "Send the invoice", CompletedAt: "2026-08-24T08:00:00Z"},
+		{ID: 2, Title: "Send the invoice", CompletedAt: at("2026-08-24T08:00:00Z")},
 	}
 
 	ribbon := renderTodosRibbon(todos, 80)
@@ -966,7 +1016,7 @@ func TestRibbonMarksWhatIsDoneAndStopsAtTheWidth(t *testing.T) {
 
 func TestDayViewLabelsItsSections(t *testing.T) {
 	events := []Recording{
-		{ID: 1, Title: "Design review with Ryan", StartsAt: "2026-08-24T11:00:00Z", EndsAt: "2026-08-24T12:00:00Z"},
+		{ID: 1, Title: "Design review with Ryan", StartsAt: atLocal("2026-08-24T11:00:00"), EndsAt: atLocal("2026-08-24T12:00:00")},
 		{ID: 2, Title: "Dentist", AllDay: true},
 	}
 	habits := []Recording{{ID: 4, Title: "Read 20 pages"}}
@@ -1017,7 +1067,7 @@ func TestAllDayEventsAreBlocksInTheirCalendarsColor(t *testing.T) {
 
 func TestDayViewRulesFallFromEveryHourWithoutCuttingIntoAnEvent(t *testing.T) {
 	events := []Recording{
-		{ID: 1, Title: "Design review with Ryan", StartsAt: "2026-08-24T11:00:00Z", EndsAt: "2026-08-24T12:00:00Z"},
+		{ID: 1, Title: "Design review with Ryan", StartsAt: atLocal("2026-08-24T11:00:00"), EndsAt: atLocal("2026-08-24T12:00:00")},
 	}
 	day := time.Date(2026, 8, 24, 9, 0, 0, 0, time.Local)
 
@@ -1104,7 +1154,7 @@ func TestOverlappingEventsShareTheDaysHeight(t *testing.T) {
 func TestDayViewGivesASingleEventTheWholeGrid(t *testing.T) {
 	day := time.Date(2026, 8, 24, 9, 0, 0, 0, time.Local)
 	events := []Recording{{ID: 1, Title: "Charge the car", Type: "CalendarEvent",
-		StartsAt: "2026-08-24T07:00:00Z", EndsAt: "2026-08-24T10:00:00Z"}}
+		StartsAt: atLocal("2026-08-24T07:00:00"), EndsAt: atLocal("2026-08-24T10:00:00")}}
 
 	// An hour every four columns, so 07:00 starts on column 28 and the block covers the
 	// rules at 28 and 32 for every one of the grid's 38 rows.
@@ -1258,7 +1308,7 @@ func TestCalendarPinsTodosBelowTheGrid(t *testing.T) {
 	v.todos = []Recording{{ID: 1, Title: "Renew passport"}}
 	v.events = []Recording{
 		{ID: 2, Title: "A design review long enough to fill the day view twice over",
-			StartsAt: "2026-08-24T11:00:00Z", EndsAt: "2026-08-24T12:00:00Z"},
+			StartsAt: atLocal("2026-08-24T11:00:00"), EndsAt: atLocal("2026-08-24T12:00:00")},
 	}
 	v.rebuildView()
 

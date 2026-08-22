@@ -386,7 +386,7 @@ func TestCalendarHabitEnterCompletesAndClearsForTheDayOnScreen(t *testing.T) {
 	}
 
 	// A habit already done for the day is cleared by the same key.
-	view.habitPicker.setHabits([]Recording{{ID: 7, Title: "Read before bed", CompletedAt: "2026-08-22T00:00:00Z"}})
+	view.habitPicker.setHabits([]Recording{{ID: 7, Title: "Read before bed", CompletedAt: at("2026-08-22T00:00:00Z")}})
 	cmd = view.HandleContentKey(keyPress("enter"))
 	if cmd == nil {
 		t.Fatal("enter should clear a habit that is already done")

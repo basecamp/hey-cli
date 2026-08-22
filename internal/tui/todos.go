@@ -159,7 +159,7 @@ func (p *todoPicker) draw(base string, width, height int) string {
 	start, end := modalListWindow(len(p.todos), p.cursor, visible)
 	for i := start; i < end; i++ {
 		todo := p.todos[i]
-		done := todo.CompletedAt != ""
+		done := todo.Done()
 
 		marker, markerStyle := "□", lipgloss.NewStyle().Foreground(colorAlert).Bold(true)
 		labelStyle := lipgloss.NewStyle().Foreground(colorBright)
@@ -208,7 +208,7 @@ func (p *todoPicker) helpBindings() []helpBinding {
 	bindings := []helpBinding{{"↑↓", "choose"}}
 	if selected := p.selected(); selected != nil {
 		doneLabel := "mark done"
-		if selected.CompletedAt != "" {
+		if selected.Done() {
 			doneLabel = "clear"
 		}
 		deleteLabel := "delete"

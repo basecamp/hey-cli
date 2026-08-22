@@ -47,7 +47,7 @@ func calendarTodosWithServer(t *testing.T) (*calendarView, *recordedHabitRequest
 	view.now = func() time.Time { return time.Date(2026, 8, 22, 9, 0, 0, 0, time.Local) }
 	view.todos = []Recording{
 		{ID: 7, Title: "Clean the attic", Type: "Calendar::Todo"},
-		{ID: 8, Title: "Send the invoice", Type: "Calendar::Todo", CompletedAt: "2026-08-21T08:00:00Z"},
+		{ID: 8, Title: "Send the invoice", Type: "Calendar::Todo", CompletedAt: at("2026-08-21T08:00:00Z")},
 	}
 	view.Resize(vc.width, vc.height)
 	view.HandleContentKey(keyPress("s"))
@@ -93,7 +93,7 @@ func TestTodosModalTicksOffAndClears(t *testing.T) {
 
 	// A to-do already done is cleared by the same key.
 	view.todoPicker.setTodos([]Recording{
-		{ID: 8, Title: "Send the invoice", CompletedAt: "2026-08-21T08:00:00Z"},
+		{ID: 8, Title: "Send the invoice", CompletedAt: at("2026-08-21T08:00:00Z")},
 	})
 	cmd = view.HandleContentKey(keyPress("enter"))
 	if toast := finishCalendarMutation(t, view, cmd); toast != "To-do cleared" {

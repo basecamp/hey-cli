@@ -117,7 +117,7 @@ func (p *habitPicker) draw(base string, width, height int) string {
 	start, end := modalListWindow(len(p.habits), p.cursor, visible)
 	for i := start; i < end; i++ {
 		habit := p.habits[i]
-		done := habit.CompletedAt != ""
+		done := habit.Done()
 		marker := habitMarkerStyle(habit.Color).Render(habitMarker(done))
 
 		label := truncateToWidth(habitLabel(habit), max(contentWidth-4, 1))
@@ -147,7 +147,7 @@ func (p *habitPicker) helpBindings() []helpBinding {
 	bindings := []helpBinding{{"↑↓", "choose"}}
 	if selected := p.selected(); selected != nil {
 		doneLabel := "mark done"
-		if selected.CompletedAt != "" {
+		if selected.Done() {
 			doneLabel = "clear"
 		}
 		deleteLabel := "delete"
