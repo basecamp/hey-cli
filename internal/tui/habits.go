@@ -11,12 +11,17 @@ import (
 	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
-// habitColors stands HEY's eight habit colors up as ANSI slots, for the reason
-// styles.go and covers.go give: the reader's terminal theme defines those sixteen, so a
-// habit wears its own color in the reader's palette rather than HEY's hex. Gold takes
-// the bright yellow and brown the plain one, which is what a dark yellow looks like in
-// every theme.
-var habitColors = map[string]color.Color{
+// heyColors stands HEY's colors up as ANSI slots, for the reason styles.go and covers.go
+// give: the reader's terminal theme defines those sixteen, so a habit or a calendar wears
+// its own color in the reader's palette rather than HEY's hex. Gold takes the bright
+// yellow and brown the plain one, which is what a dark yellow looks like in every theme.
+//
+// One vocabulary covers both, because HEY has one: `Calendar::Preference::Colored` is
+// where a calendar's color comes from and a habit's is the same enum. Black is a calendar
+// color only, and it takes the foreground slot rather than lipgloss.Black — the reader's
+// ink, which is dark on a light theme and light on a dark one, where a literal black
+// would vanish into half of them.
+var heyColors = map[string]color.Color{
 	"blue":   lipgloss.Blue,
 	"red":    lipgloss.Red,
 	"gold":   lipgloss.BrightYellow,
@@ -25,12 +30,13 @@ var habitColors = map[string]color.Color{
 	"purple": lipgloss.Magenta,
 	"pink":   lipgloss.BrightMagenta,
 	"brown":  lipgloss.Yellow,
+	"black":  lipgloss.White,
 }
 
 // habitMarkerStyle is the style for a habit's ring: its own color where HEY gave it
 // one, and the alert red every other waiting thing wears where it did not.
 func habitMarkerStyle(habitColor string) lipgloss.Style {
-	if slot, ok := habitColors[habitColor]; ok {
+	if slot, ok := heyColors[habitColor]; ok {
 		return lipgloss.NewStyle().Foreground(slot).Bold(true)
 	}
 	return lipgloss.NewStyle().Foreground(colorAlert).Bold(true)

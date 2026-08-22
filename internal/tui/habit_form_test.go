@@ -195,6 +195,12 @@ func (r *recordedHabitRequests) snapshot() ([]string, []string) {
 	return append([]string(nil), r.requests...), append([]string(nil), r.bodies...)
 }
 
+// habitRefreshDay is the day these tests sit on, and habitRefreshPath is the read a habit
+// write refreshes it with.
+var habitRefreshDay = time.Date(2025, 3, 9, 12, 0, 0, 0, time.UTC)
+
+const habitRefreshPath = "/calendar/days/2025-03-09.json"
+
 func calendarHabitsWithServer(t *testing.T) (*calendarView, *recordedHabitRequests) {
 	t.Helper()
 	recorded := &recordedHabitRequests{}
@@ -214,8 +220,9 @@ func calendarHabitsWithServer(t *testing.T) (*calendarView, *recordedHabitReques
 			_, _ = io.WriteString(w, `{"id":99,"type":"Calendar::Habit::Completion","parent_id":7}`)
 		case req.Method == http.MethodDelete && strings.HasSuffix(req.URL.Path, "/habits/7/completions.json"):
 			w.WriteHeader(http.StatusNoContent)
-		case req.Method == http.MethodGet && req.URL.Path == "/calendars/10/recordings.json":
-			_, _ = io.WriteString(w, `{"Calendar::Habit":[{"id":7,"title":"Read before bed","type":"CalendarHabit","icon":"read","color":"blue","days":[1,3,5]}]}`)
+		case req.Method == http.MethodGet && req.URL.Path == habitRefreshPath:
+			_, _ = io.WriteString(w, `{"starts_at":"2025-03-09T00:00:00Z","ends_at":"2025-03-09T23:59:59Z","kind":"day",
+				"recordings":{"Calendar::Habit":[{"id":7,"title":"Read before bed","type":"CalendarHabit","icon":"read","color":"blue","days":[1,3,5]}]}}`)
 		default:
 			http.NotFound(w, req)
 		}
@@ -226,6 +233,9 @@ func calendarHabitsWithServer(t *testing.T) (*calendarView, *recordedHabitReques
 	vc := testVC()
 	vc.sdk = client
 	view := newCalendarView(vc)
+	// The clock is pinned so the day a habit write refreshes is the one the fake server
+	// answers: the refresh reads the day the view is on rather than a fixed URL.
+	view.now = func() time.Time { return habitRefreshDay }
 	view.calendars = []Calendar{{ID: 10, Name: "Rob Zolkos", Personal: true}}
 	view.habits = []Recording{{ID: 7, Title: "Read before bed", Icon: "read", Color: "blue", Days: []int32{1, 3, 5}}}
 	view.Resize(vc.width, vc.height)
@@ -247,6 +257,9 @@ func calendarHabitsWithFailingServer(t *testing.T, status int) *calendarView {
 	vc := testVC()
 	vc.sdk = client
 	view := newCalendarView(vc)
+	// The clock is pinned so the day a habit write refreshes is the one the fake server
+	// answers: the refresh reads the day the view is on rather than a fixed URL.
+	view.now = func() time.Time { return habitRefreshDay }
 	view.calendars = []Calendar{{ID: 10, Name: "Rob Zolkos", Personal: true}}
 	view.habits = []Recording{{ID: 7, Title: "Read before bed", Icon: "read", Color: "blue", Days: []int32{1, 3, 5}}}
 	view.Resize(vc.width, vc.height)
@@ -288,7 +301,7 @@ func TestCalendarHabitCreateMutationAndRefresh(t *testing.T) {
 		t.Errorf("create state = toast:%q form:%v", toast, view.habitForm)
 	}
 	requests, bodies := recorded.snapshot()
-	if len(requests) < 2 || requests[0] != "POST /calendar/habits.json" || requests[1] != "GET /calendars/10/recordings.json" {
+	if len(requests) < 2 || requests[0] != "POST /calendar/habits.json" || requests[1] != "GET "+habitRefreshPath {
 		t.Errorf("requests = %v", requests)
 	}
 	var payload map[string]map[string]any
@@ -309,7 +322,7 @@ func TestCalendarHabitEditMutationAndRefresh(t *testing.T) {
 		t.Errorf("toast = %q", toast)
 	}
 	requests, _ := recorded.snapshot()
-	if len(requests) < 2 || requests[0] != "PATCH /calendar/habits/7.json" || requests[1] != "GET /calendars/10/recordings.json" {
+	if len(requests) < 2 || requests[0] != "PATCH /calendar/habits/7.json" || requests[1] != "GET "+habitRefreshPath {
 		t.Errorf("requests = %v", requests)
 	}
 }
@@ -444,7 +457,7 @@ func TestCalendarHabitDeleteRequiresConfirmationAndRefresh(t *testing.T) {
 		t.Errorf("delete state = toast:%q confirmed ID:%d", toast, picker.confirmed)
 	}
 	requests, _ := recorded.snapshot()
-	if len(requests) < 2 || requests[0] != "DELETE /calendar/habits/7.json" || requests[1] != "GET /calendars/10/recordings.json" {
+	if len(requests) < 2 || requests[0] != "DELETE /calendar/habits/7.json" || requests[1] != "GET "+habitRefreshPath {
 		t.Errorf("requests = %v", requests)
 	}
 }
