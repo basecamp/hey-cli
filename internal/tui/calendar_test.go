@@ -775,6 +775,45 @@ func TestWeekWithoutAnyHabitsHasNoBand(t *testing.T) {
 	}
 }
 
+// An all-day event belongs to no hour, so the week gathers them at its foot rather than
+// leaving them at whatever depth each day's timed events reached. An event keeps one row
+// across every day it covers, so a week-long one is a single bar straight across.
+func TestWeekGathersAllDayEventsAtTheFoot(t *testing.T) {
+	events := []Recording{
+		{ID: 9, Title: "Stanko & Kevin", CalendarColor: "blue", Type: "Calendar::Event",
+			StartsAt: "2026-08-20T14:00:00Z", EndsAt: "2026-08-20T15:00:00Z"},
+		{ID: 10, Title: "Summer friday", CalendarColor: "gold", AllDay: true, Type: "Calendar::Event",
+			StartsAt: "2026-08-21T00:00:00Z", EndsAt: "2026-08-21T23:59:59Z"},
+		{ID: 11, Title: "On call", CalendarColor: "green", AllDay: true, Type: "Calendar::Event",
+			StartsAt: "2026-08-17T00:00:00Z", EndsAt: "2026-08-23T23:59:59Z"},
+	}
+
+	anchor := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+	out := renderWeekView(events, nil, nil, anchor, time.Monday, 100, weekViewRows, "p/n week", nil)
+	lines := strings.Split(stripANSI(out), "\n")
+
+	// The band is under the grid, headed as the day view heads its own.
+	header := rowContaining(t, lines, "All day")
+	if timed := rowContaining(t, lines, "Stanko & Kev"); timed > header {
+		t.Errorf("a timed event is below the all-day band: row %d against %d", timed, header)
+	}
+	if header != len(lines)-3 {
+		t.Errorf("the band is at row %d of %d, want it at the foot", header, len(lines))
+	}
+
+	// The week-long event holds one row all the way across; the single day goes below it.
+	across := lines[header+1]
+	if got := strings.Count(across, "On call"); got != 7 {
+		t.Errorf("the week-long event covers %d days, want 7: %q", got, across)
+	}
+	if strings.Contains(across, "Summer friday") {
+		t.Errorf("the one-day event took a row from the one spanning the week: %q", across)
+	}
+	if below := lines[header+2]; !strings.Contains(below, "Summer friday") {
+		t.Errorf("the one-day event is not on the row under it: %q", below)
+	}
+}
+
 // The days run to the bottom of the screen: the rules between them are the grid, so a quiet
 // week still reads as seven days rather than as a paragraph that stops.
 func TestWeekRunsItsDaysToTheBottom(t *testing.T) {
@@ -788,6 +827,56 @@ func TestWeekRunsItsDaysToTheBottom(t *testing.T) {
 		if got := strings.Count(lines[row], string(hourRule)); got != 6 {
 			t.Errorf("row %d has %d rules, want 6: %q", row, got, lines[row])
 		}
+	}
+}
+
+// The year is drawn as the week is: it names itself with the keys that move it, its days
+// are dotted apart, and there is no box around the lot. It keeps a rule between weeks,
+// which the week view has no need of — a row there is one line, and here it is as tall as
+// its busiest day.
+func TestYearIsDrawnLikeTheWeek(t *testing.T) {
+	events := []Recording{
+		{ID: 1, Title: "Switch out contact lense", CalendarColor: "blue", AllDay: true,
+			StartsAt: "2026-01-26T00:00:00Z", EndsAt: "2026-01-26T23:59:59Z", Type: "Calendar::Event"},
+		{ID: 3, Title: "MEETUP", CalendarColor: "gold", AllDay: true,
+			StartsAt: "2026-02-05T00:00:00Z", EndsAt: "2026-02-08T23:59:59Z", Type: "Calendar::Event"},
+	}
+
+	out := renderYearView(events, time.Date(2026, 8, 22, 0, 0, 0, 0, time.UTC),
+		time.Monday, 100, 30, "p/n year · t today")
+	lines := strings.Split(stripANSI(out), "\n")
+
+	// The year names itself and says what moves it, on its own first line.
+	if !strings.HasPrefix(lines[0], "2026 ") || !strings.Contains(lines[0], "p/n year · t today") {
+		t.Errorf("the year does not name itself with its keys: %q", lines[0])
+	}
+
+	// No box: nothing draws the old grid's corners or walls.
+	for i, line := range lines {
+		for _, boxed := range []string{"┌", "┬", "┐", "│", "├", "┼", "┤", "└", "┴", "┘"} {
+			if strings.Contains(line, boxed) {
+				t.Errorf("row %d still carries %q from the boxed grid: %q", i, boxed, line)
+			}
+		}
+	}
+
+	// Each cell says its own weekday, so there is no header row naming the columns.
+	if !strings.Contains(lines[1], "MON") || !strings.Contains(lines[1], "JAN THU 1") {
+		t.Errorf("the first week should be dates, not column names: %q", lines[1])
+	}
+
+	// Six dotted rules for seven days, and a solid one closing each week off.
+	if got := strings.Count(lines[1], string(hourRule)); got != 6 {
+		t.Errorf("a week row has %d dotted rules, want 6: %q", got, lines[1])
+	}
+	if !strings.HasPrefix(lines[2], strings.Repeat("─", 10)) {
+		t.Errorf("no rule under the first week: %q", lines[2])
+	}
+
+	// A multi-day event fills every day it covers, each in its calendar's color.
+	meetup := rowContaining(t, lines, "MEETUP")
+	if got := strings.Count(lines[meetup], "MEETUP"); got != 4 {
+		t.Errorf("MEETUP spans four days but appears %d times: %q", got, lines[meetup])
 	}
 }
 
@@ -888,6 +977,41 @@ func TestDayViewLabelsItsSections(t *testing.T) {
 		if !strings.Contains(view, label) {
 			t.Errorf("day view did not label its %q section: %q", label, view)
 		}
+	}
+}
+
+// An all-day event is a block in its calendar's color lying across the day, the same thing
+// a timed one is standing up in the grid. It used to be drawn [like this─────], which said
+// "all day" by reaching across and said nothing about whose it was.
+func TestAllDayEventsAreBlocksInTheirCalendarsColor(t *testing.T) {
+	events := []Recording{
+		{ID: 1, Title: "Summer friday", CalendarColor: "gold", AllDay: true, Type: "Calendar::Event"},
+		{ID: 2, Title: "Rosa and Stanko (On Call)", CalendarColor: "green", AllDay: true, Type: "Calendar::Event"},
+	}
+	day := time.Date(2026, 8, 21, 9, 0, 0, 0, time.Local)
+
+	rendered := renderDayView(events, nil, day, "", 100, 14)
+	lines := strings.Split(rendered, "\n")
+
+	gold := lines[rowContaining(t, lines, "Summer friday")]
+	green := lines[rowContaining(t, lines, "Rosa and Stanko")]
+
+	// Filled, and each in its own calendar's color rather than one style for both.
+	for _, bar := range []string{gold, green} {
+		if !strings.Contains(bar, "\x1b[") {
+			t.Errorf("all-day bar carries no fill: %q", bar)
+		}
+		if strings.ContainsAny(stripANSI(bar), "[]─") {
+			t.Errorf("all-day bar still drawn with brackets and dashes: %q", stripANSI(bar))
+		}
+	}
+	if gold == green {
+		t.Error("two all-day events on different calendars drew identically")
+	}
+
+	// The bar reaches across the day, so it reads as covering all of it.
+	if got := lipgloss.Width(stripANSI(gold)); got < 90 {
+		t.Errorf("all-day bar is %d columns of the ~97 the grid spans", got)
 	}
 }
 
@@ -1184,24 +1308,15 @@ func TestCalendarViewHelpBindingsShowsViewToggle(t *testing.T) {
 		}
 	}
 
-	// The week names itself and carries its own keys now, as the day does, so the help bar
-	// stops repeating them.
-	v.viewMode = viewWeek
-	for _, binding := range v.HelpBindings() {
-		if binding.key == "p/n" || binding.key == "t" {
-			t.Errorf("the week's own line says %q; the help bar should not: %+v", binding.key, v.HelpBindings())
-		}
-	}
-
-	// The year has no line of its own, so the help bar still carries its steps.
-	v.viewMode = viewYear
-	for _, want := range []string{"p/n", "c"} {
-		found := false
+	// Every span names itself and carries its own keys now, as the day always did, so the
+	// help bar repeats none of them.
+	for _, mode := range []calendarViewMode{viewDay, viewWeek, viewYear} {
+		v.viewMode = mode
 		for _, binding := range v.HelpBindings() {
-			found = found || binding.key == want
-		}
-		if !found {
-			t.Errorf("the year view is missing binding %q: %+v", want, v.HelpBindings())
+			if binding.key == "p/n" || binding.key == "t" {
+				t.Errorf("%v: its own line says %q; the help bar should not: %+v",
+					mode, binding.key, v.HelpBindings())
+			}
 		}
 	}
 	v.viewMode = viewDay
