@@ -555,7 +555,10 @@ New mail is a watch event, not a flag: every added and updated line carries `"ne
 true|false` and `--events new` selects the true ones (`internal/cmd/watch_new.go`). New is
 unseen, not muted, and `active_at` later than the watch's record of the thread — or than
 the watch's start, on HEY's clock (`serverNow`), for a thread it has no record of — and
-every posting the watch reads is recorded, in every box and whatever `--events` says. That
+every posting the watch reads is recorded, in every box and whatever `--events` says. The
+start is taken before the box list, and each box's cursor starts no later than it
+(`noLaterThan`): the server bakes the box's last posting activity into the cursor, so mail
+that landed between the two would otherwise sit behind the cursor, read by nothing. That
 is HEY's semantics and state across events, so the CLI decides it once; what to do about
 it is the reader's. A 409 skip-ahead sets that box's floor at the cursor it skipped to
 (`newMail.skippedTo`): activity at or before it is never new there, known thread or not,

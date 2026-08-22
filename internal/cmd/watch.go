@@ -139,10 +139,12 @@ func (c *watchCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	// New mail is measured against the watch's start, so that is taken before
-	// the boxes' cursors are read: nothing can then change between the two.
-	newMail := trackNewMail(serverNow(ctx))
+	// the boxes' cursors are read — and the cursors start no later than it, so
+	// nothing that lands between the two sits behind a cursor, read by nothing.
+	started := serverNow(ctx)
+	newMail := trackNewMail(started)
 
-	boxes, err := c.watchedBoxes(ctx)
+	boxes, err := c.watchedBoxes(ctx, started)
 	if err != nil {
 		return err
 	}
@@ -221,7 +223,7 @@ func (c *watchCommand) watchedChanges() (map[string]bool, error) {
 	return changes, nil
 }
 
-func (c *watchCommand) watchedBoxes(ctx context.Context) (map[int64]*watchedBox, error) {
+func (c *watchCommand) watchedBoxes(ctx context.Context, started time.Time) (map[int64]*watchedBox, error) {
 	listed, err := sdk.Boxes().List(ctx)
 	if err != nil {
 		return nil, apierr.FromSDK(err)
@@ -242,6 +244,9 @@ func (c *watchCommand) watchedBoxes(ctx context.Context) (map[int64]*watchedBox,
 		}
 		if cursor.Since == "" {
 			continue
+		}
+		if c.since == "" {
+			cursor = noLaterThan(cursor, started)
 		}
 
 		watched[box.Id] = &watchedBox{id: box.Id, kind: box.Kind, name: box.Name, cursor: cursor}
@@ -293,6 +298,22 @@ func watchCursor(changesURL, since string) (hey.PostingChangesCursor, error) {
 }
 
 const watchCursorTimeLayout = "2006-01-02T15:04:05.000Z"
+
+// noLaterThan moves a box's cursor back to the watch's start when the box's
+// own is later. The server bakes the box's last posting activity into its
+// cursor, so mail that landed after the watch read HEY's clock and before it
+// read the box list is already behind the cursor: the feed would start after
+// it, and nothing would ever report it. Starting from the watch's own start
+// reads it as part of the catch-up instead — and it is new, since it is later
+// than the start. A cursor that cannot be read is left as it is.
+func noLaterThan(cursor hey.PostingChangesCursor, started time.Time) hey.PostingChangesCursor {
+	at, err := time.Parse(watchCursorTimeLayout, cursor.Since)
+	if err == nil && at.After(started) {
+		cursor.Since = started.UTC().Format(watchCursorTimeLayout)
+	}
+
+	return cursor
+}
 
 func parseWatchSince(since string) (time.Time, error) {
 	if at, err := time.Parse(time.RFC3339, since); err == nil {
@@ -434,9 +455,16 @@ func (w *postingsWatch) noteConnection(connected bool) {
 // followConnection acts on the queued transitions in order: a drop is announced,
 // a reconnect catches every box up and then announces ready. Order is what keeps
 // a reader's picture right — a reconnect that completed while a slow catch-up
-// held the loop must not have its earlier drop announced after its ready.
+// held the loop must not have its earlier drop announced after its ready. The
+// transitions are taken one at a time, so a drop queued behind a reconnect is
+// still in the queue while the reconnect catches up, where readyOnceCaughtUp
+// can see it.
 func (w *postingsWatch) followConnection(ctx context.Context) error {
-	for _, connected := range w.drainTransitions() {
+	for {
+		connected, queued := w.nextTransition()
+		if !queued {
+			return nil
+		}
 		if !connected {
 			// A ready still owed by a catch-up is owed no longer: the next
 			// reconnect catches up afresh and announces its own.
@@ -448,8 +476,6 @@ func (w *postingsWatch) followConnection(ctx context.Context) error {
 			return err
 		}
 	}
-
-	return nil
 }
 
 // catchUp reads every box and announces ready — but only once every box has
@@ -463,7 +489,7 @@ func (w *postingsWatch) catchUp(ctx context.Context) error {
 		return err
 	}
 	w.catchingUp = true
-	w.readyOnceCaughtUp()
+	w.readyOnceCaughtUp(ctx)
 
 	return nil
 }
@@ -474,7 +500,7 @@ func (w *postingsWatch) retryUnread(ctx context.Context) error {
 	if err := w.readUnreadBoxes(ctx); err != nil {
 		return err
 	}
-	w.readyOnceCaughtUp()
+	w.readyOnceCaughtUp(ctx)
 
 	return nil
 }
@@ -483,9 +509,11 @@ func (w *postingsWatch) retryUnread(ctx context.Context) error {
 // and not while a drop is waiting to be acted on: the connection went away
 // during the reads, so the stream would say ready with the subscription
 // already down. The drop cancels the debt when it is drained, and the
-// reconnect's catch-up announces its own.
-func (w *postingsWatch) readyOnceCaughtUp() {
-	if !w.catchingUp || len(w.unread) > 0 || w.dropQueued() {
+// reconnect's catch-up announces its own. Nor when the watch is on its way
+// out: a catch-up that reported the change --exit-on-first was waiting for,
+// or one cut short by an interrupt, is not a watch that is live.
+func (w *postingsWatch) readyOnceCaughtUp(ctx context.Context) {
+	if !w.catchingUp || len(w.unread) > 0 || w.dropQueued() || w.finished() || ctx.Err() != nil {
 		return
 	}
 	w.catchingUp = false
@@ -499,14 +527,18 @@ func (w *postingsWatch) dropQueued() bool {
 	return slices.Contains(w.transitions, false)
 }
 
-func (w *postingsWatch) drainTransitions() []bool {
+// nextTransition takes the oldest queued transition, if there is one.
+func (w *postingsWatch) nextTransition() (connected, queued bool) {
 	w.transitionsMu.Lock()
 	defer w.transitionsMu.Unlock()
 
-	transitions := w.transitions
-	w.transitions = nil
+	if len(w.transitions) == 0 {
+		return false, false
+	}
+	connected = w.transitions[0]
+	w.transitions = w.transitions[1:]
 
-	return transitions
+	return connected, true
 }
 
 func (w *postingsWatch) readEveryBox(ctx context.Context) error {
@@ -545,7 +577,7 @@ func (w *postingsWatch) read(ctx context.Context, message actioncable.Message) e
 			return err
 		}
 		// The box a catch-up left behind may be the one that just rang.
-		w.readyOnceCaughtUp()
+		w.readyOnceCaughtUp(ctx)
 	}
 
 	return nil

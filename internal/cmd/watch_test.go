@@ -744,11 +744,112 @@ func TestConnectionChangesQueueInOrderAndNeverBlock(t *testing.T) {
 	default:
 		t.Fatal("a wake-up should be waiting")
 	}
-	if transitions := watch.drainTransitions(); !slices.Equal(transitions, []bool{false, true, false}) {
+	var transitions []bool
+	for {
+		connected, queued := watch.nextTransition()
+		if !queued {
+			break
+		}
+		transitions = append(transitions, connected)
+	}
+	if !slices.Equal(transitions, []bool{false, true, false}) {
 		t.Errorf("transitions = %v, want every change in the order it happened", transitions)
 	}
-	if watch.drainTransitions() != nil {
-		t.Error("draining empties the queue")
+}
+
+func TestWatchReadyYieldsToADropQueuedBehindTheReconnect(t *testing.T) {
+	server := changesServer(t, `{}`)
+	watch, out := newTestWatch("added")
+	cursor, err := watchCursor(server.URL+"/boxes/24088/postings/changes.json?since=2026-08-21T09%3A00%3A00.000Z&v=2", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	watch.boxes[24088].cursor = cursor
+
+	// A reconnect and then a drop, both queued before the loop got to them:
+	// the reconnect's catch-up must see the drop still waiting behind it.
+	watch.noteConnection(true)
+	watch.noteConnection(false)
+	if err := watch.followConnection(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 1 || !strings.Contains(lines[0], `"change":"disconnected"`) {
+		t.Errorf("wrote %q, want disconnected alone — no ready with the connection already down", out.String())
+	}
+
+	watch.noteConnection(true)
+	if err := watch.followConnection(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"change":"ready"`) {
+		t.Errorf("wrote %q, want ready after the reconnect that stuck", out.String())
+	}
+}
+
+func TestWatchDoesNotSayReadyOnItsWayOut(t *testing.T) {
+	server := changesServer(t, `{"added":[{"id":9001,"kind":"topic","box_id":24088,"app_url":"https://app.hey.com/topics/5511"}]}`)
+
+	// The catch-up reported the one change --exit-on-first was waiting for.
+	watch, out := newTestWatch("added")
+	watch.exitOnFirst = true
+	cursor, err := watchCursor(server.URL+"/boxes/24088/postings/changes.json?since=2026-08-21T09%3A00%3A00.000Z&v=2", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	watch.boxes[24088].cursor = cursor
+	if err := watch.catchUp(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"posting_id":9001`) || strings.Contains(out.String(), `"change":"ready"`) {
+		t.Errorf("wrote %q, want the change and no ready from a watch that is exiting", out.String())
+	}
+
+	// The catch-up was interrupted mid-read.
+	interrupted, out := newTestWatch("added")
+	interrupted.boxes[24088].cursor = cursor
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := interrupted.catchUp(ctx); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Len() != 0 {
+		t.Errorf("wrote %q, want nothing from a catch-up cut short by an interrupt", out.String())
+	}
+}
+
+func TestWatchedBoxesStartNoLaterThanTheWatchDid(t *testing.T) {
+	t.Setenv("HEY_TOKEN", "test-token")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// The Imbox's last activity is after the watch read HEY's clock — mail
+		// landed in between; The Feed's is before.
+		_, _ = w.Write([]byte(`[{"id":24088,"kind":"imbox","name":"Imbox","posting_changes_url":"/boxes/24088/postings/changes.json?since=2026-08-21T09%3A00%3A30.000Z&v=2"},` +
+			`{"id":24089,"kind":"feedbox","name":"The Feed","posting_changes_url":"/boxes/24089/postings/changes.json?since=2026-08-21T08%3A00%3A00.000Z&v=2"}]`))
+	}))
+	defer server.Close()
+	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
+
+	command := newWatchCommand()
+	boxes, err := command.watchedBoxes(context.Background(), watchStarted)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := boxes[24088].cursor.Since; got != "2026-08-21T09:00:00.000Z" {
+		t.Errorf("Imbox cursor = %q, want it moved back to the watch's start so the mail in between is read", got)
+	}
+	if got := boxes[24089].cursor.Since; got != "2026-08-21T08:00:00.000Z" {
+		t.Errorf("Feed cursor = %q, want the box's own when it is earlier", got)
+	}
+
+	// --since is the reader's choice and wins over both.
+	command.since = "2026-08-21T09:30:00Z"
+	boxes, err = command.watchedBoxes(context.Background(), watchStarted)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := boxes[24088].cursor.Since; got != "2026-08-21T09:30:00.000Z" {
+		t.Errorf("cursor = %q, want --since untouched", got)
 	}
 }
 
