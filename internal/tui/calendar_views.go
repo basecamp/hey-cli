@@ -74,8 +74,16 @@ func weekStartDate(t time.Time, firstDay time.Weekday) time.Time {
 	return d.AddDate(0, 0, -diff)
 }
 
-// splitRecordings separates recordings into events, todos, and habits.
-// The API returns Type values like "CalendarEvent", "CalendarTodo", "Habit".
+// splitRecordings picks the events, the todos and the habits out of what a calendar holds,
+// and takes nothing else. A calendar carries a day's own records alongside its events — a
+// `Calendar::JournalEntry` where the day has been written on, a `Calendar::DayBackground`
+// where it has a picture, a `Calendar::TimeTrack` where time was logged — and none of those
+// belong on a grid of events. Naming what is wanted rather than skipping what is not is the
+// point: the grid drew a journal entry as a bar of bare color, because it was an event by
+// default and had no name to put in it.
+//
+// HEY's type names are namespaced — `Calendar::Event`, `Calendar::Habit::Completion` — which
+// is why these match on a substring rather than on the whole string.
 func splitRecordings(recs []Recording) (events, todos, habits []Recording) {
 	// Doing a habit is a recording of its own — a `Calendar::Habit::Completion`
 	// carrying nothing but the habit it belongs to, since HEY records the doing rather
@@ -101,7 +109,7 @@ func splitRecordings(recs []Recording) (events, todos, habits []Recording) {
 				r.CompletedAt = done
 			}
 			habits = append(habits, r)
-		default:
+		case strings.Contains(t, "event"):
 			events = append(events, r)
 		}
 	}
