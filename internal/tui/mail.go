@@ -1525,7 +1525,6 @@ func (v *mailView) jumpEntry(delta int) {
 				return
 			}
 		}
-		v.topicViewport.GotoBottom()
 		return
 	}
 	for i := len(v.entryOffsets) - 1; i >= 0; i-- {

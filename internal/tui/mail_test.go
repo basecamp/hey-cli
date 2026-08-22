@@ -3091,6 +3091,10 @@ func TestThreadJKJumpsBetweenMessages(t *testing.T) {
 	if got := v.topicViewport.YOffset(); got != v.entryOffsets[2] {
 		t.Errorf("j should jump to the third message: offset %d, want %d", got, v.entryOffsets[2])
 	}
+	v.HandleContentKey(keyPress("j"))
+	if got := v.topicViewport.YOffset(); got != v.entryOffsets[2] {
+		t.Errorf("j at the final message should stay on its header: offset %d, want %d", got, v.entryOffsets[2])
+	}
 	v.HandleContentKey(keyPress("k"))
 	if got := v.topicViewport.YOffset(); got != v.entryOffsets[1] {
 		t.Errorf("k should jump back to the second message: offset %d, want %d", got, v.entryOffsets[1])
