@@ -18,12 +18,19 @@ type journalRequestKind int
 const (
 	journalRequestNone journalRequestKind = iota
 	journalRequestEntry
+	journalRequestMutation
 )
 
 type journalDetailMsg struct {
 	requestResult
-	body   htmlutil.Markdown
-	images [][]byte
+	content string
+	body    htmlutil.Markdown
+	images  [][]byte
+}
+
+type journalSavedMsg struct {
+	requestResult
+	removed bool
 }
 
 // --- Journal section view ---
@@ -36,7 +43,10 @@ type journalView struct {
 
 	topicViewport viewport.Model
 	topicContent  string
+	editContent   string
 	inThread      bool
+	form          *journalForm
+	notice        string
 	requests      requestLane[journalRequestKind]
 }
 
@@ -61,6 +71,7 @@ func (v *journalView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return cmd, true
 		}
 		v.inThread = true
+		v.editContent = msg.content
 		v.topicContent = markdown.Render(msg.body, max(v.vc.width-4, 40))
 		if msg.body.IsEmpty() {
 			v.topicContent = "(empty)"
@@ -80,8 +91,31 @@ func (v *journalView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return tea.Batch(uploadCmds...), true
 		}
 		return nil, true
+
+	case journalSavedMsg:
+		if !v.requests.accepts(msg.requestResult) {
+			return nil, true
+		}
+		v.requests.finish(msg.requestID)
+		if msg.err != nil {
+			if v.form != nil {
+				v.form.saving = false
+				v.form.status = errorNotice("Save failed", msg.err)
+				v.form.isError = true
+			}
+			return nil, true
+		}
+		v.form = nil
+		v.setNotice("Journal entry saved")
+		if msg.removed {
+			v.setNotice("Journal entry removed")
+		}
+		return v.requestJournalEntry(), true
 	}
 
+	if v.form != nil {
+		return v.form.update(msg), true
+	}
 	if v.inThread {
 		var cmd tea.Cmd
 		v.topicViewport, cmd = v.topicViewport.Update(msg)
@@ -92,10 +126,21 @@ func (v *journalView) Update(msg tea.Msg) (tea.Cmd, bool) {
 }
 
 func (v *journalView) View() string {
+	if v.form != nil {
+		return v.form.view()
+	}
+	if v.notice != "" {
+		return v.vc.styles.title.Render(v.notice) + "\n" + v.topicViewport.View()
+	}
 	return v.topicViewport.View()
 }
 
-func (v *journalView) HelpBindings() []helpBinding { return nil }
+func (v *journalView) HelpBindings() []helpBinding {
+	if v.form != nil {
+		return v.form.helpBindings()
+	}
+	return []helpBinding{{"e", "edit"}}
+}
 
 func (v *journalView) SubnavItems() ([]navItem, int, string, bool) {
 	label := "Journal"
@@ -108,6 +153,7 @@ func (v *journalView) SubnavItems() ([]navItem, int, string, bool) {
 func (v *journalView) SubnavLeft() tea.Cmd {
 	if v.dateIndex > 0 {
 		v.dateIndex--
+		v.setNotice("")
 		return v.requestJournalEntry()
 	}
 	return nil
@@ -116,13 +162,32 @@ func (v *journalView) SubnavLeft() tea.Cmd {
 func (v *journalView) SubnavRight() tea.Cmd {
 	if v.dateIndex < len(v.dates)-1 {
 		v.dateIndex++
+		v.setNotice("")
 		return v.requestJournalEntry()
 	}
 	return nil
 }
 
 func (v *journalView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
-	// Journal always shows content in viewport
+	if v.form != nil {
+		if msg.Key().Code == tea.KeyEscape && !v.form.saving {
+			v.form = nil
+			return nil
+		}
+		cmd, submit := v.form.handleKey(msg)
+		if submit {
+			return v.saveJournalEntry()
+		}
+		return cmd
+	}
+	if msg.String() == "e" && v.inThread {
+		v.setNotice("")
+		v.form = newJournalForm(v.dates[v.dateIndex], v.editContent, v.vc.styles)
+		v.form.resize(v.vc.width, v.vc.height)
+		return v.form.init()
+	}
+
+	// Journal always shows content in viewport.
 	var cmd tea.Cmd
 	v.topicViewport, cmd = v.topicViewport.Update(msg)
 	return cmd
@@ -131,39 +196,91 @@ func (v *journalView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 func (v *journalView) InThread() bool { return v.inThread }
 func (v *journalView) ExitThread()    {} // no-op: journal always shows content
 func (v *journalView) Loading() bool  { return v.requests.loading }
+func (v *journalView) CapturingInput() bool {
+	return v.form != nil
+}
 
-// Restyle is a no-op: the journal caches plain text and Kitty placeholders, neither
-// of which carries palette colors. The date list renders live.
-func (v *journalView) Restyle() {}
+func (v *journalView) AccountSwitchBlocked() bool {
+	return v.requests.kind == journalRequestMutation
+}
+
+// Restyle hands the active palette to the form. Journal content itself is plain text
+// and Kitty placeholders, so the viewport needs no repaint.
+func (v *journalView) Restyle() {
+	if v.form != nil {
+		v.form.styles = v.vc.styles
+	}
+}
 
 func (v *journalView) Resize(width, height int) {
 	v.topicViewport.SetWidth(width)
-	v.topicViewport.SetHeight(height)
+	v.resizeViewport(height)
+	if v.form != nil {
+		v.form.resize(width, height)
+	}
+}
+
+func (v *journalView) setNotice(notice string) {
+	v.notice = notice
+	v.resizeViewport(v.vc.height)
+}
+
+func (v *journalView) resizeViewport(height int) {
+	if v.notice != "" {
+		height--
+	}
+	v.topicViewport.SetHeight(max(height, 1))
 }
 
 // --- Fetch command ---
 
 func (v *journalView) requestJournalEntry() tea.Cmd {
+	v.inThread = false
+	v.editContent = ""
 	requestID, ctx := v.requests.begin(v.vc.ctx, journalRequestEntry)
 	return v.fetchJournalEntry(ctx, requestID, v.dates[v.dateIndex])
 }
 
-// A day HEY has nothing for answers 204, and a day it cannot answer for reads the same
-// way rather than as an error: the journal is a page of prose, and "(empty)" is what an
-// empty one says.
+// A day HEY has nothing for answers 204, which opens as an empty editable page. A failed
+// read remains an error so the editor cannot replace an entry whose content it never saw.
 func (v *journalView) fetchJournalEntry(ctx context.Context, requestID uint64, date string) tea.Cmd {
 	return func() tea.Msg {
-		content, err := v.vc.sdk.Journal().GetContent(ctx, date)
-		if err != nil || content == "" {
+		recording, err := v.vc.sdk.Journal().Get(ctx, date)
+		if err != nil {
+			return journalDetailMsg{requestResult: newRequestResult(requestID, err)}
+		}
+		if recording == nil {
 			return journalDetailMsg{requestResult: newRequestResult(requestID, nil)}
 		}
 
+		body := recording.ContentHtml
+		if body == "" {
+			body = recording.Content
+		}
 		var images [][]byte
 		if v.vc.imageRenderer.protocol() == imageProtocolKitty && v.vc.imageFetcher != nil {
-			images = newImageBudget().fetchImages(ctx, v.vc.imageFetcher, extractImageURLs(content))
+			images = newImageBudget().fetchImages(ctx, v.vc.imageFetcher, extractImageURLs(body))
 		}
 
-		return journalDetailMsg{requestResult: newRequestResult(requestID, nil), body: htmlToMarkdown(content), images: images}
+		return journalDetailMsg{
+			requestResult: newRequestResult(requestID, nil),
+			content:       body,
+			body:          htmlToMarkdown(body),
+			images:        images,
+		}
+	}
+}
+
+func (v *journalView) saveJournalEntry() tea.Cmd {
+	content := v.form.content()
+	date := v.form.date
+	requestID, ctx := v.requests.begin(v.vc.ctx, journalRequestMutation)
+	return func() tea.Msg {
+		_, err := v.vc.sdk.Journal().Update(ctx, date, content)
+		return journalSavedMsg{
+			requestResult: newRequestResult(requestID, err),
+			removed:       content == "",
+		}
 	}
 }
 
