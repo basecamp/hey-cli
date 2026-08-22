@@ -10,6 +10,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
+	habitvalues "github.com/basecamp/hey-cli/internal/habit"
 	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
@@ -84,12 +85,17 @@ func weekStartDate(t time.Time, firstDay time.Weekday) time.Time {
 //
 // HEY's type names are namespaced — `Calendar::Event`, `Calendar::Habit::Completion` — which
 // is why these match on a substring rather than on the whole string.
-func splitRecordings(recs []Recording) (events, todos, habits []Recording) {
+func splitRecordings(recs []Recording) (events, todos, habits, completions []Recording) {
 	// Doing a habit is a recording of its own — a `Calendar::Habit::Completion`
 	// carrying nothing but the habit it belongs to, since HEY records the doing rather
 	// than flagging the habit. So a completion marks the habit it names and is never
 	// listed itself: left in, it read as a habit with no name and left every habit
 	// looking undone.
+	//
+	// The completions are answered as well as folded, because folding is lossy over more
+	// than a day: a habit done on three days of a week has three of them, and only the
+	// last would survive as a CompletedAt. The day view wants the fold, the week wants
+	// the list.
 	completed := make(map[int64]string)
 	for _, r := range recs {
 		if isHabitCompletion(r.Type) {
@@ -101,7 +107,7 @@ func splitRecordings(recs []Recording) (events, todos, habits []Recording) {
 		t := strings.ToLower(r.Type)
 		switch {
 		case isHabitCompletion(r.Type):
-			// Already folded into the habit it completes.
+			completions = append(completions, r)
 		case strings.Contains(t, "todo"):
 			todos = append(todos, r)
 		case strings.Contains(t, "habit"):
@@ -614,7 +620,7 @@ type weekDayInfo struct {
 	allDay []Recording
 }
 
-func renderWeekView(events, habits []Recording, anchor time.Time, firstWeekDay time.Weekday, width, _ int, dayLabels map[string]string) string {
+func renderWeekView(events, habits, completions []Recording, anchor time.Time, firstWeekDay time.Weekday, width, _ int, dayLabels map[string]string) string {
 	var b strings.Builder
 	muted := styleMuted
 	bright := lipgloss.NewStyle().Foreground(colorBright)
@@ -643,15 +649,26 @@ func renderWeekView(events, habits []Recording, anchor time.Time, firstWeekDay t
 		}
 	}
 
-	// Assign habits to their dates
-	for _, h := range habits {
-		ht := parseEventTime(h.StartsAt)
-		if ht.IsZero() {
+	// Which habits were done on which day. It comes from the completions rather than from
+	// the habits: a habit's StartsAt is the day it was taken up — "Read" starts in 2024 —
+	// so matching a habit against a day in this week never hit, and the week has been
+	// showing none of them.
+	byID := make(map[int64]Recording, len(habits))
+	for _, habit := range habits {
+		byID[habit.ID] = habit
+	}
+	for _, completion := range completions {
+		done := parseEventTime(completion.StartsAt)
+		if done.IsZero() {
+			continue
+		}
+		habit, ok := byID[completion.ParentID]
+		if !ok {
 			continue
 		}
 		for i := range days {
-			if sameDay(days[i].date, ht) {
-				days[i].habits = append(days[i].habits, h)
+			if sameDay(days[i].date, done) {
+				days[i].habits = append(days[i].habits, habit)
 			}
 		}
 	}
@@ -675,6 +692,23 @@ func renderWeekView(events, habits []Recording, anchor time.Time, firstWeekDay t
 	// Header separator
 	b.WriteString(weekGridBorder("├", "┼", "┤", colWidth, muted))
 	b.WriteString("\n")
+
+	// The habits done each day, as a band across the top with a rule under it. Every day
+	// gets the same number of rows so the rule is straight and a day's events start where
+	// its neighbours' do — the band is a row of the grid, not something each column grew.
+	// A week nobody kept a habit in has no band and no rule.
+	if band := weekHabitBand(days, colWidth); len(band) > 0 {
+		for _, row := range band {
+			b.WriteString(sep)
+			for _, cell := range row {
+				b.WriteString(cell)
+				b.WriteString(sep)
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString(weekGridBorder("├", "┼", "┤", colWidth, muted))
+		b.WriteString("\n")
+	}
 
 	// Build column content
 	cols := make([][]string, 7)
@@ -718,6 +752,43 @@ func renderWeekView(events, habits []Recording, anchor time.Time, firstWeekDay t
 	return b.String()
 }
 
+// weekHabitBand is the habits kept each day, as their icons alone — the week has room for
+// seven days of them and none for seven days of names. It answers rows of seven cells, each
+// already padded to the column, and nothing at all for a week with no habits kept in it.
+func weekHabitBand(days []weekDayInfo, colWidth int) [][]string {
+	// An icon is two cells wide and wants one between it and the next.
+	const iconWidth = 3
+	perRow := max(colWidth/iconWidth, 1)
+
+	icons := make([][]string, len(days))
+	rows := 0
+	for i, day := range days {
+		for _, habit := range day.habits {
+			if emoji := habitvalues.EmojiFor(habit.Icon); emoji != "" {
+				icons[i] = append(icons[i], habitMarkerStyle(habit.Color).Render(emoji))
+			}
+		}
+		rows = max(rows, (len(icons[i])+perRow-1)/perRow)
+	}
+	if rows == 0 {
+		return nil
+	}
+
+	band := make([][]string, rows)
+	for row := range band {
+		band[row] = make([]string, len(days))
+		for day := range days {
+			var cell strings.Builder
+			for i := row * perRow; i < min((row+1)*perRow, len(icons[day])); i++ {
+				cell.WriteString(icons[day][i])
+				cell.WriteString(" ")
+			}
+			band[row][day] = padTo(cell.String(), colWidth)
+		}
+	}
+	return band
+}
+
 func weekGridBorder(left, mid, right string, colWidth int, muted lipgloss.Style) string {
 	var s strings.Builder
 	s.WriteString(muted.Render(left))
@@ -734,16 +805,8 @@ func weekGridBorder(left, mid, right string, colWidth int, muted lipgloss.Style)
 // buildWeekDayColumn returns styled lines for one day column.
 // Order: habits at top, timed events in the middle, all-day at bottom.
 func buildWeekDayColumn(d weekDayInfo, width int, muted lipgloss.Style) []string {
+	// The day's habits are the band above the grid, not lines in the column.
 	var lines []string
-
-	for _, h := range d.habits {
-		marker := "○"
-		if h.CompletedAt != "" {
-			marker = "●"
-		}
-		line := marker + " " + truncateStr(terminal.SanitizeLine(h.Title), width-2)
-		lines = append(lines, muted.Render(line))
-	}
 
 	for _, e := range d.events {
 		timeStr := ""
@@ -1015,6 +1078,15 @@ func truncateStr(s string, maxLen int) string {
 		runes = runes[:len(runes)-1]
 	}
 	return string(runes) + "…"
+}
+
+// padTo fills a cell out to its column width, measuring what is visible so the styling a
+// cell already carries is not counted.
+func padTo(s string, width int) string {
+	if pad := width - lipgloss.Width(s); pad > 0 {
+		return s + strings.Repeat(" ", pad)
+	}
+	return s
 }
 
 func centerPad(s string, width int) string {

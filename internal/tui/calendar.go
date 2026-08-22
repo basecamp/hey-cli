@@ -172,6 +172,11 @@ type calendarView struct {
 	todos  []Recording
 	habits []Recording
 
+	// habitCompletions is which habit was done on which day, which the week needs and a
+	// habit's own CompletedAt cannot carry: over a week a habit has one per day it was
+	// done on, and folding them keeps only the last.
+	habitCompletions []Recording
+
 	// year is what the year span draws, and it is a different answer than the
 	// recordings above rather than a summary of them.
 	year CalendarYear
@@ -250,7 +255,7 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if cmd, ok := v.requests.settle(msg.requestResult); !ok {
 			return cmd, true
 		}
-		v.events, v.todos, v.habits = splitRecordings(msg.recordings)
+		v.events, v.todos, v.habits, v.habitCompletions = splitRecordings(msg.recordings)
 		if v.habitPicker != nil {
 			v.habitPicker.setHabits(v.manageableHabits())
 		}
@@ -769,7 +774,7 @@ func (v *calendarView) rebuildView() {
 	case viewDay:
 		content = renderDayView(v.events, v.habits, anchor, v.stepHint(), w, v.contentVP.Height())
 	case viewWeek:
-		content = renderWeekView(v.events, v.habits, anchor, v.firstWeekDay, w, h, dayLabels)
+		content = renderWeekView(v.events, v.habits, v.habitCompletions, anchor, v.firstWeekDay, w, h, dayLabels)
 	case viewYear:
 		// The year's events are HEY's spanned_events — the all-day and multi-day ones —
 		// because that is all a year read carries. eventsByDate spreads a multi-day event
