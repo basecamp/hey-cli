@@ -1,10 +1,7 @@
 package tui
 
 import (
-	"strings"
-
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/hey-cli/internal/mail"
 	"github.com/basecamp/hey-cli/internal/terminal"
@@ -61,61 +58,11 @@ func (p *labelPicker) draw(view *mailView) string {
 }
 
 func (p *labelPicker) update(msg tea.KeyPressMsg) {
-	switch msg.Key().Code {
-	case tea.KeyUp:
-		if p.cursor > 0 {
-			p.cursor--
-		}
-	case tea.KeyDown:
-		if p.cursor < len(p.boxIndexes)-1 {
-			p.cursor++
-		}
-	}
+	p.cursor = stepListCursor(p.cursor, len(p.boxIndexes), msg)
 }
 
-// overlay composites the picker as a centered modal over the base content
-// using a lipgloss layer compositor.
 func (p *labelPicker) overlay(base string, width, height int) string {
-	modal := p.view(width, height)
-	x := max((width-lipgloss.Width(modal))/2, 0)
-	y := max((height-lipgloss.Height(modal))/2, 0)
-	compositor := lipgloss.NewCompositor(
-		lipgloss.NewLayer(base).Z(0),
-		lipgloss.NewLayer(modal).X(x).Y(y).Z(1),
-	)
-	canvas := lipgloss.NewCanvas(width, height)
-	compositor.Draw(canvas, canvas.Bounds())
-	return canvas.Render()
-}
-
-func (p *labelPicker) view(width, height int) string {
-	// Rounded borders and two cells of padding on each side use six columns.
-	contentWidth := max(width-6, 1)
-	title := lipgloss.NewStyle().Foreground(colorChrome).Bold(true).Render(truncateToWidth("Labels", contentWidth))
-	selected := lipgloss.NewStyle().Foreground(colorActive).Bold(true)
-
-	// Scroll the list when it cannot fit: border, padding and title take 6 lines.
-	maxRows := max(height-6, 1)
-	start := 0
-	if p.cursor >= maxRows {
-		start = p.cursor - maxRows + 1
-	}
-	rows := make([]string, 0, maxRows)
-	for i := start; i < min(start+maxRows, len(p.names)); i++ {
-		name := truncateToWidth(p.names[i], max(contentWidth-2, 1))
-		if i == p.cursor {
-			rows = append(rows, selected.Render("› "+name))
-		} else {
-			rows = append(rows, "  "+name)
-		}
-	}
-
-	body := title + "\n\n" + strings.Join(rows, "\n")
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorChrome).
-		Padding(0, 2).
-		Render(body)
+	return overlayModal(base, framedList("Labels", p.names, p.cursor, width, height), width, height)
 }
 
 func (p *labelPicker) helpBindings() []helpBinding {
