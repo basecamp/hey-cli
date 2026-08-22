@@ -97,13 +97,13 @@ USAGE
 
 CORE COMMANDS
   tui        Launch the interactive terminal UI
-  boxes      List your HEY boxes
   box        List email threads in a box
   threads    Read a thread
-  search     Search email threads and messages
-  compose    Write and send a new email
   reply      Reply to a thread
+  compose    Write and send a new email
+  search     Search email threads and messages
   contacts   Manage contacts
+  boxes      List your HEY boxes
   calendars  List calendars
   todo       Create and manage to-dos
   journal    Read and write journal entries
