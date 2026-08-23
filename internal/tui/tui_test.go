@@ -155,7 +155,7 @@ func TestQuestionMarkTogglesHelpAndResizesContent(t *testing.T) {
 	if !slices.Equal(saved, []bool{true, false}) {
 		t.Errorf("saved preferences = %v, want [true false]", saved)
 	}
-	if !slices.Contains(m.help.bindings, helpBinding{"?", "hide help"}) {
+	if !slices.Contains(m.help.bindings, helpBinding{"?", "toggle help"}) {
 		t.Errorf("visible shortcut help does not explain its toggle: %v", m.help.bindings)
 	}
 }
@@ -175,7 +175,7 @@ func TestQuestionMarkRemainsTextInsideSearch(t *testing.T) {
 		t.Errorf("search value = %q, want question mark", form.input.Value())
 	}
 	if m.help.hidden {
-		t.Error("typing a question mark in search should not hide help")
+		t.Error("typing a question mark in search should not toggle help")
 	}
 }
 
@@ -187,7 +187,7 @@ func TestQuestionMarkTogglesHelpInsideScreener(t *testing.T) {
 	updated, _ := m.Update(keyPress("?"))
 	m = updated.(model)
 	if !m.help.hidden {
-		t.Error("question mark should hide help inside The Screener")
+		t.Error("question mark should toggle help inside The Screener")
 	}
 }
 

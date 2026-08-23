@@ -635,7 +635,7 @@ func (m *model) updateHelpBindings() {
 		}
 	}
 	if m.canToggleHelp() && !m.help.hidden {
-		bindings = append(bindings, helpBinding{"?", "hide help"})
+		bindings = append(bindings, helpBinding{"?", "toggle help"})
 	}
 	if m.canOpenMailAccountPicker() && !m.mailAccountPicker {
 		if ic, ok := m.activeView.(inputCapturer); !ok || !ic.CapturingInput() {
