@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"time"
 
 	"charm.land/bubbles/v2/viewport"
@@ -23,10 +24,15 @@ import (
 // has no name of its own — HEY leaves the field empty and the web app labels the row
 // from the identity instead.
 type Calendar struct {
-	ID       int64
-	Name     string
-	Color    string
-	Personal bool
+	ID   int64
+	Name string
+	// OwnerEmail is the account the calendar belongs to, which is what tells two calendars of
+	// the same name apart — a reader with a work account and a personal one has two "Maybe"s
+	// and no way to know which is which from the name. It is what the web app shows under a
+	// calendar in its own list.
+	OwnerEmail string
+	Color      string
+	Personal   bool
 	// External is a calendar HEY subscribes to rather than owns — haystack's `internal`
 	// scope is `where.missing(:subscription)`, and this is the other side of it.
 	External bool
@@ -79,22 +85,60 @@ type YearDay struct {
 // sat on the 14:00 column wherever the reader was. Read Starts and Ends rather than these
 // fields — those answer in the zone a reader thinks in.
 type Recording struct {
-	ID          int64
-	ParentID    int64
-	Title       string
-	AllDay      bool
-	StartsAt    time.Time
-	EndsAt      time.Time
-	Type        string
-	CompletedAt time.Time
-	Label       string
-	Icon        string
+	ID       int64
+	ParentID int64
+	Title    string
+	AllDay   bool
+	StartsAt time.Time
+	EndsAt   time.Time
+	Type     string
+	// StartsAtZone and EndsAtZone are the IANA names of the zones the event was set in, and
+	// they are empty for most events — HEY serves them only for one saved with a zone of its
+	// own. They do not move the event: it is at one instant whatever zone it was set in, and
+	// the calendar draws it where the reader's clock puts it. What they are for is the form,
+	// which shows a zoned event on the clock it was written on.
+	StartsAtZone string
+	EndsAtZone   string
+	CompletedAt  time.Time
+	Label        string
+	Icon         string
 	// Color is a habit's own color. An event has none — what it wears is its
 	// calendar's, which is CalendarColor, and the two are different fields in HEY too.
 	Color string
-	// CalendarColor is the color of the calendar this is filed on, which is how a reader
-	// tells whose event they are looking at. HEY leaves it empty for the personal
-	// calendar: `_calendar.jbuilder` serves the color `unless calendar.personal?`.
+	// Notes, Location, Link, Attendees and AttachedEntryID are what an event carries besides
+	// when it is. They are read as well as written because HEY's update clears the lot of them
+	// on any write that leaves them out — so an edit form that did not know them would wipe an
+	// event's notes and location every time somebody changed its name.
+	//
+	// Notes arrive as plain text however they were written: HEY serves the description through
+	// to_plain_text, so formatting cannot survive a round trip through any client.
+	Notes           string
+	Location        string
+	Link            string
+	Attendees       []string
+	AttachedEntryID int64
+	// Highlighted is what HEY calls the web app's "Circle event".
+	Highlighted bool
+	// Recurring and RepeatKind are how an event repeats. The kind is served but neither the
+	// date it runs until nor the number of times, which is why an edit form can keep a
+	// schedule or replace it but cannot show what it is bounded by.
+	Recurring  bool
+	RepeatKind string
+	// ParentTitle is the title of the recording this one hangs off, which is the only place
+	// some recordings have one: a countdown carries a label — "10 days before" — and no title
+	// of its own, because what it is counting down to is the event above it.
+	ParentTitle string
+	// OccurrenceID names one instance of a repeating event — "153688907_2026-08-21", the
+	// series and the day — and is what HEY serves instead of an id for an occurrence it has
+	// not written down yet. Such a recording arrives with ID 0, which is why the arrows hold
+	// on to key() rather than to the id: selecting by the id alone meant a repeating event
+	// could never be picked out at all.
+	OccurrenceID string
+	// CalendarID is which calendar this is filed on, and CalendarColor how a reader tells
+	// whose event they are looking at. HEY leaves the color empty for the personal calendar
+	// and two calendars can wear the same one, so the id is what the edit form matches on and
+	// the color only what it falls back to.
+	CalendarID    int64
 	CalendarColor string
 	Days          []int32
 }
@@ -110,6 +154,20 @@ func (r Recording) Ends() time.Time   { return localizedEventTime(r.EndsAt, r.Al
 
 // Done is whether a habit or a todo has been completed.
 func (r Recording) Done() bool { return !r.CompletedAt.IsZero() }
+
+// key is what the arrows hold on to, and what says two recordings are the same one. It is the
+// id where there is one and the occurrence id otherwise — see OccurrenceID — and empty for a
+// recording HEY has given neither, which is then not selectable because there would be nothing
+// to act on.
+func (r Recording) key() string {
+	switch {
+	case r.ID != 0:
+		return strconv.FormatInt(r.ID, 10)
+	case r.OccurrenceID != "":
+		return r.OccurrenceID
+	}
+	return ""
+}
 
 func localizedEventTime(at time.Time, allDay bool) time.Time {
 	if at.IsZero() || allDay {
@@ -183,6 +241,30 @@ type calendarMutationMsg struct {
 	failure string // and what did not, when it did not
 }
 
+// calendarTickMsg moves the highlight over the selected event along. It carries nothing: the
+// phase is the view's, so a tick that arrives after the selection has gone simply stops.
+type calendarTickMsg struct{}
+
+// calendarTickInterval is how often the highlight moves. Slow enough that a whole span being
+// re-rendered behind it costs nothing anyone can feel, fast enough to read as motion rather
+// than as a blink.
+const calendarTickInterval = 140 * time.Millisecond
+
+func calendarTick() tea.Cmd {
+	return tea.Tick(calendarTickInterval, func(time.Time) tea.Msg { return calendarTickMsg{} })
+}
+
+// animate keeps the highlight moving for as long as there is something selected to draw it on,
+// and lets the loop stop as soon as there is not. Nothing restarts it but a key, which is the
+// only thing that can select an event in the first place.
+func (v *calendarView) animate() tea.Cmd {
+	if v.selectedEvent == "" || v.animating {
+		return nil
+	}
+	v.animating = true
+	return calendarTick()
+}
+
 // --- Calendar section view ---
 
 type calendarView struct {
@@ -219,16 +301,44 @@ type calendarView struct {
 	// done on, and folding them keeps only the last.
 	habitCompletions []Recording
 
-	// selectedEvent is the event the arrows have walked to, by id. It is an id rather than
-	// an index because the list under it is read again on every step, every write and every
-	// live change, and an index would point at whatever moved into that slot.
-	selectedEvent int64
+	// countdowns are the days counting down to an event, which HEY serves as recordings of
+	// their own on every day between the notice period and the event.
+	countdowns []Recording
+
+	// selectedEvent is the event the arrows have walked to, by Recording.key. It is a key
+	// rather than an index because the list under it is read again on every step, every write
+	// and every live change, and an index would point at whatever moved into that slot.
+	selectedEvent string
+
+	// lastTimedEvent is the grid event the reader was on before they crossed down into the
+	// all-day band, so ↑ brings them back to it rather than to the top of the day.
+	lastTimedEvent string
 
 	// selectFromEdge remembers which way the reader stepped off the end of a span, so the
 	// events of the one they land on can be walked into from the far side. The step is a
 	// read, so the answer arrives after the key: -1 means take the last event of what comes
 	// back, +1 the first, 0 that nothing is waiting on it.
 	selectFromEdge int
+
+	// inYearCell is whether the reader has stepped into the day the year's cursor is on. A
+	// year is a grid before it is a list of events, so the arrows move between cells until
+	// this is set and walk one cell's events afterwards.
+	inYearCell bool
+
+	// selectPhase is how far the highlight over the selected event has travelled. It is
+	// advanced by a tick rather than by anything the reader does, and it stops when there is
+	// nothing selected to draw it on. See calendarTickMsg.
+	selectPhase int
+
+	// animating is whether a tick is already in flight, so a key pressed mid-frame does not
+	// start a second loop running alongside the first.
+	animating bool
+
+	// drawnSinceTick is set by View and cleared by every tick. A tick that finds it clear
+	// knows nothing has drawn the calendar since the last one — the reader is in another
+	// section — and stops the loop rather than animating a screen nobody is looking at. There
+	// is no hook for a section being left, and this needs none: only the active view is drawn.
+	drawnSinceTick bool
 
 	// year is what the year span draws, and it is a different answer than the
 	// recordings above rather than a summary of them.
@@ -241,6 +351,11 @@ type calendarView struct {
 	// waits for. See Loading.
 	drawn bool
 
+	// editing is the recording the open event form was opened on. A save needs it because what
+	// it is addressing is not always an event: one day of a repeating event has no id of its
+	// own and is written through the occurrence route instead.
+	editing Recording
+
 	timeTrackCategories *timeTrackCategoryManager
 	habitPicker         *habitPicker
 	habitForm           *habitForm
@@ -250,7 +365,7 @@ type calendarView struct {
 
 	// confirmDelete is the event whose x has been pressed once, since removing something
 	// off a calendar asks twice — as deleting a habit does.
-	confirmDelete int64
+	confirmDelete string
 
 	requests requestLane[calendarRequestKind]
 }
@@ -276,6 +391,16 @@ func (v *calendarView) Init() tea.Cmd {
 
 func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
+	case calendarTickMsg:
+		v.animating = false
+		if v.selectedEvent == "" || !v.drawnSinceTick {
+			return nil, true
+		}
+		v.drawnSinceTick = false
+		v.selectPhase++
+		v.rebuildKeepingScroll()
+		return v.animate(), true
+
 	case identityLoadedMsg:
 		v.firstWeekDay = msg.firstWeekDay
 		v.rebuildView()
@@ -313,15 +438,19 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if cmd, ok := v.requests.settle(msg.requestResult); !ok {
 			return cmd, true
 		}
-		v.events, v.todos, v.habits, v.habitCompletions = splitRecordings(msg.recordings)
+		v.events, v.todos, v.habits, v.habitCompletions, v.countdowns = splitRecordings(msg.recordings)
 		if v.habitPicker != nil {
 			v.habitPicker.setHabits(v.manageableHabits())
 		}
 		if v.todoPicker != nil {
 			v.todoPicker.setTodos(v.todos)
 		}
+		was := v.selectedEvent
 		v.settleSelection()
 		v.rebuildView()
+		if v.selectedEvent != was {
+			return v.animate(), true
+		}
 		return nil, true
 
 	case yearLoadedMsg:
@@ -395,11 +524,16 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 	if v.habitForm != nil {
 		return v.habitForm.update(msg), true
 	}
+	if v.eventForm != nil {
+		return v.eventForm.update(msg), true
+	}
 
 	return nil, false
 }
 
 func (v *calendarView) View() string {
+	v.drawnSinceTick = true
+
 	if v.timeTrackCategories != nil {
 		return v.timeTrackCategories.view(v.vc.styles, v.vc.width, v.vc.height)
 	}
@@ -477,17 +611,32 @@ func (v *calendarView) HelpBindings() []helpBinding {
 	// the date they act on, so the help bar carries none of that.
 	var bindings []helpBinding
 
-	// The event under the arrows is what e and x act on, so they are only offered once
-	// there is one. a stands whether or not anything is selected.
-	if v.viewMode != viewYear {
-		bindings = append(bindings, helpBinding{"←→", "event"}, helpBinding{"a", "new event"})
-		if event, ok := v.selectedRecording(); ok {
-			label := "delete"
-			if v.confirmDelete == event.ID {
-				label = "press x again to delete"
-			}
-			bindings = append(bindings, helpBinding{"e", "edit"}, helpBinding{"x", label})
+	// What the arrows do is the one thing that differs between the spans, so each says its own
+	// — and the year says it twice, since the arrows change hands when the reader steps into a
+	// cell. a stands wherever an event can be filed; e and x wait for one to be picked out.
+	switch v.viewMode {
+	case viewDay:
+		bindings = append(bindings, helpBinding{"←→", "event"})
+		if _, allDay := v.selectableGroups(); len(allDay) > 0 {
+			bindings = append(bindings, helpBinding{"↑↓", "all day"})
 		}
+	case viewWeek:
+		bindings = append(bindings, helpBinding{"←→", "day"}, helpBinding{"↑↓", "event"})
+	case viewYear:
+		if v.inYearCell {
+			bindings = append(bindings, helpBinding{"↑↓", "event"}, helpBinding{"esc", "leave the day"})
+		} else {
+			bindings = append(bindings, helpBinding{"←→↑↓", "day"}, helpBinding{"enter", "open the day"})
+		}
+	}
+
+	bindings = append(bindings, helpBinding{"a", "new event"})
+	if event, ok := v.selectedRecording(); ok {
+		label := "delete"
+		if v.confirmDelete == event.key() {
+			label = "press x again to delete"
+		}
+		bindings = append(bindings, helpBinding{"e", "edit"}, helpBinding{"x", label})
 	}
 
 	// The spans are not in here: the row above the grid shows each one's number in the
@@ -530,10 +679,27 @@ func (v *calendarView) setViewMode(mode calendarViewMode) tea.Cmd {
 		return nil
 	}
 	v.viewMode = mode
+	// Each span gives the arrows something different, so what they were pointing at in the one
+	// before does not carry over.
+	v.inYearCell = false
+	v.selectedEvent = ""
 	return v.reread()
 }
 
+// HandleContentKey answers what the key did, and starts the highlight moving when the key is
+// what picked the event out. Several keys can do that — an arrow, a step onto another day,
+// entering a year cell — so it is noticed here, by the selection having changed, rather than
+// remembered at each of them.
 func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
+	was := v.selectedEvent
+	cmd := v.handleContentKey(msg)
+	if v.selectedEvent != was {
+		return tea.Batch(cmd, v.animate())
+	}
+	return cmd
+}
+
+func (v *calendarView) handleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	if v.timeTrackCategories != nil {
 		return v.handleTimeTrackCategoryKey(msg)
 	}
@@ -549,7 +715,10 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		return cmd
 	}
 	if v.eventForm != nil {
-		if msg.Key().Code == tea.KeyEscape && !v.eventForm.saving {
+		// The form's time zone list wants esc for itself — closing the list is what esc means
+		// while it is open, and closing the whole form under it would throw away everything
+		// typed so far.
+		if msg.Key().Code == tea.KeyEscape && !v.eventForm.saving && !v.eventForm.capturesKeys() {
 			v.eventForm = nil
 			return nil
 		}
@@ -577,7 +746,7 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 
 	// x asks twice, so any other key is the reader changing their mind.
 	if msg.String() != "x" {
-		v.confirmDelete = 0
+		v.confirmDelete = ""
 	}
 
 	switch msg.String() {
@@ -593,7 +762,7 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		return v.removeSelectedEvent()
 	// b for habits, as in HEY's own calendar.
 	case "b":
-		v.habitPicker = newHabitPicker(v.manageableHabits())
+		v.habitPicker = newHabitPicker(v.manageableHabits(), v.viewMode != viewYear)
 		return nil
 	// s for the to-dos, which HEY files under "Sometime this week".
 	case "s":
@@ -624,17 +793,177 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		return v.step(1)
 	case "t":
 		return v.today()
-	// The arrows walk the span's events, and step the span itself off either end.
-	case "left":
-		return v.moveSelection(-1)
-	case "right":
-		return v.moveSelection(1)
+	}
+
+	if cmd, handled := v.handleArrowKey(msg); handled {
+		return cmd
 	}
 
 	// Delegate scrolling to the content viewport
 	var cmd tea.Cmd
 	v.contentVP, cmd = v.contentVP.Update(msg)
 	return cmd
+}
+
+// handleArrowKey is where the three spans stop being the same screen with a different date on
+// it. Each one gives the arrows the thing it is actually made of:
+//
+// The day is one day, so ← and → walk its events and carry on into the day either side.
+//
+// The week is seven days, so ← and → walk the days and ↑ and ↓ walk the selected day's events.
+// The cursor is the anchor, which is what gives b, s and a the day the reader is pointing at
+// rather than the day the week happens to start on.
+//
+// The year is a grid, and a grid wants moving through before anything in it can be worked on:
+// the arrows move between cells, enter steps into one, and only then do ↑ and ↓ belong to that
+// day's events. esc steps back out. Without the two stages ↑ and ↓ would have to be both a
+// week's worth of movement and an event's, and a year of cells has no way to show which.
+func (v *calendarView) handleArrowKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	key := msg.String()
+
+	switch v.viewMode {
+	case viewDay:
+		switch key {
+		case "left":
+			return v.moveAlongTheDay(-1), true
+		case "right":
+			return v.moveAlongTheDay(1), true
+		case "up":
+			return v.crossTheDay(-1), true
+		case "down":
+			return v.crossTheDay(1), true
+		}
+	case viewWeek:
+		switch key {
+		case "left":
+			return v.moveCursorDay(-1), true
+		case "right":
+			return v.moveCursorDay(1), true
+		case "up":
+			return v.moveSelection(-1), true
+		case "down":
+			return v.moveSelection(1), true
+		}
+	case viewYear:
+		switch key {
+		case "left":
+			return v.moveCursorDay(-1), true
+		case "right":
+			return v.moveCursorDay(1), true
+		case "up":
+			if v.inYearCell {
+				return v.moveSelection(-1), true
+			}
+			return v.moveCursorDay(-7), true
+		case "down":
+			if v.inYearCell {
+				return v.moveSelection(1), true
+			}
+			return v.moveCursorDay(7), true
+		case "enter":
+			v.enterYearCell()
+			return nil, true
+		}
+	}
+	return nil, false
+}
+
+// moveAlongTheDay is ← and → on the day view: along the grid, and off either end into the day
+// before or after. The all-day band is not on the grid — it is a bar under it, belonging to no
+// hour — so it is not walked sideways; crossTheDay is how the reader gets to it.
+func (v *calendarView) moveAlongTheDay(delta int) tea.Cmd {
+	timed, allDay := v.selectableGroups()
+
+	// On an all-day event, ← and → step the day: there is nothing to their left or right on the
+	// band, and the day either side is what the reader is asking for.
+	if indexOfEvent(allDay, v.selectedEvent) >= 0 {
+		return v.stepSpanFromEdge(delta)
+	}
+	return v.walk(timed, delta, func() tea.Cmd { return v.stepSpanFromEdge(delta) })
+}
+
+// crossTheDay is ↑ and ↓ on the day view, which cross between the grid and the all-day band
+// under it: ↓ off the grid lands on the band, ↑ off the top of the band comes back to the grid,
+// and within the band the two walk it. Nothing crosses back down onto the grid from above it,
+// because the grid is where the reader already was.
+func (v *calendarView) crossTheDay(delta int) tea.Cmd {
+	timed, allDay := v.selectableGroups()
+
+	if at := indexOfEvent(allDay, v.selectedEvent); at >= 0 {
+		if delta < 0 && at == 0 {
+			return v.selectEvent(v.lastTimedOr(timed))
+		}
+		return v.walk(allDay, delta, nil)
+	}
+
+	// On the grid, or on nothing yet: ↓ is the way into the band.
+	if delta > 0 && len(allDay) > 0 {
+		return v.selectEvent(allDay[0].key())
+	}
+	return nil
+}
+
+// lastTimedOr is the grid event ↑ off the band comes back to: the one the reader left, so
+// crossing down and back up again is where they were rather than at the start of the day.
+func (v *calendarView) lastTimedOr(timed []Recording) string {
+	if len(timed) == 0 {
+		return ""
+	}
+	if indexOfEvent(timed, v.lastTimedEvent) >= 0 {
+		return v.lastTimedEvent
+	}
+	return timed[0].key()
+}
+
+func (v *calendarView) selectEvent(key string) tea.Cmd {
+	if key == "" {
+		return nil
+	}
+	v.selectedEvent = key
+	if timed, _ := v.selectableGroups(); indexOfEvent(timed, key) >= 0 {
+		v.lastTimedEvent = key
+	}
+	v.rebuildKeepingScroll()
+	return nil
+}
+
+func indexOfEvent(events []Recording, key string) int {
+	if key == "" {
+		return -1
+	}
+	for i, event := range events {
+		if event.key() == key {
+			return i
+		}
+	}
+	return -1
+}
+
+// enterYearCell hands the cell's own events to ↑ and ↓, starting on the first so the reader
+// can see that the arrows have changed hands.
+func (v *calendarView) enterYearCell() {
+	v.inYearCell = true
+	if events := v.selectableEvents(); len(events) > 0 && v.selectedEvent == "" {
+		v.selectedEvent = events[0].key()
+	}
+	v.rebuildView()
+}
+
+func (v *calendarView) leaveYearCell() {
+	v.inYearCell = false
+	v.selectedEvent = ""
+	v.rebuildView()
+}
+
+// CancelPendingDetail is how esc reaches a year cell. The model reads esc before a view sees a
+// key, and only offers it on through here — so stepping out of a cell is the same seam a mail
+// thread's read is cancelled through, rather than a key the calendar handles itself.
+func (v *calendarView) CancelPendingDetail() bool {
+	if !v.inYearCell {
+		return false
+	}
+	v.leaveYearCell()
+	return true
 }
 
 // handleHabitPickerKey gives the open picker every key: managing a habit is what the
@@ -736,6 +1065,10 @@ func (v *calendarView) handleHabitPickerKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return v.startHabitForm(habitFormCreate, Recording{})
 	case "enter":
+		if !picker.completable {
+			picker.status = "Keeping a habit is done from the day or the week"
+			return nil
+		}
 		if habit := picker.selected(); habit != nil {
 			return v.toggleHabitCompletion(*habit)
 		}
@@ -850,6 +1183,13 @@ func (v *calendarView) AccountSwitchBlocked() bool {
 // Restyle re-renders the day/week/year grid, which caches styled output in its
 // viewport. The recording detail is plain text and needs nothing.
 func (v *calendarView) Restyle() {
+	v.rebuildKeepingScroll()
+}
+
+// rebuildKeepingScroll redraws without moving the grid, for the changes that are only about how
+// something looks: a theme swap, a highlight moving on, the cursor stepping to the next day of
+// a week that is all on screen anyway. rebuildView puts the span back at the top.
+func (v *calendarView) rebuildKeepingScroll() {
 	offset := v.contentVP.YOffset()
 	v.rebuildView()
 	v.contentVP.SetYOffset(offset)
@@ -887,31 +1227,56 @@ func (v *calendarView) rebuildView() {
 	v.contentVP.SetHeight(max(h-2-v.todosFooterHeight(), 1))
 
 	var content string
+	cursorTop, cursorBottom := -1, -1
 	switch v.viewMode {
 	case viewDay:
-		content = renderDayView(v.events, v.habits, anchor, v.stepHint(), w, v.contentVP.Height(), v.selection())
+		content = renderDayView(v.events, v.habits, v.countdowns, anchor, v.stepHint(), w, v.contentVP.Height(), v.selection())
 	case viewWeek:
 		content = renderWeekView(v.events, v.habits, v.habitCompletions, anchor, v.firstWeekDay, w, v.contentVP.Height(), v.stepHint(), dayLabels, v.selection())
 	case viewYear:
 		// The year's events are HEY's spanned_events — the all-day and multi-day ones —
 		// because that is all a year read carries. eventsByDate spreads a multi-day event
 		// over the days it covers, so the grid fills the same way it always did.
-		content = renderYearView(v.year.SpannedEvents, anchor, v.firstWeekDay, w, h, v.stepHint())
+		content, cursorTop, cursorBottom = renderYearView(v.year.SpannedEvents, anchor, v.firstWeekDay, w, h, v.stepHint(), v.selection(), v.inYearCell)
 	}
 
 	v.contentVP.SetContent(content)
 	v.drawn = true
 
-	// For year view, scroll to the current week
 	if v.viewMode == viewYear {
-		gridStart := weekStartDate(time.Date(anchor.Year(), 1, 1, 0, 0, 0, 0, anchor.Location()), v.firstWeekDay)
-		weeksToToday := daysBetween(gridStart, anchor) / 7
-		// Center today's week in the viewport (+2 for header rows)
-		offset := max(weeksToToday-h/2+2, 0)
-		v.contentVP.SetYOffset(offset)
+		v.revealRows(cursorTop, cursorBottom)
 	} else {
 		v.contentVP.GotoTop()
 	}
+}
+
+// revealRows keeps the year's cursor on screen. It used to be scrolled to by counting weeks,
+// which is not where a week is: a row is as tall as its busiest day, so the arrows walked the
+// cursor off the bottom with the last weeks of the year still below it.
+//
+// A cursor already on screen is left where it is — re-centring on every keystroke would drag the
+// grid about under the reader. One that has just gone off the edge is followed by the smallest
+// scroll that brings it back, and one a whole screen away, which is where a fresh read or a jump
+// to another year lands, is centred.
+func (v *calendarView) revealRows(top, bottom int) {
+	height := v.contentVP.Height()
+	if top < 0 || height <= 0 {
+		v.contentVP.GotoTop()
+		return
+	}
+
+	offset := v.contentVP.YOffset()
+	switch {
+	case top >= offset && bottom < offset+height:
+		return
+	case bottom < offset-height || top > offset+2*height:
+		offset = top - height/2
+	case top < offset:
+		offset = top
+	default:
+		offset = bottom - height + 1
+	}
+	v.contentVP.SetYOffset(max(offset, 0))
 }
 
 // day is the day the view is on: today, until the reader steps off it.
@@ -982,51 +1347,101 @@ func (v *calendarView) reread() tea.Cmd {
 
 // --- Walking the events with the arrows ---
 
-func (v *calendarView) selection() selection { return selection{eventID: v.selectedEvent} }
-
-// selectableEvents is the events of the span in the order the arrows walk them, which is
-// the order they are drawn in: on the day the timed ones by the clock and then the all-day
-// ones under them, and across the week day by day and then the all-day band at its foot.
-// Traversal follows the layout so that → never jumps somewhere the eye has to hunt for.
-//
-// The year is not walked. It draws a year of days rather than a day's hours, and an event
-// there is a name in a cell rather than something with an edge to step off.
-func (v *calendarView) selectableEvents() []Recording {
-	timed, allDay := []Recording{}, []Recording{}
-	collect := func(events []Recording) {
-		for _, event := range events {
-			if event.AllDay {
-				allDay = append(allDay, event)
-			} else {
-				timed = append(timed, event)
-			}
-		}
+func (v *calendarView) selection() selection {
+	return selection{
+		eventKey: v.selectedEvent,
+		day:      v.cursorDay(),
+		phase:    v.selectPhase,
 	}
+}
 
-	switch v.viewMode {
-	case viewDay:
-		collect(eventsByDate(v.events)[dateKey(v.day())])
-	case viewWeek:
-		// eventsByDate hands a multi-day event to every day it touches, so the same event
-		// arrives more than once across a week and is taken the first time.
-		byDate := eventsByDate(v.events)
-		seen := make(map[int64]bool)
-		start := weekStartDate(v.day(), v.firstWeekDay)
-		for i := range 7 {
-			for _, event := range byDate[dateKey(start.AddDate(0, 0, i))] {
-				if !seen[event.ID] {
-					seen[event.ID] = true
-					collect([]Recording{event})
-				}
-			}
+// cursorDay is the day the arrows have walked to, for the views that draw more than one. The
+// day view has nothing to mark — the whole screen is the day it is on — and the year marks its
+// cell whether or not the reader has stepped into it, since that is what the arrows are moving.
+func (v *calendarView) cursorDay() time.Time {
+	if v.viewMode == viewDay {
+		return time.Time{}
+	}
+	return v.day()
+}
+
+// moveCursorDay walks the cursor to another day, and reads the period again only when it has
+// left the one on screen. The cursor is the anchor, which is what gives b, s and a their day
+// without anything having to be told: they all file on v.day() already.
+func (v *calendarView) moveCursorDay(days int) tea.Cmd {
+	from := v.day()
+	v.anchor = from.AddDate(0, 0, days)
+
+	if v.sameSpan(from, v.anchor) {
+		v.settleSelection()
+		// The week keeps where the reader had scrolled to — the days are all on screen
+		// already, so moving between them is not a reason to move the grid. The year does
+		// not: its cursor is the anchor, and rebuilding is what scrolls the grid to follow it.
+		if v.viewMode == viewYear {
+			v.rebuildView()
+		} else {
+			v.rebuildKeepingScroll()
 		}
-	default:
 		return nil
 	}
+	return v.reread()
+}
 
+// sameSpan is whether two days are drawn by the same screen, which is what decides whether
+// moving the cursor between them needs another read.
+func (v *calendarView) sameSpan(a, b time.Time) bool {
+	switch v.viewMode {
+	case viewWeek:
+		return sameDay(weekStartDate(a, v.firstWeekDay), weekStartDate(b, v.firstWeekDay))
+	case viewYear:
+		return a.Year() == b.Year()
+	case viewDay:
+		return sameDay(a, b)
+	}
+	return false
+}
+
+// selectableEvents is the events ↑↓ walk, which are the ones on the day the cursor is on —
+// the day in view, the week's selected column, or the year cell that has been stepped into.
+// They come back in the order they are drawn: the timed ones by the clock, then the all-day
+// ones under them, so walking them never jumps somewhere the eye has to hunt for.
+//
+// A year cell nobody has stepped into has nothing to walk. That is the point of stepping in:
+// until then the arrows belong to the grid.
+func (v *calendarView) selectableEvents() []Recording {
+	timed, allDay := v.selectableGroups()
+	return append(timed, allDay...)
+}
+
+// selectableGroups is the same events kept apart, because the day view's arrows treat them as
+// two things: the grid is walked with ← and →, and the all-day band under it is somewhere ↑ and
+// ↓ go. An all-day event has no hour, so stepping onto it sideways off a 17:00 meeting never
+// read as going anywhere.
+func (v *calendarView) selectableGroups() (timed, allDay []Recording) {
+	var onDay []Recording
+	switch v.viewMode {
+	case viewDay, viewWeek:
+		onDay = eventsByDate(v.events)[dateKey(v.day())]
+	case viewYear:
+		if !v.inYearCell {
+			return nil, nil
+		}
+		// The year draws HEY's spanned events rather than the recordings the day and the week
+		// are built from, so its cells are walked out of the same list they were drawn from.
+		onDay = eventsByDate(v.year.SpannedEvents)[dateKey(v.day())]
+	}
+
+	timed, allDay = []Recording{}, []Recording{}
+	for _, event := range onDay {
+		if event.AllDay {
+			allDay = append(allDay, event)
+		} else {
+			timed = append(timed, event)
+		}
+	}
 	sort.SliceStable(timed, func(i, j int) bool { return timed[i].Starts().Before(timed[j].Starts()) })
 	sort.SliceStable(allDay, func(i, j int) bool { return allDay[i].Starts().Before(allDay[j].Starts()) })
-	return append(timed, allDay...)
+	return timed, allDay
 }
 
 // settleSelection is what a fresh read leaves the selection on. Stepping off the end of a
@@ -1038,9 +1453,9 @@ func (v *calendarView) settleSelection() {
 
 	if v.selectFromEdge != 0 && len(events) > 0 {
 		if v.selectFromEdge < 0 {
-			v.selectedEvent = events[len(events)-1].ID
+			v.selectedEvent = events[len(events)-1].key()
 		} else {
-			v.selectedEvent = events[0].ID
+			v.selectedEvent = events[0].key()
 		}
 		v.selectFromEdge = 0
 		return
@@ -1048,62 +1463,66 @@ func (v *calendarView) settleSelection() {
 	v.selectFromEdge = 0
 
 	for _, event := range events {
-		if event.ID == v.selectedEvent {
+		if event.key() == v.selectedEvent {
 			return
 		}
 	}
-	v.selectedEvent = 0
+	v.selectedEvent = ""
 }
 
 // selectedRecording is the event under the arrows, and false when the selection has gone —
 // a write, a live change or a step to another day can all take it away.
 func (v *calendarView) selectedRecording() (Recording, bool) {
 	for _, event := range v.selectableEvents() {
-		if event.ID == v.selectedEvent {
+		if event.key() == v.selectedEvent {
 			return event, true
 		}
 	}
 	return Recording{}, false
 }
 
-// moveSelection walks the span's events by one, and steps the span itself at either end:
-// ← on the first event is the day or week before, → on the last is the one after. That is
-// what makes the arrows a way through the calendar rather than through one screen of it —
-// and it lands on the far end of the span it arrives at, so holding ← keeps going back.
+// moveSelection walks the cursor day's events by one and stops at either end, which is what ↑
+// and ↓ do in the week and the year: there the days belong to ← and →, and running off an event
+// into another day would take the cursor somewhere the reader did not point it.
 func (v *calendarView) moveSelection(delta int) tea.Cmd {
-	events := v.selectableEvents()
-	if len(events) == 0 {
-		return v.step(delta)
+	return v.walk(v.selectableEvents(), delta, nil)
+}
+
+// walk moves the selection through one list of events by a step, and hands the ends to past.
+func (v *calendarView) walk(events []Recording, delta int, past func() tea.Cmd) tea.Cmd {
+	stepPast := func() tea.Cmd {
+		if past == nil {
+			return nil
+		}
+		return past()
 	}
 
-	at := -1
-	for i, event := range events {
-		if event.ID == v.selectedEvent {
-			at = i
-			break
-		}
+	if len(events) == 0 {
+		return stepPast()
 	}
 
 	// Nothing selected yet: → takes the first, ← the last, so the first press picks up the
 	// end the reader is moving away from.
+	at := indexOfEvent(events, v.selectedEvent)
 	if at < 0 {
 		if delta > 0 {
-			v.selectedEvent = events[0].ID
-		} else {
-			v.selectedEvent = events[len(events)-1].ID
+			return v.selectEvent(events[0].key())
 		}
-		v.rebuildView()
-		return nil
+		return v.selectEvent(events[len(events)-1].key())
 	}
 
 	next := at + delta
 	if next < 0 || next >= len(events) {
-		v.selectFromEdge = delta
-		return v.step(delta)
+		return stepPast()
 	}
-	v.selectedEvent = events[next].ID
-	v.rebuildView()
-	return nil
+	return v.selectEvent(events[next].key())
+}
+
+// stepSpanFromEdge is what ← and → do on the day view's first and last event: the day before
+// or after, walked into from the end the reader was heading towards.
+func (v *calendarView) stepSpanFromEdge(delta int) tea.Cmd {
+	v.selectFromEdge = delta
+	return v.step(delta)
 }
 
 // listedCalendars is what the picker offers — everything but the personal one, which is
@@ -1134,7 +1553,19 @@ func (v *calendarView) viewingPersonalCalendar() bool {
 	return false
 }
 
+// manageableHabits is the habits b offers, each marked done or not for the day the cursor is
+// on. Which day that is matters over a span: splitRecordings folds a habit's completions into
+// one CompletedAt, and a habit kept on three days of a week keeps only the last, so over a week
+// or a year the picker would say a habit was done when the day the reader is pointing at is
+// blank — and toggling it would then clear a different day's.
 func (v *calendarView) manageableHabits() []Recording {
+	doneOn := make(map[int64]time.Time, len(v.habitCompletions))
+	for _, completion := range v.habitCompletions {
+		if done := completion.Starts(); !done.IsZero() && sameDay(done, v.day()) {
+			doneOn[completion.ParentID] = done
+		}
+	}
+
 	seen := make(map[int64]bool)
 	habits := make([]Recording, 0, len(v.habits))
 	for _, habit := range v.habits {
@@ -1142,6 +1573,7 @@ func (v *calendarView) manageableHabits() []Recording {
 			continue
 		}
 		seen[habit.ID] = true
+		habit.CompletedAt = doneOn[habit.ID]
 		habits = append(habits, habit)
 	}
 	return habits
@@ -1182,16 +1614,31 @@ func (v *calendarView) startEventForm(mode eventFormMode, event Recording) tea.C
 	if len(fileable) == 0 {
 		return notifyError("Cannot add an event", errNoCalendars)
 	}
-	v.eventForm = newEventForm(mode, event, v.day(), fileable, v.vc.styles)
+	v.editing = event
+	v.eventForm = newEventForm(mode, event, v.day(), fileable, v.lastCalendarID(), v.vc.styles)
+
+	// An edit is handed what the event already carries, and this is load-bearing rather than a
+	// courtesy: HEY clears the notes, location, link and attached email on any write that
+	// leaves them out, so a form that did not know them would wipe all four every time somebody
+	// renamed an event.
+	if mode == eventFormEdit {
+		v.eventForm.setDetails(eventDetails{
+			Notes: event.Notes, Location: event.Location, Link: event.Link,
+			Invites: event.Attendees, Circled: event.Highlighted,
+			Repeats: event.Recurring, RepeatKind: event.RepeatKind,
+			AttachedEntryID: event.AttachedEntryID,
+		})
+	}
 	v.eventForm.resize(v.vc.width, v.vc.height)
 	return v.eventForm.init()
 }
 
-// saveEvent writes what the form is holding. HEY takes a calendar on create and not on
-// update, so an edit changes an event where it is rather than moving it.
+// saveEvent writes what the form is holding, including which calendar it is on: an update
+// takes a calendar the same way a create does, so stepping the form's picker moves the event.
 func (v *calendarView) saveEvent() tea.Cmd {
 	form := v.eventForm
 	values := form.values()
+	v.rememberCalendar(values.CalendarID)
 	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestMutation)
 
 	return func() tea.Msg {
@@ -1199,31 +1646,95 @@ func (v *calendarView) saveEvent() tea.Cmd {
 		action := "Event created"
 		if form.mode == eventFormCreate {
 			_, err = v.vc.sdk.CalendarEvents().Create(ctx, hey.CreateCalendarEventParams{
-				CalendarID: values.CalendarID,
-				Title:      values.Title,
-				StartsAt:   values.StartsAt,
-				EndsAt:     values.EndsAt,
-				AllDay:     values.AllDay,
-				StartTime:  values.StartTime,
-				EndTime:    values.EndTime,
-				TimeZone:   values.TimeZone,
-				Reminders:  values.Reminders,
+				CalendarID:    values.CalendarID,
+				Title:         values.Title,
+				StartsAt:      values.StartsAt,
+				EndsAt:        values.EndsAt,
+				AllDay:        values.AllDay,
+				StartTime:     values.StartTime,
+				EndTime:       values.EndTime,
+				StartTimeZone: values.StartTimeZone,
+				EndTimeZone:   values.EndTimeZone,
+				Reminders:     values.Reminders,
+				Content: hey.EventContentParams{
+					Notes: values.Notes, Location: values.Location,
+					Link: values.Link, EntryID: values.AttachedEntryID,
+				},
+				Attendees:   values.Invites,
+				Highlighted: &values.Circled,
+				Countdown:   values.Countdown,
+				Repeat:      values.Repeat,
 			})
 		} else {
 			action = "Event updated"
-			_, err = v.vc.sdk.CalendarEvents().Update(ctx, form.eventID, hey.UpdateCalendarEventParams{
-				Title:     &values.Title,
-				StartsAt:  &values.StartsAt,
-				EndsAt:    &values.EndsAt,
-				AllDay:    &values.AllDay,
-				StartTime: &values.StartTime,
-				EndTime:   &values.EndTime,
-				TimeZone:  &values.TimeZone,
-				Reminders: values.Reminders,
-			})
+			// The zones go on every update, empty ones included: HEY reads the pair out of
+			// what was submitted or nils both, so leaving them out would quietly strip the
+			// zones off an event that had them.
+			changes := hey.UpdateCalendarEventParams{
+				CalendarID:    &values.CalendarID,
+				Title:         &values.Title,
+				StartsAt:      &values.StartsAt,
+				EndsAt:        &values.EndsAt,
+				AllDay:        &values.AllDay,
+				StartTime:     &values.StartTime,
+				EndTime:       &values.EndTime,
+				StartTimeZone: &values.StartTimeZone,
+				EndTimeZone:   &values.EndTimeZone,
+				Reminders:     values.Reminders,
+				Content: hey.EventContentParams{
+					Notes: values.Notes, Location: values.Location,
+					Link: values.Link, EntryID: values.AttachedEntryID,
+				},
+				Attendees:   values.Invites,
+				Highlighted: &values.Circled,
+				Countdown:   values.Countdown,
+				Repeat:      values.Repeat,
+			}
+			if occurrence, ok := v.editingOccurrence(); ok {
+				action = "This day updated"
+				_, err = v.vc.sdk.CalendarEvents().UpdateOccurrence(ctx, occurrence,
+					hey.OccurrenceScopeThisEvent,
+					hey.UpdateCalendarEventOccurrenceParams{UpdateCalendarEventParams: changes})
+			} else {
+				_, err = v.vc.sdk.CalendarEvents().Update(ctx, v.editing.ID, changes)
+			}
 		}
 		return calendarMutationMsg{requestResult: newRequestResult(requestID, err), action: action, failure: "Save failed"}
 	}
+}
+
+// lastCalendarID and rememberCalendar are where the calendar a new event opens on comes from and
+// goes. It is a preference rather than data, so it is remembered as soon as the reader saves
+// rather than after HEY answers, and a machine that cannot store it simply keeps offering the
+// first calendar.
+func (v *calendarView) lastCalendarID() int64 {
+	if v.vc.loadLastCalendar == nil {
+		return 0
+	}
+	return v.vc.loadLastCalendar()
+}
+
+func (v *calendarView) rememberCalendar(id int64) {
+	if v.vc.saveLastCalendar == nil || id == 0 {
+		return
+	}
+	_ = v.vc.saveLastCalendar(id)
+}
+
+func (v *calendarView) editingOccurrence() (hey.EventOccurrence, bool) {
+	return occurrenceOf(v.editing)
+}
+
+// occurrenceOf is the day of a repeating event a recording stands for, and false for an ordinary
+// event. HEY serves such a day with no id of its own, so it is addressed by the series and the
+// date instead — and both the edit and the delete act on that day alone rather than the whole
+// series, which is the narrower of the two things the reader might have meant.
+func occurrenceOf(recording Recording) (hey.EventOccurrence, bool) {
+	if recording.ID != 0 || recording.OccurrenceID == "" {
+		return hey.EventOccurrence{}, false
+	}
+	occurrence, err := hey.ParseOccurrenceID(recording.OccurrenceID)
+	return occurrence, err == nil
 }
 
 // removeSelectedEvent asks twice, as deleting a habit does: an event off a shared calendar
@@ -1233,16 +1744,26 @@ func (v *calendarView) removeSelectedEvent() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	if v.confirmDelete != event.ID {
-		v.confirmDelete = event.ID
+	if v.confirmDelete != event.key() {
+		v.confirmDelete = event.key()
 		return nil
 	}
-	v.confirmDelete = 0
+	v.confirmDelete = ""
 
+	// One day of a repeating event is taken off on its own rather than the series with it: HEY
+	// keeps the rest by writing the day into the schedule's exceptions.
+	occurrence, isOccurrence := occurrenceOf(event)
 	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestMutation)
 	return func() tea.Msg {
-		err := v.vc.sdk.CalendarEvents().Delete(ctx, event.ID)
-		return calendarMutationMsg{requestResult: newRequestResult(requestID, err), action: "Event deleted", failure: "Could not delete the event"}
+		var err error
+		action := "Event deleted"
+		if isOccurrence {
+			action = "This day deleted"
+			err = v.vc.sdk.CalendarEvents().DeleteOccurrence(ctx, occurrence, hey.OccurrenceScopeThisEvent)
+		} else {
+			err = v.vc.sdk.CalendarEvents().Delete(ctx, event.ID)
+		}
+		return calendarMutationMsg{requestResult: newRequestResult(requestID, err), action: action, failure: "Could not delete the event"}
 	}
 }
 
@@ -1270,12 +1791,19 @@ func (v *calendarView) saveHabit() tea.Cmd {
 func (v *calendarView) toggleHabitCompletion(habit Recording) tea.Cmd {
 	day := v.day().Local().Format(time.DateOnly)
 	done := habit.Done()
+	// The day the cursor is on, said by name unless it is today — over a week or a year the
+	// reader is often pointing at some other day, and "for today" would be a lie about which
+	// day was just marked.
+	when := "for today"
+	if !v.showingToday() {
+		when = "for " + v.day().Local().Format("Monday 2 January")
+	}
 	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestMutation)
 	return func() tea.Msg {
 		var err error
-		action := "Habit done for today"
+		action := "Habit done " + when
 		if done {
-			action = "Habit cleared for today"
+			action = "Habit cleared " + when
 			_, err = v.vc.sdk.Habits().Uncomplete(ctx, day, habit.ID)
 		} else {
 			_, err = v.vc.sdk.Habits().Complete(ctx, day, habit.ID)
@@ -1345,15 +1873,39 @@ func (v *calendarView) deleteTodo(todo Recording) tea.Cmd {
 // title goes back through the edit form, so sanitizing it here would rewrite it on an
 // unrelated save. Every view sanitizes what it shows instead.
 func sdkCalendarToModel(c generated.Calendar) Calendar {
-	return Calendar{ID: c.Id, Name: c.Name, Color: c.Color, Personal: c.Personal, External: c.External}
+	return Calendar{
+		ID: c.Id, Name: c.Name, OwnerEmail: c.OwnerEmailAddress,
+		Color: c.Color, Personal: c.Personal, External: c.External,
+	}
 }
 
 func sdkRecordingToModel(r generated.Recording) Recording {
+	parentTitle := ""
+	if r.Parent != nil {
+		parentTitle = r.Parent.Title
+	}
+	// Left nil rather than empty for an event nobody is invited to. An empty list is a request
+	// to clear the roster, which HEY answers by making the caller the organizer and sending
+	// cancellations — not what reading an event with no guests should turn into.
+	var attendees []string
+	for _, attendance := range r.Attendances {
+		if attendance.EmailAddress != "" {
+			attendees = append(attendees, attendance.EmailAddress)
+		}
+	}
 	return Recording{
+		ParentTitle: parentTitle,
+		Notes:       r.Description, Location: r.Location, Link: r.Url,
+		Attendees: attendees, AttachedEntryID: r.AttachedEntry.Id,
+		Highlighted: r.Highlighted,
+		Recurring:   r.Recurring, RepeatKind: r.RecurrenceSchedule.Kind,
 		ID: r.Id, ParentID: r.ParentId, Title: r.Title, AllDay: r.AllDay, Type: r.Type,
 		StartsAt: r.StartsAt, EndsAt: r.EndsAt,
-		CompletedAt: r.CompletedAt, Label: r.Label,
-		Icon: r.Icon, Color: r.Color, CalendarColor: r.Calendar.Color,
+		StartsAtZone: r.StartsAtTimeZone, EndsAtZone: r.EndsAtTimeZone,
+		OccurrenceID: r.OccurrenceId,
+		CompletedAt:  r.CompletedAt, Label: r.Label,
+		Icon: r.Icon, Color: r.Color,
+		CalendarID: r.Calendar.Id, CalendarColor: r.Calendar.Color,
 		Days: append([]int32(nil), r.Days...),
 	}
 }

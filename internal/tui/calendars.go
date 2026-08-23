@@ -56,8 +56,17 @@ func (p *calendarPicker) draw(base string, width, height int) string {
 	contentWidth := modalContentWidth(width)
 	visible := modalContentRows(height)
 
+	// The account a calendar belongs to goes under its name, but only when there is more than
+	// one of them — a reader with a work account and a personal one has two calendars called
+	// "Maybe" and nothing else to tell them apart, while a reader with one account would just
+	// get their own address written six times.
+	accounts := p.showsAccounts()
+	if accounts {
+		visible /= 2
+	}
+
 	var rows []string
-	start, end := modalListWindow(len(p.calendars), p.cursor, visible)
+	start, end := modalListWindow(len(p.calendars), p.cursor, max(visible, 1))
 	for i := start; i < end; i++ {
 		calendar := p.calendars[i]
 		on := p.selected[calendar.ID]
@@ -76,6 +85,11 @@ func (p *calendarPicker) draw(base string, width, height int) string {
 			prefix = "› "
 		}
 		rows = append(rows, prefix+marker+" "+labelStyle.Render(label))
+
+		if accounts {
+			account := truncateToWidth(terminal.SanitizeLine(calendar.OwnerEmail), max(contentWidth-4, 1))
+			rows = append(rows, "    "+styleMuted.Render(account))
+		}
 	}
 
 	body := strings.Join(rows, "\n")
@@ -83,6 +97,22 @@ func (p *calendarPicker) draw(base string, width, height int) string {
 		body = styleMuted.Render("No other calendars")
 	}
 	return overlayModal(base, modalFrame("Calendars", body, width), width, height)
+}
+
+// showsAccounts is whether the list spans more than one HEY account, which is the only time
+// naming them tells the reader anything.
+func (p *calendarPicker) showsAccounts() bool {
+	seen := ""
+	for _, calendar := range p.calendars {
+		if calendar.OwnerEmail == "" {
+			continue
+		}
+		if seen != "" && calendar.OwnerEmail != seen {
+			return true
+		}
+		seen = calendar.OwnerEmail
+	}
+	return false
 }
 
 // calendarMarkerStyle is the dot beside a calendar: its own color where HEY gave it one,

@@ -12,6 +12,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 )
 
@@ -562,35 +563,262 @@ func dayWithEvents(t *testing.T) *calendarView {
 	return v
 }
 
-// The arrows walk the events in the order they are drawn: the timed ones by the clock, then
-// the all-day ones beneath them. Traversal following the layout is the point — → should
-// never land somewhere the eye has to hunt for.
-func TestArrowsWalkTheDaysEventsInTheOrderTheyAreDrawn(t *testing.T) {
+// On the day, ← and → walk the grid — the timed events, in the order the clock puts them — and
+// the all-day band under it is somewhere ↑ and ↓ go. Stepping onto an all-day event sideways off
+// a 17:00 meeting never read as going anywhere: it belongs to no hour, so there is nothing to
+// the right of five o'clock about it.
+func TestDayArrowsWalkTheGridAndCrossToTheAllDayBand(t *testing.T) {
 	v := dayWithEvents(t)
 
-	if events := v.selectableEvents(); len(events) != 3 ||
-		events[0].ID != 1 || events[1].ID != 2 || events[2].ID != 3 {
-		t.Fatalf("order = %+v, want the two timed by the clock then the all-day one", events)
+	timed, allDay := v.selectableGroups()
+	if len(timed) != 2 || timed[0].ID != 1 || timed[1].ID != 2 {
+		t.Fatalf("the grid holds %+v, want the two timed events by the clock", timed)
+	}
+	if len(allDay) != 1 || allDay[0].ID != 3 {
+		t.Fatalf("the band holds %+v, want the all-day event", allDay)
 	}
 
 	// Nothing is selected until an arrow is pressed, and → picks up the first.
-	if v.selectedEvent != 0 {
-		t.Errorf("a day opens with %d selected, want nothing", v.selectedEvent)
+	if v.selectedEvent != "" {
+		t.Errorf("a day opens with %q selected, want nothing", v.selectedEvent)
 	}
 	v.HandleContentKey(keyPress("right"))
-	if v.selectedEvent != 1 {
-		t.Errorf("first → selected %d, want the 14:00", v.selectedEvent)
+	if v.selectedEvent != "1" {
+		t.Errorf("first → selected %q, want the 14:00", v.selectedEvent)
 	}
 	v.HandleContentKey(keyPress("right"))
-	v.HandleContentKey(keyPress("right"))
-	if v.selectedEvent != 3 {
-		t.Errorf("walking right ended on %d, want the all-day one", v.selectedEvent)
+	if v.selectedEvent != "2" {
+		t.Errorf("→ selected %q, want the 17:00", v.selectedEvent)
 	}
 
-	// And back again.
-	v.HandleContentKey(keyPress("left"))
-	if v.selectedEvent != 2 {
-		t.Errorf("← from the all-day event selected %d, want the 17:00", v.selectedEvent)
+	// ↓ crosses onto the band, ↑ comes back to the event that was left rather than to the top
+	// of the day.
+	v.HandleContentKey(keyPress("down"))
+	if v.selectedEvent != "3" {
+		t.Errorf("↓ selected %q, want the all-day event", v.selectedEvent)
+	}
+	v.HandleContentKey(keyPress("up"))
+	if v.selectedEvent != "2" {
+		t.Errorf("↑ off the band selected %q, want the 17:00 it was left from", v.selectedEvent)
+	}
+}
+
+// A day of a repeating event has no id of its own. HEY serves it as a virtual occurrence — id
+// 0, an occurrence_id naming the series and the day — so an arrow holding on to the numeric id
+// could never pick it out, and a weekly all-day event was unselectable in every view.
+func TestARepeatingEventsOwnDayCanBeSelected(t *testing.T) {
+	occurrence := sdkRecordingToModel(generated.Recording{
+		Title: "Summer friday", AllDay: true, Type: "Calendar::Event",
+		ParentId: 153688907, OccurrenceId: "153688907_2026-08-21",
+		StartsAt: at("2026-08-21T00:00:00Z"), EndsAt: at("2026-08-21T00:00:00Z"),
+	})
+	if occurrence.ID != 0 {
+		t.Fatalf("the fixture is not a virtual occurrence: id=%d", occurrence.ID)
+	}
+	if occurrence.key() != "153688907_2026-08-21" {
+		t.Errorf("key = %q, want the occurrence id", occurrence.key())
+	}
+
+	v := newCalendarView(testVC())
+	v.Resize(100, 30)
+	v.now = func() time.Time { return time.Date(2026, 8, 21, 9, 0, 0, 0, time.Local) }
+	v.Update(calendarsLoadedMsg{calendars: testCalendars()})
+	v.Update(recordingsLoadedMsg{requestResult: currentRequest(v), recordings: []Recording{occurrence}})
+
+	v.HandleContentKey(keyPress("down"))
+	if v.selectedEvent != occurrence.key() {
+		t.Fatalf("↓ selected %q, want the repeating event's own day", v.selectedEvent)
+	}
+	if _, ok := v.selectedRecording(); !ok {
+		t.Error("the selection does not resolve back to the occurrence")
+	}
+	if !v.selection().has(occurrence) {
+		t.Error("the renderers would not draw it as selected")
+	}
+}
+
+// On the year, b manages habits but does not keep them. A year read carries no recordings, so
+// nothing on that screen knows what was kept on the day the cursor is on — and a ring drawn
+// empty there would be answering a question nobody asked the server.
+func TestTheYearManagesHabitsWithoutKeepingThem(t *testing.T) {
+	v := newCalendarView(testVC())
+	v.Resize(100, 30)
+	v.now = func() time.Time { return time.Date(2026, 8, 20, 9, 0, 0, 0, time.Local) }
+	v.Update(calendarsLoadedMsg{calendars: testCalendars()})
+	v.Update(recordingsLoadedMsg{requestResult: currentRequest(v), recordings: []Recording{
+		{ID: 40, Title: "Read", Type: "Calendar::Habit", Icon: "📖",
+			StartsAt: atLocal("2024-01-01T00:00:00"), CompletedAt: atLocal("2026-08-20T08:00:00")},
+	}})
+
+	// On the day it is a day's habits, so keeping one is on offer.
+	v.HandleContentKey(keyPress("b"))
+	if v.habitPicker == nil || !v.habitPicker.completable {
+		t.Fatal("the day does not offer keeping a habit")
+	}
+	if !hasBinding(v.HelpBindings(), "enter") {
+		t.Error("the day's picker does not say enter keeps a habit")
+	}
+	v.habitPicker = nil
+
+	v.viewMode = viewYear
+	v.HandleContentKey(keyPress("b"))
+	if v.habitPicker == nil {
+		t.Fatal("b did not open the picker on the year")
+	}
+	if v.habitPicker.completable {
+		t.Error("the year offers keeping a habit")
+	}
+	if hasBinding(v.HelpBindings(), "enter") {
+		t.Error("the year's picker still says enter keeps a habit")
+	}
+
+	// enter says where to do it rather than doing nothing at all.
+	if cmd := v.HandleContentKey(keyPress("enter")); cmd != nil {
+		t.Error("enter kept a habit from the year")
+	}
+	if v.habitPicker.status == "" {
+		t.Error("enter said nothing about why")
+	}
+
+	// Editing and deleting still work, since both go by the habit's id.
+	if cmd := v.HandleContentKey(keyPress("e")); cmd == nil {
+		t.Error("e does not edit a habit from the year")
+	}
+}
+
+// Every week row of the year names its month, in the accent rather than the grey the day labels
+// wear. Naming it only on the first of the month meant that the moment that one cell scrolled
+// past, nothing on screen said what month the reader was looking at.
+func TestTheYearNamesItsMonthsOnEveryRow(t *testing.T) {
+	out, _, _ := renderYearView(nil, time.Date(2026, 8, 22, 0, 0, 0, 0, time.Local),
+		time.Monday, 100, 30, "p/n year", selection{}, false)
+
+	accent := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
+	rows := 0
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, accent.Render("AUG")) {
+			rows++
+		}
+	}
+	if rows < 4 {
+		t.Errorf("only %d rows of August name it in the accent, want every one", rows)
+	}
+
+	// A day outside the year keeps the grey: the December before it shouting from the first row
+	// would read as somewhere the reader can go. 2026 starts on a Thursday, so that row is the
+	// tail of 2025.
+	first := strings.Split(out, "\n")[1]
+	if strings.HasPrefix(first, accent.Render("DEC")) {
+		t.Errorf("a month outside the year drawn is picked out: %q", first)
+	}
+
+	// The month is dropped rather than the date when a column is too narrow for both.
+	month, day := yearDayLabel(time.Date(2026, 8, 17, 0, 0, 0, 0, time.Local), true)
+	if month != "AUG" || day != "MON 17" {
+		t.Errorf("label = %q %q", month, day)
+	}
+	narrow, _, _ := renderYearView(nil, time.Date(2026, 8, 22, 0, 0, 0, 0, time.Local),
+		time.Monday, 40, 30, "p/n year", selection{}, false)
+	if strings.Contains(stripANSI(narrow), "AUG MON 17") {
+		t.Error("a narrow column kept the month and truncated the date")
+	}
+}
+
+// A repeating event's own day is written through its own route: the series id and the date,
+// because the day has no id. It is changed on its own rather than for the whole series.
+func TestARepeatingEventsOwnDayIsWrittenThroughItsOccurrence(t *testing.T) {
+	v, recorded := calendarWithEventServer(t)
+	v.Update(recordingsLoadedMsg{requestResult: currentRequest(v), recordings: []Recording{
+		sdkRecordingToModel(generated.Recording{
+			Title: "Summer friday", AllDay: true, Type: "Calendar::Event",
+			ParentId: 153688907, OccurrenceId: "153688907_2026-08-20",
+			StartsAt: at("2026-08-20T00:00:00Z"), EndsAt: at("2026-08-20T00:00:00Z"),
+		}),
+	}})
+
+	v.HandleContentKey(keyPress("down"))
+	if v.selectedEvent != "153688907_2026-08-20" {
+		t.Fatalf("selected %q, want the occurrence", v.selectedEvent)
+	}
+
+	// Editing it patches the occurrence, not event 0.
+	v.HandleContentKey(keyPress("e"))
+	if v.eventForm == nil {
+		t.Fatal("e did not open the form on a repeating event's day")
+	}
+	cmd := v.HandleContentKey(keyPress("ctrl+s"))
+	if cmd == nil {
+		t.Fatal("ctrl+s did not save")
+	}
+	msg, ok := cmd().(calendarMutationMsg)
+	if !ok || msg.err != nil {
+		t.Fatalf("save = %T %v", cmd(), msg.err)
+	}
+	requests, _ := recorded.snapshot()
+	if len(requests) == 0 || requests[0] != "PATCH /calendar/events/153688907/occurrences/2026-08-20.json" {
+		t.Fatalf("requests = %v", requests)
+	}
+
+	// The answer has to land before anything else is pressed: a write in flight holds every key,
+	// which is what keeps two saves off the same event.
+	v.Update(msg)
+	v.Update(recordingsLoadedMsg{requestResult: currentRequest(v), recordings: v.events})
+
+	// And deleting it takes off that day alone.
+	v.HandleContentKey(keyPress("down"))
+	v.HandleContentKey(keyPress("x"))
+	cmd = v.HandleContentKey(keyPress("x"))
+	if cmd == nil {
+		t.Fatal("the second x did not delete")
+	}
+	if msg, ok := cmd().(calendarMutationMsg); !ok || msg.err != nil {
+		t.Fatalf("delete = %T %v", cmd(), msg.err)
+	}
+	requests, _ = recorded.snapshot()
+	if len(requests) < 2 || requests[1] != "DELETE /calendar/events/153688907/occurrences/2026-08-20.json" {
+		t.Errorf("requests = %v", requests)
+	}
+}
+
+// Within the band ↑ and ↓ walk it, and ↑ off the top of it is the way back to the grid.
+func TestDayAllDayBandIsWalkedUpAndDown(t *testing.T) {
+	v := dayWithEvents(t)
+	v.Update(recordingsLoadedMsg{requestResult: currentRequest(v), recordings: []Recording{
+		{ID: 1, Title: "Stanko & Kevin", Type: "Calendar::Event",
+			StartsAt: atLocal("2026-08-20T14:00:00"), EndsAt: atLocal("2026-08-20T15:00:00")},
+		{ID: 3, Title: "Summer friday", AllDay: true, Type: "Calendar::Event",
+			StartsAt: at("2026-08-20T00:00:00Z"), EndsAt: at("2026-08-20T00:00:00Z")},
+		{ID: 4, Title: "On call", AllDay: true, Type: "Calendar::Event",
+			StartsAt: at("2026-08-20T00:00:00Z"), EndsAt: at("2026-08-20T00:00:00Z")},
+	}})
+
+	v.HandleContentKey(keyPress("down"))
+	if v.selectedEvent != "3" {
+		t.Fatalf("↓ with nothing selected chose %q, want the first all-day event", v.selectedEvent)
+	}
+	v.HandleContentKey(keyPress("down"))
+	if v.selectedEvent != "4" {
+		t.Errorf("↓ within the band chose %q, want the second", v.selectedEvent)
+	}
+	v.HandleContentKey(keyPress("down"))
+	if v.selectedEvent != "4" {
+		t.Errorf("↓ off the end of the band chose %q, want it to stay", v.selectedEvent)
+	}
+
+	v.HandleContentKey(keyPress("up"))
+	v.HandleContentKey(keyPress("up"))
+	if v.selectedEvent != "1" {
+		t.Errorf("↑ off the top of the band chose %q, want the grid", v.selectedEvent)
+	}
+
+	// And on an all-day event ← and → are the day either side, since the band has no sideways.
+	v.selectedEvent = "3"
+	today := v.day()
+	if cmd := v.HandleContentKey(keyPress("right")); cmd == nil {
+		t.Fatal("→ on an all-day event did not read the next day")
+	}
+	if got := v.day(); !sameDay(got, today.AddDate(0, 0, 1)) {
+		t.Errorf("→ moved to %s, want tomorrow", got.Format(time.DateOnly))
 	}
 }
 
@@ -601,7 +829,7 @@ func TestArrowsStepTheSpanOffEitherEnd(t *testing.T) {
 	today := v.day()
 
 	// → from the last event asks for the next day.
-	v.selectedEvent = 3
+	v.selectedEvent = "3"
 	if cmd := v.HandleContentKey(keyPress("right")); cmd == nil {
 		t.Fatal("→ off the end did not read the next day")
 	}
@@ -619,8 +847,8 @@ func TestArrowsStepTheSpanOffEitherEnd(t *testing.T) {
 		{ID: 8, Title: "Retro", Type: "Calendar::Event",
 			StartsAt: atLocal("2026-08-21T16:00:00"), EndsAt: atLocal("2026-08-21T17:00:00")},
 	}})
-	if v.selectedEvent != 9 {
-		t.Errorf("landed on %d, want the first event of the new day", v.selectedEvent)
+	if v.selectedEvent != "9" {
+		t.Errorf("landed on %q, want the first event of the new day", v.selectedEvent)
 	}
 	if v.selectFromEdge != 0 {
 		t.Error("selectFromEdge should be spent once it has been used")
@@ -637,8 +865,8 @@ func TestArrowsStepTheSpanOffEitherEnd(t *testing.T) {
 		{ID: 6, Title: "Evening", Type: "Calendar::Event",
 			StartsAt: atLocal("2026-08-20T20:00:00"), EndsAt: atLocal("2026-08-20T21:00:00")},
 	}})
-	if v.selectedEvent != 6 {
-		t.Errorf("landed on %d, want the last event of the day before", v.selectedEvent)
+	if v.selectedEvent != "6" {
+		t.Errorf("landed on %q, want the last event of the day before", v.selectedEvent)
 	}
 }
 
@@ -660,40 +888,256 @@ func TestArrowsStepAnEmptySpan(t *testing.T) {
 // event was deleted, or the reader moved to a day it is not on.
 func TestSelectionIsReleasedWhenItsEventGoes(t *testing.T) {
 	v := dayWithEvents(t)
-	v.selectedEvent = 1
+	v.selectedEvent = "1"
 
 	v.Update(recordingsLoadedMsg{requestResult: currentRequest(v), recordings: []Recording{
 		{ID: 2, Title: "Product Planning", Type: "Calendar::Event",
 			StartsAt: atLocal("2026-08-20T17:00:00"), EndsAt: atLocal("2026-08-20T18:00:00")},
 	}})
-	if v.selectedEvent != 0 {
-		t.Errorf("selection = %d, want it let go of", v.selectedEvent)
+	if v.selectedEvent != "" {
+		t.Errorf("selection = %q, want it let go of", v.selectedEvent)
 	}
 }
 
-// The week walks its events day by day, and the all-day band at its foot comes last — the
-// order they are drawn in. A multi-day event is walked once, not once per day it covers.
-func TestArrowsWalkTheWeekDayByDay(t *testing.T) {
+// In the week ← and → are the days and ↑ and ↓ the events of the day they are on. That is what
+// gives b, s and a something to act on: the cursor is the anchor, so the day they file on is
+// the column the reader is pointing at rather than whichever one the week starts with.
+func TestWeekArrowsSelectDaysAndThenEvents(t *testing.T) {
 	v := dayWithEvents(t)
 	v.viewMode = viewWeek
+	v.anchor = time.Date(2026, 8, 20, 9, 0, 0, 0, time.Local) // a Thursday
 	v.Update(recordingsLoadedMsg{requestResult: currentRequest(v), recordings: []Recording{
-		{ID: 1, Title: "Thursday", Type: "Calendar::Event",
-			StartsAt: atLocal("2026-08-20T14:00:00"), EndsAt: atLocal("2026-08-20T15:00:00")},
-		{ID: 2, Title: "Monday", Type: "Calendar::Event",
-			StartsAt: atLocal("2026-08-17T09:00:00"), EndsAt: atLocal("2026-08-17T10:00:00")},
+		{ID: 1, Title: "Standup", Type: "Calendar::Event",
+			StartsAt: atLocal("2026-08-19T09:00:00"), EndsAt: atLocal("2026-08-19T09:30:00")},
+		{ID: 2, Title: "Design review", Type: "Calendar::Event",
+			StartsAt: atLocal("2026-08-19T14:00:00"), EndsAt: atLocal("2026-08-19T15:00:00")},
 		{ID: 3, Title: "On call", AllDay: true, Type: "Calendar::Event",
 			StartsAt: at("2026-08-17T00:00:00Z"), EndsAt: at("2026-08-23T00:00:00Z")},
 	}})
 
+	// Thursday holds only the week-long event, so that is all ↑ and ↓ have there.
+	if events := v.selectableEvents(); len(events) != 1 || events[0].ID != 3 {
+		t.Fatalf("Thursday offers %+v, want the week-long event alone", events)
+	}
+
+	// ← moves to Wednesday, which is inside the same week and so needs no second read.
+	v.HandleContentKey(keyPress("left"))
+	if got := v.day(); !sameDay(got, time.Date(2026, 8, 19, 0, 0, 0, 0, time.Local)) {
+		t.Fatalf("← landed on %s, want Wednesday", got.Format(time.DateOnly))
+	}
+	if v.requests.loading {
+		t.Error("moving within the week read the week again")
+	}
+
+	// And there ↑ and ↓ walk its events: the timed ones by the clock, then the all-day band.
 	events := v.selectableEvents()
-	if len(events) != 3 {
-		t.Fatalf("the week offers %d events, want 3 — the week-long one once: %+v", len(events), events)
+	if len(events) != 3 || events[0].ID != 1 || events[1].ID != 2 || events[2].ID != 3 {
+		t.Fatalf("Wednesday offers %+v, want Standup, Design review, then the all-day one", events)
 	}
-	if events[0].ID != 2 || events[1].ID != 1 {
-		t.Errorf("timed order = %d then %d, want Monday then Thursday", events[0].ID, events[1].ID)
+	v.HandleContentKey(keyPress("down"))
+	if v.selectedEvent != "1" {
+		t.Errorf("↓ selected %q, want the first event of the day", v.selectedEvent)
 	}
-	if events[2].ID != 3 {
-		t.Errorf("the all-day band should come last, got %d", events[2].ID)
+	v.HandleContentKey(keyPress("down"))
+	if v.selectedEvent != "2" {
+		t.Errorf("a second ↓ selected %q, want the next event", v.selectedEvent)
+	}
+
+	// And the week says which column that is, or neither pair of arrows would have anything
+	// visible to aim at.
+	week := renderWeekView(v.events, nil, nil, v.day(), time.Monday, 100, 14, "p/n week", nil, v.selection())
+	header := strings.Split(week, "\n")[1]
+	if !strings.Contains(header, cursorDayStyle(false).Render(centerPad("WED 19", 13))) {
+		t.Errorf("the week does not mark the day the cursor is on: %q", header)
+	}
+
+	// ↓ stops at the end rather than walking into another day: the days are ← and →'s.
+	v.HandleContentKey(keyPress("down"))
+	v.HandleContentKey(keyPress("down"))
+	if v.selectedEvent != "3" {
+		t.Errorf("↓ past the last event selected %q, want it to stay on the last", v.selectedEvent)
+	}
+	if got := v.day(); !sameDay(got, time.Date(2026, 8, 19, 0, 0, 0, 0, time.Local)) {
+		t.Errorf("↓ moved the day to %s", got.Format(time.DateOnly))
+	}
+}
+
+// The highlight only moves while there is something to draw it on and somebody looking at it.
+// A loop that outlived either would be re-rendering a screen nobody is reading, forever.
+func TestTheHighlightStopsWhenThereIsNothingToDraw(t *testing.T) {
+	v := dayWithEvents(t)
+
+	// Picking an event out is what starts it, and only the key that changed the selection does.
+	if cmd := v.HandleContentKey(keyPress("right")); cmd == nil {
+		t.Fatal("selecting an event did not start the highlight")
+	}
+	if !v.animating {
+		t.Fatal("the loop is not running")
+	}
+	if cmd := v.HandleContentKey(keyPress("t")); cmd != nil {
+		t.Error("a key that changed no selection started a second loop")
+	}
+
+	// A tick keeps it going for as long as the calendar is what is on screen.
+	v.View()
+	phase := v.selectPhase
+	cmd, _ := v.Update(calendarTickMsg{})
+	if cmd == nil {
+		t.Error("a tick on a drawn calendar did not schedule the next")
+	}
+	if v.selectPhase == phase {
+		t.Error("the tick did not move the highlight")
+	}
+
+	// Nothing drawn since the last tick means the reader is in another section, so it stops
+	// rather than animating out of sight. There is no hook for leaving a section, and this
+	// needs none: only the view on screen is drawn.
+	if cmd, _ := v.Update(calendarTickMsg{}); cmd != nil {
+		t.Error("the loop went on with the calendar off screen")
+	}
+
+	// And it stops when the selection goes, whoever took it away.
+	v.View()
+	v.selectedEvent = ""
+	if cmd, _ := v.Update(calendarTickMsg{}); cmd != nil {
+		t.Error("the loop went on with nothing selected")
+	}
+}
+
+// b acts on the day the cursor is on, which over a week or a year is not today. A habit's
+// completions are folded into one timestamp when the recordings are split, so the picker has to
+// read the day's own out of the completions — or it says a habit was done when the day the
+// reader is pointing at is blank, and toggling it clears some other day's.
+func TestHabitsAreOfferedForTheDayTheCursorIsOn(t *testing.T) {
+	v := newCalendarView(testVC())
+	v.Resize(100, 30)
+	v.now = func() time.Time { return time.Date(2026, 8, 20, 9, 0, 0, 0, time.Local) }
+	v.viewMode = viewWeek
+	v.Update(calendarsLoadedMsg{calendars: testCalendars()})
+	v.Update(recordingsLoadedMsg{requestResult: currentRequest(v), recordings: []Recording{
+		{ID: 40, Title: "Read", Type: "Calendar::Habit", Icon: "📖",
+			StartsAt: atLocal("2024-01-01T00:00:00")},
+		{ID: 41, ParentID: 40, Type: "Calendar::Habit::Completion",
+			StartsAt: atLocal("2026-08-18T08:00:00")},
+	}})
+
+	// Thursday: nothing kept.
+	if habits := v.manageableHabits(); len(habits) != 1 || habits[0].Done() {
+		t.Fatalf("Thursday says %+v, want the habit undone", habits)
+	}
+
+	// Tuesday, where it was kept.
+	v.anchor = time.Date(2026, 8, 18, 9, 0, 0, 0, time.Local)
+	if habits := v.manageableHabits(); len(habits) != 1 || !habits[0].Done() {
+		t.Fatalf("Tuesday says %+v, want the habit done", habits)
+	}
+}
+
+// A year is a grid before it is a list of events, so the arrows move between cells and only
+// belong to a day's events once the reader has stepped into one. Without the two stages ↑ and ↓
+// would have to be both a week's worth of movement and an event's.
+func TestYearArrowsMoveCellsUntilOneIsOpened(t *testing.T) {
+	v := newCalendarView(testVC())
+	v.Resize(100, 30)
+	v.now = func() time.Time { return time.Date(2026, 8, 20, 9, 0, 0, 0, time.Local) }
+	v.viewMode = viewYear
+	v.Update(calendarsLoadedMsg{calendars: testCalendars()})
+	v.Update(yearLoadedMsg{requestResult: currentRequest(v), year: CalendarYear{
+		SpannedEvents: []Recording{
+			{ID: 7, Title: "Off to Split", AllDay: true, Type: "Calendar::Event",
+				StartsAt: at("2026-08-21T00:00:00Z"), EndsAt: at("2026-08-21T00:00:00Z")},
+			{ID: 8, Title: "MEETUP", AllDay: true, Type: "Calendar::Event",
+				StartsAt: at("2026-08-21T00:00:00Z"), EndsAt: at("2026-08-21T00:00:00Z")},
+		},
+	}})
+
+	// ↓ is a week while the reader is moving between cells, not an event.
+	v.HandleContentKey(keyPress("down"))
+	if got := v.day(); !sameDay(got, time.Date(2026, 8, 27, 0, 0, 0, 0, time.Local)) {
+		t.Fatalf("↓ landed on %s, want the week after", got.Format(time.DateOnly))
+	}
+	if v.selectedEvent != "" {
+		t.Errorf("moving between cells selected event %q", v.selectedEvent)
+	}
+	v.HandleContentKey(keyPress("up"))
+
+	// Nothing is selectable until a cell is opened, however much is in it.
+	v.HandleContentKey(keyPress("right"))
+	if events := v.selectableEvents(); len(events) != 0 {
+		t.Fatalf("a cell nobody stepped into offers %+v", events)
+	}
+
+	// enter opens it and takes the first event, which is how the reader sees that ↑ and ↓
+	// have changed hands.
+	v.HandleContentKey(keyPress("enter"))
+	if !v.inYearCell || v.selectedEvent != "7" {
+		t.Fatalf("enter left inYearCell=%v selected=%q", v.inYearCell, v.selectedEvent)
+	}
+	v.HandleContentKey(keyPress("down"))
+	if v.selectedEvent != "8" {
+		t.Errorf("↓ inside the cell selected %q, want the next event", v.selectedEvent)
+	}
+	if got := v.day(); !sameDay(got, time.Date(2026, 8, 21, 0, 0, 0, 0, time.Local)) {
+		t.Errorf("↓ inside the cell moved the day to %s", got.Format(time.DateOnly))
+	}
+
+	// esc comes through the model's own seam rather than as a key, and steps back out.
+	if !v.CancelPendingDetail() {
+		t.Fatal("esc did not step out of the cell")
+	}
+	if v.inYearCell || v.selectedEvent != "" {
+		t.Errorf("leaving left inYearCell=%v selected=%q", v.inYearCell, v.selectedEvent)
+	}
+	if v.CancelPendingDetail() {
+		t.Error("esc outside a cell should be the model's to deal with")
+	}
+}
+
+// The all-day band is at the foot of the whole week, but the events in it belong to days, so ↑
+// and ↓ reach the cursor day's own — and the band draws it as selected once they have.
+func TestWeekReachesTheAllDayBand(t *testing.T) {
+	v := dayWithEvents(t)
+	v.viewMode = viewWeek
+	v.anchor = time.Date(2026, 8, 21, 9, 0, 0, 0, time.Local) // the Friday
+	v.Update(recordingsLoadedMsg{requestResult: currentRequest(v), recordings: []Recording{
+		{ID: 1, Title: "Changelog", CalendarColor: "blue", Type: "Calendar::Event",
+			StartsAt: atLocal("2026-08-21T09:30:00"), EndsAt: atLocal("2026-08-21T10:00:00")},
+		{ID: 3, Title: "Summer friday", AllDay: true, CalendarColor: "gold", Type: "Calendar::Event",
+			StartsAt: at("2026-08-21T00:00:00Z"), EndsAt: at("2026-08-21T00:00:00Z")},
+	}})
+
+	v.HandleContentKey(keyPress("down"))
+	v.HandleContentKey(keyPress("down"))
+	if v.selectedEvent != "3" {
+		t.Fatalf("↓ ended on %q, want the all-day event under the cursor day", v.selectedEvent)
+	}
+
+	band := weekAllDayBand([]weekDayInfo{{
+		date:   v.day(),
+		allDay: []Recording{{ID: 3, Title: "Summer friday", AllDay: true, CalendarColor: "gold"}},
+	}}, 13, v.selection())
+	if len(band) != 1 {
+		t.Fatalf("the band drew %d rows", len(band))
+	}
+	if band[0][0] == eventPill(Recording{ID: 3, Title: "Summer friday", CalendarColor: "gold"}, 13, selection{}) {
+		t.Error("the band drew the selected all-day event as an unselected one")
+	}
+}
+
+// Stepping the cursor off the end of the week is what reads the week either side of it, and the
+// weekday is kept: ← off Monday lands on the Sunday before, not on the new week's Monday.
+func TestWeekCursorStepsIntoTheWeekEitherSide(t *testing.T) {
+	v := calendarWithRecordings()
+	v.viewMode = viewWeek
+	v.firstWeekDay = time.Monday
+	v.anchor = time.Date(2026, 8, 17, 9, 0, 0, 0, time.Local) // the Monday
+
+	v.HandleContentKey(keyPress("left"))
+	if got := v.day(); !sameDay(got, time.Date(2026, 8, 16, 0, 0, 0, 0, time.Local)) {
+		t.Errorf("← off Monday landed on %s, want the Sunday before", got.Format(time.DateOnly))
+	}
+	if !v.requests.loading {
+		t.Error("leaving the week did not read the one before it")
 	}
 }
 
@@ -798,7 +1242,7 @@ func TestCalendarStepsByTheUnitTheViewShows(t *testing.T) {
 func TestHabitCompletionsMarkTheirHabitRatherThanListingThemselves(t *testing.T) {
 	// HEY answers a habit and its completion as separate recordings, the completion
 	// carrying no title and naming its habit in parent_id.
-	events, todos, habits, completions := splitRecordings([]Recording{
+	events, todos, habits, completions, _ := splitRecordings([]Recording{
 		{ID: 14796085, Title: "Read", Type: "Calendar::Habit", Icon: "read"},
 		{ID: 14113260, Title: "Meditate", Type: "Calendar::Habit", Icon: "meditate"},
 		{ID: 171477412, Type: "Calendar::Habit::Completion", ParentID: 14796085, StartsAt: at("2026-08-22T00:00:00Z")},
@@ -1049,8 +1493,8 @@ func TestYearIsDrawnLikeTheWeek(t *testing.T) {
 			StartsAt: at("2026-02-05T00:00:00Z"), EndsAt: at("2026-02-08T23:59:59Z"), Type: "Calendar::Event"},
 	}
 
-	out := renderYearView(events, time.Date(2026, 8, 22, 0, 0, 0, 0, time.UTC),
-		time.Monday, 100, 30, "p/n year · t today")
+	out, _, _ := renderYearView(events, time.Date(2026, 8, 22, 0, 0, 0, 0, time.UTC),
+		time.Monday, 100, 30, "p/n year · t today", selection{}, false)
 	lines := strings.Split(stripANSI(out), "\n")
 
 	// The year names itself and says what moves it, on its own first line.
@@ -1090,7 +1534,7 @@ func TestYearIsDrawnLikeTheWeek(t *testing.T) {
 // A calendar carries a day's own records alongside its events. Only the events are drawn:
 // a journal entry taken for one came out as a bar of bare color across the day.
 func TestOnlyEventsAreDrawnOnTheGrid(t *testing.T) {
-	events, todos, habits, _ := splitRecordings([]Recording{
+	events, todos, habits, _, _ := splitRecordings([]Recording{
 		{ID: 169118695, Title: "Stanko & Kevin", Type: "Calendar::Event", StartsAt: at("2026-08-20T14:00:00Z")},
 		// The journal entry behind the stray stripe, as HEY answered it: no title.
 		{ID: 171477000, Type: "Calendar::JournalEntry", AllDay: true, StartsAt: at("2026-08-20T00:00:00Z")},
@@ -1179,7 +1623,7 @@ func TestDayViewLabelsItsSections(t *testing.T) {
 	habits := []Recording{{ID: 4, Title: "Read 20 pages"}}
 
 	day := time.Date(2026, 8, 24, 9, 0, 0, 0, time.Local)
-	view := stripANSI(renderDayView(events, habits, day, "p/n day", 100, 24, selection{}))
+	view := stripANSI(renderDayView(events, habits, nil, day, "p/n day", 100, 24, selection{}))
 	for _, label := range []string{"Habits", "Monday, August 24", "p/n day", "All day"} {
 		if !strings.Contains(view, label) {
 			t.Errorf("day view did not label its %q section: %q", label, view)
@@ -1197,7 +1641,7 @@ func TestAllDayEventsAreBlocksInTheirCalendarsColor(t *testing.T) {
 	}
 	day := time.Date(2026, 8, 21, 9, 0, 0, 0, time.Local)
 
-	rendered := renderDayView(events, nil, day, "", 100, 14, selection{})
+	rendered := renderDayView(events, nil, nil, day, "", 100, 14, selection{})
 	lines := strings.Split(rendered, "\n")
 
 	gold := lines[rowContaining(t, lines, "Summer friday")]
@@ -1232,7 +1676,7 @@ func TestDayViewRulesFallFromEveryHourWithoutCuttingIntoAnEvent(t *testing.T) {
 	// an hour every four columns and the 11:00 event's block on the four from 44. The
 	// day's header and the hour axis take the first two rows of the 40 it is given,
 	// leaving 38 for the grid.
-	lines := strings.Split(stripANSI(renderDayView(events, nil, day, "", 98, 40, selection{})), "\n")
+	lines := strings.Split(stripANSI(renderDayView(events, nil, nil, day, "", 98, 40, selection{})), "\n")
 	grid := lines[2:]
 	if len(grid) != 38 {
 		t.Fatalf("grid is %d rows of the 38 left to it: %q", len(grid), grid)
@@ -1261,7 +1705,7 @@ func TestDayViewRulesFallFromEveryHourWithoutCuttingIntoAnEvent(t *testing.T) {
 
 func TestEmptyDayIsItsHoursRatherThanANotice(t *testing.T) {
 	day := time.Date(2026, 8, 22, 9, 0, 0, 0, time.Local)
-	view := stripANSI(renderDayView(nil, nil, day, "", 96, 20, selection{}))
+	view := stripANSI(renderDayView(nil, nil, nil, day, "", 96, 20, selection{}))
 
 	if strings.Contains(view, "no events") {
 		t.Errorf("an empty day still announces itself: %q", view)
@@ -1315,7 +1759,7 @@ func TestDayViewGivesASingleEventTheWholeGrid(t *testing.T) {
 
 	// An hour every four columns, so 07:00 starts on column 28 and the block covers the
 	// rules at 28 and 32 for every one of the grid's 38 rows.
-	grid := strings.Split(stripANSI(renderDayView(events, nil, day, "", 98, 40, selection{})), "\n")[2:]
+	grid := strings.Split(stripANSI(renderDayView(events, nil, nil, day, "", 98, 40, selection{})), "\n")[2:]
 	if len(grid) != 38 {
 		t.Fatalf("grid is %d rows, want 38: %q", len(grid), grid)
 	}
@@ -1364,7 +1808,7 @@ func TestCalendarColorFillsAnEventsBlock(t *testing.T) {
 	// Every one of those is light, so every one takes the theme's dark paper as its ink —
 	// which is what nominal contrast got backwards on green and blue.
 	for _, calendarColor := range []string{"blue", "green", "red", "gold"} {
-		style := dayCell{kind: cellTitle, color: calendarColor}.style(styleMuted, styleMuted, styleMuted)
+		style := dayCell{kind: cellTitle, color: calendarColor}.style(styleMuted, 0)
 		if style.GetBackground() != eventFillColor(calendarColor) {
 			t.Errorf("%q sits on %v, want its own fill", calendarColor, style.GetBackground())
 		}
@@ -1387,7 +1831,7 @@ func TestEventInkFollowsTheThemesOwnPalette(t *testing.T) {
 		Hues:       map[string]color.Color{"blue": lipgloss.Color("#2b4c8c")},
 	})
 
-	style := dayCell{kind: cellTitle, color: "blue"}.style(styleMuted, styleMuted, styleMuted)
+	style := dayCell{kind: cellTitle, color: "blue"}.style(styleMuted, 0)
 	if style.GetForeground() != colorPaper {
 		t.Errorf("a deep blue on a light theme drew %v, want the pale paper", style.GetForeground())
 	}
@@ -1407,24 +1851,218 @@ func TestEventInkFollowsALiveThemeChange(t *testing.T) {
 		Background: lipgloss.Color("#060B1E"),
 		Hues:       map[string]color.Color{"green": lipgloss.Color("#92a593")},
 	})
-	onDark := eventPill(Recording{Title: "Summer friday", CalendarColor: "green"}, 20, false)
+	onDark := eventPill(Recording{Title: "Summer friday", CalendarColor: "green"}, 20, selection{})
 
 	applyTheme(Theme{
 		Accent: lipgloss.BrightBlue, Bright: lipgloss.Color("#1c1c1c"), Dark: false,
 		Background: lipgloss.Color("#fafafa"),
 		Hues:       map[string]color.Color{"green": lipgloss.Color("#1f5c2f")},
 	})
-	onLight := eventPill(Recording{Title: "Summer friday", CalendarColor: "green"}, 20, false)
+	onLight := eventPill(Recording{Title: "Summer friday", CalendarColor: "green"}, 20, selection{})
 
 	if onDark == onLight {
 		t.Errorf("the pill did not follow the theme: %q", onDark)
 	}
 }
 
+// A countdown is a recording of its own — a child of the event, spanning the days from the
+// notice period up to it — and it goes above the date rather than on the grid, the way the web
+// app puts it. It has no title of its own: what it is counting down to is its parent's.
+func TestTheDayCountsDownToWhatIsComing(t *testing.T) {
+	countdown := sdkRecordingToModel(generated.Recording{
+		Id: 171603042, ParentId: 171603041, Type: "Calendar::Countdown", AllDay: true,
+		Label:    "10 days before",
+		StartsAt: at("2026-08-15T00:00:00Z"), EndsAt: at("2026-08-25T00:00:00Z"),
+		Parent: &generated.Recording{Id: 171603041, Title: "Kevin's leaving do", Type: "Calendar::Event"},
+	})
+	if countdown.ParentTitle != "Kevin's leaving do" {
+		t.Fatalf("the countdown does not know what it counts down to: %+v", countdown)
+	}
+
+	day := time.Date(2026, 8, 23, 9, 0, 0, 0, time.Local)
+	lines := strings.Split(stripANSI(renderDayView(nil, nil, []Recording{countdown},
+		day, "p/n day", 100, 20, selection{})), "\n")
+	if got := strings.TrimSpace(lines[0]); got != "2 days until Kevin's leaving do" {
+		t.Errorf("the day says %q", got)
+	}
+
+	// One day out reads as a day, not as days.
+	lines = strings.Split(stripANSI(renderDayView(nil, nil, []Recording{countdown},
+		day.AddDate(0, 0, 1), "p/n day", 100, 20, selection{})), "\n")
+	if got := strings.TrimSpace(lines[0]); got != "1 day until Kevin's leaving do" {
+		t.Errorf("the day before says %q", got)
+	}
+
+	// And on the day itself there is nothing left to count: HEY stops serving the countdown,
+	// and a day that was handed one anyway does not say "0 days".
+	view := stripANSI(renderDayView(nil, nil, []Recording{countdown},
+		time.Date(2026, 8, 25, 9, 0, 0, 0, time.Local), "p/n day", 100, 20, selection{}))
+	if strings.Contains(view, "until") {
+		t.Errorf("the event's own day still counts down: %q", strings.Split(view, "\n")[0])
+	}
+}
+
+// A countdown is not an event, so it never reaches the grid — it used to be dropped altogether,
+// which is why the day never showed one.
+func TestCountdownsAreKeptApartFromEvents(t *testing.T) {
+	events, todos, habits, _, countdowns := splitRecordings([]Recording{
+		{ID: 1, Title: "Design review", Type: "Calendar::Event"},
+		{ID: 2, ParentID: 1, Type: "Calendar::Countdown", Label: "10 days before"},
+	})
+	if len(events) != 1 || len(countdowns) != 1 {
+		t.Errorf("split gave %d events and %d countdowns", len(events), len(countdowns))
+	}
+	if len(todos) != 0 || len(habits) != 0 {
+		t.Errorf("a countdown landed among the todos or habits")
+	}
+}
+
+// Two events at the same hour share the height, with a row of grid between them: touching, a
+// tall block over a short one read as one block with a step in it.
+func TestOverlappingEventsAreDrawnApart(t *testing.T) {
+	out := stripANSI(renderDayView([]Recording{
+		{ID: 1, Title: "Standup", Type: "Calendar::Event",
+			StartsAt: atLocal("2026-08-20T09:00:00"), EndsAt: atLocal("2026-08-20T11:00:00")},
+		{ID: 2, Title: "Design review", Type: "Calendar::Event",
+			StartsAt: atLocal("2026-08-20T10:00:00"), EndsAt: atLocal("2026-08-20T12:00:00")},
+	}, nil, nil, time.Date(2026, 8, 20, 9, 0, 0, 0, time.Local), "p/n day", 100, 20, selection{}))
+
+	// The row between the lanes belongs to the grid, so it carries an hour rule where an
+	// event's own rows carry the event.
+	gaps := 0
+	for _, row := range strings.Split(out, "\n") {
+		if strings.Count(row, string(hourRule)) == 25 {
+			gaps++
+		}
+	}
+	if gaps == 0 {
+		t.Errorf("the two lanes are drawn without a row between them:\n%s", out)
+	}
+}
+
+// Two events back to back are two events. Drawn as touching blocks in the same color, a
+// 15:00–17:00 and a 17:00–19:00 came out as one bar from three to seven, and the hour axis above
+// them is not enough to say where one stops.
+func TestBackToBackEventsAreDividedFromEachOther(t *testing.T) {
+	out := stripANSI(renderDayView([]Recording{
+		{ID: 1, Title: "Stanko & Kevin", Type: "Calendar::Event",
+			StartsAt: atLocal("2026-08-20T15:00:00"), EndsAt: atLocal("2026-08-20T17:00:00")},
+		{ID: 2, Title: "Product Hangout", Type: "Calendar::Event",
+			StartsAt: atLocal("2026-08-20T17:00:00"), EndsAt: atLocal("2026-08-20T19:00:00")},
+	}, nil, nil, time.Date(2026, 8, 20, 9, 0, 0, 0, time.Local), "p/n day", 100, 20, selection{}))
+
+	if !strings.ContainsRune(out, eventEdge) {
+		t.Errorf("nothing separates the two events:\n%s", out)
+	}
+}
+
+// A week column says when an event runs, both ends of it where there is room: when a meeting
+// finishes is half of what a reader is looking for.
+func TestWeekColumnSaysWhenAnEventRuns(t *testing.T) {
+	event := Recording{ID: 1, Title: "Design review", Type: "Calendar::Event",
+		StartsAt: atLocal("2026-08-20T14:00:00"), EndsAt: atLocal("2026-08-20T15:30:00")}
+
+	if got := eventTimeSpan(event, 13); got != "14:00–15:30" {
+		t.Errorf("a wide column says %q, want both ends", got)
+	}
+	// A narrow one gets the start alone rather than a truncated range.
+	if got := eventTimeSpan(event, 8); got != "14:00" {
+		t.Errorf("a narrow column says %q, want the start alone", got)
+	}
+	// An event with no end has only the one.
+	if got := eventTimeSpan(Recording{StartsAt: atLocal("2026-08-20T14:00:00")}, 13); got != "14:00" {
+		t.Errorf("an event with no end says %q", got)
+	}
+}
+
+// The selected event is marked by a highlight travelling along it rather than by a color of its
+// own, so it keeps its calendar's color — which is what says whose it is.
+func TestTheSelectedEventIsHighlightedAndMoves(t *testing.T) {
+	t.Cleanup(func() { applyTheme(Theme{Accent: lipgloss.BrightBlue, Bright: lipgloss.BrightWhite, Dark: true}) })
+	applyTheme(Theme{
+		Accent: lipgloss.BrightBlue, Bright: lipgloss.Color("#ffcead"), Dark: true,
+		Background: lipgloss.Color("#060B1E"),
+		Hues:       map[string]color.Color{"green": lipgloss.Color("#92a593")},
+	})
+
+	event := Recording{ID: 4, Title: "Design review", CalendarColor: "green"}
+	at := func(phase int) string {
+		return eventPill(event, 20, selection{eventKey: event.key(), phase: phase})
+	}
+
+	if at(0) == eventPill(event, 20, selection{}) {
+		t.Error("the selected event is drawn the same as an unselected one")
+	}
+	if at(0) == at(1) {
+		t.Error("the highlight did not move when the phase did")
+	}
+	// The text is untouched: only how it is painted changes.
+	if got := stripANSI(at(3)); got != "Design review       " {
+		t.Errorf("the highlight rewrote the title: %q", got)
+	}
+
+	// A lap of the pill brings the light back to where it started, which is what makes it a
+	// loop rather than a one-way slide off the end.
+	if at(0) != at(20) {
+		t.Error("the light does not come round again")
+	}
+}
+
+// On a block the light runs round the edge and leaves the inside alone, which is what makes it
+// read as turning rather than as a wave washing over the event — and it keeps a name written
+// down the middle of a day's block as legible as any other event's.
+func TestTheLightRunsRoundABlocksEdge(t *testing.T) {
+	// A 6×4 block: the edge is every cell but the four in the middle.
+	inside, outside := 0, 0
+	for phase := range 40 {
+		for row := range 4 {
+			for col := range 6 {
+				lit := sweepIntensity(col, row, 6, 4, phase)
+				if col > 0 && col < 5 && row > 0 && row < 3 {
+					inside += int(lit * 100)
+				} else {
+					outside += int(lit * 100)
+				}
+			}
+		}
+	}
+	if inside != 0 {
+		t.Errorf("the light reached inside the block (%d)", inside)
+	}
+	if outside == 0 {
+		t.Error("the light never touched the edge")
+	}
+
+	// One cell thick, there is no inside to leave alone, so the light runs the length of it.
+	if sweepIntensity(0, 0, 12, 1, 0) == 0 && sweepIntensity(1, 0, 12, 1, 0) == 0 {
+		t.Error("a single row is never lit")
+	}
+}
+
+// A color the terminal draws out of its own palette must not be mixed: lipgloss.Blue carries
+// #000080 whatever the theme paints it, so blending it would put a color from a palette nobody
+// is using on screen. Without a theme the selected event inverts instead, as it always did.
+func TestTheHighlightWillNotMixAnANSISlot(t *testing.T) {
+	if _, ok := mixColors(lipgloss.Blue, lipgloss.BrightWhite, 0.5); ok {
+		t.Error("two ANSI slots were mixed")
+	}
+	if _, ok := mixColors(lipgloss.Color("#7d82d9"), lipgloss.Blue, 0.5); ok {
+		t.Error("a theme hue was mixed with an ANSI slot")
+	}
+
+	mixed, ok := mixColors(lipgloss.Color("#000000"), lipgloss.Color("#ffffff"), 0.5)
+	if !ok {
+		t.Fatal("two theme colors would not mix")
+	}
+	if mixed != (color.RGBA{R: 0x7f, G: 0x7f, B: 0x7f, A: 0xff}) {
+		t.Errorf("half way between black and white is %v", mixed)
+	}
+}
+
 // The week and the year draw an event as a filled bar too, off the same field and padded to
 // the cell so the fill reads as a block rather than as a highlight behind some words.
 func TestEventPillFillsTheCellInItsCalendarsColor(t *testing.T) {
-	pill := eventPill(Recording{Title: "Standup", CalendarColor: "gold"}, 12, false)
+	pill := eventPill(Recording{Title: "Standup", CalendarColor: "gold"}, 12, selection{})
 
 	if got := stripANSI(pill); got != "Standup     " {
 		t.Errorf("pill text = %q, want the title padded to 12", got)
@@ -1434,7 +2072,7 @@ func TestEventPillFillsTheCellInItsCalendarsColor(t *testing.T) {
 	}
 
 	// A title longer than the cell is cut to it rather than spilling into the next day.
-	long := eventPill(Recording{Title: "Design review with the whole team", CalendarColor: "teal"}, 12, false)
+	long := eventPill(Recording{Title: "Design review with the whole team", CalendarColor: "teal"}, 12, selection{})
 	if got := lipgloss.Width(stripANSI(long)); got != 12 {
 		t.Errorf("pill is %d columns wide, want 12", got)
 	}

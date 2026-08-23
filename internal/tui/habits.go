@@ -63,14 +63,19 @@ func habitLabel(habit Recording) string {
 // managed from here rather than from the calendar's own keys: a habit is picked by
 // looking at the list, and the calendar keeps its keys for the calendar.
 type habitPicker struct {
-	habits    []Recording
-	cursor    int
-	confirmed int64 // the habit whose deletion has been asked for once
-	status    string
+	habits []Recording
+	cursor int
+	// completable is whether keeping a habit is on offer here as well as managing one. It is
+	// off on the year, where the picker is a list of habits rather than a day's: a year read
+	// carries no recordings, so nothing on that screen knows what was kept on the day the
+	// cursor is on. Adding, renaming and deleting go by a habit's id and are fine anywhere.
+	completable bool
+	confirmed   int64 // the habit whose deletion has been asked for once
+	status      string
 }
 
-func newHabitPicker(habits []Recording) *habitPicker {
-	return &habitPicker{habits: habits}
+func newHabitPicker(habits []Recording, completable bool) *habitPicker {
+	return &habitPicker{habits: habits, completable: completable}
 }
 
 // setHabits keeps the cursor on the habit it was on, which is what a save or a delete
@@ -117,8 +122,13 @@ func (p *habitPicker) draw(base string, width, height int) string {
 	start, end := modalListWindow(len(p.habits), p.cursor, visible)
 	for i := start; i < end; i++ {
 		habit := p.habits[i]
-		done := habit.Done()
+		// Whether a habit was kept is only shown where it can be answered for: a ring drawn
+		// empty on the year would be saying "not done today" off a read that never looked.
+		done := p.completable && habit.Done()
 		marker := habitMarkerStyle(habit.Color).Render(habitMarker(done))
+		if !p.completable {
+			marker = habitMarkerStyle(habit.Color).Render("·")
+		}
 
 		label := truncateToWidth(habitLabel(habit), max(contentWidth-4, 1))
 		labelStyle := lipgloss.NewStyle().Foreground(colorBright)
@@ -146,18 +156,18 @@ func (p *habitPicker) draw(base string, width, height int) string {
 func (p *habitPicker) helpBindings() []helpBinding {
 	bindings := []helpBinding{{"↑↓", "choose"}}
 	if selected := p.selected(); selected != nil {
-		doneLabel := "mark done"
-		if selected.Done() {
-			doneLabel = "clear"
+		if p.completable {
+			doneLabel := "mark done"
+			if selected.Done() {
+				doneLabel = "clear"
+			}
+			bindings = append(bindings, helpBinding{"enter", doneLabel})
 		}
 		deleteLabel := "delete"
 		if p.confirmed == selected.ID {
 			deleteLabel = "press x again to delete"
 		}
-		bindings = append(bindings,
-			helpBinding{"enter", doneLabel},
-			helpBinding{"e", "edit"},
-			helpBinding{"x", deleteLabel})
+		bindings = append(bindings, helpBinding{"e", "edit"}, helpBinding{"x", deleteLabel})
 	}
 	bindings = append(bindings, helpBinding{"a", "new habit"})
 	return append(bindings, helpBinding{"esc", "close"})

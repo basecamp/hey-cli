@@ -295,10 +295,54 @@ section: ctrl+s from the mail list swaps it in as the active view, it captures e
 while it is open, and it asks to be closed again with `screenerClosedMsg`.
 The rest of `internal/tui/` is shared infrastructure: `tui.go` (model and
 router), `section_view.go` (the interface), plus `nav.go`, `content.go`, `help.go`,
-`styles.go`, `loading.go`, `kitty.go`, `html.go`, `live.go`, `covers.go`, `cover_picker.go` and `calendar_views.go`. Read the directory rather than a
+`styles.go`, `loading.go`, `kitty.go`, `html.go`, `live.go`, `covers.go`, `cover_picker.go`,
+`calendar_views.go`, `datetime.go` and `event_repeat.go`. Read the directory rather than a
 table here.
 
 To add a new section: implement the `sectionView` interface in a new file, add a field and constructor call in `newModel`, and add a case in `switchSection`.
+
+### Each calendar span gives the arrows what it is made of
+
+The three spans are not one screen with a different date on it, so the arrows mean something
+different in each — `handleArrowKey` in `calendar.go` is where that is decided.
+
+The **day** is one day, so ← and → walk the grid and carry on into the day either side, landing
+on the far end of it. Its all-day band belongs to no hour, so ↑ and ↓ cross down into it and back
+up to the event they left (`crossTheDay`, `lastTimedEvent`) rather than it being walked sideways.
+
+The **week** is seven days, so ← and → walk the days and ↑ and ↓ that day's events. **The cursor
+is the anchor** — that is the whole trick, and it is why `b`, `s` and `a` need telling nothing:
+they all file on `v.day()` already. Moving inside the week does not re-read; crossing its edge
+does, keeping the weekday.
+
+The **year** is a grid, and a grid wants moving through before anything in it can be worked on:
+the arrows move between cells, enter steps into one (`inYearCell`), and only then do ↑ and ↓
+belong to that day's events. `esc` comes back out through `CancelPendingDetail`, because the
+model reads esc before a view sees a key. A year read carries no recordings, so `b` there manages
+habits without keeping them — nothing on that screen knows what was kept on the cursor's day.
+
+`renderYearView` answers the cursor's line range as well as the year, and `revealRows` scrolls
+the minimum needed. A week row is as tall as its busiest day, so a week's *number* says nothing
+about which line it is on — scrolling by the number is what let the cursor walk off the bottom.
+
+**A selection is a `Recording.key()`, not an id.** HEY serves a repeating event's days as virtual
+occurrences with `id: 0` and an `occurrence_id` of `"<series>_<date>"`, so an id keyed selection
+could not pick one out at all. The same fact decides how it is written: `occurrenceOf` sends an
+edit or a delete of such a day through `CalendarEvents().UpdateOccurrence`/`DeleteOccurrence`
+with `OccurrenceScopeThisEvent`.
+
+The selected event is marked by a light travelling round its edge rather than a color of its own
+— it keeps its calendar's, which is what says whose it is. `sweepIntensity` and `edgePosition` in
+`calendar_views.go`; the tick is `calendarTickMsg`, and it stops itself when nothing is selected
+or when nothing has drawn the calendar since the last one, which is how it notices the reader
+went to another section without a hook for it. The blend only happens between colors a theme
+named: mixing an ANSI slot would put a color from a palette nobody is using on screen.
+
+**An event write is not a partial.** HEY clears the notes, location, link and attached entry on
+any update that omits them, and reminders and the countdown likewise, so `startEventForm` hands
+an edit what the event carries (`setDetails`) and `saveEvent` sends all of it back. Without that,
+renaming an event wipes its notes. Notes are served as plain text however they were written, so
+the form says out loud that saving replaces any formatting.
 
 ### Lists grow as the reader scrolls
 

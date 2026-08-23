@@ -29,6 +29,8 @@ type viewContext struct {
 	newAttachmentTempDir func() (string, error)
 	loadCover            coverLoadFunc
 	saveCover            coverSaveFunc
+	loadLastCalendar     func() int64
+	saveLastCalendar     func(id int64) error
 	width                int
 	height               int // content area height
 }

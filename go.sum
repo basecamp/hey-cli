@@ -91,6 +91,10 @@ github.com/basecamp/actioncable-go v0.0.0-20260821132720-3f7811951537 h1:OE1VMvK
 github.com/basecamp/actioncable-go v0.0.0-20260821132720-3f7811951537/go.mod h1:9+DEydJMniIKraEsd4fDJpFEnqlLUJ6XhAswxRBaITk=
 github.com/basecamp/hey-sdk/go v0.17.0 h1:0tjB1P7Pe8nRtjdxke6oFqyynM7kaqNq58i9QMoNZ08=
 github.com/basecamp/hey-sdk/go v0.17.0/go.mod h1:k6sO2XhMkU3UY8lD2ozp0735Ic3q8xoMQt7YUT3TlYk=
+github.com/basecamp/hey-sdk/go v0.18.0 h1:MFvzxopoXDgP1ysBGQ+uLknYIXeiiaFOtLLR4058Grg=
+github.com/basecamp/hey-sdk/go v0.18.0/go.mod h1:k6sO2XhMkU3UY8lD2ozp0735Ic3q8xoMQt7YUT3TlYk=
+github.com/basecamp/hey-sdk/go v0.19.0 h1:/Y3sY2R3OwEpflx/XeyzhKlOCTp/E5hmBx5YsUBcFmE=
+github.com/basecamp/hey-sdk/go v0.19.0/go.mod h1:k6sO2XhMkU3UY8lD2ozp0735Ic3q8xoMQt7YUT3TlYk=
 github.com/blang/semver v3.5.1+incompatible h1:cQNTCjp13qL8KC3Nbxr/y2Bqb63oX6wdnnjpJbkM4JQ=
 github.com/blang/semver v3.5.1+incompatible/go.mod h1:kRBLl5iJ+tD4TcOOxsy/0fnwebNt5EWlYSAyrTnjyyk=
 github.com/bmatcuk/doublestar v1.1.1/go.mod h1:UD6OnuiIn0yFxxA2le/rnRU1G4RaI4UvFv1sNto9p6w=

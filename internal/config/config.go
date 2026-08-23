@@ -46,6 +46,7 @@ type fileConfig struct {
 	AccountID           string                              `json:"account_id,omitempty"`
 	Onboarded           *bool                               `json:"onboarded,omitempty"`
 	Cover               string                              `json:"cover,omitempty"`
+	LastCalendarID      int64                               `json:"last_calendar_id,omitempty"`
 	HelpHidden          bool                                `json:"help_hidden,omitempty"`
 	AccountDefaults     map[string]string                   `json:"account_defaults,omitempty"`
 	TrustedLocalConfigs map[string]trustedLocalConfigRecord `json:"trusted_local_configs,omitempty"`
@@ -383,6 +384,33 @@ func SaveCover(preset string) error {
 		return err
 	}
 	file.Cover = preset
+	return saveGlobalConfig(file)
+}
+
+// LastCalendarID is the calendar the last event was filed on, so the next new event opens on the
+// same one. Somebody who keeps a work calendar and a personal one is nearly always adding to
+// whichever they added to last, and the first in the list is a poor guess about which that is.
+//
+// It lives here rather than on HEY for the reason Cover does: HEY serves no such preference, and
+// making one up on the server for one client to read would be worse than remembering it locally.
+func LastCalendarID() int64 {
+	file, err := loadGlobalFileConfig()
+	if err != nil {
+		return 0
+	}
+	return file.LastCalendarID
+}
+
+// SaveLastCalendarID stores it, leaving every other setting alone.
+func SaveLastCalendarID(id int64) error {
+	file, err := loadGlobalFileConfig()
+	if err != nil {
+		return err
+	}
+	if err := migrateLegacyAccountDefault(&file); err != nil {
+		return err
+	}
+	file.LastCalendarID = id
 	return saveGlobalConfig(file)
 }
 

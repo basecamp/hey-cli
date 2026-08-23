@@ -163,8 +163,10 @@ func newViewContext(ctx context.Context, rootSDK, sdk *hey.Client, styles styles
 		newAttachmentTempDir: func() (string, error) {
 			return os.MkdirTemp("", "hey-cli-attachment-*")
 		},
-		loadCover: config.Cover,
-		saveCover: config.SaveCover,
+		loadCover:        config.Cover,
+		saveCover:        config.SaveCover,
+		loadLastCalendar: config.LastCalendarID,
+		saveLastCalendar: config.SaveLastCalendarID,
 	}
 }
 

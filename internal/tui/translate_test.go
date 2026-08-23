@@ -18,10 +18,17 @@ func TestSDKRecordingToModelKeepsItsTimes(t *testing.T) {
 	starts := time.Date(2026, 8, 18, 14, 0, 0, 0, time.UTC)
 	got := sdkRecordingToModel(generated.Recording{
 		Id: 99, Title: "Standup", Type: "Calendar::Habit",
-		StartsAt:    starts,
-		EndsAt:      starts.Add(time.Hour),
-		CompletedAt: starts.Add(2 * time.Hour),
+		StartsAt:         starts,
+		EndsAt:           starts.Add(time.Hour),
+		CompletedAt:      starts.Add(2 * time.Hour),
+		StartsAtTimeZone: "Europe/Madrid",
+		EndsAtTimeZone:   "Europe/Madrid",
 	})
+
+	// A zone the event was set in comes across for the form to show, and does not move it.
+	if got.StartsAtZone != "Europe/Madrid" || got.EndsAtZone != "Europe/Madrid" {
+		t.Errorf("zones = %q / %q", got.StartsAtZone, got.EndsAtZone)
+	}
 
 	if !got.StartsAt.Equal(starts) || !got.EndsAt.Equal(starts.Add(time.Hour)) {
 		t.Errorf("times = %v / %v", got.StartsAt, got.EndsAt)
