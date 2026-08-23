@@ -21,14 +21,14 @@ import (
 // mutated only from the Bubble Tea event loop (startup and ThemeChangedMsg),
 // which is also the only place that renders.
 var (
-	colorPrimary color.Color = lipgloss.BrightBlue  // titles, selected items, sender names
-	colorMuted   color.Color = lipgloss.BrightBlack // decorative filler only — see styleMuted
-	colorBright  color.Color = lipgloss.BrightWhite // emphasized text
-	colorAlert               = lipgloss.Red         // attention: Omarchy themes signal alerts with red
-	colorPositive            = lipgloss.Green       // good outcomes: a sender screened in
-	colorNegative            = lipgloss.Red         // bad outcomes: a sender screened out
-	colorLink    color.Color = lipgloss.BrightCyan  // hyperlinks in email bodies (markdown style "14"); subjects match it
-	colorError   color.Color = lipgloss.Red         // errors
+	colorPrimary  color.Color = lipgloss.BrightBlue  // titles, selected items, sender names
+	colorMuted    color.Color = lipgloss.BrightBlack // decorative filler only — see styleMuted
+	colorBright   color.Color = lipgloss.BrightWhite // emphasized text
+	colorAlert                = lipgloss.Red         // attention: Omarchy themes signal alerts with red
+	colorPositive             = lipgloss.Green       // good outcomes: a sender screened in
+	colorNegative             = lipgloss.Red         // bad outcomes: a sender screened out
+	colorLink     color.Color = lipgloss.BrightCyan  // hyperlinks in email bodies (markdown style "14"); subjects match it
+	colorError    color.Color = lipgloss.Red         // errors
 
 	// Interface chrome (rules, tabs, hotkeys) follows eza's convention for
 	// dates and directories: regular Blue for secondary chrome, bold Blue
