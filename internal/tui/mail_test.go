@@ -19,6 +19,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
@@ -273,6 +274,50 @@ func TestMailViewHandlesTopicLoaded(t *testing.T) {
 	}
 	if v.requests.loading {
 		t.Error("loading should be false")
+	}
+}
+
+// A thread heads its messages with the centered subject, and a blank line
+// separates each message header from the content under it.
+func TestThreadViewShowsSubjectAndSpacesTheHeader(t *testing.T) {
+	v := mailWithPostings()
+	v.Update(topicLoadedMsg{
+		boxID:   1,
+		topicID: 100,
+		title:   "Quarterly planning",
+		entries: []mail.Entry{{
+			Creator:   mail.Contact{Name: "Jane Doe"},
+			CreatedAt: time.Date(2026, 1, 8, 13, 34, 0, 0, time.UTC),
+			Summary:   "Can we meet Thursday?",
+			Body:      htmlutil.ToMarkdown("<p>Can we meet Thursday to walk through the numbers?</p>"),
+		}},
+	})
+
+	lines := strings.Split(ansi.Strip(v.topicContent), "\n")
+	if len(lines) < 5 {
+		t.Fatalf("thread content = %q", v.topicContent)
+	}
+	if strings.TrimSpace(lines[0]) != "Quarterly planning" || !strings.HasPrefix(lines[0], "  ") {
+		t.Errorf("first line should be the centered subject: %q", lines[0])
+	}
+	if strings.TrimSpace(lines[1]) != "" {
+		t.Errorf("a blank line should follow the subject: %q", lines[1])
+	}
+	header := -1
+	for i, line := range lines {
+		if strings.Contains(line, "Jane Doe") {
+			header = i
+			break
+		}
+	}
+	if header < 0 || header+2 >= len(lines) {
+		t.Fatalf("no message header rendered:\n%s", ansi.Strip(v.topicContent))
+	}
+	if strings.TrimSpace(lines[header+1]) != "" {
+		t.Errorf("a blank line should follow the header: %q", lines[header+1])
+	}
+	if strings.TrimSpace(lines[header+2]) != "Can we meet Thursday?" {
+		t.Errorf("the summary should follow the blank line: %q", lines[header+2])
 	}
 }
 

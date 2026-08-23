@@ -8,6 +8,7 @@ import (
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
@@ -1548,9 +1549,11 @@ func (v *mailView) openSelected() tea.Cmd {
 	if topicID == 0 {
 		topicID = selected.ID
 	}
-	title := selected.Summary
-	if v.searchActive {
-		title = selected.Name
+	// Posting.Name is the thread's subject; Summary is only the last message's
+	// excerpt, kept as the fallback for a posting with no name.
+	title := selected.Name
+	if title == "" {
+		title = selected.Summary
 	}
 	return v.requestTopic(v.currentBoxID(), topicID, selected.ID, title)
 }
@@ -2152,6 +2155,15 @@ func (v *mailView) renderEntries(entries []mail.Entry) (string, []int) {
 	sepWidth := max(v.vc.width-4, 40)
 	sep := v.vc.styles.separator.Render(strings.Repeat("─", sepWidth))
 
+	// The subject heads the thread, centered over the first message the way
+	// the web app titles a topic.
+	if subject := terminal.SanitizeLine(v.topicName); subject != "" {
+		centered := lipgloss.NewStyle().Width(sepWidth).Align(lipgloss.Center).Foreground(colorBright).Bold(true).
+			Render(truncateStr(subject, sepWidth))
+		fmt.Fprintf(&b, "%s\n\n", centered)
+		lineCount += 2
+	}
+
 	for i, e := range entries {
 		if i > 0 {
 			fmt.Fprintf(&b, "%s\n", sep)
@@ -2168,9 +2180,11 @@ func (v *mailView) renderEntries(entries []mail.Entry) (string, []int) {
 			from = e.AlternativeSenderName
 		}
 
+		// A full blank line separates the header from whatever follows it —
+		// the summary here, or the body's own leading blank when there is none.
 		fmt.Fprintf(&b, "%s  %s\n", v.vc.styles.entryFrom.Render(terminal.SanitizeLine(from)), v.vc.styles.entryDate.Render(formatDisplayDateTime(e.CreatedAt)))
 		if e.Summary != "" {
-			fmt.Fprintf(&b, "%s\n", terminal.SanitizeLine(e.Summary))
+			fmt.Fprintf(&b, "\n%s\n", terminal.SanitizeLine(e.Summary))
 		}
 		switch {
 		case !e.Body.IsEmpty():
