@@ -791,6 +791,14 @@ func renderScreenerRows(pane *screenerPane, visible, width int) string {
 
 	var b strings.Builder
 	end := min(pane.scroll+visible, len(pane.rows))
+
+	// The trailing text gets its own right-hand column, as in the mail lists:
+	// the second line stops before it, so the right edge stays clean.
+	trailingCol := 0
+	for index := pane.scroll; index < end; index++ {
+		trailingCol = max(trailingCol, lipgloss.Width(truncateStr(pane.rows[index].trailing, max(width/2, 10))))
+	}
+
 	for index := pane.scroll; index < end; index++ {
 		row := pane.rows[index]
 		isCursor := index == pane.cursor
@@ -816,7 +824,7 @@ func renderScreenerRows(pane *screenerPane, visible, width int) string {
 		if row.summary != "" {
 			summary = " — " + row.summary
 		}
-		detailWidth := max(width-6, 10)
+		detailWidth := max(width-8-trailingCol, 10)
 		if lipgloss.Width(subject) > detailWidth {
 			subject = truncateStr(subject, detailWidth)
 			summary = ""

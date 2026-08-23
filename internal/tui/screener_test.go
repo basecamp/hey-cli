@@ -164,6 +164,38 @@ func TestScreenerViewCarriesHeyWording(t *testing.T) {
 	}
 }
 
+// A long excerpt stops before the date column instead of running under the
+// trailing date, as the second line of a mail list row does.
+func TestScreenerExcerptStopsBeforeTheDateColumn(t *testing.T) {
+	view, _ := screenerTestView(t)
+	view.pending.setRows([]screenerRow{{
+		id:       91,
+		name:     "Jane Doe",
+		email:    "jane@example.com",
+		subject:  "Quarterly planning",
+		summary:  strings.Repeat("It would be great to walk through the numbers together. ", 4),
+		trailing: "Jan 8, 2026",
+	}}, "")
+	view.pendingCount = 1
+	view.loading = false
+
+	lines := strings.Split(ansi.Strip(view.View()), "\n")
+	var detail string
+	for _, line := range lines {
+		if strings.Contains(line, "Quarterly planning") {
+			detail = strings.TrimRight(line, " ")
+			break
+		}
+	}
+	if detail == "" {
+		t.Fatalf("no excerpt line rendered:\n%s", strings.Join(lines, "\n"))
+	}
+	limit := view.vc.width - 4 - len("Jan 8, 2026")
+	if got := ansi.StringWidth(detail); got > limit {
+		t.Errorf("excerpt line width = %d, want at most %d: %q", got, limit, detail)
+	}
+}
+
 func TestScreenerEmptyQueue(t *testing.T) {
 	view, state := screenerTestView(t)
 	state.pending = `{"pending_clearances_count":0,"clearances":[]}`
