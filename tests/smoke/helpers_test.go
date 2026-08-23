@@ -180,9 +180,16 @@ func dataAs[T any](t *testing.T, resp Response) T {
 	return v
 }
 
-// cliEnv returns the environment variables used for all CLI invocations.
+// cliEnv returns the environment variables used for all CLI invocations. The
+// caller's HEY_TOKEN is dropped: the suite authenticates with the cookie TestMain
+// stored, and an inherited token would silently stand in for it on every command.
 func cliEnv() []string {
-	env := os.Environ()
+	env := make([]string, 0, len(os.Environ())+6)
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "HEY_TOKEN=") {
+			env = append(env, kv)
+		}
+	}
 	env = append(env,
 		"HEY_BASE_URL="+baseURL,
 		"XDG_CONFIG_HOME="+configDir,
