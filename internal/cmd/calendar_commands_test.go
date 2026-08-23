@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
+
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -67,6 +69,29 @@ func TestCalendarsCommand(t *testing.T) {
 	items, ok := response.Data.([]any)
 	if !ok || len(items) != 2 {
 		t.Fatalf("data = %#v, want two calendars", response.Data)
+	}
+}
+
+// Two accounts both keep a "Maybe", so the table names the account they belong to. With one
+// account it would be the reader's own address written down the column, so it stays away.
+func TestCalendarsNamesTheAccountOnlyWhenThereAreSeveral(t *testing.T) {
+	if spansAccounts([]generated.Calendar{
+		{Id: 7, Name: "Maybe", OwnerEmailAddress: "amelia@example.com"},
+		{Id: 9, Name: "Work", OwnerEmailAddress: "amelia@example.com"},
+	}) {
+		t.Error("one account should not be named")
+	}
+
+	if !spansAccounts([]generated.Calendar{
+		{Id: 7, Name: "Maybe", OwnerEmailAddress: "amelia@example.com"},
+		{Id: 11, Name: "Maybe", OwnerEmailAddress: "amelia@example.org"},
+	}) {
+		t.Error("two accounts should be named")
+	}
+
+	// The personal calendar has no owner address, and one on its own is not two accounts.
+	if spansAccounts([]generated.Calendar{{Id: 1}, {Id: 7, OwnerEmailAddress: "amelia@example.com"}}) {
+		t.Error("a calendar with no account made the list look like several")
 	}
 }
 
@@ -366,20 +391,6 @@ func TestTimetrackStopWithoutActiveTrack(t *testing.T) {
 	}
 	if requests.Load() != 1 {
 		t.Errorf("requests = %d, want only the lookup", requests.Load())
-	}
-}
-
-func TestTimetrackListCommand(t *testing.T) {
-	recordings := `{"Calendar::TimeTrack":[{"id":1,"title":"First"},{"id":2,"title":"Second"}],"Calendar::Todo":[{"id":3,"title":"Todo"}]}`
-	response, err := runJSONCommand(t, personalCalendarHandler(t, recordings), "timetrack", "list", "--limit", "1")
-	if err != nil {
-		t.Fatalf("execute timetrack list: %v", err)
-	}
-	if response.Summary != "1 time tracks" {
-		t.Errorf("summary = %q", response.Summary)
-	}
-	if response.Notice != "Showing 1 of 2 results. Use --all to see everything." {
-		t.Errorf("notice = %q", response.Notice)
 	}
 }
 

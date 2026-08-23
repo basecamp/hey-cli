@@ -5,6 +5,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
+
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
 )
@@ -43,14 +45,29 @@ func (c *calendarsCommand) run(cmd *cobra.Command, args []string) error {
 	calendars := unwrapCalendars(payload)
 
 	if writer.IsStyled() {
+		// The account is named only when there is more than one, since it is what tells two
+		// calendars of the same name apart — a reader with a work account and a personal one has
+		// two called "Maybe" and nothing else to go on. With one account it would be their own
+		// address written down the column.
+		accounts := spansAccounts(calendars)
+
 		table := newTable(cmd.OutOrStdout())
-		table.addRow([]string{"ID", "Name", "Kind", "Owned"})
+		header := []string{"ID", "Name", "Kind", "Owned"}
+		if accounts {
+			header = append(header, "Account")
+		}
+		table.addRow(header)
+
 		for _, cal := range calendars {
 			owned := "no"
 			if cal.Owned {
 				owned = "yes"
 			}
-			table.addRow([]string{fmt.Sprintf("%d", cal.Id), cal.Name, cal.Kind, owned})
+			row := []string{fmt.Sprintf("%d", cal.Id), cal.Name, cal.Kind, owned}
+			if accounts {
+				row = append(row, cal.OwnerEmailAddress)
+			}
+			table.addRow(row)
 		}
 		table.print()
 		return nil
@@ -64,4 +81,20 @@ func (c *calendarsCommand) run(cmd *cobra.Command, args []string) error {
 			Description: "List recordings for a calendar",
 		}),
 	)
+}
+
+// spansAccounts is whether the list covers more than one HEY account, which is the only time
+// naming them tells the reader anything.
+func spansAccounts(calendars []generated.Calendar) bool {
+	seen := ""
+	for _, calendar := range calendars {
+		if calendar.OwnerEmailAddress == "" {
+			continue
+		}
+		if seen != "" && calendar.OwnerEmailAddress != seen {
+			return true
+		}
+		seen = calendar.OwnerEmailAddress
+	}
+	return false
 }

@@ -482,6 +482,9 @@ hey recordings 123 --starts-on 2026-01-01 --ends-on 2026-01-31  # over a date ra
 hey recordings 123 --count      # how many entries, across every type
 ```
 
+`hey calendars` names the account each calendar belongs to when there is more than one, since
+that is what tells two calendars of the same name apart.
+
 Calendar IDs come from `hey calendars`. `--starts-on` defaults to today and `--ends-on` to
 thirty days after it; both want `YYYY-MM-DD`, and an unreadable date or an `--ends-on`
 before `--starts-on` is a usage error rather than an empty result. `hey recordings` groups
@@ -517,8 +520,14 @@ Habit IDs come from calendar recordings. Weekdays use `0` for Sunday through `6`
 ```bash
 hey timetrack start                # start tracking
 hey timetrack stop                 # stop tracking
+hey timetrack stop --category "Client work"   # stop and file it in one request
 hey timetrack current              # show active track
-hey timetrack list                 # list all tracks
+hey timetrack list                 # completed tracks, newest first
+hey timetrack list --all --json    # every page
+hey timetrack list --category 42   # only one category's tracks
+hey timetrack edit 1042 --end 2026-08-22T17:30
+hey timetrack edit 1042 --category "Client work" --notes "Invoice review"
+hey timetrack delete 1042
 hey timetrack export > tracked-time.csv
 hey timetrack export --output tracked-time.csv
 hey timetrack categories           # list categories
@@ -526,6 +535,19 @@ hey timetrack category create "Client work"
 hey timetrack category rename 123 "Planning"
 hey timetrack category delete 123
 ```
+
+`hey timetrack list` reads HEY's tracked time index: completed tracks, newest-ended first,
+with the day, the times, how long each took, the category and the notes. The track that is
+running is not in it — `hey timetrack current` is where that lives. One page arrives by
+default; `--limit` reads on until it has that many and `--all` reads the lot. `--category`
+takes an ID from `hey timetrack categories`.
+
+`hey timetrack edit` changes only the fields whose flags you give. `--start` and `--end`
+want `YYYY-MM-DDTHH:MM` in your own time zone, or a full RFC 3339 instant when the zone
+matters. A category is given as a title, and HEY creates the category if it has none by
+that title — on `edit` and on `stop --category` alike. There is no clearing a category that
+way: a blank title leaves the track filed where it was. Editing a track completes it, so
+`edit` is for tracks that have already finished.
 
 The time tracking export contains every completed entry, newest first, with Start, End, Duration, Category, and Notes columns. Ongoing time tracking is excluded. `--output` preserves an existing file unless `--force` is set.
 

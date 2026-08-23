@@ -1,18 +1,26 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	safefiles "github.com/basecamp/hey-cli/internal/attachments"
 	"github.com/basecamp/hey-cli/internal/output"
 	"github.com/basecamp/hey-cli/internal/terminal"
 )
+
+const maxTimeTrackPages = 100
 
 type timetrackCommand struct {
 	cmd *cobra.Command
@@ -24,7 +32,7 @@ func newTimetrackCommand() *timetrackCommand {
 		Use:   "timetrack",
 		Short: "Track time",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: start, stop, current, list, export, categories, category. Use current to check if tracking is active before start/stop. Export writes CSV to stdout or safely saves it with --output.",
+			"agent_notes": "Subcommands: start, stop, current, list, edit, delete, export, categories, category. Use current to check if tracking is active before start/stop. Stop takes --category to file the track as it stops it. List, edit and delete work on completed tracks and take the IDs list reports. Export writes CSV to stdout or safely saves it with --output.",
 		},
 	}
 
@@ -32,6 +40,8 @@ func newTimetrackCommand() *timetrackCommand {
 	timetrackCommand.cmd.AddCommand(newTimetrackStopCommand().cmd)
 	timetrackCommand.cmd.AddCommand(newTimetrackCurrentCommand().cmd)
 	timetrackCommand.cmd.AddCommand(newTimetrackListCommand().cmd)
+	timetrackCommand.cmd.AddCommand(newTimetrackEditCommand().cmd)
+	timetrackCommand.cmd.AddCommand(newTimetrackDeleteCommand().cmd)
 	timetrackCommand.cmd.AddCommand(newTimetrackExportCommand().cmd)
 	timetrackCommand.cmd.AddCommand(newTimetrackCategoriesCommand().cmd)
 	timetrackCommand.cmd.AddCommand(newTimetrackCategoryCommand().cmd)
@@ -81,7 +91,8 @@ func (c *timetrackStartCommand) run(cmd *cobra.Command, args []string) error {
 // stop
 
 type timetrackStopCommand struct {
-	cmd *cobra.Command
+	cmd      *cobra.Command
+	category string
 }
 
 func newTimetrackStopCommand() *timetrackStopCommand {
@@ -89,10 +100,18 @@ func newTimetrackStopCommand() *timetrackStopCommand {
 	timetrackStopCommand.cmd = &cobra.Command{
 		Use:   "stop",
 		Short: "Stop time tracking",
+		Long: `Stop the running time track.
+
+--category files the track under a category as it stops it, in the one request, and HEY
+creates the category if it has none by that title. There is no clearing a category this
+way: a blank title leaves the track filed where it was.`,
 		Example: `  hey timetrack stop
+  hey timetrack stop --category "Client work"
   hey timetrack stop --json`,
 		RunE: timetrackStopCommand.run,
 	}
+
+	timetrackStopCommand.cmd.Flags().StringVar(&timetrackStopCommand.category, "category", "", "Category title to file the stopped track under, created if HEY has none by that title")
 
 	return timetrackStopCommand
 }
@@ -112,11 +131,20 @@ func (c *timetrackStopCommand) run(cmd *cobra.Command, args []string) error {
 		return apierr.ErrNotFound("time track", "active")
 	}
 
-	if err = sdk.TimeTracks().Stop(ctx, track.Id); err != nil {
+	category := strings.TrimSpace(c.category)
+	if cmd.Flags().Changed("category") && category == "" {
+		return apierr.ErrUsage("--category needs a title; a blank one does not clear a category")
+	}
+
+	if err = sdk.TimeTracks().StopAndFile(ctx, track.Id, category); err != nil {
 		return apierr.FromSDK(err)
 	}
 
-	return writeMutation(cmd, "Time tracking stopped", nil)
+	summary := "Time tracking stopped"
+	if category != "" {
+		summary = fmt.Sprintf("Time tracking stopped and filed under %q", category)
+	}
+	return writeMutation(cmd, summary, nil)
 }
 
 // current
@@ -176,24 +204,35 @@ func (c *timetrackCurrentCommand) run(cmd *cobra.Command, args []string) error {
 // list
 
 type timetrackListCommand struct {
-	cmd   *cobra.Command
-	limit int
-	all   bool
+	cmd      *cobra.Command
+	limit    int
+	all      bool
+	category int64
 }
 
 func newTimetrackListCommand() *timetrackListCommand {
 	timetrackListCommand := &timetrackListCommand{}
 	timetrackListCommand.cmd = &cobra.Command{
 		Use:   "list",
-		Short: "List time tracks",
+		Short: "List completed time tracks",
+		Long: `List completed time tracks, newest first, with how long each one took.
+
+The track that is running is not here — read that with hey timetrack current. One page
+arrives by default; --limit reads on until it has that many, and --all reads the lot.`,
+		Annotations: map[string]string{
+			"agent_notes": "Reads HEY's tracked time index, newest-ended first. Category is a title and is empty for an unfiled track. --category takes a category ID from hey timetrack categories.",
+		},
 		Example: `  hey timetrack list
   hey timetrack list --limit 10
-  hey timetrack list --json`,
+  hey timetrack list --all --json
+  hey timetrack list --category 42`,
 		RunE: timetrackListCommand.run,
+		Args: cobra.NoArgs,
 	}
 
 	timetrackListCommand.cmd.Flags().IntVar(&timetrackListCommand.limit, "limit", 0, "Maximum number of time tracks to show")
 	timetrackListCommand.cmd.Flags().BoolVar(&timetrackListCommand.all, "all", false, "Fetch all results (override --limit)")
+	timetrackListCommand.cmd.Flags().Int64Var(&timetrackListCommand.category, "category", 0, "Only tracks filed under this category ID")
 
 	return timetrackListCommand
 }
@@ -202,20 +241,27 @@ func (c *timetrackListCommand) run(cmd *cobra.Command, args []string) error {
 	if err := requireAuth(); err != nil {
 		return err
 	}
+	if cmd.Flags().Changed("category") && c.category <= 0 {
+		return apierr.ErrUsage("--category takes a category ID; list them with hey timetrack categories")
+	}
 
 	ctx := cmd.Context()
-	resp, err := listPersonalRecordings(ctx)
+	first, err := c.readPage(ctx, "")
+	if err != nil {
+		return err
+	}
+	collected, err := collectPages(ctx, first, pageRequest{Limit: c.limit, All: c.all, MaxPages: maxTimeTrackPages}, c.readPage)
 	if err != nil {
 		return err
 	}
 
-	tracks := filterRecordingsByType(resp, "Calendar::TimeTrack")
-
-	total := len(tracks)
+	tracks := collected.Items
+	more := collected.Cursor != ""
 	if c.limit > 0 && !c.all && len(tracks) > c.limit {
 		tracks = tracks[:c.limit]
+		more = true
 	}
-	notice := output.TruncationNotice(len(tracks), total)
+	notice := timetrackListNotice(len(tracks), collected.Read, more, collected.Truncated)
 
 	if writer.IsStyled() {
 		if len(tracks) == 0 {
@@ -224,24 +270,294 @@ func (c *timetrackListCommand) run(cmd *cobra.Command, args []string) error {
 		}
 
 		table := newTable(cmd.OutOrStdout())
-		table.addRow([]string{"ID", "Title", "Start", "End"})
-		for _, t := range tracks {
-			table.addRow([]string{fmt.Sprintf("%d", t.Id), t.Title, formatTimestamp(t.StartsAt), formatTimestamp(t.EndsAt)})
+		table.addRow([]string{"ID", "Day", "Start", "End", "Length", "Category", "Notes"})
+		for _, track := range tracks {
+			table.addRow([]string{
+				strconv.FormatInt(track.Id, 10),
+				track.StartsAt.Local().Format(dateLayout),
+				formatClock(track.StartsAt),
+				timetrackEndClock(track.StartsAt, track.EndsAt),
+				formatTrackedLength(trackedLength(track)),
+				truncate(track.Category, 24),
+				truncate(track.Notes, 40),
+			})
 		}
 		table.print()
 		if notice != "" {
-			fmt.Fprintln(cmd.OutOrStdout(), notice)
+			fmt.Fprintf(cmd.OutOrStdout(), "\n%s\n", notice)
 		}
 		return nil
 	}
+	if stderrNotice := paginationNoticeForStderr(writer.EffectiveFormat(), notice); stderrNotice != "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), stderrNotice)
+	}
 
 	return writeOK(tracks,
-		output.WithSummary(fmt.Sprintf("%d time tracks", len(tracks))),
+		output.WithSummary(fmt.Sprintf("%d %s", len(tracks), timeTrackNoun(len(tracks)))),
 		output.WithNotice(notice),
+		output.WithMeta("pages_fetched", collected.Read),
 		output.WithBreadcrumbs(output.Breadcrumb{
-			Action:      "start",
-			Command:     "hey timetrack start",
-			Description: "Start time tracking",
+			Action:      "edit",
+			Command:     "hey timetrack edit <id>",
+			Description: "Edit a time track",
+		}),
+	)
+}
+
+func (c *timetrackListCommand) readPage(ctx context.Context, cursor string) (pageResult[generated.Recording], error) {
+	params := &generated.ListTimeTracksParams{}
+	if cursor != "" {
+		params.Page = &cursor
+	}
+	if c.category > 0 {
+		params.CategoryId = &c.category
+	}
+
+	page, err := sdk.TimeTracks().ListPage(ctx, params)
+	if err != nil {
+		return pageResult[generated.Recording]{}, c.readError(err)
+	}
+	if page == nil {
+		return pageResult[generated.Recording]{}, nil
+	}
+	return pageResult[generated.Recording]{Items: page.TimeTracks, Cursor: page.NextPage}, nil
+}
+
+// readError names the category HEY could not find. An id no category has answers 404 for
+// the whole list, which otherwise reads as somebody's tracked time having gone missing.
+func (c *timetrackListCommand) readError(err error) error {
+	converted := apierr.FromSDK(err)
+	if c.category > 0 && apierr.AsError(converted).Code == apierr.CodeNotFound {
+		return apierr.ErrNotFound("time track category", strconv.FormatInt(c.category, 10))
+	}
+	return converted
+}
+
+// timetrackListNotice says why the list stopped, because a list that quietly ended looks
+// like the whole of somebody's tracked time.
+func timetrackListNotice(shown, pages int, more, truncated bool) string {
+	switch {
+	case truncated:
+		return fmt.Sprintf("Stopped after %d pages, at %d %s. Narrow the list with --category.", pages, shown, timeTrackNoun(shown))
+	case more:
+		return fmt.Sprintf("Showing %d %s. Use --all to see everything.", shown, timeTrackNoun(shown))
+	default:
+		return ""
+	}
+}
+
+func timeTrackNoun(count int) string {
+	if count == 1 {
+		return "time track"
+	}
+	return "time tracks"
+}
+
+// trackedLength is how long a track took, computed from the two instants HEY serves
+// rather than read off a field: the index carries no duration of its own.
+func trackedLength(track generated.Recording) time.Duration {
+	return max(track.EndsAt.Sub(track.StartsAt), 0)
+}
+
+// formatTrackedLength reads a stretch of time the way a stopwatch does, hours and all.
+// Dropping the hours until there is one makes 0:45 either three quarters of a minute or
+// three quarters of an hour, and moves the columns after it.
+func formatTrackedLength(length time.Duration) string {
+	seconds := int(max(length, 0).Seconds())
+	return fmt.Sprintf("%d:%02d:%02d", seconds/3600, seconds/60%60, seconds%60)
+}
+
+// formatClock is a time of day on the reader's own clock. HEY serves every JSON timestamp in
+// UTC, so a track kept at noon in Zagreb arrives as 11:00 and reads as an hour it was not — and
+// with the day beside it, a late enough track lands on the wrong date entirely.
+func formatClock(ts time.Time) string {
+	if ts.IsZero() {
+		return ""
+	}
+	return ts.Local().Format("15:04")
+}
+
+// timetrackEndClock is the end of a track next to the day it started on. A track that ran
+// past midnight ended on another day, so that one carries its date rather than reading as
+// an end before its own start.
+func timetrackEndClock(startsAt, endsAt time.Time) string {
+	// Compared on the reader's clock, since that is the day the Day column shows: a track can
+	// cross midnight in one zone and not in another.
+	if !endsAt.IsZero() && endsAt.Local().Format(dateLayout) != startsAt.Local().Format(dateLayout) {
+		return endsAt.Local().Format("2006-01-02T15:04")
+	}
+	return formatClock(endsAt)
+}
+
+// edit
+
+type timetrackEditCommand struct {
+	cmd      *cobra.Command
+	start    string
+	end      string
+	category string
+	notes    string
+}
+
+func newTimetrackEditCommand() *timetrackEditCommand {
+	timetrackEditCommand := &timetrackEditCommand{}
+	timetrackEditCommand.cmd = &cobra.Command{
+		Use:   "edit <id>",
+		Short: "Edit a completed time track",
+		Long: `Edit a time track. Only the fields whose flags are given change.
+
+Timestamps are YYYY-MM-DDTHH:MM in your own time zone, or a full RFC 3339 instant when
+the zone matters. --category files the track under a category title, which HEY creates if
+it has none by that title; a blank title does not clear one. Editing a track completes it,
+so this is for tracks that have already finished.`,
+		Example: `  hey timetrack edit 1042 --end 2026-08-22T17:30
+  hey timetrack edit 1042 --category "Client work" --notes "Invoice review"
+  hey timetrack edit 1042 --start 2026-08-22T09:00 --end 2026-08-22T11:15`,
+		RunE: timetrackEditCommand.run,
+		Args: usageExactOneArg(),
+	}
+
+	timetrackEditCommand.cmd.Flags().StringVar(&timetrackEditCommand.start, "start", "", "New start, as YYYY-MM-DDTHH:MM in your time zone")
+	timetrackEditCommand.cmd.Flags().StringVar(&timetrackEditCommand.end, "end", "", "New end, as YYYY-MM-DDTHH:MM in your time zone")
+	timetrackEditCommand.cmd.Flags().StringVar(&timetrackEditCommand.category, "category", "", "Category title to file the track under, created if HEY has none by that title")
+	timetrackEditCommand.cmd.Flags().StringVar(&timetrackEditCommand.notes, "notes", "", "New notes")
+
+	return timetrackEditCommand
+}
+
+func (c *timetrackEditCommand) run(cmd *cobra.Command, args []string) error {
+	if err := requireAuth(); err != nil {
+		return err
+	}
+
+	trackID, err := parsePositiveID(args[0], "time track")
+	if err != nil {
+		return err
+	}
+	payload, err := c.payload(cmd)
+	if err != nil {
+		return err
+	}
+
+	track, err := sdk.TimeTracks().Update(cmd.Context(), trackID, generated.UpdateTimeTrackJSONRequestBody{CalendarTimeTrack: payload})
+	if err != nil {
+		return timetrackUpdateError(err)
+	}
+	return writeMutationLine(cmd,
+		fmt.Sprintf("Time track %d updated.", trackID),
+		"Time track updated",
+		track,
+		output.WithBreadcrumbs(output.Breadcrumb{
+			Action:      "list",
+			Command:     "hey timetrack list",
+			Description: "List completed time tracks",
+		}),
+	)
+}
+
+func (c *timetrackEditCommand) payload(cmd *cobra.Command) (generated.UpdateTimeTrackPayload, error) {
+	payload := generated.UpdateTimeTrackPayload{}
+	changed := false
+
+	if cmd.Flags().Changed("start") {
+		startsAt, err := parseTimestampArg("--start", c.start)
+		if err != nil {
+			return payload, err
+		}
+		payload.StartsAt = &startsAt
+		changed = true
+	}
+	if cmd.Flags().Changed("end") {
+		endsAt, err := parseTimestampArg("--end", c.end)
+		if err != nil {
+			return payload, err
+		}
+		payload.EndsAt = &endsAt
+		changed = true
+	}
+	if cmd.Flags().Changed("category") {
+		payload.CategoryTitle = strings.TrimSpace(c.category)
+		if payload.CategoryTitle == "" {
+			return payload, apierr.ErrUsage("--category needs a title; a blank one does not clear a category")
+		}
+		changed = true
+	}
+	if cmd.Flags().Changed("notes") {
+		payload.Notes = c.notes
+		if strings.TrimSpace(payload.Notes) == "" {
+			return payload, apierr.ErrUsage("--notes needs text; a blank one does not clear the notes")
+		}
+		changed = true
+	}
+	if !changed {
+		return payload, apierr.ErrUsage("provide at least one of --start, --end, --category, or --notes")
+	}
+	return payload, nil
+}
+
+// parseTimestampArg reads a moment typed on the command line, on the caller's own clock
+// unless they spelled out an offset, and hands it over in UTC — which needs no zone name
+// and is exact.
+func parseTimestampArg(label, value string) (time.Time, error) {
+	for _, layout := range []string{"2006-01-02T15:04", "2006-01-02 15:04", time.RFC3339} {
+		if parsed, err := time.ParseInLocation(layout, strings.TrimSpace(value), time.Local); err == nil {
+			return parsed.UTC(), nil
+		}
+	}
+	return time.Time{}, apierr.ErrUsageHint(
+		fmt.Sprintf("invalid %s: %s", label, value),
+		"timestamps are YYYY-MM-DDTHH:MM in your time zone, for example 2026-08-22T09:00, or a full RFC 3339 instant")
+}
+
+// timetrackUpdateError reads a 400 back as what it is. HEY answers one when it cannot
+// parse a timestamp it was sent, which is somebody's typing rather than a failure here.
+func timetrackUpdateError(err error) error {
+	converted := apierr.FromSDK(err)
+	if apierr.AsError(converted).HTTPStatus == http.StatusBadRequest {
+		return apierr.ErrUsageHint("HEY could not read the time track update",
+			"check --start and --end: timestamps are YYYY-MM-DDTHH:MM, for example 2026-08-22T09:00")
+	}
+	return converted
+}
+
+// delete
+
+type timetrackDeleteCommand struct {
+	cmd *cobra.Command
+}
+
+func newTimetrackDeleteCommand() *timetrackDeleteCommand {
+	timetrackDeleteCommand := &timetrackDeleteCommand{}
+	timetrackDeleteCommand.cmd = &cobra.Command{
+		Use:     "delete <id>",
+		Short:   "Delete a time track",
+		Example: `  hey timetrack delete 1042`,
+		RunE:    timetrackDeleteCommand.run,
+		Args:    usageExactOneArg(),
+	}
+	return timetrackDeleteCommand
+}
+
+func (c *timetrackDeleteCommand) run(cmd *cobra.Command, args []string) error {
+	if err := requireAuth(); err != nil {
+		return err
+	}
+
+	trackID, err := parsePositiveID(args[0], "time track")
+	if err != nil {
+		return err
+	}
+	if err = sdk.TimeTracks().Delete(cmd.Context(), trackID); err != nil {
+		return apierr.FromSDK(err)
+	}
+	return writeMutationLine(cmd,
+		fmt.Sprintf("Time track %d deleted.", trackID),
+		"Time track deleted",
+		nil,
+		output.WithBreadcrumbs(output.Breadcrumb{
+			Action:      "list",
+			Command:     "hey timetrack list",
+			Description: "List completed time tracks",
 		}),
 	)
 }
