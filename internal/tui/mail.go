@@ -853,7 +853,7 @@ func (v *mailView) SubnavItems() ([]navItem, int, string, bool) {
 	}
 	items := boxNavItems(boxes)
 	if v.hasLabels() {
-		items = append(items, navItem{label: "Labels"})
+		items = append(items, navItem{shortcut: "L", label: "Labels"})
 		if v.currentSourceKind() == mail.KindFolder {
 			selected = len(items) - 1
 		}
@@ -1190,6 +1190,11 @@ func (v *mailView) handleBoxShortcut(key string) tea.Cmd {
 		return nil
 	}
 	switch key {
+	case "L":
+		if v.hasLabels() {
+			v.openLabels()
+			return func() tea.Msg { return nil }
+		}
 	case "K":
 		if v.hasCollections() {
 			v.openCollections()
@@ -1763,7 +1768,9 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 	boxID := v.currentBoxID()
 
 	switch key {
-	case "l", "L":
+	// Only lowercase moves to Reply Later: Shift+L navigates to Labels, the
+	// way Shift+K reaches Collections.
+	case "l":
 		return v.moveSelectedToKnownBox("Reply Later", hey.BoxKindLater, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MoveToReplyLater(v.vc.ctx, p.ID)
 		})

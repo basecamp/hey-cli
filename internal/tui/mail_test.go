@@ -516,7 +516,6 @@ func TestMailViewPostingKeysCallExpectedEndpoints(t *testing.T) {
 		notice string
 	}{
 		{"reply later", "l", "/postings/moves.json", 4, postingActionRemove, "Thread moved to Reply Later"},
-		{"reply later uppercase", "L", "/postings/moves.json", 4, postingActionRemove, "Thread moved to Reply Later"},
 		{"set aside", "a", "/postings/moves.json", 3, postingActionRemove, "Thread moved to Set Aside"},
 		{"set aside uppercase", "A", "/postings/moves.json", 3, postingActionRemove, "Thread moved to Set Aside"},
 		{"seen", "e", "/postings/seen.json", 0, postingActionSeen, "Thread marked as seen"},
@@ -2872,8 +2871,8 @@ func TestMailViewLabelsTabAndPicker(t *testing.T) {
 	v := mailWithLabels()
 
 	items, selected, _, _ := v.SubnavItems()
-	if last := items[len(items)-1]; last.label != "Labels" || last.shortcut != "" {
-		t.Fatalf("the last tab should be Labels without the Reply Later shortcut: %+v", items)
+	if last := items[len(items)-1]; last.label != "Labels" || last.shortcut != "L" {
+		t.Fatalf("the last tab should be Labels with the L shortcut: %+v", items)
 	}
 	if len(items) != len(testBoxes())+1 {
 		t.Errorf("labels should not appear as their own tabs: %+v", items)
@@ -2926,9 +2925,15 @@ func TestMailViewLabelsTabAndPicker(t *testing.T) {
 		t.Error("left from Labels should return to the last box tab")
 	}
 
-	// Shift+L belongs to Reply Later, so Labels navigation does not capture it.
-	if cmd := v.handleBoxShortcut("L"); cmd != nil || labelsModal(v) != nil {
-		t.Error("the Labels tab captured the Reply Later shortcut")
+	// Shift+L opens the Labels picker, the way Shift+K opens Collections.
+	// Reply Later keeps lowercase l.
+	if cmd := v.handleBoxShortcut("L"); cmd == nil || labelsModal(v) == nil {
+		t.Error("Shift+L should open the Labels picker")
+	}
+	items, _, _, _ = v.SubnavItems()
+	labelsTab := items[len(items)-1]
+	if labelsTab.label != "Labels" || labelsTab.shortcut != "L" {
+		t.Errorf("Labels tab = %+v, want the L shortcut on it", labelsTab)
 	}
 }
 
