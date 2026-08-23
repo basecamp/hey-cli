@@ -84,8 +84,8 @@ type screenerRow struct {
 	id       int64
 	name     string
 	email    string
-	subject  string // subject of what they sent, or the address they write from
-	summary  string // excerpt of what they sent
+	subject  string // subject of what they sent, or the address they write from; pending rows only
+	summary  string // excerpt of what they sent; pending rows only
 	trailing string // when they wrote, or the decision and when it was made
 	verdict  string // the decision alone ("Screened in"), a prefix of trailing; empty while pending
 	denied   bool   // the decision was to screen them out
@@ -609,7 +609,13 @@ func (v *screenerView) visibleRows() int {
 	if v.notice != "" {
 		headerLines++
 	}
-	return max((v.vc.height-headerLines)/2, 1)
+	// Pending rows take two lines (the second holds the subject); history
+	// rows take one.
+	rowHeight := 2
+	if v.tab == screenerHistoryTab {
+		rowHeight = 1
+	}
+	return max((v.vc.height-headerLines)/rowHeight, 1)
 }
 
 func (v *screenerView) clearConfirmationView() string {
@@ -705,19 +711,18 @@ func pendingScreenerRow(clearance generated.Clearance) screenerRow {
 	}
 }
 
+// screenedScreenerRow is a one-line row: the label already carries the address,
+// so unlike a pending row there is no subject line under it.
 func screenedScreenerRow(clearance generated.Clearance) screenerRow {
 	verdict := screenedLabel(clearance.Status)
 	trailing := verdict
 	if decided := formatDisplayDate(clearance.UpdatedAt); decided != "" {
 		trailing += " · " + decided
 	}
-	subject, summary := clearanceEntryParts(clearance)
 	return screenerRow{
 		id:       clearance.Id,
 		name:     terminal.SanitizeLine(clearance.Petitioner.Name),
 		email:    terminal.SanitizeLine(clearance.Petitioner.EmailAddress),
-		subject:  subject,
-		summary:  summary,
 		trailing: trailing,
 		verdict:  verdict,
 		denied:   clearance.Status == hey.ClearanceDenied,
@@ -770,10 +775,11 @@ func screenerRowLabel(row screenerRow) string {
 func renderScreenerRows(pane *screenerPane, visible, width int) string {
 	// Rows mirror the mail lists: a bold bright first line ("Name <address>")
 	// with a bright trailing date, then an indented second line whose subject
-	// takes the hyperlink color and whose excerpt is faint. History rows lead
-	// the date with the decision, green for in and red for out. The cursor row
+	// takes the hyperlink color and whose excerpt is faint. History rows have
+	// no second line — their label already carries the address — and lead the
+	// date with the decision, green for in and red for out. The cursor row
 	// uses the accent foreground that is checked against the selection
-	// background, with the bar and background spanning both lines.
+	// background, with the bar and background spanning the whole row.
 	marker, selectedText := cursorStyles()
 	selectedGap := selectionStyle(lipgloss.NewStyle())
 	labelBase := lipgloss.NewStyle().Foreground(colorBright).Bold(true)
@@ -840,6 +846,9 @@ func renderScreenerRows(pane *screenerPane, visible, width int) string {
 			b.WriteString(emphasize(trailingBase).Render(rest))
 		}
 		b.WriteString("\n")
+		if subject == "" && summary == "" {
+			continue
+		}
 		if isCursor {
 			b.WriteString(marker.Render("│") + gapStyle.Render("   "))
 		} else {

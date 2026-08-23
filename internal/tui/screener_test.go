@@ -322,6 +322,11 @@ func TestScreenerTabsOverToPreviousDecisions(t *testing.T) {
 			t.Errorf("history view is missing %q:\n%s", want, rendered)
 		}
 	}
+	// History rows are one line: the address shows in the label only, with no
+	// second line repeating it.
+	if strings.Count(rendered, "alice@example.com") != 1 {
+		t.Errorf("history rows should show the address once, in the label:\n%s", rendered)
+	}
 
 	if cmd := view.HandleContentKey(keyPress("tab")); cmd != nil {
 		t.Error("tabbing back to a loaded pane should not refetch")
