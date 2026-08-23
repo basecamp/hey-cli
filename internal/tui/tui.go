@@ -17,6 +17,7 @@ import (
 
 	attachmentfiles "github.com/basecamp/hey-cli/internal/attachments"
 	"github.com/basecamp/hey-cli/internal/config"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 // --- Shared messages ---
@@ -27,6 +28,20 @@ func (e errMsg) Error() string { return e.err.Error() }
 
 type ctrlCResetMsg struct{}
 type spinnerTickMsg struct{}
+
+// TopicRequest identifies a thread to open in the TUI. AccountID selects a
+// linked account when the request comes from another process.
+type TopicRequest struct {
+	TopicID   int64  `json:"topic_id"`
+	AccountID int64  `json:"account_id,omitempty"`
+	Title     string `json:"title,omitempty"`
+}
+
+// Options configures the TUI's initial destination.
+type Options struct {
+	OpenTopic TopicRequest
+	Instance  string
+}
 
 // --- Model ---
 
@@ -78,6 +93,8 @@ type model struct {
 
 	// Linked mail accounts
 	mailAccounts            []mailAccountChoice
+	mailAccountsLoaded      bool
+	mailSourcesLoaded       bool
 	mailAccount             mailAccountChoice
 	mailAccountCursor       int
 	mailAccountPicker       bool
@@ -98,6 +115,7 @@ type model struct {
 	spinnerPhase float64
 	err          error
 	ctrlCOnce    bool
+	pendingTopic *TopicRequest
 }
 
 func newModel() model {
@@ -209,6 +227,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case notifyMsg:
 		return m, m.showToast(msg)
 
+	case TopicRequest:
+		return m.openTopic(msg)
+
 	case toastExpiredMsg:
 		if msg.id == m.toastID {
 			m.toast = notifyMsg{}
@@ -216,9 +237,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case mailAccountsLoadedMsg:
+		m.mailAccountsLoaded = true
 		if msg.err != nil {
 			m.mailAccountDiscoveryErr = errorNotice("Could not load the mail accounts", msg.err)
 			m.updateHelpBindings()
+			if m.pendingTopic != nil {
+				request := *m.pendingTopic
+				request.AccountID = 0
+				m.pendingTopic = nil
+				return m.openTopic(request)
+			}
 			return m, nil
 		}
 		m.mailAccountDiscoveryErr = ""
@@ -233,6 +261,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.mailAccountCursor = msg.selected
 		}
 		m.updateHelpBindings()
+		if m.pendingTopic != nil {
+			request := *m.pendingTopic
+			return m.openTopic(request)
+		}
 		return m, nil
 
 	case mailAccountSwitchedMsg:
@@ -242,10 +274,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mailAccountSwitching = false
 		if msg.err != nil {
 			m.mailAccountErr = errorNotice("Could not switch account", msg.err)
+			m.pendingTopic = nil
 			m.updateHelpBindings()
 			return m, nil
 		}
-		return m.applyMailAccount(msg.account, msg.client)
+		updated, initCmd := m.applyMailAccount(msg.account, msg.client)
+		next, ok := updated.(model)
+		if !ok {
+			return m, initCmd
+		}
+		m = next
+		if m.pendingTopic == nil {
+			return m, initCmd
+		}
+		request := *m.pendingTopic
+		m.pendingTopic = nil
+		opened, topicCmd := m.openTopic(request)
+		return opened, tea.Batch(initCmd, topicCmd)
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -387,13 +432,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// HEY serves The Screener's stream name with its count, and the sources read asks
 		// for both, so this is where the watch is opened first.
 		watch := m.startScreenerWatch(msg.screenerStream)
+		var cmd tea.Cmd
 		if m.activeView != m.mailView {
-			cmd, _ := m.mailView.Update(msg)
-			return m, tea.Batch(m.stampViewCmd(cmd), watch)
+			cmd, _ = m.mailView.Update(msg)
+			cmd = m.stampViewCmd(cmd)
+		} else {
+			cmd, _ = m.activeView.Update(msg)
+			cmd = m.syncLoading(cmd)
+			m.updateHelpBindings()
 		}
-		cmd, _ := m.activeView.Update(msg)
-		cmd = m.syncLoading(cmd)
-		m.updateHelpBindings()
+		m.mailSourcesLoaded = true
+		if m.pendingTopic != nil {
+			request := *m.pendingTopic
+			opened, topicCmd := m.openTopic(request)
+			return opened, tea.Batch(cmd, watch, topicCmd)
+		}
 		return m, tea.Batch(cmd, watch)
 
 	case screenerCountLoadedMsg:
@@ -512,6 +565,7 @@ func (m model) applyMailAccount(account mailAccountChoice, client *hey.Client) (
 		m.activeView = m.journalView
 	}
 	m.mailAccount = account
+	m.mailSourcesLoaded = false
 	m.mailAccountPicker = false
 	m.mailAccountUnavailable = false
 	m.mailAccountErr = ""
@@ -982,6 +1036,46 @@ func (m model) switchSection(sec section) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m model) openTopic(request TopicRequest) (tea.Model, tea.Cmd) {
+	if request.TopicID <= 0 {
+		return m, nil
+	}
+	if request.AccountID > 0 && m.mailAccount.id != request.AccountID {
+		if m.hasPendingMutation() || m.mailView.CapturingInput() {
+			m.pendingTopic = nil
+			return m, notify("Finish the current mail action before opening another account")
+		}
+		m.pendingTopic = &request
+		if !m.mailAccountsLoaded {
+			return m, nil
+		}
+		for _, account := range m.mailAccounts {
+			if account.id != request.AccountID {
+				continue
+			}
+			m.mailAccountRequestID++
+			m.mailAccountSwitching = true
+			return m, switchMailAccount(m.vc.ctx, m.rootSDK, account, m.mailAccountRequestID)
+		}
+		m.pendingTopic = nil
+		m.mailAccountErr = fmt.Sprintf("Mail account %d is not available", request.AccountID)
+		m.updateHelpBindings()
+		return m, nil
+	}
+	if !m.mailSourcesLoaded {
+		m.pendingTopic = &request
+		return m, nil
+	}
+	m.pendingTopic = nil
+	m.section = sectionMail
+	m.focus = rowContent
+	m.activeView = m.mailView
+	m.activeView.Resize(m.vc.width, m.vc.height)
+	m.updateHelpBindings()
+	title := terminal.SanitizeLine(request.Title)
+	return m, m.syncLoading(m.mailView.requestTopic(0, request.TopicID, 0, title))
+}
+
 func (m model) handleSectionKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.Key().Code {
 	case tea.KeyLeft:
@@ -1009,12 +1103,20 @@ func (m model) handleSubnavKey(msg tea.KeyPressMsg) tea.Cmd {
 // --- Shared utilities ---
 
 // Run starts the TUI with the resolved mail account, the identity root client used for
-// interactive account switching, and the watchers that tell it when things changed.
-func Run(rootSDK, sdk *hey.Client, selected string, watchers Watchers) error {
+// interactive account switching, the live watchers, and an optional initial thread.
+func Run(rootSDK, sdk *hey.Client, selected string, watchers Watchers, options Options) error {
 	m := newModelWithMailAccounts(rootSDK, sdk, selected, watchers)
+	if options.OpenTopic.TopicID > 0 {
+		request := options.OpenTopic
+		m.pendingTopic = &request
+	}
 	m.help.setHidden(config.HelpHidden())
 	m.saveHelpHidden = config.SaveHelpHidden
 	p := tea.NewProgram(m)
+	listener, listenErr := startTopicListener(options.Instance, p.Send)
+	if listenErr == nil {
+		defer closeTopicListener(options.Instance, listener)
+	}
 	_, err := p.Run()
 	return err
 }

@@ -1650,6 +1650,21 @@ func TestMailViewEnterOpensSelectedThread(t *testing.T) {
 	}
 }
 
+func TestMailViewDirectTopicDerivesItsTitleAndIgnoresTheCurrentBox(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusOK)
+
+	loaded, ok := runCmd(v.requestTopic(0, 100, 0, "")).(topicLoadedMsg)
+	if !ok {
+		t.Fatal("direct topic did not return topicLoadedMsg")
+	}
+	if loaded.title != "Hello world" || loaded.boxID != 0 {
+		t.Fatalf("direct topic = title %q box %d", loaded.title, loaded.boxID)
+	}
+	if _, consumed := v.Update(loaded); !consumed || !v.inThread || v.topicID != 100 {
+		t.Fatalf("direct topic was not opened: consumed=%v open=%v id=%d", consumed, v.inThread, v.topicID)
+	}
+}
+
 func TestMailViewDownloadsImageDataOnlyForKittyRenderer(t *testing.T) {
 	var imageRequests atomic.Int64
 	imageData := testPNG(t)

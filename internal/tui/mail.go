@@ -377,7 +377,10 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return v.loadMoreSearchResults(), true
 
 	case topicLoadedMsg:
-		if msg.boxID != v.currentBoxID() {
+		// A zero box identifies a topic opened directly rather than selected from
+		// the current list. It remains valid while sources load or another section
+		// is on screen.
+		if msg.boxID != 0 && msg.boxID != v.currentBoxID() {
 			return nil, true
 		}
 		if cmd, ok := v.requests.settle(newRequestResult(msg.requestID, msg.err)); !ok {
@@ -2144,6 +2147,9 @@ func (v *mailView) fetchTopic(ctx context.Context, requestID uint64, boxID, topi
 		var images [][]byte
 		if wantImages {
 			images = newImageBudget().fetchImages(ctx, v.vc.imageFetcher, imageURLs)
+		}
+		if title == "" {
+			title = entries[0].Summary
 		}
 
 		return topicLoadedMsg{

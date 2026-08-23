@@ -115,6 +115,37 @@ func TestInitReturnsCmd(t *testing.T) {
 	}
 }
 
+func TestTopicRequestSwitchesToMailAndStartsTheThreadRead(t *testing.T) {
+	m := sizedModel()
+	m.mailSourcesLoaded = true
+	m.section = sectionCalendar
+	m.activeView = m.calendarView
+
+	updated, cmd := m.Update(TopicRequest{TopicID: 5511})
+	m = updated.(model)
+	if m.section != sectionMail || m.activeView != m.mailView || m.focus != rowContent {
+		t.Fatalf("topic request left the TUI at section=%d focus=%d view=%T", m.section, m.focus, m.activeView)
+	}
+	if cmd == nil {
+		t.Fatal("topic request did not start a thread read")
+	}
+}
+
+func TestTopicRequestWaitsForMailSourcesBeforeReading(t *testing.T) {
+	m := sizedModel()
+	updated, cmd := m.Update(TopicRequest{TopicID: 5511})
+	m = updated.(model)
+	if cmd != nil || m.pendingTopic == nil {
+		t.Fatalf("topic started before mail sources loaded: cmd=%v pending=%v", cmd != nil, m.pendingTopic != nil)
+	}
+
+	updated, cmd = m.Update(mailSourcesLoadedMsg{})
+	m = updated.(model)
+	if cmd == nil || m.pendingTopic != nil {
+		t.Fatalf("topic did not start after mail sources loaded: cmd=%v pending=%v", cmd != nil, m.pendingTopic != nil)
+	}
+}
+
 func TestQuestionMarkTogglesHelpAndResizesContent(t *testing.T) {
 	m := modelWithBoxes()
 	visibleHeight := m.vc.height

@@ -19,7 +19,7 @@ func stubRunTUI(t *testing.T) *int {
 	t.Helper()
 	calls := 0
 	orig := runTUI
-	runTUI = func(*hey.Client, *hey.Client, string, tui.Watchers) error {
+	runTUI = func(*hey.Client, *hey.Client, string, tui.Watchers, tui.Options) error {
 		calls++
 		return nil
 	}
@@ -100,6 +100,49 @@ func TestHeyTuiOpensTUIWhenAuthenticated(t *testing.T) {
 	}
 	if *tuiCalls != 2 {
 		t.Errorf("TUI opened %d times, want 2", *tuiCalls)
+	}
+}
+
+func TestHeyTuiTopicStartsAtTheRequestedThread(t *testing.T) {
+	isolateAgents(t)
+	server := quietServer(t)
+	original := runTUI
+	var options tui.Options
+	runTUI = func(_ *hey.Client, _ *hey.Client, _ string, _ tui.Watchers, got tui.Options) error {
+		options = got
+		return nil
+	}
+	t.Cleanup(func() { runTUI = original })
+
+	if _, _, err := runAuthCommand(t, t.TempDir(), server.URL, "environment-token", false,
+		"tui", "--topic", "5511", "--topic-title", "Lunch on Thursday?", "--instance", "omarchy"); err != nil {
+		t.Fatalf("hey tui --topic: %v", err)
+	}
+	if options.OpenTopic.TopicID != 5511 || options.OpenTopic.Title != "Lunch on Thursday?" || options.Instance != "omarchy" {
+		t.Fatalf("initial topic = %#v", options.OpenTopic)
+	}
+}
+
+func TestHeyTuiRemoteSendsTheTopicWithoutLaunching(t *testing.T) {
+	isolateAgents(t)
+	server := quietServer(t)
+	calls := stubRunTUI(t)
+	original := openTopicInRunningTUI
+	var request tui.TopicRequest
+	var instance string
+	openTopicInRunningTUI = func(gotInstance string, got tui.TopicRequest) error {
+		instance = gotInstance
+		request = got
+		return nil
+	}
+	t.Cleanup(func() { openTopicInRunningTUI = original })
+
+	if _, _, err := runAuthCommand(t, t.TempDir(), server.URL, "environment-token", false,
+		"tui", "--topic", "5511", "--topic-title", "Lunch on Thursday?", "--instance", "omarchy", "--remote"); err != nil {
+		t.Fatalf("hey tui --remote: %v", err)
+	}
+	if request.TopicID != 5511 || request.Title != "Lunch on Thursday?" || instance != "omarchy" || *calls != 0 {
+		t.Fatalf("remote request = %#v, TUI launches = %d", request, *calls)
 	}
 }
 

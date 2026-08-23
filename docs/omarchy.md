@@ -179,11 +179,16 @@ attention model puts new mail in one place — and sends the toast itself throug
 - **DND is honoured.** The toast goes out under `--app-name HEY`: Omarchy's default
   app-name `omarchy-action` deliberately bypasses notification silencing, so identifying
   as HEY is what makes SUPER+CTRL+comma mute the toasts (into history) like any other app.
-- **Click focuses the TUI.** `--exec omarchy-launch-or-focus-tui --app-id=org.omarchy.hey
-  hey tui` — the shell runs it daemon-side, so it survives shell restarts — with the bar's
-  envelope as the glyph.
-- **No state file.** Nothing is remembered but the last toast's id, in the shell's memory;
-  turning toasts on is nothing more than setting the key.
+- **A single click opens its thread.** The plugin reads the topic id from the posting's
+  `app_url`, sends it to the named Omarchy TUI with
+  `hey tui --instance omarchy --topic <id> --remote`, then focuses the
+  `org.omarchy.hey` window. When no TUI is running, the same click launches
+  `hey tui --instance omarchy --topic <id>` directly. A grouped toast focuses the Imbox because it represents
+  multiple threads rather than choosing one for the reader.
+- **No persistent state file.** Nothing is remembered but the last toast's id, in the
+  shell's memory. A running TUI listens for topic requests on a mode-0600, instance-named
+  socket under `XDG_RUNTIME_DIR` and removes it when the TUI exits; turning toasts on is nothing more
+  than setting the plugin key.
 - **Mail text never reads as an option.** A subject or sender can start with a dash, and
   `notify-send` parses one wherever it appears; a leading word joiner (U+2060) makes the
   argument a plain positional and is invisible on screen.
@@ -215,7 +220,7 @@ new --run-async 'notify-send -a HEY "New mail in HEY"'` is the one-liner.
   desktop-shaped in the CLI at all: the plugin composes `hey box`, `hey watch`, `hey
   screener` and `hey seen`, and a user can run any of them by hand. What counts as new
   mail is a watch event — HEY semantics, decided once — and what to do about it (a toast
-  under the shell's app-name, a glyph, a click that focuses the TUI) is the plugin's.
+  under the shell's app-name, a glyph, a click that opens `hey tui --topic`) is the plugin's.
   (Two earlier cuts were built and superseded before release: a `hey omarchy poll` — one
   Imbox read that also diffed a fingerprint file to toast — that was ten minutes stale by
   construction and an Omarchy-named command on a general CLI; and a `hey watch --notify`

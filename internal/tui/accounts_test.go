@@ -233,6 +233,53 @@ func TestAccountSwitchRebuildsViewsAndCancelsOldGeneration(t *testing.T) {
 	}
 }
 
+func TestTopicRequestSwitchesToItsMailAccountBeforeOpening(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"id":1,"accounts":[{"id":1,"status":"active"},{"id":2,"status":"active"}]}`)
+	}))
+	t.Cleanup(server.Close)
+	root := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "token"}, hey.WithMaxRetries(0))
+	m := newModelWithMailAccounts(root, root, "all", Watchers{})
+	m.mailAccountsLoaded = true
+	m.mailAccounts = []mailAccountChoice{{label: "All Accounts"}, {id: 2, label: "jane@company.example"}}
+
+	updated, cmd := m.Update(TopicRequest{TopicID: 5511, AccountID: 2})
+	m = updated.(model)
+	if cmd == nil || !m.mailAccountSwitching || m.pendingTopic == nil {
+		t.Fatal("topic request did not start its account switch")
+	}
+	switchMsg := cmd().(mailAccountSwitchedMsg)
+	updated, initCmd := m.Update(switchMsg)
+	m = updated.(model)
+	if initCmd == nil || m.mailAccount.id != 2 || m.pendingTopic == nil {
+		t.Fatalf("topic account switch did not wait for mail: account=%d pending=%v", m.mailAccount.id, m.pendingTopic != nil)
+	}
+
+	updated, openCmd := m.Update(mailSourcesLoadedMsg{})
+	m = updated.(model)
+	if openCmd == nil || m.pendingTopic != nil || m.section != sectionMail {
+		t.Fatalf("topic was not opened after mail loaded: pending=%v section=%d", m.pendingTopic != nil, m.section)
+	}
+}
+
+func TestTopicRequestDoesNotDiscardAnAccountSensitiveAction(t *testing.T) {
+	m := newModel()
+	m.mailAccountsLoaded = true
+	m.mailSourcesLoaded = true
+	m.mailAccounts = []mailAccountChoice{{label: "All Accounts"}, {id: 2, label: "jane@company.example"}}
+	m.mailView.pendingMutations = 1
+
+	updated, cmd := m.Update(TopicRequest{TopicID: 5511, AccountID: 2})
+	m = updated.(model)
+	if cmd == nil || m.mailAccountSwitching || m.pendingTopic != nil {
+		t.Fatalf("topic request disturbed a pending action: switching=%v pending=%v", m.mailAccountSwitching, m.pendingTopic != nil)
+	}
+	if _, ok := cmd().(notifyMsg); !ok {
+		t.Fatal("blocked topic request did not explain why")
+	}
+}
+
 func TestFailedAccountSwitchPreservesCurrentViews(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

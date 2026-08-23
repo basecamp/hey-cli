@@ -276,6 +276,10 @@ hey todo list --limit
 hey todo uncomplete
 hey trash
 hey tui
+hey tui --instance
+hey tui --remote
+hey tui --topic
+hey tui --topic-title
 hey unseen
 hey unshare
 hey upgrade
