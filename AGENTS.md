@@ -296,8 +296,8 @@ while it is open, and it asks to be closed again with `screenerClosedMsg`.
 The rest of `internal/tui/` is shared infrastructure: `tui.go` (model and
 router), `section_view.go` (the interface), plus `nav.go`, `content.go`, `help.go`,
 `styles.go`, `loading.go`, `kitty.go`, `html.go`, `live.go`, `covers.go`, `cover_picker.go`,
-`calendar_views.go`, `datetime.go` and `event_repeat.go`. Read the directory rather than a
-table here.
+`calendar_views.go`, `datetime.go`, `event_repeat.go`, `time_track.go` and
+`time_track_form.go`. Read the directory rather than a table here.
 
 To add a new section: implement the `sectionView` interface in a new file, add a field and constructor call in `newModel`, and add a case in `switchSection`.
 
@@ -337,6 +337,27 @@ The selected event is marked by a light travelling round its edge rather than a 
 or when nothing has drawn the calendar since the last one, which is how it notices the reader
 went to another section without a hook for it. The blend only happens between colors a theme
 named: mixing an ANSI slot would put a color from a palette nobody is using on screen.
+
+### Tracked time is read from its own index, and nothing else works
+
+`l` opens time tracking: the stopwatch, the tracked-time screen and the categories. Three facts
+about that corner are worth knowing before touching it, because each one cost a wrong turn.
+
+**Tracked time is only readable through `GET /calendar/time_tracks`.** Reading `Calendar::TimeTrack`
+out of the personal calendar's recordings does not work — a 90-day window answers none at all and
+a three-year one misses older tracks — and the CSV export, which does have the right scope, carries
+no ids, so nothing read that way can be edited. That index answered 406 until haystack grew a JSON
+view for it (basecamp/haystack#8657); the SDK's `TimeTracks().ListPage` models it, and the screen
+grows down it the way every other list here grows.
+
+**A track's category is a title, not an id.** It arrives as a plain string, empty for a track filed
+under nothing, and it is written back as `category_title` — which *creates* the category if HEY has
+none by that name. A blank does not un-file a track: once filed, a track can only be moved. The
+form says both of those out loud rather than letting a reader find out.
+
+**Every update completes a track.** `@recording.complete` is unconditional, so there is no
+adjusting a running one — an update stops it. That is why starting a track cannot name a category
+either, and why the stopwatch on the menu is the only place a running track appears.
 
 **An event write is not a partial.** HEY clears the notes, location, link and attached entry on
 any update that omits them, and reminders and the countdown likewise, so `startEventForm` hands

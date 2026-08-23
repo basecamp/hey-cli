@@ -1623,7 +1623,7 @@ func TestDayViewLabelsItsSections(t *testing.T) {
 	habits := []Recording{{ID: 4, Title: "Read 20 pages"}}
 
 	day := time.Date(2026, 8, 24, 9, 0, 0, 0, time.Local)
-	view := stripANSI(renderDayView(events, habits, nil, day, "p/n day", 100, 24, selection{}))
+	view := stripANSI(renderDayView(events, habits, nil, day, "p/n day", 100, 24, selection{}, nil))
 	for _, label := range []string{"Habits", "Monday, August 24", "p/n day", "All day"} {
 		if !strings.Contains(view, label) {
 			t.Errorf("day view did not label its %q section: %q", label, view)
@@ -1641,7 +1641,7 @@ func TestAllDayEventsAreBlocksInTheirCalendarsColor(t *testing.T) {
 	}
 	day := time.Date(2026, 8, 21, 9, 0, 0, 0, time.Local)
 
-	rendered := renderDayView(events, nil, nil, day, "", 100, 14, selection{})
+	rendered := renderDayView(events, nil, nil, day, "", 100, 14, selection{}, nil)
 	lines := strings.Split(rendered, "\n")
 
 	gold := lines[rowContaining(t, lines, "Summer friday")]
@@ -1676,7 +1676,7 @@ func TestDayViewRulesFallFromEveryHourWithoutCuttingIntoAnEvent(t *testing.T) {
 	// an hour every four columns and the 11:00 event's block on the four from 44. The
 	// day's header and the hour axis take the first two rows of the 40 it is given,
 	// leaving 38 for the grid.
-	lines := strings.Split(stripANSI(renderDayView(events, nil, nil, day, "", 98, 40, selection{})), "\n")
+	lines := strings.Split(stripANSI(renderDayView(events, nil, nil, day, "", 98, 40, selection{}, nil)), "\n")
 	grid := lines[2:]
 	if len(grid) != 38 {
 		t.Fatalf("grid is %d rows of the 38 left to it: %q", len(grid), grid)
@@ -1705,7 +1705,7 @@ func TestDayViewRulesFallFromEveryHourWithoutCuttingIntoAnEvent(t *testing.T) {
 
 func TestEmptyDayIsItsHoursRatherThanANotice(t *testing.T) {
 	day := time.Date(2026, 8, 22, 9, 0, 0, 0, time.Local)
-	view := stripANSI(renderDayView(nil, nil, nil, day, "", 96, 20, selection{}))
+	view := stripANSI(renderDayView(nil, nil, nil, day, "", 96, 20, selection{}, nil))
 
 	if strings.Contains(view, "no events") {
 		t.Errorf("an empty day still announces itself: %q", view)
@@ -1759,7 +1759,7 @@ func TestDayViewGivesASingleEventTheWholeGrid(t *testing.T) {
 
 	// An hour every four columns, so 07:00 starts on column 28 and the block covers the
 	// rules at 28 and 32 for every one of the grid's 38 rows.
-	grid := strings.Split(stripANSI(renderDayView(events, nil, nil, day, "", 98, 40, selection{})), "\n")[2:]
+	grid := strings.Split(stripANSI(renderDayView(events, nil, nil, day, "", 98, 40, selection{}, nil)), "\n")[2:]
 	if len(grid) != 38 {
 		t.Fatalf("grid is %d rows, want 38: %q", len(grid), grid)
 	}
@@ -1873,7 +1873,7 @@ func TestTheDayMarksWhereTheClockIs(t *testing.T) {
 		StartsAt: now.Truncate(time.Hour).Add(-time.Hour), EndsAt: now.Truncate(time.Hour).Add(2 * time.Hour)}
 
 	lines := strings.Split(stripANSI(renderDayView([]Recording{event}, nil, nil,
-		now, "p/n day", 100, 16, selection{})), "\n")
+		now, "p/n day", 100, 16, selection{}, nil)), "\n")
 	if !strings.Contains(lines[1], now.Format("15")) || !strings.Contains(lines[1], now.Format("04")) {
 		t.Errorf("the clock is not named over the axis: %q", lines[1])
 	}
@@ -1911,8 +1911,8 @@ func TestTheDayMarksWhereTheClockIs(t *testing.T) {
 	// The colon blinks a second on and a second off, and is swapped for a space rather than
 	// dropped so the digits either side of it never move.
 	on := time.Date(2026, 8, 23, 15, 55, 0, 0, time.Local)
-	lit := nowLabel(on, 40, 100)
-	unlit := nowLabel(on.Add(time.Second), 40, 100)
+	lit := nowRow(on, 40, 100, nil)
+	unlit := nowRow(on.Add(time.Second), 40, 100, nil)
 	if !strings.Contains(lit, "15:55") {
 		t.Errorf("an even second reads %q, want the colon", stripANSI(lit))
 	}
@@ -1924,12 +1924,73 @@ func TestTheDayMarksWhereTheClockIs(t *testing.T) {
 	}
 
 	// A day the reader has stepped away from has no now on it, and gives back the row.
-	yesterday := stripANSI(renderDayView(nil, nil, nil, now.AddDate(0, 0, -1), "p/n day", 100, 16, selection{}))
+	yesterday := stripANSI(renderDayView(nil, nil, nil, now.AddDate(0, 0, -1), "p/n day", 100, 16, selection{}, nil))
 	if strings.ContainsRune(yesterday, nowRule) {
 		t.Error("yesterday is marked with a now line")
 	}
 	if strings.Contains(strings.Split(yesterday, "\n")[1], ":") {
 		t.Error("yesterday kept the clock's row")
+	}
+}
+
+// A running time track sits on the clock's row, at whichever end the clock has left room at. The
+// clock crosses the day as the hours pass, so a badge fixed to one side would end up under it.
+func TestARunningTrackTakesTheEndTheClockLeaves(t *testing.T) {
+	now := time.Date(2026, 8, 23, 15, 55, 0, 0, time.Local)
+	track := &runningTrack{category: "Deep work", since: now.Add(-95 * time.Minute)}
+
+	// The clock near the right: the badge goes left.
+	left := stripANSI(nowRow(now, 90, 100, track))
+	if !strings.HasPrefix(left, "● Deep work 1:35:00") {
+		t.Errorf("with the clock at the right the row reads %q", left)
+	}
+
+	// And near the left it goes right, ending at the edge.
+	right := stripANSI(nowRow(now, 6, 100, track))
+	if !strings.HasSuffix(right, "● Deep work 1:35:00") {
+		t.Errorf("with the clock at the left the row reads %q", right)
+	}
+
+	// The clock is never given up for the badge: a row too narrow for both keeps the time.
+	narrow := stripANSI(nowRow(now, 10, 22, track))
+	if !strings.Contains(narrow, "15:55") {
+		t.Errorf("the badge crowded out the clock: %q", narrow)
+	}
+	if strings.Contains(narrow, "Deep work") {
+		t.Errorf("the badge was drawn with nowhere to put it: %q", narrow)
+	}
+
+	// Elapsed is hours and minutes, not seconds: it sits beside a colon already blinking once a
+	// second, and two things counting at once is one too many.
+	if got := (runningTrack{category: "Errands", since: now.Add(-45 * time.Second)}).badge(now); got != "● Errands 0:00:45" {
+		t.Errorf("badge = %q", got)
+	}
+	// A track with no category still says something rather than nothing.
+	if got := (runningTrack{since: now.Add(-time.Hour)}).badge(now); got != "● Tracking 1:00:00" {
+		t.Errorf("badge = %q", got)
+	}
+}
+
+// The badge reads what the time tracking menu left on the view, so it is on screen while the
+// menu is closed — which is the only time anybody would see it.
+func TestTheDayShowsWhatIsBeingTracked(t *testing.T) {
+	v := dayWithEvents(t)
+	v.now = time.Now
+
+	if v.trackBadge() != nil {
+		t.Fatal("a badge with nothing running")
+	}
+
+	started := time.Now().Add(-2 * time.Hour)
+	v.ongoing = &OngoingTrack{ID: 7, Category: "Client work", StartedAt: started}
+	badge := v.trackBadge()
+	if badge == nil || badge.category != "Client work" || !badge.since.Equal(started) {
+		t.Fatalf("badge = %+v", badge)
+	}
+
+	v.rebuildView()
+	if !strings.Contains(stripANSI(v.View()), "● Client work 2:00:00") {
+		t.Errorf("the day does not show what is being tracked:\n%s", stripANSI(v.View()))
 	}
 }
 
@@ -1984,14 +2045,14 @@ func TestTheDayCountsDownToWhatIsComing(t *testing.T) {
 
 	day := time.Date(2026, 8, 23, 9, 0, 0, 0, time.Local)
 	lines := strings.Split(stripANSI(renderDayView(nil, nil, []Recording{countdown},
-		day, "p/n day", 100, 20, selection{})), "\n")
+		day, "p/n day", 100, 20, selection{}, nil)), "\n")
 	if got := strings.TrimSpace(lines[0]); got != "2 days until Kevin's leaving do" {
 		t.Errorf("the day says %q", got)
 	}
 
 	// One day out reads as a day, not as days.
 	lines = strings.Split(stripANSI(renderDayView(nil, nil, []Recording{countdown},
-		day.AddDate(0, 0, 1), "p/n day", 100, 20, selection{})), "\n")
+		day.AddDate(0, 0, 1), "p/n day", 100, 20, selection{}, nil)), "\n")
 	if got := strings.TrimSpace(lines[0]); got != "1 day until Kevin's leaving do" {
 		t.Errorf("the day before says %q", got)
 	}
@@ -1999,7 +2060,7 @@ func TestTheDayCountsDownToWhatIsComing(t *testing.T) {
 	// And on the day itself there is nothing left to count: HEY stops serving the countdown,
 	// and a day that was handed one anyway does not say "0 days".
 	view := stripANSI(renderDayView(nil, nil, []Recording{countdown},
-		time.Date(2026, 8, 25, 9, 0, 0, 0, time.Local), "p/n day", 100, 20, selection{}))
+		time.Date(2026, 8, 25, 9, 0, 0, 0, time.Local), "p/n day", 100, 20, selection{}, nil))
 	if strings.Contains(view, "until") {
 		t.Errorf("the event's own day still counts down: %q", strings.Split(view, "\n")[0])
 	}
@@ -2028,7 +2089,7 @@ func TestOverlappingEventsAreDrawnApart(t *testing.T) {
 			StartsAt: atLocal("2026-08-20T09:00:00"), EndsAt: atLocal("2026-08-20T11:00:00")},
 		{ID: 2, Title: "Design review", Type: "Calendar::Event",
 			StartsAt: atLocal("2026-08-20T10:00:00"), EndsAt: atLocal("2026-08-20T12:00:00")},
-	}, nil, nil, time.Date(2026, 8, 20, 9, 0, 0, 0, time.Local), "p/n day", 100, 20, selection{}))
+	}, nil, nil, time.Date(2026, 8, 20, 9, 0, 0, 0, time.Local), "p/n day", 100, 20, selection{}, nil))
 
 	// The row between the lanes belongs to the grid, so it carries an hour rule where an
 	// event's own rows carry the event.
@@ -2052,7 +2113,7 @@ func TestBackToBackEventsAreDividedFromEachOther(t *testing.T) {
 			StartsAt: atLocal("2026-08-20T15:00:00"), EndsAt: atLocal("2026-08-20T17:00:00")},
 		{ID: 2, Title: "Product Hangout", Type: "Calendar::Event",
 			StartsAt: atLocal("2026-08-20T17:00:00"), EndsAt: atLocal("2026-08-20T19:00:00")},
-	}, nil, nil, time.Date(2026, 8, 20, 9, 0, 0, 0, time.Local), "p/n day", 100, 20, selection{}))
+	}, nil, nil, time.Date(2026, 8, 20, 9, 0, 0, 0, time.Local), "p/n day", 100, 20, selection{}, nil))
 
 	if !strings.ContainsRune(out, eventEdge) {
 		t.Errorf("nothing separates the two events:\n%s", out)
@@ -2239,11 +2300,11 @@ func TestCalendarPinsTodosBelowTheGrid(t *testing.T) {
 
 func TestCalendarViewHelpBindingsShowsViewToggle(t *testing.T) {
 	v := calendarWithRecordings()
-	// The day view offers the arrows and a new event, the categories and the habits modal.
-	// Creating, editing and deleting a habit are the modal's own keys; the keys that move
-	// the day are on the day's own line; and each span's number is in its own tab.
+	// The day view offers the arrows and a new event, the calendars, time tracking and the
+	// habits modal. Creating, editing and deleting a habit are the modal's own keys; the keys
+	// that move the day are on the day's own line; and each span's number is in its own tab.
 	bindings := v.HelpBindings()
-	for _, want := range []string{"←→", "a", "g", "c", "b"} {
+	for _, want := range []string{"←→", "a", "g", "l", "b"} {
 		found := false
 		for _, binding := range bindings {
 			found = found || binding.key == want

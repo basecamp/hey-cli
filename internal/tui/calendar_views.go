@@ -481,22 +481,65 @@ func nowColumn(day, now time.Time, daySpan int) int {
 	return min(at, daySpan-1)
 }
 
-// nowLabel is the time itself, centred over the column the line is at and pulled back inside the
-// axis at either end so it does not hang off the day.
+// runningTrack is a time track in progress, as the day's clock row needs it: what it is being
+// counted against and when it started.
+type runningTrack struct {
+	category string
+	since    time.Time
+}
+
+// badge is a running track as one short string, counting to the second off the same formatter
+// the menu and the log use — a stopwatch on screen should agree with itself wherever it is read.
+func (track runningTrack) badge(now time.Time) string {
+	name := terminal.SanitizeLine(track.category)
+	if name == "" {
+		name = "Tracking"
+	}
+	return fmt.Sprintf("● %s %s", name, formatElapsed(now.Sub(track.since)))
+}
+
+// nowRow is the line above the hour axis: the time over the column the now line is at, and a
+// running time track at whichever end of the row has the space for it.
 //
-// Its colon blinks on the second, a second on and a second off, the way a clock's does. It is
-// swapped for a space rather than dropped so the digits either side of it never move — and it is
-// done here rather than with the terminal's own blink attribute, which plenty of terminals
-// ignore and none of them run to our second.
-func nowLabel(now time.Time, nowCol, gridWidth int) string {
+// Which end that is depends on the clock, which moves across the day — a badge fixed to one side
+// would sit under the time at some point every day. So it takes the wider of the two gaps the
+// clock leaves, and gives up rather than crowding it when neither is wide enough.
+func nowRow(now time.Time, nowCol, gridWidth int, track *runningTrack) string {
+	clock := nowClock(now)
+	at := min(max(nowCol-len(clock)/2, 0), max(gridWidth-len(clock), 0))
+
+	row := make([]rune, gridWidth)
+	for i := range row {
+		row[i] = ' '
+	}
+	style := lipgloss.NewStyle().Foreground(colorAlert).Bold(true)
+
+	if track != nil {
+		badge := []rune(track.badge(now))
+		const gap = 2 // so the badge never reads as part of the time
+		switch left, right := at, gridWidth-(at+len(clock)); {
+		case left >= right && left >= len(badge)+gap:
+			copy(row, badge)
+		case right > left && right >= len(badge)+gap:
+			copy(row[gridWidth-len(badge):], badge)
+		}
+	}
+
+	// The clock goes in last so it always wins the cells it needs, badge or no badge.
+	copy(row[at:], []rune(clock))
+	return style.Render(strings.TrimRight(string(row), " "))
+}
+
+// nowClock is the time as the row shows it, with the colon blinking a second on and a second off
+// the way a clock's does. It is swapped for a space rather than dropped so the digits either side
+// of it never move — and it is done here rather than with the terminal's own blink attribute,
+// which plenty of terminals ignore and none of them run to our second.
+func nowClock(now time.Time) string {
 	separator := ":"
 	if now.Second()%2 == 1 {
 		separator = " "
 	}
-
-	clock := now.Format("15") + separator + now.Format("04")
-	at := min(max(nowCol-len(clock)/2, 0), max(gridWidth-len(clock), 0))
-	return strings.Repeat(" ", at) + lipgloss.NewStyle().Foreground(colorAlert).Bold(true).Render(clock)
+	return now.Format("15") + separator + now.Format("04")
 }
 
 // dayCountdownLines is what the day is counting down to, one line each, nearest first.
@@ -538,7 +581,7 @@ func dayCountdownLines(countdowns []Recording, anchor time.Time) []string {
 	return lines
 }
 
-func renderDayView(events, habits, countdowns []Recording, anchor time.Time, hint string, width, height int, sel selection) string {
+func renderDayView(events, habits, countdowns []Recording, anchor time.Time, hint string, width, height int, sel selection, track *runningTrack) string {
 	var b strings.Builder
 
 	// The day borrows the mail list's vocabulary: chrome for the structure a reader
@@ -581,7 +624,7 @@ func renderDayView(events, habits, countdowns []Recording, anchor time.Time, hin
 	now := time.Now()
 	nowCol := nowColumn(anchor, now, daySpan)
 	if nowCol >= 0 {
-		b.WriteString(nowLabel(now, nowCol, gridWidth))
+		b.WriteString(nowRow(now, nowCol, gridWidth, track))
 		b.WriteString("\n")
 	}
 

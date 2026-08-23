@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -187,6 +188,10 @@ const (
 	calendarRequestToggle
 	calendarRequestMutation
 	calendarRequestCategories
+	// calendarRequestTimeTrack is starting or stopping a track, which is a write the reader
+	// is waiting on; calendarRequestTrackedTime is the read behind the tracked time screen.
+	calendarRequestTimeTrack
+	calendarRequestTrackedTime
 )
 
 type calendarsLoadedMsg struct {
@@ -228,6 +233,51 @@ type timeTrackCategoriesLoadedMsg struct {
 	categories []generated.TimeTrackCategory
 }
 
+// timeTrackOngoingLoadedMsg is the answer to "is a track running". It stays off the request
+// lane and carries a counter of its own: the day view's now row wants the answer whether or
+// not the reader asked for anything, so this read must never cancel the one they did ask
+// for, nor show a spinner.
+type timeTrackOngoingLoadedMsg struct {
+	requestID uint64
+	track     *OngoingTrack
+	err       error
+}
+
+// timeTrackToggledMsg is a track started or stopped. conflict is HEY refusing to start a
+// second one, which is worth its own word rather than a failed save.
+type timeTrackToggledMsg struct {
+	requestResult
+	action   string
+	failure  string
+	conflict bool
+}
+
+type trackedTimeLoadedMsg struct {
+	requestResult
+	tracks     []trackedTime
+	categories []generated.TimeTrackCategory
+	nextPage   string
+}
+
+// trackedTimeAppendedMsg is the page below the list. It carries a bare counter of its own
+// rather than riding the request lane, for the reason the ongoing read does: what the reader
+// is looking at is already on screen, so growing the list must never cancel — or be cancelled
+// by — the read they are waiting on, and it never shows the spinner.
+type trackedTimeAppendedMsg struct {
+	requestID  uint64
+	tracks     []trackedTime
+	categories []generated.TimeTrackCategory
+	nextPage   string
+	err        error
+}
+
+// trackedTimeSavedMsg is an edited or deleted track.
+type trackedTimeSavedMsg struct {
+	requestResult
+	summary string
+	failure string
+}
+
 type timeTrackCategorySavedMsg struct {
 	requestResult
 	summary string
@@ -267,14 +317,24 @@ func calendarClock() tea.Cmd {
 	return tea.Tick(calendarClockInterval, func(time.Time) tea.Msg { return calendarClockMsg{} })
 }
 
-// followClock keeps the day's now line moving. Only the day draws one, and only on today, so
-// nothing else pays for it.
+// followClock keeps whatever moves on its own moving. Nothing else pays for it: the tick
+// stops as soon as neither of the two things that need it is on screen.
 func (v *calendarView) followClock() tea.Cmd {
-	if v.tickingClock || v.viewMode != viewDay || !sameDay(v.day(), v.now()) {
+	if v.tickingClock || !v.watchesTheClock() {
 		return nil
 	}
 	v.tickingClock = true
 	return calendarClock()
+}
+
+// watchesTheClock is the two things that move by themselves: the day's now line, which only
+// the day draws and only on today, and a running track's elapsed time, which is read
+// wherever the reader is.
+func (v *calendarView) watchesTheClock() bool {
+	if v.ongoing != nil {
+		return true
+	}
+	return v.viewMode == viewDay && sameDay(v.day(), v.now())
 }
 
 // animate keeps the highlight moving for as long as there is something selected to draw it on,
@@ -386,12 +446,31 @@ type calendarView struct {
 	// own and is written through the occurrence route instead.
 	editing Recording
 
-	timeTrackCategories *timeTrackCategoryManager
-	habitPicker         *habitPicker
-	habitForm           *habitForm
-	todoPicker          *todoPicker
-	calendarPicker      *calendarPicker
-	eventForm           *eventForm
+	// ongoing is the track HEY has running, and ongoingKnown whether that has been read at
+	// all — "nothing is running" and "nobody has looked" are different answers, and the menu
+	// says so. It is kept here rather than in the menu because the day's now row reads it
+	// while the menu is closed.
+	ongoing      *OngoingTrack
+	ongoingKnown bool
+	// ongoingRequestID is a bare counter for the same reason liveRequestID is one in the mail
+	// list: this read runs alongside whatever the reader asked for.
+	ongoingRequestID uint64
+
+	timeTrack   *timeTrackMenu
+	trackedTime *trackedTimeScreen
+	// trackedTimeForm is the open edit form, standing over the tracked time screen.
+	trackedTimeForm *timeTrackForm
+	// trackedTimeNextPage is the cursor for the page below the tracked time on screen, and
+	// empty at the end of the list. trackedTimeMoreID is that read's own lane.
+	trackedTimeNextPage    string
+	trackedTimeLoadingMore bool
+	trackedTimeMoreID      uint64
+	timeTrackCategories    *timeTrackCategoryManager
+	habitPicker            *habitPicker
+	habitForm              *habitForm
+	todoPicker             *todoPicker
+	calendarPicker         *calendarPicker
+	eventForm              *eventForm
 
 	// confirmDelete is the event whose x has been pressed once, since removing something
 	// off a calendar asks twice — as deleting a habit does.
@@ -410,7 +489,7 @@ func newCalendarView(vc *viewContext) *calendarView {
 }
 
 func (v *calendarView) Init() tea.Cmd {
-	cmds := []tea.Cmd{v.fetchIdentity(), v.followClock()}
+	cmds := []tea.Cmd{v.fetchIdentity(), v.requestOngoingTrack(), v.followClock()}
 	if len(v.calendars) == 0 {
 		cmds = append(cmds, v.requestCalendars())
 	} else {
@@ -560,6 +639,109 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.timeTrackCategories.status = msg.summary
 		return v.requestTimeTrackCategories(), true
+
+	case timeTrackOngoingLoadedMsg:
+		if msg.requestID != v.ongoingRequestID {
+			return nil, true
+		}
+		if msg.err != nil {
+			if v.timeTrack != nil {
+				v.timeTrack.problem(errorNotice("Could not read what is being tracked", msg.err))
+			}
+			return nil, true
+		}
+		v.ongoing = msg.track
+		v.ongoingKnown = true
+		return v.followClock(), true
+
+	case timeTrackToggledMsg:
+		if !v.requests.accepts(msg.requestResult) {
+			return nil, true
+		}
+		v.requests.finish(msg.requestID)
+		if msg.err != nil {
+			// A conflict is not a failure to save: HEY is saying a track is already running,
+			// which the reader's own menu is about to show them.
+			if v.timeTrack != nil {
+				if msg.conflict {
+					v.timeTrack.problem("A time track is already running")
+				} else {
+					v.timeTrack.problem(errorNotice(msg.failure, msg.err))
+				}
+			}
+			return v.requestOngoingTrack(), true
+		}
+		if v.timeTrack != nil {
+			v.timeTrack.notice(msg.action)
+		}
+		return tea.Batch(notify(msg.action), v.requestOngoingTrack()), true
+
+	case trackedTimeLoadedMsg:
+		if !v.requests.accepts(msg.requestResult) {
+			return nil, true
+		}
+		v.requests.finish(msg.requestID)
+		if v.trackedTime == nil {
+			return nil, true
+		}
+		v.trackedTimeLoadingMore = false
+		if msg.err != nil {
+			v.trackedTime.status = errorNotice("Could not read tracked time", msg.err)
+			v.trackedTime.rebuild()
+			return nil, true
+		}
+		v.trackedTimeNextPage = msg.nextPage
+		v.trackedTime.setTracks(msg.tracks, msg.categories)
+		v.trackedTime.complete = msg.nextPage == "" || len(msg.tracks) == 0
+		return v.loadMoreTrackedTime(), true
+
+	case trackedTimeAppendedMsg:
+		if msg.requestID != v.trackedTimeMoreID || v.trackedTime == nil {
+			return nil, true
+		}
+		v.trackedTimeLoadingMore = false
+		if msg.err != nil {
+			v.trackedTime.notice = errorNotice("could not read further back", msg.err)
+			v.trackedTime.rebuild()
+			return nil, true
+		}
+		// An empty page ends the list whatever cursor came with it.
+		if len(msg.tracks) == 0 {
+			v.trackedTimeNextPage = ""
+		} else {
+			v.trackedTimeNextPage = msg.nextPage
+		}
+		v.trackedTime.growTracks(msg.tracks, msg.categories)
+		v.trackedTime.complete = v.trackedTimeNextPage == ""
+		return v.loadMoreTrackedTime(), true
+
+	case trackedTimeSavedMsg:
+		if !v.requests.accepts(msg.requestResult) {
+			return nil, true
+		}
+		v.requests.finish(msg.requestID)
+		if msg.err != nil {
+			if v.trackedTimeForm != nil {
+				v.trackedTimeForm.saving = false
+				v.trackedTimeForm.status = errorNotice(msg.failure, msg.err)
+				v.trackedTimeForm.isError = true
+				return nil, true
+			}
+			if v.trackedTime != nil {
+				v.trackedTime.notice = errorNotice(msg.failure, msg.err)
+				v.trackedTime.rebuild()
+			}
+			return nil, true
+		}
+		v.trackedTimeForm = nil
+		if v.trackedTime == nil {
+			return notify(msg.summary), true
+		}
+		return tea.Batch(notify(msg.summary), v.requestTrackedTime()), true
+	}
+
+	if v.trackedTimeForm != nil {
+		return v.trackedTimeForm.update(msg), true
 	}
 
 	if v.habitForm != nil {
@@ -575,8 +757,15 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 func (v *calendarView) View() string {
 	v.drawnSinceTick, v.drawnSinceClock = true, true
 
-	if v.timeTrackCategories != nil {
-		return v.timeTrackCategories.view(v.vc.styles, v.vc.width, v.vc.height)
+	// Tracked time is a screen rather than a modal: it takes the calendar's place while it is
+	// open, the way The Screener takes the mail list's.
+	if v.trackedTime != nil {
+		screen := v.trackedTime.view()
+		if v.trackedTimeForm != nil {
+			frame := modalFrame(v.trackedTimeForm.title(), v.trackedTimeForm.view(), v.vc.width)
+			screen = overlayModal(screen, frame, v.vc.width, v.vc.height)
+		}
+		return screen
 	}
 	view := v.contentVP.View()
 	if footer := v.todosFooter(); footer != "" {
@@ -592,6 +781,14 @@ func (v *calendarView) View() string {
 	}
 	if v.calendarPicker != nil {
 		view = v.calendarPicker.draw(view, v.vc.width, v.vc.height)
+	}
+	// The categories stand over the menu they were opened from, as a habit's form stands
+	// over the habit picker.
+	if v.timeTrack != nil {
+		view = v.timeTrack.draw(view, v.ongoing, v.ongoingKnown, v.now(), v.vc.width, v.vc.height)
+	}
+	if v.timeTrackCategories != nil {
+		view = v.timeTrackCategories.draw(view, v.vc.width, v.vc.height)
 	}
 	if v.habitForm != nil {
 		frame := modalFrame(v.habitForm.title(), v.habitForm.view(), v.vc.width)
@@ -630,8 +827,17 @@ func (v *calendarView) todosFooterHeight() int {
 }
 
 func (v *calendarView) HelpBindings() []helpBinding {
+	if v.trackedTimeForm != nil {
+		return v.trackedTimeForm.helpBindings()
+	}
+	if v.trackedTime != nil {
+		return v.trackedTime.helpBindings()
+	}
 	if v.timeTrackCategories != nil {
 		return v.timeTrackCategories.helpBindings()
+	}
+	if v.timeTrack != nil {
+		return v.timeTrack.helpBindings(v.ongoing != nil)
 	}
 	if v.habitForm != nil {
 		return v.habitForm.helpBindings()
@@ -686,7 +892,7 @@ func (v *calendarView) HelpBindings() []helpBinding {
 	if len(v.listedCalendars()) > 0 {
 		bindings = append(bindings, helpBinding{"g", "calendars"})
 	}
-	bindings = append(bindings, helpBinding{"c", "time categories"})
+	bindings = append(bindings, helpBinding{"l", "time tracking"})
 	if v.showsHabits() {
 		bindings = append(bindings, helpBinding{"b", "habits"})
 	}
@@ -741,8 +947,14 @@ func (v *calendarView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 func (v *calendarView) handleContentKey(msg tea.KeyPressMsg) tea.Cmd {
+	if v.trackedTime != nil {
+		return v.handleTrackedTimeKey(msg)
+	}
 	if v.timeTrackCategories != nil {
 		return v.handleTimeTrackCategoryKey(msg)
+	}
+	if v.timeTrack != nil {
+		return v.handleTimeTrackKey(msg)
 	}
 	if v.habitForm != nil {
 		if msg.Key().Code == tea.KeyEscape && !v.habitForm.saving {
@@ -817,9 +1029,10 @@ func (v *calendarView) handleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 			v.calendarPicker = newCalendarPicker(listed, v.selected)
 		}
 		return nil
-	case "c":
-		v.timeTrackCategories = newTimeTrackCategoryManager()
-		return v.requestTimeTrackCategories()
+	// l for time tracking — the log of it, the categories and the stopwatch all live there.
+	case "l":
+		v.timeTrack = newTimeTrackMenu()
+		return v.requestOngoingTrack()
 	// The span is picked by number, as a box is in the mail list, and the row above the
 	// grid shows which one is on.
 	case "1":
@@ -1137,6 +1350,114 @@ func (v *calendarView) handleHabitPickerKey(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
+// handleTimeTrackKey gives the open menu every key. Its three rows are picked with the
+// arrows and taken with enter, as the calendars are switched from theirs: what a row does
+// is written on it, so there is nothing here to remember.
+func (v *calendarView) handleTimeTrackKey(msg tea.KeyPressMsg) tea.Cmd {
+	menu := v.timeTrack
+
+	switch msg.String() {
+	case "esc", "q":
+		v.timeTrack = nil
+		return nil
+	case "enter", " ", "space":
+		if v.requests.loading && v.requests.kind == calendarRequestTimeTrack {
+			return nil
+		}
+		switch menu.highlighted() {
+		case timeTrackToggle:
+			return v.toggleTimeTrack()
+		case timeTrackTracked:
+			return v.openTrackedTime()
+		case timeTrackCategories:
+			v.timeTrackCategories = newTimeTrackCategoryManager()
+			return v.requestTimeTrackCategories()
+		}
+		return nil
+	}
+
+	menu.moveCursor(msg)
+	return nil
+}
+
+// handleTrackedTimeKey gives the open screen every key: it is what is on screen, so the arrows
+// move its cursor and everything else scrolls it. Either can bring the end of the list into
+// view, so both ask for the page below afterwards.
+func (v *calendarView) handleTrackedTimeKey(msg tea.KeyPressMsg) tea.Cmd {
+	screen := v.trackedTime
+
+	if form := v.trackedTimeForm; form != nil {
+		// The form's zone list wants esc for itself: closing the list is what esc means while
+		// it is open, and closing the form under it would throw away everything typed so far.
+		if msg.Key().Code == tea.KeyEscape && !form.saving && !form.capturesKeys() {
+			v.trackedTimeForm = nil
+			return nil
+		}
+		cmd, submit := form.handleKey(msg)
+		if submit {
+			return v.saveTrackedTime()
+		}
+		return cmd
+	}
+
+	if v.requests.loading && v.requests.kind == calendarRequestTimeTrack {
+		return nil
+	}
+	// x asks twice, so any other key is the reader changing their mind.
+	if msg.String() != "x" {
+		screen.confirmingDelete = false
+	}
+
+	switch msg.String() {
+	case "esc", "q":
+		v.trackedTime = nil
+		v.requests.cancel()
+		return nil
+	case "up":
+		screen.moveCursor(-1)
+		return v.loadMoreTrackedTime()
+	case "down":
+		screen.moveCursor(1)
+		return v.loadMoreTrackedTime()
+	case "e":
+		return v.startTrackedTimeEdit()
+	case "x":
+		return v.deleteHighlightedTrack()
+	}
+
+	var cmd tea.Cmd
+	screen.contentVP, cmd = screen.contentVP.Update(msg)
+	return tea.Batch(cmd, v.loadMoreTrackedTime())
+}
+
+func (v *calendarView) startTrackedTimeEdit() tea.Cmd {
+	screen := v.trackedTime
+	track := screen.selected()
+	if track == nil {
+		return nil
+	}
+	v.trackedTimeForm = newTimeTrackForm(*track, screen.categories)
+	v.trackedTimeForm.resize(v.vc.width, v.vc.height)
+	return v.trackedTimeForm.init()
+}
+
+// deleteHighlightedTrack asks twice, as deleting an event does: the answer is on the summary
+// line, where the screen says everything else about itself.
+func (v *calendarView) deleteHighlightedTrack() tea.Cmd {
+	screen := v.trackedTime
+	track := screen.selected()
+	if track == nil {
+		return nil
+	}
+	if !screen.confirmingDelete {
+		screen.confirmingDelete = true
+		screen.notice = ""
+		return nil
+	}
+	screen.confirmingDelete = false
+	return v.deleteTrackedTime(track.ID)
+}
+
 func (v *calendarView) handleTimeTrackCategoryKey(msg tea.KeyPressMsg) tea.Cmd {
 	manager := v.timeTrackCategories
 	if v.requests.loading {
@@ -1177,9 +1498,11 @@ func (v *calendarView) handleTimeTrackCategoryKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "esc", "q":
 		v.timeTrackCategories = nil
 		return nil
-	case "n":
+	// a, e and x, as they are on a habit and a to-do in their own modals. n and p belong to
+	// the calendar underneath, which steps a day at a time.
+	case "a":
 		return manager.startCreate()
-	case "enter", "r":
+	case "e":
 		return manager.startRename()
 	case "x":
 		selected := manager.selected()
@@ -1195,7 +1518,7 @@ func (v *calendarView) handleTimeTrackCategoryKey(msg tea.KeyPressMsg) tea.Cmd {
 		manager.confirmingDelete = false
 		return v.deleteTimeTrackCategory(selected.Id, selected.Title)
 	default:
-		manager.move(msg.Key())
+		manager.moveCursor(msg)
 		return nil
 	}
 }
@@ -1213,17 +1536,21 @@ func (v *calendarView) Loading() bool {
 	return v.requests.loading && !v.CapturingInput() && !v.drawn
 }
 func (v *calendarView) CapturingInput() bool {
-	return v.timeTrackCategories != nil || v.habitForm != nil || v.eventForm != nil ||
+	return v.timeTrack != nil || v.trackedTime != nil || v.timeTrackCategories != nil ||
+		v.habitForm != nil || v.eventForm != nil ||
 		v.habitPicker != nil || v.todoPicker != nil || v.calendarPicker != nil
 }
 
 func (v *calendarView) AccountSwitchBlocked() bool {
-	return v.requests.kind == calendarRequestMutation
+	return v.requests.kind == calendarRequestMutation || v.requests.kind == calendarRequestTimeTrack
 }
 
 // Restyle re-renders the day/week/year grid, which caches styled output in its
 // viewport. The recording detail is plain text and needs nothing.
 func (v *calendarView) Restyle() {
+	if v.trackedTime != nil {
+		v.trackedTime.rebuild()
+	}
 	v.rebuildKeepingScroll()
 }
 
@@ -1245,6 +1572,12 @@ func (v *calendarView) Resize(width, height int) {
 	}
 	if v.todoPicker != nil {
 		v.todoPicker.resize(width)
+	}
+	if v.trackedTime != nil {
+		v.trackedTime.resize(width, height)
+	}
+	if v.trackedTimeForm != nil {
+		v.trackedTimeForm.resize(width, height)
 	}
 	v.rebuildView()
 }
@@ -1271,7 +1604,7 @@ func (v *calendarView) rebuildView() {
 	cursorTop, cursorBottom := -1, -1
 	switch v.viewMode {
 	case viewDay:
-		content = renderDayView(v.events, v.habits, v.countdowns, anchor, v.stepHint(), w, v.contentVP.Height(), v.selection())
+		content = renderDayView(v.events, v.habits, v.countdowns, anchor, v.stepHint(), w, v.contentVP.Height(), v.selection(), v.trackBadge())
 	case viewWeek:
 		content = renderWeekView(v.events, v.habits, v.habitCompletions, anchor, v.firstWeekDay, w, v.contentVP.Height(), v.stepHint(), dayLabels, v.selection())
 	case viewYear:
@@ -2087,6 +2420,205 @@ func recordingsIn(period *generated.CalendarPeriod) []Recording {
 		}
 	}
 	return all
+}
+
+// --- Time tracking ---
+
+// OngoingTimeTrack is the track HEY has running, and false when nothing is. It is what the
+// day's now row asks: the answer is kept on the view rather than in the menu, so it is
+// there whether or not the menu has ever been opened.
+// trackBadge is what the day's clock row shows about a running track, and nothing when none is
+// running. It is the one place the two halves meet: the menu owns what is being tracked, and the
+// day view owns where on the row it fits.
+func (v *calendarView) trackBadge() *runningTrack {
+	track, running := v.OngoingTimeTrack()
+	if !running {
+		return nil
+	}
+	return &runningTrack{category: track.Category, since: track.StartedAt}
+}
+
+func (v *calendarView) OngoingTimeTrack() (OngoingTrack, bool) {
+	if v.ongoing == nil {
+		return OngoingTrack{}, false
+	}
+	return *v.ongoing, true
+}
+
+// requestOngoingTrack reads what is being tracked. A 404 is HEY saying nothing is, which
+// the SDK answers as no track and no error, so there is nothing to tell apart here.
+func (v *calendarView) requestOngoingTrack() tea.Cmd {
+	if v.vc.sdk == nil || v.vc.ctx == nil {
+		return nil
+	}
+	v.ongoingRequestID++
+	requestID := v.ongoingRequestID
+	ctx := v.vc.ctx
+	return func() tea.Msg {
+		track, err := v.vc.sdk.TimeTracks().GetOngoing(ctx)
+		return timeTrackOngoingLoadedMsg{requestID: requestID, track: ongoingTrackFrom(track), err: err}
+	}
+}
+
+// toggleTimeTrack starts tracking, or stops the track that is running.
+//
+// Starting takes no category, and stopping cannot be given one: HEY files a track under a
+// category on the same write that ends it, and the SDK's update carries no field the server
+// reads for it. So a track is started, stopped, and filed from the web app or the CLI until
+// that write exists.
+func (v *calendarView) toggleTimeTrack() tea.Cmd {
+	if running, ok := v.OngoingTimeTrack(); ok {
+		return v.stopTimeTrack(running.ID)
+	}
+	return v.startTimeTrack()
+}
+
+func (v *calendarView) startTimeTrack() tea.Cmd {
+	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestTimeTrack)
+	return func() tea.Msg {
+		_, err := v.vc.sdk.TimeTracks().Start(ctx)
+		return timeTrackToggledMsg{
+			requestResult: newRequestResult(requestID, err),
+			action:        "Time tracking started",
+			failure:       "Could not start tracking",
+			conflict:      isConflict(err),
+		}
+	}
+}
+
+func (v *calendarView) stopTimeTrack(trackID int64) tea.Cmd {
+	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestTimeTrack)
+	return func() tea.Msg {
+		err := v.vc.sdk.TimeTracks().Stop(ctx, trackID)
+		return timeTrackToggledMsg{
+			requestResult: newRequestResult(requestID, err),
+			action:        "Time tracking stopped",
+			failure:       "Could not stop tracking",
+		}
+	}
+}
+
+// isConflict is HEY refusing because the state it would change is not the state the caller
+// thought it was in — a second time track while one is already running.
+func isConflict(err error) bool {
+	var apiErr *hey.Error
+	return errors.As(err, &apiErr) && apiErr.Code == hey.CodeConflict
+}
+
+func (v *calendarView) openTrackedTime() tea.Cmd {
+	v.trackedTime = newTrackedTimeScreen()
+	v.trackedTimeForm = nil
+	v.trackedTime.resize(v.vc.width, v.vc.height)
+	return v.requestTrackedTime()
+}
+
+// requestTrackedTime reads the newest page of completed tracks. The list starts there and
+// grows downwards from it, so a read the user asked for is also what puts the list back to the
+// depth it opens at.
+func (v *calendarView) requestTrackedTime() tea.Cmd {
+	v.trackedTimeNextPage = ""
+	v.trackedTimeLoadingMore = false
+	v.trackedTimeMoreID++
+	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestTrackedTime)
+	return func() tea.Msg {
+		page, err := readTrackedTimePage(ctx, v.vc.sdk, "")
+		if err != nil {
+			return trackedTimeLoadedMsg{requestResult: newRequestResult(requestID, err)}
+		}
+		return trackedTimeLoadedMsg{
+			requestResult: newRequestResult(requestID, nil),
+			tracks:        page.tracks,
+			categories:    page.categories,
+			nextPage:      page.nextPage,
+		}
+	}
+}
+
+// loadMoreTrackedTime reads the page below what the reader has scrolled to, or the page below a
+// list they can already see the end of. One page at a time, in its own lane and on the view's
+// own context.
+func (v *calendarView) loadMoreTrackedTime() tea.Cmd {
+	screen := v.trackedTime
+	if screen == nil || v.trackedTimeLoadingMore || v.trackedTimeNextPage == "" {
+		return nil
+	}
+	if !screen.wantsMore() {
+		return nil
+	}
+
+	v.trackedTimeLoadingMore = true
+	v.trackedTimeMoreID++
+	requestID, cursor := v.trackedTimeMoreID, v.trackedTimeNextPage
+	ctx := v.vc.ctx
+	return func() tea.Msg {
+		page, err := readTrackedTimePage(ctx, v.vc.sdk, cursor)
+		if err != nil {
+			return trackedTimeAppendedMsg{requestID: requestID, err: err}
+		}
+		return trackedTimeAppendedMsg{
+			requestID:  requestID,
+			tracks:     page.tracks,
+			categories: page.categories,
+			nextPage:   page.nextPage,
+		}
+	}
+}
+
+type trackedTimePage struct {
+	tracks     []trackedTime
+	categories []generated.TimeTrackCategory
+	nextPage   string
+}
+
+// readTrackedTimePage reads one page of completed tracks, newest ended first, with the
+// calendar's categories — HEY serves those on every page for its own filter.
+func readTrackedTimePage(ctx context.Context, sdk *hey.Client, cursor string) (trackedTimePage, error) {
+	var params *generated.ListTimeTracksParams
+	if cursor != "" {
+		params = &generated.ListTimeTracksParams{Page: &cursor}
+	}
+	page, err := sdk.TimeTracks().ListPage(ctx, params)
+	if err != nil {
+		return trackedTimePage{}, err
+	}
+	if page == nil {
+		return trackedTimePage{}, nil
+	}
+
+	tracks := make([]trackedTime, 0, len(page.TimeTracks))
+	for _, recording := range page.TimeTracks {
+		tracks = append(tracks, trackedTimeFrom(recording))
+	}
+	return trackedTimePage{tracks: tracks, categories: page.Categories, nextPage: page.NextPage}, nil
+}
+
+// saveTrackedTime sends what the form changed and nothing else.
+func (v *calendarView) saveTrackedTime() tea.Cmd {
+	form := v.trackedTimeForm
+	payload, _ := form.payload()
+	trackID := form.trackID
+	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestTimeTrack)
+	return func() tea.Msg {
+		_, err := v.vc.sdk.TimeTracks().Update(ctx, trackID,
+			generated.UpdateTimeTrackJSONRequestBody{CalendarTimeTrack: payload})
+		return trackedTimeSavedMsg{
+			requestResult: newRequestResult(requestID, err),
+			summary:       "Tracked time saved",
+			failure:       "Could not save the tracked time",
+		}
+	}
+}
+
+func (v *calendarView) deleteTrackedTime(trackID int64) tea.Cmd {
+	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestTimeTrack)
+	return func() tea.Msg {
+		err := v.vc.sdk.TimeTracks().Delete(ctx, trackID)
+		return trackedTimeSavedMsg{
+			requestResult: newRequestResult(requestID, err),
+			summary:       "Tracked time deleted",
+			failure:       "Could not delete the tracked time",
+		}
+	}
 }
 
 func (v *calendarView) requestTimeTrackCategories() tea.Cmd {
