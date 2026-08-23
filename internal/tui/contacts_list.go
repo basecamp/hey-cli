@@ -48,9 +48,9 @@ func (l *contactList) moveDown() {
 	}
 }
 
-// visibleCount is how many contacts the window holds. Each one takes two lines.
+// visibleCount is how many contacts the window holds. Each one takes one line.
 func (l *contactList) visibleCount() int {
-	return max(l.height/2, 1)
+	return max(l.height, 1)
 }
 
 // hasRowsBelow reports whether the list carries on past the bottom of the window. A list
@@ -101,8 +101,8 @@ func (l *contactList) view() string {
 	end := min(l.scrollOff+l.visibleCount(), len(l.contacts))
 	cursorMarker, selected := cursorStyles()
 	selectedGap := selectionStyle(lipgloss.NewStyle())
-	normal := lipgloss.NewStyle().Foreground(colorBright)
-	muted := styleMuted
+	nameBase := lipgloss.NewStyle().Foreground(colorBright).Bold(true)
+	addressBase := lipgloss.NewStyle().Foreground(colorBright)
 
 	var b strings.Builder
 	for i := l.scrollOff; i < end; i++ {
@@ -112,16 +112,32 @@ func (l *contactList) view() string {
 		if cursor {
 			prefix = cursorMarker.Render("│") + selectedGap.Render(" ")
 		}
-		name := truncateStr(terminal.SanitizeLine(contact.Name), max(l.width-4, 10))
-		email := truncateStr(terminal.SanitizeLine(contact.EmailAddress), max(l.width-18, 10))
-		line2 := fmt.Sprintf("#%d  %s", contact.ID, email)
-		if cursor {
-			fmt.Fprintf(&b, "%s%s\n", prefix, selected.Render(name))
-			fmt.Fprintf(&b, "%s%s%s\n", cursorMarker.Render("│"), selectedGap.Render("  "), selected.Render(line2))
-		} else {
-			fmt.Fprintf(&b, "%s%s\n", prefix, normal.Render(name))
-			fmt.Fprintf(&b, "    %s\n", muted.Render(line2))
+
+		// One line per contact, written as an email From header: the name in
+		// bold with the address regular in angle brackets after it, as in the
+		// Screener lists. A contact with no name shows the bare address in the
+		// name's position, keeping its bold.
+		name := terminal.SanitizeLine(contact.Name)
+		label := name
+		if email := terminal.SanitizeLine(contact.EmailAddress); email != "" {
+			if label == "" {
+				label = email
+			} else {
+				label += " <" + email + ">"
+			}
 		}
+		label = truncateStr(label, max(l.width-4, 10))
+
+		if cursor {
+			fmt.Fprintf(&b, "%s%s\n", prefix, selected.Render(label))
+			continue
+		}
+		// A label truncated into the name renders as one bold piece.
+		head, rest := label, ""
+		if after, ok := strings.CutPrefix(label, name); ok && name != "" {
+			head, rest = name, after
+		}
+		fmt.Fprintf(&b, "%s%s%s\n", prefix, nameBase.Render(head), addressBase.Render(rest))
 	}
 	return b.String()
 }

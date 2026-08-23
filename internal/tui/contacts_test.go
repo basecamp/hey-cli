@@ -523,10 +523,20 @@ func TestContactsListNavigationAndRendering(t *testing.T) {
 		t.Errorf("selected = %+v", selected)
 	}
 	view := list.view()
-	for _, want := range []string{"Jane Doe", "jane@example.com", "Sam Rivera", "#2"} {
+	for _, want := range []string{"Jane Doe", "jane@example.com", "Sam Rivera", "sam@example.org"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("list omitted %q: %q", want, view)
 		}
+	}
+	if strings.Contains(view, "#1") || strings.Contains(view, "#2") {
+		t.Errorf("list should not show contact ids: %q", view)
+	}
+	if got := strings.Count(strings.TrimRight(view, "\n"), "\n") + 1; got != 2 {
+		t.Errorf("two contacts should render on %d lines, want 2: %q", got, view)
+	}
+	// The name is bold; the address next to it stays regular weight.
+	if !strings.Contains(view, "\x1b[1;97mJane Doe\x1b[m\x1b[97m <jane@example.com>") {
+		t.Errorf("the address should not share the name's bold: %q", view)
 	}
 	list.remove(2)
 	if len(list.contacts) != 1 || list.cursor != 0 {
