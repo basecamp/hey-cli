@@ -87,6 +87,8 @@ type screenerRow struct {
 	subject  string // subject of what they sent, or the address they write from
 	summary  string // excerpt of what they sent
 	trailing string // when they wrote, or the decision and when it was made
+	verdict  string // the decision alone ("Screened in"), a prefix of trailing; empty while pending
+	denied   bool   // the decision was to screen them out
 }
 
 type screenerPane struct {
@@ -704,7 +706,8 @@ func pendingScreenerRow(clearance generated.Clearance) screenerRow {
 }
 
 func screenedScreenerRow(clearance generated.Clearance) screenerRow {
-	trailing := screenedVerb(clearance.Status)
+	verdict := screenedLabel(clearance.Status)
+	trailing := verdict
 	if decided := formatDisplayDate(clearance.UpdatedAt); decided != "" {
 		trailing += " · " + decided
 	}
@@ -716,6 +719,8 @@ func screenedScreenerRow(clearance generated.Clearance) screenerRow {
 		subject:  subject,
 		summary:  summary,
 		trailing: trailing,
+		verdict:  verdict,
+		denied:   clearance.Status == hey.ClearanceDenied,
 	}
 }
 
@@ -730,11 +735,17 @@ func clearanceEntryParts(clearance generated.Clearance) (subject, summary string
 	return terminal.SanitizeLine(subject), terminal.SanitizeLine(summary)
 }
 
-func screenedVerb(status string) string {
+// screenedLabel is the decision as the history list titles it; screenedVerb is
+// the same decision mid-sentence, as the toast speaks it ("Jane screened in").
+func screenedLabel(status string) string {
 	if status == hey.ClearanceDenied {
-		return "screened out"
+		return "Screened out"
 	}
-	return "screened in"
+	return "Screened in"
+}
+
+func screenedVerb(status string) string {
+	return strings.ToLower(screenedLabel(status))
 }
 
 func screenerRowName(row screenerRow) string {
@@ -759,13 +770,16 @@ func screenerRowLabel(row screenerRow) string {
 func renderScreenerRows(pane *screenerPane, visible, width int) string {
 	// Rows mirror the mail lists: a bold bright first line ("Name <address>")
 	// with a bright trailing date, then an indented second line whose subject
-	// takes the hyperlink color and whose excerpt is faint. The cursor row
+	// takes the hyperlink color and whose excerpt is faint. History rows lead
+	// the date with the decision, green for in and red for out. The cursor row
 	// uses the accent foreground that is checked against the selection
 	// background, with the bar and background spanning both lines.
 	marker, selectedText := cursorStyles()
 	selectedGap := selectionStyle(lipgloss.NewStyle())
 	labelBase := lipgloss.NewStyle().Foreground(colorBright).Bold(true)
 	trailingBase := lipgloss.NewStyle().Foreground(colorBright)
+	screenedInBase := lipgloss.NewStyle().Foreground(colorPositive)
+	screenedOutBase := lipgloss.NewStyle().Foreground(colorNegative)
 	subjectBase := lipgloss.NewStyle().Foreground(colorLink).Bold(true)
 	summaryBase := styleMuted
 
@@ -811,7 +825,19 @@ func renderScreenerRows(pane *screenerPane, visible, width int) string {
 		}
 		b.WriteString(emphasize(labelBase).Render(label) + gapStyle.Render(gap))
 		if trailing != "" {
-			b.WriteString(emphasize(trailingBase).Render(trailing))
+			// The decision keeps its own color; the date after it stays
+			// bright. A trailing truncated into the verdict falls back to
+			// rendering as one bright piece.
+			rest := trailing
+			if after, ok := strings.CutPrefix(trailing, row.verdict); ok && row.verdict != "" {
+				verdictBase := screenedInBase
+				if row.denied {
+					verdictBase = screenedOutBase
+				}
+				b.WriteString(emphasize(verdictBase).Render(row.verdict))
+				rest = after
+			}
+			b.WriteString(emphasize(trailingBase).Render(rest))
 		}
 		b.WriteString("\n")
 		if isCursor {

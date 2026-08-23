@@ -306,8 +306,14 @@ func TestScreenerTabsOverToPreviousDecisions(t *testing.T) {
 	if len(view.history.rows) != 2 {
 		t.Fatalf("history rows = %+v", view.history.rows)
 	}
-	if view.history.rows[0].trailing != "screened in · Aug 18, 2026" || view.history.rows[1].trailing != "screened out · Aug 17, 2026" {
+	if view.history.rows[0].trailing != "Screened in · Aug 18, 2026" || view.history.rows[1].trailing != "Screened out · Aug 17, 2026" {
 		t.Errorf("history decisions = %q, %q", view.history.rows[0].trailing, view.history.rows[1].trailing)
+	}
+	if view.history.rows[0].verdict != "Screened in" || view.history.rows[0].denied {
+		t.Errorf("approved row = %+v, want a Screened in verdict", view.history.rows[0])
+	}
+	if view.history.rows[1].verdict != "Screened out" || !view.history.rows[1].denied {
+		t.Errorf("denied row = %+v, want a denied Screened out verdict", view.history.rows[1])
 	}
 
 	rendered := plainText(view.View())
