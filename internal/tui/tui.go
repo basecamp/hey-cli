@@ -167,6 +167,7 @@ func newViewContext(ctx context.Context, rootSDK, sdk *hey.Client, styles styles
 		saveCover:        config.SaveCover,
 		loadLastCalendar: config.LastCalendarID,
 		saveLastCalendar: config.SaveLastCalendarID,
+		vimMode:          config.VimMode(),
 	}
 }
 
@@ -1012,7 +1013,6 @@ func (m model) handleSubnavKey(msg tea.KeyPressMsg) tea.Cmd {
 // interactive account switching, and the watchers that tell it when things changed.
 func Run(rootSDK, sdk *hey.Client, selected string, watchers Watchers) error {
 	m := newModelWithMailAccounts(rootSDK, sdk, selected, watchers)
-	m.vc.vimMode = config.VimMode()
 	m.help.setHidden(config.HelpHidden())
 	m.saveHelpHidden = config.SaveHelpHidden
 	p := tea.NewProgram(m)

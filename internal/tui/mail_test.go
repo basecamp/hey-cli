@@ -24,6 +24,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/config"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/mail"
 )
@@ -2096,6 +2097,22 @@ func TestMailViewVimModeLeavesJKUnusedOutsideImbox(t *testing.T) {
 	v.HandleContentKey(keyPress("j"))
 	if v.postingList.cursor != 0 {
 		t.Fatalf("j moved the cursor outside the Imbox: %d", v.postingList.cursor)
+	}
+}
+
+// Switching mail accounts rebuilds the view context; the preference has to survive
+// that rebuild rather than silently turning j/k off for the rest of the session.
+func TestApplyMailAccountKeepsVimMode(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HEY_BASE_URL", "")
+	if err := config.SaveVimMode(true); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newModel()
+	updated, _ := m.applyMailAccount(mailAccountChoice{id: 42, label: "Work"}, nil)
+	if !updated.(model).vc.vimMode {
+		t.Error("switching mail accounts turned vim mode off")
 	}
 }
 
