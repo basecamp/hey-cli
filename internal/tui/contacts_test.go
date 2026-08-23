@@ -159,6 +159,35 @@ func TestContactsViewGrowsUntilTheListRunsOut(t *testing.T) {
 	}
 }
 
+func TestContactsViewNavigationAcceptsJAndK(t *testing.T) {
+	view, _ := contactsWithTestServer(t)
+	view.loaded = true
+	view.list.setContacts(testContactRows(3))
+
+	view.HandleContentKey(keyPress("j"))
+	if view.list.cursor != 1 {
+		t.Errorf("after j: cursor = %d, want 1", view.list.cursor)
+	}
+
+	view.HandleContentKey(keyPress("k"))
+	if view.list.cursor != 0 {
+		t.Errorf("after k: cursor = %d, want 0", view.list.cursor)
+	}
+}
+
+func TestContactsViewJReadsThePageBelowNearTheBottom(t *testing.T) {
+	view, _ := contactsWithTestServer(t)
+	view.loaded = true
+	view.nextPage = 2
+	view.list.setSize(80, 4)
+	view.list.setContacts(testContactRows(40))
+	view.list.cursor = len(view.list.contacts) - loadMoreThreshold - 1
+
+	if cmd := view.HandleContentKey(keyPress("j")); cmd == nil || !view.loadingMore {
+		t.Fatal("j near the bottom should read the next contacts page")
+	}
+}
+
 func TestContactsViewReadsThePageBelowTheCursorOnce(t *testing.T) {
 	view, _ := contactsWithTestServer(t)
 	view.loaded = true

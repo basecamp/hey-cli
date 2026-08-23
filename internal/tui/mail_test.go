@@ -2038,22 +2038,81 @@ func TestMailViewIgnoresReplyLoadAfterThreadExit(t *testing.T) {
 	}
 }
 
-func TestMailViewContentKeyUpDown(t *testing.T) {
+func TestMailViewContentNavigationKeys(t *testing.T) {
+	for _, keys := range []struct {
+		name string
+		down string
+		up   string
+	}{
+		{name: "arrows", down: "down", up: "up"},
+		{name: "vim", down: "j", up: "k"},
+	} {
+		t.Run(keys.name, func(t *testing.T) {
+			v := mailWithPostings()
+
+			if v.postingList.cursor != 0 {
+				t.Fatalf("initial cursor = %d, want 0", v.postingList.cursor)
+			}
+
+			v.HandleContentKey(keyPress(keys.down))
+			if v.postingList.cursor != 1 {
+				t.Errorf("after %s: cursor = %d, want 1", keys.down, v.postingList.cursor)
+			}
+
+			v.HandleContentKey(keyPress(keys.up))
+			if v.postingList.cursor != 0 {
+				t.Errorf("after %s: cursor = %d, want 0", keys.up, v.postingList.cursor)
+			}
+		})
+	}
+}
+
+func TestMailViewSearchNavigationAcceptsJAndK(t *testing.T) {
 	v := mailWithPostings()
+	v.searchActive = true
+	v.searchList.setPostings(testPostings())
 
-	if v.postingList.cursor != 0 {
-		t.Fatalf("initial cursor = %d, want 0", v.postingList.cursor)
+	v.HandleContentKey(keyPress("j"))
+	if v.searchList.cursor != 1 {
+		t.Errorf("after j: cursor = %d, want 1", v.searchList.cursor)
 	}
 
-	v.HandleContentKey(keyPress("down"))
-	if v.postingList.cursor != 1 {
-		t.Errorf("after down: cursor = %d, want 1", v.postingList.cursor)
+	v.HandleContentKey(keyPress("k"))
+	if v.searchList.cursor != 0 {
+		t.Errorf("after k: cursor = %d, want 0", v.searchList.cursor)
+	}
+}
+
+func TestMailViewJLoadsMoreListResults(t *testing.T) {
+	postings := make([]mail.Posting, 20)
+	for i := range postings {
+		postings[i] = mail.Posting{ID: int64(i + 1), Seen: true}
 	}
 
-	v.HandleContentKey(keyPress("up"))
-	if v.postingList.cursor != 0 {
-		t.Errorf("after up: cursor = %d, want 0", v.postingList.cursor)
-	}
+	t.Run("mail", func(t *testing.T) {
+		v := mailWithPostings()
+		v.postingList.hideSeenState = true
+		v.postingList.setPostings(postings)
+		v.postingList.cursor = len(postings) - loadMoreThreshold - 1
+		v.postingPaging.nextPage = "cursor-2"
+
+		if cmd := v.HandleContentKey(keyPress("j")); cmd == nil || !v.postingPaging.loading {
+			t.Fatal("j near the bottom should read the next mail page")
+		}
+	})
+
+	t.Run("search", func(t *testing.T) {
+		v := mailWithPostings()
+		v.searchActive = true
+		v.searchQuery = "quarterly planning"
+		v.searchList.setPostings(postings)
+		v.searchList.cursor = len(postings) - loadMoreThreshold - 1
+		v.searchNextPage = 2
+
+		if cmd := v.HandleContentKey(keyPress("j")); cmd == nil || !v.searchLoadingMore {
+			t.Fatal("j near the bottom should read the next search page")
+		}
+	})
 }
 
 func TestMailViewContentKeyInThread(t *testing.T) {
@@ -2707,7 +2766,7 @@ func TestMailViewCoverPeekUsesX(t *testing.T) {
 }
 
 func TestMailViewRemovedPostingAliasesStayUnused(t *testing.T) {
-	for _, key := range []string{"m", "g", "k"} {
+	for _, key := range []string{"m", "g"} {
 		v := mailWithPostings()
 		if cmd := v.HandleContentKey(keyPress(key)); cmd != nil {
 			t.Errorf("removed alias %q returned a command", key)

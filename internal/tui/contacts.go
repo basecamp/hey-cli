@@ -371,6 +371,11 @@ func (v *contactsView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	default:
 		switch msg.String() {
+		case "k":
+			v.list.moveUp()
+		case "j":
+			v.list.moveDown()
+			return v.loadMoreContacts()
 		case "a":
 			return v.startAddContact()
 		case "r":

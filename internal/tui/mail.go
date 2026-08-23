@@ -1034,6 +1034,11 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 			return v.openSelected()
 		default:
 			switch msg.String() {
+			case "k":
+				v.searchList.moveUp()
+			case "j":
+				v.searchList.moveDown()
+				return v.loadMoreSearchResults()
 			case "/", "s", "S":
 				return v.startSearch()
 			}
@@ -1051,6 +1056,11 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		return v.openSelected()
 	default:
 		switch msg.String() {
+		case "k":
+			v.postingList.moveUp()
+		case "j":
+			v.postingList.moveDown()
+			return v.loadMorePostings()
 		case "/", "s", "S":
 			return v.startSearch()
 		case "c":
