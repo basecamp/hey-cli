@@ -773,8 +773,9 @@ func screenerRowLabel(row screenerRow) string {
 }
 
 func renderScreenerRows(pane *screenerPane, visible, width int) string {
-	// Rows mirror the mail lists: a bold bright first line ("Name <address>")
-	// with a bright trailing date, then an indented second line whose subject
+	// Rows mirror the mail lists: a bright first line ("Name <address>", only
+	// the name bold so the address reads apart from it) with a bright trailing
+	// date, then an indented second line whose subject
 	// takes the hyperlink color and whose excerpt is faint. History rows have
 	// no second line — their label already carries the address — and lead the
 	// date with the decision, green for in and red for out. The cursor row
@@ -783,6 +784,7 @@ func renderScreenerRows(pane *screenerPane, visible, width int) string {
 	marker, selectedText := cursorStyles()
 	selectedGap := selectionStyle(lipgloss.NewStyle())
 	labelBase := lipgloss.NewStyle().Foreground(colorBright).Bold(true)
+	addressBase := lipgloss.NewStyle().Foreground(colorBright)
 	trailingBase := lipgloss.NewStyle().Foreground(colorBright)
 	screenedInBase := lipgloss.NewStyle().Foreground(colorPositive)
 	screenedOutBase := lipgloss.NewStyle().Foreground(colorNegative)
@@ -837,7 +839,18 @@ func renderScreenerRows(pane *screenerPane, visible, width int) string {
 		} else {
 			b.WriteString("  ")
 		}
-		b.WriteString(emphasize(labelBase).Render(label) + gapStyle.Render(gap))
+		// Only the name is bold; the "<address>" after it stays regular. A
+		// label truncated into the name renders as one bold piece, and a bare
+		// address standing in for the name keeps the name's bold.
+		name, address := label, ""
+		if after, ok := strings.CutPrefix(label, row.name); ok && row.name != "" {
+			name, address = row.name, after
+		}
+		b.WriteString(emphasize(labelBase).Render(name))
+		if address != "" {
+			b.WriteString(emphasize(addressBase).Render(address))
+		}
+		b.WriteString(gapStyle.Render(gap))
 		if trailing != "" {
 			// The decision keeps its own color; the date after it stays
 			// bright. A trailing truncated into the verdict falls back to
