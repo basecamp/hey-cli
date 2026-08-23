@@ -27,6 +27,9 @@ type Calendar struct {
 	Name     string
 	Color    string
 	Personal bool
+	// External is a calendar HEY subscribes to rather than owns — haystack's `internal`
+	// scope is `where.missing(:subscription)`, and this is the other side of it.
+	External bool
 }
 
 // listed is whether the picker offers this calendar at all. The personal calendar is
@@ -34,6 +37,20 @@ type Calendar struct {
 // and with no name of its own it would be a blank row that cannot be switched off.
 func (c Calendar) listed() bool {
 	return !c.Personal
+}
+
+// fileable is whether an event can be put on this calendar. It is the set haystack accepts
+// — `accessible_calendars.internal`, which `calendar_from_params` looks the submitted
+// calendar_id up in — and it is narrower than the calendars a period is drawn from.
+//
+// The personal calendar is the one that catches you out. `Identity#calendars` is
+// `accessible_calendars.ids.including(personal_calendar.id)`, so it is in every list HEY
+// serves, but `accessible_calendars` itself does not contain it — the id has to be added by
+// hand. Offer it as somewhere to file an event and the create answers 404, because the
+// lookup behind it finds nothing. The web app's own calendar select offers
+// `accessible_calendars.internal` for exactly this reason.
+func (c Calendar) fileable() bool {
+	return !c.Personal && !c.External
 }
 
 // CalendarYear is a year as HEY draws one: a grid of days, and the events that span more
@@ -1139,17 +1156,33 @@ func (v *calendarView) startHabitForm(mode habitFormMode, recording Recording) t
 // --- Writing events ---
 
 // errNoCalendars is the one thing that stops the form opening: an event has to be filed
-// somewhere, and the calendars have not been read yet.
-var errNoCalendars = errors.New("the calendars have not been read yet")
+// somewhere, and there is nowhere to put it. See Calendar.fileable — the personal calendar
+// and a subscription are not somewhere HEY lets an event be filed.
+var errNoCalendars = errors.New("no calendar takes new events")
+
+// fileableCalendars is where an event can go. It is not listedCalendars: that one is about
+// which calendars a reader can switch off, and this one about which HEY will accept a write
+// to. They differ on the personal calendar, which is switchable by nobody and writable by
+// nobody either.
+func (v *calendarView) fileableCalendars() []Calendar {
+	fileable := make([]Calendar, 0, len(v.calendars))
+	for _, calendar := range v.calendars {
+		if calendar.fileable() {
+			fileable = append(fileable, calendar)
+		}
+	}
+	return fileable
+}
 
 // startEventForm opens the form over the day or week, on the day the reader is looking at.
 // A new event needs somewhere to go, and the calendars a period is drawn from are the ones
 // it can go on.
 func (v *calendarView) startEventForm(mode eventFormMode, event Recording) tea.Cmd {
-	if len(v.calendars) == 0 {
+	fileable := v.fileableCalendars()
+	if len(fileable) == 0 {
 		return notifyError("Cannot add an event", errNoCalendars)
 	}
-	v.eventForm = newEventForm(mode, event, v.day(), v.calendars, v.vc.styles)
+	v.eventForm = newEventForm(mode, event, v.day(), fileable, v.vc.styles)
 	v.eventForm.resize(v.vc.width, v.vc.height)
 	return v.eventForm.init()
 }
@@ -1312,7 +1345,7 @@ func (v *calendarView) deleteTodo(todo Recording) tea.Cmd {
 // title goes back through the edit form, so sanitizing it here would rewrite it on an
 // unrelated save. Every view sanitizes what it shows instead.
 func sdkCalendarToModel(c generated.Calendar) Calendar {
-	return Calendar{ID: c.Id, Name: c.Name, Color: c.Color, Personal: c.Personal}
+	return Calendar{ID: c.Id, Name: c.Name, Color: c.Color, Personal: c.Personal, External: c.External}
 }
 
 func sdkRecordingToModel(r generated.Recording) Recording {

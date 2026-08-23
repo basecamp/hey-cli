@@ -14,10 +14,48 @@ import (
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 )
 
+// eventFormCalendars is what the form is handed: the calendars an event can be filed on,
+// already sifted by the view. The personal one and a subscription are not among them —
+// see TestEventFormIsOnlyOfferedCalendarsHEYWillTake.
 func eventFormCalendars() []Calendar {
 	return []Calendar{
-		{ID: 240332, Personal: true},
+		{ID: 240334, Name: "Errands", Color: "blue"},
 		{ID: 486532, Name: "Design Team", Color: "teal"},
+	}
+}
+
+// HEY looks a submitted calendar_id up in `accessible_calendars.internal`, and the personal
+// calendar is not in it: `Identity#calendars` has to add its id by hand. Offering it as
+// somewhere to file an event is what made every create answer 404.
+func TestEventFormIsOnlyOfferedCalendarsHEYWillTake(t *testing.T) {
+	v := dayWithEvents(t)
+	v.calendars = []Calendar{
+		{ID: 240332, Personal: true},
+		{ID: 240334, Name: "Errands", Color: "blue"},
+		{ID: 700001, Name: "Croatian holidays", External: true},
+	}
+
+	fileable := v.fileableCalendars()
+	if len(fileable) != 1 || fileable[0].ID != 240334 {
+		t.Fatalf("fileable = %+v, want the one internal calendar the reader owns", fileable)
+	}
+
+	v.HandleContentKey(keyPress("a"))
+	if v.eventForm == nil {
+		t.Fatal("a did not open the form")
+	}
+	if got := v.eventForm.values().CalendarID; got != 240334 {
+		t.Errorf("the form would file on %d, want 240334", got)
+	}
+
+	// With nowhere to file one, the form does not open on a promise it cannot keep.
+	v.eventForm = nil
+	v.calendars = []Calendar{{ID: 240332, Personal: true}}
+	if cmd := v.HandleContentKey(keyPress("a")); cmd == nil {
+		t.Error("a should say why it cannot add an event")
+	}
+	if v.eventForm != nil {
+		t.Error("the form opened with nowhere to file the event")
 	}
 }
 
@@ -37,7 +75,7 @@ func TestNewEventFormOpensOnTheDayInView(t *testing.T) {
 	if values.AllDay {
 		t.Error("a new event should not be all day")
 	}
-	if values.CalendarID != 240332 {
+	if values.CalendarID != 240334 {
 		t.Errorf("calendar = %d, want the first offered", values.CalendarID)
 	}
 	if values.TimeZone != time.Local.String() {
