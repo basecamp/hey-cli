@@ -775,7 +775,7 @@ func renderDayGrid(lanes [][]placedEvent, gridWidth, colWidth, rows, nowCol int,
 
 	offset := 0
 	for i, lane := range lanes {
-		drawDayLane(grid, cells, lane, offset, laneRows[i], sel)
+		drawDayLane(grid, cells, lane, offset, laneRows[i], nowCol, sel)
 		offset += laneRows[i] + 1
 	}
 
@@ -871,7 +871,25 @@ func sumOf(values []int) int {
 // boxes rows tall with vertical (90-degree rotated) title text. Every cell a box owns
 // carries the color of the calendar the event is filed on, so which calendar an event
 // belongs to is answered by looking at it.
-func drawDayLane(grid [][]rune, cells [][]dayCell, lane []placedEvent, rowOffset, rows int, sel selection) {
+// titleColumn is the column an event's name reads down: the middle of its block, and one over
+// where that is the column the clock is at.
+//
+// The line gives way to a letter, so a name sitting on the clock's column would break it on
+// every row it occupies — and a tall event's name occupies nearly all of them, which hid the
+// line completely for the two hours around its own middle. Stepping the name aside by one costs
+// nothing: it is centred by choice, not by meaning.
+func titleColumn(startCol, endCol, nowCol int) int {
+	at := startCol + max((endCol-startCol-1)/2, 0)
+	if at != nowCol || endCol-startCol < 2 {
+		return at
+	}
+	if at+1 < endCol {
+		return at + 1
+	}
+	return at - 1
+}
+
+func drawDayLane(grid [][]rune, cells [][]dayCell, lane []placedEvent, rowOffset, rows, nowCol int, sel selection) {
 	top := rowOffset
 	bottom := rowOffset + rows - 1
 
@@ -923,7 +941,7 @@ func drawDayLane(grid [][]rune, cells [][]dayCell, lane []placedEvent, rowOffset
 		titleRunes := []rune(terminal.SanitizeLine(pe.rec.Title))
 		rows := bottom - top + 1
 		titleRow := top + max((rows-len(titleRunes))/2, 0)
-		titleCol := sc + max((ec-sc-1)/2, 0)
+		titleCol := titleColumn(sc, ec, nowCol)
 
 		for i, r := range titleRunes {
 			row := titleRow + i

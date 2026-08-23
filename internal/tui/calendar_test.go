@@ -1891,21 +1891,28 @@ func TestTheDayMarksWhereTheClockIs(t *testing.T) {
 		t.Errorf("no line on the first grid row: %q", firstRow)
 	}
 
-	// Where the line falls on an event's name it breaks around it. The name is the one thing on
-	// the grid a reader has to be able to read, and a dash through the middle of it costs a
-	// letter.
+	// Where the line falls on an event's name it breaks around it — the name is the one thing on
+	// the grid a reader has to be able to read. But the name steps aside first, or a tall event
+	// would hide the line for its whole height: it reads down the middle of its block, so the
+	// two hours around its own centre had no line at all.
 	placed := placedEvent{
 		rec:      Recording{ID: 1, Title: "Design review", CalendarColor: "green"},
 		startCol: 8, endCol: 20,
 	}
-	titleCol := placed.startCol + (placed.endCol-placed.startCol-1)/2
-	grid := stripANSI(renderDayGrid([][]placedEvent{{placed}}, 40, 4, 15, titleCol, styleMuted, selection{}))
+	middle := placed.startCol + (placed.endCol-placed.startCol-1)/2
+	grid := stripANSI(renderDayGrid([][]placedEvent{{placed}}, 40, 4, 15, middle, styleMuted, selection{}))
 	if !strings.Contains(grid, "D") || !strings.Contains(grid, "w") {
 		t.Errorf("the line ate the event's name:\n%s", grid)
 	}
-	// And it is still drawn everywhere else down that column — above and below the name.
-	if strings.Count(grid, string(nowRule)) == 0 {
-		t.Errorf("the line vanished behind the event:\n%s", grid)
+	if strings.Count(grid, string(nowRule)) < 10 {
+		t.Errorf("the line hid behind the event's name:\n%s", grid)
+	}
+	if titleColumn(placed.startCol, placed.endCol, middle) == middle {
+		t.Error("the name did not step aside from the clock's column")
+	}
+	// A block one column wide has nowhere to step, so there the line gives way instead.
+	if got := titleColumn(8, 9, 8); got != 8 {
+		t.Errorf("a one-column event moved its name to %d", got)
 	}
 
 	// The colon blinks a second on and a second off, and is swapped for a space rather than
