@@ -254,6 +254,29 @@ func calendarTick() tea.Cmd {
 	return tea.Tick(calendarTickInterval, func(time.Time) tea.Msg { return calendarTickMsg{} })
 }
 
+// calendarClockMsg moves the line that marks now, and blinks the colon in the time above it. It
+// is its own tick rather than the highlight's, which runs many times a second and only while
+// something is selected; this one runs once a second for as long as a day that is today is on
+// screen, which is what a blinking colon costs. The line itself moves a column every quarter of
+// an hour or so, and comes along for free.
+type calendarClockMsg struct{}
+
+const calendarClockInterval = time.Second
+
+func calendarClock() tea.Cmd {
+	return tea.Tick(calendarClockInterval, func(time.Time) tea.Msg { return calendarClockMsg{} })
+}
+
+// followClock keeps the day's now line moving. Only the day draws one, and only on today, so
+// nothing else pays for it.
+func (v *calendarView) followClock() tea.Cmd {
+	if v.tickingClock || v.viewMode != viewDay || !sameDay(v.day(), v.now()) {
+		return nil
+	}
+	v.tickingClock = true
+	return calendarClock()
+}
+
 // animate keeps the highlight moving for as long as there is something selected to draw it on,
 // and lets the loop stop as soon as there is not. Nothing restarts it but a key, which is the
 // only thing that can select an event in the first place.
@@ -334,11 +357,18 @@ type calendarView struct {
 	// start a second loop running alongside the first.
 	animating bool
 
-	// drawnSinceTick is set by View and cleared by every tick. A tick that finds it clear
-	// knows nothing has drawn the calendar since the last one — the reader is in another
-	// section — and stops the loop rather than animating a screen nobody is looking at. There
-	// is no hook for a section being left, and this needs none: only the active view is drawn.
-	drawnSinceTick bool
+	// tickingClock is whether the now line's own tick is already in flight, so switching span
+	// and back does not leave two of them running.
+	tickingClock bool
+
+	// drawnSinceTick and drawnSinceClock are set by View and cleared by their own tick. A tick
+	// that finds its flag clear knows nothing has drawn the calendar since the last one — the
+	// reader is in another section — and stops rather than working on a screen nobody is looking
+	// at. There is no hook for a section being left, and this needs none: only the active view is
+	// drawn. They are two flags because the two ticks run at wildly different rates, and one
+	// would keep clearing the flag out from under the other.
+	drawnSinceTick  bool
+	drawnSinceClock bool
 
 	// year is what the year span draws, and it is a different answer than the
 	// recordings above rather than a summary of them.
@@ -380,7 +410,7 @@ func newCalendarView(vc *viewContext) *calendarView {
 }
 
 func (v *calendarView) Init() tea.Cmd {
-	cmds := []tea.Cmd{v.fetchIdentity()}
+	cmds := []tea.Cmd{v.fetchIdentity(), v.followClock()}
 	if len(v.calendars) == 0 {
 		cmds = append(cmds, v.requestCalendars())
 	} else {
@@ -391,6 +421,15 @@ func (v *calendarView) Init() tea.Cmd {
 
 func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
+	case calendarClockMsg:
+		v.tickingClock = false
+		if !v.drawnSinceClock {
+			return nil, true
+		}
+		v.drawnSinceClock = false
+		v.rebuildKeepingScroll()
+		return v.followClock(), true
+
 	case calendarTickMsg:
 		v.animating = false
 		if v.selectedEvent == "" || !v.drawnSinceTick {
@@ -448,10 +487,12 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		was := v.selectedEvent
 		v.settleSelection()
 		v.rebuildView()
+		// Every span change and every step lands here, which makes it the one place that
+		// notices the reader is now on a day that has a now to draw.
 		if v.selectedEvent != was {
-			return v.animate(), true
+			return tea.Batch(v.animate(), v.followClock()), true
 		}
-		return nil, true
+		return v.followClock(), true
 
 	case yearLoadedMsg:
 		if cmd, ok := v.requests.settle(msg.requestResult); !ok {
@@ -532,7 +573,7 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 }
 
 func (v *calendarView) View() string {
-	v.drawnSinceTick = true
+	v.drawnSinceTick, v.drawnSinceClock = true, true
 
 	if v.timeTrackCategories != nil {
 		return v.timeTrackCategories.view(v.vc.styles, v.vc.width, v.vc.height)

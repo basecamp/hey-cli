@@ -259,12 +259,24 @@ type dayCell struct {
 	sweepRow int
 	sweepW   int
 	sweepH   int
+	// now marks the column the clock is at. It rides on the cell rather than replacing it so
+	// the line keeps whatever it crosses: over an event it is a dash in its fill, which is what
+	// says the event is happening now.
+	now bool
 }
 
 // style is how a cell is drawn. An event is a block filled with its calendar's color with its
 // title over it, the way the web app draws its bars. Anything outside an event keeps the grid's
 // own styles.
 func (cell dayCell) style(muted lipgloss.Style, phase int) lipgloss.Style {
+	style := cell.baseStyle(muted, phase)
+	if cell.now {
+		return style.Foreground(colorAlert).Bold(true)
+	}
+	return style
+}
+
+func (cell dayCell) baseStyle(muted lipgloss.Style, phase int) lipgloss.Style {
 	if cell.selected {
 		return eventSelectedCellStyle(cell.color, cell.sweepCol, cell.sweepRow, cell.sweepW, cell.sweepH, phase)
 	}
@@ -454,6 +466,39 @@ func themeInk() color.Color {
 // events and not as another box's border.
 const hourRule = '┊'
 
+// nowRule is the line down the column the clock is at. It is dashed rather than dotted so it
+// reads as a different kind of line from the hours it crosses, and it is drawn over whatever is
+// there — including an event, which is how an event happening now says so.
+const nowRule = '╎'
+
+// nowColumn is where on the day's axis the clock is, and -1 for a day that is not today. A day
+// the reader has stepped away from has no now on it.
+func nowColumn(day, now time.Time, daySpan int) int {
+	if !sameDay(day, now) {
+		return -1
+	}
+	at := (now.Hour()*60 + now.Minute()) * daySpan / (24 * 60)
+	return min(at, daySpan-1)
+}
+
+// nowLabel is the time itself, centred over the column the line is at and pulled back inside the
+// axis at either end so it does not hang off the day.
+//
+// Its colon blinks on the second, a second on and a second off, the way a clock's does. It is
+// swapped for a space rather than dropped so the digits either side of it never move — and it is
+// done here rather than with the terminal's own blink attribute, which plenty of terminals
+// ignore and none of them run to our second.
+func nowLabel(now time.Time, nowCol, gridWidth int) string {
+	separator := ":"
+	if now.Second()%2 == 1 {
+		separator = " "
+	}
+
+	clock := now.Format("15") + separator + now.Format("04")
+	at := min(max(nowCol-len(clock)/2, 0), max(gridWidth-len(clock), 0))
+	return strings.Repeat(" ", at) + lipgloss.NewStyle().Foreground(colorAlert).Bold(true).Render(clock)
+}
+
 // dayCountdownLines is what the day is counting down to, one line each, nearest first.
 //
 // A countdown is a recording in its own right — a child of the event, spanning the days from the
@@ -530,6 +575,15 @@ func renderDayView(events, habits, countdowns []Recording, anchor time.Time, hin
 	// move it sit on the same line, where the cover puts "x to peek".
 	b.WriteString(hintedSectionHeader(anchor.Local().Format("Monday, January 2"), hint, width))
 	b.WriteString("\n")
+
+	// The clock, over the hour it is at, as the web app puts it over its own axis. It is only
+	// drawn on a day that is today: a day the reader has stepped away from has no now on it.
+	now := time.Now()
+	nowCol := nowColumn(anchor, now, daySpan)
+	if nowCol >= 0 {
+		b.WriteString(nowLabel(now, nowCol, gridWidth))
+		b.WriteString("\n")
+	}
 
 	// Hour header
 	var header strings.Builder
@@ -610,13 +664,16 @@ func renderDayView(events, habits, countdowns []Recording, anchor time.Time, hin
 	// The grid fills the room the rest of the day view leaves it, so the hours reach
 	// the bottom of the screen on a day with nothing on them.
 	spent := 2 + len(countdownLines) // the day's own header, the hour axis, what it counts down to
+	if nowCol >= 0 {
+		spent++
+	}
 	if len(habits) > 0 {
 		spent += 2
 	}
 	if len(allDay) > 0 {
 		spent += 1 + len(allDay)
 	}
-	b.WriteString(renderDayGrid(lanes, gridWidth, colWidth, height-spent, muted, sel))
+	b.WriteString(renderDayGrid(lanes, gridWidth, colWidth, height-spent, nowCol, muted, sel))
 
 	// All-day events run the width of the day at the bottom of it, as blocks in their
 	// calendars' colors. They used to be drawn [like this─────], which said "all day" by
@@ -648,7 +705,7 @@ func renderDayView(events, habits, countdowns []Recording, anchor time.Time, hin
 // to be, which left a short name looking like a short event and a long one looking like a
 // long one — the box is the span, so its size has to come from the day rather than from
 // the words in it.
-func renderDayGrid(lanes [][]placedEvent, gridWidth, colWidth, rows int, muted lipgloss.Style, sel selection) string {
+func renderDayGrid(lanes [][]placedEvent, gridWidth, colWidth, rows, nowCol int, muted lipgloss.Style, sel selection) string {
 	// A row of grid between the lanes, so two events at the same hour read as two events. They
 	// used to touch, and a tall block above a short one looked like one block with a step in it.
 	gaps := max(len(lanes)-1, 0)
@@ -687,6 +744,22 @@ func renderDayGrid(lanes [][]placedEvent, gridWidth, colWidth, rows int, muted l
 				grid[row][col] = hourRule
 				cells[row][col] = dayCell{kind: cellRule}
 			}
+		}
+	}
+
+	// The clock goes in after them and over the event happening now rather than behind it: a
+	// line that hid there would be missing at the one moment it is worth having.
+	//
+	// It gives way to a title, though. An event's name is the one thing on the grid a reader has
+	// to be able to read, and a dash through the middle of it costs a letter — so where the
+	// column lands on the name, the line breaks around it instead.
+	if nowCol >= 0 && nowCol < gridWidth {
+		for row := range height {
+			if cells[row][nowCol].kind == cellTitle {
+				continue
+			}
+			grid[row][nowCol] = nowRule
+			cells[row][nowCol].now = true
 		}
 	}
 

@@ -1865,6 +1865,109 @@ func TestEventInkFollowsALiveThemeChange(t *testing.T) {
 	}
 }
 
+// The day marks where the clock is, as the web app does: the time over the axis and a dashed
+// line down the column, drawn over whatever it crosses.
+func TestTheDayMarksWhereTheClockIs(t *testing.T) {
+	now := time.Now()
+	event := Recording{ID: 1, Title: "Design review", CalendarColor: "green", Type: "Calendar::Event",
+		StartsAt: now.Truncate(time.Hour).Add(-time.Hour), EndsAt: now.Truncate(time.Hour).Add(2 * time.Hour)}
+
+	lines := strings.Split(stripANSI(renderDayView([]Recording{event}, nil, nil,
+		now, "p/n day", 100, 16, selection{})), "\n")
+	if !strings.Contains(lines[1], now.Format("15")) || !strings.Contains(lines[1], now.Format("04")) {
+		t.Errorf("the clock is not named over the axis: %q", lines[1])
+	}
+
+	// The line goes over the event happening now rather than behind it: hidden there, it would
+	// be missing at the one moment it is worth having.
+	crossings := 0
+	for _, line := range lines {
+		crossings += strings.Count(line, string(nowRule))
+	}
+	if crossings < 3 {
+		t.Errorf("the line crosses only %d rows", crossings)
+	}
+	if firstRow := lines[3]; !strings.ContainsRune(firstRow, nowRule) {
+		t.Errorf("no line on the first grid row: %q", firstRow)
+	}
+
+	// Where the line falls on an event's name it breaks around it. The name is the one thing on
+	// the grid a reader has to be able to read, and a dash through the middle of it costs a
+	// letter.
+	placed := placedEvent{
+		rec:      Recording{ID: 1, Title: "Design review", CalendarColor: "green"},
+		startCol: 8, endCol: 20,
+	}
+	titleCol := placed.startCol + (placed.endCol-placed.startCol-1)/2
+	grid := stripANSI(renderDayGrid([][]placedEvent{{placed}}, 40, 4, 15, titleCol, styleMuted, selection{}))
+	if !strings.Contains(grid, "D") || !strings.Contains(grid, "w") {
+		t.Errorf("the line ate the event's name:\n%s", grid)
+	}
+	// And it is still drawn everywhere else down that column — above and below the name.
+	if strings.Count(grid, string(nowRule)) == 0 {
+		t.Errorf("the line vanished behind the event:\n%s", grid)
+	}
+
+	// The colon blinks a second on and a second off, and is swapped for a space rather than
+	// dropped so the digits either side of it never move.
+	on := time.Date(2026, 8, 23, 15, 55, 0, 0, time.Local)
+	lit := nowLabel(on, 40, 100)
+	unlit := nowLabel(on.Add(time.Second), 40, 100)
+	if !strings.Contains(lit, "15:55") {
+		t.Errorf("an even second reads %q, want the colon", stripANSI(lit))
+	}
+	if !strings.Contains(unlit, "15 55") {
+		t.Errorf("an odd second reads %q, want the colon blinked out", stripANSI(unlit))
+	}
+	if lipgloss.Width(stripANSI(lit)) != lipgloss.Width(stripANSI(unlit)) {
+		t.Error("the blink moves the digits")
+	}
+
+	// A day the reader has stepped away from has no now on it, and gives back the row.
+	yesterday := stripANSI(renderDayView(nil, nil, nil, now.AddDate(0, 0, -1), "p/n day", 100, 16, selection{}))
+	if strings.ContainsRune(yesterday, nowRule) {
+		t.Error("yesterday is marked with a now line")
+	}
+	if strings.Contains(strings.Split(yesterday, "\n")[1], ":") {
+		t.Error("yesterday kept the clock's row")
+	}
+}
+
+// The clock's own tick is separate from the highlight's, and each stops when nothing has drawn
+// the calendar since it last fired — which is how they notice the reader went to another section
+// without a hook saying so. Two flags, because one tick would keep clearing the other's.
+func TestTheClockFollowsOnlyTheDayThatIsToday(t *testing.T) {
+	// Reading a day is what starts it: every span change and every step lands there.
+	v := dayWithEvents(t)
+	if !v.tickingClock {
+		t.Fatal("reading a day that is today did not start the clock")
+	}
+	if cmd := v.followClock(); cmd != nil {
+		t.Error("a second clock was started alongside the first")
+	}
+	v.now = time.Now
+
+	v.View()
+	if cmd, _ := v.Update(calendarClockMsg{}); cmd == nil {
+		t.Error("a tick on a drawn day did not schedule the next")
+	}
+	if cmd, _ := v.Update(calendarClockMsg{}); cmd != nil {
+		t.Error("the clock went on with the calendar off screen")
+	}
+
+	// The week and the year draw no line, and a day the reader stepped off has no now.
+	v.View()
+	v.viewMode = viewWeek
+	if cmd := v.followClock(); cmd != nil {
+		t.Error("the week runs a clock it does not draw")
+	}
+	v.viewMode = viewDay
+	v.anchor = time.Now().AddDate(0, 0, -3)
+	if cmd := v.followClock(); cmd != nil {
+		t.Error("a day that is not today runs a clock")
+	}
+}
+
 // A countdown is a recording of its own — a child of the event, spanning the days from the
 // notice period up to it — and it goes above the date rather than on the grid, the way the web
 // app puts it. It has no title of its own: what it is counting down to is its parent's.
