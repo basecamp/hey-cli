@@ -95,9 +95,9 @@ nix profile install github:basecamp/hey-cli
 go install github.com/basecamp/hey-cli/cmd/hey@latest
 ```
 
-**From source** (requires Go 1.26+; [mise](https://mise.jdx.dev) installs the right version):
+**From source** (requires Go 1.27+; [mise](https://mise.jdx.dev) installs the right version):
 ```bash
-mise install       # install Go 1.26
+mise install       # install Go 1.27
 make install       # build and install into /usr/local/bin/hey
 ```
 

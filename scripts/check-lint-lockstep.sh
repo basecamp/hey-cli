@@ -22,7 +22,7 @@ WORKFLOW_DIR=".github/workflows"
 # The oldest golangci-lint every workflow may pin. Raising this is a deliberate
 # act, not housekeeping: move it in the same commit that moves the workflow
 # pins, so the floor and the pins never disagree in a merged tree.
-MIN_VERSION="v2.11.1"
+MIN_VERSION="v2.13.1"
 
 # Compare numerically, field by field, never lexically. As strings v2.9.0
 # sorts *above* v2.11.1 — 9 > 1 — so a lexical test would wave through the exact

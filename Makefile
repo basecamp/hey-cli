@@ -258,7 +258,7 @@ bench-compare:
 # so local and CI findings agree. govulncheck stays @latest on purpose: pinning
 # it only delays new advisories and Go version support.
 tools:
-	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.1
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.1
 	go install golang.org/x/vuln/cmd/govulncheck@latest
 	@echo "For gitleaks, install via: brew install gitleaks (or see https://github.com/gitleaks/gitleaks)"
 	@echo "For benchstat: go install golang.org/x/perf/cmd/benchstat@latest"
