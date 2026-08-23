@@ -799,6 +799,9 @@ func (v *mailView) HelpBindings() []helpBinding {
 		{"a", "set aside"},
 		{"d", "feed"},
 	}
+	if v.vc.vimMode && v.showsImbox() {
+		bindings = append(bindings, helpBinding{"j/k", "next/previous thread"})
+	}
 	bindings = append(bindings,
 		helpBinding{"p", "paper trail"},
 		helpBinding{"t", "trash"},
@@ -1050,6 +1053,16 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	case tea.KeyEnter:
 		return v.openSelected()
 	default:
+		if v.vc.vimMode && v.showsImbox() {
+			switch msg.String() {
+			case "j":
+				v.postingList.moveDown()
+				return v.loadMorePostings()
+			case "k":
+				v.postingList.moveUp()
+				return nil
+			}
+		}
 		switch msg.String() {
 		case "/", "s", "S":
 			return v.startSearch()

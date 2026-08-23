@@ -2056,6 +2056,49 @@ func TestMailViewContentKeyUpDown(t *testing.T) {
 	}
 }
 
+func TestMailViewVimModeNavigatesImbox(t *testing.T) {
+	v := mailWithPostings()
+	v.vc.vimMode = true
+	if !v.showsImbox() {
+		t.Fatal("mailWithPostings should start on a real Imbox source")
+	}
+
+	v.HandleContentKey(keyPress("j"))
+	if v.postingList.cursor != 1 {
+		t.Fatalf("after j: cursor = %d, want 1", v.postingList.cursor)
+	}
+	v.HandleContentKey(keyPress("k"))
+	if v.postingList.cursor != 0 {
+		t.Fatalf("after k: cursor = %d, want 0", v.postingList.cursor)
+	}
+}
+
+func TestMailViewVimModeLeavesJKDisabledByDefault(t *testing.T) {
+	v := mailWithPostings()
+	if !v.showsImbox() {
+		t.Fatal("mailWithPostings should start on a real Imbox source")
+	}
+
+	v.HandleContentKey(keyPress("j"))
+	if v.postingList.cursor != 0 {
+		t.Fatalf("j changed the cursor with vim mode disabled: %d", v.postingList.cursor)
+	}
+}
+
+func TestMailViewVimModeLeavesJKUnusedOutsideImbox(t *testing.T) {
+	v := mailWithPostings()
+	v.vc.vimMode = true
+	v.boxIndex = 1 // The Feed
+	if v.showsImbox() {
+		t.Fatal("test should not be on the Imbox")
+	}
+
+	v.HandleContentKey(keyPress("j"))
+	if v.postingList.cursor != 0 {
+		t.Fatalf("j moved the cursor outside the Imbox: %d", v.postingList.cursor)
+	}
+}
+
 func TestMailViewContentKeyInThread(t *testing.T) {
 	v := mailWithPostings()
 	v.inThread = true

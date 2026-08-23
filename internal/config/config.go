@@ -34,6 +34,7 @@ type Config struct {
 	BaseURL   string `json:"base_url"`
 	AccountID string `json:"account_id,omitempty"`
 	Onboarded bool   `json:"onboarded,omitempty"`
+	VimMode   bool   `json:"vim_mode,omitempty"`
 
 	sources             map[string]Source
 	globalConfig        fileConfig
@@ -48,6 +49,7 @@ type fileConfig struct {
 	Cover               string                              `json:"cover,omitempty"`
 	LastCalendarID      int64                               `json:"last_calendar_id,omitempty"`
 	HelpHidden          bool                                `json:"help_hidden,omitempty"`
+	VimMode             bool                                `json:"vim_mode,omitempty"`
 	AccountDefaults     map[string]string                   `json:"account_defaults,omitempty"`
 	TrustedLocalConfigs map[string]trustedLocalConfigRecord `json:"trusted_local_configs,omitempty"`
 }
@@ -168,6 +170,7 @@ func load(localPath string) (*Config, error) {
 	if global.Onboarded != nil {
 		cfg.Onboarded = *global.Onboarded
 	}
+	cfg.VimMode = global.VimMode
 
 	var local fileConfig
 	if localPath != "" {
@@ -324,6 +327,16 @@ func (c *Config) SetFromFlag(key, value string) error {
 			c.sources = map[string]Source{}
 		}
 		c.sources["account_id"] = SourceFlag
+	case "vim_mode":
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("vim_mode must be true or false")
+		}
+		c.VimMode = enabled
+		if c.sources == nil {
+			c.sources = map[string]Source{}
+		}
+		c.sources["vim_mode"] = SourceFlag
 	}
 	return nil
 }
@@ -437,6 +450,29 @@ func SaveHelpHidden(hidden bool) error {
 	return saveGlobalConfig(file)
 }
 
+// VimMode reports whether the TUI should use vim-style Imbox navigation.
+func VimMode() bool {
+	file, err := loadGlobalFileConfig()
+	if err != nil {
+		return false
+	}
+	return file.VimMode
+}
+
+// SaveVimMode stores whether the TUI should use vim-style Imbox navigation,
+// leaving every other setting alone.
+func SaveVimMode(enabled bool) error {
+	file, err := loadGlobalFileConfig()
+	if err != nil {
+		return err
+	}
+	if err := migrateLegacyAccountDefault(&file); err != nil {
+		return err
+	}
+	file.VimMode = enabled
+	return saveGlobalConfig(file)
+}
+
 // SaveOnboarded stores the onboarding flag in the global config so later
 // logged-out runs of bare `hey` skip the full first-run wizard.
 func (c *Config) SaveOnboarded(onboarded bool) error {
@@ -502,7 +538,7 @@ func migrateLegacyAccountDefault(file *fileConfig) error {
 
 // fileConfigKeys are the keys the fileConfig schema owns. A rewrite replaces
 // exactly these; every other key in the file is preserved verbatim.
-var fileConfigKeys = []string{"base_url", "account_id", "onboarded", "cover", "help_hidden", "account_defaults", "trusted_local_configs"}
+var fileConfigKeys = []string{"base_url", "account_id", "onboarded", "cover", "help_hidden", "vim_mode", "account_defaults", "trusted_local_configs"}
 
 // legacyCredentialKeys are the embedded-credential fields of the pre-store
 // config format. They survive every ordinary rewrite (deleting a credential

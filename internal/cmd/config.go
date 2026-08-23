@@ -37,7 +37,8 @@ func newConfigSetCommand() *cobra.Command {
 		Use:   "set <key> <value>",
 		Short: "Set a configuration value in the global config",
 		Example: `  hey config set base_url http://app.hey.localhost:3003
-  hey config set base_url https://app.hey.com`,
+  hey config set base_url https://app.hey.com
+  hey config set vim_mode true`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			key, value := args[0], args[1]
@@ -58,8 +59,17 @@ func newConfigSetCommand() *cobra.Command {
 				if err := cfg.SaveOnboarded(onboarded); err != nil {
 					return err
 				}
+			case "vim_mode":
+				enabled, err := strconv.ParseBool(value)
+				if err != nil {
+					return apierr.ErrUsage(fmt.Sprintf("vim_mode must be true or false (got %q)", value))
+				}
+				if err := config.SaveVimMode(enabled); err != nil {
+					return err
+				}
+				cfg.VimMode = enabled
 			default:
-				return apierr.ErrUsage(fmt.Sprintf("unknown config key: %s (available: base_url, onboarded)", key))
+				return apierr.ErrUsage(fmt.Sprintf("unknown config key: %s (available: base_url, onboarded, vim_mode)", key))
 			}
 
 			summary := fmt.Sprintf("Set %s = %s", key, value)
@@ -158,6 +168,11 @@ func newConfigShowCommand() *cobra.Command {
 					"key":    "account_id",
 					"value":  cfg.AccountID,
 					"source": string(cfg.SourceOf("account_id")),
+				},
+				{
+					"key":    "vim_mode",
+					"value":  strconv.FormatBool(cfg.VimMode),
+					"source": "global",
 				},
 				{
 					"key":    "onboarded",

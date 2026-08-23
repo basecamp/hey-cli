@@ -30,6 +30,49 @@ func TestDefaultConfig(t *testing.T) {
 	if src := cfg.SourceOf("account_id"); src != SourceDefault {
 		t.Errorf("account source = %q, want %q", src, SourceDefault)
 	}
+	if cfg.VimMode {
+		t.Error("VimMode = true, want false by default")
+	}
+}
+
+func TestVimModeConfig(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SetFromFlag("vim_mode", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.VimMode || cfg.SourceOf("vim_mode") != SourceFlag {
+		t.Fatalf("vim mode = %v (%s), want true (flag)", cfg.VimMode, cfg.SourceOf("vim_mode"))
+	}
+	if err := SaveVimMode(true); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.VimMode {
+		t.Error("saved VimMode did not load as true")
+	}
+	if !VimMode() {
+		t.Error("VimMode() did not report the saved value")
+	}
+}
+
+func TestInvalidVimMode(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SetFromFlag("vim_mode", "enabled"); err == nil {
+		t.Fatal("SetFromFlag accepted invalid vim_mode")
+	}
 }
 
 func TestGlobalConfigOverride(t *testing.T) {
@@ -550,6 +593,46 @@ func TestHelpHiddenRoundTrip(t *testing.T) {
 	}
 	if _, present := file["help_hidden"]; present {
 		t.Errorf("showing help left a help_hidden key behind: %s", data)
+	}
+}
+
+// A carried-through raw key must not resurrect an old value over a saved one:
+// vim_mode was missing from fileConfigKeys once, and every rewrite wrote the
+// stale true back over a freshly saved false.
+func TestSaveVimModeReplacesCarriedKey(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+	t.Setenv("HEY_BASE_URL", "")
+
+	dir := filepath.Join(tmp, configDirName)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	seed := []byte(`{"vim_mode": true, "some_future_key": 1}`)
+	if err := os.WriteFile(filepath.Join(dir, configFile), seed, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SaveVimMode(false); err != nil {
+		t.Fatalf("SaveVimMode(false): %v", err)
+	}
+	if VimMode() {
+		t.Error("vim mode still on after saving false")
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, configFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file map[string]any
+	if err := json.Unmarshal(data, &file); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	if _, present := file["vim_mode"]; present {
+		t.Errorf("saving false left a vim_mode key behind: %s", data)
+	}
+	if file["some_future_key"] != float64(1) {
+		t.Errorf("unknown key was not carried through: %s", data)
 	}
 }
 

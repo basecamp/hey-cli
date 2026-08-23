@@ -31,6 +31,7 @@ type viewContext struct {
 	saveCover            coverSaveFunc
 	loadLastCalendar     func() int64
 	saveLastCalendar     func(id int64) error
+	vimMode              bool
 	width                int
 	height               int // content area height
 }
