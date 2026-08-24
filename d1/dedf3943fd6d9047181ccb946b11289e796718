@@ -1,0 +1,20 @@
+.github/workflows/test.yml
+  s_93520af149d0cb::t_2687eef0fd9fc0 325
+  s_93520af149d0cb::t_b99e4c0b88a79f 327-329,354,357
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "d1dedf3943fd6d9047181ccb946b11289e796718",
+  "prompts": {},
+  "sessions": {
+    "s_93520af149d0cb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a03273-eea1-7202-9343-217fa7530047",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
