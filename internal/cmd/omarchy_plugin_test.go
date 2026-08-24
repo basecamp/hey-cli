@@ -447,14 +447,20 @@ func TestOmarchyPluginEnsureMissingCLISaysUpdateOmarchy(t *testing.T) {
 }
 
 func TestOmarchyPluginProbeFailsClosedOnAnUnexpectedAnswer(t *testing.T) {
-	env, _, _ := testOmarchyEnvScripted(t, map[string]omarchyReply{
-		"omarchy plugin list": {out: "I am not JSON"},
-	})
-	stubConfirmOmarchyPanel(t, true, nil)
+	for _, reply := range []omarchyReply{
+		{out: "I am not JSON"},
+		{out: "null"}, // unmarshals into a nil slice without error — still not a list
+		{out: "[]", err: errors.New("exit status 1")}, // a failing command whose output happens to parse
+	} {
+		env, _, _ := testOmarchyEnvScripted(t, map[string]omarchyReply{
+			"omarchy plugin list": reply,
+		})
+		stubConfirmOmarchyPanel(t, true, nil)
 
-	step := omarchySetup{env: env}.installBarPlugin()
-	if step.Status != "failed" || !strings.Contains(step.Detail, "unexpected answer") {
-		t.Fatalf("step = %q %q", step.Status, step.Detail)
+		step := omarchySetup{env: env}.installBarPlugin()
+		if step.Status != "failed" || !strings.Contains(step.Detail, "unexpected answer") {
+			t.Fatalf("reply %q/%v: step = %q %q", reply.out, reply.err, step.Status, step.Detail)
+		}
 	}
 }
 
@@ -695,11 +701,68 @@ func TestOmarchyPluginRemoveTombstoneFirst(t *testing.T) {
 		t.Error("the checkout must survive removal")
 	}
 
-	// Off the bar: nothing to disable, tombstone still written.
+	// Off the bar and not enabled per the shell: nothing to disable,
+	// tombstone still written; the probe is the only command that runs.
 	countBefore := len(*ran)
 	step = omarchySetup{env: env, forcePlugin: true}.removeBarPlugin(false)
-	if step.Status != "absent" || len(*ran) != countBefore {
-		t.Errorf("off-bar remove = %q, ran %v", step.Status, (*ran)[countBefore:])
+	if step.Status != "absent" {
+		t.Errorf("off-bar remove = %q %q", step.Status, step.Detail)
+	}
+	if got := mutationCommands((*ran)[countBefore:]); len(got) != 0 {
+		t.Errorf("nothing to disable for an absent plugin: %v", got)
+	}
+}
+
+func TestOmarchyPluginRemoveDisablesAnEnabledPluginWithoutALayoutEntry(t *testing.T) {
+	// An enabled plugin needs no spelled-out shell.json entry, and an
+	// unreadable shell.json reads the same way: the shell, not the layout,
+	// says whether there is something to disable.
+	env, ran, _ := testOmarchyEnvScripted(t, map[string]omarchyReply{
+		"omarchy plugin list": {out: pluginListEnabled},
+	})
+	step := omarchySetup{env: env, forcePlugin: true}.removeBarPlugin(false)
+	if step.Status != "removed" || !strings.Contains(step.Detail, "checkout stays") {
+		t.Fatalf("step = %q %q", step.Status, step.Detail)
+	}
+	if !contains(*ran, "omarchy plugin disable "+omarchyBarPluginID) {
+		t.Errorf("the enabled plugin must be disabled: %v", *ran)
+	}
+	marker, _ := readMarkerFile(t, env)
+	if marker.RemovedAt == "" {
+		t.Errorf("tombstone first: %+v", marker)
+	}
+}
+
+func TestOmarchyPluginRemoveFailsWhenTheShellCannotAnswer(t *testing.T) {
+	// With the shell down we can neither see nor disable an enabled plugin:
+	// the tombstone stands, and the command fails rather than reporting a
+	// removal that did not happen.
+	env, ran, _ := testOmarchyEnvScripted(t, map[string]omarchyReply{
+		"omarchy plugin list": {out: "omarchy-shell is not running", err: errors.New("exit status 1")},
+	})
+	step := omarchySetup{env: env, forcePlugin: true}.removeBarPlugin(false)
+	if step.Status != "failed" || !strings.Contains(step.Detail, "shell is not running") {
+		t.Fatalf("step = %q %q", step.Status, step.Detail)
+	}
+	marker, _ := readMarkerFile(t, env)
+	if marker.RemovedAt == "" {
+		t.Errorf("the tombstone must land before the probe: %+v", marker)
+	}
+	if got := mutationCommands(*ran); len(got) != 0 {
+		t.Errorf("no mutation with no shell: %v", got)
+	}
+}
+
+func TestOmarchyPluginLockFailureIsNotContention(t *testing.T) {
+	env, _, _ := testOmarchyEnvScripted(t, nil)
+	// A file where the lock's directory must go: acquisition fails for a
+	// reason waiting cannot fix, and the message must say so.
+	if err := os.WriteFile(filepath.Join(env.stateDir, "omarchy"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	step := omarchySetup{env: env, forcePlugin: true}.installBarPlugin()
+	if step.failure == nil || !strings.Contains(step.Detail, "could not take the bar plugin lock") || strings.Contains(step.Detail, "another hey") {
+		t.Fatalf("step = %q %q", step.Status, step.Detail)
 	}
 }
 
@@ -993,6 +1056,9 @@ func TestSetupWizardStep3CloneFailureIsIncomplete(t *testing.T) {
 	if !strings.Contains(text, "needs attention") || !strings.Contains(text, "hey setup omarchy") {
 		t.Errorf("a clone failure must leave the wizard incomplete with the remediation:\n%s", text)
 	}
+	if !strings.Contains(text, "✗ Omarchy desktop") {
+		t.Errorf("the checklist must not contradict the issue list:\n%s", text)
+	}
 }
 
 // --- hey setup omarchy, command level ---
@@ -1159,6 +1225,12 @@ func TestDoctorOmarchyBarPluginStates(t *testing.T) {
 	writeShell(t, env, pluginShellJSON)
 	if check := checkOmarchyBarPlugin(env); check["status"] != "ok" || check["message"] != "Installed and enabled" {
 		t.Errorf("enabled: %v", check)
+	}
+
+	// A historical decline or removal does not outrank the present tense.
+	seedMarker(t, env, omarchyPluginMarker{DeclinedAt: "2026-08-01T00:00:00Z"})
+	if check := checkOmarchyBarPlugin(env); check["status"] != "ok" {
+		t.Errorf("an enabled plugin outranks a historical decline: %v", check)
 	}
 
 	if err := os.WriteFile(env.markerPath(), []byte("{bad"), 0o600); err != nil {

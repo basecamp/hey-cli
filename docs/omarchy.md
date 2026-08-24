@@ -129,9 +129,9 @@ toggle in the panel header, or `omarchy bar set 37signals.hey notify true --json
 
 ### Installed at sign-in
 
-Signing in with hey is what puts the plugin in the bar — DHH's ask was that the panel
-"magically appear when you're logged in", with no hand-copied commands. One idempotent
-routine (`internal/cmd/omarchy_plugin.go`), three entry points, one state file, one lock:
+Signing in with hey is what puts the plugin in the bar, with no hand-copied commands.
+One idempotent routine (`internal/cmd/omarchy_plugin.go`), three entry points, one state
+file, one lock:
 
 - **Entry points.** An interactive OAuth sign-in — `hey auth login` / `hey login`,
   `requireAuth`'s "Sign in now?" (how `hey tui` and every data command sign in), the lite

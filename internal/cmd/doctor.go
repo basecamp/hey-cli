@@ -266,19 +266,21 @@ func checkOmarchyBarPlugin(env omarchyEnv) map[string]string {
 	}
 	onBar := omarchySetup{env: env}.pluginOnBar()
 	switch {
+	case marker.PendingEnable:
+		check["status"] = "warning"
+		check["message"] = "Install pending"
+		check["hint"] = "hey setup omarchy"
+	case onBar:
+		// The bar is the present tense; a decline or removal recorded
+		// before a later manual enable is history, as in ensure mode.
+		check["status"] = "ok"
+		check["message"] = "Installed and enabled"
 	case marker.DeclinedAt != "":
 		check["status"] = "info"
 		check["message"] = "Declined — hey setup omarchy installs it"
 	case marker.RemovedAt != "":
 		check["status"] = "info"
 		check["message"] = "Removed — hey setup omarchy re-enables it"
-	case marker.PendingEnable:
-		check["status"] = "warning"
-		check["message"] = "Install pending"
-		check["hint"] = "hey setup omarchy"
-	case onBar:
-		check["status"] = "ok"
-		check["message"] = "Installed and enabled"
 	case env.pluginCloned():
 		check["status"] = "warning"
 		check["message"] = "Cloned but not on the bar"

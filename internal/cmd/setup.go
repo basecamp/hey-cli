@@ -589,7 +589,9 @@ func showWizardSuccess(w io.Writer, result wizardResult, outcome agentSetupOutco
 	if result.Omarchy != nil {
 		ok := true
 		for _, step := range result.Omarchy.Steps {
-			if step.Status == "failed" || step.failure != nil {
+			// The same predicate that files the issue: a checkmark beside a
+			// step listed under "needs attention" would contradict itself.
+			if step.Status == "failed" || step.failure != nil || (step.Status == "skipped" && step.attempted) {
 				ok = false
 			}
 		}

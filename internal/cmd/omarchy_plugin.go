@@ -35,9 +35,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -103,7 +105,7 @@ func (s omarchySetup) installBarPlugin() omarchyStep {
 	}
 	lock, err := acquireOmarchyPluginLock(s.env)
 	if err != nil {
-		return s.pluginSkip("another hey is setting up the bar")
+		return s.pluginSkip(omarchyLockDetail(err))
 	}
 	defer func() { _ = lock.Unlock() }()
 
@@ -115,6 +117,16 @@ func (s omarchySetup) installBarPlugin() omarchyStep {
 		return s.forceInstall(marker)
 	}
 	return s.ensureInstall(marker)
+}
+
+// omarchyLockDetail keeps "wait for the other hey" for actual contention;
+// any other acquisition failure (an unwritable state dir, a filesystem
+// error) is its own problem and waiting will not fix it.
+func omarchyLockDetail(err error) string {
+	if errors.Is(err, errOmarchyLockHeld) {
+		return errOmarchyLockHeld.Error()
+	}
+	return "could not take the bar plugin lock: " + err.Error()
 }
 
 // ensureInstall is the sign-in path: quiet wherever installation is
@@ -129,8 +141,8 @@ func (s omarchySetup) ensureInstall(marker omarchyPluginMarker) omarchyStep {
 		// A crash between enable and the final write: finish the
 		// bookkeeping — unless the shell says the plugin is off, which is
 		// the user's doing and stays.
-		probe, failStep, ok := s.probeShellPlugins()
-		if !ok {
+		probe, failStep, outcome := s.probeShellPlugins()
+		if outcome != probeAnswered {
 			return failStep
 		}
 		if !probe.present || !probe.enabled {
@@ -158,8 +170,8 @@ func (s omarchySetup) ensureInstall(marker omarchyPluginMarker) omarchyStep {
 		if marker.cloneThrottled() {
 			return s.pluginStep("skipped", "waiting to retry a failed clone")
 		}
-		probe, failStep, ok := s.probeShellPlugins()
-		if !ok {
+		probe, failStep, outcome := s.probeShellPlugins()
+		if outcome != probeAnswered {
 			return failStep
 		}
 		if probe.present && probe.enabled {
@@ -179,8 +191,8 @@ func (s omarchySetup) ensureInstall(marker omarchyPluginMarker) omarchyStep {
 // ensureFreshInstall is the first sign-in on a box with nothing recorded:
 // probe the shell, ask once, put the intent on disk, then clone.
 func (s omarchySetup) ensureFreshInstall(marker omarchyPluginMarker) omarchyStep {
-	probe, failStep, ok := s.probeShellPlugins()
-	if !ok {
+	probe, failStep, outcome := s.probeShellPlugins()
+	if outcome != probeAnswered {
 		return failStep
 	}
 	if probe.present {
@@ -234,8 +246,8 @@ func (s omarchySetup) forceInstall(marker omarchyPluginMarker) omarchyStep {
 	if err := s.env.writeMarker(marker); err != nil {
 		return s.pluginFailed("could not record the bar plugin state in " + s.env.markerPath() + ": " + err.Error())
 	}
-	probe, failStep, ok := s.probeShellPlugins()
-	if !ok {
+	probe, failStep, outcome := s.probeShellPlugins()
+	if outcome != probeAnswered {
 		return failStep
 	}
 	switch {
@@ -281,8 +293,8 @@ func (s omarchySetup) addAndVerify(marker omarchyPluginMarker) omarchyStep {
 // plugin enabled and the marker recorded it. Anything less keeps the pending
 // intent and fails.
 func (s omarchySetup) verifyAndFinalize(marker omarchyPluginMarker) omarchyStep {
-	probe, _, ok := s.probeShellPlugins()
-	if !ok || !probe.present || !probe.enabled {
+	probe, _, outcome := s.probeShellPlugins()
+	if outcome != probeAnswered || !probe.present || !probe.enabled {
 		return s.pluginFailed("the shell did not enable the plugin — run hey setup omarchy")
 	}
 	return s.finalize(marker)
@@ -314,7 +326,7 @@ func (s omarchySetup) removeBarPlugin(onBar bool) omarchyStep {
 	}
 	lock, err := acquireOmarchyPluginLock(s.env)
 	if err != nil {
-		return s.pluginFailed("another hey is setting up the bar")
+		return s.pluginFailed(omarchyLockDetail(err))
 	}
 	defer func() { _ = lock.Unlock() }()
 
@@ -342,7 +354,19 @@ func (s omarchySetup) removeBarPlugin(onBar bool) omarchyStep {
 
 func (s omarchySetup) disableBarPlugin(onBar bool) omarchyStep {
 	if !onBar {
-		return s.pluginStep("absent", "")
+		// shell.json's layout is not the whole truth: an enabled plugin
+		// needs no spelled-out entry, and an unreadable shell.json says
+		// nothing — ask the shell before calling the plugin absent.
+		probe, failStep, outcome := s.probeShellPlugins()
+		switch {
+		case outcome == probeNoCLI:
+			// No omarchy CLI: nothing can be running, nothing to disable.
+			return s.pluginStep("absent", "")
+		case outcome != probeAnswered:
+			return s.pluginFailed(failStep.Detail)
+		case !probe.present || !probe.enabled:
+			return s.pluginStep("absent", "")
+		}
 	}
 	out, err := s.env.run("omarchy", "plugin", "disable", omarchyBarPluginID)
 	if err != nil {
@@ -364,24 +388,39 @@ type omarchyPluginProbe struct {
 // shell to talk to — an ssh session, a fresh tty, a stopped shell.
 var omarchyShellDownPattern = regexp.MustCompile(`omarchy-shell is not running|not ready|OMARCHY_PATH is not set`)
 
-// probeShellPlugins asks the running shell for its plugin list. ok=false
-// comes with the step to report, in one of three distinct shapes: the omarchy
-// CLI missing (update Omarchy), the shell down (nothing to do here), and an
-// answer that is not a plugin list (fail closed).
-func (s omarchySetup) probeShellPlugins() (omarchyPluginProbe, omarchyStep, bool) {
+// omarchyProbeOutcome distinguishes the ways a probe can not answer, because
+// they demand different reactions: no CLI means nothing can be running at
+// all, a down shell means try again from the desktop, and anything else
+// fails closed.
+type omarchyProbeOutcome int
+
+const (
+	probeAnswered omarchyProbeOutcome = iota
+	probeNoCLI
+	probeShellDown
+	probeUnexpected
+)
+
+// probeShellPlugins asks the running shell for its plugin list. Anything but
+// probeAnswered comes with the step to report.
+func (s omarchySetup) probeShellPlugins() (omarchyPluginProbe, omarchyStep, omarchyProbeOutcome) {
 	out, err := s.env.run("omarchy", "plugin", "list", "--json")
 	if err != nil && errors.Is(err, exec.ErrNotFound) {
-		return omarchyPluginProbe{}, s.pluginSkip("Omarchy CLI not found — update Omarchy"), false
+		return omarchyPluginProbe{}, s.pluginSkip("Omarchy CLI not found — update Omarchy"), probeNoCLI
 	}
 	if omarchyShellDownPattern.MatchString(out) {
-		return omarchyPluginProbe{}, s.pluginSkip("the Omarchy shell is not running — sign in again from the desktop, or run hey setup omarchy there"), false
+		return omarchyPluginProbe{}, s.pluginSkip("the Omarchy shell is not running — sign in again from the desktop, or run hey setup omarchy there"), probeShellDown
 	}
+	trimmed := strings.TrimSpace(out)
 	var plugins []struct {
 		ID      string `json:"id"`
 		Enabled bool   `json:"enabled"`
 	}
-	if jsonErr := json.Unmarshal([]byte(strings.TrimSpace(out)), &plugins); jsonErr != nil {
-		return omarchyPluginProbe{}, s.pluginFailed("unexpected answer from omarchy plugin list"), false
+	// Fail closed on anything but a clean array cleanly answered: a failing
+	// command whose output happens to parse, or a JSON null (which
+	// unmarshals into a nil slice without error), is not a plugin list.
+	if err != nil || !strings.HasPrefix(trimmed, "[") || json.Unmarshal([]byte(trimmed), &plugins) != nil {
+		return omarchyPluginProbe{}, s.pluginFailed("unexpected answer from omarchy plugin list"), probeUnexpected
 	}
 	var probe omarchyPluginProbe
 	for _, plugin := range plugins {
@@ -389,7 +428,7 @@ func (s omarchySetup) probeShellPlugins() (omarchyPluginProbe, omarchyStep, bool
 			probe.present, probe.enabled = true, plugin.Enabled
 		}
 	}
-	return probe, omarchyStep{}, true
+	return probe, omarchyStep{}, probeAnswered
 }
 
 // pluginOnBar reads shell.json's layout for the plugin's entry — the fact the
@@ -502,6 +541,10 @@ func omarchyMarkerUnreadable(env omarchyEnv) string {
 	return "bar plugin state unreadable at " + env.markerPath() + " — delete it, then run hey setup omarchy"
 }
 
+// errOmarchyLockHeld is genuine contention — another hey holds the lock —
+// as opposed to a failure to reach the lock at all.
+var errOmarchyLockHeld = errors.New("another hey is setting up the bar")
+
 // acquireOmarchyPluginLock serializes every look at the marker and every
 // mutation behind it. Non-blocking: a held lock is another hey's turn.
 func acquireOmarchyPluginLock(env omarchyEnv) (*flock.Flock, error) {
@@ -514,7 +557,7 @@ func acquireOmarchyPluginLock(env omarchyEnv) (*flock.Flock, error) {
 		return nil, err
 	}
 	if !locked {
-		return nil, errors.New("lock held")
+		return nil, errOmarchyLockHeld
 	}
 	return lock, nil
 }
@@ -588,6 +631,12 @@ var runOmarchyCommand = func(omarchyRoot, name string, args ...string) (string, 
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), omarchyCommandTimeout)
 	defer cancel()
+	// Ctrl-C must reach the isolated process group: the child sits outside
+	// the terminal's foreground group, so translate an interrupt into the
+	// same cancellation the timeout uses — Cancel kills the whole group and
+	// hey survives to report the aborted step.
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	cmd := exec.CommandContext(ctx, name, args...) // #nosec G204 -- fixed omarchy command names
 	// The omarchy CLI needs OMARCHY_PATH to find the shell; non-login and
 	// agent environments lack it, so export the root we detected ourselves.
