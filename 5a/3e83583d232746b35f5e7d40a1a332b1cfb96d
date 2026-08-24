@@ -1,0 +1,43 @@
+scripts/check-stable-metadata.sh
+  s_93520af149d0cb::t_03701b0c71d78c 4-9,19
+tests/e2e/check_stable_metadata.bats
+  s_93520af149d0cb::t_28fa19f8572096 6-7
+tests/e2e/release_workflow.bats
+  s_93520af149d0cb::t_c2df6f81c8b299 1-33
+Makefile
+  s_93520af149d0cb::t_03701b0c71d78c 211-215
+.github/workflows/release.yml
+  s_93520af149d0cb::t_77d7c6cf02e343 83-122,125
+.github/workflows/sensitive-change-gate.yml
+  s_93520af149d0cb::t_03701b0c71d78c 17
+.goreleaser.yaml
+  s_93520af149d0cb::t_03701b0c71d78c 13-14
+tests/e2e/stamp_nix_version.bats
+  s_93520af149d0cb::t_28fa19f8572096 1-62
+scripts/release.sh
+  s_93520af149d0cb::t_03701b0c71d78c 174,178
+  s_93520af149d0cb::t_28fa19f8572096 72
+tests/e2e/release.bats
+  s_93520af149d0cb::t_28fa19f8572096 9-13,37-39,43-44,109,190-191,194,197-198,205,229-230
+  s_93520af149d0cb::t_05ecf6b6c71e25 132,149,163,177,211,236,259,279,302,328,349,367,393,420
+  s_93520af149d0cb::t_32e2e5febd9ee6 82-90,95-97,107,119
+scripts/stamp-nix-version.sh
+  s_93520af149d0cb::t_03701b0c71d78c 1-20,22-53
+  s_93520af149d0cb::t_c2df6f81c8b299 21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "5a3e83583d232746b35f5e7d40a1a332b1cfb96d",
+  "prompts": {},
+  "sessions": {
+    "s_93520af149d0cb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a03273-eea1-7202-9343-217fa7530047",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
