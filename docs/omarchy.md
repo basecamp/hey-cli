@@ -151,7 +151,8 @@ file, one lock:
 - **The marker**, `StateDir()/omarchy/bar-plugin.json`: `accepted_at` is consent, asked
   once and never re-asked; `pending_enable` + `installing_at` an unfinished install;
   `installed_at` history; `declined_at`/`removed_at` the user's no; `last_clone_*` a 24 h
-  retry throttle for failed clones only — nothing else is throttled. A marker that cannot
+  retry throttle for failed clone attempts only (timeouts included) — nothing else is
+  throttled. A marker that cannot
   be read fails installation closed ("delete it, then run hey setup omarchy"); only
   `--remove` still disables then, since nothing can resurrect the plugin through a
   fail-closed install. The flock beside it (`bar-plugin.lock`) serializes every look and

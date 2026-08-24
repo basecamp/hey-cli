@@ -307,12 +307,16 @@ func TestOmarchyPluginEnsurePendingClonedFinalizesWhenTheShellSaysEnabled(t *tes
 
 func TestOmarchyPluginEnsureOnBarMigratesTheLegacyIndicator(t *testing.T) {
 	// The plugin is already enabled (installed by hand, say) beside the old
-	// hey-unread module: a sign-in still migrates — the unchanged outcome
-	// means "on the bar", and the toast choice moves onto the entry.
-	env, ran, _ := testOmarchyEnvScripted(t, nil)
-	writeShell(t, env, `{"version":1,"bar":{"layout":{"left":[{"id":"omarchy.menu"}],"center":[],"right":[
+	// hey-unread module: a sign-in still migrates — after the read-only
+	// probe confirms the replacement is live — and the toast choice moves
+	// onto the entry.
+	legacyBesideEntry := `{"version":1,"bar":{"layout":{"left":[{"id":"omarchy.menu"}],"center":[],"right":[
   {"id":"hey-unread","type":"command","exec":"hey omarchy bar-status --notify","interval":180},
-  {"id":"37signals.hey"},{"id":"omarchy.tray"}]}}}`)
+  {"id":"37signals.hey"},{"id":"omarchy.tray"}]}}}`
+	env, ran, _ := testOmarchyEnvScripted(t, map[string]omarchyReply{
+		"omarchy plugin list": {out: pluginListEnabled},
+	})
+	writeShell(t, env, legacyBesideEntry)
 
 	step := omarchySetup{env: env}.installBarPlugin()
 	if step.Status != "unchanged" || step.attempted {
@@ -324,8 +328,79 @@ func TestOmarchyPluginEnsureOnBarMigratesTheLegacyIndicator(t *testing.T) {
 	if entry := pluginEntry(t, env); entry == nil || entry["notify"] != true {
 		t.Errorf("the toast choice must move onto the entry, got %v", entry)
 	}
-	if len(*ran) != 0 {
-		t.Errorf("the on-bar migration needs no subprocess: %v", *ran)
+	if got := mutationCommands(*ran); len(got) != 0 {
+		t.Errorf("the on-bar migration mutates nothing but shell.json: %v", got)
+	}
+
+	// A layout entry the shell reports disabled is not a live replacement:
+	// the still-working legacy module stays.
+	env2, ran2, _ := testOmarchyEnvScripted(t, map[string]omarchyReply{
+		"omarchy plugin list": {out: pluginListDisabled},
+	})
+	writeShell(t, env2, legacyBesideEntry)
+	if step := (omarchySetup{env: env2}).installBarPlugin(); step.Status != "unchanged" {
+		t.Fatalf("second = %q %q", step.Status, step.Detail)
+	}
+	if !strings.Contains(readText(t, env2.shellPath()), "hey-unread") {
+		t.Error("a disabled replacement must not cost the working legacy panel")
+	}
+	if got := mutationCommands(*ran2); len(got) != 0 {
+		t.Errorf("nothing may be mutated: %v", got)
+	}
+}
+
+func TestOmarchyPluginTimedOutCloneIsThrottledToo(t *testing.T) {
+	// A hung add killed at the timeout says no "failed to clone" — it arms
+	// the retry throttle all the same, or every sign-in would block for
+	// another minute.
+	env, _, replies := testOmarchyEnvScripted(t, nil)
+	stubConfirmOmarchyPanel(t, true, nil)
+	replies["omarchy plugin add"] = omarchyReply{err: errors.New("signal: killed")}
+
+	step := omarchySetup{env: env}.installBarPlugin()
+	if step.Status != "failed" {
+		t.Fatalf("step = %q %q", step.Status, step.Detail)
+	}
+	marker, _ := readMarkerFile(t, env)
+	if !marker.PendingEnable || marker.LastCloneAt == "" {
+		t.Fatalf("a timed-out add must arm the throttle: %+v", marker)
+	}
+	if second := (omarchySetup{env: env}).installBarPlugin(); second.Status != "skipped" || second.attempted {
+		t.Errorf("throttled retry = %q attempted=%v", second.Status, second.attempted)
+	}
+}
+
+func TestOmarchyRemoveKeepsLegacyWhenTheTombstoneCannotLand(t *testing.T) {
+	// A removal that could not be recorded rewrites nothing else either.
+	if os.Geteuid() == 0 {
+		t.Skip("root can write anywhere")
+	}
+	env, ran, _ := testOmarchyEnvScripted(t, nil)
+	writeShell(t, env, legacyShellJSON)
+	if err := os.MkdirAll(filepath.Dir(env.lockPath()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(env.lockPath(), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stateDir := filepath.Dir(env.markerPath())
+	if err := os.Chmod(stateDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(stateDir, 0o700) })
+
+	steps := omarchySetup{env: env, forcePlugin: true}.removeBar()
+	if bar := stepNamed(steps, "bar plugin"); bar.Status != "failed" {
+		t.Fatalf("bar = %q %q", bar.Status, bar.Detail)
+	}
+	if stepNamed(steps, "bar indicator").Name != "" {
+		t.Error("no legacy rewrite may ride on an unrecorded removal")
+	}
+	if !strings.Contains(readText(t, env.shellPath()), "hey-unread") {
+		t.Error("shell.json must be untouched")
+	}
+	if got := mutationCommands(*ran); len(got) != 0 {
+		t.Errorf("no mutation on an unrecorded removal: %v", got)
 	}
 }
 

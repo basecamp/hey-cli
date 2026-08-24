@@ -555,8 +555,13 @@ func (s omarchySetup) removeBar() []omarchyStep {
 func (s omarchySetup) removeBarLocked() []omarchyStep {
 	// The tombstone (and the disable behind it) land before any layout
 	// rewrite: a stop in between costs only the legacy cleanup, which the
-	// marker does not guard — never the record of the user's intent.
+	// marker does not guard — never the record of the user's intent. And a
+	// removal that could not be recorded or completed rewrites nothing
+	// else either — the rerun does the cleanup.
 	plugin := s.removeBarPluginLocked(s.pluginOnBar())
+	if plugin.Status == "failed" {
+		return []omarchyStep{plugin}
+	}
 	return []omarchyStep{s.removeLegacyIndicator(false), plugin}
 }
 

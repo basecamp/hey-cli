@@ -102,18 +102,43 @@ func (s omarchySetup) installBarPlugin() omarchyStep {
 	}
 	return s.underBarPluginLock(func() []omarchyStep {
 		step := s.installBarPluginLocked()
-		// In ensure mode, installed and unchanged both mean "the plugin is
-		// on the bar" — a fresh install, a quiet crash repair, or one that
-		// was already enabled. All of them owe the legacy migration: the
-		// plugin replaces the inline hey-unread indicator earlier releases
-		// installed, and a migrating user must not keep two icons and two
-		// pollers until an explicit setup. Quiet and best-effort — a
-		// failed cleanup costs nothing the next setup will not fix.
-		if step.Status == "installed" || step.Status == "unchanged" {
-			_ = s.removeLegacyIndicator(true)
+		// The plugin replaces the inline hey-unread indicator earlier
+		// releases installed, so a sign-in that finds the plugin live owes
+		// the migration — or a migrating user keeps two icons and two
+		// pollers until an explicit setup. "installed" was just verified;
+		// an "unchanged" may rest on a layout entry alone, so with a
+		// legacy module actually present the read-only probe confirms the
+		// replacement is enabled before its predecessor is removed. Quiet
+		// and best-effort — a failed cleanup costs nothing the next setup
+		// will not fix.
+		if (step.Status == "installed" || step.Status == "unchanged") && s.legacyIndicatorPresent() {
+			live := step.Status == "installed"
+			if !live {
+				probe, _, outcome := s.probeShellPlugins()
+				live = outcome == probeAnswered && probe.present && probe.enabled
+			}
+			if live {
+				_ = s.removeLegacyIndicator(true)
+			}
 		}
 		return []omarchyStep{step}
 	})[0]
+}
+
+// legacyIndicatorPresent reports whether shell.json still carries the old
+// inline hey-unread module — the cheap check that keeps every ordinary
+// sign-in from paying for a migration nobody needs.
+func (s omarchySetup) legacyIndicatorPresent() bool {
+	shell, err := s.loadShellConfig()
+	if err != nil {
+		return false
+	}
+	layout, err := existingBarLayout(shell)
+	if err != nil {
+		return false
+	}
+	present, _ := legacyIndicator(layout)
+	return present
 }
 
 // underBarPluginLock runs fn with the plugin lock held — one acquisition
@@ -314,18 +339,22 @@ func (s omarchySetup) forceInstall(marker omarchyPluginMarker) omarchyStep {
 func (s omarchySetup) addAndVerify(marker omarchyPluginMarker) omarchyStep {
 	out, err := s.env.run("omarchy", "plugin", "add", omarchyBarPluginSource, "--enable", "--yes")
 	lower := strings.ToLower(out)
-	switch {
-	case strings.Contains(lower, "failed to clone"):
+	cloneRefused := strings.Contains(lower, "failed to clone")
+	failed := cloneRefused || (err != nil && !strings.Contains(lower, "already installed") && !strings.Contains(lower, "already used"))
+	if failed {
+		// Every failed add arms the retry throttle — a hang killed at the
+		// timeout says no "failed to clone" but retrying it on every
+		// sign-in would block each one for another minute.
 		marker.LastCloneError = firstOutputLine(out, err)
 		marker.LastCloneAt = omarchyNow()
 		_ = s.env.writeMarker(marker) // best effort: the throttle is a convenience
-		return s.pluginFailed("could not clone " + omarchyBarPluginSource + " — check the network, or run: " + omarchyBarPluginInstallHint())
-	case err != nil && !strings.Contains(lower, "already installed") && !strings.Contains(lower, "already used"):
+		if cloneRefused {
+			return s.pluginFailed("could not clone " + omarchyBarPluginSource + " — check the network, or run: " + omarchyBarPluginInstallHint())
+		}
 		return s.pluginFailed(firstOutputLine(out, err))
-	default:
-		// Added — or a lost race already installed it; the verify decides.
-		return s.verifyAndFinalize(marker)
 	}
+	// Added — or a lost race already installed it; the verify decides.
+	return s.verifyAndFinalize(marker)
 }
 
 // verifyAndFinalize reports installed only when the running shell lists the
