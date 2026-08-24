@@ -1,0 +1,29 @@
+nix/go.nix
+  s_93520af149d0cb::t_6a64a2d5ab4aa2 1,5-8
+tests/e2e/update_nix_flake.bats
+  s_93520af149d0cb::t_6a64a2d5ab4aa2 112-115
+scripts/extract-nix-vendor-hash.sh
+  s_93520af149d0cb::t_dcecdf70061b89 21-25
+tests/e2e/extract_nix_vendor_hash.bats
+  s_93520af149d0cb::t_6a64a2d5ab4aa2 92-94
+RELEASING.md
+  s_93520af149d0cb::t_6a64a2d5ab4aa2 160-162
+flake.lock
+  s_93520af149d0cb::t_68dfb1a6e8cd08 5-6,9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "40f04faf7c9bba24e5b2bf3c707c5c6db55810ef",
+  "prompts": {},
+  "sessions": {
+    "s_93520af149d0cb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a03273-eea1-7202-9343-217fa7530047",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
