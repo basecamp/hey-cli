@@ -84,6 +84,132 @@ NIX_BUILD_EXIT=0"
   [[ "$output" == *"verified (build succeeded)"* ]]
 }
 
+@test "streams Nix progress before the build completes" {
+  # A command substitution used to hold every byte until Docker exited. Keep
+  # the stub blocked after its first line and prove that line has already
+  # reached the caller before allowing the build to finish.
+  cat > "$STUB_DIR/docker" <<'STUB'
+#!/usr/bin/env bash
+if [ "${1:-}" = volume ] && [ "${2:-}" = create ]; then
+  echo test-nix-store
+  exit 0
+fi
+if [ "${1:-}" = volume ] && [ "${2:-}" = rm ]; then
+  exit 0
+fi
+
+case "$*" in
+  *--print-build-logs*) ;;
+  *) echo "error: Nix builder logs were not enabled"; echo "NIX_BUILD_EXIT=1"; exit 0;;
+esac
+
+echo "visible build progress"
+touch "${NIX_STUB_READY:?}"
+for _ in {1..100}; do
+  [ ! -f "${NIX_STUB_CONTINUE:?}" ] || break
+  sleep 0.05
+done
+if [ ! -f "$NIX_STUB_CONTINUE" ]; then
+  echo "error: timed out waiting for the streaming assertion"
+  echo "NIX_BUILD_EXIT=1"
+  exit 0
+fi
+echo "NIX_BUILD_EXIT=0"
+STUB
+  chmod +x "$STUB_DIR/docker"
+
+  NIX_STUB_READY="$WORK/ready" NIX_STUB_CONTINUE="$WORK/continue" \
+    scripts/update-nix-flake.sh 0.1.1 > "$WORK/output" 2>&1 &
+  SCRIPT_PID=$!
+
+  for _ in {1..20}; do
+    [ ! -f "$WORK/ready" ] || break
+    sleep 0.05
+  done
+  [ -f "$WORK/ready" ]
+
+  STREAMED=false
+  for _ in {1..20}; do
+    if grep -q '^visible build progress$' "$WORK/output"; then
+      STREAMED=true
+      break
+    fi
+    sleep 0.05
+  done
+  if [ "$STREAMED" != true ]; then
+    # Let the child leave its bounded wait before failing the assertion.
+    touch "$WORK/continue"
+    wait "$SCRIPT_PID" || true
+  fi
+  [ "$STREAMED" = true ]
+  SENTINEL_ARRIVED_EARLY=false
+  if grep -q '^NIX_BUILD_EXIT=0$' "$WORK/output"; then
+    SENTINEL_ARRIVED_EARLY=true
+  fi
+
+  touch "$WORK/continue"
+  if wait "$SCRIPT_PID"; then
+    SCRIPT_STATUS=0
+  else
+    SCRIPT_STATUS=$?
+  fi
+  [ "$SCRIPT_STATUS" -eq 2 ]
+  [ "$SENTINEL_ARRIVED_EARLY" = false ]
+  [ "$(grep -c '^visible build progress$' "$WORK/output")" -eq 1 ]
+  grep -q '^NIX_BUILD_EXIT=0$' "$WORK/output"
+  grep -q 'vendorHash: verified (build succeeded)' "$WORK/output"
+}
+
+@test "does not let tee mask a Docker invocation failure" {
+  cat > "$STUB_DIR/docker" <<'STUB'
+#!/usr/bin/env bash
+if [ "${1:-}" = volume ] && [ "${2:-}" = create ]; then
+  echo test-nix-store
+  exit 0
+fi
+if [ "${1:-}" = volume ] && [ "${2:-}" = rm ]; then
+  exit 0
+fi
+echo "Cannot connect to the Docker daemon"
+exit 42
+STUB
+  chmod +x "$STUB_DIR/docker"
+
+  run scripts/update-nix-flake.sh 0.2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Cannot connect to the Docker daemon"* ]]
+  [[ "$output" == *"could not run the Nix build"* ]]
+  [[ "$output" != *"verified (build succeeded)"* ]]
+  grep -q 'version = "0.1.1";' nix/package.nix
+  if grep -q 'version = "0.2.0";' nix/package.nix; then
+    echo "unverified version edit survived Docker failure"
+    return 1
+  fi
+}
+
+@test "fails closed when the streamed output cannot be recorded" {
+  stub_docker "NIX_BUILD_EXIT=0"
+  cat > "$STUB_DIR/tee" <<'STUB'
+#!/usr/bin/env bash
+# Consume the complete stream so Docker itself exits successfully, then make
+# only the recording side fail.
+while IFS= read -r _; do :; done
+exit 23
+STUB
+  chmod +x "$STUB_DIR/tee"
+
+  run scripts/update-nix-flake.sh 0.2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"recording the Nix build output failed"* ]]
+  [[ "$output" == *"could not run the Nix build"* ]]
+  [[ "$output" != *"verified (build succeeded)"* ]]
+  grep -q 'version = "0.1.1";' nix/package.nix
+  if grep -q 'version = "0.2.0";' nix/package.nix; then
+    echo "unverified version edit survived log-recording failure"
+    return 1
+  fi
+}
+
 @test "rewrites the version literal when a new version is requested" {
   # The script's other responsibility. Without this case a regression in the
   # version rewrite passes CI, because every other test asks for the version
@@ -175,6 +301,11 @@ for a in "$@"; do
   esac
 done
 echo "run $STORE" >> "$LOG"
+
+case "$*" in
+  *--print-build-logs*) ;;
+  *) echo "error: Nix builder logs were not enabled"; echo "NIX_BUILD_EXIT=1"; exit 0;;
+esac
 
 if [ -f "$STATE" ]; then
   if [ "$(cat "$STATE")" != "$STORE" ]; then
