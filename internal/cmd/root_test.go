@@ -146,6 +146,34 @@ func TestHeyTuiRemoteSendsTheTopicWithoutLaunching(t *testing.T) {
 	}
 }
 
+func TestHeyTuiRejectsNonPositiveTopicIDs(t *testing.T) {
+	isolateAgents(t)
+	server := quietServer(t)
+	calls := stubRunTUI(t)
+	original := openTopicInRunningTUI
+	remoteCalls := 0
+	openTopicInRunningTUI = func(string, tui.TopicRequest) error {
+		remoteCalls++
+		return nil
+	}
+	t.Cleanup(func() { openTopicInRunningTUI = original })
+
+	for _, args := range [][]string{
+		{"tui", "--topic", "0"},
+		{"tui", "--topic", "-1"},
+		{"tui", "--remote", "--topic", "0"},
+		{"tui", "--remote", "--topic", "-1"},
+	} {
+		_, _, err := runAuthCommand(t, t.TempDir(), server.URL, "environment-token", false, args...)
+		if err == nil || !strings.Contains(err.Error(), "topic ID must be positive") {
+			t.Errorf("hey %s error = %v, want positive topic ID usage error", strings.Join(args, " "), err)
+		}
+	}
+	if *calls != 0 || remoteCalls != 0 {
+		t.Fatalf("invalid topics launched TUI %d times and made %d remote calls", *calls, remoteCalls)
+	}
+}
+
 func TestBareHeyMachineFlagsShowHelpEvenOnTerminal(t *testing.T) {
 	isolateAgents(t)
 	stubInteractive(t, true)

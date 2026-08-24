@@ -36,7 +36,11 @@ func newTuiRunner(use string, hidden bool) *cobra.Command {
 		Hidden: hidden,
 		Args:   cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if remote && topicID == 0 {
+			topicSet := cmd.Flags().Changed("topic")
+			if topicSet && topicID <= 0 {
+				return apierr.ErrUsage("topic ID must be positive")
+			}
+			if remote && !topicSet {
 				return apierr.ErrUsage("--remote requires --topic")
 			}
 			request := tui.TopicRequest{TopicID: topicID, Title: topicTitle}

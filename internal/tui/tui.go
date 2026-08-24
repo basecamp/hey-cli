@@ -272,6 +272,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateHelpBindings()
 			return m, nil
 		}
+		if m.pendingTopic != nil {
+			m.section = sectionMail
+		}
 		updated, initCmd := m.applyMailAccount(msg.account, msg.client)
 		next, ok := updated.(model)
 		if !ok {
@@ -1055,6 +1058,11 @@ func (m model) openTopic(request TopicRequest) (tea.Model, tea.Cmd) {
 		m.mailAccountErr = fmt.Sprintf("Mail account %d is not available", request.AccountID)
 		m.updateHelpBindings()
 		return m, nil
+	}
+	if m.mailAccountSwitching {
+		m.mailAccountRequestID++
+		m.mailAccountSwitching = false
+		m.updateHelpBindings()
 	}
 	if !m.mailSourcesLoaded {
 		m.pendingTopic = &request
