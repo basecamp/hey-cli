@@ -18,6 +18,7 @@ fi
 
 NIX_PKG="nix/package.nix"
 CHANGED=false
+NIX_STORE_VOLUME=""
 
 # The build source below is staged from tracked files only, so an untracked
 # .go file never reaches the verification build — but once committed it does
@@ -45,14 +46,31 @@ fi
 ORIG_PKG="$(mktemp)"
 cp "$NIX_PKG" "$ORIG_PKG"
 # shellcheck disable=SC2329  # invoked via the EXIT trap below
-restore_on_failure() {
+cleanup() {
   local status=$?
+
+  # Each invocation gets its own Docker volume, but the two builds needed for
+  # a stale vendorHash share it. Remove it on every exit so this optimization
+  # cannot become a persistent repo- or user-level cache. A cleanup failure is
+  # a failed run: otherwise the script would silently leave a large Nix store
+  # behind while claiming success.
+  if [[ -n "$NIX_STORE_VOLUME" ]] && \
+     ! docker volume rm "$NIX_STORE_VOLUME" >/dev/null 2>&1; then
+    echo "ERROR: could not remove temporary Nix store volume: $NIX_STORE_VOLUME" >&2
+    status=1
+  fi
+
   if [[ $status -ne 0 && $status -ne 2 ]]; then
     cp "$ORIG_PKG" "$NIX_PKG"
   fi
   rm -f "$ORIG_PKG"
+
+  # Preserve the triggering status across cleanup commands, including the
+  # script's documented exit 2 for an already-current package.
+  trap - EXIT
+  exit "$status"
 }
-trap restore_on_failure EXIT
+trap cleanup EXIT
 
 # --- Update version ---
 CURRENT_VERSION=$(sed -n 's/.*version = "\([^"]*\)".*/\1/p' "$NIX_PKG" | head -1)
@@ -95,6 +113,21 @@ fi
 #   docker pull nixos/nix && docker inspect nixos/nix:latest --format '{{index .RepoDigests 0}}'
 NIX_IMAGE="${NIX_IMAGE:-nixos/nix@sha256:b9c9611c8530fa8049a1215b20638536e1e71dcaf85212e47845112caf3adeea}"
 
+# A Docker volume is much faster than a macOS bind mount for a Nix store.
+# Docker chooses a collision-free name, so separate updater runs remain cold
+# and isolated; cleanup removes it whether the run succeeds or fails. Create
+# it explicitly so a daemon failure cannot be mistaken for a volume that then
+# also fails cleanup.
+if ! NIX_STORE_VOLUME=$(docker volume create \
+  --label com.37signals.hey-cli.temporary=update-nix-flake); then
+  echo "ERROR: could not create a temporary Nix store volume"
+  exit 1
+fi
+if [[ -z "$NIX_STORE_VOLUME" ]]; then
+  echo "ERROR: Docker returned no name for the temporary Nix store volume"
+  exit 1
+fi
+
 # Runs `nix build` and echoes a trailing NIX_BUILD_EXIT= line so the real exit
 # status survives command substitution. Nothing here may swallow a failure: a
 # `|| true` plus a "did it print 'building hey'" heuristic is what let
@@ -122,7 +155,10 @@ run_nix_build() {
     echo "ERROR: staging tracked files for the build failed" >&2
     return 1
   fi
-  out=$(docker run --rm -v "$stage:/src:ro" "$NIX_IMAGE" bash -c '
+  out=$(docker run --rm \
+    -v "$stage:/src:ro" \
+    -v "$NIX_STORE_VOLUME:/nix" \
+    "$NIX_IMAGE" bash -c '
     cp -a /src /build && cd /build
     git config --global --add safe.directory /build
     git init -q && git add -A && \

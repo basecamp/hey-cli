@@ -61,6 +61,13 @@ teardown() {
 stub_docker() {
   cat > "$STUB_DIR/docker" <<STUB
 #!/usr/bin/env bash
+if [ "\${1:-}" = volume ] && [ "\${2:-}" = create ]; then
+  echo test-nix-store
+  exit 0
+fi
+if [ "\${1:-}" = volume ] && [ "\${2:-}" = rm ]; then
+  exit 0
+fi
 cat <<'OUT'
 $1
 OUT
@@ -141,16 +148,40 @@ NIX_BUILD_EXIT=1"
 }
 
 @test "records a corrected hash only after a rebuild proves it" {
-  # First call reports the mismatch, second call succeeds.
+  # First call reports the mismatch, second call succeeds. Both must mount the
+  # same ephemeral Nix store so the verification build can reuse everything
+  # the discovery build already downloaded and compiled.
   cat > "$STUB_DIR/docker" <<'STUB'
 #!/usr/bin/env bash
 STATE="${NIX_STUB_STATE:?}"
+LOG="${NIX_STUB_LOG:?}"
+
+if [ "${1:-}" = volume ] && [ "${2:-}" = create ]; then
+  echo test-nix-store
+  exit 0
+fi
+if [ "${1:-}" = volume ] && [ "${2:-}" = rm ]; then
+  echo "rm $3" >> "$LOG"
+  exit 0
+fi
+
 # The staged source is mounted at SRC:/src:ro — find it.
 SRC=""
+STORE=""
 for a in "$@"; do
-  case "$a" in *:/src:ro) SRC="${a%%:*}";; esac
+  case "$a" in
+    *:/src:ro) SRC="${a%%:*}";;
+    *:/nix) STORE="${a%:/nix}";;
+  esac
 done
+echo "run $STORE" >> "$LOG"
+
 if [ -f "$STATE" ]; then
+  if [ "$(cat "$STATE")" != "$STORE" ]; then
+    echo "error: verification rebuild used a different Nix store"
+    echo "NIX_BUILD_EXIT=1"
+    exit 0
+  fi
   # The verification rebuild must see the corrected hash: the source is
   # restaged per call, so a stale first-call stage would silently verify the
   # old hash instead.
@@ -161,7 +192,7 @@ if [ -f "$STATE" ]; then
   fi
   echo "NIX_BUILD_EXIT=0"
 else
-  touch "$STATE"
+  printf '%s\n' "$STORE" > "$STATE"
   echo "error: hash mismatch in fixed-output derivation '/nix/store/abc-hey-0.1.1-go-modules.drv':"
   echo "         specified: sha256-OLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDA="
   echo "            got:    sha256-NEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWB="
@@ -170,11 +201,137 @@ fi
 STUB
   chmod +x "$STUB_DIR/docker"
 
-  NIX_STUB_STATE="$WORK/called" run scripts/update-nix-flake.sh 0.1.1
+  NIX_STUB_STATE="$WORK/store" NIX_STUB_LOG="$WORK/docker.log" \
+    run scripts/update-nix-flake.sh 0.1.1
   [ "$status" -eq 0 ]   # 0 = changes written
   [[ "$output" == *"vendorHash: updated"* ]]
   [[ "$output" == *"verified (build succeeded)"* ]]
   grep -q 'sha256-NEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWB=' nix/package.nix
+
+  STORE="$(cat "$WORK/store")"
+  [ "$STORE" = test-nix-store ]
+  [ "$(grep -c "^run $STORE$" "$WORK/docker.log")" -eq 2 ]
+  [ "$(grep -c "^rm $STORE$" "$WORK/docker.log")" -eq 1 ]
+}
+
+@test "uses a fresh temporary Nix store for each invocation and removes it" {
+  # The speedup is intentionally intra-run only. It must not leave a cache in
+  # the checkout or the user's home, and a later updater invocation must begin
+  # with a different named volume.
+  cat > "$STUB_DIR/docker" <<'STUB'
+#!/usr/bin/env bash
+LOG="${NIX_STUB_LOG:?}"
+COUNTER="${NIX_STUB_COUNTER:?}"
+if [ "${1:-}" = volume ] && [ "${2:-}" = create ]; then
+  N=0
+  [ ! -f "$COUNTER" ] || N="$(cat "$COUNTER")"
+  N=$((N + 1))
+  printf '%s\n' "$N" > "$COUNTER"
+  echo "test-nix-store-$N"
+  exit 0
+fi
+if [ "${1:-}" = volume ] && [ "${2:-}" = rm ]; then
+  echo "rm $3" >> "$LOG"
+  exit 0
+fi
+
+STORE=""
+for a in "$@"; do
+  case "$a" in *:/nix) STORE="${a%:/nix}";; esac
+done
+echo "run $STORE" >> "$LOG"
+echo "NIX_BUILD_EXIT=0"
+STUB
+  chmod +x "$STUB_DIR/docker"
+
+  NIX_STUB_LOG="$WORK/docker.log" NIX_STUB_COUNTER="$WORK/counter" \
+    run scripts/update-nix-flake.sh 0.1.1
+  [ "$status" -eq 2 ]
+  NIX_STUB_LOG="$WORK/docker.log" NIX_STUB_COUNTER="$WORK/counter" \
+    run scripts/update-nix-flake.sh 0.1.1
+  [ "$status" -eq 2 ]
+
+  FIRST_STORE="$(sed -n '1s/^run //p' "$WORK/docker.log")"
+  SECOND_STORE="$(sed -n '3s/^run //p' "$WORK/docker.log")"
+  [ "$FIRST_STORE" = test-nix-store-1 ]
+  [ "$SECOND_STORE" = test-nix-store-2 ]
+  [[ "$FIRST_STORE" != */* ]]
+  [[ "$SECOND_STORE" != */* ]]
+  [ "$FIRST_STORE" != "$SECOND_STORE" ]
+  grep -qx "rm $FIRST_STORE" "$WORK/docker.log"
+  grep -qx "rm $SECOND_STORE" "$WORK/docker.log"
+}
+
+@test "removes the temporary Nix store when the build fails" {
+  cat > "$STUB_DIR/docker" <<'STUB'
+#!/usr/bin/env bash
+LOG="${NIX_STUB_LOG:?}"
+if [ "${1:-}" = volume ] && [ "${2:-}" = create ]; then
+  echo test-nix-store
+  exit 0
+fi
+if [ "${1:-}" = volume ] && [ "${2:-}" = rm ]; then
+  echo "rm $3" >> "$LOG"
+  exit 0
+fi
+
+for a in "$@"; do
+  case "$a" in *:/nix) echo "run ${a%:/nix}" >> "$LOG";; esac
+done
+echo "error: builder failed with exit code 1"
+echo "NIX_BUILD_EXIT=1"
+STUB
+  chmod +x "$STUB_DIR/docker"
+
+  NIX_STUB_LOG="$WORK/docker.log" run scripts/update-nix-flake.sh 0.2.0
+  [ "$status" -eq 1 ]
+  STORE="$(sed -n '1s/^run //p' "$WORK/docker.log")"
+  grep -qx "rm $STORE" "$WORK/docker.log"
+  grep -q 'version = "0.1.1";' nix/package.nix
+}
+
+@test "fails closed and restores edits when temporary store cleanup fails" {
+  cat > "$STUB_DIR/docker" <<'STUB'
+#!/usr/bin/env bash
+if [ "${1:-}" = volume ] && [ "${2:-}" = create ]; then
+  echo test-nix-store
+  exit 0
+fi
+if [ "${1:-}" = volume ] && [ "${2:-}" = rm ]; then
+  exit 1
+fi
+echo "NIX_BUILD_EXIT=0"
+STUB
+  chmod +x "$STUB_DIR/docker"
+
+  run scripts/update-nix-flake.sh 0.2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"could not remove temporary Nix store volume"* ]]
+  grep -q 'version = "0.1.1";' nix/package.nix
+  ! grep -q 'version = "0.2.0";' nix/package.nix
+}
+
+@test "does not attempt cleanup when temporary store creation fails" {
+  cat > "$STUB_DIR/docker" <<'STUB'
+#!/usr/bin/env bash
+LOG="${NIX_STUB_LOG:?}"
+printf '%s\n' "$*" >> "$LOG"
+if [ "${1:-}" = volume ] && [ "${2:-}" = create ]; then
+  echo "Cannot connect to the Docker daemon" >&2
+  exit 1
+fi
+echo "unexpected Docker command" >&2
+exit 1
+STUB
+  chmod +x "$STUB_DIR/docker"
+
+  NIX_STUB_LOG="$WORK/docker.log" run scripts/update-nix-flake.sh 0.2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"could not create a temporary Nix store volume"* ]]
+  [ "$(wc -l < "$WORK/docker.log")" -eq 1 ]
+  grep -q '^volume create ' "$WORK/docker.log"
+  grep -q 'version = "0.1.1";' nix/package.nix
+  ! grep -q 'version = "0.2.0";' nix/package.nix
 }
 
 @test "fails when the corrected hash still does not build" {
@@ -271,6 +428,13 @@ STUB
 
   cat > "$STUB_DIR/docker" <<'STUB'
 #!/usr/bin/env bash
+if [ "${1:-}" = volume ] && [ "${2:-}" = create ]; then
+  echo test-nix-store
+  exit 0
+fi
+if [ "${1:-}" = volume ] && [ "${2:-}" = rm ]; then
+  exit 0
+fi
 SRC=""
 for a in "$@"; do
   case "$a" in *:/src:ro) SRC="${a%%:*}";; esac
@@ -319,9 +483,16 @@ STUB
   echo 'tracked' > notes.md
   git add notes.md && git commit -qm notes
   rm notes.md
-  # Any docker invocation is itself a failure: staging must abort first.
+  # Volume lifecycle calls are expected, but the build itself must not run.
   cat > "$STUB_DIR/docker" <<'STUB'
 #!/usr/bin/env bash
+if [ "${1:-}" = volume ] && [ "${2:-}" = create ]; then
+  echo test-nix-store
+  exit 0
+fi
+if [ "${1:-}" = volume ] && [ "${2:-}" = rm ]; then
+  exit 0
+fi
 echo "error: build ran despite a failed staging pipeline"
 echo "NIX_BUILD_EXIT=0"
 STUB
