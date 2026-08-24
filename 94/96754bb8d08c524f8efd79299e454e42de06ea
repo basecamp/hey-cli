@@ -1,0 +1,28 @@
+scripts/update-nix-flake.sh
+  s_93520af149d0cb::t_57e1853032a816 22,67-68,136,138-140,154-161,163,173-201,215-216,221,248-249,254
+  s_93520af149d0cb::t_729688a5836438 141-142,212-214
+  s_93520af149d0cb::t_c893b34d9917c3 64-66
+tests/e2e/update_nix_flake.bats
+  s_93520af149d0cb::t_acd16ffddefb16 145-148,157
+  s_93520af149d0cb::t_6218fdebae8b64 130-131,133-144,158,181-183,188-203
+  s_93520af149d0cb::t_1e1ff6c26d9789 184-187,207-210
+  s_93520af149d0cb::t_0e05f2e8d7d4bf 87-107,109-124,126-129,149-156,159-180,204-206,211-212,305-308
+  s_93520af149d0cb::t_d249a51d8cf137 108,125,132
+  s_93520af149d0cb::t_14730761a14d2b 309
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "9496754bb8d08c524f8efd79299e454e42de06ea",
+  "prompts": {},
+  "sessions": {
+    "s_93520af149d0cb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a03273-eea1-7202-9343-217fa7530047",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
