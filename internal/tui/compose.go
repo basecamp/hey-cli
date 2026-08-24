@@ -7,7 +7,6 @@ import (
 
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
-	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
@@ -15,7 +14,6 @@ import (
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/htmlutil"
-	"github.com/basecamp/hey-cli/internal/markdown"
 )
 
 // --- Messages ---
@@ -88,9 +86,6 @@ type composeForm struct {
 	body   textarea.Model
 	focus  int // index into inputs, or len(inputs) for body
 
-	previewing bool
-	preview    viewport.Model
-
 	status  string
 	isError bool
 	sending bool
@@ -121,7 +116,6 @@ func newComposeForm(mode composeMode, s styles) *composeForm {
 	f.body.Prompt = ""
 	f.body.ShowLineNumbers = false
 	f.body.Placeholder = "Write your message… Markdown works here"
-	f.preview = viewport.New(viewport.WithWidth(0), viewport.WithHeight(0))
 	return f
 }
 
@@ -190,11 +184,6 @@ func (f *composeForm) resize(width, height int) {
 	// title + fields + blank + status + blank
 	bodyH := height - len(f.inputs) - 5
 	f.body.SetHeight(max(bodyH, 3))
-	f.preview.SetWidth(inner)
-	f.preview.SetHeight(max(bodyH, 3))
-	if f.previewing {
-		f.renderPreview()
-	}
 }
 
 func (f *composeForm) values() (to, cc, bcc []string, subject, body string) {
@@ -239,19 +228,6 @@ func (f *composeForm) handleKey(view *mailView, msg tea.KeyPressMsg) (tea.Cmd, b
 	if f.sending {
 		return nil, true
 	}
-	if f.previewing {
-		switch {
-		case msg.String() == "ctrl+p", msg.Key().Code == tea.KeyEscape:
-			f.previewing = false
-			return f.focusCurrent(), true
-		case msg.String() == "ctrl+s":
-			return f.submit(view), true
-		default:
-			var cmd tea.Cmd
-			f.preview, cmd = f.preview.Update(msg)
-			return cmd, true
-		}
-	}
 	if f.snippetPicker != nil {
 		picker := f.snippetPicker
 		cmd, open, snippet := picker.handleKey(msg)
@@ -283,9 +259,6 @@ func (f *composeForm) handleKey(view *mailView, msg tea.KeyPressMsg) (tea.Cmd, b
 		// Enter on a header field moves on, like tab.
 		f.focus++
 		return f.focusCurrent(), true
-	case msg.String() == "ctrl+p":
-		f.showPreview()
-		return nil, true
 	case msg.String() == "ctrl+s":
 		return f.submit(view), true
 	}
@@ -300,26 +273,6 @@ func (f *composeForm) submit(view *mailView) tea.Cmd {
 	f.sending = true
 	f.setStatus("Sending…", false)
 	return view.send(f)
-}
-
-// showPreview renders the message the way it will read on arrival: the body the form
-// would send, back through the same HTML-to-Markdown edge every received email crosses.
-func (f *composeForm) showPreview() {
-	f.body.Blur()
-	f.previewing = true
-	f.renderPreview()
-}
-
-func (f *composeForm) renderPreview() {
-	_, _, _, _, body := f.values()
-	var content string
-	if body == "" {
-		content = styleMuted.Render("Nothing to preview yet")
-	} else {
-		content = markdown.Render(htmlutil.ToMarkdown(body), max(f.width-4, 10))
-	}
-	f.preview.SetContent(content)
-	f.preview.GotoTop()
 }
 
 func (f *composeForm) handleMsg(msg tea.Msg) (tea.Cmd, bool) {
@@ -356,18 +309,9 @@ func (f *composeForm) helpBindings() []helpBinding {
 	if f.snippetPicker != nil {
 		return f.snippetPicker.helpBindings()
 	}
-	if f.previewing {
-		return []helpBinding{
-			{"↑/↓", "scroll"},
-			{"ctrl+p", "edit"},
-			{"ctrl+s", "send"},
-			{"esc", "edit"},
-		}
-	}
 	return []helpBinding{
 		{"tab", "next field"},
 		{"ctrl+t", "snippets"},
-		{"ctrl+p", "preview"},
 		{"ctrl+s", "send"},
 		{"esc", "cancel"},
 	}
@@ -408,16 +352,9 @@ func (f *composeForm) view() string {
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
-	if f.previewing {
-		b.WriteString(f.preview.View())
-	} else {
-		b.WriteString(f.body.View())
-	}
+	b.WriteString(styleInlineMarkdown(f.body.View()))
 	b.WriteString("\n")
-	if f.previewing {
-		b.WriteString(labelStyle.Render("Previewing how the message will read."))
-		b.WriteString("\n")
-	} else if f.mode == composeForward {
+	if f.mode == composeForward {
 		b.WriteString(labelStyle.Render("The original message will be included."))
 		b.WriteString("\n")
 	}

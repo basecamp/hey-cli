@@ -484,7 +484,7 @@ func TestModelRoutesAllKeysToOpenForm(t *testing.T) {
 	}
 }
 
-func TestComposePreviewTogglesWithoutClosingTheForm(t *testing.T) {
+func TestComposeMarkdownRendersLiveInTheEditor(t *testing.T) {
 	v, _ := composeTestServer(t)
 	v.Resize(80, 30)
 	v.HandleContentKey(keyPress("c"))
@@ -493,27 +493,18 @@ func TestComposePreviewTogglesWithoutClosingTheForm(t *testing.T) {
 	f.focusCurrent()
 	typeText(v, "A **bold** plan")
 
-	v.HandleContentKey(tea.KeyPressMsg(tea.Key{Code: 'p', Mod: tea.ModCtrl}))
-	if !f.previewing {
-		t.Fatal("ctrl+p should open the preview")
-	}
+	// The editor styles the Markdown as it is typed: the word turns bold, the
+	// markers stay visible, and no key needs pressing to see it.
 	view := v.View()
-	if !strings.Contains(view, "bold") || strings.Contains(view, "**bold**") {
-		t.Errorf("preview should render the Markdown, got %q", view)
+	if !strings.Contains(view, "\x1b[1mbold") {
+		t.Errorf("the editor should render **bold** bold, got %q", view)
 	}
-
-	// Typing must not reach the body while previewing, and esc goes back to
-	// editing instead of closing the form.
-	v.HandleContentKey(keyPress("x"))
-	if got := f.body.Value(); got != "A **bold** plan" {
-		t.Errorf("body changed while previewing: %q", got)
+	if !strings.Contains(view, "**") {
+		t.Errorf("the markers should stay on screen, got %q", view)
 	}
-	v.HandleContentKey(keyPress("esc"))
-	if f.previewing {
-		t.Error("esc should return to editing")
-	}
-	if composeModal(v) == nil {
-		t.Fatal("esc in the preview must not close the form")
+	typeText(v, "!")
+	if got := f.body.Value(); got != "A **bold** plan!" {
+		t.Errorf("typing should keep reaching the body: %q", got)
 	}
 }
 
