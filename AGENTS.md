@@ -699,8 +699,8 @@ where The Screener announces itself. When The Screener is what's on screen the q
 re-read too, through `screenerPane.refreshHead` — the same keep-your-place trick as the
 mail list — and held while a decision is in flight or the clear-everything question is up.
 On the history tab nothing is read; the pending pane is just marked unloaded, which is
-what `switchTab` already looks at. Both watches share one websocket
-(`tuiCableClient` in `internal/cmd/tui_watch.go`): two subscriptions, one authorization.
+what `switchTab` already looks at. All the watches share one websocket
+(`tuiCableClient` in `internal/cmd/tui_watch.go`): many subscriptions, one authorization.
 A client that stopped itself preserves its terminal failure and never dials again.
 `tuiSubscribe` detects that state after any failed subscription, drops the stopped client,
 and dials a fresh one; a replacement that also stops is dropped and its failure is
@@ -708,6 +708,48 @@ classified as authentication or network so the TUI can respond consistently. Mai
 doorbells are coalesced when their bounded queue
 is full, while a connection transition drains those stale doorbells and takes priority;
 the reconnect catch-up reads the current state once.
+
+The calendars are told the way The Screener is, one Turbo stream per calendar rather than
+one channel: `Calendar` broadcasts a refresh on its own stream whenever a recording on it
+is written, and `calendars.json` serves each calendar's `signed_stream_name` next to its
+`recording_changes_url` — the box shape, on the calendar. Nothing is parsed out of the
+frame; the arrival is the whole message. What nobody broadcasts is the calendar *list*
+changing, and the web app has the same blind spot (a calendar shared mid-session appears
+on its next navigation), so a slow poll of the calendar-level changes feed
+(`calendar_changes_url`, `Calendars().AllCalendarChanges` — one page, usually empty) is
+how both followers learn of a calendar arriving or leaving. Its `added` bucket carries the
+same wrapper as the list, stream name included, so a calendar learned of either way is
+immediately subscribable.
+
+The TUI's side is `tui.CalendarWatcher` (`internal/tui/live.go`), implemented by
+`watchCalendarChanges` in `internal/cmd/tui_watch.go`: every calendar's stream folded into
+one doorbell channel, the poll resubscribing arrivals and dropping leavers, and any
+subscription closing on its own tearing the whole watch down — reopening resubscribes
+everything, which is cheaper to reason about than limping on with some calendars quiet.
+The model follows it only while the Calendar or Journal section is on screen
+(`watchingCalendars` in `tui.go`): every other section re-reads on entry, so a doorbell
+rung for a section nobody is looking at would be answered by nothing. A ring is debounced
+through the same `liveRefreshDelay`, and the re-read is `calendarView.refreshLive` — the
+ordinary span read, which never shows the spinner once a day has been drawn and keeps the
+selection by `Recording.key()` — or `journalView.refreshLive`, which splices the fresh top
+page in front of what the list had grown past it, the `refreshHead` trick with dates for
+ids. Both hold the re-read while a form, a picker or a pending delete is up
+(`liveRetryDelay`), and a failed start or closed stream retries quietly on
+`mailWatchRetryDelay`'s curve: the calendar re-reads on every step the reader takes, so a
+watch that is down costs staleness, not a notice.
+
+`hey watch` follows the same streams on its own connection and reports the changes
+themselves (`internal/cmd/watch_calendar.go`). Rings are coalesced per calendar for
+`calendarCoalesceDelay`, then the calendar's recording feed is read from its cursor
+(`Calendars().AllRecordingChanges`, cursors capped at the watch's start like the boxes' —
+`calendarCursorNoLaterThan`) and each recording is a `recording_added`, `recording_updated`
+or `recording_deleted` line naming its calendar where a mail line names its box. The poll
+reports `calendar_added`, `calendar_updated` and `calendar_deleted`, and a recording feed's
+409 is `calendar_resync` after skipping ahead to a fresh cursor from the list. The
+email-specific flags switch all of it off — `--box`, or an `--events` list naming only
+mail changes (`watchingCalendars` in watch_calendar.go) — and `ready` waits for the
+calendars' catch-up exactly as it waits for the boxes', on the same retry backoff and the
+same `readyOnceCaughtUp` critical section.
 
 ### API documentation
 

@@ -48,11 +48,13 @@ const (
 // here (watch_new.go) rather than by every reader; and resync, the watch's word
 // that a box changed more than it could follow. All but new are reported by
 // default; new is asked for, and asking for new alone leaves a resync out, so a
-// script for new mail never runs on one.
+// script for new mail never runs on one. The calendar's changes are named in
+// watch_calendar.go, reported by default, and switched off entirely by the
+// email-specific flags: --box, or an --events list that names only mail changes.
 var (
 	postingChanges   = []string{"added", "updated", "deleted"}
-	defaultChanges   = []string{"added", "updated", "deleted", "resync"}
-	watchableChanges = []string{"added", "updated", "deleted", "new", "resync"}
+	defaultChanges   = append([]string{"added", "updated", "deleted", "resync"}, calendarWatchChanges...)
+	watchableChanges = append([]string{"added", "updated", "deleted", "new", "resync"}, calendarWatchChanges...)
 )
 
 type watchCommand struct {
@@ -70,8 +72,9 @@ func newWatchCommand() *watchCommand {
 	watchCommand := &watchCommand{}
 	watchCommand.cmd = &cobra.Command{
 		Use:   "watch",
-		Short: "Follow email threads as they change",
-		Long: `Print email threads as they change, one JSON object per line. Runs until interrupted.
+		Short: "Follow email threads and calendars as they change",
+		Long: `Print email threads and calendar changes as they happen, one JSON object per line.
+Runs until interrupted.
 
 Changes can drive a command instead of being printed, and that is a choice between two
 behaviours: --run-async spawns the command per change and moves on, so a slow one never
@@ -84,13 +87,21 @@ seen, so the backlog a box's first read carries is not new. Reading a thread, mu
 moving it is not new activity; a reply on a known thread is. --events new selects the new
 ones, alone or alongside added, updated and deleted, and a script sees HEY_NEW=1 for them.
 
+The calendars are followed too, by default: recording_added, recording_updated and
+recording_deleted are the events, todos, habits and journal entries the calendars hold,
+each line naming its calendar; calendar_added, calendar_updated and calendar_deleted are
+the calendars themselves coming and going. The email-specific flags switch the calendars
+off: --box scopes the watch to mail, and an --events list naming only mail changes
+(added, updated, deleted, new, resync) does the same.
+
 Besides the thread changes, three lines describe the watch itself: "ready" once every box
-is caught up and the subscription is live (again after every reconnect's catch-up),
-"disconnected" when the connection drops, and "resync" when a box changed more than the
-feed can list one change at a time and the watch skipped ahead — re-read that box. A resync
-is an event of its own: reported by default, scripts run for it and --exit-on-first counts
-it, and --events can leave it out, as --events new does. Ready and disconnected are written
-to stdout only.`,
+and calendar is caught up and the subscription is live (again after every reconnect's
+catch-up), "disconnected" when the connection drops, and "resync" when a box changed more
+than the feed can list one change at a time and the watch skipped ahead — re-read that
+box. A resync is an event of its own: reported by default, scripts run for it and
+--exit-on-first counts it, and --events can leave it out, as --events new does. A
+calendar's feed falls behind the same way, and calendar_resync is the same word for it.
+Ready and disconnected are written to stdout only.`,
 		Annotations: map[string]string{
 			"agent_notes": "Long-running. Writes one JSON object per changed thread to stdout (NDJSON), not the usual envelope. Use --exit-on-first to block until one change lands and then exit.",
 		},
@@ -106,7 +117,7 @@ to stdout only.`,
 
 	flags := watchCommand.cmd.Flags()
 	flags.StringArrayVar(&watchCommand.boxes, "box", nil, "Box whose changes to report, by name or ID (repeatable, defaults to all; every box is followed either way, so new mail is judged across all of them)")
-	flags.StringSliceVar(&watchCommand.events, "events", defaultChanges, "Changes to report: added, updated, deleted, resync, and new for the added and updated threads that are new mail")
+	flags.StringSliceVar(&watchCommand.events, "events", defaultChanges, "Changes to report: added, updated, deleted, resync and new for mail; recording_added, recording_updated, recording_deleted, calendar_added, calendar_updated, calendar_deleted and calendar_resync for the calendars")
 	flags.StringVar(&watchCommand.since, "since", "", "Report changes since this time first (RFC 3339 or YYYY-MM-DD)")
 	flags.StringVar(&watchCommand.asyncScript, "run-async", "", "Shell command to spawn per change, without waiting for it")
 	flags.StringVar(&watchCommand.syncScript, "run-sync", "", "Shell command to run per change, one at a time, waiting for each")
@@ -164,11 +175,25 @@ func (c *watchCommand) run(cmd *cobra.Command, args []string) error {
 		running:     make(chan struct{}, asyncScriptLimit),
 	}
 
+	if c.watchingCalendars(changes) {
+		calendars, calendarsErr := c.watchedCalendars(ctx, started)
+		if calendarsErr != nil {
+			return calendarsErr
+		}
+		defer calendars.poll.Stop()
+		watch.calendar = calendars
+	}
+
 	client, err := cable.Dial(ctx, cfg.BaseURL, authMgr)
 	if err != nil {
 		return watchDialError(err)
 	}
 	defer func() { _ = client.Close() }()
+	watch.cable = client
+
+	if watch.calendar != nil {
+		watch.subscribeCalendars(ctx)
+	}
 
 	subscription, err := client.Subscribe(ctx, actioncable.Identifier{Channel: changesChannel},
 		actioncable.OnConnected(func(reconnected bool) {
@@ -337,18 +362,28 @@ type watchedBox struct {
 	reported bool // --box named it, or named nothing
 }
 
-// watchEvent is one changed posting, as a line of NDJSON or as a script's stdin —
-// or a word about the watch itself, which has no posting and, for ready and
-// disconnected, no box either. New is set on every added and updated posting,
-// true or false, and on nothing else.
+// watchEvent is one changed posting or calendar recording, as a line of NDJSON or as a
+// script's stdin — or a word about the watch itself, which has neither. A mail line
+// carries the box and the posting; a calendar line carries the calendar and the
+// recording instead, and an existing mail reader never sees the new fields. New is set
+// on every added and updated posting, true or false, and on nothing else.
 type watchEvent struct {
-	Change    string             `json:"change"`
-	At        string             `json:"at"`
-	Box       *watchEventBox     `json:"box,omitempty"`
-	PostingID int64              `json:"posting_id,omitempty"`
-	ThreadID  int64              `json:"thread_id,omitempty"`
-	New       *bool              `json:"new,omitempty"`
-	Posting   *generated.Posting `json:"posting,omitempty"`
+	Change        string               `json:"change"`
+	At            string               `json:"at"`
+	Box           *watchEventBox       `json:"box,omitempty"`
+	PostingID     int64                `json:"posting_id,omitempty"`
+	ThreadID      int64                `json:"thread_id,omitempty"`
+	New           *bool                `json:"new,omitempty"`
+	Posting       *generated.Posting   `json:"posting,omitempty"`
+	Calendar      *watchEventCalendar  `json:"calendar,omitempty"`
+	RecordingID   int64                `json:"recording_id,omitempty"`
+	RecordingType string               `json:"recording_type,omitempty"`
+	Recording     *generated.Recording `json:"recording,omitempty"`
+}
+
+type watchEventCalendar struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
 }
 
 func (e watchEvent) isNew() bool {
@@ -375,6 +410,8 @@ type watchEventBox struct {
 // one has been read, and what to do with a change once it arrives.
 type postingsWatch struct {
 	boxes          map[int64]*watchedBox
+	calendar       *calendarsWatch
+	cable          *actioncable.Client
 	changes        map[string]bool
 	asyncScript    string
 	syncScript     string
@@ -413,6 +450,16 @@ func (w *postingsWatch) listen(ctx context.Context, subscription *actioncable.Su
 		case <-w.retry:
 			w.retry = nil
 			if err := w.retryUnread(ctx); err != nil {
+				return err
+			}
+		case <-w.calendarWake():
+			w.coalesceCalendarRing()
+		case <-w.calendarDue():
+			if err := w.readRungCalendars(ctx); err != nil {
+				return err
+			}
+		case <-w.calendarPoll():
+			if err := w.pollCalendarList(ctx); err != nil {
 				return err
 			}
 		case message, open := <-subscription.Messages():
@@ -483,8 +530,8 @@ func (w *postingsWatch) followConnection(ctx context.Context) error {
 	}
 }
 
-// catchUp reads every box and announces ready — but only once every box has
-// been read. A read that failed is retried on the backoff with the box's cursor
+// catchUp reads every box and calendar and announces ready — but only once every one has
+// been read. A read that failed is retried on the backoff with its cursor
 // where it was, and ready waits for it: a reader told ready while a box is
 // still behind would take the gap for a clean picture. From ready on, anything
 // after the cursors is reported: a reader that wants a gap-free picture reads
@@ -493,16 +540,22 @@ func (w *postingsWatch) catchUp(ctx context.Context) error {
 	if err := w.readEveryBox(ctx); err != nil {
 		return err
 	}
+	if err := w.readEveryCalendar(ctx); err != nil {
+		return err
+	}
 	w.catchingUp = true
 	w.readyOnceCaughtUp(ctx)
 
 	return nil
 }
 
-// retryUnread reads the boxes whose last read failed, and announces the ready a
-// catch-up left owing once the last of them is read.
+// retryUnread reads the boxes and calendars whose last read failed, and announces the
+// ready a catch-up left owing once the last of them is read.
 func (w *postingsWatch) retryUnread(ctx context.Context) error {
 	if err := w.readUnreadBoxes(ctx); err != nil {
+		return err
+	}
+	if err := w.readUnreadCalendars(ctx); err != nil {
 		return err
 	}
 	w.readyOnceCaughtUp(ctx)
@@ -524,7 +577,7 @@ func (w *postingsWatch) retryUnread(ctx context.Context) error {
 // is the order things happened. The cable's goroutine waits on one line of
 // output at most.
 func (w *postingsWatch) readyOnceCaughtUp(ctx context.Context) {
-	if !w.catchingUp || len(w.unread) > 0 || w.finished() || ctx.Err() != nil {
+	if !w.catchingUp || len(w.unread) > 0 || w.calendarsBehind() || w.finished() || ctx.Err() != nil {
 		return
 	}
 
@@ -668,7 +721,12 @@ func permanentReadError(err error) bool {
 // and the change stays invisible until the next email happens along.
 func (w *postingsWatch) readAgainLater(box *watchedBox) {
 	w.unread[box.id] = true
+	w.armRetry()
+}
 
+// armRetry starts the shared backoff timer, once: the boxes and the calendars retry on
+// the same clock, and whichever read fails first sets it running.
+func (w *postingsWatch) armRetry() {
 	if w.retry == nil {
 		w.backoff = min(max(2*w.backoff, firstWatchRetry), longestWatchRetry)
 		w.retry = time.After(w.backoff)
@@ -677,8 +735,12 @@ func (w *postingsWatch) readAgainLater(box *watchedBox) {
 
 func (w *postingsWatch) wasRead(box *watchedBox) {
 	delete(w.unread, box.id)
+	w.settleBackoff()
+}
 
-	if len(w.unread) == 0 {
+// settleBackoff lets the retry delay start over once nothing is behind any more.
+func (w *postingsWatch) settleBackoff() {
+	if len(w.unread) == 0 && !w.calendarsBehind() {
 		w.backoff = 0
 	}
 }
@@ -736,16 +798,21 @@ func (w *postingsWatch) stopWatching(box *watchedBox) error {
 }
 
 // report hands one change on — printed, or run through the script — and says
-// whether it did.
+// whether it did. A calendar change carries its calendar instead of a box, so
+// box and posting are nil for it.
 func (w *postingsWatch) report(ctx context.Context, event watchEvent, box *watchedBox, posting *generated.Posting) bool {
-	if !box.reported || w.finished() || !w.reporting(event) {
+	if w.finished() || !w.reporting(event) {
 		return false
 	}
-
-	event.Box = &watchEventBox{ID: box.id, Kind: box.kind, Name: box.name}
-	if posting != nil {
-		event.Posting = posting
-		event.ThreadID = resolvePostingTopicID(*posting)
+	if box != nil {
+		if !box.reported {
+			return false
+		}
+		event.Box = &watchEventBox{ID: box.id, Kind: box.kind, Name: box.name}
+		if posting != nil {
+			event.Posting = posting
+			event.ThreadID = resolvePostingTopicID(*posting)
+		}
 	}
 	w.reported++
 
@@ -869,7 +936,10 @@ func (w *postingsWatch) scriptCommand(ctx context.Context, script string, event 
 // environment — a watch started by another watch's script, say — would reach
 // the script for an event that does not set it: HEY_NEW=1 on an update that is
 // not new, a thread id on a deletion. They are the event's to set or leave unset.
-var watchVariables = []string{"HEY_CHANGE", "HEY_AT", "HEY_BOX_ID", "HEY_BOX_KIND", "HEY_BOX_NAME", "HEY_POSTING_ID", "HEY_THREAD_ID", "HEY_NEW"}
+var watchVariables = []string{
+	"HEY_CHANGE", "HEY_AT", "HEY_BOX_ID", "HEY_BOX_KIND", "HEY_BOX_NAME", "HEY_POSTING_ID", "HEY_THREAD_ID", "HEY_NEW",
+	"HEY_CALENDAR_ID", "HEY_CALENDAR_NAME", "HEY_RECORDING_ID", "HEY_RECORDING_TYPE",
+}
 
 func withoutWatchVariables(environment []string) []string {
 	return slices.DeleteFunc(slices.Clone(environment), func(variable string) bool {
@@ -913,6 +983,17 @@ func (e watchEvent) environment() []string {
 	if e.ThreadID != 0 {
 		environment = append(environment, "HEY_THREAD_ID="+strconv.FormatInt(e.ThreadID, 10))
 	}
+	if e.Calendar != nil {
+		environment = append(environment,
+			"HEY_CALENDAR_ID="+strconv.FormatInt(e.Calendar.ID, 10),
+			"HEY_CALENDAR_NAME="+e.Calendar.Name)
+	}
+	if e.RecordingID != 0 {
+		environment = append(environment, "HEY_RECORDING_ID="+strconv.FormatInt(e.RecordingID, 10))
+	}
+	if e.RecordingType != "" {
+		environment = append(environment, "HEY_RECORDING_TYPE="+e.RecordingType)
+	}
 	if e.isNew() {
 		environment = append(environment, "HEY_NEW=1")
 	} else {
@@ -923,9 +1004,12 @@ func (e watchEvent) environment() []string {
 }
 
 func watchLine(event watchEvent) string {
-	var boxName, description string
+	var sourceName, description string
 	if event.Box != nil {
-		boxName = event.Box.Name
+		sourceName = event.Box.Name
+	}
+	if event.Calendar != nil {
+		sourceName = event.Calendar.Name
 	}
 	change := event.Change
 	if event.isNew() {
@@ -936,15 +1020,21 @@ func watchLine(event watchEvent) string {
 		description = "watching for changes"
 	case event.Change == watchDisconnected:
 		description = "connection lost — reconnecting"
-	case event.Change == watchResync:
+	case event.Change == watchResync || event.Change == watchCalendarResync:
 		description = "too much changed to follow one change at a time — skipped ahead"
 	case event.Posting != nil:
 		description = fmt.Sprintf("%s — %s (thread %d)", terminal.SanitizeLine(event.Posting.Creator.Name), truncate(terminal.SanitizeLine(event.Posting.Summary), 50), event.ThreadID)
+	case event.Recording != nil:
+		description = fmt.Sprintf("%s (%s %d)", truncate(terminal.SanitizeLine(event.Recording.Title), 50), event.RecordingType, event.RecordingID)
+	case event.RecordingID != 0:
+		description = fmt.Sprintf("%s %d", event.RecordingType, event.RecordingID)
+	case event.Calendar != nil:
+		description = fmt.Sprintf("calendar %d", event.Calendar.ID)
 	default:
 		description = fmt.Sprintf("posting %d", event.PostingID)
 	}
 
-	return fmt.Sprintf("%s  %-13s %-24s %s", event.At, change, terminal.SanitizeLine(boxName), description)
+	return fmt.Sprintf("%s  %-13s %-24s %s", event.At, change, terminal.SanitizeLine(sourceName), description)
 }
 
 func watchTime(at time.Time) string {

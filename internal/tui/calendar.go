@@ -1545,6 +1545,22 @@ func (v *calendarView) AccountSwitchBlocked() bool {
 	return v.requests.kind == calendarRequestMutation || v.requests.kind == calendarRequestTimeTrack
 }
 
+// refreshLive re-reads the span on screen for a change that arrived over the watch, and
+// says it is held when the view cannot take one right now: a form or a picker is the
+// reader's focus, a read they asked for is in flight and must not be superseded, and a
+// delete waiting on its second x must not have the list change under it. The re-read
+// rides the ordinary request lane — once a day has been drawn it never shows the spinner,
+// and the selection is kept by key, so nothing moves under the reader but the facts.
+func (v *calendarView) refreshLive() (tea.Cmd, bool) {
+	if v.CapturingInput() || v.requests.loading || v.confirmDelete != "" {
+		return nil, true
+	}
+	if len(v.calendars) == 0 {
+		return nil, false
+	}
+	return v.requestRecordings(), false
+}
+
 // Restyle re-renders the day/week/year grid, which caches styled output in its
 // viewport. The recording detail is plain text and needs nothing.
 func (v *calendarView) Restyle() {

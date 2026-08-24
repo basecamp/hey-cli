@@ -96,6 +96,16 @@ type model struct {
 	stopScreenerWatch  context.CancelFunc
 	screenerRefreshDue bool
 
+	// The calendar's streams, followed only while the calendar or the journal is on
+	// screen: every other section re-reads its data on entry, so a doorbell rung for a
+	// section nobody is looking at would be paid for and answered by nothing.
+	watchCalendar         CalendarWatcher
+	calendarChanges       <-chan struct{}
+	calendarWatchAttempt  uint64
+	calendarWatchFailures int
+	stopCalendarWatch     context.CancelFunc
+	calendarRefreshDue    bool
+
 	// Linked mail accounts
 	mailAccounts            []mailAccountChoice
 	mailAccountsLoaded      bool
@@ -161,6 +171,7 @@ func newModelWithMailAccounts(rootSDK, sdk *hey.Client, selected string, watcher
 		screenerView:        sv,
 		watchMail:           watchers.Mail,
 		watchScreener:       watchers.Screener,
+		watchCalendar:       watchers.Calendar,
 		mailWatchAttempt:    1,
 		watchCtx:            watchCtx,
 		stopWatching:        stopWatching,
@@ -429,6 +440,38 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case screenerRefreshDueMsg:
 		return m, m.refreshScreener()
+
+	case calendarWatchStartedMsg:
+		if msg.attempt != m.calendarWatchAttempt {
+			return m, nil
+		}
+		if msg.err != nil {
+			return m, m.retryCalendarWatch()
+		}
+		m.calendarChanges = msg.changes
+		m.calendarWatchFailures = 0
+		return m, waitForCalendarChangeCmd(msg.attempt, msg.changes)
+
+	case calendarChangedMsg:
+		if msg.attempt != m.calendarWatchAttempt {
+			return m, nil
+		}
+		if msg.closed {
+			return m, m.retryCalendarWatch()
+		}
+		return m, tea.Batch(m.calendarChanged(), waitForCalendarChangeCmd(msg.attempt, m.calendarChanges))
+
+	case calendarRefreshDueMsg:
+		return m, m.refreshCalendarSection()
+
+	case calendarWatchRetryMsg:
+		if msg.attempt != m.calendarWatchAttempt || m.calendarChanges != nil || m.stopCalendarWatch != nil {
+			return m, nil
+		}
+		if !m.watchingCalendars() {
+			return m, nil
+		}
+		return m, m.startCalendarWatch()
 
 	case screenerPendingRefreshedMsg:
 		cmd, _ := m.screenerView.Update(msg)
@@ -1020,6 +1063,85 @@ func (m *model) refreshScreener() tea.Cmd {
 	return tea.Batch(m.stampViewCmd(m.mailView.refreshScreenerCount()), m.stampViewCmd(queue))
 }
 
+// watchingCalendars is whether the calendar's streams are worth following: the calendar
+// and the journal draw from them, and every other section re-reads on entry anyway.
+func (m model) watchingCalendars() bool {
+	return m.section == sectionCalendar || m.section == sectionJournal
+}
+
+// startCalendarWatch opens the calendar's streams, unless a watch is already open or on
+// its way. The watch gets a context of its own under the TUI-wide one, so leaving the
+// section can give the streams up without touching the connection they share.
+func (m *model) startCalendarWatch() tea.Cmd {
+	if m.watchCalendar == nil || m.stopCalendarWatch != nil {
+		return nil
+	}
+	watchCtx, stop := context.WithCancel(m.watchCtx) //nolint:gosec // G118: cancel stored, called on section switch, retry or ctrl+c
+	m.stopCalendarWatch = stop
+	m.calendarWatchAttempt++
+	return startCalendarWatchCmd(watchCtx, m.watchCtx, m.watchCalendar, m.calendarWatchAttempt)
+}
+
+// dropCalendarWatch gives up the calendar's streams. Left open they would go on ringing
+// for a section nobody is looking at, and hold their subscriptions for as long as the
+// TUI runs.
+func (m *model) dropCalendarWatch() {
+	if m.stopCalendarWatch != nil {
+		m.stopCalendarWatch()
+	}
+	m.stopCalendarWatch = nil
+	m.calendarChanges = nil
+	m.calendarWatchFailures = 0
+	m.calendarRefreshDue = false
+}
+
+// retryCalendarWatch comes back from a failed start or a closed stream, on the same
+// doubling delay the mail watch retries on — but quietly: the calendar re-reads on every
+// step the reader takes, so a watch that is down costs staleness, not a broken screen,
+// and the mail watch already announces a connection that is gone.
+func (m *model) retryCalendarWatch() tea.Cmd {
+	m.dropCalendarWatch()
+	if !m.watchingCalendars() {
+		return nil
+	}
+	m.calendarWatchFailures++
+	return retryCalendarWatchLaterCmd(m.calendarWatchAttempt, mailWatchRetryDelay(m.calendarWatchFailures))
+}
+
+// calendarChanged is the calendar's doorbell. One write lands as several broadcasts —
+// HEY touches the calendar per recording — so the re-read is delayed and one is armed at
+// a time.
+func (m *model) calendarChanged() tea.Cmd {
+	if m.calendarRefreshDue {
+		return nil
+	}
+	m.calendarRefreshDue = true
+	return refreshCalendarLaterCmd(liveRefreshDelay)
+}
+
+// refreshCalendarSection re-reads what the doorbell was rung about: the span the calendar
+// is on, or the journal's list. A view that cannot take a re-read right now — a form or a
+// picker is open, or a read is already in flight — holds the change rather than dropping
+// it. A section switched away from needs nothing: it re-reads on entry.
+func (m *model) refreshCalendarSection() tea.Cmd {
+	m.calendarRefreshDue = false
+	var cmd tea.Cmd
+	var held bool
+	switch m.activeView {
+	case sectionView(m.calendarView):
+		cmd, held = m.calendarView.refreshLive()
+	case sectionView(m.journalView):
+		cmd, held = m.journalView.refreshLive()
+	default:
+		return nil
+	}
+	if held {
+		m.calendarRefreshDue = true
+		return refreshCalendarLaterCmd(liveRetryDelay)
+	}
+	return m.stampViewCmd(cmd)
+}
+
 func (m model) switchSection(sec section) (tea.Model, tea.Cmd) {
 	if sec == m.section || m.hasPendingMutation() {
 		return m, nil
@@ -1035,11 +1157,17 @@ func (m model) switchSection(sec section) (tea.Model, tea.Cmd) {
 	case sectionJournal:
 		m.activeView = m.journalView
 	}
+	var watch tea.Cmd
+	if m.watchingCalendars() {
+		watch = m.startCalendarWatch()
+	} else {
+		m.dropCalendarWatch()
+	}
 	m.activeView.Resize(m.vc.width, m.vc.height)
 	cmd := m.activeView.Init()
 	cmd = m.syncLoading(cmd)
 	m.updateHelpBindings()
-	return m, cmd
+	return m, tea.Batch(cmd, watch)
 }
 
 func (m model) openRequest(request OpenRequest) (tea.Model, tea.Cmd) {

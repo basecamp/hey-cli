@@ -10,11 +10,12 @@ import (
 	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
-// Watchers are the streams the TUI follows to stay live. Both are optional: without them
+// Watchers are the streams the TUI follows to stay live. All are optional: without them
 // a list is the snapshot it was read as.
 type Watchers struct {
 	Mail     MailWatcher
 	Screener ScreenerWatcher
+	Calendar CalendarWatcher
 }
 
 // MailWatcher opens the stream of mail and connection events that keeps the TUI live.
@@ -46,6 +47,13 @@ type MailWatchEvent struct {
 // signed stream is replaced. HEY serves the signed name alongside the pending count, so
 // a watcher opens after that name has been read.
 type ScreenerWatcher func(ctx, connectionCtx context.Context, signedStreamName string) (<-chan struct{}, error)
+
+// CalendarWatcher opens the stream that says a calendar changed. It subscribes every
+// calendar the account can see and folds them into one doorbell: which calendar rang does
+// not matter, because the TUI re-reads whatever span is on screen either way. A watcher
+// discovers calendars added or removed while it runs on its own and rings for those too.
+// The stream closes when ctx is done, or when whatever is behind it has given up for good.
+type CalendarWatcher func(ctx, connectionCtx context.Context) (<-chan struct{}, error)
 
 // AnyBoxChanged stands for "something changed, we don't know what" — a watcher sends it
 // after a reconnect, where the changes broadcast while it was away were missed.
@@ -250,4 +258,60 @@ func waitForScreenerChangeCmd(stream string, changes <-chan struct{}) tea.Cmd {
 
 func refreshScreenerLaterCmd(delay time.Duration) tea.Cmd {
 	return tea.Tick(delay, func(time.Time) tea.Msg { return screenerRefreshDueMsg{} })
+}
+
+// --- The calendar ---
+
+// calendarWatchStartedMsg carries the stream a watcher opened, or the reason there isn't
+// one. The attempt identifies the watch that asked, so a start that lost its race with a
+// section switch — the watch was dropped and another opened — cannot install its stream
+// over the current one.
+type calendarWatchStartedMsg struct {
+	attempt uint64
+	changes <-chan struct{}
+	err     error
+}
+
+// calendarChangedMsg reports that a calendar changed, or that the stream has closed. The
+// frame HEY broadcasts carries nothing the TUI can use: it is a doorbell, and the span on
+// screen is read again behind it.
+type calendarChangedMsg struct {
+	attempt uint64
+	closed  bool
+}
+
+// calendarRefreshDueMsg is the re-read a calendar change asked for, once its delay has passed.
+type calendarRefreshDueMsg struct{}
+
+// calendarWatchRetryMsg asks the model to open a new calendar watch after a failed start
+// or a stream that closed. The attempt identifies the state that scheduled it, the way
+// mailWatchRetryMsg's does.
+type calendarWatchRetryMsg struct{ attempt uint64 }
+
+func startCalendarWatchCmd(ctx, connectionCtx context.Context, watch CalendarWatcher, attempt uint64) tea.Cmd {
+	if watch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		changes, err := watch(ctx, connectionCtx)
+		return calendarWatchStartedMsg{attempt: attempt, changes: changes, err: err}
+	}
+}
+
+func waitForCalendarChangeCmd(attempt uint64, changes <-chan struct{}) tea.Cmd {
+	if changes == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		_, open := <-changes
+		return calendarChangedMsg{attempt: attempt, closed: !open}
+	}
+}
+
+func refreshCalendarLaterCmd(delay time.Duration) tea.Cmd {
+	return tea.Tick(delay, func(time.Time) tea.Msg { return calendarRefreshDueMsg{} })
+}
+
+func retryCalendarWatchLaterCmd(attempt uint64, delay time.Duration) tea.Cmd {
+	return tea.Tick(delay, func(time.Time) tea.Msg { return calendarWatchRetryMsg{attempt: attempt} })
 }

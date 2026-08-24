@@ -237,6 +237,12 @@ appears in every section while the network is offline or live updates are reconn
 The TUI retries the connection, clears the status when it returns, and catches up the box
 on screen; Ctrl+R remains available whenever you want to read it yourself.
 
+The Calendar and Journal sections keep up the same way while they are on screen: HEY
+rings each calendar's own update stream when something on it is written, and the span or
+list you are looking at is read again a moment later, keeping your selection. A change
+that arrives while a form or a picker is open waits for it to close, and a calendar
+shared with you after the section opened is picked up by a slow background check.
+
 The Screener keeps up too. When a first-time sender writes, the count above the threads
 changes on its own, and if you have The Screener open the new sender appears in the queue
 without moving your place in it.
@@ -448,8 +454,9 @@ Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. B
 ### Watching for changes
 
 ```bash
-hey watch                               # follow every box, a line of JSON per change
-hey watch --box imbox --events added    # only new postings in the Imbox
+hey watch                               # follow every box and calendar, a line of JSON per change
+hey watch --box imbox --events added    # only new postings in the Imbox (calendars off)
+hey watch --events recording_added,recording_updated,recording_deleted   # calendar changes only
 hey watch --box imbox --exit-on-first   # block until something lands, then exit
 hey watch --since 2026-08-18T09:00:00Z  # catch up from a time first, then follow
 hey watch --box imbox --events new      # new mail only: unseen, unmuted, active since the watch began
@@ -475,6 +482,16 @@ is judged across all of them — a reply in The Feed and then a move into the Im
 one-liner above is what any desktop does with it; on Omarchy the bar plugin reads the same
 lines and sends one batched, replacing toast instead.
 
+The calendars are followed too, by default. A changed event, todo, habit or journal entry
+is a `recording_added`, `recording_updated` or `recording_deleted` line naming its
+calendar — `{"change":"recording_added","calendar":{"id":512,"name":"Household"},
+"recording_id":88001,"recording_type":"Calendar::Event","recording":{}}` — and a calendar
+arriving, changing or leaving is `calendar_added`, `calendar_updated` or
+`calendar_deleted`. A calendar whose feed fell too far behind is skipped ahead and says so
+with `calendar_resync`, the way a box says `resync`. The email-specific flags switch the
+calendars off: `--box` scopes the watch to mail, and an `--events` list naming only mail
+changes does the same.
+
 A change can drive a command instead of being printed, and there's a choice to make
 between two behaviours — pass one or the other, not both. `--run-async` spawns the
 command per change and moves on, so a slow one never holds up the watch and two can
@@ -483,7 +500,9 @@ slow one delays the next.
 
 Both hand the JSON to the command on its stdin, and the same fields as `HEY_CHANGE`,
 `HEY_AT`, `HEY_BOX_ID`, `HEY_BOX_KIND`, `HEY_BOX_NAME`, `HEY_POSTING_ID` and
-`HEY_THREAD_ID`, with `HEY_NEW=1` for new mail and `HEY_NEW=0` otherwise. Both also take over
+`HEY_THREAD_ID`, with `HEY_NEW=1` for new mail and `HEY_NEW=0` otherwise — and on a
+calendar line `HEY_CALENDAR_ID`, `HEY_CALENDAR_NAME`, `HEY_RECORDING_ID` and
+`HEY_RECORDING_TYPE` instead of the box and posting fields. Both also take over
 stdout, so the JSON isn't printed as well.
 
 ### Calendars

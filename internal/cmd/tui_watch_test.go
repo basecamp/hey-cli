@@ -5,11 +5,14 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
 
 	actioncable "github.com/basecamp/actioncable-go"
+
+	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/auth"
@@ -272,5 +275,72 @@ func TestRingDropsWhatWouldBlock(t *testing.T) {
 	case <-notifications:
 	case <-time.After(time.Second):
 		t.Fatal("the first notification should be waiting")
+	}
+}
+
+func TestCalendarStreamWatchPollFollowsTheCalendarSet(t *testing.T) {
+	t.Setenv("HEY_TOKEN", "test-token")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Link", `<`+r.URL.Path+`?since=2026-08-18T09%3A20%3A00.000Z>; rel="next"`)
+		_, _ = w.Write([]byte(`{
+			"added": [{"calendar": {"id": 514, "name": "Book Club"},
+			           "recording_changes_url": "/calendars/514/recording/changes.json?since=2026-08-18T09%3A14%3A00.000Z&v=1"}],
+			"deleted": [{"id": 513, "deleted_at": "2026-08-18T09:16:00.000Z"}]
+		}`))
+	}))
+	t.Cleanup(server.Close)
+	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
+
+	watch := newCalendarStreamWatch()
+	dropped := false
+	watch.stops[513] = func() { dropped = true }
+	cursor, err := hey.CalendarChangesCursorFrom(server.URL + "/calendar/changes.json?since=2026-08-18T09%3A00%3A00.000Z")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	next, alive := watch.pollOnce(context.Background(), context.Background(), cursor)
+	if !alive {
+		t.Fatal("a poll that read cleanly should keep the watch alive")
+	}
+	if next.Since != "2026-08-18T09:20:00.000Z" {
+		t.Errorf("cursor = %+v, want it moved to where the feed left off", next)
+	}
+	if !dropped {
+		t.Error("a calendar that left should have its stream given up")
+	}
+	if _, still := watch.stops[513]; still {
+		t.Error("a dropped stream should leave the map")
+	}
+	select {
+	case <-watch.changes:
+	default:
+		t.Error("a changed calendar set should ring the doorbell")
+	}
+}
+
+func TestCalendarStreamWatchPollSkipsAFailedRead(t *testing.T) {
+	t.Setenv("HEY_TOKEN", "test-token")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
+
+	watch := newCalendarStreamWatch()
+	cursor, err := hey.CalendarChangesCursorFrom(server.URL + "/calendar/changes.json?since=2026-08-18T09%3A00%3A00.000Z")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	next, alive := watch.pollOnce(context.Background(), context.Background(), cursor)
+	if !alive {
+		t.Error("a read that failed should be retried by the next poll, not end the watch")
+	}
+	if next.Since != cursor.Since {
+		t.Errorf("cursor = %+v, want it left where it was", next)
 	}
 }

@@ -706,3 +706,252 @@ func mailWithBoxServer(t *testing.T, postingsJSON string) (*mailView, *recordedR
 	v.Update(currentPostingsLoaded(v, testPostings()))
 	return v, recorded
 }
+
+// --- The calendar's streams ---
+
+func TestWaitForCalendarChangeReportsTheRingAndTheClose(t *testing.T) {
+	changes := make(chan struct{}, 1)
+	changes <- struct{}{}
+
+	if rung := waitForCalendarChangeCmd(3, changes)().(calendarChangedMsg); rung.closed || rung.attempt != 3 {
+		t.Errorf("rung = %+v, want an open stream on attempt 3", rung)
+	}
+
+	close(changes)
+	if rung := waitForCalendarChangeCmd(3, changes)().(calendarChangedMsg); !rung.closed {
+		t.Errorf("rung = %+v, want a closed stream", rung)
+	}
+
+	if cmd := waitForCalendarChangeCmd(1, nil); cmd != nil {
+		t.Error("nothing to wait on should be no command")
+	}
+}
+
+func TestStartCalendarWatchCarriesTheStreamAttemptOrReason(t *testing.T) {
+	changes := make(chan struct{})
+	opened := startCalendarWatchCmd(context.Background(), context.Background(), func(_, _ context.Context) (<-chan struct{}, error) {
+		return changes, nil
+	}, 4)().(calendarWatchStartedMsg)
+	if opened.changes == nil || opened.err != nil || opened.attempt != 4 {
+		t.Errorf("opened = %+v, want attempt 4 and its stream", opened)
+	}
+
+	refused := startCalendarWatchCmd(context.Background(), context.Background(), func(_, _ context.Context) (<-chan struct{}, error) {
+		return nil, errors.New("cable server said no")
+	}, 5)().(calendarWatchStartedMsg)
+	if refused.err == nil || refused.attempt != 5 {
+		t.Errorf("refused = %+v, want attempt 5 and the reason it failed", refused)
+	}
+
+	if cmd := startCalendarWatchCmd(context.Background(), context.Background(), nil, 1); cmd != nil {
+		t.Error("no watcher should be no command")
+	}
+}
+
+func TestModelFollowsTheCalendarOnlyWhileItIsOnScreen(t *testing.T) {
+	m := newModel()
+	m.watchCalendar = func(_, _ context.Context) (<-chan struct{}, error) { return make(chan struct{}), nil }
+
+	updated, cmd := m.switchSection(sectionCalendar)
+	m = updated.(model)
+	if m.stopCalendarWatch == nil || cmd == nil {
+		t.Fatal("entering the calendar should open the watch")
+	}
+	attempt := m.calendarWatchAttempt
+
+	changes := make(chan struct{}, 1)
+	updated, _ = m.Update(calendarWatchStartedMsg{attempt: attempt, changes: changes})
+	m = updated.(model)
+	if m.calendarChanges == nil {
+		t.Fatal("the model should hold on to the stream")
+	}
+
+	updated, _ = m.switchSection(sectionJournal)
+	m = updated.(model)
+	if m.stopCalendarWatch == nil {
+		t.Fatal("the journal draws from the same streams, so the watch should stay open")
+	}
+
+	updated, _ = m.switchSection(sectionMail)
+	m = updated.(model)
+	if m.stopCalendarWatch != nil || m.calendarChanges != nil {
+		t.Error("leaving for mail should give the streams up")
+	}
+}
+
+func TestModelIgnoresAStaleCalendarStream(t *testing.T) {
+	m := newModel()
+	m.watchCalendar = func(_, _ context.Context) (<-chan struct{}, error) { return make(chan struct{}), nil }
+	updated, _ := m.switchSection(sectionCalendar)
+	m = updated.(model)
+
+	stale := make(chan struct{}, 1)
+	updated, cmd := m.Update(calendarWatchStartedMsg{attempt: m.calendarWatchAttempt - 1, changes: stale})
+	m = updated.(model)
+	if m.calendarChanges != nil || cmd != nil {
+		t.Error("a stream opened for a watch already given up should be ignored")
+	}
+}
+
+func TestModelArmsOneCalendarReReadPerRing(t *testing.T) {
+	m := newModel()
+	m.section = sectionCalendar
+	m.activeView = m.calendarView
+	m.calendarWatchAttempt = 2
+	m.calendarChanges = make(chan struct{})
+
+	updated, cmd := m.Update(calendarChangedMsg{attempt: 2})
+	m = updated.(model)
+	if !m.calendarRefreshDue || cmd == nil {
+		t.Fatal("a ring should arm the delayed re-read")
+	}
+
+	updated, _ = m.Update(calendarChangedMsg{attempt: 2})
+	m = updated.(model)
+	if !m.calendarRefreshDue {
+		t.Error("a second ring inside the delay should be folded into the first")
+	}
+}
+
+func TestModelRetriesAClosedCalendarStreamWhileWatching(t *testing.T) {
+	m := newModel()
+	m.watchCalendar = func(_, _ context.Context) (<-chan struct{}, error) { return make(chan struct{}), nil }
+	updated, _ := m.switchSection(sectionCalendar)
+	m = updated.(model)
+	attempt := m.calendarWatchAttempt
+
+	updated, cmd := m.Update(calendarChangedMsg{attempt: attempt, closed: true})
+	m = updated.(model)
+	if cmd == nil || m.stopCalendarWatch != nil || m.calendarWatchFailures != 1 {
+		t.Errorf("failures = %d, want the watch dropped and a retry armed", m.calendarWatchFailures)
+	}
+
+	updated, retry := m.Update(calendarWatchRetryMsg{attempt: m.calendarWatchAttempt})
+	m = updated.(model)
+	if retry == nil || m.stopCalendarWatch == nil {
+		t.Error("the retry should open a new watch while the calendar is on screen")
+	}
+}
+
+func TestModelDropsACalendarRetryAfterLeaving(t *testing.T) {
+	m := newModel()
+	m.watchCalendar = func(_, _ context.Context) (<-chan struct{}, error) { return make(chan struct{}), nil }
+	updated, _ := m.switchSection(sectionCalendar)
+	m = updated.(model)
+	attempt := m.calendarWatchAttempt
+
+	updated, _ = m.Update(calendarChangedMsg{attempt: attempt, closed: true})
+	m = updated.(model)
+	updated, _ = m.switchSection(sectionMail)
+	m = updated.(model)
+
+	updated, retry := m.Update(calendarWatchRetryMsg{attempt: m.calendarWatchAttempt})
+	m = updated.(model)
+	if retry != nil || m.stopCalendarWatch != nil {
+		t.Error("a retry that fires after leaving the section should open nothing")
+	}
+}
+
+func TestCalendarViewHoldsAReReadWhileBusy(t *testing.T) {
+	vc := testVC()
+	v := newCalendarView(vc)
+	v.calendars = []Calendar{{ID: 512, Name: "Household"}}
+
+	v.eventForm = &eventForm{}
+	if _, held := v.refreshLive(); !held {
+		t.Error("a re-read should be held while a form is open")
+	}
+	v.eventForm = nil
+
+	v.requests.loading = true
+	if _, held := v.refreshLive(); !held {
+		t.Error("a re-read should be held while a read the reader asked for is in flight")
+	}
+	v.requests.loading = false
+
+	v.confirmDelete = "88001"
+	if _, held := v.refreshLive(); !held {
+		t.Error("a re-read should be held while a delete waits on its second x")
+	}
+	v.confirmDelete = ""
+
+	v.calendars = nil
+	if cmd, held := v.refreshLive(); held || cmd != nil {
+		t.Error("a view that has read nothing yet has nothing to re-read")
+	}
+}
+
+func TestModelHoldsTheCalendarReReadAndComesBack(t *testing.T) {
+	m := newModel()
+	m.section = sectionCalendar
+	m.activeView = m.calendarView
+	m.calendarView.calendars = []Calendar{{ID: 512, Name: "Household"}}
+	m.calendarView.eventForm = &eventForm{}
+
+	cmd := m.refreshCalendarSection()
+	if cmd == nil || !m.calendarRefreshDue {
+		t.Error("a held re-read should stay owed and come back later")
+	}
+}
+
+func TestJournalViewRefreshGates(t *testing.T) {
+	vc := testVC()
+	v := newJournalView(vc)
+
+	if cmd, held := v.refreshLive(); held || cmd != nil {
+		t.Error("a list never read has nothing to re-read")
+	}
+
+	v.loaded = true
+	v.form = newJournalForm("2026-08-18", "", vc.styles)
+	if _, held := v.refreshLive(); !held {
+		t.Error("a re-read should be held while the editor is open")
+	}
+	v.form = nil
+
+	v.query = "dentist"
+	if cmd, held := v.refreshLive(); held || cmd != nil {
+		t.Error("search results are a snapshot and should be left alone")
+	}
+}
+
+func TestJournalSpliceKeepsTheTailAndTheSelection(t *testing.T) {
+	vc := testVC()
+	v := newJournalView(vc)
+	v.loaded = true
+	v.nextPage = "3"
+	v.list.setEntries([]journalSummary{
+		{Date: "2026-08-20", Preview: "Went for a run"},
+		{Date: "2026-08-19", Preview: "Dinner with Maria"},
+		{Date: "2026-08-18", Preview: "Quiet day"},
+	})
+	v.list.selectDate("2026-08-19")
+
+	v.spliceRefreshedEntries([]journalSummary{
+		{Date: "2026-08-21", Preview: "New entry"},
+		{Date: "2026-08-20", Preview: "Went for a longer run"},
+	}, "2")
+
+	dates := make([]string, 0, len(v.list.entries))
+	for _, entry := range v.list.entries {
+		dates = append(dates, entry.Date)
+	}
+	want := []string{"2026-08-21", "2026-08-20", "2026-08-19", "2026-08-18"}
+	if strings.Join(dates, " ") != strings.Join(want, " ") {
+		t.Errorf("dates = %v, want the fresh page in front of the old tail: %v", dates, want)
+	}
+	if v.list.entries[1].Preview != "Went for a longer run" {
+		t.Error("the fresh page should replace what it covers")
+	}
+	if selected := v.list.selected(); selected == nil || selected.Date != "2026-08-19" {
+		t.Errorf("selected = %+v, want the cursor kept on its day", selected)
+	}
+	if v.nextPage != "3" {
+		t.Errorf("nextPage = %q, want the deepest page's cursor kept while the list has grown past the top", v.nextPage)
+	}
+
+	v.spliceRefreshedEntries(nil, "")
+	if len(v.list.entries) != 0 || v.nextPage != "" {
+		t.Error("an empty journal should empty the list")
+	}
+}

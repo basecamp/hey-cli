@@ -8,6 +8,9 @@ import (
 
 	actioncable "github.com/basecamp/actioncable-go"
 
+	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/cable"
 	"github.com/basecamp/hey-cli/internal/tui"
 )
@@ -68,7 +71,7 @@ const (
 
 // tuiWatchers are the streams `hey tui` follows to stay live.
 func tuiWatchers() tui.Watchers {
-	return tui.Watchers{Mail: watchMailChanges, Screener: watchScreenerChanges}
+	return tui.Watchers{Mail: watchMailChanges, Screener: watchScreenerChanges, Calendar: watchCalendarChanges}
 }
 
 // watchMailChanges opens the stream of changed boxes the TUI follows, over the same
@@ -175,6 +178,175 @@ func relayScreenerChanges(ctx context.Context, messages <-chan actioncable.Messa
 			}
 			ring(changes, struct{}{})
 		}
+	}
+}
+
+// calendarListPollInterval is how often a calendar watch reads the calendar-level changes
+// feed, which is the only way it can learn of a calendar added or removed while it runs:
+// a stream can only be subscribed once the calendar is known, and HEY broadcasts nothing
+// a JSON client can follow for the list itself. The read is one page and usually empty.
+const calendarListPollInterval = 5 * time.Minute
+
+// watchCalendarChanges opens the stream that says a calendar changed. HEY broadcasts a
+// refresh frame on each calendar's own stream whenever a recording on it is written —
+// the calendars list serves the signed name next to each calendar — so this subscribes
+// them all over the TUI's shared connection and folds them into one doorbell. What HEY
+// broadcasts is markup for the web app: nothing is read out of it, the arrival is the
+// whole message, and the TUI re-reads the span on screen behind it.
+func watchCalendarChanges(ctx, connectionCtx context.Context) (<-chan struct{}, error) {
+	list, err := sdk.Calendars().ListWithChanges(ctx)
+	if err != nil {
+		return nil, apierr.FromSDK(err)
+	}
+	if list == nil {
+		return nil, apierr.ErrAPI(0, "could not list calendars")
+	}
+	cursor, err := hey.CalendarChangesCursorFrom(list.CalendarChangesURL)
+	if err != nil {
+		return nil, apierr.FromSDK(err)
+	}
+
+	watch := newCalendarStreamWatch()
+	for _, calendar := range list.Calendars {
+		if err := watch.subscribe(ctx, connectionCtx, calendar); err != nil {
+			watch.stopAll()
+			return nil, err
+		}
+	}
+	go watch.run(ctx, connectionCtx, cursor)
+
+	return watch.changes, nil
+}
+
+// calendarStreamWatch is one doorbell over many subscriptions: every calendar's stream
+// rings the same channel, and a subscription that closes without being given up rings
+// dead instead, which tears the whole watch down — the TUI reopens it, resubscribing
+// everything, rather than limping on with some calendars gone quiet.
+type calendarStreamWatch struct {
+	changes chan struct{}
+	dead    chan struct{}
+	stops   map[int64]context.CancelFunc
+}
+
+func newCalendarStreamWatch() *calendarStreamWatch {
+	return &calendarStreamWatch{
+		changes: make(chan struct{}, 1),
+		dead:    make(chan struct{}, 1),
+		stops:   map[int64]context.CancelFunc{},
+	}
+}
+
+// subscribe follows one calendar's stream. A calendar HEY served without a stream name
+// cannot be followed and is skipped: its writes still reach the reader on every step they
+// take, just not between them.
+func (w *calendarStreamWatch) subscribe(ctx, connectionCtx context.Context, calendar hey.ListedCalendar) error {
+	if calendar.SignedStreamName == "" {
+		return nil
+	}
+
+	subCtx, stop := context.WithCancel(ctx) //nolint:gosec // G118: cancel stored in stops, called by drop or stopAll
+	subscription, err := tuiSubscribe(subCtx, connectionCtx, actioncable.Identifier{
+		Channel: turboStreamsChannel,
+		Params:  actioncable.Params{"signed_stream_name": calendar.SignedStreamName},
+	}, actioncable.OnConnected(func(reconnected bool) {
+		if reconnected {
+			ring(w.changes, struct{}{})
+		}
+	}))
+	if err != nil {
+		stop()
+		return err
+	}
+	w.stops[calendar.Calendar.Id] = stop
+
+	go func() {
+		defer unsubscribe(subCtx, subscription)
+		for {
+			select {
+			case <-subCtx.Done():
+				return
+			case _, open := <-subscription.Messages():
+				if !open {
+					if subCtx.Err() == nil {
+						ring(w.dead, struct{}{})
+					}
+					return
+				}
+				ring(w.changes, struct{}{})
+			}
+		}
+	}()
+
+	return nil
+}
+
+// run keeps the watch's calendar set current: the poll reads the calendar-level changes
+// feed, subscribes the streams of calendars that arrived, gives up those of calendars
+// that left, and rings for either — a new calendar's events are on the span already on
+// screen. A poll that fails is skipped; the cursor has not moved, so the next one reads
+// the same changes.
+func (w *calendarStreamWatch) run(ctx, connectionCtx context.Context, cursor hey.CalendarChangesCursor) {
+	defer close(w.changes)
+	defer w.stopAll()
+
+	poll := time.NewTicker(calendarListPollInterval)
+	defer poll.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-w.dead:
+			return
+		case <-poll.C:
+			next, alive := w.pollOnce(ctx, connectionCtx, cursor)
+			if !alive {
+				return
+			}
+			cursor = next
+		}
+	}
+}
+
+// pollOnce reads the calendar-level feed once. A read that fails is skipped — the cursor
+// has not moved, so the next poll reads the same changes — but a stream that cannot be
+// subscribed ends the watch: the connection is the likely reason, and reopening the whole
+// watch resubscribes everything.
+func (w *calendarStreamWatch) pollOnce(ctx, connectionCtx context.Context, cursor hey.CalendarChangesCursor) (hey.CalendarChangesCursor, bool) {
+	changes, err := sdk.Calendars().AllCalendarChanges(ctx, cursor)
+	if err != nil {
+		return cursor, true
+	}
+
+	for _, added := range changes.Added {
+		if err := w.subscribe(ctx, connectionCtx, added); err != nil {
+			return cursor, false
+		}
+	}
+	for _, deleted := range changes.Deleted {
+		w.drop(deleted.ID)
+	}
+	if len(changes.Added)+len(changes.Updated)+len(changes.Deleted) > 0 {
+		ring(w.changes, struct{}{})
+	}
+	if changes.NextCursor != nil {
+		cursor = *changes.NextCursor
+	}
+
+	return cursor, true
+}
+
+func (w *calendarStreamWatch) drop(calendarID int64) {
+	if stop, subscribed := w.stops[calendarID]; subscribed {
+		stop()
+		delete(w.stops, calendarID)
+	}
+}
+
+func (w *calendarStreamWatch) stopAll() {
+	for id, stop := range w.stops {
+		stop()
+		delete(w.stops, id)
 	}
 }
 

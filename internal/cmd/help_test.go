@@ -119,7 +119,7 @@ MAIL
   screener    Decide who gets to email you
   attachment  List and save files from a thread
   draft       Browse unsent drafts
-  watch       Follow email threads as they change
+  watch       Follow email threads and calendars as they change
 
 WRITE & SHARE
   bulk-reply  Reply to multiple email threads

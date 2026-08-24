@@ -44,6 +44,17 @@ type journalPageAppendedMsg struct {
 	err       error
 }
 
+// journalPageRefreshedMsg is the top of the list read again for a change that arrived
+// over the watch. It carries a bare counter of its own rather than riding the request
+// lane, for the reason the appended page does: a live re-read must never cancel — or be
+// cancelled by — the read the reader asked for, and it never shows the spinner.
+type journalPageRefreshedMsg struct {
+	requestID uint64
+	entries   []journalSummary
+	nextPage  string
+	err       error
+}
+
 type journalDetailMsg struct {
 	requestResult
 	date    string
@@ -122,6 +133,7 @@ type journalView struct {
 	nextPage    string
 	loadingMore bool
 	moreID      uint64
+	liveID      uint64
 
 	detailDate    string
 	detailContent string
@@ -177,6 +189,18 @@ func (v *journalView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.list.growEntries(msg.entries)
 		v.nextPage = msg.nextPage
 		return v.loadMoreEntries(), true
+
+	case journalPageRefreshedMsg:
+		if msg.requestID != v.liveID {
+			return nil, true
+		}
+		if msg.err != nil {
+			// A live re-read that failed costs staleness, not a notice: nothing the
+			// reader did is waiting on it, and the next change rings again.
+			return nil, true
+		}
+		v.spliceRefreshedEntries(msg.entries, msg.nextPage)
+		return nil, true
 
 	case journalDetailMsg:
 		if cmd, ok := v.requests.settle(msg.requestResult); !ok {
@@ -519,6 +543,73 @@ func (v *journalView) loadMoreEntries() tea.Cmd {
 	v.loadingMore = true
 	v.moreID++
 	return v.fetchMoreJournalPage(v.vc.ctx, v.moreID, v.nextPage)
+}
+
+// refreshLive re-reads the top of the list for a change that arrived over the watch, and
+// says it is held when the view cannot take one right now: a form or a prompt is the
+// reader's focus, a removal is waiting on its second x, or a read they asked for is in
+// flight. A search is left alone — its results are a snapshot of a question already
+// answered — and an open entry is too: the list under it is spliced, but what the reader
+// is reading does not change under them.
+func (v *journalView) refreshLive() (tea.Cmd, bool) {
+	if v.form != nil || v.prompt != nil || v.confirmRemove || v.requests.loading {
+		return nil, true
+	}
+	if !v.loaded || v.query != "" {
+		return nil, false
+	}
+	v.liveID++
+	return v.fetchRefreshedJournalPage(v.vc.ctx, v.liveID), false
+}
+
+func (v *journalView) fetchRefreshedJournalPage(ctx context.Context, requestID uint64) tea.Cmd {
+	return func() tea.Msg {
+		result, err := v.vc.sdk.Journal().ListPage(ctx, "", "")
+		if err != nil {
+			return journalPageRefreshedMsg{requestID: requestID, err: err}
+		}
+		if result == nil {
+			return journalPageRefreshedMsg{requestID: requestID}
+		}
+		return journalPageRefreshedMsg{
+			requestID: requestID,
+			entries:   journalSummaries(result.Entries),
+			nextPage:  result.NextPage,
+		}
+	}
+}
+
+// spliceRefreshedEntries puts the fresh top page in front of whatever the list had grown
+// past it, the way the mail list's refreshHead does. The journal is one entry per day,
+// newest first, so the fresh page covers every date down to its last entry and the old
+// tail keeps the rest until a full re-read. The cursor stays on its day, and the cursor
+// for what comes next only moves while the top page is the whole list.
+func (v *journalView) spliceRefreshedEntries(fresh []journalSummary, nextPage string) {
+	var selectedDate string
+	if entry := v.list.selected(); entry != nil {
+		selectedDate = entry.Date
+	}
+
+	if len(fresh) == 0 {
+		v.list.setEntries(nil)
+		v.nextPage = ""
+		return
+	}
+
+	cutoff := fresh[len(fresh)-1].Date
+	var tail []journalSummary
+	for _, entry := range v.list.entries {
+		if entry.Date < cutoff {
+			tail = append(tail, entry)
+		}
+	}
+	if len(tail) == 0 {
+		v.nextPage = nextPage
+	}
+	v.list.setEntries(append(fresh, tail...))
+	if selectedDate != "" {
+		v.list.selectDate(selectedDate)
+	}
 }
 
 func (v *journalView) fetchJournalPage(ctx context.Context, requestID uint64, page, query string) tea.Cmd {
