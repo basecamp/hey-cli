@@ -102,13 +102,14 @@ func (s omarchySetup) installBarPlugin() omarchyStep {
 	}
 	return s.underBarPluginLock(func() []omarchyStep {
 		step := s.installBarPluginLocked()
-		if step.Status == "installed" || step.finalized {
-			// The plugin replaces the inline hey-unread indicator earlier
-			// releases installed: a sign-in that installs one — the quiet
-			// crash repairs included — takes the other out, or a migrating
-			// user keeps two icons and two pollers until an explicit
-			// setup. Quiet and best-effort — a failed cleanup costs
-			// nothing the next setup will not fix.
+		// In ensure mode, installed and unchanged both mean "the plugin is
+		// on the bar" — a fresh install, a quiet crash repair, or one that
+		// was already enabled. All of them owe the legacy migration: the
+		// plugin replaces the inline hey-unread indicator earlier releases
+		// installed, and a migrating user must not keep two icons and two
+		// pollers until an explicit setup. Quiet and best-effort — a
+		// failed cleanup costs nothing the next setup will not fix.
+		if step.Status == "installed" || step.Status == "unchanged" {
 			_ = s.removeLegacyIndicator(true)
 		}
 		return []omarchyStep{step}
@@ -352,7 +353,6 @@ func (s omarchySetup) finalize(marker omarchyPluginMarker) omarchyStep {
 	}
 	step := s.pluginStep("installed", "installed and enabled")
 	step.attempted = true
-	step.finalized = true
 	return step
 }
 

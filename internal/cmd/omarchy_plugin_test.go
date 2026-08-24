@@ -305,6 +305,30 @@ func TestOmarchyPluginEnsurePendingClonedFinalizesWhenTheShellSaysEnabled(t *tes
 	}
 }
 
+func TestOmarchyPluginEnsureOnBarMigratesTheLegacyIndicator(t *testing.T) {
+	// The plugin is already enabled (installed by hand, say) beside the old
+	// hey-unread module: a sign-in still migrates — the unchanged outcome
+	// means "on the bar", and the toast choice moves onto the entry.
+	env, ran, _ := testOmarchyEnvScripted(t, nil)
+	writeShell(t, env, `{"version":1,"bar":{"layout":{"left":[{"id":"omarchy.menu"}],"center":[],"right":[
+  {"id":"hey-unread","type":"command","exec":"hey omarchy bar-status --notify","interval":180},
+  {"id":"37signals.hey"},{"id":"omarchy.tray"}]}}}`)
+
+	step := omarchySetup{env: env}.installBarPlugin()
+	if step.Status != "unchanged" || step.attempted {
+		t.Fatalf("step = %q %q attempted=%v", step.Status, step.Detail, step.attempted)
+	}
+	if strings.Contains(readText(t, env.shellPath()), "hey-unread") {
+		t.Error("an already-enabled plugin still owes the migration")
+	}
+	if entry := pluginEntry(t, env); entry == nil || entry["notify"] != true {
+		t.Errorf("the toast choice must move onto the entry, got %v", entry)
+	}
+	if len(*ran) != 0 {
+		t.Errorf("the on-bar migration needs no subprocess: %v", *ran)
+	}
+}
+
 func TestOmarchyPluginCrashRepairMigratesTheLegacyIndicator(t *testing.T) {
 	// A first sign-in that crashed after the enable: the quiet self-repair
 	// still owes the migration, or a legacy user keeps two icons forever.

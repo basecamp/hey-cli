@@ -140,10 +140,6 @@ type omarchyStep struct {
 	// and the wizard say nothing about a step that neither did nor owes
 	// anything.
 	attempted bool
-	// finalized marks a run that recorded a verified enable — including the
-	// quiet crash repairs — which is the moment the legacy indicator
-	// migration is owed.
-	finalized bool
 }
 
 type omarchySetup struct {

@@ -158,9 +158,12 @@ file, one lock:
   mutation; a held lock is a quiet skip at sign-in and a failure under force.
 - **Ensure never enables an off-bar checkout.** A plugin the user disabled stays disabled
   whatever the marker says — pending included, where the sign-in owes the one-line notice
-  "install incomplete — run hey setup omarchy" and nothing else. Ensure's only mutation is
-  `omarchy plugin add`, on fresh consent or a pending retry; re-enabling is force mode's
-  alone (`omarchy plugin enable`, the reversal of `omarchy plugin disable`).
+  "install incomplete — run hey setup omarchy" and nothing else. Ensure's only enabling
+  mutation is `omarchy plugin add`, on fresh consent or a pending retry; re-enabling is
+  force mode's alone (`omarchy plugin enable`, the reversal of `omarchy plugin disable`).
+  The one other thing a sign-in may write is the one-time legacy migration: once the
+  plugin is on the bar, the old inline `hey-unread` module leaves shell.json, its notify
+  choice carried along.
 - **The probe**, `omarchy plugin list --json`, distinguishes three failures: the omarchy
   CLI missing ("update Omarchy"), the shell not running (an ssh session — nothing is
   asked, cloned or throttled), and an answer that is not a plugin list (fail closed). Its
