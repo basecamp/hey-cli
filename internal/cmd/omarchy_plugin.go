@@ -103,15 +103,17 @@ func (s omarchySetup) installBarPlugin() omarchyStep {
 	return s.underBarPluginLock(func() []omarchyStep {
 		step := s.installBarPluginLocked()
 		// The plugin replaces the inline hey-unread indicator earlier
-		// releases installed, so a sign-in that finds the plugin live owes
-		// the migration — or a migrating user keeps two icons and two
-		// pollers until an explicit setup. "installed" was just verified;
-		// an "unchanged" may rest on a layout entry alone, so with a
-		// legacy module actually present the read-only probe confirms the
-		// replacement is enabled before its predecessor is removed. Quiet
-		// and best-effort — a failed cleanup costs nothing the next setup
-		// will not fix.
-		if (step.Status == "installed" || step.Status == "unchanged") && s.legacyIndicatorPresent() {
+		// releases installed, and one rule covers every path here: with
+		// the legacy module still present and the replacement verifiably
+		// live, a sign-in migrates — whatever else this run decided (a
+		// fresh install, a quiet repair, already enabled, or a checkout
+		// someone installed by hand). "installed" was just verified;
+		// anything else earns the read-only probe first, so a layout entry
+		// alone never costs a working panel; a failed run stays
+		// fail-closed with no cleanup at all. Quiet and best-effort — a
+		// failed cleanup costs nothing the next setup will not fix, and a
+		// sign-in with no legacy module pays nothing.
+		if step.Status != "failed" && s.legacyIndicatorPresent() {
 			live := step.Status == "installed"
 			if !live {
 				probe, _, outcome := s.probeShellPlugins()

@@ -404,6 +404,33 @@ func TestOmarchyRemoveKeepsLegacyWhenTheTombstoneCannotLand(t *testing.T) {
 	}
 }
 
+func TestOmarchyPluginEnsureMigratesBesideAManuallyClonedEnabledPlugin(t *testing.T) {
+	// Someone installed the plugin by hand (cloned, enabled, no marker) and
+	// the old hey-unread module is still there: the row stays a quiet skip
+	// — nothing recorded over someone else's install — but a verifiably
+	// live replacement still owes the migration.
+	env, ran, replies := testOmarchyEnvScripted(t, map[string]omarchyReply{
+		"omarchy plugin list": {out: pluginListEnabled},
+	})
+	clonePluginCheckout(t, env)
+	writeShell(t, env, legacyShellJSON)
+	replies["omarchy bar set"] = omarchyReply{}
+
+	step := omarchySetup{env: env}.installBarPlugin()
+	if step.Status != "skipped" || step.attempted {
+		t.Fatalf("the cloned row stays a quiet skip, got %q %q attempted=%v", step.Status, step.Detail, step.attempted)
+	}
+	if strings.Contains(readText(t, env.shellPath()), "hey-unread") {
+		t.Error("a live replacement owes the migration, whatever row decided")
+	}
+	if !contains(*ran, "omarchy bar set "+omarchyBarPluginID+" notify true --json") {
+		t.Errorf("the toast choice must ride along: %v", *ran)
+	}
+	if _, exists := readMarkerFile(t, env); exists {
+		t.Error("nothing may be recorded over someone else's install")
+	}
+}
+
 func TestOmarchyPluginCrashRepairMigratesTheLegacyIndicator(t *testing.T) {
 	// A first sign-in that crashed after the enable: the quiet self-repair
 	// still owes the migration, or a legacy user keeps two icons forever.
