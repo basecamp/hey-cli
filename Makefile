@@ -208,11 +208,11 @@ check-release-lockstep:
 	@scripts/check-release-lockstep.sh
 
 # Recompute Nix vendorHash via Docker and update nix/package.nix. Pass
-# VERSION=vX.Y.Z to also bump the package version (scripts/release.sh refuses
-# to tag a stable release until it matches); without it the stored version is
-# kept. 0 = updated, 2 = nothing to do. Anything else is a real failure and
-# must propagate: a blanket `|| true` here would silently undo the script's
-# own fail-closed check.
+# VERSION=vX.Y.Z to also bump the package version; without it the stored
+# version is kept. Releases stamp the version without Docker, then the tag
+# workflow builds the exact flake before publication. 0 = updated, 2 = nothing
+# to do. Anything else is a real failure and must propagate: a blanket
+# `|| true` here would silently undo the script's own fail-closed check.
 update-nix-hash:
 	@V="$(VERSION)"; \
 	if [ "$$V" = dev ]; then V=$$(sed -n 's/.*version = "\([^"]*\)".*/\1/p' nix/package.nix | head -1); fi; \

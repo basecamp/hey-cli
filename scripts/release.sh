@@ -69,7 +69,7 @@ if [[ -n "$(git status --porcelain)" ]]; then
 fi
 
 # From here on the tree is known clean, so on failure the stable metadata
-# files can be checked out to undo any half-made edits — a failed nix update
+# files can be checked out to undo any half-made edits — a failed Nix version
 # or plugin stamp must not leave a dirty tree that blocks the next attempt.
 # Checkout from HEAD, not the index: a failed release commit (hook, signing)
 # leaves the files staged, and a plain `git checkout --` would restore the
@@ -171,19 +171,11 @@ if [[ "$PRERELEASE" -eq 1 ]]; then
   echo "  nix flake: unchanged"
   echo "  Claude plugin metadata: unchanged"
 else
-  info "Updating Nix flake"
+  info "Stamping Nix version"
   if [[ "$DRY_RUN" -eq 1 ]]; then
     echo "  (skipped — dry run)"
   else
-    NIX_RC=0
-    scripts/update-nix-flake.sh "$VERSION" || NIX_RC=$?
-    if [[ "$NIX_RC" -eq 0 ]]; then
-      : # nix flake updated
-    elif [[ "$NIX_RC" -eq 2 ]]; then
-      echo "  nix flake: no changes needed"
-    else
-      die "scripts/update-nix-flake.sh failed (exit $NIX_RC)"
-    fi
+    scripts/stamp-nix-version.sh "$VERSION"
   fi
 
   info "Stamping plugin version"

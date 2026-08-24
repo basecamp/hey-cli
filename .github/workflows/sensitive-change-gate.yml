@@ -14,6 +14,7 @@ jobs:
         .goreleaser.yaml
         .github/workflows/release.yml
         scripts/release.sh
+        scripts/stamp-nix-version.sh
         scripts/sign-windows.sh
         scripts/install.sh
         scripts/install.ps1

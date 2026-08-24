@@ -6,9 +6,11 @@
 # refused before main is touched, and the prep commit must reach origin before
 # the tag that the release workflow builds from.
 #
-# make and update-nix-flake.sh are stubbed; stamp-plugin-version.sh is the real
-# one. A pre-receive hook on the bare origin records every ref it receives, in
-# order, which is the only way to observe the push sequence after the fact.
+# make is stubbed; both metadata stampers are the real ones. A deliberately
+# failing update-nix-flake.sh stub proves that the release path never invokes
+# the Docker-backed hash updater. A pre-receive hook on the bare origin records
+# every ref it receives, in order, which is the only way to observe the push
+# sequence after the fact.
 
 setup() {
   REPO_ROOT="$(cd "${BATS_TEST_DIRNAME}/../.." && pwd)"
@@ -32,12 +34,14 @@ HOOK
   git checkout -q -b main
 
   mkdir -p scripts nix .claude-plugin
-  cp "$REPO_ROOT/scripts/release.sh" "$REPO_ROOT/scripts/stamp-plugin-version.sh" scripts/
+  cp "$REPO_ROOT/scripts/release.sh" \
+     "$REPO_ROOT/scripts/stamp-nix-version.sh" \
+     "$REPO_ROOT/scripts/stamp-plugin-version.sh" scripts/
   cat > scripts/update-nix-flake.sh <<'STUB'
 #!/usr/bin/env bash
 echo "update-nix-flake $1" >> "$LOG"
-if grep -q "version = \"$1\"" nix/package.nix; then exit 2; fi
-printf '{\n  version = "%s";\n}\n' "$1" > nix/package.nix
+echo "release invoked the Docker-backed Nix updater" >&2
+exit 99
 STUB
   chmod +x scripts/update-nix-flake.sh
   printf '{\n  version = "0.1.0";\n}\n' > nix/package.nix
@@ -75,11 +79,22 @@ STUB
 }
 
 teardown() {
-  rm -rf "$WORK"
+  # Git authorship tooling may finish writing notes just after a fixture
+  # command returns. Retry rather than turning that unrelated write into a
+  # release-test failure on macOS.
+  for _ in 1 2 3; do
+    rm -rf "$WORK" 2>/dev/null && return 0
+    sleep 0.1
+  done
+  rm -rf "$WORK" 2>/dev/null || true
+  return 0
 }
 
 origin() { git --git-dir="$WORK/origin.git" "$@"; }
 plugin_version() { jq -r .version .claude-plugin/plugin.json; }
+# The fixture records every pushed ref, but authorship tooling may add its own
+# notes refs. Only main and release tags belong to the protocol under test.
+release_pushes() { grep -E '^refs/(heads/main|tags/v)' "$PUSH_LOG" || true; }
 
 @test "stable release commits and pushes the metadata before pushing the tag" {
   run scripts/release.sh 0.2.0
@@ -89,8 +104,9 @@ plugin_version() { jq -r .version .claude-plugin/plugin.json; }
   [ "$(origin rev-parse v0.2.0^{commit})" = "$(origin rev-parse main)" ]
   [ "$(origin show main:.claude-plugin/plugin.json | jq -r .version)" = "0.2.0" ]
   origin show main:nix/package.nix | grep -q 'version = "0.2.0"'
-  [ "$(cat "$PUSH_LOG")" = $'refs/heads/main\nrefs/tags/v0.2.0' ]
+  [ "$(release_pushes)" = $'refs/heads/main\nrefs/tags/v0.2.0' ]
   grep -q '^make release-check$' "$LOG"
+  ! grep -q update-nix-flake "$LOG"
 }
 
 @test "prerelease tags HEAD and leaves the stable metadata alone" {
@@ -100,7 +116,7 @@ plugin_version() { jq -r .version .claude-plugin/plugin.json; }
   [ "$(origin rev-parse main)" = "$BASE" ]
   [ "$(origin rev-parse v0.2.0-rc.1^{commit})" = "$BASE" ]
   [ "$(plugin_version)" = "0.1.0" ]
-  [ "$(cat "$PUSH_LOG")" = "refs/tags/v0.2.0-rc.1" ]
+  [ "$(release_pushes)" = "refs/tags/v0.2.0-rc.1" ]
   ! grep -q update-nix-flake "$LOG"
 }
 
@@ -113,7 +129,7 @@ plugin_version() { jq -r .version .claude-plugin/plugin.json; }
   [ "$(origin rev-parse main)" = "$BASE" ]
   ! origin rev-parse -q --verify refs/tags/v0.2.0 >/dev/null
   [ "$(plugin_version)" = "0.1.0" ]
-  [ ! -s "$PUSH_LOG" ]
+  [ -z "$(release_pushes)" ]
   grep -q '^make release-check$' "$LOG"
   ! grep -q update-nix-flake "$LOG"
 }
@@ -130,7 +146,7 @@ plugin_version() { jq -r .version .claude-plugin/plugin.json; }
   [ "$(origin rev-parse main)" = "$BASE" ]
   [ "$(git rev-parse HEAD)" = "$BASE" ]
   [ "$(plugin_version)" = "0.1.0" ]
-  [ ! -s "$PUSH_LOG" ]
+  [ -z "$(release_pushes)" ]
   [ ! -f "$LOG" ]
 }
 
@@ -144,7 +160,7 @@ plugin_version() { jq -r .version .claude-plugin/plugin.json; }
   [ "$status" -eq 1 ]
   [[ "$output" == *"Tag v0.2.0 already exists at"* ]]
   [ "$(origin rev-parse main)" = "$BASE" ]
-  [ ! -s "$PUSH_LOG" ]
+  [ -z "$(release_pushes)" ]
 }
 
 @test "refuses a stable version older than the latest stable tag" {
@@ -158,7 +174,7 @@ plugin_version() { jq -r .version .claude-plugin/plugin.json; }
 
   [ "$(origin rev-parse main)" = "$BASE" ]
   [ "$(plugin_version)" = "0.1.0" ]
-  [ ! -s "$PUSH_LOG" ]
+  [ -z "$(release_pushes)" ]
   [ ! -f "$LOG" ]
 }
 
@@ -171,28 +187,28 @@ plugin_version() { jq -r .version .claude-plugin/plugin.json; }
   [ "$(origin rev-parse v0.10.0^{commit})" = "$(origin rev-parse main)" ]
 }
 
-@test "a failed nix update restores the metadata and leaves the tree clean" {
-  cat > scripts/update-nix-flake.sh <<'STUB'
+@test "a failed nix version stamp restores the metadata and leaves the tree clean" {
+  cat > scripts/stamp-nix-version.sh <<'STUB'
 #!/usr/bin/env bash
 printf '{\n  version = "%s";\n}\n' "$1" > nix/package.nix
-echo "ERROR: nix build failed, and not because of the vendorHash"
+echo "ERROR: nix version stamp failed"
 exit 1
 STUB
-  git add scripts/update-nix-flake.sh
-  git commit -qm "Break the nix update"
+  git add scripts/stamp-nix-version.sh
+  git commit -qm "Break the nix version stamp"
   git push -q origin main
   : > "$PUSH_LOG"
   BASE=$(git rev-parse HEAD)
 
   run scripts/release.sh 0.2.0
   [ "$status" -eq 1 ]
-  [[ "$output" == *"update-nix-flake.sh failed (exit 1)"* ]]
+  [[ "$output" == *"nix version stamp failed"* ]]
 
   [ -z "$(git status --porcelain)" ]
   grep -q 'version = "0.1.0"' nix/package.nix
   [ "$(git rev-parse HEAD)" = "$BASE" ]
   [ "$(origin rev-parse main)" = "$BASE" ]
-  [ ! -s "$PUSH_LOG" ]
+  [ -z "$(release_pushes)" ]
 }
 
 @test "a failed plugin stamp restores the metadata and leaves the tree clean" {
@@ -210,13 +226,14 @@ STUB
   run scripts/release.sh 0.2.0
   [ "$status" -eq 1 ]
 
-  # The nix update succeeded before the stamp failed; both files come back.
+  # The Nix version stamp succeeded before the plugin stamp failed; both files
+  # come back.
   [ -z "$(git status --porcelain)" ]
   grep -q 'version = "0.1.0"' nix/package.nix
   [ "$(plugin_version)" = "0.1.0" ]
   [ "$(git rev-parse HEAD)" = "$BASE" ]
   [ "$(origin rev-parse main)" = "$BASE" ]
-  [ ! -s "$PUSH_LOG" ]
+  [ -z "$(release_pushes)" ]
 }
 
 @test "prerelease below the latest stable is not a downgrade of any channel" {
@@ -239,7 +256,7 @@ STUB
   [ "$(git rev-parse HEAD)" = "$PREPPED" ]
   [ "$(origin rev-parse main)" = "$PREPPED" ]
   [ "$(origin rev-parse v0.2.0^{commit})" = "$PREPPED" ]
-  [ ! -s "$PUSH_LOG" ]
+  [ -z "$(release_pushes)" ]
 }
 
 @test "refuses a hand-pushed stable tag at an unstamped HEAD before touching main" {
@@ -259,7 +276,7 @@ STUB
   grep -q 'version = "0.1.0"' nix/package.nix
   [ "$(git rev-parse HEAD)" = "$BASE" ]
   [ "$(origin rev-parse main)" = "$BASE" ]
-  [ ! -s "$PUSH_LOG" ]
+  [ -z "$(release_pushes)" ]
 }
 
 @test "an existing tag elsewhere is refused without suggesting a tag move" {
@@ -282,7 +299,7 @@ STUB
   run scripts/release.sh 0.2.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"Not on main"* ]]
-  [ ! -s "$PUSH_LOG" ]
+  [ -z "$(release_pushes)" ]
 }
 
 @test "rejects malformed versions" {
@@ -308,7 +325,7 @@ HOOK
   [ "$(plugin_version)" = "0.1.0" ]
   [ "$(git rev-parse HEAD)" = "$BASE" ]
   [ "$(origin rev-parse main)" = "$BASE" ]
-  [ ! -s "$PUSH_LOG" ]
+  [ -z "$(release_pushes)" ]
 
   rm .git/hooks/pre-commit
   run scripts/release.sh 0.2.0
@@ -329,7 +346,7 @@ HOOK
 
   [ "$(origin rev-parse main)" = "$BASE" ]
   [ "$(plugin_version)" = "0.1.0" ]
-  [ ! -s "$PUSH_LOG" ]
+  [ -z "$(release_pushes)" ]
   [ ! -f "$LOG" ]
 }
 
@@ -347,7 +364,7 @@ HOOK
 
   [ "$(origin rev-parse main)" = "$BASE" ]
   [ "$(plugin_version)" = "0.1.0" ]
-  [ ! -s "$PUSH_LOG" ]
+  [ -z "$(release_pushes)" ]
   [ ! -f "$LOG" ]
 }
 
@@ -373,7 +390,7 @@ STUB
 
   [ "$(origin rev-parse main)" = "$BASE" ]
   [ "$(origin rev-parse v0.2.0^{commit})" = "$OTHER" ]
-  [ "$(cat "$PUSH_LOG")" = "refs/tags/v0.2.0" ]
+  [ "$(release_pushes)" = "refs/tags/v0.2.0" ]
 
   # The local clone is left where a re-run (with a new version) can start:
   # no unpushed prep commit, no stray local tag, clean tree.
@@ -400,7 +417,7 @@ STUB
 
   [ "$(origin rev-parse main)" = "$(git -C "$WORK/other" rev-parse HEAD)" ]
   ! origin rev-parse -q --verify refs/tags/v0.2.0 >/dev/null
-  [ "$(cat "$PUSH_LOG")" = "refs/heads/main" ]
+  [ "$(release_pushes)" = "refs/heads/main" ]
   [ -z "$(git status --porcelain)" ]
   [ "$(git rev-parse HEAD)" = "$BASE" ]
   ! git rev-parse -q --verify refs/tags/v0.2.0 >/dev/null

@@ -80,9 +80,49 @@ jobs:
       - name: Check CLI surface compatibility
         run: scripts/check-surface-compat.sh
 
+  # Pull-request CI catches flake and vendorHash drift where source and
+  # dependencies change. This final build covers the exact stable tag —
+  # including release.sh's version-only metadata commit — before GoReleaser
+  # publishes anything. Prereleases deliberately retain the latest stable Nix
+  # metadata, so their gate is an explicit no-op.
+  nix-verify:
+    name: Verify Nix flake before release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Skip prerelease
+        if: ${{ contains(github.ref_name, '-') }}
+        run: echo "Prerelease — leaving stable Nix metadata unchanged"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: ${{ !contains(github.ref_name, '-') }}
+        with:
+          persist-credentials: false
+
+      - name: Install Nix
+        if: ${{ !contains(github.ref_name, '-') }}
+        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31.11.0
+
+      # The metadata hooks read the version stamps; this proves the flake's
+      # built artifact agrees with the tag before the release is public.
+      - name: Build and verify
+        if: ${{ !contains(github.ref_name, '-') }}
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          STORE_PATH=$(nix build --no-link --print-out-paths)
+          out=$("$STORE_PATH/bin/hey" --version)
+          echo "$out"
+          [ "$out" = "hey version ${TAG#v}" ] || {
+            echo "::error::Nix flake built ${out#hey version }, expected ${TAG#v}. nix/package.nix was not bumped before tagging."
+            exit 1
+          }
+
   release:
     name: Release
-    needs: [test, security]
+    needs: [test, security, nix-verify]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: release
@@ -428,40 +468,6 @@ jobs:
             echo "::warning::Notarization not yet accepted for ${{ matrix.arch }} (ticket propagation may lag)"
           fi
 
-  # Not continue-on-error: a broken flake is a broken release artifact, so it
-  # must colour the run even though it lands after publication.
-  nix-verify:
-    name: Verify Nix flake
-    needs: [release]
-    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install Nix
-        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31.11.0
-
-      # The version check closes the loop on the pre-publish gates
-      # (release.sh and GoReleaser's check-stable-metadata.sh hook): those read
-      # the metadata, this proves the built artifact — a flake that builds but
-      # still advertises the previous release is broken for
-      # `nix profile install`, and only the tag knows the truth.
-      - name: Build and verify
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          STORE_PATH=$(nix build --no-link --print-out-paths)
-          out=$("$STORE_PATH/bin/hey" --version)
-          echo "$out"
-          [ "$out" = "hey version ${TAG#v}" ] || {
-            echo "::error::Nix flake built ${out#hey version }, expected ${TAG#v}. nix/package.nix was not bumped before tagging."
-            exit 1
-          }
   windows-verify:
     name: Verify Windows signing
     needs: [release]

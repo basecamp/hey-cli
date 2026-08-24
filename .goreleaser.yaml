@@ -10,9 +10,8 @@ before:
     # can repair a tag pushed by hand without that commit (both files ship
     # from the tag, not from these archives), so a stable tag whose metadata
     # disagrees with its version fails before anything is published — the
-    # post-publication nix-verify job would otherwise be the first to notice,
-    # after the release is already public. Prereleases and snapshots leave
-    # stable metadata on the latest stable version.
+    # pre-publication nix-verify job would otherwise reject it. Prereleases and
+    # snapshots leave stable metadata on the latest stable version.
     - sh -c '{{ if or .Prerelease .IsSnapshot }}echo "Skipping stable metadata check for {{ .Version }}"{{ else }}scripts/check-stable-metadata.sh {{ .Version }}{{ end }}'
     # Authenticode-sign a copy of the PowerShell installer inside the pipeline
     # so it lands in checksums.txt (cosign-signed, provenance-attested) and on

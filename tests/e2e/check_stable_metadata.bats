@@ -3,8 +3,8 @@
 # stable tag's release metadata (.claude-plugin/plugin.json and
 # nix/package.nix) already carries the release version. GoReleaser runs it
 # before building, so a hand-pushed stable tag without the release prep commit
-# fails before anything is published instead of being caught by nix-verify
-# after the release is public.
+# fails before anything is published. The pre-publication nix-verify job then
+# proves that the exact tagged flake builds with the same version.
 
 setup() {
   CHECK="${BATS_TEST_DIRNAME}/../../scripts/check-stable-metadata.sh"
