@@ -336,9 +336,16 @@ func notifyDetail(notify bool) string {
 }
 
 // configureBarPlugin reports one merged step for the plugin — its install
-// (installBarPlugin) folded together with its notify setting — and, only when
-// there was one to remove, a step for the legacy module before it.
+// folded together with its notify setting — and, only when there was one to
+// remove, a step for the legacy module before it. The whole sequence holds
+// the plugin lock: the legacy and notify rewrites of shell.json act on what
+// they read, so a concurrent remove cannot slip between the read and the
+// write and have its disable overwritten.
 func (s omarchySetup) configureBarPlugin() []omarchyStep {
+	return s.underBarPluginLock(s.configureBarPluginLocked)
+}
+
+func (s omarchySetup) configureBarPluginLocked() []omarchyStep {
 	path := s.env.shellPath()
 	shell, err := s.loadShellConfig()
 	if err != nil {
@@ -357,7 +364,7 @@ func (s omarchySetup) configureBarPlugin() []omarchyStep {
 		steps = s.writeBarSteps(steps, shell, true)
 	}
 
-	install := s.installBarPlugin()
+	install := s.installBarPluginLocked()
 	if install.Status == "skipped" || install.Status == "failed" {
 		return append(steps, install)
 	}
@@ -472,20 +479,25 @@ func barPluginNotifies(plugin map[string]any) bool {
 
 // removeBar takes out what setup wrote into the bar layout — a legacy
 // hey-unread module — and disables the plugin, tombstone first, keeping the
-// checkout (removeBarPlugin). The entry's notify setting rides with the
-// entry: `omarchy plugin disable` takes both off the bar together.
+// checkout (removeBarPluginLocked). The entry's notify setting rides with
+// the entry: `omarchy plugin disable` takes both off the bar together. One
+// lock spans the whole sequence, as in configureBarPlugin.
 func (s omarchySetup) removeBar() []omarchyStep {
+	return s.underBarPluginLock(s.removeBarLocked)
+}
+
+func (s omarchySetup) removeBarLocked() []omarchyStep {
 	path := s.env.shellPath()
 	shell, err := s.loadShellConfig()
 	if err != nil {
-		return []omarchyStep{stepResult("bar indicator", path, false, err, "", ""), s.removeBarPlugin(false)}
+		return []omarchyStep{stepResult("bar indicator", path, false, err, "", ""), s.removeBarPluginLocked(false)}
 	}
 	bar, _ := shell["bar"].(map[string]any)
 	layout, _ := bar["layout"].(map[string]any)
 	legacy, _ := s.removeLegacyBarModule(shell, layout)
 	onBar := barLayoutModule(layout, omarchyBarPluginID) != nil
 	steps := s.writeBarSteps([]omarchyStep{stepResult("bar indicator", path, legacy, nil, "removed", "absent")}, shell, legacy)
-	return append(steps, s.removeBarPlugin(onBar))
+	return append(steps, s.removeBarPluginLocked(onBar))
 }
 
 // removeLegacyBarModule drops the inline hey-unread module earlier releases

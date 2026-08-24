@@ -271,10 +271,12 @@ func checkOmarchyBarPlugin(env omarchyEnv) map[string]string {
 		check["message"] = "Install pending"
 		check["hint"] = "hey setup omarchy"
 	case onBar:
-		// The bar is the present tense; a decline or removal recorded
-		// before a later manual enable is history, as in ensure mode.
+		// The layout entry is the shell's own config and outranks a decline
+		// or removal recorded before a later manual enable — but the files
+		// cannot prove the shell has it enabled right now, so claim only
+		// the layout.
 		check["status"] = "ok"
-		check["message"] = "Installed and enabled"
+		check["message"] = "Installed (in the configured bar layout)"
 	case marker.DeclinedAt != "":
 		check["status"] = "info"
 		check["message"] = "Declined — hey setup omarchy installs it"

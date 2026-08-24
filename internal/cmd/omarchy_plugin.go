@@ -100,15 +100,30 @@ func (s omarchySetup) installBarPlugin() omarchyStep {
 	if !s.env.detected() || !filepath.IsAbs(s.env.home) {
 		return s.pluginSkip("Omarchy not detected")
 	}
+	return s.underBarPluginLock(func() []omarchyStep {
+		return []omarchyStep{s.installBarPluginLocked()}
+	})[0]
+}
+
+// underBarPluginLock runs fn with the plugin lock held — one acquisition
+// spanning every marker look and every shell.json write, so a concurrent
+// remove cannot interleave with an install's notify rewrite and restore a
+// disabled entry. The gates and contention become the one plugin step fn
+// never gets to produce.
+func (s omarchySetup) underBarPluginLock(fn func() []omarchyStep) []omarchyStep {
 	if s.env.stateDir == "" || !filepath.IsAbs(s.env.stateDir) {
-		return s.pluginSkip("no state directory to record the install in — set XDG_STATE_HOME or HOME")
+		return []omarchyStep{s.pluginSkip("no state directory to record the bar plugin state in — set XDG_STATE_HOME or HOME")}
 	}
 	lock, err := acquireOmarchyPluginLock(s.env)
 	if err != nil {
-		return s.pluginSkip(omarchyLockDetail(err))
+		return []omarchyStep{s.pluginSkip(omarchyLockDetail(err))}
 	}
 	defer func() { _ = lock.Unlock() }()
+	return fn()
+}
 
+// installBarPluginLocked is the mode dispatch, the lock already held.
+func (s omarchySetup) installBarPluginLocked() omarchyStep {
 	marker, _, err := readOmarchyPluginMarker(s.env.markerPath())
 	if err != nil {
 		return s.pluginFailed(omarchyMarkerUnreadable(s.env))
@@ -317,19 +332,10 @@ func (s omarchySetup) finalize(marker omarchyPluginMarker) omarchyStep {
 	return step
 }
 
-// removeBarPlugin is --remove's half: tombstone first, then disable. The
-// checkout stays; deleting it is `omarchy plugin remove`, which hey never
-// runs.
-func (s omarchySetup) removeBarPlugin(onBar bool) omarchyStep {
-	if s.env.stateDir == "" || !filepath.IsAbs(s.env.stateDir) {
-		return s.pluginFailed("no state directory to record the removal in — set XDG_STATE_HOME or HOME")
-	}
-	lock, err := acquireOmarchyPluginLock(s.env)
-	if err != nil {
-		return s.pluginFailed(omarchyLockDetail(err))
-	}
-	defer func() { _ = lock.Unlock() }()
-
+// removeBarPluginLocked is --remove's half, the lock already held: tombstone
+// first, then disable. The checkout stays; deleting it is `omarchy plugin
+// remove`, which hey never runs.
+func (s omarchySetup) removeBarPluginLocked(onBar bool) omarchyStep {
 	marker, _, err := readOmarchyPluginMarker(s.env.markerPath())
 	if err != nil {
 		// A marker we cannot read must not trap removal: installation is
@@ -370,6 +376,11 @@ func (s omarchySetup) disableBarPlugin(onBar bool) omarchyStep {
 	}
 	out, err := s.env.run("omarchy", "plugin", "disable", omarchyBarPluginID)
 	if err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			// Omarchy itself is gone: a stale layout entry is not a running
+			// plugin, and removal keeps working after uninstall.
+			return s.pluginStep("absent", "")
+		}
 		return s.pluginFailed(firstOutputLine(out, err))
 	}
 	step := s.pluginStep("removed", "disabled; the checkout stays — omarchy plugin remove "+omarchyBarPluginID+" deletes it")
