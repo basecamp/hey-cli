@@ -18,11 +18,11 @@
 # - Matching a bare `got:` is far too loose: any failing build whose log happens
 #   to contain one — a Go test assertion printing `got: 42`, say — would yield
 #   "42" as a vendorHash and misreport an unrelated failure as a hash problem.
-# - Accepting any fixed-output mismatch is also too loose. This flake has a
-#   second fixed-output derivation — the Go source tarball nix/go.nix fetches
-#   while nixpkgs lags go.mod — and a stale hash there must not be written
-#   into vendorHash, nor reported to a contributor as the vendorHash remedy.
-#   The rebuild would then fail with nix/package.nix already corrupted.
+# - Accepting any fixed-output mismatch is also too loose. This flake used to
+#   carry a second one — the Go source tarball needed while nixpkgs lagged
+#   go.mod — and its hash must not be written into vendorHash or reported as
+#   the vendorHash remedy. The rebuild would then fail with nix/package.nix
+#   already corrupted.
 #
 # Exit codes:
 #   0 — a go-modules fixed-output hash mismatch was reported; the SRI hash is

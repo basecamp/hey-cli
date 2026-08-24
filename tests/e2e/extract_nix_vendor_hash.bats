@@ -89,10 +89,9 @@ LOG
 }
 
 @test "rejects a mismatch in a fixed-output derivation that is not go-modules" {
-  # This flake carries a second fixed-output derivation: the Go source tarball
-  # nix/go.nix fetches while nixpkgs lags go.mod. A stale hash there is a
-  # nix/go.nix problem; writing it into vendorHash corrupts the tracked file and
-  # then fails the verification rebuild anyway.
+  # A source-toolchain workaround used to add a second fixed-output derivation.
+  # Keep the classifier scoped to go-modules: writing any other derivation's
+  # hash into vendorHash corrupts the tracked file and fails the rebuild.
   run "$EXTRACT" <<'LOG'
 error: hash mismatch in fixed-output derivation '/nix/store/abc-go1.26.6.src.tar.gz.drv':
          specified: sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=

@@ -157,9 +157,9 @@ make update-nix-hash
 The PR-time `nix-build` job fails on every dependency bump by design — dependabot
 does not update `vendorHash` — and prints the correct hash with that command.
 
-`nix/package.nix` rebuilds Go from the upstream source tarball while
-nixpkgs-unstable lags `go.mod`'s toolchain (`minGo`). After a `nix flake update`
-that brings nixpkgs level, delete that block.
+`nix/go.nix` selects the Go toolchain from the locked nixpkgs snapshot for both
+the package and development shell. When `go.mod` moves beyond that snapshot,
+run `nix flake update nixpkgs` and commit `flake.lock` with the toolchain bump.
 
 ## CLI surface compatibility
 
