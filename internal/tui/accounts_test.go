@@ -262,21 +262,14 @@ func TestTopicRequestSwitchesToItsMailAccountBeforeOpening(t *testing.T) {
 	if openCmd == nil || m.pendingTopic != nil || m.section != sectionMail {
 		t.Fatalf("topic was not opened after mail loaded: pending=%v section=%d", m.pendingTopic != nil, m.section)
 	}
-}
 
-func TestTopicRequestKeepsItsAccountWhenDiscoveryFails(t *testing.T) {
-	m := newModel()
-	m.mailAccount = mailAccountChoice{id: 1, label: "first@example.com"}
-	request := TopicRequest{TopicID: 5511, AccountID: 2}
+	request := TopicRequest{TopicID: 6612, AccountID: 1}
 	m.pendingTopic = &request
-
-	updated, cmd := m.Update(mailAccountsLoadedMsg{err: errors.New("identity unavailable")})
+	m.mailAccountsLoaded = false
+	updated, failCmd := m.Update(mailAccountsLoadedMsg{err: errors.New("identity unavailable")})
 	m = updated.(model)
-	if cmd != nil {
-		t.Fatal("account discovery failure tried to open the topic")
-	}
-	if m.mailAccountsLoaded || m.pendingTopic == nil || m.pendingTopic.AccountID != 2 {
-		t.Fatalf("account discovery failure weakened the topic request: loaded=%v pending=%#v", m.mailAccountsLoaded, m.pendingTopic)
+	if failCmd != nil || m.mailAccountsLoaded || m.pendingTopic == nil || m.pendingTopic.AccountID != 1 {
+		t.Fatalf("account discovery failure weakened the topic request: cmd=%v loaded=%v pending=%#v", failCmd != nil, m.mailAccountsLoaded, m.pendingTopic)
 	}
 }
 
