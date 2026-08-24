@@ -108,7 +108,7 @@ func TestForwardSendsLatestEntryDraft(t *testing.T) {
 	if sent.Subject != "Fwd: Quarterly planning" {
 		t.Errorf("subject = %q", sent.Subject)
 	}
-	wantContent := `<div>For your review<br>Thanks &amp; take care</div><br><div>Quoted message</div>`
+	wantContent := "<p>For your review<br>\nThanks &amp; take care</p><br><div>Quoted message</div>"
 	if sent.Content != wantContent {
 		t.Errorf("content = %q, want %q", sent.Content, wantContent)
 	}
@@ -120,6 +120,40 @@ func TestForwardSendsLatestEntryDraft(t *testing.T) {
 	}
 	if len(sent.BCC) != 1 || sent.BCC[0] != "carol@example.com" {
 		t.Errorf("bcc = %v", sent.BCC)
+	}
+}
+
+func TestForwardSendsTheNoteAsMarkdown(t *testing.T) {
+	server, sent := forwardServer(t, `[{"id":12}]`)
+
+	err := runCLI(t, server, "--account", "8", "forward", "7",
+		"--to", "alice@example.com",
+		"-m", "For **your** review",
+	)
+	if err != nil {
+		t.Fatalf("forward failed: %v", err)
+	}
+
+	wantContent := `<p>For <strong>your</strong> review</p><br><div>Quoted message</div>`
+	if sent.Content != wantContent {
+		t.Errorf("content = %q, want %q", sent.Content, wantContent)
+	}
+}
+
+func TestForwardSendsARawHTMLNoteVerbatim(t *testing.T) {
+	server, sent := forwardServer(t, `[{"id":12}]`)
+
+	err := runCLI(t, server, "--account", "8", "forward", "7",
+		"--to", "alice@example.com",
+		"--message-html", "<div>For <strong>your</strong> review</div>",
+	)
+	if err != nil {
+		t.Fatalf("forward failed: %v", err)
+	}
+
+	wantContent := `<div>For <strong>your</strong> review</div><br><div>Quoted message</div>`
+	if sent.Content != wantContent {
+		t.Errorf("content = %q, want %q", sent.Content, wantContent)
 	}
 }
 

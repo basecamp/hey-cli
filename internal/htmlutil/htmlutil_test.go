@@ -194,21 +194,6 @@ func TestExtractAttachmentsSkipsEmbeddedHTMLAttachment(t *testing.T) {
 	}
 }
 
-func TestPrependText(t *testing.T) {
-	got := PrependText(`<div>Forwarded message</div>`, "For your review\nThanks & take care")
-	want := `<div>For your review<br>Thanks &amp; take care</div><br><div>Forwarded message</div>`
-	if got != want {
-		t.Errorf("PrependText() = %q, want %q", got, want)
-	}
-}
-
-func TestPrependTextWithoutNote(t *testing.T) {
-	content := `<div>Forwarded message</div>`
-	if got := PrependText(content, "  "); got != content {
-		t.Errorf("PrependText() = %q, want unchanged content", got)
-	}
-}
-
 func TestExtractAttachments(t *testing.T) {
 	h := `<action-text-attachment sgid="sgid-1" url="/rails/blobs/report.pdf" filename="quarterly-report.pdf" content-type="application/pdf" filesize="128"></action-text-attachment>
 <figure data-trix-attachment='{"sgid":"sgid-2","url":"/rails/blobs/photo.png","filename":"photo.png","contentType":"image/png","filesize":256}'></figure>`

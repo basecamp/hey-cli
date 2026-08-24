@@ -360,23 +360,33 @@ func TestContactNotesShowSetAndDelete(t *testing.T) {
 	if note := decodeContactData[generated.ContactNote](t, set.Data); note.Note != "Prefers a call" {
 		t.Errorf("set note = %+v", note)
 	}
+	if _, err := runContacts(t, server, "note", "set", "7", "--note-html", "<div>Prefers <strong>email</strong></div>"); err != nil {
+		t.Fatal(err)
+	}
 	if deleted, err := runContacts(t, server, "note", "delete", "7"); err != nil || deleted.Summary != "Private contact note deleted" {
 		t.Fatalf("delete: response=%+v error=%v", deleted, err)
 	}
 	requests := recorded.snapshot()
-	if len(requests) != 3 {
+	if len(requests) != 4 {
 		t.Fatalf("requests = %+v", requests)
 	}
 	var body generated.ContactNoteRequestContent
 	if err := json.Unmarshal(requests[1].Body, &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Contact.Note != "Prefers a call" {
-		t.Errorf("note body = %+v", body)
+	if want := "<p>Prefers a call</p>"; body.Contact.Note != want {
+		t.Errorf("note body = %q, want the Markdown converted to %q", body.Contact.Note, want)
+	}
+	var rawHTML generated.ContactNoteRequestContent
+	if err := json.Unmarshal(requests[2].Body, &rawHTML); err != nil {
+		t.Fatal(err)
+	}
+	if want := "<div>Prefers <strong>email</strong></div>"; rawHTML.Contact.Note != want {
+		t.Errorf("raw HTML note body = %q, want %q", rawHTML.Contact.Note, want)
 	}
 }
 
-func TestContactNoteSetPreservesMultilineContent(t *testing.T) {
+func TestContactNoteSetKeepsLineBreaks(t *testing.T) {
 	server, recorded := contactsServer(t)
 	content := "First line\nSecond line"
 	if _, err := runContacts(t, server, "note", "set", "7", content); err != nil {
@@ -390,8 +400,8 @@ func TestContactNoteSetPreservesMultilineContent(t *testing.T) {
 	if err := json.Unmarshal(requests[0].Body, &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Contact.Note != content {
-		t.Errorf("note = %q, want %q", body.Contact.Note, content)
+	if want := "<p>First line<br>\nSecond line</p>"; body.Contact.Note != want {
+		t.Errorf("note = %q, want %q", body.Contact.Note, want)
 	}
 }
 

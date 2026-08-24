@@ -219,7 +219,29 @@ func TestBulkReplySendPreservesDraftAndReportsDelayedDelivery(t *testing.T) {
 	if fmt.Sprint(request.EntryIDs) != "[11 12]" {
 		t.Errorf("entry_ids = %v", request.EntryIDs)
 	}
-	want := "<div>Thanks everyone</div><br><div>Signing off with a tag!</div>"
+	want := "<p>Thanks everyone</p><br><div>Signing off with a tag!</div>"
+	if request.Message.Content != want {
+		t.Errorf("content = %q, want %q", request.Message.Content, want)
+	}
+}
+
+func TestBulkReplySendConvertsMarkdownMessage(t *testing.T) {
+	server, state := bulkReplyServer(t)
+	_, err := runBulkReply(t, server, []string{"--json"}, []string{"send", "101", "202", "-m", "Thanks **everyone**"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	requests := state.snapshot()
+	var request struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal(requests[len(requests)-1].Body, &request); err != nil {
+		t.Fatal(err)
+	}
+	want := "<p>Thanks <strong>everyone</strong></p><br><div>Signing off with a tag!</div>"
 	if request.Message.Content != want {
 		t.Errorf("content = %q, want %q", request.Message.Content, want)
 	}

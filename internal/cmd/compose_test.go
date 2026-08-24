@@ -101,3 +101,44 @@ func TestComposeSubjectRequiredOnlyForANewMessage(t *testing.T) {
 		t.Errorf("cc = %v", sent.CC)
 	}
 }
+
+func TestComposeSendsTheMessageAsMarkdown(t *testing.T) {
+	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
+
+	err := runCLI(t, server, "--account", "8", "compose", "--thread-id", "7",
+		"-m", "The plan:\n\n- **ship** it\n- announce it")
+	if err != nil {
+		t.Fatalf("compose failed: %v", err)
+	}
+
+	want := "<p>The plan:</p>\n<ul>\n<li><strong>ship</strong> it</li>\n<li>announce it</li>\n</ul>"
+	if sent.Content != want {
+		t.Errorf("content = %q, want %q", sent.Content, want)
+	}
+}
+
+func TestComposeSendsRawHTMLVerbatim(t *testing.T) {
+	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
+
+	err := runCLI(t, server, "--account", "8", "compose", "--thread-id", "7",
+		"--message-html", "<h1>March</h1><p>What we shipped.</p>")
+	if err != nil {
+		t.Fatalf("compose failed: %v", err)
+	}
+	if want := "<h1>March</h1><p>What we shipped.</p>"; sent.Content != want {
+		t.Errorf("content = %q, want %q", sent.Content, want)
+	}
+}
+
+func TestComposeRefusesMessageAndMessageHTMLTogether(t *testing.T) {
+	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
+
+	err := runCLI(t, server, "compose", "--thread-id", "7",
+		"-m", "Hello", "--message-html", "<p>Hello</p>")
+	if err == nil || !strings.Contains(err.Error(), "none of the others can be") {
+		t.Fatalf("error = %v, want the flags refused as mutually exclusive", err)
+	}
+	if sent.Content != "" {
+		t.Errorf("nothing should have been sent, got %q", sent.Content)
+	}
+}

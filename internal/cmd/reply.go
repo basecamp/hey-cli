@@ -8,12 +8,14 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/editor"
+	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
 type replyCommand struct {
 	cmd         *cobra.Command
 	message     string
+	messageHTML string
 	attachments []string
 }
 
@@ -28,7 +30,7 @@ The reply is addressed the way HEY's own web app addresses one: everyone that en
 addressed to, with whoever wrote it on the To line. HEY saves an unaddressed reply as a
 draft rather than sending it, so the command fails when it cannot work the recipients out.`,
 		Annotations: map[string]string{
-			"agent_notes": "Replies to the latest entry in a thread, addressed the way HEY addresses a reply: everyone that entry was addressed to, plus its sender on the To line. Accepts message via -m, stdin, or $EDITOR, plus repeatable --attach files; an attachment can be sent without body text.",
+			"agent_notes": "Replies to the latest entry in a thread, addressed the way HEY addresses a reply: everyone that entry was addressed to, plus its sender on the To line. Accepts message via -m, stdin, or $EDITOR, plus repeatable --attach files; an attachment can be sent without body text. The message is Markdown; use --message-html to send raw HTML instead.",
 		},
 		Example: `  hey reply 12345 -m "Friday works for me — I'll send an agenda."
   hey reply 12345 -m "Attached is the report." --attach ./report.pdf
@@ -37,8 +39,10 @@ draft rather than sending it, so the command fails when it cannot work the recip
 		Args: usageExactOneArg(),
 	}
 
-	replyCommand.cmd.Flags().StringVarP(&replyCommand.message, "message", "m", "", "Reply message (or opens $EDITOR)")
+	replyCommand.cmd.Flags().StringVarP(&replyCommand.message, "message", "m", "", "Reply message as Markdown (or opens $EDITOR)")
+	replyCommand.cmd.Flags().StringVar(&replyCommand.messageHTML, "message-html", "", "Reply message as raw HTML instead of Markdown")
 	replyCommand.cmd.Flags().StringArrayVar(&replyCommand.attachments, "attach", nil, "File to attach (repeatable)")
+	replyCommand.cmd.MarkFlagsMutuallyExclusive("message", "message-html")
 
 	return replyCommand
 }
@@ -61,23 +65,27 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	replySDK := target.client
 
-	message := c.message
-	if message == "" && !stdinIsTerminal() {
-		message, err = readStdin()
-		if err != nil {
-			return err
+	message := c.messageHTML
+	if message == "" {
+		markdownMessage := c.message
+		if markdownMessage == "" && !stdinIsTerminal() {
+			markdownMessage, err = readStdin()
+			if err != nil {
+				return err
+			}
+			if markdownMessage == "" && len(c.attachments) == 0 {
+				return apierr.ErrUsage("no message provided (use -m or --message to provide inline, or pipe to stdin)")
+			}
+		} else if markdownMessage == "" && len(c.attachments) == 0 {
+			markdownMessage, err = editor.Open("")
+			if err != nil {
+				return apierr.ErrAPI(0, fmt.Sprintf("could not open editor: %v", err))
+			}
+			if markdownMessage == "" {
+				return apierr.ErrUsage("empty message, aborting")
+			}
 		}
-		if message == "" && len(c.attachments) == 0 {
-			return apierr.ErrUsage("no message provided (use -m or --message to provide inline, or pipe to stdin)")
-		}
-	} else if message == "" && len(c.attachments) == 0 {
-		message, err = editor.Open("")
-		if err != nil {
-			return apierr.ErrAPI(0, fmt.Sprintf("could not open editor: %v", err))
-		}
-		if message == "" {
-			return apierr.ErrUsage("empty message, aborting")
-		}
+		message = htmlutil.FromMarkdown(markdownMessage)
 	}
 
 	message, err = attachFilesWithClient(ctx, replySDK, message, c.attachments)

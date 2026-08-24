@@ -422,12 +422,22 @@ hey compose --to alice@example.com --subject "Q3 revenue report" --attach ./repo
 hey compose --to alice@example.com --subject "Q3 revenue report" -m "The numbers are attached." --attach ./report.pdf --attach ./chart.png
 hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Kitchen remodel timeline" -m "Cabinets land the week of the 14th."
 hey compose --thread-id 12345 -m "Confirmed — see you then."  # Reply into an existing thread (no subject: it carries the thread's)
+hey compose --to alice@example.com --subject "Sprint recap" -m "We **shipped** the pagination fix."
+hey compose --to alice@example.com --subject "Newsletter draft" --message-html "<h1>March</h1><p>What we shipped.</p>"
 ```
 
 `hey reply` answers the thread's **latest** entry. HEY addresses the reply the way its own
 web app does: everyone that entry was addressed to, plus whoever wrote it, on the To line.
 A reply HEY cannot address is saved as a draft rather than sent, so the command fails
 rather than guessing when it cannot work out the recipients.
+
+Everything you send is Markdown by default — `-m`, `--content`, `--note`, positional
+content, stdin, and `$EDITOR` alike — and is converted to rich text on the way out. To
+send raw HTML instead, use the flag's HTML twin: `--message-html` on `compose`, `reply`,
+`forward`, and `bulk-reply send`; `--content-html` on `journal write` and
+`snippet create`/`update`; `--note-html` on `contacts note set`. Each pair is mutually
+exclusive. A fenced code block's language (` ```ruby `) survives the conversion, and
+HEY's web app syntax-highlights it.
 
 ### Email - The Screener
 

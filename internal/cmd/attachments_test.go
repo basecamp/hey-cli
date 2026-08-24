@@ -346,7 +346,7 @@ func TestComposeUploadsAttachmentsBeforeSending(t *testing.T) {
 		t.Errorf("events = %v", state.events)
 	}
 	content := state.sentContents[0]
-	if !strings.Contains(content, "Attached.<br>") || !strings.Contains(content, `action-text-attachment sgid="sgid-upload"`) || !strings.Contains(content, `filename="quarterly-report.pdf"`) {
+	if !strings.Contains(content, "<p>Attached.</p><br>") || !strings.Contains(content, `action-text-attachment sgid="sgid-upload"`) || !strings.Contains(content, `filename="quarterly-report.pdf"`) {
 		t.Errorf("sent content = %q", content)
 	}
 }
@@ -365,7 +365,7 @@ func TestComposeReadsPipedBodyWithAttachments(t *testing.T) {
 
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	if len(state.sentContents) != 1 || !strings.HasPrefix(state.sentContents[0], "Piped compose body<br>") {
+	if len(state.sentContents) != 1 || !strings.HasPrefix(state.sentContents[0], "<p>Piped compose body</p><br>") {
 		t.Errorf("sent content = %q", state.sentContents)
 	}
 }
@@ -440,7 +440,7 @@ func TestReplyReadsPipedBodyWithAttachments(t *testing.T) {
 
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	if len(state.sentContents) != 1 || !strings.HasPrefix(state.sentContents[0], "Piped reply body<br>") {
+	if len(state.sentContents) != 1 || !strings.HasPrefix(state.sentContents[0], "<p>Piped reply body</p><br>") {
 		t.Errorf("sent content = %q", state.sentContents)
 	}
 }

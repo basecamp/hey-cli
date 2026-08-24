@@ -3,7 +3,6 @@ package htmlutil
 import (
 	"encoding/json"
 	"fmt"
-	stdhtml "html"
 	"strconv"
 	"strings"
 
@@ -37,15 +36,13 @@ func MessageSourceText(s string) string {
 	return strings.TrimSpace(b.String())
 }
 
-// PrependText adds a plain-text note before existing HTML content.
-func PrependText(content, note string) string {
-	note = strings.TrimSpace(strings.ReplaceAll(note, "\r\n", "\n"))
+// PrependHTML adds an HTML note before existing HTML content.
+func PrependHTML(content, note string) string {
+	note = strings.TrimSpace(note)
 	if note == "" {
 		return content
 	}
-	escaped := stdhtml.EscapeString(note)
-	escaped = strings.ReplaceAll(escaped, "\n", "<br>")
-	return "<div>" + escaped + "</div><br>" + content
+	return note + "<br>" + content
 }
 
 // ExtractImageURLs finds image URLs from <img src> tags and

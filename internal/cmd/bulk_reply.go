@@ -28,6 +28,7 @@ type bulkReplyPreviewCommand struct {
 type bulkReplySendCommand struct {
 	cmd         *cobra.Command
 	message     string
+	messageHTML string
 	attachments []string
 }
 
@@ -145,8 +146,10 @@ func newBulkReplySendCommand() *bulkReplySendCommand {
 		RunE: sendCommand.run,
 		Args: usageMinOneArg(),
 	}
-	sendCommand.cmd.Flags().StringVarP(&sendCommand.message, "message", "m", "", "Reply message (or opens $EDITOR)")
+	sendCommand.cmd.Flags().StringVarP(&sendCommand.message, "message", "m", "", "Reply message as Markdown (or opens $EDITOR)")
+	sendCommand.cmd.Flags().StringVar(&sendCommand.messageHTML, "message-html", "", "Reply message as raw HTML instead of Markdown")
 	sendCommand.cmd.Flags().StringArrayVar(&sendCommand.attachments, "attach", nil, "File to attach (repeatable)")
+	sendCommand.cmd.MarkFlagsMutuallyExclusive("message", "message-html")
 	return sendCommand
 }
 
@@ -158,9 +161,13 @@ func (c *bulkReplySendCommand) run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	message, err := c.readMessage()
-	if err != nil {
-		return err
+	message := c.messageHTML
+	if message == "" {
+		markdownMessage, readErr := c.readMessage()
+		if readErr != nil {
+			return readErr
+		}
+		message = htmlutil.FromMarkdown(markdownMessage)
 	}
 	attachments, err := prepareAttachments(c.attachments)
 	if err != nil {
@@ -185,7 +192,7 @@ func (c *bulkReplySendCommand) run(cmd *cobra.Command, args []string) error {
 		entryIDs[i] = entry.ID
 	}
 
-	content := htmlutil.PrependText(draftContent(draft), message)
+	content := htmlutil.PrependHTML(draftContent(draft), message)
 	content, err = attachPreparedFiles(ctx, content, attachments)
 	if err != nil {
 		return err

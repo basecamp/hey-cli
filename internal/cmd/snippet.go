@@ -9,6 +9,7 @@ import (
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/output"
 	"github.com/basecamp/hey-cli/internal/terminal"
 )
@@ -135,9 +136,10 @@ func newSnippetCommand() *snippetCommand {
 }
 
 type snippetCreateCommand struct {
-	cmd     *cobra.Command
-	name    string
-	content string
+	cmd         *cobra.Command
+	name        string
+	content     string
+	contentHTML string
 }
 
 func newSnippetCreateCommand() *snippetCreateCommand {
@@ -152,7 +154,9 @@ func newSnippetCreateCommand() *snippetCreateCommand {
 		Args: cobra.NoArgs,
 	}
 	createCommand.cmd.Flags().StringVar(&createCommand.name, "name", "", "Snippet name (required)")
-	createCommand.cmd.Flags().StringVar(&createCommand.content, "content", "", "Snippet content as text or HTML (required)")
+	createCommand.cmd.Flags().StringVar(&createCommand.content, "content", "", "Snippet content as Markdown")
+	createCommand.cmd.Flags().StringVar(&createCommand.contentHTML, "content-html", "", "Snippet content as raw HTML instead of Markdown")
+	createCommand.cmd.MarkFlagsMutuallyExclusive("content", "content-html")
 	return createCommand
 }
 
@@ -164,10 +168,14 @@ func (c *snippetCreateCommand) run(cmd *cobra.Command, _ []string) error {
 	if name == "" {
 		return apierr.ErrUsage("--name is required")
 	}
-	if strings.TrimSpace(c.content) == "" {
+	content := c.contentHTML
+	if content == "" {
+		content = htmlutil.FromMarkdown(c.content)
+	}
+	if strings.TrimSpace(content) == "" {
 		return apierr.ErrUsage("--content is required")
 	}
-	if err := sdk.Snippets().Create(cmd.Context(), name, c.content); err != nil {
+	if err := sdk.Snippets().Create(cmd.Context(), name, content); err != nil {
 		return apierr.FromSDK(err)
 	}
 	return writeMutation(cmd, fmt.Sprintf("Snippet %q created", name), map[string]any{"name": name},
@@ -176,9 +184,10 @@ func (c *snippetCreateCommand) run(cmd *cobra.Command, _ []string) error {
 }
 
 type snippetUpdateCommand struct {
-	cmd     *cobra.Command
-	name    string
-	content string
+	cmd         *cobra.Command
+	name        string
+	content     string
+	contentHTML string
 }
 
 func newSnippetUpdateCommand() *snippetUpdateCommand {
@@ -193,7 +202,9 @@ func newSnippetUpdateCommand() *snippetUpdateCommand {
 		Args: usageExactOneArg(),
 	}
 	updateCommand.cmd.Flags().StringVar(&updateCommand.name, "name", "", "New snippet name")
-	updateCommand.cmd.Flags().StringVar(&updateCommand.content, "content", "", "New snippet content as text or HTML")
+	updateCommand.cmd.Flags().StringVar(&updateCommand.content, "content", "", "New snippet content as Markdown")
+	updateCommand.cmd.Flags().StringVar(&updateCommand.contentHTML, "content-html", "", "New snippet content as raw HTML instead of Markdown")
+	updateCommand.cmd.MarkFlagsMutuallyExclusive("content", "content-html")
 	return updateCommand
 }
 
@@ -206,9 +217,9 @@ func (c *snippetUpdateCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	nameChanged := cmd.Flags().Changed("name")
-	contentChanged := cmd.Flags().Changed("content")
+	contentChanged := cmd.Flags().Changed("content") || cmd.Flags().Changed("content-html")
 	if !nameChanged && !contentChanged {
-		return apierr.ErrUsage("provide --name or --content")
+		return apierr.ErrUsage("provide --name, --content or --content-html")
 	}
 	name := c.name
 	if nameChanged {
@@ -217,10 +228,14 @@ func (c *snippetUpdateCommand) run(cmd *cobra.Command, args []string) error {
 			return apierr.ErrUsage("--name cannot be empty")
 		}
 	}
-	if contentChanged && strings.TrimSpace(c.content) == "" {
+	content := c.contentHTML
+	if content == "" {
+		content = htmlutil.FromMarkdown(c.content)
+	}
+	if contentChanged && strings.TrimSpace(content) == "" {
 		return apierr.ErrUsage("--content cannot be empty")
 	}
-	if err := sdk.Snippets().Update(cmd.Context(), snippetID, name, c.content); err != nil {
+	if err := sdk.Snippets().Update(cmd.Context(), snippetID, name, content); err != nil {
 		return apierr.FromSDK(err)
 	}
 	return writeMutation(cmd, fmt.Sprintf("Snippet %d updated", snippetID), map[string]any{"id": snippetID})

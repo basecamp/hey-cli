@@ -25,7 +25,7 @@ func newJournalCommand() *journalCommand {
 		Use:   "journal",
 		Short: "Read and write journal entries",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, read, write. Read defaults to today. Write accepts --content, stdin, or opens $EDITOR.",
+			"agent_notes": "Subcommands: list, read, write. Read defaults to today. Write accepts --content, stdin, or opens $EDITOR; content is Markdown, or raw HTML via --content-html.",
 		},
 	}
 
@@ -194,8 +194,9 @@ func (c *journalReadCommand) run(cmd *cobra.Command, args []string) error {
 // write
 
 type journalWriteCommand struct {
-	cmd     *cobra.Command
-	content string
+	cmd         *cobra.Command
+	content     string
+	contentHTML string
 }
 
 func newJournalWriteCommand() *journalWriteCommand {
@@ -216,7 +217,9 @@ be read the command stops rather than opening a blank buffer over it.`,
 		Args: cobra.MaximumNArgs(2),
 	}
 
-	journalWriteCommand.cmd.Flags().StringVarP(&journalWriteCommand.content, "content", "c", "", "Journal content (or opens $EDITOR)")
+	journalWriteCommand.cmd.Flags().StringVarP(&journalWriteCommand.content, "content", "c", "", "Journal content as Markdown (or opens $EDITOR)")
+	journalWriteCommand.cmd.Flags().StringVar(&journalWriteCommand.contentHTML, "content-html", "", "Journal content as raw HTML instead of Markdown")
+	journalWriteCommand.cmd.MarkFlagsMutuallyExclusive("content", "content-html")
 
 	return journalWriteCommand
 }
@@ -234,6 +237,9 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 		if content != "" {
 			return apierr.ErrUsage("--content and positional content are mutually exclusive")
 		}
+		if c.contentHTML != "" {
+			return apierr.ErrUsage("--content-html and positional content are mutually exclusive")
+		}
 		if !isDateArg(args[0]) {
 			return apierr.ErrUsageHint(
 				"first argument must be a date (YYYY-MM-DD) when two positional arguments are given",
@@ -248,34 +254,43 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 			if content != "" {
 				return apierr.ErrUsage("--content and positional content are mutually exclusive")
 			}
+			if c.contentHTML != "" {
+				return apierr.ErrUsage("--content-html and positional content are mutually exclusive")
+			}
 			content = args[0]
 		}
 	}
 	ctx := cmd.Context()
-	if content == "" && !stdinIsTerminal() {
-		piped, err := readStdin()
-		if err != nil {
-			return err
-		}
-		if piped == "" {
-			return apierr.ErrUsage("no content provided (use --content to provide inline, or pipe to stdin)")
-		}
-		content = piped
-	}
 
 	if date == "" {
 		date = time.Now().Format(dateLayout)
 	}
 
-	if content == "" {
-		var err error
-		content, err = journalEntryFromEditor(ctx, date, sdk.Journal().GetContent, editor.Open)
-		if err != nil {
-			return err
+	if c.contentHTML != "" {
+		content = strings.TrimSpace(c.contentHTML)
+	} else {
+		if content == "" && !stdinIsTerminal() {
+			piped, err := readStdin()
+			if err != nil {
+				return err
+			}
+			if piped == "" {
+				return apierr.ErrUsage("no content provided (use --content to provide inline, or pipe to stdin)")
+			}
+			content = piped
+		}
+		if content == "" {
+			var err error
+			content, err = journalEntryFromEditor(ctx, date, sdk.Journal().GetContent, editor.Open)
+			if err != nil {
+				return err
+			}
+		}
+		content = strings.TrimSpace(content)
+		if content != "" {
+			content = htmlutil.FromMarkdown(content)
 		}
 	}
-
-	content = strings.TrimSpace(content)
 
 	if _, err := sdk.Journal().Update(ctx, date, content); err != nil {
 		return apierr.FromSDK(err)
@@ -300,12 +315,14 @@ type journalContentFetcher func(context.Context, string) (string, error)
 // journalEntryFromEditor opens $EDITOR on the day's entry. A read that fails is fatal:
 // an empty day answers 204 as an empty string, so anything else means we do not know
 // what the day holds -- and saving an empty editor over it would replace the entry.
+// journalEntryFromEditor prefills $EDITOR with the day's entry as Markdown — the same
+// form the edited result is saved in.
 func journalEntryFromEditor(ctx context.Context, date string, fetch journalContentFetcher, open func(string) (string, error)) (string, error) {
 	existing, err := fetch(ctx, date)
 	if err != nil {
 		return "", apierr.FromSDK(err)
 	}
-	edited, err := open(existing)
+	edited, err := open(htmlutil.ToMarkdown(existing).String())
 	if err != nil {
 		return "", apierr.ErrAPI(0, fmt.Sprintf("could not open editor: %v", err))
 	}

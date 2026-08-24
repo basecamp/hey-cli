@@ -50,6 +50,7 @@ hey bulk-reply preview
 hey bulk-reply send
 hey bulk-reply send --attach
 hey bulk-reply send --message
+hey bulk-reply send --message-html
 hey bulk-reply undo
 hey calendars
 hey clip
@@ -88,6 +89,7 @@ hey compose --attach
 hey compose --bcc
 hey compose --cc
 hey compose --message
+hey compose --message-html
 hey compose --subject
 hey compose --thread-id
 hey compose --to
@@ -112,6 +114,7 @@ hey contacts note
 hey contacts note delete
 hey contacts note set
 hey contacts note set --note
+hey contacts note set --note-html
 hey contacts note show
 hey contacts show
 hey contacts show-again
@@ -128,6 +131,7 @@ hey forward
 hey forward --bcc
 hey forward --cc
 hey forward --message
+hey forward --message-html
 hey forward --to
 hey habit
 hey habit complete
@@ -153,6 +157,7 @@ hey journal list --limit
 hey journal read
 hey journal write
 hey journal write --content
+hey journal write --content-html
 hey label
 hey label --all
 hey label --limit
@@ -187,6 +192,7 @@ hey recordings --starts-on
 hey reply
 hey reply --attach
 hey reply --message
+hey reply --message-html
 hey screener
 hey screener approve
 hey screener approve --box
@@ -230,11 +236,13 @@ hey skill install
 hey snippet
 hey snippet create
 hey snippet create --content
+hey snippet create --content-html
 hey snippet create --name
 hey snippet delete
 hey snippet list
 hey snippet update
 hey snippet update --content
+hey snippet update --content-html
 hey snippet update --name
 hey snippets
 hey spam

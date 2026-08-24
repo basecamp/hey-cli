@@ -11,12 +11,14 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/editor"
+	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
 type contactNoteSetCommand struct {
-	cmd  *cobra.Command
-	note string
+	cmd      *cobra.Command
+	note     string
+	noteHTML string
 }
 
 func newContactNoteSetCommand() *contactNoteSetCommand {
@@ -25,7 +27,7 @@ func newContactNoteSetCommand() *contactNoteSetCommand {
 		Use:   "set <id> [note]",
 		Short: "Write or edit a private contact note",
 		Annotations: map[string]string{
-			"agent_notes": "Accepts --note, positional content, stdin, or opens $EDITOR with the existing note. Use the delete subcommand to clear a note.",
+			"agent_notes": "Accepts --note, positional content, stdin, or opens $EDITOR with the existing note. The note is Markdown, or raw HTML via --note-html. Use the delete subcommand to clear a note.",
 		},
 		Example: `  hey contacts note set 12345 "Prefers email"
   hey contacts note set 12345 --note "Prefers email"
@@ -33,7 +35,9 @@ func newContactNoteSetCommand() *contactNoteSetCommand {
 		RunE: setCommand.run,
 		Args: cobra.MatchAll(usageMinOneArg(), cobra.MaximumNArgs(2)),
 	}
-	setCommand.cmd.Flags().StringVarP(&setCommand.note, "note", "n", "", "Private note content (or opens $EDITOR)")
+	setCommand.cmd.Flags().StringVarP(&setCommand.note, "note", "n", "", "Private note as Markdown (or opens $EDITOR)")
+	setCommand.cmd.Flags().StringVar(&setCommand.noteHTML, "note-html", "", "Private note as raw HTML instead of Markdown")
+	setCommand.cmd.MarkFlagsMutuallyExclusive("note", "note-html")
 	return setCommand
 }
 
@@ -46,28 +50,36 @@ func (c *contactNoteSetCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	content, inputProvided, err := contactNoteInput(cmd.Flags().Changed("note"), c.note, args)
-	if err != nil {
-		return err
+	if c.noteHTML != "" && len(args) == 2 {
+		return apierr.ErrUsage("--note-html and positional note are mutually exclusive")
 	}
-	if !inputProvided {
-		if !stdinIsTerminal() {
-			content, err = readStdin()
-			if err != nil {
-				return err
-			}
-		} else {
-			existing, getErr := contactNoteForEditor(cmd.Context(), contactID, sdk.Contacts().Note)
-			if getErr != nil {
-				return apierr.FromSDK(getErr)
-			}
-			content, err = editor.Open(existing)
-			if err != nil {
-				return apierr.ErrAPI(0, fmt.Sprintf("could not open editor: %v", err))
+	content := c.noteHTML
+	if content == "" {
+		markdownNote, inputProvided, inputErr := contactNoteInput(cmd.Flags().Changed("note"), c.note, args)
+		if inputErr != nil {
+			return inputErr
+		}
+		if !inputProvided {
+			if !stdinIsTerminal() {
+				markdownNote, inputErr = readStdin()
+				if inputErr != nil {
+					return inputErr
+				}
+			} else {
+				existing, getErr := contactNoteForEditor(cmd.Context(), contactID, sdk.Contacts().Note)
+				if getErr != nil {
+					return apierr.FromSDK(getErr)
+				}
+				markdownNote, inputErr = editor.Open(existing)
+				if inputErr != nil {
+					return apierr.ErrAPI(0, fmt.Sprintf("could not open editor: %v", inputErr))
+				}
 			}
 		}
+		content = htmlutil.FromMarkdown(strings.TrimSpace(markdownNote))
+	} else {
+		content = strings.TrimSpace(content)
 	}
-	content = strings.TrimSpace(content)
 	if content == "" {
 		return apierr.ErrUsage("note cannot be empty; use `hey contacts note delete <id>` to clear it")
 	}
@@ -102,6 +114,8 @@ func contactNoteInput(flagChanged bool, flagValue string, args []string) (string
 
 type contactNoteFetcher func(context.Context, int64) (*generated.ContactNote, error)
 
+// contactNoteForEditor prefills $EDITOR with the existing note as Markdown — the same
+// form the edited result is saved in.
 func contactNoteForEditor(ctx context.Context, contactID int64, fetch contactNoteFetcher) (string, error) {
 	note, err := fetch(ctx, contactID)
 	if err != nil {
@@ -109,6 +123,9 @@ func contactNoteForEditor(ctx context.Context, contactID int64, fetch contactNot
 	}
 	if note == nil {
 		return "", nil
+	}
+	if note.NoteHtml != "" {
+		return htmlutil.ToMarkdown(note.NoteHtml).String(), nil
 	}
 	return note.Note, nil
 }

@@ -11,11 +11,12 @@ import (
 )
 
 type forwardCommand struct {
-	cmd     *cobra.Command
-	to      string
-	cc      string
-	bcc     string
-	message string
+	cmd         *cobra.Command
+	to          string
+	cc          string
+	bcc         string
+	message     string
+	messageHTML string
 }
 
 func newForwardCommand() *forwardCommand {
@@ -35,7 +36,9 @@ func newForwardCommand() *forwardCommand {
 	forwardCommand.cmd.Flags().StringVar(&forwardCommand.to, "to", "", "Recipient email address(es)")
 	forwardCommand.cmd.Flags().StringVar(&forwardCommand.cc, "cc", "", "CC recipient email address(es)")
 	forwardCommand.cmd.Flags().StringVar(&forwardCommand.bcc, "bcc", "", "BCC recipient email address(es)")
-	forwardCommand.cmd.Flags().StringVarP(&forwardCommand.message, "message", "m", "", "Optional note above the forwarded message")
+	forwardCommand.cmd.Flags().StringVarP(&forwardCommand.message, "message", "m", "", "Optional Markdown note above the forwarded message")
+	forwardCommand.cmd.Flags().StringVar(&forwardCommand.messageHTML, "message-html", "", "The note as raw HTML instead of Markdown")
+	forwardCommand.cmd.MarkFlagsMutuallyExclusive("message", "message-html")
 
 	return forwardCommand
 }
@@ -79,7 +82,11 @@ func (c *forwardCommand) run(cmd *cobra.Command, args []string) error {
 		return apierr.ErrNotFound("forward draft for thread", args[0])
 	}
 
-	content := htmlutil.PrependText(draft.Content, c.message)
+	note := c.messageHTML
+	if note == "" {
+		note = htmlutil.FromMarkdown(c.message)
+	}
+	content := htmlutil.PrependHTML(draft.Content, note)
 	if err := forwardSDK.Messages().Create(ctx, draft.Subject, content, to, cc, bcc); err != nil {
 		return apierr.FromSDK(err)
 	}

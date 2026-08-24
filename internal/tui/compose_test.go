@@ -180,7 +180,7 @@ func TestComposeSendsMessage(t *testing.T) {
 		t.Errorf("sent %s %s, want POST /messages.json", rec.method, rec.path)
 	}
 	m := rec.body["message"].(map[string]any)
-	if m["subject"] != "Hello" || m["content"] != "Body text" {
+	if m["subject"] != "Hello" || m["content"] != "<p>Body text</p>" {
 		t.Errorf("message payload = %v", m)
 	}
 	addressed := rec.body["entry"].(map[string]any)["addressed"].(map[string]any)
@@ -242,7 +242,7 @@ func TestReplyFormPrefillsAndSends(t *testing.T) {
 	if rec.method != "POST" || rec.path != "/entries/99/replies.json" {
 		t.Errorf("sent %s %s, want POST /entries/99/replies.json", rec.method, rec.path)
 	}
-	if rec.body["message"].(map[string]any)["content"] != "Thanks!" {
+	if rec.body["message"].(map[string]any)["content"] != "<p>Thanks!</p>" {
 		t.Errorf("body = %v", rec.body)
 	}
 	addressed := rec.body["entry"].(map[string]any)["addressed"].(map[string]any)
@@ -388,7 +388,7 @@ func TestForwardFormLoadsLatestEntryAndSends(t *testing.T) {
 	if message["subject"] != "Fwd: Quarterly planning" {
 		t.Errorf("message subject = %v", message["subject"])
 	}
-	wantContent := `<div>For your review</div><br><div>Quoted message</div>`
+	wantContent := `<p>For your review</p><br><div>Quoted message</div>`
 	if message["content"] != wantContent {
 		t.Errorf("message content = %q, want %q", message["content"], wantContent)
 	}
@@ -481,5 +481,61 @@ func TestModelRoutesAllKeysToOpenForm(t *testing.T) {
 	m = updated.(model)
 	if m.mailView.CapturingInput() {
 		t.Error("esc should close the form through the model")
+	}
+}
+
+func TestComposePreviewTogglesWithoutClosingTheForm(t *testing.T) {
+	v, _ := composeTestServer(t)
+	v.Resize(80, 30)
+	v.HandleContentKey(keyPress("c"))
+	f := composeModal(v)
+	f.focus = f.bodyIndex()
+	f.focusCurrent()
+	typeText(v, "A **bold** plan")
+
+	v.HandleContentKey(tea.KeyPressMsg(tea.Key{Code: 'p', Mod: tea.ModCtrl}))
+	if !f.previewing {
+		t.Fatal("ctrl+p should open the preview")
+	}
+	view := v.View()
+	if !strings.Contains(view, "bold") || strings.Contains(view, "**bold**") {
+		t.Errorf("preview should render the Markdown, got %q", view)
+	}
+
+	// Typing must not reach the body while previewing, and esc goes back to
+	// editing instead of closing the form.
+	v.HandleContentKey(keyPress("x"))
+	if got := f.body.Value(); got != "A **bold** plan" {
+		t.Errorf("body changed while previewing: %q", got)
+	}
+	v.HandleContentKey(keyPress("esc"))
+	if f.previewing {
+		t.Error("esc should return to editing")
+	}
+	if composeModal(v) == nil {
+		t.Fatal("esc in the preview must not close the form")
+	}
+}
+
+func TestComposeBodyIsMarkdown(t *testing.T) {
+	f := newComposeForm(composeNew, styles{})
+	f.body.SetValue("**Bold** move\nsee the list:\n\n- budget\n- hiring")
+
+	_, _, _, _, body := f.values()
+	want := "<p><strong>Bold</strong> move<br>\nsee the list:</p>\n<ul>\n<li>budget</li>\n<li>hiring</li>\n</ul>"
+	if body != want {
+		t.Errorf("body = %q, want %q", body, want)
+	}
+}
+
+func TestForwardNoteIsMarkdown(t *testing.T) {
+	f := newComposeForm(composeForward, styles{})
+	f.forwardedContent = "<div>Quoted message</div>"
+	f.body.SetValue("For **your** review")
+
+	_, _, _, _, body := f.values()
+	want := "<p>For <strong>your</strong> review</p><br><div>Quoted message</div>"
+	if body != want {
+		t.Errorf("body = %q, want %q", body, want)
 	}
 }

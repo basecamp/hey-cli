@@ -143,6 +143,41 @@ func TestJournalWriteShortFlag(t *testing.T) {
 	}
 }
 
+func TestJournalWriteMarkdownContent(t *testing.T) {
+	var sent struct {
+		CalendarJournalEntry struct {
+			Content string `json:"content"`
+		} `json:"calendar_journal_entry"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "PATCH" {
+			_ = json.NewDecoder(r.Body).Decode(&sent)
+			w.WriteHeader(204)
+			return
+		}
+		w.WriteHeader(200)
+	}))
+	defer server.Close()
+
+	_, err := runJournalWrite(t, server, "2026-03-15", "**Bold** start to the week")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	want := "<p><strong>Bold</strong> start to the week</p>"
+	if sent.CalendarJournalEntry.Content != want {
+		t.Errorf("content = %q, want %q", sent.CalendarJournalEntry.Content, want)
+	}
+
+	_, err = runJournalWrite(t, server, "2026-03-15", "--content-html", "<div>Raw <strong>HTML</strong> entry</div>")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if want := "<div>Raw <strong>HTML</strong> entry</div>"; sent.CalendarJournalEntry.Content != want {
+		t.Errorf("content = %q, want %q", sent.CalendarJournalEntry.Content, want)
+	}
+}
+
 func TestJournalWriteConflictFlagAndPositional(t *testing.T) {
 	server := journalServer(t)
 	defer server.Close()
@@ -204,11 +239,11 @@ func TestJournalEntryFromEditorRefusesAFailedPrefillRead(t *testing.T) {
 	}
 }
 
-func TestJournalEntryFromEditorPrefillsTheDaysEntry(t *testing.T) {
+func TestJournalEntryFromEditorPrefillsTheDaysEntryAsMarkdown(t *testing.T) {
 	prefilled := ""
 	content, err := journalEntryFromEditor(t.Context(), "2026-01-31",
 		func(context.Context, string) (string, error) {
-			return "<div>Ran six miles</div>", nil
+			return "<div>Ran <strong>six</strong> miles</div>", nil
 		},
 		func(existing string) (string, error) {
 			prefilled = existing
@@ -217,10 +252,10 @@ func TestJournalEntryFromEditorPrefillsTheDaysEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if prefilled != "<div>Ran six miles</div>" {
+	if prefilled != "Ran **six** miles" {
 		t.Errorf("editor was pre-filled with %q", prefilled)
 	}
-	if content != "<div>Ran six miles</div> and swam" {
+	if content != "Ran **six** miles and swam" {
 		t.Errorf("content = %q", content)
 	}
 }

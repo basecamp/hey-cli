@@ -268,7 +268,7 @@ func TestTUIBulkReplyReviewsThenSendsAndOffersUndo(t *testing.T) {
 	if len(request.EntryIDs) != 2 || request.EntryIDs[0] != 501 || request.EntryIDs[1] != 502 {
 		t.Errorf("entry IDs = %v", request.EntryIDs)
 	}
-	want := "<div>Thanks everyone</div><br><div>Signing off with a tag!</div>"
+	want := "<p>Thanks everyone</p><br><div>Signing off with a tag!</div>"
 	if request.Message.Content != want {
 		t.Errorf("content = %q, want %q", request.Message.Content, want)
 	}

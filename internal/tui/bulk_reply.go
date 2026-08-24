@@ -309,7 +309,7 @@ func (v *mailView) sendBulkReply(form *bulkReplyForm) tea.Cmd {
 	for i, entry := range form.draft.Entries {
 		entryIDs[i] = entry.Id
 	}
-	content := htmlutil.PrependText(form.draft.Content, form.body.Value())
+	content := htmlutil.PrependHTML(form.draft.Content, htmlutil.FromMarkdown(strings.TrimSpace(form.body.Value())))
 	skipped := len(form.postingIDs) - len(entryIDs)
 	return func() tea.Msg {
 		delivery, err := v.vc.sdk.BulkReplies().Send(v.vc.ctx, entryIDs, content)

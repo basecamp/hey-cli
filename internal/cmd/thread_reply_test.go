@@ -286,6 +286,34 @@ func TestRecipientsForReplyTo(t *testing.T) {
 	}
 }
 
+func TestReplySendsTheMessageAsMarkdown(t *testing.T) {
+	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
+
+	err := runCLI(t, server, "--account", "8", "reply", "7",
+		"-m", "Sounds **great** — Tuesday it is")
+	if err != nil {
+		t.Fatalf("reply failed: %v", err)
+	}
+
+	want := "<p>Sounds <strong>great</strong> — Tuesday it is</p>"
+	if sent.Content != want {
+		t.Errorf("content = %q, want %q", sent.Content, want)
+	}
+}
+
+func TestReplySendsRawHTMLVerbatim(t *testing.T) {
+	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
+
+	err := runCLI(t, server, "--account", "8", "reply", "7",
+		"--message-html", "<p>Confirmed — <strong>Tuesday</strong>.</p>")
+	if err != nil {
+		t.Fatalf("reply failed: %v", err)
+	}
+	if want := "<p>Confirmed — <strong>Tuesday</strong>.</p>"; sent.Content != want {
+		t.Errorf("content = %q, want %q", sent.Content, want)
+	}
+}
+
 // runCLI drives a command the way the binary does — through the root command, so the
 // output writer and auth are set up — against a test server.
 func runCLI(t *testing.T, server *httptest.Server, args ...string) error {

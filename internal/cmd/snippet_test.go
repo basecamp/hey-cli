@@ -102,7 +102,7 @@ func TestSnippetCreateSendsNameAndContent(t *testing.T) {
 		if got := r.PostForm.Get("snippet[name]"); got != "Scheduling reply" {
 			t.Errorf("name = %q", got)
 		}
-		if got := r.PostForm.Get("snippet[content]"); got != "Does Tuesday work?" {
+		if got := r.PostForm.Get("snippet[content]"); got != "<p>Does Tuesday work?</p>" {
 			t.Errorf("content = %q", got)
 		}
 	}), "snippet", "create", "--name", "Scheduling reply", "--content", "Does Tuesday work?")
@@ -111,6 +111,39 @@ func TestSnippetCreateSendsNameAndContent(t *testing.T) {
 	}
 	if response.Summary != `Snippet "Scheduling reply" created` || response.Data.(map[string]any)["name"] != "Scheduling reply" {
 		t.Errorf("response = %#v", response)
+	}
+}
+
+func TestSnippetCreateConvertsMarkdownContent(t *testing.T) {
+	_, err := runJSONCommand(t, snippetMutationHandler(t, http.MethodPost, "/snippets", func(r *http.Request) {
+		if got := r.PostForm.Get("snippet[content]"); got != "<p>Does <strong>Tuesday</strong> work?</p>" {
+			t.Errorf("content = %q", got)
+		}
+	}), "snippet", "create", "--name", "Scheduling reply", "--content", "Does **Tuesday** work?")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSnippetCreateSendsRawHTMLVerbatim(t *testing.T) {
+	_, err := runJSONCommand(t, snippetMutationHandler(t, http.MethodPost, "/snippets", func(r *http.Request) {
+		if got := r.PostForm.Get("snippet[content]"); got != "<div>Office hours are <strong>Monday through Thursday</strong>.</div>" {
+			t.Errorf("content = %q", got)
+		}
+	}), "snippet", "create", "--name", "Office hours", "--content-html", "<div>Office hours are <strong>Monday through Thursday</strong>.</div>")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSnippetUpdateConvertsMarkdownContent(t *testing.T) {
+	_, err := runJSONCommand(t, snippetMutationHandler(t, http.MethodPatch, "/snippets/44", func(r *http.Request) {
+		if got := r.PostForm.Get("snippet[content]"); got != "<p><em>Wednesday</em> works for me.</p>" {
+			t.Errorf("content = %q", got)
+		}
+	}), "snippet", "update", "44", "--content", "*Wednesday* works for me.")
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -152,7 +185,8 @@ func TestSnippetCommandsValidateInput(t *testing.T) {
 	}{
 		{name: "create name", args: []string{"snippet", "create", "--content", "Hello"}, want: "--name is required"},
 		{name: "create content", args: []string{"snippet", "create", "--name", "Greeting"}, want: "--content is required"},
-		{name: "update fields", args: []string{"snippet", "update", "44"}, want: "provide --name or --content"},
+		{name: "update fields", args: []string{"snippet", "update", "44"}, want: "provide --name, --content or --content-html"},
+		{name: "exclusive content", args: []string{"snippet", "create", "--name", "Greeting", "--content", "Hello", "--content-html", "<p>Hello</p>"}, want: "none of the others can be"},
 		{name: "empty update", args: []string{"snippet", "update", "44", "--content", "  "}, want: "--content cannot be empty"},
 		{name: "invalid id", args: []string{"snippet", "delete", "zero"}, want: "invalid snippet ID: zero"},
 	}
