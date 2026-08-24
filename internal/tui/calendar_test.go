@@ -37,6 +37,10 @@ func atLocal(ts string) time.Time {
 	return parsed.UTC()
 }
 
+func calendarFixtureNow() time.Time {
+	return time.Date(2040, 1, 2, 12, 0, 0, 0, time.Local)
+}
+
 // The personal calendar carries no name and no color, which is how HEY serves it — the
 // web app labels that row from the identity instead.
 func testCalendars() []Calendar {
@@ -690,7 +694,7 @@ func TestTheYearManagesHabitsWithoutKeepingThem(t *testing.T) {
 // wear. Naming it only on the first of the month meant that the moment that one cell scrolled
 // past, nothing on screen said what month the reader was looking at.
 func TestTheYearNamesItsMonthsOnEveryRow(t *testing.T) {
-	out, _, _ := renderYearView(nil, time.Date(2026, 8, 22, 0, 0, 0, 0, time.Local),
+	out, _, _ := renderYearView(nil, time.Date(2026, 8, 22, 0, 0, 0, 0, time.Local), calendarFixtureNow(),
 		time.Monday, 100, 30, "p/n year", selection{}, false)
 
 	accent := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
@@ -717,7 +721,7 @@ func TestTheYearNamesItsMonthsOnEveryRow(t *testing.T) {
 	if month != "AUG" || day != "MON 17" {
 		t.Errorf("label = %q %q", month, day)
 	}
-	narrow, _, _ := renderYearView(nil, time.Date(2026, 8, 22, 0, 0, 0, 0, time.Local),
+	narrow, _, _ := renderYearView(nil, time.Date(2026, 8, 22, 0, 0, 0, 0, time.Local), calendarFixtureNow(),
 		time.Monday, 40, 30, "p/n year", selection{}, false)
 	if strings.Contains(stripANSI(narrow), "AUG MON 17") {
 		t.Error("a narrow column kept the month and truncated the date")
@@ -1493,7 +1497,7 @@ func TestYearIsDrawnLikeTheWeek(t *testing.T) {
 			StartsAt: at("2026-02-05T00:00:00Z"), EndsAt: at("2026-02-08T23:59:59Z"), Type: "Calendar::Event"},
 	}
 
-	out, _, _ := renderYearView(events, time.Date(2026, 8, 22, 0, 0, 0, 0, time.UTC),
+	out, _, _ := renderYearView(events, time.Date(2026, 8, 22, 0, 0, 0, 0, time.UTC), calendarFixtureNow(),
 		time.Monday, 100, 30, "p/n year · t today", selection{}, false)
 	lines := strings.Split(stripANSI(out), "\n")
 
@@ -1623,7 +1627,7 @@ func TestDayViewLabelsItsSections(t *testing.T) {
 	habits := []Recording{{ID: 4, Title: "Read 20 pages"}}
 
 	day := time.Date(2026, 8, 24, 9, 0, 0, 0, time.Local)
-	view := stripANSI(renderDayView(events, habits, nil, day, "p/n day", 100, 24, selection{}, nil))
+	view := stripANSI(renderDayView(events, habits, nil, day, calendarFixtureNow(), "p/n day", 100, 24, selection{}, nil))
 	for _, label := range []string{"Habits", "Monday, August 24", "p/n day", "All day"} {
 		if !strings.Contains(view, label) {
 			t.Errorf("day view did not label its %q section: %q", label, view)
@@ -1641,7 +1645,7 @@ func TestAllDayEventsAreBlocksInTheirCalendarsColor(t *testing.T) {
 	}
 	day := time.Date(2026, 8, 21, 9, 0, 0, 0, time.Local)
 
-	rendered := renderDayView(events, nil, nil, day, "", 100, 14, selection{}, nil)
+	rendered := renderDayView(events, nil, nil, day, calendarFixtureNow(), "", 100, 14, selection{}, nil)
 	lines := strings.Split(rendered, "\n")
 
 	gold := lines[rowContaining(t, lines, "Summer friday")]
@@ -1676,7 +1680,7 @@ func TestDayViewRulesFallFromEveryHourWithoutCuttingIntoAnEvent(t *testing.T) {
 	// an hour every four columns and the 11:00 event's block on the four from 44. The
 	// day's header and the hour axis take the first two rows of the 40 it is given,
 	// leaving 38 for the grid.
-	lines := strings.Split(stripANSI(renderDayView(events, nil, nil, day, "", 98, 40, selection{}, nil)), "\n")
+	lines := strings.Split(stripANSI(renderDayView(events, nil, nil, day, calendarFixtureNow(), "", 98, 40, selection{}, nil)), "\n")
 	grid := lines[2:]
 	if len(grid) != 38 {
 		t.Fatalf("grid is %d rows of the 38 left to it: %q", len(grid), grid)
@@ -1705,7 +1709,7 @@ func TestDayViewRulesFallFromEveryHourWithoutCuttingIntoAnEvent(t *testing.T) {
 
 func TestEmptyDayIsItsHoursRatherThanANotice(t *testing.T) {
 	day := time.Date(2026, 8, 22, 9, 0, 0, 0, time.Local)
-	view := stripANSI(renderDayView(nil, nil, nil, day, "", 96, 20, selection{}, nil))
+	view := stripANSI(renderDayView(nil, nil, nil, day, calendarFixtureNow(), "", 96, 20, selection{}, nil))
 
 	if strings.Contains(view, "no events") {
 		t.Errorf("an empty day still announces itself: %q", view)
@@ -1759,7 +1763,7 @@ func TestDayViewGivesASingleEventTheWholeGrid(t *testing.T) {
 
 	// An hour every four columns, so 07:00 starts on column 28 and the block covers the
 	// rules at 28 and 32 for every one of the grid's 38 rows.
-	grid := strings.Split(stripANSI(renderDayView(events, nil, nil, day, "", 98, 40, selection{}, nil)), "\n")[2:]
+	grid := strings.Split(stripANSI(renderDayView(events, nil, nil, day, calendarFixtureNow(), "", 98, 40, selection{}, nil)), "\n")[2:]
 	if len(grid) != 38 {
 		t.Fatalf("grid is %d rows, want 38: %q", len(grid), grid)
 	}
@@ -1868,12 +1872,12 @@ func TestEventInkFollowsALiveThemeChange(t *testing.T) {
 // The day marks where the clock is, as the web app does: the time over the axis and a dashed
 // line down the column, drawn over whatever it crosses.
 func TestTheDayMarksWhereTheClockIs(t *testing.T) {
-	now := time.Now()
+	now := time.Date(2026, 8, 23, 15, 55, 0, 0, time.Local)
 	event := Recording{ID: 1, Title: "Design review", CalendarColor: "green", Type: "Calendar::Event",
 		StartsAt: now.Truncate(time.Hour).Add(-time.Hour), EndsAt: now.Truncate(time.Hour).Add(2 * time.Hour)}
 
 	lines := strings.Split(stripANSI(renderDayView([]Recording{event}, nil, nil,
-		now, "p/n day", 100, 16, selection{}, nil)), "\n")
+		now, now, "p/n day", 100, 16, selection{}, nil)), "\n")
 	if !strings.Contains(lines[1], now.Format("15")) || !strings.Contains(lines[1], now.Format("04")) {
 		t.Errorf("the clock is not named over the axis: %q", lines[1])
 	}
@@ -1931,7 +1935,7 @@ func TestTheDayMarksWhereTheClockIs(t *testing.T) {
 	}
 
 	// A day the reader has stepped away from has no now on it, and gives back the row.
-	yesterday := stripANSI(renderDayView(nil, nil, nil, now.AddDate(0, 0, -1), "p/n day", 100, 16, selection{}, nil))
+	yesterday := stripANSI(renderDayView(nil, nil, nil, now.AddDate(0, 0, -1), now, "p/n day", 100, 16, selection{}, nil))
 	if strings.ContainsRune(yesterday, nowRule) {
 		t.Error("yesterday is marked with a now line")
 	}
@@ -2052,14 +2056,14 @@ func TestTheDayCountsDownToWhatIsComing(t *testing.T) {
 
 	day := time.Date(2026, 8, 23, 9, 0, 0, 0, time.Local)
 	lines := strings.Split(stripANSI(renderDayView(nil, nil, []Recording{countdown},
-		day, "p/n day", 100, 20, selection{}, nil)), "\n")
+		day, calendarFixtureNow(), "p/n day", 100, 20, selection{}, nil)), "\n")
 	if got := strings.TrimSpace(lines[0]); got != "2 days until Kevin's leaving do" {
 		t.Errorf("the day says %q", got)
 	}
 
 	// One day out reads as a day, not as days.
 	lines = strings.Split(stripANSI(renderDayView(nil, nil, []Recording{countdown},
-		day.AddDate(0, 0, 1), "p/n day", 100, 20, selection{}, nil)), "\n")
+		day.AddDate(0, 0, 1), calendarFixtureNow(), "p/n day", 100, 20, selection{}, nil)), "\n")
 	if got := strings.TrimSpace(lines[0]); got != "1 day until Kevin's leaving do" {
 		t.Errorf("the day before says %q", got)
 	}
@@ -2067,7 +2071,7 @@ func TestTheDayCountsDownToWhatIsComing(t *testing.T) {
 	// And on the day itself there is nothing left to count: HEY stops serving the countdown,
 	// and a day that was handed one anyway does not say "0 days".
 	view := stripANSI(renderDayView(nil, nil, []Recording{countdown},
-		time.Date(2026, 8, 25, 9, 0, 0, 0, time.Local), "p/n day", 100, 20, selection{}, nil))
+		time.Date(2026, 8, 25, 9, 0, 0, 0, time.Local), calendarFixtureNow(), "p/n day", 100, 20, selection{}, nil))
 	if strings.Contains(view, "until") {
 		t.Errorf("the event's own day still counts down: %q", strings.Split(view, "\n")[0])
 	}
@@ -2096,7 +2100,7 @@ func TestOverlappingEventsAreDrawnApart(t *testing.T) {
 			StartsAt: atLocal("2026-08-20T09:00:00"), EndsAt: atLocal("2026-08-20T11:00:00")},
 		{ID: 2, Title: "Design review", Type: "Calendar::Event",
 			StartsAt: atLocal("2026-08-20T10:00:00"), EndsAt: atLocal("2026-08-20T12:00:00")},
-	}, nil, nil, time.Date(2026, 8, 20, 9, 0, 0, 0, time.Local), "p/n day", 100, 20, selection{}, nil))
+	}, nil, nil, time.Date(2026, 8, 20, 9, 0, 0, 0, time.Local), calendarFixtureNow(), "p/n day", 100, 20, selection{}, nil))
 
 	// The row between the lanes belongs to the grid, so it carries an hour rule where an
 	// event's own rows carry the event.
@@ -2120,7 +2124,7 @@ func TestBackToBackEventsAreDividedFromEachOther(t *testing.T) {
 			StartsAt: atLocal("2026-08-20T15:00:00"), EndsAt: atLocal("2026-08-20T17:00:00")},
 		{ID: 2, Title: "Product Hangout", Type: "Calendar::Event",
 			StartsAt: atLocal("2026-08-20T17:00:00"), EndsAt: atLocal("2026-08-20T19:00:00")},
-	}, nil, nil, time.Date(2026, 8, 20, 9, 0, 0, 0, time.Local), "p/n day", 100, 20, selection{}, nil))
+	}, nil, nil, time.Date(2026, 8, 20, 9, 0, 0, 0, time.Local), calendarFixtureNow(), "p/n day", 100, 20, selection{}, nil))
 
 	if !strings.ContainsRune(out, eventEdge) {
 		t.Errorf("nothing separates the two events:\n%s", out)

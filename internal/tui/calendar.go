@@ -1604,14 +1604,14 @@ func (v *calendarView) rebuildView() {
 	cursorTop, cursorBottom := -1, -1
 	switch v.viewMode {
 	case viewDay:
-		content = renderDayView(v.events, v.habits, v.countdowns, anchor, v.stepHint(), w, v.contentVP.Height(), v.selection(), v.trackBadge())
+		content = renderDayView(v.events, v.habits, v.countdowns, anchor, v.now(), v.stepHint(), w, v.contentVP.Height(), v.selection(), v.trackBadge())
 	case viewWeek:
 		content = renderWeekView(v.events, v.habits, v.habitCompletions, anchor, v.firstWeekDay, w, v.contentVP.Height(), v.stepHint(), dayLabels, v.selection())
 	case viewYear:
 		// The year's events are HEY's spanned_events — the all-day and multi-day ones —
 		// because that is all a year read carries. eventsByDate spreads a multi-day event
 		// over the days it covers, so the grid fills the same way it always did.
-		content, cursorTop, cursorBottom = renderYearView(v.year.SpannedEvents, anchor, v.firstWeekDay, w, h, v.stepHint(), v.selection(), v.inYearCell)
+		content, cursorTop, cursorBottom = renderYearView(v.year.SpannedEvents, anchor, v.now(), v.firstWeekDay, w, h, v.stepHint(), v.selection(), v.inYearCell)
 	}
 
 	v.contentVP.SetContent(content)

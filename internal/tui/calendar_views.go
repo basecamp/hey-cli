@@ -581,7 +581,7 @@ func dayCountdownLines(countdowns []Recording, anchor time.Time) []string {
 	return lines
 }
 
-func renderDayView(events, habits, countdowns []Recording, anchor time.Time, hint string, width, height int, sel selection, track *runningTrack) string {
+func renderDayView(events, habits, countdowns []Recording, anchor, now time.Time, hint string, width, height int, sel selection, track *runningTrack) string {
 	var b strings.Builder
 
 	// The day borrows the mail list's vocabulary: chrome for the structure a reader
@@ -621,7 +621,6 @@ func renderDayView(events, habits, countdowns []Recording, anchor time.Time, hin
 
 	// The clock, over the hour it is at, as the web app puts it over its own axis. It is only
 	// drawn on a day that is today: a day the reader has stepped away from has no now on it.
-	now := time.Now()
 	nowCol := nowColumn(anchor, now, daySpan)
 	if nowCol >= 0 {
 		b.WriteString(nowRow(now, nowCol, gridWidth, track))
@@ -1351,7 +1350,7 @@ func weekDayColumnLabel(d time.Time, isFirstCol bool) string {
 // week row is as tall as its busiest day, so a week's number says nothing about which line it is
 // on — and scrolling by the number is what let the cursor walk off the bottom of the screen with
 // the last few weeks of the year still below it.
-func renderYearView(events []Recording, anchor time.Time, firstWeekDay time.Weekday, width, _ int, hint string, sel selection, inCell bool) (view string, cursorTop, cursorBottom int) {
+func renderYearView(events []Recording, anchor, now time.Time, firstWeekDay time.Weekday, width, _ int, hint string, sel selection, inCell bool) (view string, cursorTop, cursorBottom int) {
 	var b strings.Builder
 	muted := styleMuted
 	chrome := lipgloss.NewStyle().Foreground(colorChrome)
@@ -1393,7 +1392,7 @@ func renderYearView(events []Recording, anchor time.Time, firstWeekDay time.Week
 
 	weekRule := chrome.Render(strings.Repeat("─", colWidth*7+6))
 
-	today := time.Now()
+	today := now
 	cells := make([]string, 7)
 	cursorTop, cursorBottom = -1, -1
 	for d := gridStart; d.Before(gridEnd); {
