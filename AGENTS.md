@@ -446,11 +446,15 @@ cursor rather than declined for pointing elsewhere.
 because `hey box view --json` publishes those fields verbatim; `mail.Postings` describes them as
 the rows a reader acts on, and everything the TUI never reads — `bundled`, `entry_kind`,
 `kind`, `updated_at` — is left in the SDK type where the CLI can still reach it. `TopicID`
-is resolved once, out of `app_url`: HEY's `_posting.jbuilder` serves neither `topic` nor
-`topic_id`, so the URL is the only place a thread is named, and a bundle's URL names a
-contact instead and answers zero. `mail.TopicIDIn` is that parse, and it is exported
-because `internal/cmd` needs the same answer — `resolvePostingTopicID` in `sdk.go` is a
-call to it, not a second copy.
+is resolved once, out of the posting's URLs: HEY's `_posting.jbuilder` serves neither
+`topic` nor `topic_id`, so a URL is the only place a thread is named. `app_url` names it
+for a plain posting; a bundle's `app_url` names a contact, so `mail.TopicIDOf` falls back
+to `app_bundle_url`, which haystack's `bundle_posting` route points at a topic exactly
+when the bundle holds one unseen thread — the thread the row opens in the web app. A
+bundle with several unseen threads (or none) names no topic and answers zero.
+`mail.TopicIDOf` and the `mail.TopicIDIn` parse under it are exported because
+`internal/cmd` needs the same answer — `resolvePostingTopicID` in `sdk.go` is a call to
+them, not a second copy.
 
 **`mail.Entry` is one message in a thread**, described by `mail.NewEntry` against the
 message HEY served for it, because a topic's entry list and a message read on its own

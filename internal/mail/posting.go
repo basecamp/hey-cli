@@ -70,7 +70,7 @@ func Postings(postings []generated.Posting) []Posting {
 func NewPosting(posting generated.Posting) Posting {
 	return Posting{
 		ID:                    posting.Id,
-		TopicID:               TopicIDIn(posting.AppUrl),
+		TopicID:               TopicIDOf(posting),
 		CreatedAt:             posting.CreatedAt,
 		Name:                  terminal.SanitizeLine(posting.Name),
 		Summary:               terminal.SanitizeLine(posting.Summary),
@@ -127,10 +127,23 @@ func collectionsOf(collections []generated.Collection) []Collection {
 	return described
 }
 
-// TopicIDIn reads the thread out of a posting's app_url, which is the only place HEY's
+// TopicIDOf resolves the thread a posting opens: its own app_url, or — for a bundle,
+// whose app_url is its sender's contact page — its app_bundle_url. HEY points that at a
+// topic exactly when the bundle holds one unseen thread (haystack's `bundle_posting`
+// route), which is the thread the bundle row opens in the web app. A bundle with several
+// unseen threads opens a bundle view of its own, and one with none opens the contact, so
+// neither names a topic and both answer zero.
+func TopicIDOf(posting generated.Posting) int64 {
+	if id := TopicIDIn(posting.AppUrl); id != 0 {
+		return id
+	}
+	return TopicIDIn(posting.AppBundleUrl)
+}
+
+// TopicIDIn reads the thread out of a posting's URL, which is the only place HEY's
 // posting JSON says which topic a posting is: `_posting.jbuilder` serves no topic and no
-// topic_id, and the web app follows the URL. A posting that addresses something else has
-// no topic — a bundle's app_url is its sender's contact page — and answers zero.
+// topic_id, and the web app follows the URL. A URL that addresses something else — a
+// contact page, a bundle view — has no topic and answers zero.
 func TopicIDIn(appURL string) int64 {
 	marker := strings.LastIndex(appURL, "/topics/")
 	if marker < 0 {

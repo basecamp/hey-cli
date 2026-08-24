@@ -307,6 +307,8 @@ Box names: `imbox`, `feedbox`, `trailbox`, `asidebox`, `laterbox`, `bubblebox`
 
 **Response format:** `hey box view --json` returns the box itself — `id`, `kind`, `name`, `app_url`, `next_history_url`, `next_page` — with a `postings` array of the email threads in it. Each posting has: `id` (box item ID), `topic_id` (thread ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`, `visible_entry_count`. Use `id` for `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring`, and `topic_id` for `hey threads`, `hey reply`, `hey forward`, `hey share` and `hey attachments`. A box item `id` passed to `hey threads` answers `not_found`, and so does a `topic_id` passed to `hey move`.
 
+A posting that bundles a contact's mail into one row can **omit `topic_id`**: a bundle names its sender rather than a thread, and its `name` joins the bundled subjects with `•`. A bundle that does carry a `topic_id` opens as that thread — its one unseen thread — and `hey threads` reads it as usual. For a bundle without one, never substitute the box item `id` (`hey threads <id>` answers `not_found`); there is no command that lists the threads inside a bundle, so run `hey contacts unbundle <contact_id>` — the contact is in the posting's `contacts` — to list that sender's mail as separate rows, or direct the user to open the bundle in HEY.
+
 `next_page` is the cursor `--page` takes, and it is the cursor inside `next_history_url` — `--page` accepts either. `--all` reads to the end instead.
 
 `--ids-only` and `--count` work here too, and answer for the postings: one box item ID per line, or how many threads were read.
@@ -395,7 +397,7 @@ on an entry; use `hey reply`, which works the addressing out itself.
 
 **ID note:** Every email thread has two IDs: an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring` expect `id`. `hey threads`, `hey share`, `hey unshare`, `hey attachments`, `hey reply`, `hey forward`, `hey collection add`, and `hey collection remove` expect `topic_id`. Passing the wrong one answers `not_found`, not a redirect.
 
-`hey box view --json`, `hey label view --json`, `hey collection view --json` and `hey search --json` all carry both.
+`hey box view --json`, `hey label view --json`, `hey collection view --json` and `hey search --json` all carry both — except a bundle posting, which can omit `topic_id` (see the Boxes section).
 
 ### Email - Attachments
 

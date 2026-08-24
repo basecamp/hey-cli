@@ -90,6 +90,54 @@ func TestNewPostingReadsTheThreadOutOfTheAppURL(t *testing.T) {
 	}
 }
 
+// A bundle's app_url is its sender's contact page, but HEY points app_bundle_url at a
+// topic when the bundle holds one unseen thread — the thread the row opens in the web
+// app. That is the only URL such a posting names its thread in.
+func TestTopicIDOfFallsBackToTheBundleURL(t *testing.T) {
+	tests := map[string]struct {
+		posting generated.Posting
+		want    int64
+	}{
+		"app_url wins when both name a topic": {
+			posting: generated.Posting{
+				AppUrl:       "https://app.hey.com/topics/501",
+				AppBundleUrl: "https://app.hey.com/topics/700",
+			},
+			want: 501,
+		},
+		"a bundle around one unseen thread names it in app_bundle_url": {
+			posting: generated.Posting{
+				AppUrl:       "https://app.hey.com/contacts/88",
+				AppBundleUrl: "https://app.hey.com/topics/700#entry_1_9",
+			},
+			want: 700,
+		},
+		"a bundle of several unseen threads names no topic": {
+			posting: generated.Posting{
+				AppUrl:       "https://app.hey.com/contacts/88",
+				AppBundleUrl: "https://app.hey.com/postings/bundles/12/unseen",
+			},
+			want: 0,
+		},
+		"a fully seen bundle names its contact twice": {
+			posting: generated.Posting{
+				AppUrl:       "https://app.hey.com/contacts/88",
+				AppBundleUrl: "https://app.hey.com/contacts/88",
+			},
+			want: 0,
+		},
+	}
+
+	for name, test := range tests {
+		if got := TopicIDOf(test.posting); got != test.want {
+			t.Errorf("%s: topic ID = %d, want %d", name, got, test.want)
+		}
+		if described := NewPosting(test.posting); described.TopicID != test.want {
+			t.Errorf("%s: NewPosting topic ID = %d, want %d", name, described.TopicID, test.want)
+		}
+	}
+}
+
 func TestPostingsDescribesAPage(t *testing.T) {
 	described := Postings([]generated.Posting{{Id: 100}, {Id: 101, AppUrl: "https://app.hey.com/topics/9"}})
 

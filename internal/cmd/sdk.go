@@ -151,10 +151,10 @@ func formatDate(ts time.Time) string {
 // --- Posting topic ID helper ---
 
 // resolvePostingTopicID extracts the topic ID from an SDK Posting. The SDK Posting has
-// no TopicID field, so the thread is read out of app_url — the one parse of it lives in
-// internal/mail, which is where a posting is described.
+// no TopicID field, so the thread is read out of its URLs — the one parse of them lives
+// in internal/mail, which is where a posting is described.
 func resolvePostingTopicID(p generated.Posting) int64 {
-	return mail.TopicIDIn(p.AppUrl)
+	return mail.TopicIDOf(p)
 }
 
 // --- Calendar helpers ---
