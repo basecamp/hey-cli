@@ -146,6 +146,7 @@ hey habit edit --name
 hey habit uncomplete
 hey habit uncomplete --date
 hey ignore
+hey ignore --kind
 hey journal
 hey journal list
 hey journal list --all
@@ -178,6 +179,7 @@ hey login --no-browser
 hey login --token
 hey logout
 hey move
+hey move --kind
 hey move --to
 hey recordings
 hey recordings --all
@@ -275,6 +277,7 @@ hey todo list --all
 hey todo list --limit
 hey todo uncomplete
 hey trash
+hey trash --kind
 hey tui
 hey tui --instance
 hey tui --remote

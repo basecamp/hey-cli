@@ -9,7 +9,8 @@ import (
 )
 
 type trashCommand struct {
-	cmd *cobra.Command
+	cmd  *cobra.Command
+	kind string
 }
 
 func newTrashCommand() *trashCommand {
@@ -18,14 +19,15 @@ func newTrashCommand() *trashCommand {
 		Use:   "trash <id>...",
 		Short: "Move email threads to Trash",
 		Long:  "Move one or more email threads to Trash. For a shared thread, HEY removes your access instead of deleting it for everyone.",
-		Example: `  hey trash 12345
-  hey trash 12345 67890`,
+		Example: `  hey trash 12345 --kind topic
+  hey trash 12345 67890 --kind topic`,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts one or more box item IDs from hey box view output. Shared threads lose your access rather than being deleted for everyone.",
+			"agent_notes": "Accepts one or more box item IDs (id). In hey box view <box> --json or hey label view <label> --json, select records with kind=topic. hey search --json returns email threads; pass each result's id. Always pass --kind topic. Shared threads lose your access rather than being deleted for everyone.",
 		},
 		RunE: trashCommand.run,
-		Args: usageMinOneArg(),
+		Args: emailPostingArgs(&trashCommand.kind, usageMinOneArg()),
 	}
+	trashCommand.cmd.Flags().StringVar(&trashCommand.kind, "kind", "", "Email thread kind; must be topic (required)")
 
 	return trashCommand
 }
