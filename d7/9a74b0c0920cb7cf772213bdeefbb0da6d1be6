@@ -1,0 +1,35 @@
+tests/e2e/update_nix_flake.bats
+  s_93520af149d0cb::t_2b93357c3c5298 64-70
+  s_93520af149d0cb::t_b442bb423bafaa 151-153,157-158,163-167,170,172-175,177-178,180-184,195,204-205,210-211,213-223,233-246,249,252-255,258-268,273-295,300-309,333-334
+  s_93520af149d0cb::t_b339eae84edc0c 431-437,486,489-495
+  s_93520af149d0cb::t_7c99065202ce12 159-162,212,224-232,247-248,250-251,256-257,269-272,296-299,310-332
+scripts/update-nix-flake.sh
+  s_93520af149d0cb::t_63139964148fd8 116-129
+  s_93520af149d0cb::t_5c96334c73c564 49,73
+  s_93520af149d0cb::t_781883a70a9a71 21,51-62,67-71,158-161
+  s_0e4885cc7255e8::t_947cc160037424 130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "d79a74b0c0920cb7cf772213bdeefbb0da6d1be6",
+  "prompts": {},
+  "sessions": {
+    "s_0e4885cc7255e8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "17306851-e799-4734-aa65-a2d363523795",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_93520af149d0cb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a03273-eea1-7202-9343-217fa7530047",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
