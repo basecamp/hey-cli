@@ -25,9 +25,26 @@ const defaultShellJSON = `{
 }
 `
 
-// testOmarchyEnv fakes an Omarchy install: a home dir, an OMARCHY_PATH with the
-// default shell.json, and a recorder for the commands setup would run.
+// testOmarchyEnv fakes an Omarchy install: a home dir, a state dir, an
+// OMARCHY_PATH with the default shell.json, and a recorder for the commands
+// setup would run. Replies are scripted per command prefix; the default
+// answers `omarchy plugin list --json` with an empty plugin list (the shell
+// up, nothing installed) and everything else with success and no output.
 func testOmarchyEnv(t *testing.T) (omarchyEnv, *[]string) {
+	env, ran, _ := testOmarchyEnvScripted(t, nil)
+	return env, ran
+}
+
+// omarchyReply is one scripted subprocess answer.
+type omarchyReply struct {
+	out string
+	err error
+}
+
+// testOmarchyEnvScripted is testOmarchyEnv with replies keyed by a command
+// prefix ("omarchy plugin list", "omarchy plugin add", ...); the longest
+// matching prefix wins. The returned map can be mutated mid-test.
+func testOmarchyEnvScripted(t *testing.T, replies map[string]omarchyReply) (omarchyEnv, *[]string, map[string]omarchyReply) {
 	t.Helper()
 	home := t.TempDir()
 	omarchyPath := t.TempDir()
@@ -37,16 +54,33 @@ func testOmarchyEnv(t *testing.T) (omarchyEnv, *[]string) {
 	if err := os.WriteFile(filepath.Join(omarchyPath, "config", "omarchy", "shell.json"), []byte(defaultShellJSON), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if replies == nil {
+		replies = map[string]omarchyReply{}
+	}
+	if _, has := replies["omarchy plugin list"]; !has {
+		replies["omarchy plugin list"] = omarchyReply{out: "[]"}
+	}
 	var ran []string
 	env := omarchyEnv{
 		home:        home,
 		omarchyPath: omarchyPath,
-		run: func(name string, args ...string) error {
-			ran = append(ran, strings.Join(append([]string{name}, args...), " "))
-			return nil
+		stateDir:    t.TempDir(),
+		run: func(name string, args ...string) (string, error) {
+			command := strings.Join(append([]string{name}, args...), " ")
+			ran = append(ran, command)
+			best := ""
+			for prefix := range replies {
+				if strings.HasPrefix(command, prefix) && len(prefix) > len(best) {
+					best = prefix
+				}
+			}
+			if best == "" {
+				return "", nil
+			}
+			return replies[best].out, replies[best].err
 		},
 	}
-	return env, &ran
+	return env, &ran, replies
 }
 
 func statuses(steps []omarchyStep) map[string]string {
@@ -118,7 +152,7 @@ func TestOmarchySetupInstallsEverythingOnce(t *testing.T) {
 }
 
 func TestOmarchySetupRemoveReversesEveryPiece(t *testing.T) {
-	env, _ := testOmarchyEnv(t)
+	env, ran := testOmarchyEnv(t)
 	writeShell(t, env, pluginShellJSON)
 	on := true
 	setup := omarchySetup{env: env, notify: &on}
@@ -139,22 +173,37 @@ func TestOmarchySetupRemoveReversesEveryPiece(t *testing.T) {
 		t.Fatalf("--notify should set notify on the plugin entry, got %v", entry)
 	}
 
-	removed := statuses(omarchySetup{env: env}.remove())
-	for name, status := range removed {
+	removed := omarchySetup{env: env, forcePlugin: true}.remove()
+	for name, status := range statuses(removed) {
 		switch name {
 		case "bar indicator":
 			if status != "absent" {
 				t.Errorf("no legacy module was installed, got %q", status)
 			}
 		case "bar plugin":
-			if status != "kept" {
-				t.Errorf("the plugin's notify setting is the plugin's own, got %q", status)
+			if status != "removed" {
+				t.Errorf("remove disables the plugin, got %q", status)
 			}
 		default:
 			if status != "removed" {
 				t.Errorf("%s: remove = %q, want removed", name, status)
 			}
 		}
+	}
+	if bar := stepNamed(removed, "bar plugin"); !strings.Contains(bar.Detail, "the checkout stays") {
+		t.Errorf("remove keeps the checkout and says so, got %q", bar.Detail)
+	}
+	if !contains(*ran, "omarchy plugin disable "+omarchyBarPluginID) {
+		t.Errorf("remove must disable the plugin, ran %v", *ran)
+	}
+	for _, command := range *ran {
+		if strings.Contains(command, "plugin remove") {
+			t.Errorf("remove must never delete the checkout: %q", command)
+		}
+	}
+	marker, _, err := readOmarchyPluginMarker(env.markerPath())
+	if err != nil || marker.RemovedAt == "" {
+		t.Errorf("the removal must be recorded before the command: %+v %v", marker, err)
 	}
 	if _, err := os.Stat(env.desktopPath()); !os.IsNotExist(err) {
 		t.Error("desktop entry still present")
@@ -165,28 +214,15 @@ func TestOmarchySetupRemoveReversesEveryPiece(t *testing.T) {
 	if menu := readText(t, env.menuPath()); menu != menuBefore {
 		t.Errorf("menu should be restored byte for byte:\n%s", menu)
 	}
-	// The plugin entry is the user's (omarchy plugin add wrote it), and its
-	// notify setting is set as readily from the panel as from here: removal
-	// cannot tell a preference it wrote from one it didn't, so it leaves it.
-	entry := pluginEntry(t, env)
-	if entry == nil {
-		t.Fatal("remove must not delete the plugin's layout entry")
-	}
-	if entry["notify"] != true {
-		t.Errorf("remove must leave the plugin's notify setting alone, got %v", entry)
+	// The layout entry and its notify setting are the shell's to take off
+	// with `omarchy plugin disable` — hey does not edit shell.json for it.
+	if entry := pluginEntry(t, env); entry == nil || entry["notify"] != true {
+		t.Errorf("remove must not edit the plugin's layout entry itself, got %v", entry)
 	}
 
-	again := statuses(omarchySetup{env: env}.remove())
-	for name, status := range again {
-		if name == "bar plugin" {
-			if status != "kept" {
-				t.Errorf("second remove: bar plugin = %q, want kept", status)
-			}
-			continue
-		}
-		if status != "absent" {
-			t.Errorf("%s: second remove = %q, want absent", name, status)
-		}
+	// A sign-in after removal owes nothing: the tombstone stands.
+	if step := (omarchySetup{env: env}).installBarPlugin(); step.attempted {
+		t.Errorf("a sign-in after removal owes nothing, got %q %q", step.Status, step.Detail)
 	}
 }
 
@@ -259,6 +295,7 @@ func TestOmarchySetupRefusesWrongTypedBarFields(t *testing.T) {
 }
 
 func TestSetupOmarchyRemoveIgnoresMalformedLocalConfig(t *testing.T) {
+	stubOmarchyRun(t, omarchyUnavailable)
 	repo := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(repo, ".hey"), 0o755); err != nil {
 		t.Fatal(err)
@@ -284,6 +321,7 @@ func TestSetupOmarchyRemoveIgnoresMalformedLocalConfig(t *testing.T) {
 }
 
 func TestSetupOmarchyFailsWithoutAHomeDirectory(t *testing.T) {
+	stubOmarchyRun(t, omarchyUnavailable)
 	t.Setenv("HEY_NO_KEYRING", "1")
 	t.Setenv("HEY_BASE_URL", "")
 	t.Setenv("OMARCHY_PATH", t.TempDir())
@@ -307,7 +345,7 @@ func TestSetupOmarchyFailsWithoutAHomeDirectory(t *testing.T) {
 
 func TestOmarchyRemoveTemplateReportsDeferredRender(t *testing.T) {
 	env, _ := testOmarchyEnv(t)
-	env.run = func(name string, args ...string) error { return errors.New("not on PATH") }
+	env.run = func(name string, args ...string) (string, error) { return "", errors.New("not on PATH") }
 	setup := omarchySetup{env: env}
 
 	setup.apply()
@@ -323,6 +361,7 @@ func TestOmarchyRemoveTemplateReportsDeferredRender(t *testing.T) {
 }
 
 func TestSetupOmarchyRemoveWorksWithoutOmarchy(t *testing.T) {
+	stubOmarchyRun(t, omarchyUnavailable)
 	t.Setenv("HEY_NO_KEYRING", "1")
 	t.Setenv("HEY_BASE_URL", "")
 	t.Setenv("OMARCHY_PATH", "")
@@ -344,6 +383,7 @@ func TestSetupOmarchyRemoveWorksWithoutOmarchy(t *testing.T) {
 }
 
 func TestSetupOmarchyRejectsPositionalArgs(t *testing.T) {
+	stubOmarchyRun(t, omarchyUnavailable)
 	t.Setenv("HEY_NO_KEYRING", "1")
 	t.Setenv("OMARCHY_PATH", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -360,6 +400,7 @@ func TestSetupOmarchyRejectsPositionalArgs(t *testing.T) {
 }
 
 func TestSetupOmarchyFailureCarriesStepsInMeta(t *testing.T) {
+	stubOmarchyRun(t, omarchyUnavailable)
 	t.Setenv("HEY_NO_KEYRING", "1")
 	t.Setenv("HEY_BASE_URL", "")
 	home := t.TempDir()
@@ -467,6 +508,7 @@ func TestWriteFileIfChangedFollowsSymlinksAndKeepsMode(t *testing.T) {
 }
 
 func TestSetupOmarchyRefusesListFormatsBeforeTouchingFiles(t *testing.T) {
+	stubOmarchyRun(t, omarchyUnavailable)
 	t.Setenv("HEY_NO_KEYRING", "1")
 	t.Setenv("HEY_BASE_URL", "")
 	home := t.TempDir()
@@ -489,6 +531,7 @@ func TestSetupOmarchyRefusesListFormatsBeforeTouchingFiles(t *testing.T) {
 }
 
 func TestSetupOmarchyIsNotBlockedByAnUntrustedLocalConfig(t *testing.T) {
+	stubOmarchyRun(t, omarchyUnavailable)
 	repo := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(repo, ".hey"), 0o755); err != nil {
 		t.Fatal(err)
@@ -531,6 +574,7 @@ func TestOmarchySetupPreservesLargeIntegersInShellConfig(t *testing.T) {
 }
 
 func TestSetupOmarchyRejectsARelativeHome(t *testing.T) {
+	stubOmarchyRun(t, omarchyUnavailable)
 	t.Setenv("HEY_NO_KEYRING", "1")
 	t.Setenv("HEY_BASE_URL", "")
 	t.Setenv("OMARCHY_PATH", t.TempDir())
@@ -596,7 +640,7 @@ func TestOmarchySetupKeepsForeignTemplate(t *testing.T) {
 	if readText(t, env.templatePath()) != foreign {
 		t.Error("foreign template was deleted")
 	}
-	if len(*ran) != 0 {
+	if contains(*ran, "omarchy-theme-refresh") {
 		t.Errorf("no theme refresh should run for a kept template, ran %v", *ran)
 	}
 }
@@ -642,6 +686,7 @@ func TestInsertMenuBlockReplacesStaleBlock(t *testing.T) {
 }
 
 func TestSetupOmarchyRequiresOmarchy(t *testing.T) {
+	stubOmarchyRun(t, omarchyUnavailable)
 	t.Setenv("HEY_NO_KEYRING", "1")
 	t.Setenv("HEY_BASE_URL", "")
 	t.Setenv("OMARCHY_PATH", "")
@@ -695,36 +740,32 @@ func pluginEntry(t *testing.T, env omarchyEnv) map[string]any {
 	return barLayoutModule(layout, omarchyBarPluginID)
 }
 
-func stepNamed(steps []omarchyStep, name string) omarchyStep {
-	for _, step := range steps {
-		if step.Name == name {
-			return step
-		}
-	}
-	return omarchyStep{}
-}
-
 func TestOmarchySetupSkipsTheBarWithoutThePlugin(t *testing.T) {
 	env, _ := testOmarchyEnv(t)
+	confirms := stubConfirmOmarchyPanel(t, false, nil)
 	on := true
 
-	// No shell.json at all: nothing to configure, and nothing is created —
-	// setup never adds a layout entry, the plugin install does.
+	// No shell.json at all: consent is asked, a no is recorded, and nothing
+	// is created — setup never adds a layout entry, the plugin install does.
 	bar := stepNamed(omarchySetup{env: env, notify: &on}.apply(), "bar plugin")
-	if bar.Status != "skipped" || !strings.Contains(bar.Detail, omarchyBarPluginInstall) {
-		t.Errorf("without the plugin the bar step should say how to install it, got %q %q", bar.Status, bar.Detail)
+	if bar.Status != "skipped" {
+		t.Errorf("a declined consent should skip, got %q %q", bar.Status, bar.Detail)
 	}
 	if _, err := os.Stat(env.shellPath()); !os.IsNotExist(err) {
 		t.Error("setup must not create a shell.json just to skip")
 	}
 
-	// A layout without the plugin entry is the same thing.
+	// A layout without the plugin entry is the same thing — and the recorded
+	// no means the question is never asked again.
 	writeShell(t, env, defaultShellJSON)
 	if bar := stepNamed(omarchySetup{env: env}.apply(), "bar plugin"); bar.Status != "skipped" {
 		t.Errorf("a layout without the plugin should be skipped, got %q", bar.Status)
 	}
 	if readText(t, env.shellPath()) != defaultShellJSON {
 		t.Error("skipping must leave shell.json untouched")
+	}
+	if *confirms != 1 {
+		t.Errorf("consent asked %d times, want 1", *confirms)
 	}
 }
 
@@ -774,18 +815,19 @@ func TestOmarchySetupFindsThePluginInAnySection(t *testing.T) {
 
 func TestOmarchySetupRemovesTheLegacyBarModule(t *testing.T) {
 	env, _ := testOmarchyEnv(t)
+	stubConfirmOmarchyPanel(t, false, nil)
 	writeShell(t, env, legacyShellJSON)
 
-	// No plugin yet: the legacy module goes, reported as its own step, and the
-	// plugin step says what to install — and how to keep the toasts the module
-	// had on. The layout equalled the defaults once the module was out, so it
-	// goes too and the user is back to inheriting Omarchy's defaults.
+	// No plugin yet: the legacy module goes, reported as its own step, and
+	// the plugin step skips (consent declined here). The layout equalled the
+	// defaults once the module was out, so it goes too and the user is back
+	// to inheriting Omarchy's defaults.
 	steps := omarchySetup{env: env}.apply()
 	if legacy := stepNamed(steps, "bar indicator"); legacy.Status != "removed" || !strings.Contains(legacy.Detail, "hey-unread") {
 		t.Errorf("legacy removal should be its own step, got %q %q", legacy.Status, legacy.Detail)
 	}
-	if bar := stepNamed(steps, "bar plugin"); bar.Status != "skipped" || !strings.Contains(bar.Detail, omarchyBarPluginInstall) || !strings.Contains(bar.Detail, "--notify") {
-		t.Errorf("the plugin step should say how to install and how to keep notifying, got %q %q", bar.Status, bar.Detail)
+	if bar := stepNamed(steps, "bar plugin"); bar.Status != "skipped" {
+		t.Errorf("without the plugin and without consent the step skips, got %q %q", bar.Status, bar.Detail)
 	}
 	if shell := readShell(t, env); shell["bar"] != nil {
 		t.Errorf("a defaults-seeded layout should be dropped with the module: %v", shell)

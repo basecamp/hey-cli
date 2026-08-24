@@ -25,6 +25,7 @@ var (
 	baseURL       string
 	configDir     string
 	stateDir      string
+	homeDir       string
 	sessionCookie string
 	smokeEmail    string
 )
@@ -85,6 +86,13 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "Failed to create temp state dir: %v\n", err)
 		os.Exit(1)
 	}
+	// And an isolated home, so the CLI can never detect the developer's
+	// Omarchy desktop (or write agent skills into their real ~).
+	homeDir, err = os.MkdirTemp("", "hey-smoke-home-*")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create temp home dir: %v\n", err)
+		os.Exit(1)
+	}
 	// Launch headless Chrome browser and log in to obtain a session cookie.
 	sessionCookie, err = browserLogin(baseURL, smokeEmail, password)
 	if err != nil {
@@ -101,6 +109,7 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	os.RemoveAll(configDir)
 	os.RemoveAll(stateDir)
+	os.RemoveAll(homeDir)
 	os.Exit(code)
 }
 
@@ -183,15 +192,21 @@ func dataAs[T any](t *testing.T, resp Response) T {
 // cliEnv returns the environment variables used for all CLI invocations. The
 // caller's HEY_TOKEN is dropped: the suite authenticates with the cookie TestMain
 // stored, and an inherited token would silently stand in for it on every command.
+// The caller's HOME and OMARCHY_PATH are replaced too, so a suite run on a
+// developer's Omarchy desktop can never detect it — the sign-in hook and
+// `hey setup omarchy` would otherwise talk to the real shell.
 func cliEnv() []string {
-	env := make([]string, 0, len(os.Environ())+6)
+	env := make([]string, 0, len(os.Environ())+8)
 	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, "HEY_TOKEN=") {
-			env = append(env, kv)
+		if strings.HasPrefix(kv, "HEY_TOKEN=") || strings.HasPrefix(kv, "HOME=") || strings.HasPrefix(kv, "OMARCHY_PATH=") {
+			continue
 		}
+		env = append(env, kv)
 	}
 	env = append(env,
 		"HEY_BASE_URL="+baseURL,
+		"HOME="+homeDir,
+		"OMARCHY_PATH=",
 		"XDG_CONFIG_HOME="+configDir,
 		"XDG_STATE_HOME="+stateDir,
 		"HEY_NO_KEYRING=1",

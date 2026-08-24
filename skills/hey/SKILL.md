@@ -691,6 +691,9 @@ hey auth login                                # Log in (browser-based OAuth)
 hey auth status                               # Check if authenticated
 hey auth logout                               # Log out
 hey login / hey logout                        # Shortcuts for the two above
+hey setup omarchy                             # Omarchy only: put HEY in the bar. The interactive
+                                              # sign-in offer never fires for agents (non-TTY,
+                                              # machine output), so this command is the way
 hey setup                                     # First-run wizard: sign in + connect coding agents
 HEY_NONINTERACTIVE=1 hey setup --json         # No prompts and no OAuth wait — but still
                                               # installs agent skills and records onboarding;

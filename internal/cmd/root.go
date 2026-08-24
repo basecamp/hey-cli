@@ -397,7 +397,11 @@ func requireAuth() error {
 	}
 	if writer.IsStyled() && interactiveStdio() {
 		if yes, err := askToSignIn(); err == nil && yes {
-			return loginInteractively(os.Stderr)
+			if err := loginInteractively(os.Stderr); err != nil {
+				return err
+			}
+			ensureOmarchyBarPluginAfterLogin(os.Stderr)
+			return nil
 		}
 	}
 	return apierr.ErrAuth("Not logged in")

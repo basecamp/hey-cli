@@ -98,6 +98,7 @@ Use --token or --cookie for non-interactive login.`,
 					fmt.Fprintln(w, identityGreeting(identity))
 				}
 				printAgentNudge(w)
+				ensureOmarchyBarPluginAfterLogin(cmd.ErrOrStderr())
 				return nil
 			}
 			return writeOK(map[string]string{"method": "oauth"}, output.WithSummary("Logged in successfully"))

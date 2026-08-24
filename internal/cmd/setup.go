@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -32,8 +33,11 @@ func newSetupCommand() *setupCommand {
 	setupCommand.cmd = &cobra.Command{
 		Use:   "setup",
 		Short: "Set up HEY for first use",
-		Long:  "Sign in and connect your coding agents.",
-		Args:  cobra.NoArgs,
+		Long: `Sign in and connect your coding agents. On Omarchy, a styled interactive run also
+installs hey into the desktop and offers the HEY bar plugin (asked once); machine
+and non-interactive runs never touch the desktop — hey setup omarchy does that
+explicitly.`,
+		Args: cobra.NoArgs,
 		Annotations: map[string]string{
 			"agent_notes": "Runs the first-run wizard: OAuth sign-in, a look at the linked accounts, and coding-agent setup. HEY_NONINTERACTIVE=1 suppresses OAuth and every prompt, but the wizard still connects detected agents (writing skill files) and persists the onboarded flag — there is no read-only mode; use `hey doctor` to inspect without changing anything. --json changes only the output format: a terminal on stdin (an allocated PTY included) still starts browser OAuth and waits for it. Logged out and non-interactive reports status incomplete with a remediation breadcrumb.",
 		},
@@ -97,6 +101,15 @@ type wizardResult struct {
 	CompletionsInstalled bool         `json:"completions_installed"`
 	Agents               []agentCheck `json:"agents"`
 	Issues               []agentIssue `json:"issues"`
+	// Omarchy reports the desktop step, which runs only in a full, styled,
+	// interactive, signed-in wizard on Omarchy — machine and non-interactive
+	// runs skip it and are pointed at `hey setup omarchy` instead.
+	Omarchy *omarchyOutcome `json:"omarchy,omitempty"`
+}
+
+// omarchyOutcome is the wizard's Omarchy step, mirrored into the envelope.
+type omarchyOutcome struct {
+	Steps []omarchyStep `json:"steps"`
 }
 
 // setupWizard carries one wizard run: the command it prints through and what
@@ -144,12 +157,19 @@ func (s *setupWizard) run() error {
 	if s.opts.full {
 		s.result.CompletionsInstalled = s.installCompletions()
 		s.outcome = s.setupAgents()
+	} else if signedIn {
+		// A lite wizard that just signed in gets the same one-line Omarchy
+		// hook as `hey auth login`; the full wizard runs the real step below.
+		ensureOmarchyBarPluginAfterLogin(s.cmd.ErrOrStderr())
 	}
 	s.result.SkillInstalled = baselineSkillInstalled()
 	s.result.Agents = s.outcome.Checks
 	s.result.Issues = append(s.result.Issues, s.outcome.Issues...)
 	if statusFromOutcome(s.outcome) == "incomplete" {
 		s.result.Status = "incomplete"
+	}
+	if s.opts.full {
+		s.setupOmarchy(signedIn)
 	}
 
 	s.persistOnboarded()
@@ -206,8 +226,9 @@ func canSignInInteractively() bool {
 
 // loginInteractively runs the OAuth flow with progress on out, then selects
 // the configured mail account (PersistentPreRunE skipped that while we were
-// logged out). Shared with requireAuth's sign-in prompt.
-func loginInteractively(out io.Writer) error {
+// logged out). Shared with requireAuth's sign-in prompt; a var so tests can
+// stand in for the browser wait.
+var loginInteractively = func(out io.Writer) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
 
@@ -463,6 +484,42 @@ func (s *setupWizard) setupAgents() agentSetupOutcome {
 	return agentSetupOutcome{Checks: postChecks, Issues: issues}
 }
 
+// setupOmarchy is Step 3: on Omarchy, a full, styled, interactive, signed-in
+// wizard installs the desktop pieces and offers the bar plugin in ensure
+// mode — consent asked once and remembered, and a plugin the user disabled
+// stays disabled. Machine and non-interactive runs skip it entirely; the
+// envelope points at hey setup omarchy instead (wizardBreadcrumbs).
+func (s *setupWizard) setupOmarchy(signedIn bool) {
+	if !signedIn || !s.styled || !interactiveStdio() {
+		return
+	}
+	env := liveOmarchyEnv()
+	if !env.detected() || !filepath.IsAbs(env.home) {
+		return
+	}
+	w := s.cmd.OutOrStdout()
+	fmt.Fprintln(w, bold.format("  Step 3: Omarchy desktop"))
+	fmt.Fprintln(w)
+	steps := omarchySetup{env: env}.apply()
+	s.result.Omarchy = &omarchyOutcome{Steps: steps}
+	bar := stepNamed(steps, "bar plugin")
+	switch {
+	case bar.Status == "installed":
+		fmt.Fprintln(w, statusLine(true, "HEY is in your Omarchy bar"))
+	case bar.Status == "failed" || (bar.Status == "skipped" && bar.attempted):
+		fmt.Fprintln(w, warning.format("  Bar plugin: "+bar.Detail))
+	}
+	for _, step := range steps {
+		if step.Status == "failed" || (step.Status == "skipped" && step.attempted) {
+			s.result.Status = "incomplete"
+			s.result.Issues = append(s.result.Issues, agentIssue{Check: "Omarchy " + step.Name, Hint: "Run: hey setup omarchy"})
+		}
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, muted.format("  "+strings.ReplaceAll(strings.TrimRight(omarchyKeybindHint, "\n"), "\n", "\n  ")))
+	fmt.Fprintln(w)
+}
+
 // persistOnboarded records that the wizard ran, so a later logged-out bare
 // `hey` runs the lite wizard. Best-effort: a read-only config dir only costs
 // a repeat of the agent step next time.
@@ -528,6 +585,28 @@ func showWizardSuccess(w io.Writer, result wizardResult, outcome agentSetupOutco
 		for _, check := range outcome.Checks {
 			fmt.Fprintln(w, statusLine(check.Status == "pass", check.Name))
 		}
+	}
+	if result.Omarchy != nil {
+		ok := true
+		for _, step := range result.Omarchy.Steps {
+			if step.Status == "failed" || step.failure != nil {
+				ok = false
+			}
+		}
+		fmt.Fprintln(w, statusLine(ok, "Omarchy desktop"))
+		bar := stepNamed(result.Omarchy.Steps, "bar plugin")
+		barLine := bar.Status
+		if bar.Detail != "" {
+			barLine += " — " + bar.Detail
+		}
+		fmt.Fprintln(w, muted.format("    Bar plugin: "+barLine))
+		desktop := "launcher entry, menu row and theme template in place"
+		for _, step := range result.Omarchy.Steps {
+			if step.Name != "bar plugin" && step.Status == "failed" {
+				desktop = step.Name + " failed: " + step.Detail
+			}
+		}
+		fmt.Fprintln(w, muted.format("    Desktop: "+desktop))
 	}
 	fmt.Fprintln(w)
 
@@ -615,6 +694,11 @@ func wizardBreadcrumbs(result wizardResult) []output.Breadcrumb {
 	crumbs := []output.Breadcrumb{
 		{Action: "open", Command: "hey tui", Description: "Open the app"},
 		{Action: "boxes", Command: "hey box list", Description: "List your boxes"},
+	}
+	// A machine or non-interactive run on Omarchy never touches the desktop
+	// itself; the explicit command is how a script installs the bar plugin.
+	if result.Omarchy == nil && liveOmarchyEnv().detected() {
+		crumbs = append(crumbs, output.Breadcrumb{Action: "omarchy", Command: "hey setup omarchy", Description: "Put HEY in your Omarchy bar"})
 	}
 	if result.Status == "incomplete" {
 		crumbs = append(crumbs, output.Breadcrumb{Action: "doctor", Command: "hey doctor", Description: "Check CLI health"})

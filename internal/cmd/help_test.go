@@ -16,7 +16,7 @@ func TestCuratedCommandHelpUsesUserFacingLanguage(t *testing.T) {
 	root := newRootCmd()
 	tests := map[string]string{
 		"auth":  "Sign in to HEY, sign out, or check your login status.",
-		"setup": "Sign in and connect your coding agents.",
+		"setup": "Sign in and connect your coding agents. On Omarchy, a styled interactive run also\ninstalls hey into the desktop and offers the HEY bar plugin (asked once); machine\nand non-interactive runs never touch the desktop — hey setup omarchy does that\nexplicitly.",
 	}
 
 	for name, expected := range tests {

@@ -21,6 +21,8 @@ func runAuthCommand(t *testing.T, configHome, baseURL, envToken string, jsonOutp
 	t.Setenv("HEY_TOKEN", envToken)
 	t.Setenv("HEY_NO_KEYRING", "1")
 	t.Setenv("HEY_BASE_URL", "")
+	// Never let a test detect the developer's Omarchy and talk to its shell.
+	t.Setenv("OMARCHY_PATH", "")
 	t.Setenv("HOME", configHome)
 	t.Setenv("XDG_CONFIG_HOME", configHome)
 	t.Setenv("XDG_STATE_HOME", configHome)

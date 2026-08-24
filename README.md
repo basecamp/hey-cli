@@ -628,10 +628,10 @@ read from `~/.local/state/omarchy/current/theme/`, and restyles live when you ru
 
 ```bash
 omarchy pkg aur add hey-cli  # hey-cli is on the AUR
-omarchy plugin add https://github.com/basecamp/omarchy-hey-plugin.git --enable
-hey setup omarchy            # install into the desktop
+hey auth login               # signing in with hey puts HEY in your bar (asked once)
+hey setup omarchy            # the explicit path: installs in every output format, fails loudly
 hey setup omarchy --notify   # toast new mail from the bar plugin (--no-notify turns it off)
-hey setup omarchy --remove   # take it all out again
+hey setup omarchy --remove   # disable the bar plugin (checkout kept) and remove the desktop pieces
 ```
 
 The bar gets the [HEY plugin](https://github.com/basecamp/omarchy-hey-plugin): the HEY
@@ -639,6 +639,14 @@ logo lights when the Imbox has unseen mail and opens a panel of recent threads. 
 its engine — the plugin reads the Imbox with `hey box view imbox` and runs `hey watch` so the
 bar is live: a thread you archive in the TUI, on your phone or in the web app leaves the
 panel within a second, and after a disconnect the watch catches up from where it left off.
+
+Signing in interactively — `hey auth login`, the setup wizard, or any command's sign-in
+prompt — offers to install that plugin, asks once, and remembers your answer. The offer
+never fires in scripts: machine output (`--json` and friends), `HEY_NONINTERACTIVE`, a
+non-TTY, and `--token`/`--cookie` logins all skip it, and `hey setup omarchy` is how a
+script installs it — explicitly, in every output format, verified against the running
+shell, with a loud failure when it cannot. A plugin you disable stays disabled until you
+run `hey setup omarchy` again; `--remove` disables it and keeps the checkout.
 
 Setup installs a `HEY TUI` launcher entry, a `HEY` row in the SUPER+SPACE menu, and a
 `hey.toml.tpl` theme template so theme authors can tune the overlay. It prints the

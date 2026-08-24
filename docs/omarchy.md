@@ -69,7 +69,7 @@ step does not stop the others.
 |---|---|---|
 | Desktop entry | `~/.local/share/applications/HEY TUI.desktop` | Distinct from Omarchy's shipped `HEY.desktop` web app. Launches under app-id `org.omarchy.hey` |
 | Menu row | marker block in `~/.config/omarchy/extensions/omarchy-menu.jsonc` | one root `HEY` row that focuses or launches the TUI; its guard is a PATH lookup, never network or `hey` itself. Becomes a submenu once there is more than one thing to open |
-| Bar plugin | the `37signals.hey` entry in `~/.config/omarchy/shell.json`'s bar layout | not installed by setup — `omarchy plugin add https://github.com/basecamp/omarchy-hey-plugin.git --enable` does that — but configured by it: `--notify` / `--no-notify` set or delete the entry's `notify` key, which the shell hot-reloads and the plugin reads to decide whether to toast. `--remove` leaves the key alone: it is set as readily from the panel or `omarchy bar set` as from here, so removal cannot tell a preference it wrote from one it didn't — `--no-notify` is the off switch. An earlier inline `hey-unread` module is removed on sight, its notify choice carried over |
+| Bar plugin | clone under `~/.config/omarchy/plugins/37signals.hey`, entry in `~/.config/omarchy/shell.json`'s bar layout | installed and enabled by **signing in with hey** (asked once — see below) or by this command, which also finishes an interrupted install and re-enables a plugin you disabled, verified against the running shell. `--notify` / `--no-notify` set or delete the entry's `notify` key, which the shell hot-reloads and the plugin reads to decide whether to toast. `--remove` disables the plugin and keeps its checkout. An earlier inline `hey-unread` module is removed on sight, its notify choice carried over |
 | Theme template | `~/.config/omarchy/themed/hey.toml.tpl` | renders `hey.toml` into every theme so theme authors can override the overlay; triggers `omarchy-theme-refresh` |
 | Keybinding | printed, never written | `o.bind("SUPER + SHIFT + ALT + H", "HEY TUI", "omarchy-launch-or-focus-tui --app-id=org.omarchy.hey hey tui")`; SUPER+SHIFT+E keeps opening the web app unless you `hl.unbind` it. Spelled out rather than `{ tui = "hey tui" }` because the lua helper quotes that into one word and the app-id derived from it would never match |
 
@@ -126,6 +126,54 @@ live as extra keys on the `{"id":"37signals.hey"}` entry in `shell.json`, hot-re
 the shell. Three ways to flip a key, all equivalent: `hey setup omarchy --notify`, the
 toggle in the panel header, or `omarchy bar set 37signals.hey notify true --json`. Flipping
 `notify` only gates the plugin's toasts; the watch runs on regardless, and nothing restarts.
+
+### Installed at sign-in
+
+Signing in with hey is what puts the plugin in the bar — DHH's ask was that the panel
+"magically appear when you're logged in", with no hand-copied commands. One idempotent
+routine (`internal/cmd/omarchy_plugin.go`), three entry points, one state file, one lock:
+
+- **Entry points.** An interactive OAuth sign-in — `hey auth login` / `hey login`,
+  `requireAuth`'s "Sign in now?" (how `hey tui` and every data command sign in), the lite
+  wizard — runs the routine in *ensure* mode and prints at most one stderr line; the full
+  wizard runs it as Step 3; `hey setup omarchy` runs it in *force* mode. The automatic
+  hooks never run for machine output, `HEY_NONINTERACTIVE`, a non-TTY, or
+  `--token`/`--cookie` logins: a script installs with `hey setup omarchy`, which works in
+  every output format and exits `setup_failed` on any incomplete outcome — an incomplete
+  forced install is a failure, never a quiet skip.
+- **Ordering, per mode.** Ensure: state gates → shell probe → consent → intent write →
+  `omarchy plugin add` → verify → final write. Nothing is asked where installation is
+  impossible, nothing is cloned before the shell is known up and the intent is on disk,
+  and every incomplete outcome is non-fatal to the login. Force: the intent write comes
+  first — recording acceptance, clearing a decline, a removal and the clone throttle,
+  since the command is the explicit ask — so a crash leaves a pending install the *next
+  explicit setup* finishes.
+- **The marker**, `StateDir()/omarchy/bar-plugin.json`: `accepted_at` is consent, asked
+  once and never re-asked; `pending_enable` + `installing_at` an unfinished install;
+  `installed_at` history; `declined_at`/`removed_at` the user's no; `last_clone_*` a 24 h
+  retry throttle for failed clones only — nothing else is throttled. A marker that cannot
+  be read fails installation closed ("delete it, then run hey setup omarchy"); only
+  `--remove` still disables then, since nothing can resurrect the plugin through a
+  fail-closed install. The flock beside it (`bar-plugin.lock`) serializes every look and
+  mutation; a held lock is a quiet skip at sign-in and a failure under force.
+- **Ensure never enables an off-bar checkout.** A plugin the user disabled stays disabled
+  whatever the marker says — pending included, where the sign-in owes the one-line notice
+  "install incomplete — run hey setup omarchy" and nothing else. Ensure's only mutation is
+  `omarchy plugin add`, on fresh consent or a pending retry; re-enabling is force mode's
+  alone (`omarchy plugin enable`, the reversal of `omarchy plugin disable`).
+- **The probe**, `omarchy plugin list --json`, distinguishes three failures: the omarchy
+  CLI missing ("update Omarchy"), the shell not running (an ssh session — nothing is
+  asked, cloned or throttled), and an answer that is not a plugin list (fail closed). Its
+  `{id, enabled}` refines what shell.json's layout says. Installed is decided by the
+  shell: the verify probe must list the plugin enabled, and the final write must land —
+  "enabled, but could not record" is a failure everywhere, never a success with a hidden
+  error; the next run's crash repair finishes the marker.
+- **`--remove`** writes its tombstone first — a removal that cannot be recorded runs
+  nothing — then `omarchy plugin disable 37signals.hey`. The checkout stays: `omarchy
+  plugin remove` deletes it, and hey never runs that, nor `rm`.
+- **The source is not configurable.** `omarchyBarPluginSource` is a package var only as a
+  test seam; there is no flag, env var, or build override, so nothing but the public
+  repository ever ships or installs.
 
 ### New mail is a watch event
 
@@ -199,6 +247,14 @@ new --run-async 'notify-send -a HEY "New mail in HEY"'` is the one-liner.
 
 ## Decisions
 
+- **Sign-in with hey installs the face.** hey-cli observes a sign-in only on its own
+  surfaces — the web app is not visible from the host, and there is no HEY desktop app —
+  so the promise is "signing in with hey puts HEY in your bar", not "wherever you log
+  in". Consent is interactive, asked once, and remembered; ensure never enables an
+  off-bar checkout, so a plugin you disable is never resurrected by a sign-in; the
+  automatic hooks never run for scripts, and `hey setup omarchy` is the explicit,
+  verified, fail-loud path. The location-independent version is Omarchy's to ship (see
+  Follow-ups).
 - **Indicator, not count.** Pending screener mail is not what people mean by "important",
   and a number is the attention treadmill HEY exists to end. The glyph lights or it does
   not.
@@ -259,6 +315,11 @@ completions for a binary that has not been fetched yet.
 
 ## Follow-ups, in rough order
 
+0. **The Omarchy-side counterpart**: ship `37signals.hey` with Omarchy itself, so the
+   panel is on the bar before hey-cli is installed — its own button already drives
+   "Install HEY CLI…" and "Sign in to HEY…", which is the only way "the panel appears
+   wherever you log in" becomes true (a web-app login is not observable from the host).
+   A recommendation for the Omarchy team, not built here.
 1. **mailto: handler** that opens a floating compose (`hey compose --mailto`), opt-in
    against the incumbent `omarchy-webapp-handler-hey`.
 2. **Agent-triage digests**: `hey --json` feeding a system agent that emits sparse

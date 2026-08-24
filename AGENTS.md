@@ -54,6 +54,16 @@ prints help. The TUI lives at `hey tui` (plus the hidden `hey hey`). `config.jso
 disables every prompt regardless of TTY detection: the wizard skips OAuth and answers its
 own confirmations with their defaults.
 
+On Omarchy, an interactive OAuth sign-in — `hey auth login`/`hey login`, the wizard, or
+`requireAuth`'s prompt — offers to install the `37signals.hey` bar plugin
+(`internal/cmd/omarchy_plugin.go`): asked once, remembered in
+`StateDir()/omarchy/bar-plugin.json`, serialized by a flock next to it. The hook never
+runs for machine output, `HEY_NONINTERACTIVE`, a non-TTY, or `--token`/`--cookie` logins,
+and it never re-enables a plugin that is off the bar — only explicit `hey setup omarchy`
+does, which installs in every output format and fails loudly (`setup_failed`) on any
+incomplete outcome; `--remove` writes its tombstone first, disables, and keeps the
+checkout. Details and the state model are in docs/omarchy.md.
+
 Coding-agent integration lives in `internal/harness` (agent registry, Claude Code / Codex
 detection, plugin and skill health checks) and `internal/cmd/setup_agent*.go` (`hey setup
 claude|codex|agents`). Claude Code gets the `hey@37signals` plugin from `basecamp/claude-plugins`

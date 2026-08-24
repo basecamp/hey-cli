@@ -168,6 +168,11 @@ func runDoctorChecks(ctx context.Context, root *cobra.Command) []map[string]stri
 		}
 	}
 
+	// Omarchy bar plugin
+	if env := liveOmarchyEnv(); env.detected() {
+		checks = append(checks, checkOmarchyBarPlugin(env))
+	}
+
 	// Git
 	if _, err := exec.LookPath("git"); err == nil {
 		checks = append(checks, map[string]string{
@@ -242,6 +247,46 @@ func checkBaselineSkill() map[string]string {
 		check["status"] = "warning"
 		check["message"] = fmt.Sprintf("Stale (installed: %s, current: %s)", installed, version.Version)
 		check["hint"] = "hey skill install"
+	}
+	return check
+}
+
+// checkOmarchyBarPlugin reports the bar plugin's state on an Omarchy desktop:
+// the sign-in hook installs it, `hey setup omarchy` forces or removes it, and
+// this is where the in-between states get their remediation. Reads only —
+// files and the marker, never a subprocess.
+func checkOmarchyBarPlugin(env omarchyEnv) map[string]string {
+	check := map[string]string{"name": "Omarchy Bar Plugin"}
+	marker, _, err := readOmarchyPluginMarker(env.markerPath())
+	if err != nil {
+		check["status"] = "error"
+		check["message"] = "State unreadable at " + env.markerPath()
+		check["hint"] = "Delete it, then run: hey setup omarchy"
+		return check
+	}
+	onBar := omarchySetup{env: env}.pluginOnBar()
+	switch {
+	case marker.DeclinedAt != "":
+		check["status"] = "info"
+		check["message"] = "Declined — hey setup omarchy installs it"
+	case marker.RemovedAt != "":
+		check["status"] = "info"
+		check["message"] = "Removed — hey setup omarchy re-enables it"
+	case marker.PendingEnable:
+		check["status"] = "warning"
+		check["message"] = "Install pending"
+		check["hint"] = "hey setup omarchy"
+	case onBar:
+		check["status"] = "ok"
+		check["message"] = "Installed and enabled"
+	case env.pluginCloned():
+		check["status"] = "warning"
+		check["message"] = "Cloned but not on the bar"
+		check["hint"] = "hey setup omarchy re-enables it"
+	default:
+		check["status"] = "warning"
+		check["message"] = "Not installed"
+		check["hint"] = "hey setup omarchy"
 	}
 	return check
 }
