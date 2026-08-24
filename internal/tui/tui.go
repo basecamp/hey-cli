@@ -1037,11 +1037,16 @@ func (m model) openTopic(request TopicRequest) (tea.Model, tea.Cmd) {
 	if request.TopicID <= 0 {
 		return m, nil
 	}
+	capturingInput := false
+	if m.activeView != m.screenerView {
+		capturer, ok := m.activeView.(inputCapturer)
+		capturingInput = ok && capturer.CapturingInput()
+	}
+	if m.hasPendingMutation() || capturingInput {
+		m.pendingTopic = nil
+		return m, notify("Finish the current action before opening another thread")
+	}
 	if request.AccountID > 0 && m.mailAccount.id != request.AccountID {
-		if m.hasPendingMutation() || m.mailView.CapturingInput() {
-			m.pendingTopic = nil
-			return m, notify("Finish the current mail action before opening another account")
-		}
 		m.pendingTopic = &request
 		if !m.mailAccountsLoaded {
 			return m, nil

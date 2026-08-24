@@ -309,10 +309,35 @@ func TestTopicRequestDoesNotDiscardAnAccountSensitiveAction(t *testing.T) {
 	m.mailAccounts = []mailAccountChoice{{label: "All Accounts"}, {id: 2, label: "jane@company.example"}}
 	m.mailView.pendingMutations = 1
 
+	for _, accountID := range []int64{2, 0} {
+		updated, cmd := m.Update(TopicRequest{TopicID: 5511, AccountID: accountID})
+		m = updated.(model)
+		if cmd == nil || m.mailAccountSwitching || m.pendingTopic != nil || m.section != sectionMail {
+			t.Fatalf("account %d topic request disturbed a pending action: switching=%v pending=%v section=%d",
+				accountID, m.mailAccountSwitching, m.pendingTopic != nil, m.section)
+		}
+		if _, ok := cmd().(notifyMsg); !ok {
+			t.Fatalf("blocked account %d topic request did not explain why", accountID)
+		}
+	}
+}
+
+func TestTopicRequestDoesNotDiscardAnotherSectionsForm(t *testing.T) {
+	m := newModel()
+	m.mailAccountsLoaded = true
+	m.mailSourcesLoaded = true
+	m.mailAccounts = []mailAccountChoice{{label: "All Accounts"}, {id: 2, label: "jane@company.example"}}
+	m.section = sectionContacts
+	m.activeView = m.contactsView
+	if cmd := m.contactsView.HandleContentKey(keyPress("a")); cmd == nil || !m.contactsView.CapturingInput() {
+		t.Fatal("contact form did not open")
+	}
+
 	updated, cmd := m.Update(TopicRequest{TopicID: 5511, AccountID: 2})
 	m = updated.(model)
-	if cmd == nil || m.mailAccountSwitching || m.pendingTopic != nil {
-		t.Fatalf("topic request disturbed a pending action: switching=%v pending=%v", m.mailAccountSwitching, m.pendingTopic != nil)
+	if cmd == nil || m.mailAccountSwitching || m.pendingTopic != nil || m.section != sectionContacts || m.activeView != m.contactsView || !m.contactsView.CapturingInput() {
+		t.Fatalf("topic request discarded the contact form: switching=%v pending=%v section=%d capturing=%v",
+			m.mailAccountSwitching, m.pendingTopic != nil, m.section, m.contactsView.CapturingInput())
 	}
 	if _, ok := cmd().(notifyMsg); !ok {
 		t.Fatal("blocked topic request did not explain why")
