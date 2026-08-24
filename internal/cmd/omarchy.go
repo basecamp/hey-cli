@@ -396,20 +396,19 @@ func (s omarchySetup) applyNotify(legacyNotified bool) omarchyStep {
 		return stepResult("bar plugin", path, false, err, "", "")
 	}
 	plugin := barLayoutModule(layout, omarchyBarPluginID)
-	if plugin == nil {
-		// Enabled per the shell, but no spelled-out layout entry to hold a
-		// setting yet: nothing to configure.
-		return omarchyStep{Name: "bar plugin", Path: path, Status: "unchanged"}
-	}
 	want := s.notify
 	if want == nil && legacyNotified {
 		// The legacy module was toasting and the plugin has not been told
 		// either way: keep the user's choice rather than silently turning
 		// the toasts off with the module.
-		if _, has := plugin["notify"]; !has {
+		_, has := plugin["notify"]
+		if plugin == nil || !has {
 			on := true
 			want = &on
 		}
+	}
+	if plugin == nil {
+		return s.setNotifyWithoutEntry(want)
 	}
 	settingChanged := false
 	if want != nil {
@@ -428,6 +427,25 @@ func (s omarchySetup) applyNotify(legacyNotified bool) omarchyStep {
 		step.Status = "installed"
 	}
 	return s.writeBarSteps([]omarchyStep{step}, shell, settingChanged)[0]
+}
+
+// setNotifyWithoutEntry handles an enabled plugin with no spelled-out layout
+// entry to hold the key. Seeding a partial layout would override the shell's
+// whole default layout, so the omarchy CLI materializes the setting instead —
+// and with no entry there is no key, so "off" is already true.
+func (s omarchySetup) setNotifyWithoutEntry(want *bool) omarchyStep {
+	path := s.env.shellPath()
+	if want == nil {
+		return omarchyStep{Name: "bar plugin", Path: path, Status: "unchanged"}
+	}
+	if !*want {
+		return omarchyStep{Name: "bar plugin", Path: path, Status: "unchanged", Detail: notifyDetail(false)}
+	}
+	out, err := s.env.run("omarchy", "bar", "set", omarchyBarPluginID, "notify", "true", "--json")
+	if err != nil {
+		return stepResult("bar plugin", path, false, errors.New(firstOutputLine(out, err)), "", "")
+	}
+	return omarchyStep{Name: "bar plugin", Path: path, Status: "installed", Detail: notifyDetail(true)}
 }
 
 // writeBarSteps writes shell.json when anything changed and turns every

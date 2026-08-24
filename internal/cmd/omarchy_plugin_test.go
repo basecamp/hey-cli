@@ -1191,6 +1191,75 @@ func TestSetupOmarchyForceLockContentionFailsWithoutStateClaims(t *testing.T) {
 	}
 }
 
+func TestSetupOmarchyNotifyWithoutALayoutEntryUsesBarSet(t *testing.T) {
+	// An enabled plugin needs no spelled-out shell.json entry; --notify must
+	// still land, and seeding a partial layout would override the shell's
+	// defaults — the omarchy CLI materializes the setting instead.
+	env, ran, _ := testOmarchyEnvScripted(t, map[string]omarchyReply{
+		"omarchy plugin list": {out: pluginListEnabled},
+	})
+	clonePluginCheckout(t, env)
+	on := true
+
+	bar := stepNamed(omarchySetup{env: env, forcePlugin: true, notify: &on}.apply(), "bar plugin")
+	if bar.Status != "installed" || !strings.Contains(bar.Detail, "notifications on") {
+		t.Fatalf("bar = %q %q", bar.Status, bar.Detail)
+	}
+	if !contains(*ran, "omarchy bar set "+omarchyBarPluginID+" notify true --json") {
+		t.Errorf("the setting must be materialized by the CLI: %v", *ran)
+	}
+
+	// --no-notify with no entry is already off: nothing to write or run.
+	off := false
+	countBefore := len(*ran)
+	bar = stepNamed(omarchySetup{env: env, forcePlugin: true, notify: &off}.apply(), "bar plugin")
+	if bar.Status == "failed" {
+		t.Fatalf("bar = %q %q", bar.Status, bar.Detail)
+	}
+	for _, command := range (*ran)[countBefore:] {
+		if strings.HasPrefix(command, "omarchy bar set") {
+			t.Errorf("no key exists to turn off: %v", command)
+		}
+	}
+}
+
+func TestSetupWizardLoggedOutMachineRunStillPointsAtOmarchySetup(t *testing.T) {
+	// Logged out on Omarchy, the automatic hook can never run — the machine
+	// envelope must carry the explicit command alongside the login crumb.
+	isolateAgents(t)
+	server := quietServer(t)
+	stubOmarchyRun(t, omarchyUnavailable)
+	t.Setenv("HEY_TOKEN", "")
+	t.Setenv("HEY_NO_KEYRING", "1")
+	t.Setenv("HEY_BASE_URL", "")
+	configHome := t.TempDir()
+	t.Setenv("HOME", configHome)
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	t.Setenv("XDG_STATE_HOME", configHome)
+	t.Setenv("XDG_CACHE_HOME", configHome)
+	t.Setenv("OMARCHY_PATH", t.TempDir())
+
+	root := newRootCmd()
+	var stdout bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetErr(&stdout)
+	root.SetArgs([]string{"--base-url", server.URL, "--json", "setup"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("setup --json: %v", err)
+	}
+	var response output.Response
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("decode: %v\n%s", err, stdout.String())
+	}
+	commands := make([]string, 0, len(response.Breadcrumbs))
+	for _, crumb := range response.Breadcrumbs {
+		commands = append(commands, crumb.Command)
+	}
+	if !contains(commands, "hey auth login") || !contains(commands, "hey setup omarchy") {
+		t.Errorf("breadcrumbs = %v, want both the login and the omarchy remediation", commands)
+	}
+}
+
 // --- doctor ---
 
 func TestDoctorOmarchyBarPluginStates(t *testing.T) {
@@ -1218,8 +1287,8 @@ func TestDoctorOmarchyBarPluginStates(t *testing.T) {
 
 	seedMarker(t, env, omarchyPluginMarker{AcceptedAt: "2026-08-01T00:00:00Z", InstalledAt: "2026-08-01T00:00:00Z"})
 	clonePluginCheckout(t, env)
-	if check := checkOmarchyBarPlugin(env); check["status"] != "warning" || !strings.Contains(check["message"], "not on the bar") {
-		t.Errorf("cloned off-bar: %v", check)
+	if check := checkOmarchyBarPlugin(env); check["status"] != "warning" || !strings.Contains(check["message"], "not in the configured bar layout") {
+		t.Errorf("cloned off-layout: %v", check)
 	}
 
 	writeShell(t, env, pluginShellJSON)

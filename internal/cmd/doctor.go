@@ -282,9 +282,12 @@ func checkOmarchyBarPlugin(env omarchyEnv) map[string]string {
 		check["status"] = "info"
 		check["message"] = "Removed — hey setup omarchy re-enables it"
 	case env.pluginCloned():
+		// The files alone cannot prove the plugin disabled: an enabled
+		// plugin needs no spelled-out layout entry, and doctor never runs a
+		// subprocess to ask the shell — say what is known, no more.
 		check["status"] = "warning"
-		check["message"] = "Cloned but not on the bar"
-		check["hint"] = "hey setup omarchy re-enables it"
+		check["message"] = "Cloned; not in the configured bar layout (the shell may still have it enabled)"
+		check["hint"] = "hey setup omarchy verifies and enables it"
 	default:
 		check["status"] = "warning"
 		check["message"] = "Not installed"

@@ -679,31 +679,34 @@ func wizardSummaryLine(result wizardResult) string {
 
 // wizardBreadcrumbs returns next-step breadcrumbs based on wizard outcome.
 func wizardBreadcrumbs(result wizardResult) []output.Breadcrumb {
-	if hasIssue(result.Issues, "HEY_TOKEN rejected") {
+	var crumbs []output.Breadcrumb
+	switch {
+	case hasIssue(result.Issues, "HEY_TOKEN rejected"):
 		// HEY_TOKEN outranks anything hey auth login saves: the structured
 		// remediation must point at the environment or it loops forever.
-		return []output.Breadcrumb{
+		crumbs = []output.Breadcrumb{
 			{Action: "fix_token", Command: "unset HEY_TOKEN", Description: "Remove or replace the rejected environment token"},
 			{Action: "doctor", Command: "hey doctor", Description: "Check CLI health"},
 		}
-	}
-	if hasAuthIssue(result.Issues) {
-		return []output.Breadcrumb{
+	case hasAuthIssue(result.Issues):
+		crumbs = []output.Breadcrumb{
 			{Action: "login", Command: "hey auth login", Description: "Authenticate with HEY"},
 			{Action: "doctor", Command: "hey doctor", Description: "Check CLI health"},
 		}
-	}
-	crumbs := []output.Breadcrumb{
-		{Action: "open", Command: "hey tui", Description: "Open the app"},
-		{Action: "boxes", Command: "hey box list", Description: "List your boxes"},
+	default:
+		crumbs = []output.Breadcrumb{
+			{Action: "open", Command: "hey tui", Description: "Open the app"},
+			{Action: "boxes", Command: "hey box list", Description: "List your boxes"},
+		}
+		if result.Status == "incomplete" {
+			crumbs = append(crumbs, output.Breadcrumb{Action: "doctor", Command: "hey doctor", Description: "Check CLI health"})
+		}
 	}
 	// A machine or non-interactive run on Omarchy never touches the desktop
-	// itself; the explicit command is how a script installs the bar plugin.
+	// itself — logged out included, where the automatic hook can never run —
+	// so the explicit command rides along in every branch.
 	if result.Omarchy == nil && liveOmarchyEnv().detected() {
 		crumbs = append(crumbs, output.Breadcrumb{Action: "omarchy", Command: "hey setup omarchy", Description: "Put HEY in your Omarchy bar"})
-	}
-	if result.Status == "incomplete" {
-		crumbs = append(crumbs, output.Breadcrumb{Action: "doctor", Command: "hey doctor", Description: "Check CLI health"})
 	}
 	return crumbs
 }
