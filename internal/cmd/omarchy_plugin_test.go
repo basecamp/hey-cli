@@ -305,6 +305,51 @@ func TestOmarchyPluginEnsurePendingClonedFinalizesWhenTheShellSaysEnabled(t *tes
 	}
 }
 
+func TestOmarchyPluginCrashRepairMigratesTheLegacyIndicator(t *testing.T) {
+	// A first sign-in that crashed after the enable: the quiet self-repair
+	// still owes the migration, or a legacy user keeps two icons forever.
+	env, ran, replies := testOmarchyEnvScripted(t, map[string]omarchyReply{
+		"omarchy plugin list": {out: pluginListEnabled},
+	})
+	clonePluginCheckout(t, env)
+	writeShell(t, env, legacyShellJSON)
+	seedMarker(t, env, omarchyPluginMarker{AcceptedAt: "2026-08-24T00:00:00Z", PendingEnable: true})
+	replies["omarchy bar set"] = omarchyReply{}
+
+	step := omarchySetup{env: env}.installBarPlugin()
+	if step.Status != "unchanged" || step.attempted {
+		t.Fatalf("repair should stay quiet, got %q %q attempted=%v", step.Status, step.Detail, step.attempted)
+	}
+	if strings.Contains(readText(t, env.shellPath()), "hey-unread") {
+		t.Error("the crash repair must migrate the legacy indicator too")
+	}
+	if !contains(*ran, "omarchy bar set "+omarchyBarPluginID+" notify true --json") {
+		t.Errorf("the toast choice must ride along: %v", *ran)
+	}
+}
+
+func TestSetupOmarchyKeepsLegacyWhenTheCarryFails(t *testing.T) {
+	// The legacy module is the only copy of the toast choice: the explicit
+	// configure flow must not delete it while the carry has not landed.
+	env, _, replies := testOmarchyEnvScripted(t, map[string]omarchyReply{
+		"omarchy plugin list": {out: pluginListEnabled},
+	})
+	clonePluginCheckout(t, env)
+	writeShell(t, env, legacyShellJSON)
+	replies["omarchy bar set"] = omarchyReply{out: "no shell", err: errors.New("exit status 1")}
+
+	steps := omarchySetup{env: env, forcePlugin: true}.configureBarPlugin()
+	if bar := stepNamed(steps, "bar plugin"); bar.Status != "failed" {
+		t.Fatalf("a failed carry must fail the step, got %q %q", bar.Status, bar.Detail)
+	}
+	if stepNamed(steps, "bar indicator").Status == "removed" {
+		t.Error("the legacy module must survive a failed carry")
+	}
+	if !strings.Contains(readText(t, env.shellPath()), "hey-unread") {
+		t.Error("the toasting module is the only copy of the choice — it stays")
+	}
+}
+
 func TestOmarchyPluginEnsureFinishesTheMarkerAfterACrash(t *testing.T) {
 	env, ran, _ := testOmarchyEnvScripted(t, map[string]omarchyReply{
 		"omarchy plugin list": {out: pluginListEnabled},
@@ -610,10 +655,11 @@ func TestOmarchyPluginMalformedMarkerFailsClosed(t *testing.T) {
 	}
 
 	// --remove is the exception: it still disables, leaves the marker, and
-	// fails with the repair hint.
+	// fails with a removal-shaped repair hint — a plain setup would
+	// re-enable what was just removed.
 	writeShell(t, env, pluginShellJSON)
 	step := omarchySetup{env: env, forcePlugin: true}.removeBarPluginLocked(true)
-	if step.Status != "failed" || !strings.Contains(step.Detail, "state unreadable") {
+	if step.Status != "failed" || !strings.Contains(step.Detail, "state unreadable") || !strings.Contains(step.Detail, "hey setup omarchy --remove") {
 		t.Fatalf("remove with a bad marker = %q %q", step.Status, step.Detail)
 	}
 	if !contains(*ran, "omarchy plugin disable "+omarchyBarPluginID) {

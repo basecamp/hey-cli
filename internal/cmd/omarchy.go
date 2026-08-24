@@ -140,6 +140,10 @@ type omarchyStep struct {
 	// and the wizard say nothing about a step that neither did nor owes
 	// anything.
 	attempted bool
+	// finalized marks a run that recorded a verified enable — including the
+	// quiet crash repairs — which is the moment the legacy indicator
+	// migration is owed.
+	finalized bool
 }
 
 type omarchySetup struct {
@@ -364,12 +368,14 @@ func (s omarchySetup) configureBarPluginLocked() []omarchyStep {
 	if install.Status == "skipped" || install.Status == "failed" {
 		return []omarchyStep{install}
 	}
-	var steps []omarchyStep
-	if legacyPresent {
-		// The carry is applyNotify's below, so the report says "installed".
-		steps = append(steps, s.removeLegacyIndicator(false))
+	// The notify carry lands first; the legacy module — the only copy of
+	// that choice — leaves only once it has. A failed carry keeps the
+	// module for the rerun, so the preference cannot die with it.
+	merged := s.mergeNotify(install, legacyNotified)
+	if !legacyPresent || merged.Status == "failed" {
+		return []omarchyStep{merged}
 	}
-	return append(steps, s.mergeNotify(install, legacyNotified))
+	return []omarchyStep{s.removeLegacyIndicator(false), merged}
 }
 
 // legacyIndicator reports whether layout still carries the inline hey-unread

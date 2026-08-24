@@ -102,12 +102,13 @@ func (s omarchySetup) installBarPlugin() omarchyStep {
 	}
 	return s.underBarPluginLock(func() []omarchyStep {
 		step := s.installBarPluginLocked()
-		if step.Status == "installed" {
+		if step.Status == "installed" || step.finalized {
 			// The plugin replaces the inline hey-unread indicator earlier
-			// releases installed: a sign-in that installs one takes the
-			// other out, or a migrating user keeps two icons and two
-			// pollers until an explicit setup. Quiet and best-effort — a
-			// failed cleanup costs nothing the next setup will not fix.
+			// releases installed: a sign-in that installs one — the quiet
+			// crash repairs included — takes the other out, or a migrating
+			// user keeps two icons and two pollers until an explicit
+			// setup. Quiet and best-effort — a failed cleanup costs
+			// nothing the next setup will not fix.
 			_ = s.removeLegacyIndicator(true)
 		}
 		return []omarchyStep{step}
@@ -135,7 +136,7 @@ func (s omarchySetup) underBarPluginLock(fn func() []omarchyStep) []omarchyStep 
 func (s omarchySetup) installBarPluginLocked() omarchyStep {
 	marker, _, err := readOmarchyPluginMarker(s.env.markerPath())
 	if err != nil {
-		return s.pluginFailed(omarchyMarkerUnreadable(s.env))
+		return s.pluginFailed(omarchyMarkerUnreadable(s.env, "hey setup omarchy"))
 	}
 	if s.forcePlugin {
 		return s.forceInstall(marker)
@@ -351,6 +352,7 @@ func (s omarchySetup) finalize(marker omarchyPluginMarker) omarchyStep {
 	}
 	step := s.pluginStep("installed", "installed and enabled")
 	step.attempted = true
+	step.finalized = true
 	return step
 }
 
@@ -363,9 +365,10 @@ func (s omarchySetup) removeBarPluginLocked(onBar bool) omarchyStep {
 		// A marker we cannot read must not trap removal: installation is
 		// already fail-closed on it, so nothing can resurrect the plugin.
 		// Disable anyway, leave the marker as evidence, and exit nonzero
-		// with the repair hint.
+		// with a removal-shaped repair hint — pointing at a plain setup
+		// here would re-enable what was just removed.
 		step := s.disableBarPlugin(onBar)
-		detail := omarchyMarkerUnreadable(s.env)
+		detail := omarchyMarkerUnreadable(s.env, "hey setup omarchy --remove")
 		if step.Status == "failed" {
 			detail = step.Detail + "; " + detail
 		}
@@ -570,8 +573,10 @@ func (e omarchyEnv) writeMarker(marker omarchyPluginMarker) error {
 	return writeJSONFile(e.markerPath(), marker)
 }
 
-func omarchyMarkerUnreadable(env omarchyEnv) string {
-	return "bar plugin state unreadable at " + env.markerPath() + " — delete it, then run hey setup omarchy"
+// omarchyMarkerUnreadable is the fail-closed remediation; command matches
+// the operation in flight, so following it never undoes what was asked.
+func omarchyMarkerUnreadable(env omarchyEnv, command string) string {
+	return "bar plugin state unreadable at " + env.markerPath() + " — delete it, then run " + command
 }
 
 // errOmarchyLockHeld is genuine contention — another hey holds the lock —
