@@ -162,7 +162,7 @@ func newRootCmd() *cobra.Command {
 	root.CompletionOptions.HiddenDefaultCmd = true
 
 	root.PersistentFlags().BoolVar(&jsonFlag, "json", false, "Output JSON with metadata")
-	root.PersistentFlags().BoolVar(&htmlOutput, "html", false, "Write the original HTML to a pipe or file (threads, journal read, contacts show, contacts note show)")
+	root.PersistentFlags().BoolVar(&htmlOutput, "html", false, "Write the original HTML to a pipe or file (thread read, journal read, contact show, contact note show)")
 	root.PersistentFlags().BoolVar(&quietFlag, "quiet", false, "Output result data only")
 	root.PersistentFlags().BoolVar(&idsOnly, "ids-only", false, "Output only IDs, one per line")
 	root.PersistentFlags().BoolVar(&countFlag, "count", false, "Output only the count of results")
@@ -184,32 +184,26 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newLoginCommand())
 	root.AddCommand(newLogoutCommand())
 	root.AddCommand(newAccountsCommand().cmd)
-	root.AddCommand(newBoxesCommand().cmd)
 	root.AddCommand(newBoxCommand().cmd)
-	root.AddCommand(newLabelsCommand().cmd)
 	root.AddCommand(newLabelCommand().cmd)
-	root.AddCommand(newCollectionsCommand().cmd)
 	root.AddCommand(newCollectionCommand().cmd)
-	root.AddCommand(newWorkflowsCommand().cmd)
 	root.AddCommand(newWorkflowCommand().cmd)
-	root.AddCommand(newClipsCommand().cmd)
 	root.AddCommand(newClipCommand().cmd)
-	root.AddCommand(newSnippetsCommand().cmd)
 	root.AddCommand(newSnippetCommand().cmd)
 	root.AddCommand(newSearchCommand().cmd)
 	root.AddCommand(newContactsCommand().cmd)
 	root.AddCommand(newScreenerCommand().cmd)
-	root.AddCommand(newThreadsCommand().cmd)
+	root.AddCommand(newThreadCommand())
 	root.AddCommand(newShareCommand().cmd)
 	root.AddCommand(newUnshareCommand().cmd)
-	root.AddCommand(newAttachmentsCommand().cmd)
+	root.AddCommand(newAttachmentCommand())
 	root.AddCommand(newReplyCommand().cmd)
 	root.AddCommand(newBulkReplyCommand().cmd)
 	root.AddCommand(newForwardCommand().cmd)
 	root.AddCommand(newComposeCommand().cmd)
-	root.AddCommand(newDraftsCommand().cmd)
-	root.AddCommand(newCalendarsCommand().cmd)
-	root.AddCommand(newRecordingsCommand().cmd)
+	root.AddCommand(newDraftCommand())
+	root.AddCommand(newCalendarCommand())
+	root.AddCommand(newEventsCommand().cmd)
 	root.AddCommand(newTodoCommand().cmd)
 	root.AddCommand(newHabitCommand().cmd)
 	root.AddCommand(newTimetrackCommand().cmd)
@@ -228,7 +222,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newSkillCommand().cmd)
 	root.AddCommand(newHelpTopicCommands()...)
 	root.AddCommand(newCommandsCommand())
-	root.AddCommand(newCompletionCommand())
+	root.AddCommand(newShellCompletionCommand())
 	root.AddCommand(newDoctorCommand())
 	root.AddCommand(newConfigCommand().cmd)
 	root.AddCommand(newUpgradeCommand().cmd)
@@ -262,7 +256,7 @@ func commandUsesAccountScope(cmd *cobra.Command) bool {
 		return true
 	}
 	switch parts[1] {
-	case "accounts", "auth", "commands", "completion", "config", "doctor", "login", "logout", "setup", "skill", "upgrade", "version":
+	case "account", "auth", "commands", "config", "doctor", "login", "logout", "setup", "shell-completion", "skill", "upgrade", "version":
 		return false
 	default:
 		return true
@@ -312,10 +306,10 @@ func htmlRequested(args []string) bool {
 // htmlCommands are the commands that read something HEY holds as HTML, and so the only
 // ones --html means anything to.
 var htmlCommands = map[string]bool{
-	"hey threads":            true,
-	"hey journal read":       true,
-	"hey contacts show":      true,
-	"hey contacts note show": true,
+	"hey thread read":       true,
+	"hey journal read":      true,
+	"hey contact show":      true,
+	"hey contact note show": true,
 }
 
 // validateHTMLFlag settles what --html may be combined with, before any configuration
@@ -374,8 +368,8 @@ func validateJQFlags(cmd *cobra.Command, filter string, requested, ids, count bo
 	switch cmd.CommandPath() {
 	case "hey auth token":
 		return output.ErrJQNotSupported("the auth token command")
-	case "hey completion":
-		return output.ErrJQNotSupported("the completion command")
+	case "hey shell-completion generate":
+		return output.ErrJQNotSupported("the shell-completion generate command")
 	case "hey setup":
 		return output.ErrJQNotSupported("the setup wizard")
 	case "hey skill":
@@ -546,9 +540,6 @@ func printAgentHelp(cmd *cobra.Command) {
 	if notes, ok := cmd.Annotations["agent_notes"]; ok {
 		info["agent_notes"] = notes
 	}
-	if canonical, ok := cmd.Annotations[compatibilityForAnnotation]; ok {
-		info["compatibility_for"] = canonical
-	}
 	if usage, ok := cmd.Annotations[compatibilityUsageAnnotation]; ok {
 		info["compatibility_usage"] = usage
 	}
@@ -572,11 +563,6 @@ func printAgentHelp(cmd *cobra.Command) {
 	for _, sub := range cmd.Commands() {
 		if sub.Hidden || !sub.IsAvailableCommand() {
 			continue
-		}
-		if cmd == cmd.Root() {
-			if _, compatibility := sub.Annotations[compatibilityForAnnotation]; compatibility {
-				continue
-			}
 		}
 		subs = append(subs, map[string]string{
 			"name":  sub.Name(),

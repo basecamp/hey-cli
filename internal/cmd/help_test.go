@@ -34,30 +34,39 @@ func TestCuratedCommandHelpUsesUserFacingLanguage(t *testing.T) {
 
 func TestEmailCommandHelpKeepsPostingAsAnInternalTerm(t *testing.T) {
 	root := newRootCmd()
-	for _, name := range []string{"boxes", "box", "labels", "label", "workflows", "workflow", "clips", "clip", "snippets", "snippet", "search", "seen", "unseen", "move", "trash", "spam", "ignore", "stop-ignoring", "watch"} {
+	for _, name := range []string{"box", "label", "workflow", "clip", "snippet", "thread", "attachment", "bulk-reply", "search", "seen", "unseen", "move", "trash", "spam", "ignore", "stop-ignoring", "watch"} {
 		t.Run(name, func(t *testing.T) {
 			command, _, err := root.Find([]string{name})
 			if err != nil {
 				t.Fatal(err)
 			}
-			text := strings.Join([]string{
-				command.Use,
-				command.Short,
-				command.Long,
-				command.Example,
-				command.Annotations["agent_notes"],
-				command.NonInheritedFlags().FlagUsages(),
-			}, "\n")
-			if strings.Contains(strings.ToLower(text), "posting") {
-				t.Errorf("%s exposes internal posting terminology:\n%s", name, text)
+			// The whole subtree, not just the named command: `posting` used to
+			// survive under `bulk-reply preview` because only the parent was read.
+			var walk func(*cobra.Command)
+			walk = func(command *cobra.Command) {
+				text := strings.Join([]string{
+					command.Use,
+					command.Short,
+					command.Long,
+					command.Example,
+					command.Annotations["agent_notes"],
+					command.NonInheritedFlags().FlagUsages(),
+				}, "\n")
+				if strings.Contains(strings.ToLower(text), "posting") {
+					t.Errorf("%s exposes internal posting terminology:\n%s", command.CommandPath(), text)
+				}
+				for _, child := range command.Commands() {
+					walk(child)
+				}
 			}
+			walk(command)
 		})
 	}
 }
 
 func TestContactCommandHelpUsesHEYTerminology(t *testing.T) {
 	root := newRootCmd()
-	contacts, _, err := root.Find([]string{"contacts"})
+	contacts, _, err := root.Find([]string{"contact"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,22 +105,21 @@ USAGE
   hey tui                 Open the interactive app
 
 CORE COMMANDS
-  tui        Launch the interactive terminal UI
-  box        List HEY boxes and their email threads
-  threads    Read a thread
-  reply      Reply to a thread
-  compose    Write and send a new email
-  search     Search email threads and messages
-  contacts   Manage contacts
-  calendars  List calendars
-  todo       Create and manage to-dos
-  journal    Read and write journal entries
+  tui       Launch the interactive terminal UI
+  box       List HEY boxes and their email threads
+  thread    Read email threads
+  reply     Reply to a thread
+  compose   Write and send a new email
+  search    Search email threads and messages
+  contact   Manage contacts
+  calendar  Browse your calendars
+  journal   Read and write journal entries
 
 MAIL
-  screener     Decide who gets to email you
-  attachments  List and save files from a thread
-  drafts       List draft emails
-  watch        Follow email threads as they change
+  screener    Decide who gets to email you
+  attachment  List and save files from a thread
+  draft       Browse unsent drafts
+  watch       Follow email threads as they change
 
 WRITE & SHARE
   bulk-reply  Reply to multiple email threads
@@ -136,18 +144,20 @@ ORGANIZE
   stop-ignoring  Stop ignoring email threads
 
 CALENDAR & TASKS
-  recordings  List events, to-dos, and other calendar entries
-  habit       Create and manage habits
-  timetrack   Track time
+  event      Read and manage calendar events
+  todo       Create and manage to-dos
+  habit      Create and manage habits
+  timetrack  Track time
 
 ACCOUNT & SYSTEM
-  auth      Sign in, sign out, and check login status
-  accounts  List and select linked mail accounts
-  config    View and change settings
-  setup     Set up HEY for first use
-  doctor    Find login and configuration problems
-  upgrade   Upgrade hey to the latest release
-  version   Show the installed hey version
+  auth              Sign in, sign out, and check login status
+  account           List and select linked mail accounts
+  config            View and change settings
+  setup             Set up HEY for first use
+  shell-completion  Set up tab completion for your shell
+  doctor            Find login and configuration problems
+  upgrade           Upgrade hey to the latest release
+  version           Show the installed hey version
 
 HELP TOPICS
   output           Output formats and filtering
@@ -176,7 +186,7 @@ EXAMPLES
   $ hey box view imbox
   $ hey compose --to alice@example.com --subject "Lunch plans" -m "Are you free Friday?"
   $ hey todo list
-  $ hey threads 123 --json
+  $ hey thread read 123 --json
 
 LEARN MORE
   hey commands          List all available commands

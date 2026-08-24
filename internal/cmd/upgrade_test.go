@@ -544,12 +544,12 @@ func TestUpgradeAndVersionSkipAccountScope(t *testing.T) {
 			t.Errorf("%s must not use account scope", name)
 		}
 	}
-	boxes, _, err := root.Find([]string{"boxes"})
+	boxList, _, err := root.Find([]string{"box", "list"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !commandUsesAccountScope(boxes) {
-		t.Error("boxes should still use account scope")
+	if !commandUsesAccountScope(boxList) {
+		t.Error("box list should still use account scope")
 	}
 }
 

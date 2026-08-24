@@ -26,7 +26,7 @@ func TestClipsCommandListsClipsInEveryFormat(t *testing.T) {
 		_, _ = io.WriteString(w, clipsJSON)
 	})
 
-	response, err := runJSONCommand(t, handler, "clips")
+	response, err := runJSONCommand(t, handler, "clip", "list")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,26 +40,26 @@ func TestClipsCommandListsClipsInEveryFormat(t *testing.T) {
 		t.Errorf("items = %#v", items)
 	}
 
-	ids, idsStderr, err := runFormattedCommandWithStderr(t, handler, []string{"--ids-only"}, "clips")
+	ids, idsStderr, err := runFormattedCommandWithStderr(t, handler, []string{"--ids-only"}, "clip", "list")
 	if err != nil || ids != "4\n3\n" || !strings.Contains(idsStderr, "newest clips page") {
 		t.Errorf("ids = %q, stderr = %q, err = %v", ids, idsStderr, err)
 	}
-	count, err := runFormattedCommand(t, handler, []string{"--count"}, "clips")
+	count, err := runFormattedCommand(t, handler, []string{"--count"}, "clip", "list")
 	if err != nil || count != "2\n" {
 		t.Errorf("count = %q, err = %v", count, err)
 	}
-	markdown, err := runFormattedCommand(t, handler, []string{"--markdown"}, "clips")
+	markdown, err := runFormattedCommand(t, handler, []string{"--markdown"}, "clip", "list")
 	if err != nil || !strings.Contains(markdown, "| 4 | The launch moves to Wednesday\\. | 987 | 55 | Launch planning |") {
 		t.Errorf("markdown = %q, err = %v", markdown, err)
 	}
-	styled, styledStderr, err := runFormattedCommandWithStderr(t, handler, []string{"--styled"}, "clips")
+	styled, styledStderr, err := runFormattedCommandWithStderr(t, handler, []string{"--styled"}, "clip", "list")
 	if err != nil || !strings.Contains(styled, "Launch planning (55)") || !strings.Contains(styled, "Entry") || !strings.Contains(styledStderr, "newest clips page") {
 		t.Errorf("styled = %q, stderr = %q, err = %v", styled, styledStderr, err)
 	}
 }
 
 func TestClipsMarkdownSurfacesWriteFailure(t *testing.T) {
-	cmd := newClipsCommand().cmd
+	cmd := newClipListCommand().cmd
 	cmd.SetOut(failingWriter{})
 	if err := writeClipsMarkdown(cmd, []generated.Clip{{Id: 4, Content: "Keep this", EntryId: 987}}); err == nil {
 		t.Fatal("expected the write failure")
@@ -71,18 +71,18 @@ func TestClipsCommandPreservesEmptyList(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `[]`)
 	})
-	response, err := runJSONCommand(t, handler, "clips")
+	response, err := runJSONCommand(t, handler, "clip", "list")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if items := response.Data.([]any); len(items) != 0 || response.Summary != "0 clips" || response.Notice != "" {
 		t.Errorf("response = %#v", response)
 	}
-	markdown, err := runFormattedCommand(t, handler, []string{"--markdown"}, "clips")
+	markdown, err := runFormattedCommand(t, handler, []string{"--markdown"}, "clip", "list")
 	if err != nil || markdown != "(no results)\n" {
 		t.Errorf("markdown = %q, err = %v", markdown, err)
 	}
-	styled, err := runStyledCommand(t, handler, "clips")
+	styled, err := runStyledCommand(t, handler, "clip", "list")
 	if err != nil || styled != "No clips found\n" {
 		t.Errorf("styled = %q, err = %v", styled, err)
 	}
@@ -93,11 +93,11 @@ func TestClipsCommandSanitizesHumanOutput(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `[{"id":4,"content":"[click](https://example.invalid)\u001b[31m","entry_id":987,"topic":{"id":55,"name":"Safe\u001b[31mRed"}}]`)
 	})
-	styled, err := runStyledCommand(t, handler, "clips")
+	styled, err := runStyledCommand(t, handler, "clip", "list")
 	if err != nil || strings.Contains(styled, "\x1b[31m") {
 		t.Errorf("styled = %q, err = %v", styled, err)
 	}
-	markdown, err := runFormattedCommand(t, handler, []string{"--markdown"}, "clips")
+	markdown, err := runFormattedCommand(t, handler, []string{"--markdown"}, "clip", "list")
 	if err != nil || strings.Contains(markdown, "[click](") || !strings.Contains(markdown, `\[click\]`) {
 		t.Errorf("markdown = %q, err = %v", markdown, err)
 	}
@@ -281,7 +281,7 @@ func TestClipCommandsForwardTheSelectedAccountContext(t *testing.T) {
 	})
 
 	for _, args := range [][]string{
-		{"--account", "2", "clips"},
+		{"--account", "2", "clip", "list"},
 		{"--account", "2", "clip", "create", "987", "--content", "Keep this"},
 		{"--account", "2", "clip", "delete", "44"},
 	} {

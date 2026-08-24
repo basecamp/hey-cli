@@ -323,7 +323,7 @@ func TestBoxSummaryUsesThreadTerminology(t *testing.T) {
 }
 
 // The thread ID is the point of a listing: whatever `hey box --json` calls topic_id is
-// what `hey threads` reads, and the box item ID is not.
+// what `hey thread read` reads, and the box item ID is not.
 func TestBoxCommandCarriesAThreadIDThatThreadsReads(t *testing.T) {
 	var paths []string
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -363,7 +363,7 @@ func TestBoxCommandCarriesAThreadIDThatThreadsReads(t *testing.T) {
 	}
 	threadID := fmt.Sprintf("%d", int64(topicID))
 
-	if _, err := runJSONCommand(t, handler, "threads", threadID); err != nil {
+	if _, err := runJSONCommand(t, handler, "thread", "read", threadID); err != nil {
 		t.Fatalf("execute threads %s: %v", threadID, err)
 	}
 	if got, want := paths[1], "/topics/2080632163/entries.json"; got != want {

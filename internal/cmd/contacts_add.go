@@ -29,8 +29,8 @@ func newContactsAddCommand() *contactsAddCommand {
 		Annotations: map[string]string{
 			"agent_notes": "Name and email are required. Repeat --alias for alternate email addresses. --account-user-id selects an account when the HEY identity has more than one.",
 		},
-		Example: `  hey contacts add --name "Jane Doe" --email jane@example.com
-  hey contacts add --name "Jane Doe" --email jane@example.com --alias jane.doe@example.org`,
+		Example: `  hey contact add --name "Jane Doe" --email jane@example.com
+  hey contact add --name "Jane Doe" --email jane@example.com --alias jane.doe@example.org`,
 		RunE: addCommand.run,
 		Args: cobra.NoArgs,
 	}
@@ -75,7 +75,7 @@ func (c *contactsAddCommand) run(cmd *cobra.Command, _ []string) error {
 		fmt.Sprintf("Contact added: %s <%s> (#%d)", terminal.SanitizeLine(contact.Name), terminal.SanitizeLine(contact.EmailAddress), contact.Id),
 		"Contact added",
 		contact,
-		output.WithBreadcrumbs(output.Breadcrumb{Action: "view", Command: fmt.Sprintf("hey contacts show %d", contact.Id), Description: "View the contact"}),
+		output.WithBreadcrumbs(output.Breadcrumb{Action: "view", Command: fmt.Sprintf("hey contact show %d", contact.Id), Description: "View the contact"}),
 	)
 }
 

@@ -20,9 +20,9 @@ func newContactsUnbundleCommand() *contactsUnbundleCommand {
 		Short: "List a contact's mail separately",
 		Long:  "Stop grouping mail from a contact so each thread appears separately in HEY.",
 		Annotations: map[string]string{
-			"agent_notes": "Unbundling reverses `hey contacts bundle <id>` and preserves the underlying threads.",
+			"agent_notes": "Unbundling reverses `hey contact bundle <id>` and preserves the underlying threads.",
 		},
-		Example: `  hey contacts unbundle 12345`,
+		Example: `  hey contact unbundle 12345`,
 		RunE:    unbundleCommand.run,
 		Args:    usageExactOneArg(),
 	}
@@ -44,6 +44,6 @@ func (c *contactsUnbundleCommand) run(cmd *cobra.Command, args []string) error {
 		fmt.Sprintf("Unbundle request accepted for contact %d.", contactID),
 		"Unbundle request accepted",
 		contactBundleResult{ID: contactID, Action: "unbundle"},
-		output.WithBreadcrumbs(output.Breadcrumb{Action: "bundle", Command: fmt.Sprintf("hey contacts bundle %d", contactID), Description: "Bundle this contact's mail"}),
+		output.WithBreadcrumbs(output.Breadcrumb{Action: "bundle", Command: fmt.Sprintf("hey contact bundle %d", contactID), Description: "Bundle this contact's mail"}),
 	)
 }

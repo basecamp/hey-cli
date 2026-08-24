@@ -86,7 +86,7 @@ func TestThreadsReadsALongThreadAsMarkdown(t *testing.T) {
 	const replies = 11
 	topicID, _ := longThread(t, replies)
 
-	resp := heyJSON(t, "threads", topicID)
+	resp := heyJSON(t, "thread", "read", topicID)
 	entries := dataAs[[]threadEntry](t, resp)
 	if len(entries) != replies+1 {
 		t.Fatalf("thread has %d entries, want %d", len(entries), replies+1)
@@ -133,7 +133,7 @@ func TestThreadsReadsALongThreadAsMarkdown(t *testing.T) {
 		}
 	}
 
-	count := strings.TrimSpace(heyOK(t, "threads", topicID, "--count"))
+	count := strings.TrimSpace(heyOK(t, "thread", "read", topicID, "--count"))
 	if count != strconv.Itoa(replies+1) {
 		t.Errorf("--count = %q, want %d", count, replies+1)
 	}
@@ -147,7 +147,7 @@ func TestThreadsFormats(t *testing.T) {
 	topicID, _ := longThread(t, replies)
 
 	t.Run("json", func(t *testing.T) {
-		resp := heyJSON(t, "threads", topicID)
+		resp := heyJSON(t, "thread", "read", topicID)
 		got := dataAs[[]threadEntry](t, resp)
 		if len(got) != entries || resp.Summary != fmt.Sprintf("%d entries in thread %s", entries, topicID) {
 			t.Errorf("entries = %d, summary = %q", len(got), resp.Summary)
@@ -155,7 +155,7 @@ func TestThreadsFormats(t *testing.T) {
 	})
 
 	t.Run("markdown", func(t *testing.T) {
-		out := heyOK(t, "threads", topicID, "--markdown")
+		out := heyOK(t, "thread", "read", topicID, "--markdown")
 		if !strings.HasPrefix(out, "# Thread "+topicID+"\n") {
 			t.Errorf("markdown = %q, want a document heading", out)
 		}
@@ -168,7 +168,7 @@ func TestThreadsFormats(t *testing.T) {
 	})
 
 	t.Run("ids", func(t *testing.T) {
-		out := heyOK(t, "threads", topicID, "--ids-only")
+		out := heyOK(t, "thread", "read", topicID, "--ids-only")
 		ids := strings.Fields(out)
 		if len(ids) != entries {
 			t.Errorf("--ids-only = %q, want %d IDs", out, entries)
@@ -181,13 +181,13 @@ func TestThreadsFormats(t *testing.T) {
 	})
 
 	t.Run("count", func(t *testing.T) {
-		if out := strings.TrimSpace(heyOK(t, "threads", topicID, "--count")); out != strconv.Itoa(entries) {
+		if out := strings.TrimSpace(heyOK(t, "thread", "read", topicID, "--count")); out != strconv.Itoa(entries) {
 			t.Errorf("--count = %q, want %d", out, entries)
 		}
 	})
 
 	t.Run("quiet", func(t *testing.T) {
-		out := heyOK(t, "threads", topicID, "--quiet")
+		out := heyOK(t, "thread", "read", topicID, "--quiet")
 		var got []threadEntry
 		if err := json.Unmarshal([]byte(out), &got); err != nil || len(got) != entries {
 			t.Errorf("--quiet = %q, err = %v, want the bare entries", out, err)
@@ -195,14 +195,14 @@ func TestThreadsFormats(t *testing.T) {
 	})
 
 	t.Run("jq", func(t *testing.T) {
-		out := heyOK(t, "threads", topicID, "--jq", ".data | length")
+		out := heyOK(t, "thread", "read", topicID, "--jq", ".data | length")
 		if strings.TrimSpace(out) != strconv.Itoa(entries) {
 			t.Errorf("--jq = %q, want %d", out, entries)
 		}
 	})
 
 	t.Run("styled", func(t *testing.T) {
-		out := heyOK(t, "threads", topicID, "--styled")
+		out := heyOK(t, "thread", "read", topicID, "--styled")
 		if strings.Count(out, "From: ") != entries {
 			t.Errorf("styled = %q, want a From line per entry", out)
 		}
@@ -215,7 +215,7 @@ func TestThreadsFormats(t *testing.T) {
 	})
 
 	t.Run("html to a pipe", func(t *testing.T) {
-		out := heyOK(t, "threads", topicID, "--html")
+		out := heyOK(t, "thread", "read", topicID, "--html")
 		if !strings.HasPrefix(out, "<!doctype html>\n") || !strings.Contains(out, `<meta charset="utf-8">`) || !strings.HasSuffix(out, "</body>\n</html>\n") {
 			t.Errorf("--html = %q, want an HTML document declaring its charset", out)
 		}
@@ -232,15 +232,15 @@ func TestThreadsFormats(t *testing.T) {
 	})
 
 	t.Run("html refuses other selectors", func(t *testing.T) {
-		_, stderr := heyFail(t, "threads", topicID, "--html", "--json")
+		_, stderr := heyFail(t, "thread", "read", topicID, "--html", "--json")
 		if !strings.Contains(stderr, "cannot use --html with --json") {
 			t.Errorf("stderr = %q", stderr)
 		}
 	})
 
 	t.Run("html refused elsewhere", func(t *testing.T) {
-		_, stderr := heyFail(t, "boxes", "--html")
-		if !strings.Contains(stderr, "--html is not supported by hey boxes") {
+		_, stderr := heyFail(t, "box", "list", "--html")
+		if !strings.Contains(stderr, "--html is not supported by hey box list") {
 			t.Errorf("stderr = %q", stderr)
 		}
 	})

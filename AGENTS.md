@@ -101,8 +101,8 @@ because both were mis-stated here before:
   `Messages().Get`, within literal limits (`threadload.DefaultLimits`: pages, entries,
   message requests, retries, concurrency, retained bytes, deadline), and reports per
   entry whether the body was `hydrated`, `bodyless`, `not_requested`, `over_limit` or
-  `failed`. Hydration is the caller's decision: `hey threads --count` and `--ids-only` read
-  the index only, `hey attachments` always reads bodies because attachment metadata lives
+  `failed`. Hydration is the caller's decision: `hey thread read --count` and `--ids-only`
+  read the index only, `hey attachment list` always reads bodies because the metadata lives
   in the HTML. A thread that could be read only in part is refused without
   `--allow-partial`; with it the notice says what is missing (`threadNotice` in
   `internal/cmd/thread_source.go`). The package takes a `Source` interface rather than the
@@ -393,7 +393,7 @@ either — search results are never re-read live.
 Contacts are the same kind of exception, for a different reason. `ContactsController#index`
 pages an Elasticsearch relation with no `ordered_by`, so geared hands out offsets and its
 `Link` header carries a page number; `contactsView` keeps a `nextPage int` and zeroes it on
-the first empty page, the way `hey contacts` already does in `readContactsPage`. The `Link`
+the first empty page, the way `hey contact list` already does in `readContactsPage`. The `Link`
 header is not read at all — `Contacts().List` throws it away, and an empty page is a
 cheaper way to learn the same thing than a `ListPage` in the SDK. Contacts are never
 re-read live either, so there is no `headIDs` here.

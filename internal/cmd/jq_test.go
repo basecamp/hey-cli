@@ -34,7 +34,7 @@ func TestValidateJQFlags(t *testing.T) {
 		{name: "count conflict", args: []string{"auth", "status"}, filter: ".data", requested: true, count: true, want: "cannot use --jq with --count"},
 		{name: "root help", filter: ".", requested: true},
 		{name: "auth token", args: []string{"auth", "token"}, filter: ".", requested: true, want: "--jq is not supported by the auth token command"},
-		{name: "completion", args: []string{"completion"}, filter: ".", requested: true, want: "--jq is not supported by the completion command"},
+		{name: "completion", args: []string{"shell-completion", "generate"}, filter: ".", requested: true, want: "--jq is not supported by the shell-completion generate command"},
 		{name: "skill display", args: []string{"skill"}, filter: ".", requested: true, want: "--jq is not supported by the skill display command"},
 		{name: "tui", args: []string{"tui"}, filter: ".", requested: true, want: "--jq is not supported by the interactive app"},
 		{name: "hey alias", args: []string{"hey"}, filter: ".", requested: true, want: "--jq is not supported by the interactive app"},

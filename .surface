@@ -13,14 +13,15 @@ hey --stats
 hey --styled
 hey --verbose
 hey --version
-hey accounts
-hey accounts list
-hey accounts use
-hey attachments
-hey attachments --allow-partial
-hey attachments save
-hey attachments save --force
-hey attachments save --output
+hey account
+hey account list
+hey account use
+hey attachment
+hey attachment list
+hey attachment list --allow-partial
+hey attachment save
+hey attachment save --force
+hey attachment save --output
 hey auth
 hey auth login
 hey auth login --cookie
@@ -42,9 +43,6 @@ hey box view
 hey box view --all
 hey box view --limit
 hey box view --page
-hey boxes
-hey boxes --all
-hey boxes --limit
 hey bulk-reply
 hey bulk-reply preview
 hey bulk-reply send
@@ -52,13 +50,13 @@ hey bulk-reply send --attach
 hey bulk-reply send --message
 hey bulk-reply send --message-html
 hey bulk-reply undo
-hey calendars
+hey calendar
+hey calendar list
 hey clip
 hey clip create
 hey clip create --content
 hey clip delete
 hey clip list
-hey clips
 hey collection
 hey collection --all
 hey collection --limit
@@ -79,11 +77,7 @@ hey collection view
 hey collection view --all
 hey collection view --limit
 hey collection view --page
-hey collections
-hey collections --all
-hey collections --limit
 hey commands
-hey completion
 hey compose
 hey compose --attach
 hey compose --bcc
@@ -99,34 +93,83 @@ hey config show
 hey config trust-local
 hey config trusted-locals
 hey config untrust-local
-hey contacts
-hey contacts add
-hey contacts add --account-user-id
-hey contacts add --alias
-hey contacts add --email
-hey contacts add --name
-hey contacts bundle
-hey contacts hide
-hey contacts list
-hey contacts list --all
-hey contacts list --page
-hey contacts note
-hey contacts note delete
-hey contacts note set
-hey contacts note set --note
-hey contacts note set --note-html
-hey contacts note show
-hey contacts show
-hey contacts show-again
-hey contacts unbundle
-hey contacts update
-hey contacts update --alias
-hey contacts update --email
-hey contacts update --name
+hey contact
+hey contact add
+hey contact add --account-user-id
+hey contact add --alias
+hey contact add --email
+hey contact add --name
+hey contact bundle
+hey contact hide
+hey contact list
+hey contact list --all
+hey contact list --page
+hey contact note
+hey contact note delete
+hey contact note set
+hey contact note set --note
+hey contact note set --note-html
+hey contact note show
+hey contact show
+hey contact show-again
+hey contact unbundle
+hey contact update
+hey contact update --alias
+hey contact update --email
+hey contact update --name
 hey doctor
-hey drafts
-hey drafts --all
-hey drafts --limit
+hey draft
+hey draft list
+hey draft list --all
+hey draft list --limit
+hey event
+hey event add
+hey event add --all-day
+hey event add --calendar
+hey event add --circle
+hey event add --countdown
+hey event add --countdown-unit
+hey event add --end-time
+hey event add --ends-on
+hey event add --invite
+hey event add --link
+hey event add --location
+hey event add --notes
+hey event add --remind
+hey event add --repeat
+hey event add --repeat-times
+hey event add --repeat-until
+hey event add --start-time
+hey event add --starts-on
+hey event add --time-zone
+hey event add --title
+hey event delete
+hey event edit
+hey event edit --all-day
+hey event edit --calendar
+hey event edit --circle
+hey event edit --countdown
+hey event edit --countdown-unit
+hey event edit --end-time
+hey event edit --ends-on
+hey event edit --invite
+hey event edit --link
+hey event edit --location
+hey event edit --notes
+hey event edit --remind
+hey event edit --repeat
+hey event edit --repeat-times
+hey event edit --repeat-until
+hey event edit --start-time
+hey event edit --starts-on
+hey event edit --time-zone
+hey event edit --title
+hey event list
+hey event list --all
+hey event list --calendar
+hey event list --ends-on
+hey event list --limit
+hey event list --starts-on
 hey forward
 hey forward --bcc
 hey forward --cc
@@ -147,13 +190,20 @@ hey habit edit --color
 hey habit edit --days
 hey habit edit --icon
 hey habit edit --name
+hey habit list
+hey habit list --all
+hey habit list --date
+hey habit list --limit
 hey habit uncomplete
 hey habit uncomplete --date
 hey ignore
 hey journal
 hey journal list
 hey journal list --all
+hey journal list --calendar
+hey journal list --ends-on
 hey journal list --limit
+hey journal list --starts-on
 hey journal read
 hey journal write
 hey journal write --content
@@ -174,9 +224,6 @@ hey label view
 hey label view --all
 hey label view --limit
 hey label view --page
-hey labels
-hey labels --all
-hey labels --limit
 hey login
 hey login --cookie
 hey login --no-browser
@@ -184,11 +231,6 @@ hey login --token
 hey logout
 hey move
 hey move --to
-hey recordings
-hey recordings --all
-hey recordings --ends-on
-hey recordings --limit
-hey recordings --starts-on
 hey reply
 hey reply --attach
 hey reply --message
@@ -231,6 +273,10 @@ hey setup omarchy --no-notify
 hey setup omarchy --notify
 hey setup omarchy --remove
 hey share
+hey shell-completion
+hey shell-completion generate
+hey shell-completion install
+hey shell-completion install --force
 hey skill
 hey skill install
 hey snippet
@@ -244,11 +290,11 @@ hey snippet update
 hey snippet update --content
 hey snippet update --content-html
 hey snippet update --name
-hey snippets
 hey spam
 hey stop-ignoring
-hey threads
-hey threads --allow-partial
+hey thread
+hey thread read
+hey thread read --allow-partial
 hey timetrack
 hey timetrack categories
 hey timetrack category
@@ -280,7 +326,10 @@ hey todo complete
 hey todo delete
 hey todo list
 hey todo list --all
+hey todo list --calendar
+hey todo list --ends-on
 hey todo list --limit
+hey todo list --starts-on
 hey todo uncomplete
 hey trash
 hey tui
@@ -322,6 +371,3 @@ hey workflow stage update --name
 hey workflow update
 hey workflow update --name
 hey workflow view
-hey workflows
-hey workflows --all
-hey workflows --limit

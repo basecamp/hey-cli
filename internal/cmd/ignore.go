@@ -15,7 +15,7 @@ type ignoreCommand struct {
 func newIgnoreCommand() *ignoreCommand {
 	ignoreCommand := &ignoreCommand{}
 	ignoreCommand.cmd = &cobra.Command{
-		Use:   "ignore <id>...",
+		Use:   "ignore <box-item-id>...",
 		Short: "Ignore email threads",
 		Long:  "Ignore one or more email threads so new replies do not bring them back to your attention.",
 		Example: `  hey ignore 12345

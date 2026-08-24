@@ -4,7 +4,7 @@ project_name: hey
 
 before:
   hooks:
-    - sh -c 'mkdir -p completions && go run ./cmd/hey completion bash > completions/hey.bash && go run ./cmd/hey completion zsh > completions/_hey && go run ./cmd/hey completion fish > completions/hey.fish'
+    - sh -c 'mkdir -p completions && go run ./cmd/hey shell-completion generate bash > completions/hey.bash && go run ./cmd/hey shell-completion generate zsh > completions/_hey && go run ./cmd/hey shell-completion generate fish > completions/hey.fish'
     # release.sh commits the stable metadata stamps (plugin.json and
     # nix/package.nix) to main before tagging a stable release. Nothing here
     # can repair a tag pushed by hand without that commit (both files ship

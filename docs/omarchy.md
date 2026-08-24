@@ -92,7 +92,7 @@ account switcher, `New for you` / `Previously seen` tabs, the Screener count, ma
 and the setup flow that installs `hey-cli` from the AUR and signs you in. hey-cli is the
 engine, and the plugin composes its generic commands: `hey box view imbox --json` for the Imbox,
 `hey watch` to know when to read it again, `hey screener list --count` for the Screener,
-`hey seen` for marking, `hey accounts list` and `hey auth status` for the rest. The
+`hey seen` for marking, `hey account list` and `hey auth status` for the rest. The
 division was settled when both sides turned out to have built a bar indicator without
 knowing of the other — two HEY icons, two Imbox pollers, two product stances in one slot —
 and the answer was: **the CLI is the engine, the plugin is the face.**
@@ -229,6 +229,33 @@ new --run-async 'notify-send -a HEY "New mail in HEY"'` is the one-liner.
   desktop's presentation into a generic command and scoped the Imbox with a flag of its
   own, where `--events new` and the plugin's own read of the box do the same without
   either.)
+
+## Shell completions under mise
+
+Omarchy installs hey through mise, lazily: the install step writes a small wrapper onto
+`~/.local/bin/hey` that resolves the tool with mise and execs it on first use. Nothing
+about that registers completions. mise has no per-tool post-install hook, `mise activate`
+emits no completion code, and mise scans no directory of its own for a tool's completions
+— so where the AUR package drops a script into `/usr/share/bash-completion/completions`,
+a mise install drops nothing anywhere, and the user has no way of knowing they are missing
+anything.
+
+`hey shell-completion install` is the hey-cli side of that: it writes the script into
+`~/.local/share/bash-completion/completions/hey`, which the loader Omarchy sources from
+`default/bash/shell` lazy-loads by command name, with no rc change and nothing to source.
+`hey setup` runs it, so a first `hey` settles it, and `hey doctor` reports it.
+
+Two things it does that a hand-redirected `hey shell-completion generate bash` does not. It **points the
+script at the resolved binary** rather than at the word the user typed: cobra asks
+`${words[0]}` for completions, which through the wrapper means a `mise use -g` round trip
+on every press of Tab. And it **refuses to overwrite a completion file hey did not
+write**, on the same terms as the agent skill directories — the marker is a comment on the
+file's second line, since zsh needs `#compdef` on the first.
+
+The remaining half belongs in the Omarchy repo, not here: its lazily-created wrapper (or
+the first-run path around it) is the natural place to call `hey shell-completion install`, the
+way the AUR package's completions arrive without asking. hey-cli cannot install
+completions for a binary that has not been fetched yet.
 
 ## Follow-ups, in rough order
 

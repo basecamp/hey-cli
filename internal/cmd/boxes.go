@@ -17,14 +17,6 @@ type boxesCommand struct {
 	all   bool
 }
 
-func newBoxesCommand() *boxesCommand {
-	command := newBoxesListingCommand("boxes", `  hey boxes
-  hey boxes --limit 5
-  hey boxes --json`)
-	command.cmd.Annotations[compatibilityForAnnotation] = "box list"
-	return command
-}
-
 func newBoxListCommand() *boxesCommand {
 	command := newBoxesListingCommand("list", `  hey box list
   hey box list --limit 5

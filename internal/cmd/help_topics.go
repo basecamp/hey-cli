@@ -76,12 +76,12 @@ Command-line flags take precedence over environment values.`,
 			Long: `Choose a linked mail account for mail commands within one HEY identity.
 
 DISCOVERY & DEFAULTS
-  hey accounts list       List All Accounts and every linked account.
-  hey accounts use ID     Save a linked account as the default mail filter.
-  hey accounts use all    Return to All Accounts.
+  hey account list      List All Accounts and every linked account.
+  hey account use ID    Save a linked account as the default mail filter.
+  hey account use all   Return to All Accounts.
 
 ONE INVOCATION
-  hey --account ID boxes
+  hey --account ID box list
   HEY_ACCOUNT_ID=ID hey search "quarterly planning"
 
 SELECTION ORDER

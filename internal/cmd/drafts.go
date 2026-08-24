@@ -17,18 +17,28 @@ type draftsCommand struct {
 	all   bool
 }
 
+func newDraftCommand() *cobra.Command {
+	draft := &cobra.Command{
+		Use:   "draft",
+		Short: "Browse unsent drafts",
+		Annotations: map[string]string{
+			"agent_notes": "Subcommands: list. Returns saved draft messages with IDs, summaries, and subjects.",
+		},
+	}
+	draft.AddCommand(newDraftsCommand().cmd)
+	return draft
+}
+
 func newDraftsCommand() *draftsCommand {
 	draftsCommand := &draftsCommand{}
 	draftsCommand.cmd = &cobra.Command{
-		Use:   "drafts",
+		Use:   "list",
 		Short: "List draft emails",
-		Annotations: map[string]string{
-			"agent_notes": "Returns saved draft messages with IDs, summaries, and subjects.",
-		},
-		Example: `  hey drafts
-  hey drafts --limit 10
-  hey drafts --json`,
+		Example: `  hey draft list
+  hey draft list --limit 10
+  hey draft list --json`,
 		RunE: draftsCommand.run,
+		Args: cobra.NoArgs,
 	}
 
 	draftsCommand.cmd.Flags().IntVar(&draftsCommand.limit, "limit", 0, "Maximum number of drafts to show")

@@ -94,7 +94,7 @@ func threadEntriesPageIndex(pages int, cursor string) int {
 }
 
 // readThreadEntries reads thread 7, the one every server here serves, with its bodies
-// the way `hey threads` does.
+// the way `hey thread read` does.
 func readThreadEntries(ctx context.Context) ([]threadEntry, error) {
 	thread, err := loadThread(ctx, 7, true)
 	if err != nil {

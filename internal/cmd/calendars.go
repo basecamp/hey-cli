@@ -15,17 +15,27 @@ type calendarsCommand struct {
 	cmd *cobra.Command
 }
 
+func newCalendarCommand() *cobra.Command {
+	calendar := &cobra.Command{
+		Use:   "calendar",
+		Short: "Browse your calendars",
+		Annotations: map[string]string{
+			"agent_notes": "Subcommands: list. Returns all calendars with IDs. Pipe IDs to hey event list --calendar <id>.",
+		},
+	}
+	calendar.AddCommand(newCalendarsCommand().cmd)
+	return calendar
+}
+
 func newCalendarsCommand() *calendarsCommand {
 	calendarsCommand := &calendarsCommand{}
 	calendarsCommand.cmd = &cobra.Command{
-		Use:   "calendars",
+		Use:   "list",
 		Short: "List calendars",
-		Annotations: map[string]string{
-			"agent_notes": "Returns all calendars with IDs. Pipe IDs to hey recordings <id>.",
-		},
-		Example: `  hey calendars
-  hey calendars --json`,
+		Example: `  hey calendar list
+  hey calendar list --json`,
 		RunE: calendarsCommand.run,
+		Args: cobra.NoArgs,
 	}
 
 	return calendarsCommand
@@ -77,8 +87,8 @@ func (c *calendarsCommand) run(cmd *cobra.Command, args []string) error {
 		output.WithSummary(fmt.Sprintf("%d calendars", len(calendars))),
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "view",
-			Command:     "hey recordings <calendar-id>",
-			Description: "List recordings for a calendar",
+			Command:     "hey event list --calendar <calendar-id>",
+			Description: "List a calendar's events",
 		}),
 	)
 }

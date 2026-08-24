@@ -56,7 +56,7 @@ func TestHTMLIsRefusedOnARealTerminal(t *testing.T) {
 	withStdout(t, openPTY(t))
 	server, _ := threadEntriesServer(t, nil, nil)
 
-	_, _, err := runCLIRaw(t, server, "threads", "7", "--html")
+	_, _, err := runCLIRaw(t, server, "thread", "read", "7", "--html")
 	var apiErr *apierr.Error
 	if !errors.As(err, &apiErr) || apiErr.Code != apierr.CodeUsage || !strings.Contains(apiErr.Message, "terminal") {
 		t.Fatalf("error = %v, want the terminal refusal", err)
@@ -83,7 +83,7 @@ func TestHTMLWritesToARealPipe(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", tmpDir)
 	root := newRootCmd()
 	root.SetErr(&bytes.Buffer{})
-	root.SetArgs([]string{"--base-url", server.URL, "threads", "7", "--html"})
+	root.SetArgs([]string{"--base-url", server.URL, "thread", "read", "7", "--html"})
 	runErr := root.Execute()
 	_ = pipeWriter.Close()
 

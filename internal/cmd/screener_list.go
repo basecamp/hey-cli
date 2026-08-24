@@ -36,7 +36,7 @@ func newScreenerListCommand() *screenerListCommand {
 		Use:   "list",
 		Short: "List the senders waiting to be screened",
 		Annotations: map[string]string{
-			"agent_notes": "Returns clearance IDs with the sender and the subject of what they sent. Feed the ID to `hey screener approve` or `hey screener deny`, and topic_id to `hey topic` to read the thread first. Use --count for the number alone, which is a much cheaper request.",
+			"agent_notes": "Returns clearance IDs with the sender and the subject of what they sent. Feed the ID to `hey screener approve` or `hey screener deny`, and topic_id to `hey thread read` to read the thread first. Use --count for the number alone, which is a much cheaper request.",
 		},
 		Example: `  hey screener list
   hey screener list --json

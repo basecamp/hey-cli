@@ -35,24 +35,25 @@ func newTodoCommand() *todoCommand {
 // list
 
 type todoListCommand struct {
-	cmd   *cobra.Command
-	limit int
-	all   bool
+	cmd    *cobra.Command
+	filter recordingFilter
 }
 
 func newTodoListCommand() *todoListCommand {
-	todoListCommand := &todoListCommand{}
+	todoListCommand := &todoListCommand{
+		filter: recordingFilter{defaultWindow: personalWindow, defaultCalendars: personalCalendarIDs},
+	}
 	todoListCommand.cmd = &cobra.Command{
 		Use:   "list",
 		Short: "List todos",
 		Example: `  hey todo list
   hey todo list --limit 10
-  hey todo list --json`,
+  hey todo list --starts-on 2026-01-01 --ends-on 2026-01-31 --json`,
 		RunE: todoListCommand.run,
+		Args: cobra.NoArgs,
 	}
 
-	todoListCommand.cmd.Flags().IntVar(&todoListCommand.limit, "limit", 0, "Maximum number of todos to show")
-	todoListCommand.cmd.Flags().BoolVar(&todoListCommand.all, "all", false, "Fetch all results (override --limit)")
+	todoListCommand.filter.registerFlags(todoListCommand.cmd, "todos", "Calendar ID to read (defaults to the personal calendar)")
 
 	return todoListCommand
 }
@@ -63,16 +64,19 @@ func (c *todoListCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := cmd.Context()
-	resp, err := listPersonalRecordings(ctx)
+	window, err := c.filter.resolve(ctx)
 	if err != nil {
 		return err
 	}
 
-	todos := filterRecordingsByType(resp, "Calendar::Todo")
+	todos, err := window.read(ctx, "Calendar::Todo")
+	if err != nil {
+		return err
+	}
 
 	total := len(todos)
-	if c.limit > 0 && !c.all && len(todos) > c.limit {
-		todos = todos[:c.limit]
+	if c.filter.limit > 0 && !c.filter.all && len(todos) > c.filter.limit {
+		todos = todos[:c.filter.limit]
 	}
 	notice := output.TruncationNotice(len(todos), total)
 

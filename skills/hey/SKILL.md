@@ -9,7 +9,7 @@ triggers:
   - hey
   - /hey
   # Email actions
-  - hey accounts
+  - hey account
   - hey box
   - hey label
   - hey collection
@@ -17,22 +17,22 @@ triggers:
   - hey clip
   - hey snippet
   - hey search
-  - hey contacts
-  - hey threads
+  - hey contact
+  - hey thread read
   - hey share
   - hey unshare
   - hey reply
   - hey bulk-reply
   - hey forward
   - hey compose
-  - hey drafts
+  - hey draft list
   - hey screener
   - screen a sender
   - approve a sender
   - deny a sender
   # Calendar actions
-  - hey calendars
-  - hey recordings
+  - hey calendar list
+  - hey event
   # Todos
   - hey todo
   # Seen/unseen
@@ -114,7 +114,7 @@ CLI for HEY: mailboxes, labels, collections, email threads, contacts, replies, c
 1. **Choose the right structured output** — use `--jq '<expression>'` to filter or extract fields and `--json` for the full response. Never pipe to an external `jq`; `--jq` is built in and implies `--json`.
 2. **Authentication required** for all data commands — run `hey auth login` first
 3. **HTML output** is available via `--html` for commands that return HTML content
-4. **Linked mail accounts share one login** — use `hey accounts list --json`, then `--account <id|all>` when a task must target one account
+4. **Linked mail accounts share one login** — use `hey account list --json`, then `--account <id|all>` when a task must target one account
 5. **Local HEY configuration requires human trust** — never run `hey config trust-local` without the user's explicit approval
 
 ## Output Filtering
@@ -134,17 +134,17 @@ For the two commonest shapes there is no need for an expression at all: `--ids-o
 one ID per line and `--count` prints a bare number, both on stdout with any pagination
 notice on stderr. Both need list data, so they work on `hey box list`, `hey box view`,
 `hey label list`, `hey label view`, `hey collection list`, `hey collection view`, `hey workflow list`,
-`hey workflow view`, `hey clip list`, `hey snippet list`, `hey drafts`, `hey search`,
-`hey contacts list`, `hey screener list`, `hey screener history`, `hey calendars`,
-`hey recordings`, `hey todo list`, `hey timetrack list`, `hey journal list` and
-`hey attachments`. On `hey box view` they count and list its postings, not the box itself.
+`hey workflow view`, `hey clip list`, `hey snippet list`, `hey draft list`, `hey search`,
+`hey contact list`, `hey screener list`, `hey screener history`, `hey calendar list`,
+`hey event list`, `hey todo list`, `hey habit list`, `hey timetrack list`, `hey journal list` and
+`hey attachment list`. On `hey box view` they count and list its postings, not the box itself.
 
 ## Quick Reference
 
 | Task | Command |
 |------|---------|
-| List linked mail accounts | `hey accounts list --json` |
-| Set default mail account | `hey accounts use <id\|all>` |
+| List linked mail accounts | `hey account list --json` |
+| Set default mail account | `hey account use <id\|all>` |
 | Run once for one account | `hey --account <id> box list --json` |
 | Review trusted local settings | `hey config trusted-locals --json` |
 | Trust this repository's settings | `hey config trust-local` (requires explicit user approval) |
@@ -167,25 +167,25 @@ notice on stderr. Both need list data, so they work on `hey box list`, `hey box 
 | List snippets | `hey snippet list --json` |
 | Search email | `hey search "quarterly planning" --json` |
 | List search filters | `hey search filters --json` |
-| List contacts | `hey contacts list --json` |
-| View contact | `hey contacts show <id> --json` |
-| Add contact | `hey contacts add --name "Jane Doe" --email jane@example.com` |
-| Edit contact | `hey contacts update <id> --name "Jane Dawson"` |
-| Hide contact | `hey contacts hide <id>` |
-| Show contact again | `hey contacts show-again <id>` |
-| Bundle a contact's mail | `hey contacts bundle <id>` |
-| List a contact's mail separately | `hey contacts unbundle <id>` |
-| Read private contact note | `hey contacts note show <id> --json` |
-| Set private contact note | `hey contacts note set <id> "Prefers email"` |
-| Delete private contact note | `hey contacts note delete <id>` |
-| Read email thread | `hey threads <topic_id> --json` |
+| List contacts | `hey contact list --json` |
+| View contact | `hey contact show <id> --json` |
+| Add contact | `hey contact add --name "Jane Doe" --email jane@example.com` |
+| Edit contact | `hey contact update <id> --name "Jane Dawson"` |
+| Hide contact | `hey contact hide <id>` |
+| Show contact again | `hey contact show-again <id>` |
+| Bundle a contact's mail | `hey contact bundle <id>` |
+| List a contact's mail separately | `hey contact unbundle <id>` |
+| Read private contact note | `hey contact note show <id> --json` |
+| Set private contact note | `hey contact note set <id> "Prefers email"` |
+| Delete private contact note | `hey contact note delete <id>` |
+| Read email thread | `hey thread read <topic_id> --json` |
 | Get a sharing link | `hey share <thread_id>` |
 | Turn off a sharing link | `hey unshare <thread_id>` |
 | Reply to email | `hey reply <topic_id> -m "Friday works for me."` |
 | Forward email | `hey forward <topic_id> --to alice@example.com -m "For your review"` |
 | Compose email | `hey compose --to alice@example.com --subject "Lunch plans" -m "Are you free Friday?"` |
 | Compose with CC/BCC | `hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Kitchen remodel timeline"` |
-| List drafts | `hey drafts --json` |
+| List drafts | `hey draft list --json` |
 | Who is waiting in The Screener | `hey screener list --json` (clearance IDs) |
 | Number waiting | `hey screener list --count` |
 | Let a sender through | `hey screener approve <clearance_id>` |
@@ -194,8 +194,9 @@ notice on stderr. Both need list data, so they work on `hey box list`, `hey box 
 | Preview a bulk reply | `hey bulk-reply preview <id> <id> --json` |
 | Send a bulk reply | `hey bulk-reply send <id> <id> -m "Thanks for the update."` |
 | Recall a bulk reply | `hey bulk-reply undo <delivery_id>` |
-| List calendars | `hey calendars --json` |
-| List calendar events | `hey recordings 123 --json` |
+| List calendars | `hey calendar list --json` |
+| List calendar events | `hey event list --json` |
+| Add a calendar event | `hey event add "Design review" --starts-on 2026-09-02 --start-time 14:00` |
 | List todos | `hey todo list --json` |
 | Add todo | `hey todo add "Draft the quarterly report"` |
 | Complete todo | `hey todo complete 123` |
@@ -210,6 +211,7 @@ notice on stderr. Both need list data, so they work on `hey box list`, `hey box 
 | Mark email threads as spam | `hey spam 12345` |
 | Ignore email threads | `hey ignore 12345` |
 | Stop ignoring email threads | `hey stop-ignoring 12345` |
+| List habits | `hey habit list --json` |
 | Create habit | `hey habit create "Morning strength training"` |
 | Edit habit | `hey habit edit 123 --days mon,wed,fri` |
 | Delete habit | `hey habit delete 123` |
@@ -244,8 +246,8 @@ Want to read email?
 ├── Create, update, add to, or remove from a collection? → hey collection create|update|add|remove
 ├── Search threads and messages? → hey search <query> --json
 ├── Need available refinements? → hey search filters --json
-├── List or view contacts? → hey contacts list --json / hey contacts show <id> --json
-├── Read full thread? → hey threads <topic_id> --json
+├── List or view contacts? → hey contact list --json / hey contact show <id> --json
+├── Read full thread? → hey thread read <topic_id> --json
 ├── Get a sharing link? → hey share <thread_id>
 ├── Turn off the sharing link? → hey unshare <thread_id>
 ├── Mark as seen? → hey seen <id>
@@ -276,9 +278,9 @@ Want to send email?
 │   ├── With files? → add --attach ./report.pdf (repeatable; body is optional)
 │   ├── With CC? → add --cc <email>
 │   └── With BCC? → add --bcc <email>
-├── List files in a thread? → hey attachments <topic_id> --json
-│   └── Save one? → hey attachments save <attachment_id> [--output <path>]
-└── Check drafts? → hey drafts --json
+├── List files in a thread? → hey attachment list <topic_id> --json
+│   └── Save one? → hey attachment save <attachment_id> [--output <path>]
+└── Check drafts? → hey draft list --json
 ```
 
 ### Managing Todos
@@ -305,7 +307,7 @@ hey box view imbox --page next-cursor --json # Continue from an earlier listing
 
 Box names: `imbox`, `feedbox`, `trailbox`, `asidebox`, `laterbox`, `bubblebox`
 
-**Response format:** `hey box view --json` returns the box itself — `id`, `kind`, `name`, `app_url`, `next_history_url`, `next_page` — with a `postings` array of the email threads in it. Each posting has: `id` (box item ID), `topic_id` (thread ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`, `visible_entry_count`. Use `id` for `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring`, and `topic_id` for `hey threads`, `hey reply`, `hey forward`, `hey share` and `hey attachments`. A box item `id` passed to `hey threads` answers `not_found`, and so does a `topic_id` passed to `hey move`.
+**Response format:** `hey box view --json` returns the box itself — `id`, `kind`, `name`, `app_url`, `next_history_url`, `next_page` — with a `postings` array of the email threads in it. Each posting has: `id` (box item ID), `topic_id` (thread ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`, `visible_entry_count`. Use `id` for `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring`, and `topic_id` for `hey thread read`, `hey reply`, `hey forward`, `hey share` and `hey attachment list`. A box item `id` passed to `hey thread read` answers `not_found`, and so does a `topic_id` passed to `hey move`.
 
 `next_page` is the cursor `--page` takes, and it is the cursor inside `next_history_url` — `--page` accepts either. `--all` reads to the end instead.
 
@@ -350,42 +352,42 @@ Search refinements are `--required`, `--any`, `--none`, `--exact`, `--from`, `--
 
 `--in`, `--date`, `--label` and `--attachment` accept only the values `hey search filters` lists: boxes are `imbox`, `feed`, `papertrail`, `trash`; dates are `last_7_days`, `last_30_days`, `last_90_days` or a four-digit year; attachment kinds are `any`, `images`, `pdfs`, `calendar_invites`, `documents`, `spreadsheets`, `presentations`, `media`, `zip_files`. The kinds are plural — `--attachment pdfs`, not `pdf`. An unrecognized `--in`, `--date` or `--attachment` is refused as a usage error naming the values it accepts, before anything is sent; `--label` is not checked, so read `hey search filters` when unsure of a label.
 
-**Response format:** `data` contains one item per matching thread. Each result has `id` (box item ID for organization actions), `topic_id` (thread ID for `hey threads`, `hey reply`, and `hey forward`), `subject`, `updated_at`, and `messages` containing the matching message IDs, senders, dates, and summaries. A result can omit `id` when the thread has no active box item.
+**Response format:** `data` contains one item per matching thread. Each result has `id` (box item ID for organization actions), `topic_id` (thread ID for `hey thread read`, `hey reply`, and `hey forward`), `subject`, `updated_at`, and `messages` containing the matching message IDs, senders, dates, and summaries. A result can omit `id` when the thread has no active box item.
 
 ### Contacts
 
 ```bash
-hey contacts list --json                       # List contacts
-hey contacts list --page 2 --json              # List another page
-hey contacts show 12345 --json                 # View details, aliases, and private note
-hey contacts add --name "Jane Doe" --email jane@example.com
-hey contacts add --name "Jane Doe" --email jane@example.com --alias jane.doe@example.org
-hey contacts update 12345 --name "Jane Dawson"
-hey contacts update 12345 --alias=              # Clear aliases
-hey contacts hide 12345                         # Hide from lists and autocomplete
-hey contacts show-again 12345                   # Reverse hiding
-hey contacts bundle 12345                       # Group this contact's mail into one row
-hey contacts unbundle 12345                     # List this contact's mail separately
-hey contacts note show 12345 --json
-hey contacts note set 12345 "Prefers email"
-echo "Multiline private note" | hey contacts note set 12345
-hey contacts note delete 12345
+hey contact list --json                       # List contacts
+hey contact list --page 2 --json              # List another page
+hey contact show 12345 --json                 # View details, aliases, and private note
+hey contact add --name "Jane Doe" --email jane@example.com
+hey contact add --name "Jane Doe" --email jane@example.com --alias jane.doe@example.org
+hey contact update 12345 --name "Jane Dawson"
+hey contact update 12345 --alias=              # Clear aliases
+hey contact hide 12345                         # Hide from lists and autocomplete
+hey contact show-again 12345                   # Reverse hiding
+hey contact bundle 12345                       # Group this contact's mail into one row
+hey contact unbundle 12345                     # List this contact's mail separately
+hey contact note show 12345 --json
+hey contact note set 12345 "Prefers email"
+echo "Multiline private note" | hey contact note set 12345
+hey contact note delete 12345
 ```
 
-`hey contacts list` returns contact IDs, names, email addresses, and update timestamps. `hey contacts show` adds aliases, screening status, and the private note. Contact updates preserve omitted fields. Supplying `--alias` replaces the complete alias list, and `--alias=` clears it.
+`hey contact list` returns contact IDs, names, email addresses, and update timestamps. `hey contact show` adds aliases, screening status, and the private note. Contact updates preserve omitted fields. Supplying `--alias` replaces the complete alias list, and `--alias=` clears it.
 
 HEY hides contacts instead of permanently deleting them. A hidden contact leaves contact lists, autocomplete, and search results while remaining available by ID; `show-again` reverses the action. Bundling groups a contact's mail into one row without merging or deleting the underlying threads; `unbundle` lists those threads separately again. HEY applies bundling when the contact's current delivery setting supports bundles. Contact notes are private and support positional content, `--note`, stdin, or `$EDITOR`. Deleting a note leaves the contact unchanged.
 
 ### Email - Threads
 
 ```bash
-hey threads <topic_id> --json                 # Read full email thread
-hey threads <topic_id> --html                 # Read with raw HTML content
+hey thread read <topic_id> --json                 # Read full email thread
+hey thread read <topic_id> --html                 # Read with raw HTML content
 hey share <thread_id>                         # Get a sharing link
 hey unshare <thread_id>                       # Turn off the sharing link
 ```
 
-`hey threads` returns every entry in the thread, oldest first. Each entry's `body` is
+`hey thread read` returns every entry in the thread, oldest first. Each entry's `body` is
 **Markdown**, converted from HEY's Trix HTML at the edge, so headings, lists, quotes,
 tables and code survive and links keep their URLs — read it as structure rather than as
 flattened text. `--html` returns the original HTML instead. There is no `recipients` field
@@ -393,17 +395,17 @@ on an entry; use `hey reply`, which works the addressing out itself.
 
 `hey share` returns a URL that shows the entire thread and future emails or replies sent to it. Anyone with the link can open it. `hey unshare` turns off the sharing link.
 
-**ID note:** Every email thread has two IDs: an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring` expect `id`. `hey threads`, `hey share`, `hey unshare`, `hey attachments`, `hey reply`, `hey forward`, `hey collection add`, and `hey collection remove` expect `topic_id`. Passing the wrong one answers `not_found`, not a redirect.
+**ID note:** Every email thread has two IDs: an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring` expect `id`. `hey thread read`, `hey share`, `hey unshare`, `hey attachment list`, `hey reply`, `hey forward`, `hey collection add`, and `hey collection remove` expect `topic_id`. Passing the wrong one answers `not_found`, not a redirect.
 
 `hey box view --json`, `hey label view --json`, `hey collection view --json` and `hey search --json` all carry both.
 
 ### Email - Attachments
 
 ```bash
-hey attachments <topic_id> --json               # List files in every message
-hey attachments save 67890:1                    # Save using a returned ID
-hey attachments save 67890:1 --output ./reports # Save into a directory
-hey attachments save 67890:1 --output ./report.pdf --force
+hey attachment list <topic_id> --json               # List files in every message
+hey attachment save 67890:1                    # Save using a returned ID
+hey attachment save 67890:1 --output ./reports # Save into a directory
+hey attachment save 67890:1 --output ./report.pdf --force
 ```
 
 An attachment ID combines its message ID and position, so `67890:1` identifies the first attachment in message `67890`. Saving uses the original filename unless `--output` names a destination. Existing files are preserved unless `--force` is set.
@@ -538,7 +540,7 @@ Long-running, and driven by a websocket rather than polling — never poll `hey 
 loop when this will do. Writes one JSON object per changed posting to stdout, one per
 line, instead of the usual envelope: `{"change": "added", "at": ..., "box": {"id", "kind",
 "name"}, "posting_id": ..., "thread_id": ..., "new": true|false, "posting": {...}}`. Use
-`thread_id` with `hey threads`. `new` is on every `added` and `updated` line and says whether
+`thread_id` with `hey thread read`. `new` is on every `added` and `updated` line and says whether
 the posting is new mail — unseen, not muted, and active since the watch last saw the thread,
 or since the watch began for a thread it has not seen; the backlog a watch starts with is
 never new, nor is reading, muting or moving a thread, and a reply on a known thread is.
@@ -562,22 +564,54 @@ otherwise — and both take over stdout.
 ### Drafts
 
 ```bash
-hey drafts --json                             # List drafts
+hey draft list --json                             # List drafts
 ```
 
 ### Calendars
 
 ```bash
-hey calendars --json                          # List calendars (returns array of {id, name, kind})
-hey recordings 123 --json                     # List events in calendar, from today onward
-hey recordings 123 --starts-on 2026-01-01 --ends-on 2026-01-31 --json
+hey calendar list --json                          # List calendars (returns array of {id, name, kind})
 ```
 
-`--starts-on` defaults to today, `--ends-on` to thirty days after it. Both want
-`YYYY-MM-DD`; an unreadable date, or an `--ends-on` before `--starts-on`, is a usage error
-rather than an empty result.
+Everything a calendar holds is a recording, and each kind has its own command: `hey event`,
+`hey todo`, `hey journal`, `hey habit`, `hey timetrack`. Those that read a calendar's
+window — `hey event list`, `hey todo list`, `hey journal list` — share `--calendar`,
+`--starts-on`, `--ends-on`, `--limit` and `--all`. Both dates want `YYYY-MM-DD`; an
+unreadable one, or an `--ends-on` before `--starts-on`, is a usage error rather than an
+empty result. Naming only `--starts-on` moves the whole window rather than reading up to
+the default end.
 
-**Response format:** `hey recordings` returns recordings grouped by type (e.g. `{"Calendar::Event": [...], "Calendar::Habit": [...], "Calendar::Todo": [...]}`). Each recording has: `id`, `title`, `starts_at`, `ends_at`, `all_day`, `recurring`, `starts_at_time_zone`. Access a type with the built-in filter, e.g. `hey recordings 123 --quiet --jq '.["Calendar::Event"]'`. `--count` and `--ids-only` read across every type, with the types in name order.
+### Events
+
+```bash
+hey event list --json                        # Every calendar, from today onward
+hey event list --calendar 123 --starts-on 2026-01-01 --ends-on 2026-01-31 --json
+hey event add "Design review" --starts-on 2026-09-02 --start-time 14:00 --end-time 15:00
+hey event add "Sarah's birthday" --starts-on 2026-09-02   # No time given, so all day
+hey event add "Standup" --start-time 09:15 --repeat every_weekday --remind 10m
+hey event edit 4821 --title "Design review (moved)"
+hey event delete 4821
+```
+
+Without `--calendar`, `list` reads every calendar and `add` files on the first one that
+accepts events — the personal calendar is in the list HEY serves but refuses them. A
+repeating event lists once as its series, not once per day.
+
+**Response format:** a flat array of events. Each has `id`, `title`, `starts_at`, `ends_at`,
+`all_day`, `recurring`, `starts_at_time_zone` and `calendar`; one being edited also carries
+`description` (the notes, as plain text), `location`, `url`, `attached_entry` and
+`reminders`. `--count` and `--ids-only` read that array directly.
+
+**Editing is a replacement, not a patch.** `hey event edit` reads the event first and
+sends back the notes, location, link, attached email, reminders and time zones it is not
+changing, because HEY clears whatever a write omits. Two things still cannot survive it:
+notes come back as plain text, so their formatting is flattened, and a countdown is not
+served at all, so an edit removes one unless `--countdown` names it again. An event that
+cannot be read is refused rather than written blind — pass the day it starts
+(`hey event edit 4821 2026-09-02`) or `--calendar` to narrow the search.
+
+An event with no `--start-time` is all-day; a `--start-time` with no `--end-time` runs an
+hour. Clock times are read in `--time-zone`, defaulting to the machine's zone.
 
 ### Todos
 
@@ -596,6 +630,8 @@ than a request. `--date` wants `YYYY-MM-DD` and is validated before the request.
 ### Habits
 
 ```bash
+hey habit list --json                        # List habits and their IDs
+hey habit list --date 2026-09-02 --json      # The habits in that date's week
 hey habit create "Morning strength training" # Create with weights, blue, every day
 hey habit create "Practice piano" --icon music --color green --days mon,wed,fri
 hey habit edit 123 --name "Evening walk"      # Omitted fields remain unchanged
@@ -606,7 +642,10 @@ hey habit complete 123 --date 2026-03-15      # Mark complete for specific date
 hey habit uncomplete 123                      # Unmark habit for today
 ```
 
-Habit IDs can be found via `hey recordings <calendar-id> --json`. Days accept full weekday names, common abbreviations, or `0` (Sunday) through `6` (Saturday).
+Habit IDs come from `hey habit list --json`, which reads the week a date falls in — habits
+are not in a calendar's recordings listing, which carries only their completions. A week
+lists every habit exactly once, whatever weekday each is scheduled for. Days accept full
+weekday names, common abbreviations, or `0` (Sunday) through `6` (Saturday).
 
 ### Time Tracking
 

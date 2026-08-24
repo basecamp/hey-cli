@@ -25,26 +25,33 @@ type threadAttachment struct {
 	URL         string `json:"-"`
 }
 
+func newAttachmentCommand() *cobra.Command {
+	attachment := &cobra.Command{
+		Use:   "attachment",
+		Short: "List and save files from a thread",
+		Annotations: map[string]string{
+			"agent_notes": "Subcommands: list, save. Lists downloadable attachments from every message in a known thread. Pass a returned ID to `hey attachment save <id>`.",
+		},
+	}
+	attachment.AddCommand(newAttachmentsCommand().cmd)
+	attachment.AddCommand(newAttachmentsSaveCommand().cmd)
+	return attachment
+}
+
 func newAttachmentsCommand() *attachmentsCommand {
 	attachmentsCommand := &attachmentsCommand{}
 	attachmentsCommand.cmd = &cobra.Command{
-		Use:   "attachments <thread-id>",
-		Short: "List and save files from a thread",
-		Annotations: map[string]string{
-			"agent_notes": "Lists downloadable attachments from every message in a known thread. Pass a returned ID to `hey attachments save <id>`.",
-		},
-		Example: `  hey attachments 12345
-  hey attachments 12345 --json
-  hey attachments 12345 --allow-partial
-  hey attachments save 67890:1
-  hey attachments save 67890:1 --output ./quarterly-report.pdf`,
+		Use:   "list <thread-id>",
+		Short: "List a thread's attachments",
+		Example: `  hey attachment list 12345
+  hey attachment list 12345 --json
+  hey attachment list 12345 --allow-partial`,
 		RunE: attachmentsCommand.run,
 		Args: usageExactOneArg(),
 	}
 	attachmentsCommand.cmd.Flags().BoolVar(&attachmentsCommand.allowPartial, "allow-partial", false,
 		"List what could be read of a thread that could only be read in part, with a notice saying what is missing")
 
-	attachmentsCommand.cmd.AddCommand(newAttachmentsSaveCommand().cmd)
 	return attachmentsCommand
 }
 
@@ -102,7 +109,7 @@ func (c *attachmentsCommand) run(cmd *cobra.Command, args []string) error {
 	if len(attachments) > 0 {
 		options = append(options, output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "save",
-			Command:     fmt.Sprintf("hey attachments save %s", attachments[0].ID),
+			Command:     fmt.Sprintf("hey attachment save %s", attachments[0].ID),
 			Description: "Save an attachment",
 		}))
 	}

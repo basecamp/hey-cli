@@ -29,7 +29,7 @@ func TestWorkflowsCommandListsEveryLinkedAccount(t *testing.T) {
 		default:
 			http.NotFound(w, r)
 		}
-	}), "workflows")
+	}), "workflow", "list")
 	if err != nil {
 		t.Fatalf("execute workflows: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestWorkflowsCommandHonorsSelectedAccount(t *testing.T) {
 			return
 		}
 		_, _ = io.WriteString(w, `[["202","Hiring","Work"]]`)
-	}), "workflows", "--account", "2")
+	}), "workflow", "list", "--account", "2")
 	if err != nil {
 		t.Fatalf("execute account-scoped workflows: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestWorkflowsCommandLimitAndFormats(t *testing.T) {
 		http.NotFound(w, r)
 	})
 
-	response, err := runJSONCommand(t, handler, "workflows", "--limit", "1")
+	response, err := runJSONCommand(t, handler, "workflow", "list", "--limit", "1")
 	if err != nil {
 		t.Fatalf("execute workflows --limit: %v", err)
 	}
@@ -81,19 +81,19 @@ func TestWorkflowsCommandLimitAndFormats(t *testing.T) {
 		t.Errorf("response = %#v", response)
 	}
 
-	ids, err := runFormattedCommand(t, handler, []string{"--ids-only"}, "workflows", "--limit", "1", "--all")
+	ids, err := runFormattedCommand(t, handler, []string{"--ids-only"}, "workflow", "list", "--limit", "1", "--all")
 	if err != nil || ids != "101\n102\n101\n102\n" {
 		t.Errorf("ids = %q, err = %v", ids, err)
 	}
-	count, err := runFormattedCommand(t, handler, []string{"--count"}, "workflows")
+	count, err := runFormattedCommand(t, handler, []string{"--count"}, "workflow", "list")
 	if err != nil || count != "4\n" {
 		t.Errorf("count = %q, err = %v", count, err)
 	}
-	markdown, err := runFormattedCommand(t, handler, []string{"--markdown"}, "workflows", "--limit", "1")
+	markdown, err := runFormattedCommand(t, handler, []string{"--markdown"}, "workflow", "list", "--limit", "1")
 	if err != nil || !strings.Contains(markdown, "| account_id |") || !strings.Contains(markdown, "Home projects") {
 		t.Errorf("markdown = %q, err = %v", markdown, err)
 	}
-	styled, err := runStyledCommand(t, handler, "workflows", "--limit", "1")
+	styled, err := runStyledCommand(t, handler, "workflow", "list", "--limit", "1")
 	if err != nil || !strings.Contains(styled, "Account ID") || !strings.Contains(styled, "Home projects") {
 		t.Errorf("styled = %q, err = %v", styled, err)
 	}
@@ -102,7 +102,7 @@ func TestWorkflowsCommandLimitAndFormats(t *testing.T) {
 func TestWorkflowsCommandPreservesEmptyList(t *testing.T) {
 	response, err := runJSONCommand(t, workflowHandler(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `[]`)
-	}), "workflows")
+	}), "workflow", "list")
 	if err != nil {
 		t.Fatalf("execute workflows: %v", err)
 	}

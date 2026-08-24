@@ -6,9 +6,9 @@
 // request per entry. Every one of those is a request a server of somebody else's
 // choosing answers, so each has a cap: on pages, on entries, on message requests, on
 // bytes kept, on time. Nothing here decides what to do when a cap is hit; the result
-// records it per entry and the caller decides, which is what keeps `hey threads
-// --count` from reading bodies it will not show and `hey attachments` reading bodies it
-// cannot do without.
+// records it per entry and the caller decides, which is what keeps `hey thread read
+// --count` from reading bodies it will not show and `hey attachment list` reading bodies
+// it cannot do without.
 package threadload
 
 import (

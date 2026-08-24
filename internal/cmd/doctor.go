@@ -22,7 +22,7 @@ func newDoctorCommand() *cobra.Command {
 		Use:   "doctor",
 		Short: "Find login and configuration problems",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			checks := runDoctorChecks(cmd.Context())
+			checks := runDoctorChecks(cmd.Context(), cmd.Root())
 
 			if writer.IsStyled() {
 				w := cmd.OutOrStdout()
@@ -50,7 +50,7 @@ func newDoctorCommand() *cobra.Command {
 	}
 }
 
-func runDoctorChecks(ctx context.Context) []map[string]string {
+func runDoctorChecks(ctx context.Context, root *cobra.Command) []map[string]string {
 	var checks []map[string]string
 
 	// CLI Version
@@ -138,7 +138,7 @@ func runDoctorChecks(ctx context.Context) []map[string]string {
 		})
 	}
 
-	// Shell Completion
+	// Shell and its completions
 	shell := os.Getenv("SHELL")
 	if shell != "" {
 		checks = append(checks, map[string]string{
@@ -147,6 +147,7 @@ func runDoctorChecks(ctx context.Context) []map[string]string {
 			"message": shell,
 		})
 	}
+	checks = append(checks, checkShellCompletion(root))
 
 	// Agent skill + detected coding agents
 	checks = append(checks, checkBaselineSkill())

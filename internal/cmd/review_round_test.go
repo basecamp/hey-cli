@@ -18,7 +18,7 @@ func TestHTMLIsValidatedBeforeVersionAndJQ(t *testing.T) {
 		want string
 	}{
 		{[]string{"--version", "--html"}, "--html is not supported by hey"},
-		{[]string{"threads", "7", "--html", "--jq="}, "cannot use --html with --jq"},
+		{[]string{"thread", "read", "7", "--html", "--jq="}, "cannot use --html with --jq"},
 	} {
 		root := newRootCmd()
 		root.SetOut(&bytes.Buffer{})

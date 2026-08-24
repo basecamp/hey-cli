@@ -35,8 +35,8 @@ func newContactsShowCommand() *contactsShowCommand {
 		Annotations: map[string]string{
 			"agent_notes": "Returns contact details, aliases, screening status, and the private note.",
 		},
-		Example: `  hey contacts show 12345
-  hey contacts show 12345 --json`,
+		Example: `  hey contact show 12345
+  hey contact show 12345 --json`,
 		RunE: showCommand.run,
 		Args: usageExactOneArg(),
 	}
@@ -93,8 +93,8 @@ func (c *contactsShowCommand) run(cmd *cobra.Command, args []string) error {
 	return writeOK(result,
 		output.WithSummary(fmt.Sprintf("Contact %d", contactID)),
 		output.WithBreadcrumbs(
-			output.Breadcrumb{Action: "edit", Command: fmt.Sprintf("hey contacts update %d", contactID), Description: "Edit this contact"},
-			output.Breadcrumb{Action: "note", Command: fmt.Sprintf("hey contacts note set %d", contactID), Description: "Edit the private note"},
+			output.Breadcrumb{Action: "edit", Command: fmt.Sprintf("hey contact update %d", contactID), Description: "Edit this contact"},
+			output.Breadcrumb{Action: "note", Command: fmt.Sprintf("hey contact note set %d", contactID), Description: "Edit the private note"},
 		),
 	)
 }

@@ -3,7 +3,7 @@ package smoke_test
 import "testing"
 
 func TestAccountsList(t *testing.T) {
-	resp := heyJSON(t, "accounts", "list")
+	resp := heyJSON(t, "account", "list")
 	accounts := dataAs[[]struct {
 		ID     string `json:"id"`
 		Name   string `json:"name"`
@@ -18,15 +18,15 @@ func TestAccountsList(t *testing.T) {
 }
 
 func TestAccountsUseAll(t *testing.T) {
-	resp := heyJSON(t, "accounts", "use", "all")
+	resp := heyJSON(t, "account", "use", "all")
 	data := dataAs[map[string]string](t, resp)
 	if data["account_id"] != "all" {
 		t.Fatalf("account_id = %q, want all", data["account_id"])
 	}
 
-	_ = heyJSON(t, "--account", "all", "boxes")
+	_ = heyJSON(t, "--account", "all", "box", "list")
 }
 
 func TestAccountsRejectUnknownAccount(t *testing.T) {
-	heyFail(t, "--account", "9223372036854775807", "boxes")
+	heyFail(t, "--account", "9223372036854775807", "box", "list")
 }

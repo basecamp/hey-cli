@@ -118,7 +118,7 @@ func runContacts(t *testing.T, server *httptest.Server, args ...string) (output.
 	var stdout bytes.Buffer
 	root.SetOut(&stdout)
 	root.SetErr(&stdout)
-	root.SetArgs(append([]string{"contacts", "--json", "--base-url", server.URL}, args...))
+	root.SetArgs(append([]string{"contact", "--json", "--base-url", server.URL}, args...))
 	err := root.Execute()
 	var resp output.Response
 	if stdout.Len() > 0 {
@@ -322,7 +322,7 @@ func TestContactsBundleAndUnbundle(t *testing.T) {
 	if bundleResult.ID != 7 || bundleResult.Action != "bundle" || bundled.Summary != "Bundle request accepted" {
 		t.Errorf("bundle: result=%+v summary=%q", bundleResult, bundled.Summary)
 	}
-	if len(bundled.Breadcrumbs) != 1 || bundled.Breadcrumbs[0].Command != "hey contacts unbundle 7" {
+	if len(bundled.Breadcrumbs) != 1 || bundled.Breadcrumbs[0].Command != "hey contact unbundle 7" {
 		t.Errorf("bundle breadcrumbs = %+v", bundled.Breadcrumbs)
 	}
 
@@ -334,7 +334,7 @@ func TestContactsBundleAndUnbundle(t *testing.T) {
 	if unbundleResult.ID != 7 || unbundleResult.Action != "unbundle" || unbundled.Summary != "Unbundle request accepted" {
 		t.Errorf("unbundle: result=%+v summary=%q", unbundleResult, unbundled.Summary)
 	}
-	if len(unbundled.Breadcrumbs) != 1 || unbundled.Breadcrumbs[0].Command != "hey contacts bundle 7" {
+	if len(unbundled.Breadcrumbs) != 1 || unbundled.Breadcrumbs[0].Command != "hey contact bundle 7" {
 		t.Errorf("unbundle breadcrumbs = %+v", unbundled.Breadcrumbs)
 	}
 

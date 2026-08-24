@@ -17,11 +17,11 @@ var curatedCategories = []struct {
 }{
 	{
 		heading: "CORE COMMANDS",
-		names:   []string{"tui", "box", "threads", "reply", "compose", "search", "contacts", "calendars", "todo", "journal"},
+		names:   []string{"tui", "box", "thread", "reply", "compose", "search", "contact", "calendar", "journal"},
 	},
 	{
 		heading: "MAIL",
-		names:   []string{"screener", "attachments", "drafts", "watch"},
+		names:   []string{"screener", "attachment", "draft", "watch"},
 	},
 	{
 		heading: "WRITE & SHARE",
@@ -37,11 +37,11 @@ var curatedCategories = []struct {
 	},
 	{
 		heading: "CALENDAR & TASKS",
-		names:   []string{"recordings", "habit", "timetrack"},
+		names:   []string{"event", "todo", "habit", "timetrack"},
 	},
 	{
 		heading: "ACCOUNT & SYSTEM",
-		names:   []string{"auth", "accounts", "config", "setup", "doctor", "upgrade", "version"},
+		names:   []string{"auth", "account", "config", "setup", "shell-completion", "doctor", "upgrade", "version"},
 	},
 }
 
@@ -182,7 +182,7 @@ func renderRootHelp(w io.Writer, cmd *cobra.Command) {
 		"$ hey box view imbox",
 		`$ hey compose --to alice@example.com --subject "Lunch plans" -m "Are you free Friday?"`,
 		"$ hey todo list",
-		"$ hey threads 123 --json",
+		"$ hey thread read 123 --json",
 	}
 	for _, ex := range examples {
 		b.WriteString(italic.format("  "+ex) + "\n")

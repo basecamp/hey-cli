@@ -20,9 +20,9 @@ func newContactsHideCommand() *contactsHideCommand {
 		Short: "Hide a contact",
 		Long:  "Hide a contact from contact lists, autocomplete, and search results. The contact remains available by ID and can be shown again.",
 		Annotations: map[string]string{
-			"agent_notes": "This is reversible. Use `hey contacts show-again <id>` to show the contact again.",
+			"agent_notes": "This is reversible. Use `hey contact show-again <id>` to show the contact again.",
 		},
-		Example: `  hey contacts hide 12345`,
+		Example: `  hey contact hide 12345`,
 		RunE:    hideCommand.run,
 		Args:    usageExactOneArg(),
 	}
@@ -44,6 +44,6 @@ func (c *contactsHideCommand) run(cmd *cobra.Command, args []string) error {
 		fmt.Sprintf("Contact %d hidden.", contactID),
 		"Contact hidden",
 		map[string]int64{"id": contactID},
-		output.WithBreadcrumbs(output.Breadcrumb{Action: "show_again", Command: fmt.Sprintf("hey contacts show-again %d", contactID), Description: "Show the contact again"}),
+		output.WithBreadcrumbs(output.Breadcrumb{Action: "show_again", Command: fmt.Sprintf("hey contact show-again %d", contactID), Description: "Show the contact again"}),
 	)
 }

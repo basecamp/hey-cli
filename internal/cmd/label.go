@@ -22,14 +22,6 @@ type labelsCommand struct {
 	all   bool
 }
 
-func newLabelsCommand() *labelsCommand {
-	command := newLabelsListingCommand("labels", `  hey labels
-  hey labels --limit 10
-  hey labels --json`)
-	command.cmd.Annotations[compatibilityForAnnotation] = "label list"
-	return command
-}
-
 func newLabelListCommand() *labelsCommand {
 	command := newLabelsListingCommand("list", `  hey label list
   hey label list --limit 10
@@ -112,9 +104,9 @@ var labelListing = postingsListing{
 		return fmt.Sprintf("Showing %d remaining results from this cursor (%d threads with the label).", shown, total)
 	},
 	breadcrumbs: []output.Breadcrumb{
-		{Action: "read", Command: "hey threads <id>", Description: "Read an email thread"},
-		{Action: "add_label", Command: "hey label add <id> --to <label-id>", Description: "Add another label to a thread"},
-		{Action: "remove_label", Command: "hey label remove <id> --from <label-id|all>", Description: "Remove labels from a thread"},
+		{Action: "read", Command: "hey thread read <thread-id>", Description: "Read an email thread"},
+		{Action: "add_label", Command: "hey label add <box-item-id> --to <label-id>", Description: "Add another label to a thread"},
+		{Action: "remove_label", Command: "hey label remove <box-item-id> --from <label-id|all>", Description: "Remove labels from a thread"},
 	},
 }
 
@@ -205,7 +197,7 @@ type labelAddCommand struct {
 func newLabelAddCommand() *labelAddCommand {
 	labelAddCommand := &labelAddCommand{}
 	labelAddCommand.cmd = &cobra.Command{
-		Use:   "add <id>...",
+		Use:   "add <box-item-id>...",
 		Short: "Add a label to email threads",
 		Example: `  hey label add 12345 --to 789
   hey label add 12345 67890 --to 789`,
@@ -247,7 +239,7 @@ type labelCreateCommand struct {
 func newLabelCreateCommand() *labelCreateCommand {
 	labelCreateCommand := &labelCreateCommand{}
 	labelCreateCommand.cmd = &cobra.Command{
-		Use:   "create <name> <id>...",
+		Use:   "create <name> <box-item-id>...",
 		Short: "Create a label and add it to email threads",
 		Example: `  hey label create "Travel receipts" 12345
   hey label create "Project Apollo" 12345 67890`,
@@ -286,7 +278,7 @@ type labelRemoveCommand struct {
 func newLabelRemoveCommand() *labelRemoveCommand {
 	labelRemoveCommand := &labelRemoveCommand{}
 	labelRemoveCommand.cmd = &cobra.Command{
-		Use:   "remove <id>...",
+		Use:   "remove <box-item-id>...",
 		Short: "Remove labels from email threads",
 		Example: `  hey label remove 12345 --from 789
   hey label remove 12345 67890 --from all`,

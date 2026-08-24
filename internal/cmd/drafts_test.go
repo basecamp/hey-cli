@@ -61,7 +61,7 @@ func TestDraftsCommandLimitsResults(t *testing.T) {
 			{"id":101,"summary":"Agenda and decisions","subject":"Quarterly planning follow-up","updated_at":"2026-08-20T09:30:00Z"},
 			{"id":102,"summary":"Travel details","subject":"Team retreat itinerary","updated_at":"2026-08-19T14:00:00Z"}
 		]`)
-	}), "drafts", "--limit", "1")
+	}), "draft", "list", "--limit", "1")
 	if err != nil {
 		t.Fatalf("execute drafts: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestDraftsCommandAllOverridesLimit(t *testing.T) {
 			{"id":101,"subject":"Quarterly planning follow-up"},
 			{"id":102,"subject":"Team retreat itinerary"}
 		]`)
-	}), "drafts", "--limit", "1", "--all")
+	}), "draft", "list", "--limit", "1", "--all")
 	if err != nil {
 		t.Fatalf("execute drafts: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestDraftsCommandStyledTable(t *testing.T) {
 			{"id":101,"summary":"`+fullSummary+`","subject":"Quarterly planning follow-up","updated_at":"2026-08-20T09:30:00Z"},
 			{"id":102,"summary":"Travel details","subject":"Team retreat itinerary","updated_at":"2026-08-19T14:00:00Z"}
 		]`)
-	}), "drafts", "--limit", "1")
+	}), "draft", "list", "--limit", "1")
 	if err != nil {
 		t.Fatalf("execute styled drafts: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestDraftsCommandStyledTable(t *testing.T) {
 func TestDraftsCommandStyledEmpty(t *testing.T) {
 	stdout, err := runStyledCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
-	}), "drafts")
+	}), "draft", "list")
 	if err != nil {
 		t.Fatalf("execute styled drafts: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestDraftsCommandStyledEmpty(t *testing.T) {
 func TestDraftsCommandAPIError(t *testing.T) {
 	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "drafts unavailable", http.StatusBadRequest)
-	}), "drafts")
+	}), "draft", "list")
 	if err == nil || !strings.Contains(err.Error(), "400 Bad Request") {
 		t.Fatalf("error = %v, want HTTP failure", err)
 	}

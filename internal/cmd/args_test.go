@@ -9,7 +9,7 @@ import (
 
 func TestUsageExactArgs(t *testing.T) {
 	root := &cobra.Command{Use: "hey"}
-	cmd := &cobra.Command{Use: "threads <id>"}
+	cmd := &cobra.Command{Use: "read <id>"}
 	root.AddCommand(cmd)
 
 	validator := usageExactOneArg()
@@ -22,7 +22,7 @@ func TestUsageExactArgs(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing args, got nil")
 	}
-	if !strings.Contains(err.Error(), "Usage: hey threads <id>") {
+	if !strings.Contains(err.Error(), "Usage: hey read <id>") {
 		t.Fatalf("unexpected missing-args error: %q", err.Error())
 	}
 
@@ -75,8 +75,8 @@ func TestUsageMinArgs(t *testing.T) {
 }
 
 func TestCleanUseLineStripsFlagsSuffix(t *testing.T) {
-	line := cleanUseLine("hey recordings <calendar-id> [flags]")
-	if line != "hey recordings <calendar-id>" {
+	line := cleanUseLine("hey event edit <id> [date] [flags]")
+	if line != "hey event edit <id> [date]" {
 		t.Fatalf("cleanUseLine() = %q", line)
 	}
 }

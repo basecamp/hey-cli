@@ -10,121 +10,6 @@ import (
 	"testing"
 )
 
-func TestCanonicalListCommandsMatchCompatibilityForms(t *testing.T) {
-	tests := []struct {
-		name          string
-		handler       func(*testing.T) http.Handler
-		compatibility []string
-		canonical     []string
-	}{
-		{
-			name: "boxes",
-			handler: func(*testing.T) http.Handler {
-				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					if r.URL.Path != "/boxes.json" {
-						http.NotFound(w, r)
-						return
-					}
-					_, _ = io.WriteString(w, `[{"id":1,"kind":"imbox","name":"Imbox"}]`)
-				})
-			},
-			compatibility: []string{"boxes", "--limit", "1"},
-			canonical:     []string{"box", "list", "--limit", "1"},
-		},
-		{
-			name: "labels",
-			handler: func(*testing.T) http.Handler {
-				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					if r.URL.Path != "/my/navigation.json" {
-						http.NotFound(w, r)
-						return
-					}
-					_, _ = io.WriteString(w, `{"items":[{"title":"Labels","menu_items":[{"title":"Receipts","app_url":"/folders/12"}]}]}`)
-				})
-			},
-			compatibility: []string{"labels", "--limit", "1"},
-			canonical:     []string{"label", "list", "--limit", "1"},
-		},
-		{
-			name: "collections",
-			handler: func(*testing.T) http.Handler {
-				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					if r.URL.Path != "/collections.json" {
-						http.NotFound(w, r)
-						return
-					}
-					_, _ = io.WriteString(w, `[{"id":12,"name":"Kitchen remodel"}]`)
-				})
-			},
-			compatibility: []string{"collections", "--limit", "1"},
-			canonical:     []string{"collection", "list", "--limit", "1"},
-		},
-		{
-			name: "workflows",
-			handler: func(t *testing.T) http.Handler {
-				return workflowHandler(t, func(w http.ResponseWriter, r *http.Request) {
-					if r.URL.Path == "/autocompletable/accounts/1/workflows" {
-						_, _ = io.WriteString(w, `[["101","Home projects","Personal"]]`)
-						return
-					}
-					if r.URL.Path == "/autocompletable/accounts/2/workflows" {
-						_, _ = io.WriteString(w, `[]`)
-						return
-					}
-					http.NotFound(w, r)
-				})
-			},
-			compatibility: []string{"workflows", "--limit", "1"},
-			canonical:     []string{"workflow", "list", "--limit", "1"},
-		},
-		{
-			name: "clips",
-			handler: func(*testing.T) http.Handler {
-				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					if r.URL.Path != "/clips.json" {
-						http.NotFound(w, r)
-						return
-					}
-					_, _ = io.WriteString(w, clipsJSON)
-				})
-			},
-			compatibility: []string{"clips"},
-			canonical:     []string{"clip", "list"},
-		},
-		{
-			name: "snippets",
-			handler: func(*testing.T) http.Handler {
-				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					if r.URL.Path != "/snippets.json" {
-						http.NotFound(w, r)
-						return
-					}
-					_, _ = io.WriteString(w, snippetsJSON)
-				})
-			},
-			compatibility: []string{"snippets"},
-			canonical:     []string{"snippet", "list"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			handler := withJSONContentType(tt.handler(t))
-			compatibility, err := runJSONCommand(t, handler, tt.compatibility...)
-			if err != nil {
-				t.Fatalf("compatibility form: %v", err)
-			}
-			canonical, err := runJSONCommand(t, handler, tt.canonical...)
-			if err != nil {
-				t.Fatalf("canonical form: %v", err)
-			}
-			if !reflect.DeepEqual(canonical, compatibility) {
-				t.Errorf("canonical response = %#v, compatibility response = %#v", canonical, compatibility)
-			}
-		})
-	}
-}
-
 func TestCanonicalViewCommandsMatchCompatibilityForms(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -314,14 +199,6 @@ func TestAgentHelpPrefersCanonicalFamilies(t *testing.T) {
 }
 
 func TestCompatibilityCommandsNameTheirCanonicalForms(t *testing.T) {
-	wantCommands := map[string]string{
-		"boxes":       "box list",
-		"labels":      "label list",
-		"collections": "collection list",
-		"workflows":   "workflow list",
-		"clips":       "clip list",
-		"snippets":    "snippet list",
-	}
 	wantUsages := map[string]string{
 		"box":        "box <name|id>",
 		"label":      "label <id>",
@@ -331,25 +208,12 @@ func TestCompatibilityCommandsNameTheirCanonicalForms(t *testing.T) {
 	catalog := walkCommands(newRootCmd(), "")
 	for _, entry := range catalog {
 		path, _ := entry["path"].(string)
-		canonical, marked := entry["compatibility_for"].(string)
-		if expected, ok := wantCommands[path]; ok {
-			if !marked || canonical != expected {
-				t.Errorf("%s compatibility_for = %q, want %q", path, canonical, expected)
-			}
-			delete(wantCommands, path)
-		} else if marked {
-			t.Errorf("unexpected compatibility command %s -> %s", path, canonical)
-		}
-
 		if expected, ok := wantUsages[path]; ok {
 			if usage, _ := entry["compatibility_usage"].(string); usage != expected {
 				t.Errorf("%s compatibility_usage = %q, want %q", path, usage, expected)
 			}
 			delete(wantUsages, path)
 		}
-	}
-	for path := range wantCommands {
-		t.Errorf("command catalog is missing compatibility command %s", path)
 	}
 	for path := range wantUsages {
 		t.Errorf("command catalog is missing compatibility usage for %s", path)

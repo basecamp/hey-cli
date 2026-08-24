@@ -15,7 +15,7 @@ type stopIgnoringCommand struct {
 func newStopIgnoringCommand() *stopIgnoringCommand {
 	stopIgnoringCommand := &stopIgnoringCommand{}
 	stopIgnoringCommand.cmd = &cobra.Command{
-		Use:   "stop-ignoring <id>...",
+		Use:   "stop-ignoring <box-item-id>...",
 		Short: "Stop ignoring email threads",
 		Long:  "Stop ignoring one or more email threads so new replies can bring them back to your attention.",
 		Example: `  hey stop-ignoring 12345

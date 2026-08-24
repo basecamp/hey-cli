@@ -21,7 +21,7 @@ type smokeCollection struct {
 }
 
 func TestCollectionsAndCollection(t *testing.T) {
-	response := heyJSON(t, "collections")
+	response := heyJSON(t, "collection", "list")
 	collections := dataAs[[]smokeCollection](t, response)
 	if response.Summary == "" {
 		t.Error("collections response omitted summary")
@@ -49,17 +49,17 @@ func TestCollectionsAndCollection(t *testing.T) {
 }
 
 func TestCollectionOutputFormats(t *testing.T) {
-	collections := dataAs[[]smokeCollection](t, heyJSON(t, "collections"))
+	collections := dataAs[[]smokeCollection](t, heyJSON(t, "collection", "list"))
 	if len(collections) == 0 {
 		skipf(t, "no collections available for output validation")
 	}
 	id := strconv.FormatInt(collections[0].ID, 10)
 	for _, args := range [][]string{
-		{"collections", "--quiet"},
-		{"collections", "--ids-only"},
-		{"collections", "--count"},
-		{"collections", "--markdown"},
-		{"collections", "--styled"},
+		{"collection", "list", "--quiet"},
+		{"collection", "list", "--ids-only"},
+		{"collection", "list", "--count"},
+		{"collection", "list", "--markdown"},
+		{"collection", "list", "--styled"},
 		{"collection", id, "--quiet"},
 		{"collection", id, "--ids-only"},
 		{"collection", id, "--count"},
@@ -220,7 +220,7 @@ func topicIDFromAppURL(appURL string) (int64, error) {
 
 func findCollectionIDByName(t *testing.T, name string) (int64, error) {
 	t.Helper()
-	stdout, stderr, code := hey(t, "collections", "--all", "--json")
+	stdout, stderr, code := hey(t, "collection", "list", "--all", "--json")
 	if code != 0 {
 		return 0, fmt.Errorf("list collections (exit %d): %s", code, stderr)
 	}
@@ -269,7 +269,7 @@ func cleanupCollection(t *testing.T, collectionID int64) {
 		return
 	}
 	for range 5 {
-		collections := dataAs[[]smokeCollection](t, heyJSON(t, "collections", "--all"))
+		collections := dataAs[[]smokeCollection](t, heyJSON(t, "collection", "list", "--all"))
 		found := false
 		for _, collection := range collections {
 			if collection.ID == collectionID {

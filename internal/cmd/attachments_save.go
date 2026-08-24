@@ -31,14 +31,14 @@ type savedAttachment struct {
 func newAttachmentsSaveCommand() *attachmentsSaveCommand {
 	attachmentsSaveCommand := &attachmentsSaveCommand{}
 	attachmentsSaveCommand.cmd = &cobra.Command{
-		Use:   "save <id>",
+		Use:   "save <attachment-id>",
 		Short: "Save an attachment to disk",
 		Annotations: map[string]string{
-			"agent_notes": "Saves the attachment identified by an ID from `hey attachments <thread-id>`. Existing files are preserved unless --force is set.",
+			"agent_notes": "Saves the attachment identified by an ID from `hey attachment list <thread-id>`. Existing files are preserved unless --force is set.",
 		},
-		Example: `  hey attachments save 67890:1
-  hey attachments save 67890:1 --output ./quarterly-report.pdf
-  hey attachments save 67890:1 --output ./downloads --force`,
+		Example: `  hey attachment save 67890:1
+  hey attachment save 67890:1 --output ./quarterly-report.pdf
+  hey attachment save 67890:1 --output ./downloads --force`,
 		RunE: attachmentsSaveCommand.run,
 		Args: usageExactOneArg(),
 	}

@@ -104,7 +104,7 @@ func TestThreadsJSONOmitsABodyItDidNotRead(t *testing.T) {
 	server, _ := partialThreadServer(t, [][]int64{{13, 12, 11}}, 12)
 	stdoutTerminal(t, false)
 
-	stdout, _, err := runCLIRaw(t, server, "--json", "threads", "7", "--allow-partial")
+	stdout, _, err := runCLIRaw(t, server, "--json", "thread", "read", "7", "--allow-partial")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -150,13 +150,13 @@ func TestThreadsRefusesAPartialThreadUnlessAllowed(t *testing.T) {
 	server, _ := partialThreadServer(t, [][]int64{{13, 12, 11}}, 12)
 	stdoutTerminal(t, false)
 
-	stdout, _, err := runCLIRaw(t, server, "--json", "threads", "7")
+	stdout, _, err := runCLIRaw(t, server, "--json", "thread", "read", "7")
 	partialError(t, err)
 	if stdout != "" {
 		t.Errorf("stdout = %q, want nothing on a refusal", stdout)
 	}
 
-	stdout, _, err = runCLIRaw(t, server, "--json", "threads", "7", "--allow-partial")
+	stdout, _, err = runCLIRaw(t, server, "--json", "thread", "read", "7", "--allow-partial")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestThreadsStyledMarksAnUnreadBodyAndNeverPreviewsIt(t *testing.T) {
 	server, _ := partialThreadServer(t, [][]int64{{12, 11}}, 12)
 	stdoutTerminal(t, false)
 
-	stdout, _, err := runCLIRaw(t, server, "--styled", "threads", "7", "--allow-partial")
+	stdout, _, err := runCLIRaw(t, server, "--styled", "thread", "read", "7", "--allow-partial")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestThreadsCountAndIDsDoNotReadBodies(t *testing.T) {
 		server, reads := partialThreadServer(t, [][]int64{{13, 12, 11}}, 12)
 		stdoutTerminal(t, false)
 
-		stdout, _, err := runCLIRaw(t, server, flag, "threads", "7")
+		stdout, _, err := runCLIRaw(t, server, flag, "thread", "read", "7")
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", flag, err)
 		}
@@ -234,10 +234,10 @@ func TestThreadsIndexTruncationIsPartialInEveryFormat(t *testing.T) {
 
 	for _, flag := range []string{"--json", "--count", "--ids-only"} {
 		server, _ := partialThreadServer(t, [][]int64{{13, 12}, {11}})
-		_, _, err := runCLIRaw(t, server, flag, "threads", "7")
+		_, _, err := runCLIRaw(t, server, flag, "thread", "read", "7")
 		partialError(t, err)
 
-		stdout, stderr, err := runCLIRaw(t, server, flag, "threads", "7", "--allow-partial")
+		stdout, stderr, err := runCLIRaw(t, server, flag, "thread", "read", "7", "--allow-partial")
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", flag, err)
 		}
@@ -265,7 +265,7 @@ func TestThreadsMarksEntriesOverTheRequestLimit(t *testing.T) {
 	server, reads := partialThreadServer(t, [][]int64{{13, 12, 11}})
 	stdoutTerminal(t, false)
 
-	stdout, _, err := runCLIRaw(t, server, "--json", "threads", "7", "--allow-partial")
+	stdout, _, err := runCLIRaw(t, server, "--json", "thread", "read", "7", "--allow-partial")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -289,13 +289,13 @@ func TestAttachmentsReadBodiesInEveryFormatAndRefusePartialUnlessAllowed(t *test
 		server, reads := partialThreadServer(t, [][]int64{{12, 11}}, 12)
 		stdoutTerminal(t, false)
 
-		_, _, err := runCLIRaw(t, server, flag, "attachments", "7")
+		_, _, err := runCLIRaw(t, server, flag, "attachment", "list", "7")
 		partialError(t, err)
 		if _, messages := reads.counts(); messages == 0 {
 			t.Errorf("%s: read no messages, want the bodies read", flag)
 		}
 
-		stdout, stderr, err := runCLIRaw(t, server, flag, "attachments", "7", "--allow-partial")
+		stdout, stderr, err := runCLIRaw(t, server, flag, "attachment", "list", "7", "--allow-partial")
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", flag, err)
 		}
@@ -320,7 +320,7 @@ func TestThreadsPartialNoticeReachesStderrForQuietAndHTML(t *testing.T) {
 
 	for _, flag := range []string{"--quiet", "--html"} {
 		server, _ := partialThreadServer(t, [][]int64{{13, 12}, {11}})
-		stdout, stderr, err := runCLIRaw(t, server, flag, "threads", "7", "--allow-partial")
+		stdout, stderr, err := runCLIRaw(t, server, flag, "thread", "read", "7", "--allow-partial")
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", flag, err)
 		}
@@ -338,7 +338,7 @@ func TestThreadsStyledCallsAnEmptyHydratedBodyEmpty(t *testing.T) {
 	server, _ := threadEntriesServer(t, [][]int64{{11}}, map[int64]string{11: "<p><br></p>"})
 	stdoutTerminal(t, false)
 
-	stdout, _, err := runCLIRaw(t, server, "--styled", "threads", "7")
+	stdout, _, err := runCLIRaw(t, server, "--styled", "thread", "read", "7")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -369,7 +369,7 @@ func TestThreadsStopOnAServerError(t *testing.T) {
 	withThreadLimits(t, limits)
 	stdoutTerminal(t, false)
 
-	_, _, err := runCLIRaw(t, server, "--json", "threads", "7", "--allow-partial")
+	_, _, err := runCLIRaw(t, server, "--json", "thread", "read", "7", "--allow-partial")
 	if !errors.Is(err, threadload.ErrSystemic) {
 		t.Fatalf("error = %v, want the systemic error even with --allow-partial", err)
 	}
@@ -398,7 +398,7 @@ func TestThreadsMarkAnOversizedMessageOverLimit(t *testing.T) {
 	t.Cleanup(server.Close)
 	stdoutTerminal(t, false)
 
-	stdout, _, err := runCLIRaw(t, server, "--json", "threads", "7", "--allow-partial")
+	stdout, _, err := runCLIRaw(t, server, "--json", "thread", "read", "7", "--allow-partial")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

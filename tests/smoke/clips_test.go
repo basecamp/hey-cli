@@ -19,7 +19,7 @@ type smokeClip struct {
 
 func TestClipLifecycle(t *testing.T) {
 	topicID, subject := longThread(t, 0)
-	entries := dataAs[[]threadEntry](t, heyJSON(t, "threads", topicID))
+	entries := dataAs[[]threadEntry](t, heyJSON(t, "thread", "read", topicID))
 	if len(entries) == 0 || entries[0].ID == 0 {
 		t.Fatalf("thread %s has no source entry", topicID)
 	}
@@ -77,11 +77,11 @@ func TestClipLifecycle(t *testing.T) {
 
 func TestClipOutputFormatsAndValidation(t *testing.T) {
 	for _, args := range [][]string{
-		{"clips", "--quiet"},
-		{"clips", "--ids-only"},
-		{"clips", "--count"},
-		{"clips", "--markdown"},
-		{"clips", "--styled"},
+		{"clip", "list", "--quiet"},
+		{"clip", "list", "--ids-only"},
+		{"clip", "list", "--count"},
+		{"clip", "list", "--markdown"},
+		{"clip", "list", "--styled"},
 	} {
 		_, stderr, code := hey(t, args...)
 		if code != 0 {
@@ -96,7 +96,7 @@ func TestClipOutputFormatsAndValidation(t *testing.T) {
 
 func listClips(t *testing.T) []smokeClip {
 	t.Helper()
-	return dataAs[[]smokeClip](t, heyJSON(t, "clips"))
+	return dataAs[[]smokeClip](t, heyJSON(t, "clip", "list"))
 }
 
 func findClipByEntry(t *testing.T, entryID int64) smokeClip {

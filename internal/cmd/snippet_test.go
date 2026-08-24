@@ -25,7 +25,7 @@ func TestSnippetsCommandListsSnippetsInEveryFormat(t *testing.T) {
 		_, _ = io.WriteString(w, snippetsJSON)
 	})
 
-	response, err := runJSONCommand(t, handler, "snippets")
+	response, err := runJSONCommand(t, handler, "snippet", "list")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,26 +37,26 @@ func TestSnippetsCommandListsSnippetsInEveryFormat(t *testing.T) {
 		t.Errorf("items = %#v", items)
 	}
 
-	ids, err := runFormattedCommand(t, handler, []string{"--ids-only"}, "snippets")
+	ids, err := runFormattedCommand(t, handler, []string{"--ids-only"}, "snippet", "list")
 	if err != nil || ids != "3\n4\n" {
 		t.Errorf("ids = %q, err = %v", ids, err)
 	}
-	count, err := runFormattedCommand(t, handler, []string{"--count"}, "snippets")
+	count, err := runFormattedCommand(t, handler, []string{"--count"}, "snippet", "list")
 	if err != nil || count != "2\n" {
 		t.Errorf("count = %q, err = %v", count, err)
 	}
-	markdown, err := runFormattedCommand(t, handler, []string{"--markdown"}, "snippets")
+	markdown, err := runFormattedCommand(t, handler, []string{"--markdown"}, "snippet", "list")
 	if err != nil || !strings.Contains(markdown, "| 3 | Office hours | Monday through Thursday |") {
 		t.Errorf("markdown = %q, err = %v", markdown, err)
 	}
-	styled, err := runStyledCommand(t, handler, "snippets")
+	styled, err := runStyledCommand(t, handler, "snippet", "list")
 	if err != nil || !strings.Contains(styled, "Office hours") || !strings.Contains(styled, "Updated") {
 		t.Errorf("styled = %q, err = %v", styled, err)
 	}
 }
 
 func TestSnippetsMarkdownSurfacesWriteFailure(t *testing.T) {
-	cmd := newSnippetsCommand().cmd
+	cmd := newSnippetListCommand().cmd
 	cmd.SetOut(failingWriter{})
 	if err := writeSnippetsMarkdown(cmd, []generated.Snippet{{Id: 3, Name: "Greeting", Content: "Hello"}}); err == nil {
 		t.Fatal("expected the write failure")
@@ -66,7 +66,7 @@ func TestSnippetsMarkdownSurfacesWriteFailure(t *testing.T) {
 func TestSnippetsCommandPreservesEmptyList(t *testing.T) {
 	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, `[]`)
-	}), "snippets")
+	}), "snippet", "list")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestSnippetsCommandPreservesEmptyList(t *testing.T) {
 	markdown, err := runFormattedCommand(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `[]`)
-	}), []string{"--markdown"}, "snippets")
+	}), []string{"--markdown"}, "snippet", "list")
 	if err != nil || markdown != "(no results)\n" {
 		t.Errorf("markdown = %q, err = %v", markdown, err)
 	}
@@ -87,11 +87,11 @@ func TestSnippetsCommandSanitizesHumanOutput(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `[{"id":3,"name":"Safe\u001b[31mRed","content":"[click](https://example.invalid)"}]`)
 	})
-	styled, err := runStyledCommand(t, handler, "snippets")
+	styled, err := runStyledCommand(t, handler, "snippet", "list")
 	if err != nil || strings.Contains(styled, "\x1b[31m") {
 		t.Errorf("styled = %q, err = %v", styled, err)
 	}
-	markdown, err := runFormattedCommand(t, handler, []string{"--markdown"}, "snippets")
+	markdown, err := runFormattedCommand(t, handler, []string{"--markdown"}, "snippet", "list")
 	if err != nil || strings.Contains(markdown, "[click](") || !strings.Contains(markdown, `\[click\]`) {
 		t.Errorf("markdown = %q, err = %v", markdown, err)
 	}

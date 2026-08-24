@@ -18,7 +18,7 @@ func TestLabelsCommand(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"items":[{"title":"Labels","menu_items":[{"title":"All Labels","app_url":"/folders"},{"title":"Receipts","app_url":"/folders/12"},{"title":"Travel","app_url":"/folders/34"}]}]}`)
-	}), "labels", "--limit", "1")
+	}), "label", "list", "--limit", "1")
 	if err != nil {
 		t.Fatalf("execute labels: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestLabelsCommandAllOverridesLimit(t *testing.T) {
 	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"items":[{"title":"Labels","menu_items":[{"title":"Receipts","app_url":"/folders/12"},{"title":"Travel","app_url":"/folders/34"}]}]}`)
-	}), "labels", "--limit", "1", "--all")
+	}), "label", "list", "--limit", "1", "--all")
 	if err != nil {
 		t.Fatalf("execute labels: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestLabelMarkdownOutputSanitizesFolderNames(t *testing.T) {
 		}}})
 	})
 
-	stdout, err := runFormattedCommand(t, server, []string{"--markdown"}, "labels")
+	stdout, err := runFormattedCommand(t, server, []string{"--markdown"}, "label", "list")
 	if err != nil {
 		t.Fatalf("execute markdown folders: %v", err)
 	}

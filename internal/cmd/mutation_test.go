@@ -16,7 +16,7 @@ func TestMutationStyledOutputIsOneSanitizedLine(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id": 88, "name": unsafeName, "email_address": "ryan@example.com",
 		})
-	}), "contacts", "add", "--name", "Ryan Singer", "--email", "ryan@example.com")
+	}), "contact", "add", "--name", "Ryan Singer", "--email", "ryan@example.com")
 	if err != nil {
 		t.Fatalf("execute styled contacts add: %v", err)
 	}
@@ -31,7 +31,7 @@ func TestMutationEnvelopeCarriesSummaryAndBreadcrumbs(t *testing.T) {
 	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"id": 88}`)
-	}), "contacts", "hide", "88")
+	}), "contact", "hide", "88")
 	if err != nil {
 		t.Fatalf("execute contacts hide: %v", err)
 	}

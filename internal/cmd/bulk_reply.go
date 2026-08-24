@@ -67,7 +67,7 @@ func newBulkReplyCommand() *bulkReplyCommand {
 		Short: "Reply to multiple email threads",
 		Long:  "Preview, send, and undo one reply across multiple HEY threads.",
 		Annotations: map[string]string{
-			"agent_notes": "Always run `hey bulk-reply preview <posting-id>...` before sending. Send resolves the postings again, keeps HEY's name-tag content, and returns the delivery ID and undo state.",
+			"agent_notes": "Always run `hey bulk-reply preview <box-item-id>...` before sending. Send resolves the box items again, keeps HEY's name-tag content, and returns the delivery ID and undo state.",
 		},
 	}
 	bulkReplyCommand.cmd.AddCommand(newBulkReplyPreviewCommand().cmd)
@@ -79,10 +79,10 @@ func newBulkReplyCommand() *bulkReplyCommand {
 func newBulkReplyPreviewCommand() *bulkReplyPreviewCommand {
 	previewCommand := &bulkReplyPreviewCommand{}
 	previewCommand.cmd = &cobra.Command{
-		Use:   "preview <posting-id>...",
+		Use:   "preview <box-item-id>...",
 		Short: "Preview threads and recipients without sending",
 		Annotations: map[string]string{
-			"agent_notes": "Read-only. Posting IDs come from `hey box view` or `hey search`. The result contains the latest replyable entry and exact To, CC, and BCC recipients for each thread.",
+			"agent_notes": "Read-only. Box item IDs come from `hey box view` or `hey search`. The result contains the latest replyable entry and exact To, CC, and BCC recipients for each thread.",
 		},
 		Example: `  hey bulk-reply preview 12345 67890
   hey bulk-reply preview 12345 67890 --json`,
@@ -126,7 +126,7 @@ func (c *bulkReplyPreviewCommand) run(cmd *cobra.Command, args []string) error {
 		output.WithMeta("prefilled_content", draftContent(draft)),
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "send",
-			Command:     "hey bulk-reply send <posting-id>... -m <message>",
+			Command:     "hey bulk-reply send <box-item-id>... -m <message>",
 			Description: "Send one reply to the previewed threads",
 		}),
 	)
@@ -135,7 +135,7 @@ func (c *bulkReplyPreviewCommand) run(cmd *cobra.Command, args []string) error {
 func newBulkReplySendCommand() *bulkReplySendCommand {
 	sendCommand := &bulkReplySendCommand{}
 	sendCommand.cmd = &cobra.Command{
-		Use:   "send <posting-id>...",
+		Use:   "send <box-item-id>...",
 		Short: "Send one reply to multiple threads",
 		Annotations: map[string]string{
 			"agent_notes": "Mutating. Preview first. Accepts a message via -m, stdin, or $EDITOR and repeatable --attach files. HEY's server-provided name-tag content is preserved.",

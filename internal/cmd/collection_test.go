@@ -21,7 +21,7 @@ func TestCollectionsCommand(t *testing.T) {
 			{"id":12,"name":"Kitchen remodel","app_url":"/collections/12"},
 			{"id":34,"name":"Project Apollo","app_url":"/collections/34"}
 		]`)
-	}), "collections", "--limit", "1")
+	}), "collection", "list", "--limit", "1")
 	if err != nil {
 		t.Fatalf("execute collections: %v", err)
 	}
@@ -43,19 +43,19 @@ func TestCollectionsCommandOutputFormats(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `[{"id":12,"name":"Kitchen remodel"},{"id":34,"name":"Project Apollo"}]`)
 	})
-	ids, err := runFormattedCommand(t, handler, []string{"--ids-only"}, "collections")
+	ids, err := runFormattedCommand(t, handler, []string{"--ids-only"}, "collection", "list")
 	if err != nil || ids != "12\n34\n" {
 		t.Errorf("ids output = %q, err = %v", ids, err)
 	}
-	count, err := runFormattedCommand(t, handler, []string{"--count"}, "collections")
+	count, err := runFormattedCommand(t, handler, []string{"--count"}, "collection", "list")
 	if err != nil || count != "2\n" {
 		t.Errorf("count output = %q, err = %v", count, err)
 	}
-	markdown, err := runFormattedCommand(t, handler, []string{"--markdown"}, "collections")
+	markdown, err := runFormattedCommand(t, handler, []string{"--markdown"}, "collection", "list")
 	if err != nil || !strings.Contains(markdown, "| id |") || !strings.Contains(markdown, "Kitchen remodel") {
 		t.Errorf("markdown output = %q, err = %v", markdown, err)
 	}
-	styled, err := runStyledCommand(t, handler, "collections")
+	styled, err := runStyledCommand(t, handler, "collection", "list")
 	if err != nil || !strings.Contains(styled, "Kitchen remodel") || !strings.Contains(styled, "Project Apollo") {
 		t.Errorf("styled output = %q, err = %v", styled, err)
 	}
@@ -65,7 +65,7 @@ func TestCollectionsCommandPreservesEmptyList(t *testing.T) {
 	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `[]`)
-	}), "collections")
+	}), "collection", "list")
 	if err != nil {
 		t.Fatalf("execute collections: %v", err)
 	}

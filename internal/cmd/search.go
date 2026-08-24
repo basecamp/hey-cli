@@ -130,7 +130,7 @@ func (c *searchCommand) run(cmd *cobra.Command, args []string) error {
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "read",
-				Command:     "hey threads <topic_id>",
+				Command:     "hey thread read <thread-id>",
 				Description: "Read a matching email thread",
 			},
 		),

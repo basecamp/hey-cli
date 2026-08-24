@@ -29,9 +29,9 @@ func newContactsListCommand() *contactsListCommand {
 		Annotations: map[string]string{
 			"agent_notes": "Returns contact IDs, names, and email addresses. Use --all to fetch up to 100 pages.",
 		},
-		Example: `  hey contacts list
-  hey contacts list --page 2 --json
-  hey contacts list --all --json`,
+		Example: `  hey contact list
+  hey contact list --page 2 --json
+  hey contact list --all --json`,
 		RunE: listCommand.run,
 		Args: cobra.NoArgs,
 	}
@@ -90,7 +90,7 @@ func (c *contactsListCommand) run(cmd *cobra.Command, _ []string) error {
 		output.WithMeta("pages_fetched", collected.Read),
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "view",
-			Command:     "hey contacts show <id>",
+			Command:     "hey contact show <id>",
 			Description: "View a contact",
 		}),
 	)

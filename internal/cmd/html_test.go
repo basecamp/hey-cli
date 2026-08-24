@@ -61,7 +61,7 @@ func TestThreadsHTMLWritesEachEntryToAPipe(t *testing.T) {
 		})
 	stdoutTerminal(t, false)
 
-	stdout, stderr, err := runCLIRaw(t, server, "threads", "7", "--html")
+	stdout, stderr, err := runCLIRaw(t, server, "thread", "read", "7", "--html")
 	if err != nil {
 		t.Fatalf("unexpected error: %v (stderr %q)", err, stderr)
 	}
@@ -115,7 +115,7 @@ func TestThreadsHTMLCarriesThePartialNoticeInAComment(t *testing.T) {
 	stdoutTerminal(t, false)
 
 	server, _ := partialThreadServer(t, [][]int64{{13, 12}, {11}})
-	stdout, stderr, err := runCLIRaw(t, server, "threads", "7", "--html", "--allow-partial")
+	stdout, stderr, err := runCLIRaw(t, server, "thread", "read", "7", "--html", "--allow-partial")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestThreadsHTMLCarriesThePartialNoticeInAComment(t *testing.T) {
 	}
 
 	server, _ = partialThreadServer(t, [][]int64{{13, 12}, {11}})
-	stdout, _, err = runCLIRaw(t, server, "threads", "7", "--html")
+	stdout, _, err = runCLIRaw(t, server, "thread", "read", "7", "--html")
 	var apiErr *apierr.Error
 	if !errors.As(err, &apiErr) || !strings.Contains(apiErr.Message, "read only in part") || !strings.Contains(apiErr.Hint, "--allow-partial") {
 		t.Errorf("error = %v, want the partial-thread refusal naming --allow-partial", err)
@@ -156,12 +156,12 @@ func TestHTMLIsRefusedOnATerminalWithARedirectHint(t *testing.T) {
 	server, _ := threadEntriesServer(t, nil, nil)
 	stdoutTerminal(t, true)
 
-	_, _, err := runCLIRaw(t, server, "threads", "7", "--html")
+	_, _, err := runCLIRaw(t, server, "thread", "read", "7", "--html")
 	if got := usageMessage(t, err); !strings.Contains(got, "terminal") {
 		t.Errorf("message = %q, want the terminal named", got)
 	}
 	var apiErr *apierr.Error
-	if errors.As(err, &apiErr) && !strings.Contains(apiErr.Hint, "hey threads --html > out.html") {
+	if errors.As(err, &apiErr) && !strings.Contains(apiErr.Hint, "hey thread read --html > out.html") {
 		t.Errorf("hint = %q, want the redirect spelled out", apiErr.Hint)
 	}
 }
@@ -171,7 +171,7 @@ func TestHTMLConflictsWithEveryOtherOutputSelector(t *testing.T) {
 	stdoutTerminal(t, false)
 
 	for _, flag := range []string{"--json", "--markdown", "--quiet", "--ids-only", "--count", "--styled", "--agent", "--stats", "--jq=."} {
-		_, _, err := runCLIRaw(t, server, "threads", "7", "--html", flag)
+		_, _, err := runCLIRaw(t, server, "thread", "read", "7", "--html", flag)
 		name, _, _ := strings.Cut(flag, "=")
 		if got := usageMessage(t, err); got != "cannot use --html with "+name {
 			t.Errorf("%s: message = %q", flag, got)
@@ -192,9 +192,9 @@ func TestHTMLIsRefusedByOtherCommandsBeforeAnythingElse(t *testing.T) {
 		path string
 	}{
 		{[]string{"box", "imbox"}, "hey box"},
-		{[]string{"contacts", "list"}, "hey contacts list"},
+		{[]string{"contact", "list"}, "hey contact list"},
 		{[]string{"journal", "list"}, "hey journal list"},
-		{[]string{"calendars"}, "hey calendars"},
+		{[]string{"calendar", "list"}, "hey calendar list"},
 	} {
 		root := newRootCmd()
 		root.SetOut(&bytes.Buffer{})

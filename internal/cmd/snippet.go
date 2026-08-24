@@ -18,14 +18,6 @@ type snippetsCommand struct {
 	cmd *cobra.Command
 }
 
-func newSnippetsCommand() *snippetsCommand {
-	command := newSnippetsListingCommand("snippets", `  hey snippets
-  hey snippets --json
-  hey snippets --ids-only`)
-	command.cmd.Annotations[compatibilityForAnnotation] = "snippet list"
-	return command
-}
-
 func newSnippetListCommand() *snippetsCommand {
 	return newSnippetsListingCommand("list", `  hey snippet list
   hey snippet list --json

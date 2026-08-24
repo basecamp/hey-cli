@@ -99,7 +99,7 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 	return writeMutation(cmd, sentWithAttachmentsSummary("Reply sent", len(c.attachments)), nil,
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "view",
-			Command:     fmt.Sprintf("hey threads %d", threadID),
+			Command:     fmt.Sprintf("hey thread read %d", threadID),
 			Description: "View the full thread",
 		}),
 	)

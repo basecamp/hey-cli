@@ -20,9 +20,9 @@ func newContactsShowAgainCommand() *contactsShowAgainCommand {
 		Use:   "show-again <id>",
 		Short: "Show a hidden contact again",
 		Annotations: map[string]string{
-			"agent_notes": "Reverses `hey contacts hide <id>`.",
+			"agent_notes": "Reverses `hey contact hide <id>`.",
 		},
-		Example: `  hey contacts show-again 12345`,
+		Example: `  hey contact show-again 12345`,
 		RunE:    showAgainCommand.run,
 		Args:    usageExactOneArg(),
 	}
@@ -48,6 +48,6 @@ func (c *contactsShowAgainCommand) run(cmd *cobra.Command, args []string) error 
 		fmt.Sprintf("Contact shown again: %s <%s> (#%d)", terminal.SanitizeLine(contact.Name), terminal.SanitizeLine(contact.EmailAddress), contact.Id),
 		"Contact shown again",
 		contact,
-		output.WithBreadcrumbs(output.Breadcrumb{Action: "view", Command: fmt.Sprintf("hey contacts show %d", contact.Id), Description: "View the contact"}),
+		output.WithBreadcrumbs(output.Breadcrumb{Action: "view", Command: fmt.Sprintf("hey contact show %d", contact.Id), Description: "View the contact"}),
 	)
 }

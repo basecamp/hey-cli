@@ -25,9 +25,9 @@ func newContactsBundleCommand() *contactsBundleCommand {
 		Short: "Bundle a contact's mail",
 		Long:  "Group mail from a contact into one bundle in HEY instead of listing every thread separately.",
 		Annotations: map[string]string{
-			"agent_notes": "Bundling is a per-contact preference. HEY applies it when the contact's delivery setting supports bundles. Reverse it with `hey contacts unbundle <id>`.",
+			"agent_notes": "Bundling is a per-contact preference. HEY applies it when the contact's delivery setting supports bundles. Reverse it with `hey contact unbundle <id>`.",
 		},
-		Example: `  hey contacts bundle 12345`,
+		Example: `  hey contact bundle 12345`,
 		RunE:    bundleCommand.run,
 		Args:    usageExactOneArg(),
 	}
@@ -49,6 +49,6 @@ func (c *contactsBundleCommand) run(cmd *cobra.Command, args []string) error {
 		fmt.Sprintf("Bundle request accepted for contact %d.", contactID),
 		"Bundle request accepted",
 		contactBundleResult{ID: contactID, Action: "bundle"},
-		output.WithBreadcrumbs(output.Breadcrumb{Action: "unbundle", Command: fmt.Sprintf("hey contacts unbundle %d", contactID), Description: "List this contact's mail separately"}),
+		output.WithBreadcrumbs(output.Breadcrumb{Action: "unbundle", Command: fmt.Sprintf("hey contact unbundle %d", contactID), Description: "List this contact's mail separately"}),
 	)
 }

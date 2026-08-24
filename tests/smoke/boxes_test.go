@@ -7,7 +7,7 @@ import (
 )
 
 func TestBoxesList(t *testing.T) {
-	resp := heyJSON(t, "boxes")
+	resp := heyJSON(t, "box", "list")
 
 	type Box struct {
 		ID   int    `json:"id"`
@@ -42,7 +42,7 @@ func TestBoxesList(t *testing.T) {
 }
 
 func TestBoxesLimit(t *testing.T) {
-	resp := heyJSON(t, "boxes", "--limit", "2")
+	resp := heyJSON(t, "box", "list", "--limit", "2")
 	type Box struct {
 		ID int `json:"id"`
 	}
@@ -101,7 +101,7 @@ func TestBoxByName(t *testing.T) {
 
 func TestBoxByID(t *testing.T) {
 	// First get a box list to find a real ID.
-	resp := heyJSON(t, "boxes")
+	resp := heyJSON(t, "box", "list")
 	type Box struct {
 		ID   int    `json:"id"`
 		Name string `json:"name"`
@@ -161,7 +161,7 @@ func TestBoxAll(t *testing.T) {
 }
 
 func TestBoxesAll(t *testing.T) {
-	resp := heyJSON(t, "boxes", "--all")
+	resp := heyJSON(t, "box", "list", "--all")
 	type Box struct {
 		ID int `json:"id"`
 	}

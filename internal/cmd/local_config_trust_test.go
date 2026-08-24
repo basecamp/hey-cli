@@ -24,7 +24,7 @@ func TestUntrustedLocalConfigFailsBeforeNetworkRequest(t *testing.T) {
 	t.Cleanup(server.Close)
 	setupLocalTrustTest(t, server.URL, "all")
 
-	err := runLocalTrustCLI(t, "--json", "boxes")
+	err := runLocalTrustCLI(t, "--json", "box", "list")
 	var cliErr *apierr.Error
 	if !errors.As(err, &cliErr) || !strings.Contains(cliErr.Message, "not trusted") {
 		t.Fatalf("error = %v, want untrusted local config", err)
@@ -36,7 +36,7 @@ func TestUntrustedLocalConfigFailsBeforeNetworkRequest(t *testing.T) {
 
 func TestJQIsMachineReadableForLocalConfigTrust(t *testing.T) {
 	root := newRootCmd()
-	command, _, err := root.Find([]string{"boxes"})
+	command, _, err := root.Find([]string{"box", "list"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestTrustLocalAllowsRequestsAndChangesRequireTrustAgain(t *testing.T) {
 	if err := runLocalTrustCLI(t, "--json", "config", "trust-local"); err != nil {
 		t.Fatal(err)
 	}
-	if err := runLocalTrustCLI(t, "--json", "boxes"); err != nil {
+	if err := runLocalTrustCLI(t, "--json", "box", "list"); err != nil {
 		t.Fatal(err)
 	}
 	if requests == 0 {
@@ -78,7 +78,7 @@ func TestTrustLocalAllowsRequestsAndChangesRequireTrustAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	requests = 0
-	if err := runLocalTrustCLI(t, "--json", "boxes"); err == nil {
+	if err := runLocalTrustCLI(t, "--json", "box", "list"); err == nil {
 		t.Fatal("untrusted local config was used after trust removal")
 	}
 	if requests != 0 {
@@ -92,7 +92,7 @@ func TestTrustLocalAllowsRequestsAndChangesRequireTrustAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	requests = 0
-	err := runLocalTrustCLI(t, "--json", "boxes")
+	err := runLocalTrustCLI(t, "--json", "box", "list")
 	var cliErr *apierr.Error
 	if !errors.As(err, &cliErr) || !strings.Contains(cliErr.Message, "not trusted") {
 		t.Fatalf("changed config error = %v, want untrusted", err)
@@ -199,7 +199,7 @@ func TestConfigIndependentCommandsSkipLocalConfigTrust(t *testing.T) {
 		args []string
 		want bool
 	}{
-		{args: []string{"boxes"}, want: true},
+		{args: []string{"box", "list"}, want: true},
 		{args: []string{"doctor"}, want: true},
 		{args: []string{"config", "show"}, want: false},
 		{args: []string{"upgrade"}, want: false},
@@ -286,7 +286,7 @@ func TestSetupAgentsRunsWithMalformedLocalConfig(t *testing.T) {
 		t.Errorf("skill was not installed: %v", err)
 	}
 
-	err := runLocalTrustCLI(t, "--json", "boxes")
+	err := runLocalTrustCLI(t, "--json", "box", "list")
 	if err == nil || !strings.Contains(err.Error(), "could not parse config") {
 		t.Fatalf("runtime-config commands must still report the parse error, got %v", err)
 	}

@@ -186,39 +186,6 @@ func findPersonalCalendarID(calendars []generated.Calendar) (int64, error) {
 	return 0, fmt.Errorf("personal calendar not found")
 }
 
-const (
-	personalRecordingsLookbackYears  = 4
-	personalRecordingsLookaheadYears = 1
-)
-
-// listPersonalRecordings fetches recordings from the user's personal calendar
-// with a lookback/lookahead window matching the old CLI behavior.
-func listPersonalRecordings(ctx context.Context) (*generated.CalendarRecordingsResponse, error) {
-	payload, err := sdk.Calendars().List(ctx)
-	if err != nil {
-		return nil, apierr.FromSDK(err)
-	}
-
-	calendars := unwrapCalendars(payload)
-	calID, err := findPersonalCalendarID(calendars)
-	if err != nil {
-		return nil, apierr.ErrNotFound("calendar", "personal")
-	}
-
-	now := time.Now()
-	startsOn := now.AddDate(-personalRecordingsLookbackYears, 0, 0).Format("2006-01-02")
-	endsOn := now.AddDate(personalRecordingsLookaheadYears, 0, 0).Format("2006-01-02")
-
-	resp, err := sdk.Calendars().GetRecordings(ctx, calID, &generated.GetCalendarRecordingsParams{
-		StartsOn: &startsOn,
-		EndsOn:   &endsOn,
-	})
-	if err != nil {
-		return nil, apierr.FromSDK(err)
-	}
-	return resp, nil
-}
-
 // filterRecordingsByType returns recordings matching the given type string. The empty
 // result is an empty slice rather than nil so that `--json` gives `"data": []` and a
 // `.data[]` filter has something to iterate.

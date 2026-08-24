@@ -66,7 +66,7 @@ func TestThreads(t *testing.T) {
 		t.Fatalf("could not extract topic ID from app_url: %s", data.Postings[0].AppURL)
 	}
 
-	threadsResp := heyJSON(t, "threads", topicID)
+	threadsResp := heyJSON(t, "thread", "read", topicID)
 	type Entry struct {
 		ID      int    `json:"id"`
 		Summary string `json:"summary"`
@@ -181,7 +181,7 @@ func TestForward(t *testing.T) {
 }
 
 func TestDrafts(t *testing.T) {
-	resp := heyJSON(t, "drafts")
+	resp := heyJSON(t, "draft", "list")
 	// Just verify the command succeeds and returns valid data.
 	// The data is a list (possibly empty).
 	if resp.Data == nil {
@@ -195,7 +195,7 @@ func TestDrafts(t *testing.T) {
 }
 
 func TestDraftsLimit(t *testing.T) {
-	resp := heyJSON(t, "drafts", "--limit", "2")
+	resp := heyJSON(t, "draft", "list", "--limit", "2")
 	if resp.Data == nil {
 		return
 	}
@@ -209,13 +209,13 @@ func TestDraftsLimit(t *testing.T) {
 }
 
 func TestDraftsAll(t *testing.T) {
-	resp := heyJSON(t, "drafts", "--all")
+	resp := heyJSON(t, "draft", "list", "--all")
 	// Just verify the command succeeds with --all.
 	_ = resp
 }
 
-func TestThreadsNoArgument(t *testing.T) {
-	heyFail(t, "threads", "--json")
+func TestThreadReadNoArgument(t *testing.T) {
+	heyFail(t, "thread", "read", "--json")
 }
 
 func TestReplyNoArgument(t *testing.T) {

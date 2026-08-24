@@ -32,9 +32,9 @@ buildGoModule.override { inherit go; } (finalAttrs: {
   postInstall = lib.optionalString
     (stdenv.buildPlatform.canExecute stdenv.hostPlatform) ''
     installShellCompletion --cmd hey \
-      --bash <($out/bin/hey completion bash) \
-      --fish <($out/bin/hey completion fish) \
-      --zsh  <($out/bin/hey completion zsh)
+      --bash <($out/bin/hey shell-completion generate bash) \
+      --fish <($out/bin/hey shell-completion generate fish) \
+      --zsh  <($out/bin/hey shell-completion generate zsh)
   '';
 
   meta = {

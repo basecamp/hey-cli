@@ -19,7 +19,7 @@ func newContactNoteDeleteCommand() *contactNoteDeleteCommand {
 		Use:     "delete <id>",
 		Short:   "Delete a private contact note",
 		Long:    "Permanently delete the private note from a contact. The contact remains unchanged.",
-		Example: `  hey contacts note delete 12345`,
+		Example: `  hey contact note delete 12345`,
 		RunE:    deleteCommand.run,
 		Args:    usageExactOneArg(),
 	}
@@ -41,6 +41,6 @@ func (c *contactNoteDeleteCommand) run(cmd *cobra.Command, args []string) error 
 		fmt.Sprintf("Private note for contact %d deleted.", contactID),
 		"Private contact note deleted",
 		map[string]int64{"id": contactID},
-		output.WithBreadcrumbs(output.Breadcrumb{Action: "write", Command: fmt.Sprintf("hey contacts note set %d", contactID), Description: "Add a private note"}),
+		output.WithBreadcrumbs(output.Breadcrumb{Action: "write", Command: fmt.Sprintf("hey contact note set %d", contactID), Description: "Add a private note"}),
 	)
 }

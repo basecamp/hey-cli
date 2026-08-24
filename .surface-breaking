@@ -4,3 +4,104 @@
 # command or flag that the previous release had. List the dropped line here in
 # the same PR (e.g. `hey todo --legacy-flag`) to acknowledge the break; prune
 # entries after the release that ships them.
+
+# `hey recordings <calendar-id>` listed every kind of recording a calendar holds, grouped
+# by type, which meant every reader filtered the group they wanted and `--count` and
+# `--ids-only` had to flatten across types to answer at all. Each type now has the command
+# it already deserved: `hey event list` (new, plus add/edit/delete), `hey todo list` and
+# `hey journal list`, the last two grown the `--calendar`, `--starts-on` and `--ends-on`
+# flags so nothing `recordings` could read is out of reach.
+hey recordings
+hey recordings --all
+hey recordings --ends-on
+hey recordings --limit
+hey recordings --starts-on
+
+# Every command is now a singular resource with a verb. The six plural names were the
+# exceptions — two were groups that merely read as plural (`accounts`, `contacts`), two
+# were bare listings with no verb at all (`calendars`, `drafts`), and two mixed the shapes
+# (`attachments <thread-id>` plus an `attachments save` subcommand; `threads <id>`, which
+# reads one thread despite the name). The replacements:
+#
+#   hey accounts            -> hey account
+#   hey attachments <id>    -> hey attachment list <id>
+#   hey attachments save    -> hey attachment save
+#   hey calendars           -> hey calendar list
+#   hey contacts            -> hey contact
+#   hey drafts              -> hey draft list
+#   hey threads <id>        -> hey thread read <id>
+hey accounts
+hey accounts list
+hey accounts use
+hey attachments
+hey attachments --allow-partial
+hey attachments save
+hey attachments save --force
+hey attachments save --output
+hey calendars
+hey contacts
+hey contacts add
+hey contacts add --account-user-id
+hey contacts add --alias
+hey contacts add --email
+hey contacts add --name
+hey contacts bundle
+hey contacts hide
+hey contacts list
+hey contacts list --all
+hey contacts list --page
+hey contacts note
+hey contacts note delete
+hey contacts note set
+hey contacts note set --note
+hey contacts note show
+hey contacts show
+hey contacts show-again
+hey contacts unbundle
+hey contacts update
+hey contacts update --alias
+hey contacts update --email
+hey contacts update --name
+hey drafts
+hey drafts --all
+hey drafts --limit
+hey threads
+hey threads --allow-partial
+
+# The six older plural names had already been demoted to hidden aliases when `box`,
+# `label`, `collection`, `workflow`, `clip` and `snippet` grew their `list` and `view`
+# verbs. A hidden alias is a name nothing shows and everything has to keep answering, and
+# a second listing path is a second place for a flag to drift — `hey labels --all` and
+# `hey label list --all` were one test away from meaning different things. They now read
+# as the singular families do:
+#
+#   hey boxes       -> hey box list
+#   hey clips       -> hey clip list
+#   hey collections -> hey collection list
+#   hey labels      -> hey label list
+#   hey snippets    -> hey snippet list
+#   hey workflows   -> hey workflow list
+#
+# `hey box <name|id>`, `hey label <id>`, `hey collection <id>` and `hey workflow <id>` are
+# untouched: those are bare arguments on a family that still exists, not separate commands.
+hey boxes
+hey boxes --all
+hey boxes --limit
+hey clips
+hey collections
+hey collections --all
+hey collections --limit
+hey labels
+hey labels --all
+hey labels --limit
+hey snippets
+hey workflows
+hey workflows --all
+hey workflows --limit
+
+# `hey completion <shell>` printed a script and left the reader to work out where their
+# shell reads completions from — advice that named root-owned directories and did not
+# work unprivileged. It is now `hey shell-completion generate <shell>`, beside
+# `hey shell-completion install`, which writes the file where the shell already looks.
+# The bare-argument-plus-subcommand shape was the same one `attachments <id>` had.
+hey completion

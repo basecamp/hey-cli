@@ -283,7 +283,7 @@ func TestDataCommandWithoutAuthReturnsAuthErrorWhenPiped(t *testing.T) {
 	asked := stubAskToSignIn(t, true)
 	server := quietServer(t)
 
-	_, _, err := runAuthCommand(t, t.TempDir(), server.URL, "", true, "boxes")
+	_, _, err := runAuthCommand(t, t.TempDir(), server.URL, "", true, "box", "list")
 	var cliErr *apierr.Error
 	if !errors.As(err, &cliErr) || cliErr.Code != "auth" {
 		t.Fatalf("error = %v, want auth", err)

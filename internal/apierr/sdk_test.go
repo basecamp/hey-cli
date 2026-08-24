@@ -68,10 +68,10 @@ func TestFromSDK(t *testing.T) {
 		},
 		{
 			name:           "conflict keeps the server's hint",
-			sdkErr:         &hey.Error{Code: hey.CodeConflict, Message: "that contact already exists", Hint: "hey contacts show ryan@example.com", HTTPStatus: 409},
+			sdkErr:         &hey.Error{Code: hey.CodeConflict, Message: "that contact already exists", Hint: "hey contact show ryan@example.com", HTTPStatus: 409},
 			wantCode:       CodeConflict,
 			wantMessage:    "that contact already exists",
-			wantHint:       "hey contacts show ryan@example.com",
+			wantHint:       "hey contact show ryan@example.com",
 			wantHTTPStatus: 409,
 		},
 		{

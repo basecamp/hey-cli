@@ -22,12 +22,13 @@ func TestCommandAccountScopePolicy(t *testing.T) {
 		args []string
 		want bool
 	}{
-		{args: []string{"boxes"}, want: true},
-		{args: []string{"calendars"}, want: true},
+		{args: []string{"box", "list"}, want: true},
+		{args: []string{"calendar", "list"}, want: true},
 		{args: []string{"tui"}, want: true},
-		{args: []string{"accounts", "list"}, want: false},
+		{args: []string{"account", "list"}, want: false},
 		{args: []string{"auth", "status"}, want: false},
 		{args: []string{"config", "show"}, want: false},
+		{args: []string{"shell-completion", "install"}, want: false},
 	} {
 		command, _, err := root.Find(test.args)
 		if err != nil {
@@ -105,7 +106,7 @@ func TestAccountFlagScopesMailRequests(t *testing.T) {
 		http.NotFound(w, r)
 	})
 
-	_, err := runAccountsCLI(t, server, "--account", "2", "boxes")
+	_, err := runAccountsCLI(t, server, "--account", "2", "box", "list")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +139,7 @@ func TestPersistedAccountScopesMailRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := runAccountsCLIWithConfig(t, server, configDir, "boxes"); err != nil {
+	if _, err := runAccountsCLIWithConfig(t, server, configDir, "box", "list"); err != nil {
 		t.Fatal(err)
 	}
 	if boxesAccount != "2" {
@@ -183,13 +184,13 @@ func TestSelectedAccountUsesMatchingSenderAndUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := runAccountsCLI(t, server,
-		"--account", "2", "contacts", "add",
+		"--account", "2", "contact", "add",
 		"--name", "Jane Doe", "--email", "jane@example.org",
 	); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := runAccountsCLI(t, server,
-		"--account", "2", "contacts", "bundle", "77",
+		"--account", "2", "contact", "bundle", "77",
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +222,7 @@ func TestUnknownAccountFlagFailsClosed(t *testing.T) {
 		http.NotFound(w, r)
 	})
 
-	_, err := runAccountsCLI(t, server, "--account", "99", "boxes")
+	_, err := runAccountsCLI(t, server, "--account", "99", "box", "list")
 	var cliErr *apierr.Error
 	if !errors.As(err, &cliErr) || cliErr.Code != "not_found" {
 		t.Fatalf("error = %v, want not_found", err)
@@ -273,7 +274,7 @@ func TestAccountsUseValidatesAndPersistsDefault(t *testing.T) {
 	})
 	tmp := t.TempDir()
 
-	_, err := runAccountsCLIWithConfig(t, server, tmp, "accounts", "use", "2")
+	_, err := runAccountsCLIWithConfig(t, server, tmp, "account", "use", "2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,10 +314,10 @@ func TestBaseURLFlagDoesNotCarryGlobalAccountAcrossOrigins(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := runAccountsCLIWithConfig(t, server, configDir, "boxes"); err != nil {
+	if _, err := runAccountsCLIWithConfig(t, server, configDir, "box", "list"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runAccountsCLIWithConfig(t, server, configDir, "--account", "2", "boxes"); err != nil {
+	if _, err := runAccountsCLIWithConfig(t, server, configDir, "--account", "2", "box", "list"); err != nil {
 		t.Fatal(err)
 	}
 	if len(boxesAccounts) != 2 || boxesAccounts[0] != "" || boxesAccounts[1] != "2" {
@@ -330,7 +331,7 @@ func TestAccountsUseRejectsUnknownAccountWithoutSaving(t *testing.T) {
 	})
 	configDir := t.TempDir()
 
-	_, err := runAccountsCLIWithConfig(t, server, configDir, "accounts", "use", "99")
+	_, err := runAccountsCLIWithConfig(t, server, configDir, "account", "use", "99")
 	var cliErr *apierr.Error
 	if !errors.As(err, &cliErr) || cliErr.Code != "not_found" {
 		t.Fatalf("error = %v, want not_found", err)

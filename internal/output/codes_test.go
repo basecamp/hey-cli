@@ -30,7 +30,7 @@ func TestExitCodeAndEnvelopeForSDKErrors(t *testing.T) {
 		{"rate limit", &hey.Error{Code: hey.CodeRateLimit, Message: "429", Hint: "30 seconds", HTTPStatus: 429}, ExitRateLimit, apierr.CodeRateLimit, ""},
 		{"network", &hey.Error{Code: hey.CodeNetwork, Message: "connection refused"}, ExitNetwork, apierr.CodeNetwork, ""},
 		{"validation", &hey.Error{Code: hey.CodeValidation, Message: "subject can't be blank", Hint: "Give it a subject", HTTPStatus: 422}, ExitUsage, apierr.CodeValidation, "Give it a subject"},
-		{"conflict", &hey.Error{Code: hey.CodeConflict, Message: "already exists", Hint: "hey contacts show", HTTPStatus: 409}, ExitUsage, apierr.CodeConflict, "hey contacts show"},
+		{"conflict", &hey.Error{Code: hey.CodeConflict, Message: "already exists", Hint: "hey contact show", HTTPStatus: 409}, ExitUsage, apierr.CodeConflict, "hey contact show"},
 		{"api", &hey.Error{Code: hey.CodeAPI, Message: "internal server error", HTTPStatus: 500}, ExitAPI, apierr.CodeAPI, ""},
 		{"an SDK usage error", &hey.Error{Code: hey.CodeUsage, Message: "page cursor is required", HTTPStatus: 400}, ExitAPI, apierr.CodeAPI, ""},
 		{"an SDK ambiguous error", &hey.Error{Code: hey.CodeAmbiguous, Message: "two contacts match", HTTPStatus: 300}, ExitAPI, apierr.CodeAPI, ""},

@@ -8,7 +8,7 @@ import (
 )
 
 func TestJSONOutput(t *testing.T) {
-	stdout := heyOK(t, "boxes", "--json")
+	stdout := heyOK(t, "box", "list", "--json")
 
 	var resp Response
 	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
@@ -23,7 +23,7 @@ func TestJSONOutput(t *testing.T) {
 }
 
 func TestQuietOutput(t *testing.T) {
-	stdout := heyOK(t, "boxes", "--quiet")
+	stdout := heyOK(t, "box", "list", "--quiet")
 
 	// Quiet mode outputs raw JSON data without the envelope.
 	var data []any
@@ -33,7 +33,7 @@ func TestQuietOutput(t *testing.T) {
 }
 
 func TestIDsOnlyOutput(t *testing.T) {
-	stdout := heyOK(t, "boxes", "--ids-only")
+	stdout := heyOK(t, "box", "list", "--ids-only")
 	stdout = strings.TrimSpace(stdout)
 
 	if stdout == "" {
@@ -53,7 +53,7 @@ func TestIDsOnlyOutput(t *testing.T) {
 }
 
 func TestCountOutput(t *testing.T) {
-	stdout := heyOK(t, "boxes", "--count")
+	stdout := heyOK(t, "box", "list", "--count")
 	stdout = strings.TrimSpace(stdout)
 
 	if _, err := strconv.Atoi(stdout); err != nil {
@@ -62,7 +62,7 @@ func TestCountOutput(t *testing.T) {
 }
 
 func TestMarkdownOutput(t *testing.T) {
-	stdout := heyOK(t, "boxes", "--markdown")
+	stdout := heyOK(t, "box", "list", "--markdown")
 
 	// Markdown table should have pipe-separated header and separator rows.
 	lines := strings.Split(strings.TrimSpace(stdout), "\n")
@@ -79,7 +79,7 @@ func TestMarkdownOutput(t *testing.T) {
 
 func TestStyledOutput(t *testing.T) {
 	// --styled forces styled output even when piped.
-	stdout := heyOK(t, "boxes", "--styled")
+	stdout := heyOK(t, "box", "list", "--styled")
 	// Styled output has a table with ID/Kind/Name headers.
 	assertContains(t, stdout, "ID")
 	assertContains(t, stdout, "Kind")
@@ -87,9 +87,9 @@ func TestStyledOutput(t *testing.T) {
 }
 
 func TestVerboseFlag(t *testing.T) {
-	_, stderr, code := hey(t, "boxes", "-v", "--json")
+	_, stderr, code := hey(t, "box", "list", "-v", "--json")
 	if code != 0 {
-		t.Fatalf("hey boxes -v failed with exit %d", code)
+		t.Fatalf("hey box list -v failed with exit %d", code)
 	}
 	// Verbose mode logs request details to stderr.
 	if stderr == "" {
@@ -98,7 +98,7 @@ func TestVerboseFlag(t *testing.T) {
 }
 
 func TestStatsFlag(t *testing.T) {
-	stdout := heyOK(t, "boxes", "--stats", "--json")
+	stdout := heyOK(t, "box", "list", "--stats", "--json")
 	var resp Response
 	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)

@@ -29,9 +29,9 @@ func newContactNoteSetCommand() *contactNoteSetCommand {
 		Annotations: map[string]string{
 			"agent_notes": "Accepts --note, positional content, stdin, or opens $EDITOR with the existing note. The note is Markdown, or raw HTML via --note-html. Use the delete subcommand to clear a note.",
 		},
-		Example: `  hey contacts note set 12345 "Prefers email"
-  hey contacts note set 12345 --note "Prefers email"
-  echo "Prefers email" | hey contacts note set 12345`,
+		Example: `  hey contact note set 12345 "Prefers email"
+  hey contact note set 12345 --note "Prefers email"
+  echo "Prefers email" | hey contact note set 12345`,
 		RunE: setCommand.run,
 		Args: cobra.MatchAll(usageMinOneArg(), cobra.MaximumNArgs(2)),
 	}
@@ -81,7 +81,7 @@ func (c *contactNoteSetCommand) run(cmd *cobra.Command, args []string) error {
 		content = strings.TrimSpace(content)
 	}
 	if content == "" {
-		return apierr.ErrUsage("note cannot be empty; use `hey contacts note delete <id>` to clear it")
+		return apierr.ErrUsage("note cannot be empty; use `hey contact note delete <id>` to clear it")
 	}
 
 	note, err := sdk.Contacts().SetNote(cmd.Context(), contactID, content)
@@ -95,7 +95,7 @@ func (c *contactNoteSetCommand) run(cmd *cobra.Command, args []string) error {
 		fmt.Sprintf("Private note for contact %d saved.", contactID),
 		"Private contact note saved",
 		note,
-		output.WithBreadcrumbs(output.Breadcrumb{Action: "read", Command: fmt.Sprintf("hey contacts note show %d", contactID), Description: "Read the private note"}),
+		output.WithBreadcrumbs(output.Breadcrumb{Action: "read", Command: fmt.Sprintf("hey contact note show %d", contactID), Description: "Read the private note"}),
 	)
 }
 

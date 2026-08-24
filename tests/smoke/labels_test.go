@@ -21,7 +21,7 @@ type smokeFolder struct {
 }
 
 func TestLabelsAndLabel(t *testing.T) {
-	response := heyJSON(t, "labels")
+	response := heyJSON(t, "label", "list")
 	folders := dataAs[[]smokeFolder](t, response)
 	if response.Summary == "" {
 		t.Error("labels response omitted summary")
@@ -166,7 +166,7 @@ func findPostingIDBySubject(t *testing.T, subject string) (int64, error) {
 
 func findLabelIDByName(t *testing.T, name string) (int64, error) {
 	t.Helper()
-	stdout, stderr, code := hey(t, "labels", "--all", "--json")
+	stdout, stderr, code := hey(t, "label", "list", "--all", "--json")
 	if code != 0 {
 		return 0, fmt.Errorf("list labels (exit %d): %s", code, stderr)
 	}

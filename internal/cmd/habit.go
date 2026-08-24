@@ -8,10 +8,12 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	habitvalues "github.com/basecamp/hey-cli/internal/habit"
+	"github.com/basecamp/hey-cli/internal/output"
 )
 
 type habitCommand struct {
@@ -24,10 +26,11 @@ func newHabitCommand() *habitCommand {
 		Use:   "habit",
 		Short: "Create and manage habits",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: create, edit, delete, complete, uncomplete. Habit IDs are available in calendar recordings. Days accept weekday names or 0 (Sunday) through 6 (Saturday).",
+			"agent_notes": "Subcommands: list, create, edit, delete, complete, uncomplete. Use list --ids-only to pipe IDs to the rest. Days accept weekday names or 0 (Sunday) through 6 (Saturday).",
 		},
 	}
 
+	habitCommand.cmd.AddCommand(newHabitListCommand().cmd)
 	habitCommand.cmd.AddCommand(newHabitCreateCommand().cmd)
 	habitCommand.cmd.AddCommand(newHabitEditCommand().cmd)
 	habitCommand.cmd.AddCommand(newHabitDeleteCommand().cmd)
@@ -35,6 +38,108 @@ func newHabitCommand() *habitCommand {
 	habitCommand.cmd.AddCommand(newHabitUncompleteCommand().cmd)
 
 	return habitCommand
+}
+
+// list
+
+type habitListCommand struct {
+	cmd   *cobra.Command
+	date  string
+	limit int
+	all   bool
+}
+
+func newHabitListCommand() *habitListCommand {
+	habitListCommand := &habitListCommand{}
+	habitListCommand.cmd = &cobra.Command{
+		Use:   "list",
+		Short: "List habits",
+		Long: `List habits.
+
+A habit is read from the week it belongs to rather than from a calendar's recordings,
+which carry only its completions. A week is what lists every habit exactly once, whatever
+weekday each is scheduled for.`,
+		Example: `  hey habit list
+  hey habit list --date 2026-09-02
+  hey habit list --ids-only`,
+		RunE: habitListCommand.run,
+		Args: cobra.NoArgs,
+	}
+
+	habitListCommand.cmd.Flags().StringVar(&habitListCommand.date, "date", "", "Any day in the week to read (YYYY-MM-DD, defaults to today)")
+	habitListCommand.cmd.Flags().IntVar(&habitListCommand.limit, "limit", 0, "Maximum number of habits to show")
+	habitListCommand.cmd.Flags().BoolVar(&habitListCommand.all, "all", false, "Fetch all results (override --limit)")
+
+	return habitListCommand
+}
+
+func (c *habitListCommand) run(cmd *cobra.Command, args []string) error {
+	if err := requireAuth(); err != nil {
+		return err
+	}
+
+	date := c.date
+	if date == "" {
+		date = time.Now().Format(dateLayout)
+	}
+	if _, err := parseDateArg("date", date); err != nil {
+		return err
+	}
+
+	ctx := cmd.Context()
+	week, err := sdk.CalendarPeriods().Week(ctx, date)
+	if err != nil {
+		return apierr.FromSDK(err)
+	}
+
+	habits := []generated.Recording{}
+	if week != nil {
+		habits = filterRecordingsByType(&week.Recordings, "Calendar::Habit")
+	}
+
+	total := len(habits)
+	if c.limit > 0 && !c.all && len(habits) > c.limit {
+		habits = habits[:c.limit]
+	}
+	notice := output.TruncationNotice(len(habits), total)
+
+	if writer.IsStyled() {
+		if len(habits) == 0 {
+			fmt.Fprintln(cmd.OutOrStdout(), "No habits.")
+			return nil
+		}
+
+		table := newTable(cmd.OutOrStdout())
+		table.addRow([]string{"ID", "Name", "Icon", "Color", "Days"})
+		for _, habit := range habits {
+			table.addRow([]string{
+				fmt.Sprintf("%d", habit.Id), habit.Title, habit.Icon, habit.Color,
+				habitvalues.FormatDays(habit.Days),
+			})
+		}
+		table.print()
+		if notice != "" {
+			fmt.Fprintln(cmd.OutOrStdout(), notice)
+		}
+		return nil
+	}
+
+	return writeOK(habits,
+		output.WithSummary(fmt.Sprintf("%d habits", len(habits))),
+		output.WithNotice(notice),
+		output.WithBreadcrumbs(
+			output.Breadcrumb{
+				Action:      "complete",
+				Command:     "hey habit complete <id>",
+				Description: "Mark a habit done for today",
+			},
+			output.Breadcrumb{
+				Action:      "edit",
+				Command:     "hey habit edit <id>",
+				Description: "Change a habit",
+			},
+		),
+	)
 }
 
 // create

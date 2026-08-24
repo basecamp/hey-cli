@@ -42,15 +42,6 @@ type workflowsCommand struct {
 	all   bool
 }
 
-func newWorkflowsCommand() *workflowsCommand {
-	command := newWorkflowsListingCommand("workflows", `  hey workflows
-  hey workflows --account 12345
-  hey workflows --limit 10
-  hey workflows --json`)
-	command.cmd.Annotations[compatibilityForAnnotation] = "workflow list"
-	return command
-}
-
 func newWorkflowListCommand() *workflowsCommand {
 	return newWorkflowsListingCommand("list", `  hey workflow list
   hey workflow list --account 12345
@@ -259,8 +250,8 @@ func (c *workflowCommand) run(cmd *cobra.Command, args []string) error {
 		return writeOK(detail,
 			output.WithSummary(fmt.Sprintf("Workflow %d with %d %s", detail.ID, len(detail.Stages), stageNoun(len(detail.Stages)))),
 			output.WithBreadcrumbs(
-				output.Breadcrumb{Action: "add", Command: "hey workflow add <topic-id> --to <workflow-id> --stage <stage-id>", Description: "Add a thread to a stage"},
-				output.Breadcrumb{Action: "move", Command: "hey workflow move <topic-id> --workflow <workflow-id> --to <stage-id>", Description: "Move a thread to another stage"},
+				output.Breadcrumb{Action: "add", Command: "hey workflow add <thread-id> --to <workflow-id> --stage <stage-id>", Description: "Add a thread to a stage"},
+				output.Breadcrumb{Action: "move", Command: "hey workflow move <thread-id> --workflow <workflow-id> --to <stage-id>", Description: "Move a thread to another stage"},
 			),
 		)
 	}
@@ -352,7 +343,7 @@ func workflowCreationAccountID(ctx context.Context) (int64, error) {
 			continue
 		}
 		if accountID != 0 {
-			return 0, apierr.ErrUsageHint("workflow creation requires one linked mail account", "select one with --account <id> or `hey accounts use <id>`")
+			return 0, apierr.ErrUsageHint("workflow creation requires one linked mail account", "select one with --account <id> or `hey account use <id>`")
 		}
 		accountID = account.Id
 	}
@@ -564,7 +555,7 @@ type workflowAddCommand struct {
 func newWorkflowAddCommand() *workflowAddCommand {
 	workflowAddCommand := &workflowAddCommand{}
 	workflowAddCommand.cmd = &cobra.Command{
-		Use:   "add <topic-id>...",
+		Use:   "add <thread-id>...",
 		Short: "Add email threads to a workflow stage",
 		Example: `  hey workflow add 501 --to 123 --stage 456
   hey workflow add 501 502 --to 123 --stage 456`,
@@ -609,7 +600,7 @@ type workflowMoveCommand struct {
 func newWorkflowMoveCommand() *workflowMoveCommand {
 	workflowMoveCommand := &workflowMoveCommand{}
 	workflowMoveCommand.cmd = &cobra.Command{
-		Use:   "move <topic-id>...",
+		Use:   "move <thread-id>...",
 		Short: "Move email threads to another workflow stage",
 		Example: `  hey workflow move 501 --workflow 123 --to 789
   hey workflow move 501 502 --workflow 123 --to 789`,
@@ -653,7 +644,7 @@ type workflowRemoveCommand struct {
 func newWorkflowRemoveCommand() *workflowRemoveCommand {
 	workflowRemoveCommand := &workflowRemoveCommand{}
 	workflowRemoveCommand.cmd = &cobra.Command{
-		Use:   "remove <topic-id>...",
+		Use:   "remove <thread-id>...",
 		Short: "Remove email threads from a workflow",
 		Example: `  hey workflow remove 501 --from 123
   hey workflow remove 501 502 --from 123`,

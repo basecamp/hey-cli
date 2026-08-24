@@ -19,14 +19,6 @@ type clipsCommand struct {
 	cmd *cobra.Command
 }
 
-func newClipsCommand() *clipsCommand {
-	command := newClipsListingCommand("clips", `  hey clips
-  hey clips --json
-  hey clips --ids-only`)
-	command.cmd.Annotations[compatibilityForAnnotation] = "clip list"
-	return command
-}
-
 func newClipListCommand() *clipsCommand {
 	return newClipsListingCommand("list", `  hey clip list
   hey clip list --json

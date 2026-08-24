@@ -163,17 +163,3 @@ func TestFilterRecordingsByType(t *testing.T) {
 		t.Errorf("expected an empty non-nil slice for a nil response, got %v", nilResult)
 	}
 }
-
-func TestFlattenRecordingsSortsByType(t *testing.T) {
-	resp := &generated.CalendarRecordingsResponse{
-		"Calendar::Todo":         {{Id: 3, Title: "Water the plants"}},
-		"Calendar::JournalEntry": {{Id: 1, Title: "Journal"}, {Id: 2, Title: "Journal"}},
-	}
-	flattened := flattenRecordings(resp)
-	if len(flattened) != 3 || flattened[0].Id != 1 || flattened[1].Id != 2 || flattened[2].Id != 3 {
-		t.Errorf("flattenRecordings = %+v", flattened)
-	}
-	if empty := flattenRecordings(nil); empty == nil || len(empty) != 0 {
-		t.Errorf("flattenRecordings(nil) = %v, want an empty non-nil slice", empty)
-	}
-}

@@ -16,7 +16,7 @@ type seenCommand struct {
 func newSeenCommand() *seenCommand {
 	seenCommand := &seenCommand{}
 	seenCommand.cmd = &cobra.Command{
-		Use:   "seen <id>...",
+		Use:   "seen <box-item-id>...",
 		Short: "Mark email threads as seen",
 		Example: `  hey seen 12345
   hey seen 12345 67890`,
@@ -56,7 +56,7 @@ type unseenCommand struct {
 func newUnseenCommand() *unseenCommand {
 	unseenCommand := &unseenCommand{}
 	unseenCommand.cmd = &cobra.Command{
-		Use:   "unseen <id>...",
+		Use:   "unseen <box-item-id>...",
 		Short: "Mark email threads as unseen",
 		Example: `  hey unseen 12345
   hey unseen 12345 67890`,

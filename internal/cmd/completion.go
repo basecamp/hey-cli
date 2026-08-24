@@ -6,38 +6,43 @@ import (
 	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
-func newCompletionCommand() *cobra.Command {
+func newShellCompletionCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "completion [bash|zsh|fish|powershell]",
-		Short: "Generate shell completion scripts",
-		Long: `Generate shell completion scripts for hey.
+		Use:   "shell-completion",
+		Short: "Set up tab completion for your shell",
+		Annotations: map[string]string{
+			"agent_notes": "Subcommands: install, generate. install writes the script where the shell reads it and is the usual way in; generate prints it to stdout for a package or a dotfile to place itself.",
+		},
+	}
 
-To load completions:
+	cmd.AddCommand(newCompletionInstallCommand().cmd)
+	cmd.AddCommand(newCompletionGenerateCommand())
 
-Bash:
-  $ source <(hey completion bash)
+	return cmd
+}
 
-  # To load completions for each session, execute once:
-  # Linux:
-  $ hey completion bash > /etc/bash_completion.d/hey
-  # macOS:
-  $ hey completion bash > $(brew --prefix)/etc/bash_completion.d/hey
+func newCompletionGenerateCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "generate <bash|zsh|fish|powershell>",
+		Short: "Print a completion script to stdout",
+		Long: `Print hey's completion script for a shell to stdout.
 
-Zsh:
-  $ source <(hey completion zsh)
+This is the by-hand route, for a package that places the file itself or a dotfile
+that sources it. To just make tab completion work, use hey shell-completion install
+— it writes the script where your shell already looks.
 
-  # To load completions for each session, execute once:
-  $ hey completion zsh > "${fpath[1]}/_hey"
+Load it for the current session:
 
-Fish:
-  $ hey completion fish | source
+  bash   $ source <(hey shell-completion generate bash)
+  zsh    $ source <(hey shell-completion generate zsh)
+  fish   $ hey shell-completion generate fish | source
+  pwsh   PS> hey shell-completion generate powershell | Out-String | Invoke-Expression
 
-  # To load completions for each session, execute once:
-  $ hey completion fish > ~/.config/fish/completions/hey.fish
-
-PowerShell:
-  PS> hey completion powershell | Out-String | Invoke-Expression
-`,
+Keep it for every session by writing it where the shell reads completions from.
+Those directories differ per shell and per machine, and a file outside them is read
+by nothing — hey shell-completion install works out the right one and reports it.`,
+		Example: `  hey shell-completion generate bash
+  hey shell-completion generate zsh > "$HOME/.local/share/zsh/site-functions/_hey"`,
 		Args:      cobra.ExactArgs(1),
 		ValidArgs: []string{"bash", "zsh", "fish", "powershell"},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -56,6 +61,4 @@ PowerShell:
 			}
 		},
 	}
-
-	return cmd
 }

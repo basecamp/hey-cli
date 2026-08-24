@@ -64,11 +64,11 @@ func TestSnippetLifecycle(t *testing.T) {
 
 func TestSnippetOutputFormatsAndValidation(t *testing.T) {
 	for _, args := range [][]string{
-		{"snippets", "--quiet"},
-		{"snippets", "--ids-only"},
-		{"snippets", "--count"},
-		{"snippets", "--markdown"},
-		{"snippets", "--styled"},
+		{"snippet", "list", "--quiet"},
+		{"snippet", "list", "--ids-only"},
+		{"snippet", "list", "--count"},
+		{"snippet", "list", "--markdown"},
+		{"snippet", "list", "--styled"},
 	} {
 		_, stderr, code := hey(t, args...)
 		if code != 0 {
@@ -84,7 +84,7 @@ func TestSnippetOutputFormatsAndValidation(t *testing.T) {
 
 func listSnippets(t *testing.T) []smokeSnippet {
 	t.Helper()
-	return dataAs[[]smokeSnippet](t, heyJSON(t, "snippets"))
+	return dataAs[[]smokeSnippet](t, heyJSON(t, "snippet", "list"))
 }
 
 func findSnippetByName(t *testing.T, name string) smokeSnippet {

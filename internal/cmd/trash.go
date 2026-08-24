@@ -15,7 +15,7 @@ type trashCommand struct {
 func newTrashCommand() *trashCommand {
 	trashCommand := &trashCommand{}
 	trashCommand.cmd = &cobra.Command{
-		Use:   "trash <id>...",
+		Use:   "trash <box-item-id>...",
 		Short: "Move email threads to Trash",
 		Long:  "Move one or more email threads to Trash. For a shared thread, HEY removes your access instead of deleting it for everyone.",
 		Example: `  hey trash 12345

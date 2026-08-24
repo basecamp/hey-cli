@@ -13,6 +13,49 @@ import (
 	habitvalues "github.com/basecamp/hey-cli/internal/habit"
 )
 
+// Habits are read from a week, not from a calendar's recordings. That listing carries only
+// their completions (`Calendar::Habit::Completion`), so reading habits there answers none at
+// all — and a week lists every habit once whatever weekday it is scheduled for.
+func TestHabitListCommand(t *testing.T) {
+	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/calendar/weeks/2026-09-02.json" {
+			t.Errorf("request = %s %s, want the week read", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"kind":"week","starts_at":"2026-08-31T00:00:00Z","ends_at":"2026-09-06T23:59:59Z","recordings":{"Calendar::Habit":[{"id":11,"title":"Morning strength training","icon":"weights","color":"blue","days":[1,3,5]},{"id":12,"title":"Practice piano","icon":"music","color":"green","days":[0,1,2,3,4,5,6]}],"Calendar::Todo":[{"id":3,"title":"Send notes"}]}}`)
+	}), "habit", "list", "--date", "2026-09-02")
+	if err != nil {
+		t.Fatalf("execute habit list: %v", err)
+	}
+	if response.Summary != "2 habits" {
+		t.Errorf("summary = %q", response.Summary)
+	}
+	habits, ok := response.Data.([]any)
+	if !ok || len(habits) != 2 {
+		t.Fatalf("data = %#v, want the two habits and no to-do", response.Data)
+	}
+	first, ok := habits[0].(map[string]any)
+	if !ok || first["title"] != "Morning strength training" || first["icon"] != "weights" {
+		t.Errorf("first habit = %#v", habits[0])
+	}
+}
+
+func TestHabitListRejectsABadDate(t *testing.T) {
+	var requests atomic.Int32
+	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}), "habit", "list", "--date", "next tuesday")
+	if err == nil || !strings.Contains(err.Error(), "invalid date") {
+		t.Fatalf("error = %v, want an invalid date", err)
+	}
+	if requests.Load() != 0 {
+		t.Errorf("requests = %d, want 0", requests.Load())
+	}
+}
+
 func TestHabitCreateCommand(t *testing.T) {
 	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/calendar/habits.json" {

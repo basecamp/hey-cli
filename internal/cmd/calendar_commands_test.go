@@ -56,7 +56,7 @@ func TestCalendarsCommand(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"calendars":[{"calendar":{"id":7,"name":"Personal","kind":"Calendar","owned":true,"personal":true}},{"calendar":{"id":9,"name":"Team","kind":"Calendar"}}]}`)
-	}), "calendars")
+	}), "calendar", "list")
 	if err != nil {
 		t.Fatalf("execute calendars: %v", err)
 	}
@@ -98,13 +98,13 @@ func TestCalendarsNamesTheAccountOnlyWhenThereAreSeveral(t *testing.T) {
 func TestCalendarsCommandAPIError(t *testing.T) {
 	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "calendar unavailable", http.StatusBadRequest)
-	}), "calendars")
+	}), "calendar", "list")
 	if err == nil || !strings.Contains(err.Error(), "400 Bad Request") {
 		t.Fatalf("error = %v, want HTTP failure", err)
 	}
 }
 
-func TestRecordingsCommand(t *testing.T) {
+func TestEventsListCommand(t *testing.T) {
 	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/calendars/7/recordings.json" {
 			t.Errorf("request = %s %s", r.Method, r.URL.Path)
@@ -119,79 +119,133 @@ func TestRecordingsCommand(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"Calendar::Event":[{"id":1,"title":"Planning","starts_at":"2026-08-02T09:00:00Z"},{"id":2,"title":"Review","starts_at":"2026-08-03T09:00:00Z"}],"Calendar::Todo":[{"id":3,"title":"Send notes"}]}`)
-	}), "recordings", "7", "--starts-on", "2026-08-01", "--ends-on", "2026-08-31", "--limit", "1")
+	}), "event", "list", "--calendar", "7", "--starts-on", "2026-08-01", "--ends-on", "2026-08-31", "--limit", "1")
 	if err != nil {
-		t.Fatalf("execute recordings: %v", err)
+		t.Fatalf("execute events list: %v", err)
 	}
-	if response.Summary != "Recordings for calendar 7 (2026-08-01 to 2026-08-31)" {
+	if response.Summary != "1 events (2026-08-01 to 2026-08-31)" {
 		t.Errorf("summary = %q", response.Summary)
 	}
-	if response.Notice != "Showing 2 of 3 results. Use --all to see everything." {
+	if response.Notice != "Showing 1 of 2 results. Use --all to see everything." {
 		t.Errorf("notice = %q", response.Notice)
 	}
-	data, ok := response.Data.(map[string]any)
-	if !ok {
-		t.Fatalf("data = %T, want map", response.Data)
+	events, ok := response.Data.([]any)
+	if !ok || len(events) != 1 {
+		t.Fatalf("data = %#v, want one limited event", response.Data)
 	}
-	if events, ok := data["Calendar::Event"].([]any); !ok || len(events) != 1 {
-		t.Errorf("events = %#v, want one limited event", data["Calendar::Event"])
+	event, ok := events[0].(map[string]any)
+	if !ok || event["title"] != "Planning" {
+		t.Errorf("event = %#v, want the first event and no to-dos", events[0])
 	}
 }
 
-func TestRecordingsDefaultsEndDateFromStart(t *testing.T) {
+// Without --calendar the listing reads every calendar the identity has, since an event can
+// be on any of them — unlike a to-do or a journal entry, which are on the personal one.
+func TestEventsListReadsEveryCalendar(t *testing.T) {
+	var read []string
+	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/calendars.json":
+			_, _ = io.WriteString(w, `{"calendars":[{"calendar":{"id":7,"name":"Personal","personal":true}},{"calendar":{"id":9,"name":"Work","owned":true}}]}`)
+		case "/calendars/7/recordings.json":
+			read = append(read, "7")
+			_, _ = io.WriteString(w, `{"Calendar::Event":[{"id":1,"title":"Dentist"}]}`)
+		case "/calendars/9/recordings.json":
+			read = append(read, "9")
+			_, _ = io.WriteString(w, `{"Calendar::Event":[{"id":2,"title":"Design review"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}), "event", "list")
+	if err != nil {
+		t.Fatalf("execute events list: %v", err)
+	}
+	if len(read) != 2 || read[0] != "7" || read[1] != "9" {
+		t.Errorf("calendars read = %v, want both in the order they were listed", read)
+	}
+	if events, ok := response.Data.([]any); !ok || len(events) != 2 {
+		t.Errorf("data = %#v, want both calendars' events", response.Data)
+	}
+}
+
+func TestEventsListDefaultsEndDateFromStart(t *testing.T) {
 	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.URL.Query().Get("ends_on"); got != "2026-03-03" {
 			t.Errorf("ends_on = %q, want 30 days after 2026-02-01", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{}`)
-	}), "recordings", "7", "--starts-on", "2026-02-01")
+	}), "event", "list", "--calendar", "7", "--starts-on", "2026-02-01")
 	if err != nil {
-		t.Fatalf("execute recordings: %v", err)
+		t.Fatalf("execute events list: %v", err)
 	}
 	if response.Notice != "" {
 		t.Errorf("notice = %q, want empty", response.Notice)
 	}
 }
 
-// Recordings arrive grouped by type, which --count and --ids-only cannot read. Both
-// used to fail on the main calendar listing with "requires list data".
-func TestRecordingsCountsAndListsIDsAcrossTypes(t *testing.T) {
+func TestEventsListCountsAndListsIDs(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"Calendar::Event":[{"id":1,"title":"Planning"},{"id":2,"title":"Review"}],"Calendar::Todo":[{"id":3,"title":"Send notes"}]}`)
 	})
 
-	count, err := runFormattedCommand(t, handler, []string{"--count"}, "recordings", "7")
+	count, err := runFormattedCommand(t, handler, []string{"--count"}, "event", "list", "--calendar", "7")
 	if err != nil {
-		t.Fatalf("execute recordings --count: %v", err)
+		t.Fatalf("execute events list --count: %v", err)
 	}
-	if strings.TrimSpace(count) != "3" {
-		t.Errorf("count = %q, want 3", count)
+	if strings.TrimSpace(count) != "2" {
+		t.Errorf("count = %q, want 2 — the events, not the to-do", count)
 	}
 
-	ids, err := runFormattedCommand(t, handler, []string{"--ids-only"}, "recordings", "7")
+	ids, err := runFormattedCommand(t, handler, []string{"--ids-only"}, "event", "list", "--calendar", "7")
 	if err != nil {
-		t.Fatalf("execute recordings --ids-only: %v", err)
+		t.Fatalf("execute events list --ids-only: %v", err)
 	}
-	if strings.Fields(ids)[0] != "1" || len(strings.Fields(ids)) != 3 {
-		t.Errorf("ids = %q, want the three IDs with the types in name order", ids)
+	if got := strings.Fields(ids); len(got) != 2 || got[0] != "1" || got[1] != "2" {
+		t.Errorf("ids = %q, want the two event IDs", ids)
 	}
 }
 
-func TestRecordingsValidationMakesNoRequest(t *testing.T) {
+func TestEventsValidationMakesNoRequest(t *testing.T) {
 	tests := []struct {
 		name string
 		args []string
 		want string
 	}{
-		{name: "calendar ID", args: []string{"recordings", "not-an-id"}, want: "invalid calendar ID"},
-		{name: "start date", args: []string{"recordings", "7", "--starts-on", "tomorrow"}, want: "invalid starts-on date"},
-		{name: "end date", args: []string{"recordings", "7", "--ends-on", "alsobad"}, want: "invalid ends-on date"},
+		{name: "start date", args: []string{"event", "list", "--calendar", "7", "--starts-on", "tomorrow"}, want: "invalid starts-on date"},
+		{name: "end date", args: []string{"event", "list", "--calendar", "7", "--ends-on", "alsobad"}, want: "invalid ends-on date"},
 		{
 			name: "backwards window",
-			args: []string{"recordings", "7", "--starts-on", "2026-08-31", "--ends-on", "2026-08-01"},
+			args: []string{"event", "list", "--calendar", "7", "--starts-on", "2026-08-31", "--ends-on", "2026-08-01"},
 			want: "ends-on 2026-08-01 is before starts-on 2026-08-31",
+		},
+		{name: "event ID", args: []string{"event", "delete", "not-an-id"}, want: "invalid event ID"},
+		{
+			name: "repeat frequency",
+			args: []string{"event", "add", "Standup", "--calendar", "7", "--repeat", "every_fortnight"},
+			want: "invalid repeat: every_fortnight",
+		},
+		{
+			name: "repeat window without a frequency",
+			args: []string{"event", "add", "Standup", "--calendar", "7", "--repeat-times", "5"},
+			want: "repeat-until and repeat-times need --repeat",
+		},
+		{
+			name: "clock time",
+			args: []string{"event", "add", "Standup", "--calendar", "7", "--start-time", "9am"},
+			want: "invalid start-time: 9am",
+		},
+		{
+			name: "notice period",
+			args: []string{"event", "add", "Standup", "--calendar", "7", "--remind", "soon"},
+			want: "invalid remind: soon",
+		},
+		{
+			name: "countdown unit",
+			args: []string{"event", "add", "Launch", "--calendar", "7", "--countdown", "3", "--countdown-unit", "fortnights"},
+			want: "invalid countdown-unit: fortnights",
 		},
 	}
 	for _, tt := range tests {

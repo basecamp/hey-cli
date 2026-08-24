@@ -15,7 +15,7 @@ type spamCommand struct {
 func newSpamCommand() *spamCommand {
 	spamCommand := &spamCommand{}
 	spamCommand.cmd = &cobra.Command{
-		Use:   "spam <id>...",
+		Use:   "spam <box-item-id>...",
 		Short: "Mark email threads as spam",
 		Long:  "Mark one or more email threads as spam. HEY moves the threads to Spam and trains its filters.",
 		Example: `  hey spam 12345

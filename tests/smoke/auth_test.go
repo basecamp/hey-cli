@@ -60,9 +60,9 @@ func TestAuthLogoutAndRelogin(t *testing.T) {
 	}
 
 	// Commands requiring auth should fail.
-	_, _, code := hey(t, "boxes", "--json")
+	_, _, code := hey(t, "box", "list", "--json")
 	if code == 0 {
-		t.Errorf("expected 'hey boxes' to fail when not authenticated")
+		t.Errorf("expected 'hey box list' to fail when not authenticated")
 	}
 
 	// Re-login with cookie.

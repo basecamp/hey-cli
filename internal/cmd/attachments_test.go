@@ -169,7 +169,7 @@ func runAttachmentCommandWithStdin(t *testing.T, server *httptest.Server, input 
 
 func TestAttachmentsListsFilesFromKnownThread(t *testing.T) {
 	server, state := attachmentServer(t)
-	stdout, err := runAttachmentCommand(t, server, "attachments", "42")
+	stdout, err := runAttachmentCommand(t, server, "attachment", "list", "42")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestAttachmentsFollowsTheCursorThroughALongThread(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	stdout, err := runAttachmentCommand(t, server, "attachments", "42")
+	stdout, err := runAttachmentCommand(t, server, "attachment", "list", "42")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +264,7 @@ func TestAttachmentsRejectsAnEmptyMessageResponse(t *testing.T) {
 	state.nilMessage = true
 	state.mu.Unlock()
 
-	if _, err := runAttachmentCommand(t, server, "attachments", "42"); err == nil {
+	if _, err := runAttachmentCommand(t, server, "attachment", "list", "42"); err == nil {
 		t.Fatal("empty message response should fail attachment discovery")
 	}
 }
@@ -272,7 +272,7 @@ func TestAttachmentsRejectsAnEmptyMessageResponse(t *testing.T) {
 func TestAttachmentsSavePreservesExistingFilesUnlessForced(t *testing.T) {
 	server, _ := attachmentServer(t)
 	destination := filepath.Join(t.TempDir(), "saved-report.pdf")
-	if _, err := runAttachmentCommand(t, server, "attachments", "save", "101:1", "--output", destination); err != nil {
+	if _, err := runAttachmentCommand(t, server, "attachment", "save", "101:1", "--output", destination); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(destination)
@@ -283,7 +283,7 @@ func TestAttachmentsSavePreservesExistingFilesUnlessForced(t *testing.T) {
 	if err := os.WriteFile(destination, []byte("keep me"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err = runAttachmentCommand(t, server, "attachments", "save", "101:1", "--output", destination)
+	_, err = runAttachmentCommand(t, server, "attachment", "save", "101:1", "--output", destination)
 	var cliErr *apierr.Error
 	if !errors.As(err, &cliErr) || cliErr.Code != "usage" || !strings.Contains(cliErr.Message, "use --force") {
 		t.Fatalf("existing destination error = %v", err)
@@ -293,7 +293,7 @@ func TestAttachmentsSavePreservesExistingFilesUnlessForced(t *testing.T) {
 		t.Errorf("existing destination was changed to %q", data)
 	}
 
-	if _, err := runAttachmentCommand(t, server, "attachments", "save", "101:1", "--output", destination, "--force"); err != nil {
+	if _, err := runAttachmentCommand(t, server, "attachment", "save", "101:1", "--output", destination, "--force"); err != nil {
 		t.Fatal(err)
 	}
 	data, _ = os.ReadFile(destination)
@@ -310,7 +310,7 @@ func TestAttachmentsSaveRemovesPartialFileOnDownloadFailure(t *testing.T) {
 	directory := t.TempDir()
 	destination := filepath.Join(directory, "saved-report.pdf")
 
-	if _, err := runAttachmentCommand(t, server, "attachments", "save", "101:1", "--output", destination); err == nil {
+	if _, err := runAttachmentCommand(t, server, "attachment", "save", "101:1", "--output", destination); err == nil {
 		t.Fatal("failed download should return an error")
 	}
 	if _, err := os.Stat(destination); !os.IsNotExist(err) {

@@ -27,7 +27,7 @@ type smokeWorkflowDetail struct {
 }
 
 func TestWorkflowsAndWorkflow(t *testing.T) {
-	response := heyJSON(t, "workflows")
+	response := heyJSON(t, "workflow", "list")
 	workflows := dataAs[[]smokeWorkflow](t, response)
 	if response.Summary == "" {
 		t.Error("workflows response omitted summary")
@@ -44,13 +44,13 @@ func TestWorkflowsAndWorkflow(t *testing.T) {
 }
 
 func TestWorkflowOutputFormats(t *testing.T) {
-	workflows := dataAs[[]smokeWorkflow](t, heyJSON(t, "workflows"))
+	workflows := dataAs[[]smokeWorkflow](t, heyJSON(t, "workflow", "list"))
 	for _, args := range [][]string{
-		{"workflows", "--quiet"},
-		{"workflows", "--ids-only"},
-		{"workflows", "--count"},
-		{"workflows", "--markdown"},
-		{"workflows", "--styled"},
+		{"workflow", "list", "--quiet"},
+		{"workflow", "list", "--ids-only"},
+		{"workflow", "list", "--count"},
+		{"workflow", "list", "--markdown"},
+		{"workflow", "list", "--styled"},
 	} {
 		_, stderr, code := hey(t, args...)
 		if code != 0 {
@@ -216,7 +216,7 @@ func waitForWorkflowIDByName(t *testing.T, name string, accountID int64, wantPre
 	t.Helper()
 	var lastErr error
 	for range 10 {
-		stdout, stderr, code := hey(t, "workflows", "--all", "--account", strconv.FormatInt(accountID, 10), "--json")
+		stdout, stderr, code := hey(t, "workflow", "list", "--all", "--account", strconv.FormatInt(accountID, 10), "--json")
 		if code != 0 {
 			lastErr = fmt.Errorf("list workflows (exit %d): %s", code, stderr)
 		} else {

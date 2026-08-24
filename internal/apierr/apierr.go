@@ -61,6 +61,15 @@ func ErrNotFound(resource, identifier string) *Error {
 	}
 }
 
+func ErrNotFoundHint(resource, identifier, hint string) *Error {
+	return &Error{
+		Code:       CodeNotFound,
+		Message:    fmt.Sprintf("%s %q not found", resource, identifier),
+		Hint:       hint,
+		HTTPStatus: 404,
+	}
+}
+
 func ErrAuth(msg string) *Error {
 	return &Error{
 		Code:       CodeAuth,

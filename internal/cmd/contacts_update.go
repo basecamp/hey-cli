@@ -29,9 +29,9 @@ func newContactsUpdateCommand() *contactsUpdateCommand {
 		Annotations: map[string]string{
 			"agent_notes": "At least one field is required. Repeat --alias to replace aliases. --alias= clears every alias.",
 		},
-		Example: `  hey contacts update 12345 --name "Jane Doe"
-  hey contacts update 12345 --email jane@example.com --alias jane.doe@example.org
-  hey contacts update 12345 --alias=`,
+		Example: `  hey contact update 12345 --name "Jane Doe"
+  hey contact update 12345 --email jane@example.com --alias jane.doe@example.org
+  hey contact update 12345 --alias=`,
 		RunE: updateCommand.run,
 		Args: usageExactOneArg(),
 	}
@@ -110,6 +110,6 @@ func (c *contactsUpdateCommand) run(cmd *cobra.Command, args []string) error {
 		fmt.Sprintf("Contact updated: %s <%s> (#%d)", terminal.SanitizeLine(contact.Name), terminal.SanitizeLine(contact.EmailAddress), contact.Id),
 		"Contact updated",
 		contact,
-		output.WithBreadcrumbs(output.Breadcrumb{Action: "view", Command: fmt.Sprintf("hey contacts show %d", contact.Id), Description: "View the contact"}),
+		output.WithBreadcrumbs(output.Breadcrumb{Action: "view", Command: fmt.Sprintf("hey contact show %d", contact.Id), Description: "View the contact"}),
 	)
 }

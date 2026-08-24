@@ -22,6 +22,9 @@ func isolateAgents(t *testing.T) {
 	t.Helper()
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("CODEX_HOME", "")
+	// The wizard installs shell completions too; without this it would read
+	// the shell of whoever runs the tests.
+	stubCompletionEnv(t, testCompletionEnv(t, "bash"))
 	stubRunAgentCommand(t, func(_ context.Context, name string, args ...string) ([]byte, error) {
 		t.Errorf("unexpected agent command: %s %v", name, args)
 		return nil, errors.New("unexpected agent command")
@@ -353,6 +356,32 @@ func stubConfirmAgentSetup(t *testing.T, answer bool, err error) *int {
 	}
 	t.Cleanup(func() { confirmAgentSetup = orig })
 	return &calls
+}
+
+// The wizard installs shell completions on its own. An install through mise,
+// the installer script or a tarball registers them nowhere, and nobody thinks
+// to go looking for something they have never had.
+func TestSetupInstallsShellCompletions(t *testing.T) {
+	isolateAgents(t)
+	env := testCompletionEnv(t, "bash")
+	stubCompletionEnv(t, env)
+	server := quietServer(t)
+
+	_, response, err := runAuthCommand(t, t.TempDir(), server.URL, "", true, "setup")
+	if err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	if data := wizardData(t, response); data["completions_installed"] != true {
+		t.Errorf("completions_installed = %v, want true", data["completions_installed"])
+	}
+	target, err := env.target("bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ownedCompletionFile(target.Path) {
+		t.Errorf("no completion at %s", target.Path)
+	}
 }
 
 // HEY_NONINTERACTIVE must disable every wizard interaction even on a real

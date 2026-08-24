@@ -13,8 +13,8 @@ recipients are derived from the answered entry's own `addressed` — see AGENTS.
 geared_pagination's opaque cursor out of the `Link` header, not an offset. An integer there
 is not an error — it is ignored, and the first page comes back again. There is no
 `Topics().GetEntriesPage` in SDK v0.10.0 to read that header with, so anything walking this
-endpoint page-by-page reads page one repeatedly until it hits its own cap. `hey threads` and
-`hey attachments` both do; that is the bug behind a three-entry thread answering with 300
+endpoint page-by-page reads page one repeatedly until it hits its own cap. `hey thread read` and
+`hey attachment list` both do; that is the bug behind a three-entry thread answering with 300
 entries and 400 requests. The fix is either a `GetEntriesPage` in the SDK or a single read,
 since `Topics().Get` already carries the entry list.
 
@@ -47,28 +47,28 @@ since `Topics().Get` already carries the entry list.
 | `/clearances/punt.json` | POST | SDK `Clearances().Punt` | `hey screener clear`, TUI `X` | covered |
 | `/my/clearances.json` | GET | SDK `Clearances().Screened`, `ScreenedPage` | `hey screener history`, TUI Screener History | covered |
 | `/my/clearances/{id}` | PATCH | SDK `Clearances().Rescreen` | — | unused by the CLI |
-| `/contacts.json` | GET | SDK `Contacts().List` | `hey contacts list`, Contacts TUI | covered |
-| `/contacts/{id}.json` | GET | SDK `Contacts().Get` | `hey contacts show`, Contacts TUI | covered |
-| `/contacts.json` | POST | SDK `Contacts().Create` | `hey contacts add`, Contacts TUI | covered |
-| `/contacts/{id}.json` | PATCH | SDK `Contacts().Update` | `hey contacts update`, Contacts TUI | covered |
-| `/contacts/{id}.json` | DELETE | SDK `Contacts().Hide` | `hey contacts hide`, Contacts TUI | covered |
-| `/contacts/{id}/reveal.json` | POST | SDK `Contacts().Reveal` | `hey contacts show-again`, Contacts TUI | covered |
-| `/contacts/{id}/bundle.json` | POST | SDK `Contacts().Bundle` | `hey contacts bundle` | covered |
-| `/contacts/{id}/bundle.json` | DELETE | SDK `Contacts().Unbundle` | `hey contacts unbundle` | covered |
-| `/contacts/{id}/note.json` | GET | SDK `Contacts().Note` | `hey contacts note show`, Contacts TUI | covered |
-| `/contacts/{id}/note.json` | PATCH | SDK `Contacts().SetNote` | `hey contacts note set`, Contacts TUI | covered |
-| `/contacts/{id}/note.json` | DELETE | SDK `Contacts().DeleteNote` | `hey contacts note delete`, Contacts TUI | covered |
-| `/calendars.json` | GET | SDK `Calendars().List` | `hey calendars` | covered |
-| `/calendars/{id}/recordings.json` | GET | SDK `Calendars().GetRecordings` | `hey recordings <calendar-id>`, `hey todo list`, `hey timetrack list`, `hey journal list` | covered |
-| `/topics/{id}/entries.json` | GET | SDK `Topics().GetEntries` | `hey threads <id>`, `hey attachments <topic-id>` | covered, but see the paging note below |
+| `/contacts.json` | GET | SDK `Contacts().List` | `hey contact list`, Contacts TUI | covered |
+| `/contacts/{id}.json` | GET | SDK `Contacts().Get` | `hey contact show`, Contacts TUI | covered |
+| `/contacts.json` | POST | SDK `Contacts().Create` | `hey contact add`, Contacts TUI | covered |
+| `/contacts/{id}.json` | PATCH | SDK `Contacts().Update` | `hey contact update`, Contacts TUI | covered |
+| `/contacts/{id}.json` | DELETE | SDK `Contacts().Hide` | `hey contact hide`, Contacts TUI | covered |
+| `/contacts/{id}/reveal.json` | POST | SDK `Contacts().Reveal` | `hey contact show-again`, Contacts TUI | covered |
+| `/contacts/{id}/bundle.json` | POST | SDK `Contacts().Bundle` | `hey contact bundle` | covered |
+| `/contacts/{id}/bundle.json` | DELETE | SDK `Contacts().Unbundle` | `hey contact unbundle` | covered |
+| `/contacts/{id}/note.json` | GET | SDK `Contacts().Note` | `hey contact note show`, Contacts TUI | covered |
+| `/contacts/{id}/note.json` | PATCH | SDK `Contacts().SetNote` | `hey contact note set`, Contacts TUI | covered |
+| `/contacts/{id}/note.json` | DELETE | SDK `Contacts().DeleteNote` | `hey contact note delete`, Contacts TUI | covered |
+| `/calendars.json` | GET | SDK `Calendars().List` | `hey calendar list` | covered |
+| `/calendars/{id}/recordings.json` | GET | SDK `Calendars().GetRecordings` | `hey event list`, `hey event edit <id>` (reading the event back), `hey todo list`, `hey journal list` | covered |
+| `/topics/{id}/entries.json` | GET | SDK `Topics().GetEntries` | `hey thread read <id>`, `hey attachment list <topic-id>` | covered, but see the paging note below |
 | `/topics/{id}/publication` | POST | SDK `Publications().Create` | `hey share <thread-id>` | covered |
 | `/topics/{id}/publication.json` | GET | SDK `Publications().Create` readback | `hey share <thread-id>` | covered |
 | `/topics/{id}/publication` | DELETE | SDK `Publications().Delete` | `hey unshare <thread-id>` | covered |
-| `/messages/{id}.json` | GET | SDK `Messages().Get` | `hey threads <id>` (bodies), `hey reply <topic-id>` and TUI `r` (recipients), `hey attachments <topic-id>`, `hey attachments save <id>` | covered |
-| `/entries/drafts.json` | GET | SDK `Entries().ListDrafts` | `hey drafts` | covered |
+| `/messages/{id}.json` | GET | SDK `Messages().Get` | `hey thread read <id>` (bodies), `hey reply <topic-id>` and TUI `r` (recipients), `hey attachment list <topic-id>`, `hey attachment save <id>` | covered |
+| `/entries/drafts.json` | GET | SDK `Entries().ListDrafts` | `hey draft list` | covered |
 | `/rails/active_storage/direct_uploads.json` | POST | SDK `Attachments().Upload` | `hey compose --attach`, `hey reply --attach`, `hey bulk-reply send --attach` | covered |
 | signed Active Storage upload URL | PUT | SDK `Attachments().Upload` | `hey compose --attach`, `hey reply --attach`, `hey bulk-reply send --attach` | covered |
-| signed Active Storage blob URL | GET | SDK `DownloadBlob` | `hey attachments save <id>` | covered |
+| signed Active Storage blob URL | GET | SDK `DownloadBlob` | `hey attachment save <id>` | covered |
 | `/messages.json` | POST | SDK `Messages().Create` | `hey compose`, `hey forward <topic-id>` | covered |
 | `/entries/{id}/replies` | POST | SDK `Entries().CreateReply` | `hey reply <topic-id>` | covered |
 | `/topics/{id}.json` | GET | SDK `Topics().Get` | `hey forward <topic-id>`, `hey reply <topic-id>`, TUI `r` | covered |
@@ -84,9 +84,18 @@ since `Topics().Get` already carries the entry list.
 | `/postings/spam.json` | POST | SDK `Postings().MarkSpam` | `hey spam <id>`, TUI `!` | covered |
 | `/postings/mutings.json` | POST | SDK `Postings().Mute` | `hey ignore <id>`, TUI `-` | covered |
 | `/postings/mutings.json` | DELETE | SDK `Postings().Unmute` | `hey stop-ignoring <id>`, TUI `+` | covered |
+| `/calendar/events.json` | POST | SDK `CalendarEvents().Create` | `hey event add`, Calendar TUI `a` | covered |
+| `/calendar/events/{id}.json` | PATCH | SDK `CalendarEvents().Update` | `hey event edit <id>`, Calendar TUI `e` | covered: a write replaces rather than patches, so the caller reads the event and sends back what it keeps |
+| `/calendar/events/{id}` | DELETE | SDK `CalendarEvents().Delete` | `hey event delete <id>`, Calendar TUI `x` | covered |
+| `/calendar/events/{id}/occurrences/{date}.json` | PATCH | SDK `CalendarEvents().UpdateOccurrence` | Calendar TUI `e` on one day of a repeating event | covered; no CLI equivalent yet |
+| `/calendar/events/{id}/occurrences/{date}.json` | DELETE | SDK `CalendarEvents().DeleteOccurrence` | Calendar TUI `x` on one day of a repeating event | covered; no CLI equivalent yet |
+| `/calendar/events/{id}.json` | GET | — | — | not served: HEY has no JSON show for an event, which is why `hey event edit` finds one through the recordings listing |
 | `/calendar/habits.json` | POST | SDK `Habits().Create` | `hey habit create`, Calendar TUI `a` | covered |
 | `/calendar/habits/{id}.json` | PATCH | SDK `Habits().Update` | `hey habit edit <id>`, Calendar TUI `e` | covered |
 | `/calendar/habits/{id}.json` | DELETE | SDK `Habits().Delete` | `hey habit delete <id>`, Calendar TUI `x` | covered |
+| `/calendar/days/{date}.json` | GET | SDK `CalendarPeriods().Day` | Calendar TUI day view | covered |
+| `/calendar/weeks/{date}.json` | GET | SDK `CalendarPeriods().Week` | `hey habit list`, Calendar TUI week view | covered: a period expands a recurrence into its occurrences and is the only read that carries habits, which a calendar's recordings listing does not |
+| `/calendar/years/{date}.json` | GET | SDK `CalendarPeriods().Year` | Calendar TUI year view | covered |
 | `/calendar/days/{date}/habits/{id}/completions.json` | POST | SDK `Habits().Complete` | `hey habit complete <id>` | covered |
 | `/calendar/days/{date}/habits/{id}/completions.json` | DELETE | SDK `Habits().Uncomplete` | `hey habit uncomplete <id>` | covered |
 | `/calendar/days/{date}/journal_entry.json` | GET | SDK `Journal().Get` | `hey journal read [date]` | covered: a 204 means the day is empty |
@@ -106,6 +115,6 @@ since `Topics().Get` already carries the entry list.
 | `/boxes/{id}/postings/changes.json` | GET | SDK `Postings().AllChanges` | `hey watch` | covered |
 | `/cable` (`Postings::ChangesChannel`) | WS | `internal/cable` + actioncable-go | `hey watch`, TUI mail list | covered |
 | `/cable` (`Turbo::StreamsChannel`) | WS | `internal/cable` + actioncable-go | TUI Screener (stream name from `/clearances.json`) | covered |
-| `/identity.json` | GET | SDK `Identity().GetIdentity` | `hey accounts list`, `--account` validation | covered |
+| `/identity.json` | GET | SDK `Identity().GetIdentity` | `hey account list`, `--account` validation | covered |
 | `/oauth/authorizations/new` | GET | `internal/auth` (PKCE S256) | `hey auth login` | covered |
 | `/oauth/tokens` | POST | `internal/auth` | `hey auth login`, `hey auth refresh`, automatic refresh | covered |

@@ -39,24 +39,25 @@ func newJournalCommand() *journalCommand {
 // list
 
 type journalListCommand struct {
-	cmd   *cobra.Command
-	limit int
-	all   bool
+	cmd    *cobra.Command
+	filter recordingFilter
 }
 
 func newJournalListCommand() *journalListCommand {
-	journalListCommand := &journalListCommand{}
+	journalListCommand := &journalListCommand{
+		filter: recordingFilter{defaultWindow: personalWindow, defaultCalendars: personalCalendarIDs},
+	}
 	journalListCommand.cmd = &cobra.Command{
 		Use:   "list",
 		Short: "List journal entries",
 		Example: `  hey journal list
   hey journal list --limit 10
-  hey journal list --json`,
+  hey journal list --starts-on 2026-01-01 --ends-on 2026-01-31 --json`,
 		RunE: journalListCommand.run,
+		Args: cobra.NoArgs,
 	}
 
-	journalListCommand.cmd.Flags().IntVar(&journalListCommand.limit, "limit", 0, "Maximum number of entries to show")
-	journalListCommand.cmd.Flags().BoolVar(&journalListCommand.all, "all", false, "Fetch all results (override --limit)")
+	journalListCommand.filter.registerFlags(journalListCommand.cmd, "entries", "Calendar ID to read (defaults to the personal calendar)")
 
 	return journalListCommand
 }
@@ -67,16 +68,19 @@ func (c *journalListCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := cmd.Context()
-	resp, err := listPersonalRecordings(ctx)
+	window, err := c.filter.resolve(ctx)
 	if err != nil {
 		return err
 	}
 
-	entries := filterRecordingsByType(resp, "Calendar::JournalEntry")
+	entries, err := window.read(ctx, "Calendar::JournalEntry")
+	if err != nil {
+		return err
+	}
 
 	total := len(entries)
-	if c.limit > 0 && !c.all && len(entries) > c.limit {
-		entries = entries[:c.limit]
+	if c.filter.limit > 0 && !c.filter.all && len(entries) > c.filter.limit {
+		entries = entries[:c.filter.limit]
 	}
 	notice := output.TruncationNotice(len(entries), total)
 

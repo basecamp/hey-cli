@@ -23,7 +23,7 @@ type moveCommand struct {
 func newMoveCommand() *moveCommand {
 	moveCommand := &moveCommand{}
 	moveCommand.cmd = &cobra.Command{
-		Use:   "move <id>...",
+		Use:   "move <box-item-id>...",
 		Short: "Move email threads to another box",
 		Long:  "Move one or more email threads to Imbox, The Feed, Set Aside, Reply Later, or Paper Trail.",
 		Example: `  hey move 12345 --to feed

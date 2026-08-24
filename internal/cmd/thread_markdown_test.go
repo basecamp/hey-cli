@@ -45,7 +45,7 @@ func TestThreadsMarkdownThroughTheCommand(t *testing.T) {
 	server, _ := partialThreadServer(t, [][]int64{{12, 11}})
 	stdoutTerminal(t, false)
 
-	stdout, _, err := runCLIRaw(t, server, "--markdown", "threads", "7")
+	stdout, _, err := runCLIRaw(t, server, "--markdown", "thread", "read", "7")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestThreadsJSONKeepsLinks(t *testing.T) {
 	server, _ := threadEntriesServer(t, [][]int64{{11}}, map[int64]string{11: `<p>See the <a href="https://example.com/plan?a=1&amp;b=2">plan</a>.</p>`})
 	stdoutTerminal(t, false)
 
-	stdout, _, err := runCLIRaw(t, server, "--json", "threads", "7")
+	stdout, _, err := runCLIRaw(t, server, "--json", "thread", "read", "7")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

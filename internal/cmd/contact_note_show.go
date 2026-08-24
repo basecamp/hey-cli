@@ -18,8 +18,8 @@ func newContactNoteShowCommand() *contactNoteShowCommand {
 	showCommand.cmd = &cobra.Command{
 		Use:   "show <id>",
 		Short: "Read a private contact note",
-		Example: `  hey contacts note show 12345
-  hey contacts note show 12345 --json`,
+		Example: `  hey contact note show 12345
+  hey contact note show 12345 --json`,
 		RunE: showCommand.run,
 		Args: usageExactOneArg(),
 	}
@@ -50,6 +50,6 @@ func (c *contactNoteShowCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	return writeOK(note,
 		output.WithSummary(fmt.Sprintf("Private note for contact %d", contactID)),
-		output.WithBreadcrumbs(output.Breadcrumb{Action: "edit", Command: fmt.Sprintf("hey contacts note set %d", contactID), Description: "Edit the private note"}),
+		output.WithBreadcrumbs(output.Breadcrumb{Action: "edit", Command: fmt.Sprintf("hey contact note set %d", contactID), Description: "Edit the private note"}),
 	)
 }

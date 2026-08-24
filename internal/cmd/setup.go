@@ -91,8 +91,12 @@ type wizardResult struct {
 	Identity       *wizardIdentity   `json:"identity,omitempty"`
 	Accounts       []accountListItem `json:"accounts,omitempty"`
 	SkillInstalled bool              `json:"skill_installed"`
-	Agents         []agentCheck      `json:"agents"`
-	Issues         []agentIssue      `json:"issues"`
+	// CompletionsInstalled reports the shell completion step, which asks
+	// nothing and fails quietly — a shell hey cannot write to is not a reason
+	// for setup to be incomplete.
+	CompletionsInstalled bool         `json:"completions_installed"`
+	Agents               []agentCheck `json:"agents"`
+	Issues               []agentIssue `json:"issues"`
 }
 
 // setupWizard carries one wizard run: the command it prints through and what
@@ -138,6 +142,7 @@ func (s *setupWizard) run() error {
 	}
 
 	if s.opts.full {
+		s.result.CompletionsInstalled = s.installCompletions()
 		s.outcome = s.setupAgents()
 	}
 	s.result.SkillInstalled = baselineSkillInstalled()
@@ -274,7 +279,7 @@ func (s *setupWizard) greet() {
 			fmt.Fprintln(w, muted.format("    • "+label))
 		}
 		if cfg.AccountID == config.AllAccounts {
-			fmt.Fprintln(w, muted.format("    Using All Accounts — hey accounts use <id> to default to one"))
+			fmt.Fprintln(w, muted.format("    Using All Accounts — hey account use <id> to default to one"))
 		} else {
 			fmt.Fprintln(w, muted.format("    Default mail account: "+cfg.AccountID))
 		}
@@ -305,6 +310,44 @@ func identityGreeting(identity *generated.Identity) string {
 	default:
 		return "Signed in."
 	}
+}
+
+// installCompletions puts shell completions where the running shell reads
+// them from. It asks nothing: an install through mise, the installer script or
+// a tarball registers completions nowhere, and a user who never learns they
+// were missing is exactly who this step is for. Every refusal — a shell hey
+// cannot name, a completion file somebody else wrote — is left to
+// `hey shell-completion install` to explain, and never fails setup.
+func (s *setupWizard) installCompletions() bool {
+	env := completionEnvResolver()
+	shell, err := env.resolveShell(nil)
+	if err != nil {
+		return false
+	}
+	if packagedCompletionFinder(shell) != "" {
+		return false
+	}
+	target, err := env.target(shell)
+	if err != nil {
+		return false
+	}
+	script, err := env.script(s.cmd.Root(), shell)
+	if err != nil {
+		return false
+	}
+	if _, err := installCompletion(target, script, false); err != nil {
+		return false
+	}
+
+	if s.styled {
+		w := s.cmd.OutOrStdout()
+		fmt.Fprintln(w, statusLine(true, "Shell completions installed for "+shell))
+		if target.Hint != "" {
+			fmt.Fprintln(w, muted.format("    "+target.Hint))
+		}
+		fmt.Fprintln(w)
+	}
+	return true
 }
 
 // setupAgents offers to connect detected coding agents. In a styled run the

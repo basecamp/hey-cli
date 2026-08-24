@@ -62,7 +62,7 @@ func TestAttachmentSendListAndSave(t *testing.T) {
 	attachments := dataAs[[]struct {
 		ID       string `json:"id"`
 		Filename string `json:"filename"`
-	}](t, heyJSON(t, "attachments", fmt.Sprint(result.TopicID)))
+	}](t, heyJSON(t, "attachment", "list", fmt.Sprint(result.TopicID)))
 	var ref string
 	for _, attachment := range attachments {
 		if attachment.Filename == filename {
@@ -75,7 +75,7 @@ func TestAttachmentSendListAndSave(t *testing.T) {
 	}
 
 	destination := filepath.Join(t.TempDir(), "saved-project-notes.txt")
-	heysaveOut, saveErr, saveCode := hey(t, "attachments", "save", ref, "--output", destination, "--json")
+	heysaveOut, saveErr, saveCode := hey(t, "attachment", "save", ref, "--output", destination, "--json")
 	if saveCode != 0 {
 		t.Fatalf("attachment save failed (exit %d): %s", saveCode, saveErr)
 	}

@@ -20,11 +20,11 @@ type contactsCommand struct {
 func newContactsCommand() *contactsCommand {
 	contactsCommand := &contactsCommand{}
 	contactsCommand.cmd = &cobra.Command{
-		Use:   "contacts",
+		Use:   "contact",
 		Short: "Manage contacts",
 		Long:  "List, view, add, edit, hide, bundle, and annotate HEY contacts.",
 		Annotations: map[string]string{
-			"agent_notes": "Contact IDs come from `hey contacts list`. Hiding and bundling are reversible. Private notes are managed under `hey contacts note`.",
+			"agent_notes": "Contact IDs come from `hey contact list`. Hiding and bundling are reversible. Private notes are managed under `hey contact note`.",
 		},
 	}
 

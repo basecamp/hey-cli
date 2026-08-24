@@ -861,7 +861,11 @@ func TestSetupOmarchyIgnoresRepositoryLocalConfig(t *testing.T) {
 	if !commandIgnoresLocalConfig(command) {
 		t.Error("setup omarchy edits fixed desktop paths only and must ignore a checkout's config")
 	}
-	if boxes, _, _ := root.Find([]string{"boxes"}); commandIgnoresLocalConfig(boxes) {
+	boxList, _, err := root.Find([]string{"box", "list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if commandIgnoresLocalConfig(boxList) {
 		t.Error("ordinary commands keep honouring repository-local config")
 	}
 }

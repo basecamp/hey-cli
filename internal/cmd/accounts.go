@@ -30,7 +30,7 @@ type accountListItem struct {
 func newAccountsCommand() *accountsCommand {
 	accountsCommand := &accountsCommand{}
 	accountsCommand.cmd = &cobra.Command{
-		Use:   "accounts",
+		Use:   "account",
 		Short: "List and select linked mail accounts",
 		Long:  "List the mail accounts linked to the current HEY identity or choose the default mail filter.",
 		Annotations: map[string]string{
@@ -96,7 +96,7 @@ func newAccountsUseCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "use <id|all>",
 		Short:   "Set the default linked mail account",
-		Example: "  hey accounts use 12345\n  hey accounts use all",
+		Example: "  hey account use 12345\n  hey account use all",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			overrideSource := cfg.SourceOf("account_id")
@@ -145,7 +145,7 @@ func unavailableAccountNotice(accounts []accountListItem, selected string) strin
 			return ""
 		}
 	}
-	return fmt.Sprintf("Configured account %s is unavailable; run `hey accounts use all` or select an available ID.", selected)
+	return fmt.Sprintf("Configured account %s is unavailable; run `hey account use all` or select an available ID.", selected)
 }
 
 func accountOverrideNotice(source config.Source) string {

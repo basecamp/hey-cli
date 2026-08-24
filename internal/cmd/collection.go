@@ -22,14 +22,6 @@ type collectionsCommand struct {
 	all   bool
 }
 
-func newCollectionsCommand() *collectionsCommand {
-	command := newCollectionsListingCommand("collections", `  hey collections
-  hey collections --limit 10
-  hey collections --json`)
-	command.cmd.Annotations[compatibilityForAnnotation] = "collection list"
-	return command
-}
-
 func newCollectionListCommand() *collectionsCommand {
 	command := newCollectionsListingCommand("list", `  hey collection list
   hey collection list --limit 10
@@ -119,9 +111,9 @@ var collectionListing = postingsListing{
 		return fmt.Sprintf("Showing %d remaining results from this cursor (%d threads in the collection).", shown, total)
 	},
 	breadcrumbs: []output.Breadcrumb{
-		{Action: "read", Command: "hey threads <topic-id>", Description: "Read an email thread"},
-		{Action: "add_to_collection", Command: "hey collection add <topic-id> --to <collection-id>", Description: "Add a thread to a collection"},
-		{Action: "remove_from_collection", Command: "hey collection remove <topic-id> --from <collection-id>", Description: "Remove a thread from a collection"},
+		{Action: "read", Command: "hey thread read <thread-id>", Description: "Read an email thread"},
+		{Action: "add_to_collection", Command: "hey collection add <thread-id> --to <collection-id>", Description: "Add a thread to a collection"},
+		{Action: "remove_from_collection", Command: "hey collection remove <thread-id> --from <collection-id>", Description: "Remove a thread from a collection"},
 	},
 }
 
@@ -313,7 +305,7 @@ type collectionAddCommand struct {
 func newCollectionAddCommand() *collectionAddCommand {
 	collectionAddCommand := &collectionAddCommand{}
 	collectionAddCommand.cmd = &cobra.Command{
-		Use:   "add <topic-id>...",
+		Use:   "add <thread-id>...",
 		Short: "Add email threads to a collection",
 		Example: `  hey collection add 501 --to 123
   hey collection add 501 502 --to 123`,
@@ -357,7 +349,7 @@ type collectionRemoveCommand struct {
 func newCollectionRemoveCommand() *collectionRemoveCommand {
 	collectionRemoveCommand := &collectionRemoveCommand{}
 	collectionRemoveCommand.cmd = &cobra.Command{
-		Use:   "remove <topic-id>...",
+		Use:   "remove <thread-id>...",
 		Short: "Remove email threads from a collection",
 		Example: `  hey collection remove 501 --from 123
   hey collection remove 501 502 --from 123`,

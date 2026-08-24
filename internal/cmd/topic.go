@@ -49,19 +49,31 @@ type topicCommand struct {
 	allowPartial bool
 }
 
+func newThreadCommand() *cobra.Command {
+	thread := &cobra.Command{
+		Use:   "thread",
+		Short: "Read email threads",
+		Annotations: map[string]string{
+			"agent_notes": "Subcommands: read. Thread IDs come from hey box view. Use the same ID with hey reply or hey forward.",
+		},
+	}
+	thread.AddCommand(newThreadsCommand().cmd)
+	return thread
+}
+
 func newThreadsCommand() *topicCommand {
 	threadsCommand := &topicCommand{}
 	threadsCommand.cmd = &cobra.Command{
-		Use:   "threads <id>",
+		Use:   "read <thread-id>",
 		Short: "Read a thread",
 		Annotations: map[string]string{
 			"agent_notes": "Returns a thread with all entries, oldest first. Entry bodies are Markdown; --html writes an HTML document instead, one <article> per entry (data-entry-id, data-created-at, data-body-state) holding HEY's original HTML. A thread that could only be read in part is refused unless --allow-partial is passed, in which case each entry's body_state says what was read. Use the topic ID with hey reply or hey forward.",
 		},
-		Example: `  hey threads 12345
-  hey threads 12345 --json
-  hey threads 12345 --markdown
-  hey threads 12345 --count
-  hey threads 12345 --allow-partial`,
+		Example: `  hey thread read 12345
+  hey thread read 12345 --json
+  hey thread read 12345 --markdown
+  hey thread read 12345 --count
+  hey thread read 12345 --allow-partial`,
 		RunE: threadsCommand.run,
 		Args: usageExactOneArg(),
 	}
