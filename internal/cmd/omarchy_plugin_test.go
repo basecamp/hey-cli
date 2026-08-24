@@ -282,6 +282,29 @@ func TestOmarchyPluginEnsureNeverResurrectsADisabledPlugin(t *testing.T) {
 	}
 }
 
+func TestOmarchyPluginEnsurePendingClonedFinalizesWhenTheShellSaysEnabled(t *testing.T) {
+	// An enable that succeeded without a layout entry, crashed before the
+	// final write: the checkout and the pending marker both exist, and the
+	// read-only probe self-repairs the bookkeeping without enabling a thing.
+	env, ran, _ := testOmarchyEnvScripted(t, map[string]omarchyReply{
+		"omarchy plugin list": {out: pluginListEnabled},
+	})
+	clonePluginCheckout(t, env)
+	seedMarker(t, env, omarchyPluginMarker{AcceptedAt: "2026-08-24T00:00:00Z", PendingEnable: true})
+
+	step := omarchySetup{env: env}.installBarPlugin()
+	if step.Status != "unchanged" || step.attempted {
+		t.Fatalf("self-repair should be quiet, got %q %q attempted=%v", step.Status, step.Detail, step.attempted)
+	}
+	marker, _ := readMarkerFile(t, env)
+	if marker.PendingEnable || marker.InstalledAt == "" {
+		t.Errorf("marker = %+v", marker)
+	}
+	if got := mutationCommands(*ran); len(got) != 0 {
+		t.Errorf("the repair is read-only: %v", got)
+	}
+}
+
 func TestOmarchyPluginEnsureFinishesTheMarkerAfterACrash(t *testing.T) {
 	env, ran, _ := testOmarchyEnvScripted(t, map[string]omarchyReply{
 		"omarchy plugin list": {out: pluginListEnabled},
@@ -623,7 +646,14 @@ func TestOmarchyPluginSignInInstallMigratesTheLegacyIndicator(t *testing.T) {
 		case strings.HasPrefix(command, "omarchy plugin add"):
 			enabled = true
 			return "Installed", nil
-		case strings.HasPrefix(command, "omarchy bar set") && barSetFails:
+		case strings.HasPrefix(command, "omarchy bar set") && !barSetFails:
+			// The CLI materializes the entry by rewriting shell.json, the
+			// legacy module still in place.
+			writeShell(t, env, `{"version":1,"bar":{"layout":{"left":[{"id":"omarchy.menu"}],"center":[{"id":"omarchy.clock"}],"right":[
+  {"id":"hey-unread","type":"command","exec":"hey omarchy bar-status --notify","interval":180},
+  {"id":"37signals.hey","notify":true},{"id":"omarchy.tray"},{"id":"omarchy.power"}]}}}`)
+			return "", nil
+		case strings.HasPrefix(command, "omarchy bar set"):
 			return "no shell", errors.New("exit status 1")
 		default:
 			return "", nil
@@ -638,9 +668,12 @@ func TestOmarchyPluginSignInInstallMigratesTheLegacyIndicator(t *testing.T) {
 		t.Error("a sign-in install must take the legacy indicator out")
 	}
 	// legacyShellJSON's module was toasting and no entry holds the key: the
-	// CLI materializes it.
+	// CLI materializes it — and the removal must not clobber what it wrote.
 	if !contains(ran, "omarchy bar set "+omarchyBarPluginID+" notify true --json") {
 		t.Errorf("the toast choice must survive the migration: %v", ran)
+	}
+	if entry := pluginEntry(t, env); entry == nil || entry["notify"] != true {
+		t.Errorf("the materialized entry must survive the legacy removal, got %v", entry)
 	}
 
 	// When the choice cannot land, the toasting module stays for the next

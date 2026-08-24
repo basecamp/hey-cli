@@ -184,8 +184,21 @@ func (s omarchySetup) ensureInstall(marker omarchyPluginMarker) omarchyStep {
 	case marker.DeclinedAt != "" || marker.RemovedAt != "":
 		return s.pluginStep("skipped", "declined or removed — hey setup omarchy installs it")
 	case cloned && marker.PendingEnable:
-		// Never enabled automatically: the checkout may be off the bar
-		// because the user put it there.
+		// Never enabled automatically — but an enable that succeeded
+		// without a layout entry and crashed before the final write looks
+		// exactly like this, so the read-only probe self-repairs it. A
+		// checkout the shell reports disabled stays put.
+		probe, failStep, outcome := s.probeShellPlugins()
+		if outcome != probeAnswered {
+			return failStep
+		}
+		if probe.present && probe.enabled {
+			step := s.finalize(marker)
+			if step.Status == "installed" {
+				step.Status, step.Detail, step.attempted = "unchanged", "", false
+			}
+			return step
+		}
 		return s.pluginNotice("install incomplete — run hey setup omarchy")
 	case cloned:
 		return s.pluginStep("skipped", "the checkout is disabled or was installed by someone else")

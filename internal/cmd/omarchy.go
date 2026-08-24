@@ -398,7 +398,28 @@ func (s omarchySetup) removeLegacyIndicator(carryNotify bool) omarchyStep {
 	if err != nil {
 		return stepResult("bar indicator", path, false, err, "", "")
 	}
-	legacy, notified := s.removeLegacyBarModule(shell, layout)
+	present, notified := legacyIndicator(layout)
+	if !present {
+		return omarchyStep{Name: "bar indicator", Path: path, Status: "absent"}
+	}
+	if carryNotify && notified && barLayoutModule(layout, omarchyBarPluginID) == nil {
+		// No entry to hold the key (an enabled plugin needs none): the CLI
+		// materializes it — rewriting shell.json, so the removal below
+		// reloads rather than clobbering the new entry with this stale
+		// snapshot. If the choice cannot land, the toasting module stays
+		// for the next explicit setup rather than dying with the migration.
+		on := true
+		if carried := s.setNotifyWithoutEntry(&on); carried.failure != nil {
+			return carried
+		}
+		if shell, err = s.loadShellConfig(); err != nil {
+			return stepResult("bar indicator", path, false, err, "", "")
+		}
+		if layout, err = existingBarLayout(shell); err != nil {
+			return stepResult("bar indicator", path, false, err, "", "")
+		}
+	}
+	legacy, _ := s.removeLegacyBarModule(shell, layout)
 	if !legacy {
 		return omarchyStep{Name: "bar indicator", Path: path, Status: "absent"}
 	}
@@ -406,15 +427,6 @@ func (s omarchySetup) removeLegacyIndicator(carryNotify bool) omarchyStep {
 		if plugin := barLayoutModule(layout, omarchyBarPluginID); plugin != nil {
 			if _, has := plugin["notify"]; !has {
 				plugin["notify"] = true
-			}
-		} else {
-			// No entry to hold the key (an enabled plugin needs none): the
-			// CLI materializes it, and if that cannot land the toasting
-			// module stays — the next explicit setup migrates — rather
-			// than the choice dying with it.
-			on := true
-			if carried := s.setNotifyWithoutEntry(&on); carried.failure != nil {
-				return carried
 			}
 		}
 	}
