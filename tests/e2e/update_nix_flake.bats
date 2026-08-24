@@ -116,10 +116,10 @@ NIX_BUILD_EXIT=1"
 }
 
 @test "does not write the Go source tarball's hash into vendorHash" {
-  # nix/go.nix fetches the Go source with its own fixed-output hash. When that
-  # one is stale, the remedy is in go.nix; the classifier must not hand its
-  # `got:` to this script, which would corrupt package.nix and then fail the
-  # verification rebuild.
+  # nix/go.nix used to fetch Go from source while nixpkgs lagged go.mod. Keep
+  # proving that a non-vendor fixed-output failure cannot hand its `got:` to
+  # this script, which would corrupt package.nix and fail the verification
+  # rebuild.
   stub_docker "error: hash mismatch in fixed-output derivation '/nix/store/abc-go1.26.6.src.tar.gz.drv':
          specified: sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
             got:    sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=
