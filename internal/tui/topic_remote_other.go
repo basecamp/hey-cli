@@ -1,4 +1,4 @@
-//go:build windows
+//go:build !unix && !windows
 
 package tui
 

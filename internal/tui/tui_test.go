@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"strconv"
 	"strings"
@@ -128,6 +129,29 @@ func TestTopicRequestSwitchesToMailAndStartsTheThreadRead(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Fatal("topic request did not start a thread read")
+	}
+}
+
+func TestTopicRequestSanitizesAnUntrustedTitle(t *testing.T) {
+	m := sizedModel()
+	mailView, _ := mailWithTestServer(t, http.StatusOK)
+	m.mailView = mailView
+	m.activeView = mailView
+	m.mailSourcesLoaded = true
+	m.loading = true
+
+	_, cmd := m.Update(TopicRequest{TopicID: 100, Title: "\x1b[31mRed\x1b[0m\nalert"})
+	msg := runCmd(cmd)
+	stamped, ok := msg.(viewGenerationMsg)
+	if !ok {
+		t.Fatalf("topic request returned %T, want viewGenerationMsg", msg)
+	}
+	loaded, ok := stamped.msg.(topicLoadedMsg)
+	if !ok {
+		t.Fatalf("topic request returned %T, want topicLoadedMsg", stamped.msg)
+	}
+	if loaded.title != "Red alert" {
+		t.Fatalf("sanitized title = %q, want %q", loaded.title, "Red alert")
 	}
 }
 

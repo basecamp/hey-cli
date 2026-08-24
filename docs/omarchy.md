@@ -187,8 +187,9 @@ attention model puts new mail in one place — and sends the toast itself throug
   multiple threads rather than choosing one for the reader.
 - **No persistent state file.** Nothing is remembered but the last toast's id, in the
   shell's memory. A running TUI listens for topic requests on a mode-0600, instance-named
-  socket under `XDG_RUNTIME_DIR` and removes it when the TUI exits; turning toasts on is nothing more
-  than setting the plugin key.
+  socket in `$XDG_RUNTIME_DIR/hey-cli`, with an owner-only temporary directory as the
+  fallback, and removes it when the TUI exits; turning toasts on is nothing more than
+  setting the plugin key.
 - **Mail text never reads as an option.** A subject or sender can start with a dash, and
   `notify-send` parses one wherever it appears; a leading word joiner (U+2060) makes the
   argument a plain positional and is invisible on screen.

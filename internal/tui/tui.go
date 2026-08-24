@@ -237,18 +237,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case mailAccountsLoadedMsg:
-		m.mailAccountsLoaded = true
 		if msg.err != nil {
 			m.mailAccountDiscoveryErr = errorNotice("Could not load the mail accounts", msg.err)
 			m.updateHelpBindings()
-			if m.pendingTopic != nil {
-				request := *m.pendingTopic
-				request.AccountID = 0
-				m.pendingTopic = nil
-				return m.openTopic(request)
-			}
 			return m, nil
 		}
+		m.mailAccountsLoaded = true
 		m.mailAccountDiscoveryErr = ""
 		m.mailAccounts = msg.accounts
 		m.mailAccountUnavailable = msg.selectedUnavailable
@@ -1113,10 +1107,11 @@ func Run(rootSDK, sdk *hey.Client, selected string, watchers Watchers, options O
 	m.help.setHidden(config.HelpHidden())
 	m.saveHelpHidden = config.SaveHelpHidden
 	p := tea.NewProgram(m)
-	listener, listenErr := startTopicListener(options.Instance, p.Send)
-	if listenErr == nil {
-		defer closeTopicListener(options.Instance, listener)
+	listener, err := startTopicListener(options.Instance, p.Send)
+	if err != nil {
+		return err
 	}
-	_, err := p.Run()
+	defer closeTopicListener(listener)
+	_, err = p.Run()
 	return err
 }

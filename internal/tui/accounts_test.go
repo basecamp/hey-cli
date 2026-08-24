@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -260,6 +261,22 @@ func TestTopicRequestSwitchesToItsMailAccountBeforeOpening(t *testing.T) {
 	m = updated.(model)
 	if openCmd == nil || m.pendingTopic != nil || m.section != sectionMail {
 		t.Fatalf("topic was not opened after mail loaded: pending=%v section=%d", m.pendingTopic != nil, m.section)
+	}
+}
+
+func TestTopicRequestKeepsItsAccountWhenDiscoveryFails(t *testing.T) {
+	m := newModel()
+	m.mailAccount = mailAccountChoice{id: 1, label: "first@example.com"}
+	request := TopicRequest{TopicID: 5511, AccountID: 2}
+	m.pendingTopic = &request
+
+	updated, cmd := m.Update(mailAccountsLoadedMsg{err: errors.New("identity unavailable")})
+	m = updated.(model)
+	if cmd != nil {
+		t.Fatal("account discovery failure tried to open the topic")
+	}
+	if m.mailAccountsLoaded || m.pendingTopic == nil || m.pendingTopic.AccountID != 2 {
+		t.Fatalf("account discovery failure weakened the topic request: loaded=%v pending=%#v", m.mailAccountsLoaded, m.pendingTopic)
 	}
 }
 

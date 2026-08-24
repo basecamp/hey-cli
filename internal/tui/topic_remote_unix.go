@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build unix
 
 package tui
 
@@ -10,46 +10,112 @@ import (
 	"io"
 	"net"
 	"os"
-	"os/user"
 	"path/filepath"
-	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/gofrs/flock"
 )
 
 // ErrNoRunningTUI means no active HEY TUI accepted a topic request.
 var ErrNoRunningTUI = errors.New("no running HEY TUI")
 
-const topicSocketFilename = "hey-tui.sock"
+const (
+	topicRuntimeDirname = "hey-cli"
+	topicSocketFilename = "hey-tui.sock"
+)
 
-func topicSocketPath(instance string) string {
-	name := topicSocketFilename
-	if suffix := topicInstanceSuffix(instance); suffix != "" {
-		name = "hey-tui-" + suffix + ".sock"
-	}
-	if runtimeDir := os.Getenv("XDG_RUNTIME_DIR"); runtimeDir != "" {
-		return filepath.Join(runtimeDir, name)
-	}
-	uid := "user"
-	if current, err := user.Current(); err == nil && current.Uid != "" {
-		uid = current.Uid
-	}
-	return filepath.Join(os.TempDir(), "hey-tui-"+uid+"-"+name)
+type ownedTopicListener struct {
+	net.Listener
+	lock       *flock.Flock
+	path       string
+	socketInfo os.FileInfo
+	closeOnce  sync.Once
+	closeErr   error
 }
 
-func topicInstanceSuffix(instance string) string {
-	var suffix strings.Builder
+func topicSocketPath(instance string) (string, error) {
+	name, err := topicSocketName(instance)
+	if err != nil {
+		return "", err
+	}
+	runtimeDir, err := topicRuntimeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(runtimeDir, name), nil
+}
+
+func topicSocketName(instance string) (string, error) {
+	if instance == "" {
+		return topicSocketFilename, nil
+	}
+	if len(instance) > 32 {
+		return "", fmt.Errorf("TUI instance must be at most 32 characters")
+	}
 	for _, char := range instance {
 		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
 			(char >= '0' && char <= '9') || char == '-' || char == '_' {
-			suffix.WriteRune(char)
+			continue
 		}
-		if suffix.Len() == 32 {
-			break
-		}
+		return "", fmt.Errorf("TUI instance may contain only letters, numbers, hyphens, and underscores")
 	}
-	return suffix.String()
+	return "hey-tui-" + instance + ".sock", nil
+}
+
+func topicRuntimeDir() (string, error) {
+	if runtimeDir := os.Getenv("XDG_RUNTIME_DIR"); runtimeDir != "" {
+		if !filepath.IsAbs(runtimeDir) {
+			return "", fmt.Errorf("XDG_RUNTIME_DIR must be an absolute path")
+		}
+		if err := validatePrivateDirectory(runtimeDir); err != nil {
+			return "", fmt.Errorf("protect HEY TUI runtime directory: %w", err)
+		}
+		return ensurePrivateDirectory(filepath.Join(runtimeDir, topicRuntimeDirname))
+	}
+
+	tempDir := os.TempDir()
+	info, err := os.Lstat(tempDir)
+	if err != nil {
+		return "", fmt.Errorf("inspect temporary directory: %w", err)
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("temporary directory is not a directory")
+	}
+	if info.Mode().Perm()&0o022 != 0 && info.Mode()&os.ModeSticky == 0 {
+		return "", fmt.Errorf("temporary directory is writable by other users without the sticky bit")
+	}
+	return ensurePrivateDirectory(filepath.Join(tempDir, fmt.Sprintf("%s-%d", topicRuntimeDirname, os.Getuid())))
+}
+
+func ensurePrivateDirectory(path string) (string, error) {
+	if err := os.Mkdir(path, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+		return "", fmt.Errorf("create HEY TUI runtime directory: %w", err)
+	}
+	if err := validatePrivateDirectory(path); err != nil {
+		return "", fmt.Errorf("validate HEY TUI runtime directory: %w", err)
+	}
+	return path, nil
+}
+
+func validatePrivateDirectory(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s is not a directory", path)
+	}
+	if info.Mode().Perm() != 0o700 {
+		return fmt.Errorf("%s must have mode 0700", path)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || int(stat.Uid) != os.Getuid() {
+		return fmt.Errorf("%s must be owned by the current user", path)
+	}
+	return nil
 }
 
 // OpenTopicInRunningTUI sends a thread to the active named TUI.
@@ -57,8 +123,12 @@ func OpenTopicInRunningTUI(instance string, request TopicRequest) error {
 	if request.TopicID <= 0 {
 		return fmt.Errorf("topic ID must be positive")
 	}
+	path, err := topicSocketPath(instance)
+	if err != nil {
+		return err
+	}
 	dialer := net.Dialer{Timeout: 250 * time.Millisecond}
-	connection, err := dialer.DialContext(context.Background(), "unix", topicSocketPath(instance))
+	connection, err := dialer.DialContext(context.Background(), "unix", path)
 	if err != nil {
 		return ErrNoRunningTUI
 	}
@@ -80,26 +150,74 @@ func OpenTopicInRunningTUI(instance string, request TopicRequest) error {
 }
 
 func startTopicListener(instance string, send func(tea.Msg)) (net.Listener, error) {
-	path := topicSocketPath(instance)
-	dialer := net.Dialer{Timeout: 50 * time.Millisecond}
-	if connection, err := dialer.DialContext(context.Background(), "unix", path); err == nil {
-		_ = connection.Close()
-		return nil, nil
+	path, err := topicSocketPath(instance)
+	if err != nil {
+		return nil, err
 	}
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("remove stale HEY TUI socket: %w", err)
+	ownershipLock := flock.New(path + ".lock")
+	locked, err := ownershipLock.TryLock()
+	if err != nil {
+		return nil, fmt.Errorf("lock HEY TUI topic listener: %w", err)
+	}
+	if !locked {
+		return nil, errors.New("a HEY TUI with this instance is already running")
+	}
+	releaseLock := true
+	defer func() {
+		if releaseLock {
+			_ = ownershipLock.Unlock()
+		}
+	}()
+
+	if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+		return nil, fmt.Errorf("remove stale HEY TUI socket: %w", removeErr)
 	}
 	listener, err := new(net.ListenConfig).Listen(context.Background(), "unix", path)
 	if err != nil {
 		return nil, fmt.Errorf("listen for HEY TUI topics: %w", err)
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
+	unixListener, ok := listener.(*net.UnixListener)
+	if !ok {
+		_ = listener.Close()
+		return nil, fmt.Errorf("HEY TUI topic listener is not a Unix socket")
+	}
+	unixListener.SetUnlinkOnClose(false)
+	if chmodErr := os.Chmod(path, 0o600); chmodErr != nil {
 		_ = listener.Close()
 		_ = os.Remove(path)
-		return nil, fmt.Errorf("protect HEY TUI socket: %w", err)
+		return nil, fmt.Errorf("protect HEY TUI socket: %w", chmodErr)
 	}
-	go serveTopicRequests(listener, send)
-	return listener, nil
+	socketInfo, err := os.Lstat(path)
+	if err != nil {
+		_ = listener.Close()
+		_ = os.Remove(path)
+		return nil, fmt.Errorf("inspect HEY TUI socket: %w", err)
+	}
+
+	owned := &ownedTopicListener{
+		Listener:   listener,
+		lock:       ownershipLock,
+		path:       path,
+		socketInfo: socketInfo,
+	}
+	releaseLock = false
+	go serveTopicRequests(owned, send)
+	return owned, nil
+}
+
+func (l *ownedTopicListener) Close() error {
+	l.closeOnce.Do(func() {
+		l.closeErr = l.Listener.Close()
+		if info, err := os.Lstat(l.path); err == nil && os.SameFile(l.socketInfo, info) {
+			if err := os.Remove(l.path); err != nil && l.closeErr == nil {
+				l.closeErr = err
+			}
+		}
+		if err := l.lock.Unlock(); err != nil && l.closeErr == nil {
+			l.closeErr = err
+		}
+	})
+	return l.closeErr
 }
 
 func serveTopicRequests(listener net.Listener, send func(tea.Msg)) {
@@ -128,10 +246,8 @@ func handleTopicRequest(connection net.Conn, send func(tea.Msg)) {
 	}{OK: true})
 }
 
-func closeTopicListener(instance string, listener net.Listener) {
-	if listener == nil {
-		return
+func closeTopicListener(listener net.Listener) {
+	if listener != nil {
+		_ = listener.Close()
 	}
-	_ = listener.Close()
-	_ = os.Remove(topicSocketPath(instance))
 }
