@@ -407,6 +407,15 @@ func (s omarchySetup) removeLegacyIndicator(carryNotify bool) omarchyStep {
 			if _, has := plugin["notify"]; !has {
 				plugin["notify"] = true
 			}
+		} else {
+			// No entry to hold the key (an enabled plugin needs none): the
+			// CLI materializes it, and if that cannot land the toasting
+			// module stays — the next explicit setup migrates — rather
+			// than the choice dying with it.
+			on := true
+			if carried := s.setNotifyWithoutEntry(&on); carried.failure != nil {
+				return carried
+			}
 		}
 	}
 	step := omarchyStep{Name: "bar indicator", Path: path, Status: "removed",

@@ -603,13 +603,17 @@ func TestOmarchyPluginMalformedMarkerFailsClosed(t *testing.T) {
 
 func TestOmarchyPluginSignInInstallMigratesTheLegacyIndicator(t *testing.T) {
 	// A migrating user signs in: the new plugin lands and the inline
-	// hey-unread module leaves with it — never two icons and two pollers.
+	// hey-unread module leaves with it — never two icons and two pollers —
+	// and its toast choice survives even with no layout entry to hold it.
 	env, _ := testOmarchyEnv(t)
 	stubConfirmOmarchyPanel(t, true, nil)
 	writeShell(t, env, legacyShellJSON)
+	var ran []string
 	enabled := false
+	barSetFails := false
 	env.run = func(name string, args ...string) (string, error) {
 		command := strings.Join(append([]string{name}, args...), " ")
+		ran = append(ran, command)
 		switch {
 		case strings.HasPrefix(command, "omarchy plugin list"):
 			if enabled {
@@ -619,6 +623,8 @@ func TestOmarchyPluginSignInInstallMigratesTheLegacyIndicator(t *testing.T) {
 		case strings.HasPrefix(command, "omarchy plugin add"):
 			enabled = true
 			return "Installed", nil
+		case strings.HasPrefix(command, "omarchy bar set") && barSetFails:
+			return "no shell", errors.New("exit status 1")
 		default:
 			return "", nil
 		}
@@ -630,6 +636,40 @@ func TestOmarchyPluginSignInInstallMigratesTheLegacyIndicator(t *testing.T) {
 	}
 	if strings.Contains(readText(t, env.shellPath()), "hey-unread") {
 		t.Error("a sign-in install must take the legacy indicator out")
+	}
+	// legacyShellJSON's module was toasting and no entry holds the key: the
+	// CLI materializes it.
+	if !contains(ran, "omarchy bar set "+omarchyBarPluginID+" notify true --json") {
+		t.Errorf("the toast choice must survive the migration: %v", ran)
+	}
+
+	// When the choice cannot land, the toasting module stays for the next
+	// explicit setup rather than the preference dying with it.
+	env2, _ := testOmarchyEnv(t)
+	writeShell(t, env2, legacyShellJSON)
+	enabledTwo := false
+	env2.run = func(name string, args ...string) (string, error) {
+		command := strings.Join(append([]string{name}, args...), " ")
+		switch {
+		case strings.HasPrefix(command, "omarchy plugin list"):
+			if enabledTwo {
+				return pluginListEnabled, nil
+			}
+			return pluginListAbsent, nil
+		case strings.HasPrefix(command, "omarchy plugin add"):
+			enabledTwo = true
+			return "Installed", nil
+		case strings.HasPrefix(command, "omarchy bar set"):
+			return "no shell", errors.New("exit status 1")
+		default:
+			return "", nil
+		}
+	}
+	if step := (omarchySetup{env: env2}).installBarPlugin(); step.Status != "installed" {
+		t.Fatalf("second install = %q %q", step.Status, step.Detail)
+	}
+	if !strings.Contains(readText(t, env2.shellPath()), "hey-unread") {
+		t.Error("an uncarried toast choice must keep the legacy module")
 	}
 }
 
