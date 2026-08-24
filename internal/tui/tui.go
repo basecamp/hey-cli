@@ -1112,6 +1112,7 @@ func (m model) handleSubnavKey(msg tea.KeyPressMsg) tea.Cmd {
 // Run starts the TUI with the resolved mail account, the identity root client used for
 // interactive account switching, the live watchers, and an optional initial thread.
 func Run(rootSDK, sdk *hey.Client, selected string, watchers Watchers, options Options) error {
+	calibrateWidths(os.Stdin, os.Stdout)
 	m := newModelWithMailAccounts(rootSDK, sdk, selected, watchers)
 	if options.OpenTopic.TopicID > 0 {
 		request := options.OpenTopic

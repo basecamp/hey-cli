@@ -1100,6 +1100,12 @@ func TestTruncateToWidth(t *testing.T) {
 	if got := truncateToWidth("abcdef", 3); got != "" {
 		t.Errorf("truncateToWidth narrow = %q, want empty", got)
 	}
+	if got := truncateToWidth("Family 👨‍👩‍👧 picnic", 11); got != "Family ..." {
+		t.Errorf("truncateToWidth kept a torn emoji sequence = %q, want %q", got, "Family ...")
+	}
+	if got := truncateToWidth("Vote ☑️ now please", 9); got != "Vote ..." {
+		t.Errorf("truncateToWidth stripped a variation selector = %q, want %q", got, "Vote ...")
+	}
 }
 
 // --- View rendering ---

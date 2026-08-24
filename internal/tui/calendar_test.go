@@ -1793,6 +1793,61 @@ func TestDayViewKeepsEmojiTitlesAligned(t *testing.T) {
 	}
 }
 
+// A truncated title is cut between grapheme clusters, never inside one. Scripts that
+// stack marks on a base — Arabic harakat, Devanagari matras, Thai vowels and tones — and
+// joined emoji would otherwise lose their marks at the cut and shift every cell after it.
+func TestTruncateStrCutsBetweenGraphemes(t *testing.T) {
+	cases := []struct {
+		name  string
+		s     string
+		width int
+		want  string
+	}{
+		{"arabic keeps its harakat", "مُدير المشروع", 5, "مُدير…"},
+		{"hindi keeps its matra", "बैठक की योजना", 3, "बैठ…"},
+		{"thai keeps its vowel mark", "ประชุมทีม", 5, "ประชุ…"},
+		{"joined emoji is dropped whole", "Team 👨‍👩‍👧 sync", 6, "Team …"},
+		{"joined emoji fits whole", "Team 👨‍👩‍👧 sync", 8, "Team 👨‍👩‍👧…"},
+		{"a flag never loses half its pair", "Fly to 🇭🇷 soon", 8, "Fly to …"},
+		{"a variation selector stays on its base", "Vote ☑️ now", 7, "Vote …"},
+	}
+	for _, c := range cases {
+		got := truncateStr(c.s, c.width)
+		if got != c.want {
+			t.Errorf("%s: truncateStr(%q, %d) = %q, want %q", c.name, c.s, c.width, got, c.want)
+		}
+		if w := displayWidth(got); w > c.width {
+			t.Errorf("%s: result %q is %d cells wide, over %d", c.name, got, w, c.width)
+		}
+	}
+
+	if got := centerPad("Vote ☑️", 6); got != "Vote " {
+		t.Errorf("centerPad overflow = %q, want %q", got, "Vote ")
+	}
+}
+
+// A glyph the terminal draws wider than a width table guesses shears every row it sits
+// on, so the day grid budgets title glyphs by the calibrated widths: under a calibration
+// that draws spacing matras wide, every row still measures the grid's width by that same
+// calibration.
+func TestDayViewBudgetsCalibratedGlyphWidths(t *testing.T) {
+	withWidths(t, clusterWidths{spacingMark: 1, vs16: 2, flagPair: 2, skinTone: 2, zwjJoined: true})
+
+	placed := placedEvent{
+		rec:      Recording{ID: 1, Title: "बैठक की योजना", CalendarColor: "green"},
+		startCol: 8, endCol: 20,
+	}
+	grid := stripANSI(renderDayGrid([][]placedEvent{{placed}}, 40, 4, 18, -1, styleMuted, selection{}))
+	if !strings.Contains(grid, "की") {
+		t.Errorf("the matra was torn from its consonant:\n%s", grid)
+	}
+	for row, line := range strings.Split(strings.TrimSuffix(grid, "\n"), "\n") {
+		if width := displayWidth(line); width != 40 {
+			t.Errorf("grid row %d is %d columns wide, want 40: %q", row, width, line)
+		}
+	}
+}
+
 // An event is drawn in the color of the calendar it is filed on, so which calendar it
 // belongs to is answered by looking at it. HEY leaves the personal calendar's color out of
 // its JSON, and those fall back to the theme's own accent rather than to no fill.

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 
 	habitvalues "github.com/basecamp/hey-cli/internal/habit"
 	"github.com/basecamp/hey-cli/internal/terminal"
@@ -977,7 +976,7 @@ type titleGlyph struct {
 func verticalTitleGlyphs(title string) []titleGlyph {
 	glyphs := make([]titleGlyph, 0, len(title))
 	for title != "" {
-		text, width := ansi.FirstGraphemeCluster(title, ansi.GraphemeWidth)
+		text, width := firstCluster(title)
 		if text == "" {
 			break
 		}
@@ -1337,7 +1336,7 @@ func weekAllDaySpans(days []weekDayInfo) []weekAllDaySpan {
 // cell for the one pill on screen that is selected, and nothing for any of the others.
 func eventPill(event Recording, width int, sel selection) string {
 	title := truncateStr(terminal.SanitizeLine(event.Title), width)
-	if pad := width - lipgloss.Width(title); pad > 0 {
+	if pad := width - displayWidth(title); pad > 0 {
 		title += strings.Repeat(" ", pad)
 	}
 
@@ -1626,13 +1625,13 @@ func renderRibbon(items []Recording, width int, describe func(Recording) (string
 		if i > 0 {
 			gap = "  "
 		}
-		if used+lipgloss.Width(gap+marker+" "+label) > width {
+		if used+displayWidth(gap+marker+" "+label) > width {
 			if used < width {
 				b.WriteString(styleMuted.Render("…"))
 			}
 			break
 		}
-		used += lipgloss.Width(gap + marker + " " + label)
+		used += displayWidth(gap + marker + " " + label)
 		b.WriteString(gap + markerStyle.Render(marker) + " " + labelStyle.Render(label))
 	}
 	return b.String()
@@ -1648,37 +1647,29 @@ func truncateStr(s string, maxLen int) string {
 	if maxLen <= 0 {
 		return ""
 	}
-	if lipgloss.Width(s) <= maxLen {
+	if displayWidth(s) <= maxLen {
 		return s
 	}
 	if maxLen <= 1 {
 		return "…"
 	}
-	runes := []rune(s)
-	for len(runes) > 0 && lipgloss.Width(string(runes))+lipgloss.Width("…") > maxLen {
-		runes = runes[:len(runes)-1]
-	}
-	return string(runes) + "…"
+	return fitGraphemes(s, maxLen-1) + "…"
 }
 
 // padTo fills a cell out to its column width, measuring what is visible so the styling a
 // cell already carries is not counted.
 func padTo(s string, width int) string {
-	if pad := width - lipgloss.Width(s); pad > 0 {
+	if pad := width - displayWidth(s); pad > 0 {
 		return s + strings.Repeat(" ", pad)
 	}
 	return s
 }
 
 func centerPad(s string, width int) string {
-	sw := lipgloss.Width(s)
+	sw := displayWidth(s)
 	pad := width - sw
 	if pad <= 0 {
-		runes := []rune(s)
-		for len(runes) > 0 && lipgloss.Width(string(runes)) > width {
-			runes = runes[:len(runes)-1]
-		}
-		return string(runes)
+		return fitGraphemes(s, width)
 	}
 	left := pad / 2
 	right := pad - left

@@ -612,7 +612,7 @@ func (c *contentList) view() string {
 		date := formatDisplayDate(p.CreatedAt)
 		subject = truncateToWidth(subject, textWidth)
 		// Pad through the gap and right-align the date within its column.
-		gap := max(textWidth-lipgloss.Width(subject)+2+dateCol-lipgloss.Width(date), 1)
+		gap := max(textWidth-displayWidth(subject)+2+dateCol-lipgloss.Width(date), 1)
 
 		line1.WriteString(emphasize(subjectBase).Render(subject))
 		line1.WriteString(gapStyle.Render(strings.Repeat(" ", gap)))
@@ -648,11 +648,11 @@ func (c *contentList) view() string {
 		}
 
 		detailWidth := max(textWidth-2, 1) // the indent narrows the second line
-		if lipgloss.Width(sender) > detailWidth {
+		if displayWidth(sender) > detailWidth {
 			sender = truncateToWidth(sender, detailWidth)
 			excerpt = ""
 		} else {
-			excerpt = truncateToWidth(excerpt, detailWidth-lipgloss.Width(sender))
+			excerpt = truncateToWidth(excerpt, detailWidth-displayWidth(sender))
 		}
 
 		line2.WriteString(emphasize(senderBase).Render(sender))
@@ -660,7 +660,7 @@ func (c *contentList) view() string {
 		if isCursor {
 			// Pad to the full row width so the selection background also
 			// covers the space under the date.
-			pad := prefixWidth + textWidth + 2 + dateCol - 6 - lipgloss.Width(sender) - lipgloss.Width(excerpt)
+			pad := prefixWidth + textWidth + 2 + dateCol - 6 - displayWidth(sender) - displayWidth(excerpt)
 			if pad > 0 {
 				line2.WriteString(gapStyle.Render(strings.Repeat(" ", pad)))
 			}
@@ -719,15 +719,28 @@ func hintedSectionHeader(label, hint string, width int) string {
 // truncateToWidth trims s so its rendered width fits in w cells, appending
 // "..." when anything was cut. Returns "" when w cannot hold the ellipsis.
 func truncateToWidth(s string, w int) string {
-	if lipgloss.Width(s) <= w {
+	if displayWidth(s) <= w {
 		return s
 	}
 	if w <= 3 {
 		return ""
 	}
-	runes := []rune(s)
-	for lipgloss.Width(string(runes)) > w-3 && len(runes) > 0 {
-		runes = runes[:len(runes)-1]
+	return fitGraphemes(s, w-3) + "..."
+}
+
+// fitGraphemes keeps whole grapheme clusters from the front of s until the next one
+// would not fit in width cells, so a cut never lands inside an emoji sequence or
+// between a base letter and its combining marks.
+func fitGraphemes(s string, width int) string {
+	var b strings.Builder
+	for s != "" {
+		cluster, clusterWidth := firstCluster(s)
+		if cluster == "" || clusterWidth > width {
+			break
+		}
+		b.WriteString(cluster)
+		width -= clusterWidth
+		s = s[len(cluster):]
 	}
-	return string(runes) + "..."
+	return b.String()
 }
