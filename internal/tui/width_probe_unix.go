@@ -49,7 +49,7 @@ func readCursorReports(in *os.File, count int, budget time.Duration) []int {
 		if remaining <= 0 {
 			return columns
 		}
-		fds := []unix.PollFd{{Fd: int32(in.Fd()), Events: unix.POLLIN}} //nolint:gosec // G115: fd fits in int32
+		fds := []unix.PollFd{{Fd: int32(in.Fd()), Events: unix.POLLIN}} // #nosec G115 -- a poll fd fits in int32
 		ready, err := unix.Poll(fds, int(remaining.Milliseconds())+1)
 		if errors.Is(err, unix.EINTR) {
 			continue
