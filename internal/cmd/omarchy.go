@@ -355,20 +355,63 @@ func (s omarchySetup) configureBarPluginLocked() []omarchyStep {
 	if err != nil {
 		return []omarchyStep{stepResult("bar plugin", path, false, err, "", "")}
 	}
-	legacy, legacyNotified := s.removeLegacyBarModule(shell, layout)
-	var steps []omarchyStep
-	if legacy {
-		steps = append(steps, omarchyStep{Name: "bar indicator", Path: path, Status: "removed",
-			Detail: "hey-unread module removed; the " + omarchyBarPluginID + " plugin replaces it"})
-		// On disk before the plugin install reads or rewrites shell.json.
-		steps = s.writeBarSteps(steps, shell, true)
-	}
+	// Peek only: the legacy indicator keeps working until its replacement
+	// is on the bar — a declined consent, a downed shell or a failed clone
+	// must not cost the user the panel they already have.
+	legacyPresent, legacyNotified := legacyIndicator(layout)
 
 	install := s.installBarPluginLocked()
 	if install.Status == "skipped" || install.Status == "failed" {
-		return append(steps, install)
+		return []omarchyStep{install}
+	}
+	var steps []omarchyStep
+	if legacyPresent {
+		// The carry is applyNotify's below, so the report says "installed".
+		steps = append(steps, s.removeLegacyIndicator(false))
 	}
 	return append(steps, s.mergeNotify(install, legacyNotified))
+}
+
+// legacyIndicator reports whether layout still carries the inline hey-unread
+// module earlier releases installed, and whether it was toasting.
+func legacyIndicator(layout map[string]any) (present, notified bool) {
+	module := barLayoutModule(layout, omarchyBarModuleID)
+	if module == nil {
+		return false, false
+	}
+	moduleExec, _ := module["exec"].(string)
+	return true, strings.HasSuffix(moduleExec, " --notify")
+}
+
+// removeLegacyIndicator drops the legacy module and writes shell.json. It
+// reloads the file first — the caller may have rewritten it since any
+// earlier look. carryNotify moves the module's toast choice onto the
+// plugin's entry when that entry exists and has not been told either way;
+// configureBarPlugin passes false and lets applyNotify do it instead.
+func (s omarchySetup) removeLegacyIndicator(carryNotify bool) omarchyStep {
+	path := s.env.shellPath()
+	shell, err := s.loadShellConfig()
+	if err != nil {
+		return stepResult("bar indicator", path, false, err, "", "")
+	}
+	layout, err := existingBarLayout(shell)
+	if err != nil {
+		return stepResult("bar indicator", path, false, err, "", "")
+	}
+	legacy, notified := s.removeLegacyBarModule(shell, layout)
+	if !legacy {
+		return omarchyStep{Name: "bar indicator", Path: path, Status: "absent"}
+	}
+	if carryNotify && notified {
+		if plugin := barLayoutModule(layout, omarchyBarPluginID); plugin != nil {
+			if _, has := plugin["notify"]; !has {
+				plugin["notify"] = true
+			}
+		}
+	}
+	step := omarchyStep{Name: "bar indicator", Path: path, Status: "removed",
+		Detail: "hey-unread module removed; the " + omarchyBarPluginID + " plugin replaces it"}
+	return s.writeBarSteps([]omarchyStep{step}, shell, true)[0]
 }
 
 // mergeNotify reloads shell.json — the install may have rewritten it — and
@@ -487,17 +530,11 @@ func (s omarchySetup) removeBar() []omarchyStep {
 }
 
 func (s omarchySetup) removeBarLocked() []omarchyStep {
-	path := s.env.shellPath()
-	shell, err := s.loadShellConfig()
-	if err != nil {
-		return []omarchyStep{stepResult("bar indicator", path, false, err, "", ""), s.removeBarPluginLocked(false)}
-	}
-	bar, _ := shell["bar"].(map[string]any)
-	layout, _ := bar["layout"].(map[string]any)
-	legacy, _ := s.removeLegacyBarModule(shell, layout)
-	onBar := barLayoutModule(layout, omarchyBarPluginID) != nil
-	steps := s.writeBarSteps([]omarchyStep{stepResult("bar indicator", path, legacy, nil, "removed", "absent")}, shell, legacy)
-	return append(steps, s.removeBarPluginLocked(onBar))
+	// The tombstone (and the disable behind it) land before any layout
+	// rewrite: a stop in between costs only the legacy cleanup, which the
+	// marker does not guard — never the record of the user's intent.
+	plugin := s.removeBarPluginLocked(s.pluginOnBar())
+	return []omarchyStep{s.removeLegacyIndicator(false), plugin}
 }
 
 // removeLegacyBarModule drops the inline hey-unread module earlier releases

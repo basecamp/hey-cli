@@ -101,7 +101,16 @@ func (s omarchySetup) installBarPlugin() omarchyStep {
 		return s.pluginSkip("Omarchy not detected")
 	}
 	return s.underBarPluginLock(func() []omarchyStep {
-		return []omarchyStep{s.installBarPluginLocked()}
+		step := s.installBarPluginLocked()
+		if step.Status == "installed" {
+			// The plugin replaces the inline hey-unread indicator earlier
+			// releases installed: a sign-in that installs one takes the
+			// other out, or a migrating user keeps two icons and two
+			// pollers until an explicit setup. Quiet and best-effort — a
+			// failed cleanup costs nothing the next setup will not fix.
+			_ = s.removeLegacyIndicator(true)
+		}
+		return []omarchyStep{step}
 	})[0]
 }
 

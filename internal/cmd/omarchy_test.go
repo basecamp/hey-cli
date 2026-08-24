@@ -818,23 +818,17 @@ func TestOmarchySetupRemovesTheLegacyBarModule(t *testing.T) {
 	stubConfirmOmarchyPanel(t, false, nil)
 	writeShell(t, env, legacyShellJSON)
 
-	// No plugin yet: the legacy module goes, reported as its own step, and
-	// the plugin step skips (consent declined here). The layout equalled the
-	// defaults once the module was out, so it goes too and the user is back
-	// to inheriting Omarchy's defaults.
+	// No plugin and a declined consent: the working legacy indicator stays —
+	// removal waits until the replacement is on the bar.
 	steps := omarchySetup{env: env}.apply()
-	if legacy := stepNamed(steps, "bar indicator"); legacy.Status != "removed" || !strings.Contains(legacy.Detail, "hey-unread") {
-		t.Errorf("legacy removal should be its own step, got %q %q", legacy.Status, legacy.Detail)
+	if stepNamed(steps, "bar indicator").Name != "" {
+		t.Errorf("no legacy removal before the replacement lands, got %v", statuses(steps))
 	}
 	if bar := stepNamed(steps, "bar plugin"); bar.Status != "skipped" {
 		t.Errorf("without the plugin and without consent the step skips, got %q %q", bar.Status, bar.Detail)
 	}
-	if shell := readShell(t, env); shell["bar"] != nil {
-		t.Errorf("a defaults-seeded layout should be dropped with the module: %v", shell)
-	}
-	steps = omarchySetup{env: env}.apply()
-	if stepNamed(steps, "bar indicator").Name != "" || stepNamed(steps, "bar plugin").Status != "skipped" {
-		t.Errorf("once migrated there is no legacy step and the plugin step skips, got %v", statuses(steps))
+	if !strings.Contains(readText(t, env.shellPath()), "hey-unread") {
+		t.Error("a declined install must keep the legacy indicator working")
 	}
 
 	// With the plugin present and silent on notify, the legacy module's
@@ -880,6 +874,7 @@ func TestOmarchySetupRemovesTheLegacyBarModule(t *testing.T) {
 func TestOmarchyDefaultShellPathFallsBackToUserTree(t *testing.T) {
 	env, _ := testOmarchyEnv(t)
 	env.omarchyPath = "" // no OMARCHY_PATH, as in a non-login or agent shell
+	stubConfirmOmarchyPanel(t, true, nil)
 	userTree := filepath.Join(env.home, ".local", "share", "omarchy", "config", "omarchy")
 	if err := os.MkdirAll(userTree, 0o755); err != nil {
 		t.Fatal(err)
@@ -888,6 +883,23 @@ func TestOmarchyDefaultShellPathFallsBackToUserTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeShell(t, env, legacyShellJSON)
+	// The migration runs once the replacement is installed and verified.
+	enabled := false
+	env.run = func(name string, args ...string) (string, error) {
+		command := strings.Join(append([]string{name}, args...), " ")
+		switch {
+		case strings.HasPrefix(command, "omarchy plugin list"):
+			if enabled {
+				return pluginListEnabled, nil
+			}
+			return pluginListAbsent, nil
+		case strings.HasPrefix(command, "omarchy plugin add"):
+			enabled = true
+			return "Installed", nil
+		default:
+			return "", nil
+		}
+	}
 
 	if legacy := stepNamed(omarchySetup{env: env}.apply(), "bar indicator"); legacy.Status != "removed" {
 		t.Fatalf("legacy step = %q %q", legacy.Status, legacy.Detail)

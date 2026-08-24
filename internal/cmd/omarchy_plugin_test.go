@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -596,6 +598,74 @@ func TestOmarchyPluginMalformedMarkerFailsClosed(t *testing.T) {
 	}
 	if markerBytes(t, env) != "{not json" {
 		t.Error("remove must leave the malformed marker untouched")
+	}
+}
+
+func TestOmarchyPluginSignInInstallMigratesTheLegacyIndicator(t *testing.T) {
+	// A migrating user signs in: the new plugin lands and the inline
+	// hey-unread module leaves with it — never two icons and two pollers.
+	env, _ := testOmarchyEnv(t)
+	stubConfirmOmarchyPanel(t, true, nil)
+	writeShell(t, env, legacyShellJSON)
+	enabled := false
+	env.run = func(name string, args ...string) (string, error) {
+		command := strings.Join(append([]string{name}, args...), " ")
+		switch {
+		case strings.HasPrefix(command, "omarchy plugin list"):
+			if enabled {
+				return pluginListEnabled, nil
+			}
+			return pluginListAbsent, nil
+		case strings.HasPrefix(command, "omarchy plugin add"):
+			enabled = true
+			return "Installed", nil
+		default:
+			return "", nil
+		}
+	}
+
+	step := omarchySetup{env: env}.installBarPlugin()
+	if step.Status != "installed" {
+		t.Fatalf("step = %q %q", step.Status, step.Detail)
+	}
+	if strings.Contains(readText(t, env.shellPath()), "hey-unread") {
+		t.Error("a sign-in install must take the legacy indicator out")
+	}
+}
+
+func TestSetupWizardSkipsOmarchyOnRejectedCredentials(t *testing.T) {
+	// Stored-but-rejected credentials are not a login: the desktop step
+	// must not prompt or install while the user is effectively signed out.
+	isolateAgents(t)
+	stubInteractive(t, true)
+	confirms := stubConfirmOmarchyPanel(t, true, nil)
+	ran := stubOmarchyRun(t, omarchyUnavailable)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+	}))
+	t.Cleanup(server.Close)
+	configHome := t.TempDir()
+	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "stale-cookie"); err != nil {
+		t.Fatalf("auth login: %v", err)
+	}
+	origColor := colorDisabled
+	colorDisabled = true
+	t.Cleanup(func() { colorDisabled = origColor })
+	t.Setenv("OMARCHY_PATH", t.TempDir())
+
+	root := newRootCmd()
+	var stdout bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetErr(&stdout)
+	root.SetArgs([]string{"--base-url", server.URL, "setup", "--styled"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("setup: %v\n%s", err, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Stored sign-in rejected") {
+		t.Fatalf("expected the rejected-credentials warning:\n%s", stdout.String())
+	}
+	if *confirms != 0 || len(*ran) != 0 {
+		t.Errorf("the Omarchy step must wait for a working login: confirms=%d ran=%v", *confirms, *ran)
 	}
 }
 

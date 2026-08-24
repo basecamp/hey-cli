@@ -490,7 +490,9 @@ func (s *setupWizard) setupAgents() agentSetupOutcome {
 // stays disabled. Machine and non-interactive runs skip it entirely; the
 // envelope points at hey setup omarchy instead (wizardBreadcrumbs).
 func (s *setupWizard) setupOmarchy(signedIn bool) {
-	if !signedIn || !s.styled || !interactiveStdio() {
+	// Stored-but-rejected credentials are not a login: greet recorded the
+	// auth issue, and the desktop step waits for a sign-in that works.
+	if !signedIn || hasAuthIssue(s.result.Issues) || !s.styled || !interactiveStdio() {
 		return
 	}
 	env := liveOmarchyEnv()
