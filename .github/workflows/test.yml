@@ -322,10 +322,11 @@ jobs:
   # Go sources are in the filter too: vendorHash covers the vendored *files*,
   # not go.sum, so a new import from a module already in go.mod changes the
   # hash while leaving go.mod and go.sum alone. The filter exists to skip
-  # docs-only and workflow-only PRs, not Go changes.
+  # docs-only and unrelated workflow-only PRs, not Go changes.
   #
-  # The filter includes this file: a PR that changes only the job would
-  # otherwise skip the job it changed.
+  # The filter includes both workflow files and the release-time version
+  # stamper: a PR that changes how the flake is gated or stamped must not skip
+  # the build it is changing.
   nix-build:
     name: Nix flake builds
     runs-on: ubuntu-latest
@@ -350,8 +351,10 @@ jobs:
               - 'flake.nix'
               - 'flake.lock'
               - 'nix/**'
+              - 'scripts/stamp-nix-version.sh'
               - 'scripts/nix-build-check.sh'
               - 'scripts/extract-nix-vendor-hash.sh'
+              - '.github/workflows/release.yml'
               - '.github/workflows/test.yml'
 
       - name: Install Nix
