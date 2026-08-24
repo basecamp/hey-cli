@@ -11,6 +11,7 @@ setup() {
   cd "$WORK"
 
   printf '[tools]\ngo = "1.26.6"\ngoreleaser = "2.15.4"\n' > .mise.toml
+  printf 'GOSEC_VERSION := v2.28.0\n' > Makefile
   cat > .pre-commit-config.yaml <<'YAML'
 repos:
   - repo: https://github.com/golangci/golangci-lint
@@ -26,6 +27,12 @@ jobs:
         with:
           version: v2.11.1
       - run: scripts/check-release-lockstep.sh
+YAML
+  cat > .github/workflows/security.yml <<'YAML'
+jobs:
+  gosec:
+    steps:
+      - uses: securego/gosec@abc # v2.28.0
 YAML
   cat > .github/workflows/release.yml <<'YAML'
 jobs:
@@ -57,6 +64,7 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"goreleaser pin in lockstep (v2.15.4)"* ]]
   [[ "$output" == *"pre-commit golangci-lint rev in lockstep (v2.11.1)"* ]]
+  [[ "$output" == *"gosec pin in lockstep (v2.28.0)"* ]]
   [[ "$output" == *"release lockstep check passed"* ]]
 }
 
@@ -82,6 +90,15 @@ teardown() {
   run scripts/check-release-lockstep.sh
   [ "$status" -eq 1 ]
   [[ "$output" == *"golangci-lint pins disagree across workflows"* ]]
+}
+
+@test "fails when the local and workflow gosec versions drift" {
+  sed -i.bak 's/GOSEC_VERSION := v2.28.0/GOSEC_VERSION := v2.27.0/' Makefile && rm -f Makefile.bak
+  run scripts/check-release-lockstep.sh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gosec pins disagree"* ]]
+  [[ "$output" == *"v2.27.0"* ]]
+  [[ "$output" == *"v2.28.0"* ]]
 }
 
 @test "fails when a workflow names a script that does not exist" {

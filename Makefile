@@ -1,10 +1,11 @@
 .PHONY: build test test-unit test-e2e test-smoke preview-callback coverage fmt fmt-check vet lint tidy tidy-check \
-	race-test vuln secrets replace-check check-toolchain check security \
+	race-test vuln gosec secrets replace-check check-toolchain check security \
 	release-check release test-release bench bench-save bench-compare \
 	check-surface update-surface check-surface-compat check-size check-lint-lockstep \
 	check-release-lockstep update-nix-hash tools clean install help
 
 BINARY := $(CURDIR)/bin/hey
+GOSEC_VERSION := v2.28.0
 COVERAGE_FLOOR ?= 70.8
 COVERAGE_PROFILE ?= coverage.out
 COVERAGE_FUNCTIONS ?= coverage.func.txt
@@ -38,12 +39,13 @@ help:
 	@echo "  make check-lint-lockstep  Verify golangci-lint pins agree across workflows"
 	@echo "  make race-test       Run unit tests with race detector"
 	@echo "  make vuln            Run govulncheck"
+	@echo "  make gosec           Run gosec static security analysis"
 	@echo "  make secrets         Run gitleaks secret scan"
 	@echo "  make replace-check   Guard against replace directives in go.mod"
 	@echo ""
 	@echo "  make check           fmt-check + vet + lint + test-unit + tidy-check"
-	@echo "  make security        lint + vuln + secrets"
-	@echo "  make release-check   check + replace-check + vuln + race-test"
+	@echo "  make security        lint + vuln + gosec + secrets"
+	@echo "  make release-check   check + replace-check + vuln + gosec + race-test"
 	@echo "  make release         Run release preflight and tag (VERSION=v1.2.3 [DRY_RUN=1])"
 	@echo "  make test-release    Dry-run the goreleaser pipeline (snapshot, no publish/sign)"
 	@echo ""
@@ -142,6 +144,10 @@ race-test: check-toolchain
 vuln:
 	govulncheck ./...
 
+# Run the same pinned gosec version as the security workflow.
+gosec:
+	GOWORK=off go run github.com/securego/gosec/v2/cmd/gosec@$(GOSEC_VERSION) ./...
+
 # Run gitleaks secret scan. The scan is part of the security gate, so a missing
 # binary or config fails it rather than passing it by skipping.
 secrets:
@@ -214,10 +220,10 @@ update-nix-hash:
 	if [ $$RC -ne 0 ] && [ $$RC -ne 2 ]; then exit $$RC; fi
 
 # Security suite
-security: lint vuln secrets
+security: lint vuln gosec secrets
 
 # Release preflight
-release-check: check replace-check vuln race-test check-surface-compat check-size
+release-check: check replace-check vuln gosec race-test check-surface-compat check-size
 
 # Release (delegates to script)
 release:

@@ -9,7 +9,9 @@
 #      that will cut the tag.
 #   2. .pre-commit-config.yaml's golangci-lint rev == the CI pin, so a commit
 #      hook and CI cannot disagree on a finding.
-#   3. Every scripts/*.sh named in docs, workflows, the Makefile, goreleaser
+#   3. The Makefile's gosec version == the securego/gosec action version in
+#      security.yml, so the local release preflight runs the release scanner.
+#   4. Every scripts/*.sh named in docs, workflows, the Makefile, goreleaser
 #      config, other scripts or tests exists, and every scripts/*.sh is named
 #      somewhere other than in itself — a renamed or orphaned script fails here
 #      rather than at the moment a release step or a README command reaches
@@ -80,7 +82,20 @@ if [ -f .pre-commit-config.yaml ]; then
   fi
 fi
 
-# --- 3. scripts/*.sh referenced <-> existing ---
+# --- 3. gosec: Makefile vs security.yml ---
+MAKE_GOSEC=$(sed -nE 's/^GOSEC_VERSION[[:space:]]*:?=[[:space:]]*(v[0-9]+\.[0-9]+\.[0-9]+).*/\1/p' Makefile 2>/dev/null | head -1)
+CI_GOSEC=$(sed -nE 's|.*uses:[[:space:]]*securego/gosec@.*#[[:space:]]*(v[0-9]+\.[0-9]+\.[0-9]+).*|\1|p' .github/workflows/security.yml 2>/dev/null | head -1)
+if [ -z "$MAKE_GOSEC" ]; then
+  fail "no GOSEC_VERSION pin in Makefile"
+elif [ -z "$CI_GOSEC" ]; then
+  fail "no securego/gosec version pin in .github/workflows/security.yml"
+elif [ "$MAKE_GOSEC" != "$CI_GOSEC" ]; then
+  fail "gosec pins disagree: Makefile has ${MAKE_GOSEC}, security.yml has ${CI_GOSEC}"
+else
+  echo "gosec pin in lockstep (${CI_GOSEC})"
+fi
+
+# --- 4. scripts/*.sh referenced <-> existing ---
 shopt -s nullglob
 existing=()
 for f in scripts/*.sh; do existing+=("$(basename "$f")"); done

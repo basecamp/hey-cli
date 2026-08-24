@@ -91,7 +91,7 @@ func topicRuntimeDir() (string, error) {
 }
 
 func ensurePrivateDirectory(path string) (string, error) {
-	if err := os.Mkdir(path, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+	if err := os.Mkdir(path, 0o700); err != nil && !errors.Is(err, os.ErrExist) { // #nosec G703 -- path is a fixed child of an absolute, validated private runtime directory
 		return "", fmt.Errorf("create HEY TUI runtime directory: %w", err)
 	}
 	if err := validatePrivateDirectory(path); err != nil {
@@ -101,7 +101,7 @@ func ensurePrivateDirectory(path string) (string, error) {
 }
 
 func validatePrivateDirectory(path string) error {
-	info, err := os.Lstat(path)
+	info, err := os.Lstat(path) // #nosec G703 -- inspecting the absolute runtime path is the validation gate before any socket use
 	if err != nil {
 		return err
 	}

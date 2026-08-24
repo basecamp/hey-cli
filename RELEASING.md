@@ -26,7 +26,7 @@ make release VERSION=0.2.0 DRY_RUN=1
 
 1. Validates the version, that you are on the default branch with a clean tree
    synced to origin, and that `go.mod` has no `replace` directives
-2. Runs `make release-check`
+2. Runs `make release-check`, including the same pinned gosec version used by the release workflow
 3. For **stable** versions only: runs `scripts/update-nix-flake.sh` (verifies the
    Nix build via Docker and recomputes `vendorHash` if needed) and
    `scripts/stamp-plugin-version.sh`, commits `nix/package.nix` and
@@ -227,9 +227,12 @@ and dispatch; no new release needed.
 ## Local dry runs
 
 ```bash
-make release VERSION=0.2.0 DRY_RUN=1   # preflight only
+make release VERSION=0.2.0 DRY_RUN=1   # preflight, including govulncheck and gosec
 make test-release                      # goreleaser snapshot, no publish/sign
 ```
+
+The dry-run preflight runs the same gosec version as `.github/workflows/security.yml`;
+`make check-release-lockstep` fails if those pins drift.
 
 `make test-release` needs `syft` on PATH for the SBOM step (`mise use syft`); it
 blanks the signing env so notarization is skipped, and the stable metadata
