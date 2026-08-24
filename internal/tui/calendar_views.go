@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	habitvalues "github.com/basecamp/hey-cli/internal/habit"
 	"github.com/basecamp/hey-cli/internal/terminal"
@@ -762,13 +763,13 @@ func renderDayGrid(lanes [][]placedEvent, gridWidth, colWidth, rows, nowCol int,
 	// carrying, for the last two, the color of the calendar the event is filed on.
 	// They are styled separately so an event's name stands out of its border the way a
 	// subject stands out of the mail list's rules.
-	grid := make([][]rune, height)
+	grid := make([][]string, height)
 	cells := make([][]dayCell, height)
 	for row := range height {
-		grid[row] = make([]rune, gridWidth)
+		grid[row] = make([]string, gridWidth)
 		cells[row] = make([]dayCell, gridWidth)
 		for col := range gridWidth {
-			grid[row][col] = ' '
+			grid[row][col] = " "
 		}
 	}
 
@@ -783,7 +784,7 @@ func renderDayGrid(lanes [][]placedEvent, gridWidth, colWidth, rows, nowCol int,
 	for row := range height {
 		for col := 0; col < gridWidth; col += colWidth {
 			if cells[row][col].kind == cellEmpty {
-				grid[row][col] = hourRule
+				grid[row][col] = string(hourRule)
 				cells[row][col] = dayCell{kind: cellRule}
 			}
 		}
@@ -800,7 +801,7 @@ func renderDayGrid(lanes [][]placedEvent, gridWidth, colWidth, rows, nowCol int,
 			if cells[row][nowCol].kind == cellTitle {
 				continue
 			}
-			grid[row][nowCol] = nowRule
+			grid[row][nowCol] = string(nowRule)
 			cells[row][nowCol].now = true
 		}
 	}
@@ -823,7 +824,7 @@ func renderDayGrid(lanes [][]placedEvent, gridWidth, colWidth, rows, nowCol int,
 				flush()
 				cell = cells[row][col]
 			}
-			seg.WriteRune(grid[row][col])
+			seg.WriteString(grid[row][col])
 		}
 		flush()
 		b.WriteString("\n")
@@ -888,7 +889,7 @@ func titleColumn(startCol, endCol, nowCol int) int {
 	return at - 1
 }
 
-func drawDayLane(grid [][]rune, cells [][]dayCell, lane []placedEvent, rowOffset, rows, nowCol int, sel selection) {
+func drawDayLane(grid [][]string, cells [][]dayCell, lane []placedEvent, rowOffset, rows, nowCol int, sel selection) {
 	top := rowOffset
 	bottom := rowOffset + rows - 1
 
@@ -917,7 +918,7 @@ func drawDayLane(grid [][]rune, cells [][]dayCell, lane []placedEvent, rowOffset
 		// in the color left the box reading as an outline around empty grid.
 		for row := top; row <= bottom; row++ {
 			for col := sc; col < ec; col++ {
-				grid[row][col] = ' '
+				grid[row][col] = " "
 				cells[row][col] = at(fill, row, col)
 			}
 		}
@@ -928,7 +929,7 @@ func drawDayLane(grid [][]rune, cells [][]dayCell, lane []placedEvent, rowOffset
 		// came out as a single bar from three to seven.
 		if sc == previousEnd && sc < ec {
 			for row := top; row <= bottom; row++ {
-				grid[row][sc] = eventEdge
+				grid[row][sc] = string(eventEdge)
 				cells[row][sc] = at(edged, row, sc)
 			}
 		}
@@ -937,20 +938,55 @@ func drawDayLane(grid [][]rune, cells [][]dayCell, lane []placedEvent, rowOffset
 		// The title reads downwards, centred in the block: a name at the top of a
 		// full-height column reads as an event that starts there and stops. It is
 		// clipped rather than shrinking the block, since the block is the span.
-		titleRunes := []rune(terminal.SanitizeLine(pe.rec.Title))
+		// Each user-perceived character gets one row, keeping emoji sequences together.
+		titleGlyphs := verticalTitleGlyphs(terminal.SanitizeLine(pe.rec.Title))
 		rows := bottom - top + 1
-		titleRow := top + max((rows-len(titleRunes))/2, 0)
+		titleRow := top + max((rows-len(titleGlyphs))/2, 0)
 		titleCol := titleColumn(sc, ec, nowCol)
 
-		for i, r := range titleRunes {
+		for i, glyph := range titleGlyphs {
 			row := titleRow + i
 			if row > bottom {
 				break
 			}
-			grid[row][titleCol] = r
-			cells[row][titleCol] = at(titled, row, titleCol)
+
+			text, width := glyph.text, glyph.width
+			if width > ec-sc {
+				text, width = "…", 1
+			}
+			col := min(max(titleCol, sc), ec-width)
+			grid[row][col] = text
+			for occupied := col; occupied < col+width; occupied++ {
+				cells[row][occupied] = at(titled, row, occupied)
+				if occupied > col {
+					grid[row][occupied] = ""
+				}
+			}
 		}
 	}
+}
+
+type titleGlyph struct {
+	text  string
+	width int
+}
+
+// verticalTitleGlyphs returns the visible characters that make up a vertical event title.
+// A joined emoji or a base letter with combining marks stays together on one row, along with
+// the number of terminal cells it occupies.
+func verticalTitleGlyphs(title string) []titleGlyph {
+	glyphs := make([]titleGlyph, 0, len(title))
+	for title != "" {
+		text, width := ansi.FirstGraphemeCluster(title, ansi.GraphemeWidth)
+		if text == "" {
+			break
+		}
+		title = title[len(text):]
+		if width > 0 {
+			glyphs = append(glyphs, titleGlyph{text: text, width: width})
+		}
+	}
+	return glyphs
 }
 
 // =============================================

@@ -1774,6 +1774,25 @@ func TestDayViewGivesASingleEventTheWholeGrid(t *testing.T) {
 	}
 }
 
+func TestDayViewKeepsEmojiTitlesAligned(t *testing.T) {
+	placed := placedEvent{
+		rec:      Recording{ID: 1, Title: "Soul Cycle 🚴‍♀️", CalendarColor: "green"},
+		startCol: 8, endCol: 20,
+	}
+
+	for _, sel := range []selection{{}, {eventKey: placed.rec.key()}} {
+		grid := stripANSI(renderDayGrid([][]placedEvent{{placed}}, 40, 4, 18, -1, styleMuted, sel))
+		if !strings.Contains(grid, "🚴‍♀️") {
+			t.Errorf("the joined emoji was split across rows:\n%s", grid)
+		}
+		for row, line := range strings.Split(strings.TrimSuffix(grid, "\n"), "\n") {
+			if width := lipgloss.Width(line); width != 40 {
+				t.Errorf("grid row %d is %d columns wide, want 40: %q", row, width, line)
+			}
+		}
+	}
+}
+
 // An event is drawn in the color of the calendar it is filed on, so which calendar it
 // belongs to is answered by looking at it. HEY leaves the personal calendar's color out of
 // its JSON, and those fall back to the theme's own accent rather than to no fill.
