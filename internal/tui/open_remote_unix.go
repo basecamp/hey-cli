@@ -19,15 +19,15 @@ import (
 	"github.com/gofrs/flock"
 )
 
-// ErrNoRunningTUI means no active HEY TUI accepted a topic request.
+// ErrNoRunningTUI means no active HEY TUI accepted an open request.
 var ErrNoRunningTUI = errors.New("no running HEY TUI")
 
 const (
-	topicRuntimeDirname = "hey-cli"
-	topicSocketFilename = "hey-tui.sock"
+	tuiRuntimeDirname = "hey-cli"
+	tuiSocketFilename = "hey-tui.sock"
 )
 
-type ownedTopicListener struct {
+type ownedTUIListener struct {
 	net.Listener
 	lock       *flock.Flock
 	path       string
@@ -36,21 +36,21 @@ type ownedTopicListener struct {
 	closeErr   error
 }
 
-func topicSocketPath(instance string) (string, error) {
-	name, err := topicSocketName(instance)
+func tuiSocketPath(instance string) (string, error) {
+	name, err := tuiSocketName(instance)
 	if err != nil {
 		return "", err
 	}
-	runtimeDir, err := topicRuntimeDir()
+	runtimeDir, err := tuiRuntimeDir()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(runtimeDir, name), nil
 }
 
-func topicSocketName(instance string) (string, error) {
+func tuiSocketName(instance string) (string, error) {
 	if instance == "" {
-		return topicSocketFilename, nil
+		return tuiSocketFilename, nil
 	}
 	if len(instance) > 32 {
 		return "", fmt.Errorf("TUI instance must be at most 32 characters")
@@ -65,7 +65,7 @@ func topicSocketName(instance string) (string, error) {
 	return "hey-tui-" + instance + ".sock", nil
 }
 
-func topicRuntimeDir() (string, error) {
+func tuiRuntimeDir() (string, error) {
 	if runtimeDir := os.Getenv("XDG_RUNTIME_DIR"); runtimeDir != "" {
 		if !filepath.IsAbs(runtimeDir) {
 			return "", fmt.Errorf("XDG_RUNTIME_DIR must be an absolute path")
@@ -73,7 +73,7 @@ func topicRuntimeDir() (string, error) {
 		if err := validatePrivateDirectory(runtimeDir); err != nil {
 			return "", fmt.Errorf("protect HEY TUI runtime directory: %w", err)
 		}
-		return ensurePrivateDirectory(filepath.Join(runtimeDir, topicRuntimeDirname))
+		return ensurePrivateDirectory(filepath.Join(runtimeDir, tuiRuntimeDirname))
 	}
 
 	tempDir := os.TempDir()
@@ -87,7 +87,7 @@ func topicRuntimeDir() (string, error) {
 	if info.Mode().Perm()&0o022 != 0 && info.Mode()&os.ModeSticky == 0 {
 		return "", fmt.Errorf("temporary directory is writable by other users without the sticky bit")
 	}
-	return ensurePrivateDirectory(filepath.Join(tempDir, fmt.Sprintf("%s-%d", topicRuntimeDirname, os.Getuid())))
+	return ensurePrivateDirectory(filepath.Join(tempDir, fmt.Sprintf("%s-%d", tuiRuntimeDirname, os.Getuid())))
 }
 
 func ensurePrivateDirectory(path string) (string, error) {
@@ -118,12 +118,12 @@ func validatePrivateDirectory(path string) error {
 	return nil
 }
 
-// OpenTopicInRunningTUI sends a thread to the active named TUI.
-func OpenTopicInRunningTUI(instance string, request TopicRequest) error {
-	if request.TopicID <= 0 {
-		return fmt.Errorf("topic ID must be positive")
+// OpenInRunningTUI sends a destination to the active named TUI.
+func OpenInRunningTUI(instance string, request OpenRequest) error {
+	if !request.valid() {
+		return fmt.Errorf("open request must identify one destination")
 	}
-	path, err := topicSocketPath(instance)
+	path, err := tuiSocketPath(instance)
 	if err != nil {
 		return err
 	}
@@ -135,7 +135,7 @@ func OpenTopicInRunningTUI(instance string, request TopicRequest) error {
 	defer connection.Close()
 	_ = connection.SetDeadline(time.Now().Add(time.Second))
 	if err := json.NewEncoder(connection).Encode(request); err != nil {
-		return fmt.Errorf("send topic to HEY TUI: %w", err)
+		return fmt.Errorf("send open request to HEY TUI: %w", err)
 	}
 	var response struct {
 		OK bool `json:"ok"`
@@ -144,20 +144,20 @@ func OpenTopicInRunningTUI(instance string, request TopicRequest) error {
 		return fmt.Errorf("read HEY TUI response: %w", err)
 	}
 	if !response.OK {
-		return fmt.Errorf("HEY TUI refused the topic request")
+		return fmt.Errorf("HEY TUI refused the open request")
 	}
 	return nil
 }
 
-func startTopicListener(instance string, send func(tea.Msg)) (net.Listener, error) {
-	path, err := topicSocketPath(instance)
+func startOpenListener(instance string, send func(tea.Msg)) (net.Listener, error) {
+	path, err := tuiSocketPath(instance)
 	if err != nil {
 		return nil, err
 	}
 	ownershipLock := flock.New(path + ".lock")
 	locked, err := ownershipLock.TryLock()
 	if err != nil {
-		return nil, fmt.Errorf("lock HEY TUI topic listener: %w", err)
+		return nil, fmt.Errorf("lock HEY TUI open listener: %w", err)
 	}
 	if !locked {
 		return nil, errors.New("a HEY TUI with this instance is already running")
@@ -174,12 +174,12 @@ func startTopicListener(instance string, send func(tea.Msg)) (net.Listener, erro
 	}
 	listener, err := new(net.ListenConfig).Listen(context.Background(), "unix", path)
 	if err != nil {
-		return nil, fmt.Errorf("listen for HEY TUI topics: %w", err)
+		return nil, fmt.Errorf("listen for HEY TUI open requests: %w", err)
 	}
 	unixListener, ok := listener.(*net.UnixListener)
 	if !ok {
 		_ = listener.Close()
-		return nil, fmt.Errorf("HEY TUI topic listener is not a Unix socket")
+		return nil, fmt.Errorf("HEY TUI open listener is not a Unix socket")
 	}
 	unixListener.SetUnlinkOnClose(false)
 	if chmodErr := os.Chmod(path, 0o600); chmodErr != nil {
@@ -194,18 +194,18 @@ func startTopicListener(instance string, send func(tea.Msg)) (net.Listener, erro
 		return nil, fmt.Errorf("inspect HEY TUI socket: %w", err)
 	}
 
-	owned := &ownedTopicListener{
+	owned := &ownedTUIListener{
 		Listener:   listener,
 		lock:       ownershipLock,
 		path:       path,
 		socketInfo: socketInfo,
 	}
 	releaseLock = false
-	go serveTopicRequests(owned, send)
+	go serveOpenRequests(owned, send)
 	return owned, nil
 }
 
-func (l *ownedTopicListener) Close() error {
+func (l *ownedTUIListener) Close() error {
 	l.closeOnce.Do(func() {
 		l.closeErr = l.Listener.Close()
 		if info, err := os.Lstat(l.path); err == nil && os.SameFile(l.socketInfo, info) {
@@ -220,21 +220,21 @@ func (l *ownedTopicListener) Close() error {
 	return l.closeErr
 }
 
-func serveTopicRequests(listener net.Listener, send func(tea.Msg)) {
+func serveOpenRequests(listener net.Listener, send func(tea.Msg)) {
 	for {
 		connection, err := listener.Accept()
 		if err != nil {
 			return
 		}
-		go handleTopicRequest(connection, send)
+		go handleOpenRequest(connection, send)
 	}
 }
 
-func handleTopicRequest(connection net.Conn, send func(tea.Msg)) {
+func handleOpenRequest(connection net.Conn, send func(tea.Msg)) {
 	defer connection.Close()
 	_ = connection.SetDeadline(time.Now().Add(time.Second))
-	var request TopicRequest
-	if err := json.NewDecoder(io.LimitReader(connection, 4096)).Decode(&request); err != nil || request.TopicID <= 0 {
+	var request OpenRequest
+	if err := json.NewDecoder(io.LimitReader(connection, 4096)).Decode(&request); err != nil || !request.valid() {
 		_ = json.NewEncoder(connection).Encode(struct {
 			OK bool `json:"ok"`
 		}{})
@@ -246,7 +246,7 @@ func handleTopicRequest(connection net.Conn, send func(tea.Msg)) {
 	}{OK: true})
 }
 
-func closeTopicListener(listener net.Listener) {
+func closeOpenListener(listener net.Listener) {
 	if listener != nil {
 		_ = listener.Close()
 	}

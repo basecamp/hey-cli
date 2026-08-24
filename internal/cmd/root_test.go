@@ -118,8 +118,8 @@ func TestHeyTuiTopicStartsAtTheRequestedThread(t *testing.T) {
 		"tui", "--topic", "5511", "--topic-title", "Lunch on Thursday?", "--instance", "omarchy"); err != nil {
 		t.Fatalf("hey tui --topic: %v", err)
 	}
-	if options.OpenTopic.TopicID != 5511 || options.OpenTopic.Title != "Lunch on Thursday?" || options.Instance != "omarchy" {
-		t.Fatalf("initial topic = %#v", options.OpenTopic)
+	if options.Open.TopicID != 5511 || options.Open.Title != "Lunch on Thursday?" || options.Instance != "omarchy" {
+		t.Fatalf("initial topic = %#v", options.Open)
 	}
 }
 
@@ -127,15 +127,15 @@ func TestHeyTuiRemoteSendsTheTopicWithoutLaunching(t *testing.T) {
 	isolateAgents(t)
 	server := quietServer(t)
 	calls := stubRunTUI(t)
-	original := openTopicInRunningTUI
-	var request tui.TopicRequest
+	original := openInRunningTUI
+	var request tui.OpenRequest
 	var instance string
-	openTopicInRunningTUI = func(gotInstance string, got tui.TopicRequest) error {
+	openInRunningTUI = func(gotInstance string, got tui.OpenRequest) error {
 		instance = gotInstance
 		request = got
 		return nil
 	}
-	t.Cleanup(func() { openTopicInRunningTUI = original })
+	t.Cleanup(func() { openInRunningTUI = original })
 
 	if _, _, err := runAuthCommand(t, t.TempDir(), server.URL, "environment-token", false,
 		"tui", "--topic", "5511", "--topic-title", "Lunch on Thursday?", "--instance", "omarchy", "--remote"); err != nil {
@@ -146,17 +146,91 @@ func TestHeyTuiRemoteSendsTheTopicWithoutLaunching(t *testing.T) {
 	}
 }
 
+func TestHeyTuiScreenerStartsAtTheScreener(t *testing.T) {
+	isolateAgents(t)
+	server := quietServer(t)
+	original := runTUI
+	var options tui.Options
+	runTUI = func(_ *hey.Client, _ *hey.Client, _ string, _ tui.Watchers, got tui.Options) error {
+		options = got
+		return nil
+	}
+	t.Cleanup(func() { runTUI = original })
+
+	if _, _, err := runAuthCommand(t, t.TempDir(), server.URL, "environment-token", false,
+		"tui", "--screener", "--instance", "omarchy"); err != nil {
+		t.Fatalf("hey tui --screener: %v", err)
+	}
+	if !options.Open.Screener || options.Open.TopicID != 0 || options.Instance != "omarchy" {
+		t.Fatalf("initial destination = %#v", options.Open)
+	}
+}
+
+func TestHeyTuiRemoteSendsTheScreenerWithoutLaunching(t *testing.T) {
+	isolateAgents(t)
+	server := quietServer(t)
+	calls := stubRunTUI(t)
+	original := openInRunningTUI
+	var request tui.OpenRequest
+	var instance string
+	openInRunningTUI = func(gotInstance string, got tui.OpenRequest) error {
+		instance = gotInstance
+		request = got
+		return nil
+	}
+	t.Cleanup(func() { openInRunningTUI = original })
+
+	if _, _, err := runAuthCommand(t, t.TempDir(), server.URL, "environment-token", false,
+		"tui", "--screener", "--instance", "omarchy", "--remote"); err != nil {
+		t.Fatalf("hey tui --screener --remote: %v", err)
+	}
+	if !request.Screener || request.TopicID != 0 || instance != "omarchy" || *calls != 0 {
+		t.Fatalf("remote request = %#v, TUI launches = %d", request, *calls)
+	}
+}
+
+func TestHeyTuiRemoteRequiresOneDestination(t *testing.T) {
+	isolateAgents(t)
+	server := quietServer(t)
+	calls := stubRunTUI(t)
+	original := openInRunningTUI
+	remoteCalls := 0
+	openInRunningTUI = func(string, tui.OpenRequest) error {
+		remoteCalls++
+		return nil
+	}
+	t.Cleanup(func() { openInRunningTUI = original })
+
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{args: []string{"tui", "--remote"}, want: "--remote requires --topic or --screener"},
+		{args: []string{"tui", "--topic", "5511", "--screener"}, want: "--topic and --screener cannot be used together"},
+		{args: []string{"tui", "--topic-title", "Lunch on Thursday?"}, want: "--topic-title requires --topic"},
+		{args: []string{"tui", "--screener", "--topic-title", "Lunch on Thursday?"}, want: "--topic-title requires --topic"},
+	} {
+		_, _, err := runAuthCommand(t, t.TempDir(), server.URL, "environment-token", false, test.args...)
+		if err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Errorf("hey %s error = %v, want %q", strings.Join(test.args, " "), err, test.want)
+		}
+	}
+	if *calls != 0 || remoteCalls != 0 {
+		t.Fatalf("invalid destinations launched TUI %d times and made %d remote calls", *calls, remoteCalls)
+	}
+}
+
 func TestHeyTuiRejectsNonPositiveTopicIDs(t *testing.T) {
 	isolateAgents(t)
 	server := quietServer(t)
 	calls := stubRunTUI(t)
-	original := openTopicInRunningTUI
+	original := openInRunningTUI
 	remoteCalls := 0
-	openTopicInRunningTUI = func(string, tui.TopicRequest) error {
+	openInRunningTUI = func(string, tui.OpenRequest) error {
 		remoteCalls++
 		return nil
 	}
-	t.Cleanup(func() { openTopicInRunningTUI = original })
+	t.Cleanup(func() { openInRunningTUI = original })
 
 	for _, args := range [][]string{
 		{"tui", "--topic", "0"},

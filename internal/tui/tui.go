@@ -29,18 +29,23 @@ func (e errMsg) Error() string { return e.err.Error() }
 type ctrlCResetMsg struct{}
 type spinnerTickMsg struct{}
 
-// TopicRequest identifies a thread to open in the TUI. AccountID selects a
+// OpenRequest identifies a destination to open in the TUI. AccountID selects a
 // linked account when the request comes from another process.
-type TopicRequest struct {
-	TopicID   int64  `json:"topic_id"`
+type OpenRequest struct {
+	TopicID   int64  `json:"topic_id,omitempty"`
 	AccountID int64  `json:"account_id,omitempty"`
 	Title     string `json:"title,omitempty"`
+	Screener  bool   `json:"screener,omitempty"`
+}
+
+func (r OpenRequest) valid() bool {
+	return r.AccountID >= 0 && ((r.Screener && r.TopicID == 0) || (!r.Screener && r.TopicID > 0))
 }
 
 // Options configures the TUI's initial destination.
 type Options struct {
-	OpenTopic TopicRequest
-	Instance  string
+	Open     OpenRequest
+	Instance string
 }
 
 // --- Model ---
@@ -115,7 +120,7 @@ type model struct {
 	spinnerPhase float64
 	err          error
 	ctrlCOnce    bool
-	pendingTopic *TopicRequest
+	pendingOpen  *OpenRequest
 }
 
 func newModel() model {
@@ -227,8 +232,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case notifyMsg:
 		return m, m.showToast(msg)
 
-	case TopicRequest:
-		return m.openTopic(msg)
+	case OpenRequest:
+		return m.openRequest(msg)
 
 	case toastExpiredMsg:
 		if msg.id == m.toastID {
@@ -255,9 +260,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.mailAccountCursor = msg.selected
 		}
 		m.updateHelpBindings()
-		if m.pendingTopic != nil {
-			request := *m.pendingTopic
-			return m.openTopic(request)
+		if m.pendingOpen != nil {
+			request := *m.pendingOpen
+			return m.openRequest(request)
 		}
 		return m, nil
 
@@ -268,11 +273,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mailAccountSwitching = false
 		if msg.err != nil {
 			m.mailAccountErr = errorNotice("Could not switch account", msg.err)
-			m.pendingTopic = nil
+			opening := m.pendingOpen != nil
+			m.pendingOpen = nil
 			m.updateHelpBindings()
+			if opening {
+				return m, notify(m.mailAccountErr)
+			}
 			return m, nil
 		}
-		if m.pendingTopic != nil {
+		if m.pendingOpen != nil {
 			m.section = sectionMail
 		}
 		updated, initCmd := m.applyMailAccount(msg.account, msg.client)
@@ -281,13 +290,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, initCmd
 		}
 		m = next
-		if m.pendingTopic == nil {
+		if m.pendingOpen == nil {
 			return m, initCmd
 		}
-		request := *m.pendingTopic
-		m.pendingTopic = nil
-		opened, topicCmd := m.openTopic(request)
-		return opened, tea.Batch(initCmd, topicCmd)
+		request := *m.pendingOpen
+		m.pendingOpen = nil
+		opened, openCmd := m.openRequest(request)
+		return opened, tea.Batch(initCmd, openCmd)
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -439,10 +448,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateHelpBindings()
 		}
 		m.mailSourcesLoaded = true
-		if m.pendingTopic != nil {
-			request := *m.pendingTopic
-			opened, topicCmd := m.openTopic(request)
-			return opened, tea.Batch(cmd, watch, topicCmd)
+		if m.pendingOpen != nil {
+			request := *m.pendingOpen
+			opened, openCmd := m.openRequest(request)
+			return opened, tea.Batch(cmd, watch, openCmd)
 		}
 		return m, tea.Batch(cmd, watch)
 
@@ -1033,8 +1042,8 @@ func (m model) switchSection(sec section) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m model) openTopic(request TopicRequest) (tea.Model, tea.Cmd) {
-	if request.TopicID <= 0 {
+func (m model) openRequest(request OpenRequest) (tea.Model, tea.Cmd) {
+	if !request.valid() {
 		return m, nil
 	}
 	capturingInput := false
@@ -1043,11 +1052,11 @@ func (m model) openTopic(request TopicRequest) (tea.Model, tea.Cmd) {
 		capturingInput = ok && capturer.CapturingInput()
 	}
 	if m.hasPendingMutation() || capturingInput {
-		m.pendingTopic = nil
-		return m, notify("Finish the current action before opening another thread")
+		m.pendingOpen = nil
+		return m, notify("Finish the current action before opening another screen")
 	}
 	if request.AccountID > 0 && m.mailAccount.id != request.AccountID {
-		m.pendingTopic = &request
+		m.pendingOpen = &request
 		if !m.mailAccountsLoaded {
 			return m, nil
 		}
@@ -1059,10 +1068,10 @@ func (m model) openTopic(request TopicRequest) (tea.Model, tea.Cmd) {
 			m.mailAccountSwitching = true
 			return m, switchMailAccount(m.vc.ctx, m.rootSDK, account, m.mailAccountRequestID)
 		}
-		m.pendingTopic = nil
+		m.pendingOpen = nil
 		m.mailAccountErr = fmt.Sprintf("Mail account %d is not available", request.AccountID)
 		m.updateHelpBindings()
-		return m, nil
+		return m, notify(m.mailAccountErr)
 	}
 	if m.mailAccountSwitching {
 		m.mailAccountRequestID++
@@ -1070,12 +1079,15 @@ func (m model) openTopic(request TopicRequest) (tea.Model, tea.Cmd) {
 		m.updateHelpBindings()
 	}
 	if !m.mailSourcesLoaded {
-		m.pendingTopic = &request
+		m.pendingOpen = &request
 		return m, nil
 	}
-	m.pendingTopic = nil
+	m.pendingOpen = nil
 	m.section = sectionMail
 	m.focus = rowContent
+	if request.Screener {
+		return m.openScreener()
+	}
 	m.activeView = m.mailView
 	m.activeView.Resize(m.vc.width, m.vc.height)
 	m.updateHelpBindings()
@@ -1110,22 +1122,22 @@ func (m model) handleSubnavKey(msg tea.KeyPressMsg) tea.Cmd {
 // --- Shared utilities ---
 
 // Run starts the TUI with the resolved mail account, the identity root client used for
-// interactive account switching, the live watchers, and an optional initial thread.
+// interactive account switching, the live watchers, and an optional initial destination.
 func Run(rootSDK, sdk *hey.Client, selected string, watchers Watchers, options Options) error {
 	calibrateWidths(os.Stdin, os.Stdout)
 	m := newModelWithMailAccounts(rootSDK, sdk, selected, watchers)
-	if options.OpenTopic.TopicID > 0 {
-		request := options.OpenTopic
-		m.pendingTopic = &request
+	if options.Open.valid() {
+		request := options.Open
+		m.pendingOpen = &request
 	}
 	m.help.setHidden(config.HelpHidden())
 	m.saveHelpHidden = config.SaveHelpHidden
 	p := tea.NewProgram(m)
-	listener, err := startTopicListener(options.Instance, p.Send)
+	listener, err := startOpenListener(options.Instance, p.Send)
 	if err != nil {
 		return err
 	}
-	defer closeTopicListener(listener)
+	defer closeOpenListener(listener)
 	_, err = p.Run()
 	return err
 }

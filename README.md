@@ -220,11 +220,12 @@ Accounts and individual email addresses.
 Switching cancels requests from the previous account and reloads the active section;
 Calendar and Journal remain identity-wide.
 
-`hey tui --topic 123` starts on thread 123. Desktop integrations can send the same
-thread to an existing TUI with `hey tui --topic 123 --remote`; `--account` selects the
-thread's linked account before it opens. An integration that owns a dedicated TUI window
-uses the same `--instance <name>` on both commands, keeping its remote requests separate
-from manually launched TUIs.
+`hey tui --topic 123` starts on thread 123, and `hey tui --screener` starts in The
+Screener. Desktop integrations can send either destination to an existing TUI with
+`hey tui --topic 123 --remote` or `hey tui --screener --remote`; `--account` selects the
+linked account before it opens. An integration that owns a dedicated TUI window uses the
+same `--instance <name>` on both commands, keeping its remote requests separate from
+manually launched TUIs.
 
 Navigate between Mail, Contacts, Calendar, and Journal. The context-sensitive shortcut bar is visible by default; press `?` to hide or restore it, and the choice is remembered across restarts. Mail navigation includes HEY boxes plus separate Labels and Collections tabs; Shift+L opens Labels directly and Shift+K opens Collections. Every list keeps going: scroll towards the bottom of a box, label, or collection and the next threads are read in behind you, so there are no pages to step through. The mail actions use HEY's web shortcuts in either letter case (except `l`, whose uppercase belongs to Labels): `/` or `s` searches, `r` replies, `f` forwards, `v` moves, `b` manages labels, `n` adds or removes the selected thread from collections, `e` marks seen, `u` marks unseen, `i` moves to the Imbox, `l` moves to Reply Later, `a` moves to Set Aside, `d` moves to The Feed, `p` moves to Paper Trail, and `t` trashes. Press `!` to mark as spam, `-` to ignore, and `+` to stop ignoring. Select threads with Space and press Ctrl+B to preview every bulk-reply recipient before writing and sending one reply to all selected threads. A delayed bulk reply can be recalled with Ctrl+U while HEY's undo window remains open. Search results retain the matching-message summary and keep going as you scroll, like every other list. While writing a new message, reply, or forward, press Ctrl+T to open the searchable Snippets picker. HEY never chooses a default: Enter inserts the selected snippet at the body cursor, Escape returns without changing the draft, and the picker can be reopened to insert another snippet.
 

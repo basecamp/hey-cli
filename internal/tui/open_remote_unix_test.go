@@ -14,46 +14,50 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-func TestTopicRemoteRoundTrip(t *testing.T) {
+func TestOpenRemoteRoundTrip(t *testing.T) {
 	setPrivateRuntimeDir(t)
-	received := make(chan TopicRequest, 1)
-	listener, err := startTopicListener("omarchy", func(msg tea.Msg) {
-		request, ok := msg.(TopicRequest)
+	received := make(chan OpenRequest, 2)
+	listener, err := startOpenListener("omarchy", func(msg tea.Msg) {
+		request, ok := msg.(OpenRequest)
 		if ok {
 			received <- request
 		}
 	})
 	if err != nil {
-		t.Fatalf("start topic listener: %v", err)
+		t.Fatalf("start open listener: %v", err)
 	}
 	if listener == nil {
-		t.Fatal("topic listener did not start")
+		t.Fatal("open listener did not start")
 	}
-	t.Cleanup(func() { closeTopicListener(listener) })
+	t.Cleanup(func() { closeOpenListener(listener) })
 
-	want := TopicRequest{TopicID: 5511, AccountID: 42, Title: "Lunch on Thursday?"}
-	if err := OpenTopicInRunningTUI("omarchy", want); err != nil {
-		t.Fatalf("open topic: %v", err)
-	}
-	select {
-	case got := <-received:
-		if got != want {
-			t.Fatalf("request = %#v, want %#v", got, want)
+	for _, want := range []OpenRequest{
+		{TopicID: 5511, AccountID: 42, Title: "Lunch on Thursday?"},
+		{Screener: true, AccountID: 42},
+	} {
+		if err := OpenInRunningTUI("omarchy", want); err != nil {
+			t.Fatalf("open destination: %v", err)
 		}
-	case <-time.After(time.Second):
-		t.Fatal("topic request was not delivered")
+		select {
+		case got := <-received:
+			if got != want {
+				t.Fatalf("request = %#v, want %#v", got, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("open request was not delivered")
+		}
 	}
 }
 
 func TestTopicRemoteInstancesUseDistinctValidatedSockets(t *testing.T) {
 	setPrivateRuntimeDir(t)
-	defaultPath := mustTopicSocketPath(t, "")
-	omarchyPath := mustTopicSocketPath(t, "omarchy")
+	defaultPath := mustTUISocketPath(t, "")
+	omarchyPath := mustTUISocketPath(t, "omarchy")
 	if defaultPath == omarchyPath {
 		t.Fatal("named TUI shared the default socket")
 	}
 	for _, instance := range []string{"omarchy/../../other", strings.Repeat("a", 33), "."} {
-		if _, err := topicSocketPath(instance); err == nil {
+		if _, err := tuiSocketPath(instance); err == nil {
 			t.Errorf("instance %q was accepted", instance)
 		}
 	}
@@ -62,7 +66,7 @@ func TestTopicRemoteInstancesUseDistinctValidatedSockets(t *testing.T) {
 func TestTopicRemoteFallbackUsesPrivatePerUserDirectory(t *testing.T) {
 	t.Setenv("XDG_RUNTIME_DIR", "")
 	t.Setenv("TMPDIR", t.TempDir())
-	path := mustTopicSocketPath(t, "omarchy")
+	path := mustTUISocketPath(t, "omarchy")
 	parent := filepath.Dir(path)
 	if parent == os.TempDir() {
 		t.Fatalf("socket was placed directly in shared temporary directory: %s", path)
@@ -82,58 +86,71 @@ func TestTopicRemoteRejectsInsecureRuntimeDirectory(t *testing.T) {
 		t.Fatalf("make runtime directory insecure: %v", err)
 	}
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
-	if _, err := topicSocketPath("omarchy"); err == nil {
+	if _, err := tuiSocketPath("omarchy"); err == nil {
 		t.Fatal("insecure XDG_RUNTIME_DIR was accepted")
 	}
 }
 
 func TestTopicRemoteListenerOwnershipIsExclusive(t *testing.T) {
 	setPrivateRuntimeDir(t)
-	first, err := startTopicListener("omarchy", func(tea.Msg) {})
+	first, err := startOpenListener("omarchy", func(tea.Msg) {})
 	if err != nil || first == nil {
 		t.Fatalf("start first listener: listener=%v err=%v", first != nil, err)
 	}
-	defer closeTopicListener(first)
+	defer closeOpenListener(first)
 
-	second, err := startTopicListener("omarchy", func(tea.Msg) {})
+	second, err := startOpenListener("omarchy", func(tea.Msg) {})
 	if err == nil || second != nil {
-		closeTopicListener(second)
+		closeOpenListener(second)
 		t.Fatalf("second listener did not report the owned instance: listener=%v err=%v", second != nil, err)
 	}
 	if err := Run(nil, nil, "all", Watchers{}, Options{Instance: "omarchy"}); err == nil {
 		t.Fatal("Run silently started a TUI without owning its requested instance")
 	}
 
-	closeTopicListener(first)
-	third, err := startTopicListener("omarchy", func(tea.Msg) {})
+	closeOpenListener(first)
+	third, err := startOpenListener("omarchy", func(tea.Msg) {})
 	if err != nil || third == nil {
 		t.Fatalf("start listener after owner closed: listener=%v err=%v", third != nil, err)
 	}
-	closeTopicListener(third)
+	closeOpenListener(third)
 }
 
 func TestTopicRemoteListenerDoesNotRemoveAReplacementPath(t *testing.T) {
 	setPrivateRuntimeDir(t)
-	listener, err := startTopicListener("omarchy", func(tea.Msg) {})
+	listener, err := startOpenListener("omarchy", func(tea.Msg) {})
 	if err != nil || listener == nil {
 		t.Fatalf("start listener: listener=%v err=%v", listener != nil, err)
 	}
-	path := mustTopicSocketPath(t, "omarchy")
+	path := mustTUISocketPath(t, "omarchy")
 	if err := os.Remove(path); err != nil {
 		t.Fatalf("remove listener path: %v", err)
 	}
 	if err := os.WriteFile(path, []byte("replacement"), 0o600); err != nil {
 		t.Fatalf("write replacement path: %v", err)
 	}
-	closeTopicListener(listener)
+	closeOpenListener(listener)
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("listener cleanup removed replacement path: %v", err)
 	}
 }
 
+func TestOpenRemoteRequiresOneDestination(t *testing.T) {
+	for _, request := range []OpenRequest{
+		{},
+		{TopicID: 5511, Screener: true},
+		{TopicID: -1, Screener: true},
+		{TopicID: 5511, AccountID: -1},
+	} {
+		if err := OpenInRunningTUI("omarchy", request); err == nil {
+			t.Errorf("request %#v was accepted", request)
+		}
+	}
+}
+
 func TestTopicRemoteReportsNoRunningTUI(t *testing.T) {
 	setPrivateRuntimeDir(t)
-	if err := OpenTopicInRunningTUI("omarchy", TopicRequest{TopicID: 5511}); !errors.Is(err, ErrNoRunningTUI) {
+	if err := OpenInRunningTUI("omarchy", OpenRequest{TopicID: 5511}); !errors.Is(err, ErrNoRunningTUI) {
 		t.Fatalf("error = %v, want ErrNoRunningTUI", err)
 	}
 }
@@ -154,13 +171,13 @@ func setPrivateRuntimeDir(t *testing.T) {
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 }
 
-func mustTopicSocketPath(t *testing.T, instance string) string {
+func mustTUISocketPath(t *testing.T, instance string) string {
 	t.Helper()
-	path, err := topicSocketPath(instance)
+	path, err := tuiSocketPath(instance)
 	if err != nil {
-		t.Fatalf("topic socket path: %v", err)
+		t.Fatalf("TUI socket path: %v", err)
 	}
 	return path
 }
 
-var _ net.Listener = (*ownedTopicListener)(nil)
+var _ net.Listener = (*ownedTUIListener)(nil)

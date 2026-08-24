@@ -122,7 +122,7 @@ func TestTopicRequestSwitchesToMailAndStartsTheThreadRead(t *testing.T) {
 	m.section = sectionCalendar
 	m.activeView = m.calendarView
 
-	updated, cmd := m.Update(TopicRequest{TopicID: 5511})
+	updated, cmd := m.Update(OpenRequest{TopicID: 5511})
 	m = updated.(model)
 	if m.section != sectionMail || m.activeView != m.mailView || m.focus != rowContent {
 		t.Fatalf("topic request left the TUI at section=%d focus=%d view=%T", m.section, m.focus, m.activeView)
@@ -140,7 +140,7 @@ func TestTopicRequestSanitizesAnUntrustedTitle(t *testing.T) {
 	m.mailSourcesLoaded = true
 	m.loading = true
 
-	_, cmd := m.Update(TopicRequest{TopicID: 100, Title: "\x1b[31mRed\x1b[0m\nalert"})
+	_, cmd := m.Update(OpenRequest{TopicID: 100, Title: "\x1b[31mRed\x1b[0m\nalert"})
 	msg := runCmd(cmd)
 	stamped, ok := msg.(viewGenerationMsg)
 	if !ok {
@@ -157,16 +157,35 @@ func TestTopicRequestSanitizesAnUntrustedTitle(t *testing.T) {
 
 func TestTopicRequestWaitsForMailSourcesBeforeReading(t *testing.T) {
 	m := sizedModel()
-	updated, cmd := m.Update(TopicRequest{TopicID: 5511})
+	updated, cmd := m.Update(OpenRequest{TopicID: 5511})
 	m = updated.(model)
-	if cmd != nil || m.pendingTopic == nil {
-		t.Fatalf("topic started before mail sources loaded: cmd=%v pending=%v", cmd != nil, m.pendingTopic != nil)
+	if cmd != nil || m.pendingOpen == nil {
+		t.Fatalf("topic started before mail sources loaded: cmd=%v pending=%v", cmd != nil, m.pendingOpen != nil)
 	}
 
 	updated, cmd = m.Update(mailSourcesLoadedMsg{})
 	m = updated.(model)
-	if cmd == nil || m.pendingTopic != nil {
-		t.Fatalf("topic did not start after mail sources loaded: cmd=%v pending=%v", cmd != nil, m.pendingTopic != nil)
+	if cmd == nil || m.pendingOpen != nil {
+		t.Fatalf("topic did not start after mail sources loaded: cmd=%v pending=%v", cmd != nil, m.pendingOpen != nil)
+	}
+}
+
+func TestScreenerRequestWaitsForMailThenOpensTheScreener(t *testing.T) {
+	m := sizedModel()
+	m.section = sectionCalendar
+	m.activeView = m.calendarView
+
+	updated, cmd := m.Update(OpenRequest{Screener: true})
+	m = updated.(model)
+	if cmd != nil || m.pendingOpen == nil {
+		t.Fatalf("Screener opened before mail sources loaded: cmd=%v pending=%v", cmd != nil, m.pendingOpen != nil)
+	}
+
+	updated, cmd = m.Update(mailSourcesLoadedMsg{})
+	m = updated.(model)
+	if cmd == nil || m.pendingOpen != nil || m.section != sectionMail || m.activeView != m.screenerView {
+		t.Fatalf("Screener did not open after mail loaded: cmd=%v pending=%v section=%d view=%T",
+			cmd != nil, m.pendingOpen != nil, m.section, m.activeView)
 	}
 }
 

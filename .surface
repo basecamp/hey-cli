@@ -335,6 +335,7 @@ hey trash
 hey tui
 hey tui --instance
 hey tui --remote
+hey tui --screener
 hey tui --topic
 hey tui --topic-title
 hey unseen

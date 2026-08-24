@@ -247,31 +247,95 @@ func TestTopicRequestSwitchesToItsMailAccountBeforeOpening(t *testing.T) {
 	m.section = sectionCalendar
 	m.activeView = m.calendarView
 
-	updated, cmd := m.Update(TopicRequest{TopicID: 5511, AccountID: 2})
+	updated, cmd := m.Update(OpenRequest{TopicID: 5511, AccountID: 2})
 	m = updated.(model)
-	if cmd == nil || !m.mailAccountSwitching || m.pendingTopic == nil {
+	if cmd == nil || !m.mailAccountSwitching || m.pendingOpen == nil {
 		t.Fatal("topic request did not start its account switch")
 	}
 	switchMsg := cmd().(mailAccountSwitchedMsg)
 	updated, initCmd := m.Update(switchMsg)
 	m = updated.(model)
-	if initCmd == nil || m.mailAccount.id != 2 || m.pendingTopic == nil || m.section != sectionMail || m.activeView != m.mailView {
-		t.Fatalf("topic account switch did not start mail: account=%d pending=%v section=%d", m.mailAccount.id, m.pendingTopic != nil, m.section)
+	if initCmd == nil || m.mailAccount.id != 2 || m.pendingOpen == nil || m.section != sectionMail || m.activeView != m.mailView {
+		t.Fatalf("topic account switch did not start mail: account=%d pending=%v section=%d", m.mailAccount.id, m.pendingOpen != nil, m.section)
 	}
 
 	updated, openCmd := m.Update(mailSourcesLoadedMsg{})
 	m = updated.(model)
-	if openCmd == nil || m.pendingTopic != nil || m.section != sectionMail {
-		t.Fatalf("topic was not opened after mail loaded: pending=%v section=%d", m.pendingTopic != nil, m.section)
+	if openCmd == nil || m.pendingOpen != nil || m.section != sectionMail {
+		t.Fatalf("topic was not opened after mail loaded: pending=%v section=%d", m.pendingOpen != nil, m.section)
 	}
 
-	request := TopicRequest{TopicID: 6612, AccountID: 1}
-	m.pendingTopic = &request
+	request := OpenRequest{TopicID: 6612, AccountID: 1}
+	m.pendingOpen = &request
 	m.mailAccountsLoaded = false
 	updated, failCmd := m.Update(mailAccountsLoadedMsg{err: errors.New("identity unavailable")})
 	m = updated.(model)
-	if failCmd != nil || m.mailAccountsLoaded || m.pendingTopic == nil || m.pendingTopic.AccountID != 1 {
-		t.Fatalf("account discovery failure weakened the topic request: cmd=%v loaded=%v pending=%#v", failCmd != nil, m.mailAccountsLoaded, m.pendingTopic)
+	if failCmd != nil || m.mailAccountsLoaded || m.pendingOpen == nil || m.pendingOpen.AccountID != 1 {
+		t.Fatalf("account discovery failure weakened the topic request: cmd=%v loaded=%v pending=%#v", failCmd != nil, m.mailAccountsLoaded, m.pendingOpen)
+	}
+}
+
+func TestScreenerRequestSwitchesToItsMailAccountBeforeOpening(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"id":1,"accounts":[{"id":1,"status":"active"},{"id":2,"status":"active"}]}`)
+	}))
+	t.Cleanup(server.Close)
+	root := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "token"}, hey.WithMaxRetries(0))
+	m := newModelWithMailAccounts(root, root, "all", Watchers{})
+	m.mailAccountsLoaded = true
+	m.mailAccounts = []mailAccountChoice{{label: "All Accounts"}, {id: 2, label: "jane@company.example"}}
+
+	updated, switchCmd := m.Update(OpenRequest{Screener: true, AccountID: 2})
+	m = updated.(model)
+	if switchCmd == nil || !m.mailAccountSwitching || m.pendingOpen == nil {
+		t.Fatal("Screener request did not start its account switch")
+	}
+	updated, initCmd := m.Update(switchCmd().(mailAccountSwitchedMsg))
+	m = updated.(model)
+	if initCmd == nil || m.mailAccount.id != 2 || m.pendingOpen == nil {
+		t.Fatalf("Screener account switch did not start mail: account=%d pending=%v", m.mailAccount.id, m.pendingOpen != nil)
+	}
+
+	updated, openCmd := m.Update(mailSourcesLoadedMsg{})
+	m = updated.(model)
+	if openCmd == nil || m.pendingOpen != nil || m.section != sectionMail || m.activeView != m.screenerView {
+		t.Fatalf("Screener did not open after mail loaded: pending=%v section=%d view=%T",
+			m.pendingOpen != nil, m.section, m.activeView)
+	}
+}
+
+func TestOpenRequestShowsAnUnavailableAccount(t *testing.T) {
+	m := newModel()
+	m.mailAccountsLoaded = true
+	m.mailSourcesLoaded = true
+
+	updated, cmd := m.Update(OpenRequest{Screener: true, AccountID: 2})
+	m = updated.(model)
+	if cmd == nil || m.pendingOpen != nil || m.mailAccountErr != "Mail account 2 is not available" {
+		t.Fatalf("unavailable account was not shown: cmd=%v pending=%v error=%q",
+			cmd != nil, m.pendingOpen != nil, m.mailAccountErr)
+	}
+	if _, ok := cmd().(notifyMsg); !ok {
+		t.Fatal("unavailable account did not produce a visible notice")
+	}
+}
+
+func TestOpenRequestShowsAnAccountSwitchFailure(t *testing.T) {
+	m := newModel()
+	request := OpenRequest{Screener: true, AccountID: 2}
+	m.pendingOpen = &request
+	m.mailAccountSwitching = true
+	m.mailAccountRequestID = 7
+
+	updated, cmd := m.Update(mailAccountSwitchedMsg{requestID: 7, err: errors.New("identity unavailable")})
+	m = updated.(model)
+	if cmd == nil || m.pendingOpen != nil || m.mailAccountErr == "" {
+		t.Fatalf("failed account switch was not shown: cmd=%v pending=%v error=%q",
+			cmd != nil, m.pendingOpen != nil, m.mailAccountErr)
+	}
+	if _, ok := cmd().(notifyMsg); !ok {
+		t.Fatal("failed account switch did not produce a visible notice")
 	}
 }
 
@@ -281,15 +345,15 @@ func TestNewCurrentAccountTopicInvalidatesPendingAccountSwitch(t *testing.T) {
 	m.mailSourcesLoaded = true
 	m.mailAccountRequestID = 41
 	m.mailAccountSwitching = true
-	pending := TopicRequest{TopicID: 5511, AccountID: 2}
-	m.pendingTopic = &pending
+	pending := OpenRequest{TopicID: 5511, AccountID: 2}
+	m.pendingOpen = &pending
 	oldMailView := m.mailView
 
-	updated, openCmd := m.Update(TopicRequest{TopicID: 6612, AccountID: 1})
+	updated, openCmd := m.Update(OpenRequest{TopicID: 6612, AccountID: 1})
 	m = updated.(model)
-	if openCmd == nil || m.mailAccountSwitching || m.mailAccountRequestID != 42 || m.pendingTopic != nil {
+	if openCmd == nil || m.mailAccountSwitching || m.mailAccountRequestID != 42 || m.pendingOpen != nil {
 		t.Fatalf("new topic did not replace the pending switch: cmd=%v switching=%v request=%d pending=%v",
-			openCmd != nil, m.mailAccountSwitching, m.mailAccountRequestID, m.pendingTopic != nil)
+			openCmd != nil, m.mailAccountSwitching, m.mailAccountRequestID, m.pendingOpen != nil)
 	}
 
 	updated, staleCmd := m.Update(mailAccountSwitchedMsg{
@@ -310,11 +374,11 @@ func TestTopicRequestDoesNotDiscardAnAccountSensitiveAction(t *testing.T) {
 	m.mailView.pendingMutations = 1
 
 	for _, accountID := range []int64{2, 0} {
-		updated, cmd := m.Update(TopicRequest{TopicID: 5511, AccountID: accountID})
+		updated, cmd := m.Update(OpenRequest{TopicID: 5511, AccountID: accountID})
 		m = updated.(model)
-		if cmd == nil || m.mailAccountSwitching || m.pendingTopic != nil || m.section != sectionMail {
+		if cmd == nil || m.mailAccountSwitching || m.pendingOpen != nil || m.section != sectionMail {
 			t.Fatalf("account %d topic request disturbed a pending action: switching=%v pending=%v section=%d",
-				accountID, m.mailAccountSwitching, m.pendingTopic != nil, m.section)
+				accountID, m.mailAccountSwitching, m.pendingOpen != nil, m.section)
 		}
 		if _, ok := cmd().(notifyMsg); !ok {
 			t.Fatalf("blocked account %d topic request did not explain why", accountID)
@@ -333,11 +397,11 @@ func TestTopicRequestDoesNotDiscardAnotherSectionsForm(t *testing.T) {
 		t.Fatal("contact form did not open")
 	}
 
-	updated, cmd := m.Update(TopicRequest{TopicID: 5511, AccountID: 2})
+	updated, cmd := m.Update(OpenRequest{TopicID: 5511, AccountID: 2})
 	m = updated.(model)
-	if cmd == nil || m.mailAccountSwitching || m.pendingTopic != nil || m.section != sectionContacts || m.activeView != m.contactsView || !m.contactsView.CapturingInput() {
+	if cmd == nil || m.mailAccountSwitching || m.pendingOpen != nil || m.section != sectionContacts || m.activeView != m.contactsView || !m.contactsView.CapturingInput() {
 		t.Fatalf("topic request discarded the contact form: switching=%v pending=%v section=%d capturing=%v",
-			m.mailAccountSwitching, m.pendingTopic != nil, m.section, m.contactsView.CapturingInput())
+			m.mailAccountSwitching, m.pendingOpen != nil, m.section, m.contactsView.CapturingInput())
 	}
 	if _, ok := cmd().(notifyMsg); !ok {
 		t.Fatal("blocked topic request did not explain why")
