@@ -29,24 +29,27 @@ func newBubbleCommand() *bubbleCommand {
 type bubbleUpCommand struct {
 	cmd *cobra.Command
 	now bool
+	on  string
 }
 
 func newBubbleUpCommand() *bubbleUpCommand {
 	bubbleUpCommand := &bubbleUpCommand{}
 	bubbleUpCommand.cmd = &cobra.Command{
-		Use:   "up <box-item-id>... --now",
-		Short: "Bubble email threads up now",
-		Long:  "Bubble one or more email threads up to the top of the Imbox right away.",
+		Use:   "up <box-item-id>... (--now | --on <date>)",
+		Short: "Bubble email threads up",
+		Long:  "Bubble one or more email threads up to the top of the Imbox, right away with --now or at HEY's morning hour of a date with --on.",
 		Example: `  hey bubble up 12345 --now
-  hey bubble up 12345 67890 --now`,
+  hey bubble up 12345 67890 --now
+  hey bubble up 12345 --on 2026-09-04`,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts one or more box item IDs from hey box view output. --now is required; scheduled bubble-up is not supported yet.",
+			"agent_notes": "Accepts one or more box item IDs from hey box view output. Exactly one of --now and --on is required. --on takes a YYYY-MM-DD date; HEY bubbles the threads up at its morning hour of that day.",
 		},
 		RunE: bubbleUpCommand.run,
 		Args: usageMinOneArg(),
 	}
 
-	bubbleUpCommand.cmd.Flags().BoolVar(&bubbleUpCommand.now, "now", false, "Bubble the threads up right away (required)")
+	bubbleUpCommand.cmd.Flags().BoolVar(&bubbleUpCommand.now, "now", false, "Bubble the threads up right away")
+	bubbleUpCommand.cmd.Flags().StringVar(&bubbleUpCommand.on, "on", "", "Bubble the threads up on a date (YYYY-MM-DD)")
 
 	return bubbleUpCommand
 }
@@ -55,8 +58,11 @@ func (c *bubbleUpCommand) run(cmd *cobra.Command, args []string) error {
 	if err := requireAuth(); err != nil {
 		return err
 	}
-	if !c.now {
-		return apierr.ErrUsage("scheduled bubble-up is not supported yet (use --now)")
+	if c.now && c.on != "" {
+		return apierr.ErrUsage("--now and --on are mutually exclusive")
+	}
+	if !c.now && c.on == "" {
+		return apierr.ErrUsage("either --now or --on <date> is required")
 	}
 
 	ids, err := parseIntArgs(args)
@@ -64,11 +70,22 @@ func (c *bubbleUpCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := sdk.Postings().BubbleUpNow(cmd.Context(), ids...); err != nil {
-		return apierr.FromSDK(err)
+	if c.now {
+		if err = sdk.Postings().BubbleUpNow(cmd.Context(), ids...); err != nil {
+			return apierr.FromSDK(err)
+		}
+		return writeMutation(cmd, fmt.Sprintf("%d %s bubbled up", len(ids), threadNoun(len(ids))), nil)
 	}
 
-	return writeMutation(cmd, fmt.Sprintf("%d %s bubbled up", len(ids), threadNoun(len(ids))), nil)
+	on, err := parseDateArg("on date", c.on)
+	if err != nil {
+		return err
+	}
+
+	if err := sdk.Postings().ScheduleBubbleUp(cmd.Context(), on.Format(dateLayout), ids...); err != nil {
+		return apierr.FromSDK(err)
+	}
+	return writeMutation(cmd, fmt.Sprintf("%d %s will bubble up on %s", len(ids), threadNoun(len(ids)), on.Format(dateLayout)), nil)
 }
 
 type bubblePopCommand struct {

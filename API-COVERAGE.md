@@ -82,6 +82,7 @@ which is what `Entries().ListDraftsPage` and `hey draft list --page` exist for.
 | `/postings/mutings.json` | POST | SDK `Postings().Mute` | `hey ignore <id>`, TUI `-` | covered |
 | `/postings/mutings.json` | DELETE | SDK `Postings().Unmute` | `hey stop-ignoring <id>`, TUI `+` | covered |
 | `/postings/bulk_bubble_up_now.json` | POST | SDK `Postings().BubbleUpNow` | `hey bubble up <id> --now` | covered |
+| `/postings/bubble_up.json` | POST | SDK `Postings().ScheduleBubbleUp` | `hey bubble up <id> --on <date>` | covered |
 | `/postings/bubble_up.json` | DELETE | SDK `Postings().CancelBubbleUp` | `hey bubble pop <id>` | covered |
 | `/calendar/events.json` | POST | SDK `CalendarEvents().Create` | `hey event add`, Calendar TUI `a` | covered |
 | `/calendar/events/{id}.json` | PATCH | SDK `CalendarEvents().Update` | `hey event edit <id>`, Calendar TUI `e` | covered: a write replaces rather than patches, so the caller reads the event and sends back what it keeps |

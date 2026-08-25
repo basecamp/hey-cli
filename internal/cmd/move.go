@@ -97,7 +97,7 @@ func resolveMoveDestination(ctx context.Context, nameOrID string) (*generated.Bo
 
 func validateMoveDestination(box *generated.Box) (*generated.Box, error) {
 	if strings.EqualFold(box.Kind, hey.BoxKindBubbleUp) {
-		return nil, apierr.ErrUsageHint("Bubble Up is not a move destination", "Run: hey bubble up <box-item-id> --now")
+		return nil, apierr.ErrUsageHint("Bubble Up is not a move destination", "Run: hey bubble up <box-item-id> --now (or --on <date>)")
 	}
 	return box, nil
 }

@@ -18,6 +18,8 @@ type recordedBubble struct {
 	method     string
 	path       string
 	postingIDs []int64
+	slot       string
+	date       string
 	status     int
 	requests   int
 }
@@ -30,15 +32,26 @@ func bubbleServer(t *testing.T) (*httptest.Server, *recordedBubble) {
 		recorded.method = r.Method
 		recorded.path = r.URL.Path
 
-		switch r.URL.Path {
-		case "/postings/bulk_bubble_up_now.json":
+		switch {
+		case r.URL.Path == "/postings/bulk_bubble_up_now.json":
 			var body struct {
 				PostingIDs []int64 `json:"posting_ids"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			recorded.postingIDs = body.PostingIDs
 			w.WriteHeader(recorded.status)
-		case "/postings/bubble_up.json":
+		case r.URL.Path == "/postings/bubble_up.json" && r.Method == http.MethodPost:
+			var body struct {
+				PostingIDs []int64 `json:"posting_ids"`
+				Slot       string  `json:"slot"`
+				Date       string  `json:"date"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			recorded.postingIDs = body.PostingIDs
+			recorded.slot = body.Slot
+			recorded.date = body.Date
+			w.WriteHeader(recorded.status)
+		case r.URL.Path == "/postings/bubble_up.json":
 			for _, part := range strings.Split(r.URL.Query().Get("posting_ids"), ",") {
 				id, err := strconv.ParseInt(part, 10, 64)
 				if err != nil {
@@ -82,16 +95,21 @@ func runBubble(t *testing.T, server *httptest.Server, args ...string) (output.Re
 
 func TestBubbleUpAndPop(t *testing.T) {
 	tests := []struct {
-		name    string
-		args    []string
-		method  string
-		path    string
-		summary string
+		name     string
+		args     []string
+		method   string
+		path     string
+		wantIDs  []int64
+		wantSlot string
+		wantDate string
+		summary  string
 	}{
-		{"up one", []string{"up", "12345", "--now"}, http.MethodPost, "/postings/bulk_bubble_up_now.json", "1 thread bubbled up"},
-		{"up multiple", []string{"up", "12345", "67890", "--now"}, http.MethodPost, "/postings/bulk_bubble_up_now.json", "2 threads bubbled up"},
-		{"pop one", []string{"pop", "12345"}, http.MethodDelete, "/postings/bubble_up.json", "1 thread no longer bubbled up"},
-		{"pop multiple", []string{"pop", "12345", "67890"}, http.MethodDelete, "/postings/bubble_up.json", "2 threads no longer bubbled up"},
+		{"up one now", []string{"up", "12345", "--now"}, http.MethodPost, "/postings/bulk_bubble_up_now.json", []int64{12345}, "", "", "1 thread bubbled up"},
+		{"up multiple now", []string{"up", "12345", "67890", "--now"}, http.MethodPost, "/postings/bulk_bubble_up_now.json", []int64{12345, 67890}, "", "", "2 threads bubbled up"},
+		{"up one on a date", []string{"up", "12345", "--on", "2026-09-04"}, http.MethodPost, "/postings/bubble_up.json", []int64{12345}, "custom", "2026-09-04", "1 thread will bubble up on 2026-09-04"},
+		{"up multiple on a date", []string{"up", "12345", "67890", "--on", "2026-09-04"}, http.MethodPost, "/postings/bubble_up.json", []int64{12345, 67890}, "custom", "2026-09-04", "2 threads will bubble up on 2026-09-04"},
+		{"pop one", []string{"pop", "12345"}, http.MethodDelete, "/postings/bubble_up.json", []int64{12345}, "", "", "1 thread no longer bubbled up"},
+		{"pop multiple", []string{"pop", "12345", "67890"}, http.MethodDelete, "/postings/bubble_up.json", []int64{12345, 67890}, "", "", "2 threads no longer bubbled up"},
 	}
 
 	for _, tt := range tests {
@@ -104,17 +122,19 @@ func TestBubbleUpAndPop(t *testing.T) {
 			if recorded.method != tt.method || recorded.path != tt.path {
 				t.Errorf("request = %s %s, want %s %s", recorded.method, recorded.path, tt.method, tt.path)
 			}
-			ids := tt.args[1 : len(tt.args)-1]
-			if tt.args[0] == "pop" {
-				ids = tt.args[1:]
+			if len(recorded.postingIDs) != len(tt.wantIDs) {
+				t.Fatalf("posting_ids = %v, want %v", recorded.postingIDs, tt.wantIDs)
 			}
-			if len(recorded.postingIDs) != len(ids) {
-				t.Fatalf("posting_ids = %v, want %d IDs", recorded.postingIDs, len(ids))
-			}
-			for i, want := range []int64{12345, 67890}[:len(ids)] {
+			for i, want := range tt.wantIDs {
 				if recorded.postingIDs[i] != want {
 					t.Errorf("posting_ids[%d] = %d, want %d", i, recorded.postingIDs[i], want)
 				}
+			}
+			if recorded.slot != tt.wantSlot {
+				t.Errorf("slot = %q, want %q", recorded.slot, tt.wantSlot)
+			}
+			if recorded.date != tt.wantDate {
+				t.Errorf("date = %q, want %q", recorded.date, tt.wantDate)
 			}
 			if resp.Summary != tt.summary {
 				t.Errorf("summary = %q, want %q", resp.Summary, tt.summary)
@@ -123,18 +143,45 @@ func TestBubbleUpAndPop(t *testing.T) {
 	}
 }
 
-func TestBubbleUpRequiresNow(t *testing.T) {
+func TestBubbleUpRequiresExactlyOneOfNowAndOn(t *testing.T) {
+	tests := map[string]struct {
+		args    []string
+		message string
+	}{
+		"neither": {[]string{"up", "12345"}, "either --now or --on <date> is required"},
+		"both":    {[]string{"up", "12345", "--now", "--on", "2026-09-04"}, "--now and --on are mutually exclusive"},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			server, recorded := bubbleServer(t)
+			_, err := runBubble(t, server, tt.args...)
+			var cliErr *apierr.Error
+			if !errors.As(err, &cliErr) || cliErr.Code != "usage" {
+				t.Fatalf("bubble up should produce a usage error, got %v", err)
+			}
+			if cliErr.Message != tt.message {
+				t.Errorf("message = %q, want %q", cliErr.Message, tt.message)
+			}
+			if recorded.requests != 0 {
+				t.Errorf("usage error made %d requests", recorded.requests)
+			}
+		})
+	}
+}
+
+func TestBubbleUpRejectsInvalidDateBeforeRequest(t *testing.T) {
 	server, recorded := bubbleServer(t)
-	_, err := runBubble(t, server, "up", "12345")
+	_, err := runBubble(t, server, "up", "12345", "--on", "next tuesday")
 	var cliErr *apierr.Error
 	if !errors.As(err, &cliErr) || cliErr.Code != "usage" {
-		t.Fatalf("bubble up without --now should produce a usage error, got %v", err)
+		t.Fatalf("invalid date should produce a usage error, got %v", err)
 	}
-	if !strings.Contains(cliErr.Message, "scheduled bubble-up is not supported yet") {
-		t.Errorf("message = %q, want it to say scheduled bubble-up is not supported yet", cliErr.Message)
+	if !strings.Contains(cliErr.Message, "invalid on date") {
+		t.Errorf("message = %q, want it to name the on date", cliErr.Message)
 	}
 	if recorded.requests != 0 {
-		t.Errorf("missing --now made %d requests", recorded.requests)
+		t.Errorf("invalid date made %d requests", recorded.requests)
 	}
 }
 
@@ -176,8 +223,9 @@ func TestBubbleUpAndPopRejectInvalidIDsBeforeRequest(t *testing.T) {
 
 func TestBubbleUpAndPopReportServerFailures(t *testing.T) {
 	tests := map[string][]string{
-		"up":  {"up", "12345", "--now"},
-		"pop": {"pop", "12345"},
+		"up now":       {"up", "12345", "--now"},
+		"up on a date": {"up", "12345", "--on", "2026-09-04"},
+		"pop":          {"pop", "12345"},
 	}
 
 	for subcommand, args := range tests {

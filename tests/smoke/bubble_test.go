@@ -3,6 +3,7 @@ package smoke_test
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestBubbleUpAndPop(t *testing.T) {
@@ -30,6 +31,17 @@ func TestBubbleUpAndPop(t *testing.T) {
 	}
 	assertContains(t, upResp.Summary, "bubbled up")
 
+	onDate := time.Now().AddDate(0, 0, 7).Format("2006-01-02")
+	stdout, stderr, code = hey(t, "bubble", "up", postingID, "--on", onDate, "--json")
+	if code != 0 {
+		skipf(t, "bubble up --on failed (exit %d): %s", code, stderr)
+	}
+	var onResp Response
+	if err := json.Unmarshal([]byte(stdout), &onResp); err != nil {
+		t.Fatalf("failed to parse bubble up --on response: %v", err)
+	}
+	assertContains(t, onResp.Summary, "will bubble up on "+onDate)
+
 	stdout, stderr, code = hey(t, "bubble", "pop", postingID, "--json")
 	if code != 0 {
 		skipf(t, "bubble pop failed (exit %d): %s", code, stderr)
@@ -41,8 +53,9 @@ func TestBubbleUpAndPop(t *testing.T) {
 	assertContains(t, popResp.Summary, "no longer bubbled up")
 }
 
-func TestBubbleUpRequiresNow(t *testing.T) {
+func TestBubbleUpRequiresExactlyOneOfNowAndOn(t *testing.T) {
 	heyFail(t, "bubble", "up", "12345")
+	heyFail(t, "bubble", "up", "12345", "--now", "--on", "2026-09-04")
 }
 
 func TestBubbleUpInvalidID(t *testing.T) {

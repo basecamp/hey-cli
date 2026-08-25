@@ -220,6 +220,7 @@ notice on stderr. Both need list data, so they work on `hey box list`, `hey box 
 | Mark as unseen | `hey unseen 12345` |
 | Move email threads | `hey move 12345 --to feed` |
 | Bubble a thread up now | `hey bubble up 12345 --now` |
+| Bubble a thread up on a date | `hey bubble up 12345 --on 2026-09-04` |
 | Cancel a bubble-up | `hey bubble pop 12345` |
 | Move email threads to Trash | `hey trash 12345` |
 | Mark email threads as spam | `hey spam 12345` |
@@ -526,10 +527,11 @@ Takes box item IDs (the `id` field from `hey box view --json`). `--to` accepts a
 ```bash
 hey bubble up 12345 --now                     # Bubble a thread up to the top of the Imbox
 hey bubble up 12345 67890 --now               # Bubble multiple threads up
+hey bubble up 12345 --on 2026-09-04           # Bubble a thread up on a date
 hey bubble pop 12345                          # Cancel a thread's bubble-up
 ```
 
-Takes box item IDs (the `id` field from `hey box view --json`). `--now` is required for `hey bubble up`; a scheduled bubble-up is not supported yet.
+Takes box item IDs (the `id` field from `hey box view --json`). `hey bubble up` requires exactly one of `--now` and `--on`. `--on` takes a YYYY-MM-DD date; HEY bubbles the threads up at its morning hour of that day.
 
 ### Email - Trash and Spam
 
