@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
@@ -20,6 +22,7 @@ type recordedBubble struct {
 	postingIDs []int64
 	slot       string
 	date       string
+	dateSent   bool
 	status     int
 	requests   int
 }
@@ -41,15 +44,19 @@ func bubbleServer(t *testing.T) (*httptest.Server, *recordedBubble) {
 			recorded.postingIDs = body.PostingIDs
 			w.WriteHeader(recorded.status)
 		case r.URL.Path == "/postings/bubble_up.json" && r.Method == http.MethodPost:
+			raw, _ := io.ReadAll(r.Body)
 			var body struct {
 				PostingIDs []int64 `json:"posting_ids"`
 				Slot       string  `json:"slot"`
 				Date       string  `json:"date"`
 			}
-			_ = json.NewDecoder(r.Body).Decode(&body)
+			_ = json.Unmarshal(raw, &body)
+			var keys map[string]json.RawMessage
+			_ = json.Unmarshal(raw, &keys)
 			recorded.postingIDs = body.PostingIDs
 			recorded.slot = body.Slot
 			recorded.date = body.Date
+			_, recorded.dateSent = keys["date"]
 			w.WriteHeader(recorded.status)
 		case r.URL.Path == "/postings/bubble_up.json":
 			for _, part := range strings.Split(r.URL.Query().Get("posting_ids"), ",") {
@@ -94,6 +101,7 @@ func runBubble(t *testing.T, server *httptest.Server, args ...string) (output.Re
 }
 
 func TestBubbleUpAndPop(t *testing.T) {
+	today := time.Now().Format("2006-01-02")
 	tests := []struct {
 		name     string
 		args     []string
@@ -108,6 +116,11 @@ func TestBubbleUpAndPop(t *testing.T) {
 		{"up multiple now", []string{"up", "12345", "67890", "--now"}, http.MethodPost, "/postings/bulk_bubble_up_now.json", []int64{12345, 67890}, "", "", "2 threads bubbled up"},
 		{"up one on a date", []string{"up", "12345", "--on", "2026-09-04"}, http.MethodPost, "/postings/bubble_up.json", []int64{12345}, "custom", "2026-09-04", "1 thread will bubble up on 2026-09-04"},
 		{"up multiple on a date", []string{"up", "12345", "67890", "--on", "2026-09-04"}, http.MethodPost, "/postings/bubble_up.json", []int64{12345, 67890}, "custom", "2026-09-04", "2 threads will bubble up on 2026-09-04"},
+		{"up one on today", []string{"up", "12345", "--on", today}, http.MethodPost, "/postings/bubble_up.json", []int64{12345}, "today", "", "1 thread will bubble up this evening"},
+		{"up multiple on today", []string{"up", "12345", "67890", "--on", today}, http.MethodPost, "/postings/bubble_up.json", []int64{12345, 67890}, "today", "", "2 threads will bubble up this evening"},
+		{"up tomorrow", []string{"up", "12345", "--tomorrow"}, http.MethodPost, "/postings/bubble_up.json", []int64{12345}, "tomorrow", "", "1 thread will bubble up tomorrow morning"},
+		{"up weekend", []string{"up", "12345", "67890", "--weekend"}, http.MethodPost, "/postings/bubble_up.json", []int64{12345, 67890}, "weekend", "", "2 threads will bubble up Saturday morning"},
+		{"up next week", []string{"up", "12345", "--next-week"}, http.MethodPost, "/postings/bubble_up.json", []int64{12345}, "next_week", "", "1 thread will bubble up Monday morning"},
 		{"pop one", []string{"pop", "12345"}, http.MethodDelete, "/postings/bubble_up.json", []int64{12345}, "", "", "1 thread no longer bubbled up"},
 		{"pop multiple", []string{"pop", "12345", "67890"}, http.MethodDelete, "/postings/bubble_up.json", []int64{12345, 67890}, "", "", "2 threads no longer bubbled up"},
 	}
@@ -136,6 +149,9 @@ func TestBubbleUpAndPop(t *testing.T) {
 			if recorded.date != tt.wantDate {
 				t.Errorf("date = %q, want %q", recorded.date, tt.wantDate)
 			}
+			if recorded.dateSent != (tt.wantDate != "") {
+				t.Errorf("date sent = %v, want %v", recorded.dateSent, tt.wantDate != "")
+			}
 			if resp.Summary != tt.summary {
 				t.Errorf("summary = %q, want %q", resp.Summary, tt.summary)
 			}
@@ -143,13 +159,17 @@ func TestBubbleUpAndPop(t *testing.T) {
 	}
 }
 
-func TestBubbleUpRequiresExactlyOneOfNowAndOn(t *testing.T) {
+func TestBubbleUpRequiresExactlyOneSchedule(t *testing.T) {
+	exclusive := "--now, --on, --tomorrow, --weekend and --next-week are mutually exclusive"
 	tests := map[string]struct {
 		args    []string
 		message string
 	}{
-		"neither": {[]string{"up", "12345"}, "either --now or --on <date> is required"},
-		"both":    {[]string{"up", "12345", "--now", "--on", "2026-09-04"}, "--now and --on are mutually exclusive"},
+		"none":                  {[]string{"up", "12345"}, "one of --now, --on <date>, --tomorrow, --weekend or --next-week is required"},
+		"now and on":            {[]string{"up", "12345", "--now", "--on", "2026-09-04"}, exclusive},
+		"now and tomorrow":      {[]string{"up", "12345", "--now", "--tomorrow"}, exclusive},
+		"on and weekend":        {[]string{"up", "12345", "--on", "2026-09-04", "--weekend"}, exclusive},
+		"weekend and next-week": {[]string{"up", "12345", "--weekend", "--next-week"}, exclusive},
 	}
 
 	for name, tt := range tests {
@@ -225,6 +245,7 @@ func TestBubbleUpAndPopReportServerFailures(t *testing.T) {
 	tests := map[string][]string{
 		"up now":       {"up", "12345", "--now"},
 		"up on a date": {"up", "12345", "--on", "2026-09-04"},
+		"up tomorrow":  {"up", "12345", "--tomorrow"},
 		"pop":          {"pop", "12345"},
 	}
 

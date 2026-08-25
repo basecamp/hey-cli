@@ -46,8 +46,11 @@ hey box view --page
 hey bubble
 hey bubble pop
 hey bubble up
+hey bubble up --next-week
 hey bubble up --now
 hey bubble up --on
+hey bubble up --tomorrow
+hey bubble up --weekend
 hey bulk-reply
 hey bulk-reply preview
 hey bulk-reply send

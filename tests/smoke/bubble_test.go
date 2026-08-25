@@ -42,6 +42,16 @@ func TestBubbleUpAndPop(t *testing.T) {
 	}
 	assertContains(t, onResp.Summary, "will bubble up on "+onDate)
 
+	stdout, stderr, code = hey(t, "bubble", "up", postingID, "--tomorrow", "--json")
+	if code != 0 {
+		skipf(t, "bubble up --tomorrow failed (exit %d): %s", code, stderr)
+	}
+	var tomorrowResp Response
+	if err := json.Unmarshal([]byte(stdout), &tomorrowResp); err != nil {
+		t.Fatalf("failed to parse bubble up --tomorrow response: %v", err)
+	}
+	assertContains(t, tomorrowResp.Summary, "will bubble up tomorrow morning")
+
 	stdout, stderr, code = hey(t, "bubble", "pop", postingID, "--json")
 	if code != 0 {
 		skipf(t, "bubble pop failed (exit %d): %s", code, stderr)
@@ -53,9 +63,10 @@ func TestBubbleUpAndPop(t *testing.T) {
 	assertContains(t, popResp.Summary, "no longer bubbled up")
 }
 
-func TestBubbleUpRequiresExactlyOneOfNowAndOn(t *testing.T) {
+func TestBubbleUpRequiresExactlyOneSchedule(t *testing.T) {
 	heyFail(t, "bubble", "up", "12345")
 	heyFail(t, "bubble", "up", "12345", "--now", "--on", "2026-09-04")
+	heyFail(t, "bubble", "up", "12345", "--weekend", "--next-week")
 }
 
 func TestBubbleUpInvalidID(t *testing.T) {

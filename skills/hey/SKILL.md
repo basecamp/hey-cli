@@ -221,6 +221,7 @@ notice on stderr. Both need list data, so they work on `hey box list`, `hey box 
 | Move email threads | `hey move 12345 --to feed` |
 | Bubble a thread up now | `hey bubble up 12345 --now` |
 | Bubble a thread up on a date | `hey bubble up 12345 --on 2026-09-04` |
+| Bubble a thread up this weekend | `hey bubble up 12345 --weekend` |
 | Cancel a bubble-up | `hey bubble pop 12345` |
 | Move email threads to Trash | `hey trash 12345` |
 | Mark email threads as spam | `hey spam 12345` |
@@ -528,10 +529,13 @@ Takes box item IDs (the `id` field from `hey box view --json`). `--to` accepts a
 hey bubble up 12345 --now                     # Bubble a thread up to the top of the Imbox
 hey bubble up 12345 67890 --now               # Bubble multiple threads up
 hey bubble up 12345 --on 2026-09-04           # Bubble a thread up on a date
+hey bubble up 12345 --tomorrow                # Bubble a thread up tomorrow morning
+hey bubble up 12345 --weekend                 # Bubble a thread up Saturday morning
+hey bubble up 12345 --next-week               # Bubble a thread up Monday morning
 hey bubble pop 12345                          # Cancel a thread's bubble-up
 ```
 
-Takes box item IDs (the `id` field from `hey box view --json`). `hey bubble up` requires exactly one of `--now` and `--on`. `--on` takes a YYYY-MM-DD date; HEY bubbles the threads up at its morning hour of that day.
+Takes box item IDs (the `id` field from `hey box view --json`). `hey bubble up` requires exactly one of `--now`, `--on`, `--tomorrow`, `--weekend`, and `--next-week`. `--on` takes a YYYY-MM-DD date; HEY bubbles the threads up at its morning hour of that day, or at its evening hour (18:00) when the date is today.
 
 ### Email - Trash and Spam
 
