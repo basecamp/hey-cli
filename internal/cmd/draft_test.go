@@ -283,8 +283,6 @@ func TestDraftEditPreservesAScheduleExactly(t *testing.T) {
 	}
 }
 
-// --on is validated against what it advertises before anything is fetched or written.
-
 // A schedule set from a HEY app on a fractional-offset clock sits between the whole
 // UTC hours the API can express. An edit must refuse rather than move the delivery —
 // and must refuse before writing anything.
