@@ -144,6 +144,50 @@ func TestSeenInvalidID(t *testing.T) {
 	}
 }
 
+func TestSeenNonPositiveID(t *testing.T) {
+	server := seenServer(t)
+	defer server.Close()
+
+	for _, arg := range []string{"0", "-12345"} {
+		_, err := runSeen(t, server, "--", arg)
+		if err == nil {
+			t.Fatalf("expected error for ID %q", arg)
+		}
+		if err.Error() != "invalid ID: "+arg {
+			t.Errorf("error = %q, want %q", err, "invalid ID: "+arg)
+		}
+	}
+}
+
+func TestSeenDuplicateIDs(t *testing.T) {
+	server := seenServer(t)
+	defer server.Close()
+
+	resp, err := runSeen(t, server, "12345", "67890", "12345")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if resp.Summary != "2 threads marked as seen" {
+		t.Errorf("summary = %q, want %q", resp.Summary, "2 threads marked as seen")
+	}
+}
+
+func TestParseIntArgsDropsDuplicatesPreservingOrder(t *testing.T) {
+	ids, err := parseIntArgs([]string{"67890", "12345", "67890", "12345", "24680"})
+	if err != nil {
+		t.Fatalf("parseIntArgs: %v", err)
+	}
+	want := []int64{67890, 12345, 24680}
+	if len(ids) != len(want) {
+		t.Fatalf("ids = %v, want %v", ids, want)
+	}
+	for i := range want {
+		if ids[i] != want[i] {
+			t.Fatalf("ids = %v, want %v", ids, want)
+		}
+	}
+}
+
 func TestUnseenSingle(t *testing.T) {
 	server := seenServer(t)
 	defer server.Close()

@@ -89,11 +89,16 @@ func (c *unseenCommand) run(cmd *cobra.Command, args []string) error {
 
 func parseIntArgs(args []string) ([]int64, error) {
 	ids := make([]int64, 0, len(args))
+	seen := make(map[int64]struct{}, len(args))
 	for _, arg := range args {
 		id, err := strconv.ParseInt(arg, 10, 64)
-		if err != nil {
+		if err != nil || id <= 0 {
 			return nil, apierr.ErrUsage(fmt.Sprintf("invalid ID: %s", arg))
 		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
 		ids = append(ids, id)
 	}
 	return ids, nil
