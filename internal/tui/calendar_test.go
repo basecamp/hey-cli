@@ -523,10 +523,13 @@ func TestDaysBetweenIgnoresDaylightSavingShifts(t *testing.T) {
 }
 
 func TestDayLabelsCoverTodosAndHabits(t *testing.T) {
+	// atLocal, not at: a label belongs to the day the reader sees, so a fixture
+	// pinned to a UTC clock would slide to a neighbouring day on a zone behind UTC
+	// (a midnight-UTC todo is the evening before, US Eastern) and collide.
 	labels := dayLabelsFromRecordings(
-		[]Recording{{ID: 200, StartsAt: at("2025-03-01T09:00:00Z"), Type: "CalendarEvent", Label: "Launch day"}},
-		[]Recording{{ID: 203, StartsAt: at("2025-03-02T00:00:00Z"), Type: "CalendarTodo", Label: "Moving day"}},
-		[]Recording{{ID: 202, StartsAt: at("2025-03-03T06:00:00Z"), Type: "Habit", Label: "Rest day"}},
+		[]Recording{{ID: 200, StartsAt: atLocal("2025-03-01T09:00:00"), Type: "CalendarEvent", Label: "Launch day"}},
+		[]Recording{{ID: 203, StartsAt: atLocal("2025-03-02T00:00:00"), Type: "CalendarTodo", Label: "Moving day"}},
+		[]Recording{{ID: 202, StartsAt: atLocal("2025-03-03T06:00:00"), Type: "Habit", Label: "Rest day"}},
 	)
 	want := map[string]string{
 		"2025-03-01": "Launch day",
@@ -1335,8 +1338,11 @@ func weekView(t *testing.T, habits, completions []Recording) []string {
 	return strings.Split(stripANSI(out), "\n")
 }
 
+// habitDone pins the completion to the reader's own midnight, not UTC's: the week
+// buckets completions by local day, so a UTC-midnight fixture would land on the
+// evening before anywhere behind UTC and put the icons in the wrong column.
 func habitDone(habitID int64, day string) Recording {
-	return Recording{Type: "Calendar::Habit::Completion", ParentID: habitID, StartsAt: at(day + "T00:00:00Z")}
+	return Recording{Type: "Calendar::Habit::Completion", ParentID: habitID, StartsAt: atLocal(day + "T00:00:00")}
 }
 
 // The week says what was kept each day, as icons — it has room for seven days of those and

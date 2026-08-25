@@ -17,12 +17,26 @@ var (
 var fromBuildInfo bool
 
 func init() {
-	if Version == "dev" {
-		if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
-			Version = strings.TrimPrefix(info.Main.Version, "v")
-			fromBuildInfo = true
+	if Version != "dev" {
+		return
+	}
+	info, ok := debug.ReadBuildInfo()
+	if !ok || info.Main.Version == "" || info.Main.Version == "(devel)" {
+		return
+	}
+	// A build from a source checkout is still a dev build. Go stamps such a build's
+	// main-module version with a pseudo-version derived from the checkout's VCS
+	// state, which is exactly the shape a `go install module@version` build reports —
+	// the difference is that only the checkout build carries the VCS settings. So a
+	// version with vcs metadata behind it stays "dev", and only a true module build
+	// (no checkout, no vcs.revision) adopts what the toolchain recorded.
+	for _, setting := range info.Settings {
+		if setting.Key == "vcs.revision" {
+			return
 		}
 	}
+	Version = strings.TrimPrefix(info.Main.Version, "v")
+	fromBuildInfo = true
 }
 
 // Full returns the full version string for display.
