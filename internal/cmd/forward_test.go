@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -152,6 +154,26 @@ func TestForwardSendsARawHTMLNoteVerbatim(t *testing.T) {
 	}
 
 	wantContent := `<div>For <strong>your</strong> review</div><br><div>Quoted message</div>`
+	if sent.Content != wantContent {
+		t.Errorf("content = %q, want %q", sent.Content, wantContent)
+	}
+}
+
+func TestForwardReadsARawHTMLNoteFromFile(t *testing.T) {
+	server, sent := forwardServer(t, `[{"id":12}]`)
+	path := filepath.Join(t.TempDir(), "forward-note.html")
+	note := "<div>For <strong>your</strong> review</div>\n"
+	if err := os.WriteFile(path, []byte(note), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runCLI(t, server, "--account", "8", "forward", "7",
+		"--to", "alice@example.com", "--message-html-file", path)
+	if err != nil {
+		t.Fatalf("forward failed: %v", err)
+	}
+
+	wantContent := strings.TrimSpace(note) + `<br><div>Quoted message</div>`
 	if sent.Content != wantContent {
 		t.Errorf("content = %q, want %q", sent.Content, wantContent)
 	}

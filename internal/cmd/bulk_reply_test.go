@@ -247,6 +247,34 @@ func TestBulkReplySendConvertsMarkdownMessage(t *testing.T) {
 	}
 }
 
+func TestBulkReplySendReadsRawHTMLFromFile(t *testing.T) {
+	server, state := bulkReplyServer(t)
+	path := filepath.Join(t.TempDir(), "reply.html")
+	message := "<p>Thanks <strong>everyone</strong>.</p>\n"
+	if err := os.WriteFile(path, []byte(message), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := runBulkReply(t, server, []string{"--json"}, []string{"send", "101", "202", "--message-html-file", path})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	requests := state.snapshot()
+	var request struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal(requests[len(requests)-1].Body, &request); err != nil {
+		t.Fatal(err)
+	}
+	want := strings.TrimSpace(message) + "<br><div>Signing off with a tag!</div>"
+	if request.Message.Content != want {
+		t.Errorf("content = %q, want file HTML plus name tag %q", request.Message.Content, want)
+	}
+}
+
 func TestBulkReplySendReportsImmediateDeliveryWithoutUndo(t *testing.T) {
 	server, state := bulkReplyServer(t)
 	state.delivery = `{"id":901,"entries_count":2,"delayed":false}`

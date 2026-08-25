@@ -179,13 +179,14 @@ func (c *draftShowCommand) run(cmd *cobra.Command, args []string) error {
 // --- edit ---
 
 type draftEditCommand struct {
-	cmd         *cobra.Command
-	subject     string
-	to          string
-	cc          string
-	bcc         string
-	message     string
-	messageHTML string
+	cmd             *cobra.Command
+	subject         string
+	to              string
+	cc              string
+	bcc             string
+	message         string
+	messageHTML     string
+	messageHTMLFile string
 }
 
 func newDraftEditCommand() *draftEditCommand {
@@ -194,11 +195,12 @@ func newDraftEditCommand() *draftEditCommand {
 		Use:   "edit <draft-id>",
 		Short: "Change a draft",
 		Annotations: map[string]string{
-			"agent_notes": "Each flag replaces its field and an omitted flag keeps what the draft has — --to/--cc/--bcc replace that whole recipient kind (an explicit empty value clears it). With no field flags the body opens in $EDITOR as Markdown. A scheduled delivery is preserved.",
+			"agent_notes": "Each flag replaces its field and an omitted flag keeps what the draft has — --to/--cc/--bcc replace that whole recipient kind (an explicit empty value clears it). --message-html-file reads a complete raw HTML replacement verbatim from a local file. With no field flags the body opens in $EDITOR as Markdown. A scheduled delivery is preserved.",
 		},
 		Example: `  hey draft edit 12345 --subject "Quarterly planning (v2)"
   hey draft edit 12345 --to maria@example.com --cc finance@example.com
   hey draft edit 12345 -m "Rewritten agenda: budget first, hiring second."
+  hey draft edit 12345 --message-html-file ./revised-message.html
   hey draft edit 12345    # open the body in $EDITOR`,
 		RunE: editCommand.run,
 		Args: usageExactOneArg(),
@@ -209,7 +211,8 @@ func newDraftEditCommand() *draftEditCommand {
 	editCommand.cmd.Flags().StringVar(&editCommand.bcc, "bcc", "", "Replace the BCC recipients (comma separated; empty clears)")
 	editCommand.cmd.Flags().StringVarP(&editCommand.message, "message", "m", "", "Replace the body with this Markdown")
 	editCommand.cmd.Flags().StringVar(&editCommand.messageHTML, "message-html", "", "Replace the body with raw HTML instead of Markdown")
-	editCommand.cmd.MarkFlagsMutuallyExclusive("message", "message-html")
+	editCommand.cmd.Flags().StringVar(&editCommand.messageHTMLFile, "message-html-file", "", "Replace the body with raw HTML read from this file")
+	editCommand.cmd.MarkFlagsMutuallyExclusive("message", "message-html", "message-html-file")
 	return editCommand
 }
 
@@ -254,6 +257,12 @@ func (c *draftEditCommand) run(cmd *cobra.Command, args []string) error {
 		fieldFlagged = true
 	}
 	switch {
+	case flags.Changed("message-html-file"):
+		messageHTML, readErr := readMessageHTMLFile(c.messageHTMLFile)
+		if readErr != nil {
+			return readErr
+		}
+		content.Content = messageHTML
 	case flags.Changed("message-html"):
 		content.Content = c.messageHTML
 	case flags.Changed("message"):

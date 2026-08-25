@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -167,6 +169,28 @@ func TestDraftEditReplacesOnlyTheFlaggedFields(t *testing.T) {
 	copied, _ := addressed["copied"].([]any)
 	if len(copied) != 1 || copied[0] != "priya@example.com" {
 		t.Errorf("copied = %v, want the existing CC kept", addressed["copied"])
+	}
+}
+
+func TestDraftEditReadsRawHTMLFromFileVerbatim(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "revised-message.html")
+	want := "<h1>Revised agenda</h1>\n<ol><li>Budget</li><li>Hiring</li></ol>\n"
+	if err := os.WriteFile(path, []byte(want), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var writes []draftWrite
+	_, err := runJSONCommand(t, draftLifecycleServer(t, draftEditJSON, &writes),
+		"draft", "edit", "12345", "--message-html-file", path)
+	if err != nil {
+		t.Fatalf("draft edit --message-html-file: %v", err)
+	}
+	if len(writes) != 1 {
+		t.Fatalf("writes = %+v", writes)
+	}
+	message, _ := writes[0].Body["message"].(map[string]any)
+	if message["content"] != want {
+		t.Errorf("content = %q, want exact file bytes %q", message["content"], want)
 	}
 }
 

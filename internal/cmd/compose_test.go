@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -127,6 +129,24 @@ func TestComposeSendsRawHTMLVerbatim(t *testing.T) {
 	}
 	if want := "<h1>March</h1><p>What we shipped.</p>"; sent.Content != want {
 		t.Errorf("content = %q, want %q", sent.Content, want)
+	}
+}
+
+func TestComposeReadsRawHTMLFromFileVerbatim(t *testing.T) {
+	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
+	path := filepath.Join(t.TempDir(), "message.html")
+	want := "<h1>March</h1>\n<p>What we shipped.</p>\n"
+	if err := os.WriteFile(path, []byte(want), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runCLI(t, server, "--account", "8", "compose", "--thread-id", "7",
+		"--message-html-file", path)
+	if err != nil {
+		t.Fatalf("compose failed: %v", err)
+	}
+	if sent.Content != want {
+		t.Errorf("content = %q, want exact file bytes %q", sent.Content, want)
 	}
 }
 

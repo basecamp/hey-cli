@@ -26,10 +26,11 @@ type bulkReplyPreviewCommand struct {
 }
 
 type bulkReplySendCommand struct {
-	cmd         *cobra.Command
-	message     string
-	messageHTML string
-	attachments []string
+	cmd             *cobra.Command
+	message         string
+	messageHTML     string
+	messageHTMLFile string
+	attachments     []string
 }
 
 type bulkReplyUndoCommand struct {
@@ -138,18 +139,20 @@ func newBulkReplySendCommand() *bulkReplySendCommand {
 		Use:   "send <box-item-id>...",
 		Short: "Send one reply to multiple threads",
 		Annotations: map[string]string{
-			"agent_notes": "Mutating. Preview first. Accepts a message via -m, stdin, or $EDITOR and repeatable --attach files. HEY's server-provided name-tag content is preserved.",
+			"agent_notes": "Mutating. Preview first. Accepts a message via -m, stdin, or $EDITOR; use --message-html for inline raw HTML or --message-html-file to read raw HTML from a file. Repeatable --attach files are supported, and HEY's server-provided name-tag content is preserved.",
 		},
 		Example: `  hey bulk-reply send 12345 67890 -m "Thanks for the update."
   echo "Thanks for the update." | hey bulk-reply send 12345 67890
+  hey bulk-reply send 12345 67890 --message-html-file ./reply.html
   hey bulk-reply send 12345 67890 -m "The report is attached." --attach ./report.pdf`,
 		RunE: sendCommand.run,
 		Args: usageMinOneArg(),
 	}
 	sendCommand.cmd.Flags().StringVarP(&sendCommand.message, "message", "m", "", "Reply message as Markdown (or opens $EDITOR)")
 	sendCommand.cmd.Flags().StringVar(&sendCommand.messageHTML, "message-html", "", "Reply message as raw HTML instead of Markdown")
+	sendCommand.cmd.Flags().StringVar(&sendCommand.messageHTMLFile, "message-html-file", "", "Read the raw HTML reply body from this file")
 	sendCommand.cmd.Flags().StringArrayVar(&sendCommand.attachments, "attach", nil, "File to attach (repeatable)")
-	sendCommand.cmd.MarkFlagsMutuallyExclusive("message", "message-html")
+	sendCommand.cmd.MarkFlagsMutuallyExclusive("message", "message-html", "message-html-file")
 	return sendCommand
 }
 
@@ -162,7 +165,17 @@ func (c *bulkReplySendCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	message := c.messageHTML
-	if message == "" {
+	messageHTMLFileProvided := cmd.Flags().Changed("message-html-file")
+	if messageHTMLFileProvided {
+		message, err = readMessageHTMLFile(c.messageHTMLFile)
+		if err != nil {
+			return err
+		}
+		if message == "" && len(c.attachments) == 0 {
+			return apierr.ErrUsage(fmt.Sprintf("HTML message file %q is empty; attach a file or provide HTML content", c.messageHTMLFile))
+		}
+	}
+	if message == "" && !messageHTMLFileProvided {
 		markdownMessage, readErr := c.readMessage()
 		if readErr != nil {
 			return readErr

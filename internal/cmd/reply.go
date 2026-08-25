@@ -13,11 +13,12 @@ import (
 )
 
 type replyCommand struct {
-	cmd         *cobra.Command
-	message     string
-	messageHTML string
-	attachments []string
-	draft       bool
+	cmd             *cobra.Command
+	message         string
+	messageHTML     string
+	messageHTMLFile string
+	attachments     []string
+	draft           bool
 }
 
 func newReplyCommand() *replyCommand {
@@ -31,10 +32,11 @@ The reply is addressed the way HEY's own web app addresses one: everyone that en
 addressed to, with whoever wrote it on the To line. HEY saves an unaddressed reply as a
 draft rather than sending it, so the command fails when it cannot work the recipients out.`,
 		Annotations: map[string]string{
-			"agent_notes": "Replies to the latest entry in a thread, addressed the way HEY addresses a reply: everyone that entry was addressed to, plus its sender on the To line, minus the acting user's own addresses. Accepts message via -m, stdin, or $EDITOR, plus repeatable --attach files; an attachment can be sent without body text. The message is Markdown; use --message-html to send raw HTML instead. --draft saves the reply as a draft — carrying those recipients — and answers the draft ID for hey draft show/edit/send/delete.",
+			"agent_notes": "Replies to the latest entry in a thread, addressed the way HEY addresses a reply: everyone that entry was addressed to, plus its sender on the To line, minus the acting user's own addresses. Accepts message via -m, stdin, or $EDITOR, plus repeatable --attach files; an attachment can be sent without body text. The message is Markdown; use --message-html for inline raw HTML or --message-html-file to read raw HTML verbatim from a file. --draft saves the reply as a draft — carrying those recipients — and answers the draft ID for hey draft show/edit/send/delete.",
 		},
 		Example: `  hey reply 12345 -m "Friday works for me — I'll send an agenda."
   hey reply 12345 -m "Attached is the report." --attach ./report.pdf
+  hey reply 12345 --message-html-file ./reply.html
   hey reply 12345 -m "Drafting a longer answer — sending tomorrow." --draft
   echo "Longer reply from a file or a heredoc" | hey reply 12345`,
 		RunE: replyCommand.run,
@@ -43,9 +45,10 @@ draft rather than sending it, so the command fails when it cannot work the recip
 
 	replyCommand.cmd.Flags().StringVarP(&replyCommand.message, "message", "m", "", "Reply message as Markdown (or opens $EDITOR)")
 	replyCommand.cmd.Flags().StringVar(&replyCommand.messageHTML, "message-html", "", "Reply message as raw HTML instead of Markdown")
+	replyCommand.cmd.Flags().StringVar(&replyCommand.messageHTMLFile, "message-html-file", "", "Read the raw HTML reply body from this file")
 	replyCommand.cmd.Flags().StringArrayVar(&replyCommand.attachments, "attach", nil, "File to attach (repeatable)")
 	replyCommand.cmd.Flags().BoolVar(&replyCommand.draft, "draft", false, "Save as a draft instead of sending")
-	replyCommand.cmd.MarkFlagsMutuallyExclusive("message", "message-html")
+	replyCommand.cmd.MarkFlagsMutuallyExclusive("message", "message-html", "message-html-file")
 
 	return replyCommand
 }
@@ -53,6 +56,18 @@ draft rather than sending it, so the command fails when it cannot work the recip
 func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 	if err := requireAuth(); err != nil {
 		return err
+	}
+	message := c.messageHTML
+	messageHTMLFileProvided := cmd.Flags().Changed("message-html-file")
+	if messageHTMLFileProvided {
+		var readErr error
+		message, readErr = readMessageHTMLFile(c.messageHTMLFile)
+		if readErr != nil {
+			return readErr
+		}
+		if message == "" && len(c.attachments) == 0 {
+			return apierr.ErrUsage(fmt.Sprintf("HTML message file %q is empty; attach a file or provide HTML content", c.messageHTMLFile))
+		}
 	}
 
 	threadID, err := strconv.ParseInt(args[0], 10, 64)
@@ -68,8 +83,7 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	replySDK := target.client
 
-	message := c.messageHTML
-	if message == "" {
+	if message == "" && !messageHTMLFileProvided {
 		markdownMessage := c.message
 		if markdownMessage == "" && !stdinIsTerminal() {
 			markdownMessage, err = readStdin()

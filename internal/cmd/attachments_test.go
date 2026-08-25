@@ -111,12 +111,24 @@ func attachmentServer(t *testing.T) (*httptest.Server, *attachmentServerState) {
 				Message struct {
 					Content string `json:"content"`
 				} `json:"message"`
+				Entry struct {
+					Status string `json:"status"`
+				} `json:"entry"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
+			event := "send"
+			if body.Entry.Status == "drafted" {
+				event = "draft"
+			}
 			state.mu.Lock()
 			state.sentContents = append(state.sentContents, body.Message.Content)
-			state.events = append(state.events, "send")
+			state.events = append(state.events, event)
 			state.mu.Unlock()
+			if event == "draft" {
+				w.Header().Set("Location", "/messages/12345")
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{}`))
 		default:
@@ -348,6 +360,44 @@ func TestComposeUploadsAttachmentsBeforeSending(t *testing.T) {
 	content := state.sentContents[0]
 	if !strings.Contains(content, "<p>Attached.</p><br>") || !strings.Contains(content, `action-text-attachment sgid="sgid-upload"`) || !strings.Contains(content, `filename="quarterly-report.pdf"`) {
 		t.Errorf("sent content = %q", content)
+	}
+}
+
+func TestComposeDraftReadsHTMLFileAndIncludesAttachment(t *testing.T) {
+	server, state := attachmentServer(t)
+	directory := t.TempDir()
+	htmlPath := filepath.Join(directory, "invoice-email.html")
+	htmlBody := "<h1>Invoice 1042</h1>\n<p>Please see the attached invoice.</p>\n"
+	if err := os.WriteFile(htmlPath, []byte(htmlBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	attachmentPath := filepath.Join(directory, "invoice-1042.pdf")
+	if err := os.WriteFile(attachmentPath, []byte("invoice contents"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, err := runAttachmentCommand(t, server,
+		"compose", "--subject", "Client invoice", "--message-html-file", htmlPath,
+		"--attach", attachmentPath, "--draft",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout, `"id": 12345`) {
+		t.Errorf("draft output = %s, want saved draft ID", stdout)
+	}
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.directUploads != 1 || state.storageUploads != 1 || len(state.sentContents) != 1 {
+		t.Fatalf("state = %+v", state)
+	}
+	if strings.Join(state.events, ",") != "reserve,upload,draft" {
+		t.Errorf("events = %v", state.events)
+	}
+	content := state.sentContents[0]
+	if !strings.HasPrefix(content, htmlBody+"<br>") || !strings.Contains(content, `action-text-attachment sgid="sgid-upload"`) || !strings.Contains(content, `filename="invoice-1042.pdf"`) {
+		t.Errorf("draft content = %q", content)
 	}
 }
 
