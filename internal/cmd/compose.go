@@ -7,9 +7,12 @@ import (
 
 	"github.com/spf13/cobra"
 
+	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/editor"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
+	"github.com/basecamp/hey-cli/internal/output"
 )
 
 type composeCommand struct {
@@ -22,6 +25,7 @@ type composeCommand struct {
 	messageHTML string
 	threadID    string
 	attachments []string
+	draft       bool
 }
 
 func newComposeCommand() *composeCommand {
@@ -30,7 +34,7 @@ func newComposeCommand() *composeCommand {
 		Use:   "compose",
 		Short: "Write and send a new email",
 		Annotations: map[string]string{
-			"agent_notes": "Starts a new thread with --to (optionally --cc/--bcc), which requires --subject, or replies to an existing one with --thread-id, which does not. Repeatable --attach files are uploaded before sending and can be sent without body text. The body is Markdown; use --message-html to send raw HTML instead.",
+			"agent_notes": "Starts a new thread with --to (optionally --cc/--bcc), which requires --subject, or replies to an existing one with --thread-id, which does not. Repeatable --attach files are uploaded before sending and can be sent without body text. The body is Markdown; use --message-html to send raw HTML instead. --draft saves instead of sending — recipients become optional — and answers the draft ID for hey draft show/edit/send/delete.",
 		},
 		Example: `  hey compose --to alice@example.com --subject "Lunch plans" -m "Are you free Friday?"
   hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Kitchen remodel timeline" -m "Cabinets land the week of the 14th."
@@ -38,7 +42,8 @@ func newComposeCommand() *composeCommand {
   hey compose --thread-id 12345 -m "Confirmed — see you then." --attach ./diagram.png
   hey compose --to alice@example.com --subject "Sprint recap" -m "We **shipped** the pagination fix."
   hey compose --to alice@example.com --subject "Newsletter draft" --message-html "<h1>March</h1><p>What we shipped.</p>"
-  echo "Notes from the offsite" | hey compose --to bob@example.com --subject "Offsite recap"`,
+  echo "Notes from the offsite" | hey compose --to bob@example.com --subject "Offsite recap"
+  hey compose --subject "Board update" -m "Numbers to follow." --draft  # save a draft; add recipients later`,
 		RunE: composeCommand.run,
 	}
 
@@ -50,6 +55,7 @@ func newComposeCommand() *composeCommand {
 	composeCommand.cmd.Flags().StringVar(&composeCommand.messageHTML, "message-html", "", "Message body as raw HTML instead of Markdown")
 	composeCommand.cmd.Flags().StringVar(&composeCommand.threadID, "thread-id", "", "Reply to this thread instead of starting a new one")
 	composeCommand.cmd.Flags().StringArrayVar(&composeCommand.attachments, "attach", nil, "File to attach (repeatable)")
+	composeCommand.cmd.Flags().BoolVar(&composeCommand.draft, "draft", false, "Save as a draft instead of sending")
 	composeCommand.cmd.MarkFlagsMutuallyExclusive("message", "message-html")
 
 	return composeCommand
@@ -106,6 +112,14 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		if attachErr != nil {
 			return attachErr
 		}
+		if c.draft {
+			draftID, draftErr := replySDK.Entries().CreateReplyDraft(ctx, target.EntryID, messageWithAttachments,
+				target.Addressed.To, target.Addressed.CC, target.Addressed.BCC)
+			if draftErr != nil {
+				return apierr.FromSDK(draftErr)
+			}
+			return writeDraftSaved(cmd, draftID, len(c.attachments))
+		}
 		if err := replySDK.Entries().CreateReply(ctx, target.EntryID, messageWithAttachments,
 			target.Addressed.To, target.Addressed.CC, target.Addressed.BCC); err != nil {
 			return apierr.FromSDK(err)
@@ -114,12 +128,22 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		to := parseAddresses(c.to)
 		cc := parseAddresses(c.cc)
 		bcc := parseAddresses(c.bcc)
-		if len(to)+len(cc)+len(bcc) == 0 {
+		// A draft needs nobody on it yet; only a send does.
+		if len(to)+len(cc)+len(bcc) == 0 && !c.draft {
 			return apierr.ErrUsage("a message needs at least one recipient (to, cc or bcc)")
 		}
 		messageWithAttachments, attachErr := attachFiles(ctx, message, c.attachments)
 		if attachErr != nil {
 			return attachErr
+		}
+		if c.draft {
+			draftID, draftErr := sdk.Messages().CreateDraft(ctx, hey.DraftContent{
+				Subject: c.subject, Content: messageWithAttachments, To: to, CC: cc, BCC: bcc,
+			})
+			if draftErr != nil {
+				return apierr.FromSDK(draftErr)
+			}
+			return writeDraftSaved(cmd, draftID, len(c.attachments))
 		}
 		if err := sdk.Messages().Create(ctx, c.subject, messageWithAttachments, to, cc, bcc); err != nil {
 			return apierr.FromSDK(err)
@@ -127,6 +151,20 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	return writeMutation(cmd, sentWithAttachmentsSummary("Message sent", len(c.attachments)), nil)
+}
+
+// writeDraftSaved confirms a saved draft, naming the id every draft verb takes.
+func writeDraftSaved(cmd *cobra.Command, draftID int64, attachments int) error {
+	summary := sentWithAttachmentsSummary("Draft saved", attachments)
+	return writeMutationLine(cmd, fmt.Sprintf("%s (id %d).", summary, draftID), summary,
+		map[string]any{"id": draftID},
+		output.WithBreadcrumbs(
+			output.Breadcrumb{Action: "show", Command: fmt.Sprintf("hey draft show %d", draftID), Description: "Read the draft back"},
+			output.Breadcrumb{Action: "edit", Command: fmt.Sprintf("hey draft edit %d", draftID), Description: "Change it"},
+			output.Breadcrumb{Action: "send", Command: fmt.Sprintf("hey draft send %d", draftID), Description: "Deliver it"},
+			output.Breadcrumb{Action: "delete", Command: fmt.Sprintf("hey draft delete %d", draftID), Description: "Trash it"},
+		),
+	)
 }
 
 func parseAddresses(s string) []string {

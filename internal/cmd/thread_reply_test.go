@@ -39,6 +39,7 @@ type sentReply struct {
 	TopicAccountFilter   string
 	MessageAccountFilter string
 	ActingSenderID       int64
+	Status               string
 	To                   []string
 	CC                   []string
 	BCC                  []string
@@ -62,6 +63,7 @@ func threadReplyServer(t *testing.T, messageJSON string, entryIDs ...int64) (*ht
 					Content string `json:"content"`
 				} `json:"message"`
 				Entry struct {
+					Status    string `json:"status"`
 					Addressed struct {
 						Directly    []string `json:"directly"`
 						Copied      []string `json:"copied"`
@@ -73,7 +75,14 @@ func threadReplyServer(t *testing.T, messageJSON string, entryIDs ...int64) (*ht
 			sent.Path = r.URL.Path
 			sent.Content = body.Message.Content
 			sent.ActingSenderID = body.ActingSenderID
+			sent.Status = body.Entry.Status
 			sent.To, sent.CC, sent.BCC = body.Entry.Addressed.Directly, body.Entry.Addressed.Copied, body.Entry.Addressed.Blindcopied
+			if body.Entry.Status == "drafted" {
+				// A saved draft answers no body; the entry id rides in Location.
+				w.Header().Set("Location", "https://app.hey.com/messages/9101")
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
 			fmt.Fprint(w, `{}`)

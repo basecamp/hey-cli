@@ -118,7 +118,7 @@ CORE COMMANDS
 MAIL
   screener    Decide who gets to email you
   attachment  List and save files from a thread
-  draft       Browse unsent drafts
+  draft       Manage unsent drafts
   watch       Follow email threads and calendars as they change
 
 WRITE & SHARE

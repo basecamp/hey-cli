@@ -82,6 +82,7 @@ hey compose
 hey compose --attach
 hey compose --bcc
 hey compose --cc
+hey compose --draft
 hey compose --message
 hey compose --message-html
 hey compose --subject
@@ -119,10 +120,22 @@ hey contact update --email
 hey contact update --name
 hey doctor
 hey draft
+hey draft delete
+hey draft edit
+hey draft edit --bcc
+hey draft edit --cc
+hey draft edit --message
+hey draft edit --message-html
+hey draft edit --subject
+hey draft edit --to
 hey draft list
 hey draft list --all
 hey draft list --limit
 hey draft list --page
+hey draft send
+hey draft send --hour
+hey draft send --on
+hey draft show
 hey event
 hey event add
 hey event add --all-day
