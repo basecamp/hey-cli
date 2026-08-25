@@ -20,6 +20,11 @@ make lint    # Lints the code
 make install # Installs the binary to /usr/local/bin/hey (not shown by make help)
 ```
 
+## Git
+
+History is linear: merge commits are disallowed in this repository. Bring a branch up to
+date by rebasing it onto main, never by merging main into it.
+
 ## Architecture Overview
 
 This is a Go project that uses:
