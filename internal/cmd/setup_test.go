@@ -102,13 +102,9 @@ func TestSetupWelcomeCopy(t *testing.T) {
 	var out bytes.Buffer
 	wizard := setupWizard{}
 	wizard.welcome(&out)
-	for _, want := range []string{
-		"Welcome to HEY\n\nWelcome to the command-line interface for HEY.",
-		"Let's get you set up. It'll only take a moment.",
-	} {
-		if !strings.Contains(out.String(), want) {
-			t.Errorf("welcome missing %q:\n%s", want, out.String())
-		}
+	want := "Welcome to the command-line interface for HEY.\n\nLet's get you set up. It'll only take a moment."
+	if !strings.Contains(out.String(), want) {
+		t.Errorf("welcome missing %q:\n%s", want, out.String())
 	}
 	for _, removed := range []string{"This will only take a moment", "The command-line interface for HEY (v"} {
 		if strings.Contains(out.String(), removed) {
