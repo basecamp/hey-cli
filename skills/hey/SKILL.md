@@ -194,7 +194,7 @@ notice on stderr. Both need list data, so they work on `hey box list`, `hey box 
 | Draft a reply for human review | `hey reply <topic_id> -m "Drafting this." --draft` |
 | Read a draft back | `hey draft show <draft_id> --json` |
 | Change a draft | `hey draft edit <draft_id> --to alice@example.com --subject "New subject"` |
-| Send a draft | `hey draft send <draft_id>` (or `--on tomorrow --hour 9` to schedule, on the account's clock) |
+| Send a draft | `hey draft send <draft_id>` |
 | Trash drafts | `hey draft delete <draft_id>...` |
 | Who is waiting in The Screener | `hey screener list --json` (clearance IDs) |
 | Number waiting | `hey screener list --count` |
@@ -293,7 +293,7 @@ Want to send email?
 ├── Draft instead of sending (human reviews in HEY)? → add --draft to compose or reply; the answer carries the draft id
 │   ├── Read it back? → hey draft show <draft_id> --json
 │   ├── Change it? → hey draft edit <draft_id> --subject/--to/--cc/--bcc/-m (flags replace; omitted fields are kept)
-│   ├── Deliver it? → hey draft send <draft_id> (recipients required; --on <date> --hour <n> schedules, on the account's clock)
+│   ├── Deliver it? → hey draft send <draft_id> (recipients required)
 │   └── Discard it? → hey draft delete <draft_id>
 └── Check drafts? → hey draft list --json
 ```
@@ -587,7 +587,6 @@ hey draft list --json                             # List drafts; --all and --pag
 hey draft show <draft_id> --json                  # The draft's editable state; body is Markdown
 hey draft edit <draft_id> --to alice@example.com  # Each flag replaces its field; omitted flags keep the draft's
 hey draft send <draft_id>                         # Deliver now (through HEY's undo window)
-hey draft send <draft_id> --on tomorrow --hour 9  # Schedule instead — see the clock rules below
 hey draft delete <draft_id> [<draft_id>...]       # Trash drafts
 ```
 
@@ -601,14 +600,12 @@ whole of it, so an omitted flag keeps that field. `--to`/`--cc`/`--bcc` replace 
 entire recipient kind; an explicit empty value (`--cc ""`) clears it. Any scheduled
 delivery is preserved through edits.
 
-**Scheduling and clocks.** `--on` (YYYY-MM-DD, `today` or `tomorrow`) and `--hour` (0-23)
-are read on the HEY account's clock — its own time zone, not the machine's — and HEY
-schedules to the hour; there are no minutes. `today` and `tomorrow` resolve on that clock
-too. JSON output reports `scheduled_delivery_at` in UTC like every HEY timestamp, so
-scheduling 9am for a US Eastern account reports `14:00:00Z` — that is the same moment,
-not an error. An account whose zone is offset from UTC by a fraction of an hour cannot
-land on a whole hour and is refused rather than silently shifted. A scheduled draft stays
-in `hey draft list` until it goes out; `hey draft delete` cancels it entirely.
+**Scheduled deliveries.** Scheduling is done in a HEY app for now; the CLI cannot set a
+schedule (HEY's API cannot yet name an exact instant). A draft scheduled in an app stays
+in `hey draft list` until it goes out, `hey draft show` reports `scheduled_delivery_at`
+in UTC like every HEY timestamp, an edit preserves the schedule untouched — refusing the
+rare schedule it could not keep exact rather than moving it — and `hey draft delete`
+cancels it entirely.
 
 ### Calendars
 

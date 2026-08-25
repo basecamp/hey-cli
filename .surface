@@ -133,8 +133,6 @@ hey draft list --all
 hey draft list --limit
 hey draft list --page
 hey draft send
-hey draft send --hour
-hey draft send --on
 hey draft show
 hey event
 hey event add

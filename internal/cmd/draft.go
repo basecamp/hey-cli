@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -95,47 +94,19 @@ func draftContentFrom(edit *generated.MessageEditState) hey.DraftContent {
 	return content
 }
 
-// draftScheduleLocation answers the clock a person means when they say "tomorrow at 9":
-// the identity's HEY time zone. The host's local clock stands in only when the identity
-// does not name a zone this host knows.
-func draftScheduleLocation(ctx context.Context) *time.Location {
-	identity, err := sdk.Identity().GetIdentity(ctx)
-	if err != nil || identity == nil || identity.TimeZoneName == "" {
-		return time.Local
+// preservableSchedule refuses an edit that could not keep the draft's scheduled
+// delivery where it is. HEY's API expresses a schedule as a whole UTC hour, so an
+// instant between hours — set from a HEY app on a fractional-offset clock like
+// India's or Adelaide's — would be silently moved by the resend. Refusing is the
+// honest answer until the API can name an exact instant.
+func preservableSchedule(edit *generated.MessageEditState) error {
+	at := edit.ScheduledDeliveryAt.UTC()
+	if at.IsZero() || (at.Minute() == 0 && at.Second() == 0) {
+		return nil
 	}
-	location, err := time.LoadLocation(identity.TimeZoneName)
-	if err != nil {
-		return time.Local
-	}
-	return location
-}
-
-// draftScheduleFor turns "--on and --hour on the identity's clock" into the UTC date and
-// hour HEY's API reads (Time.zone is UTC for JSON requests, so the params are UTC on the
-// wire — the web app's identity-zone reading does not apply here). today and tomorrow are
-// resolved on the identity's clock too, since HEY would otherwise read them as UTC dates.
-// A zone offset with fractional hours cannot land on a whole UTC hour and is refused
-// rather than silently shifted.
-func draftScheduleFor(location *time.Location, on string, hour int, now time.Time) (*hey.DraftSchedule, error) {
-	base := now.In(location)
-	var day time.Time
-	switch on {
-	case "today":
-		day = base
-	case "tomorrow":
-		day = base.AddDate(0, 0, 1)
-	default:
-		parsed, err := time.ParseInLocation("2006-01-02", on, location)
-		if err != nil {
-			return nil, apierr.ErrUsage(fmt.Sprintf("invalid --on date %q: use YYYY-MM-DD, today or tomorrow", on))
-		}
-		day = parsed
-	}
-	at := time.Date(day.Year(), day.Month(), day.Day(), hour, 0, 0, 0, location).UTC()
-	if at.Minute() != 0 {
-		return nil, apierr.ErrUsage(fmt.Sprintf("your HEY time zone (%s) is offset from UTC by a fraction of an hour, and HEY schedules deliveries on whole UTC hours — this hour cannot be expressed exactly", location))
-	}
-	return &hey.DraftSchedule{Date: at.Format("2006-01-02"), Hour: at.Hour()}, nil
+	return apierr.ErrUsage(fmt.Sprintf(
+		"this draft is scheduled for %s, between the whole hours HEY's API can express — editing here would move its delivery; adjust it in a HEY app first",
+		at.Format(time.RFC3339)))
 }
 
 // --- show ---
@@ -259,6 +230,9 @@ func (c *draftEditCommand) run(cmd *cobra.Command, args []string) error {
 	if edit == nil {
 		return apierr.ErrNotFound("draft", args[0])
 	}
+	if scheduleErr := preservableSchedule(edit); scheduleErr != nil {
+		return scheduleErr
+	}
 	content := draftContentFrom(edit)
 
 	flags := cmd.Flags()
@@ -306,9 +280,7 @@ func (c *draftEditCommand) run(cmd *cobra.Command, args []string) error {
 // --- send ---
 
 type draftSendCommand struct {
-	cmd  *cobra.Command
-	on   string
-	hour int
+	cmd *cobra.Command
 }
 
 func newDraftSendCommand() *draftSendCommand {
@@ -317,17 +289,12 @@ func newDraftSendCommand() *draftSendCommand {
 		Use:   "send <draft-id>",
 		Short: "Deliver a draft",
 		Annotations: map[string]string{
-			"agent_notes": "Sends the draft as it stands — recipients are required, added with `hey draft edit --to`. Delivery goes through HEY's undo window. --on with --hour schedules it instead, read on the HEY account's clock and scheduled to the hour; the draft stays listed until it goes out.",
+			"agent_notes": "Sends the draft as it stands — recipients are required, added with `hey draft edit --to`. Delivery goes through HEY's undo window. Scheduling a delivery is done in a HEY app for now; the API cannot yet name an exact instant.",
 		},
-		Example: `  hey draft send 12345
-  hey draft send 12345 --on tomorrow --hour 9
-  hey draft send 12345 --on 2026-09-01 --hour 14`,
-		RunE: sendCommand.run,
-		Args: usageExactOneArg(),
+		Example: `  hey draft send 12345`,
+		RunE:    sendCommand.run,
+		Args:    usageExactOneArg(),
 	}
-	sendCommand.cmd.Flags().StringVar(&sendCommand.on, "on", "", "Schedule delivery for this date on your HEY account's clock (YYYY-MM-DD, today or tomorrow)")
-	sendCommand.cmd.Flags().IntVar(&sendCommand.hour, "hour", -1, "Hour of --on to deliver at, 0-23, on your HEY account's clock")
-	sendCommand.cmd.MarkFlagsRequiredTogether("on", "hour")
 	return sendCommand
 }
 
@@ -338,14 +305,6 @@ func (c *draftSendCommand) run(cmd *cobra.Command, args []string) error {
 	draftID, err := parseDraftID(args[0])
 	if err != nil {
 		return err
-	}
-	if c.on != "" {
-		if c.hour < 0 || c.hour > 23 {
-			return apierr.ErrUsage("--hour must be between 0 and 23")
-		}
-		if dateErr := validateScheduleDate(c.on); dateErr != nil {
-			return dateErr
-		}
 	}
 	ctx := cmd.Context()
 
@@ -359,19 +318,6 @@ func (c *draftSendCommand) run(cmd *cobra.Command, args []string) error {
 	content := draftContentFrom(edit)
 	if len(content.To)+len(content.CC)+len(content.BCC) == 0 {
 		return apierr.ErrUsageHint("the draft has no recipients", fmt.Sprintf("hey draft edit %d --to <email>", draftID))
-	}
-
-	if c.on != "" {
-		schedule, scheduleErr := draftScheduleFor(draftScheduleLocation(ctx), c.on, c.hour, time.Now())
-		if scheduleErr != nil {
-			return scheduleErr
-		}
-		content.Schedule = schedule
-		if err := sdk.Messages().UpdateDraft(ctx, draftID, content); err != nil {
-			return apierr.FromSDK(err)
-		}
-		return writeMutationLine(cmd, fmt.Sprintf("Draft %d scheduled for delivery.", draftID),
-			"Draft scheduled for delivery", map[string]any{"id": draftID})
 	}
 
 	content.Schedule = nil
@@ -430,16 +376,4 @@ func draftNoun(count int) string {
 		return "draft"
 	}
 	return "drafts"
-}
-
-// validateScheduleDate holds --on to what it advertises — YYYY-MM-DD, today or
-// tomorrow — so a typo is a usage error before anything is fetched or written.
-func validateScheduleDate(on string) error {
-	if on == "today" || on == "tomorrow" {
-		return nil
-	}
-	if _, err := time.Parse("2006-01-02", on); err != nil {
-		return apierr.ErrUsage(fmt.Sprintf("invalid --on date %q: use YYYY-MM-DD, today or tomorrow", on))
-	}
-	return nil
 }
