@@ -720,6 +720,103 @@ func TestSetupAgentsRemoveUninstallsClaudePlugin(t *testing.T) {
 	}
 }
 
+func TestSetupAgentsRemoveReportsFailedPluginUninstall(t *testing.T) {
+	isolateAgents(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	pluginsDir := filepath.Join(home, ".claude", "plugins")
+	if err := os.MkdirAll(pluginsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	registry := `{"version":2,"plugins":{"hey@37signals":[{"version":"1.1.0"}]}}`
+	if err := os.WriteFile(filepath.Join(pluginsDir, "installed_plugins.json"), []byte(registry), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	binDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(binDir, "claude"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+	stubRunAgentCommand(t, func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+		return []byte("network unreachable"), errors.New("exit status 1")
+	})
+
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+	_, _, err := runAuthCommand(t, home, server.URL, "", true, "setup", "agents", "--remove")
+	var apiErr *apierr.Error
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("error = %v, want *apierr.Error", err)
+	}
+	if apiErr.Code != "setup_remove_failed" {
+		t.Errorf("code = %q, want setup_remove_failed", apiErr.Code)
+	}
+	if !strings.Contains(apiErr.Message, "Claude Code plugin: network unreachable") {
+		t.Errorf("message = %q, want the failing component and its output named", apiErr.Message)
+	}
+}
+
+func TestSetupAgentsRemoveReportsMissingClaudeBinary(t *testing.T) {
+	isolateAgents(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	pluginsDir := filepath.Join(home, ".claude", "plugins")
+	if err := os.MkdirAll(pluginsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	registry := `{"version":2,"plugins":{"hey@37signals":[{"version":"1.1.0"}]}}`
+	if err := os.WriteFile(filepath.Join(pluginsDir, "installed_plugins.json"), []byte(registry), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", t.TempDir())
+	stubRunAgentCommand(t, func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+		t.Error("no claude command should run when the binary is missing")
+		return nil, nil
+	})
+
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+	_, _, err := runAuthCommand(t, home, server.URL, "", true, "setup", "agents", "--remove")
+	var apiErr *apierr.Error
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("error = %v, want *apierr.Error", err)
+	}
+	if apiErr.Code != "setup_remove_failed" {
+		t.Errorf("code = %q, want setup_remove_failed", apiErr.Code)
+	}
+	if !strings.Contains(apiErr.Message, "Claude Code plugin: claude binary not found") {
+		t.Errorf("message = %q, want the missing binary named", apiErr.Message)
+	}
+}
+
+func TestRemoveOwnedSkillFilesDeclinesSymlinkedDirectory(t *testing.T) {
+	target := t.TempDir()
+	for _, name := range []string{skillFilename, installedVersionFile, ownershipMarkerFile} {
+		if err := os.WriteFile(filepath.Join(target, name), []byte("managed"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link := filepath.Join(t.TempDir(), "hey")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := removeOwnedSkillFiles(link)
+	if err != nil || removed {
+		t.Fatalf("removeOwnedSkillFiles = %v, %v; want false, nil", removed, err)
+	}
+	for _, name := range []string{skillFilename, installedVersionFile, ownershipMarkerFile} {
+		if _, statErr := os.Stat(filepath.Join(target, name)); statErr != nil {
+			t.Errorf("symlink target lost %s: %v", name, statErr)
+		}
+	}
+	if _, statErr := os.Lstat(link); statErr != nil {
+		t.Errorf("symlink itself removed: %v", statErr)
+	}
+}
+
 // Legacy credentials belong to the server recorded beside them. With the
 // effective base URL pointed elsewhere, migration must neither misfile them
 // under the wrong store key nor scrub the only copy for their real origin.

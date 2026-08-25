@@ -136,7 +136,8 @@ file, one lock:
 - **Entry points.** An interactive OAuth sign-in — `hey auth login` / `hey login`,
   `requireAuth`'s "Sign in now?" (how `hey tui` and every data command sign in), the lite
   wizard — runs the routine in *ensure* mode and prints at most one stderr line; the full
-  wizard runs Step 3 in *force* mode without asking; `hey setup omarchy` also runs in
+  wizard runs its Omarchy step in *force* mode without asking (step numbers are
+  assigned dynamically to whichever steps actually run); `hey setup omarchy` also runs in
   *force* mode. The automatic
   hooks never run for machine output, `HEY_NONINTERACTIVE`, a non-TTY, or
   `--token`/`--cookie` logins: a script installs with `hey setup omarchy`, which works in

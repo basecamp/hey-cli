@@ -80,6 +80,19 @@ func runRemoveAgentSetup(cmd *cobra.Command) error {
 // directory. Additional files remain in place and make the directory
 // user-owned once the marker is gone.
 func removeOwnedSkillFiles(dir string) (bool, error) {
+	// A symlinked directory is a user's arrangement: its target was never
+	// inspected by the ownership gate, so removal declines it the way every
+	// other write path does (claimSkillDir, writeSkillFile).
+	info, err := os.Lstat(dir)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspecting %s: %w", dir, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return false, nil
+	}
 	if !ownedSkillDir(dir) {
 		return false, nil
 	}
