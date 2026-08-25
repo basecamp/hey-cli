@@ -83,6 +83,16 @@ func TestDraftLifecycle(t *testing.T) {
 		t.Errorf("a fresh draft should have no recipients, got %v", state.To)
 	}
 
+	// Raw output reads the same stored body without converting it to Markdown or
+	// wrapping it in a response envelope.
+	rawHTML, stderr, code := hey(t, "draft", "show", fmt.Sprintf("%d", id), "--html")
+	if code != 0 {
+		t.Fatalf("draft show --html failed (exit %d): %s", code, stderr)
+	}
+	if !strings.Contains(rawHTML, "Smoke test draft body") || !strings.Contains(rawHTML, "<") {
+		t.Errorf("draft show --html = %q, want the stored HTML fragment", rawHTML)
+	}
+
 	// Edit adds a recipient and rewrites the subject; unflagged fields survive.
 	newSubject := subject + " (v2)"
 	stdout, stderr, code := hey(t, "draft", "edit", fmt.Sprintf("%d", id),

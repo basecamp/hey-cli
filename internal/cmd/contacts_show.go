@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"io"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -84,7 +83,7 @@ func (c *contactsShowCommand) run(cmd *cobra.Command, args []string) error {
 		result.NoteHTML = note.NoteHtml
 	}
 	if writer.EffectiveFormat() == output.FormatHTML {
-		return writeNoteHTML(cmd.OutOrStdout(), result.NoteHTML)
+		return writeHTMLFragment(cmd.OutOrStdout(), result.NoteHTML)
 	}
 	if writer.IsStyled() {
 		printContactDetails(cmd, result)
@@ -97,16 +96,6 @@ func (c *contactsShowCommand) run(cmd *cobra.Command, args []string) error {
 			output.Breadcrumb{Action: "note", Command: fmt.Sprintf("hey contact note set %d", contactID), Description: "Edit the private note"},
 		),
 	)
-}
-
-// writeNoteHTML is what --html writes for a contact: the note's original HTML, and
-// nothing at all when there is no note.
-func writeNoteHTML(w io.Writer, noteHTML string) error {
-	if noteHTML == "" {
-		return nil
-	}
-	_, err := fmt.Fprintln(w, noteHTML)
-	return err
 }
 
 func printContactDetails(cmd *cobra.Command, result contactShowResult) {

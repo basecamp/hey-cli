@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -133,6 +135,45 @@ func TestDraftShowAnswersTheEditableState(t *testing.T) {
 	}
 	if len(writes) != 0 {
 		t.Errorf("show must not write, wrote %+v", writes)
+	}
+}
+
+func TestDraftShowHTMLAnswersTheCompleteStoredBody(t *testing.T) {
+	stdoutTerminal(t, false)
+
+	for _, test := range []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "rich body with attachment markup",
+			content: `<div><strong>Quarterly planning</strong></div><figure data-trix-attachment="{&quot;filename&quot;:&quot;agenda.pdf&quot;}"></figure>`,
+			want:    `<div><strong>Quarterly planning</strong></div><figure data-trix-attachment="{&quot;filename&quot;:&quot;agenda.pdf&quot;}"></figure>` + "\n",
+		},
+		{name: "empty body"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			editJSON := `{"id":12345,"subject":"Quarterly planning","content":` + strconv.Quote(test.content) + `,
+				"sender":{"id":77,"email_address":"projects@example.org"},"addressed":{}}`
+			var writes []draftWrite
+			server := httptest.NewServer(draftLifecycleServer(t, editJSON, &writes))
+			t.Cleanup(server.Close)
+
+			stdout, stderr, err := runCLIRaw(t, server, "draft", "show", "12345", "--html")
+			if err != nil {
+				t.Fatalf("draft show --html: %v", err)
+			}
+			if stdout != test.want {
+				t.Errorf("stdout = %q, want stored HTML %q", stdout, test.want)
+			}
+			if stderr != "" {
+				t.Errorf("stderr = %q, want empty", stderr)
+			}
+			if len(writes) != 0 {
+				t.Errorf("show must not write, wrote %+v", writes)
+			}
+		})
 	}
 }
 

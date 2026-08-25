@@ -330,11 +330,11 @@ pipeable. `hey clip list --ids-only` and `--count` cover the newest page only be
 released SDK does not expose HEY's cursor for older clip pages.
 
 `--html` writes the original HTML, for the commands that hold some: `hey thread read`,
-`hey journal read`, `hey contact show` and `hey contact note show`. It is a format of
-its own — it cannot be combined with the other output flags (`--stats` included: there is
-no envelope to carry stats), every other command refuses it, and it is meant for a file or
-a pipe: on a terminal it is refused with the redirect spelled out, since markup on a
-terminal is neither readable nor safe.
+`hey draft show`, `hey journal read`, `hey contact show` and `hey contact note show`. It
+is a format of its own — it cannot be combined with the other output flags (`--stats`
+included: there is no envelope to carry stats), every other command refuses it, and it is
+meant for a file or a pipe: on a terminal it is refused with the redirect spelled out,
+since markup on a terminal is neither readable nor safe.
 
 A thread is written as one HTML5 document, so a downstream tool can parse it rather than
 split it: `<!doctype html>`, `<html lang="en">`, a `<head>` with `<meta charset="utf-8">`
@@ -348,9 +348,10 @@ and was empty. A thread that could only be read in part is refused as for every 
 format; with `--allow-partial` the document ends with the notice in an HTML comment
 (`<!-- notice: … -->`) just before `</body>`, and the notice goes to stderr as well.
 
-A single body — a journal entry, a contact's note — is written as a fragment instead: the
-HTML as HEY served it, nothing for an empty one. A thread has entries to frame; one body
-is what gets pasted into something else.
+A single body — a draft, journal entry, or contact note — is written as a fragment
+instead: the HTML as HEY served it, nothing for an empty one. A draft fragment includes
+the complete editable body, including attachment markup. A thread has entries to frame;
+one body is what gets pasted into something else.
 
 ### Email
 
@@ -438,6 +439,7 @@ hey compose --subject "Board update" -m "Numbers to follow." --draft  # save a d
 hey reply 123 -m "Drafting a longer answer." --draft  # save a reply draft
 hey draft list                     # list drafts (--all and --page follow HEY's cursor)
 hey draft show 12345               # read a draft back
+hey draft show 12345 --html > draft.html  # complete stored HTML, including attachment markup
 hey draft edit 12345 --to alice@example.com --subject "Board update (v2)"
 hey draft edit 12345 --message-html-file ./revised-message.html
 hey draft send 12345               # deliver it
@@ -463,7 +465,7 @@ Email bodies come back as Markdown. `hey thread read` and the TUI render that Ma
 
 Writing is Markdown too, everywhere text goes in: `-m`, `--content`, `--note`, positional content, stdin, and `$EDITOR` (which opens prefilled with the existing entry or note as Markdown). Every such flag has a raw-HTML twin — `--message-html`, `--content-html`, `--note-html` — for sending markup verbatim. Email commands that accept `--message-html` (`compose`, `reply`, `forward`, `bulk-reply send`, and `draft edit`) also accept `--message-html-file <path>` and read the file directly as raw HTML, which avoids shell quoting and argument-size problems for generated messages. Markdown, inline HTML, and HTML-file inputs are mutually exclusive. Compose, reply, and draft edit preserve the file bytes exactly; forward and bulk reply use their existing HTML-prefix join, which trims surrounding whitespace before appending quoted or Name Tag content. The TUI's compose and bulk-reply forms convert Markdown the same way, and the compose editor renders it live as you type — `**bold**` turns bold, markers and all. A fenced code block's language (` ```ruby `) is carried the way HEY's own editor stores it, so the web app syntax-highlights it.
 
-Drafts are the review-before-send lane: `hey compose --draft` (and `hey reply --draft`) saves instead of sending — recipients optional on a draft — and answers the draft's ID. `hey draft show` reads it back with the body as Markdown, `hey draft edit` revises it (each flag replaces its field; what is not flagged is kept, by reading the draft and resending the whole of it, since a revision is not a patch on HEY's side), and `--message-html-file` replaces the complete body with the exact HTML read from a file. `hey draft send` delivers through HEY's undo window, and `hey draft delete` trashes it. Scheduling a delivery is done in a HEY app for now — the API cannot yet name an exact instant — and a schedule set there survives CLI edits untouched. A draft prepared here is reviewed and sent from any HEY app, which is the workflow this is for: an agent writes, a person decides.
+Drafts are the review-before-send lane: `hey compose --draft` (and `hey reply --draft`) saves instead of sending — recipients optional on a draft — and answers the draft's ID. `hey draft show` reads it back with the body as Markdown; `--html` writes the complete stored HTML fragment, including attachment markup, to a file or pipe. `hey draft edit` revises the draft (each flag replaces its field; what is not flagged is kept, by reading the draft and resending the whole of it, since a revision is not a patch on HEY's side), and `--message-html-file` replaces the complete body with the exact HTML read from a file. `hey draft send` delivers through HEY's undo window, and `hey draft delete` trashes it. Scheduling a delivery is done in a HEY app for now — the API cannot yet name an exact instant — and a schedule set there survives CLI edits untouched. A draft prepared here is reviewed and sent from any HEY app, which is the workflow this is for: an agent writes, a person decides.
 
 `hey share <thread_id>` gets a sharing link for a thread. Anyone with the link can see the entire thread and future emails or replies sent to it. `hey unshare <thread_id>` turns off the sharing link.
 

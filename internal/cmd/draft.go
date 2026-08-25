@@ -19,8 +19,8 @@ import (
 	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
-// draftOutput is what hey draft show answers with: the draft's editable state, its body
-// as Markdown the way every email body leaves this CLI.
+// draftOutput is what hey draft show answers with outside --html: the draft's editable
+// state, its body as Markdown the way every email body leaves this CLI.
 type draftOutput struct {
 	ID                  int64             `json:"id"`
 	Subject             string            `json:"subject,omitempty"`
@@ -121,10 +121,11 @@ func newDraftShowCommand() *draftShowCommand {
 		Use:   "show <draft-id>",
 		Short: "Read a draft back",
 		Annotations: map[string]string{
-			"agent_notes": "Draft IDs come from `hey draft list` or from saving with `hey compose --draft`. The body is Markdown.",
+			"agent_notes": "Draft IDs come from `hey draft list` or from saving with `hey compose --draft`. The body is Markdown by default; --html writes the complete stored HTML fragment instead, including Name Tag and attachment markup, and must be redirected to a file or pipe.",
 		},
 		Example: `  hey draft show 12345
-  hey draft show 12345 --json`,
+  hey draft show 12345 --json
+  hey draft show 12345 --html > draft.html`,
 		RunE: showCommand.run,
 		Args: usageExactOneArg(),
 	}
@@ -146,6 +147,9 @@ func (c *draftShowCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	if edit == nil {
 		return apierr.ErrNotFound("draft", args[0])
+	}
+	if writer.EffectiveFormat() == output.FormatHTML {
+		return writeHTMLFragment(cmd.OutOrStdout(), edit.Content)
 	}
 	out := draftOutputFor(draftID, edit)
 

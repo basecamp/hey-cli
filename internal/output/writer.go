@@ -31,9 +31,9 @@ const (
 	// FormatHTML is the raw writer behind --html: the original HTML of the one thing a
 	// command reads, written to a pipe or a file. A thread is written as an HTML document
 	// with an <article> per entry, since it has entries to frame; a single body — a
-	// journal entry, a contact's note — is written as a fragment, as HEY served it, since
-	// one body is what gets pasted elsewhere. It carries no envelope, so OK refuses it
-	// and --stats has nowhere to go; the commands that support it write the HTML
+	// draft, journal entry, or contact note — is written as a fragment, as HEY served it,
+	// since one body is what gets pasted elsewhere. It carries no envelope, so OK refuses
+	// it and --stats has nowhere to go; the commands that support it write the HTML
 	// themselves.
 	FormatHTML
 )
