@@ -223,7 +223,7 @@ func (s *setupWizard) run() error {
 func (s *setupWizard) welcome(w io.Writer) {
 	fmt.Fprintln(w, tui.RenderWordmark(!colorDisabled))
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, bold.format("HEY! It's a command-line interface!"))
+	fmt.Fprintln(w, bold.format("HEY! It's the command-line interface!"))
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Let's get you set up. It'll only take a moment")
 	fmt.Fprintln(w)
