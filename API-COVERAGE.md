@@ -3,20 +3,13 @@
 Mapping of HEY API endpoints used by the CLI. API interactions use the HEY SDK (`hey-sdk/go`).
 Every endpoint below is read as JSON through a typed SDK operation; nothing parses HTML.
 
-One operation HEY has and the SDK does not: `GET /entries/{id}/replies/new.json`, which
-answers the exact recipients HEY would put on a reply. Until the SDK exposes it, a reply's
-recipients are derived from the answered entry's own `addressed` — see AGENTS.md's
-`### HTML content`.
-
 **`/topics/{id}/entries.json` cannot be paged by number.** `Topics::EntriesController` uses
 `set_page_and_extract_portion_from`, so like every other list here its `page` is
 geared_pagination's opaque cursor out of the `Link` header, not an offset. An integer there
-is not an error — it is ignored, and the first page comes back again. There is no
-`Topics().GetEntriesPage` in SDK v0.10.0 to read that header with, so anything walking this
-endpoint page-by-page reads page one repeatedly until it hits its own cap. `hey thread read` and
-`hey attachment list` both do; that is the bug behind a three-entry thread answering with 300
-entries and 400 requests. The fix is either a `GetEntriesPage` in the SDK or a single read,
-since `Topics().Get` already carries the entry list.
+is not an error — it is ignored, and the first page comes back again. `Topics().GetEntriesPage`
+is the SDK read that keeps that header; `hey thread read` and `hey attachment list` walk it
+through `internal/threadload`. The drafts index (`/entries/drafts.json`) pages the same way,
+which is what `Entries().ListDraftsPage` and `hey draft list --page` exist for.
 
 | Endpoint | Method | Client | CLI Command | Status |
 |----------|--------|--------|-------------|--------|
@@ -64,13 +57,17 @@ since `Topics().Get` already carries the entry list.
 | `/topics/{id}/publication` | POST | SDK `Publications().Create` | `hey share <thread-id>` | covered |
 | `/topics/{id}/publication.json` | GET | SDK `Publications().Create` readback | `hey share <thread-id>` | covered |
 | `/topics/{id}/publication` | DELETE | SDK `Publications().Delete` | `hey unshare <thread-id>` | covered |
-| `/messages/{id}.json` | GET | SDK `Messages().Get` | `hey thread read <id>` (bodies), `hey reply <topic-id>` and TUI `r` (recipients), `hey attachment list <topic-id>`, `hey attachment save <id>` | covered |
-| `/entries/drafts.json` | GET | SDK `Entries().ListDrafts` | `hey draft list` | covered |
+| `/messages/{id}.json` | GET | SDK `Messages().Get` | `hey thread read <id>` (bodies), `hey reply <topic-id>` and TUI `r` (recipient fallback), `hey attachment list <topic-id>`, `hey attachment save <id>` | covered |
+| `/messages/{id}` | PUT | SDK `Messages().UpdateDraft`, `Messages().SendDraft` | `hey draft edit <id>`, `hey draft send <id>` | covered |
+| `/messages/{id}/edit.json` | GET | SDK `Messages().GetEdit` | `hey draft show <id>`, `hey draft edit/send` (reading the state an update resends) | covered |
+| `/entries/{id}/replies/new.json` | GET | SDK `Entries().NewReply` | `hey reply <topic-id>` and `hey compose --thread-id` (recipients, with the acting user excluded) | covered |
+| `/entries/drafts.json` | GET | SDK `Entries().ListDraftsPage` | `hey draft list` (`--all`/`--page` follow its cursor) | covered |
+| `/entries/drafts/{id}` | DELETE | SDK `Entries().DeleteDraft` | `hey draft delete <id>...` | covered |
 | `/rails/active_storage/direct_uploads.json` | POST | SDK `Attachments().Upload` | `hey compose --attach`, `hey reply --attach`, `hey bulk-reply send --attach` | covered |
 | signed Active Storage upload URL | PUT | SDK `Attachments().Upload` | `hey compose --attach`, `hey reply --attach`, `hey bulk-reply send --attach` | covered |
 | signed Active Storage blob URL | GET | SDK `DownloadBlob` | `hey attachment save <id>` | covered |
-| `/messages.json` | POST | SDK `Messages().Create` | `hey compose`, `hey forward <topic-id>` | covered |
-| `/entries/{id}/replies` | POST | SDK `Entries().CreateReply` | `hey reply <topic-id>` | covered |
+| `/messages.json` | POST | SDK `Messages().Create`, `Messages().CreateDraft` | `hey compose`, `hey compose --draft`, `hey forward <topic-id>` | covered |
+| `/entries/{id}/replies` | POST | SDK `Entries().CreateReply`, `Entries().CreateReplyDraft` | `hey reply <topic-id>`, `hey reply --draft`, `hey compose --thread-id [--draft]` | covered |
 | `/topics/{id}.json` | GET | SDK `Topics().Get` | `hey forward <topic-id>`, `hey reply <topic-id>`, TUI `r` | covered |
 | `/entries/{id}/forwards/new.json` | GET | SDK `Entries().NewForward` | `hey forward <topic-id>` | covered |
 | `/bulk_replies/new.json` | GET | SDK `BulkReplies().Draft` | `hey bulk-reply preview`, `hey bulk-reply send`, TUI `ctrl+b` | covered |

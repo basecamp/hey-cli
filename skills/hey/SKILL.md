@@ -26,6 +26,10 @@ triggers:
   - hey forward
   - hey compose
   - hey draft list
+  - hey draft show
+  - hey draft edit
+  - hey draft send
+  - hey draft delete
   - hey screener
   - screen a sender
   - approve a sender
@@ -185,7 +189,13 @@ notice on stderr. Both need list data, so they work on `hey box list`, `hey box 
 | Forward email | `hey forward <topic_id> --to alice@example.com -m "For your review"` |
 | Compose email | `hey compose --to alice@example.com --subject "Lunch plans" -m "Are you free Friday?"` |
 | Compose with CC/BCC | `hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Kitchen remodel timeline"` |
-| List drafts | `hey draft list --json` |
+| List drafts | `hey draft list --json` (`--all`/`--page` follow the cursor) |
+| Draft an email for human review | `hey compose --to alice@example.com --subject "Lunch plans" -m "Free Friday?" --draft` |
+| Draft a reply for human review | `hey reply <topic_id> -m "Drafting this." --draft` |
+| Read a draft back | `hey draft show <draft_id> --json` |
+| Change a draft | `hey draft edit <draft_id> --to alice@example.com --subject "New subject"` |
+| Send a draft | `hey draft send <draft_id>` (or `--on tomorrow --hour 9` to schedule) |
+| Trash drafts | `hey draft delete <draft_id>...` |
 | Who is waiting in The Screener | `hey screener list --json` (clearance IDs) |
 | Number waiting | `hey screener list --count` |
 | Let a sender through | `hey screener approve <clearance_id>` |
@@ -280,6 +290,11 @@ Want to send email?
 │   └── With BCC? → add --bcc <email>
 ├── List files in a thread? → hey attachment list <topic_id> --json
 │   └── Save one? → hey attachment save <attachment_id> [--output <path>]
+├── Draft instead of sending (human reviews in HEY)? → add --draft to compose or reply; the answer carries the draft id
+│   ├── Read it back? → hey draft show <draft_id> --json
+│   ├── Change it? → hey draft edit <draft_id> --subject/--to/--cc/--bcc/-m (flags replace; omitted fields are kept)
+│   ├── Deliver it? → hey draft send <draft_id> (recipients required; --on <date> --hour <n> schedules)
+│   └── Discard it? → hey draft delete <draft_id>
 └── Check drafts? → hey draft list --json
 ```
 
