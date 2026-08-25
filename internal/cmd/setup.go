@@ -223,10 +223,8 @@ func (s *setupWizard) run() error {
 func (s *setupWizard) welcome(w io.Writer) {
 	fmt.Fprintln(w, tui.RenderWordmark(!colorDisabled))
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, bold.format("Welcome to HEY"))
-	fmt.Fprintln(w)
-	fmt.Fprintf(w, "The command-line interface for HEY (v%s).\n", version.Version)
-	fmt.Fprintln(w, "Let's get you set up. This will only take a moment.")
+	fmt.Fprintln(w, bold.format("Welcome to the command-line interface for HEY."))
+	fmt.Fprintln(w, "Let's get you set up. It'll only take a moment.")
 	fmt.Fprintln(w)
 }
 
@@ -300,9 +298,8 @@ var loginInteractively = func(out io.Writer) error {
 	return selectConfiguredAccount(context.Background())
 }
 
-// greet looks up who signed in and shows the linked accounts. Read-only:
-// HEY is natively multi-account and "all" is the default, so nothing is
-// chosen or persisted here.
+// greet records the signed-in identity and linked accounts, then confirms
+// the identity in styled output. Nothing is chosen or persisted here.
 func (s *setupWizard) greet() {
 	w := s.cmd.OutOrStdout()
 
@@ -342,22 +339,6 @@ func (s *setupWizard) greet() {
 		return
 	}
 	fmt.Fprintln(w, success.format(identityGreeting(identity)))
-	// accounts[0] is the "All Accounts" filter; a single linked account
-	// needs no list.
-	if len(s.result.Accounts) > 2 {
-		for _, account := range s.result.Accounts[1:] {
-			label := terminal.SanitizeLine(account.Name)
-			if account.Email != "" {
-				label += " (" + terminal.SanitizeLine(account.Email) + ")"
-			}
-			fmt.Fprintln(w, "• "+label)
-		}
-		if cfg.AccountID == config.AllAccounts {
-			fmt.Fprintln(w, "Using All Accounts — hey account use <id> to default to one")
-		} else {
-			fmt.Fprintln(w, "Default mail account: "+cfg.AccountID)
-		}
-	}
 	fmt.Fprintln(w)
 }
 

@@ -95,6 +95,28 @@ func TestSetupCommandRegistersAgentSubcommands(t *testing.T) {
 	}
 }
 
+func TestSetupWelcomeCopy(t *testing.T) {
+	origColor := colorDisabled
+	colorDisabled = true
+	t.Cleanup(func() { colorDisabled = origColor })
+	var out bytes.Buffer
+	wizard := setupWizard{}
+	wizard.welcome(&out)
+	for _, want := range []string{
+		"Welcome to the command-line interface for HEY.",
+		"Let's get you set up. It'll only take a moment.",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("welcome missing %q:\n%s", want, out.String())
+		}
+	}
+	for _, removed := range []string{"Welcome to HEY", "This will only take a moment", "The command-line interface for HEY (v"} {
+		if strings.Contains(out.String(), removed) {
+			t.Errorf("welcome retained %q:\n%s", removed, out.String())
+		}
+	}
+}
+
 func TestSetupSkipAgentsLeavesAgentIntegrationsUnchanged(t *testing.T) {
 	isolateAgents(t)
 	server := identityServer(t)
@@ -672,6 +694,14 @@ func TestSetupStyledInteractiveInstallsDetectedAgentsWithoutPrompt(t *testing.T)
 	}
 	if strings.Contains(stdout, "Set up HEY for your coding agents?") {
 		t.Errorf("setup asked for agent confirmation:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "Signed in as Jane Doe (jane@example.com)") {
+		t.Errorf("setup omitted the signed-in identity:\n%s", stdout)
+	}
+	for _, hidden := range []string{"• Personal", "• Work", "Using All Accounts", "Default mail account"} {
+		if strings.Contains(stdout, hidden) {
+			t.Errorf("setup listed account detail %q:\n%s", hidden, stdout)
+		}
 	}
 	if _, err := os.Stat(filepath.Join(configHome, ".agents", "skills", "hey", "SKILL.md")); err != nil {
 		t.Errorf("setup did not install the detected agent skill: %v", err)

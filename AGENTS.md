@@ -52,8 +52,8 @@ login`, `hey auth logout`, `hey auth status`), the `hey login`/`hey logout` shor
 `hey setup` and `hey doctor` work without authentication.
 
 Bare `hey` at an interactive terminal runs the setup wizard when logged out
-(`runSetupWizard` in `internal/cmd/setup.go` — welcome, OAuth sign-in, linked-account
-greeting, coding-agent setup, summary) and stops at the summary; `hey setup --skip-agents`
+(`runSetupWizard` in `internal/cmd/setup.go` — welcome, OAuth sign-in, signed-in identity,
+coding-agent setup, summary) and stops at the summary; `hey setup --skip-agents`
 and `--skip-omarchy` leave those integrations unchanged. In every other case bare `hey`
 prints help. The TUI lives at `hey tui` (plus the hidden `hey hey`). `config.json`'s
 `onboarded` flag only trims a later logged-out run to the sign-in step. `HEY_NONINTERACTIVE=1`

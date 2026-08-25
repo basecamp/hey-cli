@@ -61,8 +61,8 @@ hey
 ```
 
 The first time you run `hey` at a terminal it walks you through setup: it signs you in
-(browser-based OAuth), shows the mail accounts linked to your HEY identity, and connects
-your detected coding agents (Claude Code, Codex). Run `hey setup --skip-agents` to leave
+with browser-based OAuth, confirms your identity, and connects your detected coding agents
+(Claude Code, Codex). Run `hey setup --skip-agents` to leave
 agent integrations unchanged, or add `--skip-omarchy` to leave Omarchy unchanged.
 `hey setup --silent-success` keeps required authentication visible, shows an installation
 spinner, and ends with `SETUP COMPLETE`; failure guidance remains visible. After that,
