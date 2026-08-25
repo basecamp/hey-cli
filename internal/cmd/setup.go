@@ -350,12 +350,12 @@ func (s *setupWizard) greet() {
 			if account.Email != "" {
 				label += " (" + terminal.SanitizeLine(account.Email) + ")"
 			}
-			fmt.Fprintln(w, muted.format("• "+label))
+			fmt.Fprintln(w, "• "+label)
 		}
 		if cfg.AccountID == config.AllAccounts {
-			fmt.Fprintln(w, muted.format("Using All Accounts — hey account use <id> to default to one"))
+			fmt.Fprintln(w, "Using All Accounts — hey account use <id> to default to one")
 		} else {
-			fmt.Fprintln(w, muted.format("Default mail account: "+cfg.AccountID))
+			fmt.Fprintln(w, "Default mail account: "+cfg.AccountID)
 		}
 	}
 	fmt.Fprintln(w)
@@ -417,7 +417,7 @@ func (s *setupWizard) installCompletions() bool {
 		w := s.cmd.OutOrStdout()
 		fmt.Fprintln(w, statusLine(true, "Shell completions installed for "+shell))
 		if target.Hint != "" {
-			fmt.Fprintln(w, muted.format(target.Hint))
+			fmt.Fprintln(w, target.Hint)
 		}
 		fmt.Fprintln(w)
 	}
@@ -461,7 +461,7 @@ func (s *setupWizard) setupAgents() agentSetupOutcome {
 		if s.verbose {
 			fmt.Fprintln(w, "This will:")
 			step := 1
-			fmt.Fprintln(w, muted.format(fmt.Sprintf("%d. Install the HEY agent skill to ~/.agents/skills/hey/", step)))
+			fmt.Fprintf(w, "%d. Install the HEY agent skill to ~/.agents/skills/hey/\n", step)
 			step++
 			for _, a := range agents {
 				handler, ok := agentSetupHandlers[a.ID]
@@ -469,7 +469,7 @@ func (s *setupWizard) setupAgents() agentSetupOutcome {
 					continue
 				}
 				for _, label := range handler.Labels {
-					fmt.Fprintln(w, muted.format(fmt.Sprintf("%d. %s", step, label)))
+					fmt.Fprintf(w, "%d. %s\n", step, label)
 					step++
 				}
 			}
@@ -612,7 +612,7 @@ func (s *setupWizard) setupOmarchy(signedIn bool) {
 		}
 		if s.verbose {
 			fmt.Fprintln(w)
-			fmt.Fprintln(w, muted.format(strings.TrimRight(omarchyKeybindHint, "\n")))
+			fmt.Fprintln(w, strings.TrimRight(omarchyKeybindHint, "\n"))
 		}
 		fmt.Fprintln(w)
 	}
@@ -666,16 +666,16 @@ func showWizardSuccess(w io.Writer, result wizardResult, outcome agentSetupOutco
 	if verbose {
 		fmt.Fprintln(w, statusLine(!hasAuthIssue(result.Issues), "Signed in"))
 		if result.AgentsSkipped {
-			fmt.Fprintln(w, muted.format("Coding agent setup skipped"))
+			fmt.Fprintln(w, "Coding agent setup skipped")
 		} else if outcome.Skipped {
-			fmt.Fprintln(w, muted.format("Coding agent setup skipped — run: hey setup"))
+			fmt.Fprintln(w, "Coding agent setup skipped — run: hey setup")
 		} else {
 			for _, check := range outcome.Checks {
 				fmt.Fprintln(w, statusLine(check.Status == "pass", check.Name))
 			}
 		}
 		if result.OmarchySkipped {
-			fmt.Fprintln(w, muted.format("Omarchy setup skipped"))
+			fmt.Fprintln(w, "Omarchy setup skipped")
 		} else if result.Omarchy != nil {
 			ok := true
 			for _, step := range result.Omarchy.Steps {
@@ -691,14 +691,14 @@ func showWizardSuccess(w io.Writer, result wizardResult, outcome agentSetupOutco
 			if bar.Detail != "" {
 				barLine += " — " + bar.Detail
 			}
-			fmt.Fprintln(w, muted.format("Bar plugin: "+barLine))
+			fmt.Fprintln(w, "Bar plugin: "+barLine)
 			desktop := "launcher entry, menu row and theme template in place"
 			for _, step := range result.Omarchy.Steps {
 				if step.Name != "bar plugin" && step.Status == "failed" {
 					desktop = step.Name + " failed: " + step.Detail
 				}
 			}
-			fmt.Fprintln(w, muted.format("Desktop: "+desktop))
+			fmt.Fprintln(w, "Desktop: "+desktop)
 		}
 		fmt.Fprintln(w)
 	}
@@ -722,7 +722,7 @@ func showWizardSuccess(w io.Writer, result wizardResult, outcome agentSetupOutco
 		width = max(width, len(ex.cmd))
 	}
 	for _, ex := range examples {
-		fmt.Fprintf(w, "%s%s  %s\n", muted.format(ex.cmd), strings.Repeat(" ", width-len(ex.cmd)), italicMuted.format(ex.desc))
+		fmt.Fprintf(w, "%s%s  %s\n", ex.cmd, strings.Repeat(" ", width-len(ex.cmd)), italicPlain.format(ex.desc))
 	}
 	fmt.Fprintln(w)
 }
@@ -745,7 +745,7 @@ func printWizardIssues(w io.Writer, issues []agentIssue) {
 		}
 		fmt.Fprintln(w, warning.format(line))
 	}
-	fmt.Fprintln(w, muted.format("Then verify with: hey doctor"))
+	fmt.Fprintln(w, "Then verify with: hey doctor")
 	fmt.Fprintln(w)
 }
 

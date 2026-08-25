@@ -85,10 +85,9 @@ const (
 	plain       style = ""
 	bold        style = "1;34"
 	italic      style = "3;94"
-	italicMuted style = "3;90"
+	italicPlain style = "3"
 	success     style = "32"
 	warning     style = "33"
-	muted       style = "90"
 )
 
 func (s style) format(value string) string {

@@ -182,7 +182,7 @@ func runSetupAgent(cmd *cobra.Command, agent harness.AgentInfo, handler agentSet
 		// handler's return value: never tell the user to start a session
 		// against an integration that is not connected.
 		if skillErr == nil && agent.Detect != nil && agent.Detect() && agentChecksPass(agent) {
-			fmt.Fprintln(w, muted.format("Start a new "+agent.Name+" session to use HEY commands."))
+			fmt.Fprintln(w, "Start a new "+agent.Name+" session to use HEY commands.")
 			return nil
 		}
 		return &apierr.Error{
@@ -265,27 +265,27 @@ func runSetupAgent(cmd *cobra.Command, agent harness.AgentInfo, handler agentSet
 func runClaudeSetup(cmd *cobra.Command) error {
 	w := cmd.OutOrStdout()
 	progress := func(message string) {
-		fmt.Fprintln(w, muted.format(message))
+		fmt.Fprintln(w, message)
 	}
 
 	if err := installClaudePlugin(cmd.Context(), progress); err != nil {
 		fmt.Fprintln(w, warning.format("Claude Code setup failed: "+err.Error()))
 		var setupErr *agentSetupError
 		if errors.As(err, &setupErr) && len(setupErr.Manual) > 0 {
-			fmt.Fprintln(w, muted.format("Try manually:"))
+			fmt.Fprintln(w, "Try manually:")
 			for _, manual := range setupErr.Manual {
 				fmt.Fprintln(w, bold.format(manual))
 			}
 		}
-		fmt.Fprintln(w, muted.format("Then verify with: hey doctor"))
+		fmt.Fprintln(w, "Then verify with: hey doctor")
 		return nil
 	}
 
 	fmt.Fprintln(w, statusLine(true, "Claude Code plugin installed"))
 	fmt.Fprintln(w, statusLine(true, "Claude Code skill linked"))
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, muted.format("Tip: enable auto-update to stay current with new CLI releases:"))
-	fmt.Fprintln(w, muted.format(harness.AutoUpdateHint))
+	fmt.Fprintln(w, "Tip: enable auto-update to stay current with new CLI releases:")
+	fmt.Fprintln(w, harness.AutoUpdateHint)
 	return nil
 }
 
@@ -391,7 +391,7 @@ func runCodexSetup(cmd *cobra.Command) error {
 	path, err := installCodexSkill()
 	if err != nil {
 		fmt.Fprintln(w, warning.format("Codex skill install failed: "+err.Error()))
-		fmt.Fprintln(w, muted.format("Then verify with: hey doctor"))
+		fmt.Fprintln(w, "Then verify with: hey doctor")
 		return nil //nolint:nilerr // warn and continue; the post-setup snapshot reports the failure
 	}
 	fmt.Fprintln(w, statusLine(true, "Codex skill installed ("+path+")"))

@@ -488,13 +488,16 @@ func TestShowWizardSuccessConciseHidesChecklist(t *testing.T) {
 	colorDisabled = false
 	out.Reset()
 	showWizardSuccess(&out, result, outcome, false, 1)
-	if !strings.Contains(out.String(), muted.format("hey hey")) {
-		t.Errorf("summary command is not muted:\n%s", out.String())
+	if strings.Contains(out.String(), "\033[90m") || strings.Contains(out.String(), "\033[2m") {
+		t.Errorf("summary text is dimmed:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "\nhey hey ") {
+		t.Errorf("summary command is not in the default color:\n%s", out.String())
 	}
 	if strings.Contains(out.String(), bold.format("hey hey")) {
 		t.Errorf("summary command competes with the step style:\n%s", out.String())
 	}
-	if !strings.Contains(out.String(), italicMuted.format("Open TUI")) {
+	if !strings.Contains(out.String(), italicPlain.format("Open TUI")) {
 		t.Errorf("summary hint is not differentiated from its command:\n%s", out.String())
 	}
 }

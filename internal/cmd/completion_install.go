@@ -526,7 +526,7 @@ func (c *completionInstallCommand) reportPackaged(cmd *cobra.Command, shell, pat
 	if writer.IsStyled() {
 		w := cmd.OutOrStdout()
 		for _, notice := range notices {
-			fmt.Fprintln(w, muted.format(notice))
+			fmt.Fprintln(w, notice)
 		}
 	}
 	return nil
@@ -559,7 +559,7 @@ func (c *completionInstallCommand) report(cmd *cobra.Command, env completionEnv,
 	if writer.IsStyled() {
 		w := cmd.OutOrStdout()
 		for _, notice := range notices {
-			fmt.Fprintln(w, muted.format(notice))
+			fmt.Fprintln(w, notice)
 		}
 	}
 	return nil
