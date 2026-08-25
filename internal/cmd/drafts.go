@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -11,10 +12,14 @@ import (
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
+// maxDraftPages is how many pages of drafts one command reads, counting the first.
+const maxDraftPages = 100
+
 type draftsCommand struct {
 	cmd   *cobra.Command
 	limit int
 	all   bool
+	page  string
 }
 
 func newDraftCommand() *cobra.Command {
@@ -22,7 +27,7 @@ func newDraftCommand() *cobra.Command {
 		Use:   "draft",
 		Short: "Browse unsent drafts",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list. Returns saved draft messages with IDs, summaries, and subjects.",
+			"agent_notes": "Subcommands: list. Returns saved draft messages with IDs, summaries, and subjects. --page continues from the next_page cursor of an earlier listing.",
 		},
 	}
 	draft.AddCommand(newDraftsCommand().cmd)
@@ -36,13 +41,14 @@ func newDraftsCommand() *draftsCommand {
 		Short: "List draft emails",
 		Example: `  hey draft list
   hey draft list --limit 10
-  hey draft list --json`,
+  hey draft list --all --json`,
 		RunE: draftsCommand.run,
 		Args: cobra.NoArgs,
 	}
 
 	draftsCommand.cmd.Flags().IntVar(&draftsCommand.limit, "limit", 0, "Maximum number of drafts to show")
 	draftsCommand.cmd.Flags().BoolVar(&draftsCommand.all, "all", false, "Fetch all results (override --limit)")
+	draftsCommand.cmd.Flags().StringVar(&draftsCommand.page, "page", "", "Continue from a next_page cursor")
 
 	return draftsCommand
 }
@@ -52,21 +58,23 @@ func (c *draftsCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx := cmd.Context()
-	result, err := sdk.Entries().ListDrafts(ctx, nil)
+	first, err := readDraftsPage(cmd.Context(), c.page)
 	if err != nil {
-		return apierr.FromSDK(err)
+		return err
+	}
+	collected, err := collectPages(cmd.Context(), first, pageRequest{Limit: c.limit, All: c.all, MaxPages: maxDraftPages}, readDraftsPage)
+	if err != nil {
+		return err
 	}
 
-	var drafts []generated.DraftMessage
-	if result != nil {
-		drafts = *result
-	}
-	total := len(drafts)
+	drafts := collected.Items
+	nextPage := collected.Cursor
+	notice := draftsTruncationNotice(collected.Read, collected.Truncated)
 	if c.limit > 0 && !c.all && len(drafts) > c.limit {
 		drafts = drafts[:c.limit]
+		nextPage = ""
+		notice = output.TruncationNotice(len(drafts), len(collected.Items))
 	}
-	notice := output.TruncationNotice(len(drafts), total)
 
 	if writer.IsStyled() {
 		if len(drafts) == 0 {
@@ -81,13 +89,42 @@ func (c *draftsCommand) run(cmd *cobra.Command, args []string) error {
 		}
 		table.print()
 		if notice != "" {
-			fmt.Fprintln(cmd.OutOrStdout(), notice)
+			fmt.Fprintf(cmd.OutOrStdout(), "\n%s\n", notice)
 		}
 		return nil
 	}
+	if stderrNotice := paginationNoticeForStderr(writer.EffectiveFormat(), notice); stderrNotice != "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), stderrNotice)
+	}
 
-	return writeOK(drafts,
+	opts := []output.ResponseOption{
 		output.WithSummary(fmt.Sprintf("%d drafts", len(drafts))),
 		output.WithNotice(notice),
-	)
+		output.WithMeta("pages_fetched", collected.Read),
+	}
+	if nextPage != "" {
+		opts = append(opts, output.WithMeta("next_page", nextPage))
+	}
+	return writeOK(drafts, opts...)
+}
+
+// readDraftsPage reads one page of drafts. The index pages by geared_pagination's opaque
+// cursor out of the Link header — a page number is answered with the first page forever
+// — which is what ListDraftsPage exists for; an empty cursor is the first page.
+func readDraftsPage(ctx context.Context, cursor string) (pageResult[generated.DraftMessage], error) {
+	page, err := sdk.Entries().ListDraftsPage(ctx, cursor)
+	if err != nil {
+		return pageResult[generated.DraftMessage]{}, apierr.FromSDK(err)
+	}
+	if page == nil {
+		return pageResult[generated.DraftMessage]{}, nil
+	}
+	return pageResult[generated.DraftMessage]{Items: page.Drafts, Cursor: page.NextPage}, nil
+}
+
+func draftsTruncationNotice(pages int, truncated bool) string {
+	if !truncated {
+		return ""
+	}
+	return fmt.Sprintf("Draft listing stopped after %d pages. Continue with --page using next_page.", pages)
 }

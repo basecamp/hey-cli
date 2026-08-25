@@ -135,6 +135,69 @@ func TestDraftsCommandStyledEmpty(t *testing.T) {
 	}
 }
 
+// The drafts index pages by geared_pagination's opaque cursor out of the Link header, so
+// --all follows the cursor each page answers rather than counting pages.
+func TestDraftsCommandFollowsTheCursor(t *testing.T) {
+	var queries []string
+	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries = append(queries, r.URL.RawQuery)
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("page") == "draft-cursor-2" {
+			_, _ = io.WriteString(w, `[{"id":102,"subject":"Team retreat itinerary"}]`)
+			return
+		}
+		w.Header().Set("Link", `<https://app.hey.com/entries/drafts.json?page=draft-cursor-2>; rel="next"`)
+		_, _ = io.WriteString(w, `[{"id":101,"subject":"Quarterly planning follow-up"}]`)
+	}), "draft", "list", "--all")
+	if err != nil {
+		t.Fatalf("execute drafts: %v", err)
+	}
+	if len(queries) != 2 || strings.Contains(queries[0], "page=") || !strings.Contains(queries[1], "page=draft-cursor-2") {
+		t.Errorf("queries = %v", queries)
+	}
+	items, ok := response.Data.([]any)
+	if !ok || len(items) != 2 {
+		t.Fatalf("data = %#v, want both pages' drafts", response.Data)
+	}
+	if response.Notice != "" {
+		t.Errorf("notice = %q, want none for a complete walk", response.Notice)
+	}
+}
+
+// --page continues from a next_page cursor, and a first page with more behind it names
+// the cursor in its meta so a script can carry on.
+func TestDraftsCommandReportsAndAcceptsTheCursor(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("page") == "draft-cursor-2" {
+			_, _ = io.WriteString(w, `[{"id":102,"subject":"Team retreat itinerary"}]`)
+			return
+		}
+		w.Header().Set("Link", `<https://app.hey.com/entries/drafts.json?page=draft-cursor-2>; rel="next"`)
+		_, _ = io.WriteString(w, `[{"id":101,"subject":"Quarterly planning follow-up"}]`)
+	})
+
+	response, err := runJSONCommand(t, handler, "draft", "list")
+	if err != nil {
+		t.Fatalf("execute drafts: %v", err)
+	}
+	if response.Meta == nil || response.Meta["next_page"] != "draft-cursor-2" {
+		t.Errorf("meta = %#v, want next_page cursor", response.Meta)
+	}
+
+	response, err = runJSONCommand(t, handler, "draft", "list", "--page", "draft-cursor-2")
+	if err != nil {
+		t.Fatalf("execute drafts --page: %v", err)
+	}
+	items, ok := response.Data.([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("data = %#v, want the second page", response.Data)
+	}
+	if draft, ok := items[0].(map[string]any); !ok || draft["id"] != float64(102) {
+		t.Errorf("draft = %#v, want ID 102", items[0])
+	}
+}
+
 func TestDraftsCommandAPIError(t *testing.T) {
 	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "drafts unavailable", http.StatusBadRequest)

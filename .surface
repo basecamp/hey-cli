@@ -122,6 +122,7 @@ hey draft
 hey draft list
 hey draft list --all
 hey draft list --limit
+hey draft list --page
 hey event
 hey event add
 hey event add --all-day
