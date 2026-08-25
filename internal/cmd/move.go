@@ -30,7 +30,7 @@ func newMoveCommand() *moveCommand {
   hey move 12345 67890 --to "paper trail"
   hey move 12345 --to 987`,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts box item IDs from hey box view output. --to accepts a box name, kind, or ID. Use HEY's scheduled Bubble Up flow for Bubble Up.",
+			"agent_notes": "Accepts box item IDs from hey box view output. --to accepts a box name, kind, or ID. Use hey bubble up for Bubble Up.",
 		},
 		RunE: moveCommand.run,
 		Args: usageMinOneArg(),
@@ -97,7 +97,7 @@ func resolveMoveDestination(ctx context.Context, nameOrID string) (*generated.Bo
 
 func validateMoveDestination(box *generated.Box) (*generated.Box, error) {
 	if strings.EqualFold(box.Kind, hey.BoxKindBubbleUp) {
-		return nil, apierr.ErrUsage("Bubble Up requires a scheduled date and is not supported by hey move")
+		return nil, apierr.ErrUsageHint("Bubble Up is not a move destination", "Run: hey bubble up <box-item-id> --now")
 	}
 	return box, nil
 }

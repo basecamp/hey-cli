@@ -43,6 +43,10 @@ hey box view
 hey box view --all
 hey box view --limit
 hey box view --page
+hey bubble
+hey bubble pop
+hey bubble up
+hey bubble up --now
 hey bulk-reply
 hey bulk-reply preview
 hey bulk-reply send

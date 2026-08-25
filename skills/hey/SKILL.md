@@ -43,11 +43,13 @@ triggers:
   - hey seen
   - hey unseen
   - hey move
+  - hey bubble
   - hey trash
   - hey spam
   - hey ignore
   - hey stop-ignoring
   - move email
+  - bubble a thread up
   - trash email
   - mark as spam
   - ignore email thread
@@ -217,6 +219,8 @@ notice on stderr. Both need list data, so they work on `hey box list`, `hey box 
 | Mark as seen | `hey seen 12345` |
 | Mark as unseen | `hey unseen 12345` |
 | Move email threads | `hey move 12345 --to feed` |
+| Bubble a thread up now | `hey bubble up 12345 --now` |
+| Cancel a bubble-up | `hey bubble pop 12345` |
 | Move email threads to Trash | `hey trash 12345` |
 | Mark email threads as spam | `hey spam 12345` |
 | Ignore email threads | `hey ignore 12345` |
@@ -515,7 +519,17 @@ hey move 12345 --to imbox                     # Move one thread
 hey move 12345 67890 --to "paper trail"       # Move multiple threads
 ```
 
-Takes box item IDs (the `id` field from `hey box view --json`). `--to` accepts a box name, kind, or ID. Supported destinations are Imbox, The Feed, Set Aside, Reply Later, and Paper Trail. Bubble Up requires a scheduled date and is not supported by this command.
+Takes box item IDs (the `id` field from `hey box view --json`). `--to` accepts a box name, kind, or ID. Supported destinations are Imbox, The Feed, Set Aside, Reply Later, and Paper Trail. Bubble Up goes through `hey bubble` instead.
+
+### Email - Bubble Up
+
+```bash
+hey bubble up 12345 --now                     # Bubble a thread up to the top of the Imbox
+hey bubble up 12345 67890 --now               # Bubble multiple threads up
+hey bubble pop 12345                          # Cancel a thread's bubble-up
+```
+
+Takes box item IDs (the `id` field from `hey box view --json`). `--now` is required for `hey bubble up`; a scheduled bubble-up is not supported yet.
 
 ### Email - Trash and Spam
 
