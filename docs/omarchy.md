@@ -69,7 +69,7 @@ step does not stop the others.
 |---|---|---|
 | Desktop entry | `~/.local/share/applications/HEY TUI.desktop` | Distinct from Omarchy's shipped `HEY.desktop` web app. Launches under app-id `org.omarchy.hey` |
 | Menu row | marker block in `~/.config/omarchy/extensions/omarchy-menu.jsonc` | one root `HEY` row that focuses or launches the TUI; its guard is a PATH lookup, never network or `hey` itself. Becomes a submenu once there is more than one thing to open |
-| Bar plugin | clone under `~/.config/omarchy/plugins/37signals.hey`, entry in `~/.config/omarchy/shell.json`'s bar layout | installed and enabled by **signing in with hey** (asked once — see below) or by this command, which also finishes an interrupted install and re-enables a plugin you disabled, verified against the running shell. `--notify` / `--no-notify` set or delete the entry's `notify` key, which the shell hot-reloads and the plugin reads to decide whether to toast. `--remove` disables the plugin and keeps its checkout. An earlier inline `hey-unread` module is removed on sight, its notify choice carried over |
+| Bar plugin | clone under `~/.config/omarchy/plugins/37signals.hey`, entry in `~/.config/omarchy/shell.json`'s bar layout | installed and enabled automatically by the full **`hey setup`** wizard; other interactive sign-ins ask once (see below). This command also finishes an interrupted install and re-enables a plugin you disabled, verified against the running shell. `--notify` / `--no-notify` set or delete the entry's `notify` key, which the shell hot-reloads and the plugin reads to decide whether to toast. `--remove` disables the plugin and keeps its checkout. An earlier inline `hey-unread` module is removed on sight, its notify choice carried over |
 | Theme template | `~/.config/omarchy/themed/hey.toml.tpl` | renders `hey.toml` into every theme so theme authors can override the overlay; triggers `omarchy-theme-refresh` |
 | Keybinding | printed, never written | `o.bind("SUPER + SHIFT + ALT + H", "HEY TUI", "omarchy-launch-or-focus-tui --app-id=org.omarchy.hey hey tui")`; SUPER+SHIFT+E keeps opening the web app unless you `hl.unbind` it. Spelled out rather than `{ tui = "hey tui" }` because the lua helper quotes that into one word and the app-id derived from it would never match |
 
@@ -136,7 +136,8 @@ file, one lock:
 - **Entry points.** An interactive OAuth sign-in — `hey auth login` / `hey login`,
   `requireAuth`'s "Sign in now?" (how `hey tui` and every data command sign in), the lite
   wizard — runs the routine in *ensure* mode and prints at most one stderr line; the full
-  wizard runs it as Step 3; `hey setup omarchy` runs it in *force* mode. The automatic
+  wizard runs Step 3 in *force* mode without asking; `hey setup omarchy` also runs in
+  *force* mode. The automatic
   hooks never run for machine output, `HEY_NONINTERACTIVE`, a non-TTY, or
   `--token`/`--cookie` logins: a script installs with `hey setup omarchy`, which works in
   every output format and exits `setup_failed` on any incomplete outcome — an incomplete

@@ -90,7 +90,7 @@ var ensureOmarchyBarPluginAfterLogin = func(w io.Writer) {
 // confirmOmarchyPanel is the one question the sign-in hook may ask, once ever.
 // A seam so tests can answer it.
 var confirmOmarchyPanel = func() (bool, error) {
-	return tui.Confirm("Put HEY in your Omarchy bar?", true)
+	return tui.Confirm("  Put HEY in your Omarchy bar?", true)
 }
 
 // installBarPlugin puts the 37signals.hey plugin in the bar, in ensure or

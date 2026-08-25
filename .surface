@@ -289,7 +289,11 @@ hey search --to
 hey search filters
 hey seen
 hey setup
+hey setup --silent-success
+hey setup --skip-agents
+hey setup --skip-omarchy
 hey setup agents
+hey setup agents --remove
 hey setup claude
 hey setup codex
 hey setup omarchy

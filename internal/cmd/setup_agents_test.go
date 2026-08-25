@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -572,6 +573,122 @@ func TestMigrationRetriesScrubWhenStoreAlreadyPopulated(t *testing.T) {
 	storedAfter, err := os.ReadFile(filepath.Join(configDir, "credentials.json"))
 	if err != nil || string(storedAfter) != string(storedBefore) {
 		t.Errorf("stored credentials changed during the retry: %v", err)
+	}
+}
+
+func TestSetupAgentsRemoveDeletesManagedSkillsAndPreservesUserFiles(t *testing.T) {
+	isolateAgents(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	for _, dir := range []string{".claude", ".codex"} {
+		if err := os.MkdirAll(filepath.Join(home, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := installSkillFiles(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := linkSkillToClaude(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := installSkillToCodex(); err != nil {
+		t.Fatal(err)
+	}
+	baseline := filepath.Join(home, ".agents", "skills", "hey")
+	if err := os.WriteFile(filepath.Join(baseline, "notes.txt"), []byte("keep me"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+	_, response, err := runAuthCommand(t, home, server.URL, "", true, "setup", "agents", "--remove")
+	if err != nil {
+		t.Fatalf("setup agents --remove: %v", err)
+	}
+	if response.Summary != "Coding-agent integrations removed" {
+		t.Errorf("summary = %q", response.Summary)
+	}
+	for _, path := range []string{
+		filepath.Join(home, ".claude", "skills", "hey"),
+		filepath.Join(home, ".codex", "skills", "hey"),
+		filepath.Join(baseline, skillFilename),
+		filepath.Join(baseline, ownershipMarkerFile),
+	} {
+		if _, statErr := os.Lstat(path); !os.IsNotExist(statErr) {
+			t.Errorf("managed path remains: %s", path)
+		}
+	}
+	if data, readErr := os.ReadFile(filepath.Join(baseline, "notes.txt")); readErr != nil || string(data) != "keep me" {
+		t.Errorf("user file = %q, %v", data, readErr)
+	}
+}
+
+func TestSetupAgentsRemovePreservesUnmanagedSkills(t *testing.T) {
+	isolateAgents(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	paths := []string{
+		filepath.Join(home, ".agents", "skills", "hey"),
+		filepath.Join(home, ".claude", "skills", "hey"),
+		filepath.Join(home, ".codex", "skills", "hey"),
+	}
+	for _, path := range paths {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(path, skillFilename), []byte("user skill"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+	if _, _, err := runAuthCommand(t, home, server.URL, "", true, "setup", "agents", "--remove"); err != nil {
+		t.Fatalf("setup agents --remove: %v", err)
+	}
+	for _, path := range paths {
+		data, readErr := os.ReadFile(filepath.Join(path, skillFilename))
+		if readErr != nil || string(data) != "user skill" {
+			t.Errorf("unmanaged skill %s = %q, %v", path, data, readErr)
+		}
+	}
+}
+
+func TestSetupAgentsRemoveUninstallsClaudePlugin(t *testing.T) {
+	isolateAgents(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	pluginsDir := filepath.Join(home, ".claude", "plugins")
+	if err := os.MkdirAll(pluginsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	registry := `{"version":2,"plugins":{"hey@37signals":[{"version":"1.1.0"}]}}`
+	if err := os.WriteFile(filepath.Join(pluginsDir, "installed_plugins.json"), []byte(registry), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	binDir := t.TempDir()
+	claudePath := filepath.Join(binDir, "claude")
+	if err := os.WriteFile(claudePath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+	var gotName string
+	var gotArgs []string
+	stubRunAgentCommand(t, func(_ context.Context, name string, args ...string) ([]byte, error) {
+		gotName, gotArgs = name, args
+		return nil, nil
+	})
+
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+	if _, _, err := runAuthCommand(t, home, server.URL, "", true, "setup", "agents", "--remove"); err != nil {
+		t.Fatalf("setup agents --remove: %v", err)
+	}
+	if gotName != claudePath || strings.Join(gotArgs, " ") != "plugin uninstall hey@37signals" {
+		t.Errorf("claude command = %q %v", gotName, gotArgs)
 	}
 }
 

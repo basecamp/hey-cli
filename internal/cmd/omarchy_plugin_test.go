@@ -1220,7 +1220,7 @@ func TestRequireAuthRunsTheOmarchyHookAfterSignIn(t *testing.T) {
 func TestLiteWizardRunsTheOmarchyHookOnceAndFullDoesNot(t *testing.T) {
 	isolateAgents(t)
 	stubInteractive(t, true)
-	stubStdinTerminal(t, true)
+	stubStdinTerminal(t)
 	logins := stubLoginInteractively(t, nil)
 	hookCalls := stubOmarchyAfterLogin(t)
 	server := quietServer(t)
@@ -1260,7 +1260,9 @@ func TestSetupWizardStep3InstallsThePlugin(t *testing.T) {
 	t.Cleanup(func() { colorDisabled = origColor })
 
 	enabled := false
+	omarchyCalls := 0
 	stubOmarchyRun(t, func(name string, args ...string) (string, error) {
+		omarchyCalls++
 		command := strings.Join(append([]string{name}, args...), " ")
 		switch {
 		case name != "omarchy":
@@ -1288,13 +1290,106 @@ func TestSetupWizardStep3InstallsThePlugin(t *testing.T) {
 		t.Fatalf("setup: %v\n%s", err, stdout.String())
 	}
 	text := stdout.String()
-	for _, want := range []string{"Step 3: Omarchy desktop", "HEY is in your Omarchy bar", "✓ Omarchy desktop", "Setup complete!"} {
+	for _, want := range []string{"Step 1: Omarchy desktop", "HEY is in your Omarchy bar", "Step 2: Try it out!", "hey hey", "Open TUI"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q:\n%s", want, text)
 		}
 	}
-	if *confirms != 1 {
-		t.Errorf("consent asked %d times, want 1", *confirms)
+	if *confirms != 0 {
+		t.Errorf("setup asked for Omarchy consent %d times", *confirms)
+	}
+	if strings.Contains(text, "Put HEY in your Omarchy bar?") {
+		t.Errorf("setup asked an Omarchy question:\n%s", text)
+	}
+	for _, hidden := range []string{"✓ Omarchy desktop", "Bar plugin:", "Desktop:", "Add a keybinding yourself"} {
+		if strings.Contains(text, hidden) {
+			t.Errorf("the concise wizard printed %q:\n%s", hidden, text)
+		}
+	}
+
+	t.Setenv(setupVerboseEnv, "1")
+	root = newRootCmd()
+	stdout.Reset()
+	root.SetOut(&stdout)
+	root.SetErr(&stdout)
+	root.SetArgs([]string{"--base-url", server.URL, "setup", "--styled"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("verbose setup: %v\n%s", err, stdout.String())
+	}
+	for _, want := range []string{"✓ Omarchy desktop", "Bar plugin:", "Desktop:", "Add a keybinding yourself"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("verbose setup missing %q:\n%s", want, stdout.String())
+		}
+	}
+
+	// A later concise run keeps the detected integration visible and reports
+	// that it is already connected.
+	t.Setenv(setupVerboseEnv, "")
+	root = newRootCmd()
+	stdout.Reset()
+	root.SetOut(&stdout)
+	root.SetErr(&stdout)
+	root.SetArgs([]string{"--base-url", server.URL, "setup", "--styled"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("repeat setup: %v\n%s", err, stdout.String())
+	}
+	for _, want := range []string{"Step 1: Omarchy desktop", "✓ Omarchy desktop connected", "Step 2: Try it out!"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("repeat setup missing %q:\n%s", want, stdout.String())
+		}
+	}
+
+	beforeSilent := omarchyCalls
+	root = newRootCmd()
+	stdout.Reset()
+	root.SetOut(&stdout)
+	root.SetErr(&stdout)
+	root.SetArgs([]string{"--base-url", server.URL, "setup", "--styled", "--silent-success"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("silent setup: %v\n%s", err, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Installing HEY…") || !strings.HasSuffix(stdout.String(), "\r\x1b[2KSETUP COMPLETE\n") {
+		t.Errorf("silent setup output = %q", stdout.String())
+	}
+	if omarchyCalls == beforeSilent {
+		t.Error("silent setup did not verify the Omarchy integration")
+	}
+}
+
+func TestSetupWizardSkipOmarchyLeavesIntegrationUnchanged(t *testing.T) {
+	isolateAgents(t)
+	stubInteractive(t, true)
+	server := identityServer(t)
+	configHome := t.TempDir()
+	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "session-cookie"); err != nil {
+		t.Fatalf("auth login: %v", err)
+	}
+	ran := stubOmarchyRun(t, omarchyUnavailable)
+	t.Setenv("HEY_TOKEN", "")
+	t.Setenv("HEY_NO_KEYRING", "1")
+	t.Setenv("HEY_BASE_URL", "")
+	t.Setenv("HOME", configHome)
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	t.Setenv("XDG_STATE_HOME", configHome)
+	t.Setenv("XDG_CACHE_HOME", configHome)
+	t.Setenv("OMARCHY_PATH", t.TempDir())
+	origColor := colorDisabled
+	colorDisabled = true
+	t.Cleanup(func() { colorDisabled = origColor })
+
+	root := newRootCmd()
+	var stdout bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetErr(&stdout)
+	root.SetArgs([]string{"--base-url", server.URL, "setup", "--styled", "--skip-omarchy"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("setup --skip-omarchy: %v\n%s", err, stdout.String())
+	}
+	if len(*ran) != 0 {
+		t.Errorf("Omarchy commands ran: %v", *ran)
+	}
+	if strings.Contains(stdout.String(), "Omarchy setup skipped") || strings.Contains(stdout.String(), "Omarchy desktop") || strings.Contains(stdout.String(), "Step 1:") || !strings.Contains(stdout.String(), "Try it out!") {
+		t.Errorf("unexpected setup output:\n%s", stdout.String())
 	}
 }
 
@@ -1384,11 +1479,11 @@ func TestSetupWizardStep3CloneFailureIsIncomplete(t *testing.T) {
 		t.Fatalf("setup: %v\n%s", err, stdout.String())
 	}
 	text := stdout.String()
-	if !strings.Contains(text, "needs attention") || !strings.Contains(text, "hey setup omarchy") {
+	if !strings.Contains(text, "need attention") || !strings.Contains(text, "hey setup omarchy") {
 		t.Errorf("a clone failure must leave the wizard incomplete with the remediation:\n%s", text)
 	}
-	if !strings.Contains(text, "✗ Omarchy desktop") {
-		t.Errorf("the checklist must not contradict the issue list:\n%s", text)
+	if strings.Contains(text, "✗ Omarchy desktop") {
+		t.Errorf("the concise summary printed the checklist:\n%s", text)
 	}
 }
 

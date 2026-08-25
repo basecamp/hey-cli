@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -25,7 +26,10 @@ import (
 )
 
 type setupCommand struct {
-	cmd *cobra.Command
+	cmd           *cobra.Command
+	skipAgents    bool
+	skipOmarchy   bool
+	silentSuccess bool
 }
 
 func newSetupCommand() *setupCommand {
@@ -33,13 +37,15 @@ func newSetupCommand() *setupCommand {
 	setupCommand.cmd = &cobra.Command{
 		Use:   "setup",
 		Short: "Set up HEY for first use",
-		Long: `Sign in and connect your coding agents. On Omarchy, a styled interactive run also
-installs hey into the desktop and offers the HEY bar plugin (asked once); machine
-and non-interactive runs never touch the desktop — hey setup omarchy does that
-explicitly.`,
+		Long: `Sign in, connect detected coding agents, and install the Omarchy integration when
+applicable. Use --skip-agents or --skip-omarchy to leave either integration unchanged.
+--silent-success keeps authentication visible, shows an installation spinner, and ends
+with SETUP COMPLETE. Machine and non-interactive runs never touch the desktop —
+hey setup omarchy does that explicitly. Set HEY_SETUP_VERBOSE=1 to show the detailed setup checklist, agent
+installation progress, Omarchy status, and keybinding hint.`,
 		Args: cobra.NoArgs,
 		Annotations: map[string]string{
-			"agent_notes": "Runs the first-run wizard: OAuth sign-in, a look at the linked accounts, and coding-agent setup. HEY_NONINTERACTIVE=1 suppresses OAuth and every prompt, but the wizard still connects detected agents (writing skill files) and persists the onboarded flag — there is no read-only mode; use `hey doctor` to inspect without changing anything. --json changes only the output format: a terminal on stdin (an allocated PTY included) still starts browser OAuth and waits for it. Logged out and non-interactive reports status incomplete with a remediation breadcrumb.",
+			"agent_notes": "Runs the first-run wizard: OAuth sign-in, a look at the linked accounts, coding-agent setup, and the Omarchy integration when detected. --skip-agents and --skip-omarchy leave those integrations unchanged. --silent-success keeps required authentication and failure output, shows an installation spinner, and ends with SETUP COMPLETE. HEY_NONINTERACTIVE=1 suppresses interactive sign-in, but unskipped agent setup still writes skill files and the wizard persists the onboarded flag — there is no read-only mode; use `hey doctor` to inspect without changing anything. --json changes only the output format: a terminal on stdin (an allocated PTY included) still starts browser OAuth and waits for it. Logged out and non-interactive reports status incomplete with a remediation breadcrumb.",
 		},
 		RunE: setupCommand.run,
 	}
@@ -49,6 +55,9 @@ explicitly.`,
 	}
 	setupCommand.cmd.AddCommand(newSetupAgentsCommand())
 	setupCommand.cmd.AddCommand(newSetupOmarchyCommand().cmd)
+	setupCommand.cmd.Flags().BoolVar(&setupCommand.skipAgents, "skip-agents", false, "Leave coding-agent integrations unchanged")
+	setupCommand.cmd.Flags().BoolVar(&setupCommand.skipOmarchy, "skip-omarchy", false, "Leave the Omarchy integration unchanged")
+	setupCommand.cmd.Flags().BoolVar(&setupCommand.silentSuccess, "silent-success", false, "Show setup activity and end a successful run with SETUP COMPLETE")
 
 	return setupCommand
 }
@@ -57,7 +66,15 @@ func (c *setupCommand) run(cmd *cobra.Command, _ []string) error {
 	if err := rejectListOnlyFormats("the setup wizard"); err != nil {
 		return err
 	}
-	return runSetupWizard(cmd, wizardOptions{full: true})
+	if c.silentSuccess && (!writer.IsStyled() || !interactiveStdio()) {
+		return apierr.ErrUsage("--silent-success requires an interactive terminal with styled output")
+	}
+	return runSetupWizard(cmd, wizardOptions{
+		full:          true,
+		skipAgents:    c.skipAgents,
+		skipOmarchy:   c.skipOmarchy,
+		silentSuccess: c.silentSuccess,
+	})
 }
 
 // rejectListOnlyFormats fails fast on --ids-only and --count: setup results
@@ -75,10 +92,18 @@ func rejectListOnlyFormats(command string) error {
 	}
 }
 
-// wizardOptions tunes the first-run wizard. full runs every step; a lite run
-// (a later logged-out bare `hey` once onboarded) only signs in.
+const setupVerboseEnv = "HEY_SETUP_VERBOSE"
+
+var setupSpinnerInterval = 80 * time.Millisecond
+
+// wizardOptions tunes the first-run wizard. A full run performs every
+// unskipped step; a lite run (a later logged-out bare `hey` once onboarded)
+// only signs in.
 type wizardOptions struct {
-	full bool
+	full          bool
+	skipAgents    bool
+	skipOmarchy   bool
+	silentSuccess bool
 }
 
 // wizardIdentity is the signed-in HEY identity reported in the envelope.
@@ -95,6 +120,10 @@ type wizardResult struct {
 	Identity       *wizardIdentity   `json:"identity,omitempty"`
 	Accounts       []accountListItem `json:"accounts,omitempty"`
 	SkillInstalled bool              `json:"skill_installed"`
+	// AgentsSkipped reports that --skip-agents left coding-agent integrations unchanged.
+	AgentsSkipped bool `json:"agents_skipped,omitempty"`
+	// OmarchySkipped reports that --skip-omarchy left the desktop integration unchanged.
+	OmarchySkipped bool `json:"omarchy_skipped,omitempty"`
 	// CompletionsInstalled reports the shell completion step, which asks
 	// nothing and fails quietly — a shell hey cannot write to is not a reason
 	// for setup to be incomplete.
@@ -115,31 +144,30 @@ type omarchyOutcome struct {
 // setupWizard carries one wizard run: the command it prints through and what
 // it has learned so far.
 type setupWizard struct {
-	cmd     *cobra.Command
-	opts    wizardOptions
-	styled  bool
-	result  wizardResult
-	outcome agentSetupOutcome
-}
-
-// confirmAgentSetup is the wizard's one prompt, a seam so tests can answer it.
-var confirmAgentSetup = func() (bool, error) {
-	return tui.Confirm("  Set up HEY for your coding agents?", true)
+	cmd      *cobra.Command
+	opts     wizardOptions
+	styled   bool
+	verbose  bool
+	nextStep int
+	result   wizardResult
+	outcome  agentSetupOutcome
 }
 
 // runSetupWizard is the entry point shared by `hey setup` and bare `hey`.
 func runSetupWizard(cmd *cobra.Command, opts wizardOptions) error {
 	wizard := &setupWizard{
-		cmd:    cmd,
-		opts:   opts,
-		styled: writer.IsStyled(),
-		result: wizardResult{Version: version.Version, Status: "complete"},
+		cmd:      cmd,
+		opts:     opts,
+		styled:   writer.IsStyled(),
+		verbose:  os.Getenv(setupVerboseEnv) == "1",
+		nextStep: 1,
+		result:   wizardResult{Version: version.Version, Status: "complete"},
 	}
 	return wizard.run()
 }
 
 func (s *setupWizard) run() error {
-	if s.styled {
+	if s.narrates() {
 		s.welcome(s.cmd.OutOrStdout())
 	}
 
@@ -154,9 +182,19 @@ func (s *setupWizard) run() error {
 		s.result.Issues = append(s.result.Issues, agentIssue{Check: "Not logged in", Hint: "Run: hey auth login"})
 	}
 
+	stopSilentSpinner := func() {}
+	if s.opts.silentSuccess {
+		stopSilentSpinner = startSetupSpinner(s.cmd.OutOrStdout(), "Installing HEY…", true)
+	}
+	defer stopSilentSpinner()
+
 	if s.opts.full {
 		s.result.CompletionsInstalled = s.installCompletions()
-		s.outcome = s.setupAgents()
+		if s.opts.skipAgents {
+			s.result.AgentsSkipped = true
+		} else {
+			s.outcome = s.setupAgents()
+		}
 	} else if signedIn {
 		// A lite wizard that just signed in gets the same one-line Omarchy
 		// hook as `hey auth login`; the full wizard runs the real step below.
@@ -169,9 +207,14 @@ func (s *setupWizard) run() error {
 		s.result.Status = "incomplete"
 	}
 	if s.opts.full {
-		s.setupOmarchy(signedIn)
+		if s.opts.skipOmarchy {
+			s.result.OmarchySkipped = true
+		} else {
+			s.setupOmarchy(signedIn)
+		}
 	}
 
+	stopSilentSpinner()
 	s.persistOnboarded()
 	return s.summary()
 }
@@ -187,6 +230,16 @@ func (s *setupWizard) welcome(w io.Writer) {
 	fmt.Fprintln(w)
 }
 
+// printStep gives each displayed setup stage the next consecutive number.
+func (s *setupWizard) printStep(w io.Writer, label string) {
+	fmt.Fprintln(w, bold.format(fmt.Sprintf("Step %d: %s", s.nextStep, label)))
+	s.nextStep++
+}
+
+func (s *setupWizard) narrates() bool {
+	return s.styled && !s.opts.silentSuccess
+}
+
 // signIn makes sure we are authenticated. Reports whether we are. Sign-in
 // runs only when somebody can see it through: stdin is a terminal and
 // HEY_NONINTERACTIVE is not engaged. Otherwise — a piped `hey setup --json`,
@@ -200,9 +253,9 @@ func (s *setupWizard) signIn() (bool, error) {
 		return false, nil
 	}
 
-	if s.styled {
+	if s.narrates() {
 		w := s.cmd.OutOrStdout()
-		fmt.Fprintln(w, bold.format("  Step 1: Sign in"))
+		s.printStep(w, "Sign in")
 		fmt.Fprintln(w)
 		if err := loginInteractively(w); err != nil {
 			return false, err
@@ -237,7 +290,7 @@ var loginInteractively = func(out io.Writer) error {
 			if line == "" {
 				fmt.Fprintln(out)
 			} else {
-				fmt.Fprintln(out, "  "+line)
+				fmt.Fprintln(out, line)
 			}
 		}
 	}
@@ -267,16 +320,16 @@ func (s *setupWizard) greet() {
 			if os.Getenv("HEY_TOKEN") != "" {
 				issue = agentIssue{Check: "HEY_TOKEN rejected", Hint: "Update or unset HEY_TOKEN"}
 			}
-			if s.styled {
-				fmt.Fprintln(w, warning.format("  "+issue.Check+" by HEY — "+issue.Hint))
+			if s.narrates() {
+				fmt.Fprintln(w, warning.format(issue.Check+" by HEY — "+issue.Hint))
 				fmt.Fprintln(w)
 			}
 			s.result.Status = "incomplete"
 			s.result.Issues = append(s.result.Issues, issue)
 			return
 		}
-		if s.styled {
-			fmt.Fprintln(w, success.format("  Signed in."))
+		if s.narrates() {
+			fmt.Fprintln(w, success.format("Signed in."))
 			fmt.Fprintln(w)
 		}
 		return
@@ -285,10 +338,10 @@ func (s *setupWizard) greet() {
 	s.result.Identity = &wizardIdentity{Name: identity.Name, Email: identity.PrimaryContact.EmailAddress}
 	s.result.Accounts = linkedAccountList(identity, cfg.AccountID)
 
-	if !s.styled {
+	if !s.narrates() {
 		return
 	}
-	fmt.Fprintln(w, success.format("  "+identityGreeting(identity)))
+	fmt.Fprintln(w, success.format(identityGreeting(identity)))
 	// accounts[0] is the "All Accounts" filter; a single linked account
 	// needs no list.
 	if len(s.result.Accounts) > 2 {
@@ -297,12 +350,12 @@ func (s *setupWizard) greet() {
 			if account.Email != "" {
 				label += " (" + terminal.SanitizeLine(account.Email) + ")"
 			}
-			fmt.Fprintln(w, muted.format("    • "+label))
+			fmt.Fprintln(w, muted.format("• "+label))
 		}
 		if cfg.AccountID == config.AllAccounts {
-			fmt.Fprintln(w, muted.format("    Using All Accounts — hey account use <id> to default to one"))
+			fmt.Fprintln(w, muted.format("Using All Accounts — hey account use <id> to default to one"))
 		} else {
-			fmt.Fprintln(w, muted.format("    Default mail account: "+cfg.AccountID))
+			fmt.Fprintln(w, muted.format("Default mail account: "+cfg.AccountID))
 		}
 	}
 	fmt.Fprintln(w)
@@ -360,19 +413,19 @@ func (s *setupWizard) installCompletions() bool {
 		return false
 	}
 
-	if s.styled {
+	if s.narrates() {
 		w := s.cmd.OutOrStdout()
 		fmt.Fprintln(w, statusLine(true, "Shell completions installed for "+shell))
 		if target.Hint != "" {
-			fmt.Fprintln(w, muted.format("    "+target.Hint))
+			fmt.Fprintln(w, muted.format(target.Hint))
 		}
 		fmt.Fprintln(w)
 	}
 	return true
 }
 
-// setupAgents offers to connect detected coding agents. In a styled run the
-// user confirms first; a machine run just does it — there is nobody to ask.
+// setupAgents connects every detected coding agent. Styled runs narrate the
+// work while machine runs report the same outcome in their envelope.
 func (s *setupWizard) setupAgents() agentSetupOutcome {
 	agents := harness.DetectedAgents()
 	if len(agents) == 0 {
@@ -380,12 +433,16 @@ func (s *setupWizard) setupAgents() agentSetupOutcome {
 	}
 
 	w := s.cmd.OutOrStdout()
+	if s.narrates() {
+		s.printStep(w, "Coding agents")
+		fmt.Fprintln(w)
+	}
 
 	// One pre-setup snapshot drives both the all-good gate and the checklist
 	// rendered in the summary for the paths that do not run setup.
 	preChecks := snapshotAgentChecks(agents)
 	if baselineSkillInstalled() && len(issuesFromChecks(preChecks)) == 0 {
-		if s.styled {
+		if s.narrates() {
 			for _, a := range agents {
 				fmt.Fprintln(w, statusLine(true, a.Name+" connected"))
 			}
@@ -394,62 +451,40 @@ func (s *setupWizard) setupAgents() agentSetupOutcome {
 		return agentSetupOutcome{Checks: preChecks}
 	}
 
-	if s.styled {
-		fmt.Fprintln(w, bold.format("  Step 2: Coding agents"))
-		fmt.Fprintln(w)
-
+	if s.narrates() {
 		var names []string
 		for _, a := range agents {
 			names = append(names, a.Name)
 		}
-		fmt.Fprintf(w, "  Detected: %s\n", joinNames(names))
+		fmt.Fprintf(w, "Detected: %s\n", joinNames(names))
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, "  This will:")
-		step := 1
-		fmt.Fprintln(w, muted.format(fmt.Sprintf("    %d. Install the HEY agent skill to ~/.agents/skills/hey/", step)))
-		step++
-		for _, a := range agents {
-			handler, ok := agentSetupHandlers[a.ID]
-			if !ok {
-				continue
-			}
-			for _, label := range handler.Labels {
-				fmt.Fprintln(w, muted.format(fmt.Sprintf("    %d. %s", step, label)))
-				step++
-			}
-		}
-		fmt.Fprintln(w)
-
-		// The prompt runs only when it can be answered: styled output alone
-		// does not prove a human (HEY_NONINTERACTIVE on a PTY, --styled while
-		// piped). Without one, proceed with the prompt's default answer —
-		// exactly what the machine-mode wizard does.
-		if interactiveStdio() {
-			install, confirmErr := confirmAgentSetup()
-			if confirmErr != nil || !install {
-				fmt.Fprintln(w, muted.format("  You can set up agents later:"))
-				for _, a := range agents {
-					if _, ok := agentSetupHandlers[a.ID]; ok {
-						fmt.Fprintln(w, bold.format("    hey setup "+a.ID))
-					}
+		if s.verbose {
+			fmt.Fprintln(w, "This will:")
+			step := 1
+			fmt.Fprintln(w, muted.format(fmt.Sprintf("%d. Install the HEY agent skill to ~/.agents/skills/hey/", step)))
+			step++
+			for _, a := range agents {
+				handler, ok := agentSetupHandlers[a.ID]
+				if !ok {
+					continue
 				}
-				fmt.Fprintln(w)
-				// Skipped carries the snapshot for the checklist but records no
-				// issues, so a deliberate skip stays "complete".
-				return agentSetupOutcome{Skipped: true, Checks: preChecks}
+				for _, label := range handler.Labels {
+					fmt.Fprintln(w, muted.format(fmt.Sprintf("%d. %s", step, label)))
+					step++
+				}
 			}
+			fmt.Fprintln(w)
 		}
-		fmt.Fprintln(w)
 	}
 
+	stopSpinner := startSetupSpinner(w, "Installing agent skill…", s.narrates() && !s.verbose && interactiveStdio())
+	_, skillErr := installSkillFiles()
 	var issues []agentIssue
-	if _, err := installSkillFiles(); err != nil {
-		if s.styled {
-			fmt.Fprintln(w, warning.format(fmt.Sprintf("  Skill install failed: %s", err)))
-		}
+	if skillErr != nil {
 		issues = append(issues, agentIssue{Check: "Agent skill", Hint: "Run: hey skill install"})
-	} else if s.styled {
-		fmt.Fprintln(w, statusLine(true, "Agent skill installed"))
+	}
+	if s.narrates() && s.verbose {
+		printSkillInstallResult(w, skillErr)
 	}
 
 	for _, a := range agents {
@@ -458,7 +493,7 @@ func (s *setupWizard) setupAgents() agentSetupOutcome {
 			continue
 		}
 		var handlerErr error
-		if s.styled {
+		if s.narrates() && s.verbose {
 			if handler.Run != nil {
 				handlerErr = handler.Run(s.cmd) // interactive handlers warn and continue
 			}
@@ -471,6 +506,10 @@ func (s *setupWizard) setupAgents() agentSetupOutcome {
 			issues = append(issues, agentIssue{Agent: a.Name, Check: a.Name + " setup failed", Hint: handlerErr.Error()})
 		}
 	}
+	stopSpinner()
+	if s.narrates() && !s.verbose {
+		printSkillInstallResult(w, skillErr)
+	}
 
 	// Re-snapshot after setup ran so failed installs surface as issues rather
 	// than a silent "complete". The same snapshot renders the checklist, so
@@ -478,17 +517,61 @@ func (s *setupWizard) setupAgents() agentSetupOutcome {
 	postChecks := snapshotAgentChecks(agents)
 	issues = append(issues, issuesFromChecks(postChecks)...)
 
-	if s.styled {
+	if s.narrates() {
 		fmt.Fprintln(w)
 	}
 	return agentSetupOutcome{Checks: postChecks, Issues: issues}
 }
 
-// setupOmarchy is Step 3: on Omarchy, a full, styled, interactive, signed-in
-// wizard installs the desktop pieces and offers the bar plugin in ensure
-// mode — consent asked once and remembered, and a plugin the user disabled
-// stays disabled. Machine and non-interactive runs skip it entirely; the
-// envelope points at hey setup omarchy instead (wizardBreadcrumbs).
+func printSkillInstallResult(w io.Writer, err error) {
+	if err != nil {
+		fmt.Fprintln(w, warning.format(fmt.Sprintf("Skill install failed: %s", err)))
+		return
+	}
+	fmt.Fprintln(w, statusLine(true, "Agent skill installed"))
+}
+
+// startSetupSpinner animates one terminal line while concise agent setup runs.
+// stop clears that line so the durable success or failure status replaces it.
+func startSetupSpinner(w io.Writer, label string, enabled bool) func() {
+	if !enabled {
+		return func() {}
+	}
+
+	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	fmt.Fprintf(w, "\r%s %s", frames[0], label)
+	go func() {
+		defer close(stopped)
+		ticker := time.NewTicker(setupSpinnerInterval)
+		defer ticker.Stop()
+		frame := 1
+		for {
+			select {
+			case <-ticker.C:
+				fmt.Fprintf(w, "\r%s %s", frames[frame%len(frames)], label)
+				frame++
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			close(done)
+			<-stopped
+			fmt.Fprint(w, "\r\x1b[2K")
+		})
+	}
+}
+
+// setupOmarchy installs the Omarchy desktop pieces and enables the bar plugin
+// in a full, styled, interactive, signed-in wizard. Machine and
+// non-interactive runs skip it entirely; the envelope points at
+// hey setup omarchy instead (wizardBreadcrumbs).
 func (s *setupWizard) setupOmarchy(signedIn bool) {
 	// Stored-but-rejected credentials are not a login: greet recorded the
 	// auth issue, and the desktop step waits for a sign-in that works.
@@ -500,26 +583,39 @@ func (s *setupWizard) setupOmarchy(signedIn bool) {
 		return
 	}
 	w := s.cmd.OutOrStdout()
-	fmt.Fprintln(w, bold.format("  Step 3: Omarchy desktop"))
-	fmt.Fprintln(w)
-	steps := omarchySetup{env: env}.apply()
+	steps := omarchySetup{env: env, forcePlugin: true}.apply()
 	s.result.Omarchy = &omarchyOutcome{Steps: steps}
-	bar := stepNamed(steps, "bar plugin")
-	switch {
-	case bar.Status == "installed":
-		fmt.Fprintln(w, statusLine(true, "HEY is in your Omarchy bar"))
-	case bar.Status == "failed" || (bar.Status == "skipped" && bar.attempted):
-		fmt.Fprintln(w, warning.format("  Bar plugin: "+bar.Detail))
+	if s.narrates() {
+		s.printStep(w, "Omarchy desktop")
+		fmt.Fprintln(w)
 	}
+
+	failed := false
 	for _, step := range steps {
 		if step.Status == "failed" || (step.Status == "skipped" && step.attempted) {
+			failed = true
 			s.result.Status = "incomplete"
 			s.result.Issues = append(s.result.Issues, agentIssue{Check: "Omarchy " + step.Name, Hint: "Run: hey setup omarchy"})
 		}
 	}
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, muted.format("  "+strings.ReplaceAll(strings.TrimRight(omarchyKeybindHint, "\n"), "\n", "\n  ")))
-	fmt.Fprintln(w)
+	if s.narrates() {
+		bar := stepNamed(steps, "bar plugin")
+		switch {
+		case bar.Status == "failed" || (bar.Status == "skipped" && bar.attempted):
+			fmt.Fprintln(w, warning.format("Bar plugin: "+bar.Detail))
+		case failed:
+			fmt.Fprintln(w, statusLine(false, "Omarchy desktop setup needs attention"))
+		case bar.Status == "installed":
+			fmt.Fprintln(w, statusLine(true, "HEY is in your Omarchy bar"))
+		default:
+			fmt.Fprintln(w, statusLine(true, "Omarchy desktop connected"))
+		}
+		if s.verbose {
+			fmt.Fprintln(w)
+			fmt.Fprintln(w, muted.format(strings.TrimRight(omarchyKeybindHint, "\n")))
+		}
+		fmt.Fprintln(w)
+	}
 }
 
 // persistOnboarded records that the wizard ran, so a later logged-out bare
@@ -537,8 +633,19 @@ func (s *setupWizard) persistOnboarded() {
 // summary closes the wizard: a checklist and next steps in a terminal, the
 // envelope otherwise.
 func (s *setupWizard) summary() error {
+	if s.opts.silentSuccess {
+		w := s.cmd.OutOrStdout()
+		if s.result.Status == "complete" {
+			fmt.Fprintln(w, success.format("SETUP COMPLETE"))
+			return nil
+		}
+		fmt.Fprintln(w, warning.format("SETUP INCOMPLETE"))
+		fmt.Fprintln(w)
+		printWizardIssues(w, s.result.Issues)
+		return nil
+	}
 	if s.styled {
-		showWizardSuccess(s.cmd.OutOrStdout(), s.result, s.outcome)
+		showWizardSuccess(s.cmd.OutOrStdout(), s.result, s.outcome, s.verbose, s.nextStep)
 		return nil
 	}
 	if s.result.Agents == nil {
@@ -553,90 +660,59 @@ func (s *setupWizard) summary() error {
 	)
 }
 
-// successHeadline returns the completion banner. When a step left unresolved
-// issues the banner is honest about it rather than claiming "Setup complete!".
-func successHeadline(status string, issueCount int) string {
-	if status != "incomplete" {
-		return "Setup complete!"
-	}
-	if issueCount == 1 {
-		return "Setup finished — 1 step needs attention"
-	}
-	return fmt.Sprintf("Setup finished — %d steps need attention", issueCount)
-}
-
-// showWizardSuccess renders the completion checklist, remediation for
-// anything that did not complete, and example commands.
-func showWizardSuccess(w io.Writer, result wizardResult, outcome agentSetupOutcome) {
-	divider := muted.format("─────────────────────────────────")
-
-	headline := success
-	if result.Status == "incomplete" {
-		headline = warning
-	}
-
-	fmt.Fprintln(w, divider)
-	fmt.Fprintln(w, headline.format("  "+successHeadline(result.Status, len(result.Issues))))
-	fmt.Fprintln(w, divider)
-	fmt.Fprintln(w)
-
-	fmt.Fprintln(w, statusLine(!hasAuthIssue(result.Issues), "Signed in"))
-	if outcome.Skipped {
-		fmt.Fprintln(w, muted.format("  Coding agent setup skipped — run: hey setup"))
-	} else {
-		for _, check := range outcome.Checks {
-			fmt.Fprintln(w, statusLine(check.Status == "pass", check.Name))
-		}
-	}
-	if result.Omarchy != nil {
-		ok := true
-		for _, step := range result.Omarchy.Steps {
-			// The same predicate that files the issue: a checkmark beside a
-			// step listed under "needs attention" would contradict itself.
-			if step.Status == "failed" || step.failure != nil || (step.Status == "skipped" && step.attempted) {
-				ok = false
+// showWizardSuccess renders an optional detailed checklist, remediation for
+// incomplete steps, and the commands that finish the setup flow.
+func showWizardSuccess(w io.Writer, result wizardResult, outcome agentSetupOutcome, verbose bool, nextStep int) {
+	if verbose {
+		fmt.Fprintln(w, statusLine(!hasAuthIssue(result.Issues), "Signed in"))
+		if result.AgentsSkipped {
+			fmt.Fprintln(w, muted.format("Coding agent setup skipped"))
+		} else if outcome.Skipped {
+			fmt.Fprintln(w, muted.format("Coding agent setup skipped — run: hey setup"))
+		} else {
+			for _, check := range outcome.Checks {
+				fmt.Fprintln(w, statusLine(check.Status == "pass", check.Name))
 			}
 		}
-		fmt.Fprintln(w, statusLine(ok, "Omarchy desktop"))
-		bar := stepNamed(result.Omarchy.Steps, "bar plugin")
-		barLine := bar.Status
-		if bar.Detail != "" {
-			barLine += " — " + bar.Detail
-		}
-		fmt.Fprintln(w, muted.format("    Bar plugin: "+barLine))
-		desktop := "launcher entry, menu row and theme template in place"
-		for _, step := range result.Omarchy.Steps {
-			if step.Name != "bar plugin" && step.Status == "failed" {
-				desktop = step.Name + " failed: " + step.Detail
+		if result.OmarchySkipped {
+			fmt.Fprintln(w, muted.format("Omarchy setup skipped"))
+		} else if result.Omarchy != nil {
+			ok := true
+			for _, step := range result.Omarchy.Steps {
+				// The same predicate that files the issue: a checkmark beside a
+				// step listed under "needs attention" would contradict itself.
+				if step.Status == "failed" || step.failure != nil || (step.Status == "skipped" && step.attempted) {
+					ok = false
+				}
 			}
-		}
-		fmt.Fprintln(w, muted.format("    Desktop: "+desktop))
-	}
-	fmt.Fprintln(w)
-
-	if len(result.Issues) > 0 {
-		fmt.Fprintln(w, "  Some steps need attention:")
-		for _, issue := range result.Issues {
-			// Check names usually already carry the agent (e.g. "Claude Code
-			// Plugin"); only prefix when they don't.
-			label := issue.Check
-			if issue.Agent != "" && !strings.HasPrefix(issue.Check, issue.Agent) {
-				label = issue.Agent + " — " + issue.Check
+			fmt.Fprintln(w, statusLine(ok, "Omarchy desktop"))
+			bar := stepNamed(result.Omarchy.Steps, "bar plugin")
+			barLine := bar.Status
+			if bar.Detail != "" {
+				barLine += " — " + bar.Detail
 			}
-			line := "    " + label
-			if issue.Hint != "" {
-				line += ": " + issue.Hint
+			fmt.Fprintln(w, muted.format("Bar plugin: "+barLine))
+			desktop := "launcher entry, menu row and theme template in place"
+			for _, step := range result.Omarchy.Steps {
+				if step.Name != "bar plugin" && step.Status == "failed" {
+					desktop = step.Name + " failed: " + step.Detail
+				}
 			}
-			fmt.Fprintln(w, warning.format(line))
+			fmt.Fprintln(w, muted.format("Desktop: "+desktop))
 		}
-		fmt.Fprintln(w, muted.format("    Then verify with: hey doctor"))
 		fmt.Fprintln(w)
 	}
 
-	fmt.Fprintln(w, "  Try these commands:")
+	printWizardIssues(w, result.Issues)
+
+	title := "Try it out!"
+	if nextStep > 1 {
+		title = fmt.Sprintf("Step %d: Try it out!", nextStep)
+	}
+	fmt.Fprintln(w, bold.format(title))
 	fmt.Fprintln(w)
 	examples := []struct{ cmd, desc string }{
-		{"hey tui", "Open the app"},
+		{"hey hey", "Open TUI"},
 		{"hey box list", "List your boxes"},
 		{"hey box view imbox", "Read your Imbox"},
 		{`hey search "quarterly planning"`, "Search your mail"},
@@ -646,8 +722,30 @@ func showWizardSuccess(w io.Writer, result wizardResult, outcome agentSetupOutco
 		width = max(width, len(ex.cmd))
 	}
 	for _, ex := range examples {
-		fmt.Fprintf(w, "    %s%s  %s\n", bold.format(ex.cmd), strings.Repeat(" ", width-len(ex.cmd)), muted.format(ex.desc))
+		fmt.Fprintf(w, "%s%s  %s\n", muted.format(ex.cmd), strings.Repeat(" ", width-len(ex.cmd)), italicMuted.format(ex.desc))
 	}
+	fmt.Fprintln(w)
+}
+
+func printWizardIssues(w io.Writer, issues []agentIssue) {
+	if len(issues) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "Some steps need attention:")
+	for _, issue := range issues {
+		// Check names usually already carry the agent (e.g. "Claude Code
+		// Plugin"); only prefix when they don't.
+		label := issue.Check
+		if issue.Agent != "" && !strings.HasPrefix(issue.Check, issue.Agent) {
+			label = issue.Agent + " — " + issue.Check
+		}
+		line := label
+		if issue.Hint != "" {
+			line += ": " + issue.Hint
+		}
+		fmt.Fprintln(w, warning.format(line))
+	}
+	fmt.Fprintln(w, muted.format("Then verify with: hey doctor"))
 	fmt.Fprintln(w)
 }
 
@@ -707,7 +805,7 @@ func wizardBreadcrumbs(result wizardResult) []output.Breadcrumb {
 	// A machine or non-interactive run on Omarchy never touches the desktop
 	// itself — logged out included, where the automatic hook can never run —
 	// so the explicit command rides along in every branch.
-	if result.Omarchy == nil && liveOmarchyEnv().detected() {
+	if result.Omarchy == nil && !result.OmarchySkipped && liveOmarchyEnv().detected() {
 		crumbs = append(crumbs, output.Breadcrumb{Action: "omarchy", Command: "hey setup omarchy", Description: "Put HEY in your Omarchy bar"})
 	}
 	return crumbs

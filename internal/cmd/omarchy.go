@@ -145,8 +145,8 @@ type omarchyStep struct {
 type omarchySetup struct {
 	env    omarchyEnv
 	notify *bool // nil keeps the bar plugin's notify setting as it is
-	// forcePlugin is `hey setup omarchy`: install the bar plugin in every
-	// output format, finish a pending install, re-enable a disabled one, and
+	// forcePlugin is the full setup wizard and `hey setup omarchy`: install
+	// the bar plugin, finish a pending install, re-enable a disabled one, and
 	// carry a failure for every incomplete outcome.
 	forcePlugin bool
 }

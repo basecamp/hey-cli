@@ -61,8 +61,12 @@ hey
 ```
 
 The first time you run `hey` at a terminal it walks you through setup: it signs you in
-(browser-based OAuth), shows the mail accounts linked to your HEY identity, and offers to
-connect your coding agents (Claude Code, Codex). After that, `hey tui` opens the app and
+(browser-based OAuth), shows the mail accounts linked to your HEY identity, and connects
+your detected coding agents (Claude Code, Codex). Run `hey setup --skip-agents` to leave
+agent integrations unchanged, or add `--skip-omarchy` to leave Omarchy unchanged.
+`hey setup --silent-success` keeps required authentication visible, shows an installation
+spinner, and ends with `SETUP COMPLETE`; failure guidance remains visible. After that,
+`hey tui` opens the app and
 bare `hey` prints the help. `hey setup` reruns the wizard any time; `hey login` and
 `hey logout` are shortcuts for `hey auth login` and `hey auth logout`.
 
@@ -685,8 +689,8 @@ read from `~/.local/state/omarchy/current/theme/`, and restyles live when you ru
 
 ```bash
 omarchy-mise-install github:basecamp/hey-cli hey
-hey auth login               # signing in puts HEY in your bar (asked once)
-hey setup omarchy            # the explicit path: installs in every output format, fails loudly
+hey setup                    # sign in, connect detected agents, and put HEY in your bar
+hey setup omarchy            # the explicit desktop-only path: installs in every output format, fails loudly
 hey setup omarchy --notify   # toast new mail from the bar plugin (--no-notify turns it off)
 hey setup omarchy --remove   # disable the bar plugin (checkout kept) and remove the desktop pieces
 ```
@@ -697,13 +701,14 @@ its engine — the plugin reads the Imbox with `hey box view imbox` and runs `he
 bar is live: a thread you archive in the TUI, on your phone or in the web app leaves the
 panel within a second, and after a disconnect the watch catches up from where it left off.
 
-Signing in interactively — `hey auth login`, the setup wizard, or any command's sign-in
-prompt — offers to install that plugin, asks once, and remembers your answer. The offer
-never fires in scripts: machine output (`--json` and friends), `HEY_NONINTERACTIVE`, a
-non-TTY, and `--token`/`--cookie` logins all skip it, and `hey setup omarchy` is how a
-script installs it — explicitly, in every output format, verified against the running
-shell, with a loud failure when it cannot. A plugin you disable stays disabled until you
-run `hey setup omarchy` again; `--remove` disables it and keeps the checkout.
+The full `hey setup` wizard installs and enables the plugin automatically. Other interactive
+sign-ins — `hey auth login` or any command's sign-in prompt — offer it once and remember
+the answer. Those sign-in hooks never fire in scripts: machine output (`--json` and friends),
+`HEY_NONINTERACTIVE`, a non-TTY, and `--token`/`--cookie` logins all skip it.
+`hey setup omarchy` is the desktop-only path for scripts: it works in every output format,
+verifies the running shell, and fails loudly when installation is incomplete. A plugin you
+disable stays disabled until `hey setup` or `hey setup omarchy` enables it again; `--remove`
+disables it and keeps the checkout.
 
 Setup installs a `HEY TUI` launcher entry, a `HEY` row in the SUPER+SPACE menu, and a
 `hey.toml.tpl` theme template so theme authors can tune the overlay. It prints the
@@ -722,22 +727,23 @@ other app. See [docs/omarchy.md](docs/omarchy.md) for the details and what is pl
 
 hey-cli ships with an embedded agent skill so your coding agent can work with HEY on your
 behalf, and a Claude Code plugin (`hey@37signals` from the `basecamp/claude-plugins`
-marketplace). The setup wizard offers to connect detected agents; these commands do it on
-their own:
+marketplace). The setup wizard connects every detected agent automatically; these commands
+manage the integrations on their own:
 
 ```bash
 hey setup claude    # install the skill and the hey@37signals plugin for Claude Code
 hey setup codex     # install the skill for Codex
 hey skill install   # install the skill only (~/.agents/skills/hey, linked for detected agents)
-hey setup agents    # non-interactive: skill + a single detected agent (the installer uses this)
-hey doctor          # check skill and plugin health per detected agent
+hey setup agents             # non-interactive: skill + a single detected agent (the installer uses this)
+hey setup agents --remove    # remove HEY's managed skills and Claude Code plugin
+hey doctor                   # check skill and plugin health per detected agent
 ```
 
 `hey setup agents` never prompts and never guesses: with several agents detected it installs
 the skill only and lists the `hey setup <agent>` choices. `HEY_SETUP_AGENT=claude|codex|all|none`
-picks explicitly. `HEY_NONINTERACTIVE=1` disables every prompt (the sign-in offer, the
-wizard's confirmations) for harnesses that run hey under a pseudo-terminal. The installed
-skill is refreshed automatically the first time a new hey release runs.
+picks explicitly. `HEY_NONINTERACTIVE=1` disables interactive sign-in for harnesses that
+run hey under a pseudo-terminal. The installed skill is refreshed automatically the first
+time a new hey release runs.
 
 hey only ever writes skill directories it owns: each one it creates carries a
 `.managed-by-hey-cli` marker, and install, replacement and automatic refresh all refuse a

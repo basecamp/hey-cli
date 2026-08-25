@@ -23,23 +23,30 @@ const agentSetupEnv = "HEY_SETUP_AGENT"
 // envelope. It never prompts, so it is safe for the piped installer and
 // coding-agent shells.
 func newSetupAgentsCommand() *cobra.Command {
-	return &cobra.Command{
+	var remove bool
+	cmd := &cobra.Command{
 		Use:   "agents",
-		Short: "Install the HEY skill and connect detected coding agents",
+		Short: "Install or remove HEY coding-agent integrations",
 		Long: "Install the baseline HEY agent skill and attempt to connect coding agents.\n\n" +
 			"Selection is controlled by " + agentSetupEnv + ": claude, codex, all, or none. When\n" +
 			"unset, a single detected agent is connected; when several are detected none is\n" +
-			"guessed — the per-agent `hey setup <id>` commands are surfaced instead.",
+			"guessed — the per-agent `hey setup <id>` commands are surfaced instead. Use\n" +
+			"--remove to uninstall the HEY integrations and managed skill files.",
 		// Selection is env-driven; positional args are always a mistake (typo,
 		// or confusion with `setup <id>`). Reject them rather than silently ignore.
 		Args: cobra.NoArgs,
 		Annotations: map[string]string{
-			"agent_notes": "Never prompts. Set " + agentSetupEnv + "=claude|codex|all|none to choose; unset auto-detects a single agent.",
+			"agent_notes": "Never prompts. Set " + agentSetupEnv + "=claude|codex|all|none to choose; unset auto-detects a single agent. --remove uninstalls HEY's managed agent integrations.",
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if remove {
+				return runRemoveAgentSetup(cmd)
+			}
 			return runNonInteractiveAgentSetup(cmd)
 		},
 	}
+	cmd.Flags().BoolVar(&remove, "remove", false, "Remove HEY coding-agent integrations")
+	return cmd
 }
 
 // agentSetupRecord is the per-agent outcome captured while running handlers.

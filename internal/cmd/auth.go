@@ -3,9 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -13,7 +11,6 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/auth"
-	"github.com/basecamp/hey-cli/internal/harness"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -97,7 +94,8 @@ Use --token or --cookie for non-interactive login.`,
 				if identity, err := rootSDK.Identity().GetIdentity(cmd.Context()); err == nil && identity != nil {
 					fmt.Fprintln(w, identityGreeting(identity))
 				}
-				printAgentNudge(w)
+				// Agent integration is configured through `hey setup`; sign-in reports
+				// the authenticated identity and completes its Omarchy integration.
 				ensureOmarchyBarPluginAfterLogin(cmd.ErrOrStderr())
 				return nil
 			}
@@ -312,42 +310,4 @@ func refuseSessionCookieAsToken() error {
 		}
 	}
 	return nil
-}
-
-// printAgentNudge prints a hint about coding agent setup after login.
-//
-// Detection proves presence, not intent: with a single detected-unhealthy
-// agent it points at that agent; with several, it never guesses — it prints
-// every `hey setup <id>` choice so the user picks. It never suggests
-// `hey setup agents`, which is the installer's non-interactive path.
-func printAgentNudge(w io.Writer) {
-	type nudgeAgent struct{ id, name string }
-	var unhealthy []nudgeAgent
-	for _, agent := range harness.DetectedAgents() {
-		if agent.Checks == nil {
-			continue
-		}
-		for _, c := range agent.Checks() {
-			if c.Status != "pass" {
-				unhealthy = append(unhealthy, nudgeAgent{id: agent.ID, name: agent.Name})
-				break
-			}
-		}
-	}
-	sort.Slice(unhealthy, func(i, j int) bool { return unhealthy[i].id < unhealthy[j].id })
-
-	switch len(unhealthy) {
-	case 0:
-		return
-	case 1:
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, muted.format(fmt.Sprintf("  %s detected. Connect it to HEY:", unhealthy[0].name)))
-		fmt.Fprintln(w, bold.format("  hey setup "+unhealthy[0].id))
-	default:
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, muted.format("  Multiple coding agents detected. Choose one:"))
-		for _, a := range unhealthy {
-			fmt.Fprintln(w, bold.format("  hey setup "+a.id))
-		}
-	}
 }

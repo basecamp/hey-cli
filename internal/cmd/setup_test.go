@@ -5,13 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/basecamp/hey-cli/internal/auth"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -88,6 +92,130 @@ func TestSetupCommandRegistersAgentSubcommands(t *testing.T) {
 		if err != nil || command.Name() != path[1] {
 			t.Errorf("%v not registered: %v", path, err)
 		}
+	}
+}
+
+func TestSetupSkipAgentsLeavesAgentIntegrationsUnchanged(t *testing.T) {
+	isolateAgents(t)
+	server := identityServer(t)
+	configHome := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(configHome, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "session-cookie"); err != nil {
+		t.Fatalf("auth login: %v", err)
+	}
+
+	_, response, err := runAuthCommand(t, configHome, server.URL, "", true, "setup", "--skip-agents")
+	if err != nil {
+		t.Fatalf("setup --skip-agents: %v", err)
+	}
+	data := wizardData(t, response)
+	if data["agents_skipped"] != true {
+		t.Errorf("agents_skipped = %v", data["agents_skipped"])
+	}
+	if agents, ok := data["agents"].([]any); !ok || len(agents) != 0 {
+		t.Errorf("agents = %v", data["agents"])
+	}
+	if _, statErr := os.Stat(filepath.Join(configHome, ".agents", "skills", "hey", skillFilename)); !os.IsNotExist(statErr) {
+		t.Errorf("agent skill was written: %v", statErr)
+	}
+}
+
+func TestSetupSilentSuccessShowsSpinnerAndCompletion(t *testing.T) {
+	isolateAgents(t)
+	stubInteractive(t, true)
+	server := identityServer(t)
+	configHome := t.TempDir()
+	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "session-cookie"); err != nil {
+		t.Fatalf("auth login: %v", err)
+	}
+	origColor := colorDisabled
+	colorDisabled = true
+	t.Cleanup(func() { colorDisabled = origColor })
+
+	stdout, _, err := runAuthCommand(t, configHome, server.URL, "", false, "setup", "--styled", "--silent-success")
+	if err != nil {
+		t.Fatalf("setup --silent-success: %v", err)
+	}
+	if !strings.Contains(stdout, "Installing HEY…") {
+		t.Errorf("silent setup did not show installation activity: %q", stdout)
+	}
+	if !strings.HasSuffix(stdout, "\r\x1b[2KSETUP COMPLETE\n") {
+		t.Errorf("silent setup did not clear the spinner into SETUP COMPLETE: %q", stdout)
+	}
+	for _, hidden := range []string{"Welcome to HEY", "Coding agents", "Try it out!"} {
+		if strings.Contains(stdout, hidden) {
+			t.Errorf("silent success contains narration %q: %q", hidden, stdout)
+		}
+	}
+}
+
+func TestSetupSilentSuccessKeepsSignInInstructions(t *testing.T) {
+	stubStdinTerminal(t)
+	t.Setenv("HEY_NONINTERACTIVE", "")
+	previousAuthMgr := authMgr
+	authMgr = auth.NewManager("http://app.hey.localhost:3003", http.DefaultClient, t.TempDir())
+	t.Cleanup(func() { authMgr = previousAuthMgr })
+	previousLogin := loginInteractively
+	loginInteractively = func(out io.Writer) error {
+		fmt.Fprintln(out, "Opening browser for authentication...")
+		fmt.Fprintln(out, "If the browser doesn't open, visit: https://example.com/oauth")
+		fmt.Fprintln(out, "Waiting for authentication...")
+		return nil
+	}
+	t.Cleanup(func() { loginInteractively = previousLogin })
+
+	cmd := newSetupCommand().cmd
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stdout)
+	wizard := &setupWizard{cmd: cmd, opts: wizardOptions{silentSuccess: true}, styled: true, nextStep: 1}
+	signedIn, err := wizard.signIn()
+	if err != nil || !signedIn {
+		t.Fatalf("signIn = %v, %v", signedIn, err)
+	}
+	for _, want := range []string{"Opening browser", "https://example.com/oauth", "Waiting for authentication"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("silent sign-in missing %q:\n%s", want, stdout.String())
+		}
+	}
+	if strings.Contains(stdout.String(), "Step 1") {
+		t.Errorf("silent sign-in included setup narration:\n%s", stdout.String())
+	}
+}
+
+func TestSetupSilentSuccessKeepsFailureGuidance(t *testing.T) {
+	isolateAgents(t)
+	stubInteractive(t, true)
+	t.Setenv("HEY_NONINTERACTIVE", "1")
+	server := quietServer(t)
+	origColor := colorDisabled
+	colorDisabled = true
+	t.Cleanup(func() { colorDisabled = origColor })
+
+	stdout, _, err := runAuthCommand(t, t.TempDir(), server.URL, "", false, "setup", "--styled", "--silent-success")
+	if err != nil {
+		t.Fatalf("setup --silent-success: %v", err)
+	}
+	for _, want := range []string{"SETUP INCOMPLETE", "Not logged in", "hey auth login"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("failure output missing %q:\n%s", want, stdout)
+		}
+	}
+	for _, hidden := range []string{"Welcome to HEY", "Try it out!"} {
+		if strings.Contains(stdout, hidden) {
+			t.Errorf("failure output contains success narration %q:\n%s", hidden, stdout)
+		}
+	}
+}
+
+func TestSetupSilentSuccessRejectsMachineOutput(t *testing.T) {
+	isolateAgents(t)
+	stubInteractive(t, true)
+	_, _, err := runAuthCommand(t, t.TempDir(), "http://app.hey.localhost:3003", "", true, "setup", "--silent-success")
+	if err == nil || !strings.Contains(err.Error(), "requires an interactive terminal with styled output") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -271,23 +399,6 @@ func contains(items []string, want string) bool {
 	return false
 }
 
-func TestSuccessHeadline(t *testing.T) {
-	tests := []struct {
-		status string
-		issues int
-		want   string
-	}{
-		{"complete", 0, "Setup complete!"},
-		{"incomplete", 1, "Setup finished — 1 step needs attention"},
-		{"incomplete", 3, "Setup finished — 3 steps need attention"},
-	}
-	for _, tt := range tests {
-		if got := successHeadline(tt.status, tt.issues); got != tt.want {
-			t.Errorf("successHeadline(%q, %d) = %q, want %q", tt.status, tt.issues, got, tt.want)
-		}
-	}
-}
-
 func TestStatusFromOutcome(t *testing.T) {
 	if got := statusFromOutcome(agentSetupOutcome{}); got != "complete" {
 		t.Errorf("empty outcome = %q", got)
@@ -308,9 +419,9 @@ func TestShowWizardSuccessText(t *testing.T) {
 	var out bytes.Buffer
 	showWizardSuccess(&out, wizardResult{Status: "complete", Identity: &wizardIdentity{Email: "jane@example.com"}}, agentSetupOutcome{
 		Checks: []agentCheck{{Agent: "Claude Code", Name: "Claude Code Plugin", Status: "pass"}},
-	})
+	}, true, 3)
 	text := out.String()
-	for _, want := range []string{"Setup complete!", "✓ Signed in", "✓ Claude Code Plugin", "Try these commands:", "hey box list", `hey search "quarterly planning"`} {
+	for _, want := range []string{"✓ Signed in", "✓ Claude Code Plugin", "Step 3: Try it out!", "hey hey", "Open TUI", "hey box list", `hey search "quarterly planning"`} {
 		if !strings.Contains(text, want) {
 			t.Errorf("complete summary missing %q:\n%s", want, text)
 		}
@@ -324,38 +435,75 @@ func TestShowWizardSuccessText(t *testing.T) {
 	showWizardSuccess(&out, wizardResult{Status: "incomplete", Issues: issues}, agentSetupOutcome{
 		Checks: []agentCheck{{Agent: "Claude Code", Name: "Claude Code Plugin", Status: "fail"}},
 		Issues: issues,
-	})
+	}, true, 2)
 	text = out.String()
-	for _, want := range []string{"Setup finished — 1 step needs attention", "✗ Claude Code Plugin", "Some steps need attention:", "Claude Code Plugin: Run: hey setup claude", "Then verify with: hey doctor"} {
+	for _, want := range []string{"✗ Claude Code Plugin", "Some steps need attention:", "Claude Code Plugin: Run: hey setup claude", "Then verify with: hey doctor", "Step 2: Try it out!"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("incomplete summary missing %q:\n%s", want, text)
 		}
 	}
 
 	out.Reset()
-	showWizardSuccess(&out, wizardResult{Status: "complete"}, agentSetupOutcome{Skipped: true})
+	showWizardSuccess(&out, wizardResult{Status: "complete"}, agentSetupOutcome{Skipped: true}, true, 1)
 	if !strings.Contains(out.String(), "Coding agent setup skipped — run: hey setup") {
 		t.Errorf("skipped summary:\n%s", out.String())
 	}
 }
 
-func stubStdinTerminal(t *testing.T, isTerminal bool) {
-	t.Helper()
-	orig := stdinIsTerminal
-	stdinIsTerminal = func() bool { return isTerminal }
-	t.Cleanup(func() { stdinIsTerminal = orig })
+func TestShowWizardSuccessConciseHidesChecklist(t *testing.T) {
+	origColor := colorDisabled
+	colorDisabled = true
+	t.Cleanup(func() { colorDisabled = origColor })
+
+	result := wizardResult{
+		Status: "complete",
+		Omarchy: &omarchyOutcome{Steps: []omarchyStep{
+			{Name: "bar plugin", Status: "installed", Detail: "installed and enabled; notifications off"},
+			{Name: "desktop entry", Status: "installed"},
+		}},
+	}
+	outcome := agentSetupOutcome{Checks: []agentCheck{
+		{Name: "Claude Code Plugin", Status: "pass"},
+		{Name: "Claude Code Skill", Status: "pass"},
+		{Name: "Codex Skill", Status: "pass"},
+	}}
+	var out bytes.Buffer
+	showWizardSuccess(&out, result, outcome, false, 1)
+	for _, hidden := range []string{"Signed in", "Claude Code Plugin", "Claude Code Skill", "Codex Skill", "Omarchy desktop", "Bar plugin:", "Desktop:", "Setup complete!", "────────────────", "Try these commands:", "Step 1:"} {
+		if strings.Contains(out.String(), hidden) {
+			t.Errorf("concise summary contains %q:\n%s", hidden, out.String())
+		}
+	}
+	for _, want := range []string{"Try it out!", "hey hey", "Open TUI"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("concise summary missing %q:\n%s", want, out.String())
+		}
+	}
+	for _, line := range strings.Split(out.String(), "\n") {
+		if (strings.Contains(line, "Try it out!") || strings.HasPrefix(strings.TrimLeft(line, " "), "hey ")) && strings.HasPrefix(line, " ") {
+			t.Errorf("summary line is indented: %q", line)
+		}
+	}
+
+	colorDisabled = false
+	out.Reset()
+	showWizardSuccess(&out, result, outcome, false, 1)
+	if !strings.Contains(out.String(), muted.format("hey hey")) {
+		t.Errorf("summary command is not muted:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), bold.format("hey hey")) {
+		t.Errorf("summary command competes with the step style:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), italicMuted.format("Open TUI")) {
+		t.Errorf("summary hint is not differentiated from its command:\n%s", out.String())
+	}
 }
 
-func stubConfirmAgentSetup(t *testing.T, answer bool, err error) *int {
+func stubStdinTerminal(t *testing.T) {
 	t.Helper()
-	calls := 0
-	orig := confirmAgentSetup
-	confirmAgentSetup = func() (bool, error) {
-		calls++
-		return answer, err
-	}
-	t.Cleanup(func() { confirmAgentSetup = orig })
-	return &calls
+	orig := stdinIsTerminal
+	stdinIsTerminal = func() bool { return true }
+	t.Cleanup(func() { stdinIsTerminal = orig })
 }
 
 // The wizard installs shell completions on its own. An install through mise,
@@ -384,13 +532,12 @@ func TestSetupInstallsShellCompletions(t *testing.T) {
 	}
 }
 
-// HEY_NONINTERACTIVE must disable every wizard interaction even on a real
-// PTY: no agent-setup prompt (the default answer applies) and no OAuth wait.
+// HEY_NONINTERACTIVE disables interactive sign-in even on a real PTY while
+// detected agent setup continues without prompting.
 func TestSetupStyledNonInteractiveNeverPromptsNorSignsIn(t *testing.T) {
 	isolateAgents(t)
-	stubStdinTerminal(t, true) // a PTY — but HEY_NONINTERACTIVE wins
+	stubStdinTerminal(t) // a PTY — but HEY_NONINTERACTIVE wins
 	t.Setenv("HEY_NONINTERACTIVE", "1")
-	confirms := stubConfirmAgentSetup(t, false, nil)
 	server := quietServer(t)
 	configHome := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(configHome, ".claude"), 0o755); err != nil {
@@ -405,24 +552,104 @@ func TestSetupStyledNonInteractiveNeverPromptsNorSignsIn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setup --styled: %v", err)
 	}
-	if *confirms != 0 {
-		t.Errorf("the agent-setup prompt ran %d times with HEY_NONINTERACTIVE=1", *confirms)
-	}
 	// No OAuth wait: the run completed and reported the missing login.
-	if !strings.Contains(stdout, "Setup finished") || !strings.Contains(stdout, "Not logged in") {
-		t.Errorf("expected an incomplete summary, got:\n%s", stdout)
+	if !strings.Contains(stdout, "Some steps need attention") || !strings.Contains(stdout, "Not logged in") {
+		t.Errorf("expected incomplete-step guidance, got:\n%s", stdout)
 	}
-	// The agent step proceeded with the prompt's default answer.
+	for _, want := range []string{"Step 1: Coding agents", "Step 2: Try it out!"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("dynamic steps missing %q:\n%s", want, stdout)
+		}
+	}
+	if strings.Contains(stdout, "Step 3:") {
+		t.Errorf("setup left a gap in its step numbering:\n%s", stdout)
+	}
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.HasPrefix(line, " ") {
+			t.Errorf("setup line is indented: %q", line)
+		}
+	}
 	if _, err := os.Stat(filepath.Join(configHome, ".agents", "skills", "hey", "SKILL.md")); err != nil {
 		t.Errorf("agent step should auto-proceed without a prompt: %v", err)
 	}
 }
 
-// The interactive path still prompts, and declining skips the agent step.
-func TestSetupStyledInteractiveDeclineSkipsAgents(t *testing.T) {
+func TestSetupSpinnerAnimatesAndClears(t *testing.T) {
+	originalInterval := setupSpinnerInterval
+	setupSpinnerInterval = time.Millisecond
+	t.Cleanup(func() { setupSpinnerInterval = originalInterval })
+
+	var out bytes.Buffer
+	stop := startSetupSpinner(&out, "Installing agent skill…", true)
+	time.Sleep(5 * time.Millisecond)
+	stop()
+	text := out.String()
+	if !strings.Contains(text, "Installing agent skill…") {
+		t.Errorf("spinner output = %q", text)
+	}
+	if !strings.HasSuffix(text, "\r\x1b[2K") {
+		t.Errorf("spinner did not clear its line: %q", text)
+	}
+
+	out.Reset()
+	startSetupSpinner(&out, "Installing agent skill…", false)()
+	if out.Len() != 0 {
+		t.Errorf("disabled spinner output = %q", out.String())
+	}
+}
+
+func TestSetupStyledDetailsRequireVerboseEnv(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		verbose string
+		want    bool
+	}{
+		{name: "concise by default"},
+		{name: "verbose", verbose: "1", want: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			isolateAgents(t)
+			t.Setenv("HEY_NONINTERACTIVE", "1")
+			t.Setenv(setupVerboseEnv, tt.verbose)
+			binDir := t.TempDir()
+			claudePath := filepath.Join(binDir, "claude")
+			if err := os.WriteFile(claudePath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", binDir)
+			stubRunAgentCommand(t, func(context.Context, string, ...string) ([]byte, error) {
+				return nil, nil
+			})
+
+			configHome := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(configHome, ".claude"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			origColor := colorDisabled
+			colorDisabled = true
+			t.Cleanup(func() { colorDisabled = origColor })
+
+			server := quietServer(t)
+			defer server.Close()
+			stdout, _, err := runAuthCommand(t, configHome, server.URL, "", false, "setup", "--styled")
+			if err != nil {
+				t.Fatalf("setup --styled: %v", err)
+			}
+			for _, detail := range []string{"This will:", "Registering 37signals marketplace", "Refreshing 37signals marketplace", "Installing hey@37signals plugin"} {
+				if got := strings.Contains(stdout, detail); got != tt.want {
+					t.Errorf("contains %q = %v, want %v:\n%s", detail, got, tt.want, stdout)
+				}
+			}
+			if strings.Contains(stdout, "Detected: Claude Code\n\n\n") {
+				t.Errorf("extra blank line after detected agents:\n%s", stdout)
+			}
+		})
+	}
+}
+
+func TestSetupStyledInteractiveInstallsDetectedAgentsWithoutPrompt(t *testing.T) {
 	isolateAgents(t)
 	stubInteractive(t, true)
-	confirms := stubConfirmAgentSetup(t, false, nil)
 	server := identityServer(t)
 	configHome := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(configHome, ".claude"), 0o755); err != nil {
@@ -440,21 +667,47 @@ func TestSetupStyledInteractiveDeclineSkipsAgents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setup --styled: %v", err)
 	}
-	if *confirms != 1 {
-		t.Errorf("prompt ran %d times, want 1", *confirms)
+	if strings.Contains(stdout, "Set up HEY for your coding agents?") {
+		t.Errorf("setup asked for agent confirmation:\n%s", stdout)
 	}
-	if !strings.Contains(stdout, "You can set up agents later:") || !strings.Contains(stdout, "Coding agent setup skipped") {
-		t.Errorf("declined setup should skip:\n%s", stdout)
+	if _, err := os.Stat(filepath.Join(configHome, ".agents", "skills", "hey", "SKILL.md")); err != nil {
+		t.Errorf("setup did not install the detected agent skill: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(configHome, ".agents", "skills", "hey", "SKILL.md")); !os.IsNotExist(err) {
-		t.Error("declined setup must not install the skill")
+}
+
+func TestSetupRepeatKeepsDetectedConnectedAgentsVisible(t *testing.T) {
+	isolateAgents(t)
+	stubInteractive(t, true)
+	server := identityServer(t)
+	configHome := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(configHome, ".codex"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "session-cookie"); err != nil {
+		t.Fatalf("auth login: %v", err)
+	}
+	origColor := colorDisabled
+	colorDisabled = true
+	t.Cleanup(func() { colorDisabled = origColor })
+
+	if _, _, err := runAuthCommand(t, configHome, server.URL, "", false, "setup", "--styled"); err != nil {
+		t.Fatalf("initial setup: %v", err)
+	}
+	stdout, _, err := runAuthCommand(t, configHome, server.URL, "", false, "setup", "--styled")
+	if err != nil {
+		t.Fatalf("repeat setup: %v", err)
+	}
+	for _, want := range []string{"Step 1: Coding agents", "✓ Codex connected", "Step 2: Try it out!"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("repeat setup missing %q:\n%s", want, stdout)
+		}
 	}
 }
 
 // Machine output plus HEY_NONINTERACTIVE on a terminal must not start OAuth.
 func TestSetupJSONNonInteractiveEnvSkipsSignIn(t *testing.T) {
 	isolateAgents(t)
-	stubStdinTerminal(t, true)
+	stubStdinTerminal(t)
 	t.Setenv("HEY_NONINTERACTIVE", "1")
 	server := quietServer(t)
 
@@ -503,8 +756,8 @@ func TestSetupJSONStaleCredentialsReportIncomplete(t *testing.T) {
 }
 
 // The wizard records a handler refusal as an issue even when the health
-// snapshot alone would miss it, so "Setup complete!" can never follow an
-// installation warning.
+// snapshot alone would miss it, so the warning remains visible in the
+// finished setup flow.
 func TestSetupWizardRecordsHandlerFailures(t *testing.T) {
 	isolateAgents(t)
 	server := identityServer(t)
@@ -551,7 +804,7 @@ func TestShowWizardSuccessRejectedCredentialsChecklist(t *testing.T) {
 
 	var out bytes.Buffer
 	issues := []agentIssue{{Check: "Stored sign-in rejected", Hint: "Run: hey auth login"}}
-	showWizardSuccess(&out, wizardResult{Status: "incomplete", Issues: issues}, agentSetupOutcome{})
+	showWizardSuccess(&out, wizardResult{Status: "incomplete", Issues: issues}, agentSetupOutcome{}, true, 1)
 	if !strings.Contains(out.String(), "✗ Signed in") {
 		t.Errorf("rejected credentials must render as not signed in:\n%s", out.String())
 	}
