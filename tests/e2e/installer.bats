@@ -62,6 +62,9 @@ write_stub() {
       # `setup <sub>`: a real old parent would swallow it as a stray arg and
       # launch the interactive wizard -- the exact bug the installer must avoid.
       echo 'if [[ "$1" == "setup" && "$2" != "claude" && "$2" != "--help" ]]; then echo "unknown command \"$2\"" >&2; exit 1; fi'
+    else
+      echo 'if [[ "$1 $2 $3 $4" == "setup agents --jq .summary" ]]; then echo "Installed baseline skill"; exit 0; fi'
+      echo 'if [[ "$1 $2" == "setup agents" ]]; then echo '\''{"ok":true,"data":{"skill_installed":true}}'\''; exit 0; fi'
     fi
     echo 'exit 0'
   } > "$STUB_DIR/hey"
@@ -104,10 +107,12 @@ run_post_install_setup() {
 # `setup claude`; old binaries (no `setup agents`) must fall back without
 # guessing an agent.
 
-@test "new binary: post_install_setup dispatches to 'setup agents', never 'setup claude'" {
+@test "new binary: post_install_setup prints the summary without the JSON envelope" {
   run_post_install_setup
   [[ "$status" -eq 0 ]]
-  [[ "$output" == *"setup agents"* ]]
+  [[ "$output" == *"Installed baseline skill"* ]]
+  [[ "$output" == *"setup agents --jq .summary"* ]]
+  [[ "$output" != *'"ok":true'* ]]
   [[ "$output" != *"setup claude"* ]]
 }
 
@@ -231,6 +236,10 @@ $nk = if ($null -eq $env:HEY_NO_KEYRING) { 'unset' } else { $env:HEY_NO_KEYRING 
 Add-Content -LiteralPath $env:PS_LOG "nk=$nk $rest"
 if ($rest -eq 'setup --help') {
   '  agents  Install the HEY skill and connect detected coding agents'
+} elseif ($rest -eq 'setup agents --jq .summary') {
+  'Installed baseline skill'
+} elseif ($rest -eq 'setup agents') {
+  '{"ok":true,"data":{"skill_installed":true}}'
 }
 EOF
 
@@ -243,6 +252,8 @@ $fn = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.Functi
 if (-not $fn) { throw 'Invoke-PostInstallSetup not found in install.ps1' }
 # Evaluate only the function definition -- the installer's Main never runs.
 . ([scriptblock]::Create($fn.Extent.Text))
+# Supply the installer's output helper used by Invoke-PostInstallSetup.
+function Info([string]$Message) { $Message }
 Invoke-PostInstallSetup $env:PS_STUB
 if ($null -ne $env:HEY_NO_KEYRING) { throw "HEY_NO_KEYRING not restored: '$env:HEY_NO_KEYRING'" }
 'restored-ok'
@@ -263,7 +274,9 @@ EOF
   [[ "$status" -eq 0 ]]
   [[ "$output" == *"restored-ok"* ]]
   [[ "$output" == *"restored-value-ok"* ]]
-  [[ "$output" == *"nk=1 setup agents"* ]]
+  [[ "$output" == *"Installed baseline skill"* ]]
+  [[ "$output" == *"nk=1 setup agents --jq .summary"* ]]
+  [[ "$output" != *'"ok":true'* ]]
 }
 
 # The release builds darwin_amd64 and darwin_arm64, never a universal

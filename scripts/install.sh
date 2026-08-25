@@ -500,6 +500,8 @@ binary_supports_setup_agents() {
 # post_install_setup connects coding agents without prompting, but only when
 # the installed binary has the ownership-aware `setup agents` (it honors
 # HEY_SETUP_AGENT itself: claude|codex|all|none, unset = auto-detect one).
+# The jq selector keeps the machine-readable command's envelope out of the
+# human-facing installer while preserving its concise outcome.
 #
 # Releases that predate `setup agents` also predate the ownership gate on
 # `skill install` — their legacy implementation overwrites whatever occupies
@@ -514,9 +516,14 @@ binary_supports_setup_agents() {
 post_install_setup() {
   local binary_name="$1"
   local bin="$BIN_DIR/$binary_name"
+  local summary
 
   if binary_supports_setup_agents "$bin"; then
-    HEY_NO_KEYRING=1 "$bin" setup agents || true
+    if summary=$(HEY_NO_KEYRING=1 "$bin" setup agents --jq '.summary' 2>/dev/null); then
+      if [[ -n "$summary" ]]; then
+        info "$summary"
+      fi
+    fi
   fi
 }
 

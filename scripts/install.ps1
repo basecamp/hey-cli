@@ -322,7 +322,12 @@ function Invoke-PostInstallSetup([string]$Binary) {
     try { $help = & $Binary setup --help 2>$null } catch { $help = '' }
 
     if ($help -match '(?m)^\s+agents\s') {
-      try { & $Binary setup agents } catch { }
+      try {
+        $summary = & $Binary setup agents --jq '.summary' 2>$null
+        if ($summary) {
+          Info "$summary"
+        }
+      } catch { }
     }
   } finally {
     if ($null -eq $savedNoKeyring) {
