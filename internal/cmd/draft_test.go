@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // draftLifecycleServer serves the identity the SDK's sending operations resolve, a
@@ -228,8 +229,10 @@ func TestDraftSendRefusesADraftWithNoRecipients(t *testing.T) {
 
 func TestDraftSendSchedulesWithOnAndHour(t *testing.T) {
 	var writes []draftWrite
+	// The fixture identity keeps America/New_York, so 9 on its clock in December
+	// (EST, UTC-5) is 14:00Z — the UTC values HEY's API actually reads.
 	response, err := runJSONCommand(t, draftLifecycleServer(t, draftEditJSON, &writes),
-		"draft", "send", "12345", "--on", "tomorrow", "--hour", "9")
+		"draft", "send", "12345", "--on", "2026-12-01", "--hour", "9")
 	if err != nil {
 		t.Fatalf("draft send --on: %v", err)
 	}
@@ -238,7 +241,7 @@ func TestDraftSendSchedulesWithOnAndHour(t *testing.T) {
 	if entry["status"] != "drafted" {
 		t.Errorf("a scheduled send stays drafted, got status %v", entry["status"])
 	}
-	if entry["scheduled_delivery"] != "true" || entry["scheduled_delivery_at_date"] != "tomorrow" || entry["scheduled_delivery_at_hour"] != "9" {
+	if entry["scheduled_delivery"] != "true" || entry["scheduled_delivery_at_date"] != "2026-12-01" || entry["scheduled_delivery_at_hour"] != "14" {
 		t.Errorf("schedule = %v", entry)
 	}
 	if response.Summary != "Draft scheduled for delivery" {
@@ -278,11 +281,11 @@ func TestDraftCommandsRejectBadIDs(t *testing.T) {
 	}
 }
 
-// A schedule is a date and an hour on the identity's clock, so resending one converts
-// the served UTC moment into the identity's zone — never the host's, whose clock would
-// move the delivery by the difference between them. 13:00Z is 09:00 in the fixture
-// identity's America/New_York, whatever machine this test runs on.
-func TestDraftEditPreservesAScheduleOnTheIdentitysClock(t *testing.T) {
+// HEY's API reads a schedule's date and hour in UTC, so preserving one through an edit
+// says the served UTC moment back as its own UTC date and hour — the exact round-trip.
+// Converting into any other zone here is the live bug this pins: a 09:00Z delivery
+// became 04:00Z on the first edit from a US Eastern identity.
+func TestDraftEditPreservesAScheduleExactly(t *testing.T) {
 	scheduled := `{"id":12345,"subject":"Quarterly planning","content":"<div>Agenda.</div>",
 		"scheduled_delivery_at":"2026-09-01T13:00:00Z",
 		"addressed":{"directly":[{"id":7,"name":"Maria Delgado","email_address":"maria@example.com"}]}}`
@@ -297,8 +300,8 @@ func TestDraftEditPreservesAScheduleOnTheIdentitysClock(t *testing.T) {
 	if entry["scheduled_delivery"] != "true" {
 		t.Fatalf("schedule was not preserved: %v", entry)
 	}
-	if entry["scheduled_delivery_at_date"] != "2026-09-01" || entry["scheduled_delivery_at_hour"] != "9" {
-		t.Errorf("schedule = %v/%v, want the identity zone's 2026-09-01 hour 9",
+	if entry["scheduled_delivery_at_date"] != "2026-09-01" || entry["scheduled_delivery_at_hour"] != "13" {
+		t.Errorf("schedule = %v/%v, want the served moment's own UTC 2026-09-01 hour 13",
 			entry["scheduled_delivery_at_date"], entry["scheduled_delivery_at_hour"])
 	}
 }
@@ -313,5 +316,50 @@ func TestDraftSendRefusesAMalformedOnDate(t *testing.T) {
 	}
 	if len(writes) != 0 {
 		t.Errorf("nothing should be written, wrote %+v", writes)
+	}
+}
+
+// draftScheduleFor is the identity-clock-to-UTC conversion itself.
+func TestDraftScheduleFor(t *testing.T) {
+	newYork, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skipf("time zone database unavailable: %v", err)
+	}
+	adelaide, err := time.LoadLocation("Australia/Adelaide")
+	if err != nil {
+		t.Skipf("time zone database unavailable: %v", err)
+	}
+	// A fixed moment: 2026-12-01 20:00 in New York (2026-12-02 01:00Z).
+	now := time.Date(2026, 12, 1, 20, 0, 0, 0, newYork)
+
+	tests := []struct {
+		name     string
+		on       string
+		hour     int
+		wantDate string
+		wantHour int
+	}{
+		{name: "explicit winter date", on: "2026-12-10", hour: 9, wantDate: "2026-12-10", wantHour: 14},
+		{name: "today is the identity's today", on: "today", hour: 23, wantDate: "2026-12-02", wantHour: 4},
+		{name: "tomorrow rolls the identity's clock", on: "tomorrow", hour: 9, wantDate: "2026-12-02", wantHour: 14},
+		{name: "a late hour crosses into the next UTC day", on: "2026-12-10", hour: 22, wantDate: "2026-12-11", wantHour: 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			schedule, err := draftScheduleFor(newYork, tt.on, tt.hour, now)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if schedule.Date != tt.wantDate || schedule.Hour != tt.wantHour {
+				t.Errorf("schedule = %s/%d, want %s/%d", schedule.Date, schedule.Hour, tt.wantDate, tt.wantHour)
+			}
+		})
+	}
+
+	if _, err := draftScheduleFor(adelaide, "2026-12-10", 9, now); err == nil {
+		t.Error("a half-hour zone offset cannot land on a whole UTC hour and must be refused")
+	}
+	if _, err := draftScheduleFor(newYork, "soon", 9, now); err == nil {
+		t.Error("an unrecognized --on date must be refused")
 	}
 }

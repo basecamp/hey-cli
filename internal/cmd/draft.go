@@ -75,7 +75,7 @@ func parseDraftID(arg string) (int64, error) {
 
 // draftContentFrom is the edit state as the full DraftContent an update resends. HEY
 // revises a draft from the whole request, so every verb that writes one starts here.
-func draftContentFrom(ctx context.Context, edit *generated.MessageEditState) hey.DraftContent {
+func draftContentFrom(edit *generated.MessageEditState) hey.DraftContent {
 	content := hey.DraftContent{
 		Subject: edit.Subject,
 		Content: edit.Content,
@@ -84,18 +84,20 @@ func draftContentFrom(ctx context.Context, edit *generated.MessageEditState) hey
 		BCC:     addressEmails(edit.Addressed.Blindcopied),
 	}
 	if !edit.ScheduledDeliveryAt.IsZero() {
-		// HEY serves the moment in UTC but schedules by a date and an hour read in
-		// the identity's time zone, so the moment is said back in that zone — the
-		// host's own clock would move the delivery by the difference between them.
-		at := edit.ScheduledDeliveryAt.In(draftScheduleLocation(ctx))
+		// HEY's API reads a schedule's date and hour in UTC (ApiRequest sets
+		// Time.zone to UTC for every JSON request), so the served UTC moment is
+		// said back as its own UTC date and hour — the exact round-trip, whatever
+		// clock the host or the identity keeps. Proven live: an identity-zone
+		// conversion here moved a 09:00Z delivery to 04:00Z on the first edit.
+		at := edit.ScheduledDeliveryAt.UTC()
 		content.Schedule = &hey.DraftSchedule{Date: at.Format("2006-01-02"), Hour: at.Hour()}
 	}
 	return content
 }
 
-// draftScheduleLocation answers the clock a draft's schedule is read in: the identity's
-// time zone, which is HEY's own for every scheduled delivery. The host's local clock
-// stands in only when the identity does not name a zone this host knows.
+// draftScheduleLocation answers the clock a person means when they say "tomorrow at 9":
+// the identity's HEY time zone. The host's local clock stands in only when the identity
+// does not name a zone this host knows.
 func draftScheduleLocation(ctx context.Context) *time.Location {
 	identity, err := sdk.Identity().GetIdentity(ctx)
 	if err != nil || identity == nil || identity.TimeZoneName == "" {
@@ -106,6 +108,34 @@ func draftScheduleLocation(ctx context.Context) *time.Location {
 		return time.Local
 	}
 	return location
+}
+
+// draftScheduleFor turns "--on and --hour on the identity's clock" into the UTC date and
+// hour HEY's API reads (Time.zone is UTC for JSON requests, so the params are UTC on the
+// wire — the web app's identity-zone reading does not apply here). today and tomorrow are
+// resolved on the identity's clock too, since HEY would otherwise read them as UTC dates.
+// A zone offset with fractional hours cannot land on a whole UTC hour and is refused
+// rather than silently shifted.
+func draftScheduleFor(location *time.Location, on string, hour int, now time.Time) (*hey.DraftSchedule, error) {
+	base := now.In(location)
+	var day time.Time
+	switch on {
+	case "today":
+		day = base
+	case "tomorrow":
+		day = base.AddDate(0, 0, 1)
+	default:
+		parsed, err := time.ParseInLocation("2006-01-02", on, location)
+		if err != nil {
+			return nil, apierr.ErrUsage(fmt.Sprintf("invalid --on date %q: use YYYY-MM-DD, today or tomorrow", on))
+		}
+		day = parsed
+	}
+	at := time.Date(day.Year(), day.Month(), day.Day(), hour, 0, 0, 0, location).UTC()
+	if at.Minute() != 0 {
+		return nil, apierr.ErrUsage(fmt.Sprintf("your HEY time zone (%s) is offset from UTC by a fraction of an hour, and HEY schedules deliveries on whole UTC hours — this hour cannot be expressed exactly", location))
+	}
+	return &hey.DraftSchedule{Date: at.Format("2006-01-02"), Hour: at.Hour()}, nil
 }
 
 // --- show ---
@@ -229,7 +259,7 @@ func (c *draftEditCommand) run(cmd *cobra.Command, args []string) error {
 	if edit == nil {
 		return apierr.ErrNotFound("draft", args[0])
 	}
-	content := draftContentFrom(ctx, edit)
+	content := draftContentFrom(edit)
 
 	flags := cmd.Flags()
 	fieldFlagged := false
@@ -287,7 +317,7 @@ func newDraftSendCommand() *draftSendCommand {
 		Use:   "send <draft-id>",
 		Short: "Deliver a draft",
 		Annotations: map[string]string{
-			"agent_notes": "Sends the draft as it stands — recipients are required, added with `hey draft edit --to`. Delivery goes through HEY's undo window. --on with --hour schedules it instead (to the hour, in the account's time zone); the draft stays listed until it goes out.",
+			"agent_notes": "Sends the draft as it stands — recipients are required, added with `hey draft edit --to`. Delivery goes through HEY's undo window. --on with --hour schedules it instead, read on the HEY account's clock and scheduled to the hour; the draft stays listed until it goes out.",
 		},
 		Example: `  hey draft send 12345
   hey draft send 12345 --on tomorrow --hour 9
@@ -295,8 +325,8 @@ func newDraftSendCommand() *draftSendCommand {
 		RunE: sendCommand.run,
 		Args: usageExactOneArg(),
 	}
-	sendCommand.cmd.Flags().StringVar(&sendCommand.on, "on", "", "Schedule delivery for this date (YYYY-MM-DD, today or tomorrow)")
-	sendCommand.cmd.Flags().IntVar(&sendCommand.hour, "hour", -1, "Hour of --on to deliver at (0-23)")
+	sendCommand.cmd.Flags().StringVar(&sendCommand.on, "on", "", "Schedule delivery for this date on your HEY account's clock (YYYY-MM-DD, today or tomorrow)")
+	sendCommand.cmd.Flags().IntVar(&sendCommand.hour, "hour", -1, "Hour of --on to deliver at, 0-23, on your HEY account's clock")
 	sendCommand.cmd.MarkFlagsRequiredTogether("on", "hour")
 	return sendCommand
 }
@@ -326,13 +356,17 @@ func (c *draftSendCommand) run(cmd *cobra.Command, args []string) error {
 	if edit == nil {
 		return apierr.ErrNotFound("draft", args[0])
 	}
-	content := draftContentFrom(ctx, edit)
+	content := draftContentFrom(edit)
 	if len(content.To)+len(content.CC)+len(content.BCC) == 0 {
 		return apierr.ErrUsageHint("the draft has no recipients", fmt.Sprintf("hey draft edit %d --to <email>", draftID))
 	}
 
 	if c.on != "" {
-		content.Schedule = &hey.DraftSchedule{Date: c.on, Hour: c.hour}
+		schedule, scheduleErr := draftScheduleFor(draftScheduleLocation(ctx), c.on, c.hour, time.Now())
+		if scheduleErr != nil {
+			return scheduleErr
+		}
+		content.Schedule = schedule
 		if err := sdk.Messages().UpdateDraft(ctx, draftID, content); err != nil {
 			return apierr.FromSDK(err)
 		}
