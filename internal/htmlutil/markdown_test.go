@@ -92,6 +92,75 @@ func TestToMarkdownTable(t *testing.T) {
 	}
 }
 
+func TestToMarkdownTableWithoutHeaderRow(t *testing.T) {
+	got := toMarkdown("<table><tr><td>Personal</td><td>$99/yr</td></tr><tr><td>Team</td><td>$299/yr</td></tr></table>")
+	want := "| Personal | $99/yr |\n| --- | --- |\n| Team | $299/yr |"
+	if got != want {
+		t.Errorf("ToMarkdown = %q, want %q", got, want)
+	}
+}
+
+func TestToMarkdownLayoutTableWithBlockContent(t *testing.T) {
+	got := toMarkdown(`<table><tbody><tr><td><div>
+		<h3>Spotlights</h3>
+		<ul><li>Polished off the animation controller</li><li>Fixed reordering in generated projects</li></ul>
+		<p>Pending code review, this is ready to ship!</p>
+	</div></td></tr></tbody></table>`)
+	want := "### Spotlights\n\n- Polished off the animation controller\n- Fixed reordering in generated projects\n\nPending code review, this is ready to ship!"
+	if got != want {
+		t.Errorf("ToMarkdown = %q, want %q", got, want)
+	}
+}
+
+func TestToMarkdownLayoutTableWithSpannedCells(t *testing.T) {
+	got := toMarkdown(`<table><tbody>
+		<tr><td colspan="2"></td></tr>
+		<tr><td>Sent with Basecamp</td><td>You can reply to this email or <a href="https://example.com/answers/42">respond in Basecamp</a>.</td></tr>
+	</tbody></table>`)
+	want := "Sent with Basecamp\n\nYou can reply to this email or [respond in Basecamp](https://example.com/answers/42)."
+	if got != want {
+		t.Errorf("ToMarkdown = %q, want %q", got, want)
+	}
+}
+
+func TestToMarkdownLayoutTableWithPresentationRole(t *testing.T) {
+	got := toMarkdown(`<table role="presentation"><tr><td>Weekly digest</td><td>Everything that happened this week</td></tr></table>`)
+	want := "Weekly digest\n\nEverything that happened this week"
+	if got != want {
+		t.Errorf("ToMarkdown = %q, want %q", got, want)
+	}
+}
+
+func TestToMarkdownSingleColumnTable(t *testing.T) {
+	got := toMarkdown("<table><tr><td>Thanks for signing up!</td></tr><tr><td>Your trial ends on March 14.</td></tr></table>")
+	want := "Thanks for signing up!\n\nYour trial ends on March 14."
+	if got != want {
+		t.Errorf("ToMarkdown = %q, want %q", got, want)
+	}
+}
+
+func TestToMarkdownDataTableInsideLayoutTable(t *testing.T) {
+	got := toMarkdown(`<table><tbody><tr><td>
+		<p>Here is where the launch stands:</p>
+		<table><tr><th>Task</th><th>Owner</th></tr><tr><td>Ship the beta</td><td>Priya</td></tr></table>
+	</td></tr></tbody></table>`)
+	want := "Here is where the launch stands:\n\n| Task | Owner |\n| --- | --- |\n| Ship the beta | Priya |"
+	if got != want {
+		t.Errorf("ToMarkdown = %q, want %q", got, want)
+	}
+}
+
+func TestToMarkdownLayoutTableInsideLayoutTable(t *testing.T) {
+	got := toMarkdown(`<table><tbody><tr><td>
+		<p>The launch checklist is done.</p>
+		<table><tbody><tr><td><action-text-attachment content-type="image" url="https://example.com/logo.png"></action-text-attachment></td><td>Reply to this email to comment.</td></tr></tbody></table>
+	</td></tr></tbody></table>`)
+	want := "The launch checklist is done.\n\n![attachment](https://example.com/logo.png)\n\nReply to this email to comment."
+	if got != want {
+		t.Errorf("ToMarkdown = %q, want %q", got, want)
+	}
+}
+
 func TestToMarkdownHardBreak(t *testing.T) {
 	got := toMarkdown("<p>Thanks,<br>Jason</p>")
 	want := "Thanks,  \nJason"

@@ -455,8 +455,8 @@ func TestToMarkdownAttachmentNamesAreSerialized(t *testing.T) {
 }
 
 func TestToMarkdownTableCellsEscapePipes(t *testing.T) {
-	got := toMarkdown("<table><tr><th>a|b</th></tr><tr><td>c | d</td></tr></table>")
-	want := "| a\\|b |\n| --- |\n| c \\| d |"
+	got := toMarkdown("<table><tr><th>a|b</th><th>e</th></tr><tr><td>c | d</td><td>f</td></tr></table>")
+	want := "| a\\|b | e |\n| --- | --- |\n| c \\| d | f |"
 	if got != want {
 		t.Errorf("ToMarkdown = %q, want %q", got, want)
 	}

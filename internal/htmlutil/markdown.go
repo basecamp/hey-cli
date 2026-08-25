@@ -270,10 +270,25 @@ func codeLanguage(n *html.Node) string {
 	return ""
 }
 
+// table writes a data table as a pipe table. HTML email lays whole pages out in
+// tables, and a pipe table cannot hold what those cells hold — headings, lists,
+// nested tables, spanned cells — so a table that is scaffolding rather than data
+// renders each cell as the block flow it contains instead.
 func (m *markdownizer) table(n *html.Node) {
-	rows := tableRows(n)
-	if len(rows) == 0 {
+	cells := tableCells(n)
+	if len(cells) == 0 {
 		return
+	}
+	if isLayoutTable(n, cells) {
+		m.layoutTable(n)
+		return
+	}
+
+	rows := make([][]string, len(cells))
+	for i, row := range cells {
+		for _, cell := range row {
+			rows[i] = append(rows[i], inlineMarkdown(cell))
+		}
 	}
 
 	m.flushLine()
@@ -292,24 +307,77 @@ func (m *markdownizer) table(n *html.Node) {
 	m.blank()
 }
 
-func tableRows(n *html.Node) [][]string {
-	var rows [][]string
+func tableCells(n *html.Node) [][]*html.Node {
 	if n.Type == html.ElementNode && n.Data == "tr" {
-		var cells []string
+		var cells []*html.Node
 		for cell := n.FirstChild; cell != nil; cell = cell.NextSibling {
 			if cell.Type == html.ElementNode && (cell.Data == "td" || cell.Data == "th") {
-				cells = append(cells, inlineMarkdown(cell))
+				cells = append(cells, cell)
 			}
 		}
 		if len(cells) > 0 {
-			return [][]string{cells}
+			return [][]*html.Node{cells}
 		}
 		return nil
 	}
+	var rows [][]*html.Node
 	for child := n.FirstChild; child != nil; child = child.NextSibling {
-		rows = append(rows, tableRows(child)...)
+		rows = append(rows, tableCells(child)...)
 	}
 	return rows
+}
+
+func isLayoutTable(n *html.Node, cells [][]*html.Node) bool {
+	if role := getAttr(n, "role"); role == "presentation" || role == "none" {
+		return true
+	}
+	columns := 0
+	for _, row := range cells {
+		if len(row) > columns {
+			columns = len(row)
+		}
+		for _, cell := range row {
+			if getAttr(cell, "colspan") != "" || getAttr(cell, "rowspan") != "" || holdsBlockContent(cell) {
+				return true
+			}
+		}
+	}
+	return columns < 2
+}
+
+// holdsBlockContent reports whether a cell holds content a pipe-table cell
+// cannot: block elements that flattening to one line would destroy. A <p> or a
+// <div> is not counted — a wrapped cell value flattens without loss.
+func holdsBlockContent(n *html.Node) bool {
+	for child := n.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type == html.ElementNode && (blockContentTags[child.Data] || holdsBlockContent(child)) {
+			return true
+		}
+	}
+	return false
+}
+
+var blockContentTags = map[string]bool{
+	"h1": true, "h2": true, "h3": true, "h4": true, "h5": true, "h6": true,
+	"ul": true, "ol": true, "table": true, "pre": true, "blockquote": true,
+	"figure": true, "hr": true, "action-text-attachment": true,
+}
+
+func (m *markdownizer) layoutTable(n *html.Node) {
+	for child := n.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type != html.ElementNode {
+			m.walk(child)
+			continue
+		}
+		switch child.Data {
+		case "td", "th":
+			m.block(func() { m.children(child) })
+		case "tbody", "thead", "tfoot", "tr":
+			m.layoutTable(child)
+		default:
+			m.walk(child)
+		}
+	}
 }
 
 func (m *markdownizer) emphasis(n *html.Node, delimiter string) {
