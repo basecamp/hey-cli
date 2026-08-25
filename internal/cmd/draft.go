@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -74,7 +75,7 @@ func parseDraftID(arg string) (int64, error) {
 
 // draftContentFrom is the edit state as the full DraftContent an update resends. HEY
 // revises a draft from the whole request, so every verb that writes one starts here.
-func draftContentFrom(edit *generated.MessageEditState) hey.DraftContent {
+func draftContentFrom(ctx context.Context, edit *generated.MessageEditState) hey.DraftContent {
 	content := hey.DraftContent{
 		Subject: edit.Subject,
 		Content: edit.Content,
@@ -83,12 +84,28 @@ func draftContentFrom(edit *generated.MessageEditState) hey.DraftContent {
 		BCC:     addressEmails(edit.Addressed.Blindcopied),
 	}
 	if !edit.ScheduledDeliveryAt.IsZero() {
-		// HEY serves the moment in UTC and schedules by a date and an hour read in
-		// the identity's time zone; the local clock is this CLI's best stand-in.
-		local := edit.ScheduledDeliveryAt.Local()
-		content.Schedule = &hey.DraftSchedule{Date: local.Format("2006-01-02"), Hour: local.Hour()}
+		// HEY serves the moment in UTC but schedules by a date and an hour read in
+		// the identity's time zone, so the moment is said back in that zone — the
+		// host's own clock would move the delivery by the difference between them.
+		at := edit.ScheduledDeliveryAt.In(draftScheduleLocation(ctx))
+		content.Schedule = &hey.DraftSchedule{Date: at.Format("2006-01-02"), Hour: at.Hour()}
 	}
 	return content
+}
+
+// draftScheduleLocation answers the clock a draft's schedule is read in: the identity's
+// time zone, which is HEY's own for every scheduled delivery. The host's local clock
+// stands in only when the identity does not name a zone this host knows.
+func draftScheduleLocation(ctx context.Context) *time.Location {
+	identity, err := sdk.Identity().GetIdentity(ctx)
+	if err != nil || identity == nil || identity.TimeZoneName == "" {
+		return time.Local
+	}
+	location, err := time.LoadLocation(identity.TimeZoneName)
+	if err != nil {
+		return time.Local
+	}
+	return location
 }
 
 // --- show ---
@@ -212,7 +229,7 @@ func (c *draftEditCommand) run(cmd *cobra.Command, args []string) error {
 	if edit == nil {
 		return apierr.ErrNotFound("draft", args[0])
 	}
-	content := draftContentFrom(edit)
+	content := draftContentFrom(ctx, edit)
 
 	flags := cmd.Flags()
 	fieldFlagged := false
@@ -292,8 +309,13 @@ func (c *draftSendCommand) run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if c.on != "" && (c.hour < 0 || c.hour > 23) {
-		return apierr.ErrUsage("--hour must be between 0 and 23")
+	if c.on != "" {
+		if c.hour < 0 || c.hour > 23 {
+			return apierr.ErrUsage("--hour must be between 0 and 23")
+		}
+		if dateErr := validateScheduleDate(c.on); dateErr != nil {
+			return dateErr
+		}
 	}
 	ctx := cmd.Context()
 
@@ -304,7 +326,7 @@ func (c *draftSendCommand) run(cmd *cobra.Command, args []string) error {
 	if edit == nil {
 		return apierr.ErrNotFound("draft", args[0])
 	}
-	content := draftContentFrom(edit)
+	content := draftContentFrom(ctx, edit)
 	if len(content.To)+len(content.CC)+len(content.BCC) == 0 {
 		return apierr.ErrUsageHint("the draft has no recipients", fmt.Sprintf("hey draft edit %d --to <email>", draftID))
 	}
@@ -374,4 +396,16 @@ func draftNoun(count int) string {
 		return "draft"
 	}
 	return "drafts"
+}
+
+// validateScheduleDate holds --on to what it advertises — YYYY-MM-DD, today or
+// tomorrow — so a typo is a usage error before anything is fetched or written.
+func validateScheduleDate(on string) error {
+	if on == "today" || on == "tomorrow" {
+		return nil
+	}
+	if _, err := time.Parse("2006-01-02", on); err != nil {
+		return apierr.ErrUsage(fmt.Sprintf("invalid --on date %q: use YYYY-MM-DD, today or tomorrow", on))
+	}
+	return nil
 }

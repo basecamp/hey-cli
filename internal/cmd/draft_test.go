@@ -22,7 +22,7 @@ func draftLifecycleServer(t *testing.T, editJSON string, writes *[]draftWrite) h
 		switch {
 		case strings.Contains(r.URL.Path, "identity"):
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"email_address":"user@hey.com","id":1,"senders":[{"id":42,"default":true}],"primary_contact":{"id":42}}`)
+			_, _ = io.WriteString(w, `{"email_address":"user@hey.com","id":1,"time_zone_name":"America/New_York","senders":[{"id":42,"default":true}],"primary_contact":{"id":42}}`)
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/edit.json"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = io.WriteString(w, editJSON)
@@ -272,6 +272,44 @@ func TestDraftCommandsRejectBadIDs(t *testing.T) {
 		if _, err := runJSONCommand(t, draftLifecycleServer(t, draftEditJSON, &writes), args...); err == nil || !strings.Contains(err.Error(), "invalid draft ID") {
 			t.Errorf("%v: err = %v, want invalid draft ID", args, err)
 		}
+	}
+	if len(writes) != 0 {
+		t.Errorf("nothing should be written, wrote %+v", writes)
+	}
+}
+
+// A schedule is a date and an hour on the identity's clock, so resending one converts
+// the served UTC moment into the identity's zone — never the host's, whose clock would
+// move the delivery by the difference between them. 13:00Z is 09:00 in the fixture
+// identity's America/New_York, whatever machine this test runs on.
+func TestDraftEditPreservesAScheduleOnTheIdentitysClock(t *testing.T) {
+	scheduled := `{"id":12345,"subject":"Quarterly planning","content":"<div>Agenda.</div>",
+		"scheduled_delivery_at":"2026-09-01T13:00:00Z",
+		"addressed":{"directly":[{"id":7,"name":"Maria Delgado","email_address":"maria@example.com"}]}}`
+	var writes []draftWrite
+	_, err := runJSONCommand(t, draftLifecycleServer(t, scheduled, &writes),
+		"draft", "edit", "12345", "--subject", "Quarterly planning (v2)")
+	if err != nil {
+		t.Fatalf("draft edit: %v", err)
+	}
+
+	entry, _ := writes[0].Body["entry"].(map[string]any)
+	if entry["scheduled_delivery"] != "true" {
+		t.Fatalf("schedule was not preserved: %v", entry)
+	}
+	if entry["scheduled_delivery_at_date"] != "2026-09-01" || entry["scheduled_delivery_at_hour"] != "9" {
+		t.Errorf("schedule = %v/%v, want the identity zone's 2026-09-01 hour 9",
+			entry["scheduled_delivery_at_date"], entry["scheduled_delivery_at_hour"])
+	}
+}
+
+// --on is validated against what it advertises before anything is fetched or written.
+func TestDraftSendRefusesAMalformedOnDate(t *testing.T) {
+	var writes []draftWrite
+	_, err := runJSONCommand(t, draftLifecycleServer(t, draftEditJSON, &writes),
+		"draft", "send", "12345", "--on", "next-week", "--hour", "9")
+	if err == nil || !strings.Contains(err.Error(), "invalid --on date") {
+		t.Fatalf("err = %v, want an invalid --on usage error", err)
 	}
 	if len(writes) != 0 {
 		t.Errorf("nothing should be written, wrote %+v", writes)
