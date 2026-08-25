@@ -8,7 +8,7 @@ require (
 	charm.land/glamour/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/basecamp/actioncable-go v0.0.0-20260824145920-822e6cf08655
-	github.com/basecamp/hey-sdk/go v0.23.0
+	github.com/basecamp/hey-sdk/go v0.24.0
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/gofrs/flock v0.13.0
@@ -118,5 +118,3 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
 )
-
-replace github.com/basecamp/hey-sdk/go => /home/stanko/Work/basecamp/hey-sdk/go
