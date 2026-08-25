@@ -18,6 +18,8 @@ import (
 	"time"
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
+	"github.com/basecamp/hey-cli/internal/version"
 )
 
 type imageBlobDownloader interface {
@@ -147,6 +149,7 @@ func (f *trustedImageFetcher) Fetch(ctx context.Context, source string, maxBytes
 	if err != nil {
 		return nil, err
 	}
+	request.Header.Set("User-Agent", version.UserAgent())
 	response, err := f.gopherClient.Do(request)
 	if err != nil {
 		return nil, err

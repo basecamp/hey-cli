@@ -13,6 +13,7 @@ import (
 	"github.com/basecamp/actioncable-go"
 
 	"github.com/basecamp/hey-cli/internal/auth"
+	"github.com/basecamp/hey-cli/internal/version"
 )
 
 // Dial connects to the cable server for a HEY base URL, authorizing the upgrade
@@ -88,6 +89,7 @@ func authHeader(ctx context.Context, baseURL string, authMgr *auth.Manager) (htt
 	if err := authMgr.AuthenticateRequest(ctx, request); err != nil {
 		return nil, err
 	}
+	request.Header.Set("User-Agent", version.UserAgent())
 
 	return request.Header, nil
 }

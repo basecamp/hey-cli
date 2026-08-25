@@ -1,6 +1,7 @@
 package version
 
 import (
+	"runtime"
 	"runtime/debug"
 	"strings"
 )
@@ -53,7 +54,20 @@ func Full() string {
 
 // UserAgent returns the user agent string for API requests.
 func UserAgent() string {
-	return "hey-cli/" + Version + " (https://github.com/basecamp/hey-cli)"
+	return "HEY-CLI/" + Version + " (" + operatingSystem() + " " + runtime.GOARCH + "; https://github.com/basecamp/hey-cli)"
+}
+
+func operatingSystem() string {
+	switch runtime.GOOS {
+	case "linux":
+		return "Linux"
+	case "darwin":
+		return "Mac"
+	case "windows":
+		return "Windows"
+	default:
+		return runtime.GOOS
+	}
 }
 
 // IsDev returns true if this is a development build.

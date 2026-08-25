@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/basecamp/hey-cli/internal/version"
 )
 
 // OAuthToken represents the token response from the HEY OAuth server.
@@ -39,6 +41,7 @@ func exchangeCode(ctx context.Context, httpClient *http.Client, tokenEndpoint, c
 		return nil, fmt.Errorf("creating token request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("User-Agent", version.UserAgent())
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -81,6 +84,7 @@ func refreshOAuthToken(ctx context.Context, httpClient *http.Client, tokenEndpoi
 		return nil, fmt.Errorf("creating refresh request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("User-Agent", version.UserAgent())
 
 	resp, err := httpClient.Do(req)
 	if err != nil {

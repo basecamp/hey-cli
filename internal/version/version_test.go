@@ -1,7 +1,9 @@
 package version
 
 import (
+	"runtime"
 	"runtime/debug"
+	"strings"
 	"testing"
 )
 
@@ -48,7 +50,15 @@ func TestFull(t *testing.T) {
 
 func TestUserAgent(t *testing.T) {
 	stubVersion(t, "1.0.0", false)
-	if got := UserAgent(); got != "hey-cli/1.0.0 (https://github.com/basecamp/hey-cli)" {
+
+	got := UserAgent()
+	if !strings.HasPrefix(got, "HEY-CLI/1.0.0 (") {
+		t.Errorf("UserAgent() = %q, want HEY-CLI/1.0.0 product token", got)
+	}
+	if !strings.HasSuffix(got, " "+runtime.GOARCH+"; https://github.com/basecamp/hey-cli)") {
+		t.Errorf("UserAgent() = %q, want OS, arch and repo URL in the comment", got)
+	}
+	if runtime.GOOS == "linux" && got != "HEY-CLI/1.0.0 (Linux "+runtime.GOARCH+"; https://github.com/basecamp/hey-cli)" {
 		t.Errorf("UserAgent() = %q", got)
 	}
 }
