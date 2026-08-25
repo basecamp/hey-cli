@@ -551,7 +551,10 @@ hey event delete 4821
 
 Without `--calendar`, `hey event list` reads every calendar and `hey event add` files on
 the first one it can — the personal calendar is in the list HEY serves but refuses events.
-A repeating event lists once as the series it is stored as, not once per day it falls on.
+The list follows every page HEY serves. Within each calendar HEY orders recordings by
+newest start time, not creation time, so use the ID returned by `hey event add` for a follow-up
+edit or delete rather than choosing an event by its position in the list. A repeating event
+lists once as the series it is stored as, not once per day it falls on.
 
 An event with no `--start-time` is an all-day event, and a `--start-time` with no
 `--end-time` runs for an hour. Clock times are read in `--time-zone`, which defaults to the

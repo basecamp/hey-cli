@@ -169,6 +169,39 @@ func TestEventsListReadsEveryCalendar(t *testing.T) {
 	}
 }
 
+// Calendar recordings are geared-paginated newest start first. A recurring series that
+// began long ago can sit behind a full page of newer one-off events even while it recurs in
+// the requested window, so stopping at the first page makes the series disappear.
+func TestEventsListFollowsEveryRecordingsPage(t *testing.T) {
+	var pages []string
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page := r.URL.Query().Get("page")
+		pages = append(pages, page)
+		w.Header().Set("Content-Type", "application/json")
+		switch page {
+		case "":
+			w.Header().Set("Link", `</calendars/7/recordings.json?page=older-starts>; rel="next"`)
+			_, _ = io.WriteString(w, `{"Calendar::Event":[{"id":1,"title":"Design review","starts_at":"2026-08-03T09:00:00Z"}]}`)
+		case "older-starts":
+			_, _ = io.WriteString(w, `{"Calendar::Event":[{"id":2,"title":"Weekly planning","recurring":true,"starts_at":"2025-01-06T09:00:00Z"}]}`)
+		default:
+			http.Error(w, "unexpected page", http.StatusBadRequest)
+		}
+	})
+
+	ids, err := runFormattedCommand(t, handler, []string{"--ids-only"},
+		"event", "list", "--calendar", "7", "--starts-on", "2026-08-01", "--ends-on", "2026-08-31")
+	if err != nil {
+		t.Fatalf("execute events list --ids-only: %v", err)
+	}
+	if got := strings.Join(pages, ","); got != ",older-starts" {
+		t.Errorf("pages = %q, want the first page followed by HEY's cursor", got)
+	}
+	if got := strings.Fields(ids); len(got) != 2 || got[0] != "1" || got[1] != "2" {
+		t.Errorf("ids = %q, want the one-off event and the recurring series from page two", ids)
+	}
+}
+
 func TestEventsListDefaultsEndDateFromStart(t *testing.T) {
 	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.URL.Query().Get("ends_on"); got != "2026-03-03" {

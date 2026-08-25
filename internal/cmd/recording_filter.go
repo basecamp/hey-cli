@@ -106,24 +106,60 @@ func (f *recordingFilter) resolve(ctx context.Context) (recordingWindow, error) 
 }
 
 // read lists the recordings of one type over the window, calendar by calendar in the order
-// HEY listed the calendars.
+// HEY listed the calendars, following every page of each calendar.
 //
 // A recurring event is one recording here rather than one per day it falls on: a calendar
 // lists what it holds, and only the day, week and year reads expand a recurrence into the
-// occurrences inside them.
+// occurrences inside them. Series can start long before the requested window, which puts
+// them on a later page after newer one-off events even when they recur inside it.
 func (w recordingWindow) read(ctx context.Context, recType string) ([]generated.Recording, error) {
 	recordings := []generated.Recording{}
 	for _, calendarID := range w.calendars {
-		resp, err := sdk.Calendars().GetRecordings(ctx, calendarID, &generated.GetCalendarRecordingsParams{
-			StartsOn: &w.startsOn,
-			EndsOn:   &w.endsOn,
-		})
+		calendarRecordings, err := w.readCalendar(ctx, calendarID, recType)
+		if err != nil {
+			return nil, err
+		}
+		recordings = append(recordings, calendarRecordings...)
+	}
+	return recordings, nil
+}
+
+func (w recordingWindow) readCalendar(ctx context.Context, calendarID int64, recType string) ([]generated.Recording, error) {
+	params := &generated.GetCalendarRecordingsParams{StartsOn: &w.startsOn, EndsOn: &w.endsOn}
+	recordings := []generated.Recording{}
+	seenPages := map[string]bool{}
+
+	for {
+		page, err := sdk.Calendars().GetRecordingsPage(ctx, calendarID, params)
 		if err != nil {
 			return nil, apierr.FromSDK(err)
 		}
-		recordings = append(recordings, filterRecordingsByType(resp, recType)...)
+		if page == nil {
+			return recordings, nil
+		}
+
+		recordings = append(recordings, filterRecordingsByType(page.Recordings, recType)...)
+		if page.NextPage == "" || calendarRecordingsEmpty(page.Recordings) {
+			return recordings, nil
+		}
+		if seenPages[page.NextPage] {
+			return nil, apierr.ErrAPI(0, "calendar recordings pagination repeated a page")
+		}
+		seenPages[page.NextPage] = true
+		params.Page = &page.NextPage
 	}
-	return recordings, nil
+}
+
+func calendarRecordingsEmpty(recordings *generated.CalendarRecordingsResponse) bool {
+	if recordings == nil {
+		return true
+	}
+	for _, grouped := range *recordings {
+		if len(grouped) > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // describe names the window for a summary line.
