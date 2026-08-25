@@ -24,7 +24,10 @@ func TestClipLifecycle(t *testing.T) {
 		t.Fatalf("thread %s has no source entry", topicID)
 	}
 	entryID := strconv.FormatInt(entries[0].ID, 10)
-	content := "**quarterly** numbers are at https://example.com/reports/q3"
+	// The thread's first message went in as Markdown, so **quarterly** is emphasis in
+	// the stored entry: its text carries the word, not the asterisks. A clip quotes
+	// the entry's text.
+	content := "quarterly numbers are at https://example.com/reports/q3"
 
 	_, stderr := heyFail(t, "clip", "create", entryID, "--content", "Text that is not present in the source entry", "--json")
 	if !strings.Contains(stderr, "does not match text in entry") {

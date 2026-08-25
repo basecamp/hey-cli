@@ -11,7 +11,7 @@ type smokeEvent struct {
 	Title    string `json:"title"`
 	StartsAt string `json:"starts_at"`
 	AllDay   bool   `json:"all_day"`
-	Notes    string `json:"notes"`
+	Notes    string `json:"description"`
 	Location string `json:"location"`
 }
 
@@ -70,7 +70,7 @@ func TestEventCRUD(t *testing.T) {
 		t.Fatal("add response carries no event ID")
 	}
 	id := fmt.Sprint(event.ID)
-	t.Cleanup(func() { _, _, _ = hey(t, "event", "delete", id, day) })
+	t.Cleanup(func() { _, _, _ = hey(t, "event", "delete", id) })
 
 	if event.Title != title {
 		t.Errorf("created title = %q, want %q", event.Title, title)
@@ -101,7 +101,7 @@ func TestEventCRUD(t *testing.T) {
 		t.Error("edit dropped the notes")
 	}
 
-	stdout, stderr, code = hey(t, "event", "delete", id, day, "--json")
+	stdout, stderr, code = hey(t, "event", "delete", id, "--json")
 	if code != 0 {
 		skipf(t, "event delete failed (exit %d): %s", code, stderr)
 	}

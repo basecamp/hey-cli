@@ -362,11 +362,20 @@ func (c *eventsEditCommand) run(cmd *cobra.Command, args []string) error {
 // no event on its own, so it is looked for among the recordings of the calendars it could be
 // on — every one of them, or the one --calendar names, over the day given or a window wide
 // enough to cover an event somebody is editing.
+//
+// The day is read as the window [day, day+1): HEY's recordings window is a pair of
+// instants, and the degenerate same-day window — midnight to the same midnight — can
+// never contain a timed event, which is how editing an event by its own day used to
+// answer not-found. Reading a day too many is harmless here: the event is matched by id.
 func (c *eventsEditCommand) findEvent(ctx context.Context, id int64, on string) (generated.Recording, error) {
+	endsOn := on
+	if day, err := time.Parse("2006-01-02", on); err == nil {
+		endsOn = day.AddDate(0, 0, 1).Format("2006-01-02")
+	}
 	filter := recordingFilter{
 		calendar:         c.fields.calendar,
 		startsOn:         on,
-		endsOn:           on,
+		endsOn:           endsOn,
 		defaultWindow:    func(now time.Time) (time.Time, time.Time) { return now.AddDate(-1, 0, 0), now.AddDate(1, 0, 0) },
 		defaultCalendars: allCalendarIDs,
 	}
