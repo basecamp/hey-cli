@@ -59,6 +59,14 @@ func screenerServer(t *testing.T) (*httptest.Server, *recordedScreener) {
 			}
 			// The endpoint pages by an opaque geared_pagination cursor from the Link
 			// header; anything else — a page number included — answers the first page.
+			if req.URL.Query().Get("page") == "screener-loop" {
+				w.Header().Set("Link", `<https://app.hey.com/clearances.json?page=screener-loop>; rel="next"`)
+				_, _ = w.Write([]byte(`{"pending_clearances_count":3,"clearances":[
+					{"id":91,"status":"pending",
+					 "petitioner":{"id":51,"name":"Hollis Heimboch","email_address":"hollis@example.com"},
+					 "most_recent_entry":{"id":71,"subject":"New numbers!","topic_id":81,"summary":"The latest sales figures"}}]}`))
+				return
+			}
 			if req.URL.Query().Get("page") == "screener-cursor-2" {
 				_, _ = w.Write([]byte(`{"pending_clearances_count":3,"clearances":[
 					{"id":92,"status":"pending",
@@ -243,7 +251,8 @@ func TestScreenerListStartsFromTheCursor(t *testing.T) {
 	}
 }
 
-// A first page with more behind it names the cursor, so a script can carry on.
+// A first page with more behind it names the cursor, so a script can carry on, and
+// total_count says what the whole queue holds beyond what this read returned.
 func TestScreenerListReportsTheNextPageCursor(t *testing.T) {
 	server, _ := screenerServer(t)
 
@@ -252,7 +261,28 @@ func TestScreenerListReportsTheNextPageCursor(t *testing.T) {
 		t.Fatalf("list failed: %v", err)
 	}
 
-	if resp.Meta == nil || resp.Meta["next_page"] != "screener-cursor-2" {
+	if resp.Meta == nil || resp.Meta["next_page"] != "screener-cursor-2" || resp.Meta["total_count"] != float64(3) {
+		t.Errorf("meta = %+v", resp.Meta)
+	}
+}
+
+// A queue that keeps answering pages stops at the cap rather than reading forever, and
+// the capped read names the cursor to continue from.
+func TestScreenerListStopsAtTheCapAndNamesTheCursor(t *testing.T) {
+	server, recorded := screenerServer(t)
+
+	resp, err := runScreener(t, server, "list", "--all", "--page", "screener-loop")
+	if err != nil {
+		t.Fatalf("list --all failed: %v", err)
+	}
+
+	if requests := recorded.snapshot(); len(requests) != maxScreenerPages {
+		t.Errorf("requests = %d, want %d", len(requests), maxScreenerPages)
+	}
+	if resp.Notice != "Screener listing stopped after 100 pages. Continue with --page using next_page." {
+		t.Errorf("notice = %q", resp.Notice)
+	}
+	if resp.Meta == nil || resp.Meta["next_page"] != "screener-loop" || resp.Meta["pages_fetched"] != float64(100) {
 		t.Errorf("meta = %+v", resp.Meta)
 	}
 }

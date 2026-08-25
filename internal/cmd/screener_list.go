@@ -96,6 +96,7 @@ func (c *screenerListCommand) run(cmd *cobra.Command, _ []string) error {
 		output.WithSummary(fmt.Sprintf("%d %s waiting", len(pending), senderNoun(len(pending)))),
 		output.WithNotice(notice),
 		output.WithMeta("pages_fetched", collected.Read),
+		output.WithMeta("total_count", collected.Total),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{Action: "approve", Command: "hey screener approve <id>", Description: "Let a sender through"},
 			output.Breadcrumb{Action: "deny", Command: "hey screener deny <id>", Description: "Turn a sender away"},
