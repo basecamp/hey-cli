@@ -247,6 +247,7 @@ hey move
 hey move --to
 hey reply
 hey reply --attach
+hey reply --draft
 hey reply --message
 hey reply --message-html
 hey screener

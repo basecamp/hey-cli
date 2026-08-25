@@ -135,3 +135,66 @@ func TestDraftSendRefusesWithoutRecipients(t *testing.T) {
 		t.Errorf("stderr = %q, want a no-recipients refusal", stderr)
 	}
 }
+
+// findSmokeThread composes a message to self and finds its topic in the imbox, falling
+// back to any thread there.
+func findSmokeThread(t *testing.T, subject string) string {
+	t.Helper()
+	_, _, composeCode := hey(t, "compose", "--to", smokeEmail, "--subject", subject,
+		"-m", "Original message for the reply draft test", "--json")
+
+	resp := heyJSON(t, "box", "imbox")
+	type posting struct {
+		AppURL  string `json:"app_url"`
+		Summary string `json:"summary"`
+	}
+	type boxResp struct {
+		Postings []posting `json:"postings"`
+	}
+	data := dataAs[boxResp](t, resp)
+
+	if composeCode == 0 {
+		for _, p := range data.Postings {
+			if p.Summary == subject {
+				return extractTopicID(p.AppURL)
+			}
+		}
+	}
+	for _, p := range data.Postings {
+		if p.AppURL != "" {
+			return extractTopicID(p.AppURL)
+		}
+	}
+	return ""
+}
+
+func TestReplyDraft(t *testing.T) {
+	topicID := findSmokeThread(t, "Reply draft smoke "+uniqueID())
+	if topicID == "" {
+		skipf(t, "no thread available to draft a reply on")
+	}
+
+	stdout, stderr, code := hey(t, "reply", topicID, "-m", "Drafting this reply.", "--draft", "--json")
+	if code != 0 {
+		skipf(t, "reply --draft not accepted by server (exit %d): %s", code, stderr)
+	}
+	draft := dataAs[draftData](t, parseResponse(t, stdout))
+	if draft.ID <= 0 {
+		t.Fatalf("draft id = %d, want positive", draft.ID)
+	}
+	t.Cleanup(func() {
+		_, _, _ = hey(t, "draft", "delete", fmt.Sprintf("%d", draft.ID), "--json")
+	})
+
+	resp := heyJSON(t, "draft", "show", fmt.Sprintf("%d", draft.ID))
+	state := dataAs[draftState](t, resp)
+	if !state.IsReply {
+		t.Errorf("draft %d should know it is a reply: %+v", draft.ID, state)
+	}
+	if !strings.Contains(state.Body, "Drafting this reply") {
+		t.Errorf("body = %q", state.Body)
+	}
+	if !draftListedIDs(t)[draft.ID] {
+		t.Errorf("reply draft %d missing from hey draft list --all", draft.ID)
+	}
+}

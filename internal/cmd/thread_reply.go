@@ -45,6 +45,17 @@ func resolveThreadReply(ctx context.Context, threadID int64) (*threadReplyTarget
 		return nil, err
 	}
 	entryID := topic.Entries[len(topic.Entries)-1].Id
+
+	target := &threadReplyTarget{
+		EntryID:   entryID,
+		AccountID: topic.AccountId,
+		client:    threadSDK,
+	}
+	if addressed, ok := replyRecipientsFromServer(ctx, threadSDK, entryID); ok {
+		target.Addressed = addressed
+		return target, nil
+	}
+
 	message, err := threadSDK.Messages().Get(ctx, entryID)
 	if err != nil {
 		return nil, apierr.FromSDK(err)
@@ -58,12 +69,31 @@ func resolveThreadReply(ctx context.Context, threadID int64) (*threadReplyTarget
 		return nil, apierr.ErrUsage("could not determine thread recipients")
 	}
 
-	return &threadReplyTarget{
-		EntryID:   entryID,
-		AccountID: topic.AccountId,
-		Addressed: addressed,
-		client:    threadSDK,
-	}, nil
+	target.Addressed = addressed
+	return target, nil
+}
+
+// replyRecipientsFromServer asks HEY who a reply to the entry goes to
+// (GET /entries/{id}/replies/new): the entry's sender moved onto the To line and the
+// acting user's own addresses, aliases and catch-alls excluded — the exclusion this CLI
+// cannot compute locally, and the reason a reply used to be able to CC its writer back
+// to themselves. A failed read falls back to the local computation, and so does an
+// empty answer: on a thread with yourself, everyone HEY excludes is everyone there is,
+// and the local list is what keeps that reply addressable.
+func replyRecipientsFromServer(ctx context.Context, client *hey.Client, entryID int64) (replyRecipients, bool) {
+	prefilled, err := client.Entries().NewReply(ctx, entryID)
+	if err != nil || prefilled == nil {
+		return replyRecipients{}, false
+	}
+	addressed := replyRecipients{
+		To:  addressEmails(prefilled.Addressed.Directly),
+		CC:  addressEmails(prefilled.Addressed.Copied),
+		BCC: addressEmails(prefilled.Addressed.Blindcopied),
+	}
+	if len(addressed.To)+len(addressed.CC)+len(addressed.BCC) == 0 {
+		return replyRecipients{}, false
+	}
+	return addressed, true
 }
 
 // recipientsForReplyTo answers who a reply to this message goes to: the message's own

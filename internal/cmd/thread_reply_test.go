@@ -43,6 +43,11 @@ type sentReply struct {
 	To                   []string
 	CC                   []string
 	BCC                  []string
+
+	// ReplyNewJSON, when set before the command runs, is what GET
+	// /entries/{id}/replies/new answers — HEY's own computed reply recipients.
+	// Empty means the endpoint 404s and the CLI falls back to computing locally.
+	ReplyNewJSON string
 }
 
 // threadReplyServer answers the typed topic, the latest entry's message, the identity
@@ -53,6 +58,14 @@ func threadReplyServer(t *testing.T, messageJSON string, entryIDs ...int64) (*ht
 	sent := &sentReply{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case strings.HasSuffix(r.URL.Path, "/replies/new.json"):
+			if sent.ReplyNewJSON == "" {
+				w.Header().Set("Content-Type", "application/json")
+				http.Error(w, `{"message":"not found"}`, http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, sent.ReplyNewJSON)
 		case strings.Contains(r.URL.Path, "/replies"):
 			if got := r.URL.Query().Get("filtered_account_id"); got != "9" {
 				t.Errorf("reply account = %q, want 9", got)
@@ -342,4 +355,59 @@ func runCLI(t *testing.T, server *httptest.Server, args ...string) error {
 	root.SetArgs(append([]string{"--json", "--base-url", server.URL}, args...))
 
 	return root.Execute()
+}
+
+// HEY's replies/new endpoint answers the reply's recipients with the acting user's own
+// addresses excluded — the exclusion the local computation cannot do. When it answers,
+// its list wins.
+func TestReplyPrefersTheServersComputedRecipients(t *testing.T) {
+	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
+	sent.ReplyNewJSON = `{"content":"<div>quoted</div>","is_reply":true,
+		"addressed":{"directly":[{"id":31,"name":"Rick Ramirez","email_address":"rick@example.com"}]}}`
+
+	if err := runCLI(t, server, "--account", "8", "reply", "7", "-m", "sounds good"); err != nil {
+		t.Fatalf("reply: %v", err)
+	}
+	if len(sent.To) != 1 || sent.To[0] != "rick@example.com" {
+		t.Errorf("to = %v, want the server-computed list alone", sent.To)
+	}
+	if len(sent.CC) != 0 {
+		t.Errorf("cc = %v, want none", sent.CC)
+	}
+}
+
+// An empty answer from replies/new means everyone HEY excludes is everyone there is —
+// a thread with yourself — and the local computation is what keeps that reply
+// addressable. The 404 case rides through every other test in this file, which runs
+// against a fake that does not serve the endpoint at all.
+func TestReplyFallsBackWhenTheServerAnswersNobody(t *testing.T) {
+	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
+	sent.ReplyNewJSON = `{"content":"<div>quoted</div>","is_reply":true,"addressed":{}}`
+
+	if err := runCLI(t, server, "--account", "8", "reply", "7", "-m", "note to self"); err != nil {
+		t.Fatalf("reply: %v", err)
+	}
+	if len(sent.To) == 0 {
+		t.Errorf("to = %v, want the locally computed recipients", sent.To)
+	}
+}
+
+func TestReplyDraftSavesInsteadOfSending(t *testing.T) {
+	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
+
+	if err := runCLI(t, server, "--account", "8", "reply", "7", "-m", "drafting this", "--draft"); err != nil {
+		t.Fatalf("reply --draft: %v", err)
+	}
+	if sent.Status != "drafted" {
+		t.Errorf("entry.status = %q, want drafted", sent.Status)
+	}
+	if !strings.Contains(sent.Path, "/entries/12/replies") {
+		t.Errorf("path = %q, want the latest entry's replies", sent.Path)
+	}
+	if len(sent.To) == 0 {
+		t.Errorf("a reply draft carries the thread's recipients, got none")
+	}
+	if !strings.Contains(sent.Content, "drafting this") {
+		t.Errorf("content = %q", sent.Content)
+	}
 }
