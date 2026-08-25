@@ -657,7 +657,7 @@ func TestSetupAgentsRemovePreservesUnmanagedSkills(t *testing.T) {
 	}
 }
 
-func TestClaudePluginStepsIgnoreGlobalGitURLRewrites(t *testing.T) {
+func TestClaudePluginStepsForceGitHubHTTPS(t *testing.T) {
 	isolateAgents(t)
 	var gotEnv []string
 	stubRunAgentCommand(t, func(ctx context.Context, _ string, _ ...string) ([]byte, error) {
@@ -668,9 +668,16 @@ func TestClaudePluginStepsIgnoreGlobalGitURLRewrites(t *testing.T) {
 	if _, err := runClaudePluginStep(context.Background(), time.Second, "claude", "plugin", "install", "hey@37signals"); err != nil {
 		t.Fatal(err)
 	}
-	want := "GIT_CONFIG_GLOBAL=" + os.DevNull
-	if len(gotEnv) != 1 || gotEnv[0] != want {
-		t.Errorf("command environment = %v, want %q", gotEnv, want)
+	want := []string{
+		"GIT_CONFIG_GLOBAL=" + os.DevNull,
+		"GIT_CONFIG_COUNT=2",
+		"GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf",
+		"GIT_CONFIG_VALUE_0=git@github.com:",
+		"GIT_CONFIG_KEY_1=url.https://github.com/.insteadOf",
+		"GIT_CONFIG_VALUE_1=ssh://git@github.com/",
+	}
+	if strings.Join(gotEnv, "|") != strings.Join(want, "|") {
+		t.Errorf("command environment = %v, want %v", gotEnv, want)
 	}
 }
 

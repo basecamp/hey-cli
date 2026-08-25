@@ -349,10 +349,19 @@ func runClaudeStep(parent context.Context, timeout time.Duration, path string, a
 }
 
 // runClaudePluginStep clones the public Claude plugin repositories over
-// HTTPS independently of global Git URL rewrites. Plugin setup therefore
-// works before the user configures GitHub SSH keys or host verification.
+// HTTPS independently of global Git URL rewrites. Claude accepts HTTPS
+// marketplace sources and also emits SSH-shaped GitHub URLs for plugins, so
+// this command-scoped Git configuration maps both forms onto HTTPS.
 func runClaudePluginStep(parent context.Context, timeout time.Duration, path string, args ...string) ([]byte, error) {
-	ctx := context.WithValue(parent, agentCommandEnvironmentKey{}, []string{"GIT_CONFIG_GLOBAL=" + os.DevNull})
+	env := []string{
+		"GIT_CONFIG_GLOBAL=" + os.DevNull,
+		"GIT_CONFIG_COUNT=2",
+		"GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf",
+		"GIT_CONFIG_VALUE_0=git@github.com:",
+		"GIT_CONFIG_KEY_1=url.https://github.com/.insteadOf",
+		"GIT_CONFIG_VALUE_1=ssh://git@github.com/",
+	}
+	ctx := context.WithValue(parent, agentCommandEnvironmentKey{}, env)
 	return runClaudeStep(ctx, timeout, path, args...)
 }
 
