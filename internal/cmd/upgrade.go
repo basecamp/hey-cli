@@ -530,7 +530,7 @@ func miseConfigPath(data []byte, version string) (string, error) {
 
 func resolveMiseBinary(ctx context.Context, mise, version string) (string, error) {
 	tool := miseTool + "@" + version
-	resolve := exec.CommandContext(ctx, mise, "which", "hey", "--tool="+tool) //nolint:gosec // mise is independently matched to the running install layout
+	resolve := exec.CommandContext(ctx, mise, "which", "hey", "--tool="+tool) // #nosec G204 -- mise is independently matched to the running install layout
 	return miseBinaryPath(resolve)
 }
 
@@ -553,7 +553,7 @@ func miseBinaryPath(resolve *exec.Cmd) (string, error) {
 }
 
 func upgradeMise(ctx context.Context, mise, configPath, version string, stdout io.Writer, stderr io.Writer) error {
-	upgrade := exec.CommandContext(ctx, mise, "use", "--path", configPath, miseTool+"@"+version) //nolint:gosec // mise is independently matched to the running install layout
+	upgrade := exec.CommandContext(ctx, mise, "use", "--path", configPath, miseTool+"@"+version) // #nosec G204 -- mise is independently matched to the running install layout
 	upgrade.Stdout = stdout
 	upgrade.Stderr = stderr
 	return upgrade.Run()
