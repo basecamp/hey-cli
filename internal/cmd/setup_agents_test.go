@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
@@ -653,6 +654,33 @@ func TestSetupAgentsRemovePreservesUnmanagedSkills(t *testing.T) {
 		if readErr != nil || string(data) != "user skill" {
 			t.Errorf("unmanaged skill %s = %q, %v", path, data, readErr)
 		}
+	}
+}
+
+func TestClaudePluginStepsIgnoreGlobalGitURLRewrites(t *testing.T) {
+	isolateAgents(t)
+	var gotEnv []string
+	stubRunAgentCommand(t, func(ctx context.Context, _ string, _ ...string) ([]byte, error) {
+		gotEnv = agentCommandEnvironment(ctx)
+		return nil, nil
+	})
+
+	if _, err := runClaudePluginStep(context.Background(), time.Second, "claude", "plugin", "install", "hey@37signals"); err != nil {
+		t.Fatal(err)
+	}
+	want := "GIT_CONFIG_GLOBAL=" + os.DevNull
+	if len(gotEnv) != 1 || gotEnv[0] != want {
+		t.Errorf("command environment = %v, want %q", gotEnv, want)
+	}
+}
+
+func TestCommandEnvironmentReplacesExistingValues(t *testing.T) {
+	got := commandEnvironment(
+		[]string{"PATH=/usr/bin", "GIT_CONFIG_GLOBAL=/home/jane/.gitconfig"},
+		[]string{"GIT_CONFIG_GLOBAL=" + os.DevNull},
+	)
+	if strings.Join(got, "|") != "PATH=/usr/bin|GIT_CONFIG_GLOBAL="+os.DevNull {
+		t.Errorf("environment = %v", got)
 	}
 }
 

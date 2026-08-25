@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -83,10 +84,42 @@ var agentSetupHandlers = map[string]agentSetupHandler{
 // prints its own status lines and surfaces the tool's output only on failure.
 var runAgentCommand = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 	command := exec.CommandContext(ctx, name, args...) // #nosec G204 -- name comes from harness.Find*Binary
+	command.Env = commandEnvironment(os.Environ(), agentCommandEnvironment(ctx))
 	// Bound Wait, not just the process: a wrapper script's grandchild can hold
 	// the output pipes open after the timeout kills the child.
 	command.WaitDelay = time.Second
 	return command.CombinedOutput()
+}
+
+type agentCommandEnvironmentKey struct{}
+
+func agentCommandEnvironment(ctx context.Context) []string {
+	env, _ := ctx.Value(agentCommandEnvironmentKey{}).([]string)
+	return env
+}
+
+// commandEnvironment applies command-scoped overrides without changing the
+// process environment shared by concurrent commands.
+func commandEnvironment(base, overrides []string) []string {
+	env := append([]string(nil), base...)
+	for _, override := range overrides {
+		key, _, ok := strings.Cut(override, "=")
+		if !ok {
+			continue
+		}
+		replaced := false
+		for i, value := range env {
+			existingKey, _, hasValue := strings.Cut(value, "=")
+			if hasValue && strings.EqualFold(existingKey, key) {
+				env[i] = override
+				replaced = true
+			}
+		}
+		if !replaced {
+			env = append(env, override)
+		}
+	}
+	return env
 }
 
 const (
@@ -292,12 +325,12 @@ func installClaudePlugin(parent context.Context, progress func(string)) error {
 
 		progress("Registering " + harness.ClaudeMarketplaceName + " marketplace…")
 		// Best-effort: already registered is the common case and not an error.
-		_, _ = runClaudeStep(parent, claudeMarketplaceTimeout, claudePath, "plugin", "marketplace", "add", harness.ClaudeMarketplaceSource)
+		_, _ = runClaudePluginStep(parent, claudeMarketplaceTimeout, claudePath, "plugin", "marketplace", "add", harness.ClaudeMarketplaceSource)
 		progress("Refreshing " + harness.ClaudeMarketplaceName + " marketplace…")
-		_, _ = runClaudeStep(parent, claudeMarketplaceTimeout, claudePath, "plugin", "marketplace", "update", harness.ClaudeMarketplaceName)
+		_, _ = runClaudePluginStep(parent, claudeMarketplaceTimeout, claudePath, "plugin", "marketplace", "update", harness.ClaudeMarketplaceName)
 
 		progress("Installing " + harness.ClaudeExpectedPluginKey + " plugin…")
-		out, err := runClaudeStep(parent, claudeInstallTimeout, claudePath, "plugin", "install", harness.ClaudeExpectedPluginKey)
+		out, err := runClaudePluginStep(parent, claudeInstallTimeout, claudePath, "plugin", "install", harness.ClaudeExpectedPluginKey)
 		if err != nil {
 			return claudeSetupError("plugin install failed: " + agentCommandFailure(out, err))
 		}
@@ -313,6 +346,14 @@ func runClaudeStep(parent context.Context, timeout time.Duration, path string, a
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	return runAgentCommand(ctx, path, args...)
+}
+
+// runClaudePluginStep clones the public Claude plugin repositories over
+// HTTPS independently of global Git URL rewrites. Plugin setup therefore
+// works before the user configures GitHub SSH keys or host verification.
+func runClaudePluginStep(parent context.Context, timeout time.Duration, path string, args ...string) ([]byte, error) {
+	ctx := context.WithValue(parent, agentCommandEnvironmentKey{}, []string{"GIT_CONFIG_GLOBAL=" + os.DevNull})
+	return runClaudeStep(ctx, timeout, path, args...)
 }
 
 func claudeSetupError(summary string) *agentSetupError {
