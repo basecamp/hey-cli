@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -20,6 +22,7 @@ import (
 const (
 	homebrewCask           = "basecamp/tap/hey"
 	homebrewCaskroomPath   = "/caskroom/hey/"
+	miseTool               = "github:basecamp/hey-cli"
 	scoopApp               = "hey"
 	scoopAppPath           = "/scoop/apps/hey/"
 	scoopShimPath          = "/scoop/shims/"
@@ -35,6 +38,11 @@ var (
 	scoopPrefixResolver       = resolveScoopPrefix
 	homebrewChecker           = isHomebrew
 	homebrewUpgrader          = upgradeHomebrew
+	miseInstallResolver       = resolveMiseInstall
+	miseBinaryResolver        = resolveMiseBinary
+	miseActiveBinaryResolver  = resolveMiseActiveBinary
+	miseConfigPathResolver    = resolveMiseConfigPath
+	miseUpgrader              = upgradeMise
 	scoopChecker              = isScoop
 	scoopGlobalScopeChecker   = isGlobalScoopInstall
 	scoopUpgrader             = upgradeScoop
@@ -53,7 +61,7 @@ func newUpgradeCommand() *upgradeCommand {
 
 Installer-script and tarball installs under your home directory are replaced
 with the verified release binary (Sigstore signature and SHA-256 checksum).
-Homebrew and Scoop installs are upgraded through their package manager.
+Mise, Homebrew and Scoop installs are upgraded through their package manager.
 System packages, Nix and go install builds are never touched; the command
 exits nonzero with the right next step for that install method.
 
@@ -65,7 +73,7 @@ Homebrew and Scoop installs always follow their package manager's version.`,
   hey upgrade --json
   hey upgrade 0.2.0-rc.1`,
 		Annotations: map[string]string{
-			"agent_notes": "Exits 0 only when already current or when the upgrade was applied and confirmed. An optional version argument pins the target release (self-updating installs only; never downgrades). Error codes: upgrade_required (an update exists but this install method must be upgraded another way — follow the hint), upgrade_incomplete, upgrade_unverified, upgrade_failed.",
+			"agent_notes": "Exits 0 only when already current or when the upgrade was applied and confirmed. An optional version argument pins the target release for native and mise installs; upgrades never downgrade. Error codes: upgrade_required (an update exists but this install method must be upgraded another way — follow the hint), upgrade_incomplete, upgrade_unverified, upgrade_failed.",
 		},
 		Args: cobra.MaximumNArgs(1),
 		RunE: upgradeCommand.run,
@@ -183,7 +191,7 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 				Hint:    fmt.Sprintf("Run manually for detail: brew upgrade --cask %s", homebrewCask),
 			}
 		}
-		return confirmManagedUpgrade(ctx, w, "homebrew", filepath.Join(prefix, "bin", "hey"), current, latest,
+		return confirmManagedUpgrade(ctx, w, "homebrew", filepath.Join(prefix, "bin", "hey"), current, latest, true,
 			fmt.Sprintf("brew reinstall --cask %s", homebrewCask))
 	}
 
@@ -201,8 +209,31 @@ func (c *upgradeCommand) run(cmd *cobra.Command, args []string) error {
 				Hint:    fmt.Sprintf("Run manually for detail: scoop update%s %s", scoopGlobalFlag(global), scoopApp),
 			}
 		}
-		return confirmManagedUpgrade(ctx, w, "scoop", scoopBinaryPath(ctx, global), current, latest,
+		return confirmManagedUpgrade(ctx, w, "scoop", scoopBinaryPath(ctx, global), current, latest, true,
 			fmt.Sprintf("scoop uninstall%s %s && scoop install%s %s", scoopGlobalFlag(global), scoopApp, scoopGlobalFlag(global), scoopApp))
+	}
+
+	if install, owned, resolveErr := miseInstallResolver(ctx, current); owned {
+		useCmd := miseUseCommand(install.configPath, latest)
+		if resolveErr != nil {
+			return &apierr.Error{
+				Code:    "upgrade_required",
+				Message: fmt.Sprintf("update available (%s → %s) for a mise-managed install, but mise ownership could not be resolved: %v", current, latest, resolveErr),
+				Hint:    "Run manually: " + useCmd,
+			}
+		}
+
+		fmt.Fprintln(w, "Upgrading via mise…")
+		if miseErr := miseUpgrader(ctx, install.command, install.configPath, latest, w, procErr); miseErr != nil {
+			return &apierr.Error{
+				Code:    "upgrade_failed",
+				Message: fmt.Sprintf("mise upgrade failed for %s: %v", miseTool, miseErr),
+				Hint:    "Run manually for detail: " + useCmd,
+			}
+		}
+
+		probePath, _ := miseActiveBinaryResolver(ctx, install.command)
+		return confirmManagedUpgrade(ctx, w, "mise", probePath, current, latest, requested == "", useCmd)
 	}
 
 	// A `go install` build (stable or pseudo version alike) has no release
@@ -270,9 +301,10 @@ func errPinnedManagedInstall(current, requested, manager, managerCmd string) *ap
 
 // confirmManagedUpgrade verifies a package-manager upgrade actually landed by
 // probing the manager-derived entrypoint. No success is reported without a
-// confirmed version: a probe that can't run is upgrade_unverified, a probe
-// that reports anything but the latest version is upgrade_incomplete.
-func confirmManagedUpgrade(ctx context.Context, w io.Writer, method, probePath, current, latest, reinstallCmd string) error {
+// confirmed version. Managers that follow a moving manifest may select a newer
+// release published during the upgrade; an exact mise request confirms the
+// requested version itself.
+func confirmManagedUpgrade(ctx context.Context, w io.Writer, method, probePath, current, latest string, allowNewer bool, reinstallCmd string) error {
 	unverified := func(detail string) error {
 		return &apierr.Error{
 			Code:    "upgrade_unverified",
@@ -290,15 +322,17 @@ func confirmManagedUpgrade(ctx context.Context, w io.Writer, method, probePath, 
 		return unverified(fmt.Sprintf("probing %s failed: %v", probePath, err))
 	}
 
-	// Semantic comparison, accepting reported >= latest: a release published
-	// while the manager ran can legitimately install something newer than the
-	// snapshot fetched at the start. An unparseable probe result fails safely
-	// as unconfirmed rather than pretending to know either way.
+	// Semantic comparison accepts reported >= latest only for managers that
+	// follow a moving manifest: a release published while they run can
+	// legitimately install something newer than the snapshot fetched at the
+	// start. An exact mise request must resolve to that version. An unparseable
+	// probe result fails safely as unconfirmed rather than guessing.
 	reportedSemver, latestSemver := normalizeSemver(reported), normalizeSemver(latest)
 	if !semver.IsValid(reportedSemver) || !semver.IsValid(latestSemver) {
 		return unverified(fmt.Sprintf("the installed version %q could not be interpreted (expected %s)", reported, latest))
 	}
-	if semver.Compare(reportedSemver, latestSemver) < 0 {
+	comparison := semver.Compare(reportedSemver, latestSemver)
+	if comparison < 0 || (!allowNewer && comparison != 0) {
 		return &apierr.Error{
 			Code:    "upgrade_incomplete",
 			Message: fmt.Sprintf("%s exited successfully but hey still reports %s (expected %s, upgrading from %s)", method, reported, latest, current),
@@ -404,6 +438,132 @@ func upgradeScoop(ctx context.Context, global bool, stdout io.Writer, stderr io.
 	upgrade.Stdout = stdout
 	upgrade.Stderr = stderr
 	return upgrade.Run()
+}
+
+// A miseInstall identifies the mise executable and configuration that own the
+// running HEY binary. The same pair performs the upgrade, and normal mise
+// resolution confirms the selected version afterwards.
+type miseInstall struct {
+	command    string
+	configPath string
+}
+
+// resolveMiseInstall recognizes mise from its release-backend install layout
+// before consulting any command on PATH. A recognized layout remains
+// mise-owned when its manager cannot be resolved, protecting its files from
+// native self-update.
+func resolveMiseInstall(ctx context.Context, current string) (miseInstall, bool, error) {
+	running, ok := rawExecutablePathResolver()
+	if !ok || !isMiseInstallPath(running, current) {
+		return miseInstall{}, false, nil
+	}
+
+	mise, err := exec.LookPath("mise")
+	if err != nil {
+		return miseInstall{}, true, err
+	}
+
+	managed, err := miseBinaryResolver(ctx, mise, current)
+	if err != nil {
+		return miseInstall{}, true, err
+	}
+	if !sameFile(running, managed) {
+		return miseInstall{}, true, errors.New("mise resolves this HEY version to a different binary")
+	}
+
+	configPath, err := miseConfigPathResolver(ctx, mise, current)
+	if err != nil {
+		return miseInstall{}, true, err
+	}
+	return miseInstall{command: mise, configPath: configPath}, true, nil
+}
+
+func isMiseInstallPath(path, version string) bool {
+	binary := filepath.Base(path)
+	versionDir := filepath.Dir(path)
+	toolDir := filepath.Dir(versionDir)
+	installsDir := filepath.Dir(toolDir)
+
+	return (strings.EqualFold(binary, "hey") || strings.EqualFold(binary, "hey.exe")) &&
+		filepath.Base(versionDir) == version &&
+		strings.EqualFold(filepath.Base(toolDir), "github-basecamp-hey-cli") &&
+		strings.EqualFold(filepath.Base(installsDir), "installs")
+}
+
+func sameFile(a, b string) bool {
+	aInfo, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bInfo, err := os.Stat(b)
+	return err == nil && os.SameFile(aInfo, bInfo)
+}
+
+func resolveMiseConfigPath(ctx context.Context, mise, version string) (string, error) {
+	list := exec.CommandContext(ctx, mise, "ls", "--json", miseTool) //nolint:gosec // mise is independently matched to the running install layout
+	out, err := list.Output()
+	if err != nil {
+		return "", err
+	}
+
+	return miseConfigPath(out, version)
+}
+
+func miseConfigPath(data []byte, version string) (string, error) {
+	var tools []struct {
+		Version string `json:"version"`
+		Active  bool   `json:"active"`
+		Source  struct {
+			Path string `json:"path"`
+		} `json:"source"`
+	}
+	if err := json.Unmarshal(data, &tools); err != nil {
+		return "", fmt.Errorf("could not read mise's tool configuration: %w", err)
+	}
+	for _, tool := range tools {
+		if tool.Active && tool.Version == version && filepath.IsAbs(tool.Source.Path) {
+			return tool.Source.Path, nil
+		}
+	}
+	return "", errors.New("mise did not report the active HEY configuration")
+}
+
+func resolveMiseBinary(ctx context.Context, mise, version string) (string, error) {
+	tool := miseTool + "@" + version
+	resolve := exec.CommandContext(ctx, mise, "which", "hey", "--tool="+tool) //nolint:gosec // mise is independently matched to the running install layout
+	return miseBinaryPath(resolve)
+}
+
+func resolveMiseActiveBinary(ctx context.Context, mise string) (string, error) {
+	resolve := exec.CommandContext(ctx, mise, "which", "hey") //nolint:gosec // mise is independently matched to the running install layout
+	return miseBinaryPath(resolve)
+}
+
+func miseBinaryPath(resolve *exec.Cmd) (string, error) {
+	out, err := resolve.Output()
+	if err != nil {
+		return "", err
+	}
+
+	path := strings.TrimSpace(string(out))
+	if path == "" {
+		return "", errors.New("mise returned an empty HEY binary path")
+	}
+	return path, nil
+}
+
+func upgradeMise(ctx context.Context, mise, configPath, version string, stdout io.Writer, stderr io.Writer) error {
+	upgrade := exec.CommandContext(ctx, mise, "use", "--path", configPath, miseTool+"@"+version) //nolint:gosec // mise is independently matched to the running install layout
+	upgrade.Stdout = stdout
+	upgrade.Stderr = stderr
+	return upgrade.Run()
+}
+
+func miseUseCommand(configPath, version string) string {
+	if configPath == "" {
+		return "mise use -g " + miseTool + "@" + version
+	}
+	return fmt.Sprintf("mise use --path %s %s@%s", shellQuoted(configPath), miseTool, version)
 }
 
 // isHomebrew reports whether the running binary is the cask's own payload,

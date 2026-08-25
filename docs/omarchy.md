@@ -89,7 +89,7 @@ the current defaults, the layout goes too and the user is back to inheriting the
 [`basecamp/omarchy-hey-plugin`](https://github.com/basecamp/omarchy-hey-plugin) is the
 face: the HEY logo in the bar (tinted when there is unseen mail), the panel with its
 account switcher, `New for you` / `Previously seen` tabs, the Screener count, mark-as-seen,
-and the setup flow that installs `hey-cli` from the AUR and signs you in. hey-cli is the
+and the setup flow that installs `hey-cli` through mise and signs you in. hey-cli is the
 engine, and the plugin composes its generic commands: `hey box view imbox --json` for the Imbox,
 `hey watch` to know when to read it again, `hey screener list --count` for the Screener,
 `hey seen` for marking, `hey account list` and `hey auth status` for the rest. The

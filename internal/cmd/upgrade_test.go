@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -100,13 +101,17 @@ func stubReleaseByTagFetcher(t *testing.T, fetch func(context.Context, string) (
 }
 
 type upgradeCheckersStub struct {
-	latestVersion   string
-	release         *releaseInfo // optional richer release (assets); read at call time so tests can mutate
-	isBrew          bool
-	isScoop         bool
-	isGlobalScoop   bool
-	homebrewUpgrade func(context.Context, string, io.Writer, io.Writer) error
-	scoopUpgrade    func(context.Context, bool, io.Writer, io.Writer) error
+	latestVersion    string
+	release          *releaseInfo // optional richer release (assets); read at call time so tests can mutate
+	isBrew           bool
+	isMise           bool
+	isScoop          bool
+	isGlobalScoop    bool
+	homebrewUpgrade  func(context.Context, string, io.Writer, io.Writer) error
+	miseResolveErr   error
+	miseUpgrade      func(context.Context, string, string, string, io.Writer, io.Writer) error
+	miseActiveBinary func(context.Context, string) (string, error)
+	scoopUpgrade     func(context.Context, bool, io.Writer, io.Writer) error
 }
 
 // stubUpgradeCheckers overrides the release lookup and package manager
@@ -141,6 +146,31 @@ func stubUpgradeCheckers(t *testing.T, stub upgradeCheckersStub) {
 	if stub.isGlobalScoop {
 		stubExecutablePathResolver(t, "c:/programdata/scoop/apps/hey/current/hey.exe", true)
 	}
+
+	origMR := miseInstallResolver
+	miseInstallResolver = func(context.Context, string) (miseInstall, bool, error) {
+		if stub.miseResolveErr != nil {
+			return miseInstall{}, stub.isMise, stub.miseResolveErr
+		}
+		return miseInstall{command: "/usr/bin/mise", configPath: "/home/alice/.config/mise/config.toml"}, stub.isMise, nil
+	}
+	t.Cleanup(func() { miseInstallResolver = origMR })
+
+	origMU := miseUpgrader
+	miseUpgrader = stub.miseUpgrade
+	if miseUpgrader == nil {
+		miseUpgrader = func(context.Context, string, string, string, io.Writer, io.Writer) error { return nil }
+	}
+	t.Cleanup(func() { miseUpgrader = origMU })
+
+	origMAB := miseActiveBinaryResolver
+	miseActiveBinaryResolver = stub.miseActiveBinary
+	if miseActiveBinaryResolver == nil {
+		miseActiveBinaryResolver = func(context.Context, string) (string, error) {
+			return "/home/alice/.local/share/mise/installs/github-basecamp-hey-cli/1.3.0/hey", nil
+		}
+	}
+	t.Cleanup(func() { miseActiveBinaryResolver = origMAB })
 
 	origSC := scoopChecker
 	scoopChecker = func(context.Context) bool { return stub.isScoop }
@@ -808,7 +838,209 @@ func TestUpgradeScoopExecFailureIsStructured(t *testing.T) {
 	assertContains(t, apiErr.Hint, "scoop update -g hey")
 }
 
+// --- mise ---
+
+func TestUpgradeMiseConfirmedSuccess(t *testing.T) {
+	stubVersion(t, "1.2.3")
+	var gotMise, gotConfig, gotVersion string
+	stubUpgradeCheckers(t, upgradeCheckersStub{
+		latestVersion: "1.3.0",
+		isMise:        true,
+		miseUpgrade: func(_ context.Context, mise, config, version string, _ io.Writer, _ io.Writer) error {
+			gotMise, gotConfig, gotVersion = mise, config, version
+			return nil
+		},
+		miseActiveBinary: func(_ context.Context, mise string) (string, error) {
+			if mise != "/usr/bin/mise" {
+				t.Errorf("resolved with mise=%q", mise)
+			}
+			return "/home/alice/.local/share/mise/installs/github-basecamp-hey-cli/1.3.0/hey", nil
+		},
+	})
+	stubBinaryVersionProber(t, func(_ context.Context, path string) (string, error) {
+		if path != "/home/alice/.local/share/mise/installs/github-basecamp-hey-cli/1.3.0/hey" {
+			t.Errorf("probed %q, want mise's selected HEY binary", path)
+		}
+		return "1.3.0", nil
+	})
+
+	run := executeUpgradeCommand(t)
+	mustNoError(t, run.err)
+	if gotMise != "/usr/bin/mise" || gotConfig != "/home/alice/.config/mise/config.toml" || gotVersion != "1.3.0" {
+		t.Errorf("upgraded with mise=%q config=%q version=%q", gotMise, gotConfig, gotVersion)
+	}
+	data := run.data(t)
+	if data["method"] != "mise" || data["to"] != "1.3.0" {
+		t.Errorf("unexpected envelope data: %v", data)
+	}
+}
+
+// Mise can select an exact release, so a pinned hey upgrade remains pinned
+// when it delegates to the manager.
+func TestUpgradeMiseSupportsPinnedVersion(t *testing.T) {
+	stubVersion(t, "1.2.3")
+	stubReleaseByTagFetcher(t, func(context.Context, string) (releaseInfo, error) {
+		return releaseInfo{Version: "1.4.0-rc.1"}, nil
+	})
+	var gotVersion string
+	stubUpgradeCheckers(t, upgradeCheckersStub{
+		isMise: true,
+		miseUpgrade: func(_ context.Context, _, _ string, version string, _ io.Writer, _ io.Writer) error {
+			gotVersion = version
+			return nil
+		},
+	})
+	stubBinaryVersionProber(t, func(context.Context, string) (string, error) { return "1.4.0-rc.1", nil })
+
+	run := executeUpgradeCommandAs(t, "--json", "1.4.0-rc.1")
+	mustNoError(t, run.err)
+	if gotVersion != "1.4.0-rc.1" {
+		t.Errorf("mise version = %q, want the requested prerelease", gotVersion)
+	}
+}
+
+func TestUpgradeMisePinnedVersionRequiresExactResolution(t *testing.T) {
+	stubVersion(t, "1.2.3")
+	stubReleaseByTagFetcher(t, func(context.Context, string) (releaseInfo, error) {
+		return releaseInfo{Version: "1.4.0-rc.1"}, nil
+	})
+	stubUpgradeCheckers(t, upgradeCheckersStub{isMise: true})
+	stubBinaryVersionProber(t, func(context.Context, string) (string, error) { return "1.4.0", nil })
+
+	run := executeUpgradeCommandAs(t, "--json", "1.4.0-rc.1")
+	apiErr := requireUpgradeError(t, run.err, "upgrade_incomplete")
+	assertContains(t, apiErr.Message, "hey still reports 1.4.0 (expected 1.4.0-rc.1")
+}
+
+func TestUpgradeMiseExecFailureIsStructured(t *testing.T) {
+	stubVersion(t, "1.2.3")
+	stubUpgradeCheckers(t, upgradeCheckersStub{
+		latestVersion: "1.3.0",
+		isMise:        true,
+		miseUpgrade: func(context.Context, string, string, string, io.Writer, io.Writer) error {
+			return errors.New("exit status 1")
+		},
+	})
+
+	run := executeUpgradeCommand(t)
+	apiErr := requireUpgradeError(t, run.err, "upgrade_failed")
+	assertContains(t, apiErr.Message, "mise upgrade failed")
+	assertContains(t, apiErr.Hint, `mise use --path '/home/alice/.config/mise/config.toml' github:basecamp/hey-cli@1.3.0`)
+}
+
+func TestUpgradeMiseUnresolvableResultIsUnverified(t *testing.T) {
+	stubVersion(t, "1.2.3")
+	stubUpgradeCheckers(t, upgradeCheckersStub{
+		latestVersion: "1.3.0",
+		isMise:        true,
+		miseActiveBinary: func(context.Context, string) (string, error) {
+			return "", errors.New("not installed")
+		},
+	})
+
+	run := executeUpgradeCommand(t)
+	apiErr := requireUpgradeError(t, run.err, "upgrade_unverified")
+	assertContains(t, apiErr.Hint, `mise use --path '/home/alice/.config/mise/config.toml' github:basecamp/hey-cli@1.3.0`)
+}
+
+func TestMiseUseCommandShellQuotesConfigPath(t *testing.T) {
+	configPath := "/home/alice/$HOME/it's `mine`.toml"
+	got := miseUseCommand(configPath, "1.3.0")
+	want := "mise use --path '/home/alice/$HOME/it'\\''s `mine`.toml' github:basecamp/hey-cli@1.3.0"
+	if got != want {
+		t.Errorf("mise command = %q, want %q", got, want)
+	}
+}
+
+func TestUpgradeMiseResolutionFailureDoesNotSelfUpdate(t *testing.T) {
+	stubVersion(t, "1.2.3")
+	stubUpgradeCheckers(t, upgradeCheckersStub{
+		latestVersion:  "1.3.0",
+		isMise:         true,
+		miseResolveErr: errors.New("mise is unavailable"),
+	})
+	stubSelfUpdateTarget(t, "", errors.New("native self-update must not be reached"))
+
+	run := executeUpgradeCommand(t)
+	apiErr := requireUpgradeError(t, run.err, "upgrade_required")
+	assertContains(t, apiErr.Message, "mise-managed install")
+	assertContains(t, apiErr.Hint, "mise use -g github:basecamp/hey-cli@1.3.0")
+}
+
 // --- install-source detection ---
+
+func TestResolveMiseInstallRequiresMiseOwnedBinary(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake mise executable is a Unix shell script")
+	}
+
+	dir := t.TempDir()
+	misePath := filepath.Join(dir, "mise")
+	managed := filepath.Join(dir, "data", "installs", "github-basecamp-hey-cli", "1.2.3", "hey")
+	other := filepath.Join(dir, "bin", "hey")
+	configPath := filepath.Join(dir, "config", "mise", "config.toml")
+	mustMkdirAll(t, filepath.Dir(managed))
+	mustMkdirAll(t, filepath.Dir(other))
+	mustMkdirAll(t, filepath.Dir(configPath))
+	mustWriteFile(t, misePath, []byte("#!/bin/sh\nexit 0\n"), 0o755)
+	mustWriteFile(t, managed, []byte("managed"), 0o755)
+	mustWriteFile(t, other, []byte("other"), 0o755)
+	mustWriteFile(t, configPath, []byte("[tools]\n"), 0o644)
+	t.Setenv("PATH", dir)
+
+	binaryResolutions := 0
+	origMB := miseBinaryResolver
+	miseBinaryResolver = func(_ context.Context, mise, version string) (string, error) {
+		binaryResolutions++
+		if mise != misePath || version != "1.2.3" {
+			t.Errorf("resolved with mise=%q version=%q", mise, version)
+		}
+		return managed, nil
+	}
+	t.Cleanup(func() { miseBinaryResolver = origMB })
+
+	origMC := miseConfigPathResolver
+	miseConfigPathResolver = func(_ context.Context, mise, version string) (string, error) {
+		if mise != misePath || version != "1.2.3" {
+			t.Errorf("found config with mise=%q version=%q", mise, version)
+		}
+		return configPath, nil
+	}
+	t.Cleanup(func() { miseConfigPathResolver = origMC })
+
+	running := managed
+	origRaw := rawExecutablePathResolver
+	rawExecutablePathResolver = func() (string, bool) { return running, true }
+	t.Cleanup(func() { rawExecutablePathResolver = origRaw })
+
+	install, owned, err := resolveMiseInstall(context.Background(), "1.2.3")
+	mustNoError(t, err)
+	if !owned || install.command != misePath || install.configPath != configPath {
+		t.Fatalf("resolveMiseInstall = (%q, %q, %v), want the owning mise executable and config", install.command, install.configPath, owned)
+	}
+
+	binaryResolutions = 0
+	running = other
+	if _, owned, err := resolveMiseInstall(context.Background(), "1.2.3"); err != nil || owned {
+		t.Errorf("native path resolved as mise: owned=%v err=%v", owned, err)
+	}
+	if binaryResolutions != 0 {
+		t.Error("a PATH command must not establish mise ownership for a native install")
+	}
+}
+
+func TestMiseConfigPathUsesActiveVersionSource(t *testing.T) {
+	data := []byte(`[
+		{"version":"1.2.3","active":false,"source":{"path":"/home/alice/old.toml"}},
+		{"version":"1.2.3","active":true,"source":{"path":"/home/alice/project/mise.toml"}}
+	]`)
+
+	got, err := miseConfigPath(data, "1.2.3")
+	mustNoError(t, err)
+	if got != "/home/alice/project/mise.toml" {
+		t.Errorf("miseConfigPath = %q, want the active configuration", got)
+	}
+}
 
 func TestIsHomebrewAnchorsOnCaskPayload(t *testing.T) {
 	tests := []struct {

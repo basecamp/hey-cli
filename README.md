@@ -25,11 +25,26 @@ A CLI and TUI for [HEY](https://hey.com).
 
 ## Install
 
+**Omarchy**
+
+```bash
+omarchy-mise-install github:basecamp/hey-cli hey
+```
+
 **macOS / Linux / WSL2**
 
 ```bash
 curl -fsSL https://hey.com/install-cli | bash
 ```
+
+Or with mise:
+
+```bash
+MISE_MINIMUM_RELEASE_AGE=0 mise use -g github:basecamp/hey-cli
+```
+
+The override selects the current release immediately; mise otherwise waits for a new
+release to be 24 hours old.
 
 **Windows (PowerShell)**
 
@@ -60,12 +75,17 @@ Both scripts download the release for your platform, verify its SHA-256 checksum
 <details>
 <summary>Other installation methods</summary>
 
+**mise:**
+```bash
+MISE_MINIMUM_RELEASE_AGE=0 mise use -g github:basecamp/hey-cli
+```
+
 **Homebrew (macOS / Linux):**
 ```bash
 brew install --cask basecamp/tap/hey
 ```
 
-**Arch Linux / Omarchy (AUR):**
+**Arch Linux (AUR):**
 ```bash
 yay -S hey-cli
 ```
@@ -138,12 +158,13 @@ hey upgrade 0.2.0-rc.1   # target a specific release, e.g. a prerelease
 ```
 
 Upgrading only ever moves forward: a requested version at or below the installed one is a
-no-op, and package-manager installs always follow their manager's own version (a pinned
-version is refused there).
+no-op. Mise and native installs can select a specific version; Homebrew and Scoop always
+follow their manager's own version and refuse a pinned upgrade.
 
 What happens depends on how hey was installed:
 
 - **Installer script / tarball** (a binary under your home directory, e.g. `~/.local/bin` or `~/bin`): upgrades in place. hey downloads the release for your platform, verifies its Sigstore signature (the keyless `checksums.txt.bundle` published by the release pipeline, identity-pinned to the release workflow and tag) and SHA-256 checksum, swaps the executable transactionally, and confirms the installed binary reports the new version. On failure the previous binary is restored; in the worst case — restoration itself fails mid-swap — the error names the preserved backup file next to the binary so you can put it back by hand.
+- **mise**: delegates to mise, updates the configuration that selected the running binary, then verifies normal mise resolution selects the new version.
 - **Homebrew / Scoop**: delegates to `brew upgrade --cask basecamp/tap/hey` / `scoop update hey`, then verifies the manager-installed binary actually reports the new version.
 - **System packages** (apt/dnf/apk, AUR, Nix) and **`go install` builds**: never touched. `hey upgrade` exits nonzero with upgrade guidance for that install method (the exact command where it can be known, e.g. `go install` or `yay -S hey-cli`; otherwise which package manager to use).
 
@@ -663,8 +684,8 @@ read from `~/.local/state/omarchy/current/theme/`, and restyles live when you ru
 — an explicitly chosen file is trusted as written — or `NO_COLOR=1` to turn color off.
 
 ```bash
-omarchy pkg aur add hey-cli  # hey-cli is on the AUR
-hey auth login               # signing in with hey puts HEY in your bar (asked once)
+omarchy-mise-install github:basecamp/hey-cli hey
+hey auth login               # signing in puts HEY in your bar (asked once)
 hey setup omarchy            # the explicit path: installs in every output format, fails loudly
 hey setup omarchy --notify   # toast new mail from the bar plugin (--no-notify turns it off)
 hey setup omarchy --remove   # disable the bar plugin (checkout kept) and remove the desktop pieces
