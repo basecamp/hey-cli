@@ -186,7 +186,7 @@ jobs:
 
       - name: Check for installer changes
         id: filter
-        uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           # test.yml is in its own filter so the job proves itself on the PR
           # that introduces or edits it.
@@ -341,7 +341,7 @@ jobs:
 
       - name: Check for flake-relevant changes
         id: filter
-        uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           filters: |
             nix:
@@ -359,7 +359,7 @@ jobs:
 
       - name: Install Nix
         if: steps.filter.outputs.nix == 'true'
-        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31.11.0
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
 
       - name: Build the flake
         if: steps.filter.outputs.nix == 'true'
