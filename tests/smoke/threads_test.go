@@ -23,9 +23,9 @@ type threadEntry struct {
 	} `json:"creator"`
 }
 
-// firstMessage is the plain text the long thread starts with. compose sends it as
-// text, so in the thread it is prose: the asterisks and the list dashes come back
-// escaped, and the URL comes back as the literal it is.
+// firstMessage is the Markdown the long thread starts with. compose sends -m as
+// Markdown, so in the thread the emphasis and the list survive as structure, and the
+// bare URL stays a literal the reader can follow.
 const firstMessage = "First: the **quarterly** numbers are at https://example.com/reports/q3 — see the bullets\n\n- Revenue up\n- Churn down"
 
 // longThread composes a message and replies to it until the thread is longer than one
@@ -112,17 +112,17 @@ func TestThreadsReadsALongThreadAsMarkdown(t *testing.T) {
 		}
 	}
 
-	// The text was sent as text, so it is prose in the Markdown: the asterisks are
-	// escaped rather than emphasis, the URL is the literal it was, and the em dash —
+	// The message went in as Markdown, so it comes back as Markdown: the emphasis
+	// and the list are structure, the URL is the literal it was, and the em dash —
 	// a multibyte character — survives intact.
 	first := entries[0].Body
-	for _, want := range []string{`\*\*quarterly\*\*`, "https://example.com/reports/q3", "— see the bullets", "Revenue up", "Churn down"} {
+	for _, want := range []string{"**quarterly**", "https://example.com/reports/q3", "— see the bullets", "- Revenue up", "- Churn down"} {
 		if !strings.Contains(first, want) {
 			t.Errorf("first body = %q, want %q in it", first, want)
 		}
 	}
-	if strings.Contains(first, "**quarterly**") {
-		t.Errorf("first body = %q, want the asterisks escaped, not emphasis", first)
+	if strings.Contains(first, `\*\*quarterly\*\*`) {
+		t.Errorf("first body = %q, want emphasis, not escaped asterisks", first)
 	}
 	if last := entries[len(entries)-1].Body; !strings.Contains(last, fmt.Sprintf("Reply %d of %d", replies, replies)) {
 		t.Errorf("last body = %q, want the last reply", last)
