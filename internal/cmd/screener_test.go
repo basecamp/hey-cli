@@ -57,10 +57,16 @@ func screenerServer(t *testing.T) (*httptest.Server, *recordedScreener) {
 				_, _ = w.Write([]byte(`{"pending_clearances_count":3,"signed_stream_name":"abc"}`))
 				return
 			}
-			if req.URL.Query().Get("page") == "2" {
-				_, _ = w.Write([]byte(`{"pending_clearances_count":3,"clearances":[]}`))
+			// The endpoint pages by an opaque geared_pagination cursor from the Link
+			// header; anything else — a page number included — answers the first page.
+			if req.URL.Query().Get("page") == "screener-cursor-2" {
+				_, _ = w.Write([]byte(`{"pending_clearances_count":3,"clearances":[
+					{"id":92,"status":"pending",
+					 "petitioner":{"id":52,"name":"Scott Ellrod","email_address":"scott@example.com"},
+					 "most_recent_entry":{"id":72,"subject":"Budget review","topic_id":82,"summary":"The quarterly budget"}}]}`))
 				return
 			}
+			w.Header().Set("Link", `<https://app.hey.com/clearances.json?page=screener-cursor-2>; rel="next"`)
 			_, _ = w.Write([]byte(`{"pending_clearances_count":3,"clearances":[
 				{"id":91,"status":"pending",
 				 "petitioner":{"id":51,"name":"Hollis Heimboch","email_address":"hollis@example.com"},
@@ -74,10 +80,12 @@ func screenerServer(t *testing.T) (*httptest.Server, *recordedScreener) {
 		case req.Method == http.MethodPost && req.URL.Path == "/clearances/punt.json":
 			w.WriteHeader(http.StatusAccepted)
 		case req.Method == http.MethodGet && req.URL.Path == "/my/clearances.json":
-			if req.URL.Query().Get("page") == "2" {
-				_, _ = w.Write([]byte(`{"clearances":[]}`))
+			if req.URL.Query().Get("page") == "history-cursor-2" {
+				_, _ = w.Write([]byte(`{"clearances":[
+					{"id":93,"status":"approved","updated_at":"2026-08-17T10:00:00Z","petitioner":{"id":53,"name":"Priya Natarajan","email_address":"priya@example.com"}}]}`))
 				return
 			}
+			w.Header().Set("Link", `<https://app.hey.com/my/clearances.json?page=history-cursor-2>; rel="next"`)
 			_, _ = w.Write([]byte(`{"clearances":[
 				{"id":91,"status":"approved","updated_at":"2026-08-19T10:00:00Z","petitioner":{"id":51,"name":"Glenn","email_address":"glenn@example.com"}},
 				{"id":92,"status":"denied","updated_at":"2026-08-18T10:00:00Z","petitioner":{"id":52,"name":"Spammer","email_address":"spam@example.com"}}]}`))
@@ -192,16 +200,79 @@ func TestScreenerListCountAsksForTheCountAlone(t *testing.T) {
 	}
 }
 
+// The Screener pages by an opaque geared_pagination cursor, so --all must follow the
+// cursor each page answers rather than counting pages itself — a numbered page is
+// answered with the first page forever, which is how --all once read the same eight
+// senders a hundred times over.
 func TestScreenerListPaginates(t *testing.T) {
 	server, recorded := screenerServer(t)
 
-	if _, err := runScreener(t, server, "list", "--all"); err != nil {
+	resp, err := runScreener(t, server, "list", "--all")
+	if err != nil {
 		t.Fatalf("list --all failed: %v", err)
 	}
 
 	requests := recorded.snapshot()
-	if len(requests) != 2 || !strings.Contains(requests[0].Query, "page=1") || !strings.Contains(requests[1].Query, "page=2") {
+	if len(requests) != 2 || strings.Contains(requests[0].Query, "page=") || !strings.Contains(requests[1].Query, "page=screener-cursor-2") {
 		t.Errorf("requests = %+v", requests)
+	}
+
+	pending := decodeScreenerData[[]pendingClearance](t, resp.Data)
+	if len(pending) != 2 || pending[0].ID != 91 || pending[1].ID != 92 {
+		t.Errorf("pending = %+v", pending)
+	}
+}
+
+// --page continues from a next_page cursor, the way every other listing here does.
+func TestScreenerListStartsFromTheCursor(t *testing.T) {
+	server, recorded := screenerServer(t)
+
+	resp, err := runScreener(t, server, "list", "--page", "screener-cursor-2")
+	if err != nil {
+		t.Fatalf("list --page failed: %v", err)
+	}
+
+	requests := recorded.snapshot()
+	if len(requests) != 1 || !strings.Contains(requests[0].Query, "page=screener-cursor-2") {
+		t.Errorf("requests = %+v", requests)
+	}
+
+	pending := decodeScreenerData[[]pendingClearance](t, resp.Data)
+	if len(pending) != 1 || pending[0].ID != 92 || pending[0].Name != "Scott Ellrod" {
+		t.Errorf("pending = %+v", pending)
+	}
+}
+
+// A first page with more behind it names the cursor, so a script can carry on.
+func TestScreenerListReportsTheNextPageCursor(t *testing.T) {
+	server, _ := screenerServer(t)
+
+	resp, err := runScreener(t, server, "list")
+	if err != nil {
+		t.Fatalf("list failed: %v", err)
+	}
+
+	if resp.Meta == nil || resp.Meta["next_page"] != "screener-cursor-2" {
+		t.Errorf("meta = %+v", resp.Meta)
+	}
+}
+
+func TestScreenerHistoryPaginates(t *testing.T) {
+	server, recorded := screenerServer(t)
+
+	resp, err := runScreener(t, server, "history", "--all")
+	if err != nil {
+		t.Fatalf("history --all failed: %v", err)
+	}
+
+	requests := recorded.snapshot()
+	if len(requests) != 2 || strings.Contains(requests[0].Query, "page=") || !strings.Contains(requests[1].Query, "page=history-cursor-2") {
+		t.Errorf("requests = %+v", requests)
+	}
+
+	screened := decodeScreenerData[[]screenedClearance](t, resp.Data)
+	if len(screened) != 3 || screened[2].ID != 93 {
+		t.Errorf("screened = %+v", screened)
 	}
 }
 

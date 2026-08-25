@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	"github.com/spf13/cobra"
 
@@ -15,7 +14,7 @@ import (
 
 type screenerHistoryCommand struct {
 	cmd  *cobra.Command
-	page int
+	page string
 	all  bool
 }
 
@@ -34,7 +33,7 @@ func newScreenerHistoryCommand() *screenerHistoryCommand {
 		Short: "List the senders already screened",
 		Long:  "Review who has been approved or denied, most recent decision first.",
 		Annotations: map[string]string{
-			"agent_notes": "Only senders already decided on — the pending queue is `hey screener list`. Change a decision with `hey screener approve <id>` or `hey screener deny <id>` using the ID from here.",
+			"agent_notes": "Only senders already decided on — the pending queue is `hey screener list`. Change a decision with `hey screener approve <id>` or `hey screener deny <id>` using the ID from here. --page continues from the next_page cursor of an earlier listing.",
 		},
 		Example: `  hey screener history
   hey screener history --json
@@ -42,8 +41,8 @@ func newScreenerHistoryCommand() *screenerHistoryCommand {
 		RunE: historyCommand.run,
 		Args: cobra.NoArgs,
 	}
-	historyCommand.cmd.Flags().IntVar(&historyCommand.page, "page", 1, "Results page")
-	historyCommand.cmd.Flags().BoolVar(&historyCommand.all, "all", false, "Fetch up to 100 results pages from --page onward")
+	historyCommand.cmd.Flags().StringVar(&historyCommand.page, "page", "", "Continue from a next_page cursor")
+	historyCommand.cmd.Flags().BoolVar(&historyCommand.all, "all", false, "Fetch all results (up to 100 pages)")
 	return historyCommand
 }
 
@@ -51,11 +50,8 @@ func (c *screenerHistoryCommand) run(cmd *cobra.Command, _ []string) error {
 	if err := requireAuth(); err != nil {
 		return err
 	}
-	if c.page < 1 {
-		return apierr.ErrUsage("--page must be at least 1")
-	}
 
-	first, err := readScreenedClearances(cmd.Context(), strconv.Itoa(c.page))
+	first, err := readScreenedClearances(cmd.Context(), c.page)
 	if err != nil {
 		return err
 	}
@@ -64,7 +60,7 @@ func (c *screenerHistoryCommand) run(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	screened := collected.Items
-	notice := screenerTruncationNotice(c.page, collected.Read, collected.Truncated)
+	notice := screenerTruncationNotice(collected.Read, collected.Truncated)
 
 	if writer.IsStyled() {
 		if len(screened) == 0 {
@@ -91,35 +87,38 @@ func (c *screenerHistoryCommand) run(cmd *cobra.Command, _ []string) error {
 	if stderrNotice := paginationNoticeForStderr(writer.EffectiveFormat(), notice); stderrNotice != "" {
 		fmt.Fprintln(cmd.ErrOrStderr(), stderrNotice)
 	}
-	return writeOK(screened,
+	opts := []output.ResponseOption{
 		output.WithSummary(fmt.Sprintf("%d %s screened", len(screened), senderNoun(len(screened)))),
 		output.WithNotice(notice),
-		output.WithMeta("page", c.page),
 		output.WithMeta("pages_fetched", collected.Read),
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "rescreen",
 			Command:     "hey screener approve <id>",
 			Description: "Change a decision",
 		}),
-	)
+	}
+	if collected.Cursor != "" {
+		opts = append(opts, output.WithMeta("next_page", collected.Cursor))
+	}
+	return writeOK(screened, opts...)
 }
 
+// readScreenedClearances reads one page of decisions, following the opaque
+// geared_pagination cursor the way readPendingClearances does.
 func readScreenedClearances(ctx context.Context, cursor string) (pageResult[screenedClearance], error) {
-	page, err := nextScreenerPage(cursor)
-	if err != nil {
-		return pageResult[screenedClearance]{}, err
-	}
-
-	clearances, err := sdk.Clearances().Screened(ctx, cursor)
+	page, err := sdk.Clearances().ScreenedPage(ctx, cursor)
 	if err != nil {
 		return pageResult[screenedClearance]{}, apierr.FromSDK(err)
 	}
+	if page == nil {
+		return pageResult[screenedClearance]{}, nil
+	}
 
 	var screened []screenedClearance
-	for _, clearance := range clearances {
+	for _, clearance := range page.Clearances {
 		screened = append(screened, screenedClearanceFor(clearance))
 	}
-	return pageResult[screenedClearance]{Items: screened, Cursor: page}, nil
+	return pageResult[screenedClearance]{Items: screened, Cursor: page.NextPage}, nil
 }
 
 func screenedClearanceFor(clearance generated.Clearance) screenedClearance {

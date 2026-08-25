@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	"github.com/spf13/cobra"
 
@@ -17,7 +16,7 @@ const maxScreenerPages = 100
 
 type screenerListCommand struct {
 	cmd  *cobra.Command
-	page int
+	page string
 	all  bool
 }
 
@@ -36,7 +35,7 @@ func newScreenerListCommand() *screenerListCommand {
 		Use:   "list",
 		Short: "List the senders waiting to be screened",
 		Annotations: map[string]string{
-			"agent_notes": "Returns clearance IDs with the sender and the subject of what they sent. Feed the ID to `hey screener approve` or `hey screener deny`, and topic_id to `hey thread read` to read the thread first. Use --count for the number alone, which is a much cheaper request.",
+			"agent_notes": "Returns clearance IDs with the sender and the subject of what they sent. Feed the ID to `hey screener approve` or `hey screener deny`, and topic_id to `hey thread read` to read the thread first. Use --count for the number alone, which is a much cheaper request. --page continues from the next_page cursor of an earlier listing.",
 		},
 		Example: `  hey screener list
   hey screener list --json
@@ -45,8 +44,8 @@ func newScreenerListCommand() *screenerListCommand {
 		RunE: listCommand.run,
 		Args: cobra.NoArgs,
 	}
-	listCommand.cmd.Flags().IntVar(&listCommand.page, "page", 1, "Results page")
-	listCommand.cmd.Flags().BoolVar(&listCommand.all, "all", false, "Fetch up to 100 results pages from --page onward")
+	listCommand.cmd.Flags().StringVar(&listCommand.page, "page", "", "Continue from a next_page cursor")
+	listCommand.cmd.Flags().BoolVar(&listCommand.all, "all", false, "Fetch all results (up to 100 pages)")
 	return listCommand
 }
 
@@ -54,14 +53,11 @@ func (c *screenerListCommand) run(cmd *cobra.Command, _ []string) error {
 	if err := requireAuth(); err != nil {
 		return err
 	}
-	if c.page < 1 {
-		return apierr.ErrUsage("--page must be at least 1")
-	}
 	if writer.EffectiveFormat() == output.FormatCount {
 		return c.runCount(cmd)
 	}
 
-	first, err := readPendingClearances(cmd.Context(), strconv.Itoa(c.page))
+	first, err := readPendingClearances(cmd.Context(), c.page)
 	if err != nil {
 		return err
 	}
@@ -70,7 +66,7 @@ func (c *screenerListCommand) run(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	pending := collected.Items
-	notice := screenerTruncationNotice(c.page, collected.Read, collected.Truncated)
+	notice := screenerTruncationNotice(collected.Read, collected.Truncated)
 
 	if writer.IsStyled() {
 		if len(pending) == 0 {
@@ -96,16 +92,19 @@ func (c *screenerListCommand) run(cmd *cobra.Command, _ []string) error {
 	if stderrNotice := paginationNoticeForStderr(writer.EffectiveFormat(), notice); stderrNotice != "" {
 		fmt.Fprintln(cmd.ErrOrStderr(), stderrNotice)
 	}
-	return writeOK(pending,
+	opts := []output.ResponseOption{
 		output.WithSummary(fmt.Sprintf("%d %s waiting", len(pending), senderNoun(len(pending)))),
 		output.WithNotice(notice),
-		output.WithMeta("page", c.page),
 		output.WithMeta("pages_fetched", collected.Read),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{Action: "approve", Command: "hey screener approve <id>", Description: "Let a sender through"},
 			output.Breadcrumb{Action: "deny", Command: "hey screener deny <id>", Description: "Turn a sender away"},
 		),
-	)
+	}
+	if collected.Cursor != "" {
+		opts = append(opts, output.WithMeta("next_page", collected.Cursor))
+	}
+	return writeOK(pending, opts...)
 }
 
 // runCount answers the global --count with the number alone, which is a much cheaper
@@ -120,35 +119,24 @@ func (c *screenerListCommand) runCount(cmd *cobra.Command) error {
 	return nil
 }
 
-// readPendingClearances reads one page of the queue. The Screener numbers its pages, so
-// the cursor is the next page's number.
+// readPendingClearances reads one page of the queue. The endpoint pages by an opaque
+// geared_pagination cursor out of the Link header — a page *number* is answered with the
+// first page forever — which is what PendingPage exists for; an empty cursor is the first
+// page, and an empty NextPage ends the list.
 func readPendingClearances(ctx context.Context, cursor string) (pageResult[pendingClearance], error) {
-	page, err := nextScreenerPage(cursor)
-	if err != nil {
-		return pageResult[pendingClearance]{}, err
-	}
-
-	summary, err := sdk.Clearances().Pending(ctx, cursor)
+	page, err := sdk.Clearances().PendingPage(ctx, cursor)
 	if err != nil {
 		return pageResult[pendingClearance]{}, apierr.FromSDK(err)
 	}
-	if summary == nil {
+	if page == nil {
 		return pageResult[pendingClearance]{}, nil
 	}
 
 	var pending []pendingClearance
-	for _, clearance := range summary.Clearances {
+	for _, clearance := range page.Clearances {
 		pending = append(pending, pendingClearanceFor(clearance))
 	}
-	return pageResult[pendingClearance]{Items: pending, Cursor: page}, nil
-}
-
-func nextScreenerPage(cursor string) (string, error) {
-	page, err := strconv.Atoi(cursor)
-	if err != nil {
-		return "", fmt.Errorf("unreadable screener page %q: %w", cursor, err)
-	}
-	return strconv.Itoa(page + 1), nil
+	return pageResult[pendingClearance]{Items: pending, Cursor: page.NextPage, Total: page.PendingCount}, nil
 }
 
 func pendingClearanceFor(clearance generated.Clearance) pendingClearance {
@@ -162,9 +150,9 @@ func pendingClearanceFor(clearance generated.Clearance) pendingClearance {
 	}
 }
 
-func screenerTruncationNotice(startPage, pages int, truncated bool) string {
+func screenerTruncationNotice(pages int, truncated bool) string {
 	if !truncated {
 		return ""
 	}
-	return fmt.Sprintf("Screener listing stopped after %d pages. Continue with --page %d.", pages, startPage+pages)
+	return fmt.Sprintf("Screener listing stopped after %d pages. Continue with --page using next_page.", pages)
 }
