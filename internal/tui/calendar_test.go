@@ -952,7 +952,7 @@ func TestWeekArrowsSelectDaysAndThenEvents(t *testing.T) {
 
 	// And the week says which column that is, or neither pair of arrows would have anything
 	// visible to aim at.
-	week := renderWeekView(v.events, nil, nil, v.day(), time.Monday, 100, 14, "p/n week", nil, v.selection())
+	week := renderWeekView(v.events, nil, nil, v.day(), time.Monday, 100, 14, "p/n week", nil, v.selection(), true)
 	header := strings.Split(week, "\n")[1]
 	if !strings.Contains(header, cursorDayStyle(false).Render(centerPad("WED 19", 13))) {
 		t.Errorf("the week does not mark the day the cursor is on: %q", header)
@@ -1334,7 +1334,7 @@ func weekView(t *testing.T, habits, completions []Recording) []string {
 	}
 
 	anchor := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
-	out := renderWeekView(events, habits, completions, anchor, time.Monday, 100, weekViewRows, "p/n week", nil, selection{})
+	out := renderWeekView(events, habits, completions, anchor, time.Monday, 100, weekViewRows, "p/n week", nil, selection{}, true)
 	return strings.Split(stripANSI(out), "\n")
 }
 
@@ -1450,7 +1450,7 @@ func TestWeekGathersAllDayEventsAtTheFoot(t *testing.T) {
 	}
 
 	anchor := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
-	out := renderWeekView(events, nil, nil, anchor, time.Monday, 100, weekViewRows, "p/n week", nil, selection{})
+	out := renderWeekView(events, nil, nil, anchor, time.Monday, 100, weekViewRows, "p/n week", nil, selection{}, true)
 	lines := strings.Split(stripANSI(out), "\n")
 
 	// The band is under the grid, headed as the day view heads its own.
@@ -1633,7 +1633,7 @@ func TestDayViewLabelsItsSections(t *testing.T) {
 	habits := []Recording{{ID: 4, Title: "Read 20 pages"}}
 
 	day := time.Date(2026, 8, 24, 9, 0, 0, 0, time.Local)
-	view := stripANSI(renderDayView(events, habits, nil, day, calendarFixtureNow(), "p/n day", 100, 24, selection{}, nil))
+	view := stripANSI(renderDayView(events, habits, nil, day, calendarFixtureNow(), "p/n day", 100, 24, selection{}, nil, true))
 	for _, label := range []string{"Habits", "Monday, August 24", "p/n day", "All day"} {
 		if !strings.Contains(view, label) {
 			t.Errorf("day view did not label its %q section: %q", label, view)
@@ -1651,7 +1651,7 @@ func TestAllDayEventsAreBlocksInTheirCalendarsColor(t *testing.T) {
 	}
 	day := time.Date(2026, 8, 21, 9, 0, 0, 0, time.Local)
 
-	rendered := renderDayView(events, nil, nil, day, calendarFixtureNow(), "", 100, 14, selection{}, nil)
+	rendered := renderDayView(events, nil, nil, day, calendarFixtureNow(), "", 100, 14, selection{}, nil, true)
 	lines := strings.Split(rendered, "\n")
 
 	gold := lines[rowContaining(t, lines, "Summer friday")]
@@ -1686,7 +1686,7 @@ func TestDayViewRulesFallFromEveryHourWithoutCuttingIntoAnEvent(t *testing.T) {
 	// an hour every four columns and the 11:00 event's block on the four from 44. The
 	// day's header and the hour axis take the first two rows of the 40 it is given,
 	// leaving 38 for the grid.
-	lines := strings.Split(stripANSI(renderDayView(events, nil, nil, day, calendarFixtureNow(), "", 98, 40, selection{}, nil)), "\n")
+	lines := strings.Split(stripANSI(renderDayView(events, nil, nil, day, calendarFixtureNow(), "", 98, 40, selection{}, nil, true)), "\n")
 	grid := lines[2:]
 	if len(grid) != 38 {
 		t.Fatalf("grid is %d rows of the 38 left to it: %q", len(grid), grid)
@@ -1715,7 +1715,7 @@ func TestDayViewRulesFallFromEveryHourWithoutCuttingIntoAnEvent(t *testing.T) {
 
 func TestEmptyDayIsItsHoursRatherThanANotice(t *testing.T) {
 	day := time.Date(2026, 8, 22, 9, 0, 0, 0, time.Local)
-	view := stripANSI(renderDayView(nil, nil, nil, day, calendarFixtureNow(), "", 96, 20, selection{}, nil))
+	view := stripANSI(renderDayView(nil, nil, nil, day, calendarFixtureNow(), "", 96, 20, selection{}, nil, true))
 
 	if strings.Contains(view, "no events") {
 		t.Errorf("an empty day still announces itself: %q", view)
@@ -1769,7 +1769,7 @@ func TestDayViewGivesASingleEventTheWholeGrid(t *testing.T) {
 
 	// An hour every four columns, so 07:00 starts on column 28 and the block covers the
 	// rules at 28 and 32 for every one of the grid's 38 rows.
-	grid := strings.Split(stripANSI(renderDayView(events, nil, nil, day, calendarFixtureNow(), "", 98, 40, selection{}, nil)), "\n")[2:]
+	grid := strings.Split(stripANSI(renderDayView(events, nil, nil, day, calendarFixtureNow(), "", 98, 40, selection{}, nil, true)), "\n")[2:]
 	if len(grid) != 38 {
 		t.Fatalf("grid is %d rows, want 38: %q", len(grid), grid)
 	}
@@ -1957,7 +1957,7 @@ func TestTheDayMarksWhereTheClockIs(t *testing.T) {
 		StartsAt: now.Truncate(time.Hour).Add(-time.Hour), EndsAt: now.Truncate(time.Hour).Add(2 * time.Hour)}
 
 	lines := strings.Split(stripANSI(renderDayView([]Recording{event}, nil, nil,
-		now, now, "p/n day", 100, 16, selection{}, nil)), "\n")
+		now, now, "p/n day", 100, 16, selection{}, nil, true)), "\n")
 	if !strings.Contains(lines[1], now.Format("15")) || !strings.Contains(lines[1], now.Format("04")) {
 		t.Errorf("the clock is not named over the axis: %q", lines[1])
 	}
@@ -2002,8 +2002,8 @@ func TestTheDayMarksWhereTheClockIs(t *testing.T) {
 	// The colon blinks a second on and a second off, and is swapped for a space rather than
 	// dropped so the digits either side of it never move.
 	on := time.Date(2026, 8, 23, 15, 55, 0, 0, time.Local)
-	lit := nowRow(on, 40, 100, nil)
-	unlit := nowRow(on.Add(time.Second), 40, 100, nil)
+	lit := nowRow(on, 40, 100, nil, true)
+	unlit := nowRow(on.Add(time.Second), 40, 100, nil, true)
 	if !strings.Contains(lit, "15:55") {
 		t.Errorf("an even second reads %q, want the colon", stripANSI(lit))
 	}
@@ -2015,7 +2015,7 @@ func TestTheDayMarksWhereTheClockIs(t *testing.T) {
 	}
 
 	// A day the reader has stepped away from has no now on it, and gives back the row.
-	yesterday := stripANSI(renderDayView(nil, nil, nil, now.AddDate(0, 0, -1), now, "p/n day", 100, 16, selection{}, nil))
+	yesterday := stripANSI(renderDayView(nil, nil, nil, now.AddDate(0, 0, -1), now, "p/n day", 100, 16, selection{}, nil, true))
 	if strings.ContainsRune(yesterday, nowRule) {
 		t.Error("yesterday is marked with a now line")
 	}
@@ -2031,19 +2031,19 @@ func TestARunningTrackTakesTheEndTheClockLeaves(t *testing.T) {
 	track := &runningTrack{category: "Deep work", since: now.Add(-95 * time.Minute)}
 
 	// The clock near the right: the badge goes left.
-	left := stripANSI(nowRow(now, 90, 100, track))
+	left := stripANSI(nowRow(now, 90, 100, track, true))
 	if !strings.HasPrefix(left, "● Deep work 1:35:00") {
 		t.Errorf("with the clock at the right the row reads %q", left)
 	}
 
 	// And near the left it goes right, ending at the edge.
-	right := stripANSI(nowRow(now, 6, 100, track))
+	right := stripANSI(nowRow(now, 6, 100, track, true))
 	if !strings.HasSuffix(right, "● Deep work 1:35:00") {
 		t.Errorf("with the clock at the left the row reads %q", right)
 	}
 
 	// The clock is never given up for the badge: a row too narrow for both keeps the time.
-	narrow := stripANSI(nowRow(now, 10, 22, track))
+	narrow := stripANSI(nowRow(now, 10, 22, track, true))
 	if !strings.Contains(narrow, "15:55") {
 		t.Errorf("the badge crowded out the clock: %q", narrow)
 	}
@@ -2136,14 +2136,14 @@ func TestTheDayCountsDownToWhatIsComing(t *testing.T) {
 
 	day := time.Date(2026, 8, 23, 9, 0, 0, 0, time.Local)
 	lines := strings.Split(stripANSI(renderDayView(nil, nil, []Recording{countdown},
-		day, calendarFixtureNow(), "p/n day", 100, 20, selection{}, nil)), "\n")
+		day, calendarFixtureNow(), "p/n day", 100, 20, selection{}, nil, true)), "\n")
 	if got := strings.TrimSpace(lines[0]); got != "2 days until Kevin's leaving do" {
 		t.Errorf("the day says %q", got)
 	}
 
 	// One day out reads as a day, not as days.
 	lines = strings.Split(stripANSI(renderDayView(nil, nil, []Recording{countdown},
-		day.AddDate(0, 0, 1), calendarFixtureNow(), "p/n day", 100, 20, selection{}, nil)), "\n")
+		day.AddDate(0, 0, 1), calendarFixtureNow(), "p/n day", 100, 20, selection{}, nil, true)), "\n")
 	if got := strings.TrimSpace(lines[0]); got != "1 day until Kevin's leaving do" {
 		t.Errorf("the day before says %q", got)
 	}
@@ -2151,7 +2151,7 @@ func TestTheDayCountsDownToWhatIsComing(t *testing.T) {
 	// And on the day itself there is nothing left to count: HEY stops serving the countdown,
 	// and a day that was handed one anyway does not say "0 days".
 	view := stripANSI(renderDayView(nil, nil, []Recording{countdown},
-		time.Date(2026, 8, 25, 9, 0, 0, 0, time.Local), calendarFixtureNow(), "p/n day", 100, 20, selection{}, nil))
+		time.Date(2026, 8, 25, 9, 0, 0, 0, time.Local), calendarFixtureNow(), "p/n day", 100, 20, selection{}, nil, true))
 	if strings.Contains(view, "until") {
 		t.Errorf("the event's own day still counts down: %q", strings.Split(view, "\n")[0])
 	}
@@ -2180,7 +2180,7 @@ func TestOverlappingEventsAreDrawnApart(t *testing.T) {
 			StartsAt: atLocal("2026-08-20T09:00:00"), EndsAt: atLocal("2026-08-20T11:00:00")},
 		{ID: 2, Title: "Design review", Type: "Calendar::Event",
 			StartsAt: atLocal("2026-08-20T10:00:00"), EndsAt: atLocal("2026-08-20T12:00:00")},
-	}, nil, nil, time.Date(2026, 8, 20, 9, 0, 0, 0, time.Local), calendarFixtureNow(), "p/n day", 100, 20, selection{}, nil))
+	}, nil, nil, time.Date(2026, 8, 20, 9, 0, 0, 0, time.Local), calendarFixtureNow(), "p/n day", 100, 20, selection{}, nil, true))
 
 	// The row between the lanes belongs to the grid, so it carries an hour rule where an
 	// event's own rows carry the event.
@@ -2204,7 +2204,7 @@ func TestBackToBackEventsAreDividedFromEachOther(t *testing.T) {
 			StartsAt: atLocal("2026-08-20T15:00:00"), EndsAt: atLocal("2026-08-20T17:00:00")},
 		{ID: 2, Title: "Product Hangout", Type: "Calendar::Event",
 			StartsAt: atLocal("2026-08-20T17:00:00"), EndsAt: atLocal("2026-08-20T19:00:00")},
-	}, nil, nil, time.Date(2026, 8, 20, 9, 0, 0, 0, time.Local), calendarFixtureNow(), "p/n day", 100, 20, selection{}, nil))
+	}, nil, nil, time.Date(2026, 8, 20, 9, 0, 0, 0, time.Local), calendarFixtureNow(), "p/n day", 100, 20, selection{}, nil, true))
 
 	if !strings.ContainsRune(out, eventEdge) {
 		t.Errorf("nothing separates the two events:\n%s", out)
@@ -2217,15 +2217,15 @@ func TestWeekColumnSaysWhenAnEventRuns(t *testing.T) {
 	event := Recording{ID: 1, Title: "Design review", Type: "Calendar::Event",
 		StartsAt: atLocal("2026-08-20T14:00:00"), EndsAt: atLocal("2026-08-20T15:30:00")}
 
-	if got := eventTimeSpan(event, 13); got != "14:00–15:30" {
+	if got := eventTimeSpan(event, 13, true); got != "14:00–15:30" {
 		t.Errorf("a wide column says %q, want both ends", got)
 	}
 	// A narrow one gets the start alone rather than a truncated range.
-	if got := eventTimeSpan(event, 8); got != "14:00" {
+	if got := eventTimeSpan(event, 8, true); got != "14:00" {
 		t.Errorf("a narrow column says %q, want the start alone", got)
 	}
 	// An event with no end has only the one.
-	if got := eventTimeSpan(Recording{StartsAt: atLocal("2026-08-20T14:00:00")}, 13); got != "14:00" {
+	if got := eventTimeSpan(Recording{StartsAt: atLocal("2026-08-20T14:00:00")}, 13, true); got != "14:00" {
 		t.Errorf("an event with no end says %q", got)
 	}
 }

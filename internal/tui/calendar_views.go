@@ -504,8 +504,8 @@ func (track runningTrack) badge(now time.Time) string {
 // Which end that is depends on the clock, which moves across the day — a badge fixed to one side
 // would sit under the time at some point every day. So it takes the wider of the two gaps the
 // clock leaves, and gives up rather than crowding it when neither is wide enough.
-func nowRow(now time.Time, nowCol, gridWidth int, track *runningTrack) string {
-	clock := nowClock(now)
+func nowRow(now time.Time, nowCol, gridWidth int, track *runningTrack, use24 bool) string {
+	clock := nowClock(now, use24)
 	at := min(max(nowCol-len(clock)/2, 0), max(gridWidth-len(clock), 0))
 
 	row := make([]rune, gridWidth)
@@ -534,12 +534,24 @@ func nowRow(now time.Time, nowCol, gridWidth int, track *runningTrack) string {
 // the way a clock's does. It is swapped for a space rather than dropped so the digits either side
 // of it never move — and it is done here rather than with the terminal's own blink attribute,
 // which plenty of terminals ignore and none of them run to our second.
-func nowClock(now time.Time) string {
+func nowClock(now time.Time, use24 bool) string {
 	separator := ":"
 	if now.Second()%2 == 1 {
 		separator = " "
 	}
-	return now.Format("15") + separator + now.Format("04")
+	if use24 {
+		return now.Format("15") + separator + now.Format("04")
+	}
+	return now.Format("3") + separator + now.Format("04") + strings.ToLower(now.Format("PM"))
+}
+
+// clockTime is t on the clock the identity keeps — HEY's own preference decides whether
+// a quarter past three reads 15:15 or 3:15pm.
+func clockTime(t time.Time, use24 bool) string {
+	if use24 {
+		return t.Format("15:04")
+	}
+	return strings.ToLower(t.Format("3:04PM"))
 }
 
 // dayCountdownLines is what the day is counting down to, one line each, nearest first.
@@ -581,7 +593,30 @@ func dayCountdownLines(countdowns []Recording, anchor time.Time) []string {
 	return lines
 }
 
-func renderDayView(events, habits, countdowns []Recording, anchor, now time.Time, hint string, width, height int, sel selection, track *runningTrack) string {
+// hourAxisLabels is the day's axis in the reader's clock: two digits an hour on a 24-hour
+// one, the hour with its half of the day on a 12-hour one. The closing label — the next
+// day's midnight — is labels[0] either way.
+func hourAxisLabels(use24 bool) []string {
+	labels := make([]string, 24)
+	for h := range 24 {
+		if use24 {
+			labels[h] = fmt.Sprintf("%02d", h)
+			continue
+		}
+		half := "a"
+		if h >= 12 {
+			half = "p"
+		}
+		hour := h % 12
+		if hour == 0 {
+			hour = 12
+		}
+		labels[h] = fmt.Sprintf("%d%s", hour, half)
+	}
+	return labels
+}
+
+func renderDayView(events, habits, countdowns []Recording, anchor, now time.Time, hint string, width, height int, sel selection, track *runningTrack, use24 bool) string {
 	var b strings.Builder
 
 	// The day borrows the mail list's vocabulary: chrome for the structure a reader
@@ -605,11 +640,13 @@ func renderDayView(events, habits, countdowns []Recording, anchor, now time.Time
 		b.WriteString("\n")
 	}
 
-	// A day ends where the next one begins, so the axis closes on another 00 with a
+	// A day ends where the next one begins, so the axis closes on another midnight with a
 	// rule under it: twenty-four hours are twenty-five lines, and the day reads as a
-	// span rather than as columns that stop. The two columns that last label needs are
+	// span rather than as columns that stop. The columns that last label needs are
 	// what the hours are sized against.
-	colWidth := max((width-2)/24, 3)
+	labels := hourAxisLabels(use24)
+	closing := labels[0]
+	colWidth := max((width-len(closing))/24, 3)
 	daySpan := colWidth * 24
 	gridWidth := daySpan + 1
 
@@ -623,19 +660,19 @@ func renderDayView(events, habits, countdowns []Recording, anchor, now time.Time
 	// drawn on a day that is today: a day the reader has stepped away from has no now on it.
 	nowCol := nowColumn(anchor, now, daySpan)
 	if nowCol >= 0 {
-		b.WriteString(nowRow(now, nowCol, gridWidth, track))
+		b.WriteString(nowRow(now, nowCol, gridWidth, track, use24))
 		b.WriteString("\n")
 	}
 
 	// Hour header
 	var header strings.Builder
-	for h := range 24 {
-		fmt.Fprintf(&header, "%02d", h)
-		if pad := colWidth - 2; pad > 0 {
+	for _, label := range labels {
+		header.WriteString(label)
+		if pad := colWidth - len(label); pad > 0 {
 			header.WriteString(strings.Repeat(" ", pad))
 		}
 	}
-	header.WriteString("00")
+	header.WriteString(closing)
 	b.WriteString(chrome.Render(header.String()))
 	b.WriteString("\n")
 
@@ -1008,7 +1045,7 @@ type weekDayInfo struct {
 // spreadsheet of the week rather than as the week. The day never had a box: it is a header,
 // an axis, and events on open ground. That is what a week is too, with seven days across
 // instead of twenty-four hours.
-func renderWeekView(events, habits, completions []Recording, anchor time.Time, firstWeekDay time.Weekday, width, height int, hint string, dayLabels map[string]string, sel selection) string {
+func renderWeekView(events, habits, completions []Recording, anchor time.Time, firstWeekDay time.Weekday, width, height int, hint string, dayLabels map[string]string, sel selection, use24 bool) string {
 	var b strings.Builder
 	muted := styleMuted
 	chrome := lipgloss.NewStyle().Foreground(colorChrome)
@@ -1117,7 +1154,7 @@ func renderWeekView(events, habits, completions []Recording, anchor time.Time, f
 	// Build column content
 	cols := make([][]string, 7)
 	for i := range 7 {
-		cols[i] = buildWeekDayColumn(days[i], colWidth, muted, sel)
+		cols[i] = buildWeekDayColumn(days[i], colWidth, muted, sel, use24)
 	}
 
 	maxH := 0
@@ -1212,13 +1249,13 @@ func weekHabitBand(days []weekDayInfo, colWidth int) [][]string {
 
 // buildWeekDayColumn returns styled lines for one day column.
 // Order: habits at top, timed events in the middle, all-day at bottom.
-func buildWeekDayColumn(d weekDayInfo, width int, muted lipgloss.Style, sel selection) []string {
+func buildWeekDayColumn(d weekDayInfo, width int, muted lipgloss.Style, sel selection, use24 bool) []string {
 	// The day's habits are the band above the grid and its all-day events the band below
 	// it, so the column itself is the timed events alone.
 	var lines []string
 
 	for _, e := range d.events {
-		if when := eventTimeSpan(e, width); when != "" {
+		if when := eventTimeSpan(e, width, use24); when != "" {
 			lines = append(lines, muted.Render(when))
 		}
 		lines = append(lines, eventPill(e, width, sel))
@@ -1233,15 +1270,15 @@ func buildWeekDayColumn(d weekDayInfo, width int, muted lipgloss.Style, sel sele
 // Both ends are said where the column is wide enough for them, since when a meeting finishes is
 // half of what a reader is looking for; a narrow column gets the start alone rather than a
 // truncated range.
-func eventTimeSpan(event Recording, width int) string {
+func eventTimeSpan(event Recording, width int, use24 bool) string {
 	starts := event.Starts()
 	if starts.IsZero() {
 		return ""
 	}
 
-	from := starts.Format("15:04")
+	from := clockTime(starts, use24)
 	if ends := event.Ends(); !ends.IsZero() && ends.After(starts) {
-		if span := from + "–" + ends.Format("15:04"); len(span) <= width {
+		if span := from + "–" + clockTime(ends, use24); len(span) <= width {
 			return span
 		}
 	}

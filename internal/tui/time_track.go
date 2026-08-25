@@ -121,10 +121,10 @@ func timeTrackActionLabel(action timeTrackAction, running bool) string {
 	return ""
 }
 
-func (m *timeTrackMenu) draw(base string, track *OngoingTrack, known bool, now time.Time, width, height int) string {
+func (m *timeTrackMenu) draw(base string, track *OngoingTrack, known bool, now time.Time, width, height int, use24 bool) string {
 	contentWidth := modalContentWidth(width)
 
-	rows := []string{m.trackingLine(track, known, contentWidth, now), ""}
+	rows := []string{m.trackingLine(track, known, contentWidth, now, use24), ""}
 	for i, action := range timeTrackActions {
 		label := truncateToWidth(timeTrackActionLabel(action, track != nil), max(contentWidth-2, 1))
 		if i == m.cursor {
@@ -146,7 +146,7 @@ func (m *timeTrackMenu) draw(base string, track *OngoingTrack, known bool, now t
 
 // trackingLine is the reason to open the menu while a track is running: what it is filed
 // under, when it started, and how long it has been going.
-func (m *timeTrackMenu) trackingLine(track *OngoingTrack, known bool, contentWidth int, now time.Time) string {
+func (m *timeTrackMenu) trackingLine(track *OngoingTrack, known bool, contentWidth int, now time.Time, use24 bool) string {
 	if track == nil {
 		if !known {
 			return styleMuted.Render("Reading what is being tracked…")
@@ -158,7 +158,7 @@ func (m *timeTrackMenu) trackingLine(track *OngoingTrack, known bool, contentWid
 	if track.Category != "" {
 		what += " " + track.Category
 	}
-	line := fmt.Sprintf("● %s since %s · %s", what, track.StartedAt.Format("15:04"), formatElapsed(track.Elapsed(now)))
+	line := fmt.Sprintf("● %s since %s · %s", what, clockTime(track.StartedAt, use24), formatElapsed(track.Elapsed(now)))
 	return lipgloss.NewStyle().Foreground(colorActive).Bold(true).
 		Render(truncateToWidth(line, contentWidth))
 }
@@ -231,10 +231,14 @@ type trackedTimeScreen struct {
 
 	contentVP viewport.Model
 	width     int
+	use24     bool
 }
 
-func newTrackedTimeScreen() *trackedTimeScreen {
-	return &trackedTimeScreen{contentVP: viewport.New(viewport.WithWidth(0), viewport.WithHeight(0))}
+func newTrackedTimeScreen(use24 bool) *trackedTimeScreen {
+	return &trackedTimeScreen{
+		contentVP: viewport.New(viewport.WithWidth(0), viewport.WithHeight(0)),
+		use24:     use24,
+	}
 }
 
 // setTracks is the first page, or the list read again from the top: the cursor goes back to
@@ -357,7 +361,7 @@ func (s *trackedTimeScreen) row(track trackedTime, selected bool) string {
 
 	line := marker +
 		strong.Render(fmt.Sprintf("%-16s", track.StartsAt.Format("Mon Jan 2 2006"))) + "  " +
-		soft.Render(fmt.Sprintf("%s – %s", track.StartsAt.Format("15:04"), track.EndsAt.Format("15:04"))) + "  " +
+		soft.Render(fmt.Sprintf("%s – %s", clockTime(track.StartsAt, s.use24), clockTime(track.EndsAt, s.use24))) + "  " +
 		accent.Render(fmt.Sprintf("%-9s", formatElapsed(track.Duration()))) + " " +
 		categoryStyle.Render(category)
 	if notes := terminal.SanitizeLine(track.Notes); notes != "" {

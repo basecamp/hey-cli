@@ -221,11 +221,19 @@ type yearLoadedMsg struct {
 	year CalendarYear
 }
 
-// identityLoadedMsg stays off the request lane: the first day of the week is read
-// once, alongside the calendars rather than instead of them, so putting it on the
+// identityLoadedMsg stays off the request lane: the identity's calendar preferences are
+// read once, alongside the calendars rather than instead of them, so putting it on the
 // lane would cancel the read it was batched with.
 type identityLoadedMsg struct {
 	firstWeekDay time.Weekday
+	use24Hour    bool
+}
+
+// calendarSettingsSavedMsg is the settings form's write landing — or not.
+type calendarSettingsSavedMsg struct {
+	requestResult
+	firstWeekDay time.Weekday
+	use24Hour    bool
 }
 
 type timeTrackCategoriesLoadedMsg struct {
@@ -364,6 +372,10 @@ type calendarView struct {
 	viewMode     calendarViewMode
 	firstWeekDay time.Weekday
 
+	// use24Hour is HEY's own time_format preference: every clock this section draws reads
+	// it, and the settings form writes it back.
+	use24Hour bool
+
 	// now is the clock the calendar anchors on. It is read on every fetch and
 	// every render, so a TUI left open overnight moves to the new day instead of
 	// fetching around the day it started on while the grid highlights today.
@@ -456,6 +468,9 @@ type calendarView struct {
 	// list: this read runs alongside whatever the reader asked for.
 	ongoingRequestID uint64
 
+	// settings is the open calendar settings form, standing over the calendar.
+	settings *calendarSettingsForm
+
 	timeTrack   *timeTrackMenu
 	trackedTime *trackedTimeScreen
 	// trackedTimeForm is the open edit form, standing over the tracked time screen.
@@ -521,8 +536,29 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 
 	case identityLoadedMsg:
 		v.firstWeekDay = msg.firstWeekDay
+		v.use24Hour = msg.use24Hour
 		v.rebuildView()
 		return nil, true
+
+	case calendarSettingsSavedMsg:
+		if !v.requests.accepts(msg.requestResult) {
+			return nil, true
+		}
+		v.requests.finish(msg.requestID)
+		if msg.err != nil {
+			if v.settings != nil {
+				v.settings.saving = false
+				v.settings.status = errorNotice("Could not save the settings", msg.err)
+				v.settings.isError = true
+			}
+			return nil, true
+		}
+		v.settings = nil
+		v.firstWeekDay = msg.firstWeekDay
+		v.use24Hour = msg.use24Hour
+		// The year's grid padding is the server's answer, computed for the old week start,
+		// so the span is read again rather than just redrawn.
+		return tea.Batch(notify("Calendar settings saved"), v.reread()), true
 
 	case calendarsLoadedMsg:
 		if cmd, ok := v.requests.settle(msg.requestResult); !ok {
@@ -785,7 +821,7 @@ func (v *calendarView) View() string {
 	// The categories stand over the menu they were opened from, as a habit's form stands
 	// over the habit picker.
 	if v.timeTrack != nil {
-		view = v.timeTrack.draw(view, v.ongoing, v.ongoingKnown, v.now(), v.vc.width, v.vc.height)
+		view = v.timeTrack.draw(view, v.ongoing, v.ongoingKnown, v.now(), v.vc.width, v.vc.height, v.use24Hour)
 	}
 	if v.timeTrackCategories != nil {
 		view = v.timeTrackCategories.draw(view, v.vc.width, v.vc.height)
@@ -798,6 +834,10 @@ func (v *calendarView) View() string {
 	// with the arrows rather than from a list, so there is no picker underneath it.
 	if v.eventForm != nil {
 		frame := modalFrame(v.eventForm.formTitle(), v.eventForm.view(), v.vc.width)
+		view = overlayModal(view, frame, v.vc.width, v.vc.height)
+	}
+	if v.settings != nil {
+		frame := modalFrame(v.settings.title(), v.settings.view(), v.vc.width)
 		view = overlayModal(view, frame, v.vc.width, v.vc.height)
 	}
 	return view
@@ -827,6 +867,9 @@ func (v *calendarView) todosFooterHeight() int {
 }
 
 func (v *calendarView) HelpBindings() []helpBinding {
+	if v.settings != nil {
+		return v.settings.helpBindings()
+	}
 	if v.trackedTimeForm != nil {
 		return v.trackedTimeForm.helpBindings()
 	}
@@ -896,7 +939,7 @@ func (v *calendarView) HelpBindings() []helpBinding {
 	if v.showsHabits() {
 		bindings = append(bindings, helpBinding{"b", "habits"})
 	}
-	return bindings
+	return append(bindings, helpBinding{",", "settings"})
 }
 
 // showsHabits reports whether the day has habits to manage: the hint on the section
@@ -955,6 +998,16 @@ func (v *calendarView) handleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if v.timeTrack != nil {
 		return v.handleTimeTrackKey(msg)
+	}
+	if v.settings != nil {
+		if msg.Key().Code == tea.KeyEscape && !v.settings.saving {
+			v.settings = nil
+			return nil
+		}
+		if v.settings.handleKey(msg) {
+			return v.saveSettings()
+		}
+		return nil
 	}
 	if v.habitForm != nil {
 		if msg.Key().Code == tea.KeyEscape && !v.habitForm.saving {
@@ -1033,6 +1086,11 @@ func (v *calendarView) handleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "l":
 		v.timeTrack = newTimeTrackMenu()
 		return v.requestOngoingTrack()
+	// , for the calendar's settings, the conventional preferences key.
+	case ",":
+		v.settings = newCalendarSettingsForm(v.firstWeekDay, v.use24Hour)
+		v.settings.resize(v.vc.width, v.vc.height)
+		return nil
 	// The span is picked by number, as a box is in the mail list, and the row above the
 	// grid shows which one is on.
 	case "1":
@@ -1537,7 +1595,7 @@ func (v *calendarView) Loading() bool {
 }
 func (v *calendarView) CapturingInput() bool {
 	return v.timeTrack != nil || v.trackedTime != nil || v.timeTrackCategories != nil ||
-		v.habitForm != nil || v.eventForm != nil ||
+		v.habitForm != nil || v.eventForm != nil || v.settings != nil ||
 		v.habitPicker != nil || v.todoPicker != nil || v.calendarPicker != nil
 }
 
@@ -1595,6 +1653,9 @@ func (v *calendarView) Resize(width, height int) {
 	if v.trackedTimeForm != nil {
 		v.trackedTimeForm.resize(width, height)
 	}
+	if v.settings != nil {
+		v.settings.resize(width, height)
+	}
 	v.rebuildView()
 }
 
@@ -1620,9 +1681,9 @@ func (v *calendarView) rebuildView() {
 	cursorTop, cursorBottom := -1, -1
 	switch v.viewMode {
 	case viewDay:
-		content = renderDayView(v.events, v.habits, v.countdowns, anchor, v.now(), v.stepHint(), w, v.contentVP.Height(), v.selection(), v.trackBadge())
+		content = renderDayView(v.events, v.habits, v.countdowns, anchor, v.now(), v.stepHint(), w, v.contentVP.Height(), v.selection(), v.trackBadge(), v.use24Hour)
 	case viewWeek:
-		content = renderWeekView(v.events, v.habits, v.habitCompletions, anchor, v.firstWeekDay, w, v.contentVP.Height(), v.stepHint(), dayLabels, v.selection())
+		content = renderWeekView(v.events, v.habits, v.habitCompletions, anchor, v.firstWeekDay, w, v.contentVP.Height(), v.stepHint(), dayLabels, v.selection(), v.use24Hour)
 	case viewYear:
 		// The year's events are HEY's spanned_events — the all-day and multi-day ones —
 		// because that is all a year read carries. eventsByDate spreads a multi-day event
@@ -2315,7 +2376,10 @@ func (v *calendarView) fetchIdentity() tea.Cmd {
 		if wd < 0 || wd > 6 {
 			wd = 1 // default to Monday
 		}
-		return identityLoadedMsg{firstWeekDay: time.Weekday(wd)}
+		return identityLoadedMsg{
+			firstWeekDay: time.Weekday(wd),
+			use24Hour:    identity.TimeFormat == string(hey.TimeFormatTwentyFourHour),
+		}
 	}
 }
 
@@ -2522,7 +2586,7 @@ func isConflict(err error) bool {
 }
 
 func (v *calendarView) openTrackedTime() tea.Cmd {
-	v.trackedTime = newTrackedTimeScreen()
+	v.trackedTime = newTrackedTimeScreen(v.use24Hour)
 	v.trackedTimeForm = nil
 	v.trackedTime.resize(v.vc.width, v.vc.height)
 	return v.requestTrackedTime()
@@ -2606,6 +2670,38 @@ func readTrackedTimePage(ctx context.Context, sdk *hey.Client, cursor string) (t
 		tracks = append(tracks, trackedTimeFrom(recording))
 	}
 	return trackedTimePage{tracks: tracks, categories: page.Categories, nextPage: page.NextPage}, nil
+}
+
+// saveSettings writes the calendar preferences the form changed, and nothing else — each
+// is its own endpoint on HEY, so an untouched one costs no request. The message carries
+// what the server says it stored, not what was asked for.
+func (v *calendarView) saveSettings() tea.Cmd {
+	form := v.settings
+	weekStart, use24 := form.weekStart, form.use24
+	weekChanged := weekStart != form.weekStartArrived
+	clockChanged := use24 != form.use24Arrived
+	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestMutation)
+	return func() tea.Msg {
+		var err error
+		if weekChanged {
+			weekStart, err = v.vc.sdk.Identity().UpdateFirstWeekDay(ctx, weekStart)
+		}
+		if err == nil && clockChanged {
+			asked := hey.TimeFormatTwelveHour
+			if use24 {
+				asked = hey.TimeFormatTwentyFourHour
+			}
+			var stored hey.TimeFormat
+			if stored, err = v.vc.sdk.Identity().UpdateTimeFormat(ctx, asked); err == nil {
+				use24 = stored == hey.TimeFormatTwentyFourHour
+			}
+		}
+		return calendarSettingsSavedMsg{
+			requestResult: newRequestResult(requestID, err),
+			firstWeekDay:  weekStart,
+			use24Hour:     use24,
+		}
+	}
 }
 
 // saveTrackedTime sends what the form changed and nothing else.
