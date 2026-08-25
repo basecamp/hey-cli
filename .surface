@@ -43,6 +43,8 @@ hey box view
 hey box view --all
 hey box view --limit
 hey box view --page
+hey bubble-up-now
+hey bubble-up-now --topic-id
 hey bulk-reply
 hey bulk-reply preview
 hey bulk-reply send
@@ -231,6 +233,8 @@ hey login --token
 hey logout
 hey move
 hey move --to
+hey pop
+hey pop --topic-id
 hey reply
 hey reply --attach
 hey reply --message

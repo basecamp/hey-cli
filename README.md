@@ -411,6 +411,8 @@ hey compose --to alice@example.com --subject "Newsletter draft" --message-html "
 hey draft list                     # list drafts
 hey seen 12345                     # mark a thread as seen
 hey unseen 12345 67890             # mark threads as unseen
+hey bubble-up-now 12345 --topic-id 987  # Bubble one exact thread to the top now
+hey pop 12345 --topic-id 987            # remove that exact thread from Bubble Up
 hey move 12345 --to feed           # move a thread to another box
 hey move 12345 67890 --to "paper trail"  # move multiple threads
 hey trash 12345                    # move a thread to Trash
@@ -439,6 +441,8 @@ The Screener is where first-time senders wait. `hey screener list` returns clear
 
 Organization actions take the `id` values returned by `hey box view --json`, `hey label view --json`, or `hey search --json`. Reading, replying to, and forwarding a thread take its `topic_id` instead, which `hey box view --json`, `hey label view --json`, `hey collection view --json` and `hey search --json` all carry alongside `id`. `hey box view` also returns `next_page` and accepts `--page <next_page>` to continue a box listing; it keeps `next_history_url` for the sync clients that read it, and `--page` accepts that URL as readily as the cursor inside it. Label IDs come from `hey label list`; `hey label view` returns `next_page` and `total_count`, accepts `--page <next_page>` for continuation, and supports `--all` for complete traversal. HEY creates a label while adding it to at least one thread, so `hey label create` requires thread item IDs.
 
+`hey bubble-up-now` and `hey pop` are intentionally stricter: each takes one box item `id` plus the `topic_id` from the same row. They read every Imbox and Bubble Up page before changing anything and verify the exact pair afterward. A missing, mismatched, incomplete, or truncated target fails closed; repeating an already-applied action returns a verified no-op. Bubble Up Now is not replayed after an ambiguous response — rerun the high-level command so its fresh preflight can safely resolve the state.
+
 Collection IDs come from `hey collection list`. `hey collection view` returns both each posting `id` and its `topic_id`, plus `next_page` and `total_count`. Collection membership commands take `topic_id`; posting organization commands continue to take `id`. Creating a collection returns a confirmed mutation, and `hey collection list` provides its ID for subsequent commands. Collection updates accept a non-empty name, summary, or both.
 
 Workflow IDs come from `hey workflow list`, which includes the linked account ID for each workflow. `hey workflow view <id>` returns stages in position order; `--ids-only` and `--count` apply to those stages. Creating a workflow needs one linked mail account, selected with `--account` when more than one is available. HEY creates new stages as `Untitled`, so create the stage, read its ID with `hey workflow view <id>`, then rename it. Workflow membership commands take `topic_id`. Adding a thread creates its workflow membership before selecting the requested stage; if stage selection fails, the thread remains in the workflow's first stage and the command reports the error.
@@ -449,7 +453,7 @@ Snippets are named reusable email content, separate from clips saved out of rece
 
 `hey box view <name|id>`, `hey label view <id>` and `hey collection view <id>` list the same postings and answer the same formats: `--json`, `--styled`, `--markdown`, `--ids-only`, and `--count`. The data-only formats print the pagination notice and any `next_page` cursor on stderr, so the IDs on stdout stay pipeable. `--json` differs only in what wraps the postings: a box answers with HEY's box payload, a label and a collection with the source and its `total_count`.
 
-Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Bubble Up requires a scheduled date and is not available through `hey move`. Trashing a shared thread removes your access instead of deleting it for everyone. Ignored threads remain in their box and can be restored with `hey stop-ignoring`.
+Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Scheduled Bubble Up is not available through `hey move`; `hey bubble-up-now` raises one exact thread immediately and `hey pop` removes it from Bubble Up. Trashing a shared thread removes your access instead of deleting it for everyone. Ignored threads remain in their box and can be restored with `hey stop-ignoring`.
 
 ### Watching for changes
 

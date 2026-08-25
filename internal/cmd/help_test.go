@@ -34,7 +34,7 @@ func TestCuratedCommandHelpUsesUserFacingLanguage(t *testing.T) {
 
 func TestEmailCommandHelpKeepsPostingAsAnInternalTerm(t *testing.T) {
 	root := newRootCmd()
-	for _, name := range []string{"box", "label", "workflow", "clip", "snippet", "thread", "attachment", "bulk-reply", "search", "seen", "unseen", "move", "trash", "spam", "ignore", "stop-ignoring", "watch"} {
+	for _, name := range []string{"box", "label", "workflow", "clip", "snippet", "thread", "attachment", "bulk-reply", "search", "seen", "unseen", "bubble-up-now", "pop", "move", "trash", "spam", "ignore", "stop-ignoring", "watch"} {
 		t.Run(name, func(t *testing.T) {
 			command, _, err := root.Find([]string{name})
 			if err != nil {
@@ -137,6 +137,8 @@ ORGANIZE
   workflow       List and manage email workflows
   seen           Mark email threads as seen
   unseen         Mark email threads as unseen
+  bubble-up-now  Bubble one exact thread to the top of the Imbox now
+  pop            Remove one exact thread from Bubble Up
   move           Move email threads to another box
   trash          Move email threads to Trash
   spam           Mark email threads as spam

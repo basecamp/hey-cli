@@ -38,6 +38,8 @@ triggers:
   # Seen/unseen
   - hey seen
   - hey unseen
+  - hey bubble-up-now
+  - hey pop
   - hey move
   - hey trash
   - hey spam
@@ -52,6 +54,8 @@ triggers:
   - mark as seen
   - mark as unseen
   - mark as unread
+  - bubble up email
+  - pop email from bubble up
   # Habits
   - hey habit
   # Time tracking
@@ -116,6 +120,7 @@ CLI for HEY: mailboxes, labels, collections, email threads, contacts, replies, c
 3. **HTML output** is available via `--html` for commands that return HTML content
 4. **Linked mail accounts share one login** — use `hey account list --json`, then `--account <id|all>` when a task must target one account
 5. **Local HEY configuration requires human trust** — never run `hey config trust-local` without the user's explicit approval
+6. **Bubble Up changes require one exact pair** — copy the box item `id` and `topic_id` from the same complete box row; never infer one from a subject or a different row
 
 ## Output Filtering
 
@@ -206,6 +211,8 @@ notice on stderr. Both need list data, so they work on `hey box list`, `hey box 
 | Follow every change | `hey watch` |
 | Mark as seen | `hey seen 12345` |
 | Mark as unseen | `hey unseen 12345` |
+| Bubble one thread now | `hey bubble-up-now 12345 --topic-id 987` |
+| Remove one thread from Bubble Up | `hey pop 12345 --topic-id 987` |
 | Move email threads | `hey move 12345 --to feed` |
 | Move email threads to Trash | `hey trash 12345` |
 | Mark email threads as spam | `hey spam 12345` |
@@ -252,6 +259,8 @@ Want to read email?
 ├── Turn off the sharing link? → hey unshare <thread_id>
 ├── Mark as seen? → hey seen <id>
 ├── Mark as unseen? → hey unseen <id>
+├── Bubble one exact thread now? → hey bubble-up-now <id> --topic-id <topic_id>
+├── Remove one exact thread from Bubble Up? → hey pop <id> --topic-id <topic_id>
 ├── Move to another box? → hey move <id> --to <box>
 ├── Move to Trash? → hey trash <id>
 ├── Mark as spam? → hey spam <id>
@@ -307,7 +316,7 @@ hey box view imbox --page next-cursor --json # Continue from an earlier listing
 
 Box names: `imbox`, `feedbox`, `trailbox`, `asidebox`, `laterbox`, `bubblebox`
 
-**Response format:** `hey box view --json` returns the box itself — `id`, `kind`, `name`, `app_url`, `next_history_url`, `next_page` — with a `postings` array of the email threads in it. Each posting has: `id` (box item ID), `topic_id` (thread ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`, `visible_entry_count`. Use `id` for `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring`, and `topic_id` for `hey thread read`, `hey reply`, `hey forward`, `hey share` and `hey attachment list`. A box item `id` passed to `hey thread read` answers `not_found`, and so does a `topic_id` passed to `hey move`.
+**Response format:** `hey box view --json` returns the box itself — `id`, `kind`, `name`, `app_url`, `next_history_url`, `next_page` — with a `postings` array of the email threads in it. Each posting has: `id` (box item ID), `topic_id` (thread ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`, `visible_entry_count`. Use `id` for `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring`, and `topic_id` for `hey thread read`, `hey reply`, `hey forward`, `hey share` and `hey attachment list`. `hey bubble-up-now` and `hey pop` require both values from the same row. A box item `id` passed to `hey thread read` answers `not_found`, and so does a `topic_id` passed to `hey move`.
 
 A posting that bundles a contact's mail into one row can **omit `topic_id`**: a bundle names its sender rather than a thread, and its `name` joins the bundled subjects with `•`. A bundle that does carry a `topic_id` opens as that thread — its one unseen thread — and `hey threads` reads it as usual. For a bundle without one, never substitute the box item `id` (`hey threads <id>` answers `not_found`); there is no command that lists the threads inside a bundle, so run `hey contacts unbundle <contact_id>` — the contact is in the posting's `contacts` — to list that sender's mail as separate rows, or direct the user to open the bundle in HEY.
 
@@ -397,7 +406,7 @@ on an entry; use `hey reply`, which works the addressing out itself.
 
 `hey share` returns a URL that shows the entire thread and future emails or replies sent to it. Anyone with the link can open it. `hey unshare` turns off the sharing link.
 
-**ID note:** Every email thread has two IDs: an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring` expect `id`. `hey thread read`, `hey share`, `hey unshare`, `hey attachment list`, `hey reply`, `hey forward`, `hey collection add`, and `hey collection remove` expect `topic_id`. Passing the wrong one answers `not_found`, not a redirect.
+**ID note:** Every email thread has two IDs: an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring` expect `id`. `hey thread read`, `hey share`, `hey unshare`, `hey attachment list`, `hey reply`, `hey forward`, `hey collection add`, and `hey collection remove` expect `topic_id`. `hey bubble-up-now` and `hey pop` require both from one exact row. Passing the wrong one answers `not_found`, not a redirect.
 
 `hey box view --json`, `hey label view --json`, `hey collection view --json` and `hey search --json` all carry both — except a bundle posting, which can omit `topic_id` (see the Boxes section).
 
@@ -493,6 +502,16 @@ hey unseen 12345 67890                        # Mark multiple threads as unseen
 
 Takes box item IDs (the `id` field from `hey box view` output).
 
+### Email - Bubble Up
+
+```bash
+hey box view imbox --all --json               # Read a complete row with both IDs
+hey bubble-up-now 12345 --topic-id 987         # Bubble that exact thread now
+hey pop 12345 --topic-id 987                   # Remove that exact thread from Bubble Up
+```
+
+Both commands require one box item `id` and its paired `topic_id` from the same row. They read every Imbox and Bubble Up page before changing anything, then verify the exact pair after the SDK operation. A missing, mismatched, incomplete, or truncated target fails before any change. Repeating an already-applied action returns `verified: true` with `no_op: true`. Bubble Up Now is non-idempotent and is never replayed after an ambiguous response; rerun the complete command so its fresh preflight can resolve whether HEY already applied it.
+
 ### Email - Moving Threads
 
 ```bash
@@ -500,7 +519,7 @@ hey move 12345 --to imbox                     # Move one thread
 hey move 12345 67890 --to "paper trail"       # Move multiple threads
 ```
 
-Takes box item IDs (the `id` field from `hey box view --json`). `--to` accepts a box name, kind, or ID. Supported destinations are Imbox, The Feed, Set Aside, Reply Later, and Paper Trail. Bubble Up requires a scheduled date and is not supported by this command.
+Takes box item IDs (the `id` field from `hey box view --json`). `--to` accepts a box name, kind, or ID. Supported destinations are Imbox, The Feed, Set Aside, Reply Later, and Paper Trail. Scheduled Bubble Up is not supported by this command; use the exact-pair `hey bubble-up-now` command to raise a thread immediately or `hey pop` to remove it from Bubble Up.
 
 ### Email - Trash and Spam
 

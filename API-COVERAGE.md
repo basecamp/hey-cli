@@ -27,7 +27,9 @@ since `Topics().Get` already carries the entry list.
 | `/trailbox.json` | GET | SDK `Boxes().GetTrailbox` | `hey box view trailbox` | covered |
 | `/asidebox.json` | GET | SDK `Boxes().GetAsidebox` | `hey box view asidebox` | covered |
 | `/laterbox.json` | GET | SDK `Boxes().GetLaterbox` | `hey box view laterbox` | covered |
-| `/bubblebox.json` | GET | SDK `Boxes().GetBubblebox` | `hey box view bubblebox` | covered |
+| `/bubble_up.json` | GET | SDK `Boxes().GetBubblebox` | `hey box view bubblebox`, `hey bubble-up-now`, `hey pop` verification | covered |
+| `/postings/bulk_bubble_up_now.json` | POST | SDK `Postings().BubbleUpNow` | `hey bubble-up-now` | covered |
+| `/postings/bubble_up.json` | DELETE | SDK `Postings().CancelBubbleUp` | `hey pop` | covered |
 | `/my/navigation.json` | GET | SDK `Identity().GetNavigation` | `hey label list`, Mail TUI navigation | covered |
 | `/folders/{id}.json` | GET | SDK `Folders().GetPage` | `hey label view <id>`, Mail TUI labels | covered |
 | `/postings/filings.json` | POST | SDK `Postings().File` | `hey label add`, TUI `b/B` | covered |

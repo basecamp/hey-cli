@@ -211,6 +211,8 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newWatchCommand().cmd)
 	root.AddCommand(newSeenCommand().cmd)
 	root.AddCommand(newUnseenCommand().cmd)
+	root.AddCommand(newBubbleUpNowCommand().cmd)
+	root.AddCommand(newPopCommand().cmd)
 	root.AddCommand(newMoveCommand().cmd)
 	root.AddCommand(newTrashCommand().cmd)
 	root.AddCommand(newSpamCommand().cmd)

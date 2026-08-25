@@ -33,7 +33,7 @@ var curatedCategories = []struct {
 	},
 	{
 		heading: "ORGANIZE",
-		names:   []string{"label", "collection", "workflow", "seen", "unseen", "move", "trash", "spam", "ignore", "stop-ignoring"},
+		names:   []string{"label", "collection", "workflow", "seen", "unseen", "bubble-up-now", "pop", "move", "trash", "spam", "ignore", "stop-ignoring"},
 	},
 	{
 		heading: "CALENDAR & TASKS",
