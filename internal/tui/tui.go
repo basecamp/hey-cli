@@ -528,6 +528,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case errMsg:
 		m.loading = false
 		m.err = msg.err
+		m.updateHelpBindings()
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -635,7 +636,10 @@ const headerHeight = 6 // five drawn rows and the terminal's final safety row
 func (m model) contentView() string {
 	switch {
 	case m.err != nil:
-		return errorView(m.err.Error(), m.width)
+		// The section keeps its last good state underneath, so dismissing the error
+		// with esc puts the reader back where they were.
+		box := errorView(terminal.SanitizeLine(m.err.Error()), m.width)
+		return overlayModal(m.activeView.View(), box, m.width, m.contentHeight())
 	case m.loading:
 		return loadingView(m.width, m.contentHeight(), m.spinnerPhase)
 	default:
@@ -697,6 +701,11 @@ func (m *model) updateHelpBindings() {
 			{"↑↓", "account"},
 			{"enter", "switch"},
 			{"esc/q", "cancel"},
+			quitHint,
+		}
+	} else if m.err != nil {
+		bindings = []helpBinding{
+			{"esc/q", "dismiss"},
 			quitHint,
 		}
 	} else if ic, ok := m.activeView.(inputCapturer); ok && ic.CapturingInput() {
@@ -800,6 +809,16 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	if m.mailAccountPicker {
 		return m.handleMailAccountKey(msg)
+	}
+
+	// An error box stands over the section until it is dismissed; nothing else should
+	// act on a screen it is covering.
+	if m.err != nil {
+		if msg.Key().Code == tea.KeyEscape || key == "q" {
+			m.err = nil
+			m.updateHelpBindings()
+		}
+		return m, nil
 	}
 
 	if key == "?" && m.canToggleHelp() {

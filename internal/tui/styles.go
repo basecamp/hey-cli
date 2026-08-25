@@ -173,7 +173,11 @@ func newStyles() styles {
 
 // --- Error display ---
 
-// errorView renders a styled error message inside a bordered box.
+const errorViewHint = "esc to dismiss · ctrl+c ctrl+c to quit"
+
+// errorView renders a styled error message inside a bordered box. It is drawn over the
+// section it interrupted, so every line is padded to one width: an overlay's blank
+// cells are what keep the content beneath from bleeding through.
 func errorView(errMsg string, width int) string {
 	border := lipgloss.NewStyle().Foreground(colorError)
 	errStyle := lipgloss.NewStyle().Foreground(colorError).Bold(true)
@@ -185,25 +189,29 @@ func errorView(errMsg string, width int) string {
 	}
 
 	lines := wrapText(errMsg, maxInner)
-	innerWidth := 0
+	innerWidth := 6
 	for _, l := range lines {
 		if len(l) > innerWidth {
 			innerWidth = len(l)
 		}
 	}
 
-	top := border.Render("╭─ Error " + strings.Repeat("─", max(innerWidth-6, 0)) + "╮")
-	bot := border.Render("╰" + strings.Repeat("─", innerWidth+2) + "╯")
-
-	var mid strings.Builder
-	for _, l := range lines {
-		pad := strings.Repeat(" ", innerWidth-len(l))
-		mid.WriteString(border.Render("│") + " " + errStyle.Render(l) + pad + " " + border.Render("│") + "\n")
+	hintText := "  " + errorViewHint
+	blockWidth := max(innerWidth+4, lipgloss.Width(hintText))
+	padTo := func(rendered string) string {
+		return rendered + strings.Repeat(" ", max(blockWidth-lipgloss.Width(rendered), 0))
 	}
 
-	hintLine := hint.Render("  Press ctrl+c ctrl+c to quit")
-
-	return top + "\n" + mid.String() + bot + "\n\n" + hintLine
+	var b strings.Builder
+	b.WriteString(padTo(border.Render("╭─ Error "+strings.Repeat("─", innerWidth-6)+"╮")) + "\n")
+	for _, l := range lines {
+		pad := strings.Repeat(" ", innerWidth-len(l))
+		b.WriteString(padTo(border.Render("│")+" "+errStyle.Render(l)+pad+" "+border.Render("│")) + "\n")
+	}
+	b.WriteString(padTo(border.Render("╰"+strings.Repeat("─", innerWidth+2)+"╯")) + "\n")
+	b.WriteString(strings.Repeat(" ", blockWidth) + "\n")
+	b.WriteString(padTo(hint.Render(hintText)))
+	return b.String()
 }
 
 // wrapText wraps a string to fit within maxWidth characters.

@@ -471,6 +471,121 @@ func TestSingleCtrlCDoesNotQuit(t *testing.T) {
 	}
 }
 
+// --- Errors are dismissible ---
+
+func TestEscDismissesAnErrorAndKeepsTheSection(t *testing.T) {
+	m := modelWithBoxes()
+	updated, _ := m.Update(errMsg{errors.New("resource not found")})
+	m = updated.(model)
+	if m.err == nil {
+		t.Fatal("errMsg should set the error state")
+	}
+	if !slices.Contains(m.help.bindings, helpBinding{"esc/q", "dismiss"}) {
+		t.Errorf("error help is missing the dismiss binding: %v", m.help.bindings)
+	}
+
+	updated, _ = m.Update(keyPress("esc"))
+	m = updated.(model)
+	if m.err != nil {
+		t.Error("esc should dismiss the error")
+	}
+	if m.section != sectionMail || m.activeView != m.mailView {
+		t.Errorf("dismissing the error moved the TUI to section=%d view=%T", m.section, m.activeView)
+	}
+	if !strings.Contains(m.contentView(), "Hello world") {
+		t.Error("the mail list should be back on screen after dismissing the error")
+	}
+}
+
+func TestQDismissesAnError(t *testing.T) {
+	m := modelWithBoxes()
+	updated, _ := m.Update(errMsg{errors.New("resource not found")})
+	m = updated.(model)
+
+	updated, _ = m.Update(keyPress("q"))
+	m = updated.(model)
+	if m.err != nil {
+		t.Error("q should dismiss the error")
+	}
+}
+
+func TestErrorKeepsTheSectionContentOnScreen(t *testing.T) {
+	m := modelWithBoxes()
+	updated, _ := m.Update(errMsg{errors.New("resource not found")})
+	m = updated.(model)
+
+	content := m.contentView()
+	if !strings.Contains(content, "resource not found") {
+		t.Error("the error box should name the error")
+	}
+	if !strings.Contains(content, errorViewHint) {
+		t.Error("the error box should say how to dismiss it")
+	}
+	if !strings.Contains(content, "Hello world") {
+		t.Error("the section's last good state should stay on screen under the error")
+	}
+}
+
+func TestErrorSwallowsOtherKeysWhileItIsUp(t *testing.T) {
+	m := modelWithBoxes()
+	updated, _ := m.Update(errMsg{errors.New("resource not found")})
+	m = updated.(model)
+
+	updated, cmd := m.Update(keyPress("O"))
+	m = updated.(model)
+	if m.section != sectionMail || cmd != nil {
+		t.Error("a section shortcut should wait until the error is dismissed")
+	}
+	if m.err == nil {
+		t.Error("another key should not dismiss the error")
+	}
+}
+
+func TestCtrlCStillQuitsFromAnError(t *testing.T) {
+	m := modelWithBoxes()
+	updated, _ := m.Update(errMsg{errors.New("resource not found")})
+	m = updated.(model)
+
+	updated, _ = m.Update(keyPress("ctrl+c"))
+	m = updated.(model)
+	_, cmd := m.Update(keyPress("ctrl+c"))
+	if cmd == nil {
+		t.Fatal("double ctrl+c should quit from the error state")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Error("double ctrl+c should produce tea.QuitMsg from the error state")
+	}
+}
+
+func TestEscDismissesAnErrorFromAFreshLoad(t *testing.T) {
+	m := sizedModel()
+	updated, _ := m.Update(errMsg{errors.New("could not reach HEY")})
+	m = updated.(model)
+	if m.loading {
+		t.Fatal("an error should end the loading state")
+	}
+
+	updated, _ = m.Update(keyPress("esc"))
+	m = updated.(model)
+	if m.err != nil {
+		t.Error("esc should dismiss a fresh-load error")
+	}
+	if m.contentView() == "" {
+		t.Error("the section should still render after dismissing a fresh-load error")
+	}
+}
+
+func TestErrorViewLinesShareOneWidth(t *testing.T) {
+	view := errorView("resource not found", 80)
+	lines := strings.Split(view, "\n")
+	want := lipgloss.Width(lines[0])
+	for index, line := range lines {
+		if lipgloss.Width(line) != want {
+			t.Errorf("line %d is %d cells wide, want %d — an uneven overlay lets the content beneath bleed through", index, lipgloss.Width(line), want)
+		}
+	}
+}
+
 func TestLoadingViewKeepsItsSectionUntilResponse(t *testing.T) {
 	m := modelWithBoxes()
 	m.loading = true
