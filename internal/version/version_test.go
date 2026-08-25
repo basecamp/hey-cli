@@ -1,6 +1,9 @@
 package version
 
-import "testing"
+import (
+	"runtime/debug"
+	"testing"
+)
 
 func stubVersion(t *testing.T, v string, goInstall bool) {
 	t.Helper()
@@ -81,6 +84,45 @@ func TestSource(t *testing.T) {
 			stubVersion(t, tt.version, tt.goInstall)
 			if got := Source(); got != tt.want {
 				t.Errorf("Source() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// classify is the provenance decision itself: what an unstamped binary adopts from
+// build info, and what it refuses. The vcs.revision branch is the point — a source
+// checkout's build carries a toolchain-stamped pseudo-version in exactly the shape a
+// `go install` build reports, and only the VCS settings tell the two apart.
+func TestClassify(t *testing.T) {
+	moduleBuild := func(version string, settings ...debug.BuildSetting) *debug.BuildInfo {
+		info := &debug.BuildInfo{Settings: settings}
+		info.Main.Version = version
+		return info
+	}
+	vcs := debug.BuildSetting{Key: "vcs.revision", Value: "c426c98b3ea4"}
+
+	tests := []struct {
+		name          string
+		stamped       string
+		info          *debug.BuildInfo
+		ok            bool
+		wantVersion   string
+		wantBuildInfo bool
+	}{
+		{name: "release ldflags stand", stamped: "1.2.3", info: moduleBuild("v0.9.9"), ok: true, wantVersion: "1.2.3"},
+		{name: "go install adopts the module version", stamped: "dev", info: moduleBuild("v1.0.1"), ok: true, wantVersion: "1.0.1", wantBuildInfo: true},
+		{name: "go install pseudo-version adopts too", stamped: "dev", info: moduleBuild("v1.0.1-0.20260825032930-c426c98b3ea4"), ok: true, wantVersion: "1.0.1-0.20260825032930-c426c98b3ea4", wantBuildInfo: true},
+		{name: "checkout build stays dev", stamped: "dev", info: moduleBuild("v1.0.1-0.20260825032930-c426c98b3ea4+dirty", vcs), ok: true, wantVersion: "dev"},
+		{name: "devel stays dev", stamped: "dev", info: moduleBuild("(devel)"), ok: true, wantVersion: "dev"},
+		{name: "no build info stays dev", stamped: "dev", info: nil, ok: false, wantVersion: "dev"},
+		{name: "empty module version stays dev", stamped: "dev", info: moduleBuild(""), ok: true, wantVersion: "dev"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			version, fromInfo := classify(tt.stamped, tt.info, tt.ok)
+			if version != tt.wantVersion || fromInfo != tt.wantBuildInfo {
+				t.Errorf("classify(%q) = %q, %v; want %q, %v", tt.stamped, version, fromInfo, tt.wantVersion, tt.wantBuildInfo)
 			}
 		})
 	}

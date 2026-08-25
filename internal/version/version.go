@@ -17,26 +17,30 @@ var (
 var fromBuildInfo bool
 
 func init() {
-	if Version != "dev" {
-		return
-	}
 	info, ok := debug.ReadBuildInfo()
-	if !ok || info.Main.Version == "" || info.Main.Version == "(devel)" {
-		return
+	Version, fromBuildInfo = classify(Version, info, ok)
+}
+
+// classify decides what a binary reports itself as. An ldflags-stamped version stands as
+// stamped. An unstamped ("dev") binary adopts the toolchain-recorded module version only
+// for a true `go install module@version` build. A build from a source checkout is still a
+// dev build — Go stamps such a build's main-module version with a pseudo-version derived
+// from the checkout's VCS state, which is exactly the shape a `go install` build reports,
+// and the difference is that only the checkout build carries the VCS settings. So a
+// version with vcs metadata behind it stays "dev".
+func classify(stamped string, info *debug.BuildInfo, ok bool) (version string, fromBuildInfo bool) {
+	if stamped != "dev" {
+		return stamped, false
 	}
-	// A build from a source checkout is still a dev build. Go stamps such a build's
-	// main-module version with a pseudo-version derived from the checkout's VCS
-	// state, which is exactly the shape a `go install module@version` build reports —
-	// the difference is that only the checkout build carries the VCS settings. So a
-	// version with vcs metadata behind it stays "dev", and only a true module build
-	// (no checkout, no vcs.revision) adopts what the toolchain recorded.
+	if !ok || info == nil || info.Main.Version == "" || info.Main.Version == "(devel)" {
+		return stamped, false
+	}
 	for _, setting := range info.Settings {
 		if setting.Key == "vcs.revision" {
-			return
+			return stamped, false
 		}
 	}
-	Version = strings.TrimPrefix(info.Main.Version, "v")
-	fromBuildInfo = true
+	return strings.TrimPrefix(info.Main.Version, "v"), true
 }
 
 // Full returns the full version string for display.
