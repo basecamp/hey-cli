@@ -63,6 +63,24 @@ func TestBubbleUpAndPop(t *testing.T) {
 	assertContains(t, popResp.Summary, "no longer bubbled up")
 }
 
+func TestBubbleList(t *testing.T) {
+	resp := heyJSON(t, "bubble", "list")
+	type BubbleList struct {
+		BubbledUp []struct {
+			ID int `json:"id"`
+		} `json:"bubbled_up"`
+		Scheduled []struct {
+			ID int `json:"id"`
+		} `json:"scheduled"`
+	}
+	data := dataAs[BubbleList](t, resp)
+	for _, row := range append(data.BubbledUp, data.Scheduled...) {
+		if row.ID == 0 {
+			t.Errorf("bubble list row without an id: %+v", row)
+		}
+	}
+}
+
 func TestBubbleUpRequiresExactlyOneSchedule(t *testing.T) {
 	heyFail(t, "bubble", "up", "12345")
 	heyFail(t, "bubble", "up", "12345", "--now", "--on", "2026-09-04")

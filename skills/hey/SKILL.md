@@ -222,6 +222,7 @@ notice on stderr. Both need list data, so they work on `hey box list`, `hey box 
 | Bubble a thread up now | `hey bubble up 12345 --now` |
 | Bubble a thread up on a date | `hey bubble up 12345 --on 2026-09-04` |
 | Bubble a thread up this weekend | `hey bubble up 12345 --weekend` |
+| List bubbled-up and scheduled threads | `hey bubble list --json` |
 | Cancel a bubble-up | `hey bubble pop 12345` |
 | Move email threads to Trash | `hey trash 12345` |
 | Mark email threads as spam | `hey spam 12345` |
@@ -532,10 +533,13 @@ hey bubble up 12345 --on 2026-09-04           # Bubble a thread up on a date
 hey bubble up 12345 --tomorrow                # Bubble a thread up tomorrow morning
 hey bubble up 12345 --weekend                 # Bubble a thread up Saturday morning
 hey bubble up 12345 --next-week               # Bubble a thread up Monday morning
+hey bubble list                               # List bubbled-up and scheduled threads
 hey bubble pop 12345                          # Cancel a thread's bubble-up
 ```
 
 Takes box item IDs (the `id` field from `hey box view --json`). `hey bubble up` requires exactly one of `--now`, `--on`, `--tomorrow`, `--weekend`, and `--next-week`. `--on` takes a YYYY-MM-DD date; HEY bubbles the threads up at its morning hour of that day, or at its evening hour (18:00) when the date is today.
+
+`hey bubble list --json` answers two buckets: `bubbled_up`, the threads back in the Imbox after bubbling up, and `scheduled`, the threads waiting in Bubble Up — each scheduled row carries `bubble_up_schedule.bubble_up_at`, and `surprise_me` when HEY picked the time. Use `id` with `hey bubble pop`, `topic_id` with `hey thread read`.
 
 ### Email - Trash and Spam
 

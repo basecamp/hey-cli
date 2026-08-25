@@ -44,6 +44,9 @@ hey box view --all
 hey box view --limit
 hey box view --page
 hey bubble
+hey bubble list
+hey bubble list --all
+hey bubble list --limit
 hey bubble pop
 hey bubble up
 hey bubble up --next-week

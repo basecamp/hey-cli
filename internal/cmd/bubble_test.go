@@ -36,6 +36,22 @@ func bubbleServer(t *testing.T) (*httptest.Server, *recordedBubble) {
 		recorded.path = r.URL.Path
 
 		switch {
+		case r.URL.Path == "/boxes.json":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"id":1,"kind":"imbox","name":"Imbox"},{"id":6,"kind":"bubblebox","name":"Bubble Up"}]`))
+		case r.URL.Path == "/imbox.json":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":1,"kind":"imbox","name":"Imbox","postings":[
+				{"id":11,"bubbled_up":true,"creator":{"name":"Jane Herrera"},"summary":"Re: Renewal quote","created_at":"2026-08-24T09:15:00Z"},
+				{"id":12,"creator":{"name":"Ravi Patel"},"summary":"Standup notes","created_at":"2026-08-23T16:40:00Z"},
+				{"id":13,"bubbled_up":true,"creator":{"name":"Priya Raman"},"summary":"Follow up on the offsite venue","created_at":"2026-08-22T11:05:00Z"}
+			]}`))
+		case r.URL.Path == "/bubble_up.json" && r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":6,"kind":"bubblebox","name":"Bubble Up","postings":[
+				{"id":21,"creator":{"name":"Miles Cooper"},"summary":"Invoice for July","bubble_up_schedule":{"bubble_up_at":"2026-09-04T08:00:00Z"}},
+				{"id":22,"creator":{"name":"Dana Whitfield"},"summary":"Conference travel options","bubble_up_schedule":{"bubble_up_at":"2026-09-01T10:00:00Z","surprise_me":true}}
+			]}`))
 		case r.URL.Path == "/postings/bulk_bubble_up_now.json":
 			var body struct {
 				PostingIDs []int64 `json:"posting_ids"`
@@ -78,6 +94,16 @@ func bubbleServer(t *testing.T) (*httptest.Server, *recordedBubble) {
 
 func runBubble(t *testing.T, server *httptest.Server, args ...string) (output.Response, error) {
 	t.Helper()
+	stdout, err := runBubbleOutput(t, server, append(args, "--json")...)
+	var resp output.Response
+	if stdout != "" {
+		_ = json.Unmarshal([]byte(stdout), &resp)
+	}
+	return resp, err
+}
+
+func runBubbleOutput(t *testing.T, server *httptest.Server, args ...string) (string, error) {
+	t.Helper()
 	t.Setenv("HEY_TOKEN", "test-token")
 	t.Setenv("HEY_NO_KEYRING", "1")
 	t.Setenv("HEY_BASE_URL", "")
@@ -90,14 +116,10 @@ func runBubble(t *testing.T, server *httptest.Server, args ...string) (output.Re
 	var buf bytes.Buffer
 	root.SetOut(&buf)
 	root.SetErr(&buf)
-	root.SetArgs(append([]string{"bubble"}, append(args, "--json", "--base-url", server.URL)...))
+	root.SetArgs(append([]string{"bubble"}, append(args, "--base-url", server.URL)...))
 
 	err := root.Execute()
-	var resp output.Response
-	if buf.Len() > 0 {
-		_ = json.Unmarshal(buf.Bytes(), &resp)
-	}
-	return resp, err
+	return buf.String(), err
 }
 
 func TestBubbleUpAndPop(t *testing.T) {
@@ -257,5 +279,95 @@ func TestBubbleUpAndPopReportServerFailures(t *testing.T) {
 				t.Fatal("server failure should be reported")
 			}
 		})
+	}
+}
+
+func TestBubbleList(t *testing.T) {
+	server, _ := bubbleServer(t)
+	resp, err := runBubble(t, server, "list")
+	if err != nil {
+		t.Fatalf("bubble list failed: %v", err)
+	}
+	if resp.Summary != "1 bubbled up, 2 scheduled" {
+		t.Errorf("summary = %q, want %q", resp.Summary, "1 bubbled up, 2 scheduled")
+	}
+
+	raw, err := json.Marshal(resp.Data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var data struct {
+		BubbledUp []struct {
+			ID int64 `json:"id"`
+		} `json:"bubbled_up"`
+		Scheduled []struct {
+			ID               int64 `json:"id"`
+			BubbleUpSchedule struct {
+				BubbleUpAt string `json:"bubble_up_at"`
+				SurpriseMe bool   `json:"surprise_me"`
+			} `json:"bubble_up_schedule"`
+		} `json:"scheduled"`
+	}
+	if err := json.Unmarshal(raw, &data); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(data.BubbledUp) != 1 || data.BubbledUp[0].ID != 11 {
+		t.Errorf("bubbled_up = %v, want the bubbled-up prefix [11] and nothing after the first seen row", data.BubbledUp)
+	}
+	if len(data.Scheduled) != 2 || data.Scheduled[0].ID != 21 || data.Scheduled[1].ID != 22 {
+		t.Fatalf("scheduled = %v, want [21 22]", data.Scheduled)
+	}
+	if data.Scheduled[0].BubbleUpSchedule.BubbleUpAt != "2026-09-04T08:00:00Z" {
+		t.Errorf("scheduled[0].bubble_up_at = %q, want 2026-09-04T08:00:00Z", data.Scheduled[0].BubbleUpSchedule.BubbleUpAt)
+	}
+	if !data.Scheduled[1].BubbleUpSchedule.SurpriseMe {
+		t.Error("scheduled[1] should carry surprise_me")
+	}
+}
+
+func TestBubbleListStyled(t *testing.T) {
+	server, _ := bubbleServer(t)
+	stdout, err := runBubbleOutput(t, server, "list", "--styled")
+	if err != nil {
+		t.Fatalf("bubble list failed: %v", err)
+	}
+	for _, want := range []string{"Bubbled up:", "Scheduled to bubble up:", "Jane Herrera", "Miles Cooper", "???", "Bubbles up"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("styled output missing %q:\n%s", want, stdout)
+		}
+	}
+	if strings.Contains(stdout, "Ravi Patel") {
+		t.Errorf("styled output lists a thread that is not bubbled up:\n%s", stdout)
+	}
+}
+
+func TestBubbleListIDsAndCount(t *testing.T) {
+	server, _ := bubbleServer(t)
+	stdout, err := runBubbleOutput(t, server, "list", "--ids-only")
+	if err != nil {
+		t.Fatalf("bubble list --ids-only failed: %v", err)
+	}
+	if stdout != "11\n21\n22\n" {
+		t.Errorf("ids = %q, want %q", stdout, "11\n21\n22\n")
+	}
+
+	stdout, err = runBubbleOutput(t, server, "list", "--count")
+	if err != nil {
+		t.Fatalf("bubble list --count failed: %v", err)
+	}
+	if stdout != "3\n" {
+		t.Errorf("count = %q, want %q", stdout, "3\n")
+	}
+}
+
+func TestBubbleListLimitCapsEachBucket(t *testing.T) {
+	server, _ := bubbleServer(t)
+	resp, err := runBubble(t, server, "list", "--limit", "1")
+	if err != nil {
+		t.Fatalf("bubble list failed: %v", err)
+	}
+	if resp.Summary != "1 bubbled up, 1 scheduled" {
+		t.Errorf("summary = %q, want %q", resp.Summary, "1 bubbled up, 1 scheduled")
 	}
 }

@@ -20,7 +20,8 @@ which is what `Entries().ListDraftsPage` and `hey draft list --page` exist for.
 | `/trailbox.json` | GET | SDK `Boxes().GetTrailbox` | `hey box view trailbox` | covered |
 | `/asidebox.json` | GET | SDK `Boxes().GetAsidebox` | `hey box view asidebox` | covered |
 | `/laterbox.json` | GET | SDK `Boxes().GetLaterbox` | `hey box view laterbox` | covered |
-| `/bubblebox.json` | GET | SDK `Boxes().GetBubblebox` | `hey box view bubblebox` | covered |
+| `/bubblebox.json` | GET | SDK `Boxes().GetBubblebox` | `hey box view bubblebox`, `hey bubble list` (scheduled bucket) | covered |
+| `/imbox/bubbled_up` | GET | — | — | not served: HTML only; the Imbox JSON orders bubbled-up threads first, so `hey bubble list` reads that prefix instead |
 | `/my/navigation.json` | GET | SDK `Identity().GetNavigation` | `hey label list`, Mail TUI navigation | covered |
 | `/folders/{id}.json` | GET | SDK `Folders().GetPage` | `hey label view <id>`, Mail TUI labels | covered |
 | `/postings/filings.json` | POST | SDK `Postings().File` | `hey label add`, TUI `b/B` | covered |

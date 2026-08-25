@@ -23,6 +23,7 @@ func newBubbleCommand() *bubbleCommand {
 		Long:  "Bubble email threads up to the top of the Imbox, or cancel a bubble-up.",
 	}
 
+	bubbleCommand.cmd.AddCommand(newBubbleListCommand().cmd)
 	bubbleCommand.cmd.AddCommand(newBubbleUpCommand().cmd)
 	bubbleCommand.cmd.AddCommand(newBubblePopCommand().cmd)
 
