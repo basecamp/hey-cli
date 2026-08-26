@@ -121,12 +121,15 @@ type searchResultsAppendedMsg struct {
 	err       error
 }
 
-// bundleLoadedMsg is the first page of the unseen threads inside a bundle posting,
-// opened from its row the way a thread is.
+// bundleLoadedMsg is the first page of what a bundle row opens: the unseen threads
+// inside an unread bundle, or — for a bundle that has been read through — every thread
+// with its contact, which is where the web app sends a read bundle. contactID says
+// which; zero is the unseen list for postingID's bundle.
 type bundleLoadedMsg struct {
 	requestID uint64
 	boxID     int64
 	postingID int64
+	contactID int64
 	title     string
 	nextPage  string
 	postings  []mail.Posting
@@ -138,6 +141,7 @@ type bundleLoadedMsg struct {
 type bundleAppendedMsg struct {
 	requestID uint64
 	postingID int64
+	contactID int64
 	nextPage  string
 	postings  []mail.Posting
 	err       error
@@ -247,7 +251,8 @@ type mailView struct {
 	bundleList             contentList
 	bundleActive           bool
 	bundlePostingID        int64  // the bundle row the open list belongs to
-	bundleTitle            string // the bundled contact's name, sanitized
+	bundleContactID        int64  // set when the list is the contact's threads instead of the bundle's unseen
+	bundleTitle            string // what the list is, sanitized: "New from X" or "All threads with X"
 	bundleNextPage         string // the cursor for the page below, empty at the last
 	bundleLoadingMore      bool   // a page of the bundle is already on its way
 	screenerCount          int    // senders waiting in The Screener
@@ -416,6 +421,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.bundleActive = true
 		v.bundlePostingID = msg.postingID
+		v.bundleContactID = msg.contactID
 		v.bundleTitle = msg.title
 		v.bundleNextPage = msg.nextPage
 		v.bundleLoadingMore = false
@@ -423,7 +429,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return v.loadMoreBundlePostings(), true
 
 	case bundleAppendedMsg:
-		if msg.requestID != v.bundleMoreID || !v.bundleActive || msg.postingID != v.bundlePostingID {
+		if msg.requestID != v.bundleMoreID || !v.bundleActive || msg.postingID != v.bundlePostingID || msg.contactID != v.bundleContactID {
 			return nil, true
 		}
 		v.bundleLoadingMore = false
@@ -747,10 +753,14 @@ func (v *mailView) View() string {
 	}
 	if v.bundleActive {
 		view := v.bundleList.view()
-		// HEY serves a bundle's unseen threads, so a bundle that has been read
-		// through answers none — say so instead of showing a bare empty list.
 		if len(v.bundleList.postings) == 0 {
-			view = styleMuted.Render("  Nothing unseen from " + v.bundleTitle + " — everything in this bundle has been read.")
+			// A contact with no threads is HEY's own empty case; an unseen list
+			// answering none means the bundle was read since its row was drawn.
+			if v.bundleContactID != 0 {
+				view = styleMuted.Render("  No emails with this contact.")
+			} else {
+				view = styleMuted.Render("  Nothing unseen here any more — reload the box to catch it up.")
+			}
 		}
 		if v.notice != "" {
 			return v.vc.styles.title.Render(v.notice) + "\n" + view
@@ -915,7 +925,7 @@ func (v *mailView) SubnavItems() ([]navItem, int, string, bool) {
 		return nil, 0, label, true
 	}
 	if v.bundleActive {
-		label := "New from " + v.bundleTitle
+		label := v.bundleTitle
 		if v.bundleLoadingMore {
 			label += " · loading more…"
 		}
@@ -1249,6 +1259,7 @@ func (v *mailView) clearSearch() {
 func (v *mailView) clearBundle() {
 	v.bundleActive = false
 	v.bundlePostingID = 0
+	v.bundleContactID = 0
 	v.bundleTitle = ""
 	v.bundleNextPage = ""
 	v.bundleLoadingMore = false
@@ -1555,14 +1566,24 @@ func (v *mailView) loadMoreSearchResults() tea.Cmd {
 	return v.fetchMoreSearchResults(v.vc.ctx, v.searchMoreID, v.searchQuery, v.searchNextPage)
 }
 
-// requestBundle opens a bundle row: the unseen threads it groups, from their first page.
-// They grow downwards from there, the same way a box does.
+// requestBundle opens an unread bundle row: the unseen threads it groups, from their
+// first page. They grow downwards from there, the same way a box does.
 func (v *mailView) requestBundle(postingID int64) tea.Cmd {
 	v.bundleNextPage = ""
 	v.bundleLoadingMore = false
 	v.bundleMoreID++
 	requestID, ctx := v.requests.begin(v.vc.ctx, mailRequestBundle)
 	return v.fetchBundle(ctx, requestID, v.currentBoxID(), postingID)
+}
+
+// requestContactThreads opens a read bundle row: every thread with its contact, from
+// the first page, in the same list the unseen bundle uses.
+func (v *mailView) requestContactThreads(contactID int64) tea.Cmd {
+	v.bundleNextPage = ""
+	v.bundleLoadingMore = false
+	v.bundleMoreID++
+	requestID, ctx := v.requests.begin(v.vc.ctx, mailRequestBundle)
+	return v.fetchContactThreads(ctx, requestID, v.currentBoxID(), contactID)
 }
 
 // loadMoreBundlePostings reads the page of the bundle below the ones the reader has
@@ -1577,6 +1598,9 @@ func (v *mailView) loadMoreBundlePostings() tea.Cmd {
 
 	v.bundleLoadingMore = true
 	v.bundleMoreID++
+	if v.bundleContactID != 0 {
+		return v.fetchMoreContactThreads(v.vc.ctx, v.bundleMoreID, v.bundleContactID, v.bundleNextPage)
+	}
 	return v.fetchMoreBundlePostings(v.vc.ctx, v.bundleMoreID, v.bundlePostingID, v.bundleNextPage)
 }
 
@@ -1718,10 +1742,15 @@ func (v *mailView) openSelected() tea.Cmd {
 		return nil
 	}
 	// A bundle names a topic only when it holds one unseen thread — otherwise its row
-	// opens the bundle itself. The posting's own id is never a topic id, so anything
-	// else without one has nowhere to go.
+	// opens the bundle itself: the unseen threads while there are any, or every thread
+	// with its contact once it has been read through, which is where the web app sends
+	// a read bundle. The posting's own id is never a topic id, so anything else without
+	// one has nowhere to go.
 	if selected.TopicID == 0 {
 		if selected.IsBundle {
+			if selected.Seen {
+				return v.requestContactThreads(selected.Creator.ID)
+			}
 			return v.requestBundle(selected.ID)
 		}
 		err := fmt.Errorf("this item does not identify an email thread")
@@ -2268,14 +2297,44 @@ func (v *mailView) fetchMoreBundlePostings(ctx context.Context, requestID uint64
 	}
 }
 
-// readBundlePage reads one page of the unseen threads a bundle posting groups, and the
-// bundled contact's name for the title.
+// readBundlePage reads one page of the unseen threads a bundle posting groups, titled
+// the way the web app titles its bundle view.
 func (v *mailView) readBundlePage(ctx context.Context, postingID int64, cursor string) ([]mail.Posting, string, string, error) {
 	page, err := v.vc.sdk.Postings().BundleUnseenPage(ctx, postingID, cursor)
 	if err != nil {
 		return nil, "", "", err
 	}
-	return mail.Postings(page.Postings), terminal.SanitizeLine(page.Contact.Name), page.NextPage, nil
+	return mail.Postings(page.Postings), "New from " + terminal.SanitizeLine(page.Contact.Name), page.NextPage, nil
+}
+
+func (v *mailView) fetchContactThreads(ctx context.Context, requestID uint64, boxID, contactID int64) tea.Cmd {
+	return func() tea.Msg {
+		postings, title, nextPage, err := v.readContactThreadsPage(ctx, contactID, "")
+		return bundleLoadedMsg{requestID: requestID, boxID: boxID, contactID: contactID, title: title, postings: postings, nextPage: nextPage, err: err}
+	}
+}
+
+// fetchMoreContactThreads reads the page of the contact's threads below the ones on
+// screen, in the growing lane and without the spinner.
+func (v *mailView) fetchMoreContactThreads(ctx context.Context, requestID uint64, contactID int64, cursor string) tea.Cmd {
+	return func() tea.Msg {
+		postings, _, nextPage, err := v.readContactThreadsPage(ctx, contactID, cursor)
+		return bundleAppendedMsg{requestID: requestID, contactID: contactID, postings: postings, nextPage: nextPage, err: err}
+	}
+}
+
+// readContactThreadsPage reads one page of the threads a contact is on, titled with
+// HEY's own heading for the list.
+func (v *mailView) readContactThreadsPage(ctx context.Context, contactID int64, cursor string) ([]mail.Posting, string, string, error) {
+	page, err := v.vc.sdk.Contacts().ThreadsPage(ctx, contactID, cursor)
+	if err != nil {
+		return nil, "", "", err
+	}
+	title := terminal.SanitizeLine(page.Contact.EntriesTitle)
+	if title == "" {
+		title = "All threads with " + terminal.SanitizeLine(page.Contact.Name)
+	}
+	return mail.Postings(page.Contact.Postings), title, page.NextPage, nil
 }
 
 // tuiThreadLimits is what the TUI reads a thread within: threadload's defaults, at the

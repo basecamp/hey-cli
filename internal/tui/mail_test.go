@@ -121,6 +121,8 @@ func mailWithTestServer(t *testing.T, status int) (*mailView, *recordedMailReque
 			} else {
 				_, _ = w.Write([]byte(`{"contact":{"id":88,"name":"GitHub","email_address":"notifications@example.com"},"postings":[{"id":512,"kind":"topic","name":"Nightly build is green again","app_url":"https://app.hey.com/topics/101","created_at":"2026-08-24T21:00:00Z","creator":{"id":88,"name":"GitHub"}}]}`))
 			}
+		case "/contacts/88.json":
+			_, _ = w.Write([]byte(`{"id":88,"name":"GitHub","entries_title":"All threads with GitHub","postings":[{"id":513,"kind":"topic","name":"Deploy failed on main","seen":true,"app_url":"https://app.hey.com/topics/100","created_at":"2026-08-25T09:00:00Z","creator":{"id":88,"name":"GitHub"}},{"id":514,"kind":"topic","name":"Nightly build is green again","seen":true,"app_url":"https://app.hey.com/topics/101","created_at":"2026-08-24T21:00:00Z","creator":{"id":88,"name":"GitHub"}}]}`))
 		case "/topics/100/entries.json":
 			_, _ = w.Write([]byte(`[{"id":501,"kind":"message","summary":"Hello world","created_at":"2026-08-19T09:00:00Z","creator":{"id":10,"name":"Alice"}}]`))
 		case "/messages/501.json":
@@ -3267,7 +3269,7 @@ func TestMailViewOpensABundle(t *testing.T) {
 		t.Fatalf("opening a bundle returned %#v", loaded)
 	}
 	more, _ := v.Update(loaded)
-	if !v.bundleActive || v.bundleTitle != "GitHub" {
+	if !v.bundleActive || v.bundleTitle != "New from GitHub" {
 		t.Fatalf("bundle view: active %v title %q", v.bundleActive, v.bundleTitle)
 	}
 	if len(v.bundleList.postings) != 1 || v.bundleList.postings[0].TopicID != 100 {
@@ -3310,14 +3312,44 @@ func TestMailViewOpensABundle(t *testing.T) {
 	}
 }
 
-func TestMailViewSaysWhyAReadBundleIsEmpty(t *testing.T) {
+func TestMailViewOpensAReadBundleAsContactThreads(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	row := bundleRow()
+	row.Seen = true
+	v.postingList.postings[0] = row
+
+	loaded, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(bundleLoadedMsg)
+	if !ok || loaded.err != nil || loaded.contactID != 88 {
+		t.Fatalf("opening a read bundle returned %#v", loaded)
+	}
+	v.Update(loaded)
+	if !v.bundleActive || v.bundleTitle != "All threads with GitHub" {
+		t.Fatalf("contact threads view: active %v title %q", v.bundleActive, v.bundleTitle)
+	}
+	if len(v.bundleList.postings) != 2 || v.bundleList.postings[0].TopicID != 100 || v.bundleList.postings[1].TopicID != 101 {
+		t.Fatalf("contact threads = %+v", v.bundleList.postings)
+	}
+
+	topic, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(topicLoadedMsg)
+	if !ok || topic.err != nil || topic.topicID != 100 {
+		t.Fatalf("opening a thread returned %#v", topic)
+	}
+}
+
+func TestMailViewSaysWhyABundleListIsEmpty(t *testing.T) {
 	v := mailWithPostings()
 	v.bundleActive = true
-	v.bundleTitle = "GitHub"
+	v.bundleTitle = "All threads with GitHub"
+	v.bundleContactID = 88
 	v.bundleList.setPostings(nil)
 
-	if view := v.View(); !strings.Contains(view, "Nothing unseen from GitHub") {
-		t.Errorf("empty bundle view = %q", view)
+	if view := v.View(); !strings.Contains(view, "No emails with this contact") {
+		t.Errorf("empty contact threads view = %q", view)
+	}
+
+	v.bundleContactID = 0
+	if view := v.View(); !strings.Contains(view, "Nothing unseen here any more") {
+		t.Errorf("empty unseen bundle view = %q", view)
 	}
 }
 
