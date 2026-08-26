@@ -89,6 +89,7 @@ The setup wizard connects the agents it finds. To do it yourself:
 ```bash
 hey setup claude                        # skill + the hey@37signals plugin for Claude Code
 hey setup codex                         # skill for Codex
+hey setup grok                          # skill for Grok
 claude mcp add hey -- hey mcp           # HEY as MCP tools, on your signed-in account
 ```
 
