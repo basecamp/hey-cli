@@ -1,43 +1,53 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
-	"charm.land/bubbles/v2/textarea"
-	"charm.land/bubbles/v2/textinput"
+	"charm.land/lipgloss/v2"
 )
 
-// The text fields take their palette from the theme's mode, the way the cover art
-// is guarded by TestCoversDoNotDependOnTheThemeMode — except that here the two
-// modes must differ: bubbles' dark default paints a light terminal with a black
-// cursor line and grey text (hey-cli#331).
-func TestTextFieldsFollowTheThemeMode(t *testing.T) {
+// The text fields name no color of their own, so the theme's mode cannot change a
+// byte of what they draw — the same guard TestCoversDoNotDependOnTheThemeMode gives
+// the cover art. bubbles' default did depend on it: its dark palette paints a light
+// terminal with a black cursor line and grey text (hey-cli#331).
+func TestTextFieldsDoNotDependOnTheThemeMode(t *testing.T) {
 	t.Cleanup(func() { applyTheme(defaultTheme()) })
 
-	dark := defaultTheme()
-	dark.Dark = true
-	applyTheme(dark)
-	darkArea, darkInput := newTextArea(), newTextInput()
+	render := func(dark bool) (area, input string) {
+		theme := defaultTheme()
+		theme.Dark = dark
+		applyTheme(theme)
 
-	light := defaultTheme()
-	light.Dark = false
-	applyTheme(light)
-	lightArea, lightInput := newTextArea(), newTextInput()
-
-	if got, want := darkArea.Styles().Focused.CursorLine.GetBackground(), textarea.DefaultDarkStyles().Focused.CursorLine.GetBackground(); got != want {
-		t.Errorf("dark textarea cursor line = %v, want bubbles' dark default %v", got, want)
-	}
-	if got, want := lightArea.Styles().Focused.CursorLine.GetBackground(), textarea.DefaultLightStyles().Focused.CursorLine.GetBackground(); got != want {
-		t.Errorf("light textarea cursor line = %v, want bubbles' light default %v", got, want)
-	}
-	if darkArea.Styles().Focused.CursorLine.GetBackground() == lightArea.Styles().Focused.CursorLine.GetBackground() {
-		t.Error("the textarea cursor line should change with the theme mode")
+		a := newTextArea()
+		a.SetWidth(40)
+		a.SetHeight(3)
+		a.SetValue("Quarterly numbers for the board")
+		a.Focus()
+		i := newTextInput()
+		i.SetWidth(40)
+		i.SetValue("Jane Doe")
+		i.Focus()
+		return a.View(), i.View()
 	}
 
-	if got, want := lightInput.Styles().Blurred.Text.GetForeground(), textinput.DefaultLightStyles().Blurred.Text.GetForeground(); got != want {
-		t.Errorf("light textinput blurred text = %v, want bubbles' light default %v", got, want)
+	darkArea, darkInput := render(true)
+	lightArea, lightInput := render(false)
+	if darkArea != lightArea {
+		t.Errorf("textarea renders differently on a light theme:\n%q\n%q", darkArea, lightArea)
 	}
-	if darkInput.Styles().Blurred.Text.GetForeground() == lightInput.Styles().Blurred.Text.GetForeground() {
-		t.Error("the textinput blurred text should change with the theme mode")
+	if darkInput != lightInput {
+		t.Errorf("textinput renders differently on a light theme:\n%q\n%q", darkInput, lightInput)
+	}
+
+	// The focused cursor line carries no background: that band is the defect.
+	if bg, unset := textAreaStyles().Focused.CursorLine.GetBackground(), lipgloss.NewStyle().GetBackground(); bg != unset {
+		t.Errorf("focused cursor line has a background %v, want none", bg)
+	}
+	if strings.Contains(darkArea, "\x1b[40m") || strings.Contains(darkArea, "48;5;0m") {
+		t.Errorf("textarea paints a black cursor line: %q", darkArea)
+	}
+	if !strings.Contains(darkArea, "Quarterly numbers") || !strings.Contains(darkInput, "Jane Doe") {
+		t.Errorf("fields dropped their text:\n%q\n%q", darkArea, darkInput)
 	}
 }
