@@ -1715,7 +1715,7 @@ func (v *mailView) openSelected() tea.Cmd {
 	// opens the bundle itself. The posting's own id is never a topic id, so anything
 	// else without one has nowhere to go.
 	if selected.TopicID == 0 {
-		if selected.Bundled {
+		if selected.IsBundle {
 			return v.requestBundle(selected.ID)
 		}
 		err := fmt.Errorf("this item does not identify an email thread")

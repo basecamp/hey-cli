@@ -22,14 +22,16 @@ type Posting struct {
 	Summary               string
 	AlternativeSenderName string
 	Seen                  bool
-	Bundled               bool
-	BubbledUp             bool
-	Muted                 bool
-	VisibleEntryCount     int32
-	Creator               Contact
-	Extenzions            []Extenzion
-	Folders               []Folder
-	Collections           []Collection
+	// IsBundle marks a row that is a bundle of one contact's unseen threads. It comes
+	// from the posting's kind — HEY's `bundled` flag means filed *inside* a bundle.
+	IsBundle          bool
+	BubbledUp         bool
+	Muted             bool
+	VisibleEntryCount int32
+	Creator           Contact
+	Extenzions        []Extenzion
+	Folders           []Folder
+	Collections       []Collection
 }
 
 // Contact is who a posting came from.
@@ -77,7 +79,7 @@ func NewPosting(posting generated.Posting) Posting {
 		Summary:               terminal.SanitizeLine(posting.Summary),
 		AlternativeSenderName: terminal.SanitizeLine(posting.AlternativeSenderName),
 		Seen:                  posting.Seen,
-		Bundled:               posting.Bundled,
+		IsBundle:              posting.Kind == "bundle",
 		BubbledUp:             posting.BubbledUp,
 		Muted:                 posting.Muted,
 		VisibleEntryCount:     posting.VisibleEntryCount,

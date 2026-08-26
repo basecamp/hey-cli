@@ -3245,14 +3245,17 @@ func TestThreadJKJumpsBetweenMessages(t *testing.T) {
 }
 
 // bundleRow is a bundle posting the way HEY lists one: several unseen threads from one
-// contact, so no topic of its own — its app_url names the contact, not a thread.
+// contact, so no topic of its own — its app_url names the contact, not a thread. It is
+// built through mail.NewPosting so the tests exercise the real kind mapping: a bundle is
+// kind "bundle", while HEY's `bundled` flag means filed inside one.
 func bundleRow() mail.Posting {
-	return mail.Posting{
-		ID:      311,
-		Bundled: true,
+	return mail.NewPosting(generated.Posting{
+		Id:      311,
+		Kind:    "bundle",
 		Name:    "Deploy failed on main • Nightly build is green again",
-		Creator: mail.Contact{Name: "GitHub"},
-	}
+		AppUrl:  "https://app.hey.com/contacts/88",
+		Creator: generated.Contact{Id: 88, Name: "GitHub"},
+	})
 }
 
 func TestMailViewOpensABundle(t *testing.T) {

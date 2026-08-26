@@ -35,7 +35,8 @@ func TestNewPostingKeepsWhatARowShows(t *testing.T) {
 	if posting.ID != 4471829 || posting.TopicID != 501 || posting.Name != "Kitchen remodel quote" {
 		t.Errorf("posting = %+v", posting)
 	}
-	if !posting.Seen || !posting.Bundled || !posting.BubbledUp || !posting.Muted || posting.VisibleEntryCount != 3 {
+	// HEY's `bundled` means filed inside a bundle; only kind "bundle" makes a row one.
+	if !posting.Seen || posting.IsBundle || !posting.BubbledUp || !posting.Muted || posting.VisibleEntryCount != 3 {
 		t.Errorf("posting state = %+v", posting)
 	}
 	if posting.Summary != "Here is the revised quote for the cabinets" || posting.AlternativeSenderName != "Ryan at Fine Woodwork" {
@@ -130,11 +131,16 @@ func TestTopicIDOfFallsBackToTheBundleURL(t *testing.T) {
 	}
 
 	for name, test := range tests {
+		test.posting.Kind = "bundle"
 		if got := TopicIDOf(test.posting); got != test.want {
 			t.Errorf("%s: topic ID = %d, want %d", name, got, test.want)
 		}
-		if described := NewPosting(test.posting); described.TopicID != test.want {
+		described := NewPosting(test.posting)
+		if described.TopicID != test.want {
 			t.Errorf("%s: NewPosting topic ID = %d, want %d", name, described.TopicID, test.want)
+		}
+		if !described.IsBundle {
+			t.Errorf("%s: a kind %q posting should be a bundle", name, test.posting.Kind)
 		}
 	}
 }
