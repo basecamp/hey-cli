@@ -87,6 +87,13 @@ func TestMessageSourceTextIncludesEmbeddedEmailBody(t *testing.T) {
 	}
 }
 
+func TestMessageSourceTextIncludesEmbeddedActionTextAttachment(t *testing.T) {
+	html := `<action-text-attachment content-type="text/html" content="<p>External confirmation: BLUE-42</p>"></action-text-attachment>`
+	if got := strings.Join(strings.Fields(MessageSourceText(html)), " "); got != "External confirmation: BLUE-42" {
+		t.Errorf("MessageSourceText = %q", got)
+	}
+}
+
 func TestMessageSourceTextFailsClosedWhenHTMLExceedsParserDepth(t *testing.T) {
 	html := strings.Repeat("<div>", 1_000) + "not selectable" + strings.Repeat("</div>", 1_000)
 	if got := MessageSourceText(html); got != "" {
@@ -158,6 +165,13 @@ func TestToTextActionTextAttachment(t *testing.T) {
 	}
 }
 
+func TestToTextRendersEmbeddedActionTextAttachment(t *testing.T) {
+	got := ToText(`<action-text-attachment content-type="text/html" content="<p>Inside</p>"></action-text-attachment>`)
+	if got != "Inside" {
+		t.Errorf("ToText = %q, want %q", got, "Inside")
+	}
+}
+
 func TestToTextTrixFigure(t *testing.T) {
 	got := ToText(`<p>Before</p><figure data-trix-attachment='{"filename":"photo.png","url":"/img.png","contentType":"image/png"}'></figure><p>After</p>`)
 	if !strings.Contains(got, "[photo.png]") {
@@ -182,6 +196,13 @@ func TestToTextEmbeddedContentStopsRecursing(t *testing.T) {
 
 func TestExtractImageURLsInsideEmbeddedHTMLAttachment(t *testing.T) {
 	urls := ExtractImageURLs(`<figure data-trix-attachment='{"contentType":"text/html","content":"<p><img src=\"https://example.com/logo.png\"></p>"}'></figure>`)
+	if len(urls) != 1 || urls[0] != "https://example.com/logo.png" {
+		t.Errorf("ExtractImageURLs = %v, want the image inside the embedded body", urls)
+	}
+}
+
+func TestExtractImageURLsInsideEmbeddedActionTextAttachment(t *testing.T) {
+	urls := ExtractImageURLs(`<action-text-attachment content-type="text/html" content="<img src=&quot;https://example.com/logo.png&quot;>"></action-text-attachment>`)
 	if len(urls) != 1 || urls[0] != "https://example.com/logo.png" {
 		t.Errorf("ExtractImageURLs = %v, want the image inside the embedded body", urls)
 	}

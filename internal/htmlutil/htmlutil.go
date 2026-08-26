@@ -96,8 +96,9 @@ func walkNode(b *strings.Builder, n *html.Node, depth int) {
 			}
 			return
 		case "action-text-attachment":
-			filename := getAttr(n, "filename")
-			if filename != "" {
+			if doc := parseEmbeddedActionText(n, depth); doc != nil {
+				walkNode(b, doc, depth+1)
+			} else if filename := getAttr(n, "filename"); filename != "" {
 				fmt.Fprintf(b, "\n[%s]\n", filename)
 			}
 			return
@@ -162,6 +163,13 @@ func walkMessageSourceNode(b *strings.Builder, n *html.Node, depth int) {
 		case "hr":
 			writeMessageSourceBoundary(b)
 			return
+		case "action-text-attachment":
+			if doc := parseEmbeddedActionText(n, depth); doc != nil {
+				writeMessageSourceBoundary(b)
+				walkMessageSourceNode(b, doc, depth+1)
+				writeMessageSourceBoundary(b)
+			}
+			return
 		case "template":
 			if depth == 0 || n.Parent == nil || n.Parent.Data != "shadow-content" {
 				return
@@ -196,7 +204,7 @@ func elementProvidesMessageSourceText(n *html.Node) bool {
 		return false
 	}
 	switch n.Data {
-	case "script", "style", "noscript", "head", "action-text-attachment":
+	case "script", "style", "noscript", "head":
 		return false
 	case "dialog":
 		return hasAttr(n, "open")
@@ -293,6 +301,21 @@ func parseTrixAttachment(n *html.Node) *trixAttachment {
 		return nil
 	}
 	return &att
+}
+
+func embeddedActionTextContent(n *html.Node) string {
+	if getAttr(n, "filename") != "" {
+		return ""
+	}
+	return getAttr(n, "content")
+}
+
+func parseEmbeddedActionText(n *html.Node, depth int) *html.Node {
+	content := embeddedActionTextContent(n)
+	if content == "" {
+		return nil
+	}
+	return parseEmbeddedContent(content, depth)
 }
 
 func getAttr(n *html.Node, key string) string {
@@ -401,7 +424,9 @@ func findImages(n *html.Node, urls *[]string, depth int) {
 				}
 			}
 		case "action-text-attachment":
-			if imageURL := getAttr(n, "url"); isImageContentType(getAttr(n, "content-type")) && imageURL != "" {
+			if doc := parseEmbeddedActionText(n, depth); doc != nil {
+				findImages(doc, urls, depth+1)
+			} else if imageURL := getAttr(n, "url"); isImageContentType(getAttr(n, "content-type")) && imageURL != "" {
 				*urls = append(*urls, imageURL)
 			}
 		case "figure":

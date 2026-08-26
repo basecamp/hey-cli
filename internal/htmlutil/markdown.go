@@ -111,7 +111,7 @@ func (m *markdownizer) element(n *html.Node) {
 	case "figure":
 		m.figure(n)
 	case "action-text-attachment":
-		m.attachment(getAttr(n, "filename"), getAttr(n, "url"), getAttr(n, "content-type"))
+		m.renderActionTextAttachment(n)
 	default:
 		m.children(n)
 	}
@@ -488,6 +488,16 @@ func (m *markdownizer) image(n *html.Node) {
 	case alt != "":
 		m.write(escapeText(alt, m.line.String()))
 	}
+}
+
+// renderActionTextAttachment renders unnamed inline content as embedded HTML while
+// preserving named elements as file attachments.
+func (m *markdownizer) renderActionTextAttachment(n *html.Node) {
+	if content := embeddedActionTextContent(n); content != "" {
+		m.embedded(content)
+		return
+	}
+	m.attachment(getAttr(n, "filename"), getAttr(n, "url"), getAttr(n, "content-type"))
 }
 
 func (m *markdownizer) figure(n *html.Node) {
