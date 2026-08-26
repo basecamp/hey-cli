@@ -27,6 +27,7 @@ triggers:
   - hey compose
   - hey draft list
   - hey draft show
+  - hey draft export
   - hey draft edit
   - hey draft send
   - hey draft delete
@@ -196,6 +197,7 @@ notice on stderr. Both need list data, so they work on `hey box list`, `hey box 
 | Draft an email for human review | `hey compose --to alice@example.com --subject "Lunch plans" -m "Free Friday?" --draft` |
 | Draft a reply for human review | `hey reply <topic_id> -m "Drafting this." --draft` |
 | Read a draft back | `hey draft show <draft_id> --json` (`attachments` has safe file metadata; `--html > draft.html` writes complete stored markup) |
+| Export a complete draft bundle | `hey draft export <draft_id> --output ./draft-<draft_id>` (read-only to HEY; writes HTML, safe JSON, and attachments locally) |
 | Change a draft | `hey draft edit <draft_id> --to alice@example.com --subject "New subject"` |
 | Send a draft | `hey draft send <draft_id>` |
 | Trash drafts | `hey draft delete <draft_id>...` |
@@ -302,6 +304,7 @@ Want to send email?
 │   └── Save one? → hey attachment save <attachment_id> [--output <path>]
 ├── Draft instead of sending (human reviews in HEY)? → add --draft to compose or reply; the answer carries the draft id
 │   ├── Read it back? → hey draft show <draft_id> --json (attachments has file metadata; --html > draft.html writes stored markup)
+│   ├── Export it locally? → hey draft export <draft_id> --output ./draft-<draft_id>
 │   ├── Change it? → hey draft edit <draft_id> --subject/--to/--cc/--bcc/-m/--message-html-file (flags replace; omitted fields are kept)
 │   ├── Deliver it? → hey draft send <draft_id> (recipients required)
 │   └── Discard it? → hey draft delete <draft_id>
@@ -622,6 +625,7 @@ hey draft list --json                             # List drafts; --all and --pag
 hey draft show <draft_id> --json                  # The draft's editable state; body is Markdown
 hey draft show <draft_id> --jq '.data.attachments' # Filename plus available type/size metadata
 hey draft show <draft_id> --html > draft.html     # Complete stored HTML, including attachment markup
+hey draft export <draft_id> --output ./draft-<draft_id> # Private local HTML/JSON/attachment bundle
 hey draft edit <draft_id> --to alice@example.com  # Each flag replaces its field; omitted flags keep the draft's
 hey draft edit <draft_id> --message-html-file ./revised-message.html
 hey draft send <draft_id>                         # Deliver now (through HEY's undo window)
@@ -635,7 +639,13 @@ recipient requirement. `draft show` returns Markdown by default. Its structured 
 has an `attachments` array with each downloadable file's name and available content
 type/byte size, and the styled view lists the same safe metadata; internal download URLs
 and signed IDs stay private. `--html` writes the complete stored body fragment, including
-attachment markup, and must be redirected to a file or pipe.
+attachment markup, and must be redirected to a file or pipe. `draft export` is read-only
+to HEY and writes a private local directory containing byte-exact `draft.html`, safe
+`draft.json`, and downloaded originals under `attachments/`. It stages and verifies
+every file before publishing the directory, resolves filename collisions portably,
+records actual byte counts and SHA-256 hashes, and exposes no download URL or SGID. The
+destination must not exist. `--force` only replaces a complete export of the same draft
+and refuses unexpected files.
 
 **An edit is a revision, not a patch.** The CLI reads the draft first and resends the
 whole of it, so an omitted flag keeps that field. `--to`/`--cc`/`--bcc` replace their

@@ -3,6 +3,8 @@ package smoke_test
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -91,6 +93,25 @@ func TestDraftLifecycle(t *testing.T) {
 	}
 	if !strings.Contains(rawHTML, "Smoke test draft body") || !strings.Contains(rawHTML, "<") {
 		t.Errorf("draft show --html = %q, want the stored HTML fragment", rawHTML)
+	}
+
+	// Export reads the same draft into a complete local bundle without changing HEY.
+	exportDirectory := filepath.Join(t.TempDir(), "draft-export")
+	_, stderr, code = hey(t, "draft", "export", fmt.Sprintf("%d", id), "--output", exportDirectory, "--json")
+	if code != 0 {
+		t.Fatalf("draft export failed (exit %d): %s", code, stderr)
+	}
+	exportedHTML, err := os.ReadFile(filepath.Join(exportDirectory, "draft.html"))
+	if err != nil || !strings.Contains(string(exportedHTML), "Smoke test draft body") {
+		t.Errorf("exported draft.html = %q, error = %v", exportedHTML, err)
+	}
+	manifest, err := os.ReadFile(filepath.Join(exportDirectory, "draft.json"))
+	if err != nil || !strings.Contains(string(manifest), `"format": "hey-draft-export/v1"`) {
+		t.Errorf("exported draft.json = %q, error = %v", manifest, err)
+	}
+	attachmentEntries, err := os.ReadDir(filepath.Join(exportDirectory, "attachments"))
+	if err != nil || len(attachmentEntries) != 0 {
+		t.Errorf("fresh draft export attachments = %v, error = %v", attachmentEntries, err)
 	}
 
 	// Edit adds a recipient and rewrites the subject; unflagged fields survive.

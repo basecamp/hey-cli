@@ -142,6 +142,9 @@ hey draft edit --message-html
 hey draft edit --message-html-file
 hey draft edit --subject
 hey draft edit --to
+hey draft export
+hey draft export --force
+hey draft export --output
 hey draft list
 hey draft list --all
 hey draft list --limit
