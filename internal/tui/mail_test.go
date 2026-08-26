@@ -3310,6 +3310,17 @@ func TestMailViewOpensABundle(t *testing.T) {
 	}
 }
 
+func TestMailViewSaysWhyAReadBundleIsEmpty(t *testing.T) {
+	v := mailWithPostings()
+	v.bundleActive = true
+	v.bundleTitle = "GitHub"
+	v.bundleList.setPostings(nil)
+
+	if view := v.View(); !strings.Contains(view, "Nothing unseen from GitHub") {
+		t.Errorf("empty bundle view = %q", view)
+	}
+}
+
 func TestMailViewReplyOnABundleOpensIt(t *testing.T) {
 	v, _ := mailWithTestServer(t, http.StatusNoContent)
 	v.postingList.postings[0] = bundleRow()

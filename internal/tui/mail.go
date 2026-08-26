@@ -746,10 +746,16 @@ func (v *mailView) View() string {
 		return v.searchList.view()
 	}
 	if v.bundleActive {
-		if v.notice != "" {
-			return v.vc.styles.title.Render(v.notice) + "\n" + v.bundleList.view()
+		view := v.bundleList.view()
+		// HEY serves a bundle's unseen threads, so a bundle that has been read
+		// through answers none — say so instead of showing a bare empty list.
+		if len(v.bundleList.postings) == 0 {
+			view = styleMuted.Render("  Nothing unseen from " + v.bundleTitle + " — everything in this bundle has been read.")
 		}
-		return v.bundleList.view()
+		if v.notice != "" {
+			return v.vc.styles.title.Render(v.notice) + "\n" + view
+		}
+		return view
 	}
 	return v.listView()
 }
