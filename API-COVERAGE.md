@@ -16,6 +16,7 @@ which is what `Entries().ListDraftsPage` and `hey draft list --page` exist for.
 | `/boxes.json` | GET | SDK `Boxes().List` | `hey box list` | covered |
 | `/boxes/{id}.json` | GET | SDK `Boxes().Get`, `Boxes().GetPage` | `hey box view <id>`, TUI mail list growth | covered |
 | `/imbox.json` | GET | SDK `Boxes().GetImbox` | `hey box view imbox` | covered |
+| `/imbox/seen.json` | GET | SDK `Boxes().GetImboxSeen` | TUI Previously Seen screen | covered |
 | `/feedbox.json` | GET | SDK `Boxes().GetFeedbox` | `hey box view feedbox` | covered |
 | `/trailbox.json` | GET | SDK `Boxes().GetTrailbox` | `hey box view trailbox` | covered |
 | `/asidebox.json` | GET | SDK `Boxes().GetAsidebox` | `hey box view asidebox` | covered |

@@ -21,6 +21,7 @@ type bulkReplyDraftLoadedMsg struct {
 	requestID  uint64
 	boxID      int64
 	postingIDs []int64
+	seen       bool
 	draft      *generated.BulkReplyDraft
 	err        error
 }
@@ -28,6 +29,7 @@ type bulkReplyDraftLoadedMsg struct {
 type bulkReplySentMsg struct {
 	delivery *generated.BulkReplyDelivery
 	skipped  int
+	seen     bool
 	err      error
 }
 
@@ -39,6 +41,7 @@ type bulkReplyUndoneMsg struct {
 type bulkReplyForm struct {
 	postingIDs []int64
 	draft      generated.BulkReplyDraft
+	seen       bool
 	composing  bool
 	preview    viewport.Model
 	body       textarea.Model
@@ -50,9 +53,10 @@ type bulkReplyForm struct {
 	height     int
 }
 
-func newBulkReplyForm(postingIDs []int64, draft *generated.BulkReplyDraft, s styles) *bulkReplyForm {
+func newBulkReplyForm(postingIDs []int64, draft *generated.BulkReplyDraft, seen bool, s styles) *bulkReplyForm {
 	form := &bulkReplyForm{
 		postingIDs: append([]int64(nil), postingIDs...),
+		seen:       seen,
 		styles:     s,
 	}
 	if draft != nil {
@@ -281,13 +285,14 @@ func replyNoun(count int) string {
 }
 
 func (v *mailView) startBulkReply() tea.Cmd {
-	postingIDs := v.postingList.selectedIDs()
+	postingIDs := v.actionList().selectedIDs()
 	if len(postingIDs) == 0 {
 		v.notice = "Select threads with space before starting a bulk reply"
 		return nil
 	}
 	requestID, ctx := v.requests.begin(v.vc.ctx, mailRequestBulkReply)
 	boxID := v.currentBoxID()
+	seen := v.seenActive
 	return func() tea.Msg {
 		draft, err := v.vc.sdk.BulkReplies().Draft(ctx, postingIDs)
 		if err != nil && hey.AsError(err).Code == hey.CodeNotFound {
@@ -298,6 +303,7 @@ func (v *mailView) startBulkReply() tea.Cmd {
 			requestID:  requestID,
 			boxID:      boxID,
 			postingIDs: postingIDs,
+			seen:       seen,
 			draft:      draft,
 			err:        err,
 		}
@@ -313,7 +319,7 @@ func (v *mailView) sendBulkReply(form *bulkReplyForm) tea.Cmd {
 	skipped := len(form.postingIDs) - len(entryIDs)
 	return func() tea.Msg {
 		delivery, err := v.vc.sdk.BulkReplies().Send(v.vc.ctx, entryIDs, content)
-		return bulkReplySentMsg{delivery: delivery, skipped: max(skipped, 0), err: err}
+		return bulkReplySentMsg{delivery: delivery, skipped: max(skipped, 0), seen: form.seen, err: err}
 	}
 }
 

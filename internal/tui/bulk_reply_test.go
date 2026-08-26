@@ -162,6 +162,61 @@ func TestTUIBulkReplySelectionAndPreviewShowExactRecipients(t *testing.T) {
 	}
 }
 
+func TestTUIBulkReplyUsesThePreviouslySeenSelection(t *testing.T) {
+	view, _ := tuiBulkReplyServer(t)
+	view.postingList.toggleSelected()
+	view.seenActive = true
+	view.seenList.setPostings(testPostings())
+	selectTwoThreads(view)
+
+	if selected := view.seenList.selectedIDs(); !slices.Equal(selected, []int64{100, 101}) {
+		t.Fatalf("Previously Seen selected IDs = %v", selected)
+	}
+	if selected := view.postingList.selectedIDs(); !slices.Equal(selected, []int64{100}) {
+		t.Fatalf("box selected IDs = %v", selected)
+	}
+
+	loaded, ok := runCmd(view.HandleContentKey(keyPress("ctrl+b"))).(bulkReplyDraftLoadedMsg)
+	if !ok || loaded.err != nil || !loaded.seen {
+		t.Fatalf("Previously Seen draft returned %#v", loaded)
+	}
+	view.Update(loaded)
+	if form := bulkReplyModal(view); form == nil || !form.seen {
+		t.Fatalf("Previously Seen bulk reply form = %#v", form)
+	}
+
+	view.HandleContentKey(keyPress("enter"))
+	typeText(view, "Thanks everyone")
+	sent, ok := runCmd(view.HandleContentKey(ctrlS())).(bulkReplySentMsg)
+	if !ok || sent.err != nil || !sent.seen {
+		t.Fatalf("Previously Seen send returned %#v", sent)
+	}
+	view.Update(sent)
+	if selected := view.seenList.selectedIDs(); len(selected) != 0 {
+		t.Errorf("Previously Seen selection after send = %v", selected)
+	}
+	if selected := view.postingList.selectedIDs(); !slices.Equal(selected, []int64{100}) {
+		t.Errorf("bulk reply cleared the box selection: %v", selected)
+	}
+	if !hasHelpBinding(view.HelpBindings(), "ctrl+u") {
+		t.Errorf("Previously Seen help does not offer undo: %v", view.HelpBindings())
+	}
+}
+
+func TestTUIBulkReplyDraftStaysWithItsOriginatingScreen(t *testing.T) {
+	view, _ := tuiBulkReplyServer(t)
+	view.seenActive = true
+	view.seenList.setPostings(testPostings())
+	view.HandleContentKey(keyPress("space"))
+	loaded := runCmd(view.HandleContentKey(keyPress("ctrl+b"))).(bulkReplyDraftLoadedMsg)
+
+	view.seenActive = false
+	view.Update(loaded)
+	if bulkReplyModal(view) != nil {
+		t.Fatal("a Previously Seen draft should not open over the box list")
+	}
+}
+
 func TestTUIBulkReplyPreviewScrollsThroughEveryRecipient(t *testing.T) {
 	entries := make([]generated.BulkReplyEntry, 12)
 	for i := range entries {
@@ -175,7 +230,7 @@ func TestTUIBulkReplyPreviewScrollsThroughEveryRecipient(t *testing.T) {
 			}}},
 		}
 	}
-	form := newBulkReplyForm([]int64{100, 101}, &generated.BulkReplyDraft{Entries: entries}, newStyles())
+	form := newBulkReplyForm([]int64{100, 101}, &generated.BulkReplyDraft{Entries: entries}, false, newStyles())
 	form.resize(40, 8)
 
 	if strings.Contains(form.view(), "recipient-12@example.com") {
@@ -200,7 +255,7 @@ func TestTUIBulkReplyPreviewWrapsLongRecipientsWithoutDroppingText(t *testing.T)
 		TopicId:   701,
 		TopicName: "A complete safety preview",
 		Addressed: generated.Addressed{Directly: []generated.Contact{{Id: 901, EmailAddress: email}}},
-	}}}, newStyles())
+	}}}, false, newStyles())
 
 	content := form.previewContent(24)
 	compacted := strings.NewReplacer("\n", "", " ", "").Replace(content)
@@ -369,7 +424,7 @@ func TestTUIBulkReplyCanCancelPreviewAndEditor(t *testing.T) {
 }
 
 func TestBulkReplyFormRequiresBodyBeforeSend(t *testing.T) {
-	form := newBulkReplyForm([]int64{100}, nil, newStyles())
+	form := newBulkReplyForm([]int64{100}, nil, false, newStyles())
 	form.draft.Entries = append(form.draft.Entries, generated.BulkReplyEntry{Id: 501})
 	form.composing = true
 	if cmd, _ := form.handleKey(newMailView(testVC()), tea.KeyPressMsg(tea.Key{Code: 's', Mod: tea.ModCtrl})); cmd != nil {

@@ -567,7 +567,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return form.init(), true
 
 	case bulkReplyDraftLoadedMsg:
-		if !v.requests.accepts(newRequestResult(msg.requestID, msg.err)) || msg.boxID != v.currentBoxID() {
+		if !v.requests.accepts(newRequestResult(msg.requestID, msg.err)) || msg.boxID != v.currentBoxID() || msg.seen != v.seenActive {
 			return nil, true
 		}
 		v.requests.finish(msg.requestID)
@@ -578,7 +578,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if msg.draft == nil || len(msg.draft.Entries) == 0 {
 			return notify("No replyable threads found; nothing was sent"), true
 		}
-		form := newBulkReplyForm(msg.postingIDs, msg.draft, v.vc.styles)
+		form := newBulkReplyForm(msg.postingIDs, msg.draft, msg.seen, v.vc.styles)
 		v.openModal(form)
 		return form.init(), true
 
@@ -600,7 +600,11 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		v.modal = nil
-		v.postingList.clearSelected()
+		if msg.seen {
+			v.seenList.clearSelected()
+		} else {
+			v.postingList.clearSelected()
+		}
 		count := int(msg.delivery.EntriesCount)
 		sent := fmt.Sprintf("%d bulk %s sent", count, replyNoun(count))
 		v.lastBulkReplyID = 0
@@ -949,8 +953,10 @@ func (v *mailView) HelpBindings() []helpBinding {
 		if selected := v.seenList.selectedPosting(); selected != nil && selected.Muted {
 			ignoreBinding = helpBinding{"+", "stop ignoring"}
 		}
-		return []helpBinding{
+		bindings := []helpBinding{
 			{"enter", "open"},
+			{"space", "select"},
+			{"ctrl+b", "bulk reply"},
 			{"r", "reply"},
 			{"f", "forward"},
 			{"v", "move"},
@@ -965,6 +971,10 @@ func (v *mailView) HelpBindings() []helpBinding {
 			{"!", "spam"},
 			ignoreBinding,
 		}
+		if v.lastBulkReplyID != 0 {
+			bindings = append(bindings, helpBinding{"ctrl+u", "undo bulk reply"})
+		}
+		return modifiersLast(bindings)
 	}
 	ignoreBinding := helpBinding{"-", "ignore"}
 	if selected := v.postingList.selectedPosting(); selected != nil && selected.Muted {
@@ -1306,6 +1316,13 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 			case "j":
 				v.seenList.moveDown()
 				return v.loadMoreSeenPostings()
+			case " ", "space":
+				v.seenList.toggleSelected()
+				return nil
+			case "ctrl+b":
+				return v.startBulkReply()
+			case "ctrl+u":
+				return v.undoBulkReply()
 			case "v", "V":
 				v.startMove()
 				return nil

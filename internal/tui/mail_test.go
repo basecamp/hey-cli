@@ -3616,7 +3616,7 @@ func TestMailViewHelpBindingsNamePreviouslySeen(t *testing.T) {
 
 	v.seenActive = true
 	bindings := v.HelpBindings()
-	for _, key := range []string{"enter", "a", "l", "u", "t", "v", "b", "n"} {
+	for _, key := range []string{"enter", "space", "ctrl+b", "a", "l", "u", "t", "v", "b", "n"} {
 		if !hasHelpBinding(bindings, key) {
 			t.Errorf("seen screen help misses %q: %+v", key, bindings)
 		}
