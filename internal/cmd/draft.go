@@ -19,29 +19,38 @@ import (
 	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
+type draftAttachmentOutput struct {
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type,omitempty"`
+	ByteSize    *int64 `json:"byte_size,omitempty"`
+}
+
 // draftOutput is what hey draft show answers with outside --html: the draft's editable
-// state, its body as Markdown the way every email body leaves this CLI.
+// state, its body as Markdown the way every email body leaves this CLI, and safe
+// metadata for the downloadable attachments in that complete stored body.
 type draftOutput struct {
-	ID                  int64             `json:"id"`
-	Subject             string            `json:"subject,omitempty"`
-	Body                htmlutil.Markdown `json:"body"`
-	To                  []string          `json:"to,omitempty"`
-	CC                  []string          `json:"cc,omitempty"`
-	BCC                 []string          `json:"bcc,omitempty"`
-	IsReply             bool              `json:"is_reply,omitempty"`
-	ScheduledDeliveryAt *time.Time        `json:"scheduled_delivery_at,omitempty"`
-	UpdatedAt           *time.Time        `json:"updated_at,omitempty"`
+	ID                  int64                   `json:"id"`
+	Subject             string                  `json:"subject,omitempty"`
+	Body                htmlutil.Markdown       `json:"body"`
+	Attachments         []draftAttachmentOutput `json:"attachments"`
+	To                  []string                `json:"to,omitempty"`
+	CC                  []string                `json:"cc,omitempty"`
+	BCC                 []string                `json:"bcc,omitempty"`
+	IsReply             bool                    `json:"is_reply,omitempty"`
+	ScheduledDeliveryAt *time.Time              `json:"scheduled_delivery_at,omitempty"`
+	UpdatedAt           *time.Time              `json:"updated_at,omitempty"`
 }
 
 func draftOutputFor(id int64, edit *generated.MessageEditState) draftOutput {
 	out := draftOutput{
-		ID:      id,
-		Subject: edit.Subject,
-		Body:    htmlutil.ToMarkdown(edit.Content),
-		To:      addressEmails(edit.Addressed.Directly),
-		CC:      addressEmails(edit.Addressed.Copied),
-		BCC:     addressEmails(edit.Addressed.Blindcopied),
-		IsReply: edit.IsReply,
+		ID:          id,
+		Subject:     edit.Subject,
+		Body:        htmlutil.ToMarkdown(edit.Content),
+		Attachments: draftAttachments(edit.Content),
+		To:          addressEmails(edit.Addressed.Directly),
+		CC:          addressEmails(edit.Addressed.Copied),
+		BCC:         addressEmails(edit.Addressed.Blindcopied),
+		IsReply:     edit.IsReply,
 	}
 	if !edit.ScheduledDeliveryAt.IsZero() {
 		at := edit.ScheduledDeliveryAt
@@ -50,6 +59,19 @@ func draftOutputFor(id int64, edit *generated.MessageEditState) draftOutput {
 	if !edit.UpdatedAt.IsZero() {
 		at := edit.UpdatedAt
 		out.UpdatedAt = &at
+	}
+	return out
+}
+
+func draftAttachments(content string) []draftAttachmentOutput {
+	attachments := htmlutil.ExtractAttachments(content)
+	out := make([]draftAttachmentOutput, len(attachments))
+	for index, attachment := range attachments {
+		out[index] = draftAttachmentOutput{
+			Filename:    attachment.Filename,
+			ContentType: attachment.ContentType,
+			ByteSize:    attachment.ByteSize,
+		}
 	}
 	return out
 }
@@ -121,10 +143,11 @@ func newDraftShowCommand() *draftShowCommand {
 		Use:   "show <draft-id>",
 		Short: "Read a draft back",
 		Annotations: map[string]string{
-			"agent_notes": "Draft IDs come from `hey draft list` or from saving with `hey compose --draft`. The body is Markdown by default; --html writes the complete stored HTML fragment instead, including Name Tag and attachment markup, and must be redirected to a file or pipe.",
+			"agent_notes": "Draft IDs come from `hey draft list` or from saving with `hey compose --draft`. Structured and styled output lists each downloadable attachment's filename and available type/size metadata without exposing its internal URL or signed ID. The body is Markdown by default; --html writes the complete stored HTML fragment instead, including attachment markup, and must be redirected to a file or pipe.",
 		},
 		Example: `  hey draft show 12345
   hey draft show 12345 --json
+  hey draft show 12345 --jq '.data.attachments'
   hey draft show 12345 --html > draft.html`,
 		RunE: showCommand.run,
 		Args: usageExactOneArg(),
@@ -167,6 +190,12 @@ func (c *draftShowCommand) run(cmd *cobra.Command, args []string) error {
 		if out.ScheduledDeliveryAt != nil {
 			fmt.Fprintf(w, "Scheduled: %s\n", out.ScheduledDeliveryAt.Local().Format("2006-01-02 15:04"))
 		}
+		if len(out.Attachments) > 0 {
+			fmt.Fprintln(w, "Attachments:")
+			for _, attachment := range out.Attachments {
+				fmt.Fprintf(w, "  %s\n", formatDraftAttachment(attachment))
+			}
+		}
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, markdown.Render(out.Body, stdoutWidth()))
 		return nil
@@ -178,6 +207,21 @@ func (c *draftShowCommand) run(cmd *cobra.Command, args []string) error {
 			output.Breadcrumb{Action: "send", Command: fmt.Sprintf("hey draft send %d", out.ID), Description: "Deliver it"},
 		),
 	)
+}
+
+func formatDraftAttachment(attachment draftAttachmentOutput) string {
+	filename := terminal.SanitizeLine(attachment.Filename)
+	var details []string
+	if attachment.ContentType != "" {
+		details = append(details, terminal.SanitizeLine(attachment.ContentType))
+	}
+	if attachment.ByteSize != nil {
+		details = append(details, formatByteSize(*attachment.ByteSize))
+	}
+	if len(details) == 0 {
+		return filename
+	}
+	return fmt.Sprintf("%s (%s)", filename, strings.Join(details, ", "))
 }
 
 // --- edit ---

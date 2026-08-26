@@ -133,6 +133,83 @@ func TestDraftShowAnswersTheEditableState(t *testing.T) {
 	if len(to) != 1 || to[0] != "maria@example.com" {
 		t.Errorf("to = %v", data["to"])
 	}
+	attachments, ok := data["attachments"].([]any)
+	if !ok || len(attachments) != 0 {
+		t.Errorf("attachments = %#v, want an empty array", data["attachments"])
+	}
+	if len(writes) != 0 {
+		t.Errorf("show must not write, wrote %+v", writes)
+	}
+}
+
+func TestDraftShowIncludesAttachmentMetadataWithoutInternalLocators(t *testing.T) {
+	content := `<div>Agenda to follow.</div>
+<action-text-attachment sgid="secret-one" url="https://example.com/rails/blobs/report.pdf?signature=secret" filename="quarterly-report.pdf" content-type="application/pdf" filesize="128"></action-text-attachment>
+<figure data-trix-attachment='{"sgid":"secret-two","url":"https://example.com/rails/blobs/empty.txt?signature=secret","filename":"empty.txt","contentType":"text/plain","filesize":0}'></figure>
+<figure data-trix-attachment='{"url":"https://example.com/rails/blobs/unknown.bin?signature=secret","filename":"unknown.bin","contentType":"application/octet-stream"}'></figure>`
+	editJSON := `{"id":12345,"subject":"Quarterly planning","content":` + strconv.Quote(content) + `,
+		"sender":{"id":77,"email_address":"projects@example.org"},"addressed":{}}`
+	var writes []draftWrite
+	response, err := runJSONCommand(t, draftLifecycleServer(t, editJSON, &writes),
+		"draft", "show", "12345")
+	if err != nil {
+		t.Fatalf("draft show: %v", err)
+	}
+
+	data, _ := response.Data.(map[string]any)
+	attachments, _ := data["attachments"].([]any)
+	if len(attachments) != 3 {
+		t.Fatalf("attachments = %#v, want three files", data["attachments"])
+	}
+	first, _ := attachments[0].(map[string]any)
+	if first["filename"] != "quarterly-report.pdf" || first["content_type"] != "application/pdf" || first["byte_size"] != float64(128) {
+		t.Errorf("first attachment = %#v", first)
+	}
+	second, _ := attachments[1].(map[string]any)
+	if second["filename"] != "empty.txt" || second["byte_size"] != float64(0) {
+		t.Errorf("empty attachment = %#v", second)
+	}
+	third, _ := attachments[2].(map[string]any)
+	if third["filename"] != "unknown.bin" || third["content_type"] != "application/octet-stream" {
+		t.Errorf("unknown-size attachment = %#v", third)
+	}
+	if _, exists := third["byte_size"]; exists {
+		t.Errorf("unknown-size attachment unexpectedly has byte_size: %#v", third)
+	}
+	for index, value := range attachments {
+		attachment, _ := value.(map[string]any)
+		if _, exists := attachment["url"]; exists {
+			t.Errorf("attachment %d exposes url: %#v", index, attachment)
+		}
+		if _, exists := attachment["sgid"]; exists {
+			t.Errorf("attachment %d exposes sgid: %#v", index, attachment)
+		}
+	}
+	if len(writes) != 0 {
+		t.Errorf("show must not write, wrote %+v", writes)
+	}
+}
+
+func TestDraftShowStyledListsAttachmentMetadata(t *testing.T) {
+	content := `<div>Agenda to follow.</div><action-text-attachment url="/rails/blobs/report.pdf" filename="quarterly-report.pdf" content-type="application/pdf" filesize="128"></action-text-attachment>`
+	editJSON := `{"id":12345,"subject":"Quarterly planning","content":` + strconv.Quote(content) + `,
+		"sender":{"id":77,"email_address":"projects@example.org"},"addressed":{}}`
+	var writes []draftWrite
+	server := httptest.NewServer(draftLifecycleServer(t, editJSON, &writes))
+	t.Cleanup(server.Close)
+
+	stdout, stderr, err := runCLIRaw(t, server, "--styled", "draft", "show", "12345")
+	if err != nil {
+		t.Fatalf("draft show --styled: %v", err)
+	}
+	for _, want := range []string{"Attachments:", "quarterly-report.pdf (application/pdf, 128 B)"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout = %q, want %q", stdout, want)
+		}
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q, want empty", stderr)
+	}
 	if len(writes) != 0 {
 		t.Errorf("show must not write, wrote %+v", writes)
 	}
