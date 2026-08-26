@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -139,6 +140,40 @@ func TestDraftExportWritesCompletePrivateBundleWithoutMailboxWrites(t *testing.T
 	}
 }
 
+func TestDraftExportManifestEscapesC1Controls(t *testing.T) {
+	subject := "Quarterly \u009b planning"
+	content := "<div>Agenda.</div>"
+	editJSON := `{"id":12345,"subject":` + strconv.Quote(subject) + `,"content":` + strconv.Quote(content) + `,
+		"sender":{"id":77,"email_address":"projects@example.org"},"addressed":{}}`
+	var writes []draftWrite
+	destination := filepath.Join(t.TempDir(), "draft-12345")
+
+	if _, err := runJSONCommand(t, draftExportServer(t, editJSON, nil, &writes),
+		"draft", "export", "12345", "--output", destination); err != nil {
+		t.Fatal(err)
+	}
+	manifestBytes, err := os.ReadFile(filepath.Join(destination, "draft.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(manifestBytes, []byte{0xc2, 0x9b}) {
+		t.Fatalf("draft.json contains a raw C1 control: %q", manifestBytes)
+	}
+	if !bytes.Contains(manifestBytes, []byte(`\u009b`)) {
+		t.Fatalf("draft.json = %q, want an escaped C1 control", manifestBytes)
+	}
+	var manifest draftExportManifest
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Subject != subject {
+		t.Errorf("decoded subject = %q, want lossless %q", manifest.Subject, subject)
+	}
+	if len(writes) != 0 {
+		t.Errorf("draft export wrote to HEY: %+v", writes)
+	}
+}
+
 func TestDraftExportPublishesNothingWhenAnAttachmentFails(t *testing.T) {
 	content := `<action-text-attachment url="/rails/blobs/first" filename="first.txt" content-type="text/plain" filesize="5"></action-text-attachment>
 <action-text-attachment url="/rails/blobs/second" filename="second.txt" content-type="text/plain" filesize="6"></action-text-attachment>`
@@ -184,6 +219,28 @@ func TestDraftExportRejectsReportedAttachmentSizeMismatch(t *testing.T) {
 	entries, _ := os.ReadDir(parent)
 	if len(entries) != 0 {
 		t.Errorf("size mismatch left staging files: %v", entries)
+	}
+}
+
+func TestUniqueDraftExportFilenameNormalizesPortableCollisions(t *testing.T) {
+	used := make(map[string]struct{})
+	tests := []struct {
+		filename string
+		want     string
+	}{
+		{filename: "Café.txt", want: "Café.txt"},
+		{filename: "Cafe\u0301.txt", want: "Cafe\u0301-2.txt"},
+		{filename: "STRASSE.txt", want: "STRASSE.txt"},
+		{filename: "straße.txt", want: "straße-2.txt"},
+	}
+	for _, tt := range tests {
+		got, err := uniqueDraftExportFilename(tt.filename, used)
+		if err != nil {
+			t.Fatalf("unique filename for %q: %v", tt.filename, err)
+		}
+		if got != tt.want {
+			t.Errorf("unique filename for %q = %q, want %q", tt.filename, got, tt.want)
+		}
 	}
 }
 
@@ -264,6 +321,64 @@ func TestDraftExportForceOnlyReplacesAnExactCompleteExport(t *testing.T) {
 	}
 	if len(writes) != 0 {
 		t.Errorf("force export wrote to HEY: %+v", writes)
+	}
+}
+
+func TestDraftExportPreflightRecoversInterruptedForceReplacement(t *testing.T) {
+	var writes []draftWrite
+	parent := t.TempDir()
+	destination := filepath.Join(parent, "draft-12345")
+	replacement := filepath.Join(parent, "replacement-12345")
+	priorContent := "<div>Prior complete body.</div>"
+	replacementContent := "<div>Replacement complete body.</div>"
+
+	if _, err := runJSONCommand(t, draftExportServer(t, draftExportEditJSON(priorContent), nil, &writes),
+		"draft", "export", "12345", "--output", destination); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runJSONCommand(t, draftExportServer(t, draftExportEditJSON(replacementContent), nil, &writes),
+		"draft", "export", "12345", "--output", replacement); err != nil {
+		t.Fatal(err)
+	}
+
+	recovery := draftExportRecoveryPath(destination)
+	if err := commitDraftExportDirectoryNoReplace(destination, recovery); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := preflightDraftExportDestination(destination, 12345, false); err == nil {
+		t.Fatal("a recovered existing destination should still require --force")
+	}
+	if err := validateExistingDraftExport(destination, 12345); err != nil {
+		t.Fatalf("missing destination was not restored: %v", err)
+	}
+	if body, err := os.ReadFile(filepath.Join(destination, "draft.html")); err != nil || string(body) != priorContent {
+		t.Fatalf("restored body = %q, error = %v", body, err)
+	}
+	if _, err := os.Lstat(recovery); !os.IsNotExist(err) {
+		t.Fatalf("restored replacement left recovery data: %v", err)
+	}
+
+	if err := commitDraftExportDirectoryNoReplace(destination, recovery); err != nil {
+		t.Fatal(err)
+	}
+	if err := commitDraftExportDirectoryNoReplace(replacement, destination); err != nil {
+		t.Fatal(err)
+	}
+	resolved, existed, err := preflightDraftExportDestination(destination, 12345, true)
+	if err != nil {
+		t.Fatalf("clean published replacement recovery: %v", err)
+	}
+	if resolved != destination || !existed {
+		t.Errorf("preflight = %q, existed %v", resolved, existed)
+	}
+	if body, err := os.ReadFile(filepath.Join(destination, "draft.html")); err != nil || string(body) != replacementContent {
+		t.Fatalf("published replacement body = %q, error = %v", body, err)
+	}
+	if _, err := os.Lstat(recovery); !os.IsNotExist(err) {
+		t.Fatalf("published replacement left recovery data: %v", err)
+	}
+	if len(writes) != 0 {
+		t.Errorf("draft export wrote to HEY: %+v", writes)
 	}
 }
 

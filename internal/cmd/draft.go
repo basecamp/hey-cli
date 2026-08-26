@@ -172,7 +172,7 @@ func (c *draftShowCommand) run(cmd *cobra.Command, args []string) error {
 		return apierr.ErrNotFound("draft", args[0])
 	}
 	if writer.EffectiveFormat() == output.FormatHTML {
-		return writeHTMLFragment(cmd.OutOrStdout(), edit.Content)
+		return writeExactHTMLFragment(cmd.OutOrStdout(), edit.Content)
 	}
 	out := draftOutputFor(draftID, edit)
 

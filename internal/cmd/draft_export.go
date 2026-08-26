@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
@@ -142,6 +144,9 @@ func preflightDraftExportDestination(outputPath string, draftID int64, force boo
 	if !parentInfo.IsDir() {
 		return "", false, apierr.ErrUsage(fmt.Sprintf("output parent is not a directory: %s", parent))
 	}
+	if recoveryErr := recoverDraftExportReplacement(destination, draftID); recoveryErr != nil {
+		return "", false, recoveryErr
+	}
 
 	_, err = os.Lstat(destination)
 	switch {
@@ -216,7 +221,7 @@ func exportDraftBundle(ctx context.Context, destination string, draftID int64, e
 		ScheduledDeliveryAt: out.ScheduledDeliveryAt,
 		UpdatedAt:           out.UpdatedAt,
 	}
-	manifestJSON, err := json.MarshalIndent(manifest, "", "  ")
+	manifestJSON, err := output.MarshalIndentJSON(manifest)
 	if err != nil {
 		return draftExportResult{}, apierr.ErrAPI(0, fmt.Sprintf("could not encode draft manifest: %v", err))
 	}
@@ -290,13 +295,21 @@ func uniqueDraftExportFilename(filename string, used map[string]struct{}) (strin
 		if sequence > 1 {
 			candidate = fmt.Sprintf("%s-%d%s", stem, sequence, extension)
 		}
-		key := strings.ToLower(candidate)
+		key := draftExportFilenameKey(candidate)
 		if _, exists := used[key]; exists {
 			continue
 		}
 		used[key] = struct{}{}
 		return candidate, nil
 	}
+}
+
+func draftExportFilenameKey(filename string) string {
+	// Portable bundles must survive case-insensitive and normalization-insensitive
+	// filesystems. Full Unicode folding is deliberately conservative: assigning a
+	// suffix where one filesystem would allow both names is safer than discovering
+	// the collision while the second attachment is being created.
+	return norm.NFC.String(cases.Fold().String(norm.NFC.String(filename)))
 }
 
 func downloadDraftExportAttachment(ctx context.Context, root *os.Root, path, sourceURL string) (int64, error) {
@@ -361,32 +374,104 @@ func replaceDraftExportDirectory(staging, destination string, draftID int64) err
 	if err := validateExistingDraftExport(destination, draftID); err != nil {
 		return err
 	}
-	backup, err := os.MkdirTemp(filepath.Dir(destination), ".hey-draft-export-previous-*")
+
+	exchanged, err := exchangeDraftExportDirectories(staging, destination)
 	if err != nil {
-		return apierr.ErrAPI(0, fmt.Sprintf("could not reserve prior-export path: %v", err))
+		return apierr.ErrAPI(0, fmt.Sprintf("could not atomically replace draft export: %v", err))
 	}
-	if err := os.Remove(backup); err != nil {
-		return apierr.ErrAPI(0, fmt.Sprintf("could not prepare prior-export path: %v", err))
+	if exchanged {
+		// The prior export is now at staging. Revalidate it after the exchange so a
+		// destination changed between preflight and publication is restored rather
+		// than silently discarded.
+		if err := validateExistingDraftExport(staging, draftID); err != nil {
+			restored, rollbackErr := exchangeDraftExportDirectories(staging, destination)
+			if rollbackErr != nil || !restored {
+				return apierr.ErrAPI(0, fmt.Sprintf(
+					"the destination changed while export replacement began; atomic rollback failed: %v", rollbackErr))
+			}
+			return apierr.ErrUsage("the destination changed while export replacement began; it was restored and nothing was replaced")
+		}
+		if err := os.RemoveAll(staging); err != nil {
+			return apierr.ErrAPI(0, fmt.Sprintf(
+				"draft export was published at %s, but the prior export could not be removed from %s: %v", destination, staging, err))
+		}
+		return nil
 	}
-	if err := commitDraftExportDirectoryNoReplace(destination, backup); err != nil {
+
+	return replaceDraftExportDirectoryRecoverable(staging, destination, draftID)
+}
+
+func replaceDraftExportDirectoryRecoverable(staging, destination string, draftID int64) error {
+	if err := recoverDraftExportReplacement(destination, draftID); err != nil {
+		return err
+	}
+	recovery := draftExportRecoveryPath(destination)
+	if err := commitDraftExportDirectoryNoReplace(destination, recovery); err != nil {
 		return apierr.ErrAPI(0, fmt.Sprintf("could not preserve prior export: %v", err))
 	}
-	if err := validateExistingDraftExport(backup, draftID); err != nil {
-		rollbackErr := commitDraftExportDirectoryNoReplace(backup, destination)
+	if err := validateExistingDraftExport(recovery, draftID); err != nil {
+		rollbackErr := commitDraftExportDirectoryNoReplace(recovery, destination)
 		if rollbackErr != nil {
-			return apierr.ErrAPI(0, fmt.Sprintf("the destination changed while export replacement began; the moved directory remains at %s because rollback failed: %v", backup, rollbackErr))
+			return apierr.ErrAPI(0, fmt.Sprintf("the destination changed while export replacement began; the moved directory remains at %s because rollback failed: %v", recovery, rollbackErr))
 		}
 		return apierr.ErrUsage("the destination changed while export replacement began; it was restored and nothing was replaced")
 	}
 	if err := commitDraftExportDirectoryNoReplace(staging, destination); err != nil {
-		rollbackErr := commitDraftExportDirectoryNoReplace(backup, destination)
+		rollbackErr := commitDraftExportDirectoryNoReplace(recovery, destination)
 		if rollbackErr != nil {
-			return apierr.ErrAPI(0, fmt.Sprintf("could not publish draft export: %v; prior export remains at %s because rollback failed: %v", err, backup, rollbackErr))
+			return apierr.ErrAPI(0, fmt.Sprintf("could not publish draft export: %v; prior export remains at %s because rollback failed: %v", err, recovery, rollbackErr))
 		}
 		return apierr.ErrAPI(0, fmt.Sprintf("could not publish draft export: %v", err))
 	}
-	if err := os.RemoveAll(backup); err != nil {
-		return apierr.ErrAPI(0, fmt.Sprintf("draft export was published at %s, but the prior export could not be removed from %s: %v", destination, backup, err))
+	if err := os.RemoveAll(recovery); err != nil {
+		return apierr.ErrAPI(0, fmt.Sprintf("draft export was published at %s, but the prior export could not be removed from %s: %v", destination, recovery, err))
+	}
+	return nil
+}
+
+func draftExportRecoveryPath(destination string) string {
+	digest := sha256.Sum256([]byte(destination))
+	return filepath.Join(filepath.Dir(destination), fmt.Sprintf(".hey-draft-export-recovery-%x", digest[:8]))
+}
+
+// recoverDraftExportReplacement repairs the two durable states a non-atomic
+// platform can leave behind: the prior export moved aside before publication,
+// or both the published replacement and the prior export present before cleanup.
+// The recovery path is deterministic so the next invocation finds it without a
+// directory scan. Nothing unrecognized is removed.
+func recoverDraftExportReplacement(destination string, draftID int64) error {
+	recovery := draftExportRecoveryPath(destination)
+	if _, err := os.Lstat(recovery); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return apierr.ErrAPI(0, fmt.Sprintf("could not inspect draft export replacement recovery: %v", err))
+	}
+
+	_, destinationErr := os.Lstat(destination)
+	switch {
+	case errors.Is(destinationErr, fs.ErrNotExist):
+		if err := validateExistingDraftExport(recovery, draftID); err != nil {
+			return apierr.ErrUsage(fmt.Sprintf(
+				"an interrupted draft export replacement left no destination and the recovery at %s is not a complete export of this draft; nothing was changed", recovery))
+		}
+		if err := commitDraftExportDirectoryNoReplace(recovery, destination); err != nil {
+			return apierr.ErrAPI(0, fmt.Sprintf("could not restore the prior draft export from %s: %v", recovery, err))
+		}
+		return nil
+	case destinationErr != nil:
+		return apierr.ErrAPI(0, fmt.Sprintf("could not inspect output destination during replacement recovery: %v", destinationErr))
+	}
+
+	if err := validateExistingDraftExport(destination, draftID); err != nil {
+		return apierr.ErrUsage(fmt.Sprintf(
+			"an interrupted draft export replacement left recovery data at %s, but the destination is not a complete export of this draft; nothing was changed", recovery))
+	}
+	if err := validateExistingDraftExport(recovery, draftID); err != nil {
+		return apierr.ErrUsage(fmt.Sprintf(
+			"an interrupted draft export replacement left unrecognized recovery data at %s; nothing was removed", recovery))
+	}
+	if err := os.RemoveAll(recovery); err != nil {
+		return apierr.ErrAPI(0, fmt.Sprintf("could not remove the recovered prior draft export at %s: %v", recovery, err))
 	}
 	return nil
 }

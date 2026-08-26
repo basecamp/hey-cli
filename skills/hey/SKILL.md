@@ -638,14 +638,15 @@ A draft needs no recipients until it is sent; `--draft` on `hey compose` lifts t
 recipient requirement. `draft show` returns Markdown by default. Its structured output
 has an `attachments` array with each downloadable file's name and available content
 type/byte size, and the styled view lists the same safe metadata; internal download URLs
-and signed IDs stay private. `--html` writes the complete stored body fragment, including
+and signed IDs stay private. `--html` writes the byte-exact stored body fragment, including
 attachment markup, and must be redirected to a file or pipe. `draft export` is read-only
 to HEY and writes a private local directory containing byte-exact `draft.html`, safe
 `draft.json`, and downloaded originals under `attachments/`. It stages and verifies
 every file before publishing the directory, resolves filename collisions portably,
 records actual byte counts and SHA-256 hashes, and exposes no download URL or SGID. The
 destination must not exist. `--force` only replaces a complete export of the same draft
-and refuses unexpected files.
+and refuses unexpected files. Replacement uses atomic directory exchange where the
+platform supports it and otherwise repairs an interrupted replacement on the next run.
 
 **An edit is a revision, not a patch.** The CLI reads the draft first and resends the
 whole of it, so an omitted flag keeps that field. `--to`/`--cc`/`--bcc` replace their

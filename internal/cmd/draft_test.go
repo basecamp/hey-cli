@@ -221,13 +221,12 @@ func TestDraftShowHTMLAnswersTheCompleteStoredBody(t *testing.T) {
 	for _, test := range []struct {
 		name    string
 		content string
-		want    string
 	}{
 		{
 			name:    "rich body with attachment markup",
 			content: `<div><strong>Quarterly planning</strong></div><figure data-trix-attachment="{&quot;filename&quot;:&quot;agenda.pdf&quot;}"></figure>`,
-			want:    `<div><strong>Quarterly planning</strong></div><figure data-trix-attachment="{&quot;filename&quot;:&quot;agenda.pdf&quot;}"></figure>` + "\n",
 		},
+		{name: "stored trailing newline", content: "<div>Agenda.</div>\n"},
 		{name: "empty body"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -241,8 +240,8 @@ func TestDraftShowHTMLAnswersTheCompleteStoredBody(t *testing.T) {
 			if err != nil {
 				t.Fatalf("draft show --html: %v", err)
 			}
-			if stdout != test.want {
-				t.Errorf("stdout = %q, want stored HTML %q", stdout, test.want)
+			if stdout != test.content {
+				t.Errorf("stdout = %q, want byte-exact stored HTML %q", stdout, test.content)
 			}
 			if stderr != "" {
 				t.Errorf("stderr = %q, want empty", stderr)

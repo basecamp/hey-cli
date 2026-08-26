@@ -15,3 +15,7 @@ func commitDraftExportDirectoryNoReplace(source, destination string) error {
 	}
 	return os.Rename(source, destination)
 }
+
+func exchangeDraftExportDirectories(_, _ string) (bool, error) {
+	return false, nil
+}

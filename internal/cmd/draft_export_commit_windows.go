@@ -15,3 +15,7 @@ func commitDraftExportDirectoryNoReplace(source, destination string) error {
 	}
 	return windows.MoveFile(from, to)
 }
+
+func exchangeDraftExportDirectories(_, _ string) (bool, error) {
+	return false, nil
+}
