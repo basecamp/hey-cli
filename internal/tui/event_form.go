@@ -188,7 +188,7 @@ func newEventForm(mode eventFormMode, event Recording, on time.Time, calendars [
 }
 
 func eventInput(placeholder string, width int) textinput.Model {
-	input := textinput.New()
+	input := newTextInput()
 	input.Prompt = ""
 	input.Placeholder = placeholder
 	if width > 0 {
@@ -200,7 +200,7 @@ func eventInput(placeholder string, width int) textinput.Model {
 // eventNotesInput is the one field somebody writes a paragraph into, so it takes several lines
 // and enter puts a new one in rather than moving on. Tab is how the reader leaves it.
 func eventNotesInput() textarea.Model {
-	input := textarea.New()
+	input := newTextArea()
 	input.Prompt = ""
 	input.ShowLineNumbers = false
 	input.Placeholder = "Agenda, what to bring, anything"

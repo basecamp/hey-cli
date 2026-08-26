@@ -442,7 +442,7 @@ type timeTrackCategoryManager struct {
 }
 
 func newTimeTrackCategoryManager() *timeTrackCategoryManager {
-	input := textinput.New()
+	input := newTextInput()
 	input.Prompt = ""
 	input.Placeholder = "Category title…"
 	return &timeTrackCategoryManager{input: input}

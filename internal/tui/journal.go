@@ -86,7 +86,7 @@ type journalPrompt struct {
 }
 
 func newJournalPrompt(kind journalPromptKind, value string, styles styles) *journalPrompt {
-	input := textinput.New()
+	input := newTextInput()
 	input.Prompt = ""
 	input.SetValue(value)
 	if kind == journalPromptSearch {

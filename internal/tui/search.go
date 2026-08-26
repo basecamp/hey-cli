@@ -15,7 +15,7 @@ type mailSearchForm struct {
 }
 
 func newMailSearchForm(query string, styles styles) *mailSearchForm {
-	input := textinput.New()
+	input := newTextInput()
 	input.Prompt = ""
 	input.Placeholder = "Search threads and messages…"
 	input.SetValue(query)

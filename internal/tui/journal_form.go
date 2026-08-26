@@ -29,7 +29,7 @@ type journalForm struct {
 }
 
 func newJournalForm(date, content string, styles styles) *journalForm {
-	input := textarea.New()
+	input := newTextArea()
 	input.Prompt = ""
 	input.ShowLineNumbers = false
 	input.Placeholder = "Write about your day…"

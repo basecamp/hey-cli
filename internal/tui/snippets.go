@@ -35,7 +35,7 @@ type snippetPicker struct {
 }
 
 func newSnippetPicker(returnFocus int) *snippetPicker {
-	input := textinput.New()
+	input := newTextInput()
 	input.Prompt = ""
 	input.Placeholder = "Filter snippets…"
 	return &snippetPicker{input: input, cursor: -1, loading: true, returnFocus: returnFocus}

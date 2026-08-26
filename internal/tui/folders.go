@@ -52,7 +52,7 @@ func newFolderPicker(posting mail.Posting, sources []mail.Source) *folderPicker 
 			folders = append(folders, source)
 		}
 	}
-	input := textinput.New()
+	input := newTextInput()
 	input.Prompt = ""
 	input.Placeholder = "Label name…"
 	return &folderPicker{posting: posting, folders: folders, input: input}

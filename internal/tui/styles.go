@@ -61,6 +61,7 @@ var styleMuted = lipgloss.NewStyle().Faint(true)
 // applyTheme makes theme the active palette. Styles built before the call keep the
 // old colors — rebuild them with newStyles.
 func applyTheme(theme Theme) {
+	themeDark = theme.Dark
 	colorPrimary = theme.Accent
 	colorMuted = theme.Muted
 	colorBright = theme.Bright

@@ -60,7 +60,7 @@ func newBulkReplyForm(postingIDs []int64, draft *generated.BulkReplyDraft, s sty
 	}
 	form.preview = viewport.New(viewport.WithWidth(80), viewport.WithHeight(24))
 	form.preview.SetContent(form.previewContent(80))
-	form.body = textarea.New()
+	form.body = newTextArea()
 	form.body.Prompt = ""
 	form.body.ShowLineNumbers = false
 	form.body.Placeholder = "Write the reply that every selected thread will receive…"

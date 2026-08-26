@@ -33,7 +33,7 @@ type todoPicker struct {
 }
 
 func newTodoPicker(todos []Recording) *todoPicker {
-	input := textinput.New()
+	input := newTextInput()
 	input.Prompt = ""
 	input.Placeholder = "Renew passport"
 	return &todoPicker{todos: todos, input: input}

@@ -38,7 +38,7 @@ func newContactForm(mode contactFormMode, contact Contact, styles styles) *conta
 	form := &contactForm{mode: mode, contactID: contact.ID, styles: styles}
 	placeholders := []string{"Jane Doe", "jane@example.com", "jane.doe@example.org, jane@example.net"}
 	for _, placeholder := range placeholders {
-		input := textinput.New()
+		input := newTextInput()
 		input.Prompt = ""
 		input.Placeholder = placeholder
 		form.inputs = append(form.inputs, input)
@@ -170,7 +170,7 @@ type contactNoteForm struct {
 }
 
 func newContactNoteForm(contactID int64, note string, styles styles) *contactNoteForm {
-	input := textarea.New()
+	input := newTextArea()
 	input.Prompt = ""
 	input.ShowLineNumbers = false
 	input.Placeholder = "Add a private note…"

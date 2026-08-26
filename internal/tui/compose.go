@@ -107,12 +107,12 @@ func newComposeForm(mode composeMode, s styles) *composeForm {
 		labels = append(labels, "Subject")
 	}
 	for _, l := range labels {
-		in := textinput.New()
+		in := newTextInput()
 		in.Prompt = ""
 		in.Placeholder = placeholderFor(l)
 		f.inputs = append(f.inputs, in)
 	}
-	f.body = textarea.New()
+	f.body = newTextArea()
 	f.body.Prompt = ""
 	f.body.ShowLineNumbers = false
 	f.body.Placeholder = "Write your message… Markdown works here"

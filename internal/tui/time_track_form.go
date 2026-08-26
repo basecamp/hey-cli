@@ -87,7 +87,7 @@ func newTimeTrackForm(track trackedTime, categories []generated.TimeTrackCategor
 }
 
 func trackInput(placeholder string) textinput.Model {
-	input := textinput.New()
+	input := newTextInput()
 	input.Prompt = ""
 	input.Placeholder = placeholder
 	return input

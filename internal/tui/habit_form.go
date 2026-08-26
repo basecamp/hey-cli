@@ -49,7 +49,7 @@ type habitForm struct {
 }
 
 func newHabitForm(mode habitFormMode, recording Recording, styles styles) *habitForm {
-	name := textinput.New()
+	name := newTextInput()
 	name.Prompt = ""
 	name.Placeholder = "Morning strength training"
 

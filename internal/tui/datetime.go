@@ -75,7 +75,7 @@ func newDateTimePicker(at time.Time, allDay bool) *dateTimePicker {
 }
 
 func dateTimeInput(placeholder string, width int) textinput.Model {
-	input := textinput.New()
+	input := newTextInput()
 	input.Prompt = ""
 	input.Placeholder = placeholder
 	input.SetWidth(width)
