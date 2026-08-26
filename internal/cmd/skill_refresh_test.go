@@ -17,6 +17,7 @@ func refreshFixture(t *testing.T) (home string) {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("CODEX_HOME", "")
+	t.Setenv("GROK_HOME", "")
 	return home
 }
 
@@ -244,6 +245,7 @@ func TestRefreshSkillsPreservesUnmanagedSkills(t *testing.T) {
 		writeSkillFixture(t, filepath.Join(home, ".agents", "skills", "hey"), custom, false),
 		writeSkillFixture(t, filepath.Join(home, ".claude", "skills", "hey"), custom, false),
 		writeSkillFixture(t, filepath.Join(home, ".codex", "skills", "hey"), custom, false),
+		writeSkillFixture(t, filepath.Join(home, ".grok", "skills", "hey"), custom, false),
 	}
 
 	if refreshSkillsIfVersionChanged() {

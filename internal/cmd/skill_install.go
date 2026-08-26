@@ -100,7 +100,7 @@ func newSkillInstallCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "install",
 		Short: "Install the hey skill globally for your coding agents",
-		Long:  "Copies the embedded SKILL.md to ~/.agents/skills/hey/ and links it into ~/.claude/skills/hey when Claude Code is installed. Codex discovers the shared skill directly.",
+		Long:  "Copies the embedded SKILL.md to ~/.agents/skills/hey/ and links it into ~/.claude/skills/hey when Claude Code is installed. Codex and Grok discover the shared skill directly.",
 		RunE:  runSkillInstall,
 	}
 }

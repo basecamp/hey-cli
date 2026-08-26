@@ -7,7 +7,7 @@ import (
 
 // AgentInfo describes a coding agent integration.
 type AgentInfo struct {
-	Name   string                // "Claude Code"
+	Name   string                // "Claude Code", "Codex", "Grok"
 	ID     string                // "claude"
 	Detect func() bool           // reports whether the agent is installed
 	Checks func() []*StatusCheck // cheap health checks gating setup wizard behavior

@@ -79,6 +79,7 @@ func TestSkillInstallCopyFallbackIsIdempotent(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("CODEX_HOME", "")
+	t.Setenv("GROK_HOME", "")
 	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -156,6 +157,7 @@ func agentHome(t *testing.T, dirs ...string) string {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("CODEX_HOME", "")
+	t.Setenv("GROK_HOME", "")
 	for _, dir := range dirs {
 		if err := os.MkdirAll(filepath.Join(home, dir), 0o755); err != nil {
 			t.Fatal(err)
