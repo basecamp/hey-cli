@@ -172,6 +172,9 @@ func TestSetupSilentSuccessShowsSpinnerAndCompletion(t *testing.T) {
 func TestSetupSilentSuccessKeepsSignInInstructions(t *testing.T) {
 	stubStdinTerminal(t)
 	t.Setenv("HEY_NONINTERACTIVE", "")
+	// Without this the manager consults the developer's real keyring, sees them
+	// signed in, and skips the stubbed login this test exists to observe.
+	t.Setenv("HEY_NO_KEYRING", "1")
 	previousAuthMgr := authMgr
 	authMgr = auth.NewManager("http://app.hey.localhost:3003", http.DefaultClient, t.TempDir())
 	t.Cleanup(func() { authMgr = previousAuthMgr })
