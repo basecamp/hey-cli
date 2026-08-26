@@ -19,6 +19,7 @@ func TestNewPostingKeepsWhatARowShows(t *testing.T) {
 		Summary:               "Here is the revised quote for the cabinets",
 		AlternativeSenderName: "Ryan at Fine Woodwork",
 		Seen:                  true,
+		Bundled:               true,
 		BubbledUp:             true,
 		Muted:                 true,
 		VisibleEntryCount:     3,
@@ -34,7 +35,7 @@ func TestNewPostingKeepsWhatARowShows(t *testing.T) {
 	if posting.ID != 4471829 || posting.TopicID != 501 || posting.Name != "Kitchen remodel quote" {
 		t.Errorf("posting = %+v", posting)
 	}
-	if !posting.Seen || !posting.BubbledUp || !posting.Muted || posting.VisibleEntryCount != 3 {
+	if !posting.Seen || !posting.Bundled || !posting.BubbledUp || !posting.Muted || posting.VisibleEntryCount != 3 {
 		t.Errorf("posting state = %+v", posting)
 	}
 	if posting.Summary != "Here is the revised quote for the cabinets" || posting.AlternativeSenderName != "Ryan at Fine Woodwork" {

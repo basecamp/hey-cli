@@ -51,6 +51,7 @@ func testPostings() []mail.Posting {
 	return []mail.Posting{
 		{
 			ID:        100,
+			TopicID:   100,
 			Summary:   "Hello world",
 			CreatedAt: time.Date(2025, 3, 1, 10, 0, 0, 0, time.UTC),
 			Seen:      false,
@@ -58,6 +59,7 @@ func testPostings() []mail.Posting {
 		},
 		{
 			ID:        101,
+			TopicID:   101,
 			Summary:   "Meeting notes",
 			CreatedAt: time.Date(2025, 3, 1, 9, 0, 0, 0, time.UTC),
 			Seen:      true,

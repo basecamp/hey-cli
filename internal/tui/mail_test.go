@@ -114,6 +114,13 @@ func mailWithTestServer(t *testing.T, status int) (*mailView, *recordedMailReque
 		switch r.URL.Path {
 		case "/advanced_search.json":
 			_, _ = w.Write([]byte(`{"matches":[{"topic":{"id":100,"name":"Hello world","app_url":"https://app.hey.com/topics/100","updated_at":"2026-08-19T09:00:00Z"},"posting_id":10,"entries":[{"id":501,"kind":"message","summary":"Matching message summary","created_at":"2026-08-19T09:00:00Z","creator":{"id":10,"name":"Alice"}}]}]}`))
+		case "/postings/311/bundles/unseen.json":
+			if r.URL.Query().Get("page") == "" {
+				w.Header().Set("Link", `<http://`+r.Host+`/postings/311/bundles/unseen.json?page=eyJwYWdlIjoyfQ>; rel="next"`)
+				_, _ = w.Write([]byte(`{"contact":{"id":88,"name":"GitHub","email_address":"notifications@example.com"},"postings":[{"id":511,"kind":"topic","name":"Deploy failed on main","app_url":"https://app.hey.com/topics/100","created_at":"2026-08-25T09:00:00Z","creator":{"id":88,"name":"GitHub"}}]}`))
+			} else {
+				_, _ = w.Write([]byte(`{"contact":{"id":88,"name":"GitHub","email_address":"notifications@example.com"},"postings":[{"id":512,"kind":"topic","name":"Nightly build is green again","app_url":"https://app.hey.com/topics/101","created_at":"2026-08-24T21:00:00Z","creator":{"id":88,"name":"GitHub"}}]}`))
+			}
 		case "/topics/100/entries.json":
 			_, _ = w.Write([]byte(`[{"id":501,"kind":"message","summary":"Hello world","created_at":"2026-08-19T09:00:00Z","creator":{"id":10,"name":"Alice"}}]`))
 		case "/messages/501.json":
@@ -3234,5 +3241,110 @@ func TestThreadJKJumpsBetweenMessages(t *testing.T) {
 	v.HandleContentKey(keyPress("k"))
 	if got := v.topicViewport.YOffset(); got != 0 {
 		t.Errorf("k at the first message should go to the top: offset %d", got)
+	}
+}
+
+// bundleRow is a bundle posting the way HEY lists one: several unseen threads from one
+// contact, so no topic of its own — its app_url names the contact, not a thread.
+func bundleRow() mail.Posting {
+	return mail.Posting{
+		ID:      311,
+		Bundled: true,
+		Name:    "Deploy failed on main • Nightly build is green again",
+		Creator: mail.Contact{Name: "GitHub"},
+	}
+}
+
+func TestMailViewOpensABundle(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	v.postingList.postings[0] = bundleRow()
+
+	loaded, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(bundleLoadedMsg)
+	if !ok || loaded.err != nil {
+		t.Fatalf("opening a bundle returned %#v", loaded)
+	}
+	more, _ := v.Update(loaded)
+	if !v.bundleActive || v.bundleTitle != "GitHub" {
+		t.Fatalf("bundle view: active %v title %q", v.bundleActive, v.bundleTitle)
+	}
+	if len(v.bundleList.postings) != 1 || v.bundleList.postings[0].TopicID != 100 {
+		t.Fatalf("bundle postings = %+v", v.bundleList.postings)
+	}
+	if _, _, label, _ := v.SubnavItems(); !strings.Contains(label, "New from GitHub") {
+		t.Errorf("subnav label = %q", label)
+	}
+
+	// The list is shorter than the window with a page below, so it grows at once.
+	appended, ok := runCmd(more).(bundleAppendedMsg)
+	if !ok || appended.err != nil {
+		t.Fatalf("growing the bundle returned %#v", appended)
+	}
+	v.Update(appended)
+	if len(v.bundleList.postings) != 2 || v.bundleList.postings[1].TopicID != 101 {
+		t.Fatalf("grown bundle postings = %+v", v.bundleList.postings)
+	}
+	if v.bundleNextPage != "" {
+		t.Errorf("nextPage = %q, want none after the last page", v.bundleNextPage)
+	}
+
+	// Enter on a member opens its thread the normal way, and esc steps back out
+	// through the bundle to the box.
+	topic, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(topicLoadedMsg)
+	if !ok || topic.err != nil || topic.topicID != 100 {
+		t.Fatalf("opening a member returned %#v", topic)
+	}
+	v.Update(topic)
+	if !v.inThread {
+		t.Fatal("a bundle member should open as a thread")
+	}
+	v.ExitThread()
+	if v.inThread || !v.bundleActive {
+		t.Fatalf("leaving the thread should return to the bundle: inThread %v bundleActive %v", v.inThread, v.bundleActive)
+	}
+	v.ExitThread()
+	if v.bundleActive {
+		t.Fatal("leaving the bundle should return to the box list")
+	}
+}
+
+func TestMailViewReplyOnABundleOpensIt(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	v.postingList.postings[0] = bundleRow()
+
+	loaded, ok := runCmd(v.HandleContentKey(keyPress("r"))).(bundleLoadedMsg)
+	if !ok || loaded.err != nil {
+		t.Fatalf("reply on a bundle returned %#v", loaded)
+	}
+	v.Update(loaded)
+	if !v.bundleActive {
+		t.Fatal("reply on a bundle should open the bundle")
+	}
+}
+
+func TestMailViewRefusesAPostingWithoutAThread(t *testing.T) {
+	v := mailWithPostings()
+	v.postingList.postings[0].TopicID = 0
+
+	failed, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(errMsg)
+	if !ok || failed.err == nil {
+		t.Fatalf("opening a topicless posting returned %#v, want errMsg", failed)
+	}
+	if v.bundleActive || v.inThread {
+		t.Error("a topicless posting should open nothing")
+	}
+}
+
+func TestMailViewBundleSurvivesAStaleAppend(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	v.postingList.postings[0] = bundleRow()
+
+	loaded, _ := runCmd(v.HandleContentKey(keyPress("enter"))).(bundleLoadedMsg)
+	v.Update(loaded)
+	stale := bundleAppendedMsg{requestID: v.bundleMoreID - 1, postingID: 311, postings: []mail.Posting{{ID: 599}}}
+	v.Update(stale)
+	for _, posting := range v.bundleList.postings {
+		if posting.ID == 599 {
+			t.Fatal("a stale append should not grow the bundle")
+		}
 	}
 }

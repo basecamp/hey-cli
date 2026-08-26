@@ -183,6 +183,7 @@ func TestMailViewCollectionMembershipFailureKeepsState(t *testing.T) {
 func TestMailViewCollectionMembershipRequiresTopicID(t *testing.T) {
 	v, recorded := mailWithTestServer(t, http.StatusNoContent)
 	v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindCollection, Name: "Kitchen remodel"})
+	v.postingList.postings[0].TopicID = 0
 
 	if cmd := v.HandleContentKey(keyPress("n")); cmd != nil {
 		t.Fatal("unresolved posting should not start a mutation")

@@ -36,6 +36,7 @@ const (
 	mailRequestReply
 	mailRequestForward
 	mailRequestSearch
+	mailRequestBundle
 	mailRequestBulkReply
 )
 
@@ -116,6 +117,28 @@ type searchResultsAppendedMsg struct {
 	requestID uint64
 	query     string
 	nextPage  int
+	postings  []mail.Posting
+	err       error
+}
+
+// bundleLoadedMsg is the first page of the unseen threads inside a bundle posting,
+// opened from its row the way a thread is.
+type bundleLoadedMsg struct {
+	requestID uint64
+	boxID     int64
+	postingID int64
+	title     string
+	nextPage  string
+	postings  []mail.Posting
+	err       error
+}
+
+// bundleAppendedMsg is the page of a bundle's threads below the ones on screen, read
+// because the reader scrolled towards the bottom. Its own lane, like a box's.
+type bundleAppendedMsg struct {
+	requestID uint64
+	postingID int64
+	nextPage  string
 	postings  []mail.Posting
 	err       error
 }
@@ -219,8 +242,14 @@ type mailView struct {
 	searchList             contentList
 	searchActive           bool
 	searchQuery            string
-	searchNextPage         int    // the page of matches after the ones on screen, zero at the last
-	searchLoadingMore      bool   // a page of matches is already on its way
+	searchNextPage         int  // the page of matches after the ones on screen, zero at the last
+	searchLoadingMore      bool // a page of matches is already on its way
+	bundleList             contentList
+	bundleActive           bool
+	bundlePostingID        int64  // the bundle row the open list belongs to
+	bundleTitle            string // the bundled contact's name, sanitized
+	bundleNextPage         string // the cursor for the page below, empty at the last
+	bundleLoadingMore      bool   // a page of the bundle is already on its way
 	screenerCount          int    // senders waiting in The Screener
 	lastBulkReplyID        int64  // delayed delivery currently available for undo
 	pendingMutations       int    // writes that must finish before changing the account context
@@ -234,6 +263,7 @@ type mailView struct {
 	liveRefreshDue bool   // a re-read is already on its way
 	moreRequestID  uint64 // identifies the only page-below read allowed to grow the list
 	searchMoreID   uint64 // the same, for the search results
+	bundleMoreID   uint64 // the same, for an open bundle's threads
 }
 
 func newMailView(vc *viewContext) *mailView {
@@ -241,6 +271,7 @@ func newMailView(vc *viewContext) *mailView {
 		vc:            vc,
 		topicViewport: viewport.New(viewport.WithWidth(0), viewport.WithHeight(0)),
 		searchList:    contentList{hideSeenState: true},
+		bundleList:    contentList{hideSeenState: true},
 	}
 	if vc.loadCover != nil {
 		view.cover = parseCoverPreset(vc.loadCover())
@@ -375,6 +406,38 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			v.searchNextPage = msg.nextPage
 		}
 		return v.loadMoreSearchResults(), true
+
+	case bundleLoadedMsg:
+		if msg.boxID != v.currentBoxID() {
+			return nil, true
+		}
+		if cmd, ok := v.requests.settle(newRequestResult(msg.requestID, msg.err)); !ok {
+			return cmd, true
+		}
+		v.bundleActive = true
+		v.bundlePostingID = msg.postingID
+		v.bundleTitle = msg.title
+		v.bundleNextPage = msg.nextPage
+		v.bundleLoadingMore = false
+		v.bundleList.setPostings(msg.postings)
+		return v.loadMoreBundlePostings(), true
+
+	case bundleAppendedMsg:
+		if msg.requestID != v.bundleMoreID || !v.bundleActive || msg.postingID != v.bundlePostingID {
+			return nil, true
+		}
+		v.bundleLoadingMore = false
+		if msg.err != nil {
+			v.noteFailure("Could not load more mail", msg.err)
+			return nil, true
+		}
+		v.bundleList.growPostings(msg.postings)
+		if len(msg.postings) == 0 {
+			v.bundleNextPage = ""
+		} else {
+			v.bundleNextPage = msg.nextPage
+		}
+		return v.loadMoreBundlePostings(), true
 
 	case topicLoadedMsg:
 		// A zero box identifies a topic opened directly rather than selected from
@@ -682,6 +745,12 @@ func (v *mailView) View() string {
 		}
 		return v.searchList.view()
 	}
+	if v.bundleActive {
+		if v.notice != "" {
+			return v.vc.styles.title.Render(v.notice) + "\n" + v.bundleList.view()
+		}
+		return v.bundleList.view()
+	}
 	return v.listView()
 }
 
@@ -772,6 +841,9 @@ func (v *mailView) HelpBindings() []helpBinding {
 	if v.searchActive {
 		return []helpBinding{{"enter", "open"}, {"/", "new search"}}
 	}
+	if v.bundleActive {
+		return []helpBinding{{"enter", "open"}, {"esc", "back"}}
+	}
 	ignoreBinding := helpBinding{"-", "ignore"}
 	if selected := v.postingList.selectedPosting(); selected != nil && selected.Muted {
 		ignoreBinding = helpBinding{"+", "stop ignoring"}
@@ -832,6 +904,13 @@ func (v *mailView) SubnavItems() ([]navItem, int, string, bool) {
 			label = "Search: " + v.searchQuery
 		}
 		if v.searchLoadingMore {
+			label += " · loading more…"
+		}
+		return nil, 0, label, true
+	}
+	if v.bundleActive {
+		label := "New from " + v.bundleTitle
+		if v.bundleLoadingMore {
 			label += " · loading more…"
 		}
 		return nil, 0, label, true
@@ -913,7 +992,7 @@ func (v *mailView) openCollections() {
 }
 
 func (v *mailView) SubnavLeft() tea.Cmd {
-	if v.searchActive || v.searchOpen() {
+	if v.searchActive || v.searchOpen() || v.bundleActive {
 		return nil
 	}
 	tabIndexes := v.tabBoxIndexes()
@@ -943,7 +1022,7 @@ func (v *mailView) SubnavLeft() tea.Cmd {
 }
 
 func (v *mailView) SubnavRight() tea.Cmd {
-	if v.searchActive || v.searchOpen() {
+	if v.searchActive || v.searchOpen() || v.bundleActive {
 		return nil
 	}
 	switch v.currentSourceKind() {
@@ -1049,6 +1128,27 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 
+	if v.bundleActive {
+		switch msg.Key().Code {
+		case tea.KeyUp:
+			v.bundleList.moveUp()
+		case tea.KeyDown:
+			v.bundleList.moveDown()
+			return v.loadMoreBundlePostings()
+		case tea.KeyEnter:
+			return v.openSelected()
+		default:
+			switch msg.String() {
+			case "k":
+				v.bundleList.moveUp()
+			case "j":
+				v.bundleList.moveDown()
+				return v.loadMoreBundlePostings()
+			}
+		}
+		return nil
+	}
+
 	switch msg.Key().Code {
 	case tea.KeyUp:
 		v.postingList.moveUp()
@@ -1096,19 +1196,20 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
-func (v *mailView) InThread() bool { return v.inThread || v.searchActive }
+func (v *mailView) InThread() bool { return v.inThread || v.searchActive || v.bundleActive }
 
 func (v *mailView) ExitDetail(key string) {
-	if key == "q" && v.searchActive && !v.inThread && (v.requests.kind == mailRequestTopic || v.requests.kind == mailRequestSearch) {
+	if key == "q" && (v.searchActive || v.bundleActive) && !v.inThread && (v.requests.kind == mailRequestTopic || v.requests.kind == mailRequestSearch) {
 		v.requests.cancel()
 		v.clearSearch()
+		v.clearBundle()
 		return
 	}
 	v.ExitThread()
 }
 
 func (v *mailView) ExitThread() {
-	if v.searchActive && !v.inThread && (v.requests.kind == mailRequestTopic || v.requests.kind == mailRequestSearch) {
+	if (v.searchActive || v.bundleActive) && !v.inThread && (v.requests.kind == mailRequestTopic || v.requests.kind == mailRequestSearch) {
 		v.requests.cancel()
 		return
 	}
@@ -1116,6 +1217,11 @@ func (v *mailView) ExitThread() {
 		v.inThread = false
 		v.threadNotice = ""
 		v.modal = nil
+		v.requests.cancel()
+		return
+	}
+	if v.bundleActive {
+		v.clearBundle()
 		v.requests.cancel()
 		return
 	}
@@ -1134,8 +1240,20 @@ func (v *mailView) clearSearch() {
 	v.modal = nil
 }
 
+func (v *mailView) clearBundle() {
+	v.bundleActive = false
+	v.bundlePostingID = 0
+	v.bundleTitle = ""
+	v.bundleNextPage = ""
+	v.bundleLoadingMore = false
+	v.bundleMoreID++
+	v.bundleList.setPostings(nil)
+	v.notice = ""
+	v.modal = nil
+}
+
 func (v *mailView) CancelPendingDetail() bool {
-	if v.requests.kind != mailRequestTopic && v.requests.kind != mailRequestReply && v.requests.kind != mailRequestForward && v.requests.kind != mailRequestSearch && v.requests.kind != mailRequestBulkReply {
+	if v.requests.kind != mailRequestTopic && v.requests.kind != mailRequestReply && v.requests.kind != mailRequestForward && v.requests.kind != mailRequestSearch && v.requests.kind != mailRequestBundle && v.requests.kind != mailRequestBulkReply {
 		return false
 	}
 	v.requests.cancel()
@@ -1164,6 +1282,7 @@ func (v *mailView) Resize(width, height int) {
 	}
 	v.postingList.setSize(width, height)
 	v.searchList.setSize(width, height)
+	v.bundleList.setSize(width, height)
 	v.topicViewport.SetWidth(width)
 	v.contentHeight = height
 	v.fitThreadViewport()
@@ -1224,6 +1343,7 @@ func (v *mailView) switchBox(index int) tea.Cmd {
 	v.inThread = false
 	v.threadNotice = ""
 	v.clearSearch()
+	v.clearBundle()
 	v.requests.cancel()
 	v.notice = ""
 	v.postingList.setPostings(nil)
@@ -1429,6 +1549,31 @@ func (v *mailView) loadMoreSearchResults() tea.Cmd {
 	return v.fetchMoreSearchResults(v.vc.ctx, v.searchMoreID, v.searchQuery, v.searchNextPage)
 }
 
+// requestBundle opens a bundle row: the unseen threads it groups, from their first page.
+// They grow downwards from there, the same way a box does.
+func (v *mailView) requestBundle(postingID int64) tea.Cmd {
+	v.bundleNextPage = ""
+	v.bundleLoadingMore = false
+	v.bundleMoreID++
+	requestID, ctx := v.requests.begin(v.vc.ctx, mailRequestBundle)
+	return v.fetchBundle(ctx, requestID, v.currentBoxID(), postingID)
+}
+
+// loadMoreBundlePostings reads the page of the bundle below the ones the reader has
+// scrolled to, or below threads they can already see the end of.
+func (v *mailView) loadMoreBundlePostings() tea.Cmd {
+	if !v.bundleActive || v.bundleLoadingMore || v.bundleNextPage == "" {
+		return nil
+	}
+	if v.bundleList.hasRowsBelow() && len(v.bundleList.postings)-v.bundleList.cursor > loadMoreThreshold {
+		return nil
+	}
+
+	v.bundleLoadingMore = true
+	v.bundleMoreID++
+	return v.fetchMoreBundlePostings(v.vc.ctx, v.bundleMoreID, v.bundlePostingID, v.bundleNextPage)
+}
+
 func (v *mailView) requestTopic(boxID, topicID, postingID int64, title string) tea.Cmd {
 	requestID, ctx := v.requests.begin(v.vc.ctx, mailRequestTopic)
 	return v.fetchTopic(ctx, requestID, boxID, topicID, postingID, title)
@@ -1560,12 +1705,21 @@ func (v *mailView) openSelected() tea.Cmd {
 	if v.searchActive {
 		selected = v.searchList.selectedPosting()
 	}
+	if v.bundleActive {
+		selected = v.bundleList.selectedPosting()
+	}
 	if selected == nil {
 		return nil
 	}
-	topicID := selected.TopicID
-	if topicID == 0 {
-		topicID = selected.ID
+	// A bundle names a topic only when it holds one unseen thread — otherwise its row
+	// opens the bundle itself. The posting's own id is never a topic id, so anything
+	// else without one has nowhere to go.
+	if selected.TopicID == 0 {
+		if selected.Bundled {
+			return v.requestBundle(selected.ID)
+		}
+		err := fmt.Errorf("this item does not identify an email thread")
+		return func() tea.Msg { return errMsg{err} }
 	}
 	// Posting.Name is the thread's subject; Summary is only the last message's
 	// excerpt, kept as the fallback for a posting with no name.
@@ -1573,7 +1727,7 @@ func (v *mailView) openSelected() tea.Cmd {
 	if title == "" {
 		title = selected.Summary
 	}
-	return v.requestTopic(v.currentBoxID(), topicID, selected.ID, title)
+	return v.requestTopic(v.currentBoxID(), selected.TopicID, selected.ID, title)
 }
 
 // markPostingSeen marks a thread as seen once it has been opened, the way the
@@ -1598,6 +1752,9 @@ func (v *mailView) openedPosting(postingID int64) *mail.Posting {
 	list := &v.postingList
 	if v.searchActive {
 		list = &v.searchList
+	}
+	if v.bundleActive {
+		list = &v.bundleList
 	}
 	for i := range list.postings {
 		if list.postings[i].ID == postingID {
@@ -1842,17 +1999,15 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 			return v.vc.sdk.Postings().Unmute(v.vc.ctx, p.ID)
 		})
 	case "r", "R":
-		topicID := p.TopicID
-		if topicID == 0 {
-			topicID = p.ID
+		if p.TopicID == 0 {
+			return v.openSelected()
 		}
-		return v.loadReplyContext(topicID, p.Summary)
+		return v.loadReplyContext(p.TopicID, p.Summary)
 	case "f", "F":
-		topicID := p.TopicID
-		if topicID == 0 {
-			topicID = p.ID
+		if p.TopicID == 0 {
+			return v.openSelected()
 		}
-		return v.loadForwardContext(topicID, p.Summary)
+		return v.loadForwardContext(p.TopicID, p.Summary)
 	}
 	return nil
 }
@@ -2089,6 +2244,32 @@ func (v *mailView) readSearchPage(ctx context.Context, query string, page int) (
 		nextPage = results.NextPage
 	}
 	return postings, nextPage, nil
+}
+
+func (v *mailView) fetchBundle(ctx context.Context, requestID uint64, boxID, postingID int64) tea.Cmd {
+	return func() tea.Msg {
+		postings, title, nextPage, err := v.readBundlePage(ctx, postingID, "")
+		return bundleLoadedMsg{requestID: requestID, boxID: boxID, postingID: postingID, title: title, postings: postings, nextPage: nextPage, err: err}
+	}
+}
+
+// fetchMoreBundlePostings reads the page of the bundle below the ones on screen, in the
+// growing lane and without the spinner.
+func (v *mailView) fetchMoreBundlePostings(ctx context.Context, requestID uint64, postingID int64, cursor string) tea.Cmd {
+	return func() tea.Msg {
+		postings, _, nextPage, err := v.readBundlePage(ctx, postingID, cursor)
+		return bundleAppendedMsg{requestID: requestID, postingID: postingID, postings: postings, nextPage: nextPage, err: err}
+	}
+}
+
+// readBundlePage reads one page of the unseen threads a bundle posting groups, and the
+// bundled contact's name for the title.
+func (v *mailView) readBundlePage(ctx context.Context, postingID int64, cursor string) ([]mail.Posting, string, string, error) {
+	page, err := v.vc.sdk.Postings().BundleUnseenPage(ctx, postingID, cursor)
+	if err != nil {
+		return nil, "", "", err
+	}
+	return mail.Postings(page.Postings), terminal.SanitizeLine(page.Contact.Name), page.NextPage, nil
 }
 
 // tuiThreadLimits is what the TUI reads a thread within: threadload's defaults, at the

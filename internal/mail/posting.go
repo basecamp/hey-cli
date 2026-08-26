@@ -22,6 +22,7 @@ type Posting struct {
 	Summary               string
 	AlternativeSenderName string
 	Seen                  bool
+	Bundled               bool
 	BubbledUp             bool
 	Muted                 bool
 	VisibleEntryCount     int32
@@ -76,6 +77,7 @@ func NewPosting(posting generated.Posting) Posting {
 		Summary:               terminal.SanitizeLine(posting.Summary),
 		AlternativeSenderName: terminal.SanitizeLine(posting.AlternativeSenderName),
 		Seen:                  posting.Seen,
+		Bundled:               posting.Bundled,
 		BubbledUp:             posting.BubbledUp,
 		Muted:                 posting.Muted,
 		VisibleEntryCount:     posting.VisibleEntryCount,
