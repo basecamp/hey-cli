@@ -121,6 +121,12 @@ func mailWithTestServer(t *testing.T, status int) (*mailView, *recordedMailReque
 			} else {
 				_, _ = w.Write([]byte(`{"contact":{"id":88,"name":"GitHub","email_address":"notifications@example.com"},"postings":[{"id":512,"kind":"topic","name":"Nightly build is green again","app_url":"https://app.hey.com/topics/101","created_at":"2026-08-24T21:00:00Z","creator":{"id":88,"name":"GitHub"}}]}`))
 			}
+		case "/imbox/seen.json":
+			if r.URL.Query().Get("page") == "" {
+				_, _ = w.Write([]byte(`{"id":1,"postings":[{"id":611,"kind":"topic","name":"Weekly team sync notes","seen":true,"app_url":"https://app.hey.com/topics/100","created_at":"2026-08-20T09:00:00Z","creator":{"id":21,"name":"Claire Lee"}}],"next_history_url":"/imbox?page=seen-page-2"}`))
+			} else {
+				_, _ = w.Write([]byte(`{"id":1,"postings":[{"id":612,"kind":"topic","name":"Invoice #2041 from Fastmail","seen":true,"app_url":"https://app.hey.com/topics/101","created_at":"2026-08-18T15:00:00Z","creator":{"id":22,"name":"Fastmail Billing"}}]}`))
+			}
 		case "/contacts/88.json":
 			_, _ = w.Write([]byte(`{"id":88,"name":"GitHub","entries_title":"All threads with GitHub","postings":[{"id":513,"kind":"topic","name":"Deploy failed on main","seen":true,"app_url":"https://app.hey.com/topics/100","created_at":"2026-08-25T09:00:00Z","creator":{"id":88,"name":"GitHub"}},{"id":514,"kind":"topic","name":"Nightly build is green again","seen":true,"app_url":"https://app.hey.com/topics/101","created_at":"2026-08-24T21:00:00Z","creator":{"id":88,"name":"GitHub"}}]}`))
 		case "/topics/100/entries.json":
@@ -919,8 +925,11 @@ func TestMailViewLoadsFolderSourcesAndPostings(t *testing.T) {
 		t.Fatalf("mail sources = %+v", v.boxes)
 	}
 
+	if cmd := v.SubnavRight(); cmd == nil || !v.seenActive {
+		t.Fatal("moving right past the last box should land on Previously Seen")
+	}
 	if cmd := v.SubnavRight(); cmd != nil || labelsModal(v) == nil {
-		t.Fatal("moving right past the last box should open the Labels picker")
+		t.Fatal("moving right past Previously Seen should open the Labels picker")
 	}
 	folderCmd := v.HandleContentKey(keyPress("enter"))
 	folderLoaded, ok := runCmd(folderCmd).(postingsLoadedMsg)
@@ -970,7 +979,8 @@ func TestMailViewFolderGrowsAsTheReaderScrolls(t *testing.T) {
 	vc.sdk = client
 	v := newMailView(vc)
 	v.Update(runCmd(v.Init()))
-	v.SubnavRight()
+	v.SubnavRight() // Previously Seen
+	v.SubnavRight() // Labels
 	first := runCmd(v.HandleContentKey(keyPress("enter"))).(postingsLoadedMsg)
 	more, _ := v.Update(first)
 	if v.postingPaging.nextPage != "next-cursor" {
@@ -2154,8 +2164,8 @@ func TestMailViewSubnavItems(t *testing.T) {
 	v := mailWithPostings()
 	items, selected, label, centered := v.SubnavItems()
 
-	if len(items) != 3 {
-		t.Errorf("expected 3 subnav items, got %d", len(items))
+	if len(items) != 4 || items[3].label != "Previously Seen" || items[3].shortcut != "9" {
+		t.Errorf("expected the boxes and Previously Seen, got %+v", items)
 	}
 	if selected != 0 {
 		t.Errorf("selected = %d, want 0", selected)
@@ -2957,17 +2967,21 @@ func TestMailViewLabelsTabAndPicker(t *testing.T) {
 	if last := items[len(items)-1]; last.label != "Labels" || last.shortcut != "L" {
 		t.Fatalf("the last tab should be Labels with the L shortcut: %+v", items)
 	}
-	if len(items) != len(testBoxes())+1 {
+	if len(items) != len(testBoxes())+2 {
 		t.Errorf("labels should not appear as their own tabs: %+v", items)
 	}
 	if selected != 0 {
 		t.Errorf("selected tab = %d, want 0", selected)
 	}
 
-	// Moving right from the last box opens the picker instead of switching.
+	// Moving right from the last box lands on Previously Seen; right again opens
+	// the picker instead of switching.
 	v.boxIndex = len(v.tabBoxIndexes()) - 1
+	if cmd := v.SubnavRight(); cmd == nil || !v.seenActive {
+		t.Fatal("moving right past the last box should land on Previously Seen")
+	}
 	if cmd := v.SubnavRight(); cmd != nil || labelsModal(v) == nil {
-		t.Fatal("moving right past the last box should open the picker")
+		t.Fatal("moving right past Previously Seen should open the picker")
 	}
 	if !v.CapturingInput() {
 		t.Error("the open picker should capture input")
@@ -3003,9 +3017,13 @@ func TestMailViewLabelsTabAndPicker(t *testing.T) {
 		t.Error("escape should close the picker and keep the current label")
 	}
 
-	// Left from the Labels tab returns to the last box tab.
-	if cmd := v.SubnavLeft(); cmd == nil || v.currentSourceKind() == mail.KindFolder {
-		t.Error("left from Labels should return to the last box tab")
+	// Left from the Labels tab lands on Previously Seen, and left again on the
+	// last box tab.
+	if cmd := v.SubnavLeft(); cmd == nil || !v.seenActive {
+		t.Error("left from Labels should land on Previously Seen")
+	}
+	if cmd := v.SubnavLeft(); cmd == nil || v.seenActive || v.currentSourceKind() != mail.KindBox {
+		t.Error("left from Previously Seen should return to the last box tab")
 	}
 
 	// Shift+L opens the Labels picker, the way Shift+K opens Collections.
@@ -3364,6 +3382,247 @@ func TestMailViewReplyOnABundleOpensIt(t *testing.T) {
 	v.Update(loaded)
 	if !v.bundleActive {
 		t.Fatal("reply on a bundle should open the bundle")
+	}
+}
+
+func TestMailViewJumpsToPreviouslySeen(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+
+	loaded, ok := runCmd(v.handleBoxShortcut("9")).(seenLoadedMsg)
+	if !ok || loaded.err != nil {
+		t.Fatalf("jumping to Previously Seen returned %#v", loaded)
+	}
+	if recorded.path != "/imbox/seen.json" {
+		t.Errorf("read %s, want /imbox/seen.json", recorded.path)
+	}
+	more, _ := v.Update(loaded)
+	if !v.seenActive {
+		t.Fatal("9 should open the Previously Seen screen")
+	}
+	if len(v.seenList.postings) != 1 || v.seenList.postings[0].TopicID != 100 {
+		t.Fatalf("seen postings = %+v", v.seenList.postings)
+	}
+	// The list is shorter than the window with a page below, so it grows at once,
+	// following the cursor out of next_history_url back into the seen route.
+	appended, ok := runCmd(more).(seenAppendedMsg)
+	if !ok || appended.err != nil {
+		t.Fatalf("growing the seen list returned %#v", appended)
+	}
+	if recorded.path != "/imbox/seen.json" || recorded.rawQueries[len(recorded.rawQueries)-1] != "page=seen-page-2" {
+		t.Errorf("read %s?%s, want /imbox/seen.json?page=seen-page-2", recorded.path, recorded.rawQueries[len(recorded.rawQueries)-1])
+	}
+	v.Update(appended)
+	if len(v.seenList.postings) != 2 || v.seenList.postings[1].TopicID != 101 {
+		t.Fatalf("grown seen postings = %+v", v.seenList.postings)
+	}
+	if v.seenNextPage != "" {
+		t.Errorf("nextPage = %q, want none after the last page", v.seenNextPage)
+	}
+	// The box row stays under the screen's own label, with the screen's own tab —
+	// after the boxes, before Labels — selected.
+	if items, selected, label, _ := v.SubnavItems(); label != "Previously Seen" || selected != len(items)-1 || items[selected].label != "Previously Seen" {
+		t.Errorf("subnav = %+v, selected %d, label %q", items, selected, label)
+	}
+
+	// Enter on a thread opens it the normal way, and esc steps back out through
+	// the seen screen to the box.
+	topic, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(topicLoadedMsg)
+	if !ok || topic.err != nil || topic.topicID != 100 {
+		t.Fatalf("opening a seen thread returned %#v", topic)
+	}
+	v.Update(topic)
+	if !v.inThread {
+		t.Fatal("a seen thread should open as a thread")
+	}
+	v.ExitThread()
+	if v.inThread || !v.seenActive {
+		t.Fatalf("leaving the thread should return to the seen screen: inThread %v seenActive %v", v.inThread, v.seenActive)
+	}
+	v.ExitThread()
+	if v.seenActive {
+		t.Fatal("leaving the seen screen should return to the box list")
+	}
+}
+
+func TestMailViewPreviouslySeenIsANoOpWhileOpen(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+
+	loaded, _ := runCmd(v.handleBoxShortcut("9")).(seenLoadedMsg)
+	v.Update(loaded)
+	if cmd := v.handleBoxShortcut("9"); cmd != nil {
+		t.Error("9 on the seen screen should do nothing")
+	}
+}
+
+func TestMailViewBoxShortcutClosesPreviouslySeen(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+
+	loaded, _ := runCmd(v.handleBoxShortcut("9")).(seenLoadedMsg)
+	v.Update(loaded)
+	if cmd := v.handleBoxShortcut("2"); cmd == nil {
+		t.Fatal("a box shortcut should leave the seen screen for the box")
+	}
+	if v.seenActive {
+		t.Error("switching boxes should close the seen screen")
+	}
+}
+
+func TestMailViewOwnBoxShortcutClosesPreviouslySeen(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+
+	loaded, _ := runCmd(v.handleBoxShortcut("9")).(seenLoadedMsg)
+	v.Update(loaded)
+	v.handleBoxShortcut("1") // the box the screen was opened over
+	if v.seenActive {
+		t.Error("the box's own shortcut should close the seen screen")
+	}
+	if len(v.postingList.postings) != 2 {
+		t.Errorf("box postings = %+v", v.postingList.postings)
+	}
+}
+
+func TestMailViewSubnavStepsOutOfPreviouslySeen(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+
+	loaded, _ := runCmd(v.handleBoxShortcut("9")).(seenLoadedMsg)
+	v.Update(loaded)
+	if cmd := v.SubnavLeft(); cmd == nil {
+		t.Fatal("subnav left should leave the seen screen for the last box")
+	}
+	if v.seenActive {
+		t.Error("subnav navigation should close the seen screen")
+	}
+}
+
+func TestMailViewSaysWhyTheSeenScreenIsEmpty(t *testing.T) {
+	v := mailWithPostings()
+	v.seenActive = true
+	v.seenList.setPostings(nil)
+
+	if view := v.View(); !strings.Contains(view, "Nothing has been seen yet") {
+		t.Errorf("empty seen view = %q", view)
+	}
+}
+
+func TestMailViewSeenScreenSurvivesAStaleAppend(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+
+	loaded, _ := runCmd(v.handleBoxShortcut("9")).(seenLoadedMsg)
+	v.Update(loaded)
+	stale := seenAppendedMsg{requestID: v.seenMoreID - 1, postings: []mail.Posting{{ID: 699}}}
+	v.Update(stale)
+	for _, posting := range v.seenList.postings {
+		if posting.ID == 699 {
+			t.Fatal("a stale append should not grow the seen list")
+		}
+	}
+}
+
+func TestMailViewTriagesFromTheSeenScreen(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	loaded, _ := runCmd(v.handleBoxShortcut("9")).(seenLoadedMsg)
+	more, _ := v.Update(loaded)
+	appended, _ := runCmd(more).(seenAppendedMsg)
+	v.Update(appended)
+	if len(v.seenList.postings) != 2 {
+		t.Fatalf("seen postings = %+v", v.seenList.postings)
+	}
+
+	// A seen thread is already in the Imbox, so i has nowhere to move it.
+	if cmd := v.HandleContentKey(keyPress("i")); cmd != nil || v.notice != "Already in Imbox" {
+		t.Fatalf("i on the seen screen: cmd %v notice %q", cmd, v.notice)
+	}
+
+	// Ignoring marks the row and keeps it; stop ignoring clears it.
+	muted, ok := runCmd(v.HandleContentKey(keyPress("-"))).(postingActionDoneMsg)
+	if !ok || muted.err != nil || !muted.seen {
+		t.Fatalf("ignoring returned %#v", muted)
+	}
+	v.Update(muted)
+	if len(v.seenList.postings) != 2 || !v.seenList.postings[0].Muted {
+		t.Fatalf("ignored seen postings = %+v", v.seenList.postings)
+	}
+	unmuted, _ := runCmd(v.HandleContentKey(keyPress("+"))).(postingActionDoneMsg)
+	v.Update(unmuted)
+	if v.seenList.postings[0].Muted {
+		t.Fatal("stop ignoring should clear the mark")
+	}
+
+	// Setting aside moves the thread out of the Imbox, so it leaves the screen.
+	aside, ok := runCmd(v.HandleContentKey(keyPress("a"))).(postingActionDoneMsg)
+	if !ok || aside.err != nil || !aside.seen || aside.effect != postingActionRemove {
+		t.Fatalf("set aside returned %#v", aside)
+	}
+	v.Update(aside)
+	if len(v.seenList.postings) != 1 || v.seenList.postings[0].ID != 612 {
+		t.Fatalf("seen postings after set aside = %+v", v.seenList.postings)
+	}
+
+	// Marked unseen, a thread is not previously seen any more.
+	unseen, ok := runCmd(v.HandleContentKey(keyPress("u"))).(postingActionDoneMsg)
+	if !ok || unseen.err != nil || unseen.effect != postingActionUnseen {
+		t.Fatalf("mark unseen returned %#v", unseen)
+	}
+	v.Update(unseen)
+	if len(v.seenList.postings) != 0 {
+		t.Fatalf("seen postings after unseen = %+v", v.seenList.postings)
+	}
+
+	// The box list underneath was never touched.
+	if len(v.postingList.postings) != 2 {
+		t.Errorf("box postings = %+v", v.postingList.postings)
+	}
+}
+
+func TestMailViewSeenScreenActionAfterClosingLandsNowhere(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	loaded, _ := runCmd(v.handleBoxShortcut("9")).(seenLoadedMsg)
+	v.Update(loaded)
+
+	done, ok := runCmd(v.HandleContentKey(keyPress("a"))).(postingActionDoneMsg)
+	if !ok || !done.seen {
+		t.Fatalf("set aside returned %#v", done)
+	}
+	v.ExitThread()
+	v.Update(done)
+	if len(v.postingList.postings) != 2 {
+		t.Errorf("a seen-screen action landed on the box list: %+v", v.postingList.postings)
+	}
+}
+
+func TestMailViewMovePickerOnTheSeenScreenLeavesTheImboxOut(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	v.SubnavRight() // The Feed under the screen, so the Imbox would otherwise be offered
+	loaded, _ := runCmd(v.handleBoxShortcut("9")).(seenLoadedMsg)
+	v.Update(loaded)
+
+	v.HandleContentKey(keyPress("v"))
+	picker := modalOf[*movePicker](v)
+	if picker == nil {
+		t.Fatal("v on the seen screen should open the move picker")
+	}
+	for _, destination := range picker.destinations {
+		if destination.BoxKind == hey.BoxKindImbox {
+			t.Error("the move picker should not offer the Imbox to a seen thread")
+		}
+	}
+}
+
+func TestMailViewHelpBindingsNamePreviouslySeen(t *testing.T) {
+	v := mailWithPostings()
+	if !hasHelpBinding(v.HelpBindings(), "9") {
+		t.Error("the list help should name 9")
+	}
+
+	v.seenActive = true
+	bindings := v.HelpBindings()
+	for _, key := range []string{"enter", "a", "l", "u", "t", "v", "b", "n"} {
+		if !hasHelpBinding(bindings, key) {
+			t.Errorf("seen screen help misses %q: %+v", key, bindings)
+		}
+	}
+	if hasHelpBinding(bindings, "9") {
+		t.Error("the seen screen help should not name 9")
 	}
 }
 

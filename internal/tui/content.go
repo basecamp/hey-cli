@@ -129,6 +129,19 @@ func (c *contentList) settleCover() {
 	c.clampCursor()
 }
 
+// removeAt takes a posting the list is finished with out of it, keeping the cursor on
+// the posting it was on.
+func (c *contentList) removeAt(index int) {
+	if index < 0 || index >= len(c.postings) {
+		return
+	}
+	c.postings = append(c.postings[:index], c.postings[index+1:]...)
+	if c.cursor > index {
+		c.cursor--
+	}
+	c.settleCover()
+}
+
 // coveredFrom is the index of the first Previously Seen posting while the cover
 // is down, or -1 when nothing is hidden. Everything from there on is under the
 // art: out of reach, and not rendered.

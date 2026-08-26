@@ -83,6 +83,31 @@ func readBox(ctx context.Context, client *hey.Client, source Source, page string
 	}
 }
 
+// ReadSeenPage reads a page of the Imbox's Previously Seen postings, which HEY serves on
+// their own route ordered by when they were seen — the Imbox's own pages order seen
+// postings last, which is why the box cannot stand in for this. There is no Source
+// parameter: the route is account-scoped and names the Imbox itself. An empty cursor
+// reads the first page.
+func ReadSeenPage(ctx context.Context, client *hey.Client, cursor string) (Page, error) {
+	var page *string
+	if cursor != "" {
+		historyPage, err := historyPageCursor(cursor)
+		if err != nil {
+			return Page{}, err
+		}
+		page = &historyPage
+	}
+
+	box, err := client.Boxes().GetImboxSeen(ctx, &generated.GetImboxSeenParams{Page: page})
+	if err != nil {
+		return Page{}, err
+	}
+	if box == nil {
+		return Page{}, fmt.Errorf("mail: the Imbox's seen postings answered no page")
+	}
+	return Page{Postings: box.Postings, Cursor: box.NextHistoryUrl}, nil
+}
+
 func historyPageCursor(nextHistoryURL string) (string, error) {
 	parsed, err := url.Parse(nextHistoryURL)
 	if err != nil {

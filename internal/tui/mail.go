@@ -37,6 +37,7 @@ const (
 	mailRequestForward
 	mailRequestSearch
 	mailRequestBundle
+	mailRequestSeen
 	mailRequestBulkReply
 )
 
@@ -147,6 +148,26 @@ type bundleAppendedMsg struct {
 	err       error
 }
 
+// seenLoadedMsg is the first page of the Imbox's Previously Seen threads, read on
+// their own route when the reader jumps to the seen screen. The screen is never
+// re-read live — the box underneath still refreshes through its own lane, and
+// reopening reads the list fresh.
+type seenLoadedMsg struct {
+	requestID uint64
+	nextPage  string
+	postings  []mail.Posting
+	err       error
+}
+
+// seenAppendedMsg is the page of seen threads below the ones on screen, read because
+// the reader scrolled towards the bottom. Its own lane, like a box's.
+type seenAppendedMsg struct {
+	requestID uint64
+	nextPage  string
+	postings  []mail.Posting
+	err       error
+}
+
 type attachmentSavedMsg struct {
 	topicID      int64
 	attachmentID string
@@ -178,6 +199,7 @@ type postingActionDoneMsg struct {
 	sourceKind mail.Kind
 	postingID  int64
 	effect     postingActionEffect
+	seen       bool // the action was taken on the Previously Seen screen
 	err        error
 }
 
@@ -215,6 +237,7 @@ type collectionActionDoneMsg struct {
 	postingID  int64
 	collection mail.Collection
 	added      bool
+	seen       bool // the action was taken on the Previously Seen screen
 	err        error
 }
 
@@ -255,6 +278,10 @@ type mailView struct {
 	bundleTitle            string // what the list is, sanitized: "New from X" or "All threads with X"
 	bundleNextPage         string // the cursor for the page below, empty at the last
 	bundleLoadingMore      bool   // a page of the bundle is already on its way
+	seenList               contentList
+	seenActive             bool
+	seenNextPage           string // the cursor for the page below, empty at the last
+	seenLoadingMore        bool   // a page of seen threads is already on its way
 	screenerCount          int    // senders waiting in The Screener
 	lastBulkReplyID        int64  // delayed delivery currently available for undo
 	pendingMutations       int    // writes that must finish before changing the account context
@@ -269,6 +296,7 @@ type mailView struct {
 	moreRequestID  uint64 // identifies the only page-below read allowed to grow the list
 	searchMoreID   uint64 // the same, for the search results
 	bundleMoreID   uint64 // the same, for an open bundle's threads
+	seenMoreID     uint64 // the same, for the Previously Seen screen
 }
 
 func newMailView(vc *viewContext) *mailView {
@@ -277,6 +305,7 @@ func newMailView(vc *viewContext) *mailView {
 		topicViewport: viewport.New(viewport.WithWidth(0), viewport.WithHeight(0)),
 		searchList:    contentList{hideSeenState: true},
 		bundleList:    contentList{hideSeenState: true},
+		seenList:      contentList{hideSeenState: true},
 	}
 	if vc.loadCover != nil {
 		view.cover = parseCoverPreset(vc.loadCover())
@@ -444,6 +473,35 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			v.bundleNextPage = msg.nextPage
 		}
 		return v.loadMoreBundlePostings(), true
+
+	case seenLoadedMsg:
+		if cmd, ok := v.requests.settle(newRequestResult(msg.requestID, msg.err)); !ok {
+			return cmd, true
+		}
+		if !v.seenActive {
+			return nil, true
+		}
+		v.seenNextPage = msg.nextPage
+		v.seenLoadingMore = false
+		v.seenList.setPostings(msg.postings)
+		return v.loadMoreSeenPostings(), true
+
+	case seenAppendedMsg:
+		if msg.requestID != v.seenMoreID || !v.seenActive {
+			return nil, true
+		}
+		v.seenLoadingMore = false
+		if msg.err != nil {
+			v.noteFailure("Could not load more mail", msg.err)
+			return nil, true
+		}
+		v.seenList.growPostings(msg.postings)
+		if len(msg.postings) == 0 {
+			v.seenNextPage = ""
+		} else {
+			v.seenNextPage = msg.nextPage
+		}
+		return v.loadMoreSeenPostings(), true
 
 	case topicLoadedMsg:
 		// A zero box identifies a topic opened directly rather than selected from
@@ -625,6 +683,9 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 
 	case postingActionDoneMsg:
 		v.finishMutation()
+		if msg.seen {
+			return v.applySeenPostingAction(msg), true
+		}
 		if msg.boxID != v.currentBoxID() || (msg.sourceKind != "" && msg.sourceKind != v.currentSourceKind()) {
 			return nil, true
 		}
@@ -692,6 +753,19 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 
 	case collectionActionDoneMsg:
 		v.finishMutation()
+		if msg.seen {
+			if !v.seenActive {
+				return nil, true
+			}
+			if msg.err != nil {
+				v.notice = terminal.SanitizeLine(errorNotice("Could not update collections", msg.err))
+				return nil, true
+			}
+			if index := postingIndexIn(v.seenList.postings, msg.postingID); index >= 0 {
+				updatePostingCollection(&v.seenList, index, msg.collection, msg.added)
+			}
+			return notify(msg.action), true
+		}
 		if msg.sourceID != v.currentBoxID() || msg.sourceKind != v.currentSourceKind() {
 			return nil, true
 		}
@@ -701,7 +775,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		done := notify(msg.action)
 		if index := v.postingIndex(msg.postingID); index >= 0 {
-			v.updatePostingCollection(index, msg.collection, msg.added)
+			updatePostingCollection(&v.postingList, index, msg.collection, msg.added)
 			if !msg.added && msg.sourceKind == mail.KindCollection && msg.collection.ID == msg.sourceID {
 				v.removePostingAt(index)
 			}
@@ -761,6 +835,16 @@ func (v *mailView) View() string {
 			} else {
 				view = styleMuted.Render("  Nothing unseen here any more — reload the box to catch it up.")
 			}
+		}
+		if v.notice != "" {
+			return v.vc.styles.title.Render(v.notice) + "\n" + view
+		}
+		return view
+	}
+	if v.seenActive {
+		view := v.seenList.view()
+		if len(v.seenList.postings) == 0 && !v.requests.loading {
+			view = styleMuted.Render("  Nothing has been seen yet.")
 		}
 		if v.notice != "" {
 			return v.vc.styles.title.Render(v.notice) + "\n" + view
@@ -860,6 +944,28 @@ func (v *mailView) HelpBindings() []helpBinding {
 	if v.bundleActive {
 		return []helpBinding{{"enter", "open"}, {"esc", "back"}}
 	}
+	if v.seenActive {
+		ignoreBinding := helpBinding{"-", "ignore"}
+		if selected := v.seenList.selectedPosting(); selected != nil && selected.Muted {
+			ignoreBinding = helpBinding{"+", "stop ignoring"}
+		}
+		return []helpBinding{
+			{"enter", "open"},
+			{"r", "reply"},
+			{"f", "forward"},
+			{"v", "move"},
+			{"b", "labels"},
+			{"n", "collections"},
+			{"u", "unseen"},
+			{"l", "reply later"},
+			{"a", "set aside"},
+			{"d", "feed"},
+			{"p", "paper trail"},
+			{"t", "trash"},
+			{"!", "spam"},
+			ignoreBinding,
+		}
+	}
 	ignoreBinding := helpBinding{"-", "ignore"}
 	if selected := v.postingList.selectedPosting(); selected != nil && selected.Muted {
 		ignoreBinding = helpBinding{"+", "stop ignoring"}
@@ -895,6 +1001,7 @@ func (v *mailView) HelpBindings() []helpBinding {
 		helpBinding{"t", "trash"},
 		helpBinding{"!", "spam"},
 		ignoreBinding,
+		helpBinding{"9", "previously seen"},
 		helpBinding{"ctrl+r", "reload"},
 	)
 	if v.postingList.cover != coverNone {
@@ -931,8 +1038,15 @@ func (v *mailView) SubnavItems() ([]navItem, int, string, bool) {
 		}
 		return nil, 0, label, true
 	}
+	// The seen screen keeps the box row — its threads are the Imbox's, the number keys
+	// still work, and esc lands on the tab that stays highlighted — under its own label.
 	label := "Mail"
-	if v.boxIndex >= 0 && v.boxIndex < len(v.boxes) {
+	if v.seenActive {
+		label = "Previously Seen"
+		if v.seenLoadingMore {
+			label += " · loading more…"
+		}
+	} else if v.boxIndex >= 0 && v.boxIndex < len(v.boxes) {
 		label = terminal.SanitizeLine(v.boxes[v.boxIndex].Name)
 		if v.postingPaging.loading {
 			label += " · loading more…"
@@ -950,6 +1064,14 @@ func (v *mailView) SubnavItems() ([]navItem, int, string, bool) {
 		}
 	}
 	items := boxNavItems(boxes)
+	// The screen is the Imbox's, so its tab arrives with the boxes rather than
+	// standing alone while they load.
+	if v.imboxSource() != nil {
+		items = append(items, navItem{shortcut: "9", label: "Previously Seen"})
+		if v.seenActive {
+			selected = len(items) - 1
+		}
+	}
 	if v.hasLabels() {
 		items = append(items, navItem{shortcut: "L", label: "Labels"})
 		if v.currentSourceKind() == mail.KindFolder {
@@ -1012,21 +1134,21 @@ func (v *mailView) SubnavLeft() tea.Cmd {
 		return nil
 	}
 	tabIndexes := v.tabBoxIndexes()
+	if v.seenActive {
+		if len(tabIndexes) > 0 {
+			return v.switchBox(tabIndexes[len(tabIndexes)-1])
+		}
+		return nil
+	}
 	switch v.currentSourceKind() {
 	case mail.KindCollection:
 		if v.hasLabels() {
 			v.openLabels()
 			return nil
 		}
-		if len(tabIndexes) > 0 {
-			return v.switchBox(tabIndexes[len(tabIndexes)-1])
-		}
-		return nil
+		return v.openPreviouslySeen()
 	case mail.KindFolder:
-		if len(tabIndexes) > 0 {
-			return v.switchBox(tabIndexes[len(tabIndexes)-1])
-		}
-		return nil
+		return v.openPreviouslySeen()
 	case mail.KindBox:
 		for i, boxIndex := range tabIndexes {
 			if boxIndex == v.boxIndex && i > 0 {
@@ -1039,6 +1161,14 @@ func (v *mailView) SubnavLeft() tea.Cmd {
 
 func (v *mailView) SubnavRight() tea.Cmd {
 	if v.searchActive || v.searchOpen() || v.bundleActive {
+		return nil
+	}
+	if v.seenActive {
+		if v.hasLabels() {
+			v.openLabels()
+		} else if v.hasCollections() {
+			v.openCollections()
+		}
 		return nil
 	}
 	switch v.currentSourceKind() {
@@ -1061,12 +1191,7 @@ func (v *mailView) SubnavRight() tea.Cmd {
 			if i+1 < len(tabIndexes) {
 				return v.switchBox(tabIndexes[i+1])
 			}
-			if v.hasLabels() {
-				v.openLabels()
-			} else if v.hasCollections() {
-				v.openCollections()
-			}
-			return nil
+			return v.openPreviouslySeen()
 		}
 	}
 	return nil
@@ -1165,6 +1290,36 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 
+	if v.seenActive {
+		switch msg.Key().Code {
+		case tea.KeyUp:
+			v.seenList.moveUp()
+		case tea.KeyDown:
+			v.seenList.moveDown()
+			return v.loadMoreSeenPostings()
+		case tea.KeyEnter:
+			return v.openSelected()
+		default:
+			switch msg.String() {
+			case "k":
+				v.seenList.moveUp()
+			case "j":
+				v.seenList.moveDown()
+				return v.loadMoreSeenPostings()
+			case "v", "V":
+				v.startMove()
+				return nil
+			case "b", "B":
+				return v.startFolderPicker()
+			case "n", "N":
+				return v.startCollectionPicker()
+			default:
+				return v.handlePostingAction(msg.String())
+			}
+		}
+		return nil
+	}
+
 	switch msg.Key().Code {
 	case tea.KeyUp:
 		v.postingList.moveUp()
@@ -1212,20 +1367,23 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
-func (v *mailView) InThread() bool { return v.inThread || v.searchActive || v.bundleActive }
+func (v *mailView) InThread() bool {
+	return v.inThread || v.searchActive || v.bundleActive || v.seenActive
+}
 
 func (v *mailView) ExitDetail(key string) {
-	if key == "q" && (v.searchActive || v.bundleActive) && !v.inThread && (v.requests.kind == mailRequestTopic || v.requests.kind == mailRequestSearch) {
+	if key == "q" && (v.searchActive || v.bundleActive || v.seenActive) && !v.inThread && (v.requests.kind == mailRequestTopic || v.requests.kind == mailRequestSearch) {
 		v.requests.cancel()
 		v.clearSearch()
 		v.clearBundle()
+		v.clearSeen()
 		return
 	}
 	v.ExitThread()
 }
 
 func (v *mailView) ExitThread() {
-	if (v.searchActive || v.bundleActive) && !v.inThread && (v.requests.kind == mailRequestTopic || v.requests.kind == mailRequestSearch) {
+	if (v.searchActive || v.bundleActive || v.seenActive) && !v.inThread && (v.requests.kind == mailRequestTopic || v.requests.kind == mailRequestSearch) {
 		v.requests.cancel()
 		return
 	}
@@ -1238,6 +1396,11 @@ func (v *mailView) ExitThread() {
 	}
 	if v.bundleActive {
 		v.clearBundle()
+		v.requests.cancel()
+		return
+	}
+	if v.seenActive {
+		v.clearSeen()
 		v.requests.cancel()
 		return
 	}
@@ -1269,8 +1432,44 @@ func (v *mailView) clearBundle() {
 	v.modal = nil
 }
 
+func (v *mailView) clearSeen() {
+	v.seenActive = false
+	v.seenNextPage = ""
+	v.seenLoadingMore = false
+	v.seenMoreID++
+	v.seenList.setPostings(nil)
+	v.notice = ""
+	v.modal = nil
+}
+
+// applySeenPostingAction lands a thread action taken on the Previously Seen screen. A
+// thread moved out of the Imbox, trashed, marked spam or marked unseen is not previously
+// seen any more, so it leaves the screen, and what is below comes up to fill the gap.
+func (v *mailView) applySeenPostingAction(msg postingActionDoneMsg) tea.Cmd {
+	if !v.seenActive {
+		return nil
+	}
+	if msg.err != nil {
+		return func() tea.Msg { return errMsg{msg.err} }
+	}
+	if idx := postingIndexIn(v.seenList.postings, msg.postingID); idx >= 0 {
+		switch msg.effect {
+		case postingActionNone:
+		case postingActionRemove, postingActionUnseen:
+			v.seenList.removeAt(idx)
+		case postingActionSeen:
+			v.seenList.markSeen(idx)
+		case postingActionIgnore:
+			v.seenList.postings[idx].Muted = true
+		case postingActionStopIgnoring:
+			v.seenList.postings[idx].Muted = false
+		}
+	}
+	return tea.Batch(notify(msg.action), v.loadMoreSeenPostings())
+}
+
 func (v *mailView) CancelPendingDetail() bool {
-	if v.requests.kind != mailRequestTopic && v.requests.kind != mailRequestReply && v.requests.kind != mailRequestForward && v.requests.kind != mailRequestSearch && v.requests.kind != mailRequestBundle && v.requests.kind != mailRequestBulkReply {
+	if v.requests.kind != mailRequestTopic && v.requests.kind != mailRequestReply && v.requests.kind != mailRequestForward && v.requests.kind != mailRequestSearch && v.requests.kind != mailRequestBundle && v.requests.kind != mailRequestSeen && v.requests.kind != mailRequestBulkReply {
 		return false
 	}
 	v.requests.cancel()
@@ -1300,6 +1499,7 @@ func (v *mailView) Resize(width, height int) {
 	v.postingList.setSize(width, height)
 	v.searchList.setSize(width, height)
 	v.bundleList.setSize(width, height)
+	v.seenList.setSize(width, height)
 	v.topicViewport.SetWidth(width)
 	v.contentHeight = height
 	v.fitThreadViewport()
@@ -1349,23 +1549,61 @@ func (v *mailView) handleBoxShortcut(key string) tea.Cmd {
 			v.openCollections()
 			return func() tea.Msg { return nil }
 		}
+	case "9":
+		return v.openPreviouslySeen()
 	}
 	return v.switchBox(boxForShortcut(key, v.boxes))
 }
 
 func (v *mailView) switchBox(index int) tea.Cmd {
-	if index < 0 || index >= len(v.boxes) || index == v.boxIndex {
+	if index < 0 || index >= len(v.boxes) {
+		return nil
+	}
+	if index == v.boxIndex {
+		// The box under the seen screen: its number or tab closes the screen the
+		// way esc does, landing on the list that is already there.
+		if v.seenActive {
+			v.clearSeen()
+			v.requests.cancel()
+		}
 		return nil
 	}
 	v.inThread = false
 	v.threadNotice = ""
 	v.clearSearch()
 	v.clearBundle()
+	v.clearSeen()
 	v.requests.cancel()
 	v.notice = ""
 	v.postingList.setPostings(nil)
 	v.boxIndex = index
 	return v.requestPostings(v.boxes[index])
+}
+
+// openPreviouslySeen jumps to the Imbox's Previously Seen threads on their own screen,
+// the web app's 9 shortcut. It opens over whichever source is on screen — the route is
+// account-scoped, so nothing is asked of the current box — and esc returns there. The
+// screen shows every seen thread flat, which is also the way to see what a covered
+// Imbox hides.
+func (v *mailView) openPreviouslySeen() tea.Cmd {
+	if v.seenActive {
+		return nil
+	}
+	v.inThread = false
+	v.threadNotice = ""
+	v.clearSearch()
+	v.clearBundle()
+	v.notice = ""
+	// The screen opens before its first page answers, the way a box switch does: the
+	// tab is selected there and then, so the ribbon reads on past it to Labels rather
+	// than asking for the screen again.
+	v.seenActive = true
+	v.seenList.setPostings(nil)
+	v.seenNextPage = ""
+	v.seenLoadingMore = false
+	v.seenMoreID++
+	requestID, ctx := v.requests.begin(v.vc.ctx, mailRequestSeen)
+	return v.fetchSeenPostings(ctx, requestID)
 }
 
 func (v *mailView) currentSource() *mail.Source {
@@ -1604,14 +1842,33 @@ func (v *mailView) loadMoreBundlePostings() tea.Cmd {
 	return v.fetchMoreBundlePostings(v.vc.ctx, v.bundleMoreID, v.bundlePostingID, v.bundleNextPage)
 }
 
+// loadMoreSeenPostings reads the page of seen threads below the ones the reader has
+// scrolled to, or below threads they can already see the end of.
+func (v *mailView) loadMoreSeenPostings() tea.Cmd {
+	if !v.seenActive || v.seenLoadingMore || v.seenNextPage == "" {
+		return nil
+	}
+	if v.seenList.hasRowsBelow() && len(v.seenList.postings)-v.seenList.cursor > loadMoreThreshold {
+		return nil
+	}
+
+	v.seenLoadingMore = true
+	v.seenMoreID++
+	return v.fetchMoreSeenPostings(v.vc.ctx, v.seenMoreID, v.seenNextPage)
+}
+
 func (v *mailView) requestTopic(boxID, topicID, postingID int64, title string) tea.Cmd {
 	requestID, ctx := v.requests.begin(v.vc.ctx, mailRequestTopic)
 	return v.fetchTopic(ctx, requestID, boxID, topicID, postingID, title)
 }
 
 func (v *mailView) postingIndex(postingID int64) int {
-	for i := range v.postingList.postings {
-		if v.postingList.postings[i].ID == postingID {
+	return postingIndexIn(v.postingList.postings, postingID)
+}
+
+func postingIndexIn(postings []mail.Posting, postingID int64) int {
+	for i := range postings {
+		if postings[i].ID == postingID {
 			return i
 		}
 	}
@@ -1619,14 +1876,7 @@ func (v *mailView) postingIndex(postingID int64) int {
 }
 
 func (v *mailView) removePostingAt(index int) {
-	if index < 0 || index >= len(v.postingList.postings) {
-		return
-	}
-	v.postingList.postings = append(v.postingList.postings[:index], v.postingList.postings[index+1:]...)
-	if v.postingList.cursor > index {
-		v.postingList.cursor--
-	}
-	v.postingList.settleCover()
+	v.postingList.removeAt(index)
 }
 
 func (v *mailView) moveAttachmentCursor(delta int) {
@@ -1735,6 +1985,9 @@ func (v *mailView) openSelected() tea.Cmd {
 	if v.searchActive {
 		selected = v.searchList.selectedPosting()
 	}
+	if v.seenActive {
+		selected = v.seenList.selectedPosting()
+	}
 	if v.bundleActive {
 		selected = v.bundleList.selectedPosting()
 	}
@@ -1788,6 +2041,9 @@ func (v *mailView) openedPosting(postingID int64) *mail.Posting {
 	if v.searchActive {
 		list = &v.searchList
 	}
+	if v.seenActive {
+		list = &v.seenList
+	}
 	if v.bundleActive {
 		list = &v.bundleList
 	}
@@ -1802,8 +2058,8 @@ func (v *mailView) openedPosting(postingID int64) *mail.Posting {
 // --- Posting actions ---
 
 func (v *mailView) startMove() {
-	selected := v.postingList.selectedPosting()
-	currentSource := v.currentSource()
+	selected := v.actionList().selectedPosting()
+	currentSource := v.actionSource()
 	if selected == nil || currentSource == nil {
 		return
 	}
@@ -1844,7 +2100,7 @@ func (v *mailView) startFolderPicker() tea.Cmd {
 		v.notice = "Retrying labels…"
 		return v.requestSources()
 	}
-	selected := v.postingList.selectedPosting()
+	selected := v.actionList().selectedPosting()
 	if selected == nil {
 		return nil
 	}
@@ -1893,7 +2149,7 @@ func (v *mailView) startCollectionPicker() tea.Cmd {
 		v.notice = "Retrying collections…"
 		return v.requestSources()
 	}
-	selected := v.postingList.selectedPosting()
+	selected := v.actionList().selectedPosting()
 	if selected == nil {
 		return nil
 	}
@@ -1922,6 +2178,7 @@ func (v *mailView) removePostingFromCollection(postingID, topicID int64, collect
 
 func (v *mailView) doCollectionAction(label string, postingID, topicID int64, collection mail.Collection, added bool) tea.Cmd {
 	sourceID, sourceKind := v.currentSourceIdentity()
+	seen := v.seenActive
 	v.pendingMutations++
 	return func() tea.Msg {
 		var err error
@@ -1937,24 +2194,25 @@ func (v *mailView) doCollectionAction(label string, postingID, topicID int64, co
 			postingID:  postingID,
 			collection: collection,
 			added:      added,
+			seen:       seen,
 			err:        err,
 		}
 	}
 }
 
-func (v *mailView) updatePostingCollection(index int, collection mail.Collection, added bool) {
-	memberships := v.postingList.postings[index].Collections
+func updatePostingCollection(list *contentList, index int, collection mail.Collection, added bool) {
+	memberships := list.postings[index].Collections
 	for i, membership := range memberships {
 		if membership.ID != collection.ID {
 			continue
 		}
 		if !added {
-			v.postingList.postings[index].Collections = append(memberships[:i], memberships[i+1:]...)
+			list.postings[index].Collections = append(memberships[:i], memberships[i+1:]...)
 		}
 		return
 	}
 	if added {
-		v.postingList.postings[index].Collections = append(memberships, collection)
+		list.postings[index].Collections = append(memberships, collection)
 	}
 }
 
@@ -1964,8 +2222,36 @@ func (v *mailView) movePostingToBox(postingID int64, destination mail.Source) te
 	})
 }
 
+// actionList is the list a thread action works on: the Previously Seen screen's list
+// while it is open, the box list otherwise. Search results and bundles navigate only.
+func (v *mailView) actionList() *contentList {
+	if v.seenActive {
+		return &v.seenList
+	}
+	return &v.postingList
+}
+
+// actionSource is the box a thread action files out of: the Imbox while the Previously
+// Seen screen is open — its threads are the Imbox's whatever source the screen was
+// opened over — and the source on screen otherwise.
+func (v *mailView) actionSource() *mail.Source {
+	if v.seenActive {
+		return v.imboxSource()
+	}
+	return v.currentSource()
+}
+
+func (v *mailView) imboxSource() *mail.Source {
+	for i := range v.boxes {
+		if v.boxes[i].Kind == mail.KindBox && v.boxes[i].BoxKind == hey.BoxKindImbox {
+			return &v.boxes[i]
+		}
+	}
+	return nil
+}
+
 func (v *mailView) handlePostingAction(key string) tea.Cmd {
-	selected := v.postingList.selectedPosting()
+	selected := v.actionList().selectedPosting()
 	if selected == nil {
 		return nil
 	}
@@ -2048,13 +2334,11 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 }
 
 func (v *mailView) moveSelectedToImbox(boxID, postingID int64) tea.Cmd {
-	for _, source := range v.boxes {
-		if source.Kind == mail.KindBox && source.BoxKind == hey.BoxKindImbox {
-			imboxID := source.ID
-			return v.moveSelectedToKnownBox("Imbox", hey.BoxKindImbox, boxID, postingID, func() error {
-				return v.vc.sdk.Postings().Move(v.vc.ctx, imboxID, postingID)
-			})
-		}
+	if source := v.imboxSource(); source != nil {
+		imboxID := source.ID
+		return v.moveSelectedToKnownBox("Imbox", hey.BoxKindImbox, boxID, postingID, func() error {
+			return v.vc.sdk.Postings().Move(v.vc.ctx, imboxID, postingID)
+		})
 	}
 	v.notice = "Imbox is unavailable"
 	return nil
@@ -2069,6 +2353,9 @@ func (v *mailView) moveSelectedToKnownBox(name, kind string, boxID, postingID in
 }
 
 func (v *mailView) boxMoveEffect() postingActionEffect {
+	if v.seenActive {
+		return postingActionRemove
+	}
 	if isOrganizedMailSource(v.currentSourceKind()) {
 		return postingActionNone
 	}
@@ -2079,7 +2366,7 @@ func (v *mailView) boxMoveEffect() postingActionEffect {
 // at all. The destination is one of HEY's own box kinds, so it is the box's kind that
 // answers — a label or a collection carries none and is never the destination.
 func (v *mailView) movesOutOfCurrentBox(destinationBoxKind string) bool {
-	source := v.currentSource()
+	source := v.actionSource()
 	if source == nil {
 		return true
 	}
@@ -2088,6 +2375,7 @@ func (v *mailView) movesOutOfCurrentBox(destinationBoxKind string) bool {
 
 func (v *mailView) doPostingAction(label string, effect postingActionEffect, boxID, postingID int64, fn func() error) tea.Cmd {
 	sourceKind := v.currentSourceKind()
+	seen := v.seenActive
 	v.pendingMutations++
 	return func() tea.Msg {
 		err := fn()
@@ -2097,6 +2385,7 @@ func (v *mailView) doPostingAction(label string, effect postingActionEffect, box
 			sourceKind: sourceKind,
 			postingID:  postingID,
 			effect:     effect,
+			seen:       seen,
 			err:        err,
 		}
 	}
@@ -2305,6 +2594,32 @@ func (v *mailView) readBundlePage(ctx context.Context, postingID int64, cursor s
 		return nil, "", "", err
 	}
 	return mail.Postings(page.Postings), "New from " + terminal.SanitizeLine(page.Contact.Name), page.NextPage, nil
+}
+
+func (v *mailView) fetchSeenPostings(ctx context.Context, requestID uint64) tea.Cmd {
+	return func() tea.Msg {
+		postings, nextPage, err := v.readSeenPage(ctx, "")
+		return seenLoadedMsg{requestID: requestID, postings: postings, nextPage: nextPage, err: err}
+	}
+}
+
+// fetchMoreSeenPostings reads the page of seen threads below the ones on screen, in the
+// growing lane and without the spinner.
+func (v *mailView) fetchMoreSeenPostings(ctx context.Context, requestID uint64, cursor string) tea.Cmd {
+	return func() tea.Msg {
+		postings, nextPage, err := v.readSeenPage(ctx, cursor)
+		return seenAppendedMsg{requestID: requestID, postings: postings, nextPage: nextPage, err: err}
+	}
+}
+
+// readSeenPage reads one page of the Imbox's Previously Seen threads on their own
+// route, where HEY orders them by when they were seen.
+func (v *mailView) readSeenPage(ctx context.Context, cursor string) ([]mail.Posting, string, error) {
+	page, err := mail.ReadSeenPage(ctx, v.vc.sdk, cursor)
+	if err != nil {
+		return nil, "", err
+	}
+	return mail.Postings(page.Postings), page.Cursor, nil
 }
 
 func (v *mailView) fetchContactThreads(ctx context.Context, requestID uint64, boxID, contactID int64) tea.Cmd {

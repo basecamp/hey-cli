@@ -634,7 +634,11 @@ func TestSubnavNavigationUpdatesHelpWhenItOpensLabels(t *testing.T) {
 	m.focus = rowSubnav
 	m.updateHelpBindings()
 
-	updated, _ := m.Update(keyPress("right"))
+	updated, _ := m.Update(keyPress("right")) // Previously Seen
+	m = updated.(model)
+	updated, _ = m.Update(seenLoadedMsg{requestID: m.mailView.requests.id})
+	m = updated.(model)
+	updated, _ = m.Update(keyPress("right")) // Labels
 	m = updated.(model)
 
 	if labelsModal(m.mailView) == nil {

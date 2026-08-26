@@ -87,8 +87,11 @@ func TestMailViewLoadsAndPagesCollections(t *testing.T) {
 	if len(v.boxes) != 2 || v.boxes[1].Kind != mail.KindCollection {
 		t.Fatalf("sources = %+v", v.boxes)
 	}
+	if cmd := v.SubnavRight(); cmd == nil || !v.seenActive {
+		t.Fatal("right from the last box should land on Previously Seen")
+	}
 	if cmd := v.SubnavRight(); cmd != nil || collectionsModal(v) == nil {
-		t.Fatal("right from the last box should open Collections")
+		t.Fatal("right from Previously Seen should open Collections")
 	}
 	first := runCmd(v.HandleContentKey(keyPress("enter"))).(postingsLoadedMsg)
 	more, _ := v.Update(first)
@@ -575,7 +578,7 @@ func TestMailViewCollectionMembershipDoesNotDuplicate(t *testing.T) {
 	v := mailWithPostings()
 	collection := mail.Collection{ID: 12, Name: "Kitchen remodel"}
 	v.postingList.postings[0].Collections = []mail.Collection{collection}
-	v.updatePostingCollection(0, collection, true)
+	updatePostingCollection(&v.postingList, 0, collection, true)
 	if len(v.postingList.postings[0].Collections) != 1 {
 		t.Errorf("memberships = %+v", v.postingList.postings[0].Collections)
 	}
@@ -583,7 +586,7 @@ func TestMailViewCollectionMembershipDoesNotDuplicate(t *testing.T) {
 
 func TestMailViewCollectionMembershipRemoveUnknownIsStable(t *testing.T) {
 	v := mailWithPostings()
-	v.updatePostingCollection(0, mail.Collection{ID: 12, Name: "Kitchen remodel"}, false)
+	updatePostingCollection(&v.postingList, 0, mail.Collection{ID: 12, Name: "Kitchen remodel"}, false)
 	if len(v.postingList.postings[0].Collections) != 0 {
 		t.Errorf("memberships = %+v", v.postingList.postings[0].Collections)
 	}
