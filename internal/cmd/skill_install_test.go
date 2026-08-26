@@ -78,6 +78,7 @@ func TestSkillInstallCopyFallbackIsIdempotent(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("CODEX_HOME", "")
+	t.Setenv("GROK_HOME", "")
 	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -155,6 +156,7 @@ func agentHome(t *testing.T, dirs ...string) string {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("CODEX_HOME", "")
+	t.Setenv("GROK_HOME", "")
 	for _, dir := range dirs {
 		if err := os.MkdirAll(filepath.Join(home, dir), 0o755); err != nil {
 			t.Fatal(err)
@@ -199,12 +201,13 @@ func TestSkillInstallRefusesForeignLinkOrFile(t *testing.T) {
 // hand-authored skill can legitimately live there. Every install path — the
 // explicit command and the installer's automatic `setup agents` alike — must
 // refuse an unmarked one rather than overwrite it and then claim it.
-func TestSkillInstallRefusesUnmarkedBaselineAndCodexSkills(t *testing.T) {
-	home := agentHome(t, ".codex")
+func TestSkillInstallRefusesUnmarkedBaselineAndAgentSkills(t *testing.T) {
+	home := agentHome(t, ".codex", ".grok")
 	custom := "# my own hey skill\n"
 	baseline := filepath.Join(home, ".agents", "skills", "hey")
 	codex := filepath.Join(home, ".codex", "skills", "hey")
-	for _, dir := range []string{baseline, codex} {
+	grok := filepath.Join(home, ".grok", "skills", "hey")
+	for _, dir := range []string{baseline, codex, grok} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -220,7 +223,10 @@ func TestSkillInstallRefusesUnmarkedBaselineAndCodexSkills(t *testing.T) {
 	if _, err := installSkillToCodex(); !errors.As(err, &unmanaged) {
 		t.Fatalf("installSkillToCodex error = %v, want unmanaged refusal", err)
 	}
-	for _, dir := range []string{baseline, codex} {
+	if _, err := installSkillToGrok(); !errors.As(err, &unmanaged) {
+		t.Fatalf("installSkillToGrok error = %v, want unmanaged refusal", err)
+	}
+	for _, dir := range []string{baseline, codex, grok} {
 		data, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
 		if err != nil || string(data) != custom {
 			t.Errorf("%s changed: %q, %v", dir, data, err)
@@ -254,7 +260,7 @@ func TestClaimSkillDirAcceptsEmptyAndMarkedDirectories(t *testing.T) {
 // follow a symlink planted inside it — a link's target was never inspected,
 // and truncating it would destroy a file we do not own.
 func TestSkillInstallRefusesSymlinkedSkillFileInManagedDir(t *testing.T) {
-	home := agentHome(t, ".codex")
+	home := agentHome(t, ".codex", ".grok")
 	precious := filepath.Join(home, "precious.md")
 	if err := os.WriteFile(precious, []byte("# do not truncate"), 0o644); err != nil {
 		t.Fatal(err)
@@ -262,6 +268,7 @@ func TestSkillInstallRefusesSymlinkedSkillFileInManagedDir(t *testing.T) {
 	for _, dir := range []string{
 		filepath.Join(home, ".agents", "skills", "hey"),
 		filepath.Join(home, ".codex", "skills", "hey"),
+		filepath.Join(home, ".grok", "skills", "hey"),
 	} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
@@ -277,6 +284,9 @@ func TestSkillInstallRefusesSymlinkedSkillFileInManagedDir(t *testing.T) {
 	}
 	if _, err := installSkillToCodex(); err == nil {
 		t.Error("Codex install wrote through a symlinked SKILL.md")
+	}
+	if _, err := installSkillToGrok(); err == nil {
+		t.Error("Grok install wrote through a symlinked SKILL.md")
 	}
 	if data, _ := os.ReadFile(precious); string(data) != "# do not truncate" {
 		t.Errorf("symlink target was truncated: %q", data)

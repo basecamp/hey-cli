@@ -77,9 +77,16 @@ var agentSetupHandlers = map[string]agentSetupHandler{
 		Run:               runCodexSetup,
 		RunNonInteractive: runCodexSetupNonInteractive,
 	},
+	"grok": {
+		Labels: []string{
+			"Copy the HEY skill into Grok's skills directory",
+		},
+		Run:               runGrokSetup,
+		RunNonInteractive: runGrokSetupNonInteractive,
+	},
 }
 
-// runAgentCommand is the subprocess seam for agent CLIs (claude, codex) so
+// runAgentCommand is the subprocess seam for agent CLIs (claude, codex, grok) so
 // tests never spawn a real one. Output is captured, not streamed: the wizard
 // prints its own status lines and surfaces the tool's output only on failure.
 var runAgentCommand = func(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -424,6 +431,41 @@ func installCodexSkill() (string, error) {
 		}
 	}
 	return installSkillToCodex()
+}
+
+// --- Grok ---
+
+// runGrokSetup copies the skill for Grok in the interactive wizard.
+// hey has no Grok plugin yet, so the skill is the whole integration.
+func runGrokSetup(cmd *cobra.Command) error {
+	w := cmd.OutOrStdout()
+	path, err := installGrokSkill()
+	if err != nil {
+		fmt.Fprintln(w, warning.format("Grok skill install failed: "+err.Error()))
+		fmt.Fprintln(w, "Then verify with: hey doctor")
+		return nil //nolint:nilerr // warn and continue; the post-setup snapshot reports the failure
+	}
+	fmt.Fprintln(w, statusLine(true, "Grok skill installed ("+path+")"))
+	return nil
+}
+
+func runGrokSetupNonInteractive(*cobra.Command) error {
+	_, err := installGrokSkill()
+	return err
+}
+
+// installGrokSkill is the Grok handler's one step. Like Claude, it never
+// fabricates the agent: creating ~/.grok on a machine without Grok would
+// make every later detection — and this command's own verdict — report it
+// installed.
+func installGrokSkill() (string, error) {
+	if !harness.DetectGrok() {
+		return "", &agentSetupError{
+			Summary: "Grok not detected — install Grok, then run: hey setup grok",
+			Manual:  []string{"hey setup grok"},
+		}
+	}
+	return installSkillToGrok()
 }
 
 // --- Shared helpers ---

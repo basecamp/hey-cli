@@ -296,6 +296,7 @@ hey setup agents
 hey setup agents --remove
 hey setup claude
 hey setup codex
+hey setup grok
 hey setup omarchy
 hey setup omarchy --no-notify
 hey setup omarchy --notify

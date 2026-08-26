@@ -48,11 +48,11 @@ func refreshSkillsIfVersionChanged() bool {
 	}
 	sentinelPath := filepath.Join(configDir, ".last-run-version")
 
-	// The sentinel records the active Codex home alongside the version:
-	// skill locations depend on CODEX_HOME, so switching homes mid-release
-	// triggers one rescan instead of leaving the other home's marked skill
-	// stale until the next release.
-	sentinelState := version.Version + "\n" + harness.CodexHome() + "\n"
+	// The sentinel records the active Codex and Grok homes alongside the
+	// version: skill locations depend on CODEX_HOME and GROK_HOME, so
+	// switching homes mid-release triggers one rescan instead of leaving
+	// the other home's marked skill stale until the next release.
+	sentinelState := version.Version + "\n" + harness.CodexHome() + "\n" + harness.GrokHome() + "\n"
 	data, err := os.ReadFile(sentinelPath) // #nosec G304 -- fixed path under the user config dir
 	if err == nil && string(data) == sentinelState {
 		return false
@@ -93,6 +93,9 @@ func skillRefreshLocations() []string {
 	}
 	if codexPath := harness.CodexSkillPath(); codexPath != "" {
 		locations = append(locations, codexPath)
+	}
+	if grokPath := harness.GrokSkillPath(); grokPath != "" {
+		locations = append(locations, grokPath)
 	}
 	return locations
 }

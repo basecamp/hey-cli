@@ -62,7 +62,7 @@ hey
 
 The first time you run `hey` at a terminal it walks you through setup: it signs you in
 with browser-based OAuth, confirms your identity, and connects your detected coding agents
-(Claude Code, Codex). Run `hey setup --skip-agents` to leave
+(Claude Code, Codex, Grok). Run `hey setup --skip-agents` to leave
 agent integrations unchanged, or add `--skip-omarchy` to leave Omarchy unchanged.
 `hey setup --silent-success` keeps required authentication visible, shows an installation
 spinner, and ends with `SETUP COMPLETE`; failure guidance remains visible. After that,
@@ -733,6 +733,7 @@ manage the integrations on their own:
 ```bash
 hey setup claude    # install the skill and the hey@37signals plugin for Claude Code
 hey setup codex     # install the skill for Codex
+hey setup grok      # install the skill for Grok
 hey skill install   # install the skill only (~/.agents/skills/hey, linked for detected agents)
 hey setup agents             # non-interactive: skill + a single detected agent (the installer uses this)
 hey setup agents --remove    # remove HEY's managed skills and Claude Code plugin
@@ -740,7 +741,7 @@ hey doctor                   # check skill and plugin health per detected agent
 ```
 
 `hey setup agents` never prompts and never guesses: with several agents detected it installs
-the skill only and lists the `hey setup <agent>` choices. `HEY_SETUP_AGENT=claude|codex|all|none`
+the skill only and lists the `hey setup <agent>` choices. `HEY_SETUP_AGENT=claude|codex|grok|all|none`
 picks explicitly. `HEY_NONINTERACTIVE=1` disables interactive sign-in for harnesses that
 run hey under a pseudo-terminal. The installed skill is refreshed automatically the first
 time a new hey release runs.
