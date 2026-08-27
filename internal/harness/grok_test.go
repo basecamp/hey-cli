@@ -22,6 +22,21 @@ func TestDetectGrokByHomeDirectory(t *testing.T) {
 	}
 }
 
+func TestDetectGrokByBinary(t *testing.T) {
+	tempHome(t)
+	t.Setenv("GROK_HOME", "")
+	bin := t.TempDir()
+	stub := filepath.Join(bin, "grok")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+
+	if !DetectGrok() {
+		t.Error("grok executable on PATH should detect Grok without a home directory")
+	}
+}
+
 func TestGrokHomeHonorsEnvOverride(t *testing.T) {
 	home := tempHome(t)
 
