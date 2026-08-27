@@ -194,6 +194,33 @@ func TestExtractAttachmentsSkipsEmbeddedHTMLAttachment(t *testing.T) {
 	}
 }
 
+func TestExtractAttachmentsInsideEmbeddedHTMLAttachment(t *testing.T) {
+	// An HTML email from outside HEY arrives as one text/html trix attachment
+	// whose content string holds the original markup, files included.
+	content := `<figure data-trix-attachment="{&quot;contentType&quot;:&quot;text/html&quot;,&quot;content&quot;:&quot;<shadow-content><template><p>Payslip attached.</p><action-text-attachment sgid=\&quot;sgid-1\&quot; content-type=\&quot;application/pdf\&quot; url=\&quot;/rails/blobs/payslip.pdf\&quot; filename=\&quot;payslip.pdf\&quot; filesize=\&quot;44218\&quot;></action-text-attachment></template></shadow-content>&quot;,&quot;data&quot;:&quot;{}&quot;}"></figure>`
+
+	attachments := ExtractAttachments(content)
+	if len(attachments) != 1 {
+		t.Fatalf("ExtractAttachments = %+v, want the file inside the embedded body", attachments)
+	}
+	got := attachments[0]
+	if got.Filename != "payslip.pdf" || got.URL != "/rails/blobs/payslip.pdf" || got.ContentType != "application/pdf" || got.SGID != "sgid-1" || got.ByteSize == nil || *got.ByteSize != 44218 {
+		t.Errorf("embedded attachment = %+v", got)
+	}
+}
+
+func TestExtractAttachmentsEmbeddedContentStopsRecursing(t *testing.T) {
+	nested := `<figure data-trix-attachment='{"contentType":"text/html","content":"<action-text-attachment url=\"/rails/blobs/deep.pdf\" filename=\"deep.pdf\"></action-text-attachment>"}'></figure>`
+	for range embeddedContentDepthLimit + 2 {
+		nested = `<figure data-trix-attachment='{"contentType":"text/html","content":"` +
+			strings.ReplaceAll(nested, `"`, `\"`) + `"}'></figure>`
+	}
+
+	if attachments := ExtractAttachments(nested); len(attachments) != 0 {
+		t.Errorf("ExtractAttachments = %+v, should stop before the innermost level", attachments)
+	}
+}
+
 func TestExtractAttachments(t *testing.T) {
 	h := `<action-text-attachment sgid="sgid-1" url="/rails/blobs/report.pdf" filename="quarterly-report.pdf" content-type="application/pdf" filesize="128"></action-text-attachment>
 <figure data-trix-attachment='{"sgid":"sgid-2","url":"/rails/blobs/photo.png","filename":"photo.png","contentType":"image/png","filesize":256}'></figure>`
