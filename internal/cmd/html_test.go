@@ -213,15 +213,15 @@ func TestHTMLCommentsCannotBeEndedByWhatTheyHold(t *testing.T) {
 	}
 }
 
-// A single body — a contact's note, a journal entry — is a fragment, not a document:
-// the HTML as HEY served it, and nothing at all when there is none.
-func TestNoteHTMLWritesNothingForAnEmptyNote(t *testing.T) {
+// A single body — a draft, contact note, or journal entry — is a fragment, not a
+// document: the HTML as HEY served it, and nothing at all when there is none.
+func TestHTMLFragmentWritesNothingForAnEmptyBody(t *testing.T) {
 	var out bytes.Buffer
-	if err := writeNoteHTML(&out, ""); err != nil || out.Len() != 0 {
-		t.Errorf("writeNoteHTML = %q, %v", out.String(), err)
+	if err := writeHTMLFragment(&out, ""); err != nil || out.Len() != 0 {
+		t.Errorf("writeHTMLFragment = %q, %v", out.String(), err)
 	}
-	if err := writeNoteHTML(&out, "<div>call back</div>"); err != nil || out.String() != "<div>call back</div>\n" {
-		t.Errorf("writeNoteHTML = %q, %v", out.String(), err)
+	if err := writeHTMLFragment(&out, "<div>call back</div>"); err != nil || out.String() != "<div>call back</div>\n" {
+		t.Errorf("writeHTMLFragment = %q, %v", out.String(), err)
 	}
 }
 

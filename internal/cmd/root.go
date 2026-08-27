@@ -162,7 +162,7 @@ func newRootCmd() *cobra.Command {
 	root.CompletionOptions.HiddenDefaultCmd = true
 
 	root.PersistentFlags().BoolVar(&jsonFlag, "json", false, "Output JSON with metadata")
-	root.PersistentFlags().BoolVar(&htmlOutput, "html", false, "Write the original HTML to a pipe or file (thread read, journal read, contact show, contact note show)")
+	root.PersistentFlags().BoolVar(&htmlOutput, "html", false, "Write the original HTML to a pipe or file (thread read, draft show, journal read, contact show, contact note show)")
 	root.PersistentFlags().BoolVar(&quietFlag, "quiet", false, "Output result data only")
 	root.PersistentFlags().BoolVar(&idsOnly, "ids-only", false, "Output only IDs, one per line")
 	root.PersistentFlags().BoolVar(&countFlag, "count", false, "Output only the count of results")
@@ -308,6 +308,7 @@ func htmlRequested(args []string) bool {
 // ones --html means anything to.
 var htmlCommands = map[string]bool{
 	"hey thread read":       true,
+	"hey draft show":        true,
 	"hey journal read":      true,
 	"hey contact show":      true,
 	"hey contact note show": true,

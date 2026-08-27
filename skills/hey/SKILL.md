@@ -27,6 +27,7 @@ triggers:
   - hey compose
   - hey draft list
   - hey draft show
+  - hey draft export
   - hey draft edit
   - hey draft send
   - hey draft delete
@@ -190,11 +191,13 @@ notice on stderr. Both need list data, so they work on `hey box list`, `hey box 
 | Reply to email | `hey reply <topic_id> -m "Friday works for me."` |
 | Forward email | `hey forward <topic_id> --to alice@example.com -m "For your review"` |
 | Compose email | `hey compose --to alice@example.com --subject "Lunch plans" -m "Are you free Friday?"` |
+| Compose from an HTML file | `hey compose --subject "Client invoice" --message-html-file ./invoice-email.html --attach ./invoice.pdf --draft` |
 | Compose with CC/BCC | `hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Kitchen remodel timeline"` |
 | List drafts | `hey draft list --json` (`--all`/`--page` follow the cursor) |
 | Draft an email for human review | `hey compose --to alice@example.com --subject "Lunch plans" -m "Free Friday?" --draft` |
 | Draft a reply for human review | `hey reply <topic_id> -m "Drafting this." --draft` |
-| Read a draft back | `hey draft show <draft_id> --json` |
+| Read a draft back | `hey draft show <draft_id> --json` (`attachments` has safe file metadata; `--html > draft.html` writes complete stored markup) |
+| Export a complete draft bundle | `hey draft export <draft_id> --output ./draft-<draft_id>` (read-only to HEY; writes HTML, safe JSON, and attachments locally) |
 | Change a draft | `hey draft edit <draft_id> --to alice@example.com --subject "New subject"` |
 | Send a draft | `hey draft send <draft_id>` |
 | Trash drafts | `hey draft delete <draft_id>...` |
@@ -285,6 +288,7 @@ Want to read email?
 Want to send email?
 ├── Reply to thread? → hey reply <topic_id> -m "message"
 │   ├── Open editor? → hey reply <topic_id> (omit -m to open $EDITOR)
+│   ├── Use generated HTML? → add --message-html-file ./reply.html
 │   └── Attach files? → add --attach ./report.pdf (repeatable)
 ├── Reply to many threads at once? → hey bulk-reply preview <id>... first, then send
 │   └── Sent by mistake? → hey bulk-reply undo <delivery_id> (while the window is open)
@@ -292,14 +296,16 @@ Want to send email?
 │   └── Add a note? → add -m "note"
 ├── Compose new? → hey compose --to <email> --subject "Subject"
 │   ├── With body? → hey compose --to <email> --subject "Subject" -m "Body"
+│   ├── With generated HTML? → add --message-html-file ./message.html
 │   ├── With files? → add --attach ./report.pdf (repeatable; body is optional)
 │   ├── With CC? → add --cc <email>
 │   └── With BCC? → add --bcc <email>
 ├── List files in a thread? → hey attachment list <topic_id> --json
 │   └── Save one? → hey attachment save <attachment_id> [--output <path>]
 ├── Draft instead of sending (human reviews in HEY)? → add --draft to compose or reply; the answer carries the draft id
-│   ├── Read it back? → hey draft show <draft_id> --json
-│   ├── Change it? → hey draft edit <draft_id> --subject/--to/--cc/--bcc/-m (flags replace; omitted fields are kept)
+│   ├── Read it back? → hey draft show <draft_id> --json (attachments has file metadata; --html > draft.html writes stored markup)
+│   ├── Export it locally? → hey draft export <draft_id> --output ./draft-<draft_id>
+│   ├── Change it? → hey draft edit <draft_id> --subject/--to/--cc/--bcc/-m/--message-html-file (flags replace; omitted fields are kept)
 │   ├── Deliver it? → hey draft send <draft_id> (recipients required)
 │   └── Discard it? → hey draft delete <draft_id>
 └── Check drafts? → hey draft list --json
@@ -442,6 +448,7 @@ hey reply <topic_id>                          # Reply via $EDITOR
 hey reply <topic_id> -m "Here is the wiring diagram." --attach ./diagram.png
 hey forward <topic_id> --to alice@example.com                 # Forward the latest message
 hey forward <topic_id> --to alice@example.com -m "Please review before Thursday."
+hey forward <topic_id> --to alice@example.com --message-html-file ./forward-note.html
 hey compose --to alice@example.com --subject "Lunch plans"    # Body from $EDITOR
 hey compose --to alice@example.com --subject "Lunch plans" -m "Are you free Friday?"
 hey compose --to alice@example.com --subject "Q3 revenue report" --attach ./report.pdf  # Attachment-only message
@@ -450,6 +457,7 @@ hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org 
 hey compose --thread-id 12345 -m "Confirmed — see you then."  # Reply into an existing thread (no subject: it carries the thread's)
 hey compose --to alice@example.com --subject "Sprint recap" -m "We **shipped** the pagination fix."
 hey compose --to alice@example.com --subject "Newsletter draft" --message-html "<h1>March</h1><p>What we shipped.</p>"
+hey compose --subject "Client invoice" --message-html-file ./invoice-email.html --attach ./invoice.pdf --draft
 ```
 
 `hey reply` answers the thread's **latest** entry. HEY addresses the reply the way its own
@@ -460,10 +468,14 @@ rather than guessing when it cannot work out the recipients.
 Everything you send is Markdown by default — `-m`, `--content`, `--note`, positional
 content, stdin, and `$EDITOR` alike — and is converted to rich text on the way out. To
 send raw HTML instead, use the flag's HTML twin: `--message-html` on `compose`, `reply`,
-`forward`, and `bulk-reply send`; `--content-html` on `journal write` and
-`snippet create`/`update`; `--note-html` on `contacts note set`. Each pair is mutually
-exclusive. A fenced code block's language (` ```ruby `) survives the conversion, and
-HEY's web app syntax-highlights it.
+`forward`, `bulk-reply send`, and `draft edit`; `--content-html` on `journal write` and
+`snippet create`/`update`; `--note-html` on `contacts note set`. Those five email commands
+also accept `--message-html-file <path>`, reading the file directly as raw HTML to avoid
+shell quoting and argument-size problems for generated messages. Markdown, inline HTML,
+and HTML-file inputs are mutually exclusive. Compose, reply, and draft edit preserve the
+file bytes exactly; forward and bulk reply trim surrounding whitespace when joining the
+file content to HEY's quoted or Name Tag content. A fenced code block's language
+(` ```ruby `) survives the conversion, and HEY's web app syntax-highlights it.
 
 ### Email - The Screener
 
@@ -495,6 +507,7 @@ those senders are asked about again on their next email.
 ```bash
 hey bulk-reply preview 12345 67890 --json     # Read-only: threads and exact recipients
 hey bulk-reply send 12345 67890 -m "Thanks for the update — noted."
+hey bulk-reply send 12345 67890 --message-html-file ./reply.html
 hey bulk-reply undo 98765                     # Recall a delayed bulk reply
 ```
 
@@ -606,10 +619,15 @@ otherwise — and both take over stdout.
 
 ```bash
 hey compose --subject "Board update" -m "Numbers to follow." --draft   # save instead of sending; answers the draft id
+hey compose --subject "Client invoice" --message-html-file ./invoice-email.html --attach ./invoice.pdf --draft
 hey reply <topic_id> -m "Drafting this." --draft  # save a reply draft, addressed like a real reply
 hey draft list --json                             # List drafts; --all and --page follow the next_page cursor
 hey draft show <draft_id> --json                  # The draft's editable state; body is Markdown
+hey draft show <draft_id> --jq '.data.attachments' # Filename plus available type/size metadata
+hey draft show <draft_id> --html > draft.html     # Complete stored HTML, including attachment markup
+hey draft export <draft_id> --output ./draft-<draft_id> # Private local HTML/JSON/attachment bundle
 hey draft edit <draft_id> --to alice@example.com  # Each flag replaces its field; omitted flags keep the draft's
+hey draft edit <draft_id> --message-html-file ./revised-message.html
 hey draft send <draft_id>                         # Deliver now (through HEY's undo window)
 hey draft delete <draft_id> [<draft_id>...]       # Trash drafts
 ```
@@ -617,12 +635,24 @@ hey draft delete <draft_id> [<draft_id>...]       # Trash drafts
 This is the review-before-send lane: an agent prepares the email as a draft, a person
 reviews and sends it from any HEY app (or the agent sends it later with `hey draft send`).
 A draft needs no recipients until it is sent; `--draft` on `hey compose` lifts the
-recipient requirement.
+recipient requirement. `draft show` returns Markdown by default. Its structured output
+has an `attachments` array with each downloadable file's name and available content
+type/byte size, and the styled view lists the same safe metadata; internal download URLs
+and signed IDs stay private. `--html` writes the byte-exact stored body fragment, including
+attachment markup, and must be redirected to a file or pipe. `draft export` is read-only
+to HEY and writes a private local directory containing byte-exact `draft.html`, safe
+`draft.json`, and downloaded originals under `attachments/`. It stages and verifies
+every file before publishing the directory, resolves filename collisions portably,
+records actual byte counts and SHA-256 hashes, and exposes no download URL or SGID. The
+destination must not exist. `--force` only replaces a complete export of the same draft
+and refuses unexpected files. Replacement uses atomic directory exchange where the
+platform supports it and otherwise repairs an interrupted replacement on the next run.
 
 **An edit is a revision, not a patch.** The CLI reads the draft first and resends the
 whole of it, so an omitted flag keeps that field. `--to`/`--cc`/`--bcc` replace their
-entire recipient kind; an explicit empty value (`--cc ""`) clears it. Any scheduled
-delivery is preserved through edits.
+entire recipient kind; an explicit empty value (`--cc ""`) clears it.
+`--message-html-file` replaces the complete body with the exact HTML read from a file.
+Any scheduled delivery is preserved through edits.
 
 **Scheduled deliveries.** Scheduling is done in a HEY app for now; the CLI cannot set a
 schedule (HEY's API cannot yet name an exact instant). A draft scheduled in an app stays

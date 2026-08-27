@@ -27,11 +27,12 @@ func newDraftCommand() *cobra.Command {
 		Use:   "draft",
 		Short: "Manage unsent drafts",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, show, edit, send, delete. Draft IDs come from `hey draft list` or from `hey compose --draft`/`hey reply --draft`. list's --page continues from the next_page cursor of an earlier listing.",
+			"agent_notes": "Subcommands: list, show, export, edit, send, delete. Draft IDs come from `hey draft list` or from `hey compose --draft`/`hey reply --draft`. export reads one exact draft into a private local bundle without changing HEY. list's --page continues from the next_page cursor of an earlier listing.",
 		},
 	}
 	draft.AddCommand(newDraftsCommand().cmd)
 	draft.AddCommand(newDraftShowCommand().cmd)
+	draft.AddCommand(newDraftExportCommand().cmd)
 	draft.AddCommand(newDraftEditCommand().cmd)
 	draft.AddCommand(newDraftSendCommand().cmd)
 	draft.AddCommand(newDraftDeleteCommand().cmd)

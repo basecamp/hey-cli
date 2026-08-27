@@ -163,11 +163,7 @@ func (c *journalReadCommand) run(cmd *cobra.Command, args []string) error {
 
 	// --html writes the entry's HTML and, for a day without one, nothing at all.
 	if writer.EffectiveFormat() == output.FormatHTML {
-		if content == "" {
-			return nil
-		}
-		_, err := fmt.Fprintln(cmd.OutOrStdout(), content)
-		return err
+		return writeHTMLFragment(cmd.OutOrStdout(), content)
 	}
 
 	if content == "" {

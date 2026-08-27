@@ -19,29 +19,38 @@ import (
 	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
-// draftOutput is what hey draft show answers with: the draft's editable state, its body
-// as Markdown the way every email body leaves this CLI.
+type draftAttachmentOutput struct {
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type,omitempty"`
+	ByteSize    *int64 `json:"byte_size,omitempty"`
+}
+
+// draftOutput is what hey draft show answers with outside --html: the draft's editable
+// state, its body as Markdown the way every email body leaves this CLI, and safe
+// metadata for the downloadable attachments in that complete stored body.
 type draftOutput struct {
-	ID                  int64             `json:"id"`
-	Subject             string            `json:"subject,omitempty"`
-	Body                htmlutil.Markdown `json:"body"`
-	To                  []string          `json:"to,omitempty"`
-	CC                  []string          `json:"cc,omitempty"`
-	BCC                 []string          `json:"bcc,omitempty"`
-	IsReply             bool              `json:"is_reply,omitempty"`
-	ScheduledDeliveryAt *time.Time        `json:"scheduled_delivery_at,omitempty"`
-	UpdatedAt           *time.Time        `json:"updated_at,omitempty"`
+	ID                  int64                   `json:"id"`
+	Subject             string                  `json:"subject,omitempty"`
+	Body                htmlutil.Markdown       `json:"body"`
+	Attachments         []draftAttachmentOutput `json:"attachments"`
+	To                  []string                `json:"to,omitempty"`
+	CC                  []string                `json:"cc,omitempty"`
+	BCC                 []string                `json:"bcc,omitempty"`
+	IsReply             bool                    `json:"is_reply,omitempty"`
+	ScheduledDeliveryAt *time.Time              `json:"scheduled_delivery_at,omitempty"`
+	UpdatedAt           *time.Time              `json:"updated_at,omitempty"`
 }
 
 func draftOutputFor(id int64, edit *generated.MessageEditState) draftOutput {
 	out := draftOutput{
-		ID:      id,
-		Subject: edit.Subject,
-		Body:    htmlutil.ToMarkdown(edit.Content),
-		To:      addressEmails(edit.Addressed.Directly),
-		CC:      addressEmails(edit.Addressed.Copied),
-		BCC:     addressEmails(edit.Addressed.Blindcopied),
-		IsReply: edit.IsReply,
+		ID:          id,
+		Subject:     edit.Subject,
+		Body:        htmlutil.ToMarkdown(edit.Content),
+		Attachments: draftAttachments(edit.Content),
+		To:          addressEmails(edit.Addressed.Directly),
+		CC:          addressEmails(edit.Addressed.Copied),
+		BCC:         addressEmails(edit.Addressed.Blindcopied),
+		IsReply:     edit.IsReply,
 	}
 	if !edit.ScheduledDeliveryAt.IsZero() {
 		at := edit.ScheduledDeliveryAt
@@ -50,6 +59,19 @@ func draftOutputFor(id int64, edit *generated.MessageEditState) draftOutput {
 	if !edit.UpdatedAt.IsZero() {
 		at := edit.UpdatedAt
 		out.UpdatedAt = &at
+	}
+	return out
+}
+
+func draftAttachments(content string) []draftAttachmentOutput {
+	attachments := htmlutil.ExtractAttachments(content)
+	out := make([]draftAttachmentOutput, len(attachments))
+	for index, attachment := range attachments {
+		out[index] = draftAttachmentOutput{
+			Filename:    attachment.Filename,
+			ContentType: attachment.ContentType,
+			ByteSize:    attachment.ByteSize,
+		}
 	}
 	return out
 }
@@ -121,10 +143,12 @@ func newDraftShowCommand() *draftShowCommand {
 		Use:   "show <draft-id>",
 		Short: "Read a draft back",
 		Annotations: map[string]string{
-			"agent_notes": "Draft IDs come from `hey draft list` or from saving with `hey compose --draft`. The body is Markdown.",
+			"agent_notes": "Draft IDs come from `hey draft list` or from saving with `hey compose --draft`. Structured and styled output lists each downloadable attachment's filename and available type/size metadata without exposing its internal URL or signed ID. The body is Markdown by default; --html writes the complete stored HTML fragment instead, including attachment markup, and must be redirected to a file or pipe.",
 		},
 		Example: `  hey draft show 12345
-  hey draft show 12345 --json`,
+  hey draft show 12345 --json
+  hey draft show 12345 --jq '.data.attachments'
+  hey draft show 12345 --html > draft.html`,
 		RunE: showCommand.run,
 		Args: usageExactOneArg(),
 	}
@@ -147,6 +171,9 @@ func (c *draftShowCommand) run(cmd *cobra.Command, args []string) error {
 	if edit == nil {
 		return apierr.ErrNotFound("draft", args[0])
 	}
+	if writer.EffectiveFormat() == output.FormatHTML {
+		return writeExactHTMLFragment(cmd.OutOrStdout(), edit.Content)
+	}
 	out := draftOutputFor(draftID, edit)
 
 	if writer.IsStyled() {
@@ -163,6 +190,12 @@ func (c *draftShowCommand) run(cmd *cobra.Command, args []string) error {
 		if out.ScheduledDeliveryAt != nil {
 			fmt.Fprintf(w, "Scheduled: %s\n", out.ScheduledDeliveryAt.Local().Format("2006-01-02 15:04"))
 		}
+		if len(out.Attachments) > 0 {
+			fmt.Fprintln(w, "Attachments:")
+			for _, attachment := range out.Attachments {
+				fmt.Fprintf(w, "  %s\n", formatDraftAttachment(attachment))
+			}
+		}
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, markdown.Render(out.Body, stdoutWidth()))
 		return nil
@@ -176,16 +209,32 @@ func (c *draftShowCommand) run(cmd *cobra.Command, args []string) error {
 	)
 }
 
+func formatDraftAttachment(attachment draftAttachmentOutput) string {
+	filename := terminal.SanitizeLine(attachment.Filename)
+	var details []string
+	if attachment.ContentType != "" {
+		details = append(details, terminal.SanitizeLine(attachment.ContentType))
+	}
+	if attachment.ByteSize != nil {
+		details = append(details, formatByteSize(*attachment.ByteSize))
+	}
+	if len(details) == 0 {
+		return filename
+	}
+	return fmt.Sprintf("%s (%s)", filename, strings.Join(details, ", "))
+}
+
 // --- edit ---
 
 type draftEditCommand struct {
-	cmd         *cobra.Command
-	subject     string
-	to          string
-	cc          string
-	bcc         string
-	message     string
-	messageHTML string
+	cmd             *cobra.Command
+	subject         string
+	to              string
+	cc              string
+	bcc             string
+	message         string
+	messageHTML     string
+	messageHTMLFile string
 }
 
 func newDraftEditCommand() *draftEditCommand {
@@ -194,11 +243,12 @@ func newDraftEditCommand() *draftEditCommand {
 		Use:   "edit <draft-id>",
 		Short: "Change a draft",
 		Annotations: map[string]string{
-			"agent_notes": "Each flag replaces its field and an omitted flag keeps what the draft has — --to/--cc/--bcc replace that whole recipient kind (an explicit empty value clears it). With no field flags the body opens in $EDITOR as Markdown. A scheduled delivery is preserved.",
+			"agent_notes": "Each flag replaces its field and an omitted flag keeps what the draft has — --to/--cc/--bcc replace that whole recipient kind (an explicit empty value clears it). --message-html-file reads a complete raw HTML replacement verbatim from a local file. With no field flags the body opens in $EDITOR as Markdown. A scheduled delivery is preserved.",
 		},
 		Example: `  hey draft edit 12345 --subject "Quarterly planning (v2)"
   hey draft edit 12345 --to maria@example.com --cc finance@example.com
   hey draft edit 12345 -m "Rewritten agenda: budget first, hiring second."
+  hey draft edit 12345 --message-html-file ./revised-message.html
   hey draft edit 12345    # open the body in $EDITOR`,
 		RunE: editCommand.run,
 		Args: usageExactOneArg(),
@@ -209,7 +259,8 @@ func newDraftEditCommand() *draftEditCommand {
 	editCommand.cmd.Flags().StringVar(&editCommand.bcc, "bcc", "", "Replace the BCC recipients (comma separated; empty clears)")
 	editCommand.cmd.Flags().StringVarP(&editCommand.message, "message", "m", "", "Replace the body with this Markdown")
 	editCommand.cmd.Flags().StringVar(&editCommand.messageHTML, "message-html", "", "Replace the body with raw HTML instead of Markdown")
-	editCommand.cmd.MarkFlagsMutuallyExclusive("message", "message-html")
+	editCommand.cmd.Flags().StringVar(&editCommand.messageHTMLFile, "message-html-file", "", "Replace the body with raw HTML read from this file")
+	editCommand.cmd.MarkFlagsMutuallyExclusive("message", "message-html", "message-html-file")
 	return editCommand
 }
 
@@ -254,6 +305,12 @@ func (c *draftEditCommand) run(cmd *cobra.Command, args []string) error {
 		fieldFlagged = true
 	}
 	switch {
+	case flags.Changed("message-html-file"):
+		messageHTML, readErr := readMessageHTMLFile(c.messageHTMLFile)
+		if readErr != nil {
+			return readErr
+		}
+		content.Content = messageHTML
 	case flags.Changed("message-html"):
 		content.Content = c.messageHTML
 	case flags.Changed("message"):

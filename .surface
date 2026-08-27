@@ -60,6 +60,7 @@ hey bulk-reply send
 hey bulk-reply send --attach
 hey bulk-reply send --message
 hey bulk-reply send --message-html
+hey bulk-reply send --message-html-file
 hey bulk-reply undo
 hey calendar
 hey calendar list
@@ -96,6 +97,7 @@ hey compose --cc
 hey compose --draft
 hey compose --message
 hey compose --message-html
+hey compose --message-html-file
 hey compose --subject
 hey compose --thread-id
 hey compose --to
@@ -137,8 +139,12 @@ hey draft edit --bcc
 hey draft edit --cc
 hey draft edit --message
 hey draft edit --message-html
+hey draft edit --message-html-file
 hey draft edit --subject
 hey draft edit --to
+hey draft export
+hey draft export --force
+hey draft export --output
 hey draft list
 hey draft list --all
 hey draft list --limit
@@ -198,6 +204,7 @@ hey forward --bcc
 hey forward --cc
 hey forward --message
 hey forward --message-html
+hey forward --message-html-file
 hey forward --to
 hey habit
 hey habit complete
@@ -259,6 +266,7 @@ hey reply --attach
 hey reply --draft
 hey reply --message
 hey reply --message-html
+hey reply --message-html-file
 hey screener
 hey screener approve
 hey screener approve --box

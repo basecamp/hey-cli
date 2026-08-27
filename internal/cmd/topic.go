@@ -239,9 +239,9 @@ func writeThreadMarkdown(w io.Writer, threadID int64, entries []threadEntry, not
 // through as it does for every other format, ends with the notice in a comment before
 // </body>, alongside the copy on stderr.
 //
-// A thread is a document because it has entries to frame; the single-body reads —
-// journal read, contacts show, contacts note show — write a fragment instead (see
-// writeNoteHTML), one body as HEY served it and nothing for an empty one, because one
+// A thread is a document because it has entries to frame; the single-body reads — draft
+// show, journal read, contact show, contact note show — write a fragment instead (see
+// writeHTMLFragment), one body as HEY served it and nothing for an empty one, because one
 // body is what gets pasted into something else. --stats is refused with --html like every
 // other selector: there is no envelope here to carry stats.
 //

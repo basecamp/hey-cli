@@ -42,7 +42,7 @@ func (c *contactNoteShowCommand) run(cmd *cobra.Command, args []string) error {
 		return apierr.ErrNotFound("contact note", args[0])
 	}
 	if writer.EffectiveFormat() == output.FormatHTML {
-		return writeNoteHTML(cmd.OutOrStdout(), note.NoteHtml)
+		return writeHTMLFragment(cmd.OutOrStdout(), note.NoteHtml)
 	}
 	if writer.IsStyled() {
 		fmt.Fprintln(cmd.OutOrStdout(), renderedNote(note.Note, note.NoteHtml))

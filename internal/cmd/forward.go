@@ -11,12 +11,13 @@ import (
 )
 
 type forwardCommand struct {
-	cmd         *cobra.Command
-	to          string
-	cc          string
-	bcc         string
-	message     string
-	messageHTML string
+	cmd             *cobra.Command
+	to              string
+	cc              string
+	bcc             string
+	message         string
+	messageHTML     string
+	messageHTMLFile string
 }
 
 func newForwardCommand() *forwardCommand {
@@ -25,10 +26,11 @@ func newForwardCommand() *forwardCommand {
 		Use:   "forward <thread-id>",
 		Short: "Forward the latest message in a thread",
 		Annotations: map[string]string{
-			"agent_notes": "Forwards the latest entry in a thread with HEY's quoted content. Accepts comma-separated recipients and an optional note via -m.",
+			"agent_notes": "Forwards the latest entry in a thread with HEY's quoted content. Accepts comma-separated recipients and an optional Markdown note via -m; use --message-html for inline raw HTML or --message-html-file to read the raw HTML note from a file.",
 		},
 		Example: `  hey forward 12345 --to alice@example.com
-  hey forward 12345 --to alice@example.com --cc bob@example.org -m "For your review"`,
+  hey forward 12345 --to alice@example.com --cc bob@example.org -m "For your review"
+  hey forward 12345 --to alice@example.com --message-html-file ./forward-note.html`,
 		RunE: forwardCommand.run,
 		Args: usageExactOneArg(),
 	}
@@ -38,7 +40,8 @@ func newForwardCommand() *forwardCommand {
 	forwardCommand.cmd.Flags().StringVar(&forwardCommand.bcc, "bcc", "", "BCC recipient email address(es)")
 	forwardCommand.cmd.Flags().StringVarP(&forwardCommand.message, "message", "m", "", "Optional Markdown note above the forwarded message")
 	forwardCommand.cmd.Flags().StringVar(&forwardCommand.messageHTML, "message-html", "", "The note as raw HTML instead of Markdown")
-	forwardCommand.cmd.MarkFlagsMutuallyExclusive("message", "message-html")
+	forwardCommand.cmd.Flags().StringVar(&forwardCommand.messageHTMLFile, "message-html-file", "", "Read the raw HTML note from this file")
+	forwardCommand.cmd.MarkFlagsMutuallyExclusive("message", "message-html", "message-html-file")
 
 	return forwardCommand
 }
@@ -58,6 +61,17 @@ func (c *forwardCommand) run(cmd *cobra.Command, args []string) error {
 	bcc := parseAddresses(c.bcc)
 	if len(to)+len(cc)+len(bcc) == 0 {
 		return apierr.ErrUsageHint("at least one recipient is required", "hey forward <thread-id> --to <email>")
+	}
+
+	note := c.messageHTML
+	messageHTMLFileProvided := cmd.Flags().Changed("message-html-file")
+	if messageHTMLFileProvided {
+		note, err = readMessageHTMLFile(c.messageHTMLFile)
+		if err != nil {
+			return err
+		}
+	} else if note == "" {
+		note = htmlutil.FromMarkdown(c.message)
 	}
 
 	ctx := cmd.Context()
@@ -82,10 +96,6 @@ func (c *forwardCommand) run(cmd *cobra.Command, args []string) error {
 		return apierr.ErrNotFound("forward draft for thread", args[0])
 	}
 
-	note := c.messageHTML
-	if note == "" {
-		note = htmlutil.FromMarkdown(c.message)
-	}
 	content := htmlutil.PrependHTML(draft.Content, note)
 	if err := forwardSDK.Messages().Create(ctx, draft.Subject, content, to, cc, bcc); err != nil {
 		return apierr.FromSDK(err)
