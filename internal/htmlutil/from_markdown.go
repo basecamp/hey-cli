@@ -21,9 +21,42 @@ var fromMarkdown = goldmark.New(
 	goldmark.WithRendererOptions(
 		htmlrenderer.WithHardWraps(),
 		htmlrenderer.WithUnsafe(),
-		renderer.WithNodeRenderers(util.Prioritized(&trixCodeBlockRenderer{}, 100)),
+		renderer.WithNodeRenderers(
+			util.Prioritized(&trixTextRenderer{}, 100),
+			util.Prioritized(&trixCodeBlockRenderer{}, 100),
+		),
 	),
 )
+
+// trixTextRenderer writes line breaks without formatting whitespace after them, so the
+// next line starts with exactly the text the author wrote. Goldmark's default renderer
+// writes a newline after every <br>, and Trix keeps that newline with the following text.
+type trixTextRenderer struct{}
+
+func (r *trixTextRenderer) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) {
+	reg.Register(ast.KindText, r.renderText)
+}
+
+func (r *trixTextRenderer) renderText(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
+	if !entering {
+		return ast.WalkContinue, nil
+	}
+	text, ok := node.(*ast.Text)
+	if !ok {
+		return ast.WalkContinue, nil
+	}
+
+	value := text.Segment.Value(source)
+	if text.IsRaw() {
+		htmlrenderer.DefaultWriter.RawWrite(w, value)
+	} else {
+		htmlrenderer.DefaultWriter.Write(w, value)
+		if text.HardLineBreak() || text.SoftLineBreak() {
+			_, _ = w.WriteString("<br>")
+		}
+	}
+	return ast.WalkContinue, nil
+}
 
 // trixLanguages maps a fence's info string to the language names HEY's own code
 // blocks carry, which is the set its server-side highlighter accepts.

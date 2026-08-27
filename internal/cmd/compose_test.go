@@ -130,6 +130,19 @@ func TestComposeSendsRawHTMLVerbatim(t *testing.T) {
 	}
 }
 
+func TestComposeKeepsWhitespaceInRawHTML(t *testing.T) {
+	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
+	body := "<pre>first<br>\n second</pre>"
+
+	err := runCLI(t, server, "--account", "8", "compose", "--thread-id", "7", "--message-html", body)
+	if err != nil {
+		t.Fatalf("compose failed: %v", err)
+	}
+	if sent.Content != body {
+		t.Errorf("content = %q, want raw HTML %q", sent.Content, body)
+	}
+}
+
 func TestComposeRefusesMessageAndMessageHTMLTogether(t *testing.T) {
 	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
 

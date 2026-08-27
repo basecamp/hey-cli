@@ -513,7 +513,7 @@ func TestComposeBodyIsMarkdown(t *testing.T) {
 	f.body.SetValue("**Bold** move\nsee the list:\n\n- budget\n- hiring")
 
 	_, _, _, _, body := f.values()
-	want := "<p><strong>Bold</strong> move<br>\nsee the list:</p>\n<ul>\n<li>budget</li>\n<li>hiring</li>\n</ul>"
+	want := "<p><strong>Bold</strong> move<br>see the list:</p>\n<ul>\n<li>budget</li>\n<li>hiring</li>\n</ul>"
 	if body != want {
 		t.Errorf("body = %q, want %q", body, want)
 	}

@@ -400,7 +400,7 @@ func TestContactNoteSetKeepsLineBreaks(t *testing.T) {
 	if err := json.Unmarshal(requests[0].Body, &body); err != nil {
 		t.Fatal(err)
 	}
-	if want := "<p>First line<br>\nSecond line</p>"; body.Contact.Note != want {
+	if want := "<p>First line<br>Second line</p>"; body.Contact.Note != want {
 		t.Errorf("note = %q, want %q", body.Contact.Note, want)
 	}
 }

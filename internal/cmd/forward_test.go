@@ -108,7 +108,7 @@ func TestForwardSendsLatestEntryDraft(t *testing.T) {
 	if sent.Subject != "Fwd: Quarterly planning" {
 		t.Errorf("subject = %q", sent.Subject)
 	}
-	wantContent := "<p>For your review<br>\nThanks &amp; take care</p><br><div>Quoted message</div>"
+	wantContent := "<p>For your review<br>Thanks &amp; take care</p><br><div>Quoted message</div>"
 	if sent.Content != wantContent {
 		t.Errorf("content = %q, want %q", sent.Content, wantContent)
 	}

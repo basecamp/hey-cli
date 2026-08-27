@@ -79,6 +79,23 @@ func TestComposeDraftSavesInsteadOfSending(t *testing.T) {
 	}
 }
 
+func TestComposeDraftStartsEveryWrappedLineFlush(t *testing.T) {
+	var writes []draftWrite
+	_, err := runJSONCommand(t, draftLifecycleServer(t, draftEditJSON, &writes),
+		"compose", "--subject", "A short note", "-m", "AAA.\nBBB.\n\nCCC.", "--draft")
+	if err != nil {
+		t.Fatalf("compose --draft: %v", err)
+	}
+
+	if len(writes) != 1 {
+		t.Fatalf("writes = %+v", writes)
+	}
+	message, _ := writes[0].Body["message"].(map[string]any)
+	if want := "<p>AAA.<br>BBB.</p>\n<p>CCC.</p>"; message["content"] != want {
+		t.Errorf("content = %q, want %q", message["content"], want)
+	}
+}
+
 // A draft needs nobody on it yet — only a send does.
 func TestComposeDraftNeedsNoRecipients(t *testing.T) {
 	var writes []draftWrite
