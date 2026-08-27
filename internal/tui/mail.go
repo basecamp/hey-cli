@@ -715,6 +715,9 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 				v.postingList.postings[idx].Muted = false
 			}
 		}
+		if msg.effect == postingActionRemove {
+			v.removeFromOverlaidLists(msg.postingID)
+		}
 		if v.requests.kind == mailRequestPostings {
 			if source := v.currentSource(); source != nil {
 				return tea.Batch(done, v.requestPostings(*source)), true
@@ -1901,6 +1904,14 @@ func postingIndexIn(postings []mail.Posting, postingID int64) int {
 
 func (v *mailView) removePostingAt(index int) {
 	v.postingList.removeAt(index)
+}
+
+func (v *mailView) removeFromOverlaidLists(postingID int64) {
+	for _, list := range []*contentList{&v.searchList, &v.bundleList} {
+		if index := postingIndexIn(list.postings, postingID); index >= 0 {
+			list.removeAt(index)
+		}
+	}
 }
 
 func (v *mailView) moveAttachmentCursor(delta int) {

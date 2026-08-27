@@ -2221,6 +2221,44 @@ func TestMailViewTrashesTheThreadOnScreenRatherThanTheListSelection(t *testing.T
 	if v.inThread || !v.searchActive {
 		t.Errorf("trashing a searched thread landed on open:%v search:%v, want the results", v.inThread, v.searchActive)
 	}
+
+	v.Update(done)
+	if len(v.searchList.postings) != 0 {
+		t.Errorf("search results after trashing = %+v, want the row gone", v.searchList.postings)
+	}
+	if len(v.postingList.postings) != 2 {
+		t.Errorf("a searched thread's trash landed on the box list: %+v", v.postingList.postings)
+	}
+}
+
+func TestMailViewTrashesAThreadOpenedFromABundle(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	v.postingList.postings[0] = bundleRow()
+	loaded, _ := runCmd(v.HandleContentKey(keyPress("enter"))).(bundleLoadedMsg)
+	more, _ := v.Update(loaded)
+	appended, _ := runCmd(more).(bundleAppendedMsg)
+	v.Update(appended)
+	if len(v.bundleList.postings) != 2 {
+		t.Fatalf("bundle postings = %+v", v.bundleList.postings)
+	}
+
+	v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+	if !v.inThread || v.topicPostingID != 511 {
+		t.Fatalf("thread state = open:%v posting:%d", v.inThread, v.topicPostingID)
+	}
+
+	done, ok := runCmd(v.HandleContentKey(keyPress("t"))).(postingActionDoneMsg)
+	if !ok || done.err != nil || done.postingID != 511 {
+		t.Fatalf("trash command returned %#v", done)
+	}
+	if v.inThread || !v.bundleActive {
+		t.Errorf("trashing landed on open:%v bundle:%v, want the bundle", v.inThread, v.bundleActive)
+	}
+
+	v.Update(done)
+	if len(v.bundleList.postings) != 1 || v.bundleList.postings[0].ID != 512 {
+		t.Errorf("bundle postings after trashing = %+v, want the other thread alone", v.bundleList.postings)
+	}
 }
 
 func TestMailViewCannotTrashAThreadOpenedWithoutItsPosting(t *testing.T) {
