@@ -957,7 +957,7 @@ func (v *mailView) HelpBindings() []helpBinding {
 	if v.inThread {
 		bindings := []helpBinding{{"r", "reply"}, {"f", "forward"}}
 		if v.fileablePosting() != nil {
-			bindings = append(bindings, helpBinding{"l", "reply later"}, helpBinding{"a", "set aside"})
+			bindings = append(bindings, helpBinding{"l", "reply later"}, helpBinding{"a", "set aside"}, helpBinding{"t", "trash"})
 		}
 		if len(v.entries) > 1 {
 			bindings = append(bindings, helpBinding{"j/k", "next/previous message"})
@@ -1266,7 +1266,7 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 			if v.topicID != 0 {
 				return v.loadForwardContext(v.topicID, v.topicName)
 			}
-		case "a", "A", "l":
+		case "a", "A", "l", "t", "T":
 			return v.fileOpenThread(msg.String())
 		case "[":
 			v.moveAttachmentCursor(-1)
@@ -2325,6 +2325,12 @@ func (v *mailView) fileOpenThread(key string) tea.Cmd {
 	move := v.postingAction(key, *posting, v.threadBoxKind)
 	if move == nil {
 		return nil
+	}
+	// Set Aside and Reply Later leave the thread on screen, in the box it landed
+	// in, so the next filing key can act on it there. Trash closes it: the Trash
+	// is not a box you file out of, and the web app returns to the list too.
+	if key == "t" || key == "T" {
+		v.ExitThread()
 	}
 	// Filing keys pressed faster than their requests answer can complete out of
 	// order, so each dispatch takes a sequence number and only the latest one
