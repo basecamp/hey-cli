@@ -799,6 +799,177 @@ func TestThreadMoreMenuKeepsToForwardAndTrashOverSearch(t *testing.T) {
 	}
 }
 
+// openTestBundleThread opens the bundle on the list and then the first thread inside
+// it, which is how the menu is reached over a bundle rather than over a box list.
+func openTestBundleThread(t *testing.T, v *mailView, postingID int64) {
+	t.Helper()
+	loaded, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(bundleLoadedMsg)
+	if !ok || loaded.err != nil {
+		t.Fatalf("opening the bundle returned %#v", loaded)
+	}
+	v.Update(loaded)
+	topic, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(topicLoadedMsg)
+	if !ok || topic.err != nil {
+		t.Fatalf("opening the bundle's thread returned %#v", topic)
+	}
+	cmd, _ := v.Update(topic)
+	if seen, ok := runCmd(cmd).(postingSeenMsg); ok {
+		v.Update(seen)
+	}
+	if !v.inThread || v.topicPosting == nil || v.topicPosting.ID != postingID {
+		t.Fatalf("thread state = open:%v posting:%v, want posting %d open", v.inThread, v.topicPosting, postingID)
+	}
+}
+
+// An unseen bundle holds the box's own postings — the box they live in is the box on
+// screen, and each row carries its labels — so the menu offers label and move there
+// just as it does over the list.
+func TestThreadMoreMenuOrganizesFromAnUnseenBundle(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindFolder, Name: "Receipts"})
+	v.postingList.postings[0] = bundleRow()
+	openTestBundleThread(t, v, 511)
+
+	v.HandleContentKey(keyPress("m"))
+	if !hasHelpBinding(v.HelpBindings(), "b") || !hasHelpBinding(v.HelpBindings(), "v") {
+		t.Errorf("menu bindings = %v, want label and move offered inside an unseen bundle", v.HelpBindings())
+	}
+	v.HandleContentKey(keyPress("b"))
+	picker, ok := v.modal.(*folderPicker)
+	if !ok {
+		t.Fatalf("b opened %T, want the label picker", v.modal)
+	}
+	if picker.posting.ID != 511 {
+		t.Errorf("label picker holds posting %d, want the bundle member's 511", picker.posting.ID)
+	}
+
+	v.HandleContentKey(keyPress("esc"))
+	v.HandleContentKey(keyPress("m"))
+	v.HandleContentKey(keyPress("v"))
+	if _, ok := v.modal.(*movePicker); !ok {
+		t.Fatalf("v opened %T, want the move picker", v.modal)
+	}
+}
+
+// A read bundle opens as every thread with its contact, gathered from across the boxes:
+// a row there says neither which box its thread sits in nor which labels it carries, so
+// the menu keeps to forward and trash the way it does over search.
+func TestThreadMoreMenuKeepsToForwardAndTrashOverContactThreads(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindFolder, Name: "Receipts"})
+	row := bundleRow()
+	row.Seen = true
+	v.postingList.postings[0] = row
+	openTestBundleThread(t, v, 513)
+	if v.bundleContactID != 88 {
+		t.Fatalf("bundle contact = %d, want the contact's threads", v.bundleContactID)
+	}
+
+	v.HandleContentKey(keyPress("m"))
+	if hasHelpBinding(v.HelpBindings(), "b") || hasHelpBinding(v.HelpBindings(), "v") {
+		t.Errorf("menu bindings = %v, want label and move withheld over a contact's threads", v.HelpBindings())
+	}
+	v.HandleContentKey(keyPress("v"))
+	if _, ok := v.modal.(*movePicker); ok {
+		t.Error("v opened a move picker built over the browsed box, not the thread's")
+	}
+	v.HandleContentKey(keyPress("b"))
+	if _, ok := v.modal.(*folderPicker); ok {
+		t.Error("b opened a label picker over a posting whose labels are unknown")
+	}
+	if !hasHelpBinding(v.HelpBindings(), "f") || !hasHelpBinding(v.HelpBindings(), "t") {
+		t.Errorf("menu bindings = %v, want forward and trash still offered", v.HelpBindings())
+	}
+}
+
+// A label filed from the menu once a live re-read has carried the row out of the list
+// has only the retained posting to land on — there is no row left to re-read it from.
+// Kept in step, reopening the picker shows the label checked and enter removes it;
+// stale, the picker would offer to file the same label a second time.
+func TestThreadMoreMenuKeepsItsLabelsWhenTheRowIsGone(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindFolder, Name: "Receipts"})
+	openTestThread(t, v)
+
+	v.Update(postingsRefreshedMsg{
+		requestID:  v.liveRequestID,
+		boxID:      1,
+		sourceKind: v.currentSourceKind(),
+		postings:   []mail.Posting{{ID: 300, TopicID: 300, Summary: "Newer thread", Creator: mail.Contact{Name: "Cara"}}},
+	})
+	if v.postingIndex(100) >= 0 {
+		t.Fatal("the refresh should have carried the opened row out of the list")
+	}
+
+	v.HandleContentKey(keyPress("m"))
+	v.HandleContentKey(keyPress("b"))
+	filed, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(folderActionDoneMsg)
+	if !ok || filed.err != nil || !filed.added {
+		t.Fatalf("labelling returned %#v", filed)
+	}
+	if recorded.path != "/postings/filings.json" {
+		t.Fatalf("request = %s, want the label filed", recorded.path)
+	}
+	v.Update(filed)
+	if len(v.topicPosting.Folders) != 1 || v.topicPosting.Folders[0].ID != 12 {
+		t.Fatalf("retained posting folders = %v, want the filed label", v.topicPosting.Folders)
+	}
+
+	v.HandleContentKey(keyPress("m"))
+	v.HandleContentKey(keyPress("b"))
+	if _, ok := v.modal.(*folderPicker); !ok {
+		t.Fatalf("b reopened %T, want the label picker", v.modal)
+	}
+	if view := v.View(); !strings.Contains(view, "[x] Receipts") || !strings.Contains(view, "Remove all labels") {
+		t.Errorf("reopened picker view = %q, want Receipts checked", view)
+	}
+	removed, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(folderActionDoneMsg)
+	if !ok || removed.added {
+		t.Fatalf("enter over the carried label returned %#v, want it removed rather than filed again", removed)
+	}
+	v.Update(removed)
+	if len(v.topicPosting.Folders) != 0 {
+		t.Errorf("retained posting folders = %v, want the label gone", v.topicPosting.Folders)
+	}
+}
+
+// A label created from the menu is known only by its name until the sources reload
+// hands back its ID, and that is enough to keep the retained posting honest: reopening
+// the picker shows the new label checked rather than offering to file it again.
+func TestThreadMoreMenuKeepsALabelItJustCreated(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	openTestThread(t, v)
+
+	v.Update(postingsRefreshedMsg{
+		requestID:  v.liveRequestID,
+		boxID:      1,
+		sourceKind: v.currentSourceKind(),
+		postings:   []mail.Posting{{ID: 300, TopicID: 300, Summary: "Newer thread", Creator: mail.Contact{Name: "Cara"}}},
+	})
+
+	v.HandleContentKey(keyPress("m"))
+	v.HandleContentKey(keyPress("b"))
+	v.HandleContentKey(keyPress("enter")) // + Create a new label…
+	folderModal(v).input.SetValue("Receipts")
+	created, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(folderActionDoneMsg)
+	if !ok || created.err != nil || !created.created {
+		t.Fatalf("creating the label returned %#v", created)
+	}
+	v.Update(created)
+
+	// The reload that follows brings the label back with the ID the server gave it.
+	v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindFolder, Name: "Receipts"})
+	v.HandleContentKey(keyPress("m"))
+	v.HandleContentKey(keyPress("b"))
+	if view := v.View(); !strings.Contains(view, "[x] Receipts") {
+		t.Errorf("reopened picker view = %q, want the created label checked", view)
+	}
+	removed, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(folderActionDoneMsg)
+	if !ok || removed.added {
+		t.Fatalf("enter over the created label returned %#v, want it removed rather than filed again", removed)
+	}
+}
+
 // The menu takes only its own keys; the rest keep their thread meaning, so reading
 // never degrades while the menu is up — r still starts a reply, not a scroll.
 func TestThreadMoreMenuPassesThreadKeysThrough(t *testing.T) {

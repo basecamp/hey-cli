@@ -226,6 +226,9 @@ type folderActionDoneMsg struct {
 	action     string
 	sourceID   int64
 	sourceKind mail.Kind
+	postingID  int64
+	folder     mail.Folder
+	added      bool
 	created    bool
 	err        error
 }
@@ -787,6 +790,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			}
 			return nil, true
 		}
+		v.notePostingLabelled(msg)
 		var done tea.Cmd
 		if msg.sourceID == v.currentBoxID() && msg.sourceKind == v.currentSourceKind() {
 			done = notify(msg.action)
@@ -2225,13 +2229,18 @@ func (v *mailView) openFolderPicker(posting mail.Posting) (tea.Cmd, bool) {
 }
 
 func (v *mailView) filePosting(postingID, folderID int64, folderName string) tea.Cmd {
-	return v.doFolderAction("Label "+terminal.SanitizeLine(folderName)+" added", false, func() error {
+	folder := mail.Folder{ID: folderID, Name: folderName}
+	return v.doFolderAction("Label "+terminal.SanitizeLine(folderName)+" added", postingID, folder, true, false, func() error {
 		return v.vc.sdk.Postings().File(v.vc.ctx, folderID, postingID)
 	})
 }
 
+// createFolderForPosting labels the thread with a label that does not exist yet. The
+// server answers the creation with nothing but its blessing, so the new label is known
+// by name until the source reload that follows hands back its ID.
 func (v *mailView) createFolderForPosting(postingID int64, folderName string) tea.Cmd {
-	return v.doFolderAction("Label "+terminal.SanitizeLine(folderName)+" created", true, func() error {
+	folder := mail.Folder{Name: folderName}
+	return v.doFolderAction("Label "+terminal.SanitizeLine(folderName)+" created", postingID, folder, true, true, func() error {
 		return v.vc.sdk.Postings().CreateFolder(v.vc.ctx, folderName, postingID)
 	})
 }
@@ -2241,12 +2250,13 @@ func (v *mailView) unfilePosting(postingID, folderID int64, folderName string) t
 	if folderID != 0 {
 		label = "Label " + terminal.SanitizeLine(folderName) + " removed"
 	}
-	return v.doFolderAction(label, false, func() error {
+	folder := mail.Folder{ID: folderID, Name: folderName}
+	return v.doFolderAction(label, postingID, folder, false, false, func() error {
 		return v.vc.sdk.Postings().Unfile(v.vc.ctx, folderID, postingID)
 	})
 }
 
-func (v *mailView) doFolderAction(label string, created bool, fn func() error) tea.Cmd {
+func (v *mailView) doFolderAction(label string, postingID int64, folder mail.Folder, added, created bool, fn func() error) tea.Cmd {
 	sourceID, sourceKind := v.currentSourceIdentity()
 	v.pendingMutations++
 	return func() tea.Msg {
@@ -2254,10 +2264,60 @@ func (v *mailView) doFolderAction(label string, created bool, fn func() error) t
 			action:     label,
 			sourceID:   sourceID,
 			sourceKind: sourceKind,
+			postingID:  postingID,
+			folder:     folder,
+			added:      added,
 			created:    created,
 			err:        fn(),
 		}
 	}
+}
+
+// notePostingLabelled carries a landed label change onto every copy of the posting the
+// reader still holds. The list's row is the obvious one, but the thread's retained
+// posting matters more: once a live re-read has carried the row out of the list that
+// snapshot is the only copy left, and it is what the More menu builds its label picker
+// off. Left stale, the picker shows a label the thread already carries as unchecked and
+// files it a second time instead of removing it.
+func (v *mailView) notePostingLabelled(msg folderActionDoneMsg) {
+	if row := v.openedPosting(msg.postingID); row != nil {
+		updatePostingFolders(row, msg.folder, msg.added)
+	}
+	if v.topicPosting != nil && v.topicPosting.ID == msg.postingID {
+		updatePostingFolders(v.topicPosting, msg.folder, msg.added)
+	}
+}
+
+// updatePostingFolders answers a label change on a posting in hand; an unnamed label
+// removed is the picker's "remove all labels". It builds a fresh slice rather than
+// editing in place, because the retained posting and the list's row are separate copies
+// that still share one backing array, and rewriting that array under both is how one of
+// them ends up wrong.
+func updatePostingFolders(posting *mail.Posting, folder mail.Folder, added bool) {
+	if !added && folder.ID == 0 {
+		posting.Folders = nil
+		return
+	}
+	kept := make([]mail.Folder, 0, len(posting.Folders)+1)
+	for _, carried := range posting.Folders {
+		if !sameFolder(carried, folder) {
+			kept = append(kept, carried)
+		}
+	}
+	if added {
+		kept = append(kept, folder)
+	}
+	posting.Folders = kept
+}
+
+// sameFolder matches two labels. A label just created for a thread is known only by the
+// name it was created under until the source reload that follows hands back its ID, so a
+// label without one matches on its name.
+func sameFolder(a, b mail.Folder) bool {
+	if a.ID != 0 && b.ID != 0 {
+		return a.ID == b.ID
+	}
+	return a.Name == b.Name
 }
 
 func (v *mailView) startCollectionPicker() tea.Cmd {
