@@ -97,6 +97,7 @@ type contentList struct {
 	scrollOff     int
 	width         int
 	height        int // visible rows (each posting takes 2 lines)
+	itemGap       int // blank rows after a posting in the spacious layout
 	hideSeenState bool
 	selected      map[int64]struct{}
 
@@ -396,6 +397,18 @@ func (c *contentList) setSize(w, h int) {
 	c.height = h
 }
 
+func (c *contentList) setItemGap(gap int) {
+	c.itemGap = max(gap, 0)
+	c.ensureVisible()
+}
+
+func (c *contentList) effectiveItemGap() int {
+	if c.height < 3 {
+		return 0
+	}
+	return c.itemGap
+}
+
 func (c *contentList) moveUp() {
 	if c.cursor > 0 {
 		c.cursor--
@@ -427,7 +440,7 @@ func (c *contentList) visibleItemsFrom(start int) int {
 	count := 0
 	height := c.listHeight()
 	for i := start; i < c.itemCount(); i++ {
-		postingRows := 2
+		postingRows := 2 + c.effectiveItemGap()
 		if c.sectionLabelAt(i) != "" {
 			postingRows++
 		}
@@ -681,7 +694,10 @@ func (c *contentList) view() string {
 
 		fmt.Fprintln(&b, line1.String())
 		fmt.Fprintln(&b, line2.String())
-		rendered += 2
+		for range c.effectiveItemGap() {
+			b.WriteString("\n")
+		}
+		rendered += 2 + c.effectiveItemGap()
 	}
 
 	if from := c.coveredFrom(); from >= 0 {
