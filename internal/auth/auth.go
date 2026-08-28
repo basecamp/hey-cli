@@ -14,11 +14,8 @@ import (
 	"time"
 )
 
-// Built-in OAuth client credentials for the CLI app.
-const (
-	oauthClientID = "khMWSVDVSq78oyKA3KtxmYRv"
-	installID     = "hey-cli"
-)
+// Built-in OAuth client ID for the CLI app.
+const oauthClientID = "khMWSVDVSq78oyKA3KtxmYRv"
 
 type callbackWaiter func(context.Context, string, string, net.Listener, LoginOptions) (string, error)
 type listenerFactory func(context.Context, string, string) (net.Listener, error)
@@ -177,6 +174,11 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
 	defer func() { _ = listener.Close() }()
 	redirectURI := "http://" + listener.Addr().String() + "/callback"
 
+	installID, err := m.store.InstallID()
+	if err != nil {
+		return fmt.Errorf("install id: %w", err)
+	}
+
 	state := generateState()
 	codeVerifier := generateCodeVerifier()
 	codeChallenge := generateCodeChallenge(codeVerifier)
@@ -293,6 +295,11 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 	tokenEndpoint := creds.TokenEndpoint
 	if tokenEndpoint == "" {
 		tokenEndpoint = m.baseURL + "/oauth/tokens"
+	}
+
+	installID, err := m.store.installID()
+	if err != nil {
+		return fmt.Errorf("install id: %w", err)
 	}
 
 	token, err := refreshOAuthToken(ctx, m.httpClient, tokenEndpoint, creds.RefreshToken, oauthClientID, installID)

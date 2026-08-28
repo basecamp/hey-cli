@@ -196,6 +196,9 @@ func newAuthStatusCommand() *cobra.Command {
 			if creds.RefreshToken != "" {
 				status["refresh_available"] = true
 			}
+			if installID, err := store.InstallID(); err == nil {
+				status["install_id"] = installID
+			}
 
 			if writer.IsStyled() {
 				w := cmd.OutOrStdout()
@@ -215,6 +218,9 @@ func newAuthStatusCommand() *cobra.Command {
 					if len(cookie) > 12 {
 						fmt.Fprintf(w, "Cookie:    %s...%s\n", cookie[:8], cookie[len(cookie)-4:])
 					}
+				}
+				if installID, ok := status["install_id"].(string); ok {
+					fmt.Fprintf(w, "Install:   %s\n", installID)
 				}
 
 				if creds.ExpiresAt > 0 {

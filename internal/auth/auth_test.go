@@ -93,12 +93,16 @@ func TestNormalizeBaseURL(t *testing.T) {
 
 func TestLoginOAuthFlow(t *testing.T) {
 	redirectURIs := make(chan string, 1)
+	var installID string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/oauth/tokens" {
 			t.Errorf("path = %q, want /oauth/tokens", r.URL.Path)
 		}
 		if err := r.ParseForm(); err != nil {
 			t.Fatalf("ParseForm: %v", err)
+		}
+		if got := r.Form.Get("install_id"); got != installID {
+			t.Errorf("install_id = %q, want this install's %q", got, installID)
 		}
 		if got := r.Form.Get("code"); got != "callback-code" {
 			t.Errorf("code = %q, want callback-code", got)
@@ -122,6 +126,10 @@ func TestLoginOAuthFlow(t *testing.T) {
 			t.Errorf("listen arguments = %q, %q, want an ephemeral loopback port", network, address)
 		}
 		return listen(ctx, network, address)
+	}
+	var err error
+	if installID, err = mgr.GetStore().InstallID(); err != nil {
+		t.Fatalf("InstallID: %v", err)
 	}
 	mgr.callbackWait = func(_ context.Context, state, authURL string, listener net.Listener, opts LoginOptions) (string, error) {
 		if state == "" {
@@ -709,6 +717,9 @@ func TestConcurrentManagersRefreshOnce(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			t.Fatalf("ParseForm: %v", err)
+		}
+		if got := r.Form.Get("install_id"); got == "" || got == "hey-cli" {
+			t.Errorf("install_id = %q, want a per-install identifier", got)
 		}
 		// Rotation: the refresh token is spent by the first refresh that presents it.
 		if r.Form.Get("refresh_token") != "first-refresh" {
