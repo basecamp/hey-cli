@@ -77,6 +77,20 @@ func runMove(t *testing.T, server *httptest.Server, args ...string) (output.Resp
 	return resp, err
 }
 
+func TestMoveHelpExplainsHowToRemoveReplyLater(t *testing.T) {
+	cmd := newMoveCommand().cmd
+
+	if !strings.Contains(cmd.Long, "Moving a Reply Later thread to Imbox removes Reply Later") {
+		t.Errorf("long help does not explain how to remove Reply Later: %q", cmd.Long)
+	}
+	if !strings.Contains(cmd.Example, "--to imbox") {
+		t.Errorf("examples do not show the Imbox destination: %q", cmd.Example)
+	}
+	if !strings.Contains(cmd.Annotations["agent_notes"], "To remove Reply Later, move the threads to Imbox") {
+		t.Errorf("agent notes do not explain how to remove Reply Later: %q", cmd.Annotations["agent_notes"])
+	}
+}
+
 func TestMovePostingsToNamedBox(t *testing.T) {
 	server, recorded := moveServer(t)
 

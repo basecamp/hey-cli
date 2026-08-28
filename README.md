@@ -443,6 +443,7 @@ hey draft delete 12345             # trash it
 hey seen 12345                     # mark a thread as seen
 hey unseen 12345 67890             # mark threads as unseen
 hey move 12345 --to feed           # move a thread to another box
+hey move 12345 67890 --to imbox    # remove Reply Later from seen threads
 hey move 12345 67890 --to "paper trail"  # move multiple threads
 hey bubble up 12345 --now          # bubble a thread up to the top of the Imbox
 hey bubble up 12345 --on 2026-09-04  # bubble a thread up on a date
@@ -487,7 +488,7 @@ Snippets are named reusable email content, separate from clips saved out of rece
 
 `hey box view <name|id>`, `hey label view <id>` and `hey collection view <id>` list the same postings and answer the same formats: `--json`, `--styled`, `--markdown`, `--ids-only`, and `--count`. The data-only formats print the pagination notice and any `next_page` cursor on stderr, so the IDs on stdout stay pipeable. `--json` differs only in what wraps the postings: a box answers with HEY's box payload, a label and a collection with the source and its `total_count`.
 
-Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Bubble Up has its own commands: `hey bubble up` raises a thread right away with `--now`, on a date with `--on` (HEY resurfaces it at its morning hour of that day, or its evening hour when the date is today), or at the morning hour of tomorrow, Saturday, or next Monday with `--tomorrow`, `--weekend`, and `--next-week`; `hey bubble pop` cancels one. `hey bubble list` shows both buckets — the threads back in the Imbox after bubbling up and the ones still scheduled, each with when it resurfaces. Trashing a shared thread removes your access instead of deleting it for everyone. Ignored threads remain in their box and can be restored with `hey stop-ignoring`.
+Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Reply Later is a box rather than a separate flag: moving a Reply Later thread to Imbox removes Reply Later, preserves its seen state, and leaves a seen thread in Previously Seen. It does not return the thread to the box it occupied before Reply Later. Bubble Up has its own commands: `hey bubble up` raises a thread right away with `--now`, on a date with `--on` (HEY resurfaces it at its morning hour of that day, or its evening hour when the date is today), or at the morning hour of tomorrow, Saturday, or next Monday with `--tomorrow`, `--weekend`, and `--next-week`; `hey bubble pop` cancels one. `hey bubble list` shows both buckets — the threads back in the Imbox after bubbling up and the ones still scheduled, each with when it resurfaces. Trashing a shared thread removes your access instead of deleting it for everyone. Ignored threads remain in their box and can be restored with `hey stop-ignoring`.
 
 ### Watching for changes
 

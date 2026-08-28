@@ -219,6 +219,7 @@ notice on stderr. Both need list data, so they work on `hey box list`, `hey box 
 | Mark as seen | `hey seen 12345` |
 | Mark as unseen | `hey unseen 12345` |
 | Move email threads | `hey move 12345 --to feed` |
+| Remove Reply Later | `hey move 12345 --to imbox` |
 | Bubble a thread up now | `hey bubble up 12345 --now` |
 | Bubble a thread up on a date | `hey bubble up 12345 --on 2026-09-04` |
 | Bubble a thread up this weekend | `hey bubble up 12345 --weekend` |
@@ -270,6 +271,7 @@ Want to read email?
 ├── Mark as seen? → hey seen <id>
 ├── Mark as unseen? → hey unseen <id>
 ├── Move to another box? → hey move <id> --to <box>
+├── Remove or unmark Reply Later? → hey move <id> --to imbox
 ├── Move to Trash? → hey trash <id>
 ├── Mark as spam? → hey spam <id>
 ├── Ignore future activity? → hey ignore <id>
@@ -518,11 +520,12 @@ Takes box item IDs (the `id` field from `hey box view` output).
 ### Email - Moving Threads
 
 ```bash
-hey move 12345 --to imbox                     # Move one thread
+hey move 12345 --to feed                      # Move one thread
 hey move 12345 67890 --to "paper trail"       # Move multiple threads
+hey move 12345 67890 --to imbox               # Remove Reply Later from threads
 ```
 
-Takes box item IDs (the `id` field from `hey box view --json`). `--to` accepts a box name, kind, or ID. Supported destinations are Imbox, The Feed, Set Aside, Reply Later, and Paper Trail. Bubble Up goes through `hey bubble` instead.
+Takes box item IDs (the `id` field from `hey box view --json`). `--to` accepts a box name, kind, or ID. Supported destinations are Imbox, The Feed, Set Aside, Reply Later, and Paper Trail. Reply Later is a box, not an independent flag: moving a Reply Later thread to Imbox removes Reply Later, preserves its seen state, and leaves a seen thread in Previously Seen. It does not return the thread to the box it occupied before Reply Later. Bubble Up goes through `hey bubble` instead.
 
 ### Email - Bubble Up
 

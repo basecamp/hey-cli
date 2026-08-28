@@ -25,12 +25,12 @@ func newMoveCommand() *moveCommand {
 	moveCommand.cmd = &cobra.Command{
 		Use:   "move <box-item-id>...",
 		Short: "Move email threads to another box",
-		Long:  "Move one or more email threads to Imbox, The Feed, Set Aside, Reply Later, or Paper Trail.",
+		Long:  "Move one or more email threads to Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Moving a Reply Later thread to Imbox removes Reply Later while preserving its seen state.",
 		Example: `  hey move 12345 --to feed
-  hey move 12345 67890 --to "paper trail"
+  hey move 12345 67890 --to imbox
   hey move 12345 --to 987`,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts box item IDs from hey box view output. --to accepts a box name, kind, or ID. Use hey bubble up for Bubble Up.",
+			"agent_notes": "Accepts box item IDs from hey box view output. --to accepts a box name, kind, or ID. To remove Reply Later, move the threads to Imbox; seen threads then appear in Previously Seen. Use hey bubble up for Bubble Up.",
 		},
 		RunE: moveCommand.run,
 		Args: usageMinOneArg(),
