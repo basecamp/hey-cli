@@ -41,7 +41,7 @@ var curatedCategories = []struct {
 	},
 	{
 		heading: "ACCOUNT & SYSTEM",
-		names:   []string{"auth", "account", "config", "setup", "shell-completion", "doctor", "upgrade", "version"},
+		names:   []string{"auth", "account", "config", "setup", "mcp", "shell-completion", "doctor", "upgrade", "version"},
 	},
 }
 

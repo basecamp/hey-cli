@@ -55,6 +55,7 @@ help:
 	@echo ""
 	@echo "  make check-surface        Verify .surface matches the command tree"
 	@echo "  make update-surface       Regenerate .surface"
+	@echo "  make update-mcp-model     Refresh the vendored hey-sdk model snapshot for hey mcp (SDK=path)"
 	@echo "  make check-surface-compat Compare .surface against the previous release tag"
 	@echo "  make check-size           Check the built binary against .size-budget"
 	@echo "  make check-release-lockstep  Verify release tool pins and script references agree"
@@ -192,6 +193,12 @@ update-surface: check-toolchain
 	@HEY_NO_KEYRING=1 go test ./internal/cmd/ -run TestSurfaceSnapshot -count=1 -update-surface >/dev/null
 	@HEY_NO_KEYRING=1 go test ./internal/cmd/ -run TestSurfaceSnapshot -count=1
 	@echo ".surface updated"
+
+# Refresh the vendored hey-sdk model snapshot the MCP catalog embeds
+# (internal/mcpserver/model/). Keep it in lockstep with the hey-sdk version
+# pinned in go.mod. SDK=path names a hey-sdk checkout (default ../hey-sdk).
+update-mcp-model:
+	@scripts/sync-mcp-model.sh $(SDK)
 
 # Compare .surface against the previous release tag (removals fail unless
 # acknowledged in .surface-breaking)

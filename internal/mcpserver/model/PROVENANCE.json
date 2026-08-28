@@ -1,0 +1,7 @@
+{
+  "source": "github.com/basecamp/hey-sdk",
+  "commit": "cbc342f6419eb7d9cf703d25efc43c866bfc4ab6",
+  "ref": "go/v0.28.0",
+  "files": ["behavior-model.json", "openapi.json"],
+  "synced_by": "scripts/sync-mcp-model.sh"
+}

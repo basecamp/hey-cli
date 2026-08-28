@@ -1,0 +1,1700 @@
+{
+  "$schema": "https://hey.com/schemas/behavior-model.json",
+  "generated": true,
+  "operations": {
+    "AddPostingsToBoxGroup": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "AdvancedSearch": {
+      "idempotent": false,
+      "pagination": {
+        "style": "link"
+      },
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "BubbleUpPostingsNow": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "BulkUpdateClearances": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "BundleContact": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "CancelPostingsBubbleUp": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "CompleteCalendarTodo": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "CompleteHabit": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "CreateBoxDesignation": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "CreateBoxGroup": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "CreateBulkReply": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "max": 0
+      }
+    },
+    "CreateCalendarTodo": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "CreateContact": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "CreateDirectUpload": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "max": 0
+      }
+    },
+    "CreateFolderForPostings": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "CreateHabit": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "CreateMessage": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "CreateReply": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "CreateSticky": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "CreateTimeTrack": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "CreateWorkflowStaging": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "max": 0
+      }
+    },
+    "DeleteBoxDesignation": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "DeleteBoxGroup": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "DeleteCalendarTodo": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "DeleteContactNote": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "DeleteDraft": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "DeleteHabit": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "DeleteSticky": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "DeleteTimeTrack": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "EmptySpam": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "EmptyTrash": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "FilePostings": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetAdvancedSearchFilters": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetAsidebox": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetBox": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetBoxPostingChanges": {
+      "idempotent": false,
+      "pagination": {
+        "style": "link",
+        "totalCountHeader": "X-Total-Count"
+      },
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetBubblebox": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetBundleUnseenPostings": {
+      "idempotent": false,
+      "pagination": {
+        "style": "link",
+        "totalCountHeader": "X-Total-Count"
+      },
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetCalendarDay": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetCalendarRecordings": {
+      "idempotent": false,
+      "pagination": {
+        "style": "window"
+      },
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetCalendarWeek": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetCalendarYear": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetClearances": {
+      "idempotent": false,
+      "pagination": {
+        "style": "link",
+        "totalCountHeader": "X-Total-Count"
+      },
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetCollection": {
+      "idempotent": false,
+      "pagination": {
+        "style": "link",
+        "totalCountHeader": "X-Total-Count"
+      },
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetContact": {
+      "idempotent": false,
+      "pagination": {
+        "style": "link",
+        "totalCountHeader": "X-Total-Count"
+      },
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetContactNote": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetEverythingTopics": {
+      "idempotent": false,
+      "pagination": {
+        "style": "link",
+        "totalCountHeader": "X-Total-Count"
+      },
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetFeedbox": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetFolder": {
+      "idempotent": false,
+      "pagination": {
+        "style": "link",
+        "totalCountHeader": "X-Total-Count"
+      },
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetIdentity": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetImbox": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetImboxSeen": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetJournalEntry": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetLaterbox": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetMessage": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetMessageEdit": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetMyClearances": {
+      "idempotent": false,
+      "pagination": {
+        "style": "link",
+        "totalCountHeader": "X-Total-Count"
+      },
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetNavigation": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetOngoingTimeTrack": {
+      "empty_on": [
+        404
+      ],
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetSentTopics": {
+      "idempotent": false,
+      "pagination": {
+        "style": "link",
+        "totalCountHeader": "X-Total-Count"
+      },
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetSpamTopics": {
+      "idempotent": false,
+      "pagination": {
+        "style": "link",
+        "totalCountHeader": "X-Total-Count"
+      },
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetTopic": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetTopicEntries": {
+      "idempotent": false,
+      "pagination": {
+        "style": "link",
+        "totalCountHeader": "X-Total-Count"
+      },
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetTopicPublication": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetTrailbox": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetTrashTopics": {
+      "idempotent": false,
+      "pagination": {
+        "style": "link",
+        "totalCountHeader": "X-Total-Count"
+      },
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetWorkflow": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "HideContact": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "ListBoxGroups": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "ListBoxes": {
+      "idempotent": false,
+      "pagination": {
+        "style": "link",
+        "totalCountHeader": "X-Total-Count"
+      },
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "ListCalendarDays": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "ListCalendarWeeks": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "ListCalendars": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "ListClips": {
+      "idempotent": false,
+      "pagination": {
+        "style": "link",
+        "totalCountHeader": "X-Total-Count"
+      },
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "ListCollections": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "ListContacts": {
+      "idempotent": false,
+      "pagination": {
+        "style": "link",
+        "totalCountHeader": "X-Total-Count"
+      },
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "ListDrafts": {
+      "idempotent": false,
+      "pagination": {
+        "style": "link",
+        "totalCountHeader": "X-Total-Count"
+      },
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "ListJournalEntries": {
+      "idempotent": false,
+      "pagination": {
+        "style": "link"
+      },
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "ListSnippets": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "ListStickies": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "ListTimeTrackCategories": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "ListTimeTracks": {
+      "idempotent": false,
+      "pagination": {
+        "style": "link"
+      },
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "MarkBoxSeen": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "MarkEntrySpam": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "MarkPostingsSeen": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "MarkPostingsSpam": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "MarkPostingsUnseen": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "MarkTopicHam": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "MovePostings": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "MoveSticky": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "MoveTopic": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "MoveWorkflowStaging": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "max": 0
+      }
+    },
+    "MutePostings": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "NewBulkReply": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "NewEntryForward": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "NewEntryReply": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "PuntClearances": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "RemovePostingsFromBoxGroup": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "RestoreTopic": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "ResumeHabit": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "RevealContact": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "SchedulePostingsBubbleUp": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "StartTimeTrack": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "StopHabit": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "ToggleCalendar": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "TrashPostings": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "TrashTopic": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "UnbundleContact": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "UncompleteCalendarTodo": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "UncompleteHabit": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "UnfilePostings": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "UnmutePostings": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "UpdateCalendarTodo": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "UpdateClearance": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "UpdateCollection": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "UpdateContact": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "UpdateContactClearance": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "UpdateContactNote": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "UpdateFirstWeekDay": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "UpdateHabit": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "UpdateJournalEntry": {
+      "idempotent": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "UpdateMessage": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "UpdateMyClearance": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "UpdateSticky": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "UpdateTimeFormat": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "UpdateTimeTrack": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    }
+  },
+  "version": "1.0.0"
+}

@@ -221,6 +221,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newTuiCommand().cmd)
 	root.AddCommand(newHeyCommand().cmd)
 	root.AddCommand(newSkillCommand().cmd)
+	root.AddCommand(newMCPCommand().cmd)
 	root.AddCommand(newHelpTopicCommands()...)
 	root.AddCommand(newCommandsCommand())
 	root.AddCommand(newShellCompletionCommand())

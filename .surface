@@ -252,6 +252,9 @@ hey login --cookie
 hey login --no-browser
 hey login --token
 hey logout
+hey mcp
+hey mcp --domains
+hey mcp --read-only
 hey move
 hey move --to
 hey reply

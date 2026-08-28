@@ -155,6 +155,7 @@ ACCOUNT & SYSTEM
   account           List and select linked mail accounts
   config            View and change settings
   setup             Set up HEY for first use
+  mcp               Serve HEY to MCP clients over stdio
   shell-completion  Set up tab completion for your shell
   doctor            Find login and configuration problems
   upgrade           Upgrade hey to the latest release

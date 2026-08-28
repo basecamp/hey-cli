@@ -25,6 +25,11 @@ import (
 var (
 	rootSDK *hey.Client
 	sdk     *hey.Client
+
+	// The configuration rootSDK was built from, kept so newSDKClient can
+	// build siblings that share auth, user agent, hooks, and logging.
+	sdkClientCfg  *hey.Config
+	sdkClientOpts []hey.ClientOption
 )
 
 // cliAuthStrategy bridges the CLI's auth.Manager to the SDK's AuthStrategy interface.
@@ -86,8 +91,17 @@ func initSDK(authMgr *auth.Manager, baseURL string) {
 	sdkStats = &statsHooks{}
 	opts = append(opts, hey.WithHooks(sdkStats))
 
+	sdkClientCfg = sdkCfg
+	sdkClientOpts = opts
 	rootSDK = hey.NewClient(sdkCfg, nil, opts...)
 	sdk = rootSDK
+}
+
+// newSDKClient builds another client sharing the CLI's configuration — auth,
+// user agent, hooks, logging — plus any extra options. Valid after initSDK.
+func newSDKClient(extra ...hey.ClientOption) *hey.Client {
+	opts := append(append([]hey.ClientOption{}, sdkClientOpts...), extra...)
+	return hey.NewClient(sdkClientCfg, nil, opts...)
 }
 
 func selectConfiguredAccount(ctx context.Context) error {
