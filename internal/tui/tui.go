@@ -654,9 +654,13 @@ func (m model) contentView() string {
 
 func (m model) View() tea.View {
 	var b strings.Builder
+	metrics := m.layout.metrics(m.width, m.height)
 
 	b.WriteString(renderHeader(&m))
 	b.WriteString("\n")
+	for range metrics.headerGap() {
+		b.WriteString("\n")
+	}
 	if notice := m.mailWatchNotice(); notice != "" {
 		b.WriteString(m.styles.title.Render(truncateStr(notice, max(m.width, 1))))
 		b.WriteString("\n")
@@ -672,7 +676,6 @@ func (m model) View() tea.View {
 		x := max(m.contentWidth()-lipgloss.Width(toast)-1, 0)
 		content = overlayAt(content, toast, x, 0, m.contentWidth(), m.contentHeight())
 	}
-	metrics := m.layout.metrics(m.width, m.height)
 	content = metrics.render(content, m.width, m.contentHeight()+metrics.verticalChrome())
 	b.WriteString(content)
 
@@ -680,14 +683,17 @@ func (m model) View() tea.View {
 	if helpView != "" {
 		contentLines := strings.Count(b.String(), "\n")
 		helpH := strings.Count(helpView, "\n") + 1
-		footerH := 1 + helpH
+		footerH := metrics.footerChrome() + helpH
 		padLines := m.height - contentLines - footerH - 1
 		for range max(padLines, 0) {
 			b.WriteString("\n")
 		}
 
-		b.WriteString(renderRule(m.width, ""))
-		b.WriteString("\n" + helpView)
+		if metrics.drawFooterRule() {
+			b.WriteString(renderRule(m.width, ""))
+			b.WriteString("\n")
+		}
+		b.WriteString(helpView)
 	}
 
 	v := tea.NewView(b.String())
@@ -789,18 +795,19 @@ func (m model) contentWidth() int {
 	return max(m.width-m.layout.metrics(m.width, m.height).horizontalChrome(), 1)
 }
 
-// contentHeight gives the active view every row that is not navigation or a
-// visible help footer. The footer carries two clear rows above its divider.
+// contentHeight gives the active view every row that is not navigation, layout
+// spacing, or a visible help footer.
 func (m model) contentHeight() int {
+	metrics := m.layout.metrics(m.width, m.height)
 	footerHeight := 0
 	if helpHeight := m.help.height(); helpHeight > 0 {
-		footerHeight = helpHeight + 3
+		footerHeight = helpHeight + metrics.footerChrome()
 	}
 	statusHeight := 0
 	if m.mailWatchNotice() != "" {
 		statusHeight = 1
 	}
-	chromeHeight := m.layout.metrics(m.width, m.height).verticalChrome()
+	chromeHeight := metrics.verticalChrome() + metrics.headerGap()
 	return max(m.height-headerHeight-footerHeight-statusHeight-chromeHeight, 1)
 }
 
