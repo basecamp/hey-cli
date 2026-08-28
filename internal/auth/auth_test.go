@@ -92,6 +92,7 @@ func TestNormalizeBaseURL(t *testing.T) {
 }
 
 func TestLoginOAuthFlow(t *testing.T) {
+	redirectURIs := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/oauth/tokens" {
 			t.Errorf("path = %q, want /oauth/tokens", r.URL.Path)
@@ -102,8 +103,8 @@ func TestLoginOAuthFlow(t *testing.T) {
 		if got := r.Form.Get("code"); got != "callback-code" {
 			t.Errorf("code = %q, want callback-code", got)
 		}
-		if got := r.Form.Get("redirect_uri"); got != "http://127.0.0.1:8976/callback" {
-			t.Errorf("redirect_uri = %q", got)
+		if got, want := r.Form.Get("redirect_uri"), <-redirectURIs; got != want {
+			t.Errorf("redirect_uri = %q, want the callback listener's %q", got, want)
 		}
 		if got := r.Form.Get("code_verifier"); got == "" {
 			t.Error("code_verifier is empty")
@@ -115,16 +116,26 @@ func TestLoginOAuthFlow(t *testing.T) {
 
 	t.Setenv("HEY_TOKEN", "")
 	mgr := testManager(t, server)
-	mgr.callbackWait = func(_ context.Context, state, authURL, callbackAddr string, opts LoginOptions) (string, error) {
+	listen := mgr.listen
+	mgr.listen = func(ctx context.Context, network, address string) (net.Listener, error) {
+		if network != "tcp" || address != "127.0.0.1:0" {
+			t.Errorf("listen arguments = %q, %q, want an ephemeral loopback port", network, address)
+		}
+		return listen(ctx, network, address)
+	}
+	mgr.callbackWait = func(_ context.Context, state, authURL string, listener net.Listener, opts LoginOptions) (string, error) {
 		if state == "" {
 			t.Error("state is empty")
-		}
-		if callbackAddr != "127.0.0.1:8976" {
-			t.Errorf("callback address = %q", callbackAddr)
 		}
 		if !opts.NoBrowser {
 			t.Error("NoBrowser = false, want true")
 		}
+		addr, ok := listener.Addr().(*net.TCPAddr)
+		if !ok || !addr.IP.Equal(net.IPv4(127, 0, 0, 1)) || addr.Port == 0 {
+			t.Fatalf("listener address = %v, want a bound 127.0.0.1 port", listener.Addr())
+		}
+		redirectURI := "http://" + addr.String() + "/callback"
+		redirectURIs <- redirectURI
 		u, err := url.Parse(authURL)
 		if err != nil {
 			t.Fatalf("Parse auth URL: %v", err)
@@ -136,7 +147,7 @@ func TestLoginOAuthFlow(t *testing.T) {
 		want := map[string]string{
 			"client_id":             oauthClientID,
 			"grant_type":            "authorization_code",
-			"redirect_uri":          "http://127.0.0.1:8976/callback",
+			"redirect_uri":          redirectURI,
 			"state":                 state,
 			"code_challenge_method": "S256",
 			"install_id":            installID,
@@ -193,7 +204,7 @@ func TestLoginDoesNotSaveCredentialsOnFailure(t *testing.T) {
 
 			t.Setenv("HEY_TOKEN", "")
 			mgr := testManager(t, server)
-			mgr.callbackWait = func(context.Context, string, string, string, LoginOptions) (string, error) {
+			mgr.callbackWait = func(context.Context, string, string, net.Listener, LoginOptions) (string, error) {
 				return "callback-code", tt.waitErr
 			}
 			err := mgr.Login(t.Context(), LoginOptions{})
@@ -231,20 +242,15 @@ func TestWaitForCallback(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Listen: %v", err)
 			}
+			t.Cleanup(func() { _ = listener.Close() })
 			mgr := NewManager("http://example.test", http.DefaultClient, t.TempDir())
-			mgr.listen = func(_ context.Context, network, address string) (net.Listener, error) {
-				if network != "tcp" || address != "requested-address" {
-					t.Errorf("listen arguments = %q, %q", network, address)
-				}
-				return listener, nil
-			}
 			type result struct {
 				code string
 				err  error
 			}
 			resultCh := make(chan result, 1)
 			go func() {
-				code, waitErr := mgr.waitForCallback(t.Context(), "expected", "http://example.test/authorize", "requested-address", LoginOptions{NoBrowser: true})
+				code, waitErr := mgr.waitForCallback(t.Context(), "expected", "http://example.test/authorize", listener, LoginOptions{NoBrowser: true})
 				resultCh <- result{code: code, err: waitErr}
 			}()
 
@@ -280,35 +286,36 @@ func TestWaitForCallback(t *testing.T) {
 	}
 }
 
-func TestWaitForCallbackFailures(t *testing.T) {
-	t.Run("listen", func(t *testing.T) {
-		mgr := NewManager("http://example.test", http.DefaultClient, t.TempDir())
-		mgr.listen = func(context.Context, string, string) (net.Listener, error) {
-			return nil, errors.New("address unavailable")
-		}
-		_, err := mgr.waitForCallback(t.Context(), "state", "auth-url", "address", LoginOptions{NoBrowser: true})
-		if err == nil || !strings.Contains(err.Error(), "failed to start callback server") {
-			t.Fatalf("error = %v", err)
-		}
-	})
+func TestLoginListenFailure(t *testing.T) {
+	t.Setenv("HEY_TOKEN", "")
+	mgr := NewManager("http://example.test", http.DefaultClient, t.TempDir())
+	mgr.listen = func(context.Context, string, string) (net.Listener, error) {
+		return nil, errors.New("address unavailable")
+	}
+	mgr.callbackWait = func(context.Context, string, string, net.Listener, LoginOptions) (string, error) {
+		t.Fatal("callback wait ran without a listener")
+		return "", nil
+	}
+	err := mgr.Login(t.Context(), LoginOptions{NoBrowser: true})
+	if err == nil || !strings.Contains(err.Error(), "failed to start callback server") {
+		t.Fatalf("error = %v", err)
+	}
+}
 
-	t.Run("context cancellation", func(t *testing.T) {
-		listenConfig := &net.ListenConfig{}
-		listener, err := listenConfig.Listen(t.Context(), "tcp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatalf("Listen: %v", err)
-		}
-		mgr := NewManager("http://example.test", http.DefaultClient, t.TempDir())
-		mgr.listen = func(context.Context, string, string) (net.Listener, error) {
-			return listener, nil
-		}
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		_, err = mgr.waitForCallback(ctx, "state", "auth-url", "address", LoginOptions{NoBrowser: true})
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("error = %v, want context.Canceled", err)
-		}
-	})
+func TestWaitForCallbackContextCancellation(t *testing.T) {
+	listenConfig := &net.ListenConfig{}
+	listener, err := listenConfig.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	mgr := NewManager("http://example.test", http.DefaultClient, t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = mgr.waitForCallback(ctx, "state", "auth-url", listener, LoginOptions{NoBrowser: true})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
 }
 
 func TestLoginWithCookieAuthenticateAndLogout(t *testing.T) {
@@ -763,10 +770,8 @@ func TestLoginOptionsLoggerReceivesProgress(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
+	t.Cleanup(func() { _ = listener.Close() })
 	mgr := NewManager("http://example.test", http.DefaultClient, t.TempDir())
-	mgr.listen = func(context.Context, string, string) (net.Listener, error) {
-		return listener, nil
-	}
 
 	// Capture stderr: a configured Logger must own all progress output.
 	origStderr := os.Stderr
@@ -783,7 +788,7 @@ func TestLoginOptionsLoggerReceivesProgress(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, _ = mgr.waitForCallback(t.Context(), "expected", "http://example.test/authorize", "addr", opts)
+		_, _ = mgr.waitForCallback(t.Context(), "expected", "http://example.test/authorize", listener, opts)
 	}()
 
 	client := &http.Client{Timeout: 2 * time.Second}

@@ -20,8 +20,12 @@ const (
 	installID     = "hey-cli"
 )
 
-type callbackWaiter func(context.Context, string, string, string, LoginOptions) (string, error)
+type callbackWaiter func(context.Context, string, string, net.Listener, LoginOptions) (string, error)
 type listenerFactory func(context.Context, string, string) (net.Listener, error)
+
+// The callback listener binds an ephemeral loopback port (RFC 8252 §7.3):
+// a fixed port lets any local process squat it and block sign-in.
+const callbackListenAddr = "127.0.0.1:0"
 
 // Manager handles OAuth authentication.
 type Manager struct {
@@ -163,8 +167,15 @@ func (o LoginOptions) log(msg string) {
 func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
 	authEndpoint := m.baseURL + "/oauth/authorizations/new"
 	tokenEndpoint := m.baseURL + "/oauth/tokens"
-	callbackAddr := "127.0.0.1:8976"
-	redirectURI := "http://" + callbackAddr + "/callback"
+
+	// Listen before building the authorization URL: the redirect_uri has to
+	// carry whichever port the kernel handed out.
+	listener, err := m.listen(ctx, "tcp", callbackListenAddr)
+	if err != nil {
+		return fmt.Errorf("failed to start callback server: %w", err)
+	}
+	defer func() { _ = listener.Close() }()
+	redirectURI := "http://" + listener.Addr().String() + "/callback"
 
 	state := generateState()
 	codeVerifier := generateCodeVerifier()
@@ -186,12 +197,12 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
 	u.RawQuery = q.Encode()
 	authURL := u.String()
 
-	// Start local callback server
+	// Serve the callback on the listener we already hold
 	waitForCallback := m.callbackWait
 	if waitForCallback == nil {
 		waitForCallback = m.waitForCallback
 	}
-	code, err := waitForCallback(ctx, state, authURL, callbackAddr, opts)
+	code, err := waitForCallback(ctx, state, authURL, listener, opts)
 	if err != nil {
 		return err
 	}
@@ -317,13 +328,7 @@ func (m *Manager) CredentialKey() string {
 	return m.baseURL
 }
 
-func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL, callbackAddr string, opts LoginOptions) (string, error) {
-	listener, err := m.listen(ctx, "tcp", callbackAddr)
-	if err != nil {
-		return "", fmt.Errorf("failed to start callback server: %w", err)
-	}
-	defer func() { _ = listener.Close() }()
-
+func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL string, listener net.Listener, opts LoginOptions) (string, error) {
 	codeCh := make(chan string, 1)
 	errCh := make(chan error, 1)
 	var shutdownOnce sync.Once
@@ -340,7 +345,7 @@ func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL, c
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second) //nolint:gosec // G118: cancel deferred in goroutine; async shutdown required to avoid handler self-deadlock
 			go func() {
 				defer cancel()
-				// The listener is closed on the way out of waitForCallback, and
+				// The caller closes the listener on the way out of Login, and
 				// Shutdown closes it too; whichever gets there second sees
 				// net.ErrClosed, which is the server being down, not a failure.
 				if shutdownErr := server.Shutdown(shutdownCtx); shutdownErr != nil &&
