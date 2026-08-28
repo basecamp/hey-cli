@@ -652,7 +652,7 @@ func renderDayView(events, habits, countdowns []Recording, anchor, now time.Time
 
 	// The day names itself above its hours — the subnav carries the calendar and the
 	// view mode, so which day this is has nowhere else to be said — and the keys that
-	// move it sit on the same line, where the cover puts "x to peek".
+	// move it sit on the same line, where the cover puts "z to peek".
 	b.WriteString(hintedSectionHeader(anchor.Local().Format("Monday, January 2"), hint, width))
 	b.WriteString("\n")
 
