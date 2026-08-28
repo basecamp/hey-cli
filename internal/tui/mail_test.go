@@ -2786,16 +2786,43 @@ func TestMailViewHaystackPickerAliases(t *testing.T) {
 	}
 }
 
-func TestMailViewCoverPeekUsesX(t *testing.T) {
+func TestMailViewCoverPeekUsesZ(t *testing.T) {
 	v := mailWithPostings()
 	v.postingList.setCover(coverTopo)
-	v.HandleContentKey(keyPress("x"))
+	v.HandleContentKey(keyPress("z"))
 	if !v.postingList.coverPeeked {
-		t.Fatal("x did not lift the cover")
+		t.Fatal("z did not lift the cover")
+	}
+	v.HandleContentKey(keyPress("z"))
+	if v.postingList.coverPeeked {
+		t.Fatal("z did not replace the cover")
+	}
+}
+
+// x selects like space does, matching the HEY desktop app — including on a covered
+// Imbox, where x used to lift the cover (that is z's key now).
+func TestMailViewSelectsWithXLikeSpace(t *testing.T) {
+	v := mailWithPostings()
+	v.postingList.setCover(coverTopo)
+
+	v.HandleContentKey(keyPress("x"))
+	if ids := v.postingList.selectedIDs(); len(ids) != 1 || ids[0] != 100 {
+		t.Fatalf("selected after x = %v, want [100]", ids)
+	}
+	if v.postingList.coverPeeked {
+		t.Error("x lifted the cover instead of selecting")
 	}
 	v.HandleContentKey(keyPress("x"))
-	if v.postingList.coverPeeked {
-		t.Fatal("x did not replace the cover")
+	if ids := v.postingList.selectedIDs(); len(ids) != 0 {
+		t.Errorf("selected after second x = %v, want none", ids)
+	}
+
+	seen := mailWithPostings()
+	seen.seenActive = true
+	seen.seenList.setPostings(testPostings())
+	seen.HandleContentKey(keyPress("x"))
+	if ids := seen.seenList.selectedIDs(); len(ids) != 1 || ids[0] != 100 {
+		t.Errorf("seen screen selected after x = %v, want [100]", ids)
 	}
 }
 
@@ -3616,7 +3643,7 @@ func TestMailViewHelpBindingsNamePreviouslySeen(t *testing.T) {
 
 	v.seenActive = true
 	bindings := v.HelpBindings()
-	for _, key := range []string{"enter", "space", "ctrl+b", "a", "l", "u", "t", "v", "b", "n"} {
+	for _, key := range []string{"enter", "space/x", "ctrl+b", "a", "l", "u", "t", "v", "b", "n"} {
 		if !hasHelpBinding(bindings, key) {
 			t.Errorf("seen screen help misses %q: %+v", key, bindings)
 		}
