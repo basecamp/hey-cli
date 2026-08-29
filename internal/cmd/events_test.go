@@ -217,6 +217,34 @@ func TestEventsEditKeepsWhatItWasNotAskedToChange(t *testing.T) {
 	}
 }
 
+// An all-day edit carries calendar dates without clock times.
+func TestEventsEditAllDayEventOmitsClockTimes(t *testing.T) {
+	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/calendars/9/recordings.json":
+			_, _ = io.WriteString(w, `{"Calendar::Event":[{"id":4821,"title":"Sarah's birthday","all_day":true,"starts_at":"2026-09-02T00:00:00Z","ends_at":"2026-09-02T00:00:00Z"}]}`)
+		case r.Method == http.MethodPatch && r.URL.Path == "/calendar/events/4821.json":
+			form := eventForm(t, r)
+			for _, field := range []string{
+				"calendar_event[starts_at_time]",
+				"calendar_event[ends_at_time]",
+			} {
+				if form.Has(field) {
+					t.Errorf("%s was sent as %q, want it left out", field, form.Get(field))
+				}
+			}
+			_, _ = io.WriteString(w, `{"id":4821,"title":"Sarah's birthday (edited)","all_day":true}`)
+		default:
+			t.Errorf("unexpected request = %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}), "event", "edit", "4821", "2026-09-02", "--calendar", "9", "--title", "Sarah's birthday (edited)")
+	if err != nil {
+		t.Fatalf("execute all-day event edit: %v", err)
+	}
+}
+
 // Giving a date reads that day rather than a window around today — as the window
 // [day, day+1), since HEY's recordings window is a pair of instants and the degenerate
 // same-day window can never contain a timed event.
