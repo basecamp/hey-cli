@@ -40,11 +40,8 @@ curl -fsSL https://hey.com/install-cli | bash
 Or with mise:
 
 ```bash
-MISE_MINIMUM_RELEASE_AGE=0 mise use -g github:basecamp/hey-cli
+mise use -g github:basecamp/hey-cli
 ```
-
-The override selects the current release immediately; mise otherwise waits for a new
-release to be 24 hours old.
 
 **Windows (PowerShell)**
 
@@ -81,7 +78,7 @@ Both scripts download the release for your platform, verify its SHA-256 checksum
 
 **mise:**
 ```bash
-MISE_MINIMUM_RELEASE_AGE=0 mise use -g github:basecamp/hey-cli
+mise use -g github:basecamp/hey-cli
 ```
 
 **Homebrew (macOS / Linux):**
@@ -89,9 +86,10 @@ MISE_MINIMUM_RELEASE_AGE=0 mise use -g github:basecamp/hey-cli
 brew install --cask basecamp/tap/hey
 ```
 
-**Arch Linux (AUR):**
+**Arch Linux:**
 ```bash
-yay -S hey-cli
+mise use -g github:basecamp/hey-cli
+omarchy-mise-install github:basecamp/hey-cli hey   # on Omarchy
 ```
 
 **Linux (deb/rpm/apk):**

@@ -138,9 +138,15 @@ release:
     hey auth login
     ```
 
-    **Arch Linux / Omarchy:**
+    **Omarchy:**
     ```sh
-    yay -S hey-cli
+    omarchy-mise-install github:basecamp/hey-cli hey
+    hey auth login
+    ```
+
+    **Arch Linux / other Linux (mise):**
+    ```sh
+    mise use -g github:basecamp/hey-cli
     hey auth login
     ```
 

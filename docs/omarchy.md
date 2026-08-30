@@ -332,8 +332,8 @@ completions for a binary that has not been fetched yet.
    toasts instead of per-message noise.
 3. **Upstream contributions**: a `default/themed/hey.toml.tpl` PR alongside
    `claude.json.tpl`; an Install-menu TUI row; possibly branching the mailto handler to
-   the TUI when installed. (An AUR package already ships: `yay -S hey-cli`, published by
-   the release workflow.)
+   the TUI when installed. (The row needs no new packaging:
+   `omarchy-mise-install github:basecamp/hey-cli hey` is the whole install.)
 4. **Deltas applied in the plugin**: every watch event already carries the full posting,
    but the plugin re-reads the Imbox per batch today. Applying events in place — reading
    only on `ready` and `resync` — would make an ordinary change cost no API read at all.
