@@ -328,3 +328,57 @@ func TestLoginLogoutShortcutsMirrorAuthCommands(t *testing.T) {
 		t.Errorf("hey login example = %q", login2.Example)
 	}
 }
+
+func TestAuthStatusReportsInstallID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+	configHome := t.TempDir()
+
+	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "session-cookie"); err != nil {
+		t.Fatalf("auth login: %v", err)
+	}
+
+	// JSON output carries install_id...
+	installID := statusInstallID(t, configHome, server.URL, "")
+	if installID == "" || strings.Count(installID, "-") != 4 {
+		t.Fatalf("status install_id = %q, want a UUID", installID)
+	}
+
+	// ...and the styled output prints the matching Install: line.
+	styled, _, err := runAuthCommand(t, configHome, server.URL, "", false, "auth", "status", "--styled")
+	if err != nil {
+		t.Fatalf("auth status (styled): %v", err)
+	}
+	if !strings.Contains(styled, "Install:   "+installID) {
+		t.Errorf("styled status = %q, want an Install: line with %q", styled, installID)
+	}
+
+	// The identifier is install-scoped: it survives logout and shows when
+	// authenticating through HEY_TOKEN, paths that both return before the
+	// signed-in status output.
+	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "logout"); err != nil {
+		t.Fatalf("auth logout: %v", err)
+	}
+	if after := statusInstallID(t, configHome, server.URL, ""); after != installID {
+		t.Errorf("install_id after logout = %q, want %q", after, installID)
+	}
+	if env := statusInstallID(t, configHome, server.URL, "environment-token"); env != installID {
+		t.Errorf("install_id with HEY_TOKEN = %q, want %q", env, installID)
+	}
+}
+
+func statusInstallID(t *testing.T, configHome, baseURL, envToken string) string {
+	t.Helper()
+	_, status, err := runAuthCommand(t, configHome, baseURL, envToken, true, "auth", "status")
+	if err != nil {
+		t.Fatalf("auth status: %v", err)
+	}
+	data, ok := status.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("status data = %T", status.Data)
+	}
+	id, _ := data["install_id"].(string)
+	return id
+}

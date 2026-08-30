@@ -146,6 +146,16 @@ func newAuthStatusCommand() *cobra.Command {
 				"authenticated":  false,
 			}
 
+			// The install identifier is install-scoped: it survives logout and
+			// is sent on every OAuth login and refresh. Surface it in every
+			// status path — env token and logged-out included, both of which
+			// return before the signed-in path — so the JSON and styled output
+			// stay consistent and can diagnose HEY's new-device alerts.
+			installID, _ := authMgr.GetStore().InstallID()
+			if installID != "" {
+				status["install_id"] = installID
+			}
+
 			if os.Getenv("HEY_TOKEN") != "" {
 				status["authenticated"] = true
 				status["method"] = "env_var"
@@ -154,6 +164,9 @@ func newAuthStatusCommand() *cobra.Command {
 					w := cmd.OutOrStdout()
 					fmt.Fprintf(w, "Base URL:  %s\n", cfg.BaseURL)
 					fmt.Fprintf(w, "Mail:      %s (%s)\n", cfg.AccountID, cfg.SourceOf("account_id"))
+					if installID != "" {
+						fmt.Fprintf(w, "Install:   %s\n", installID)
+					}
 					fmt.Fprintln(w, "Status:    Logged in (via HEY_TOKEN env var)")
 					return nil
 				}
@@ -167,6 +180,9 @@ func newAuthStatusCommand() *cobra.Command {
 					w := cmd.OutOrStdout()
 					fmt.Fprintf(w, "Base URL:  %s\n", cfg.BaseURL)
 					fmt.Fprintf(w, "Mail:      %s (%s)\n", cfg.AccountID, cfg.SourceOf("account_id"))
+					if installID != "" {
+						fmt.Fprintf(w, "Install:   %s\n", installID)
+					}
 					fmt.Fprintln(w, "Status:    Not logged in")
 					return nil
 				}
@@ -196,10 +212,6 @@ func newAuthStatusCommand() *cobra.Command {
 			if creds.RefreshToken != "" {
 				status["refresh_available"] = true
 			}
-			if installID, err := store.InstallID(); err == nil {
-				status["install_id"] = installID
-			}
-
 			if writer.IsStyled() {
 				w := cmd.OutOrStdout()
 				fmt.Fprintf(w, "Base URL:  %s\n", cfg.BaseURL)
@@ -219,7 +231,7 @@ func newAuthStatusCommand() *cobra.Command {
 						fmt.Fprintf(w, "Cookie:    %s...%s\n", cookie[:8], cookie[len(cookie)-4:])
 					}
 				}
-				if installID, ok := status["install_id"].(string); ok {
+				if installID != "" {
 					fmt.Fprintf(w, "Install:   %s\n", installID)
 				}
 

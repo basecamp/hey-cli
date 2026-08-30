@@ -72,3 +72,30 @@ func TestInstallIDsDifferPerInstall(t *testing.T) {
 		t.Errorf("two installs share install id %q", a)
 	}
 }
+
+func TestInstallIDReplacesAMalformedFile(t *testing.T) {
+	t.Setenv("HEY_NO_KEYRING", "1")
+	configDir := t.TempDir()
+	path := filepath.Join(configDir, "install_id")
+
+	// A truncated or garbage file — e.g. a write interrupted by a crash or a
+	// full disk, or the old constant "hey-cli" identifier — is not a usable
+	// identity and must be reminted, never sent to HEY as-is.
+	if err := os.WriteFile(path, []byte("hey-cli"), 0600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	id, err := NewStore(configDir).InstallID()
+	if err != nil {
+		t.Fatalf("InstallID: %v", err)
+	}
+	if !uuidV4.MatchString(id) {
+		t.Fatalf("install id = %q, want a v4 UUID", id)
+	}
+
+	// The mint is durable: the replacement is written back, so a second store
+	// reads the same value rather than reminting again.
+	if again, _ := NewStore(configDir).InstallID(); again != id {
+		t.Errorf("install id = %q on reload, want the reminted %q", again, id)
+	}
+}
