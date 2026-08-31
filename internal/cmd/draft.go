@@ -81,6 +81,11 @@ func draftContentFrom(edit *generated.MessageEditState) hey.DraftContent {
 		To:      addressEmails(edit.Addressed.Directly),
 		CC:      addressEmails(edit.Addressed.Copied),
 		BCC:     addressEmails(edit.Addressed.Blindcopied),
+
+		// The identity the draft was saved as rides every rewrite, or a draft
+		// composed from a shared or alternate address would be handed back to
+		// the account default by its first edit or the final send.
+		ActingSenderID: edit.Sender.Id,
 	}
 	if !edit.ScheduledDeliveryAt.IsZero() {
 		// HEY's API reads a schedule's date and hour in UTC (ApiRequest sets

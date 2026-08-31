@@ -230,6 +230,38 @@ func TestDraftSendDeliversWithTheDraftsOwnState(t *testing.T) {
 	}
 }
 
+func TestDraftLifecyclePreservesTheDraftsOwnSender(t *testing.T) {
+	// A draft composed from a shared or alternate address carries that identity in
+	// its edit state; every rewrite must say it back, or the first `draft update`
+	// or the final `draft send` would hand the draft to the account default.
+	altSenderEditJSON := `{"id":12345,"subject":"Quarterly planning","content":"<div>Agenda to follow.</div>",
+		"updated_at":"2026-08-24T10:00:00Z",
+		"sender":{"id":4242,"name":"Support","email_address":"support@example.com"},
+		"addressed":{"directly":[{"id":7,"name":"Maria Delgado","email_address":"maria@example.com"}]}}`
+
+	var writes []draftWrite
+	if _, err := runJSONCommand(t, draftLifecycleServer(t, altSenderEditJSON, &writes),
+		"draft", "send", "12345"); err != nil {
+		t.Fatalf("draft send: %v", err)
+	}
+	if len(writes) != 1 {
+		t.Fatalf("writes = %+v", writes)
+	}
+	if got, _ := writes[0].Body["acting_sender_id"].(float64); got != 4242 {
+		t.Errorf("acting_sender_id = %v, want the draft's own sender 4242", writes[0].Body["acting_sender_id"])
+	}
+
+	// Without a sender in the edit state, the account default still applies.
+	writes = nil
+	if _, err := runJSONCommand(t, draftLifecycleServer(t, draftEditJSON, &writes),
+		"draft", "send", "12345"); err != nil {
+		t.Fatalf("draft send: %v", err)
+	}
+	if got, _ := writes[0].Body["acting_sender_id"].(float64); got != 42 {
+		t.Errorf("acting_sender_id = %v, want the account default 42", writes[0].Body["acting_sender_id"])
+	}
+}
+
 func TestDraftSendRefusesADraftWithNoRecipients(t *testing.T) {
 	var writes []draftWrite
 	bare := `{"id":12345,"subject":"Quarterly planning","content":"<div>Agenda.</div>","addressed":{}}`
