@@ -681,6 +681,40 @@ func TestMailViewFilesOpenThreadAfterMarkSeenCoversItsRow(t *testing.T) {
 	}
 }
 
+func TestMailViewFilesOpenThreadAfterLiveRefreshDropsItsRow(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+	if !v.inThread {
+		t.Fatal("enter should open the selected thread")
+	}
+
+	// A live refresh whose head no longer returns the opened row takes it out of
+	// the list entirely, so filing cannot go looking for it there.
+	v.Update(postingsRefreshedMsg{
+		requestID:  v.liveRequestID,
+		boxID:      v.currentBoxID(),
+		sourceKind: v.currentSourceKind(),
+		postings:   testPostings()[1:],
+	})
+	if v.postingIndex(100) != -1 {
+		t.Fatal("test needs the refresh to drop the opened row from the list")
+	}
+	if bindings := fmt.Sprint(v.HelpBindings()); !strings.Contains(bindings, "set aside") {
+		t.Errorf("thread help = %s, should keep advertising filing", bindings)
+	}
+
+	done, ok := runCmd(v.HandleContentKey(keyPress("l"))).(postingActionDoneMsg)
+	if !ok || done.err != nil {
+		t.Fatalf("filing command returned %#v", done)
+	}
+	if recorded.method != http.MethodPost || recorded.path != "/postings/moves.json" {
+		t.Errorf("request = %s %s, want POST /postings/moves.json", recorded.method, recorded.path)
+	}
+	if len(recorded.body.PostingIDs) != 1 || recorded.body.PostingIDs[0] != 100 {
+		t.Errorf("posting_ids = %v, want [100]", recorded.body.PostingIDs)
+	}
+}
+
 func TestMailViewFilesOpenThreadOnlyFromFilingLists(t *testing.T) {
 	t.Run("search result", func(t *testing.T) {
 		v := mailWithPostings()
@@ -688,7 +722,7 @@ func TestMailViewFilesOpenThreadOnlyFromFilingLists(t *testing.T) {
 		v.searchList.setPostings([]mail.Posting{{ID: 10, TopicID: 100, Name: "Hello world"}})
 		v.inThread = true
 		v.topicID = 100
-		v.threadPostingID = 10
+		v.threadPosting = mail.Posting{ID: 10, TopicID: 100}
 
 		if cmd := v.HandleContentKey(keyPress("a")); cmd != nil {
 			t.Errorf("a search-opened thread should not file: %#v", runCmd(cmd))
@@ -716,7 +750,7 @@ func TestMailViewThreadHelpAdvertisesFilingKeys(t *testing.T) {
 	v := mailWithPostings()
 	v.inThread = true
 	v.topicID = 100
-	v.threadPostingID = 100
+	v.threadPosting = mail.Posting{ID: 100, TopicID: 100}
 
 	bindings := fmt.Sprint(v.HelpBindings())
 	for _, want := range []string{"reply later", "set aside"} {
@@ -725,7 +759,7 @@ func TestMailViewThreadHelpAdvertisesFilingKeys(t *testing.T) {
 		}
 	}
 
-	v.threadPostingID = 0 // opened by URL, with no posting row behind it
+	v.threadPosting = mail.Posting{} // opened by URL, with no posting row behind it
 	bindings = fmt.Sprint(v.HelpBindings())
 	for _, missing := range []string{"reply later", "set aside"} {
 		if strings.Contains(bindings, missing) {

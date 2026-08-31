@@ -254,7 +254,7 @@ type mailView struct {
 	topicViewport    viewport.Model
 	topicContent     string
 	topicID          int64
-	threadPostingID  int64 // the posting the open thread was opened from, zero when it has none
+	threadPosting    mail.Posting // snapshot of the posting the open thread was opened from, zero when it has none
 	topicName        string
 	entries          []mail.Entry
 	attachments      []messageAttachment
@@ -516,7 +516,14 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.inThread = true
 		v.topicID = msg.topicID
-		v.threadPostingID = msg.postingID
+		// The posting the thread was opened from, snapshotted rather than looked up
+		// again later: the automatic mark-seen and the live refresh can resort the
+		// row, slide it under the cover, or drop it off the head page while the
+		// thread stays on screen.
+		v.threadPosting = mail.Posting{ID: msg.postingID, TopicID: msg.topicID}
+		if opened := v.openedPosting(msg.postingID); opened != nil {
+			v.threadPosting = *opened
+		}
 		v.topicName = msg.title
 		v.entries = msg.entries
 		v.attachments = msg.attachments
@@ -1414,7 +1421,7 @@ func (v *mailView) ExitThread() {
 	if v.inThread {
 		v.inThread = false
 		v.threadNotice = ""
-		v.threadPostingID = 0
+		v.threadPosting = mail.Posting{}
 		v.modal = nil
 		v.requests.cancel()
 		return
@@ -1595,7 +1602,7 @@ func (v *mailView) switchBox(index int) tea.Cmd {
 	}
 	v.inThread = false
 	v.threadNotice = ""
-	v.threadPostingID = 0
+	v.threadPosting = mail.Posting{}
 	v.clearSearch()
 	v.clearBundle()
 	v.clearSeen()
@@ -1617,7 +1624,7 @@ func (v *mailView) openPreviouslySeen() tea.Cmd {
 	}
 	v.inThread = false
 	v.threadNotice = ""
-	v.threadPostingID = 0
+	v.threadPosting = mail.Posting{}
 	v.clearSearch()
 	v.clearBundle()
 	v.notice = ""
@@ -2290,15 +2297,15 @@ func (v *mailView) fileOpenThread(key string) tea.Cmd {
 	return nil
 }
 
-// fileablePosting is the row the open thread files on: the posting the thread was
-// opened from, found by id rather than under the cursor because the mark-seen that
-// opening triggers can resort the list, slide the row under the cover, and clamp
-// the cursor onto some other row while the thread is on screen.
+// fileablePosting is the posting the open thread files on: the snapshot taken when
+// the thread opened, standing in for a row the list may no longer hold — the
+// automatic mark-seen resorts it under the cover and clamps the cursor away, and a
+// live refresh can drop it off the head page — while the thread stays on screen.
 func (v *mailView) fileablePosting() *mail.Posting {
-	if v.searchActive || v.bundleActive || v.threadPostingID == 0 {
+	if v.searchActive || v.bundleActive || v.threadPosting.ID == 0 {
 		return nil
 	}
-	return v.openedPosting(v.threadPostingID)
+	return &v.threadPosting
 }
 
 func (v *mailView) handlePostingAction(key string) tea.Cmd {
