@@ -929,6 +929,9 @@ func (v *mailView) HelpBindings() []helpBinding {
 	}
 	if v.inThread {
 		bindings := []helpBinding{{"r", "reply"}, {"f", "forward"}}
+		if v.canFileOpenThread() {
+			bindings = append(bindings, helpBinding{"l", "reply later"}, helpBinding{"a", "set aside"})
+		}
 		if len(v.entries) > 1 {
 			bindings = append(bindings, helpBinding{"j/k", "next/previous message"})
 		}
@@ -1230,6 +1233,8 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 			if v.topicID != 0 {
 				return v.loadForwardContext(v.topicID, v.topicName)
 			}
+		case "a", "A", "l":
+			return v.fileOpenThread(msg.String())
 		case "[":
 			v.moveAttachmentCursor(-1)
 			return nil
@@ -2265,6 +2270,27 @@ func (v *mailView) imboxSource() *mail.Source {
 		}
 	}
 	return nil
+}
+
+// fileOpenThread files the thread on screen the way the same key files it on the
+// list, matching the web app's topic toolbar keeping its hotkeys live while a
+// thread is open. Only a thread opened from a filing list — a box or Previously
+// Seen — has a posting row to act on: over search results, bundles, and topics
+// opened directly the key answers with a notice instead of silence.
+func (v *mailView) fileOpenThread(key string) tea.Cmd {
+	if v.canFileOpenThread() {
+		return v.handlePostingAction(key)
+	}
+	v.notice = "Can't file this thread from here"
+	return nil
+}
+
+func (v *mailView) canFileOpenThread() bool {
+	if v.searchActive || v.bundleActive {
+		return false
+	}
+	selected := v.actionList().selectedPosting()
+	return selected != nil && selected.TopicID == v.topicID
 }
 
 func (v *mailView) handlePostingAction(key string) tea.Cmd {

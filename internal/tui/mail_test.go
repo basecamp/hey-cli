@@ -606,6 +606,105 @@ func TestMailViewPostingKeysCallExpectedEndpoints(t *testing.T) {
 	}
 }
 
+func TestMailViewFilesOpenThread(t *testing.T) {
+	tests := []struct {
+		name   string
+		key    string
+		boxID  int64
+		notice string
+	}{
+		{"reply later", "l", 4, "Thread moved to Reply Later"},
+		{"set aside", "a", 3, "Thread moved to Set Aside"},
+		{"set aside uppercase", "A", 3, "Thread moved to Set Aside"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v, recorded := mailWithTestServer(t, http.StatusNoContent)
+			v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+			if !v.inThread {
+				t.Fatal("enter should open the selected thread")
+			}
+
+			done, ok := runCmd(v.HandleContentKey(keyPress(tt.key))).(postingActionDoneMsg)
+			if !ok || done.err != nil {
+				t.Fatalf("filing command returned %#v", done)
+			}
+			if recorded.method != http.MethodPost || recorded.path != "/postings/moves.json" {
+				t.Errorf("request = %s %s, want POST /postings/moves.json", recorded.method, recorded.path)
+			}
+			if len(recorded.body.PostingIDs) != 1 || recorded.body.PostingIDs[0] != 100 {
+				t.Errorf("posting_ids = %v, want [100]", recorded.body.PostingIDs)
+			}
+			if recorded.body.BoxID == nil || *recorded.body.BoxID != tt.boxID {
+				t.Errorf("box_id = %v, want %d", recorded.body.BoxID, tt.boxID)
+			}
+
+			answer, _ := v.Update(done)
+			if toast := deliverToView(v, answer); toast != tt.notice {
+				t.Errorf("toast = %q, want %q", toast, tt.notice)
+			}
+			if !v.inThread {
+				t.Error("filing should keep the thread open, the way the web app stays on the topic")
+			}
+			if v.postingIndex(100) != -1 {
+				t.Error("the filed thread should leave the box list behind the reader")
+			}
+		})
+	}
+}
+
+func TestMailViewFilesOpenThreadOnlyFromFilingLists(t *testing.T) {
+	t.Run("search result", func(t *testing.T) {
+		v := mailWithPostings()
+		v.searchActive = true
+		v.searchList.setPostings([]mail.Posting{{ID: 10, TopicID: 100, Name: "Hello world"}})
+		v.inThread = true
+		v.topicID = 100
+
+		if cmd := v.HandleContentKey(keyPress("a")); cmd != nil {
+			t.Errorf("a search-opened thread should not file: %#v", runCmd(cmd))
+		}
+		if v.notice != "Can't file this thread from here" {
+			t.Errorf("notice = %q, want the filing explanation", v.notice)
+		}
+	})
+
+	t.Run("directly opened topic", func(t *testing.T) {
+		v := mailWithPostings()
+		v.inThread = true
+		v.topicID = 555 // opened by URL, not from the selected row
+
+		if cmd := v.HandleContentKey(keyPress("l")); cmd != nil {
+			t.Errorf("a directly opened thread should not file the selected row: %#v", runCmd(cmd))
+		}
+		if v.notice != "Can't file this thread from here" {
+			t.Errorf("notice = %q, want the filing explanation", v.notice)
+		}
+	})
+}
+
+func TestMailViewThreadHelpAdvertisesFilingKeys(t *testing.T) {
+	v := mailWithPostings()
+	v.inThread = true
+	v.topicID = 100
+
+	bindings := fmt.Sprint(v.HelpBindings())
+	for _, want := range []string{"reply later", "set aside"} {
+		if !strings.Contains(bindings, want) {
+			t.Errorf("thread help = %s, want %q", bindings, want)
+		}
+	}
+
+	v.topicID = 555
+	bindings = fmt.Sprint(v.HelpBindings())
+	for _, missing := range []string{"reply later", "set aside"} {
+		if strings.Contains(bindings, missing) {
+			t.Errorf("unfilable thread help = %s, should drop %q", bindings, missing)
+		}
+	}
+}
+
 func TestMailViewUnseenKeysRestoreSeenAndBubbledUpThreads(t *testing.T) {
 	for _, testCase := range []struct {
 		name      string
