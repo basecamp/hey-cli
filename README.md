@@ -320,8 +320,8 @@ rendering when the output is piped, `--ids-only` for one ID per line, and `--cou
 bare number. `--ids-only` and `--count` need list data, so they work on `hey box list`,
 `hey box view`, `hey label list`, `hey label view`, `hey collection list`, `hey collection view`,
 `hey workflow list`, `hey workflow view`, `hey clip list`, `hey snippet list`, `hey draft list`, `hey search`, `hey contact list`, `hey screener list`, `hey screener history`, `hey calendar list`,
-`hey event list`, `hey todo list`, `hey habit list`, `hey timetrack list` and
-`hey journal list`.
+`hey event list`, `hey event day`, `hey event week`, `hey todo list`, `hey habit list`,
+`hey timetrack list` and `hey journal list`.
 The
 data-only formats print any pagination notice on stderr, so the IDs on stdout stay
 pipeable. `hey clip list --ids-only` and `--count` cover the newest page only because the
@@ -565,6 +565,10 @@ hey event list                    # every calendar, from today onward
 hey event list --calendar 123 --starts-on 2026-01-01 --ends-on 2026-01-31
 hey event list --count            # how many events in the window
 
+hey event day                     # today as HEY draws it, recurrences expanded
+hey event day 2026-09-02          # one day
+hey event week 2026-09-02         # the week that day falls in
+
 hey event add "Design review" --starts-on 2026-09-02 --start-time 14:00 --end-time 15:00
 hey event add "Sarah's birthday" --starts-on 2026-09-02     # no time, so all day
 hey event add "Standup" --start-time 09:15 --repeat every_weekday --remind 10m
@@ -579,6 +583,14 @@ The list follows every page HEY serves. Within each calendar HEY orders recordin
 newest start time, not creation time, so use the ID returned by `hey event add` for a follow-up
 edit or delete rather than choosing an event by its position in the list. A repeating event
 lists once as the series it is stored as, not once per day it falls on.
+
+`hey event day` and `hey event week` read a span the way HEY's own views draw it: a
+repeating event is expanded into the occurrences that fall inside it, each carrying that
+day's own times, an `occurrence_id`, and the id of the series it repeats — which is what
+`hey event edit` and `hey event delete` take. A period covers the calendars switched on in
+HEY, the same set the app draws, so `day` and `week` take no `--calendar` — only `--limit`
+and `--all`. With no date they read the account's own today, whatever zone the machine
+runs in.
 
 An event with no `--start-time` is an all-day event, and a `--start-time` with no
 `--end-time` runs for an hour. Clock times are read in `--time-zone`, which defaults to the

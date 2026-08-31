@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -41,7 +40,12 @@ func newEventsDayCommand() *eventsPeriodCommand {
 		read: func(ctx context.Context, date string) (*generated.CalendarPeriod, error) {
 			return sdk.CalendarPeriods().Day(ctx, date)
 		},
-		describe: func(date string) string { return "on " + date },
+		describe: func(date string) string {
+			if date == periodNow {
+				return "today"
+			}
+			return "on " + date
+		},
 	}
 	eventsDayCommand.cmd = &cobra.Command{
 		Use:   "day [date]",
@@ -72,7 +76,12 @@ func newEventsWeekCommand() *eventsPeriodCommand {
 		read: func(ctx context.Context, date string) (*generated.CalendarPeriod, error) {
 			return sdk.CalendarPeriods().Week(ctx, date)
 		},
-		describe: func(date string) string { return "in the week of " + date },
+		describe: func(date string) string {
+			if date == periodNow {
+				return "this week"
+			}
+			return "in the week of " + date
+		},
 	}
 	eventsWeekCommand.cmd = &cobra.Command{
 		Use:   "week [date]",
@@ -104,7 +113,9 @@ func (c *eventsPeriodCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	date := time.Now().Format(dateLayout)
+	// With no date the read asks for "now" and HEY resolves today in the account's own
+	// time zone, so a host in another zone does not fetch yesterday's schedule at midnight.
+	date := periodNow
 	if len(args) > 0 {
 		if _, err := parseDateArg("date", args[0]); err != nil {
 			return err
@@ -123,6 +134,7 @@ func (c *eventsPeriodCommand) run(cmd *cobra.Command, args []string) error {
 		events = filterRecordingsByType(&period.Recordings, recordingTypeEvent)
 	}
 	sortEventsByStart(events)
+	resolveOccurrenceSeries(events)
 
 	total := len(events)
 	if c.limit > 0 && !c.all && len(events) > c.limit {
@@ -131,6 +143,21 @@ func (c *eventsPeriodCommand) run(cmd *cobra.Command, args []string) error {
 	notice := output.TruncationNotice(len(events), total)
 
 	return writeEventRows(cmd, events, c.describe(date), notice)
+}
+
+// periodNow is the date the period reads accept for today: HEY resolves it in the
+// account's own time zone, which the CLI process's clock cannot.
+const periodNow = "now"
+
+// resolveOccurrenceSeries gives each row the ID the event verbs take. HEY serves a day of a
+// repeating series as a virtual occurrence — no id of its own, the series in parent_id — but
+// 'hey event edit' and 'hey event delete' take the series, so the row carries it.
+func resolveOccurrenceSeries(events []generated.Recording) {
+	for i := range events {
+		if events[i].Id == 0 && events[i].ParentId != 0 {
+			events[i].Id = events[i].ParentId
+		}
+	}
 }
 
 // sortEventsByStart puts a period's events in the order the span reads, top to bottom in

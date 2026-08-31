@@ -11,6 +11,8 @@ import (
 // A repeating event is one row on a calendar, so `hey event list` answers it on the day the
 // series began. A day is HEY's own expansion: the occurrence falls on the day asked for,
 // carrying that day's times, and everything that is not an event stays out of the answer.
+// HEY serves the occurrence virtual — no id of its own, the series in parent_id — and the
+// row resolves that to the series id, which is what edit and delete take.
 func TestEventsDayExpandsRecurringEvents(t *testing.T) {
 	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/calendar/days/2026-09-02.json" {
@@ -22,7 +24,7 @@ func TestEventsDayExpandsRecurringEvents(t *testing.T) {
 		_, _ = io.WriteString(w, `{"kind":"day","starts_at":"2026-09-02T00:00:00Z","ends_at":"2026-09-02T23:59:59Z","recordings":{`+
 			`"Calendar::Event":[`+
 			`{"id":301,"title":"Design review","starts_at":"2026-09-02T14:00:00Z","ends_at":"2026-09-02T15:00:00Z","type":"Calendar::Event","calendar":{"id":9,"name":"Work"}},`+
-			`{"id":204,"title":"Standup","starts_at":"2026-09-02T09:15:00Z","ends_at":"2026-09-02T09:30:00Z","type":"Calendar::Event","recurring":true,"occurrence_id":"204-2026-09-02","calendar":{"id":9,"name":"Work"}}`+
+			`{"title":"Standup","starts_at":"2026-09-02T09:15:00Z","ends_at":"2026-09-02T09:30:00Z","type":"Calendar::Event","recurring":true,"parent_id":204,"occurrence_id":"204_2026-09-02","calendar":{"id":9,"name":"Work"}}`+
 			`],`+
 			`"Calendar::Habit":[{"id":11,"title":"Morning strength training"}],`+
 			`"Calendar::Todo":[{"id":3,"title":"Send notes"}]}}`)
@@ -41,8 +43,11 @@ func TestEventsDayExpandsRecurringEvents(t *testing.T) {
 	if !ok || first["title"] != "Standup" {
 		t.Errorf("first event = %#v, want the occurrence, in the order the day reads", events[0])
 	}
-	if first["occurrence_id"] != "204-2026-09-02" || first["starts_at"] != "2026-09-02T09:15:00Z" {
+	if first["occurrence_id"] != "204_2026-09-02" || first["starts_at"] != "2026-09-02T09:15:00Z" {
 		t.Errorf("occurrence = %#v, want the day's own times", first)
+	}
+	if first["id"] != float64(204) {
+		t.Errorf("occurrence id = %v, want the series, which is what edit and delete take", first["id"])
 	}
 }
 
@@ -56,8 +61,8 @@ func TestEventsWeekReadsTheWeekPeriod(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"kind":"week","starts_at":"2026-08-31T00:00:00Z","ends_at":"2026-09-06T23:59:59Z","recordings":{`+
 			`"Calendar::Event":[`+
-			`{"id":204,"title":"Standup","starts_at":"2026-09-04T09:15:00Z","ends_at":"2026-09-04T09:30:00Z","type":"Calendar::Event","recurring":true,"occurrence_id":"204-2026-09-04","calendar":{"id":9,"name":"Work"}},`+
-			`{"id":204,"title":"Standup","starts_at":"2026-09-02T09:15:00Z","ends_at":"2026-09-02T09:30:00Z","type":"Calendar::Event","recurring":true,"occurrence_id":"204-2026-09-02","calendar":{"id":9,"name":"Work"}}`+
+			`{"title":"Standup","starts_at":"2026-09-04T09:15:00Z","ends_at":"2026-09-04T09:30:00Z","type":"Calendar::Event","recurring":true,"parent_id":204,"occurrence_id":"204_2026-09-04","calendar":{"id":9,"name":"Work"}},`+
+			`{"title":"Standup","starts_at":"2026-09-02T09:15:00Z","ends_at":"2026-09-02T09:30:00Z","type":"Calendar::Event","recurring":true,"parent_id":204,"occurrence_id":"204_2026-09-02","calendar":{"id":9,"name":"Work"}}`+
 			`]}}`)
 	}), "event", "week", "2026-09-02")
 	if err != nil {
@@ -71,8 +76,28 @@ func TestEventsWeekReadsTheWeekPeriod(t *testing.T) {
 		t.Fatalf("data = %#v, want both occurrences", response.Data)
 	}
 	first, ok := events[0].(map[string]any)
-	if !ok || first["occurrence_id"] != "204-2026-09-02" {
+	if !ok || first["occurrence_id"] != "204_2026-09-02" {
 		t.Errorf("first event = %#v, want the earlier occurrence first", events[0])
+	}
+}
+
+// With no date the read asks HEY for "now", which the server resolves in the account's own
+// time zone — the CLI process's clock could be a day off either way around midnight.
+func TestEventsDayDefaultsToNow(t *testing.T) {
+	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/calendar/days/now.json" {
+			t.Errorf("request = %s %s, want the day read for now", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"kind":"day","starts_at":"2026-09-02T00:00:00Z","ends_at":"2026-09-02T23:59:59Z","recordings":{"Calendar::Event":[]}}`)
+	}), "event", "day")
+	if err != nil {
+		t.Fatalf("execute event day: %v", err)
+	}
+	if response.Summary != "0 events (today)" {
+		t.Errorf("summary = %q", response.Summary)
 	}
 }
 
