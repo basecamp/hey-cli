@@ -293,41 +293,60 @@ func TestReplyLoadsAndSendsThroughThreadAccount(t *testing.T) {
 
 func TestReplyContextFallsBackWhenPrefillIsEmpty(t *testing.T) {
 	// On a thread with yourself, everyone HEY excludes from the prefill is
-	// everyone there is; the local computation keeps that reply addressable.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/identity.json":
-			_, _ = w.Write([]byte(`{"id":1,"accounts":[{"id":9,"status":"active"}],"senders":[{"id":42,"account_id":9,"default":true}]}`))
-		case "/topics/100.json":
-			_, _ = w.Write([]byte(`{"id":100,"account_id":9,"name":"Quarterly planning","entries":[{"id":501}]}`))
-		case "/messages/501.json":
-			_, _ = w.Write([]byte(`{"id":501,"subject":"Quarterly planning","sender":{"id":3,"name":"Rick Sanchez","email_address":"rick@example.com"},
-				"addressed":{"directly":[{"id":1,"name":"Jane Doe","email_address":"jane@example.com"}]}}`))
-		default:
-			_, _ = w.Write([]byte(`{}`))
-		}
-	}))
-	t.Cleanup(srv.Close)
-	sdk := hey.NewClient(&hey.Config{BaseURL: srv.URL}, &hey.StaticTokenProvider{Token: "t"}, hey.WithMaxRetries(0))
-	vc := testVC()
-	vc.rootSDK = sdk
-	vc.sdk = sdk
-	vc.ctx = context.Background()
-	v := newMailView(vc)
-	v.boxes = orderBoxes(testBoxes())
-	v.Update(currentPostingsLoaded(v, testPostings()))
+	// everyone there is; the local computation keeps that reply addressable. The
+	// subject only falls back with it when the prefill answered none.
+	for name, testCase := range map[string]struct {
+		prefillJSON string
+		wantSubject string
+	}{
+		"an empty prefill derives the subject locally": {
+			prefillJSON: `{}`,
+			wantSubject: "Re: Quarterly planning",
+		},
+		"a recipientless prefill keeps its subject": {
+			prefillJSON: `{"subject":"Re: Quarterly planning per HEY"}`,
+			wantSubject: "Re: Quarterly planning per HEY",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/identity.json":
+					_, _ = w.Write([]byte(`{"id":1,"accounts":[{"id":9,"status":"active"}],"senders":[{"id":42,"account_id":9,"default":true}]}`))
+				case "/topics/100.json":
+					_, _ = w.Write([]byte(`{"id":100,"account_id":9,"name":"Quarterly planning","entries":[{"id":501}]}`))
+				case "/messages/501.json":
+					_, _ = w.Write([]byte(`{"id":501,"subject":"Quarterly planning","sender":{"id":3,"name":"Rick Sanchez","email_address":"rick@example.com"},
+						"addressed":{"directly":[{"id":1,"name":"Jane Doe","email_address":"jane@example.com"}]}}`))
+				case "/entries/501/replies/new.json":
+					_, _ = w.Write([]byte(testCase.prefillJSON))
+				default:
+					_, _ = w.Write([]byte(`{}`))
+				}
+			}))
+			t.Cleanup(srv.Close)
+			sdk := hey.NewClient(&hey.Config{BaseURL: srv.URL}, &hey.StaticTokenProvider{Token: "t"}, hey.WithMaxRetries(0))
+			vc := testVC()
+			vc.rootSDK = sdk
+			vc.sdk = sdk
+			vc.ctx = context.Background()
+			v := newMailView(vc)
+			v.boxes = orderBoxes(testBoxes())
+			v.Update(currentPostingsLoaded(v, testPostings()))
 
-	loaded := runCmd(v.loadReplyContext(100, "Quarterly planning"))
-	ctxMsg, ok := loaded.(replyContextLoadedMsg)
-	if !ok || ctxMsg.err != nil {
-		t.Fatalf("reply command returned %#v", loaded)
-	}
-	if want := []string{"jane@example.com", "rick@example.com"}; !slices.Equal(ctxMsg.to, want) {
-		t.Errorf("to = %v, want %v", ctxMsg.to, want)
-	}
-	if ctxMsg.subject != "Re: Quarterly planning" {
-		t.Errorf("subject = %q, want %q", ctxMsg.subject, "Re: Quarterly planning")
+			loaded := runCmd(v.loadReplyContext(100, "Quarterly planning"))
+			ctxMsg, ok := loaded.(replyContextLoadedMsg)
+			if !ok || ctxMsg.err != nil {
+				t.Fatalf("reply command returned %#v", loaded)
+			}
+			if want := []string{"jane@example.com", "rick@example.com"}; !slices.Equal(ctxMsg.to, want) {
+				t.Errorf("to = %v, want %v", ctxMsg.to, want)
+			}
+			if ctxMsg.subject != testCase.wantSubject {
+				t.Errorf("subject = %q, want %q", ctxMsg.subject, testCase.wantSubject)
+			}
+		})
 	}
 }
 

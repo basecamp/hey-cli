@@ -394,13 +394,17 @@ func TestReplyPrefersTheServersComputedRecipients(t *testing.T) {
 // against a fake that does not serve the endpoint at all.
 func TestReplyFallsBackWhenTheServerAnswersNobody(t *testing.T) {
 	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
-	sent.ReplyNewJSON = `{"content":"<div>quoted</div>","is_reply":true,"addressed":{}}`
+	sent.ReplyNewJSON = `{"subject":"Re: Weekly sync per HEY","content":"<div>quoted</div>","is_reply":true,"addressed":{}}`
 
 	if err := runCLI(t, server, "--account", "8", "reply", "7", "-m", "note to self"); err != nil {
 		t.Fatalf("reply: %v", err)
 	}
 	if len(sent.To) == 0 {
 		t.Errorf("to = %v, want the locally computed recipients", sent.To)
+	}
+	// Only the recipients needed the fallback: the subject HEY supplied survives it.
+	if sent.Subject != "Re: Weekly sync per HEY" {
+		t.Errorf("subject = %q, want the prefilled one", sent.Subject)
 	}
 }
 

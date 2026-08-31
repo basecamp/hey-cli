@@ -54,7 +54,8 @@ func resolveThreadReply(ctx context.Context, threadID int64) (*threadReplyTarget
 		AccountID: topic.AccountId,
 		client:    threadSDK,
 	}
-	if subject, addressed, ok := replyPrefillFromServer(ctx, threadSDK, entryID); ok {
+	subject, addressed, ok := replyPrefillFromServer(ctx, threadSDK, entryID)
+	if ok {
 		target.Subject = subject
 		target.Addressed = addressed
 		return target, nil
@@ -68,12 +69,17 @@ func resolveThreadReply(ctx context.Context, threadID int64) (*threadReplyTarget
 		return nil, apierr.ErrNotFound("message", fmt.Sprintf("%d", entryID))
 	}
 
-	addressed := recipientsForReplyTo(*message)
+	addressed = recipientsForReplyTo(*message)
 	if len(addressed.To) == 0 && len(addressed.CC) == 0 && len(addressed.BCC) == 0 {
 		return nil, apierr.ErrUsage("could not determine thread recipients")
 	}
 
-	target.Subject = replySubject(message.Subject)
+	// The prefill's subject survives an empty recipient list: only the recipients
+	// needed the local computation.
+	if subject == "" {
+		subject = replySubject(message.Subject)
+	}
+	target.Subject = subject
 	target.Addressed = addressed
 	return target, nil
 }
@@ -85,7 +91,8 @@ func resolveThreadReply(ctx context.Context, threadID int64) (*threadReplyTarget
 // locally, and the reason a reply used to be able to CC its writer back to themselves.
 // A failed read falls back to the local computation, and so does an empty answer: on a
 // thread with yourself, everyone HEY excludes is everyone there is, and the local list
-// is what keeps that reply addressable.
+// is what keeps that reply addressable. The subject is answered even when the
+// recipients are not — only they need the fallback, not the subject HEY supplied.
 func replyPrefillFromServer(ctx context.Context, client *hey.Client, entryID int64) (string, replyRecipients, bool) {
 	prefilled, err := client.Entries().NewReply(ctx, entryID)
 	if err != nil || prefilled == nil {
@@ -97,7 +104,7 @@ func replyPrefillFromServer(ctx context.Context, client *hey.Client, entryID int
 		BCC: addressEmails(prefilled.Addressed.Blindcopied),
 	}
 	if len(addressed.To)+len(addressed.CC)+len(addressed.BCC) == 0 {
-		return "", replyRecipients{}, false
+		return prefilled.Subject, replyRecipients{}, false
 	}
 	return prefilled.Subject, addressed, true
 }

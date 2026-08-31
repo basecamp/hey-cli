@@ -423,8 +423,11 @@ func (v *mailView) loadReplyContext(topicID int64, topicName string) tea.Cmd {
 		// with the acting user's own addresses, aliases and catch-alls excluded — an
 		// exclusion this client cannot compute locally. A failed read falls back to
 		// the local computation, and so does an empty answer: on a thread with
-		// yourself, everyone HEY excludes is everyone there is.
+		// yourself, everyone HEY excludes is everyone there is. The prefill's subject
+		// survives that recipient fallback — only the recipients needed it.
+		var prefillSubject string
 		if prefilled, prefillErr := accountSDK.Entries().NewReply(ctx, entryID); prefillErr == nil && prefilled != nil {
+			prefillSubject = prefilled.Subject
 			to := addressesOf(prefilled.Addressed.Directly, "")
 			cc := addressesOf(prefilled.Addressed.Copied, "")
 			bcc := addressesOf(prefilled.Addressed.Blindcopied, "")
@@ -436,7 +439,7 @@ func (v *mailView) loadReplyContext(topicID int64, topicName string) tea.Cmd {
 					topicName: topicName,
 					entryID:   entryID,
 					sdk:       accountSDK,
-					subject:   prefilled.Subject,
+					subject:   prefillSubject,
 					to:        to,
 					cc:        cc,
 					bcc:       bcc,
@@ -456,6 +459,10 @@ func (v *mailView) loadReplyContext(topicID int64, topicName string) tea.Cmd {
 			}
 		}
 		to, cc, bcc := recipientsForReplyTo(*message)
+		subject := prefillSubject
+		if subject == "" {
+			subject = replySubjectFor(*message)
+		}
 		return replyContextLoadedMsg{
 			requestID: requestID,
 			boxID:     boxID,
@@ -463,7 +470,7 @@ func (v *mailView) loadReplyContext(topicID int64, topicName string) tea.Cmd {
 			topicName: topicName,
 			entryID:   entryID,
 			sdk:       accountSDK,
-			subject:   replySubjectFor(*message),
+			subject:   subject,
 			to:        to,
 			cc:        cc,
 			bcc:       bcc,
