@@ -118,7 +118,7 @@ CLI for HEY: mailboxes, labels, collections, email threads, contacts, replies, c
 **MUST follow these rules:**
 
 1. **Choose the right structured output** — use `--jq '<expression>'` to filter or extract fields and `--json` for the full response. Never pipe to an external `jq`; `--jq` is built in and implies `--json`.
-2. **Authentication required** for all data commands — run `hey auth login` first
+2. **Reuse stored authentication** — run the requested data command; it uses stored credentials and refreshes expiring OAuth tokens automatically. If it returns an auth error, report the task as blocked. Use `hey auth status --json` when an explicit authentication check is needed. Never run `hey auth login` unattended; use it only for interactive recovery with the user present.
 3. **HTML output** is available via `--html` for commands that return HTML content
 4. **Linked mail accounts share one login** — use `hey account list --json`, then `--account <id|all>` when a task must target one account
 5. **Local HEY configuration requires human trust** — never run `hey config trust-local` without the user's explicit approval
@@ -246,7 +246,7 @@ notice on stderr. Both need list data, so they work on `hey box list`, `hey box 
 | List journal entries | `hey journal list --json` |
 | Read journal entry | `hey journal read 2024-03-15 --json` |
 | Write journal entry | `hey journal write "Shipped the pagination fix."` (empty content removes the entry) |
-| Check auth status | `hey auth status` |
+| Check auth status | `hey auth status --json` |
 | Print bearer token | `hey auth token` (refuses a `--cookie` login) |
 | Launch TUI | `hey tui` (Ctrl+A switches linked mail accounts) |
 
@@ -751,20 +751,27 @@ error.
 
 ### Authentication
 
+Data commands use the credentials HEY already stores and refresh expiring OAuth tokens automatically. Run the requested data command without a login preflight. Use `hey auth status --json` when the user asks for authentication status or when an explicit authentication check helps diagnose a failure; it reports whether credentials are available without changing them.
+
+If a data command returns exit code 3 with `"code": "auth"`, report that authentication is required and the task is blocked. Tell the user to run `hey auth login`; do not run it for them unattended.
+
+Piped, machine-output and non-TTY commands do not prompt for sign-in. When an agent harness runs commands under a PTY, set `HEY_NONINTERACTIVE=1` so a missing login returns the same actionable auth error instead of opening an interactive prompt.
+
 ```bash
-hey auth login                                # Log in (browser-based OAuth)
-hey auth status                               # Check if authenticated
-hey auth logout                               # Log out
-hey login / hey logout                        # Shortcuts for the two above
-hey setup omarchy                             # Omarchy only: put HEY in the bar. The interactive
-                                              # sign-in offer never fires for agents (non-TTY,
-                                              # machine output), so this command is the way
-hey setup                                     # First-run wizard: sign in + connect coding agents
-HEY_NONINTERACTIVE=1 hey setup --json         # No prompts and no OAuth wait — but still
-                                              # installs agent skills and records onboarding;
-                                              # use `hey doctor` to inspect without changes.
-                                              # (Without HEY_NONINTERACTIVE, a terminal on
-                                              # stdin still starts browser sign-in.)
+hey auth status --json                         # Inspect stored authentication without changing it
+HEY_NONINTERACTIVE=1 hey box list --json       # A PTY-safe unattended data command
+hey auth login                                 # Interactive browser recovery, with the user present
+hey auth logout                                # Log out
+hey login / hey logout                         # Shortcuts for the two above
+hey setup omarchy                              # Omarchy only: put HEY in the bar. The interactive
+                                               # sign-in offer never fires for agents (non-TTY,
+                                               # machine output), so this command is the way
+hey setup                                      # First-run wizard: sign in + connect coding agents
+HEY_NONINTERACTIVE=1 hey setup --json          # No prompts and no OAuth wait — but still
+                                               # installs agent skills and records onboarding;
+                                               # use `hey doctor` to inspect without changes.
+                                               # (Without HEY_NONINTERACTIVE, a terminal on
+                                               # stdin still starts browser sign-in.)
 ```
 
-If a command fails with an auth error, run `hey auth status` to check, then `hey auth login` to re-authenticate.
+Run `hey auth login` only when the user is present and explicitly asks to authenticate.

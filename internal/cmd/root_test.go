@@ -349,6 +349,28 @@ func TestRequireAuthPromptsOnlyWhenInteractiveAndStyled(t *testing.T) {
 			t.Errorf("prompt shown %d times for machine output", *asked)
 		}
 	})
+
+	t.Run("never prompts when non-interactive is requested", func(t *testing.T) {
+		t.Setenv("HEY_NONINTERACTIVE", "1")
+		previousStdin, previousStdout, previousStderr := stdinIsTerminal, stdoutIsTerminal, stderrIsTerminal
+		stdinIsTerminal = func() bool { return true }
+		stdoutIsTerminal = func() bool { return true }
+		stderrIsTerminal = func() bool { return true }
+		t.Cleanup(func() {
+			stdinIsTerminal, stdoutIsTerminal, stderrIsTerminal = previousStdin, previousStdout, previousStderr
+		})
+		asked := stubAskToSignIn(t, true)
+		prev := writer
+		writer = output.New(output.Options{Format: output.FormatStyled, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+		t.Cleanup(func() { writer = prev })
+
+		if err := requireAuth(); err == nil {
+			t.Fatal("expected an auth error")
+		}
+		if *asked != 0 {
+			t.Errorf("prompt shown %d times with HEY_NONINTERACTIVE", *asked)
+		}
+	})
 }
 
 func TestDataCommandWithoutAuthReturnsAuthErrorWhenPiped(t *testing.T) {
