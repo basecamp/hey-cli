@@ -254,6 +254,7 @@ type mailView struct {
 	topicViewport    viewport.Model
 	topicContent     string
 	topicID          int64
+	threadPostingID  int64 // the posting the open thread was opened from, zero when it has none
 	topicName        string
 	entries          []mail.Entry
 	attachments      []messageAttachment
@@ -515,6 +516,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.inThread = true
 		v.topicID = msg.topicID
+		v.threadPostingID = msg.postingID
 		v.topicName = msg.title
 		v.entries = msg.entries
 		v.attachments = msg.attachments
@@ -929,7 +931,7 @@ func (v *mailView) HelpBindings() []helpBinding {
 	}
 	if v.inThread {
 		bindings := []helpBinding{{"r", "reply"}, {"f", "forward"}}
-		if v.canFileOpenThread() {
+		if v.fileablePosting() != nil {
 			bindings = append(bindings, helpBinding{"l", "reply later"}, helpBinding{"a", "set aside"})
 		}
 		if len(v.entries) > 1 {
@@ -1412,6 +1414,7 @@ func (v *mailView) ExitThread() {
 	if v.inThread {
 		v.inThread = false
 		v.threadNotice = ""
+		v.threadPostingID = 0
 		v.modal = nil
 		v.requests.cancel()
 		return
@@ -1592,6 +1595,7 @@ func (v *mailView) switchBox(index int) tea.Cmd {
 	}
 	v.inThread = false
 	v.threadNotice = ""
+	v.threadPostingID = 0
 	v.clearSearch()
 	v.clearBundle()
 	v.clearSeen()
@@ -1613,6 +1617,7 @@ func (v *mailView) openPreviouslySeen() tea.Cmd {
 	}
 	v.inThread = false
 	v.threadNotice = ""
+	v.threadPostingID = 0
 	v.clearSearch()
 	v.clearBundle()
 	v.notice = ""
@@ -2278,19 +2283,22 @@ func (v *mailView) imboxSource() *mail.Source {
 // Seen — has a posting row to act on: over search results, bundles, and topics
 // opened directly the key answers with a notice instead of silence.
 func (v *mailView) fileOpenThread(key string) tea.Cmd {
-	if v.canFileOpenThread() {
-		return v.handlePostingAction(key)
+	if posting := v.fileablePosting(); posting != nil {
+		return v.postingAction(key, *posting)
 	}
 	v.notice = "Can't file this thread from here"
 	return nil
 }
 
-func (v *mailView) canFileOpenThread() bool {
-	if v.searchActive || v.bundleActive {
-		return false
+// fileablePosting is the row the open thread files on: the posting the thread was
+// opened from, found by id rather than under the cursor because the mark-seen that
+// opening triggers can resort the list, slide the row under the cover, and clamp
+// the cursor onto some other row while the thread is on screen.
+func (v *mailView) fileablePosting() *mail.Posting {
+	if v.searchActive || v.bundleActive || v.threadPostingID == 0 {
+		return nil
 	}
-	selected := v.actionList().selectedPosting()
-	return selected != nil && selected.TopicID == v.topicID
+	return v.openedPosting(v.threadPostingID)
 }
 
 func (v *mailView) handlePostingAction(key string) tea.Cmd {
@@ -2298,7 +2306,10 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 	if selected == nil {
 		return nil
 	}
-	p := *selected
+	return v.postingAction(key, *selected)
+}
+
+func (v *mailView) postingAction(key string, p mail.Posting) tea.Cmd {
 	boxID := v.currentBoxID()
 
 	switch key {

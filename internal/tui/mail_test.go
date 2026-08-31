@@ -654,6 +654,33 @@ func TestMailViewFilesOpenThread(t *testing.T) {
 	}
 }
 
+func TestMailViewFilesOpenThreadAfterMarkSeenCoversItsRow(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v.postingList.setCover(coverTopo)
+
+	opened, _ := v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+	if !v.inThread {
+		t.Fatal("enter should open the selected thread")
+	}
+	// The mark-seen that opening triggers slides the row under the cover and
+	// clamps the cursor off it, so filing cannot go through the selection.
+	deliverToView(v, opened)
+	if p := v.actionList().selectedPosting(); p != nil && p.ID == 100 {
+		t.Fatal("mark-seen under a cover should move the cursor off the opened row")
+	}
+
+	done, ok := runCmd(v.HandleContentKey(keyPress("a"))).(postingActionDoneMsg)
+	if !ok || done.err != nil {
+		t.Fatalf("filing command returned %#v", done)
+	}
+	if recorded.method != http.MethodPost || recorded.path != "/postings/moves.json" {
+		t.Errorf("request = %s %s, want POST /postings/moves.json", recorded.method, recorded.path)
+	}
+	if len(recorded.body.PostingIDs) != 1 || recorded.body.PostingIDs[0] != 100 {
+		t.Errorf("posting_ids = %v, want [100]", recorded.body.PostingIDs)
+	}
+}
+
 func TestMailViewFilesOpenThreadOnlyFromFilingLists(t *testing.T) {
 	t.Run("search result", func(t *testing.T) {
 		v := mailWithPostings()
@@ -661,6 +688,7 @@ func TestMailViewFilesOpenThreadOnlyFromFilingLists(t *testing.T) {
 		v.searchList.setPostings([]mail.Posting{{ID: 10, TopicID: 100, Name: "Hello world"}})
 		v.inThread = true
 		v.topicID = 100
+		v.threadPostingID = 10
 
 		if cmd := v.HandleContentKey(keyPress("a")); cmd != nil {
 			t.Errorf("a search-opened thread should not file: %#v", runCmd(cmd))
@@ -673,7 +701,7 @@ func TestMailViewFilesOpenThreadOnlyFromFilingLists(t *testing.T) {
 	t.Run("directly opened topic", func(t *testing.T) {
 		v := mailWithPostings()
 		v.inThread = true
-		v.topicID = 555 // opened by URL, not from the selected row
+		v.topicID = 555 // opened by URL, with no posting row behind it
 
 		if cmd := v.HandleContentKey(keyPress("l")); cmd != nil {
 			t.Errorf("a directly opened thread should not file the selected row: %#v", runCmd(cmd))
@@ -688,6 +716,7 @@ func TestMailViewThreadHelpAdvertisesFilingKeys(t *testing.T) {
 	v := mailWithPostings()
 	v.inThread = true
 	v.topicID = 100
+	v.threadPostingID = 100
 
 	bindings := fmt.Sprint(v.HelpBindings())
 	for _, want := range []string{"reply later", "set aside"} {
@@ -696,7 +725,7 @@ func TestMailViewThreadHelpAdvertisesFilingKeys(t *testing.T) {
 		}
 	}
 
-	v.topicID = 555
+	v.threadPostingID = 0 // opened by URL, with no posting row behind it
 	bindings = fmt.Sprint(v.HelpBindings())
 	for _, missing := range []string{"reply later", "set aside"} {
 		if strings.Contains(bindings, missing) {
