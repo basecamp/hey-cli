@@ -417,6 +417,33 @@ func (v *mailView) loadReplyContext(topicID int64, topicName string) tea.Cmd {
 			return replyContextLoadedMsg{requestID: requestID, boxID: boxID, err: err}
 		}
 		entryID := topic.Entries[len(topic.Entries)-1].Id
+
+		// HEY's reply prefill (GET /entries/{id}/replies/new) is the authority on how
+		// a reply starts out: the "Re: …" subject it goes out under, and recipients
+		// with the acting user's own addresses, aliases and catch-alls excluded — an
+		// exclusion this client cannot compute locally. A failed read falls back to
+		// the local computation, and so does an empty answer: on a thread with
+		// yourself, everyone HEY excludes is everyone there is.
+		if prefilled, prefillErr := accountSDK.Entries().NewReply(ctx, entryID); prefillErr == nil && prefilled != nil {
+			to := addressesOf(prefilled.Addressed.Directly, "")
+			cc := addressesOf(prefilled.Addressed.Copied, "")
+			bcc := addressesOf(prefilled.Addressed.Blindcopied, "")
+			if len(to)+len(cc)+len(bcc) > 0 {
+				return replyContextLoadedMsg{
+					requestID: requestID,
+					boxID:     boxID,
+					topicID:   topicID,
+					topicName: topicName,
+					entryID:   entryID,
+					sdk:       accountSDK,
+					subject:   prefilled.Subject,
+					to:        to,
+					cc:        cc,
+					bcc:       bcc,
+				}
+			}
+		}
+
 		message, err := accountSDK.Messages().Get(ctx, entryID)
 		if err != nil {
 			return replyContextLoadedMsg{requestID: requestID, boxID: boxID, err: err}
