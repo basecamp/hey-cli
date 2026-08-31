@@ -8,7 +8,7 @@ require (
 	charm.land/glamour/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/basecamp/actioncable-go v0.0.0-20260824145920-822e6cf08655
-	github.com/basecamp/hey-sdk/go v0.28.2-0.20260831222730-44894c6c46d0
+	github.com/basecamp/hey-sdk/go v0.28.2-0.20260831223614-ed5cf6fadf55
 	github.com/basecamp/mcp v0.0.0-20260828100356-2d6f44b51e9d
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/fsnotify/fsnotify v1.10.1
