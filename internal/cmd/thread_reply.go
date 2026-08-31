@@ -19,12 +19,15 @@ type replyRecipients struct {
 	BCC []string
 }
 
-// threadReplyTarget carries the entry a reply answers, its recipients, and an immutable
-// client bound to the thread's mail account. HEY saves an unaddressed reply as a draft,
-// so the recipients are not optional.
+// threadReplyTarget carries the entry a reply answers, its subject and recipients, and
+// an immutable client bound to the thread's mail account. HEY saves an unaddressed
+// reply as a draft, so the recipients are not optional. The subject is not optional
+// either: HEY never derives one, so a reply sent without it saves drafts that read
+// "No subject" in Drafts.
 type threadReplyTarget struct {
 	EntryID   int64
 	AccountID int64
+	Subject   string
 	Addressed replyRecipients
 	client    *hey.Client
 }
@@ -51,7 +54,8 @@ func resolveThreadReply(ctx context.Context, threadID int64) (*threadReplyTarget
 		AccountID: topic.AccountId,
 		client:    threadSDK,
 	}
-	if addressed, ok := replyRecipientsFromServer(ctx, threadSDK, entryID); ok {
+	if subject, addressed, ok := replyPrefillFromServer(ctx, threadSDK, entryID); ok {
+		target.Subject = subject
 		target.Addressed = addressed
 		return target, nil
 	}
@@ -69,21 +73,23 @@ func resolveThreadReply(ctx context.Context, threadID int64) (*threadReplyTarget
 		return nil, apierr.ErrUsage("could not determine thread recipients")
 	}
 
+	target.Subject = replySubject(message.Subject)
 	target.Addressed = addressed
 	return target, nil
 }
 
-// replyRecipientsFromServer asks HEY who a reply to the entry goes to
-// (GET /entries/{id}/replies/new): the entry's sender moved onto the To line and the
-// acting user's own addresses, aliases and catch-alls excluded — the exclusion this CLI
-// cannot compute locally, and the reason a reply used to be able to CC its writer back
-// to themselves. A failed read falls back to the local computation, and so does an
-// empty answer: on a thread with yourself, everyone HEY excludes is everyone there is,
-// and the local list is what keeps that reply addressable.
-func replyRecipientsFromServer(ctx context.Context, client *hey.Client, entryID int64) (replyRecipients, bool) {
+// replyPrefillFromServer asks HEY how a reply to the entry starts out
+// (GET /entries/{id}/replies/new): the "Re: …" subject the reply carries, and its
+// recipients — the entry's sender moved onto the To line and the acting user's own
+// addresses, aliases and catch-alls excluded — the exclusion this CLI cannot compute
+// locally, and the reason a reply used to be able to CC its writer back to themselves.
+// A failed read falls back to the local computation, and so does an empty answer: on a
+// thread with yourself, everyone HEY excludes is everyone there is, and the local list
+// is what keeps that reply addressable.
+func replyPrefillFromServer(ctx context.Context, client *hey.Client, entryID int64) (string, replyRecipients, bool) {
 	prefilled, err := client.Entries().NewReply(ctx, entryID)
 	if err != nil || prefilled == nil {
-		return replyRecipients{}, false
+		return "", replyRecipients{}, false
 	}
 	addressed := replyRecipients{
 		To:  addressEmails(prefilled.Addressed.Directly),
@@ -91,9 +97,26 @@ func replyRecipientsFromServer(ctx context.Context, client *hey.Client, entryID 
 		BCC: addressEmails(prefilled.Addressed.Blindcopied),
 	}
 	if len(addressed.To)+len(addressed.CC)+len(addressed.BCC) == 0 {
-		return replyRecipients{}, false
+		return "", replyRecipients{}, false
 	}
-	return addressed, true
+	return prefilled.Subject, addressed, true
+}
+
+// replySubject answers the subject a reply to the given subject carries, the way HEY
+// derives it in Entry::Replyable#reply_subject: a "Re: " prefix, without doubling one
+// already there in any casing. An empty subject stays empty rather than becoming a
+// bare "Re:".
+func replySubject(subject string) string {
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		return ""
+	}
+
+	rest := subject
+	if len(rest) >= 3 && strings.EqualFold(rest[:3], "Re:") {
+		rest = strings.TrimPrefix(rest[3:], " ")
+	}
+	return strings.TrimRight("Re: "+rest, " ")
 }
 
 // recipientsForReplyTo answers who a reply to this message goes to: the message's own

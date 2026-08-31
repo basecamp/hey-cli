@@ -55,7 +55,7 @@ func composeTestServer(t *testing.T) (*mailView, *struct {
 		case "/topics/100.json":
 			_, _ = w.Write([]byte(`{"id":100,"account_id":9,"name":"Quarterly planning","entries":[{"id":500},{"id":501}]}`))
 		case "/messages/501.json":
-			_, _ = w.Write([]byte(`{"id":501,"sender":{"id":3,"name":"Rick Sanchez","email_address":"rick@example.com"},
+			_, _ = w.Write([]byte(`{"id":501,"subject":"Quarterly planning","sender":{"id":3,"name":"Rick Sanchez","email_address":"rick@example.com"},
 				"addressed":{"directly":[{"id":1,"name":"Jane Doe","email_address":"jane@example.com"}]}}`))
 		case "/entries/501/forwards/new.json":
 			_, _ = w.Write([]byte(`{"subject":"Fwd: Quarterly planning","content":"<div>Quoted message</div>"}`))
@@ -217,7 +217,7 @@ func TestReplyFormPrefillsAndSends(t *testing.T) {
 	v, rec := composeTestServer(t)
 	v.Resize(80, 30)
 	v.Update(replyContextLoadedMsg{
-		boxID: 1, topicID: 7, topicName: "Kitchen", entryID: 99,
+		boxID: 1, topicID: 7, topicName: "Kitchen", entryID: 99, subject: "Re: Kitchen",
 		to: []string{"jane@x.com"}, cc: []string{"bob@x.com"},
 	})
 	f := composeModal(v)
@@ -245,6 +245,10 @@ func TestReplyFormPrefillsAndSends(t *testing.T) {
 	if rec.body["message"].(map[string]any)["content"] != "<p>Thanks!</p>" {
 		t.Errorf("body = %v", rec.body)
 	}
+	// HEY never derives a reply's subject, so the reply carries the prefilled one.
+	if rec.body["message"].(map[string]any)["subject"] != "Re: Kitchen" {
+		t.Errorf("subject = %v, want Re: Kitchen", rec.body["message"].(map[string]any)["subject"])
+	}
 	addressed := rec.body["entry"].(map[string]any)["addressed"].(map[string]any)
 	if got := addressed["directly"].([]any); len(got) != 1 || got[0] != "jane@x.com" {
 		t.Errorf("directly = %v", got)
@@ -266,6 +270,10 @@ func TestReplyLoadsAndSendsThroughThreadAccount(t *testing.T) {
 	// The recipients come from the entry the reply answers, and reach whoever wrote it.
 	if want := []string{"jane@example.com", "rick@example.com"}; !slices.Equal(ctxMsg.to, want) {
 		t.Errorf("to = %v, want %v", ctxMsg.to, want)
+	}
+	// So does the subject, prefixed the way HEY derives a reply's.
+	if ctxMsg.subject != "Re: Quarterly planning" {
+		t.Errorf("subject = %q, want %q", ctxMsg.subject, "Re: Quarterly planning")
 	}
 	v.Update(ctxMsg)
 	typeText(v, "Thanks!")

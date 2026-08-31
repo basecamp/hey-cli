@@ -21,6 +21,7 @@ import (
 // To line and Cee on the CC line.
 const messageAddressedToJane = `{
 	"id": 12,
+	"subject": "Weekly sync",
 	"creator": {"id": 3, "name": "Rick Sanchez", "email_address": "rick@example.com"},
 	"sender": {"id": 3, "name": "Rick Sanchez", "email_address": "rick@example.com"},
 	"addressed": {
@@ -35,6 +36,7 @@ const messageWithoutRecipients = `{"id": 12}`
 // sentReply is what the server saw a reply arrive as.
 type sentReply struct {
 	Path                 string
+	Subject              string
 	Content              string
 	TopicAccountFilter   string
 	MessageAccountFilter string
@@ -73,6 +75,7 @@ func threadReplyServer(t *testing.T, messageJSON string, entryIDs ...int64) (*ht
 			var body struct {
 				ActingSenderID int64 `json:"acting_sender_id"`
 				Message        struct {
+					Subject string `json:"subject"`
 					Content string `json:"content"`
 				} `json:"message"`
 				Entry struct {
@@ -86,6 +89,7 @@ func threadReplyServer(t *testing.T, messageJSON string, entryIDs ...int64) (*ht
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			sent.Path = r.URL.Path
+			sent.Subject = body.Message.Subject
 			sent.Content = body.Message.Content
 			sent.ActingSenderID = body.ActingSenderID
 			sent.Status = body.Entry.Status
@@ -157,6 +161,10 @@ func TestResolveThreadReply(t *testing.T) {
 	// HEY replies to the last entry on the thread, not the first.
 	if target.EntryID != 12 {
 		t.Errorf("entry = %d, want the last one (12)", target.EntryID)
+	}
+	// HEY never derives a reply's subject, so the target carries the "Re: …" one.
+	if target.Subject != "Re: Weekly sync" {
+		t.Errorf("subject = %q, want %q", target.Subject, "Re: Weekly sync")
 	}
 	if target.AccountID != 9 {
 		t.Errorf("account = %d, want 9", target.AccountID)
@@ -362,7 +370,7 @@ func runCLI(t *testing.T, server *httptest.Server, args ...string) error {
 // its list wins.
 func TestReplyPrefersTheServersComputedRecipients(t *testing.T) {
 	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
-	sent.ReplyNewJSON = `{"content":"<div>quoted</div>","is_reply":true,
+	sent.ReplyNewJSON = `{"subject":"Re: Weekly sync","content":"<div>quoted</div>","is_reply":true,
 		"addressed":{"directly":[{"id":31,"name":"Rick Ramirez","email_address":"rick@example.com"}]}}`
 
 	if err := runCLI(t, server, "--account", "8", "reply", "7", "-m", "sounds good"); err != nil {
@@ -373,6 +381,10 @@ func TestReplyPrefersTheServersComputedRecipients(t *testing.T) {
 	}
 	if len(sent.CC) != 0 {
 		t.Errorf("cc = %v, want none", sent.CC)
+	}
+	// The prefill's subject rides along verbatim — the server computed it already.
+	if sent.Subject != "Re: Weekly sync" {
+		t.Errorf("subject = %q, want the prefilled one", sent.Subject)
 	}
 }
 
@@ -409,5 +421,27 @@ func TestReplyDraftSavesInsteadOfSending(t *testing.T) {
 	}
 	if !strings.Contains(sent.Content, "drafting this") {
 		t.Errorf("content = %q", sent.Content)
+	}
+	// The whole point of carrying the subject: without it this draft reads
+	// "No subject" in HEY's Drafts. Here the fake serves no replies/new endpoint,
+	// so the subject is the locally derived one.
+	if sent.Subject != "Re: Weekly sync" {
+		t.Errorf("subject = %q, want %q", sent.Subject, "Re: Weekly sync")
+	}
+}
+
+func TestReplySubject(t *testing.T) {
+	for subject, want := range map[string]string{
+		"Weekly sync":     "Re: Weekly sync",
+		"Re: Weekly sync": "Re: Weekly sync",
+		"RE: SHOUTING":    "Re: SHOUTING",
+		"re:no space":     "Re: no space",
+		"Reply guide":     "Re: Reply guide",
+		"":                "",
+		"   ":             "",
+	} {
+		if got := replySubject(subject); got != want {
+			t.Errorf("replySubject(%q) = %q, want %q", subject, got, want)
+		}
 	}
 }

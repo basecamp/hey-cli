@@ -11485,7 +11485,7 @@
       },
       "CreateReplyRequestContent": {
         "type": "object",
-        "description": "Wire format: {acting_sender_id, message: {content}, entry: {addressed: {directly: [...]}}}\nentry.addressed is optional on the wire but a reply posted without it is saved as a\ndraft rather than delivered — HEY does not reply-all for the caller. Resolve the\nthread's recipients first and always send them.",
+        "description": "Wire format: {acting_sender_id, message: {subject, content}, entry: {addressed: {directly: [...]}}}\nentry.addressed is optional on the wire but a reply posted without it is saved as a\ndraft rather than delivered — HEY does not reply-all for the caller. Resolve the\nthread's recipients first and always send them.",
         "properties": {
           "acting_sender_id": {
             "type": "integer",
@@ -13218,7 +13218,11 @@
       },
       "ReplyMessagePayload": {
         "type": "object",
+        "description": "HEY does not derive a subject for a reply: a reply draft saved without message.subject\nreads \"No subject\" in Drafts. NewEntryReply hands back the prefilled subject (\"Re: …\") —\nsend it here. Content is the caller's reply body alone: the server appends the quoted\noriginal at delivery (auto_quoting defaults on), so the prefill's quoted content must\nnot be echoed back.",
         "properties": {
+          "subject": {
+            "type": "string"
+          },
           "content": {
             "type": "string"
           }
