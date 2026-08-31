@@ -96,14 +96,14 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if c.draft {
-		draftID, draftErr := replySDK.Entries().CreateReplyDraft(ctx, target.EntryID, target.Subject, message,
+		draftID, draftErr := replySDK.Entries().CreateReplyDraft(ctx, target.EntryID, target.ActingSenderID, target.Subject, message,
 			target.Addressed.To, target.Addressed.CC, target.Addressed.BCC)
 		if draftErr != nil {
 			return apierr.FromSDK(draftErr)
 		}
 		return writeDraftSaved(cmd, draftID, len(c.attachments))
 	}
-	if err = replySDK.Entries().CreateReply(ctx, target.EntryID, target.Subject, message, target.Addressed.To, target.Addressed.CC, target.Addressed.BCC); err != nil {
+	if err = replySDK.Entries().CreateReply(ctx, target.EntryID, target.ActingSenderID, target.Subject, message, target.Addressed.To, target.Addressed.CC, target.Addressed.BCC); err != nil {
 		return apierr.FromSDK(err)
 	}
 

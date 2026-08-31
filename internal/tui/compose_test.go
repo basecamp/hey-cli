@@ -59,6 +59,7 @@ func composeTestServer(t *testing.T) (*mailView, *struct {
 				"addressed":{"directly":[{"id":1,"name":"Jane Doe","email_address":"jane@example.com"}]}}`))
 		case "/entries/501/replies/new.json":
 			_, _ = w.Write([]byte(`{"subject":"Re: Quarterly planning",
+				"sender":{"id":215,"name":"Support","email_address":"support@example.com"},
 				"addressed":{"directly":[{"id":3,"name":"Rick Sanchez","email_address":"rick@example.com"}]}}`))
 		case "/entries/501/forwards/new.json":
 			_, _ = w.Write([]byte(`{"subject":"Fwd: Quarterly planning","content":"<div>Quoted message</div>"}`))
@@ -221,7 +222,8 @@ func TestReplyFormPrefillsAndSends(t *testing.T) {
 	v.Resize(80, 30)
 	v.Update(replyContextLoadedMsg{
 		boxID: 1, topicID: 7, topicName: "Kitchen", entryID: 99, subject: "Re: Kitchen",
-		to: []string{"jane@x.com"}, cc: []string{"bob@x.com"},
+		actingSenderID: 7,
+		to:             []string{"jane@x.com"}, cc: []string{"bob@x.com"},
 	})
 	f := composeModal(v)
 	if f == nil || f.mode != composeReply {
@@ -252,6 +254,10 @@ func TestReplyFormPrefillsAndSends(t *testing.T) {
 	if rec.body["message"].(map[string]any)["subject"] != "Re: Kitchen" {
 		t.Errorf("subject = %v, want Re: Kitchen", rec.body["message"].(map[string]any)["subject"])
 	}
+	// The reply goes out as the sender the context resolved, not the account default.
+	if got, _ := rec.body["acting_sender_id"].(float64); got != 7 {
+		t.Errorf("acting_sender_id = %v, want the reply context's sender 7", rec.body["acting_sender_id"])
+	}
 	addressed := rec.body["entry"].(map[string]any)["addressed"].(map[string]any)
 	if got := addressed["directly"].([]any); len(got) != 1 || got[0] != "jane@x.com" {
 		t.Errorf("directly = %v", got)
@@ -280,6 +286,11 @@ func TestReplyLoadsAndSendsThroughThreadAccount(t *testing.T) {
 	if ctxMsg.subject != "Re: Quarterly planning" {
 		t.Errorf("subject = %q, want %q", ctxMsg.subject, "Re: Quarterly planning")
 	}
+	// And the sender: on a thread sent to a shared or alternate address, the
+	// prefill names the identity the reply goes out as.
+	if ctxMsg.actingSenderID != 215 {
+		t.Errorf("actingSenderID = %d, want the prefill's sender 215", ctxMsg.actingSenderID)
+	}
 	v.Update(ctxMsg)
 	typeText(v, "Thanks!")
 	msg := runCmd(v.HandleContentKey(ctrlS()))
@@ -289,6 +300,9 @@ func TestReplyLoadsAndSendsThroughThreadAccount(t *testing.T) {
 	if rec.path != "/entries/501/replies.json" || rec.account != "9" {
 		t.Fatalf("reply path/account = %s/%q, want /entries/501/replies.json/9", rec.path, rec.account)
 	}
+	if got, _ := rec.body["acting_sender_id"].(float64); got != 215 {
+		t.Errorf("acting_sender_id = %v, want the prefill's sender 215, not the account default", rec.body["acting_sender_id"])
+	}
 }
 
 func TestReplyContextFallsBackWhenPrefillIsEmpty(t *testing.T) {
@@ -296,16 +310,18 @@ func TestReplyContextFallsBackWhenPrefillIsEmpty(t *testing.T) {
 	// everyone there is; the local computation keeps that reply addressable. The
 	// subject only falls back with it when the prefill answered none.
 	for name, testCase := range map[string]struct {
-		prefillJSON string
-		wantSubject string
+		prefillJSON  string
+		wantSubject  string
+		wantSenderID int64
 	}{
 		"an empty prefill derives the subject locally": {
 			prefillJSON: `{}`,
 			wantSubject: "Re: Quarterly planning",
 		},
-		"a recipientless prefill keeps its subject": {
-			prefillJSON: `{"subject":"Re: Quarterly planning per HEY"}`,
-			wantSubject: "Re: Quarterly planning per HEY",
+		"a recipientless prefill keeps its subject and sender": {
+			prefillJSON:  `{"subject":"Re: Quarterly planning per HEY","sender":{"id":215,"email_address":"support@example.com"}}`,
+			wantSubject:  "Re: Quarterly planning per HEY",
+			wantSenderID: 215,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -345,6 +361,9 @@ func TestReplyContextFallsBackWhenPrefillIsEmpty(t *testing.T) {
 			}
 			if ctxMsg.subject != testCase.wantSubject {
 				t.Errorf("subject = %q, want %q", ctxMsg.subject, testCase.wantSubject)
+			}
+			if ctxMsg.actingSenderID != testCase.wantSenderID {
+				t.Errorf("actingSenderID = %d, want %d", ctxMsg.actingSenderID, testCase.wantSenderID)
 			}
 		})
 	}

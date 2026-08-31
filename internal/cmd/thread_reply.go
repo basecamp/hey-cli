@@ -19,17 +19,21 @@ type replyRecipients struct {
 	BCC []string
 }
 
-// threadReplyTarget carries the entry a reply answers, its subject and recipients, and
-// an immutable client bound to the thread's mail account. HEY saves an unaddressed
-// reply as a draft, so the recipients are not optional. The subject is not optional
-// either: HEY never derives one, so a reply sent without it saves drafts that read
-// "No subject" in Drafts.
+// threadReplyTarget carries the entry a reply answers, its subject, sender and
+// recipients, and an immutable client bound to the thread's mail account. HEY saves an
+// unaddressed reply as a draft, so the recipients are not optional. The subject is not
+// optional either: HEY never derives one, so a reply sent without it saves drafts that
+// read "No subject" in Drafts. ActingSenderID is the identity the reply goes out as —
+// the sender HEY resolved for the thread, which on a shared or alternate address is
+// not the account default; zero (the prefill named none, or was unreachable) leaves
+// the SDK on the account default.
 type threadReplyTarget struct {
-	EntryID   int64
-	AccountID int64
-	Subject   string
-	Addressed replyRecipients
-	client    *hey.Client
+	EntryID        int64
+	AccountID      int64
+	ActingSenderID int64
+	Subject        string
+	Addressed      replyRecipients
+	client         *hey.Client
 }
 
 // resolveThreadReply returns the thread's latest entry, linked account, and the
@@ -54,10 +58,11 @@ func resolveThreadReply(ctx context.Context, threadID int64) (*threadReplyTarget
 		AccountID: topic.AccountId,
 		client:    threadSDK,
 	}
-	subject, addressed, ok := replyPrefillFromServer(ctx, threadSDK, entryID)
+	prefill, ok := replyPrefillFromServer(ctx, threadSDK, entryID)
+	target.ActingSenderID = prefill.ActingSenderID
+	target.Subject = prefill.Subject
 	if ok {
-		target.Subject = subject
-		target.Addressed = addressed
+		target.Addressed = prefill.Addressed
 		return target, nil
 	}
 
@@ -69,44 +74,59 @@ func resolveThreadReply(ctx context.Context, threadID int64) (*threadReplyTarget
 		return nil, apierr.ErrNotFound("message", fmt.Sprintf("%d", entryID))
 	}
 
-	addressed = recipientsForReplyTo(*message)
+	addressed := recipientsForReplyTo(*message)
 	if len(addressed.To) == 0 && len(addressed.CC) == 0 && len(addressed.BCC) == 0 {
 		return nil, apierr.ErrUsage("could not determine thread recipients")
 	}
 
 	// The prefill's subject survives an empty recipient list: only the recipients
 	// needed the local computation.
-	if subject == "" {
-		subject = replySubject(message.Subject)
+	if target.Subject == "" {
+		target.Subject = replySubject(message.Subject)
 	}
-	target.Subject = subject
 	target.Addressed = addressed
 	return target, nil
 }
 
+// replyPrefill is how a reply starts out, as HEY prefills it: the "Re: …" subject it
+// goes out under, the sender it goes out as, and who it goes out to.
+type replyPrefill struct {
+	Subject        string
+	ActingSenderID int64
+	Addressed      replyRecipients
+}
+
 // replyPrefillFromServer asks HEY how a reply to the entry starts out
-// (GET /entries/{id}/replies/new): the "Re: …" subject the reply carries, and its
-// recipients — the entry's sender moved onto the To line and the acting user's own
-// addresses, aliases and catch-alls excluded — the exclusion this CLI cannot compute
-// locally, and the reason a reply used to be able to CC its writer back to themselves.
-// A failed read falls back to the local computation, and so does an empty answer: on a
-// thread with yourself, everyone HEY excludes is everyone there is, and the local list
-// is what keeps that reply addressable. The subject is answered even when the
-// recipients are not — only they need the fallback, not the subject HEY supplied.
-func replyPrefillFromServer(ctx context.Context, client *hey.Client, entryID int64) (string, replyRecipients, bool) {
+// (GET /entries/{id}/replies/new): the "Re: …" subject the reply carries; the sender
+// it goes out as — resolved from the entry's own to and from addresses, so a thread on
+// a shared or alternate address answers as that address, not the account default, and
+// named only when it differs from the acting user; and its recipients — the entry's
+// sender moved onto the To line and the acting user's own addresses, aliases and
+// catch-alls excluded — the exclusion this CLI cannot compute locally, and the reason
+// a reply used to be able to CC its writer back to themselves. A failed read falls
+// back to the local computation, and so does an empty answer: on a thread with
+// yourself, everyone HEY excludes is everyone there is, and the local list is what
+// keeps that reply addressable. The subject and sender are answered even when the
+// recipients are not — only they need the fallback, not what HEY already supplied.
+func replyPrefillFromServer(ctx context.Context, client *hey.Client, entryID int64) (replyPrefill, bool) {
 	prefilled, err := client.Entries().NewReply(ctx, entryID)
 	if err != nil || prefilled == nil {
-		return "", replyRecipients{}, false
+		return replyPrefill{}, false
 	}
-	addressed := replyRecipients{
-		To:  addressEmails(prefilled.Addressed.Directly),
-		CC:  addressEmails(prefilled.Addressed.Copied),
-		BCC: addressEmails(prefilled.Addressed.Blindcopied),
+	prefill := replyPrefill{
+		Subject:        prefilled.Subject,
+		ActingSenderID: prefilled.Sender.Id,
+		Addressed: replyRecipients{
+			To:  addressEmails(prefilled.Addressed.Directly),
+			CC:  addressEmails(prefilled.Addressed.Copied),
+			BCC: addressEmails(prefilled.Addressed.Blindcopied),
+		},
 	}
-	if len(addressed.To)+len(addressed.CC)+len(addressed.BCC) == 0 {
-		return prefilled.Subject, replyRecipients{}, false
+	if len(prefill.Addressed.To)+len(prefill.Addressed.CC)+len(prefill.Addressed.BCC) == 0 {
+		prefill.Addressed = replyRecipients{}
+		return prefill, false
 	}
-	return prefilled.Subject, addressed, true
+	return prefill, true
 }
 
 // replySubject answers the subject a reply to the given subject carries, the way HEY

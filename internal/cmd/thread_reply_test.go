@@ -388,6 +388,39 @@ func TestReplyPrefersTheServersComputedRecipients(t *testing.T) {
 	}
 }
 
+// The prefill also names the sender the reply goes out as — the identity HEY resolved
+// from the entry's own to and from addresses. On a shared or alternate address that is
+// not the account default, and sending as the default delivers the reply from the
+// wrong identity. The prefill's sender wins.
+func TestReplySendsAsThePrefillsSender(t *testing.T) {
+	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
+	sent.ReplyNewJSON = `{"subject":"Re: Weekly sync","content":"<div>quoted</div>","is_reply":true,
+		"sender":{"id":215,"name":"Support","email_address":"support@example.com"},
+		"addressed":{"directly":[{"id":31,"name":"Rick Ramirez","email_address":"rick@example.com"}]}}`
+
+	if err := runCLI(t, server, "--account", "8", "reply", "7", "-m", "sounds good"); err != nil {
+		t.Fatalf("reply: %v", err)
+	}
+	if sent.ActingSenderID != 215 {
+		t.Errorf("acting_sender_id = %d, want the prefill's sender 215, not the account default", sent.ActingSenderID)
+	}
+}
+
+// A prefill that names no sender means the acting user replies as themselves, and the
+// account's default sender is the right identity.
+func TestReplyWithoutAPrefillSenderActsAsTheAccountDefault(t *testing.T) {
+	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
+	sent.ReplyNewJSON = `{"subject":"Re: Weekly sync","content":"<div>quoted</div>","is_reply":true,
+		"addressed":{"directly":[{"id":31,"name":"Rick Ramirez","email_address":"rick@example.com"}]}}`
+
+	if err := runCLI(t, server, "--account", "8", "reply", "7", "-m", "sounds good"); err != nil {
+		t.Fatalf("reply: %v", err)
+	}
+	if sent.ActingSenderID != 42 {
+		t.Errorf("acting_sender_id = %d, want the account default 42", sent.ActingSenderID)
+	}
+}
+
 // An empty answer from replies/new means everyone HEY excludes is everyone there is —
 // a thread with yourself — and the local computation is what keeps that reply
 // addressable. The 404 case rides through every other test in this file, which runs

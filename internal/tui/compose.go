@@ -19,18 +19,20 @@ import (
 // --- Messages ---
 
 // replyContextLoadedMsg carries what a reply needs from the thread: the entry to
-// reply to, the "Re: …" subject it goes out under, and who the thread is addressed to.
+// reply to, the "Re: …" subject it goes out under, the sender it goes out as, and who
+// the thread is addressed to.
 type replyContextLoadedMsg struct {
-	requestID uint64
-	boxID     int64
-	topicID   int64
-	topicName string
-	entryID   int64
-	sdk       *hey.Client
-	subject   string
-	to, cc    []string
-	bcc       []string
-	err       error
+	requestID      uint64
+	boxID          int64
+	topicID        int64
+	topicName      string
+	entryID        int64
+	sdk            *hey.Client
+	actingSenderID int64
+	subject        string
+	to, cc         []string
+	bcc            []string
+	err            error
 }
 
 // forwardContextLoadedMsg carries HEY's prefilled subject and quoted message
@@ -77,12 +79,13 @@ const (
 // its inputs, validation and status; sending is done by mailView so the form
 // stays free of SDK calls.
 type composeForm struct {
-	mode             composeMode
-	topicName        string
-	entryID          int64  // reply target (composeReply only)
-	replySubject     string // the "Re: …" subject a reply goes out under (composeReply only)
-	sendSDK          *hey.Client
-	forwardedContent string
+	mode                composeMode
+	topicName           string
+	entryID             int64  // reply target (composeReply only)
+	replySubject        string // the "Re: …" subject a reply goes out under (composeReply only)
+	replyActingSenderID int64  // the sender a reply goes out as; 0 = account default (composeReply only)
+	sendSDK             *hey.Client
+	forwardedContent    string
 
 	inputs []textinput.Model // to, cc, bcc, subject (subject omitted for replies)
 	body   textarea.Model
@@ -138,6 +141,7 @@ func newReplyForm(ctxMsg replyContextLoadedMsg, s styles) *composeForm {
 	f.topicName = ctxMsg.topicName
 	f.entryID = ctxMsg.entryID
 	f.replySubject = ctxMsg.subject
+	f.replyActingSenderID = ctxMsg.actingSenderID
 	f.sendSDK = ctxMsg.sdk
 	f.inputs[fieldTo].SetValue(strings.Join(ctxMsg.to, ", "))
 	f.inputs[fieldCc].SetValue(strings.Join(ctxMsg.cc, ", "))
@@ -419,30 +423,35 @@ func (v *mailView) loadReplyContext(topicID int64, topicName string) tea.Cmd {
 		entryID := topic.Entries[len(topic.Entries)-1].Id
 
 		// HEY's reply prefill (GET /entries/{id}/replies/new) is the authority on how
-		// a reply starts out: the "Re: …" subject it goes out under, and recipients
-		// with the acting user's own addresses, aliases and catch-alls excluded — an
-		// exclusion this client cannot compute locally. A failed read falls back to
-		// the local computation, and so does an empty answer: on a thread with
-		// yourself, everyone HEY excludes is everyone there is. The prefill's subject
-		// survives that recipient fallback — only the recipients needed it.
+		// a reply starts out: the "Re: …" subject it goes out under, the sender it
+		// goes out as — on a shared or alternate address, not the account default —
+		// and recipients with the acting user's own addresses, aliases and catch-alls
+		// excluded — an exclusion this client cannot compute locally. A failed read
+		// falls back to the local computation, and so does an empty answer: on a
+		// thread with yourself, everyone HEY excludes is everyone there is. The
+		// prefill's subject and sender survive that recipient fallback — only the
+		// recipients needed it.
 		var prefillSubject string
+		var prefillSenderID int64
 		if prefilled, prefillErr := accountSDK.Entries().NewReply(ctx, entryID); prefillErr == nil && prefilled != nil {
 			prefillSubject = prefilled.Subject
+			prefillSenderID = prefilled.Sender.Id
 			to := addressesOf(prefilled.Addressed.Directly, "")
 			cc := addressesOf(prefilled.Addressed.Copied, "")
 			bcc := addressesOf(prefilled.Addressed.Blindcopied, "")
 			if len(to)+len(cc)+len(bcc) > 0 {
 				return replyContextLoadedMsg{
-					requestID: requestID,
-					boxID:     boxID,
-					topicID:   topicID,
-					topicName: topicName,
-					entryID:   entryID,
-					sdk:       accountSDK,
-					subject:   prefillSubject,
-					to:        to,
-					cc:        cc,
-					bcc:       bcc,
+					requestID:      requestID,
+					boxID:          boxID,
+					topicID:        topicID,
+					topicName:      topicName,
+					entryID:        entryID,
+					sdk:            accountSDK,
+					actingSenderID: prefillSenderID,
+					subject:        prefillSubject,
+					to:             to,
+					cc:             cc,
+					bcc:            bcc,
 				}
 			}
 		}
@@ -464,16 +473,17 @@ func (v *mailView) loadReplyContext(topicID int64, topicName string) tea.Cmd {
 			subject = replySubjectFor(*message)
 		}
 		return replyContextLoadedMsg{
-			requestID: requestID,
-			boxID:     boxID,
-			topicID:   topicID,
-			topicName: topicName,
-			entryID:   entryID,
-			sdk:       accountSDK,
-			subject:   subject,
-			to:        to,
-			cc:        cc,
-			bcc:       bcc,
+			requestID:      requestID,
+			boxID:          boxID,
+			topicID:        topicID,
+			topicName:      topicName,
+			entryID:        entryID,
+			sdk:            accountSDK,
+			actingSenderID: prefillSenderID,
+			subject:        subject,
+			to:             to,
+			cc:             cc,
+			bcc:            bcc,
 		}
 	}
 }
@@ -608,8 +618,9 @@ func (v *mailView) send(f *composeForm) tea.Cmd {
 	switch f.mode {
 	case composeReply:
 		entryID := f.entryID
+		actingSenderID := f.replyActingSenderID
 		return func() tea.Msg {
-			err := sdk.Entries().CreateReply(ctx, entryID, subject, body, to, cc, bcc)
+			err := sdk.Entries().CreateReply(ctx, entryID, actingSenderID, subject, body, to, cc, bcc)
 			return composeSentMsg{label: "Reply sent", err: err}
 		}
 	case composeForward:
