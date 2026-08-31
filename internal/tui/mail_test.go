@@ -2158,6 +2158,156 @@ func TestMailViewContentKeyInThread(t *testing.T) {
 	v.HandleContentKey(keyPress("up"))
 }
 
+func TestMailViewTrashesTheOpenThreadAndReturnsToTheList(t *testing.T) {
+	for _, key := range []string{"t", "T"} {
+		t.Run(key, func(t *testing.T) {
+			v, recorded := mailWithTestServer(t, http.StatusNoContent)
+
+			v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+			if !v.inThread || v.topicPostingID != 100 {
+				t.Fatalf("thread state = open:%v posting:%d", v.inThread, v.topicPostingID)
+			}
+
+			cmd := v.HandleContentKey(keyPress(key))
+			if v.inThread {
+				t.Error("trashing the open thread should return to the list")
+			}
+			done, ok := runCmd(cmd).(postingActionDoneMsg)
+			if !ok || done.err != nil {
+				t.Fatalf("trash command returned %#v", done)
+			}
+			if done.postingID != 100 || done.effect != postingActionRemove {
+				t.Errorf("action = posting %d effect %v, want posting 100 effect %v", done.postingID, done.effect, postingActionRemove)
+			}
+			if recorded.method != http.MethodPost || recorded.path != "/postings/trash.json" {
+				t.Errorf("request = %s %s, want POST /postings/trash.json", recorded.method, recorded.path)
+			}
+			if len(recorded.body.PostingIDs) != 1 || recorded.body.PostingIDs[0] != 100 {
+				t.Errorf("posting_ids = %v, want [100]", recorded.body.PostingIDs)
+			}
+
+			answer, _ := v.Update(done)
+			if toast := deliverToView(v, answer); toast != "Thread moved to Trash" {
+				t.Errorf("toast = %q, want %q", toast, "Thread moved to Trash")
+			}
+			if len(v.postingList.postings) != 1 || v.postingList.postings[0].ID != 101 {
+				t.Errorf("postings after trashing = %v, want the other thread alone", v.postingList.postings)
+			}
+		})
+	}
+}
+
+func TestMailViewTrashesTheThreadOnScreenRatherThanTheListSelection(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v.searchActive = true
+	v.searchQuery = "quarterly planning"
+	v.searchList.setPostings([]mail.Posting{{ID: 10, TopicID: 100, Name: "Hello world"}})
+
+	v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+	if !v.inThread || v.topicPostingID != 10 {
+		t.Fatalf("thread state = open:%v posting:%d", v.inThread, v.topicPostingID)
+	}
+
+	done, ok := runCmd(v.HandleContentKey(keyPress("t"))).(postingActionDoneMsg)
+	if !ok || done.err != nil {
+		t.Fatalf("trash command returned %#v", done)
+	}
+	if done.postingID != 10 {
+		t.Errorf("trashed posting %d, want the searched thread's posting 10", done.postingID)
+	}
+	if len(recorded.body.PostingIDs) != 1 || recorded.body.PostingIDs[0] != 10 {
+		t.Errorf("posting_ids = %v, want [10]", recorded.body.PostingIDs)
+	}
+	if v.inThread || !v.searchActive {
+		t.Errorf("trashing a searched thread landed on open:%v search:%v, want the results", v.inThread, v.searchActive)
+	}
+
+	v.Update(done)
+	if len(v.searchList.postings) != 0 {
+		t.Errorf("search results after trashing = %+v, want the row gone", v.searchList.postings)
+	}
+	if len(v.postingList.postings) != 2 {
+		t.Errorf("a searched thread's trash landed on the box list: %+v", v.postingList.postings)
+	}
+}
+
+func TestMailViewTrashesAThreadOpenedFromABundle(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	v.postingList.postings[0] = bundleRow()
+	loaded, _ := runCmd(v.HandleContentKey(keyPress("enter"))).(bundleLoadedMsg)
+	more, _ := v.Update(loaded)
+	appended, _ := runCmd(more).(bundleAppendedMsg)
+	v.Update(appended)
+	if len(v.bundleList.postings) != 2 {
+		t.Fatalf("bundle postings = %+v", v.bundleList.postings)
+	}
+
+	v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+	if !v.inThread || v.topicPostingID != 511 {
+		t.Fatalf("thread state = open:%v posting:%d", v.inThread, v.topicPostingID)
+	}
+
+	done, ok := runCmd(v.HandleContentKey(keyPress("t"))).(postingActionDoneMsg)
+	if !ok || done.err != nil || done.postingID != 511 {
+		t.Fatalf("trash command returned %#v", done)
+	}
+	if v.inThread || !v.bundleActive {
+		t.Errorf("trashing landed on open:%v bundle:%v, want the bundle", v.inThread, v.bundleActive)
+	}
+
+	v.Update(done)
+	if len(v.bundleList.postings) != 1 || v.bundleList.postings[0].ID != 512 {
+		t.Errorf("bundle postings after trashing = %+v, want the other thread alone", v.bundleList.postings)
+	}
+}
+
+func TestMailViewCannotTrashAThreadOpenedWithoutItsPosting(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v.Update(topicLoadedMsg{
+		topicID: 100,
+		title:   "Hello world",
+		entries: []mail.Entry{{Creator: mail.Contact{Name: "Alice"}, Body: htmlutil.ToMarkdown("<p>hello</p>")}},
+	})
+
+	if cmd := v.HandleContentKey(keyPress("t")); cmd != nil {
+		t.Errorf("trash without a posting returned %#v, want nothing", runCmd(cmd))
+	}
+	if !v.inThread {
+		t.Error("a refused trash should leave the thread open")
+	}
+	if v.notice == "" {
+		t.Error("a refused trash should say why")
+	}
+	if recorded.method != "" {
+		t.Errorf("a refused trash sent %s %s", recorded.method, recorded.path)
+	}
+}
+
+func TestMailViewTrashesAThreadOpenedFromPreviouslySeen(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	loaded, _ := runCmd(v.handleBoxShortcut("9")).(seenLoadedMsg)
+	v.Update(loaded)
+	v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+	if !v.inThread || !v.seenActive || v.topicPostingID != 611 {
+		t.Fatalf("thread state = open:%v seen:%v posting:%d", v.inThread, v.seenActive, v.topicPostingID)
+	}
+
+	done, ok := runCmd(v.HandleContentKey(keyPress("t"))).(postingActionDoneMsg)
+	if !ok || done.err != nil || !done.seen {
+		t.Fatalf("trash command returned %#v", done)
+	}
+	if v.inThread || !v.seenActive {
+		t.Errorf("trashing landed on open:%v seen:%v, want the Previously Seen list", v.inThread, v.seenActive)
+	}
+	v.Update(done)
+	if len(v.seenList.postings) != 0 {
+		t.Errorf("seen postings after trashing = %+v, want the row gone", v.seenList.postings)
+	}
+	if len(v.postingList.postings) != 2 {
+		t.Errorf("a seen-screen trash landed on the box list: %+v", v.postingList.postings)
+	}
+}
+
 // --- Subnav ---
 
 func TestMailViewSubnavItems(t *testing.T) {
@@ -2826,6 +2976,19 @@ func TestMailViewHelpBindings(t *testing.T) {
 		if !keys[expected] {
 			t.Errorf("missing help binding for key %q", expected)
 		}
+	}
+}
+
+func TestMailViewOpenThreadHelpOffersTrashOnlyWithAPosting(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+	if !hasHelpBinding(v.HelpBindings(), "t") {
+		t.Errorf("help bindings = %v, want trash among them", v.HelpBindings())
+	}
+
+	v.topicPostingID = 0
+	if hasHelpBinding(v.HelpBindings(), "t") {
+		t.Errorf("help bindings = %v, want no trash without a posting", v.HelpBindings())
 	}
 }
 

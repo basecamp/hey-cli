@@ -254,6 +254,7 @@ type mailView struct {
 	topicViewport    viewport.Model
 	topicContent     string
 	topicID          int64
+	topicPostingID   int64
 	topicName        string
 	entries          []mail.Entry
 	attachments      []messageAttachment
@@ -515,6 +516,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.inThread = true
 		v.topicID = msg.topicID
+		v.topicPostingID = msg.postingID
 		v.topicName = msg.title
 		v.entries = msg.entries
 		v.attachments = msg.attachments
@@ -712,6 +714,9 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			case postingActionStopIgnoring:
 				v.postingList.postings[idx].Muted = false
 			}
+		}
+		if msg.effect == postingActionRemove {
+			v.removeFromOverlaidLists(msg.postingID)
 		}
 		if v.requests.kind == mailRequestPostings {
 			if source := v.currentSource(); source != nil {
@@ -929,6 +934,9 @@ func (v *mailView) HelpBindings() []helpBinding {
 	}
 	if v.inThread {
 		bindings := []helpBinding{{"r", "reply"}, {"f", "forward"}}
+		if v.topicPostingID != 0 {
+			bindings = append(bindings, helpBinding{"t", "trash"})
+		}
 		if len(v.entries) > 1 {
 			bindings = append(bindings, helpBinding{"j/k", "next/previous message"})
 		}
@@ -1240,6 +1248,8 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 			return v.saveSelectedAttachment()
 		case "o":
 			return v.openSelectedAttachment()
+		case "t", "T":
+			return v.trashOpenThread()
 		case "j":
 			if len(v.entryOffsets) > 1 {
 				v.jumpEntry(1)
@@ -1896,6 +1906,14 @@ func (v *mailView) removePostingAt(index int) {
 	v.postingList.removeAt(index)
 }
 
+func (v *mailView) removeFromOverlaidLists(postingID int64) {
+	for _, list := range []*contentList{&v.searchList, &v.bundleList} {
+		if index := postingIndexIn(list.postings, postingID); index >= 0 {
+			list.removeAt(index)
+		}
+	}
+}
+
 func (v *mailView) moveAttachmentCursor(delta int) {
 	if len(v.attachments) == 0 {
 		return
@@ -2348,6 +2366,19 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 		return v.loadForwardContext(p.TopicID, p.Summary)
 	}
 	return nil
+}
+
+func (v *mailView) trashOpenThread() tea.Cmd {
+	if v.topicPostingID == 0 {
+		v.notice = "Open this thread from a box to trash it"
+		return nil
+	}
+	postingID := v.topicPostingID
+	cmd := v.doPostingAction("Thread moved to Trash", postingActionRemove, v.currentBoxID(), postingID, func() error {
+		return v.vc.sdk.Postings().MoveToTrash(v.vc.ctx, postingID)
+	})
+	v.ExitThread()
+	return cmd
 }
 
 func (v *mailView) moveSelectedToImbox(boxID, postingID int64) tea.Cmd {
