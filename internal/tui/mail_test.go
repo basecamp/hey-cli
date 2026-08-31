@@ -715,6 +715,48 @@ func TestMailViewFilesOpenThreadAfterLiveRefreshDropsItsRow(t *testing.T) {
 	}
 }
 
+func TestMailViewFilesOpenThreadWhereItLandedLastTime(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v.boxes = append(v.boxes, mail.Source{Kind: mail.KindBox, ID: 3, Name: "Set Aside", BoxKind: hey.BoxKindSetAside})
+	v.boxIndex = len(v.boxes) - 1
+	v.Update(currentPostingsLoaded(v, testPostings()))
+	v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+	if !v.inThread {
+		t.Fatal("enter should open the selected thread")
+	}
+
+	// The thread was opened from Set Aside, so a answers without a request.
+	if cmd := v.HandleContentKey(keyPress("a")); cmd != nil {
+		t.Errorf("filing to the box the thread is in should not move: %#v", runCmd(cmd))
+	}
+	if v.notice != "Already in Set Aside" {
+		t.Errorf("notice = %q, want %q", v.notice, "Already in Set Aside")
+	}
+
+	// Filing to Reply Later moves the thread there, and later keys measure
+	// against where it landed: l answers in place, a moves it back.
+	done, ok := runCmd(v.HandleContentKey(keyPress("l"))).(postingActionDoneMsg)
+	if !ok || done.err != nil {
+		t.Fatalf("filing command returned %#v", done)
+	}
+	v.Update(done)
+
+	if cmd := v.HandleContentKey(keyPress("l")); cmd != nil {
+		t.Errorf("filing to the box the thread landed in should not move: %#v", runCmd(cmd))
+	}
+	if v.notice != "Already in Reply Later" {
+		t.Errorf("notice = %q, want %q", v.notice, "Already in Reply Later")
+	}
+
+	done, ok = runCmd(v.HandleContentKey(keyPress("a"))).(postingActionDoneMsg)
+	if !ok || done.err != nil {
+		t.Fatalf("filing command returned %#v", done)
+	}
+	if recorded.body.BoxID == nil || *recorded.body.BoxID != 3 {
+		t.Errorf("box_id = %v, want 3", recorded.body.BoxID)
+	}
+}
+
 func TestMailViewFilesOpenThreadOnlyFromFilingLists(t *testing.T) {
 	t.Run("search result", func(t *testing.T) {
 		v := mailWithPostings()

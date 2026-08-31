@@ -194,13 +194,14 @@ const (
 )
 
 type postingActionDoneMsg struct {
-	action     string
-	boxID      int64
-	sourceKind mail.Kind
-	postingID  int64
-	effect     postingActionEffect
-	seen       bool // the action was taken on the Previously Seen screen
-	err        error
+	action          string
+	boxID           int64
+	sourceKind      mail.Kind
+	postingID       int64
+	effect          postingActionEffect
+	destinationKind string // the box kind a move filed into, empty for every other action
+	seen            bool   // the action was taken on the Previously Seen screen
+	err             error
 }
 
 // postingSeenMsg reports the mark-seen that opening a thread triggers on its
@@ -255,6 +256,7 @@ type mailView struct {
 	topicContent     string
 	topicID          int64
 	threadPosting    mail.Posting // snapshot of the posting the open thread was opened from, zero when it has none
+	threadBoxKind    string       // the box kind the open thread files out of, following it as filings move it
 	topicName        string
 	entries          []mail.Entry
 	attachments      []messageAttachment
@@ -524,6 +526,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if opened := v.openedPosting(msg.postingID); opened != nil {
 			v.threadPosting = *opened
 		}
+		v.threadBoxKind = v.actionBoxKind()
 		v.topicName = msg.title
 		v.entries = msg.entries
 		v.attachments = msg.attachments
@@ -696,6 +699,11 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 
 	case postingActionDoneMsg:
 		v.finishMutation()
+		// A move of the open thread leaves it on screen in its new box, so later
+		// filing keys measure against where it landed, not where it was opened.
+		if msg.err == nil && v.inThread && msg.postingID == v.threadPosting.ID && msg.destinationKind != "" {
+			v.threadBoxKind = msg.destinationKind
+		}
 		if msg.seen {
 			return v.applySeenPostingAction(msg), true
 		}
@@ -1422,6 +1430,7 @@ func (v *mailView) ExitThread() {
 		v.inThread = false
 		v.threadNotice = ""
 		v.threadPosting = mail.Posting{}
+		v.threadBoxKind = ""
 		v.modal = nil
 		v.requests.cancel()
 		return
@@ -1603,6 +1612,7 @@ func (v *mailView) switchBox(index int) tea.Cmd {
 	v.inThread = false
 	v.threadNotice = ""
 	v.threadPosting = mail.Posting{}
+	v.threadBoxKind = ""
 	v.clearSearch()
 	v.clearBundle()
 	v.clearSeen()
@@ -1625,6 +1635,7 @@ func (v *mailView) openPreviouslySeen() tea.Cmd {
 	v.inThread = false
 	v.threadNotice = ""
 	v.threadPosting = mail.Posting{}
+	v.threadBoxKind = ""
 	v.clearSearch()
 	v.clearBundle()
 	v.notice = ""
@@ -2291,7 +2302,7 @@ func (v *mailView) imboxSource() *mail.Source {
 // opened directly the key answers with a notice instead of silence.
 func (v *mailView) fileOpenThread(key string) tea.Cmd {
 	if posting := v.fileablePosting(); posting != nil {
-		return v.postingAction(key, *posting)
+		return v.postingAction(key, *posting, v.threadBoxKind)
 	}
 	v.notice = "Can't file this thread from here"
 	return nil
@@ -2313,21 +2324,34 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 	if selected == nil {
 		return nil
 	}
-	return v.postingAction(key, *selected)
+	return v.postingAction(key, *selected, v.actionBoxKind())
 }
 
-func (v *mailView) postingAction(key string, p mail.Posting) tea.Cmd {
+// actionBoxKind is the box kind a list row files out of, empty over a source that
+// is not one of HEY's own boxes.
+func (v *mailView) actionBoxKind() string {
+	if source := v.actionSource(); source != nil {
+		return source.BoxKind
+	}
+	return ""
+}
+
+// postingAction runs key's action on p. fromBoxKind is the box kind the posting
+// files out of — the list's own box for a row, the box the open thread lives in
+// for a filing key pressed there — so a move to the box it is already in answers
+// with a notice instead of a request.
+func (v *mailView) postingAction(key string, p mail.Posting, fromBoxKind string) tea.Cmd {
 	boxID := v.currentBoxID()
 
 	switch key {
 	// Only lowercase moves to Reply Later: Shift+L navigates to Labels, the
 	// way Shift+K reaches Collections.
 	case "l":
-		return v.moveSelectedToKnownBox("Reply Later", hey.BoxKindLater, boxID, p.ID, func() error {
+		return v.moveSelectedToKnownBox("Reply Later", hey.BoxKindLater, fromBoxKind, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MoveToReplyLater(v.vc.ctx, p.ID)
 		})
 	case "a", "A":
-		return v.moveSelectedToKnownBox("Set Aside", hey.BoxKindSetAside, boxID, p.ID, func() error {
+		return v.moveSelectedToKnownBox("Set Aside", hey.BoxKindSetAside, fromBoxKind, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MoveToSetAside(v.vc.ctx, p.ID)
 		})
 	case "e", "E":
@@ -2347,13 +2371,13 @@ func (v *mailView) postingAction(key string, p mail.Posting) tea.Cmd {
 			return v.vc.sdk.Postings().MarkUnseen(v.vc.ctx, []int64{p.ID})
 		})
 	case "i", "I":
-		return v.moveSelectedToImbox(boxID, p.ID)
+		return v.moveSelectedToImbox(fromBoxKind, boxID, p.ID)
 	case "d", "D":
-		return v.moveSelectedToKnownBox("The Feed", hey.BoxKindFeed, boxID, p.ID, func() error {
+		return v.moveSelectedToKnownBox("The Feed", hey.BoxKindFeed, fromBoxKind, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MoveToFeed(v.vc.ctx, p.ID)
 		})
 	case "p", "P":
-		return v.moveSelectedToKnownBox("Paper Trail", hey.BoxKindTrail, boxID, p.ID, func() error {
+		return v.moveSelectedToKnownBox("Paper Trail", hey.BoxKindTrail, fromBoxKind, boxID, p.ID, func() error {
 			return v.vc.sdk.Postings().MoveToPaperTrail(v.vc.ctx, p.ID)
 		})
 	case "t", "T":
@@ -2394,10 +2418,10 @@ func (v *mailView) postingAction(key string, p mail.Posting) tea.Cmd {
 	return nil
 }
 
-func (v *mailView) moveSelectedToImbox(boxID, postingID int64) tea.Cmd {
+func (v *mailView) moveSelectedToImbox(fromBoxKind string, boxID, postingID int64) tea.Cmd {
 	if source := v.imboxSource(); source != nil {
 		imboxID := source.ID
-		return v.moveSelectedToKnownBox("Imbox", hey.BoxKindImbox, boxID, postingID, func() error {
+		return v.moveSelectedToKnownBox("Imbox", hey.BoxKindImbox, fromBoxKind, boxID, postingID, func() error {
 			return v.vc.sdk.Postings().Move(v.vc.ctx, imboxID, postingID)
 		})
 	}
@@ -2405,12 +2429,23 @@ func (v *mailView) moveSelectedToImbox(boxID, postingID int64) tea.Cmd {
 	return nil
 }
 
-func (v *mailView) moveSelectedToKnownBox(name, kind string, boxID, postingID int64, fn func() error) tea.Cmd {
-	if !v.movesOutOfCurrentBox(kind) {
+func (v *mailView) moveSelectedToKnownBox(name, kind, fromBoxKind string, boxID, postingID int64, fn func() error) tea.Cmd {
+	// The destination is one of HEY's own box kinds, so the posting's kind answers
+	// whether the move would do anything — a label or a collection carries none and
+	// is never the destination.
+	if fromBoxKind == kind {
 		v.notice = "Already in " + name
 		return nil
 	}
-	return v.doPostingAction("Thread moved to "+name, v.boxMoveEffect(), boxID, postingID, fn)
+	move := v.doPostingAction("Thread moved to "+name, v.boxMoveEffect(), boxID, postingID, fn)
+	return func() tea.Msg {
+		done, ok := move().(postingActionDoneMsg)
+		if !ok {
+			return nil
+		}
+		done.destinationKind = kind
+		return done
+	}
 }
 
 func (v *mailView) boxMoveEffect() postingActionEffect {
@@ -2421,17 +2456,6 @@ func (v *mailView) boxMoveEffect() postingActionEffect {
 		return postingActionNone
 	}
 	return postingActionRemove
-}
-
-// movesOutOfCurrentBox reports whether a key that files a thread somewhere would move it
-// at all. The destination is one of HEY's own box kinds, so it is the box's kind that
-// answers — a label or a collection carries none and is never the destination.
-func (v *mailView) movesOutOfCurrentBox(destinationBoxKind string) bool {
-	source := v.actionSource()
-	if source == nil {
-		return true
-	}
-	return source.BoxKind != destinationBoxKind
 }
 
 func (v *mailView) doPostingAction(label string, effect postingActionEffect, boxID, postingID int64, fn func() error) tea.Cmd {
