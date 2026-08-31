@@ -101,12 +101,14 @@ func (c *eventsListCommand) run(cmd *cobra.Command, args []string) error {
 
 // eventBoundary writes one end of an event: a day for an all-day event, a day and a clock
 // time for a timed one. An all-day event has no time of day, and printing it midnight reads
-// as an event that starts at midnight.
+// as an event that starts at midnight. HEY's JSON is always UTC, so a timed boundary
+// converts to the reader's clock the way HEY's own views draw it, while an all-day date is
+// the day it names and does not shift.
 func eventBoundary(at time.Time, allDay bool) string {
 	if allDay {
 		return formatDate(at)
 	}
-	return formatTimestamp(at)
+	return formatTimestamp(at.Local())
 }
 
 // add

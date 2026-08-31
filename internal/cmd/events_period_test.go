@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // A repeating event is one row on a calendar, so `hey event list` answers it on the day the
@@ -81,16 +83,25 @@ func TestEventsWeekReadsTheWeekPeriod(t *testing.T) {
 	}
 }
 
+// inLocalZone pins the process's local zone so the suite reads the same wherever it runs.
+func inLocalZone(t *testing.T, offsetHours int) {
+	t.Helper()
+	local := time.Local
+	time.Local = time.FixedZone(fmt.Sprintf("UTC%+d", offsetHours), offsetHours*60*60)
+	t.Cleanup(func() { time.Local = local })
+}
+
 // The listing reads in the order HEY draws the span: each day's all-day band first, then
-// the timed events by clock. An all-day event is stamped midnight UTC, so a timed
-// 00:30+10:00 the same day is the earlier absolute instant — and would wrongly lead, or
-// push the band off a --limit, if instants alone decided.
+// the timed events by clock. HEY's JSON is always UTC, so east of Greenwich a 23:30Z event
+// belongs to the next local day — stamped-midnight instants alone would draw it above that
+// day's all-day band, and a small --limit could keep the wrong visual row.
 func TestEventsDaySortsTheAllDayBandFirst(t *testing.T) {
+	inLocalZone(t, 2)
 	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"kind":"day","starts_at":"2026-09-02T00:00:00Z","ends_at":"2026-09-02T23:59:59Z","recordings":{`+
 			`"Calendar::Event":[`+
-			`{"id":77,"title":"Early swim","starts_at":"2026-09-02T00:30:00+10:00","ends_at":"2026-09-02T01:30:00+10:00","type":"Calendar::Event","calendar":{"id":9,"name":"Work"}},`+
+			`{"id":77,"title":"Late night sync","starts_at":"2026-09-01T23:30:00Z","ends_at":"2026-09-02T00:30:00Z","type":"Calendar::Event","calendar":{"id":9,"name":"Work"}},`+
 			`{"id":88,"title":"Company holiday","all_day":true,"starts_at":"2026-09-02T00:00:00Z","ends_at":"2026-09-02T00:00:00Z","type":"Calendar::Event","calendar":{"id":9,"name":"Work"}}`+
 			`]}}`)
 	}), "event", "day", "2026-09-02")
@@ -103,7 +114,19 @@ func TestEventsDaySortsTheAllDayBandFirst(t *testing.T) {
 	}
 	first, ok := events[0].(map[string]any)
 	if !ok || first["title"] != "Company holiday" {
-		t.Errorf("first event = %#v, want the all-day band on top", events[0])
+		t.Errorf("first event = %#v, want the all-day band on top: both rows are the reader's 2026-09-02", events[0])
+	}
+}
+
+// A styled boundary reads on the reader's clock — HEY's JSON is always UTC — while an
+// all-day date is the day it names and does not shift.
+func TestEventBoundaryDrawsTheReadersClock(t *testing.T) {
+	inLocalZone(t, 2)
+	if got := eventBoundary(time.Date(2026, 9, 2, 14, 0, 0, 0, time.UTC), false); got != "2026-09-02T16:00" {
+		t.Errorf("timed boundary = %q, want the reader's 16:00", got)
+	}
+	if got := eventBoundary(time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC), true); got != "2026-09-02" {
+		t.Errorf("all-day boundary = %q, want the unshifted day", got)
 	}
 }
 

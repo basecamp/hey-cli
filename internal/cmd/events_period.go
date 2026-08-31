@@ -163,8 +163,8 @@ func resolveOccurrenceSeries(events []generated.Recording) {
 // sortEventsByStart puts a period's events in the order HEY draws the span: day by day,
 // each day's all-day band first, then the timed events by clock. HEY serves a period
 // grouped by type with no promise about order, and instants alone would not do — an
-// all-day event is stamped midnight UTC, so a timed 00:30+10:00 the same day is the
-// earlier instant even though the app draws it below the band.
+// all-day event is stamped midnight UTC, so a timed event late the same local evening
+// can be the earlier instant even though the app draws it below the band.
 func sortEventsByStart(events []generated.Recording) {
 	sort.SliceStable(events, func(i, j int) bool {
 		if di, dj := eventDay(events[i]), eventDay(events[j]); di != dj {
@@ -180,13 +180,14 @@ func sortEventsByStart(events []generated.Recording) {
 	})
 }
 
-// eventDay names the day a row sits on: the stamped date for an all-day event, the start's
-// own local day for a timed one.
+// eventDay names the day a row sits on, the day HEY draws it: the stamped date for an
+// all-day event, the reader's own day for a timed one. HEY's JSON is always UTC, so a
+// 23:30Z event belongs to the next day east of Greenwich.
 func eventDay(event generated.Recording) string {
 	if event.AllDay {
 		return event.StartsAt.UTC().Format(dateLayout)
 	}
-	return event.StartsAt.Format(dateLayout)
+	return event.StartsAt.Local().Format(dateLayout)
 }
 
 // writeEventRows renders one listing of events: the table when styled, the JSON envelope
