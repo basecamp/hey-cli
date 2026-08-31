@@ -95,8 +95,8 @@ which is what `Entries().ListDraftsPage` and `hey draft list --page` exist for.
 | `/calendar/habits.json` | POST | SDK `Habits().Create` | `hey habit create`, Calendar TUI `a` | covered |
 | `/calendar/habits/{id}.json` | PATCH | SDK `Habits().Update` | `hey habit edit <id>`, Calendar TUI `e` | covered |
 | `/calendar/habits/{id}.json` | DELETE | SDK `Habits().Delete` | `hey habit delete <id>`, Calendar TUI `x` | covered |
-| `/calendar/days/{date}.json` | GET | SDK `CalendarPeriods().Day` | Calendar TUI day view | covered |
-| `/calendar/weeks/{date}.json` | GET | SDK `CalendarPeriods().Week` | `hey habit list`, Calendar TUI week view | covered: a period expands a recurrence into its occurrences and is the only read that carries habits, which a calendar's recordings listing does not |
+| `/calendar/days/{date}.json` | GET | SDK `CalendarPeriods().Day` | `hey event day [date]`, Calendar TUI day view | covered |
+| `/calendar/weeks/{date}.json` | GET | SDK `CalendarPeriods().Week` | `hey event week [date]`, `hey habit list`, Calendar TUI week view | covered: a period expands a recurrence into its occurrences and is the only read that carries habits, which a calendar's recordings listing does not |
 | `/calendar/years/{date}.json` | GET | SDK `CalendarPeriods().Year` | Calendar TUI year view | covered |
 | `/calendar/days/{date}/habits/{id}/completions.json` | POST | SDK `Habits().Complete` | `hey habit complete <id>` | covered |
 | `/calendar/days/{date}/habits/{id}/completions.json` | DELETE | SDK `Habits().Uncomplete` | `hey habit uncomplete <id>` | covered |

@@ -142,8 +142,8 @@ notice on stderr. Both need list data, so they work on `hey box list`, `hey box 
 `hey label list`, `hey label view`, `hey collection list`, `hey collection view`, `hey workflow list`,
 `hey workflow view`, `hey clip list`, `hey snippet list`, `hey draft list`, `hey search`,
 `hey contact list`, `hey screener list`, `hey screener history`, `hey calendar list`,
-`hey event list`, `hey todo list`, `hey habit list`, `hey timetrack list`, `hey journal list` and
-`hey attachment list`. On `hey box view` they count and list its postings, not the box itself.
+`hey event list`, `hey event day`, `hey event week`, `hey todo list`, `hey habit list`,
+`hey timetrack list`, `hey journal list` and `hey attachment list`. On `hey box view` they count and list its postings, not the box itself.
 
 ## Quick Reference
 
@@ -208,6 +208,7 @@ notice on stderr. Both need list data, so they work on `hey box list`, `hey box 
 | Recall a bulk reply | `hey bulk-reply undo <delivery_id>` |
 | List calendars | `hey calendar list --json` |
 | List calendar events | `hey event list --json` |
+| Today's schedule, recurrences expanded | `hey event day --json` |
 | Add a calendar event | `hey event add "Design review" --starts-on 2026-09-02 --start-time 14:00` |
 | List todos | `hey todo list --json` |
 | Add todo | `hey todo add "Draft the quarterly report"` |
@@ -653,6 +654,9 @@ the default end.
 ```bash
 hey event list --json                        # Every calendar, from today onward
 hey event list --calendar 123 --starts-on 2026-01-01 --ends-on 2026-01-31 --json
+hey event day --json                         # Today as HEY draws it, recurrences expanded
+hey event day 2026-09-02 --json              # One day
+hey event week 2026-09-02 --json             # The week that day falls in
 hey event add "Design review" --starts-on 2026-09-02 --start-time 14:00 --end-time 15:00
 hey event add "Sarah's birthday" --starts-on 2026-09-02   # No time given, so all day
 hey event add "Standup" --start-time 09:15 --repeat every_weekday --remind 10m
@@ -663,6 +667,12 @@ hey event delete 4821
 Without `--calendar`, `list` reads every calendar and `add` files on the first one that
 accepts events — the personal calendar is in the list HEY serves but refuses them. A
 repeating event lists once as its series, not once per day.
+
+**"What's on my schedule today?" is `hey event day`, not `list`.** A day or a week is the
+span as HEY draws it: a repeating event is expanded into the occurrences inside it, each
+carrying that day's own times and an `occurrence_id`, with its `id` still naming the
+series that `edit` and `delete` take. The period covers the calendars switched on in HEY,
+so `day` and `week` take no `--calendar` — only `--limit` and `--all`.
 
 **Response format:** a flat array of events. Each has `id`, `title`, `starts_at`, `ends_at`,
 `all_day`, `recurring`, `starts_at_time_zone` and `calendar`; one being edited also carries

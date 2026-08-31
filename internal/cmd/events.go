@@ -29,11 +29,13 @@ func newEventsCommand() *eventsCommand {
 		Use:   "event",
 		Short: "Read and manage calendar events",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, add, edit, delete. list reads every calendar unless --calendar names one, and lists a repeating event once as its series rather than once per day. An edit is not a patch on HEY's side: it resends the notes, location, link, attached email, reminders and time zones the event already carries, so notes lose their formatting and a countdown is removed unless --countdown names one again.",
+			"agent_notes": "Subcommands: list, day, week, add, edit, delete. \"What's on the schedule today?\" is answered by day, not list: day and week read the span as HEY draws it, with a repeating event expanded into the occurrences inside it, over the calendars switched on in HEY. list reads what calendars hold — every calendar unless --calendar names one — and a repeating event is one row, its series, on the day the series began. An edit is not a patch on HEY's side: it resends the notes, location, link, attached email, reminders and time zones the event already carries, so notes lose their formatting and a countdown is removed unless --countdown names one again.",
 		},
 	}
 
 	eventsCommand.cmd.AddCommand(newEventsListCommand().cmd)
+	eventsCommand.cmd.AddCommand(newEventsDayCommand().cmd)
+	eventsCommand.cmd.AddCommand(newEventsWeekCommand().cmd)
 	eventsCommand.cmd.AddCommand(newEventsAddCommand().cmd)
 	eventsCommand.cmd.AddCommand(newEventsEditCommand().cmd)
 	eventsCommand.cmd.AddCommand(newEventsDeleteCommand().cmd)
@@ -55,6 +57,11 @@ func newEventsListCommand() *eventsListCommand {
 	eventsListCommand.cmd = &cobra.Command{
 		Use:   "list",
 		Short: "List calendar events",
+		Long: `List the events calendars hold over a date window.
+
+A repeating event is stored once, so it lists once, as its series, on the day the series
+began. For the events of a day or a week as HEY draws them — occurrences of a repeating
+series expanded into the days they fall on — read 'hey event day' or 'hey event week'.`,
 		Example: `  hey event list
   hey event list --starts-on 2026-01-01 --ends-on 2026-01-31
   hey event list --calendar 123 --limit 5 --json`,
@@ -89,50 +96,7 @@ func (c *eventsListCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	notice := output.TruncationNotice(len(events), total)
 
-	if writer.IsStyled() {
-		if len(events) == 0 {
-			fmt.Fprintf(cmd.OutOrStdout(), "No events %s.\n", window.describe())
-			return nil
-		}
-
-		table := newTable(cmd.OutOrStdout())
-		table.addRow([]string{"ID", "Title", "Starts", "Ends", "Calendar"})
-		for _, event := range events {
-			table.addRow([]string{
-				fmt.Sprintf("%d", event.Id), event.Title,
-				eventBoundary(event.StartsAt, event.AllDay),
-				eventBoundary(event.EndsAt, event.AllDay),
-				event.Calendar.Name,
-			})
-		}
-		table.print()
-		if notice != "" {
-			fmt.Fprintln(cmd.OutOrStdout(), notice)
-		}
-		return nil
-	}
-
-	return writeOK(events,
-		output.WithSummary(fmt.Sprintf("%d events (%s)", len(events), window.describe())),
-		output.WithNotice(notice),
-		output.WithBreadcrumbs(
-			output.Breadcrumb{
-				Action:      "add",
-				Command:     "hey event add '...'",
-				Description: "Create an event",
-			},
-			output.Breadcrumb{
-				Action:      "edit",
-				Command:     "hey event edit <id>",
-				Description: "Change an event",
-			},
-			output.Breadcrumb{
-				Action:      "delete",
-				Command:     "hey event delete <id>",
-				Description: "Delete an event",
-			},
-		),
-	)
+	return writeEventRows(cmd, events, window.describe(), notice)
 }
 
 // eventBoundary writes one end of an event: a day for an all-day event, a day and a clock

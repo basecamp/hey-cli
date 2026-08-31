@@ -166,6 +166,9 @@ hey event add --start-time
 hey event add --starts-on
 hey event add --time-zone
 hey event add --title
+hey event day
+hey event day --all
+hey event day --limit
 hey event delete
 hey event edit
 hey event edit --all-day
@@ -193,6 +196,9 @@ hey event list --calendar
 hey event list --ends-on
 hey event list --limit
 hey event list --starts-on
+hey event week
+hey event week --all
+hey event week --limit
 hey forward
 hey forward --bcc
 hey forward --cc
