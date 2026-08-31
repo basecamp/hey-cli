@@ -81,6 +81,32 @@ func TestEventsWeekReadsTheWeekPeriod(t *testing.T) {
 	}
 }
 
+// The listing reads in the order HEY draws the span: each day's all-day band first, then
+// the timed events by clock. An all-day event is stamped midnight UTC, so a timed
+// 00:30+10:00 the same day is the earlier absolute instant — and would wrongly lead, or
+// push the band off a --limit, if instants alone decided.
+func TestEventsDaySortsTheAllDayBandFirst(t *testing.T) {
+	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"kind":"day","starts_at":"2026-09-02T00:00:00Z","ends_at":"2026-09-02T23:59:59Z","recordings":{`+
+			`"Calendar::Event":[`+
+			`{"id":77,"title":"Early swim","starts_at":"2026-09-02T00:30:00+10:00","ends_at":"2026-09-02T01:30:00+10:00","type":"Calendar::Event","calendar":{"id":9,"name":"Work"}},`+
+			`{"id":88,"title":"Company holiday","all_day":true,"starts_at":"2026-09-02T00:00:00Z","ends_at":"2026-09-02T00:00:00Z","type":"Calendar::Event","calendar":{"id":9,"name":"Work"}}`+
+			`]}}`)
+	}), "event", "day", "2026-09-02")
+	if err != nil {
+		t.Fatalf("execute event day: %v", err)
+	}
+	events, ok := response.Data.([]any)
+	if !ok || len(events) != 2 {
+		t.Fatalf("data = %#v, want both events", response.Data)
+	}
+	first, ok := events[0].(map[string]any)
+	if !ok || first["title"] != "Company holiday" {
+		t.Errorf("first event = %#v, want the all-day band on top", events[0])
+	}
+}
+
 // With no date the read asks HEY for "now", which the server resolves in the account's own
 // time zone — the CLI process's clock could be a day off either way around midnight.
 func TestEventsDayDefaultsToNow(t *testing.T) {
