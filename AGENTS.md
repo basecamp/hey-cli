@@ -148,16 +148,18 @@ because both were mis-stated here before:
   `internal/threadload/sdk.go` classifies a failed message read by status before size —
   an oversized 500 is still systemic and an oversized 404 is still just a missing
   message; only an oversized success is `over_limit`.
-- **A reply's recipients come from the entry it answers.** `Messages().Get` carries that
-  entry's `Addressed` (`directly`/`copied`/`blindcopied`), and `recipientsForReplyTo` —
-  in `internal/cmd/thread_reply.go` for `hey reply`, and in `internal/tui/compose.go` for
-  the TUI's reply form — turns it into To/CC/BCC with the entry's sender moved onto the To
-  line. That last part is haystack's `directly_address_sender`, and without it a reply to
-  an inbound email reaches everyone except the person who wrote it. What HEY also does and
-  this cannot is *remove* the acting user and their aliases, catch-alls and redelivery
-  contacts: that needs `GET /entries/{id}/replies/new.json`, which the SDK does not expose
-  yet. Until it does, a reply may CC the sender back to themselves. Add that operation to
-  the SDK rather than reimplementing the exclusion rules here.
+- **A reply starts from HEY's prefill, with a local fallback.** The SDK's
+  `Entries().NewReply` (`GET /entries/{id}/replies/new.json`) answers how a reply starts
+  out: its "Re: …" subject and its recipients, with the entry's sender moved onto the To
+  line (haystack's `directly_address_sender`) *and* the acting user's own addresses,
+  aliases, catch-alls and redelivery contacts removed — the exclusion this CLI cannot
+  compute locally. Both reply paths — `replyPrefillFromServer` in
+  `internal/cmd/thread_reply.go` for `hey reply`, and `loadReplyContext` in
+  `internal/tui/compose.go` for the TUI's reply form — ask the prefill first and fall
+  back to the local computation (`recipientsForReplyTo` plus the derived subject) on a
+  failed read or an empty recipient answer, which a thread with yourself produces; the
+  prefill's subject survives that recipient fallback. Extend the prefill flow rather
+  than reimplementing HEY's exclusion rules here.
 
 `internal/htmlutil` provides `ToMarkdown` (HTML→Markdown), `ToText` (HTML→plain text),
 `ExtractImageURLs` and `ExtractAttachments`, which are presentation helpers rather than
