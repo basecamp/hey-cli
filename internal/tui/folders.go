@@ -78,9 +78,9 @@ func (p *folderPicker) selected() *folderPickerSelection {
 	return &choices[p.cursor]
 }
 
-func (p *folderPicker) postingHasFolder(folderID int64) bool {
+func (p *folderPicker) postingHasFolder(choice mail.Source) bool {
 	for _, folder := range p.posting.Folders {
-		if folder.ID == folderID {
+		if sameFolder(folder, mail.Folder{ID: choice.ID, Name: choice.Name}) {
 			return true
 		}
 	}
@@ -134,7 +134,7 @@ func (p *folderPicker) handleKey(view *mailView, msg tea.KeyPressMsg) (tea.Cmd, 
 		if selection := p.selected(); selection != nil {
 			switch selection.kind {
 			case folderPickerExisting:
-				if p.postingHasFolder(selection.folder.ID) {
+				if p.postingHasFolder(selection.folder) {
 					return view.unfilePosting(p.posting.ID, selection.folder.ID, selection.folder.Name), false
 				}
 				return view.filePosting(p.posting.ID, selection.folder.ID, selection.folder.Name), false
@@ -237,7 +237,7 @@ func (p *folderPicker) view(styles styles, width int) string {
 		switch choice.kind {
 		case folderPickerExisting:
 			mark := "[ ]"
-			if p.postingHasFolder(choice.folder.ID) {
+			if p.postingHasFolder(choice.folder) {
 				mark = "[x]"
 			}
 			label = mark + " " + terminal.SanitizeLine(choice.folder.Name)

@@ -226,6 +226,9 @@ type folderActionDoneMsg struct {
 	action     string
 	sourceID   int64
 	sourceKind mail.Kind
+	postingID  int64
+	folder     mail.Folder
+	added      bool
 	created    bool
 	err        error
 }
@@ -249,20 +252,27 @@ type mailView struct {
 	boxes    []mail.Source
 	boxIndex int
 
-	postingPaging    listPaging
-	postingList      contentList
-	topicViewport    viewport.Model
-	topicContent     string
-	topicID          int64
-	topicName        string
-	entries          []mail.Entry
-	attachments      []messageAttachment
-	attachmentCursor int
-	imageContent     string
-	entryOffsets     []int // line where each message starts in the thread content
-	inThread         bool
-	threadNotice     string // what the open thread's read did not get; stays until the thread is left
-	contentHeight    int    // the rows the section has, which the thread's notices and viewport share
+	postingPaging listPaging
+	postingList   contentList
+	topicViewport viewport.Model
+	topicContent  string
+	topicID       int64
+	// topicPosting is a copy of the posting the open thread was opened from, nil for a
+	// topic opened directly. A copy, because the row itself can leave the list while
+	// the thread is open: opening marked it seen, and a live re-read's head page may
+	// no longer reach it. pendingTopicPosting is the same copy taken when the thread
+	// was asked for, so a re-read landing during the read itself cannot lose it.
+	topicPosting        *mail.Posting
+	pendingTopicPosting *mail.Posting
+	topicName           string
+	entries             []mail.Entry
+	attachments         []messageAttachment
+	attachmentCursor    int
+	imageContent        string
+	entryOffsets        []int // line where each message starts in the thread content
+	inThread            bool
+	threadNotice        string // what the open thread's read did not get; stays until the thread is left
+	contentHeight       int    // the rows the section has, which the thread's notices and viewport share
 
 	modal                  modal       // the form or picker over the list, and the only one there can be
 	cover                  coverPreset // the session's cover; HEY does not serve one to read
@@ -515,6 +525,18 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.inThread = true
 		v.topicID = msg.topicID
+		// The list's row is the freshest picture of the posting when it is still
+		// there; the copy taken at request time covers a row a re-read carried away
+		// while the topic was loading.
+		v.topicPosting = nil
+		if pending := v.pendingTopicPosting; pending != nil && pending.ID == msg.postingID {
+			v.topicPosting = pending
+		}
+		if opened := v.openedPosting(msg.postingID); opened != nil {
+			posting := *opened
+			v.topicPosting = &posting
+		}
+		v.pendingTopicPosting = nil
 		v.topicName = msg.title
 		v.entries = msg.entries
 		v.attachments = msg.attachments
@@ -687,6 +709,31 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 
 	case postingActionDoneMsg:
 		v.finishMutation()
+		if msg.err == nil && msg.effect == postingActionRemove {
+			// A thread that left its box leaves the search and bundle lists with it,
+			// whether or not the reader is still inside it when the action lands —
+			// those lists never re-read themselves, and a row for a trashed thread
+			// would otherwise stay there to be opened.
+			if idx := postingIndexIn(v.searchList.postings, msg.postingID); idx >= 0 {
+				v.searchList.removeAt(idx)
+			}
+			if idx := postingIndexIn(v.bundleList.postings, msg.postingID); idx >= 0 {
+				v.bundleList.removeAt(idx)
+			}
+			// The open thread closes under an idle reader: what was on screen is in
+			// the Trash or another box now, and the list it came from is where they
+			// land. A reader who has moved on — a form or a picker up, typed text at
+			// stake — keeps the thread and leaves it themselves, as they always
+			// could. A reply or forward still loading for the closed thread is
+			// cancelled with it, so it cannot settle into a compose form over the
+			// list once the thread is gone.
+			if v.inThread && v.topicPosting != nil && msg.postingID == v.topicPosting.ID && v.modal == nil {
+				v.closeThread()
+				if v.requests.kind == mailRequestTopic || v.requests.kind == mailRequestReply || v.requests.kind == mailRequestForward {
+					v.requests.cancel()
+				}
+			}
+		}
 		if msg.seen {
 			return v.applySeenPostingAction(msg), true
 		}
@@ -743,6 +790,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			}
 			return nil, true
 		}
+		v.notePostingLabelled(msg)
 		var done tea.Cmd
 		if msg.sourceID == v.currentBoxID() && msg.sourceKind == v.currentSourceKind() {
 			done = notify(msg.action)
@@ -816,12 +864,7 @@ func (v *mailView) View() string {
 		return v.modal.draw(v)
 	}
 	if v.inThread {
-		v.fitThreadViewport()
-		var lines []string
-		for _, notice := range v.threadNotices() {
-			lines = append(lines, v.vc.styles.title.Render(notice))
-		}
-		return strings.Join(append(lines, v.topicViewport.View()), "\n")
+		return v.threadView()
 	}
 	if v.searchActive {
 		if v.notice != "" {
@@ -862,6 +905,17 @@ func (v *mailView) View() string {
 // modal draws itself over.
 func (v *mailView) listView() string {
 	return v.listHeader() + v.postingList.view()
+}
+
+// threadView is the open thread and its notices, which is what the More menu draws
+// itself over.
+func (v *mailView) threadView() string {
+	v.fitThreadViewport()
+	var lines []string
+	for _, notice := range v.threadNotices() {
+		lines = append(lines, v.vc.styles.title.Render(notice))
+	}
+	return strings.Join(append(lines, v.topicViewport.View()), "\n")
 }
 
 // openModal puts a form or a picker over the list, sized to the screen it opens on.
@@ -929,6 +983,9 @@ func (v *mailView) HelpBindings() []helpBinding {
 	}
 	if v.inThread {
 		bindings := []helpBinding{{"r", "reply"}, {"f", "forward"}}
+		if v.topicPosting != nil {
+			bindings = append(bindings, helpBinding{"m", "more"})
+		}
 		if len(v.entries) > 1 {
 			bindings = append(bindings, helpBinding{"j/k", "next/previous message"})
 		}
@@ -1221,39 +1278,7 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 
 	if v.inThread {
-		switch msg.String() {
-		case "r", "R":
-			if v.topicID != 0 {
-				return v.loadReplyContext(v.topicID, v.topicName)
-			}
-		case "f", "F":
-			if v.topicID != 0 {
-				return v.loadForwardContext(v.topicID, v.topicName)
-			}
-		case "[":
-			v.moveAttachmentCursor(-1)
-			return nil
-		case "]":
-			v.moveAttachmentCursor(1)
-			return nil
-		case "s":
-			return v.saveSelectedAttachment()
-		case "o":
-			return v.openSelectedAttachment()
-		case "j":
-			if len(v.entryOffsets) > 1 {
-				v.jumpEntry(1)
-				return nil
-			}
-		case "k":
-			if len(v.entryOffsets) > 1 {
-				v.jumpEntry(-1)
-				return nil
-			}
-		}
-		var cmd tea.Cmd
-		v.topicViewport, cmd = v.topicViewport.Update(msg)
-		return cmd
+		return v.handleThreadKey(msg)
 	}
 
 	if v.searchActive {
@@ -1384,6 +1409,50 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
+// handleThreadKey routes one key over the open thread: the thread's own actions
+// first, the viewport's scrolling for everything else. The More menu sends the keys
+// it does not take through here too, so having the menu up never changes what a
+// thread key means. Only lowercase m opens the menu — uppercase M is the Mail
+// section's global shortcut and never reaches the thread.
+func (v *mailView) handleThreadKey(msg tea.KeyPressMsg) tea.Cmd {
+	switch msg.String() {
+	case "r", "R":
+		if v.topicID != 0 {
+			return v.loadReplyContext(v.topicID, v.topicName)
+		}
+	case "f", "F":
+		if v.topicID != 0 {
+			return v.loadForwardContext(v.topicID, v.topicName)
+		}
+	case "m":
+		v.openMoreMenu()
+		return nil
+	case "[":
+		v.moveAttachmentCursor(-1)
+		return nil
+	case "]":
+		v.moveAttachmentCursor(1)
+		return nil
+	case "s":
+		return v.saveSelectedAttachment()
+	case "o":
+		return v.openSelectedAttachment()
+	case "j":
+		if len(v.entryOffsets) > 1 {
+			v.jumpEntry(1)
+			return nil
+		}
+	case "k":
+		if len(v.entryOffsets) > 1 {
+			v.jumpEntry(-1)
+			return nil
+		}
+	}
+	var cmd tea.Cmd
+	v.topicViewport, cmd = v.topicViewport.Update(msg)
+	return cmd
+}
+
 func (v *mailView) InThread() bool {
 	return v.inThread || v.searchActive || v.bundleActive || v.seenActive
 }
@@ -1405,9 +1474,7 @@ func (v *mailView) ExitThread() {
 		return
 	}
 	if v.inThread {
-		v.inThread = false
-		v.threadNotice = ""
-		v.modal = nil
+		v.closeThread()
 		v.requests.cancel()
 		return
 	}
@@ -1423,6 +1490,17 @@ func (v *mailView) ExitThread() {
 	}
 	v.clearSearch()
 	v.requests.cancel()
+}
+
+// closeThread leaves the thread view for the list it was opened from, taking whatever
+// modal stood over the thread with it. Cancelling anything in flight stays with the
+// caller: leaving by key abandons the pending read, leaving because an action removed
+// the thread has nothing to abandon.
+func (v *mailView) closeThread() {
+	v.inThread = false
+	v.threadNotice = ""
+	v.topicPosting = nil
+	v.modal = nil
 }
 
 func (v *mailView) clearSearch() {
@@ -1875,6 +1953,13 @@ func (v *mailView) loadMoreSeenPostings() tea.Cmd {
 }
 
 func (v *mailView) requestTopic(boxID, topicID, postingID int64, title string) tea.Cmd {
+	// The posting is copied now, while the row is certainly still on screen: a live
+	// re-read can carry it out of the list before the topic arrives.
+	v.pendingTopicPosting = nil
+	if opened := v.openedPosting(postingID); opened != nil {
+		posting := *opened
+		v.pendingTopicPosting = &posting
+	}
 	requestID, ctx := v.requests.begin(v.vc.ctx, mailRequestTopic)
 	return v.fetchTopic(ctx, requestID, boxID, topicID, postingID, title)
 }
@@ -2075,17 +2160,25 @@ func (v *mailView) openedPosting(postingID int64) *mail.Posting {
 // --- Posting actions ---
 
 func (v *mailView) startMove() {
-	selected := v.actionList().selectedPosting()
-	currentSource := v.actionSource()
-	if selected == nil || currentSource == nil {
-		return
+	if selected := v.actionList().selectedPosting(); selected != nil {
+		v.openMovePicker(*selected)
 	}
-	picker := newMovePicker(*selected, v.boxes, *currentSource)
+}
+
+// openMovePicker puts the move picker up over posting and reports whether it opened:
+// with nowhere to move to there is no picker, only the notice saying so.
+func (v *mailView) openMovePicker(posting mail.Posting) bool {
+	currentSource := v.actionSource()
+	if currentSource == nil {
+		return false
+	}
+	picker := newMovePicker(posting, v.boxes, *currentSource)
 	if len(picker.destinations) == 0 {
 		v.notice = "No other boxes available"
-		return
+		return false
 	}
 	v.openModal(picker)
+	return true
 }
 
 // startCoverPicker opens the cover picker. Only the Imbox can be covered, which
@@ -2117,22 +2210,37 @@ func (v *mailView) startFolderPicker() tea.Cmd {
 		v.notice = "Retrying labels…"
 		return v.requestSources()
 	}
-	selected := v.actionList().selectedPosting()
-	if selected == nil {
-		return nil
+	if selected := v.actionList().selectedPosting(); selected != nil {
+		cmd, _ := v.openFolderPicker(*selected)
+		return cmd
 	}
-	v.openModal(newFolderPicker(*selected, v.boxes))
 	return nil
 }
 
+// openFolderPicker puts the label picker up over posting, or retries the label
+// discovery that failed, and reports whether a picker is now open.
+func (v *mailView) openFolderPicker(posting mail.Posting) (tea.Cmd, bool) {
+	if v.folderDiscoveryErr != "" {
+		v.notice = "Retrying labels…"
+		return v.requestSources(), false
+	}
+	v.openModal(newFolderPicker(posting, v.boxes))
+	return nil, true
+}
+
 func (v *mailView) filePosting(postingID, folderID int64, folderName string) tea.Cmd {
-	return v.doFolderAction("Label "+terminal.SanitizeLine(folderName)+" added", false, func() error {
+	folder := mail.Folder{ID: folderID, Name: folderName}
+	return v.doFolderAction("Label "+terminal.SanitizeLine(folderName)+" added", postingID, folder, true, false, func() error {
 		return v.vc.sdk.Postings().File(v.vc.ctx, folderID, postingID)
 	})
 }
 
+// createFolderForPosting labels the thread with a label that does not exist yet. The
+// server answers the creation with nothing but its blessing, so the new label is known
+// by name until the source reload that follows hands back its ID.
 func (v *mailView) createFolderForPosting(postingID int64, folderName string) tea.Cmd {
-	return v.doFolderAction("Label "+terminal.SanitizeLine(folderName)+" created", true, func() error {
+	folder := mail.Folder{Name: folderName}
+	return v.doFolderAction("Label "+terminal.SanitizeLine(folderName)+" created", postingID, folder, true, true, func() error {
 		return v.vc.sdk.Postings().CreateFolder(v.vc.ctx, folderName, postingID)
 	})
 }
@@ -2142,12 +2250,13 @@ func (v *mailView) unfilePosting(postingID, folderID int64, folderName string) t
 	if folderID != 0 {
 		label = "Label " + terminal.SanitizeLine(folderName) + " removed"
 	}
-	return v.doFolderAction(label, false, func() error {
+	folder := mail.Folder{ID: folderID, Name: folderName}
+	return v.doFolderAction(label, postingID, folder, false, false, func() error {
 		return v.vc.sdk.Postings().Unfile(v.vc.ctx, folderID, postingID)
 	})
 }
 
-func (v *mailView) doFolderAction(label string, created bool, fn func() error) tea.Cmd {
+func (v *mailView) doFolderAction(label string, postingID int64, folder mail.Folder, added, created bool, fn func() error) tea.Cmd {
 	sourceID, sourceKind := v.currentSourceIdentity()
 	v.pendingMutations++
 	return func() tea.Msg {
@@ -2155,10 +2264,60 @@ func (v *mailView) doFolderAction(label string, created bool, fn func() error) t
 			action:     label,
 			sourceID:   sourceID,
 			sourceKind: sourceKind,
+			postingID:  postingID,
+			folder:     folder,
+			added:      added,
 			created:    created,
 			err:        fn(),
 		}
 	}
+}
+
+// notePostingLabelled carries a landed label change onto every copy of the posting the
+// reader still holds. The list's row is the obvious one, but the thread's retained
+// posting matters more: once a live re-read has carried the row out of the list that
+// snapshot is the only copy left, and it is what the More menu builds its label picker
+// off. Left stale, the picker shows a label the thread already carries as unchecked and
+// files it a second time instead of removing it.
+func (v *mailView) notePostingLabelled(msg folderActionDoneMsg) {
+	if row := v.openedPosting(msg.postingID); row != nil {
+		updatePostingFolders(row, msg.folder, msg.added)
+	}
+	if v.topicPosting != nil && v.topicPosting.ID == msg.postingID {
+		updatePostingFolders(v.topicPosting, msg.folder, msg.added)
+	}
+}
+
+// updatePostingFolders answers a label change on a posting in hand; an unnamed label
+// removed is the picker's "remove all labels". It builds a fresh slice rather than
+// editing in place, because the retained posting and the list's row are separate copies
+// that still share one backing array, and rewriting that array under both is how one of
+// them ends up wrong.
+func updatePostingFolders(posting *mail.Posting, folder mail.Folder, added bool) {
+	if !added && folder.ID == 0 {
+		posting.Folders = nil
+		return
+	}
+	kept := make([]mail.Folder, 0, len(posting.Folders)+1)
+	for _, carried := range posting.Folders {
+		if !sameFolder(carried, folder) {
+			kept = append(kept, carried)
+		}
+	}
+	if added {
+		kept = append(kept, folder)
+	}
+	posting.Folders = kept
+}
+
+// sameFolder matches two labels. A label just created for a thread is known only by the
+// name it was created under until the source reload that follows hands back its ID, so a
+// label without one matches on its name.
+func sameFolder(a, b mail.Folder) bool {
+	if a.ID != 0 && b.ID != 0 {
+		return a.ID == b.ID
+	}
+	return a.Name == b.Name
 }
 
 func (v *mailView) startCollectionPicker() tea.Cmd {
@@ -2265,6 +2424,43 @@ func (v *mailView) imboxSource() *mail.Source {
 		}
 	}
 	return nil
+}
+
+// openMoreMenu swaps the help bar for the thread's More menu — forward, label, move,
+// trash, as in the HEY apps. The menu acts on the posting the thread was opened from;
+// a topic opened directly has none, so there is nothing to offer.
+func (v *mailView) openMoreMenu() {
+	if v.topicPosting == nil {
+		return
+	}
+	// The list's row is fresher than the snapshot for as long as it is still there:
+	// a label added since the thread was opened lives on the row, and a picker built
+	// off the snapshot would offer to add it again.
+	if live := v.openedPosting(v.topicPosting.ID); live != nil {
+		posting := *live
+		v.topicPosting = &posting
+	}
+	v.openModal(newMoreMenu(*v.topicPosting, v.menuOrganizes()))
+}
+
+// menuOrganizes reports whether the More menu can offer label and move. A search
+// match and a contact's threads say neither which box a thread lives in nor which
+// labels it carries, so a picker built over them offers wrong choices — there the
+// menu keeps to forward and trash, which need only the posting itself.
+func (v *mailView) menuOrganizes() bool {
+	if v.searchActive {
+		return false
+	}
+	return !v.bundleActive || v.bundleContactID == 0
+}
+
+// trashOpenThread moves the thread on screen to the Trash. Closing the thread view is
+// left to the action's done message, so the reader only lands back on the list once
+// the thread has really gone.
+func (v *mailView) trashOpenThread(postingID int64) tea.Cmd {
+	return v.doPostingAction("Thread moved to Trash", postingActionRemove, v.currentBoxID(), postingID, func() error {
+		return v.vc.sdk.Postings().MoveToTrash(v.vc.ctx, postingID)
+	})
 }
 
 func (v *mailView) handlePostingAction(key string) tea.Cmd {

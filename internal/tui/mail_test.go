@@ -519,6 +519,555 @@ func TestMailViewReportsFailureToMarkOpenedThreadSeen(t *testing.T) {
 	}
 }
 
+// --- Thread More menu ---
+
+func openTestThread(t *testing.T, v *mailView) {
+	t.Helper()
+	loaded, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(topicLoadedMsg)
+	if !ok {
+		t.Fatal("opening the thread did not return topicLoadedMsg")
+	}
+	cmd, _ := v.Update(loaded)
+	if seen, ok := runCmd(cmd).(postingSeenMsg); ok {
+		v.Update(seen)
+	}
+	if !v.inThread || v.topicPosting == nil || v.topicPosting.ID != 100 {
+		t.Fatalf("thread state = open:%v posting:%v, want posting 100 open", v.inThread, v.topicPosting)
+	}
+}
+
+// The thread view carries the HEY apps' More menu: m opens it over the thread, and t
+// inside it trashes the thread — the server told first, the view closed and the row
+// gone from the list only once the trash has landed.
+func TestThreadMoreMenuTrashesTheOpenThread(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	openTestThread(t, v)
+
+	v.HandleContentKey(keyPress("m"))
+	if _, ok := v.modal.(*moreMenu); !ok {
+		t.Fatalf("m opened %T, want the More menu", v.modal)
+	}
+	cmd := v.HandleContentKey(keyPress("t"))
+	if v.modal != nil {
+		t.Error("committing an action should close the menu")
+	}
+	if !v.inThread {
+		t.Error("the thread should stay open until the trash lands")
+	}
+	done, ok := runCmd(cmd).(postingActionDoneMsg)
+	if !ok || done.err != nil {
+		t.Fatalf("trash returned %#v", done)
+	}
+	if recorded.method != http.MethodPost || recorded.path != "/postings/trash.json" {
+		t.Errorf("request = %s %s, want POST /postings/trash.json", recorded.method, recorded.path)
+	}
+	if len(recorded.body.PostingIDs) != 1 || recorded.body.PostingIDs[0] != 100 {
+		t.Errorf("posting_ids = %v, want [100]", recorded.body.PostingIDs)
+	}
+
+	answer, _ := v.Update(done)
+	toast := deliverToView(v, answer)
+	if v.inThread {
+		t.Error("the trashed thread should close")
+	}
+	if v.postingIndex(100) >= 0 {
+		t.Error("the trashed thread should leave the list")
+	}
+	if toast != "Thread moved to Trash" {
+		t.Errorf("toast = %q, want the trash confirmation", toast)
+	}
+}
+
+// The menu lives in the help bar, not in a box over the mail: m swaps the bar's
+// bindings for the extra actions, the thread stays on screen and keeps scrolling,
+// and q or esc swaps the bar back.
+func TestThreadMoreMenuSwapsTheHelpBar(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	openTestThread(t, v)
+	before := v.View()
+
+	v.HandleContentKey(keyPress("m"))
+	if !hasHelpBinding(v.HelpBindings(), "t") || !hasHelpBinding(v.HelpBindings(), "esc/q") {
+		t.Errorf("menu bindings = %v, want the extra actions and esc/q", v.HelpBindings())
+	}
+	if v.View() != before {
+		t.Error("the menu should leave the thread on screen untouched")
+	}
+
+	v.HandleContentKey(keyPress("down"))
+	if v.modal == nil {
+		t.Error("scrolling the thread should leave the menu up")
+	}
+
+	v.HandleContentKey(keyPress("q"))
+	if v.modal != nil {
+		t.Error("q should put the help bar back")
+	}
+	if !v.inThread {
+		t.Error("leaving the menu should leave the thread on screen")
+	}
+	if !hasHelpBinding(v.HelpBindings(), "m") {
+		t.Errorf("thread bindings = %v, want m offered again", v.HelpBindings())
+	}
+}
+
+// The menu's items hand off to the same places their list keys go, and a picker that
+// opens replaces the menu rather than being closed along with it.
+func TestThreadMoreMenuOpensThePickers(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	openTestThread(t, v)
+
+	v.HandleContentKey(keyPress("m"))
+	v.HandleContentKey(keyPress("b"))
+	picker, ok := v.modal.(*folderPicker)
+	if !ok {
+		t.Fatalf("b opened %T, want the label picker", v.modal)
+	}
+	if picker.posting.ID != 100 {
+		t.Errorf("label picker holds posting %d, want the open thread's 100", picker.posting.ID)
+	}
+	v.HandleContentKey(keyPress("esc"))
+
+	v.HandleContentKey(keyPress("m"))
+	v.HandleContentKey(keyPress("v"))
+	if _, ok := v.modal.(*movePicker); !ok {
+		t.Fatalf("v opened %T, want the move picker", v.modal)
+	}
+	v.HandleContentKey(keyPress("esc"))
+
+	v.HandleContentKey(keyPress("m"))
+	v.HandleContentKey(keyPress("esc"))
+	if v.modal != nil {
+		t.Errorf("esc left %T open, want the menu closed", v.modal)
+	}
+	if !v.inThread {
+		t.Error("leaving the menu should leave the thread on screen")
+	}
+}
+
+// A live refresh can carry the opened row out of the list underneath the reader:
+// opening the thread marked it seen, and the re-read head page no longer reaches it.
+// The menu works off the posting captured when the thread was opened, so it neither
+// leaves the help bar nor stops answering.
+func TestThreadMoreMenuSurvivesTheRowLeavingTheList(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	openTestThread(t, v)
+
+	v.Update(postingsRefreshedMsg{
+		requestID:  v.liveRequestID,
+		boxID:      1,
+		sourceKind: v.currentSourceKind(),
+		postings:   []mail.Posting{{ID: 300, TopicID: 300, Summary: "Newer thread", Creator: mail.Contact{Name: "Cara"}}},
+	})
+	if v.postingIndex(100) >= 0 {
+		t.Fatal("the refresh should have carried the opened row out of the list")
+	}
+	if !hasHelpBinding(v.HelpBindings(), "m") {
+		t.Error("the menu should still be offered after the row left")
+	}
+
+	v.HandleContentKey(keyPress("m"))
+	if _, ok := v.modal.(*moreMenu); !ok {
+		t.Fatalf("m opened %T, want the More menu", v.modal)
+	}
+	done, ok := runCmd(v.HandleContentKey(keyPress("t"))).(postingActionDoneMsg)
+	if !ok || done.err != nil {
+		t.Fatalf("trash returned %#v", done)
+	}
+	if recorded.path != "/postings/trash.json" || len(recorded.body.PostingIDs) != 1 || recorded.body.PostingIDs[0] != 100 {
+		t.Errorf("request = %s %v, want POST /postings/trash.json [100]", recorded.path, recorded.body.PostingIDs)
+	}
+	answer, _ := v.Update(done)
+	deliverToView(v, answer)
+	if v.inThread {
+		t.Error("the trashed thread should close")
+	}
+}
+
+// A reply asked for after the trash left dies with the thread: the trash's done
+// message cancels the loading context, so a compose form cannot open over the list
+// for a thread that is already in the Trash.
+func TestThreadTrashCancelsThePendingReplyLoad(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	openTestThread(t, v)
+
+	v.HandleContentKey(keyPress("m"))
+	trash := v.HandleContentKey(keyPress("t"))
+	v.HandleContentKey(keyPress("r")) // reply context now loading on the lane
+	if v.requests.kind != mailRequestReply {
+		t.Fatalf("request lane = %v, want a reply load in flight", v.requests.kind)
+	}
+	replyID := v.requests.id
+
+	done := runCmd(trash).(postingActionDoneMsg)
+	answer, _ := v.Update(done)
+	deliverToView(v, answer)
+	if v.inThread {
+		t.Fatal("the trashed thread should close")
+	}
+	if v.requests.loading {
+		t.Error("closing the thread should cancel the reply load")
+	}
+
+	v.Update(replyContextLoadedMsg{requestID: replyID, boxID: 1})
+	if v.modal != nil {
+		t.Errorf("the cancelled reply still opened %T over the list", v.modal)
+	}
+}
+
+// A reader who has already moved on when the trash lands keeps what they were doing:
+// an open form or picker — typed text at stake — survives, and the thread stays for
+// them to leave, as they always could.
+func TestThreadTrashLeavesAnOccupiedReaderAlone(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	openTestThread(t, v)
+
+	v.HandleContentKey(keyPress("m"))
+	trash := v.HandleContentKey(keyPress("t"))
+	v.HandleContentKey(keyPress("m")) // back in the menu while the trash is in flight
+	if _, ok := v.modal.(*moreMenu); !ok {
+		t.Fatalf("m reopened %T, want the More menu", v.modal)
+	}
+
+	done := runCmd(trash).(postingActionDoneMsg)
+	answer, _ := v.Update(done)
+	deliverToView(v, answer)
+	if !v.inThread {
+		t.Error("the thread closed under a reader who had moved on")
+	}
+	if _, ok := v.modal.(*moreMenu); !ok {
+		t.Errorf("the modal became %T, want the menu kept", v.modal)
+	}
+	if v.postingIndex(100) >= 0 {
+		t.Error("the trashed row should still leave the list")
+	}
+}
+
+// Leaving the thread while the trash is still in flight must not leave the trashed
+// row behind on a search or bundle list — those lists never re-read themselves.
+func TestThreadTrashRemovesTheRowAfterTheReaderLeft(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v.searchActive = true
+	v.searchList.setPostings([]mail.Posting{{ID: 100, TopicID: 100, Name: "Hello world", Creator: mail.Contact{Name: "Alice"}}})
+	loaded := runCmd(v.HandleContentKey(keyPress("enter"))).(topicLoadedMsg)
+	v.Update(loaded)
+	if !v.inThread {
+		t.Fatal("the search result did not open")
+	}
+
+	v.HandleContentKey(keyPress("m"))
+	trash := v.HandleContentKey(keyPress("t"))
+	v.ExitThread() // esc before the server answers
+	if v.inThread {
+		t.Fatal("esc should leave the thread")
+	}
+
+	done := runCmd(trash).(postingActionDoneMsg)
+	if done.err != nil {
+		t.Fatalf("trash returned %#v", done)
+	}
+	if recorded.path != "/postings/trash.json" {
+		t.Fatalf("request = %s, want /postings/trash.json", recorded.path)
+	}
+	v.Update(done)
+	if postingIndexIn(v.searchList.postings, 100) >= 0 {
+		t.Error("the trashed row stayed on the search list")
+	}
+}
+
+// A search match says neither which box its thread lives in nor which labels it
+// carries, so from a search-opened thread the menu keeps to forward and trash rather
+// than building label and move pickers over wrong choices.
+func TestThreadMoreMenuKeepsToForwardAndTrashOverSearch(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	v.searchActive = true
+	v.searchList.setPostings([]mail.Posting{{ID: 100, TopicID: 100, Name: "Hello world", Creator: mail.Contact{Name: "Alice"}}})
+	loaded := runCmd(v.HandleContentKey(keyPress("enter"))).(topicLoadedMsg)
+	v.Update(loaded)
+
+	v.HandleContentKey(keyPress("m"))
+	if hasHelpBinding(v.HelpBindings(), "b") || hasHelpBinding(v.HelpBindings(), "v") {
+		t.Errorf("menu bindings = %v, want label and move withheld over search", v.HelpBindings())
+	}
+	v.HandleContentKey(keyPress("v"))
+	if _, ok := v.modal.(*movePicker); ok {
+		t.Error("v opened a move picker built over the browsed box, not the thread's")
+	}
+	v.HandleContentKey(keyPress("b"))
+	if _, ok := v.modal.(*folderPicker); ok {
+		t.Error("b opened a label picker over a posting whose labels are unknown")
+	}
+}
+
+// openTestBundleThread opens the bundle on the list and then the first thread inside
+// it, which is how the menu is reached over a bundle rather than over a box list.
+func openTestBundleThread(t *testing.T, v *mailView, postingID int64) {
+	t.Helper()
+	loaded, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(bundleLoadedMsg)
+	if !ok || loaded.err != nil {
+		t.Fatalf("opening the bundle returned %#v", loaded)
+	}
+	v.Update(loaded)
+	topic, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(topicLoadedMsg)
+	if !ok || topic.err != nil {
+		t.Fatalf("opening the bundle's thread returned %#v", topic)
+	}
+	cmd, _ := v.Update(topic)
+	if seen, ok := runCmd(cmd).(postingSeenMsg); ok {
+		v.Update(seen)
+	}
+	if !v.inThread || v.topicPosting == nil || v.topicPosting.ID != postingID {
+		t.Fatalf("thread state = open:%v posting:%v, want posting %d open", v.inThread, v.topicPosting, postingID)
+	}
+}
+
+// An unseen bundle holds the box's own postings — the box they live in is the box on
+// screen, and each row carries its labels — so the menu offers label and move there
+// just as it does over the list.
+func TestThreadMoreMenuOrganizesFromAnUnseenBundle(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindFolder, Name: "Receipts"})
+	v.postingList.postings[0] = bundleRow()
+	openTestBundleThread(t, v, 511)
+
+	v.HandleContentKey(keyPress("m"))
+	if !hasHelpBinding(v.HelpBindings(), "b") || !hasHelpBinding(v.HelpBindings(), "v") {
+		t.Errorf("menu bindings = %v, want label and move offered inside an unseen bundle", v.HelpBindings())
+	}
+	v.HandleContentKey(keyPress("b"))
+	picker, ok := v.modal.(*folderPicker)
+	if !ok {
+		t.Fatalf("b opened %T, want the label picker", v.modal)
+	}
+	if picker.posting.ID != 511 {
+		t.Errorf("label picker holds posting %d, want the bundle member's 511", picker.posting.ID)
+	}
+
+	v.HandleContentKey(keyPress("esc"))
+	v.HandleContentKey(keyPress("m"))
+	v.HandleContentKey(keyPress("v"))
+	if _, ok := v.modal.(*movePicker); !ok {
+		t.Fatalf("v opened %T, want the move picker", v.modal)
+	}
+}
+
+// A read bundle opens as every thread with its contact, gathered from across the boxes:
+// a row there says neither which box its thread sits in nor which labels it carries, so
+// the menu keeps to forward and trash the way it does over search.
+func TestThreadMoreMenuKeepsToForwardAndTrashOverContactThreads(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindFolder, Name: "Receipts"})
+	row := bundleRow()
+	row.Seen = true
+	v.postingList.postings[0] = row
+	openTestBundleThread(t, v, 513)
+	if v.bundleContactID != 88 {
+		t.Fatalf("bundle contact = %d, want the contact's threads", v.bundleContactID)
+	}
+
+	v.HandleContentKey(keyPress("m"))
+	if hasHelpBinding(v.HelpBindings(), "b") || hasHelpBinding(v.HelpBindings(), "v") {
+		t.Errorf("menu bindings = %v, want label and move withheld over a contact's threads", v.HelpBindings())
+	}
+	v.HandleContentKey(keyPress("v"))
+	if _, ok := v.modal.(*movePicker); ok {
+		t.Error("v opened a move picker built over the browsed box, not the thread's")
+	}
+	v.HandleContentKey(keyPress("b"))
+	if _, ok := v.modal.(*folderPicker); ok {
+		t.Error("b opened a label picker over a posting whose labels are unknown")
+	}
+	if !hasHelpBinding(v.HelpBindings(), "f") || !hasHelpBinding(v.HelpBindings(), "t") {
+		t.Errorf("menu bindings = %v, want forward and trash still offered", v.HelpBindings())
+	}
+}
+
+// A label filed from the menu once a live re-read has carried the row out of the list
+// has only the retained posting to land on — there is no row left to re-read it from.
+// Kept in step, reopening the picker shows the label checked and enter removes it;
+// stale, the picker would offer to file the same label a second time.
+func TestThreadMoreMenuKeepsItsLabelsWhenTheRowIsGone(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindFolder, Name: "Receipts"})
+	openTestThread(t, v)
+
+	v.Update(postingsRefreshedMsg{
+		requestID:  v.liveRequestID,
+		boxID:      1,
+		sourceKind: v.currentSourceKind(),
+		postings:   []mail.Posting{{ID: 300, TopicID: 300, Summary: "Newer thread", Creator: mail.Contact{Name: "Cara"}}},
+	})
+	if v.postingIndex(100) >= 0 {
+		t.Fatal("the refresh should have carried the opened row out of the list")
+	}
+
+	v.HandleContentKey(keyPress("m"))
+	v.HandleContentKey(keyPress("b"))
+	filed, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(folderActionDoneMsg)
+	if !ok || filed.err != nil || !filed.added {
+		t.Fatalf("labelling returned %#v", filed)
+	}
+	if recorded.path != "/postings/filings.json" {
+		t.Fatalf("request = %s, want the label filed", recorded.path)
+	}
+	v.Update(filed)
+	if len(v.topicPosting.Folders) != 1 || v.topicPosting.Folders[0].ID != 12 {
+		t.Fatalf("retained posting folders = %v, want the filed label", v.topicPosting.Folders)
+	}
+
+	v.HandleContentKey(keyPress("m"))
+	v.HandleContentKey(keyPress("b"))
+	if _, ok := v.modal.(*folderPicker); !ok {
+		t.Fatalf("b reopened %T, want the label picker", v.modal)
+	}
+	if view := v.View(); !strings.Contains(view, "[x] Receipts") || !strings.Contains(view, "Remove all labels") {
+		t.Errorf("reopened picker view = %q, want Receipts checked", view)
+	}
+	removed, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(folderActionDoneMsg)
+	if !ok || removed.added {
+		t.Fatalf("enter over the carried label returned %#v, want it removed rather than filed again", removed)
+	}
+	v.Update(removed)
+	if len(v.topicPosting.Folders) != 0 {
+		t.Errorf("retained posting folders = %v, want the label gone", v.topicPosting.Folders)
+	}
+}
+
+// A label created from the menu is known only by its name until the sources reload
+// hands back its ID, and that is enough to keep the retained posting honest: reopening
+// the picker shows the new label checked rather than offering to file it again.
+func TestThreadMoreMenuKeepsALabelItJustCreated(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	openTestThread(t, v)
+
+	v.Update(postingsRefreshedMsg{
+		requestID:  v.liveRequestID,
+		boxID:      1,
+		sourceKind: v.currentSourceKind(),
+		postings:   []mail.Posting{{ID: 300, TopicID: 300, Summary: "Newer thread", Creator: mail.Contact{Name: "Cara"}}},
+	})
+
+	v.HandleContentKey(keyPress("m"))
+	v.HandleContentKey(keyPress("b"))
+	v.HandleContentKey(keyPress("enter")) // + Create a new label…
+	folderModal(v).input.SetValue("Receipts")
+	created, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(folderActionDoneMsg)
+	if !ok || created.err != nil || !created.created {
+		t.Fatalf("creating the label returned %#v", created)
+	}
+	v.Update(created)
+
+	// The reload that follows brings the label back with the ID the server gave it.
+	v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindFolder, Name: "Receipts"})
+	v.HandleContentKey(keyPress("m"))
+	v.HandleContentKey(keyPress("b"))
+	if view := v.View(); !strings.Contains(view, "[x] Receipts") {
+		t.Errorf("reopened picker view = %q, want the created label checked", view)
+	}
+	removed, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(folderActionDoneMsg)
+	if !ok || removed.added {
+		t.Fatalf("enter over the created label returned %#v, want it removed rather than filed again", removed)
+	}
+}
+
+// The menu takes only its own keys; the rest keep their thread meaning, so reading
+// never degrades while the menu is up — r still starts a reply, not a scroll.
+func TestThreadMoreMenuPassesThreadKeysThrough(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	openTestThread(t, v)
+
+	v.HandleContentKey(keyPress("m"))
+	v.HandleContentKey(keyPress("r"))
+	if v.requests.kind != mailRequestReply {
+		t.Errorf("request lane = %v, want r under the menu to start the reply load", v.requests.kind)
+	}
+}
+
+// A label added while the thread is open lives on the list's row, not the snapshot
+// taken at opening — the menu re-reads the row so its label picker cannot offer to
+// add the label again.
+func TestThreadMoreMenuReadsTheFreshRow(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	openTestThread(t, v)
+
+	idx := v.postingIndex(100)
+	v.postingList.postings[idx].Folders = []mail.Folder{{ID: 9, Name: "Receipts"}}
+	v.HandleContentKey(keyPress("m"))
+	if len(v.topicPosting.Folders) != 1 || v.topicPosting.Folders[0].ID != 9 {
+		t.Errorf("menu posting folders = %v, want the row's fresh labels", v.topicPosting.Folders)
+	}
+}
+
+// A live refresh landing while the topic itself is still loading must not cost the
+// thread its menu: the posting was in hand when the thread was asked for.
+func TestThreadMoreMenuSurvivesARefreshDuringTheTopicLoad(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+
+	open := v.HandleContentKey(keyPress("enter"))
+	v.Update(postingsRefreshedMsg{
+		requestID:  v.liveRequestID,
+		boxID:      1,
+		sourceKind: v.currentSourceKind(),
+		postings:   []mail.Posting{{ID: 300, TopicID: 300, Summary: "Newer thread", Creator: mail.Contact{Name: "Cara"}}},
+	})
+	loaded := runCmd(open).(topicLoadedMsg)
+	cmd, _ := v.Update(loaded)
+	if seen, ok := runCmd(cmd).(postingSeenMsg); ok {
+		v.Update(seen)
+	}
+	if !v.inThread || v.topicPosting == nil || v.topicPosting.ID != 100 {
+		t.Fatalf("thread state = open:%v posting:%v, want posting 100 held", v.inThread, v.topicPosting)
+	}
+	if !hasHelpBinding(v.HelpBindings(), "m") {
+		t.Error("the menu should still be offered")
+	}
+}
+
+// A trash the server refuses leaves the reader where they were: in the thread, the
+// row still on the list, the failure reported.
+func TestThreadMoreMenuKeepsTheThreadWhenTrashFails(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusInternalServerError)
+	openTestThread(t, v)
+
+	v.HandleContentKey(keyPress("m"))
+	done, ok := runCmd(v.HandleContentKey(keyPress("t"))).(postingActionDoneMsg)
+	if !ok || done.err == nil {
+		t.Fatalf("a refused trash returned %#v, want its error", done)
+	}
+	cmd, _ := v.Update(done)
+	if _, ok := runCmd(cmd).(errMsg); !ok {
+		t.Error("a refused trash should be reported")
+	}
+	if !v.inThread {
+		t.Error("a refused trash should leave the thread open")
+	}
+	if v.postingIndex(100) < 0 {
+		t.Error("a refused trash should leave the row on the list")
+	}
+}
+
+// A topic opened directly was not opened from any list, so there is no posting for
+// the menu to act on: m does nothing and the help bar does not offer it.
+func TestThreadMoreMenuNeedsAPosting(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	loaded, ok := runCmd(v.requestTopic(0, 100, 0, "")).(topicLoadedMsg)
+	if !ok {
+		t.Fatal("direct topic did not return topicLoadedMsg")
+	}
+	v.Update(loaded)
+	if !v.inThread {
+		t.Fatal("direct topic did not open")
+	}
+
+	v.HandleContentKey(keyPress("m"))
+	if v.modal != nil {
+		t.Errorf("m opened %T over a topic with no posting", v.modal)
+	}
+	if hasHelpBinding(v.HelpBindings(), "m") {
+		t.Error("the help bar offers the menu with nothing for it to act on")
+	}
+}
+
 // --- Posting actions ---
 
 func TestMailViewPostingKeysCallExpectedEndpoints(t *testing.T) {
