@@ -734,6 +734,12 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 				v.postingList.postings[idx].Muted = false
 			}
 		}
+		// The open thread can file back into the box on screen — out and back while
+		// it stays open — and its row was removed when it first filed away, so the
+		// list re-reads its head to hold what the server now does.
+		if msg.destinationKind != "" && msg.destinationKind == v.actionBoxKind() && v.postingIndex(msg.postingID) < 0 {
+			return tea.Batch(done, v.refreshBox(msg.boxID)), true
+		}
 		if v.requests.kind == mailRequestPostings {
 			if source := v.currentSource(); source != nil {
 				return tea.Batch(done, v.requestPostings(*source)), true

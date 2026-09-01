@@ -755,6 +755,22 @@ func TestMailViewFilesOpenThreadWhereItLandedLastTime(t *testing.T) {
 	if recorded.body.BoxID == nil || *recorded.body.BoxID != 3 {
 		t.Errorf("box_id = %v, want 3", recorded.body.BoxID)
 	}
+
+	// Landing back in the box on screen, whose row was removed when the thread
+	// first filed away, re-reads the head so the list holds what the server does.
+	restore, _ := v.Update(done)
+	if restore == nil {
+		t.Fatal("filing back into the box on screen should re-read its head")
+	}
+	v.Update(postingsRefreshedMsg{
+		requestID:  v.liveRequestID,
+		boxID:      v.currentBoxID(),
+		sourceKind: v.currentSourceKind(),
+		postings:   testPostings(),
+	})
+	if v.postingIndex(100) == -1 {
+		t.Error("the re-read head should put the returned thread back on the list")
+	}
 }
 
 func TestMailViewFilesOpenThreadRecordsOnlyTheLatestFiling(t *testing.T) {
