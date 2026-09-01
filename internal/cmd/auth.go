@@ -127,6 +127,8 @@ func buildLogoutCommand(path string) *cobra.Command {
 			if err := authMgr.Logout(); err != nil {
 				return apierr.ErrAuth(fmt.Sprintf("could not clear credentials: %v", err))
 			}
+			// Cached mail must not outlive the credentials that fetched it.
+			clearHTTPCache()
 			return writeMutation(cmd, "Logged out", nil)
 		},
 	}

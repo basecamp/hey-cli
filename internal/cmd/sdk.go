@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -76,8 +77,15 @@ var sdkStats *statsHooks
 // initSDK creates the SDK client, bridging the CLI's auth and config.
 func initSDK(authMgr *auth.Manager, baseURL string) {
 	sdkCfg := &hey.Config{
-		BaseURL:      baseURL,
-		CacheEnabled: false,
+		BaseURL: baseURL,
+	}
+
+	// The SDK cache is a revalidation cache: every read still asks the server,
+	// conditionally, and only a 304 is answered from disk — so it can never serve
+	// stale mail. Logout clears it so cached mail does not outlive its credentials.
+	if dir := httpCacheDir(); dir != "" {
+		sdkCfg.CacheDir = dir
+		sdkCfg.CacheEnabled = true
 	}
 
 	var opts []hey.ClientOption
@@ -95,6 +103,22 @@ func initSDK(authMgr *auth.Manager, baseURL string) {
 	sdkClientOpts = opts
 	rootSDK = hey.NewClient(sdkCfg, nil, opts...)
 	sdk = rootSDK
+}
+
+// httpCacheDir is where the SDK keeps its ETag response cache, or empty when no
+// cache location can be resolved, which leaves caching off.
+func httpCacheDir() string {
+	if dir := config.CacheDir(); dir != "" {
+		return filepath.Join(dir, "http")
+	}
+	return ""
+}
+
+// clearHTTPCache drops the SDK's response cache.
+func clearHTTPCache() {
+	if dir := httpCacheDir(); dir != "" {
+		_ = hey.NewCache(dir).Clear()
+	}
 }
 
 // newSDKClient builds another client sharing the CLI's configuration — auth,
