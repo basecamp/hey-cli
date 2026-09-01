@@ -20,6 +20,7 @@ triggers:
   - hey search
   - hey contact
   - hey thread read
+  - hey thread comment
   - hey share
   - hey unshare
   - hey reply
@@ -193,6 +194,7 @@ notice on stderr. Both need list data, so they work on `hey box list`, `hey box 
 | Set private contact note | `hey contact note set <id> "Prefers email"` |
 | Delete private contact note | `hey contact note delete <id>` |
 | Read email thread | `hey thread read <topic_id> --json` |
+| Add a private note to a thread (not mailed) | `hey thread comment <topic_id> -m "Following up with accounting on this."` |
 | Get a sharing link | `hey share <thread_id>` |
 | Turn off a sharing link | `hey unshare <thread_id>` |
 | Reply to email | `hey reply <topic_id> -m "Friday works for me."` |
@@ -277,6 +279,7 @@ Want to read email?
 ├── Need available refinements? → hey search filters --json
 ├── List or view contacts? → hey contact list --json / hey contact show <id> --json
 ├── Read full thread? → hey thread read <topic_id> --json
+├── Add a private note to a thread (not mailed)? → hey thread comment <topic_id> -m "note"
 ├── Get a sharing link? → hey share <thread_id>
 ├── Turn off the sharing link? → hey unshare <thread_id>
 ├── Mark as seen? → hey seen <id>
@@ -342,7 +345,7 @@ hey box view imbox --page next-cursor --json # Continue from an earlier listing
 
 Box names: `imbox`, `feedbox`, `trailbox`, `asidebox`, `laterbox`, `bubblebox`
 
-**Response format:** `hey box view --json` returns the box itself — `id`, `kind`, `name`, `app_url`, `next_history_url`, `next_page` — with a `postings` array of the email threads in it. Each posting has: `id` (box item ID), `topic_id` (thread ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`, `visible_entry_count`. Use `id` for `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring`, and `topic_id` for `hey thread read`, `hey reply`, `hey forward`, `hey share` and `hey attachment list`. A box item `id` passed to `hey thread read` answers `not_found`. The reverse is not caught yet: `hey seen`, `hey unseen` and `hey move` silently ignore any id that is not one of your box items — a `topic_id`, a typo — and still answer success counting every id given, because HEY's endpoints do not report a non-match. Every id in the same call that *is* one of your box items is changed, so a mixed batch is a partial success reported as a whole one, and a `topic_id` that happens to equal one of your other box item ids marks or moves that unrelated thread. Confirm rather than trust the envelope: `hey box view <box> --json --all --jq '{notice, next_page: .data.next_page, match: [.data.postings[] | select(.id == <id>) | {id, topic_id, seen}]}'` for a mark, or the destination box for a move. `--all` reads every page up to the command's cap of 101; an empty `match` with `next_page` still set means the box is larger than that, so continue with `--page <next_page>` rather than calling it a non-match, and `topic_id` in the match says which thread an id actually named. `hey trash`, `hey spam` and the label commands do answer `not_found`.
+**Response format:** `hey box view --json` returns the box itself — `id`, `kind`, `name`, `app_url`, `next_history_url`, `next_page` — with a `postings` array of the email threads in it. Each posting has: `id` (box item ID), `topic_id` (thread ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`, `visible_entry_count`. Use `id` for `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring`, and `topic_id` for `hey thread read`, `hey thread comment`, `hey reply`, `hey forward`, `hey share` and `hey attachment list`. A box item `id` passed to `hey thread read` answers `not_found`. The reverse is not caught yet: `hey seen`, `hey unseen` and `hey move` silently ignore any id that is not one of your box items — a `topic_id`, a typo — and still answer success counting every id given, because HEY's endpoints do not report a non-match. Every id in the same call that *is* one of your box items is changed, so a mixed batch is a partial success reported as a whole one, and a `topic_id` that happens to equal one of your other box item ids marks or moves that unrelated thread. Confirm rather than trust the envelope: `hey box view <box> --json --all --jq '{notice, next_page: .data.next_page, match: [.data.postings[] | select(.id == <id>) | {id, topic_id, seen}]}'` for a mark, or the destination box for a move. `--all` reads every page up to the command's cap of 101; an empty `match` with `next_page` still set means the box is larger than that, so continue with `--page <next_page>` rather than calling it a non-match, and `topic_id` in the match says which thread an id actually named. `hey trash`, `hey spam` and the label commands do answer `not_found`.
 
 A posting that bundles a contact's mail into one row can **omit `topic_id`**: a bundle names its sender rather than a thread, and its `name` joins the bundled subjects with `•`. A bundle that does carry a `topic_id` opens as that thread — its one unseen thread — and `hey threads` reads it as usual. For a bundle without one, never substitute the box item `id` (`hey threads <id>` answers `not_found`); there is no command that lists the threads inside a bundle, so run `hey contacts unbundle <contact_id>` — the contact is in the posting's `contacts` — to list that sender's mail as separate rows, or direct the user to open the bundle in HEY.
 
@@ -403,7 +406,7 @@ Search refinements are `--required`, `--any`, `--none`, `--exact`, `--from`, `--
 
 `--in`, `--date`, `--label` and `--attachment` accept only the values `hey search filters` lists: boxes are `imbox`, `feed`, `papertrail`, `trash`; dates are `last_7_days`, `last_30_days`, `last_90_days` or a four-digit year; attachment kinds are `any`, `images`, `pdfs`, `calendar_invites`, `documents`, `spreadsheets`, `presentations`, `media`, `zip_files`. The kinds are plural — `--attachment pdfs`, not `pdf`. An unrecognized `--in`, `--date` or `--attachment` is refused as a usage error naming the values it accepts, before anything is sent; `--label` is not checked, so read `hey search filters` when unsure of a label.
 
-**Response format:** `data` contains one item per matching thread. Each result has `id` (box item ID for organization actions), `topic_id` (thread ID for `hey thread read`, `hey reply`, and `hey forward`), `subject`, `updated_at`, and `messages` containing the matching message IDs, senders, dates, and summaries. A result can omit `id` when the thread has no active box item.
+**Response format:** `data` contains one item per matching thread. Each result has `id` (box item ID for organization actions), `topic_id` (thread ID for `hey thread read`, `hey thread comment`, `hey reply`, and `hey forward`), `subject`, `updated_at`, and `messages` containing the matching message IDs, senders, dates, and summaries. A result can omit `id` when the thread has no active box item.
 
 ### Contacts
 
@@ -434,6 +437,7 @@ HEY hides contacts instead of permanently deleting them. A hidden contact leaves
 ```bash
 hey thread read <topic_id> --json                 # Read full email thread
 hey thread read <topic_id> --html                 # Read with raw HTML content
+hey thread comment <topic_id> -m "Following up with accounting on this."  # Private note, not mailed
 hey share <thread_id>                         # Get a sharing link
 hey unshare <thread_id>                       # Turn off the sharing link
 ```
@@ -444,9 +448,11 @@ tables and code survive and links keep their URLs — read it as structure rathe
 flattened text. `--html` returns the original HTML instead. There is no `recipients` field
 on an entry; use `hey reply`, which works the addressing out itself.
 
+`hey thread comment` adds a **private internal note** to the thread — visible only to you and anyone else on the account, never mailed to anyone. It is not `hey reply`: nothing is sent, and there is no recipient. Unlike other `-m` flags in this CLI, the text is posted exactly as typed rather than converted from Markdown.
+
 `hey share` returns a URL that shows the entire thread and future emails or replies sent to it. Anyone with the link can open it. `hey unshare` turns off the sharing link.
 
-**ID note:** Every email thread has two IDs: an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring` expect `id`. `hey thread read`, `hey share`, `hey unshare`, `hey attachment list`, `hey reply`, `hey forward`, `hey collection add`, and `hey collection remove` expect `topic_id`. Passing the wrong one answers `not_found`, not a redirect — except `hey seen`, `hey unseen` and `hey move`, which ignore an unmatched id, act on every id that does match, and answer success either way (confirm with `hey box view <box> --json --all`, as in the note above).
+**ID note:** Every email thread has two IDs: an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring` expect `id`. `hey thread read`, `hey thread comment`, `hey share`, `hey unshare`, `hey attachment list`, `hey reply`, `hey forward`, `hey collection add`, and `hey collection remove` expect `topic_id`. Passing the wrong one answers `not_found`, not a redirect — except `hey seen`, `hey unseen` and `hey move`, which ignore an unmatched id, act on every id that does match, and answer success either way (confirm with `hey box view <box> --json --all`, as in the note above).
 
 `hey box view --json`, `hey label view --json`, `hey collection view --json` and `hey search --json` all carry both — except a bundle posting, which can omit `topic_id` (see the Boxes section).
 
