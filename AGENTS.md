@@ -153,13 +153,14 @@ because both were mis-stated here before:
   out: its "Re: …" subject and its recipients, with the entry's sender moved onto the To
   line (haystack's `directly_address_sender`) *and* the acting user's own addresses,
   aliases, catch-alls and redelivery contacts removed — the exclusion this CLI cannot
-  compute locally. Both reply paths — `replyPrefillFromServer` in
-  `internal/cmd/thread_reply.go` for `hey reply`, and `loadReplyContext` in
-  `internal/tui/compose.go` for the TUI's reply form — ask the prefill first and fall
-  back to the local computation (`recipientsForReplyTo` plus the derived subject) on a
-  failed read or an empty recipient answer, which a thread with yourself produces; the
-  prefill's subject survives that recipient fallback. Extend the prefill flow rather
-  than reimplementing HEY's exclusion rules here.
+  compute locally. Both reply paths — `hey reply` in `internal/cmd/thread_reply.go`,
+  and the TUI's reply form via `loadReplyContext` in `internal/tui/compose.go` — ask
+  the shared `mail.ReplyPrefillFromServer` (`internal/mail/reply_prefill.go`) first and
+  fall back to their local computation (`recipientsForReplyTo` plus the derived subject)
+  on a failed read or an empty recipient answer, which a thread with yourself produces;
+  the prefill's subject survives that recipient fallback. Extend
+  `mail.ReplyPrefillFromServer` rather than reimplementing HEY's exclusion rules in
+  each caller.
 
 `internal/htmlutil` provides `ToMarkdown` (HTML→Markdown), `ToText` (HTML→plain text),
 `ExtractImageURLs` and `ExtractAttachments`, which are presentation helpers rather than
