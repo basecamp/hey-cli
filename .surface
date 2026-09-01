@@ -330,6 +330,8 @@ hey snippet update --name
 hey spam
 hey stop-ignoring
 hey thread
+hey thread comment
+hey thread comment --message
 hey thread read
 hey thread read --allow-partial
 hey timetrack
