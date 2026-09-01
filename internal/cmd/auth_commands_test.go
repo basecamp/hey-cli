@@ -119,6 +119,15 @@ func TestAuthTokenLoginAndStoredTokenOutput(t *testing.T) {
 	}
 }
 
+func TestAuthLoginRejectsConflictingMethods(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+	_, _, err := runAuthCommand(t, t.TempDir(), server.URL, "", true, "auth", "login", "--device", "--no-browser")
+	if err == nil || !strings.Contains(err.Error(), "choose only one") {
+		t.Fatalf("error = %v, want conflicting method error", err)
+	}
+}
+
 // A session cookie is sent as a Cookie header, so printing it as a bearer token gave
 // the caller something that 401s with nothing to explain it -- and put the cookie in
 // their shell history.
