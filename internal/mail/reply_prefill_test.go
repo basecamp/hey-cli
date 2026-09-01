@@ -31,7 +31,8 @@ func TestReplyPrefillFromServer(t *testing.T) {
 		"sender": {"id": 215, "name": "Support", "email_address": "support@example.com"},
 		"addressed": {
 			"directly": [{"id": 31, "name": "Rick", "email_address": "rick@example.com"}, {"id": 32}],
-			"copied": [{"id": 33, "email_address": "cc@example.com"}]
+			"copied": [{"id": 33, "email_address": "cc@example.com"}],
+			"blindcopied": [{"id": 34, "email_address": "bcc@example.com"}]
 		}
 	}`)
 
@@ -48,7 +49,11 @@ func TestReplyPrefillFromServer(t *testing.T) {
 	// The addressless contact is dropped; the rest ride verbatim. The quoted content
 	// is not carried at all: HEY appends it at delivery, and echoing it back would
 	// double the quote.
-	want := ReplyRecipients{To: []string{"rick@example.com"}, CC: []string{"cc@example.com"}}
+	want := ReplyRecipients{
+		To:  []string{"rick@example.com"},
+		CC:  []string{"cc@example.com"},
+		BCC: []string{"bcc@example.com"},
+	}
 	if !reflect.DeepEqual(prefill.Addressed, want) {
 		t.Errorf("addressed = %+v, want %+v", prefill.Addressed, want)
 	}
