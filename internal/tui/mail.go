@@ -200,6 +200,7 @@ type postingActionDoneMsg struct {
 	postingID       int64
 	effect          postingActionEffect
 	destinationKind string // the box kind a move filed into, empty for every other action
+	filingSeq       uint64 // which open-thread filing dispatched the move, zero for a list row's
 	seen            bool   // the action was taken on the Previously Seen screen
 	err             error
 }
@@ -257,6 +258,7 @@ type mailView struct {
 	topicID          int64
 	threadPosting    mail.Posting // snapshot of the posting the open thread was opened from, zero when it has none
 	threadBoxKind    string       // the box kind the open thread files out of, following it as filings move it
+	threadFilingSeq  uint64       // dispatch order of open-thread filings, so only the latest records where the thread landed
 	topicName        string
 	entries          []mail.Entry
 	attachments      []messageAttachment
@@ -700,8 +702,10 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 	case postingActionDoneMsg:
 		v.finishMutation()
 		// A move of the open thread leaves it on screen in its new box, so later
-		// filing keys measure against where it landed, not where it was opened.
-		if msg.err == nil && v.inThread && msg.postingID == v.threadPosting.ID && msg.destinationKind != "" {
+		// filing keys measure against where it landed, not where it was opened —
+		// and only the latest dispatched filing gets to say where that is.
+		if msg.err == nil && v.inThread && msg.postingID == v.threadPosting.ID &&
+			msg.destinationKind != "" && msg.filingSeq == v.threadFilingSeq {
 			v.threadBoxKind = msg.destinationKind
 		}
 		if msg.seen {
@@ -2301,11 +2305,28 @@ func (v *mailView) imboxSource() *mail.Source {
 // Seen — has a posting row to act on: over search results, bundles, and topics
 // opened directly the key answers with a notice instead of silence.
 func (v *mailView) fileOpenThread(key string) tea.Cmd {
-	if posting := v.fileablePosting(); posting != nil {
-		return v.postingAction(key, *posting, v.threadBoxKind)
+	posting := v.fileablePosting()
+	if posting == nil {
+		v.notice = "Can't file this thread from here"
+		return nil
 	}
-	v.notice = "Can't file this thread from here"
-	return nil
+	move := v.postingAction(key, *posting, v.threadBoxKind)
+	if move == nil {
+		return nil
+	}
+	// Filing keys pressed faster than their requests answer can complete out of
+	// order, so each dispatch takes a sequence number and only the latest one
+	// records where the thread landed.
+	v.threadFilingSeq++
+	seq := v.threadFilingSeq
+	return func() tea.Msg {
+		msg := move()
+		if done, ok := msg.(postingActionDoneMsg); ok {
+			done.filingSeq = seq
+			return done
+		}
+		return msg
+	}
 }
 
 // fileablePosting is the posting the open thread files on: the snapshot taken when

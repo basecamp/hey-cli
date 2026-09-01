@@ -757,6 +757,37 @@ func TestMailViewFilesOpenThreadWhereItLandedLastTime(t *testing.T) {
 	}
 }
 
+func TestMailViewFilesOpenThreadRecordsOnlyTheLatestFiling(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+	if !v.inThread {
+		t.Fatal("enter should open the selected thread")
+	}
+
+	// Two filing keys faster than their requests answer, with the responses
+	// crossing: the first-dispatched move answers last. Only the latest
+	// dispatch records where the thread landed.
+	aside := v.HandleContentKey(keyPress("a"))
+	later := v.HandleContentKey(keyPress("l"))
+	laterDone, ok := runCmd(later).(postingActionDoneMsg)
+	if !ok || laterDone.err != nil {
+		t.Fatalf("filing command returned %#v", laterDone)
+	}
+	asideDone, ok := runCmd(aside).(postingActionDoneMsg)
+	if !ok || asideDone.err != nil {
+		t.Fatalf("filing command returned %#v", asideDone)
+	}
+	v.Update(laterDone)
+	v.Update(asideDone)
+
+	if cmd := v.HandleContentKey(keyPress("l")); cmd != nil {
+		t.Errorf("the thread landed in Reply Later, so l should answer in place: %#v", runCmd(cmd))
+	}
+	if v.notice != "Already in Reply Later" {
+		t.Errorf("notice = %q, want %q", v.notice, "Already in Reply Later")
+	}
+}
+
 func TestMailViewFilesOpenThreadOnlyFromFilingLists(t *testing.T) {
 	t.Run("search result", func(t *testing.T) {
 		v := mailWithPostings()
