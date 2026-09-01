@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -114,10 +115,17 @@ func httpCacheDir() string {
 	return ""
 }
 
-// clearHTTPCache drops the SDK's response cache.
-func clearHTTPCache() {
-	if dir := httpCacheDir(); dir != "" {
-		_ = hey.NewCache(dir).Clear()
+// clearHTTPCache drops the SDK's response cache. It runs after a credential
+// change has already happened, so a failure is reported rather than failing
+// the command that carried it: the warning names the directory left to
+// remove by hand.
+func clearHTTPCache(errOut io.Writer) {
+	dir := httpCacheDir()
+	if dir == "" {
+		return
+	}
+	if err := hey.NewCache(dir).Clear(); err != nil {
+		fmt.Fprintf(errOut, "warning: could not clear cached responses in %s: %v\n", dir, err)
 	}
 }
 

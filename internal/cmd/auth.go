@@ -71,6 +71,8 @@ Use --token or --cookie for non-interactive login.`,
 				if err := authMgr.LoginWithToken(token); err != nil {
 					return apierr.ErrAuth(fmt.Sprintf("could not save token: %v", err))
 				}
+				// Replaced credentials orphan whatever the old ones cached.
+				clearHTTPCache(cmd.ErrOrStderr())
 				return writeMutation(cmd, "Logged in with token", map[string]string{"method": "token"})
 			}
 
@@ -78,6 +80,8 @@ Use --token or --cookie for non-interactive login.`,
 				if err := authMgr.LoginWithCookie(cookie); err != nil {
 					return apierr.ErrAuth(fmt.Sprintf("could not save cookie: %v", err))
 				}
+				// Replaced credentials orphan whatever the old ones cached.
+				clearHTTPCache(cmd.ErrOrStderr())
 				return writeMutation(cmd, "Logged in with session cookie", map[string]string{"method": "cookie"})
 			}
 
@@ -87,6 +91,8 @@ Use --token or --cookie for non-interactive login.`,
 			if err := authMgr.Login(ctx, auth.LoginOptions{NoBrowser: noBrowser}); err != nil {
 				return apierr.ErrAuth(fmt.Sprintf("login failed: %v", err))
 			}
+			// Replaced credentials orphan whatever the old ones cached.
+			clearHTTPCache(cmd.ErrOrStderr())
 
 			if writer.IsStyled() {
 				w := cmd.OutOrStdout()
@@ -128,7 +134,7 @@ func buildLogoutCommand(path string) *cobra.Command {
 				return apierr.ErrAuth(fmt.Sprintf("could not clear credentials: %v", err))
 			}
 			// Cached mail must not outlive the credentials that fetched it.
-			clearHTTPCache()
+			clearHTTPCache(cmd.ErrOrStderr())
 			return writeMutation(cmd, "Logged out", nil)
 		},
 	}

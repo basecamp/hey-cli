@@ -296,6 +296,8 @@ var loginInteractively = func(out io.Writer) error {
 	if err := authMgr.Login(ctx, auth.LoginOptions{Logger: logger}); err != nil {
 		return apierr.ErrAuth(fmt.Sprintf("login failed: %v", err))
 	}
+	// Replaced credentials orphan whatever the old ones cached.
+	clearHTTPCache(out)
 	return selectConfiguredAccount(context.Background())
 }
 
