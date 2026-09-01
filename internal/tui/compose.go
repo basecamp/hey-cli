@@ -14,6 +14,7 @@ import (
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/htmlutil"
+	"github.com/basecamp/hey-cli/internal/mail"
 )
 
 // --- Messages ---
@@ -422,37 +423,25 @@ func (v *mailView) loadReplyContext(topicID int64, topicName string) tea.Cmd {
 		}
 		entryID := topic.Entries[len(topic.Entries)-1].Id
 
-		// HEY's reply prefill (GET /entries/{id}/replies/new) is the authority on how
-		// a reply starts out: the "Re: …" subject it goes out under, the sender it
-		// goes out as — on a shared or alternate address, not the account default —
-		// and recipients with the acting user's own addresses, aliases and catch-alls
-		// excluded — an exclusion this client cannot compute locally. A failed read
-		// falls back to the local computation, and so does an empty answer: on a
-		// thread with yourself, everyone HEY excludes is everyone there is. The
-		// prefill's subject and sender survive that recipient fallback — only the
-		// recipients needed it.
-		var prefillSubject string
-		var prefillSenderID int64
-		if prefilled, prefillErr := accountSDK.Entries().NewReply(ctx, entryID); prefillErr == nil && prefilled != nil {
-			prefillSubject = prefilled.Subject
-			prefillSenderID = prefilled.Sender.Id
-			to := addressesOf(prefilled.Addressed.Directly, "")
-			cc := addressesOf(prefilled.Addressed.Copied, "")
-			bcc := addressesOf(prefilled.Addressed.Blindcopied, "")
-			if len(to)+len(cc)+len(bcc) > 0 {
-				return replyContextLoadedMsg{
-					requestID:      requestID,
-					boxID:          boxID,
-					topicID:        topicID,
-					topicName:      topicName,
-					entryID:        entryID,
-					sdk:            accountSDK,
-					actingSenderID: prefillSenderID,
-					subject:        prefillSubject,
-					to:             to,
-					cc:             cc,
-					bcc:            bcc,
-				}
+		// HEY's reply prefill is the authority on how a reply starts out — see
+		// mail.ReplyPrefillFromServer. A failed read falls back to the local
+		// computation, and so does an empty answer: on a thread with yourself,
+		// everyone HEY excludes is everyone there is. The prefill's subject and
+		// sender survive that recipient fallback — only the recipients needed it.
+		prefill, ok := mail.ReplyPrefillFromServer(ctx, accountSDK, entryID)
+		if ok {
+			return replyContextLoadedMsg{
+				requestID:      requestID,
+				boxID:          boxID,
+				topicID:        topicID,
+				topicName:      topicName,
+				entryID:        entryID,
+				sdk:            accountSDK,
+				actingSenderID: prefill.ActingSenderID,
+				subject:        prefill.Subject,
+				to:             prefill.Addressed.To,
+				cc:             prefill.Addressed.CC,
+				bcc:            prefill.Addressed.BCC,
 			}
 		}
 
@@ -468,7 +457,7 @@ func (v *mailView) loadReplyContext(topicID int64, topicName string) tea.Cmd {
 			}
 		}
 		to, cc, bcc := recipientsForReplyTo(*message)
-		subject := prefillSubject
+		subject := prefill.Subject
 		if subject == "" {
 			subject = replySubjectFor(*message)
 		}
@@ -479,7 +468,7 @@ func (v *mailView) loadReplyContext(topicID int64, topicName string) tea.Cmd {
 			topicName:      topicName,
 			entryID:        entryID,
 			sdk:            accountSDK,
-			actingSenderID: prefillSenderID,
+			actingSenderID: prefill.ActingSenderID,
 			subject:        subject,
 			to:             to,
 			cc:             cc,

@@ -10,14 +10,11 @@ import (
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/mail"
 )
 
 // replyRecipients is who a reply goes out to, in HEY's three kinds of addressing.
-type replyRecipients struct {
-	To  []string
-	CC  []string
-	BCC []string
-}
+type replyRecipients = mail.ReplyRecipients
 
 // threadReplyTarget carries the entry a reply answers, its subject, sender and
 // recipients, and an immutable client bound to the thread's mail account. HEY saves an
@@ -58,7 +55,7 @@ func resolveThreadReply(ctx context.Context, threadID int64) (*threadReplyTarget
 		AccountID: topic.AccountId,
 		client:    threadSDK,
 	}
-	prefill, ok := replyPrefillFromServer(ctx, threadSDK, entryID)
+	prefill, ok := mail.ReplyPrefillFromServer(ctx, threadSDK, entryID)
 	target.ActingSenderID = prefill.ActingSenderID
 	target.Subject = prefill.Subject
 	if ok {
@@ -86,47 +83,6 @@ func resolveThreadReply(ctx context.Context, threadID int64) (*threadReplyTarget
 	}
 	target.Addressed = addressed
 	return target, nil
-}
-
-// replyPrefill is how a reply starts out, as HEY prefills it: the "Re: …" subject it
-// goes out under, the sender it goes out as, and who it goes out to.
-type replyPrefill struct {
-	Subject        string
-	ActingSenderID int64
-	Addressed      replyRecipients
-}
-
-// replyPrefillFromServer asks HEY how a reply to the entry starts out
-// (GET /entries/{id}/replies/new): the "Re: …" subject the reply carries; the sender
-// it goes out as — resolved from the entry's own to and from addresses, so a thread on
-// a shared or alternate address answers as that address, not the account default, and
-// named only when it differs from the acting user; and its recipients — the entry's
-// sender moved onto the To line and the acting user's own addresses, aliases and
-// catch-alls excluded — the exclusion this CLI cannot compute locally, and the reason
-// a reply used to be able to CC its writer back to themselves. A failed read falls
-// back to the local computation, and so does an empty answer: on a thread with
-// yourself, everyone HEY excludes is everyone there is, and the local list is what
-// keeps that reply addressable. The subject and sender are answered even when the
-// recipients are not — only they need the fallback, not what HEY already supplied.
-func replyPrefillFromServer(ctx context.Context, client *hey.Client, entryID int64) (replyPrefill, bool) {
-	prefilled, err := client.Entries().NewReply(ctx, entryID)
-	if err != nil || prefilled == nil {
-		return replyPrefill{}, false
-	}
-	prefill := replyPrefill{
-		Subject:        prefilled.Subject,
-		ActingSenderID: prefilled.Sender.Id,
-		Addressed: replyRecipients{
-			To:  addressEmails(prefilled.Addressed.Directly),
-			CC:  addressEmails(prefilled.Addressed.Copied),
-			BCC: addressEmails(prefilled.Addressed.Blindcopied),
-		},
-	}
-	if len(prefill.Addressed.To)+len(prefill.Addressed.CC)+len(prefill.Addressed.BCC) == 0 {
-		prefill.Addressed = replyRecipients{}
-		return prefill, false
-	}
-	return prefill, true
 }
 
 // replySubject answers the subject a reply to the given subject carries, the way HEY
