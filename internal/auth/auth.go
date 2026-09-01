@@ -31,6 +31,7 @@ type Manager struct {
 	httpClient   *http.Client
 	callbackWait callbackWaiter
 	listen       listenerFactory
+	wait         func(context.Context, time.Duration) error
 	mu           sync.Mutex
 }
 
@@ -42,6 +43,18 @@ func NewManager(baseURL string, httpClient *http.Client, configDir string) *Mana
 		store:      NewStore(configDir),
 		httpClient: httpClient,
 		listen:     listenConfig.Listen,
+		wait:       waitForDuration,
+	}
+}
+
+func waitForDuration(ctx context.Context, duration time.Duration) error {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
 }
 
@@ -150,6 +163,19 @@ type LoginOptions struct {
 	Logger func(msg string)
 }
 
+// DeviceLoginOptions configures OAuth device authorization login.
+type DeviceLoginOptions struct {
+	Logger func(msg string)
+}
+
+func (o DeviceLoginOptions) log(msg string) {
+	if o.Logger != nil {
+		o.Logger(msg)
+		return
+	}
+	fmt.Fprint(os.Stderr, msg)
+}
+
 // log routes a progress message to the configured Logger, or to os.Stderr
 // verbatim when none is set so `hey auth login` output stays as it was.
 func (o LoginOptions) log(msg string) {
@@ -226,6 +252,67 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
 	}
 
 	return m.store.Save(m.baseURL, creds)
+}
+
+// LoginDevice authenticates using the OAuth 2.0 Device Authorization Grant (RFC 8628).
+func (m *Manager) LoginDevice(ctx context.Context, opts DeviceLoginOptions) error {
+	deviceEndpoint := m.baseURL + "/oauth/device_authorizations"
+	tokenEndpoint := m.baseURL + "/oauth/tokens"
+	installID, err := m.store.InstallID()
+	if err != nil {
+		return fmt.Errorf("install id: %w", err)
+	}
+
+	authorization, err := requestDeviceAuthorization(ctx, m.httpClient, deviceEndpoint, oauthClientID, installID)
+	if err != nil {
+		return err
+	}
+	opts.log(fmt.Sprintf("Open %s and enter code: %s\n", authorization.VerificationURI, authorization.UserCode))
+	if authorization.VerificationURIComplete != "" {
+		opts.log(fmt.Sprintf("Direct link: %s\n", authorization.VerificationURIComplete))
+	}
+	opts.log("Waiting for authorization...\n")
+
+	interval := time.Duration(authorization.Interval) * time.Second
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+	expiresAt := time.Now().Add(time.Duration(authorization.ExpiresIn) * time.Second)
+	firstPoll := true
+
+	for {
+		if time.Now().After(expiresAt) {
+			return errors.New("device authorization expired")
+		}
+		if !firstPoll {
+			if err := m.wait(ctx, interval); err != nil {
+				return err
+			}
+		}
+		firstPoll = false
+
+		token, oauthErr, err := exchangeDeviceCode(ctx, m.httpClient, tokenEndpoint, authorization.DeviceCode, oauthClientID, installID)
+		if err != nil {
+			return err
+		}
+		switch oauthErr {
+		case "":
+			creds := &Credentials{AccessToken: token.AccessToken, RefreshToken: token.RefreshToken, OAuthType: "oauth", TokenEndpoint: tokenEndpoint}
+			if !token.ExpiresAt.IsZero() {
+				creds.ExpiresAt = token.ExpiresAt.Unix()
+			}
+			return m.store.Save(m.baseURL, creds)
+		case "authorization_pending":
+		case "slow_down":
+			interval += 5 * time.Second
+		case "access_denied":
+			return errors.New("device authorization was denied")
+		case "expired_token":
+			return errors.New("device authorization expired")
+		default:
+			return fmt.Errorf("device authorization failed: %s", oauthErr)
+		}
+	}
 }
 
 // LoginWithToken stores a pre-provided bearer token.

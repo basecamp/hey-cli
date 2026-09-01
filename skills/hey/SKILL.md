@@ -150,6 +150,7 @@ notice on stderr. Both need list data, so they work on `hey box list`, `hey box 
 | Task | Command |
 |------|---------|
 | List linked mail accounts | `hey account list --json` |
+| Sign in on a headless machine | `hey auth login --device` |
 | Set default mail account | `hey account use <id\|all>` |
 | Run once for one account | `hey --account <id> box list --json` |
 | Review trusted local settings | `hey config trusted-locals --json` |

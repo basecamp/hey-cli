@@ -91,6 +91,51 @@ func TestRefreshOAuthTokenRequest(t *testing.T) {
 	}
 }
 
+func TestDeviceAuthorizationAndTokenRequests(t *testing.T) {
+	var polls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		switch r.URL.Path {
+		case "/device":
+			if r.Form.Get("client_id") != "client" || r.Form.Get("install_id") != "install" {
+				t.Errorf("device form = %v", r.Form)
+			}
+			_, _ = io.WriteString(w, `{"device_code":"device-secret","user_code":"ABCD-EFGH","verification_uri":"https://example.test/device","verification_uri_complete":"https://example.test/device?code=ABCD-EFGH","expires_in":600,"interval":5}`)
+		case "/token":
+			polls++
+			if r.Form.Get("grant_type") != "urn:ietf:params:oauth:grant-type:device_code" || r.Form.Get("device_code") != "device-secret" {
+				t.Errorf("token form = %v", r.Form)
+			}
+			if polls == 1 {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = io.WriteString(w, `{"error":"authorization_pending"}`)
+				return
+			}
+			_, _ = io.WriteString(w, `{"access_token":"access","refresh_token":"refresh","expires_in":3600}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	authorization, err := requestDeviceAuthorization(t.Context(), server.Client(), server.URL+"/device", "client", "install")
+	if err != nil {
+		t.Fatalf("requestDeviceAuthorization: %v", err)
+	}
+	if authorization.UserCode != "ABCD-EFGH" || authorization.Interval != 5 {
+		t.Errorf("authorization = %#v", authorization)
+	}
+	if _, pending, err := exchangeDeviceCode(t.Context(), server.Client(), server.URL+"/token", authorization.DeviceCode, "client", "install"); err != nil || pending != "authorization_pending" {
+		t.Fatalf("pending exchange = %q, %v", pending, err)
+	}
+	token, pending, err := exchangeDeviceCode(t.Context(), server.Client(), server.URL+"/token", authorization.DeviceCode, "client", "install")
+	if err != nil || pending != "" || token.AccessToken != "access" {
+		t.Fatalf("token exchange = %#v, %q, %v", token, pending, err)
+	}
+}
+
 func TestOAuthTokenResponseFailures(t *testing.T) {
 	tests := []struct {
 		name     string

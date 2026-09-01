@@ -25,6 +25,7 @@ hey attachment save --output
 hey auth
 hey auth login
 hey auth login --cookie
+hey auth login --device
 hey auth login --no-browser
 hey auth login --token
 hey auth logout
@@ -255,6 +256,7 @@ hey label view --limit
 hey label view --page
 hey login
 hey login --cookie
+hey login --device
 hey login --no-browser
 hey login --token
 hey logout

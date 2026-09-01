@@ -30,6 +30,7 @@ func TestHEYTokenPrecedence(t *testing.T) {
 
 	t.Setenv("HEY_TOKEN", "env-token-123")
 	mgr := testManager(t, server)
+	mgr.wait = func(context.Context, time.Duration) error { return nil }
 
 	token, err := mgr.AccessToken(context.Background())
 	if err != nil {
@@ -226,6 +227,44 @@ func TestLoginDoesNotSaveCredentialsOnFailure(t *testing.T) {
 				t.Fatal("credentials were saved after failed login")
 			}
 		})
+	}
+}
+
+func TestLoginDevice(t *testing.T) {
+	var polls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth/device_authorizations":
+			_, _ = io.WriteString(w, `{"device_code":"secret","user_code":"ABCD-EFGH","verification_uri":"https://example.test/device","expires_in":60,"interval":0}`)
+		case "/oauth/tokens":
+			polls++
+			if polls == 1 {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = io.WriteString(w, `{"error":"authorization_pending"}`)
+				return
+			}
+			_, _ = io.WriteString(w, `{"access_token":"device-access","refresh_token":"device-refresh","expires_in":3600}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	mgr := testManager(t, server)
+	mgr.wait = func(context.Context, time.Duration) error { return nil }
+	var messages strings.Builder
+	if err := mgr.LoginDevice(t.Context(), DeviceLoginOptions{Logger: func(msg string) { messages.WriteString(msg) }}); err != nil {
+		t.Fatalf("LoginDevice: %v", err)
+	}
+	if !strings.Contains(messages.String(), "ABCD-EFGH") || strings.Contains(messages.String(), "secret") {
+		t.Errorf("login messages = %q", messages.String())
+	}
+	creds, err := mgr.GetStore().Load(mgr.CredentialKey())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if creds.AccessToken != "device-access" || creds.RefreshToken != "device-refresh" {
+		t.Errorf("credentials = %#v", creds)
 	}
 }
 
