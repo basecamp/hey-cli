@@ -25,12 +25,14 @@ func newMoveCommand() *moveCommand {
 	moveCommand.cmd = &cobra.Command{
 		Use:   "move <box-item-id>...",
 		Short: "Move email threads to another box",
-		Long:  "Move one or more email threads to Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Moving a Reply Later thread to Imbox removes Reply Later while preserving its seen state.",
+		Long: "Move one or more email threads to Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. " +
+			"Moving a Reply Later thread to Imbox removes Reply Later while preserving its seen state. " +
+			"A bundle row is not a thread and is refused: moving one takes a sender's whole stream out of the box they are delivered to, so their next email arrives unbundled.",
 		Example: `  hey move 12345 --to feed
   hey move 12345 67890 --to imbox
   hey move 12345 --to 987`,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts box item IDs from hey box view output. --to accepts a box name, kind, or ID. To remove Reply Later, move the threads to Imbox; seen threads then appear in Previously Seen. Use hey bubble up for Bubble Up.",
+			"agent_notes": "Accepts box item IDs from hey box view output. --to accepts a box name, kind, or ID. To remove Reply Later, move the threads to Imbox; seen threads then appear in Previously Seen. Use hey bubble up for Bubble Up. A hey box view row with kind \"bundle\" is refused: moving one unbundles that sender's mail in the box they are delivered to. Change grouping with hey contact bundle|unbundle <contact-id>.",
 		},
 		RunE: moveCommand.run,
 		Args: usageMinOneArg(),
@@ -57,6 +59,14 @@ func (c *moveCommand) run(cmd *cobra.Command, args []string) error {
 	destination, err := resolveMoveDestination(cmd.Context(), c.to)
 	if err != nil {
 		return err
+	}
+
+	bundles, err := bundlePostings(cmd.Context(), ids)
+	if err != nil {
+		return err
+	}
+	if len(bundles) > 0 {
+		return errBundleMove(bundles)
 	}
 
 	if err := sdk.Postings().Move(cmd.Context(), destination.Id, ids...); err != nil {
