@@ -64,15 +64,19 @@ func (m *markdownizer) String() string {
 	return strings.TrimSpace(result)
 }
 
-// collapseRepeatedLinkBlocks drops a block that is one whole-line link identical to the
-// block before it. An email attachment tile is two anchors at the same destination — a
-// preview image and a filename — and once linkedImage names the first from that
-// destination, both render as the same line; a link repeated back to back says one
-// thing, so it is said once. Only a bare whole-line link collapses: a repeated line of
-// prose, a list item or a quoted line is content, and stays.
+// collapseRepeatedLinkBlocks collapses adjacent whole-line links that say one thing.
+// An email attachment tile is two anchors at the same destination — a preview image
+// and a filename — and once linkedImage names the first from that destination, both
+// render as the same line, said once. A filename the destination cannot name (no dot,
+// or too long) leaves the preview on the generic label instead, so a link labeled
+// genericImageLabel also collapses into an adjacent link at the same destination,
+// whichever side carries the name: the destinations' equality is the proof it adds
+// nothing. Only bare whole-line links collapse: a repeated line of prose, a list item
+// or a quoted line is content, and stays.
 func collapseRepeatedLinkBlocks(lines []string) []string {
 	collapsed := make([]string, 0, len(lines))
-	previous := ""
+	prevAt := -1 // where the previous single-link block sits in collapsed
+	prevLabel, prevDest := "", ""
 	for i := 0; i < len(lines); {
 		if lines[i] == "" {
 			collapsed = append(collapsed, lines[i])
@@ -83,15 +87,26 @@ func collapseRepeatedLinkBlocks(lines []string) []string {
 		for end < len(lines) && lines[end] != "" {
 			end++
 		}
-		single := end == i+1 && wholeLineLink(lines[i])
-		if single && lines[i] == previous {
+		label, dest, single := "", "", false
+		if end == i+1 {
+			label, dest, single = parseWholeLineLink(lines[i])
+		}
+		switch {
+		case single && prevAt >= 0 && dest == prevDest && (label == prevLabel || label == genericImageLabel):
+			// The same line again, or a generic twin of the link already kept.
+			i = end
+			continue
+		case single && prevAt >= 0 && dest == prevDest && prevLabel == genericImageLabel:
+			// The named side arrived second; it replaces the generic line.
+			collapsed[prevAt] = lines[i]
+			prevLabel = label
 			i = end
 			continue
 		}
 		if single {
-			previous = lines[i]
+			prevAt, prevLabel, prevDest = len(collapsed), label, dest
 		} else {
-			previous = ""
+			prevAt = -1
 		}
 		collapsed = append(collapsed, lines[i:end]...)
 		i = end
@@ -99,14 +114,17 @@ func collapseRepeatedLinkBlocks(lines []string) []string {
 	return collapsed
 }
 
-// wholeLineLink reports a line that is one link and nothing else. The serializer
+// parseWholeLineLink parses a line that is one link and nothing else. The serializer
 // escapes "[" and "]" in prose and percent-encodes ")" in a destination, so the first
 // "](" is the link's boundary and a ")" anywhere before the line's last byte means
 // prose follows the link.
-func wholeLineLink(line string) bool {
-	label, dest, found := strings.Cut(line, "](")
-	return found && strings.HasPrefix(label, "[") &&
-		strings.HasSuffix(dest, ")") && !strings.Contains(dest[:len(dest)-1], ")")
+func parseWholeLineLink(line string) (label, dest string, ok bool) {
+	head, tail, found := strings.Cut(line, "](")
+	if !found || !strings.HasPrefix(head, "[") ||
+		!strings.HasSuffix(tail, ")") || strings.Contains(tail[:len(tail)-1], ")") {
+		return "", "", false
+	}
+	return head[1:], tail[:len(tail)-1], true
 }
 
 func (m *markdownizer) walk(n *html.Node) {
@@ -464,7 +482,17 @@ func (m *markdownizer) link(n *html.Node) {
 	dest, linkable := destination(href)
 	if linkable && strings.TrimSpace(elementText(n)) == "" {
 		if image, sole := soleLinkedImage(n); sole {
+			// The anchor may own the whitespace between it and its neighbours, so
+			// it is kept the way inline keeps it — around a decorative anchor too,
+			// or dropping the anchor would join the words either side of it.
+			leading, trailing := surroundingSpace(n)
+			if leading {
+				m.writeSpace()
+			}
 			m.linkedImage(image, dest)
+			if trailing {
+				m.writeSpace()
+			}
 			return
 		}
 	}
@@ -515,6 +543,11 @@ func soleLinkedImage(n *html.Node) (image *html.Node, sole bool) {
 	}
 }
 
+// genericImageLabel names a linked image nothing else names. collapseRepeatedLinkBlocks
+// treats a link wearing it as saying nothing an adjacent link at the same destination
+// does not.
+const genericImageLabel = "image"
+
 // linkedImage writes an anchor whose whole content is one image. The image is the face
 // of the link, a terminal cannot draw a face, and writing the image as Markdown inside
 // the link hands the reader two URLs for one thing — the preview's and the
@@ -534,7 +567,7 @@ func (m *markdownizer) linkedImage(image *html.Node, dest string) {
 		}
 	}
 	if label == "" {
-		label = "image"
+		label = genericImageLabel
 	}
 	m.write("[" + label + "](" + dest + ")")
 }

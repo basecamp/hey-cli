@@ -99,6 +99,9 @@ func walkNode(b *strings.Builder, n *html.Node, depth int) {
 			}
 			return
 		case "action-text-attachment":
+			if isImageContentType(getAttr(n, "content-type")) && isDecorativeImage(getAttr(n, "width"), getAttr(n, "height")) {
+				return
+			}
 			filename := getAttr(n, "filename")
 			if filename != "" {
 				fmt.Fprintf(b, "\n[%s]\n", filename)
