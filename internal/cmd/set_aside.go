@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -175,7 +176,9 @@ func (c *setAsideGroupListCommand) run(cmd *cobra.Command, _ []string) error {
 }
 
 // readSetAsideGroups reads the group index and then each group's first page for its
-// total. The index carries ids alone, so the count costs one request per group.
+// total. The index carries ids alone, so the count costs one request per group. HEY
+// removes a group itself when its last thread leaves, so a group the index named can be
+// gone by the time it is read; that one is left out rather than failing the listing.
 func readSetAsideGroups(ctx context.Context, boxID int64) ([]setAsideGroupOutput, error) {
 	result, err := sdk.Boxes().ListGroups(ctx, boxID)
 	if err != nil {
@@ -189,6 +192,10 @@ func readSetAsideGroups(ctx context.Context, boxID int64) ([]setAsideGroupOutput
 	for _, group := range result.BoxGroups {
 		page, err := sdk.Boxes().GetGroupPage(ctx, boxID, group.Id, nil)
 		if err != nil {
+			var missing *apierr.Error
+			if errors.As(apierr.FromSDK(err), &missing) && missing.Code == apierr.CodeNotFound {
+				continue
+			}
 			return nil, apierr.FromSDK(err)
 		}
 		groups = append(groups, setAsideGroupOutput{ID: group.Id, ThreadCount: groupPageTotal(page)})

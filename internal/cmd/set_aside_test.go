@@ -161,6 +161,42 @@ func TestSetAsideGroupList(t *testing.T) {
 	}
 }
 
+// HEY removes a group when its last thread leaves, so a group the index named can be gone
+// by the time it is read. The listing leaves it out rather than failing.
+func TestSetAsideGroupListSkipsAGroupThatVanished(t *testing.T) {
+	recorded := &recordedSetAside{}
+	inner := setAsideServer(recorded)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /boxes/3/groups.json":
+			recorded.requests = append(recorded.requests, "GET /boxes/3/groups.json")
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"box_groups":[{"id":42},{"id":44}]}`)
+		case "GET /boxes/3/groups/44.json":
+			recorded.requests = append(recorded.requests, "GET /boxes/3/groups/44.json")
+			http.NotFound(w, r)
+		default:
+			inner.ServeHTTP(w, r)
+		}
+	})
+
+	response, err := runJSONCommand(t, handler, "set-aside", "group", "list")
+	if err != nil {
+		t.Fatalf("execute group list: %v", err)
+	}
+	want := []string{"GET /boxes.json", "GET /boxes/3/groups.json", "GET /boxes/3/groups/42.json", "GET /boxes/3/groups/44.json"}
+	if strings.Join(recorded.requests, ",") != strings.Join(want, ",") {
+		t.Errorf("requests = %v, want %v", recorded.requests, want)
+	}
+	groups := response.Data.([]any)
+	if len(groups) != 1 || groups[0].(map[string]any)["id"] != float64(42) {
+		t.Errorf("groups = %#v, want only group 42", groups)
+	}
+	if response.Summary != "1 group in Set Aside" {
+		t.Errorf("summary = %q", response.Summary)
+	}
+}
+
 func TestSetAsideGroupView(t *testing.T) {
 	recorded := &recordedSetAside{}
 	response, err := runJSONCommand(t, setAsideServer(recorded), "set-aside", "group", "view", "42", "--all")

@@ -377,7 +377,7 @@ hey collection update 321 --name "Kitchen renovation"
 hey collection add 987 --to 321      # add a topic ID to a collection
 hey collection remove 987 --from 321 # remove a topic ID from a collection
 hey set-aside view                   # list Set Aside threads with their group
-hey set-aside group list             # list Set Aside groups and their threads
+hey set-aside group list             # list Set Aside groups and their thread counts
 hey set-aside group view 42          # list the threads in a group
 hey set-aside group create 12345 67890  # gather threads into a new group
 hey set-aside group add 12345 --to 42   # file a thread into a group
