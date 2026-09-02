@@ -1,10 +1,14 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
@@ -136,4 +140,67 @@ func bundleNotFound(identifier string, err error) error {
 			"The ID must be a bundle row's own id — a hey box view row with kind \"bundle\".")
 	}
 	return err
+}
+
+// bundleProbeConcurrency bounds the pre-flight bundle checks a command fans out.
+const bundleProbeConcurrency = 8
+
+// bundlePostings reports which of ids name a bundle row rather than a thread. A box
+// listing mixes the two, so an id taken from `hey box view` can be either; the
+// bundles/unseen route decides it, on the 404 bundleNotFound reads above. It answers for
+// a bundle read through as well, carrying its contact and no postings, so a bundle is
+// recognised whether or not it still holds unseen mail.
+//
+// The probes run concurrently because a bulk action passes many ids at once. Anything
+// but a 404 is a real error and stops the command rather than passing for "not a
+// bundle".
+func bundlePostings(ctx context.Context, ids []int64) ([]int64, error) {
+	isBundle := make([]bool, len(ids))
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.SetLimit(bundleProbeConcurrency)
+	for i, id := range ids {
+		group.Go(func() error {
+			page, err := sdk.Postings().BundleUnseenPage(groupCtx, id, "")
+			if err != nil {
+				converted := apierr.FromSDK(err)
+				var apiErr *apierr.Error
+				if errors.As(converted, &apiErr) && apiErr.Code == apierr.CodeNotFound {
+					return nil
+				}
+				return converted
+			}
+			isBundle[i] = page != nil
+			return nil
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return nil, err
+	}
+
+	bundles := make([]int64, 0, len(ids))
+	for i, id := range ids {
+		if isBundle[i] {
+			bundles = append(bundles, id)
+		}
+	}
+	return bundles, nil
+}
+
+// errBundleMove refuses a move that would relocate a bundle row. A bundle is the
+// container for one sender's mail in the box that sender is delivered to; moving it takes
+// the container away, so their next email arrives as a thread of its own, and threads
+// delivered while the bundle is gone never join it once it returns. HEY's own web app
+// offers a bundle only Mark Seen, Note and Ignore, so refusing keeps the CLI to what the
+// product allows.
+func errBundleMove(ids []int64) error {
+	labels := make([]string, len(ids))
+	for i, id := range ids {
+		labels[i] = strconv.FormatInt(id, 10)
+	}
+	message := fmt.Sprintf("%s is a bundle row, not a thread", labels[0])
+	if len(ids) > 1 {
+		message = fmt.Sprintf("%s are bundle rows, not threads", strings.Join(labels, ", "))
+	}
+	return apierr.ErrUsageHint(message,
+		"change a sender's grouping with hey contact bundle|unbundle <contact-id>")
 }
