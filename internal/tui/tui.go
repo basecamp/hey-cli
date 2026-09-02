@@ -42,10 +42,11 @@ func (r OpenRequest) valid() bool {
 	return r.AccountID >= 0 && ((r.Screener && r.TopicID == 0) || (!r.Screener && r.TopicID > 0))
 }
 
-// Options configures the TUI's initial destination.
+// Options configures the TUI's initial destination and presentation.
 type Options struct {
 	Open     OpenRequest
 	Instance string
+	Layout   Layout
 }
 
 // --- Model ---
@@ -57,6 +58,7 @@ type model struct {
 	rootSDK        *hey.Client
 	cancel         context.CancelFunc
 	theme          Theme
+	layout         Layout
 	styles         styles
 	help           helpBar
 	saveHelpHidden func(bool) error
@@ -134,10 +136,14 @@ type model struct {
 }
 
 func newModel() model {
-	return newModelWithMailAccounts(nil, nil, "all", Watchers{})
+	return newModelWithMailAccounts(nil, nil, "all")
 }
 
-func newModelWithMailAccounts(rootSDK, sdk *hey.Client, selected string, watchers Watchers) model {
+func newModelWithMailAccounts(rootSDK, sdk *hey.Client, selected string) model {
+	return newModelWithOptions(rootSDK, sdk, selected, Watchers{}, Options{})
+}
+
+func newModelWithOptions(rootSDK, sdk *hey.Client, selected string, watchers Watchers, options Options) model {
 	theme := ResolveTheme()
 	applyTheme(theme)
 	s := newStyles()
@@ -159,6 +165,7 @@ func newModelWithMailAccounts(rootSDK, sdk *hey.Client, selected string, watcher
 		rootSDK:             rootSDK,
 		cancel:              cancel,
 		theme:               theme,
+		layout:              options.Layout.normalized(),
 		styles:              s,
 		help:                newHelpBar(s),
 		section:             sectionMail,
@@ -312,11 +319,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.vc.width = msg.Width
 		m.help.setWidth(msg.Width)
-		contentH := m.contentHeight()
-		m.vc.height = contentH
-		m.activeView.Resize(msg.Width, contentH)
+		m.resizeActiveView()
 		m.updateHelpBindings()
 		return m, nil
 
@@ -597,7 +601,8 @@ func (m model) applyMailAccount(account mailAccountChoice, client *hey.Client) (
 	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118: cancel stored, called on switch or quit
 	m.cancel = cancel
 	m.vc = newViewContext(ctx, m.rootSDK, client, m.styles)
-	m.vc.width = m.width
+	m.vc.layout = m.layout.metrics(m.width, m.height)
+	m.vc.width = m.contentWidth()
 	m.vc.height = m.contentHeight()
 	m.mailView = newMailView(m.vc)
 	m.contactsView = newContactsView(m.vc)
@@ -638,10 +643,10 @@ func (m model) contentView() string {
 	case m.err != nil:
 		// The section keeps its last good state underneath, so dismissing the error
 		// with esc puts the reader back where they were.
-		box := errorView(terminal.SanitizeLine(m.err.Error()), m.width)
-		return overlayModal(m.activeView.View(), box, m.width, m.contentHeight())
+		box := errorView(terminal.SanitizeLine(m.err.Error()), m.contentWidth())
+		return overlayModal(m.activeView.View(), box, m.contentWidth(), m.contentHeight())
 	case m.loading:
-		return loadingView(m.width, m.contentHeight(), m.spinnerPhase)
+		return loadingView(m.contentWidth(), m.contentHeight(), m.spinnerPhase)
 	default:
 		return m.activeView.View()
 	}
@@ -649,9 +654,13 @@ func (m model) contentView() string {
 
 func (m model) View() tea.View {
 	var b strings.Builder
+	metrics := m.layout.metrics(m.width, m.height)
 
 	b.WriteString(renderHeader(&m))
 	b.WriteString("\n")
+	for range metrics.headerGap() {
+		b.WriteString("\n")
+	}
 	if notice := m.mailWatchNotice(); notice != "" {
 		b.WriteString(m.styles.title.Render(truncateStr(notice, max(m.width, 1))))
 		b.WriteString("\n")
@@ -664,23 +673,27 @@ func (m model) View() tea.View {
 	// The toast goes on last, over the modals too: it is the answer to what the reader
 	// just did, and a form open over the list does not make it less so.
 	if toast := m.toastView(); toast != "" {
-		x := max(m.width-lipgloss.Width(toast)-1, 0)
-		content = overlayAt(content, toast, x, 0, m.width, m.contentHeight())
+		x := max(m.contentWidth()-lipgloss.Width(toast)-1, 0)
+		content = overlayAt(content, toast, x, 0, m.contentWidth(), m.contentHeight())
 	}
+	content = metrics.render(content, m.width, m.contentHeight()+metrics.verticalChrome())
 	b.WriteString(content)
 
 	helpView := m.help.view()
 	if helpView != "" {
 		contentLines := strings.Count(b.String(), "\n")
 		helpH := strings.Count(helpView, "\n") + 1
-		footerH := 1 + helpH
+		footerH := metrics.footerChrome() + helpH
 		padLines := m.height - contentLines - footerH - 1
 		for range max(padLines, 0) {
 			b.WriteString("\n")
 		}
 
-		b.WriteString(renderRule(m.width, ""))
-		b.WriteString("\n" + helpView)
+		if metrics.drawFooterRule() {
+			b.WriteString(renderRule(m.width, ""))
+			b.WriteString("\n")
+		}
+		b.WriteString(helpView)
 	}
 
 	v := tea.NewView(b.String())
@@ -760,26 +773,42 @@ func (m *model) updateHelpBindings() {
 			bindings = append(bindings, helpBinding{"ctrl+a", description})
 		}
 	}
+	if m.canToggleLayout() {
+		bindings = append(bindings, helpBinding{"ctrl+g", "toggle layout"})
+	}
 	m.help.setBindings(bindings)
-	contentHeight := m.contentHeight()
-	if contentHeight != m.vc.height {
-		m.vc.height = contentHeight
-		m.activeView.Resize(m.vc.width, contentHeight)
+	contentWidth, contentHeight := m.contentWidth(), m.contentHeight()
+	metrics := m.layout.metrics(m.width, m.height)
+	if contentWidth != m.vc.width || contentHeight != m.vc.height || metrics != m.vc.layout {
+		m.resizeActiveView()
 	}
 }
 
-// contentHeight gives the active view every row that is not navigation or a
-// visible help footer. The footer carries two clear rows above its divider.
+func (m *model) resizeActiveView() {
+	m.vc.layout = m.layout.metrics(m.width, m.height)
+	m.vc.width = m.contentWidth()
+	m.vc.height = m.contentHeight()
+	m.activeView.Resize(m.vc.width, m.vc.height)
+}
+
+func (m model) contentWidth() int {
+	return max(m.width-m.layout.metrics(m.width, m.height).horizontalChrome(), 1)
+}
+
+// contentHeight gives the active view every row that is not navigation, layout
+// spacing, or a visible help footer.
 func (m model) contentHeight() int {
+	metrics := m.layout.metrics(m.width, m.height)
 	footerHeight := 0
 	if helpHeight := m.help.height(); helpHeight > 0 {
-		footerHeight = helpHeight + 3
+		footerHeight = helpHeight + metrics.footerChrome()
 	}
 	statusHeight := 0
 	if m.mailWatchNotice() != "" {
 		statusHeight = 1
 	}
-	return max(m.height-headerHeight-footerHeight-statusHeight, 1)
+	chromeHeight := metrics.verticalChrome() + metrics.headerGap()
+	return max(m.height-headerHeight-footerHeight-statusHeight-chromeHeight, 1)
 }
 
 // --- Key handling ---
@@ -831,6 +860,10 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		cmd = m.syncLoading(cmd)
 		m.updateHelpBindings()
 		return m, cmd
+	}
+
+	if key == "ctrl+g" && m.canToggleLayout() {
+		return m.toggleLayout()
 	}
 
 	if key == "ctrl+s" && m.canOpenScreener() {
@@ -925,6 +958,25 @@ func (m model) canToggleHelp() bool {
 	}
 	capturer, ok := m.activeView.(inputCapturer)
 	return !ok || !capturer.CapturingInput()
+}
+
+func (m model) canToggleLayout() bool {
+	if m.mailAccountPicker || m.err != nil {
+		return false
+	}
+	capturer, ok := m.activeView.(inputCapturer)
+	return !ok || !capturer.CapturingInput()
+}
+
+func (m model) toggleLayout() (tea.Model, tea.Cmd) {
+	m.layout = m.layout.toggled()
+	m.resizeActiveView()
+	m.updateHelpBindings()
+	label := "Classic"
+	if m.layout == LayoutSpacious {
+		label = "Spacious"
+	}
+	return m, notify(label + " layout")
 }
 
 func (m model) toggleHelp() (tea.Model, tea.Cmd) {
@@ -1272,7 +1324,7 @@ func (m model) handleSubnavKey(msg tea.KeyPressMsg) tea.Cmd {
 // interactive account switching, the live watchers, and an optional initial destination.
 func Run(rootSDK, sdk *hey.Client, selected string, watchers Watchers, options Options) error {
 	calibrateWidths(os.Stdin, os.Stdout)
-	m := newModelWithMailAccounts(rootSDK, sdk, selected, watchers)
+	m := newModelWithOptions(rootSDK, sdk, selected, watchers, options)
 	if options.Open.valid() {
 		request := options.Open
 		m.pendingOpen = &request

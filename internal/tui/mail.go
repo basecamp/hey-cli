@@ -1554,9 +1554,13 @@ func (v *mailView) Resize(width, height int) {
 		v.modal.resize(width, height)
 	}
 	v.postingList.setSize(width, height)
+	v.postingList.setItemGap(v.vc.layout.itemGap)
 	v.searchList.setSize(width, height)
+	v.searchList.setItemGap(v.vc.layout.itemGap)
 	v.bundleList.setSize(width, height)
+	v.bundleList.setItemGap(v.vc.layout.itemGap)
 	v.seenList.setSize(width, height)
+	v.seenList.setItemGap(v.vc.layout.itemGap)
 	v.topicViewport.SetWidth(width)
 	v.contentHeight = height
 	v.fitThreadViewport()

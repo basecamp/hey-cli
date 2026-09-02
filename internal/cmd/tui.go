@@ -32,11 +32,19 @@ func newTuiRunner(use string, hidden bool) *cobra.Command {
 	var instance string
 	var remote bool
 	command := &cobra.Command{
-		Use:    use,
+		Use:    use + " [classic|spacious]",
 		Short:  "Launch the interactive terminal UI",
 		Hidden: hidden,
-		Args:   cobra.NoArgs,
+		Args:   cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			layout := tui.LayoutClassic
+			if len(args) == 1 {
+				var err error
+				layout, err = tui.ParseLayout(args[0])
+				if err != nil {
+					return apierr.ErrUsage(err.Error())
+				}
+			}
 			topicSet := cmd.Flags().Changed("topic")
 			topicTitleSet := cmd.Flags().Changed("topic-title")
 			if topicSet && topicID <= 0 {
@@ -50,6 +58,9 @@ func newTuiRunner(use string, hidden bool) *cobra.Command {
 			}
 			if remote && !topicSet && !screener {
 				return apierr.ErrUsage("--remote requires --topic or --screener")
+			}
+			if remote && len(args) == 1 {
+				return apierr.ErrUsage("a layout cannot be selected when opening an existing TUI with --remote")
 			}
 			request := tui.OpenRequest{TopicID: topicID, Title: topicTitle, Screener: screener}
 			if accountID, err := strconv.ParseInt(cfg.AccountID, 10, 64); err == nil && accountID > 0 {
@@ -67,7 +78,7 @@ func newTuiRunner(use string, hidden bool) *cobra.Command {
 			if err := requireAuth(); err != nil {
 				return err
 			}
-			return runTUI(rootSDK, sdk, cfg.AccountID, tuiWatchers(), tui.Options{Open: request, Instance: instance})
+			return runTUI(rootSDK, sdk, cfg.AccountID, tuiWatchers(), tui.Options{Open: request, Instance: instance, Layout: layout})
 		},
 	}
 	command.Flags().Int64Var(&topicID, "topic", 0, "Open a thread by topic ID")

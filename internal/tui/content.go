@@ -97,6 +97,7 @@ type contentList struct {
 	scrollOff     int
 	width         int
 	height        int // visible rows (each posting takes 2 lines)
+	itemGap       int // blank rows after a posting in the spacious layout
 	hideSeenState bool
 	selected      map[int64]struct{}
 
@@ -396,6 +397,22 @@ func (c *contentList) setSize(w, h int) {
 	c.height = h
 }
 
+func (c *contentList) setItemGap(gap int) {
+	c.itemGap = max(gap, 0)
+	c.ensureVisible()
+}
+
+func (c *contentList) effectiveItemGap() int {
+	if c.height < 3 {
+		return 0
+	}
+	return c.itemGap
+}
+
+func (c *contentList) effectiveSectionGap() int {
+	return c.effectiveItemGap()
+}
+
 func (c *contentList) moveUp() {
 	if c.cursor > 0 {
 		c.cursor--
@@ -427,9 +444,9 @@ func (c *contentList) visibleItemsFrom(start int) int {
 	count := 0
 	height := c.listHeight()
 	for i := start; i < c.itemCount(); i++ {
-		postingRows := 2
+		postingRows := 2 + c.effectiveItemGap()
 		if c.sectionLabelAt(i) != "" {
-			postingRows++
+			postingRows += 1 + c.effectiveSectionGap()
 		}
 		if rows+postingRows > height {
 			break
@@ -573,7 +590,10 @@ func (c *contentList) view() string {
 			} else {
 				fmt.Fprintln(&b, sectionHeader(label, c.width))
 			}
-			rendered++
+			for range c.effectiveSectionGap() {
+				b.WriteString("\n")
+			}
+			rendered += 1 + c.effectiveSectionGap()
 		}
 
 		// The cursor text takes the accent foreground that applyTheme checked
@@ -681,7 +701,10 @@ func (c *contentList) view() string {
 
 		fmt.Fprintln(&b, line1.String())
 		fmt.Fprintln(&b, line2.String())
-		rendered += 2
+		for range c.effectiveItemGap() {
+			b.WriteString("\n")
+		}
+		rendered += 2 + c.effectiveItemGap()
 	}
 
 	if from := c.coveredFrom(); from >= 0 {
@@ -698,11 +721,12 @@ func (c *contentList) coverView(hidden, rowsUsed int) string {
 	hint := fmt.Sprintf("%d hidden · x to peek", hidden)
 	header := hintedSectionHeader(sectionPreviouslySeen.label(), hint, c.width)
 
-	rows := c.height - rowsUsed - 1
+	sectionGap := c.effectiveSectionGap()
+	rows := c.height - rowsUsed - 1 - sectionGap
 	if rows < coverMinRows {
 		return header
 	}
-	return header + "\n" + c.coverArt.view(c.cover, c.width, rows)
+	return header + strings.Repeat("\n", 1+sectionGap) + c.coverArt.view(c.cover, c.width, rows)
 }
 
 // sectionHeader renders a list section label with a rule filling the rest

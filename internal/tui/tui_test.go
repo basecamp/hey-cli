@@ -73,6 +73,8 @@ func keyPress(key string) tea.KeyPressMsg {
 	switch key {
 	case "ctrl+c":
 		k = tea.Key{Code: 'c', Mod: tea.ModCtrl}
+	case "ctrl+g":
+		k = tea.Key{Code: 'g', Mod: tea.ModCtrl}
 	case "esc":
 		k = tea.Key{Code: tea.KeyEscape}
 	case "enter":
