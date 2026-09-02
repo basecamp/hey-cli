@@ -276,6 +276,26 @@ func TestExtractImageURLsActionTextImage(t *testing.T) {
 	}
 }
 
+// Decorative images — avatars, icons, tracking pixels declaring icon-sized
+// dimensions — are not extracted: a digest email carries hundreds of them ahead of
+// its screenshots, and each request would come out of the viewer's image budget.
+func TestExtractImageURLsSkipsDecorativeImages(t *testing.T) {
+	h := `<img src="https://mailer.example.com/open?id=8fd3" width="1" height="1">
+<action-text-attachment url="https://gopher.hey.com/signed/avatar.png" content-type="image" width="40" height="40" caption="Michelle Harjani"></action-text-attachment>
+<action-text-attachment url="https://gopher.hey.com/signed/screenshot.png" content-type="image"></action-text-attachment>`
+	urls := ExtractImageURLs(h)
+	if len(urls) != 1 || urls[0] != "https://gopher.hey.com/signed/screenshot.png" {
+		t.Errorf("ExtractImageURLs = %v, want only the screenshot", urls)
+	}
+}
+
+func TestToTextSkipsDecorativeImages(t *testing.T) {
+	got := ToText(`<p>Michelle commented<img src="https://gopher.hey.com/signed/avatar.png" width="40" height="40"></p>`)
+	if strings.Contains(got, "[image]") {
+		t.Errorf("ToText should skip a decorative image, got %q", got)
+	}
+}
+
 func TestExtractImageURLsTrixFigure(t *testing.T) {
 	h := `<figure data-trix-attachment='{"url":"/rails/blobs/abc/image.png","filename":"image.png","contentType":"image/png"}'></figure>
 <figure data-trix-attachment='{"url":"/rails/blobs/abc/report.pdf","filename":"report.pdf","contentType":"application/pdf"}'></figure>`
