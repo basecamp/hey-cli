@@ -48,10 +48,8 @@ func refreshSkillsIfVersionChanged() bool {
 	}
 	sentinelPath := filepath.Join(configDir, ".last-run-version")
 
-	// The sentinel records the active Codex home alongside the version:
-	// skill locations depend on CODEX_HOME, so switching homes mid-release
-	// triggers one rescan instead of leaving the other home's marked skill
-	// stale until the next release.
+	// Legacy cleanup still depends on the active Codex home, so switching
+	// CODEX_HOME gets one migration pass per release.
 	sentinelState := version.Version + "\n" + harness.CodexHome() + "\n"
 	data, err := os.ReadFile(sentinelPath) // #nosec G304 -- fixed path under the user config dir
 	if err == nil && string(data) == sentinelState {
@@ -91,11 +89,10 @@ func skillRefreshLocations() []string {
 			filepath.Join(home, ".claude", "skills", "hey", skillFilename),
 		)
 	}
-	if codexPath := harness.CodexSkillPath(); codexPath != "" {
-		locations = append(locations, codexPath)
-	}
 	return locations
 }
+
+var refreshSkillFile = writeSkillFile
 
 func refreshInstalledSkills() (updated, failed int) {
 	embedded, err := skills.FS.ReadFile("hey/SKILL.md")
@@ -124,10 +121,21 @@ func refreshInstalledSkills() (updated, failed int) {
 		if !ownedSkillDir(filepath.Dir(location)) {
 			continue
 		}
-		if writeErr := os.WriteFile(location, embedded, 0o644); writeErr == nil { // #nosec G306 -- installed skills are intentionally user-readable
+		if writeErr := refreshSkillFile(location, embedded); writeErr == nil {
 			updated++
 		} else {
 			failed++
+		}
+	}
+
+	// Current Codex reads the shared ~/.agents skill. A copy from an older
+	// release would produce a duplicate entry, so migrate it away when its
+	// ownership marker proves hey-cli created it.
+	if failed == 0 {
+		if removed, err := migrateLegacyCodexSkill(); err != nil {
+			failed++
+		} else if removed {
+			updated++
 		}
 	}
 

@@ -47,7 +47,7 @@ func runRemoveAgentSetup(cmd *cobra.Command) error {
 		}
 	}
 
-	if codexSkill := harness.CodexSkillPath(); codexSkill != "" {
+	if codexSkill := harness.LegacyCodexSkillPath(); codexSkill != "" {
 		if didRemove, removeErr := removeOwnedSkillFiles(filepath.Dir(codexSkill)); removeErr != nil {
 			failures = append(failures, "Codex skill: "+removeErr.Error())
 		} else if didRemove {

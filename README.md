@@ -745,7 +745,7 @@ manage the integrations on their own:
 
 ```bash
 hey setup claude    # install the skill and the hey@37signals plugin for Claude Code
-hey setup codex     # install the skill for Codex
+hey setup codex     # install the shared skill for Codex
 hey skill install   # install the skill only (~/.agents/skills/hey, linked for detected agents)
 hey setup agents             # non-interactive: skill + a single detected agent (the installer uses this)
 hey setup agents --remove    # remove HEY's managed skills and Claude Code plugin
@@ -757,6 +757,12 @@ the skill only and lists the `hey setup <agent>` choices. `HEY_SETUP_AGENT=claud
 picks explicitly. `HEY_NONINTERACTIVE=1` disables interactive sign-in for harnesses that
 run hey under a pseudo-terminal. The installed skill is refreshed automatically the first
 time a new hey release runs.
+
+Codex discovers the shared `~/.agents/skills/hey` skill directly. hey-cli does
+not also copy it to `~/.codex/skills/hey`, which would make Codex list the same
+skill twice. Setup and version refresh remove that legacy path only when its
+ownership marker proves an older hey-cli created it; user-authored files are
+left untouched.
 
 hey only ever writes skill directories it owns: each one it creates carries a
 `.managed-by-hey-cli` marker, and install, replacement and automatic refresh all refuse a

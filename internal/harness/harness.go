@@ -11,6 +11,16 @@ import (
 // skill: present, but not a working hey integration.
 const SkillOwnershipMarker = ".managed-by-hey-cli"
 
+// AgentSkillPath returns the shared location used by agents that implement
+// the Agent Skills convention.
+func AgentSkillPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Clean(home), ".agents", "skills", "hey", "SKILL.md")
+}
+
 // SkillDirOwned reports whether hey-cli wrote the skill directory at dir.
 // The marker itself must be a regular file — the same shape rule as every
 // other skill file, so a planted symlink or directory in the marker's name
@@ -31,6 +41,23 @@ func SkillDirOwned(dir string) bool {
 func RegularSkillFile(path string) bool {
 	info, err := os.Lstat(path)
 	return err == nil && info.Mode().IsRegular()
+}
+
+// SameFile reports whether two paths resolve to the same existing file. The
+// clean-path fallback also handles the useful missing-file case without
+// following or inventing any filesystem state.
+func SameFile(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	absA, errA := filepath.Abs(a)
+	absB, errB := filepath.Abs(b)
+	if errA == nil && errB == nil && filepath.Clean(absA) == filepath.Clean(absB) {
+		return true
+	}
+	infoA, errA := os.Stat(a)
+	infoB, errB := os.Stat(b)
+	return errA == nil && errB == nil && os.SameFile(infoA, infoB)
 }
 
 // StatusCheck represents a single agent integration health check result.
