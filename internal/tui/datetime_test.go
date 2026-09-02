@@ -68,15 +68,15 @@ func TestDateTimePickerStepsTheDateByADay(t *testing.T) {
 		t.Errorf("after up, date() = %q, want 2026-08-23", got)
 	}
 
-	picker.handleKey(tea.KeyPressMsg{Code: tea.KeyDown})
-	picker.handleKey(tea.KeyPressMsg{Code: tea.KeyDown})
-	if got := picker.date(); got != "2026-08-21" {
-		t.Errorf("after two downs, date() = %q, want 2026-08-21", got)
+	// "-" no longer steps date (hey-cli#368)
+	typeInto(t, picker, "-")
+	if got := picker.date(); got != "2026-08-23" {
+		t.Errorf("after -, date() = %q, want unchanged", got)
 	}
 
 	typeInto(t, picker, "+")
-	if got := picker.date(); got != "2026-08-22" {
-		t.Errorf("after +, date() = %q, want 2026-08-22", got)
+	if got := picker.date(); got != "2026-08-24" {
+		t.Errorf("after +, date() = %q, want 2026-08-24", got)
 	}
 
 	picker.dateInput.SetValue("next tuesday")
