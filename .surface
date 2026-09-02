@@ -309,6 +309,22 @@ hey search --subject
 hey search --to
 hey search filters
 hey seen
+hey set-aside
+hey set-aside group
+hey set-aside group add
+hey set-aside group add --to
+hey set-aside group create
+hey set-aside group delete
+hey set-aside group list
+hey set-aside group remove
+hey set-aside group view
+hey set-aside group view --all
+hey set-aside group view --limit
+hey set-aside group view --page
+hey set-aside view
+hey set-aside view --all
+hey set-aside view --limit
+hey set-aside view --page
 hey setup
 hey setup --silent-success
 hey setup --skip-agents

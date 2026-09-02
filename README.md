@@ -376,6 +376,13 @@ hey collection create "Kitchen remodel" --summary "Plans and decisions"
 hey collection update 321 --name "Kitchen renovation"
 hey collection add 987 --to 321      # add a topic ID to a collection
 hey collection remove 987 --from 321 # remove a topic ID from a collection
+hey set-aside view                   # list Set Aside threads with their group
+hey set-aside group list             # list Set Aside groups and their threads
+hey set-aside group view 42          # list the threads in a group
+hey set-aside group create 12345 67890  # gather threads into a new group
+hey set-aside group add 12345 --to 42   # file a thread into a group
+hey set-aside group remove 12345     # take a thread out of its group
+hey set-aside group delete 42        # break a group up (threads go to Previously Seen)
 hey workflow list                    # list workflows, account IDs, and workflow IDs
 hey workflow view 654                # list a workflow's stages and stage IDs
 hey workflow create "Hiring" --account 12345
@@ -479,6 +486,8 @@ The Screener is where first-time senders wait. `hey screener list` returns clear
 Organization actions take the `id` values returned by `hey box view --json`, `hey label view --json`, or `hey search --json`. Reading, replying to, and forwarding a thread take its `topic_id` instead, which `hey box view --json`, `hey label view --json`, `hey collection view --json` and `hey search --json` all carry alongside `id`. `hey box view` also returns `next_page` and accepts `--page <next_page>` to continue a box listing; it keeps `next_history_url` for the sync clients that read it, and `--page` accepts that URL as readily as the cursor inside it. Label IDs come from `hey label list`; `hey label view` returns `next_page` and `total_count`, accepts `--page <next_page>` for continuation, and supports `--all` for complete traversal. HEY creates a label while adding it to at least one thread, so `hey label create` requires thread item IDs.
 
 Collection IDs come from `hey collection list`. `hey collection view` returns both each posting `id` and its `topic_id`, plus `next_page` and `total_count`. Collection membership commands take `topic_id`; posting organization commands continue to take `id`. Creating a collection returns a confirmed mutation, and `hey collection list` provides its ID for subsequent commands. Collection updates accept a non-empty name, summary, or both.
+
+Set Aside groups have no name in HEY; a group is its ID and its threads. `hey set-aside view` lists the same threads as `hey box view set-aside` and adds each thread's `box_group_id` (a `Group` column in the styled table). HEY's group index answers with IDs alone, so `hey set-aside group list` reads each group once for its thread count. `hey set-aside group view <group-id>` lists a group's threads with `next_page` and `total_count`, accepts `--page <next_page>` and `--all` like the other listings, and answers `not_found` for a group that is gone; HEY removes a group itself once its last thread leaves it. Group commands take posting `id` values. `hey set-aside group create` moves threads into Set Aside if they are elsewhere. `hey set-aside group remove` leaves threads in Set Aside outside any group, while `hey set-aside group delete` sends the group's threads to Previously Seen, which is what HEY does when a group is dissolved in the web app.
 
 Workflow IDs come from `hey workflow list`, which includes the linked account ID for each workflow. `hey workflow view <id>` returns stages in position order; `--ids-only` and `--count` apply to those stages. Creating a workflow needs one linked mail account, selected with `--account` when more than one is available. HEY creates new stages as `Untitled`, so create the stage, read its ID with `hey workflow view <id>`, then rename it. Workflow membership commands take `topic_id`. Adding a thread creates its workflow membership before selecting the requested stage; if stage selection fails, the thread remains in the workflow's first stage and the command reports the error.
 

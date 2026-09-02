@@ -38,6 +38,7 @@ type sourcePostingOutput struct {
 type sourcePostingRow struct {
 	ID      int64  `json:"id"`
 	TopicID int64  `json:"topic_id,omitempty"`
+	Group   int64  `json:"group,omitempty"`
 	From    string `json:"from,omitempty"`
 	Summary string `json:"summary,omitempty"`
 	Date    string `json:"date,omitempty"`
@@ -51,12 +52,16 @@ type sourcePostingRow struct {
 // `--json` with the same source-and-postings object, while a box answers with HEY's box
 // payload, which carries fields (its sync URLs, its stream name) that are not a listing's
 // business and that consumers already read.
+//
+// groupColumn shows each posting's Set Aside group in the styled and Markdown tables; only
+// Set Aside has groups, so only its listing asks for it.
 type postingsListing struct {
 	heading      string
 	summary      func(count int, name string) string
 	cursorNotice func(shown, total int) string
 	breadcrumbs  []output.Breadcrumb
 	payload      func(source mail.Source, postings []sourcePostingOutput, nextPage string, total int) any
+	groupColumn  bool
 
 	// emptyNotice speaks for a first page with nothing on it, where the counts alone
 	// would say nothing at all. Only the bundle sets one: a bundle with no unseen
@@ -65,7 +70,13 @@ type postingsListing struct {
 }
 
 func (l postingsListing) write(cmd *cobra.Command, source mail.Source, first pageResult[generated.Posting], request pageRequest, fromCursor bool) error {
-	collected, err := collectPages(cmd.Context(), first, request, readSourcePage(source))
+	return l.writePages(cmd, source, first, request, fromCursor, readSourcePage(source))
+}
+
+// writePages is write for a listing whose pages do not come from a mail source — a Set
+// Aside group is postings too, but it is read on its own route.
+func (l postingsListing) writePages(cmd *cobra.Command, source mail.Source, first pageResult[generated.Posting], request pageRequest, fromCursor bool, read pageReader[generated.Posting]) error {
+	collected, err := collectPages(cmd.Context(), first, request, read)
 	if err != nil {
 		return err
 	}
@@ -139,25 +150,39 @@ func (l postingsListing) notice(shown, total int, hasMore, all, fromCursor bool)
 func (l postingsListing) writeStyled(cmd *cobra.Command, source mail.Source, postings []generated.Posting, notice string) error {
 	fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n\n", l.heading, sourceHeading(source))
 	table := newTable(cmd.OutOrStdout())
-	table.addRow([]string{"ID", "Thread", "From", "Summary", "Date"})
+	table.addRow(l.styledColumns([]string{"ID", "Thread"}, "Group", []string{"From", "Summary", "Date"}))
 	for _, posting := range postings {
 		topicID := ""
 		if id := resolvePostingTopicID(posting); id != 0 {
 			topicID = fmt.Sprintf("%d", id)
 		}
-		table.addRow([]string{
-			fmt.Sprintf("%d", posting.Id),
-			topicID,
-			terminal.SanitizeLine(posting.Creator.Name),
-			truncate(terminal.SanitizeLine(posting.Summary), 60),
-			formatDate(posting.CreatedAt),
-		})
+		group := ""
+		if posting.BoxGroupId != 0 {
+			group = fmt.Sprintf("%d", posting.BoxGroupId)
+		}
+		table.addRow(l.styledColumns(
+			[]string{fmt.Sprintf("%d", posting.Id), topicID},
+			group,
+			[]string{
+				terminal.SanitizeLine(posting.Creator.Name),
+				truncate(terminal.SanitizeLine(posting.Summary), 60),
+				formatDate(posting.CreatedAt),
+			},
+		))
 	}
 	table.print()
 	if notice != "" {
 		fmt.Fprintln(cmd.OutOrStdout(), notice)
 	}
 	return nil
+}
+
+func (l postingsListing) styledColumns(leading []string, group string, trailing []string) []string {
+	columns := append([]string{}, leading...)
+	if l.groupColumn {
+		columns = append(columns, group)
+	}
+	return append(columns, trailing...)
 }
 
 func (l postingsListing) writeMarkdown(cmd *cobra.Command, source mail.Source, postings []generated.Posting, nextPage string, total int, notice string) error {
@@ -170,6 +195,9 @@ func (l postingsListing) writeMarkdown(cmd *cobra.Command, source mail.Source, p
 			From:    posting.Creator.Name,
 			Summary: posting.Summary,
 			Date:    formatDate(posting.CreatedAt),
+		}
+		if l.groupColumn {
+			rows[i].Group = posting.BoxGroupId
 		}
 	}
 	if err := writeOK(rows); err != nil {
