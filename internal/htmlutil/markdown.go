@@ -99,8 +99,14 @@ func collapseRepeatedLinkBlocks(lines []string) []string {
 	return collapsed
 }
 
+// wholeLineLink reports a line that is one link and nothing else. The serializer
+// escapes "[" and "]" in prose and percent-encodes ")" in a destination, so the first
+// "](" is the link's boundary and a ")" anywhere before the line's last byte means
+// prose follows the link.
 func wholeLineLink(line string) bool {
-	return strings.HasPrefix(line, "[") && strings.HasSuffix(line, ")") && strings.Contains(line, "](")
+	label, dest, found := strings.Cut(line, "](")
+	return found && strings.HasPrefix(label, "[") &&
+		strings.HasSuffix(dest, ")") && !strings.Contains(dest[:len(dest)-1], ")")
 }
 
 func (m *markdownizer) walk(n *html.Node) {
@@ -538,12 +544,13 @@ func (m *markdownizer) linkedImage(image *html.Node, dest string) {
 // Basecamp's download URLs end in the attachment's own name, which names a linked
 // preview image better than anything the image carries.
 func destinationFilename(dest string) string {
-	dest, _, _ = strings.Cut(dest, "#")
-	dest, _, _ = strings.Cut(dest, "?")
-	segment := dest[strings.LastIndexByte(dest, '/')+1:]
-	if decoded, err := url.PathUnescape(segment); err == nil {
-		segment = decoded
+	parsed, err := url.Parse(dest)
+	if err != nil {
+		return ""
 	}
+	// Only the path can end in a filename: a bare host is dotted without naming a
+	// file, and an opaque destination like mailto: has no path at all.
+	segment := parsed.Path[strings.LastIndexByte(parsed.Path, '/')+1:]
 	if len(segment) > 64 || !strings.Contains(segment, ".") {
 		return ""
 	}

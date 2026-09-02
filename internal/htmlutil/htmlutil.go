@@ -421,8 +421,13 @@ func findImages(n *html.Node, urls *[]string, depth int) {
 				*urls = append(*urls, src)
 			}
 		case "action-text-attachment":
-			if imageURL := getAttr(n, "url"); isImageContentType(getAttr(n, "content-type")) && imageURL != "" &&
-				!isDecorativeImage(getAttr(n, "width"), getAttr(n, "height")) {
+			// A decorative attachment's subtree is skipped whole: Action Text can
+			// carry the attachment's rendered <img> as a child, and that is the
+			// same decoration under another URL.
+			if isImageContentType(getAttr(n, "content-type")) && isDecorativeImage(getAttr(n, "width"), getAttr(n, "height")) {
+				return
+			}
+			if imageURL := getAttr(n, "url"); isImageContentType(getAttr(n, "content-type")) && imageURL != "" {
 				*urls = append(*urls, imageURL)
 			}
 		case "figure":
