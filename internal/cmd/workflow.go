@@ -27,6 +27,18 @@ type workflowStageView struct {
 	Name string `json:"name"`
 }
 
+type workflowStageTopicsView struct {
+	ID     int64                    `json:"id"`
+	Name   string                   `json:"name"`
+	Topics []workflowStageTopicView `json:"topics"`
+}
+
+type workflowStageTopicView struct {
+	TopicID    int64  `json:"topic_id"`
+	Subject    string `json:"subject"`
+	EntryCount int    `json:"entry_count"`
+}
+
 type workflowDetailView struct {
 	ID        int64               `json:"id"`
 	Name      string              `json:"name"`
@@ -434,9 +446,74 @@ func newWorkflowStageCommand() *workflowStageCommand {
 		},
 	}
 	workflowStageCommand.cmd.AddCommand(newWorkflowStageCreateCommand().cmd)
+	workflowStageCommand.cmd.AddCommand(newWorkflowStageViewCommand().cmd)
 	workflowStageCommand.cmd.AddCommand(newWorkflowStageUpdateCommand().cmd)
 	workflowStageCommand.cmd.AddCommand(newWorkflowStageDeleteCommand().cmd)
 	return workflowStageCommand
+}
+
+type workflowStageViewCommand struct{ cmd *cobra.Command }
+
+func newWorkflowStageViewCommand() *workflowStageViewCommand {
+	c := &workflowStageViewCommand{}
+	c.cmd = &cobra.Command{
+		Use:     "view <workflow-id> <stage-id>",
+		Short:   "List email threads in a workflow stage",
+		Example: "  hey workflow stage view 123 456 --json",
+		Annotations: map[string]string{
+			"agent_notes": "Returns every thread currently in this workflow stage. Get workflow and stage IDs from hey workflow view <workflow-id>.",
+		},
+		Args: usageExactArgs(2),
+		RunE: c.run,
+	}
+	return c
+}
+
+func (c *workflowStageViewCommand) run(cmd *cobra.Command, args []string) error {
+	if err := requireAuth(); err != nil {
+		return err
+	}
+	workflowID, err := parsePositiveID(args[0], "workflow")
+	if err != nil {
+		return err
+	}
+	stageID, err := parsePositiveID(args[1], "stage")
+	if err != nil {
+		return err
+	}
+	stage, err := sdk.Workflows().GetStage(cmd.Context(), workflowID, stageID)
+	if err != nil {
+		return apierr.FromSDK(err)
+	}
+	view := workflowStageTopicsView{ID: stage.ID, Name: stage.Name, Topics: make([]workflowStageTopicView, 0, len(stage.Topics))}
+	for _, topic := range stage.Topics {
+		view.Topics = append(view.Topics, workflowStageTopicView{
+			TopicID:    topic.TopicID,
+			Subject:    topic.Subject,
+			EntryCount: topic.EntryCount,
+		})
+	}
+	if writer.IsStyled() {
+		table := newTable(cmd.OutOrStdout())
+		table.addRow([]string{"Thread", "Subject", "Emails"})
+		for _, topic := range view.Topics {
+			table.addRow([]string{fmt.Sprintf("%d", topic.TopicID), terminal.SanitizeLine(topic.Subject), fmt.Sprintf("%d", topic.EntryCount)})
+		}
+		table.print()
+		return nil
+	}
+	format := writer.EffectiveFormat()
+	if format == output.FormatIDs {
+		for _, topic := range view.Topics {
+			fmt.Fprintln(cmd.OutOrStdout(), topic.TopicID)
+		}
+		return nil
+	}
+	if format == output.FormatCount {
+		fmt.Fprintln(cmd.OutOrStdout(), len(view.Topics))
+		return nil
+	}
+	return writeOK(view, output.WithSummary(fmt.Sprintf("%d %s in workflow stage %s", len(view.Topics), threadNoun(len(view.Topics)), terminal.SanitizeLine(view.Name))), output.WithBreadcrumbs(output.Breadcrumb{Action: "read", Command: "hey thread read <thread-id>", Description: "Read an email thread"}))
 }
 
 type workflowStageCreateCommand struct {

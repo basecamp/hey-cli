@@ -418,6 +418,7 @@ hey workflow stage create
 hey workflow stage delete
 hey workflow stage update
 hey workflow stage update --name
+hey workflow stage view
 hey workflow update
 hey workflow update --name
 hey workflow view

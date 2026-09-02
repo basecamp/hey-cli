@@ -47,6 +47,8 @@ github.com/alecthomas/chroma/v2 v2.20.0 h1:sfIHpxPyR07/Oylvmcai3X/exDlE8+FA820NT
 github.com/alecthomas/chroma/v2 v2.20.0/go.mod h1:e7tViK0xh/Nf4BYHl00ycY6rV7b8iXBksI9E359yNmA=
 github.com/alecthomas/repr v0.5.1 h1:E3G4t2QbHTSNpPKBgMTln5KLkZHLOcU7r37J4pXBuIg=
 github.com/alecthomas/repr v0.5.1/go.mod h1:Fr0507jx4eOXV7AlPV6AVZLYrLIuIeSOWtW57eE/O/4=
+github.com/almirsarajcic/hey-sdk/go v0.28.2-0.20260901124435-ada48dc17209 h1:0XirClBU1eKa9qc5GaIYMUUW1Oiqk9fLHKD5e9gusNg=
+github.com/almirsarajcic/hey-sdk/go v0.28.2-0.20260901124435-ada48dc17209/go.mod h1:k6sO2XhMkU3UY8lD2ozp0735Ic3q8xoMQt7YUT3TlYk=
 github.com/apapsch/go-jsonmerge/v2 v2.0.0 h1:axGnT1gRIfimI7gJifB699GoE/oq+F2MU7Dml6nw9rQ=
 github.com/apapsch/go-jsonmerge/v2 v2.0.0/go.mod h1:lvDnEdqiQrp0O42VQGgmlKpxL1AP2+08jFMw88y4klk=
 github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 h1:DklsrG3dyBCFEj5IhUbnKptjxatkF07cF2ak3yi77so=
@@ -89,8 +91,6 @@ github.com/aymerick/douceur v0.2.0 h1:Mv+mAeH1Q+n9Fr+oyamOlAkUNPWPlA8PPGR0QAaYuP
 github.com/aymerick/douceur v0.2.0/go.mod h1:wlT5vV2O3h55X9m7iVYN0TBM0NH/MmbLnd30/FjWUq4=
 github.com/basecamp/actioncable-go v0.0.0-20260824145920-822e6cf08655 h1:zz0WUSEmjURj0T+soXuTtgX291nYouqa+UoyYY3Xxk8=
 github.com/basecamp/actioncable-go v0.0.0-20260824145920-822e6cf08655/go.mod h1:ezaV5z1GXQAsqyejqTs6wCFl2D8Wj+COLQkHc/kwoRs=
-github.com/basecamp/hey-sdk/go v0.28.2-0.20260901001535-51b9228e1844 h1:EU5eR2Awg3HNFlwfIczwF2ZqwpxqNeXDg7/xbtJLAiY=
-github.com/basecamp/hey-sdk/go v0.28.2-0.20260901001535-51b9228e1844/go.mod h1:k6sO2XhMkU3UY8lD2ozp0735Ic3q8xoMQt7YUT3TlYk=
 github.com/basecamp/mcp v0.0.0-20260828100356-2d6f44b51e9d h1:zEQVGq1x1nhKMZ2TudFAcSJ32CHT8richI1vQakIKz4=
 github.com/basecamp/mcp v0.0.0-20260828100356-2d6f44b51e9d/go.mod h1:Ee2c/q1/pg+5T5741PIuA3s6VJMQC7I0XBNXIHIujzA=
 github.com/blang/semver v3.5.1+incompatible h1:cQNTCjp13qL8KC3Nbxr/y2Bqb63oX6wdnnjpJbkM4JQ=

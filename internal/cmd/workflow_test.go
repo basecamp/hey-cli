@@ -158,6 +158,59 @@ func TestWorkflowCommandOutputFormats(t *testing.T) {
 	}
 }
 
+func TestWorkflowStageViewListsThreads(t *testing.T) {
+	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/workflows/8801/stages/5512" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("Accept"); got != "text/html" {
+			t.Errorf("Accept = %q, want text/html", got)
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = io.WriteString(w, `<section id="container_workflow_stage_5512"><h2>Applied</h2><div id="topic_4471829" data-identifier="91"><h3>Application</h3><p class="card__detail">3 emails</p></div></section>`)
+	}), "workflow", "stage", "view", "8801", "5512")
+	if err != nil {
+		t.Fatalf("execute workflow stage view: %v", err)
+	}
+	if response.Summary != "1 thread in workflow stage Applied" {
+		t.Errorf("summary = %q", response.Summary)
+	}
+	stage, ok := response.Data.(map[string]any)
+	if !ok || stage["id"] != float64(5512) || stage["name"] != "Applied" {
+		t.Fatalf("stage = %#v", response.Data)
+	}
+	topics, ok := stage["topics"].([]any)
+	if !ok || len(topics) != 1 {
+		t.Fatalf("topics = %#v", stage["topics"])
+	}
+	topic := topics[0].(map[string]any)
+	if topic["topic_id"] != float64(4471829) || topic["entry_count"] != float64(3) || topic["subject"] != "Application" {
+		t.Errorf("topic = %#v", topic)
+	}
+}
+
+func TestWorkflowStageViewOutputFormats(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = io.WriteString(w, `<section id="container_workflow_stage_5512"><h2>Applied</h2><div id="topic_4471829" data-identifier="91"><h3>Application</h3><p class="card__detail">3 emails</p></div></section>`)
+	})
+
+	ids, err := runFormattedCommand(t, handler, []string{"--ids-only"}, "workflow", "stage", "view", "8801", "5512")
+	if err != nil || ids != "4471829\n" {
+		t.Errorf("ids = %q, err = %v", ids, err)
+	}
+	count, err := runFormattedCommand(t, handler, []string{"--count"}, "workflow", "stage", "view", "8801", "5512")
+	if err != nil || count != "1\n" {
+		t.Errorf("count = %q, err = %v", count, err)
+	}
+	styled, err := runStyledCommand(t, handler, "workflow", "stage", "view", "8801", "5512")
+	if err != nil || !strings.Contains(styled, "Thread") || !strings.Contains(styled, "Application") || !strings.Contains(styled, "3") {
+		t.Errorf("styled = %q, err = %v", styled, err)
+	}
+}
+
 func TestWorkflowMarkdownEscapesMetadata(t *testing.T) {
 	cmd := newWorkflowCommand().cmd
 	var output strings.Builder

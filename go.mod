@@ -127,3 +127,5 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
 )
+
+replace github.com/basecamp/hey-sdk/go => github.com/almirsarajcic/hey-sdk/go v0.28.2-0.20260901124435-ada48dc17209
