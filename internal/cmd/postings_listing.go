@@ -38,7 +38,17 @@ type sourcePostingOutput struct {
 type sourcePostingRow struct {
 	ID      int64  `json:"id"`
 	TopicID int64  `json:"topic_id,omitempty"`
-	Group   int64  `json:"group,omitempty"`
+	From    string `json:"from,omitempty"`
+	Summary string `json:"summary,omitempty"`
+	Date    string `json:"date,omitempty"`
+}
+
+// groupedPostingRow is sourcePostingRow with the Set Aside group. The group is never
+// omitted, so the column is there when nothing on the page is grouped.
+type groupedPostingRow struct {
+	ID      int64  `json:"id"`
+	TopicID int64  `json:"topic_id,omitempty"`
+	Group   string `json:"group"`
 	From    string `json:"from,omitempty"`
 	Summary string `json:"summary,omitempty"`
 	Date    string `json:"date,omitempty"`
@@ -187,20 +197,7 @@ func (l postingsListing) styledColumns(leading []string, group string, trailing 
 
 func (l postingsListing) writeMarkdown(cmd *cobra.Command, source mail.Source, postings []generated.Posting, nextPage string, total int, notice string) error {
 	fmt.Fprintf(cmd.OutOrStdout(), "# %s\n\n", markdownSafeText(source.Name))
-	rows := make([]sourcePostingRow, len(postings))
-	for i, posting := range postings {
-		rows[i] = sourcePostingRow{
-			ID:      posting.Id,
-			TopicID: resolvePostingTopicID(posting),
-			From:    posting.Creator.Name,
-			Summary: posting.Summary,
-			Date:    formatDate(posting.CreatedAt),
-		}
-		if l.groupColumn {
-			rows[i].Group = posting.BoxGroupId
-		}
-	}
-	if err := writeOK(rows); err != nil {
+	if err := writeOK(l.markdownRows(postings)); err != nil {
 		return err
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "\n**Total threads:** %d\n", total)
@@ -211,6 +208,39 @@ func (l postingsListing) writeMarkdown(cmd *cobra.Command, source mail.Source, p
 		fmt.Fprintf(cmd.OutOrStdout(), "\n%s\n", markdownSafeText(notice))
 	}
 	return nil
+}
+
+func (l postingsListing) markdownRows(postings []generated.Posting) any {
+	if l.groupColumn {
+		rows := make([]groupedPostingRow, len(postings))
+		for i, posting := range postings {
+			group := ""
+			if posting.BoxGroupId != 0 {
+				group = fmt.Sprintf("%d", posting.BoxGroupId)
+			}
+			rows[i] = groupedPostingRow{
+				ID:      posting.Id,
+				TopicID: resolvePostingTopicID(posting),
+				Group:   group,
+				From:    posting.Creator.Name,
+				Summary: posting.Summary,
+				Date:    formatDate(posting.CreatedAt),
+			}
+		}
+		return rows
+	}
+
+	rows := make([]sourcePostingRow, len(postings))
+	for i, posting := range postings {
+		rows[i] = sourcePostingRow{
+			ID:      posting.Id,
+			TopicID: resolvePostingTopicID(posting),
+			From:    posting.Creator.Name,
+			Summary: posting.Summary,
+			Date:    formatDate(posting.CreatedAt),
+		}
+	}
+	return rows
 }
 
 // readSourcePage reads a page of any mail source, so the growing loop never has to know

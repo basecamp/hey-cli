@@ -107,6 +107,22 @@ func TestSetAsideViewCarriesGroups(t *testing.T) {
 	}
 }
 
+func TestSetAsideViewMarkdownKeepsGroupColumnWhenNothingIsGrouped(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":3,"kind":"asidebox","name":"Set Aside","postings":[
+			{"id":102,"kind":"topic","summary":"Flight confirmation","creator":{"name":"Ada Lovelace"}}
+		]}`)
+	})
+	markdown, err := runFormattedCommand(t, handler, []string{"--markdown"}, "set-aside", "view")
+	if err != nil {
+		t.Fatalf("execute markdown set-aside view: %v", err)
+	}
+	if !strings.Contains(markdown, "| group |") {
+		t.Errorf("markdown output = %q, want a group column even with nothing grouped", markdown)
+	}
+}
+
 func TestBoxViewHasNoGroupColumn(t *testing.T) {
 	styled, err := runStyledCommand(t, setAsideServer(&recordedSetAside{}), "box", "view", "set aside")
 	if err != nil {
