@@ -141,7 +141,7 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		response, sendErr = sendReply(ctx, replySDK, target.EntryID, target.ActingSenderID,
 			sent.Subject, sent.Content, sent.To, sent.CC, sent.BCC)
 		if sendErr != nil {
-			return apierr.FromSDK(sendErr)
+			return classifySendFailure(sendErr)
 		}
 	} else {
 		to := parseAddresses(c.to)
@@ -168,7 +168,7 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		var sendErr error
 		response, sendErr = sendMessage(ctx, sdk, sent.Subject, sent.Content, sent.To, sent.CC, sent.BCC)
 		if sendErr != nil {
-			return apierr.FromSDK(sendErr)
+			return classifySendFailure(sendErr)
 		}
 	}
 
@@ -181,7 +181,7 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 	if handleErr != nil {
 		return apierr.ErrAmbiguousOutcome(
 			fmt.Sprintf("the message may have been sent, but the response named no message to read back: %v", handleErr),
-			"Check the thread before sending again — a retry may deliver it twice.")
+			"Read the thread back before sending again — this endpoint has no idempotency key, so a retry may deliver the message twice.")
 	}
 
 	verification, readback := verifyComposedMessage(ctx, sendClient, handle.MessageID, sent)
