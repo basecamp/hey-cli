@@ -281,7 +281,7 @@ func TestExtractImageURLsActionTextImage(t *testing.T) {
 // its screenshots, and each request would come out of the viewer's image budget.
 func TestExtractImageURLsSkipsDecorativeImages(t *testing.T) {
 	h := `<img src="https://mailer.example.com/open?id=8fd3" width="1" height="1">
-<action-text-attachment url="https://gopher.hey.com/signed/avatar.png" content-type="image" width="40" height="40" caption="Michelle Harjani"></action-text-attachment>
+<action-text-attachment url="https://gopher.hey.com/signed/avatar.png" content-type="image" width="40" height="40" caption="Michelle Harjani"><figure><img src="https://gopher.hey.com/signed/avatar-rendered.png"></figure></action-text-attachment>
 <action-text-attachment url="https://gopher.hey.com/signed/screenshot.png" content-type="image"></action-text-attachment>`
 	urls := ExtractImageURLs(h)
 	if len(urls) != 1 || urls[0] != "https://gopher.hey.com/signed/screenshot.png" {
@@ -293,6 +293,9 @@ func TestToTextSkipsDecorativeImages(t *testing.T) {
 	got := ToText(`<p>Michelle commented<img src="https://gopher.hey.com/signed/avatar.png" width="40" height="40"></p>`)
 	if strings.Contains(got, "[image]") {
 		t.Errorf("ToText should skip a decorative image, got %q", got)
+	}
+	if !strings.Contains(got, "Michelle commented") {
+		t.Errorf("ToText should keep the surrounding text, got %q", got)
 	}
 }
 

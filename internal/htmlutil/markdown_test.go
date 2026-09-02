@@ -297,6 +297,11 @@ func TestToMarkdownLinkedImageLabels(t *testing.T) {
 			want: "[Screen Recording 2026-08-24.mov](https://storage.app.basecamp.com/blobs/43aa4222/download/Screen%20Recording%202026-08-24.mov)",
 		},
 		{
+			name: "a bare host is not a filename",
+			in:   `<a href="https://gallery.example.com"><action-text-attachment content-type="image" url="https://gopher.hey.com/signed/preview"></action-text-attachment></a>`,
+			want: "[image](https://gallery.example.com)",
+		},
+		{
 			name: "image when nothing names it",
 			in:   `<a href="https://app.basecamp.com/2914079/buckets/22311406/uploads/998877"><action-text-attachment content-type="image" url="https://gopher.hey.com/signed/preview"></action-text-attachment></a>`,
 			want: "[image](https://app.basecamp.com/2914079/buckets/22311406/uploads/998877)",
@@ -328,6 +333,11 @@ func TestToMarkdownKeepsRepeatedContent(t *testing.T) {
 			name: "repeated links with content between stay",
 			in:   `<p><a href="https://example.com/vote">Vote here</a></p><p>Polls close Friday.</p><p><a href="https://example.com/vote">Vote here</a></p>`,
 			want: "[Vote here](https://example.com/vote)\n\nPolls close Friday.\n\n[Vote here](https://example.com/vote)",
+		},
+		{
+			name: "repeated lines with prose after a link stay",
+			in:   `<p><a href="https://example.com/vote">Vote here</a> (before Friday)</p><p><a href="https://example.com/vote">Vote here</a> (before Friday)</p>`,
+			want: "[Vote here](https://example.com/vote) (before Friday)\n\n[Vote here](https://example.com/vote) (before Friday)",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
