@@ -104,6 +104,7 @@ func attachmentServer(t *testing.T) (*httptest.Server, *attachmentServerState) {
 			state.sentContents = append(state.sentContents, body.Message.Content)
 			state.events = append(state.events, "send")
 			state.mu.Unlock()
+			w.Header().Set("Location", "https://app.hey.com/messages/9101")
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/messages.json":
@@ -117,8 +118,18 @@ func attachmentServer(t *testing.T) (*httptest.Server, *attachmentServerState) {
 			state.sentContents = append(state.sentContents, body.Message.Content)
 			state.events = append(state.events, "send")
 			state.mu.Unlock()
+			w.Header().Set("Location", "https://app.hey.com/messages/9101")
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/messages/9101.json":
+			state.mu.Lock()
+			content := ""
+			if len(state.sentContents) > 0 {
+				content = state.sentContents[len(state.sentContents)-1]
+			}
+			state.mu.Unlock()
+			payload, _ := json.Marshal(map[string]any{"id": 9101, "content": content})
+			_, _ = w.Write(payload)
 		default:
 			t.Logf("unhandled attachment test request: %s %s", r.Method, r.URL.RequestURI())
 			http.Error(w, "not found", http.StatusNotFound)

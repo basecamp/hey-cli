@@ -159,6 +159,9 @@ func TestSelectedAccountUsesMatchingSenderAndUser(t *testing.T) {
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			actingSenderID = body.ActingSenderID
+			// HEY names the entry it created in Location, which is what compose reads
+			// back; the readback itself 404s here, and an unverified send still stands.
+			w.Header().Set("Location", "https://app.hey.com/messages/9101")
 			w.WriteHeader(http.StatusCreated)
 		case "/contacts.json":
 			contactAccount = r.URL.Query().Get("filtered_account_id")

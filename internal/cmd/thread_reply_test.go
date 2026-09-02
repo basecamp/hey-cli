@@ -100,6 +100,9 @@ func threadReplyServer(t *testing.T, messageJSON string, entryIDs ...int64) (*ht
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
+			// A delivered reply answers the way a saved one does: the entry it created
+			// is named in Location, and nowhere else.
+			w.Header().Set("Location", "https://app.hey.com/messages/9101")
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
 			fmt.Fprint(w, `{}`)
@@ -117,6 +120,15 @@ func threadReplyServer(t *testing.T, messageJSON string, entryIDs ...int64) (*ht
 				entries = append(entries, fmt.Sprintf(`{"id":%d}`, id))
 			}
 			fmt.Fprintf(w, `{"id":7,"account_id":9,"entries":[%s]}`, strings.Join(entries, ","))
+		case r.URL.Path == "/messages/9101.json":
+			// The reply read back after it was sent, as compose verifies it.
+			w.Header().Set("Content-Type", "application/json")
+			payload, _ := json.Marshal(map[string]any{
+				"id": 9101, "subject": sent.Subject, "content": sent.Content,
+				"sender":    map[string]any{"id": 42, "email_address": "jane@example.com"},
+				"addressed": map[string]any{"directly": jsonContacts(sent.To), "copied": jsonContacts(sent.CC)},
+			})
+			_, _ = w.Write(payload)
 		case strings.HasPrefix(r.URL.Path, "/messages/"):
 			sent.MessageAccountFilter = r.URL.Query().Get("filtered_account_id")
 			if r.URL.Path != "/messages/12.json" {
@@ -131,6 +143,15 @@ func threadReplyServer(t *testing.T, messageJSON string, entryIDs ...int64) (*ht
 	}))
 	t.Cleanup(server.Close)
 	return server, sent
+}
+
+// jsonContacts is a recipient list in the shape HEY serves one.
+func jsonContacts(emails []string) []map[string]any {
+	contacts := make([]map[string]any, 0, len(emails))
+	for i, email := range emails {
+		contacts = append(contacts, map[string]any{"id": 200 + i, "email_address": email})
+	}
+	return contacts
 }
 
 // withSDKPointedAt builds the package-level client the commands use, aimed at a test

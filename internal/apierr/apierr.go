@@ -143,6 +143,15 @@ func ErrAmbiguous(resource string, matches []string) *Error {
 	}
 }
 
+// ErrAmbiguousOutcome is a write the server accepted and then named nothing for. It is
+// neither a success nor a failure: the change may well have happened, so a caller must
+// go and look rather than either reporting it done or trying again. It is a code of its
+// own — not api, not network — because those two both read as "it did not happen", and
+// this one does not.
+func ErrAmbiguousOutcome(msg, hint string) *Error {
+	return &Error{Code: CodeAmbiguous, Message: msg, Hint: hint}
+}
+
 func AsError(err error) *Error {
 	var e *Error
 	if errors.As(err, &e) {

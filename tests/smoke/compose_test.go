@@ -6,14 +6,47 @@ import (
 	"testing"
 )
 
+// composeResult is the machine contract `hey compose --json` answers with: the handle
+// naming the message that was created, and what reading it back showed.
+type composeResult struct {
+	Sent         bool   `json:"sent"`
+	MessageID    int64  `json:"message_id"`
+	TopicID      int64  `json:"topic_id"`
+	AppURL       string `json:"app_url"`
+	Verification struct {
+		Status  string `json:"status"`
+		Method  string `json:"method"`
+		Reason  string `json:"reason"`
+		Subject string `json:"subject"`
+		Sender  struct {
+			Name         string `json:"name"`
+			EmailAddress string `json:"email_address"`
+		} `json:"sender"`
+		Recipients struct {
+			To           []string `json:"to"`
+			CC           []string `json:"cc"`
+			BCC          []string `json:"bcc"`
+			BCCDisclosed bool     `json:"bcc_disclosed"`
+		} `json:"recipients"`
+		BodyMarkdown       string `json:"body_markdown"`
+		BodyMarkdownSHA256 string `json:"body_markdown_sha256"`
+		MatchesSent        struct {
+			Subject    bool `json:"subject"`
+			Body       bool `json:"body"`
+			Recipients bool `json:"recipients"`
+		} `json:"matches_sent"`
+	} `json:"verification"`
+}
+
 func TestCompose(t *testing.T) {
 	uid := uniqueID()
 	subject := fmt.Sprintf("Smoke test %s", uid)
+	body := "Hello from smoke test.\n\n- **First** item\n- *Second* item"
 
 	stdout, stderr, code := hey(t, "compose",
 		"--to", "david@basecamp.com",
 		"--subject", subject,
-		"-m", "Hello from smoke test",
+		"-m", body,
 		"--json",
 	)
 	if code != 0 {
@@ -29,14 +62,74 @@ func TestCompose(t *testing.T) {
 	}
 	assertContains(t, resp.Summary, "Message sent")
 
-	// Cross-verify: fetch the thread page and check the subject appears.
-	composeData := dataAs[map[string]any](t, resp)
-	if appURL, ok := composeData["app_url"].(string); ok {
-		topicID := extractTopicID(appURL)
-		if topicID != "" {
-			html := fetchHTML(t, fmt.Sprintf("%s/topics/%s", baseURL, topicID))
-			assertContains(t, html, subject)
+	// The handle is not optional. A send that reports success and names nothing is the
+	// regression this check exists for: the cross-verification below used to sit inside
+	// an `if app_url, ok := …`, so a compose with no handle passed silently.
+	result := dataAs[composeResult](t, resp)
+	if !result.Sent {
+		t.Fatal("compose did not report the message as sent")
+	}
+	if result.MessageID == 0 && result.TopicID == 0 {
+		t.Fatalf("compose named neither a message nor a thread: %s", string(resp.Data))
+	}
+
+	// And the readback is what proves it. Anything but `verified` means the CLI could
+	// not show that what HEY stored is what was asked for.
+	verification := result.Verification
+	if verification.Status != "verified" {
+		t.Fatalf("verification = %s (%s), want verified", verification.Status, verification.Reason)
+	}
+	if verification.Subject != subject {
+		t.Errorf("verified subject = %q, want %q", verification.Subject, subject)
+	}
+	if verification.Sender.EmailAddress == "" {
+		t.Error("a verified send must name the address it went out as")
+	}
+	if len(verification.Recipients.To) != 1 || verification.Recipients.To[0] != "david@basecamp.com" {
+		t.Errorf("verified recipients = %v, want exactly the address it was sent to", verification.Recipients.To)
+	}
+	if !verification.MatchesSent.Subject || !verification.MatchesSent.Body || !verification.MatchesSent.Recipients {
+		t.Errorf("matches_sent = %+v, want every comparison to hold", verification.MatchesSent)
+	}
+	// The Markdown a caller wrote is the Markdown it gets back.
+	assertContains(t, verification.BodyMarkdown, "- **First** item")
+	assertContains(t, verification.BodyMarkdown, "- *Second* item")
+	if verification.BodyMarkdownSHA256 == "" {
+		t.Error("a verified send must carry the digest of what was stored")
+	}
+
+	// Cross-verify against the browser: the thread the send named holds the subject.
+	if result.TopicID == 0 {
+		t.Fatalf("compose named no thread to cross-verify: %s", string(resp.Data))
+	}
+	html := fetchHTML(t, fmt.Sprintf("%s/topics/%d", baseURL, result.TopicID))
+	assertContains(t, html, subject)
+
+	// And `hey thread read` answers the same envelope for the same message.
+	threadResp := heyJSON(t, "thread", "read", fmt.Sprintf("%d", result.TopicID))
+	type threadEntry struct {
+		ID        int64  `json:"id"`
+		Subject   string `json:"subject"`
+		Addressed struct {
+			To []string `json:"to"`
+		} `json:"addressed"`
+	}
+	entries := dataAs[[]threadEntry](t, threadResp)
+	found := false
+	for _, entry := range entries {
+		if entry.ID != result.MessageID {
+			continue
 		}
+		found = true
+		if entry.Subject != subject {
+			t.Errorf("thread read subject = %q, want %q", entry.Subject, subject)
+		}
+		if len(entry.Addressed.To) != 1 || entry.Addressed.To[0] != "david@basecamp.com" {
+			t.Errorf("thread read recipients = %v, want the address it was sent to", entry.Addressed.To)
+		}
+	}
+	if !found && result.MessageID != 0 {
+		t.Errorf("thread %d does not carry the message %d that compose named", result.TopicID, result.MessageID)
 	}
 }
 

@@ -30,18 +30,29 @@ type threadContact struct {
 // HEY's Trix HTML; BodyHTML keeps that HTML for --html. BodyState says what became of
 // the body: hydrated, bodyless (HEY served none), over_limit or failed (it was not
 // read), or not_requested (the format did not need it).
+//
+// Subject, Sender and Addressed are the message's own addressing envelope, and they
+// come from the message HEY served for the entry rather than from anything inferred:
+// the entry index carries neither. They are therefore present exactly when the body
+// was read — a count or a list of IDs reads no messages and invents no envelope — and
+// they are what lets a caller prove which message it is looking at and who it reached.
+// Creator is still whoever wrote the entry; Sender is the identity it went out as,
+// which on a shared or alternate address is not the same person.
 type threadEntry struct {
-	ID                    int64             `json:"id"`
-	CreatedAt             string            `json:"created_at"`
-	UpdatedAt             string            `json:"updated_at"`
-	Creator               threadContact     `json:"creator"`
-	AlternativeSenderName string            `json:"alternative_sender_name"`
-	Summary               string            `json:"summary"`
-	Kind                  string            `json:"kind"`
-	AppURL                string            `json:"app_url"`
-	Body                  htmlutil.Markdown `json:"body,omitzero"`
-	BodyState             string            `json:"body_state,omitempty"`
-	BodyHTML              string            `json:"-"`
+	ID                    int64              `json:"id"`
+	CreatedAt             string             `json:"created_at"`
+	UpdatedAt             string             `json:"updated_at"`
+	Creator               threadContact      `json:"creator"`
+	Sender                *threadContact     `json:"sender,omitempty"`
+	AlternativeSenderName string             `json:"alternative_sender_name"`
+	Subject               string             `json:"subject,omitempty"`
+	Addressed             *addressedEnvelope `json:"addressed,omitempty"`
+	Summary               string             `json:"summary"`
+	Kind                  string             `json:"kind"`
+	AppURL                string             `json:"app_url"`
+	Body                  htmlutil.Markdown  `json:"body,omitzero"`
+	BodyState             string             `json:"body_state,omitempty"`
+	BodyHTML              string             `json:"-"`
 }
 
 type topicCommand struct {
@@ -332,8 +343,15 @@ func newThreadEntry(loaded *threadload.Entry, html bool) threadEntry {
 	appURL := entry.AppUrl
 	var body htmlutil.Markdown
 	bodyHTML := ""
+	subject := ""
+	var sender *threadContact
+	var addressed *addressedEnvelope
 
 	if message := loaded.Message; message != nil {
+		subject = message.Subject
+		sender = senderOf(message)
+		envelope := addressedFrom(message.Addressed)
+		addressed = &envelope
 		if creator.Id == 0 {
 			creator = message.Creator
 		}
@@ -363,6 +381,9 @@ func newThreadEntry(loaded *threadload.Entry, html bool) threadEntry {
 		CreatedAt:             formatTimestamp(createdAt),
 		UpdatedAt:             formatTimestamp(updatedAt),
 		AlternativeSenderName: entry.AlternativeSenderName,
+		Subject:               subject,
+		Sender:                sender,
+		Addressed:             addressed,
 		Summary:               summary,
 		Kind:                  entry.Kind,
 		AppURL:                appURL,

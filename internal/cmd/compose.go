@@ -98,6 +98,15 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 
 	ctx := cmd.Context()
 
+	// A send answers where the message went, so the response HEY gives is kept rather
+	// than reduced to an error: sendClient, response and sent below are what
+	// composeHandle and verifyComposedMessage work from.
+	var (
+		sendClient = sdk
+		response   *hey.Response
+		sent       composeSent
+	)
+
 	if c.threadID != "" {
 		topicID, parseErr := strconv.ParseInt(c.threadID, 10, 64)
 		if parseErr != nil {
@@ -120,9 +129,19 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 			}
 			return writeDraftSaved(cmd, draftID, len(c.attachments))
 		}
-		if err := replySDK.Entries().CreateReply(ctx, target.EntryID, target.ActingSenderID, target.Subject, messageWithAttachments,
-			target.Addressed.To, target.Addressed.CC, target.Addressed.BCC); err != nil {
-			return apierr.FromSDK(err)
+		if len(target.Addressed.To)+len(target.Addressed.CC)+len(target.Addressed.BCC) == 0 {
+			return apierr.ErrUsage("a reply needs at least one recipient (to, cc or bcc); HEY saves an unaddressed reply as a draft")
+		}
+		sendClient = replySDK
+		sent = composeSent{
+			Subject: target.Subject, Content: messageWithAttachments,
+			To: target.Addressed.To, CC: target.Addressed.CC, BCC: target.Addressed.BCC,
+		}
+		var sendErr error
+		response, sendErr = sendReply(ctx, replySDK, target.EntryID, target.ActingSenderID,
+			sent.Subject, sent.Content, sent.To, sent.CC, sent.BCC)
+		if sendErr != nil {
+			return apierr.FromSDK(sendErr)
 		}
 	} else {
 		to := parseAddresses(c.to)
@@ -145,12 +164,40 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 			}
 			return writeDraftSaved(cmd, draftID, len(c.attachments))
 		}
-		if err := sdk.Messages().Create(ctx, c.subject, messageWithAttachments, to, cc, bcc); err != nil {
-			return apierr.FromSDK(err)
+		sent = composeSent{Subject: c.subject, Content: messageWithAttachments, To: to, CC: cc, BCC: bcc}
+		var sendErr error
+		response, sendErr = sendMessage(ctx, sdk, sent.Subject, sent.Content, sent.To, sent.CC, sent.BCC)
+		if sendErr != nil {
+			return apierr.FromSDK(sendErr)
 		}
 	}
 
-	return writeMutation(cmd, sentWithAttachmentsSummary("Message sent", len(c.attachments)), nil)
+	// HEY accepted the request. Which message it made is a separate question, and one a
+	// caller that has to prove what it sent cannot do without: a send that names nothing
+	// is reported as ambiguous rather than as a success, so nobody reads "sent" off a
+	// response there is no way back from — and nobody retries a send that may already
+	// have gone out.
+	handle, handleErr := handleFromResponse(response.StatusCode, response.Headers, response.Data)
+	if handleErr != nil {
+		return apierr.ErrAmbiguousOutcome(
+			fmt.Sprintf("the message may have been sent, but the response named no message to read back: %v", handleErr),
+			"Check the thread before sending again — a retry may deliver it twice.")
+	}
+
+	verification, readback := verifyComposedMessage(ctx, sendClient, handle.MessageID, sent)
+	result := composeResultFor(handle, verification, readback)
+
+	summary := sentWithAttachmentsSummary("Message sent", len(c.attachments))
+	if result.TopicID != 0 {
+		return writeMutation(cmd, summary, result, output.WithBreadcrumbs(
+			output.Breadcrumb{
+				Action:      "read",
+				Command:     fmt.Sprintf("hey thread read %d", result.TopicID),
+				Description: "Read the thread this message landed in",
+			},
+		))
+	}
+	return writeMutation(cmd, summary, result)
 }
 
 // writeDraftSaved confirms a saved draft, naming the id every draft verb takes.

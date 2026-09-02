@@ -235,7 +235,7 @@ func TestLoadStopsAskingAfterTheBudgetRefuses(t *testing.T) {
 	source := &fakeSource{pages: [][]int64{pages}, bodies: bodies}
 	l := limits()
 	l.Concurrency = 1
-	l.MaxRetainedBytes = int64(len(pages))*(retainedOverhead+int64(len("summary 40")+len("message"))) + 3*(retainedOverhead+100) + 1
+	l.MaxRetainedBytes = int64(len(pages))*(retainedOverhead+int64(len("summary 40")+len("message"))) + 3*(retainedOverhead+100+fakeRecipientCost) + 1
 	thread, err := Load(context.Background(), source, Request{TopicID: 7, Hydrate: true, Limits: l})
 	if err != nil {
 		t.Fatal(err)
@@ -279,7 +279,8 @@ func TestLoadBoundsTheReasonAFailedReadKeeps(t *testing.T) {
 }
 
 // What a thread keeps of a message is charged to the budget whole — body, subject,
-// URL, creator — and what is not kept is not held: the recipient lists go.
+// URL, creator, and the addressing envelope, which is kept because it is the only place
+// a thread says who a message reached.
 func TestLoadChargesWhatItKeeps(t *testing.T) {
 	source := &fakeSource{pages: [][]int64{{12, 11}}, bodies: map[int64]string{12: "x", 11: "y"}, subjects: map[int64]string{12: strings.Repeat("s", 200)}}
 	l := limits()
@@ -299,11 +300,15 @@ func TestLoadChargesWhatItKeeps(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, entry := range thread.Entries {
-		if entry.Message == nil || len(entry.Message.Addressed.Directly) != 0 {
-			t.Errorf("entry %d kept %+v, want the body without the recipient lists", entry.Entry.Id, entry.Message)
+		if entry.Message == nil || len(entry.Message.Addressed.Directly) != 1 {
+			t.Errorf("entry %d kept %+v, want the body and its recipient list", entry.Entry.Id, entry.Message)
 		}
 	}
 }
+
+// fakeRecipientCost is what the one recipient every fakeSource message carries costs
+// the budget, so the arithmetic above states the cost rather than hiding it.
+const fakeRecipientCost = perContactOverhead + int64(len("Rick Sanchez"))
 
 func TestLoadStopsRequestingMessagesAtTheRequestCap(t *testing.T) {
 	source := &fakeSource{pages: [][]int64{{14, 13, 12, 11}}, bodies: map[int64]string{14: "a", 13: "b", 12: "c", 11: "d"}}
@@ -340,7 +345,7 @@ func TestLoadSpendsTheByteBudgetNewestFirst(t *testing.T) {
 	l := limits()
 	// Four index entries and the two newest bodies fit; the third body does not.
 	indexEntry := retainedOverhead + int64(len("summary 14")+len("message"))
-	l.MaxRetainedBytes = 4*indexEntry + 2*(retainedOverhead+10) + 1
+	l.MaxRetainedBytes = 4*indexEntry + 2*(retainedOverhead+10+fakeRecipientCost) + 1
 	for range 20 {
 		thread, err := Load(context.Background(), source, Request{TopicID: 7, Hydrate: true, Limits: l})
 		if err != nil {

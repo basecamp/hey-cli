@@ -401,10 +401,16 @@ func boundedError(err error) error {
 	return errors.New(message)
 }
 
-// retained is the part of a message a thread keeps — the body and what names the
-// entry — and how many bytes it costs the budget. The rest of what HEY serves on a
-// message, the recipient lists above all, is dropped here rather than held: the budget
-// bounds what is kept, so it has to be charged for everything that is.
+// retained is the part of a message a thread keeps — the body, what names the entry,
+// and the addressing envelope: who it went out as and who it reached. The rest of what
+// HEY serves on a message is dropped here rather than held.
+//
+// The envelope is kept because it is the only place a thread says who a message
+// actually reached — the entry index carries none of it — and a caller that has to
+// prove that cannot get it anywhere else. It is not kept for free: every address and
+// name is charged to the byte budget, which is what bounds a thread addressed to a
+// mailing list rather than a per-message cap that would silently cut a recipient list
+// with nothing saying it had been cut.
 func retained(message *generated.Message) (*generated.Message, int64) {
 	kept := &generated.Message{
 		Id:        message.Id,
@@ -412,17 +418,37 @@ func retained(message *generated.Message) (*generated.Message, int64) {
 		Subject:   message.Subject,
 		Url:       message.Url,
 		Creator:   message.Creator,
+		Sender:    message.Sender,
+		Addressed: message.Addressed,
 		CreatedAt: message.CreatedAt,
 		UpdatedAt: message.UpdatedAt,
 	}
 	size := int64(len(kept.Content)+len(kept.Subject)+len(kept.Url)+
-		len(kept.Creator.Name)+len(kept.Creator.EmailAddress)) + retainedOverhead
+		len(kept.Creator.Name)+len(kept.Creator.EmailAddress)+
+		len(kept.Sender.Name)+len(kept.Sender.EmailAddress)) +
+		contactsSize(kept.Addressed.Directly) +
+		contactsSize(kept.Addressed.Copied) +
+		contactsSize(kept.Addressed.Blindcopied) +
+		retainedOverhead
 	return kept, size
+}
+
+// contactsSize is what a recipient list costs the budget: its addresses and names, and
+// perContactOverhead for the struct holding them.
+func contactsSize(contacts []generated.Contact) int64 {
+	var size int64
+	for _, contact := range contacts {
+		size += int64(len(contact.Name)+len(contact.EmailAddress)) + perContactOverhead
+	}
+	return size
 }
 
 // retainedOverhead is what a kept message costs beyond its strings: the struct, the
 // entry, the timestamps.
 const retainedOverhead = 512
+
+// perContactOverhead is what one recipient costs beyond its name and address.
+const perContactOverhead = 128
 
 type byteBudget struct {
 	mu        sync.Mutex
