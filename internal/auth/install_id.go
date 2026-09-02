@@ -26,7 +26,7 @@ func (s *Store) InstallID() (string, error) {
 func (s *Store) installID() (string, error) {
 	path := s.installIDPath()
 
-	data, err := os.ReadFile(path) //nolint:gosec // G304: path built from the store's own config directory
+	data, err := os.ReadFile(path) // #nosec G304 -- path built from the store's own config directory
 	if err == nil {
 		// Only a well-formed identifier is a usable identity. A truncated or
 		// garbage file — an earlier write interrupted by a crash or a full
