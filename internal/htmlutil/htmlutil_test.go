@@ -299,6 +299,16 @@ func TestToTextSkipsDecorativeImages(t *testing.T) {
 	}
 }
 
+func TestToTextSkipsDecorativeImageAttachments(t *testing.T) {
+	got := ToText(`<p>Kevin commented</p><action-text-attachment content-type="image" url="https://gopher.hey.com/signed/avatar.png" filename="kevin.png" width="20" height="20"></action-text-attachment>`)
+	if strings.Contains(got, "kevin.png") {
+		t.Errorf("ToText should skip a decorative image attachment, got %q", got)
+	}
+	if !strings.Contains(got, "Kevin commented") {
+		t.Errorf("ToText should keep the surrounding text, got %q", got)
+	}
+}
+
 func TestExtractImageURLsTrixFigure(t *testing.T) {
 	h := `<figure data-trix-attachment='{"url":"/rails/blobs/abc/image.png","filename":"image.png","contentType":"image/png"}'></figure>
 <figure data-trix-attachment='{"url":"/rails/blobs/abc/report.pdf","filename":"report.pdf","contentType":"application/pdf"}'></figure>`

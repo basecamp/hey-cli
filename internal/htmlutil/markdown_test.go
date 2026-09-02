@@ -279,6 +279,38 @@ func TestToMarkdownAttachmentTileRendersOnce(t *testing.T) {
 	}
 }
 
+// A filename without a dot cannot be read out of the destination, so the preview keeps
+// the generic label — and still collapses into the named link at the same destination,
+// whichever order the tile puts them in.
+func TestToMarkdownAttachmentTileWithExtensionlessFilename(t *testing.T) {
+	for _, test := range []struct{ name, in, want string }{
+		{
+			name: "preview first",
+			in: `<div><a href="https://storage.app.basecamp.com/blobs/9f2c/download/README"><action-text-attachment content-type="image" url="https://gopher.hey.com/signed/preview"></action-text-attachment></a></div>
+				<div><a href="https://storage.app.basecamp.com/blobs/9f2c/download/README">README</a></div>`,
+			want: "[README](https://storage.app.basecamp.com/blobs/9f2c/download/README)",
+		},
+		{
+			name: "filename first",
+			in: `<div><a href="https://storage.app.basecamp.com/blobs/9f2c/download/README">README</a></div>
+				<div><a href="https://storage.app.basecamp.com/blobs/9f2c/download/README"><action-text-attachment content-type="image" url="https://gopher.hey.com/signed/preview"></action-text-attachment></a></div>`,
+			want: "[README](https://storage.app.basecamp.com/blobs/9f2c/download/README)",
+		},
+		{
+			name: "different destinations stay",
+			in: `<div><a href="https://example.com/photos/albums"><action-text-attachment content-type="image" url="https://gopher.hey.com/signed/preview"></action-text-attachment></a></div>
+				<div><a href="https://example.com/photos/settings">Settings</a></div>`,
+			want: "[image](https://example.com/photos/albums)\n\n[Settings](https://example.com/photos/settings)",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := toMarkdown(test.in); got != test.want {
+				t.Errorf("ToMarkdown = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestToMarkdownLinkedImageLabels(t *testing.T) {
 	for _, test := range []struct{ name, in, want string }{
 		{
@@ -310,6 +342,16 @@ func TestToMarkdownLinkedImageLabels(t *testing.T) {
 			name: "an anchor around only a decorative image is decoration too",
 			in:   `<p>Follow the launch <a href="https://social.example.com/37signals"><img src="https://example.com/icons/mastodon.png" width="24" height="24"></a> as it happens</p>`,
 			want: "Follow the launch as it happens",
+		},
+		{
+			name: "whitespace the anchor owns stays around the link",
+			in:   `<p>See<a href="https://example.com/news/launch"> <img src="https://example.com/hero.jpg" alt="the announcement"> </a>now</p>`,
+			want: "See [the announcement](https://example.com/news/launch) now",
+		},
+		{
+			name: "whitespace the anchor owns stays around dropped decoration",
+			in:   `<p>Thanks<a href="https://social.example.com/37signals"> <img src="https://example.com/icons/mastodon.png" width="24" height="24"> </a>everyone</p>`,
+			want: "Thanks everyone",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
