@@ -187,6 +187,9 @@ What happens depends on how hey was installed:
 # Browser-based OAuth against HEY's own OAuth server (primary method)
 hey auth login
 
+# Or sign in from a headless machine using a code on another device
+hey auth login --device
+
 # Or use a pre-generated token
 hey auth login --token TOKEN
 
