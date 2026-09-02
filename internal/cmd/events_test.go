@@ -301,8 +301,8 @@ func TestEventsEditRefusesAnEventItCannotRead(t *testing.T) {
 
 func TestEventsDeleteCommand(t *testing.T) {
 	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodDelete || r.URL.Path != "/calendar/events/4821" {
-			t.Errorf("request = %s %s, want DELETE /calendar/events/4821", r.Method, r.URL.Path)
+		if r.Method != http.MethodDelete || r.URL.Path != "/calendar/events/4821.json" {
+			t.Errorf("request = %s %s, want DELETE /calendar/events/4821.json", r.Method, r.URL.Path)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}), "event", "delete", "4821")

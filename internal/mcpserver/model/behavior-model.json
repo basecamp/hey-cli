@@ -286,6 +286,32 @@
         ]
       }
     },
+    "DeleteCalendarEvent": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "DeleteCalendarEventOccurrence": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
     "DeleteCalendarTodo": {
       "idempotent": true,
       "readonly": false,
@@ -313,6 +339,19 @@
       }
     },
     "DeleteDraft": {
+      "idempotent": true,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "DeleteExtenzion": {
       "idempotent": true,
       "readonly": false,
       "retry": {
@@ -431,6 +470,23 @@
     },
     "GetBox": {
       "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetBoxGroup": {
+      "idempotent": false,
+      "pagination": {
+        "style": "link",
+        "totalCountHeader": "X-Total-Count"
+      },
       "readonly": true,
       "retry": {
         "backoff": "exponential",

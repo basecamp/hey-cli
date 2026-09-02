@@ -1029,7 +1029,7 @@ func TestDeleteEventAsksTwice(t *testing.T) {
 	if msg.action != "Event deleted" {
 		t.Errorf("action = %q", msg.action)
 	}
-	if requests, _ := recorded.snapshot(); len(requests) != 1 || requests[0] != "DELETE /calendar/events/1" {
+	if requests, _ := recorded.snapshot(); len(requests) != 1 || requests[0] != "DELETE /calendar/events/1.json" {
 		t.Errorf("requests = %v", requests)
 	}
 }
