@@ -88,6 +88,9 @@ func walkNode(b *strings.Builder, n *html.Node, depth int) {
 		case "br":
 			b.WriteString("\n")
 		case "img":
+			if isDecorativeImage(getAttr(n, "width"), getAttr(n, "height")) {
+				return
+			}
 			alt := getAttr(n, "alt")
 			if alt != "" {
 				fmt.Fprintf(b, "[%s]", alt)
@@ -373,6 +376,25 @@ func isImageContentType(contentType string) bool {
 	return contentType == "image" || strings.HasPrefix(contentType, "image/")
 }
 
+// An image that declares icon-sized dimensions is decoration: an avatar beside the name
+// it repeats, a glyph beside its label, a tracking pixel. The text alongside carries the
+// meaning, and in a terminal the image's URL would be the widest thing on the page, so a
+// decorative image is not rendered at all. Notification emails are where this bites —
+// a Basecamp digest carries hundreds of 11–40px avatars and icons around its words.
+// 64px holds those with room to spare, while a content image — a screenshot, a photo,
+// a preview — declares its real size or declares nothing.
+const decorativeImageMaxPixels = 64
+
+// isDecorativeImage reports whether width and height declare an icon-sized image. Only
+// an image declaring both dimensions is decoration by this rule: a missing or malformed
+// dimension keeps the image, because most content images declare none.
+func isDecorativeImage(width, height string) bool {
+	w, errW := strconv.Atoi(width)
+	h, errH := strconv.Atoi(height)
+	return errW == nil && errH == nil &&
+		w >= 0 && h >= 0 && w <= decorativeImageMaxPixels && h <= decorativeImageMaxPixels
+}
+
 func parseAttachmentByteSize(value string) *int64 {
 	if value == "" {
 		return nil
@@ -395,13 +417,12 @@ func findImages(n *html.Node, urls *[]string, depth int) {
 	if n.Type == html.ElementNode {
 		switch n.Data {
 		case "img":
-			for _, a := range n.Attr {
-				if a.Key == "src" && a.Val != "" {
-					*urls = append(*urls, a.Val)
-				}
+			if src := getAttr(n, "src"); src != "" && !isDecorativeImage(getAttr(n, "width"), getAttr(n, "height")) {
+				*urls = append(*urls, src)
 			}
 		case "action-text-attachment":
-			if imageURL := getAttr(n, "url"); isImageContentType(getAttr(n, "content-type")) && imageURL != "" {
+			if imageURL := getAttr(n, "url"); isImageContentType(getAttr(n, "content-type")) && imageURL != "" &&
+				!isDecorativeImage(getAttr(n, "width"), getAttr(n, "height")) {
 				*urls = append(*urls, imageURL)
 			}
 		case "figure":

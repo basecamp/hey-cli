@@ -2,6 +2,7 @@ package htmlutil
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -56,11 +57,50 @@ func inlineMarkdown(n *html.Node) string {
 
 func (m *markdownizer) String() string {
 	m.flushLine()
-	result := strings.Join(m.lines, "\n")
+	result := strings.Join(collapseRepeatedLinkBlocks(m.lines), "\n")
 	for strings.Contains(result, "\n\n\n") {
 		result = strings.ReplaceAll(result, "\n\n\n", "\n\n")
 	}
 	return strings.TrimSpace(result)
+}
+
+// collapseRepeatedLinkBlocks drops a block that is one whole-line link identical to the
+// block before it. An email attachment tile is two anchors at the same destination — a
+// preview image and a filename — and once linkedImage names the first from that
+// destination, both render as the same line; a link repeated back to back says one
+// thing, so it is said once. Only a bare whole-line link collapses: a repeated line of
+// prose, a list item or a quoted line is content, and stays.
+func collapseRepeatedLinkBlocks(lines []string) []string {
+	collapsed := make([]string, 0, len(lines))
+	previous := ""
+	for i := 0; i < len(lines); {
+		if lines[i] == "" {
+			collapsed = append(collapsed, lines[i])
+			i++
+			continue
+		}
+		end := i
+		for end < len(lines) && lines[end] != "" {
+			end++
+		}
+		single := end == i+1 && wholeLineLink(lines[i])
+		if single && lines[i] == previous {
+			i = end
+			continue
+		}
+		if single {
+			previous = lines[i]
+		} else {
+			previous = ""
+		}
+		collapsed = append(collapsed, lines[i:end]...)
+		i = end
+	}
+	return collapsed
+}
+
+func wholeLineLink(line string) bool {
+	return strings.HasPrefix(line, "[") && strings.HasSuffix(line, ")") && strings.Contains(line, "](")
 }
 
 func (m *markdownizer) walk(n *html.Node) {
@@ -111,7 +151,7 @@ func (m *markdownizer) element(n *html.Node) {
 	case "figure":
 		m.figure(n)
 	case "action-text-attachment":
-		m.attachment(getAttr(n, "filename"), getAttr(n, "url"), getAttr(n, "content-type"))
+		m.actionTextAttachment(n)
 	default:
 		m.children(n)
 	}
@@ -416,6 +456,12 @@ func (m *markdownizer) code(n *html.Node) {
 func (m *markdownizer) link(n *html.Node) {
 	href := getAttr(n, "href")
 	dest, linkable := destination(href)
+	if linkable && strings.TrimSpace(elementText(n)) == "" {
+		if image, sole := soleLinkedImage(n); sole {
+			m.linkedImage(image, dest)
+			return
+		}
+	}
 	m.inline(n, func(text string) string {
 		switch {
 		case !linkable:
@@ -429,6 +475,79 @@ func (m *markdownizer) link(n *html.Node) {
 			return "[" + text + "](" + dest + ")"
 		}
 	})
+}
+
+// soleLinkedImage returns the one image that is an anchor's whole content. The second
+// result is true when the anchor holds nothing but images: one to render, or only
+// decorative ones (image nil), which make the whole anchor decoration too.
+func soleLinkedImage(n *html.Node) (image *html.Node, sole bool) {
+	var images []*html.Node
+	decorated := false
+	var scan func(*html.Node)
+	scan = func(c *html.Node) {
+		if c.Type == html.ElementNode && (c.Data == "img" ||
+			(c.Data == "action-text-attachment" && isImageContentType(getAttr(c, "content-type")))) {
+			if isDecorativeImage(getAttr(c, "width"), getAttr(c, "height")) {
+				decorated = true
+			} else {
+				images = append(images, c)
+			}
+			return
+		}
+		for child := c.FirstChild; child != nil; child = child.NextSibling {
+			scan(child)
+		}
+	}
+	scan(n)
+	switch {
+	case len(images) == 1:
+		return images[0], true
+	case len(images) == 0 && decorated:
+		return nil, true
+	default:
+		return nil, false
+	}
+}
+
+// linkedImage writes an anchor whose whole content is one image. The image is the face
+// of the link, a terminal cannot draw a face, and writing the image as Markdown inside
+// the link hands the reader two URLs for one thing — the preview's and the
+// destination's. So the link is written once, with the best name available as its
+// text: the image's caption or alt text or filename, the filename its destination
+// ends in, or "image" — a newsletter photo behind a tracking link is an image, not a
+// file. An anchor whose only content is decorative images (image nil) is decoration
+// whole, and writes nothing.
+func (m *markdownizer) linkedImage(image *html.Node, dest string) {
+	if image == nil {
+		return
+	}
+	label := ""
+	for _, name := range []string{getAttr(image, "caption"), getAttr(image, "alt"), getAttr(image, "filename"), destinationFilename(dest)} {
+		if label = escapeText(strings.Join(strings.Fields(name), " "), "["); label != "" {
+			break
+		}
+	}
+	if label == "" {
+		label = "image"
+	}
+	m.write("[" + label + "](" + dest + ")")
+}
+
+// destinationFilename is the filename a destination ends in, when it ends in one: the
+// last path segment, percent-decoded, if it holds the dot a filename does. HEY's and
+// Basecamp's download URLs end in the attachment's own name, which names a linked
+// preview image better than anything the image carries.
+func destinationFilename(dest string) string {
+	dest, _, _ = strings.Cut(dest, "#")
+	dest, _, _ = strings.Cut(dest, "?")
+	segment := dest[strings.LastIndexByte(dest, '/')+1:]
+	if decoded, err := url.PathUnescape(segment); err == nil {
+		segment = decoded
+	}
+	if len(segment) > 64 || !strings.Contains(segment, ".") {
+		return ""
+	}
+	return segment
 }
 
 // inline writes one inline element, keeping any whitespace that sat at its
@@ -478,8 +597,12 @@ func collectText(n *html.Node, b *strings.Builder) {
 }
 
 // image writes an image, or — when its source may not be linked — its alt text as the
-// prose it then is, escaped against the line it lands on rather than as a label.
+// prose it then is, escaped against the line it lands on rather than as a label. A
+// decorative image writes nothing; see isDecorativeImage.
 func (m *markdownizer) image(n *html.Node) {
+	if isDecorativeImage(getAttr(n, "width"), getAttr(n, "height")) {
+		return
+	}
 	alt := strings.Join(strings.Fields(getAttr(n, "alt")), " ")
 	src, linkable := destination(getAttr(n, "src"))
 	switch {
@@ -515,6 +638,23 @@ func (m *markdownizer) embedded(content string) {
 	m.depth++
 	m.walk(doc)
 	m.depth--
+}
+
+// actionTextAttachment writes an attachment node — or nothing, for a decorative image.
+// HEY rewrites an inbound email's <img> tags into these nodes, so a notification
+// email's avatars and icons arrive as image attachments declaring icon-sized
+// dimensions, decoration beside the text that already says who or what they show. A
+// caption names an image its missing filename does not — the alt text of the <img>
+// the node used to be.
+func (m *markdownizer) actionTextAttachment(n *html.Node) {
+	if isImageContentType(getAttr(n, "content-type")) && isDecorativeImage(getAttr(n, "width"), getAttr(n, "height")) {
+		return
+	}
+	filename := getAttr(n, "filename")
+	if filename == "" {
+		filename = getAttr(n, "caption")
+	}
+	m.attachment(filename, getAttr(n, "url"), getAttr(n, "content-type"))
 }
 
 func (m *markdownizer) attachment(filename, url, contentType string) {

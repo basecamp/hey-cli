@@ -209,6 +209,145 @@ func TestToMarkdownActionTextAttachment(t *testing.T) {
 	}
 }
 
+// A notification email surrounds its words with avatars, icons and tracking pixels:
+// image attachments and <img> tags declaring icon-sized dimensions. They are
+// decoration — the text beside them already says who commented and on what — and
+// each would render as a full-width URL, so they render as nothing.
+func TestToMarkdownDropsDecorativeImages(t *testing.T) {
+	got := toMarkdown(`<p>
+		<action-text-attachment content-type="image" url="https://gopher.hey.com/signed/avatar.png" width="40" height="40" caption="Michelle Harjani" previewable="true"></action-text-attachment>
+		Michelle commented on <a href="https://app.basecamp.com/2914079/buckets/41746046/card_tables/cards/10224749161">My tasks capitalization</a>
+		<action-text-attachment content-type="image" url="https://gopher.hey.com/signed/card-solid.png" width="11" height="11" previewable="true"></action-text-attachment>
+		<img src="https://mailer.example.com/open?id=8fd3" width="1" height="1" alt="">
+	</p>`)
+	want := "Michelle commented on [My tasks capitalization](https://app.basecamp.com/2914079/buckets/41746046/card_tables/cards/10224749161)"
+	if got != want {
+		t.Errorf("ToMarkdown = %q, want %q", got, want)
+	}
+}
+
+// A content image declares its real size or declares nothing, and either keeps it
+// on the page. A dimension that does not parse keeps it too.
+func TestToMarkdownKeepsContentImages(t *testing.T) {
+	for _, test := range []struct{ name, in, want string }{
+		{
+			name: "attachment without dimensions",
+			in:   `<action-text-attachment content-type="image" url="https://gopher.hey.com/signed/screenshot.png" previewable="true"></action-text-attachment>`,
+			want: "![attachment](https://gopher.hey.com/signed/screenshot.png)",
+		},
+		{
+			name: "attachment at its real size",
+			in:   `<action-text-attachment content-type="image" url="https://gopher.hey.com/signed/screenshot.png" width="1280" height="720"></action-text-attachment>`,
+			want: "![attachment](https://gopher.hey.com/signed/screenshot.png)",
+		},
+		{
+			name: "img with a percentage width",
+			in:   `<img src="https://example.com/chart.png" alt="Revenue chart" width="100%" height="48">`,
+			want: "![Revenue chart](https://example.com/chart.png)",
+		},
+		{
+			name: "img with only one dimension",
+			in:   `<img src="https://example.com/banner.png" alt="Launch banner" height="48">`,
+			want: "![Launch banner](https://example.com/banner.png)",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := toMarkdown(test.in); got != test.want {
+				t.Errorf("ToMarkdown = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+// A Basecamp attachment tile is two anchors at one download URL: a preview image with
+// no name, then the filename. The linked image renders as one link named by the
+// filename its destination ends in, and the second, identical link collapses into it —
+// one line for one attachment, instead of two URLs for the preview and a third for
+// the caption.
+func TestToMarkdownAttachmentTileRendersOnce(t *testing.T) {
+	got := toMarkdown(`<table><tbody>
+		<tr><td>
+			<a href="https://storage.app.basecamp.com/2914079/blobs/61ea0356/download/money-rain-cash.gif"><action-text-attachment content-type="image" url="https://gopher.hey.com/signed/preview?variant=attachment_grid" previewable="true"></action-text-attachment></a>
+		</td></tr>
+		<tr><td>
+			<a href="https://storage.app.basecamp.com/2914079/blobs/61ea0356/download/money-rain-cash.gif">money-rain-cash.gif</a>
+		</td></tr>
+	</tbody></table>`)
+	want := "[money-rain-cash.gif](https://storage.app.basecamp.com/2914079/blobs/61ea0356/download/money-rain-cash.gif)"
+	if got != want {
+		t.Errorf("ToMarkdown = %q, want %q", got, want)
+	}
+}
+
+func TestToMarkdownLinkedImageLabels(t *testing.T) {
+	for _, test := range []struct{ name, in, want string }{
+		{
+			name: "caption names the link",
+			in:   `<a href="https://app.basecamp.com/2914079/buckets/22311406/uploads/998877"><action-text-attachment content-type="image" url="https://gopher.hey.com/signed/photo.png" caption="Team photo from the meetup"></action-text-attachment></a>`,
+			want: "[Team photo from the meetup](https://app.basecamp.com/2914079/buckets/22311406/uploads/998877)",
+		},
+		{
+			name: "alt names the link",
+			in:   `<a href="https://example.com/news/launch"><img src="https://example.com/hero.jpg" alt="Read the launch announcement"></a>`,
+			want: "[Read the launch announcement](https://example.com/news/launch)",
+		},
+		{
+			name: "the destination's filename names the link, percent-decoded",
+			in:   `<a href="https://storage.app.basecamp.com/blobs/43aa4222/download/Screen%20Recording%202026-08-24.mov"><action-text-attachment content-type="image" url="https://gopher.hey.com/signed/preview"></action-text-attachment></a>`,
+			want: "[Screen Recording 2026-08-24.mov](https://storage.app.basecamp.com/blobs/43aa4222/download/Screen%20Recording%202026-08-24.mov)",
+		},
+		{
+			name: "image when nothing names it",
+			in:   `<a href="https://app.basecamp.com/2914079/buckets/22311406/uploads/998877"><action-text-attachment content-type="image" url="https://gopher.hey.com/signed/preview"></action-text-attachment></a>`,
+			want: "[image](https://app.basecamp.com/2914079/buckets/22311406/uploads/998877)",
+		},
+		{
+			name: "an anchor around only a decorative image is decoration too",
+			in:   `<p>Follow the launch <a href="https://social.example.com/37signals"><img src="https://example.com/icons/mastodon.png" width="24" height="24"></a> as it happens</p>`,
+			want: "Follow the launch as it happens",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := toMarkdown(test.in); got != test.want {
+				t.Errorf("ToMarkdown = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+// Only a repeated whole-line link collapses. Repeated prose is content — a chorus, a
+// deliberate echo — and a repeated link with content between marks two places.
+func TestToMarkdownKeepsRepeatedContent(t *testing.T) {
+	for _, test := range []struct{ name, in, want string }{
+		{
+			name: "repeated prose stays",
+			in:   "<p>Location, location, location.</p><p>Location, location, location.</p>",
+			want: "Location, location, location.\n\nLocation, location, location.",
+		},
+		{
+			name: "repeated links with content between stay",
+			in:   `<p><a href="https://example.com/vote">Vote here</a></p><p>Polls close Friday.</p><p><a href="https://example.com/vote">Vote here</a></p>`,
+			want: "[Vote here](https://example.com/vote)\n\nPolls close Friday.\n\n[Vote here](https://example.com/vote)",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := toMarkdown(test.in); got != test.want {
+				t.Errorf("ToMarkdown = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+// An image attachment without a filename used to be labeled "attachment"; its caption —
+// the alt text of the <img> HEY rewrote — names it better when there is one.
+func TestToMarkdownImageAttachmentCaptionLabel(t *testing.T) {
+	got := toMarkdown(`<action-text-attachment content-type="image" url="https://gopher.hey.com/signed/kevin.png" caption="Kevin McConnell"></action-text-attachment>`)
+	want := "![Kevin McConnell](https://gopher.hey.com/signed/kevin.png)"
+	if got != want {
+		t.Errorf("ToMarkdown = %q, want %q", got, want)
+	}
+}
+
 // HEY wraps an inbound HTML email that Trix cannot represent in a single
 // text/html attachment: the entire body lives in the attachment's content
 // attribute, and skipping it leaves nothing but HEY's truncated summary.
