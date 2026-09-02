@@ -100,7 +100,7 @@ func newSkillInstallCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "install",
 		Short: "Install the hey skill globally for your coding agents",
-		Long:  "Copies the embedded SKILL.md to ~/.agents/skills/hey/, links it into ~/.claude/skills/hey when Claude Code is installed, and copies it for Codex when Codex is installed.",
+		Long:  "Copies the embedded SKILL.md to ~/.agents/skills/hey/, links it into ~/.claude/skills/hey when Claude Code is installed, and copies it for Codex and Grok when those agents are installed.",
 		RunE:  runSkillInstall,
 	}
 }
@@ -136,6 +136,15 @@ func runSkillInstall(cmd *cobra.Command, args []string) error {
 		}
 		result["codex_skill_path"] = codexPath
 		lines = append(lines, "Copied skill to "+codexPath)
+	}
+
+	if harness.DetectGrok() {
+		grokPath, grokErr := installSkillToGrok()
+		if grokErr != nil {
+			return apierr.ErrAPI(0, grokErr.Error())
+		}
+		result["grok_skill_path"] = grokPath
+		lines = append(lines, "Copied skill to "+grokPath)
 	}
 
 	if writer.IsStyled() {
@@ -307,6 +316,28 @@ func installSkillToCodex() (string, error) {
 	}
 	if err := writeSkillFile(skillPath, data); err != nil {
 		return "", fmt.Errorf("writing Codex skill file: %w", err)
+	}
+	return skillPath, nil
+}
+
+// installSkillToGrok copies the embedded SKILL.md into Grok's skills
+// directory ($GROK_HOME or ~/.grok). GROK_HOME can sit anywhere, so this is
+// a copy rather than a link — the same reason Codex copies.
+func installSkillToGrok() (string, error) {
+	skillPath := harness.GrokSkillPath()
+	if skillPath == "" {
+		return "", fmt.Errorf("cannot determine Grok home directory")
+	}
+
+	data, err := skills.FS.ReadFile("hey/SKILL.md")
+	if err != nil {
+		return "", fmt.Errorf("reading embedded skill: %w", err)
+	}
+	if err := claimSkillDir(filepath.Dir(skillPath)); err != nil {
+		return "", err
+	}
+	if err := writeSkillFile(skillPath, data); err != nil {
+		return "", fmt.Errorf("writing Grok skill file: %w", err)
 	}
 	return skillPath, nil
 }

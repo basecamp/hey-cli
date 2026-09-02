@@ -19,13 +19,14 @@ import (
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
-// isolateAgents makes agent detection deterministic: no claude/codex binary
-// on PATH and no ~/.local/bin, so only the ~/.claude and ~/.codex directories
-// a test creates count. Agent CLIs are never spawned.
+// isolateAgents makes agent detection deterministic: no claude/codex/grok
+// binary on PATH and no ~/.local/bin, so only the ~/.claude, ~/.codex and
+// ~/.grok directories a test creates count. Agent CLIs are never spawned.
 func isolateAgents(t *testing.T) {
 	t.Helper()
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("CODEX_HOME", "")
+	t.Setenv("GROK_HOME", "")
 	// The wizard installs shell completions too; without this it would read
 	// the shell of whoever runs the tests.
 	stubCompletionEnv(t, testCompletionEnv(t, "bash"))
@@ -87,7 +88,7 @@ func wizardData(t *testing.T, response output.Response) map[string]any {
 
 func TestSetupCommandRegistersAgentSubcommands(t *testing.T) {
 	root := newRootCmd()
-	for _, path := range [][]string{{"setup", "agents"}, {"setup", "claude"}, {"setup", "codex"}} {
+	for _, path := range [][]string{{"setup", "agents"}, {"setup", "claude"}, {"setup", "codex"}, {"setup", "grok"}} {
 		command, _, err := root.Find(path)
 		if err != nil || command.Name() != path[1] {
 			t.Errorf("%v not registered: %v", path, err)
@@ -870,7 +871,7 @@ func TestSetupRejectsListOnlyFormatsBeforeSideEffects(t *testing.T) {
 	isolateAgents(t)
 	server := quietServer(t)
 	for _, flag := range []string{"--ids-only", "--count"} {
-		for _, args := range [][]string{{"setup"}, {"setup", "agents"}, {"setup", "codex"}} {
+		for _, args := range [][]string{{"setup"}, {"setup", "agents"}, {"setup", "codex"}, {"setup", "grok"}} {
 			configHome := t.TempDir()
 			_, _, err := runAuthCommand(t, configHome, server.URL, "", false, append(args, flag)...)
 			if err == nil || !strings.Contains(err.Error(), flag+" is not supported") {

@@ -101,6 +101,23 @@ func TestSetupAgentsSingleDetectedAgentIsConnected(t *testing.T) {
 	}
 }
 
+func TestSetupAgentsSingleDetectedGrokIsConnected(t *testing.T) {
+	data, response := runSetupAgents(t, "", ".grok")
+	if got := stringList(t, data["attempted_agents"]); len(got) != 1 || got[0] != "grok" {
+		t.Errorf("attempted = %v", got)
+	}
+	if got := stringList(t, data["errors"]); len(got) != 0 {
+		t.Errorf("errors = %v", got)
+	}
+	agents := data["agents"].([]any)
+	if len(agents) != 1 || agents[0].(map[string]any)["plugin_installed"] != true {
+		t.Errorf("agents = %v", agents)
+	}
+	if response.Summary != "Installed baseline skill; connected Grok" {
+		t.Errorf("summary = %q", response.Summary)
+	}
+}
+
 func TestSetupAgentsAmbiguousDetectionNeverGuesses(t *testing.T) {
 	data, response := runSetupAgents(t, "", ".claude", ".codex")
 	if data["ambiguous"] != true {
@@ -120,24 +137,34 @@ func TestSetupAgentsAmbiguousDetectionNeverGuesses(t *testing.T) {
 
 func TestSetupAgentsAllAttemptsEveryAgent(t *testing.T) {
 	data, response := runSetupAgents(t, "all", ".claude", ".codex")
-	if got := stringList(t, data["attempted_agents"]); len(got) != 2 || got[0] != "claude" || got[1] != "codex" {
+	if got := stringList(t, data["attempted_agents"]); len(got) != 3 || got[0] != "claude" || got[1] != "codex" || got[2] != "grok" {
 		t.Errorf("attempted = %v", got)
 	}
 	// Claude cannot be connected without its binary: an error, a warning and
-	// manual remediation, never a silent success.
+	// manual remediation, never a silent success. Grok is not detected here
+	// (no ~/.grok), so its handler also fails closed.
 	errs := stringList(t, data["errors"])
-	if len(errs) == 0 || !strings.HasPrefix(errs[0], "claude: ") {
+	if len(errs) < 2 || !strings.HasPrefix(errs[0], "claude: ") {
 		t.Errorf("errors = %v", errs)
+	}
+	var sawGrok bool
+	for _, e := range errs {
+		if strings.HasPrefix(e, "grok: ") {
+			sawGrok = true
+		}
+	}
+	if !sawGrok {
+		t.Errorf("errors = %v, want a grok: failure", errs)
 	}
 	warnings := stringList(t, data["warnings"])
 	if len(warnings) == 0 || !strings.Contains(warnings[0], "Claude Code binary not found") {
 		t.Errorf("warnings = %v", warnings)
 	}
 	manual := stringList(t, data["manual_commands"])
-	if !contains(manual, "claude plugin install hey@37signals") || !contains(manual, "hey setup claude") {
+	if !contains(manual, "claude plugin install hey@37signals") || !contains(manual, "hey setup claude") || !contains(manual, "hey setup grok") {
 		t.Errorf("manual_commands = %v", manual)
 	}
-	if response.Summary != "Installed baseline skill; attempted Claude Code and Codex" {
+	if response.Summary != "Installed baseline skill; attempted Claude Code, Codex, and Grok" {
 		t.Errorf("summary = %q", response.Summary)
 	}
 }
@@ -158,6 +185,14 @@ func TestSetupAgentsExplicitSelectorTargetsThatAgent(t *testing.T) {
 		t.Errorf("selector = %v", data["selector"])
 	}
 	if got := stringList(t, data["attempted_agents"]); len(got) != 1 || got[0] != "codex" {
+		t.Errorf("attempted = %v", got)
+	}
+
+	data, _ = runSetupAgents(t, "Grok", ".claude", ".grok")
+	if data["selector"] != "grok" {
+		t.Errorf("selector = %v", data["selector"])
+	}
+	if got := stringList(t, data["attempted_agents"]); len(got) != 1 || got[0] != "grok" {
 		t.Errorf("attempted = %v", got)
 	}
 }
@@ -197,6 +232,21 @@ func TestSetupAgentCommandEnvelope(t *testing.T) {
 		t.Errorf("data = %v", data)
 	}
 	if response.Summary != "Codex connected" {
+		t.Errorf("summary = %q", response.Summary)
+	}
+
+	if err := os.MkdirAll(filepath.Join(home, ".grok"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, response, err = runAuthCommand(t, home, server.URL, "", true, "setup", "grok")
+	if err != nil {
+		t.Fatalf("setup grok: %v", err)
+	}
+	data = response.Data.(map[string]any)
+	if data["agent_detected"] != true || data["plugin_installed"] != true {
+		t.Errorf("grok data = %v", data)
+	}
+	if response.Summary != "Grok connected" {
 		t.Errorf("summary = %q", response.Summary)
 	}
 
@@ -278,6 +328,24 @@ func TestSetupCodexDoesNotFabricateCodex(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, ".codex")); !os.IsNotExist(err) {
 		t.Error("~/.codex was fabricated")
+	}
+}
+
+// `hey setup grok` on a machine without Grok must not create ~/.grok and
+// then count its own creation as detection.
+func TestSetupGrokDoesNotFabricateGrok(t *testing.T) {
+	isolateAgents(t)
+	home := t.TempDir()
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	_, _, err := runAuthCommand(t, home, server.URL, "", true, "setup", "grok")
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != "setup_incomplete" || cliErr.Message != "Grok not detected" {
+		t.Fatalf("error = %v, want setup_incomplete/Grok not detected", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".grok")); !os.IsNotExist(err) {
+		t.Error("~/.grok was fabricated")
 	}
 }
 
@@ -582,7 +650,7 @@ func TestSetupAgentsRemoveDeletesManagedSkillsAndPreservesUserFiles(t *testing.T
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	for _, dir := range []string{".claude", ".codex"} {
+	for _, dir := range []string{".claude", ".codex", ".grok"} {
 		if err := os.MkdirAll(filepath.Join(home, dir), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -594,6 +662,9 @@ func TestSetupAgentsRemoveDeletesManagedSkillsAndPreservesUserFiles(t *testing.T
 		t.Fatal(err)
 	}
 	if _, err := installSkillToCodex(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := installSkillToGrok(); err != nil {
 		t.Fatal(err)
 	}
 	baseline := filepath.Join(home, ".agents", "skills", "hey")
@@ -613,6 +684,7 @@ func TestSetupAgentsRemoveDeletesManagedSkillsAndPreservesUserFiles(t *testing.T
 	for _, path := range []string{
 		filepath.Join(home, ".claude", "skills", "hey"),
 		filepath.Join(home, ".codex", "skills", "hey"),
+		filepath.Join(home, ".grok", "skills", "hey"),
 		filepath.Join(baseline, skillFilename),
 		filepath.Join(baseline, ownershipMarkerFile),
 	} {
@@ -634,6 +706,7 @@ func TestSetupAgentsRemovePreservesUnmanagedSkills(t *testing.T) {
 		filepath.Join(home, ".agents", "skills", "hey"),
 		filepath.Join(home, ".claude", "skills", "hey"),
 		filepath.Join(home, ".codex", "skills", "hey"),
+		filepath.Join(home, ".grok", "skills", "hey"),
 	}
 	for _, path := range paths {
 		if err := os.MkdirAll(path, 0o755); err != nil {

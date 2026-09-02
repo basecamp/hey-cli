@@ -55,6 +55,14 @@ func runRemoveAgentSetup(cmd *cobra.Command) error {
 		}
 	}
 
+	if grokSkill := harness.GrokSkillPath(); grokSkill != "" {
+		if didRemove, removeErr := removeOwnedSkillFiles(filepath.Dir(grokSkill)); removeErr != nil {
+			failures = append(failures, "Grok skill: "+removeErr.Error())
+		} else if didRemove {
+			removed = append(removed, "Grok skill")
+		}
+	}
+
 	baseline := filepath.Join(home, ".agents", "skills", "hey")
 	if didRemove, removeErr := removeOwnedSkillFiles(baseline); removeErr != nil {
 		failures = append(failures, "agent skill: "+removeErr.Error())

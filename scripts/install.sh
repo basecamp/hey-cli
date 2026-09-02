@@ -14,7 +14,7 @@
 #                  and connect coding agents without prompting)
 #   HEY_SETUP_AGENT
 #                  Which coding agent(s) `setup agents` connects:
-#                  claude | codex | all | none (default: auto-detect a single
+#                  claude | codex | grok | all | none (default: auto-detect a single
 #                  agent; several detected connects none and lists them)
 #
 # Verification: the SHA-256 checksum is always verified against the release's
@@ -499,7 +499,7 @@ binary_supports_setup_agents() {
 
 # post_install_setup connects coding agents without prompting, but only when
 # the installed binary has the ownership-aware `setup agents` (it honors
-# HEY_SETUP_AGENT itself: claude|codex|all|none, unset = auto-detect one).
+# HEY_SETUP_AGENT itself: claude|codex|grok|all|none, unset = auto-detect one).
 # The jq selector keeps the machine-readable command's envelope out of the
 # human-facing installer while preserving its concise outcome.
 #

@@ -130,7 +130,7 @@ run_post_install_setup() {
 # printed next steps.
 @test "old binary: nothing is invoked beyond the capability probe" {
   write_stub old
-  for selector in "" claude codex all none; do
+  for selector in "" claude codex grok all none; do
     : > "$LOG"
     if [[ -n "$selector" ]]; then
       run_post_install_setup "export HEY_SETUP_AGENT=$selector"
@@ -142,6 +142,7 @@ run_post_install_setup() {
     [[ "$output" != *"skill install"* ]]
     [[ "$output" != *"setup claude"* ]]
     [[ "$output" != *"setup codex"* ]]
+    [[ "$output" != *"setup grok"* ]]
     [[ "$output" != *"setup agents"$'\n'* ]]
   done
 }

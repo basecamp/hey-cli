@@ -16,6 +16,7 @@ func refreshFixture(t *testing.T) (home string) {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("CODEX_HOME", "")
+	t.Setenv("GROK_HOME", "")
 	return home
 }
 
@@ -56,8 +57,9 @@ func TestRefreshSkillsUpdatesInstalledCopiesOnce(t *testing.T) {
 	stubVersion(t, "1.2.3")
 	skillPath := installStaleSkill(t, home)
 
-	// A Codex copy must be refreshed too.
+	// A Codex copy and a Grok copy must be refreshed too.
 	codexSkill := writeSkillFixture(t, filepath.Join(home, ".codex", "skills", "hey"), "# stale skill", true)
+	grokSkill := writeSkillFixture(t, filepath.Join(home, ".grok", "skills", "hey"), "# stale skill", true)
 
 	if !refreshSkillsIfVersionChanged() {
 		t.Fatal("first run on a new version should refresh")
@@ -67,7 +69,7 @@ func TestRefreshSkillsUpdatesInstalledCopiesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{skillPath, codexSkill} {
+	for _, path := range []string{skillPath, codexSkill, grokSkill} {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
@@ -174,6 +176,7 @@ func TestRefreshSkillsPreservesUnmanagedSkills(t *testing.T) {
 		writeSkillFixture(t, filepath.Join(home, ".agents", "skills", "hey"), custom, false),
 		writeSkillFixture(t, filepath.Join(home, ".claude", "skills", "hey"), custom, false),
 		writeSkillFixture(t, filepath.Join(home, ".codex", "skills", "hey"), custom, false),
+		writeSkillFixture(t, filepath.Join(home, ".grok", "skills", "hey"), custom, false),
 	}
 
 	if refreshSkillsIfVersionChanged() {
@@ -281,6 +284,38 @@ func TestRefreshSkillsRescansWhenCodexHomeChanges(t *testing.T) {
 	data, err := os.ReadFile(staleB)
 	if err != nil || string(data) == "# stale skill" {
 		t.Errorf("skill in the newly active Codex home was not refreshed: %v", err)
+	}
+	if refreshSkillsIfVersionChanged() {
+		t.Error("stable again: refresh must be a no-op")
+	}
+}
+
+// The sentinel tracks the active Grok home: a marked, stale skill in a
+// Grok home that was inactive during the first post-upgrade run is
+// refreshed as soon as that home becomes active, not at the next release.
+func TestRefreshSkillsRescansWhenGrokHomeChanges(t *testing.T) {
+	home := refreshFixture(t)
+	stubVersion(t, "9.9.9")
+	installStaleSkill(t, home)
+
+	homeA := t.TempDir()
+	t.Setenv("GROK_HOME", homeA)
+	if !refreshSkillsIfVersionChanged() {
+		t.Fatal("first run should refresh")
+	}
+	if refreshSkillsIfVersionChanged() {
+		t.Fatal("same home: second run is a no-op")
+	}
+
+	homeB := t.TempDir()
+	staleB := writeSkillFixture(t, filepath.Join(homeB, "skills", "hey"), "# stale skill", true)
+	t.Setenv("GROK_HOME", homeB)
+	if !refreshSkillsIfVersionChanged() {
+		t.Fatal("switching Grok homes should rescan")
+	}
+	data, err := os.ReadFile(staleB)
+	if err != nil || string(data) == "# stale skill" {
+		t.Errorf("skill in the newly active Grok home was not refreshed: %v", err)
 	}
 	if refreshSkillsIfVersionChanged() {
 		t.Error("stable again: refresh must be a no-op")
