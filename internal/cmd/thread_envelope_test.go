@@ -188,3 +188,104 @@ func TestThreadReadBoundsTheRecipientsItRetains(t *testing.T) {
 		t.Error("a cut list must say it was cut")
 	}
 }
+
+// The same question through the read a caller actually makes. `bcc_disclosed` says
+// whether HEY served the BCC line, so an explicitly empty one — proof that nobody was
+// blind-copied — is no longer the same shape as one HEY withheld.
+func TestThreadReadDistinguishesAnEmptyBCCLineFromAWithheldOne(t *testing.T) {
+	tests := []struct {
+		name          string
+		addressed     string
+		wantDisclosed bool
+		wantBCC       []string
+	}{
+		{
+			name:      "the addressed object is omitted entirely",
+			addressed: ``,
+		},
+		{
+			name:      "blindcopied is omitted",
+			addressed: `,"addressed":{"directly":[{"id":100,"email_address":"alice@example.com"}]}`,
+		},
+		{
+			name:      "blindcopied is null",
+			addressed: `,"addressed":{"directly":[{"id":100,"email_address":"alice@example.com"}],"blindcopied":null}`,
+		},
+		{
+			name:          "blindcopied is an explicitly empty array",
+			addressed:     `,"addressed":{"directly":[{"id":100,"email_address":"alice@example.com"}],"blindcopied":[]}`,
+			wantDisclosed: true,
+		},
+		{
+			name:          "blindcopied carries addresses",
+			addressed:     `,"addressed":{"blindcopied":[{"id":102,"email_address":"carol@example.org"}]}`,
+			wantDisclosed: true,
+			wantBCC:       []string{"carol@example.org"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := threadEnvelopeServer(t, fmt.Sprintf(
+				`{"id":9101,"subject":"Inovo Customer Update — Week 12","content":"<p>Hi Alice,</p>",
+				  "sender":{"id":42,"email_address":"nova@example.com"}%s}`, tt.addressed))
+
+			stdout, _, err := runCLIRaw(t, server, "--json", "thread", "read", "7")
+			if err != nil {
+				t.Fatalf("thread read: %v", err)
+			}
+			var envelope threadReadEnvelope
+			if err := json.Unmarshal([]byte(stdout), &envelope); err != nil {
+				t.Fatalf("thread read did not answer JSON (%v): %s", err, stdout)
+			}
+			addressed := envelope.Data[0].Addressed
+			if addressed.BCCDisclosed != tt.wantDisclosed {
+				t.Errorf("bcc_disclosed = %v, want %v", addressed.BCCDisclosed, tt.wantDisclosed)
+			}
+			want := tt.wantBCC
+			if want == nil {
+				want = []string{}
+			}
+			if !equalStrings(addressed.BCC, want) {
+				t.Errorf("bcc = %v, want %v", addressed.BCC, want)
+			}
+			// Whatever the BCC line said, the rest of the envelope is untouched.
+			if envelope.Data[0].Subject != "Inovo Customer Update — Week 12" {
+				t.Errorf("subject = %q", envelope.Data[0].Subject)
+			}
+			if envelope.Data[0].Sender.EmailAddress != "nova@example.com" {
+				t.Errorf("sender = %q", envelope.Data[0].Sender.EmailAddress)
+			}
+		})
+	}
+}
+
+// A BCC line long enough to be cut is disclosed and truncated at once: the bound is
+// about what is kept, not about whether HEY answered.
+func TestThreadReadKeepsBCCDisclosureWhenTheLineIsCut(t *testing.T) {
+	recipients := make([]string, 0, maxRetainedRecipients+5)
+	for i := range maxRetainedRecipients + 5 {
+		recipients = append(recipients, fmt.Sprintf(`{"id":%d,"email_address":"reader%d@example.org"}`, 300+i, i))
+	}
+	server := threadEnvelopeServer(t, fmt.Sprintf(`{
+		"id": 9101, "subject": "Inovo Customer Update — Week 12", "content": "<p>Hi.</p>",
+		"sender": {"id": 42, "email_address": "nova@example.com"},
+		"addressed": {"blindcopied": [%s]}
+	}`, strings.Join(recipients, ",")))
+
+	stdout, _, err := runCLIRaw(t, server, "--json", "thread", "read", "7")
+	if err != nil {
+		t.Fatalf("thread read: %v", err)
+	}
+	var envelope threadReadEnvelope
+	if err := json.Unmarshal([]byte(stdout), &envelope); err != nil {
+		t.Fatalf("thread read did not answer JSON (%v): %s", err, stdout)
+	}
+	addressed := envelope.Data[0].Addressed
+	if !addressed.BCCDisclosed || !addressed.Truncated {
+		t.Errorf("disclosed = %v truncated = %v, want both", addressed.BCCDisclosed, addressed.Truncated)
+	}
+	if len(addressed.BCC) != maxRetainedRecipients {
+		t.Errorf("bcc = %d addresses, want the bound of %d", len(addressed.BCC), maxRetainedRecipients)
+	}
+}

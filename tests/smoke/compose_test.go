@@ -88,6 +88,15 @@ func TestCompose(t *testing.T) {
 	if len(verification.Recipients.To) != 1 || verification.Recipients.To[0] != "david@basecamp.com" {
 		t.Errorf("verified recipients = %v, want exactly the address it was sent to", verification.Recipients.To)
 	}
+	// Nothing was blind-copied. bcc_disclosed says whether the empty list is evidence of
+	// that or just HEY withholding the line — this is the one place a real server can
+	// tell us which it does, so record it rather than asserting a shape we are guessing
+	// at. A disclosed line, though, must be empty: nobody was BCC'd.
+	t.Logf("live BCC disclosure: bcc_disclosed=%v bcc=%v",
+		verification.Recipients.BCCDisclosed, verification.Recipients.BCC)
+	if verification.Recipients.BCCDisclosed && len(verification.Recipients.BCC) != 0 {
+		t.Errorf("bcc = %v, want nobody — this send named no BCC", verification.Recipients.BCC)
+	}
 	if !verification.MatchesSent.Subject || !verification.MatchesSent.Body || !verification.MatchesSent.Recipients {
 		t.Errorf("matches_sent = %+v, want every comparison to hold", verification.MatchesSent)
 	}

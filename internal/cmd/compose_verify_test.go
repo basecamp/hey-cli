@@ -493,3 +493,147 @@ func TestVerifiedBodyLeavesAnOversizedBodyToItsDigest(t *testing.T) {
 		t.Error("the digest must cover the whole body, bound or no bound")
 	}
 }
+
+// The verification carries the same semantics as `hey thread read`: a BCC line HEY
+// served is disclosed even when it is empty, and one HEY withheld is not. Without that,
+// a caller cannot prove the message's exact destination set — an empty BCC it was told
+// about and one it was not had the same shape.
+func TestComposeVerificationDistinguishesAnEmptyBCCLineFromAWithheldOne(t *testing.T) {
+	tests := []struct {
+		name          string
+		addressed     string
+		wantDisclosed bool
+		wantBCC       []string
+	}{
+		{
+			name:      "blindcopied is omitted",
+			addressed: `,"addressed":{"directly":[{"id":100,"email_address":"alice@example.com"}]}`,
+		},
+		{
+			name:      "blindcopied is null",
+			addressed: `,"addressed":{"directly":[{"id":100,"email_address":"alice@example.com"}],"blindcopied":null}`,
+		},
+		{
+			name:          "blindcopied is an explicitly empty array",
+			addressed:     `,"addressed":{"directly":[{"id":100,"email_address":"alice@example.com"}],"blindcopied":[]}`,
+			wantDisclosed: true,
+		},
+		{
+			name:          "blindcopied carries the address it was sent to",
+			addressed:     `,"addressed":{"directly":[{"id":100,"email_address":"alice@example.com"}],"blindcopied":[{"id":102,"email_address":"carol@example.org"}]}`,
+			wantDisclosed: true,
+			wantBCC:       []string{"carol@example.org"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server, sent := composeSendServer(t)
+			sent.ReadbackJSON = fmt.Sprintf(
+				`{"id":9101,"subject":"Inovo Customer Update — Week 12","content":"<p>Body.</p>",
+				  "url":"https://app.hey.com/topics/7742",
+				  "sender":{"id":42,"name":"Nova Desk","email_address":"nova@example.com"}%s}`, tt.addressed)
+
+			stdout, _, err := runCLIRaw(t, server, "--json", "compose",
+				"--to", "alice@example.com", "--bcc", "carol@example.org",
+				"--subject", "Inovo Customer Update — Week 12", "-m", "Body.")
+			if err != nil {
+				t.Fatalf("compose: %v", err)
+			}
+
+			verification := composeJSON(t, stdout).Data.Verification
+			if verification.Recipients.BCCDisclosed != tt.wantDisclosed {
+				t.Errorf("bcc_disclosed = %v, want %v",
+					verification.Recipients.BCCDisclosed, tt.wantDisclosed)
+			}
+			want := tt.wantBCC
+			if want == nil {
+				want = []string{}
+			}
+			if !equalStrings(verification.Recipients.BCC, want) {
+				t.Errorf("bcc = %v, want %v", verification.Recipients.BCC, want)
+			}
+			// Disclosure says nothing about the rest of the envelope, which is read the
+			// same way whatever the BCC line did.
+			if wantTo := []string{"alice@example.com"}; !equalStrings(verification.Recipients.To, wantTo) {
+				t.Errorf("to = %v, want %v", verification.Recipients.To, wantTo)
+			}
+			if verification.Subject != "Inovo Customer Update — Week 12" {
+				t.Errorf("subject = %q", verification.Subject)
+			}
+			if verification.Sender.EmailAddress != "nova@example.com" {
+				t.Errorf("sender = %q", verification.Sender.EmailAddress)
+			}
+			if verification.Status != "verified" {
+				t.Errorf("status = %q, want verified — every disclosure here is consistent with the send", verification.Status)
+			}
+			if !verification.MatchesSent.Recipients {
+				t.Error("no unexpected recipient came back, so the comparison holds")
+			}
+		})
+	}
+}
+
+// A readback carrying no addressing at all discloses nothing and proves nothing: every
+// line is empty and undisclosed, and the To line the message was sent to did not come
+// back, which is a mismatch rather than a quiet pass.
+func TestComposeVerificationTreatsAMissingAddressedObjectAsUndisclosed(t *testing.T) {
+	server, sent := composeSendServer(t)
+	sent.ReadbackJSON = `{
+		"id": 9101, "subject": "Inovo Customer Update — Week 12", "content": "<p>Body.</p>",
+		"sender": {"id": 42, "email_address": "nova@example.com"}
+	}`
+
+	stdout, _, err := runCLIRaw(t, server, "--json", "compose",
+		"--to", "alice@example.com", "--bcc", "carol@example.org",
+		"--subject", "Inovo Customer Update — Week 12", "-m", "Body.")
+	if err != nil {
+		t.Fatalf("compose: %v", err)
+	}
+
+	verification := composeJSON(t, stdout).Data.Verification
+	if verification.Recipients.BCCDisclosed {
+		t.Error("nothing was served, so nothing is disclosed")
+	}
+	if len(verification.Recipients.To) != 0 || len(verification.Recipients.BCC) != 0 {
+		t.Errorf("recipients = %+v, want nothing invented", verification.Recipients)
+	}
+	if verification.MatchesSent.Recipients {
+		t.Error("the To line it was sent to did not come back, so the comparison must not hold")
+	}
+	if verification.Status != "mismatch" {
+		t.Errorf("status = %q, want mismatch", verification.Status)
+	}
+}
+
+// A disclosed BCC line naming somebody nobody asked for is still the failure this
+// contract exists to catch.
+func TestComposeVerificationRefusesAnUnexpectedDisclosedBCC(t *testing.T) {
+	server, sent := composeSendServer(t)
+	sent.ReadbackJSON = `{
+		"id": 9101, "subject": "Inovo Customer Update — Week 12", "content": "<p>Body.</p>",
+		"sender": {"id": 42, "email_address": "nova@example.com"},
+		"addressed": {
+			"directly": [{"id": 100, "email_address": "alice@example.com"}],
+			"blindcopied": [{"id": 199, "email_address": "mallory@example.com"}]
+		}
+	}`
+
+	stdout, _, err := runCLIRaw(t, server, "--json", "compose",
+		"--to", "alice@example.com", "--bcc", "carol@example.org",
+		"--subject", "Inovo Customer Update — Week 12", "-m", "Body.")
+	if err != nil {
+		t.Fatalf("compose: %v", err)
+	}
+
+	verification := composeJSON(t, stdout).Data.Verification
+	if !verification.Recipients.BCCDisclosed {
+		t.Error("a served blindcopied line is disclosed even when it is wrong")
+	}
+	if verification.MatchesSent.Recipients {
+		t.Error("a blind-copied recipient nobody asked for must not compare equal")
+	}
+	if verification.Status != "mismatch" {
+		t.Errorf("status = %q, want mismatch", verification.Status)
+	}
+}

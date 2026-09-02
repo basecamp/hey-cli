@@ -16,11 +16,16 @@ const maxRetainedRecipients = 100
 // meant to and nowhere else, so it is read off the message HEY answered with rather
 // than inferred from a position in a list or found in the body.
 //
-// BCCDisclosed is the honest part. HEY does not distinguish "there was no BCC" from "we
-// are not telling you the BCC" — both arrive as no blindcopied recipients at all — so
-// BCC being empty is never proof that nobody was blind-copied. BCCDisclosed is true only
-// when HEY actually served addresses, and a caller that must not accept an unexpected
-// recipient reads it before treating an empty BCC as settled.
+// BCCDisclosed is the honest part, and it answers "did HEY tell us the BCC line" rather
+// than "was anybody on it". Those are different questions, and reading the second as the
+// first left a caller unable to prove a message's exact destinations: an empty BCC HEY
+// served — which is proof that nobody was blind-copied — had the same shape as one HEY
+// withheld, which proves nothing at all.
+//
+// So it is presence, not population: true when the blindcopied field arrived, an
+// explicitly empty array included, and false when it was omitted, null, or there was no
+// addressing at all. A caller that must not accept an unexpected recipient reads it
+// before treating an empty BCC as settled — false still means unknown.
 type addressedEnvelope struct {
 	To           []string `json:"to"`
 	CC           []string `json:"cc"`
@@ -31,6 +36,16 @@ type addressedEnvelope struct {
 }
 
 // addressedFrom describes HEY's addressing in the CLI's shape, within the bound.
+//
+// Disclosure is read from the decoded slice's nil-ness, which is where the presence of
+// the field survives: encoding/json leaves an omitted or null array nil and makes an
+// explicit `[]` non-nil, generated.Message declares no unmarshaler of its own to flatten
+// the two, and threadload's retained copies the slice header rather than rebuilding it.
+// It is deliberately not read from len(bcc) — that would report a line HEY served as
+// empty as withheld — nor from what the caller asked to send, which is not evidence of
+// anything the server did. TestBlindcopiedPresenceSurvivesTheSDKDecode pins the
+// invariant through a real HTTP response, since it is the kind that would otherwise
+// break in silence.
 func addressedFrom(addressed generated.Addressed) addressedEnvelope {
 	to, toCut := boundedEmails(addressed.Directly)
 	cc, ccCut := boundedEmails(addressed.Copied)
@@ -39,7 +54,7 @@ func addressedFrom(addressed generated.Addressed) addressedEnvelope {
 		To:           to,
 		CC:           cc,
 		BCC:          bcc,
-		BCCDisclosed: len(bcc) > 0,
+		BCCDisclosed: addressed.Blindcopied != nil,
 		Truncated:    toCut || ccCut || bccCut,
 	}
 }

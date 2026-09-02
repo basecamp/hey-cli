@@ -77,8 +77,11 @@ type composeMatches struct {
 	Subject bool `json:"subject"`
 	Body    bool `json:"body"`
 	// Recipients holds when the To and CC lines are exactly the ones asked for and
-	// every BCC address served back was asked for too. An undisclosed BCC does not
-	// break it — HEY commonly serves none — but a recipient nobody asked for does.
+	// every BCC address served back was asked for too. It is the "nobody unexpected"
+	// question, so a BCC line HEY did not serve does not break it and neither does a
+	// disclosed line that is shorter than what was asked for; a recipient nobody asked
+	// for does. Whether a requested BCC must also appear is the caller's policy, and
+	// Recipients.BCCDisclosed is what tells it whether the answer is evidence.
 	Recipients bool `json:"recipients"`
 }
 
@@ -186,10 +189,15 @@ func bodyDigest(markdown string) string {
 // recipientsMatch reports whether the message reached exactly who it was meant to.
 //
 // To and CC must be the sets that were asked for, in any order. BCC is one-sided: HEY
-// serves no blindcopied line back for a message it delivered, and an empty list is not
-// proof that nobody was blind-copied, so a BCC that came back must have been asked for
-// but one that did not come back costs nothing. What that leaves refused is the case
-// worth refusing — a recipient nobody asked for.
+// may serve a delivered message's blindcopied line or withhold it, so a BCC that came
+// back must have been asked for while one that did not come back costs nothing. What
+// that leaves refused is the case worth refusing — a recipient nobody asked for.
+//
+// A caller that needs the stronger claim — that the BCC line is exactly what it asked
+// for — reads addressedEnvelope.BCCDisclosed and the BCC list itself and decides for
+// itself. This function deliberately does not make that call: an absent line and an
+// empty one mean different things, and only the caller knows which it is willing to
+// accept.
 func recipientsMatch(sent composeSent, got addressedEnvelope) bool {
 	return sameAddresses(sent.To, got.To) &&
 		sameAddresses(sent.CC, got.CC) &&
