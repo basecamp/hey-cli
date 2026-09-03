@@ -94,7 +94,11 @@ Configuration (the base URL, the default linked account, the Imbox's cover, and 
 
 ### CLI
 
-Remember to update the examples in the README when you change, add or remove CLI commands.
+The README is the front door, not the manual: install, first run, a dozen examples, and
+links. Keep it that way. When you change, add or remove a command, the behaviour goes in
+the command's `--help` text and its section of `docs/cli.md` (`docs/tui.md` for the TUI,
+`docs/agents.md` for the skill and MCP, `docs/install.md` for installing and upgrading).
+Touch the README only if one of its examples no longer runs or a command it names is gone.
 
 ### HTML content
 

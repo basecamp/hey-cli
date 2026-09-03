@@ -33,6 +33,15 @@ Run with race detector:
 make race-test
 ```
 
+Cross-package coverage, enforcing the floor set in the Makefile:
+
+```sh
+make coverage
+```
+
+It writes `coverage.out`, `coverage.func.txt` and `coverage.packages.txt`, then prints a
+package summary and the lowest-covered functions.
+
 The bats suite covers the installers and release scripts (`scripts/install.sh`,
 `scripts/install.ps1`, `scripts/notify-issue.sh`, …), which Go tests cannot reach:
 
