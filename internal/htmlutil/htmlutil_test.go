@@ -310,14 +310,20 @@ func TestToTextSkipsDecorativeImageAttachments(t *testing.T) {
 }
 
 func TestExtractImageURLsTrixFigure(t *testing.T) {
+	// The small figure is a named upload, not decoration: its JSON dimensions are the
+	// file's intrinsic size, so the decorative-image rule does not apply to figures.
 	h := `<figure data-trix-attachment='{"url":"/rails/blobs/abc/image.png","filename":"image.png","contentType":"image/png"}'></figure>
+<figure data-trix-attachment='{"url":"/rails/blobs/abc/pixel-icon.png","filename":"pixel-icon.png","contentType":"image/png","width":32,"height":32}'></figure>
 <figure data-trix-attachment='{"url":"/rails/blobs/abc/report.pdf","filename":"report.pdf","contentType":"application/pdf"}'></figure>`
 	urls := ExtractImageURLs(h)
-	if len(urls) != 1 {
-		t.Fatalf("ExtractImageURLs trix got %d urls, want 1", len(urls))
+	if len(urls) != 2 {
+		t.Fatalf("ExtractImageURLs trix got %d urls, want 2", len(urls))
 	}
 	if urls[0] != "/rails/blobs/abc/image.png" {
 		t.Errorf("url[0] = %q, want %q", urls[0], "/rails/blobs/abc/image.png")
+	}
+	if urls[1] != "/rails/blobs/abc/pixel-icon.png" {
+		t.Errorf("url[1] = %q, want the named small upload", urls[1])
 	}
 }
 

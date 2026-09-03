@@ -193,6 +193,37 @@ func TestToMarkdownTrixImageAttachment(t *testing.T) {
 	}
 }
 
+// A Trix figure is a user's own upload, named by its filename, and the width and
+// height in its JSON are the file's intrinsic size — not a template's display hint.
+// A named upload is content whatever its pixel size, so the decorative-image rule
+// deliberately does not apply to figures.
+func TestToMarkdownTrixFigureSizeIsNotDecoration(t *testing.T) {
+	for _, dims := range []string{`,"width":32,"height":32`, `,"width":2048,"height":1536`, ``} {
+		got := toMarkdown(`<figure data-trix-attachment='{"url":"/rails/blobs/team.png","filename":"team.png","contentType":"image/png"` + dims + `}'></figure>`)
+		want := "![team.png](/rails/blobs/team.png)"
+		if got != want {
+			t.Errorf("ToMarkdown with dims %q = %q, want %q", dims, got, want)
+		}
+	}
+}
+
+// The editors round-trip a body through ToMarkdown and FromMarkdown — journal edit,
+// draft edit, contact notes — so what a user can author must survive the pair: a
+// named image keeps its reference whatever its size, and a repeated link stays
+// repeated.
+func TestMarkdownRoundTripPreservesAuthoredContent(t *testing.T) {
+	md := toMarkdown(`<div><figure data-trix-attachment='{"url":"/rails/blobs/team.png","filename":"team.png","contentType":"image/png","width":48,"height":48}'></figure>
+		<div><a href="https://example.com/rsvp">RSVP</a></div>
+		<div><a href="https://example.com/rsvp">RSVP</a></div></div>`)
+	html := FromMarkdown(md)
+	if !strings.Contains(html, "/rails/blobs/team.png") {
+		t.Errorf("round trip should keep the named image, got %q", html)
+	}
+	if got := strings.Count(html, "https://example.com/rsvp"); got != 2 {
+		t.Errorf("round trip should keep both links, got %d in %q", got, html)
+	}
+}
+
 func TestToMarkdownTrixFileAttachment(t *testing.T) {
 	got := toMarkdown(`<figure data-trix-attachment='{"url":"/rails/blobs/q3.pdf","filename":"q3-report.pdf","contentType":"application/pdf"}'></figure>`)
 	want := "📎 q3-report.pdf"
@@ -380,6 +411,12 @@ func TestToMarkdownKeepsRepeatedContent(t *testing.T) {
 			name: "repeated lines with prose after a link stay",
 			in:   `<p><a href="https://example.com/vote">Vote here</a> (before Friday)</p><p><a href="https://example.com/vote">Vote here</a> (before Friday)</p>`,
 			want: "[Vote here](https://example.com/vote) (before Friday)\n\n[Vote here](https://example.com/vote) (before Friday)",
+		},
+		{
+			name: "the same authored link said twice stays",
+			in: `<p><a href="https://example.com/vote">Vote here</a></p><p><a href="https://example.com/vote">Vote here</a></p>
+				<div><a href="https://storage.app.basecamp.com/blobs/9f2c/download/README"><action-text-attachment content-type="image" url="https://gopher.hey.com/signed/preview"></action-text-attachment></a></div>`,
+			want: "[Vote here](https://example.com/vote)\n\n[Vote here](https://example.com/vote)\n\n[image](https://storage.app.basecamp.com/blobs/9f2c/download/README)",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
