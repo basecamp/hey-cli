@@ -23,16 +23,16 @@ A CLI and TUI for HEY: your email and calendar, in the terminal and in your codi
 
 ## Install
 
-**Omarchy**
-
-```bash
-omarchy-mise-install github:basecamp/hey-cli hey
-```
-
 **mise**
 
 ```bash
 mise use -g github:basecamp/hey-cli
+```
+
+**Omarchy**
+
+```bash
+omarchy-mise-install github:basecamp/hey-cli hey
 ```
 
 **macOS / Linux / WSL2**
