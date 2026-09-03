@@ -38,6 +38,11 @@ type markdownizer struct {
 	breaking      bool
 	depth         int
 	quoteDepth    int
+	// derivedLinks are the links linkedImage wrote with a label it derived rather
+	// than one the author gave, keyed by the rendered line: only these may collapse
+	// into a neighbouring link. Two lines with the same bytes and the same
+	// destination are the same link, which is why keying on content is sound.
+	derivedLinks map[string]string
 }
 
 // listLevel is one level of list nesting: its kind, its count so far, and the prefix
@@ -57,26 +62,28 @@ func inlineMarkdown(n *html.Node) string {
 
 func (m *markdownizer) String() string {
 	m.flushLine()
-	result := strings.Join(collapseRepeatedLinkBlocks(m.lines), "\n")
+	result := strings.Join(m.collapseDerivedLinkBlocks(m.lines), "\n")
 	for strings.Contains(result, "\n\n\n") {
 		result = strings.ReplaceAll(result, "\n\n\n", "\n\n")
 	}
 	return strings.TrimSpace(result)
 }
 
-// collapseRepeatedLinkBlocks collapses adjacent whole-line links that say one thing.
-// An email attachment tile is two anchors at the same destination — a preview image
-// and a filename — and once linkedImage names the first from that destination, both
-// render as the same line, said once. A filename the destination cannot name (no dot,
-// or too long) leaves the preview on the generic label instead, so a link labeled
-// genericImageLabel also collapses into an adjacent link at the same destination,
-// whichever side carries the name: the destinations' equality is the proof it adds
-// nothing. Only bare whole-line links collapse: a repeated line of prose, a list item
-// or a quoted line is content, and stays.
-func collapseRepeatedLinkBlocks(lines []string) []string {
+// collapseDerivedLinkBlocks drops what a derived link says twice. linkedImage names a
+// preview from its destination, or falls back to the generic label, when the image
+// carries no name of its own — the attachment tile's thumbnail beside its filename
+// link — and a whole-line link written that way says nothing an adjacent link at the
+// same destination does not: it collapses into that neighbour, whichever side the
+// named link is on. Links the author wrote are never collapsed — a repeated line of
+// prose, a list item, a quoted line, and the same link said twice on purpose all stay.
+func (m *markdownizer) collapseDerivedLinkBlocks(lines []string) []string {
+	if len(m.derivedLinks) == 0 {
+		return lines
+	}
 	collapsed := make([]string, 0, len(lines))
 	prevAt := -1 // where the previous single-link block sits in collapsed
-	prevLabel, prevDest := "", ""
+	prevDest := ""
+	prevDerived := false
 	for i := 0; i < len(lines); {
 		if lines[i] == "" {
 			collapsed = append(collapsed, lines[i])
@@ -87,24 +94,26 @@ func collapseRepeatedLinkBlocks(lines []string) []string {
 		for end < len(lines) && lines[end] != "" {
 			end++
 		}
-		label, dest, single := "", "", false
+		dest, single := "", false
 		if end == i+1 {
-			label, dest, single = parseWholeLineLink(lines[i])
+			_, dest, single = parseWholeLineLink(lines[i])
 		}
-		switch {
-		case single && prevAt >= 0 && dest == prevDest && (label == prevLabel || label == genericImageLabel):
-			// The same line again, or a generic twin of the link already kept.
-			i = end
-			continue
-		case single && prevAt >= 0 && dest == prevDest && prevLabel == genericImageLabel:
-			// The named side arrived second; it replaces the generic line.
-			collapsed[prevAt] = lines[i]
-			prevLabel = label
-			i = end
-			continue
+		if single && prevAt >= 0 && dest == prevDest {
+			if _, derived := m.derivedLinks[lines[i]]; derived {
+				i = end
+				continue
+			}
+			if prevDerived {
+				// The named side arrived second; it replaces the derived line.
+				collapsed[prevAt] = lines[i]
+				prevDerived = false
+				i = end
+				continue
+			}
 		}
 		if single {
-			prevAt, prevLabel, prevDest = len(collapsed), label, dest
+			_, prevDerived = m.derivedLinks[lines[i]]
+			prevAt, prevDest = len(collapsed), dest
 		} else {
 			prevAt = -1
 		}
@@ -543,9 +552,7 @@ func soleLinkedImage(n *html.Node) (image *html.Node, sole bool) {
 	}
 }
 
-// genericImageLabel names a linked image nothing else names. collapseRepeatedLinkBlocks
-// treats a link wearing it as saying nothing an adjacent link at the same destination
-// does not.
+// genericImageLabel names a linked image nothing else names.
 const genericImageLabel = "image"
 
 // linkedImage writes an anchor whose whole content is one image. The image is the face
@@ -561,15 +568,31 @@ func (m *markdownizer) linkedImage(image *html.Node, dest string) {
 		return
 	}
 	label := ""
-	for _, name := range []string{getAttr(image, "caption"), getAttr(image, "alt"), getAttr(image, "filename"), destinationFilename(dest)} {
+	for _, name := range []string{getAttr(image, "caption"), getAttr(image, "alt"), getAttr(image, "filename")} {
 		if label = escapeText(strings.Join(strings.Fields(name), " "), "["); label != "" {
 			break
 		}
 	}
-	if label == "" {
-		label = genericImageLabel
+	derived := label == ""
+	if derived {
+		if label = escapeText(strings.Join(strings.Fields(destinationFilename(dest)), " "), "["); label == "" {
+			label = genericImageLabel
+		}
 	}
-	m.write("[" + label + "](" + dest + ")")
+	line := "[" + label + "](" + dest + ")"
+	if derived {
+		m.recordDerivedLink(line, dest)
+	}
+	m.write(line)
+}
+
+// recordDerivedLink remembers a link written with a derived label, so that
+// collapseDerivedLinkBlocks may fold it into a neighbour at the same destination.
+func (m *markdownizer) recordDerivedLink(line, dest string) {
+	if m.derivedLinks == nil {
+		m.derivedLinks = map[string]string{}
+	}
+	m.derivedLinks[line] = dest
 }
 
 // destinationFilename is the filename a destination ends in, when it ends in one: the
