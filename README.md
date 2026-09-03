@@ -21,7 +21,7 @@
 
 **HEY! It's the command-line interface!**
 
-Your HEY email and calendar, in the terminal and in your coding agent's hands.
+A CLI and TUI for HEY: your email and calendar, in the terminal and in your coding agent's hands.
 
 ## Install
 
