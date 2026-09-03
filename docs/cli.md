@@ -24,6 +24,19 @@ hey help environment       # supported HEY_* environment variables
 hey help linked-accounts   # account selection and precedence
 ```
 
+## Setup
+
+`hey setup` runs the first-run wizard again at any time: browser sign-in, a check of who
+you are signed in as, and connecting the coding agents it detects (Claude Code, Codex).
+`--skip-agents` leaves agent integrations unchanged and `--skip-omarchy` leaves the
+Omarchy integration unchanged. `--silent-success` keeps any required sign-in visible,
+shows an installation spinner, and ends a successful run with `SETUP COMPLETE`; failure
+guidance is still shown.
+
+At a terminal, a logged-out data command (`hey box list`, say) offers to sign you in on
+the spot. Piped or `--json` runs never prompt: they fail with `Not logged in` (exit 3) so
+scripts and agents can handle it.
+
 ## Authentication
 
 ```bash
@@ -83,7 +96,8 @@ Structured data commands support `--json` for full output and `--jq '<expression
 filter that output without an external `jq` binary. `--jq` implies `--json` and filters
 the full success envelope; combine it with `--quiet` to filter result data directly.
 Errors retain their complete structured envelope. Commands with dedicated raw output
-(`auth token`, `completion`, `skill`, `tui`, and `--version`) reject `--jq`.
+(`hey auth token`, `hey shell-completion generate`, `hey setup`, `hey skill`, `hey tui`,
+and `hey --version`) reject `--jq`.
 
 Use `--base-url` to override the server URL and `--account <id|all>` to select a linked
 mail account.

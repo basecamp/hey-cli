@@ -76,7 +76,8 @@ hey watch --box imbox --events new      # a line of JSON for every new email, as
 ```
 
 Every command explains itself with `--help`. At a terminal the output is made for reading.
-Piped, it is JSON, and `--jq` filters it without a separate `jq`:
+Piped, a command that returns data writes JSON, and `--jq` filters it without a separate
+`jq`:
 
 ```bash
 hey box view imbox --jq '.data.postings[] | {topic_id, subject}'

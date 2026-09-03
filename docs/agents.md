@@ -1,7 +1,7 @@
 # Coding agents and MCP
 
-hey-cli is built to be driven by an agent as readily as by a person: every command answers
-`--json`, the exit codes are stable (`hey help exit-codes`), and `hey commands --json`
+hey-cli is built to be driven by an agent as readily as by a person: every command that returns
+data answers `--json`, the exit codes are stable (`hey help exit-codes`), and `hey commands --json`
 describes the whole surface. This page covers the two integrations that ship with it: an
 agent skill for Claude Code and Codex, and an MCP server.
 
