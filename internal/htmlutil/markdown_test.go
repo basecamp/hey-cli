@@ -221,6 +221,24 @@ func TestToMarkdownEmbeddedHTMLAttachment(t *testing.T) {
 	}
 }
 
+// A nested action-text-attachment carries its HTML in a content attribute.
+func TestToMarkdownEmbeddedActionTextAttachment(t *testing.T) {
+	got := toMarkdown(`<figure data-trix-attachment='{"contentType":"text/html","content":"<action-text-attachment content-type=\"text/html\" content=\"<p>Dear customer,</p><p>Please <a href=&amp;quot;https://example.com/sign&amp;quot;>sign the document</a>.</p>\"></action-text-attachment>"}'></figure>`)
+
+	want := "Dear customer,\n\nPlease [sign the document](https://example.com/sign)."
+	if got != want {
+		t.Errorf("ToMarkdown = %q, want %q", got, want)
+	}
+}
+
+func TestToMarkdownNamedActionTextAttachmentIgnoresInlineContent(t *testing.T) {
+	got := toMarkdown(`<action-text-attachment filename="report.pdf" content-type="application/pdf" content="<p>not the body</p>"></action-text-attachment>`)
+	want := "📎 report.pdf"
+	if got != want {
+		t.Errorf("ToMarkdown = %q, want %q", got, want)
+	}
+}
+
 func TestToMarkdownEmbeddedContentStopsRecursing(t *testing.T) {
 	nested := `<figure data-trix-attachment='{"contentType":"text/html","content":"<p>innermost</p>"}'></figure>`
 	for range embeddedContentDepthLimit + 2 {
