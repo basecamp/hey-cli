@@ -124,6 +124,7 @@ func runBubbleOutput(t *testing.T, server *httptest.Server, args ...string) (str
 
 func TestBubbleUpAndPop(t *testing.T) {
 	today := time.Now().Format("2006-01-02")
+	later := time.Now().AddDate(0, 0, 7).Format("2006-01-02")
 	tests := []struct {
 		name     string
 		args     []string
@@ -136,8 +137,8 @@ func TestBubbleUpAndPop(t *testing.T) {
 	}{
 		{"up one now", []string{"up", "12345", "--now"}, http.MethodPost, "/postings/bulk_bubble_up_now.json", []int64{12345}, "", "", "1 thread bubbled up"},
 		{"up multiple now", []string{"up", "12345", "67890", "--now"}, http.MethodPost, "/postings/bulk_bubble_up_now.json", []int64{12345, 67890}, "", "", "2 threads bubbled up"},
-		{"up one on a date", []string{"up", "12345", "--on", "2026-09-04"}, http.MethodPost, "/postings/bubble_up.json", []int64{12345}, "custom", "2026-09-04", "1 thread will bubble up on 2026-09-04"},
-		{"up multiple on a date", []string{"up", "12345", "67890", "--on", "2026-09-04"}, http.MethodPost, "/postings/bubble_up.json", []int64{12345, 67890}, "custom", "2026-09-04", "2 threads will bubble up on 2026-09-04"},
+		{"up one on a date", []string{"up", "12345", "--on", later}, http.MethodPost, "/postings/bubble_up.json", []int64{12345}, "custom", later, "1 thread will bubble up on " + later},
+		{"up multiple on a date", []string{"up", "12345", "67890", "--on", later}, http.MethodPost, "/postings/bubble_up.json", []int64{12345, 67890}, "custom", later, "2 threads will bubble up on " + later},
 		{"up one on today", []string{"up", "12345", "--on", today}, http.MethodPost, "/postings/bubble_up.json", []int64{12345}, "today", "", "1 thread will bubble up this evening"},
 		{"up multiple on today", []string{"up", "12345", "67890", "--on", today}, http.MethodPost, "/postings/bubble_up.json", []int64{12345, 67890}, "today", "", "2 threads will bubble up this evening"},
 		{"up tomorrow", []string{"up", "12345", "--tomorrow"}, http.MethodPost, "/postings/bubble_up.json", []int64{12345}, "tomorrow", "", "1 thread will bubble up tomorrow morning"},
