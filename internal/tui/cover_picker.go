@@ -95,7 +95,7 @@ func (p *coverPicker) view(styles styles, width int) string {
 		b.WriteString(preview + "\n\n")
 	}
 	b.WriteString(strings.Join(wrapText(
-		"A cover hides the threads you have already read. Press v to look under it.",
+		"A cover hides the threads you have already read. Press x to look under it.",
 		contentWidth), "\n"))
 	return b.String()
 }
