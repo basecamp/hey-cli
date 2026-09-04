@@ -12,7 +12,7 @@ buildGoModule.override { inherit go; } (finalAttrs: {
   pname = "hey";
   # Bumped by `make update-nix-hash VERSION=vX.Y.Z` before each stable
   # release; scripts/release.sh refuses to tag until it matches.
-  version = "1.4.0";
+  version = "1.4.1";
 
   src = lib.cleanSource ./..;
 
