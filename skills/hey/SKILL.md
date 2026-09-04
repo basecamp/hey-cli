@@ -199,6 +199,7 @@ notice on stderr. Both need list data, so they work on `hey box list`, `hey box 
 | Forward email | `hey forward <topic_id> --to alice@example.com -m "For your review"` |
 | Compose email | `hey compose --to alice@example.com --subject "Lunch plans" -m "Are you free Friday?"` |
 | Compose with CC/BCC | `hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Kitchen remodel timeline"` |
+| Compose with exact known-ID reconciliation | `hey compose --to alice@example.com --subject "Customer update" -m "The migration is complete." --verifiable` (pre-send draft readback; no drafts, replies, attachments, or HTML markup in the Markdown input) |
 | List drafts | `hey draft list --json` (`--all`/`--page` follow the cursor) |
 | Draft an email for human review | `hey compose --to alice@example.com --subject "Lunch plans" -m "Free Friday?" --draft` |
 | Draft a reply for human review | `hey reply <topic_id> -m "Drafting this." --draft` |
@@ -305,6 +306,7 @@ Want to send email?
 │   └── Add a note? → add -m "note"
 ├── Compose new? → hey compose --to <email> --subject "Subject"
 │   ├── With body? → hey compose --to <email> --subject "Subject" -m "Body"
+│   ├── Need exact known-ID readback? → add --verifiable (draft readback, one send, no search/retry/files/HTML markup)
 │   ├── With files? → add --attach ./report.pdf (repeatable; body is optional)
 │   ├── With CC? → add --cc <email>
 │   └── With BCC? → add --bcc <email>
@@ -476,6 +478,7 @@ hey compose --to alice@example.com --subject "Q3 revenue report" -m "The numbers
 hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Kitchen remodel timeline" -m "Cabinets land the week of the 14th."
 hey compose --thread-id 12345 -m "Confirmed — see you then."  # Reply into an existing thread (no subject: it carries the thread's)
 hey compose --to alice@example.com --subject "Sprint recap" -m "We **shipped** the pagination fix."
+hey compose --to alice@example.com --subject "Customer update" -m "The migration is complete." --verifiable  # Known-ID send with exact readback
 hey compose --to alice@example.com --subject "Newsletter draft" --message-html "<h1>March</h1><p>What we shipped.</p>"
 ```
 

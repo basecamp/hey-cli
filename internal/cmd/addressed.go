@@ -59,14 +59,16 @@ func addressedFrom(addressed generated.Addressed) addressedEnvelope {
 	}
 }
 
-// boundedEmails answers the contacts' addresses, dropping blanks and stopping at
-// maxRetainedRecipients. The addresses are HEY's own, so they are carried verbatim;
+// boundedEmails answers the contacts' addresses, marking the envelope incomplete when a
+// contact has no address or when the bound is reached. The addresses are HEY's own, so
+// they are carried verbatim;
 // whatever prints one sanitizes it there, as every other read of somebody else's text
 // does.
 func boundedEmails(contacts []generated.Contact) (emails []string, truncated bool) {
 	emails = make([]string, 0, min(len(contacts), maxRetainedRecipients))
 	for _, contact := range contacts {
 		if contact.EmailAddress == "" {
+			truncated = true
 			continue
 		}
 		if len(emails) == maxRetainedRecipients {
@@ -74,5 +76,5 @@ func boundedEmails(contacts []generated.Contact) (emails []string, truncated boo
 		}
 		emails = append(emails, contact.EmailAddress)
 	}
-	return emails, false
+	return emails, truncated
 }

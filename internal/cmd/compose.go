@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	xhtml "golang.org/x/net/html"
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
@@ -26,6 +27,7 @@ type composeCommand struct {
 	threadID    string
 	attachments []string
 	draft       bool
+	verifiable  bool
 }
 
 func newComposeCommand() *composeCommand {
@@ -34,13 +36,13 @@ func newComposeCommand() *composeCommand {
 		Use:   "compose",
 		Short: "Write and send a new email",
 		Annotations: map[string]string{
-			"agent_notes": "Starts a new thread with --to (optionally --cc/--bcc), which requires --subject, or replies to an existing one with --thread-id, which does not. Repeatable --attach files are uploaded before sending and can be sent without body text. The body is Markdown; use --message-html to send raw HTML instead. --draft saves instead of sending — recipients become optional — and answers the draft ID for hey draft show/edit/send/delete.",
+			"agent_notes": "Starts a new thread with --to (optionally --cc/--bcc), which requires --subject, or replies to an existing one with --thread-id, which does not. Repeatable --attach files are uploaded before sending and can be sent without body text. The body is Markdown; use --message-html to send raw HTML instead. --draft saves instead of sending — recipients become optional — and answers the draft ID for hey draft show/edit/send/delete. For automation that must reconcile a lost send response without searching or retrying, --verifiable saves and reads back an exact Markdown-only draft to obtain its stable message ID, sends that draft once, and reports success only after reading the delivered message at that exact ID.",
 		},
 		Example: `  hey compose --to alice@example.com --subject "Lunch plans" -m "Are you free Friday?"
   hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Kitchen remodel timeline" -m "Cabinets land the week of the 14th."
   hey compose --to alice@example.com --subject "Q3 revenue report" -m "The numbers are attached." --attach ./report.pdf
   hey compose --thread-id 12345 -m "Confirmed — see you then." --attach ./diagram.png
-  hey compose --to alice@example.com --subject "Sprint recap" -m "We **shipped** the pagination fix."
+  hey compose --to alice@example.com --subject "Sprint recap" -m "We **shipped** the pagination fix." --verifiable
   hey compose --to alice@example.com --subject "Newsletter draft" --message-html "<h1>March</h1><p>What we shipped.</p>"
   echo "Notes from the offsite" | hey compose --to bob@example.com --subject "Offsite recap"
   hey compose --subject "Board update" -m "Numbers to follow." --draft  # save a draft; add recipients later`,
@@ -56,6 +58,7 @@ func newComposeCommand() *composeCommand {
 	composeCommand.cmd.Flags().StringVar(&composeCommand.threadID, "thread-id", "", "Reply to this thread instead of starting a new one")
 	composeCommand.cmd.Flags().StringArrayVar(&composeCommand.attachments, "attach", nil, "File to attach (repeatable)")
 	composeCommand.cmd.Flags().BoolVar(&composeCommand.draft, "draft", false, "Save as a draft instead of sending")
+	composeCommand.cmd.Flags().BoolVar(&composeCommand.verifiable, "verifiable", false, "Create a known-ID draft, send it once, and require exact readback")
 	composeCommand.cmd.MarkFlagsMutuallyExclusive("message", "message-html")
 
 	return composeCommand
@@ -64,6 +67,18 @@ func newComposeCommand() *composeCommand {
 func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 	if err := requireAuth(); err != nil {
 		return err
+	}
+	if c.verifiable {
+		switch {
+		case c.draft:
+			return apierr.ErrUsage("--verifiable cannot be combined with --draft")
+		case c.threadID != "":
+			return apierr.ErrUsage("--verifiable cannot be combined with --thread-id")
+		case c.messageHTML != "":
+			return apierr.ErrUsage("--verifiable cannot be combined with --message-html")
+		case len(c.attachments) > 0:
+			return apierr.ErrUsage("--verifiable cannot be combined with --attach")
+		}
 	}
 
 	// A reply carries the thread's subject, so only a new message needs one.
@@ -92,6 +107,9 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 			if markdownMessage == "" {
 				return apierr.ErrUsage("empty message, aborting")
 			}
+		}
+		if c.verifiable && containsHTMLMarkup(markdownMessage) {
+			return apierr.ErrUsage("--verifiable Markdown cannot contain raw HTML or attachment markup")
 		}
 		message = htmlutil.FromMarkdown(markdownMessage)
 	}
@@ -165,6 +183,13 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 			return writeDraftSaved(cmd, draftID, len(c.attachments))
 		}
 		sent = composeSent{Subject: c.subject, Content: messageWithAttachments, To: to, CC: cc, BCC: bcc}
+		if c.verifiable {
+			result, verifyErr := composeVerifiably(ctx, sdk, sent)
+			if verifyErr != nil {
+				return verifyErr
+			}
+			return writeComposedMessage(cmd, result, len(c.attachments))
+		}
 		var sendErr error
 		response, sendErr = sendMessage(ctx, sdk, sent.Subject, sent.Content, sent.To, sent.CC, sent.BCC)
 		if sendErr != nil {
@@ -186,8 +211,11 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 
 	verification, readback := verifyComposedMessage(ctx, sendClient, handle.MessageID, sent)
 	result := composeResultFor(handle, verification, readback)
+	return writeComposedMessage(cmd, result, len(c.attachments))
+}
 
-	summary := sentWithAttachmentsSummary("Message sent", len(c.attachments))
+func writeComposedMessage(cmd *cobra.Command, result composeResult, attachments int) error {
+	summary := sentWithAttachmentsSummary("Message sent", attachments)
 	if result.TopicID != 0 {
 		return writeMutation(cmd, summary, result, output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -226,4 +254,22 @@ func parseAddresses(s string) []string {
 		}
 	}
 	return addrs
+}
+
+// containsHTMLMarkup keeps verifiable sends inside a canonical Markdown subset. Raw HTML
+// and Action Text attachment elements lose attributes during Markdown readback, so accepting
+// them would let distinct wire bodies compare equal.
+func containsHTMLMarkup(markdown string) bool {
+	tokens := xhtml.NewTokenizer(strings.NewReader(markdown))
+	for {
+		switch tokens.Next() {
+		case xhtml.StartTagToken, xhtml.EndTagToken, xhtml.SelfClosingTagToken,
+			xhtml.CommentToken, xhtml.DoctypeToken:
+			return true
+		case xhtml.TextToken:
+			continue
+		case xhtml.ErrorToken:
+			return false
+		}
+	}
 }

@@ -27,6 +27,19 @@ func stubRunTUI(t *testing.T) *int {
 	return &calls
 }
 
+func TestReadOnlyIntrospectionSkipsCredentialMigration(t *testing.T) {
+	root := newRootCmd()
+	for _, name := range []string{"version", "commands"} {
+		command, _, err := root.Find([]string{name})
+		if err != nil {
+			t.Fatalf("find %s: %v", name, err)
+		}
+		if !commandSkipsCredentialMigration(command) {
+			t.Errorf("%s should not migrate credentials", name)
+		}
+	}
+}
+
 func stubAskToSignIn(t *testing.T, answer bool) *int {
 	t.Helper()
 	calls := 0

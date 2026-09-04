@@ -152,7 +152,7 @@ func verifyComposedMessage(ctx context.Context, client *hey.Client, messageID in
 // when HEY names no separate sender.
 func senderOf(message *generated.Message) *threadContact {
 	contact := message.Sender
-	if contact.EmailAddress == "" && contact.Name == "" {
+	if contact.Id == 0 && contact.EmailAddress == "" && contact.Name == "" {
 		contact = message.Creator
 	}
 	if contact.EmailAddress == "" && contact.Name == "" && contact.Id == 0 {
@@ -199,7 +199,8 @@ func bodyDigest(markdown string) string {
 // empty one mean different things, and only the caller knows which it is willing to
 // accept.
 func recipientsMatch(sent composeSent, got addressedEnvelope) bool {
-	return sameAddresses(sent.To, got.To) &&
+	return !got.Truncated &&
+		sameAddresses(sent.To, got.To) &&
 		sameAddresses(sent.CC, got.CC) &&
 		addressSubset(got.BCC, sent.BCC)
 }
@@ -208,7 +209,18 @@ func sameAddresses(want, got []string) bool {
 	if len(want) != len(got) {
 		return false
 	}
-	return addressSubset(got, want)
+	remaining := make(map[string]int, len(want))
+	for _, address := range want {
+		remaining[normalizeAddress(address)]++
+	}
+	for _, address := range got {
+		normalized := normalizeAddress(address)
+		if remaining[normalized] == 0 {
+			return false
+		}
+		remaining[normalized]--
+	}
+	return true
 }
 
 func addressSubset(got, want []string) bool {

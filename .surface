@@ -107,6 +107,7 @@ hey compose --message-html
 hey compose --subject
 hey compose --thread-id
 hey compose --to
+hey compose --verifiable
 hey config
 hey config set
 hey config show

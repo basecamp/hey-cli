@@ -67,6 +67,7 @@ hey box view imbox                      # threads in a box
 hey thread read 12345                   # a whole thread, as Markdown
 hey reply 12345 -m "Friday works for me."
 hey compose --to alice@example.com --subject "Lunch?" -m "Thursday at noon?"
+hey compose --to alice@example.com --subject "Customer update" -m "Done." --verifiable
 hey search --from jane@example.com --date last_30_days
 hey screener list                       # first-time senders waiting on you
 hey event add "Design review" --starts-on 2026-09-02 --start-time 14:00

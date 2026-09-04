@@ -118,7 +118,7 @@ func newRootCmd() *cobra.Command {
 			authMgr = auth.NewManager(cfg.BaseURL, httpClient, configDir)
 			initSDK(authMgr, cfg.BaseURL)
 
-			// The agent-local setup subcommands and skill commands never read
+			// Local introspection, agent-local setup subcommands and skill commands never read
 			// credentials and never rewrite the global config, so they defer
 			// migration — the installer runs them with HEY_NO_KEYRING=1, which
 			// would otherwise move legacy tokens into plaintext. Every other
@@ -245,7 +245,7 @@ func commandSkipsCredentialMigration(cmd *cobra.Command) bool {
 		return false
 	}
 	switch parts[1] {
-	case "skill":
+	case "commands", "version", "skill":
 		return true
 	case "setup":
 		return len(parts) > 2 // the wizard itself persists onboarded; subcommands touch only agent files
