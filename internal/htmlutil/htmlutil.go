@@ -73,7 +73,7 @@ func ExtractAttachments(s string) []Attachment {
 		return nil
 	}
 	var attachments []Attachment
-	findAttachments(doc, &attachments)
+	findAttachments(doc, &attachments, 0)
 	return attachments
 }
 
@@ -342,7 +342,7 @@ func parseEmbeddedContent(content string, depth int) *html.Node {
 	return doc
 }
 
-func findAttachments(n *html.Node, attachments *[]Attachment) {
+func findAttachments(n *html.Node, attachments *[]Attachment, depth int) {
 	if n.Type == html.ElementNode {
 		switch n.Data {
 		case "action-text-attachment":
@@ -358,7 +358,10 @@ func findAttachments(n *html.Node, attachments *[]Attachment) {
 				*attachments = append(*attachments, attachment)
 			}
 		case "figure":
-			if trix := parseTrixAttachment(n); trix != nil && trix.URL != "" && trix.Filename != "" {
+			trix := parseTrixAttachment(n)
+			switch {
+			case trix == nil:
+			case trix.URL != "" && trix.Filename != "":
 				*attachments = append(*attachments, Attachment{
 					URL:         trix.URL,
 					Filename:    trix.Filename,
@@ -366,11 +369,18 @@ func findAttachments(n *html.Node, attachments *[]Attachment) {
 					ByteSize:    nonnegativeAttachmentByteSize(trix.Filesize),
 					SGID:        trix.SGID,
 				})
+			case trix.Content != "":
+				// An inbound email's files are inside the embedded markup, not
+				// on the figure that wraps it. The wrapper itself is not listed:
+				// an embedded body is not a downloadable file.
+				if doc := parseEmbeddedContent(trix.Content, depth); doc != nil {
+					findAttachments(doc, attachments, depth+1)
+				}
 			}
 		}
 	}
 	for child := n.FirstChild; child != nil; child = child.NextSibling {
-		findAttachments(child, attachments)
+		findAttachments(child, attachments, depth)
 	}
 }
 
