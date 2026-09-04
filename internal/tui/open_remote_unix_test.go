@@ -162,9 +162,18 @@ func TestRunReportsTopicListenerConfigurationErrors(t *testing.T) {
 	}
 }
 
+// setPrivateRuntimeDir points the TUI at a private runtime directory the test owns.
+// The directory is made under the system temp root with a short name rather than
+// with t.TempDir(): a unix socket path is capped at 104 bytes on macOS, and
+// t.TempDir() embeds the test name inside an already long per-user temp path,
+// which put the socket over the cap and failed bind with "invalid argument".
 func setPrivateRuntimeDir(t *testing.T) {
 	t.Helper()
-	runtimeDir := t.TempDir()
+	runtimeDir, err := os.MkdirTemp("", "hey")
+	if err != nil {
+		t.Fatalf("create runtime directory: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(runtimeDir) })
 	if err := os.Chmod(runtimeDir, 0o700); err != nil {
 		t.Fatalf("protect runtime directory: %v", err)
 	}
