@@ -51,6 +51,18 @@ func (a *cliAuthStrategy) Refresh(ctx context.Context) error {
 	return a.mgr.Refresh(ctx)
 }
 
+// cliAuthOnlyStrategy deliberately does not implement hey.TokenRefresher. Verifiable
+// compose uses it because replaying a delivery PUT after a 401 would violate its one-send
+// contract; AuthenticateRequest may still refresh an already-expired token before the first
+// request, but the SDK cannot refresh-and-retry a request the server has answered.
+type cliAuthOnlyStrategy struct {
+	mgr *auth.Manager
+}
+
+func (a *cliAuthOnlyStrategy) Authenticate(ctx context.Context, req *http.Request) error {
+	return a.mgr.AuthenticateRequest(ctx, req)
+}
+
 // statsHooks implements hey.Hooks for --stats tracking.
 type statsHooks struct {
 	requestCount atomic.Int64
@@ -77,6 +89,16 @@ var sdkStats *statsHooks
 
 // initSDK creates the SDK client, bridging the CLI's auth and config.
 func initSDK(authMgr *auth.Manager, baseURL string) {
+	initSDKWithRefresh(authMgr, baseURL, true)
+}
+
+// initSDKWithoutRefresh builds the command-scoped client for compose --verifiable. Other
+// commands retain the SDK's normal one-refresh behavior through initSDK.
+func initSDKWithoutRefresh(authMgr *auth.Manager, baseURL string) {
+	initSDKWithRefresh(authMgr, baseURL, false)
+}
+
+func initSDKWithRefresh(authMgr *auth.Manager, baseURL string, refreshOnUnauthorized bool) {
 	sdkCfg := &hey.Config{
 		BaseURL: baseURL,
 	}
@@ -90,7 +112,11 @@ func initSDK(authMgr *auth.Manager, baseURL string) {
 	}
 
 	var opts []hey.ClientOption
-	opts = append(opts, hey.WithAuthStrategy(&cliAuthStrategy{mgr: authMgr}))
+	if refreshOnUnauthorized {
+		opts = append(opts, hey.WithAuthStrategy(&cliAuthStrategy{mgr: authMgr}))
+	} else {
+		opts = append(opts, hey.WithAuthStrategy(&cliAuthOnlyStrategy{mgr: authMgr}))
+	}
 	opts = append(opts, hey.WithUserAgent(version.UserAgent()+" "+hey.DefaultUserAgent))
 
 	if verboseFlag > 0 {

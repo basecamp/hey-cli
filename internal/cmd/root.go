@@ -116,7 +116,12 @@ func newRootCmd() *cobra.Command {
 			configDir := config.ConfigDir()
 			httpClient := &http.Client{Timeout: 30 * time.Second}
 			authMgr = auth.NewManager(cfg.BaseURL, httpClient, configDir)
-			initSDK(authMgr, cfg.BaseURL)
+			verifiableCompose, _ := cmd.Flags().GetBool("verifiable")
+			if cmd.Name() == "compose" && verifiableCompose {
+				initSDKWithoutRefresh(authMgr, cfg.BaseURL)
+			} else {
+				initSDK(authMgr, cfg.BaseURL)
+			}
 
 			// Local introspection, agent-local setup subcommands and skill commands never read
 			// credentials and never rewrite the global config, so they defer

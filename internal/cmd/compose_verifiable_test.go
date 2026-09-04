@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/auth"
 )
 
 type verifiableComposeState struct {
@@ -20,9 +23,11 @@ type verifiableComposeState struct {
 	requests      []string
 	accountScopes map[string][]string
 
-	sendStatus int
-	readStatus int
-	readJSON   string
+	sendStatus            int
+	readStatus            int
+	readJSON              string
+	unauthorizedFirstSend bool
+	refreshRequests       int
 
 	draftBody map[string]any
 	sendBody  map[string]any
@@ -137,11 +142,19 @@ func verifiableComposeServer(t *testing.T, state *verifiableComposeState) *httpt
 		case r.Method == http.MethodPut && r.URL.Path == "/messages/12345.json":
 			state.sendWrites++
 			_ = json.NewDecoder(r.Body).Decode(&state.sendBody)
+			if state.unauthorizedFirstSend && state.sendWrites == 1 {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
 			status := state.sendStatus
 			if status == 0 {
 				status = http.StatusOK
 			}
 			w.WriteHeader(status)
+		case r.Method == http.MethodPost && r.URL.Path == "/oauth/tokens":
+			state.refreshRequests++
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600}`)
 		case r.Method == http.MethodGet && r.URL.Path == "/messages/12345.json":
 			state.messageReads++
 			status := state.readStatus
@@ -318,6 +331,41 @@ func TestComposeVerifiableCreatesAKnownDraftThenSendsAndReadsOnlyThatID(t *testi
 	}
 	if state.draftBody["acting_sender_id"] != float64(42) || state.sendBody["acting_sender_id"] != float64(42) {
 		t.Errorf("acting sender changed: draft=%v send=%v", state.draftBody["acting_sender_id"], state.sendBody["acting_sender_id"])
+	}
+}
+
+func TestComposeVerifiableDoesNotRefreshAndResendARejectedDelivery(t *testing.T) {
+	state := &verifiableComposeState{unauthorizedFirstSend: true}
+	server := verifiableComposeServer(t, state)
+	configHome := t.TempDir()
+	t.Setenv("HEY_NO_KEYRING", "1")
+	manager := auth.NewManager(server.URL, server.Client(), filepath.Join(configHome, "hey-cli"))
+	if err := manager.GetStore().Save(manager.CredentialKey(), &auth.Credentials{
+		AccessToken: "old-access", RefreshToken: "old-refresh", ExpiresAt: time.Now().Add(time.Hour).Unix(),
+	}); err != nil {
+		t.Fatalf("seed credentials: %v", err)
+	}
+
+	stdout, _, err := runAuthCommand(t, configHome, server.URL, "", true,
+		"--account", "840304", "compose", "--verifiable",
+		"--to", "alice@example.com", "--cc", "bob@example.com", "--bcc", "carol@example.org",
+		"--subject", "Inovo Customer Update — Week 12", "-m", "Body.")
+	if err == nil {
+		t.Fatal("compose --verifiable accepted a rejected delivery")
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q, want no success envelope", stdout)
+	}
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code == apierr.CodeAmbiguous {
+		t.Fatalf("error = %v, want a terminal non-success result", err)
+	}
+	if state.sendWrites != 1 || state.refreshRequests != 0 || state.messageReads != 0 {
+		t.Fatalf("send writes/refreshes/readbacks = %d/%d/%d, want 1/0/0",
+			state.sendWrites, state.refreshRequests, state.messageReads)
+	}
+	if got := strings.Join(state.requests, ", "); strings.Contains(got, "search") {
+		t.Fatalf("requests = %s, want no search or fallback", got)
 	}
 }
 
