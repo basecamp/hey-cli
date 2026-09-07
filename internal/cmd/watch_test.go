@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -708,11 +709,11 @@ func TestWatchClosedSubscriptionIsOnlyFineWhenItWasInterrupted(t *testing.T) {
 
 	interrupted, interrupt := context.WithCancel(context.Background())
 	interrupt()
-	if err := watch.closedError(interrupted); err != nil {
+	if err := watch.closedError(interrupted, actioncable.ErrUnsubscribed); err != nil {
 		t.Errorf("error = %v, want an interrupted watch to end cleanly", err)
 	}
 
-	err := watch.closedError(context.Background())
+	err := watch.closedError(context.Background(), actioncable.ErrClosed)
 	if err == nil {
 		t.Fatal("a connection that went away for good should be reported")
 	}
@@ -720,8 +721,7 @@ func TestWatchClosedSubscriptionIsOnlyFineWhenItWasInterrupted(t *testing.T) {
 		t.Errorf("error = %q, want it to say the server hung up", err.Error())
 	}
 
-	watch.rejected.Store(true)
-	err = watch.closedError(context.Background())
+	err = watch.closedError(context.Background(), fmt.Errorf("%w: %s", actioncable.ErrRejected, changesChannel))
 	if err == nil || !strings.Contains(err.Error(), "turned this subscription down") {
 		t.Errorf("error = %v, want a rejected subscription reported as an auth failure", err)
 	}

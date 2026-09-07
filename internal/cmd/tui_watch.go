@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"time"
 
@@ -23,11 +22,12 @@ const mailChangeBacklog = 16
 
 // reconnectBacklog is one, because a Screener reconnect always says the same thing. It
 // is a channel of its own so that the relay goroutine is the only writer to the channel
-// it closes: the cable client drains callbacks queued before it was told to stop, and a
-// send on a closed channel panics whatever the select around it says — off a goroutine
-// Bubble Tea knows nothing about, which takes the terminal down in raw mode. Nothing
-// closes this one, so a callback arriving after the relay is gone rings into the buffer
-// and is collected with it.
+// it closes: the relay ends with the watch's context and closes as it goes, while the
+// subscription it was reading lives until the goodbye behind it, so a callback can still
+// fire once the relay is gone. A send on a closed channel panics whatever the select
+// around it says — off a goroutine Bubble Tea knows nothing about, which takes the
+// terminal down in raw mode. Nothing closes this one, so a late callback rings into the
+// buffer and is collected with it.
 const reconnectBacklog = 1
 
 type mailConnectionNotifier struct {
@@ -58,16 +58,10 @@ func (n *mailConnectionNotifier) after(version uint64) (tui.MailWatchEvent, uint
 	return n.event, n.version, n.version != version
 }
 
-const (
-	// unsubscribeTimeout bounds the goodbye sent for a watch that is over. Nothing waits
-	// on it, and a connection that has gone away is reason to stop trying rather than hang.
-	unsubscribeTimeout = 5 * time.Second
-
-	// tuiCableDialTimeout turns an unreachable cable server into app state instead of
-	// leaving the startup command inside Action Cable's retry loop forever. The model
-	// owns the retries after this first bounded attempt.
-	tuiCableDialTimeout = 5 * time.Second
-)
+// tuiCableDialTimeout turns an unreachable cable server into app state instead of
+// leaving the startup command inside Action Cable's retry loop for as long as the
+// package allows. The model owns the retries after this first bounded attempt.
+const tuiCableDialTimeout = 5 * time.Second
 
 // tuiWatchers are the streams `hey tui` follows to stay live.
 func tuiWatchers() tui.Watchers {
@@ -98,7 +92,7 @@ func watchMailChanges(ctx context.Context) (<-chan tui.MailWatchEvent, error) {
 
 	events := make(chan tui.MailWatchEvent, mailChangeBacklog)
 	go func() {
-		defer unsubscribe(ctx, subscription)
+		defer unsubscribe(subscription)
 		relayMailChanges(ctx, subscription.Messages(), connection, events)
 	}()
 
@@ -156,7 +150,7 @@ func watchScreenerChanges(ctx, connectionCtx context.Context, signedStreamName s
 
 	changes := make(chan struct{}, 1)
 	go func() {
-		defer unsubscribe(ctx, subscription)
+		defer unsubscribe(subscription)
 		relayScreenerChanges(ctx, subscription.Messages(), reconnects, changes)
 	}()
 
@@ -260,7 +254,7 @@ func (w *calendarStreamWatch) subscribe(ctx, connectionCtx context.Context, cale
 	w.stops[calendar.Calendar.Id] = stop
 
 	go func() {
-		defer unsubscribe(subCtx, subscription)
+		defer unsubscribe(subscription)
 		for {
 			select {
 			case <-subCtx.Done():
@@ -353,12 +347,9 @@ func (w *calendarStreamWatch) stopAll() {
 // unsubscribe drops a subscription whose watch is over. Cancelling the watch's context
 // ends the relay, but the subscription itself belongs to the shared client: left
 // registered it holds its buffered channel and its callback dispatcher for as long as the
-// TUI runs, and goes on being handed messages nobody reads. The watch's context is what
-// ended, so the goodbye is sent under one that outlives it.
-func unsubscribe(ctx context.Context, subscription *actioncable.Subscription) {
-	goodbye, giveUp := context.WithTimeout(context.WithoutCancel(ctx), unsubscribeTimeout)
-	defer giveUp()
-	_ = subscription.Unsubscribe(goodbye)
+// TUI runs, and goes on being handed messages nobody reads.
+func unsubscribe(subscription *actioncable.Subscription) {
+	_ = subscription.Unsubscribe()
 }
 
 // ringMailWatchEvent keeps connection state ahead of stale box doorbells. Box events can
@@ -423,9 +414,8 @@ func ring[T any](notifications chan<- T, notification T) {
 }
 
 // tuiSubscribe subscribes over the connection the TUI's watches share, dialling a new one
-// when the one on hand has stopped itself. A stopped client preserves its terminal failure
-// and never dials again on its own, so a reopened stream replaces it with a connection that
-// carries current credentials.
+// when the one on hand has stopped itself. A stopped client never dials again, so a
+// reopened stream replaces it with a connection that carries current credentials.
 func tuiSubscribe(ctx, connectionCtx context.Context, identifier actioncable.Identifier, options ...actioncable.SubscriptionOption) (*actioncable.Subscription, error) {
 	client, err := tuiCableClient(connectionCtx)
 	if err != nil {
@@ -445,17 +435,17 @@ func tuiSubscribe(ctx, connectionCtx context.Context, identifier actioncable.Ide
 	return subscription, err
 }
 
-// subscribeTuiCable returns stopped when the shared client needs replacing. Every shared
-// client has connected before it is cached, so Connect reports ErrAlreadyConnected while
-// it is live or reconnecting and preserves the terminal failure after it stops.
+// subscribeTuiCable returns stopped when the shared client needs replacing. A client that
+// has stopped keeps why for good and never dials again, which Err reports and every other
+// failure — a rejection, a subscribe the context ran out on — leaves nil.
 func subscribeTuiCable(ctx context.Context, client *actioncable.Client, identifier actioncable.Identifier, options ...actioncable.SubscriptionOption) (*actioncable.Subscription, bool, error) {
 	subscription, err := client.Subscribe(ctx, identifier, options...)
 	if err == nil {
 		return subscription, false, nil
 	}
 
-	stoppedBecause := client.Connect(ctx)
-	if errors.Is(stoppedBecause, actioncable.ErrAlreadyConnected) {
+	stoppedBecause := client.Err()
+	if stoppedBecause == nil {
 		return nil, false, err
 	}
 

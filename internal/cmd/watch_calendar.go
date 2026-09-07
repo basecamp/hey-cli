@@ -251,7 +251,7 @@ func (w *postingsWatch) subscribeCalendar(ctx context.Context, calendar *watched
 
 	id := calendar.id
 	go func() {
-		defer unsubscribe(subCtx, subscription)
+		defer unsubscribe(subscription)
 		for {
 			select {
 			case <-subCtx.Done():

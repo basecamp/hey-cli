@@ -78,10 +78,11 @@ func TestRelayScreenerChangesRingsOnEveryBroadcast(t *testing.T) {
 }
 
 func TestARelayIsTheOnlyWriterToTheStreamItCloses(t *testing.T) {
-	// The cable client runs the callbacks it queued before it was told to stop, so a
-	// reconnect can be announced after the relay closed the channel the TUI reads.
-	// Sending on a closed channel panics, off a goroutine Bubble Tea can't recover,
-	// which leaves the terminal in raw mode — so only the relay may write to it.
+	// A relay ends with its watch's context while the subscription it was reading is
+	// still registered, so a reconnect can be announced after the relay closed the
+	// channel the TUI reads. Sending on a closed channel panics, off a goroutine Bubble
+	// Tea can't recover, which leaves the terminal in raw mode — so only the relay may
+	// write to it.
 	relaying, stop := context.WithCancel(t.Context())
 
 	mailMessages := make(chan actioncable.Message)
@@ -192,6 +193,36 @@ func TestSubscribeTuiCableRecognizesAnUnenumeratedTerminalFailure(t *testing.T) 
 	}
 	if tuiCable.client != nil {
 		t.Error("a stopped client should not remain cached")
+	}
+}
+
+func TestSubscribeTuiCableKeepsALiveClientThatTurnedASubscriptionDown(t *testing.T) {
+	// A channel that says no is about that one subscription. The connection under it is
+	// still good and still carrying the TUI's other watches, so throwing it away would
+	// cost every one of them a reconnect over a stream that was never going to open.
+	conn := newScriptedCableConn()
+	conn.reads <- []byte(`{"type":"welcome"}`)
+	client := actioncable.New("ws://cable.example.test/cable", actioncable.WithTransport(scriptedCableTransport{conn: conn}))
+	if err := client.Connect(t.Context()); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer client.Close()
+	tuiCable.client = client
+	t.Cleanup(func() { tuiCable.client = nil })
+
+	go func() {
+		conn.reads <- []byte(`{"type":"reject_subscription","identifier":"{\"channel\":\"Postings::ChangesChannel\"}"}`)
+	}()
+
+	_, stopped, err := subscribeTuiCable(t.Context(), client, actioncable.Identifier{Channel: changesChannel})
+	if stopped {
+		t.Fatal("a rejection should not condemn the connection the other watches share")
+	}
+	if !errors.Is(err, actioncable.ErrRejected) {
+		t.Errorf("error = %v, want the rejection reported as it is", err)
+	}
+	if tuiCable.client != client {
+		t.Error("a live client should stay cached after a rejected subscription")
 	}
 }
 

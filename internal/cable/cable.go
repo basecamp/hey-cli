@@ -9,12 +9,20 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/basecamp/actioncable-go"
 
 	"github.com/basecamp/hey-cli/internal/auth"
 	"github.com/basecamp/hey-cli/internal/version"
 )
+
+// openTimeout is how long Dial keeps trying to open a connection before it reports
+// why it couldn't. Credentials the server won't take, and a server that isn't there,
+// both fail every attempt, and a command has to say so rather than retry under a
+// caller who gave it no deadline at all. It bounds the opening and nothing else: a
+// connection that got through outlives it, and reconnects on its own until Close.
+const openTimeout = 15 * time.Second
 
 // Dial connects to the cable server for a HEY base URL, authorizing the upgrade
 // request with the same credentials the SDK sends on an API request.
@@ -29,24 +37,17 @@ func Dial(ctx context.Context, baseURL string, authMgr *auth.Manager, options ..
 		return nil, err
 	}
 
-	// The first dial's header is taken here so that credentials the server won't take
-	// are reported now, rather than becoming a reconnect loop inside the client.
-	if _, err := authHeader(ctx, baseURL, authMgr); err != nil {
-		return nil, err
-	}
-
 	settings := make([]actioncable.Option, 0, 1+len(options))
 	settings = append(settings, actioncable.WithHeaderFunc(func(ctx context.Context) (http.Header, error) {
 		return authHeader(ctx, baseURL, authMgr)
 	}))
 	settings = append(settings, options...)
 
+	opening, giveUp := context.WithTimeout(ctx, openTimeout)
+	defer giveUp()
+
 	client := actioncable.New(cableURL, settings...)
-	if err := client.Connect(ctx); err != nil {
-		// Connect's context bounds the caller's wait rather than the client's lifetime.
-		// A dial that did not complete has no owner to close it, so stop its retry loop
-		// before returning the error.
-		_ = client.Close()
+	if err := client.Connect(opening); err != nil {
 		return nil, err
 	}
 

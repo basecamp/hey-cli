@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -121,8 +122,8 @@ func TestEveryDialCarriesCurrentCredentials(t *testing.T) {
 		t.Errorf("redial Origin = %q, want the client's own headers kept", got)
 	}
 
-	// Connect's deadline only bounds its wait; Dial owns and stops a client that never
-	// connected so no retry goroutine is left behind after the error.
+	// A dial that gave up leaves nothing behind it: the client stops itself rather
+	// than retrying under a caller who has already been handed the error.
 	dialsAtReturn := len(headers)
 	time.Sleep(10 * time.Millisecond)
 	if got := len(recorded.recorded()); got != dialsAtReturn {
@@ -130,12 +131,25 @@ func TestEveryDialCarriesCurrentCredentials(t *testing.T) {
 	}
 }
 
-func TestDialWithoutCredentialsFailsBeforeConnecting(t *testing.T) {
+func TestDialWithoutCredentialsSaysSo(t *testing.T) {
 	t.Setenv("HEY_NO_KEYRING", "1")
 	t.Setenv("HEY_TOKEN", "")
 
-	_, err := Dial(t.Context(), "https://app.hey.com", auth.NewManager("https://app.hey.com", http.DefaultClient, t.TempDir()))
+	recorded := &recordingTransport{dialed: make(chan struct{}, 1)}
+	dialing, stopDialing := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer stopDialing()
+
+	_, err := Dial(dialing, "https://app.hey.com", auth.NewManager("https://app.hey.com", http.DefaultClient, t.TempDir()),
+		actioncable.WithTransport(recorded), actioncable.WithBackoff(time.Millisecond, time.Millisecond))
 	if err == nil {
 		t.Fatal("expected a dial with no credentials to fail")
+	}
+	// The upgrade request is never built without credentials, so the reason has to
+	// come back with the error rather than being retried away out of sight.
+	if !strings.Contains(err.Error(), "not authenticated") {
+		t.Errorf("error = %q, want it to name the credentials that could not be built", err.Error())
+	}
+	if dials := len(recorded.recorded()); dials != 0 {
+		t.Errorf("dials = %d, want no upgrade request attempted without credentials", dials)
 	}
 }

@@ -16,7 +16,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -201,8 +200,7 @@ func (c *watchCommand) run(cmd *cobra.Command, args []string) error {
 				watch.noteConnection(true)
 			}
 		}),
-		actioncable.OnDisconnected(func(willReconnect bool) { watch.noteConnection(false) }),
-		actioncable.OnRejected(func() { watch.rejected.Store(true) }))
+		actioncable.OnDisconnected(func(willReconnect bool) { watch.noteConnection(false) }))
 	if err != nil {
 		return apierr.ErrAPI(0, fmt.Sprintf("could not subscribe to posting changes: %v", err))
 	}
@@ -423,7 +421,6 @@ type postingsWatch struct {
 	connection     chan struct{}
 	transitionsMu  sync.Mutex
 	transitions    []bool
-	rejected       atomic.Bool
 	catchingUp     bool
 	unread         map[int64]bool
 	backoff        time.Duration
@@ -464,7 +461,7 @@ func (w *postingsWatch) listen(ctx context.Context, subscription *actioncable.Su
 			}
 		case message, open := <-subscription.Messages():
 			if !open {
-				return w.closedError(ctx)
+				return w.closedError(ctx, subscription.Err())
 			}
 			if err := w.read(ctx, message); err != nil {
 				return err
@@ -475,18 +472,19 @@ func (w *postingsWatch) listen(ctx context.Context, subscription *actioncable.Su
 	return nil
 }
 
-// closedError tells the two ways the subscription's messages dry up apart: the watch was
+// closedError tells the ways the subscription's messages dry up apart: the watch was
 // interrupted or timed out, which is how it's meant to end, or the connection went away
 // for good and there is nothing left listening — which a watch left running unattended
-// has to hear about rather than exiting quietly.
-func (w *postingsWatch) closedError(ctx context.Context) error {
+// has to hear about rather than exiting quietly. ended is what the subscription says
+// closed it.
+func (w *postingsWatch) closedError(ctx context.Context, ended error) error {
 	switch {
 	case ctx.Err() != nil:
 		return nil //nolint:nilerr // an interrupt or a --timeout is how a watch is meant to end
-	case w.rejected.Load():
+	case errors.Is(ended, actioncable.ErrRejected):
 		return apierr.ErrAuth("HEY's cable server turned this subscription down — run `hey auth login` again, or log in with `hey auth login --cookie` if the server doesn't take access tokens on a websocket yet")
 	default:
-		return apierr.ErrNetwork(errors.New("HEY's cable server hung up for good — nothing is watching for changes any more"))
+		return apierr.ErrNetwork(fmt.Errorf("HEY's cable server hung up for good — nothing is watching for changes any more: %w", ended))
 	}
 }
 
