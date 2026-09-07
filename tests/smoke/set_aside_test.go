@@ -149,6 +149,73 @@ func TestSetAsideGroupMutations(t *testing.T) {
 	}
 }
 
+// A bubbled-up thread gathered into a group arrives in Set Aside seen, with the bubble
+// cleared — the state HEY's own move leaves — rather than set aside and bubbled up at once.
+func TestSetAsideGroupingClearsBubbleUp(t *testing.T) {
+	bubbledUpThread := func(label string) string {
+		uid := uniqueID()
+		subject := fmt.Sprintf("Disposable bubbled-up %s test %s", label, uid)
+		_, stderr, code := hey(t, "compose",
+			"--to", smokeEmail,
+			"--subject", subject,
+			"-m", "This disposable thread verifies that grouping clears a bubble-up.",
+			"--json",
+		)
+		if code != 0 {
+			skipf(t, "could not create a disposable thread (exit %d): %s", code, stderr)
+		}
+		t.Cleanup(func() { cleanupThreadBySubject(t, subject) })
+		postingID, _, _, err := waitForPostingAndTopicIDsBySubject(t, subject)
+		if err != nil || postingID == 0 {
+			t.Fatalf("could not find disposable thread: %v", err)
+		}
+		posting := strconv.FormatInt(postingID, 10)
+		if _, stderr, code := hey(t, "bubble", "up", posting, "--now", "--json"); code != 0 {
+			skipf(t, "could not bubble up thread %s (exit %d): %s", posting, code, stderr)
+		}
+		return posting
+	}
+	assertGroupedAndNotBubbledUp := func(group, posting string) {
+		t.Helper()
+		detail := dataAs[struct {
+			Postings []struct {
+				ID        int64 `json:"id"`
+				BoxID     int64 `json:"box_id"`
+				BubbledUp bool  `json:"bubbled_up"`
+				Seen      bool  `json:"seen"`
+			} `json:"postings"`
+		}](t, heyJSON(t, "set-aside", "group", "view", group, "--all"))
+		for _, got := range detail.Postings {
+			if strconv.FormatInt(got.ID, 10) != posting {
+				continue
+			}
+			if got.BubbledUp || !got.Seen {
+				t.Errorf("posting %s in group %s = %+v, want seen and not bubbled up", posting, group, got)
+			}
+			return
+		}
+		t.Errorf("posting %s is not in group %s", posting, group)
+	}
+
+	// Both threads are made before the group so that the group's cleanup runs first and
+	// returns them to the Imbox, where the thread cleanups look for them.
+	first := bubbledUpThread("create")
+	second := bubbledUpThread("add")
+	created := setAsideWriteJSON(t, "set-aside", "group", "create", first)
+	groupID := dataAs[struct {
+		ID int64 `json:"id"`
+	}](t, created).ID
+	if groupID == 0 {
+		t.Fatalf("group create answered no id: %+v", created)
+	}
+	group := strconv.FormatInt(groupID, 10)
+	t.Cleanup(func() { hey(t, "set-aside", "group", "delete", group, "--json") })
+	assertGroupedAndNotBubbledUp(group, first)
+
+	setAsideWriteJSON(t, "set-aside", "group", "add", second, "--to", group)
+	assertGroupedAndNotBubbledUp(group, second)
+}
+
 func TestSetAsideGroupMutationValidation(t *testing.T) {
 	if _, stderr := heyFail(t, "set-aside", "group", "add", "1"); !strings.Contains(stderr, "--to") {
 		t.Errorf("group add without --to should ask for it, got: %s", stderr)

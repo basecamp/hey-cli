@@ -60,7 +60,7 @@ func setAsideServer(recorded *recordedSetAside) http.Handler {
 			_, _ = io.WriteString(w, `{"id":44}`)
 		case "DELETE /boxes/3/groups/42.json":
 			w.WriteHeader(http.StatusNoContent)
-		case "POST /postings/box_groups.json", "DELETE /postings/box_groups.json":
+		case "POST /postings/moves.json", "POST /postings/box_groups.json", "DELETE /postings/box_groups.json":
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.NotFound(w, r)
@@ -275,12 +275,17 @@ func TestSetAsideGroupCreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute group create: %v", err)
 	}
-	want := []string{"GET /boxes.json", "POST /boxes/3/groups.json"}
+	want := []string{"GET /boxes.json", "POST /postings/moves.json", "POST /boxes/3/groups.json"}
 	if strings.Join(recorded.requests, ",") != strings.Join(want, ",") {
 		t.Errorf("requests = %v, want %v", recorded.requests, want)
 	}
-	if ids := recorded.bodies[0]["posting_ids"].([]any); len(ids) != 2 || ids[0] != float64(101) || ids[1] != float64(102) {
-		t.Errorf("posting_ids = %#v", recorded.bodies[0])
+	if move := recorded.bodies[0]; move["box_id"] != float64(3) {
+		t.Errorf("move body = %#v, want a move into Set Aside", move)
+	}
+	for i, body := range recorded.bodies[:2] {
+		if ids := body["posting_ids"].([]any); len(ids) != 2 || ids[0] != float64(101) || ids[1] != float64(102) {
+			t.Errorf("request %d posting_ids = %#v", i, body)
+		}
 	}
 	if response.Summary != "Group 44 created with 2 threads" {
 		t.Errorf("summary = %q", response.Summary)
@@ -301,16 +306,21 @@ func TestSetAsideGroupAdd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute group add: %v", err)
 	}
-	want := []string{"GET /boxes.json", "POST /postings/box_groups.json"}
+	want := []string{"GET /boxes.json", "POST /postings/moves.json", "POST /postings/box_groups.json"}
 	if strings.Join(recorded.requests, ",") != strings.Join(want, ",") {
 		t.Errorf("requests = %v, want %v", recorded.requests, want)
 	}
-	body := recorded.bodies[0]
+	if move := recorded.bodies[0]; move["box_id"] != float64(3) {
+		t.Errorf("move body = %#v, want a move into Set Aside", move)
+	}
+	body := recorded.bodies[1]
 	if body["box_id"] != float64(3) || body["box_group_id"] != float64(42) {
 		t.Errorf("body = %#v", body)
 	}
-	if ids := body["posting_ids"].([]any); len(ids) != 1 || ids[0] != float64(102) {
-		t.Errorf("posting_ids = %#v", body["posting_ids"])
+	for i, body := range recorded.bodies[:2] {
+		if ids := body["posting_ids"].([]any); len(ids) != 1 || ids[0] != float64(102) {
+			t.Errorf("request %d posting_ids = %#v", i, body["posting_ids"])
+		}
 	}
 	if response.Summary != "1 thread added to group 42" {
 		t.Errorf("summary = %q", response.Summary)
@@ -353,5 +363,106 @@ func TestSetAsideGroupDelete(t *testing.T) {
 	_, err = runJSONCommand(t, setAsideServer(&recordedSetAside{}), "set-aside", "group", "delete", "0")
 	if err == nil {
 		t.Error("deleting group 0 succeeded, want a usage error")
+	}
+}
+
+// fakeSetAsidePosting is what HEY keeps for a posting that the group commands touch. seen
+// is haystack's enum as it is stored: 1 seen, 0 unseen, -1 bubbled up — "bubbled up" is a
+// value of seen, not a flag of its own, which is why the two relocation routes below
+// differ in what they leave behind.
+type fakeSetAsidePosting struct {
+	box   int64
+	seen  int
+	group int64
+}
+
+// setAsideStateServer models the two ways HEY relocates a posting into Set Aside.
+//
+// POST /postings/moves.json is Box#move_in: it writes the box and marks the posting seen,
+// which is also what clears bubbled_up.
+//
+// The group routes — POST /boxes/3/groups.json and POST /postings/box_groups.json — are
+// Posting#move_to_box_group: they write the box and the group and leave seen exactly as
+// it was, so a bubbled-up thread arrives in Set Aside still bubbled up.
+func setAsideStateServer(postings map[int64]*fakeSetAsidePosting) http.Handler {
+	postingIDs := func(body map[string]any) []int64 {
+		raw := body["posting_ids"].([]any)
+		ids := make([]int64, 0, len(raw))
+		for _, id := range raw {
+			ids = append(ids, int64(id.(float64)))
+		}
+		return ids
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method + " " + r.URL.Path {
+		case "GET /boxes.json":
+			_, _ = io.WriteString(w, `[{"id":1,"kind":"imbox","name":"Imbox"},{"id":3,"kind":"asidebox","name":"Set Aside"}]`)
+		case "POST /postings/moves.json":
+			for _, id := range postingIDs(body) {
+				postings[id].box = int64(body["box_id"].(float64))
+				postings[id].seen = 1
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case "POST /boxes/3/groups.json":
+			for _, id := range postingIDs(body) {
+				postings[id].box = 3
+				postings[id].group = 44
+			}
+			_, _ = io.WriteString(w, `{"id":44}`)
+		case "POST /postings/box_groups.json":
+			for _, id := range postingIDs(body) {
+				postings[id].box = 3
+				postings[id].group = int64(body["box_group_id"].(float64))
+			}
+			w.WriteHeader(http.StatusCreated)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// A thread bubbled up into the Imbox is stored as seen: -1. Gathering it into a Set Aside
+// group must put it in Set Aside the way HEY's own move does — seen, with the bubble
+// cleared — rather than leave it set aside and bubbled up at once (card 10279322895).
+func TestSetAsideGroupCreateClearsTheBubbleOnAnImboxThread(t *testing.T) {
+	postings := map[int64]*fakeSetAsidePosting{201: {box: 1, seen: -1}}
+	response, err := runJSONCommand(t, setAsideStateServer(postings), "set-aside", "group", "create", "201")
+	if err != nil {
+		t.Fatalf("execute group create: %v", err)
+	}
+	if response.Summary != "Group 44 created with 1 thread" {
+		t.Errorf("summary = %q", response.Summary)
+	}
+	got := postings[201]
+	if got.box != 3 || got.group != 44 {
+		t.Errorf("posting = %+v, want box 3 in group 44", *got)
+	}
+	if got.seen == -1 {
+		t.Errorf("posting is still bubbled up in Set Aside: %+v", *got)
+	}
+}
+
+// Adding an Imbox thread to a group moves it into Set Aside the same way create does, and
+// must clear its bubble on the way for the same reason (cards 10279323648, 10279322895).
+func TestSetAsideGroupAddClearsTheBubbleOnAnImboxThread(t *testing.T) {
+	postings := map[int64]*fakeSetAsidePosting{201: {box: 1, seen: -1}}
+	response, err := runJSONCommand(t, setAsideStateServer(postings), "set-aside", "group", "add", "201", "--to", "42")
+	if err != nil {
+		t.Fatalf("execute group add: %v", err)
+	}
+	if response.Summary != "1 thread added to group 42" {
+		t.Errorf("summary = %q", response.Summary)
+	}
+	got := postings[201]
+	if got.box != 3 || got.group != 42 {
+		t.Errorf("posting = %+v, want box 3 in group 42", *got)
+	}
+	if got.seen == -1 {
+		t.Errorf("posting is still bubbled up in Set Aside: %+v", *got)
 	}
 }

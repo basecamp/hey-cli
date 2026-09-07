@@ -307,12 +307,25 @@ func groupPageTotal(page *hey.BoxGroupPage) int {
 	return max(page.TotalCount, len(page.Group.Postings))
 }
 
+// setAsideThreads moves the threads into Set Aside through HEY's move before they are
+// grouped. The group routes relocate a thread themselves, but with a plain box write:
+// "bubbled up" is a value of a posting's seen state, not a flag of its own, and only the
+// move marks a thread seen. Grouping a bubbled-up thread straight out of the Imbox left it
+// set aside and bubbled up at once, which the web app draws as a Bubble Up row inside the
+// Set Aside stack. A thread already in Set Aside is unchanged by the move.
+func setAsideThreads(ctx context.Context, boxID int64, ids []int64) error {
+	if err := sdk.Postings().Move(ctx, boxID, ids...); err != nil {
+		return apierr.FromSDK(err)
+	}
+	return nil
+}
+
 func newSetAsideGroupCreateCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "create <box-item-id>...",
 		Short: "Gather email threads into a new Set Aside group",
 		Annotations: map[string]string{
-			"agent_notes": "Accepts box item IDs from hey set-aside view. Threads not yet in Set Aside are moved there. Returns the new group's ID.",
+			"agent_notes": "Accepts box item IDs from hey set-aside view. Threads not yet in Set Aside are moved there and marked seen, which also clears a bubble-up. Returns the new group's ID.",
 		},
 		Example: `  hey set-aside group create 12345
   hey set-aside group create 12345 67890`,
@@ -327,6 +340,9 @@ func newSetAsideGroupCreateCommand() *cobra.Command {
 			}
 			boxID, err := setAsideID(cmd.Context())
 			if err != nil {
+				return err
+			}
+			if err = setAsideThreads(cmd.Context(), boxID, ids); err != nil {
 				return err
 			}
 
@@ -355,7 +371,7 @@ func newSetAsideGroupAddCommand() *setAsideGroupAddCommand {
 		Use:   "add <box-item-id>...",
 		Short: "Add email threads to a Set Aside group",
 		Annotations: map[string]string{
-			"agent_notes": "Accepts box item IDs from hey set-aside view and a group ID from hey set-aside group list. A thread already in another group is moved to this one.",
+			"agent_notes": "Accepts box item IDs from hey set-aside view and a group ID from hey set-aside group list. Threads not yet in Set Aside are moved there and marked seen, which also clears a bubble-up. A thread already in another group is moved to this one.",
 		},
 		Example: `  hey set-aside group add 12345 --to 42
   hey set-aside group add 12345 67890 --to 42`,
@@ -386,6 +402,9 @@ func (c *setAsideGroupAddCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	if err := setAsideThreads(cmd.Context(), boxID, ids); err != nil {
+		return err
+	}
 	if err := sdk.Postings().AddToBoxGroup(cmd.Context(), boxID, groupID, ids...); err != nil {
 		return apierr.FromSDK(err)
 	}
