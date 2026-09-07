@@ -275,11 +275,11 @@ func TestSetAsideGroupCreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute group create: %v", err)
 	}
-	want := []string{"GET /boxes.json", "POST /postings/moves.json", "POST /boxes/3/groups.json"}
+	want := []string{"GET /boxes.json", "POST /boxes/3/groups.json", "POST /postings/moves.json"}
 	if strings.Join(recorded.requests, ",") != strings.Join(want, ",") {
 		t.Errorf("requests = %v, want %v", recorded.requests, want)
 	}
-	if move := recorded.bodies[0]; move["box_id"] != float64(3) {
+	if move := recorded.bodies[1]; move["box_id"] != float64(3) {
 		t.Errorf("move body = %#v, want a move into Set Aside", move)
 	}
 	for i, body := range recorded.bodies[:2] {
@@ -306,14 +306,14 @@ func TestSetAsideGroupAdd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute group add: %v", err)
 	}
-	want := []string{"GET /boxes.json", "POST /postings/moves.json", "POST /postings/box_groups.json"}
+	want := []string{"GET /boxes.json", "POST /postings/box_groups.json", "POST /postings/moves.json"}
 	if strings.Join(recorded.requests, ",") != strings.Join(want, ",") {
 		t.Errorf("requests = %v, want %v", recorded.requests, want)
 	}
-	if move := recorded.bodies[0]; move["box_id"] != float64(3) {
+	if move := recorded.bodies[1]; move["box_id"] != float64(3) {
 		t.Errorf("move body = %#v, want a move into Set Aside", move)
 	}
-	body := recorded.bodies[1]
+	body := recorded.bodies[0]
 	if body["box_id"] != float64(3) || body["box_group_id"] != float64(42) {
 		t.Errorf("body = %#v", body)
 	}
@@ -444,6 +444,29 @@ func TestSetAsideGroupCreateClearsTheBubbleOnAnImboxThread(t *testing.T) {
 	}
 	if got.seen == -1 {
 		t.Errorf("posting is still bubbled up in Set Aside: %+v", *got)
+	}
+}
+
+// A group HEY refuses fails the add before the threads are moved or marked seen.
+func TestSetAsideGroupAddToARefusedGroupMovesNothing(t *testing.T) {
+	var requests []string
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		switch r.Method + " " + r.URL.Path {
+		case "GET /boxes.json":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `[{"id":3,"kind":"asidebox","name":"Set Aside"}]`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	_, err := runJSONCommand(t, handler, "set-aside", "group", "add", "201", "--to", "99")
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("add to a missing group err = %v, want not found", err)
+	}
+	want := []string{"GET /boxes.json", "POST /postings/box_groups.json"}
+	if strings.Join(requests, ",") != strings.Join(want, ",") {
+		t.Errorf("requests = %v, want %v (no move)", requests, want)
 	}
 }
 

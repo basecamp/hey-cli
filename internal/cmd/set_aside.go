@@ -307,12 +307,13 @@ func groupPageTotal(page *hey.BoxGroupPage) int {
 	return max(page.TotalCount, len(page.Group.Postings))
 }
 
-// setAsideThreads moves the threads into Set Aside through HEY's move before they are
-// grouped. The group routes relocate a thread themselves, but with a plain box write:
-// "bubbled up" is a value of a posting's seen state, not a flag of its own, and only the
-// move marks a thread seen. Grouping a bubbled-up thread straight out of the Imbox left it
-// set aside and bubbled up at once, which the web app draws as a Bubble Up row inside the
-// Set Aside stack. A thread already in Set Aside is unchanged by the move.
+// setAsideThreads completes the move the group routes began. Those routes relocate a
+// thread into Set Aside themselves, but with a plain box write: "bubbled up" is a value of
+// a posting's seen state, not a flag of its own, and only HEY's move marks a thread seen.
+// Grouping a bubbled-up thread straight out of the Imbox left it set aside and bubbled up
+// at once, which the web app draws as a Bubble Up row inside the Set Aside stack. The
+// move runs after the group route so that a group HEY refuses fails before anything is
+// changed; a thread already in Set Aside keeps its group, since its box does not change.
 func setAsideThreads(ctx context.Context, boxID int64, ids []int64) error {
 	if err := sdk.Postings().Move(ctx, boxID, ids...); err != nil {
 		return apierr.FromSDK(err)
@@ -342,16 +343,15 @@ func newSetAsideGroupCreateCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err = setAsideThreads(cmd.Context(), boxID, ids); err != nil {
-				return err
-			}
-
 			group, err := sdk.Boxes().CreateGroup(cmd.Context(), boxID, ids)
 			if err != nil {
 				return apierr.FromSDK(err)
 			}
 			if group == nil {
 				return apierr.ErrAPI(200, "HEY did not answer with the new group")
+			}
+			if err := setAsideThreads(cmd.Context(), boxID, ids); err != nil {
+				return err
 			}
 
 			summary := fmt.Sprintf("Group %d created with %d %s", group.Id, len(ids), threadNoun(len(ids)))
@@ -402,11 +402,11 @@ func (c *setAsideGroupAddCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := setAsideThreads(cmd.Context(), boxID, ids); err != nil {
-		return err
-	}
 	if err := sdk.Postings().AddToBoxGroup(cmd.Context(), boxID, groupID, ids...); err != nil {
 		return apierr.FromSDK(err)
+	}
+	if err := setAsideThreads(cmd.Context(), boxID, ids); err != nil {
+		return err
 	}
 
 	return writeMutation(cmd, fmt.Sprintf("%d %s added to group %d", len(ids), threadNoun(len(ids)), groupID), nil)
