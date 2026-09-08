@@ -43,6 +43,7 @@ func newAttachmentsCommand() *attachmentsCommand {
 	attachmentsCommand.cmd = &cobra.Command{
 		Use:   "list <thread-id>",
 		Short: "List a thread's attachments",
+		Long:  "List every named downloadable file in a thread, including named inline images. IDs reflect the current message order; pass an ID from the current listing to attachment save.",
 		Example: `  hey attachment list 12345
   hey attachment list 12345 --json
   hey attachment list 12345 --allow-partial`,

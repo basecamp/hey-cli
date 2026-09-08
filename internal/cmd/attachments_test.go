@@ -195,6 +195,65 @@ func TestAttachmentsListsFilesFromKnownThread(t *testing.T) {
 	}
 }
 
+func TestAttachmentsListsAndSavesNamedFilesInRenderedOrder(t *testing.T) {
+	content := `<figure data-trix-attachment='{"contentType":"text/html","content":"<action-text-attachment content-type=\"image/png\" url=\"/rails/active_storage/blobs/conference-logo.png\" filename=\"conference-logo.png\" filesize=\"9\"></action-text-attachment>"}'></figure>
+<figure data-trix-attachment='{"contentType":"text/html","content":"<action-text-attachment content-type=\"application/pdf\" url=\"/rails/active_storage/blobs/conference-agenda.pdf\" filename=\"conference-agenda.pdf\" filesize=\"15\"></action-text-attachment>"}'></figure>
+<action-text-attachment content-type="application/pdf" url="/rails/active_storage/blobs/venue-map.pdf" filename="venue-map.pdf" filesize="9"></action-text-attachment>`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/topics/42/entries.json":
+			_, _ = w.Write([]byte(`[{"id":101,"kind":"message"}]`))
+		case "/messages/101.json":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 101, "content": content})
+		case "/rails/active_storage/blobs/conference-agenda.pdf":
+			w.Header().Set("Content-Type", "application/pdf")
+			_, _ = w.Write([]byte("conference agenda"))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.RequestURI())
+			http.Error(w, "not found", http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	stdout, err := runAttachmentCommand(t, server, "attachment", "list", "42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response struct {
+		Data []threadAttachment `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &response); err != nil {
+		t.Fatalf("decode response: %v\n%s", err, stdout)
+	}
+	if len(response.Data) != 3 {
+		t.Fatalf("listed attachments = %+v, want three named files", response.Data)
+	}
+	for index, want := range []struct {
+		id       string
+		filename string
+	}{
+		{id: "101:1", filename: "conference-logo.png"},
+		{id: "101:2", filename: "conference-agenda.pdf"},
+		{id: "101:3", filename: "venue-map.pdf"},
+	} {
+		if response.Data[index].ID != want.id || response.Data[index].Filename != want.filename {
+			t.Errorf("attachment %d = %+v, want ID %q and filename %q", index, response.Data[index], want.id, want.filename)
+		}
+	}
+
+	destination := filepath.Join(t.TempDir(), "conference-agenda.pdf")
+	if _, err := runAttachmentCommand(t, server, "attachment", "save", "101:2", "--output", destination); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(destination); err != nil {
+		t.Fatal(err)
+	} else if string(got) != "conference agenda" {
+		t.Errorf("saved attachment = %q", got)
+	}
+}
+
 // A thread longer than one page is walked by following HEY's cursor, so each attachment
 // is listed once and the list is not claimed to be truncated.
 func TestAttachmentsFollowsTheCursorThroughALongThread(t *testing.T) {
