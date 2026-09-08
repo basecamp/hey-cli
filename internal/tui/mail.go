@@ -1060,7 +1060,6 @@ func (v *mailView) HelpBindings() []helpBinding {
 		helpBinding{"t", "trash"},
 		helpBinding{"!", "spam"},
 		ignoreBinding,
-		helpBinding{"9", "previously seen"},
 		helpBinding{"ctrl+r", "reload"},
 	)
 	if v.postingList.cover != coverNone {

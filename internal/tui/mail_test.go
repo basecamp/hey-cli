@@ -4101,21 +4101,17 @@ func TestMailViewMovePickerOnTheSeenScreenLeavesTheImboxOut(t *testing.T) {
 	}
 }
 
-func TestMailViewHelpBindingsNamePreviouslySeen(t *testing.T) {
+// Previously Seen holds ordinary threads, so its screen offers the same actions the
+// box list does rather than being a place you can only read from.
+func TestMailViewSeenScreenHelpOffersTheThreadActions(t *testing.T) {
 	v := mailWithPostings()
-	if !hasHelpBinding(v.HelpBindings(), "9") {
-		t.Error("the list help should name 9")
-	}
-
 	v.seenActive = true
+
 	bindings := v.HelpBindings()
 	for _, key := range []string{"enter", "space", "ctrl+b", "a", "l", "u", "t", "v", "b", "n"} {
 		if !hasHelpBinding(bindings, key) {
 			t.Errorf("seen screen help misses %q: %+v", key, bindings)
 		}
-	}
-	if hasHelpBinding(bindings, "9") {
-		t.Error("the seen screen help should not name 9")
 	}
 }
 
