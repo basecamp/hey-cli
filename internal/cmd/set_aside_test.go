@@ -277,7 +277,7 @@ func TestSetAsideGroupCreate(t *testing.T) {
 	}
 	want := []string{"GET /boxes.json", "POST /boxes/3/groups.json", "POST /postings/moves.json"}
 	if strings.Join(recorded.requests, ",") != strings.Join(want, ",") {
-		t.Errorf("requests = %v, want %v", recorded.requests, want)
+		t.Fatalf("requests = %v, want %v", recorded.requests, want)
 	}
 	if move := recorded.bodies[1]; move["box_id"] != float64(3) {
 		t.Errorf("move body = %#v, want a move into Set Aside", move)
@@ -308,7 +308,7 @@ func TestSetAsideGroupAdd(t *testing.T) {
 	}
 	want := []string{"GET /boxes.json", "POST /postings/box_groups.json", "POST /postings/moves.json"}
 	if strings.Join(recorded.requests, ",") != strings.Join(want, ",") {
-		t.Errorf("requests = %v, want %v", recorded.requests, want)
+		t.Fatalf("requests = %v, want %v", recorded.requests, want)
 	}
 	if move := recorded.bodies[1]; move["box_id"] != float64(3) {
 		t.Errorf("move body = %#v, want a move into Set Aside", move)
