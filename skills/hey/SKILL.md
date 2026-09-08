@@ -459,7 +459,7 @@ hey attachment save 67890:1 --output ./reports # Save into a directory
 hey attachment save 67890:1 --output ./report.pdf --force
 ```
 
-An attachment ID combines its message ID and position, so `67890:1` identifies the first attachment in message `67890`. Saving uses the original filename unless `--output` names a destination. Existing files are preserved unless `--force` is set.
+Direct attachment IDs combine the message ID and position, so `67890:1` identifies the first direct attachment in message `67890`. Named downloadable files inside embedded HTML, including named inline images, use opaque IDs scoped to their message. Pass the ID returned by `hey attachment list` to `hey attachment save`. Saving uses the original filename unless `--output` names a destination. Existing files are preserved unless `--force` is set.
 
 ### Email - Reply, Forward & Compose
 

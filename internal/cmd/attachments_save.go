@@ -53,7 +53,7 @@ func (c *attachmentsSaveCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	messageID, position, err := parseAttachmentID(args[0])
+	messageID, selector, err := parseAttachmentID(args[0])
 	if err != nil {
 		return err
 	}
@@ -65,10 +65,10 @@ func (c *attachmentsSaveCommand) run(cmd *cobra.Command, args []string) error {
 		return apierr.ErrNotFound("message", strconv.FormatInt(messageID, 10))
 	}
 	attachments := htmlutil.ExtractAttachments(message.Content)
-	if position > len(attachments) {
+	attachment, found := findAttachmentByID(messageID, fmt.Sprintf("%d:%s", messageID, selector), attachments)
+	if !found {
 		return apierr.ErrNotFound("attachment", args[0])
 	}
-	attachment := attachments[position-1]
 
 	destination, err := attachmentDestination(c.output, attachment.Filename)
 	if err != nil {
@@ -101,17 +101,19 @@ func savedAttachmentForMarkdown(attachment savedAttachment) savedAttachment {
 	return attachment
 }
 
-func parseAttachmentID(id string) (int64, int, error) {
+func parseAttachmentID(id string) (int64, string, error) {
 	parts := strings.Split(id, ":")
 	if len(parts) != 2 {
-		return 0, 0, apierr.ErrUsage(fmt.Sprintf("invalid attachment ID: %s", id))
+		return 0, "", apierr.ErrUsage(fmt.Sprintf("invalid attachment ID: %s", id))
 	}
 	messageID, messageErr := strconv.ParseInt(parts[0], 10, 64)
-	position, positionErr := strconv.Atoi(parts[1])
-	if messageErr != nil || positionErr != nil || messageID <= 0 || position <= 0 {
-		return 0, 0, apierr.ErrUsage(fmt.Sprintf("invalid attachment ID: %s", id))
+	if messageErr != nil || messageID <= 0 || !validAttachmentSelector(parts[1]) {
+		return 0, "", apierr.ErrUsage(fmt.Sprintf("invalid attachment ID: %s", id))
 	}
-	return messageID, position, nil
+	if position, err := strconv.Atoi(parts[1]); err == nil {
+		return messageID, strconv.Itoa(position), nil
+	}
+	return messageID, parts[1], nil
 }
 
 func attachmentDestination(outputPath, filename string) (string, error) {

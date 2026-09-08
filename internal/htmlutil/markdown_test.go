@@ -450,10 +450,9 @@ func TestToMarkdownEmbeddedHTMLAttachment(t *testing.T) {
 }
 
 func TestToMarkdownEmbeddedContentStopsRecursing(t *testing.T) {
-	nested := `<figure data-trix-attachment='{"contentType":"text/html","content":"<p>innermost</p>"}'></figure>`
-	for range embeddedContentDepthLimit + 2 {
-		nested = `<figure data-trix-attachment='{"contentType":"text/html","content":"` +
-			strings.ReplaceAll(nested, `"`, `\"`) + `"}'></figure>`
+	nested := "<p>innermost</p>"
+	for range embeddedContentDepthLimit + 1 {
+		nested = embeddedHTMLFigure(t, nested)
 	}
 
 	if got := toMarkdown(nested); strings.Contains(got, "innermost") {

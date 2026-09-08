@@ -64,6 +64,8 @@ type Attachment struct {
 	ContentType string
 	ByteSize    *int64
 	SGID        string
+	// Embedded reports whether the file comes from an opaque embedded HTML body.
+	Embedded bool
 }
 
 // ExtractAttachments returns downloadable files in their document order.
@@ -346,16 +348,21 @@ func findAttachments(n *html.Node, attachments *[]Attachment, depth int) {
 	if n.Type == html.ElementNode {
 		switch n.Data {
 		case "action-text-attachment":
-			byteSize := parseAttachmentByteSize(getAttr(n, "filesize"))
 			attachment := Attachment{
 				URL:         getAttr(n, "url"),
 				Filename:    getAttr(n, "filename"),
 				ContentType: getAttr(n, "content-type"),
-				ByteSize:    byteSize,
+				ByteSize:    parseAttachmentByteSize(getAttr(n, "filesize")),
 				SGID:        getAttr(n, "sgid"),
+				Embedded:    depth > 0,
 			}
-			if attachment.URL != "" && attachment.Filename != "" {
+			switch {
+			case attachment.URL != "" && attachment.Filename != "":
 				*attachments = append(*attachments, attachment)
+			case isHTMLContentType(attachment.ContentType) && getAttr(n, "content") != "":
+				if doc := parseEmbeddedContent(getAttr(n, "content"), depth); doc != nil {
+					findAttachments(doc, attachments, depth+1)
+				}
 			}
 		case "figure":
 			trix := parseTrixAttachment(n)
@@ -368,6 +375,7 @@ func findAttachments(n *html.Node, attachments *[]Attachment, depth int) {
 					ContentType: trix.ContentType,
 					ByteSize:    nonnegativeAttachmentByteSize(trix.Filesize),
 					SGID:        trix.SGID,
+					Embedded:    depth > 0,
 				})
 			case trix.Content != "":
 				// An inbound email's files are inside the embedded markup, not
@@ -382,6 +390,11 @@ func findAttachments(n *html.Node, attachments *[]Attachment, depth int) {
 	for child := n.FirstChild; child != nil; child = child.NextSibling {
 		findAttachments(child, attachments, depth)
 	}
+}
+
+func isHTMLContentType(contentType string) bool {
+	contentType = strings.ToLower(strings.TrimSpace(contentType))
+	return contentType == "text/html" || strings.HasPrefix(contentType, "text/html;")
 }
 
 func isImageContentType(contentType string) bool {

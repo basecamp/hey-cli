@@ -2,7 +2,11 @@ package cmd
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -43,7 +47,7 @@ func newAttachmentsCommand() *attachmentsCommand {
 	attachmentsCommand.cmd = &cobra.Command{
 		Use:   "list <thread-id>",
 		Short: "List a thread's attachments",
-		Long:  "List every named downloadable file in a thread, including named inline images. IDs reflect the current message order; pass an ID from the current listing to attachment save.",
+		Long:  "List every named downloadable file in a thread, including named inline images. Each returned ID identifies the same file when passed to attachment save.",
 		Example: `  hey attachment list 12345
   hey attachment list 12345 --json
   hey attachment list 12345 --allow-partial`,
@@ -146,9 +150,11 @@ func attachmentsInThread(ctx context.Context, threadID int64) ([]threadAttachmen
 		if loaded.Message == nil {
 			continue
 		}
-		for attachmentIndex, attachment := range htmlutil.ExtractAttachments(loaded.Message.Content) {
+		messageAttachments := htmlutil.ExtractAttachments(loaded.Message.Content)
+		ids := attachmentIDs(loaded.Entry.Id, messageAttachments)
+		for index, attachment := range messageAttachments {
 			attachments = append(attachments, threadAttachment{
-				ID:          attachmentID(loaded.Entry.Id, attachmentIndex+1),
+				ID:          ids[index],
 				MessageID:   loaded.Entry.Id,
 				Filename:    attachment.Filename,
 				ContentType: attachment.ContentType,
@@ -162,6 +168,68 @@ func attachmentsInThread(ctx context.Context, threadID int64) ([]threadAttachmen
 
 func attachmentID(messageID int64, position int) string {
 	return fmt.Sprintf("%d:%d", messageID, position)
+}
+
+func attachmentIDs(messageID int64, attachments []htmlutil.Attachment) []string {
+	ids := make([]string, len(attachments))
+	directPosition := 0
+	embeddedOccurrences := make(map[string]int)
+	for index, attachment := range attachments {
+		if !attachment.Embedded {
+			directPosition++
+			ids[index] = attachmentID(messageID, directPosition)
+			continue
+		}
+
+		key := embeddedAttachmentKey(attachment)
+		embeddedOccurrences[key]++
+		ids[index] = fmt.Sprintf("%d:e-%s", messageID, key)
+		if embeddedOccurrences[key] > 1 {
+			ids[index] += fmt.Sprintf(".%d", embeddedOccurrences[key])
+		}
+	}
+	return ids
+}
+
+func embeddedAttachmentKey(attachment htmlutil.Attachment) string {
+	identity := "sgid\x00" + attachment.SGID
+	if attachment.SGID == "" {
+		byteSize := ""
+		if attachment.ByteSize != nil {
+			byteSize = strconv.FormatInt(*attachment.ByteSize, 10)
+		}
+		identity = strings.Join([]string{"file", attachment.URL, attachment.Filename, attachment.ContentType, byteSize}, "\x00")
+	}
+	digest := sha256.Sum256([]byte(identity))
+	return base64.RawURLEncoding.EncodeToString(digest[:])
+}
+
+func validAttachmentSelector(selector string) bool {
+	if position, err := strconv.Atoi(selector); err == nil {
+		return position > 0
+	}
+	if !strings.HasPrefix(selector, "e-") {
+		return false
+	}
+	key, occurrence, hasOccurrence := strings.Cut(strings.TrimPrefix(selector, "e-"), ".")
+	digest, err := base64.RawURLEncoding.DecodeString(key)
+	if err != nil || len(digest) != sha256.Size {
+		return false
+	}
+	if !hasOccurrence {
+		return true
+	}
+	position, err := strconv.Atoi(occurrence)
+	return err == nil && position > 1 && strconv.Itoa(position) == occurrence
+}
+
+func findAttachmentByID(messageID int64, id string, attachments []htmlutil.Attachment) (htmlutil.Attachment, bool) {
+	for index, candidateID := range attachmentIDs(messageID, attachments) {
+		if candidateID == id {
+			return attachments[index], true
+		}
+	}
+	return htmlutil.Attachment{}, false
 }
 
 func formatOptionalByteSize(size *int64) string {

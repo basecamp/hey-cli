@@ -1,9 +1,27 @@
 package htmlutil
 
 import (
+	"encoding/json"
+	stdhtml "html"
 	"strings"
 	"testing"
 )
+
+func embeddedHTMLFigure(t *testing.T, content string) string {
+	t.Helper()
+	attributes, err := json.Marshal(struct {
+		ContentType string `json:"contentType"`
+		Content     string `json:"content"`
+	}{ContentType: "text/html", Content: content})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return `<figure data-trix-attachment="` + stdhtml.EscapeString(string(attributes)) + `"></figure>`
+}
+
+func canonicalEmbeddedHTML(content string) string {
+	return `<action-text-attachment content-type="text/html" content="` + stdhtml.EscapeString(content) + `"></action-text-attachment>`
+}
 
 func TestToTextPlain(t *testing.T) {
 	got := ToText("hello world")
@@ -169,10 +187,9 @@ func TestToTextTrixFigure(t *testing.T) {
 }
 
 func TestToTextEmbeddedContentStopsRecursing(t *testing.T) {
-	nested := `<figure data-trix-attachment='{"contentType":"text/html","content":"<p>innermost</p>"}'></figure>`
-	for range embeddedContentDepthLimit + 2 {
-		nested = `<figure data-trix-attachment='{"contentType":"text/html","content":"` +
-			strings.ReplaceAll(nested, `"`, `\"`) + `"}'></figure>`
+	nested := "<p>innermost</p>"
+	for range embeddedContentDepthLimit + 1 {
+		nested = embeddedHTMLFigure(t, nested)
 	}
 
 	if got := ToText(nested); strings.Contains(got, "innermost") {
@@ -209,15 +226,33 @@ func TestExtractAttachmentsInsideEmbeddedHTMLAttachment(t *testing.T) {
 	}
 }
 
+func TestExtractAttachmentsInsideCanonicalEmbeddedHTMLAttachment(t *testing.T) {
+	file := `<action-text-attachment sgid="sgid-deep" content-type="application/pdf" url="/rails/blobs/deep.pdf" filename="deep.pdf" filesize="128"></action-text-attachment>`
+	content := embeddedHTMLFigure(t, canonicalEmbeddedHTML(file))
+
+	attachments := ExtractAttachments(content)
+	if len(attachments) != 1 {
+		t.Fatalf("ExtractAttachments = %+v, want the file inside the canonical HTML attachment", attachments)
+	}
+	got := attachments[0]
+	if got.Filename != "deep.pdf" || got.URL != "/rails/blobs/deep.pdf" || got.ContentType != "application/pdf" || got.SGID != "sgid-deep" || got.ByteSize == nil || *got.ByteSize != 128 || !got.Embedded {
+		t.Errorf("canonical embedded attachment = %+v", got)
+	}
+}
+
 func TestExtractAttachmentsEmbeddedContentStopsRecursing(t *testing.T) {
-	nested := `<figure data-trix-attachment='{"contentType":"text/html","content":"<action-text-attachment url=\"/rails/blobs/deep.pdf\" filename=\"deep.pdf\"></action-text-attachment>"}'></figure>`
-	for range embeddedContentDepthLimit + 2 {
-		nested = `<figure data-trix-attachment='{"contentType":"text/html","content":"` +
-			strings.ReplaceAll(nested, `"`, `\"`) + `"}'></figure>`
+	file := `<action-text-attachment url="/rails/blobs/deep.pdf" filename="deep.pdf"></action-text-attachment>`
+	withinLimit := file
+	for range embeddedContentDepthLimit {
+		withinLimit = embeddedHTMLFigure(t, withinLimit)
+	}
+	if attachments := ExtractAttachments(withinLimit); len(attachments) != 1 {
+		t.Fatalf("ExtractAttachments = %+v, want the file at the nesting limit", attachments)
 	}
 
-	if attachments := ExtractAttachments(nested); len(attachments) != 0 {
-		t.Errorf("ExtractAttachments = %+v, should stop before the innermost level", attachments)
+	beyondLimit := embeddedHTMLFigure(t, withinLimit)
+	if attachments := ExtractAttachments(beyondLimit); len(attachments) != 0 {
+		t.Errorf("ExtractAttachments = %+v, should stop before the file beyond the nesting limit", attachments)
 	}
 }
 
