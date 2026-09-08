@@ -15,7 +15,11 @@ import (
 // formatting a time into a string and parsing it back is how a reader east of UTC ends
 // up looking at yesterday's date.
 type Posting struct {
-	ID                    int64
+	ID int64
+	// BoxID is the box this row is in, which HEY serves on every posting. A list can
+	// draw rows from several boxes at once — a search, a label, a contact's threads —
+	// so the box a thread files out of is the row's own rather than the list's.
+	BoxID                 int64
 	TopicID               int64
 	CreatedAt             time.Time
 	Name                  string
@@ -73,6 +77,7 @@ func Postings(postings []generated.Posting) []Posting {
 func NewPosting(posting generated.Posting) Posting {
 	return Posting{
 		ID:                    posting.Id,
+		BoxID:                 posting.BoxId,
 		TopicID:               TopicIDOf(posting),
 		CreatedAt:             posting.CreatedAt,
 		Name:                  terminal.SanitizeLine(posting.Name),

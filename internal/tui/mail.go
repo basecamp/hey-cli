@@ -528,7 +528,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if opened := v.openedPosting(msg.postingID); opened != nil {
 			v.threadPosting = *opened
 		}
-		v.threadBoxKind = v.actionBoxKind()
+		v.threadBoxKind = v.postingBoxKind(v.threadPosting)
 		v.topicName = msg.title
 		v.entries = msg.entries
 		v.attachments = msg.attachments
@@ -733,6 +733,9 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			case postingActionStopIgnoring:
 				v.postingList.postings[idx].Muted = false
 			}
+		}
+		if msg.effect == postingActionRemove {
+			v.removeFromOverlaidLists(msg.postingID)
 		}
 		// The open thread can file back into the box on screen — out and back while
 		// it stays open — and its row was removed when it first filed away, so the
@@ -1960,6 +1963,18 @@ func (v *mailView) removePostingAt(index int) {
 	v.postingList.removeAt(index)
 }
 
+// removeFromOverlaidLists takes a row out of the lists drawn over the box list. Nothing
+// re-reads those — a search's results and a bundle's threads are drawn once when they
+// open — so a row left behind stays on screen offering to file a thread that has
+// already moved.
+func (v *mailView) removeFromOverlaidLists(postingID int64) {
+	for _, list := range []*contentList{&v.searchList, &v.bundleList} {
+		if index := postingIndexIn(list.postings, postingID); index >= 0 {
+			list.removeAt(index)
+		}
+	}
+}
+
 func (v *mailView) moveAttachmentCursor(delta int) {
 	if len(v.attachments) == 0 {
 		return
@@ -2400,8 +2415,13 @@ func (v *mailView) openThreadPicker(key string) tea.Cmd {
 // the thread opened, standing in for a row the list may no longer hold — the
 // automatic mark-seen resorts it under the cover and clamps the cursor away, and a
 // live refresh can drop it off the head page — while the thread stays on screen.
+//
+// Where the thread was opened from does not come into it. Every posting HEY serves
+// carries its own box, so a thread found through a search, a bundle, a contact or a
+// label files out of the box it is actually in rather than out of whatever list is
+// behind it. Only a topic opened by its id has no row, and nothing to file.
 func (v *mailView) fileablePosting() *mail.Posting {
-	if v.searchActive || v.bundleActive || v.threadPosting.ID == 0 {
+	if v.threadPosting.ID == 0 {
 		return nil
 	}
 	return &v.threadPosting
@@ -2412,7 +2432,7 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 	if selected == nil {
 		return nil
 	}
-	return v.postingAction(key, *selected, v.actionBoxKind())
+	return v.postingAction(key, *selected, v.postingBoxKind(*selected))
 }
 
 // actionBoxKind is the box kind a list row files out of, empty over a source that
@@ -2420,6 +2440,30 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 func (v *mailView) actionBoxKind() string {
 	if source := v.actionSource(); source != nil {
 		return source.BoxKind
+	}
+	return ""
+}
+
+// postingBoxKind is the box kind a posting files out of, taken from the posting's own
+// box rather than the list showing it. A search, a label, a collection and a contact's
+// threads all draw rows from several boxes at once, so the list's box says nothing
+// about where any one row lives. Falls back to the list for a row HEY served without
+// a box.
+func (v *mailView) postingBoxKind(p mail.Posting) string {
+	if kind := v.boxKindOf(p.BoxID); kind != "" {
+		return kind
+	}
+	return v.actionBoxKind()
+}
+
+func (v *mailView) boxKindOf(boxID int64) string {
+	if boxID == 0 {
+		return ""
+	}
+	for i := range v.boxes {
+		if v.boxes[i].Kind == mail.KindBox && v.boxes[i].ID == boxID {
+			return v.boxes[i].BoxKind
+		}
 	}
 	return ""
 }

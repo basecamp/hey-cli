@@ -752,11 +752,8 @@ func TestMailViewRefusesThePickersWithoutAFileableThread(t *testing.T) {
 	for _, key := range []string{"b", "v"} {
 		t.Run(key, func(t *testing.T) {
 			v := mailWithPostings()
-			v.searchActive = true
-			v.searchList.setPostings([]mail.Posting{{ID: 10, TopicID: 100, Name: "Hello world"}})
 			v.inThread = true
-			v.topicID = 100
-			v.threadPosting = mail.Posting{ID: 10, TopicID: 100}
+			v.topicID = 555 // opened by URL, with no posting row behind it
 
 			v.HandleContentKey(keyPress(key))
 			if v.modal != nil {
@@ -766,6 +763,24 @@ func TestMailViewRefusesThePickersWithoutAFileableThread(t *testing.T) {
 				t.Errorf("notice = %q, want the filing explanation", v.notice)
 			}
 		})
+	}
+}
+
+// A picker over a search result aims at the result's own row, which is the only thing
+// that knows the labels it carries and the box it would move out of.
+func TestMailViewOpensThePickersOverASearchResult(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	v.searchActive = true
+	v.searchList.setPostings([]mail.Posting{{ID: 10, BoxID: 3, TopicID: 100, Name: "Hello world"}})
+	v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+
+	v.HandleContentKey(keyPress("b"))
+	picker, ok := v.modal.(*folderPicker)
+	if !ok {
+		t.Fatalf("modal = %#v, want the label picker", v.modal)
+	}
+	if picker.posting.ID != 10 {
+		t.Errorf("picker posting = %d, want the result's own 10", picker.posting.ID)
 	}
 }
 
@@ -919,35 +934,64 @@ func TestMailViewFilesOpenThreadRecordsOnlyTheLatestFiling(t *testing.T) {
 	}
 }
 
-func TestMailViewFilesOpenThreadOnlyFromFilingLists(t *testing.T) {
-	t.Run("search result", func(t *testing.T) {
-		v := mailWithPostings()
-		v.searchActive = true
-		v.searchList.setPostings([]mail.Posting{{ID: 10, TopicID: 100, Name: "Hello world"}})
-		v.inThread = true
-		v.topicID = 100
-		v.threadPosting = mail.Posting{ID: 10, TopicID: 100}
+// A search result carries its own box like every other posting, so a thread opened out
+// of one files out of the box it is really in — which the results list, drawn from every
+// box at once, could never have said.
+func TestMailViewFilesAThreadOpenedFromSearchResults(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v.searchActive = true
+	v.searchQuery = "quarterly planning"
+	// The result lives in Paper Trail while the box behind the search is the Imbox.
+	v.searchList.setPostings([]mail.Posting{{ID: 10, BoxID: 3, TopicID: 100, Name: "Hello world"}})
+	v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+	if !v.inThread {
+		t.Fatal("a search result should open")
+	}
 
-		if cmd := v.HandleContentKey(keyPress("a")); cmd != nil {
-			t.Errorf("a search-opened thread should not file: %#v", runCmd(cmd))
-		}
-		if v.notice != "Can't file this thread from here" {
-			t.Errorf("notice = %q, want the filing explanation", v.notice)
-		}
-	})
+	done, ok := runCmd(v.HandleContentKey(keyPress("a"))).(postingActionDoneMsg)
+	if !ok || done.err != nil {
+		t.Fatalf("filing a search result returned %#v", done)
+	}
+	if len(recorded.body.PostingIDs) != 1 || recorded.body.PostingIDs[0] != 10 {
+		t.Errorf("posting_ids = %v, want the result's own 10", recorded.body.PostingIDs)
+	}
 
-	t.Run("directly opened topic", func(t *testing.T) {
-		v := mailWithPostings()
-		v.inThread = true
-		v.topicID = 555 // opened by URL, with no posting row behind it
+	v.Update(done)
+	if len(v.searchList.postings) != 0 {
+		t.Errorf("results after filing = %+v, want the filed row gone", v.searchList.postings)
+	}
+}
 
-		if cmd := v.HandleContentKey(keyPress("l")); cmd != nil {
-			t.Errorf("a directly opened thread should not file the selected row: %#v", runCmd(cmd))
-		}
-		if v.notice != "Can't file this thread from here" {
-			t.Errorf("notice = %q, want the filing explanation", v.notice)
-		}
-	})
+// The guard measures against the thread's own box, not the list's, so a Paper Trail
+// result found from the Imbox knows it is already in Paper Trail.
+func TestMailViewMeasuresAlreadyInAgainstTheThreadsOwnBox(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v.searchActive = true
+	v.searchList.setPostings([]mail.Posting{{ID: 10, BoxID: 3, TopicID: 100, Name: "Hello world"}})
+	v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+
+	if cmd := v.HandleContentKey(keyPress("p")); cmd != nil {
+		t.Errorf("moving to the box it is in returned %#v, want nothing", runCmd(cmd))
+	}
+	if v.notice != "Already in Paper Trail" {
+		t.Errorf("notice = %q, want the already-there explanation", v.notice)
+	}
+	if recorded.path == "/postings/moves.json" {
+		t.Error("a refused move still asked the server to move something")
+	}
+}
+
+func TestMailViewWillNotFileATopicOpenedWithoutARow(t *testing.T) {
+	v := mailWithPostings()
+	v.inThread = true
+	v.topicID = 555 // opened by URL, with no posting row behind it
+
+	if cmd := v.HandleContentKey(keyPress("l")); cmd != nil {
+		t.Errorf("a directly opened thread should not file the selected row: %#v", runCmd(cmd))
+	}
+	if v.notice != "Can't file this thread from here" {
+		t.Errorf("notice = %q, want the filing explanation", v.notice)
+	}
 }
 
 func TestMailViewThreadHelpAdvertisesFilingKeys(t *testing.T) {
@@ -2566,28 +2610,37 @@ func TestMailViewTrashesTheOpenThreadAndReturnsToTheList(t *testing.T) {
 // Trash keeps to the same rule as the other filing keys: a thread opened over
 // search results or a bundle has no row to file, so the key says so rather than
 // trashing whatever the box list's cursor happens to be sitting on.
-func TestMailViewRefusesToTrashAThreadOpenedFromSearchResults(t *testing.T) {
+// Trashing a search result trashes the result's own posting, and takes its row out of
+// the results with it: nothing re-reads that list, so the row would otherwise stay
+// there offering to reopen a thread that is now in the Trash.
+func TestMailViewTrashesAThreadOpenedFromSearchResults(t *testing.T) {
 	v, recorded := mailWithTestServer(t, http.StatusNoContent)
 	v.searchActive = true
 	v.searchQuery = "quarterly planning"
-	v.searchList.setPostings([]mail.Posting{{ID: 10, TopicID: 100, Name: "Hello world"}})
+	v.searchList.setPostings([]mail.Posting{{ID: 10, BoxID: 3, TopicID: 100, Name: "Hello world"}})
 
 	v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
 	if !v.inThread {
 		t.Fatal("the searched thread should have opened")
 	}
 
-	if cmd := v.HandleContentKey(keyPress("t")); cmd != nil {
-		t.Errorf("trash over search results returned %#v, want nothing", runCmd(cmd))
+	done, ok := runCmd(v.HandleContentKey(keyPress("t"))).(postingActionDoneMsg)
+	if !ok || done.err != nil {
+		t.Fatalf("trashing a search result returned %#v", done)
 	}
-	if !v.inThread {
-		t.Error("a refused trash should leave the thread open")
+	if done.postingID != 10 {
+		t.Errorf("trashed posting %d, want the result's own 10", done.postingID)
 	}
-	if v.notice == "" {
-		t.Error("a refused trash should say why")
+	if recorded.path != "/postings/trash.json" {
+		t.Errorf("request = %s %s, want POST /postings/trash.json", recorded.method, recorded.path)
 	}
-	if recorded.path == "/postings/trash.json" {
-		t.Error("a refused trash still asked the server to trash something")
+	if v.inThread || !v.searchActive {
+		t.Errorf("trashing landed on open:%v search:%v, want the results", v.inThread, v.searchActive)
+	}
+
+	v.Update(done)
+	if len(v.searchList.postings) != 0 {
+		t.Errorf("results after trashing = %+v, want the trashed row gone", v.searchList.postings)
 	}
 }
 
@@ -3844,6 +3897,114 @@ func TestMailViewOpensAReadBundleAsContactThreads(t *testing.T) {
 	topic, ok := runCmd(v.HandleContentKey(keyPress("enter"))).(topicLoadedMsg)
 	if !ok || topic.err != nil || topic.topicID != 100 {
 		t.Fatalf("opening a thread returned %#v", topic)
+	}
+}
+
+// The reader's complaint was the help bar, not the keys: a thread opened in a bundle
+// offered reply and forward and nothing else, so the filing keys read as missing even
+// where they would have worked.
+func TestMailViewBundleThreadHelpOffersTheFilingKeys(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	v.postingList.postings[0] = bundleRow()
+	v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+	v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+	if !v.inThread || !v.bundleActive {
+		t.Fatalf("thread state = open:%v bundle:%v", v.inThread, v.bundleActive)
+	}
+
+	bindings := v.HelpBindings()
+	for _, key := range []string{"r", "f", "v", "b", "u", "i", "l", "a", "d", "p", "t"} {
+		if !hasHelpBinding(bindings, key) {
+			t.Errorf("bundle thread help misses %q: %+v", key, bindings)
+		}
+	}
+}
+
+// A contact's threads are every thread with them, drawn from every box at once. Each
+// row still carries the box it is in, so a thread opened from that list files out of
+// its own box — the screen the customer reported, and the one the web app files from.
+func TestMailViewFilesAThreadOpenedFromAContactsThreads(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v.bundleActive = true
+	v.bundleContactID = 88
+	v.bundleTitle = "All emails with GitHub"
+	v.bundleList.setPostings([]mail.Posting{{ID: 511, BoxID: 3, TopicID: 100, Name: "Deploy failed on main"}})
+	v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+	if !v.inThread {
+		t.Fatal("a contact's thread should open")
+	}
+
+	bindings := v.HelpBindings()
+	for _, key := range []string{"r", "f", "v", "b", "u", "i", "l", "a", "d", "p", "t"} {
+		if !hasHelpBinding(bindings, key) {
+			t.Errorf("contact thread help misses %q: %+v", key, bindings)
+		}
+	}
+
+	done, ok := runCmd(v.HandleContentKey(keyPress("a"))).(postingActionDoneMsg)
+	if !ok || done.err != nil {
+		t.Fatalf("filing a contact's thread returned %#v", done)
+	}
+	if len(recorded.body.PostingIDs) != 1 || recorded.body.PostingIDs[0] != 511 {
+		t.Errorf("posting_ids = %v, want the thread's own 511", recorded.body.PostingIDs)
+	}
+
+	v.Update(done)
+	if len(v.bundleList.postings) != 0 {
+		t.Errorf("contact threads after filing = %+v, want the filed row gone", v.bundleList.postings)
+	}
+}
+
+// A bundle's threads live in the box the bundle was opened from, so opening one and
+// filing it is the same act as filing its row — which is what the web app does, where
+// the topic's toolbar is the same however you reached it.
+func TestMailViewFilesAThreadOpenedFromABundle(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v.postingList.postings[0] = bundleRow()
+	v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+	v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+	if !v.inThread || !v.bundleActive {
+		t.Fatalf("thread state = open:%v bundle:%v", v.inThread, v.bundleActive)
+	}
+
+	done, ok := runCmd(v.HandleContentKey(keyPress("a"))).(postingActionDoneMsg)
+	if !ok || done.err != nil {
+		t.Fatalf("filing from a bundle returned %#v", done)
+	}
+	if recorded.path != "/postings/moves.json" {
+		t.Errorf("request = %s %s, want POST /postings/moves.json", recorded.method, recorded.path)
+	}
+	if len(recorded.body.PostingIDs) != 1 || recorded.body.PostingIDs[0] != 511 {
+		t.Errorf("posting_ids = %v, want the bundle member's 511", recorded.body.PostingIDs)
+	}
+	if recorded.body.BoxID == nil || *recorded.body.BoxID != 3 {
+		t.Errorf("box_id = %v, want Set Aside's 3", recorded.body.BoxID)
+	}
+
+	v.Update(done)
+	if len(v.bundleList.postings) != 0 {
+		t.Errorf("bundle postings after filing = %+v, want the filed row gone", v.bundleList.postings)
+	}
+}
+
+// Nothing re-reads a bundle's list, so a row the reader has filed away has to be taken
+// out here or it stays on screen offering to file a thread that has already moved.
+func TestMailViewDropsATrashedBundleRow(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	v.postingList.postings[0] = bundleRow()
+	v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+	v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+
+	done, ok := runCmd(v.HandleContentKey(keyPress("t"))).(postingActionDoneMsg)
+	if !ok || done.err != nil {
+		t.Fatalf("trashing from a bundle returned %#v", done)
+	}
+	if v.inThread {
+		t.Error("trash should close the thread, leaving the bundle on screen")
+	}
+	v.Update(done)
+	if len(v.bundleList.postings) != 0 {
+		t.Errorf("bundle postings after trashing = %+v, want the trashed row gone", v.bundleList.postings)
 	}
 }
 

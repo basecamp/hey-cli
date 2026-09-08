@@ -12,6 +12,7 @@ func TestNewPostingKeepsWhatARowShows(t *testing.T) {
 
 	posting := NewPosting(generated.Posting{
 		Id:                    4471829,
+		BoxId:                 91,
 		AppUrl:                "https://app.hey.com/topics/501",
 		CreatedAt:             created,
 		Kind:                  "topic",
@@ -34,6 +35,11 @@ func TestNewPostingKeepsWhatARowShows(t *testing.T) {
 	}
 	if posting.ID != 4471829 || posting.TopicID != 501 || posting.Name != "Kitchen remodel quote" {
 		t.Errorf("posting = %+v", posting)
+	}
+	// The box is the row's own, not the list's: it is what a thread found through a
+	// search, a label or a contact files out of.
+	if posting.BoxID != 91 {
+		t.Errorf("box = %d, want the box HEY served the row in", posting.BoxID)
 	}
 	// HEY's `bundled` means filed inside a bundle; only kind "bundle" makes a row one.
 	if !posting.Seen || posting.IsBundle || !posting.BubbledUp || !posting.Muted || posting.VisibleEntryCount != 3 {

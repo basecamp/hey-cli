@@ -65,8 +65,11 @@ Most of those keep working while you are reading a thread, the way the web app's
 toolbar stays live: `r`, `f`, `v`, `b`, `u`, `i`, `l`, `a`, `d`, `p` and `t` all act on
 the thread on screen rather than on the list behind it. Filing a thread leaves it open in
 the box it landed in, so the next key files it on from there; `t` closes it, because a
-trashed thread is not somewhere you file out of. A thread opened from search results, from
-a bundle, or by its id has no row to file and says so instead.
+trashed thread is not somewhere you file out of. Where you opened the thread from does
+not come into it: a bundle, a contact's threads, a label and a search all work, because
+every thread carries the box it is in and files out of that one rather than out of the
+list you found it through. Filing takes the row out of the list you were reading. Only a
+thread opened by its id has no row behind it, and says so instead.
 
 While writing a new message, reply or forward, Ctrl+T opens the searchable Snippets
 picker. HEY never chooses a default: Enter inserts the selected snippet at the body
