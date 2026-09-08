@@ -72,20 +72,64 @@ func TestSaveBytesWritesContentSafely(t *testing.T) {
 	assertFileContent(t, destination, "Start,End\n09:00,10:00\n")
 }
 
+func TestIsHEYBlobURL(t *testing.T) {
+	for _, test := range []struct {
+		source string
+		want   bool
+	}{
+		{source: "/rails/active_storage/blobs/redirect/signed/report.pdf", want: true},
+		{source: "/rails/active_storage/blobs/proxy/signed/report%20copy.pdf", want: true},
+		{source: "/identity.json"},
+		{source: "https://app.hey.com/rails/active_storage/blobs/redirect/signed/report.pdf"},
+		{source: "//app.hey.com/rails/active_storage/blobs/redirect/signed/report.pdf"},
+		{source: "/rails/active_storage/blobs/../identity.json"},
+		{source: "/rails/active_storage/blobs/%2e%2e/identity.json"},
+		{source: `/rails/active_storage/blobs/redirect/signed/..\identity.json`},
+		{source: "/rails/active_storage/blobs/redirect/signed/report.pdf?download=1"},
+		{source: "/rails/active_storage/blobs/redirect/signed/report.pdf#fragment"},
+		{source: "/rails/active_storage/blobs/"},
+	} {
+		if got := IsHEYBlobURL(test.source); got != test.want {
+			t.Errorf("IsHEYBlobURL(%q) = %t, want %t", test.source, got, test.want)
+		}
+	}
+}
+
+func TestSaveRejectsNonBlobURLBeforeDownload(t *testing.T) {
+	called := false
+	downloader := downloadFunc(func(_ context.Context, _ string, _ io.Writer) (int64, http.Header, error) {
+		called = true
+		return 0, nil, nil
+	})
+	destination := filepath.Join(t.TempDir(), "invoice.pdf")
+
+	_, err := Save(context.Background(), downloader, destination, "/identity.json", true)
+	var saveErr *apierr.Error
+	if !errors.As(err, &saveErr) || saveErr.Code != apierr.CodeAPI {
+		t.Fatalf("Save error = %v", err)
+	}
+	if called {
+		t.Error("Save requested a non-blob URL")
+	}
+	if _, err := os.Stat(destination); !os.IsNotExist(err) {
+		t.Errorf("Save created a destination for a non-blob URL: %v", err)
+	}
+}
+
 func TestSavePreservesExistingFileUnlessForced(t *testing.T) {
 	destination := filepath.Join(t.TempDir(), "quarterly-report.pdf")
 	if err := os.WriteFile(destination, []byte("keep me"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err := Save(context.Background(), writeDownload("new report"), destination, "/report.pdf", false)
+	_, err := Save(context.Background(), writeDownload("new report"), destination, "/rails/active_storage/blobs/redirect/signed/report.pdf", false)
 	var saveErr *apierr.Error
 	if !errors.As(err, &saveErr) || saveErr.Code != "usage" || !strings.Contains(saveErr.Message, "use --force") {
 		t.Fatalf("existing destination error = %v", err)
 	}
 	assertFileContent(t, destination, "keep me")
 
-	written, err := Save(context.Background(), writeDownload("new report"), destination, "/report.pdf", true)
+	written, err := Save(context.Background(), writeDownload("new report"), destination, "/rails/active_storage/blobs/redirect/signed/report.pdf", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +153,7 @@ func TestSaveDoesNotReplaceFileCreatedDuringDownload(t *testing.T) {
 		return int64(written), nil, nil
 	}
 
-	_, err := Save(context.Background(), downloadFunc(downloader), destination, "/report.pdf", false)
+	_, err := Save(context.Background(), downloadFunc(downloader), destination, "/rails/active_storage/blobs/redirect/signed/report.pdf", false)
 	var saveErr *apierr.Error
 	if !errors.As(err, &saveErr) || saveErr.Code != "usage" {
 		t.Fatalf("concurrent destination error = %v", err)
@@ -130,7 +174,7 @@ func TestSaveRemovesPartialFileAndPreservesDownloadError(t *testing.T) {
 		return int64(written), nil, downloadErr
 	}
 
-	written, err := Save(context.Background(), downloadFunc(downloader), destination, "/report.pdf", false)
+	written, err := Save(context.Background(), downloadFunc(downloader), destination, "/rails/active_storage/blobs/redirect/signed/report.pdf", false)
 	if !errors.Is(err, downloadErr) {
 		t.Fatalf("download error = %v, want %v", err, downloadErr)
 	}

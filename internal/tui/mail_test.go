@@ -2104,8 +2104,8 @@ func TestMailViewDownloadsImageDataOnlyForKittyRenderer(t *testing.T) {
 			_, _ = w.Write([]byte(`[{"id":501,"kind":"message"}]`))
 		case "/messages/501.json":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"id":501,"content":"<action-text-attachment url=\"/rails/blobs/chart.png\" filename=\"chart.png\" content-type=\"image/png\"></action-text-attachment>"}`))
-		case "/rails/blobs/chart.png":
+			_, _ = w.Write([]byte(`{"id":501,"content":"<action-text-attachment url=\"/rails/active_storage/blobs/redirect/signed/chart.png\" filename=\"chart.png\" content-type=\"image/png\"></action-text-attachment>"}`))
+		case "/rails/active_storage/blobs/redirect/signed/chart.png":
 			imageRequests.Add(1)
 			w.Header().Set("Content-Type", "image/png")
 			_, _ = w.Write(imageData)

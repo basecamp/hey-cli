@@ -214,20 +214,20 @@ func TestExtractAttachmentsSkipsEmbeddedHTMLAttachment(t *testing.T) {
 func TestExtractAttachmentsInsideEmbeddedHTMLAttachment(t *testing.T) {
 	// An HTML email from outside HEY arrives as one text/html trix attachment
 	// whose content string holds the original markup, files included.
-	content := `<figure data-trix-attachment="{&quot;contentType&quot;:&quot;text/html&quot;,&quot;content&quot;:&quot;<shadow-content><template><p>Payslip attached.</p><action-text-attachment sgid=\&quot;sgid-1\&quot; content-type=\&quot;application/pdf\&quot; url=\&quot;/rails/blobs/payslip.pdf\&quot; filename=\&quot;payslip.pdf\&quot; filesize=\&quot;44218\&quot;></action-text-attachment></template></shadow-content>&quot;,&quot;data&quot;:&quot;{}&quot;}"></figure>`
+	content := `<figure data-trix-attachment="{&quot;contentType&quot;:&quot;text/html&quot;,&quot;content&quot;:&quot;<shadow-content><template><p>Payslip attached.</p><action-text-attachment sgid=\&quot;sgid-1\&quot; content-type=\&quot;application/pdf\&quot; url=\&quot;/rails/active_storage/blobs/redirect/signed/payslip.pdf\&quot; filename=\&quot;payslip.pdf\&quot; filesize=\&quot;44218\&quot;></action-text-attachment></template></shadow-content>&quot;,&quot;data&quot;:&quot;{}&quot;}"></figure>`
 
 	attachments := ExtractAttachments(content)
 	if len(attachments) != 1 {
 		t.Fatalf("ExtractAttachments = %+v, want the file inside the embedded body", attachments)
 	}
 	got := attachments[0]
-	if got.Filename != "payslip.pdf" || got.URL != "/rails/blobs/payslip.pdf" || got.ContentType != "application/pdf" || got.SGID != "sgid-1" || got.ByteSize == nil || *got.ByteSize != 44218 {
+	if got.Filename != "payslip.pdf" || got.URL != "/rails/active_storage/blobs/redirect/signed/payslip.pdf" || got.ContentType != "application/pdf" || got.SGID != "sgid-1" || got.ByteSize == nil || *got.ByteSize != 44218 {
 		t.Errorf("embedded attachment = %+v", got)
 	}
 }
 
 func TestExtractAttachmentsInsideCanonicalEmbeddedHTMLAttachment(t *testing.T) {
-	file := `<action-text-attachment sgid="sgid-deep" content-type="application/pdf" url="/rails/blobs/deep.pdf" filename="deep.pdf" filesize="128"></action-text-attachment>`
+	file := `<action-text-attachment sgid="sgid-deep" content-type="application/pdf" url="/rails/active_storage/blobs/redirect/signed/deep.pdf" filename="deep.pdf" filesize="128"></action-text-attachment>`
 	content := embeddedHTMLFigure(t, canonicalEmbeddedHTML(file))
 
 	attachments := ExtractAttachments(content)
@@ -235,13 +235,13 @@ func TestExtractAttachmentsInsideCanonicalEmbeddedHTMLAttachment(t *testing.T) {
 		t.Fatalf("ExtractAttachments = %+v, want the file inside the canonical HTML attachment", attachments)
 	}
 	got := attachments[0]
-	if got.Filename != "deep.pdf" || got.URL != "/rails/blobs/deep.pdf" || got.ContentType != "application/pdf" || got.SGID != "sgid-deep" || got.ByteSize == nil || *got.ByteSize != 128 || !got.Embedded {
+	if got.Filename != "deep.pdf" || got.URL != "/rails/active_storage/blobs/redirect/signed/deep.pdf" || got.ContentType != "application/pdf" || got.SGID != "sgid-deep" || got.ByteSize == nil || *got.ByteSize != 128 || !got.Embedded {
 		t.Errorf("canonical embedded attachment = %+v", got)
 	}
 }
 
 func TestExtractAttachmentsEmbeddedContentStopsRecursing(t *testing.T) {
-	file := `<action-text-attachment url="/rails/blobs/deep.pdf" filename="deep.pdf"></action-text-attachment>`
+	file := `<action-text-attachment url="/rails/active_storage/blobs/redirect/signed/deep.pdf" filename="deep.pdf"></action-text-attachment>`
 	withinLimit := file
 	for range embeddedContentDepthLimit {
 		withinLimit = embeddedHTMLFigure(t, withinLimit)
@@ -257,8 +257,8 @@ func TestExtractAttachmentsEmbeddedContentStopsRecursing(t *testing.T) {
 }
 
 func TestExtractAttachments(t *testing.T) {
-	h := `<action-text-attachment sgid="sgid-1" url="/rails/blobs/report.pdf" filename="quarterly-report.pdf" content-type="application/pdf" filesize="128"></action-text-attachment>
-<figure data-trix-attachment='{"sgid":"sgid-2","url":"/rails/blobs/photo.png","filename":"photo.png","contentType":"image/png","filesize":256}'></figure>`
+	h := `<action-text-attachment sgid="sgid-1" url="/rails/active_storage/blobs/redirect/signed/report.pdf" filename="quarterly-report.pdf" content-type="application/pdf" filesize="128"></action-text-attachment>
+<figure data-trix-attachment='{"sgid":"sgid-2","url":"/rails/active_storage/blobs/redirect/signed/photo.png","filename":"photo.png","contentType":"image/png","filesize":256}'></figure>`
 	attachments := ExtractAttachments(h)
 	if len(attachments) != 2 {
 		t.Fatalf("ExtractAttachments got %d attachments, want 2", len(attachments))
@@ -266,14 +266,14 @@ func TestExtractAttachments(t *testing.T) {
 	if attachments[0].Filename != "quarterly-report.pdf" || attachments[0].ContentType != "application/pdf" || attachments[0].ByteSize == nil || *attachments[0].ByteSize != 128 || attachments[0].SGID != "sgid-1" {
 		t.Errorf("canonical attachment = %+v", attachments[0])
 	}
-	if attachments[1].Filename != "photo.png" || attachments[1].URL != "/rails/blobs/photo.png" || attachments[1].ByteSize == nil || *attachments[1].ByteSize != 256 || attachments[1].SGID != "sgid-2" {
+	if attachments[1].Filename != "photo.png" || attachments[1].URL != "/rails/active_storage/blobs/redirect/signed/photo.png" || attachments[1].ByteSize == nil || *attachments[1].ByteSize != 256 || attachments[1].SGID != "sgid-2" {
 		t.Errorf("Trix attachment = %+v", attachments[1])
 	}
 }
 
 func TestExtractAttachmentsDistinguishesEmptyFromUnknownSize(t *testing.T) {
-	h := `<action-text-attachment url="/rails/blobs/empty.txt" filename="empty.txt" filesize="0"></action-text-attachment>
-<figure data-trix-attachment='{"url":"/rails/blobs/unknown.txt","filename":"unknown.txt"}'></figure>`
+	h := `<action-text-attachment url="/rails/active_storage/blobs/redirect/signed/empty.txt" filename="empty.txt" filesize="0"></action-text-attachment>
+<figure data-trix-attachment='{"url":"/rails/active_storage/blobs/redirect/signed/unknown.txt","filename":"unknown.txt"}'></figure>`
 	attachments := ExtractAttachments(h)
 	if len(attachments) != 2 {
 		t.Fatalf("ExtractAttachments got %d attachments, want 2", len(attachments))
@@ -288,9 +288,26 @@ func TestExtractAttachmentsDistinguishesEmptyFromUnknownSize(t *testing.T) {
 
 func TestExtractAttachmentsSkipsIncompleteElements(t *testing.T) {
 	h := `<action-text-attachment sgid="sgid-1" filename="missing-url.pdf"></action-text-attachment>
-<figure data-trix-attachment='{"url":"/rails/blobs/missing-name"}'></figure>`
+<figure data-trix-attachment='{"url":"/rails/active_storage/blobs/redirect/signed/missing-name"}'></figure>`
 	if attachments := ExtractAttachments(h); len(attachments) != 0 {
 		t.Errorf("ExtractAttachments = %+v, want none", attachments)
+	}
+}
+
+func TestExtractAttachmentsOnlyReturnsHEYBlobPaths(t *testing.T) {
+	embedded := embeddedHTMLFigure(t, `<action-text-attachment url="/identity.json" filename="identity.pdf"></action-text-attachment>
+<figure data-trix-attachment='{"url":"/identity.json","filename":"embedded-trix.pdf"}'></figure>
+<action-text-attachment url="/rails/active_storage/blobs/redirect/signed/embedded.pdf" filename="embedded.pdf"></action-text-attachment>`)
+	content := embedded + `
+<figure data-trix-attachment='{"url":"/rails/active_storage/blobs/redirect/signed/direct.pdf","filename":"direct.pdf"}'></figure>
+<figure data-trix-attachment='{"url":"/identity.json","filename":"direct-trix.pdf"}'></figure>
+<action-text-attachment url="/identity.json" filename="direct-identity.pdf"></action-text-attachment>
+<action-text-attachment url="https://app.hey.com/rails/active_storage/blobs/redirect/signed/absolute.pdf" filename="absolute.pdf"></action-text-attachment>
+<action-text-attachment url="/rails/active_storage/blobs/../identity.json" filename="traversal.pdf"></action-text-attachment>`
+
+	attachments := ExtractAttachments(content)
+	if len(attachments) != 2 || attachments[0].Filename != "embedded.pdf" || attachments[1].Filename != "direct.pdf" {
+		t.Errorf("ExtractAttachments = %+v, want only the embedded and direct HEY blobs", attachments)
 	}
 }
 

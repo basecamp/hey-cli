@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"golang.org/x/net/html"
+
+	attachmentfiles "github.com/basecamp/hey-cli/internal/attachments"
 )
 
 // ToText converts HTML content to plain text, preserving basic structure.
@@ -357,7 +359,7 @@ func findAttachments(n *html.Node, attachments *[]Attachment, depth int) {
 				Embedded:    depth > 0,
 			}
 			switch {
-			case attachment.URL != "" && attachment.Filename != "":
+			case attachmentfiles.IsHEYBlobURL(attachment.URL) && attachment.Filename != "":
 				*attachments = append(*attachments, attachment)
 			case isHTMLContentType(attachment.ContentType) && getAttr(n, "content") != "":
 				if doc := parseEmbeddedContent(getAttr(n, "content"), depth); doc != nil {
@@ -368,7 +370,7 @@ func findAttachments(n *html.Node, attachments *[]Attachment, depth int) {
 			trix := parseTrixAttachment(n)
 			switch {
 			case trix == nil:
-			case trix.URL != "" && trix.Filename != "":
+			case attachmentfiles.IsHEYBlobURL(trix.URL) && trix.Filename != "":
 				*attachments = append(*attachments, Attachment{
 					URL:         trix.URL,
 					Filename:    trix.Filename,

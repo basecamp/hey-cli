@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
@@ -285,6 +286,90 @@ func TestAttachmentsListsAndSavesNamedFilesInRenderedOrder(t *testing.T) {
 		} else if string(got) != test.content {
 			t.Errorf("saved attachment = %q, want %q", got, test.content)
 		}
+	}
+}
+
+func TestAttachmentsRejectNonBlobURLs(t *testing.T) {
+	malicious := `<action-text-attachment sgid="sgid-identity" content-type="application/pdf" url="/identity.json" filename="invoice.pdf"></action-text-attachment>`
+	valid := `<action-text-attachment sgid="sgid-report" content-type="application/pdf" url="/rails/active_storage/blobs/redirect/signed/report.pdf" filename="report.pdf"></action-text-attachment>`
+	content := renderedEmbeddedHTMLFigure(t, malicious) + valid
+	maliciousID := attachmentIDs(101, []htmlutil.Attachment{{
+		URL:      "/identity.json",
+		Filename: "invoice.pdf",
+		SGID:     "sgid-identity",
+		Embedded: true,
+	}})[0]
+	var identityRequests atomic.Int64
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/topics/42/entries.json":
+			_, _ = w.Write([]byte(`[{"id":101,"kind":"message"}]`))
+		case "/messages/101.json":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 101, "content": content})
+		case "/identity.json":
+			identityRequests.Add(1)
+			_, _ = w.Write([]byte(`{"email_address":"private@example.com"}`))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.RequestURI())
+			http.Error(w, "not found", http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	stdout, err := runAttachmentCommand(t, server, "attachment", "list", "42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response struct {
+		Data []threadAttachment `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &response); err != nil {
+		t.Fatalf("decode response: %v\n%s", err, stdout)
+	}
+	if len(response.Data) != 1 || response.Data[0].Filename != "report.pdf" || response.Data[0].ID != "101:1" {
+		t.Errorf("listed attachments = %+v, want only the HEY blob", response.Data)
+	}
+
+	_, err = runAttachmentCommand(t, server, "attachment", "save", maliciousID, "--output", filepath.Join(t.TempDir(), "invoice.pdf"))
+	var saveErr *apierr.Error
+	if !errors.As(err, &saveErr) || saveErr.Code != apierr.CodeNotFound {
+		t.Fatalf("saving a rejected non-blob attachment error = %v, want not_found", err)
+	}
+	if got := identityRequests.Load(); got != 0 {
+		t.Errorf("identity endpoint received %d requests", got)
+	}
+}
+
+func TestAttachmentSaveRejectsNonCanonicalOpaqueIDsBeforeRequest(t *testing.T) {
+	validID := attachmentIDs(101, []htmlutil.Attachment{{SGID: "sgid-report", Embedded: true}})[0]
+	keyStart := strings.Index(validID, ":e-") + len(":e-")
+	withNewline := validID[:keyStart+8] + "\r\n" + validID[keyStart+8:]
+
+	const base64URLAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	last := strings.IndexByte(base64URLAlphabet, validID[len(validID)-1])
+	if last < 0 || last%4 != 0 {
+		t.Fatalf("opaque ID has unexpected final base64 character: %q", validID)
+	}
+	withTrailingBits := validID[:len(validID)-1] + string(base64URLAlphabet[last+1])
+
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+
+	for _, id := range []string{withNewline, withTrailingBits} {
+		_, err := runAttachmentCommand(t, server, "attachment", "save", id)
+		var commandErr *apierr.Error
+		if !errors.As(err, &commandErr) || commandErr.Code != apierr.CodeUsage {
+			t.Errorf("attachment save %q error = %v, want usage", id, err)
+		}
+	}
+	if got := requests.Load(); got != 0 {
+		t.Errorf("malformed opaque IDs caused %d requests", got)
 	}
 }
 

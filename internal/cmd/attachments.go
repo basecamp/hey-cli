@@ -213,7 +213,7 @@ func validAttachmentSelector(selector string) bool {
 	}
 	key, occurrence, hasOccurrence := strings.Cut(strings.TrimPrefix(selector, "e-"), ".")
 	digest, err := base64.RawURLEncoding.DecodeString(key)
-	if err != nil || len(digest) != sha256.Size {
+	if err != nil || len(digest) != sha256.Size || base64.RawURLEncoding.EncodeToString(digest) != key {
 		return false
 	}
 	if !hasOccurrence {

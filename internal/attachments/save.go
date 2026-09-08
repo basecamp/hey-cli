@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -17,6 +18,25 @@ import (
 
 type Downloader interface {
 	DownloadBlob(context.Context, string, io.Writer) (int64, http.Header, error)
+}
+
+const heyBlobPathPrefix = "/rails/active_storage/blobs/"
+
+// IsHEYBlobURL reports whether source is a clean relative path to HEY's blob storage.
+func IsHEYBlobURL(source string) bool {
+	parsed, err := url.Parse(source)
+	if err != nil || parsed.IsAbs() || parsed.Host != "" || parsed.User != nil || parsed.Opaque != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return false
+	}
+	if parsed.Path == "" || strings.Contains(parsed.Path, `\`) || path.Clean(parsed.Path) != parsed.Path || !strings.HasPrefix(parsed.Path, heyBlobPathPrefix) {
+		return false
+	}
+	for _, character := range parsed.Path {
+		if unicode.IsControl(character) {
+			return false
+		}
+	}
+	return len(parsed.Path) > len(heyBlobPathPrefix)
 }
 
 func Destination(outputPath, filename string) (string, error) {
@@ -61,7 +81,7 @@ func PortableFilename(filename string) (string, error) {
 
 // SaveBytes safely writes data to destination. Existing paths are preserved unless force is set.
 func SaveBytes(destination string, data []byte, force bool) (int64, error) {
-	return Save(context.Background(), byteDownloader(data), destination, "", force)
+	return save(context.Background(), byteDownloader(data), destination, "", force)
 }
 
 type byteDownloader []byte
@@ -72,6 +92,13 @@ func (data byteDownloader) DownloadBlob(_ context.Context, _ string, writer io.W
 }
 
 func Save(ctx context.Context, downloader Downloader, destination, sourceURL string, force bool) (int64, error) {
+	if !IsHEYBlobURL(sourceURL) {
+		return 0, apierr.ErrAPI(0, "attachment URL does not identify a HEY blob")
+	}
+	return save(ctx, downloader, destination, sourceURL, force)
+}
+
+func save(ctx context.Context, downloader Downloader, destination, sourceURL string, force bool) (int64, error) {
 	if !force {
 		if _, err := os.Lstat(destination); err == nil {
 			return 0, apierr.ErrUsage(fmt.Sprintf("destination already exists: %s (use --force to replace it)", destination))
