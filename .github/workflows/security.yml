@@ -52,7 +52,7 @@ jobs:
           scan-type: fs
           format: sarif
           output: trivy-results.sarif
-      - uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
+      - uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: trivy-results.sarif
           category: trivy
@@ -68,12 +68,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: securego/gosec@9e75c0576c9878035d4221392108d458abe10fc3 # v2.28.0
+      - uses: securego/gosec@deb54465fea23d19a77f037e11e6589021f8501d # v2.29.0
         env:
           GOTOOLCHAIN: auto
         with:
           args: -fmt sarif -out gosec-results.sarif ./...
-      - uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
+      - uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         if: ${{ always() && hashFiles('gosec-results.sarif') != '' }}
         with:
           sarif_file: gosec-results.sarif
