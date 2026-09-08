@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -4301,5 +4302,46 @@ func TestMailViewBundleSurvivesAStaleAppend(t *testing.T) {
 		if posting.ID == 599 {
 			t.Fatal("a stale append should not grow the bundle")
 		}
+	}
+}
+
+func TestMailViewTrashesSelectedThreadsInOneRequest(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	selectTwoThreads(v)
+
+	done, ok := runCmd(v.HandleContentKey(keyPress("t"))).(postingActionDoneMsg)
+	if !ok || done.err != nil {
+		t.Fatalf("bulk trash returned %#v", done)
+	}
+	if recorded.path != "/postings/trash.json" || !slices.Equal(recorded.body.PostingIDs, []int64{100, 101}) {
+		t.Fatalf("request = %s %v, want one POST /postings/trash.json with [100 101]", recorded.path, recorded.body.PostingIDs)
+	}
+
+	answer, _ := v.Update(done)
+	if toast := deliverToView(v, answer); toast != "2 threads moved to Trash" {
+		t.Errorf("toast = %q", toast)
+	}
+	if len(v.postingList.postings) != 0 {
+		t.Errorf("postings left = %d, want every selected row gone", len(v.postingList.postings))
+	}
+	if ids := v.postingList.selectedIDs(); len(ids) != 0 {
+		t.Errorf("selection left = %v, want the trashed rows out of it", ids)
+	}
+	if v.AccountSwitchBlocked() {
+		t.Error("completed bulk trash still blocks account switching")
+	}
+}
+
+func TestMailViewTrashFailureKeepsSelection(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusInternalServerError)
+	selectTwoThreads(v)
+
+	done := runCmd(v.HandleContentKey(keyPress("t"))).(postingActionDoneMsg)
+	if done.err == nil {
+		t.Fatal("a failed bulk trash should carry its error")
+	}
+	v.Update(done)
+	if len(v.postingList.postings) != 2 || !slices.Equal(v.postingList.selectedIDs(), []int64{100, 101}) {
+		t.Errorf("postings = %d selected = %v, want both rows still selected", len(v.postingList.postings), v.postingList.selectedIDs())
 	}
 }

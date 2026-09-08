@@ -198,11 +198,21 @@ type postingActionDoneMsg struct {
 	boxID           int64
 	sourceKind      mail.Kind
 	postingID       int64
+	postingIDs      []int64 // every posting a bulk action took, empty for a single row's
 	effect          postingActionEffect
 	destinationKind string // the box kind a move filed into, empty for every other action
 	filingSeq       uint64 // which open-thread filing dispatched the move, zero for a list row's
 	seen            bool   // the action was taken on the Previously Seen screen
 	err             error
+}
+
+// postings is every posting the action took: the bulk selection when there was one,
+// otherwise the single row.
+func (msg postingActionDoneMsg) postings() []int64 {
+	if len(msg.postingIDs) > 0 {
+		return msg.postingIDs
+	}
+	return []int64{msg.postingID}
 }
 
 // postingSeenMsg reports the mark-seen that opening a thread triggers on its
@@ -718,24 +728,26 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return func() tea.Msg { return errMsg{msg.err} }, true
 		}
 		done := notify(msg.action)
-		idx := v.postingIndex(msg.postingID)
-		if idx >= 0 {
-			switch msg.effect {
-			case postingActionNone:
-			case postingActionRemove:
-				v.removePostingAt(idx)
-			case postingActionSeen:
-				v.postingList.markSeen(idx)
-			case postingActionUnseen:
-				v.postingList.markUnseen(idx)
-			case postingActionIgnore:
-				v.postingList.postings[idx].Muted = true
-			case postingActionStopIgnoring:
-				v.postingList.postings[idx].Muted = false
+		for _, postingID := range msg.postings() {
+			idx := v.postingIndex(postingID)
+			if idx >= 0 {
+				switch msg.effect {
+				case postingActionNone:
+				case postingActionRemove:
+					v.removePostingAt(idx)
+				case postingActionSeen:
+					v.postingList.markSeen(idx)
+				case postingActionUnseen:
+					v.postingList.markUnseen(idx)
+				case postingActionIgnore:
+					v.postingList.postings[idx].Muted = true
+				case postingActionStopIgnoring:
+					v.postingList.postings[idx].Muted = false
+				}
 			}
-		}
-		if msg.effect == postingActionRemove {
-			v.removeFromOverlaidLists(msg.postingID)
+			if msg.effect == postingActionRemove {
+				v.removeFromOverlaidLists(postingID)
+			}
 		}
 		// The open thread can file back into the box on screen — out and back while
 		// it stays open — and its row was removed when it first filed away, so the
@@ -1532,7 +1544,11 @@ func (v *mailView) applySeenPostingAction(msg postingActionDoneMsg) tea.Cmd {
 	if msg.err != nil {
 		return func() tea.Msg { return errMsg{msg.err} }
 	}
-	if idx := postingIndexIn(v.seenList.postings, msg.postingID); idx >= 0 {
+	for _, postingID := range msg.postings() {
+		idx := postingIndexIn(v.seenList.postings, postingID)
+		if idx < 0 {
+			continue
+		}
 		switch msg.effect {
 		case postingActionNone:
 		case postingActionRemove, postingActionUnseen:
@@ -2428,11 +2444,38 @@ func (v *mailView) fileablePosting() *mail.Posting {
 }
 
 func (v *mailView) handlePostingAction(key string) tea.Cmd {
+	if key == "t" || key == "T" {
+		if ids := v.actionList().selectedIDs(); len(ids) > 0 {
+			return v.trashSelected(ids)
+		}
+	}
 	selected := v.actionList().selectedPosting()
 	if selected == nil {
 		return nil
 	}
 	return v.postingAction(key, *selected, v.postingBoxKind(*selected))
+}
+
+// trashSelected trashes every selected thread in one request, the way the web app's
+// toolbar acts on a selection rather than on the row under the cursor. The rows leave
+// the list when HEY answers and take their selection with them; a failure leaves the
+// selection standing for another try.
+func (v *mailView) trashSelected(ids []int64) tea.Cmd {
+	label := "Thread moved to Trash"
+	if len(ids) > 1 {
+		label = fmt.Sprintf("%d threads moved to Trash", len(ids))
+	}
+	trash := v.doPostingAction(label, postingActionRemove, v.currentBoxID(), ids[0], func() error {
+		return v.vc.sdk.Postings().MoveToTrash(v.vc.ctx, ids...)
+	})
+	return func() tea.Msg {
+		done, ok := trash().(postingActionDoneMsg)
+		if !ok {
+			return nil
+		}
+		done.postingIDs = ids
+		return done
+	}
 }
 
 // actionBoxKind is the box kind a list row files out of, empty over a source that
