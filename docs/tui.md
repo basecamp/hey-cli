@@ -61,6 +61,13 @@ uppercase belongs to Labels:
 | Ctrl+A | switch linked account |
 | Ctrl+V | choose an Imbox cover |
 
+Most of those keep working while you are reading a thread, the way the web app's topic
+toolbar stays live: `r`, `f`, `v`, `b`, `u`, `i`, `l`, `a`, `d`, `p` and `t` all act on
+the thread on screen rather than on the list behind it. Filing a thread leaves it open in
+the box it landed in, so the next key files it on from there; `t` closes it, because a
+trashed thread is not somewhere you file out of. A thread opened from search results, from
+a bundle, or by its id has no row to file and says so instead.
+
 While writing a new message, reply or forward, Ctrl+T opens the searchable Snippets
 picker. HEY never chooses a default: Enter inserts the selected snippet at the body
 cursor, Escape returns without changing the draft, and the picker can be reopened to

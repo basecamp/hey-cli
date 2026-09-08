@@ -616,6 +616,10 @@ func TestMailViewFilesOpenThread(t *testing.T) {
 		{"reply later", "l", 4, "Thread moved to Reply Later"},
 		{"set aside", "a", 3, "Thread moved to Set Aside"},
 		{"set aside uppercase", "A", 3, "Thread moved to Set Aside"},
+		{"feed", "d", 2, "Thread moved to The Feed"},
+		{"feed uppercase", "D", 2, "Thread moved to The Feed"},
+		{"paper trail", "p", 5, "Thread moved to Paper Trail"},
+		{"paper trail uppercase", "P", 5, "Thread moved to Paper Trail"},
 	}
 
 	for _, tt := range tests {
@@ -649,6 +653,117 @@ func TestMailViewFilesOpenThread(t *testing.T) {
 			}
 			if v.postingIndex(100) != -1 {
 				t.Error("the filed thread should leave the box list behind the reader")
+			}
+		})
+	}
+}
+
+// Opening an unseen thread marks it seen, so u has something to undo. The snapshot
+// the thread files on is taken before that lands and has to follow it, or the key
+// answers that the thread it just marked seen is already unseen.
+func TestMailViewMarksTheOpenThreadUnseen(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	marking, _ := v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+	if !v.inThread {
+		t.Fatal("enter should open the selected thread")
+	}
+	v.Update(runCmd(marking))
+
+	done, ok := runCmd(v.HandleContentKey(keyPress("u"))).(postingActionDoneMsg)
+	if !ok || done.err != nil {
+		t.Fatalf("unseen command returned %#v", done)
+	}
+	if recorded.path != "/postings/unseen.json" {
+		t.Errorf("request = %s %s, want POST /postings/unseen.json", recorded.method, recorded.path)
+	}
+	if len(recorded.body.PostingIDs) != 1 || recorded.body.PostingIDs[0] != 100 {
+		t.Errorf("posting_ids = %v, want [100]", recorded.body.PostingIDs)
+	}
+	if !v.inThread {
+		t.Error("marking unseen should leave the thread open: it has not gone anywhere")
+	}
+}
+
+// The same-box guard reaches the open thread, so a key naming the box the thread is
+// already in says so rather than sending a move that would do nothing.
+func TestMailViewRefusesToFileTheOpenThreadIntoItsOwnBox(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+
+	if cmd := v.HandleContentKey(keyPress("i")); cmd != nil {
+		t.Errorf("moving to the box it is in returned %#v, want nothing", runCmd(cmd))
+	}
+	if v.notice != "Already in Imbox" {
+		t.Errorf("notice = %q, want the already-there explanation", v.notice)
+	}
+	if recorded.path == "/postings/moves.json" {
+		t.Error("a refused move still asked the server to move something")
+	}
+}
+
+func TestMailViewOpensThePickersOverTheOpenThread(t *testing.T) {
+	t.Run("labels", func(t *testing.T) {
+		v, _ := mailWithTestServer(t, http.StatusNoContent)
+		v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+
+		v.HandleContentKey(keyPress("b"))
+		picker, ok := v.modal.(*folderPicker)
+		if !ok {
+			t.Fatalf("modal = %#v, want the label picker", v.modal)
+		}
+		if picker.posting.ID != 100 {
+			t.Errorf("picker posting = %d, want the thread's own 100", picker.posting.ID)
+		}
+	})
+
+	t.Run("move", func(t *testing.T) {
+		v, _ := mailWithTestServer(t, http.StatusNoContent)
+		v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+
+		v.HandleContentKey(keyPress("v"))
+		picker, ok := v.modal.(*movePicker)
+		if !ok {
+			t.Fatalf("modal = %#v, want the move picker", v.modal)
+		}
+		if picker.postingID != 100 {
+			t.Errorf("picker posting = %d, want the thread's own 100", picker.postingID)
+		}
+	})
+}
+
+// A picker aims at the thread on screen, not at the row the list's cursor has moved
+// on to: opening a thread marks it seen, which resorts it under the cover.
+func TestMailViewPickersAimAtTheThreadNotTheListCursor(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+	v.postingList.moveDown()
+
+	v.HandleContentKey(keyPress("b"))
+	picker, ok := v.modal.(*folderPicker)
+	if !ok {
+		t.Fatalf("modal = %#v, want the label picker", v.modal)
+	}
+	if picker.posting.ID != 100 {
+		t.Errorf("picker posting = %d, want the open thread's 100 rather than the moved cursor", picker.posting.ID)
+	}
+}
+
+func TestMailViewRefusesThePickersWithoutAFileableThread(t *testing.T) {
+	for _, key := range []string{"b", "v"} {
+		t.Run(key, func(t *testing.T) {
+			v := mailWithPostings()
+			v.searchActive = true
+			v.searchList.setPostings([]mail.Posting{{ID: 10, TopicID: 100, Name: "Hello world"}})
+			v.inThread = true
+			v.topicID = 100
+			v.threadPosting = mail.Posting{ID: 10, TopicID: 100}
+
+			v.HandleContentKey(keyPress(key))
+			if v.modal != nil {
+				t.Errorf("modal = %#v, want no picker over a thread with no row to file", v.modal)
+			}
+			if v.notice != "Can't file this thread from here" {
+				t.Errorf("notice = %q, want the filing explanation", v.notice)
 			}
 		})
 	}
