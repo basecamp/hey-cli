@@ -2981,17 +2981,19 @@ func (v *mailView) renderEntries(entries []mail.Entry) (string, []int) {
 			from = e.AlternativeSenderName
 		}
 
-		// A full blank line separates the header from whatever follows it —
-		// the summary here, or the body's own leading blank when there is none.
+		// Each arm below opens with a blank line, which is what separates the header
+		// from whatever follows it. The summary is HEY's ~105-character preview of the
+		// body, so it stands in only where there is no body to show: printed beside one
+		// it repeats the message's opening line, and printed for a body that was not
+		// read it passes a preview off as the message.
 		fmt.Fprintf(&b, "%s  %s\n", v.vc.styles.entryFrom.Render(terminal.SanitizeLine(from)), v.vc.styles.entryDate.Render(formatDisplayDateTime(e.CreatedAt)))
-		if e.Summary != "" {
-			fmt.Fprintf(&b, "\n%s\n", terminal.SanitizeLine(e.Summary))
-		}
 		switch {
 		case !e.Body.IsEmpty():
 			fmt.Fprintf(&b, "\n%s\n", v.vc.styles.entryBody.Render(markdown.Render(e.Body, sepWidth)))
 		case e.BodyState == string(threadload.StateOverLimit), e.BodyState == string(threadload.StateFailed):
 			fmt.Fprintf(&b, "\n%s\n", v.vc.styles.entryDate.Render("(body not read: "+e.BodyState+")"))
+		case e.Summary != "":
+			fmt.Fprintf(&b, "\n%s\n", terminal.SanitizeLine(e.Summary))
 		}
 		entryAttachments := attachmentsForMessage(v.attachments, e.ID)
 		if panel := renderAttachmentPanel(entryAttachments, selectedAttachmentForMessage(v.attachments, v.attachmentCursor, e.ID)); panel != "" {

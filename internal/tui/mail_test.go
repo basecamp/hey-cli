@@ -26,6 +26,7 @@ import (
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/mail"
+	"github.com/basecamp/hey-cli/internal/threadload"
 )
 
 func testPNG(t *testing.T) []byte {
@@ -331,8 +332,8 @@ func TestThreadViewShowsSubjectAndSpacesTheHeader(t *testing.T) {
 	if strings.TrimSpace(lines[header+1]) != "" {
 		t.Errorf("a blank line should follow the header: %q", lines[header+1])
 	}
-	if strings.TrimSpace(lines[header+2]) != "Can we meet Thursday?" {
-		t.Errorf("the summary should follow the blank line: %q", lines[header+2])
+	if strings.TrimSpace(lines[header+2]) != "Can we meet Thursday to walk through the numbers?" {
+		t.Errorf("the body should follow the blank line: %q", lines[header+2])
 	}
 }
 
@@ -3707,6 +3708,50 @@ func TestMailViewReadsEveryPageOfAThreadAndMarksUnreadBodies(t *testing.T) {
 	}
 	if !strings.Contains(view, "(body not read: failed)") {
 		t.Errorf("view does not mark the unread body: %q", view)
+	}
+}
+
+// HEY's summary is its ~105-character preview of the body, so it belongs on screen only
+// where the body itself cannot be. Beside a body it repeats the message's opening line;
+// for a body that was not read it would pass a preview off as the message.
+func TestRenderEntriesShowsTheBodyRatherThanHEYsPreviewOfIt(t *testing.T) {
+	v := newMailView(testVC())
+	v.vc.width = 80
+	entries := []mail.Entry{
+		{
+			ID:        1,
+			Creator:   mail.Contact{Name: "Maria Gonzalez"},
+			Summary:   "Moving the review to Friday so ...",
+			Body:      htmlutil.ToMarkdown("<p>Moving the review to Friday so Sam can join.</p>"),
+			BodyState: string(threadload.StateHydrated),
+		},
+		{
+			ID:        2,
+			Creator:   mail.Contact{Name: "Sam Rivera"},
+			Summary:   "The quarterly figures are attached.",
+			BodyState: string(threadload.StateBodyless),
+		},
+		{
+			ID:        3,
+			Creator:   mail.Contact{Name: "Ana Ortiz"},
+			Summary:   "Never shown, the body went unread ...",
+			BodyState: string(threadload.StateFailed),
+		},
+	}
+
+	rendered, _ := v.renderEntries(entries)
+
+	if strings.Contains(rendered, "Friday so ...") {
+		t.Errorf("a hydrated entry repeats HEY's preview of its own body:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "Sam can join.") {
+		t.Errorf("a hydrated entry lost its body:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "The quarterly figures are attached.") {
+		t.Errorf("a bodyless entry lost its summary, which is all HEY serves for it:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "Never shown") || !strings.Contains(rendered, "(body not read: failed)") {
+		t.Errorf("an unread body should say so rather than show a preview:\n%s", rendered)
 	}
 }
 
