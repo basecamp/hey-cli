@@ -7,7 +7,7 @@ require (
 	charm.land/bubbletea/v2 v2.0.9
 	charm.land/glamour/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.6
-	github.com/basecamp/actioncable-go v0.0.0-20260907155732-ea2cdf5c8d55
+	github.com/basecamp/actioncable-go v1.0.0
 	github.com/basecamp/hey-sdk/go v0.29.0
 	github.com/basecamp/mcp v0.0.0-20260828100356-2d6f44b51e9d
 	github.com/charmbracelet/x/ansi v0.11.8
