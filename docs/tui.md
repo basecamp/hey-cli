@@ -212,7 +212,11 @@ The private note is shown formatted and edited as Markdown, the way `hey contact
 
 ## Calendar
 
-Press Shift+C to open Calendar, then `c` to manage time track categories. Create a category with `n`, rename the selected category with Enter or `r`, and press `x` twice to delete it. Time tracks in a deleted category become uncategorized.
+Press Shift+C to open Calendar. `1`, `2` and `3` switch between the day, week and year spans, `p` and `n` step back and forward, and `t` returns to today. The arrows walk what the span is made of — events on the day, days then events on the week, cells then a cell's events on the year (Enter steps into a cell, Escape steps back out).
+
+With an event picked out, Enter opens a read-only card showing what it carries — when and where it is, the link to join it, the guest list and the notes. From the card, `o` opens the link in your browser, `e` switches to the edit form on the same event, and Escape or `q` closes it. `a` creates an event, `e` edits the selected one, and `x` twice deletes it.
+
+Press `c` to manage time track categories. Create a category with `n`, rename the selected category with Enter or `r`, and press `x` twice to delete it. Time tracks in a deleted category become uncategorized.
 
 A new event's times are written in your HEY account's time zone, the one HEY's web app and
 `hey event add` use: the Starts and Ends rows name it, and the event is saved in it. The
