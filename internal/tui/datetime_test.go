@@ -74,9 +74,9 @@ func TestDateTimePickerStepsTheDateByADay(t *testing.T) {
 		t.Errorf("after two downs, date() = %q, want 2026-08-21", got)
 	}
 
-	typeInto(t, picker, "+")
+	picker.handleKey(tea.KeyPressMsg{Code: tea.KeyUp})
 	if got := picker.date(); got != "2026-08-22" {
-		t.Errorf("after +, date() = %q, want 2026-08-22", got)
+		t.Errorf("after up, date() = %q, want 2026-08-22", got)
 	}
 
 	picker.dateInput.SetValue("next tuesday")
@@ -94,6 +94,20 @@ func TestDateTimePickerTypesTheDateSeparator(t *testing.T) {
 	typeInto(t, picker, "-22")
 	if got := picker.date(); got != "2026-08-22" {
 		t.Errorf("after typing -22, date() = %q, want 2026-08-22", got)
+	}
+}
+
+func TestDateTimePickerTypesADateWithItsHyphens(t *testing.T) {
+	picker := testPicker()
+	picker.focusFirst()
+	picker.dateInput.SetValue("")
+
+	typeInto(t, picker, "2026-09-14")
+	if got := picker.date(); got != "2026-09-14" {
+		t.Errorf("after typing 2026-09-14, date() = %q", got)
+	}
+	if got := picker.problem(); got != "" {
+		t.Errorf("problem() = %q, want none for a typed date", got)
 	}
 }
 
