@@ -644,6 +644,199 @@ func TestARepeatingEventsOwnDayCanBeSelected(t *testing.T) {
 	}
 }
 
+// cardDay is a calendar on one day holding a single event with every trimming — a location, a
+// link, guests, notes and a weekly recurrence — so the read-only card can be checked in full.
+func cardDay(t *testing.T) *calendarView {
+	t.Helper()
+	v := newCalendarView(testVC())
+	v.Resize(100, 30)
+	v.now = func() time.Time { return time.Date(2026, 8, 20, 9, 0, 0, 0, time.Local) }
+	v.Update(calendarsLoadedMsg{calendars: testCalendars()})
+	v.Update(recordingsLoadedMsg{requestResult: currentRequest(v), recordings: []Recording{
+		{ID: 5, Title: "Roadmap review", Type: "Calendar::Event", CalendarID: 10,
+			StartsAt: atLocal("2026-08-20T14:00:00"), EndsAt: atLocal("2026-08-20T15:00:00"),
+			Location: "Sala 2", Link: "https://meet.example.com/roadmap",
+			Attendees: []string{"ana@example.com", "luis@example.com"},
+			Notes:     "Bring the September report", Recurring: true, RepeatKind: "every_week"},
+	}})
+	return v
+}
+
+// Enter opens a read-only card over whatever event the arrows have walked to — the same offer
+// the help bar makes on every other content list. It is built from the selection alone: the
+// grid read already carries the notes, the link and the guests.
+func TestEnterOpensTheReadOnlyEventCard(t *testing.T) {
+	v := cardDay(t)
+
+	// With nothing picked out there is nothing to open.
+	if cmd := v.HandleContentKey(keyPress("enter")); cmd != nil || v.detail != nil {
+		t.Fatal("enter opened a card with nothing selected")
+	}
+
+	v.HandleContentKey(keyPress("right"))
+	if v.selectedEvent != "5" {
+		t.Fatalf("→ selected %q", v.selectedEvent)
+	}
+	v.HandleContentKey(keyPress("enter"))
+	if v.detail == nil {
+		t.Fatal("enter did not open the event card")
+	}
+
+	card := stripANSI(v.detail.view())
+	for _, want := range []string{
+		"Roadmap review", "Sala 2", "https://meet.example.com/roadmap",
+		"ana@example.com", "Bring the September report", "every week", "Design Team",
+	} {
+		if !strings.Contains(card, want) {
+			t.Errorf("the card does not show %q:\n%s", want, card)
+		}
+	}
+
+	// The card holds every key: a span number does not switch the view behind it.
+	v.HandleContentKey(keyPress("3"))
+	if v.viewMode != viewDay || v.detail == nil {
+		t.Errorf("a key fell through the card: viewMode=%v open=%v", v.viewMode, v.detail != nil)
+	}
+
+	if !hasBinding(v.HelpBindings(), "o") || !hasBinding(v.HelpBindings(), "e") {
+		t.Errorf("the card's help bar = %+v, want o and e", v.HelpBindings())
+	}
+
+	// esc closes it, and so does q.
+	v.HandleContentKey(keyPress("esc"))
+	if v.detail != nil {
+		t.Fatal("esc did not close the card")
+	}
+	v.HandleContentKey(keyPress("right"))
+	v.HandleContentKey(keyPress("enter"))
+	v.HandleContentKey(keyPress("q"))
+	if v.detail != nil {
+		t.Error("q did not close the card")
+	}
+}
+
+// o on the card opens the link through the same launcher an attachment uses.
+func TestTheEventCardOpensTheLink(t *testing.T) {
+	var opened []string
+	vc := testVC()
+	vc.openAttachment = func(target string) error {
+		opened = append(opened, target)
+		return nil
+	}
+
+	v := newCalendarView(vc)
+	v.Resize(100, 30)
+	v.now = func() time.Time { return time.Date(2026, 8, 20, 9, 0, 0, 0, time.Local) }
+	v.Update(calendarsLoadedMsg{calendars: testCalendars()})
+	v.Update(recordingsLoadedMsg{requestResult: currentRequest(v), recordings: []Recording{
+		{ID: 6, Title: "Sync", Type: "Calendar::Event",
+			StartsAt: atLocal("2026-08-20T14:00:00"), EndsAt: atLocal("2026-08-20T15:00:00"),
+			Link: "https://meet.example.com/sync"},
+	}})
+	v.HandleContentKey(keyPress("right"))
+	v.HandleContentKey(keyPress("enter"))
+
+	if cmd := v.HandleContentKey(keyPress("o")); cmd == nil {
+		t.Fatal("o said nothing")
+	}
+	if len(opened) != 1 || opened[0] != "https://meet.example.com/sync" {
+		t.Fatalf("o opened %v, want the event link", opened)
+	}
+	if v.detail == nil {
+		t.Error("o closed the card")
+	}
+}
+
+// Event links are server data and the edit form takes any URI with a host, so a shared event
+// could carry a non-web scheme. The card shows it but never hands it to the OS launcher, and
+// does not offer o for it.
+func TestTheEventCardWillNotOpenANonWebLink(t *testing.T) {
+	var opened []string
+	vc := testVC()
+	vc.openAttachment = func(target string) error {
+		opened = append(opened, target)
+		return nil
+	}
+
+	v := newCalendarView(vc)
+	v.Resize(100, 30)
+	v.now = func() time.Time { return time.Date(2026, 8, 20, 9, 0, 0, 0, time.Local) }
+	v.Update(calendarsLoadedMsg{calendars: testCalendars()})
+	v.Update(recordingsLoadedMsg{requestResult: currentRequest(v), recordings: []Recording{
+		{ID: 6, Title: "Sync", Type: "Calendar::Event",
+			StartsAt: atLocal("2026-08-20T14:00:00"), EndsAt: atLocal("2026-08-20T15:00:00"),
+			Link: "file:///etc/passwd"},
+	}})
+	v.HandleContentKey(keyPress("right"))
+	v.HandleContentKey(keyPress("enter"))
+
+	if hasBinding(v.HelpBindings(), "o") {
+		t.Error("the card offers o for a non-web link")
+	}
+	v.HandleContentKey(keyPress("o"))
+	if len(opened) != 0 {
+		t.Fatalf("o handed %v to the launcher", opened)
+	}
+	if !strings.Contains(stripANSI(v.detail.view()), "file:///etc/passwd") {
+		t.Error("the card hides the link instead of showing it")
+	}
+}
+
+// The card is an inputCapturer, so the model routes every key to it -- including esc, which
+// never reaches CancelPendingDetail while it is open. Regression test that esc closes the card
+// through the full model rather than being swallowed by the notes viewport.
+func TestModelClosesTheEventCardOnEscape(t *testing.T) {
+	m := sizedModel()
+	m.loading = false
+	m.section = sectionCalendar
+	m.activeView = m.calendarView
+	m.calendarView.now = func() time.Time { return time.Date(2026, 8, 20, 9, 0, 0, 0, time.Local) }
+	m.calendarView.Update(calendarsLoadedMsg{calendars: testCalendars()})
+	m.calendarView.Update(recordingsLoadedMsg{
+		requestResult: currentRequest(m.calendarView),
+		recordings: []Recording{
+			{ID: 5, Title: "Roadmap review", Type: "Calendar::Event", CalendarID: 10,
+				StartsAt: atLocal("2026-08-20T14:00:00"), EndsAt: atLocal("2026-08-20T15:00:00"),
+				Notes: "Bring the September report"},
+		},
+	})
+
+	step := func(key string) {
+		t.Helper()
+		updated, _ := m.Update(keyPress(key))
+		m = updated.(model)
+	}
+
+	step("right")
+	step("enter")
+	if m.calendarView.detail == nil {
+		t.Fatal("enter did not open the card through the model")
+	}
+	step("esc")
+	if m.calendarView.detail != nil {
+		t.Fatal("the model did not close the card on esc")
+	}
+}
+
+// e trades the card for the edit form on the same event, so the card is where an edit starts
+// rather than a dead end.
+func TestEEditsFromTheEventCard(t *testing.T) {
+	v := cardDay(t)
+	v.HandleContentKey(keyPress("right"))
+	v.HandleContentKey(keyPress("enter"))
+
+	v.HandleContentKey(keyPress("e"))
+	if v.detail != nil {
+		t.Error("e left the card open")
+	}
+	if v.eventForm == nil || v.eventForm.mode != eventFormEdit {
+		t.Fatal("e did not open the edit form on the card's event")
+	}
+	if v.editing.ID != 5 {
+		t.Errorf("the form is editing %d, want the card's event", v.editing.ID)
+	}
+}
+
 // On the year, b manages habits but does not keep them. A year read carries no recordings, so
 // nothing on that screen knows what was kept on the day the cursor is on — and a ring drawn
 // empty there would be answering a question nobody asked the server.
@@ -1097,6 +1290,44 @@ func TestYearArrowsMoveCellsUntilOneIsOpened(t *testing.T) {
 	}
 	if v.CancelPendingDetail() {
 		t.Error("esc outside a cell should be the model's to deal with")
+	}
+}
+
+// Inside a year cell enter opens the selected event's card, the same as on the day and the
+// week. esc then closes the card and leaves the cell standing, so leaving the year takes two.
+func TestEnterOpensTheEventCardInsideAYearCell(t *testing.T) {
+	v := newCalendarView(testVC())
+	v.Resize(100, 30)
+	v.now = func() time.Time { return time.Date(2026, 8, 20, 9, 0, 0, 0, time.Local) }
+	v.viewMode = viewYear
+	v.Update(calendarsLoadedMsg{calendars: testCalendars()})
+	v.Update(yearLoadedMsg{requestResult: currentRequest(v), year: CalendarYear{
+		SpannedEvents: []Recording{
+			{ID: 7, Title: "Off to Split", AllDay: true, Type: "Calendar::Event",
+				StartsAt: at("2026-08-21T00:00:00Z"), EndsAt: at("2026-08-21T00:00:00Z")},
+		},
+	}})
+
+	v.HandleContentKey(keyPress("right"))
+	v.HandleContentKey(keyPress("enter")) // step into the cell
+	v.HandleContentKey(keyPress("enter")) // open the card
+	if v.detail == nil {
+		t.Fatal("enter in a year cell did not open the card")
+	}
+	if !strings.Contains(stripANSI(v.detail.view()), "Off to Split") {
+		t.Errorf("the card is not the selected event:\n%s", stripANSI(v.detail.view()))
+	}
+
+	v.HandleContentKey(keyPress("esc"))
+	if v.detail != nil {
+		t.Fatal("esc did not close the card")
+	}
+	if !v.inYearCell {
+		t.Error("closing the card also left the cell")
+	}
+	// A second esc, now through the model's seam, steps out of the cell.
+	if !v.CancelPendingDetail() || v.inYearCell {
+		t.Error("esc did not step out of the cell once the card was closed")
 	}
 }
 

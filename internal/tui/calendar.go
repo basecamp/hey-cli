@@ -471,6 +471,11 @@ type calendarView struct {
 	// settings is the open calendar settings form, standing over the calendar.
 	settings *calendarSettingsForm
 
+	// detail is the read-only card Enter opens over a selected event — everything the event
+	// carries, laid out to be read. It never stands with the event form: e closes it and
+	// opens the form on the same event.
+	detail *eventDetail
+
 	timeTrack   *timeTrackMenu
 	trackedTime *trackedTimeScreen
 	// trackedTimeForm is the open edit form, standing over the tracked time screen.
@@ -840,6 +845,11 @@ func (v *calendarView) View() string {
 		frame := modalFrame(v.settings.title(), v.settings.view(), v.vc.width)
 		view = overlayModal(view, frame, v.vc.width, v.vc.height)
 	}
+	// The detail card stands over the grid like the event form does, and never with it: e
+	// closes the card and opens the form on the same event.
+	if v.detail != nil {
+		view = overlayModal(view, v.detail.view(), v.vc.width, v.vc.height)
+	}
 	return view
 }
 
@@ -867,6 +877,9 @@ func (v *calendarView) todosFooterHeight() int {
 }
 
 func (v *calendarView) HelpBindings() []helpBinding {
+	if v.detail != nil {
+		return v.detail.helpBindings()
+	}
 	if v.settings != nil {
 		return v.settings.helpBindings()
 	}
@@ -1034,6 +1047,25 @@ func (v *calendarView) handleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return cmd
 	}
+	// The event detail card takes every key while it is up — it is an inputCapturer, so the
+	// model routes esc here rather than through CancelPendingDetail. esc and q close it, o opens
+	// the link, e trades the card for the form on the same event, and anything else scrolls the
+	// notes or does nothing.
+	if v.detail != nil {
+		switch msg.String() {
+		case "esc", "q":
+			v.detail = nil
+			return nil
+		case "o":
+			return v.openEventLink()
+		case "e":
+			event := v.detail.event
+			v.detail = nil
+			return v.startEventForm(eventFormEdit, event)
+		}
+		return v.detail.update(msg)
+	}
+
 	if v.requests.kind == calendarRequestMutation {
 		return nil
 	}
@@ -1130,6 +1162,9 @@ func (v *calendarView) handleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 // the arrows move between cells, enter steps into one, and only then do ↑ and ↓ belong to that
 // day's events. esc steps back out. Without the two stages ↑ and ↓ would have to be both a
 // week's worth of movement and an event's, and a year of cells has no way to show which.
+//
+// enter opens the selected event's detail card wherever one is picked out — on the day, on the
+// week, and inside a year cell. On the year with no cell open it is the step into the cell.
 func (v *calendarView) handleArrowKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	key := msg.String()
 
@@ -1144,6 +1179,9 @@ func (v *calendarView) handleArrowKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			return v.crossTheDay(-1), true
 		case "down":
 			return v.crossTheDay(1), true
+		case "enter":
+			v.openEventDetail()
+			return nil, true
 		}
 	case viewWeek:
 		switch key {
@@ -1155,6 +1193,9 @@ func (v *calendarView) handleArrowKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			return v.moveSelection(-1), true
 		case "down":
 			return v.moveSelection(1), true
+		case "enter":
+			v.openEventDetail()
+			return nil, true
 		}
 	case viewYear:
 		switch key {
@@ -1173,6 +1214,10 @@ func (v *calendarView) handleArrowKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			}
 			return v.moveCursorDay(7), true
 		case "enter":
+			if v.inYearCell {
+				v.openEventDetail()
+				return nil, true
+			}
 			v.enterYearCell()
 			return nil, true
 		}
@@ -1269,13 +1314,59 @@ func (v *calendarView) leaveYearCell() {
 
 // CancelPendingDetail is how esc reaches a year cell. The model reads esc before a view sees a
 // key, and only offers it on through here — so stepping out of a cell is the same seam a mail
-// thread's read is cancelled through, rather than a key the calendar handles itself.
+// thread's read is cancelled through, rather than a key the calendar handles itself. The event
+// card does not come through here: it is an inputCapturer, so the model hands it esc directly.
 func (v *calendarView) CancelPendingDetail() bool {
 	if !v.inYearCell {
 		return false
 	}
 	v.leaveYearCell()
 	return true
+}
+
+// openEventDetail is Enter on the grid: the read-only card over whatever event the arrows have
+// walked to. There is nothing to fetch — the grid read already carries the notes, the link and
+// the guest list — so the card is built straight from the selected recording, and Enter with
+// nothing picked out does nothing.
+func (v *calendarView) openEventDetail() {
+	event, ok := v.selectedRecording()
+	if !ok {
+		return
+	}
+	v.detail = newEventDetail(event, v.calendarName(event.CalendarID), v.use24Hour, v.vc.styles, v.vc.width, v.vc.height)
+}
+
+// openEventLink hands the card's event link to the same launcher that opens an attachment —
+// xdg-open, open, the Windows handler. Only an http/https link is handed over (openableLink),
+// so a shared event's file:// path or application scheme cannot invoke a local handler; a
+// launcher missing from PATH says so in a toast rather than the key seeming dead.
+func (v *calendarView) openEventLink() tea.Cmd {
+	if v.detail == nil {
+		return nil
+	}
+	link, ok := v.detail.openableLink()
+	if !ok {
+		return nil
+	}
+	if v.vc.openAttachment == nil {
+		return nil
+	}
+	if err := v.vc.openAttachment(link); err != nil {
+		return notifyError("Could not open the link", err)
+	}
+	return notify("Opening the link…")
+}
+
+// calendarName is the event's calendar by name, for the detail card. The personal calendar and
+// any calendar the reader is not a member of are not in the list, and get no name rather than
+// a wrong one.
+func (v *calendarView) calendarName(id int64) string {
+	for _, calendar := range v.calendars {
+		if calendar.ID == id {
+			return calendar.Name
+		}
+	}
+	return ""
 }
 
 // handleHabitPickerKey gives the open picker every key: managing a habit is what the
@@ -1595,7 +1686,7 @@ func (v *calendarView) Loading() bool {
 }
 func (v *calendarView) CapturingInput() bool {
 	return v.timeTrack != nil || v.trackedTime != nil || v.timeTrackCategories != nil ||
-		v.habitForm != nil || v.eventForm != nil || v.settings != nil ||
+		v.habitForm != nil || v.eventForm != nil || v.settings != nil || v.detail != nil ||
 		v.habitPicker != nil || v.todoPicker != nil || v.calendarPicker != nil
 }
 
@@ -1620,10 +1711,13 @@ func (v *calendarView) refreshLive() (tea.Cmd, bool) {
 }
 
 // Restyle re-renders the day/week/year grid, which caches styled output in its
-// viewport. The recording detail is plain text and needs nothing.
+// viewport, and the event card, which caches its own.
 func (v *calendarView) Restyle() {
 	if v.trackedTime != nil {
 		v.trackedTime.rebuild()
+	}
+	if v.detail != nil {
+		v.detail.restyle(v.vc.styles)
 	}
 	v.rebuildKeepingScroll()
 }
@@ -1655,6 +1749,9 @@ func (v *calendarView) Resize(width, height int) {
 	}
 	if v.settings != nil {
 		v.settings.resize(width, height)
+	}
+	if v.detail != nil {
+		v.detail.resize(width, height)
 	}
 	v.rebuildView()
 }
