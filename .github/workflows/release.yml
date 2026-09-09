@@ -14,7 +14,7 @@ permissions: {}
 jobs:
   security:
     name: Security scan
-    uses: ./.github/workflows/security.yml
+    uses: ./.github/workflows/security.yml # zizmor: ignore[self-repository] -- actionlint v1.7.12 rejects the $/ form; a job-level call has no earlier step that could swap the checkout
     permissions:
       contents: read
       security-events: write
