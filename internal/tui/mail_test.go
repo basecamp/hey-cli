@@ -3737,6 +3737,13 @@ func TestRenderEntriesShowsTheBodyRatherThanHEYsPreviewOfIt(t *testing.T) {
 			Summary:   "Never shown, the body went unread ...",
 			BodyState: string(threadload.StateFailed),
 		},
+		{
+			ID:        4,
+			Creator:   mail.Contact{Name: "Lee Park"},
+			Summary:   "Markup only, so HEY still has a preview ...",
+			Body:      htmlutil.ToMarkdown("<div><br></div>"),
+			BodyState: string(threadload.StateHydrated),
+		},
 	}
 
 	rendered, _ := v.renderEntries(entries)
@@ -3752,6 +3759,9 @@ func TestRenderEntriesShowsTheBodyRatherThanHEYsPreviewOfIt(t *testing.T) {
 	}
 	if strings.Contains(rendered, "Never shown") || !strings.Contains(rendered, "(body not read: failed)") {
 		t.Errorf("an unread body should say so rather than show a preview:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "Markup only") || !strings.Contains(rendered, "(empty body)") {
+		t.Errorf("a body that was read and rendered to nothing should say so rather than show a preview:\n%s", rendered)
 	}
 }
 
