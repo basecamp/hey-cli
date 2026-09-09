@@ -634,6 +634,7 @@ otherwise — and both take over stdout.
 
 ```bash
 hey compose --subject "Board update" -m "Numbers to follow." --draft   # save instead of sending; answers the draft id
+hey compose --to alice@example.com --subject "Sprint recap" -m "Shipped." --no-name-tag  # leave the sender's HEY name tag off
 hey reply <topic_id> -m "Drafting this." --draft  # save a reply draft, addressed like a real reply
 hey draft list --json                             # List drafts; --all and --page follow the next_page cursor
 hey draft show <draft_id> --json                  # The draft's editable state; body is Markdown

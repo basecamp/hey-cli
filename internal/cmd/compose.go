@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -26,6 +27,7 @@ type composeCommand struct {
 	threadID    string
 	attachments []string
 	draft       bool
+	noNameTag   bool
 }
 
 func newComposeCommand() *composeCommand {
@@ -34,7 +36,7 @@ func newComposeCommand() *composeCommand {
 		Use:   "compose",
 		Short: "Write and send a new email",
 		Annotations: map[string]string{
-			"agent_notes": "Starts a new thread with --to (optionally --cc/--bcc), which requires --subject, or replies to an existing one with --thread-id, which does not. Repeatable --attach files are uploaded before sending and can be sent without body text. The body is Markdown; use --message-html to send raw HTML instead. --draft saves instead of sending — recipients become optional — and answers the draft ID for hey draft show/edit/send/delete.",
+			"agent_notes": "Starts a new thread with --to (optionally --cc/--bcc), which requires --subject, or replies to an existing one with --thread-id, which does not. Repeatable --attach files are uploaded before sending and can be sent without body text. The body is Markdown; use --message-html to send raw HTML instead. --draft saves instead of sending — recipients become optional — and answers the draft ID for hey draft show/edit/send/delete. A new message ends with the sender's HEY name tag, as one composed in HEY does; --no-name-tag leaves it out.",
 		},
 		Example: `  hey compose --to alice@example.com --subject "Lunch plans" -m "Are you free Friday?"
   hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Kitchen remodel timeline" -m "Cabinets land the week of the 14th."
@@ -56,6 +58,7 @@ func newComposeCommand() *composeCommand {
 	composeCommand.cmd.Flags().StringVar(&composeCommand.threadID, "thread-id", "", "Reply to this thread instead of starting a new one")
 	composeCommand.cmd.Flags().StringArrayVar(&composeCommand.attachments, "attach", nil, "File to attach (repeatable)")
 	composeCommand.cmd.Flags().BoolVar(&composeCommand.draft, "draft", false, "Save as a draft instead of sending")
+	composeCommand.cmd.Flags().BoolVar(&composeCommand.noNameTag, "no-name-tag", false, "Leave the sender's HEY name tag off a new message")
 	composeCommand.cmd.MarkFlagsMutuallyExclusive("message", "message-html")
 
 	return composeCommand
@@ -132,6 +135,12 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		if len(to)+len(cc)+len(bcc) == 0 && !c.draft {
 			return apierr.ErrUsage("a message needs at least one recipient (to, cc or bcc)")
 		}
+		if !c.noNameTag {
+			var tagErr error
+			if message, tagErr = appendSenderNameTag(ctx, message); tagErr != nil {
+				return tagErr
+			}
+		}
 		messageWithAttachments, attachErr := attachFiles(ctx, message, c.attachments)
 		if attachErr != nil {
 			return attachErr
@@ -151,6 +160,32 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	return writeMutation(cmd, sentWithAttachmentsSummary("Message sent", len(c.attachments)), nil)
+}
+
+// appendSenderNameTag ends a new message with the sender's name tag the way HEY's own
+// compose form does. HEY applies the tag in the form it prefills, not on the message it
+// saves, so a message written here has to carry its own — otherwise a draft or a send from
+// the CLI goes out unsigned while the same message written in HEY would not. The tag is the
+// one HEY serves for the sender the message is filed under; a sender without one leaves the
+// message alone.
+func appendSenderNameTag(ctx context.Context, message string) (string, error) {
+	senderID, err := sdk.DefaultSenderID(ctx)
+	if err != nil {
+		return "", apierr.FromSDK(err)
+	}
+	identity, err := rootSDK.Identity().GetIdentity(ctx)
+	if err != nil {
+		return "", apierr.FromSDK(err)
+	}
+	if identity == nil {
+		return message, nil
+	}
+	for _, sender := range identity.Senders {
+		if sender.Id == senderID && sender.NameTag != "" {
+			return message + "<br>" + sender.NameTag, nil
+		}
+	}
+	return message, nil
 }
 
 // writeDraftSaved confirms a saved draft, naming the id every draft verb takes.
