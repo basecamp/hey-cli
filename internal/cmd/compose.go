@@ -135,15 +135,15 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		if len(to)+len(cc)+len(bcc) == 0 && !c.draft {
 			return apierr.ErrUsage("a message needs at least one recipient (to, cc or bcc)")
 		}
-		if !c.noNameTag {
-			var tagErr error
-			if message, tagErr = appendSenderNameTag(ctx, message); tagErr != nil {
-				return tagErr
-			}
-		}
 		messageWithAttachments, attachErr := attachFiles(ctx, message, c.attachments)
 		if attachErr != nil {
 			return attachErr
+		}
+		if !c.noNameTag {
+			var tagErr error
+			if messageWithAttachments, tagErr = appendSenderNameTag(ctx, messageWithAttachments); tagErr != nil {
+				return tagErr
+			}
 		}
 		if c.draft {
 			draftID, draftErr := sdk.Messages().CreateDraft(ctx, hey.DraftContent{
@@ -162,8 +162,8 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 	return writeMutation(cmd, sentWithAttachmentsSummary("Message sent", len(c.attachments)), nil)
 }
 
-// appendSenderNameTag ends a new message with the sender's name tag the way HEY's own
-// compose form does. HEY applies the tag in the form it prefills, not on the message it
+// appendSenderNameTag ends a new message — attachments included — with the sender's name
+// tag the way HEY's own compose form does. HEY applies the tag in the form it prefills, not on the message it
 // saves, so a message written here has to carry its own — otherwise a draft or a send from
 // the CLI goes out unsigned while the same message written in HEY would not. The tag is the
 // one HEY serves for the sender the message is filed under; a sender without one leaves the

@@ -29,6 +29,7 @@ type attachmentServerState struct {
 	events         []string
 	blobStatus     int
 	nilMessage     bool
+	nameTag        string
 }
 
 func attachmentServer(t *testing.T) (*httptest.Server, *attachmentServerState) {
@@ -88,7 +89,10 @@ func attachmentServer(t *testing.T) (*httptest.Server, *attachmentServerState) {
 			if got := r.URL.Query().Get("filtered_account_id"); got != "" {
 				t.Errorf("identity account = %q, want unscoped", got)
 			}
-			_, _ = w.Write([]byte(`{"id":1,"accounts":[{"id":9,"status":"active"}],"senders":[{"id":42,"account_id":9,"default":true}]}`))
+			state.mu.Lock()
+			nameTag, _ := json.Marshal(state.nameTag)
+			state.mu.Unlock()
+			fmt.Fprintf(w, `{"id":1,"accounts":[{"id":9,"status":"active"}],"senders":[{"id":42,"account_id":9,"default":true,"name_tag":%s}]}`, nameTag)
 		case r.Method == http.MethodGet && r.URL.Path == "/topics/7.json":
 			_, _ = w.Write([]byte(`{"id":7,"account_id":9,"entries":[{"id":11},{"id":12}]}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/messages/12.json":
@@ -526,6 +530,44 @@ func TestComposeUploadsAttachmentsBeforeSending(t *testing.T) {
 	content := state.sentContents[0]
 	if !strings.Contains(content, "<p>Attached.</p><br>") || !strings.Contains(content, `action-text-attachment sgid="sgid-upload"`) || !strings.Contains(content, `filename="quarterly-report.pdf"`) {
 		t.Errorf("sent content = %q", content)
+	}
+}
+
+// The name tag is the last thing in the message, after the attachments, as a signature is.
+func TestComposeEndsAnAttachedMessageWithTheNameTag(t *testing.T) {
+	server, state := attachmentServer(t)
+	state.mu.Lock()
+	state.nameTag = "<div>Maria Delgado</div>"
+	state.mu.Unlock()
+	path := filepath.Join(t.TempDir(), "quarterly-report.pdf")
+	if err := os.WriteFile(path, []byte("report contents"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, args := range [][]string{
+		{"compose", "--to", "alice@example.com", "--subject", "Quarterly report", "-m", "Attached.", "--attach", path},
+		{"compose", "--to", "alice@example.com", "--subject", "Quarterly report", "--attach", path},
+	} {
+		if _, err := runAttachmentCommand(t, server, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if len(state.sentContents) != 2 {
+		t.Fatalf("sent %d messages, want 2", len(state.sentContents))
+	}
+	for i, content := range state.sentContents {
+		if !strings.HasSuffix(content, `filename="quarterly-report.pdf" filesize="15"></action-text-attachment><br><div>Maria Delgado</div>`) {
+			t.Errorf("message %d does not end with the attachment and then the name tag: %q", i, content)
+		}
+	}
+	if !strings.HasPrefix(state.sentContents[0], "<p>Attached.</p><br><action-text-attachment") {
+		t.Errorf("message does not start with the body: %q", state.sentContents[0])
+	}
+	if !strings.HasPrefix(state.sentContents[1], "<action-text-attachment") {
+		t.Errorf("attachment-only message does not start with the attachment: %q", state.sentContents[1])
 	}
 }
 
