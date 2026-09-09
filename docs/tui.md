@@ -61,7 +61,7 @@ uppercase belongs to Labels:
 | `t` | trash — every selected thread when any are selected, otherwise the one under the cursor. Not offered when it would target a bundle |
 | `!` | mark as spam |
 | `-` / `+` | ignore / stop ignoring |
-| Space | select the thread for a bulk action (`e`, `u`, `t` or Ctrl+B) |
+| Space or `x` | select the thread for a bulk action (`e`, `u`, `t` or Ctrl+B) |
 | Escape | clear the selection |
 | Ctrl+B | preview every bulk-reply recipient, then write one reply to every selected thread |
 | Ctrl+U | recall a delayed bulk reply while HEY's undo window is open |
@@ -193,7 +193,7 @@ preview only reads the email; it doesn't screen the sender or tell them anything
 The Imbox can wear cover art, the way the HEY web app does: everything you have already
 read goes under it, so the box ends at what still wants your attention instead of trailing
 off into a month of receipts. The divider stays and says how much is under there — press
-`x` to peek, `x` again to close it, or `9` to open Previously Seen on its own screen.
+`z` to peek, `z` again to close it, or `9` to open Previously Seen on its own screen.
 
 Press Ctrl+V to choose one: `blobs`, `grid`, `peace`, `terrazzo`, `topo` or `waves`, the
 same six covers redrawn as characters, so they work in any terminal rather than only the
