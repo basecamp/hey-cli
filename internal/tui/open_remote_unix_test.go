@@ -80,6 +80,28 @@ func TestTopicRemoteFallbackUsesPrivatePerUserDirectory(t *testing.T) {
 	}
 }
 
+// macOS's /tmp is a symlink to /private/tmp, and it is what os.TempDir answers whenever
+// TMPDIR is unset — an ssh session, a launchd job, a shell started without the login
+// environment — so the fallback has to follow the link rather than refuse it.
+func TestTopicRemoteFallbackFollowsSymlinkedTemporaryDirectory(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	target := t.TempDir()
+	link := filepath.Join(t.TempDir(), "tmp")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink temporary directory: %v", err)
+	}
+	t.Setenv("TMPDIR", link)
+
+	path := mustTUISocketPath(t, "omarchy")
+	resolved, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatalf("resolve temporary directory: %v", err)
+	}
+	if got := filepath.Dir(filepath.Dir(path)); got != resolved {
+		t.Fatalf("socket %s is not under the resolved temporary directory %s", path, resolved)
+	}
+}
+
 func TestTopicRemoteRejectsInsecureRuntimeDirectory(t *testing.T) {
 	runtimeDir := t.TempDir()
 	if err := os.Chmod(runtimeDir, 0o755); err != nil {
