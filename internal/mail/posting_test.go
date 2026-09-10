@@ -33,7 +33,7 @@ func TestNewPostingKeepsWhatARowShows(t *testing.T) {
 	if !posting.CreatedAt.Equal(created) {
 		t.Errorf("created at = %s, want %s", posting.CreatedAt, created)
 	}
-	if posting.ID != 4471829 || posting.TopicID != 501 || posting.Name != "Kitchen remodel quote" {
+	if posting.ID != 4471829 || posting.TopicID != 501 || posting.Kind != "topic" || posting.Name != "Kitchen remodel quote" {
 		t.Errorf("posting = %+v", posting)
 	}
 	// The box is the row's own, not the list's: it is what a thread found through a
@@ -59,6 +59,18 @@ func TestNewPostingKeepsWhatARowShows(t *testing.T) {
 	}
 	if len(posting.Collections) != 1 || posting.Collections[0] != (Collection{ID: 34, Name: "Kitchen remodel"}) {
 		t.Errorf("collections = %+v", posting.Collections)
+	}
+}
+
+func TestPostingIdentifiesWorldContentByKind(t *testing.T) {
+	for _, kind := range []string{"world/post", " WORLD/POST "} {
+		posting := NewPosting(generated.Posting{Kind: kind})
+		if !posting.IsWorldPost() {
+			t.Errorf("kind %q was not identified as HEY World content", kind)
+		}
+	}
+	if NewPosting(generated.Posting{Kind: "topic"}).IsWorldPost() {
+		t.Error("an email topic was identified as HEY World content")
 	}
 }
 

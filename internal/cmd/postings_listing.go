@@ -68,6 +68,9 @@ type groupedPostingRow struct {
 type postingsListing struct {
 	heading      string
 	summary      func(count int, name string) string
+	summarize    func(postings []generated.Posting, name string) string
+	metadata     func(postings []generated.Posting) []output.ResponseOption
+	showSummary  bool
 	cursorNotice func(shown, total int) string
 	breadcrumbs  []output.Breadcrumb
 	payload      func(source mail.Source, postings []sourcePostingOutput, nextPage string, total int) any
@@ -113,12 +116,23 @@ func (l postingsListing) writePages(cmd *cobra.Command, source mail.Source, firs
 	case output.FormatMarkdown:
 		return l.writeMarkdown(cmd, source, postings, nextPage, collected.Total, notice)
 	default:
-		return writeOK(l.sourcePayload(source, postings, nextPage, collected.Total),
-			output.WithSummary(l.summary(len(postings), source.Name)),
+		options := []output.ResponseOption{
+			output.WithSummary(l.summaryFor(postings, source.Name)),
 			output.WithNotice(notice),
 			output.WithBreadcrumbs(l.breadcrumbs...),
-		)
+		}
+		if l.metadata != nil {
+			options = append(options, l.metadata(postings)...)
+		}
+		return writeOK(l.sourcePayload(source, postings, nextPage, collected.Total), options...)
 	}
+}
+
+func (l postingsListing) summaryFor(postings []generated.Posting, name string) string {
+	if l.summarize != nil {
+		return l.summarize(postings, name)
+	}
+	return l.summary(len(postings), name)
 }
 
 // sourcePayload is what `--json` answers with: the listing's own payload where it has one,
@@ -181,6 +195,9 @@ func (l postingsListing) writeStyled(cmd *cobra.Command, source mail.Source, pos
 		))
 	}
 	table.print()
+	if l.showSummary {
+		fmt.Fprintln(cmd.OutOrStdout(), terminal.SanitizeLine(l.summaryFor(postings, source.Name))+".")
+	}
 	if notice != "" {
 		fmt.Fprintln(cmd.OutOrStdout(), notice)
 	}
