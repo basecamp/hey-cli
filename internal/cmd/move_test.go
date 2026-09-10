@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
@@ -14,18 +15,62 @@ import (
 )
 
 type recordedMove struct {
+	mu         sync.Mutex
 	requests   []string
 	postingIDs []int64
 	boxID      int64
 	moveStatus int
+	// bundles holds the posting IDs the server answers the bundles/unseen route for,
+	// which is how hey move tells a bundle row from a thread.
+	bundles map[string]bool
+}
+
+// moved reports whether a move request reached the server.
+func (r *recordedMove) moved() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, request := range r.requests {
+		if request == "POST /postings/moves.json" {
+			return true
+		}
+	}
+	return false
+}
+
+// bundleProbes counts the bundle checks the command made. They run concurrently, so
+// tests count them rather than expecting an order.
+func (r *recordedMove) bundleProbes() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	probes := 0
+	for _, request := range r.requests {
+		if strings.HasSuffix(request, "/bundles/unseen.json") {
+			probes++
+		}
+	}
+	return probes
 }
 
 func moveServer(t *testing.T) (*httptest.Server, *recordedMove) {
 	t.Helper()
-	recorded := &recordedMove{moveStatus: http.StatusNoContent}
+	recorded := &recordedMove{moveStatus: http.StatusNoContent, bundles: map[string]bool{}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		recorded.mu.Lock()
 		recorded.requests = append(recorded.requests, r.Method+" "+r.URL.Path)
+		recorded.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
+
+		// The bundles/unseen route answers only for a bundle row; a thread 404s here.
+		if strings.HasPrefix(r.URL.Path, "/postings/") && strings.HasSuffix(r.URL.Path, "/bundles/unseen.json") {
+			id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/postings/"), "/bundles/unseen.json")
+			if recorded.bundles[id] {
+				_, _ = w.Write([]byte(`{"contact":{"id":42,"name":"Bundled Sender","email_address":"sender@example.com"},"postings":[]}`))
+			} else {
+				http.NotFound(w, r)
+			}
+			return
+		}
+
 		switch r.URL.Path {
 		case "/boxes.json":
 			_, _ = w.Write([]byte(`[
@@ -98,8 +143,11 @@ func TestMovePostingsToNamedBox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("move failed: %v", err)
 	}
-	if got := strings.Join(recorded.requests, ","); got != "GET /boxes.json,POST /postings/moves.json" {
-		t.Errorf("requests = %q", got)
+	if !recorded.moved() {
+		t.Error("no move request was sent")
+	}
+	if got := recorded.bundleProbes(); got != 2 {
+		t.Errorf("bundle probes = %d, want one per ID", got)
 	}
 	if recorded.boxID != 5 {
 		t.Errorf("box_id = %d, want 5", recorded.boxID)
@@ -204,5 +252,72 @@ func TestMoveReportsServerFailure(t *testing.T) {
 	_, err := runMove(t, server, "12345", "--to", "feed")
 	if err == nil {
 		t.Fatal("move should report the server failure")
+	}
+}
+
+func TestMoveRejectsBundleRowsBeforeRequest(t *testing.T) {
+	server, recorded := moveServer(t)
+	recorded.bundles["67890"] = true
+
+	_, err := runMove(t, server, "67890", "--to", "feed")
+
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != "usage" {
+		t.Fatalf("a bundle row should produce a usage error, got %v", err)
+	}
+	if !strings.Contains(cliErr.Message, "67890") {
+		t.Errorf("message does not name the bundle row: %q", cliErr.Message)
+	}
+	if !strings.Contains(cliErr.Hint, "hey contact bundle|unbundle") {
+		t.Errorf("hint does not point at contact bundling: %q", cliErr.Hint)
+	}
+	if recorded.moved() {
+		t.Error("a bundle row was moved despite being rejected")
+	}
+}
+
+func TestMoveRejectsBatchContainingABundleRow(t *testing.T) {
+	server, recorded := moveServer(t)
+	recorded.bundles["67890"] = true
+
+	_, err := runMove(t, server, "12345", "67890", "--to", "paper-trail")
+
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != "usage" {
+		t.Fatalf("a batch holding a bundle row should produce a usage error, got %v", err)
+	}
+	// The threads in the batch stay put: a partial move would leave the caller guessing
+	// which of their IDs landed.
+	if recorded.moved() {
+		t.Error("threads moved even though the batch held a bundle row")
+	}
+}
+
+func TestMoveNamesEveryBundleRowItRejects(t *testing.T) {
+	server, recorded := moveServer(t)
+	recorded.bundles["12345"] = true
+	recorded.bundles["67890"] = true
+
+	_, err := runMove(t, server, "12345", "67890", "--to", "feed")
+
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) {
+		t.Fatalf("want a CLI error, got %v", err)
+	}
+	for _, id := range []string{"12345", "67890"} {
+		if !strings.Contains(cliErr.Message, id) {
+			t.Errorf("message omits bundle row %s: %q", id, cliErr.Message)
+		}
+	}
+}
+
+func TestMoveHelpExplainsBundleRefusal(t *testing.T) {
+	cmd := newMoveCommand().cmd
+
+	if !strings.Contains(cmd.Long, "bundle row") {
+		t.Errorf("long help does not mention bundle rows: %q", cmd.Long)
+	}
+	if !strings.Contains(cmd.Annotations["agent_notes"], "bundle") {
+		t.Errorf("agent notes do not mention bundles: %q", cmd.Annotations["agent_notes"])
 	}
 }
