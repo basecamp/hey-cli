@@ -66,7 +66,7 @@ INTERACTION & DIAGNOSTICS
 TUI & SETUP
   HEY_THEME          Load a TUI theme overlay from a TOML file.
   HEY_CABLE_URL      Override the Action Cable websocket URL.
-  HEY_SETUP_AGENT    Select claude, codex, all, or none during agent setup.
+  HEY_SETUP_AGENT    Select claude, codex, grok, all, or none during agent setup.
 
 Command-line flags take precedence over environment values.`,
 		},

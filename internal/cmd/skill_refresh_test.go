@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/basecamp/hey-cli/internal/harness"
 	"github.com/basecamp/hey-cli/skills"
 )
 
@@ -17,6 +18,7 @@ func refreshFixture(t *testing.T) (home string) {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("CODEX_HOME", "")
+	t.Setenv("GROK_HOME", "")
 	return home
 }
 
@@ -244,6 +246,7 @@ func TestRefreshSkillsPreservesUnmanagedSkills(t *testing.T) {
 		writeSkillFixture(t, filepath.Join(home, ".agents", "skills", "hey"), custom, false),
 		writeSkillFixture(t, filepath.Join(home, ".claude", "skills", "hey"), custom, false),
 		writeSkillFixture(t, filepath.Join(home, ".codex", "skills", "hey"), custom, false),
+		writeSkillFixture(t, filepath.Join(home, ".grok", "skills", "hey"), custom, false),
 	}
 
 	if refreshSkillsIfVersionChanged() {
@@ -325,35 +328,37 @@ func TestRefreshSkillsSkipsWithoutConfigDir(t *testing.T) {
 	}
 }
 
-// The sentinel tracks the active Codex home: a marked legacy copy in a home
-// that was inactive during the first post-upgrade run is removed as soon as
-// that home becomes active, not at the next release.
-func TestRefreshSkillsRescansWhenCodexHomeChanges(t *testing.T) {
-	home := refreshFixture(t)
-	stubVersion(t, "9.9.9")
-	installStaleSkill(t, home)
+// The sentinel tracks each agent's active home: a marked legacy copy in a
+// home that was inactive during the first post-upgrade run is removed as
+// soon as that home becomes active, not at the next release.
+func TestRefreshSkillsRescansWhenAgentHomeChanges(t *testing.T) {
+	forEachSkillAgent(t, func(t *testing.T, agent harness.SkillAgent) {
+		home := refreshFixture(t)
+		stubVersion(t, "9.9.9")
+		installStaleSkill(t, home)
 
-	homeA := t.TempDir()
-	t.Setenv("CODEX_HOME", homeA)
-	if !refreshSkillsIfVersionChanged() {
-		t.Fatal("first run should refresh")
-	}
-	if refreshSkillsIfVersionChanged() {
-		t.Fatal("same home: second run is a no-op")
-	}
+		homeA := t.TempDir()
+		t.Setenv(agent.HomeEnv, homeA)
+		if !refreshSkillsIfVersionChanged() {
+			t.Fatal("first run should refresh")
+		}
+		if refreshSkillsIfVersionChanged() {
+			t.Fatal("same home: second run is a no-op")
+		}
 
-	homeB := t.TempDir()
-	legacyB := writeSkillFixture(t, filepath.Join(homeB, "skills", "hey"), "# stale skill", true)
-	t.Setenv("CODEX_HOME", homeB)
-	if !refreshSkillsIfVersionChanged() {
-		t.Fatal("switching Codex homes should rescan")
-	}
-	if _, err := os.Stat(legacyB); !os.IsNotExist(err) {
-		t.Errorf("legacy skill in the newly active Codex home was not removed: %v", err)
-	}
-	if refreshSkillsIfVersionChanged() {
-		t.Error("stable again: refresh must be a no-op")
-	}
+		homeB := t.TempDir()
+		legacyB := writeSkillFixture(t, filepath.Join(homeB, "skills", "hey"), "# stale skill", true)
+		t.Setenv(agent.HomeEnv, homeB)
+		if !refreshSkillsIfVersionChanged() {
+			t.Fatalf("switching %s homes should rescan", agent.Name)
+		}
+		if _, err := os.Stat(legacyB); !os.IsNotExist(err) {
+			t.Errorf("legacy skill in the newly active %s home was not removed: %v", agent.Name, err)
+		}
+		if refreshSkillsIfVersionChanged() {
+			t.Error("stable again: refresh must be a no-op")
+		}
+	})
 }
 
 // The sentinel gets the same no-follow rule as every other file this feature
