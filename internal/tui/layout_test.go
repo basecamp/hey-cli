@@ -78,6 +78,38 @@ func TestControlGTogglesLayoutAndResizesTheActiveView(t *testing.T) {
 	}
 }
 
+func TestControlGTogglesLayoutInsideTheScreener(t *testing.T) {
+	m := modelWithBoxes()
+	updated, _ := m.Update(keyPress("ctrl+s"))
+	m = updated.(model)
+	if m.activeView != m.screenerView {
+		t.Fatal("ctrl+s did not open The Screener")
+	}
+
+	updated, _ = m.Update(keyPress("ctrl+g"))
+	m = updated.(model)
+	if m.layout != LayoutSpacious {
+		t.Errorf("layout after ctrl+g in The Screener = %q, want spacious", m.layout)
+	}
+	if m.activeView != m.screenerView {
+		t.Error("toggling the layout left The Screener")
+	}
+}
+
+func TestGapsCollapseUntilOneSectionedPostingFits(t *testing.T) {
+	list := &contentList{}
+	list.setItemGap(1)
+	for height, want := range map[int]int{2: 0, 4: 0, 5: 1, 20: 1} {
+		list.setSize(80, height)
+		if got := list.effectiveItemGap(); got != want {
+			t.Errorf("effectiveItemGap at height %d = %d, want %d", height, got, want)
+		}
+		if got := list.effectiveSectionGap(); got != want {
+			t.Errorf("effectiveSectionGap at height %d = %d, want %d", height, got, want)
+		}
+	}
+}
+
 func TestSpaciousMailRowsHaveNegativeSpace(t *testing.T) {
 	m := modelWithBoxes()
 	m.layout = LayoutSpacious

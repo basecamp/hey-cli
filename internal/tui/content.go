@@ -402,8 +402,11 @@ func (c *contentList) setItemGap(gap int) {
 	c.ensureVisible()
 }
 
+// effectiveItemGap collapses the gaps while the list is too short for even one
+// sectioned posting with them: a header, its gap, two rows and the item gap
+// take five rows, and visibleItemsFrom always shows at least one posting.
 func (c *contentList) effectiveItemGap() int {
-	if c.height < 3 {
+	if c.height < 5 {
 		return 0
 	}
 	return c.itemGap

@@ -854,16 +854,16 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.toggleHelp()
 	}
 
+	if key == "ctrl+g" && m.canToggleLayout() {
+		return m.toggleLayout()
+	}
+
 	// A view with an open text form gets every key (esc, tab, letters, ...).
 	if ic, ok := m.activeView.(inputCapturer); ok && ic.CapturingInput() {
 		cmd := m.activeView.HandleContentKey(msg)
 		cmd = m.syncLoading(cmd)
 		m.updateHelpBindings()
 		return m, cmd
-	}
-
-	if key == "ctrl+g" && m.canToggleLayout() {
-		return m.toggleLayout()
 	}
 
 	if key == "ctrl+s" && m.canOpenScreener() {
@@ -960,9 +960,14 @@ func (m model) canToggleHelp() bool {
 	return !ok || !capturer.CapturingInput()
 }
 
+// canToggleLayout mirrors canToggleHelp: The Screener captures input for its
+// own keys but has no text form, so the layout switch stays live there.
 func (m model) canToggleLayout() bool {
 	if m.mailAccountPicker || m.err != nil {
 		return false
+	}
+	if m.activeView == m.screenerView {
+		return true
 	}
 	capturer, ok := m.activeView.(inputCapturer)
 	return !ok || !capturer.CapturingInput()

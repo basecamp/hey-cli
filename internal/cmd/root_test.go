@@ -242,6 +242,8 @@ func TestHeyTuiRemoteRequiresOneDestination(t *testing.T) {
 		{args: []string{"tui", "--topic", "5511", "--screener"}, want: "--topic and --screener cannot be used together"},
 		{args: []string{"tui", "--topic-title", "Lunch on Thursday?"}, want: "--topic-title requires --topic"},
 		{args: []string{"tui", "--screener", "--topic-title", "Lunch on Thursday?"}, want: "--topic-title requires --topic"},
+		{args: []string{"tui", "--remote", "--topic", "5511", "spacious"}, want: "a layout cannot be selected when opening an existing TUI with --remote"},
+		{args: []string{"tui", "--remote", "--screener", "classic"}, want: "a layout cannot be selected when opening an existing TUI with --remote"},
 	} {
 		_, _, err := runAuthCommand(t, t.TempDir(), server.URL, "environment-token", false, test.args...)
 		if err == nil || !strings.Contains(err.Error(), test.want) {
