@@ -139,6 +139,7 @@ func (c *contentList) removeAt(index int) {
 	if c.cursor > index {
 		c.cursor--
 	}
+	c.keepSelected()
 	c.settleCover()
 }
 
