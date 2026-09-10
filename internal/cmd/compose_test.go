@@ -1,7 +1,10 @@
 package cmd
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -153,5 +156,106 @@ func TestComposeRefusesMessageAndMessageHTMLTogether(t *testing.T) {
 	}
 	if sent.Content != "" {
 		t.Errorf("nothing should have been sent, got %q", sent.Content)
+	}
+}
+
+// nameTaggedServer is draftLifecycleServer with a name tag on the default sender, which
+// is where HEY serves it: the identity's senders carry name_tag as sanitized HTML.
+func nameTaggedServer(t *testing.T, nameTag string, writes *[]draftWrite) http.Handler {
+	t.Helper()
+	tag, _ := json.Marshal(nameTag)
+	return composeIdentityServer(t, fmt.Sprintf(`{"id":1,"senders":[{"id":42,"default":true,"name_tag":%s},{"id":43,"name_tag":"<div>Not this one</div>"}],"primary_contact":{"id":42}}`, tag), writes)
+}
+
+func composeIdentityServer(t *testing.T, identityJSON string, writes *[]draftWrite) http.Handler {
+	t.Helper()
+	inner := draftLifecycleServer(t, draftEditJSON, writes)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "identity") {
+			inner.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, identityJSON)
+	})
+}
+
+func sentContent(t *testing.T, writes []draftWrite) string {
+	t.Helper()
+	if len(writes) != 1 || writes[0].Path != "/messages.json" {
+		t.Fatalf("writes = %+v, want one POST /messages.json", writes)
+	}
+	message, _ := writes[0].Body["message"].(map[string]any)
+	content, _ := message["content"].(string)
+	return content
+}
+
+// HEY puts the sender's name tag into the compose form, not onto the saved message, so a
+// message written here has to end with it itself — on a draft and on a send alike.
+func TestComposeEndsANewMessageWithTheSendersNameTag(t *testing.T) {
+	const nameTag = "<div>Maria Delgado<br>Chief of Staff</div>"
+	want := "<p>Numbers to follow.</p><br>" + nameTag
+
+	var drafted []draftWrite
+	if _, err := runJSONCommand(t, nameTaggedServer(t, nameTag, &drafted),
+		"compose", "--subject", "Board update", "-m", "Numbers to follow.", "--draft"); err != nil {
+		t.Fatalf("compose --draft: %v", err)
+	}
+	if got := sentContent(t, drafted); got != want {
+		t.Errorf("draft content = %q, want %q", got, want)
+	}
+
+	var sent []draftWrite
+	if _, err := runJSONCommand(t, nameTaggedServer(t, nameTag, &sent),
+		"compose", "--to", "alice@example.com", "--subject", "Board update", "-m", "Numbers to follow."); err != nil {
+		t.Fatalf("compose: %v", err)
+	}
+	if got := sentContent(t, sent); got != want {
+		t.Errorf("sent content = %q, want %q", got, want)
+	}
+}
+
+func TestComposeNoNameTagLeavesTheMessageAlone(t *testing.T) {
+	var writes []draftWrite
+	if _, err := runJSONCommand(t, nameTaggedServer(t, "<div>Maria Delgado</div>", &writes),
+		"compose", "--subject", "Board update", "-m", "Numbers to follow.", "--draft", "--no-name-tag"); err != nil {
+		t.Fatalf("compose --draft --no-name-tag: %v", err)
+	}
+	if got, want := sentContent(t, writes), "<p>Numbers to follow.</p>"; got != want {
+		t.Errorf("content = %q, want %q", got, want)
+	}
+}
+
+// A sender with no name tag configured has nothing to append: the message goes as written,
+// without a stray break at the end.
+func TestComposeWithoutANameTagSendsTheMessageAsWritten(t *testing.T) {
+	var writes []draftWrite
+	if _, err := runJSONCommand(t, nameTaggedServer(t, "", &writes),
+		"compose", "--subject", "Board update", "-m", "Numbers to follow.", "--draft"); err != nil {
+		t.Fatalf("compose --draft: %v", err)
+	}
+	if got, want := sentContent(t, writes), "<p>Numbers to follow.</p>"; got != want {
+		t.Errorf("content = %q, want %q", got, want)
+	}
+}
+
+// The sender is the one the SDK files the message under, which --account changes: the
+// tag has to be that account's sender's, not the identity-wide default's.
+func TestComposeUsesTheSelectedAccountsSendersNameTag(t *testing.T) {
+	const identity = `{"id":1,
+		"accounts":[{"id":1,"name":"Personal","purpose":"home","status":"active"},{"id":2,"name":"Work","purpose":"work","status":"active"}],
+		"senders":[{"id":42,"account_id":1,"default":true,"name_tag":"<div>Maria, at home</div>"},{"id":43,"account_id":2,"name_tag":"<div>Maria Delgado<br>Chief of Staff</div>"}],
+		"primary_contact":{"id":42}}`
+
+	var writes []draftWrite
+	if _, err := runJSONCommand(t, composeIdentityServer(t, identity, &writes),
+		"--account", "2", "compose", "--subject", "Board update", "-m", "Numbers to follow.", "--draft"); err != nil {
+		t.Fatalf("compose --account 2 --draft: %v", err)
+	}
+	if got, want := sentContent(t, writes), "<p>Numbers to follow.</p><br><div>Maria Delgado<br>Chief of Staff</div>"; got != want {
+		t.Errorf("content = %q, want %q", got, want)
+	}
+	if got := writes[0].Body["acting_sender_id"]; got != float64(43) {
+		t.Errorf("acting_sender_id = %v, want the work account's sender 43", got)
 	}
 }

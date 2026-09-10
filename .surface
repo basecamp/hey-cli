@@ -104,6 +104,7 @@ hey compose --cc
 hey compose --draft
 hey compose --message
 hey compose --message-html
+hey compose --no-name-tag
 hey compose --subject
 hey compose --thread-id
 hey compose --to
