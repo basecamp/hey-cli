@@ -123,6 +123,7 @@ CLI for HEY: mailboxes, labels, collections, email threads, contacts, replies, c
 3. **HTML output** is available via `--html` for commands that return HTML content
 4. **Linked mail accounts share one login** — use `hey account list --json`, then `--account <id|all>` when a task must target one account
 5. **Local HEY configuration requires human trust** — never run `hey config trust-local` without the user's explicit approval
+6. **Preserve item kind** from `hey box view --json` — `world/post` is published HEY World content, not email, and must not be passed to email-only actions
 
 ## Output Filtering
 
@@ -579,6 +580,14 @@ hey spam 12345 67890                          # Mark multiple threads as spam
 ```
 
 Takes box item IDs (the `id` field from `hey box view --json`). Trashing a shared thread removes your access instead of deleting it for everyone. Marking a thread as spam moves it to Spam and trains HEY's filters.
+
+### HEY World
+
+`hey box view --json` can return `world/post` items beside email topics. These are
+published content, not email. The response metadata reports `posting_count`,
+`email_count`, and `world_post_count`. Preserve each row's `kind` and exclude
+`world/post` rows before passing box item IDs to email organization commands; those
+commands receive bare IDs and cannot validate the kind themselves.
 
 ### Email - Ignoring Threads
 

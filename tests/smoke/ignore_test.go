@@ -6,8 +6,9 @@ import (
 )
 
 type ignorePosting struct {
-	ID    int  `json:"id"`
-	Muted bool `json:"muted"`
+	ID    int    `json:"id"`
+	Kind  string `json:"kind"`
+	Muted bool   `json:"muted"`
 }
 
 func TestIgnoreAndStopIgnoring(t *testing.T) {
@@ -19,7 +20,18 @@ func TestIgnoreAndStopIgnoring(t *testing.T) {
 	if len(box.Postings) == 0 {
 		skipf(t, "no threads in Imbox to ignore")
 	}
-	posting := box.Postings[0]
+	var posting ignorePosting
+	found := false
+	for _, candidate := range box.Postings {
+		if candidate.Kind == "topic" {
+			posting = candidate
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Skip("no email topics in Imbox to ignore")
+	}
 	postingID := intStr(posting.ID)
 
 	if posting.Muted {

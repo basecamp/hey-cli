@@ -58,6 +58,7 @@ func TestBoxImbox(t *testing.T) {
 	type Posting struct {
 		ID      int    `json:"id"`
 		AppURL  string `json:"app_url"`
+		Kind    string `json:"kind"`
 		Summary string `json:"summary"`
 	}
 	type BoxResponse struct {
@@ -69,6 +70,11 @@ func TestBoxImbox(t *testing.T) {
 
 	if data.Kind != "imbox" {
 		t.Errorf("expected kind=imbox, got %s", data.Kind)
+	}
+	for _, posting := range data.Postings {
+		if posting.Kind == "" {
+			t.Errorf("posting %d has no kind", posting.ID)
+		}
 	}
 
 	// Cross-verify: pick a posting and verify its topic page exists on the server.
@@ -174,8 +180,9 @@ func TestBoxesAll(t *testing.T) {
 func TestMovePosting(t *testing.T) {
 	resp := heyJSON(t, "box", "imbox", "--limit", "10")
 	type Posting struct {
-		ID   int  `json:"id"`
-		Seen bool `json:"seen"`
+		ID   int    `json:"id"`
+		Kind string `json:"kind"`
+		Seen bool   `json:"seen"`
 	}
 	type BoxResponse struct {
 		Postings []Posting `json:"postings"`
@@ -183,19 +190,24 @@ func TestMovePosting(t *testing.T) {
 	imbox := dataAs[BoxResponse](t, resp)
 	postingID := 0
 	for _, posting := range imbox.Postings {
-		if posting.Seen {
+		if posting.Kind == "topic" && posting.Seen {
 			postingID = posting.ID
 			break
 		}
 	}
 	if postingID == 0 {
-		if len(imbox.Postings) == 0 {
-			skipf(t, "no postings in Imbox to move")
+		for _, posting := range imbox.Postings {
+			if posting.Kind == "topic" {
+				postingID = posting.ID
+				break
+			}
+		}
+		if postingID == 0 {
+			skipf(t, "no email topics in Imbox to move")
 		}
 		// No seen posting to borrow: mark one seen and put its unread
 		// state back afterwards. The restore runs after the move-back
 		// cleanup below, so the posting is home before it goes unseen.
-		postingID = imbox.Postings[0].ID
 		heyOK(t, "seen", intStr(postingID), "--json")
 		t.Cleanup(func() {
 			_, cleanupStderr, cleanupCode := hey(t, "unseen", intStr(postingID), "--json")
