@@ -14,10 +14,12 @@ name: Refresh Nix vendorHash on Dependabot PRs
 # main's own, and none of them references a secret a Go bump can reach — keep
 # it that way. The full actor analysis is in the reusable workflow's header.
 #
-# Needs the cli-release-bot App installed here and RELEASE_APP_PRIVATE_KEY
-# stored as a Dependabot secret (Dependabot-triggered runs do not see Actions
-# secrets); the dispatch path reads the Actions secret release.yml already
-# uses.
+# Needs the cli-release-bot App installed here with contents: write, and its
+# private key stored as a repository *Dependabot* secret named
+# RELEASE_APP_PRIVATE_KEY (Dependabot-triggered runs see only Dependabot
+# secrets) and, for the workflow_dispatch path, as a repository Actions secret
+# of the same name. release.yml's copies live in the `release` environment
+# and are not reachable from here, by design.
 
 on:
   pull_request:
@@ -39,7 +41,10 @@ jobs:
     uses: basecamp/.github/.github/workflows/dependabot-sync-nix-vendor-hash.yml@8f44c1e73b288ef09d2a3e48a5771d34fba22b39
     with:
       pr: ${{ inputs.pr }}
-      app-client-id: ${{ vars.RELEASE_CLIENT_ID }}
+      # cli-release-bot's client id — the `release` environment's
+      # RELEASE_CLIENT_ID, which is a public identifier (every release run
+      # prints it) and, being environment-scoped, is not readable here.
+      app-client-id: Iv23liAbERu6z8d7t5A8
     permissions:
       contents: read
       pull-requests: read
