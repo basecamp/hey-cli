@@ -358,6 +358,11 @@ hey snippet update --name
 hey spam
 hey stop-ignoring
 hey thread
+hey thread list
+hey thread list --all
+hey thread list --in
+hey thread list --limit
+hey thread list --page
 hey thread read
 hey thread read --allow-partial
 hey timetrack

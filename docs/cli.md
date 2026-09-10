@@ -110,7 +110,7 @@ hey box list --quiet --jq '.[].id'
 Listing commands also answer `--markdown` for a table, `--styled` to force the human
 rendering when the output is piped, `--ids-only` for one ID per line, and `--count` for a
 bare number. `--ids-only` and `--count` need list data, so they work on `hey box list`,
-`hey box view`, `hey bundle view`, `hey label list`, `hey label view`, `hey collection list`, `hey collection view`,
+`hey box view`, `hey bundle view`, `hey thread list`, `hey label list`, `hey label view`, `hey collection list`, `hey collection view`,
 `hey workflow list`, `hey workflow view`, `hey clip list`, `hey snippet list`, `hey draft list`, `hey search`, `hey contact list`, `hey contact threads`, `hey screener list`, `hey screener history`, `hey calendar list`,
 `hey event list`, `hey event day`, `hey event week`, `hey todo list`, `hey habit list`,
 `hey timetrack list` and `hey journal list`.
@@ -155,6 +155,10 @@ or through the direct-form escape (`hey box -- list`).
 ```bash
 hey box list                         # list mailboxes
 hey box view imbox                   # list email threads in a box (by name or ID)
+hey thread list --in sent            # list sent threads
+hey thread list --in spam            # list threads in Spam without changing them
+hey thread list --in trash           # list threads in Trash without changing them
+hey thread list --in everything      # list every thread
 hey bundle view 456                  # list the unseen threads a bundle row groups
 hey label list                       # list labels and their IDs
 hey label view 789 --all             # list all email threads with a label
@@ -255,6 +259,14 @@ hey ignore 12345                   # ignore future activity on a thread
 hey stop-ignoring 12345            # resume attention for a thread
 ```
 
+`hey thread list` is the read-only index for HEY's Sent, Spam, Trash and Everything
+views. Its JSON data is an array of topics; each row carries `topic_id` explicitly, and
+both `id` and `topic_id` on these rows are thread IDs for `hey thread read`, `hey reply`,
+`hey forward`, `hey share` and `hey attachment list` — neither is a box item ID for
+organization commands. `--limit` reads only enough pages for the requested result count,
+`--all` follows up to 100 pages, and `--page <next_page>` continues from the opaque cursor
+reported by an earlier listing of the same view. A page number does not name a position.
+
 `hey thread read` reads a whole thread, oldest entry first, however many pages HEY serves it in — within limits it states: a hundred pages past the first, two thousand entries, as many bodies, 64 MiB of content and two minutes in all. A thread that could only be read in part — a body HEY would not serve, a limit reached — is refused rather than passed off as whole; `--allow-partial` takes what was read, with a `notice` saying what is missing and each entry's `body_state` saying whether its body was `hydrated`, `bodyless` (HEY served none), `over_limit` or `failed`. `--count` and `--ids-only` read the entry index and no bodies, so only a truncated index can make them partial. `--markdown` writes the thread as one Markdown document — a heading per entry naming the sender, date and ID, then the body — which is the shape to hand an agent or a notes app. `hey attachment list` reads the bodies in every format, since that is where attachment metadata lives, and answers a partial thread the same way. `hey reply` answers the thread's latest entry and addresses the reply the way HEY does: it asks HEY for the reply's recipients — everyone that entry was addressed to, its sender moved onto the To line, and your own addresses, aliases and catch-alls excluded — falling back to computing them from the entry when that read is unavailable.
 
 Email bodies come back as Markdown. `hey thread read` and the TUI render that Markdown for the terminal — headings, emphasis, lists, quotes, tables and code survive, and links keep their URLs and stay clickable where the terminal supports it. `--json` carries the same Markdown in `body`, so an agent reading a thread sees the structure a human sees rather than a flattened wall of text. `--html` still returns HEY's original HTML.
@@ -275,7 +287,7 @@ The Screener is where first-time senders wait. `hey screener list` returns clear
 
 `--attach` is repeatable on `hey compose`, `hey reply`, and `hey bulk-reply send`, and attachment-only messages are supported. The CLI validates and uploads every file before sending the email. `hey attachment list <thread-id>` returns every named downloadable file, including named inline images. Direct files keep stable message-and-position IDs such as `456:1`; files inside embedded HTML receive opaque IDs scoped to their message. Pass either returned ID to `hey attachment save`. Saving uses the original filename by default, accepts `--output` for a file or directory, and preserves existing files unless `--force` is set.
 
-Organization actions take the `id` values returned by `hey box view --json`, `hey label view --json`, or `hey search --json`. Reading, replying to, and forwarding a thread take its `topic_id` instead, which `hey box view --json`, `hey label view --json`, `hey collection view --json` and `hey search --json` all carry alongside `id`. `hey box view` also returns `next_page` and accepts `--page <next_page>` to continue a box listing; it keeps `next_history_url` for the sync clients that read it, and `--page` accepts that URL as readily as the cursor inside it. Label IDs come from `hey label list`; `hey label view` returns `next_page` and `total_count`, accepts `--page <next_page>` for continuation, and supports `--all` for complete traversal. HEY creates a label while adding it to at least one thread, so `hey label create` requires thread item IDs.
+Organization actions take the `id` values returned by `hey box view --json`, `hey label view --json`, or `hey search --json`. Reading, replying to, and forwarding a thread take its `topic_id` instead, which `hey thread list --json`, `hey box view --json`, `hey label view --json`, `hey collection view --json` and `hey search --json` carry. A `hey thread list` row is the exception to the two-ID shape: its `id` is already a topic ID, and `topic_id` repeats it to make that unambiguous. `hey box view` also returns `next_page` and accepts `--page <next_page>` to continue a box listing; it keeps `next_history_url` for the sync clients that read it, and `--page` accepts that URL as readily as the cursor inside it. Label IDs come from `hey label list`; `hey label view` returns `next_page` and `total_count`, accepts `--page <next_page>` for continuation, and supports `--all` for complete traversal. HEY creates a label while adding it to at least one thread, so `hey label create` requires thread item IDs.
 
 Collection IDs come from `hey collection list`. `hey collection view` returns both each posting `id` and its `topic_id`, plus `next_page` and `total_count`. Collection membership commands take `topic_id`; posting organization commands continue to take `id`. Creating a collection returns a confirmed mutation, and `hey collection list` provides its ID for subsequent commands. Collection updates accept a non-empty name, summary, or both.
 
