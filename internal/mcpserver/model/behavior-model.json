@@ -470,6 +470,10 @@
     },
     "GetBox": {
       "idempotent": false,
+      "pagination": {
+        "style": "link",
+        "totalCountHeader": "X-Total-Count"
+      },
       "readonly": true,
       "retry": {
         "backoff": "exponential",
@@ -956,6 +960,19 @@
       }
     },
     "GetWorkflow": {
+      "idempotent": false,
+      "readonly": true,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 3,
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetWorkflowStage": {
       "idempotent": false,
       "readonly": true,
       "retry": {

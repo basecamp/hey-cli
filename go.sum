@@ -89,8 +89,8 @@ github.com/aymerick/douceur v0.2.0 h1:Mv+mAeH1Q+n9Fr+oyamOlAkUNPWPlA8PPGR0QAaYuP
 github.com/aymerick/douceur v0.2.0/go.mod h1:wlT5vV2O3h55X9m7iVYN0TBM0NH/MmbLnd30/FjWUq4=
 github.com/basecamp/actioncable-go v1.0.0 h1:m8UGFYfBfa/YivQNayc2VoS+oVKLG+ixKzhIzdACWDM=
 github.com/basecamp/actioncable-go v1.0.0/go.mod h1:ezaV5z1GXQAsqyejqTs6wCFl2D8Wj+COLQkHc/kwoRs=
-github.com/basecamp/hey-sdk/go v0.29.0 h1:/u9iD5x2Rm2IqVpF55XDfGMNwVyvtC+rJjpYC9BrFeo=
-github.com/basecamp/hey-sdk/go v0.29.0/go.mod h1:k6sO2XhMkU3UY8lD2ozp0735Ic3q8xoMQt7YUT3TlYk=
+github.com/basecamp/hey-sdk/go v0.30.0 h1:PKAxAL8ZXUNuLPR+YE6Vd8BSuGj+kWm3bkCmwSwxP8s=
+github.com/basecamp/hey-sdk/go v0.30.0/go.mod h1:CRBUw9E72QFvCtjZmPgu8wrKEXcBMWc9RMxvl0+XQVc=
 github.com/basecamp/mcp v0.0.0-20260828100356-2d6f44b51e9d h1:zEQVGq1x1nhKMZ2TudFAcSJ32CHT8richI1vQakIKz4=
 github.com/basecamp/mcp v0.0.0-20260828100356-2d6f44b51e9d/go.mod h1:Ee2c/q1/pg+5T5741PIuA3s6VJMQC7I0XBNXIHIujzA=
 github.com/blang/semver v3.5.1+incompatible h1:cQNTCjp13qL8KC3Nbxr/y2Bqb63oX6wdnnjpJbkM4JQ=
@@ -301,8 +301,8 @@ github.com/natefinch/atomic v1.0.1 h1:ZPYKxkqQOx3KZ+RsbnP/YsgvxWQPGxjC0oBt2AhwV0
 github.com/natefinch/atomic v1.0.1/go.mod h1:N/D/ELrljoqDyT3rZrsUmtsuzvHkeB/wWjHV22AZRbM=
 github.com/oapi-codegen/nullable v1.1.0 h1:eAh8JVc5430VtYVnq00Hrbpag9PFRGWLjxR1/3KntMs=
 github.com/oapi-codegen/nullable v1.1.0/go.mod h1:KUZ3vUzkmEKY90ksAmit2+5juDIhIZhfDl+0PwOQlFY=
-github.com/oapi-codegen/runtime v1.6.0 h1:7Xx+GlueD6nRuyKoCPzL434Jfi3BetbiJOrzCHp/VPU=
-github.com/oapi-codegen/runtime v1.6.0/go.mod h1:GwV7hC2hviaMzj+ITfHVRESK5J2W/GefVwIND/bMGvU=
+github.com/oapi-codegen/runtime v1.7.0 h1:t7358VYPvNbWJ9gdAkIK/smVeHpBf6yp8VTsaZsb/7k=
+github.com/oapi-codegen/runtime v1.7.0/go.mod h1:GwV7hC2hviaMzj+ITfHVRESK5J2W/GefVwIND/bMGvU=
 github.com/oklog/ulid/v2 v2.1.1 h1:suPZ4ARWLOJLegGFiZZ1dFAkqzhMjL3J1TzI+5wHz8s=
 github.com/oklog/ulid/v2 v2.1.1/go.mod h1:rcEKHmBBKfef9DhnvX7y1HZBYxjXb0cP5ExxNsTT1QQ=
 github.com/opencontainers/go-digest v1.0.0 h1:apOUWs51W5PlhuyGyz9FCeeBIOUDA/6nW8Oi/yOhh5U=
