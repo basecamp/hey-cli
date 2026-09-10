@@ -97,11 +97,14 @@ func TestDeviceAuthorizationAndTokenRequests(t *testing.T) {
 		if err := r.ParseForm(); err != nil {
 			t.Fatalf("ParseForm: %v", err)
 		}
+		if r.Method != http.MethodPost || r.Header.Get("Content-Type") != "application/x-www-form-urlencoded" {
+			t.Errorf("%s request = %s %s", r.URL.Path, r.Method, r.Header.Get("Content-Type"))
+		}
+		if r.Form.Get("client_id") != "client" || r.Form.Get("install_id") != "install" {
+			t.Errorf("%s form = %v", r.URL.Path, r.Form)
+		}
 		switch r.URL.Path {
 		case "/device":
-			if r.Form.Get("client_id") != "client" || r.Form.Get("install_id") != "install" {
-				t.Errorf("device form = %v", r.Form)
-			}
 			_, _ = io.WriteString(w, `{"device_code":"device-secret","user_code":"ABCD-EFGH","verification_uri":"https://example.test/device","verification_uri_complete":"https://example.test/device?code=ABCD-EFGH","expires_in":600,"interval":5}`)
 		case "/token":
 			polls++

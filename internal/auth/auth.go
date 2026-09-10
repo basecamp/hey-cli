@@ -165,22 +165,20 @@ type LoginOptions struct {
 
 // DeviceLoginOptions configures OAuth device authorization login.
 type DeviceLoginOptions struct {
+	// Logger receives login progress messages (the verification URL and user
+	// code, the waiting notice). Nil keeps the default os.Stderr output.
 	Logger func(msg string)
 }
 
-func (o DeviceLoginOptions) log(msg string) {
-	if o.Logger != nil {
-		o.Logger(msg)
-		return
-	}
-	fmt.Fprint(os.Stderr, msg)
-}
+func (o DeviceLoginOptions) log(msg string) { logProgress(o.Logger, msg) }
 
 // log routes a progress message to the configured Logger, or to os.Stderr
 // verbatim when none is set so `hey auth login` output stays as it was.
-func (o LoginOptions) log(msg string) {
-	if o.Logger != nil {
-		o.Logger(msg)
+func (o LoginOptions) log(msg string) { logProgress(o.Logger, msg) }
+
+func logProgress(logger func(msg string), msg string) {
+	if logger != nil {
+		logger(msg)
 		return
 	}
 	fmt.Fprint(os.Stderr, msg)
@@ -278,19 +276,8 @@ func (m *Manager) LoginDevice(ctx context.Context, opts DeviceLoginOptions) erro
 		interval = 5 * time.Second
 	}
 	expiresAt := time.Now().Add(time.Duration(authorization.ExpiresIn) * time.Second)
-	firstPoll := true
 
 	for {
-		if time.Now().After(expiresAt) {
-			return errors.New("device authorization expired")
-		}
-		if !firstPoll {
-			if err := m.wait(ctx, interval); err != nil {
-				return err
-			}
-		}
-		firstPoll = false
-
 		token, oauthErr, err := exchangeDeviceCode(ctx, m.httpClient, tokenEndpoint, authorization.DeviceCode, oauthClientID, installID)
 		if err != nil {
 			return err
@@ -311,6 +298,16 @@ func (m *Manager) LoginDevice(ctx context.Context, opts DeviceLoginOptions) erro
 			return errors.New("device authorization expired")
 		default:
 			return fmt.Errorf("device authorization failed: %s", oauthErr)
+		}
+
+		// The wait never outlives the code, and an expired code is not polled again.
+		if remaining := time.Until(expiresAt); remaining > 0 {
+			if err := m.wait(ctx, min(interval, remaining)); err != nil {
+				return err
+			}
+		}
+		if !time.Now().Before(expiresAt) {
+			return errors.New("device authorization expired")
 		}
 	}
 }

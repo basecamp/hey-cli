@@ -122,9 +122,33 @@ func TestAuthTokenLoginAndStoredTokenOutput(t *testing.T) {
 func TestAuthLoginRejectsConflictingMethods(t *testing.T) {
 	server := httptest.NewServer(http.NotFoundHandler())
 	defer server.Close()
-	_, _, err := runAuthCommand(t, t.TempDir(), server.URL, "", true, "auth", "login", "--device", "--no-browser")
-	if err == nil || !strings.Contains(err.Error(), "choose only one") {
-		t.Fatalf("error = %v, want conflicting method error", err)
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{args: []string{"--device", "--no-browser"}, want: "--no-browser cannot be combined with --device"},
+		{args: []string{"--device", "--token", "abc"}, want: "choose only one"},
+		{args: []string{"--token", "abc", "--cookie", "xyz"}, want: "choose only one"},
+	} {
+		args := append([]string{"auth", "login"}, test.args...)
+		_, _, err := runAuthCommand(t, t.TempDir(), server.URL, "", true, args...)
+		if err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Errorf("hey %s error = %v, want %q", strings.Join(args, " "), err, test.want)
+		}
+	}
+}
+
+// --no-browser only shapes the browser flow; alongside --token or --cookie it is
+// ignored, as it was before --device arrived.
+func TestAuthLoginTokenIgnoresNoBrowser(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+	stdout, _, err := runAuthCommand(t, t.TempDir(), server.URL, "", true, "auth", "login", "--token", "abc", "--no-browser")
+	if err != nil {
+		t.Fatalf("hey auth login --token --no-browser: %v", err)
+	}
+	if !strings.Contains(stdout, "Logged in with token") {
+		t.Errorf("stdout = %q, want token login", stdout)
 	}
 }
 

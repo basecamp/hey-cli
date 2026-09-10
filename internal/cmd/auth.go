@@ -70,13 +70,16 @@ Use --device on a headless machine, or --token/--cookie with an existing credent
 		}, "\n"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			selected := 0
-			for _, active := range []bool{token != "", cookie != "", noBrowser, device} {
+			for _, active := range []bool{token != "", cookie != "", device} {
 				if active {
 					selected++
 				}
 			}
 			if selected > 1 {
-				return apierr.ErrUsage("choose only one of --device, --no-browser, --token, or --cookie")
+				return apierr.ErrUsage("choose only one of --device, --token, or --cookie")
+			}
+			if device && noBrowser {
+				return apierr.ErrUsage("--no-browser cannot be combined with --device")
 			}
 			if token != "" {
 				if err := authMgr.LoginWithToken(token); err != nil {
@@ -97,9 +100,8 @@ Use --device on a headless machine, or --token/--cookie with an existing credent
 			}
 
 			if device {
-				ctx, cancel := context.WithTimeout(cmd.Context(), 16*time.Minute)
-				defer cancel()
-				if err := authMgr.LoginDevice(ctx, auth.DeviceLoginOptions{}); err != nil {
+				// The server's expires_in bounds the wait; Ctrl-C ends it early.
+				if err := authMgr.LoginDevice(cmd.Context(), auth.DeviceLoginOptions{}); err != nil {
 					return apierr.ErrAuth(fmt.Sprintf("login failed: %v", err))
 				}
 				clearHTTPCache(cmd.ErrOrStderr())
