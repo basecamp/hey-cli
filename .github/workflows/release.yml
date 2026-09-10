@@ -14,7 +14,7 @@ permissions: {}
 jobs:
   security:
     name: Security scan
-    uses: ./.github/workflows/security.yml
+    uses: $/.github/workflows/security.yml
     permissions:
       contents: read
       security-events: write
