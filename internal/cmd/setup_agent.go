@@ -72,7 +72,7 @@ var agentSetupHandlers = map[string]agentSetupHandler{
 	},
 	"codex": {
 		Labels: []string{
-			"Copy the HEY skill into Codex's skills directory",
+			"Install the shared HEY skill for Codex",
 		},
 		Run:               runCodexSetup,
 		RunNonInteractive: runCodexSetupNonInteractive,
@@ -393,8 +393,7 @@ func agentCommandFailure(out []byte, err error) string {
 
 // --- Codex ---
 
-// runCodexSetup copies the skill for Codex in the interactive wizard.
-// hey has no Codex plugin yet, so the skill is the whole integration.
+// runCodexSetup connects Codex to the shared agent skill.
 func runCodexSetup(cmd *cobra.Command) error {
 	w := cmd.OutOrStdout()
 	path, err := installCodexSkill()
@@ -412,10 +411,9 @@ func runCodexSetupNonInteractive(*cobra.Command) error {
 	return err
 }
 
-// installCodexSkill is the Codex handler's one step. Like Claude, it never
-// fabricates the agent: creating ~/.codex on a machine without Codex would
-// make every later detection — and this command's own verdict — report it
-// installed.
+// installCodexSkill is the Codex handler's one step. The caller installs the
+// shared baseline first; this removes any older hey-cli-managed Codex copy so
+// Codex discovers only one skill. Like Claude, it never fabricates the agent.
 func installCodexSkill() (string, error) {
 	if !harness.DetectCodex() {
 		return "", &agentSetupError{
@@ -423,7 +421,17 @@ func installCodexSkill() (string, error) {
 			Manual:  []string{"hey setup codex"},
 		}
 	}
-	return installSkillToCodex()
+	path := harness.AgentSkillPath()
+	if path == "" {
+		return "", fmt.Errorf("cannot determine shared Agent Skills directory")
+	}
+	if !baselineSkillInstalled() {
+		return "", fmt.Errorf("shared HEY skill is not installed")
+	}
+	if _, err := migrateLegacyCodexSkill(); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // --- Shared helpers ---

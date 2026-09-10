@@ -13,9 +13,9 @@ func init() {
 		Name:   "Codex",
 		ID:     "codex",
 		Detect: DetectCodex,
-		// hey has no Codex plugin yet (no .codex-plugin manifest ships in
-		// this repo), so Codex health is skill-presence only. When a native
-		// plugin lands, this grows the plugin/version checks basecamp-cli has.
+		// Codex discovers the shared ~/.agents skill directly, so health is
+		// skill-presence only. When a native plugin lands, this grows the
+		// plugin/version checks basecamp-cli has.
 		Checks: func() []*StatusCheck {
 			return []*StatusCheck{CheckCodexSkill()}
 		},
@@ -61,8 +61,10 @@ func CodexHome() string {
 	return filepath.Join(filepath.Clean(home), ".codex")
 }
 
-// CodexSkillPath returns where Codex reads the hey skill from.
-func CodexSkillPath() string {
+// LegacyCodexSkillPath returns the old Codex-specific skill path. Current Codex
+// discovers AgentSkillPath directly; this remains only so hey-cli can safely
+// migrate and remove copies written by older releases.
+func LegacyCodexSkillPath() string {
 	codexHome := CodexHome()
 	if codexHome == "" {
 		return ""
@@ -70,14 +72,14 @@ func CodexSkillPath() string {
 	return filepath.Join(codexHome, "skills", "hey", "SKILL.md")
 }
 
-// CheckCodexSkill checks whether the hey skill is installed for Codex.
+// CheckCodexSkill checks whether the shared hey skill is installed for Codex.
 func CheckCodexSkill() *StatusCheck {
-	skillPath := CodexSkillPath()
+	skillPath := AgentSkillPath()
 	if skillPath == "" {
 		return &StatusCheck{
 			Name:    "Codex Skill",
 			Status:  "warn",
-			Message: "Cannot determine Codex home directory",
+			Message: "Cannot determine shared Agent Skills directory",
 		}
 	}
 	if _, err := os.Stat(skillPath); err != nil {
@@ -114,6 +116,15 @@ func CheckCodexSkill() *StatusCheck {
 			Status:  "fail",
 			Message: "A skill not written by hey-cli occupies " + skillDir,
 			Hint:    "Move it aside, then run: hey setup codex",
+		}
+	}
+	legacyPath := LegacyCodexSkillPath()
+	if !SameFile(skillPath, legacyPath) && RegularSkillFile(legacyPath) && SkillDirOwned(filepath.Dir(legacyPath)) {
+		return &StatusCheck{
+			Name:    "Codex Skill",
+			Status:  "fail",
+			Message: "Redundant managed skill installed at " + filepath.Dir(legacyPath),
+			Hint:    "Run: hey setup codex",
 		}
 	}
 	return &StatusCheck{

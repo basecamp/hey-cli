@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/basecamp/hey-cli/internal/output"
@@ -163,6 +164,133 @@ func agentHome(t *testing.T, dirs ...string) string {
 	return home
 }
 
+func TestSkillInstallUsesSharedPathAndRemovesManagedLegacyCodexCopy(t *testing.T) {
+	home := agentHome(t, ".codex")
+	legacy := filepath.Join(home, ".codex", "skills", "hey")
+	writeSkillFixture(t, legacy, "# legacy", true)
+	jsonWriter(t)
+
+	if err := runSkillInstall(newSkillInstallCommand(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".agents", "skills", "hey", skillFilename)); err != nil {
+		t.Fatalf("shared skill missing: %v", err)
+	}
+	if _, err := os.Lstat(legacy); !os.IsNotExist(err) {
+		t.Fatalf("managed legacy Codex copy remains: %v", err)
+	}
+}
+
+func TestSkillInstallPreservesUnmanagedLegacyCodexSkill(t *testing.T) {
+	home := agentHome(t, ".codex")
+	legacy := filepath.Join(home, ".codex", "skills", "hey")
+	if err := os.MkdirAll(legacy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	custom := []byte("# user-owned Codex skill\n")
+	if err := os.WriteFile(filepath.Join(legacy, skillFilename), custom, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	jsonWriter(t)
+
+	if err := runSkillInstall(newSkillInstallCommand(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(legacy, skillFilename)); err != nil || !bytes.Equal(got, custom) {
+		t.Fatalf("unmanaged legacy skill changed: %q, %v", got, err)
+	}
+	if ownedSkillDir(legacy) {
+		t.Error("unmanaged legacy Codex skill was claimed")
+	}
+}
+
+func TestCodexMigrationPreservesLegacySkillWithoutSharedBaseline(t *testing.T) {
+	home := agentHome(t, ".codex")
+	legacy := filepath.Join(home, ".codex", "skills", "hey")
+	writeSkillFixture(t, legacy, "# only working skill", true)
+
+	if _, err := installCodexSkill(); err == nil || !strings.Contains(err.Error(), "shared HEY skill is not installed") {
+		t.Fatalf("installCodexSkill error = %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(legacy, skillFilename)); err != nil || string(got) != "# only working skill" {
+		t.Fatalf("legacy-only skill changed: %q, %v", got, err)
+	}
+}
+
+func TestCodexInstallReportsMissingSharedAgentSkillsHome(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("CODEX_HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+
+	if _, err := installCodexSkill(); err == nil || err.Error() != "cannot determine shared Agent Skills directory" {
+		t.Fatalf("installCodexSkill error = %v", err)
+	}
+}
+
+func TestSkillInstallFailurePreservesManagedLegacyCodexSkill(t *testing.T) {
+	home := agentHome(t, ".codex")
+	legacy := filepath.Join(home, ".codex", "skills", "hey")
+	writeSkillFixture(t, legacy, "# only working skill", true)
+
+	baseline := filepath.Join(home, ".agents", "skills", "hey")
+	if err := os.MkdirAll(baseline, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeOwnershipMarker(baseline)
+	precious := filepath.Join(home, "user-skill.md")
+	if err := os.WriteFile(precious, []byte("# user skill"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(precious, filepath.Join(baseline, skillFilename)); err != nil {
+		t.Fatal(err)
+	}
+	jsonWriter(t)
+
+	if err := runSkillInstall(newSkillInstallCommand(), nil); err == nil {
+		t.Fatal("install succeeded over a non-regular baseline skill")
+	}
+	if got, err := os.ReadFile(filepath.Join(legacy, skillFilename)); err != nil || string(got) != "# only working skill" {
+		t.Fatalf("legacy skill changed after failed baseline install: %q, %v", got, err)
+	}
+}
+
+func TestSkillInstallDoesNotRemoveSharedSkillWhenCodexHomeAliasesAgents(t *testing.T) {
+	home := agentHome(t)
+	t.Setenv("CODEX_HOME", filepath.Join(home, ".agents"))
+	jsonWriter(t)
+
+	if err := runSkillInstall(newSkillInstallCommand(), nil); err != nil {
+		t.Fatal(err)
+	}
+	shared := filepath.Join(home, ".agents", "skills", "hey")
+	if !baselineSkillInstalled() {
+		t.Fatal("shared skill was removed as its own legacy copy")
+	}
+	if !ownedSkillDir(shared) {
+		t.Fatal("shared skill lost its ownership marker")
+	}
+}
+
+func TestSkillInstallMigratesLegacyCopyBeforeClaudeSetupFailure(t *testing.T) {
+	home := agentHome(t, ".codex", ".claude/skills/hey")
+	legacy := filepath.Join(home, ".codex", "skills", "hey")
+	writeSkillFixture(t, legacy, "# legacy", true)
+	// A populated user-owned Claude directory makes the optional Claude step
+	// fail after the shared baseline succeeds.
+	if err := os.WriteFile(filepath.Join(home, ".claude", "skills", "hey", "keep"), []byte("mine"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	jsonWriter(t)
+
+	if err := runSkillInstall(newSkillInstallCommand(), nil); err == nil {
+		t.Fatal("install unexpectedly succeeded through user-owned Claude skill")
+	}
+	if _, err := os.Lstat(legacy); !os.IsNotExist(err) {
+		t.Fatalf("managed legacy Codex copy remains after shared install: %v", err)
+	}
+}
+
 // Only hey-cli's own canonical symlink may be replaced. A user's symlink to
 // their own skill, or a regular file, is refused and left exactly as found.
 func TestSkillInstallRefusesForeignLinkOrFile(t *testing.T) {
@@ -195,39 +323,30 @@ func TestSkillInstallRefusesForeignLinkOrFile(t *testing.T) {
 	}
 }
 
-// The canonical baseline and Codex paths are conventions agents share, so a
-// hand-authored skill can legitimately live there. Every install path — the
-// explicit command and the installer's automatic `setup agents` alike — must
-// refuse an unmarked one rather than overwrite it and then claim it.
-func TestSkillInstallRefusesUnmarkedBaselineAndCodexSkills(t *testing.T) {
+// The canonical baseline is a convention agents share, so a hand-authored
+// skill can legitimately live there. Every install path must refuse an
+// unmarked one rather than overwrite it and then claim it.
+func TestSkillInstallRefusesUnmarkedBaselineSkill(t *testing.T) {
 	home := agentHome(t, ".codex")
 	custom := "# my own hey skill\n"
 	baseline := filepath.Join(home, ".agents", "skills", "hey")
-	codex := filepath.Join(home, ".codex", "skills", "hey")
-	for _, dir := range []string{baseline, codex} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(custom), 0o600); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.MkdirAll(baseline, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(baseline, "SKILL.md"), []byte(custom), 0o600); err != nil {
+		t.Fatal(err)
 	}
 
 	var unmanaged *unmanagedSkillDirError
 	if _, err := installSkillFiles(); !errors.As(err, &unmanaged) {
 		t.Fatalf("installSkillFiles error = %v, want unmanaged refusal", err)
 	}
-	if _, err := installSkillToCodex(); !errors.As(err, &unmanaged) {
-		t.Fatalf("installSkillToCodex error = %v, want unmanaged refusal", err)
+	data, err := os.ReadFile(filepath.Join(baseline, "SKILL.md"))
+	if err != nil || string(data) != custom {
+		t.Errorf("%s changed: %q, %v", baseline, data, err)
 	}
-	for _, dir := range []string{baseline, codex} {
-		data, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
-		if err != nil || string(data) != custom {
-			t.Errorf("%s changed: %q, %v", dir, data, err)
-		}
-		if ownedSkillDir(dir) {
-			t.Errorf("%s was claimed", dir)
-		}
+	if ownedSkillDir(baseline) {
+		t.Errorf("%s was claimed", baseline)
 	}
 }
 
@@ -259,10 +378,7 @@ func TestSkillInstallRefusesSymlinkedSkillFileInManagedDir(t *testing.T) {
 	if err := os.WriteFile(precious, []byte("# do not truncate"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for _, dir := range []string{
-		filepath.Join(home, ".agents", "skills", "hey"),
-		filepath.Join(home, ".codex", "skills", "hey"),
-	} {
+	for _, dir := range []string{filepath.Join(home, ".agents", "skills", "hey")} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -274,9 +390,6 @@ func TestSkillInstallRefusesSymlinkedSkillFileInManagedDir(t *testing.T) {
 
 	if _, err := installSkillFiles(); err == nil {
 		t.Error("baseline install wrote through a symlinked SKILL.md")
-	}
-	if _, err := installSkillToCodex(); err == nil {
-		t.Error("Codex install wrote through a symlinked SKILL.md")
 	}
 	if data, _ := os.ReadFile(precious); string(data) != "# do not truncate" {
 		t.Errorf("symlink target was truncated: %q", data)

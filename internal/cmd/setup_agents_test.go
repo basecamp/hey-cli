@@ -342,10 +342,9 @@ func TestSetupAgentsDoesNotMigrateLegacyCredentials(t *testing.T) {
 	}
 }
 
-// A targeted agent whose skill path is occupied by an unmanaged skill is a
-// conflict, not a connection: the presence check alone must not flip
-// plugin_installed back to true over the handler's refusal.
-func TestSetupAgentsConflictedInstallIsNotConnected(t *testing.T) {
+// An unmanaged legacy Codex skill is user state: setup leaves it untouched
+// while connecting Codex through the shared ~/.agents skill.
+func TestSetupAgentsPreservesUnmanagedLegacyCodexSkill(t *testing.T) {
 	isolateAgents(t)
 	t.Setenv(agentSetupEnv, "codex")
 	home := t.TempDir()
@@ -365,15 +364,14 @@ func TestSetupAgentsConflictedInstallIsNotConnected(t *testing.T) {
 		t.Fatalf("setup agents: %v", err)
 	}
 	data := response.Data.(map[string]any)
-	errs := stringList(t, data["errors"])
-	if len(errs) == 0 || !strings.Contains(errs[0], "not written by hey-cli") {
+	if errs := stringList(t, data["errors"]); len(errs) != 0 {
 		t.Fatalf("errors = %v", errs)
 	}
 	agents := data["agents"].([]any)
-	if agents[0].(map[string]any)["plugin_installed"] != false {
-		t.Error("a refused install must not report plugin_installed")
+	if agents[0].(map[string]any)["plugin_installed"] != true {
+		t.Error("the shared skill should connect Codex")
 	}
-	if response.Summary != "Installed baseline skill; attempted Codex" {
+	if response.Summary != "Installed baseline skill; connected Codex" {
 		t.Errorf("summary = %q", response.Summary)
 	}
 	if got, _ := os.ReadFile(filepath.Join(codexSkill, "SKILL.md")); string(got) != custom {
@@ -593,9 +591,8 @@ func TestSetupAgentsRemoveDeletesManagedSkillsAndPreservesUserFiles(t *testing.T
 	if _, err := linkSkillToClaude(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := installSkillToCodex(); err != nil {
-		t.Fatal(err)
-	}
+	legacy := filepath.Join(home, ".codex", "skills", "hey")
+	writeSkillFixture(t, legacy, "# legacy managed skill", true)
 	baseline := filepath.Join(home, ".agents", "skills", "hey")
 	if err := os.WriteFile(filepath.Join(baseline, "notes.txt"), []byte("keep me"), 0o600); err != nil {
 		t.Fatal(err)
