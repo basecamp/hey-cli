@@ -153,7 +153,8 @@ const bundleProbeConcurrency = 8
 //
 // The probes run concurrently because a bulk action passes many ids at once. Anything
 // but a 404 is a real error and stops the command rather than passing for "not a
-// bundle".
+// bundle" — a success with no page included, since a move must not proceed on an
+// answer it cannot read.
 func bundlePostings(ctx context.Context, ids []int64) ([]int64, error) {
 	isBundle := make([]bool, len(ids))
 	group, groupCtx := errgroup.WithContext(ctx)
@@ -169,7 +170,10 @@ func bundlePostings(ctx context.Context, ids []int64) ([]int64, error) {
 				}
 				return converted
 			}
-			isBundle[i] = page != nil
+			if page == nil {
+				return fmt.Errorf("bundle check for posting %d answered no page", id)
+			}
+			isBundle[i] = true
 			return nil
 		})
 	}
