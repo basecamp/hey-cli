@@ -30,6 +30,7 @@ func TestHEYTokenPrecedence(t *testing.T) {
 
 	t.Setenv("HEY_TOKEN", "env-token-123")
 	mgr := testManager(t, server)
+	mgr.wait = func(context.Context, time.Duration) error { return nil }
 
 	token, err := mgr.AccessToken(context.Background())
 	if err != nil {
@@ -226,6 +227,81 @@ func TestLoginDoesNotSaveCredentialsOnFailure(t *testing.T) {
 				t.Fatal("credentials were saved after failed login")
 			}
 		})
+	}
+}
+
+func TestLoginDevice(t *testing.T) {
+	var polls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth/device_authorizations":
+			_, _ = io.WriteString(w, `{"device_code":"secret","user_code":"ABCD-EFGH","verification_uri":"https://example.test/device","expires_in":60,"interval":0}`)
+		case "/oauth/tokens":
+			polls++
+			if polls == 1 {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = io.WriteString(w, `{"error":"authorization_pending"}`)
+				return
+			}
+			_, _ = io.WriteString(w, `{"access_token":"device-access","refresh_token":"device-refresh","expires_in":3600}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	mgr := testManager(t, server)
+	mgr.wait = func(context.Context, time.Duration) error { return nil }
+	var messages strings.Builder
+	if err := mgr.LoginDevice(t.Context(), DeviceLoginOptions{Logger: func(msg string) { messages.WriteString(msg) }}); err != nil {
+		t.Fatalf("LoginDevice: %v", err)
+	}
+	if !strings.Contains(messages.String(), "ABCD-EFGH") || strings.Contains(messages.String(), "secret") {
+		t.Errorf("login messages = %q", messages.String())
+	}
+	creds, err := mgr.GetStore().Load(mgr.CredentialKey())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if creds.AccessToken != "device-access" || creds.RefreshToken != "device-refresh" {
+		t.Errorf("credentials = %#v", creds)
+	}
+}
+
+// The server's expires_in bounds the polling: a wait never runs past it, and a
+// device code that expired while waiting is not exchanged again.
+func TestLoginDeviceStopsPollingAtExpiry(t *testing.T) {
+	var polls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth/device_authorizations":
+			_, _ = io.WriteString(w, `{"device_code":"secret","user_code":"ABCD-EFGH","verification_uri":"https://example.test/device","expires_in":1,"interval":30}`)
+		case "/oauth/tokens":
+			polls++
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"error":"authorization_pending"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	mgr := testManager(t, server)
+	var waits []time.Duration
+	mgr.wait = func(_ context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		time.Sleep(d + 50*time.Millisecond) // a timer fires at or after d, never before
+		return nil
+	}
+	err := mgr.LoginDevice(t.Context(), DeviceLoginOptions{Logger: func(string) {}})
+	if err == nil || !strings.Contains(err.Error(), "expired") {
+		t.Fatalf("LoginDevice error = %v, want expiry", err)
+	}
+	if len(waits) != 1 || waits[0] > time.Second {
+		t.Errorf("waits = %v, want one wait capped at the remaining second", waits)
+	}
+	if polls != 1 {
+		t.Errorf("polls = %d, want one before expiry", polls)
 	}
 }
 

@@ -51,6 +51,7 @@ func buildLoginCommand(path string) *cobra.Command {
 		token     string
 		cookie    string
 		noBrowser bool
+		device    bool
 	)
 
 	cmd := &cobra.Command{
@@ -59,14 +60,27 @@ func buildLoginCommand(path string) *cobra.Command {
 		Long: `Authenticate with the HEY server.
 
 Opens a browser for OAuth authentication against HEY's own OAuth server, using PKCE.
-Use --token or --cookie for non-interactive login.`,
+Use --device on a headless machine, or --token/--cookie with an existing credential.`,
 		Example: strings.Join([]string{
 			"  " + path,
 			"  " + path + " --token YOUR_BEARER_TOKEN",
 			"  " + path + " --cookie SESSION_COOKIE_VALUE",
 			"  " + path + " --no-browser",
+			"  " + path + " --device",
 		}, "\n"),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			selected := 0
+			for _, active := range []bool{token != "", cookie != "", device} {
+				if active {
+					selected++
+				}
+			}
+			if selected > 1 {
+				return apierr.ErrUsage("choose only one of --device, --token, or --cookie")
+			}
+			if device && noBrowser {
+				return apierr.ErrUsage("--no-browser cannot be combined with --device")
+			}
 			if token != "" {
 				if err := authMgr.LoginWithToken(token); err != nil {
 					return apierr.ErrAuth(fmt.Sprintf("could not save token: %v", err))
@@ -83,6 +97,15 @@ Use --token or --cookie for non-interactive login.`,
 				// Replaced credentials orphan whatever the old ones cached.
 				clearHTTPCache(cmd.ErrOrStderr())
 				return writeMutation(cmd, "Logged in with session cookie", map[string]string{"method": "cookie"})
+			}
+
+			if device {
+				// The server's expires_in bounds the wait; Ctrl-C ends it early.
+				if err := authMgr.LoginDevice(cmd.Context(), auth.DeviceLoginOptions{}); err != nil {
+					return apierr.ErrAuth(fmt.Sprintf("login failed: %v", err))
+				}
+				clearHTTPCache(cmd.ErrOrStderr())
+				return writeMutation(cmd, "Logged in successfully", map[string]string{"method": "device"})
 			}
 
 			ctx, cancel := context.WithTimeout(cmd.Context(), 6*time.Minute)
@@ -112,6 +135,7 @@ Use --token or --cookie for non-interactive login.`,
 	cmd.Flags().StringVar(&token, "token", "", "Pre-generated Bearer token")
 	cmd.Flags().StringVar(&cookie, "cookie", "", "Session cookie value from browser (session_token)")
 	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Don't open browser, print URL instead")
+	cmd.Flags().BoolVar(&device, "device", false, "Use device authorization for headless sign-in")
 
 	return cmd
 }
