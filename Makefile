@@ -5,7 +5,7 @@
 	check-release-lockstep update-nix-hash tools clean install help
 
 BINARY := $(CURDIR)/bin/hey
-GOSEC_VERSION := v2.28.0
+GOSEC_VERSION := v2.29.0
 COVERAGE_FLOOR ?= 70.8
 COVERAGE_PROFILE ?= coverage.out
 COVERAGE_FUNCTIONS ?= coverage.func.txt
