@@ -396,6 +396,11 @@ hey thread comment
 hey thread comment --dry-run
 hey thread comment --message
 hey thread comment --message-html
+hey thread list
+hey thread list --all
+hey thread list --in
+hey thread list --limit
+hey thread list --page
 hey thread read
 hey thread read --allow-partial
 hey thread update

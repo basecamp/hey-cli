@@ -17,11 +17,11 @@ func newRestoreCommand() *restoreCommand {
 	restoreCommand.cmd = &cobra.Command{
 		Use:   "restore <thread-id>...",
 		Short: "Restore email threads from Trash",
-		Long:  "Restore one or more email threads from Trash to active mail. This only works for threads currently in Trash. Use the topic_id column from hey search --in trash. Do not use a box item ID.",
+		Long:  "Restore one or more email threads from Trash to active mail. This only works for threads currently in Trash. Use the topic_id column from hey thread list --in trash or hey search --in trash. Do not use a box item ID.",
 		Example: `  hey restore 12345
   hey restore 12345 67890`,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts one or more thread IDs, not box item IDs. Use topic_id from hey search --in trash. A trashed thread has no box item ID. Only restores threads currently in Trash.",
+			"agent_notes": "Accepts one or more thread IDs, not box item IDs. Use topic_id from hey thread list --in trash or hey search --in trash. A trashed thread has no box item ID. Only restores threads currently in Trash.",
 		},
 		Args: usageMinOneArg(),
 		RunE: restoreCommand.run,
