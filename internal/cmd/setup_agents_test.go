@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/harness"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -84,38 +85,32 @@ func TestSetupAgentsNoAgentsDetectedInstallsSkillOnly(t *testing.T) {
 	}
 }
 
-func TestSetupAgentsSingleDetectedAgentIsConnected(t *testing.T) {
-	data, response := runSetupAgents(t, "", ".codex")
-	if got := stringList(t, data["attempted_agents"]); len(got) != 1 || got[0] != "codex" {
-		t.Errorf("attempted = %v", got)
-	}
-	if got := stringList(t, data["errors"]); len(got) != 0 {
-		t.Errorf("errors = %v", got)
-	}
-	agents := data["agents"].([]any)
-	if len(agents) != 1 || agents[0].(map[string]any)["plugin_installed"] != true {
-		t.Errorf("agents = %v", agents)
-	}
-	if response.Summary != "Installed baseline skill; connected Codex" {
-		t.Errorf("summary = %q", response.Summary)
+// forEachSkillAgent runs a test once per shared-skill agent (Codex, Grok):
+// their setup is one code path, so their coverage is one test.
+func forEachSkillAgent(t *testing.T, test func(t *testing.T, agent harness.SkillAgent)) {
+	t.Helper()
+	for _, agent := range harness.SkillAgents() {
+		t.Run(agent.ID, func(t *testing.T) { test(t, agent) })
 	}
 }
 
-func TestSetupAgentsSingleDetectedGrokIsConnected(t *testing.T) {
-	data, response := runSetupAgents(t, "", ".grok")
-	if got := stringList(t, data["attempted_agents"]); len(got) != 1 || got[0] != "grok" {
-		t.Errorf("attempted = %v", got)
-	}
-	if got := stringList(t, data["errors"]); len(got) != 0 {
-		t.Errorf("errors = %v", got)
-	}
-	agents := data["agents"].([]any)
-	if len(agents) != 1 || agents[0].(map[string]any)["plugin_installed"] != true {
-		t.Errorf("agents = %v", agents)
-	}
-	if response.Summary != "Installed baseline skill; connected Grok" {
-		t.Errorf("summary = %q", response.Summary)
-	}
+func TestSetupAgentsSingleDetectedAgentIsConnected(t *testing.T) {
+	forEachSkillAgent(t, func(t *testing.T, agent harness.SkillAgent) {
+		data, response := runSetupAgents(t, "", agent.HomeDir)
+		if got := stringList(t, data["attempted_agents"]); len(got) != 1 || got[0] != agent.ID {
+			t.Errorf("attempted = %v", got)
+		}
+		if got := stringList(t, data["errors"]); len(got) != 0 {
+			t.Errorf("errors = %v", got)
+		}
+		agents := data["agents"].([]any)
+		if len(agents) != 1 || agents[0].(map[string]any)["plugin_installed"] != true {
+			t.Errorf("agents = %v", agents)
+		}
+		if response.Summary != "Installed baseline skill; connected "+agent.Name {
+			t.Errorf("summary = %q", response.Summary)
+		}
+	})
 }
 
 func TestSetupAgentsAmbiguousDetectionNeverGuesses(t *testing.T) {
@@ -215,48 +210,35 @@ func TestSetupAgentsInvalidSelectorWarns(t *testing.T) {
 }
 
 func TestSetupAgentCommandEnvelope(t *testing.T) {
-	isolateAgents(t)
-	home := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server := httptest.NewServer(http.NotFoundHandler())
-	defer server.Close()
+	forEachSkillAgent(t, func(t *testing.T, agent harness.SkillAgent) {
+		isolateAgents(t)
+		home := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(home, agent.HomeDir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		server := httptest.NewServer(http.NotFoundHandler())
+		defer server.Close()
 
-	_, response, err := runAuthCommand(t, home, server.URL, "", true, "setup", "codex")
-	if err != nil {
-		t.Fatalf("setup codex: %v", err)
-	}
-	data := response.Data.(map[string]any)
-	if data["agent_detected"] != true || data["plugin_installed"] != true {
-		t.Errorf("data = %v", data)
-	}
-	if response.Summary != "Codex connected" {
-		t.Errorf("summary = %q", response.Summary)
-	}
+		_, response, err := runAuthCommand(t, home, server.URL, "", true, "setup", agent.ID)
+		if err != nil {
+			t.Fatalf("setup %s: %v", agent.ID, err)
+		}
+		data := response.Data.(map[string]any)
+		if data["agent_detected"] != true || data["plugin_installed"] != true {
+			t.Errorf("data = %v", data)
+		}
+		if response.Summary != agent.Name+" connected" {
+			t.Errorf("summary = %q", response.Summary)
+		}
 
-	if err := os.MkdirAll(filepath.Join(home, ".grok"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	_, response, err = runAuthCommand(t, home, server.URL, "", true, "setup", "grok")
-	if err != nil {
-		t.Fatalf("setup grok: %v", err)
-	}
-	data = response.Data.(map[string]any)
-	if data["agent_detected"] != true || data["plugin_installed"] != true {
-		t.Errorf("grok data = %v", data)
-	}
-	if response.Summary != "Grok connected" {
-		t.Errorf("summary = %q", response.Summary)
-	}
-
-	// An explicitly requested integration that is not detected is a failed
-	// command: error envelope, nonzero exit.
-	_, _, err = runAuthCommand(t, home, server.URL, "", true, "setup", "claude")
-	var cliErr *apierr.Error
-	if !errors.As(err, &cliErr) || cliErr.Code != "setup_incomplete" || cliErr.Message != "Claude Code not detected" {
-		t.Fatalf("error = %v, want setup_incomplete/Claude Code not detected", err)
-	}
+		// An explicitly requested integration that is not detected is a failed
+		// command: error envelope, nonzero exit.
+		_, _, err = runAuthCommand(t, home, server.URL, "", true, "setup", "claude")
+		var cliErr *apierr.Error
+		if !errors.As(err, &cliErr) || cliErr.Code != "setup_incomplete" || cliErr.Message != "Claude Code not detected" {
+			t.Fatalf("error = %v, want setup_incomplete/Claude Code not detected", err)
+		}
+	})
 }
 
 func TestJoinNames(t *testing.T) {
@@ -313,40 +295,24 @@ func TestSetupAgentsPreservesUnmarkedBaselineSkill(t *testing.T) {
 	}
 }
 
-// `hey setup codex` on a machine without Codex must not create ~/.codex and
-// then count its own creation as detection.
-func TestSetupCodexDoesNotFabricateCodex(t *testing.T) {
-	isolateAgents(t)
-	home := t.TempDir()
-	server := httptest.NewServer(http.NotFoundHandler())
-	defer server.Close()
+// `hey setup <agent>` on a machine without the agent must not create its
+// home and then count its own creation as detection.
+func TestSetupSkillAgentDoesNotFabricateAgent(t *testing.T) {
+	forEachSkillAgent(t, func(t *testing.T, agent harness.SkillAgent) {
+		isolateAgents(t)
+		home := t.TempDir()
+		server := httptest.NewServer(http.NotFoundHandler())
+		defer server.Close()
 
-	_, _, err := runAuthCommand(t, home, server.URL, "", true, "setup", "codex")
-	var cliErr *apierr.Error
-	if !errors.As(err, &cliErr) || cliErr.Code != "setup_incomplete" || cliErr.Message != "Codex not detected" {
-		t.Fatalf("error = %v, want setup_incomplete/Codex not detected", err)
-	}
-	if _, err := os.Stat(filepath.Join(home, ".codex")); !os.IsNotExist(err) {
-		t.Error("~/.codex was fabricated")
-	}
-}
-
-// `hey setup grok` on a machine without Grok must not create ~/.grok and
-// then count its own creation as detection.
-func TestSetupGrokDoesNotFabricateGrok(t *testing.T) {
-	isolateAgents(t)
-	home := t.TempDir()
-	server := httptest.NewServer(http.NotFoundHandler())
-	defer server.Close()
-
-	_, _, err := runAuthCommand(t, home, server.URL, "", true, "setup", "grok")
-	var cliErr *apierr.Error
-	if !errors.As(err, &cliErr) || cliErr.Code != "setup_incomplete" || cliErr.Message != "Grok not detected" {
-		t.Fatalf("error = %v, want setup_incomplete/Grok not detected", err)
-	}
-	if _, err := os.Stat(filepath.Join(home, ".grok")); !os.IsNotExist(err) {
-		t.Error("~/.grok was fabricated")
-	}
+		_, _, err := runAuthCommand(t, home, server.URL, "", true, "setup", agent.ID)
+		var cliErr *apierr.Error
+		if !errors.As(err, &cliErr) || cliErr.Code != "setup_incomplete" || cliErr.Message != agent.Name+" not detected" {
+			t.Fatalf("error = %v, want setup_incomplete/%s not detected", err, agent.Name)
+		}
+		if _, err := os.Stat(filepath.Join(home, agent.HomeDir)); !os.IsNotExist(err) {
+			t.Errorf("~/%s was fabricated", agent.HomeDir)
+		}
+	})
 }
 
 // A styled `hey setup <agent>` that did not connect must say so and exit
@@ -659,8 +625,9 @@ func TestSetupAgentsRemoveDeletesManagedSkillsAndPreservesUserFiles(t *testing.T
 	if _, err := linkSkillToClaude(); err != nil {
 		t.Fatal(err)
 	}
-	legacy := filepath.Join(home, ".codex", "skills", "hey")
-	writeSkillFixture(t, legacy, "# legacy managed skill", true)
+	for _, agent := range harness.SkillAgents() {
+		writeSkillFixture(t, filepath.Join(home, agent.HomeDir, "skills", "hey"), "# legacy managed skill", true)
+	}
 	baseline := filepath.Join(home, ".agents", "skills", "hey")
 	if err := os.WriteFile(filepath.Join(baseline, "notes.txt"), []byte("keep me"), 0o600); err != nil {
 		t.Fatal(err)
@@ -678,6 +645,7 @@ func TestSetupAgentsRemoveDeletesManagedSkillsAndPreservesUserFiles(t *testing.T
 	for _, path := range []string{
 		filepath.Join(home, ".claude", "skills", "hey"),
 		filepath.Join(home, ".codex", "skills", "hey"),
+		filepath.Join(home, ".grok", "skills", "hey"),
 		filepath.Join(baseline, skillFilename),
 		filepath.Join(baseline, ownershipMarkerFile),
 	} {

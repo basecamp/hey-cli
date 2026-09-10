@@ -59,34 +59,29 @@ type agentSetupOutcome struct {
 	Issues  []agentIssue
 }
 
-// agentSetupHandlers maps agent ID → setup handler.
-var agentSetupHandlers = map[string]agentSetupHandler{
-	"claude": {
-		Labels: []string{
-			"Add the " + harness.ClaudeMarketplaceSource + " marketplace to Claude Code",
-			"Install the " + harness.ClaudeExpectedPluginKey + " plugin for Claude Code",
-			"Link the skill into ~/.claude/skills/hey",
+// agentSetupHandlers maps agent ID → setup handler. Claude Code's is written
+// out; every shared-skill agent's comes from the harness table.
+var agentSetupHandlers = agentSetupHandlersFor(harness.SkillAgents())
+
+func agentSetupHandlersFor(skillAgents []harness.SkillAgent) map[string]agentSetupHandler {
+	handlers := map[string]agentSetupHandler{
+		"claude": {
+			Labels: []string{
+				"Add the " + harness.ClaudeMarketplaceSource + " marketplace to Claude Code",
+				"Install the " + harness.ClaudeExpectedPluginKey + " plugin for Claude Code",
+				"Link the skill into ~/.claude/skills/hey",
+			},
+			Run:               runClaudeSetup,
+			RunNonInteractive: runClaudeSetupNonInteractive,
 		},
-		Run:               runClaudeSetup,
-		RunNonInteractive: runClaudeSetupNonInteractive,
-	},
-	"codex": {
-		Labels: []string{
-			"Install the shared HEY skill for Codex",
-		},
-		Run:               runCodexSetup,
-		RunNonInteractive: runCodexSetupNonInteractive,
-	},
-	"grok": {
-		Labels: []string{
-			"Install the shared HEY skill for Grok",
-		},
-		Run:               runGrokSetup,
-		RunNonInteractive: runGrokSetupNonInteractive,
-	},
+	}
+	for _, agent := range skillAgents {
+		handlers[agent.ID] = skillAgentSetupHandler(agent)
+	}
+	return handlers
 }
 
-// runAgentCommand is the subprocess seam for agent CLIs (claude, codex, grok) so
+// runAgentCommand is the subprocess seam for agent CLIs (claude, codex, …) so
 // tests never spawn a real one. Output is captured, not streamed: the wizard
 // prints its own status lines and surfaces the tool's output only on failure.
 var runAgentCommand = func(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -398,34 +393,48 @@ func agentCommandFailure(out []byte, err error) string {
 	return message
 }
 
-// --- Codex ---
+// --- Shared-skill agents (Codex, Grok) ---
 
-// runCodexSetup connects Codex to the shared agent skill.
-func runCodexSetup(cmd *cobra.Command) error {
-	w := cmd.OutOrStdout()
-	path, err := installCodexSkill()
-	if err != nil {
-		fmt.Fprintln(w, warning.format("Codex skill install failed: "+err.Error()))
-		fmt.Fprintln(w, "Then verify with: hey doctor")
-		return nil //nolint:nilerr // warn and continue; the post-setup snapshot reports the failure
+// skillAgentSetupHandler builds the handler for an agent that reads the
+// shared skill directly: hey has no plugin for it, so the one step is
+// confirming the shared skill and clearing any copy it once made.
+func skillAgentSetupHandler(agent harness.SkillAgent) agentSetupHandler {
+	return agentSetupHandler{
+		Labels: []string{
+			"Install the shared HEY skill for " + agent.Name,
+		},
+		// Interactive: print progress, warn and continue.
+		Run: func(cmd *cobra.Command) error {
+			w := cmd.OutOrStdout()
+			path, err := installSkillAgentSkill(agent)
+			if err != nil {
+				fmt.Fprintln(w, warning.format(agent.Name+" skill install failed: "+err.Error()))
+				fmt.Fprintln(w, "Then verify with: hey doctor")
+				return nil //nolint:nilerr // warn and continue; the post-setup snapshot reports the failure
+			}
+			fmt.Fprintln(w, statusLine(true, agent.Name+" skill installed ("+path+")"))
+			return nil
+		},
+		RunNonInteractive: func(*cobra.Command) error {
+			_, err := installSkillAgentSkill(agent)
+			return err
+		},
 	}
-	fmt.Fprintln(w, statusLine(true, "Codex skill installed ("+path+")"))
-	return nil
 }
 
-func runCodexSetupNonInteractive(*cobra.Command) error {
-	_, err := installCodexSkill()
-	return err
-}
-
-// installCodexSkill is the Codex handler's one step. The caller installs the
-// shared baseline first; this removes any older hey-cli-managed Codex copy so
-// Codex discovers only one skill. Like Claude, it never fabricates the agent.
-func installCodexSkill() (string, error) {
-	if !harness.DetectCodex() {
+// installSkillAgentSkill is a shared-skill agent's one step. The caller
+// installs the shared baseline first; this confirms it is healthy and
+// removes any older hey-cli-managed copy in the agent's own skills
+// directory so the agent discovers only one skill. Like Claude, it never
+// fabricates the agent: creating its home on a machine without it would
+// make every later detection — and this command's own verdict — report it
+// installed.
+func installSkillAgentSkill(agent harness.SkillAgent) (string, error) {
+	if !agent.Detect() {
+		setup := "hey setup " + agent.ID
 		return "", &agentSetupError{
-			Summary: "Codex not detected — install Codex, then run: hey setup codex",
-			Manual:  []string{"hey setup codex"},
+			Summary: agent.Name + " not detected — install " + agent.Name + ", then run: " + setup,
+			Manual:  []string{setup},
 		}
 	}
 	path := harness.AgentSkillPath()
@@ -435,49 +444,8 @@ func installCodexSkill() (string, error) {
 	if !baselineSkillInstalled() {
 		return "", fmt.Errorf("shared HEY skill is not installed")
 	}
-	if _, err := migrateLegacyCodexSkill(); err != nil {
+	if _, err := migrateLegacySkill(agent); err != nil {
 		return "", err
-	}
-	return path, nil
-}
-
-// --- Grok ---
-
-// runGrokSetup connects Grok to the shared agent skill.
-func runGrokSetup(cmd *cobra.Command) error {
-	w := cmd.OutOrStdout()
-	path, err := installGrokSkill()
-	if err != nil {
-		fmt.Fprintln(w, warning.format("Grok skill install failed: "+err.Error()))
-		fmt.Fprintln(w, "Then verify with: hey doctor")
-		return nil //nolint:nilerr // warn and continue; the post-setup snapshot reports the failure
-	}
-	fmt.Fprintln(w, statusLine(true, "Grok skill installed ("+path+")"))
-	return nil
-}
-
-func runGrokSetupNonInteractive(*cobra.Command) error {
-	_, err := installGrokSkill()
-	return err
-}
-
-// installGrokSkill is the Grok handler's one step. The caller installs the
-// shared baseline first, and Grok reads it from ~/.agents/skills directly,
-// so this only confirms the baseline is healthy. Like Claude, it never
-// fabricates the agent.
-func installGrokSkill() (string, error) {
-	if !harness.DetectGrok() {
-		return "", &agentSetupError{
-			Summary: "Grok not detected — install Grok, then run: hey setup grok",
-			Manual:  []string{"hey setup grok"},
-		}
-	}
-	path := harness.AgentSkillPath()
-	if path == "" {
-		return "", fmt.Errorf("cannot determine shared Agent Skills directory")
-	}
-	if !baselineSkillInstalled() {
-		return "", fmt.Errorf("shared HEY skill is not installed")
 	}
 	return path, nil
 }

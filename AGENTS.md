@@ -74,7 +74,13 @@ docs/omarchy.md.
 Coding-agent integration lives in `internal/harness` (agent registry, Claude Code / Codex / Grok
 detection, plugin and skill health checks) and `internal/cmd/setup_agent*.go` (`hey setup
 claude|codex|grok|agents`). Claude Code gets the `hey@37signals` plugin from `basecamp/claude-plugins`
-plus a skill link; Codex and Grok discover the shared `~/.agents` skill directly. `HEY_SETUP_AGENT`
+plus a skill link; Codex and Grok discover the shared `~/.agents` skill directly. Those two are
+rows of one table, `harness.SkillAgent` (name, id, home env var, home directory, binary), and
+everything in `internal/cmd` that touches them — setup handlers, `hey skill install`, refresh,
+`--remove`, the `HEY_SETUP_AGENT` values, the migration of a copy an older hey-cli made in the
+agent's own skills directory — loops over `harness.SkillAgents()` rather than naming either. A new
+shared-skill agent is a new row; the prose lists in `help_topics.go`, the installers and the docs
+are the places to update by hand. `HEY_SETUP_AGENT`
 selects the target for `hey setup agents`; `hey setup agents --remove` uninstalls the
 Claude plugin and removes only hey-cli-managed skill files. `hey doctor` reports per-agent diagnostics, and a
 `PersistentPostRunE` hook (`skill_refresh.go`) re-syncs installed skill copies once per release

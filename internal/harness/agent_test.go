@@ -3,7 +3,7 @@ package harness
 import "testing"
 
 // withCleanRegistry empties the registry for a test and restores the real
-// claude/codex/grok registrations from init() afterwards.
+// registrations from init() afterwards.
 func withCleanRegistry(t *testing.T) {
 	t.Helper()
 	registryMu.Lock()
@@ -76,14 +76,10 @@ func TestRegisterAgentPanicsOnBadIDs(t *testing.T) {
 	assertPanics("duplicate ID", func() { RegisterAgent(AgentInfo{ID: "dup", Name: "Second"}) })
 }
 
-func TestDefaultRegistryHasClaudeCodexAndGrok(t *testing.T) {
-	if FindAgent("claude") == nil {
-		t.Error("claude agent not registered")
-	}
-	if FindAgent("codex") == nil {
-		t.Error("codex agent not registered")
-	}
-	if FindAgent("grok") == nil {
-		t.Error("grok agent not registered")
+func TestDefaultRegistryHasEveryAgent(t *testing.T) {
+	for _, id := range []string{"claude", "codex", "grok"} {
+		if FindAgent(id) == nil {
+			t.Errorf("%s agent not registered", id)
+		}
 	}
 }
