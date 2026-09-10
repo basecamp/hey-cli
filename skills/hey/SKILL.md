@@ -19,6 +19,7 @@ triggers:
   - hey snippet
   - hey search
   - hey contact
+  - hey thread list
   - hey thread read
   - hey share
   - hey unshare
@@ -140,7 +141,7 @@ listing that found nothing.
 For the two commonest shapes there is no need for an expression at all: `--ids-only` prints
 one ID per line and `--count` prints a bare number, both on stdout with any pagination
 notice on stderr. Both need list data, so they work on `hey box list`, `hey box view`,
-`hey label list`, `hey label view`, `hey collection list`, `hey collection view`, `hey workflow list`,
+`hey thread list`, `hey label list`, `hey label view`, `hey collection list`, `hey collection view`, `hey workflow list`,
 `hey workflow view`, `hey clip list`, `hey snippet list`, `hey draft list`, `hey search`,
 `hey contact list`, `hey screener list`, `hey screener history`, `hey calendar list`,
 `hey event list`, `hey event day`, `hey event week`, `hey todo list`, `hey habit list`,
@@ -157,6 +158,10 @@ notice on stderr. Both need list data, so they work on `hey box list`, `hey box 
 | Trust this repository's settings | `hey config trust-local` (requires explicit user approval) |
 | List mailboxes | `hey box list --json` |
 | List emails in a box | `hey box view imbox --json` |
+| List sent threads | `hey thread list --in sent --json` |
+| List spam threads | `hey thread list --in spam --json` |
+| List trashed threads | `hey thread list --in trash --json` |
+| List every thread | `hey thread list --in everything --json` |
 | List labels | `hey label list --json` |
 | List emails with a label | `hey label view <label_id> --all --json` |
 | Add a label to a thread | `hey label add <id> --to <label_id>` |
@@ -267,6 +272,7 @@ notice on stderr. Both need list data, so they work on `hey box list`, `hey box 
 Want to read email?
 ├── Which mailbox? → hey box list --json
 ├── List emails in box? → hey box view <name|id> --json
+├── List sent, spam, trash, or every thread? → hey thread list --in sent|spam|trash|everything --json
 ├── List labels or labeled email? → hey label list --json / hey label view <label_id> --json
 ├── Add, create, or remove a label? → hey label add|create|remove
 ├── List collections or collection threads? → hey collection list --json / hey collection view <collection_id> --json
@@ -432,11 +438,23 @@ HEY hides contacts instead of permanently deleting them. A hidden contact leaves
 ### Email - Threads
 
 ```bash
+hey thread list --in sent --json                   # List sent threads
+hey thread list --in spam --json                   # List threads in Spam
+hey thread list --in trash --json                  # List threads in Trash
+hey thread list --in everything --all --json       # List every thread
+hey thread list --in sent --page <next_page> --json # Continue with the returned cursor
 hey thread read <topic_id> --json                 # Read full email thread
 hey thread read <topic_id> --html                 # Read with raw HTML content
 hey share <thread_id>                         # Get a sharing link
 hey unshare <thread_id>                       # Turn off the sharing link
 ```
+
+`hey thread list` is read-only. It lists HEY's Sent, Spam, Trash, or Everything view and
+returns an array of topics. Each JSON row has `topic_id`; both `id` and `topic_id` on
+these rows are thread IDs, not the box item IDs that organization commands take. Use
+`--limit` to cap results, `--all` to follow up to 100 pages, or `--page <next_page>` to
+continue an earlier listing of the same view. The cursor is opaque; never invent a page
+number.
 
 `hey thread read` returns every entry in the thread, oldest first. Each entry's `body` is
 **Markdown**, converted from HEY's Trix HTML at the edge, so headings, lists, quotes,
@@ -446,9 +464,9 @@ on an entry; use `hey reply`, which works the addressing out itself.
 
 `hey share` returns a URL that shows the entire thread and future emails or replies sent to it. Anyone with the link can open it. `hey unshare` turns off the sharing link.
 
-**ID note:** Every email thread has two IDs: an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring` expect `id`. `hey thread read`, `hey share`, `hey unshare`, `hey attachment list`, `hey reply`, `hey forward`, `hey collection add`, and `hey collection remove` expect `topic_id`. Passing the wrong one answers `not_found`, not a redirect.
+**ID note:** A thread listed through a box, label, collection, or search normally has two IDs: an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring` expect the box item `id`. `hey thread read`, `hey share`, `hey unshare`, `hey attachment list`, `hey reply`, `hey forward`, `hey collection add`, and `hey collection remove` expect `topic_id`. A `hey thread list` row comes directly from a topic, so its `id` is also a thread ID and `topic_id` repeats it explicitly. Passing a box item ID where a thread ID is expected, or the reverse, answers `not_found`, not a redirect.
 
-`hey box view --json`, `hey label view --json`, `hey collection view --json` and `hey search --json` all carry both — except a bundle posting, which can omit `topic_id` (see the Boxes section).
+`hey thread list --json`, `hey box view --json`, `hey label view --json`, `hey collection view --json` and `hey search --json` all carry `topic_id`; a bundle posting can omit it (see the Boxes section).
 
 ### Email - Attachments
 

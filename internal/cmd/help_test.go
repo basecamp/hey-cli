@@ -107,7 +107,7 @@ USAGE
 CORE COMMANDS
   tui       Launch the interactive terminal UI
   box       List HEY boxes and their email threads
-  thread    Read email threads
+  thread    List and read email threads
   reply     Reply to a thread
   compose   Write and send a new email
   search    Search email threads and messages

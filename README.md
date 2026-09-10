@@ -64,6 +64,7 @@ screen a moment later.
 
 ```bash
 hey box view imbox                      # threads in a box
+hey thread list --in sent               # sent threads; also spam, trash, or everything
 hey thread read 12345                   # a whole thread, as Markdown
 hey reply 12345 -m "Friday works for me."
 hey compose --to alice@example.com --subject "Lunch?" -m "Thursday at noon?"
