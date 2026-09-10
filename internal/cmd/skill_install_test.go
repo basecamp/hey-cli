@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/basecamp/hey-cli/internal/harness"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -206,28 +207,32 @@ func TestSkillInstallPreservesUnmanagedLegacyCodexSkill(t *testing.T) {
 	}
 }
 
-func TestCodexMigrationPreservesLegacySkillWithoutSharedBaseline(t *testing.T) {
-	home := agentHome(t, ".codex")
-	legacy := filepath.Join(home, ".codex", "skills", "hey")
-	writeSkillFixture(t, legacy, "# only working skill", true)
+func TestSkillAgentMigrationPreservesLegacySkillWithoutSharedBaseline(t *testing.T) {
+	forEachSkillAgent(t, func(t *testing.T, agent harness.SkillAgent) {
+		home := agentHome(t, agent.HomeDir)
+		legacy := filepath.Join(home, agent.HomeDir, "skills", "hey")
+		writeSkillFixture(t, legacy, "# only working skill", true)
 
-	if _, err := installCodexSkill(); err == nil || !strings.Contains(err.Error(), "shared HEY skill is not installed") {
-		t.Fatalf("installCodexSkill error = %v", err)
-	}
-	if got, err := os.ReadFile(filepath.Join(legacy, skillFilename)); err != nil || string(got) != "# only working skill" {
-		t.Fatalf("legacy-only skill changed: %q, %v", got, err)
-	}
+		if _, err := installSkillAgentSkill(agent); err == nil || !strings.Contains(err.Error(), "shared HEY skill is not installed") {
+			t.Fatalf("installSkillAgentSkill error = %v", err)
+		}
+		if got, err := os.ReadFile(filepath.Join(legacy, skillFilename)); err != nil || string(got) != "# only working skill" {
+			t.Fatalf("legacy-only skill changed: %q, %v", got, err)
+		}
+	})
 }
 
-func TestCodexInstallReportsMissingSharedAgentSkillsHome(t *testing.T) {
-	t.Setenv("HOME", "")
-	t.Setenv("USERPROFILE", "")
-	t.Setenv("CODEX_HOME", t.TempDir())
-	t.Setenv("PATH", t.TempDir())
+func TestSkillAgentInstallReportsMissingSharedAgentSkillsHome(t *testing.T) {
+	forEachSkillAgent(t, func(t *testing.T, agent harness.SkillAgent) {
+		t.Setenv("HOME", "")
+		t.Setenv("USERPROFILE", "")
+		t.Setenv(agent.HomeEnv, t.TempDir())
+		t.Setenv("PATH", t.TempDir())
 
-	if _, err := installCodexSkill(); err == nil || err.Error() != "cannot determine shared Agent Skills directory" {
-		t.Fatalf("installCodexSkill error = %v", err)
-	}
+		if _, err := installSkillAgentSkill(agent); err == nil || err.Error() != "cannot determine shared Agent Skills directory" {
+			t.Fatalf("installSkillAgentSkill error = %v", err)
+		}
+	})
 }
 
 func TestSkillInstallFailurePreservesManagedLegacyCodexSkill(t *testing.T) {

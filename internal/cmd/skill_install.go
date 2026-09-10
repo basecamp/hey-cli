@@ -116,12 +116,14 @@ func runSkillInstall(cmd *cobra.Command, args []string) error {
 
 	// Once the shared replacement is installed, remove a managed legacy copy
 	// before optional agent-specific setup. A later Claude failure must not
-	// leave Codex discovering both copies.
-	if removed, cleanupErr := migrateLegacyCodexSkill(); cleanupErr != nil {
-		return apierr.ErrAPI(0, cleanupErr.Error())
-	} else if removed {
-		result["removed_legacy_codex_skill"] = "true"
-		lines = append(lines, "Removed the redundant managed Codex skill copy")
+	// leave an agent discovering both copies.
+	for _, agent := range harness.SkillAgents() {
+		if removed, cleanupErr := migrateLegacySkill(agent); cleanupErr != nil {
+			return apierr.ErrAPI(0, cleanupErr.Error())
+		} else if removed {
+			result["removed_legacy_"+agent.ID+"_skill"] = "true"
+			lines = append(lines, "Removed the redundant managed "+agent.Name+" skill copy")
+		}
 	}
 
 	if harness.DetectClaude() {
@@ -290,28 +292,29 @@ func isManagedSkillCopy(path string) bool {
 	return sawMarker
 }
 
-// removeLegacyCodexSkill removes only the redundant Codex-specific copy
-// written by an older hey-cli. An unmarked directory is user-owned and stays
-// untouched; Codex will continue to discover it alongside the shared skill.
-func removeLegacyCodexSkill() (bool, error) {
-	skillPath := harness.LegacyCodexSkillPath()
+// removeLegacySkill removes only the redundant agent-specific copy written
+// by an older hey-cli. An unmarked directory is user-owned and stays
+// untouched; the agent will continue to discover it alongside the shared
+// skill.
+func removeLegacySkill(agent harness.SkillAgent) (bool, error) {
+	skillPath := agent.LegacySkillPath()
 	if skillPath == "" {
 		return false, nil
 	}
 	return removeOwnedSkillFiles(filepath.Dir(skillPath))
 }
 
-// migrateLegacyCodexSkill removes the old Codex-specific copy only after the
-// shared skill is known healthy. Until then the legacy copy may be the user's
-// only working Codex integration and must remain available.
-func migrateLegacyCodexSkill() (bool, error) {
+// migrateLegacySkill removes the old agent-specific copy only after the
+// shared skill is known healthy. Until then the legacy copy may be the
+// user's only working integration and must remain available.
+func migrateLegacySkill(agent harness.SkillAgent) (bool, error) {
 	if !baselineSkillInstalled() {
 		return false, nil
 	}
-	if harness.SameFile(harness.AgentSkillPath(), harness.LegacyCodexSkillPath()) {
+	if harness.SameFile(harness.AgentSkillPath(), agent.LegacySkillPath()) {
 		return false, nil
 	}
-	return removeLegacyCodexSkill()
+	return removeLegacySkill(agent)
 }
 
 // baselineSkillInstalled reports whether ~/.agents/skills/hey/SKILL.md is a

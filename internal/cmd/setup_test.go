@@ -755,7 +755,7 @@ func TestSetupRepeatMigratesManagedLegacyCodexSkill(t *testing.T) {
 
 	legacy := filepath.Join(home, ".codex", "skills", "hey")
 	writeSkillFixture(t, legacy, "# managed legacy duplicate", true)
-	if check := harness.CheckCodexSkill(); check.Status != "fail" {
+	if check := harness.Codex.CheckSkill(); check.Status != "fail" {
 		t.Fatalf("preflight did not notice managed duplicate: %+v", check)
 	}
 

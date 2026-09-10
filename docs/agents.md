@@ -29,10 +29,10 @@ run hey under a pseudo-terminal. The installed skill is refreshed automatically 
 time a new hey release runs.
 
 Codex and Grok discover the shared `~/.agents/skills/hey` skill directly. hey-cli does
-not also copy it into their own skills directories (`~/.codex/skills/hey`, `~/.grok/skills/hey`),
-which would make an agent list the same skill twice. Setup and version refresh remove the
-legacy Codex copy only when its ownership marker proves an older hey-cli created it;
-user-authored files are left untouched.
+not also copy it into their own skills directories (`~/.codex/skills/hey`, `~/.grok/skills/hey`):
+Codex would list the same skill twice, and either would be a second copy to keep current.
+Setup, `hey skill install` and version refresh remove such a copy only when its ownership
+marker proves an older hey-cli created it; user-authored files are left untouched.
 
 hey only ever writes skill directories it owns: each one it creates carries a
 `.managed-by-hey-cli` marker, and install, replacement and automatic refresh all refuse a

@@ -7,10 +7,14 @@ import (
 
 // AgentInfo describes a coding agent integration.
 type AgentInfo struct {
-	Name   string                // "Claude Code", "Codex", "Grok"
+	Name   string                // "Claude Code"
 	ID     string                // "claude"
 	Detect func() bool           // reports whether the agent is installed
 	Checks func() []*StatusCheck // cheap health checks gating setup wizard behavior
+
+	// FindBinary returns the path to the agent's executable, or "" when it
+	// is not on disk. Nil means the agent has no executable to look for.
+	FindBinary func() string
 
 	// Diagnostics returns the full doctor check suite, including checks that
 	// are too slow or noisy for the wizard (e.g. version comparisons).
