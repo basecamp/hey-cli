@@ -237,11 +237,6 @@ func (p *dateTimePicker) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			p.shiftDate(days)
 			return nil
 		}
-		// "-" cannot appear in a YYYY-MM-DD date, so swallow it here
-		// instead of letting it through to the text input (hey-cli#368)
-		if msg.String() == "-" {
-			return nil
-		}
 		var cmd tea.Cmd
 		p.dateInput, cmd = p.dateInput.Update(msg)
 		return cmd
@@ -260,14 +255,15 @@ func (p *dateTimePicker) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 }
 
-// dateStep is the day-at-a-time keys. Both pairs are here because neither means anything
-// else on a date field: the arrows are unbound in a single-line text input, and a + or a -
-// cannot appear in YYYY-MM-DD, so typing one is only ever a step.
+// dateStep is the day-at-a-time keys. The arrows are unbound in a single-line text input,
+// and a + cannot appear in YYYY-MM-DD, so typing one is only ever a step. A - is the date's
+// own separator, so it is typed into the field like any other character (hey-cli#368).
 func dateStep(msg tea.KeyPressMsg) (days int, stepped bool) {
 	switch msg.Key().Code {
 	case tea.KeyUp:
 		return 1, true
 	case tea.KeyDown:
+		return -1, true
 	}
 	switch msg.String() {
 	case "+", "=":

@@ -68,21 +68,32 @@ func TestDateTimePickerStepsTheDateByADay(t *testing.T) {
 		t.Errorf("after up, date() = %q, want 2026-08-23", got)
 	}
 
-	// "-" no longer steps date (hey-cli#368)
-	typeInto(t, picker, "-")
-	if got := picker.date(); got != "2026-08-23" {
-		t.Errorf("after -, date() = %q, want unchanged", got)
+	picker.handleKey(tea.KeyPressMsg{Code: tea.KeyDown})
+	picker.handleKey(tea.KeyPressMsg{Code: tea.KeyDown})
+	if got := picker.date(); got != "2026-08-21" {
+		t.Errorf("after two downs, date() = %q, want 2026-08-21", got)
 	}
 
 	typeInto(t, picker, "+")
-	if got := picker.date(); got != "2026-08-24" {
-		t.Errorf("after +, date() = %q, want 2026-08-24", got)
+	if got := picker.date(); got != "2026-08-22" {
+		t.Errorf("after +, date() = %q, want 2026-08-22", got)
 	}
 
 	picker.dateInput.SetValue("next tuesday")
 	picker.handleKey(tea.KeyPressMsg{Code: tea.KeyUp})
 	if got := picker.date(); got != "next tuesday" {
 		t.Errorf("stepping an unreadable date changed it to %q", got)
+	}
+}
+
+func TestDateTimePickerTypesTheDateSeparator(t *testing.T) {
+	picker := testPicker()
+	picker.focusFirst()
+	picker.dateInput.SetValue("2026-08")
+
+	typeInto(t, picker, "-22")
+	if got := picker.date(); got != "2026-08-22" {
+		t.Errorf("after typing -22, date() = %q, want 2026-08-22", got)
 	}
 }
 
