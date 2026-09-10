@@ -67,9 +67,9 @@ func (m model) toastView() string {
 		border, text = colorError, lipgloss.NewStyle().Foreground(colorError)
 	}
 
-	// A toast is over the content, so it can never be wider than half the screen: the
+	// A toast is over the content, so it can never be wider than half the content: the
 	// reader is looking at what they were doing, not at this.
-	body := truncateToWidth(terminal.SanitizeLine(m.toast.text), max(m.width/2-4, 10))
+	body := truncateToWidth(terminal.SanitizeLine(m.toast.text), max(m.contentWidth()/2-4, 10))
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(border).

@@ -103,6 +103,39 @@ func TestHeyTuiOpensTUIWhenAuthenticated(t *testing.T) {
 	}
 }
 
+func TestHeyTuiSelectsAnInitialLayout(t *testing.T) {
+	isolateAgents(t)
+	server := quietServer(t)
+	original := runTUI
+	var options tui.Options
+	runTUI = func(_ *hey.Client, _ *hey.Client, _ string, _ tui.Watchers, got tui.Options) error {
+		options = got
+		return nil
+	}
+	t.Cleanup(func() { runTUI = original })
+
+	if _, _, err := runAuthCommand(t, t.TempDir(), server.URL, "environment-token", false, "tui", "spacious"); err != nil {
+		t.Fatalf("hey tui spacious: %v", err)
+	}
+	if options.Layout != tui.LayoutSpacious {
+		t.Errorf("initial layout = %q, want spacious", options.Layout)
+	}
+}
+
+func TestHeyTuiRejectsAnUnknownLayout(t *testing.T) {
+	isolateAgents(t)
+	server := quietServer(t)
+	calls := stubRunTUI(t)
+
+	_, _, err := runAuthCommand(t, t.TempDir(), server.URL, "environment-token", false, "tui", "roomy")
+	if err == nil || !strings.Contains(err.Error(), "layout must be classic or spacious") {
+		t.Fatalf("hey tui roomy error = %v", err)
+	}
+	if *calls != 0 {
+		t.Errorf("unknown layout launched the TUI %d times", *calls)
+	}
+}
+
 func TestHeyTuiTopicStartsAtTheRequestedThread(t *testing.T) {
 	isolateAgents(t)
 	server := quietServer(t)
@@ -209,6 +242,8 @@ func TestHeyTuiRemoteRequiresOneDestination(t *testing.T) {
 		{args: []string{"tui", "--topic", "5511", "--screener"}, want: "--topic and --screener cannot be used together"},
 		{args: []string{"tui", "--topic-title", "Lunch on Thursday?"}, want: "--topic-title requires --topic"},
 		{args: []string{"tui", "--screener", "--topic-title", "Lunch on Thursday?"}, want: "--topic-title requires --topic"},
+		{args: []string{"tui", "--remote", "--topic", "5511", "spacious"}, want: "a layout cannot be selected when opening an existing TUI with --remote"},
+		{args: []string{"tui", "--remote", "--screener", "classic"}, want: "a layout cannot be selected when opening an existing TUI with --remote"},
 	} {
 		_, _, err := runAuthCommand(t, t.TempDir(), server.URL, "environment-token", false, test.args...)
 		if err == nil || !strings.Contains(err.Error(), test.want) {
