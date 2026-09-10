@@ -76,12 +76,15 @@ func tuiRuntimeDir() (string, error) {
 		return ensurePrivateDirectory(filepath.Join(runtimeDir, tuiRuntimeDirname))
 	}
 
-	tempDir := os.TempDir()
+	tempDir, err := filepath.EvalSymlinks(os.TempDir())
+	if err != nil {
+		return "", fmt.Errorf("inspect temporary directory: %w", err)
+	}
 	info, err := os.Lstat(tempDir)
 	if err != nil {
 		return "", fmt.Errorf("inspect temporary directory: %w", err)
 	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+	if !info.IsDir() {
 		return "", fmt.Errorf("temporary directory is not a directory")
 	}
 	if info.Mode().Perm()&0o022 != 0 && info.Mode()&os.ModeSticky == 0 {
