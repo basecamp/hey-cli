@@ -47,8 +47,7 @@ func (c *threadCommentCommand) run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	message := strings.TrimSpace(c.message)
-	if message == "" {
+	if strings.TrimSpace(c.message) == "" {
 		return apierr.ErrUsage("--message is required")
 	}
 
@@ -61,7 +60,7 @@ func (c *threadCommentCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	values := url.Values{}
-	values.Set("comment[content]", message)
+	values.Set("comment[content]", c.message)
 	path := fmt.Sprintf("/topics/%d/comments?account_id=%d", threadID, topic.AccountId)
 	if _, err := rootSDK.PostForm(cmd.Context(), path, values); err != nil {
 		return apierr.FromSDK(err)

@@ -70,13 +70,15 @@ func TestThreadCommentPostsPlainTextNote(t *testing.T) {
 }
 
 func TestThreadCommentSendsMarkdownLookingTextVerbatim(t *testing.T) {
-	handler, sent := threadCommentServer(t)
-	_, err := runJSONCommand(t, handler, "thread", "comment", "42", "-m", "**Not** converted, _as-is_.")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if sent.Content != "**Not** converted, _as-is_." {
-		t.Errorf("content = %q, want the Markdown-looking text sent verbatim", sent.Content)
+	for _, message := range []string{"**Not** converted, _as-is_.", "  indented, with a trailing newline\n"} {
+		handler, sent := threadCommentServer(t)
+		_, err := runJSONCommand(t, handler, "thread", "comment", "42", "-m", message)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sent.Content != message {
+			t.Errorf("content = %q, want %q sent verbatim", sent.Content, message)
+		}
 	}
 }
 

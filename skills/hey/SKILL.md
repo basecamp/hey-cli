@@ -491,7 +491,8 @@ A reply HEY cannot address is saved as a draft rather than sent, so the command 
 rather than guessing when it cannot work out the recipients.
 
 Everything you send is Markdown by default — `-m`, `--content`, `--note`, positional
-content, stdin, and `$EDITOR` alike — and is converted to rich text on the way out. To
+content, stdin, and `$EDITOR` alike — and is converted to rich text on the way out. The one
+exception is `hey thread comment`, whose `-m` is posted exactly as typed. To
 send raw HTML instead, use the flag's HTML twin: `--message-html` on `compose`, `reply`,
 `forward`, and `bulk-reply send`; `--content-html` on `journal write` and
 `snippet create`/`update`; `--note-html` on `contacts note set`. Each pair is mutually
