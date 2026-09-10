@@ -15,7 +15,7 @@ setup() {
   cat > .pre-commit-config.yaml <<'YAML'
 repos:
   - repo: https://github.com/golangci/golangci-lint
-    rev: v2.11.1
+    rev: v2.13.1
     hooks:
       - id: golangci-lint
 YAML
@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: golangci/golangci-lint-action@abc # v9.3.0
         with:
-          version: v2.11.1
+          version: v2.13.1
       - run: scripts/check-release-lockstep.sh
 YAML
   cat > .github/workflows/security.yml <<'YAML'
@@ -40,7 +40,7 @@ jobs:
     steps:
       - uses: golangci/golangci-lint-action@abc # v9.3.0
         with:
-          version: v2.11.1
+          version: v2.13.1
           install-only: true
       - run: scripts/publish.sh
   release:
@@ -63,7 +63,7 @@ teardown() {
   run scripts/check-release-lockstep.sh
   [ "$status" -eq 0 ]
   [[ "$output" == *"goreleaser pin in lockstep (v2.15.4)"* ]]
-  [[ "$output" == *"pre-commit golangci-lint rev in lockstep (v2.11.1)"* ]]
+  [[ "$output" == *"pre-commit golangci-lint rev in lockstep (v2.13.1)"* ]]
   [[ "$output" == *"gosec pin in lockstep (v2.28.0)"* ]]
   [[ "$output" == *"release lockstep check passed"* ]]
 }
@@ -78,7 +78,7 @@ teardown() {
 }
 
 @test "fails when the pre-commit golangci-lint rev drifts from CI" {
-  sed -i.bak 's/rev: v2.11.1/rev: v2.1.6/' .pre-commit-config.yaml && rm -f .pre-commit-config.yaml.bak
+  sed -i.bak 's/rev: v2.13.1/rev: v2.1.6/' .pre-commit-config.yaml && rm -f .pre-commit-config.yaml.bak
   run scripts/check-release-lockstep.sh
   [ "$status" -eq 1 ]
   [[ "$output" == *"golangci-lint pins disagree"* ]]
@@ -86,7 +86,7 @@ teardown() {
 }
 
 @test "inherits the golangci-lint workflow lockstep failure" {
-  sed -i.bak 's/version: v2.11.1/version: v2.9.0/' .github/workflows/release.yml && rm -f .github/workflows/release.yml.bak
+  sed -i.bak 's/version: v2.13.1/version: v2.9.0/' .github/workflows/release.yml && rm -f .github/workflows/release.yml.bak
   run scripts/check-release-lockstep.sh
   [ "$status" -eq 1 ]
   [[ "$output" == *"golangci-lint pins disagree across workflows"* ]]
