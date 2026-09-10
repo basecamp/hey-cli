@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	"github.com/spf13/cobra"
 )
 
@@ -59,6 +60,19 @@ func TestValidateBoxArgs(t *testing.T) {
 	}
 }
 
+func TestBoxViewHelpUsesMixedItemTerminology(t *testing.T) {
+	command := newBoxViewCommand().cmd
+	if command.Short != "List email and HEY World items in a box" {
+		t.Errorf("short help = %q", command.Short)
+	}
+	if usage := command.Flags().Lookup("limit").Usage; usage != "Maximum number of items to show" {
+		t.Errorf("--limit help = %q", usage)
+	}
+	if notes := command.Annotations["agent_notes"]; !strings.Contains(notes, "world/post") {
+		t.Errorf("agent notes omit the World-post boundary: %q", notes)
+	}
+}
+
 func TestBoxCommandNamedRoutes(t *testing.T) {
 	tests := []struct {
 		name string
@@ -91,7 +105,7 @@ func TestBoxCommandNamedRoutes(t *testing.T) {
 			if requests.Load() != 1 {
 				t.Errorf("requests = %d, want one named lookup", requests.Load())
 			}
-			if response.Summary != "0 threads in "+tt.name {
+			if response.Summary != "0 emails in "+tt.name {
 				t.Errorf("summary = %q", response.Summary)
 			}
 		})
@@ -111,7 +125,7 @@ func TestBoxCommandNumericIDAndLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute box: %v", err)
 	}
-	if response.Summary != "1 thread in Receipts" {
+	if response.Summary != "1 email in Receipts" {
 		t.Errorf("summary = %q", response.Summary)
 	}
 	if response.Notice != "Showing 1 of 2 results. Use --all to see everything." {
@@ -149,7 +163,7 @@ func TestBoxCommandUnknownNameFallsBackToList(t *testing.T) {
 	if got, want := fmt.Sprint(requests), "[GET /boxes.json GET /boxes/17.json]"; got != want {
 		t.Errorf("requests = %s, want %s", got, want)
 	}
-	if response.Summary != "0 threads in Receipts" {
+	if response.Summary != "0 emails in Receipts" {
 		t.Errorf("summary = %q", response.Summary)
 	}
 }
@@ -195,7 +209,7 @@ func TestBoxCommandFollowsPagesOnTheNamedRoute(t *testing.T) {
 	if got := fmt.Sprint(requests); got != want {
 		t.Errorf("requests = %s, want %s", got, want)
 	}
-	if response.Summary != "2 threads in The Feed" {
+	if response.Summary != "2 emails in The Feed" {
 		t.Errorf("summary = %q", response.Summary)
 	}
 }
@@ -241,7 +255,7 @@ func TestBoxCommandFollowsPagesForACustomBox(t *testing.T) {
 	if got := fmt.Sprint(requests); got != want {
 		t.Errorf("requests = %s, want %s", got, want)
 	}
-	if response.Summary != "2 threads in Receipts" {
+	if response.Summary != "2 emails in Receipts" {
 		t.Errorf("summary = %q", response.Summary)
 	}
 	data, _ := response.Data.(map[string]any)
@@ -288,7 +302,7 @@ func TestBoxCommandStopsAtAnEmptyPage(t *testing.T) {
 	if requests.Load() != 2 {
 		t.Errorf("requests = %d, want two", requests.Load())
 	}
-	if response.Summary != "1 thread in Imbox" || response.Notice != "" {
+	if response.Summary != "1 email in Imbox" || response.Notice != "" {
 		t.Errorf("summary = %q notice = %q", response.Summary, response.Notice)
 	}
 }
@@ -309,16 +323,82 @@ func TestBoxSummaryUsesThreadTerminology(t *testing.T) {
 		count int
 		want  string
 	}{
-		{"one thread", 1, "1 thread in Imbox"},
-		{"multiple threads", 2, "2 threads in Imbox"},
+		{name: "one thread", count: 1, want: "1 thread in Imbox"},
+		{name: "multiple threads", count: 2, want: "2 threads in Imbox"},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := boxSummary(tt.count, "Imbox"); got != tt.want {
-				t.Errorf("boxSummary(%d) = %q, want %q", tt.count, got, tt.want)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := boxSummary(test.count, "Imbox"); got != test.want {
+				t.Errorf("boxSummary(%d) = %q, want %q", test.count, got, test.want)
 			}
 		})
+	}
+}
+
+func TestBoxPostingCountsAndSummary(t *testing.T) {
+	postings := make([]generated.Posting, 2944)
+	for i := range postings {
+		postings[i] = generated.Posting{Id: int64(i + 1), Kind: "topic"}
+	}
+	for i := 0; i < 21; i++ {
+		postings = append(postings, generated.Posting{Id: int64(3000 + i), Kind: "world/post"})
+	}
+
+	counts := countBoxPostings(postings)
+	if counts.postings != 2965 || counts.emails != 2944 || counts.worldPosts != 21 {
+		t.Fatalf("counts = %+v", counts)
+	}
+	if got := counts.summary("Imbox"); got != "2,944 emails and 21 HEY World posts in Imbox" {
+		t.Errorf("summary = %q", got)
+	}
+}
+
+func TestBoxMixedPostingKindsJSONContract(t *testing.T) {
+	resp, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/imbox.json" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id": 1,
+			"kind": "imbox",
+			"name": "Imbox",
+			"postings": [
+				{"id": 101, "kind": "topic", "summary": "Project update"},
+				{"id": 102, "kind": "world/post", "summary": "Published note"}
+			]
+		}`))
+	}), "box", "view", "imbox")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if resp.Summary != "1 email and 1 HEY World post in Imbox" {
+		t.Errorf("summary = %q", resp.Summary)
+	}
+	if got := resp.Meta["posting_count"]; got != float64(2) {
+		t.Errorf("posting_count = %v, want 2", got)
+	}
+	if got := resp.Meta["email_count"]; got != float64(1) {
+		t.Errorf("email_count = %v, want 1", got)
+	}
+	if got := resp.Meta["world_post_count"]; got != float64(1) {
+		t.Errorf("world_post_count = %v, want 1", got)
+	}
+
+	data, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("data type = %T, want map[string]any", resp.Data)
+	}
+	postings, ok := data["postings"].([]any)
+	if !ok || len(postings) != 2 {
+		t.Fatalf("postings = %#v, want 2 entries", data["postings"])
+	}
+	first, _ := postings[0].(map[string]any)
+	second, _ := postings[1].(map[string]any)
+	if first["kind"] != "topic" || second["kind"] != "world/post" {
+		t.Errorf("posting kinds = %q, %q", first["kind"], second["kind"])
 	}
 }
 
@@ -416,7 +496,7 @@ func TestBoxCommandContinuesFromAPageCursor(t *testing.T) {
 		if err != nil {
 			t.Fatalf("execute box --page %s: %v", page, err)
 		}
-		if response.Summary != "1 thread in Imbox" {
+		if response.Summary != "1 email in Imbox" {
 			t.Errorf("summary = %q", response.Summary)
 		}
 	}
@@ -452,7 +532,7 @@ func TestBoxCommandOutputFormats(t *testing.T) {
 	if err != nil {
 		t.Fatalf("styled box: %v", err)
 	}
-	for _, want := range []string{"Box: Imbox (imbox)", "Thread", "Jane Doe", "Studio invoice", "101", "501"} {
+	for _, want := range []string{"Box: Imbox (imbox)", "Thread", "Jane Doe", "Studio invoice", "101", "501", "2 emails in Imbox."} {
 		if !strings.Contains(styled, want) {
 			t.Errorf("styled output %q does not contain %q", styled, want)
 		}

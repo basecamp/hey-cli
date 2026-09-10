@@ -63,7 +63,7 @@ screen a moment later.
 ## Using the CLI
 
 ```bash
-hey box view imbox                      # threads in a box
+hey box view imbox                      # email and HEY World items in a box
 hey thread read 12345                   # a whole thread, as Markdown
 hey reply 12345 -m "Friday works for me."
 hey compose --to alice@example.com --subject "Lunch?" -m "Thursday at noon?"
@@ -78,7 +78,7 @@ Piped, a command that returns data writes JSON, and `--jq` filters it without a 
 `jq`:
 
 ```bash
-hey box view imbox --jq '.data.postings[] | {topic_id, subject}'
+hey box view imbox --jq '.data.postings[] | {id, kind, topic_id, subject}'
 hey label view 789 --ids-only           # one ID per line, for xargs
 ```
 

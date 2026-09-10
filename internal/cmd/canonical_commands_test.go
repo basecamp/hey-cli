@@ -116,7 +116,7 @@ func TestBoxListIsReservedAndViewStillOpensABoxNamedList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if viewed.Summary != "0 threads in list" {
+	if viewed.Summary != "0 emails in list" {
 		t.Errorf("box view list summary = %q", viewed.Summary)
 	}
 
