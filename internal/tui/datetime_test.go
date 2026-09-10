@@ -86,6 +86,17 @@ func TestDateTimePickerStepsTheDateByADay(t *testing.T) {
 	}
 }
 
+func TestDateTimePickerTypesTheDateSeparator(t *testing.T) {
+	picker := testPicker()
+	picker.focusFirst()
+	picker.dateInput.SetValue("2026-08")
+
+	typeInto(t, picker, "-22")
+	if got := picker.date(); got != "2026-08-22" {
+		t.Errorf("after typing -22, date() = %q, want 2026-08-22", got)
+	}
+}
+
 func TestDateTimePickerAllDayHidesTheTimeAndTheZone(t *testing.T) {
 	picker := testPicker()
 	picker.setZoneName("Europe/Zagreb")
