@@ -1,0 +1,58 @@
+name: Refresh Nix vendorHash on Dependabot PRs
+
+# A Dependabot Go bump changes go.sum and leaves nix/package.nix's vendorHash
+# stale, so "Nix flake builds" — required on main — fails with a fixed-output
+# hash mismatch and the PR wedges until someone runs `make update-nix-hash`
+# with Docker (#427). This refreshes the hash on the PR itself.
+#
+# The SHA-pinned reusable workflow builds the flake at the PR's merge commit,
+# takes the corrected hash from Nix's go-modules fixed-output mismatch, and
+# commits exactly that one line of nix/package.nix back to the PR with a
+# one-hour cli-release-bot token scoped to this repository, so the PR's own
+# "Nix flake builds" check re-runs on the new head and verifies it. That
+# check being required is what keeps the stale head from merging while the
+# refresh runs: auto-merge waits for required checks only, so the requirement
+# is part of this workflow's contract, not a nicety. Go bumps only, enforced
+# by the reusable workflow on the PR's actual diff (go.mod, go.sum and
+# nix/package.nix, nothing else; the paths filter below only spares a runner):
+# the pull_request jobs that then re-run under the App bot's actor are main's
+# own, and none of them references a secret a Go bump can reach — keep it that
+# way. The full actor analysis is in the reusable workflow's header.
+#
+# Needs the cli-release-bot App installed here with contents: write, and its
+# private key stored as a repository *Dependabot* secret named
+# RELEASE_APP_PRIVATE_KEY (Dependabot-triggered runs see only Dependabot
+# secrets) and, for the workflow_dispatch path, as a repository Actions secret
+# of the same name. release.yml's copies live in the `release` environment
+# and are not reachable from here, by design.
+
+on:
+  pull_request:
+    paths:
+      - go.mod
+      - go.sum
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Dependabot pull request number to refresh
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  refresh:
+    if: github.event_name == 'workflow_dispatch' || (github.actor == 'dependabot[bot]' && github.event.pull_request.user.login == 'dependabot[bot]') # zizmor: ignore[bot-conditions] -- dual check: actor validates the current trigger (and stops the App bot's own push from looping back), user.login validates PR origin; on:pull_request, not pull_request_target, so GitHub sets the actor from who pushed
+    uses: basecamp/.github/.github/workflows/dependabot-sync-nix-vendor-hash.yml@49eaa2156461cee5ac15c5236d3ff3f5fe900d3f
+    with:
+      pr: ${{ inputs.pr }}
+      # cli-release-bot's client id — the `release` environment's
+      # RELEASE_CLIENT_ID, which is a public identifier (every release run
+      # prints it) and, being environment-scoped, is not readable here.
+      app-client-id: Iv23liAbERu6z8d7t5A8
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+    secrets:
+      app-private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
