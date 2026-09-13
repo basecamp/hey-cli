@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestEventDetailOpensOnlyHostedWebLinks(t *testing.T) {
@@ -111,12 +113,51 @@ func TestWrapTextHardWrapsLongTokens(t *testing.T) {
 	long := "https://meet.example.com/a-very-long-room-name-that-exceeds-the-modal-width"
 	lines := wrapText(long, 20)
 	for _, line := range lines {
-		if len(line) > 20 {
-			t.Errorf("wrapText produced a line longer than maxWidth: %q (len=%d)", line, len(line))
+		if displayWidth(line) > 20 {
+			t.Errorf("wrapText produced a line wider than maxWidth: %q (width=%d)", line, displayWidth(line))
 		}
 	}
 	rejoined := strings.Join(lines, "")
 	if rejoined != long {
 		t.Errorf("wrapText lost characters: got %q, want %q", rejoined, long)
+	}
+}
+
+// wrapText must split at grapheme boundaries, never inside a rune or emoji sequence.
+func TestWrapTextSplitsAtGraphemeBoundaries(t *testing.T) {
+	// A string of 5 two-cell emoji, each 2 cells wide, total 10 cells.
+	emoji := "🎉🎊🎈🎁🎀"
+	lines := wrapText(emoji, 4) // 4-cell budget: fits two emoji per line
+	for _, line := range lines {
+		w := displayWidth(line)
+		if w > 4 {
+			t.Errorf("wrapText produced a line wider than maxWidth: %q (width=%d)", line, w)
+		}
+		// Verify each line decodes as valid UTF-8 grapheme clusters.
+		for rest := line; rest != ""; {
+			cluster, _ := ansi.FirstGraphemeCluster(rest, ansi.GraphemeWidth)
+			if cluster == "" {
+				t.Errorf("wrapText produced invalid UTF-8 in %q", line)
+				break
+			}
+			rest = rest[len(cluster):]
+		}
+	}
+}
+
+// On a narrow terminal the when() line must not exceed the modal content width.
+func TestEventCardWhenLineWrapsOnNarrowTerminal(t *testing.T) {
+	d := &eventDetail{
+		event:  Recording{StartsAt: atLocal("2026-08-20T14:00:00"), EndsAt: atLocal("2026-08-20T15:00:00")},
+		styles: testVC().styles,
+		width:  40, // narrow terminal
+		height: 20,
+	}
+	content := d.content()
+	for _, line := range strings.Split(content, "\n") {
+		stripped := ansi.Strip(line)
+		if displayWidth(stripped) > modalContentWidth(40) {
+			t.Errorf("content line exceeds modal content width on narrow terminal: %q (width=%d)", stripped, displayWidth(stripped))
+		}
 	}
 }

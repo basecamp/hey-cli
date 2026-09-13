@@ -216,9 +216,10 @@ func errorView(errMsg string, width int) string {
 	return b.String()
 }
 
-// wrapText wraps a string to fit within maxWidth characters.
-// Words longer than maxWidth are hard-wrapped at the boundary so that a single long token
-// (like a URL) does not make the containing column wider than the terminal.
+// wrapText wraps a string to fit within maxWidth terminal cells.
+// Words wider than maxWidth are hard-wrapped at grapheme boundaries so that a single long
+// token (like a URL or an emoji-heavy value) never makes the column wider than the terminal
+// and is never split inside a rune or grapheme cluster.
 func wrapText(s string, maxWidth int) []string {
 	if maxWidth <= 0 {
 		return []string{s}
@@ -230,26 +231,37 @@ func wrapText(s string, maxWidth int) []string {
 
 	var lines []string
 	line := ""
+	lineWidth := 0
 	for _, w := range words {
-		// Hard-wrap any word that alone exceeds maxWidth.
-		for len(w) > maxWidth {
+		// Hard-wrap any word whose display width alone exceeds maxWidth, advancing by
+		// whole grapheme clusters so we never split inside a rune or emoji sequence.
+		for displayWidth(w) > maxWidth {
 			if line != "" {
 				lines = append(lines, line)
 				line = ""
+				lineWidth = 0
 			}
-			lines = append(lines, w[:maxWidth])
-			w = w[maxWidth:]
+			chunk := fitGraphemes(w, maxWidth)
+			if chunk == "" {
+				break // single cluster wider than maxWidth — emit it whole to avoid infinite loop
+			}
+			lines = append(lines, chunk)
+			w = w[len(chunk):]
 		}
 		if w == "" {
 			continue
 		}
+		wWidth := displayWidth(w)
 		if line == "" {
 			line = w
-		} else if len(line)+1+len(w) > maxWidth {
+			lineWidth = wWidth
+		} else if lineWidth+1+wWidth > maxWidth {
 			lines = append(lines, line)
 			line = w
+			lineWidth = wWidth
 		} else {
 			line += " " + w
+			lineWidth += 1 + wWidth
 		}
 	}
 	if line != "" {

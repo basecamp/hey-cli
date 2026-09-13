@@ -121,7 +121,15 @@ func (d *eventDetail) openableLink() (string, bool) {
 func (d *eventDetail) content() string {
 	var b strings.Builder
 
-	b.WriteString(d.styles.entryDate.Render(d.when()) + "\n")
+	contentWidth := modalContentWidth(d.width)
+	// The when line can exceed contentWidth on narrow terminals; wrap it like the other rows.
+	for i, whenLine := range wrapText(d.when(), contentWidth) {
+		if i == 0 {
+			b.WriteString(d.styles.entryDate.Render(whenLine) + "\n")
+		} else {
+			b.WriteString(whenLine + "\n")
+		}
+	}
 	if label := repeatFrequencyLabel(d.event.RepeatKind); d.event.Recurring && label != "" {
 		b.WriteString(styleMuted.Render("Repeats "+label) + "\n")
 	}
@@ -134,7 +142,7 @@ func (d *eventDetail) content() string {
 	}
 	// The label column is 8 chars + 2 spaces of padding; what remains is for the value.
 	labelWidth := 10
-	valueWidth := max(modalContentWidth(d.width)-labelWidth, 1)
+	valueWidth := max(contentWidth-labelWidth, 1)
 	wrote := false
 	for _, row := range rows {
 		if row[1] == "" {
