@@ -43,7 +43,7 @@ permissions: {}
 jobs:
   refresh:
     if: github.event_name == 'workflow_dispatch' || (github.actor == 'dependabot[bot]' && github.event.pull_request.user.login == 'dependabot[bot]') # zizmor: ignore[bot-conditions] -- dual check: actor validates the current trigger (and stops the App bot's own push from looping back), user.login validates PR origin; on:pull_request, not pull_request_target, so GitHub sets the actor from who pushed
-    uses: basecamp/.github/.github/workflows/dependabot-sync-nix-vendor-hash.yml@49eaa2156461cee5ac15c5236d3ff3f5fe900d3f
+    uses: basecamp/.github/.github/workflows/dependabot-sync-nix-vendor-hash.yml@293dc747a2cee44c5b4dae72067adeb681636d26
     with:
       pr: ${{ inputs.pr }}
       # cli-release-bot's client id — the `release` environment's
