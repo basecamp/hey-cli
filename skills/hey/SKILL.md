@@ -731,10 +731,13 @@ itself where HEY has already written it out — and refuses what it cannot keep:
 countdown is read back and re-sent (only `--countdown 0` removes it), and notes HEY serves
 only as plain text, so an edit that would send notes back as text is refused unless
 `--allow-plain-notes` accepts the loss or `--notes` replaces them; an event with no notes
-needs neither. HEY answers not-found for a date that is not a day of the series and for a
-series you cannot edit alike. The JSON envelope is the one every mutation writes:
-`summary` (`Occurrence updated` or `Occurrence and the following updated`) and `data`
-holding the recording HEY answered.
+needs neither. With `--occurrence`, `--calendar` is only the calendar the day moves to:
+the day is read over every calendar. An attached email you cannot read is not served and
+is detached by any edit, whole event or one day — nothing client-side can keep it. HEY
+answers not-found for a date that is not a day of the series and for a series you cannot
+edit alike. The JSON envelope is the one every mutation writes: `summary` (`Occurrence
+updated` or `Occurrence and the following updated`) and `data` holding the recording HEY
+answered.
 
 An event with no `--start-time` is all-day; a `--start-time` with no `--end-time` runs an
 hour. Clock times are read in `--time-zone`, defaulting to the machine's zone.

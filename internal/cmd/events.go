@@ -252,7 +252,9 @@ An occurrence edit keeps more than a whole-event edit does, and refuses what it 
 keep. The countdown is read back and sent again, so it survives unless --countdown 0
 removes it. Notes are still only served as plain text, so an occurrence edit that would
 send formatted notes back as text refuses unless --allow-plain-notes accepts that or
---notes replaces them.`,
+--notes replaces them. The day is read over every calendar, so here --calendar is only
+where the day is moved to. One thing no edit can keep: an attached email you cannot read
+is not served, so it is detached by any edit, whole event or one day.`,
 		Example: `  hey event edit 4821 --title "Design review (moved)"
   hey event edit 4821 --starts-on 2026-09-04 --start-time 15:00
   hey event edit 4821 2026-09-02 --location "Studio, 3rd floor"

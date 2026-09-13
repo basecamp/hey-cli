@@ -36,12 +36,18 @@ type occurrenceEdit struct {
 // schedule cannot apply to one day, which is HEY's rule as much as this command's.
 func (c *eventsEditCommand) parseOccurrence(cmd *cobra.Command, id int64, on string) (*occurrenceEdit, error) {
 	flags := cmd.Flags()
-	if c.occurrence == "" {
+	if !flags.Changed("occurrence") {
 		if flags.Changed("apply-to") {
 			return nil, apierr.ErrUsageHint("--apply-to needs --occurrence",
 				"hey event edit 4821 --occurrence 4821_2026-09-15 --apply-to current")
 		}
 		return nil, nil
+	}
+	// An --occurrence given empty — a script's unset variable — must not quietly become an
+	// edit of the whole series, which is the one thing the flag was there to avoid.
+	if c.occurrence == "" {
+		return nil, apierr.ErrUsageHint("--occurrence needs an occurrence_id",
+			"an occurrence_id as hey event day serves it, <series id>_<YYYY-MM-DD>, for example 4821_2026-09-15")
 	}
 
 	occurrence, err := hey.ParseOccurrenceID(c.occurrence)
@@ -113,6 +119,11 @@ func parseApplyTo(value string, given bool) (hey.OccurrenceScope, error) {
 // again, so only --countdown 0 removes it. Notes are served only as plain text, so an edit
 // that would send formatted notes back as text is refused unless --allow-plain-notes says
 // that is acceptable or --notes replaces them.
+//
+// One thing cannot be kept and cannot be refused either: an attached email the editor
+// cannot read is left out of what HEY serves, indistinguishable from none, and HEY clears
+// the attachment whether the write sends an empty entry id or no key at all. That is the
+// server's to fix; the docs say so.
 func (c *eventsEditCommand) editOccurrence(ctx context.Context, cmd *cobra.Command, edit occurrenceEdit) error {
 	// The flags that need no read are refused first, so a bad one costs no request.
 	repeat, err := c.fields.parseRepeat()
@@ -123,7 +134,9 @@ func (c *eventsEditCommand) editOccurrence(ctx context.Context, cmd *cobra.Comma
 		return err
 	}
 
-	window, err := c.searchWindow(ctx, edit.occurrence.DateParam())
+	// The day is read over every calendar, whatever --calendar says: here the flag names the
+	// calendar the day is moved to, and the series being moved is on some other one.
+	window, err := occurrenceDayWindow(ctx, edit.occurrence.Date)
 	if err != nil {
 		return err
 	}
@@ -216,6 +229,22 @@ func occurrenceWriteError(err error, occurrence hey.EventOccurrence) error {
 	return apierr.FromSDK(err)
 }
 
+// occurrenceDayWindow is the one day an occurrence is read on, [day, day+1), over every
+// calendar the identity has. HEY answers that window with every series still recurring
+// through it and with the day itself where an earlier edit has written it out, and it is
+// one request per calendar, so there is nothing to narrow.
+func occurrenceDayWindow(ctx context.Context, day time.Time) (recordingWindow, error) {
+	calendars, err := allCalendarIDs(ctx)
+	if err != nil {
+		return recordingWindow{}, err
+	}
+	return recordingWindow{
+		calendars: calendars,
+		startsOn:  day.Format(dateLayout),
+		endsOn:    day.AddDate(0, 0, 1).Format(dateLayout),
+	}, nil
+}
+
 // occurrenceDay is what the day of an occurrence holds for it: the series it belongs to,
 // the day itself where HEY has already written it out as a recording of its own, and the
 // countdowns ending that day.
@@ -305,15 +334,31 @@ func occurrenceInstants(series generated.Recording, day time.Time) (time.Time, t
 	}
 	wall := series.StartsAt.In(loc)
 	named := day.Format(dateLayout)
-	start := time.Date(day.Year(), day.Month(), day.Day(), wall.Hour(), wall.Minute(), wall.Second(), 0, loc)
+	start := wallClockOn(day, wall, loc)
 	for _, delta := range []int{0, -1, 1} {
-		candidate := time.Date(day.Year(), day.Month(), day.Day()+delta, wall.Hour(), wall.Minute(), wall.Second(), 0, loc)
+		candidate := wallClockOn(day.AddDate(0, 0, delta), wall, loc)
 		if candidate.UTC().Format(dateLayout) == named {
 			start = candidate
 			break
 		}
 	}
 	return start, start.Add(duration)
+}
+
+// wallClockOn is the series' clock time on a day, resolved the way HEY resolves it. A clock
+// time that does not exist on that day — the hour a zone springs forward over — is moved
+// an hour later and tried again, which is what ActiveSupport does when it changes the day
+// of a time; Go's time.Date picks the earlier zone instead and would land the day an hour
+// before HEY's, so a title-only edit would move it.
+func wallClockOn(day, wall time.Time, loc *time.Location) time.Time {
+	hour, minute, second := wall.Clock()
+	for step := range 24 {
+		at := time.Date(day.Year(), day.Month(), day.Day(), hour+step, minute, second, 0, loc)
+		if h, m, _ := at.Clock(); h == (hour+step)%24 && m == minute {
+			return at
+		}
+	}
+	return time.Date(day.Year(), day.Month(), day.Day(), hour, minute, second, 0, loc)
 }
 
 // occurrenceCountdown is the countdown the write sends: the one --countdown names, or the
@@ -330,34 +375,54 @@ func (c *eventsEditCommand) occurrenceCountdown(ctx context.Context, cmd *cobra.
 	}
 	if day.realized != nil {
 		if countdown, ok := countdownOf(day.countdowns, day.realized.Id); ok {
-			return countdownFromLabel(countdown.Label)
+			return countdownFromRecording(countdown)
+		}
+		// A day that was moved is still listed under the date it stands for, but its
+		// countdown ends where it now starts, so that day is where its own countdown is.
+		if day.realized.StartsAt.UTC().Format(dateLayout) != day.occurrence.DateParam() {
+			countdown, found, err := countdownEnding(ctx, window, *day.realized)
+			if err != nil || found {
+				return countdown, err
+			}
 		}
 	}
 	if countdown, ok := countdownOf(day.countdowns, day.series.Id); ok {
-		return countdownFromLabel(countdown.Label)
+		return countdownFromRecording(countdown)
 	}
+	if day.series.StartsAt.UTC().Format(dateLayout) == day.occurrence.DateParam() {
+		return hey.CountdownParams{}, nil
+	}
+	countdown, _, err := countdownEnding(ctx, window, day.series)
+	return countdown, err
+}
 
-	if day.series.StartsAt.IsZero() {
-		return hey.CountdownParams{}, nil
-	}
-	began := day.series.StartsAt.UTC()
-	startsOn := began.Format(dateLayout)
-	if startsOn == day.occurrence.DateParam() {
-		return hey.CountdownParams{}, nil
+// countdownEnding reads the day an event starts on, over its own calendar, for the
+// countdown ending there. A countdown ends at the moment its event starts, so that one
+// day is the whole window it can be found in.
+func countdownEnding(ctx context.Context, window recordingWindow, event generated.Recording) (hey.CountdownParams, bool, error) {
+	if event.StartsAt.IsZero() {
+		return hey.CountdownParams{}, false, nil
 	}
 	calendars := window.calendars
-	if day.series.Calendar.Id != 0 {
-		calendars = []int64{day.series.Calendar.Id}
+	if event.Calendar.Id != 0 {
+		calendars = []int64{event.Calendar.Id}
 	}
-	firstDay := recordingWindow{calendars: calendars, startsOn: startsOn, endsOn: began.AddDate(0, 0, 1).Format(dateLayout)}
-	countdowns, err := firstDay.readTypes(ctx, recordingTypeCountdown)
+	starts := event.StartsAt.UTC()
+	startDay := recordingWindow{
+		calendars: calendars,
+		startsOn:  starts.Format(dateLayout),
+		endsOn:    starts.AddDate(0, 0, 1).Format(dateLayout),
+	}
+	countdowns, err := startDay.readTypes(ctx, recordingTypeCountdown)
 	if err != nil {
-		return hey.CountdownParams{}, err
+		return hey.CountdownParams{}, false, err
 	}
-	if countdown, ok := countdownOf(countdowns, day.series.Id); ok {
-		return countdownFromLabel(countdown.Label)
+	countdown, ok := countdownOf(countdowns, event.Id)
+	if !ok {
+		return hey.CountdownParams{}, false, nil
 	}
-	return hey.CountdownParams{}, nil
+	params, err := countdownFromRecording(countdown)
+	return params, true, err
 }
 
 // countdownOf is the countdown recording under the event with that id, if the rows hold one.
@@ -374,25 +439,38 @@ func countdownOf(rows []generated.Recording, eventID int64) (generated.Recording
 // before", from which the value and the unit its own form would submit are read back.
 var countdownLabel = regexp.MustCompile(`^(\d+) (day|week|month)s? before$`)
 
-// countdownFromLabel reads the countdown back out of its label. A label in a shape this
-// cannot read is refused rather than guessed at or dropped: the caller can still name the
-// countdown with --countdown, or remove it with --countdown 0.
-func countdownFromLabel(label string) (hey.CountdownParams, error) {
-	match := countdownLabel.FindStringSubmatch(label)
+// countdownFromRecording reads the countdown back out of the recording HEY keeps for it.
+// The label is the length as HEY's own form would show it, and it is trusted first. HEY
+// tries months before weeks before days and takes a remainder of up to a day as a match,
+// so a countdown that is exactly one day long — a day before an event at midnight, which
+// is any all-day event's — comes out as "0 months before"; the recording's own span says
+// what that is. Anything else this cannot read is refused rather than guessed at or
+// dropped, since a countdown the write does not name is a countdown removed: the caller
+// can still name it with --countdown, or remove it with --countdown 0.
+func countdownFromRecording(countdown generated.Recording) (hey.CountdownParams, error) {
+	unreadable := &apierr.Error{
+		Code:    apierr.CodeAPI,
+		Message: fmt.Sprintf("the event's countdown could not be read back: %q", terminal.SanitizeLine(countdown.Label)),
+		Hint:    "pass --countdown with --countdown-unit to keep it, or --countdown 0 to remove it",
+	}
+
+	match := countdownLabel.FindStringSubmatch(countdown.Label)
 	if match == nil {
-		return hey.CountdownParams{}, &apierr.Error{
-			Code:    apierr.CodeAPI,
-			Message: fmt.Sprintf("the event's countdown could not be read back: %q", terminal.SanitizeLine(label)),
-			Hint:    "pass --countdown with --countdown-unit to keep it, or --countdown 0 to remove it",
-		}
+		return hey.CountdownParams{}, unreadable
 	}
 	value, _ := strconv.Atoi(match[1])
-	units := map[string]hey.CountdownUnit{
-		"day":   hey.CountdownUnitDays,
-		"week":  hey.CountdownUnitWeeks,
-		"month": hey.CountdownUnitMonths,
+	if value >= 1 {
+		units := map[string]hey.CountdownUnit{
+			"day":   hey.CountdownUnitDays,
+			"week":  hey.CountdownUnitWeeks,
+			"month": hey.CountdownUnitMonths,
+		}
+		return hey.CountdownParams{Value: value, Unit: units[match[2]]}, nil
 	}
-	return hey.CountdownParams{Value: value, Unit: units[match[2]]}, nil
+	if !countdown.StartsAt.IsZero() && countdown.EndsAt.Sub(countdown.StartsAt) == 24*time.Hour {
+		return hey.CountdownParams{Value: 1, Unit: hey.CountdownUnitDays}, nil
+	}
+	return hey.CountdownParams{}, unreadable
 }
 
 // errPlainNotes is how an occurrence edit refuses to flatten notes it was not asked to

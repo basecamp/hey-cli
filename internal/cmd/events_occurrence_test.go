@@ -254,6 +254,8 @@ func TestEventsEditOccurrenceRefusesWhatItCannotMean(t *testing.T) {
 	}{
 		{name: "apply-to without occurrence", args: []string{"--apply-to", "current"}, want: "--apply-to needs --occurrence"},
 		{name: "occurrence without apply-to", args: []string{"--occurrence", "4821_2026-09-15"}, want: "--apply-to is required with --occurrence"},
+		{name: "occurrence given empty", args: []string{"--occurrence=", "--title", "Design review (moved)"}, want: "--occurrence needs an occurrence_id"},
+		{name: "occurrence given empty with a scope", args: []string{"--occurrence", "", "--apply-to", "current"}, want: "--occurrence needs an occurrence_id"},
 		{name: "unknown scope", args: []string{"--occurrence", "4821_2026-09-15", "--apply-to", "all"}, want: "invalid apply-to: all"},
 		{name: "no underscore", args: []string{"--occurrence", "4821-2026-09-15", "--apply-to", "current"}, want: "invalid occurrence: 4821-2026-09-15"},
 		{name: "date without dashes", args: []string{"--occurrence", "4821_20260915", "--apply-to", "current"}, want: "invalid occurrence: 4821_20260915"},
@@ -564,6 +566,134 @@ func TestEventsEditWholeSeriesIsUnchangedByTheOccurrenceFlags(t *testing.T) {
 	}
 }
 
+// recordingsServer answers a calendar list and a table of recordings reads keyed by
+// "<calendar id> <starts_on>", for the edits whose reads the day-and-first-day helper
+// does not describe. A read with no entry is an error, so every request is accounted for.
+func recordingsServer(t *testing.T, calendars string, reads map[string]string, patchPath string, onPatch func(t *testing.T, form url.Values)) (http.Handler, *atomic.Int32) {
+	t.Helper()
+	var writes atomic.Int32
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/calendars.json":
+			_, _ = io.WriteString(w, calendars)
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/calendars/") && strings.HasSuffix(r.URL.Path, "/recordings.json"):
+			calendar := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/calendars/"), "/recordings.json")
+			key := calendar + " " + r.URL.Query().Get("starts_on")
+			body, ok := reads[key]
+			if !ok {
+				t.Errorf("unexpected read of calendar %s from %s", calendar, r.URL.Query().Get("starts_on"))
+				body = `{}`
+			}
+			_, _ = io.WriteString(w, body)
+		case r.Method == http.MethodPatch && r.URL.Path == patchPath:
+			writes.Add(1)
+			onPatch(t, eventForm(t, r))
+			_, _ = io.WriteString(w, `{"id":9001,"parent_id":4821}`)
+		default:
+			t.Errorf("unexpected request = %s %s", r.Method, r.URL)
+			http.NotFound(w, r)
+		}
+	}), &writes
+}
+
+const oneCalendarJSON = `{"calendars":[{"calendar":{"id":9,"name":"Work","owned":true}}]}`
+
+// A day that was moved is still listed under the date it stands for, while its own
+// countdown ends where it now starts. Its countdown is what the edit keeps — read from the
+// day it moved to — and not the series'.
+func TestEventsEditOccurrenceKeepsAMovedDaysOwnCountdown(t *testing.T) {
+	moved := `{"id":9001,"type":"Calendar::Event","parent_id":4821,"occurrence_id":"4821_2026-09-15",` +
+		`"title":"Design review (with the vendor)","starts_at":"2026-09-18T13:30:00Z","ends_at":"2026-09-18T14:30:00Z",` +
+		`"starts_at_time_zone":"Europe/Zagreb","ends_at_time_zone":"Europe/Zagreb","calendar":{"id":9,"name":"Work"}}`
+	own := `{"id":78,"type":"Calendar::Countdown","parent_id":9001,"label":"2 days before",` +
+		`"starts_at":"2026-09-16T00:00:00Z","ends_at":"2026-09-18T13:30:00Z","calendar":{"id":9,"name":"Work"}}`
+	handler, writes := recordingsServer(t, oneCalendarJSON, map[string]string{
+		"9 2026-09-15": `{"Calendar::Event":[` + occurrenceSeriesJSON + `,` + moved + `]}`,
+		"9 2026-09-18": `{"Calendar::Event":[` + moved + `],"Calendar::Countdown":[` + own + `]}`,
+	}, "/calendar/events/4821/occurrences/2026-09-15.json", func(t *testing.T, form url.Values) {
+		if got := form.Get("countdown_interval_duration_value"); got != "2" {
+			t.Errorf("countdown value = %q, want the moved day's own", got)
+		}
+		if got := form.Get("countdown_interval_duration_unit"); got != "86400" {
+			t.Errorf("countdown unit = %q, want days", got)
+		}
+		if got := form.Get("calendar_event[starts_at]"); got != "2026-09-18" {
+			t.Errorf("starts_at = %q, want the day where it was moved to", got)
+		}
+	})
+	_, err := runJSONCommand(t, handler,
+		"event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "current", "--title", "Design review (vendor, final)")
+	if err != nil {
+		t.Fatalf("execute occurrence edit: %v", err)
+	}
+	if writes.Load() != 1 {
+		t.Errorf("writes = %d, want one", writes.Load())
+	}
+}
+
+// A weekly series at 02:30 in New York has no 02:30 on the day the clocks spring forward.
+// HEY draws that day at 03:30, so that is what a title-only edit sends back, whichever
+// scope it reaches — anything else would move the day.
+func TestEventsEditOccurrenceKeepsTheClockAcrossASpringForward(t *testing.T) {
+	series := `{"id":4821,"type":"Calendar::Event","title":"Early standup","recurring":true,` +
+		`"starts_at":"2026-03-01T07:30:00Z","ends_at":"2026-03-01T08:30:00Z",` +
+		`"starts_at_time_zone":"America/New_York","ends_at_time_zone":"America/New_York","calendar":{"id":9,"name":"Work"}}`
+	for _, scope := range []string{"current", "future"} {
+		t.Run(scope, func(t *testing.T) {
+			handler, _ := recordingsServer(t, oneCalendarJSON, map[string]string{
+				"9 2026-03-08": `{"Calendar::Event":[` + series + `]}`,
+				"9 2026-03-01": `{"Calendar::Event":[` + series + `]}`,
+			}, "/calendar/events/4821/occurrences/2026-03-08.json", func(t *testing.T, form url.Values) {
+				if got := form.Get("calendar_event[starts_at]"); got != "2026-03-08" {
+					t.Errorf("starts_at = %q", got)
+				}
+				if got := form.Get("calendar_event[starts_at_time]"); got != "03:30:00" {
+					t.Errorf("starts_at_time = %q, want the hour HEY moved it to", got)
+				}
+				if got := form.Get("calendar_event[ends_at_time]"); got != "04:30:00" {
+					t.Errorf("ends_at_time = %q", got)
+				}
+				if got := form.Get("calendar_event[starts_at_time_zone_name]"); got != "America/New_York" {
+					t.Errorf("starts_at_time_zone_name = %q", got)
+				}
+			})
+			_, err := runJSONCommand(t, handler,
+				"event", "edit", "4821", "--occurrence", "4821_2026-03-08", "--apply-to", scope, "--title", "Early standup (moved)")
+			if err != nil {
+				t.Fatalf("execute occurrence edit: %v", err)
+			}
+		})
+	}
+}
+
+// --calendar on an occurrence edit is where the day goes, not where the series is looked
+// for: the day is read over every calendar, and the write carries the destination.
+func TestEventsEditOccurrenceMovesADayToAnotherCalendar(t *testing.T) {
+	handler, writes := recordingsServer(t,
+		`{"calendars":[{"calendar":{"id":9,"name":"Work","owned":true}},{"calendar":{"id":10,"name":"Shared","owned":true}}]}`,
+		map[string]string{
+			"9 2026-09-15":  `{"Calendar::Event":[` + occurrenceSeriesJSON + `]}`,
+			"10 2026-09-15": `{}`,
+			"9 2026-09-01":  `{}`,
+		}, "/calendar/events/4821/occurrences/2026-09-15.json", func(t *testing.T, form url.Values) {
+			if got := form.Get("calendar_event[calendar_id]"); got != "10" {
+				t.Errorf("calendar_id = %q, want the destination", got)
+			}
+			if got := form.Get("apply_to_future"); got != "1" {
+				t.Errorf("apply_to_future = %q", got)
+			}
+		})
+	_, err := runJSONCommand(t, handler,
+		"event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "future", "--calendar", "10", "--allow-plain-notes")
+	if err != nil {
+		t.Fatalf("execute occurrence edit: %v", err)
+	}
+	if writes.Load() != 1 {
+		t.Errorf("writes = %d, want one", writes.Load())
+	}
+}
+
 // HEY names a day by the UTC date of its start and gives it the series' wall-clock time in
 // the series' zone, so the wall-clock day can be the day either side of the one named.
 func TestOccurrenceInstants(t *testing.T) {
@@ -617,6 +747,18 @@ func TestOccurrenceInstants(t *testing.T) {
 			day:    "2026-09-15", start: "2026-09-15T09:00:00Z", end: "2026-09-15T09:30:00Z",
 		},
 		{
+			// 02:30 does not exist in New York on 2026-03-08; HEY moves it an hour on, to
+			// 03:30 EDT, and Go's time.Date would have put it at 01:30 EST.
+			name:   "a clock time the zone springs over",
+			series: timed("2026-03-01T07:30:00Z", "2026-03-01T08:30:00Z", "America/New_York"),
+			day:    "2026-03-08", start: "2026-03-08T07:30:00Z", end: "2026-03-08T08:30:00Z",
+		},
+		{
+			name:   "the same clock time on an ordinary day",
+			series: timed("2026-03-01T07:30:00Z", "2026-03-01T08:30:00Z", "America/New_York"),
+			day:    "2026-03-15", start: "2026-03-15T06:30:00Z", end: "2026-03-15T07:30:00Z",
+		},
+		{
 			name: "two all-day days",
 			series: generated.Recording{AllDay: true,
 				StartsAt: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), EndsAt: time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC)},
@@ -636,36 +778,103 @@ func TestOccurrenceInstants(t *testing.T) {
 	}
 }
 
-func TestCountdownFromLabel(t *testing.T) {
+// HEY labels a countdown by trying months, then weeks, then days, taking a remainder of up
+// to a day as a match — so a countdown exactly one day long is "0 months before", and only
+// the recording's own span says what it is.
+func TestCountdownFromRecording(t *testing.T) {
+	span := func(hours int) (time.Time, time.Time) {
+		end := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+		return end.Add(-time.Duration(hours) * time.Hour), end
+	}
 	tests := []struct {
+		name    string
 		label   string
+		hours   int
 		value   int
 		unit    hey.CountdownUnit
 		invalid bool
 	}{
-		{label: "3 weeks before", value: 3, unit: hey.CountdownUnitWeeks},
-		{label: "1 days before", value: 1, unit: hey.CountdownUnitDays},
-		{label: "1 day before", value: 1, unit: hey.CountdownUnitDays},
-		{label: "6 months before", value: 6, unit: hey.CountdownUnitMonths},
-		{label: "Countdown", invalid: true},
-		{label: "", invalid: true},
-		{label: "3 fortnights before", invalid: true},
-		{label: "three weeks before", invalid: true},
+		{name: "weeks", label: "3 weeks before", hours: 21 * 24, value: 3, unit: hey.CountdownUnitWeeks},
+		{name: "days, plural", label: "1 days before", hours: 36, value: 1, unit: hey.CountdownUnitDays},
+		{name: "day", label: "1 day before", hours: 36, value: 1, unit: hey.CountdownUnitDays},
+		{name: "months", label: "6 months before", hours: 183 * 24, value: 6, unit: hey.CountdownUnitMonths},
+		{name: "one day on an all-day event", label: "0 months before", hours: 24, value: 1, unit: hey.CountdownUnitDays},
+		{name: "zero with an unexplained span", label: "0 months before", hours: 20, invalid: true},
+		{name: "zero with no span", label: "0 months before", invalid: true},
+		{name: "no countdown", label: "Countdown", hours: 24, invalid: true},
+		{name: "empty", label: "", hours: 24, invalid: true},
+		{name: "unknown unit", label: "3 fortnights before", hours: 42 * 24, invalid: true},
+		{name: "words", label: "three weeks before", hours: 21 * 24, invalid: true},
 	}
 	for _, tt := range tests {
-		countdown, err := countdownFromLabel(tt.label)
-		if tt.invalid {
-			if err == nil {
-				t.Errorf("countdownFromLabel(%q) = %+v, want an error", tt.label, countdown)
+		t.Run(tt.name, func(t *testing.T) {
+			recording := generated.Recording{Type: recordingTypeCountdown, Label: tt.label}
+			if tt.hours > 0 {
+				recording.StartsAt, recording.EndsAt = span(tt.hours)
 			}
-			continue
-		}
-		if err != nil {
-			t.Errorf("countdownFromLabel(%q): %v", tt.label, err)
-			continue
-		}
-		if countdown.Value != tt.value || countdown.Unit != tt.unit {
-			t.Errorf("countdownFromLabel(%q) = %+v, want %d %d", tt.label, countdown, tt.value, tt.unit)
-		}
+			countdown, err := countdownFromRecording(recording)
+			if tt.invalid {
+				if err == nil {
+					t.Fatalf("countdownFromRecording(%q) = %+v, want an error", tt.label, countdown)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("countdownFromRecording(%q): %v", tt.label, err)
+			}
+			if countdown.Value != tt.value || countdown.Unit != tt.unit {
+				t.Errorf("countdownFromRecording(%q) = %+v, want %d %d", tt.label, countdown, tt.value, tt.unit)
+			}
+		})
+	}
+}
+
+// A countdown labelled "0 months before" whose span does not say it is one day is not
+// guessed at: the edit stops before writing, as with any label it cannot read.
+func TestEventsEditOccurrenceFailsClosedOnAZeroCountdown(t *testing.T) {
+	zero := strings.Replace(occurrenceCountdownJSON, "3 weeks before", "0 months before", 1)
+	handler, writes := occurrenceServer(t, "2026-09-15",
+		`{"Calendar::Event":[`+occurrenceSeriesJSON+`]}`,
+		`{"Calendar::Countdown":[`+zero+`]}`,
+		func(t *testing.T, form url.Values) {})
+	_, err := runJSONCommand(t, handler,
+		"event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "current", "--title", "Design review (moved)", "--allow-plain-notes")
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeAPI || !strings.Contains(cliErr.Message, `"0 months before"`) {
+		t.Fatalf("error = %v, want the countdown refusal", err)
+	}
+	if writes.Load() != 0 {
+		t.Errorf("writes = %d, want none", writes.Load())
+	}
+}
+
+// A one-day countdown on an all-day series is "0 months before" with a span of exactly a
+// day, and it is sent back as the day it is.
+func TestEventsEditOccurrenceKeepsAOneDayCountdown(t *testing.T) {
+	allDay := `{"id":4821,"type":"Calendar::Event","title":"Sarah's birthday","recurring":true,"all_day":true,` +
+		`"starts_at":"2026-09-01T00:00:00Z","ends_at":"2026-09-01T00:00:00Z","calendar":{"id":9,"name":"Work"}}`
+	oneDay := `{"id":77,"type":"Calendar::Countdown","parent_id":4821,"label":"0 months before",` +
+		`"starts_at":"2026-08-31T00:00:00Z","ends_at":"2026-09-01T00:00:00Z","calendar":{"id":9,"name":"Work"}}`
+	handler, _ := occurrenceServer(t, "2027-09-01",
+		`{"Calendar::Event":[`+allDay+`]}`,
+		`{"Calendar::Countdown":[`+oneDay+`]}`,
+		func(t *testing.T, form url.Values) {
+			if got := form.Get("countdown_interval_duration_value"); got != "1" {
+				t.Errorf("countdown value = %q, want one", got)
+			}
+			if got := form.Get("countdown_interval_duration_unit"); got != "86400" {
+				t.Errorf("countdown unit = %q, want days", got)
+			}
+			if got := form.Get("calendar_event[all_day]"); got != "1" {
+				t.Errorf("all_day = %q", got)
+			}
+			if got := form.Get("calendar_event[starts_at]"); got != "2027-09-01" {
+				t.Errorf("starts_at = %q", got)
+			}
+		})
+	_, err := runJSONCommand(t, handler,
+		"event", "edit", "4821", "--occurrence", "4821_2027-09-01", "--apply-to", "current", "--title", "Sarah's birthday (party)")
+	if err != nil {
+		t.Fatalf("execute occurrence edit: %v", err)
 	}
 }

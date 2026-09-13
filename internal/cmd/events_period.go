@@ -151,10 +151,13 @@ const periodNow = "now"
 
 // resolveOccurrenceSeries gives each row the ID the event verbs take. HEY serves a day of a
 // repeating series as a virtual occurrence — no id of its own, the series in parent_id — but
-// 'hey event edit' and 'hey event delete' take the series, so the row carries it.
+// 'hey event edit' and 'hey event delete' take the series, so the row carries it. A day an
+// earlier edit or a reminder has written out carries an id of its own, and it is still one
+// day of its series: its occurrence_id names the series, and `hey event edit --occurrence`
+// takes the series id beside it, so it is the series id the row publishes too.
 func resolveOccurrenceSeries(events []generated.Recording) {
 	for i := range events {
-		if events[i].Id == 0 && events[i].ParentId != 0 {
+		if events[i].ParentId != 0 && (events[i].Id == 0 || events[i].OccurrenceId != "") {
 			events[i].Id = events[i].ParentId
 		}
 	}

@@ -430,14 +430,23 @@ editing it further.
 An occurrence edit keeps more than a whole-event edit does, and refuses what it cannot
 keep. It sends back the day's own schedule and zones, notes, location, link, attached
 email, reminders and circle, taking them from the day itself where HEY has already written
-that day out on its own. The countdown is read back from the recording HEY keeps for it
-and sent again, so it survives unless `--countdown 0` removes it. Notes are still served
-only as plain text and nothing can tell formatted notes from plain ones, so an occurrence
-edit that would send notes back as text is refused unless `--allow-plain-notes` accepts
-the loss or `--notes` replaces them; an event with no notes needs neither. A whole-event
-edit accepts `--allow-plain-notes` too, and it changes nothing there. HEY answers the
-write with not-found both for a date that is not a day of the series and for a series you
-cannot edit.
+that day out on its own (a day like that lists under the series id in `day` and `week`
+too, beside its `occurrence_id`, so the pair feeds the edit as served). The countdown is
+read back from the recording HEY keeps for it — on the day, or on the day the series began
+in one more single-day read — and sent again, so it survives unless `--countdown 0`
+removes it; a countdown whose length cannot be read back stops the edit and says so. Notes
+are still served only as plain text and nothing can tell formatted notes from plain ones,
+so an occurrence edit that would send notes back as text is refused unless
+`--allow-plain-notes` accepts the loss or `--notes` replaces them; an event with no notes
+needs neither. A whole-event edit accepts `--allow-plain-notes` too, and it changes nothing
+there. The day is read over every calendar, so with `--occurrence` the `--calendar` flag is
+only the calendar the day is moved to. HEY answers the write with not-found both for a date
+that is not a day of the series and for a series you cannot edit.
+
+One thing no edit can keep, whole event or one day: an attached email you cannot read is
+left out of what HEY serves, indistinguishable from none, and HEY clears the attachment
+whether the write sends an empty entry id or no entry id at all. Editing such an event
+detaches the email; only HEY can change that.
 
 ### Todos
 
