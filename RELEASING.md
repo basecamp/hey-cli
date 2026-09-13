@@ -226,9 +226,10 @@ target with no `.managed-skills.hey-cli` yet is a first run: nothing is removed.
 rejected because another CLI published first is retried by applying the whole sync
 again from the remote's new tip, not by replaying the stale commit. The legacy shared `.managed-skills` is rewritten as a comment-only tombstone
 so a CLI still on the pre-fix script — which deleted everything its own tree lacked —
-deletes nothing (basecamp/skills#5). `scripts/test-sync-skills.sh` (`make test-sync-skills`,
-in `make check`) pins the contract by running the script as both CLIs against a
-throwaway target.
+deletes nothing (basecamp/skills#5). The script always clones the target fresh and pushes
+only the commit it made, so there is no checkout to hand it. `scripts/test-sync-skills.sh`
+(`make test-sync-skills`, in `make check`) pins the contract by running the script as both
+CLIs against a local bare repository — real clones, commits and pushes, no network.
 
 If that job fails, a `skills-sync`-labeled issue is filed; recover with the
 `Sync skills` workflow (`workflow_dispatch`, stable tag, optional dry run). It

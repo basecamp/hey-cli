@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # sync-skills.sh — Publish this CLI's skills to the basecamp/skills distribution repo.
 #
-# Runs from CI on a release tag. Mirrors each skills/<name>/ tree (SKILL.md and its
-# supporting files; no *.go, no dotfiles) into skills/<name>/ at the root of
-# basecamp/skills — the layout `npx skills add basecamp/skills` reads — then commits
-# as <source>[bot] and pushes.
+# Runs from CI on a release tag. Clones basecamp/skills fresh into a temp directory,
+# mirrors each skills/<name>/ tree (SKILL.md and its supporting files; no *.go, no
+# dotfiles) into skills/<name>/ at its root — the layout `npx skills add
+# basecamp/skills` reads — then commits as <source>[bot], pushes, and removes the
+# clone. The script never adopts an existing checkout: the only commit it can push
+# is the one it made, against the tip it cloned or fetched.
 #
 # Several CLIs publish into that one repo, so each owns a manifest of its own at the
 # target root, .managed-skills.<source>, listing the skill names it has published,
@@ -27,26 +29,27 @@
 # by hand, which beats guessing ownership from the legacy file.
 #
 # Required env vars:
-#   RELEASE_TAG    — the release tag (e.g. v1.2.3)
-#   SOURCE_SHA     — the source commit SHA
-#   SKILLS_TOKEN   — GitHub token with push access to basecamp/skills; not needed
-#                    for DRY_RUN=local, nor when SKILLS_TARGET is set
+#   RELEASE_TAG      — the release tag (e.g. v1.2.3)
+#   SOURCE_SHA       — the source commit SHA
+#   SKILLS_TOKEN     — GitHub token with push access to basecamp/skills; not needed
+#                      for DRY_RUN=local, nor when SKILLS_REPO_URL is not on github.com
 #
 # Optional env vars:
-#   CLI_NAME       — this CLI's name; the publishing source is <CLI_NAME>-cli
-#   SYNC_SOURCE    — the publishing repo's name (default: <CLI_NAME>-cli). Names the
-#                    manifest, the bot and the commit; the test sets it to play
-#                    another CLI
-#   SKILLS_SOURCE  — directory holding the skills tree (default: skills). A manual
-#                    recovery workflow can point it at a checkout of the release tag
-#                    so the sync logic comes from a newer ref than the content
-#   SKILLS_TARGET  — an existing checkout of basecamp/skills to sync into instead of
-#                    cloning; the remote-URL and branch asserts still run against it
-#   DRY_RUN        — "local": no network. Without SKILLS_TARGET, copy into an empty
-#                    tmpdir and print what would be published; with it, apply and
-#                    commit there but do not push.
-#                    "remote": clone (or use SKILLS_TARGET), apply, print the diff,
-#                    and stop before committing
+#   CLI_NAME         — this CLI's name; the publishing source is <CLI_NAME>-cli
+#   SYNC_SOURCE      — the publishing repo's name (default: <CLI_NAME>-cli). Names the
+#                      manifest, the bot and the commit; the test sets it to play
+#                      another CLI
+#   SKILLS_SOURCE    — directory holding the skills tree (default: skills). A manual
+#                      recovery workflow can point it at a checkout of the release tag
+#                      so the sync logic comes from a newer ref than the content
+#   SKILLS_REPO_URL  — where basecamp/skills is cloned from and pushed to (default:
+#                      https://github.com/basecamp/skills.git). The test points it at
+#                      a local bare repository so a real push lands somewhere it can
+#                      read back
+#   DRY_RUN          — "local": no network; copy into an empty tmpdir and print what
+#                      would be published.
+#                      "remote": clone, apply, print the diff, and stop before
+#                      committing
 #
 
 set -euo pipefail
@@ -56,12 +59,12 @@ SYNC_SOURCE="${SYNC_SOURCE:-${CLI_NAME}-cli}"
 RELEASE_TAG="${RELEASE_TAG:?RELEASE_TAG is required}"
 SOURCE_SHA="${SOURCE_SHA:?SOURCE_SHA is required}"
 SKILLS_SOURCE="${SKILLS_SOURCE:-skills}"
-SKILLS_TARGET="${SKILLS_TARGET:-}"
 SKILLS_TOKEN="${SKILLS_TOKEN:-}"
 DRY_RUN="${DRY_RUN:-}"
 
 TARGET_REPO="basecamp/skills"
 TARGET_BRANCH="main"
+SKILLS_REPO_URL="${SKILLS_REPO_URL:-https://github.com/${TARGET_REPO}.git}"
 SKILLS_SUBDIR="skills"
 LEGACY_MANIFEST=".managed-skills"
 MANIFEST="${LEGACY_MANIFEST}.${SYNC_SOURCE}"
@@ -119,29 +122,6 @@ claimed_by_other() {
   return 1
 }
 
-# The URLs as configured: `remote get-url` would show them after any insteadOf
-# rewrite, so an operator's rewrite could pass this check with a repo that is not
-# the target. A push URL of its own is where `git push origin` would actually go.
-assert_remote_url() {
-  local kind url
-  for kind in url pushurl; do
-    url=$(git -C "$1" config --get "remote.origin.${kind}" || true)
-    [[ -z "$url" && "$kind" == pushurl ]] && continue
-    case "${url%.git}" in
-      "https://github.com/${TARGET_REPO}") ;;
-      https://x-access-token:*@github.com/"${TARGET_REPO}") ;;
-      "git@github.com:${TARGET_REPO}") ;;
-      *) die "origin ${kind} '$(echo "$url" | sed -E 's#(https://[^:@]+:)[^@]*@#\1***@#')' does not point to github.com/${TARGET_REPO}" ;;
-    esac
-  done
-}
-
-assert_branch() {
-  local branch
-  branch=$(git -C "$1" rev-parse --abbrev-ref HEAD)
-  [[ "$branch" == "$TARGET_BRANCH" ]] || die "checked-out branch is '$branch', expected '$TARGET_BRANCH'"
-}
-
 # --- Validate the knobs ---
 
 plain_name "$SYNC_SOURCE" || die "SYNC_SOURCE '$SYNC_SOURCE' is not a plain name"
@@ -182,9 +162,9 @@ copy_skills() {
 tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
 
-# --- DRY_RUN=local without a target: what would be published ---
+# --- DRY_RUN=local: what would be published ---
 
-if [[ "$DRY_RUN" == "local" && -z "$SKILLS_TARGET" ]]; then
+if [[ "$DRY_RUN" == "local" ]]; then
   preview="${tmpdir}/preview"
   echo "DRY_RUN=local: copying skills into ${preview}"
   copy_skills "${preview}/${SKILLS_SUBDIR}"
@@ -206,7 +186,7 @@ fi
 # --- Git configuration for the target ---
 #
 # A private global config for every git call below: the bot is the identity for
-# the commit and for the rebase a retried push needs, the token goes in as a URL
+# the commit, and for the one a rejected push makes again, the token goes in as a URL
 # rewrite so it never appears in argv or in the remote URL, and nothing from the
 # ambient environment (signing, hooks, defaults) reaches the target.
 export GIT_CONFIG_GLOBAL="${tmpdir}/gitconfig"
@@ -216,30 +196,19 @@ cat > "$GIT_CONFIG_GLOBAL" <<GITCFG
 	email = ${SYNC_SOURCE}[bot]@users.noreply.github.com
 GITCFG
 chmod 600 "$GIT_CONFIG_GLOBAL"
-if [[ -n "$SKILLS_TOKEN" ]]; then
+if [[ "$SKILLS_REPO_URL" == https://github.com/* ]]; then
+  [[ -n "$SKILLS_TOKEN" ]] || die "SKILLS_TOKEN is required to push to ${SKILLS_REPO_URL} (set DRY_RUN=local for offline testing)"
   cat >> "$GIT_CONFIG_GLOBAL" <<GITCFG
 [url "https://x-access-token:${SKILLS_TOKEN}@github.com/"]
 	insteadOf = https://github.com/
 GITCFG
 fi
 
-# --- Clone the target, or take the checkout given ---
+# --- Clone the target ---
 
-if [[ -n "$SKILLS_TARGET" ]]; then
-  [[ -d "${SKILLS_TARGET}/.git" ]] || die "SKILLS_TARGET '${SKILLS_TARGET}' is not a git checkout"
-  target="$SKILLS_TARGET"
-  echo "Syncing into ${target}"
-else
-  [[ -n "$SKILLS_TOKEN" ]] || die "SKILLS_TOKEN is required (set DRY_RUN=local for offline testing)"
-  target="${tmpdir}/skills"
-  echo "Cloning ${TARGET_REPO} into ${target}..."
-  git clone -q --depth 1 --branch "$TARGET_BRANCH" "https://github.com/${TARGET_REPO}.git" "$target"
-fi
-
-assert_remote_url "$target"
-assert_branch "$target"
-# `git add -A` below would sweep anything else in the checkout into the sync commit.
-[[ -z "$(git -C "$target" status --porcelain)" ]] || die "${target} has uncommitted changes; commit or stash them before syncing into it"
+target="${tmpdir}/skills"
+echo "Cloning ${TARGET_REPO} into ${target}..."
+git clone -q --depth 1 --branch "$TARGET_BRANCH" "$SKILLS_REPO_URL" "$target"
 
 # --- Apply the sync to the target's working tree ---
 #
@@ -324,11 +293,6 @@ if [[ "$DRY_RUN" == "remote" ]]; then
 fi
 
 commit_sync
-
-if [[ "$DRY_RUN" == "local" ]]; then
-  echo "DRY_RUN=local: committed in ${target}, skipping push."
-  exit 0
-fi
 
 # --- Push; when another publisher got there first, apply again from its tip ---
 #
