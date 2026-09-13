@@ -29,7 +29,7 @@ func newEventsCommand() *eventsCommand {
 		Use:   "event",
 		Short: "Read and manage calendar events",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, day, week, add, edit, delete. \"What's on the schedule today?\" is answered by day, not list: day and week read the span as HEY draws it, with a repeating event expanded into the occurrences inside it, over the calendars switched on in HEY. list reads what calendars hold — every calendar unless --calendar names one — and a repeating event is one row, its series, on the day the series began. An edit is not a patch on HEY's side: it resends the notes, location, link, attached email, reminders and time zones the event already carries, so notes lose their formatting and a countdown is removed unless --countdown names one again.",
+			"agent_notes": "Subcommands: list, day, week, add, edit, delete. \"What's on the schedule today?\" is answered by day, not list: day and week read the span as HEY draws it, with a repeating event expanded into the occurrences inside it, over the calendars switched on in HEY. list reads what calendars hold — every calendar unless --calendar names one — and a repeating event is one row, its series, on the day the series began. An edit is not a patch on HEY's side: it resends the notes, location, link, attached email, reminders and time zones the event already carries, so notes lose their formatting and a countdown is removed unless --countdown names one again. edit <series id> changes a whole series; one day of it is edit <series id> --occurrence <occurrence_id from day/week> --apply-to current|future, which keeps the countdown and refuses to flatten notes unless --allow-plain-notes or --notes is given. After --apply-to future HEY splits the series, so read the day again for the new series id.",
 		},
 	}
 
@@ -213,6 +213,13 @@ func (c *eventsAddCommand) run(cmd *cobra.Command, args []string) error {
 type eventsEditCommand struct {
 	cmd    *cobra.Command
 	fields eventFields
+
+	// occurrence and applyTo turn the edit into one of a repeating event's days: the
+	// occurrence_id a day or a week listing serves, and how much of the series the change
+	// reaches. allowPlainNotes accepts what that write cannot keep; see editOccurrence.
+	occurrence      string
+	applyTo         string
+	allowPlainNotes bool
 }
 
 func newEventsEditCommand() *eventsEditCommand {
@@ -229,16 +236,38 @@ countdown is not served at all, so an edit removes one unless --countdown names 
 
 The event is found by reading the calendars it might be on, which is one request each and
 covers the pages HEY answers with. Give the day it starts as [date] to look on that day
-alone, or --calendar to look on one calendar.`,
+alone, or --calendar to look on one calendar.
+
+An id alone changes the whole event, a repeating series included. One day of a series is
+changed with --occurrence, which takes the occurrence_id 'hey event day' and 'hey event
+week' serve (<series id>_<YYYY-MM-DD>, and the series must be the id given), and
+--apply-to, which is required with it: 'current' changes that day alone and 'future'
+changes it and every day after it, the two choices HEY's own form offers. The day is read
+on its own date, so [date] can be left out or must name it. A change to --repeat,
+--repeat-until or --repeat-times cannot apply to one day, so 'current' refuses those
+flags; 'future' takes them, and HEY splits the series there either way, so the days from
+this one on get a new series id.
+
+An occurrence edit keeps more than a whole-event edit does, and refuses what it cannot
+keep. The countdown is read back and sent again, so it survives unless --countdown 0
+removes it. Notes are still only served as plain text, so an occurrence edit that would
+send formatted notes back as text refuses unless --allow-plain-notes accepts that or
+--notes replaces them.`,
 		Example: `  hey event edit 4821 --title "Design review (moved)"
   hey event edit 4821 --starts-on 2026-09-04 --start-time 15:00
   hey event edit 4821 2026-09-02 --location "Studio, 3rd floor"
-  hey event edit 4821 --circle=false`,
+  hey event edit 4821 --circle=false
+  hey event edit 4821 --occurrence 4821_2026-09-15 --apply-to current --start-time 15:00 --json
+  hey event edit 4821 --occurrence 4821_2026-09-15 --apply-to future --location "Studio, 3rd floor" --allow-plain-notes`,
 		RunE: eventsEditCommand.run,
 		Args: cobra.RangeArgs(1, 2),
 	}
 
 	eventsEditCommand.fields.registerFlags(eventsEditCommand.cmd)
+	flags := eventsEditCommand.cmd.Flags()
+	flags.StringVar(&eventsEditCommand.occurrence, "occurrence", "", "One day of a repeating event, by the occurrence_id 'hey event day' serves (<series id>_<YYYY-MM-DD>)")
+	flags.StringVar(&eventsEditCommand.applyTo, "apply-to", "", "How much of the series an --occurrence edit reaches: current (that day alone) or future (that day and every one after it)")
+	flags.BoolVar(&eventsEditCommand.allowPlainNotes, "allow-plain-notes", false, "Let an --occurrence edit send notes it is not changing back as plain text, losing their formatting")
 
 	return eventsEditCommand
 }
@@ -261,7 +290,15 @@ func (c *eventsEditCommand) run(cmd *cobra.Command, args []string) error {
 		on = args[1]
 	}
 
+	occurrence, err := c.parseOccurrence(cmd, id, on)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
+	if occurrence != nil {
+		return c.editOccurrence(ctx, cmd, *occurrence)
+	}
+
 	event, err := c.findEvent(ctx, id, on)
 	if err != nil {
 		return err
@@ -334,18 +371,7 @@ func (c *eventsEditCommand) run(cmd *cobra.Command, args []string) error {
 // never contain a timed event, which is how editing an event by its own day used to
 // answer not-found. Reading a day too many is harmless here: the event is matched by id.
 func (c *eventsEditCommand) findEvent(ctx context.Context, id int64, on string) (generated.Recording, error) {
-	endsOn := on
-	if day, err := time.Parse("2006-01-02", on); err == nil {
-		endsOn = day.AddDate(0, 0, 1).Format("2006-01-02")
-	}
-	filter := recordingFilter{
-		calendar:         c.fields.calendar,
-		startsOn:         on,
-		endsOn:           endsOn,
-		defaultWindow:    func(now time.Time) (time.Time, time.Time) { return now.AddDate(-1, 0, 0), now.AddDate(1, 0, 0) },
-		defaultCalendars: allCalendarIDs,
-	}
-	window, err := filter.resolve(ctx)
+	window, err := c.searchWindow(ctx, on)
 	if err != nil {
 		return generated.Recording{}, err
 	}
@@ -362,6 +388,24 @@ func (c *eventsEditCommand) findEvent(ctx context.Context, id int64, on string) 
 
 	return generated.Recording{}, apierr.ErrNotFoundHint("event", strconv.FormatInt(id, 10),
 		fmt.Sprintf("hey event edit %d <YYYY-MM-DD>  reads the day it starts on", id))
+}
+
+// searchWindow is where an edit looks for its event: the day given, read as [day, day+1),
+// or a window wide enough to cover an event somebody is editing, over the calendar
+// --calendar names or every one of them.
+func (c *eventsEditCommand) searchWindow(ctx context.Context, on string) (recordingWindow, error) {
+	endsOn := on
+	if day, err := time.Parse(dateLayout, on); err == nil {
+		endsOn = day.AddDate(0, 0, 1).Format(dateLayout)
+	}
+	filter := recordingFilter{
+		calendar:         c.fields.calendar,
+		startsOn:         on,
+		endsOn:           endsOn,
+		defaultWindow:    func(now time.Time) (time.Time, time.Time) { return now.AddDate(-1, 0, 0), now.AddDate(1, 0, 0) },
+		defaultCalendars: allCalendarIDs,
+	}
+	return filter.resolve(ctx)
 }
 
 // delete

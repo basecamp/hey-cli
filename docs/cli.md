@@ -380,6 +380,8 @@ hey event add "Sarah's birthday" --starts-on 2026-09-02     # no time, so all da
 hey event add "Standup" --start-time 09:15 --repeat every_weekday --remind 10m
 hey event edit 4821 --title "Design review (moved)"
 hey event edit 4821 --starts-on 2026-09-04 --start-time 15:00
+hey event edit 4821 --occurrence 4821_2026-09-15 --apply-to current --start-time 15:00   # that day alone
+hey event edit 4821 --occurrence 4821_2026-09-15 --apply-to future --location "Studio, 3rd floor" --allow-plain-notes
 hey event delete 4821
 ```
 
@@ -410,6 +412,32 @@ saving flattens their formatting; and a countdown is not served at all, so an ed
 one unless `--countdown` names it again. An event that cannot be read is refused rather
 than written blind — pass the day it starts (`hey event edit 4821 2026-09-02`) or
 `--calendar` to look somewhere narrower.
+
+An id on its own changes the whole event, a repeating series included. One day of a
+series is changed with `--occurrence`, which takes the `occurrence_id` that `hey event
+day` and `hey event week` serve — `<series id>_<YYYY-MM-DD>`, byte for byte, naming the
+series the positional id names — together with `--apply-to`, which is required with it
+and is the choice HEY's own form puts to you: `current` changes that day alone, `future`
+changes it and every day after it. `--apply-to` without `--occurrence` is a usage error,
+as is any other value. The day is read on its own date rather than searched for, so
+`[date]` can be left out or must name it. A change to `--repeat`, `--repeat-until` or
+`--repeat-times` cannot apply to one day, so `current` refuses those flags; `future` takes
+them. HEY splits the series on a `future` edit either way — the days from this one on
+become a new series with a new id, the old series stops the day before, and the answer is
+still the day you edited — so read the day or the week again for the new series id before
+editing it further.
+
+An occurrence edit keeps more than a whole-event edit does, and refuses what it cannot
+keep. It sends back the day's own schedule and zones, notes, location, link, attached
+email, reminders and circle, taking them from the day itself where HEY has already written
+that day out on its own. The countdown is read back from the recording HEY keeps for it
+and sent again, so it survives unless `--countdown 0` removes it. Notes are still served
+only as plain text and nothing can tell formatted notes from plain ones, so an occurrence
+edit that would send notes back as text is refused unless `--allow-plain-notes` accepts
+the loss or `--notes` replaces them; an event with no notes needs neither. A whole-event
+edit accepts `--allow-plain-notes` too, and it changes nothing there. HEY answers the
+write with not-found both for a date that is not a day of the series and for a series you
+cannot edit.
 
 ### Todos
 

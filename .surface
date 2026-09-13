@@ -185,6 +185,8 @@ hey event day --limit
 hey event delete
 hey event edit
 hey event edit --all-day
+hey event edit --allow-plain-notes
+hey event edit --apply-to
 hey event edit --calendar
 hey event edit --circle
 hey event edit --countdown
@@ -195,6 +197,7 @@ hey event edit --invite
 hey event edit --link
 hey event edit --location
 hey event edit --notes
+hey event edit --occurrence
 hey event edit --remind
 hey event edit --repeat
 hey event edit --repeat-times
