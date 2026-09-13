@@ -171,6 +171,9 @@ jobs:
       - name: Run bats suite
         run: make test-e2e
 
+      - name: Test the skills sync
+        run: make test-sync-skills
+
   installer-bash32:
     name: Installer (bash 3.2)
     runs-on: macos-latest

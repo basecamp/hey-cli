@@ -6,8 +6,10 @@
 # needs a way back without cutting a new tag. This is it.
 #
 # scripts/sync-skills.sh mirrors the skills/ tree at the given ref into
-# basecamp/skills and no-ops when the content already matches, so re-running it
-# for an already-synced release is safe.
+# basecamp/skills — only this CLI's skills, tracked in its own manifest there
+# (.managed-skills.hey-cli); other CLIs' skills are never touched — and no-ops
+# when the content already matches, so re-running it for an already-synced
+# release is safe.
 name: Sync skills
 
 on:
@@ -53,8 +55,8 @@ jobs:
             exit 1
           fi
 
-          # sync-skills.sh mirrors the tree wholesale, so syncing an older tag
-          # would roll basecamp/skills back. The only reason to run this by
+          # sync-skills.sh mirrors this CLI's skills wholesale, so syncing an
+          # older tag would roll them back in basecamp/skills. The only reason to run this by
           # hand is that the newest release failed to sync — so require exactly
           # that release.
           latest=$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName --jq .tagName)

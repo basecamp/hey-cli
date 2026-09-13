@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-e2e test-smoke preview-callback coverage fmt fmt-check vet lint tidy tidy-check \
+.PHONY: build test test-unit test-e2e test-sync-skills test-smoke preview-callback coverage fmt fmt-check vet lint tidy tidy-check \
 	race-test vuln gosec secrets replace-check check-toolchain check security \
 	release-check release test-release bench bench-save bench-compare \
 	check-surface update-surface check-surface-compat check-size check-lint-lockstep \
@@ -25,6 +25,7 @@ help:
 	@echo "  make test-unit       Run unit tests"
 	@echo "  make test            Alias for test-unit"
 	@echo "  make test-e2e        Run the bats suite (installer and script contracts)"
+	@echo "  make test-sync-skills Run the skills sync as two CLIs against a throwaway target"
 	@echo "  make test-smoke      Run smoke tests against a live server"
 	@echo "  make preview-callback Preview the OAuth callback screens in a browser"
 	@echo "  make coverage        Run cross-package coverage and enforce the 70.8% floor"
@@ -43,7 +44,7 @@ help:
 	@echo "  make secrets         Run gitleaks secret scan"
 	@echo "  make replace-check   Guard against replace directives in go.mod"
 	@echo ""
-	@echo "  make check           fmt-check + vet + lint + test-unit + tidy-check"
+	@echo "  make check           fmt-check + vet + lint + test-unit + test-sync-skills + tidy-check"
 	@echo "  make security        lint + vuln + gosec + secrets"
 	@echo "  make release-check   check + replace-check + vuln + gosec + race-test"
 	@echo "  make release         Run release preflight and tag (VERSION=v1.2.3 [DRY_RUN=1])"
@@ -102,6 +103,10 @@ preview-callback: check-toolchain
 # Run the bats end-to-end suite (installers, release scripts). Needs bats-core.
 test-e2e:
 	@./tests/e2e/run.sh
+
+# Run the skills sync against a throwaway basecamp/skills, as two CLIs publishing in turn
+test-sync-skills:
+	scripts/test-sync-skills.sh
 
 # Run smoke tests against a live HEY server.
 # Requires: a running server (default http://app.hey.localhost:3003) and Chrome.
@@ -171,7 +176,7 @@ replace-check:
 	fi
 
 # Local CI gate
-check: fmt-check vet lint test-unit tidy-check check-surface check-release-lockstep
+check: fmt-check vet lint test-unit test-sync-skills tidy-check check-surface check-release-lockstep
 
 # Verify every workflow lints with the same golangci-lint version
 check-lint-lockstep:
