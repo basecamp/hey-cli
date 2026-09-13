@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -91,16 +92,24 @@ func (d *eventDetail) helpBindings() []helpBinding {
 }
 
 // openableLink is the event's link when it is a web address the OS launcher should be handed:
-// http or https. Event links are server data and the edit form takes any URI with a host, so a
-// shared event could carry a file:// path or an application scheme — those are shown on the
-// card but not opened.
+// http or https, with a non-empty host. Event links are server data and the edit form takes any
+// URI with a host, so a shared event could carry a file:// path, an application scheme, or a
+// hostless URI like "https:roadmap" — those are shown on the card but never opened.
+// The scheme comparison is case-insensitive so "HTTPS://…" is treated the same as "https://…".
 func (d *eventDetail) openableLink() (string, bool) {
 	link := strings.TrimSpace(d.event.Link)
 	if link == "" {
 		return "", false
 	}
 	parsed, err := url.Parse(link)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+	if err != nil {
+		return "", false
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return "", false
+	}
+	if parsed.Host == "" {
 		return "", false
 	}
 	return link, true
@@ -123,6 +132,9 @@ func (d *eventDetail) content() string {
 		{"Link", terminal.SanitizeLine(d.event.Link)},
 		{"Guests", d.guests()},
 	}
+	// The label column is 8 chars + 2 spaces of padding; what remains is for the value.
+	labelWidth := 10
+	valueWidth := max(modalContentWidth(d.width)-labelWidth, 1)
 	wrote := false
 	for _, row := range rows {
 		if row[1] == "" {
@@ -132,7 +144,14 @@ func (d *eventDetail) content() string {
 			b.WriteString("\n")
 			wrote = true
 		}
-		fmt.Fprintf(&b, "%s  %s\n", d.styles.entryFrom.Render(fmt.Sprintf("%-8s", row[0])), row[1])
+		// Wrap long values so no row makes the modal wider than the terminal.
+		for i, valueLine := range wrapText(row[1], valueWidth) {
+			if i == 0 {
+				fmt.Fprintf(&b, "%s  %s\n", d.styles.entryFrom.Render(fmt.Sprintf("%-8s", row[0])), valueLine)
+			} else {
+				fmt.Fprintf(&b, "%s  %s\n", strings.Repeat(" ", 8), valueLine)
+			}
+		}
 	}
 
 	if notes := strings.TrimRight(d.event.Notes, "\n"); strings.TrimSpace(notes) != "" {
@@ -159,7 +178,17 @@ func (d *eventDetail) when() string {
 
 	if d.event.AllDay {
 		if !ends.IsZero() && ends.After(starts) {
-			return starts.Format("Monday, January 2") + " – " + ends.Format("Monday, January 2") + " · all day"
+			// Normalize same-day: if end is the same calendar day as start, it's a single-day event.
+			// Also handle exclusive midnight end: a midnight end belongs to the previous day.
+			endDay := ends
+			if ends.Hour() == 0 && ends.Minute() == 0 && ends.Second() == 0 {
+				// Exclusive midnight end — the event ends before this day begins.
+				endDay = ends.Add(-24 * time.Hour)
+			}
+			if sameDay(starts, endDay) {
+				return starts.Format("Monday, January 2") + " · all day"
+			}
+			return starts.Format("Monday, January 2") + " – " + endDay.Format("Monday, January 2") + " · all day"
 		}
 		return starts.Format("Monday, January 2") + " · all day"
 	}

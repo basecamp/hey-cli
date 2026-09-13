@@ -217,6 +217,8 @@ func errorView(errMsg string, width int) string {
 }
 
 // wrapText wraps a string to fit within maxWidth characters.
+// Words longer than maxWidth are hard-wrapped at the boundary so that a single long token
+// (like a URL) does not make the containing column wider than the terminal.
 func wrapText(s string, maxWidth int) []string {
 	if maxWidth <= 0 {
 		return []string{s}
@@ -227,15 +229,31 @@ func wrapText(s string, maxWidth int) []string {
 	}
 
 	var lines []string
-	line := words[0]
-	for _, w := range words[1:] {
-		if len(line)+1+len(w) > maxWidth {
+	line := ""
+	for _, w := range words {
+		// Hard-wrap any word that alone exceeds maxWidth.
+		for len(w) > maxWidth {
+			if line != "" {
+				lines = append(lines, line)
+				line = ""
+			}
+			lines = append(lines, w[:maxWidth])
+			w = w[maxWidth:]
+		}
+		if w == "" {
+			continue
+		}
+		if line == "" {
+			line = w
+		} else if len(line)+1+len(w) > maxWidth {
 			lines = append(lines, line)
 			line = w
 		} else {
 			line += " " + w
 		}
 	}
-	lines = append(lines, line)
+	if line != "" {
+		lines = append(lines, line)
+	}
 	return lines
 }
