@@ -18,6 +18,7 @@ func TestEventDetailOpensOnlyHostedWebLinks(t *testing.T) {
 		{name: "HTTPS link (uppercase scheme)", link: "HTTPS://meet.example.com/roadmap", want: true},
 		{name: "hostless HTTPS link", link: "https:roadmap", want: false},
 		{name: "empty HTTPS host", link: "https://", want: false},
+		{name: "port only host (https://:443)", link: "https://:443/path", want: false},
 		{name: "file link", link: "file:///etc/passwd", want: false},
 		{name: "application scheme", link: "zoomus://zoom.us/join/123", want: false},
 		{name: "empty link", link: "", want: false},

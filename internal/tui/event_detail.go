@@ -109,7 +109,7 @@ func (d *eventDetail) openableLink() (string, bool) {
 	if scheme != "http" && scheme != "https" {
 		return "", false
 	}
-	if parsed.Host == "" {
+	if parsed.Hostname() == "" {
 		return "", false
 	}
 	return link, true
@@ -130,7 +130,10 @@ func (d *eventDetail) content() string {
 			b.WriteString(whenLine + "\n")
 		}
 	}
-	if label := repeatFrequencyLabel(d.event.RepeatKind); d.event.Recurring && label != "" {
+	if label := repeatFrequencyLabel(d.event.RepeatKind); d.event.Recurring {
+		if label == "" {
+			label = "on a schedule" // unknown repeat kind — still recurring, just not a named preset
+		}
 		b.WriteString(styleMuted.Render("Repeats "+label) + "\n")
 	}
 

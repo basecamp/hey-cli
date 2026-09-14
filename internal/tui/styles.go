@@ -235,7 +235,9 @@ func wrapText(s string, maxWidth int) []string {
 	for _, w := range words {
 		// Hard-wrap any word whose display width alone exceeds maxWidth, advancing by
 		// whole grapheme clusters so we never split inside a rune or emoji sequence.
-		for displayWidth(w) > maxWidth {
+		// Compute the word width once; iterate over chunks to keep this linear.
+		wWidth := displayWidth(w)
+		for wWidth > maxWidth {
 			if line != "" {
 				lines = append(lines, line)
 				line = ""
@@ -247,11 +249,11 @@ func wrapText(s string, maxWidth int) []string {
 			}
 			lines = append(lines, chunk)
 			w = w[len(chunk):]
+			wWidth = displayWidth(w)
 		}
 		if w == "" {
 			continue
 		}
-		wWidth := displayWidth(w)
 		if line == "" {
 			line = w
 			lineWidth = wWidth
