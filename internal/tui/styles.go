@@ -193,8 +193,8 @@ func errorView(errMsg string, width int) string {
 	lines := wrapText(errMsg, maxInner)
 	innerWidth := 6
 	for _, l := range lines {
-		if len(l) > innerWidth {
-			innerWidth = len(l)
+		if w := displayWidth(l); w > innerWidth {
+			innerWidth = w
 		}
 	}
 
@@ -207,7 +207,7 @@ func errorView(errMsg string, width int) string {
 	var b strings.Builder
 	b.WriteString(padTo(border.Render("╭─ Error "+strings.Repeat("─", innerWidth-6)+"╮")) + "\n")
 	for _, l := range lines {
-		pad := strings.Repeat(" ", innerWidth-len(l))
+		pad := strings.Repeat(" ", innerWidth-displayWidth(l))
 		b.WriteString(padTo(border.Render("│")+" "+errStyle.Render(l)+pad+" "+border.Render("│")) + "\n")
 	}
 	b.WriteString(padTo(border.Render("╰"+strings.Repeat("─", innerWidth+2)+"╯")) + "\n")
