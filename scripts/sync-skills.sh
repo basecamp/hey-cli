@@ -22,11 +22,16 @@
 # every run as a comment-only tombstone. The pre-fix script skips any line it cannot
 # parse as a skill name, but treats a missing file as licence to own every skills/*
 # directory — so the tombstone is what stops an un-upgraded sibling from deleting
-# anyone's skills, whichever CLI upgrades first (basecamp/skills#5). One case is
-# accepted: a skill a still-pre-fix sibling drops after the tombstone exists stays
-# behind in the target (that script has no names left to delete by, and the
-# sibling's own first run here removes nothing) — a lingering directory to remove
-# by hand, which beats guessing ownership from the legacy file.
+# this source's skills, whichever CLI upgrades first (basecamp/skills#5). It shields
+# only the sources that have upgraded: a pre-fix sibling still writes its own names
+# to .managed-skills, and a second pre-fix sibling still deletes those — the #5
+# clobber, confined to the CLIs yet to upgrade and gone once each has; nothing the
+# target holds can make that script delete less, since a file it cannot read widens
+# its reach to every skills/* directory. One more case is accepted: a skill a
+# still-pre-fix sibling drops after the tombstone exists stays behind in the target
+# (that script has no names left to delete by, and the sibling's own first run here
+# removes nothing) — a lingering directory to remove by hand, which beats guessing
+# ownership from the legacy file.
 #
 # Required env vars:
 #   RELEASE_TAG      — the release tag (e.g. v1.2.3)
@@ -187,10 +192,13 @@ fi
 #
 # A private global config for every git call below: the bot is the identity for
 # the commit, and for the one a rejected push makes again, and the token goes in as
-# a URL rewrite so it never appears in argv or in the remote URL. Only the user's
-# global file is replaced (~/.gitconfig: identity, signing, credential helpers, hooks
-# path); the system config and any GIT_CONFIG_COUNT/GIT_CONFIG_KEY_* settings in the
-# environment still apply — the test's race case injects a hooks path that way.
+# an Authorization header scoped to github.com, the way actions/checkout sends it —
+# not as a URL rewrite, which git expands before handing the URL to git-remote-https
+# in argv. The remote URL stays clean; the token is only in this file, mode 600,
+# removed with the tmpdir. Only the user's global file is replaced (~/.gitconfig:
+# identity, signing, credential helpers, hooks path); the system config and any
+# GIT_CONFIG_COUNT/GIT_CONFIG_KEY_* settings in the environment still apply — the
+# test's race case injects a hooks path that way.
 export GIT_CONFIG_GLOBAL="${tmpdir}/gitconfig"
 cat > "$GIT_CONFIG_GLOBAL" <<GITCFG
 [user]
@@ -201,8 +209,8 @@ chmod 600 "$GIT_CONFIG_GLOBAL"
 if [[ "$SKILLS_REPO_URL" == https://github.com/* ]]; then
   [[ -n "$SKILLS_TOKEN" ]] || die "SKILLS_TOKEN is required to push to ${SKILLS_REPO_URL} (set DRY_RUN=local for offline testing)"
   cat >> "$GIT_CONFIG_GLOBAL" <<GITCFG
-[url "https://x-access-token:${SKILLS_TOKEN}@github.com/"]
-	insteadOf = https://github.com/
+[http "https://github.com/"]
+	extraheader = AUTHORIZATION: basic $(printf 'x-access-token:%s' "$SKILLS_TOKEN" | base64 | tr -d '\n')
 GITCFG
 fi
 

@@ -32,6 +32,11 @@ trap 'rm -rf "$work"' EXIT
 export GIT_CONFIG_GLOBAL="${work}/gitconfig" GIT_CONFIG_NOSYSTEM=1
 printf '[user]\n\tname = test\n\temail = test@example.com\n' > "$GIT_CONFIG_GLOBAL"
 
+# The token-required case points the script at the real basecamp/skills; a token
+# inherited from the caller's environment would let it clone and publish the
+# fixtures there.
+unset SKILLS_TOKEN
+
 # A file:// URL rather than a path: git ignores --depth for a path, and the
 # script's clone is shallow, so the retry has to fetch as it would from GitHub.
 origin="${work}/origin.git"
