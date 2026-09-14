@@ -106,7 +106,7 @@ test-e2e:
 
 # Run the skills sync against a throwaway basecamp/skills, as two CLIs publishing in turn
 test-sync-skills:
-	scripts/test-sync-skills.sh
+	EXPECTED_SOURCE=hey-cli scripts/test-sync-skills.sh
 
 # Run smoke tests against a live HEY server.
 # Requires: a running server (default http://app.hey.localhost:3003) and Chrome.

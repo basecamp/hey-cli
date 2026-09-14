@@ -8,12 +8,16 @@
 # from a clone of its own. It starts in the state basecamp/skills#5 left it:
 # basecamp-cli's skills and the shared .managed-skills listing them. Then
 # hey-cli and basecamp-cli sync in turn, one loses a skill, a pre-fix sibling
-# rewrites the legacy manifest, two manifests claim one name, and a sibling
-# wins the race to push — after each step both sources' skills must be where
-# they belong. No network and no token.
+# rewrites the legacy manifest, two manifests claim one name, a sibling wins
+# the race to push, and the script runs as the source its own CLI_NAME default
+# names — after each step both sources' skills must be where they belong. No
+# network and no token.
 #
 # Usage: scripts/test-sync-skills.sh            (tests scripts/sync-skills.sh)
 #        SYNC_SCRIPT=path/to/sync-skills.sh scripts/test-sync-skills.sh
+#        EXPECTED_SOURCE=<name>-cli scripts/test-sync-skills.sh
+#          (the source the script publishes as when nothing names one; a CLI's
+#          Makefile passes its own, the default is read off the script's CLI_NAME line)
 
 set -euo pipefail
 
@@ -85,11 +89,17 @@ refresh_target() {
   git -C "$target" reset -q --hard FETCH_HEAD
 }
 
+# The script against origin with the identifiers a release carries; the caller's
+# VAR=value pairs go in front of the fixed ones, so only SKILLS_REPO_URL can be
+# overridden (DRY_RUN=local points it nowhere to prove it is never reached).
+run_sync() {  # [VAR=value...]
+  env SKILLS_REPO_URL="$origin_url" "$@" RELEASE_TAG=v9.9.9 SOURCE_SHA=0123abcd "$SYNC_SCRIPT" > "$out" 2>&1
+}
+
 sync() {  # source, fixture, [VAR=value...]
   local source="$1" fixture="$2"
   shift 2
-  if env SKILLS_REPO_URL="$origin_url" "$@" SYNC_SOURCE="$source" SKILLS_SOURCE="${fixture}/skills" \
-       RELEASE_TAG=v9.9.9 SOURCE_SHA=0123abcd "$SYNC_SCRIPT" > "$out" 2>&1; then
+  if run_sync "$@" SYNC_SOURCE="$source" SKILLS_SOURCE="${fixture}/skills"; then
     ok "sync as ${source} succeeded"
   else
     not_ok "sync as ${source} succeeded"
@@ -101,12 +111,25 @@ sync() {  # source, fixture, [VAR=value...]
 sync_expecting_failure() {  # source, fixture, [VAR=value...]
   local source="$1" fixture="$2"
   shift 2
-  if env SKILLS_REPO_URL="$origin_url" "$@" SYNC_SOURCE="$source" SKILLS_SOURCE="${fixture}/skills" \
-       RELEASE_TAG=v9.9.9 SOURCE_SHA=0123abcd "$SYNC_SCRIPT" > "$out" 2>&1; then
+  if run_sync "$@" SYNC_SOURCE="$source" SKILLS_SOURCE="${fixture}/skills"; then
     not_ok "sync as ${source} refused"
     sed 's/^/    /' "$out"
   else
     ok "sync as ${source} refused"
+  fi
+  refresh_target
+}
+
+# The script with neither SYNC_SOURCE nor CLI_NAME set, so the source is the one
+# the CLI_NAME default line names — the line each CLI edits, which the other
+# runs here never reach because they set SYNC_SOURCE to play another CLI.
+sync_as_default() {  # fixture
+  local fixture="$1"
+  if (unset CLI_NAME SYNC_SOURCE; run_sync SKILLS_SOURCE="${fixture}/skills"); then
+    ok "sync as the default source succeeded"
+  else
+    not_ok "sync as the default source succeeded"
+    sed 's/^/    /' "$out"
   fi
   refresh_target
 }
@@ -331,6 +354,26 @@ assert_output "Skills synced to basecamp/skills"
 assert_content skills/hey/SKILL.md "hey v5"
 assert_manifest basecamp-cli basecamp basecamp-doctor
 assert_manifest hey-cli hey
+
+# --- The CLI_NAME default: the one line each CLI's copy of the script changes ---
+#
+# A copy whose default names another CLI, or still names the seed's placeholder,
+# fails here rather than publishing under that source's manifest and bot identity.
+# The CLI's Makefile says which source to expect; the seed expects what its own
+# CLI_NAME line says. Last, because in hey-cli's or basecamp-cli's repository this
+# is that CLI's own sync, which rightly rewrites its manifest from the new tree.
+
+echo "# with nothing set, the script publishes as the source its CLI_NAME default names"
+default_source="${EXPECTED_SOURCE:-$(sed -n 's/^CLI_NAME=.*CLI_NAME:-\([a-z0-9-]*\)}.*/\1/p' "$SYNC_SCRIPT")-cli}"
+assert "a default source is known (${default_source})" test "$default_source" != "-cli"
+c="${work}/default"
+write_skill "${c}/skills/default-skill" "default-skill v1"
+sync_as_default "$c"
+assert_output "Skills synced to basecamp/skills (main) from ${default_source} v9.9.9"
+assert_skill default-skill
+assert_manifest "$default_source" default-skill
+assert_author "$default_source"
+assert_tombstone
 
 # --- Verdict ---
 
