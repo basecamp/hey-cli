@@ -146,6 +146,19 @@ func TestWrapTextSplitsAtGraphemeBoundaries(t *testing.T) {
 	}
 }
 
+// When the leading grapheme of a word is wider than maxWidth, wrapText must still advance
+// past it and continue wrapping the suffix rather than looping forever or dropping it.
+func TestWrapTextAdvancesPastOversizedLeadingGrapheme(t *testing.T) {
+	// A 3-cell wide emoji followed by ASCII; maxWidth=2 means the emoji cannot fit.
+	// wrapText should emit the emoji alone and then wrap the rest normally.
+	s := "🎉abc"
+	lines := wrapText(s, 2)
+	rejoined := strings.Join(lines, "")
+	if rejoined != s {
+		t.Errorf("wrapText lost characters: got %q, want %q", rejoined, s)
+	}
+}
+
 // On a narrow terminal the when() line must not exceed the modal content width.
 func TestEventCardWhenLineWrapsOnNarrowTerminal(t *testing.T) {
 	d := &eventDetail{
@@ -159,6 +172,26 @@ func TestEventCardWhenLineWrapsOnNarrowTerminal(t *testing.T) {
 		stripped := ansi.Strip(line)
 		if displayWidth(stripped) > modalContentWidth(40) {
 			t.Errorf("content line exceeds modal content width on narrow terminal: %q (width=%d)", stripped, displayWidth(stripped))
+		}
+	}
+}
+
+// On a very narrow terminal (contentWidth <= labelWidth) the card must use stacked layout.
+func TestEventCardUsesStackedLayoutOnVeryNarrowTerminal(t *testing.T) {
+	d := &eventDetail{
+		event: Recording{
+			StartsAt: atLocal("2026-08-20T14:00:00"), EndsAt: atLocal("2026-08-20T15:00:00"),
+			Location: "Sala 2",
+		},
+		styles: testVC().styles,
+		width:  10, // very narrow — contentWidth will be <= labelWidth
+		height: 20,
+	}
+	content := d.content()
+	for _, line := range strings.Split(content, "\n") {
+		stripped := ansi.Strip(line)
+		if displayWidth(stripped) > modalContentWidth(10) {
+			t.Errorf("stacked content line exceeds modal content width on very narrow terminal: %q (width=%d)", stripped, displayWidth(stripped))
 		}
 	}
 }

@@ -144,7 +144,11 @@ func (d *eventDetail) content() string {
 		{"Guests", d.guests()},
 	}
 	// The label column is 8 chars + 2 spaces of padding; what remains is for the value.
-	labelWidth := 10
+	// On very narrow terminals the label column alone would exceed contentWidth, so we
+	// switch to a stacked layout (label on one line, value indented on the next) to keep
+	// every row within the modal's content width.
+	const labelWidth = 10 // 8-char label + 2-space gap
+	stacked := contentWidth <= labelWidth
 	valueWidth := max(contentWidth-labelWidth, 1)
 	wrote := false
 	for _, row := range rows {
@@ -155,12 +159,21 @@ func (d *eventDetail) content() string {
 			b.WriteString("\n")
 			wrote = true
 		}
-		// Wrap long values so no row makes the modal wider than the terminal.
-		for i, valueLine := range wrapText(row[1], valueWidth) {
-			if i == 0 {
-				fmt.Fprintf(&b, "%s  %s\n", d.styles.entryFrom.Render(fmt.Sprintf("%-8s", row[0])), valueLine)
-			} else {
-				fmt.Fprintf(&b, "%s  %s\n", strings.Repeat(" ", 8), valueLine)
+		if stacked {
+			// Stacked layout: label on its own line (truncated to contentWidth), value indented by 2.
+			label := fitGraphemes(row[0], contentWidth)
+			b.WriteString(d.styles.entryFrom.Render(label) + "\n")
+			for _, valueLine := range wrapText(row[1], max(contentWidth-2, 1)) {
+				fmt.Fprintf(&b, "  %s\n", valueLine)
+			}
+		} else {
+			// Side-by-side layout: fixed 8-char label, value wrapped to remaining width.
+			for i, valueLine := range wrapText(row[1], valueWidth) {
+				if i == 0 {
+					fmt.Fprintf(&b, "%s  %s\n", d.styles.entryFrom.Render(fmt.Sprintf("%-8s", row[0])), valueLine)
+				} else {
+					fmt.Fprintf(&b, "%s  %s\n", strings.Repeat(" ", 8), valueLine)
+				}
 			}
 		}
 	}

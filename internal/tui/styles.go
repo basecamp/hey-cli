@@ -235,7 +235,7 @@ func wrapText(s string, maxWidth int) []string {
 	for _, w := range words {
 		// Hard-wrap any word whose display width alone exceeds maxWidth, advancing by
 		// whole grapheme clusters so we never split inside a rune or emoji sequence.
-		// Compute the word width once; iterate over chunks to keep this linear.
+		// Track the remaining width by subtraction to keep the inner loop linear.
 		wWidth := displayWidth(w)
 		for wWidth > maxWidth {
 			if line != "" {
@@ -245,11 +245,18 @@ func wrapText(s string, maxWidth int) []string {
 			}
 			chunk := fitGraphemes(w, maxWidth)
 			if chunk == "" {
-				break // single cluster wider than maxWidth — emit it whole to avoid infinite loop
+				// The leading grapheme is wider than maxWidth and cannot be split
+				// further; emit it as-is and advance past it so the loop terminates.
+				cluster, clusterWidth := firstCluster(w)
+				lines = append(lines, cluster)
+				w = w[len(cluster):]
+				wWidth -= clusterWidth
+				continue
 			}
+			chunkWidth := displayWidth(chunk)
 			lines = append(lines, chunk)
 			w = w[len(chunk):]
-			wWidth = displayWidth(w)
+			wWidth -= chunkWidth
 		}
 		if w == "" {
 			continue
