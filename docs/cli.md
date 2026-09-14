@@ -394,8 +394,10 @@ lists once as the series it is stored as, not once per day it falls on.
 
 `hey event day` and `hey event week` read a span the way HEY's own views draw it: a
 repeating event is expanded into the occurrences that fall inside it, each carrying that
-day's own times, an `occurrence_id`, and the id of the series it repeats — which is what
-`hey event edit` and `hey event delete` take. A period covers the calendars switched on in
+day's own times and an `occurrence_id`. An occurrence HEY draws from the series carries the
+series' id, which `hey event edit` and `hey event delete` take for the whole series; a day
+HEY has written out on its own carries an id of its own, which those two act on for that
+day alone, with the series in `parent_id`. A period covers the calendars switched on in
 HEY, the same set the app draws, so `day` and `week` take no `--calendar` — only `--limit`
 and `--all`. With no date they read the account's own today, whatever zone the machine
 runs in.

@@ -697,8 +697,10 @@ repeating event lists once as its series, not once per day.
 
 **"What's on my schedule today?" is `hey event day`, not `list`.** A day or a week is the
 span as HEY draws it: a repeating event is expanded into the occurrences inside it, each
-carrying that day's own times and an `occurrence_id`, with its `id` still naming the
-series that `edit` and `delete` take. The period covers the calendars switched on in HEY,
+carrying that day's own times and an `occurrence_id`. An occurrence drawn from the series
+has the series' `id` (what `edit`/`delete` take for the whole series); a day HEY has
+written out on its own has its own `id` (acting on that day alone) with the series in
+`parent_id`. The period covers the calendars switched on in HEY,
 so `day` and `week` take no `--calendar` — only `--limit` and `--all`.
 
 **Response format:** a flat array of events. Each has `id`, `title`, `starts_at`, `ends_at`,

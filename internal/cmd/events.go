@@ -164,7 +164,7 @@ func (c *eventsAddCommand) run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	repeat, err := c.fields.parseRepeat()
+	repeat, err := c.fields.parseRepeat(cmd)
 	if err != nil {
 		return err
 	}
@@ -316,7 +316,7 @@ func (c *eventsEditCommand) run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	repeat, err := c.fields.parseRepeat()
+	repeat, err := c.fields.parseRepeat(cmd)
 	if err != nil {
 		return err
 	}
@@ -702,13 +702,19 @@ func checkEventDates(startsOn, endsOn string) error {
 
 // parseRepeat reads the recurrence flags into the three fields HEY takes. Nil is no change,
 // which on a whole-event update leaves the recurrence as it was.
-func (f *eventFields) parseRepeat() (*hey.RepeatParams, error) {
+func (f *eventFields) parseRepeat(cmd *cobra.Command) (*hey.RepeatParams, error) {
+	timesGiven := cmd.Flags().Changed("repeat-times")
 	if f.repeat == "" {
-		if f.repeatUntil == "" && f.repeatTimes == 0 {
+		if f.repeatUntil == "" && !timesGiven {
 			return nil, nil
 		}
 		return nil, apierr.ErrUsageHint("repeat-until and repeat-times need --repeat",
 			"hey event add \"Standup\" --repeat every_weekday --repeat-times 20")
+	}
+	// A count of nothing is not "forever", which is what the zero value would have meant.
+	if timesGiven && f.repeatTimes < 1 {
+		return nil, apierr.ErrUsageHint(fmt.Sprintf("repeat-times %d is not a number of occurrences", f.repeatTimes),
+			"a count of at least 1, or --repeat-until for a last day")
 	}
 
 	frequencies := map[string]hey.RepeatFrequency{

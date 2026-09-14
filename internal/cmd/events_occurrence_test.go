@@ -855,6 +855,83 @@ func TestEventsEditOccurrenceFutureRefusesToDropADaysOwnGuests(t *testing.T) {
 	})
 }
 
+// An eight-day countdown on an all-day series is labelled "1 weeks before", and a title-only
+// edit sends the eight days back, not the week.
+func TestEventsEditOccurrenceKeepsAnEightDayCountdown(t *testing.T) {
+	allDay := `{"id":4821,"type":"Calendar::Event","title":"Sarah's birthday","recurring":true,"all_day":true,` +
+		`"starts_at":"2026-09-01T00:00:00Z","ends_at":"2026-09-01T00:00:00Z","calendar":{"id":9,"name":"Work"}}`
+	eightDays := `{"id":77,"type":"Calendar::Countdown","parent_id":4821,"label":"1 weeks before",` +
+		`"starts_at":"2026-08-24T00:00:00Z","ends_at":"2026-09-01T00:00:00Z","calendar":{"id":9,"name":"Work"}}`
+	handler, _ := occurrenceServer(t, "2027-09-01",
+		`{"Calendar::Event":[`+allDay+`]}`,
+		`{"Calendar::Countdown":[`+eightDays+`]}`,
+		func(t *testing.T, form url.Values) {
+			if got := form.Get("countdown_interval_duration_value"); got != "8" {
+				t.Errorf("countdown value = %q, want the eight days the recording spans", got)
+			}
+			if got := form.Get("countdown_interval_duration_unit"); got != "86400" {
+				t.Errorf("countdown unit = %q, want days", got)
+			}
+		})
+	_, err := runJSONCommand(t, handler,
+		"event", "edit", "4821", "--occurrence", "4821_2027-09-01", "--apply-to", "current", "--title", "Sarah's birthday (party)")
+	if err != nil {
+		t.Fatalf("execute occurrence edit: %v", err)
+	}
+}
+
+// A repeat count of nothing is not "forever": zero and a negative count are refused
+// before anything is read, on the future edit that would split the series and on a create.
+func TestEventsRefuseARepeatCountOfNothing(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "future edit, zero", args: []string{"event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "future", "--repeat", "every_week", "--repeat-times=0"}},
+		{name: "future edit, negative", args: []string{"event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "future", "--repeat", "every_week", "--repeat-times=-1"}},
+		{name: "add, zero", args: []string{"event", "add", "Standup", "--calendar", "9", "--repeat", "every_weekday", "--repeat-times=0"}},
+		{name: "whole event, zero", args: []string{"event", "edit", "4821", "--repeat", "every_week", "--repeat-times", "0"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var requests atomic.Int32
+			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.URL.Path == "/calendars.json":
+					_, _ = io.WriteString(w, oneCalendarJSON)
+				case r.Method == http.MethodGet:
+					_, _ = io.WriteString(w, `{"Calendar::Event":[`+occurrenceSeriesJSON+`]}`)
+				default:
+					t.Errorf("unexpected write = %s %s", r.Method, r.URL)
+					http.NotFound(w, r)
+				}
+			})
+			_, err := runJSONCommand(t, handler, tt.args...)
+			var cliErr *apierr.Error
+			if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, "is not a number of occurrences") {
+				t.Fatalf("error = %v, want the repeat-times refusal", err)
+			}
+			if strings.HasPrefix(tt.name, "future") && requests.Load() != 0 {
+				t.Errorf("requests = %d, want none before the flags are read", requests.Load())
+			}
+		})
+	}
+}
+
+// The day and the week say which id an occurrence carries: the series' for one HEY draws
+// from the series, its own for a day HEY has written out, with the series in parent_id.
+func TestEventsPeriodHelpNamesTheSeriesID(t *testing.T) {
+	for _, command := range []*eventsPeriodCommand{newEventsDayCommand(), newEventsWeekCommand()} {
+		for _, want := range []string{"parent_id", "occurrence_id", "written out"} {
+			if !strings.Contains(command.cmd.Long, want) {
+				t.Errorf("%s help does not mention %q", command.cmd.Name(), want)
+			}
+		}
+	}
+}
+
 // HEY names a day by the UTC date of its start and gives it the series' wall-clock time in
 // the series' zone, so the wall-clock day can be the day either side of the one named.
 func TestOccurrenceInstants(t *testing.T) {
@@ -940,38 +1017,47 @@ func TestOccurrenceInstants(t *testing.T) {
 }
 
 // HEY labels a countdown by trying months, then weeks, then days, taking a remainder of up
-// to a day as a match — so a countdown exactly one day long is "0 months before", and only
-// the recording's own span says what it is.
+// to a whole day as a match — so eight days at midnight is "1 weeks before", 29 days is
+// "4 weeks before" and one day is "0 months before". The recording's span is the countdown
+// plus however far into its day the event starts, and that is what the length is read off;
+// the label only settles days against HEY's month, which is not a whole number of them.
 func TestCountdownFromRecording(t *testing.T) {
-	span := func(hours int) (time.Time, time.Time) {
+	const month = time.Duration(hey.CountdownUnitMonths) * time.Second
+	span := func(length time.Duration) (time.Time, time.Time) {
 		end := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
-		return end.Add(-time.Duration(hours) * time.Hour), end
+		return end.Add(-length), end
 	}
 	tests := []struct {
 		name    string
 		label   string
-		hours   int
+		length  time.Duration
 		value   int
 		unit    hey.CountdownUnit
 		invalid bool
 	}{
-		{name: "weeks", label: "3 weeks before", hours: 21 * 24, value: 3, unit: hey.CountdownUnitWeeks},
-		{name: "days, plural", label: "1 days before", hours: 36, value: 1, unit: hey.CountdownUnitDays},
-		{name: "day", label: "1 day before", hours: 36, value: 1, unit: hey.CountdownUnitDays},
-		{name: "months", label: "6 months before", hours: 183 * 24, value: 6, unit: hey.CountdownUnitMonths},
-		{name: "one day on an all-day event", label: "0 months before", hours: 24, value: 1, unit: hey.CountdownUnitDays},
-		{name: "zero with an unexplained span", label: "0 months before", hours: 20, invalid: true},
+		{name: "weeks at midnight", label: "3 weeks before", length: 21 * 24 * time.Hour, value: 3, unit: hey.CountdownUnitWeeks},
+		{name: "weeks on a timed event", label: "3 weeks before", length: 21*24*time.Hour + 12*time.Hour, value: 3, unit: hey.CountdownUnitWeeks},
+		{name: "days, plural", label: "1 days before", length: 36 * time.Hour, value: 1, unit: hey.CountdownUnitDays},
+		{name: "day", label: "1 day before", length: 36 * time.Hour, value: 1, unit: hey.CountdownUnitDays},
+		{name: "months", label: "6 months before", length: 6*month + 9*time.Hour, value: 6, unit: hey.CountdownUnitMonths},
+		{name: "eight days labelled a week", label: "1 weeks before", length: 8 * 24 * time.Hour, value: 8, unit: hey.CountdownUnitDays},
+		{name: "29 days labelled four weeks", label: "4 weeks before", length: 29 * 24 * time.Hour, value: 29, unit: hey.CountdownUnitDays},
+		{name: "30 days at midnight", label: "30 days before", length: 30 * 24 * time.Hour, value: 30, unit: hey.CountdownUnitDays},
+		{name: "one day on an all-day event", label: "0 months before", length: 24 * time.Hour, value: 1, unit: hey.CountdownUnitDays},
+		{name: "a month the label settles", label: "1 months before", length: month + 3*time.Hour, value: 1, unit: hey.CountdownUnitMonths},
+		{name: "no span, so the label", label: "2 weeks before", value: 2, unit: hey.CountdownUnitWeeks},
+		{name: "zero with an unexplained span", label: "0 months before", length: 20 * time.Hour, invalid: true},
 		{name: "zero with no span", label: "0 months before", invalid: true},
-		{name: "no countdown", label: "Countdown", hours: 24, invalid: true},
-		{name: "empty", label: "", hours: 24, invalid: true},
-		{name: "unknown unit", label: "3 fortnights before", hours: 42 * 24, invalid: true},
-		{name: "words", label: "three weeks before", hours: 21 * 24, invalid: true},
+		{name: "no countdown", label: "Countdown", length: 24 * time.Hour, invalid: true},
+		{name: "empty", label: "", length: 24 * time.Hour, invalid: true},
+		{name: "unknown unit", label: "3 fortnights before", length: 42 * 24 * time.Hour, invalid: true},
+		{name: "words", label: "three weeks before", length: 21 * 24 * time.Hour, invalid: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			recording := generated.Recording{Type: recordingTypeCountdown, Label: tt.label}
-			if tt.hours > 0 {
-				recording.StartsAt, recording.EndsAt = span(tt.hours)
+			if tt.length > 0 {
+				recording.StartsAt, recording.EndsAt = span(tt.length)
 			}
 			countdown, err := countdownFromRecording(recording)
 			if tt.invalid {
@@ -990,10 +1076,12 @@ func TestCountdownFromRecording(t *testing.T) {
 	}
 }
 
-// A countdown labelled "0 months before" whose span does not say it is one day is not
-// guessed at: the edit stops before writing, as with any label it cannot read.
+// A countdown labelled "0 months before" whose span is under a day says nothing readable
+// about its length, and is not guessed at: the edit stops before writing, as with any
+// recording it cannot read.
 func TestEventsEditOccurrenceFailsClosedOnAZeroCountdown(t *testing.T) {
-	zero := strings.Replace(occurrenceCountdownJSON, "3 weeks before", "0 months before", 1)
+	zero := strings.NewReplacer("3 weeks before", "0 months before", "2026-08-11T00:00:00Z", "2026-08-31T16:00:00Z").
+		Replace(occurrenceCountdownJSON)
 	handler, writes := occurrenceServer(t, "2026-09-15",
 		`{"Calendar::Event":[`+occurrenceSeriesJSON+`]}`,
 		`{"Calendar::Countdown":[`+zero+`]}`,
