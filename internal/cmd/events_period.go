@@ -58,8 +58,12 @@ event that falls on it, occurrences of a repeating series included, and nothing 
 outside it.
 
 The day covers the calendars switched on in HEY, the same set the app draws, so there is
-no --calendar to narrow it. The ID of an occurrence is its series, which is what 'hey
-event edit' and 'hey event delete' take.`,
+no --calendar to narrow it. An occurrence HEY draws from the series carries the series'
+id, which 'hey event edit' and 'hey event delete' take for the whole series. A day HEY has
+written out on its own — after an edit of that day alone, or a reminder — carries an id of
+its own, which those two act on for that day alone, and names its series in parent_id.
+Either way the occurrence_id is what 'hey event edit --occurrence' takes, with the series
+id (parent_id) before it.`,
 		Example: `  hey event day
   hey event day 2026-09-02
   hey event day --json`,
@@ -90,8 +94,12 @@ func newEventsWeekCommand() *eventsPeriodCommand {
 inside the week, occurrences of a repeating series included. Any day names its week.
 
 The week covers the calendars switched on in HEY, the same set the app draws, so there is
-no --calendar to narrow it. The ID of an occurrence is its series, which is what 'hey
-event edit' and 'hey event delete' take.`,
+no --calendar to narrow it. An occurrence HEY draws from the series carries the series'
+id, which 'hey event edit' and 'hey event delete' take for the whole series. A day HEY has
+written out on its own — after an edit of that day alone, or a reminder — carries an id of
+its own, which those two act on for that day alone, and names its series in parent_id.
+Either way the occurrence_id is what 'hey event edit --occurrence' takes, with the series
+id (parent_id) before it.`,
 		Example: `  hey event week
   hey event week 2026-09-02
   hey event week --json`,
@@ -152,6 +160,11 @@ const periodNow = "now"
 // resolveOccurrenceSeries gives each row the ID the event verbs take. HEY serves a day of a
 // repeating series as a virtual occurrence — no id of its own, the series in parent_id — but
 // 'hey event edit' and 'hey event delete' take the series, so the row carries it.
+//
+// A day an earlier edit or a reminder has written out is different: it has an id of its
+// own, and HEY's event routes act on that id for that day alone — an edit or a delete by
+// it reaches nothing else. So it keeps its id, and parent_id names its series, which is
+// what `hey event edit --occurrence` takes beside its occurrence_id.
 func resolveOccurrenceSeries(events []generated.Recording) {
 	for i := range events {
 		if events[i].Id == 0 && events[i].ParentId != 0 {

@@ -380,6 +380,8 @@ hey event add "Sarah's birthday" --starts-on 2026-09-02     # no time, so all da
 hey event add "Standup" --start-time 09:15 --repeat every_weekday --remind 10m
 hey event edit 4821 --title "Design review (moved)"
 hey event edit 4821 --starts-on 2026-09-04 --start-time 15:00
+hey event edit 4821 --occurrence 4821_2026-09-15 --apply-to current --start-time 15:00   # that day alone
+hey event edit 4821 --occurrence 4821_2026-09-15 --apply-to future --location "Studio, 3rd floor" --allow-plain-notes
 hey event delete 4821
 ```
 
@@ -392,8 +394,10 @@ lists once as the series it is stored as, not once per day it falls on.
 
 `hey event day` and `hey event week` read a span the way HEY's own views draw it: a
 repeating event is expanded into the occurrences that fall inside it, each carrying that
-day's own times, an `occurrence_id`, and the id of the series it repeats — which is what
-`hey event edit` and `hey event delete` take. A period covers the calendars switched on in
+day's own times and an `occurrence_id`. An occurrence HEY draws from the series carries the
+series' id, which `hey event edit` and `hey event delete` take for the whole series; a day
+HEY has written out on its own carries an id of its own, which those two act on for that
+day alone, with the series in `parent_id`. A period covers the calendars switched on in
 HEY, the same set the app draws, so `day` and `week` take no `--calendar` — only `--limit`
 and `--all`. With no date they read the account's own today, whatever zone the machine
 runs in.
@@ -410,6 +414,49 @@ saving flattens their formatting; and a countdown is not served at all, so an ed
 one unless `--countdown` names it again. An event that cannot be read is refused rather
 than written blind — pass the day it starts (`hey event edit 4821 2026-09-02`) or
 `--calendar` to look somewhere narrower.
+
+An id on its own changes the whole event, a repeating series included. One day of a
+series is changed with `--occurrence`, which takes the `occurrence_id` that `hey event
+day` and `hey event week` serve — `<series id>_<YYYY-MM-DD>`, byte for byte, naming the
+series the positional id names — together with `--apply-to`, which is required with it
+and is the choice HEY's own form puts to you: `current` changes that day alone, `future`
+changes it and every day after it. `--apply-to` without `--occurrence` is a usage error,
+as is any other value. The day is read on its own date rather than searched for, so
+`[date]` can be left out or must name it. A change to `--repeat`, `--repeat-until` or
+`--repeat-times` cannot apply to one day, so `current` refuses those flags; `future` takes
+them. HEY splits the series on a `future` edit either way — the days from this one on
+become a new series with a new id, the old series stops the day before, and the answer is
+still the day you edited — so read the day or the week again for the new series id before
+editing it further.
+
+An occurrence edit keeps more than a whole-event edit does, and refuses what it cannot
+keep. It sends back the day's own schedule and zones, notes, location, link, attached
+email, reminders and circle, taking them from the day itself where HEY has already written
+that day out on its own. A day like that lists in `day` and `week` with an id of its own,
+which `hey event edit <id>` and `hey event delete <id>` act on for that day alone, and
+with the series in `parent_id`, which is what `--occurrence` takes beside its
+`occurrence_id`. The countdown is read back from the recording HEY keeps for it — on the
+day, or on the day the series began in one more single-day read — and sent again, so it
+survives unless `--countdown 0` removes it; a countdown whose length cannot be read back
+stops the edit and says so. One day of a series with a countdown cannot lose it alone:
+HEY shows a day the series' countdown whenever it has none of its own, so `--countdown 0`
+with `current` is refused there, and `future` or an edit of the series is where it comes
+off. Notes are still served only as plain text and nothing can tell formatted notes from
+plain ones, so an occurrence edit that would send notes back as text is refused unless
+`--allow-plain-notes` accepts the loss or `--notes` replaces them; an event with no notes
+needs neither. A whole-event edit accepts `--allow-plain-notes` too, and it changes nothing
+there. A `future` edit records the new series from the series' own guest list and sends
+the invitations, so a day whose guest list had come to differ from the series' is refused
+until `--invite` names the new series' list. The day is read over every calendar, so with
+`--occurrence` the `--calendar` flag is only the calendar the day is moved to, and a day
+already moved to another calendar stays there through a `future` edit. HEY answers the
+write with not-found both for a date that is not a day of the series and for a series you
+cannot edit.
+
+One thing no edit can keep, whole event or one day: an attached email you cannot read is
+left out of what HEY serves, indistinguishable from none, and HEY clears the attachment
+whether the write sends an empty entry id or no entry id at all. Editing such an event
+detaches the email; only HEY can change that.
 
 ### Todos
 

@@ -53,6 +53,31 @@ func TestEventsDayExpandsRecurringEvents(t *testing.T) {
 	}
 }
 
+// A day an earlier edit has written out has an id of its own, and HEY's event routes act
+// on that id for that day alone, so the row keeps it: rewriting it to the series would
+// turn an edit or a delete of one day into one of the whole series. The series is named
+// by parent_id beside the occurrence_id.
+func TestEventsDayKeepsAWrittenOutDaysOwnID(t *testing.T) {
+	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"kind":"day","starts_at":"2026-09-15T00:00:00Z","ends_at":"2026-09-15T23:59:59Z","recordings":{`+
+			`"Calendar::Event":[`+
+			`{"id":9001,"parent_id":4821,"occurrence_id":"4821_2026-09-15","title":"Design review (with the vendor)","starts_at":"2026-09-15T13:30:00Z","ends_at":"2026-09-15T14:30:00Z","type":"Calendar::Event","calendar":{"id":9,"name":"Work"}}`+
+			`]}}`)
+	}), "event", "day", "2026-09-15")
+	if err != nil {
+		t.Fatalf("execute event day: %v", err)
+	}
+	events, ok := response.Data.([]any)
+	if !ok || len(events) != 1 {
+		t.Fatalf("data = %#v, want the one event", response.Data)
+	}
+	row, ok := events[0].(map[string]any)
+	if !ok || row["id"] != float64(9001) || row["parent_id"] != float64(4821) || row["occurrence_id"] != "4821_2026-09-15" {
+		t.Errorf("row = %#v, want the day's own id, with the series in parent_id", events[0])
+	}
+}
+
 func TestEventsWeekReadsTheWeekPeriod(t *testing.T) {
 	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/calendar/weeks/2026-09-02.json" {

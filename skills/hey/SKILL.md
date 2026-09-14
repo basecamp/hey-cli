@@ -686,6 +686,8 @@ hey event add "Design review" --starts-on 2026-09-02 --start-time 14:00 --end-ti
 hey event add "Sarah's birthday" --starts-on 2026-09-02   # No time given, so all day
 hey event add "Standup" --start-time 09:15 --repeat every_weekday --remind 10m
 hey event edit 4821 --title "Design review (moved)"
+hey event edit 4821 --occurrence 4821_2026-09-15 --apply-to current --start-time 15:00 --json   # That day alone
+hey event edit 4821 --occurrence 4821_2026-09-15 --apply-to future --title "Design review (v2)" --allow-plain-notes --json
 hey event delete 4821
 ```
 
@@ -695,8 +697,10 @@ repeating event lists once as its series, not once per day.
 
 **"What's on my schedule today?" is `hey event day`, not `list`.** A day or a week is the
 span as HEY draws it: a repeating event is expanded into the occurrences inside it, each
-carrying that day's own times and an `occurrence_id`, with its `id` still naming the
-series that `edit` and `delete` take. The period covers the calendars switched on in HEY,
+carrying that day's own times and an `occurrence_id`. An occurrence drawn from the series
+has the series' `id` (what `edit`/`delete` take for the whole series); a day HEY has
+written out on its own has its own `id` (acting on that day alone) with the series in
+`parent_id`. The period covers the calendars switched on in HEY,
 so `day` and `week` take no `--calendar` — only `--limit` and `--all`.
 
 **Response format:** a flat array of events. Each has `id`, `title`, `starts_at`, `ends_at`,
@@ -711,6 +715,37 @@ notes come back as plain text, so their formatting is flattened, and a countdown
 served at all, so an edit removes one unless `--countdown` names it again. An event that
 cannot be read is refused rather than written blind — pass the day it starts
 (`hey event edit 4821 2026-09-02`) or `--calendar` to narrow the search.
+
+**An id alone edits the whole series; one day of it is `--occurrence` plus `--apply-to`.**
+`--occurrence` takes the `occurrence_id` from `day` or `week` exactly as served
+(`<series id>_<YYYY-MM-DD>`, naming the series the positional id names) and `--apply-to`
+is required with it: `current` changes that day alone, `future` changes that day and every
+one after it — HEY's own two choices. `--apply-to` without `--occurrence`, any other value,
+a malformed or mismatched occurrence id, or `--repeat`/`--repeat-until`/`--repeat-times`
+with `current` are usage errors, refused before anything is read. The day is read on its
+own date, so leave `[date]` out or name that day. A `future` edit makes HEY split the
+series: the days from this one on get a new series id, and the answer is still the day
+edited — read `day` or `week` again before editing the new series.
+
+An occurrence edit keeps everything it is not told to change — that day's own schedule,
+zones, notes, location, link, attached email, reminders, circle and countdown, from the day
+itself where HEY has already written it out — and refuses what it cannot keep: the
+countdown is read back and re-sent (only `--countdown 0` removes it, and not from one day
+of a series that has one, since HEY shows the day the series' countdown regardless — use
+`future` or edit the series), and notes HEY serves only as plain text, so an edit that
+would send notes back as text is refused unless `--allow-plain-notes` accepts the loss or
+`--notes` replaces them; an event with no notes needs neither. A `future` edit builds the
+new series from the series' own guest list and sends invitations, so a day whose guests
+differ from the series' is refused until `--invite` names the new list. With
+`--occurrence`, `--calendar` is only the calendar the day moves to: the day is read over
+every calendar, and a day already moved elsewhere stays there. A day HEY has written out
+lists in `day`/`week` with its own `id` (which `edit <id>`/`delete <id>` act on for that
+day alone) and the series in `parent_id`: use `parent_id` as the positional id with
+`--occurrence`. An attached email you cannot read is not served and is detached by any
+edit, whole event or one day — nothing client-side can keep it. HEY answers not-found for
+a date that is not a day of the series and for a series you cannot edit alike. The JSON
+envelope is the one every mutation writes: `summary` (`Occurrence updated` or `Occurrence
+and the following updated`) and `data` holding the recording HEY answered.
 
 An event with no `--start-time` is all-day; a `--start-time` with no `--end-time` runs an
 hour. Clock times are read in `--time-zone`, defaulting to the machine's zone.

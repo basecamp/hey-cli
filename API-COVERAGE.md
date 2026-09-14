@@ -54,7 +54,7 @@ which is what `Entries().ListDraftsPage` and `hey draft list --page` exist for.
 | `/contacts/{id}/note.json` | PATCH | SDK `Contacts().SetNote` | `hey contact note set`, Contacts TUI | covered |
 | `/contacts/{id}/note.json` | DELETE | SDK `Contacts().DeleteNote` | `hey contact note delete`, Contacts TUI | covered |
 | `/calendars.json` | GET | SDK `Calendars().List` | `hey calendar list` | covered |
-| `/calendars/{id}/recordings.json` | GET | SDK `Calendars().GetRecordings` | `hey event list`, `hey event edit <id>` (reading the event back), `hey todo list`, `hey journal list` | covered |
+| `/calendars/{id}/recordings.json` | GET | SDK `Calendars().GetRecordings` | `hey event list`, `hey event edit <id>` (reading the event back; with `--occurrence`, the occurrence's day and then the series' first day for its `Calendar::Countdown`), `hey todo list`, `hey journal list` | covered |
 | `/topics/{id}/entries.json` | GET | SDK `Topics().GetEntries` | `hey thread read <id>`, `hey attachment list <topic-id>` | covered, but see the paging note below |
 | `/topics/{id}/publication` | POST | SDK `Publications().Create` | `hey share <thread-id>` | covered |
 | `/topics/{id}/publication.json` | GET | SDK `Publications().Create` readback | `hey share <thread-id>` | covered |
@@ -89,7 +89,7 @@ which is what `Entries().ListDraftsPage` and `hey draft list --page` exist for.
 | `/calendar/events.json` | POST | SDK `CalendarEvents().Create` | `hey event add`, Calendar TUI `a` | covered |
 | `/calendar/events/{id}.json` | PATCH | SDK `CalendarEvents().Update` | `hey event edit <id>`, Calendar TUI `e` | covered: a write replaces rather than patches, so the caller reads the event and sends back what it keeps |
 | `/calendar/events/{id}` | DELETE | SDK `CalendarEvents().Delete` | `hey event delete <id>`, Calendar TUI `x` | covered |
-| `/calendar/events/{id}/occurrences/{date}.json` | PATCH | SDK `CalendarEvents().UpdateOccurrence` | Calendar TUI `e` on one day of a repeating event | covered; no CLI equivalent yet |
+| `/calendar/events/{id}/occurrences/{date}.json` | PATCH | SDK `CalendarEvents().UpdateOccurrence` | `hey event edit <id> --occurrence <id>_<date> --apply-to current\|future`, Calendar TUI `e` on one day of a repeating event | covered: `current` is `apply_to_future=0` and `future` is `apply_to_future=1`; the CLI sends the day's own schedule, content, reminders, circle and countdown back, and refuses a schedule change for `current` |
 | `/calendar/events/{id}/occurrences/{date}.json` | DELETE | SDK `CalendarEvents().DeleteOccurrence` | Calendar TUI `x` on one day of a repeating event | covered; no CLI equivalent yet |
 | `/calendar/events/{id}.json` | GET | — | — | not served: HEY has no JSON show for an event, which is why `hey event edit` finds one through the recordings listing |
 | `/calendar/habits.json` | POST | SDK `Habits().Create` | `hey habit create`, Calendar TUI `a` | covered |

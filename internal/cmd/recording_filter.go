@@ -113,9 +113,16 @@ func (f *recordingFilter) resolve(ctx context.Context) (recordingWindow, error) 
 // occurrences inside them. Series can start long before the requested window, which puts
 // them on a later page after newer one-off events even when they recur inside it.
 func (w recordingWindow) read(ctx context.Context, recType string) ([]generated.Recording, error) {
+	return w.readTypes(ctx, recType)
+}
+
+// readTypes is read over several recording types at once, in one pass over the pages. An
+// event's countdown is a recording of its own kind under the event, so an edit that means
+// to keep one reads both kinds from the same window rather than paging it twice.
+func (w recordingWindow) readTypes(ctx context.Context, recTypes ...string) ([]generated.Recording, error) {
 	recordings := []generated.Recording{}
 	for _, calendarID := range w.calendars {
-		calendarRecordings, err := w.readCalendar(ctx, calendarID, recType)
+		calendarRecordings, err := w.readCalendar(ctx, calendarID, recTypes)
 		if err != nil {
 			return nil, err
 		}
@@ -124,7 +131,7 @@ func (w recordingWindow) read(ctx context.Context, recType string) ([]generated.
 	return recordings, nil
 }
 
-func (w recordingWindow) readCalendar(ctx context.Context, calendarID int64, recType string) ([]generated.Recording, error) {
+func (w recordingWindow) readCalendar(ctx context.Context, calendarID int64, recTypes []string) ([]generated.Recording, error) {
 	params := &generated.GetCalendarRecordingsParams{StartsOn: &w.startsOn, EndsOn: &w.endsOn}
 	recordings := []generated.Recording{}
 	seenPages := map[string]bool{}
@@ -138,7 +145,9 @@ func (w recordingWindow) readCalendar(ctx context.Context, calendarID int64, rec
 			return recordings, nil
 		}
 
-		recordings = append(recordings, filterRecordingsByType(page.Recordings, recType)...)
+		for _, recType := range recTypes {
+			recordings = append(recordings, filterRecordingsByType(page.Recordings, recType)...)
+		}
 		if page.NextPage == "" || calendarRecordingsEmpty(page.Recordings) {
 			return recordings, nil
 		}
