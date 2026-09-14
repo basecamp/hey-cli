@@ -186,9 +186,11 @@ fi
 # --- Git configuration for the target ---
 #
 # A private global config for every git call below: the bot is the identity for
-# the commit, and for the one a rejected push makes again, the token goes in as a URL
-# rewrite so it never appears in argv or in the remote URL, and nothing from the
-# ambient environment (signing, hooks, defaults) reaches the target.
+# the commit, and for the one a rejected push makes again, and the token goes in as
+# a URL rewrite so it never appears in argv or in the remote URL. Only the user's
+# global file is replaced (~/.gitconfig: identity, signing, credential helpers, hooks
+# path); the system config and any GIT_CONFIG_COUNT/GIT_CONFIG_KEY_* settings in the
+# environment still apply — the test's race case injects a hooks path that way.
 export GIT_CONFIG_GLOBAL="${tmpdir}/gitconfig"
 cat > "$GIT_CONFIG_GLOBAL" <<GITCFG
 [user]
