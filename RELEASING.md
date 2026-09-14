@@ -236,7 +236,10 @@ If that job fails, a `skills-sync`-labeled issue is filed; recover with the
 refuses anything but the latest stable release so it cannot roll the distribution
 repo back, and it runs the sync script from the dispatching branch against the
 tag's skills tree — so when the failure was a defect in `sync-skills.sh` itself,
-merge the fix to main and dispatch; no new release needed.
+merge the fix to main and dispatch; no new release needed. The release-time job makes
+the same check before it publishes, so an older release whose run stalls, or whose
+failed sync is rerun after a newer release has shipped, skips the sync instead of
+rolling it back.
 
 ## Local dry runs
 

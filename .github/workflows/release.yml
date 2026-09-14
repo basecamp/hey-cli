@@ -565,7 +565,29 @@ jobs:
         with:
           persist-credentials: false
 
+      # An older stable release can reach this job after a newer one has
+      # published — its run stalled, or its failed sync was rerun later — and
+      # the script mirrors the skills wholesale, so it would roll basecamp/skills
+      # back. The concurrency group serialises the jobs but does not order them,
+      # so this is the check the manual Sync skills workflow makes: only the
+      # latest stable release publishes. A failed lookup fails the job, which
+      # files the issue below rather than skipping in silence.
+      - name: Confirm this is the latest stable release
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          latest=$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName --jq .tagName)
+          if [ "$TAG" = "$latest" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Skipping the skills sync for ${TAG}: the latest stable release is ${latest}, and syncing an older tag would roll basecamp/skills back."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Generate token for skills repo
+        if: steps.latest.outputs.publish == 'true'
         id: skills-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
@@ -576,6 +598,7 @@ jobs:
           permission-contents: write
 
       - name: Sync skills to distribution repo
+        if: steps.latest.outputs.publish == 'true'
         id: sync
         env:
           SKILLS_TOKEN: ${{ steps.skills-token.outputs.token }}
