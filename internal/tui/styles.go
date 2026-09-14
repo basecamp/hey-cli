@@ -191,8 +191,8 @@ func errorView(errMsg string, width int) string {
 	lines := wrapText(errMsg, maxInner)
 	innerWidth := 6
 	for _, l := range lines {
-		if len(l) > innerWidth {
-			innerWidth = len(l)
+		if w := displayWidth(l); w > innerWidth {
+			innerWidth = w
 		}
 	}
 
@@ -205,7 +205,7 @@ func errorView(errMsg string, width int) string {
 	var b strings.Builder
 	b.WriteString(padTo(border.Render("╭─ Error "+strings.Repeat("─", innerWidth-6)+"╮")) + "\n")
 	for _, l := range lines {
-		pad := strings.Repeat(" ", innerWidth-len(l))
+		pad := strings.Repeat(" ", innerWidth-displayWidth(l))
 		b.WriteString(padTo(border.Render("│")+" "+errStyle.Render(l)+pad+" "+border.Render("│")) + "\n")
 	}
 	b.WriteString(padTo(border.Render("╰"+strings.Repeat("─", innerWidth+2)+"╯")) + "\n")
@@ -214,7 +214,10 @@ func errorView(errMsg string, width int) string {
 	return b.String()
 }
 
-// wrapText wraps a string to fit within maxWidth characters.
+// wrapText wraps a string to fit within maxWidth terminal cells.
+// Words wider than maxWidth are hard-wrapped at grapheme boundaries so that a single long
+// token (like a URL or an emoji-heavy value) never makes the column wider than the terminal
+// and is never split inside a rune or grapheme cluster.
 func wrapText(s string, maxWidth int) []string {
 	if maxWidth <= 0 {
 		return []string{s}
@@ -225,15 +228,51 @@ func wrapText(s string, maxWidth int) []string {
 	}
 
 	var lines []string
-	line := words[0]
-	for _, w := range words[1:] {
-		if len(line)+1+len(w) > maxWidth {
+	line := ""
+	lineWidth := 0
+	for _, w := range words {
+		// Hard-wrap any word whose display width alone exceeds maxWidth, advancing by
+		// whole grapheme clusters so we never split inside a rune or emoji sequence.
+		// Track the remaining width by subtraction to keep the inner loop linear.
+		wWidth := displayWidth(w)
+		for wWidth > maxWidth {
+			if line != "" {
+				lines = append(lines, line)
+				line = ""
+				lineWidth = 0
+			}
+			chunk := fitGraphemes(w, maxWidth)
+			if chunk == "" {
+				// The leading grapheme is wider than maxWidth and cannot be split
+				// further; emit it as-is and advance past it so the loop terminates.
+				cluster, clusterWidth := firstCluster(w)
+				lines = append(lines, cluster)
+				w = w[len(cluster):]
+				wWidth -= clusterWidth
+				continue
+			}
+			chunkWidth := displayWidth(chunk)
+			lines = append(lines, chunk)
+			w = w[len(chunk):]
+			wWidth -= chunkWidth
+		}
+		if w == "" {
+			continue
+		}
+		if line == "" {
+			line = w
+			lineWidth = wWidth
+		} else if lineWidth+1+wWidth > maxWidth {
 			lines = append(lines, line)
 			line = w
+			lineWidth = wWidth
 		} else {
 			line += " " + w
+			lineWidth += 1 + wWidth
 		}
 	}
-	lines = append(lines, line)
+	if line != "" {
+		lines = append(lines, line)
+	}
 	return lines
 }
