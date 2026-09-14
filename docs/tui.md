@@ -50,10 +50,10 @@ uppercase belongs to Labels:
 | `a` | move to Set Aside |
 | `d` | move to The Feed |
 | `p` | move to Paper Trail |
-| `t` | trash |
+| `t` | trash — every selected thread when any are selected, otherwise the one under the cursor |
 | `!` | mark as spam |
 | `-` / `+` | ignore / stop ignoring |
-| Space | select the thread for a bulk action |
+| Space | select the thread for a bulk action (`t` or Ctrl+B) |
 | Ctrl+B | preview every bulk-reply recipient, then write one reply to every selected thread |
 | Ctrl+U | recall a delayed bulk reply while HEY's undo window is open |
 | Ctrl+S | open The Screener |
