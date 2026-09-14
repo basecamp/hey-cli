@@ -728,16 +728,22 @@ edited — read `day` or `week` again before editing the new series.
 An occurrence edit keeps everything it is not told to change — that day's own schedule,
 zones, notes, location, link, attached email, reminders, circle and countdown, from the day
 itself where HEY has already written it out — and refuses what it cannot keep: the
-countdown is read back and re-sent (only `--countdown 0` removes it), and notes HEY serves
-only as plain text, so an edit that would send notes back as text is refused unless
-`--allow-plain-notes` accepts the loss or `--notes` replaces them; an event with no notes
-needs neither. With `--occurrence`, `--calendar` is only the calendar the day moves to:
-the day is read over every calendar. An attached email you cannot read is not served and
-is detached by any edit, whole event or one day — nothing client-side can keep it. HEY
-answers not-found for a date that is not a day of the series and for a series you cannot
-edit alike. The JSON envelope is the one every mutation writes: `summary` (`Occurrence
-updated` or `Occurrence and the following updated`) and `data` holding the recording HEY
-answered.
+countdown is read back and re-sent (only `--countdown 0` removes it, and not from one day
+of a series that has one, since HEY shows the day the series' countdown regardless — use
+`future` or edit the series), and notes HEY serves only as plain text, so an edit that
+would send notes back as text is refused unless `--allow-plain-notes` accepts the loss or
+`--notes` replaces them; an event with no notes needs neither. A `future` edit builds the
+new series from the series' own guest list and sends invitations, so a day whose guests
+differ from the series' is refused until `--invite` names the new list. With
+`--occurrence`, `--calendar` is only the calendar the day moves to: the day is read over
+every calendar, and a day already moved elsewhere stays there. A day HEY has written out
+lists in `day`/`week` with its own `id` (which `edit <id>`/`delete <id>` act on for that
+day alone) and the series in `parent_id`: use `parent_id` as the positional id with
+`--occurrence`. An attached email you cannot read is not served and is detached by any
+edit, whole event or one day — nothing client-side can keep it. HEY answers not-found for
+a date that is not a day of the series and for a series you cannot edit alike. The JSON
+envelope is the one every mutation writes: `summary` (`Occurrence updated` or `Occurrence
+and the following updated`) and `data` holding the recording HEY answered.
 
 An event with no `--start-time` is all-day; a `--start-time` with no `--end-time` runs an
 hour. Clock times are read in `--time-zone`, defaulting to the machine's zone.

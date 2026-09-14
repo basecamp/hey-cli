@@ -382,24 +382,68 @@ func TestEventsEditOccurrenceRefusesADayItCannotRead(t *testing.T) {
 	}
 }
 
-// --countdown 0 is the one way an occurrence edit removes a countdown, and saying so means
-// the countdown is not read back at all.
-func TestEventsEditOccurrenceRemovesTheCountdownOnlyWhenTold(t *testing.T) {
-	handler, _ := occurrenceServer(t, "2026-09-15",
-		`{"Calendar::Event":[`+occurrenceSeriesJSON+`]}`,
-		"",
-		func(t *testing.T, form url.Values) {
-			for _, field := range []string{"countdown_interval_duration_value", "countdown_interval_duration_unit"} {
-				if form.Has(field) {
-					t.Errorf("%s = %q, want none", field, form.Get(field))
-				}
+// --countdown 0 is the one way an occurrence edit removes a countdown. On one day alone it
+// can only remove the day's own: HEY shows a day the series' countdown whenever it has
+// none of its own, so with a series that has one the removal would be reported and change
+// nothing, and it is refused instead. A future edit takes the countdown off the new
+// series, so there it goes through.
+func TestEventsEditOccurrenceRemovesTheCountdownOnlyWhereItCan(t *testing.T) {
+	noCountdown := func(t *testing.T, form url.Values) {
+		for _, field := range []string{"countdown_interval_duration_value", "countdown_interval_duration_unit"} {
+			if form.Has(field) {
+				t.Errorf("%s = %q, want none", field, form.Get(field))
 			}
-		})
-	_, err := runJSONCommand(t, handler,
-		"event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "current", "--countdown", "0", "--allow-plain-notes")
-	if err != nil {
-		t.Fatalf("execute occurrence edit: %v", err)
+		}
 	}
+
+	t.Run("a series without one", func(t *testing.T) {
+		handler, writes := occurrenceServer(t, "2026-09-15",
+			`{"Calendar::Event":[`+occurrenceSeriesJSON+`]}`,
+			`{}`,
+			noCountdown)
+		_, err := runJSONCommand(t, handler,
+			"event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "current", "--countdown", "0", "--allow-plain-notes")
+		if err != nil {
+			t.Fatalf("execute occurrence edit: %v", err)
+		}
+		if writes.Load() != 1 {
+			t.Errorf("writes = %d, want one", writes.Load())
+		}
+	})
+
+	t.Run("one day of a series with one", func(t *testing.T) {
+		handler, writes := occurrenceServer(t, "2026-09-15",
+			`{"Calendar::Event":[`+occurrenceSeriesJSON+`]}`,
+			`{"Calendar::Countdown":[`+occurrenceCountdownJSON+`]}`,
+			noCountdown)
+		_, err := runJSONCommand(t, handler,
+			"event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "current", "--countdown", "0", "--allow-plain-notes")
+		var cliErr *apierr.Error
+		if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, "the series has a countdown") {
+			t.Fatalf("error = %v, want the refusal", err)
+		}
+		if !strings.Contains(cliErr.Hint, "--apply-to future") {
+			t.Errorf("hint = %q, want it to say where the countdown can come off", cliErr.Hint)
+		}
+		if writes.Load() != 0 {
+			t.Errorf("writes = %d, want none", writes.Load())
+		}
+	})
+
+	t.Run("this day and the following", func(t *testing.T) {
+		handler, writes := occurrenceServer(t, "2026-09-15",
+			`{"Calendar::Event":[`+occurrenceSeriesJSON+`]}`,
+			"",
+			noCountdown)
+		_, err := runJSONCommand(t, handler,
+			"event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "future", "--countdown", "0", "--allow-plain-notes")
+		if err != nil {
+			t.Fatalf("execute occurrence edit: %v", err)
+		}
+		if writes.Load() != 1 {
+			t.Errorf("writes = %d, want one", writes.Load())
+		}
+	})
 }
 
 // A countdown --countdown names replaces the one the series has, without reading it back.
@@ -692,6 +736,123 @@ func TestEventsEditOccurrenceMovesADayToAnotherCalendar(t *testing.T) {
 	if writes.Load() != 1 {
 		t.Errorf("writes = %d, want one", writes.Load())
 	}
+}
+
+// A day that was moved to another calendar stays there through a future edit: HEY records
+// the new series on the series' calendar unless told otherwise, so the write names the
+// day's. --calendar still says where to move it instead.
+func TestEventsEditOccurrenceFutureKeepsAMovedDaysCalendar(t *testing.T) {
+	twoCalendars := `{"calendars":[{"calendar":{"id":9,"name":"Work","owned":true}},{"calendar":{"id":10,"name":"Shared","owned":true}}]}`
+	moved := `{"id":9001,"type":"Calendar::Event","parent_id":4821,"occurrence_id":"4821_2026-09-15",` +
+		`"title":"Design review (with the vendor)","starts_at":"2026-09-15T12:00:00Z","ends_at":"2026-09-15T13:00:00Z",` +
+		`"starts_at_time_zone":"Europe/Zagreb","ends_at_time_zone":"Europe/Zagreb","calendar":{"id":10,"name":"Shared"}}`
+	reads := func() map[string]string {
+		return map[string]string{
+			"9 2026-09-15":  `{"Calendar::Event":[` + occurrenceSeriesJSON + `]}`,
+			"10 2026-09-15": `{"Calendar::Event":[` + moved + `]}`,
+			"9 2026-09-01":  `{}`,
+		}
+	}
+
+	t.Run("without --calendar", func(t *testing.T) {
+		handler, _ := recordingsServer(t, twoCalendars, reads(), "/calendar/events/4821/occurrences/2026-09-15.json",
+			func(t *testing.T, form url.Values) {
+				if got := form.Get("calendar_event[calendar_id]"); got != "10" {
+					t.Errorf("calendar_id = %q, want the day's own calendar", got)
+				}
+			})
+		_, err := runJSONCommand(t, handler,
+			"event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "future", "--title", "Design review (vendor, final)")
+		if err != nil {
+			t.Fatalf("execute occurrence edit: %v", err)
+		}
+	})
+
+	t.Run("with --calendar", func(t *testing.T) {
+		handler, _ := recordingsServer(t, twoCalendars, reads(), "/calendar/events/4821/occurrences/2026-09-15.json",
+			func(t *testing.T, form url.Values) {
+				if got := form.Get("calendar_event[calendar_id]"); got != "9" {
+					t.Errorf("calendar_id = %q, want the destination named", got)
+				}
+			})
+		_, err := runJSONCommand(t, handler,
+			"event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "future", "--calendar", "9", "--title", "Design review (vendor, final)")
+		if err != nil {
+			t.Fatalf("execute occurrence edit: %v", err)
+		}
+	})
+
+	t.Run("that day alone leaves the calendar unsaid", func(t *testing.T) {
+		handler, _ := recordingsServer(t, twoCalendars, reads(), "/calendar/events/4821/occurrences/2026-09-15.json",
+			func(t *testing.T, form url.Values) {
+				if form.Has("calendar_event[calendar_id]") {
+					t.Errorf("calendar_id = %q, want none: the day stays where it is", form.Get("calendar_event[calendar_id]"))
+				}
+			})
+		_, err := runJSONCommand(t, handler,
+			"event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "current", "--title", "Design review (vendor, final)")
+		if err != nil {
+			t.Fatalf("execute occurrence edit: %v", err)
+		}
+	})
+}
+
+// A future edit records the new series from the series' guest list and invites it. A day
+// that had come to have guests of its own is therefore refused until --invite says whose
+// list the new series gets; that day alone keeps its own list without a word.
+func TestEventsEditOccurrenceFutureRefusesToDropADaysOwnGuests(t *testing.T) {
+	series := strings.Replace(occurrenceSeriesJSON, `"highlighted":true,`,
+		`"highlighted":true,"attendances":[{"id":1,"email_address":"alice@example.com","status":"accepted","name":"Alice Chen"}],`, 1)
+	ownGuests := `{"id":9001,"type":"Calendar::Event","parent_id":4821,"occurrence_id":"4821_2026-09-15",` +
+		`"title":"Design review (with the vendor)","starts_at":"2026-09-15T12:00:00Z","ends_at":"2026-09-15T13:00:00Z",` +
+		`"starts_at_time_zone":"Europe/Zagreb","ends_at_time_zone":"Europe/Zagreb",` +
+		`"attendances":[{"id":2,"email_address":"bob@example.org","status":"pending","name":"Bob Reyes"}],"calendar":{"id":9,"name":"Work"}}`
+	day := `{"Calendar::Event":[` + series + `,` + ownGuests + `]}`
+
+	t.Run("refused", func(t *testing.T) {
+		handler, writes := occurrenceServer(t, "2026-09-15", day, "", func(t *testing.T, form url.Values) {})
+		_, err := runJSONCommand(t, handler,
+			"event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "future", "--title", "Design review (vendor, final)")
+		var cliErr *apierr.Error
+		if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, "guest list of its own (bob@example.org)") {
+			t.Fatalf("error = %v, want the guest-list refusal", err)
+		}
+		if writes.Load() != 0 {
+			t.Errorf("writes = %d, want none", writes.Load())
+		}
+	})
+
+	t.Run("with --invite", func(t *testing.T) {
+		handler, writes := occurrenceServer(t, "2026-09-15", day, `{}`, func(t *testing.T, form url.Values) {
+			if got := form["calendar_event[attendance_email_addresses][]"]; len(got) != 1 || got[0] != "bob@example.org" {
+				t.Errorf("attendees = %v, want Bob alone", got)
+			}
+		})
+		_, err := runJSONCommand(t, handler,
+			"event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "future", "--invite", "bob@example.org", "--title", "Design review (vendor, final)")
+		if err != nil {
+			t.Fatalf("execute occurrence edit: %v", err)
+		}
+		if writes.Load() != 1 {
+			t.Errorf("writes = %d, want one", writes.Load())
+		}
+	})
+
+	t.Run("that day alone keeps its own", func(t *testing.T) {
+		handler, writes := occurrenceServer(t, "2026-09-15", day, `{}`, func(t *testing.T, form url.Values) {
+			if got := form["calendar_event[attendance_email_addresses][]"]; got != nil {
+				t.Errorf("attendees = %v, want none submitted", got)
+			}
+		})
+		_, err := runJSONCommand(t, handler,
+			"event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "current", "--title", "Design review (vendor, final)")
+		if err != nil {
+			t.Fatalf("execute occurrence edit: %v", err)
+		}
+		if writes.Load() != 1 {
+			t.Errorf("writes = %d, want one", writes.Load())
+		}
+	})
 }
 
 // HEY names a day by the UTC date of its start and gives it the series' wall-clock time in

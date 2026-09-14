@@ -250,11 +250,17 @@ this one on get a new series id.
 
 An occurrence edit keeps more than a whole-event edit does, and refuses what it cannot
 keep. The countdown is read back and sent again, so it survives unless --countdown 0
-removes it. Notes are still only served as plain text, so an occurrence edit that would
-send formatted notes back as text refuses unless --allow-plain-notes accepts that or
---notes replaces them. The day is read over every calendar, so here --calendar is only
-where the day is moved to. One thing no edit can keep: an attached email you cannot read
-is not served, so it is detached by any edit, whole event or one day.`,
+removes it — and one day of a series with a countdown cannot lose it alone, since HEY
+shows a day the series' countdown whenever it has none of its own, so that is refused.
+Notes are still only served as plain text, so an occurrence edit that would send
+formatted notes back as text refuses unless --allow-plain-notes accepts that or --notes
+replaces them. A 'future' edit records the new series from the series' own guest list,
+so a day that had come to have guests of its own is refused until --invite names the new
+series' list. The day is read over every calendar, so here --calendar is only where the
+day is moved to; a day already moved elsewhere stays there. A day HEY has written out on
+its own lists with an id of its own, which edits and deletes that day alone, and with the
+series in parent_id. One thing no edit can keep: an attached email you cannot read is not
+served, so it is detached by any edit, whole event or one day.`,
 		Example: `  hey event edit 4821 --title "Design review (moved)"
   hey event edit 4821 --starts-on 2026-09-04 --start-time 15:00
   hey event edit 4821 2026-09-02 --location "Studio, 3rd floor"

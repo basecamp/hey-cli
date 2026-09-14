@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -153,6 +154,13 @@ func (c *eventsEditCommand) editOccurrence(ctx context.Context, cmd *cobra.Comma
 	if event.Description != "" && !cmd.Flags().Changed("notes") && !c.allowPlainNotes {
 		return errPlainNotes(edit.occurrence)
 	}
+	// A future edit records the new series from the series' own guest list and invites it,
+	// whatever this day's had come to be, and a guest list is only ever sent on purpose.
+	if edit.scope == hey.OccurrenceScopeThisAndFollowing && day.realized != nil && !cmd.Flags().Changed("invite") {
+		if guests := attendeeAddresses(day.realized.Attendances); !sameAddresses(guests, attendeeAddresses(day.series.Attendances)) {
+			return errDayGuests(edit.occurrence, guests)
+		}
+	}
 
 	schedule, err := c.fields.scheduleFrom(cmd, event)
 	if err != nil {
@@ -162,7 +170,7 @@ func (c *eventsEditCommand) editOccurrence(ctx context.Context, cmd *cobra.Comma
 	if err != nil {
 		return err
 	}
-	countdown, err := c.occurrenceCountdown(ctx, cmd, window, day)
+	countdown, err := c.occurrenceCountdown(ctx, cmd, window, day, edit.scope)
 	if err != nil {
 		return err
 	}
@@ -191,6 +199,11 @@ func (c *eventsEditCommand) editOccurrence(ctx context.Context, cmd *cobra.Comma
 	}
 	if cmd.Flags().Changed("calendar") {
 		changes.CalendarID = &c.fields.calendar
+	} else if edit.scope == hey.OccurrenceScopeThisAndFollowing && day.realized != nil && day.realized.Calendar.Id != 0 {
+		// HEY records the new series on the series' calendar unless told otherwise, so a day
+		// that had been moved to another calendar would move back with everything after it.
+		calendarID := day.realized.Calendar.Id
+		changes.CalendarID = &calendarID
 	}
 	// The circle is sent back whether or not it changes. A future edit records a new series
 	// for the days from this one on, and HEY circles that one only when told to; the
@@ -369,9 +382,27 @@ func wallClockOn(day, wall time.Time, loc *time.Location) time.Time {
 // day written out on its own may carry one, ending on this day; the series' ends on the
 // day the series began, which is this day only for the first occurrence and otherwise one
 // more read of that one day, on the series' own calendar.
-func (c *eventsEditCommand) occurrenceCountdown(ctx context.Context, cmd *cobra.Command, window recordingWindow, day occurrenceDay) (hey.CountdownParams, error) {
+//
+// Removing one is the other way round. HEY shows one day of a series the series' countdown
+// whenever the day has none of its own, and a write that names no countdown removes only
+// the day's own; so --countdown 0 on one day of a series with a countdown would be
+// reported done and change nothing. That is refused: the countdown comes off with the
+// series, by --apply-to future or an edit of the series itself.
+func (c *eventsEditCommand) occurrenceCountdown(ctx context.Context, cmd *cobra.Command, window recordingWindow, day occurrenceDay, scope hey.OccurrenceScope) (hey.CountdownParams, error) {
 	if cmd.Flags().Changed("countdown") {
-		return c.fields.parseCountdown()
+		countdown, err := c.fields.parseCountdown()
+		if err != nil || countdown.Value != 0 || scope != hey.OccurrenceScopeThisEvent {
+			return countdown, err
+		}
+		if _, inherited, err := seriesCountdown(ctx, window, day); err != nil || inherited {
+			if err != nil {
+				return hey.CountdownParams{}, err
+			}
+			return hey.CountdownParams{}, apierr.ErrUsageHint(
+				fmt.Sprintf("the series has a countdown, and HEY shows it on %s whatever the day's own", day.occurrence),
+				"--apply-to future removes it from this day and every one after it; an edit of the series id alone removes it everywhere")
+		}
+		return hey.CountdownParams{}, nil
 	}
 	if day.realized != nil {
 		if countdown, ok := countdownOf(day.countdowns, day.realized.Id); ok {
@@ -386,14 +417,21 @@ func (c *eventsEditCommand) occurrenceCountdown(ctx context.Context, cmd *cobra.
 			}
 		}
 	}
+	countdown, _, err := seriesCountdown(ctx, window, day)
+	return countdown, err
+}
+
+// seriesCountdown is the series' own countdown: on the day, where the day is the one the
+// series began on, and otherwise on that first day in one more read.
+func seriesCountdown(ctx context.Context, window recordingWindow, day occurrenceDay) (hey.CountdownParams, bool, error) {
 	if countdown, ok := countdownOf(day.countdowns, day.series.Id); ok {
-		return countdownFromRecording(countdown)
+		params, err := countdownFromRecording(countdown)
+		return params, true, err
 	}
 	if day.series.StartsAt.UTC().Format(dateLayout) == day.occurrence.DateParam() {
-		return hey.CountdownParams{}, nil
+		return hey.CountdownParams{}, false, nil
 	}
-	countdown, _, err := countdownEnding(ctx, window, day.series)
-	return countdown, err
+	return countdownEnding(ctx, window, day.series)
 }
 
 // countdownEnding reads the day an event starts on, over its own calendar, for the
@@ -471,6 +509,46 @@ func countdownFromRecording(countdown generated.Recording) (hey.CountdownParams,
 		return hey.CountdownParams{Value: 1, Unit: hey.CountdownUnitDays}, nil
 	}
 	return hey.CountdownParams{}, unreadable
+}
+
+// attendeeAddresses is a guest list as the set of addresses on it, which is how two lists
+// are told apart: the same guests in another order or with another status are one list.
+func attendeeAddresses(attendances []generated.Attendance) []string {
+	addresses := make([]string, 0, len(attendances))
+	for _, attendance := range attendances {
+		if address := strings.ToLower(strings.TrimSpace(attendance.EmailAddress)); address != "" {
+			addresses = append(addresses, address)
+		}
+	}
+	return addresses
+}
+
+func sameAddresses(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[string]int, len(a))
+	for _, address := range a {
+		seen[address]++
+	}
+	for _, address := range b {
+		if seen[address] == 0 {
+			return false
+		}
+		seen[address]--
+	}
+	return true
+}
+
+// errDayGuests is how a future edit refuses to invite the series' guests to a day that had
+// come to have guests of its own. HEY records the new series from the series' list and
+// sends the invitations, so the caller has to say whose list the new series gets.
+func errDayGuests(occurrence hey.EventOccurrence, guests []string) error {
+	return &apierr.Error{
+		Code:    apierr.CodeUsage,
+		Message: fmt.Sprintf("occurrence %s has a guest list of its own (%s), and a future edit would give the new series the series' list instead", occurrence, terminal.SanitizeLine(strings.Join(guests, ", "))),
+		Hint:    "pass --invite for each address the new series should invite; the list replaces the series' and sends invitations",
+	}
 }
 
 // errPlainNotes is how an occurrence edit refuses to flatten notes it was not asked to
