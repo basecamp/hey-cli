@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,6 +24,96 @@ type OAuthToken struct {
 	TokenType    string    `json:"token_type"`
 	ExpiresIn    int64     `json:"expires_in"`
 	ExpiresAt    time.Time `json:"-"`
+}
+
+// DeviceAuthorization represents an RFC 8628 device authorization response.
+type DeviceAuthorization struct {
+	DeviceCode              string `json:"device_code"`
+	UserCode                string `json:"user_code"`
+	VerificationURI         string `json:"verification_uri"`
+	VerificationURIComplete string `json:"verification_uri_complete"`
+	ExpiresIn               int64  `json:"expires_in"`
+	Interval                int64  `json:"interval"`
+}
+
+type deviceTokenError struct {
+	Code string `json:"error"`
+}
+
+func requestDeviceAuthorization(ctx context.Context, httpClient *http.Client, endpoint, clientID, installID string) (*DeviceAuthorization, error) {
+	data := url.Values{"client_id": {clientID}, "install_id": {installID}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(data.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("creating device authorization request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("User-Agent", version.UserAgent())
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("device authorization request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if err != nil {
+		return nil, fmt.Errorf("reading device authorization response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("device authorization failed (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	var authorization DeviceAuthorization
+	if err := json.Unmarshal(body, &authorization); err != nil {
+		return nil, fmt.Errorf("parsing device authorization response: %w", err)
+	}
+	if authorization.DeviceCode == "" || authorization.UserCode == "" || authorization.VerificationURI == "" || authorization.ExpiresIn <= 0 {
+		return nil, errors.New("device authorization response is missing required fields")
+	}
+	return &authorization, nil
+}
+
+func exchangeDeviceCode(ctx context.Context, httpClient *http.Client, tokenEndpoint, deviceCode, clientID, installID string) (*OAuthToken, string, error) {
+	data := url.Values{
+		"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
+		"device_code": {deviceCode},
+		"client_id":   {clientID},
+		"install_id":  {installID},
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenEndpoint, strings.NewReader(data.Encode()))
+	if err != nil {
+		return nil, "", fmt.Errorf("creating device token request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("User-Agent", version.UserAgent())
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("device token request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if err != nil {
+		return nil, "", fmt.Errorf("reading device token response: %w", err)
+	}
+	if resp.StatusCode == http.StatusOK {
+		var token OAuthToken
+		if err := json.Unmarshal(body, &token); err != nil {
+			return nil, "", fmt.Errorf("parsing device token response: %w", err)
+		}
+		if token.AccessToken == "" {
+			return nil, "", errors.New("device token response is missing access_token")
+		}
+		if token.ExpiresIn > 0 {
+			token.ExpiresAt = time.Now().Add(time.Duration(token.ExpiresIn) * time.Second)
+		}
+		return &token, "", nil
+	}
+
+	var oauthErr deviceTokenError
+	if err := json.Unmarshal(body, &oauthErr); err == nil && oauthErr.Code != "" && (resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusForbidden) {
+		return nil, oauthErr.Code, nil
+	}
+	return nil, "", fmt.Errorf("device token exchange failed (status %d): %s", resp.StatusCode, string(body))
 }
 
 // exchangeCode exchanges an authorization code for tokens using PKCE.
