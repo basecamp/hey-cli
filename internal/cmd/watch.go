@@ -706,6 +706,15 @@ func (w *postingsWatch) classify(box *watchedBox, posting generated.Posting) *bo
 // cursor or credentials the server won't take doesn't get better by waiting two minutes,
 // and a watch that retried it silently would sit there for hours and still exit 0.
 func permanentReadError(err error) bool {
+	// A credential failure comes from our own auth strategy, which the SDK passes
+	// back untouched, so it is already classified and hey.AsError would read it as
+	// a generic API error. A watch that retried a session the server has ended
+	// would redial every fifteen seconds for as long as it was left running.
+	var cliErr *apierr.Error
+	if errors.As(err, &cliErr) {
+		return cliErr.Code == apierr.CodeUsage || cliErr.Code == apierr.CodeAuth
+	}
+
 	switch hey.AsError(err).Code {
 	case hey.CodeUsage, hey.CodeAuth:
 		return true
