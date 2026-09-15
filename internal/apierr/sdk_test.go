@@ -2,6 +2,7 @@ package apierr
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
@@ -130,5 +131,37 @@ func TestFromSDKKeepsTheCauseReachable(t *testing.T) {
 
 	if !errors.Is(FromSDK(sdkErr), error(sdkErr)) {
 		t.Error("the SDK error a validation failure came from must stay reachable through errors.Is")
+	}
+}
+
+// The CLI's own auth strategy runs inside SDK calls, and the SDK hands back what it
+// returns untouched. Such an error arrives here already classified; flattening it to
+// "api" would cost the auth exit code and the hint that says how to fix it.
+func TestFromSDKKeepsAnAlreadyClassifiedError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "bare", err: ErrAuth("not authenticated")},
+		{name: "wrapped", err: fmt.Errorf("reading changes: %w", ErrAuth("not authenticated"))},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AsError(FromSDK(tt.err))
+			if got.Code != CodeAuth {
+				t.Errorf("code = %q, want %q", got.Code, CodeAuth)
+			}
+			if got.Hint == "" {
+				t.Error("the login hint was dropped")
+			}
+		})
+	}
+}
+
+func TestFromSDKStillMapsRateLimitedCLIErrors(t *testing.T) {
+	got := AsError(FromSDK(&Error{Code: CodeRateLimit, Message: "rate limited", HTTPStatus: 429}))
+	if got.Code != CodeRateLimit {
+		t.Errorf("code = %q, want %q", got.Code, CodeRateLimit)
 	}
 }

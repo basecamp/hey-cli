@@ -17,7 +17,9 @@ import (
 	actioncable "github.com/basecamp/actioncable-go"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
+	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/auth"
 )
 
@@ -1025,5 +1027,34 @@ func TestWatchLineDescribesTheWatchsOwnNews(t *testing.T) {
 	line := watchLine(watchEvent{Change: watchReady, At: "2026-08-21T09:00:00.000Z"})
 	if !strings.Contains(line, "ready") || !strings.Contains(line, "watching for changes") {
 		t.Errorf("line = %q, want ready described without a box", line)
+	}
+}
+
+// A watch whose credentials the server has ended must stop, not redial. The auth
+// failure comes from the CLI's own auth strategy, which the SDK returns untouched,
+// so it is not a *hey.Error and the SDK's classifier reads it as a generic API
+// error — the kind this retries every two minutes, for as long as the shell service
+// keeps restarting it.
+func TestPermanentReadErrorRecognizesACLIAuthFailure(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "cli auth", err: apierr.ErrAuth("not authenticated"), want: true},
+		{name: "cli auth wrapped", err: fmt.Errorf("reading changes: %w", apierr.ErrAuth("not authenticated")), want: true},
+		{name: "cli usage", err: apierr.ErrUsage("bad cursor"), want: true},
+		{name: "cli rate limit", err: apierr.ErrRateLimit(30), want: false},
+		{name: "cli network", err: apierr.ErrNetwork(io.EOF), want: false},
+		{name: "sdk auth", err: &hey.Error{Code: hey.CodeAuth, Message: "not authenticated"}, want: true},
+		{name: "sdk server error", err: &hey.Error{Code: hey.CodeAPI, Message: "boom"}, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := permanentReadError(tt.err); got != tt.want {
+				t.Errorf("permanentReadError(%v) = %t, want %t", tt.err, got, tt.want)
+			}
+		})
 	}
 }

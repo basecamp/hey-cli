@@ -100,9 +100,9 @@ func TestOAuthTokenResponseFailures(t *testing.T) {
 		exchange bool
 	}{
 		{name: "exchange status", status: http.StatusUnauthorized, body: "denied", want: "token exchange failed (status 401): denied", exchange: true},
-		{name: "exchange invalid JSON", status: http.StatusOK, body: "not-json", want: "parsing token response", exchange: true},
+		{name: "exchange invalid JSON", status: http.StatusOK, body: "not-json", want: "parsing token exchange response", exchange: true},
 		{name: "refresh status", status: http.StatusBadGateway, body: "upstream unavailable", want: "token refresh failed (status 502): upstream unavailable"},
-		{name: "refresh invalid JSON", status: http.StatusOK, body: "not-json", want: "parsing refresh response"},
+		{name: "refresh invalid JSON", status: http.StatusOK, body: "not-json", want: "parsing token refresh response"},
 	}
 
 	for _, tt := range tests {

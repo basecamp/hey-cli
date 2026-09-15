@@ -100,15 +100,11 @@ func (s *Store) Delete(origin string) error {
 	}
 	defer unlock()
 
-	s.ensureInit()
-	if s.useKeyring {
-		return s.keyring.delete(serviceName, key(origin))
-	}
-	return s.deleteFile(origin)
+	return s.delete(origin)
 }
 
-// load and save are the unlocked pair, for a caller already holding the lock over a
-// whole read-modify-write. Everything else goes through Load and Save.
+// load, save and delete are the unlocked set, for a caller already holding the lock over
+// a whole read-modify-write. Everything else goes through Load, Save and Delete.
 func (s *Store) load(origin string) (*Credentials, error) {
 	s.ensureInit()
 	if s.useKeyring {
@@ -123,6 +119,14 @@ func (s *Store) save(origin string, creds *Credentials) error {
 		return s.saveToKeyring(origin, creds)
 	}
 	return s.saveToFile(origin, creds)
+}
+
+func (s *Store) delete(origin string) error {
+	s.ensureInit()
+	if s.useKeyring {
+		return s.keyring.delete(serviceName, key(origin))
+	}
+	return s.deleteFile(origin)
 }
 
 func (s *Store) loadFromKeyring(origin string) (*Credentials, error) {

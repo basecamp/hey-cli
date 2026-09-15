@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
 // Built-in OAuth client ID for the CLI app.
@@ -32,7 +34,20 @@ type Manager struct {
 	callbackWait callbackWaiter
 	listen       listenerFactory
 	mu           sync.Mutex
+
+	// refreshHoldUntil parks refreshes after the token endpoint rate-limited one.
+	// Guarded by mu, which every path into refreshLocked already holds.
+	refreshHoldUntil time.Time
+
+	// refusedRefreshToken is a grant the server refused that the store could not
+	// delete, so this process remembers not to send it again. Guarded by mu.
+	refusedRefreshToken string
 }
+
+// defaultRefreshHold is how long to sit out a rate limit that came without a
+// Retry-After. The token endpoint's window is an hour and it counts refusals, so a
+// `hey watch` redialling every fifteen seconds would spend it in minutes.
+const defaultRefreshHold = 15 * time.Minute
 
 // NewManager creates a new auth manager.
 func NewManager(baseURL string, httpClient *http.Client, configDir string) *Manager {
@@ -62,7 +77,7 @@ func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 
 	creds, err := m.store.Load(m.baseURL)
 	if err != nil {
-		return "", fmt.Errorf("not authenticated: %w", err)
+		return "", errNotAuthenticated(err)
 	}
 
 	// Check if token is expired (with 5-minute buffer)
@@ -85,7 +100,7 @@ func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 		return creds.SessionCookie, nil
 	}
 
-	return "", fmt.Errorf("no access token or session cookie available")
+	return "", errNoCredential("no access token or session cookie available", nil)
 }
 
 // AuthenticateRequest sets the appropriate auth header on an HTTP request.
@@ -101,7 +116,7 @@ func (m *Manager) AuthenticateRequest(ctx context.Context, req *http.Request) er
 
 	creds, err := m.store.Load(m.baseURL)
 	if err != nil {
-		return fmt.Errorf("not authenticated: %w", err)
+		return errNotAuthenticated(err)
 	}
 
 	if creds.AccessToken != "" {
@@ -124,7 +139,7 @@ func (m *Manager) AuthenticateRequest(ctx context.Context, req *http.Request) er
 		return nil
 	}
 
-	return fmt.Errorf("no access token or session cookie available")
+	return errNoCredential("no access token or session cookie available", nil)
 }
 
 // IsAuthenticated checks if there are valid credentials.
@@ -258,7 +273,7 @@ func (m *Manager) Refresh(ctx context.Context) error {
 
 	creds, err := m.store.Load(m.baseURL)
 	if err != nil {
-		return fmt.Errorf("not authenticated: %w", err)
+		return errNotAuthenticated(err)
 	}
 
 	// Cookie-based auth doesn't support refresh; treat as no-op.
@@ -281,15 +296,34 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 	}
 	defer unlock()
 
-	if stored, loadErr := m.store.load(m.baseURL); loadErr == nil {
-		if stored.AccessToken != "" && stored.AccessToken != creds.AccessToken {
-			return nil
-		}
-		creds = stored
+	stored, loadErr := m.store.load(m.baseURL)
+	if loadErr != nil {
+		// Another process had this same grant refused and forgot it while we
+		// waited for the lock. The copy we came in with is the same dead token.
+		return errNotAuthenticated(loadErr)
 	}
+	if stored.AccessToken != "" && stored.AccessToken != creds.AccessToken {
+		return nil
+	}
+	creds = stored
 
 	if creds.RefreshToken == "" {
 		return fmt.Errorf("no refresh token available")
+	}
+
+	if m.refusedRefreshToken != "" && creds.RefreshToken == m.refusedRefreshToken {
+		// Refused once already, and the store would not let go of it.
+		return errRefusedGrant(nil)
+	}
+
+	if held, until := m.refreshHeld(); held {
+		// Asking again inside the rate limit cannot get through. A token that has
+		// not actually expired is still good, so carry on with it: the SDK's own
+		// retry after a 401 costs one request at most.
+		if creds.ExpiresAt > time.Now().Unix() {
+			return nil
+		}
+		return errRefreshHeld(until)
 	}
 
 	tokenEndpoint := creds.TokenEndpoint
@@ -304,8 +338,9 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 
 	token, err := refreshOAuthToken(ctx, m.httpClient, tokenEndpoint, creds.RefreshToken, oauthClientID, installID)
 	if err != nil {
-		return fmt.Errorf("token refresh failed: %w", err)
+		return m.accountForRefreshFailure(err, creds.RefreshToken)
 	}
+	m.refreshHoldUntil = time.Time{}
 	// A 200 without an access token is not a refresh. Storing the empty string would
 	// take the working token with it and leave nothing to authenticate with.
 	if token.AccessToken == "" {
@@ -323,6 +358,87 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 	}
 
 	return m.store.save(m.baseURL, creds)
+}
+
+// accountForRefreshFailure decides what a failed refresh costs the stored credential.
+// Only invalid_grant clears it: that is the one answer that proves re-sending can never
+// work. Anything softer keeps it, or a passing 502 would sign people out.
+func (m *Manager) accountForRefreshFailure(err error, sentRefreshToken string) error {
+	var refusal *tokenEndpointError
+	if !errors.As(err, &refusal) {
+		// No answer from the server, so no verdict on the grant.
+		return fmt.Errorf("token refresh failed: %w", err)
+	}
+
+	if refusal.rateLimited() {
+		m.holdRefreshes(refusal.RetryAfter)
+		return errRefreshHeld(m.refreshHoldUntil)
+	}
+
+	if !refusal.grantRefused() {
+		return fmt.Errorf("token refresh failed: %w", err)
+	}
+
+	// Forget it under the lock that already spans this load-refresh-save, so the
+	// next command asks for a login instead of re-sending it.
+	if delErr := m.store.delete(m.baseURL); delErr != nil {
+		// The credential is still on disk for the next command to load, so the
+		// refusal is remembered here instead.
+		m.refusedRefreshToken = sentRefreshToken
+		return errRefusedGrant(delErr)
+	}
+	return errRefusedGrant(nil)
+}
+
+// refreshHeld reports whether this process is sitting out a rate limit, and until when.
+func (m *Manager) refreshHeld() (bool, time.Time) {
+	if m.refreshHoldUntil.IsZero() || !time.Now().Before(m.refreshHoldUntil) {
+		return false, time.Time{}
+	}
+	return true, m.refreshHoldUntil
+}
+
+// holdRefreshes parks refreshes until the rate limit has had time to clear, honoring
+// the server's Retry-After when it sends one. The hold only ever moves later.
+func (m *Manager) holdRefreshes(retryAfter time.Duration) {
+	if retryAfter <= 0 {
+		retryAfter = defaultRefreshHold
+	}
+	if until := time.Now().Add(retryAfter); until.After(m.refreshHoldUntil) {
+		m.refreshHoldUntil = until
+	}
+}
+
+// errNoCredential is an auth failure with the store's reason attached. It has to be
+// classified here: the SDK hands our errors back untouched, so an unclassified one
+// would reach the envelope as a generic API failure without the login hint.
+func errNoCredential(msg string, cause error) *apierr.Error {
+	err := apierr.ErrAuth(msg)
+	err.Cause = cause
+	return err
+}
+
+func errNotAuthenticated(cause error) *apierr.Error {
+	return errNoCredential(fmt.Sprintf("not authenticated: %v", cause), cause)
+}
+
+// errRefusedGrant reports a refresh token the server answered invalid_grant for.
+// cleanupErr is the failure to clear it from the store, when there was one.
+func errRefusedGrant(cleanupErr error) *apierr.Error {
+	if cleanupErr != nil {
+		err := errNoCredential(fmt.Sprintf("HEY refused the stored refresh token: the session has expired or was revoked. The stored credentials could not be cleared: %v", cleanupErr), cleanupErr)
+		err.Hint = "Run: hey auth logout, then: hey auth login"
+		return err
+	}
+	return apierr.ErrAuth("HEY refused the stored refresh token: the session has expired or was revoked. Changing your HEY password ends every session, including this one. The stored credentials have been cleared")
+}
+
+func errRefreshHeld(until time.Time) *apierr.Error {
+	wait := time.Until(until).Round(time.Second)
+	err := apierr.ErrRateLimit(int(wait / time.Second))
+	err.Message = fmt.Sprintf("HEY is rate-limiting token requests — not asking again for %s", wait)
+	err.Hint = "Wait for the limit to clear, then run the command again"
+	return err
 }
 
 // GetStore returns the credential store.
