@@ -21,7 +21,7 @@ require (
 	github.com/spf13/pflag v1.0.10
 	github.com/yuin/goldmark v1.8.6
 	github.com/zalando/go-keyring v0.2.8
-	golang.org/x/mod v0.40.0
+	golang.org/x/mod v0.41.0
 	golang.org/x/net v0.58.0
 	golang.org/x/sync v0.22.0
 	golang.org/x/sys v0.47.0
