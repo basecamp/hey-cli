@@ -281,6 +281,7 @@ hey reply --attach
 hey reply --draft
 hey reply --message
 hey reply --message-html
+hey restore
 hey screener
 hey screener approve
 hey screener approve --box
