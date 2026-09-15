@@ -154,7 +154,7 @@ or through the direct-form escape (`hey box -- list`).
 
 ```bash
 hey box list                         # list mailboxes
-hey box view imbox                   # list email threads in a box (by name or ID)
+hey box view imbox                   # list email and HEY World items (by box name or ID)
 hey bundle view 456                  # list the unseen threads a bundle row groups
 hey label list                       # list labels and their IDs
 hey label view 789 --all             # list all email threads with a label
@@ -277,6 +277,8 @@ The Screener is where first-time senders wait. `hey screener list` returns clear
 A new message from `hey compose` — sent or saved with `--draft` — ends with the sender's HEY name tag, appended the way HEY's own compose form does; HEY puts the tag into the form rather than onto the saved message, so the CLI carries it itself. `--no-name-tag` leaves it off. A reply does not carry one yet.
 
 `--attach` is repeatable on `hey compose`, `hey reply`, and `hey bulk-reply send`, and attachment-only messages are supported. The CLI validates and uploads every file before sending the email. `hey attachment list <thread-id>` returns every named downloadable file, including named inline images. Direct files keep stable message-and-position IDs such as `456:1`; files inside embedded HTML receive opaque IDs scoped to their message. Pass either returned ID to `hey attachment save`. Saving uses the original filename by default, accepts `--output` for a file or directory, and preserves existing files unless `--force` is set.
+
+`hey box view --json` preserves every row's `kind`. A `world/post` row is published HEY World content, not email; preserve that kind while selecting IDs and never pass its `id` to email organization actions, because those commands receive bare IDs and cannot infer the kind. The response metadata reports `posting_count`, `email_count`, and `world_post_count`, and the summary names email and World counts separately when both are present.
 
 Organization actions take the `id` values returned by `hey box view --json`, `hey label view --json`, or `hey search --json`. Reading, replying to, and forwarding a thread take its `topic_id` instead, which `hey box view --json`, `hey label view --json`, `hey collection view --json` and `hey search --json` all carry alongside `id`. `hey box view` also returns `next_page` and accepts `--page <next_page>` to continue a box listing; it keeps `next_history_url` for the sync clients that read it, and `--page` accepts that URL as readily as the cursor inside it. Label IDs come from `hey label list`; `hey label view` returns `next_page` and `total_count`, accepts `--page <next_page>` for continuation, and supports `--all` for complete traversal. HEY creates a label while adding it to at least one thread, so `hey label create` requires thread item IDs.
 
