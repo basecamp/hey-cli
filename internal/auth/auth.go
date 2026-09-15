@@ -35,18 +35,18 @@ type Manager struct {
 	listen       listenerFactory
 	mu           sync.Mutex
 
-	// refreshHoldUntil is when this process will next send a refresh, after the
-	// token endpoint rate-limited one. Guarded by mu, which every path into
-	// refreshLocked already holds.
+	// refreshHoldUntil parks refreshes after the token endpoint rate-limited one.
+	// Guarded by mu, which every path into refreshLocked already holds.
 	refreshHoldUntil time.Time
+
+	// refusedRefreshToken is a grant the server refused that the store could not
+	// delete, so this process remembers not to send it again. Guarded by mu.
+	refusedRefreshToken string
 }
 
-// defaultRefreshHold is how long to sit out a rate limit the server did not put a
-// Retry-After on. The token endpoint's limit is a fixed window an hour wide, so a
-// process pausing this long spends only a few of the allowance per window however
-// long it runs — where `hey watch`, which re-authenticates on every ActionCable
-// dial and redials on a fifteen-second timeout, spends all of it in minutes and
-// then keeps it spent.
+// defaultRefreshHold is how long to sit out a rate limit that came without a
+// Retry-After. The token endpoint's window is an hour and it counts refusals, so a
+// `hey watch` redialling every fifteen seconds would spend it in minutes.
 const defaultRefreshHold = 15 * time.Minute
 
 // NewManager creates a new auth manager.
@@ -77,7 +77,7 @@ func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 
 	creds, err := m.store.Load(m.baseURL)
 	if err != nil {
-		return "", errNoCredential(fmt.Sprintf("not authenticated: %v", err), err)
+		return "", errNotAuthenticated(err)
 	}
 
 	// Check if token is expired (with 5-minute buffer)
@@ -116,7 +116,7 @@ func (m *Manager) AuthenticateRequest(ctx context.Context, req *http.Request) er
 
 	creds, err := m.store.Load(m.baseURL)
 	if err != nil {
-		return errNoCredential(fmt.Sprintf("not authenticated: %v", err), err)
+		return errNotAuthenticated(err)
 	}
 
 	if creds.AccessToken != "" {
@@ -273,7 +273,7 @@ func (m *Manager) Refresh(ctx context.Context) error {
 
 	creds, err := m.store.Load(m.baseURL)
 	if err != nil {
-		return errNoCredential(fmt.Sprintf("not authenticated: %v", err), err)
+		return errNotAuthenticated(err)
 	}
 
 	// Cookie-based auth doesn't support refresh; treat as no-op.
@@ -298,12 +298,9 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 
 	stored, loadErr := m.store.load(m.baseURL)
 	if loadErr != nil {
-		// The credential went away while we waited for the lock, which is what
-		// happens when another process just had this same grant refused and
-		// forgot it. Falling back to the copy we came in with would send a token
-		// already known to be dead, and spend one more of an allowance that is
-		// counted per address and shared by every process here.
-		return errNoCredential(fmt.Sprintf("not authenticated: %v", loadErr), loadErr)
+		// Another process had this same grant refused and forgot it while we
+		// waited for the lock. The copy we came in with is the same dead token.
+		return errNotAuthenticated(loadErr)
 	}
 	if stored.AccessToken != "" && stored.AccessToken != creds.AccessToken {
 		return nil
@@ -314,14 +311,16 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 		return fmt.Errorf("no refresh token available")
 	}
 
+	if m.refusedRefreshToken != "" && creds.RefreshToken == m.refusedRefreshToken {
+		// Refused once already, and the store would not let go of it.
+		return errRefusedGrant(nil)
+	}
+
 	if held, until := m.refreshHeld(); held {
-		// The endpoint rate-limited us recently. Its limit counts refusals as
-		// well as successes, so asking again now cannot get through and only
-		// spends the allowance a fresh sign-in will need.
+		// Asking again inside the rate limit cannot get through. A token that has
+		// not actually expired is still good, so carry on with it: the SDK's own
+		// retry after a 401 costs one request at most.
 		if creds.ExpiresAt > time.Now().Unix() {
-			// The five-minute buffer opened this refresh early and the access
-			// token has not actually expired yet, so the command carries on with
-			// the one we hold and tries again later.
 			return nil
 		}
 		return errRefreshHeld(until)
@@ -339,7 +338,7 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 
 	token, err := refreshOAuthToken(ctx, m.httpClient, tokenEndpoint, creds.RefreshToken, oauthClientID, installID)
 	if err != nil {
-		return m.accountForRefreshFailure(err)
+		return m.accountForRefreshFailure(err, creds.RefreshToken)
 	}
 	m.refreshHoldUntil = time.Time{}
 	// A 200 without an access token is not a refresh. Storing the empty string would
@@ -362,26 +361,16 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 }
 
 // accountForRefreshFailure decides what a failed refresh costs the stored credential.
-// Only the server refusing the grant itself clears it; every other failure leaves it
-// exactly where it was.
-//
-// Getting this split wrong is expensive in both directions. Keeping a refused grant is
-// the bug this replaces: the credential stayed on disk, so every later command re-sent
-// a token the server had already killed, and because the token endpoint's limit counts
-// refusals as well as successes, a background `hey watch` could spend an hour's
-// allowance in minutes and go on spending it — locking the address out of the login it
-// needed to recover. Clearing on anything softer is the opposite failure: a flaky
-// network or a passing 502 would sign people out of a session that was fine.
-func (m *Manager) accountForRefreshFailure(err error) error {
+// Only invalid_grant clears it: that is the one answer that proves re-sending can never
+// work. Anything softer keeps it, or a passing 502 would sign people out.
+func (m *Manager) accountForRefreshFailure(err error, sentRefreshToken string) error {
 	var refusal *tokenEndpointError
 	if !errors.As(err, &refusal) {
-		// A transport failure — no answer from the server at all, so no verdict on
-		// the grant.
+		// No answer from the server, so no verdict on the grant.
 		return fmt.Errorf("token refresh failed: %w", err)
 	}
 
 	if refusal.rateLimited() {
-		// Says nothing about the credential: the server declined to look at it.
 		m.holdRefreshes(refusal.RetryAfter)
 		return errRefreshHeld(m.refreshHoldUntil)
 	}
@@ -390,25 +379,15 @@ func (m *Manager) accountForRefreshFailure(err error) error {
 		return fmt.Errorf("token refresh failed: %w", err)
 	}
 
-	// invalid_grant. The refresh token is expired, revoked or already spent, and it
-	// will be refused the same way forever. Forget it here, under the lock that
-	// already spans this load-refresh-save, so the next command asks for a login
-	// instead of re-sending it.
+	// Forget it under the lock that already spans this load-refresh-save, so the
+	// next command asks for a login instead of re-sending it.
 	if delErr := m.store.delete(m.baseURL); delErr != nil {
-		// The grant is dead whether or not the store would let go of it, and the
-		// credential is still on disk for the next command to find. Hold refreshes
-		// so a cleanup that failed cannot become the same hammering by another
-		// name, and still report it as the auth failure it is.
-		m.holdRefreshes(0)
-		return &apierr.Error{
-			Code:       apierr.CodeAuth,
-			Message:    fmt.Sprintf("HEY refused the stored refresh token: the session has expired or was revoked. The stored credentials could not be cleared: %v", delErr),
-			Hint:       "Run: hey auth logout, then: hey auth login",
-			HTTPStatus: 401,
-			Cause:      delErr,
-		}
+		// The credential is still on disk for the next command to load, so the
+		// refusal is remembered here instead.
+		m.refusedRefreshToken = sentRefreshToken
+		return errRefusedGrant(delErr)
 	}
-	return apierr.ErrAuth("HEY refused the stored refresh token: the session has expired or was revoked. Changing your HEY password ends every session, including this one. The stored credentials have been cleared")
+	return errRefusedGrant(nil)
 }
 
 // refreshHeld reports whether this process is sitting out a rate limit, and until when.
@@ -420,8 +399,7 @@ func (m *Manager) refreshHeld() (bool, time.Time) {
 }
 
 // holdRefreshes parks refreshes until the rate limit has had time to clear, honoring
-// the server's Retry-After when it sends one. The hold only ever moves later, so a
-// short hint cannot shorten a longer wait already in force.
+// the server's Retry-After when it sends one. The hold only ever moves later.
 func (m *Manager) holdRefreshes(retryAfter time.Duration) {
 	if retryAfter <= 0 {
 		retryAfter = defaultRefreshHold
@@ -431,28 +409,36 @@ func (m *Manager) holdRefreshes(retryAfter time.Duration) {
 	}
 }
 
-// errNoCredential reports a missing or unusable credential. It carries the auth code
-// so the exit status and the login hint survive the trip out through the SDK: the auth
-// strategy is ours and the SDK hands our errors back untouched, so an unclassified one
-// would reach the envelope as a generic API failure — exiting 7 where a script, and the
-// service that restarts `hey watch`, are both watching for the auth exit.
+// errNoCredential is an auth failure with the store's reason attached. It has to be
+// classified here: the SDK hands our errors back untouched, so an unclassified one
+// would reach the envelope as a generic API failure without the login hint.
 func errNoCredential(msg string, cause error) *apierr.Error {
-	return &apierr.Error{
-		Code:       apierr.CodeAuth,
-		Message:    msg,
-		Hint:       "Run: hey auth login",
-		HTTPStatus: 401,
-		Cause:      cause,
-	}
+	err := apierr.ErrAuth(msg)
+	err.Cause = cause
+	return err
 }
 
-func errRefreshHeld(until time.Time) error {
-	return &apierr.Error{
-		Code:       apierr.CodeRateLimit,
-		Message:    fmt.Sprintf("HEY is rate-limiting token requests — not asking again for %s", time.Until(until).Round(time.Second)),
-		Hint:       "Asking sooner cannot get through, and spends the allowance a fresh sign-in needs. Wait for the limit to clear, then run the command again",
-		HTTPStatus: 429,
+func errNotAuthenticated(cause error) *apierr.Error {
+	return errNoCredential(fmt.Sprintf("not authenticated: %v", cause), cause)
+}
+
+// errRefusedGrant reports a refresh token the server answered invalid_grant for.
+// cleanupErr is the failure to clear it from the store, when there was one.
+func errRefusedGrant(cleanupErr error) *apierr.Error {
+	if cleanupErr != nil {
+		err := errNoCredential(fmt.Sprintf("HEY refused the stored refresh token: the session has expired or was revoked. The stored credentials could not be cleared: %v", cleanupErr), cleanupErr)
+		err.Hint = "Run: hey auth logout, then: hey auth login"
+		return err
 	}
+	return apierr.ErrAuth("HEY refused the stored refresh token: the session has expired or was revoked. Changing your HEY password ends every session, including this one. The stored credentials have been cleared")
+}
+
+func errRefreshHeld(until time.Time) *apierr.Error {
+	wait := time.Until(until).Round(time.Second)
+	err := apierr.ErrRateLimit(int(wait / time.Second))
+	err.Message = fmt.Sprintf("HEY is rate-limiting token requests — not asking again for %s", wait)
+	err.Hint = "Wait for the limit to clear, then run the command again"
+	return err
 }
 
 // GetStore returns the credential store.

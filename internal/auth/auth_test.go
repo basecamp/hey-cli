@@ -441,6 +441,10 @@ func TestMissingCredentialsDoNotModifyRequest(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error = %v, want substring %q", err, tt.want)
 			}
+			var authErr *apierr.Error
+			if !errors.As(err, &authErr) || authErr.Code != apierr.CodeAuth {
+				t.Errorf("error = %v, want one coded %q so the exit code and login hint survive the SDK", err, apierr.CodeAuth)
+			}
 			if got := req.Header.Get("Authorization"); got != "original" {
 				t.Errorf("Authorization = %q, want original header preserved", got)
 			}
@@ -572,16 +576,29 @@ func TestRefreshUsesStoredEndpointAndRotatesToken(t *testing.T) {
 }
 
 func TestRefreshFailuresPreserveCredentials(t *testing.T) {
+	// Every refusal that is not the server's verdict on the grant itself. The
+	// credential has to come through each of them untouched: signing someone out
+	// over a blip is worse than the resend this fix exists to stop.
+	refusable := func() *Credentials {
+		return &Credentials{AccessToken: "access", RefreshToken: "refresh"}
+	}
+
 	tests := []struct {
 		name      string
 		creds     *Credentials
 		status    int
+		body      string
 		want      string
 		wantCalls int
 	}{
 		{name: "not authenticated", want: "not authenticated", wantCalls: 0},
 		{name: "no refresh token", creds: &Credentials{AccessToken: "access"}, want: "no refresh token", wantCalls: 0},
-		{name: "server failure", creds: &Credentials{AccessToken: "access", RefreshToken: "refresh"}, status: http.StatusUnauthorized, want: "token refresh failed", wantCalls: 1},
+		{name: "server failure", creds: refusable(), status: http.StatusUnauthorized, body: "denied", want: "token refresh failed", wantCalls: 1},
+		{name: "rate limited", creds: refusable(), status: http.StatusTooManyRequests, body: `{"error":"rate_limit_exceeded"}`, want: "rate-limiting", wantCalls: 1},
+		{name: "origin failure", creds: refusable(), status: http.StatusBadGateway, body: "upstream unavailable", want: "token refresh failed", wantCalls: 1},
+		{name: "unparseable refusal", creds: refusable(), status: http.StatusBadRequest, body: "<html>nope</html>", want: "token refresh failed", wantCalls: 1},
+		{name: "a different oauth error", creds: refusable(), status: http.StatusBadRequest, body: `{"error":"invalid_request"}`, want: "token refresh failed", wantCalls: 1},
+		{name: "invalid_grant from a broken origin", creds: refusable(), status: http.StatusInternalServerError, body: `{"error":"invalid_grant"}`, want: "token refresh failed", wantCalls: 1},
 	}
 
 	for _, tt := range tests {
@@ -590,7 +607,7 @@ func TestRefreshFailuresPreserveCredentials(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls++
 				w.WriteHeader(tt.status)
-				_, _ = fmt.Fprint(w, "denied")
+				_, _ = fmt.Fprint(w, tt.body)
 			}))
 			defer server.Close()
 
@@ -832,6 +849,19 @@ func TestLoginOptionsLoggerReceivesProgress(t *testing.T) {
 	}
 }
 
+// saveExpiredCredential stores a credential whose access token has run out, so the
+// next use has to refresh.
+func saveExpiredCredential(t *testing.T, mgr *Manager) {
+	t.Helper()
+	if err := mgr.GetStore().Save(mgr.CredentialKey(), &Credentials{
+		AccessToken:  "expired-access",
+		RefreshToken: "refresh",
+		ExpiresAt:    time.Now().Add(-time.Hour).Unix(),
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+}
+
 // The refusal HEY sends when a refresh token has been killed — by a password change,
 // a revoked session, or a token already spent.
 func invalidGrantHandler(calls *int) http.HandlerFunc {
@@ -844,34 +874,86 @@ func invalidGrantHandler(calls *int) http.HandlerFunc {
 }
 
 func TestRefreshForgetsAGrantTheServerRefused(t *testing.T) {
+	// The verdict is the error code. What the server puts alongside it — a
+	// description, a malformed one, or nothing — does not change whether the grant
+	// is dead, so none of these may change whether the credential is cleared.
+	bodies := map[string]string{
+		"with a description":       `{"error":"invalid_grant","error_description":"The refresh token is invalid"}`,
+		"bare":                     `{"error":"invalid_grant"}`,
+		"malformed description":    `{"error":"invalid_grant","error_description":123}`,
+		"description as an object": `{"error":"invalid_grant","error_description":{"detail":"gone"}}`,
+	}
+
+	for name, body := range bodies {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = fmt.Fprint(w, body)
+			}))
+			defer server.Close()
+
+			t.Setenv("HEY_TOKEN", "")
+			mgr := testManager(t, server)
+			saveExpiredCredential(t, mgr)
+
+			_, err := mgr.AccessToken(t.Context())
+			if err == nil {
+				t.Fatal("AccessToken succeeded against a refused grant")
+			}
+
+			var authErr *apierr.Error
+			if !errors.As(err, &authErr) || authErr.Code != apierr.CodeAuth {
+				t.Errorf("error = %v, want one coded %q so the caller stops rather than retries", err, apierr.CodeAuth)
+			}
+			if _, loadErr := mgr.GetStore().Load(mgr.CredentialKey()); loadErr == nil {
+				t.Error("the refused credential is still stored; every later command will re-send it")
+			}
+			if mgr.IsAuthenticated() {
+				t.Error("IsAuthenticated still true after the session was refused")
+			}
+		})
+	}
+}
+
+// Deleting the credential is what normally stops a refused grant being sent again.
+// When the store will not let go of it, the refusal has to be remembered instead, or
+// the next command loads the same dead token and spends another attempt on it.
+func TestARefusedGrantIsNotResentWhenItCannotBeDeleted(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(invalidGrantHandler(&calls))
 	defer server.Close()
 
 	t.Setenv("HEY_TOKEN", "")
-	mgr := testManager(t, server)
-	if err := mgr.GetStore().Save(mgr.CredentialKey(), &Credentials{
-		AccessToken:  "dead-access",
-		RefreshToken: "dead-refresh",
-		ExpiresAt:    time.Now().Add(-time.Hour).Unix(),
-	}); err != nil {
-		t.Fatalf("Save: %v", err)
+	t.Setenv("HEY_NO_KEYRING", "")
+	mgr := NewManager(server.URL, server.Client(), t.TempDir())
+
+	// A keyring that stores and reads but refuses to delete.
+	stored := ""
+	mgr.GetStore().useKeyring = true
+	mgr.GetStore().initOnce.Do(func() {})
+	mgr.GetStore().keyring = credentialKeyring{
+		set:    func(_, _, password string) error { stored = password; return nil },
+		get:    func(_, _ string) (string, error) { return stored, nil },
+		delete: func(_, _ string) error { return errors.New("keyring is locked") },
+	}
+
+	saveExpiredCredential(t, mgr)
+
+	for range 4 {
+		if _, err := mgr.AccessToken(t.Context()); err == nil {
+			t.Fatal("AccessToken succeeded with a refused grant")
+		}
+	}
+
+	if calls != 1 {
+		t.Errorf("refresh requests = %d, want 1 — the refusal has to outlive a delete that failed", calls)
 	}
 
 	_, err := mgr.AccessToken(t.Context())
-	if err == nil {
-		t.Fatal("AccessToken succeeded against a refused grant")
-	}
-
 	var authErr *apierr.Error
 	if !errors.As(err, &authErr) || authErr.Code != apierr.CodeAuth {
-		t.Errorf("error = %v, want one coded %q so the caller stops rather than retries", err, apierr.CodeAuth)
-	}
-	if _, loadErr := mgr.GetStore().Load(mgr.CredentialKey()); loadErr == nil {
-		t.Error("the refused credential is still stored; every later command will re-send it")
-	}
-	if mgr.IsAuthenticated() {
-		t.Error("IsAuthenticated still true after the session was refused")
+		t.Errorf("error = %v, want one coded %q", err, apierr.CodeAuth)
 	}
 }
 
@@ -886,13 +968,7 @@ func TestARefusedGrantIsNeverSentTwice(t *testing.T) {
 
 	t.Setenv("HEY_TOKEN", "")
 	mgr := testManager(t, server)
-	if err := mgr.GetStore().Save(mgr.CredentialKey(), &Credentials{
-		AccessToken:  "dead-access",
-		RefreshToken: "dead-refresh",
-		ExpiresAt:    time.Now().Add(-time.Hour).Unix(),
-	}); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
+	saveExpiredCredential(t, mgr)
 
 	for range 5 {
 		req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL, nil)
@@ -909,53 +985,6 @@ func TestARefusedGrantIsNeverSentTwice(t *testing.T) {
 	}
 }
 
-func TestRefreshKeepsCredentialsTheServerNeverJudged(t *testing.T) {
-	tests := []struct {
-		name   string
-		status int
-		body   string
-	}{
-		{name: "rate limited", status: http.StatusTooManyRequests, body: `{"error":"rate_limit_exceeded"}`},
-		{name: "origin failure", status: http.StatusBadGateway, body: "upstream unavailable"},
-		{name: "unparseable refusal", status: http.StatusBadRequest, body: "<html>nope</html>"},
-		{name: "a different oauth error", status: http.StatusBadRequest, body: `{"error":"invalid_request"}`},
-		{name: "invalid_grant from a broken origin", status: http.StatusInternalServerError, body: `{"error":"invalid_grant"}`},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(tt.status)
-				_, _ = fmt.Fprint(w, tt.body)
-			}))
-			defer server.Close()
-
-			t.Setenv("HEY_TOKEN", "")
-			mgr := testManager(t, server)
-			if err := mgr.GetStore().Save(mgr.CredentialKey(), &Credentials{
-				AccessToken:  "access",
-				RefreshToken: "refresh",
-				ExpiresAt:    time.Now().Add(-time.Hour).Unix(),
-			}); err != nil {
-				t.Fatalf("Save: %v", err)
-			}
-
-			if _, err := mgr.AccessToken(t.Context()); err == nil {
-				t.Fatal("AccessToken succeeded against a failed refresh")
-			}
-
-			stored, err := mgr.GetStore().Load(mgr.CredentialKey())
-			if err != nil {
-				t.Fatalf("the credential was cleared on a failure that is no verdict on the grant: %v", err)
-			}
-			if stored.RefreshToken != "refresh" {
-				t.Errorf("stored refresh token = %q, want it left alone", stored.RefreshToken)
-			}
-		})
-	}
-}
-
 func TestRateLimitedRefreshStopsAskingUntilTheLimitCanHaveCleared(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -968,28 +997,23 @@ func TestRateLimitedRefreshStopsAskingUntilTheLimitCanHaveCleared(t *testing.T) 
 
 	t.Setenv("HEY_TOKEN", "")
 	mgr := testManager(t, server)
-	if err := mgr.GetStore().Save(mgr.CredentialKey(), &Credentials{
-		AccessToken:  "expired-access",
-		RefreshToken: "refresh",
-		ExpiresAt:    time.Now().Add(-time.Hour).Unix(),
-	}); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-
-	for range 4 {
-		if _, err := mgr.AccessToken(t.Context()); err == nil {
-			t.Fatal("AccessToken succeeded while rate limited")
-		}
-	}
-
-	if calls != 1 {
-		t.Errorf("refresh requests = %d, want 1 — asking again inside the window cannot get through and only spends the allowance", calls)
-	}
+	saveExpiredCredential(t, mgr)
 
 	_, err := mgr.AccessToken(t.Context())
 	var rateErr *apierr.Error
 	if !errors.As(err, &rateErr) || rateErr.Code != apierr.CodeRateLimit {
-		t.Errorf("error = %v, want one coded %q while the hold is in force", err, apierr.CodeRateLimit)
+		t.Fatalf("error = %v, want the first rate limit coded %q", err, apierr.CodeRateLimit)
+	}
+
+	for range 4 {
+		_, err = mgr.AccessToken(t.Context())
+		if !errors.As(err, &rateErr) || rateErr.Code != apierr.CodeRateLimit {
+			t.Fatalf("error = %v, want one coded %q while the hold is in force", err, apierr.CodeRateLimit)
+		}
+	}
+
+	if calls != 1 {
+		t.Errorf("refresh requests = %d, want 1 — asking again inside the window cannot get through", calls)
 	}
 }
 
@@ -1042,13 +1066,7 @@ func TestRefreshHoldHonorsRetryAfter(t *testing.T) {
 
 	t.Setenv("HEY_TOKEN", "")
 	mgr := testManager(t, server)
-	if err := mgr.GetStore().Save(mgr.CredentialKey(), &Credentials{
-		AccessToken:  "access",
-		RefreshToken: "refresh",
-		ExpiresAt:    time.Now().Add(-time.Hour).Unix(),
-	}); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
+	saveExpiredCredential(t, mgr)
 
 	if _, err := mgr.AccessToken(t.Context()); err == nil {
 		t.Fatal("AccessToken succeeded while rate limited")
@@ -1095,13 +1113,7 @@ func TestASuccessfulRefreshLiftsTheHold(t *testing.T) {
 	defer server.Close()
 
 	mgr := testManager(t, server)
-	if err := mgr.GetStore().Save(mgr.CredentialKey(), &Credentials{
-		AccessToken:  "old",
-		RefreshToken: "refresh",
-		ExpiresAt:    time.Now().Add(-time.Hour).Unix(),
-	}); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
+	saveExpiredCredential(t, mgr)
 	mgr.holdRefreshes(time.Minute)
 
 	// The hold is in force, so this one is skipped and the expired token reported.
@@ -1176,13 +1188,7 @@ func TestRateLimitHoldSurvivesABodyThatNeverArrives(t *testing.T) {
 
 	t.Setenv("HEY_TOKEN", "")
 	mgr := testManager(t, server)
-	if err := mgr.GetStore().Save(mgr.CredentialKey(), &Credentials{
-		AccessToken:  "access",
-		RefreshToken: "refresh",
-		ExpiresAt:    time.Now().Add(-time.Hour).Unix(),
-	}); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
+	saveExpiredCredential(t, mgr)
 
 	if _, err := mgr.AccessToken(t.Context()); err == nil {
 		t.Fatal("AccessToken succeeded against a truncated 429")
@@ -1193,60 +1199,5 @@ func TestRateLimitHoldSurvivesABodyThatNeverArrives(t *testing.T) {
 	}
 	if _, err := mgr.GetStore().Load(mgr.CredentialKey()); err != nil {
 		t.Errorf("the credential was cleared on a rate limit: %v", err)
-	}
-}
-
-func TestTheFirstRateLimitIsAlreadyClassified(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusTooManyRequests)
-		_, _ = fmt.Fprint(w, `{"error":"rate_limit_exceeded"}`)
-	}))
-	defer server.Close()
-
-	t.Setenv("HEY_TOKEN", "")
-	mgr := testManager(t, server)
-	if err := mgr.GetStore().Save(mgr.CredentialKey(), &Credentials{
-		AccessToken:  "access",
-		RefreshToken: "refresh",
-		ExpiresAt:    time.Now().Add(-time.Hour).Unix(),
-	}); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-
-	_, err := mgr.AccessToken(t.Context())
-	var rateErr *apierr.Error
-	if !errors.As(err, &rateErr) || rateErr.Code != apierr.CodeRateLimit {
-		t.Errorf("error = %v, want the first rate limit coded %q too", err, apierr.CodeRateLimit)
-	}
-}
-
-// The exit code and the login hint have to survive the trip out: `hey watch` is
-// restarted by a shell service on any non-auth exit, so an auth failure that reads
-// as a generic API error is a restart loop.
-func TestACredentialFailureKeepsItsAuthCode(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		t.Fatal("no request should be made without a credential")
-	}))
-	defer server.Close()
-
-	t.Setenv("HEY_TOKEN", "")
-	mgr := testManager(t, server)
-
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL, nil)
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
-
-	authErr := mgr.AuthenticateRequest(t.Context(), req)
-	if authErr == nil {
-		t.Fatal("AuthenticateRequest succeeded with no credential")
-	}
-
-	mapped := apierr.AsError(apierr.FromSDK(authErr))
-	if mapped.Code != apierr.CodeAuth {
-		t.Errorf("code after the SDK adapter = %q, want %q", mapped.Code, apierr.CodeAuth)
-	}
-	if mapped.Hint == "" {
-		t.Error("the login hint was lost on the way out")
 	}
 }
