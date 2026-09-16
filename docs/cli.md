@@ -282,7 +282,8 @@ A new message from `hey compose` — sent or saved with `--draft` — ends with 
 Choose a new message's sender with `compose --from <email-or-sender-id>`. Discover
 addresses and IDs with `hey account senders`; `--account` filters the listing and
 limits sender selection. In All Accounts, an ambiguous address requires a sender
-ID or a specific account. Unknown and unavailable senders fail before uploads.
+ID or a specific account. Unknown and unavailable senders fail before reading
+stdin, opening the editor, or uploading attachments.
 The selected sender's active Name Tag is appended unless `--no-name-tag` is set.
 `--from` is currently only for new messages, not `compose --thread-id` replies.
 
@@ -290,9 +291,11 @@ With `--from`, compose uses the SDK's sender-aware draft route: save, verify the
 saved sender, recipients and complete body, then deliver. `--draft` stops after
 saving. If verification fails, the draft remains and the error names its ID;
 inspect it with `draft show` before taking another action. Do not repeat compose
-to recover a saved draft or retry an ambiguous delivery. Exact HTML and HEY's
-lossless HTML envelope are accepted; other server-side HTML normalization leaves
-a draft for inspection rather than sending changed content.
+to recover a saved draft or retry an ambiguous delivery. Verification accepts
+exact HTML, HEY's lossless HTML envelope, paragraph-to-div conversion, and
+uploaded-attachment Trix figures. Attachment identity and metadata, links, and
+formatting must remain intact. Other server-side HTML normalization leaves a
+draft for inspection rather than sending changed content.
 
 `draft edit --from <email-or-sender-id>` changes the sender within the draft's
 existing account. As with other field flags, the omitted body remains byte-for-byte

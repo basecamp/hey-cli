@@ -92,6 +92,10 @@ func draftContentFrom(edit *generated.MessageEditState) hey.DraftContent {
 		// the account default by its first edit or the final send.
 		ActingSenderID: edit.Sender.Id,
 	}
+	if content.ActingSenderID == 0 {
+		// HEY omits sender when the draft is sent as its creator contact.
+		content.ActingSenderID = edit.Creator.Id
+	}
 	if !edit.ScheduledDeliveryAt.IsZero() {
 		// HEY's API reads a schedule's date and hour in UTC (ApiRequest sets
 		// Time.zone to UTC for every JSON request), so the served UTC moment is

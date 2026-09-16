@@ -5,6 +5,8 @@ import (
 	"fmt"
 	stdhtml "html"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -374,5 +376,156 @@ func TestDraftShowIncludesSelectedSender(t *testing.T) {
 	}
 	if response.Data.(map[string]any)["from"] != "personal@example.org" {
 		t.Fatalf("missing sender: %+v", response.Data)
+	}
+}
+
+func TestComposeFromCanonicalMarkdown(t *testing.T) {
+	var writes []draftWrite
+	actual := `<div>Numbers.</div><br><div>Billing</div>`
+	_, err := runJSONCommand(t, senderServer(t, senderIdentity, &writes, func(s map[string]any) { s["content"] = actual }),
+		"compose", "--from", "88", "--subject", "Board update", "--to", "maria@example.com", "-m", "Numbers.")
+	if err != nil || len(writes) != 2 {
+		t.Fatalf("err=%v writes=%v", err, writes)
+	}
+	if writes[1].Method != "PUT" || writes[1].Body["message"].(map[string]any)["content"] != actual {
+		t.Fatal("delivery must use verified server content")
+	}
+}
+
+func TestDraftWritesPreserveCreatorSender(t *testing.T) {
+	identity := strings.Replace(senderIdentity, `"senders":[`, `"senders":[{"id":42,"account_id":9,"email_address":"default@example.org","default":true},`, 1)
+	for _, args := range [][]string{{"draft", "edit", "12345", "--subject", "Updated board figures"}, {"draft", "send", "12345"}} {
+		t.Run(args[1], func(t *testing.T) {
+			var writes []draftWrite
+			_, err := runJSONCommand(t, senderServer(t, identity, &writes, func(s map[string]any) { delete(s, "sender") }), append(args, "--account", "9")...)
+			if err != nil || len(writes) != 1 {
+				t.Fatalf("err=%v writes=%v", err, writes)
+			}
+			if writes[0].Body["acting_sender_id"] != float64(77) {
+				t.Fatalf("creator sender lost: %v", writes[0])
+			}
+		})
+	}
+}
+
+func TestComposeFromValidatesBeforeInput(t *testing.T) {
+	for _, terminal := range []bool{true, false} {
+		t.Run(fmt.Sprint(terminal), func(t *testing.T) {
+			previous := stdinIsTerminal
+			stdinIsTerminal = func() bool { return terminal }
+			t.Cleanup(func() { stdinIsTerminal = previous })
+			marker := filepath.Join(t.TempDir(), "editor-ran")
+			script := filepath.Join(t.TempDir(), "editor")
+			if err := os.WriteFile(script, []byte("#!/bin/sh\ntouch '"+marker+"'\nprintf 'Numbers.' > \"$1\"\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("EDITOR", script)
+			t.Setenv("VISUAL", script)
+			input, err := os.CreateTemp(t.TempDir(), "stdin")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer input.Close()
+			if _, err := input.WriteString("Numbers."); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := input.Seek(0, 0); err != nil {
+				t.Fatal(err)
+			}
+			old := os.Stdin
+			os.Stdin = input
+			t.Cleanup(func() { os.Stdin = old })
+			var writes []draftWrite
+			_, err = runJSONCommand(t, senderServer(t, senderIdentity, &writes, nil), "compose", "--from", "unknown@example.org", "--subject", "Board update", "--draft")
+			if err == nil || !strings.Contains(err.Error(), "--from") || len(writes) != 0 {
+				t.Fatalf("err=%v writes=%v", err, writes)
+			}
+			if _, err := os.Stat(marker); !os.IsNotExist(err) {
+				t.Fatal("editor opened before sender validation")
+			}
+			if offset, err := input.Seek(0, 1); err != nil || offset != 0 {
+				t.Fatalf("stdin consumed before validation: %d, %v", offset, err)
+			}
+		})
+	}
+}
+
+func TestSavedHTMLCanonicalization(t *testing.T) {
+	upload := `<action-text-attachment sgid="sgid-report" content-type="application/pdf" filename="board.pdf" filesize="14"></action-text-attachment>`
+	figure := `<figure data-trix-attachment='{"sgid":"sgid-report","contentType":"application/pdf","filename":"board.pdf","filesize":14,"url":"/rails/active_storage/blobs/report/board.pdf"}'></figure>`
+	for _, tc := range []struct {
+		name, expected, actual string
+		same                   bool
+	}{
+		{"paragraph", `<p>Numbers.</p>`, `<div>Numbers.</div>`, true},
+		{"paragraphs", "<p>Numbers.</p>\n<p>Details.</p>", `<div>Numbers.</div><div>Details.</div>`, true},
+		{"formatting", `<p><strong>Numbers</strong> and <a href="https://example.org">details</a>.</p>`, `<div><strong>Numbers</strong> and <a href="https://example.org">details</a>.</div>`, true},
+		{"upload", upload, figure, true},
+		{"missing-upload", upload, "", false},
+		{"different-upload", upload, strings.Replace(figure, "sgid-report", "sgid-other", 1), false},
+		{"renamed-upload", upload, strings.Replace(figure, `"filename":"board.pdf"`, `"filename":"other.pdf"`, 1), false},
+		{"changed-size", upload, strings.Replace(figure, `"filesize":14`, `"filesize":15`, 1), false},
+		{"missing-size", upload, strings.Replace(figure, `"filesize":14,`, "", 1), false},
+		{"changed-type", upload, strings.Replace(figure, "application/pdf", "image/png", 1), false},
+		{"extra-figure-content", upload, strings.Replace(figure, "</figure>", "<p>Unexpected</p></figure>", 1), false},
+		{"extra-attachment-content", upload, strings.Replace(figure, `"filesize":14`, `"filesize":14,"content":"Unexpected"`, 1), false},
+		{"extra-attachment-caption", upload, strings.Replace(figure, `"filesize":14`, `"filesize":14,"caption":"Unexpected"`, 1), false},
+		{"extra-body", `<p>Numbers.</p>`, `<div>Numbers.</div><div>Unexpected</div>`, false},
+		{"changed-link", `<p><a href="https://example.org">details</a></p>`, `<div><a href="https://other.example.org">details</a></div>`, false},
+		{"lost-emphasis", `<p><strong>Numbers.</strong></p>`, `<div>Numbers.</div>`, false},
+		{"inline-space", `<strong>Board</strong> <em>figures</em>`, `<strong>Board</strong><em>figures</em>`, false},
+		{"preformatted-block-space", "<pre><div>Numbers.</div>\n<div>Details.</div></pre>", "<pre><div>Numbers.</div><div>Details.</div></pre>", false},
+		{"preformatted-space", "<pre>\n\n</pre>", "<pre></pre>", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sameSavedMessageHTML(tc.expected, tc.actual); got != tc.same {
+				t.Fatalf("equivalent=%v, want %v", got, tc.same)
+			}
+		})
+	}
+}
+
+func TestComposeFromCanonicalUploadedAttachment(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "board.pdf")
+	if err := os.WriteFile(path, []byte("Report figures"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, changed := range []bool{false, true} {
+		t.Run(fmt.Sprint(changed), func(t *testing.T) {
+			var writes []draftWrite
+			figure := `<figure data-trix-attachment='{"sgid":"sgid-report","contentType":"application/pdf","filename":"board.pdf","filesize":14,"url":"/rails/active_storage/blobs/report/board.pdf"}'></figure>`
+			if changed {
+				figure = strings.Replace(figure, "sgid-report", "sgid-other", 1)
+			}
+			actual := `<div>Numbers.</div><br>` + figure + `<br><div>Billing</div>`
+			handler := senderServer(t, senderIdentity, &writes, func(s map[string]any) { s["content"] = actual })
+			uploads := 0
+			wrapped := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/rails/active_storage/direct_uploads.json":
+					if r.URL.Query().Get("filtered_account_id") != "9" {
+						t.Error("upload not account scoped")
+					}
+					w.Header().Set("Content-Type", "application/json")
+					fmt.Fprintf(w, `{"signed_id":"signed-report","attachable_sgid":"sgid-report","direct_upload":{"url":%q,"headers":{}}}`, "http://"+r.Host+"/storage/upload")
+				case "/storage/upload":
+					uploads++
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					handler.ServeHTTP(w, r)
+				}
+			})
+			_, err := runJSONCommand(t, wrapped, "compose", "--from", "88", "--subject", "Board update", "--to", "maria@example.com", "-m", "Numbers.", "--attach", path)
+			if uploads != 1 {
+				t.Fatalf("uploads=%d", uploads)
+			}
+			if changed {
+				if err == nil || len(writes) != 1 {
+					t.Fatalf("changed attachment delivered: err=%v writes=%v", err, writes)
+				}
+			} else if err != nil || len(writes) != 2 || writes[1].Method != "PUT" || writes[1].Body["message"].(map[string]any)["content"] != actual {
+				t.Fatalf("err=%v writes=%v", err, writes)
+			}
+		})
 	}
 }
