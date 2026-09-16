@@ -151,6 +151,7 @@ notice on stderr. Both need list data, so they work on `hey box list`, `hey box 
 | Task | Command |
 |------|---------|
 | List linked mail accounts | `hey account list --json` |
+| List sender addresses and IDs | `hey account senders --json` |
 | Set default mail account | `hey account use <id\|all>` |
 | Run once for one account | `hey --account <id> box list --json` |
 | Review trusted local settings | `hey config trusted-locals --json` |
@@ -204,6 +205,8 @@ notice on stderr. Both need list data, so they work on `hey box list`, `hey box 
 | Draft a reply for human review | `hey reply <topic_id> -m "Drafting this." --draft` |
 | Read a draft back | `hey draft show <draft_id> --json` |
 | Change a draft | `hey draft edit <draft_id> --to alice@example.com --subject "New subject"` |
+| Change a draft sender | `hey draft edit <draft_id> --from billing@example.org` |
+| Compose from a selected address | `hey compose --from billing@example.org --to alice@example.com --subject "Board update" -m "Numbers to follow." --draft` |
 | Send a draft | `hey draft send <draft_id>` |
 | Trash drafts | `hey draft delete <draft_id>...` |
 | Who is waiting in The Screener | `hey screener list --json` (clearance IDs) |
@@ -810,3 +813,14 @@ HEY_NONINTERACTIVE=1 hey setup --json          # No prompts and no OAuth wait â€
 ```
 
 Run `hey auth login` only when the user is present and explicitly asks to authenticate.
+
+### Sender selection
+
+`account senders` lists configured sender IDs and addresses within `--account`.
+`compose --from <email-or-id>` applies that sender's active Name Tag unless
+`--no-name-tag` is set; `--draft` saves without sending. Without `--draft`,
+explicit-sender compose saves and verifies a draft before delivery. On a
+verification or ambiguous-delivery error, inspect the reported draft ID; do not
+blindly repeat compose or send. `draft edit --from` stays in the draft's account
+and preserves the existing body, including signatures. Replace the body explicitly
+when needed. `draft show` includes From. These commands do not persist a default.

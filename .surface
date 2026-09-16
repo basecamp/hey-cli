@@ -15,6 +15,7 @@ hey --verbose
 hey --version
 hey account
 hey account list
+hey account senders
 hey account use
 hey attachment
 hey attachment list
@@ -102,6 +103,7 @@ hey compose --attach
 hey compose --bcc
 hey compose --cc
 hey compose --draft
+hey compose --from
 hey compose --message
 hey compose --message-html
 hey compose --no-name-tag
@@ -148,6 +150,7 @@ hey draft delete
 hey draft edit
 hey draft edit --bcc
 hey draft edit --cc
+hey draft edit --from
 hey draft edit --message
 hey draft edit --message-html
 hey draft edit --subject

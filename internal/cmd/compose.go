@@ -18,6 +18,7 @@ import (
 
 type composeCommand struct {
 	cmd         *cobra.Command
+	from        string
 	to          string
 	cc          string
 	bcc         string
@@ -36,7 +37,7 @@ func newComposeCommand() *composeCommand {
 		Use:   "compose",
 		Short: "Write and send a new email",
 		Annotations: map[string]string{
-			"agent_notes": "Starts a new thread with --to (optionally --cc/--bcc), which requires --subject, or replies to an existing one with --thread-id, which does not. Repeatable --attach files are uploaded before sending and can be sent without body text. The body is Markdown; use --message-html to send raw HTML instead. --draft saves instead of sending — recipients become optional — and answers the draft ID for hey draft show/edit/send/delete. A new message ends with the sender's HEY name tag, as one composed in HEY does; --no-name-tag leaves it out.",
+			"agent_notes": "--from selects a configured sender email or ID from account senders; --account must agree. Explicit-sender sends save and verify a draft before delivery; a failed verification retains the draft and reports its ID. --from is only for new messages. Starts a new thread with --to (optionally --cc/--bcc), which requires --subject, or replies to an existing one with --thread-id, which does not. Repeatable --attach files are uploaded before sending and can be sent without body text. The body is Markdown; use --message-html to send raw HTML instead. --draft saves instead of sending — recipients become optional — and answers the draft ID for hey draft show/edit/send/delete. A new message ends with the sender's HEY name tag, as one composed in HEY does; --no-name-tag leaves it out.",
 		},
 		Example: `  hey compose --to alice@example.com --subject "Lunch plans" -m "Are you free Friday?"
   hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Kitchen remodel timeline" -m "Cabinets land the week of the 14th."
@@ -49,6 +50,7 @@ func newComposeCommand() *composeCommand {
 		RunE: composeCommand.run,
 	}
 
+	composeCommand.cmd.Flags().StringVar(&composeCommand.from, "from", "", "Configured sender email or ID (see hey account senders)")
 	composeCommand.cmd.Flags().StringVar(&composeCommand.to, "to", "", "Recipient email address(es)")
 	composeCommand.cmd.Flags().StringVar(&composeCommand.cc, "cc", "", "CC recipient email address(es)")
 	composeCommand.cmd.Flags().StringVar(&composeCommand.bcc, "bcc", "", "BCC recipient email address(es)")
@@ -65,6 +67,9 @@ func newComposeCommand() *composeCommand {
 }
 
 func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
+	if cmd.Flags().Changed("from") && (strings.TrimSpace(c.from) == "" || c.threadID != "") {
+		return apierr.ErrUsage("--from requires a sender email or ID and is only supported for new messages")
+	}
 	if err := requireAuth(); err != nil {
 		return err
 	}
@@ -134,6 +139,9 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		// A draft needs nobody on it yet; only a send does.
 		if len(to)+len(cc)+len(bcc) == 0 && !c.draft {
 			return apierr.ErrUsage("a message needs at least one recipient (to, cc or bcc)")
+		}
+		if cmd.Flags().Changed("from") {
+			return c.composeFrom(cmd, message, to, cc, bcc)
 		}
 		messageWithAttachments, attachErr := attachFiles(ctx, message, c.attachments)
 		if attachErr != nil {
