@@ -166,7 +166,12 @@ func (c *composeCommand) composeFrom(cmd *cobra.Command, message string, to, cc,
 	if !sameSenderDraft(content, actual) {
 		return apierr.ErrUsageHint(fmt.Sprintf("draft %d saved but readback differs; not sent", id), fmt.Sprintf("hey draft show %d", id))
 	}
-	if err := client.Messages().SendDraft(ctx, id, actual); err != nil {
+	// Keep delivery single-attempt even if the SDK operation policy changes.
+	delivery, err := newSDKClient(hey.WithMaxRetries(0)).ForAccount(ctx, sender.AccountId)
+	if err != nil {
+		return fmt.Errorf("draft %d saved; delivery client unavailable; not sent: %w", id, apierr.FromSDK(err))
+	}
+	if err := delivery.Messages().SendDraft(ctx, id, actual); err != nil {
 		return fmt.Errorf("delivery of draft %d was not confirmed; inspect its state before retrying: %w", id, apierr.FromSDK(err))
 	}
 	return writeMutation(cmd, sentWithAttachmentsSummary("Message sent", len(c.attachments)), map[string]any{"id": id})
@@ -207,6 +212,11 @@ func sameSavedMessageHTML(expected, actual string) bool {
 	}
 	if node.Type != html.ElementNode || node.Data != "figure" {
 		return false
+	}
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type != html.TextNode || strings.TrimSpace(child.Data) != "" {
+			return false
+		}
 	}
 	var attachment struct {
 		ContentType string `json:"contentType"`
