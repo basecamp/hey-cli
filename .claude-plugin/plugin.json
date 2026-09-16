@@ -1,6 +1,6 @@
 {
   "name": "hey",
-  "version": "1.4.3",
+  "version": "1.5.0",
   "description": "HEY integration for Claude Code. Read email, manage todos, track time.",
   "author": {
     "name": "37signals",
