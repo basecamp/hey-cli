@@ -16,6 +16,8 @@ setup() {
   REPO_ROOT="$(cd "${BATS_TEST_DIRNAME}/../.." && pwd)"
   WORK="$(mktemp -d)"
   STUB_DIR="$WORK/bin"
+  ORIGINAL_PATH="$PATH"
+  REAL_MAKE="$(command -v make)"
   export LOG="$WORK/calls.log"
   PUSH_LOG="$WORK/pushes.log"
   mkdir -p "$STUB_DIR"
@@ -47,6 +49,11 @@ STUB
   printf '{\n  version = "0.1.0";\n}\n' > nix/package.nix
   printf '{\n  "name": "hey",\n  "version": "0.1.0"\n}\n' > .claude-plugin/plugin.json
   printf 'module example.com/hey\n\ngo 1.24\n' > go.mod
+  cat > Makefile <<'MAKEFILE'
+release-check:
+	@if [ -n "$(DRY_RUN)" ]; then echo "release DRY_RUN leaked through make: $(DRY_RUN)" >&2; exit 1; fi
+	@echo "make DRY_RUN= release-check" >> "$(LOG)"
+MAKEFILE
 
   git add -A && git commit -qm "Initial import"
   git tag -a v0.1.0 -m "Release v0.1.0"
@@ -58,6 +65,10 @@ STUB
 
   cat > "$STUB_DIR/make" <<'STUB'
 #!/usr/bin/env bash
+if [[ -n "${DRY_RUN:-}" ]]; then
+  echo "release DRY_RUN leaked into release checks: $DRY_RUN" >&2
+  exit 1
+fi
 echo "make $*" >> "$LOG"
 STUB
   chmod +x "$STUB_DIR/make"
@@ -105,7 +116,7 @@ release_pushes() { grep -E '^refs/(heads/main|tags/v)' "$PUSH_LOG" || true; }
   [ "$(origin show main:.claude-plugin/plugin.json | jq -r .version)" = "0.2.0" ]
   origin show main:nix/package.nix | grep -q 'version = "0.2.0"'
   [ "$(release_pushes)" = $'refs/heads/main\nrefs/tags/v0.2.0' ]
-  grep -q '^make release-check$' "$LOG"
+  grep -q '^make DRY_RUN= release-check$' "$LOG"
   ! grep -q update-nix-flake "$LOG"
 }
 
@@ -130,8 +141,72 @@ release_pushes() { grep -E '^refs/(heads/main|tags/v)' "$PUSH_LOG" || true; }
   ! origin rev-parse -q --verify refs/tags/v0.2.0 >/dev/null
   [ "$(plugin_version)" = "0.1.0" ]
   [ -z "$(release_pushes)" ]
-  grep -q '^make release-check$' "$LOG"
+  grep -q '^make DRY_RUN= release-check$' "$LOG"
   ! grep -q update-nix-flake "$LOG"
+}
+
+@test "Makefile dry run stays dry and does not leak through recursive make" {
+  run env PATH="$ORIGINAL_PATH" "$REAL_MAKE" -f "$REPO_ROOT/Makefile" release VERSION=0.2.0 DRY_RUN=1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Dry run complete"* ]]
+
+  [ "$(git rev-parse HEAD)" = "$BASE" ]
+  [ "$(origin rev-parse main)" = "$BASE" ]
+  if origin rev-parse -q --verify refs/tags/v0.2.0 >/dev/null; then
+    false
+  fi
+  [ "$(plugin_version)" = "0.1.0" ]
+  [ -z "$(release_pushes)" ]
+  grep -q '^make DRY_RUN= release-check$' "$LOG"
+  if grep -q update-nix-flake "$LOG"; then
+    false
+  fi
+}
+
+@test "Makefile real release still commits and pushes" {
+  run env PATH="$ORIGINAL_PATH" "$REAL_MAKE" -f "$REPO_ROOT/Makefile" release VERSION=0.2.0
+  [ "$status" -eq 0 ]
+
+  [ "$(origin log -1 --format=%s main)" = "Update nix flake and plugin version for v0.2.0" ]
+  [ "$(origin rev-parse v0.2.0^{commit})" = "$(origin rev-parse main)" ]
+  [ "$(origin show main:.claude-plugin/plugin.json | jq -r .version)" = "0.2.0" ]
+  origin show main:nix/package.nix | grep -q 'version = "0.2.0"'
+  [ "$(release_pushes)" = $'refs/heads/main\nrefs/tags/v0.2.0' ]
+  grep -q '^make DRY_RUN= release-check$' "$LOG"
+}
+
+@test "unknown arguments fail closed" {
+  run scripts/release.sh 0.2.0 --dryrun
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Unknown argument: '--dryrun'"* ]]
+
+  run scripts/release.sh 0.2.0 --dry-run unexpected
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Unexpected arguments"* ]]
+
+  [ "$(git rev-parse HEAD)" = "$BASE" ]
+  [ "$(origin rev-parse main)" = "$BASE" ]
+  if origin rev-parse -q --verify refs/tags/v0.2.0 >/dev/null; then
+    false
+  fi
+  [ "$(plugin_version)" = "0.1.0" ]
+  [ -z "$(release_pushes)" ]
+  [ ! -f "$LOG" ]
+}
+
+@test "invalid environment dry run value fails closed" {
+  run env DRY_RUN=tru scripts/release.sh 0.2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Invalid release DRY_RUN value: 'tru'"* ]]
+
+  [ "$(git rev-parse HEAD)" = "$BASE" ]
+  [ "$(origin rev-parse main)" = "$BASE" ]
+  if origin rev-parse -q --verify refs/tags/v0.2.0 >/dev/null; then
+    false
+  fi
+  [ "$(plugin_version)" = "0.1.0" ]
+  [ -z "$(release_pushes)" ]
+  [ ! -f "$LOG" ]
 }
 
 @test "refuses a tag that exists at another commit before touching main" {

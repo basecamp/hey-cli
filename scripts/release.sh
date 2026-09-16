@@ -20,19 +20,39 @@ error() { echo -e "${RED}ERROR:${RESET} $*" >&2; }
 die()   { error "$@"; exit 1; }
 
 # --- Args ---
-VERSION="${1:-${VERSION:-}}"
-DRY_RUN="${DRY_RUN:-0}"
-if [[ "$*" == *"--dry-run"* ]]; then
-  DRY_RUN=1
-fi
-case "$DRY_RUN" in
-  1|true) DRY_RUN=1 ;;
-  *) DRY_RUN=0 ;;
-esac
-
-if [[ -z "$VERSION" || "$VERSION" == "dev" ]]; then
+usage() {
   echo "Usage: scripts/release.sh VERSION [--dry-run]"
   echo "       make release VERSION=0.2.0 [DRY_RUN=1]"
+}
+
+if [[ $# -eq 0 ]]; then
+  usage
+  exit 1
+fi
+if [[ $# -gt 2 ]]; then
+  die "Unexpected arguments (expected VERSION [--dry-run])"
+fi
+
+VERSION="$1"
+# Capture the release switch under its own name, then keep the generic DRY_RUN
+# variable out of release-check's environment. Individual checks use DRY_RUN for
+# their own interfaces, with values such as "local" and "remote".
+release_dry_run_input="${DRY_RUN:-}"
+case "${2:-}" in
+  "") ;;
+  --dry-run) release_dry_run_input=1 ;;
+  *) die "Unknown argument: '$2' (expected --dry-run)" ;;
+esac
+unset DRY_RUN
+case "$release_dry_run_input" in
+  ""|0|false) RELEASE_DRY_RUN=0 ;;
+  1|true) RELEASE_DRY_RUN=1 ;;
+  *) die "Invalid release DRY_RUN value: '$release_dry_run_input' (expected 0, 1, false or true)" ;;
+esac
+readonly RELEASE_DRY_RUN
+
+if [[ "$VERSION" == "dev" ]]; then
+  usage
   exit 1
 fi
 
@@ -50,7 +70,7 @@ if [[ "$VERSION" == *-* ]]; then
   PRERELEASE=1
 fi
 
-if [[ "$DRY_RUN" -eq 1 ]]; then
+if [[ "$RELEASE_DRY_RUN" -eq 1 ]]; then
   info "Dry run — no commits, tags or pushes"
   echo ""
 fi
@@ -161,7 +181,10 @@ info "  Branch: $BRANCH"
 info "  Commit: ${LOCAL:0:7}"
 info "  Tag:    $TAG"
 echo ""
-make release-check
+# A variable assigned on `make release` also travels through MAKEFLAGS into the
+# nested make. The explicit empty command-line override wins over that inherited
+# assignment; unsetting the shell variable alone does not.
+make DRY_RUN= release-check
 
 # --- Update stable release metadata ---
 # Prereleases leave the Nix flake and plugin metadata on the latest stable
@@ -172,14 +195,14 @@ if [[ "$PRERELEASE" -eq 1 ]]; then
   echo "  Claude plugin metadata: unchanged"
 else
   info "Stamping Nix version"
-  if [[ "$DRY_RUN" -eq 1 ]]; then
+  if [[ "$RELEASE_DRY_RUN" -eq 1 ]]; then
     echo "  (skipped — dry run)"
   else
     scripts/stamp-nix-version.sh "$VERSION"
   fi
 
   info "Stamping plugin version"
-  if [[ "$DRY_RUN" -eq 1 ]]; then
+  if [[ "$RELEASE_DRY_RUN" -eq 1 ]]; then
     echo "  (skipped — dry run)"
   else
     scripts/stamp-plugin-version.sh "$VERSION"
@@ -195,7 +218,7 @@ fi
 # the two refs go up in one --atomic push — an existing remote tag or a
 # non-fast-forward main rejects both, and origin is left exactly as found.
 PREP_BASE="$LOCAL"
-if [[ "$PRERELEASE" -eq 0 && "$DRY_RUN" -eq 0 ]]; then
+if [[ "$PRERELEASE" -eq 0 && "$RELEASE_DRY_RUN" -eq 0 ]]; then
   git add nix/package.nix .claude-plugin/plugin.json
   if ! git diff --cached --quiet; then
     STAGED=$(git diff --cached --name-only)
@@ -216,7 +239,7 @@ if [[ "$PRERELEASE" -eq 0 && "$DRY_RUN" -eq 0 ]]; then
   fi
 fi
 
-if [[ "$DRY_RUN" -eq 1 ]]; then
+if [[ "$RELEASE_DRY_RUN" -eq 1 ]]; then
   echo ""
   info "Dry run complete. No tag created."
   exit 0
