@@ -222,6 +222,9 @@ func TestSavedHTMLLosslessEnvelope(t *testing.T) {
 	if sameSavedMessageHTML(expected, envelope(strings.ReplaceAll(expected, "example.org", "other.example.org"))) {
 		t.Fatal("changed link accepted")
 	}
+	if sameSavedMessageHTML(expected, strings.Replace(envelope(expected), "</figure>", "<p>Unexpected</p></figure>", 1)) {
+		t.Fatal("extra figure content accepted")
+	}
 	if sameSavedMessageHTML(expected, envelope(expected)+"<p>Unexpected</p>") {
 		t.Fatal("extra body accepted")
 	}
@@ -324,20 +327,28 @@ func TestSenderListingEmptyAndUnavailable(t *testing.T) {
 }
 
 func TestComposeFromDoesNotRetryAmbiguousDelivery(t *testing.T) {
-	var writes []draftWrite
-	handler := senderServer(t, senderIdentity, &writes, nil)
-	sends := 0
-	wrapped := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "PUT" {
-			sends++
-			http.Error(w, "delivery uncertain", http.StatusServiceUnavailable)
-			return
-		}
-		handler.ServeHTTP(w, r)
-	})
-	_, err := runJSONCommand(t, wrapped, "compose", "--from", "billing@example.org", "--to", "maria@example.com", "--subject", "Board update", "-m", "Numbers.")
-	if err == nil || !strings.Contains(err.Error(), "12345") || sends != 1 || len(writes) != 1 {
-		t.Fatalf("err=%v sends=%d writes=%v", err, sends, writes)
+	for _, status := range []int{http.StatusServiceUnavailable, http.StatusTooManyRequests} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			var writes []draftWrite
+			handler := senderServer(t, senderIdentity, &writes, nil)
+			sends := 0
+			wrapped := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == "PUT" {
+					sends++
+					if r.URL.Query().Get("filtered_account_id") != "9" {
+						t.Error("delivery was not account scoped")
+					}
+					w.Header().Set("Retry-After", "1")
+					http.Error(w, "delivery uncertain", status)
+					return
+				}
+				handler.ServeHTTP(w, r)
+			})
+			_, err := runJSONCommand(t, wrapped, "compose", "--from", "billing@example.org", "--to", "maria@example.com", "--subject", "Board update", "-m", "Numbers.")
+			if err == nil || !strings.Contains(err.Error(), "12345") || sends != 1 || len(writes) != 1 {
+				t.Fatalf("err=%v sends=%d writes=%v", err, sends, writes)
+			}
+		})
 	}
 }
 
