@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -277,7 +278,7 @@ func newAuthRefreshCommand() *cobra.Command {
 		Short: "Force token refresh",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := authMgr.Refresh(cmd.Context()); err != nil {
-				return apierr.ErrAuth(fmt.Sprintf("refresh failed: %v", err))
+				return authFailure("refresh failed", err)
 			}
 			return writeMutation(cmd, "Token refreshed", nil)
 		},
@@ -310,7 +311,7 @@ Cookie header, so it is not a bearer token and this command refuses to print it.
 
 			token, err := authMgr.AccessToken(cmd.Context())
 			if err != nil {
-				return apierr.ErrAuth(fmt.Sprintf("could not get token: %v", err))
+				return authFailure("could not get token", err)
 			}
 			fmt.Fprint(cmd.OutOrStdout(), token)
 			return nil
@@ -320,6 +321,21 @@ Cookie header, so it is not a bearer token and this command refuses to print it.
 	cmd.Flags().BoolVar(&stored, "stored", false, "Only print stored OAuth token (ignore HEY_TOKEN env var)")
 
 	return cmd
+}
+
+// authFailure reports a manager failure with the command's context in front of it.
+// The manager classifies its own refusals — a refused grant is auth, a throttled
+// token endpoint is rate_limit with how long to wait — and wrapping every one as
+// ErrAuth turned a 429 into exit 3 and "Run: hey auth login". A classified error
+// keeps its code, hint and status; only its message gains the context.
+func authFailure(context string, err error) error {
+	var classified *apierr.Error
+	if !errors.As(err, &classified) {
+		return apierr.ErrAuth(fmt.Sprintf("%s: %v", context, err))
+	}
+	prefixed := *classified
+	prefixed.Message = fmt.Sprintf("%s: %s", context, classified.Message)
+	return &prefixed
 }
 
 // refuseSessionCookieAsToken stops `hey auth token` from printing a session cookie.

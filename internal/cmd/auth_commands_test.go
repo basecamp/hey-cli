@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/auth"
 	"github.com/basecamp/hey-cli/internal/output"
 )
@@ -203,6 +205,57 @@ func TestAuthRefreshFailure(t *testing.T) {
 	_, _, err := runAuthCommand(t, t.TempDir(), server.URL, "", true, "auth", "refresh")
 	if err == nil || !strings.Contains(err.Error(), "refresh failed: not authenticated") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+// A throttled token endpoint is not a missing login. Both commands used to wrap every
+// manager failure as ErrAuth, so a 429 came out as exit 3 with "Run: hey auth login" —
+// advice that spends another request on the same limit.
+func TestAuthCommandsKeepARateLimitClassified(t *testing.T) {
+	commands := map[string][]string{
+		"refresh": {"auth", "refresh"},
+		"token":   {"auth", "token", "--stored"},
+	}
+
+	for name, args := range commands {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Retry-After", "42")
+				w.WriteHeader(http.StatusTooManyRequests)
+			}))
+			defer server.Close()
+			configHome := t.TempDir()
+			t.Setenv("HEY_NO_KEYRING", "1")
+			manager := auth.NewManager(server.URL, server.Client(), filepath.Join(configHome, "hey-cli"))
+			// Expired, so `auth token` has to refresh rather than print what it holds.
+			expired := &auth.Credentials{AccessToken: "old-access", RefreshToken: "old-refresh", ExpiresAt: time.Now().Add(-time.Hour).Unix()}
+			if err := manager.GetStore().Save(manager.CredentialKey(), expired); err != nil {
+				t.Fatalf("seed credentials: %v", err)
+			}
+
+			_, _, err := runAuthCommand(t, configHome, server.URL, "", true, args...)
+
+			var classified *apierr.Error
+			if !errors.As(err, &classified) {
+				t.Fatalf("error = %v, want an *apierr.Error", err)
+			}
+			if classified.Code != apierr.CodeRateLimit {
+				t.Errorf("code = %q, want %q", classified.Code, apierr.CodeRateLimit)
+			}
+			if got := output.ExitCodeFor(err); got != output.ExitRateLimit {
+				t.Errorf("exit code = %d, want %d", got, output.ExitRateLimit)
+			}
+			if !strings.Contains(classified.Message, "rate-limiting") || !strings.Contains(classified.Message, "42s") {
+				t.Errorf("message = %q, want the rate limit and its wait", classified.Message)
+			}
+			if strings.Contains(classified.Hint, "hey auth login") {
+				t.Errorf("hint = %q; logging in again spends the same limit", classified.Hint)
+			}
+			creds, loadErr := manager.GetStore().Load(manager.CredentialKey())
+			if loadErr != nil || creds.RefreshToken != "old-refresh" {
+				t.Errorf("credentials after a rate limit = %#v, %v; want them kept", creds, loadErr)
+			}
+		})
 	}
 }
 

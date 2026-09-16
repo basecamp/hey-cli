@@ -116,6 +116,10 @@ func newRootCmd() *cobra.Command {
 			configDir := config.ConfigDir()
 			httpClient := &http.Client{Timeout: 30 * time.Second}
 			authMgr = auth.NewManager(cfg.BaseURL, httpClient, configDir)
+			// A refresh token HEY refuses is forgotten by the manager itself, on
+			// whatever command happened to send it. Cached mail must not outlive
+			// that credential any more than it outlives a logout.
+			authMgr.OnCredentialCleared(func() { clearHTTPCache(cmd.ErrOrStderr()) })
 			initSDK(authMgr, cfg.BaseURL)
 
 			// The agent-local setup subcommands and skill commands never read

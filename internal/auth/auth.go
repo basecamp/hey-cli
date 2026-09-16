@@ -42,6 +42,11 @@ type Manager struct {
 	// refusedRefreshToken is a grant the server refused that the store could not
 	// delete, so this process remembers not to send it again. Guarded by mu.
 	refusedRefreshToken string
+
+	// credentialCleared runs after the manager has deleted a credential on its own
+	// verdict, so the owner of the response cache can drop what that credential
+	// fetched. Logout is not that: its callers already clear the cache themselves.
+	credentialCleared func()
 }
 
 // defaultRefreshHold is how long to sit out a rate limit that came without a
@@ -261,6 +266,16 @@ func (m *Manager) LoginWithCookie(cookie string) error {
 	return m.store.Save(m.baseURL, creds)
 }
 
+// OnCredentialCleared registers what to run when the manager clears a credential
+// on its own — today, when the server has refused the refresh token. It does not
+// run for Logout, whose callers clear the cache themselves, and not when the store
+// refused the deletion, because the credential is then still there to be used.
+func (m *Manager) OnCredentialCleared(fn func()) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.credentialCleared = fn
+}
+
 // Logout removes stored credentials.
 func (m *Manager) Logout() error {
 	return m.store.Delete(m.baseURL)
@@ -386,6 +401,11 @@ func (m *Manager) accountForRefreshFailure(err error, sentRefreshToken string) e
 		// refusal is remembered here instead.
 		m.refusedRefreshToken = sentRefreshToken
 		return errRefusedGrant(delErr)
+	}
+	// Cached mail must not outlive the credential that fetched it, here as much
+	// as on an explicit logout.
+	if m.credentialCleared != nil {
+		m.credentialCleared()
 	}
 	return errRefusedGrant(nil)
 }

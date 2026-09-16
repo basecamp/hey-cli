@@ -957,6 +957,74 @@ func TestARefusedGrantIsNotResentWhenItCannotBeDeleted(t *testing.T) {
 	}
 }
 
+// Forgetting the credential is the manager's call, so whoever owns the response
+// cache has to hear about it from here: cached mail must not outlive the credential
+// that fetched it. The hook runs only when the credential actually went — a refusal
+// the store would not delete, or a failure that is no verdict on the grant, keeps
+// the credential and so keeps the cache.
+func TestTheClearedCredentialHookRunsOnlyWhenTheCredentialWent(t *testing.T) {
+	tests := []struct {
+		name         string
+		status       int
+		body         string
+		refuseDelete bool
+		wantRuns     int
+	}{
+		{name: "refused grant", status: http.StatusBadRequest, body: `{"error":"invalid_grant"}`, wantRuns: 1},
+		{name: "refused grant the store keeps", status: http.StatusBadRequest, body: `{"error":"invalid_grant"}`, refuseDelete: true, wantRuns: 0},
+		{name: "rate limited", status: http.StatusTooManyRequests, body: `{"error":"rate_limit_exceeded"}`, wantRuns: 0},
+		{name: "origin failure", status: http.StatusBadGateway, body: "upstream unavailable", wantRuns: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.status)
+				_, _ = fmt.Fprint(w, tt.body)
+			}))
+			defer server.Close()
+
+			t.Setenv("HEY_TOKEN", "")
+			t.Setenv("HEY_NO_KEYRING", "")
+			mgr := NewManager(server.URL, server.Client(), t.TempDir())
+			stored := ""
+			mgr.GetStore().useKeyring = true
+			mgr.GetStore().initOnce.Do(func() {})
+			mgr.GetStore().keyring = credentialKeyring{
+				set: func(_, _, password string) error { stored = password; return nil },
+				get: func(_, _ string) (string, error) {
+					if stored == "" {
+						return "", errors.New("no credential")
+					}
+					return stored, nil
+				},
+				delete: func(_, _ string) error {
+					if tt.refuseDelete {
+						return errors.New("keyring is locked")
+					}
+					stored = ""
+					return nil
+				},
+			}
+			runs := 0
+			mgr.OnCredentialCleared(func() { runs++ })
+			saveExpiredCredential(t, mgr)
+
+			if _, err := mgr.AccessToken(t.Context()); err == nil {
+				t.Fatal("AccessToken succeeded against a failing token endpoint")
+			}
+
+			if runs != tt.wantRuns {
+				t.Errorf("hook ran %d times, want %d", runs, tt.wantRuns)
+			}
+			if kept := stored != ""; kept != (tt.wantRuns == 0) {
+				t.Errorf("credential kept = %v; the hook has to run exactly when it is gone", kept)
+			}
+		})
+	}
+}
+
 // The bug itself. `hey watch` re-authenticates on every ActionCable dial, so a refresh
 // token the server has already killed used to go back out every fifteen seconds for as
 // long as the process lived — and the token endpoint's limit counts refusals, so the
