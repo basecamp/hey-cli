@@ -292,8 +292,9 @@ saved sender, recipients and complete body, then deliver. `--draft` stops after
 saving. If verification fails, the draft remains and the error names its ID;
 inspect it with `draft show` before taking another action. Do not repeat compose
 to recover a saved draft or retry an ambiguous delivery. Verification accepts
-exact HTML, HEY's lossless HTML envelope, paragraph-to-div conversion, and
-uploaded-attachment Trix figures. Attachment identity and metadata, links, and
+exact HTML, HEY's lossless HTML envelope, paragraph-to-div conversion (including
+the two trailing breaks HEY adds to non-final paragraphs), and uploaded-attachment
+Trix figures. Attachment identity and metadata, links, and
 formatting must remain intact. Other server-side HTML normalization leaves a
 draft for inspection rather than sending changed content.
 

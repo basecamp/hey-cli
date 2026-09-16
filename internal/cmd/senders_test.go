@@ -381,7 +381,7 @@ func TestDraftShowIncludesSelectedSender(t *testing.T) {
 
 func TestComposeFromCanonicalMarkdown(t *testing.T) {
 	var writes []draftWrite
-	actual := `<div>Numbers.</div><br><div>Billing</div>`
+	actual := `<div>Numbers.<br><br></div><br><div>Billing</div>`
 	_, err := runJSONCommand(t, senderServer(t, senderIdentity, &writes, func(s map[string]any) { s["content"] = actual }),
 		"compose", "--from", "88", "--subject", "Board update", "--to", "maria@example.com", "-m", "Numbers.")
 	if err != nil || len(writes) != 2 {
@@ -458,7 +458,7 @@ func TestSavedHTMLCanonicalization(t *testing.T) {
 		same                   bool
 	}{
 		{"paragraph", `<p>Numbers.</p>`, `<div>Numbers.</div>`, true},
-		{"paragraphs", "<p>Numbers.</p>\n<p>Details.</p>", `<div>Numbers.</div><div>Details.</div>`, true},
+		{"paragraphs", "<p>Numbers.</p>\n<p>Details.</p>", `<div>Numbers.<br><br></div><div>Details.</div>`, true},
 		{"formatting", `<p><strong>Numbers</strong> and <a href="https://example.org">details</a>.</p>`, `<div><strong>Numbers</strong> and <a href="https://example.org">details</a>.</div>`, true},
 		{"upload", upload, figure, true},
 		{"missing-upload", upload, "", false},
@@ -497,7 +497,7 @@ func TestComposeFromCanonicalUploadedAttachment(t *testing.T) {
 			if changed {
 				figure = strings.Replace(figure, "sgid-report", "sgid-other", 1)
 			}
-			actual := `<div>Numbers.</div><br>` + figure + `<br><div>Billing</div>`
+			actual := `<div>Numbers.<br><br></div><br>` + figure + `<br><div>Billing</div>`
 			handler := senderServer(t, senderIdentity, &writes, func(s map[string]any) { s["content"] = actual })
 			uploads := 0
 			wrapped := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -525,6 +525,53 @@ func TestComposeFromCanonicalUploadedAttachment(t *testing.T) {
 				}
 			} else if err != nil || len(writes) != 2 || writes[1].Method != "PUT" || writes[1].Body["message"].(map[string]any)["content"] != actual {
 				t.Fatalf("err=%v writes=%v", err, writes)
+			}
+		})
+	}
+}
+
+func TestComposeFromCanonicalParagraphs(t *testing.T) {
+	for _, nameTag := range []bool{false, true} {
+		t.Run(fmt.Sprint(nameTag), func(t *testing.T) {
+			var writes []draftWrite
+			actual := "<div>One.<br><br></div>\n<div>Two.</div>"
+			args := []string{"compose", "--from", "88", "--subject", "Board update", "--to", "maria@example.com", "-m", "One.\n\nTwo."}
+			if nameTag {
+				actual = "<div>One.<br><br></div>\n<div>Two.<br><br></div><br><div>Billing</div>"
+			} else {
+				args = append(args, "--no-name-tag")
+			}
+			_, err := runJSONCommand(t, senderServer(t, senderIdentity, &writes, func(s map[string]any) { s["content"] = actual }), args...)
+			if err != nil || len(writes) != 2 || writes[1].Method != "PUT" || writes[1].Body["message"].(map[string]any)["content"] != actual {
+				t.Fatalf("err=%v writes=%v", err, writes)
+			}
+		})
+	}
+}
+
+func TestSavedHTMLConditionalParagraphBreaks(t *testing.T) {
+	for _, tc := range []struct {
+		name, expected, actual string
+		same                   bool
+	}{
+		{"non-final", `<p>One.</p><p>Two.</p>`, `<div>One.<br><br></div><div>Two.</div>`, true},
+		{"before-tag", `<p>One.</p><br><div>Alex</div>`, `<div>One.<br><br></div><br><div>Alex</div>`, true},
+		{"authored-break", `<p>One.<br></p><p>Two.</p>`, `<div>One.<br><br><br></div><div>Two.</div>`, true},
+		{"final-paragraph", `<p>One.</p>`, `<div>One.<br><br></div>`, false},
+		{"trailing-whitespace", "<p>One.</p>\n", `<div>One.<br><br></div>`, false},
+		{"plain-div", `<div>One.</div><p>Two.</p>`, `<div>One.<br><br></div><div>Two.</div>`, false},
+		{"one-break", `<p>One.</p><p>Two.</p>`, `<div>One.<br></div><div>Two.</div>`, false},
+		{"three-breaks", `<p>One.</p><p>Two.</p>`, `<div>One.<br><br><br></div><div>Two.</div>`, false},
+		{"attributed-break", `<p>One.</p><p>Two.</p>`, `<div>One.<br><br class="extra"></div><div>Two.</div>`, false},
+		{"lost-authored-break", `<p>One.<br></p><p>Two.</p>`, `<div>One.<br><br></div><div>Two.</div>`, false},
+		{"extra-text", `<p>One.</p><p>Two.</p>`, `<div>One.Unexpected<br><br></div><div>Two.</div>`, false},
+		{"changed-link", `<p><a href="https://example.org">One.</a></p><p>Two.</p>`, `<div><a href="https://other.example.org">One.</a><br><br></div><div>Two.</div>`, false},
+		{"lost-formatting", `<p><strong>One.</strong></p><p>Two.</p>`, `<div>One.<br><br></div><div>Two.</div>`, false},
+		{"preformatted", `<pre><p>One.</p><p>Two.</p></pre>`, `<pre><div>One.<br><br></div><div>Two.</div></pre>`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sameSavedMessageHTML(tc.expected, tc.actual); got != tc.same {
+				t.Fatalf("equivalent=%v want %v", got, tc.same)
 			}
 		})
 	}

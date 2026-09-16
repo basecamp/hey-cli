@@ -50,11 +50,27 @@ func sameTrixNodes(left, right []*html.Node, preserveWhitespace bool) bool {
 		if a.Data != b.Data && !paragraph {
 			return false
 		}
-		if a.Namespace != b.Namespace || !sameHTMLAttributes(a.Attr, b.Attr) || !sameTrixNodes(htmlChildren(a), htmlChildren(b), preserveWhitespace || a.Data == "pre") {
+		if a.Namespace != b.Namespace || !sameHTMLAttributes(a.Attr, b.Attr) {
+			return false
+		}
+		expectedChildren, actualChildren := htmlChildren(a), htmlChildren(b)
+		// HEY appends two breaks when converting a non-final paragraph to a
+		// div. Only allow that exact suffix, retaining any authored breaks.
+		if paragraph && !preserveWhitespace && index < len(left)-1 && len(actualChildren) == len(expectedChildren)+2 {
+			last := len(actualChildren) - 1
+			if plainTrixBreak(actualChildren[last-1]) && plainTrixBreak(actualChildren[last]) {
+				actualChildren = actualChildren[:last-1]
+			}
+		}
+		if !sameTrixNodes(expectedChildren, actualChildren, preserveWhitespace || a.Data == "pre") {
 			return false
 		}
 	}
 	return true
+}
+
+func plainTrixBreak(node *html.Node) bool {
+	return node.Type == html.ElementNode && node.Data == "br" && node.Namespace == "" && len(node.Attr) == 0 && node.FirstChild == nil
 }
 
 func htmlChildren(node *html.Node) []*html.Node {
