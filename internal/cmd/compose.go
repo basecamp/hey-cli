@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	"github.com/spf13/cobra"
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
@@ -79,6 +80,17 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		return apierr.ErrUsageHint("--subject is required", "hey compose --to <email> --subject <subject> -m <message>")
 	}
 
+	ctx := cmd.Context()
+	var senderClient *hey.Client
+	var sender generated.Sender
+	if cmd.Flags().Changed("from") {
+		var err error
+		senderClient, sender, err = selectedSender(ctx, c.from, 0)
+		if err != nil {
+			return err
+		}
+	}
+
 	message := c.messageHTML
 	if message == "" {
 		markdownMessage := c.message
@@ -103,8 +115,6 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		}
 		message = htmlutil.FromMarkdown(markdownMessage)
 	}
-
-	ctx := cmd.Context()
 
 	if c.threadID != "" {
 		topicID, parseErr := strconv.ParseInt(c.threadID, 10, 64)
@@ -141,7 +151,7 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 			return apierr.ErrUsage("a message needs at least one recipient (to, cc or bcc)")
 		}
 		if cmd.Flags().Changed("from") {
-			return c.composeFrom(cmd, message, to, cc, bcc)
+			return c.composeFrom(cmd, senderClient, sender, message, to, cc, bcc)
 		}
 		messageWithAttachments, attachErr := attachFiles(ctx, message, c.attachments)
 		if attachErr != nil {

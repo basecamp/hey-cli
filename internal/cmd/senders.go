@@ -128,13 +128,9 @@ func newAccountSendersCommand() *cobra.Command {
 	}
 }
 
-func (c *composeCommand) composeFrom(cmd *cobra.Command, message string, to, cc, bcc []string) error {
+func (c *composeCommand) composeFrom(cmd *cobra.Command, client *hey.Client, sender generated.Sender, message string, to, cc, bcc []string) error {
 	ctx := cmd.Context()
-	client, sender, err := selectedSender(ctx, c.from, 0)
-	if err != nil {
-		return err
-	}
-	message, err = attachFilesWithClient(ctx, client, message, c.attachments)
+	message, err := attachFilesWithClient(ctx, client, message, c.attachments)
 	if err != nil {
 		return err
 	}
@@ -160,9 +156,6 @@ func (c *composeCommand) composeFrom(cmd *cobra.Command, message string, to, cc,
 		return apierr.ErrUsage(fmt.Sprintf("draft %d saved but its state could not be verified; not sent", id))
 	}
 	actual := draftContentFrom(edit)
-	if actual.ActingSenderID == 0 {
-		actual.ActingSenderID = edit.Creator.Id
-	}
 	if !sameSenderDraft(content, actual) {
 		return apierr.ErrUsageHint(fmt.Sprintf("draft %d saved but readback differs; not sent", id), fmt.Sprintf("hey draft show %d", id))
 	}
@@ -184,10 +177,10 @@ func sameSenderDraft(expected, actual hey.DraftContent) bool {
 		slices.Equal(expected.BCC, actual.BCC) && actual.Schedule == nil
 }
 
-// sameSavedMessageHTML allows HEY's lossless HTML envelope, not plain-text
-// equality: the links, formatting, and attachments must survive too.
+// sameSavedMessageHTML allows HEY's Trix canonicalization and lossless HTML
+// envelope. Links, formatting, and attachment identities must survive too.
 func sameSavedMessageHTML(expected, actual string) bool {
-	if expected == actual {
+	if expected == actual || sameTrixMessageHTML(expected, actual) {
 		return true
 	}
 	nodes, err := html.ParseFragment(strings.NewReader(actual), &html.Node{Type: html.ElementNode, Data: "div", DataAtom: atom.Div})
