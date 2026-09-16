@@ -68,6 +68,7 @@ filters, persist a default, or select one for a single invocation:
 
 ```bash
 hey account list                 # list All Accounts and each linked account
+hey account senders              # list sender IDs, addresses, account IDs, and defaults
 hey account use 12345            # persist a linked account as the default mail filter
 hey account use all              # return to All Accounts
 hey --account 12345 boxes         # override the default for one invocation
@@ -238,6 +239,8 @@ hey reply 123 -m "Drafting a longer answer." --draft  # save a reply draft
 hey draft list                     # list drafts (--all and --page follow HEY's cursor)
 hey draft show 12345               # read a draft back
 hey draft edit 12345 --to alice@example.com --subject "Board update (v2)"
+hey draft edit 12345 --from billing@example.org
+hey compose --from billing@example.org --to alice@example.com --subject "Board update" -m "Numbers to follow." --draft
 hey draft send 12345               # deliver it
 hey draft delete 12345             # trash it
 hey seen 12345                     # mark a thread as seen
@@ -275,6 +278,27 @@ The Screener is where first-time senders wait. `hey screener list` returns clear
 `hey bulk-reply preview` is read-only and resolves each posting to its latest replyable entry. `hey bulk-reply send` resolves the selection again, skips threads without a replyable entry, keeps HEY's server-provided name tag, and returns the exact reply count, delivery ID, delayed state, undo URL, and undo command. Posting IDs must be positive and unique. The message can come from `-m`, stdin, or `$EDITOR`; `--attach` is repeatable.
 
 A new message from `hey compose` — sent or saved with `--draft` — ends with the sender's HEY name tag, appended the way HEY's own compose form does; HEY puts the tag into the form rather than onto the saved message, so the CLI carries it itself. `--no-name-tag` leaves it off. A reply does not carry one yet.
+
+Choose a new message's sender with `compose --from <email-or-sender-id>`. Discover
+addresses and IDs with `hey account senders`; `--account` filters the listing and
+limits sender selection. In All Accounts, an ambiguous address requires a sender
+ID or a specific account. Unknown and unavailable senders fail before uploads.
+The selected sender's active Name Tag is appended unless `--no-name-tag` is set.
+`--from` is currently only for new messages, not `compose --thread-id` replies.
+
+With `--from`, compose uses the SDK's sender-aware draft route: save, verify the
+saved sender, recipients and complete body, then deliver. `--draft` stops after
+saving. If verification fails, the draft remains and the error names its ID;
+inspect it with `draft show` before taking another action. Do not repeat compose
+to recover a saved draft or retry an ambiguous delivery. Exact HTML and HEY's
+lossless HTML envelope are accepted; other server-side HTML normalization leaves
+a draft for inspection rather than sending changed content.
+
+`draft edit --from <email-or-sender-id>` changes the sender within the draft's
+existing account. As with other field flags, the omitted body remains byte-for-byte
+intact, including any existing signature or Name Tag. Use a body flag to replace
+it when needed. `draft show` includes the selected From address in both styled
+and JSON output. No command here persists a default sender.
 
 `--attach` is repeatable on `hey compose`, `hey reply`, and `hey bulk-reply send`, and attachment-only messages are supported. The CLI validates and uploads every file before sending the email. `hey attachment list <thread-id>` returns every named downloadable file, including named inline images. Direct files keep stable message-and-position IDs such as `456:1`; files inside embedded HTML receive opaque IDs scoped to their message. Pass either returned ID to `hey attachment save`. Saving uses the original filename by default, accepts `--output` for a file or directory, and preserves existing files unless `--force` is set.
 

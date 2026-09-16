@@ -22,6 +22,7 @@ import (
 // draftOutput is what hey draft show answers with: the draft's editable state, its body
 // as Markdown the way every email body leaves this CLI.
 type draftOutput struct {
+	From                string            `json:"from,omitempty"`
 	ID                  int64             `json:"id"`
 	Subject             string            `json:"subject,omitempty"`
 	Body                htmlutil.Markdown `json:"body"`
@@ -35,6 +36,7 @@ type draftOutput struct {
 
 func draftOutputFor(id int64, edit *generated.MessageEditState) draftOutput {
 	out := draftOutput{
+		From:    edit.Sender.EmailAddress,
 		ID:      id,
 		Subject: edit.Subject,
 		Body:    htmlutil.ToMarkdown(edit.Content),
@@ -42,6 +44,9 @@ func draftOutputFor(id int64, edit *generated.MessageEditState) draftOutput {
 		CC:      addressEmails(edit.Addressed.Copied),
 		BCC:     addressEmails(edit.Addressed.Blindcopied),
 		IsReply: edit.IsReply,
+	}
+	if edit.Sender.Id == 0 {
+		out.From = edit.Creator.EmailAddress
 	}
 	if !edit.ScheduledDeliveryAt.IsZero() {
 		at := edit.ScheduledDeliveryAt
@@ -157,6 +162,9 @@ func (c *draftShowCommand) run(cmd *cobra.Command, args []string) error {
 	if writer.IsStyled() {
 		w := cmd.OutOrStdout()
 		fmt.Fprintf(w, "Draft %d: %s\n", out.ID, terminal.SanitizeLine(out.Subject))
+		if out.From != "" {
+			fmt.Fprintf(w, "From: %s\n", terminal.SanitizeLine(out.From))
+		}
 		for _, kind := range []struct {
 			label  string
 			emails []string
@@ -185,6 +193,7 @@ func (c *draftShowCommand) run(cmd *cobra.Command, args []string) error {
 
 type draftEditCommand struct {
 	cmd         *cobra.Command
+	from        string
 	subject     string
 	to          string
 	cc          string
@@ -199,7 +208,7 @@ func newDraftEditCommand() *draftEditCommand {
 		Use:   "edit <draft-id>",
 		Short: "Change a draft",
 		Annotations: map[string]string{
-			"agent_notes": "Each flag replaces its field and an omitted flag keeps what the draft has — --to/--cc/--bcc replace that whole recipient kind (an explicit empty value clears it). With no field flags the body opens in $EDITOR as Markdown. A scheduled delivery is preserved.",
+			"agent_notes": "--from chooses a configured sender email or ID within this draft account. It preserves the body verbatim, including existing signatures; use a body flag to replace those. Each flag replaces its field and an omitted flag keeps what the draft has — --to/--cc/--bcc replace that whole recipient kind (an explicit empty value clears it). With no field flags the body opens in $EDITOR as Markdown. A scheduled delivery is preserved.",
 		},
 		Example: `  hey draft edit 12345 --subject "Quarterly planning (v2)"
   hey draft edit 12345 --to maria@example.com --cc finance@example.com
@@ -208,6 +217,7 @@ func newDraftEditCommand() *draftEditCommand {
 		RunE: editCommand.run,
 		Args: usageExactOneArg(),
 	}
+	editCommand.cmd.Flags().StringVar(&editCommand.from, "from", "", "Replace the sender with a configured email or ID in this draft account")
 	editCommand.cmd.Flags().StringVar(&editCommand.subject, "subject", "", "Replace the subject")
 	editCommand.cmd.Flags().StringVar(&editCommand.to, "to", "", "Replace the To recipients (comma separated; empty clears)")
 	editCommand.cmd.Flags().StringVar(&editCommand.cc, "cc", "", "Replace the CC recipients (comma separated; empty clears)")
@@ -241,7 +251,23 @@ func (c *draftEditCommand) run(cmd *cobra.Command, args []string) error {
 	content := draftContentFrom(edit)
 
 	flags := cmd.Flags()
-	fieldFlagged := false
+	fieldFlagged := flags.Changed("from")
+	editClient := sdk
+	if flags.Changed("from") {
+		if edit.Id != draftID {
+			return apierr.ErrNotFound("draft", args[0])
+		}
+		accountID, accountErr := draftSenderAccount(edit)
+		if accountErr != nil {
+			return accountErr
+		}
+		client, sender, senderErr := selectedSender(ctx, c.from, accountID)
+		if senderErr != nil {
+			return senderErr
+		}
+		editClient = client
+		content.ActingSenderID = sender.Id
+	}
 	if flags.Changed("subject") {
 		content.Subject = c.subject
 		fieldFlagged = true
@@ -275,7 +301,7 @@ func (c *draftEditCommand) run(cmd *cobra.Command, args []string) error {
 		content.Content = htmlutil.FromMarkdown(body)
 	}
 
-	if err := sdk.Messages().UpdateDraft(ctx, draftID, content); err != nil {
+	if err := editClient.Messages().UpdateDraft(ctx, draftID, content); err != nil {
 		return apierr.FromSDK(err)
 	}
 	return writeMutationLine(cmd, fmt.Sprintf("Draft %d updated.", draftID), "Draft updated",

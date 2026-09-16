@@ -1,0 +1,367 @@
+package cmd
+
+import (
+	"encoding/json"
+	"fmt"
+	stdhtml "html"
+	"net/http"
+	"strings"
+	"testing"
+)
+
+const senderIdentity = `{"accounts":[{"id":9,"status":"active"},{"id":8,"status":"active"}],"senders":[{"id":77,"account_id":9,"email_address":"personal@example.org","name_tag":"<div>Personal</div>"},{"id":88,"account_id":9,"email_address":"billing@example.org","name_tag":"<div>Billing</div>"}]}`
+
+func senderServer(t *testing.T, identity string, writes *[]draftWrite, alter func(map[string]any)) http.Handler {
+	t.Helper()
+	var saved map[string]any
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "identity"):
+			fmt.Fprint(w, identity)
+		case r.Method == "POST" && r.URL.Path == "/messages.json", r.Method == "PUT" && r.URL.Path == "/messages/12345.json":
+			if r.URL.Query().Get("filtered_account_id") != "9" {
+				t.Error("creation was not account scoped")
+			}
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			*writes = append(*writes, draftWrite{Method: r.Method, Path: r.URL.Path, Body: body})
+			saved = body
+			w.Header().Set("Location", "/messages/12345")
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == "GET" && r.URL.Path == "/messages/12345/edit.json":
+			state := map[string]any{"id": 12345, "subject": "Board update", "content": "<p>Numbers.</p><br><div>Personal</div>", "creator": map[string]any{"id": 77, "account_id": 9}, "sender": map[string]any{"id": 77, "account_id": 9, "email_address": "personal@example.org"}, "addressed": map[string]any{"directly": []any{map[string]any{"email_address": "maria@example.com"}}}}
+			if saved != nil {
+				message := saved["message"].(map[string]any)
+				state["subject"] = message["subject"]
+				state["content"] = message["content"]
+				state["sender"] = map[string]any{"id": saved["acting_sender_id"], "account_id": 9, "email_address": "billing@example.org"}
+				entry := saved["entry"].(map[string]any)
+				addressed := map[string]any{}
+				for k, v := range entry["addressed"].(map[string]any) {
+					contacts := []any{}
+					if values, ok := v.([]any); ok {
+						for _, a := range values {
+							contacts = append(contacts, map[string]any{"email_address": a})
+						}
+					}
+					addressed[k] = contacts
+				}
+				state["addressed"] = addressed
+			}
+			if alter != nil {
+				alter(state)
+			}
+			if err := json.NewEncoder(w).Encode(state); err != nil {
+				t.Fatal(err)
+			}
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	})
+}
+
+func TestComposeFromDraftAndSend(t *testing.T) {
+	for _, draft := range []bool{true, false} {
+		t.Run(fmt.Sprint(draft), func(t *testing.T) {
+			var writes []draftWrite
+			args := []string{"compose", "--from", " Billing@Example.ORG ", "--subject", "Board update", "--to", "maria@example.com", "--cc", "priya@example.org", "--bcc", "sam@example.org", "-m", "Numbers."}
+			if draft {
+				args = append(args, "--draft")
+			}
+			_, err := runJSONCommand(t, senderServer(t, senderIdentity, &writes, nil), args...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := 2
+			if draft {
+				want = 1
+			}
+			if len(writes) != want {
+				t.Fatalf("writes: %+v", writes)
+			}
+			for _, write := range writes {
+				if write.Body["acting_sender_id"] != float64(88) {
+					t.Fatalf("wrong sender: %+v", write)
+				}
+				if write.Body["message"].(map[string]any)["content"] != "<p>Numbers.</p><br><div>Billing</div>" {
+					t.Fatalf("wrong body: %+v", write)
+				}
+			}
+			if writes[0].Body["entry"].(map[string]any)["status"] != "drafted" {
+				t.Fatal("creation sent")
+			}
+			if !draft && writes[1].Body["entry"].(map[string]any)["status"] == "drafted" {
+				t.Fatal("delivery not requested")
+			}
+		})
+	}
+}
+
+func TestComposeFromRejectsUnsafeSenderBeforeUpload(t *testing.T) {
+	for _, tc := range []struct {
+		name, identity, from string
+		account              string
+	}{
+		{"unknown", senderIdentity, "unknown@example.org", ""},
+		{"empty", senderIdentity, " ", ""},
+		{"duplicate", strings.Replace(senderIdentity, `"id":77,"account_id":9,"email_address":"personal@example.org"`, `"id":77,"account_id":9,"email_address":"billing@example.org"`, 1), "billing@example.org", ""},
+		{"wrong-account", senderIdentity, "billing@example.org", "8"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var writes []draftWrite
+			args := []string{"compose", "--from", tc.from, "--subject", "Board update", "-m", "Numbers.", "--draft", "--attach", "/missing/attachment.pdf"}
+			if tc.account != "" {
+				args = append(args, "--account", tc.account)
+			}
+			_, err := runJSONCommand(t, senderServer(t, tc.identity, &writes, nil), args...)
+			if err == nil || strings.Contains(err.Error(), "attachment") {
+				t.Fatalf("sender preflight failed: %v", err)
+			}
+			if len(writes) != 0 {
+				t.Fatal("unsafe write")
+			}
+		})
+	}
+}
+
+func TestComposeFromRefusesChangedReadback(t *testing.T) {
+	for _, field := range []string{"id", "sender", "subject", "content", "addressed", "is_reply", "scheduled_delivery_at"} {
+		t.Run(field, func(t *testing.T) {
+			var writes []draftWrite
+			alter := func(s map[string]any) {
+				switch field {
+				case "id":
+					s[field] = 54321
+				case "sender":
+					s[field] = map[string]any{"id": 77}
+				case "addressed":
+					s[field] = map[string]any{}
+				case "is_reply":
+					s[field] = true
+				case "scheduled_delivery_at":
+					s[field] = "2026-10-01T12:00:00Z"
+				default:
+					s[field] = "changed"
+				}
+			}
+			_, err := runJSONCommand(t, senderServer(t, senderIdentity, &writes, alter), "compose", "--from", "billing@example.org", "--subject", "Board update", "--to", "maria@example.com", "-m", "Numbers.")
+			if err == nil || len(writes) != 1 {
+				t.Fatalf("err=%v writes=%+v", err, writes)
+			}
+		})
+	}
+}
+
+func TestDraftEditFromPreservesFieldsAndQuote(t *testing.T) {
+	var writes []draftWrite
+	quote := `<div><br><br></div><div>On Friday, Maria wrote:</div><blockquote><div>Personal</div></blockquote>`
+	alter := func(s map[string]any) {
+		s["content"] = `<p>Numbers.</p><br><div>Personal</div>` + quote
+		s["scheduled_delivery_at"] = "2026-10-01T12:00:00Z"
+	}
+	_, err := runJSONCommand(t, senderServer(t, senderIdentity, &writes, alter), "draft", "edit", "12345", "--from", "billing@example.org")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(writes) != 1 {
+		t.Fatalf("writes=%+v", writes)
+	}
+	body := writes[0].Body
+	if body["acting_sender_id"] != float64(88) {
+		t.Fatal("sender not changed")
+	}
+	message := body["message"].(map[string]any)
+	if message["content"] != `<p>Numbers.</p><br><div>Personal</div>`+quote || message["subject"] != "Board update" {
+		t.Fatalf("content changed: %+v", message)
+	}
+	entry := body["entry"].(map[string]any)
+	if entry["status"] != "drafted" || entry["scheduled_delivery_at_date"] != "2026-10-01" || entry["scheduled_delivery_at_hour"] != "12" {
+		t.Fatalf("schedule changed: %+v", entry)
+	}
+}
+
+func TestDraftEditFromAccountRefusal(t *testing.T) {
+	for _, tc := range []struct {
+		name, from string
+		alter      func(map[string]any)
+	}{
+
+		{"unknown", "unknown@example.org", nil},
+		{"missing-account", "billing@example.org", func(s map[string]any) {
+			s["creator"] = map[string]any{"id": 77}
+			s["sender"] = map[string]any{"id": 77}
+		}},
+		{"wrong-account", "billing@example.org", func(s map[string]any) { s["creator"] = map[string]any{"id": 77, "account_id": 8} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var writes []draftWrite
+			_, err := runJSONCommand(t, senderServer(t, senderIdentity, &writes, tc.alter), "draft", "edit", "12345", "--from", tc.from)
+			if err == nil || len(writes) != 0 {
+				t.Fatalf("err=%v writes=%+v", err, writes)
+			}
+		})
+	}
+}
+
+func TestSavedHTMLLosslessEnvelope(t *testing.T) {
+	expected := `<p>Please <a href="https://example.org/review">review</a>.</p>`
+	envelope := func(body string) string {
+		data, err := json.Marshal(map[string]string{"contentType": "text/html", "content": "<shadow-content><template>" + body + "</template></shadow-content>"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return `<div><figure data-trix-attachment="` + stdhtml.EscapeString(string(data)) + `"></figure></div>`
+	}
+	if !sameSavedMessageHTML(expected, envelope(expected)) {
+		t.Fatal("lossless envelope refused")
+	}
+	if sameSavedMessageHTML(expected, envelope(strings.ReplaceAll(expected, "example.org", "other.example.org"))) {
+		t.Fatal("changed link accepted")
+	}
+	if sameSavedMessageHTML(expected, envelope(expected)+"<p>Unexpected</p>") {
+		t.Fatal("extra body accepted")
+	}
+}
+
+func TestComposeFromAcceptsLosslessEnvelope(t *testing.T) {
+	var writes []draftWrite
+	alter := func(s map[string]any) {
+		data, err := json.Marshal(map[string]string{"contentType": "text/html", "content": "<shadow-content><template>" + s["content"].(string) + "</template></shadow-content>"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		s["content"] = `<div><figure data-trix-attachment="` + stdhtml.EscapeString(string(data)) + `"></figure></div>`
+	}
+	_, err := runJSONCommand(t, senderServer(t, senderIdentity, &writes, alter), "compose", "--from", "billing@example.org", "--subject", "Board update", "--to", "maria@example.com", "-m", "Numbers.")
+	if err != nil || len(writes) != 2 {
+		t.Fatalf("err=%v writes=%+v", err, writes)
+	}
+}
+
+func TestComposeFromNoNameTagAndSenderID(t *testing.T) {
+	for _, draft := range []bool{true, false} {
+		t.Run(fmt.Sprint(draft), func(t *testing.T) {
+			var writes []draftWrite
+			args := []string{"compose", "--from", "88", "--subject", "Board update", "--to", "maria@example.com", "-m", "Numbers.", "--no-name-tag"}
+			if draft {
+				args = append(args, "--draft")
+			}
+			_, err := runJSONCommand(t, senderServer(t, senderIdentity, &writes, nil), args...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, write := range writes {
+				if write.Body["acting_sender_id"] != float64(88) || write.Body["message"].(map[string]any)["content"] != "<p>Numbers.</p>" {
+					t.Fatalf("unexpected payload: %+v", write)
+				}
+			}
+		})
+	}
+}
+
+func TestSenderListingAndScopedResolution(t *testing.T) {
+	identity := strings.Replace(senderIdentity, `"senders":[`, `"senders":[{"id":99,"account_id":8,"email_address":"billing@example.org","default":true,"name_tag":"<div>Private tag</div>"},`, 1)
+	for _, tc := range []struct {
+		account string
+		count   int
+	}{{"", 3}, {"9", 2}, {"8", 1}} {
+		t.Run(tc.account, func(t *testing.T) {
+			var writes []draftWrite
+			args := []string{"account", "senders"}
+			if tc.account != "" {
+				args = append(args, "--account", tc.account)
+			}
+			response, err := runJSONCommand(t, senderServer(t, identity, &writes, nil), args...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rows := response.Data.([]any)
+			if len(rows) != tc.count || len(writes) != 0 {
+				t.Fatalf("rows=%v writes=%v", rows, writes)
+			}
+			for _, row := range rows {
+				item := row.(map[string]any)
+				if len(item) != 4 || item["id"] == nil || item["account_id"] == nil || item["email"] == nil || item["default"] == nil {
+					t.Fatalf("unexpected listing: %v", item)
+				}
+			}
+		})
+	}
+	for _, account := range []string{"", "9"} {
+		t.Run("resolve-"+account, func(t *testing.T) {
+			var writes []draftWrite
+			args := []string{"compose", "--from", "billing@example.org", "--subject", "Board update", "-m", "Numbers.", "--draft"}
+			if account != "" {
+				args = append(args, "--account", account)
+			}
+			_, err := runJSONCommand(t, senderServer(t, identity, &writes, nil), args...)
+			if account == "" {
+				if err == nil || len(writes) != 0 {
+					t.Fatalf("ambiguous sender accepted: %v", err)
+				}
+			} else if err != nil || len(writes) != 1 {
+				t.Fatalf("scoped sender refused: %v", err)
+			}
+		})
+	}
+}
+
+func TestSenderListingEmptyAndUnavailable(t *testing.T) {
+	identity := `{"accounts":[{"id":9,"status":"disabled"}],"senders":[{"id":88,"account_id":9,"email_address":"billing@example.org"}]}`
+	var writes []draftWrite
+	response, err := runJSONCommand(t, senderServer(t, identity, &writes, nil), "account", "senders")
+	if err != nil || len(response.Data.([]any)) != 0 {
+		t.Fatalf("response=%v err=%v", response, err)
+	}
+	_, err = runJSONCommand(t, senderServer(t, identity, &writes, nil), "compose", "--from", "88", "--subject", "Board update", "-m", "Numbers.", "--draft")
+	if err == nil || len(writes) != 0 {
+		t.Fatal("unavailable account accepted")
+	}
+}
+
+func TestComposeFromDoesNotRetryAmbiguousDelivery(t *testing.T) {
+	var writes []draftWrite
+	handler := senderServer(t, senderIdentity, &writes, nil)
+	sends := 0
+	wrapped := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "PUT" {
+			sends++
+			http.Error(w, "delivery uncertain", http.StatusServiceUnavailable)
+			return
+		}
+		handler.ServeHTTP(w, r)
+	})
+	_, err := runJSONCommand(t, wrapped, "compose", "--from", "billing@example.org", "--to", "maria@example.com", "--subject", "Board update", "-m", "Numbers.")
+	if err == nil || !strings.Contains(err.Error(), "12345") || sends != 1 || len(writes) != 1 {
+		t.Fatalf("err=%v sends=%d writes=%v", err, sends, writes)
+	}
+}
+
+func TestDraftEditFromKeepsWrappedBody(t *testing.T) {
+	var writes []draftWrite
+	original := `<div><figure data-trix-attachment='{"contentType":"text/html","content":"<shadow-content><template><p>Numbers.</p><br><div>Personal</div></template></shadow-content>"}'></figure></div>`
+	alter := func(s map[string]any) { s["content"] = original }
+	_, err := runJSONCommand(t, senderServer(t, senderIdentity, &writes, alter), "draft", "edit", "12345", "--from", "88")
+	if err != nil || len(writes) != 1 {
+		t.Fatalf("err=%v writes=%v", err, writes)
+	}
+	body := writes[0].Body
+	if body["acting_sender_id"] != float64(88) || body["message"].(map[string]any)["content"] != original {
+		t.Fatal("sender or body changed unexpectedly")
+	}
+}
+
+func TestDraftShowIncludesSelectedSender(t *testing.T) {
+	var writes []draftWrite
+	response, err := runJSONCommand(t, senderServer(t, senderIdentity, &writes, nil), "draft", "show", "12345")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Data.(map[string]any)["from"] != "personal@example.org" {
+		t.Fatalf("missing sender: %+v", response.Data)
+	}
+}
