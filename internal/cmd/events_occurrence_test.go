@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -1079,18 +1080,68 @@ func TestEventsRefuseCustomRepeatOutsideAFutureSplit(t *testing.T) {
 	}
 }
 
-func TestEventsEditOccurrenceRefusesAnInvalidReminderBeforeReading(t *testing.T) {
-	var requests atomic.Int32
-	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests.Add(1)
-		http.Error(w, "unexpected request", http.StatusInternalServerError)
-	}), "event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "current", "--remind", "soon")
-	var cliErr *apierr.Error
-	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, "invalid remind: soon") {
-		t.Fatalf("error = %v, want invalid reminder usage error", err)
+func TestEventsEditOccurrenceValidatesExplicitFlagsBeforeReading(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "reminder", args: []string{"--remind", "soon"}, want: "invalid remind: soon"},
+		{name: "start date", args: []string{"--starts-on", "next-week"}, want: "invalid starts-on date"},
+		{name: "end date", args: []string{"--ends-on", "eventually"}, want: "invalid ends-on date"},
+		{name: "date order", args: []string{"--starts-on", "2026-09-15", "--ends-on", "2026-09-14"}, want: "ends-on 2026-09-14 is before starts-on 2026-09-15"},
+		{name: "start time", args: []string{"--start-time", "morning"}, want: "invalid start-time: morning"},
+		{name: "end time", args: []string{"--end-time", "later"}, want: "invalid end-time: later"},
 	}
-	if requests.Load() != 0 {
-		t.Errorf("requests = %d, want none", requests.Load())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var requests atomic.Int32
+			args := []string{"event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "current"}
+			args = append(args, tt.args...)
+			_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				http.Error(w, "unexpected request", http.StatusInternalServerError)
+			}), args...)
+			var cliErr *apierr.Error
+			if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, tt.want) {
+				t.Fatalf("error = %v, want usage error containing %q", err, tt.want)
+			}
+			if requests.Load() != 0 {
+				t.Errorf("requests = %d, want none", requests.Load())
+			}
+		})
+	}
+}
+
+// Haystack truncates the parent at the occurrence identifier but cancels realized children
+// from the selected recording's actual start. Until those boundaries agree, a future split
+// of a moved occurrence can destroy a preceding edit or leave a following edit behind.
+func TestEventsRefuseAFutureSplitOfAMovedRealizedOccurrence(t *testing.T) {
+	for _, movedStart := range []string{"2026-09-10T12:00:00Z", "2026-09-20T12:00:00Z"} {
+		t.Run(movedStart, func(t *testing.T) {
+			movedAt, err := time.Parse(time.RFC3339, movedStart)
+			if err != nil {
+				t.Fatal(err)
+			}
+			realized := fmt.Sprintf(`{"id":9001,"type":"Calendar::Event","parent_id":4821,"occurrence_id":"4821_2026-09-15",`+
+				`"title":"Design review","starts_at":%q,"ends_at":%q,`+
+				`"starts_at_time_zone":"Europe/Zagreb","ends_at_time_zone":"Europe/Zagreb","calendar":{"id":9,"name":"Work"}}`,
+				movedAt.Format(time.RFC3339), movedAt.Add(time.Hour).Format(time.RFC3339))
+			handler, writes := occurrenceServer(t, "2026-09-15",
+				`{"Calendar::Event":[`+occurrenceSeriesJSON+`,`+realized+`]}`, "",
+				func(t *testing.T, form url.Values) { t.Error("wrote a future split for a moved occurrence") })
+			_, err = runJSONCommand(t, handler,
+				"event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "future",
+				"--starts-on", "2026-09-15", "--ends-on", "2026-09-15",
+				"--start-time", "14:00", "--end-time", "15:00", "--repeat", "every_week")
+			var cliErr *apierr.Error
+			if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, "was moved") {
+				t.Fatalf("error = %v, want moved-occurrence usage error", err)
+			}
+			if writes.Load() != 0 {
+				t.Errorf("writes = %d, want none", writes.Load())
+			}
+		})
 	}
 }
 

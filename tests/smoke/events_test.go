@@ -293,7 +293,7 @@ func TestEventOccurrenceFutureSplitAllowsAnEarlierTime(t *testing.T) {
 	}
 }
 
-func TestEventOccurrenceFutureSplitAllowsARealizedDayMovedEarlier(t *testing.T) {
+func TestEventOccurrenceFutureSplitRefusesARealizedDayMovedEarlier(t *testing.T) {
 	uid := uniqueID()
 	title := fmt.Sprintf("Editorial check-in %s", uid)
 	first := time.Now().AddDate(2, 2, 0)
@@ -331,10 +331,28 @@ func TestEventOccurrenceFutureSplitAllowsARealizedDayMovedEarlier(t *testing.T) 
 		skipf(t, "move current occurrence earlier failed (exit %d): %s", code, stderr)
 	}
 
+	_, stderr, code = hey(t, "event", "edit", seriesID,
+		"--occurrence", occurrence, "--apply-to", "future",
+		"--starts-on", selectedDay, "--ends-on", selectedDay,
+		"--start-time", "09:00", "--end-time", "10:00", "--time-zone", "UTC",
+		"--repeat", "every_day", "--repeat-times", "3", "--json")
+	if code == 0 {
+		t.Fatal("future split from a moved realized day succeeded")
+	}
+	assertContains(t, stderr, "was moved")
+
+	// Moving the day back with a current-only edit aligns Haystack's cancellation and
+	// occurrence-identifier boundaries, after which the future split is safe.
+	if _, stderr, code = hey(t, "event", "edit", seriesID,
+		"--occurrence", occurrence, "--apply-to", "current",
+		"--starts-on", selectedDay, "--ends-on", selectedDay,
+		"--start-time", "09:00", "--end-time", "10:00", "--time-zone", "UTC", "--json"); code != 0 {
+		skipf(t, "move occurrence back to its series position failed (exit %d): %s", code, stderr)
+	}
 	if _, stderr, code = hey(t, "event", "edit", seriesID,
 		"--occurrence", occurrence, "--apply-to", "future",
 		"--repeat", "every_day", "--repeat-times", "3", "--json"); code != 0 {
-		skipf(t, "future split from an earlier moved day failed (exit %d): %s", code, stderr)
+		skipf(t, "future split after restoring occurrence failed (exit %d): %s", code, stderr)
 	}
 }
 

@@ -29,7 +29,7 @@ func newEventsCommand() *eventsCommand {
 		Use:   "event",
 		Short: "Read and manage calendar events",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, day, week, add, edit, delete. \"What's on the schedule today?\" is answered by day, not list: day and week read the span as HEY draws it, with a repeating event expanded into the occurrences inside it, over the calendars switched on in HEY. list reads what calendars hold — every calendar unless --calendar names one — and a repeating event is one row, its series, on the day the series began. An edit is not a patch on HEY's side: it resends the notes, location, link, attached email, reminders and time zones the event already carries, so notes lose their formatting and a countdown is removed unless --countdown names one again. edit <series id> changes a whole series; one day of it is edit <series id> --occurrence <occurrence_id from day/week> --apply-to current|future, which keeps the countdown and refuses to flatten notes unless --allow-plain-notes or --notes is given. --apply-to future starts a new series and requires --repeat with its complete schedule; a preset alone means forever and custom copies an existing opaque schedule (a count-based rule can restart its full count). Read the day again afterward for the new series id.",
+			"agent_notes": "Subcommands: list, day, week, add, edit, delete. \"What's on the schedule today?\" is answered by day, not list: day and week read the span as HEY draws it, with a repeating event expanded into the occurrences inside it, over the calendars switched on in HEY. list reads what calendars hold — every calendar unless --calendar names one — and a repeating event is one row, its series, on the day the series began. An edit is not a patch on HEY's side: it resends the notes, location, link, attached email, reminders and time zones the event already carries, so notes lose their formatting and a countdown is removed unless --countdown names one again. edit <series id> changes a whole series; one day of it is edit <series id> --occurrence <occurrence_id from day/week> --apply-to current|future, which keeps the countdown and refuses to flatten notes unless --allow-plain-notes or --notes is given. --apply-to future starts a new series and requires --repeat with its complete schedule; a preset alone means forever and custom copies an existing opaque schedule (a count-based rule can restart its full count). A realized occurrence moved away from its series time must be moved back with --apply-to current before a future split. Read the day again afterward for the new series id.",
 		},
 	}
 
@@ -252,8 +252,11 @@ on its own date, so [date] can be left out or must name it. A change to --repeat
 flags. 'future' starts a new series and requires --repeat to state its complete schedule:
 combine a preset with --repeat-times or --repeat-until for a finite series, use a preset
 alone for one that continues forever, or use --repeat custom to copy an existing opaque
-schedule. A custom count-based rule can restart its full count on the replacement. HEY accepts the replacement's submitted start even when it overlaps an earlier
-occurrence, so choose its date and time deliberately. The days from this one on
+schedule. A custom count-based rule can restart its full count on the replacement. HEY
+accepts the replacement's submitted start even when it overlaps an earlier occurrence, so
+choose its date and time deliberately. A day previously moved away from its series time
+must be moved back with a current-only edit before it can be split safely. The days from
+this one on
 get a new series id.
 
 An occurrence edit keeps more than a whole-event edit does, and refuses what it cannot
@@ -592,6 +595,38 @@ func (f *eventFields) newSchedule() (eventSchedule, error) {
 	}, nil
 }
 
+// validateExplicitScheduleFlags checks every schedule value that needs no stored event.
+// Relationships involving an omitted half are checked later, after scheduleFrom fills it in.
+func (f *eventFields) validateExplicitScheduleFlags(cmd *cobra.Command) error {
+	flags := cmd.Flags()
+	if flags.Changed("starts-on") {
+		if _, err := parseDateArg("starts-on date", f.startsOn); err != nil {
+			return err
+		}
+	}
+	if flags.Changed("ends-on") {
+		if _, err := parseDateArg("ends-on date", f.endsOn); err != nil {
+			return err
+		}
+	}
+	if flags.Changed("starts-on") && flags.Changed("ends-on") {
+		if err := checkEventDates(f.startsOn, f.endsOn); err != nil {
+			return err
+		}
+	}
+	if flags.Changed("start-time") {
+		if _, err := parseEventClock("start-time", f.startTime, "14:30"); err != nil {
+			return err
+		}
+	}
+	if flags.Changed("end-time") {
+		if _, err := parseEventClock("end-time", f.endTime, "15:30"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // scheduleFrom is when an edited event happens: whatever the flags name, and the event's own
 // answer for everything they do not.
 func (f *eventFields) scheduleFrom(cmd *cobra.Command, event generated.Recording) (eventSchedule, error) {
@@ -655,19 +690,26 @@ const eventDuration = time.Hour
 
 // clockTimes reads the pair of HH:MM times, defaulting the end to an hour after the start.
 func (f *eventFields) clockTimes(startTime, endTime string) (string, string, error) {
-	start, err := time.Parse(clockLayout, startTime)
+	start, err := parseEventClock("start-time", startTime, "14:30")
 	if err != nil {
-		return "", "", apierr.ErrUsageHint(fmt.Sprintf("invalid start-time: %s", startTime),
-			"times are HH:MM on a 24-hour clock, for example 14:30")
+		return "", "", err
 	}
 	if endTime == "" {
 		return startTime, start.Add(eventDuration).Format(clockLayout), nil
 	}
-	if _, err := time.Parse(clockLayout, endTime); err != nil {
-		return "", "", apierr.ErrUsageHint(fmt.Sprintf("invalid end-time: %s", endTime),
-			"times are HH:MM on a 24-hour clock, for example 15:30")
+	if _, err := parseEventClock("end-time", endTime, "15:30"); err != nil {
+		return "", "", err
 	}
 	return startTime, endTime, nil
+}
+
+func parseEventClock(name, value, example string) (time.Time, error) {
+	clock, err := time.Parse(clockLayout, value)
+	if err != nil {
+		return time.Time{}, apierr.ErrUsageHint(fmt.Sprintf("invalid %s: %s", name, value),
+			fmt.Sprintf("times are HH:MM on a 24-hour clock, for example %s", example))
+	}
+	return clock, nil
 }
 
 // clockLayout is the time of day HEY's form takes, and the one a reader types.

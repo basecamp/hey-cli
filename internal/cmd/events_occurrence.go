@@ -140,6 +140,9 @@ func (c *eventsEditCommand) editOccurrence(ctx context.Context, cmd *cobra.Comma
 	if _, err = c.fields.parseCountdown(); err != nil {
 		return err
 	}
+	if err = c.fields.validateExplicitScheduleFlags(cmd); err != nil {
+		return err
+	}
 	var explicitReminders []time.Duration
 	if cmd.Flags().Changed("remind") {
 		explicitReminders, err = c.fields.parseReminders()
@@ -163,6 +166,15 @@ func (c *eventsEditCommand) editOccurrence(ctx context.Context, cmd *cobra.Comma
 		return err
 	}
 	event := day.event()
+
+	if edit.scope == hey.OccurrenceScopeThisAndFollowing && day.realized != nil {
+		virtual := virtualOccurrence(day.series, edit.occurrence.Date)
+		if !day.realized.StartsAt.Equal(virtual.StartsAt) {
+			return apierr.ErrUsageHint(
+				fmt.Sprintf("occurrence %s was moved from %s to %s and cannot be changed with --apply-to future", edit.occurrence.String(), virtual.StartsAt.Format(time.RFC3339), day.realized.StartsAt.Format(time.RFC3339)),
+				"move that occurrence back to its series date and time with --apply-to current, then retry the future edit")
+		}
+	}
 
 	if event.Description != "" && !cmd.Flags().Changed("notes") && !c.allowPlainNotes {
 		return errPlainNotes(edit.occurrence)

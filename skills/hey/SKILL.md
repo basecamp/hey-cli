@@ -734,8 +734,11 @@ or `--repeat-until` for a finite series, naming what remains from the edited day
 `--repeat custom` without either limit to copy an existing opaque schedule. A custom rule
 with `COUNT` can restart its full count because HEY cannot expose how many occurrences remain.
 HEY accepts the new series' submitted start even when it overlaps an earlier occurrence,
-so choose its date and time deliberately; its last day cannot precede its first day. A preset `--repeat`
-alone means forever. HEY gives
+so choose its date and time deliberately; its last day cannot precede its first day. A
+realized occurrence moved away from its series time is refused for `future`: move it back
+with a `current` edit first. Haystack cancels children from the moved time but truncates the
+parent at the occurrence identifier, so splitting directly can lose neighboring realized
+edits. A preset `--repeat` alone means forever. HEY gives
 the new series a new id, and the answer is still
 the day edited — read `day` or `week` again before editing it further.
 
