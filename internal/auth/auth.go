@@ -79,8 +79,8 @@ func cloneCredentials(creds *Credentials) *Credentials {
 	if creds == nil {
 		return nil
 	}
-	copy := *creds
-	return &copy
+	clone := *creds
+	return &clone
 }
 
 // AccessToken returns a valid access token, refreshing if needed.

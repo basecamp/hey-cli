@@ -17,13 +17,12 @@ import (
 type managerKeyring struct {
 	mu sync.Mutex
 
-	value       string
-	getErr      error
-	setErr      error
-	deleteErr   error
-	getCalls    int
-	setCalls    int
-	deleteCalls int
+	value     string
+	getErr    error
+	setErr    error
+	deleteErr error
+	getCalls  int
+	setCalls  int
 }
 
 func (k *managerKeyring) get(_ string, user string) (string, error) {
@@ -59,7 +58,6 @@ func (k *managerKeyring) delete(_, _ string) error {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 
-	k.deleteCalls++
 	if k.deleteErr != nil {
 		return k.deleteErr
 	}
@@ -78,10 +76,10 @@ func (k *managerKeyring) replace(t *testing.T, creds *Credentials) {
 	k.mu.Unlock()
 }
 
-func (k *managerKeyring) calls() (gets, sets, deletes int) {
+func (k *managerKeyring) calls() (gets, sets int) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	return k.getCalls, k.setCalls, k.deleteCalls
+	return k.getCalls, k.setCalls
 }
 
 func managerWithKeyring(t *testing.T, creds *Credentials) (*Manager, *managerKeyring) {
@@ -125,7 +123,7 @@ func TestHEYTokenBypassesCredentialStorage(t *testing.T) {
 	if got := req.Header.Get("Authorization"); got != "Bearer environment-token" {
 		t.Errorf("Authorization = %q, want environment token", got)
 	}
-	gets, _, _ := keyring.calls()
+	gets, _ := keyring.calls()
 	if gets != 0 {
 		t.Errorf("credential Gets = %d, want HEY_TOKEN to bypass storage", gets)
 	}
@@ -147,7 +145,7 @@ func TestManagerCachesSuccessfulCredentialLoads(t *testing.T) {
 		t.Fatalf("AccessToken = %q, %v", token, err)
 	}
 
-	gets, _, _ := keyring.calls()
+	gets, _ := keyring.calls()
 	if gets != 1 {
 		t.Errorf("credential Gets = %d, want one for the process", gets)
 	}
@@ -184,7 +182,7 @@ func TestConcurrentAuthenticationCoalescesCredentialLoads(t *testing.T) {
 		t.Error(err)
 	}
 
-	gets, _, _ := keyring.calls()
+	gets, _ := keyring.calls()
 	if gets != 1 {
 		t.Errorf("credential Gets = %d, want one across concurrent requests", gets)
 	}
@@ -220,7 +218,7 @@ func TestManagerDoesNotCacheCredentialLoadFailures(t *testing.T) {
 				t.Fatal("successful retry was hidden by a cached failure")
 			}
 
-			gets, _, _ := keyring.calls()
+			gets, _ := keyring.calls()
 			if gets != 2 {
 				t.Errorf("credential Gets = %d, want failed load and retry", gets)
 			}
@@ -276,7 +274,7 @@ func TestManagerUpdatesCacheOnlyAfterSuccessfulMutations(t *testing.T) {
 		if got := req.Header.Get("Authorization"); got != "Bearer new-token" {
 			t.Errorf("Authorization = %q, want replacement token", got)
 		}
-		gets, _, _ := keyring.calls()
+		gets, _ := keyring.calls()
 		if gets != 1 {
 			t.Errorf("credential Gets = %d, want cached replacement", gets)
 		}
@@ -363,7 +361,7 @@ func TestRefreshRereadsStoredAuthentication(t *testing.T) {
 			if got := req.Header.Get(tt.wantHeader); got != tt.wantValue {
 				t.Errorf("%s = %q, want %q", tt.wantHeader, got, tt.wantValue)
 			}
-			gets, _, _ := keyring.calls()
+			gets, _ := keyring.calls()
 			if gets != 2 {
 				t.Errorf("credential Gets = %d, want initial and forced refresh reads", gets)
 			}
@@ -418,7 +416,7 @@ func TestFailedRefreshSaveDoesNotPublishCredentials(t *testing.T) {
 	if err := mgr.Refresh(t.Context()); err == nil {
 		t.Fatal("Refresh succeeded despite failed persistence")
 	}
-	_, sets, _ := keyring.calls()
+	_, sets := keyring.calls()
 	if sets != 1 {
 		t.Fatalf("credential Sets = %d, want the failed refresh persistence attempt", sets)
 	}
@@ -476,7 +474,7 @@ func TestConcurrentAuthenticationSharesOneRefresh(t *testing.T) {
 	if got := refreshes.Load(); got != 1 {
 		t.Errorf("refresh requests = %d, want one", got)
 	}
-	gets, sets, _ := keyring.calls()
+	gets, sets := keyring.calls()
 	if gets != 2 {
 		t.Errorf("credential Gets = %d, want initial load and locked refresh reread", gets)
 	}
