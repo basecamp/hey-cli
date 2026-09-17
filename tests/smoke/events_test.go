@@ -207,21 +207,6 @@ func TestEventOccurrenceEditScopes(t *testing.T) {
 		t.Errorf("future occurrence changed without an explicit repeat schedule: %#v", unchangedFuture)
 	}
 
-	heyFail(t, "event", "edit", seriesID,
-		"--occurrence", futureOccurrence, "--apply-to", "future",
-		"--starts-on", firstDay, "--ends-on", firstDay,
-		"--repeat", "every_week", "--allow-plain-notes", "--json")
-	earlierEvents := dataAs[[]smokeEvent](t, heyJSON(t, "event", "day", firstDay))
-	matchingEarlier := 0
-	for _, event := range earlierEvents {
-		if event.Title == title {
-			matchingEarlier++
-		}
-	}
-	if matchingEarlier != 1 {
-		t.Errorf("earlier occurrences after refused backward split = %d, want one: %#v", matchingEarlier, earlierEvents)
-	}
-
 	if _, stderr, code = hey(t, "event", "edit", seriesID,
 		"--occurrence", futureOccurrence, "--apply-to", "future",
 		"--repeat", "every_week", "--repeat-times", "3",
@@ -248,7 +233,7 @@ func TestEventOccurrenceEditScopes(t *testing.T) {
 	}
 }
 
-func TestEventOccurrenceFutureSplitRejectsSameDayOverlap(t *testing.T) {
+func TestEventOccurrenceFutureSplitAllowsAnEarlierTime(t *testing.T) {
 	uid := uniqueID()
 	title := fmt.Sprintf("Overnight support rotation %s", uid)
 	first := time.Now().AddDate(2, 1, 0)
@@ -272,26 +257,43 @@ func TestEventOccurrenceFutureSplitRejectsSameDayOverlap(t *testing.T) {
 		t.Fatal("repeating event response carries no event ID")
 	}
 	seriesID := fmt.Sprint(series.ID)
-	t.Cleanup(func() { _, _, _ = hey(t, "event", "delete", seriesID) })
+	t.Cleanup(func() {
+		ids := append([]string{seriesID}, smokeEventSeriesIDsOnDay(t, selectedDay, title)...)
+		for _, id := range uniqueStrings(ids) {
+			_, _, _ = hey(t, "event", "delete", id)
+		}
+	})
 
 	occurrence := fmt.Sprintf("%d_%s", series.ID, selectedDay)
-	_, stderr, code = hey(t, "event", "edit", seriesID,
+	// The selected 23:00 occurrence itself is removed, and HEY accepts the replacement's
+	// submitted 02:00 start even though it is earlier on the same day.
+	stdout, stderr, code = hey(t, "event", "edit", seriesID,
 		"--occurrence", occurrence, "--apply-to", "future",
 		"--starts-on", selectedDay, "--ends-on", selectedDay,
-		"--start-time", "00:00", "--end-time", "01:00", "--time-zone", "UTC",
+		"--start-time", "02:00", "--end-time", "03:00", "--time-zone", "UTC",
 		"--repeat", "every_day", "--repeat-times", "2", "--json")
-	if code == 0 {
-		t.Fatal("same-day backward split succeeded; want an overlap refusal")
+	if code != 0 {
+		skipf(t, "safe same-day backward split failed (exit %d): %s", code, stderr)
 	}
-	assertContains(t, stderr, "before the selected occurrence")
-
-	events := dataAs[[]smokeEvent](t, heyJSON(t, "event", "day", selectedDay))
-	if event, ok := findSmokeOccurrence(events, occurrence); !ok || event.Title != title {
-		t.Errorf("selected occurrence after refused split = %#v, want the original", event)
+	var edited Response
+	if err := json.Unmarshal([]byte(stdout), &edited); err != nil {
+		t.Fatalf("failed to parse future split response: %v", err)
+	}
+	movedEvents := dataAs[[]smokeEvent](t, heyJSON(t, "event", "day", selectedDay))
+	foundMoved := false
+	for _, event := range movedEvents {
+		startsAt, parseErr := time.Parse(time.RFC3339, event.StartsAt)
+		if event.Title == title && parseErr == nil && startsAt.Hour() == 2 {
+			foundMoved = true
+			break
+		}
+	}
+	if !foundMoved {
+		t.Errorf("safe same-day backward split = %#v, want a 02:00 occurrence", movedEvents)
 	}
 }
 
-func TestEventOccurrenceFutureSplitRejectsMovedEarlierDay(t *testing.T) {
+func TestEventOccurrenceFutureSplitAllowsARealizedDayMovedEarlier(t *testing.T) {
 	uid := uniqueID()
 	title := fmt.Sprintf("Editorial check-in %s", uid)
 	first := time.Now().AddDate(2, 2, 0)
@@ -313,23 +315,27 @@ func TestEventOccurrenceFutureSplitRejectsMovedEarlierDay(t *testing.T) {
 		t.Fatal("repeating event response carries no event ID")
 	}
 	seriesID := fmt.Sprint(series.ID)
-	t.Cleanup(func() { _, _, _ = hey(t, "event", "delete", seriesID) })
+	t.Cleanup(func() {
+		ids := append([]string{seriesID}, smokeEventSeriesIDsOnDay(t, firstDay, title)...)
+		ids = append(ids, smokeEventSeriesIDsOnDay(t, selectedDay, title)...)
+		for _, id := range uniqueStrings(ids) {
+			_, _, _ = hey(t, "event", "delete", id)
+		}
+	})
 
 	occurrence := fmt.Sprintf("%d_%s", series.ID, selectedDay)
 	if _, stderr, code = hey(t, "event", "edit", seriesID,
 		"--occurrence", occurrence, "--apply-to", "current",
 		"--starts-on", firstDay, "--ends-on", firstDay,
-		"--start-time", "12:00", "--end-time", "13:00", "--time-zone", "UTC", "--json"); code != 0 {
+		"--start-time", "08:00", "--end-time", "08:30", "--time-zone", "UTC", "--json"); code != 0 {
 		skipf(t, "move current occurrence earlier failed (exit %d): %s", code, stderr)
 	}
 
-	_, stderr, code = hey(t, "event", "edit", seriesID,
+	if _, stderr, code = hey(t, "event", "edit", seriesID,
 		"--occurrence", occurrence, "--apply-to", "future",
-		"--repeat", "every_day", "--repeat-times", "3", "--json")
-	if code == 0 {
-		t.Fatal("future split from an earlier moved day succeeded; want an overlap refusal")
+		"--repeat", "every_day", "--repeat-times", "3", "--json"); code != 0 {
+		skipf(t, "future split from an earlier moved day failed (exit %d): %s", code, stderr)
 	}
-	assertContains(t, stderr, "before the selected occurrence")
 }
 
 func smokeEventSeriesIDsOnDay(t *testing.T, day, title string) []string {

@@ -29,7 +29,7 @@ func newEventsCommand() *eventsCommand {
 		Use:   "event",
 		Short: "Read and manage calendar events",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, day, week, add, edit, delete. \"What's on the schedule today?\" is answered by day, not list: day and week read the span as HEY draws it, with a repeating event expanded into the occurrences inside it, over the calendars switched on in HEY. list reads what calendars hold — every calendar unless --calendar names one — and a repeating event is one row, its series, on the day the series began. An edit is not a patch on HEY's side: it resends the notes, location, link, attached email, reminders and time zones the event already carries, so notes lose their formatting and a countdown is removed unless --countdown names one again. edit <series id> changes a whole series; one day of it is edit <series id> --occurrence <occurrence_id from day/week> --apply-to current|future, which keeps the countdown and refuses to flatten notes unless --allow-plain-notes or --notes is given. --apply-to future starts a new series and requires --repeat with its complete schedule; --repeat alone means forever. Read the day again afterward for the new series id.",
+			"agent_notes": "Subcommands: list, day, week, add, edit, delete. \"What's on the schedule today?\" is answered by day, not list: day and week read the span as HEY draws it, with a repeating event expanded into the occurrences inside it, over the calendars switched on in HEY. list reads what calendars hold — every calendar unless --calendar names one — and a repeating event is one row, its series, on the day the series began. An edit is not a patch on HEY's side: it resends the notes, location, link, attached email, reminders and time zones the event already carries, so notes lose their formatting and a countdown is removed unless --countdown names one again. edit <series id> changes a whole series; one day of it is edit <series id> --occurrence <occurrence_id from day/week> --apply-to current|future, which keeps the countdown and refuses to flatten notes unless --allow-plain-notes or --notes is given. --apply-to future starts a new series and requires --repeat with its complete schedule; a preset alone means forever and custom copies an existing opaque schedule (a count-based rule can restart its full count). Read the day again afterward for the new series id.",
 		},
 	}
 
@@ -150,7 +150,7 @@ func (c *eventsAddCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	repeat, err := c.fields.parseRepeat(cmd)
+	repeat, err := c.fields.parseRepeat(cmd, false)
 	if err != nil {
 		return err
 	}
@@ -250,10 +250,10 @@ changes it and every day after it, the two choices HEY's own form offers. The da
 on its own date, so [date] can be left out or must name it. A change to --repeat,
 --repeat-until or --repeat-times cannot apply to one day, so 'current' refuses those
 flags. 'future' starts a new series and requires --repeat to state its complete schedule:
-combine it with --repeat-times or --repeat-until for a finite series, or use --repeat alone
-for one that continues forever. The replacement cannot start before the selected occurrence's
-position in the parent schedule, where it would overlap the part of the original series HEY
-keeps. The days from this one on
+combine a preset with --repeat-times or --repeat-until for a finite series, use a preset
+alone for one that continues forever, or use --repeat custom to copy an existing opaque
+schedule. A custom count-based rule can restart its full count on the replacement. HEY accepts the replacement's submitted start even when it overlaps an earlier
+occurrence, so choose its date and time deliberately. The days from this one on
 get a new series id.
 
 An occurrence edit keeps more than a whole-event edit does, and refuses what it cannot
@@ -319,7 +319,7 @@ func (c *eventsEditCommand) run(cmd *cobra.Command, args []string) error {
 		return c.editOccurrence(ctx, cmd, *occurrence)
 	}
 
-	repeat, err := c.fields.parseRepeat(cmd)
+	repeat, err := c.fields.parseRepeat(cmd, false)
 	if err != nil {
 		return err
 	}
@@ -515,7 +515,7 @@ func (f *eventFields) registerFlags(cmd *cobra.Command) {
 	flags.StringVar(&f.link, "link", "", "Meeting or reference URL")
 	flags.StringArrayVar(&f.invites, "invite", nil, "Email address to invite (repeatable, replaces the guest list)")
 	flags.BoolVar(&f.circle, "circle", false, "Circle the event")
-	flags.StringVar(&f.repeat, "repeat", "", "Repeat: every_day, every_weekday, every_week, every_other_week, every_day_of_month, every_year")
+	flags.StringVar(&f.repeat, "repeat", "", "Repeat: every_day, every_weekday, every_week, every_other_week, every_day_of_month, every_year; custom copies an opaque future schedule")
 	flags.StringVar(&f.repeatUntil, "repeat-until", "", "Stop repeating on this date (YYYY-MM-DD)")
 	flags.IntVar(&f.repeatTimes, "repeat-times", 0, "Stop repeating after this many occurrences")
 	flags.IntVar(&f.countdown, "countdown", 0, "Count down this many units to the event")
@@ -719,14 +719,17 @@ func checkEventDates(startsOn, endsOn string) error {
 
 // parseRepeat reads the recurrence flags into the three fields HEY takes. Nil is no change,
 // which on a whole-event update leaves the recurrence as it was.
-func (f *eventFields) parseRepeat(cmd *cobra.Command) (*hey.RepeatParams, error) {
+func (f *eventFields) parseRepeat(cmd *cobra.Command, allowCustom bool) (*hey.RepeatParams, error) {
 	flags := cmd.Flags()
 	repeatGiven := flags.Changed("repeat")
 	untilGiven := flags.Changed("repeat-until")
 	timesGiven := flags.Changed("repeat-times")
+	frequencyHint := "one of every_day, every_weekday, every_week, every_other_week, every_day_of_month, every_year"
+	if allowCustom {
+		frequencyHint += ", or custom to copy an existing opaque schedule"
+	}
 	if repeatGiven && f.repeat == "" {
-		return nil, apierr.ErrUsageHint("--repeat needs a frequency",
-			"one of every_day, every_weekday, every_week, every_other_week, every_day_of_month, every_year")
+		return nil, apierr.ErrUsageHint("--repeat needs a frequency", frequencyHint)
 	}
 	if untilGiven && f.repeatUntil == "" {
 		return nil, apierr.ErrUsageHint("--repeat-until needs a date", "a date in YYYY-MM-DD form")
@@ -752,14 +755,22 @@ func (f *eventFields) parseRepeat(cmd *cobra.Command) (*hey.RepeatParams, error)
 		"every_day_of_month": hey.RepeatEveryDayOfMonth,
 		"every_year":         hey.RepeatEveryYear,
 	}
+	if allowCustom {
+		frequencies["custom"] = hey.RepeatCustom
+	}
 	frequency, ok := frequencies[f.repeat]
 	if !ok {
-		return nil, apierr.ErrUsageHint(fmt.Sprintf("invalid repeat: %s", f.repeat),
-			"one of every_day, every_weekday, every_week, every_other_week, every_day_of_month, every_year")
+		return nil, apierr.ErrUsageHint(fmt.Sprintf("invalid repeat: %s", f.repeat), frequencyHint)
 	}
 
 	if f.repeatUntil != "" && f.repeatTimes > 0 {
 		return nil, apierr.ErrUsage("--repeat-until and --repeat-times are mutually exclusive")
+	}
+	if frequency == hey.RepeatCustom {
+		if untilGiven || timesGiven {
+			return nil, apierr.ErrUsage("--repeat custom copies the existing schedule, so it cannot be combined with --repeat-until or --repeat-times")
+		}
+		return &hey.RepeatParams{Frequency: hey.RepeatCustom}, nil
 	}
 
 	repeat := &hey.RepeatParams{Frequency: frequency, Until: hey.RepeatUntilForever}

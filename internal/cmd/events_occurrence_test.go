@@ -1029,72 +1029,111 @@ func TestEventsRefuseEmptyRepeatValuesBeforeReading(t *testing.T) {
 	}
 }
 
-// HEY truncates the old series at the selected occurrence but starts its replacement on
-// the submitted day. Letting that day reach behind the split makes both series cover the
-// earlier occurrences.
-func TestEventsRefuseAFutureSeriesStartingBeforeTheSelectedOccurrence(t *testing.T) {
+// "custom" is HEY's instruction to copy an opaque recurrence schedule. It belongs only
+// to a future occurrence split: a create has no schedule to copy, and a whole-series edit
+// can leave its recurrence untouched by omitting --repeat. HEY copies an opaque COUNT too,
+// which can restart its full count; the command's help warns about that server behavior.
+func TestEventsEditOccurrenceCopiesACustomFutureSchedule(t *testing.T) {
+	series := strings.Replace(occurrenceSeriesJSON,
+		`"recurrence_schedule":{"kind":"every_week","preset":true}`,
+		`"recurrence_schedule":{"kind":"custom","preset":false}`, 1)
 	handler, writes := occurrenceServer(t, "2026-09-15",
-		`{"Calendar::Event":[`+occurrenceSeriesJSON+`]}`, "", func(t *testing.T, form url.Values) {
-			t.Error("wrote the overlapping replacement series")
+		`{"Calendar::Event":[`+series+`]}`, `{}`, func(t *testing.T, form url.Values) {
+			if got := form.Get("repeat_frequency"); got != "custom" {
+				t.Errorf("repeat_frequency = %q, want custom", got)
+			}
+			if form.Has("calendar_recurrence_schedule[recurs_until_type]") || form.Has("calendar_recurrence_schedule[recurs_until_date]") || form.Has("calendar_recurrence_schedule[recurs_count]") {
+				t.Errorf("custom recurrence carried a replacement limit: %v", form)
+			}
 		})
 	_, err := runJSONCommand(t, handler,
 		"event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "future",
-		"--starts-on", "2026-09-01", "--ends-on", "2026-09-01", "--repeat", "every_week", "--allow-plain-notes")
-	var cliErr *apierr.Error
-	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, "before the selected occurrence") {
-		t.Fatalf("error = %v, want the overlapping-series usage error", err)
+		"--repeat", "custom", "--allow-plain-notes", "--title", "Design review (new agenda)")
+	if err != nil {
+		t.Fatalf("execute occurrence edit: %v", err)
 	}
-	if writes.Load() != 0 {
-		t.Errorf("writes = %d, want none", writes.Load())
+	if writes.Load() != 1 {
+		t.Errorf("writes = %d, want one", writes.Load())
 	}
 }
 
-// A date-only comparison misses an overlap within the selected day. The retained overnight
-// occurrence still runs when this replacement would begin.
-func TestEventsRefuseAFutureSeriesStartingEarlierOnTheSelectedDay(t *testing.T) {
-	series := strings.ReplaceAll(occurrenceSeriesJSON,
-		`"starts_at":"2026-09-01T12:00:00Z"`, `"starts_at":"2026-09-01T23:00:00Z"`)
-	series = strings.ReplaceAll(series,
-		`"ends_at":"2026-09-01T13:00:00Z"`, `"ends_at":"2026-09-02T01:00:00Z"`)
-	series = strings.ReplaceAll(series, `Europe/Zagreb`, `UTC`)
-	handler, writes := occurrenceServer(t, "2026-09-15",
-		`{"Calendar::Event":[`+series+`]}`, "", func(t *testing.T, form url.Values) {
-			t.Error("wrote the overlapping replacement series")
-		})
-	_, err := runJSONCommand(t, handler,
-		"event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "future",
-		"--starts-on", "2026-09-15", "--ends-on", "2026-09-15", "--start-time", "00:00", "--end-time", "01:00",
-		"--time-zone", "UTC", "--repeat", "every_day", "--allow-plain-notes")
-	var cliErr *apierr.Error
-	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, "before the selected occurrence") {
-		t.Fatalf("error = %v, want the same-day overlap refusal", err)
+func TestEventsRefuseCustomRepeatOutsideAFutureSplit(t *testing.T) {
+	tests := [][]string{
+		{"event", "add", "Standup", "--repeat", "custom"},
+		{"event", "edit", "4821", "--repeat", "custom"},
+		{"event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "future", "--repeat", "custom", "--repeat-times", "2"},
 	}
-	if writes.Load() != 0 {
-		t.Errorf("writes = %d, want none", writes.Load())
+	for _, args := range tests {
+		var requests atomic.Int32
+		_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requests.Add(1)
+			http.Error(w, "unexpected request", http.StatusInternalServerError)
+		}), args...)
+		var cliErr *apierr.Error
+		if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage {
+			t.Fatalf("%v: error = %v, want usage error", args, err)
+		}
+		if requests.Load() != 0 {
+			t.Errorf("%v: requests = %d, want none", args, requests.Load())
+		}
 	}
 }
 
-// A realized occurrence can already stand before the date in its occurrence_id, but HEY
-// still truncates the parent at the identifier's virtual position. Starting the replacement
-// from the moved day would therefore overlap the retained parent occurrences.
-func TestEventsRefuseAFutureSplitFromARealizedOccurrenceMovedEarlier(t *testing.T) {
-	realized := `{"id":9001,"type":"Calendar::Event","parent_id":4821,"occurrence_id":"4821_2026-09-15",` +
-		`"title":"Design review","starts_at":"2026-09-10T12:00:00Z","ends_at":"2026-09-10T13:00:00Z",` +
-		`"starts_at_time_zone":"Europe/Zagreb","ends_at_time_zone":"Europe/Zagreb","calendar":{"id":9,"name":"Work"}}`
+func TestEventsEditOccurrenceRefusesAnInvalidReminderBeforeReading(t *testing.T) {
+	var requests atomic.Int32
+	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}), "event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "current", "--remind", "soon")
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, "invalid remind: soon") {
+		t.Fatalf("error = %v, want invalid reminder usage error", err)
+	}
+	if requests.Load() != 0 {
+		t.Errorf("requests = %d, want none", requests.Load())
+	}
+}
+
+// Splitting at the first occurrence destroys the old parent, so there is no retained
+// occurrence to overlap and the replacement can move before the old first day.
+func TestEventsAllowMovingAFirstOccurrenceAndItsFutureEarlier(t *testing.T) {
+	handler, writes := occurrenceServer(t, "2026-09-01",
+		`{"Calendar::Event":[`+occurrenceSeriesJSON+`]}`, `{}`, func(t *testing.T, form url.Values) {
+			if got := form.Get("calendar_event[starts_at]"); got != "2026-08-31" {
+				t.Errorf("starts_at = %q, want 2026-08-31", got)
+			}
+		})
+	_, err := runJSONCommand(t, handler,
+		"event", "edit", "4821", "--occurrence", "4821_2026-09-01", "--apply-to", "future",
+		"--starts-on", "2026-08-31", "--ends-on", "2026-08-31", "--repeat", "every_week", "--allow-plain-notes")
+	if err != nil {
+		t.Fatalf("execute occurrence edit: %v", err)
+	}
+	if writes.Load() != 1 {
+		t.Errorf("writes = %d, want one", writes.Load())
+	}
+}
+
+// HEY removes the selected occurrence before it starts the replacement, so an earlier
+// time is valid when the occurrence the parent keeps has already ended.
+func TestEventsAllowAFutureSeriesStartingEarlierOnTheSelectedDay(t *testing.T) {
 	handler, writes := occurrenceServer(t, "2026-09-15",
-		`{"Calendar::Event":[`+occurrenceSeriesJSON+`,`+realized+`]}`, "",
-		func(t *testing.T, form url.Values) {
-			t.Error("wrote the overlapping replacement series")
+		`{"Calendar::Event":[`+occurrenceSeriesJSON+`]}`, `{}`, func(t *testing.T, form url.Values) {
+			if got := form.Get("calendar_event[starts_at_time]"); got != "11:30:00" {
+				t.Errorf("starts_at_time = %q, want 11:30:00", got)
+			}
+			if got := form.Get("apply_to_future"); got != "1" {
+				t.Errorf("apply_to_future = %q, want 1", got)
+			}
 		})
 	_, err := runJSONCommand(t, handler,
 		"event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "future",
-		"--repeat", "every_week", "--allow-plain-notes")
-	var cliErr *apierr.Error
-	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, "before the selected occurrence") {
-		t.Fatalf("error = %v, want the moved-day overlap refusal", err)
+		"--start-time", "11:30", "--end-time", "12:30", "--repeat", "every_week", "--allow-plain-notes")
+	if err != nil {
+		t.Fatalf("execute occurrence edit: %v", err)
 	}
-	if writes.Load() != 0 {
-		t.Errorf("writes = %d, want none", writes.Load())
+	if writes.Load() != 1 {
+		t.Errorf("writes = %d, want one", writes.Load())
 	}
 }
 

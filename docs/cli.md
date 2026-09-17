@@ -447,11 +447,13 @@ as is any other value. The day is read on its own date rather than searched for,
 `[date]` can be left out or must name it. A change to `--repeat`, `--repeat-until` or
 `--repeat-times` cannot apply to one day, so `current` refuses those flags. A `future`
 edit starts a new series and requires `--repeat` to state its complete schedule. Combine
-it with `--repeat-times` or `--repeat-until` for a finite series, naming how many
-occurrences remain from the edited day. The new series cannot start before the selected
-occurrence's position in the parent schedule, where it would overlap the part of the
-original series HEY keeps, and its last
-day cannot precede its first day. `--repeat` alone means the new series continues forever.
+a preset with `--repeat-times` or `--repeat-until` for a finite series, naming how many
+occurrences remain from the edited day; use `--repeat custom` without either limit to
+copy an existing opaque schedule. A custom rule with `COUNT` can restart its full count on
+the replacement because HEY cannot expose how many occurrences remain. HEY accepts the new
+series' submitted start even when it overlaps an earlier occurrence, so choose its date and
+time deliberately; its last day cannot precede its first day. A preset `--repeat` alone means
+the new series continues forever.
 HEY splits the series there
 — the days from this one on become a new series with
 a new id, the old series stops the day before, and the answer is still the day you edited

@@ -133,12 +133,19 @@ func parseApplyTo(value string, given bool) (hey.OccurrenceScope, error) {
 // server's to fix; the docs say so.
 func (c *eventsEditCommand) editOccurrence(ctx context.Context, cmd *cobra.Command, edit occurrenceEdit) error {
 	// The flags that need no read are refused first, so a bad one costs no request.
-	repeat, err := c.fields.parseRepeat(cmd)
+	repeat, err := c.fields.parseRepeat(cmd, true)
 	if err != nil {
 		return err
 	}
 	if _, err = c.fields.parseCountdown(); err != nil {
 		return err
+	}
+	var explicitReminders []time.Duration
+	if cmd.Flags().Changed("remind") {
+		explicitReminders, err = c.fields.parseReminders()
+		if err != nil {
+			return err
+		}
 	}
 
 	// The day is read over every calendar, whatever --calendar says: here the flag names the
@@ -172,16 +179,16 @@ func (c *eventsEditCommand) editOccurrence(ctx context.Context, cmd *cobra.Comma
 	if err != nil {
 		return err
 	}
-	if err = checkFutureOccurrenceStarts(edit, day.series, schedule); err != nil {
-		return err
-	}
 	err = checkRepeatStarts(repeat, schedule.startsAt)
 	if err != nil {
 		return err
 	}
-	reminders, err := c.fields.remindersFrom(cmd, event)
-	if err != nil {
-		return err
+	reminders := explicitReminders
+	if !cmd.Flags().Changed("remind") {
+		reminders, err = c.fields.remindersFrom(cmd, event)
+		if err != nil {
+			return err
+		}
 	}
 	countdown, err := c.occurrenceCountdown(ctx, cmd, window, day, edit.scope)
 	if err != nil {
@@ -338,54 +345,6 @@ func virtualOccurrence(series generated.Recording, day time.Time) generated.Reco
 	occurrence.OccurrenceId = hey.EventOccurrence{EventID: series.Id, Date: day}.String()
 	occurrence.StartsAt, occurrence.EndsAt = occurrenceInstants(series, day)
 	return occurrence
-}
-
-// checkFutureOccurrenceStarts keeps a replacement series from reaching behind the split.
-// HEY stops the old series at the occurrence identifier's position in the parent schedule
-// but starts the new one wherever the submitted schedule says, so an earlier instant could
-// overlap the retained series. A realized day may have moved elsewhere, but that does not
-// move the boundary where HEY truncates its parent.
-func checkFutureOccurrenceStarts(edit occurrenceEdit, series generated.Recording, schedule eventSchedule) error {
-	if edit.scope != hey.OccurrenceScopeThisAndFollowing {
-		return nil
-	}
-
-	start, err := scheduleStart(schedule)
-	if err != nil {
-		return err
-	}
-	selected := virtualOccurrence(series, edit.occurrence.Date)
-	if start.Before(selected.StartsAt) {
-		return apierr.ErrUsageHint(
-			fmt.Sprintf("the replacement starts at %s, before the selected occurrence at %s", start.Format(time.RFC3339), selected.StartsAt.Format(time.RFC3339)),
-			"keep the replacement at or after the selected occurrence so it cannot overlap the original series")
-	}
-	return nil
-}
-
-// scheduleStart resolves the form fields to the instant HEY will use for the first event in
-// the replacement series. A timed event's date is a wall-clock date in its submitted zone.
-func scheduleStart(schedule eventSchedule) (time.Time, error) {
-	day, err := parseDateArg("starts-on date", schedule.startsAt)
-	if err != nil {
-		return time.Time{}, err
-	}
-	if schedule.allDay {
-		return day, nil
-	}
-
-	wall, err := time.Parse(clockLayout, schedule.startTime)
-	if err != nil {
-		return time.Time{}, apierr.ErrUsage(fmt.Sprintf("invalid start-time: %s", schedule.startTime))
-	}
-	loc := time.UTC
-	if schedule.zone != "" {
-		loc, err = time.LoadLocation(schedule.zone)
-		if err != nil {
-			return time.Time{}, apierr.ErrUsage(fmt.Sprintf("invalid time-zone: %s", schedule.zone))
-		}
-	}
-	return wallClockOn(day, wall, loc), nil
 }
 
 // occurrenceInstants is when a day of the series starts and ends. HEY names the day by the

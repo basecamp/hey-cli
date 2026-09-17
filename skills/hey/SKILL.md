@@ -729,11 +729,13 @@ one after it — HEY's own two choices. `--apply-to` without `--occurrence`, any
 a malformed or mismatched occurrence id, or `--repeat`/`--repeat-until`/`--repeat-times`
 with `current` are usage errors, refused before anything is read. The day is read on its
 own date, so leave `[date]` out or name that day. A `future` edit starts a new series and
-requires `--repeat` to state its complete schedule; add `--repeat-times` or
-`--repeat-until` for a finite series, naming what remains from the edited day. The new
-series cannot start before the selected occurrence's position in the parent schedule,
-where it would overlap the original, and its last day cannot precede its first day.
-`--repeat` alone means forever. HEY gives
+requires `--repeat` to state its complete schedule; combine a preset with `--repeat-times`
+or `--repeat-until` for a finite series, naming what remains from the edited day, or use
+`--repeat custom` without either limit to copy an existing opaque schedule. A custom rule
+with `COUNT` can restart its full count because HEY cannot expose how many occurrences remain.
+HEY accepts the new series' submitted start even when it overlaps an earlier occurrence,
+so choose its date and time deliberately; its last day cannot precede its first day. A preset `--repeat`
+alone means forever. HEY gives
 the new series a new id, and the answer is still
 the day edited — read `day` or `week` again before editing it further.
 
