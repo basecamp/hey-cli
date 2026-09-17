@@ -3,6 +3,7 @@ package smoke_test
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,8 @@ type smokeEvent struct {
 	Notes        string `json:"description"`
 	Location     string `json:"location"`
 	OccurrenceID string `json:"occurrence_id"`
+	ParentID     int64  `json:"parent_id"`
+	EditURL      string `json:"edit_url"`
 }
 
 func TestEventList(t *testing.T) {
@@ -127,7 +130,7 @@ func TestEventOccurrenceEditScopes(t *testing.T) {
 
 	stdout, stderr, code := hey(t, "event", "add", title,
 		"--starts-on", firstDay, "--all-day", "--repeat", "every_week", "--repeat-times", "5",
-		"--notes", "Bring the latest roadmap", "--json")
+		"--notes", "Bring the latest roadmap", "--countdown", "1", "--countdown-unit", "weeks", "--json")
 	if code != 0 {
 		skipf(t, "repeating event add failed (exit %d): %s", code, stderr)
 	}
@@ -142,7 +145,8 @@ func TestEventOccurrenceEditScopes(t *testing.T) {
 	seriesID := fmt.Sprint(series.ID)
 	cleanupIDs := []string{seriesID}
 	t.Cleanup(func() {
-		for _, id := range cleanupIDs {
+		cleanupIDs = append(cleanupIDs, smokeEventSeriesIDsOnDay(t, futureDay, title)...)
+		for _, id := range uniqueStrings(cleanupIDs) {
 			_, _, _ = hey(t, "event", "delete", id)
 		}
 	})
@@ -159,8 +163,8 @@ func TestEventOccurrenceEditScopes(t *testing.T) {
 	if !ok || current.Title != currentTitle {
 		t.Errorf("current occurrence = %#v, want title %q", current, currentTitle)
 	}
-	if current.ID != series.ID || current.RecordingID == 0 || current.RecordingID == series.ID {
-		t.Errorf("current occurrence ids = %#v, want the series id and a distinct recording_id", current)
+	if current.ID == 0 || current.ID == series.ID || current.RecordingID != current.ID {
+		t.Errorf("current occurrence ids = %#v, want the realized id preserved as id and recording_id", current)
 	}
 	styled, stderr, code := hey(t, "event", "day", currentDay, "--styled")
 	if code != 0 {
@@ -170,6 +174,27 @@ func TestEventOccurrenceEditScopes(t *testing.T) {
 		if !strings.Contains(styled, want) {
 			t.Errorf("styled occurrence does not contain %q:\n%s", want, styled)
 		}
+	}
+
+	// The current-only edit must leave the series countdown inherited. Changing the series'
+	// countdown afterward should therefore change what the realized occurrence inherits.
+	if _, stderr, code = hey(t, "event", "edit", seriesID, firstDay,
+		"--countdown", "2", "--countdown-unit", "days", "--json"); code != 0 {
+		skipf(t, "series countdown edit failed (exit %d): %s", code, stderr)
+	}
+	editURL := current.EditURL
+	if strings.HasPrefix(editURL, "/") {
+		editURL = baseURL + editURL
+	}
+	if editURL == "" {
+		t.Fatal("realized occurrence carries no edit_url")
+	}
+	form := fetchHTML(t, editURL)
+	if got := selectedOptionValue(form, "countdown_interval_duration_value"); got != "2" {
+		t.Errorf("realized occurrence countdown value = %q, want the changed inherited value 2", got)
+	}
+	if got := selectedOptionValue(form, "countdown_interval_duration_unit"); got != "86400" {
+		t.Errorf("realized occurrence countdown unit = %q, want inherited days", got)
 	}
 
 	futureOccurrence := fmt.Sprintf("%d_%s", series.ID, futureDay)
@@ -221,6 +246,146 @@ func TestEventOccurrenceEditScopes(t *testing.T) {
 	if beyond, ok := findSmokeEventByTitle(beyondEvents, title); ok {
 		t.Errorf("finite future series grew past its three remaining occurrences: %#v", beyond)
 	}
+}
+
+func TestEventOccurrenceFutureSplitRejectsSameDayOverlap(t *testing.T) {
+	uid := uniqueID()
+	title := fmt.Sprintf("Overnight support rotation %s", uid)
+	first := time.Now().AddDate(2, 1, 0)
+	firstDay := first.Format("2006-01-02")
+	firstEndDay := first.AddDate(0, 0, 1).Format("2006-01-02")
+	selectedDay := firstEndDay
+
+	stdout, stderr, code := hey(t, "event", "add", title,
+		"--starts-on", firstDay, "--ends-on", firstEndDay,
+		"--start-time", "23:00", "--end-time", "01:00", "--time-zone", "UTC",
+		"--repeat", "every_day", "--repeat-times", "3", "--json")
+	if code != 0 {
+		skipf(t, "overnight repeating event add failed (exit %d): %s", code, stderr)
+	}
+	var added Response
+	if err := json.Unmarshal([]byte(stdout), &added); err != nil {
+		t.Fatalf("failed to parse repeating event response: %v", err)
+	}
+	series := dataAs[smokeEvent](t, added)
+	if series.ID == 0 {
+		t.Fatal("repeating event response carries no event ID")
+	}
+	seriesID := fmt.Sprint(series.ID)
+	t.Cleanup(func() { _, _, _ = hey(t, "event", "delete", seriesID) })
+
+	occurrence := fmt.Sprintf("%d_%s", series.ID, selectedDay)
+	_, stderr, code = hey(t, "event", "edit", seriesID,
+		"--occurrence", occurrence, "--apply-to", "future",
+		"--starts-on", selectedDay, "--ends-on", selectedDay,
+		"--start-time", "00:00", "--end-time", "01:00", "--time-zone", "UTC",
+		"--repeat", "every_day", "--repeat-times", "2", "--json")
+	if code == 0 {
+		t.Fatal("same-day backward split succeeded; want an overlap refusal")
+	}
+	assertContains(t, stderr, "before the selected occurrence")
+
+	events := dataAs[[]smokeEvent](t, heyJSON(t, "event", "day", selectedDay))
+	if event, ok := findSmokeOccurrence(events, occurrence); !ok || event.Title != title {
+		t.Errorf("selected occurrence after refused split = %#v, want the original", event)
+	}
+}
+
+func TestEventOccurrenceFutureSplitRejectsMovedEarlierDay(t *testing.T) {
+	uid := uniqueID()
+	title := fmt.Sprintf("Editorial check-in %s", uid)
+	first := time.Now().AddDate(2, 2, 0)
+	firstDay := first.Format("2006-01-02")
+	selectedDay := first.AddDate(0, 0, 1).Format("2006-01-02")
+
+	stdout, stderr, code := hey(t, "event", "add", title,
+		"--starts-on", firstDay, "--start-time", "09:00", "--end-time", "10:00", "--time-zone", "UTC",
+		"--repeat", "every_day", "--repeat-times", "4", "--json")
+	if code != 0 {
+		skipf(t, "daily repeating event add failed (exit %d): %s", code, stderr)
+	}
+	var added Response
+	if err := json.Unmarshal([]byte(stdout), &added); err != nil {
+		t.Fatalf("failed to parse repeating event response: %v", err)
+	}
+	series := dataAs[smokeEvent](t, added)
+	if series.ID == 0 {
+		t.Fatal("repeating event response carries no event ID")
+	}
+	seriesID := fmt.Sprint(series.ID)
+	t.Cleanup(func() { _, _, _ = hey(t, "event", "delete", seriesID) })
+
+	occurrence := fmt.Sprintf("%d_%s", series.ID, selectedDay)
+	if _, stderr, code = hey(t, "event", "edit", seriesID,
+		"--occurrence", occurrence, "--apply-to", "current",
+		"--starts-on", firstDay, "--ends-on", firstDay,
+		"--start-time", "12:00", "--end-time", "13:00", "--time-zone", "UTC", "--json"); code != 0 {
+		skipf(t, "move current occurrence earlier failed (exit %d): %s", code, stderr)
+	}
+
+	_, stderr, code = hey(t, "event", "edit", seriesID,
+		"--occurrence", occurrence, "--apply-to", "future",
+		"--repeat", "every_day", "--repeat-times", "3", "--json")
+	if code == 0 {
+		t.Fatal("future split from an earlier moved day succeeded; want an overlap refusal")
+	}
+	assertContains(t, stderr, "before the selected occurrence")
+}
+
+func smokeEventSeriesIDsOnDay(t *testing.T, day, title string) []string {
+	t.Helper()
+	stdout, _, code := hey(t, "event", "day", day, "--json")
+	if code != 0 {
+		return nil
+	}
+	var response Response
+	if json.Unmarshal([]byte(stdout), &response) != nil {
+		return nil
+	}
+	var events []smokeEvent
+	if json.Unmarshal(response.Data, &events) != nil {
+		return nil
+	}
+	var ids []string
+	for _, event := range events {
+		if event.Title != title {
+			continue
+		}
+		id := event.ParentID
+		if id == 0 {
+			id = event.ID
+		}
+		if id != 0 {
+			ids = append(ids, fmt.Sprint(id))
+		}
+	}
+	return ids
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]bool, len(values))
+	unique := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		unique = append(unique, value)
+	}
+	return unique
+}
+
+func selectedOptionValue(markup, name string) string {
+	selectRE := regexp.MustCompile(`(?s)<select[^>]*name="` + regexp.QuoteMeta(name) + `"[^>]*>.*?</select>`)
+	selectedRE := regexp.MustCompile(`<option[^>]*selected(?:="selected")?[^>]*>`)
+	valueRE := regexp.MustCompile(`value="([^"]*)"`)
+	selectHTML := selectRE.FindString(markup)
+	option := selectedRE.FindString(selectHTML)
+	match := valueRE.FindStringSubmatch(option)
+	if len(match) == 2 {
+		return match[1]
+	}
+	return ""
 }
 
 func findSmokeOccurrence(events []smokeEvent, occurrenceID string) (smokeEvent, bool) {

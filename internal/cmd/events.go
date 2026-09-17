@@ -251,23 +251,27 @@ on its own date, so [date] can be left out or must name it. A change to --repeat
 --repeat-until or --repeat-times cannot apply to one day, so 'current' refuses those
 flags. 'future' starts a new series and requires --repeat to state its complete schedule:
 combine it with --repeat-times or --repeat-until for a finite series, or use --repeat alone
-for one that continues forever. The replacement cannot start before the selected occurrence,
-where it would overlap the part of the original series HEY keeps. The days from this one on
+for one that continues forever. The replacement cannot start before the selected occurrence's
+position in the parent schedule, where it would overlap the part of the original series HEY
+keeps. The days from this one on
 get a new series id.
 
 An occurrence edit keeps more than a whole-event edit does, and refuses what it cannot
-keep. The countdown is read back and sent again, so it survives unless --countdown 0
-removes it — and one day of a series with a countdown cannot lose it alone, since HEY
-shows a day the series' countdown whenever it has none of its own, so that is refused.
-Notes are still only served as plain text, so an occurrence edit that would send
+keep. A countdown owned by the day is read back and sent again; an inherited series
+countdown is left inherited on a current-only edit and copied to the replacement series on
+a future edit. It survives unless --countdown 0 removes it — and one day of a series with
+a countdown cannot lose it alone, since HEY shows a day the series' countdown whenever it
+has none of its own, so that is refused. Notes are still only served as plain text, so an
+occurrence edit that would send
 formatted notes back as text refuses unless --allow-plain-notes accepts that or --notes
 replaces them. A 'future' edit records the new series from the series' own guest list,
 so a day that had come to have guests of its own is refused until --invite names the new
 series' list. The day is read over every calendar, so here --calendar is only where the
-day is moved to; a day already moved elsewhere stays there. Every occurrence lists with
-the series in id and parent_id; a day HEY has written out on its own also has a
-recording_id, which edits and deletes that day alone. One thing no edit can keep: an
-attached email you cannot read is not served, so it is detached by any edit, whole event
+day is moved to; a day already moved elsewhere stays there. A virtual occurrence lists
+its series in id and parent_id; a day HEY has written out on its own keeps its own event id
+in id and recording_id, with the series in parent_id. That own id edits and deletes the
+day alone. One thing no edit can keep: an attached email you cannot read is not served, so
+it is detached by any edit, whole event
 or one day.`,
 		Example: `  hey event edit 4821 --title "Design review (moved)"
   hey event edit 4821 --starts-on 2026-09-04 --start-time 15:00

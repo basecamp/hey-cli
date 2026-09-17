@@ -700,11 +700,11 @@ repeating event lists once as its series, not once per day.
 
 **"What's on my schedule today?" is `hey event day`, not `list`.** A day or a week is the
 span as HEY draws it: a repeating event is expanded into the occurrences inside it, each
-carrying that day's own times and an `occurrence_id`. Every occurrence has the series in
-`id` and `parent_id` (what `edit`/`delete` take for the whole series); a day HEY has
-written out on its own also has a `recording_id`, which acts on that day alone. Styled
-period tables that contain occurrences print `Occurrence ID` and `Recording ID` columns
-beside the series `ID`. The period covers the calendars switched on in HEY,
+carrying that day's own times and an `occurrence_id`. A virtual occurrence has the series
+in `id` and `parent_id`; a day HEY has written out on its own keeps its own event ID in
+`id` and `recording_id`, with the series in `parent_id`. That own ID acts on the day alone.
+Styled period tables that contain occurrences print `Series ID`, `Occurrence ID` and
+`Recording ID` beside `ID`. The period covers the calendars switched on in HEY,
 so `day` and `week` take no `--calendar` — only `--limit` and `--all`.
 
 **Response format:** a flat array of events. Each has `id`, `title`, `starts_at`, `ends_at`,
@@ -731,26 +731,29 @@ with `current` are usage errors, refused before anything is read. The day is rea
 own date, so leave `[date]` out or name that day. A `future` edit starts a new series and
 requires `--repeat` to state its complete schedule; add `--repeat-times` or
 `--repeat-until` for a finite series, naming what remains from the edited day. The new
-series cannot start before the selected occurrence, where it would overlap the original,
-and its last day cannot precede its first day. `--repeat` alone means forever. HEY gives
+series cannot start before the selected occurrence's position in the parent schedule,
+where it would overlap the original, and its last day cannot precede its first day.
+`--repeat` alone means forever. HEY gives
 the new series a new id, and the answer is still
 the day edited — read `day` or `week` again before editing it further.
 
 An occurrence edit keeps everything it is not told to change — that day's own schedule,
 zones, notes, location, link, attached email, reminders, circle and countdown, from the day
-itself where HEY has already written it out — and refuses what it cannot keep: the
-countdown is read back and re-sent (only `--countdown 0` removes it, and not from one day
-of a series that has one, since HEY shows the day the series' countdown regardless — use
-`future` or edit the series), and notes HEY serves only as plain text, so an edit that
+itself where HEY has already written it out — and refuses what it cannot keep. A countdown
+owned by the day is read back and re-sent; an inherited series countdown stays inherited
+for `current` and is copied to the replacement series for `future`. Only `--countdown 0`
+removes it, and not from one day of a series that has one, since HEY shows the day the
+series' countdown regardless — use `future` or edit the series. Notes HEY serves only as
+plain text, so an edit that
 would send notes back as text is refused unless `--allow-plain-notes` accepts the loss or
 `--notes` replaces them; an event with no notes needs neither. A `future` edit builds the
 new series from the series' own guest list and sends invitations, so a day whose guests
 differ from the series' is refused until `--invite` names the new list. With
 `--occurrence`, `--calendar` is only the calendar the day moves to: the day is read over
 every calendar, and a day already moved elsewhere stays there. A day HEY has written out
-lists in `day`/`week` with the series in `id` and `parent_id`, plus its own `recording_id`
-(which `edit <recording_id>`/`delete <recording_id>` act on for that day alone): use the
-series id as the positional id with `--occurrence`. An attached email you cannot read is
+lists in `day`/`week` with its own event ID in `id` and `recording_id`, plus the series in
+`parent_id`; `edit <id>`/`delete <id>` act on that day alone. Use the series id as the
+positional id with `--occurrence`. An attached email you cannot read is
 not served and is detached by any
 edit, whole event or one day — nothing client-side can keep it. HEY answers not-found for
 a date that is not a day of the series and for a series you cannot edit alike. The JSON

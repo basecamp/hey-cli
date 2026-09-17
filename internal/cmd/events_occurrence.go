@@ -120,9 +120,10 @@ func parseApplyTo(value string, given bool) (hey.OccurrenceScope, error) {
 //
 // The write is a replacement like every event write, so what the flags do not name is read
 // back and sent again: the schedule of that day, its zones, notes, location, link, attached
-// email, reminders, circle and countdown. Two things the whole-event edit loses are handled
-// here rather than lost. The countdown is read from the recording HEY keeps for it and sent
-// again, so only --countdown 0 removes it. Notes are served only as plain text, so an edit
+// email, reminders and circle. Two things the whole-event edit loses are handled here rather
+// than lost. An occurrence-owned countdown is read and sent again; an inherited one is left
+// inherited for a current edit and copied for a future split, so only --countdown 0 removes
+// it. Notes are served only as plain text, so an edit
 // that would send formatted notes back as text is refused unless --allow-plain-notes says
 // that is acceptable or --notes replaces them.
 //
@@ -171,7 +172,7 @@ func (c *eventsEditCommand) editOccurrence(ctx context.Context, cmd *cobra.Comma
 	if err != nil {
 		return err
 	}
-	if err = checkFutureOccurrenceStarts(edit, day.series, schedule.startsAt); err != nil {
+	if err = checkFutureOccurrenceStarts(edit, day.series, schedule); err != nil {
 		return err
 	}
 	err = checkRepeatStarts(repeat, schedule.startsAt)
@@ -340,29 +341,51 @@ func virtualOccurrence(series generated.Recording, day time.Time) generated.Reco
 }
 
 // checkFutureOccurrenceStarts keeps a replacement series from reaching behind the split.
-// HEY stops the old series at the selected occurrence but starts the new one wherever the
-// submitted schedule says, so an earlier start would make both series cover the earlier days.
-func checkFutureOccurrenceStarts(edit occurrenceEdit, series generated.Recording, startsAt string) error {
+// HEY stops the old series at the occurrence identifier's position in the parent schedule
+// but starts the new one wherever the submitted schedule says, so an earlier instant could
+// overlap the retained series. A realized day may have moved elsewhere, but that does not
+// move the boundary where HEY truncates its parent.
+func checkFutureOccurrenceStarts(edit occurrenceEdit, series generated.Recording, schedule eventSchedule) error {
 	if edit.scope != hey.OccurrenceScopeThisAndFollowing {
 		return nil
 	}
 
+	start, err := scheduleStart(schedule)
+	if err != nil {
+		return err
+	}
 	selected := virtualOccurrence(series, edit.occurrence.Date)
-	selectedStartsAt, _ := eventClock(selected.StartsAt, selected.StartsAtTimeZone)
-	start, err := parseDateArg("starts-on date", startsAt)
-	if err != nil {
-		return err
-	}
-	selectedStart, err := parseDateArg("selected occurrence date", selectedStartsAt)
-	if err != nil {
-		return err
-	}
-	if start.Before(selectedStart) {
+	if start.Before(selected.StartsAt) {
 		return apierr.ErrUsageHint(
-			fmt.Sprintf("starts-on %s is before the selected occurrence on %s", startsAt, selectedStartsAt),
-			fmt.Sprintf("use %s or later so the replacement series cannot overlap the original", selectedStartsAt))
+			fmt.Sprintf("the replacement starts at %s, before the selected occurrence at %s", start.Format(time.RFC3339), selected.StartsAt.Format(time.RFC3339)),
+			"keep the replacement at or after the selected occurrence so it cannot overlap the original series")
 	}
 	return nil
+}
+
+// scheduleStart resolves the form fields to the instant HEY will use for the first event in
+// the replacement series. A timed event's date is a wall-clock date in its submitted zone.
+func scheduleStart(schedule eventSchedule) (time.Time, error) {
+	day, err := parseDateArg("starts-on date", schedule.startsAt)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if schedule.allDay {
+		return day, nil
+	}
+
+	wall, err := time.Parse(clockLayout, schedule.startTime)
+	if err != nil {
+		return time.Time{}, apierr.ErrUsage(fmt.Sprintf("invalid start-time: %s", schedule.startTime))
+	}
+	loc := time.UTC
+	if schedule.zone != "" {
+		loc, err = time.LoadLocation(schedule.zone)
+		if err != nil {
+			return time.Time{}, apierr.ErrUsage(fmt.Sprintf("invalid time-zone: %s", schedule.zone))
+		}
+	}
+	return wallClockOn(day, wall, loc), nil
 }
 
 // occurrenceInstants is when a day of the series starts and ends. HEY names the day by the
@@ -412,9 +435,11 @@ func wallClockOn(day, wall time.Time, loc *time.Location) time.Time {
 	return time.Date(day.Year(), day.Month(), day.Day(), hour, minute, second, 0, loc)
 }
 
-// occurrenceCountdown is the countdown the write sends: the one --countdown names, or the
-// one the event already has, read back so that a write that says nothing about it does
-// not remove it. --countdown 0 is how it is removed on purpose.
+// occurrenceCountdown is the countdown the write sends: the one --countdown names, or an
+// existing countdown owned by the recording this write updates. An inherited countdown is
+// left out of a current-only write so it stays inherited; a future split copies the series'
+// countdown because the replacement series needs one of its own. --countdown 0 removes one
+// on purpose.
 //
 // A countdown is a recording of its own under the event, ending when the event starts. A
 // day written out on its own may carry one, ending on this day; the series' ends on the
@@ -432,7 +457,7 @@ func (c *eventsEditCommand) occurrenceCountdown(ctx context.Context, cmd *cobra.
 		if err != nil || countdown.Value != 0 || scope != hey.OccurrenceScopeThisEvent {
 			return countdown, err
 		}
-		if _, inherited, err := seriesCountdown(ctx, window, day); err != nil || inherited {
+		if _, inherited, err := c.seriesCountdown(ctx, window, day); err != nil || inherited {
 			if err != nil {
 				return hey.CountdownParams{}, err
 			}
@@ -444,38 +469,41 @@ func (c *eventsEditCommand) occurrenceCountdown(ctx context.Context, cmd *cobra.
 	}
 	if day.realized != nil {
 		if countdown, ok := countdownOf(day.countdowns, day.realized.Id); ok {
-			return countdownFromRecording(countdown, *day.realized)
+			return c.countdownFromRecording(ctx, countdown, *day.realized)
 		}
 		// A day that was moved is still listed under the date it stands for, but its
 		// countdown ends where it now starts, so that day is where its own countdown is.
 		if day.realized.StartsAt.UTC().Format(dateLayout) != day.occurrence.DateParam() {
-			countdown, found, err := countdownEnding(ctx, window, *day.realized)
+			countdown, found, err := c.countdownEnding(ctx, window, *day.realized)
 			if err != nil || found {
 				return countdown, err
 			}
 		}
 	}
-	countdown, _, err := seriesCountdown(ctx, window, day)
+	if scope == hey.OccurrenceScopeThisEvent {
+		return hey.CountdownParams{}, nil
+	}
+	countdown, _, err := c.seriesCountdown(ctx, window, day)
 	return countdown, err
 }
 
 // seriesCountdown is the series' own countdown: on the day, where the day is the one the
 // series began on, and otherwise on that first day in one more read.
-func seriesCountdown(ctx context.Context, window recordingWindow, day occurrenceDay) (hey.CountdownParams, bool, error) {
+func (c *eventsEditCommand) seriesCountdown(ctx context.Context, window recordingWindow, day occurrenceDay) (hey.CountdownParams, bool, error) {
 	if countdown, ok := countdownOf(day.countdowns, day.series.Id); ok {
-		params, err := countdownFromRecording(countdown, day.series)
+		params, err := c.countdownFromRecording(ctx, countdown, day.series)
 		return params, true, err
 	}
 	if day.series.StartsAt.UTC().Format(dateLayout) == day.occurrence.DateParam() {
 		return hey.CountdownParams{}, false, nil
 	}
-	return countdownEnding(ctx, window, day.series)
+	return c.countdownEnding(ctx, window, day.series)
 }
 
 // countdownEnding reads the day an event starts on, over its own calendar, for the
 // countdown ending there. A countdown ends at the moment its event starts, so that one
 // day is the whole window it can be found in.
-func countdownEnding(ctx context.Context, window recordingWindow, event generated.Recording) (hey.CountdownParams, bool, error) {
+func (c *eventsEditCommand) countdownEnding(ctx context.Context, window recordingWindow, event generated.Recording) (hey.CountdownParams, bool, error) {
 	if event.StartsAt.IsZero() {
 		return hey.CountdownParams{}, false, nil
 	}
@@ -497,7 +525,7 @@ func countdownEnding(ctx context.Context, window recordingWindow, event generate
 	if !ok {
 		return hey.CountdownParams{}, false, nil
 	}
-	params, err := countdownFromRecording(countdown, event)
+	params, err := c.countdownFromRecording(ctx, countdown, event)
 	return params, true, err
 }
 
@@ -532,7 +560,7 @@ var countdownLabel = regexp.MustCompile(`^(\d+) (day|week|month)s? before$`)
 // A recording this cannot read is refused rather than guessed at or dropped, since a
 // countdown the write does not name is a countdown removed: the caller can still name it
 // with --countdown, or remove it with --countdown 0.
-func countdownFromRecording(countdown, event generated.Recording) (hey.CountdownParams, error) {
+func countdownFromRecording(countdown, event generated.Recording, additionalZones ...string) (hey.CountdownParams, error) {
 	unreadable := &apierr.Error{
 		Code:    apierr.CodeAPI,
 		Message: fmt.Sprintf("the event's countdown could not be read back: %q", terminal.SanitizeLine(countdown.Label)),
@@ -558,19 +586,24 @@ func countdownFromRecording(countdown, event generated.Recording) (hey.Countdown
 	}
 
 	// A JSON write runs in UTC, while the web form runs in the reader's zone. The recording
-	// does not say which one created it, so try UTC and the event's own zone. A candidate is
+	// does not say which one created it, so try UTC, the event's zone and any additional
+	// identity zone the caller supplies. A candidate is
 	// accepted only when it reconstructs one of the exact value/unit pairs the form can send
 	// and produces the label HEY served. If both zones give different valid answers, there is
 	// no lossless answer and the edit stops.
 	locations := []*time.Location{time.UTC}
-	if event.StartsAtTimeZone != "" {
-		loc, err := time.LoadLocation(event.StartsAtTimeZone)
+	seenZones := map[string]bool{"UTC": true}
+	zones := append([]string{event.StartsAtTimeZone}, additionalZones...)
+	for _, name := range zones {
+		if name == "" || seenZones[name] {
+			continue
+		}
+		loc, err := time.LoadLocation(name)
 		if err != nil {
 			return hey.CountdownParams{}, unreadable
 		}
-		if loc != time.UTC {
-			locations = append(locations, loc)
-		}
+		seenZones[name] = true
+		locations = append(locations, loc)
 	}
 
 	var answer hey.CountdownParams
@@ -591,6 +624,20 @@ func countdownFromRecording(countdown, event generated.Recording) (hey.Countdown
 		return hey.CountdownParams{}, unreadable
 	}
 	return answer, nil
+}
+
+// countdownFromRecording includes the identity's zone when decoding a web-created
+// countdown. HTML writes use that zone while JSON API writes use UTC, and the event's own
+// zone need not be either one. Trying it even when another zone works preserves the pure
+// decoder's ambiguity check.
+func (c *eventsEditCommand) countdownFromRecording(ctx context.Context, countdown, event generated.Recording) (hey.CountdownParams, error) {
+	params, unreadable := countdownFromRecording(countdown, event)
+
+	identity, err := rootSDK.Identity().GetIdentity(ctx)
+	if err != nil || identity == nil || identity.TimeZone == "" {
+		return params, unreadable
+	}
+	return countdownFromRecording(countdown, event, identity.TimeZone)
 }
 
 // countdownLabelMatchesDuration applies the same month, week, then day test HEY uses to

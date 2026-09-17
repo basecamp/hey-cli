@@ -58,11 +58,11 @@ event that falls on it, occurrences of a repeating series included, and nothing 
 outside it.
 
 The day covers the calendars switched on in HEY, the same set the app draws, so there is
-no --calendar to narrow it. Every occurrence carries the series in id and parent_id, which
-'hey event edit' and 'hey event delete' take for the whole series. A day HEY has written
-out on its own — after an edit of that day alone, or a reminder — also carries its own
-recording_id, which those two commands act on for that day alone. Either way occurrence_id
-is what 'hey event edit --occurrence' takes, with the series id before it.`,
+no --calendar to narrow it. A virtual occurrence carries the series in id and parent_id.
+A day HEY has written out on its own — after an edit of that day alone, or a reminder —
+keeps its own event id in id and recording_id, while parent_id remains the series. The own
+id is what 'hey event edit' and 'hey event delete' act on for that day alone. Either way
+occurrence_id is what 'hey event edit --occurrence' takes, with the series id before it.`,
 		Example: `  hey event day
   hey event day 2026-09-02
   hey event day --json`,
@@ -93,11 +93,11 @@ func newEventsWeekCommand() *eventsPeriodCommand {
 inside the week, occurrences of a repeating series included. Any day names its week.
 
 The week covers the calendars switched on in HEY, the same set the app draws, so there is
-no --calendar to narrow it. Every occurrence carries the series in id and parent_id, which
-'hey event edit' and 'hey event delete' take for the whole series. A day HEY has written
-out on its own — after an edit of that day alone, or a reminder — also carries its own
-recording_id, which those two commands act on for that day alone. Either way occurrence_id
-is what 'hey event edit --occurrence' takes, with the series id before it.`,
+no --calendar to narrow it. A virtual occurrence carries the series in id and parent_id.
+A day HEY has written out on its own — after an edit of that day alone, or a reminder —
+keeps its own event id in id and recording_id, while parent_id remains the series. The own
+id is what 'hey event edit' and 'hey event delete' act on for that day alone. Either way
+occurrence_id is what 'hey event edit --occurrence' takes, with the series id before it.`,
 		Example: `  hey event week
   hey event week 2026-09-02
   hey event week --json`,
@@ -155,8 +155,8 @@ func (c *eventsPeriodCommand) run(cmd *cobra.Command, args []string) error {
 // account's own time zone, which the CLI process's clock cannot.
 const periodNow = "now"
 
-// eventRow is the event shape the CLI publishes. An occurrence's id names its series,
-// while RecordingID names a realized day's own event for an edit or delete of that day.
+// eventRow is the event shape the CLI publishes. A virtual occurrence's id names its
+// series; a realized day's id and RecordingID both name its own event.
 type eventRow struct {
 	generated.Recording
 	RecordingID int64 `json:"recording_id,omitempty"`
@@ -170,9 +170,9 @@ func eventRows(events []generated.Recording) []eventRow {
 	return rows
 }
 
-// occurrenceEventRows gives every occurrence the series id used for whole-series actions.
-// A virtual occurrence has no id of its own. A realized occurrence publishes that own id
-// separately as recording_id for actions on that day alone.
+// occurrenceEventRows keeps a realized occurrence's established id: HEY's event routes
+// act on that recording alone. A virtual occurrence has no id of its own, so its id is the
+// series id. recording_id makes the distinction explicit without changing the old id.
 func occurrenceEventRows(events []generated.Recording) []eventRow {
 	rows := eventRows(events)
 	for i := range rows {
@@ -181,6 +181,7 @@ func occurrenceEventRows(events []generated.Recording) []eventRow {
 		}
 		if rows[i].Id != 0 {
 			rows[i].RecordingID = rows[i].Id
+			continue
 		}
 		rows[i].Id = rows[i].ParentId
 	}
@@ -238,17 +239,20 @@ func writeEventRows(cmd *cobra.Command, events []eventRow, described, notice str
 		table := newTable(cmd.OutOrStdout())
 		header := []string{"ID"}
 		if showsOccurrenceIDs {
-			header = append(header, "Occurrence ID", "Recording ID")
+			header = append(header, "Series ID", "Occurrence ID", "Recording ID")
 		}
 		table.addRow(append(header, "Title", "Starts", "Ends", "Calendar"))
 		for _, event := range events {
 			row := []string{fmt.Sprintf("%d", event.Id)}
 			if showsOccurrenceIDs {
-				recordingID := ""
+				seriesID, recordingID := "", ""
+				if event.ParentId != 0 {
+					seriesID = fmt.Sprintf("%d", event.ParentId)
+				}
 				if event.RecordingID != 0 {
 					recordingID = fmt.Sprintf("%d", event.RecordingID)
 				}
-				row = append(row, event.OccurrenceId, recordingID)
+				row = append(row, seriesID, event.OccurrenceId, recordingID)
 			}
 			table.addRow(append(row,
 				event.Title,

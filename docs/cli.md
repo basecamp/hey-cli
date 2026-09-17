@@ -415,10 +415,11 @@ lists once as the series it is stored as, not once per day it falls on.
 
 `hey event day` and `hey event week` read a span the way HEY's own views draw it: a
 repeating event is expanded into the occurrences that fall inside it, each carrying that
-day's own times and an `occurrence_id`. Every occurrence carries the series in `id` and
-`parent_id`, which `hey event edit` and `hey event delete` take for the whole series. A day
-HEY has written out on its own also carries its own `recording_id`, which those commands
-act on for that day alone. A period covers the calendars switched on in HEY, the same set
+day's own times and an `occurrence_id`. A virtual occurrence carries the series in `id`
+and `parent_id`. A day HEY has written out on its own keeps its own event ID in both `id`
+and `recording_id`, while `parent_id` remains the series; that own ID is what `hey event
+edit` and `hey event delete` act on for that day alone. A period covers the calendars
+switched on in HEY, the same set
 the app draws, so `day` and `week` take no `--calendar` — only `--limit`
 and `--all`. With no date they read the account's own today, whatever zone the machine
 runs in.
@@ -448,7 +449,8 @@ as is any other value. The day is read on its own date rather than searched for,
 edit starts a new series and requires `--repeat` to state its complete schedule. Combine
 it with `--repeat-times` or `--repeat-until` for a finite series, naming how many
 occurrences remain from the edited day. The new series cannot start before the selected
-occurrence, where it would overlap the part of the original series HEY keeps, and its last
+occurrence's position in the parent schedule, where it would overlap the part of the
+original series HEY keeps, and its last
 day cannot precede its first day. `--repeat` alone means the new series continues forever.
 HEY splits the series there
 — the days from this one on become a new series with
@@ -459,13 +461,13 @@ An occurrence edit keeps more than a whole-event edit does, and refuses what it 
 keep. It sends back the day's own schedule and zones, notes, location, link, attached
 email, reminders and circle, taking them from the day itself where HEY has already written
 that day out on its own. Styled `day` and `week` tables that contain occurrences print
-`Occurrence ID` and `Recording ID` columns beside the series `ID`. A day like that lists
-with the series in `id` and `parent_id`, plus its own `recording_id`, which
-`hey event edit <recording_id>`
-and `hey event delete <recording_id>` act on for that day alone. The series id is what
-`--occurrence` takes beside its `occurrence_id`. The countdown is read back from the
-recording HEY keeps for it — on the
-day, or on the day the series began in one more single-day read — and sent again, so it
+`Series ID`, `Occurrence ID` and `Recording ID` columns beside `ID`. A day like that
+lists its own event ID in `id` and `recording_id`, with the series in `parent_id`; `hey
+event edit <id>` and
+`hey event delete <id>` act on that day alone. The series id is what `--occurrence` takes
+beside its `occurrence_id`. A countdown owned by the day is read back and sent again. An
+inherited series countdown is left inherited by a `current` edit, while a `future` edit
+reads it from the day the series began and copies it to the replacement series. It
 survives unless `--countdown 0` removes it; a countdown whose length cannot be read back
 stops the edit and says so. One day of a series with a countdown cannot lose it alone:
 HEY shows a day the series' countdown whenever it has none of its own, so `--countdown 0`

@@ -57,9 +57,9 @@ func TestEventsDayExpandsRecurringEvents(t *testing.T) {
 }
 
 // A day an earlier edit has written out has an id of its own, and HEY's event routes act
-// on that id for that day alone. The published id keeps its established meaning — the
-// series — while recording_id exposes the realized day's own id explicitly.
-func TestEventsDayKeepsTheSeriesIDAndPublishesARealizedRecordingID(t *testing.T) {
+// on that id for that day alone. The published id keeps that established meaning while
+// recording_id makes the distinction from a virtual occurrence explicit.
+func TestEventsDayKeepsARealizedOccurrenceID(t *testing.T) {
 	var deletedPath string
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -86,15 +86,15 @@ func TestEventsDayKeepsTheSeriesIDAndPublishesARealizedRecordingID(t *testing.T)
 		t.Fatalf("data = %#v, want the one event", response.Data)
 	}
 	row, ok := events[0].(map[string]any)
-	if !ok || row["id"] != float64(4821) || row["recording_id"] != float64(9001) || row["parent_id"] != float64(4821) || row["occurrence_id"] != "4821_2026-09-15" {
-		t.Errorf("row = %#v, want the series id and the day's own recording_id", events[0])
+	if !ok || row["id"] != float64(9001) || row["recording_id"] != float64(9001) || row["parent_id"] != float64(4821) || row["occurrence_id"] != "4821_2026-09-15" {
+		t.Errorf("row = %#v, want the day's own id and recording_id with its series in parent_id", events[0])
 	}
 
 	if _, err := runJSONCommand(t, handler, "event", "delete", fmt.Sprintf("%.0f", row["id"])); err != nil {
 		t.Fatalf("delete the id from the day response: %v", err)
 	}
-	if deletedPath != "/calendar/events/4821.json" {
-		t.Errorf("delete path = %q, want the established series target", deletedPath)
+	if deletedPath != "/calendar/events/9001.json" {
+		t.Errorf("delete path = %q, want the realized day alone", deletedPath)
 	}
 }
 
@@ -123,7 +123,7 @@ func TestEventsPeriodStyledPublishesOccurrenceIdentifiers(t *testing.T) {
 			if err != nil {
 				t.Fatalf("execute event %s: %v", tt.name, err)
 			}
-			for _, want := range []string{"Occurrence ID", "Recording ID", "204_2026-09-15", "4821_2026-09-13", "9001"} {
+			for _, want := range []string{"Series ID", "Occurrence ID", "Recording ID", "204_2026-09-15", "4821_2026-09-13", "9001"} {
 				if !strings.Contains(styled, want) {
 					t.Errorf("styled output does not contain %q:\n%s", want, styled)
 				}
