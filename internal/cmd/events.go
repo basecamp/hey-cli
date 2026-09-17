@@ -338,6 +338,13 @@ func (c *eventsEditCommand) run(cmd *cobra.Command, args []string) error {
 	if err = c.fields.validateExplicitScheduleFlags(cmd); err != nil {
 		return err
 	}
+	var explicitReminders []time.Duration
+	if cmd.Flags().Changed("remind") {
+		explicitReminders, err = c.fields.parseReminders()
+		if err != nil {
+			return err
+		}
+	}
 
 	event, err := c.findEvent(ctx, id, on)
 	if err != nil {
@@ -352,9 +359,12 @@ func (c *eventsEditCommand) run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	reminders, err := c.fields.remindersFrom(cmd, event)
-	if err != nil {
-		return err
+	reminders := explicitReminders
+	if !cmd.Flags().Changed("remind") {
+		reminders, err = c.fields.remindersFrom(cmd, event)
+		if err != nil {
+			return err
+		}
 	}
 
 	changes := hey.UpdateCalendarEventParams{
