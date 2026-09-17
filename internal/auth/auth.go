@@ -124,6 +124,17 @@ func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 // AuthenticateRequest sets the appropriate auth header on an HTTP request.
 // Uses Bearer token if available, otherwise falls back to session cookie.
 func (m *Manager) AuthenticateRequest(ctx context.Context, req *http.Request) error {
+	return m.authenticateRequest(ctx, req, false)
+}
+
+// AuthenticateRequestFromStore rereads persistent credentials before setting the
+// auth header. Long-lived connections use it when they dial again, since they do
+// not have the SDK's 401 path to invalidate this manager's process-local cache.
+func (m *Manager) AuthenticateRequestFromStore(ctx context.Context, req *http.Request) error {
+	return m.authenticateRequest(ctx, req, true)
+}
+
+func (m *Manager) authenticateRequest(ctx context.Context, req *http.Request, reload bool) error {
 	if token := os.Getenv("HEY_TOKEN"); token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 		return nil
@@ -132,7 +143,13 @@ func (m *Manager) AuthenticateRequest(ctx context.Context, req *http.Request) er
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	creds, err := m.loadCredentialsLocked()
+	var creds *Credentials
+	var err error
+	if reload {
+		creds, err = m.reloadCredentialsLocked()
+	} else {
+		creds, err = m.loadCredentialsLocked()
+	}
 	if err != nil {
 		return errNotAuthenticated(err)
 	}
@@ -320,9 +337,13 @@ func (m *Manager) loadCredentialsLocked() (*Credentials, error) {
 	if m.cachedCredentials != nil {
 		return cloneCredentials(m.cachedCredentials), nil
 	}
+	return m.reloadCredentialsLocked()
+}
 
+func (m *Manager) reloadCredentialsLocked() (*Credentials, error) {
 	creds, err := m.store.Load(m.baseURL)
 	if err != nil {
+		m.cachedCredentials = nil
 		return nil, err
 	}
 	m.cachedCredentials = cloneCredentials(creds)
@@ -360,7 +381,8 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 		return errNotAuthenticated(loadErr)
 	}
 	m.cachedCredentials = cloneCredentials(stored)
-	if stored.AccessToken != creds.AccessToken || stored.SessionCookie != creds.SessionCookie {
+	changed := stored.AccessToken != creds.AccessToken || stored.SessionCookie != creds.SessionCookie
+	if changed && (stored.AccessToken != "" || stored.SessionCookie != "") {
 		return nil
 	}
 	creds = cloneCredentials(stored)

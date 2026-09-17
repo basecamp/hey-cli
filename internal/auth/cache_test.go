@@ -369,6 +369,19 @@ func TestRefreshRereadsStoredAuthentication(t *testing.T) {
 	}
 }
 
+func TestRefreshDoesNotAdoptAnEmptyStoredCredential(t *testing.T) {
+	mgr, keyring := managerWithKeyring(t, &Credentials{AccessToken: "cached-token", OAuthType: "token"})
+	authenticate(t, mgr)
+	keyring.replace(t, &Credentials{})
+
+	if err := mgr.Refresh(t.Context()); err == nil {
+		t.Fatal("Refresh succeeded after the stored credential became empty")
+	}
+	if mgr.IsAuthenticated() {
+		t.Fatal("IsAuthenticated = true with an empty stored credential")
+	}
+}
+
 func TestFailedForcedReadClearsStaleCredentials(t *testing.T) {
 	mgr, keyring := managerWithKeyring(t, &Credentials{AccessToken: "deleted-token", OAuthType: "token"})
 	if got := authenticate(t, mgr).Header.Get("Authorization"); got != "Bearer deleted-token" {

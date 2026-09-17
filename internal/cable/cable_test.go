@@ -131,6 +131,45 @@ func TestEveryDialCarriesCurrentCredentials(t *testing.T) {
 	}
 }
 
+func TestDialHeaderRereadsStoredCredentials(t *testing.T) {
+	t.Setenv("HEY_NO_KEYRING", "1")
+	t.Setenv("HEY_TOKEN", "")
+
+	configDir := t.TempDir()
+	manager := auth.NewManager("https://app.hey.com", http.DefaultClient, configDir)
+	if err := manager.LoginWithCookie("cookie-at-first-dial"); err != nil {
+		t.Fatalf("store first cookie: %v", err)
+	}
+
+	first, err := authHeader(t.Context(), "https://app.hey.com", manager)
+	if err != nil {
+		t.Fatalf("first dial header: %v", err)
+	}
+	if got := first.Get("Cookie"); got != "session_token=cookie-at-first-dial" {
+		t.Errorf("first dial Cookie = %q", got)
+	}
+
+	replacement := auth.NewManager("https://app.hey.com", http.DefaultClient, configDir)
+	if err := replacement.LoginWithCookie("cookie-at-redial"); err != nil {
+		t.Fatalf("replace stored cookie: %v", err)
+	}
+
+	redial, err := authHeader(t.Context(), "https://app.hey.com", manager)
+	if err != nil {
+		t.Fatalf("redial header: %v", err)
+	}
+	if got := redial.Get("Cookie"); got != "session_token=cookie-at-redial" {
+		t.Errorf("redial Cookie = %q, want the replacement from storage", got)
+	}
+
+	if err := replacement.Logout(); err != nil {
+		t.Fatalf("delete stored cookie: %v", err)
+	}
+	if _, err := authHeader(t.Context(), "https://app.hey.com", manager); err == nil || !strings.Contains(err.Error(), "not authenticated") {
+		t.Errorf("dial after deletion error = %v, want not authenticated", err)
+	}
+}
+
 func TestDialWithoutCredentialsSaysSo(t *testing.T) {
 	t.Setenv("HEY_NO_KEYRING", "1")
 	t.Setenv("HEY_TOKEN", "")

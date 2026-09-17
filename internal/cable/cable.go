@@ -87,7 +87,7 @@ func authHeader(ctx context.Context, baseURL string, authMgr *auth.Manager) (htt
 		return nil, err
 	}
 
-	if err := authMgr.AuthenticateRequest(ctx, request); err != nil {
+	if err := authMgr.AuthenticateRequestFromStore(ctx, request); err != nil {
 		return nil, err
 	}
 	request.Header.Set("User-Agent", version.UserAgent())
