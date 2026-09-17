@@ -984,6 +984,26 @@ func TestEventsRefuseEmptyRepeatValuesBeforeReading(t *testing.T) {
 	}
 }
 
+// HEY truncates the old series at the selected occurrence but starts its replacement on
+// the submitted day. Letting that day reach behind the split makes both series cover the
+// earlier occurrences.
+func TestEventsRefuseAFutureSeriesStartingBeforeTheSelectedOccurrence(t *testing.T) {
+	handler, writes := occurrenceServer(t, "2026-09-15",
+		`{"Calendar::Event":[`+occurrenceSeriesJSON+`]}`, "", func(t *testing.T, form url.Values) {
+			t.Error("wrote the overlapping replacement series")
+		})
+	_, err := runJSONCommand(t, handler,
+		"event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "future",
+		"--starts-on", "2026-09-01", "--ends-on", "2026-09-01", "--repeat", "every_week", "--allow-plain-notes")
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, "before the selected occurrence") {
+		t.Fatalf("error = %v, want the overlapping-series usage error", err)
+	}
+	if writes.Load() != 0 {
+		t.Errorf("writes = %d, want none", writes.Load())
+	}
+}
+
 // A replacement recurrence must reach at least its first day. Otherwise HEY accepts the
 // write as a one-off event and truncates the old series behind it.
 func TestEventsRefuseARepeatEndBeforeTheFutureSeriesStarts(t *testing.T) {

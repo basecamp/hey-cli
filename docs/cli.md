@@ -447,8 +447,10 @@ as is any other value. The day is read on its own date rather than searched for,
 `--repeat-times` cannot apply to one day, so `current` refuses those flags. A `future`
 edit starts a new series and requires `--repeat` to state its complete schedule. Combine
 it with `--repeat-times` or `--repeat-until` for a finite series, naming how many
-occurrences remain from the edited day. The last day cannot precede the new series' first
-day. `--repeat` alone means the new series continues forever. HEY splits the series there
+occurrences remain from the edited day. The new series cannot start before the selected
+occurrence, where it would overlap the part of the original series HEY keeps, and its last
+day cannot precede its first day. `--repeat` alone means the new series continues forever.
+HEY splits the series there
 — the days from this one on become a new series with
 a new id, the old series stops the day before, and the answer is still the day you edited
 — so read the day or the week again for the new series id before editing it further.
@@ -456,8 +458,10 @@ a new id, the old series stops the day before, and the answer is still the day y
 An occurrence edit keeps more than a whole-event edit does, and refuses what it cannot
 keep. It sends back the day's own schedule and zones, notes, location, link, attached
 email, reminders and circle, taking them from the day itself where HEY has already written
-that day out on its own. A day like that lists in `day` and `week` with the series in
-`id` and `parent_id`, plus its own `recording_id`, which `hey event edit <recording_id>`
+that day out on its own. Styled `day` and `week` tables that contain occurrences print
+`Occurrence ID` and `Recording ID` columns beside the series `ID`. A day like that lists
+with the series in `id` and `parent_id`, plus its own `recording_id`, which
+`hey event edit <recording_id>`
 and `hey event delete <recording_id>` act on for that day alone. The series id is what
 `--occurrence` takes beside its `occurrence_id`. The countdown is read back from the
 recording HEY keeps for it — on the

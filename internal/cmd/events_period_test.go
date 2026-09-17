@@ -98,6 +98,40 @@ func TestEventsDayKeepsTheSeriesIDAndPublishesARealizedRecordingID(t *testing.T)
 	}
 }
 
+// Styled period output carries every identifier needed to act on an occurrence. A moved
+// realized day cannot reconstruct its occurrence id from the date drawn in the table, and
+// its own recording id is what edits or deletes that day without the rest of the series.
+func TestEventsPeriodStyledPublishesOccurrenceIdentifiers(t *testing.T) {
+	for _, tt := range []struct {
+		name, period, path string
+	}{
+		{name: "day", period: "day", path: "/calendar/days/2026-09-15.json"},
+		{name: "week", period: "week", path: "/calendar/weeks/2026-09-15.json"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			styled, err := runStyledCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != tt.path {
+					t.Errorf("request = %s %s, want %s", r.Method, r.URL.Path, tt.path)
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"kind":"`+tt.period+`","recordings":{"Calendar::Event":[`+
+					`{"parent_id":204,"occurrence_id":"204_2026-09-15","title":"Standup","starts_at":"2026-09-15T09:15:00Z","ends_at":"2026-09-15T09:30:00Z","type":"Calendar::Event","calendar":{"id":9,"name":"Work"}},`+
+					`{"id":9001,"parent_id":4821,"occurrence_id":"4821_2026-09-13","title":"Design review","starts_at":"2026-09-15T13:30:00Z","ends_at":"2026-09-15T14:30:00Z","type":"Calendar::Event","calendar":{"id":9,"name":"Work"}}]}}`)
+			}), "event", tt.name, "2026-09-15")
+			if err != nil {
+				t.Fatalf("execute event %s: %v", tt.name, err)
+			}
+			for _, want := range []string{"Occurrence ID", "Recording ID", "204_2026-09-15", "4821_2026-09-13", "9001"} {
+				if !strings.Contains(styled, want) {
+					t.Errorf("styled output does not contain %q:\n%s", want, styled)
+				}
+			}
+		})
+	}
+}
+
 func TestEventsWeekReadsTheWeekPeriod(t *testing.T) {
 	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/calendar/weeks/2026-09-02.json" {

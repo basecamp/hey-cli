@@ -227,15 +227,35 @@ func writeEventRows(cmd *cobra.Command, events []eventRow, described, notice str
 			return nil
 		}
 
-		table := newTable(cmd.OutOrStdout())
-		table.addRow([]string{"ID", "Title", "Starts", "Ends", "Calendar"})
+		showsOccurrenceIDs := false
 		for _, event := range events {
-			table.addRow([]string{
-				fmt.Sprintf("%d", event.Id), event.Title,
+			if event.OccurrenceId != "" || event.RecordingID != 0 {
+				showsOccurrenceIDs = true
+				break
+			}
+		}
+
+		table := newTable(cmd.OutOrStdout())
+		header := []string{"ID"}
+		if showsOccurrenceIDs {
+			header = append(header, "Occurrence ID", "Recording ID")
+		}
+		table.addRow(append(header, "Title", "Starts", "Ends", "Calendar"))
+		for _, event := range events {
+			row := []string{fmt.Sprintf("%d", event.Id)}
+			if showsOccurrenceIDs {
+				recordingID := ""
+				if event.RecordingID != 0 {
+					recordingID = fmt.Sprintf("%d", event.RecordingID)
+				}
+				row = append(row, event.OccurrenceId, recordingID)
+			}
+			table.addRow(append(row,
+				event.Title,
 				eventBoundary(event.StartsAt, event.AllDay),
 				eventBoundary(event.EndsAt, event.AllDay),
 				event.Calendar.Name,
-			})
+			))
 		}
 		table.print()
 		if notice != "" {

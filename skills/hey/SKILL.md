@@ -702,8 +702,9 @@ repeating event lists once as its series, not once per day.
 span as HEY draws it: a repeating event is expanded into the occurrences inside it, each
 carrying that day's own times and an `occurrence_id`. Every occurrence has the series in
 `id` and `parent_id` (what `edit`/`delete` take for the whole series); a day HEY has
-written out on its own also has a `recording_id`, which acts on that day alone. The period
-covers the calendars switched on in HEY,
+written out on its own also has a `recording_id`, which acts on that day alone. Styled
+period tables that contain occurrences print `Occurrence ID` and `Recording ID` columns
+beside the series `ID`. The period covers the calendars switched on in HEY,
 so `day` and `week` take no `--calendar` — only `--limit` and `--all`.
 
 **Response format:** a flat array of events. Each has `id`, `title`, `starts_at`, `ends_at`,
@@ -729,8 +730,9 @@ a malformed or mismatched occurrence id, or `--repeat`/`--repeat-until`/`--repea
 with `current` are usage errors, refused before anything is read. The day is read on its
 own date, so leave `[date]` out or name that day. A `future` edit starts a new series and
 requires `--repeat` to state its complete schedule; add `--repeat-times` or
-`--repeat-until` for a finite series, naming what remains from the edited day; the last
-day cannot precede the new series' first day. `--repeat` alone means forever. HEY gives
+`--repeat-until` for a finite series, naming what remains from the edited day. The new
+series cannot start before the selected occurrence, where it would overlap the original,
+and its last day cannot precede its first day. `--repeat` alone means forever. HEY gives
 the new series a new id, and the answer is still
 the day edited — read `day` or `week` again before editing it further.
 

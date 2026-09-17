@@ -171,6 +171,9 @@ func (c *eventsEditCommand) editOccurrence(ctx context.Context, cmd *cobra.Comma
 	if err != nil {
 		return err
 	}
+	if err = checkFutureOccurrenceStarts(edit, day.series, schedule.startsAt); err != nil {
+		return err
+	}
 	err = checkRepeatStarts(repeat, schedule.startsAt)
 	if err != nil {
 		return err
@@ -334,6 +337,32 @@ func virtualOccurrence(series generated.Recording, day time.Time) generated.Reco
 	occurrence.OccurrenceId = hey.EventOccurrence{EventID: series.Id, Date: day}.String()
 	occurrence.StartsAt, occurrence.EndsAt = occurrenceInstants(series, day)
 	return occurrence
+}
+
+// checkFutureOccurrenceStarts keeps a replacement series from reaching behind the split.
+// HEY stops the old series at the selected occurrence but starts the new one wherever the
+// submitted schedule says, so an earlier start would make both series cover the earlier days.
+func checkFutureOccurrenceStarts(edit occurrenceEdit, series generated.Recording, startsAt string) error {
+	if edit.scope != hey.OccurrenceScopeThisAndFollowing {
+		return nil
+	}
+
+	selected := virtualOccurrence(series, edit.occurrence.Date)
+	selectedStartsAt, _ := eventClock(selected.StartsAt, selected.StartsAtTimeZone)
+	start, err := parseDateArg("starts-on date", startsAt)
+	if err != nil {
+		return err
+	}
+	selectedStart, err := parseDateArg("selected occurrence date", selectedStartsAt)
+	if err != nil {
+		return err
+	}
+	if start.Before(selectedStart) {
+		return apierr.ErrUsageHint(
+			fmt.Sprintf("starts-on %s is before the selected occurrence on %s", startsAt, selectedStartsAt),
+			fmt.Sprintf("use %s or later so the replacement series cannot overlap the original", selectedStartsAt))
+	}
+	return nil
 }
 
 // occurrenceInstants is when a day of the series starts and ends. HEY names the day by the

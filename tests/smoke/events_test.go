@@ -3,6 +3,7 @@ package smoke_test
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -161,6 +162,15 @@ func TestEventOccurrenceEditScopes(t *testing.T) {
 	if current.ID != series.ID || current.RecordingID == 0 || current.RecordingID == series.ID {
 		t.Errorf("current occurrence ids = %#v, want the series id and a distinct recording_id", current)
 	}
+	styled, stderr, code := hey(t, "event", "day", currentDay, "--styled")
+	if code != 0 {
+		t.Fatalf("styled occurrence read failed (exit %d): %s", code, stderr)
+	}
+	for _, want := range []string{currentOccurrence, fmt.Sprint(current.RecordingID)} {
+		if !strings.Contains(styled, want) {
+			t.Errorf("styled occurrence does not contain %q:\n%s", want, styled)
+		}
+	}
 
 	futureOccurrence := fmt.Sprintf("%d_%s", series.ID, futureDay)
 	heyFail(t, "event", "edit", seriesID,
@@ -170,6 +180,21 @@ func TestEventOccurrenceEditScopes(t *testing.T) {
 	unchangedFuture, ok := findSmokeOccurrence(unchangedFutureEvents, futureOccurrence)
 	if !ok || unchangedFuture.Location == "Studio C" {
 		t.Errorf("future occurrence changed without an explicit repeat schedule: %#v", unchangedFuture)
+	}
+
+	heyFail(t, "event", "edit", seriesID,
+		"--occurrence", futureOccurrence, "--apply-to", "future",
+		"--starts-on", firstDay, "--ends-on", firstDay,
+		"--repeat", "every_week", "--allow-plain-notes", "--json")
+	earlierEvents := dataAs[[]smokeEvent](t, heyJSON(t, "event", "day", firstDay))
+	matchingEarlier := 0
+	for _, event := range earlierEvents {
+		if event.Title == title {
+			matchingEarlier++
+		}
+	}
+	if matchingEarlier != 1 {
+		t.Errorf("earlier occurrences after refused backward split = %d, want one: %#v", matchingEarlier, earlierEvents)
 	}
 
 	if _, stderr, code = hey(t, "event", "edit", seriesID,

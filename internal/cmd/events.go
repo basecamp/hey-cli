@@ -251,7 +251,9 @@ on its own date, so [date] can be left out or must name it. A change to --repeat
 --repeat-until or --repeat-times cannot apply to one day, so 'current' refuses those
 flags. 'future' starts a new series and requires --repeat to state its complete schedule:
 combine it with --repeat-times or --repeat-until for a finite series, or use --repeat alone
-for one that continues forever. The days from this one on get a new series id.
+for one that continues forever. The replacement cannot start before the selected occurrence,
+where it would overlap the part of the original series HEY keeps. The days from this one on
+get a new series id.
 
 An occurrence edit keeps more than a whole-event edit does, and refuses what it cannot
 keep. The countdown is read back and sent again, so it survives unless --countdown 0
