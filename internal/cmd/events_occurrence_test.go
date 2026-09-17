@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	"github.com/basecamp/hey-sdk/go/pkg/hey"
 
@@ -780,7 +782,8 @@ func TestEventsEditOccurrenceKeepsAMovedDaysOwnCountdown(t *testing.T) {
 func TestEventsEditOccurrenceKeepsTheClockAcrossASpringForward(t *testing.T) {
 	series := `{"id":4821,"type":"Calendar::Event","title":"Early standup","recurring":true,` +
 		`"starts_at":"2026-03-01T07:30:00Z","ends_at":"2026-03-01T08:30:00Z",` +
-		`"starts_at_time_zone":"America/New_York","ends_at_time_zone":"America/New_York","calendar":{"id":9,"name":"Work"}}`
+		`"starts_at_time_zone":"America/New_York","ends_at_time_zone":"America/New_York",` +
+		`"recurrence_schedule":{"kind":"every_week","preset":true},"calendar":{"id":9,"name":"Work"}}`
 	for _, scope := range []string{"current", "future"} {
 		t.Run(scope, func(t *testing.T) {
 			handler, _ := recordingsServer(t, oneCalendarJSON, map[string]string{
@@ -965,7 +968,8 @@ func TestEventsEditOccurrenceFutureRefusesToDropADaysOwnGuests(t *testing.T) {
 // split copies the eight days to the replacement series, not the week.
 func TestEventsEditOccurrenceKeepsAnEightDayCountdown(t *testing.T) {
 	allDay := `{"id":4821,"type":"Calendar::Event","title":"Sarah's birthday","recurring":true,"all_day":true,` +
-		`"starts_at":"2026-09-01T00:00:00Z","ends_at":"2026-09-01T00:00:00Z","calendar":{"id":9,"name":"Work"}}`
+		`"starts_at":"2026-09-01T00:00:00Z","ends_at":"2026-09-01T00:00:00Z",` +
+		`"recurrence_schedule":{"kind":"every_year","preset":true},"calendar":{"id":9,"name":"Work"}}`
 	eightDays := `{"id":77,"type":"Calendar::Countdown","parent_id":4821,"label":"1 weeks before",` +
 		`"starts_at":"2026-08-24T00:00:00Z","ends_at":"2026-09-01T00:00:00Z","calendar":{"id":9,"name":"Work"}}`
 	handler, _ := occurrenceServer(t, "2027-09-01",
@@ -1066,7 +1070,11 @@ func TestEventsEditOccurrenceCopiesACustomFutureSchedule(t *testing.T) {
 	series := strings.Replace(occurrenceSeriesJSON,
 		`"recurrence_schedule":{"kind":"every_week","preset":true}`,
 		`"recurrence_schedule":{"kind":"custom","preset":false}`, 1)
-	handler, writes := occurrenceServer(t, "2026-09-15",
+	virtual := strings.Replace(series, `{"id":4821`,
+		`{"id":0,"parent_id":4821,"occurrence_id":"4821_2026-09-15"`, 1)
+	virtual = strings.Replace(virtual, `"starts_at":"2026-09-01T12:00:00Z"`, `"starts_at":"2026-09-15T15:00:00Z"`, 1)
+	virtual = strings.Replace(virtual, `"ends_at":"2026-09-01T13:00:00Z"`, `"ends_at":"2026-09-15T16:30:00Z"`, 1)
+	base, writes := occurrenceServer(t, "2026-09-15",
 		`{"Calendar::Event":[`+series+`]}`, `{}`, func(t *testing.T, form url.Values) {
 			if got := form.Get("repeat_frequency"); got != "custom" {
 				t.Errorf("repeat_frequency = %q, want custom", got)
@@ -1074,7 +1082,21 @@ func TestEventsEditOccurrenceCopiesACustomFutureSchedule(t *testing.T) {
 			if form.Has("calendar_recurrence_schedule[recurs_until_type]") || form.Has("calendar_recurrence_schedule[recurs_until_date]") || form.Has("calendar_recurrence_schedule[recurs_count]") {
 				t.Errorf("custom recurrence carried a replacement limit: %v", form)
 			}
+			if got := form.Get("calendar_event[starts_at_time]"); got != "17:00:00" {
+				t.Errorf("starts_at_time = %q, want the custom occurrence HEY served", got)
+			}
+			if got := form.Get("calendar_event[ends_at_time]"); got != "18:30:00" {
+				t.Errorf("ends_at_time = %q, want the custom occurrence HEY served", got)
+			}
 		})
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/calendar/days/2026-09-15.json" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"kind":"day","recordings":{"Calendar::Event":[`+virtual+`]}}`)
+			return
+		}
+		base.ServeHTTP(w, r)
+	})
 	_, err := runJSONCommand(t, handler,
 		"event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "future",
 		"--repeat", "custom", "--allow-plain-notes", "--title", "Design review (new agenda)")
@@ -1083,6 +1105,73 @@ func TestEventsEditOccurrenceCopiesACustomFutureSchedule(t *testing.T) {
 	}
 	if writes.Load() != 1 {
 		t.Errorf("writes = %d, want one", writes.Load())
+	}
+}
+
+func TestEventsEditOccurrenceCurrentUsesTheServedCustomVirtualSchedule(t *testing.T) {
+	series := strings.Replace(occurrenceSeriesJSON,
+		`"recurrence_schedule":{"kind":"every_week","preset":true}`,
+		`"recurrence_schedule":{"kind":"custom","preset":false}`, 1)
+	virtual := strings.Replace(series, `{"id":4821`,
+		`{"id":0,"parent_id":4821,"occurrence_id":"4821_2026-09-15"`, 1)
+	virtual = strings.Replace(virtual, `"starts_at":"2026-09-01T12:00:00Z"`, `"starts_at":"2026-09-15T15:00:00Z"`, 1)
+	virtual = strings.Replace(virtual, `"ends_at":"2026-09-01T13:00:00Z"`, `"ends_at":"2026-09-15T16:30:00Z"`, 1)
+	base, writes := occurrenceServer(t, "2026-09-15",
+		`{"Calendar::Event":[`+series+`]}`, "", func(t *testing.T, form url.Values) {
+			if got := form.Get("calendar_event[starts_at_time]"); got != "17:00:00" {
+				t.Errorf("starts_at_time = %q, want the custom occurrence HEY served", got)
+			}
+			if got := form.Get("calendar_event[ends_at_time]"); got != "18:30:00" {
+				t.Errorf("ends_at_time = %q, want the custom occurrence HEY served", got)
+			}
+		})
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/calendar/days/2026-09-15.json" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"kind":"day","recordings":{"Calendar::Event":[`+virtual+`]}}`)
+			return
+		}
+		base.ServeHTTP(w, r)
+	})
+
+	_, err := runJSONCommand(t, handler,
+		"event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "current",
+		"--title", "Design review (new agenda)", "--allow-plain-notes")
+	if err != nil {
+		t.Fatalf("execute occurrence edit: %v", err)
+	}
+	if writes.Load() != 1 {
+		t.Errorf("writes = %d, want one", writes.Load())
+	}
+}
+
+func TestEventsEditOccurrenceRefusesAnUnservedCustomVirtualOccurrence(t *testing.T) {
+	series := strings.Replace(occurrenceSeriesJSON,
+		`"recurrence_schedule":{"kind":"every_week","preset":true}`,
+		`"recurrence_schedule":{"kind":"custom","preset":false}`, 1)
+	base, writes := occurrenceServer(t, "2026-09-15",
+		`{"Calendar::Event":[`+series+`]}`, "",
+		func(t *testing.T, form url.Values) {
+			t.Error("wrote a custom occurrence whose schedule was not served")
+		})
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/calendar/days/") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"kind":"day","recordings":{}}`)
+			return
+		}
+		base.ServeHTTP(w, r)
+	})
+
+	_, err := runJSONCommand(t, handler,
+		"event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "current",
+		"--title", "Design review (new agenda)", "--allow-plain-notes")
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeNotFound || !strings.Contains(cliErr.Message, "4821_2026-09-15") {
+		t.Fatalf("error = %v, want the unserved occurrence not-found error", err)
+	}
+	if writes.Load() != 0 {
+		t.Errorf("writes = %d, want none", writes.Load())
 	}
 }
 
@@ -1104,6 +1193,15 @@ func TestEventsRefuseCustomRepeatOutsideAFutureSplit(t *testing.T) {
 		}
 		if requests.Load() != 0 {
 			t.Errorf("%v: requests = %d, want none", args, requests.Load())
+		}
+	}
+}
+
+func TestEventsRepeatHelpLimitsCustomToFutureOccurrenceEdits(t *testing.T) {
+	for _, command := range []*cobra.Command{newEventsAddCommand().cmd, newEventsEditCommand().cmd} {
+		usage := command.Flags().Lookup("repeat").Usage
+		if !strings.Contains(usage, "custom only") || !strings.Contains(usage, "future occurrence edit") {
+			t.Errorf("%s --repeat help = %q, want the custom scope", command.CommandPath(), usage)
 		}
 	}
 }
@@ -1543,7 +1641,8 @@ func TestEventsEditOccurrenceFailsClosedOnAZeroCountdown(t *testing.T) {
 // day, and a future split copies it as the day it is.
 func TestEventsEditOccurrenceKeepsAOneDayCountdown(t *testing.T) {
 	allDay := `{"id":4821,"type":"Calendar::Event","title":"Sarah's birthday","recurring":true,"all_day":true,` +
-		`"starts_at":"2026-09-01T00:00:00Z","ends_at":"2026-09-01T00:00:00Z","calendar":{"id":9,"name":"Work"}}`
+		`"starts_at":"2026-09-01T00:00:00Z","ends_at":"2026-09-01T00:00:00Z",` +
+		`"recurrence_schedule":{"kind":"every_year","preset":true},"calendar":{"id":9,"name":"Work"}}`
 	oneDay := `{"id":77,"type":"Calendar::Countdown","parent_id":4821,"label":"0 months before",` +
 		`"starts_at":"2026-08-31T00:00:00Z","ends_at":"2026-09-01T00:00:00Z","calendar":{"id":9,"name":"Work"}}`
 	handler, _ := occurrenceServer(t, "2027-09-01",

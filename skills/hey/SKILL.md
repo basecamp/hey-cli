@@ -735,9 +735,10 @@ or `--repeat-until` for a finite series, naming what remains from the edited day
 with `COUNT` can restart its full count because HEY cannot expose how many occurrences remain.
 HEY accepts the new series' submitted start even when it overlaps an earlier occurrence,
 so choose its date and time deliberately; its last day cannot precede its first day. A
-realized day of an opaque custom schedule is refused for `future`, because HEY does not
-serve the rule's authoritative occurrence boundary; split from a virtual occurrence, edit
-that day alone, or edit the whole series. A realized preset occurrence moved away from its
+virtual day of an opaque custom schedule takes its exact time from HEY's Day view and is
+refused if that view no longer serves it. A realized custom day is refused for `future`,
+because HEY does not serve the rule's authoritative occurrence boundary; split from a
+virtual occurrence, edit that day alone, or edit the whole series. A realized preset occurrence moved away from its
 series time is also refused: move it back with a `current` edit first. Haystack cancels
 children from the moved time but truncates the parent at the occurrence identifier, so
 splitting directly can lose neighboring realized edits. A preset `--repeat` alone means

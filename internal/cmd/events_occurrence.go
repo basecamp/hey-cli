@@ -166,6 +166,12 @@ func (c *eventsEditCommand) editOccurrence(ctx context.Context, cmd *cobra.Comma
 		return err
 	}
 	event := day.event()
+	if day.realized == nil && !day.series.RecurrenceSchedule.Preset {
+		event, err = readCustomVirtualOccurrence(ctx, edit.occurrence)
+		if err != nil {
+			return err
+		}
+	}
 
 	if edit.scope == hey.OccurrenceScopeThisAndFollowing && day.realized != nil {
 		// A preset determines an occurrence's boundary from the parent's wall clock, so it
@@ -348,8 +354,9 @@ func locateOccurrence(rows []generated.Recording, occurrence hey.EventOccurrence
 	return day, nil
 }
 
-// event is the day as an event: the recording HEY wrote out for it, or the series with the
-// day's own times in place of the series' first.
+// event is the day as an event: the recording HEY wrote out for it, or a preset series with
+// the day's own times in place of the series' first. A custom series needs the authoritative
+// virtual occurrence from readCustomVirtualOccurrence instead.
 func (d occurrenceDay) event() generated.Recording {
 	if d.realized != nil {
 		return *d.realized
@@ -357,9 +364,34 @@ func (d occurrenceDay) event() generated.Recording {
 	return virtualOccurrence(d.series, d.occurrence.Date)
 }
 
-// virtualOccurrence is one day of a series the way HEY builds it: the series' own fields,
-// with the day's start and end in place of the first day's. It is what the write has to
-// send, since a date the series began on would move the day there.
+// readCustomVirtualOccurrence finds the exact virtual occurrence HEY serves in its Day view.
+// A custom recurrence schedule is opaque in the API: BYHOUR, RDATE and similar rules can put
+// the day at a different clock time from its parent, so synthesizing it from the parent would
+// move it on an otherwise unrelated edit. An occurrence id uses the UTC start date while the
+// Day view uses the identity's calendar date, so that view can be the day on either side.
+func readCustomVirtualOccurrence(ctx context.Context, occurrence hey.EventOccurrence) (generated.Recording, error) {
+	for _, offset := range []int{0, -1, 1} {
+		date := occurrence.Date.AddDate(0, 0, offset).Format(dateLayout)
+		period, err := sdk.CalendarPeriods().Day(ctx, date)
+		if err != nil {
+			return generated.Recording{}, apierr.FromSDK(err)
+		}
+		if period == nil {
+			continue
+		}
+		for _, event := range filterRecordingsByType(&period.Recordings, recordingTypeEvent) {
+			if event.OccurrenceId == occurrence.String() {
+				return event, nil
+			}
+		}
+	}
+	return generated.Recording{}, apierr.ErrNotFoundHint("occurrence", occurrence.String(),
+		"HEY's Day view did not serve this opaque custom occurrence; read it with hey event day or hey event week and retry with the occurrence_id served there")
+}
+
+// virtualOccurrence is one day of a preset series the way HEY builds it: the series' own
+// fields, with the day's start and end in place of the first day's. It is what the write has
+// to send, since a date the series began on would move the day there.
 func virtualOccurrence(series generated.Recording, day time.Time) generated.Recording {
 	occurrence := series
 	occurrence.Id = 0

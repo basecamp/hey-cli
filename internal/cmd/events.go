@@ -29,7 +29,7 @@ func newEventsCommand() *eventsCommand {
 		Use:   "event",
 		Short: "Read and manage calendar events",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, day, week, add, edit, delete. \"What's on the schedule today?\" is answered by day, not list: day and week read the span as HEY draws it, with a repeating event expanded into the occurrences inside it, over the calendars switched on in HEY. list reads what calendars hold — every calendar unless --calendar names one — and a repeating event is one row, its series, on the day the series began. An edit is not a patch on HEY's side: it resends the notes, location, link, attached email, reminders and time zones the event already carries, so notes lose their formatting and a countdown is removed unless --countdown names one again. edit <series id> changes a whole series; one day of it is edit <series id> --occurrence <occurrence_id from day/week> --apply-to current|future, which keeps the countdown and refuses to flatten notes unless --allow-plain-notes or --notes is given. --apply-to future starts a new series and requires --repeat with its complete schedule; a preset alone means forever and custom copies an existing opaque schedule (a count-based rule can restart its full count). A realized day of an opaque custom schedule cannot be split safely; use a virtual occurrence, edit that day alone, or edit the whole series. A realized preset occurrence moved away from its series time must be moved back with --apply-to current before a future split. Read the day again afterward for the new series id.",
+			"agent_notes": "Subcommands: list, day, week, add, edit, delete. \"What's on the schedule today?\" is answered by day, not list: day and week read the span as HEY draws it, with a repeating event expanded into the occurrences inside it, over the calendars switched on in HEY. list reads what calendars hold — every calendar unless --calendar names one — and a repeating event is one row, its series, on the day the series began. An edit is not a patch on HEY's side: it resends the notes, location, link, attached email, reminders and time zones the event already carries, so notes lose their formatting and a countdown is removed unless --countdown names one again. edit <series id> changes a whole series; one day of it is edit <series id> --occurrence <occurrence_id from day/week> --apply-to current|future, which keeps the countdown and refuses to flatten notes unless --allow-plain-notes or --notes is given. --apply-to future starts a new series and requires --repeat with its complete schedule; a preset alone means forever and custom copies an existing opaque schedule (a count-based rule can restart its full count). A virtual day of an opaque custom schedule is read from HEY's Day view and refused if that view no longer serves it. A realized custom day cannot be split safely; use a virtual occurrence, edit that day alone, or edit the whole series. A realized preset occurrence moved away from its series time must be moved back with --apply-to current before a future split. Read the day again afterward for the new series id.",
 		},
 	}
 
@@ -257,9 +257,10 @@ combine a preset with --repeat-times or --repeat-until for a finite series, use 
 alone for one that continues forever, or use --repeat custom to copy an existing opaque
 schedule. A custom count-based rule can restart its full count on the replacement. HEY
 accepts the replacement's submitted start even when it overlaps an earlier occurrence, so
-choose its date and time deliberately. A realized day of an opaque custom schedule cannot
-be split safely, because HEY does not serve the rule's occurrence boundary; use a virtual
-occurrence, edit that day alone, or edit the whole series. A realized preset occurrence moved
+choose its date and time deliberately. A virtual day of an opaque custom schedule takes its exact time from HEY's Day view and is
+refused if that view no longer serves it. A realized day of a custom schedule cannot be split
+safely, because HEY does not serve the rule's occurrence boundary; use a virtual occurrence,
+edit that day alone, or edit the whole series. A realized preset occurrence moved
 away from its series time must be moved back with a current-only edit before it can be split
 safely. The days from this one on
 get a new series id.
@@ -536,7 +537,7 @@ func (f *eventFields) registerFlags(cmd *cobra.Command) {
 	flags.StringVar(&f.link, "link", "", "Meeting or reference URL")
 	flags.StringArrayVar(&f.invites, "invite", nil, "Email address to invite (repeatable, replaces the guest list)")
 	flags.BoolVar(&f.circle, "circle", false, "Circle the event")
-	flags.StringVar(&f.repeat, "repeat", "", "Repeat: every_day, every_weekday, every_week, every_other_week, every_day_of_month, every_year; custom copies an opaque future schedule")
+	flags.StringVar(&f.repeat, "repeat", "", "Repeat: every_day, every_weekday, every_week, every_other_week, every_day_of_month, every_year; custom only copies an opaque schedule in a future occurrence edit")
 	flags.StringVar(&f.repeatUntil, "repeat-until", "", "Stop repeating on this date (YYYY-MM-DD)")
 	flags.IntVar(&f.repeatTimes, "repeat-times", 0, "Stop repeating after this many occurrences")
 	flags.IntVar(&f.countdown, "countdown", 0, "Count down this many units to the event")
