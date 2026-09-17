@@ -35,6 +35,11 @@ type Manager struct {
 	listen       listenerFactory
 	mu           sync.Mutex
 
+	// cachedCredentials avoids opening a keyring session for every request. It is
+	// process-local; refreshLocked still rereads the store to coordinate rotation
+	// with other processes. Guarded by mu.
+	cachedCredentials *Credentials
+
 	// refreshHoldUntil parks refreshes after the token endpoint rate-limited one.
 	// Guarded by mu, which every path into refreshLocked already holds.
 	refreshHoldUntil time.Time
@@ -70,6 +75,14 @@ func normalizeBaseURL(u string) string {
 	return strings.TrimRight(u, "/")
 }
 
+func cloneCredentials(creds *Credentials) *Credentials {
+	if creds == nil {
+		return nil
+	}
+	copy := *creds
+	return &copy
+}
+
 // AccessToken returns a valid access token, refreshing if needed.
 // If HEY_TOKEN env var is set, it's used directly.
 func (m *Manager) AccessToken(ctx context.Context) (string, error) {
@@ -80,7 +93,7 @@ func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	creds, err := m.store.Load(m.baseURL)
+	creds, err := m.loadCredentialsLocked()
 	if err != nil {
 		return "", errNotAuthenticated(err)
 	}
@@ -90,7 +103,7 @@ func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 		if err = m.refreshLocked(ctx, creds); err != nil {
 			return "", err
 		}
-		creds, err = m.store.Load(m.baseURL)
+		creds, err = m.loadCredentialsLocked()
 		if err != nil {
 			return "", fmt.Errorf("failed to load refreshed credentials: %w", err)
 		}
@@ -119,7 +132,7 @@ func (m *Manager) AuthenticateRequest(ctx context.Context, req *http.Request) er
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	creds, err := m.store.Load(m.baseURL)
+	creds, err := m.loadCredentialsLocked()
 	if err != nil {
 		return errNotAuthenticated(err)
 	}
@@ -130,7 +143,7 @@ func (m *Manager) AuthenticateRequest(ctx context.Context, req *http.Request) er
 			if err = m.refreshLocked(ctx, creds); err != nil {
 				return err
 			}
-			creds, err = m.store.Load(m.baseURL)
+			creds, err = m.loadCredentialsLocked()
 			if err != nil {
 				return fmt.Errorf("failed to load refreshed credentials: %w", err)
 			}
@@ -153,7 +166,10 @@ func (m *Manager) IsAuthenticated() bool {
 		return true
 	}
 
-	creds, err := m.store.Load(m.baseURL)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	creds, err := m.loadCredentialsLocked()
 	if err != nil {
 		return false
 	}
@@ -245,7 +261,7 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
 		creds.ExpiresAt = token.ExpiresAt.Unix()
 	}
 
-	return m.store.Save(m.baseURL, creds)
+	return m.saveCredentials(creds)
 }
 
 // LoginWithToken stores a pre-provided bearer token.
@@ -254,7 +270,7 @@ func (m *Manager) LoginWithToken(token string) error {
 		AccessToken: token,
 		OAuthType:   "token",
 	}
-	return m.store.Save(m.baseURL, creds)
+	return m.saveCredentials(creds)
 }
 
 // LoginWithCookie stores a session cookie.
@@ -263,7 +279,7 @@ func (m *Manager) LoginWithCookie(cookie string) error {
 		SessionCookie: cookie,
 		OAuthType:     "cookie",
 	}
-	return m.store.Save(m.baseURL, creds)
+	return m.saveCredentials(creds)
 }
 
 // OnCredentialCleared registers what to run when the manager clears a credential
@@ -278,7 +294,14 @@ func (m *Manager) OnCredentialCleared(fn func()) {
 
 // Logout removes stored credentials.
 func (m *Manager) Logout() error {
-	return m.store.Delete(m.baseURL)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if err := m.store.Delete(m.baseURL); err != nil {
+		return err
+	}
+	m.cachedCredentials = nil
+	return nil
 }
 
 // Refresh forces a token refresh.
@@ -286,17 +309,35 @@ func (m *Manager) Refresh(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	creds, err := m.store.Load(m.baseURL)
+	creds, err := m.loadCredentialsLocked()
 	if err != nil {
 		return errNotAuthenticated(err)
 	}
+	return m.refreshLocked(ctx, creds)
+}
 
-	// Cookie-based auth doesn't support refresh; treat as no-op.
-	if creds.RefreshToken == "" && creds.SessionCookie != "" {
-		return nil
+func (m *Manager) loadCredentialsLocked() (*Credentials, error) {
+	if m.cachedCredentials != nil {
+		return cloneCredentials(m.cachedCredentials), nil
 	}
 
-	return m.refreshLocked(ctx, creds)
+	creds, err := m.store.Load(m.baseURL)
+	if err != nil {
+		return nil, err
+	}
+	m.cachedCredentials = cloneCredentials(creds)
+	return cloneCredentials(creds), nil
+}
+
+func (m *Manager) saveCredentials(creds *Credentials) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if err := m.store.Save(m.baseURL, creds); err != nil {
+		return err
+	}
+	m.cachedCredentials = cloneCredentials(creds)
+	return nil
 }
 
 // refreshLocked holds the store's cross-process lock for the whole load-refresh-save,
@@ -313,15 +354,22 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 
 	stored, loadErr := m.store.load(m.baseURL)
 	if loadErr != nil {
-		// Another process had this same grant refused and forgot it while we
-		// waited for the lock. The copy we came in with is the same dead token.
+		// Another process may have deleted the credential while we waited for
+		// the lock. Nothing stale may survive a forced read's failure.
+		m.cachedCredentials = nil
 		return errNotAuthenticated(loadErr)
 	}
-	if stored.AccessToken != "" && stored.AccessToken != creds.AccessToken {
+	m.cachedCredentials = cloneCredentials(stored)
+	if stored.AccessToken != creds.AccessToken || stored.SessionCookie != creds.SessionCookie {
 		return nil
 	}
-	creds = stored
+	creds = cloneCredentials(stored)
 
+	// Cookie-based auth has nothing to refresh. The fresh read above still lets
+	// a 401 adopt a cookie another process stored before the SDK retries.
+	if creds.RefreshToken == "" && creds.SessionCookie != "" {
+		return nil
+	}
 	if creds.RefreshToken == "" {
 		return fmt.Errorf("no refresh token available")
 	}
@@ -372,7 +420,11 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 		creds.ExpiresAt = token.ExpiresAt.Unix()
 	}
 
-	return m.store.save(m.baseURL, creds)
+	if err := m.store.save(m.baseURL, creds); err != nil {
+		return err
+	}
+	m.cachedCredentials = cloneCredentials(creds)
+	return nil
 }
 
 // accountForRefreshFailure decides what a failed refresh costs the stored credential.
@@ -402,6 +454,7 @@ func (m *Manager) accountForRefreshFailure(err error, sentRefreshToken string) e
 		m.refusedRefreshToken = sentRefreshToken
 		return errRefusedGrant(delErr)
 	}
+	m.cachedCredentials = nil
 	// Cached mail must not outlive the credential that fetched it, here as much
 	// as on an explicit logout.
 	if m.credentialCleared != nil {
