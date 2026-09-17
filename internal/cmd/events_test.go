@@ -76,6 +76,29 @@ func TestEventsAddTimedEvent(t *testing.T) {
 	}
 }
 
+// A time-zone flag is a promise to interpret the submitted clocks in that IANA zone. A
+// typo must not be sent to HEY, which otherwise accepts it and silently falls back to the
+// request's zone. Add and whole-event edit use the same preflight as occurrence edits.
+func TestEventsRefuseInvalidExplicitTimeZonesBeforeReading(t *testing.T) {
+	tests := [][]string{
+		{"event", "add", "Design review", "--time-zone", "Not/AZone"},
+		{"event", "edit", "4821", "--time-zone", "Not/AZone"},
+	}
+	for _, args := range tests {
+		var requests atomic.Int32
+		_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requests.Add(1)
+			http.Error(w, "unexpected request", http.StatusInternalServerError)
+		}), args...)
+		if err == nil || !strings.Contains(err.Error(), "invalid time-zone: Not/AZone") {
+			t.Fatalf("%v: error = %v, want invalid time-zone usage error", args, err)
+		}
+		if requests.Load() != 0 {
+			t.Errorf("%v: requests = %d, want none", args, requests.Load())
+		}
+	}
+}
+
 // An event nobody named a time for is an all-day event. `hey event add "Sarah's birthday"`
 // is the everyday case, and answering it with a nine-o'clock appointment would be a guess.
 func TestEventsAddWithoutATimeIsAllDay(t *testing.T) {

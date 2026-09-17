@@ -577,6 +577,34 @@ func TestEventsEditOccurrenceReadsAWebCountdownInTheIdentityZone(t *testing.T) {
 	}
 }
 
+// The identity zone is part of decoding a stored countdown: without it the first plausible
+// UTC or event-zone answer cannot be checked for ambiguity. A failed identity read must stop
+// before the replacement write rather than silently using that unchecked answer.
+func TestEventsEditOccurrenceStopsWhenTheCountdownIdentityZoneCannotBeRead(t *testing.T) {
+	base, writes := occurrenceServer(t, "2026-09-15",
+		`{"Calendar::Event":[`+occurrenceSeriesJSON+`]}`,
+		`{"Calendar::Countdown":[`+occurrenceCountdownJSON+`]}`,
+		func(t *testing.T, form url.Values) { t.Error("wrote an occurrence with an unchecked countdown") })
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/identity.json" {
+			http.Error(w, `{"error":"identity unavailable"}`, http.StatusInternalServerError)
+			return
+		}
+		base.ServeHTTP(w, r)
+	})
+
+	_, err := runJSONCommand(t, handler,
+		"event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "future",
+		"--repeat", "every_week", "--allow-plain-notes")
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeAPI {
+		t.Fatalf("error = %v, want the identity API error", err)
+	}
+	if writes.Load() != 0 {
+		t.Errorf("writes = %d, want none", writes.Load())
+	}
+}
+
 // HEY's own refusal of the write — a date that is not a day of the series, or a series the
 // caller cannot edit, both 404 on the occurrence route — reaches the caller as not-found.
 func TestEventsEditOccurrenceReportsHEYsRefusal(t *testing.T) {
@@ -1092,6 +1120,9 @@ func TestEventsEditOccurrenceValidatesExplicitFlagsBeforeReading(t *testing.T) {
 		{name: "date order", args: []string{"--starts-on", "2026-09-15", "--ends-on", "2026-09-14"}, want: "ends-on 2026-09-14 is before starts-on 2026-09-15"},
 		{name: "start time", args: []string{"--start-time", "morning"}, want: "invalid start-time: morning"},
 		{name: "end time", args: []string{"--end-time", "later"}, want: "invalid end-time: later"},
+		{name: "time zone", args: []string{"--time-zone", "Not/AZone"}, want: "invalid time-zone: Not/AZone"},
+		{name: "empty time zone", args: []string{"--time-zone="}, want: "--time-zone needs a time zone"},
+		{name: "local pseudo-zone", args: []string{"--time-zone", "Local"}, want: "invalid time-zone: Local"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1142,6 +1173,34 @@ func TestEventsRefuseAFutureSplitOfAMovedRealizedOccurrence(t *testing.T) {
 				t.Errorf("writes = %d, want none", writes.Load())
 			}
 		})
+	}
+}
+
+// The API does not expose a custom rule's occurrence boundary. A realized custom occurrence
+// can happen at a different clock time from its parent and then be moved back to the parent's
+// clock, which would evade the preset comparison above. Fail closed before Haystack can
+// cancel neighboring realized children from that guessed boundary. A virtual custom day is
+// still covered by TestEventsEditOccurrenceCopiesACustomFutureSchedule.
+func TestEventsRefuseAFutureSplitOfARealizedCustomOccurrence(t *testing.T) {
+	series := strings.Replace(occurrenceSeriesJSON,
+		`"recurrence_schedule":{"kind":"every_week","preset":true}`,
+		`"recurrence_schedule":{"kind":"custom","preset":false}`, 1)
+	realized := `{"id":9001,"type":"Calendar::Event","parent_id":4821,"occurrence_id":"4821_2026-09-15",` +
+		`"title":"Design review","starts_at":"2026-09-15T12:00:00Z","ends_at":"2026-09-15T13:00:00Z",` +
+		`"starts_at_time_zone":"Europe/Zagreb","ends_at_time_zone":"Europe/Zagreb","calendar":{"id":9,"name":"Work"}}`
+	handler, writes := occurrenceServer(t, "2026-09-15",
+		`{"Calendar::Event":[`+series+`,`+realized+`]}`, "",
+		func(t *testing.T, form url.Values) { t.Error("wrote a future split for a realized custom occurrence") })
+
+	_, err := runJSONCommand(t, handler,
+		"event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "future",
+		"--repeat", "every_week", "--allow-plain-notes")
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, "opaque custom schedule") {
+		t.Fatalf("error = %v, want the custom-schedule usage error", err)
+	}
+	if writes.Load() != 0 {
+		t.Errorf("writes = %d, want none", writes.Load())
 	}
 }
 
@@ -1295,6 +1354,14 @@ func TestOccurrenceInstants(t *testing.T) {
 			name:   "across a DST change the wall-clock time holds",
 			series: timed("2026-10-01T12:00:00Z", "2026-10-01T13:00:00Z", "Europe/Zagreb"),
 			day:    "2026-11-05", start: "2026-11-05T13:00:00Z", end: "2026-11-05T14:00:00Z",
+		},
+		{
+			// Haystack builds an occurrence's end as its projected start plus the
+			// series' elapsed duration. It deliberately becomes 04:30 EDT rather than
+			// preserving the parent's 03:30 wall clock across spring-forward.
+			name:   "elapsed duration across spring-forward matches HEY",
+			series: timed("2026-03-01T06:30:00Z", "2026-03-01T08:30:00Z", "America/New_York"),
+			day:    "2026-03-08", start: "2026-03-08T06:30:00Z", end: "2026-03-08T08:30:00Z",
 		},
 		{
 			name:   "no zone is UTC",

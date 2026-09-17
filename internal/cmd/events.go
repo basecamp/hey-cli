@@ -29,7 +29,7 @@ func newEventsCommand() *eventsCommand {
 		Use:   "event",
 		Short: "Read and manage calendar events",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, day, week, add, edit, delete. \"What's on the schedule today?\" is answered by day, not list: day and week read the span as HEY draws it, with a repeating event expanded into the occurrences inside it, over the calendars switched on in HEY. list reads what calendars hold — every calendar unless --calendar names one — and a repeating event is one row, its series, on the day the series began. An edit is not a patch on HEY's side: it resends the notes, location, link, attached email, reminders and time zones the event already carries, so notes lose their formatting and a countdown is removed unless --countdown names one again. edit <series id> changes a whole series; one day of it is edit <series id> --occurrence <occurrence_id from day/week> --apply-to current|future, which keeps the countdown and refuses to flatten notes unless --allow-plain-notes or --notes is given. --apply-to future starts a new series and requires --repeat with its complete schedule; a preset alone means forever and custom copies an existing opaque schedule (a count-based rule can restart its full count). A realized occurrence moved away from its series time must be moved back with --apply-to current before a future split. Read the day again afterward for the new series id.",
+			"agent_notes": "Subcommands: list, day, week, add, edit, delete. \"What's on the schedule today?\" is answered by day, not list: day and week read the span as HEY draws it, with a repeating event expanded into the occurrences inside it, over the calendars switched on in HEY. list reads what calendars hold — every calendar unless --calendar names one — and a repeating event is one row, its series, on the day the series began. An edit is not a patch on HEY's side: it resends the notes, location, link, attached email, reminders and time zones the event already carries, so notes lose their formatting and a countdown is removed unless --countdown names one again. edit <series id> changes a whole series; one day of it is edit <series id> --occurrence <occurrence_id from day/week> --apply-to current|future, which keeps the countdown and refuses to flatten notes unless --allow-plain-notes or --notes is given. --apply-to future starts a new series and requires --repeat with its complete schedule; a preset alone means forever and custom copies an existing opaque schedule (a count-based rule can restart its full count). A realized day of an opaque custom schedule cannot be split safely; use a virtual occurrence, edit that day alone, or edit the whole series. A realized preset occurrence moved away from its series time must be moved back with --apply-to current before a future split. Read the day again afterward for the new series id.",
 		},
 	}
 
@@ -162,6 +162,9 @@ func (c *eventsAddCommand) run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if err = c.fields.validateExplicitScheduleFlags(cmd); err != nil {
+		return err
+	}
 	schedule, err := c.fields.newSchedule()
 	if err != nil {
 		return err
@@ -254,9 +257,11 @@ combine a preset with --repeat-times or --repeat-until for a finite series, use 
 alone for one that continues forever, or use --repeat custom to copy an existing opaque
 schedule. A custom count-based rule can restart its full count on the replacement. HEY
 accepts the replacement's submitted start even when it overlaps an earlier occurrence, so
-choose its date and time deliberately. A day previously moved away from its series time
-must be moved back with a current-only edit before it can be split safely. The days from
-this one on
+choose its date and time deliberately. A realized day of an opaque custom schedule cannot
+be split safely, because HEY does not serve the rule's occurrence boundary; use a virtual
+occurrence, edit that day alone, or edit the whole series. A realized preset occurrence moved
+away from its series time must be moved back with a current-only edit before it can be split
+safely. The days from this one on
 get a new series id.
 
 An occurrence edit keeps more than a whole-event edit does, and refuses what it cannot
@@ -328,6 +333,9 @@ func (c *eventsEditCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	countdown, err := c.fields.parseCountdown()
 	if err != nil {
+		return err
+	}
+	if err = c.fields.validateExplicitScheduleFlags(cmd); err != nil {
 		return err
 	}
 
@@ -622,6 +630,18 @@ func (f *eventFields) validateExplicitScheduleFlags(cmd *cobra.Command) error {
 	if flags.Changed("end-time") {
 		if _, err := parseEventClock("end-time", f.endTime, "15:30"); err != nil {
 			return err
+		}
+	}
+	if flags.Changed("time-zone") {
+		const hint = "an IANA time zone name, for example America/New_York"
+		if f.timeZone == "" {
+			return apierr.ErrUsageHint("--time-zone needs a time zone", hint)
+		}
+		if f.timeZone == "Local" {
+			return apierr.ErrUsageHint("invalid time-zone: Local", hint)
+		}
+		if _, err := time.LoadLocation(f.timeZone); err != nil {
+			return apierr.ErrUsageHint(fmt.Sprintf("invalid time-zone: %s", f.timeZone), hint)
 		}
 	}
 	return nil

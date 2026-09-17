@@ -168,6 +168,16 @@ func (c *eventsEditCommand) editOccurrence(ctx context.Context, cmd *cobra.Comma
 	event := day.event()
 
 	if edit.scope == hey.OccurrenceScopeThisAndFollowing && day.realized != nil {
+		// A preset determines an occurrence's boundary from the parent's wall clock, so it
+		// can be compared with the realized day below. A custom schedule is opaque in the
+		// API: BYHOUR, RDATE and similar rules can put the occurrence at a different time.
+		// Guessing the parent's clock there can miss a moved day, after which Haystack may
+		// cancel neighboring realized children from the wrong boundary.
+		if !day.series.RecurrenceSchedule.Preset {
+			return apierr.ErrUsageHint(
+				fmt.Sprintf("occurrence %s belongs to an opaque custom schedule and cannot be changed with --apply-to future after HEY has written that day out", edit.occurrence.String()),
+				"use --apply-to current for that day, edit the whole series, or split from a later virtual occurrence")
+		}
 		virtual := virtualOccurrence(day.series, edit.occurrence.Date)
 		if !day.realized.StartsAt.Equal(virtual.StartsAt) {
 			return apierr.ErrUsageHint(
@@ -605,7 +615,10 @@ func (c *eventsEditCommand) countdownFromRecording(ctx context.Context, countdow
 	params, unreadable := countdownFromRecording(countdown, event)
 
 	identity, err := rootSDK.Identity().GetIdentity(ctx)
-	if err != nil || identity == nil || identity.TimeZone == "" {
+	if err != nil {
+		return hey.CountdownParams{}, apierr.FromSDK(err)
+	}
+	if identity == nil || identity.TimeZone == "" {
 		return params, unreadable
 	}
 	return countdownFromRecording(countdown, event, identity.TimeZone)
