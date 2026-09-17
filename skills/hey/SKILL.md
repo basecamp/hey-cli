@@ -817,10 +817,8 @@ Run `hey auth login` only when the user is present and explicitly asks to authen
 ### Sender selection
 
 `account senders` lists configured sender IDs and addresses within `--account`.
-`compose --from <email-or-id>` applies that sender's active Name Tag unless
-`--no-name-tag` is set; `--draft` saves without sending. Without `--draft`,
-explicit-sender compose saves and verifies a draft before delivery. On a
-verification or ambiguous-delivery error, inspect the reported draft ID; do not
-blindly repeat compose or send. `draft edit --from` stays in the draft's account
-and preserves the existing body, including signatures. Replace the body explicitly
-when needed. `draft show` includes From. These commands do not persist a default.
+`compose --from <email-or-id>` sends directly as that sender and applies its active
+Name Tag unless `--no-name-tag` is set; `--draft` saves without sending.
+`draft edit --from` stays in the draft's account and preserves the existing body,
+including signatures. Replace the body explicitly when needed. `draft show`
+includes From. These commands do not persist a default.

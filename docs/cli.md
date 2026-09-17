@@ -287,16 +287,9 @@ stdin, opening the editor, or uploading attachments.
 The selected sender's active Name Tag is appended unless `--no-name-tag` is set.
 `--from` is currently only for new messages, not `compose --thread-id` replies.
 
-With `--from`, compose uses the SDK's sender-aware draft route: save, verify the
-saved sender, recipients and complete body, then deliver. `--draft` stops after
-saving. If verification fails, the draft remains and the error names its ID;
-inspect it with `draft show` before taking another action. Do not repeat compose
-to recover a saved draft or retry an ambiguous delivery. Verification accepts
-exact HTML, HEY's lossless HTML envelope, paragraph-to-div conversion (including
-the two trailing breaks HEY adds to non-final paragraphs), and uploaded-attachment
-Trix figures. Attachment identity and metadata, links, and
-formatting must remain intact. Other server-side HTML normalization leaves a
-draft for inspection rather than sending changed content.
+With `--from`, compose sends directly as the selected configured sender.
+`--draft` saves with that sender instead, ready for `draft show`, `draft edit`,
+`draft send`, or review in a HEY app.
 
 `draft edit --from <email-or-sender-id>` changes the sender within the draft's
 existing account. As with other field flags, the omitted body remains byte-for-byte

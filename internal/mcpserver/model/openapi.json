@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "HEY",
-    "version": "2026-08-21",
+    "version": "2026-09-16",
     "description": "HEY API",
     "contact": {
       "name": "Basecamp",
@@ -1215,7 +1215,8 @@
         ],
         "x-hey-pagination": {
           "style": "link",
-          "totalCountHeader": "X-Total-Count"
+          "totalCountHeader": "X-Total-Count",
+          "pageParameter": "page"
         },
         "x-hey-retry": {
           "maxAttempts": 3,
@@ -10554,7 +10555,16 @@
         },
         "tags": [
           "Workflows"
-        ]
+        ],
+        "x-hey-retry": {
+          "maxAttempts": 3,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
       }
     }
   },
@@ -12829,6 +12839,13 @@
           },
           "addressed_sender": {
             "$ref": "#/components/schemas/AddressedSender"
+          },
+          "received_via": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageReceivedVia"
+            },
+            "description": "The account addresses HEY recorded this inbound message arriving through."
           }
         },
         "required": [
@@ -13016,6 +13033,25 @@
             "type": "string"
           }
         }
+      },
+      "MessageReceivedVia": {
+        "type": "object",
+        "description": "MessageReceivedVia — one delivery address HEY recorded for an inbound message",
+        "properties": {
+          "email_address": {
+            "type": "string",
+            "x-hey-sensitive": {
+              "category": "pii"
+            }
+          },
+          "contact": {
+            "$ref": "#/components/schemas/Contact",
+            "x-go-type-skip-optional-pointer": false
+          }
+        },
+        "required": [
+          "email_address"
+        ]
       },
       "MovePostingsRequestContent": {
         "type": "object",
@@ -13379,7 +13415,7 @@
       },
       "Recording": {
         "type": "object",
-        "description": "Recording — polymorphic by `type` (Calendar::Event, Calendar::Todo, etc.)",
+        "description": "Recording — polymorphic by `type`, with direct and namespaced calendar wire values",
         "properties": {
           "id": {
             "type": "integer",
@@ -13440,7 +13476,7 @@
           },
           "type": {
             "type": "string",
-            "description": "Discriminator — the recordable's Ruby class name: Calendar::Event, Calendar::Todo,\nCalendar::JournalEntry, Calendar::Habit, Calendar::TimeTrack, Calendar::Countdown,\nCalendar::DayBackground, Calendar::DayTitle or Calendar::Habit::Completion."
+            "description": "Discriminator with direct (`CalendarTodo`) and namespaced (`Calendar::Todo`) values."
           },
           "parent": {
             "$ref": "#/components/schemas/Recording"
@@ -13565,7 +13601,11 @@
             "type": "string"
           },
           "category": {
-            "type": "string"
+            "type": "string",
+            "description": "HEY emits explicit JSON null when a time track has no category.",
+            "x-hey-nullable": {},
+            "nullable": true,
+            "x-go-type-skip-optional-pointer": false
           },
           "label": {
             "type": "string"
@@ -13617,6 +13657,36 @@
             ],
             "Calendar::DayBackground": [
               "image_url"
+            ]
+          },
+          "discriminatorValues": {
+            "Calendar::Event": [
+              "CalendarEvent",
+              "Calendar::Event"
+            ],
+            "Calendar::Todo": [
+              "CalendarTodo",
+              "Calendar::Todo"
+            ],
+            "Calendar::JournalEntry": [
+              "CalendarJournalEntry",
+              "Calendar::JournalEntry"
+            ],
+            "Calendar::Habit": [
+              "CalendarHabit",
+              "Calendar::Habit"
+            ],
+            "Calendar::TimeTrack": [
+              "CalendarTimeTrack",
+              "Calendar::TimeTrack"
+            ],
+            "Calendar::Countdown": [
+              "CalendarCountdown",
+              "Calendar::Countdown"
+            ],
+            "Calendar::DayBackground": [
+              "CalendarDayBackground",
+              "Calendar::DayBackground"
             ]
           }
         }

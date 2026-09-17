@@ -25,6 +25,10 @@ type timeTrackRequest struct {
 	query  string
 }
 
+func stringPointer(value string) *string {
+	return &value
+}
+
 // timeTrackServer stands in for HEY's time tracking: what is running, the categories, the
 // pages of completed tracks, and every request made of it.
 type timeTrackServer struct {
@@ -146,7 +150,7 @@ func (s *timeTrackServer) handle(t *testing.T, w http.ResponseWriter, r *http.Re
 			return
 		}
 		fmt.Fprintf(w, `{"id":%d,"type":"Calendar::TimeTrack","starts_at":%q,"category":%q}`,
-			track.Id, track.StartsAt.Format(time.RFC3339), track.Category)
+			track.Id, track.StartsAt.Format(time.RFC3339), timeTrackCategory(track.Category))
 	case r.Method == http.MethodPost && r.URL.Path == "/calendar/ongoing_time_track.json":
 		if s.startStatus != 0 {
 			w.WriteHeader(s.startStatus)
@@ -265,7 +269,7 @@ func TestCalendarTimeTrackMenuSaysWhatIsTracked(t *testing.T) {
 		t.Error("nothing should be running")
 	}
 
-	server.setRunning(&generated.Recording{Id: 91, StartsAt: time.Date(2026, 8, 22, 15, 0, 0, 0, time.UTC), Category: "Client work"})
+	server.setRunning(&generated.Recording{Id: 91, StartsAt: time.Date(2026, 8, 22, 15, 0, 0, 0, time.UTC), Category: stringPointer("Client work")})
 	deliverTimeTrack(t, view, view.requestOngoingTrack())
 
 	track, running := view.OngoingTimeTrack()
@@ -836,9 +840,18 @@ func TestTimeTrackCategoryManagerValidatesAndConfirms(t *testing.T) {
 // A category HEY serves is drawn through the sanitizer wherever it is shown, the running
 // track's own included.
 func TestOngoingTrackCategoryIsSanitized(t *testing.T) {
-	track := ongoingTrackFrom(&generated.Recording{Id: 91, Category: "Client \x1b]52;c;secret\awork"})
+	track := ongoingTrackFrom(&generated.Recording{Id: 91, Category: stringPointer("Client \x1b]52;c;secret\awork")})
 	if strings.ContainsRune(track.Category, '\x1b') || strings.ContainsRune(track.Category, '\a') {
 		t.Errorf("category = %q", track.Category)
+	}
+}
+
+func TestMissingTimeTrackCategoryIsEmpty(t *testing.T) {
+	if category := ongoingTrackFrom(&generated.Recording{Id: 91}).Category; category != "" {
+		t.Errorf("ongoing category = %q", category)
+	}
+	if category := trackedTimeFrom(generated.Recording{}).Category; category != "" {
+		t.Errorf("completed category = %q", category)
 	}
 }
 

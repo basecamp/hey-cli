@@ -505,6 +505,7 @@
     "GetBoxPostingChanges": {
       "idempotent": false,
       "pagination": {
+        "pageParameter": "page",
         "style": "link",
         "totalCountHeader": "X-Total-Count"
       },

@@ -2,17 +2,13 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 	"github.com/spf13/cobra"
-	"golang.org/x/net/html"
-	"golang.org/x/net/html/atom"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
@@ -137,110 +133,21 @@ func (c *composeCommand) composeFrom(cmd *cobra.Command, client *hey.Client, sen
 	if !c.noNameTag && sender.NameTag != "" {
 		message += "<br>" + sender.NameTag
 	}
-	content := hey.DraftContent{Subject: c.subject, Content: message, To: to, CC: cc, BCC: bcc, ActingSenderID: sender.Id}
-	id, err := client.Messages().CreateDraft(ctx, content)
-	if err != nil {
-		return apierr.FromSDK(err)
-	}
 	if c.draft {
+		id, err := client.Messages().CreateDraft(ctx, hey.DraftContent{
+			Subject: c.subject, Content: message, To: to, CC: cc, BCC: bcc, ActingSenderID: sender.Id,
+		})
+		if err != nil {
+			return apierr.FromSDK(err)
+		}
 		return writeDraftSaved(cmd, id, len(c.attachments))
 	}
-
-	// The released SDK's send-now method cannot select a sender. Its draft
-	// route can. Verify the saved state before delivering that exact draft.
-	edit, err := client.Messages().GetEdit(ctx, id)
-	if err != nil {
-		return fmt.Errorf("draft %d saved; verification failed; not sent: %w", id, apierr.FromSDK(err))
+	if err := client.Messages().Send(ctx, hey.MessageContent{
+		Subject: c.subject, Content: message, To: to, CC: cc, BCC: bcc, ActingSenderID: sender.Id,
+	}); err != nil {
+		return apierr.FromSDK(err)
 	}
-	if edit == nil || edit.Id != id || edit.IsReply || !edit.ScheduledDeliveryAt.IsZero() {
-		return apierr.ErrUsage(fmt.Sprintf("draft %d saved but its state could not be verified; not sent", id))
-	}
-	actual := draftContentFrom(edit)
-	if !sameSenderDraft(content, actual) {
-		return apierr.ErrUsageHint(fmt.Sprintf("draft %d saved but readback differs; not sent", id), fmt.Sprintf("hey draft show %d", id))
-	}
-	// Keep delivery single-attempt even if the SDK operation policy changes.
-	delivery, err := newSDKClient(hey.WithMaxRetries(0)).ForAccount(ctx, sender.AccountId)
-	if err != nil {
-		return fmt.Errorf("draft %d saved; delivery client unavailable; not sent: %w", id, apierr.FromSDK(err))
-	}
-	if err := delivery.Messages().SendDraft(ctx, id, actual); err != nil {
-		return fmt.Errorf("delivery of draft %d was not confirmed; inspect its state before retrying: %w", id, apierr.FromSDK(err))
-	}
-	return writeMutation(cmd, sentWithAttachmentsSummary("Message sent", len(c.attachments)), map[string]any{"id": id})
-}
-
-func sameSenderDraft(expected, actual hey.DraftContent) bool {
-	return expected.ActingSenderID == actual.ActingSenderID &&
-		expected.Subject == actual.Subject && sameSavedMessageHTML(expected.Content, actual.Content) &&
-		slices.Equal(expected.To, actual.To) && slices.Equal(expected.CC, actual.CC) &&
-		slices.Equal(expected.BCC, actual.BCC) && actual.Schedule == nil
-}
-
-// sameSavedMessageHTML allows HEY's Trix canonicalization and lossless HTML
-// envelope. Links, formatting, and attachment identities must survive too.
-func sameSavedMessageHTML(expected, actual string) bool {
-	if expected == actual || sameTrixMessageHTML(expected, actual) {
-		return true
-	}
-	nodes, err := html.ParseFragment(strings.NewReader(actual), &html.Node{Type: html.ElementNode, Data: "div", DataAtom: atom.Div})
-	if err != nil {
-		return false
-	}
-	nodes = significantHTMLNodes(nodes)
-	if len(nodes) != 1 {
-		return false
-	}
-	node := nodes[0]
-	if node.Type == html.ElementNode && node.Data == "div" && len(node.Attr) == 0 {
-		var children []*html.Node
-		for child := node.FirstChild; child != nil; child = child.NextSibling {
-			children = append(children, child)
-		}
-		children = significantHTMLNodes(children)
-		if len(children) != 1 {
-			return false
-		}
-		node = children[0]
-	}
-	if node.Type != html.ElementNode || node.Data != "figure" {
-		return false
-	}
-	for child := node.FirstChild; child != nil; child = child.NextSibling {
-		if child.Type != html.TextNode || strings.TrimSpace(child.Data) != "" {
-			return false
-		}
-	}
-	var attachment struct {
-		ContentType string `json:"contentType"`
-		Content     string `json:"content"`
-		Filename    string `json:"filename"`
-		URL         string `json:"url"`
-	}
-	found := false
-	for _, attr := range node.Attr {
-		if attr.Key == "data-trix-attachment" {
-			if found || json.Unmarshal([]byte(attr.Val), &attachment) != nil {
-				return false
-			}
-			found = true
-		}
-	}
-	if !found || attachment.ContentType != "text/html" || attachment.Filename != "" || attachment.URL != "" {
-		return false
-	}
-	return attachment.Content == "<shadow-content><template>"+expected+"</template></shadow-content>"
-}
-
-func significantHTMLNodes(nodes []*html.Node) []*html.Node {
-	var significant []*html.Node
-	for _, node := range nodes {
-		if node.Type == html.TextNode && strings.TrimSpace(node.Data) == "" {
-			continue
-		}
-		significant = append(significant, node)
-	}
-	return significant
+	return writeMutation(cmd, sentWithAttachmentsSummary("Message sent", len(c.attachments)), nil)
 }
 
 // The account comes from the existing draft, never from the requested sender.

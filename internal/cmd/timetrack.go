@@ -272,13 +272,17 @@ func (c *timetrackListCommand) run(cmd *cobra.Command, args []string) error {
 		table := newTable(cmd.OutOrStdout())
 		table.addRow([]string{"ID", "Day", "Start", "End", "Length", "Category", "Notes"})
 		for _, track := range tracks {
+			category := ""
+			if track.Category != nil {
+				category = *track.Category
+			}
 			table.addRow([]string{
 				strconv.FormatInt(track.Id, 10),
 				track.StartsAt.Local().Format(dateLayout),
 				formatClock(track.StartsAt),
 				timetrackEndClock(track.StartsAt, track.EndsAt),
 				formatTrackedLength(trackedLength(track)),
-				truncate(track.Category, 24),
+				truncate(category, 24),
 				truncate(track.Notes, 40),
 			})
 		}
