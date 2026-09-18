@@ -140,6 +140,7 @@ func (t scriptedCableTransport) Dial(context.Context, string, actioncable.DialOp
 
 type scriptedCableConn struct {
 	reads       chan []byte
+	writes      chan []byte
 	done        chan struct{}
 	once        sync.Once
 	subprotocol string
@@ -148,6 +149,7 @@ type scriptedCableConn struct {
 func newScriptedCableConn() *scriptedCableConn {
 	return &scriptedCableConn{
 		reads:       make(chan []byte, 2),
+		writes:      make(chan []byte, 2),
 		done:        make(chan struct{}),
 		subprotocol: actioncable.SubprotocolV1JSON,
 	}
@@ -166,7 +168,16 @@ func (c *scriptedCableConn) Read(ctx context.Context) ([]byte, error) {
 	}
 }
 
-func (c *scriptedCableConn) Write(context.Context, []byte) error { return nil }
+func (c *scriptedCableConn) Write(ctx context.Context, payload []byte) error {
+	select {
+	case c.writes <- payload:
+		return nil
+	case <-c.done:
+		return io.EOF
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
 
 func (c *scriptedCableConn) Close() error {
 	c.once.Do(func() { close(c.done) })
@@ -210,11 +221,17 @@ func TestSubscribeTuiCableKeepsALiveClientThatTurnedASubscriptionDown(t *testing
 	tuiCable.client = client
 	t.Cleanup(func() { tuiCable.client = nil })
 
+	subscribing, stop := context.WithTimeout(t.Context(), time.Second)
+	defer stop()
 	go func() {
-		conn.reads <- []byte(`{"type":"reject_subscription","identifier":"{\"channel\":\"Postings::ChangesChannel\"}"}`)
+		select {
+		case <-conn.writes:
+			conn.reads <- []byte(`{"type":"reject_subscription","identifier":"{\"channel\":\"Postings::ChangesChannel\"}"}`)
+		case <-subscribing.Done():
+		}
 	}()
 
-	_, stopped, err := subscribeTuiCable(t.Context(), client, actioncable.Identifier{Channel: changesChannel})
+	_, stopped, err := subscribeTuiCable(subscribing, client, actioncable.Identifier{Channel: changesChannel})
 	if stopped {
 		t.Fatal("a rejection should not condemn the connection the other watches share")
 	}
