@@ -134,13 +134,14 @@ func renderMailAccountPicker(m *model, base string) string {
 	}
 
 	height := m.contentHeight()
+	width := m.contentWidth()
 	visible := modalContentRows(height)
 	if len(status) > 0 {
 		visible = max(visible-len(status)-1, 1)
 	}
-	body := strings.Join(modalListRows(labels, m.mailAccountCursor, modalContentWidth(m.width), visible), "\n")
+	body := strings.Join(modalListRows(labels, m.mailAccountCursor, modalContentWidth(width), visible), "\n")
 	if len(status) > 0 {
 		body += "\n\n" + strings.Join(status, "\n")
 	}
-	return overlayModal(base, modalFrame("Select mail account", body, m.width), m.width, height)
+	return overlayModal(base, modalFrame("Select mail account", body, width), width, height)
 }
