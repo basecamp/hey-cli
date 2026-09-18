@@ -96,11 +96,29 @@ func decodeThread(t *testing.T, stdout string) threadResponse {
 	return response
 }
 
-// --json carries a body only for an entry that has one: a body that was not read is
-// omitted rather than written as "", which is the contract a decoder reading the key's
-// presence depends on. decodedEntry cannot tell the two apart, so this reads the raw
-// objects.
-func TestThreadsJSONOmitsABodyItDidNotRead(t *testing.T) {
+func assertThreadEntryOmitsRecipients(t *testing.T, stdout string, id int64) {
+	t.Helper()
+	var response struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &response); err != nil {
+		t.Fatalf("decode %q: %v", stdout, err)
+	}
+	for _, entry := range response.Data {
+		if entry["id"] == float64(id) {
+			if recipients, present := entry["recipients"]; present {
+				t.Errorf("entry %d carries recipients %#v, want the key omitted", id, recipients)
+			}
+			return
+		}
+	}
+	t.Errorf("response has no entry %d", id)
+}
+
+// --json carries a body and recipients only for an entry whose message was read: an
+// unread message omits both keys rather than claiming an empty body and recipient list.
+// decodedEntry cannot tell key absence from an empty value, so this reads the raw objects.
+func TestThreadsJSONOmitsMessageDataItDidNotRead(t *testing.T) {
 	server, _ := partialThreadServer(t, [][]int64{{13, 12, 11}}, 12)
 	stdoutTerminal(t, false)
 
@@ -118,15 +136,16 @@ func TestThreadsJSONOmitsABodyItDidNotRead(t *testing.T) {
 		t.Fatalf("got %d entries, want 3", len(response.Data))
 	}
 	for _, entry := range response.Data {
-		body, present := entry["body"]
+		body, hasBody := entry["body"]
+		_, hasRecipients := entry["recipients"]
 		switch entry["id"] {
 		case float64(12):
-			if present {
-				t.Errorf("entry 12 carries body %#v, want the key omitted for a body that was not read", body)
+			if hasBody || hasRecipients {
+				t.Errorf("entry 12 carries body %#v or recipients %v, want message data omitted", body, hasRecipients)
 			}
 		default:
-			if text, ok := body.(string); !ok || text == "" {
-				t.Errorf("entry %v carries body %#v, want a Markdown string", entry["id"], body)
+			if text, ok := body.(string); !ok || text == "" || !hasRecipients {
+				t.Errorf("entry %v carries body %#v and recipients %v, want both", entry["id"], body, hasRecipients)
 			}
 		}
 	}
@@ -277,6 +296,7 @@ func TestThreadsMarksEntriesOverTheRequestLimit(t *testing.T) {
 	if response.Data[0].ID != 11 || response.Data[0].BodyState != "over_limit" {
 		t.Errorf("oldest entry = %+v, want over_limit", response.Data[0])
 	}
+	assertThreadEntryOmitsRecipients(t, stdout, 11)
 	if _, messages := reads.counts(); messages != 2 {
 		t.Errorf("read %d messages, want 2", messages)
 	}
@@ -406,6 +426,7 @@ func TestThreadsMarkAnOversizedMessageOverLimit(t *testing.T) {
 	if response.Data[1].ID != 12 || response.Data[1].BodyState != "over_limit" || response.Data[0].BodyState != "hydrated" {
 		t.Errorf("response = %+v", response.Data)
 	}
+	assertThreadEntryOmitsRecipients(t, stdout, 12)
 	if _, messages := reads.counts(); messages != 1 {
 		t.Errorf("read the oversized message %d times, want once", messages)
 	}

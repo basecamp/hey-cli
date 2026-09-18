@@ -444,8 +444,10 @@ hey unshare <thread_id>                       # Turn off the sharing link
 `hey thread read` returns every entry in the thread, oldest first. Each entry's `body` is
 **Markdown**, converted from HEY's Trix HTML at the edge, so headings, lists, quotes,
 tables and code survive and links keep their URLs — read it as structure rather than as
-flattened text. `--html` returns the original HTML instead. There is no `recipients` field
-on an entry; use `hey reply`, which works the addressing out itself.
+flattened text. An entry whose message was read also carries `recipients`, with `to`,
+`cc` and `bcc` contact lists; a known-empty line is `[]`, while an entry whose message
+was not hydrated omits the object. `--html` returns the original body HTML framed by
+From, To, CC and BCC header rows. Use `hey reply` to have HEY work out reply addressing.
 
 `hey share` returns a URL that shows the entire thread and future emails or replies sent to it. Anyone with the link can open it. `hey unshare` turns off the sharing link.
 

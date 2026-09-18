@@ -50,7 +50,7 @@ func usageMessage(t *testing.T, err error) string {
 
 // --html writes a thread to a pipe as one HTML document: a head declaring the charset and
 // naming the thread, then an <article> per entry, oldest first, holding the entry's
-// original markup after a header naming the sender and the date. An entry without a
+// original markup after a header naming the sender, date and recipients. An entry without a
 // body holds only its header, and says why in data-body-state.
 func TestThreadsHTMLWritesEachEntryToAPipe(t *testing.T) {
 	server, _ := threadEntriesServer(t,
@@ -67,11 +67,11 @@ func TestThreadsHTMLWritesEachEntryToAPipe(t *testing.T) {
 	}
 	want := "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Thread 7</title>\n</head>\n<body>\n" +
 		"<article id=\"entry-11\" data-entry-id=\"11\" data-created-at=\"2026-04-12T09:30\" data-body-state=\"hydrated\">\n" +
-		"<header>From: Rick Sanchez — 2026-04-12T09:30</header>\n" +
+		"<header>\n<div>From: Rick Sanchez — 2026-04-12T09:30</div>\n</header>\n" +
 		"<div>the first <b>word</b></div>\n" +
 		"</article>\n" +
 		"<article id=\"entry-12\" data-entry-id=\"12\" data-created-at=\"2026-04-13T09:30\" data-body-state=\"bodyless\">\n" +
-		"<header>From: Rick Sanchez — 2026-04-13T09:30</header>\n" +
+		"<header>\n<div>From: Rick Sanchez — 2026-04-13T09:30</div>\n</header>\n" +
 		"</article>\n" +
 		"</body>\n</html>\n"
 	if stdout != want {
@@ -82,22 +82,36 @@ func TestThreadsHTMLWritesEachEntryToAPipe(t *testing.T) {
 	}
 }
 
-// The sender is whatever the entry says it is, so it is escaped wherever it lands —
-// text and attribute alike — and stripped of controls first; the body is HEY's HTML and
-// is written as it came, markup and all, since that is what --html is for.
-func TestThreadsHTMLEscapesTheSenderAndKeepsTheBodyVerbatim(t *testing.T) {
+// The sender and recipients are whatever the entry says they are, so they are escaped
+// wherever they land and stripped of controls first, including a non-empty Bcc line.
+// The body is HEY's HTML and is written as it came, markup and all, since that is what
+// --html is for.
+func TestThreadsHTMLEscapesHeadersAndKeepsTheBodyVerbatim(t *testing.T) {
 	var out bytes.Buffer
 	entries := []threadEntry{{
 		ID:                    11,
 		CreatedAt:             "2026-04-12T09:30",
 		BodyState:             "hydrated",
 		AlternativeSenderName: "Rick <b>\"Pickle\"</b> \x1b[31m& Co",
-		BodyHTML:              `<div onclick="x()">the <b>word</b> &amp; more</div>`,
+		Recipients: &threadRecipients{
+			To: []threadContact{
+				{Name: "Morty <b>Smith</b>\x1b[31m", EmailAddress: "morty&co@example.com"},
+				{EmailAddress: "summer@example.org"},
+			},
+			CC:  []threadContact{{Name: "Beth & Jerry"}},
+			BCC: []threadContact{{Name: `Birdperson "BP"`, EmailAddress: "bird<&>@example.org"}},
+		},
+		BodyHTML: `<div onclick="x()">the <b>word</b> &amp; more</div>`,
 	}}
 	if err := writeThreadHTML(&out, 7, entries, ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	wantHeader := "<header>From: Rick &lt;b&gt;&#34;Pickle&#34;&lt;/b&gt; &amp; Co — 2026-04-12T09:30</header>\n"
+	wantHeader := "<header>\n" +
+		"<div>From: Rick &lt;b&gt;&#34;Pickle&#34;&lt;/b&gt; &amp; Co — 2026-04-12T09:30</div>\n" +
+		"<div>To: Morty &lt;b&gt;Smith&lt;/b&gt; &lt;morty&amp;co@example.com&gt;, summer@example.org</div>\n" +
+		"<div>CC: Beth &amp; Jerry</div>\n" +
+		"<div>BCC: Birdperson &#34;BP&#34; &lt;bird&lt;&amp;&gt;@example.org&gt;</div>\n" +
+		"</header>\n"
 	if !strings.Contains(out.String(), wantHeader) {
 		t.Errorf("document =\n%s\nwant the header %q", out.String(), wantHeader)
 	}

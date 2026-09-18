@@ -244,8 +244,9 @@ links keep their URLs and headings, lists, quotes, tables and code survive.
 (`writeThreadHTML` in `internal/cmd/topic.go`) is an HTML5 document: `<!doctype html>`,
 `<meta charset="utf-8">`, `<title>Thread N</title>`, then one
 `<article id="entry-ID" data-entry-id data-created-at data-body-state>` per entry, oldest
-first, with a `<header>` naming the sender and date (sanitized, then HTML-escaped) and the
-entry's HTML verbatim — or nothing, with `data-body-state` saying why (`bodyless`,
+first, with a `<header>` naming the sender, date and non-empty To, CC and BCC lines
+(sanitized, then HTML-escaped) and the entry's HTML verbatim — or nothing, with
+`data-body-state` saying why (`bodyless`,
 `over_limit`, `failed`, or `hydrated` and empty). A partial thread needs `--allow-partial`
 as everywhere else and then ends with `<!-- notice: … -->` before `</body>`
 (`htmlCommentSafe` keeps a value from closing the comment), with the notice on stderr too.

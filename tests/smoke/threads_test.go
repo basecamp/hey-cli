@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -21,6 +22,15 @@ type threadEntry struct {
 		Name         string `json:"name"`
 		EmailAddress string `json:"email_address"`
 	} `json:"creator"`
+	Recipients *struct {
+		To  []threadRecipient `json:"to"`
+		CC  []threadRecipient `json:"cc"`
+		BCC []threadRecipient `json:"bcc"`
+	} `json:"recipients"`
+}
+
+type threadRecipient struct {
+	EmailAddress string `json:"email_address"`
 }
 
 // firstMessage is the Markdown the long thread starts with. compose sends -m as
@@ -34,10 +44,14 @@ const firstMessage = "First: the **quarterly** numbers are at https://example.co
 // will not let the CLI write, and trashes the thread when the test is done.
 func longThread(t *testing.T, replies int) (topicID string, subject string) {
 	t.Helper()
+	const ccAddress = "morty.smith@example.org"
+	const bccAddress = "beth.smith@example.org"
 	uid := uniqueID()
 	subject = fmt.Sprintf("Long thread %s", uid)
 	_, stderr, code := hey(t, "compose",
 		"--to", smokeEmail,
+		"--cc", ccAddress,
+		"--bcc", bccAddress,
 		"--subject", subject,
 		"-m", firstMessage,
 		"--json",
@@ -109,6 +123,31 @@ func TestThreadsReadsALongThreadAsMarkdown(t *testing.T) {
 		}
 		if strings.Contains(entry.Body, "<div") || strings.Contains(entry.Body, "<p") || strings.Contains(entry.Body, "<br") {
 			t.Errorf("entry %d body carries HTML: %q", entry.ID, entry.Body)
+		}
+		// Every hydrated entry carries all three recipient lists. Replies need not keep
+		// the acting user's own address: HEY excludes it from reply recipients.
+		if entry.Recipients == nil || entry.Recipients.To == nil || entry.Recipients.CC == nil || entry.Recipients.BCC == nil {
+			t.Errorf("entry %d recipients = %+v, want to, cc and bcc lists", entry.ID, entry.Recipients)
+		}
+	}
+	firstRecipients := entries[0].Recipients
+	if firstRecipients == nil {
+		t.Fatal("first entry has no recipients")
+	}
+	for label, recipients := range map[string][]threadRecipient{
+		"to":  firstRecipients.To,
+		"cc":  firstRecipients.CC,
+		"bcc": firstRecipients.BCC,
+	} {
+		want := map[string]string{
+			"to":  smokeEmail,
+			"cc":  "morty.smith@example.org",
+			"bcc": "beth.smith@example.org",
+		}[label]
+		if !slices.ContainsFunc(recipients, func(recipient threadRecipient) bool {
+			return strings.EqualFold(recipient.EmailAddress, want)
+		}) {
+			t.Errorf("first entry %s = %+v, want %s", label, recipients, want)
 		}
 	}
 
