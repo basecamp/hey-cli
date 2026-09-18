@@ -66,9 +66,9 @@ type Limits struct {
 	// Concurrency is how many message requests are in flight at once.
 	Concurrency int
 	// MaxRetainedBytes is how much thread data is kept in total — index metadata,
-	// message content and metadata, and recipient identities when requested. A
-	// message whose retained data would exceed it is over_limit, and an index that
-	// would exceed it is truncated.
+	// message content and metadata, and recipient or inbound-delivery identities
+	// when requested. A message whose retained data would exceed it is over_limit,
+	// and an index that would exceed it is truncated.
 	MaxRetainedBytes int64
 	// Deadline is how long the whole load may take; entries not yet requested when it
 	// passes are over_limit.
@@ -98,7 +98,11 @@ type Request struct {
 	// Callers that need only bodies leave it false so recipient lists cannot consume
 	// the body's budget.
 	RetainRecipients bool
-	Limits           Limits
+	// RetainReceivedVia keeps and charges the exact account addresses HEY recorded
+	// an inbound message arriving through, and their optional contact identities.
+	// Callers that do not publish delivery metadata leave it false.
+	RetainReceivedVia bool
+	Limits            Limits
 }
 
 // State is what became of one entry's body.
@@ -181,7 +185,7 @@ func Load(ctx context.Context, source Source, request Request) (*Thread, error) 
 		thread.Entries[i] = Entry{Entry: entry, State: StateNotRequested}
 	}
 	if request.Hydrate {
-		if err := hydrate(ctx, source, thread, limits, budget, request.RetainRecipients); err != nil {
+		if err := hydrate(ctx, source, thread, limits, budget, request.RetainRecipients, request.RetainReceivedVia); err != nil {
 			return nil, err
 		}
 		if err := caller.Err(); err != nil {
@@ -249,7 +253,7 @@ func readIndex(ctx, caller context.Context, source Source, topicID int64, limits
 // contiguous. Entries past a limit are over_limit; a request that fails after its
 // retries leaves its entry failed, with its reason bounded; a systemic error —
 // ErrSystemic from the Source — stops every request in flight and is returned.
-func hydrate(ctx context.Context, source Source, thread *Thread, limits Limits, budget *byteBudget, retainRecipients bool) error {
+func hydrate(ctx context.Context, source Source, thread *Thread, limits Limits, budget *byteBudget, retainRecipients, retainReceivedVia bool) error {
 	turns := newTurns()
 	refused := make([]bool, len(thread.Entries))
 	var exhausted atomic.Bool
@@ -284,7 +288,7 @@ func hydrate(ctx context.Context, source Source, thread *Thread, limits Limits, 
 			case err != nil:
 				entry.State, entry.Err = StateFailed, boundedError(err)
 			default:
-				kept, size := retained(message, retainRecipients)
+				kept, size := retained(message, retainRecipients, retainReceivedVia)
 				turns.wait(i)
 				switch {
 				case !budget.admit(size):
@@ -412,10 +416,11 @@ func boundedError(err error) error {
 }
 
 // retained is the part of a message a thread keeps — its body and metadata, plus
-// recipients when the caller needs them — and how many bytes it costs the budget. All
-// contacts are projected to id, name and email before admission so presentation fields
-// that are neither needed nor charged cannot escape the retention limit.
-func retained(message *generated.Message, retainRecipients bool) (*generated.Message, int64) {
+// recipients and inbound delivery records when the caller needs them — and how many
+// bytes it costs the budget. All contacts are projected to id, name and email before
+// admission so presentation fields that are neither needed nor charged cannot escape
+// the retention limit.
+func retained(message *generated.Message, retainRecipients, retainReceivedVia bool) (*generated.Message, int64) {
 	kept := &generated.Message{
 		Id:        message.Id,
 		Content:   message.Content,
@@ -432,10 +437,16 @@ func retained(message *generated.Message, retainRecipients bool) (*generated.Mes
 			Blindcopied: retainedContacts(message.Addressed.Blindcopied),
 		}
 	}
+	if retainReceivedVia {
+		kept.ReceivedVia = retainedReceivedVia(message.ReceivedVia)
+	}
 	size := int64(len(kept.Content)+len(kept.Subject)+len(kept.Url)+
 		len(kept.Creator.Name)+len(kept.Creator.EmailAddress)) + retainedOverhead
 	if retainRecipients {
 		size += contactsSize(kept.Addressed.Directly) + contactsSize(kept.Addressed.Copied) + contactsSize(kept.Addressed.Blindcopied)
+	}
+	if retainReceivedVia {
+		size += receivedViaSize(kept.ReceivedVia)
 	}
 	return kept, size
 }
@@ -459,6 +470,21 @@ func retainedContacts(contacts []generated.Contact) []generated.Contact {
 	return kept
 }
 
+func retainedReceivedVia(deliveries []generated.MessageReceivedVia) []generated.MessageReceivedVia {
+	if len(deliveries) == 0 {
+		return nil
+	}
+	kept := make([]generated.MessageReceivedVia, len(deliveries))
+	for i, delivery := range deliveries {
+		kept[i].EmailAddress = delivery.EmailAddress
+		if delivery.Contact != nil {
+			contact := retainedContact(*delivery.Contact)
+			kept[i].Contact = &contact
+		}
+	}
+	return kept
+}
+
 // contactsSize is what a kept recipient list costs the budget: each address's strings
 // and an overhead. A message to a thousand addresses is a thousand addresses held, so
 // each is charged.
@@ -470,12 +496,31 @@ func contactsSize(contacts []generated.Contact) int64 {
 	return size
 }
 
+// receivedViaSize charges every delivery address and, when HEY resolved one, the
+// retained contact identity. The complete size is admitted with the rest of the message,
+// so a delivery list never survives only in part.
+func receivedViaSize(deliveries []generated.MessageReceivedVia) int64 {
+	size := int64(0)
+	for _, delivery := range deliveries {
+		size += int64(len(delivery.EmailAddress)) + retainedDeliveryOverhead
+		if delivery.Contact != nil {
+			size += int64(len(delivery.Contact.Name)+len(delivery.Contact.EmailAddress)) + retainedContactOverhead
+		}
+	}
+	return size
+}
+
 // retainedOverhead is what a kept message costs beyond its strings: the struct, the
 // entry, the timestamps.
 const retainedOverhead = 512
 
-// retainedContactOverhead is what a kept recipient costs beyond its strings.
+// retainedContactOverhead is what a kept recipient or resolved delivery contact costs
+// beyond its strings.
 const retainedContactOverhead = 128
+
+// retainedDeliveryOverhead is what a received-via record costs beyond its address and
+// optional contact.
+const retainedDeliveryOverhead = 128
 
 type byteBudget struct {
 	mu        sync.Mutex

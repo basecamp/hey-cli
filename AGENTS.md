@@ -123,9 +123,14 @@ because both were mis-stated here before:
   `Messages().Get`, within literal limits (`threadload.DefaultLimits`: pages, entries,
   message requests, retries, concurrency, retained bytes, deadline), and reports per
   entry whether the body was `hydrated`, `bodyless`, `not_requested`, `over_limit` or
-  `failed`. Hydration is the caller's decision: `hey thread read --count` and `--ids-only`
-  read the index only, `hey attachment list` always reads bodies because the metadata lives
-  in the HTML. A thread that could be read only in part is refused without
+  `failed`. Hydration and retained message metadata are the caller's decisions:
+  `hey thread read --count` and `--ids-only` read the index only, JSON thread output
+  retains both ordinary To/CC/BCC recipients and inbound `received_via` delivery records,
+  HTML retains only the recipients it renders, and body-only callers such as the TUI and
+  `hey attachment list` retain neither kind. Delivery records keep HEY's exact account
+  address (including plus tags and catch-all aliases) and an optional identity-only
+  contact; all of those retained strings are charged atomically with the message against
+  the byte budget. A thread that could be read only in part is refused without
   `--allow-partial`; with it the notice says what is missing (`threadNotice` in
   `internal/cmd/thread_source.go`). The package takes a `Source` interface rather than the
   SDK; `threadload.NewSDKSource` is the adapter both the CLI and the TUI hand it, and the TUI's `mailView.fetchTopic` reads through it

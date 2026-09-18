@@ -36,25 +36,35 @@ type threadRecipients struct {
 	BCC []threadContact `json:"bcc"`
 }
 
+// threadReceivedVia is one exact account address HEY recorded an inbound message
+// arriving through, optionally resolved to a contact. The address is kept losslessly
+// for JSON; unlike the ordinary recipients, it can carry an envelope alias or plus tag.
+type threadReceivedVia struct {
+	EmailAddress string         `json:"email_address"`
+	Contact      *threadContact `json:"contact,omitempty"`
+}
+
 // threadEntry is one message in a thread. Body is Markdown, converted once here from
 // HEY's Trix HTML; BodyHTML keeps that HTML for --html. BodyState says what became of
 // the body: hydrated, bodyless (HEY served none), over_limit or failed (it was not
-// read), or not_requested (the format did not need it). Recipients come from the message
-// like the body does, so they are absent exactly when the message was not read: the
-// entry index HEY serves carries no recipients.
+// read), or not_requested (the format did not need it). Recipients and received-via
+// records come from the message like the body does, so they are absent exactly when the
+// message was not read; received_via is also absent when HEY served none for a sent or
+// generated message. The entry index carries neither kind of message metadata.
 type threadEntry struct {
-	ID                    int64             `json:"id"`
-	CreatedAt             string            `json:"created_at"`
-	UpdatedAt             string            `json:"updated_at"`
-	Creator               threadContact     `json:"creator"`
-	AlternativeSenderName string            `json:"alternative_sender_name"`
-	Summary               string            `json:"summary"`
-	Kind                  string            `json:"kind"`
-	AppURL                string            `json:"app_url"`
-	Recipients            *threadRecipients `json:"recipients,omitempty"`
-	Body                  htmlutil.Markdown `json:"body,omitzero"`
-	BodyState             string            `json:"body_state,omitempty"`
-	BodyHTML              string            `json:"-"`
+	ID                    int64               `json:"id"`
+	CreatedAt             string              `json:"created_at"`
+	UpdatedAt             string              `json:"updated_at"`
+	Creator               threadContact       `json:"creator"`
+	AlternativeSenderName string              `json:"alternative_sender_name"`
+	Summary               string              `json:"summary"`
+	Kind                  string              `json:"kind"`
+	AppURL                string              `json:"app_url"`
+	Recipients            *threadRecipients   `json:"recipients,omitempty"`
+	ReceivedVia           []threadReceivedVia `json:"received_via,omitempty"`
+	Body                  htmlutil.Markdown   `json:"body,omitzero"`
+	BodyState             string              `json:"body_state,omitempty"`
+	BodyHTML              string              `json:"-"`
 }
 
 type topicCommand struct {
@@ -79,8 +89,11 @@ func newThreadsCommand() *topicCommand {
 	threadsCommand.cmd = &cobra.Command{
 		Use:   "read <thread-id>",
 		Short: "Read a thread",
+		Long: "Read every entry in a thread, oldest first. JSON entries include ordinary " +
+			"To/CC/BCC recipients and, for inbound mail, received_via with the exact " +
+			"account delivery addresses HEY recorded.",
 		Annotations: map[string]string{
-			"agent_notes": "Returns a thread with all entries, oldest first. Entry bodies are Markdown; each entry whose message was read carries recipients as to, cc and bcc contact lists. --html writes an HTML document instead, one <article> per entry with a From/To/CC/BCC header and HEY's original body HTML. A thread that could only be read in part is refused unless --allow-partial is passed, in which case each entry's body_state says what was read. Use the topic ID with hey reply or hey forward.",
+			"agent_notes": "Returns a thread with all entries, oldest first. Entry bodies are Markdown; each entry whose message was read carries recipients as to, cc and bcc contact lists. In JSON, inbound entries also carry received_via: the exact account delivery addresses HEY recorded, distinct from the visible recipients, with an optional resolved contact. --html writes an HTML document instead, one <article> per entry with a From/To/CC/BCC header and HEY's original body HTML. A thread that could only be read in part is refused unless --allow-partial is passed, in which case each entry's body_state says what was read. Use the topic ID with hey reply or hey forward.",
 		},
 		Example: `  hey thread read 12345
   hey thread read 12345 --json
@@ -107,14 +120,16 @@ func (c *topicCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	// A count or a list of IDs needs the index and nothing else; every other format
-	// shows bodies, so it reads them. Only JSON-shaped and HTML output retain recipients:
-	// styled and Markdown output do not show them, so their lists must not consume the
-	// body budget.
+	// shows bodies, so it reads them. JSON-shaped output retains recipients and inbound
+	// delivery records. HTML retains only the recipients it renders. Styled and Markdown
+	// output show neither, so that metadata must not consume their body budget.
 	format := writer.EffectiveFormat()
 	hydrate := format != output.FormatCount && format != output.FormatIDs
 	load := loadThread
 	switch format {
-	case output.FormatJSON, output.FormatHTML, output.FormatQuiet:
+	case output.FormatJSON, output.FormatQuiet:
+		load = loadThreadWithJSONMetadata
+	case output.FormatHTML:
 		load = loadThreadWithRecipients
 	case output.FormatAuto, output.FormatStyled, output.FormatIDs, output.FormatCount, output.FormatMarkdown:
 	}
@@ -392,6 +407,7 @@ func newThreadEntry(loaded *threadload.Entry, html bool) threadEntry {
 	var body htmlutil.Markdown
 	bodyHTML := ""
 	var recipients *threadRecipients
+	var receivedVia []threadReceivedVia
 
 	if message := loaded.Message; message != nil {
 		if creator.Id == 0 {
@@ -415,6 +431,7 @@ func newThreadEntry(loaded *threadload.Entry, html bool) threadEntry {
 			body = htmlutil.ToMarkdown(message.Content)
 		}
 		recipients = newThreadRecipients(message.Addressed)
+		receivedVia = newThreadReceivedVia(message.ReceivedVia)
 		// The loaded thread's copy is released as it is converted.
 		loaded.Message = nil
 	}
@@ -428,6 +445,7 @@ func newThreadEntry(loaded *threadload.Entry, html bool) threadEntry {
 		Kind:                  entry.Kind,
 		AppURL:                appURL,
 		Recipients:            recipients,
+		ReceivedVia:           receivedVia,
 		Body:                  body,
 		BodyState:             string(loaded.State),
 		BodyHTML:              bodyHTML,
@@ -452,6 +470,18 @@ func newThreadRecipients(addressed generated.Addressed) *threadRecipients {
 		CC:  threadContacts(addressed.Copied),
 		BCC: threadContacts(addressed.Blindcopied),
 	}
+}
+
+func newThreadReceivedVia(deliveries []generated.MessageReceivedVia) []threadReceivedVia {
+	receivedVia := make([]threadReceivedVia, len(deliveries))
+	for i, delivery := range deliveries {
+		receivedVia[i].EmailAddress = delivery.EmailAddress
+		if delivery.Contact != nil {
+			contact := newThreadContact(*delivery.Contact)
+			receivedVia[i].Contact = &contact
+		}
+	}
+	return receivedVia
 }
 
 func threadContacts(contacts []generated.Contact) []threadContact {

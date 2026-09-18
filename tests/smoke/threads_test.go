@@ -27,6 +27,9 @@ type threadEntry struct {
 		CC  []threadRecipient `json:"cc"`
 		BCC []threadRecipient `json:"bcc"`
 	} `json:"recipients"`
+	ReceivedVia []struct {
+		EmailAddress string `json:"email_address"`
+	} `json:"received_via"`
 }
 
 type threadRecipient struct {
@@ -128,6 +131,11 @@ func TestThreadsReadsALongThreadAsMarkdown(t *testing.T) {
 		// the acting user's own address: HEY excludes it from reply recipients.
 		if entry.Recipients == nil || entry.Recipients.To == nil || entry.Recipients.CC == nil || entry.Recipients.BCC == nil {
 			t.Errorf("entry %d recipients = %+v, want to, cc and bcc lists", entry.ID, entry.Recipients)
+		}
+		// This thread was composed and replied to by the account, so none of its sent
+		// messages has an inbound delivery record.
+		if entry.ReceivedVia != nil {
+			t.Errorf("entry %d received_via = %+v, want the field omitted for sent mail", entry.ID, entry.ReceivedVia)
 		}
 	}
 	firstRecipients := entries[0].Recipients

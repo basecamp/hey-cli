@@ -446,8 +446,12 @@ hey unshare <thread_id>                       # Turn off the sharing link
 tables and code survive and links keep their URLs — read it as structure rather than as
 flattened text. An entry whose message was read also carries `recipients`, with `to`,
 `cc` and `bcc` contact lists; a known-empty line is `[]`, while an entry whose message
-was not hydrated omits the object. `--html` returns the original body HTML framed by
-From, To, CC and BCC header rows. Use `hey reply` to have HEY work out reply addressing.
+was not hydrated omits the object. In JSON, an inbound entry also carries `received_via`:
+every exact account address HEY recorded it arriving through, including aliases and plus
+tags. These delivery records are distinct from visible To/CC/BCC recipients. Each one's
+resolved `contact` is optional; `received_via` is omitted for sent/generated messages and
+when the message was not hydrated. `--html` returns the original body HTML framed by From,
+To, CC and BCC header rows. Use `hey reply` to have HEY work out reply addressing.
 
 `hey share` returns a URL that shows the entire thread and future emails or replies sent to it. Anyone with the link can open it. `hey unshare` turns off the sharing link.
 

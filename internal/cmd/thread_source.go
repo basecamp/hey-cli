@@ -14,23 +14,31 @@ import (
 var threadLimits = threadload.DefaultLimits
 
 // loadThread reads a thread within threadLimits, with or without bodies. It does not
-// retain recipients for consumers, such as attachments, that only need the body.
+// retain recipients or delivery records for consumers, such as attachments, that only
+// need the body.
 func loadThread(ctx context.Context, threadID int64, hydrate bool) (*threadload.Thread, error) {
-	return loadThreadRetainingRecipients(ctx, threadID, hydrate, false)
+	return loadThreadRetainingMessageMetadata(ctx, threadID, hydrate, false, false)
 }
 
-// loadThreadWithRecipients is the thread-read path: when it reads messages, it keeps
-// their To, Cc and Bcc identities for the JSON and HTML representations.
+// loadThreadWithRecipients keeps the To, Cc and Bcc identities used by the HTML
+// representation, without retaining JSON-only delivery records.
 func loadThreadWithRecipients(ctx context.Context, threadID int64, hydrate bool) (*threadload.Thread, error) {
-	return loadThreadRetainingRecipients(ctx, threadID, hydrate, true)
+	return loadThreadRetainingMessageMetadata(ctx, threadID, hydrate, true, false)
 }
 
-func loadThreadRetainingRecipients(ctx context.Context, threadID int64, hydrate, retainRecipients bool) (*threadload.Thread, error) {
+// loadThreadWithJSONMetadata keeps both ordinary recipients and HEY's records of the
+// exact account addresses an inbound message arrived through.
+func loadThreadWithJSONMetadata(ctx context.Context, threadID int64, hydrate bool) (*threadload.Thread, error) {
+	return loadThreadRetainingMessageMetadata(ctx, threadID, hydrate, true, true)
+}
+
+func loadThreadRetainingMessageMetadata(ctx context.Context, threadID int64, hydrate, retainRecipients, retainReceivedVia bool) (*threadload.Thread, error) {
 	thread, err := threadload.Load(ctx, threadload.NewSDKSource(sdk), threadload.Request{
-		TopicID:          threadID,
-		Hydrate:          hydrate,
-		RetainRecipients: retainRecipients,
-		Limits:           threadLimits,
+		TopicID:           threadID,
+		Hydrate:           hydrate,
+		RetainRecipients:  retainRecipients,
+		RetainReceivedVia: retainReceivedVia,
+		Limits:            threadLimits,
 	})
 	if err != nil {
 		return nil, describeBundleMisread(ctx, threadID, err)

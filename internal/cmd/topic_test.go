@@ -112,7 +112,7 @@ func threadEntriesPageIndex(pages int, cursor string) int {
 // readThreadEntries reads thread 7, the one every server here serves, with its bodies
 // the way `hey thread read` does.
 func readThreadEntries(ctx context.Context) ([]threadEntry, error) {
-	thread, err := loadThreadWithRecipients(ctx, 7, true)
+	thread, err := loadThreadWithJSONMetadata(ctx, 7, true)
 	if err != nil {
 		return nil, err
 	}
@@ -314,8 +314,45 @@ func TestEntriesInThreadCarryWhoEachMessageWasSentTo(t *testing.T) {
 	}
 }
 
-// The entry index carries no recipients, so an entry whose body was not read says
-// nothing about who it went to rather than claiming it went to nobody.
+// received_via is the delivery route, not the visible To line: its exact alias or plus
+// tag survives, every recorded route is kept in order, and a contact remains optional.
+func TestEntriesInThreadCarryInboundDeliveryAddresses(t *testing.T) {
+	const message = `{"id":11,"content":"<div>Your invoice is ready.</div>",
+		"addressed":{"directly":[{"id":22,"name":"David","email_address":"david@example.com"}]},
+		"received_via":[
+			{"email_address":"david+receipts@example.com","contact":{"id":22,"name":"David","email_address":"david@example.com","contactable_type":"Person","avatar_url":"https://example.com/david.png"}},
+			{"email_address":"invoices@example.org"}]}`
+	server, _ := threadEntriesServerServing(t, [][]int64{{11}}, map[int64]string{11: message})
+	withSDKPointedAt(t, server)
+
+	entries, err := readThreadEntries(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	contact := threadContact{ID: 22, Name: "David", EmailAddress: "david@example.com"}
+	want := []threadReceivedVia{
+		{EmailAddress: "david+receipts@example.com", Contact: &contact},
+		{EmailAddress: "invoices@example.org"},
+	}
+	if !reflect.DeepEqual(entries[0].ReceivedVia, want) {
+		t.Errorf("received_via = %+v, want %+v", entries[0].ReceivedVia, want)
+	}
+	encoded, err := json.Marshal(entries[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantJSON := `"received_via":[{"email_address":"david+receipts@example.com","contact":{"id":22,"name":"David","email_address":"david@example.com"}},{"email_address":"invoices@example.org"}]`
+	if !strings.Contains(string(encoded), wantJSON) {
+		t.Errorf("JSON = %s, want it to carry %s", encoded, wantJSON)
+	}
+	if strings.Contains(string(encoded), "contactable_type") || strings.Contains(string(encoded), "avatar_url") {
+		t.Errorf("JSON = %s, want only the resolved contact identity fields", encoded)
+	}
+}
+
+// The entry index carries no recipients or delivery records, so an entry whose body
+// was not read says nothing about who it went to rather than claiming it went to nobody.
 func TestEntriesInThreadWithoutBodiesCarryNoRecipients(t *testing.T) {
 	server, reads := threadEntriesServer(t, [][]int64{{11}}, nil)
 	withSDKPointedAt(t, server)
@@ -332,15 +369,34 @@ func TestEntriesInThreadWithoutBodiesCarryNoRecipients(t *testing.T) {
 	if entries[0].BodyState != string(threadload.StateNotRequested) {
 		t.Errorf("body_state = %q, want %q", entries[0].BodyState, threadload.StateNotRequested)
 	}
-	if entries[0].Recipients != nil {
-		t.Errorf("recipients = %+v, want none for an unread message", entries[0].Recipients)
+	if entries[0].Recipients != nil || len(entries[0].ReceivedVia) != 0 {
+		t.Errorf("entry metadata = recipients %+v, received_via %+v; want none for an unread message", entries[0].Recipients, entries[0].ReceivedVia)
 	}
 	encoded, err := json.Marshal(entries[0])
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(encoded), `"recipients"`) {
-		t.Errorf("JSON = %s, want no recipients key for an unread message", encoded)
+	if strings.Contains(string(encoded), `"recipients"`) || strings.Contains(string(encoded), `"received_via"`) {
+		t.Errorf("JSON = %s, want no message metadata for an unread message", encoded)
+	}
+}
+
+// A sent or generated message has no received_via field from HEY, so the CLI does not
+// fabricate an empty delivery list for it.
+func TestNewThreadEntryOmitsReceivedViaForASentMessage(t *testing.T) {
+	loaded := threadload.Entry{
+		Entry:   generated.Entry{Id: 11},
+		Message: &generated.Message{Id: 11, Content: "<p>sent</p>"},
+		State:   threadload.StateHydrated,
+	}
+
+	entry := newThreadEntry(&loaded, false)
+	encoded, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), `"received_via"`) {
+		t.Errorf("JSON = %s, want no received_via key for a sent message", encoded)
 	}
 }
 
@@ -368,6 +424,18 @@ func TestNewThreadEntryWithNoRecipientsHasEmptyLists(t *testing.T) {
 	}
 	if loaded.Message != nil {
 		t.Error("message still held after conversion")
+	}
+}
+
+func TestThreadReadHelpDistinguishesDeliveryAddressesFromRecipients(t *testing.T) {
+	command := newThreadsCommand().cmd
+	for name, text := range map[string]string{
+		"help":        command.Long,
+		"agent notes": command.Annotations["agent_notes"],
+	} {
+		if !strings.Contains(text, "received_via") || !strings.Contains(text, "delivery") {
+			t.Errorf("%s = %q, want received_via delivery guidance", name, text)
+		}
 	}
 }
 

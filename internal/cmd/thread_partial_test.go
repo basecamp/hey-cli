@@ -55,7 +55,10 @@ func partialThreadServer(t *testing.T, pages [][]int64, missing ...int64) (*http
 				http.Error(w, `{"error":"gone"}`, http.StatusNotFound)
 				return
 			}
-			payload, _ := json.Marshal(map[string]any{"id": id, "content": fmt.Sprintf("<p>body %d</p>", id)})
+			payload, _ := json.Marshal(map[string]any{
+				"id": id, "content": fmt.Sprintf("<p>body %d</p>", id),
+				"received_via": []map[string]any{{"email_address": fmt.Sprintf("alias+%d@example.com", id)}},
+			})
 			_, _ = w.Write(payload)
 		default:
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.RequestURI())
@@ -96,7 +99,7 @@ func decodeThread(t *testing.T, stdout string) threadResponse {
 	return response
 }
 
-func assertThreadEntryOmitsRecipients(t *testing.T, stdout string, id int64) {
+func assertThreadEntryOmitsMessageMetadata(t *testing.T, stdout string, id int64) {
 	t.Helper()
 	var response struct {
 		Data []map[string]any `json:"data"`
@@ -109,15 +112,18 @@ func assertThreadEntryOmitsRecipients(t *testing.T, stdout string, id int64) {
 			if recipients, present := entry["recipients"]; present {
 				t.Errorf("entry %d carries recipients %#v, want the key omitted", id, recipients)
 			}
+			if receivedVia, present := entry["received_via"]; present {
+				t.Errorf("entry %d carries received_via %#v, want the key omitted", id, receivedVia)
+			}
 			return
 		}
 	}
 	t.Errorf("response has no entry %d", id)
 }
 
-// --json carries a body and recipients only for an entry whose message was read: an
-// unread message omits both keys rather than claiming an empty body and recipient list.
-// decodedEntry cannot tell key absence from an empty value, so this reads the raw objects.
+// --json carries a body, recipients and received-via records only for an entry whose
+// message was read. An unread message omits them rather than claiming empty metadata.
+// decodedEntry cannot tell key absence from an empty value, so this reads raw objects.
 func TestThreadsJSONOmitsMessageDataItDidNotRead(t *testing.T) {
 	server, _ := partialThreadServer(t, [][]int64{{13, 12, 11}}, 12)
 	stdoutTerminal(t, false)
@@ -138,14 +144,15 @@ func TestThreadsJSONOmitsMessageDataItDidNotRead(t *testing.T) {
 	for _, entry := range response.Data {
 		body, hasBody := entry["body"]
 		_, hasRecipients := entry["recipients"]
+		_, hasReceivedVia := entry["received_via"]
 		switch entry["id"] {
 		case float64(12):
-			if hasBody || hasRecipients {
-				t.Errorf("entry 12 carries body %#v or recipients %v, want message data omitted", body, hasRecipients)
+			if hasBody || hasRecipients || hasReceivedVia {
+				t.Errorf("entry 12 carries body %#v, recipients %v or received_via %v; want message data omitted", body, hasRecipients, hasReceivedVia)
 			}
 		default:
-			if text, ok := body.(string); !ok || text == "" || !hasRecipients {
-				t.Errorf("entry %v carries body %#v and recipients %v, want both", entry["id"], body, hasRecipients)
+			if text, ok := body.(string); !ok || text == "" || !hasRecipients || !hasReceivedVia {
+				t.Errorf("entry %v carries body %#v, recipients %v and received_via %v; want all", entry["id"], body, hasRecipients, hasReceivedVia)
 			}
 		}
 	}
@@ -296,7 +303,7 @@ func TestThreadsMarksEntriesOverTheRequestLimit(t *testing.T) {
 	if response.Data[0].ID != 11 || response.Data[0].BodyState != "over_limit" {
 		t.Errorf("oldest entry = %+v, want over_limit", response.Data[0])
 	}
-	assertThreadEntryOmitsRecipients(t, stdout, 11)
+	assertThreadEntryOmitsMessageMetadata(t, stdout, 11)
 	if _, messages := reads.counts(); messages != 2 {
 		t.Errorf("read %d messages, want 2", messages)
 	}
@@ -426,7 +433,7 @@ func TestThreadsMarkAnOversizedMessageOverLimit(t *testing.T) {
 	if response.Data[1].ID != 12 || response.Data[1].BodyState != "over_limit" || response.Data[0].BodyState != "hydrated" {
 		t.Errorf("response = %+v", response.Data)
 	}
-	assertThreadEntryOmitsRecipients(t, stdout, 12)
+	assertThreadEntryOmitsMessageMetadata(t, stdout, 12)
 	if _, messages := reads.counts(); messages != 1 {
 		t.Errorf("read the oversized message %d times, want once", messages)
 	}
