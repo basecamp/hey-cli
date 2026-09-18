@@ -330,10 +330,13 @@ jobs:
   #
   # Every other stale-hash case still ends here, red with the remedy attached:
   # human PRs, a Go change that moves the hash without touching go.mod or
-  # go.sum, a Dependabot PR the refresh refuses or whose refresh failed, and
-  # any build that broke for a reason other than the hash — a flake.lock whose
-  # Go is older than go.mod's directive, say, which the shared classifier in
-  # extract-nix-vendor-hash.sh deliberately declines to call a hash problem.
+  # go.sum, and a Dependabot PR the refresh refuses or whose refresh failed.
+  #
+  # A build that broke for some other reason gets no remedy, deliberately.
+  # nix-build-check.sh attaches `make update-nix-hash` only when the shared
+  # classifier in extract-nix-vendor-hash.sh confirms nix's go-modules
+  # fixed-output diagnostic, so a flake.lock whose Go is older than go.mod's
+  # directive falls through with nix's own output and no misleading remedy.
   #
   # Go sources are in the filter too: vendorHash covers the vendored *files*,
   # not go.sum, so a new import from a module already in go.mod changes the
