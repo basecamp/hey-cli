@@ -316,11 +316,24 @@ jobs:
   # touching go.sum, and nothing would notice until the tag (nix-verify). Catch
   # the drift where it is introduced instead.
   #
-  # This job is *meant* to fail on a dependency bump: any go.mod or go.sum
-  # change invalidates vendorHash, and dependabot does not update it, so every
-  # weekly `gomod` PR lands here red. That is the check working. nix-build-check.sh
-  # exists so it lands red with the correct hash and `make update-nix-hash`
-  # attached, instead of a raw nix dump.
+  # This job is *meant* to fail on a dependency change: anything that moves the
+  # vendored module set invalidates vendorHash. That is the check working, and
+  # nix-build-check.sh exists so it lands red with the correct hash and
+  # `make update-nix-hash` attached, instead of a raw nix dump.
+  #
+  # Dependabot's weekly `gomod` PRs no longer stop there.
+  # dependabot-sync-nix-vendor-hash.yml takes the corrected hash out of this
+  # build's own failure and commits that one line of nix/package.nix back to
+  # the Dependabot branch, so this check re-runs on the new head and goes
+  # green without a human. Being required on main is what holds the stale head
+  # back until that lands.
+  #
+  # Every other stale-hash case still ends here, red with the remedy attached:
+  # human PRs, a Go change that moves the hash without touching go.mod or
+  # go.sum, a Dependabot PR the refresh refuses or whose refresh failed, and
+  # any build that broke for a reason other than the hash — a flake.lock whose
+  # Go is older than go.mod's directive, say, which the shared classifier in
+  # extract-nix-vendor-hash.sh deliberately declines to call a hash problem.
   #
   # Go sources are in the filter too: vendorHash covers the vendored *files*,
   # not go.sum, so a new import from a module already in go.mod changes the
