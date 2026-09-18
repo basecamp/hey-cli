@@ -4387,6 +4387,32 @@ func TestMailViewTrashesSelectedThreadsInOneRequest(t *testing.T) {
 	}
 }
 
+func TestMailViewTrashesSelectedThreadsFromPreviouslySeen(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v.seenActive = true
+	v.seenList.setPostings(testPostings())
+	selectTwoThreads(v)
+
+	done, ok := runCmd(v.HandleContentKey(keyPress("t"))).(postingActionDoneMsg)
+	if !ok || done.err != nil || !done.seen {
+		t.Fatalf("Previously Seen bulk trash returned %#v", done)
+	}
+	if recorded.path != "/postings/trash.json" || !slices.Equal(recorded.body.PostingIDs, []int64{100, 101}) {
+		t.Fatalf("request = %s %v, want one POST /postings/trash.json with [100 101]", recorded.path, recorded.body.PostingIDs)
+	}
+
+	v.Update(done)
+	if len(v.seenList.postings) != 0 {
+		t.Errorf("Previously Seen postings left = %d, want every selected row gone", len(v.seenList.postings))
+	}
+	if ids := v.seenList.selectedIDs(); len(ids) != 0 {
+		t.Errorf("Previously Seen selection left = %v, want the trashed rows out of it", ids)
+	}
+	if len(v.postingList.postings) != 2 {
+		t.Errorf("bulk trash changed the box list: %+v", v.postingList.postings)
+	}
+}
+
 func TestMailViewTrashFailureKeepsSelection(t *testing.T) {
 	v, _ := mailWithTestServer(t, http.StatusInternalServerError)
 	selectTwoThreads(v)
