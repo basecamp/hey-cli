@@ -50,7 +50,7 @@ uppercase belongs to Labels:
 | `a` | move to Set Aside |
 | `d` | move to The Feed |
 | `p` | move to Paper Trail |
-| `t` | trash — every selected thread when any are selected, otherwise the one under the cursor |
+| `t` | trash — every selected thread when any are selected, otherwise the one under the cursor. Not offered when it would target a bundle |
 | `!` | mark as spam |
 | `-` / `+` | ignore / stop ignoring |
 | Space | select the thread for a bulk action (`t` or Ctrl+B) |
@@ -70,6 +70,13 @@ not come into it: a bundle, a contact's threads, a label and a search all work, 
 every thread carries the box it is in and files out of that one rather than out of the
 list you found it through. Filing takes the row out of the list you were reading. Only a
 thread opened by its id has no row behind it, and says so instead.
+
+A bundle row cannot be trashed, and `t` leaves the help bar whenever the rows it would
+act on include one. A bundle stands for one sender's whole stream rather than for a thread,
+and HEY trashes a thread — so the server quietly does nothing with it while the list would
+report it gone. HEY's own web app hides Trash on a bundle for the same reason. Deselect the
+bundle to trash the rest of the selection; `hey contact unbundle` is what stops a sender
+being grouped.
 
 While writing a new message, reply or forward, Ctrl+T opens the searchable Snippets
 picker. HEY never chooses a default: Enter inserts the selected snippet at the body

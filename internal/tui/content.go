@@ -526,6 +526,18 @@ func (c *contentList) selectedIDs() []int64 {
 	return ids
 }
 
+// selectedPostings is selectedIDs as rows, for the actions whose availability depends on
+// what kind of row is selected rather than only on how many of them there are.
+func (c *contentList) selectedPostings() []mail.Posting {
+	postings := make([]mail.Posting, 0, len(c.selected))
+	for _, posting := range c.postings[:c.itemCount()] {
+		if _, exists := c.selected[posting.ID]; exists {
+			postings = append(postings, posting)
+		}
+	}
+	return postings
+}
+
 func (c *contentList) clearSelected() {
 	c.selected = nil
 }
