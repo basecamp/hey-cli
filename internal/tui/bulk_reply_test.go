@@ -120,7 +120,7 @@ func TestTUIBulkReplyRequiresExplicitSelection(t *testing.T) {
 	if cmd := view.HandleContentKey(keyPress("ctrl+b")); cmd != nil {
 		t.Fatal("bulk reply without a selection should not make a request")
 	}
-	if view.notice != "Select threads with space before starting a bulk reply" {
+	if view.notice != "Select threads with space or x before starting a bulk reply" {
 		t.Errorf("notice = %q", view.notice)
 	}
 	if requests := state.snapshot(); len(requests) != 0 {

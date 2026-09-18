@@ -556,7 +556,7 @@ func TestCoverHidesPreviouslySeen(t *testing.T) {
 	if !strings.Contains(view, sectionPreviouslySeen.label()) {
 		t.Error("covered list dropped the Previously Seen divider")
 	}
-	if !strings.Contains(view, "3 hidden · x to peek") {
+	if !strings.Contains(view, "3 hidden · z to peek") {
 		t.Error("covered list gave no hint about what is under the cover")
 	}
 	for _, posting := range list.postings[1:] {
@@ -599,7 +599,7 @@ func TestPeekingLiftsTheCover(t *testing.T) {
 	if !strings.Contains(view, list.postings[2].Name) {
 		t.Error("peeking did not reveal the seen threads")
 	}
-	if !strings.Contains(view, "x to cover") {
+	if !strings.Contains(view, "z to cover") {
 		t.Error("a peeked list does not say how to put the cover back")
 	}
 
@@ -627,7 +627,7 @@ func TestCoverDropsTheArtBeforeTheDivider(t *testing.T) {
 	list := coveredList(coverTopo, coverMinRows+2, false, false, true)
 
 	view := list.view()
-	if !strings.Contains(view, "1 hidden · x to peek") {
+	if !strings.Contains(view, "1 hidden · z to peek") {
 		t.Error("a short covered list lost its divider")
 	}
 	if rows := strings.Count(view, "\n") + 1; rows > coverMinRows+2 {
@@ -643,7 +643,7 @@ func TestCoverWithNothingUnread(t *testing.T) {
 		t.Errorf("itemCount = %d, want 0", got)
 	}
 	view := list.view()
-	if !strings.Contains(view, "2 hidden · x to peek") {
+	if !strings.Contains(view, "2 hidden · z to peek") {
 		t.Error("an all-read Imbox does not say what is under the cover")
 	}
 	if rows := strings.Count(view, "\n") + 1; rows != 20 {

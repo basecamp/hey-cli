@@ -53,7 +53,7 @@ uppercase belongs to Labels:
 | `t` | trash |
 | `!` | mark as spam |
 | `-` / `+` | ignore / stop ignoring |
-| Space | select the thread for a bulk action |
+| Space or `x` | select the thread for a bulk action |
 | Ctrl+B | preview every bulk-reply recipient, then write one reply to every selected thread |
 | Ctrl+U | recall a delayed bulk reply while HEY's undo window is open |
 | Ctrl+S | open The Screener |
@@ -109,7 +109,7 @@ scroll, the same way the mail list does.
 The Imbox can wear cover art, the way the HEY web app does: everything you have already
 read goes under it, so the box ends at what still wants your attention instead of trailing
 off into a month of receipts. The divider stays and says how much is under there — press
-`x` to peek, `x` again to close it, or `9` to open Previously Seen on its own screen.
+`z` to peek, `z` again to close it, or `9` to open Previously Seen on its own screen.
 
 Press Ctrl+V to choose one: `blobs`, `grid`, `peace`, `terrazzo`, `topo` or `waves`, the
 same six covers redrawn as characters, so they work in any terminal rather than only the

@@ -569,7 +569,7 @@ func (c *contentList) view() string {
 
 		if label := c.sectionLabelAt(i); label != "" {
 			if c.cover != coverNone && sectionOf(p) == sectionPreviouslySeen {
-				fmt.Fprintln(&b, hintedSectionHeader(label, "x to cover", c.width))
+				fmt.Fprintln(&b, hintedSectionHeader(label, "z to cover", c.width))
 			} else {
 				fmt.Fprintln(&b, sectionHeader(label, c.width))
 			}
@@ -695,7 +695,7 @@ func (c *contentList) view() string {
 // The threads themselves are not rendered at all — that is the whole point of a
 // cover, and it is why the art can have every row the postings did not use.
 func (c *contentList) coverView(hidden, rowsUsed int) string {
-	hint := fmt.Sprintf("%d hidden · x to peek", hidden)
+	hint := fmt.Sprintf("%d hidden · z to peek", hidden)
 	header := hintedSectionHeader(sectionPreviouslySeen.label(), hint, c.width)
 
 	rows := c.height - rowsUsed - 1
@@ -716,7 +716,7 @@ func sectionHeader(label string, width int) string {
 }
 
 // hintedSectionHeader is a section label with a hint on its right, where the HEY web
-// app puts a section's buttons: "Previously Seen ──── 34 hidden · x to peek", or
+// app puts a section's buttons: "Previously Seen ──── 34 hidden · z to peek", or
 // "Habits ──── b to manage".
 func hintedSectionHeader(label, hint string, width int) string {
 	rule := lipgloss.NewStyle().Foreground(colorChrome)
