@@ -982,51 +982,65 @@ func TestRefreshForgetsAGrantTheServerRefused(t *testing.T) {
 }
 
 // Deleting the credential is what normally stops a refused grant being sent again.
-// When the store will not let go of it, the refusal has to be remembered instead, or
-// the next command loads the same dead token and spends another attempt on it.
-func TestARefusedGrantIsNotResentWhenItCannotBeDeleted(t *testing.T) {
+// When the store will not let go of it, an empty credential takes its place so a
+// later process cannot load and resend the same dead token.
+func TestARefusedGrantIsNotResentByANewManagerWhenItCannotBeDeleted(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(invalidGrantHandler(&calls))
 	defer server.Close()
 
 	t.Setenv("HEY_TOKEN", "")
 	t.Setenv("HEY_NO_KEYRING", "")
-	mgr := NewManager(server.URL, server.Client(), t.TempDir())
-
-	// A keyring that stores and reads but refuses to delete.
+	configDir := t.TempDir()
 	stored := ""
-	mgr.GetStore().useKeyring = true
-	mgr.GetStore().initOnce.Do(func() {})
-	mgr.GetStore().keyring = credentialKeyring{
-		set:    func(_, _, password string) error { stored = password; return nil },
-		get:    func(_, _ string) (string, error) { return stored, nil },
-		delete: func(_, _ string) error { return errors.New("keyring is locked") },
-	}
-
-	saveExpiredCredential(t, mgr)
-
-	for range 4 {
-		if _, err := mgr.AccessToken(t.Context()); err == nil {
-			t.Fatal("AccessToken succeeded with a refused grant")
+	newManager := func() *Manager {
+		mgr := NewManager(server.URL, server.Client(), configDir)
+		mgr.GetStore().useKeyring = true
+		mgr.GetStore().initOnce.Do(func() {})
+		mgr.GetStore().keyring = credentialKeyring{
+			set:    func(_, _, password string) error { stored = password; return nil },
+			get:    func(_, _ string) (string, error) { return stored, nil },
+			delete: func(_, _ string) error { return errors.New("keyring is locked") },
 		}
+		return mgr
 	}
 
-	if calls != 1 {
-		t.Errorf("refresh requests = %d, want 1 — the refusal has to outlive a delete that failed", calls)
+	first := newManager()
+	saveExpiredCredential(t, first)
+	if _, err := first.AccessToken(t.Context()); err == nil {
+		t.Fatal("first manager accepted a refused grant")
 	}
 
-	_, err := mgr.AccessToken(t.Context())
+	second := newManager()
+	_, err := second.AccessToken(t.Context())
 	var authErr *apierr.Error
 	if !errors.As(err, &authErr) || authErr.Code != apierr.CodeAuth {
-		t.Errorf("error = %v, want one coded %q", err, apierr.CodeAuth)
+		t.Fatalf("second manager error = %v, want one coded %q", err, apierr.CodeAuth)
+	}
+	if calls != 1 {
+		t.Errorf("refresh requests = %d, want one across both managers", calls)
+	}
+	authenticated, statusErr := second.AuthenticationStatus()
+	if statusErr != nil {
+		t.Fatalf("AuthenticationStatus: %v", statusErr)
+	}
+	if authenticated {
+		t.Error("the refused credential still reports authenticated")
+	}
+
+	if err := second.LoginWithToken("fresh-access"); err != nil {
+		t.Fatalf("LoginWithToken: %v", err)
+	}
+	if token, err := second.AccessToken(t.Context()); err != nil || token != "fresh-access" {
+		t.Fatalf("AccessToken after login = %q, %v", token, err)
 	}
 }
 
 // Forgetting the credential is the manager's call, so whoever owns the response
 // cache has to hear about it from here: cached mail must not outlive the credential
-// that fetched it. The hook runs only when the credential actually went — a refusal
-// the store would not delete, or a failure that is no verdict on the grant, keeps
-// the credential and so keeps the cache.
+// that fetched it. The hook runs when the credential is deleted or replaced by a
+// signed-out record. A failure that is no verdict on the grant keeps the credential
+// and so keeps the cache.
 func TestTheClearedCredentialHookRunsOnlyWhenTheCredentialWent(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -1036,7 +1050,7 @@ func TestTheClearedCredentialHookRunsOnlyWhenTheCredentialWent(t *testing.T) {
 		wantRuns     int
 	}{
 		{name: "refused grant", status: http.StatusBadRequest, body: `{"error":"invalid_grant"}`, wantRuns: 1},
-		{name: "refused grant the store keeps", status: http.StatusBadRequest, body: `{"error":"invalid_grant"}`, refuseDelete: true, wantRuns: 0},
+		{name: "refused grant replaced after delete fails", status: http.StatusBadRequest, body: `{"error":"invalid_grant"}`, refuseDelete: true, wantRuns: 1},
 		{name: "rate limited", status: http.StatusTooManyRequests, body: `{"error":"rate_limit_exceeded"}`, wantRuns: 0},
 		{name: "origin failure", status: http.StatusBadGateway, body: "upstream unavailable", wantRuns: 0},
 	}
@@ -1083,8 +1097,15 @@ func TestTheClearedCredentialHookRunsOnlyWhenTheCredentialWent(t *testing.T) {
 			if runs != tt.wantRuns {
 				t.Errorf("hook ran %d times, want %d", runs, tt.wantRuns)
 			}
-			if kept := stored != ""; kept != (tt.wantRuns == 0) {
-				t.Errorf("credential kept = %v; the hook has to run exactly when it is gone", kept)
+			var remaining Credentials
+			if stored != "" {
+				if err := json.Unmarshal([]byte(stored), &remaining); err != nil {
+					t.Fatalf("stored credential: %v", err)
+				}
+			}
+			kept := remaining.AccessToken != "" || remaining.SessionCookie != ""
+			if kept != (tt.wantRuns == 0) {
+				t.Errorf("usable credential kept = %v; the hook has to run exactly when it is gone", kept)
 			}
 		})
 	}

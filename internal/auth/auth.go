@@ -486,10 +486,22 @@ func (m *Manager) accountForRefreshFailure(err error, sentRefreshToken string) e
 	// Forget it under the lock that already spans this load-refresh-save, so the
 	// next command asks for a login instead of re-sending it.
 	if delErr := m.store.delete(m.baseURL); delErr != nil {
-		// The credential is still on disk for the next command to load, so the
-		// refusal is remembered here instead.
+		// Keep the process-local guard even if the durable fallback also fails.
 		m.refusedRefreshToken = sentRefreshToken
-		return errRefusedGrant(delErr)
+
+		// The keyring can occasionally refuse a delete while still allowing a
+		// write. Replace the dead grant with a signed-out record so another
+		// process cannot load and submit it again. A later login overwrites this
+		// through the ordinary save path.
+		tombstone := &Credentials{}
+		if saveErr := m.store.save(m.baseURL, tombstone); saveErr != nil {
+			return errRefusedGrant(errors.Join(delErr, fmt.Errorf("replace refused credential: %w", saveErr)))
+		}
+		m.cachedCredentials = cloneCredentials(tombstone)
+		if m.credentialCleared != nil {
+			m.credentialCleared()
+		}
+		return errRefusedGrant(nil)
 	}
 	m.cachedCredentials = nil
 	// Cached mail must not outlive the credential that fetched it, here as much
