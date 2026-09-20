@@ -46,6 +46,9 @@ func TestReplyPrefillFromServer(t *testing.T) {
 	if prefill.ActingSenderID != 215 {
 		t.Errorf("acting sender = %d, want the prefill's 215", prefill.ActingSenderID)
 	}
+	if want := (ReplySender{ID: 215, Name: "Support", EmailAddress: "support@example.com"}); prefill.Sender != want {
+		t.Errorf("sender = %+v, want %+v", prefill.Sender, want)
+	}
 	// The addressless contact is dropped; the rest ride verbatim. The quoted content
 	// is not carried at all: HEY appends it at delivery, and echoing it back would
 	// double the quote.
@@ -73,6 +76,9 @@ func TestReplyPrefillFromServerWithoutRecipients(t *testing.T) {
 	if prefill.Subject != "Re: Weekly sync" || prefill.ActingSenderID != 215 {
 		t.Errorf("subject = %q, sender = %d — both survive an empty recipient list",
 			prefill.Subject, prefill.ActingSenderID)
+	}
+	if prefill.Sender.ID != 215 || prefill.Sender.EmailAddress != "support@example.com" {
+		t.Errorf("sender details = %+v, want the prefilled identity", prefill.Sender)
 	}
 	if !reflect.DeepEqual(prefill.Addressed, ReplyRecipients{}) {
 		t.Errorf("addressed = %+v, want none", prefill.Addressed)

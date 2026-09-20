@@ -36,6 +36,18 @@ type threadRecipient struct {
 	EmailAddress string `json:"email_address"`
 }
 
+type replyPreview struct {
+	ThreadID int64 `json:"thread_id"`
+	EntryID  int64 `json:"entry_id"`
+	From     struct {
+		ID           int64  `json:"id"`
+		EmailAddress string `json:"email_address"`
+	} `json:"from"`
+	To  []string `json:"to"`
+	CC  []string `json:"cc"`
+	BCC []string `json:"bcc"`
+}
+
 // firstMessage is the Markdown the long thread starts with. compose sends -m as
 // Markdown, so in the thread the emphasis and the list survive as structure, and the
 // bare URL stays a literal the reader can follow.
@@ -95,6 +107,61 @@ func longThread(t *testing.T, replies int) (topicID string, subject string) {
 		}
 	}
 	return topicID, subject
+}
+
+// Recipient overrides first preview the exact envelope without writing, then replace
+// HEY's prefill while still creating the message inside the original thread.
+func TestReplyRecipientOverrides(t *testing.T) {
+	topicID, _ := longThread(t, 0)
+	const (
+		toAddress  = "jane.doe@example.com"
+		ccAddress  = "morty.smith@example.org"
+		bccAddress = "beth.smith@example.org"
+	)
+
+	previewResponse := heyJSON(t, "reply", topicID, "--dry-run", "--replace-recipients",
+		"--to", toAddress, "--cc", ccAddress, "--bcc", bccAddress)
+	preview := dataAs[replyPreview](t, previewResponse)
+	parsedTopicID, err := strconv.ParseInt(topicID, 10, 64)
+	if err != nil {
+		t.Fatalf("parse topic ID %q: %v", topicID, err)
+	}
+	if preview.ThreadID != parsedTopicID || preview.EntryID <= 0 {
+		t.Errorf("preview identifiers = thread %d entry %d", preview.ThreadID, preview.EntryID)
+	}
+	if preview.From.ID <= 0 || preview.From.EmailAddress == "" {
+		t.Errorf("preview sender = %+v, want a resolved identity", preview.From)
+	}
+	if !slices.Equal(preview.To, []string{toAddress}) || !slices.Equal(preview.CC, []string{ccAddress}) || !slices.Equal(preview.BCC, []string{bccAddress}) {
+		t.Errorf("preview recipients = to %v cc %v bcc %v", preview.To, preview.CC, preview.BCC)
+	}
+
+	before := dataAs[[]threadEntry](t, heyJSON(t, "thread", "read", topicID))
+	if len(before) != 1 {
+		t.Fatalf("dry run left %d entries, want the original entry alone", len(before))
+	}
+
+	_, stderr, code := hey(t, "reply", topicID, "--replace-recipients",
+		"--to", toAddress, "--cc", ccAddress, "--bcc", bccAddress,
+		"-m", "The replacement is on the way.", "--json")
+	if code != 0 {
+		skipf(t, "reply with recipient overrides failed (exit %d): %s", code, stderr)
+	}
+
+	after := dataAs[[]threadEntry](t, heyJSON(t, "thread", "read", topicID))
+	if len(after) != 2 {
+		t.Fatalf("thread has %d entries after reply, want 2", len(after))
+	}
+	latest := after[len(after)-1]
+	if !strings.Contains(latest.Body, "The replacement is on the way.") {
+		t.Errorf("latest body = %q", latest.Body)
+	}
+	if latest.Recipients == nil ||
+		!slices.ContainsFunc(latest.Recipients.To, func(recipient threadRecipient) bool { return strings.EqualFold(recipient.EmailAddress, toAddress) }) ||
+		!slices.ContainsFunc(latest.Recipients.CC, func(recipient threadRecipient) bool { return strings.EqualFold(recipient.EmailAddress, ccAddress) }) ||
+		!slices.ContainsFunc(latest.Recipients.BCC, func(recipient threadRecipient) bool { return strings.EqualFold(recipient.EmailAddress, bccAddress) }) {
+		t.Errorf("latest recipients = %+v, want the replacement envelope", latest.Recipients)
+	}
 }
 
 // A thread longer than a page reads whole, oldest first, with every entry's body as

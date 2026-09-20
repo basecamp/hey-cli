@@ -125,6 +125,9 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		if resolveErr != nil {
 			return resolveErr
 		}
+		if !replyHasRecipients(target.Addressed) {
+			return apierr.ErrUsage("could not determine thread recipients; use hey reply with --to, --cc or --bcc")
+		}
 		replySDK := target.client
 		messageWithAttachments, attachErr := attachFilesWithClient(ctx, replySDK, message, c.attachments)
 		if attachErr != nil {

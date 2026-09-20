@@ -284,9 +284,14 @@ hey move
 hey move --to
 hey reply
 hey reply --attach
+hey reply --bcc
+hey reply --cc
 hey reply --draft
+hey reply --dry-run
 hey reply --message
 hey reply --message-html
+hey reply --replace-recipients
+hey reply --to
 hey screener
 hey screener approve
 hey screener approve --box

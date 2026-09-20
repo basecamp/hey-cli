@@ -475,6 +475,8 @@ Direct attachment IDs combine the message ID and position, so `67890:1` identifi
 ```bash
 hey reply <topic_id> -m "Friday works for me — I'll send an agenda."  # Inline message
 hey reply <topic_id>                          # Reply via $EDITOR
+hey reply <topic_id> --to support@example.com -m "The replacement is on the way."
+hey reply <topic_id> --to support@example.com --replace-recipients --dry-run --json
 hey reply <topic_id> -m "Here is the wiring diagram." --attach ./diagram.png
 hey forward <topic_id> --to alice@example.com                 # Forward the latest message
 hey forward <topic_id> --to alice@example.com -m "Please review before Thursday."
@@ -490,8 +492,11 @@ hey compose --to alice@example.com --subject "Newsletter draft" --message-html "
 
 `hey reply` answers the thread's **latest** entry. HEY addresses the reply the way its own
 web app does: everyone that entry was addressed to, plus whoever wrote it, on the To line.
-A reply HEY cannot address is saved as a draft rather than sent, so the command fails
-rather than guessing when it cannot work out the recipients.
+Repeatable `--to`, `--cc` and `--bcc` flags add or move explicit recipients. Use
+`--replace-recipients` to discard HEY's prefill. Run `--dry-run --json` first when an
+agent changes the envelope; it needs no message and reports the resolved sender and final
+recipients without sending. A reply HEY cannot address is refused unless an explicit
+recipient makes it addressable.
 
 Everything you send is Markdown by default — `-m`, `--content`, `--note`, positional
 content, stdin, and `$EDITOR` alike — and is converted to rich text on the way out. To

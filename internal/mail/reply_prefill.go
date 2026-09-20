@@ -15,6 +15,13 @@ type ReplyRecipients struct {
 	BCC []string
 }
 
+// ReplySender is the configured identity a reply goes out as.
+type ReplySender struct {
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	EmailAddress string `json:"email_address"`
+}
+
 // ReplyPrefill is how a reply starts out, as HEY prefills it: the "Re: …" subject it
 // goes out under, the sender it goes out as, and who it goes out to. The prefill's
 // quoted content is deliberately not carried: a reply's content is the writer's body
@@ -23,6 +30,7 @@ type ReplyRecipients struct {
 type ReplyPrefill struct {
 	Subject        string
 	ActingSenderID int64
+	Sender         ReplySender
 	Addressed      ReplyRecipients
 }
 
@@ -47,6 +55,11 @@ func ReplyPrefillFromServer(ctx context.Context, client *hey.Client, entryID int
 	prefill := ReplyPrefill{
 		Subject:        prefilled.Subject,
 		ActingSenderID: prefilled.Sender.Id,
+		Sender: ReplySender{
+			ID:           prefilled.Sender.Id,
+			Name:         prefilled.Sender.Name,
+			EmailAddress: prefilled.Sender.EmailAddress,
+		},
 		Addressed: ReplyRecipients{
 			To:  contactEmails(prefilled.Addressed.Directly),
 			CC:  contactEmails(prefilled.Addressed.Copied),

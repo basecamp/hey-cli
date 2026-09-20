@@ -15,6 +15,7 @@ import (
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/mail"
 )
 
 // messageAddressedToJane is entry 12 as HEY serves it: Rick wrote it, Jane was on the
@@ -108,7 +109,7 @@ func threadReplyServer(t *testing.T, messageJSON string, entryIDs ...int64) (*ht
 				t.Errorf("identity account = %q, want unscoped", got)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"id":1,"accounts":[{"id":8,"status":"active"},{"id":9,"status":"active"}],"senders":[{"id":42,"account_id":9,"default":true}]}`)
+			fmt.Fprint(w, `{"id":1,"accounts":[{"id":8,"status":"active"},{"id":9,"status":"active"}],"senders":[{"id":42,"account_id":9,"name":"Jane Doe","email_address":"me@example.com","default":true}]}`)
 		case r.URL.Path == "/topics/7.json":
 			sent.TopicAccountFilter = r.URL.Query().Get("filtered_account_id")
 			w.Header().Set("Content-Type", "application/json")
@@ -216,17 +217,43 @@ func TestResolveThreadReplyFollowsTheLatestEntrysRecipients(t *testing.T) {
 	}
 }
 
-// An unaddressed reply is saved as a draft rather than sent, so a thread we cannot read
-// recipients from is refused before anything is written.
+// Resolution keeps an unaddressed target so an explicit recipient override can make
+// the reply addressable. The command still refuses to send it without that override.
 func TestResolveThreadReplyWithoutRecipients(t *testing.T) {
 	server, _ := threadReplyServer(t, messageWithoutRecipients, 11, 12)
 	withSDKPointedAt(t, server)
 
-	_, err := resolveThreadReply(context.Background(), 7)
+	target, err := resolveThreadReply(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("resolve unaddressed reply: %v", err)
+	}
+	if replyHasRecipients(target.Addressed) {
+		t.Errorf("recipients = %+v, want none", target.Addressed)
+	}
+}
 
+func TestReplyOverrideCanAddressAnOtherwiseUnaddressedThread(t *testing.T) {
+	server, sent := threadReplyServer(t, messageWithoutRecipients, 11, 12)
+
+	err := runCLI(t, server, "--account", "8", "reply", "7", "-m", "please route this", "--to", "support@example.com")
+	if err != nil {
+		t.Fatalf("reply with explicit recipient: %v", err)
+	}
+	if want := []string{"support@example.com"}; !reflect.DeepEqual(sent.To, want) {
+		t.Errorf("to = %v, want %v", sent.To, want)
+	}
+}
+
+func TestReplyWithoutResolvedOrExplicitRecipientsIsRefused(t *testing.T) {
+	server, sent := threadReplyServer(t, messageWithoutRecipients, 11, 12)
+
+	err := runCLI(t, server, "--account", "8", "reply", "7", "-m", "must not send")
 	var cliErr *apierr.Error
-	if !errors.As(err, &cliErr) || cliErr.Code != "usage" {
-		t.Fatalf("expected a usage error, got %v", err)
+	if !errors.As(err, &cliErr) || cliErr.Code != "usage" || !strings.Contains(err.Error(), "supply --to") {
+		t.Fatalf("expected an actionable usage error, got %v", err)
+	}
+	if sent.Path != "" {
+		t.Errorf("unaddressed reply wrote to %q", sent.Path)
 	}
 }
 
@@ -348,6 +375,12 @@ func TestReplySendsRawHTMLVerbatim(t *testing.T) {
 // output writer and auth are set up — against a test server.
 func runCLI(t *testing.T, server *httptest.Server, args ...string) error {
 	t.Helper()
+	_, err := runCLIOutput(t, server, args...)
+	return err
+}
+
+func runCLIOutput(t *testing.T, server *httptest.Server, args ...string) (string, error) {
+	t.Helper()
 	t.Setenv("HEY_TOKEN", "test-token")
 	t.Setenv("HEY_NO_KEYRING", "1")
 	t.Setenv("HEY_BASE_URL", "")
@@ -362,7 +395,178 @@ func runCLI(t *testing.T, server *httptest.Server, args ...string) error {
 	root.SetErr(&buf)
 	root.SetArgs(append([]string{"--json", "--base-url", server.URL}, args...))
 
-	return root.Execute()
+	err := root.Execute()
+	return buf.String(), err
+}
+
+func TestReplyMergesRecipientOverridesIntoHEYsPrefill(t *testing.T) {
+	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
+	sent.ReplyNewJSON = `{"subject":"Re: Weekly sync","content":"<div>quoted</div>","is_reply":true,
+		"addressed":{
+			"directly":[{"email_address":"rick@example.com"}],
+			"copied":[{"email_address":"moved@example.com"},{"email_address":"cc@example.com"}]
+		}}`
+
+	err := runCLI(t, server, "--account", "8", "reply", "7", "-m", "sounds good",
+		"--to", "moved@example.com", "--to", "support@example.com,billing@example.com",
+		"--cc", "manager@example.com", "--bcc", "audit@example.com")
+	if err != nil {
+		t.Fatalf("reply with recipient overrides: %v", err)
+	}
+
+	if want := []string{"rick@example.com", "moved@example.com", "support@example.com", "billing@example.com"}; !reflect.DeepEqual(sent.To, want) {
+		t.Errorf("to = %v, want %v", sent.To, want)
+	}
+	if want := []string{"cc@example.com", "manager@example.com"}; !reflect.DeepEqual(sent.CC, want) {
+		t.Errorf("cc = %v, want %v", sent.CC, want)
+	}
+	if want := []string{"audit@example.com"}; !reflect.DeepEqual(sent.BCC, want) {
+		t.Errorf("bcc = %v, want %v", sent.BCC, want)
+	}
+	if !strings.Contains(sent.Path, "/entries/12/replies") {
+		t.Errorf("path = %q, want the existing thread's reply endpoint", sent.Path)
+	}
+}
+
+func TestReplyCanReplaceHEYsPrefilledRecipients(t *testing.T) {
+	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
+	sent.ReplyNewJSON = `{"subject":"Re: Weekly sync","content":"<div>quoted</div>","is_reply":true,
+		"addressed":{"directly":[{"email_address":"rick@example.com"}],"copied":[{"email_address":"cc@example.com"}]}}`
+
+	err := runCLI(t, server, "--account", "8", "reply", "7", "-m", "sounds good",
+		"--replace-recipients", "--to", "support@example.com", "--bcc", "archive@example.com")
+	if err != nil {
+		t.Fatalf("reply with replacement recipients: %v", err)
+	}
+
+	if want := []string{"support@example.com"}; !reflect.DeepEqual(sent.To, want) {
+		t.Errorf("to = %v, want %v", sent.To, want)
+	}
+	if len(sent.CC) != 0 {
+		t.Errorf("cc = %v, want none", sent.CC)
+	}
+	if want := []string{"archive@example.com"}; !reflect.DeepEqual(sent.BCC, want) {
+		t.Errorf("bcc = %v, want %v", sent.BCC, want)
+	}
+}
+
+func TestReplyDryRunReportsTheResolvedEnvelopeWithoutSending(t *testing.T) {
+	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
+	sent.ReplyNewJSON = `{"subject":"Re: Weekly sync","content":"<div>quoted</div>","is_reply":true,
+		"sender":{"id":215,"name":"Support","email_address":"support@example.com"},
+		"addressed":{"directly":[{"email_address":"rick@example.com"}]}}`
+
+	out, err := runCLIOutput(t, server, "--account", "8", "reply", "7", "--dry-run",
+		"--to", "customer@example.org", "--cc", "manager@example.com")
+	if err != nil {
+		t.Fatalf("reply dry run: %v", err)
+	}
+	if sent.Path != "" {
+		t.Fatalf("dry run wrote a reply to %q", sent.Path)
+	}
+
+	var response struct {
+		Data struct {
+			ThreadID  int64  `json:"thread_id"`
+			EntryID   int64  `json:"entry_id"`
+			AccountID int64  `json:"account_id"`
+			Subject   string `json:"subject"`
+			From      struct {
+				ID           int64  `json:"id"`
+				Name         string `json:"name"`
+				EmailAddress string `json:"email_address"`
+			} `json:"from"`
+			To  []string `json:"to"`
+			CC  []string `json:"cc"`
+			BCC []string `json:"bcc"`
+		} `json:"data"`
+		Summary string `json:"summary"`
+	}
+	if err := json.Unmarshal([]byte(out), &response); err != nil {
+		t.Fatalf("decode dry run: %v\n%s", err, out)
+	}
+	if response.Data.ThreadID != 7 || response.Data.EntryID != 12 || response.Data.AccountID != 9 {
+		t.Errorf("reply identifiers = thread %d entry %d account %d", response.Data.ThreadID, response.Data.EntryID, response.Data.AccountID)
+	}
+	if response.Data.Subject != "Re: Weekly sync" {
+		t.Errorf("subject = %q", response.Data.Subject)
+	}
+	if response.Data.From.ID != 215 || response.Data.From.Name != "Support" || response.Data.From.EmailAddress != "support@example.com" {
+		t.Errorf("from = %+v", response.Data.From)
+	}
+	if want := []string{"rick@example.com", "customer@example.org"}; !reflect.DeepEqual(response.Data.To, want) {
+		t.Errorf("to = %v, want %v", response.Data.To, want)
+	}
+	if want := []string{"manager@example.com"}; !reflect.DeepEqual(response.Data.CC, want) {
+		t.Errorf("cc = %v, want %v", response.Data.CC, want)
+	}
+	if response.Data.BCC == nil || len(response.Data.BCC) != 0 {
+		t.Errorf("bcc = %#v, want an empty list", response.Data.BCC)
+	}
+	if response.Summary != "Reply preview; nothing sent" {
+		t.Errorf("summary = %q", response.Summary)
+	}
+}
+
+func TestReplyDryRunResolvesTheAccountDefaultSender(t *testing.T) {
+	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
+	sent.ReplyNewJSON = `{"subject":"Re: Weekly sync","content":"<div>quoted</div>","is_reply":true,
+		"addressed":{"directly":[{"email_address":"rick@example.com"}]}}`
+
+	out, err := runCLIOutput(t, server, "--account", "8", "reply", "7", "--dry-run")
+	if err != nil {
+		t.Fatalf("reply dry run: %v", err)
+	}
+	var response struct {
+		Data struct {
+			From mail.ReplySender `json:"from"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(out), &response); err != nil {
+		t.Fatalf("decode dry run: %v\n%s", err, out)
+	}
+	want := mail.ReplySender{ID: 42, Name: "Jane Doe", EmailAddress: "me@example.com"}
+	if response.Data.From != want {
+		t.Errorf("from = %+v, want account default %+v", response.Data.From, want)
+	}
+}
+
+func TestReplyRecipientCannotBeExplicitlyNamedOnTwoLines(t *testing.T) {
+	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
+
+	err := runCLI(t, server, "--account", "8", "reply", "7", "--dry-run",
+		"--to", "support@example.com", "--cc", "SUPPORT@example.com")
+	if err == nil || !strings.Contains(err.Error(), "both --to and --cc") {
+		t.Fatalf("error = %v, want a conflicting recipient refusal", err)
+	}
+	if sent.Path != "" {
+		t.Errorf("invalid overrides wrote to %q", sent.Path)
+	}
+}
+
+func TestReplyDraftCarriesRecipientOverrides(t *testing.T) {
+	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
+
+	err := runCLI(t, server, "--account", "8", "reply", "7", "--draft", "-m", "please review",
+		"--replace-recipients", "--to", "support@example.com")
+	if err != nil {
+		t.Fatalf("reply draft with recipient override: %v", err)
+	}
+	if sent.Status != "drafted" || !reflect.DeepEqual(sent.To, []string{"support@example.com"}) {
+		t.Errorf("draft status = %q, to = %v", sent.Status, sent.To)
+	}
+}
+
+func TestReplyReplacementRequiresExplicitRecipients(t *testing.T) {
+	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
+
+	err := runCLI(t, server, "--account", "8", "reply", "7", "--replace-recipients", "--dry-run")
+	if err == nil || !strings.Contains(err.Error(), "--replace-recipients requires") {
+		t.Fatalf("error = %v, want a replacement recipient refusal", err)
+	}
+	if sent.Path != "" {
+		t.Errorf("invalid replacement wrote to %q", sent.Path)
+	}
 }
 
 // HEY's replies/new endpoint answers the reply's recipients with the acting user's own

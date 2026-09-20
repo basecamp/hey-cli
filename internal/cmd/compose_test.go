@@ -105,6 +105,19 @@ func TestComposeSubjectRequiredOnlyForANewMessage(t *testing.T) {
 	}
 }
 
+func TestComposeThreadReplyWithoutRecipientsIsRefusedBeforeWriting(t *testing.T) {
+	server, sent := threadReplyServer(t, messageWithoutRecipients, 11, 12)
+
+	err := runCLI(t, server, "--account", "8", "compose", "--thread-id", "7", "-m", "must not send")
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != "usage" || !strings.Contains(err.Error(), "use hey reply with --to") {
+		t.Fatalf("expected an actionable usage error, got %v", err)
+	}
+	if sent.Path != "" {
+		t.Errorf("unaddressed compose reply wrote to %q", sent.Path)
+	}
+}
+
 func TestComposeSendsTheMessageAsMarkdown(t *testing.T) {
 	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
 
