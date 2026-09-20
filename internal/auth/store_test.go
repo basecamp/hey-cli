@@ -339,8 +339,17 @@ func TestKeyringFailureOnFirstAccessPreservesKnownKeyringChoice(t *testing.T) {
 	}
 
 	locked := NewStore(configDir)
+	lockedErr := errors.New("keyring is locked")
 	locked.keyring = credentialKeyring{
-		get:    func(_, _ string) (string, error) { return "", errors.New("keyring is locked") },
+		get: func(_, user string) (string, error) {
+			if lockedErr != nil {
+				return "", lockedErr
+			}
+			if user == keyringAvailability {
+				return "", keyringlib.ErrNotFound
+			}
+			return `{"access_token":"recovered"}`, nil
+		},
 		set:    func(_, _, _ string) error { return nil },
 		delete: func(_, _ string) error { return nil },
 	}
@@ -353,6 +362,15 @@ func TestKeyringFailureOnFirstAccessPreservesKnownKeyringChoice(t *testing.T) {
 	}
 	if !locked.UsingKeyring() {
 		t.Error("known keyring choice was replaced with the fallback file")
+	}
+
+	lockedErr = nil
+	creds, err := locked.Load("https://app.hey.com")
+	if err != nil {
+		t.Fatalf("Load after unlock: %v", err)
+	}
+	if creds.AccessToken != "recovered" {
+		t.Errorf("access token = %q, want recovered", creds.AccessToken)
 	}
 }
 

@@ -43,7 +43,6 @@ type Credentials struct {
 type Store struct {
 	initOnce    sync.Once
 	useKeyring  bool
-	keyringErr  error
 	noKeyring   bool
 	fallbackDir string
 	keyring     credentialKeyring
@@ -76,8 +75,9 @@ func (s *Store) ensureInit() {
 			return
 		}
 		if s.keyringWasChosen() {
+			// Keep using the selected backend, but do not cache this probe failure:
+			// each real operation must be able to recover after the keyring unlocks.
 			s.useKeyring = true
-			s.keyringErr = fmt.Errorf("system keyring unavailable: %w", err)
 			return
 		}
 		fmt.Fprintf(os.Stderr, "warning: system keyring unavailable, credentials stored in plaintext at %s\n",
@@ -136,9 +136,6 @@ func (s *Store) Delete(origin string) error {
 // a whole read-modify-write. Everything else goes through Load, Save and Delete.
 func (s *Store) load(origin string) (*Credentials, error) {
 	s.ensureInit()
-	if s.keyringErr != nil {
-		return nil, s.keyringErr
-	}
 	if s.useKeyring {
 		return s.loadFromKeyring(origin)
 	}
@@ -147,9 +144,6 @@ func (s *Store) load(origin string) (*Credentials, error) {
 
 func (s *Store) save(origin string, creds *Credentials) error {
 	s.ensureInit()
-	if s.keyringErr != nil {
-		return s.keyringErr
-	}
 	if s.useKeyring {
 		return s.saveToKeyring(origin, creds)
 	}
@@ -158,9 +152,6 @@ func (s *Store) save(origin string, creds *Credentials) error {
 
 func (s *Store) delete(origin string) error {
 	s.ensureInit()
-	if s.keyringErr != nil {
-		return s.keyringErr
-	}
 	if s.useKeyring {
 		return s.keyring.delete(serviceName, key(origin))
 	}
@@ -290,9 +281,6 @@ func (s *Store) deleteFile(origin string) error {
 // MigrateToKeyring migrates credentials from file to keyring.
 func (s *Store) MigrateToKeyring() error {
 	s.ensureInit()
-	if s.keyringErr != nil {
-		return s.keyringErr
-	}
 	if !s.useKeyring {
 		return nil
 	}
