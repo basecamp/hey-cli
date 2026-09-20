@@ -875,6 +875,22 @@ func TestModelRetriesACalendarWatchAfterRateLimit(t *testing.T) {
 	}
 }
 
+func TestModelRetriesACalendarWatchAfterCredentialStorageFailure(t *testing.T) {
+	m := newModel()
+	m.watchCalendar = func(_, _ context.Context) (<-chan CalendarWatchEvent, error) {
+		return make(chan CalendarWatchEvent), nil
+	}
+	updated, _ := m.switchSection(sectionCalendar)
+	m = updated.(model)
+
+	unavailable := errors.New("could not read stored credentials: keyring is locked")
+	updated, cmd := m.Update(calendarWatchStartedMsg{attempt: m.calendarWatchAttempt, err: unavailable})
+	m = updated.(model)
+	if cmd == nil || m.stopCalendarWatch != nil || m.calendarWatchFailures != 1 {
+		t.Errorf("failures = %d, want the storage failure to schedule a retry", m.calendarWatchFailures)
+	}
+}
+
 func TestModelDoesNotRetryACalendarWatchAfterAuthenticationFailure(t *testing.T) {
 	m := newModel()
 	m.watchCalendar = func(_, _ context.Context) (<-chan CalendarWatchEvent, error) {

@@ -148,11 +148,20 @@ func mailWatchRetryDelay(failures int) time.Duration {
 }
 
 func retryableWatchError(err error) bool {
+	code := watchErrorCode(err)
+	return code == apierr.CodeNetwork || code == apierr.CodeRateLimit
+}
+
+func authenticationWatchError(err error) bool {
+	return watchErrorCode(err) == apierr.CodeAuth
+}
+
+func watchErrorCode(err error) string {
 	var known *apierr.Error
 	if !errors.As(err, &known) {
 		known = apierr.AsError(apierr.FromSDK(err))
 	}
-	return known.Code == apierr.CodeNetwork || known.Code == apierr.CodeRateLimit
+	return known.Code
 }
 
 func (m *model) mailWatchFailed(err error) tea.Cmd {
