@@ -87,10 +87,6 @@ github.com/aymanbagabas/go-udiff v0.4.1 h1:OEIrQ8maEeDBXQDoGCbbTTXYJMYRCRO1fnodZ
 github.com/aymanbagabas/go-udiff v0.4.1/go.mod h1:0L9PGwj20lrtmEMeyw4WKJ/TMyDtvAoK9bf2u/mNo3w=
 github.com/aymerick/douceur v0.2.0 h1:Mv+mAeH1Q+n9Fr+oyamOlAkUNPWPlA8PPGR0QAaYuPk=
 github.com/aymerick/douceur v0.2.0/go.mod h1:wlT5vV2O3h55X9m7iVYN0TBM0NH/MmbLnd30/FjWUq4=
-github.com/basecamp/actioncable-go v1.0.0 h1:m8UGFYfBfa/YivQNayc2VoS+oVKLG+ixKzhIzdACWDM=
-github.com/basecamp/actioncable-go v1.0.0/go.mod h1:ezaV5z1GXQAsqyejqTs6wCFl2D8Wj+COLQkHc/kwoRs=
-github.com/basecamp/actioncable-go v1.0.1-0.20260920012115-d1ee046197ee h1:UokSc0Qnp/2+feQX3gcH5tcw9vRaaPzisstzj2Ml084=
-github.com/basecamp/actioncable-go v1.0.1-0.20260920012115-d1ee046197ee/go.mod h1:ezaV5z1GXQAsqyejqTs6wCFl2D8Wj+COLQkHc/kwoRs=
 github.com/basecamp/actioncable-go v1.0.1-0.20260920013943-0a28da604c70 h1:HuJ7a2jTI7UQLIKhFrvbo/QKR/igzFzsI7Nc7C8acpk=
 github.com/basecamp/actioncable-go v1.0.1-0.20260920013943-0a28da604c70/go.mod h1:ezaV5z1GXQAsqyejqTs6wCFl2D8Wj+COLQkHc/kwoRs=
 github.com/basecamp/hey-sdk/go v0.31.1 h1:dFlCe4LMmLAHgRB05QRHaE26XPPkZVIMp0qCGEanVQU=
