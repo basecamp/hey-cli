@@ -301,8 +301,9 @@ func (w *calendarStreamWatch) run(ctx, connectionCtx context.Context, cursor hey
 			}
 			return
 		case <-poll.C:
-			next, alive := w.pollOnce(ctx, connectionCtx, cursor)
-			if !alive {
+			next, err := w.pollOnce(ctx, connectionCtx, cursor)
+			if err != nil {
+				ringCalendarWatchEvent(w.changes, tui.CalendarWatchEvent{Err: err})
 				return
 			}
 			cursor = next
@@ -312,17 +313,17 @@ func (w *calendarStreamWatch) run(ctx, connectionCtx context.Context, cursor hey
 
 // pollOnce reads the calendar-level feed once. A read that fails is skipped — the cursor
 // has not moved, so the next poll reads the same changes — but a stream that cannot be
-// subscribed ends the watch: the connection is the likely reason, and reopening the whole
-// watch resubscribes everything.
-func (w *calendarStreamWatch) pollOnce(ctx, connectionCtx context.Context, cursor hey.CalendarChangesCursor) (hey.CalendarChangesCursor, bool) {
+// subscribed ends the watch with its reason, so the TUI can tell a temporary connection
+// failure from credentials the server refused.
+func (w *calendarStreamWatch) pollOnce(ctx, connectionCtx context.Context, cursor hey.CalendarChangesCursor) (hey.CalendarChangesCursor, error) {
 	changes, err := sdk.Calendars().AllCalendarChanges(ctx, cursor)
 	if err != nil {
-		return cursor, true
+		return cursor, nil //nolint:nilerr // A failed feed read leaves its cursor for the next poll.
 	}
 
 	for _, added := range changes.Added {
 		if err := w.subscribe(ctx, connectionCtx, added); err != nil {
-			return cursor, false
+			return cursor, err
 		}
 	}
 	for _, deleted := range changes.Deleted {
@@ -335,7 +336,7 @@ func (w *calendarStreamWatch) pollOnce(ctx, connectionCtx context.Context, curso
 		cursor = *changes.NextCursor
 	}
 
-	return cursor, true
+	return cursor, nil
 }
 
 func (w *calendarStreamWatch) drop(calendarID int64) {

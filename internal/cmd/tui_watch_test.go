@@ -385,9 +385,9 @@ func TestCalendarStreamWatchPollFollowsTheCalendarSet(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	next, alive := watch.pollOnce(context.Background(), context.Background(), cursor)
-	if !alive {
-		t.Fatal("a poll that read cleanly should keep the watch alive")
+	next, err := watch.pollOnce(context.Background(), context.Background(), cursor)
+	if err != nil {
+		t.Fatalf("a poll that read cleanly should keep the watch alive: %v", err)
 	}
 	if next.Since != "2026-08-18T09:20:00.000Z" {
 		t.Errorf("cursor = %+v, want it moved to where the feed left off", next)
@@ -402,6 +402,50 @@ func TestCalendarStreamWatchPollFollowsTheCalendarSet(t *testing.T) {
 	case <-watch.changes:
 	default:
 		t.Error("a changed calendar set should ring the doorbell")
+	}
+}
+
+func TestCalendarStreamWatchPollReportsSubscriptionAuthenticationFailure(t *testing.T) {
+	t.Setenv("HEY_TOKEN", "")
+	t.Setenv("HEY_NO_KEYRING", "1")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Link", `<`+r.URL.Path+`?since=2026-08-18T09%3A20%3A00.000Z>; rel="next"`)
+		_, _ = w.Write([]byte(`{
+			"added": [{"calendar": {"id": 514, "name": "Book Club"},
+			           "recording_changes_url": "/calendars/514/recording/changes.json?since=2026-08-18T09%3A14%3A00.000Z&v=1",
+			           "signed_stream_name": "book-club-stream"}]
+		}`))
+	}))
+	t.Cleanup(server.Close)
+
+	previousSDK, previousCfg, previousAuthMgr := sdk, cfg, authMgr
+	sdk = hey.NewClient(
+		&hey.Config{BaseURL: server.URL},
+		&hey.StaticTokenProvider{Token: "test-token"},
+		hey.WithMaxRetries(0),
+	)
+	cfg = &config.Config{BaseURL: server.URL}
+	authMgr = auth.NewManager(server.URL, server.Client(), t.TempDir())
+	stopped := actioncable.New("ws://cable.example.test/cable")
+	_ = stopped.Close()
+	tuiCable.client = stopped
+	t.Cleanup(func() {
+		sdk, cfg, authMgr = previousSDK, previousCfg, previousAuthMgr
+		tuiCable.client = nil
+	})
+
+	watch := newCalendarStreamWatch()
+	cursor, err := hey.CalendarChangesCursorFrom(server.URL + "/calendar/changes.json?since=2026-08-18T09%3A00%3A00.000Z")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	_, err = watch.pollOnce(context.Background(), context.Background(), cursor)
+	var known *apierr.Error
+	if !errors.As(err, &known) || known.Code != apierr.CodeAuth {
+		t.Errorf("poll error = %T %v, want the subscription authentication failure", err, err)
 	}
 }
 
@@ -420,9 +464,9 @@ func TestCalendarStreamWatchPollSkipsAFailedRead(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	next, alive := watch.pollOnce(context.Background(), context.Background(), cursor)
-	if !alive {
-		t.Error("a read that failed should be retried by the next poll, not end the watch")
+	next, err := watch.pollOnce(context.Background(), context.Background(), cursor)
+	if err != nil {
+		t.Errorf("a read that failed should be retried by the next poll, not end the watch: %v", err)
 	}
 	if next.Since != cursor.Since {
 		t.Errorf("cursor = %+v, want it left where it was", next)
