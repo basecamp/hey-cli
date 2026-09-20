@@ -344,9 +344,17 @@ func (s omarchySetup) addAndVerify(marker omarchyPluginMarker) omarchyStep {
 	cloneRefused := strings.Contains(lower, "failed to clone")
 	failed := cloneRefused || (err != nil && !strings.Contains(lower, "already installed") && !strings.Contains(lower, "already used"))
 	if failed {
-		// Every failed add arms the retry throttle — a hang killed at the
-		// timeout says no "failed to clone" but retrying it on every
-		// sign-in would block each one for another minute.
+		// The add has several side effects after the clone. A later failure
+		// can leave the plugin enabled, so the shell's final state wins over
+		// the command result.
+		probe, _, outcome := s.probeShellPlugins()
+		if outcome == probeAnswered && probe.present && probe.enabled {
+			return s.finalize(marker)
+		}
+		// An add that did not reach the required postcondition arms the retry
+		// throttle. A hang killed at the timeout says no "failed to clone",
+		// but retrying it on every sign-in would block each one for another
+		// minute.
 		marker.LastCloneError = firstOutputLine(out, err)
 		marker.LastCloneAt = omarchyNow()
 		_ = s.env.writeMarker(marker) // best effort: the throttle is a convenience
