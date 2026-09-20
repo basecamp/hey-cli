@@ -184,7 +184,10 @@ func newAuthStatusCommand() *cobra.Command {
 
 			store := authMgr.GetStore()
 			creds, err := store.Load(authMgr.CredentialKey())
-			if err != nil || (creds.AccessToken == "" && creds.SessionCookie == "") {
+			if err != nil && !errors.Is(err, auth.ErrCredentialsNotFound) {
+				return fmt.Errorf("could not read authentication status: %w", err)
+			}
+			if errors.Is(err, auth.ErrCredentialsNotFound) || (creds.AccessToken == "" && creds.SessionCookie == "") {
 				if writer.IsStyled() {
 					w := cmd.OutOrStdout()
 					fmt.Fprintf(w, "Base URL:  %s\n", cfg.BaseURL)

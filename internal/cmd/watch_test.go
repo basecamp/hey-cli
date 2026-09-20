@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -1046,6 +1047,7 @@ func TestPermanentReadErrorRecognizesACLIAuthFailure(t *testing.T) {
 		{name: "cli usage", err: apierr.ErrUsage("bad cursor"), want: true},
 		{name: "cli rate limit", err: apierr.ErrRateLimit(30), want: false},
 		{name: "cli network", err: apierr.ErrNetwork(io.EOF), want: false},
+		{name: "credential storage unavailable", err: errors.New("keyring is locked"), want: false},
 		{name: "sdk auth", err: &hey.Error{Code: hey.CodeAuth, Message: "not authenticated"}, want: true},
 		{name: "sdk server error", err: &hey.Error{Code: hey.CodeAPI, Message: "boom"}, want: false},
 	}

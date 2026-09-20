@@ -245,7 +245,11 @@ func (s *setupWizard) narrates() bool {
 // an agent harness on a pseudo-terminal — it reports "not logged in" instead
 // of parking a six-minute browser wait.
 func (s *setupWizard) signIn() (bool, error) {
-	if authMgr.IsAuthenticated() {
+	authenticated, err := authMgr.AuthenticationStatus()
+	if err != nil {
+		return false, err
+	}
+	if authenticated {
 		return true, nil
 	}
 	if !canSignInInteractively() {

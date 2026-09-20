@@ -124,6 +124,18 @@ func TestKeyringFailures(t *testing.T) {
 		}
 	})
 
+	t.Run("missing credential", func(t *testing.T) {
+		fake := newFakeKeyring()
+		store := keyringStore(t, fake)
+		if !store.UsingKeyring() {
+			t.Fatal("UsingKeyring = false")
+		}
+		_, err := store.Load("https://app.hey.com")
+		if !errors.Is(err, ErrCredentialsNotFound) {
+			t.Fatalf("error = %v, want ErrCredentialsNotFound", err)
+		}
+	})
+
 	t.Run("get error", func(t *testing.T) {
 		fake := newFakeKeyring()
 		store := keyringStore(t, fake)
@@ -132,8 +144,11 @@ func TestKeyringFailures(t *testing.T) {
 		}
 		fake.getErr = errors.New("locked")
 		_, err := store.Load("https://app.hey.com")
-		if err == nil || !strings.Contains(err.Error(), "credentials not found") {
+		if err == nil || !strings.Contains(err.Error(), "locked") {
 			t.Fatalf("error = %v", err)
+		}
+		if errors.Is(err, ErrCredentialsNotFound) {
+			t.Fatalf("error = %v, an unavailable keyring is not missing credentials", err)
 		}
 	})
 
@@ -240,8 +255,8 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 func TestLoadNotFound(t *testing.T) {
 	s := testStore(t)
 	_, err := s.Load("https://app.hey.com")
-	if err == nil {
-		t.Fatal("expected error for missing credentials")
+	if !errors.Is(err, ErrCredentialsNotFound) {
+		t.Fatalf("error = %v, want ErrCredentialsNotFound", err)
 	}
 }
 

@@ -74,6 +74,29 @@ func TestIsAuthenticated(t *testing.T) {
 	})
 }
 
+func TestAuthenticationStatusReportsUnavailableStorage(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	t.Setenv("HEY_TOKEN", "")
+	fake := newFakeKeyring()
+	store := keyringStore(t, fake)
+	if !store.UsingKeyring() {
+		t.Fatal("UsingKeyring = false")
+	}
+	fake.getErr = errors.New("keyring is locked")
+
+	mgr := testManager(t, server)
+	mgr.store = store
+	authenticated, err := mgr.AuthenticationStatus()
+	if err == nil || !strings.Contains(err.Error(), "keyring is locked") {
+		t.Fatalf("AuthenticationStatus error = %v, want the storage failure", err)
+	}
+	if authenticated {
+		t.Error("authenticated = true while status is indeterminate")
+	}
+}
+
 func TestNormalizeBaseURL(t *testing.T) {
 	tests := []struct {
 		input string
@@ -412,6 +435,48 @@ func TestAuthenticateRequestBearerPrecedence(t *testing.T) {
 			t.Errorf("Cookie = %q, want empty when bearer is available", got)
 		}
 	})
+}
+
+func TestCredentialStorageFailuresAreNotAuthenticationFailures(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	operations := map[string]func(*Manager) error{
+		"access token": func(mgr *Manager) error {
+			_, err := mgr.AccessToken(t.Context())
+			return err
+		},
+		"authenticate request": func(mgr *Manager) error {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.test", nil)
+			return mgr.AuthenticateRequest(t.Context(), req)
+		},
+		"refresh": func(mgr *Manager) error {
+			return mgr.Refresh(t.Context())
+		},
+	}
+
+	for name, operation := range operations {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("HEY_TOKEN", "")
+			fake := newFakeKeyring()
+			store := keyringStore(t, fake)
+			if !store.UsingKeyring() {
+				t.Fatal("UsingKeyring = false")
+			}
+			fake.getErr = errors.New("keyring is locked")
+
+			mgr := testManager(t, server)
+			mgr.store = store
+			err := operation(mgr)
+			if err == nil || !strings.Contains(err.Error(), "keyring is locked") {
+				t.Fatalf("error = %v, want the storage failure", err)
+			}
+			var classified *apierr.Error
+			if errors.As(err, &classified) && classified.Code == apierr.CodeAuth {
+				t.Fatalf("error = %v, an unavailable store is not an authentication failure", err)
+			}
+		})
+	}
 }
 
 func TestMissingCredentialsDoNotModifyRequest(t *testing.T) {
@@ -1201,6 +1266,44 @@ func TestASuccessfulRefreshLiftsTheHold(t *testing.T) {
 // Two processes can queue on the credential lock holding the same dead grant. The
 // first is refused and forgets it; the second must not go on to send its own copy,
 // or the allowance is spent twice over for one dead session.
+func TestRefreshKeepsCachedCredentialsWhenTheStoreIsTemporarilyUnavailable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("refresh endpoint called without a fresh read of the stored credential")
+	}))
+	defer server.Close()
+
+	t.Setenv("HEY_TOKEN", "")
+	fake := newFakeKeyring()
+	store := keyringStore(t, fake)
+	mgr := testManager(t, server)
+	mgr.store = store
+	if err := store.Save(mgr.CredentialKey(), &Credentials{
+		AccessToken:  "working-access",
+		RefreshToken: "refresh",
+		ExpiresAt:    time.Now().Add(time.Hour).Unix(),
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if token, err := mgr.AccessToken(t.Context()); err != nil || token != "working-access" {
+		t.Fatalf("AccessToken = %q, %v", token, err)
+	}
+
+	fake.getErr = errors.New("keyring is locked")
+	err := mgr.Refresh(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "keyring is locked") {
+		t.Fatalf("Refresh error = %v, want the storage failure", err)
+	}
+	var classified *apierr.Error
+	if errors.As(err, &classified) && classified.Code == apierr.CodeAuth {
+		t.Fatalf("Refresh error = %v, an unavailable store is not an authentication failure", err)
+	}
+
+	token, err := mgr.AccessToken(t.Context())
+	if err != nil || token != "working-access" {
+		t.Fatalf("cached AccessToken = %q, %v, want the still-valid token", token, err)
+	}
+}
+
 func TestRefreshStopsWhenAnotherProcessForgotTheCredential(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

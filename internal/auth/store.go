@@ -17,6 +17,11 @@ const (
 	keyringAvailability = "hey::availability"
 )
 
+// ErrCredentialsNotFound means the store has no credential for an origin. It
+// does not cover a credential that could not be read from otherwise available
+// storage.
+var ErrCredentialsNotFound = errors.New("credentials not found")
+
 type credentialKeyring struct {
 	set    func(service, user, password string) error
 	get    func(service, user string) (string, error)
@@ -131,8 +136,11 @@ func (s *Store) delete(origin string) error {
 
 func (s *Store) loadFromKeyring(origin string) (*Credentials, error) {
 	data, err := s.keyring.get(serviceName, key(origin))
+	if errors.Is(err, keyring.ErrNotFound) {
+		return nil, fmt.Errorf("%w for %s", ErrCredentialsNotFound, origin)
+	}
 	if err != nil {
-		return nil, fmt.Errorf("credentials not found: %w", err)
+		return nil, fmt.Errorf("read credentials from system keyring: %w", err)
 	}
 
 	var creds Credentials
@@ -221,7 +229,7 @@ func (s *Store) loadFromFile(origin string) (*Credentials, error) {
 
 	creds, ok := all[origin]
 	if !ok {
-		return nil, fmt.Errorf("credentials not found for %s", origin)
+		return nil, fmt.Errorf("%w for %s", ErrCredentialsNotFound, origin)
 	}
 	return creds, nil
 }

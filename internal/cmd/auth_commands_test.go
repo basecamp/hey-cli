@@ -147,6 +147,28 @@ func TestAuthTokenRefusesToPrintASessionCookie(t *testing.T) {
 	}
 }
 
+func TestAuthStatusReportsUnreadableCredentialState(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	configHome := t.TempDir()
+	configDir := filepath.Join(configHome, "hey-cli")
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "credentials.json"), []byte("not-json"), 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	_, response, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "status")
+	if err == nil || !strings.Contains(err.Error(), "invalid character") {
+		t.Fatalf("auth status error = %v, want the credential read failure", err)
+	}
+	if data, ok := response.Data.(map[string]any); ok && data["authenticated"] == false {
+		t.Fatalf("status = %#v, an unreadable state must not be reported as signed out", data)
+	}
+}
+
 func TestAuthStatusUsesEnvironmentTokenWithoutStorage(t *testing.T) {
 	server := httptest.NewServer(http.NotFoundHandler())
 	defer server.Close()

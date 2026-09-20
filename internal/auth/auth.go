@@ -95,7 +95,7 @@ func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 
 	creds, err := m.loadCredentialsLocked()
 	if err != nil {
-		return "", errNotAuthenticated(err)
+		return "", credentialLoadError(err)
 	}
 
 	// Check if token is expired (with 5-minute buffer)
@@ -151,7 +151,7 @@ func (m *Manager) authenticateRequest(ctx context.Context, req *http.Request, re
 		creds, err = m.loadCredentialsLocked()
 	}
 	if err != nil {
-		return errNotAuthenticated(err)
+		return credentialLoadError(err)
 	}
 
 	if creds.AccessToken != "" {
@@ -177,20 +177,32 @@ func (m *Manager) authenticateRequest(ctx context.Context, req *http.Request, re
 	return errNoCredential("no access token or session cookie available", nil)
 }
 
-// IsAuthenticated checks if there are valid credentials.
-func (m *Manager) IsAuthenticated() bool {
+// AuthenticationStatus reports whether usable credentials exist. A missing
+// credential is a known signed-out state; a storage failure leaves the state
+// unknown and is returned to the caller.
+func (m *Manager) AuthenticationStatus() (bool, error) {
 	if os.Getenv("HEY_TOKEN") != "" {
-		return true
+		return true, nil
 	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	creds, err := m.loadCredentialsLocked()
-	if err != nil {
-		return false
+	if errors.Is(err, ErrCredentialsNotFound) {
+		return false, nil
 	}
-	return creds.AccessToken != "" || creds.SessionCookie != ""
+	if err != nil {
+		return false, credentialLoadError(err)
+	}
+	return creds.AccessToken != "" || creds.SessionCookie != "", nil
+}
+
+// IsAuthenticated reports whether usable credentials exist. Callers that need
+// to distinguish signed out from unavailable storage use AuthenticationStatus.
+func (m *Manager) IsAuthenticated() bool {
+	authenticated, _ := m.AuthenticationStatus()
+	return authenticated
 }
 
 // LoginOptions configures the login flow.
@@ -328,7 +340,7 @@ func (m *Manager) Refresh(ctx context.Context) error {
 
 	creds, err := m.loadCredentialsLocked()
 	if err != nil {
-		return errNotAuthenticated(err)
+		return credentialLoadError(err)
 	}
 	return m.refreshLocked(ctx, creds)
 }
@@ -374,11 +386,14 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 	defer unlock()
 
 	stored, loadErr := m.store.load(m.baseURL)
-	if loadErr != nil {
-		// Another process may have deleted the credential while we waited for
-		// the lock. Nothing stale may survive a forced read's failure.
+	if errors.Is(loadErr, ErrCredentialsNotFound) {
+		// Another process deleted the credential while we waited for the lock.
+		// Nothing stale may survive a forced read that proves it is gone.
 		m.cachedCredentials = nil
 		return errNotAuthenticated(loadErr)
+	}
+	if loadErr != nil {
+		return credentialLoadError(loadErr)
 	}
 	m.cachedCredentials = cloneCredentials(stored)
 	changed := stored.AccessToken != creds.AccessToken || stored.SessionCookie != creds.SessionCookie
@@ -511,6 +526,13 @@ func errNoCredential(msg string, cause error) *apierr.Error {
 	err := apierr.ErrAuth(msg)
 	err.Cause = cause
 	return err
+}
+
+func credentialLoadError(err error) error {
+	if errors.Is(err, ErrCredentialsNotFound) {
+		return errNotAuthenticated(err)
+	}
+	return fmt.Errorf("could not read stored credentials: %w", err)
 }
 
 func errNotAuthenticated(cause error) *apierr.Error {

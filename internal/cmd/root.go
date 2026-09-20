@@ -134,9 +134,15 @@ func newRootCmd() *cobra.Command {
 				migrateOldCredentials(configDir)
 			}
 
-			if authMgr.IsAuthenticated() && commandUsesAccountScope(cmd) {
-				if err := selectConfiguredAccount(cmd.Context()); err != nil {
+			if commandUsesAccountScope(cmd) {
+				authenticated, err := authMgr.AuthenticationStatus()
+				if err != nil {
 					return err
+				}
+				if authenticated {
+					if err := selectConfiguredAccount(cmd.Context()); err != nil {
+						return err
+					}
 				}
 			}
 
@@ -156,7 +162,11 @@ func newRootCmd() *cobra.Command {
 			// First run: an interactive, logged-out bare `hey` gets the
 			// onboarding wizard (lite once onboarded — sign-in only). Every
 			// other bare `hey` prints help; the app lives at `hey tui`.
-			if interactiveStdio() && !machineReadableOutput(cmd) && !authMgr.IsAuthenticated() {
+			authenticated, err := authMgr.AuthenticationStatus()
+			if err != nil {
+				return err
+			}
+			if interactiveStdio() && !machineReadableOutput(cmd) && !authenticated {
 				return runSetupWizard(cmd, wizardOptions{full: !cfg.Onboarded})
 			}
 			return cmd.Help()
@@ -400,7 +410,11 @@ var askToSignIn = func() (bool, error) {
 // stdout stays data); declined, piped or machine-output runs get the auth
 // error and exit code 3 instead.
 func requireAuth() error {
-	if authMgr.IsAuthenticated() {
+	authenticated, err := authMgr.AuthenticationStatus()
+	if err != nil {
+		return err
+	}
+	if authenticated {
 		return nil
 	}
 	if writer.IsStyled() && interactiveStdio() {
