@@ -147,17 +147,17 @@ func mailWatchRetryDelay(failures int) time.Duration {
 	return min(delay, mailWatchMaximumRetry)
 }
 
-func retryableMailWatchError(err error) bool {
+func retryableWatchError(err error) bool {
 	var known *apierr.Error
-	if errors.As(err, &known) {
-		return known.Code == apierr.CodeNetwork
+	if !errors.As(err, &known) {
+		known = apierr.AsError(apierr.FromSDK(err))
 	}
-	return apierr.AsError(apierr.FromSDK(err)).Code == apierr.CodeNetwork
+	return known.Code == apierr.CodeNetwork || known.Code == apierr.CodeRateLimit
 }
 
 func (m *model) mailWatchFailed(err error) tea.Cmd {
 	m.mailWatchEvents = nil
-	if retryableMailWatchError(err) {
+	if retryableWatchError(err) {
 		m.mailWatchStatus = mailWatchReconnecting
 		m.mailWatchReason = "Offline — reconnecting to HEY"
 		return m.retryMailWatch()

@@ -1137,7 +1137,7 @@ func (m *model) retryCalendarWatch() tea.Cmd {
 }
 
 func (m *model) calendarWatchFailed(err error) tea.Cmd {
-	if retryableMailWatchError(err) {
+	if retryableWatchError(err) {
 		return m.retryCalendarWatch()
 	}
 	m.dropCalendarWatch()

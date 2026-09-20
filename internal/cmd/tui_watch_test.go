@@ -332,7 +332,7 @@ func TestTuiSubscribeReplacesAClientThatStoppedItself(t *testing.T) {
 
 func TestCalendarStreamReportsWhyAnEstablishedSubscriptionStopped(t *testing.T) {
 	watch := newCalendarStreamWatch()
-	watch.changes <- tui.CalendarWatchEvent{}
+	ring(watch.rings, struct{}{})
 	go watch.run(t.Context(), t.Context(), hey.CalendarChangesCursor{})
 
 	watch.dead <- &actioncable.DisconnectError{Reason: actioncable.ReasonUnauthorized, Reconnect: false}
@@ -343,6 +343,20 @@ func TestCalendarStreamReportsWhyAnEstablishedSubscriptionStopped(t *testing.T) 
 	var known *apierr.Error
 	if !errors.As(got.Err, &known) || known.Code != apierr.CodeAuth {
 		t.Errorf("final event error = %T %v, want an authentication error", got.Err, got.Err)
+	}
+}
+
+func TestCalendarStreamLateDoorbellsCannotWriteToItsClosedOutput(t *testing.T) {
+	ctx, stop := context.WithCancel(t.Context())
+	watch := newCalendarStreamWatch()
+	go watch.run(ctx, ctx, hey.CalendarChangesCursor{})
+	stop()
+	if _, open := <-watch.changes; open {
+		t.Fatal("the canceled watch should close its output")
+	}
+
+	for range 3 {
+		ring(watch.rings, struct{}{})
 	}
 }
 
@@ -399,7 +413,7 @@ func TestCalendarStreamWatchPollFollowsTheCalendarSet(t *testing.T) {
 		t.Error("a dropped stream should leave the map")
 	}
 	select {
-	case <-watch.changes:
+	case <-watch.rings:
 	default:
 		t.Error("a changed calendar set should ring the doorbell")
 	}

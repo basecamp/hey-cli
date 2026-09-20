@@ -859,6 +859,22 @@ func TestModelRetriesAClosedCalendarStreamWhileWatching(t *testing.T) {
 	}
 }
 
+func TestModelRetriesACalendarWatchAfterRateLimit(t *testing.T) {
+	m := newModel()
+	m.watchCalendar = func(_, _ context.Context) (<-chan CalendarWatchEvent, error) {
+		return make(chan CalendarWatchEvent), nil
+	}
+	updated, _ := m.switchSection(sectionCalendar)
+	m = updated.(model)
+
+	limited := apierr.ErrRateLimit(30)
+	updated, cmd := m.Update(calendarWatchStartedMsg{attempt: m.calendarWatchAttempt, err: limited})
+	m = updated.(model)
+	if cmd == nil || m.stopCalendarWatch != nil || m.calendarWatchFailures != 1 {
+		t.Errorf("failures = %d, want the rate-limited watch dropped and a retry armed", m.calendarWatchFailures)
+	}
+}
+
 func TestModelDoesNotRetryACalendarWatchAfterAuthenticationFailure(t *testing.T) {
 	m := newModel()
 	m.watchCalendar = func(_, _ context.Context) (<-chan CalendarWatchEvent, error) {

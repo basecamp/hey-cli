@@ -220,9 +220,12 @@ func watchCalendarChanges(ctx, connectionCtx context.Context) (<-chan tui.Calend
 // calendarStreamWatch is one doorbell over many subscriptions: every calendar's stream
 // rings the same channel, and a subscription that closes without being given up rings
 // dead instead, which tears the whole watch down — the TUI reopens it, resubscribing
-// everything, rather than limping on with some calendars gone quiet.
+// everything, rather than limping on with some calendars gone quiet. Only run writes to
+// changes; subscription callbacks ring the internal channel, which is never closed, so a
+// late callback cannot race a terminal event or write to closed TUI output.
 type calendarStreamWatch struct {
 	changes chan tui.CalendarWatchEvent
+	rings   chan struct{}
 	dead    chan error
 	stops   map[int64]context.CancelFunc
 }
@@ -230,6 +233,7 @@ type calendarStreamWatch struct {
 func newCalendarStreamWatch() *calendarStreamWatch {
 	return &calendarStreamWatch{
 		changes: make(chan tui.CalendarWatchEvent, 1),
+		rings:   make(chan struct{}, 1),
 		dead:    make(chan error, 1),
 		stops:   map[int64]context.CancelFunc{},
 	}
@@ -249,7 +253,7 @@ func (w *calendarStreamWatch) subscribe(ctx, connectionCtx context.Context, cale
 		Params:  actioncable.Params{"signed_stream_name": calendar.SignedStreamName},
 	}, actioncable.OnConnected(func(reconnected bool) {
 		if reconnected {
-			ring(w.changes, tui.CalendarWatchEvent{})
+			ring(w.rings, struct{}{})
 		}
 	}))
 	if err != nil {
@@ -271,7 +275,7 @@ func (w *calendarStreamWatch) subscribe(ctx, connectionCtx context.Context, cale
 					}
 					return
 				}
-				ring(w.changes, tui.CalendarWatchEvent{})
+				ring(w.rings, struct{}{})
 			}
 		}
 	}()
@@ -295,6 +299,8 @@ func (w *calendarStreamWatch) run(ctx, connectionCtx context.Context, cursor hey
 		select {
 		case <-ctx.Done():
 			return
+		case <-w.rings:
+			ring(w.changes, tui.CalendarWatchEvent{})
 		case err := <-w.dead:
 			if err != nil {
 				ringCalendarWatchEvent(w.changes, tui.CalendarWatchEvent{Err: watchDialError(err)})
@@ -330,7 +336,7 @@ func (w *calendarStreamWatch) pollOnce(ctx, connectionCtx context.Context, curso
 		w.drop(deleted.ID)
 	}
 	if len(changes.Added)+len(changes.Updated)+len(changes.Deleted) > 0 {
-		ring(w.changes, tui.CalendarWatchEvent{})
+		ring(w.rings, struct{}{})
 	}
 	if changes.NextCursor != nil {
 		cursor = *changes.NextCursor
@@ -419,11 +425,20 @@ func ringCalendarWatchEvent(events chan tui.CalendarWatchEvent, event tui.Calend
 		return
 	}
 
-	select {
-	case <-events:
-	default:
+	for {
+		select {
+		case <-events:
+			continue
+		default:
+		}
+		select {
+		case events <- event:
+			return
+		default:
+			// The reader raced the drain and another event took its place. Try the
+			// current queue again so a terminal error can never be discarded.
+		}
 	}
-	ring(events, event)
 }
 
 // ring drops the notification when one is already waiting: they all say the same thing,
