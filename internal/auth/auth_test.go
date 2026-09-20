@@ -1007,11 +1007,15 @@ func TestARefusedGrantIsNotResentByANewManagerWhenItCannotBeDeleted(t *testing.T
 
 	first := newManager()
 	saveExpiredCredential(t, first)
+	second := newManager()
+	if authenticated, err := second.AuthenticationStatus(); err != nil || !authenticated {
+		t.Fatalf("second manager did not cache the original credential: authenticated = %t, error = %v", authenticated, err)
+	}
+
 	if _, err := first.AccessToken(t.Context()); err == nil {
 		t.Fatal("first manager accepted a refused grant")
 	}
 
-	second := newManager()
 	_, err := second.AccessToken(t.Context())
 	var authErr *apierr.Error
 	if !errors.As(err, &authErr) || authErr.Code != apierr.CodeAuth {
