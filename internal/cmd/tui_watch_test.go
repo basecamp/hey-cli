@@ -25,7 +25,7 @@ func TestRelayMailChangesNamesTheChangedBoxAndConnectionState(t *testing.T) {
 	connection := newMailConnectionNotifier()
 	events := make(chan tui.MailWatchEvent, mailChangeBacklog)
 
-	go relayMailChanges(t.Context(), messages, connection, events)
+	go relayMailChanges(t.Context(), messages, connection, events, nil)
 
 	messages <- actioncable.Message(`{"change":"upsert","box_id":24088}`)
 	if got := <-events; got.BoxID != 24088 || got.Connection != tui.MailConnectionUnchanged {
@@ -46,6 +46,26 @@ func TestRelayMailChangesNamesTheChangedBoxAndConnectionState(t *testing.T) {
 	messages <- actioncable.Message(`{"box_id":31145}`)
 	if got := <-events; got.BoxID != 31145 {
 		t.Errorf("event = %+v, want the stream to carry on past what it can't read", got)
+	}
+}
+
+func TestRelayMailChangesReportsWhyAnEstablishedSubscriptionStopped(t *testing.T) {
+	messages := make(chan actioncable.Message)
+	connection := newMailConnectionNotifier()
+	events := make(chan tui.MailWatchEvent, mailChangeBacklog)
+	events <- tui.MailWatchEvent{BoxID: 1}
+	refused := &actioncable.DisconnectError{Reason: actioncable.ReasonUnauthorized, Reconnect: false}
+
+	go relayMailChanges(t.Context(), messages, connection, events, func() error { return refused })
+	close(messages)
+
+	var got tui.MailWatchEvent
+	for event := range events {
+		got = event
+	}
+	var known *apierr.Error
+	if !errors.As(got.Err, &known) || known.Code != apierr.CodeAuth {
+		t.Errorf("final event error = %T %v, want an authentication error", got.Err, got.Err)
 	}
 }
 
@@ -92,7 +112,7 @@ func TestARelayIsTheOnlyWriterToTheStreamItCloses(t *testing.T) {
 	mail := make(chan tui.MailWatchEvent, mailChangeBacklog)
 	screener := make(chan struct{}, 1)
 
-	go relayMailChanges(relaying, mailMessages, connection, mail)
+	go relayMailChanges(relaying, mailMessages, connection, mail, nil)
 	go relayScreenerChanges(relaying, screenerMessages, reconnects, screener)
 
 	stop()
@@ -307,6 +327,22 @@ func TestTuiSubscribeReplacesAClientThatStoppedItself(t *testing.T) {
 	}
 	if tuiCable.client == stopped {
 		t.Error("the stopped client should be dropped, so the next watch dials")
+	}
+}
+
+func TestCalendarStreamReportsWhyAnEstablishedSubscriptionStopped(t *testing.T) {
+	watch := newCalendarStreamWatch()
+	watch.changes <- tui.CalendarWatchEvent{}
+	go watch.run(t.Context(), t.Context(), hey.CalendarChangesCursor{})
+
+	watch.dead <- &actioncable.DisconnectError{Reason: actioncable.ReasonUnauthorized, Reconnect: false}
+	var got tui.CalendarWatchEvent
+	for event := range watch.changes {
+		got = event
+	}
+	var known *apierr.Error
+	if !errors.As(got.Err, &known) || known.Code != apierr.CodeAuth {
+		t.Errorf("final event error = %T %v, want an authentication error", got.Err, got.Err)
 	}
 }
 

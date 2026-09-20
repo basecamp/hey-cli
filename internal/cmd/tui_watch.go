@@ -93,13 +93,13 @@ func watchMailChanges(ctx context.Context) (<-chan tui.MailWatchEvent, error) {
 	events := make(chan tui.MailWatchEvent, mailChangeBacklog)
 	go func() {
 		defer unsubscribe(subscription)
-		relayMailChanges(ctx, subscription.Messages(), connection, events)
+		relayMailChanges(ctx, subscription.Messages(), connection, events, subscription.Err)
 	}()
 
 	return events, nil
 }
 
-func relayMailChanges(ctx context.Context, messages <-chan actioncable.Message, connection *mailConnectionNotifier, events chan tui.MailWatchEvent) {
+func relayMailChanges(ctx context.Context, messages <-chan actioncable.Message, connection *mailConnectionNotifier, events chan tui.MailWatchEvent, stoppedBecause func() error) {
 	defer close(events)
 	var connectionVersion uint64
 
@@ -116,6 +116,11 @@ func relayMailChanges(ctx context.Context, messages <-chan actioncable.Message, 
 			ringMailWatchEvent(events, event)
 		case message, open := <-messages:
 			if !open {
+				if stoppedBecause != nil {
+					if err := stoppedBecause(); err != nil {
+						ringMailWatchEvent(events, tui.MailWatchEvent{Err: watchDialError(err)})
+					}
+				}
 				return
 			}
 			var notification struct {
@@ -187,7 +192,7 @@ const calendarListPollInterval = 5 * time.Minute
 // them all over the TUI's shared connection and folds them into one doorbell. What HEY
 // broadcasts is markup for the web app: nothing is read out of it, the arrival is the
 // whole message, and the TUI re-reads the span on screen behind it.
-func watchCalendarChanges(ctx, connectionCtx context.Context) (<-chan struct{}, error) {
+func watchCalendarChanges(ctx, connectionCtx context.Context) (<-chan tui.CalendarWatchEvent, error) {
 	list, err := sdk.Calendars().ListWithChanges(ctx)
 	if err != nil {
 		return nil, apierr.FromSDK(err)
@@ -217,15 +222,15 @@ func watchCalendarChanges(ctx, connectionCtx context.Context) (<-chan struct{}, 
 // dead instead, which tears the whole watch down — the TUI reopens it, resubscribing
 // everything, rather than limping on with some calendars gone quiet.
 type calendarStreamWatch struct {
-	changes chan struct{}
-	dead    chan struct{}
+	changes chan tui.CalendarWatchEvent
+	dead    chan error
 	stops   map[int64]context.CancelFunc
 }
 
 func newCalendarStreamWatch() *calendarStreamWatch {
 	return &calendarStreamWatch{
-		changes: make(chan struct{}, 1),
-		dead:    make(chan struct{}, 1),
+		changes: make(chan tui.CalendarWatchEvent, 1),
+		dead:    make(chan error, 1),
 		stops:   map[int64]context.CancelFunc{},
 	}
 }
@@ -244,7 +249,7 @@ func (w *calendarStreamWatch) subscribe(ctx, connectionCtx context.Context, cale
 		Params:  actioncable.Params{"signed_stream_name": calendar.SignedStreamName},
 	}, actioncable.OnConnected(func(reconnected bool) {
 		if reconnected {
-			ring(w.changes, struct{}{})
+			ring(w.changes, tui.CalendarWatchEvent{})
 		}
 	}))
 	if err != nil {
@@ -262,11 +267,11 @@ func (w *calendarStreamWatch) subscribe(ctx, connectionCtx context.Context, cale
 			case _, open := <-subscription.Messages():
 				if !open {
 					if subCtx.Err() == nil {
-						ring(w.dead, struct{}{})
+						ring(w.dead, subscription.Err())
 					}
 					return
 				}
-				ring(w.changes, struct{}{})
+				ring(w.changes, tui.CalendarWatchEvent{})
 			}
 		}
 	}()
@@ -290,7 +295,10 @@ func (w *calendarStreamWatch) run(ctx, connectionCtx context.Context, cursor hey
 		select {
 		case <-ctx.Done():
 			return
-		case <-w.dead:
+		case err := <-w.dead:
+			if err != nil {
+				ringCalendarWatchEvent(w.changes, tui.CalendarWatchEvent{Err: watchDialError(err)})
+			}
 			return
 		case <-poll.C:
 			next, alive := w.pollOnce(ctx, connectionCtx, cursor)
@@ -321,7 +329,7 @@ func (w *calendarStreamWatch) pollOnce(ctx, connectionCtx context.Context, curso
 		w.drop(deleted.ID)
 	}
 	if len(changes.Added)+len(changes.Updated)+len(changes.Deleted) > 0 {
-		ring(w.changes, struct{}{})
+		ring(w.changes, tui.CalendarWatchEvent{})
 	}
 	if changes.NextCursor != nil {
 		cursor = *changes.NextCursor
@@ -357,7 +365,7 @@ func unsubscribe(subscription *actioncable.Subscription) {
 // transition empties that backlog so the global status changes promptly, and reconnecting
 // catches the visible box up without relying on an older doorbell.
 func ringMailWatchEvent(events chan tui.MailWatchEvent, event tui.MailWatchEvent) {
-	if event.Connection == tui.MailConnectionUnchanged {
+	if event.Connection == tui.MailConnectionUnchanged && event.Err == nil {
 		select {
 		case events <- event:
 			return
@@ -402,6 +410,19 @@ func ringMailWatchEvent(events chan tui.MailWatchEvent, event tui.MailWatchEvent
 			// queue again rather than blocking Action Cable's relay.
 		}
 	}
+}
+
+func ringCalendarWatchEvent(events chan tui.CalendarWatchEvent, event tui.CalendarWatchEvent) {
+	if event.Err == nil {
+		ring(events, event)
+		return
+	}
+
+	select {
+	case <-events:
+	default:
+	}
+	ring(events, event)
 }
 
 // ring drops the notification when one is already waiting: they all say the same thing,

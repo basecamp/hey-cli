@@ -100,7 +100,7 @@ type model struct {
 	// screen: every other section re-reads its data on entry, so a doorbell rung for a
 	// section nobody is looking at would be paid for and answered by nothing.
 	watchCalendar         CalendarWatcher
-	calendarChanges       <-chan struct{}
+	calendarChanges       <-chan CalendarWatchEvent
 	calendarWatchAttempt  uint64
 	calendarWatchFailures int
 	stopCalendarWatch     context.CancelFunc
@@ -385,6 +385,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateHelpBindings()
 			return m, cmd
 		}
+		if msg.event.Err != nil {
+			cmd := m.mailWatchFailed(msg.event.Err)
+			m.updateHelpBindings()
+			return m, cmd
+		}
 		wait := waitForMailWatchEventCmd(m.mailWatchEvents)
 		switch msg.event.Connection {
 		case MailConnectionUnchanged:
@@ -446,7 +451,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.err != nil {
-			return m, m.retryCalendarWatch()
+			return m, m.calendarWatchFailed(msg.err)
 		}
 		m.calendarChanges = msg.changes
 		m.calendarWatchFailures = 0
@@ -458,6 +463,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.closed {
 			return m, m.retryCalendarWatch()
+		}
+		if msg.event.Err != nil {
+			return m, m.calendarWatchFailed(msg.event.Err)
 		}
 		return m, tea.Batch(m.calendarChanged(), waitForCalendarChangeCmd(msg.attempt, m.calendarChanges))
 
@@ -1119,12 +1127,21 @@ func (m *model) dropCalendarWatch() {
 // step the reader takes, so a watch that is down costs staleness, not a broken screen,
 // and the mail watch already announces a connection that is gone.
 func (m *model) retryCalendarWatch() tea.Cmd {
+	failures := m.calendarWatchFailures
 	m.dropCalendarWatch()
 	if !m.watchingCalendars() {
 		return nil
 	}
-	m.calendarWatchFailures++
+	m.calendarWatchFailures = failures + 1
 	return retryCalendarWatchLaterCmd(m.calendarWatchAttempt, mailWatchRetryDelay(m.calendarWatchFailures))
+}
+
+func (m *model) calendarWatchFailed(err error) tea.Cmd {
+	if retryableMailWatchError(err) {
+		return m.retryCalendarWatch()
+	}
+	m.dropCalendarWatch()
+	return nil
 }
 
 // calendarChanged is the calendar's doorbell. One write lands as several broadcasts —
