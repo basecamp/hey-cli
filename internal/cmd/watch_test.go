@@ -728,6 +728,13 @@ func TestWatchClosedSubscriptionIsOnlyFineWhenItWasInterrupted(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "turned this subscription down") {
 		t.Errorf("error = %v, want a rejected subscription reported as an auth failure", err)
 	}
+
+	original := apierr.ErrAuth("the stored session has ended")
+	err = watch.closedError(context.Background(), original)
+	var classified *apierr.Error
+	if !errors.As(err, &classified) || classified.Code != apierr.CodeAuth || classified.Message != original.Message {
+		t.Errorf("error = %v, want the connection's authentication failure preserved", err)
+	}
 }
 
 func TestWatchRunsBoundedAsyncScripts(t *testing.T) {
@@ -1036,6 +1043,19 @@ func TestWatchLineDescribesTheWatchsOwnNews(t *testing.T) {
 // so it is not a *hey.Error and the SDK's classifier reads it as a generic API
 // error — the kind this retries every two minutes, for as long as the shell service
 // keeps restarting it.
+func TestWatchDialErrorPreservesAClientAuthenticationFailure(t *testing.T) {
+	original := apierr.ErrAuth("the stored session has ended")
+	err := watchDialError(fmt.Errorf("opening cable: %w", original))
+
+	var classified *apierr.Error
+	if !errors.As(err, &classified) || classified.Code != apierr.CodeAuth {
+		t.Fatalf("error = %v, want the original authentication classification", err)
+	}
+	if classified.Message != original.Message {
+		t.Errorf("message = %q, want %q", classified.Message, original.Message)
+	}
+}
+
 func TestPermanentReadErrorRecognizesACLIAuthFailure(t *testing.T) {
 	tests := []struct {
 		name string

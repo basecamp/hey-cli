@@ -221,6 +221,11 @@ func (c *watchCommand) run(cmd *cobra.Command, args []string) error {
 // watchDialError tells the two ways a dial fails apart: the server turned the
 // credentials down, or it couldn't be reached at all.
 func watchDialError(err error) error {
+	var classified *apierr.Error
+	if errors.As(err, &classified) && classified.Code == apierr.CodeAuth {
+		return classified
+	}
+
 	var disconnect *actioncable.DisconnectError
 	if errors.As(err, &disconnect) && disconnect.Reason == actioncable.ReasonUnauthorized {
 		return apierr.ErrAuth("HEY's cable server turned these credentials down — run `hey auth login` again, or log in with `hey auth login --cookie` if the server doesn't take access tokens on a websocket yet")
@@ -478,9 +483,14 @@ func (w *postingsWatch) listen(ctx context.Context, subscription *actioncable.Su
 // has to hear about rather than exiting quietly. ended is what the subscription says
 // closed it.
 func (w *postingsWatch) closedError(ctx context.Context, ended error) error {
+	var classified *apierr.Error
+	authenticationFailed := errors.As(ended, &classified) && classified.Code == apierr.CodeAuth
+
 	switch {
 	case ctx.Err() != nil:
 		return nil //nolint:nilerr // an interrupt or a --timeout is how a watch is meant to end
+	case authenticationFailed:
+		return classified
 	case errors.Is(ended, actioncable.ErrRejected):
 		return apierr.ErrAuth("HEY's cable server turned this subscription down — run `hey auth login` again, or log in with `hey auth login --cookie` if the server doesn't take access tokens on a websocket yet")
 	default:

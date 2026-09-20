@@ -4,6 +4,7 @@ package cable
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/basecamp/actioncable-go"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/auth"
 	"github.com/basecamp/hey-cli/internal/version"
 )
@@ -37,11 +39,12 @@ func Dial(ctx context.Context, baseURL string, authMgr *auth.Manager, options ..
 		return nil, err
 	}
 
-	settings := make([]actioncable.Option, 0, 1+len(options))
+	settings := make([]actioncable.Option, 0, 2+len(options))
 	settings = append(settings, actioncable.WithHeaderFunc(func(ctx context.Context) (http.Header, error) {
 		return authHeader(ctx, baseURL, authMgr)
 	}))
 	settings = append(settings, options...)
+	settings = append(settings, actioncable.WithStopOnError(terminalConnectionError))
 
 	opening, giveUp := context.WithTimeout(ctx, openTimeout)
 	defer giveUp()
@@ -79,6 +82,11 @@ func URL(baseURL string) (string, error) {
 	parsed.RawQuery = ""
 
 	return parsed.String(), nil
+}
+
+func terminalConnectionError(err error) bool {
+	var classified *apierr.Error
+	return errors.As(err, &classified) && classified.Code == apierr.CodeAuth
 }
 
 func authHeader(ctx context.Context, baseURL string, authMgr *auth.Manager) (http.Header, error) {
