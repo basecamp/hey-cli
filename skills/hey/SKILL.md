@@ -494,8 +494,10 @@ hey compose --to alice@example.com --subject "Newsletter draft" --message-html "
 web app does: everyone that entry was addressed to, plus whoever wrote it, on the To line.
 Repeatable `--to`, `--cc` and `--bcc` flags add or move explicit recipients. Use
 `--replace-recipients` to discard HEY's prefill. Run `--dry-run --json` first when an
-agent changes the envelope; it needs no message and reports the resolved sender and final
-recipients without sending. A reply HEY cannot address is refused unless an explicit
+agent changes the envelope; it does not read the original message body and reports the
+resolved sender and final recipients without sending. If HEY's envelope prefill is
+unavailable, use `--replace-recipients` with explicit addresses because a dry run will not
+guess the original lists. A reply HEY cannot address is refused unless an explicit
 recipient makes it addressable.
 
 Everything you send is Markdown by default — `-m`, `--content`, `--note`, positional

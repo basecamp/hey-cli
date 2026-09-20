@@ -18,25 +18,39 @@ type replyRecipients = mail.ReplyRecipients
 
 // threadReplyTarget carries the entry a reply answers, its subject, sender and
 // recipients, and an immutable client bound to the thread's mail account. Recipients
-// can be empty when HEY cannot resolve them: an explicit reply override can still make
-// that target addressable. The subject is not optional either: HEY never derives one,
+// can be unresolved when the body-free path cannot get HEY's prefill; only a complete
+// replacement envelope can safely address that target. The subject is not optional
+// either: HEY never derives one,
 // so a reply sent without it saves drafts that read "No subject" in Drafts.
 // ActingSenderID is the identity the reply goes out as: the sender HEY resolved for
 // the thread, which on a shared or alternate address is not the account default; zero
 // (the prefill named none, or was unreachable) leaves the SDK on the account default.
 type threadReplyTarget struct {
-	EntryID        int64
-	AccountID      int64
-	ActingSenderID int64
-	Subject        string
-	Sender         mail.ReplySender
-	Addressed      replyRecipients
-	client         *hey.Client
+	EntryID            int64
+	AccountID          int64
+	ActingSenderID     int64
+	Subject            string
+	Sender             mail.ReplySender
+	Addressed          replyRecipients
+	RecipientsResolved bool
+	client             *hey.Client
 }
 
 // resolveThreadReply returns the thread's latest entry, linked account, and the
-// recipients a reply to that entry goes to.
+// recipients a reply to that entry goes to. If HEY's reply prefill is unavailable,
+// it reads the message for the most complete fallback metadata.
 func resolveThreadReply(ctx context.Context, threadID int64) (*threadReplyTarget, error) {
+	return resolveThreadReplyTarget(ctx, threadID, true)
+}
+
+// resolveThreadReplyWithoutMessage resolves a reply from the topic entry summary and
+// HEY's reply prefill only. Dry runs must not hydrate a body, and a replacement envelope
+// does not need the original recipients.
+func resolveThreadReplyWithoutMessage(ctx context.Context, threadID int64) (*threadReplyTarget, error) {
+	return resolveThreadReplyTarget(ctx, threadID, false)
+}
+
+func resolveThreadReplyTarget(ctx context.Context, threadID int64, readMessageFallback bool) (*threadReplyTarget, error) {
 	topic, err := rootSDK.Topics().Get(ctx, threadID)
 	if err != nil {
 		return nil, apierr.FromSDK(err)
@@ -49,7 +63,8 @@ func resolveThreadReply(ctx context.Context, threadID int64) (*threadReplyTarget
 	if err != nil {
 		return nil, err
 	}
-	entryID := topic.Entries[len(topic.Entries)-1].Id
+	entry := topic.Entries[len(topic.Entries)-1]
+	entryID := entry.Id
 
 	target := &threadReplyTarget{
 		EntryID:   entryID,
@@ -62,6 +77,17 @@ func resolveThreadReply(ctx context.Context, threadID int64) (*threadReplyTarget
 	target.Sender = prefill.Sender
 	if ok {
 		target.Addressed = prefill.Addressed
+		target.RecipientsResolved = true
+		return target, nil
+	}
+
+	if !readMessageFallback {
+		if target.Subject == "" {
+			target.Subject = replySubject(entry.Subject)
+			if target.Subject == "" {
+				target.Subject = replySubject(topic.Name)
+			}
+		}
 		return target, nil
 	}
 
@@ -73,12 +99,19 @@ func resolveThreadReply(ctx context.Context, threadID int64) (*threadReplyTarget
 		return nil, apierr.ErrNotFound("message", fmt.Sprintf("%d", entryID))
 	}
 
-	// The prefill's subject survives an empty recipient list: only the recipients
-	// needed the local computation.
+	// The prefill's subject survives the fallback. Otherwise the message is the source
+	// of truth; entry and topic names are the last body-free fallback.
 	if target.Subject == "" {
 		target.Subject = replySubject(message.Subject)
+		if target.Subject == "" {
+			target.Subject = replySubject(entry.Subject)
+		}
+		if target.Subject == "" {
+			target.Subject = replySubject(topic.Name)
+		}
 	}
 	target.Addressed = recipientsForReplyTo(*message)
+	target.RecipientsResolved = true
 	return target, nil
 }
 
@@ -231,11 +264,14 @@ func recipientsForReplyTo(message generated.Message) replyRecipients {
 	if sender == "" {
 		sender = message.Creator.EmailAddress
 	}
+	return recipientsForReplyAddressed(message.Addressed, sender)
+}
 
+func recipientsForReplyAddressed(addressed generated.Addressed, sender string) replyRecipients {
 	recipients := replyRecipients{
-		To:  addressesOf(message.Addressed.Directly, sender),
-		CC:  addressesOf(message.Addressed.Copied, sender),
-		BCC: addressesOf(message.Addressed.Blindcopied, sender),
+		To:  addressesOf(addressed.Directly, sender),
+		CC:  addressesOf(addressed.Copied, sender),
+		BCC: addressesOf(addressed.Blindcopied, sender),
 	}
 	if sender != "" {
 		recipients.To = append(recipients.To, sender)

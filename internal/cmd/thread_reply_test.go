@@ -46,6 +46,9 @@ type sentReply struct {
 	To                   []string
 	CC                   []string
 	BCC                  []string
+	MessageReads         int
+	MessageStatus        int
+	TopicEntryJSON       string
 
 	// ReplyNewJSON, when set before the command runs, is what GET
 	// /entries/{id}/replies/new answers — HEY's own computed reply recipients.
@@ -117,9 +120,17 @@ func threadReplyServer(t *testing.T, messageJSON string, entryIDs ...int64) (*ht
 			for _, id := range entryIDs {
 				entries = append(entries, fmt.Sprintf(`{"id":%d}`, id))
 			}
-			fmt.Fprintf(w, `{"id":7,"account_id":9,"entries":[%s]}`, strings.Join(entries, ","))
+			if sent.TopicEntryJSON != "" {
+				entries = []string{sent.TopicEntryJSON}
+			}
+			fmt.Fprintf(w, `{"id":7,"account_id":9,"name":"Weekly sync","entries":[%s]}`, strings.Join(entries, ","))
 		case strings.HasPrefix(r.URL.Path, "/messages/"):
+			sent.MessageReads++
 			sent.MessageAccountFilter = r.URL.Query().Get("filtered_account_id")
+			if sent.MessageStatus != 0 {
+				http.Error(w, `{"message":"message unavailable"}`, sent.MessageStatus)
+				return
+			}
 			if r.URL.Path != "/messages/12.json" {
 				t.Errorf("read %s, want the thread's latest entry", r.URL.Path)
 			}
@@ -505,6 +516,82 @@ func TestReplyDryRunReportsTheResolvedEnvelopeWithoutSending(t *testing.T) {
 	}
 	if response.Summary != "Reply preview; nothing sent" {
 		t.Errorf("summary = %q", response.Summary)
+	}
+}
+
+func TestReplyDryRunUsesEntryMetadataWithoutHydratingTheMessage(t *testing.T) {
+	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
+	sent.TopicEntryJSON = `{"id":12,"subject":"Weekly sync"}`
+	sent.MessageStatus = http.StatusInternalServerError
+
+	out, err := runCLIOutput(t, server, "--account", "8", "reply", "7", "--dry-run",
+		"--replace-recipients", "--to", "support@example.com", "--cc", "manager@example.com")
+	if err != nil {
+		t.Fatalf("reply dry run: %v", err)
+	}
+	if sent.MessageReads != 0 {
+		t.Fatalf("dry run hydrated the message %d times", sent.MessageReads)
+	}
+	var response struct {
+		Data struct {
+			Subject string   `json:"subject"`
+			To      []string `json:"to"`
+			CC      []string `json:"cc"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(out), &response); err != nil {
+		t.Fatalf("decode dry run: %v\n%s", err, out)
+	}
+	if response.Data.Subject != "Re: Weekly sync" {
+		t.Errorf("subject = %q", response.Data.Subject)
+	}
+	if want := []string{"support@example.com"}; !reflect.DeepEqual(response.Data.To, want) {
+		t.Errorf("to = %v, want %v", response.Data.To, want)
+	}
+	if want := []string{"manager@example.com"}; !reflect.DeepEqual(response.Data.CC, want) {
+		t.Errorf("cc = %v, want %v", response.Data.CC, want)
+	}
+}
+
+func TestReplyDryRunRefusesToGuessWhenThePrefillIsUnavailable(t *testing.T) {
+	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
+	sent.TopicEntryJSON = `{"id":12,"subject":"Weekly sync"}`
+	sent.MessageStatus = http.StatusInternalServerError
+
+	_, err := runCLIOutput(t, server, "--account", "8", "reply", "7", "--dry-run", "--to", "support@example.com")
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || !strings.Contains(cliErr.Hint, "use --replace-recipients") {
+		t.Fatalf("error = %v, want an actionable replacement hint", err)
+	}
+	if sent.MessageReads != 0 {
+		t.Fatalf("refused dry run hydrated the message %d times", sent.MessageReads)
+	}
+	if sent.Path != "" {
+		t.Errorf("refused dry run wrote to %q", sent.Path)
+	}
+}
+
+func TestReplyReplacementDoesNotNeedTheOriginalMessage(t *testing.T) {
+	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
+	sent.TopicEntryJSON = `{"id":12,"subject":"Weekly sync"}`
+	sent.MessageStatus = http.StatusRequestEntityTooLarge
+
+	err := runCLI(t, server, "--account", "8", "reply", "7", "--replace-recipients",
+		"--to", "support@example.com", "-m", "please route this")
+	if err != nil {
+		t.Fatalf("reply with replacement recipient: %v", err)
+	}
+	if sent.MessageReads != 0 {
+		t.Fatalf("replacement reply hydrated the message %d times", sent.MessageReads)
+	}
+	if want := []string{"support@example.com"}; !reflect.DeepEqual(sent.To, want) {
+		t.Errorf("to = %v, want %v", sent.To, want)
+	}
+	if sent.Subject != "Re: Weekly sync" {
+		t.Errorf("subject = %q", sent.Subject)
+	}
+	if !strings.Contains(sent.Path, "/entries/12/replies") {
+		t.Errorf("path = %q, want the existing thread's reply endpoint", sent.Path)
 	}
 }
 

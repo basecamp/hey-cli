@@ -100,9 +100,19 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 
 	ctx := cmd.Context()
 
-	target, err := resolveThreadReply(ctx, threadID)
+	resolve := resolveThreadReply
+	if c.dryRun || c.replaceRecipients {
+		resolve = resolveThreadReplyWithoutMessage
+	}
+	target, err := resolve(ctx, threadID)
 	if err != nil {
 		return err
+	}
+	if target.Subject == "" {
+		return apierr.ErrUsage("could not determine the reply subject")
+	}
+	if c.dryRun && !c.replaceRecipients && !target.RecipientsResolved {
+		return apierr.ErrUsageHint("could not resolve HEY's reply recipients without reading the message", "use --replace-recipients with explicit --to, --cc or --bcc addresses")
 	}
 	target.Addressed, err = applyReplyRecipientOverrides(target.Addressed, overrides, c.replaceRecipients)
 	if err != nil {
