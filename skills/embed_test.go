@@ -48,7 +48,11 @@ func TestHeySkillRetriesMacOSKeychainAccessWithoutBroadEscalation(t *testing.T) 
 		"normal approval flow",
 		"rerun only the exact `hey` command the user requested",
 		"separate one-command approval",
+		"`data.authenticated` is `true`",
+		"`data.authenticated` is `false` or the status command fails",
 		"Never run the macOS `security` command",
+		"print or copy credentials",
+		"move credentials into a file",
 		"never disable the sandbox globally",
 		"never set `HEY_NO_KEYRING=1`",
 	} {
