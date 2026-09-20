@@ -169,6 +169,33 @@ func TestAuthStatusReportsUnreadableCredentialState(t *testing.T) {
 	}
 }
 
+func TestAuthCommandsPreserveCredentialStorageFailures(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	for _, command := range [][]string{{"auth", "refresh"}, {"auth", "token"}} {
+		t.Run(strings.Join(command, " "), func(t *testing.T) {
+			configHome := t.TempDir()
+			configDir := filepath.Join(configHome, "hey-cli")
+			if err := os.MkdirAll(configDir, 0700); err != nil {
+				t.Fatalf("MkdirAll: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(configDir, "credentials.json"), []byte("not-json"), 0600); err != nil {
+				t.Fatalf("WriteFile: %v", err)
+			}
+
+			_, _, err := runAuthCommand(t, configHome, server.URL, "", true, command...)
+			if err == nil || !strings.Contains(err.Error(), "invalid character") {
+				t.Fatalf("error = %v, want the credential read failure", err)
+			}
+			var classified *apierr.Error
+			if errors.As(err, &classified) && classified.Code == apierr.CodeAuth {
+				t.Fatalf("error = %v, unavailable storage is not an authentication failure", err)
+			}
+		})
+	}
+}
+
 func TestAuthStatusUsesEnvironmentTokenWithoutStorage(t *testing.T) {
 	server := httptest.NewServer(http.NotFoundHandler())
 	defer server.Close()

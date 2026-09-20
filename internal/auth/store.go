@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	serviceName         = "hey"
-	keyringAvailability = "hey::availability"
+	serviceName               = "hey"
+	keyringAvailability       = "hey::availability"
+	storagePreferenceFilename = "credential-storage"
 )
 
 // ErrCredentialsNotFound means the store has no credential for an origin. It
@@ -42,6 +43,7 @@ type Credentials struct {
 type Store struct {
 	initOnce    sync.Once
 	useKeyring  bool
+	keyringErr  error
 	noKeyring   bool
 	fallbackDir string
 	keyring     credentialKeyring
@@ -70,11 +72,33 @@ func (s *Store) ensureInit() {
 		_, err := s.keyring.get(serviceName, keyringAvailability)
 		if err == nil || errors.Is(err, keyring.ErrNotFound) {
 			s.useKeyring = true
+			s.rememberKeyringChoice()
+			return
+		}
+		if s.keyringWasChosen() {
+			s.useKeyring = true
+			s.keyringErr = fmt.Errorf("system keyring unavailable: %w", err)
 			return
 		}
 		fmt.Fprintf(os.Stderr, "warning: system keyring unavailable, credentials stored in plaintext at %s\n",
 			filepath.Join(s.fallbackDir, "credentials.json"))
 	})
+}
+
+func (s *Store) credentialStoragePath() string {
+	return filepath.Join(s.fallbackDir, storagePreferenceFilename)
+}
+
+func (s *Store) rememberKeyringChoice() {
+	if err := os.MkdirAll(s.fallbackDir, 0700); err != nil {
+		return
+	}
+	_ = os.WriteFile(s.credentialStoragePath(), []byte("keyring\n"), 0600)
+}
+
+func (s *Store) keyringWasChosen() bool {
+	choice, err := os.ReadFile(s.credentialStoragePath())
+	return err == nil && string(choice) == "keyring\n"
 }
 
 func key(origin string) string {
@@ -112,6 +136,9 @@ func (s *Store) Delete(origin string) error {
 // a whole read-modify-write. Everything else goes through Load, Save and Delete.
 func (s *Store) load(origin string) (*Credentials, error) {
 	s.ensureInit()
+	if s.keyringErr != nil {
+		return nil, s.keyringErr
+	}
 	if s.useKeyring {
 		return s.loadFromKeyring(origin)
 	}
@@ -120,6 +147,9 @@ func (s *Store) load(origin string) (*Credentials, error) {
 
 func (s *Store) save(origin string, creds *Credentials) error {
 	s.ensureInit()
+	if s.keyringErr != nil {
+		return s.keyringErr
+	}
 	if s.useKeyring {
 		return s.saveToKeyring(origin, creds)
 	}
@@ -128,6 +158,9 @@ func (s *Store) save(origin string, creds *Credentials) error {
 
 func (s *Store) delete(origin string) error {
 	s.ensureInit()
+	if s.keyringErr != nil {
+		return s.keyringErr
+	}
 	if s.useKeyring {
 		return s.keyring.delete(serviceName, key(origin))
 	}
@@ -257,6 +290,9 @@ func (s *Store) deleteFile(origin string) error {
 // MigrateToKeyring migrates credentials from file to keyring.
 func (s *Store) MigrateToKeyring() error {
 	s.ensureInit()
+	if s.keyringErr != nil {
+		return s.keyringErr
+	}
 	if !s.useKeyring {
 		return nil
 	}

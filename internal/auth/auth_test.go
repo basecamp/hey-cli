@@ -1263,9 +1263,6 @@ func TestASuccessfulRefreshLiftsTheHold(t *testing.T) {
 	}
 }
 
-// Two processes can queue on the credential lock holding the same dead grant. The
-// first is refused and forgets it; the second must not go on to send its own copy,
-// or the allowance is spent twice over for one dead session.
 func TestRefreshKeepsCachedCredentialsWhenTheStoreIsTemporarilyUnavailable(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("refresh endpoint called without a fresh read of the stored credential")
@@ -1304,6 +1301,9 @@ func TestRefreshKeepsCachedCredentialsWhenTheStoreIsTemporarilyUnavailable(t *te
 	}
 }
 
+// Two processes can queue on the credential lock holding the same dead grant. The
+// first is refused and forgets it; the second must not go on to send its own copy,
+// or the allowance is spent twice over for one dead session.
 func TestRefreshStopsWhenAnotherProcessForgotTheCredential(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

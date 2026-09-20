@@ -324,6 +324,38 @@ func TestConcurrentKeyringAvailabilityChecksAreReadOnly(t *testing.T) {
 	}
 }
 
+func TestKeyringFailureOnFirstAccessPreservesKnownKeyringChoice(t *testing.T) {
+	t.Setenv("HEY_NO_KEYRING", "")
+	configDir := t.TempDir()
+
+	available := NewStore(configDir)
+	available.keyring = credentialKeyring{
+		get:    func(_, _ string) (string, error) { return "", keyringlib.ErrNotFound },
+		set:    func(_, _, _ string) error { return nil },
+		delete: func(_, _ string) error { return nil },
+	}
+	if !available.UsingKeyring() {
+		t.Fatal("available keyring was not selected")
+	}
+
+	locked := NewStore(configDir)
+	locked.keyring = credentialKeyring{
+		get:    func(_, _ string) (string, error) { return "", errors.New("keyring is locked") },
+		set:    func(_, _, _ string) error { return nil },
+		delete: func(_, _ string) error { return nil },
+	}
+	_, err := locked.Load("https://app.hey.com")
+	if err == nil || !strings.Contains(err.Error(), "keyring is locked") {
+		t.Fatalf("Load error = %v, want the keyring failure", err)
+	}
+	if errors.Is(err, ErrCredentialsNotFound) {
+		t.Fatalf("Load error = %v, a known keyring becoming unavailable is not missing credentials", err)
+	}
+	if !locked.UsingKeyring() {
+		t.Error("known keyring choice was replaced with the fallback file")
+	}
+}
+
 func TestKeyringAvailabilityErrorUsesFileStore(t *testing.T) {
 	t.Setenv("HEY_NO_KEYRING", "")
 	store := NewStore(t.TempDir())
