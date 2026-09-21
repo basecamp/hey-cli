@@ -11,6 +11,7 @@ import (
 // viewContext holds shared dependencies injected into every sectionView.
 type attachmentSaveFunc func(context.Context, string, string, bool) (int64, error)
 type attachmentOpenFunc func(string) error
+type urlOpenFunc func(string) error
 
 // The Imbox's cover crosses the seam as a preset name rather than a coverPreset,
 // so that what stores it does not have to know how covers are drawn.
@@ -26,6 +27,7 @@ type viewContext struct {
 	imageFetcher         imageFetcher
 	saveAttachment       attachmentSaveFunc
 	openAttachment       attachmentOpenFunc
+	openURL              urlOpenFunc
 	newAttachmentTempDir func() (string, error)
 	loadCover            coverLoadFunc
 	saveCover            coverSaveFunc
@@ -83,6 +85,13 @@ type sectionView interface {
 // instead of treating any of them as global shortcuts.
 type inputCapturer interface {
 	CapturingInput() bool
+}
+
+// linkNavigator is an optional content-row capability. It keeps link-specific
+// keyboard routing out of sectionView, whose other implementations do not need it.
+type linkNavigator interface {
+	ClaimsLinkNavigation() bool
+	LinkSelectionActive() bool
 }
 
 type accountSwitchBlocker interface {

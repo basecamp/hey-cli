@@ -61,6 +61,8 @@ uppercase belongs to Labels:
 | Ctrl+A | switch linked account |
 | Ctrl+V | choose an Imbox cover |
 
+While reading a thread, links can be selected without a mouse. Tab selects the next link in document order and Shift+Tab selects the previous one; both wrap at the ends. The selected destination is shown above the thread, and the viewport moves to show the whole link, including wrapped lines. Press Enter to open it, Escape once to clear the selection, and Escape again to leave the thread. A thread with no selectable links keeps the normal global Tab focus behavior. Existing OSC 8 mouse links remain available.
+
 Most of those keep working while you are reading a thread, the way the web app's topic
 toolbar stays live: `r`, `f`, `v`, `b`, `u`, `i`, `l`, `a`, `d`, `p` and `t` all act on
 the thread on screen rather than on the list behind it. Filing a thread leaves it open in

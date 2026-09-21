@@ -8,6 +8,8 @@ import (
 
 	"charm.land/glamour/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/basecamp/hey-cli/internal/htmlutil"
 )
 
 // visible is what the terminal shows: the output with every escape sequence removed.
@@ -321,6 +323,21 @@ func FuzzContainment(f *testing.F) {
 			t.Skip()
 		}
 		out := render(md, 40)
+		linked := RenderLinked(htmlutil.ToMarkdown(md), 40, len(md)%8)
+		if !sgrOnly(linked.Text) {
+			t.Fatalf("RenderLinked(%q) = %q carries a sequence outside the allow-list", md, linked.Text)
+		}
+		for _, link := range linked.Links {
+			if !allowedHyperlink(link.Destination) {
+				t.Fatalf("RenderLinked(%q) returned unsafe destination %q", md, link.Destination)
+			}
+			if link.StartLine < 0 || link.EndLine < link.StartLine {
+				t.Fatalf("RenderLinked(%q) returned invalid range %#v", md, link)
+			}
+			if !strings.Contains(linked.Text, ";"+link.Destination+"\a") && !strings.Contains(linked.Text, ";"+link.Destination+"\x1b\\") {
+				t.Fatalf("RenderLinked(%q) returned destination %q without a matching OSC 8 occurrence", md, link.Destination)
+			}
+		}
 		if !sgrOnly(out) {
 			t.Fatalf("render(%q) = %q carries a sequence outside the allow-list", md, out)
 		}

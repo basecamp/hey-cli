@@ -175,6 +175,11 @@ type attachmentSavedMsg struct {
 	err          error
 }
 
+type linkOpenedMsg struct {
+	topicID int64
+	err     error
+}
+
 type attachmentOpenedMsg struct {
 	topicID      int64
 	attachmentID string
@@ -255,6 +260,13 @@ type collectionActionDoneMsg struct {
 
 // --- Mail section view ---
 
+type mailLink struct {
+	destination string
+	startLine   int
+	endLine     int
+	key         string
+}
+
 type mailView struct {
 	vc *viewContext
 
@@ -275,6 +287,9 @@ type mailView struct {
 	attachmentCursor int
 	imageContent     string
 	entryOffsets     []int // line where each message starts in the thread content
+	links            []mailLink
+	selectedLink     int
+	selectedLinkKey  string
 	inThread         bool
 	threadNotice     string // what the open thread's read did not get; stays until the thread is left
 	contentHeight    int    // the rows the section has, which the thread's notices and viewport share
@@ -321,6 +336,7 @@ func newMailView(vc *viewContext) *mailView {
 		searchList:    contentList{hideSeenState: true},
 		bundleList:    contentList{hideSeenState: true},
 		seenList:      contentList{hideSeenState: true},
+		selectedLink:  -1,
 	}
 	if vc.loadCover != nil {
 		view.cover = parseCoverPreset(vc.loadCover())
@@ -544,6 +560,8 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.attachments = msg.attachments
 		v.attachmentCursor = 0
 		v.threadNotice = msg.notice
+		v.selectedLink = -1
+		v.selectedLinkKey = ""
 		v.fitThreadViewport()
 		var imageContent strings.Builder
 		var uploadCmds []tea.Cmd
@@ -698,6 +716,17 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		return notify("Saved attachment to " + msg.path), true
+
+	case linkOpenedMsg:
+		if msg.topicID != v.topicID || !v.inThread {
+			return nil, true
+		}
+		if msg.err != nil {
+			v.notice = terminal.SanitizeLine("Could not open link: " + msg.err.Error())
+			v.fitThreadViewport()
+			v.revealLink()
+		}
+		return nil, true
 
 	case attachmentOpenedMsg:
 		if !v.currentAttachmentAction(msg.topicID, msg.attachmentID) {
@@ -992,6 +1021,12 @@ func (v *mailView) HelpBindings() []helpBinding {
 				helpBinding{"p", "paper trail"},
 				helpBinding{"t", "trash"},
 			)
+		}
+		if v.ClaimsLinkNavigation() {
+			bindings = append(bindings, helpBinding{"tab/shift+tab", "next/previous link"})
+			if v.LinkSelectionActive() {
+				bindings = append(bindings, helpBinding{"enter", "open link"})
+			}
 		}
 		if len(v.entries) > 1 {
 			bindings = append(bindings, helpBinding{"j/k", "next/previous message"})
@@ -1293,6 +1328,10 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 
 	if v.inThread {
+		if cmd, handled := v.handleLinkKey(msg); handled {
+			return cmd
+		}
+
 		switch msg.String() {
 		case "r", "R":
 			if v.topicID != 0 {
@@ -1464,7 +1503,19 @@ func (v *mailView) InThread() bool {
 	return v.inThread || v.searchActive || v.bundleActive || v.seenActive
 }
 
+func (v *mailView) ClaimsLinkNavigation() bool {
+	return v.inThread && v.modal == nil && len(v.links) > 0
+}
+
+func (v *mailView) LinkSelectionActive() bool {
+	return v.ClaimsLinkNavigation() && v.selectedLink >= 0 && v.selectedLink < len(v.links)
+}
+
 func (v *mailView) ExitDetail(key string) {
+	if v.inThread && key != "q" && v.selectedLink >= 0 {
+		v.clearLinkSelection()
+		return
+	}
 	if key == "q" && (v.searchActive || v.bundleActive || v.seenActive) && !v.inThread && (v.requests.kind == mailRequestTopic || v.requests.kind == mailRequestSearch) {
 		v.requests.cancel()
 		v.clearSearch()
@@ -1485,6 +1536,8 @@ func (v *mailView) ExitThread() {
 		v.threadNotice = ""
 		v.threadPosting = mail.Posting{}
 		v.threadBoxKind = ""
+		v.clearLinkSelection()
+		v.links = nil
 		v.modal = nil
 		v.requests.cancel()
 		return
@@ -1585,6 +1638,8 @@ func (v *mailView) Restyle() {
 		offset := v.topicViewport.YOffset()
 		v.rebuildTopicContent()
 		v.topicViewport.SetYOffset(offset)
+		v.fitThreadViewport()
+		v.revealLink()
 	}
 	if v.modal != nil {
 		v.modal.restyle(v.vc.styles)
@@ -1599,9 +1654,14 @@ func (v *mailView) Resize(width, height int) {
 	v.searchList.setSize(width, height)
 	v.bundleList.setSize(width, height)
 	v.seenList.setSize(width, height)
+	oldWidth := v.topicViewport.Width()
 	v.topicViewport.SetWidth(width)
 	v.contentHeight = height
+	if v.inThread && oldWidth != width {
+		v.rebuildTopicContent()
+	}
 	v.fitThreadViewport()
+	v.revealLink()
 }
 
 // threadNotices is what is shown above an open thread's viewport: the partial-read
@@ -1611,7 +1671,11 @@ func (v *mailView) Resize(width, height int) {
 // way rather than pushing the viewport out.
 func (v *mailView) threadNotices() []string {
 	var notices []string
-	for _, notice := range []string{v.threadNotice, v.notice} {
+	linkNotice := ""
+	if v.LinkSelectionActive() {
+		linkNotice = "Open: " + terminal.SanitizeLine(v.links[v.selectedLink].destination)
+	}
+	for _, notice := range []string{linkNotice, v.threadNotice, v.notice} {
 		if notice != "" {
 			notices = append(notices, truncateToWidth(notice, max(v.vc.width, 4)))
 		}
@@ -1671,6 +1735,8 @@ func (v *mailView) switchBox(index int) tea.Cmd {
 	v.threadNotice = ""
 	v.threadPosting = mail.Posting{}
 	v.threadBoxKind = ""
+	v.clearLinkSelection()
+	v.links = nil
 	v.clearSearch()
 	v.clearBundle()
 	v.clearSeen()
@@ -1694,6 +1760,8 @@ func (v *mailView) openPreviouslySeen() tea.Cmd {
 	v.threadNotice = ""
 	v.threadPosting = mail.Posting{}
 	v.threadBoxKind = ""
+	v.clearLinkSelection()
+	v.links = nil
 	v.clearSearch()
 	v.clearBundle()
 	v.notice = ""
@@ -2088,10 +2156,84 @@ func (v *mailView) jumpEntry(delta int) {
 	v.topicViewport.GotoTop()
 }
 
+func (v *mailView) clearLinkSelection() {
+	selected := v.selectedLink >= 0 || v.selectedLinkKey != ""
+	v.selectedLink = -1
+	v.selectedLinkKey = ""
+	if selected && v.inThread {
+		offset := v.topicViewport.YOffset()
+		v.rebuildTopicContent()
+		v.topicViewport.SetYOffset(offset)
+		v.fitThreadViewport()
+	}
+}
+
+func (v *mailView) handleLinkKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	if !v.inThread || len(v.links) == 0 {
+		return nil, false
+	}
+	if msg.Key().Code == tea.KeyTab {
+		delta := 1
+		if msg.Key().Mod == tea.ModShift {
+			delta = -1
+		}
+		if v.selectedLink < 0 {
+			if delta < 0 {
+				v.selectedLink = len(v.links)
+			} else {
+				v.selectedLink = -1
+			}
+		}
+		v.selectedLink = (v.selectedLink + delta + len(v.links)) % len(v.links)
+		v.selectedLinkKey = v.links[v.selectedLink].key
+		v.rebuildTopicContent()
+		v.fitThreadViewport()
+		v.revealLink()
+		return nil, true
+	}
+	if msg.Key().Code == tea.KeyEnter && v.selectedLink >= 0 {
+		link := v.links[v.selectedLink]
+		if v.vc.openURL == nil {
+			return nil, true
+		}
+		topicID, destination := v.topicID, link.destination
+		return func() tea.Msg {
+			return linkOpenedMsg{topicID: topicID, err: v.vc.openURL(destination)}
+		}, true
+	}
+	return nil, false
+}
+
+func (v *mailView) revealLink() {
+	if v.selectedLink < 0 || v.selectedLink >= len(v.links) {
+		return
+	}
+	link := v.links[v.selectedLink]
+	height := max(v.topicViewport.Height(), 1)
+	if link.startLine < v.topicViewport.YOffset() {
+		v.topicViewport.SetYOffset(link.startLine)
+	}
+	if link.endLine >= v.topicViewport.YOffset()+height {
+		v.topicViewport.SetYOffset(link.endLine - height + 1)
+	}
+}
+
 func (v *mailView) rebuildTopicContent() {
-	rendered, offsets := v.renderEntries(v.entries)
+	key := v.selectedLinkKey
+	rendered, offsets, links := v.renderEntriesWithLinks(v.entries, key)
 	v.topicContent = rendered + v.imageContent
 	v.entryOffsets = offsets
+	v.links = links
+	v.selectedLink = -1
+	for i := range links {
+		if links[i].key == key && key != "" {
+			v.selectedLink = i
+			break
+		}
+	}
+	if v.selectedLink < 0 {
+		v.selectedLinkKey = ""
+	}
 	v.topicViewport.SetContent(v.topicContent)
 }
 
@@ -3054,9 +3196,15 @@ func (v *mailView) fetchTopic(ctx context.Context, requestID uint64, boxID, topi
 // renderEntries renders the thread's messages and returns the content along
 // with the line each message header starts on, for j/k jumps.
 func (v *mailView) renderEntries(entries []mail.Entry) (string, []int) {
+	rendered, offsets, _ := v.renderEntriesWithLinks(entries, "")
+	return rendered, offsets
+}
+
+func (v *mailView) renderEntriesWithLinks(entries []mail.Entry, selectedKey string) (string, []int, []mailLink) {
 	var b strings.Builder
 	offsets := make([]int, 0, len(entries))
 	lineCount := 0
+	links := []mailLink{}
 	sepWidth := max(v.vc.width-4, 40)
 	sep := v.vc.styles.separator.Render(strings.Repeat("─", sepWidth))
 
@@ -3094,7 +3242,19 @@ func (v *mailView) renderEntries(entries []mail.Entry) (string, []int) {
 		fmt.Fprintf(&b, "%s  %s\n", v.vc.styles.entryFrom.Render(terminal.SanitizeLine(from)), v.vc.styles.entryDate.Render(formatDisplayDateTime(e.CreatedAt)))
 		switch {
 		case !e.Body.IsEmpty():
-			fmt.Fprintf(&b, "\n%s\n", v.vc.styles.entryBody.Render(markdown.Render(e.Body, sepWidth)))
+			linked := markdown.RenderLinked(e.Body, sepWidth, -1)
+			localSelected := -1
+			for i, occurrence := range linked.Links {
+				key := fmt.Sprintf("%d\x00%d\x00%s", e.ID, i, occurrence.Destination)
+				links = append(links, mailLink{destination: occurrence.Destination, startLine: lineCount + 2 + occurrence.StartLine, endLine: lineCount + 2 + occurrence.EndLine, key: key})
+				if key == selectedKey {
+					localSelected = i
+				}
+			}
+			if localSelected >= 0 {
+				linked = markdown.RenderLinked(e.Body, sepWidth, localSelected)
+			}
+			fmt.Fprintf(&b, "\n%s\n", v.vc.styles.entryBody.Render(linked.Text))
 		case e.BodyState == string(threadload.StateHydrated):
 			fmt.Fprintf(&b, "\n%s\n", v.vc.styles.entryDate.Render("(empty body)"))
 		case e.BodyState == string(threadload.StateBodyless) && e.Summary != "":
@@ -3112,5 +3272,5 @@ func (v *mailView) renderEntries(entries []mail.Entry) (string, []int) {
 		lineCount += strings.Count(b.String()[entryStart:], "\n")
 	}
 
-	return b.String(), offsets
+	return b.String(), offsets, links
 }

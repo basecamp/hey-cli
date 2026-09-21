@@ -194,6 +194,7 @@ func newViewContext(ctx context.Context, rootSDK, sdk *hey.Client, styles styles
 			return attachmentfiles.Save(ctx, sdk, destination, sourceURL, force)
 		},
 		openAttachment: openExternalFile,
+		openURL:        openExternalURL,
 		newAttachmentTempDir: func() (string, error) {
 			return os.MkdirTemp("", "hey-cli-attachment-*")
 		},
@@ -720,11 +721,16 @@ func (m *model) updateHelpBindings() {
 		bindings = append(m.activeView.HelpBindings(), quitHint)
 	} else if m.activeView.InThread() {
 		extra := m.activeView.HelpBindings()
-		bindings = make([]helpBinding, 0, 3+len(extra))
-		bindings = append(bindings,
-			helpBinding{"↑↓", "scroll"},
-			helpBinding{"esc/q", "back"},
-		)
+		bindings = make([]helpBinding, 0, 4+len(extra))
+		bindings = append(bindings, helpBinding{"↑↓", "scroll"})
+		if navigator, ok := m.activeView.(linkNavigator); ok && navigator.LinkSelectionActive() {
+			bindings = append(bindings,
+				helpBinding{"esc", "clear link"},
+				helpBinding{"q", "back"},
+			)
+		} else {
+			bindings = append(bindings, helpBinding{"esc/q", "back"})
+		}
 		bindings = append(bindings, extra...)
 		bindings = append(bindings, quitHint)
 	} else {
@@ -883,6 +889,14 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	if m.loading {
 		return m, nil
+	}
+
+	if msg.Key().Code == tea.KeyTab && m.focus == rowContent {
+		if navigator, ok := m.activeView.(linkNavigator); ok && navigator.ClaimsLinkNavigation() {
+			cmd := m.activeView.HandleContentKey(msg)
+			m.updateHelpBindings()
+			return m, m.syncLoading(cmd)
+		}
 	}
 
 	if msg.Key().Code == tea.KeyTab {

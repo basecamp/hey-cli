@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strconv"
 	"strings"
@@ -67,6 +68,19 @@ func testPostings() []mail.Posting {
 		},
 	}
 }
+
+type linkNavigationTestModal struct {
+	plainModal
+	keys []string
+}
+
+func (m *linkNavigationTestModal) handleKey(_ *mailView, msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	m.keys = append(m.keys, msg.String())
+	return nil, true
+}
+
+func (*linkNavigationTestModal) draw(*mailView) string       { return "modal" }
+func (*linkNavigationTestModal) helpBindings() []helpBinding { return nil }
 
 func keyPress(key string) tea.KeyPressMsg {
 	k := tea.Key{Text: key}
@@ -1275,5 +1289,284 @@ func TestViewShowsBoxNames(t *testing.T) {
 	v := m.View()
 	if !strings.Contains(stripANSI(v.Content), "Imbox") {
 		t.Error("View should contain Imbox")
+	}
+}
+
+func openLinkThreadThroughModel(t *testing.T) model {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/topics/100/entries.json":
+			_, _ = w.Write([]byte(`[
+				{"id":503,"kind":"message","summary":"Send a note","created_at":"2026-08-19T11:00:00Z","creator":{"id":30,"name":"Carol"}},
+				{"id":502,"kind":"message","summary":"Second report","created_at":"2026-08-19T10:00:00Z","creator":{"id":20,"name":"Bob"}},
+				{"id":501,"kind":"message","summary":"First report","created_at":"2026-08-19T09:00:00Z","creator":{"id":10,"name":"Alice"}}
+			]`))
+		case "/messages/501.json":
+			_, _ = w.Write([]byte(`{"id":501,"subject":"Three reports","content":"<p>Read <a href=\"https://example.com/first\">the first report</a>.</p>","created_at":"2026-08-19T09:00:00Z","creator":{"id":10,"name":"Alice"}}`))
+		case "/messages/502.json":
+			_, _ = w.Write([]byte(`{"id":502,"subject":"Three reports","content":"<p>Padding padding padding padding padding padding padding padding padding padding padding padding.</p><p>Read <a href=\"https://example.org/second?full=destination\">the second report</a>.</p>","created_at":"2026-08-19T10:00:00Z","creator":{"id":20,"name":"Bob"}}`))
+		case "/messages/503.json":
+			_, _ = w.Write([]byte(`{"id":503,"subject":"Three reports","content":"<p>Finally, <a href=\"mailto:reader@example.com\">send a note</a>.</p>","created_at":"2026-08-19T11:00:00Z","creator":{"id":30,"name":"Carol"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	m := modelWithBoxes()
+	m.mailView.vc.sdk = hey.NewClient(
+		&hey.Config{BaseURL: server.URL},
+		&hey.StaticTokenProvider{Token: "test-token"},
+		hey.WithMaxRetries(0),
+	)
+	updated, cmd := m.Update(keyPress("enter"))
+	m = updated.(model)
+	if cmd == nil {
+		t.Fatal("opening the selected posting returned no command")
+	}
+	message := runCmd(cmd)
+	if batch, ok := message.(tea.BatchMsg); ok {
+		message = runCmd(batch[0])
+	}
+	if _, ok := message.(viewGenerationMsg); !ok {
+		t.Fatalf("topic command returned %T, want viewGenerationMsg", message)
+	}
+	updated, _ = m.Update(message)
+	m = updated.(model)
+	if !m.mailView.InThread() || len(m.mailView.links) != 3 {
+		t.Fatalf("loaded thread links = %d, want 3", len(m.mailView.links))
+	}
+	return m
+}
+
+func TestRootModelKeepsGlobalTabForALinklessThread(t *testing.T) {
+	m := modelWithBoxes()
+	m.mailView.inThread = true
+	m.mailView.entries = []mail.Entry{{ID: 501, Creator: mail.Contact{Name: "Alice"}}}
+	m.mailView.rebuildTopicContent()
+	m.updateHelpBindings()
+
+	updated, _ := m.Update(keyPress("tab"))
+	m = updated.(model)
+	if m.focus != rowSection {
+		t.Errorf("linkless thread Tab focus = %d, want rowSection", m.focus)
+	}
+}
+
+func TestLinkedThreadUsesGlobalTabOutsideContent(t *testing.T) {
+	m := openLinkThreadThroughModel(t)
+	m.focus = rowSubnav
+	updated, _ := m.Update(keyPress("tab"))
+	m = updated.(model)
+	if m.focus != rowContent || m.mailView.selectedLink != -1 {
+		t.Errorf("Tab outside content set focus=%d selectedLink=%d", m.focus, m.mailView.selectedLink)
+	}
+}
+
+func TestEnterWithoutASelectedLinkDoesNotOpen(t *testing.T) {
+	m := openLinkThreadThroughModel(t)
+	opened := false
+	m.mailView.vc.openURL = func(string) error {
+		opened = true
+		return nil
+	}
+	updated, cmd := m.Update(keyPress("enter"))
+	m = updated.(model)
+	if cmd != nil || opened || m.mailView.selectedLink != -1 {
+		t.Errorf("Enter without selection returned command=%v opened=%v selected=%d", cmd != nil, opened, m.mailView.selectedLink)
+	}
+}
+
+func TestThreadLinkNavigationYieldsToAModal(t *testing.T) {
+	m := openLinkThreadThroughModel(t)
+	updated, _ := m.Update(keyPress("tab"))
+	m = updated.(model)
+	selectedKey := m.mailView.selectedLinkKey
+	open := &linkNavigationTestModal{}
+	m.mailView.modal = open
+	m.updateHelpBindings()
+
+	updated, _ = m.Update(keyPress("tab"))
+	m = updated.(model)
+	if len(open.keys) != 1 || open.keys[0] != "tab" {
+		t.Fatalf("modal keys = %q, want Tab", open.keys)
+	}
+	if m.mailView.selectedLinkKey != selectedKey {
+		t.Error("modal Tab changed the selected thread link")
+	}
+}
+
+func TestThreadLinkSelectionSurvivesRebuildsAndClearsWhenOccurrenceDisappears(t *testing.T) {
+	m := openLinkThreadThroughModel(t)
+	updated, _ := m.Update(keyPress("tab"))
+	m = updated.(model)
+	selectedKey := m.mailView.selectedLinkKey
+
+	updated, _ = m.Update(tea.WindowSizeMsg{Width: 48, Height: 40})
+	m = updated.(model)
+	if m.mailView.selectedLinkKey != selectedKey || m.mailView.selectedLink < 0 {
+		t.Fatal("resize lost the logical link occurrence")
+	}
+	selected := m.mailView.links[m.mailView.selectedLink]
+	if selected.startLine < m.mailView.topicViewport.YOffset() || selected.endLine >= m.mailView.topicViewport.YOffset()+m.mailView.topicViewport.Height() {
+		t.Errorf("resized selected range %d-%d is outside the viewport", selected.startLine, selected.endLine)
+	}
+
+	m.mailView.Restyle()
+	if m.mailView.selectedLinkKey != selectedKey || !strings.Contains(m.mailView.topicContent, "\x1b[7m") {
+		t.Error("restyle lost the selected occurrence or its styling")
+	}
+	m.mailView.attachments = []messageAttachment{{ID: "501:1", MessageID: 501, Filename: "report.pdf"}}
+	m.mailView.moveAttachmentCursor(1)
+	if m.mailView.selectedLinkKey != selectedKey {
+		t.Error("attachment rebuild lost the selected occurrence")
+	}
+
+	m.mailView.entries = m.mailView.entries[1:]
+	m.mailView.rebuildTopicContent()
+	if m.mailView.selectedLink != -1 || m.mailView.selectedLinkKey != "" {
+		t.Error("removing the selected occurrence did not clear selection")
+	}
+}
+
+func TestThreadMessageAndAttachmentKeysRemainAvailableWithLinks(t *testing.T) {
+	m := openLinkThreadThroughModel(t)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 16})
+	m = updated.(model)
+	updated, _ = m.Update(keyPress("tab"))
+	m = updated.(model)
+	selectedKey := m.mailView.selectedLinkKey
+
+	updated, _ = m.Update(keyPress("j"))
+	m = updated.(model)
+	if m.mailView.topicViewport.YOffset() != m.mailView.entryOffsets[1] {
+		t.Errorf("j offset = %d, want second message at %d", m.mailView.topicViewport.YOffset(), m.mailView.entryOffsets[1])
+	}
+
+	m.mailView.attachments = []messageAttachment{
+		{ID: "501:1", MessageID: 501, Filename: "report.pdf"},
+		{ID: "501:2", MessageID: 501, Filename: "chart.png"},
+	}
+	m.mailView.rebuildTopicContent()
+	updated, _ = m.Update(keyPress("]"))
+	m = updated.(model)
+	if m.mailView.attachmentCursor != 1 || m.mailView.selectedLinkKey != selectedKey {
+		t.Errorf("next attachment set cursor=%d selected=%q", m.mailView.attachmentCursor, m.mailView.selectedLinkKey)
+	}
+	updated, _ = m.Update(keyPress("["))
+	m = updated.(model)
+	if m.mailView.attachmentCursor != 0 {
+		t.Errorf("previous attachment cursor = %d, want 0", m.mailView.attachmentCursor)
+	}
+}
+
+func TestQLeavesAThreadWithASelectedLink(t *testing.T) {
+	m := openLinkThreadThroughModel(t)
+	updated, _ := m.Update(keyPress("tab"))
+	m = updated.(model)
+	updated, _ = m.Update(keyPress("q"))
+	m = updated.(model)
+	if m.mailView.InThread() {
+		t.Error("q cleared link selection instead of leaving the thread")
+	}
+}
+
+func TestRootModelNavigatesThreadLinksAndOpensExactDestination(t *testing.T) {
+	m := openLinkThreadThroughModel(t)
+	var opened []string
+	m.mailView.vc.openURL = func(destination string) error {
+		opened = append(opened, destination)
+		return nil
+	}
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 16})
+	m = updated.(model)
+
+	// These are end-user key messages. In particular, do not call HandleContentKey.
+	updated, _ = m.Update(keyPress("tab"))
+	m = updated.(model)
+	updated, _ = m.Update(keyPress("shift+tab"))
+	m = updated.(model)
+	if m.mailView.selectedLink != 2 {
+		t.Fatalf("reverse wrap selected link = %d, want last occurrence", m.mailView.selectedLink)
+	}
+	updated, _ = m.Update(keyPress("tab"))
+	m = updated.(model)
+	if m.mailView.selectedLink != 0 {
+		t.Fatalf("forward wrap selected link = %d, want first occurrence", m.mailView.selectedLink)
+	}
+	updated, _ = m.Update(keyPress("tab"))
+	m = updated.(model)
+	if m.mailView.selectedLink != 1 {
+		t.Fatalf("selected link = %d, want second occurrence", m.mailView.selectedLink)
+	}
+	if !strings.Contains(stripANSI(m.contentView()), "https://example.org/second?full=destination") {
+		t.Fatalf("selected destination is not visible: %q", m.contentView())
+	}
+	if m.mailView.topicViewport.YOffset() == 0 {
+		t.Error("selecting the offscreen second link did not move the viewport")
+	}
+	selected := m.mailView.links[m.mailView.selectedLink]
+	visibleStart := m.mailView.topicViewport.YOffset()
+	visibleEnd := visibleStart + m.mailView.topicViewport.Height() - 1
+	if selected.startLine < visibleStart || selected.endLine > visibleEnd {
+		t.Errorf("selected range %d-%d is outside viewport %d-%d", selected.startLine, selected.endLine, visibleStart, visibleEnd)
+	}
+	if !strings.Contains(m.mailView.topicContent, "\x1b[7m") {
+		t.Error("selected link has no reverse-video styling")
+	}
+	if !hasHelpBinding(m.help.bindings, "enter") || !hasHelpBinding(m.help.bindings, "esc") || !hasHelpBinding(m.help.bindings, "q") || hasHelpBinding(m.help.bindings, "esc/q") {
+		t.Errorf("selected-link help is inaccurate: %#v", m.help.bindings)
+	}
+
+	updated, cmd := m.Update(keyPress("enter"))
+	m = updated.(model)
+	if cmd == nil {
+		t.Fatal("enter did not return an opener command")
+	}
+	if msg := cmd(); msg == nil {
+		t.Fatal("opener command returned no result")
+	} else {
+		updated, _ = m.Update(msg)
+		m = updated.(model)
+	}
+	if len(opened) != 1 || opened[0] != "https://example.org/second?full=destination" {
+		t.Fatalf("opened destinations = %q, want exact second destination once", opened)
+	}
+	m.mailView.vc.openURL = func(string) error { return errors.New("\x1b[31mblocked\x1b[0m") }
+	updated, cmd = m.Update(keyPress("enter"))
+	m = updated.(model)
+	if cmd == nil {
+		t.Fatal("enter with a selected link did not retry the opener")
+	}
+	updated, _ = m.Update(cmd())
+	m = updated.(model)
+	if !strings.Contains(stripANSI(m.contentView()), "Could not open link: blocked") || strings.Contains(m.contentView(), "\x1b[31m") {
+		t.Errorf("opener error was not a sanitized visible notice: %q", m.contentView())
+	}
+
+	updated, _ = m.Update(keyPress("shift+tab"))
+	m = updated.(model)
+	if m.mailView.selectedLink != 0 {
+		t.Errorf("shift+tab selected %d, want first occurrence", m.mailView.selectedLink)
+	}
+	updated, _ = m.Update(keyPress("esc"))
+	m = updated.(model)
+	if !m.mailView.InThread() || m.mailView.selectedLink != -1 {
+		t.Fatal("first escape should clear selection and keep the thread open")
+	}
+	if strings.Contains(m.mailView.topicContent, "\x1b[7m") {
+		t.Error("first escape left selected styling in the thread")
+	}
+	for _, notice := range m.mailView.threadNotices() {
+		if strings.HasPrefix(notice, "Open: ") {
+			t.Errorf("first escape left destination notice %q", notice)
+		}
+	}
+	updated, _ = m.Update(keyPress("esc"))
+	m = updated.(model)
+	if m.mailView.InThread() {
+		t.Error("second escape should leave the thread")
 	}
 }
