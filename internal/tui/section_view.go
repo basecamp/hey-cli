@@ -94,6 +94,13 @@ type linkNavigator interface {
 	LinkSelectionActive() bool
 }
 
+// linkFooterProvider is implemented by a view that reserves a stable footer row
+// for contextual detail. The bool reports whether the row belongs on screen even
+// when its content is blank.
+type linkFooterProvider interface {
+	LinkFooter() (string, bool)
+}
+
 type accountSwitchBlocker interface {
 	AccountSwitchBlocked() bool
 }

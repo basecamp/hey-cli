@@ -144,30 +144,32 @@ func relativeLuminance(c color.Color) float64 {
 }
 
 type styles struct {
-	app       lipgloss.Style
-	title     lipgloss.Style // bold primary for inline titles
-	pill      lipgloss.Style // filled button, for a call to action above a list
-	entryFrom lipgloss.Style
-	entryDate lipgloss.Style
-	entryBody lipgloss.Style
-	separator lipgloss.Style
-	helpKey   lipgloss.Style
-	helpDesc  lipgloss.Style
-	helpSep   lipgloss.Style
+	app        lipgloss.Style
+	title      lipgloss.Style // bold primary for inline titles
+	pill       lipgloss.Style // filled button, for a call to action above a list
+	entryFrom  lipgloss.Style
+	entryDate  lipgloss.Style
+	entryBody  lipgloss.Style
+	separator  lipgloss.Style
+	helpKey    lipgloss.Style
+	helpDesc   lipgloss.Style
+	helpSep    lipgloss.Style
+	linkStatus lipgloss.Style
 }
 
 func newStyles() styles {
 	return styles{
-		app:       lipgloss.NewStyle().Padding(1, 2),
-		title:     lipgloss.NewStyle().Foreground(colorPrimary).Bold(true),
-		pill:      lipgloss.NewStyle().Foreground(colorOnAccent).Background(colorPrimary).Bold(true).Padding(0, 1),
-		entryFrom: lipgloss.NewStyle().Foreground(colorPrimary).Bold(true),
-		entryDate: styleMuted,
-		entryBody: lipgloss.NewStyle(),
-		separator: lipgloss.NewStyle().Foreground(colorChrome),
-		helpKey:   lipgloss.NewStyle().Foreground(colorChrome).Bold(true),
-		helpDesc:  lipgloss.NewStyle().Foreground(colorChrome),
-		helpSep:   lipgloss.NewStyle().Foreground(colorChrome),
+		app:        lipgloss.NewStyle().Padding(1, 2),
+		title:      lipgloss.NewStyle().Foreground(colorPrimary).Bold(true),
+		pill:       lipgloss.NewStyle().Foreground(colorOnAccent).Background(colorPrimary).Bold(true).Padding(0, 1),
+		entryFrom:  lipgloss.NewStyle().Foreground(colorPrimary).Bold(true),
+		entryDate:  styleMuted,
+		entryBody:  lipgloss.NewStyle(),
+		separator:  lipgloss.NewStyle().Foreground(colorChrome),
+		helpKey:    lipgloss.NewStyle().Foreground(colorChrome).Bold(true),
+		helpDesc:   lipgloss.NewStyle().Foreground(colorChrome),
+		helpSep:    lipgloss.NewStyle().Foreground(colorChrome),
+		linkStatus: lipgloss.NewStyle().Foreground(colorLink).Bold(true),
 	}
 }
 

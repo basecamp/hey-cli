@@ -1415,7 +1415,7 @@ func TestThreadLinkSelectionSurvivesRebuildsAndClearsWhenOccurrenceDisappears(t 
 	}
 
 	m.mailView.Restyle()
-	if m.mailView.selectedLinkKey != selectedKey || !strings.Contains(m.mailView.topicContent, "\x1b[7m") {
+	if m.mailView.selectedLinkKey != selectedKey || !strings.Contains(m.mailView.topicViewport.View(), "\x1b[7m") {
 		t.Error("restyle lost the selected occurrence or its styling")
 	}
 	m.mailView.attachments = []messageAttachment{{ID: "501:1", MessageID: 501, Filename: "report.pdf"}}
@@ -1484,6 +1484,15 @@ func TestRootModelNavigatesThreadLinksAndOpensExactDestination(t *testing.T) {
 	m = updated.(model)
 
 	// These are end-user key messages. In particular, do not call HandleContentKey.
+	unselectedViewportHeight := m.mailView.topicViewport.Height()
+	cachedTopicContent := m.mailView.topicContent
+	if len(m.mailView.topicLines) == 0 {
+		t.Fatal("thread has no cached lines")
+	}
+	cachedFirstLine := &m.mailView.topicLines[0]
+	if footer, visible := m.mailView.LinkFooter(); !visible || footer != "" {
+		t.Fatalf("unselected link footer = %q visible=%v, want one reserved blank row", footer, visible)
+	}
 	updated, _ = m.Update(keyPress("tab"))
 	m = updated.(model)
 	updated, _ = m.Update(keyPress("shift+tab"))
@@ -1501,8 +1510,18 @@ func TestRootModelNavigatesThreadLinksAndOpensExactDestination(t *testing.T) {
 	if m.mailView.selectedLink != 1 {
 		t.Fatalf("selected link = %d, want second occurrence", m.mailView.selectedLink)
 	}
-	if !strings.Contains(stripANSI(m.contentView()), "https://example.org/second?full=destination") {
-		t.Fatalf("selected destination is not visible: %q", m.contentView())
+	if strings.Contains(stripANSI(m.contentView()), "Open: https://example.org/second?full=destination") {
+		t.Fatalf("selected destination is still above the thread: %q", m.contentView())
+	}
+	footerText := "Open: https://example.org/second?full=destination (press Enter to visit)"
+	if !strings.Contains(stripANSI(m.View().Content), footerText) {
+		t.Fatalf("selected destination is not in the footer: %q", m.View().Content)
+	}
+	if !strings.Contains(m.View().Content, m.styles.linkStatus.Render(footerText)) {
+		t.Fatalf("selected destination does not use the link status style: %q", m.View().Content)
+	}
+	if m.mailView.topicViewport.Height() != unselectedViewportHeight {
+		t.Errorf("link selection changed viewport height from %d to %d", unselectedViewportHeight, m.mailView.topicViewport.Height())
 	}
 	if m.mailView.topicViewport.YOffset() == 0 {
 		t.Error("selecting the offscreen second link did not move the viewport")
@@ -1513,14 +1532,27 @@ func TestRootModelNavigatesThreadLinksAndOpensExactDestination(t *testing.T) {
 	if selected.startLine < visibleStart || selected.endLine > visibleEnd {
 		t.Errorf("selected range %d-%d is outside viewport %d-%d", selected.startLine, selected.endLine, visibleStart, visibleEnd)
 	}
-	if !strings.Contains(m.mailView.topicContent, "\x1b[7m") {
-		t.Error("selected link has no reverse-video styling")
+	if m.mailView.topicContent != cachedTopicContent || &m.mailView.topicLines[0] != cachedFirstLine {
+		t.Error("link navigation rebuilt the cached thread content")
 	}
-	if !hasHelpBinding(m.help.bindings, "enter") || !hasHelpBinding(m.help.bindings, "esc") || !hasHelpBinding(m.help.bindings, "q") || hasHelpBinding(m.help.bindings, "esc/q") {
+	if !strings.Contains(m.mailView.topicViewport.View(), "\x1b[7m") {
+		t.Errorf("selected link has no reverse-video styling: %q", m.mailView.topicViewport.View())
+	}
+	if hasHelpBinding(m.help.bindings, "enter") || !hasHelpBinding(m.help.bindings, "esc") || !hasHelpBinding(m.help.bindings, "q") || hasHelpBinding(m.help.bindings, "esc/q") {
 		t.Errorf("selected-link help is inaccurate: %#v", m.help.bindings)
 	}
 
+	updated, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 7})
+	m = updated.(model)
 	updated, cmd := m.Update(keyPress("enter"))
+	m = updated.(model)
+	if cmd != nil || len(opened) != 0 {
+		t.Fatalf("enter opened a destination while the footer was below the terminal: command=%v opened=%q", cmd != nil, opened)
+	}
+	updated, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 16})
+	m = updated.(model)
+
+	updated, cmd = m.Update(keyPress("enter"))
 	m = updated.(model)
 	if cmd == nil {
 		t.Fatal("enter did not return an opener command")
@@ -1556,13 +1588,14 @@ func TestRootModelNavigatesThreadLinksAndOpensExactDestination(t *testing.T) {
 	if !m.mailView.InThread() || m.mailView.selectedLink != -1 {
 		t.Fatal("first escape should clear selection and keep the thread open")
 	}
-	if strings.Contains(m.mailView.topicContent, "\x1b[7m") {
+	if strings.Contains(m.mailView.topicViewport.View(), "\x1b[7m") {
 		t.Error("first escape left selected styling in the thread")
 	}
-	for _, notice := range m.mailView.threadNotices() {
-		if strings.HasPrefix(notice, "Open: ") {
-			t.Errorf("first escape left destination notice %q", notice)
-		}
+	if footer, visible := m.mailView.LinkFooter(); !visible || footer != "" {
+		t.Errorf("first escape left link footer %q visible=%v", footer, visible)
+	}
+	if m.mailView.topicViewport.Height() != unselectedViewportHeight {
+		t.Errorf("clearing link changed viewport height from %d to %d", unselectedViewportHeight, m.mailView.topicViewport.Height())
 	}
 	updated, _ = m.Update(keyPress("esc"))
 	m = updated.(model)

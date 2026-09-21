@@ -448,26 +448,36 @@ func TestMailViewKeepsAPartialThreadsNoticeAndLeavesItUnseen(t *testing.T) {
 	}
 }
 
-func TestLinkDestinationMustBeFullyVisibleBeforeOpening(t *testing.T) {
+func TestLinkDestinationMustFitFooterBeforeOpening(t *testing.T) {
 	v := newMailView(testVC())
 	v.inThread = true
 	v.topicID = 100
 	v.selectedLink = 0
-	destination := "https://example.com/" + strings.Repeat("quarterly-report/", 6)
+	destination := "https://example.com/" + strings.Repeat("quarterly-report/", 3)
 	v.links = []mailLink{{destination: destination, key: "501\x000"}}
 	v.selectedLinkKey = v.links[0].key
-	v.vc.width = 24
+	v.vc.width = 120
 	v.contentHeight = 12
+	v.threadNotice = "Some messages were not read"
 
-	lines, reviewable := v.linkNoticeLines()
-	if !reviewable || len(lines) < 2 {
-		t.Fatalf("long destination notice = %#v reviewable=%v, want complete wrapped rows", lines, reviewable)
+	footer, visible := v.LinkFooter()
+	if !visible || !v.linkDestinationReviewable() {
+		t.Fatalf("link footer = %q visible=%v, want a reviewable footer", footer, visible)
 	}
-	if !hasHelpBinding(v.HelpBindings(), "enter") {
-		t.Error("reviewable destination has no open-link help")
+	if !strings.Contains(footer, destination) || !strings.Contains(footer, "press Enter to visit") || strings.Contains(footer, "...") {
+		t.Errorf("link footer = %q, want the complete destination and action", footer)
 	}
-	if joined := strings.Join(lines, ""); !strings.Contains(joined, destination) || strings.Contains(joined, "...") {
-		t.Errorf("wrapped destination notice = %q, want the complete destination", joined)
+	notices := v.threadNotices()
+	if len(notices) != 1 || notices[0] != v.threadNotice {
+		t.Errorf("selected link displaced permanent thread notice: %#v", notices)
+	}
+	for _, notice := range notices {
+		if strings.Contains(notice, destination) {
+			t.Errorf("thread notice still contains destination: %q", notice)
+		}
+	}
+	if hasHelpBinding(v.HelpBindings(), "enter") {
+		t.Error("footer action is duplicated in help")
 	}
 
 	var opened string
@@ -484,12 +494,10 @@ func TestLinkDestinationMustBeFullyVisibleBeforeOpening(t *testing.T) {
 		t.Errorf("opened %q, want %q", opened, destination)
 	}
 
-	v.contentHeight = 1
-	if lines, reviewable := v.linkNoticeLines(); reviewable || len(lines) != 0 {
-		t.Errorf("one-row destination notice = %#v reviewable=%v", lines, reviewable)
-	}
-	if hasHelpBinding(v.HelpBindings(), "enter") {
-		t.Error("hidden destination still offers open-link help")
+	v.vc.width = 24
+	footer, visible = v.LinkFooter()
+	if !visible || v.linkDestinationReviewable() || strings.Contains(footer, destination) {
+		t.Errorf("narrow link footer = %q visible=%v reviewable=%v", footer, visible, v.linkDestinationReviewable())
 	}
 	opened = ""
 	if cmd, handled := v.handleLinkKey(keyPress("enter")); !handled || cmd != nil || opened != "" {
@@ -497,12 +505,17 @@ func TestLinkDestinationMustBeFullyVisibleBeforeOpening(t *testing.T) {
 	}
 
 	v.vc.width = 3
-	v.contentHeight = 12
-	if _, reviewable := v.linkNoticeLines(); reviewable {
-		t.Error("destination wider than a narrow terminal was marked reviewable")
+	if v.linkDestinationReviewable() {
+		t.Error("destination wider than a tiny terminal was marked reviewable")
 	}
 	if cmd, handled := v.handleLinkKey(keyPress("enter")); !handled || cmd != nil {
-		t.Errorf("narrow terminal opened destination: handled=%v command=%v", handled, cmd != nil)
+		t.Errorf("tiny terminal opened destination: handled=%v command=%v", handled, cmd != nil)
+	}
+
+	v.selectedLink = -1
+	footer, visible = v.LinkFooter()
+	if !visible || footer != "" {
+		t.Errorf("unselected link footer = %q visible=%v, want one reserved blank row", footer, visible)
 	}
 }
 

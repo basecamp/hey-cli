@@ -679,17 +679,27 @@ func (m model) View() tea.View {
 	b.WriteString(content)
 
 	helpView := m.help.view()
-	if helpView != "" {
+	linkFooter, linkFooterVisible := m.linkFooter()
+	if helpView != "" || linkFooterVisible {
 		contentLines := strings.Count(b.String(), "\n")
-		helpH := strings.Count(helpView, "\n") + 1
-		footerH := 1 + helpH
+		helpH := 0
+		if helpView != "" {
+			helpH = strings.Count(helpView, "\n") + 1
+		}
+		footerH := helpH + 3
 		padLines := m.height - contentLines - footerH - 1
 		for range max(padLines, 0) {
 			b.WriteString("\n")
 		}
 
 		b.WriteString(renderRule(m.width, ""))
-		b.WriteString("\n" + helpView)
+		b.WriteString("\n")
+		if linkFooter != "" {
+			b.WriteString(m.styles.linkStatus.Render(linkFooter))
+		}
+		if helpView != "" {
+			b.WriteString("\n" + helpView)
+		}
 	}
 
 	v := tea.NewView(b.String())
@@ -723,9 +733,9 @@ func (m *model) updateHelpBindings() {
 		extra := m.activeView.HelpBindings()
 		bindings = make([]helpBinding, 0, 4+len(extra))
 		bindings = append(bindings, helpBinding{"↑↓", "scroll"})
-		if navigator, ok := m.activeView.(linkNavigator); ok && navigator.LinkSelectionActive() {
+		if navigator, ok := m.activeView.(linkNavigator); ok && navigator.ClaimsLinkNavigation() {
 			bindings = append(bindings,
-				helpBinding{"esc", "clear link"},
+				helpBinding{"esc", "clear/back"},
 				helpBinding{"q", "back"},
 			)
 		} else {
@@ -782,11 +792,33 @@ func (m *model) updateHelpBindings() {
 	}
 }
 
+func (m model) linkFooter() (string, bool) {
+	if provider, ok := m.activeView.(linkFooterProvider); ok {
+		return provider.LinkFooter()
+	}
+	return "", false
+}
+
+func (m model) linkFooterFits() bool {
+	_, visible := m.linkFooter()
+	if !visible {
+		return false
+	}
+	statusHeight := 0
+	if m.mailWatchNotice() != "" {
+		statusHeight = 1
+	}
+	return m.height >= headerHeight+m.help.height()+3+statusHeight+1
+}
+
 // contentHeight gives the active view every row that is not navigation or a
-// visible help footer. The footer carries two clear rows above its divider.
+// visible footer. Ordinary help has two clear rows above its divider; a link
+// footer uses one of them for its stable status row.
 func (m model) contentHeight() int {
 	footerHeight := 0
-	if helpHeight := m.help.height(); helpHeight > 0 {
+	helpHeight := m.help.height()
+	_, linkFooterVisible := m.linkFooter()
+	if helpHeight > 0 || linkFooterVisible {
 		footerHeight = helpHeight + 3
 	}
 	statusHeight := 0
@@ -929,6 +961,11 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.updateHelpBindings()
 		return m, m.syncLoading(cmd)
 	case rowContent:
+		if msg.Key().Code == tea.KeyEnter {
+			if navigator, ok := m.activeView.(linkNavigator); ok && navigator.LinkSelectionActive() && !m.linkFooterFits() {
+				return m, nil
+			}
+		}
 		cmd := m.activeView.HandleContentKey(msg)
 		cmd = m.syncLoading(cmd)
 		m.updateHelpBindings()
