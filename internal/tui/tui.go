@@ -686,16 +686,21 @@ func (m model) View() tea.View {
 		if helpView != "" {
 			helpH = strings.Count(helpView, "\n") + 1
 		}
-		footerH := helpH + 3
+		footerH := 1 + helpH
+		if linkFooterVisible {
+			footerH++
+		}
 		padLines := m.height - contentLines - footerH - 1
 		for range max(padLines, 0) {
 			b.WriteString("\n")
 		}
 
 		b.WriteString(renderRule(m.width, ""))
-		b.WriteString("\n")
-		if linkFooter != "" {
-			b.WriteString(m.styles.linkStatus.Render(linkFooter))
+		if linkFooterVisible {
+			b.WriteString("\n")
+			if linkFooter != "" {
+				b.WriteString(m.styles.linkStatus.Render(linkFooter))
+			}
 		}
 		if helpView != "" {
 			b.WriteString("\n" + helpView)

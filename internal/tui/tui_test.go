@@ -205,6 +205,20 @@ func TestScreenerRequestWaitsForMailThenOpensTheScreener(t *testing.T) {
 	}
 }
 
+func TestFooterLeavesOnlyTheTerminalSafetyRow(t *testing.T) {
+	m := modelWithBoxes()
+	if rows := strings.Count(m.View().Content, "\n") + 1; rows != m.height-1 {
+		t.Errorf("ordinary view rows = %d, want %d", rows, m.height-1)
+	}
+
+	m = openLinkThreadThroughModel(t)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 16})
+	m = updated.(model)
+	if rows := strings.Count(m.View().Content, "\n") + 1; rows != m.height-1 {
+		t.Errorf("linked thread rows = %d, want %d", rows, m.height-1)
+	}
+}
+
 func TestQuestionMarkTogglesHelpAndResizesContent(t *testing.T) {
 	m := modelWithBoxes()
 	visibleHeight := m.vc.height
