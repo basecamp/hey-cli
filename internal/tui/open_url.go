@@ -55,7 +55,7 @@ func validateURLDestination(destination string) error {
 
 	switch strings.ToLower(parsed.Scheme) {
 	case "http", "https":
-		if !parsed.IsAbs() || parsed.Host == "" || parsed.Hostname() == "" {
+		if !parsed.IsAbs() || parsed.User != nil || parsed.Host == "" || parsed.Hostname() == "" {
 			return fmt.Errorf("invalid URL destination")
 		}
 	case "mailto":

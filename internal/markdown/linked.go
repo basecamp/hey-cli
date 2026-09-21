@@ -112,7 +112,7 @@ func allowedHyperlink(uri string) bool {
 	}
 	switch strings.ToLower(parsed.Scheme) {
 	case "http", "https":
-		return parsed.Host != "" && parsed.Hostname() != ""
+		return parsed.User == nil && parsed.Host != "" && parsed.Hostname() != ""
 	case "mailto":
 		return parsed.Opaque != ""
 	default:

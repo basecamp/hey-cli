@@ -448,6 +448,64 @@ func TestMailViewKeepsAPartialThreadsNoticeAndLeavesItUnseen(t *testing.T) {
 	}
 }
 
+func TestLinkDestinationMustBeFullyVisibleBeforeOpening(t *testing.T) {
+	v := newMailView(testVC())
+	v.inThread = true
+	v.topicID = 100
+	v.selectedLink = 0
+	destination := "https://example.com/" + strings.Repeat("quarterly-report/", 6)
+	v.links = []mailLink{{destination: destination, key: "501\x000"}}
+	v.selectedLinkKey = v.links[0].key
+	v.vc.width = 24
+	v.contentHeight = 12
+
+	lines, reviewable := v.linkNoticeLines()
+	if !reviewable || len(lines) < 2 {
+		t.Fatalf("long destination notice = %#v reviewable=%v, want complete wrapped rows", lines, reviewable)
+	}
+	if !hasHelpBinding(v.HelpBindings(), "enter") {
+		t.Error("reviewable destination has no open-link help")
+	}
+	if joined := strings.Join(lines, ""); !strings.Contains(joined, destination) || strings.Contains(joined, "...") {
+		t.Errorf("wrapped destination notice = %q, want the complete destination", joined)
+	}
+
+	var opened string
+	v.vc.openURL = func(destination string) error {
+		opened = destination
+		return nil
+	}
+	cmd, handled := v.handleLinkKey(keyPress("enter"))
+	if !handled || cmd == nil {
+		t.Fatal("a fully visible destination was not opened")
+	}
+	runCmd(cmd)
+	if opened != destination {
+		t.Errorf("opened %q, want %q", opened, destination)
+	}
+
+	v.contentHeight = 1
+	if lines, reviewable := v.linkNoticeLines(); reviewable || len(lines) != 0 {
+		t.Errorf("one-row destination notice = %#v reviewable=%v", lines, reviewable)
+	}
+	if hasHelpBinding(v.HelpBindings(), "enter") {
+		t.Error("hidden destination still offers open-link help")
+	}
+	opened = ""
+	if cmd, handled := v.handleLinkKey(keyPress("enter")); !handled || cmd != nil || opened != "" {
+		t.Errorf("hidden destination opened: handled=%v command=%v destination=%q", handled, cmd != nil, opened)
+	}
+
+	v.vc.width = 3
+	v.contentHeight = 12
+	if _, reviewable := v.linkNoticeLines(); reviewable {
+		t.Error("destination wider than a narrow terminal was marked reviewable")
+	}
+	if cmd, handled := v.handleLinkKey(keyPress("enter")); !handled || cmd != nil {
+		t.Errorf("narrow terminal opened destination: handled=%v command=%v", handled, cmd != nil)
+	}
+}
+
 func TestMailViewLeavesBubbledUpThreadAloneWhenOpened(t *testing.T) {
 	v, recorded := mailWithTestServer(t, http.StatusNoContent)
 	v.postingList.postings[0].BubbledUp = true

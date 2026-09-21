@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
@@ -1024,7 +1025,7 @@ func (v *mailView) HelpBindings() []helpBinding {
 		}
 		if v.ClaimsLinkNavigation() {
 			bindings = append(bindings, helpBinding{"tab/shift+tab", "next/previous link"})
-			if v.LinkSelectionActive() {
+			if v.linkDestinationReviewable() {
 				bindings = append(bindings, helpBinding{"enter", "open link"})
 			}
 		}
@@ -1664,18 +1665,14 @@ func (v *mailView) Resize(width, height int) {
 	v.revealLink()
 }
 
-// threadNotices is what is shown above an open thread's viewport: the partial-read
-// notice for as long as the thread is open, and the one-shot notice while it is up. Each
-// is one row, truncated to the width, so the rows they take can be counted, and the
-// thread itself keeps at least one: in a section too short for both, a notice gives
-// way rather than pushing the viewport out.
+// threadNotices is what is shown above an open thread's viewport: the selected
+// destination, the partial-read notice for as long as the thread is open, and the
+// one-shot notice while it is up. A destination wraps in full and can open only when
+// every row fits. Other notices stay on one truncated row, and the thread itself keeps
+// at least one row.
 func (v *mailView) threadNotices() []string {
-	var notices []string
-	linkNotice := ""
-	if v.LinkSelectionActive() {
-		linkNotice = "Open: " + terminal.SanitizeLine(v.links[v.selectedLink].destination)
-	}
-	for _, notice := range []string{linkNotice, v.threadNotice, v.notice} {
+	notices, _ := v.linkNoticeLines()
+	for _, notice := range []string{v.threadNotice, v.notice} {
 		if notice != "" {
 			notices = append(notices, truncateToWidth(notice, max(v.vc.width, 4)))
 		}
@@ -1684,6 +1681,31 @@ func (v *mailView) threadNotices() []string {
 		notices = notices[:room]
 	}
 	return notices
+}
+
+func (v *mailView) linkNoticeLines() ([]string, bool) {
+	if !v.LinkSelectionActive() {
+		return nil, false
+	}
+	width := v.vc.width
+	if width <= 0 {
+		return nil, false
+	}
+	notice := "Open: " + terminal.SanitizeLine(v.links[v.selectedLink].destination)
+	lines := strings.Split(ansi.Hardwrap(notice, width, false), "\n")
+	room := max(v.contentHeight-1, 0)
+	if len(lines) <= room {
+		return lines, true
+	}
+	if room == 0 {
+		return nil, false
+	}
+	return []string{truncateToWidth("Enlarge the terminal to inspect this link", width)}, false
+}
+
+func (v *mailView) linkDestinationReviewable() bool {
+	_, reviewable := v.linkNoticeLines()
+	return reviewable
 }
 
 // fitThreadViewport gives the thread's viewport the rows its notices leave, so the
@@ -2192,6 +2214,9 @@ func (v *mailView) handleLinkKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, true
 	}
 	if msg.Key().Code == tea.KeyEnter && v.selectedLink >= 0 {
+		if !v.linkDestinationReviewable() {
+			return nil, true
+		}
 		link := v.links[v.selectedLink]
 		if v.vc.openURL == nil {
 			return nil, true

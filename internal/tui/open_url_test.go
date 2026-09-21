@@ -56,7 +56,7 @@ func TestOpenExternalURLReturnsLauncherStartupFailure(t *testing.T) {
 
 func TestOpenURLCommandValidation(t *testing.T) {
 	valid := []string{"http://example.com", "https://example.com/path", "mailto:alex@example.com"}
-	invalid := []string{"", "http:/example.com", "http:///path", "http://", "https://?x", "ftp://example.com", "file:///tmp/a", "mailto:", "mailto://", "https://example.com/line\nbreak", "https://example.com/\u0085", "https://example.com/%zz"}
+	invalid := []string{"", "http:/example.com", "http:///path", "http://", "https://?x", "https://trusted.example@evil.example/path", "ftp://example.com", "file:///tmp/a", "mailto:", "mailto://", "https://example.com/line\nbreak", "https://example.com/\u0085", "https://example.com/%zz"}
 
 	for _, goos := range []string{"darwin", "linux", "windows", "freebsd", ""} {
 		t.Run(goos, func(t *testing.T) {

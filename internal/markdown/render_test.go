@@ -109,7 +109,7 @@ func TestRenderLinkedPreservesOrderDuplicatesAndSchemes(t *testing.T) {
 }
 
 func TestRenderLinkedRejectsUnsafeAndRelativeDestinations(t *testing.T) {
-	linked := RenderLinked(htmlutil.ToMarkdown(`<p><a href="/relative">relative</a> <a href="ftp://example.com">ftp</a> <a href="javascript:alert(1)">script</a> <a href="https://">bad</a></p>`), 80, -1)
+	linked := RenderLinked(htmlutil.ToMarkdown(`<p><a href="/relative">relative</a> <a href="ftp://example.com">ftp</a> <a href="javascript:alert(1)">script</a> <a href="https://">bad</a> <a href="https://trusted.example@evil.example/path">userinfo</a></p>`), 80, -1)
 	if len(linked.Links) != 0 {
 		t.Fatalf("links = %#v, want no selectable links", linked.Links)
 	}
