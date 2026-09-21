@@ -39,7 +39,6 @@ func linkedRender(out string, selected int) LinkedRender {
 	links := make([]LinkOccurrence, 0)
 	line := 0
 	currentDestination := ""
-	currentVisible := ""
 	currentComplete := false
 	for i := 0; i < len(out); {
 		if strings.HasPrefix(out[i:], "\x1b]8;") {
@@ -60,12 +59,14 @@ func linkedRender(out string, selected int) LinkedRender {
 								if destination != currentDestination || currentComplete {
 									links = append(links, LinkOccurrence{Destination: destination, StartLine: startLine, EndLine: endLine})
 									currentDestination = destination
-									currentVisible = ""
 								} else {
 									links[len(links)-1].EndLine = endLine
 								}
-								currentVisible += withoutWhitespace(ansi.Strip(content))
-								currentComplete = strings.HasSuffix(currentVisible, withoutWhitespace(destination))
+								// Glamour renders a named anchor as one OSC 8 span for
+								// its label and a second span for the shown destination.
+								// Only the destination span completes the occurrence. A
+								// label that merely ends with the URL must not do so.
+								currentComplete = withoutWhitespace(ansi.Strip(content)) == withoutWhitespace(destination)
 
 								b.WriteString(openEnd)
 								if len(links)-1 == selected {

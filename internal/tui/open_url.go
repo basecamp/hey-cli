@@ -10,18 +10,18 @@ import (
 	"unicode"
 )
 
-type urlCommandStarter func(string, ...string) error
+type urlCommandRunner func(string, ...string) error
 
 func openExternalURL(destination string) error {
-	return openURLWith(runtime.GOOS, destination, startURLCommand)
+	return openURLWith(runtime.GOOS, destination, runURLCommand)
 }
 
-func openURLWith(goos, destination string, start urlCommandStarter) error {
+func openURLWith(goos, destination string, run urlCommandRunner) error {
 	name, args, err := openURLCommand(goos, destination)
 	if err != nil {
 		return err
 	}
-	return start(name, args...)
+	return run(name, args...)
 }
 
 func openURLCommand(goos, destination string) (string, []string, error) {
@@ -68,11 +68,7 @@ func validateURLDestination(destination string) error {
 	return nil
 }
 
-func startURLCommand(name string, args ...string) error {
+func runURLCommand(name string, args ...string) error {
 	command := exec.CommandContext(context.Background(), name, args...) // #nosec G204 -- fixed OS launcher receives the validated destination as one argument
-	if err := command.Start(); err != nil {
-		return err
-	}
-	go func() { _ = command.Wait() }()
-	return nil
+	return command.Run()
 }

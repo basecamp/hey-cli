@@ -138,6 +138,28 @@ func TestRenderLinkedReportsWrappedLinkRange(t *testing.T) {
 	}
 }
 
+func TestRenderLinkedKeepsOneAnchorWhoseLabelContainsItsDestinationTogether(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		label         string
+		selectedSpans int
+	}{
+		{name: "ends with destination", label: "Read https://example.com", selectedSpans: 2},
+		{name: "equals destination", label: "https://example.com", selectedSpans: 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			source := `<p><a href="https://example.com">` + tt.label + `</a></p>`
+			linked := RenderLinked(htmlutil.ToMarkdown(source), 80, 0)
+			if len(linked.Links) != 1 {
+				t.Fatalf("links = %#v, want one occurrence; rendered text = %q", linked.Links, linked.Text)
+			}
+			if got := strings.Count(linked.Text, "\x1b[27m"); got != tt.selectedSpans {
+				t.Errorf("selected spans = %d, want %d: %q", got, tt.selectedSpans, linked.Text)
+			}
+		})
+	}
+}
+
 func TestRenderLinkedKeepsDuplicateLinksSeparate(t *testing.T) {
 	for name, source := range map[string]string{
 		"labels":     `<p><a href="https://example.com/one">one</a><a href="https://example.com/one">again</a></p>`,

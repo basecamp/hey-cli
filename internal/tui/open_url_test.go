@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"os/exec"
 	"testing"
 )
 
@@ -37,20 +38,30 @@ func TestOpenURLCommand(t *testing.T) {
 	}
 }
 
-func TestOpenExternalURLReturnsLauncherStartupFailure(t *testing.T) {
-	startupErr := errors.New("launcher unavailable")
+func TestOpenExternalURLReturnsLauncherFailure(t *testing.T) {
+	launcherErr := errors.New("launcher failed")
 	var executable string
 	var arguments []string
 	err := openURLWith("linux", "https://example.com/report", func(name string, args ...string) error {
 		executable = name
 		arguments = append(arguments, args...)
-		return startupErr
+		return launcherErr
 	})
-	if !errors.Is(err, startupErr) {
-		t.Fatalf("openURLWith error = %v, want startup failure", err)
+	if !errors.Is(err, launcherErr) {
+		t.Fatalf("openURLWith error = %v, want launcher failure", err)
 	}
 	if executable != "xdg-open" || len(arguments) != 1 || arguments[0] != "https://example.com/report" {
 		t.Errorf("launcher = %q %#v", executable, arguments)
+	}
+}
+
+func TestRunURLCommandReturnsExitFailure(t *testing.T) {
+	command, err := exec.LookPath("false")
+	if err != nil {
+		t.Skip("false command is unavailable")
+	}
+	if err := runURLCommand(command); err == nil {
+		t.Fatal("runURLCommand returned success for a failed launcher")
 	}
 }
 
