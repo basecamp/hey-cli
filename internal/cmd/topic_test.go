@@ -446,6 +446,16 @@ func TestThreadEntrySender(t *testing.T) {
 		want  string
 	}{
 		{
+			name:  "selected send-as address with name",
+			entry: threadEntry{Creator: threadContact{Name: "Personal"}, Sender: &threadContact{Name: "Billing", EmailAddress: "billing@example.org"}},
+			want:  "Billing <billing@example.org>",
+		},
+		{
+			name:  "selected send-as address without name",
+			entry: threadEntry{Creator: threadContact{Name: "Personal"}, Sender: &threadContact{EmailAddress: "billing@example.org"}},
+			want:  "billing@example.org",
+		},
+		{
 			name:  "an alternative sender name wins",
 			entry: threadEntry{AlternativeSenderName: "Support", Creator: threadContact{Name: "Rick Sanchez"}},
 			want:  "Support",

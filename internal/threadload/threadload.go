@@ -427,6 +427,7 @@ func retained(message *generated.Message, retainRecipients, retainReceivedVia bo
 		Subject:   message.Subject,
 		Url:       message.Url,
 		Creator:   retainedContact(message.Creator),
+		Sender:    retainedContact(message.Sender),
 		CreatedAt: message.CreatedAt,
 		UpdatedAt: message.UpdatedAt,
 	}
@@ -441,7 +442,8 @@ func retained(message *generated.Message, retainRecipients, retainReceivedVia bo
 		kept.ReceivedVia = retainedReceivedVia(message.ReceivedVia)
 	}
 	size := int64(len(kept.Content)+len(kept.Subject)+len(kept.Url)+
-		len(kept.Creator.Name)+len(kept.Creator.EmailAddress)) + retainedOverhead
+		len(kept.Creator.Name)+len(kept.Creator.EmailAddress)+
+		len(kept.Sender.Name)+len(kept.Sender.EmailAddress)) + retainedOverhead
 	if retainRecipients {
 		size += contactsSize(kept.Addressed.Directly) + contactsSize(kept.Addressed.Copied) + contactsSize(kept.Addressed.Blindcopied)
 	}

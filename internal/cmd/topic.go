@@ -56,6 +56,7 @@ type threadEntry struct {
 	CreatedAt             string              `json:"created_at"`
 	UpdatedAt             string              `json:"updated_at"`
 	Creator               threadContact       `json:"creator"`
+	Sender                *threadContact      `json:"sender,omitempty"`
 	AlternativeSenderName string              `json:"alternative_sender_name"`
 	Summary               string              `json:"summary"`
 	Kind                  string              `json:"kind"`
@@ -89,11 +90,12 @@ func newThreadsCommand() *topicCommand {
 	threadsCommand.cmd = &cobra.Command{
 		Use:   "read <thread-id>",
 		Short: "Read a thread",
-		Long: "Read every entry in a thread, oldest first. JSON entries include ordinary " +
-			"To/CC/BCC recipients and, for inbound mail, received_via with the exact " +
-			"account delivery addresses HEY recorded.",
+		Long: "Read every entry in a thread, oldest first. JSON entries keep the " +
+			"creator as the account user and, when HEY used another From address, " +
+			"include that address as sender. Entries also include To/CC/BCC recipients " +
+			"and, for inbound mail, received_via with the exact account delivery addresses HEY recorded.",
 		Annotations: map[string]string{
-			"agent_notes": "Returns a thread with all entries, oldest first. Entry bodies are Markdown; each entry whose message was read carries recipients as to, cc and bcc contact lists. In JSON, inbound entries also carry received_via: the exact account delivery addresses HEY recorded, distinct from the visible recipients, with an optional resolved contact. --html writes an HTML document instead, one <article> per entry with a From/To/CC/BCC header and HEY's original body HTML. A thread that could only be read in part is refused unless --allow-partial is passed, in which case each entry's body_state says what was read. Use the topic ID with hey reply or hey forward.",
+			"agent_notes": "Returns a thread with all entries, oldest first. Entry bodies are Markdown; the creator is the account user, while a non-default send-as address is the optional sender on a hydrated entry. Each entry whose message was read carries recipients as to, cc and bcc contact lists. In JSON, inbound entries also carry received_via: the exact account delivery addresses HEY recorded, distinct from the visible recipients, with an optional resolved contact. --html writes an HTML document instead, one <article> per entry with a From/To/CC/BCC header and HEY's original body HTML. A thread that could only be read in part is refused unless --allow-partial is passed, in which case each entry's body_state says what was read. Use the topic ID with hey reply or hey forward.",
 		},
 		Example: `  hey thread read 12345
   hey thread read 12345 --json
@@ -375,6 +377,12 @@ func htmlCommentSafe(value string) string {
 }
 
 func threadEntrySender(entry threadEntry) string {
+	if entry.Sender != nil && entry.Sender.EmailAddress != "" {
+		if entry.Sender.Name != "" {
+			return fmt.Sprintf("%s <%s>", terminal.SanitizeLine(entry.Sender.Name), terminal.SanitizeLine(entry.Sender.EmailAddress))
+		}
+		return entry.Sender.EmailAddress
+	}
 	switch {
 	case entry.AlternativeSenderName != "":
 		return entry.AlternativeSenderName
@@ -408,6 +416,7 @@ func newThreadEntry(loaded *threadload.Entry, html bool) threadEntry {
 	bodyHTML := ""
 	var recipients *threadRecipients
 	var receivedVia []threadReceivedVia
+	var sender *threadContact
 
 	if message := loaded.Message; message != nil {
 		if creator.Id == 0 {
@@ -432,6 +441,10 @@ func newThreadEntry(loaded *threadload.Entry, html bool) threadEntry {
 		}
 		recipients = newThreadRecipients(message.Addressed)
 		receivedVia = newThreadReceivedVia(message.ReceivedVia)
+		if message.Sender.Id != 0 {
+			contact := newThreadContact(message.Sender)
+			sender = &contact
+		}
 		// The loaded thread's copy is released as it is converted.
 		loaded.Message = nil
 	}
@@ -450,6 +463,7 @@ func newThreadEntry(loaded *threadload.Entry, html bool) threadEntry {
 		BodyState:             string(loaded.State),
 		BodyHTML:              bodyHTML,
 		Creator:               newThreadContact(creator),
+		Sender:                sender,
 	}
 }
 

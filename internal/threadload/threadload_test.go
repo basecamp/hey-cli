@@ -415,6 +415,21 @@ func TestLoadDropsMessageMetadataUnlessRequested(t *testing.T) {
 	}
 }
 
+func TestRetainedKeepsAndChargesTheSendAsIdentity(t *testing.T) {
+	message := &generated.Message{Sender: generated.Contact{
+		Id: 88, Name: "Billing", EmailAddress: "billing@example.org",
+		AvatarUrl: strings.Repeat("a", 1024), NameTag: strings.Repeat("n", 1024),
+	}}
+	kept, size := retained(message, false, false)
+	want := generated.Contact{Id: 88, Name: "Billing", EmailAddress: "billing@example.org"}
+	if kept.Sender != want {
+		t.Errorf("sender = %+v, want only identity fields %+v", kept.Sender, want)
+	}
+	if size != retainedOverhead+int64(len(want.Name)+len(want.EmailAddress)) {
+		t.Errorf("retained size = %d, want the selected sender charged", size)
+	}
+}
+
 func TestRetainedKeepsEveryRecipientKindAndOnlyIdentityFields(t *testing.T) {
 	message := &generated.Message{Addressed: generated.Addressed{
 		Directly:    []generated.Contact{fakeRecipient},

@@ -20,6 +20,7 @@ type Entry struct {
 	ID                    int64
 	CreatedAt             time.Time
 	Creator               Contact
+	Sender                Contact
 	AlternativeSenderName string
 	Summary               string
 	Body                  htmlutil.Markdown
@@ -64,6 +65,7 @@ func NewEntry(entry generated.Entry, message generated.Message) Entry {
 		ID:                    entry.Id,
 		CreatedAt:             createdAt,
 		Creator:               contactOf(creator),
+		Sender:                contactOf(message.Sender),
 		AlternativeSenderName: terminal.SanitizeLine(entry.AlternativeSenderName),
 		Summary:               terminal.SanitizeLine(summary),
 		Body:                  htmlutil.ToMarkdown(message.Content),

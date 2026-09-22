@@ -3313,6 +3313,12 @@ func (v *mailView) renderEntriesWithLinks(entries []mail.Entry) (string, []int, 
 		if e.AlternativeSenderName != "" {
 			from = e.AlternativeSenderName
 		}
+		if e.Sender.EmailAddress != "" {
+			from = e.Sender.EmailAddress
+			if e.Sender.Name != "" {
+				from = fmt.Sprintf("%s <%s>", terminal.SanitizeLine(e.Sender.Name), terminal.SanitizeLine(e.Sender.EmailAddress))
+			}
+		}
 
 		// Each arm below opens with a blank line, which is what separates the header
 		// from whatever follows it. The summary is HEY's ~105-character preview of the

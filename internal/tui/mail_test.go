@@ -3837,6 +3837,21 @@ func TestRenderEntriesShowsTheBodyRatherThanHEYsPreviewOfIt(t *testing.T) {
 	}
 }
 
+func TestRenderEntriesShowsTheSelectedSendAsAddress(t *testing.T) {
+	v := newMailView(testVC())
+	v.vc.width = 80
+	entry := mail.NewEntry(generated.Entry{
+		Id: 11, Creator: generated.Contact{Id: 77, Name: "Personal", EmailAddress: "personal@example.org"},
+	}, generated.Message{
+		Id: 11, Sender: generated.Contact{Id: 88, Name: "Billing", EmailAddress: "billing@example.org"},
+		Content: "<p>Numbers.</p>",
+	})
+	rendered, _ := v.renderEntries([]mail.Entry{entry})
+	if !strings.Contains(rendered, "Billing <billing@example.org>") || strings.Contains(rendered, "Personal  ") {
+		t.Fatalf("thread shows the wrong From: %q", rendered)
+	}
+}
+
 func TestRenderEntriesReportsEveryMessageHeaderOffset(t *testing.T) {
 	v := newMailView(testVC())
 	v.vc.width = 60

@@ -7,6 +7,17 @@ import (
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 )
 
+func TestNewEntryKeepsTheSelectedSender(t *testing.T) {
+	entry := NewEntry(generated.Entry{
+		Id: 501, Creator: generated.Contact{Id: 77, Name: "Personal", EmailAddress: "personal@example.org"},
+	}, generated.Message{
+		Sender: generated.Contact{Id: 88, Name: "Billing", EmailAddress: "billing@example.org"},
+	})
+	if entry.Creator.EmailAddress != "personal@example.org" || entry.Sender.EmailAddress != "billing@example.org" {
+		t.Fatalf("creator = %+v, sender = %+v", entry.Creator, entry.Sender)
+	}
+}
+
 func TestNewEntry(t *testing.T) {
 	created := time.Date(2026, 8, 18, 9, 30, 0, 0, time.UTC)
 

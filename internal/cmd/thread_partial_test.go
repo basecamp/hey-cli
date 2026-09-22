@@ -115,6 +115,9 @@ func assertThreadEntryOmitsMessageMetadata(t *testing.T, stdout string, id int64
 			if receivedVia, present := entry["received_via"]; present {
 				t.Errorf("entry %d carries received_via %#v, want the key omitted", id, receivedVia)
 			}
+			if sender, present := entry["sender"]; present {
+				t.Errorf("entry %d carries sender %#v without a message", id, sender)
+			}
 			return
 		}
 	}
@@ -145,10 +148,11 @@ func TestThreadsJSONOmitsMessageDataItDidNotRead(t *testing.T) {
 		body, hasBody := entry["body"]
 		_, hasRecipients := entry["recipients"]
 		_, hasReceivedVia := entry["received_via"]
+		_, hasSender := entry["sender"]
 		switch entry["id"] {
 		case float64(12):
-			if hasBody || hasRecipients || hasReceivedVia {
-				t.Errorf("entry 12 carries body %#v, recipients %v or received_via %v; want message data omitted", body, hasRecipients, hasReceivedVia)
+			if hasBody || hasRecipients || hasReceivedVia || hasSender {
+				t.Errorf("entry 12 carries body %#v, recipients %v, received_via %v or sender %v; want message data omitted", body, hasRecipients, hasReceivedVia, hasSender)
 			}
 		default:
 			if text, ok := body.(string); !ok || text == "" || !hasRecipients || !hasReceivedVia {

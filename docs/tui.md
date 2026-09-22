@@ -61,6 +61,8 @@ uppercase belongs to Labels:
 | Ctrl+A | switch linked account |
 | Ctrl+V | choose an Imbox cover |
 
+While reading a thread, the From header shows the actual send-as address when HEY records one separately from the account user.
+
 While reading a thread, links can be selected without a mouse. Tab selects the next link in document order and Shift+Tab selects the previous one; both wrap at the ends. A fixed row above the shortcut bar shows the complete selected destination without moving the thread. Press Enter to open it; opening stays unavailable until the terminal is wide enough to show the complete destination. Press Escape once to clear the selection, and Escape again to leave the thread. A thread with no selectable links keeps the normal global Tab focus behavior. Existing OSC 8 mouse links remain available.
 
 Most of those keep working while you are reading a thread, the way the web app's topic
