@@ -441,7 +441,7 @@ func newThreadEntry(loaded *threadload.Entry, html bool) threadEntry {
 		}
 		recipients = newThreadRecipients(message.Addressed)
 		receivedVia = newThreadReceivedVia(message.ReceivedVia)
-		if message.Sender.Id != 0 {
+		if message.Sender.EmailAddress != "" {
 			contact := newThreadContact(message.Sender)
 			sender = &contact
 		}

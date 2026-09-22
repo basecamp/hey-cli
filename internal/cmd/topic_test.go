@@ -439,6 +439,17 @@ func TestThreadReadHelpDistinguishesDeliveryAddressesFromRecipients(t *testing.T
 	}
 }
 
+func TestThreadEntryKeepsASenderAddressWithoutAContactID(t *testing.T) {
+	loaded := threadload.Entry{
+		Entry:   generated.Entry{Id: 11, Creator: generated.Contact{Id: 77, EmailAddress: "personal@example.org"}},
+		Message: &generated.Message{Sender: generated.Contact{EmailAddress: "billing@example.org"}},
+	}
+	entry := newThreadEntry(&loaded, false)
+	if entry.Sender == nil || entry.Sender.EmailAddress != "billing@example.org" {
+		t.Fatalf("sender = %+v, want the address HEY served", entry.Sender)
+	}
+}
+
 func TestThreadEntrySender(t *testing.T) {
 	for _, testCase := range []struct {
 		name  string
@@ -446,8 +457,8 @@ func TestThreadEntrySender(t *testing.T) {
 		want  string
 	}{
 		{
-			name:  "selected send-as address with name",
-			entry: threadEntry{Creator: threadContact{Name: "Personal"}, Sender: &threadContact{Name: "Billing", EmailAddress: "billing@example.org"}},
+			name:  "selected send-as address with name even when the index repeats the creator name",
+			entry: threadEntry{Creator: threadContact{Name: "Personal"}, AlternativeSenderName: "Personal", Sender: &threadContact{Name: "Billing", EmailAddress: "billing@example.org"}},
 			want:  "Billing <billing@example.org>",
 		},
 		{
