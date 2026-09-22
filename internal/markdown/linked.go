@@ -39,6 +39,8 @@ func linkedRender(out string, selected int) LinkedRender {
 	links := make([]LinkOccurrence, 0)
 	line := 0
 	currentDestination := ""
+	currentShownDestination := false
+	currentShownText := ""
 	currentComplete := false
 	for i := 0; i < len(out); {
 		if strings.HasPrefix(out[i:], "\x1b]8;") {
@@ -59,14 +61,24 @@ func linkedRender(out string, selected int) LinkedRender {
 								if destination != currentDestination || currentComplete {
 									links = append(links, LinkOccurrence{Destination: destination, StartLine: startLine, EndLine: endLine})
 									currentDestination = destination
+									currentShownDestination = false
+									currentShownText = ""
 								} else {
 									links[len(links)-1].EndLine = endLine
 								}
 								// Glamour renders a named anchor as one OSC 8 span for
-								// its label and a second span for the shown destination.
-								// Only the destination span completes the occurrence. A
-								// label that merely ends with the URL must not do so.
-								currentComplete = withoutWhitespace(ansi.Strip(content)) == withoutWhitespace(destination)
+								// its label and one or more underlined spans for the shown
+								// destination. Only those destination spans complete the
+								// occurrence. A plain fallback URL has no style prefix.
+								if !currentShownDestination && (precededByUnderline(out, i) || content == destination) {
+									currentShownDestination = true
+								}
+								if currentShownDestination {
+									currentShownText += withoutWhitespace(ansi.Strip(content))
+									currentComplete = currentShownText == withoutWhitespace(destination)
+								} else {
+									currentComplete = false
+								}
 
 								b.WriteString(openEnd)
 								if len(links)-1 == selected {
@@ -119,6 +131,26 @@ func allowedHyperlink(uri string) bool {
 	default:
 		return false
 	}
+}
+
+func precededByUnderline(out string, position int) bool {
+	start := strings.LastIndex(out[:position], "\x1b[")
+	if start < 0 {
+		return false
+	}
+	sequence, _, ok := sgr(out[start:position])
+	if !ok || start+len(sequence) != position {
+		return false
+	}
+	parameters := strings.FieldsFunc(sequence[2:len(sequence)-1], func(r rune) bool {
+		return r == ';' || r == ':'
+	})
+	for _, parameter := range parameters {
+		if parameter == "4" {
+			return true
+		}
+	}
+	return false
 }
 
 func withoutWhitespace(s string) string {

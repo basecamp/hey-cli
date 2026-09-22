@@ -146,6 +146,7 @@ func TestRenderLinkedKeepsOneAnchorWhoseLabelContainsItsDestinationTogether(t *t
 	}{
 		{name: "ends with destination", label: "Read https://example.com", selectedSpans: 2},
 		{name: "equals destination", label: "https://example.com", selectedSpans: 1},
+		{name: "equals after whitespace is removed", label: "https://example. com", selectedSpans: 2},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			source := `<p><a href="https://example.com">` + tt.label + `</a></p>`
@@ -157,6 +158,13 @@ func TestRenderLinkedKeepsOneAnchorWhoseLabelContainsItsDestinationTogether(t *t
 				t.Errorf("selected spans = %d, want %d: %q", got, tt.selectedSpans, linked.Text)
 			}
 		})
+	}
+}
+
+func TestRenderLinkedKeepsWrappedDuplicateLinksSeparate(t *testing.T) {
+	linked := RenderLinked(htmlutil.ToMarkdown(`<p><a href="https://example.com/very/long/path">one</a> <a href="https://example.com/very/long/path">again</a></p>`), 12, -1)
+	if len(linked.Links) != 2 {
+		t.Fatalf("links = %#v, want two occurrences; rendered text = %q", linked.Links, linked.Text)
 	}
 }
 
