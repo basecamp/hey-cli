@@ -2,8 +2,8 @@ package tui
 
 import (
 	"errors"
-	"os/exec"
 	"testing"
+	"time"
 )
 
 func TestOpenURLCommand(t *testing.T) {
@@ -38,31 +38,59 @@ func TestOpenURLCommand(t *testing.T) {
 	}
 }
 
-func TestOpenExternalURLReturnsLauncherFailure(t *testing.T) {
-	launcherErr := errors.New("launcher failed")
+func TestOpenExternalURLReturnsLauncherStartupFailure(t *testing.T) {
+	startupErr := errors.New("launcher unavailable")
 	var executable string
 	var arguments []string
 	err := openURLWith("linux", "https://example.com/report", func(name string, args ...string) error {
 		executable = name
 		arguments = append(arguments, args...)
-		return launcherErr
+		return startupErr
 	})
-	if !errors.Is(err, launcherErr) {
-		t.Fatalf("openURLWith error = %v, want launcher failure", err)
+	if !errors.Is(err, startupErr) {
+		t.Fatalf("openURLWith error = %v, want startup failure", err)
 	}
 	if executable != "xdg-open" || len(arguments) != 1 || arguments[0] != "https://example.com/report" {
 		t.Errorf("launcher = %q %#v", executable, arguments)
 	}
 }
 
-func TestRunURLCommandReturnsExitFailure(t *testing.T) {
-	command, err := exec.LookPath("false")
-	if err != nil {
-		t.Skip("false command is unavailable")
+func TestURLProcessReturnsAfterStartAndReapsInBackground(t *testing.T) {
+	process := &blockingURLProcess{
+		release: make(chan struct{}),
+		waited:  make(chan struct{}),
 	}
-	if err := runURLCommand(command); err == nil {
-		t.Fatal("runURLCommand returned success for a failed launcher")
+	done := make(chan error, 1)
+	go func() { done <- startURLProcess(process) }()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("startURLProcess error = %v", err)
+		}
+	case <-time.After(time.Second):
+		close(process.release)
+		t.Fatal("startURLProcess waited for the launcher to exit")
 	}
+	close(process.release)
+	select {
+	case <-process.waited:
+	case <-time.After(time.Second):
+		t.Fatal("launcher process was not reaped")
+	}
+}
+
+type blockingURLProcess struct {
+	release chan struct{}
+	waited  chan struct{}
+}
+
+func (*blockingURLProcess) Start() error { return nil }
+
+func (p *blockingURLProcess) Wait() error {
+	<-p.release
+	close(p.waited)
+	return nil
 }
 
 func TestOpenURLCommandValidation(t *testing.T) {

@@ -1362,7 +1362,16 @@ func TestRootModelKeepsGlobalTabForALinklessThread(t *testing.T) {
 	m.mailView.rebuildTopicContent()
 	m.updateHelpBindings()
 
-	updated, _ := m.Update(keyPress("tab"))
+	if footer, visible := m.mailView.LinkFooter(); visible || footer != "" {
+		t.Errorf("linkless thread footer = %q visible=%v, want no reserved row", footer, visible)
+	}
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+	m = updated.(model)
+	if got, want := m.mailView.topicViewport.Height(), m.contentHeight(); got != want {
+		t.Errorf("linkless thread viewport height = %d, want all %d content rows", got, want)
+	}
+
+	updated, _ = m.Update(keyPress("tab"))
 	m = updated.(model)
 	if m.focus != rowSection {
 		t.Errorf("linkless thread Tab focus = %d, want rowSection", m.focus)

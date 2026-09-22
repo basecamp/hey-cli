@@ -1687,11 +1687,11 @@ func (v *mailView) threadNotices() []string {
 	return notices
 }
 
-// LinkFooter reserves one footer row for an open mail thread. Its text stays blank
-// until a link is selected, so moving through links never changes the viewport's
-// height. A destination can open only when the footer shows it in full.
+// LinkFooter reserves one footer row for a thread with selectable links. Its text
+// stays blank until a link is selected, so moving through links never changes the
+// viewport's height. A destination can open only when the footer shows it in full.
 func (v *mailView) LinkFooter() (text string, visible bool) {
-	if !v.inThread || v.modal != nil {
+	if !v.inThread || v.modal != nil || len(v.links) == 0 {
 		return "", false
 	}
 	text, _ = v.linkDestinationFooter()
