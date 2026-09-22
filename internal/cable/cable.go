@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/basecamp/actioncable-go"
+	actioncable "github.com/basecamp/actioncable-client/go/v2"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/auth"
