@@ -444,9 +444,11 @@ hey unshare <thread_id>                       # Turn off the sharing link
 `hey thread read` returns every entry in the thread, oldest first. Each entry's `body` is
 **Markdown**, converted from HEY's Trix HTML at the edge, so headings, lists, quotes,
 tables and code survive and links keep their URLs — read it as structure rather than as
-flattened text. An entry whose message was read also carries `recipients`, with `to`,
-`cc` and `bcc` contact lists; a known-empty line is `[]`, while an entry whose message
-was not hydrated omits the object. In JSON, an inbound entry also carries `received_via`:
+flattened text. `creator` is the account user; when HEY records a separate From address,
+a hydrated entry also has `sender`. Use `sender.email_address` for the actual From;
+fall back to `creator.email_address` only when the message was read and `sender` is absent.
+An entry whose message was read also carries `recipients`, with `to`, `cc` and `bcc` contact lists; a known-empty
+line is `[]`, while an entry whose message was not hydrated omits the object. In JSON, an inbound entry also carries `received_via`:
 every exact account address HEY recorded it arriving through, including aliases and plus
 tags. These delivery records are distinct from visible To/CC/BCC recipients. Each one's
 resolved `contact` is optional; `received_via` is omitted for sent/generated messages and
