@@ -461,7 +461,12 @@ edit` acts on for that day alone. Deleting one day, written out or not, takes it
 switched on in HEY, the same set
 the app draws, so `day` and `week` take no `--calendar` — only `--limit`
 and `--all`. With no date they read the account's today (see above), whatever zone the
-machine runs in.
+machine runs in. When the period includes a countdown recording for an
+event, `day` and `week` show its label in the styled table and include `countdown` (label,
+start and end) on that event in JSON. Countdowns are not additional events and do not
+change `--count`. HEY does not include an inherited series countdown in every later
+occurrence's period; when none is served, the CLI does not invent one. `event list` reads
+calendar recordings instead of a day or week and does not include countdowns.
 
 An event with no `--start-time` is an all-day event, and a `--start-time` with no
 `--end-time` runs for an hour — unless `--ends-on` names a later day, when it ends there at
