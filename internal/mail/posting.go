@@ -21,6 +21,7 @@ type Posting struct {
 	// so the box a thread files out of is the row's own rather than the list's.
 	BoxID                 int64
 	TopicID               int64
+	Kind                  string
 	CreatedAt             time.Time
 	Name                  string
 	Summary               string
@@ -79,6 +80,7 @@ func NewPosting(posting generated.Posting) Posting {
 		ID:                    posting.Id,
 		BoxID:                 posting.BoxId,
 		TopicID:               TopicIDOf(posting),
+		Kind:                  terminal.SanitizeLine(posting.Kind),
 		CreatedAt:             posting.CreatedAt,
 		Name:                  terminal.SanitizeLine(posting.Name),
 		Summary:               terminal.SanitizeLine(posting.Summary),
@@ -93,6 +95,18 @@ func NewPosting(posting generated.Posting) Posting {
 		Folders:               foldersOf(posting.Folders),
 		Collections:           collectionsOf(posting.Collections),
 	}
+}
+
+// IsWorldPost reports whether this row is published HEY World content rather than
+// an email thread.
+func (p Posting) IsWorldPost() bool {
+	return IsWorldPostKind(p.Kind)
+}
+
+// IsWorldPostKind reports whether HEY's posting discriminator names published
+// HEY World content.
+func IsWorldPostKind(kind string) bool {
+	return strings.EqualFold(strings.TrimSpace(kind), "world/post")
 }
 
 func contactOf(contact generated.Contact) Contact {

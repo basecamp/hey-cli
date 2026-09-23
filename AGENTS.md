@@ -475,8 +475,9 @@ cursor rather than declined for pointing elsewhere.
 
 **`mail.Posting` is a row, not the JSON.** `Page.Postings` stays `[]generated.Posting`
 because `hey box view --json` publishes those fields verbatim; `mail.Postings` describes them as
-the rows a reader acts on, and everything the TUI never reads — `bundled`, `entry_kind`,
-`kind`, `updated_at` — is left in the SDK type where the CLI can still reach it. `TopicID`
+the rows a reader acts on, including `kind` so the TUI can keep HEY World posts out of email
+actions. Everything the TUI never reads — `bundled`, `entry_kind`, `updated_at` — is left in
+the SDK type where the CLI can still reach it. `TopicID`
 is resolved once, out of the posting's URLs: HEY's `_posting.jbuilder` serves neither
 `topic` nor `topic_id`, so a URL is the only place a thread is named. `app_url` names it
 for a plain posting; a bundle's `app_url` names a contact, so `mail.TopicIDOf` falls back

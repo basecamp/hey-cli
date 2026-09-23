@@ -2330,6 +2330,10 @@ func (v *mailView) openSelected() tea.Cmd {
 	if selected == nil {
 		return nil
 	}
+	if selected.IsWorldPost() {
+		v.notice = "HEY World posts are published content; email thread actions are unavailable"
+		return nil
+	}
 	// A bundle names a topic only when it holds one unseen thread — otherwise its row
 	// opens the bundle itself: the unseen threads while there are any, or every thread
 	// with its contact once it has been read through, which is where the web app sends
@@ -2397,6 +2401,10 @@ func (v *mailView) startMove() {
 	selected := v.actionPosting()
 	currentSource := v.actionSource()
 	if selected == nil || currentSource == nil {
+		return
+	}
+	if selected.IsWorldPost() {
+		v.notice = "HEY World posts cannot be moved with email actions"
 		return
 	}
 	picker := newMovePicker(*selected, v.boxes, *currentSource)
@@ -2673,6 +2681,10 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 	}
 	selected := v.actionList().selectedPosting()
 	if selected == nil {
+		return nil
+	}
+	if selected.IsWorldPost() {
+		v.notice = "HEY World posts are published content; email actions are unavailable"
 		return nil
 	}
 	return v.postingAction(key, *selected, v.postingBoxKind(*selected))
