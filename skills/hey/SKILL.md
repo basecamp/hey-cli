@@ -847,8 +847,10 @@ so `day` and `week` take no `--calendar` — only `--limit` and `--all`.
 and `calendar`; `all_day` and `recurring` appear only when true, the zones only on timed
 events, and `description` (the notes, as plain text), `location`, `url`, `attached_entry`
 and `reminders` when set. Occurrences carry `parent_id` and `occurrence_id`, and in `day`
-and `week` a written-out day also carries `recording_id`. `--count` and `--ids-only` read
-that array directly.
+and `week` a written-out day also carries `recording_id`. When HEY serves a countdown in a
+day or week, its event carries `countdown` with a label and start/end timestamps. A later
+recurring day may omit this field when HEY omits the countdown from that period. `event
+list` does not include countdowns. `--count` and `--ids-only` read the event array.
 
 **Editing is a replacement, not a patch.** `hey event edit` reads the event first and
 sends back the notes, location, link, attached email, reminders and time zones it is not

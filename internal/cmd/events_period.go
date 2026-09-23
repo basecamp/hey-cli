@@ -234,10 +234,10 @@ func occurrenceEventRows(events []generated.Recording) []eventRow {
 }
 
 // attachEventCountdowns joins the countdowns HEY included in this period to its
-// events. An all-day countdown ends at midnight on its event's UTC date; HEY
-// sets UTC for JSON requests. Its end is not the event's start time. A week can
-// carry several occurrences of the same series and only one countdown record,
-// so both the parent ID and UTC date must agree.
+// events. HEY serves countdown ends at the event's start in some reads and as
+// the midnight stamp of its UTC date in period reads. Both identify the same
+// event date in HEY's UTC JSON. A week can carry several occurrences of one
+// series and only one countdown record, so the parent ID and date must agree.
 func attachEventCountdowns(rows []eventRow, countdowns []generated.Recording) {
 	type key struct {
 		parentID int64

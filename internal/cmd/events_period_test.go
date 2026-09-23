@@ -223,6 +223,18 @@ func TestEventCountdownUsesHEYsUTCDate(t *testing.T) {
 	}
 }
 
+func TestEventCountdownEndingAtTheEventStart(t *testing.T) {
+	start := time.Date(2026, 9, 28, 19, 0, 0, 0, time.UTC)
+	rows := eventRows([]generated.Recording{{Id: 301, StartsAt: start}})
+	attachEventCountdowns(rows, []generated.Recording{{
+		ParentId: 301, Label: "2 days before",
+		StartsAt: start.AddDate(0, 0, -2), EndsAt: start,
+	}})
+	if rows[0].Countdown == nil || rows[0].Countdown.EndsAt != start {
+		t.Errorf("countdown ending when the event starts = %+v, want the served time", rows[0].Countdown)
+	}
+}
+
 func TestEventCountdownDoesNotInventMissingTimes(t *testing.T) {
 	rows := eventRows([]generated.Recording{{Id: 301, StartsAt: time.Date(2026, 9, 28, 14, 0, 0, 0, time.UTC)}})
 	attachEventCountdowns(rows, []generated.Recording{{ParentId: 301, Label: "2 days before", EndsAt: time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)}})
