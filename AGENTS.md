@@ -847,7 +847,7 @@ themselves (`internal/cmd/watch_calendar.go`). Rings are coalesced per calendar 
 or `recording_deleted` line naming its calendar where a mail line names its box. The poll
 reports `calendar_added`, `calendar_updated` and `calendar_deleted`, and a recording feed's
 409 is `calendar_resync` after skipping ahead to HEY's clock, as a box does. The
-email-specific flags switch all of it off — `--box`, or an `--events` list naming only
+email-specific flags switch all of it off — `--box`, `--label`, or an `--events` list naming only
 mail changes (`watchingCalendars` in watch_calendar.go) — and `ready` waits for the
 calendars' catch-up exactly as it waits for the boxes', on the same retry backoff and the
 same `readyOnceCaughtUp` critical section.

@@ -24,6 +24,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/auth"
+	internalfolders "github.com/basecamp/hey-cli/internal/folders"
 )
 
 func TestWatchedChanges(t *testing.T) {
@@ -1679,5 +1680,100 @@ func TestPermanentReadErrorRecognizesACLIAuthFailure(t *testing.T) {
 				t.Errorf("permanentReadError(%v) = %t, want %t", tt.err, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestResolveWatchLabel(t *testing.T) {
+	listed := []internalfolders.Label{
+		{ID: 789, Name: "agent-trades"},
+		{ID: 790, Name: "Receipts"},
+	}
+
+	byID, err := resolveWatchLabel(listed, "789")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if byID.ID != 789 || byID.Name != "agent-trades" {
+		t.Errorf("by ID = %+v, want agent-trades 789", byID)
+	}
+
+	byName, err := resolveWatchLabel(listed, "AGENT-TRADES")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if byName.ID != 789 {
+		t.Errorf("by name = %+v, want case-insensitive match on 789", byName)
+	}
+
+	if _, err := resolveWatchLabel(listed, "missing"); err == nil {
+		t.Error("expected not found for an unknown label")
+	}
+	if _, err := resolveWatchLabel(listed, "  "); err == nil {
+		t.Error("expected usage error for a blank --label")
+	}
+}
+
+func TestLabeling(t *testing.T) {
+	labels := []watchEventLabel{{ID: 789, Name: "agent-trades"}, {ID: 12, Name: "Receipts"}}
+	if labeling(nil, labels) != nil {
+		t.Error("a missing posting cannot match a label")
+	}
+	if labeling(&generated.Posting{Id: 1}, labels) != nil {
+		t.Error("a posting with no folders should not match")
+	}
+
+	matched := labeling(&generated.Posting{Id: 1, Folders: []generated.Folder{{Id: 12, Name: "Receipts"}}}, labels)
+	if matched == nil || matched.ID != 12 || matched.Name != "Receipts" {
+		t.Errorf("matched = %+v, want Receipts", matched)
+	}
+}
+
+func TestWatchFiltersByLabel(t *testing.T) {
+	watch, out := newTestWatch("added", "updated", "deleted", "resync")
+	watch.labels = []watchEventLabel{{ID: 789, Name: "agent-trades"}}
+
+	unlabeled := &generated.Posting{Id: 9001, AppUrl: "https://app.hey.com/topics/5511"}
+	labeled := &generated.Posting{
+		Id:      9002,
+		AppUrl:  "https://app.hey.com/topics/5512",
+		Folders: []generated.Folder{{Id: 789, Name: "agent-trades"}},
+	}
+
+	if watch.report(context.Background(), watchEvent{Change: "added", At: "2026-08-18T09:14:22.031Z", PostingID: 9001}, watch.boxes[24088], unlabeled) {
+		t.Error("unlabeled mail should be dropped when --label is set")
+	}
+	if !watch.report(context.Background(), watchEvent{Change: "added", At: "2026-08-18T09:15:00.000Z", PostingID: 9002}, watch.boxes[24088], labeled) {
+		t.Fatal("mail already in the label should be reported")
+	}
+	if watch.report(context.Background(), watchEvent{Change: "deleted", PostingID: 9003}, watch.boxes[24088], nil) {
+		t.Error("a deletion carries no folders, so --label should leave it out")
+	}
+	if watch.report(context.Background(), watchEvent{Change: watchResync}, watch.boxes[24088], nil) {
+		t.Error("a resync carries no folders, so --label should leave it out")
+	}
+
+	var event watchEvent
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out.String())), &event); err != nil {
+		t.Fatalf("output isn't JSON: %q", out.String())
+	}
+	if event.PostingID != 9002 {
+		t.Errorf("event = %+v, want labeled posting 9002", event)
+	}
+	if event.Label == nil || event.Label.ID != 789 || event.Label.Name != "agent-trades" {
+		t.Errorf("label = %+v, want agent-trades on the JSON line", event.Label)
+	}
+}
+
+func TestWatchEventLabelEnvironment(t *testing.T) {
+	event := watchEvent{
+		Change: "added",
+		At:     "2026-08-18T09:14:22.031Z",
+		Label:  &watchEventLabel{ID: 789, Name: "agent-trades"},
+	}
+	environment := strings.Join(event.environment(), "\n")
+	for _, want := range []string{"HEY_LABEL_ID=789", "HEY_LABEL_NAME=agent-trades"} {
+		if !strings.Contains(environment, want) {
+			t.Errorf("environment = %q, want %s", environment, want)
+		}
 	}
 }

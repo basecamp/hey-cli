@@ -71,6 +71,7 @@ hey search --from jane@example.com --date last_30_days
 hey screener list                       # first-time senders waiting on you
 hey event add "Design review" --starts-on 2026-09-02 --start-time 14:00
 hey watch --box imbox --events new      # a line of JSON for every new email, as it lands
+hey watch --label 789 --events new      # only new mail already filed under that label
 ```
 
 Every command explains itself with `--help`. At a terminal the output is made for reading.
