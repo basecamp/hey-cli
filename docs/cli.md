@@ -338,7 +338,7 @@ Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. M
 ```bash
 hey watch                               # follow every box and calendar, a line of JSON per change
 hey watch --box imbox --events added    # only new postings in the Imbox (calendars off)
-hey watch --label 789 --events new      # new mail already filed under that label (calendars off)
+hey watch --label 789 --events new      # labeled new mail, or a known thread that gains the label (calendars off)
 hey watch --events recording_added,recording_updated,recording_deleted   # calendar changes only
 hey watch --box imbox --exit-on-first   # block until something lands, then exit
 hey watch --since 2026-08-18T09:00:00Z  # catch up from a time first, then follow
@@ -370,11 +370,12 @@ and `new` alone leaves a `resync` out, so a script for new mail never runs on on
 picks the boxes whose changes are reported; every box is followed regardless, so what is new
 is judged across all of them — a reply in The Feed and then a move into the Imbox is not.
 `--label` keeps only postings already filed under that label (id or name from
-`hey label list`), and each reported line includes `label` `{id,name}`. v1 is new mail that
-already carries the label; an existing thread that gains the label is reported only when the
-changes feed returns that filing as an updated posting with the folder on it. The
-one-liner above is what any desktop does with it; on Omarchy the bar plugin reads the same
-lines and sends one batched, replacing toast instead.
+`hey label list`), and each reported line includes `label` `{id,name}`. With `--events new`,
+that means new mail that already carries the label, and a thread this watch already saw
+without the label that later gains it when the feed returns an update with the folder. A
+late tag on a thread the watch has never seen still needs `--events updated` (or `updated`
+alongside `new`). The one-liner above is what any desktop does with it; on Omarchy the bar
+plugin reads the same lines and sends one batched, replacing toast instead.
 
 The calendars are followed too, by default. A changed event, todo, habit or journal entry
 is a `recording_added`, `recording_updated` or `recording_deleted` line naming its

@@ -101,10 +101,12 @@ off: --box or --label scopes the watch to mail, and an --events list naming only
 changes (added, updated, deleted, new, resync) does the same.
 
 --label keeps only mail already filed under that label (by id or name, from
-hey label list). New mail that already carries the label is reported; an existing
-thread that gains the label is reported only when the changes feed returns that filing
-as an update with the folder on it. Deletions and resyncs carry no folders, so they
-are left out while --label is set. Each reported line includes label {id,name}.
+hey label list). --events new reports new mail that already has the label, and a
+thread this watch already saw without the label that later gains it when the feed
+returns an update with the folder. A late tag on a thread the watch has never seen
+still needs --events updated (or updated alongside new). Deletions and resyncs
+carry no folders, so they are left out while --label is set. Each reported line
+includes label {id,name}.
 
 Besides the thread changes, three lines describe the watch itself: "ready" once every box
 and calendar is caught up and the subscription is live (again after every reconnect's
@@ -186,19 +188,21 @@ func (c *watchCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	watch := &postingsWatch{
-		boxes:       boxes,
-		labels:      labels,
-		changes:     changes,
-		asyncScript: c.asyncScript,
-		syncScript:  c.syncScript,
-		exitOnFirst: c.exitOnFirst,
-		newMail:     newMail,
-		out:         cmd.OutOrStdout(),
-		errOut:      cmd.ErrOrStderr(),
-		styled:      writer.IsStyled(),
-		connection:  make(chan struct{}, 1),
-		unread:      map[int64]bool{},
-		running:     make(chan struct{}, asyncScriptLimit),
+		boxes:           boxes,
+		labels:          labels,
+		seenPostings:    map[int64]bool{},
+		labeledPostings: map[int64]bool{},
+		changes:         changes,
+		asyncScript:     c.asyncScript,
+		syncScript:      c.syncScript,
+		exitOnFirst:     c.exitOnFirst,
+		newMail:         newMail,
+		out:             cmd.OutOrStdout(),
+		errOut:          cmd.ErrOrStderr(),
+		styled:          writer.IsStyled(),
+		connection:      make(chan struct{}, 1),
+		unread:          map[int64]bool{},
+		running:         make(chan struct{}, asyncScriptLimit),
 	}
 
 	if c.watchingCalendars(changes) {
@@ -361,9 +365,18 @@ func resolveWatchLabel(listed []internalfolders.Label, wanted string) (watchEven
 		return watchEventLabel{}, apierr.ErrUsage("--label needs a label name or ID")
 	}
 
+	// A numeric --label is an ID first: a label named "789" must not block ID 789.
+	if id, err := strconv.ParseInt(wanted, 10, 64); err == nil {
+		for _, label := range listed {
+			if label.ID == id {
+				return watchEventLabel{ID: label.ID, Name: label.Name}, nil
+			}
+		}
+	}
+
 	var matches []internalfolders.Label
 	for _, label := range listed {
-		if labelIs(label, wanted) {
+		if strings.EqualFold(wanted, label.Name) {
 			matches = append(matches, label)
 		}
 	}
@@ -375,10 +388,6 @@ func resolveWatchLabel(listed []internalfolders.Label, wanted string) (watchEven
 	default:
 		return watchEventLabel{}, apierr.ErrUsage(fmt.Sprintf("label %q is ambiguous — pass an ID from hey label list", wanted))
 	}
-}
-
-func labelIs(label internalfolders.Label, wanted string) bool {
-	return strings.EqualFold(wanted, label.Name) || wanted == strconv.FormatInt(label.ID, 10)
 }
 
 // watchCursor reads the cursor out of a box's changes URL, moved by --since. Its since
@@ -494,28 +503,30 @@ type watchEventLabel struct {
 // postingsWatch holds what a run of the command follows: the boxes and how far each
 // one has been read, and what to do with a change once it arrives.
 type postingsWatch struct {
-	boxes          map[int64]*watchedBox
-	labels         []watchEventLabel
-	calendar       *calendarsWatch
-	cable          *actioncable.Client
-	changes        map[string]bool
-	asyncScript    string
-	syncScript     string
-	exitOnFirst    bool
-	newMail        *newMail
-	out            io.Writer
-	errOut         io.Writer
-	styled         bool
-	connection     chan struct{}
-	transitionsMu  sync.Mutex
-	transitions    []bool
-	catchingUp     bool
-	unread         map[int64]bool
-	backoff        time.Duration
-	retry          <-chan time.Time
-	running        chan struct{}
-	reported       int
-	lastScriptExit int
+	boxes           map[int64]*watchedBox
+	labels          []watchEventLabel
+	seenPostings    map[int64]bool // posting IDs this watch has already classified
+	labeledPostings map[int64]bool // posting IDs already seen carrying a watched label
+	calendar        *calendarsWatch
+	cable           *actioncable.Client
+	changes         map[string]bool
+	asyncScript     string
+	syncScript      string
+	exitOnFirst     bool
+	newMail         *newMail
+	out             io.Writer
+	errOut          io.Writer
+	styled          bool
+	connection      chan struct{}
+	transitionsMu   sync.Mutex
+	transitions     []bool
+	catchingUp      bool
+	unread          map[int64]bool
+	backoff         time.Duration
+	retry           <-chan time.Time
+	running         chan struct{}
+	reported        int
+	lastScriptExit  int
 }
 
 func (w *postingsWatch) listen(ctx context.Context, subscription *actioncable.Subscription) error {
@@ -811,8 +822,22 @@ func (w *postingsWatch) recoverBox(ctx context.Context, box *watchedBox) error {
 }
 
 // classify decides whether a posting is new mail and records it, in that order.
+// With --label, a thread this watch already saw without the label that later
+// gains it counts as new, so --events new reports that filing.
 func (w *postingsWatch) classify(box *watchedBox, posting generated.Posting) *bool {
 	isNew := w.newMail.isNew(box.id, posting)
+	if len(w.labels) > 0 {
+		matched := labeling(&posting, w.labels) != nil
+		seen := w.seenPostings[posting.Id]
+		wasLabeled := w.labeledPostings[posting.Id]
+		if matched && seen && !wasLabeled {
+			isNew = true
+		}
+		w.seenPostings[posting.Id] = true
+		if matched {
+			w.labeledPostings[posting.Id] = true
+		}
+	}
 	w.newMail.record(posting)
 	return &isNew
 }
