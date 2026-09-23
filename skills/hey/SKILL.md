@@ -725,14 +725,17 @@ so `day` and `week` take no `--calendar` — only `--limit` and `--all`.
 **Response format:** a flat array of events. Each has `id`, `title`, `starts_at`, `ends_at`,
 `all_day`, `recurring`, `starts_at_time_zone` and `calendar`; a realized occurrence also
 has `recording_id`, and one being edited carries `description` (the notes, as plain text),
-`location`, `url`, `attached_entry` and `reminders`. `--count` and `--ids-only` read that
-array directly.
+`location`, `url`, `attached_entry` and `reminders`. When HEY serves a countdown in a
+day or week, its event carries `countdown` with a label and start/end timestamps. A
+later recurring day may omit this field when HEY omits the countdown from that period.
+`event list` does not include countdowns. `--count` and `--ids-only` read the event array.
 
 **Editing is a replacement, not a patch.** `hey event edit` reads the event first and
 sends back the notes, location, link, attached email, reminders and time zones it is not
 changing, because HEY clears whatever a write omits. Two things still cannot survive it:
-notes come back as plain text, so their formatting is flattened, and a countdown is not
-served at all, so an edit removes one unless `--countdown` names it again. An event that
+notes come back as plain text, so their formatting is flattened; an ordinary event edit
+reads a calendar listing without the separate countdown, so it removes the countdown
+unless `--countdown` names it again. An event that
 cannot be read is refused rather than written blind — pass the day it starts
 (`hey event edit 4821 2026-09-02`) or `--calendar` to narrow the search.
 

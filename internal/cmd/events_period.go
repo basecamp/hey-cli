@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -62,7 +63,9 @@ no --calendar to narrow it. A virtual occurrence carries the series in id and pa
 A day HEY has written out on its own — after an edit of that day alone, or a reminder —
 keeps its own event id in id and recording_id, while parent_id remains the series. The own
 id is what 'hey event edit' and 'hey event delete' act on for that day alone. Either way
-occurrence_id is what 'hey event edit --occurrence' takes, with the series id before it.`,
+occurrence_id is what 'hey event edit --occurrence' takes, with the series id before it.
+A countdown recording HEY includes in the day appears on its event as countdown in JSON
+and as a label in the styled table.`,
 		Example: `  hey event day
   hey event day 2026-09-02
   hey event day --json`,
@@ -97,7 +100,9 @@ no --calendar to narrow it. A virtual occurrence carries the series in id and pa
 A day HEY has written out on its own — after an edit of that day alone, or a reminder —
 keeps its own event id in id and recording_id, while parent_id remains the series. The own
 id is what 'hey event edit' and 'hey event delete' act on for that day alone. Either way
-occurrence_id is what 'hey event edit --occurrence' takes, with the series id before it.`,
+occurrence_id is what 'hey event edit --occurrence' takes, with the series id before it.
+A countdown recording HEY includes in the week appears on its event as countdown in JSON
+and as a label in the styled table.`,
 		Example: `  hey event week
   hey event week 2026-09-02
   hey event week --json`,
@@ -141,6 +146,9 @@ func (c *eventsPeriodCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	sortEventsByStart(events)
 	rows := occurrenceEventRows(events)
+	if period != nil {
+		attachEventCountdowns(rows, filterRecordingsByType(&period.Recordings, recordingTypeCountdown))
+	}
 
 	total := len(rows)
 	if c.limit > 0 && !c.all && len(rows) > c.limit {
@@ -159,7 +167,16 @@ const periodNow = "now"
 // series; a realized day's id and RecordingID both name its own event.
 type eventRow struct {
 	generated.Recording
-	RecordingID int64 `json:"recording_id,omitempty"`
+	RecordingID int64           `json:"recording_id,omitempty"`
+	Countdown   *eventCountdown `json:"countdown,omitempty"`
+}
+
+// A countdown is a separate HEY recording. Publish only the parts that describe
+// the countdown, not its own unrelated recording fields as another event.
+type eventCountdown struct {
+	Label    string    `json:"label"`
+	StartsAt time.Time `json:"starts_at"`
+	EndsAt   time.Time `json:"ends_at"`
 }
 
 func eventRows(events []generated.Recording) []eventRow {
@@ -186,6 +203,48 @@ func occurrenceEventRows(events []generated.Recording) []eventRow {
 		rows[i].Id = rows[i].ParentId
 	}
 	return rows
+}
+
+// attachEventCountdowns joins the countdowns HEY included in this period to its
+// events. HEY serves countdown ends at the event's start in some reads and as
+// the midnight stamp of its UTC date in period reads. Both identify the same
+// event date in HEY's UTC JSON. A week can carry several occurrences of one
+// series and only one countdown record, so the parent ID and date must agree.
+func attachEventCountdowns(rows []eventRow, countdowns []generated.Recording) {
+	type key struct {
+		parentID int64
+		date     string
+	}
+	byParentAndDate := make(map[key][]int, len(rows))
+	for i, row := range rows {
+		if row.Id == 0 || row.StartsAt.IsZero() {
+			continue
+		}
+		date := row.StartsAt.UTC().Format(dateLayout)
+		byParentAndDate[key{row.Id, date}] = append(byParentAndDate[key{row.Id, date}], i)
+		if row.ParentId != 0 && row.ParentId != row.Id {
+			parent := key{row.ParentId, date}
+			byParentAndDate[parent] = append(byParentAndDate[parent], i)
+		}
+	}
+
+	for _, countdown := range countdowns {
+		if countdown.ParentId == 0 || countdown.Label == "" || countdown.StartsAt.IsZero() || countdown.EndsAt.IsZero() {
+			continue
+		}
+		candidates := byParentAndDate[key{countdown.ParentId, countdown.EndsAt.UTC().Format(dateLayout)}]
+		if len(candidates) == 0 {
+			continue
+		}
+		// A realized day's own countdown wins over an inherited series one,
+		// regardless of the order HEY served the two recordings.
+		row := &rows[candidates[0]]
+		if row.Countdown == nil || row.RecordingID == countdown.ParentId {
+			row.Countdown = &eventCountdown{
+				Label: countdown.Label, StartsAt: countdown.StartsAt, EndsAt: countdown.EndsAt,
+			}
+		}
+	}
 }
 
 // sortEventsByStart puts a period's events in the order HEY draws the span: day by day,
@@ -241,7 +300,18 @@ func writeEventRows(cmd *cobra.Command, events []eventRow, described, notice str
 		if showsOccurrenceIDs {
 			header = append(header, "Series ID", "Occurrence ID", "Recording ID")
 		}
-		table.addRow(append(header, "Title", "Starts", "Ends", "Calendar"))
+		showsCountdown := false
+		for _, event := range events {
+			if event.Countdown != nil {
+				showsCountdown = true
+				break
+			}
+		}
+		columns := append(header, "Title", "Starts", "Ends", "Calendar")
+		if showsCountdown {
+			columns = append(columns, "Countdown")
+		}
+		table.addRow(columns)
 		for _, event := range events {
 			row := []string{fmt.Sprintf("%d", event.Id)}
 			if showsOccurrenceIDs {
@@ -254,12 +324,18 @@ func writeEventRows(cmd *cobra.Command, events []eventRow, described, notice str
 				}
 				row = append(row, seriesID, event.OccurrenceId, recordingID)
 			}
-			table.addRow(append(row,
-				event.Title,
+			row = append(row, event.Title,
 				eventBoundary(event.StartsAt, event.AllDay),
 				eventBoundary(event.EndsAt, event.AllDay),
-				event.Calendar.Name,
-			))
+				event.Calendar.Name)
+			if showsCountdown {
+				label := ""
+				if event.Countdown != nil {
+					label = event.Countdown.Label
+				}
+				row = append(row, label)
+			}
+			table.addRow(row)
 		}
 		table.print()
 		if notice != "" {

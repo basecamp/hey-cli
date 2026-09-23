@@ -427,7 +427,12 @@ edit` and `hey event delete` act on for that day alone. A period covers the cale
 switched on in HEY, the same set
 the app draws, so `day` and `week` take no `--calendar` — only `--limit`
 and `--all`. With no date they read the account's own today, whatever zone the machine
-runs in.
+runs in. When the period includes a countdown recording for an event, `day` and `week`
+show its label in the styled table and include `countdown` (label, start and end) on that
+event in JSON. Countdowns are not additional events and do not change `--count`.
+HEY does not include an inherited series countdown in every later occurrence's period;
+when none is served, the CLI does not invent one. `event list` reads calendar recordings
+instead of a day or week and does not include countdowns.
 
 An event with no `--start-time` is an all-day event, and a `--start-time` with no
 `--end-time` runs for an hour. Clock times are read in `--time-zone`, which defaults to the
@@ -437,8 +442,8 @@ machine's own zone; without one HEY would read them as UTC.
 than HEY's: an event write is a replacement, so the edit reads the event first and sends
 back the notes, location, link, attached email, reminders and time zones it is not
 changing. Two things cannot survive the round trip. HEY serves notes back as plain text, so
-saving flattens their formatting; and a countdown is not served at all, so an edit removes
-one unless `--countdown` names it again. An event that cannot be read is refused rather
+saving flattens their formatting; and an ordinary event edit cannot read back a countdown
+from its calendar listing, so it removes one unless `--countdown` names it again. An event that cannot be read is refused rather
 than written blind — pass the day it starts (`hey event edit 4821 2026-09-02`) or
 `--calendar` to look somewhere narrower.
 
