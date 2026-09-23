@@ -1850,3 +1850,55 @@ func TestWatchLabeledCatchUpNotNew(t *testing.T) {
 		t.Errorf("wrote %q, want nothing for catch-up labeled mail", out.String())
 	}
 }
+
+func TestWatchLabelReAddCountsAsNew(t *testing.T) {
+	watch, out := newTestWatch("new")
+	watch.labels = []watchEventLabel{{ID: 789, Name: "agent-trades"}}
+	box := watch.boxes[24088]
+	before := watchStarted.Add(-time.Hour)
+
+	labeled := generated.Posting{
+		Id:       9003,
+		AppUrl:   "https://app.hey.com/topics/5513",
+		ActiveAt: before,
+		Folders:  []generated.Folder{{Id: 789, Name: "agent-trades"}},
+	}
+	first := watch.classify(box, labeled)
+	if *first {
+		t.Fatal("first sighting of old already-labeled mail should not be new")
+	}
+	if watch.report(context.Background(), watchEvent{Change: "updated", At: "2026-08-18T09:14:22.031Z", PostingID: 9003, New: first}, box, &labeled) {
+		t.Error("catch-up labeled mail should be dropped under --events new")
+	}
+
+	unlabeled := generated.Posting{Id: 9003, AppUrl: "https://app.hey.com/topics/5513", ActiveAt: before}
+	cleared := watch.classify(box, unlabeled)
+	if *cleared {
+		t.Fatal("removing the label should not count as new")
+	}
+	if watch.report(context.Background(), watchEvent{Change: "updated", At: "2026-08-18T09:15:00.000Z", PostingID: 9003, New: cleared}, box, &unlabeled) {
+		t.Error("unlabeled mail should be dropped when --label is set")
+	}
+
+	readded := generated.Posting{
+		Id:       9003,
+		AppUrl:   "https://app.hey.com/topics/5513",
+		ActiveAt: before,
+		Folders:  []generated.Folder{{Id: 789, Name: "agent-trades"}},
+	}
+	gained := watch.classify(box, readded)
+	if !*gained {
+		t.Fatal("re-adding the label after an unlabeled update should count as new")
+	}
+	if !watch.report(context.Background(), watchEvent{Change: "updated", At: "2026-08-18T09:16:00.000Z", PostingID: 9003, New: gained}, box, &readded) {
+		t.Fatal("label re-add should pass --events new")
+	}
+
+	var event watchEvent
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out.String())), &event); err != nil {
+		t.Fatalf("output isn't JSON: %q", out.String())
+	}
+	if event.PostingID != 9003 || event.New == nil || !*event.New {
+		t.Errorf("event = %+v, want posting 9003 with new true", event)
+	}
+}
