@@ -20,7 +20,7 @@ try {
 #                    `hey setup agents` to install the agent skill and connect
 #                    coding agents without prompting)
 #   HEY_SETUP_AGENT  Which coding agent(s) `setup agents` connects:
-#                    claude | codex | all | none (default: auto-detect)
+#                    claude | codex | grok | all | none (default: auto-detect)
 #
 # This file must stay pure ASCII: the release pipeline stages and
 # Authenticode-signs a CRLF copy of it, and Windows PowerShell 5.1 decodes a
