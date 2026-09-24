@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "HEY",
-    "version": "2026-09-16",
+    "version": "2026-09-20",
     "description": "HEY API",
     "contact": {
       "name": "Basecamp",
@@ -12193,6 +12193,16 @@
             },
             "x-omitzero": true
           },
+          "active_at": {
+            "type": "string",
+            "description": "Delivery time. Present on the latest entry in Sent topics.",
+            "format": "date-time",
+            "x-go-type": "time.Time",
+            "x-go-type-import": {
+              "path": "time"
+            },
+            "x-omitzero": true
+          },
           "creator": {
             "$ref": "#/components/schemas/Contact"
           },
@@ -12214,6 +12224,9 @@
           "topic_id": {
             "type": "integer",
             "format": "int64"
+          },
+          "addressed": {
+            "$ref": "#/components/schemas/Addressed"
           }
         },
         "required": [

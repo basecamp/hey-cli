@@ -112,7 +112,7 @@ Listing commands also answer `--markdown` for a table, `--styled` to force the h
 rendering when the output is piped, `--ids-only` for one ID per line, and `--count` for a
 bare number. `--ids-only` and `--count` need list data, so they work on `hey box list`,
 `hey box view`, `hey bundle view`, `hey label list`, `hey label view`, `hey collection list`, `hey collection view`,
-`hey workflow list`, `hey workflow view`, `hey clip list`, `hey snippet list`, `hey draft list`, `hey search`, `hey contact list`, `hey contact threads`, `hey screener list`, `hey screener history`, `hey calendar list`,
+`hey workflow list`, `hey workflow view`, `hey clip list`, `hey snippet list`, `hey draft list`, `hey sent`, `hey search`, `hey contact list`, `hey contact threads`, `hey screener list`, `hey screener history`, `hey calendar list`,
 `hey event list`, `hey event day`, `hey event week`, `hey todo list`, `hey habit list`,
 `hey timetrack list` and `hey journal list`.
 The
@@ -193,6 +193,8 @@ hey snippet list                                  # list reusable email snippets
 hey snippet create --name "Scheduling reply" --content "Tuesday works for me."
 hey snippet update 44 --content "Wednesday works for me."
 hey snippet delete 44
+hey sent                            # list the latest sent message in each thread
+hey sent --all --json               # exact To, CC, BCC, sent time, and app URL
 hey search "quarterly planning"    # search threads and matching messages
 hey search --from jane@example.com --date last_30_days  # refine a search
 hey search filters                 # list available refinement values
@@ -273,6 +275,8 @@ Writing is Markdown too, everywhere text goes in: `-m`, `--content`, `--note`, p
 Drafts are the review-before-send lane: `hey compose --draft` (and `hey reply --draft`) saves instead of sending — recipients optional on a draft — and answers the draft's ID. `hey draft show` reads it back with the body as Markdown, `hey draft edit` revises it (each flag replaces its field; what is not flagged is kept, by reading the draft and resending the whole of it, since a revision is not a patch on HEY's side), `hey draft send` delivers through HEY's undo window, and `hey draft delete` trashes it. Scheduling a delivery is done in a HEY app for now — the API cannot yet name an exact instant — and a schedule set there survives CLI edits untouched. A draft prepared here is reviewed and sent from any HEY app, which is the workflow this is for: an agent writes, a person decides.
 
 `hey share <thread_id>` gets a sharing link for a thread. Anyone with the link can see the entire thread and future emails or replies sent to it. `hey unshare <thread_id>` turns off the sharing link.
+
+`hey sent` lists the latest message you sent in each thread, newest first. Its `id` is the thread ID accepted by `hey thread read`; `sent_at` uses HEY's delivery time when present and otherwise its creation time, matching the web view. If a server omits both times, JSON reports `sent_at` as `null` and human output says `Unavailable`. JSON separates exact recipients into `to`, `cc`, and `bcc` arrays and includes the subject, summary, and `app_url`. Styled and Markdown output use HEY's compact `Me → first recipient + N` summary. One page arrives by default; `--limit` reads enough pages for the requested count, `--all` follows HEY's next-page links for up to 100 pages, and `--page` continues from a reported page cursor.
 
 Search accepts free text plus `--required`, `--any`, `--none`, `--exact`, `--from`, `--to`, `--subject`, `--date`, `--in`, `--label`, and `--attachment`. `--in`, `--date`, `--label` and `--attachment` take one of the values `hey search filters` lists — the attachment kinds are `any`, `images`, `pdfs`, `calendar_invites`, `documents`, `spreadsheets`, `presentations`, `media` and `zip_files`, so it is `--attachment pdfs` rather than `pdf`, and an unrecognized `--in`, `--date` or `--attachment` is refused with the values it accepts before anything is sent. Use `--page` for one page or `--all` to fetch up to 100 pages; capped searches report the next page for continuation. Search results include `topic_id` for reading the thread and the matching message summaries. Results with an active box item also include `id` for organization actions.
 

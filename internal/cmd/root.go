@@ -206,6 +206,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newClipCommand().cmd)
 	root.AddCommand(newSnippetCommand().cmd)
 	root.AddCommand(newSearchCommand().cmd)
+	root.AddCommand(newSentCommand().cmd)
 	root.AddCommand(newContactsCommand().cmd)
 	root.AddCommand(newScreenerCommand().cmd)
 	root.AddCommand(newThreadCommand())

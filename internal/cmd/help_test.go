@@ -110,6 +110,7 @@ CORE COMMANDS
   thread    Read email threads
   reply     Reply to a thread
   compose   Write and send a new email
+  sent      List sent email
   search    Search email threads and messages
   contact   Manage contacts
   calendar  Browse your calendars

@@ -321,6 +321,10 @@ hey search --subject
 hey search --to
 hey search filters
 hey seen
+hey sent
+hey sent --all
+hey sent --limit
+hey sent --page
 hey set-aside
 hey set-aside group
 hey set-aside group add

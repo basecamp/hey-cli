@@ -89,8 +89,8 @@ github.com/aymerick/douceur v0.2.0 h1:Mv+mAeH1Q+n9Fr+oyamOlAkUNPWPlA8PPGR0QAaYuP
 github.com/aymerick/douceur v0.2.0/go.mod h1:wlT5vV2O3h55X9m7iVYN0TBM0NH/MmbLnd30/FjWUq4=
 github.com/basecamp/actioncable-go v1.1.0 h1:AizmCxoKvmUMdqwMQCCLQrFaVbjp8RhkneWidxygc7E=
 github.com/basecamp/actioncable-go v1.1.0/go.mod h1:ezaV5z1GXQAsqyejqTs6wCFl2D8Wj+COLQkHc/kwoRs=
-github.com/basecamp/hey-sdk/go v0.31.1 h1:dFlCe4LMmLAHgRB05QRHaE26XPPkZVIMp0qCGEanVQU=
-github.com/basecamp/hey-sdk/go v0.31.1/go.mod h1:eCJOhTLOpi2FCQUXireHZQ7DzRs2TUqvYhRDTfVLoDY=
+github.com/basecamp/hey-sdk/go v0.31.2-0.20260920180340-2d40721c770f h1:pmgQYWhGNX7W6CAxrfKNTN+BEvfganLC2mgR87Uv5hs=
+github.com/basecamp/hey-sdk/go v0.31.2-0.20260920180340-2d40721c770f/go.mod h1:eCJOhTLOpi2FCQUXireHZQ7DzRs2TUqvYhRDTfVLoDY=
 github.com/basecamp/mcp v0.0.0-20260828100356-2d6f44b51e9d h1:zEQVGq1x1nhKMZ2TudFAcSJ32CHT8richI1vQakIKz4=
 github.com/basecamp/mcp v0.0.0-20260828100356-2d6f44b51e9d/go.mod h1:Ee2c/q1/pg+5T5741PIuA3s6VJMQC7I0XBNXIHIujzA=
 github.com/blang/semver v3.5.1+incompatible h1:cQNTCjp13qL8KC3Nbxr/y2Bqb63oX6wdnnjpJbkM4JQ=

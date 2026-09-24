@@ -55,6 +55,7 @@ which is what `Entries().ListDraftsPage` and `hey draft list --page` exist for.
 | `/contacts/{id}/note.json` | DELETE | SDK `Contacts().DeleteNote` | `hey contact note delete`, Contacts TUI | covered |
 | `/calendars.json` | GET | SDK `Calendars().List` | `hey calendar list` | covered |
 | `/calendars/{id}/recordings.json` | GET | SDK `Calendars().GetRecordings` | `hey event list`, `hey event edit <id>` (reading the event back; with `--occurrence`, the occurrence's day and then the series' first day for its `Calendar::Countdown`), `hey todo list`, `hey journal list` | covered |
+| `/topics/sent.json` | GET | SDK `Topics().GetSentPage` | `hey sent` | covered |
 | `/topics/{id}/entries.json` | GET | SDK `Topics().GetEntries` | `hey thread read <id>`, `hey attachment list <topic-id>` | covered, but see the paging note below |
 | `/topics/{id}/publication` | POST | SDK `Publications().Create` | `hey share <thread-id>` | covered |
 | `/topics/{id}/publication.json` | GET | SDK `Publications().Create` readback | `hey share <thread-id>` | covered |
