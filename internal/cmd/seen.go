@@ -3,36 +3,72 @@ package cmd
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 type seenCommand struct {
 	cmd *cobra.Command
+	box string
 }
 
 func newSeenCommand() *seenCommand {
 	seenCommand := &seenCommand{}
 	seenCommand.cmd = &cobra.Command{
-		Use:   "seen <box-item-id>...",
+		Use:   "seen (<box-item-id>... | --box <name|id>)",
 		Short: "Mark email threads as seen",
+		Long: "Mark email threads as seen by box item ID, or queue marking a whole box as seen. " +
+			"--box resolves a name or ID the same way as hey box view and cannot be combined with box item IDs. " +
+			"Whole-box work is queued; threads may still appear unseen immediately afterward.",
 		Example: `  hey seen 12345
-  hey seen 12345 67890`,
+  hey seen 12345 67890
+  hey seen --box "paper trail"
+  hey seen --box 987`,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts one or more box item IDs from hey box view output. Marks each email thread as seen/read.",
+			"agent_notes": "Accepts one or more box item IDs from hey box view output, or --box <name|id> to mark a whole box as seen. The two target modes are mutually exclusive. --box resolves like hey box view and uses the current account selection. Whole-box work is queued, so success acknowledges the request rather than completed changes.",
 		},
 		RunE: seenCommand.run,
-		Args: usageMinOneArg(),
+		Args: seenCommand.validateArgs,
 	}
+	seenCommand.cmd.Flags().StringVar(&seenCommand.box, "box", "", "Queue marking a whole box as seen (name or ID, as in hey box view)")
 
 	return seenCommand
+}
+
+func (c *seenCommand) validateArgs(cmd *cobra.Command, args []string) error {
+	if !cmd.Flags().Changed("box") {
+		return usageMinOneArg()(cmd, args)
+	}
+	if len(args) > 0 {
+		return apierr.ErrUsage("--box cannot be combined with box item IDs")
+	}
+	if strings.TrimSpace(c.box) == "" {
+		return apierr.ErrUsage("--box requires a box name or ID")
+	}
+	return nil
 }
 
 func (c *seenCommand) run(cmd *cobra.Command, args []string) error {
 	if err := requireAuth(); err != nil {
 		return err
+	}
+
+	if c.box != "" {
+		box, err := resolveBox(cmd.Context(), c.box, "")
+		if err != nil {
+			return err
+		}
+		if box == nil || box.Id <= 0 {
+			return apierr.ErrAPI(0, "HEY returned no valid box ID")
+		}
+		if err := sdk.Boxes().MarkSeen(cmd.Context(), box.Id); err != nil {
+			return apierr.FromSDK(err)
+		}
+		return writeMutation(cmd, fmt.Sprintf("Queued marking %s as seen", terminal.SanitizeLine(box.Name)), nil)
 	}
 
 	ids, err := parseIntArgs(args)
