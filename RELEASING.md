@@ -2,9 +2,17 @@
 
 ## Quick release
 
+A stable release is two runs of the same command, with a PR merged in between:
+
 ```bash
-make release VERSION=0.2.0
+make release VERSION=0.2.0   # opens "Prepare v0.2.0 release" and stops
+# review and merge that PR, then from an up-to-date main:
+make release VERSION=0.2.0   # pushes the v0.2.0 tag
 ```
+
+`main` takes changes only through pull requests (the `main-gate` ruleset), and a
+stable tag must point at a commit that carries its version, so the version lands
+through a PR first. The script never pushes to `main`.
 
 ## Release candidate
 
@@ -26,22 +34,34 @@ make release VERSION=0.2.0 DRY_RUN=1
 
 1. Validates the version, that you are on the default branch with a clean tree
    synced to origin, and that `go.mod` has no `replace` directives
-2. Runs `make release-check`, including the same pinned gosec version used by the release workflow
-3. For **stable** versions only: runs `scripts/update-nix-flake.sh` (verifies the
-   Nix build via Docker and recomputes `vendorHash` if needed) and
-   `scripts/stamp-plugin-version.sh`, commits `nix/package.nix` and
-   `.claude-plugin/plugin.json`, and pushes that commit to main
-4. Creates the annotated tag and pushes it
+2. Runs `make release-check`, including the same pinned gosec version used by
+   the release workflow and `check-size-release`, which builds every release
+   target and holds each to the size budget (see [Release size budget](#release-size-budget))
+3. For a **stable** version whose metadata is not yet stamped (the first run):
+   stamps `nix/package.nix` (`scripts/stamp-nix-version.sh`) and
+   `.claude-plugin/plugin.json` (`scripts/stamp-plugin-version.sh`) on
+   `release/vX.Y.Z`, pushes that branch, opens a "Prepare vX.Y.Z release" PR
+   labelled `release`, returns to `main` and stops. Running it again while that
+   PR is open points at the PR rather than opening another, and a
+   `release/vX.Y.Z` branch on origin with no open PR is refused rather than
+   pushed over
+4. Once the metadata is stamped (the run after the PR is merged, or any
+   prerelease): creates the annotated tag and pushes only the tag
 
 Before touching anything it fetches tags and refuses a tag that already exists at
 another commit, or a stable version older than the latest stable tag, so a
-rejected release leaves main untouched. Pushing a stable tag by hand skips the
-metadata commit; GoReleaser then fails the release at its stable metadata check
+rejected release pushes nothing. A tag push that is rejected — another operator
+took the tag, or a repository rule refused it, which the error names — removes
+the local tag so the next attempt starts clean. Pushing a stable tag by hand at
+an unstamped commit fails the release at GoReleaser's stable metadata check
 (`scripts/check-stable-metadata.sh`, covering the plugin stamp and the Nix
 package version) rather than publishing stale metadata.
 
+The release PR needs `gh`, and the `release` label keeps it out of the release
+notes (see [Release notes](#release-notes)).
+
 The [release workflow](.github/workflows/release.yml) then runs **against the tag
-SHA** (which is why the prep commit is pushed first):
+SHA** (which is why the metadata is merged first):
 
 - `test`: lint lockstep, fmt, vet, lint, unit tests, bats suite, tidy, surface
   snapshot, race detector, govulncheck, CLI surface compatibility vs the previous tag
@@ -55,10 +75,23 @@ SHA** (which is why the prep commit is pushed first):
   a staged copy of `install.ps1` (`hey_installer.ps1`), signs `checksums.txt`
   with cosign (keyless, `checksums.txt.bundle`), generates SBOMs, publishes the
   GitHub release, and updates the Homebrew cask and Scoop manifest; the checksums
-  are then attested with GitHub build provenance
+  are then attested with GitHub build provenance. The size report that follows
+  is informational (`continue-on-error`): by then the release is published, and
+  a failure there must not skip the attestation or the jobs below
 - After publication: `macos-verify`, `windows-verify`, `nix-verify` (stable
   only), `aur-publish` (stable only, non-blocking), `sync-skills` (stable only,
   non-blocking)
+
+## Release notes
+
+GitHub generates the notes from `.github/release.yml`, which groups each PR by
+the labels `.github/labeler.yml` applies from the paths it touches:
+Authentication, TUI, CLI, Agents and integrations, Dependencies, Documentation,
+then Other Changes. A PR lands under the first group that matches, so one that
+touches both the TUI and the commands is listed under TUI. Read the notes once
+the release is published and move or reword entries where the paths tell the
+wrong story (`gh release edit vX.Y.Z --notes-file notes.md`). The release PR is
+left out by its `release` label.
 
 ## Stable vs prerelease
 
@@ -172,17 +205,30 @@ in `.surface-breaking` in the same PR; prune entries after the release ships.
 
 ## Release size budget
 
-`.size-budget` holds per-platform ceilings (`stripped_max_mib`, `gzip_max_mib`);
-`scripts/check-size-budget.sh` runs as a goreleaser build hook on each binary
-(so a breach stops the release before anything is archived, signed or
-published), again over `dist/` afterwards for the per-platform table in the job
-summary, and on `./bin/hey` on PRs (`make check-size`).
+`.size-budget` holds ceilings for every platform (`stripped_max_mib`,
+`gzip_max_mib`), measured against the binary as shipped. `scripts/check-size-budget.sh`
+runs:
 
-Baseline (goreleaser snapshot at the `hey upgrade` change): the largest target,
-windows_amd64, measured **25.2 MiB stripped / 8.8 MiB gzipped**; pre-Sigstore the
-same target was 15.2 / 5.4 MiB. sigstore-go's in-process verification cost
-~10 MiB stripped, accepted so releases verify without a cosign dependency. The
-ceilings are ceil(max × 1.15) = **29 / 11 MiB**, enforced. An increase beyond a
+- in `make release-check` (`check-size-release`), over a goreleaser snapshot of
+  every release target, so the dry run fails before a tag exists — a tag that
+  fails later can never be reused
+- as a goreleaser build hook on each binary, so a breach stops the release
+  before anything is archived or published
+- over `dist/` after publication, for the per-platform table in the job
+  summary; informational, since the release is already out
+- on `./bin/hey` on PRs (`make check-size`)
+
+The hook runs before notarize signs the macOS binaries, and a snapshot signs
+nothing, so `SIZE_BUDGET_UNSIGNED` names the platforms still unsigned and the
+script charges each the signature it will ship with (marked `~` in the table):
+32 bytes per 4 KiB page plus 32 KiB for macOS (326 KB on the 36.7 MiB v1.7.0
+binary), 16 KiB for Windows (10,024 bytes at v1.7.0). Without that, v1.7.0's
+darwin_amd64 passed the gate at 36.73 MiB and shipped at 37.04, over a 37 MiB
+ceiling.
+
+The ceilings are ceil(max × 1.15) over the largest shipped binary:
+**43 MiB stripped / 15 MiB gzipped** since v1.7.0 (darwin_amd64, 37.04 / 12.7
+MiB). `.size-budget` records what grew at each raise; an increase beyond a
 ceiling needs a review of what grew, not a budget bump.
 
 ## Pin and reference lockstep
@@ -244,9 +290,12 @@ rolling it back.
 ## Local dry runs
 
 ```bash
-make release VERSION=0.2.0 DRY_RUN=1   # preflight, including govulncheck and gosec
+make release VERSION=0.2.0 DRY_RUN=1   # preflight, including govulncheck, gosec and every target's size
 make test-release                      # goreleaser snapshot, no publish/sign
 ```
+
+A dry run opens no PR, creates no branch and pushes nothing; for an unstamped
+stable version it says the real run would open the release PR.
 
 The dry-run preflight runs the same gosec version as `.github/workflows/security.yml`;
 `make check-release-lockstep` fails if those pins drift.

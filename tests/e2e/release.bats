@@ -1,16 +1,18 @@
 #!/usr/bin/env bats
 #
-# scripts/release.sh against a real git repo with a local bare origin. The
-# script mutates main (the stable metadata commit) before it creates the tag,
-# so what matters is ordering: a release that is going to be refused must be
-# refused before main is touched, and the prep commit must reach origin before
-# the tag that the release workflow builds from.
+# scripts/release.sh against a real git repo with a local bare origin. main
+# takes changes only through pull requests, so the script never pushes it: a
+# stable release first stamps its metadata on release/vX.Y.Z and opens a PR,
+# and only a run from a main that carries the stamps pushes the tag. What
+# matters is what reaches origin and when: a release that is going to be
+# refused must be refused before anything is pushed, and the tag must only ever
+# point at a stamped commit.
 #
-# make is stubbed; both metadata stampers are the real ones. A deliberately
-# failing update-nix-flake.sh stub proves that the release path never invokes
-# the Docker-backed hash updater. A pre-receive hook on the bare origin records
-# every ref it receives, in order, which is the only way to observe the push
-# sequence after the fact.
+# make and gh are stubbed; both metadata stampers are the real ones. A
+# deliberately failing update-nix-flake.sh stub proves that the release path
+# never invokes the Docker-backed hash updater. A pre-receive hook on the bare
+# origin records every ref it receives, in order, which is the only way to
+# observe the push sequence after the fact.
 
 setup() {
   REPO_ROOT="$(cd "${BATS_TEST_DIRNAME}/../.." && pwd)"
@@ -19,8 +21,10 @@ setup() {
   ORIGINAL_PATH="$PATH"
   REAL_MAKE="$(command -v make)"
   export LOG="$WORK/calls.log"
+  export GH_LOG="$WORK/gh.log"
   PUSH_LOG="$WORK/pushes.log"
-  mkdir -p "$STUB_DIR"
+  GH_DIR="$WORK/gh-bin"
+  mkdir -p "$STUB_DIR" "$GH_DIR"
 
   git init -q --bare --initial-branch=main "$WORK/origin.git"
   cat > "$WORK/origin.git/hooks/pre-receive" <<HOOK
@@ -73,6 +77,23 @@ echo "make $*" >> "$LOG"
 STUB
   chmod +x "$STUB_DIR/make"
 
+  # gh answers the two calls the release PR needs. GH_OPEN_PR stands for a
+  # release PR that is already open. Anything else fails, so a test never
+  # reaches the real gh. GH_DIR holds gh alone, for the tests that run the real
+  # make and so cannot have the make stub on PATH.
+  cat > "$GH_DIR/gh" <<'STUB'
+#!/usr/bin/env bash
+echo "gh $*" >> "$GH_LOG"
+case "$1 $2" in
+  "pr list") [[ -z "${GH_OPEN_PR:-}" ]] || echo "$GH_OPEN_PR"; exit 0 ;;
+  "pr create") echo "https://github.com/basecamp/hey-cli/pull/999"; exit 0 ;;
+esac
+echo "unexpected gh call: $*" >&2
+exit 1
+STUB
+  chmod +x "$GH_DIR/gh"
+  cp "$GH_DIR/gh" "$STUB_DIR/gh"
+
   # macOS's stock sort has no -V/--version-sort. Shadow sort with a stub that
   # refuses those flags so every test fails if release.sh reaches for them.
   cat > "$STUB_DIR/sort" <<'STUB'
@@ -104,20 +125,61 @@ teardown() {
 origin() { git --git-dir="$WORK/origin.git" "$@"; }
 plugin_version() { jq -r .version .claude-plugin/plugin.json; }
 # The fixture records every pushed ref, but authorship tooling may add its own
-# notes refs. Only main and release tags belong to the protocol under test.
-release_pushes() { grep -E '^refs/(heads/main|tags/v)' "$PUSH_LOG" || true; }
+# notes refs. Only main, release branches and release tags belong to the
+# protocol under test.
+release_pushes() { grep -E '^refs/(heads/main|heads/release/|tags/v)' "$PUSH_LOG" || true; }
 
-@test "stable release commits and pushes the metadata before pushing the tag" {
+# What squash-merging the release PR leaves on origin's main: one new commit
+# carrying the stamps, not the release branch's own commit.
+merge_release_pr() {
+  git fetch -q origin
+  git merge -q --squash "origin/release/v$1" >/dev/null
+  git commit -qm "Prepare v$1 release (#999)"
+  git push -q origin main
+  : > "$PUSH_LOG"
+  : > "$GH_LOG"
+}
+
+# Both runs of a stable release, with the PR merged in between.
+release_through_pr() {
+  scripts/release.sh "$1" >/dev/null
+  merge_release_pr "$1"
+}
+
+@test "an unstamped stable release opens the release PR and pushes neither main nor a tag" {
   run scripts/release.sh 0.2.0
   [ "$status" -eq 0 ]
+  [[ "$output" == *"Opened the release PR: https://github.com/basecamp/hey-cli/pull/999"* ]]
+  [[ "$output" == *"make release VERSION=0.2.0"* ]]
 
-  [ "$(origin log -1 --format=%s main)" = "Update nix flake and plugin version for v0.2.0" ]
-  [ "$(origin rev-parse v0.2.0^{commit})" = "$(origin rev-parse main)" ]
-  [ "$(origin show main:.claude-plugin/plugin.json | jq -r .version)" = "0.2.0" ]
-  origin show main:nix/package.nix | grep -q 'version = "0.2.0"'
-  [ "$(release_pushes)" = $'refs/heads/main\nrefs/tags/v0.2.0' ]
+  [ "$(release_pushes)" = "refs/heads/release/v0.2.0" ]
+  [ "$(origin rev-parse main)" = "$BASE" ]
+  ! origin rev-parse -q --verify refs/tags/v0.2.0 >/dev/null
+  [ "$(origin log -1 --format=%s release/v0.2.0)" = "Update nix flake and plugin version for v0.2.0" ]
+  [ "$(origin show release/v0.2.0:.claude-plugin/plugin.json | jq -r .version)" = "0.2.0" ]
+  origin show release/v0.2.0:nix/package.nix | grep -q 'version = "0.2.0"'
+  grep -q -- '^gh pr create --base main --head release/v0.2.0 --label release --title Prepare v0.2.0 release' "$GH_LOG"
+
+  # The clone is back on main, untouched, ready for the run after the merge.
+  [ "$(git rev-parse --abbrev-ref HEAD)" = "main" ]
+  [ "$(git rev-parse HEAD)" = "$BASE" ]
+  [ -z "$(git status --porcelain)" ]
   grep -q '^make DRY_RUN= release-check$' "$LOG"
   ! grep -q update-nix-flake "$LOG"
+}
+
+@test "once the release PR is merged the release pushes only the tag, at the stamped commit" {
+  release_through_pr 0.2.0
+  MERGED=$(git rev-parse HEAD)
+
+  run scripts/release.sh 0.2.0
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Release metadata is stamped for 0.2.0"* ]]
+
+  [ "$(release_pushes)" = "refs/tags/v0.2.0" ]
+  [ "$(origin rev-parse v0.2.0^{commit})" = "$MERGED" ]
+  [ "$(origin rev-parse main)" = "$MERGED" ]
+  [ ! -s "$GH_LOG" ]
 }
 
 @test "prerelease tags HEAD and leaves the stable metadata alone" {
@@ -128,6 +190,7 @@ release_pushes() { grep -E '^refs/(heads/main|tags/v)' "$PUSH_LOG" || true; }
   [ "$(origin rev-parse v0.2.0-rc.1^{commit})" = "$BASE" ]
   [ "$(plugin_version)" = "0.1.0" ]
   [ "$(release_pushes)" = "refs/tags/v0.2.0-rc.1" ]
+  [ ! -f "$GH_LOG" ]
   ! grep -q update-nix-flake "$LOG"
 }
 
@@ -135,6 +198,9 @@ release_pushes() { grep -E '^refs/(heads/main|tags/v)' "$PUSH_LOG" || true; }
   run scripts/release.sh 0.2.0 --dry-run
   [ "$status" -eq 0 ]
   [[ "$output" == *"Dry run complete"* ]]
+  [[ "$output" == *"opens the release PR"* ]]
+  [ ! -f "$GH_LOG" ]
+  ! git rev-parse -q --verify refs/heads/release/v0.2.0 >/dev/null
 
   [ "$(git rev-parse HEAD)" = "$BASE" ]
   [ "$(origin rev-parse main)" = "$BASE" ]
@@ -163,16 +229,18 @@ release_pushes() { grep -E '^refs/(heads/main|tags/v)' "$PUSH_LOG" || true; }
   fi
 }
 
-@test "Makefile real release still commits and pushes" {
-  run env PATH="$ORIGINAL_PATH" "$REAL_MAKE" -f "$REPO_ROOT/Makefile" release VERSION=0.2.0
+@test "Makefile real release opens the release PR, then pushes the tag after the merge" {
+  run env PATH="$GH_DIR:$ORIGINAL_PATH" "$REAL_MAKE" -f "$REPO_ROOT/Makefile" release VERSION=0.2.0
   [ "$status" -eq 0 ]
-
-  [ "$(origin log -1 --format=%s main)" = "Update nix flake and plugin version for v0.2.0" ]
-  [ "$(origin rev-parse v0.2.0^{commit})" = "$(origin rev-parse main)" ]
-  [ "$(origin show main:.claude-plugin/plugin.json | jq -r .version)" = "0.2.0" ]
-  origin show main:nix/package.nix | grep -q 'version = "0.2.0"'
-  [ "$(release_pushes)" = $'refs/heads/main\nrefs/tags/v0.2.0' ]
+  [ "$(release_pushes)" = "refs/heads/release/v0.2.0" ]
+  [ "$(origin rev-parse main)" = "$BASE" ]
   grep -q '^make DRY_RUN= release-check$' "$LOG"
+
+  merge_release_pr 0.2.0
+  run env PATH="$GH_DIR:$ORIGINAL_PATH" "$REAL_MAKE" -f "$REPO_ROOT/Makefile" release VERSION=0.2.0
+  [ "$status" -eq 0 ]
+  [ "$(release_pushes)" = "refs/tags/v0.2.0" ]
+  [ "$(origin rev-parse v0.2.0^{commit})" = "$(origin rev-parse main)" ]
 }
 
 @test "unknown arguments fail closed" {
@@ -257,6 +325,7 @@ release_pushes() { grep -E '^refs/(heads/main|tags/v)' "$PUSH_LOG" || true; }
   git tag -a v0.9.0 -m "Release v0.9.0"
   git push -q origin v0.9.0
 
+  release_through_pr 0.10.0
   run scripts/release.sh 0.10.0
   [ "$status" -eq 0 ]
   [ "$(origin rev-parse v0.10.0^{commit})" = "$(origin rev-parse main)" ]
@@ -281,9 +350,11 @@ STUB
 
   [ -z "$(git status --porcelain)" ]
   grep -q 'version = "0.1.0"' nix/package.nix
+  [ "$(git rev-parse --abbrev-ref HEAD)" = "main" ]
   [ "$(git rev-parse HEAD)" = "$BASE" ]
   [ "$(origin rev-parse main)" = "$BASE" ]
   [ -z "$(release_pushes)" ]
+  ! grep -q 'pr create' "$GH_LOG"
 }
 
 @test "a failed plugin stamp restores the metadata and leaves the tree clean" {
@@ -306,6 +377,7 @@ STUB
   [ -z "$(git status --porcelain)" ]
   grep -q 'version = "0.1.0"' nix/package.nix
   [ "$(plugin_version)" = "0.1.0" ]
+  [ "$(git rev-parse --abbrev-ref HEAD)" = "main" ]
   [ "$(git rev-parse HEAD)" = "$BASE" ]
   [ "$(origin rev-parse main)" = "$BASE" ]
   [ -z "$(release_pushes)" ]
@@ -321,6 +393,7 @@ STUB
 }
 
 @test "re-running a stable release whose tag is already at HEAD pushes nothing new" {
+  release_through_pr 0.2.0
   scripts/release.sh 0.2.0 >/dev/null
   PREPPED=$(git rev-parse HEAD)
   : > "$PUSH_LOG"
@@ -405,7 +478,7 @@ HOOK
   rm .git/hooks/pre-commit
   run scripts/release.sh 0.2.0
   [ "$status" -eq 0 ]
-  [ "$(origin rev-parse v0.2.0^{commit})" = "$(origin rev-parse main)" ]
+  [ "$(release_pushes)" = "refs/heads/release/v0.2.0" ]
 }
 
 @test "rejects leading-zero version fields" {
@@ -443,11 +516,11 @@ HOOK
   [ ! -f "$LOG" ]
 }
 
-@test "a tag pushed by someone else during the checks reaches neither main nor the tag" {
-  # The tag check runs before make release-check; the pushes run after it.
-  # Another operator landing the same tag in that window must not leave main
-  # carrying stable metadata for a tag that points somewhere else — the tag
-  # cannot be moved, so that main would be stuck. Nothing may reach origin.
+@test "a tag pushed by someone else during the checks is not overwritten" {
+  # The tag check runs before make release-check; the push runs after it.
+  # Another operator landing the same tag in that window wins: the tag cannot
+  # be moved, and nothing of ours may reach origin.
+  release_through_pr 0.2.0
   git clone -q "$WORK/origin.git" "$WORK/other"
   git -C "$WORK/other" config user.email other@example.com
   git -C "$WORK/other" config user.name "Other Operator"
@@ -458,24 +531,26 @@ git -C "$WORK/other" tag -a v0.2.0 -m "Release v0.2.0" v0.1.0
 git -C "$WORK/other" push -q origin v0.2.0
 STUB
   OTHER=$(git -C "$WORK/other" rev-parse v0.1.0^{commit})
+  MERGED=$(git rev-parse HEAD)
 
   run scripts/release.sh 0.2.0
   [ "$status" -ne 0 ]
-  [[ "$output" == *"v0.2.0"* ]]
+  [[ "$output" == *"choose a new version"* ]]
 
-  [ "$(origin rev-parse main)" = "$BASE" ]
+  [ "$(origin rev-parse main)" = "$MERGED" ]
   [ "$(origin rev-parse v0.2.0^{commit})" = "$OTHER" ]
   [ "$(release_pushes)" = "refs/tags/v0.2.0" ]
 
   # The local clone is left where a re-run (with a new version) can start:
-  # no unpushed prep commit, no stray local tag, clean tree.
+  # no stray local tag, clean tree.
   [ -z "$(git status --porcelain)" ]
-  [ "$(git rev-parse HEAD)" = "$BASE" ]
+  [ "$(git rev-parse HEAD)" = "$MERGED" ]
   ! git rev-parse -q --verify refs/tags/v0.2.0 >/dev/null || [ "$(git rev-parse v0.2.0^{commit})" = "$OTHER" ]
-  [ "$(plugin_version)" = "0.1.0" ]
 }
 
-@test "main moved by someone else during the checks reaches neither main nor the tag" {
+@test "main moving during the checks still tags the commit that was checked" {
+  release_through_pr 0.2.0
+  MERGED=$(git rev-parse HEAD)
   git clone -q "$WORK/origin.git" "$WORK/other"
   git -C "$WORK/other" config user.email other@example.com
   git -C "$WORK/other" config user.name "Other Operator"
@@ -488,12 +563,47 @@ STUB
   : > "$PUSH_LOG"
 
   run scripts/release.sh 0.2.0
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 0 ]
 
+  [ "$(origin rev-parse v0.2.0^{commit})" = "$MERGED" ]
   [ "$(origin rev-parse main)" = "$(git -C "$WORK/other" rev-parse HEAD)" ]
-  ! origin rev-parse -q --verify refs/tags/v0.2.0 >/dev/null
-  [ "$(release_pushes)" = "refs/heads/main" ]
+  [ "$(release_pushes)" = $'refs/heads/main\nrefs/tags/v0.2.0' ]
+}
+
+@test "a release PR that is already open is pointed at, not opened again" {
+  GH_OPEN_PR=https://github.com/basecamp/hey-cli/pull/998 run scripts/release.sh 0.2.0
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"already open: https://github.com/basecamp/hey-cli/pull/998"* ]]
+  [ -z "$(release_pushes)" ]
+  ! grep -q 'pr create' "$GH_LOG"
+  [ "$(git rev-parse --abbrev-ref HEAD)" = "main" ]
+}
+
+@test "a release branch left on origin without a PR is not pushed over" {
+  git push -q origin "$BASE:refs/heads/release/v0.2.0"
+  : > "$PUSH_LOG"
+
+  run scripts/release.sh 0.2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"origin already has release/v0.2.0 but no open PR"* ]]
+  [ -z "$(release_pushes)" ]
+  ! grep -q 'pr create' "$GH_LOG"
+  [ "$(git rev-parse --abbrev-ref HEAD)" = "main" ]
   [ -z "$(git status --porcelain)" ]
-  [ "$(git rev-parse HEAD)" = "$BASE" ]
+}
+
+@test "a push refused by the repository rules says so" {
+  release_through_pr 0.2.0
+  cat > "$WORK/origin.git/hooks/pre-receive" <<'HOOK'
+#!/bin/sh
+echo "error: GH013: Repository rule violations found for refs/tags/v0.2.0." >&2
+exit 1
+HOOK
+
+  run scripts/release.sh 0.2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"refused by the repository rules"* ]]
+  [[ "$output" != *"origin changed"* ]]
+  ! origin rev-parse -q --verify refs/tags/v0.2.0 >/dev/null
   ! git rev-parse -q --verify refs/tags/v0.2.0 >/dev/null
 }

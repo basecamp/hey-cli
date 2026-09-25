@@ -288,14 +288,19 @@ jobs:
           SIGN_ALIAS: 1346fa41-d9f0-4580-b7b9-a95cf5674354
         run: goreleaser release --clean
 
-      # The gate itself runs as a goreleaser build hook (.goreleaser.yaml),
-      # before archives, signing and publishing; this pass over dist/ is the
-      # consolidated per-platform table for the job summary.
       - name: Clean up Windows signing material
         if: always()
         run: rm -f "$RUNNER_TEMP/digicert-client-cert.p12" "$RUNNER_TEMP"/jsign-*.jar
 
+      # The gate itself runs as a goreleaser build hook (.goreleaser.yaml),
+      # before anything is archived or published, and again in make
+      # release-check before the tag exists. This pass over dist/ measures the
+      # signed binaries as shipped and is the consolidated per-platform table
+      # for the job summary. It must not fail the job: by now the release is
+      # published, and a failure here skipped the attestation, the upgrade
+      # smoke and every job after this one for v1.7.0.
       - name: Report release size budget
+        continue-on-error: true
         run: scripts/check-size-budget.sh
 
       - name: Attest build provenance

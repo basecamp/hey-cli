@@ -12,6 +12,23 @@
 # Sizes are of the binary as shipped (goreleaser builds with -s -w; so does
 # `make build`), and of the same bytes gzip -9 compressed as a proxy for the
 # release archive size.
+#
+# A binary measured before its signature is attached is not yet the binary
+# that ships. goreleaser's build hook runs before notarize signs the macOS
+# binaries, and a dry run signs nothing, so SIZE_BUDGET_UNSIGNED names the
+# operating systems whose binaries here are unsigned ("darwin", "windows",
+# comma or space separated) and each of those is charged its signature up
+# front, marked with ~ in the table:
+#
+#   darwin   the code signature notarize embeds: a SHA-256 hash per 4 KiB
+#            page plus about 25 KiB of CMS blob and certificates, charged as
+#            32 bytes a page plus 32 KiB (v1.7.0 measured 326306 bytes on a
+#            36.7 MiB binary, the estimate 333664)
+#   windows  the Authenticode signature sign-windows.sh appends, a constant
+#            10024 bytes at v1.7.0, charged as 16 KiB
+#
+# The signature is charged to the gzipped size too: hashes and certificates
+# do not compress.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -31,6 +48,15 @@ ENFORCE="${ENFORCE:-true}"
 
 for v in "$STRIPPED_MAX" "$GZIP_MAX"; do
   [[ "$v" =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo "FAIL: stripped_max_mib and gzip_max_mib must be numeric in $BUDGET_FILE" >&2; exit 1; }
+done
+
+UNSIGNED=" "
+unsigned_input="${SIZE_BUDGET_UNSIGNED:-}"
+for os in ${unsigned_input//,/ }; do
+  case "$os" in
+    darwin|windows) UNSIGNED+="$os " ;;
+    *) echo "FAIL: SIZE_BUDGET_UNSIGNED names '$os'; only darwin and windows are signed" >&2; exit 1 ;;
+  esac
 done
 
 bins=("$@")
@@ -65,19 +91,44 @@ platform_of() {
   esac
 }
 
+# The bytes a signature not yet attached will add, or 0 for a binary that is
+# already in its shipped form (see SIZE_BUDGET_UNSIGNED above).
+signature_allowance() {
+  local os="${1%%_*}" raw="$2"
+  [[ "$UNSIGNED" == *" $os "* ]] || { echo 0; return; }
+  local pages=$(( (raw + 4095) / 4096 ))
+  case "$os" in
+    darwin) echo $(( pages * 32 + 32768 )) ;;
+    windows) echo 16384 ;;
+  esac
+}
+
 breached=0
+estimated=0
 table=$'| Platform | Stripped (MiB) | Gzipped (MiB) | Status |\n|---|---:|---:|---|'
 for bin in "${bins[@]}"; do
   [ -f "$bin" ] || { echo "FAIL: not a file: $bin" >&2; exit 1; }
+  platform=$(platform_of "$bin")
   raw=$(file_size "$bin")
   gz=$(gzip -9 -c -- "$bin" | wc -c | tr -d ' ')
+  allowance=$(signature_allowance "$platform" "$raw")
+  mark=""
+  if [ "$allowance" -gt 0 ]; then
+    raw=$((raw + allowance))
+    gz=$((gz + allowance))
+    mark="~"
+    estimated=1
+  fi
   status="ok"
   if over "$raw" "$STRIPPED_MAX" || over "$gz" "$GZIP_MAX"; then
     status="OVER"
     breached=1
   fi
-  table+=$'\n'"| $(platform_of "$bin") | $(mib "$raw") | $(mib "$gz") | $status |"
+  table+=$'\n'"| $platform | $mark$(mib "$raw") | $mark$(mib "$gz") | $status |"
 done
+if [ "$estimated" -eq 1 ]; then
+  table+=$'\n\n'"~ includes the estimated signature this binary will carry when it ships"
+fi
 
 header="Size budget: stripped <= ${STRIPPED_MAX} MiB, gzipped <= ${GZIP_MAX} MiB (enforce=${ENFORCE})"
 echo "$header"

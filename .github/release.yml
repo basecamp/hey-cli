@@ -1,18 +1,39 @@
+# Categories for GitHub's generated release notes, keyed on the labels
+# .github/labeler.yml applies from the paths a PR touches (nothing applies
+# enhancement or bug, which is how every v1.7.0 PR landed in one "Other
+# Changes" list). A PR goes under the first category that matches, so a PR
+# touching both the TUI and the commands is listed under TUI; the notes are a
+# first draft to read before publishing, not the final word.
 changelog:
+  exclude:
+    labels:
+      # The release PR scripts/release.sh opens to stamp the version.
+      - release
   categories:
     - title: Breaking Changes
       labels:
         - breaking
-    - title: Features
+    - title: Authentication
       labels:
-        - enhancement
-        - feature
-    - title: Bug Fixes
+        - auth
+    - title: TUI
       labels:
-        - bug
-        - fix
+        - tui
+    - title: CLI
+      labels:
+        - commands
+        - output
+    - title: Agents and integrations
+      labels:
+        - skills
+        - plugin
+    - title: Dependencies
+      labels:
+        - deps
+        - dependencies
     - title: Documentation
       labels:
+        - docs
         - documentation
     - title: Other Changes
       labels:

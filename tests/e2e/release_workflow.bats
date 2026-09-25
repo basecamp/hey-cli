@@ -31,3 +31,9 @@ job_body() {
   [[ "$nix" == *"if: \${{ contains(github.ref_name, '-') }}"* ]]
   [[ "$nix" == *"if: \${{ !contains(github.ref_name, '-') }}"* ]]
 }
+
+@test "the size report after publication cannot skip the jobs that follow it" {
+  release=$(job_body release)
+  report=$(awk '/- name: Report release size budget/ { inside = 1 } inside && /run:/ { print; exit } inside { print }' <<<"$release")
+  [[ "$report" == *"continue-on-error: true"* ]]
+}

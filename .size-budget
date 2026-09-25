@@ -17,6 +17,18 @@
 # email bodies keep their links, headings, lists and quotes instead of being
 # flattened to plain text. Measured across all ten release targets: the largest,
 # darwin_amd64 and windows_amd64, are 31.6 MiB stripped / 10.7 MiB gzipped.
-stripped_max_mib = 37
-gzip_max_mib = 13
+#
+# Raised at v1.7.0, 2026-09-25: darwin_amd64 shipped at 37.04 MiB stripped /
+# 12.7 MiB gzipped, 42 KB over, and the gate had not seen it. Two things had
+# grown into the headroom. The binary itself: the release archives grew about
+# 1 MiB compressed from v1.0.0 to v1.7.0, most of it in two steps -- hey mcp and
+# the MCP Go SDK at v1.3.0 (+0.56 MiB) and Go 1.27 with an SDK bump at v1.5.0
+# (+0.19 MiB) -- and the rest a few hundredths a release. And the baseline
+# above: 31.6 MiB was a snapshot build, which signs nothing, while the macOS
+# binary that ships carries a code signature of about 0.85% (326 KB at
+# v1.7.0). check-size-budget.sh now charges that signature before it is
+# attached (SIZE_BUDGET_UNSIGNED), so these bounds are against the binary as
+# shipped: ceil(37.04 x 1.15) = 43 and ceil(12.7 x 1.15) = 15.
+stripped_max_mib = 43
+gzip_max_mib = 15
 enforce = true
