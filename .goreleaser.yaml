@@ -5,8 +5,9 @@ project_name: hey
 before:
   hooks:
     - sh -c 'mkdir -p completions && go run ./cmd/hey shell-completion generate bash > completions/hey.bash && go run ./cmd/hey shell-completion generate zsh > completions/_hey && go run ./cmd/hey shell-completion generate fish > completions/hey.fish'
-    # release.sh commits the stable metadata stamps (plugin.json and
-    # nix/package.nix) to main before tagging a stable release. Nothing here
+    # release.sh lands the stable metadata stamps (plugin.json and
+    # nix/package.nix) on main through a release PR before tagging a stable
+    # release. Nothing here
     # can repair a tag pushed by hand without that commit (both files ship
     # from the tag, not from these archives), so a stable tag whose metadata
     # disagrees with its version fails before anything is published — the
@@ -54,11 +55,15 @@ builds:
         # SM_* signing env is absent (forks, make test-release).
         - cmd: scripts/sign-windows.sh "{{ .Target }}" "{{ .Path }}"
           output: true
-        # Size gate per binary, after signing and before anything is archived
-        # or published. Report-only while .size-budget has enforce = false. The
-        # release workflow prints the consolidated table afterwards, so the
-        # per-binary run stays out of the job summary.
-        - sh -c 'GITHUB_STEP_SUMMARY= scripts/check-size-budget.sh {{ .Path }}'
+        # Size gate per binary, before anything is archived or published. It
+        # runs after Windows signing (the hook above) but before notarize signs
+        # the macOS binaries, so macOS is charged the signature it will ship
+        # with -- and so is Windows whenever the SM_* env is absent and the
+        # hook above signed nothing (make release-check, forks). v1.7.0 passed
+        # this gate unsigned and shipped 42 KB over once notarize had signed
+        # it. The release workflow prints the consolidated table afterwards,
+        # so the per-binary run stays out of the job summary.
+        - sh -c 'GITHUB_STEP_SUMMARY= SIZE_BUDGET_UNSIGNED="darwin{{ if not (index .Env "SM_API_KEY") }} windows{{ end }}" scripts/check-size-budget.sh {{ .Path }}'
 
 archives:
   - id: default
