@@ -59,7 +59,12 @@ values add or move recipients on those lines; each value can also be comma-separ
 resolves and prints the complete envelope without requiring a message or sending one.
 
 A --to, --cc or --bcc address HEY would drop without saying so — one with no domain,
-or a top-level domain HEY does not know — is refused before anything is sent.`,
+or a top-level domain HEY does not know — is refused before anything is sent.
+
+A send answers the reply's id and the topic_id of the thread it landed on, with its
+subject and delayed (true while Undo Send holds it back). That thread is a new one when
+HEY breaks the reply out of this one, as HEY for Domains does when a reply changes who is
+on the thread. A HEY that does not serve these yet answers a send without them.`,
 		Annotations: map[string]string{
 			"agent_notes": "Replies to the latest emailed message in a thread — never a note (kind \"comment\") or share notice (kind \"access_notice\"), which are internal to the thread and never emailed; a thread with no emailed message is refused as not_found. The reply is addressed the way HEY addresses a reply: everyone that entry was addressed to, plus its sender on the To line, minus the acting user's own addresses. Repeatable --to/--cc/--bcc flags merge explicit recipients into that prefill; --replace-recipients uses only the explicit lists. --dry-run is read-only, needs no message, and returns the resolved sender, recipients, subject, account, thread and entry. Accepts message via -m, stdin, or $EDITOR, plus repeatable --attach files; an attachment can be sent without body text. The message is Markdown; use --message-html to send raw HTML instead. --draft saves the reply as a draft, carries the resolved recipients, and answers the draft ID for hey draft show/edit/send/delete. A send answers the reply's id and the topic_id of the thread it landed on — a new thread when HEY breaks the reply out of this one — once HEY serves them.",
 		},

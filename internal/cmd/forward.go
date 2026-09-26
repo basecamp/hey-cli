@@ -31,7 +31,11 @@ the thread, never emailed — so it is skipped, as HEY's web app skips it. A thr
 nothing but notes and share notices is refused.
 
 A --to, --cc or --bcc address HEY would drop without saying so — one with no domain,
-or a top-level domain HEY does not know — is refused before anything is sent.`,
+or a top-level domain HEY does not know — is refused before anything is sent.
+
+The answer's thread_id and entry_id name the thread and entry that were forwarded. Beside
+them, id and topic_id name the new message and the thread it started, with delayed (true
+while Undo Send holds it back), once HEY serves them.`,
 		Annotations: map[string]string{
 			"agent_notes": "Forwards the latest emailed message in a thread with HEY's quoted content — never an internal note or share notice posted after it. Accepts comma-separated recipients and an optional note via -m. The answer's thread_id and entry_id name what was forwarded; id and topic_id name the new message and the thread it started, once HEY serves them.",
 		},

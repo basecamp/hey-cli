@@ -46,7 +46,12 @@ share notice posted after it is internal and never emailed, and a thread holding
 else is refused.
 
 A --to, --cc or --bcc address HEY would drop without saying so — one with no domain,
-or a top-level domain HEY does not know — is refused before anything is sent.`,
+or a top-level domain HEY does not know — is refused before anything is sent.
+
+A send answers the new message's id and the topic_id of the thread it is on (for hey
+thread read or hey reply), with its subject and delayed, which is true while Undo Send
+holds the delivery back. A HEY that does not serve these yet answers a send without them.
+--draft saves instead of sending and answers the draft's id.`,
 		Args: recipientsChecked(nil),
 		Annotations: map[string]string{
 			"agent_notes": "--from selects a configured sender email or ID from account senders; --account must agree. --from is only for new messages. Starts a new thread with --to (optionally --cc/--bcc), which requires --subject, or replies to an existing one with --thread-id, which does not; --thread-id answers the thread's latest emailed message, never a note (kind \"comment\") or share notice (kind \"access_notice\"), and a thread with no emailed message is refused as not_found. Repeatable --attach files are uploaded before sending and can be sent without body text. The body is Markdown; use --message-html to send raw HTML instead. --draft saves instead of sending — recipients become optional — and answers the draft ID for hey draft show/edit/send/delete. A new message ends with the sender's HEY name tag, as one composed in HEY does; --no-name-tag leaves it out. A send answers the new message's id and the topic_id of its thread (for hey thread read), with subject and delayed (true while Undo Send holds it back), once HEY serves them; until then it answers without them.",

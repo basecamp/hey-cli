@@ -327,6 +327,12 @@ func newDraftSendCommand() *draftSendCommand {
 	sendCommand.cmd = &cobra.Command{
 		Use:   "send <draft-id>",
 		Short: "Deliver a draft",
+		Long: `Deliver a draft through HEY's undo window.
+
+The answer carries the delivered message's id and the topic_id of its thread, with its
+subject and delayed (true while Undo Send holds it back). The id is the draft's own unless
+HEY breaks the draft out into a thread of its own. A HEY that does not serve these yet
+answers only the draft's id.`,
 		Annotations: map[string]string{
 			"agent_notes": "Sends the draft as it stands — recipients are required, added with `hey draft edit --to`. Delivery goes through HEY's undo window. The answer carries the delivered message's id and its thread's topic_id once HEY serves them. Scheduling a delivery is done in a HEY app for now; the CLI has no flag for it, and HEY's API schedules only to a whole hour.",
 		},
