@@ -651,7 +651,7 @@ This works in Kitty and Ghostty. Other terminals show the text content normally 
 ### Watching for changes over Action Cable
 
 `hey watch` is told when a box changed instead of polling for it.
-`internal/cable` dials HEY's cable server with [actioncable-go](github.com/basecamp/actioncable-go),
+`internal/cable` dials HEY's cable server with [actioncable-client](https://github.com/basecamp/actioncable-client/tree/main/go)'s Go module,
 authorizing the upgrade request with the same credentials the SDK sends on an API request
 (`HEY_CABLE_URL` overrides the endpoint). `internal/cmd/watch.go` subscribes to
 haystack's `Postings::ChangesChannel`, which broadcasts only `{change, account_id, box_id,

@@ -115,8 +115,8 @@ which is what `Entries().ListDraftsPage` and `hey draft list --page` exist for.
 | `/calendar/todos/{id}/completions.json` | DELETE | SDK `CalendarTodos().Uncomplete` | `hey todo uncomplete <id>` | covered |
 | `/calendar/todos/{id}.json` | DELETE | SDK `CalendarTodos().Delete` | `hey todo delete <id>` | covered |
 | `/boxes/{id}/postings/changes.json` | GET | SDK `Postings().AllChanges` | `hey watch` | covered |
-| `/cable` (`Postings::ChangesChannel`) | WS | `internal/cable` + actioncable-go | `hey watch`, TUI mail list | covered |
-| `/cable` (`Turbo::StreamsChannel`) | WS | `internal/cable` + actioncable-go | TUI Screener (stream name from `/clearances.json`) | covered |
+| `/cable` (`Postings::ChangesChannel`) | WS | `internal/cable` + actioncable-client | `hey watch`, TUI mail list | covered |
+| `/cable` (`Turbo::StreamsChannel`) | WS | `internal/cable` + actioncable-client | TUI Screener (stream name from `/clearances.json`) | covered |
 | `/identity.json` | GET | SDK `Identity().GetIdentity` | `hey account list`, `--account` validation | covered |
 | `/oauth/authorizations/new` | GET | `internal/auth` (PKCE S256) | `hey auth login` | covered |
 | `/oauth/tokens` | POST | `internal/auth` | `hey auth login`, `hey auth refresh`, automatic refresh | covered |

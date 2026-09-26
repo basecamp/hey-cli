@@ -19,7 +19,7 @@ import (
 	"syscall"
 	"time"
 
-	actioncable "github.com/basecamp/actioncable-go"
+	actioncable "github.com/basecamp/actioncable-client/go/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"

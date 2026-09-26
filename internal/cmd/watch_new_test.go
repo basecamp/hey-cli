@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	actioncable "github.com/basecamp/actioncable-go"
+	actioncable "github.com/basecamp/actioncable-client/go/v2"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
