@@ -789,7 +789,8 @@ hey event add "Standup" --calendar 123 --start-time 09:15 --repeat every_weekday
 hey event edit 4821 --title "Design review (moved)"
 hey event edit 4821 --occurrence 4821_2026-09-15 --apply-to current --start-time 15:00 --json   # That day alone
 hey event edit 4821 --occurrence 4821_2026-09-15 --apply-to future --repeat every_week --repeat-times 8 --title "Design review (v2)" --allow-plain-notes --json
-hey event delete 4821
+hey event delete 4821                                                   # The whole event, a series included
+hey event delete 4821 --occurrence 4821_2026-09-15 --apply-to current    # That day alone
 ```
 
 Without `--calendar`, `list` reads every calendar and `add` files on HEY's default: the
@@ -801,7 +802,8 @@ written out on its own.
 span as HEY draws it: a repeating event is expanded into the occurrences inside it, each
 carrying that day's own times and an `occurrence_id`. A virtual occurrence has the series
 in `id` and `parent_id`; a day HEY has written out on its own keeps its own event ID in
-`id` and `recording_id`, with the series in `parent_id`. That own ID edits the day alone.
+`id` and `recording_id`, with the series in `parent_id`. That own ID edits the day alone;
+deleting one day always goes through the series with `--occurrence` (below).
 Styled period tables that contain occurrences print `Series ID`, `Occurrence ID` and
 `Recording ID` beside `ID`. The period covers the calendars switched on in HEY,
 so `day` and `week` take no `--calendar` — only `--limit` and `--all`.
@@ -863,10 +865,18 @@ differ from the series' is refused until `--invite` names the new list. With
 `--occurrence`, `--calendar` is only the calendar the day moves to: the day is read over
 every calendar, and a day already moved elsewhere stays there. A day HEY has written out
 lists in `day`/`week` with its own event ID in `id` and `recording_id`, plus the series in
-`parent_id`; `edit <id>` changes that day alone. `delete <id>` discards only the day's own
-changes: HEY's series still has that date, so the series' occurrence shows again — the CLI
-cannot remove one day of a series. Use the series id as the
-positional id with `--occurrence`. An attached email you cannot read is
+`parent_id`; `edit <id>` changes that day alone. Use the series id as the positional id
+with `--occurrence`.
+
+**Deleting follows the same rule.** `hey event delete <id>` deletes the whole event, a
+series included. One day is `hey event delete <series id> --occurrence <occurrence_id>
+--apply-to current`; `future` deletes that day and every one after it, which from the
+series' first day is the whole series. A written-out day's own ID is refused with a usage
+error naming the occurrence command, because deleting that ID alone lets HEY draw the day
+again from the series. The check reads the event a year either side of today, so a
+written-out day further out than that is not caught — use the occurrence form for it.
+`future` is refused from a written-out day moved off its series time or on an opaque
+custom schedule, as for edits. An attached email you cannot read is
 not served and is detached by any
 edit, whole event or one day — nothing client-side can keep it. HEY answers not-found for
 a date that is not a day of the series and for a series you cannot edit alike. The JSON
