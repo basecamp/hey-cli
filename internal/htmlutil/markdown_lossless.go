@@ -18,6 +18,9 @@ var markdownElements = map[string]bool{
 	"h1": true, "h2": true, "h3": true, "h4": true, "h5": true, "h6": true,
 	"strong": true, "b": true, "em": true, "i": true, "del": true, "s": true, "strike": true,
 	"a": true, "blockquote": true, "ul": true, "ol": true, "li": true, "pre": true, "code": true,
+	// A span with no attributes shows nothing of its own; one with a style or class does
+	// and fails on its attributes.
+	"span": true,
 }
 
 // markdownBlocks are the elements a line of Markdown cannot run across: a break's
