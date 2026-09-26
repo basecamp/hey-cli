@@ -73,7 +73,8 @@ func newWatchCommand() *watchCommand {
 		Use:   "watch",
 		Short: "Follow email threads and calendars as they change",
 		Long: `Print email threads and calendar changes as they happen: piped or with --json, one
-JSON object per line; at a terminal, one text line each. Runs until interrupted.
+JSON object per line; at a terminal, one text line each. Runs until interrupted. What
+changed before the watch began is not reported, unless --since reads back to it first.
 
 Changes can drive a command instead of being printed, and that is a choice between two
 behaviours: --run-async spawns the command per change and moves on, so a slow one never
@@ -82,7 +83,7 @@ Pass one or the other.
 
 Every added and updated line says whether the thread is new mail: unseen, not muted, and
 active since the watch last saw it — or since the watch began, for a thread it has not
-seen, so the backlog a box's first read carries is not new. Reading a thread, muting or
+seen, so the backlog --since reads is not new. Reading a thread, muting or
 moving it is not new activity; a reply on a known thread is. --events new selects the new
 ones, alone or alongside added, updated and deleted, and a script sees HEY_NEW=1 for them.
 
@@ -150,8 +151,8 @@ func (c *watchCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	// New mail is measured against the watch's start, so that is taken before
-	// the boxes' cursors are read — and the cursors start no later than it, so
-	// nothing that lands between the two sits behind a cursor, read by nothing.
+	// the boxes' cursors are read — and the cursors start at it, so nothing
+	// that lands between the two sits behind a cursor, read by nothing.
 	started := serverNow(ctx)
 	newMail := trackNewMail(started)
 
@@ -276,7 +277,7 @@ func (c *watchCommand) watchedBoxes(ctx context.Context, started time.Time) (map
 			continue
 		}
 		if c.since == "" {
-			cursor = noLaterThan(cursor, started)
+			cursor = startingAt(cursor, started)
 		}
 
 		watched[box.Id] = &watchedBox{id: box.Id, kind: box.Kind, name: box.Name, cursor: cursor, reported: c.watching(box)}
@@ -306,8 +307,9 @@ func boxIs(box generated.Box, wanted string) bool {
 		wanted == strconv.FormatInt(box.Id, 10)
 }
 
-// watchCursor is where a box's changes feed should be read from. The server bakes its own
-// clock into the box's changes URL, so that's the cursor unless --since moves it.
+// watchCursor reads the cursor out of a box's changes URL — HEY's own, which a skip-ahead
+// resumes from — unless --since moves it. A watch's first read starts at the watch's
+// start instead (startingAt).
 func watchCursor(changesURL, since string) (hey.PostingChangesCursor, error) {
 	if changesURL == "" {
 		return hey.PostingChangesCursor{}, nil
@@ -332,19 +334,21 @@ func watchCursor(changesURL, since string) (hey.PostingChangesCursor, error) {
 
 const watchCursorTimeLayout = "2006-01-02T15:04:05.000Z"
 
-// noLaterThan moves a box's cursor back to the watch's start when the box's
-// own is later. The server bakes the box's last posting activity into its
-// cursor, so mail that landed after the watch read HEY's clock and before it
-// read the box list is already behind the cursor: the feed would start after
-// it, and nothing would ever report it. Starting from the watch's own start
-// reads it as part of the catch-up instead — and it is new, since it is later
-// than the start. A cursor that cannot be read is left as it is.
-func noLaterThan(cursor hey.PostingChangesCursor, started time.Time) hey.PostingChangesCursor {
-	at, err := time.Parse(watchCursorTimeLayout, cursor.Since)
-	if err == nil && at.After(started) {
-		cursor.Since = started.UTC().Format(watchCursorTimeLayout)
-	}
-
+// startingAt starts a feed's cursor at the watch's start, keeping the version HEY's
+// URL names. The since HEY serves is not its clock but the box's last posting
+// activity — the latest updated_at among its unbundled postings, or the box's own
+// when it has none — and the feed answers changes later than that which are history
+// by now: a deletion, a bundled posting. Nor is it always even that: the box list
+// comes through the SDK's ETag cache, HEY's ETag for it is the box rows, and posting
+// activity does not touch them, so a 304 hands back the since as it stood when the
+// list was cached — hours or days behind. Read from there, the catch-up reported
+// what came after as news on every start, and --exit-on-first stopped on the first
+// of it. From the start it
+// reports what happened after it and nothing before — including mail that landed
+// after the watch read HEY's clock and before it read the box list, which a cursor
+// later than the start would leave behind it, read by nothing. That mail is new, too.
+func startingAt(cursor hey.PostingChangesCursor, started time.Time) hey.PostingChangesCursor {
+	cursor.Since = started.UTC().Format(watchCursorTimeLayout)
 	return cursor
 }
 

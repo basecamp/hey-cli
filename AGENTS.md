@@ -679,9 +679,14 @@ says (`--box` picks the boxes whose changes are reported; every box is followed)
 posting recorded as soon as it is classified. The
 start is the Date header translated back to when the request was made (mail that lands while
 the server answers is later than the start), it is taken before the box list, and each
-box's cursor starts no later than it (`noLaterThan`): the server bakes the box's last posting
-activity into the cursor, so mail that landed in between would otherwise sit behind the
-cursor, read by nothing. That
+box's cursor starts at it (`startingAt`), keeping only the version from the box's
+`posting_changes_url`. The since HEY puts there is not its clock but the box's last posting
+activity (`Box#last_posting_activity_at`: unbundled postings only, the box's own `updated_at`
+when it has none), and the feed answers deletions and bundled postings later than that; and
+`/boxes.json` comes through the SDK's ETag cache with an ETag of the box rows alone, which
+posting activity does not touch, so a 304 serves the since as it was when the list was
+cached. A read from HEY's since reported history as news on every start, and a since later
+than the start would leave mail that landed in between behind it, read by nothing. That
 is HEY's semantics and state across events, so the CLI decides it once; what to do about
 it is the reader's. A 409 skip-ahead sets that box's floor at the cursor it skipped to
 (`newMail.skippedTo`): activity at or before it is never new there, known thread or not,
@@ -785,8 +790,8 @@ watch that is down costs staleness, not a notice.
 `hey watch` follows the same streams on its own connection and reports the changes
 themselves (`internal/cmd/watch_calendar.go`). Rings are coalesced per calendar for
 `calendarCoalesceDelay`, then the calendar's recording feed is read from its cursor
-(`Calendars().AllRecordingChanges`, cursors capped at the watch's start like the boxes' —
-`calendarCursorNoLaterThan`) and each recording is a `recording_added`, `recording_updated`
+(`Calendars().AllRecordingChanges`, cursors starting at the watch's start like the boxes' —
+`calendarCursor`) and each recording is a `recording_added`, `recording_updated`
 or `recording_deleted` line naming its calendar where a mail line names its box. The poll
 reports `calendar_added`, `calendar_updated` and `calendar_deleted`, and a recording feed's
 409 is `calendar_resync` after skipping ahead to a fresh cursor from the list. The
