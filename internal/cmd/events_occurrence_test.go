@@ -1668,3 +1668,210 @@ func TestEventsEditOccurrenceKeepsAOneDayCountdown(t *testing.T) {
 		t.Fatalf("execute occurrence edit: %v", err)
 	}
 }
+
+// occurrenceDeleteServer answers what an occurrence delete reads and writes: the calendars
+// and the occurrence's own day, for a future delete's boundary check, and the delete itself,
+// whose apply_to_future it records. Anything else is an error, so every request is accounted
+// for.
+func occurrenceDeleteServer(t *testing.T, date, day string, status int) (http.Handler, *[]string) {
+	t.Helper()
+	var deletes []string
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/calendars.json":
+			_, _ = io.WriteString(w, oneCalendarJSON)
+		case r.Method == http.MethodGet && r.URL.Path == "/calendars/9/recordings.json" && r.URL.Query().Get("starts_on") == date:
+			_, _ = io.WriteString(w, day)
+		case r.Method == http.MethodDelete && r.URL.Path == "/calendar/events/4821/occurrences/"+date+".json":
+			deletes = append(deletes, r.URL.Query().Get("apply_to_future"))
+			w.WriteHeader(status)
+			if status >= http.StatusBadRequest {
+				_, _ = io.WriteString(w, `{"status":404,"error":"Not Found"}`)
+			}
+		default:
+			t.Errorf("unexpected request = %s %s", r.Method, r.URL)
+			http.NotFound(w, r)
+		}
+	}), &deletes
+}
+
+// The one that matters: one day of the series is deleted through the occurrence route with
+// apply_to_future off, which is what writes the day into the series' exceptions. Deleting
+// that day's own id would not: HEY would draw it again from the series. A current delete
+// has nothing to read first.
+func TestEventsDeleteOccurrenceCurrentDeletesThatDayAlone(t *testing.T) {
+	handler, deletes := occurrenceDeleteServer(t, "2026-09-15", "", http.StatusNoContent)
+	response, err := runJSONCommand(t, handler,
+		"event", "delete", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "current")
+	if err != nil {
+		t.Fatalf("execute occurrence delete: %v", err)
+	}
+	if len(*deletes) != 1 || (*deletes)[0] != "false" {
+		t.Errorf("apply_to_future = %v, want one delete of that day alone", *deletes)
+	}
+	if response.Summary != "Occurrence deleted" {
+		t.Errorf("summary = %q", response.Summary)
+	}
+	data, ok := response.Data.(map[string]any)
+	if !ok || data["occurrence_id"] != "4821_2026-09-15" || data["apply_to"] != "current" {
+		t.Errorf("structured data = %#v, want the occurrence and its scope", response.Data)
+	}
+}
+
+// The wider scope is the same delete with apply_to_future on: that day and every one after
+// it. It reads the day first, for the boundary check a future edit makes, and a virtual day
+// passes it.
+func TestEventsDeleteOccurrenceFutureDeletesTheDaysFromThisOneOn(t *testing.T) {
+	handler, deletes := occurrenceDeleteServer(t, "2026-09-15",
+		`{"Calendar::Event":[`+occurrenceSeriesJSON+`]}`, http.StatusNoContent)
+	response, err := runJSONCommand(t, handler,
+		"event", "delete", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "future")
+	if err != nil {
+		t.Fatalf("execute occurrence delete: %v", err)
+	}
+	if len(*deletes) != 1 || (*deletes)[0] != "true" {
+		t.Errorf("apply_to_future = %v, want one delete of this day and the following", *deletes)
+	}
+	if response.Summary != "Occurrence and the following deleted" {
+		t.Errorf("summary = %q", response.Summary)
+	}
+}
+
+// A future delete from a written-out day has the boundary problem a future edit has: HEY
+// stops the series at the day's occurrence date but cancels the written-out days from the
+// day's actual start. A day moved off its series time, or any written-out day of an opaque
+// custom schedule, is refused before anything is deleted.
+func TestEventsDeleteOccurrenceFutureRefusesAnUntrustworthyBoundary(t *testing.T) {
+	moved := `{"id":9001,"type":"Calendar::Event","parent_id":4821,"occurrence_id":"4821_2026-09-15",` +
+		`"title":"Design review","starts_at":"2026-09-18T12:00:00Z","ends_at":"2026-09-18T13:00:00Z",` +
+		`"starts_at_time_zone":"Europe/Zagreb","ends_at_time_zone":"Europe/Zagreb","calendar":{"id":9,"name":"Work"}}`
+	inPlace := `{"id":9001,"type":"Calendar::Event","parent_id":4821,"occurrence_id":"4821_2026-09-15",` +
+		`"title":"Design review","starts_at":"2026-09-15T12:00:00Z","ends_at":"2026-09-15T13:00:00Z",` +
+		`"starts_at_time_zone":"Europe/Zagreb","ends_at_time_zone":"Europe/Zagreb","calendar":{"id":9,"name":"Work"}}`
+	custom := strings.Replace(occurrenceSeriesJSON,
+		`"recurrence_schedule":{"kind":"every_week","preset":true}`,
+		`"recurrence_schedule":{"kind":"custom","preset":false}`, 1)
+	for _, tt := range []struct {
+		name, day, want string
+	}{
+		{name: "moved", day: `{"Calendar::Event":[` + occurrenceSeriesJSON + `,` + moved + `]}`, want: "was moved"},
+		{name: "custom", day: `{"Calendar::Event":[` + custom + `,` + inPlace + `]}`, want: "opaque custom schedule"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			handler, deletes := occurrenceDeleteServer(t, "2026-09-15", tt.day, http.StatusNoContent)
+			_, err := runJSONCommand(t, handler,
+				"event", "delete", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "future")
+			var cliErr *apierr.Error
+			if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage ||
+				!strings.Contains(cliErr.Message, tt.want) || !strings.Contains(cliErr.Message, "cannot be deleted") {
+				t.Fatalf("error = %v, want a usage refusal saying %q", err, tt.want)
+			}
+			if !strings.Contains(cliErr.Hint, "--apply-to current") {
+				t.Errorf("hint = %q, want the way round", cliErr.Hint)
+			}
+			if len(*deletes) != 0 {
+				t.Errorf("deletes = %v, want none", *deletes)
+			}
+		})
+	}
+}
+
+// Everything the flags get wrong is refused before a request is made, as for an edit, with
+// the hints naming the delete.
+func TestEventsDeleteOccurrenceRefusesWhatItCannotMean(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "apply-to without occurrence", args: []string{"--apply-to", "current"}, want: "--apply-to needs --occurrence"},
+		{name: "occurrence without apply-to", args: []string{"--occurrence", "4821_2026-09-15"}, want: "--apply-to is required with --occurrence"},
+		{name: "occurrence given empty", args: []string{"--occurrence=", "--apply-to", "current"}, want: "--occurrence needs an occurrence_id"},
+		{name: "unknown scope", args: []string{"--occurrence", "4821_2026-09-15", "--apply-to", "all"}, want: "invalid apply-to: all"},
+		{name: "not an occurrence id", args: []string{"--occurrence", "4821-2026-09-15", "--apply-to", "current"}, want: "invalid occurrence: 4821-2026-09-15"},
+		{name: "other series", args: []string{"--occurrence", "4822_2026-09-15", "--apply-to", "current"}, want: "occurrence 4822_2026-09-15 belongs to series 4822, not 4821"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				t.Errorf("unexpected request = %s %s", r.Method, r.URL)
+				http.NotFound(w, r)
+			})
+			_, err := runJSONCommand(t, handler, append([]string{"event", "delete", "4821"}, tt.args...)...)
+			var cliErr *apierr.Error
+			if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || cliErr.Message != tt.want {
+				t.Fatalf("error = %v, want usage %q", err, tt.want)
+			}
+			if strings.Contains(cliErr.Hint, "hey event edit") {
+				t.Errorf("hint = %q, want it to name the delete", cliErr.Hint)
+			}
+		})
+	}
+}
+
+// A hint that names a command names one that runs: the series the occurrence belongs to,
+// with the scope that was given, since --apply-to is required.
+func TestEventsOccurrenceHintsCarryTheScope(t *testing.T) {
+	for _, tt := range []struct {
+		command, scope string
+	}{
+		{command: "delete", scope: "current"},
+		{command: "delete", scope: "future"},
+		{command: "edit", scope: "current"},
+	} {
+		t.Run(tt.command+" "+tt.scope, func(t *testing.T) {
+			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				t.Errorf("unexpected request = %s %s", r.Method, r.URL)
+				http.NotFound(w, r)
+			})
+			_, err := runJSONCommand(t, handler,
+				"event", tt.command, "4821", "--occurrence", "4822_2026-09-15", "--apply-to", tt.scope)
+			var cliErr *apierr.Error
+			if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage {
+				t.Fatalf("error = %v, want a usage refusal", err)
+			}
+			if want := "hey event " + tt.command + " 4822 --occurrence 4822_2026-09-15 --apply-to " + tt.scope; cliErr.Hint != want {
+				t.Errorf("hint = %q, want %q", cliErr.Hint, want)
+			}
+		})
+	}
+
+	// A series id that names a day HEY wrote out is found on the day's read, and the hint
+	// points at the series with the same scope.
+	realized := `{"id":9001,"type":"Calendar::Event","parent_id":4821,"occurrence_id":"4821_2026-09-15",` +
+		`"title":"Design review","starts_at":"2026-09-15T12:00:00Z","ends_at":"2026-09-15T13:00:00Z","calendar":{"id":9,"name":"Work"}}`
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/calendars.json":
+			_, _ = io.WriteString(w, oneCalendarJSON)
+		case r.Method == http.MethodGet && r.URL.Path == "/calendars/9/recordings.json":
+			_, _ = io.WriteString(w, `{"Calendar::Event":[`+occurrenceSeriesJSON+`,`+realized+`]}`)
+		default:
+			t.Errorf("unexpected request = %s %s", r.Method, r.URL)
+			http.NotFound(w, r)
+		}
+	})
+	_, err := runJSONCommand(t, handler,
+		"event", "delete", "9001", "--occurrence", "9001_2026-09-15", "--apply-to", "future")
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage {
+		t.Fatalf("error = %v, want a usage refusal", err)
+	}
+	if want := "hey event delete 4821 --occurrence 4821_2026-09-15 --apply-to future"; cliErr.Hint != want {
+		t.Errorf("hint = %q, want %q", cliErr.Hint, want)
+	}
+}
+
+// HEY's own refusal — a date that is not a day of the series, or a series the caller cannot
+// delete from, both 404 on the occurrence route — reaches the caller as not-found.
+func TestEventsDeleteOccurrenceReportsHEYsRefusal(t *testing.T) {
+	handler, _ := occurrenceDeleteServer(t, "2026-09-16", "", http.StatusNotFound)
+	_, err := runJSONCommand(t, handler,
+		"event", "delete", "4821", "--occurrence", "4821_2026-09-16", "--apply-to", "current")
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeNotFound {
+		t.Fatalf("error = %v, want not-found", err)
+	}
+}

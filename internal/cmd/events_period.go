@@ -61,9 +61,9 @@ The day covers the calendars switched on in HEY, the same set the app draws, so 
 no --calendar to narrow it. A virtual occurrence carries the series in id and parent_id.
 A day HEY has written out on its own — after an edit of that day alone, or a reminder —
 keeps its own event id in id and recording_id, while parent_id remains the series. The own
-id is what 'hey event edit' changes for that day alone; 'hey event delete' on it discards
-only the day's own changes, and the series' occurrence shows again. Either way
-occurrence_id is what 'hey event edit --occurrence' takes, with the series id before it.`,
+id is what 'hey event edit' acts on for that day alone. Either way occurrence_id is what
+'hey event edit --occurrence' and 'hey event delete --occurrence' take, with the series id
+before it — and the delete is the one way to delete one day, written out or not.`,
 		Example: `  hey event day
   hey event day 2026-09-02
   hey event day --json`,
@@ -97,9 +97,9 @@ The week covers the calendars switched on in HEY, the same set the app draws, so
 no --calendar to narrow it. A virtual occurrence carries the series in id and parent_id.
 A day HEY has written out on its own — after an edit of that day alone, or a reminder —
 keeps its own event id in id and recording_id, while parent_id remains the series. The own
-id is what 'hey event edit' changes for that day alone; 'hey event delete' on it discards
-only the day's own changes, and the series' occurrence shows again. Either way
-occurrence_id is what 'hey event edit --occurrence' takes, with the series id before it.`,
+id is what 'hey event edit' acts on for that day alone. Either way occurrence_id is what
+'hey event edit --occurrence' and 'hey event delete --occurrence' take, with the series id
+before it — and the delete is the one way to delete one day, written out or not.`,
 		Example: `  hey event week
   hey event week 2026-09-02
   hey event week --json`,
@@ -172,9 +172,11 @@ func eventRows(events []generated.Recording) []eventRow {
 	return rows
 }
 
-// occurrenceEventRows keeps a realized occurrence's established id: HEY's event routes
-// act on that recording alone. A virtual occurrence has no id of its own, so its id is the
-// series id. recording_id makes the distinction explicit without changing the old id.
+// occurrenceEventRows keeps a realized occurrence's established id: an update of it changes
+// that recording alone. A delete of it does not delete the day — the series draws the day
+// again — which is why 'hey event delete' refuses it for --occurrence. A virtual occurrence
+// has no id of its own, so its id is the series id. recording_id makes the distinction
+// explicit without changing the old id.
 func occurrenceEventRows(events []generated.Recording) []eventRow {
 	rows := eventRows(events)
 	for i := range rows {

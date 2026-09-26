@@ -787,6 +787,63 @@ func TestARepeatingEventsOwnDayIsWrittenThroughItsOccurrence(t *testing.T) {
 	}
 }
 
+// A day HEY has written out on its own has an id, and an edit goes by it: that recording is
+// the day. A delete does not. Deleting that id removes only HEY's copy of the day and the
+// series draws it again, so the day is deleted through its occurrence like any other.
+func TestAWrittenOutDayIsDeletedThroughItsOccurrence(t *testing.T) {
+	v, recorded := calendarWithEventServer(t)
+	v.Update(recordingsLoadedMsg{requestResult: currentRequest(v), recordings: []Recording{
+		sdkRecordingToModel(generated.Recording{
+			Id: 9001, Title: "Summer friday (half day)", AllDay: true, Type: "Calendar::Event",
+			ParentId: 153688907, OccurrenceId: "153688907_2026-08-20",
+			StartsAt: at("2026-08-20T00:00:00Z"), EndsAt: at("2026-08-20T00:00:00Z"),
+		}),
+	}})
+
+	v.HandleContentKey(keyPress("down"))
+	if v.selectedEvent != "9001" {
+		t.Fatalf("selected %q, want the written-out day", v.selectedEvent)
+	}
+
+	v.HandleContentKey(keyPress("e"))
+	if v.eventForm == nil {
+		t.Fatal("e did not open the form on a written-out day")
+	}
+	cmd := v.HandleContentKey(keyPress("ctrl+s"))
+	if cmd == nil {
+		t.Fatal("ctrl+s did not save")
+	}
+	msg, ok := cmd().(calendarMutationMsg)
+	if !ok || msg.err != nil {
+		t.Fatalf("save = %T %v", cmd(), msg.err)
+	}
+	requests, _ := recorded.snapshot()
+	if len(requests) == 0 || requests[0] != "PATCH /calendar/events/9001.json" {
+		t.Fatalf("requests = %v, want the day's own id edited", requests)
+	}
+
+	v.Update(msg)
+	v.Update(recordingsLoadedMsg{requestResult: currentRequest(v), recordings: v.events})
+
+	v.HandleContentKey(keyPress("down"))
+	v.HandleContentKey(keyPress("x"))
+	cmd = v.HandleContentKey(keyPress("x"))
+	if cmd == nil {
+		t.Fatal("the second x did not delete")
+	}
+	msg, ok = cmd().(calendarMutationMsg)
+	if !ok || msg.err != nil {
+		t.Fatalf("delete = %T %v", cmd(), msg.err)
+	}
+	if msg.action != "This day deleted" {
+		t.Errorf("action = %q, want the day deleted", msg.action)
+	}
+	requests, _ = recorded.snapshot()
+	if len(requests) < 2 || requests[1] != "DELETE /calendar/events/153688907/occurrences/2026-08-20.json" {
+		t.Errorf("requests = %v, want the day deleted through its occurrence", requests)
+	}
+}
+
 // Within the band ↑ and ↓ walk it, and ↑ off the top of it is the way back to the grid.
 func TestDayAllDayBandIsWalkedUpAndDown(t *testing.T) {
 	v := dayWithEvents(t)

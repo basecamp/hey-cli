@@ -2207,16 +2207,22 @@ func (v *calendarView) rememberCalendar(id int64) {
 	_ = v.vc.saveLastCalendar(id)
 }
 
+// editingOccurrence is the day being edited, when HEY has not written it out yet. A day it
+// has written out is a recording of its own, and an update of that id changes the day alone.
 func (v *calendarView) editingOccurrence() (hey.EventOccurrence, bool) {
+	if v.editing.ID != 0 {
+		return hey.EventOccurrence{}, false
+	}
 	return occurrenceOf(v.editing)
 }
 
 // occurrenceOf is the day of a repeating event a recording stands for, and false for an ordinary
-// event. HEY serves such a day with no id of its own, so it is addressed by the series and the
-// date instead — and both the edit and the delete act on that day alone rather than the whole
-// series, which is the narrower of the two things the reader might have meant.
+// event. A day HEY has not written out has no id of its own, so it is addressed by the series and
+// the date instead — and both the edit and the delete act on that day alone rather than the whole
+// series, which is the narrower of the two things the reader might have meant. A day HEY has
+// written out keeps the same occurrence_id beside its own id.
 func occurrenceOf(recording Recording) (hey.EventOccurrence, bool) {
-	if recording.ID != 0 || recording.OccurrenceID == "" {
+	if recording.OccurrenceID == "" {
 		return hey.EventOccurrence{}, false
 	}
 	occurrence, err := hey.ParseOccurrenceID(recording.OccurrenceID)
@@ -2237,7 +2243,9 @@ func (v *calendarView) removeSelectedEvent() tea.Cmd {
 	v.confirmDelete = ""
 
 	// One day of a repeating event is taken off on its own rather than the series with it: HEY
-	// keeps the rest by writing the day into the schedule's exceptions.
+	// keeps the rest by writing the day into the schedule's exceptions. That goes for a day HEY
+	// has written out too — deleting its own id removes only that copy, and the series draws
+	// the day again.
 	occurrence, isOccurrence := occurrenceOf(event)
 	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestMutation)
 	return func() tea.Msg {

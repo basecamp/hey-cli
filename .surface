@@ -186,6 +186,8 @@ hey event day
 hey event day --all
 hey event day --limit
 hey event delete
+hey event delete --apply-to
+hey event delete --occurrence
 hey event edit
 hey event edit --all-day
 hey event edit --allow-plain-notes
