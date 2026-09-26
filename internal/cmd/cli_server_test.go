@@ -15,14 +15,14 @@ import (
 // can find it listening and ask what it is: moshi-hook, which the Moshi app runs over SSH
 // to list dev servers, sends GET / to every loopback listener, once as 127.0.0.1 and once
 // as localhost. A handler that fails its test on a request it did not expect would blame
-// the CLI for those. The CLI never asks for the root, so a request for / that does not carry
-// the CLI's user agent is answered 404 and logged without reaching the handler. The longer a
-// server is up the likelier such a visit, and a test waiting out the SDK's retry backoff is
-// up for seconds.
+// the CLI for those. The CLI never asks for the root, so a GET / that does not carry the
+// CLI's user agent is answered 404 and logged without reaching the handler; anything else,
+// a write to / included, still does. The longer a server is up the likelier such a visit,
+// and a test waiting out the SDK's retry backoff is up for seconds.
 func newCLIServer(t *testing.T, handler http.Handler) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" && !strings.HasPrefix(r.UserAgent(), version.UserAgent()) {
+		if r.Method == http.MethodGet && r.URL.Path == "/" && !strings.HasPrefix(r.UserAgent(), version.UserAgent()) {
 			t.Logf("ignored a look at what is listening: %s %s from %q", r.Method, r.URL, r.UserAgent())
 			http.NotFound(w, r)
 			return
@@ -34,16 +34,16 @@ func newCLIServer(t *testing.T, handler http.Handler) *httptest.Server {
 }
 
 // A look at what is listening is answered without the handler seeing it; everything the CLI
-// sends, and anything else for a real path, still reaches it.
+// sends, a write to / from anyone, and anything else for a real path, still reaches it.
 func TestCLIServerKeepsALookAtWhatIsListeningFromTheHandler(t *testing.T) {
 	var reached []string
 	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		reached = append(reached, r.URL.Path+" "+r.UserAgent())
+		reached = append(reached, r.Method+" "+r.URL.Path+" "+r.UserAgent())
 	}))
 
-	send := func(path, userAgent string) int {
+	send := func(method, path, userAgent string) int {
 		t.Helper()
-		request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+path, nil)
+		request, err := http.NewRequestWithContext(t.Context(), method, server.URL+path, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -56,13 +56,18 @@ func TestCLIServerKeepsALookAtWhatIsListeningFromTheHandler(t *testing.T) {
 		return response.StatusCode
 	}
 
-	if got := send("/", "Go-http-client/1.1"); got != http.StatusNotFound {
+	if got := send(http.MethodGet, "/", "Go-http-client/1.1"); got != http.StatusNotFound {
 		t.Errorf("a look at / answered %d, want 404", got)
 	}
-	send("/", version.UserAgent()+" hey-sdk-go")
-	send("/storage/upload", "Go-http-client/1.1")
+	send(http.MethodGet, "/", version.UserAgent()+" hey-sdk-go")
+	send(http.MethodPost, "/", "Go-http-client/1.1")
+	send(http.MethodPut, "/storage/upload", "Go-http-client/1.1")
 
-	want := []string{"/ " + version.UserAgent() + " hey-sdk-go", "/storage/upload Go-http-client/1.1"}
+	want := []string{
+		"GET / " + version.UserAgent() + " hey-sdk-go",
+		"POST / Go-http-client/1.1",
+		"PUT /storage/upload Go-http-client/1.1",
+	}
 	if strings.Join(reached, "\n") != strings.Join(want, "\n") {
 		t.Errorf("handler saw %q, want %q", reached, want)
 	}
