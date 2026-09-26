@@ -34,6 +34,8 @@ func newContactsShowCommand() *contactsShowCommand {
 	showCommand.cmd = &cobra.Command{
 		Use:   "show <id>",
 		Short: "View a contact",
+		Long: "View a contact's details, aliases, screening status, a page of its threads, and its private note as note, note_html, note_markdown " +
+			"and note_markdown_lossless, each empty for a contact with no note. See hey contact note show for what they hold.",
 		Annotations: map[string]string{
 			"agent_notes": "Returns contact details, aliases, screening status, and the private note: note, note_html, note_markdown and note_markdown_lossless, empty for a contact with no note (note_markdown is the form hey contact note set takes when note_markdown_lossless is true). The embedded postings are one page of the contact's threads; hey contact threads <id> pages through all of them.",
 		},

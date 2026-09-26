@@ -26,14 +26,17 @@ func newContactNoteSetCommand() *contactNoteSetCommand {
 	setCommand.cmd = &cobra.Command{
 		Use:   "set <id> [note]",
 		Short: "Write or edit a private contact note",
+		Long: "Write a contact's private note. Set replaces the whole note: to add to one, read it, change it and set all of it. " +
+			"Read it as note_markdown only when hey contact note show answers note_markdown_lossless as true; " +
+			"otherwise the note holds an attachment or markup Markdown cannot carry, so change note_html and set it with --note-html. " +
+			"With no note given at a terminal, $EDITOR opens on the note as Markdown, and is refused for a note whose Markdown would drop part of it.",
 		Annotations: map[string]string{
 			"agent_notes": "Replaces the whole note. Accepts --note, positional content, stdin, or opens $EDITOR with the existing note as Markdown, which is refused when that Markdown would drop part of the note. The note is Markdown, or raw HTML via --note-html. To add to a note, read note_markdown from hey contact note show, change it, and set all of it; when note_markdown_lossless is false, change note_html and set it with --note-html instead. Use the delete subcommand to clear a note.",
 		},
 		Example: `  hey contact note set 12345 "Prefers email"
   hey contact note set 12345 --note "Prefers email"
   echo "Prefers email" | hey contact note set 12345
-  hey contact note show 12345 --jq '.data.note_markdown' > note.md
-  hey contact note set 12345 < note.md`,
+  hey contact note set 12345 --note-html "<p><strong>Prefers email</strong></p>"`,
 		RunE: setCommand.run,
 		Args: cobra.MatchAll(usageMinOneArg(), cobra.MaximumNArgs(2)),
 	}
