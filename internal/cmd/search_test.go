@@ -27,7 +27,7 @@ type recordedSearch struct {
 func searchServer(t *testing.T) (*httptest.Server, *recordedSearch) {
 	t.Helper()
 	recorded := &recordedSearch{status: http.StatusOK}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		recorded.requests++
 		if r.URL.Path == "/advanced_search_filters.json" {
 			w.Header().Set("Content-Type", "application/json")
@@ -56,7 +56,6 @@ func searchServer(t *testing.T) (*httptest.Server, *recordedSearch) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(searchPageJSON(page)))
 	}))
-	t.Cleanup(server.Close)
 	return server, recorded
 }
 

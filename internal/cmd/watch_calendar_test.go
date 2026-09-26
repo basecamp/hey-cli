@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -129,7 +128,7 @@ func TestWatchReadsRungCalendars(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 
 	var requested []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requested = append(requested, r.URL.String())
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Link", `<`+r.URL.Path+`?since=2026-08-18T09%3A14%3A22.031Z&v=1>; rel="next"`)
@@ -139,7 +138,6 @@ func TestWatchReadsRungCalendars(t *testing.T) {
 			"deleted": {"Calendar::Todo": [{"id": 88003, "deleted_at": "2026-08-18T09:14:00.000Z", "type": "Calendar::Todo"}]}
 		}`))
 	}))
-	defer server.Close()
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
 
 	watch, out := newTestWatch("recording_added", "recording_updated", "recording_deleted")
@@ -196,7 +194,7 @@ func TestWatchReadsRungCalendars(t *testing.T) {
 func TestWatchCalendarSkipsAheadOnAFullSync(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/calendars.json" {
 			_, _ = w.Write([]byte(`{
@@ -209,7 +207,6 @@ func TestWatchCalendarSkipsAheadOnAFullSync(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusConflict)
 	}))
-	defer server.Close()
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
 
 	watch, out := newTestWatch("recording_added", "calendar_resync")
@@ -234,7 +231,7 @@ func TestWatchCalendarSkipsAheadOnAFullSync(t *testing.T) {
 func TestWatchCalendarStopsWatchingAGoneCalendar(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/calendars.json" {
 			_, _ = w.Write([]byte(`{"calendars": [], "calendar_changes_url": "/calendar/changes.json?since=2026-08-18T11%3A00%3A00.000Z"}`))
@@ -242,7 +239,6 @@ func TestWatchCalendarStopsWatchingAGoneCalendar(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusConflict)
 	}))
-	defer server.Close()
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
 
 	watch, out := newTestWatch("recording_added", "calendar_resync")
@@ -262,7 +258,7 @@ func TestWatchCalendarStopsWatchingAGoneCalendar(t *testing.T) {
 func TestWatchPollReportsCalendarChanges(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if strings.HasPrefix(r.URL.Path, "/calendars/") {
 			w.Header().Set("Link", `<`+r.URL.Path+`?since=2026-08-18T09%3A20%3A00.000Z&v=1>; rel="next"`)
@@ -278,7 +274,6 @@ func TestWatchPollReportsCalendarChanges(t *testing.T) {
 			"deleted": [{"id": 513, "deleted_at": "2026-08-18T09:16:00.000Z"}]
 		}`))
 	}))
-	defer server.Close()
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
 
 	watch, out := newTestWatch("calendar_added", "calendar_updated", "calendar_deleted")

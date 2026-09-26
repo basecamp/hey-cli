@@ -24,7 +24,7 @@ type recordedRemoval struct {
 func removalServer(t *testing.T) (*httptest.Server, *recordedRemoval) {
 	t.Helper()
 	recorded := &recordedRemoval{status: http.StatusNoContent}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		recorded.requests++
 		recorded.method = r.Method
 		recorded.path = r.URL.Path
@@ -41,7 +41,6 @@ func removalServer(t *testing.T) (*httptest.Server, *recordedRemoval) {
 			http.NotFound(w, r)
 		}
 	}))
-	t.Cleanup(server.Close)
 	return server, recorded
 }
 

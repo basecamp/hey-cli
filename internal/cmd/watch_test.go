@@ -291,13 +291,12 @@ func TestWatchReadsChangesWhenNotified(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 
 	var requested []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requested = append(requested, r.URL.String())
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Link", `<`+r.URL.Path+`?since=2026-08-18T09%3A14%3A22.031Z&v=2>; rel="next"`)
 		_, _ = w.Write([]byte(`{"added":[{"id":9001,"kind":"topic","box_id":24088,"app_url":"https://app.hey.com/topics/5511"}]}`))
 	}))
-	defer server.Close()
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
 
 	watch, out := newTestWatch("added", "updated", "deleted")
@@ -341,7 +340,7 @@ func TestWatchReadsAgainAfterAFailedRead(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 
 	broken := true
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if broken {
 			http.Error(w, "boom", http.StatusInternalServerError)
 			return
@@ -350,7 +349,6 @@ func TestWatchReadsAgainAfterAFailedRead(t *testing.T) {
 		w.Header().Set("Link", `<`+r.URL.Path+`?since=2026-08-18T09%3A14%3A22.031Z&v=2>; rel="next"`)
 		_, _ = w.Write([]byte(`{"added":[{"id":9001,"kind":"topic","box_id":24088,"app_url":"https://app.hey.com/topics/5511"}]}`))
 	}))
-	defer server.Close()
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
 
 	watch, out := newTestWatch("added")
@@ -395,10 +393,9 @@ func TestWatchReadsAgainAfterAFailedRead(t *testing.T) {
 
 func TestWatchStopsOnAReadThatCannotWork(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("the server was asked for %s, want a read the SDK turns down on its own", r.URL)
 	}))
-	defer server.Close()
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
 
 	watch, _ := newTestWatch("added")
@@ -426,7 +423,7 @@ func TestWatchStopsOnAReadThatCannotWork(t *testing.T) {
 func boxesAndChanges(t *testing.T, boxes string) *httptest.Server {
 	t.Helper()
 
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/boxes.json":
 			w.Header().Set("Content-Type", "application/json")
@@ -465,7 +462,7 @@ func TestWatchSkipsAheadToTheBoxesOwnCursor(t *testing.T) {
 func TestWatchReadyWaitsForAFailedCatchUpRead(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 	broken := true
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if broken {
 			http.Error(w, "boom", http.StatusInternalServerError)
 			return
@@ -474,7 +471,6 @@ func TestWatchReadyWaitsForAFailedCatchUpRead(t *testing.T) {
 		w.Header().Set("Link", `<`+r.URL.Path+`?since=2026-08-18T09%3A14%3A22.031Z&v=2>; rel="next"`)
 		_, _ = w.Write([]byte(`{}`))
 	}))
-	defer server.Close()
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
 
 	watch, out := newTestWatch("added")
@@ -562,7 +558,7 @@ func TestWatchReadyYieldsToADropQueuedDuringTheCatchUp(t *testing.T) {
 func TestWatchDoorbellReadPaysTheReadyACatchUpOwed(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 	broken := true
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if broken {
 			http.Error(w, "boom", http.StatusInternalServerError)
 			return
@@ -571,7 +567,6 @@ func TestWatchDoorbellReadPaysTheReadyACatchUpOwed(t *testing.T) {
 		w.Header().Set("Link", `<`+r.URL.Path+`?since=2026-08-18T09%3A14%3A22.031Z&v=2>; rel="next"`)
 		_, _ = w.Write([]byte(`{}`))
 	}))
-	defer server.Close()
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
 
 	watch, out := newTestWatch("added")
@@ -598,7 +593,7 @@ func TestWatchDoorbellReadPaysTheReadyACatchUpOwed(t *testing.T) {
 func TestWatchDropWhileCatchingUpCancelsTheReadyItOwed(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 	broken := true
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if broken {
 			http.Error(w, "boom", http.StatusInternalServerError)
 			return
@@ -607,7 +602,6 @@ func TestWatchDropWhileCatchingUpCancelsTheReadyItOwed(t *testing.T) {
 		w.Header().Set("Link", `<`+r.URL.Path+`?since=2026-08-18T09%3A14%3A22.031Z&v=2>; rel="next"`)
 		_, _ = w.Write([]byte(`{}`))
 	}))
-	defer server.Close()
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
 
 	watch, out := newTestWatch("added")
@@ -853,14 +847,13 @@ func TestWatchDoesNotSayReadyOnItsWayOut(t *testing.T) {
 
 func TestWatchedBoxesStartNoLaterThanTheWatchDid(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		// The Imbox's last activity is after the watch read HEY's clock — mail
 		// landed in between; The Feed's is before.
 		_, _ = w.Write([]byte(`[{"id":24088,"kind":"imbox","name":"Imbox","posting_changes_url":"/boxes/24088/postings/changes.json?since=2026-08-21T09%3A00%3A30.000Z&v=2"},` +
 			`{"id":24089,"kind":"feedbox","name":"The Feed","posting_changes_url":"/boxes/24089/postings/changes.json?since=2026-08-21T08%3A00%3A00.000Z&v=2"}]`))
 	}))
-	defer server.Close()
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
 
 	command := newWatchCommand()
@@ -996,7 +989,7 @@ func TestWatchReportsAResyncWhenAskedFor(t *testing.T) {
 func TestWatchReportsAResyncAfterSkippingAhead(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 	var server *httptest.Server
-	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server = newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/postings/changes") {
 			// As haystack answers: `head :conflict`, no body.
 			w.WriteHeader(http.StatusConflict)
@@ -1005,7 +998,6 @@ func TestWatchReportsAResyncAfterSkippingAhead(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`[{"id":24088,"kind":"imbox","name":"Imbox","posting_changes_url":"` + server.URL + `/boxes/24088/postings/changes.json?since=2026-08-21T12%3A00%3A00.000Z&v=2"}]`))
 	}))
-	defer server.Close()
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
 
 	watch, out := newTestWatch("added", "resync")

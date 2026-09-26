@@ -34,7 +34,7 @@ func (r *recordedScreener) snapshot() []recordedScreenerRequest {
 func screenerServer(t *testing.T) (*httptest.Server, *recordedScreener) {
 	t.Helper()
 	recorded := &recordedScreener{statuses: make(map[string]int)}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		body := new(bytes.Buffer)
 		_, _ = body.ReadFrom(req.Body)
 		recorded.mu.Lock()
@@ -104,7 +104,6 @@ func screenerServer(t *testing.T) (*httptest.Server, *recordedScreener) {
 			_, _ = w.Write([]byte(`{"message":"unexpected request"}`))
 		}
 	}))
-	t.Cleanup(server.Close)
 	return server, recorded
 }
 

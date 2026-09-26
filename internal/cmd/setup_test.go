@@ -251,10 +251,9 @@ func TestSetupRejectsJQ(t *testing.T) {
 // browser: it reports "not logged in" and points at `hey auth login`.
 func TestSetupJSONNotLoggedInWithoutTerminalReportsIncomplete(t *testing.T) {
 	isolateAgents(t)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 	}))
-	defer server.Close()
 	configHome := t.TempDir()
 
 	_, response, err := runAuthCommand(t, configHome, server.URL, "", true, "setup")
@@ -378,10 +377,9 @@ func TestSetupJSONRunsAgentStepNonInteractively(t *testing.T) {
 func TestBareHeyLiteWizardSkipsAgentsWhenOnboarded(t *testing.T) {
 	isolateAgents(t)
 	stubInteractive(t, true)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 	}))
-	defer server.Close()
 	configHome := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(configHome, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
@@ -785,10 +783,9 @@ func TestSetupJSONNonInteractiveEnvSkipsSignIn(t *testing.T) {
 // wizard must not skip OAuth and then report a complete, signed-in setup.
 func TestSetupJSONStaleCredentialsReportIncomplete(t *testing.T) {
 	isolateAgents(t)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 	}))
-	defer server.Close()
 	configHome := t.TempDir()
 	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "stale-cookie"); err != nil {
 		t.Fatalf("auth login: %v", err)
@@ -910,10 +907,9 @@ func TestSetupRejectsListOnlyFormatsBeforeSideEffects(t *testing.T) {
 // remediation must point at the environment, not at a login that cannot win.
 func TestSetupJSONRejectedEnvTokenPointsAtEnvironment(t *testing.T) {
 	isolateAgents(t)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 	}))
-	defer server.Close()
 
 	_, response, err := runAuthCommand(t, t.TempDir(), server.URL, "revoked-env-token", true, "setup")
 	if err != nil {

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -16,7 +15,7 @@ import (
 func TestComposeFromIsVisibleOnThreadRead(t *testing.T) {
 	var actingSenderID atomic.Int64
 	var messageReads atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case strings.Contains(r.URL.Path, "identity"):
@@ -40,7 +39,6 @@ func TestComposeFromIsVisibleOnThreadRead(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	t.Cleanup(server.Close)
 	stdoutTerminal(t, false)
 
 	_, _, err := runCLIRaw(t, server, "--json", "compose", "--from", "billing@example.org", "--to", "maria@example.com", "--subject", "Board update", "-m", "Numbers.")

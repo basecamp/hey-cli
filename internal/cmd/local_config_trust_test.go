@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,12 +15,11 @@ import (
 
 func TestUntrustedLocalConfigFailsBeforeNetworkRequest(t *testing.T) {
 	requests := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requests++
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":1}`))
 	}))
-	t.Cleanup(server.Close)
 	setupLocalTrustTest(t, server.URL, "all")
 
 	err := runLocalTrustCLI(t, "--json", "box", "list")
@@ -50,7 +48,7 @@ func TestJQIsMachineReadableForLocalConfigTrust(t *testing.T) {
 
 func TestTrustLocalAllowsRequestsAndChangesRequireTrustAgain(t *testing.T) {
 	requests := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
@@ -62,7 +60,6 @@ func TestTrustLocalAllowsRequestsAndChangesRequireTrustAgain(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	t.Cleanup(server.Close)
 	path := setupLocalTrustTest(t, server.URL, "2")
 
 	if err := runLocalTrustCLI(t, "--json", "config", "trust-local"); err != nil {

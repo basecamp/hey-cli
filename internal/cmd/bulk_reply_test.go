@@ -53,7 +53,7 @@ func bulkReplyServer(t *testing.T) (*httptest.Server, *bulkReplyServerState) {
 		delivery: `{"id":900,"entries_count":2,"delayed":true,"undo_send_url":"https://app.hey.com/bulk_replies/900/undo_send"}`,
 	}
 	var server *httptest.Server
-	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server = newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := new(bytes.Buffer)
 		_, _ = body.ReadFrom(r.Body)
 		state.mu.Lock()
@@ -100,7 +100,6 @@ func bulkReplyServer(t *testing.T) (*httptest.Server, *bulkReplyServerState) {
 			http.NotFound(w, r)
 		}
 	}))
-	t.Cleanup(server.Close)
 	return server, state
 }
 

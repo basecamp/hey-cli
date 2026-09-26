@@ -43,10 +43,9 @@ func stubAskToSignIn(t *testing.T, answer bool) *int {
 
 func quietServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 	}))
-	t.Cleanup(server.Close)
 	return server
 }
 

@@ -25,7 +25,7 @@ type recordedIgnoring struct {
 func ignoringServer(t *testing.T) (*httptest.Server, *recordedIgnoring) {
 	t.Helper()
 	recorded := &recordedIgnoring{status: http.StatusNoContent}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		recorded.requests++
 		recorded.method = r.Method
 		recorded.path = r.URL.Path
@@ -53,7 +53,6 @@ func ignoringServer(t *testing.T) (*httptest.Server, *recordedIgnoring) {
 		}
 		w.WriteHeader(recorded.status)
 	}))
-	t.Cleanup(server.Close)
 	return server, recorded
 }
 

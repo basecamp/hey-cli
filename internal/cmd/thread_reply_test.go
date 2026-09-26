@@ -62,7 +62,7 @@ type sentReply struct {
 func threadReplyServer(t *testing.T, messageJSON string, entryIDs ...int64) (*httptest.Server, *sentReply) {
 	t.Helper()
 	sent := &sentReply{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/replies/new.json"):
 			if sent.ReplyNewJSON == "" {
@@ -141,7 +141,6 @@ func threadReplyServer(t *testing.T, messageJSON string, entryIDs ...int64) (*ht
 			http.Error(w, "not found", http.StatusNotFound)
 		}
 	}))
-	t.Cleanup(server.Close)
 	return server, sent
 }
 

@@ -103,7 +103,7 @@ func runMCPCommand(t *testing.T, upstream *httptest.Server, args ...string) *mcp
 }
 
 func TestMCPCommandServesMCP(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/boxes.json" {
 			t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)
@@ -116,7 +116,6 @@ func TestMCPCommandServesMCP(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`[{"id":1,"name":"Imbox"}]`))
 	}))
-	t.Cleanup(upstream.Close)
 
 	session := runMCPCommand(t, upstream)
 
@@ -158,11 +157,10 @@ func TestMCPCommandServesMCP(t *testing.T) {
 }
 
 func TestMCPCommandFlagPassthrough(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 		http.NotFound(w, r)
 	}))
-	t.Cleanup(upstream.Close)
 
 	session := runMCPCommand(t, upstream, "--read-only", "--domains", "boxes")
 
@@ -186,7 +184,7 @@ func TestMCPCommandFlagPassthrough(t *testing.T) {
 
 func TestMCPCommandDoesNotRetryMutations(t *testing.T) {
 	var deliveries atomic.Int32
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPut || !strings.HasPrefix(r.URL.Path, "/messages/1") {
 			t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)
@@ -198,7 +196,6 @@ func TestMCPCommandDoesNotRetryMutations(t *testing.T) {
 		w.Header().Set("Retry-After", "0")
 		w.WriteHeader(http.StatusTooManyRequests)
 	}))
-	t.Cleanup(upstream.Close)
 
 	session := runMCPCommand(t, upstream)
 

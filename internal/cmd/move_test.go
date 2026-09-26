@@ -54,7 +54,7 @@ func (r *recordedMove) bundleProbes() int {
 func moveServer(t *testing.T) (*httptest.Server, *recordedMove) {
 	t.Helper()
 	recorded := &recordedMove{moveStatus: http.StatusNoContent, bundles: map[string]bool{}}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		recorded.mu.Lock()
 		recorded.requests = append(recorded.requests, r.Method+" "+r.URL.Path)
 		recorded.mu.Unlock()
@@ -94,7 +94,6 @@ func moveServer(t *testing.T) (*httptest.Server, *recordedMove) {
 			http.NotFound(w, r)
 		}
 	}))
-	t.Cleanup(server.Close)
 	return server, recorded
 }
 

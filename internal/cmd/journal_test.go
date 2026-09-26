@@ -27,7 +27,7 @@ func journalServer(t *testing.T) *httptest.Server {
 //	"204"               — returns 204 No Content (SDK returns nil), no legacy fallback
 func journalServerWithReadBehavior(t *testing.T, readBehavior string) *httptest.Server {
 	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "GET" && strings.Contains(r.URL.Path, "/calendar/days/") && strings.HasSuffix(r.URL.Path, "/journal_entry/edit"):
 			// Legacy HTML-scrape path
@@ -63,7 +63,7 @@ func journalServerWithReadBehavior(t *testing.T, readBehavior string) *httptest.
 // anything asked for the legacy edit page.
 func journalServerRecordingEditFetches(t *testing.T, editFetched *atomic.Bool) *httptest.Server {
 	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/journal_entry/edit"):
 			editFetched.Store(true)
@@ -149,7 +149,7 @@ func TestJournalWriteMarkdownContent(t *testing.T) {
 			Content string `json:"content"`
 		} `json:"calendar_journal_entry"`
 	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "PATCH" {
 			_ = json.NewDecoder(r.Body).Decode(&sent)
 			w.WriteHeader(204)
@@ -157,7 +157,6 @@ func TestJournalWriteMarkdownContent(t *testing.T) {
 		}
 		w.WriteHeader(200)
 	}))
-	defer server.Close()
 
 	_, err := runJournalWrite(t, server, "2026-03-15", "**Bold** start to the week")
 	if err != nil {

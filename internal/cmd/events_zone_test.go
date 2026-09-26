@@ -5,7 +5,6 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"strings"
 	"sync"
@@ -831,7 +830,7 @@ func TestEventsAddReadsTheIdentityOnceItself(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			var identityReads, writes atomic.Int32
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				switch {
 				case r.Method == http.MethodGet && r.URL.Path == "/identity.json":
@@ -849,7 +848,6 @@ func TestEventsAddReadsTheIdentityOnceItself(t *testing.T) {
 					http.NotFound(w, r)
 				}
 			}))
-			t.Cleanup(server.Close)
 
 			args := append(append([]string{}, tt.args...), "event", "add", "Dentist appointment", "--calendar", "9",
 				"--starts-on", "2026-10-14", "--start-time", "10:00")

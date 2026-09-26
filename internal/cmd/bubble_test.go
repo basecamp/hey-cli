@@ -30,7 +30,7 @@ type recordedBubble struct {
 func bubbleServer(t *testing.T) (*httptest.Server, *recordedBubble) {
 	t.Helper()
 	recorded := &recordedBubble{status: http.StatusNoContent}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		recorded.requests++
 		recorded.method = r.Method
 		recorded.path = r.URL.Path
@@ -88,7 +88,6 @@ func bubbleServer(t *testing.T) (*httptest.Server, *recordedBubble) {
 			http.NotFound(w, r)
 		}
 	}))
-	t.Cleanup(server.Close)
 	return server, recorded
 }
 

@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -196,8 +197,7 @@ func TestHTMLConflictsWithEveryOtherOutputSelector(t *testing.T) {
 // A command without HTML refuses the flag before it reads configuration or makes a
 // request: the server here answers nothing, and no credentials are set.
 func TestHTMLIsRefusedByOtherCommandsBeforeAnythingElse(t *testing.T) {
-	server := httptest.NewServer(nil)
-	t.Cleanup(server.Close)
+	server := newCLIServer(t, http.NotFoundHandler())
 	t.Setenv("HEY_TOKEN", "")
 	stdoutTerminal(t, false)
 

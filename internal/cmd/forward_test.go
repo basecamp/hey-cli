@@ -25,7 +25,7 @@ type sentForward struct {
 func forwardServer(t *testing.T, entriesJSON string) (*httptest.Server, *sentForward) {
 	t.Helper()
 	sent := &sentForward{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sent.Requests = append(sent.Requests, r.Method+" "+r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
@@ -75,7 +75,6 @@ func forwardServer(t *testing.T, entriesJSON string) (*httptest.Server, *sentFor
 			http.NotFound(w, r)
 		}
 	}))
-	t.Cleanup(server.Close)
 	return server, sent
 }
 

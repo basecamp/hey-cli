@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -913,10 +912,9 @@ func TestSetupWizardSkipsOmarchyOnRejectedCredentials(t *testing.T) {
 	stubInteractive(t, true)
 	confirms := stubConfirmOmarchyPanel(t, true, nil)
 	ran := stubOmarchyRun(t, omarchyUnavailable)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 	}))
-	t.Cleanup(server.Close)
 	configHome := t.TempDir()
 	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "stale-cookie"); err != nil {
 		t.Fatalf("auth login: %v", err)

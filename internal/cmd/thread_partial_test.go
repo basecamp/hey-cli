@@ -29,7 +29,7 @@ func partialThreadServer(t *testing.T, pages [][]int64, missing ...int64) (*http
 	}
 	reads := &threadEntriesReads{}
 	var mu sync.Mutex
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/topics/7/entries.json":
@@ -65,7 +65,6 @@ func partialThreadServer(t *testing.T, pages [][]int64, missing ...int64) (*http
 			http.Error(w, "not found", http.StatusNotFound)
 		}
 	}))
-	t.Cleanup(server.Close)
 	return server, reads
 }
 
@@ -382,7 +381,7 @@ func TestThreadsStyledCallsAnEmptyHydratedBodyEmpty(t *testing.T) {
 // reporting a partial thread over hundreds of failing requests.
 func TestThreadsStopOnAServerError(t *testing.T) {
 	reads := &threadEntriesReads{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/topics/7/entries.json":
@@ -394,7 +393,6 @@ func TestThreadsStopOnAServerError(t *testing.T) {
 			http.Error(w, `{"error":"down"}`, http.StatusServiceUnavailable)
 		}
 	}))
-	t.Cleanup(server.Close)
 	limits := threadload.DefaultLimits
 	limits.Concurrency = 1
 	withThreadLimits(t, limits)
@@ -410,7 +408,7 @@ func TestThreadsStopOnAServerError(t *testing.T) {
 // read once, not retried, and not the command's error.
 func TestThreadsMarkAnOversizedMessageOverLimit(t *testing.T) {
 	reads := &threadEntriesReads{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/topics/7/entries.json":
@@ -426,7 +424,6 @@ func TestThreadsMarkAnOversizedMessageOverLimit(t *testing.T) {
 			fmt.Fprint(w, `{"id":11,"content":"<p>fits</p>"}`)
 		}
 	}))
-	t.Cleanup(server.Close)
 	stdoutTerminal(t, false)
 
 	stdout, _, err := runCLIRaw(t, server, "--json", "thread", "read", "7", "--allow-partial")

@@ -165,12 +165,11 @@ func TestLogoutClearsTheHTTPCache(t *testing.T) {
 // of whatever command sent it. Cached mail must not outlive that credential any more
 // than it outlives an explicit logout.
 func TestARefusedGrantClearsTheHTTPCache(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = io.WriteString(w, `{"error":"invalid_grant","error_description":"The refresh token is invalid"}`)
 	}))
-	defer server.Close()
 	configHome := t.TempDir()
 	responses, etags := seedHTTPCache(t, configHome)
 	manager := seedExpiredCredential(t, configHome, server)
@@ -202,10 +201,9 @@ func TestATransientRefreshFailureKeepsTheCredentialAndTheHTTPCache(t *testing.T)
 
 	for name, status := range statuses {
 		t.Run(name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(status)
 			}))
-			defer server.Close()
 			configHome := t.TempDir()
 			responses, etags := seedHTTPCache(t, configHome)
 			manager := seedExpiredCredential(t, configHome, server)

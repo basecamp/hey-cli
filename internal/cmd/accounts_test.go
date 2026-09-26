@@ -343,7 +343,7 @@ func TestAccountsUseRejectsUnknownAccountWithoutSaving(t *testing.T) {
 
 func linkedAccountServer(t *testing.T, fallback http.HandlerFunc) *httptest.Server {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/identity.json" {
 			if got := r.URL.Query().Get("filtered_account_id"); got != "" {
@@ -368,7 +368,6 @@ func linkedAccountServer(t *testing.T, fallback http.HandlerFunc) *httptest.Serv
 		}
 		fallback(w, r)
 	}))
-	t.Cleanup(server.Close)
 	return server
 }
 

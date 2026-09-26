@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,10 +50,9 @@ func runAuthCommand(t *testing.T, configHome, baseURL, envToken string, jsonOutp
 }
 
 func TestAuthCookieLoginStatusAndLogout(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 	}))
-	defer server.Close()
 	configHome := t.TempDir()
 
 	_, login, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "session-cookie")
@@ -100,8 +98,7 @@ func TestAuthCookieLoginStatusAndLogout(t *testing.T) {
 }
 
 func TestAuthTokenLoginAndStoredTokenOutput(t *testing.T) {
-	server := httptest.NewServer(http.NotFoundHandler())
-	defer server.Close()
+	server := newCLIServer(t, http.NotFoundHandler())
 	configHome := t.TempDir()
 
 	_, response, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--token", "stored-token")
@@ -125,10 +122,9 @@ func TestAuthTokenLoginAndStoredTokenOutput(t *testing.T) {
 // the caller something that 401s with nothing to explain it -- and put the cookie in
 // their shell history.
 func TestAuthTokenRefusesToPrintASessionCookie(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 	}))
-	defer server.Close()
 	configHome := t.TempDir()
 
 	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "session-cookie"); err != nil {
@@ -148,8 +144,7 @@ func TestAuthTokenRefusesToPrintASessionCookie(t *testing.T) {
 }
 
 func TestAuthStatusReportsUnreadableCredentialState(t *testing.T) {
-	server := httptest.NewServer(http.NotFoundHandler())
-	defer server.Close()
+	server := newCLIServer(t, http.NotFoundHandler())
 
 	configHome := t.TempDir()
 	configDir := filepath.Join(configHome, "hey-cli")
@@ -170,8 +165,7 @@ func TestAuthStatusReportsUnreadableCredentialState(t *testing.T) {
 }
 
 func TestAuthCommandsPreserveCredentialStorageFailures(t *testing.T) {
-	server := httptest.NewServer(http.NotFoundHandler())
-	defer server.Close()
+	server := newCLIServer(t, http.NotFoundHandler())
 
 	for _, command := range [][]string{{"auth", "refresh"}, {"auth", "token"}} {
 		t.Run(strings.Join(command, " "), func(t *testing.T) {
@@ -197,8 +191,7 @@ func TestAuthCommandsPreserveCredentialStorageFailures(t *testing.T) {
 }
 
 func TestAuthStatusUsesEnvironmentTokenWithoutStorage(t *testing.T) {
-	server := httptest.NewServer(http.NotFoundHandler())
-	defer server.Close()
+	server := newCLIServer(t, http.NotFoundHandler())
 
 	_, response, err := runAuthCommand(t, t.TempDir(), server.URL, "environment-token", true, "auth", "status")
 	if err != nil {
@@ -211,7 +204,7 @@ func TestAuthStatusUsesEnvironmentTokenWithoutStorage(t *testing.T) {
 }
 
 func TestAuthRefreshCommand(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/oauth/tokens" {
 			t.Errorf("request = %s %s", r.Method, r.URL.Path)
 		}
@@ -224,7 +217,6 @@ func TestAuthRefreshCommand(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600}`)
 	}))
-	defer server.Close()
 	configHome := t.TempDir()
 	t.Setenv("HEY_NO_KEYRING", "1")
 	manager := auth.NewManager(server.URL, server.Client(), filepath.Join(configHome, "hey-cli"))
@@ -249,8 +241,7 @@ func TestAuthRefreshCommand(t *testing.T) {
 }
 
 func TestAuthRefreshFailure(t *testing.T) {
-	server := httptest.NewServer(http.NotFoundHandler())
-	defer server.Close()
+	server := newCLIServer(t, http.NotFoundHandler())
 	_, _, err := runAuthCommand(t, t.TempDir(), server.URL, "", true, "auth", "refresh")
 	if err == nil || !strings.Contains(err.Error(), "refresh failed: not authenticated") {
 		t.Fatalf("error = %v", err)
@@ -268,11 +259,10 @@ func TestAuthCommandsKeepARateLimitClassified(t *testing.T) {
 
 	for name, args := range commands {
 		t.Run(name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Retry-After", "42")
 				w.WriteHeader(http.StatusTooManyRequests)
 			}))
-			defer server.Close()
 			configHome := t.TempDir()
 			t.Setenv("HEY_NO_KEYRING", "1")
 			manager := auth.NewManager(server.URL, server.Client(), filepath.Join(configHome, "hey-cli"))
@@ -309,8 +299,7 @@ func TestAuthCommandsKeepARateLimitClassified(t *testing.T) {
 }
 
 func TestDoctorCommandReportsEnvironment(t *testing.T) {
-	server := httptest.NewServer(http.NotFoundHandler())
-	defer server.Close()
+	server := newCLIServer(t, http.NotFoundHandler())
 	configHome := t.TempDir()
 	t.Setenv("SHELL", "/bin/zsh")
 	skillPath := filepath.Join(configHome, ".agents", "skills", "hey", "SKILL.md")
@@ -363,8 +352,7 @@ func TestDoctorCommandReportsEnvironment(t *testing.T) {
 }
 
 func TestDoctorCommandReportsMissingAuthentication(t *testing.T) {
-	server := httptest.NewServer(http.NotFoundHandler())
-	defer server.Close()
+	server := newCLIServer(t, http.NotFoundHandler())
 	_, response, err := runAuthCommand(t, t.TempDir(), server.URL, "", true, "doctor")
 	if err != nil {
 		t.Fatalf("doctor: %v", err)
@@ -386,10 +374,9 @@ func TestDoctorCommandReportsMissingAuthentication(t *testing.T) {
 }
 
 func TestLoginLogoutShortcutsMirrorAuthCommands(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 	}))
-	defer server.Close()
 	configHome := t.TempDir()
 
 	_, login, err := runAuthCommand(t, configHome, server.URL, "", true, "login", "--cookie", "session-cookie")
@@ -432,10 +419,9 @@ func TestLoginLogoutShortcutsMirrorAuthCommands(t *testing.T) {
 }
 
 func TestAuthStatusReportsInstallID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 	}))
-	defer server.Close()
 	configHome := t.TempDir()
 
 	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "session-cookie"); err != nil {

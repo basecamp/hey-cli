@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -379,7 +378,7 @@ func TestRingDropsWhatWouldBlock(t *testing.T) {
 func TestCalendarStreamWatchPollFollowsTheCalendarSet(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Link", `<`+r.URL.Path+`?since=2026-08-18T09%3A20%3A00.000Z>; rel="next"`)
 		_, _ = w.Write([]byte(`{
@@ -388,7 +387,6 @@ func TestCalendarStreamWatchPollFollowsTheCalendarSet(t *testing.T) {
 			"deleted": [{"id": 513, "deleted_at": "2026-08-18T09:16:00.000Z"}]
 		}`))
 	}))
-	t.Cleanup(server.Close)
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
 
 	watch := newCalendarStreamWatch()
@@ -423,7 +421,7 @@ func TestCalendarStreamWatchPollReportsSubscriptionAuthenticationFailure(t *test
 	t.Setenv("HEY_TOKEN", "")
 	t.Setenv("HEY_NO_KEYRING", "1")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Link", `<`+r.URL.Path+`?since=2026-08-18T09%3A20%3A00.000Z>; rel="next"`)
 		_, _ = w.Write([]byte(`{
@@ -432,7 +430,6 @@ func TestCalendarStreamWatchPollReportsSubscriptionAuthenticationFailure(t *test
 			           "signed_stream_name": "book-club-stream"}]
 		}`))
 	}))
-	t.Cleanup(server.Close)
 
 	previousSDK, previousCfg, previousAuthMgr := sdk, cfg, authMgr
 	sdk = hey.NewClient(
@@ -466,10 +463,9 @@ func TestCalendarStreamWatchPollReportsSubscriptionAuthenticationFailure(t *test
 func TestCalendarStreamWatchPollSkipsAFailedRead(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
-	t.Cleanup(server.Close)
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
 
 	watch := newCalendarStreamWatch()

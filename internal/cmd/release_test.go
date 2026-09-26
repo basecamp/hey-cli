@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 )
 
@@ -56,7 +55,7 @@ func stubReleasesAPIBase(t *testing.T, url string) {
 
 func TestFetchLatestReleaseParsesTagAndAssets(t *testing.T) {
 	var gotAccept, gotAuth string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAccept = r.Header.Get("Accept")
 		gotAuth = r.Header.Get("Authorization")
 		_, _ = w.Write([]byte(`{
@@ -67,7 +66,6 @@ func TestFetchLatestReleaseParsesTagAndAssets(t *testing.T) {
 			]
 		}`))
 	}))
-	t.Cleanup(srv.Close)
 	stubReleasesAPIBase(t, srv.URL)
 	t.Setenv("GITHUB_TOKEN", "ghp_example_token")
 
@@ -93,11 +91,10 @@ func TestFetchLatestReleaseParsesTagAndAssets(t *testing.T) {
 
 func TestFetchReleaseByTagUsesTagPath(t *testing.T) {
 	var gotPath string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		_, _ = w.Write([]byte(`{"tag_name": "v1.5.0-rc.1", "assets": []}`))
 	}))
-	t.Cleanup(srv.Close)
 	stubReleasesAPIBase(t, srv.URL)
 
 	release, err := fetchReleaseByTag(context.Background(), "1.5.0-rc.1")
@@ -111,10 +108,9 @@ func TestFetchReleaseByTagUsesTagPath(t *testing.T) {
 }
 
 func TestFetchLatestReleaseNonOKStatus(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 	}))
-	t.Cleanup(srv.Close)
 	stubReleasesAPIBase(t, srv.URL)
 
 	_, err := fetchLatestRelease(context.Background())

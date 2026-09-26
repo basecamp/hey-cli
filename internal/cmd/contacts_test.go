@@ -42,7 +42,7 @@ func (r *recordedContacts) snapshot() []recordedContactRequest {
 func contactsServer(t *testing.T) (*httptest.Server, *recordedContacts) {
 	t.Helper()
 	recorded := &recordedContacts{statuses: make(map[string]int)}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		body := new(bytes.Buffer)
 		_, _ = body.ReadFrom(req.Body)
 		recorded.mu.Lock()
@@ -100,7 +100,6 @@ func contactsServer(t *testing.T) (*httptest.Server, *recordedContacts) {
 			http.NotFound(w, req)
 		}
 	}))
-	t.Cleanup(server.Close)
 	return server, recorded
 }
 

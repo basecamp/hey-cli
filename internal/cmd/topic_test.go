@@ -52,7 +52,7 @@ func threadEntriesServer(t *testing.T, pages [][]int64, bodies map[int64]string)
 func threadEntriesServerServing(t *testing.T, pages [][]int64, messages map[int64]string) (*httptest.Server, *threadEntriesReads) {
 	t.Helper()
 	reads := &threadEntriesReads{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
 		switch {
@@ -92,7 +92,6 @@ func threadEntriesServerServing(t *testing.T, pages [][]int64, messages map[int6
 			http.Error(w, "not found", http.StatusNotFound)
 		}
 	}))
-	t.Cleanup(server.Close)
 	return server, reads
 }
 

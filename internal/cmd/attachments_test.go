@@ -36,7 +36,7 @@ func attachmentServer(t *testing.T) (*httptest.Server, *attachmentServerState) {
 	t.Helper()
 	state := &attachmentServerState{}
 	var server *httptest.Server
-	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server = newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/topics/42/entries.json":
@@ -131,7 +131,6 @@ func attachmentServer(t *testing.T) (*httptest.Server, *attachmentServerState) {
 			http.Error(w, "not found", http.StatusNotFound)
 		}
 	}))
-	t.Cleanup(server.Close)
 	return server, state
 }
 
@@ -228,7 +227,7 @@ func TestAttachmentsListsAndSavesNamedFilesInRenderedOrder(t *testing.T) {
 		directPDF,
 	}, "\n")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/topics/42/entries.json":
@@ -246,7 +245,6 @@ func TestAttachmentsListsAndSavesNamedFilesInRenderedOrder(t *testing.T) {
 			http.Error(w, "not found", http.StatusNotFound)
 		}
 	}))
-	t.Cleanup(server.Close)
 
 	stdout, err := runAttachmentCommand(t, server, "attachment", "list", "42")
 	if err != nil {
@@ -305,7 +303,7 @@ func TestAttachmentsRejectNonBlobURLs(t *testing.T) {
 	}})[0]
 	var identityRequests atomic.Int64
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/topics/42/entries.json":
@@ -320,7 +318,6 @@ func TestAttachmentsRejectNonBlobURLs(t *testing.T) {
 			http.Error(w, "not found", http.StatusNotFound)
 		}
 	}))
-	t.Cleanup(server.Close)
 
 	stdout, err := runAttachmentCommand(t, server, "attachment", "list", "42")
 	if err != nil {
@@ -359,11 +356,10 @@ func TestAttachmentSaveRejectsNonCanonicalOpaqueIDsBeforeRequest(t *testing.T) {
 	withTrailingBits := validID[:len(validID)-1] + string(base64URLAlphabet[last+1])
 
 	var requests atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
 		http.Error(w, "unexpected request", http.StatusInternalServerError)
 	}))
-	t.Cleanup(server.Close)
 
 	for _, id := range []string{withNewline, withTrailingBits} {
 		_, err := runAttachmentCommand(t, server, "attachment", "save", id)
@@ -382,7 +378,7 @@ func TestAttachmentSaveRejectsNonCanonicalOpaqueIDsBeforeRequest(t *testing.T) {
 func TestAttachmentsFollowsTheCursorThroughALongThread(t *testing.T) {
 	pages := [][]int64{{103, 102}, {101}}
 	reads := &threadEntriesReads{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/topics/42/entries.json":
@@ -410,7 +406,6 @@ func TestAttachmentsFollowsTheCursorThroughALongThread(t *testing.T) {
 			http.Error(w, "not found", http.StatusNotFound)
 		}
 	}))
-	t.Cleanup(server.Close)
 
 	stdout, err := runAttachmentCommand(t, server, "attachment", "list", "42")
 	if err != nil {
