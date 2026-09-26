@@ -8,6 +8,8 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
+	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
 // New mail is a watch event: every added and updated line says whether the
@@ -17,7 +19,7 @@ import (
 // what to do about it (a toast, a bell, a re-read) is the reader's.
 //
 // There is no state file: new means active since the watch began, so the
-// backlog a box's first read carries is not new, and what the watch remembers —
+// backlog --since reads is not new, and what the watch remembers —
 // when each thread was last active — lives and dies with it.
 
 // newMail keeps up with every thread the watch reads, in every box and whatever
@@ -68,61 +70,51 @@ func (n *newMail) skippedTo(boxID int64, cursor hey.PostingChangesCursor) {
 // earlier. Date is whole seconds, rounded down, which errs the same way: towards
 // calling mail a moment old new rather than mail a moment new old. The SDK
 // caches GETs by URL, so a query the server ignores keeps this one out of the
-// cache; and when the server's clock can't be read, the local clock at the
-// start stands in, and the start says so. Either way it is handed out as a
-// cutoff: a whole millisecond, strictly before the instant it stands for.
-func serverNow(ctx context.Context) watchStart {
+// cache. The start is handed out as a cutoff: a whole millisecond, strictly
+// before the instant it stands for.
+//
+// A watch that cannot read HEY's clock does not start. The workstation's clock
+// is no stand-in: every feed starts at the start (watchStartSince) and new mail
+// is measured against it, so a fast clock would put both in HEY's future —
+// changes unread and new mail called old until the clocks met — and a slow one
+// would report history. A request that fails here would fail at the box list
+// next anyway.
+func serverNow(ctx context.Context) (time.Time, error) {
 	started := time.Now()
 	response, err := rootSDK.Get(ctx, "/identity.json?clock="+strconv.FormatInt(started.UnixNano(), 10))
-	if err != nil || response == nil || response.FromCache {
-		return watchStart{at: cutoffBefore(started)}
+	if err != nil {
+		return time.Time{}, apierr.FromSDK(err)
 	}
-	if at, err := http.ParseTime(response.Headers.Get("Date")); err == nil {
-		return watchStart{at: cutoffBefore(at.Add(-time.Since(started))), onServerClock: true}
+	if response == nil || response.FromCache {
+		return time.Time{}, apierr.ErrAPI(0, "could not read HEY's clock — the watch needs it to tell what happened after it began")
+	}
+	at, err := http.ParseTime(response.Headers.Get("Date"))
+	if err != nil {
+		return time.Time{}, apierr.ErrAPI(0, "HEY's answer carried no Date header — the watch needs HEY's clock to tell what happened after it began")
 	}
 
-	return watchStart{at: cutoffBefore(started)}
+	return cutoffBefore(at.Add(-time.Since(started))), nil
 }
 
-// watchStart is the moment a watch began, and whether HEY's clock said so or
-// only the workstation's did.
-type watchStart struct {
-	at            time.Time
-	onServerClock bool
-}
-
-// since is where a feed's first read begins, given the since HEY's changes URL
-// carries. That since is not HEY's clock: a box's is its last posting activity
-// — the latest updated_at among its unbundled postings, or the box's own when
-// it has none — and a calendar's is its updated_at, the list's the latest of
-// them. The feeds answer changes later than that which are history by now: a
-// deletion, a bundled posting, a calendar deleted after the rest last changed.
-// Nor is it always even that: the box list comes through the SDK's ETag cache,
-// HEY's ETag for it is the box rows, and posting activity does not touch them,
-// so a 304 hands back the since as it stood when the list was cached — hours or
-// days behind. Read from there, the catch-up reported what came after as news
-// on every start, and --exit-on-first stopped on the first of it.
+// watchStartSince is where a feed's first read begins without --since: the
+// watch's start, in place of the since HEY's changes URL carries. That since is
+// not HEY's clock. A box's is its last posting activity — the latest updated_at
+// among its unbundled postings, or the box's own when it has none — and a
+// calendar's is its updated_at, the list's the latest of them; the feeds answer
+// changes later than that which are history by now: a deletion, a bundled
+// posting, a calendar deleted after the rest last changed. Nor is it always
+// even that: the box list comes through the SDK's ETag cache, HEY's ETag for it
+// is the box rows, and posting activity does not touch them, so a 304 hands
+// back the since as it stood when the list was cached — hours or days behind.
+// Read from there, the catch-up reported what came after as news on every
+// start, and --exit-on-first stopped on the first of it.
 //
-// So a feed starts at the watch's start. It reports what happened after it and
-// nothing before — including mail that landed after the watch read HEY's clock
-// and before it read the box list, which a since later than the start would
-// leave behind it, read by nothing; that mail is new, too.
-//
-// On the workstation's clock alone the start is only as good as that clock,
-// and a fast one would put it in HEY's future, where every change until then
-// goes unread. There, HEY's own since is kept when it is the earlier of the two
-// — or cannot be read — at the cost of the history it may carry: missing mail
-// is worse than repeating it.
-func (s watchStart) since(served string) string {
-	start := s.at.UTC().Format(watchCursorTimeLayout)
-	if s.onServerClock {
-		return start
-	}
-	if at, err := time.Parse(time.RFC3339Nano, served); err == nil && !at.Before(s.at) {
-		return start
-	}
-
-	return served
+// From the start a feed reports what happened after it and nothing before —
+// including mail that landed after the watch read HEY's clock and before it
+// read the box list, which a since later than the start would leave behind it,
+// read by nothing; that mail is new, too.
+func watchStartSince(started time.Time) string {
+	return started.UTC().Format(watchCursorTimeLayout)
 }
 
 // cutoffBefore makes an instant usable as the watch's start: a cursor is

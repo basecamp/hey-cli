@@ -338,7 +338,9 @@ hey watch --run-sync ./triage.sh        # one at a time, waiting for each
 
 Runs until interrupted, printing changes as they happen, one line each. What changed before
 the watch began is not reported unless `--since` reads back to it first, so
-`--exit-on-first` waits for a change rather than stopping on an old one:
+`--exit-on-first` waits for a change rather than stopping on an old one. When the watch began
+is read off HEY's clock, and a watch that cannot read it exits with an error rather than
+guess:
 
 ```json
 {"change":"added","at":"2026-08-18T09:14:22.031Z","box":{"id":24088,"kind":"imbox","name":"Imbox"},"posting_id":98765,"thread_id":54321,"new":true,"posting":{}}

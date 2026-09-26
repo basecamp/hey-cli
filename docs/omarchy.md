@@ -191,7 +191,8 @@ and `--events new` selects the true ones. The rule:
   watch last recorded for the thread — or later than the watch's start, when it has no
   record. That start is read off HEY's own clock (the `Date` header of one request,
   translated back to the moment the request was made), the clock every `active_at` is on,
-  so a workstation running fast or slow neither calls the backlog new nor sits on new mail;
+  so a workstation running fast or slow neither calls the backlog new nor sits on new mail
+  (a watch that cannot read HEY's clock exits with an error rather than use its own);
   whole seconds, rounded down, so the doubt falls on the side of calling mail a moment old
   new, and every box's cursor starts at that start, so mail that lands while the
   watch is starting up is read and is new. `active_at` moves on new mail only, not on a

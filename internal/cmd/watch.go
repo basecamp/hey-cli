@@ -153,8 +153,11 @@ func (c *watchCommand) run(cmd *cobra.Command, args []string) error {
 	// New mail is measured against the watch's start, so that is taken before
 	// the boxes' cursors are read — and the cursors start at it, so nothing
 	// that lands between the two sits behind a cursor, read by nothing.
-	started := serverNow(ctx)
-	newMail := trackNewMail(started.at)
+	started, err := serverNow(ctx)
+	if err != nil {
+		return err
+	}
+	newMail := trackNewMail(started)
 
 	boxes, err := c.watchedBoxes(ctx, started)
 	if err != nil {
@@ -253,7 +256,7 @@ func (c *watchCommand) watchedChanges() (map[string]bool, error) {
 	return changes, nil
 }
 
-func (c *watchCommand) watchedBoxes(ctx context.Context, started watchStart) (map[int64]*watchedBox, error) {
+func (c *watchCommand) watchedBoxes(ctx context.Context, started time.Time) (map[int64]*watchedBox, error) {
 	listed, err := sdk.Boxes().List(ctx)
 	if err != nil {
 		return nil, apierr.FromSDK(err)
@@ -277,7 +280,7 @@ func (c *watchCommand) watchedBoxes(ctx context.Context, started watchStart) (ma
 			continue
 		}
 		if c.since == "" {
-			cursor.Since = started.since(cursor.Since)
+			cursor.Since = watchStartSince(started)
 		}
 
 		watched[box.Id] = &watchedBox{id: box.Id, kind: box.Kind, name: box.Name, cursor: cursor, reported: c.watching(box)}
@@ -309,7 +312,7 @@ func boxIs(box generated.Box, wanted string) bool {
 
 // watchCursor reads the cursor out of a box's changes URL — HEY's own, which a skip-ahead
 // resumes from — unless --since moves it. Without --since, a watch's first read starts
-// at the watch's start instead (watchStart.since).
+// at the watch's start instead (watchStartSince).
 func watchCursor(changesURL, since string) (hey.PostingChangesCursor, error) {
 	if changesURL == "" {
 		return hey.PostingChangesCursor{}, nil

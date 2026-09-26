@@ -53,7 +53,7 @@ func TestWatchingCalendars(t *testing.T) {
 
 func TestCalendarCursor(t *testing.T) {
 	changesURL := "https://app.hey.com/calendars/512/recording/changes.json?since=2026-08-18T09%3A00%3A00.000Z&v=1"
-	started := watchStart{at: time.Date(2026, 8, 18, 10, 0, 0, 0, time.UTC), onServerClock: true}
+	started := time.Date(2026, 8, 18, 10, 0, 0, 0, time.UTC)
 
 	command := newWatchCommand()
 	cursor, err := command.calendarCursor(changesURL, started)
@@ -128,7 +128,7 @@ func TestWatchPollDoesNotReportHistoryAsItStarts(t *testing.T) {
 	defer server.Close()
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
 
-	calendars, err := newWatchCommand().watchedCalendars(context.Background(), serverStart)
+	calendars, err := newWatchCommand().watchedCalendars(context.Background(), watchStarted)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

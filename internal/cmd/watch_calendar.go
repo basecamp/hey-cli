@@ -79,11 +79,11 @@ func (c *watchCommand) watchingCalendars(changes map[string]bool) bool {
 }
 
 // watchedCalendars reads the calendars and where each one's feed should be read from. The
-// cursors start at the watch's start the way the boxes' do (watchStart.since): the since
+// cursors start at the watch's start the way the boxes' do (watchStartSince): the since
 // HEY serves is a calendar's own updated_at — for the list, the latest of them — so a
 // calendar deleted after the rest last changed was reported by the first poll of every
 // watch.
-func (c *watchCommand) watchedCalendars(ctx context.Context, started watchStart) (*calendarsWatch, error) {
+func (c *watchCommand) watchedCalendars(ctx context.Context, started time.Time) (*calendarsWatch, error) {
 	list, err := sdk.Calendars().ListWithChanges(ctx)
 	if err != nil {
 		return nil, apierr.FromSDK(err)
@@ -116,7 +116,7 @@ func (c *watchCommand) watchedCalendars(ctx context.Context, started watchStart)
 	return watch, nil
 }
 
-func (c *watchCommand) followedCalendar(listed hey.ListedCalendar, started watchStart) (*watchedCalendar, error) {
+func (c *watchCommand) followedCalendar(listed hey.ListedCalendar, started time.Time) (*watchedCalendar, error) {
 	cursor, err := c.calendarCursor(listed.RecordingChangesURL, started)
 	if err != nil {
 		return nil, err
@@ -132,13 +132,13 @@ func (c *watchCommand) followedCalendar(listed hey.ListedCalendar, started watch
 
 // calendarCursor is where a feed should be read from: the feed and version the URL HEY
 // served names, from --since or else from the watch's start.
-func (c *watchCommand) calendarCursor(changesURL string, started watchStart) (hey.CalendarChangesCursor, error) {
+func (c *watchCommand) calendarCursor(changesURL string, started time.Time) (hey.CalendarChangesCursor, error) {
 	cursor, err := hey.CalendarChangesCursorFrom(changesURL)
 	if err != nil {
 		return hey.CalendarChangesCursor{}, apierr.FromSDK(err)
 	}
 	if c.since == "" {
-		cursor.Since = started.since(cursor.Since)
+		cursor.Since = watchStartSince(started)
 		return cursor, nil
 	}
 

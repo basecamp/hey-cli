@@ -20,8 +20,15 @@ import (
 
 var watchStarted = time.Date(2026, 8, 21, 9, 0, 0, 0, time.UTC)
 
-// serverStart is watchStarted as read off HEY's clock.
-var serverStart = watchStart{at: watchStarted, onServerClock: true}
+// readServerNow is serverNow where the test's server answers with its clock.
+func readServerNow(t *testing.T) time.Time {
+	t.Helper()
+	started, err := serverNow(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	return started
+}
 
 func newPosting(id int64, sender, subject string, activeAt time.Time) generated.Posting {
 	return generated.Posting{Id: id, Name: subject, ActiveAt: activeAt, Creator: generated.Contact{Name: sender}}
@@ -50,9 +57,8 @@ func TestNewMailIsSinceTheWatchBeganNotTheBacklog(t *testing.T) {
 	before := watchStarted.Add(-time.Hour)
 	after := watchStarted.Add(30 * time.Second)
 
-	// A box's first read carries everything since the server's cursor — the
-	// box's last activity — which may be hours of backlog, plus mail that
-	// arrived while the watch was starting up.
+	// A read from --since carries backlog, alongside mail that arrived while
+	// the watch was starting up.
 	backlog := newPosting(101, "Maria Delgado", "Lunch on Thursday?", before)
 	arrived := newPosting(102, "Northwind Invoicing", "Invoice #4021", after)
 	if fresh := classifyRead(tracker, backlog, arrived); len(fresh) != 1 || fresh[0] != 102 {
@@ -229,21 +235,17 @@ func TestServerNowReadsTheServersClock(t *testing.T) {
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
 
 	date := time.Date(2026, 8, 21, 9, 0, 5, 0, time.UTC)
-	start := serverNow(context.Background())
-	got := start.at
+	got := readServerNow(t)
 	// The Date header, less the instant the request took: on the server's
 	// clock, whatever the local one says, and no later than the header.
 	if got.After(date) || date.Sub(got) > time.Second {
 		t.Errorf("serverNow = %v, want the Date header translated back to the request's start", got)
 	}
-	if !start.onServerClock {
-		t.Error("a start read off the Date header is on HEY's clock")
-	}
 	if len(requested) != 1 || !strings.Contains(requested[0], "/identity.json?clock=") {
 		t.Errorf("requested %v, want one uncacheable identity request", requested)
 	}
 
-	second := serverNow(context.Background()).at
+	second := readServerNow(t)
 	if len(requested) != 2 || requested[1] == requested[0] {
 		t.Errorf("requested %v, want a fresh request each time, never the cache", requested)
 	}
@@ -269,34 +271,8 @@ func TestCutoffBeforeIsAWholeMillisecondStrictlyBefore(t *testing.T) {
 	if !tracker.isNew(24088, newPosting(101, "Maria Delgado", "Lunch on Thursday?", landed)) {
 		t.Error("mail in the same millisecond as the watch's start is new")
 	}
-	start := watchStart{at: cutoffBefore(within), onServerClock: true}
-	if since := start.since(landed.Format(watchCursorTimeLayout)); since != "2026-08-21T09:00:05.122Z" {
+	if since := watchStartSince(cutoffBefore(within)); since != "2026-08-21T09:00:05.122Z" {
 		t.Errorf("since = %q, want it before the millisecond the mail landed in", since)
-	}
-}
-
-func TestWatchStartSince(t *testing.T) {
-	earlier := "2026-08-21T08:00:00.518496Z"
-	later := "2026-08-21T09:00:30.183221Z"
-
-	// On HEY's clock, a feed starts at the start whatever HEY served.
-	for _, served := range []string{earlier, later, "whenever"} {
-		if got := serverStart.since(served); got != "2026-08-21T09:00:00.000Z" {
-			t.Errorf("since(%q) = %q, want the watch's start", served, got)
-		}
-	}
-
-	// On the workstation's clock alone the start may be in HEY's future, so it
-	// never starts later than HEY's own since.
-	local := watchStart{at: watchStarted}
-	if got := local.since(earlier); got != earlier {
-		t.Errorf("since = %q, want HEY's since when it is earlier than a local start", got)
-	}
-	if got := local.since(later); got != "2026-08-21T09:00:00.000Z" {
-		t.Errorf("since = %q, want the start when HEY's since is later", got)
-	}
-	if got := local.since("whenever"); got != "whenever" {
-		t.Errorf("since = %q, want a since that cannot be read left as it is", got)
 	}
 }
 
@@ -312,8 +288,7 @@ func TestServerNowIsTheClockWhenTheRequestBeganNotWhenItWasAnswered(t *testing.T
 	defer server.Close()
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
 
-	start := serverNow(context.Background())
-	got := start.at
+	got := readServerNow(t)
 
 	// Mail that lands while the server is answering is later than the start;
 	// a start taken at the Date header would put it before.
@@ -359,7 +334,7 @@ func TestWatchReadsMailThatLandedWhileItReadTheClock(t *testing.T) {
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
 
 	// As run does: the clock, then the boxes, then the catch-up.
-	started := serverNow(context.Background())
+	started := readServerNow(t)
 	command := newWatchCommand()
 	boxes, err := command.watchedBoxes(context.Background(), started)
 	if err != nil {
@@ -367,7 +342,7 @@ func TestWatchReadsMailThatLandedWhileItReadTheClock(t *testing.T) {
 	}
 	watch, out := newTestWatch("added")
 	watch.boxes = boxes
-	watch.newMail = trackNewMail(started.at)
+	watch.newMail = trackNewMail(started)
 	if err := watch.catchUp(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -386,27 +361,29 @@ func TestWatchReadsMailThatLandedWhileItReadTheClock(t *testing.T) {
 	}
 }
 
-func TestServerNowFallsBackToTheLocalClock(t *testing.T) {
+// A watch that cannot read HEY's clock does not start: the workstation's clock is
+// no stand-in for the cutoff every feed and new mail are measured against.
+func TestServerNowRefusesWithoutHEYsClock(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "down", http.StatusBadGateway)
 	}))
-	defer server.Close()
-	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
+	defer down.Close()
+	initSDK(auth.NewManager(down.URL, down.Client(), t.TempDir()), down.URL)
+	if _, err := serverNow(context.Background()); err == nil {
+		t.Error("expected an error when HEY cannot be reached")
+	}
 
-	before := time.Now()
-	start := serverNow(context.Background())
-	got := start.at
-	// The local clock at the request's start, as a cutoff: a whole millisecond,
-	// strictly before — so up to two milliseconds before the instant itself.
-	if got.Before(before.Add(-2*time.Millisecond)) || got.After(time.Now()) {
-		t.Errorf("serverNow = %v, want the local clock at the start when the server's can't be read", got)
-	}
-	if got.Nanosecond()%int(time.Millisecond) != 0 {
-		t.Errorf("serverNow = %v, want a whole millisecond", got)
-	}
-	if start.onServerClock {
-		t.Error("a start the server's clock could not give is not on HEY's clock")
+	undated := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header()["Date"] = nil
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":1}`))
+	}))
+	defer undated.Close()
+	initSDK(auth.NewManager(undated.URL, undated.Client(), t.TempDir()), undated.URL)
+	if _, err := serverNow(context.Background()); err == nil {
+		t.Error("expected an error when HEY's answer carries no Date header")
 	}
 }
 
