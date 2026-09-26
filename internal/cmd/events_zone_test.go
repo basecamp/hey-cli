@@ -995,3 +995,26 @@ func TestEventsEditSaysHowFarARepeatedTimeWouldMove(t *testing.T) {
 		})
 	}
 }
+
+// A new event that would end before it starts is refused before anything is written, on
+// its instants as HEY checks them; one that ends as it starts is HEY's to take.
+func TestEventsAddRefusesAnEventThatEndsBeforeItStarts(t *testing.T) {
+	handler, requests := zoneServer(t, zoneFixture{})
+	_, err := runJSONCommand(t, handler, "event", "add", "Design review", "--calendar", "9",
+		"--starts-on", "2026-10-14", "--start-time", "10:00", "--end-time", "09:00", "--time-zone", "Europe/Zagreb")
+	var cliErr *apierr.Error
+	want := "would end at 2026-10-14 09:00 Europe/Zagreb, before it starts at 2026-10-14 10:00 Europe/Zagreb"
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, want) {
+		t.Fatalf("error = %v, want a usage error containing %q", err, want)
+	}
+	if got := requests.writes.Load(); got != 0 {
+		t.Errorf("writes = %d, want none", got)
+	}
+
+	handler, requests = zoneServer(t, zoneFixture{})
+	if _, err := runJSONCommand(t, handler, "event", "add", "Fire drill", "--calendar", "9",
+		"--starts-on", "2026-10-14", "--start-time", "10:00", "--end-time", "10:00", "--time-zone", "Europe/Zagreb"); err != nil {
+		t.Fatalf("execute event add ending as it starts: %v", err)
+	}
+	wantSchedule(t, requests.written(t), "2026-10-14", "10:00", "2026-10-14", "10:00", "Europe/Zagreb")
+}

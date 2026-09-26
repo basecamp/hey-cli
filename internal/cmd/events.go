@@ -755,9 +755,11 @@ func (f *eventFields) newSchedule(ctx context.Context) (eventSchedule, error) {
 		}
 	}
 	var today time.Time
+	var loc *time.Location
 	if !allDay || f.startsOn == "" {
-		name, loc, err := f.writeZone(ctx)
-		if err != nil {
+		var name string
+		var err error
+		if name, loc, err = f.writeZone(ctx); err != nil {
 			return eventSchedule{}, err
 		}
 		today = eventNow().In(loc)
@@ -785,11 +787,15 @@ func (f *eventFields) newSchedule(ctx context.Context) (eventSchedule, error) {
 	if allDay {
 		return eventSchedule{startsAt: startsOn, endsAt: endsOn, allDay: true}, nil
 	}
-	return eventSchedule{
+	schedule := eventSchedule{
 		startsAt: startsOn, endsAt: endsOn,
 		startTime: startTime, endTime: endTime,
 		zone: zone, endZone: zone,
-	}, nil
+	}
+	if err := endsAfterItStarts(schedule, clockZone{zone, loc}, clockZone{zone, loc}); err != nil {
+		return eventSchedule{}, err
+	}
+	return schedule, nil
 }
 
 // validateExplicitScheduleFlags checks every schedule value that needs no stored event.
