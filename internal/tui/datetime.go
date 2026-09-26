@@ -131,8 +131,8 @@ func (p *dateTimePicker) zoneName() string {
 func (p *dateTimePicker) moment() (time.Time, bool) {
 	in := time.Local
 	if name := p.zoneName(); name != "" {
-		zone, err := time.LoadLocation(name)
-		if err != nil {
+		zone, ok := loadEventZone(name)
+		if !ok {
 			return time.Time{}, false
 		}
 		in = zone
@@ -158,7 +158,7 @@ func (p *dateTimePicker) problem() string {
 		return "Time must be HH:MM"
 	}
 	if name := p.zoneName(); name != "" {
-		if _, err := time.LoadLocation(name); err != nil {
+		if _, ok := loadEventZone(name); !ok {
 			return "That is not a time zone"
 		}
 	}

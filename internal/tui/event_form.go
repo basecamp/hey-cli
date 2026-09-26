@@ -18,6 +18,7 @@ import (
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/terminal"
+	"github.com/basecamp/hey-cli/internal/timezone"
 )
 
 type eventFormMode int
@@ -139,7 +140,12 @@ type eventForm struct {
 // the one this reader filed on last, because somebody who keeps a work calendar and a
 // personal one files on the same one all week, or else the one HEY files on by default (see
 // calendarView.newEventCalendarID). An edit opens on the event's own calendar instead.
-func newEventForm(mode eventFormMode, event Recording, on time.Time, calendars []Calendar, calendarID int64, styles styles) *eventForm {
+//
+// accountZone is the HEY account's time zone, the one HEY's web app and `hey event add` read
+// a typed time in, and a new event's times are written in it and sent with its name. Empty,
+// or a name HEY could not look up, leaves the form on Local — the reader can see the choice
+// on the form, which is reason enough not to refuse to open it.
+func newEventForm(mode eventFormMode, event Recording, on time.Time, calendars []Calendar, calendarID int64, accountZone string, styles styles) *eventForm {
 	form := &eventForm{
 		mode:            mode,
 		eventID:         event.ID,
@@ -164,10 +170,27 @@ func newEventForm(mode eventFormMode, event Recording, on time.Time, calendars [
 		form.calendar = indexOfCalendarID(calendars, calendarID)
 	}
 
+	// Which clock each moment is written on. An event saved with zones of its own is shown on
+	// the clock it was written on — 09:00 in Madrid stays 09:00 in Madrid, wherever it is being
+	// read. A timed event saved without one stays on Local, the reader's own clock, which is
+	// the one the calendar draws it on, and goes back as UTC with no zone, as it came: an edit
+	// does not zone an event nobody asked it to. Everything else — a new event, and an all-day
+	// one that may yet be given a time — is written in the account's zone, as `hey event`
+	// writes it.
+	account, accountLoc := usableZone(accountZone)
+	startZone, endZone := account, account
+	if mode == eventFormEdit && !event.AllDay {
+		startZone, endZone = event.StartsAtZone, event.EndsAtZone
+	}
+
 	// An edit shows the event's own times; a new event is offered the next whole hour for
-	// an hour. An event missing either time falls back to the same guess rather than to a
-	// blank field.
-	starts := nextWholeHour(on)
+	// an hour, on the clock it is written on. An event missing either time falls back to the
+	// same guess rather than to a blank field.
+	clock := on.Location()
+	if accountLoc != nil {
+		clock = accountLoc
+	}
+	starts := newEventStart(on, clock)
 	if mode == eventFormEdit && !event.Starts().IsZero() {
 		starts = event.Starts()
 	}
@@ -176,16 +199,22 @@ func newEventForm(mode eventFormMode, event Recording, on time.Time, calendars [
 		ends = event.Ends()
 	}
 
-	// An event saved with zones of its own is shown on the clock it was written on — 09:00 in
-	// Madrid stays 09:00 in Madrid, wherever it is being read. Everything else is the reader's
-	// own clock, which the picker calls Local and sends as UTC.
 	form.starts = newDateTimePicker(inZoneNamed(starts, event.StartsAtZone), form.allDay)
 	form.ends = newDateTimePicker(inZoneNamed(ends, event.EndsAtZone), form.allDay)
-	if !form.allDay {
-		form.starts.setZoneName(event.StartsAtZone)
-		form.ends.setZoneName(event.EndsAtZone)
-	}
+	form.starts.setZoneName(startZone)
+	form.ends.setZoneName(endZone)
 	return form
+}
+
+// usableZone is the account's zone when HEY can look it up by that name, and nothing when it
+// cannot: an account with no zone set, a read that failed and a name this build does not know
+// all open the form on Local instead.
+func usableZone(name string) (string, *time.Location) {
+	zone, ok := loadEventZone(name)
+	if !ok {
+		return "", nil
+	}
+	return name, zone
 }
 
 func eventInput(placeholder string, width int) textinput.Model {
@@ -271,11 +300,13 @@ func inZoneNamed(at time.Time, name string) time.Time {
 	return at
 }
 
+// loadEventZone loads a zone by the rules `hey event --time-zone` uses, which are the ones HEY
+// looks a zone up by: a name HEY would not find is no zone at all, even where Go answers it.
 func loadEventZone(name string) (*time.Location, bool) {
 	if name == "" {
 		return nil, false
 	}
-	zone, err := time.LoadLocation(name)
+	zone, err := timezone.Load(name)
 	if err != nil {
 		return nil, false
 	}
@@ -318,14 +349,17 @@ func zoneMatchesLocal(name string) bool {
 	return named == local
 }
 
-// nextWholeHour is where a new event starts when the reader has not said: the next hour on
-// the clock, so a form opened at 09:41 offers 10:00 rather than 09:41.
-func nextWholeHour(at time.Time) time.Time {
-	rounded := at.Truncate(time.Hour)
-	if rounded.Before(at) {
-		rounded = rounded.Add(time.Hour)
+// newEventStart is where a new event starts when the reader has not said: on the day they are
+// looking at, at the next whole hour on the clock the event is written on, so a form opened at
+// 09:41 offers 10:00 rather than 09:41. The day is the one on screen even where that clock is
+// already on another — the reader chose the day by looking at it.
+func newEventStart(on time.Time, zone *time.Location) time.Time {
+	clock := on.In(zone)
+	hour := clock.Hour()
+	if clock.Minute() != 0 || clock.Second() != 0 || clock.Nanosecond() != 0 {
+		hour++
 	}
-	return rounded
+	return time.Date(on.Year(), on.Month(), on.Day(), hour, 0, 0, 0, zone)
 }
 
 // indexOfCalendar finds the calendar an event is filed on. The id is the answer where the
@@ -495,9 +529,10 @@ type eventFormValues struct {
 	StartTime  string
 	EndTime    string
 	// StartTimeZone and EndTimeZone are the zones the clock times above are written in, and
-	// they are empty for a moment left on Local — that says UTC, which is how HEY reads a time
+	// they are empty for an event left on Local — that says UTC, which is how HEY reads a time
 	// nobody named a zone for. Sending them empty on an update is not the same as leaving
 	// them out: it clears the zones the event had, which is what moving back to Local means.
+	// One end on Local beside a zoned one is written in the other's zone; see wireMoment.
 	StartTimeZone string
 	EndTimeZone   string
 	// Reminders is every notice period chosen, and HEY reads it as the whole set: an update
@@ -535,14 +570,15 @@ type eventFormValues struct {
 // request that is UTC when it was told nothing — ApiRequest#set_utc_timezone sets it. So each
 // moment has two honest ways to say when it is, and the form uses both:
 //
+// With a zone chosen — the account's, which a new event opens on, or any other — the time goes
+// as the reader wrote it, next to the zone they wrote it in, and HEY places it on that clock
+// itself and stores the zone along with the event. That is what an event should keep when the
+// reader travels, and it is the only way to say an event starts in one zone and ends in
+// another.
+//
 // Left on Local, the time is converted to UTC here and no zone is named. Converting needs no
 // name and is exact — 08:00 in Zagreb is one instant whatever anybody calls the zone — which
 // matters because Go will not always give a name for the local zone at all.
-//
-// With a zone chosen, the time goes as the reader wrote it, next to the zone they wrote it in,
-// and HEY stores the zone along with the event. That is what an event should keep when the
-// reader travels, and it is the only way to say an event starts in one zone and ends in
-// another.
 //
 // An all-day event is neither: it is sent as the date typed, unconverted, because it is a
 // calendar date rather than a moment and shifting it would move a birthday.
@@ -568,21 +604,30 @@ func (f *eventForm) values() eventFormValues {
 	if f.allDay {
 		return values
 	}
-	values.StartsAt, values.StartTime, values.StartTimeZone = wireMoment(f.starts)
-	values.EndsAt, values.EndTime, values.EndTimeZone = wireMoment(f.ends)
+	values.StartsAt, values.StartTime, values.StartTimeZone = wireMoment(f.starts, f.ends.zoneName())
+	values.EndsAt, values.EndTime, values.EndTimeZone = wireMoment(f.ends, f.starts.zoneName())
 	return values
 }
 
 // wireMoment is one moment as HEY should read it. A field the reader is still typing does not
 // parse; validate refuses the save before that matters, and until then the strings as typed
 // are the honest answer.
-func wireMoment(p *dateTimePicker) (date, clock, zone string) {
+//
+// HEY keeps a zone for both ends of an event or for neither, and a write naming one zone is
+// given it for both. So a moment left on Local beside one with a zone — a new event whose end
+// the reader moved back to Local, say — cannot go as UTC: HEY would read it on the other end's
+// clock. It is written on that clock instead, which is the same instant.
+func wireMoment(p *dateTimePicker, other string) (date, clock, zone string) {
 	if name := p.zoneName(); name != "" {
 		return p.date(), p.clock(), name
 	}
 	at, ok := p.moment()
 	if !ok {
 		return p.date(), p.clock(), ""
+	}
+	if loc, ok := loadEventZone(other); ok {
+		at = at.In(loc)
+		return at.Format("2006-01-02"), at.Format("15:04"), other
 	}
 	return at.UTC().Format("2006-01-02"), at.UTC().Format("15:04"), ""
 }
