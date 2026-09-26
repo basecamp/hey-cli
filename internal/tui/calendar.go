@@ -2169,12 +2169,10 @@ func (v *calendarView) saveEvent() tea.Cmd {
 	}
 }
 
-// lastCalendarID and rememberCalendar are where the calendar a new event opens on comes from and
-// goes. It is a preference rather than data, so it is remembered as soon as the reader saves
-// rather than after HEY answers, and a machine that cannot store it simply keeps offering the
-// first calendar.
 // newEventCalendarID is the calendar a new event opens on: the one the reader filed on last
-// while it is still offered, and otherwise the one HEY files on by default.
+// while it is still offered, and otherwise the one HEY files on by default. An account with no
+// default answers zero and the form opens on its first calendar — unlike `hey event add`, which
+// refuses, because here the choice is on screen in the Calendar row before anything is saved.
 func (v *calendarView) newEventCalendarID(fileable []Calendar) int64 {
 	if last := v.lastCalendarID(); last != 0 {
 		for _, calendar := range fileable {
@@ -2191,6 +2189,10 @@ func (v *calendarView) newEventCalendarID(fileable []Calendar) int64 {
 	return 0
 }
 
+// lastCalendarID and rememberCalendar are where the calendar a new event opens on comes from and
+// goes. It is a preference rather than data, so it is remembered as soon as the reader saves
+// rather than after HEY answers, and a machine that cannot store it simply keeps offering
+// HEY's default.
 func (v *calendarView) lastCalendarID() int64 {
 	if v.vc.loadLastCalendar == nil {
 		return 0
