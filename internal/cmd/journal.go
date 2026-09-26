@@ -344,8 +344,9 @@ func journalEntryFromEditor(ctx context.Context, date string, fetch journalConte
 	}
 	if !htmlutil.MarkdownIsLossless(existing) {
 		return "", apierr.ErrUsageHint(
-			fmt.Sprintf("the journal entry for %s holds an attachment or other content Markdown cannot carry, so editing it as Markdown would drop it", date),
-			fmt.Sprintf("change the entry's HTML and write it back: entry=$(hey journal read %s --jq '.data.content') && hey journal write %s --content-html \"$entry...\"", date, date))
+			fmt.Sprintf("the journal entry for %s holds an attachment or other markup Markdown cannot carry, so editing it as Markdown would drop it", date),
+			fmt.Sprintf("Change its HTML instead: read it with `hey journal read %s --jq '.data.content'` and write it back with `hey journal write %s --content-html '<the changed HTML>'`", date, date),
+		)
 	}
 	edited, err := open(htmlutil.ToMarkdown(existing).String())
 	if err != nil {

@@ -538,6 +538,7 @@ func TestJournalReadSaysWhenItsMarkdownIsLossless(t *testing.T) {
 	}{
 		{name: "an entry from HEY's editor", stored: webEditedJournalStored, want: true},
 		{name: "an entry with an attachment", stored: attachedJournalStored, want: false},
+		{name: "an entry with a colour", stored: `<div style="color: red">Retrospective: the migration took two days longer than planned.</div>`, want: false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			server, _ := newJournalStore(t, tt.stored)
