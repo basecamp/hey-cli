@@ -18,8 +18,12 @@ func newContactNoteShowCommand() *contactNoteShowCommand {
 	showCommand.cmd = &cobra.Command{
 		Use:   "show <id>",
 		Short: "Read a private contact note",
+		Annotations: map[string]string{
+			"agent_notes": "JSON answers note (HEY's plain text, formatting dropped), note_html (as HEY serves it) and note_markdown (the note as Markdown, which hey contact note set writes back unchanged).",
+		},
 		Example: `  hey contact note show 12345
-  hey contact note show 12345 --json`,
+  hey contact note show 12345 --json
+  hey contact note show 12345 --jq '.data.note_markdown'`,
 		RunE: showCommand.run,
 		Args: usageExactOneArg(),
 	}
@@ -48,7 +52,7 @@ func (c *contactNoteShowCommand) run(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(cmd.OutOrStdout(), renderedNote(note.Note, note.NoteHtml))
 		return nil
 	}
-	return writeOK(note,
+	return writeOK(newContactNoteResult(*note),
 		output.WithSummary(fmt.Sprintf("Private note for contact %d", contactID)),
 		output.WithBreadcrumbs(output.Breadcrumb{Action: "edit", Command: fmt.Sprintf("hey contact note set %d", contactID), Description: "Edit the private note"}),
 	)

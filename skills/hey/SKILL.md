@@ -205,7 +205,7 @@ postings, not the box, label or contact around them.
 | Bundle a contact's mail | `hey contact bundle <contact_id>` |
 | List a contact's mail separately | `hey contact unbundle <contact_id>` |
 | List a bundle's unseen threads | `hey bundle view <box_item_id> --json` |
-| Read private contact note | `hey contact note show <contact_id> --json` |
+| Read private contact note | `hey contact note show <contact_id> --json` (`note_markdown` is the form `note set` takes) |
 | Replace private contact note | `hey contact note set <contact_id> "Prefers email"` (replaces the whole note) |
 | Delete private contact note | `hey contact note delete <contact_id>` |
 | Read email thread | `hey thread read <topic_id> --json` |
@@ -468,6 +468,7 @@ hey contact show-again 12345                   # Reverse hiding
 hey contact bundle 12345                       # Group this contact's mail into one row
 hey contact unbundle 12345                     # List this contact's mail separately
 hey contact note show 12345 --json
+hey contact note show 12345 --jq '.data.note_markdown'  # The note as Markdown, ready to edit and set back
 hey contact note set 12345 "Prefers email"
 echo "Prefers email; call only for urgent deliveries" | hey contact note set 12345
 hey contact note set 12345 --note-html "<p><strong>Prefers email</strong></p>"
@@ -480,12 +481,14 @@ hey contact note delete 12345
 
 HEY hides contacts instead of permanently deleting them. A hidden contact leaves contact lists, autocomplete, and search results while remaining available by ID; `show-again` reverses the action. A contact that is hidden, an alias, or another HEY user cannot be edited: `contact update`, `contact note set` and `contact note delete` answer `not_found`. Bundling groups a contact's mail into one row without merging or deleting the underlying threads; `unbundle` lists those threads separately again. HEY bundles only a contact with no box preference or one sent to the Paper Trail; for any other, `bundle` answers success and changes nothing.
 
-**A contact note is written whole.** `hey contact note set` replaces the entire note, so to add a detail, read the note, change it, and write all of it back. It takes Markdown — positional, `--note`, stdin, or `$EDITOR` (which opens on the existing note) — or raw HTML with `--note-html`; an empty note is refused, and `hey contact note delete` clears one without touching the contact. `hey contact note show --json` answers `note` as plain text, which loses formatting (bold is dropped, list items become `•`), and `note_html` with the formatting intact. To append without losing formatting, extend `note_html` and write it back as HTML:
+**A contact note is written whole.** `hey contact note set` replaces the entire note — there is no append — so to add a detail, read the note as Markdown, change it, and write all of it back. It takes Markdown — positional, `--note`, stdin, or `$EDITOR` (which opens on the existing note) — or raw HTML with `--note-html`; an empty note is refused, and `hey contact note delete` clears one without touching the contact. `hey contact note show --json` answers `note_markdown`, which `note set` writes back as the same note; `note` is HEY's plain text and loses formatting (bold is dropped, list items become `•`), and `note_html` is the HTML as HEY serves it. To add to a note:
 
 ```bash
-note=$(hey contact note show 12345 --jq '.data.note_html')
-hey contact note set 12345 --note-html "$note<p>Moved to the Lisbon office in March.</p>"
+note=$(hey contact note show 12345 --jq '.data.note_markdown') &&
+  printf '%s\n\nMoved to the Lisbon office in March.\n' "$note" | hey contact note set 12345
 ```
+
+Keep the `&&`: a failed read must not go on to write. The read and the write are not atomic — a save by someone else in between is lost — so write straight after reading.
 
 Notes are private to the HEY account that holds the contact, so they are reached only through the user's own login. With linked accounts, `--account <id>` (from `hey account list`) selects whose contacts a command reads and writes.
 
