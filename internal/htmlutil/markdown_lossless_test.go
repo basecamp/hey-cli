@@ -39,7 +39,8 @@ func TestMarkdownIsLossless(t *testing.T) {
 		{name: "a code block in a language HEY highlights", html: `<pre language="ruby">Contact.find(7)</pre>`, want: true},
 		{name: "a code block in a language HEY does not", html: `<pre language="haskell">main = pure ()</pre>`, want: false},
 		{name: "formatting inside a code block", html: `<pre>quote <strong>#4821</strong></pre>`, want: false},
-		{name: "line breaks inside a code block", html: `<pre>line one<br><br><br>line four</pre>`, want: true},
+		{name: "line breaks inside a code block", html: `<pre>line one<br>line two</pre>`, want: true},
+		{name: "blank lines inside a code block", html: `<pre>line one<br><br><br>line four</pre>`, want: false},
 		{name: "a paragraph break", html: `<div>Met at RailsConf.<br><br>Prefers texts.</div>`, want: true},
 		{name: "two blank lines", html: `<div>Met at RailsConf.<br><br><br>Prefers texts.</div>`, want: false},
 		{name: "a line break in a list item", html: `<ul><li>Jane Doe<br>Head of purchasing</li></ul>`, want: true},
@@ -65,6 +66,13 @@ func TestMarkdownIsLossless(t *testing.T) {
 		{name: "spaces held apart by non-breaking spaces", html: `<p>Total:&nbsp;&nbsp; $4,200</p>`, want: false},
 		{name: "a control character in code", html: "<pre>quote\x1b #4821</pre>", want: false},
 		{name: "a tab in a code block", html: "<pre>quote\t#4821</pre>", want: true},
+		{name: "a list item outside a list", html: `<li>Prefers email</li>`, want: false},
+		{name: "a blank line ending a code block", html: `<pre>quote #4821<br><br></pre>`, want: false},
+		{name: "bold inside bold", html: `<div><strong>A<strong>B</strong>C</strong></div>`, want: false},
+		{name: "a link with no label", html: `<div>Site: <a href="https://example.com/acme"></a></div>`, want: false},
+		{name: "a link labelled with a URL Markdown rewrites", html: `<div><a href="https://example.com/acme deals">https://example.com/acme deals</a></div>`, want: false},
+		{name: "a link labelled with its own URL", html: `<div><a href="https://example.com/acme">https://example.com/acme</a></div>`, want: true},
+		{name: "text after a list", html: `<ul><li>Partners</li></ul>Leads`, want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

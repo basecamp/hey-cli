@@ -80,7 +80,10 @@ func MarkdownIsLossless(s string) bool {
 			pending = append(pending, visit{node: child, context: ctx})
 		}
 	}
-	return true
+	// The checks above name what Markdown cannot carry at all; the round trip catches
+	// what it carries differently — a list item outside a list, bold inside bold, a
+	// link label ToMarkdown rewrites.
+	return roundTripsThroughMarkdown(s)
 }
 
 // inside is the context for an element's children.
