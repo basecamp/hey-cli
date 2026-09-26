@@ -121,13 +121,20 @@ func (f *eventFields) writeZone(ctx context.Context) (string, *time.Location, er
 
 	name, err := f.accountTimeZone(ctx)
 	if err != nil {
-		// A login HEY no longer accepts is an auth failure, not a missing zone: --time-zone
-		// would only move the refusal to the write, so it is reported as what it is.
-		readErr := apierr.AsError(apierr.FromSDK(err))
+		// A failed read keeps what it failed with — network, rate limit, a server error — so
+		// a script can tell a retry from a mistake, and says --time-zone would do without it.
+		// A login HEY no longer accepts is an auth failure and nothing else: --time-zone would
+		// only move the refusal to the write.
+		readErr := *apierr.AsError(apierr.FromSDK(err))
 		if readErr.Code == apierr.CodeAuth {
-			return "", nil, readErr
+			return "", nil, &readErr
 		}
-		return "", nil, errNoAccountZone("your HEY account's time zone could not be read: "+readErr.Message, err)
+		readErr.Message = "no time zone to place the event in: your HEY account's time zone could not be read: " + readErr.Message
+		readErr.Hint = timeZoneHint
+		if readErr.Cause == nil {
+			readErr.Cause = err
+		}
+		return "", nil, &readErr
 	}
 	if name == "" {
 		return "", nil, errNoAccountZone("your HEY account has no time zone set", nil)

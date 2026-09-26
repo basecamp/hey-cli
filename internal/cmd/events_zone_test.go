@@ -209,7 +209,6 @@ func TestEventsAddRefusesWithoutAnAccountZone(t *testing.T) {
 	}{
 		{name: "account names none", fixture: zoneFixture{}, want: "your HEY account has no time zone set"},
 		{name: "zone this build does not know", fixture: zoneFixture{accountZone: "Mars/Olympus_Mons"}, want: "Mars/Olympus_Mons is not one this build of hey knows"},
-		{name: "server error", fixture: zoneFixture{identityStatus: http.StatusInternalServerError}, want: "could not be read"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -256,7 +255,46 @@ func wantNoZoneRefusal(t *testing.T, err error, want string) {
 	}
 }
 
-// A network failure reading the identity is refused the same way, and nothing is written.
+// A failed read of the identity keeps its own code, so a script can tell a retry from a
+// mistake, and still says --time-zone would do without it. Nothing is written.
+func TestEventsAddKeepsTheCodeOfAFailedAccountRead(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		status int
+		code   string
+	}{
+		{name: "server error", status: http.StatusInternalServerError, code: apierr.CodeAPI},
+		{name: "rate limited", status: http.StatusTooManyRequests, code: apierr.CodeRateLimit},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			handler, requests := zoneServer(t, zoneFixture{identityStatus: tt.status})
+			_, err := runJSONCommand(t, handler, "event", "add", "Dentist appointment", "--calendar", "9",
+				"--starts-on", "2026-10-14", "--start-time", "10:00")
+			wantFailedAccountRead(t, err, tt.code, tt.status)
+			if got := requests.writes.Load(); got != 0 {
+				t.Errorf("writes = %d, want none", got)
+			}
+		})
+	}
+}
+
+func wantFailedAccountRead(t *testing.T, err error, code string, status int) {
+	t.Helper()
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != code || cliErr.HTTPStatus != status {
+		t.Fatalf("error = %#v, want code %s and status %d", err, code, status)
+	}
+	if !strings.Contains(cliErr.Message, "could not be read") {
+		t.Errorf("message = %q, want it to say the zone could not be read", cliErr.Message)
+	}
+	if !strings.Contains(cliErr.Hint, "--time-zone") {
+		t.Errorf("hint = %q, want it to name --time-zone", cliErr.Hint)
+	}
+}
+
+// A connection that fails while the identity is read is reported with the code any other
+// command gets for it — the SDK's identity read calls a dropped connection an API error, as
+// `hey calendar list` does — with the --time-zone hint, and nothing is written.
 func TestEventsAddRefusesWhenTheAccountCannotBeReached(t *testing.T) {
 	base, requests := zoneServer(t, zoneFixture{accountZone: "America/New_York"})
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -272,7 +310,7 @@ func TestEventsAddRefusesWhenTheAccountCannotBeReached(t *testing.T) {
 	})
 	_, err := runJSONCommand(t, handler, "event", "add", "Dentist appointment", "--calendar", "9",
 		"--starts-on", "2026-10-14", "--start-time", "10:00")
-	wantNoZoneRefusal(t, err, "could not be read")
+	wantFailedAccountRead(t, err, apierr.CodeAPI, 0)
 	if got := requests.writes.Load(); got != 0 {
 		t.Errorf("writes = %d, want none", got)
 	}
