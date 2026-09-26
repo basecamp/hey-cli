@@ -438,16 +438,15 @@ runs in.
 An event with no `--start-time` is an all-day event, and a `--start-time` with no
 `--end-time` runs for an hour. Clock times are read in your HEY account's time zone, the
 one HEY's web app uses, and so is today when `--starts-on` is left out, for an all-day
-event too; `--time-zone America/New_York` names another zone. The command reads the
-account's zone from your identity at most once, and only when a clock time or today needs
-it: an all-day event on a named date, or a write with `--time-zone`, asks for nothing.
-`--account` makes a read of the identity of its own, to check the account, so with it a
-timed write reads the identity twice (and `--stats` counts both). If the account has no
-time zone, or it cannot be read, the write refuses and asks for `--time-zone` rather than
-guessing at UTC or the machine's zone. `--time-zone`
-takes an IANA name spelled as the zone database spells it (`America/New_York`,
-`US/Eastern`, `Etc/GMT+5`, `UTC`); a name HEY cannot look up, such as `Local`, a
-lowercase spelling or Rails' `Eastern Time (US & Canada)`, is refused.
+event too; `--time-zone America/New_York` names another zone. The command reads your
+identity for the account's zone at most once, and only when it needs it: for a clock time
+or today on an event with no zone of its own, or for a countdown an occurrence edit keeps.
+`--account` checks the account with a read of its own. If the account has no time zone, or
+it cannot be read, the write refuses and asks for `--time-zone` rather than guessing at UTC
+or the machine's zone. `--time-zone` takes IANA names only, spelled as the zone database
+spells them (`America/New_York`, `US/Eastern`, `Etc/GMT+5`, `UTC`). That is this command's
+rule, not HEY's: `Local`, a lowercase spelling and Rails' friendly names such as `Eastern
+Time (US & Canada)` are refused.
 
 On `edit`, and on an `--occurrence` edit alike, an event saved in a time zone keeps it for
 the times you type and the times you keep. An event saved without one stays without one:

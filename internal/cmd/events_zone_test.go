@@ -278,8 +278,10 @@ func TestEventsAddRefusesWhenTheAccountCannotBeReached(t *testing.T) {
 	}
 }
 
-// HEY stores a zone name it cannot look up and reads the event as UTC, so only a name HEY
-// will find gets through — and it is refused before anything is read.
+// HEY stores a zone name it cannot look up and reads the event as UTC, so only an IANA name
+// HEY will find gets through, and anything else is refused before anything is read. Rails'
+// friendly names are among the refused: HEY would find those, but the CLI takes IANA names
+// alone.
 func TestEventsRefuseATimeZoneHEYCannotFind(t *testing.T) {
 	for _, zone := range []string{"Not/AZone", "america/new_york", "Local", "localtime", "posixrules", "Factory", "posix/America/New_York", "right/UTC", "America//New_York", "America/./New_York", "/America/New_York", "Eastern Time (US & Canada)"} {
 		for _, command := range [][]string{
