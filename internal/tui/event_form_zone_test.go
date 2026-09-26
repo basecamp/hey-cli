@@ -62,17 +62,75 @@ func TestNewEventFormOpensOnTheAccountZone(t *testing.T) {
 	}
 }
 
-// The day is the one on screen, even where the account's clock has already moved on to the
-// next: a reader looking at the 14th late in the evening gets an event on the 14th.
+// wantDefaultStart checks the instant a new event is offered: the one HEY places the wire
+// values at, no earlier than the moment the form was opened from, and on the day in view as the
+// machine's clock draws it.
+func wantDefaultStart(t *testing.T, form *eventForm, on, want time.Time) {
+	t.Helper()
+	values := form.values()
+	got, ok := timezone.Placed(values.StartsAt, values.StartTime, mustZone(t, values.StartTimeZone))
+	if !ok || !got.Equal(want) {
+		t.Errorf("start sent as %s %s %s, which HEY places at %s, want %s",
+			values.StartsAt, values.StartTime, values.StartTimeZone, got.UTC(), want.UTC())
+	}
+	if got.Before(on) {
+		t.Errorf("start %s is before the form was opened, %s", got.UTC(), on.UTC())
+	}
+	if day := got.In(on.Location()).Format("2006-01-02"); day != on.Format("2006-01-02") {
+		t.Errorf("start falls on %s on the machine's clock, want the day in view, %s", day, on.Format("2006-01-02"))
+	}
+}
+
+// The date and the hour are the account clock's together, and the start falls on the day in
+// view as the machine draws it. At 17:30 on the 14th in Los Angeles it is 02:30 on the 15th in
+// Madrid; the next whole hour there is 03:00 on the 15th (=> 01:00 UTC), 18:00 on the 14th in
+// Los Angeles. Taking the date from one clock and the hour from the other offered 03:00 on the
+// 14th in Madrid, the evening before.
 func TestNewEventFormKeepsTheDayInViewOnTheAccountsClock(t *testing.T) {
-	// 17:30 in Los Angeles on the 14th is 02:30 in Madrid on the 15th.
 	on := time.Date(2026, 10, 14, 17, 30, 0, 0, mustZone(t, "America/Los_Angeles"))
 	form := newAccountZoneForm(eventFormCreate, Recording{}, on, "Europe/Madrid")
 
-	values := form.values()
-	if values.StartsAt != "2026-10-14" || values.StartTime != "03:00" {
-		t.Errorf("start = %q %q, want 03:00 on the 14th", values.StartsAt, values.StartTime)
+	if values := form.values(); values.StartsAt != "2026-10-15" || values.StartTime != "03:00" {
+		t.Errorf("start = %q %q, want 03:00 on the 15th in Madrid", values.StartsAt, values.StartTime)
 	}
+	wantDefaultStart(t, form, on, time.Date(2026, 10, 15, 1, 0, 0, 0, time.UTC))
+}
+
+// The other way round: at 08:15 on the 15th in Madrid (=> 06:15 UTC) it is 23:15 on the 14th
+// in Los Angeles, and the next whole hour there is midnight on the 15th (=> 07:00 UTC), 09:00
+// in Madrid on the day in view.
+func TestNewEventFormTakesAnAccountClockStillOnTheDayBefore(t *testing.T) {
+	on := time.Date(2026, 10, 15, 8, 15, 0, 0, mustZone(t, "Europe/Madrid"))
+	form := newAccountZoneForm(eventFormCreate, Recording{}, on, "America/Los_Angeles")
+
+	if values := form.values(); values.StartsAt != "2026-10-15" || values.StartTime != "00:00" {
+		t.Errorf("start = %q %q, want midnight on the 15th in Los Angeles", values.StartsAt, values.StartTime)
+	}
+	wantDefaultStart(t, form, on, time.Date(2026, 10, 15, 7, 0, 0, 0, time.UTC))
+}
+
+// A day in view other than today is offered the first whole hour after the clock time the view
+// carries, on that day: the 20th in Los Angeles at 17:30 opens at 03:00 on the 21st in Madrid
+// (=> 2026-10-21 01:00 UTC), 18:00 on the 20th in Los Angeles.
+func TestNewEventFormOnAnotherDayKeepsThatDayOnTheAccountsClock(t *testing.T) {
+	on := time.Date(2026, 10, 20, 17, 30, 0, 0, mustZone(t, "America/Los_Angeles"))
+	form := newAccountZoneForm(eventFormCreate, Recording{}, on, "Europe/Madrid")
+
+	wantDefaultStart(t, form, on, time.Date(2026, 10, 21, 1, 0, 0, 0, time.UTC))
+}
+
+// On the night Madrid falls back, 17:30 on the 24th in Los Angeles (=> 2026-10-25 00:30 UTC) is
+// the first 02:30 in Madrid. The whole hour 02:00 repeats there and HEY reads it as the first
+// (=> 00:00 UTC), before now; the next is 03:00 (=> 02:00 UTC), 19:00 on the 24th in Los
+// Angeles.
+func TestNewEventFormOnTheAccountsFallBackNight(t *testing.T) {
+	on := time.Date(2026, 10, 24, 17, 30, 0, 0, mustZone(t, "America/Los_Angeles"))
+	form := newAccountZoneForm(eventFormCreate, Recording{}, on, "Europe/Madrid")
+
+	if values := form.values(); values.StartsAt != "2026-10-25" || values.StartTime != "03:00" {
+		t.Errorf("start = %q %q, want 03:00 on the 25th in Madrid", values.StartsAt, values.StartTime)
+	}
+	wantDefaultStart(t, form, on, time.Date(2026, 10, 25, 2, 0, 0, 0, time.UTC))
 }
 
 // Half-hour zones have whole hours of their own: the next one in Kolkata is on the hour there,

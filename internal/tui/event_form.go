@@ -432,38 +432,38 @@ func zoneMatchesLocal(name string) bool {
 	return named == local
 }
 
-// newEventStart is where a new event starts when the reader has not said: on the day they are
-// looking at, at the next whole hour on the clock the event is written on, so a form opened at
-// 09:41 offers 10:00 rather than 09:41. The day is the one on screen even where that clock is
-// already on another — the reader chose the day by looking at it.
+// newEventStart is where a new event starts when the reader has not said: the first whole hour
+// on the clock the event is written on that HEY places at or after on — the moment the form
+// is opened from, which is now when the day in view is today and the day in view at the
+// clock time the view carries otherwise (calendarView.newEventDay). A form opened at 09:41
+// offers 10:00.
 //
-// The hour is placed as HEY will place it, so an hour the clocks skip opens on the first one
-// after it: 01:41 on the morning New York springs forward offers 03:00, not an 02:00 that Go
-// would put back at 01:00, before the form was opened.
+// The date and the hour are the same clock's. The day in view is drawn on the machine's
+// clock, and the account's can be on another date: at 17:30 on 14 October in Los Angeles it
+// is 02:30 on the 15th in Madrid, and the hour offered is 03:00 on the 15th there — 18:00 on
+// the 14th in Los Angeles, the day the reader is looking at. Taking the date from one clock
+// and the hour from the other offered 03:00 on the 14th in Madrid, the evening before.
+//
+// Because the hour is the first at or after on, it falls on the day in view whenever that day
+// has one left; in the day's last hour, or where the two clocks sit half an hour apart, the
+// first can be past midnight, and it is offered there rather than an hour already gone.
+//
+// Each hour is placed as HEY will place it. One the clocks skip is passed over: 01:41 on the
+// morning New York springs forward offers 03:00, not an 02:00 HEY would move there anyway. So
+// is one HEY places before on: at the second 01:00 of the night New York falls back, HEY reads
+// 01:00 as the first, an hour ago, and the form offers 02:00.
 func newEventStart(on time.Time, zone *time.Location) time.Time {
 	clock := on.In(zone)
-	hour := clock.Hour()
-	if clock.Minute() != 0 || clock.Second() != 0 || clock.Nanosecond() != 0 {
-		hour++
-	}
-	// Written in UTC first so that hour 24 rolls over to the next day and nothing else moves.
-	wall := time.Date(on.Year(), on.Month(), on.Day(), hour, 0, 0, 0, time.UTC)
-	start := timezone.WallClock(wall, wall, zone)
-
-	// On the clock's own day the hour offered is one still to come. At the second 01:00 of the
-	// night New York falls back, 01:00 is a whole hour on the clock, and HEY places it at the
-	// first, an hour ago; the next one it places after now is 02:00. On a day in view that the
-	// clock has already left or not yet reached, the hour is the day's, wherever that falls.
-	if clock.Format("2006-01-02") == on.Format("2006-01-02") {
-		for range 48 {
-			if !start.Before(on) {
-				break
-			}
-			wall = wall.Add(time.Hour)
-			start = timezone.WallClock(wall, wall, zone)
+	// Written in UTC so the hours can be stepped as figures on the clock, midnight included.
+	wall := time.Date(clock.Year(), clock.Month(), clock.Day(), clock.Hour(), 0, 0, 0, time.UTC)
+	for range 72 {
+		start := timezone.WallClock(wall, wall, zone)
+		if !start.Before(on) && start.In(zone).Format("2006-01-02 15:04") == wall.Format("2006-01-02 15:04") {
+			return start.In(zone)
 		}
+		wall = wall.Add(time.Hour)
 	}
-	return start.In(zone)
+	return clock
 }
 
 // indexOfCalendar finds the calendar an event is filed on. The id is the answer where the
