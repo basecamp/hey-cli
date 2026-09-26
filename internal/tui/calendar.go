@@ -242,6 +242,9 @@ type yearLoadedMsg struct {
 type identityLoadedMsg struct {
 	firstWeekDay time.Weekday
 	use24Hour    bool
+	// timeZone is the account's zone as the identity serves it, and empty when it has none
+	// or the read failed.
+	timeZone string
 }
 
 // calendarSettingsSavedMsg is the settings form's write landing — or not.
@@ -390,6 +393,12 @@ type calendarView struct {
 	// use24Hour is HEY's own time_format preference: every clock this section draws reads
 	// it, and the settings form writes it back.
 	use24Hour bool
+
+	// accountZone is the zone HEY's web app reads a typed time in, as the identity served it
+	// when this section was last entered, and what a new event's times are written in. It is
+	// read with the rest of the identity rather than kept anywhere longer-lived, so a zone
+	// changed on the web is picked up the next time the calendar is opened.
+	accountZone string
 
 	// now is the clock the calendar anchors on. It is read on every fetch and
 	// every render, so a TUI left open overnight moves to the new day instead of
@@ -552,6 +561,7 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 	case identityLoadedMsg:
 		v.firstWeekDay = msg.firstWeekDay
 		v.use24Hour = msg.use24Hour
+		v.accountZone = msg.timeZone
 		v.rebuildView()
 		return nil, true
 
@@ -2081,7 +2091,7 @@ func (v *calendarView) startEventForm(mode eventFormMode, event Recording) tea.C
 		return notifyError("Cannot add an event", errNoCalendars)
 	}
 	v.editing = event
-	v.eventForm = newEventForm(mode, event, v.day(), fileable, v.newEventCalendarID(fileable), v.vc.styles)
+	v.eventForm = newEventForm(mode, event, v.day(), fileable, v.newEventCalendarID(fileable), v.accountZone, v.vc.styles)
 
 	// An edit is handed what the event already carries, and this is load-bearing rather than a
 	// courtesy: HEY clears the notes, location, link and attached email on any write that
@@ -2423,6 +2433,7 @@ func (v *calendarView) fetchIdentity() tea.Cmd {
 		return identityLoadedMsg{
 			firstWeekDay: time.Weekday(wd),
 			use24Hour:    identity.TimeFormat == string(hey.TimeFormatTwentyFourHour),
+			timeZone:     identity.TimeZone,
 		}
 	}
 }
