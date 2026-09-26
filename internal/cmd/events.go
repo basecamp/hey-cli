@@ -952,7 +952,7 @@ func keepsItsMoment(end string, had time.Time, date, clock string, zone clockZon
 	if !had.Equal(had.Truncate(time.Minute)) {
 		return apierr.ErrUsageHint(
 			fmt.Sprintf("the event's %s is at %s %s, and HEY is only sent whole minutes, so the edit would move it %s",
-				end, had.In(zone.loc).Format(time.DateTime), zone.label(), movedBy(had, sent)),
+				end, had.In(zone.loc).Format(time.DateTime+".999999999"), zone.label(), movedBy(had, sent)),
 			hint)
 	}
 	return apierr.ErrUsageHint(
@@ -974,8 +974,12 @@ func movedBy(had, sent time.Time) string {
 		return fmt.Sprintf("%d hours %s", moved/time.Hour, way)
 	case moved%time.Minute == 0:
 		return fmt.Sprintf("%d minutes %s", moved/time.Minute, way)
+	case moved < time.Millisecond:
+		return "less than a millisecond " + way
+	case moved < time.Second:
+		return fmt.Sprintf("%s milliseconds %s", strconv.FormatFloat(float64(moved)/float64(time.Millisecond), 'f', -1, 64), way)
 	case moved < time.Minute:
-		return fmt.Sprintf("%d seconds %s", moved/time.Second, way)
+		return fmt.Sprintf("%s seconds %s", strconv.FormatFloat(moved.Seconds(), 'f', -1, 64), way)
 	}
 	return moved.String() + " " + way
 }

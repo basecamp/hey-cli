@@ -955,6 +955,10 @@ func TestEventsEditRefusesToDropAKeptTimesSeconds(t *testing.T) {
 			want: "the event's start is at 2026-10-14 10:00:30 Europe/Zagreb, and HEY is only sent whole minutes, so the edit would move it 30 seconds earlier"},
 		{name: "zoneless", event: strings.Replace(zonelessEventJSON, `"2026-10-14T15:00:00Z"`, `"2026-10-14T15:00:45Z"`, 1),
 			want: "the event's end is at 2026-10-14 15:00:45 UTC, and HEY is only sent whole minutes, so the edit would move it 45 seconds earlier"},
+		{name: "milliseconds", event: strings.Replace(zonedEventJSON, `"2026-10-14T08:00:00Z"`, `"2026-10-14T08:00:00.500Z"`, 1),
+			want: "the event's start is at 2026-10-14 10:00:00.5 Europe/Zagreb, and HEY is only sent whole minutes, so the edit would move it 500 milliseconds earlier"},
+		{name: "seconds and a fraction", event: strings.Replace(zonedEventJSON, `"2026-10-14T08:00:00Z"`, `"2026-10-14T08:00:12.250Z"`, 1),
+			want: "the event's start is at 2026-10-14 10:00:12.25 Europe/Zagreb, and HEY is only sent whole minutes, so the edit would move it 12.25 seconds earlier"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			handler, requests := zoneServer(t, zoneFixture{event: tt.event})
