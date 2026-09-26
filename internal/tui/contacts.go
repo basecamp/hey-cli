@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	stdhtml "html"
 	"strings"
 
 	"charm.land/bubbles/v2/viewport"
@@ -13,6 +14,8 @@ import (
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
+	"github.com/basecamp/hey-cli/internal/htmlutil"
+	"github.com/basecamp/hey-cli/internal/markdown"
 	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
@@ -49,8 +52,9 @@ type contactsAppendedMsg struct {
 
 type contactDetailLoadedMsg struct {
 	requestResult
-	contact Contact
-	note    string
+	contact              Contact
+	note                 htmlutil.Markdown
+	noteMarkdownLossless bool
 }
 
 type contactSavedMsg struct {
@@ -72,28 +76,30 @@ type contactRevealedMsg struct {
 
 type contactNoteSavedMsg struct {
 	requestResult
-	note    string
-	deleted bool
+	note                 htmlutil.Markdown
+	noteMarkdownLossless bool
+	deleted              bool
 }
 
 type contactsView struct {
 	vc *viewContext
 
-	list                contactList
-	loaded              bool
-	nextPage            int  // the page after the contacts on screen, zero at the last one
-	loadingMore         bool // the page below is already on its way
-	detail              Contact
-	note                string
-	inDetail            bool
-	detailView          viewport.Model
-	contactForm         *contactForm
-	noteForm            *contactNoteForm
-	lastHiddenID        int64
-	pendingSavedContact bool
-	pendingOriginalID   int64
-	confirmNoteDelete   bool
-	notice              string
+	list                 contactList
+	loaded               bool
+	nextPage             int  // the page after the contacts on screen, zero at the last one
+	loadingMore          bool // the page below is already on its way
+	detail               Contact
+	note                 htmlutil.Markdown // the private note's rich text, read as Markdown
+	noteMarkdownLossless bool              // the note can make a trip through the Markdown editor unchanged
+	inDetail             bool
+	detailView           viewport.Model
+	contactForm          *contactForm
+	noteForm             *contactNoteForm
+	lastHiddenID         int64
+	pendingSavedContact  bool
+	pendingOriginalID    int64
+	confirmNoteDelete    bool
+	notice               string
 
 	requests      requestLane[contactRequestKind]
 	moreRequestID uint64 // identifies the only page-below read allowed to grow the list
@@ -162,6 +168,7 @@ func (v *contactsView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.detail = msg.contact
 		v.note = msg.note
+		v.noteMarkdownLossless = msg.noteMarkdownLossless
 		v.inDetail = true
 		v.refreshDetailView()
 		return nil, true
@@ -206,7 +213,8 @@ func (v *contactsView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.list.remove(msg.contact.ID)
 		v.inDetail = false
 		v.detail = Contact{}
-		v.note = ""
+		v.note = htmlutil.Markdown{}
+		v.noteMarkdownLossless = true
 		return tea.Batch(notify("Contact hidden"), v.loadMoreContacts()), true
 
 	case contactRevealedMsg:
@@ -232,6 +240,7 @@ func (v *contactsView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.noteForm = nil
 		v.note = msg.note
+		v.noteMarkdownLossless = msg.noteMarkdownLossless
 		saved := "Private note saved"
 		if msg.deleted {
 			saved = "Private note deleted"
@@ -282,7 +291,7 @@ func (v *contactsView) HelpBindings() []helpBinding {
 	}
 	if v.inDetail {
 		bindings := []helpBinding{{"e", "edit"}, {"n", "edit note"}, {"h", "hide"}}
-		if v.note != "" {
+		if !v.note.IsEmpty() {
 			label := "delete note"
 			if v.confirmNoteDelete {
 				label = "confirm delete"
@@ -344,7 +353,7 @@ func (v *contactsView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		case "h":
 			return v.hideContact()
 		case "x":
-			if v.note != "" {
+			if !v.note.IsEmpty() {
 				if !v.confirmNoteDelete {
 					v.confirmNoteDelete = true
 					v.notice = "Press x again to permanently delete this note"
@@ -405,7 +414,8 @@ func (v *contactsView) ExitThread() {
 	v.contactForm = nil
 	v.noteForm = nil
 	v.detail = Contact{}
-	v.note = ""
+	v.note = htmlutil.Markdown{}
+	v.noteMarkdownLossless = true
 	v.confirmNoteDelete = false
 	v.requests.cancel()
 }
@@ -503,8 +513,14 @@ func (v *contactsView) startEditContact() tea.Cmd {
 	return v.contactForm.init()
 }
 
+// startNote edits the note as Markdown, which saveNote turns back into HTML. Refuse a
+// note carrying anything Markdown cannot represent rather than dropping it on save.
 func (v *contactsView) startNote() tea.Cmd {
-	v.noteForm = newContactNoteForm(v.detail.ID, v.note, v.vc.styles)
+	if !v.noteMarkdownLossless {
+		v.notice = "This note contains formatting Markdown cannot preserve. Edit it in HEY or with `hey contact note set --note-html`."
+		return nil
+	}
+	v.noteForm = newContactNoteForm(v.detail.ID, v.note.String(), v.vc.styles)
 	v.noteForm.resize(v.vc.width, v.vc.height)
 	return v.noteForm.init()
 }
@@ -558,7 +574,7 @@ func (v *contactsView) revealContact(contactID int64) tea.Cmd {
 
 func (v *contactsView) saveNote() tea.Cmd {
 	form := v.noteForm
-	content := strings.TrimSpace(form.input.Value())
+	content := htmlutil.FromMarkdown(strings.TrimSpace(form.input.Value()))
 	requestID, ctx := v.requests.begin(v.vc.ctx, contactRequestMutation)
 	return func() tea.Msg {
 		note, err := v.vc.sdk.Contacts().SetNote(ctx, form.contactID, content)
@@ -568,7 +584,11 @@ func (v *contactsView) saveNote() tea.Cmd {
 		if err != nil {
 			return contactNoteSavedMsg{requestResult: newRequestResult(requestID, err)}
 		}
-		return contactNoteSavedMsg{requestResult: newRequestResult(requestID, nil), note: note.Note}
+		return contactNoteSavedMsg{
+			requestResult:        newRequestResult(requestID, nil),
+			note:                 contactNoteMarkdown(note),
+			noteMarkdownLossless: contactNoteMarkdownLossless(note),
+		}
 	}
 }
 
@@ -577,7 +597,7 @@ func (v *contactsView) deleteNote() tea.Cmd {
 	requestID, ctx := v.requests.begin(v.vc.ctx, contactRequestMutation)
 	return func() tea.Msg {
 		err := v.vc.sdk.Contacts().DeleteNote(ctx, contactID)
-		return contactNoteSavedMsg{requestResult: newRequestResult(requestID, err), deleted: true}
+		return contactNoteSavedMsg{requestResult: newRequestResult(requestID, err), noteMarkdownLossless: true, deleted: true}
 	}
 }
 
@@ -611,10 +631,10 @@ func (v *contactsView) renderContactDetail() string {
 	b.WriteString("\n")
 	b.WriteString(v.vc.styles.entryFrom.Render("Private note"))
 	b.WriteString("\n")
-	if v.note == "" {
+	if v.note.IsEmpty() {
 		b.WriteString(v.vc.styles.entryDate.Render("(empty)"))
 	} else {
-		b.WriteString(terminal.Sanitize(v.note))
+		b.WriteString(markdown.Render(v.note, max(v.vc.width-4, 40)))
 	}
 	b.WriteString("\n")
 	return b.String()
@@ -681,12 +701,35 @@ func (v *contactsView) fetchContactDetail(ctx context.Context, requestID uint64,
 		if err != nil {
 			return contactDetailLoadedMsg{requestResult: newRequestResult(requestID, err)}
 		}
-		content := ""
-		if note != nil {
-			content = note.Note
+		source := contactNoteHTML(note)
+		return contactDetailLoadedMsg{
+			requestResult:        newRequestResult(requestID, nil),
+			contact:              sdkContactDetailToModel(*detail),
+			note:                 htmlutil.ToMarkdown(source),
+			noteMarkdownLossless: htmlutil.MarkdownIsLossless(source),
 		}
-		return contactDetailLoadedMsg{requestResult: newRequestResult(requestID, nil), contact: sdkContactDetailToModel(*detail), note: content}
 	}
+}
+
+// contactNoteHTML reads a note from its rich text, which keeps the bold, lists and
+// links that the plain `note` flattens away. HEY serves both or neither; plain text on
+// its own is escaped into HTML first, so it is shown and saved again as the text it is.
+func contactNoteHTML(note *generated.ContactNote) string {
+	if note == nil {
+		return ""
+	}
+	if note.NoteHtml != "" {
+		return note.NoteHtml
+	}
+	return strings.ReplaceAll(stdhtml.EscapeString(note.Note), "\n", "<br>")
+}
+
+func contactNoteMarkdown(note *generated.ContactNote) htmlutil.Markdown {
+	return htmlutil.ToMarkdown(contactNoteHTML(note))
+}
+
+func contactNoteMarkdownLossless(note *generated.ContactNote) bool {
+	return htmlutil.MarkdownIsLossless(contactNoteHTML(note))
 }
 
 func contactSaveFailure(err error) string {

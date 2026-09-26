@@ -140,6 +140,8 @@ Thread attachments always appear with their filename, media type, and size. Use 
 
 Press Shift+O to open Contacts. Use Enter to view a contact, `a` to add, `e` to edit, `n` to edit the private note, `x` twice to delete a note, `h` to hide, and `u` to show the most recently hidden contact again. Escape or `q` goes back.
 
+The private note is shown formatted and edited as Markdown, the way `hey contact note set` takes it, so a note written in HEY keeps its bold, italics, lists, links and headings when you edit it here. Press ctrl+s to save it. A note holding an attachment or other formatting Markdown cannot preserve is shown but refused by the editor rather than losing that content; edit it in HEY or use `hey contact note set --note-html`.
+
 ## Calendar
 
 Press Shift+C to open Calendar, then `c` to manage time track categories. Create a category with `n`, rename the selected category with Enter or `r`, and press `x` twice to delete it. Time tracks in a deleted category become uncategorized.
