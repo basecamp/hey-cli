@@ -516,7 +516,7 @@ what is missing. Use `hey reply` to have HEY work out reply addressing.
 
 **ID note:** Every email thread has two IDs: an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, `hey stop-ignoring`, `hey bubble up|pop`, `hey set-aside group`, `hey bulk-reply` and `hey bundle view` expect `id`. `hey thread read`, `hey share`, `hey unshare`, `hey attachment list`, `hey reply`, `hey forward`, `hey compose --thread-id`, `hey collection add|remove`, and `hey workflow add|move|remove` expect `topic_id`. Passing the wrong one answers `not_found`, not a redirect — except `hey seen`, `hey unseen` and `hey move`, which ignore an unmatched id, act on every id that does match, and answer success either way (confirm with `hey box view <box> --json --all`, as in the note above).
 
-`hey box view --json`, `hey label view --json`, `hey collection view --json`, `hey bundle view --json`, `hey contact threads --json` and `hey search --json` all carry both — except a bundle posting, which can omit `topic_id` (see the Boxes section).
+`hey box view --json`, `hey label view --json`, `hey collection view --json`, `hey bundle view --json`, `hey contact threads --json` and `hey search --json` all carry both, with two exceptions: a bundle posting can omit `topic_id` (see the Boxes section), and a search result omits `id` when its thread has no active box item, so it cannot be used with the box item commands above.
 
 ### Email - Attachments
 
