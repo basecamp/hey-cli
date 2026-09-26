@@ -779,15 +779,11 @@ func (f *eventFields) validateExplicitScheduleFlags(cmd *cobra.Command) error {
 		}
 	}
 	if flags.Changed("time-zone") {
-		const hint = "an IANA time zone name, for example America/New_York"
 		if f.timeZone == "" {
-			return apierr.ErrUsageHint("--time-zone needs a time zone", hint)
+			return apierr.ErrUsageHint("--time-zone needs a time zone", "an IANA time zone name, for example America/New_York")
 		}
-		if f.timeZone == "Local" {
-			return apierr.ErrUsageHint("invalid time-zone: Local", hint)
-		}
-		if _, err := time.LoadLocation(f.timeZone); err != nil {
-			return apierr.ErrUsageHint(fmt.Sprintf("invalid time-zone: %s", f.timeZone), hint)
+		if _, err := loadEventZone(f.timeZone); err != nil {
+			return errInvalidTimeZone(f.timeZone)
 		}
 	}
 	return nil
