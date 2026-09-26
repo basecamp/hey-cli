@@ -1071,3 +1071,19 @@ func TestEventsEditRunsADefaultHourPastMidnight(t *testing.T) {
 	requests := runZoneEdit(t, zoneFixture{accountZone: "America/New_York", event: allDayEventJSON}, "--start-time", "23:30")
 	wantSchedule(t, requests.written(t), "2026-10-14", "23:30", "2026-10-15", "00:30", "America/New_York")
 }
+
+// A timed event made all-day with both its dates given needs no zone to read it by, so it
+// asks the account nothing and goes through for an account with no zone.
+func TestEventsEditMadeAllDayOnTwoDatesNeedsNoZone(t *testing.T) {
+	requests := runZoneEdit(t, zoneFixture{event: zonelessEventJSON}, "--all-day", "--starts-on", "2026-10-14", "--ends-on", "2026-10-15")
+	form := requests.written(t)
+	if got := form.Get("calendar_event[all_day]"); got != "1" {
+		t.Errorf("all_day = %q, want 1", got)
+	}
+	if got, want := form.Get("calendar_event[starts_at]")+" "+form.Get("calendar_event[ends_at]"), "2026-10-14 2026-10-15"; got != want {
+		t.Errorf("dates = %q, want %q", got, want)
+	}
+	if got := requests.identity.Load(); got != 0 {
+		t.Errorf("identity reads = %d, want none", got)
+	}
+}

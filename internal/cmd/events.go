@@ -1034,6 +1034,13 @@ func (f *eventFields) editZones(ctx context.Context, cmd *cobra.Command, event g
 		return clockZone{name, loc}, clockZone{name, loc}, err
 	}
 
+	// An all-day event given both its dates takes nothing from the event's clock, so no zone
+	// is needed to read it.
+	flags := cmd.Flags()
+	if allDay && flags.Changed("starts-on") && flags.Changed("ends-on") {
+		return clockZone{loc: time.UTC}, clockZone{loc: time.UTC}, nil
+	}
+
 	if !event.AllDay && event.StartsAtTimeZone != "" {
 		start, err := storedZone(event.StartsAtTimeZone)
 		if err != nil {
@@ -1046,7 +1053,6 @@ func (f *eventFields) editZones(ctx context.Context, cmd *cobra.Command, event g
 		return start, end, err
 	}
 
-	flags := cmd.Flags()
 	retyped := flags.Changed("starts-on") || flags.Changed("ends-on") || flags.Changed("start-time") || flags.Changed("end-time")
 	if allDay == event.AllDay && (allDay || !retyped) {
 		return clockZone{loc: time.UTC}, clockZone{loc: time.UTC}, nil
