@@ -123,22 +123,47 @@ func TestMarkdownSurvivesARoundTripThroughHEY(t *testing.T) {
 	}
 }
 
-// A note written in HEY's web editor reads as Markdown that writes back as the same
-// note, and from then on it is stable.
+// A note written in HEY's web editor — <div>s, with two <br>s for a paragraph break —
+// reads as Markdown that is already stable: the first write normalizes the HTML to
+// <p>s, and from then on every read gives the same Markdown and every write the same
+// HTML.
 func TestWebEditedNoteReadsAsStableMarkdown(t *testing.T) {
-	markdown := ToMarkdown(webEditedNoteHTML).String()
-	if want := "**Anniversary:** June 12  \n\n- Prefers texts after six"; markdown != want {
-		t.Fatalf("Markdown = %q, want %q", markdown, want)
+	tests := []struct {
+		name     string
+		html     string
+		markdown string
+		stored   string
+	}{
+		{
+			name:     "a label, a paragraph break and a list",
+			html:     webEditedNoteHTML,
+			markdown: "**Anniversary:** June 12\n\n- Prefers texts after six",
+			stored:   "<p><strong>Anniversary:</strong> June 12</p>\n<ul>\n<li>Prefers texts after six</li>\n</ul>",
+		},
+		{
+			name:     "a paragraph break inside one div",
+			html:     heyServesForEditing("<div>Met at RailsConf in Detroit.<br><br>Prefers texts after six.<br>Never on Sundays.</div>"),
+			markdown: "Met at RailsConf in Detroit.\n\nPrefers texts after six.  \nNever on Sundays.",
+			stored:   "<p>Met at RailsConf in Detroit.</p>\n<p>Prefers texts after six.<br>Never on Sundays.</p>",
+		},
 	}
-	stored := FromMarkdown(markdown)
-	if want := "<p><strong>Anniversary:</strong> June 12</p>\n<ul>\n<li>Prefers texts after six</li>\n</ul>"; stored != want {
-		t.Errorf("stored = %q, want %q", stored, want)
-	}
-	settled := ToMarkdown(heyServesForEditing(stored)).String()
-	if want := "**Anniversary:** June 12\n\n- Prefers texts after six"; settled != want {
-		t.Errorf("second read = %q, want %q", settled, want)
-	}
-	if again := FromMarkdown(settled); again != stored {
-		t.Errorf("third write = %q, want %q", again, stored)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			markdown := ToMarkdown(tt.html).String()
+			if markdown != tt.markdown {
+				t.Fatalf("Markdown = %q, want %q", markdown, tt.markdown)
+			}
+			stored := FromMarkdown(markdown)
+			if stored != tt.stored {
+				t.Errorf("stored = %q, want %q", stored, tt.stored)
+			}
+			again := ToMarkdown(heyServesForEditing(stored)).String()
+			if again != markdown {
+				t.Errorf("second read = %q, want the first read %q", again, markdown)
+			}
+			if rewritten := FromMarkdown(again); rewritten != stored {
+				t.Errorf("second write = %q, want the first write %q", rewritten, stored)
+			}
+		})
 	}
 }

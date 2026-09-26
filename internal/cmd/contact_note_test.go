@@ -109,7 +109,7 @@ func TestContactNoteShowAnswersTheNoteAsMarkdown(t *testing.T) {
 	if note.Note != webEditedNotePlain || note.NoteHTML != webEditedNoteHTML {
 		t.Errorf("note = %q, note_html = %q, want both as HEY served them", note.Note, note.NoteHTML)
 	}
-	if want := "**Anniversary:** June 12  \n\n- Prefers texts after six"; note.NoteMarkdown != want {
+	if want := "**Anniversary:** June 12\n\n- Prefers texts after six"; note.NoteMarkdown != want {
 		t.Errorf("note_markdown = %q, want %q", note.NoteMarkdown, want)
 	}
 }
@@ -139,7 +139,7 @@ func TestContactsShowAnswersTheNoteAsMarkdown(t *testing.T) {
 	if contact.Note != webEditedNotePlain || contact.NoteHTML != webEditedNoteHTML {
 		t.Errorf("note = %q, note_html = %q, want both as HEY served them", contact.Note, contact.NoteHTML)
 	}
-	if want := "**Anniversary:** June 12  \n\n- Prefers texts after six"; contact.NoteMarkdown != want {
+	if want := "**Anniversary:** June 12\n\n- Prefers texts after six"; contact.NoteMarkdown != want {
 		t.Errorf("note_markdown = %q, want %q", contact.NoteMarkdown, want)
 	}
 }
@@ -165,8 +165,8 @@ func TestContactNoteMarkdownWritesBackWithoutLoss(t *testing.T) {
 		t.Fatal(err)
 	}
 	settled := showContactNote(t, server).NoteMarkdown
-	if want := "**Anniversary:** June 12\n\n- Prefers texts after six"; settled != want {
-		t.Fatalf("note_markdown after a write = %q, want %q", settled, want)
+	if settled != first {
+		t.Fatalf("note_markdown after a write = %q, want the first read %q", settled, first)
 	}
 	for range 2 {
 		if _, err := runContacts(t, server, "note", "set", "7", "--note="+settled); err != nil {

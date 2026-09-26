@@ -36,8 +36,11 @@ type markdownizer struct {
 	pendingPrefix string
 	lists         []*listLevel
 	breaking      bool
-	depth         int
-	quoteDepth    int
+	// brokenLines is how many lines there were when the last one ending in a hard break
+	// was written, so a second break straight after it can tell it follows a break.
+	brokenLines int
+	depth       int
+	quoteDepth  int
 	// derivedLinks are the links linkedImage wrote with a label it derived rather
 	// than one the author gave, keyed by the rendered line: only these may collapse
 	// into a neighbouring link. Two lines with the same bytes and the same
@@ -802,7 +805,18 @@ func endsWithSpace(s string) bool {
 	return unicode.IsSpace(last)
 }
 
+// hardBreak ends the line with a Markdown hard break. A second break straight after one
+// is a blank line instead — two breaks are how HEY's editor writes a paragraph break,
+// and one hard break would run the paragraphs together — except inside a list item,
+// where a blank line would loosen the whole list.
 func (m *markdownizer) hardBreak() {
+	if m.line.Len() == 0 && m.pendingPrefix == "" && len(m.lists) == 0 &&
+		m.brokenLines > 0 && m.brokenLines == len(m.lines) {
+		last := len(m.lines) - 1
+		m.lines[last] = strings.TrimSuffix(m.lines[last], "  ")
+		m.blank()
+		return
+	}
 	m.breaking = m.line.Len() > 0
 	m.flushLine()
 }
@@ -828,6 +842,7 @@ func (m *markdownizer) flushLine() {
 	}
 	if breaking {
 		m.lines = append(m.lines, prefix+content)
+		m.brokenLines = len(m.lines)
 	} else {
 		m.lines = append(m.lines, strings.TrimRight(prefix+content, " "))
 	}

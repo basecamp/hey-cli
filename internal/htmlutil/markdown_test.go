@@ -169,6 +169,30 @@ func TestToMarkdownHardBreak(t *testing.T) {
 	}
 }
 
+// Two breaks in a row are a blank line, which is how HEY's editor writes a paragraph
+// break: a single hard break would run the two paragraphs together.
+func TestToMarkdownConsecutiveBreaksAreABlankLine(t *testing.T) {
+	tests := []struct {
+		name string
+		html string
+		want string
+	}{
+		{name: "two breaks", html: "<div>Thanks for the call.<br><br>Jason</div>", want: "Thanks for the call.\n\nJason"},
+		{name: "three breaks", html: "<div>Thanks for the call.<br><br><br>Jason</div>", want: "Thanks for the call.\n\nJason"},
+		{name: "two breaks ending a block", html: "<div><strong>Anniversary:</strong> June 12<br><br></div><div>Call after six</div>", want: "**Anniversary:** June 12\n\nCall after six"},
+		{name: "two breaks in a quote", html: "<blockquote>Thanks for the call.<br><br>Jason</blockquote>", want: "> Thanks for the call.\n>\n> Jason"},
+		{name: "one break still a hard break", html: "<div>Thanks,<br>Jason</div>", want: "Thanks,  \nJason"},
+		{name: "two breaks in a list item stay one", html: "<ul><li>Thanks,<br><br>Jason</li></ul>", want: "- Thanks,  \n  Jason"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := toMarkdown(tt.html); got != tt.want {
+				t.Errorf("ToMarkdown(%q)\n got %q\nwant %q", tt.html, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestToMarkdownHorizontalRule(t *testing.T) {
 	got := toMarkdown("<p>Above</p><hr><p>Below</p>")
 	want := "Above\n\n---\n\nBelow"
