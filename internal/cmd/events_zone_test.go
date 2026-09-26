@@ -859,3 +859,87 @@ func TestEventsEditKeepsATimeHEYTakesTheLaterOf(t *testing.T) {
 		})
 	}
 }
+
+// HEY checks that a timed event does not end before it starts on the instants, not the
+// dates: a flight leaving Tokyo at 09:00 on the 15th lands in Los Angeles at 18:00 on the
+// 14th, an hour later. Renaming it sends both ends back as they are.
+func TestEventsEditKeepsAnEventThatEndsOnAnEarlierDateElsewhere(t *testing.T) {
+	flight := `{"id":4821,"title":"Flight to Los Angeles","starts_at":"2026-10-15T00:00:00Z","ends_at":"2026-10-15T01:00:00Z",` +
+		`"starts_at_time_zone":"Asia/Tokyo","ends_at_time_zone":"America/Los_Angeles"}`
+	requests := runZoneEdit(t, zoneFixture{event: flight}, "--title", "Flight to Los Angeles (JL62)")
+	form := requests.written(t)
+	for field, want := range map[string]string{
+		"calendar_event[starts_at]":                "2026-10-15",
+		"calendar_event[starts_at_time]":           "09:00:00",
+		"calendar_event[starts_at_time_zone_name]": "Asia/Tokyo",
+		"calendar_event[ends_at]":                  "2026-10-14",
+		"calendar_event[ends_at_time]":             "18:00:00",
+		"calendar_event[ends_at_time_zone_name]":   "America/Los_Angeles",
+	} {
+		if got := form.Get(field); got != want {
+			t.Errorf("%s = %q, want %q", field, got, want)
+		}
+	}
+}
+
+// An event that would end before it starts is refused before it is written: a timed one on
+// its instants, an all-day one on its dates, and one day of a series the same way.
+func TestEventsEditRefusesAnEventThatEndsBeforeItStarts(t *testing.T) {
+	tests := []struct {
+		name  string
+		event string
+		args  []string
+		want  string
+	}{
+		{name: "timed", event: zonedEventJSON, args: []string{"--end-time", "09:00"},
+			want: "would end at 2026-10-14 09:00 Europe/Zagreb, before it starts at 2026-10-14 10:00 Europe/Zagreb"},
+		{name: "zoneless", event: zonelessEventJSON, args: []string{"--end-time", "09:00"},
+			want: "would end at 2026-10-14 13:00 UTC, before it starts at 2026-10-14 14:00 UTC"},
+		{name: "all-day", event: allDayEventJSON, args: []string{"--ends-on", "2026-10-13"},
+			want: "ends-on 2026-10-13 is before starts-on 2026-10-14"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler, requests := zoneServer(t, zoneFixture{accountZone: "America/New_York", event: tt.event})
+			_, err := runJSONCommand(t, handler, append([]string{"event", "edit", "4821", "2026-10-14", "--calendar", "9"}, tt.args...)...)
+			var cliErr *apierr.Error
+			if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, tt.want) {
+				t.Fatalf("error = %v, want a usage error containing %q", err, tt.want)
+			}
+			if got := requests.writes.Load(); got != 0 {
+				t.Errorf("writes = %d, want none", got)
+			}
+		})
+	}
+
+	t.Run("occurrence", func(t *testing.T) {
+		handler, writes := occurrenceServer(t, "2026-09-15",
+			`{"Calendar::Event":[`+occurrenceSeriesJSON+`]}`, "",
+			func(t *testing.T, form url.Values) { t.Error("wrote a day that ends before it starts") })
+		_, err := runJSONCommand(t, handler, "event", "edit", "4821", "--occurrence", "4821_2026-09-15", "--apply-to", "current",
+			"--starts-on", "2026-09-15", "--ends-on", "2026-09-14", "--allow-plain-notes")
+		var cliErr *apierr.Error
+		if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, "before it starts") {
+			t.Fatalf("error = %v, want a usage error about the order", err)
+		}
+		if writes.Load() != 0 {
+			t.Errorf("writes = %d, want none", writes.Load())
+		}
+	})
+}
+
+// A new event's ends share a zone, so dates in the wrong order are refused before anything is
+// read.
+func TestEventsAddRefusesDatesInTheWrongOrderBeforeReading(t *testing.T) {
+	var requests atomic.Int32
+	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}), "event", "add", "Team offsite", "--starts-on", "2026-10-15", "--ends-on", "2026-10-14", "--start-time", "09:00")
+	if err == nil || !strings.Contains(err.Error(), "ends-on 2026-10-14 is before starts-on 2026-10-15") {
+		t.Fatalf("error = %v, want the dates refused", err)
+	}
+	if got := requests.Load(); got != 0 {
+		t.Errorf("requests = %d, want none", got)
+	}
+}

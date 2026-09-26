@@ -747,6 +747,13 @@ func (f *eventFields) newSchedule(ctx context.Context) (eventSchedule, error) {
 			return eventSchedule{}, err
 		}
 	}
+	// A new event's ends share one zone, so dates in the wrong order are refused before the
+	// zone is read.
+	if f.startsOn != "" && f.endsOn != "" {
+		if err := checkEventDates(f.startsOn, f.endsOn); err != nil {
+			return eventSchedule{}, err
+		}
+	}
 	var today time.Time
 	if !allDay || f.startsOn == "" {
 		name, loc, err := f.writeZone(ctx)
@@ -796,11 +803,6 @@ func (f *eventFields) validateExplicitScheduleFlags(cmd *cobra.Command) error {
 	}
 	if flags.Changed("ends-on") {
 		if _, err := parseDateArg("ends-on date", f.endsOn); err != nil {
-			return err
-		}
-	}
-	if flags.Changed("starts-on") && flags.Changed("ends-on") {
-		if err := checkEventDates(f.startsOn, f.endsOn); err != nil {
 			return err
 		}
 	}
@@ -862,11 +864,10 @@ func (f *eventFields) scheduleFrom(ctx context.Context, cmd *cobra.Command, even
 	if _, err = parseDateArg("ends-on date", schedule.endsAt); err != nil {
 		return eventSchedule{}, err
 	}
-	if err = checkEventDates(schedule.startsAt, schedule.endsAt); err != nil {
-		return eventSchedule{}, err
-	}
-
 	if schedule.allDay {
+		if err = checkEventDates(schedule.startsAt, schedule.endsAt); err != nil {
+			return eventSchedule{}, err
+		}
 		return eventSchedule{startsAt: schedule.startsAt, endsAt: schedule.endsAt, allDay: true}, nil
 	}
 
@@ -899,7 +900,24 @@ func (f *eventFields) scheduleFrom(ctx context.Context, cmd *cobra.Command, even
 			return eventSchedule{}, err
 		}
 	}
+	if err = endsAfterItStarts(schedule, startZone, endZone); err != nil {
+		return eventSchedule{}, err
+	}
 	return schedule, nil
+}
+
+// endsAfterItStarts is HEY's own check on a timed event, that it does not end before it
+// starts, made on the instants rather than the dates: each end can have a zone of its own,
+// so a flight leaving Tokyo at 09:00 on the 15th lands in Los Angeles at 18:00 on the 14th.
+// An end as long as its start is allowed, as HEY allows it.
+func endsAfterItStarts(schedule eventSchedule, startZone, endZone clockZone) error {
+	start := startZone.instant(schedule.startsAt, schedule.startTime)
+	end := endZone.instant(schedule.endsAt, schedule.endTime)
+	if !end.Before(start) {
+		return nil
+	}
+	return apierr.ErrUsage(fmt.Sprintf("the event would end at %s %s %s, before it starts at %s %s %s",
+		schedule.endsAt, schedule.endTime, endZone.label(), schedule.startsAt, schedule.startTime, startZone.label()))
 }
 
 // keepsItsMoment refuses to send an end nobody retyped as a clock time HEY would place
@@ -924,6 +942,25 @@ func keepsItsMoment(end string, had time.Time, date, clock string, zone clockZon
 type clockZone struct {
 	name string
 	loc  *time.Location
+}
+
+// instant is when a date and clock time sent in this zone happen: placed as HEY places them
+// for a named zone, and as UTC for a zoneless end, which is sent that way.
+func (z clockZone) instant(date, clock string) time.Time {
+	day, _ := time.Parse(dateLayout, date)
+	at, _ := time.Parse(clockLayout, clock)
+	if z.name == "" {
+		return time.Date(day.Year(), day.Month(), day.Day(), at.Hour(), at.Minute(), 0, 0, time.UTC)
+	}
+	return wallClockOn(day, at, z.loc)
+}
+
+// label is the zone as a refusal names it.
+func (z clockZone) label() string {
+	if z.name == "" {
+		return "UTC"
+	}
+	return terminal.SanitizeLine(z.name)
 }
 
 // readIn is where the event's own end is read from. An all-day event's end is the date it
