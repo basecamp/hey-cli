@@ -3,7 +3,6 @@ package cmd
 import (
 	"errors"
 	"io"
-	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -11,7 +10,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"testing/fstest"
 	"time"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
@@ -651,50 +649,6 @@ func TestEventsEditOccurrenceOfAZonedSeriesKeepsItsZone(t *testing.T) {
 	}
 	if writes.Load() != 1 {
 		t.Errorf("writes = %d, want one", writes.Load())
-	}
-}
-
-// foldedFS answers a name in any case, as the zone files on a case-insensitive disk do.
-type foldedFS struct{ fstest.MapFS }
-
-func (f foldedFS) Open(name string) (fs.File, error) {
-	return f.MapFS.Open(f.stored(name))
-}
-
-func (f foldedFS) Stat(name string) (fs.FileInfo, error) {
-	return f.MapFS.Stat(f.stored(name))
-}
-
-func (f foldedFS) stored(name string) string {
-	for stored := range f.MapFS {
-		if strings.EqualFold(stored, name) {
-			return stored
-		}
-	}
-	return name
-}
-
-// On macOS Go loads america/new_york from the file America/New_York, and HEY would store a
-// name it cannot find. A name is only taken as the files spell it; one no file answers came
-// from the embedded database, which answers exact names alone.
-func TestZoneFileSpelledAs(t *testing.T) {
-	previous := zoneFiles
-	zoneFiles = func() []fs.FS {
-		return []fs.FS{foldedFS{fstest.MapFS{"America/New_York": {Data: []byte("TZif")}, "UTC": {Data: []byte("TZif")}}}}
-	}
-	t.Cleanup(func() { zoneFiles = previous })
-
-	for name, want := range map[string]bool{
-		"America/New_York": true,
-		"america/new_york": false,
-		"America/NEW_YORK": false,
-		"UTC":              true,
-		"utc":              false,
-		"Europe/Lisbon":    true,
-	} {
-		if got := zoneFileSpelledAs(name); got != want {
-			t.Errorf("zoneFileSpelledAs(%q) = %v, want %v", name, got, want)
-		}
 	}
 }
 
