@@ -273,7 +273,7 @@ postings, not the box, label or contact around them.
 | List time track categories | `hey timetrack categories --json` |
 | Create time track category | `hey timetrack category create "Client work"` |
 | List journal entries | `hey journal list --json` |
-| Read journal entry | `hey journal read 2024-03-15 --json` (`content_markdown` is the form `journal write` takes) |
+| Read journal entry | `hey journal read 2024-03-15 --json` (`content_markdown` is the form `journal write` takes when `content_markdown_lossless` is true) |
 | Write journal entry | `hey journal write "Shipped the pagination fix."` (whitespace-only content removes the entry) |
 | Check auth status | `hey auth status --json` |
 | Print bearer token | `hey auth token` (refuses a `--cookie` login) |
@@ -986,6 +986,29 @@ emptied `$EDITOR` buffer — **removes** the day's entry, and the command says "
 rather than "saved"; only do that when removal is the intent. (A literal `""` is treated as
 no content and falls through to stdin or `$EDITOR`.) A day with no entry is not an error:
 `--json` answers `ok` with the summary "No journal entry for <date>" and no `data`.
+
+**A journal entry is written whole**, so to add to one, read it, change it and write all of
+it back. `hey journal read --json` answers `content` (the HTML as HEY serves it),
+`content_markdown` and `content_markdown_lossless`. When `content_markdown_lossless` is
+`true`, add to the Markdown:
+
+```bash
+entry=$(hey journal read 2026-03-15 --jq '.data.content_markdown') &&
+  printf '%s\n\nBooked the venue for the second day.\n' "$entry" | hey journal write 2026-03-15
+```
+
+When it is `false`, the entry holds an attachment or other markup Markdown cannot carry, and
+writing Markdown would drop it. Add to the HTML instead — `--content-html` takes off the
+wrapper HEY serves the entry in, so this does not nest:
+
+```bash
+entry=$(hey journal read 2026-03-15 --jq '.data.content') &&
+  hey journal write 2026-03-15 --content-html "$entry<p>Booked the venue for the second day.</p>"
+```
+
+Keep the `&&`: a failed read must not go on to write. A day with no entry answers no `data`,
+which `--jq` prints as `null`, so check for that before adding to it, or the entry starts
+with the word null.
 
 ### Authentication
 

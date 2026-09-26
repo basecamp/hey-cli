@@ -25,7 +25,7 @@ func newJournalCommand() *journalCommand {
 		Use:   "journal",
 		Short: "Read and write journal entries",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, read, write. Read defaults to today; its JSON answers content (HTML as HEY serves it) and content_markdown (the form write takes). Write replaces the whole entry and accepts --content, stdin, or opens $EDITOR; content is Markdown, or raw HTML via --content-html.",
+			"agent_notes": "Subcommands: list, read, write. Read defaults to today; its JSON answers content (HTML as HEY serves it), content_markdown (the form write takes) and content_markdown_lossless; when that is false, change content and write it with --content-html instead. Write replaces the whole entry and accepts --content, stdin, or opens $EDITOR; content is Markdown, or raw HTML via --content-html.",
 		},
 	}
 
@@ -186,7 +186,15 @@ func (c *journalReadCommand) run(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return writeOK(map[string]any{"date": date, "content": content, "content_markdown": htmlutil.ToMarkdown(content)},
+	// content_markdown_lossless says whether the Markdown can be written back in place of
+	// the entry: one holding an attachment, an image or anything else Markdown cannot
+	// carry has to be changed as HTML instead.
+	return writeOK(map[string]any{
+		"date":                      date,
+		"content":                   content,
+		"content_markdown":          htmlutil.ToMarkdown(content),
+		"content_markdown_lossless": htmlutil.MarkdownIsLossless(content),
+	},
 		output.WithSummary(fmt.Sprintf("Journal entry for %s", date)),
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "write",

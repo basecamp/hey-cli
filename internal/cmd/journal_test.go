@@ -498,7 +498,7 @@ func TestJournalReadAnswersTheEntryAsMarkdown(t *testing.T) {
 	if want := "<div class=\"trix-content\">\n  " + webEditedJournalStored + "\n</div>\n"; entry["content"] != want {
 		t.Errorf("content = %q, want it as HEY served it", entry["content"])
 	}
-	if want := "**Shipped** the pagination fix  \n\n- Paired with Jane on the cover art"; entry["content_markdown"] != want {
+	if want := "**Shipped** the pagination fix\n\n- Paired with Jane on the cover art"; entry["content_markdown"] != want {
 		t.Errorf("content_markdown = %q, want %q", entry["content_markdown"], want)
 	}
 }
@@ -521,5 +521,45 @@ func TestJournalMarkdownWritesBackWithoutLoss(t *testing.T) {
 	}
 	if _, writes := store.snapshot(); writes[1] != writes[0] || writes[2] != writes[0] {
 		t.Errorf("writes = %q, want the same HTML each time", writes)
+	}
+}
+
+// A journal entry can hold what Markdown cannot carry — HEY's web editor attaches files
+// and images to one — so content_markdown_lossless says so, and a figure survives being
+// changed as HTML.
+const attachedJournalStored = `<div>Offsite agenda, signed off:</div><figure data-trix-attachment='{"contentType":"application/pdf","filename":"offsite-agenda.pdf","url":"/rails/active_storage/blobs/redirect/eyJfcmFpbHMiOnt9fQ--9c2d/offsite-agenda.pdf"}'><figcaption>offsite-agenda.pdf</figcaption></figure>`
+
+func TestJournalReadSaysWhenItsMarkdownIsLossless(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		stored string
+		want   bool
+	}{
+		{name: "an entry from HEY's editor", stored: webEditedJournalStored, want: true},
+		{name: "an entry with an attachment", stored: attachedJournalStored, want: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			server, _ := newJournalStore(t, tt.stored)
+			if lossless, present := readJournalEntry(t, server)["content_markdown_lossless"]; !present || lossless != tt.want {
+				t.Errorf("content_markdown_lossless = %#v (present %v), want %v", lossless, present, tt.want)
+			}
+		})
+	}
+}
+
+func TestJournalEntryWithAnAttachmentKeepsItWhenChangedAsHTML(t *testing.T) {
+	server, store := newJournalStore(t, attachedJournalStored)
+	content, _ := readJournalEntry(t, server)["content"].(string)
+	if _, err := runJournalWrite(t, server, "2026-03-15", "--content-html", content+"<div>Booked the venue for the second day.</div>"); err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := store.snapshot()
+	attachments := htmlutil.ExtractAttachments(stored)
+	if len(attachments) != 1 || attachments[0].Filename != "offsite-agenda.pdf" || attachments[0].URL != "/rails/active_storage/blobs/redirect/eyJfcmFpbHMiOnt9fQ--9c2d/offsite-agenda.pdf" ||
+		!strings.Contains(stored, "Booked the venue for the second day.") {
+		t.Errorf("stored = %q, want the attachment and the addition", stored)
+	}
+	if strings.Contains(stored, "trix-content") {
+		t.Errorf("stored = %q, want HEY's wrapper taken off", stored)
 	}
 }

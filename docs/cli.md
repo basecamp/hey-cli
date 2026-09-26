@@ -640,9 +640,13 @@ hey journal read 2026-03-15 --jq '.data.content_markdown'  # the entry as Markdo
 hey journal write "..."            # write today's entry (omit content: $EDITOR at a terminal, else stdin)
 ```
 
-`hey journal read --json` answers `content`, the entry's HTML as HEY serves it, and
-`content_markdown`, the entry as Markdown, which `hey journal write` writes back as the same
-entry. A write replaces the whole entry.
+`hey journal read --json` answers `content`, the entry's HTML as HEY serves it,
+`content_markdown`, the entry as Markdown, and `content_markdown_lossless`, which says
+whether that Markdown holds everything in the entry. A write replaces the whole entry. When
+`content_markdown_lossless` is `true`, `hey journal write` writes the Markdown back as the
+same entry. When it is `false`, the entry holds an attachment, an image, a table or other
+markup Markdown has no syntax for, and writing Markdown would drop it: change `content` and
+write it back with `--content-html` instead, which takes off the wrapper HEY serves it in.
 
 Saving an empty buffer in `$EDITOR` removes the day's entry, and `hey journal write` says
 so rather than reporting a save. An empty day answers with an empty entry, so if the read
