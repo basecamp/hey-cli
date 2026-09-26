@@ -218,6 +218,54 @@ func TestContactNoteHTMLRoundTripDoesNotNest(t *testing.T) {
 	}
 }
 
+// A note can hold what Markdown cannot carry: HEY's web editor refuses attachments on
+// a note, but --note-html writes whatever it is given. note_markdown_lossless says so,
+// and a figure survives being changed as HTML.
+const attachedNoteStored = `<div>Signed contract:</div><figure data-trix-attachment='{"contentType":"application/pdf","filename":"contract.pdf","url":"/rails/active_storage/blobs/redirect/eyJfcmFpbHMiOnt9fQ--4f1e/contract.pdf"}'><figcaption>contract.pdf</figcaption></figure>`
+
+func TestContactNoteSaysWhenItsMarkdownIsLossless(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		stored string
+		want   bool
+	}{
+		{name: "a note from HEY's editor", stored: webEditedNoteStored, want: true},
+		{name: "no note", stored: "", want: true},
+		{name: "a note with an attachment", stored: attachedNoteStored, want: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			server, _ := newNoteServer(t, tt.stored, htmlutil.ToText(tt.stored))
+			for _, args := range [][]string{{"note", "show", "7"}, {"show", "7"}} {
+				resp, err := runContacts(t, server, args...)
+				if err != nil {
+					t.Fatalf("%v: %v", args, err)
+				}
+				data, _ := resp.Data.(map[string]any)
+				if lossless, present := data["note_markdown_lossless"]; !present || lossless != tt.want {
+					t.Errorf("%v: note_markdown_lossless = %#v (present %v), want %v", args, lossless, present, tt.want)
+				}
+			}
+		})
+	}
+}
+
+func TestContactNoteWithAnAttachmentKeepsItWhenChangedAsHTML(t *testing.T) {
+	server, notes := newNoteServer(t, attachedNoteStored, "Signed contract:")
+	noteHTML := showContactNote(t, server).NoteHTML
+	if _, err := runContacts(t, server, "note", "set", "7", "--note-html", noteHTML+"<div>Renewal due in March.</div>"); err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := notes.snapshot()
+	attachments := htmlutil.ExtractAttachments(stored)
+	if len(attachments) != 1 || attachments[0].Filename != "contract.pdf" || attachments[0].URL != "/rails/active_storage/blobs/redirect/eyJfcmFpbHMiOnt9fQ--4f1e/contract.pdf" ||
+		!strings.Contains(stored, "Renewal due in March.") {
+		t.Errorf("stored = %q, want the attachment and the addition", stored)
+	}
+	if strings.Contains(stored, "trix-content") {
+		t.Errorf("stored = %q, want HEY's wrapper taken off", stored)
+	}
+}
+
 func TestContactNoteReadFailuresAreReported(t *testing.T) {
 	for _, tt := range []struct {
 		status int

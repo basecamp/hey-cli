@@ -23,9 +23,10 @@ type contactsShowCommand struct {
 
 type contactShowResult struct {
 	generated.ContactDetail
-	Note         string            `json:"note"`
-	NoteHTML     string            `json:"note_html,omitempty"`
-	NoteMarkdown htmlutil.Markdown `json:"note_markdown"`
+	Note                 string            `json:"note"`
+	NoteHTML             string            `json:"note_html,omitempty"`
+	NoteMarkdown         htmlutil.Markdown `json:"note_markdown"`
+	NoteMarkdownLossless bool              `json:"note_markdown_lossless"`
 }
 
 func newContactsShowCommand() *contactsShowCommand {
@@ -79,11 +80,12 @@ func (c *contactsShowCommand) run(cmd *cobra.Command, args []string) error {
 		return apierr.ErrNotFound("contact", args[0])
 	}
 
-	result := contactShowResult{ContactDetail: *contact}
+	result := contactShowResult{ContactDetail: *contact, NoteMarkdownLossless: true}
 	if note != nil {
 		result.Note = note.Note
 		result.NoteHTML = note.NoteHtml
 		result.NoteMarkdown = contactNoteMarkdown(note.Note, note.NoteHtml)
+		result.NoteMarkdownLossless = htmlutil.MarkdownIsLossless(note.NoteHtml)
 	}
 	if writer.EffectiveFormat() == output.FormatHTML {
 		return writeNoteHTML(cmd.OutOrStdout(), result.NoteHTML)

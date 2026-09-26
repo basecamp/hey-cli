@@ -61,3 +61,25 @@ func TestHeySkillRetriesMacOSKeychainAccessWithoutBroadEscalation(t *testing.T) 
 		}
 	}
 }
+
+// Setting a note replaces it, so the skill's recipe for adding to one must not write
+// back Markdown that has lost part of the note, nor write after a failed read.
+func TestHeySkillAddsToAContactNoteWithoutLosingIt(t *testing.T) {
+	data, err := FS.ReadFile("hey/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+
+	for _, want := range []string{
+		"note_markdown_lossless",
+		"note=$(hey contact note show 12345 --jq '.data.note_markdown') &&",
+		"note=$(hey contact note show 12345 --jq '.data.note_html') &&",
+		`hey contact note set 12345 --note-html "$note`,
+		"a failed read must not go on to write",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("embedded HEY skill does not contain %q", want)
+		}
+	}
+}

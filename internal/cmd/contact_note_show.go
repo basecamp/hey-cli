@@ -19,7 +19,7 @@ func newContactNoteShowCommand() *contactNoteShowCommand {
 		Use:   "show <id>",
 		Short: "Read a private contact note",
 		Annotations: map[string]string{
-			"agent_notes": "JSON answers note (HEY's plain text, formatting dropped), note_html (as HEY serves it) and note_markdown (the note as Markdown, which hey contact note set writes back unchanged).",
+			"agent_notes": "JSON answers note (HEY's plain text, formatting dropped), note_html (as HEY serves it), note_markdown (the note as Markdown, the form hey contact note set takes) and note_markdown_lossless. When note_markdown_lossless is false the note holds an attachment or other markup Markdown cannot carry: change note_html and write it back with --note-html instead.",
 		},
 		Example: `  hey contact note show 12345
   hey contact note show 12345 --json

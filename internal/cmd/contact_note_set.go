@@ -27,7 +27,7 @@ func newContactNoteSetCommand() *contactNoteSetCommand {
 		Use:   "set <id> [note]",
 		Short: "Write or edit a private contact note",
 		Annotations: map[string]string{
-			"agent_notes": "Replaces the whole note. Accepts --note, positional content, stdin, or opens $EDITOR with the existing note. The note is Markdown, or raw HTML via --note-html. To add to a note, read note_markdown from hey contact note show, change it, and set all of it. Use the delete subcommand to clear a note.",
+			"agent_notes": "Replaces the whole note. Accepts --note, positional content, stdin, or opens $EDITOR with the existing note. The note is Markdown, or raw HTML via --note-html. To add to a note, read note_markdown from hey contact note show, change it, and set all of it; when note_markdown_lossless is false, change note_html and set it with --note-html instead. Use the delete subcommand to clear a note.",
 		},
 		Example: `  hey contact note set 12345 "Prefers email"
   hey contact note set 12345 --note "Prefers email"
