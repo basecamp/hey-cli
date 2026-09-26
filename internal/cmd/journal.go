@@ -131,6 +131,14 @@ func newJournalReadCommand() *journalReadCommand {
 	journalReadCommand.cmd = &cobra.Command{
 		Use:   "read [date]",
 		Short: "Read a journal entry (default: today)",
+		Long: `Read a journal entry, today's by default.
+
+JSON answers content, the entry's HTML as HEY serves it; content_markdown, the entry as
+Markdown; and content_markdown_lossless, which says whether that Markdown holds everything in
+the entry. Write content_markdown back with hey journal write only when
+content_markdown_lossless is true. When it is false, the entry holds an attachment, an image
+or other markup Markdown cannot carry, and writing the Markdown would drop it: change content
+and write it back with hey journal write --content-html instead.`,
 		Example: `  hey journal read
   hey journal read 2026-03-15
   hey journal read --html > entry.html

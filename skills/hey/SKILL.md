@@ -1004,13 +1004,13 @@ entry for the same reason. Add to the HTML instead — `--content-html` takes of
 wrapper HEY serves the entry in, so this does not nest:
 
 ```bash
-entry=$(hey journal read 2026-03-15 --jq '.data.content') &&
+entry=$(hey journal read 2026-03-15 --jq '.data.content // error("no journal entry for this day")') &&
   hey journal write 2026-03-15 --content-html "$entry<p>Booked the venue for the second day.</p>"
 ```
 
 Keep the `&&`: a failed read must not go on to write. A day with no entry answers no `data`,
-which a bare `--jq '.data.content'` prints as `null`, so check for that before adding to the
-HTML, or the entry starts with the word null.
+which a bare `--jq '.data.content'` prints as `null`; the `// error(...)` makes that read fail
+instead, so the entry never starts with the word null.
 
 ### Authentication
 

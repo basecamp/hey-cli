@@ -96,7 +96,7 @@ func TestHeySkillAddsToAJournalEntryWithoutLosingIt(t *testing.T) {
 	for _, want := range []string{
 		"content_markdown_lossless",
 		"--jq 'if .data.content_markdown_lossless then .data.content_markdown else error(",
-		"entry=$(hey journal read 2026-03-15 --jq '.data.content') &&",
+		"entry=$(hey journal read 2026-03-15 --jq '.data.content // error(",
 		`hey journal write 2026-03-15 --content-html "$entry`,
 	} {
 		if !strings.Contains(content, want) {
