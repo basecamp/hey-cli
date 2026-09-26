@@ -468,7 +468,7 @@ hey contact show-again 12345                   # Reverse hiding
 hey contact bundle 12345                       # Group this contact's mail into one row
 hey contact unbundle 12345                     # List this contact's mail separately
 hey contact note show 12345 --json
-hey contact note show 12345 --jq '.data.note_markdown'  # The note as Markdown, ready to edit and set back
+hey contact note show 12345 --jq '.data.note_markdown'  # The note as Markdown; set it back only if note_markdown_lossless is true (see below)
 hey contact note set 12345 "Prefers email"
 echo "Prefers email; call only for urgent deliveries" | hey contact note set 12345
 hey contact note set 12345 --note-html "<p><strong>Prefers email</strong></p>"

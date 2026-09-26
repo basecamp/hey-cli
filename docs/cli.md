@@ -208,7 +208,7 @@ hey contact bundle 12345          # group this contact's mail into one row
 hey contact unbundle 12345        # list this contact's mail separately
 hey contact note set 12345 "Prefers email"
 hey contact note show 12345       # read the private note
-hey contact note show 12345 --jq '.data.note_markdown'  # the note as Markdown, to edit and set back
+hey contact note show 12345 --jq '.data.note_markdown'  # the note as Markdown; set it back only if note_markdown_lossless is true
 hey contact note delete 12345
 hey screener list                  # who is waiting to be screened
 hey screener list --count          # just the number waiting
