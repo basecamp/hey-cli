@@ -36,8 +36,13 @@ func TestUnwrapTrixContent(t *testing.T) {
 			want: "<div>Prefers email</div>",
 		},
 		{
-			name: "a wrapper with more classes than trix-content",
-			html: `<div class="trix-content trix-content--wide"><div>Prefers email</div></div>`,
+			name: "a note nested by earlier round trips that each added to it",
+			html: heyServesForEditing(heyServesForEditing("<div>Prefers email</div>") + "<div>Call after six</div>"),
+			want: "<div>Prefers email</div>\n\n<div>Call after six</div>",
+		},
+		{
+			name: "whitespace around the wrapper",
+			html: "\n\n  " + heyServesForEditing("<div>Prefers email</div>") + "\n\n",
 			want: "<div>Prefers email</div>",
 		},
 	}
@@ -55,6 +60,13 @@ func TestUnwrapTrixContentLeavesOtherHTMLAsItCame(t *testing.T) {
 		"<p>Prefers <strong>email</strong> &amp; calls</p>",
 		`<div class="note">Prefers email</div>`,
 		`<blockquote><div class="trix-content">Quoted from another note</div></blockquote>`,
+		// Only HEY's layout is taken off: <div class="trix-content"> and nothing else, at
+		// the start of the note. A div of the author's own is left alone wherever it is.
+		`<p>Intro</p><div class="trix-content" data-id="section"><p>Details</p></div>`,
+		`<p>Intro</p><div class="trix-content"><p>Details</p></div>`,
+		`<div class="trix-content" data-id="section"><p>Details</p></div>`,
+		`<div class="trix-content trix-content--wide"><p>Details</p></div>`,
+		`<div class="trix-content" id="details"><p>Details</p></div><p>Outro</p>`,
 		"Mentions trix-content in plain text",
 		"",
 	} {

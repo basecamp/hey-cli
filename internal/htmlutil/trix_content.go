@@ -12,9 +12,13 @@ import (
 // text it serves for editing — a contact note's note_html, a journal entry's
 // content_html. That div is Action Text's layout rather than part of what was written,
 // and HEY adds it again on every read, so HTML read from HEY and written back as it is
-// sinks one div deeper each time. Wrappers are taken off wherever they stand at the top
-// level, however deeply they have already nested; HTML without one is returned as it
-// came.
+// sinks one div deeper each time.
+//
+// Only the layout is taken off: a div carrying exactly class="trix-content", which is
+// all the layout writes, standing first in the HTML — with or without what was added
+// after it — and again at the start of what it held, which is where earlier round trips
+// nested it. A div like that anywhere else, or one with any other attribute or class,
+// is the author's and is kept. HTML with nothing to take off is returned as it came.
 func UnwrapTrixContent(s string) string {
 	if !strings.Contains(s, "trix-content") {
 		return s
@@ -24,7 +28,7 @@ func UnwrapTrixContent(s string) string {
 	if err != nil {
 		return s
 	}
-	unwrapped, changed := unwrapTrixContentNodes(nodes)
+	unwrapped, changed := unwrapLeadingTrixContent(nodes)
 	if !changed {
 		return s
 	}
@@ -38,30 +42,35 @@ func UnwrapTrixContent(s string) string {
 	return strings.TrimSpace(b.String())
 }
 
-func unwrapTrixContentNodes(nodes []*html.Node) ([]*html.Node, bool) {
-	unwrapped := make([]*html.Node, 0, len(nodes))
+// unwrapLeadingTrixContent replaces the first node that is not whitespace with its
+// children for as long as that node is HEY's layout.
+func unwrapLeadingTrixContent(nodes []*html.Node) ([]*html.Node, bool) {
 	changed := false
-	for len(nodes) > 0 {
-		node := nodes[0]
-		nodes = nodes[1:]
-		if !isTrixContentWrapper(node) {
-			unwrapped = append(unwrapped, node)
-			continue
+	for {
+		first := slices.IndexFunc(nodes, func(n *html.Node) bool { return !isWhitespace(n) })
+		if first < 0 || !isTrixContentLayout(nodes[first]) {
+			return nodes, changed
 		}
 		changed = true
+		layout := nodes[first]
 		var children []*html.Node
-		for child := node.FirstChild; child != nil; child = node.FirstChild {
-			node.RemoveChild(child)
+		for child := layout.FirstChild; child != nil; child = layout.FirstChild {
+			layout.RemoveChild(child)
 			children = append(children, child)
 		}
-		// The wrapper's children stand at the top level now, so a wrapper among them is
-		// looked at next rather than recursed into.
-		nodes = append(children, nodes...)
+		nodes = slices.Concat(children, nodes[first+1:])
 	}
-	return unwrapped, changed
 }
 
-func isTrixContentWrapper(n *html.Node) bool {
+func isWhitespace(n *html.Node) bool {
+	return n.Type == html.TextNode && strings.TrimSpace(n.Data) == ""
+}
+
+// isTrixContentLayout matches the div Action Text's layout writes
+// (layouts/action_text/contents/_content.html.erb): class="trix-content" and nothing
+// else.
+func isTrixContentLayout(n *html.Node) bool {
 	return n.Type == html.ElementNode && n.DataAtom == atom.Div &&
-		slices.Contains(strings.Fields(getAttr(n, "class")), "trix-content")
+		len(n.Attr) == 1 && n.Attr[0].Namespace == "" && n.Attr[0].Key == "class" &&
+		strings.TrimSpace(n.Attr[0].Val) == "trix-content"
 }
