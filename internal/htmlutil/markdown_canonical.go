@@ -60,6 +60,14 @@ type canonicalizer struct {
 	place   canonicalPlace
 	tokens  []canonicalToken
 	spacing bool
+	// spaceRun and nonBreaking describe the whitespace since the last thing written,
+	// across element boundaries: a run a non-breaking space holds open shows wider
+	// than one space.
+	spaceRun    int
+	nonBreaking bool
+	// blank records a break or a non-breaking space in the block, which makes a block
+	// with no text in it a line that shows.
+	blank bool
 }
 
 func (c *canonicalizer) walk(n *html.Node, place canonicalPlace, style string) {
@@ -163,10 +171,17 @@ func withStyle(style, add string) string {
 
 func (c *canonicalizer) text(s string, place canonicalPlace, style string) {
 	for _, r := range s {
-		// A non-breaking space shows as a space, which is what ToMarkdown writes for one;
-		// a run of them that would show wider is judged by MarkdownIsLossless itself.
-		if !place.pre && (r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\f' || r == ' ') {
+		// A non-breaking space on its own shows as a space, which is what ToMarkdown
+		// writes for one; a run it holds open shows wider, and a block of nothing else
+		// is a blank line.
+		if !place.pre && (r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\f' || r == '\u00a0') {
+			if r == '\u00a0' {
+				c.startBlock(place)
+				c.nonBreaking = true
+				c.blank = true
+			}
 			c.spacing = true
+			c.spaceRun++
 			continue
 		}
 		c.emit(r, style, place)
@@ -177,16 +192,27 @@ func (c *canonicalizer) emit(r rune, style string, place canonicalPlace) {
 	c.startBlock(place)
 	if c.spacing && len(c.tokens) > 0 && !c.tokens[len(c.tokens)-1].brk {
 		// A space belongs to no style: "**A** B" and "**A B**" show the same.
-		c.tokens = append(c.tokens, canonicalToken{text: ' '})
+		space := ' '
+		if c.spaceRun > 1 && c.nonBreaking {
+			space = '\u00a0'
+		}
+		c.tokens = append(c.tokens, canonicalToken{text: space})
 	}
-	c.spacing = false
+	c.resetSpacing()
 	c.tokens = append(c.tokens, canonicalToken{text: r, style: style})
 }
 
 func (c *canonicalizer) emitBreak(place canonicalPlace) {
 	c.startBlock(place)
-	c.spacing = false
+	c.resetSpacing()
+	c.blank = true
 	c.tokens = append(c.tokens, canonicalToken{brk: true})
+}
+
+func (c *canonicalizer) resetSpacing() {
+	c.spacing = false
+	c.spaceRun = 0
+	c.nonBreaking = false
 }
 
 // startBlock opens a block where the first thing in it is written; a block whose
@@ -206,12 +232,18 @@ func (c *canonicalizer) startBlock(place canonicalPlace) {
 // breaks that end the block show nothing and are dropped.
 func (c *canonicalizer) endBlock() {
 	tokens := c.tokens
+	blank := c.blank
 	c.tokens = nil
-	c.spacing = false
+	c.blank = false
+	c.resetSpacing()
 	for len(tokens) > 0 && tokens[len(tokens)-1].brk {
 		tokens = tokens[:len(tokens)-1]
 	}
 	if len(tokens) == 0 {
+		if blank {
+			// A block of breaks or non-breaking spaces and no text is a blank line.
+			c.blocks = append(c.blocks, c.place.String()+" blank")
+		}
 		return
 	}
 
