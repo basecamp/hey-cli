@@ -609,8 +609,9 @@ func TestZoneFileSpelledAs(t *testing.T) {
 
 // A clock time is placed where HEY places it. These are what ActiveSupport answers for
 // Time.zone.parse(clock).change(zone:), the way HEY reads a typed time: a time the clocks
-// skip moves an hour on, and a time they repeat is the first of the two — which Go's
-// time.Date gets right in New York and wrong in Zagreb.
+// skip moves an hour on, and a time they repeat is the daylight-saving one of the two, or
+// the later where neither keeps daylight saving — Almaty, Volgograd and Moscow going back an
+// hour for good. Go's time.Date picks by rules of its own and gets some of each wrong.
 func TestWallClockOnPlacesAClockTimeAsHEYDoes(t *testing.T) {
 	tests := []struct{ name, zone, day, clock, want string }{
 		{name: "Zagreb repeats 02:30", zone: "Europe/Zagreb", day: "2026-10-25", clock: "02:30", want: "2026-10-25T00:30:00Z"},
@@ -619,6 +620,9 @@ func TestWallClockOnPlacesAClockTimeAsHEYDoes(t *testing.T) {
 		{name: "Lord Howe repeats 01:45", zone: "Australia/Lord_Howe", day: "2026-04-05", clock: "01:45", want: "2026-04-04T14:45:00Z"},
 		{name: "Lord Howe skips 02:15", zone: "Australia/Lord_Howe", day: "2026-10-04", clock: "02:15", want: "2026-10-03T16:15:00Z"},
 		{name: "an ordinary day", zone: "America/New_York", day: "2026-06-10", clock: "10:00", want: "2026-06-10T14:00:00Z"},
+		{name: "Almaty repeats 23:30 for good", zone: "Asia/Almaty", day: "2024-02-29", clock: "23:30", want: "2024-02-29T18:30:00Z"},
+		{name: "Volgograd repeats 01:30 for good", zone: "Europe/Volgograd", day: "2020-12-27", clock: "01:30", want: "2020-12-26T22:30:00Z"},
+		{name: "Moscow repeats 01:30 for good", zone: "Europe/Moscow", day: "2014-10-26", clock: "01:30", want: "2014-10-25T22:30:00Z"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -680,7 +684,7 @@ func TestEventsEditRefusesToMoveAKeptTimeOutOfTheRepeatedHour(t *testing.T) {
 			_, err := runJSONCommand(t, handler, append([]string{"event", "edit", "4821", "2026-11-01", "--calendar", "9"}, tt.args...)...)
 			if tt.want == "" {
 				var cliErr *apierr.Error
-				if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, "clocks go back") {
+				if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, "clocks repeat") {
 					t.Fatalf("error = %v, want a usage error about the repeated hour", err)
 				}
 				if got := requests.writes.Load(); got != 0 {
@@ -711,7 +715,7 @@ func TestEventsEditOccurrenceRefusesToMoveADayOutOfTheRepeatedHour(t *testing.T)
 	_, err := runJSONCommand(t, handler, "event", "edit", "4821", "--occurrence", "4821_2026-10-27", "--apply-to", "current",
 		"--title", "Design review (moved)")
 	var cliErr *apierr.Error
-	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, "clocks go back") {
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, "clocks repeat") {
 		t.Fatalf("error = %v, want a usage error about the repeated hour", err)
 	}
 	if writes.Load() != 0 {
@@ -764,6 +768,40 @@ func TestEventsAddReadsTheIdentityOnceItself(t *testing.T) {
 			if got := writes.Load(); got != 1 {
 				t.Errorf("writes = %d, want one", got)
 			}
+		})
+	}
+}
+
+// Where neither side of a repeated hour keeps daylight saving, HEY takes the later moment:
+// Almaty's 23:30 on 29 February 2024 is 18:30Z. An event kept there goes back as it is, and
+// one at the earlier 23:30, 17:30Z, is refused rather than moved an hour later.
+func TestEventsEditKeepsATimeHEYTakesTheLaterOf(t *testing.T) {
+	for _, tt := range []struct {
+		start string
+		kept  bool
+	}{
+		{start: "2024-02-29T18:30:00Z", kept: true},
+		{start: "2024-02-29T17:30:00Z"},
+	} {
+		t.Run(tt.start, func(t *testing.T) {
+			event := `{"id":4821,"title":"Late call with Aigerim","starts_at":"` + tt.start + `","ends_at":"2024-02-29T20:00:00Z",` +
+				`"starts_at_time_zone":"Asia/Almaty","ends_at_time_zone":"Asia/Almaty"}`
+			handler, requests := zoneServer(t, zoneFixture{event: event})
+			_, err := runJSONCommand(t, handler, "event", "edit", "4821", "2024-02-29", "--calendar", "9", "--title", "Late call with Aigerim (moved)")
+			if !tt.kept {
+				var cliErr *apierr.Error
+				if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, "clocks repeat") {
+					t.Fatalf("error = %v, want a usage error about the repeated hour", err)
+				}
+				if got := requests.writes.Load(); got != 0 {
+					t.Errorf("writes = %d, want none", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("execute event edit: %v", err)
+			}
+			wantSchedule(t, requests.written(t), "2024-02-29", "23:30", "2024-03-01", "01:00", "Asia/Almaty")
 		})
 	}
 }

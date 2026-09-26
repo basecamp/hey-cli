@@ -255,9 +255,9 @@ they name, and the times you do not type keep theirs. --time-zone gives the even
 zone, keeping the moment of every time you do not type. An all-day event given a time
 takes the account's zone. If a zone is needed and the account has none, the edit refuses
 and asks for --time-zone. HEY is sent a clock time and a zone, and a clock time in the hour
-the clocks repeat as they go back is the first of the two; a time you keep at the second
-cannot be sent, so the edit refuses until you retype it. All of this holds for an
---occurrence edit too.
+the clocks repeat as they go back names two moments, of which HEY takes the daylight-saving
+one, or the later where neither is; a time you keep at the other cannot be sent, so the
+edit refuses until you retype it. All of this holds for an --occurrence edit too.
 
 The event is found by reading the calendars it might be on, which is one request each and
 covers the pages HEY answers with. Give the day it starts as [date] to look on that day
@@ -904,9 +904,9 @@ func (f *eventFields) scheduleFrom(ctx context.Context, cmd *cobra.Command, even
 
 // keepsItsMoment refuses to send an end nobody retyped as a clock time HEY would place
 // somewhere else. HEY is sent a date, a clock time and a zone, and of the two moments a
-// clock time names in the hour the clocks go back, it takes the first: an end at the
-// second one — an event HEY imported, or a zoneless one given a zone — cannot be sent back
-// as it is, and would move an hour earlier on an edit that never touched it.
+// clock time names in the hour the clocks go back, it takes one (see heysChoice): an end at
+// the other — an event HEY imported, or a zoneless one given a zone — cannot be sent back as
+// it is, and would move an hour on an edit that never touched it.
 func keepsItsMoment(end string, had time.Time, date, clock string, zone clockZone) error {
 	day, _ := time.Parse(dateLayout, date)
 	at, _ := time.Parse(clockLayout, clock)
@@ -914,9 +914,9 @@ func keepsItsMoment(end string, had time.Time, date, clock string, zone clockZon
 		return nil
 	}
 	return apierr.ErrUsageHint(
-		fmt.Sprintf("the event's %s, %s %s in %s, is the second %s of the night the clocks go back, and HEY can only be sent the first, so the edit would move it an hour",
-			end, date, clock, terminal.SanitizeLine(zone.name), clock),
-		fmt.Sprintf("retype it with --%ss-on and --%s-time to place it at the first %s, or choose a time outside that hour", end, end, clock))
+		fmt.Sprintf("the event's %s, %s %s in %s, falls in the hour the clocks repeat as they go back, and HEY would place that clock time at its other moment, so the edit would move it an hour",
+			end, date, clock, terminal.SanitizeLine(zone.name)),
+		fmt.Sprintf("retype it with --%ss-on and --%s-time to place it where HEY does, or choose a time outside that hour", end, end))
 }
 
 // clockZone is the zone one end of an edited event is read and written in. An end with no

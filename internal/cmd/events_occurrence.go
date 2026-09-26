@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -475,39 +476,69 @@ func occurrenceInstants(series generated.Recording, day time.Time) (time.Time, t
 // wallClockOn is a clock time on a day, resolved the way HEY resolves one. A clock time that
 // does not exist on that day — the hour a zone springs forward over — is moved an hour later
 // and tried again, which is what ActiveSupport does when it changes the day of a time. A
-// clock time that happens twice — the hour a zone repeats as it falls back — is the first of
-// the two, as ActiveSupport takes it. Go's time.Date is no guide to either: it picks one side
-// of a gap or an overlap by the zone's rules, not HEY's, so a title-only edit would move the
-// day an hour.
+// clock time that happens twice is resolved by heysChoice. Go's time.Date is no guide to
+// either: it picks one side of a gap or an overlap by its own rules, not HEY's, so a
+// title-only edit would move the day an hour.
 func wallClockOn(day, wall time.Time, loc *time.Location) time.Time {
 	hour, minute, second := wall.Clock()
 	for step := range 24 {
 		at := time.Date(day.Year(), day.Month(), day.Day(), hour+step, minute, second, 0, loc)
 		if h, m, _ := at.Clock(); h == (hour+step)%24 && m == minute {
-			return firstOfARepeatedClock(at)
+			return heysChoice(instantsReading(localClock(at), loc))
 		}
 	}
 	return time.Date(day.Year(), day.Month(), day.Day(), hour, minute, second, 0, loc)
 }
 
-// firstOfARepeatedClock is the earlier of the two instants a clock time names in the hour a
-// zone repeats, and the instant itself anywhere else. The earlier one belongs to the offset
-// in force before the clocks went back.
-func firstOfARepeatedClock(at time.Time) time.Time {
-	start, _ := at.ZoneBounds()
-	if start.IsZero() {
-		return at
+// localClock is the clock time an instant reads as, held as the same figures in UTC so it
+// can be stepped without a zone getting in the way.
+func localClock(at time.Time) time.Time {
+	return time.Date(at.Year(), at.Month(), at.Day(), at.Hour(), at.Minute(), at.Second(), 0, time.UTC)
+}
+
+// instantsReading is every instant whose clock in loc reads local, earliest first: none in a
+// gap the clocks skip, two where they go back over the same hour, one anywhere else. Each
+// offset the zone has within a day and a half either side is tried in turn.
+func instantsReading(local time.Time, loc *time.Location) []time.Time {
+	var instants []time.Time
+	seen := map[int]bool{}
+	for at := local.Add(-36 * time.Hour).In(loc); at.Before(local.Add(36 * time.Hour)); {
+		_, offset := at.Zone()
+		if !seen[offset] {
+			seen[offset] = true
+			if candidate := local.Add(-time.Duration(offset) * time.Second).In(loc); localClock(candidate).Equal(local) {
+				instants = append(instants, candidate)
+			}
+		}
+		_, end := at.ZoneBounds()
+		if end.IsZero() {
+			break
+		}
+		at = end.In(loc)
 	}
-	_, offset := at.Zone()
-	_, before := start.Add(-time.Second).Zone()
-	if before <= offset {
-		return at
+	slices.SortFunc(instants, func(a, b time.Time) int { return a.Compare(b) })
+	return slices.CompactFunc(instants, time.Time.Equal)
+}
+
+// heysChoice is the instant HEY takes for a clock time that names more than one:
+// ActiveSupport asks TZInfo for the period with daylight saving in force, and takes the
+// last of those still left — so the daylight-saving side of a fall-back, and the later of
+// two when neither side keeps daylight saving, as when Almaty moved its clocks back an hour
+// for good in 2024.
+func heysChoice(instants []time.Time) time.Time {
+	if len(instants) == 0 {
+		return time.Time{}
 	}
-	earlier := at.Add(-time.Duration(before-offset) * time.Second)
-	if earlier.Before(start) && earlier.In(at.Location()).Format(time.DateTime) == at.Format(time.DateTime) {
-		return earlier
+	var saving []time.Time
+	for _, at := range instants {
+		if at.IsDST() {
+			saving = append(saving, at)
+		}
 	}
-	return at
+	if len(saving) > 0 {
+		instants = saving
+	}
+	return instants[len(instants)-1]
 }
 
 // occurrenceCountdown is the countdown the write sends: the one --countdown names, or an
