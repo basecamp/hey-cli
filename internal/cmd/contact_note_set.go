@@ -27,7 +27,7 @@ func newContactNoteSetCommand() *contactNoteSetCommand {
 		Use:   "set <id> [note]",
 		Short: "Write or edit a private contact note",
 		Annotations: map[string]string{
-			"agent_notes": "Replaces the whole note. Accepts --note, positional content, stdin, or opens $EDITOR with the existing note. The note is Markdown, or raw HTML via --note-html. To add to a note, read note_markdown from hey contact note show, change it, and set all of it; when note_markdown_lossless is false, change note_html and set it with --note-html instead. Use the delete subcommand to clear a note.",
+			"agent_notes": "Replaces the whole note. Accepts --note, positional content, stdin, or opens $EDITOR with the existing note as Markdown, which is refused when that Markdown would drop part of the note. The note is Markdown, or raw HTML via --note-html. To add to a note, read note_markdown from hey contact note show, change it, and set all of it; when note_markdown_lossless is false, change note_html and set it with --note-html instead. Use the delete subcommand to clear a note.",
 		},
 		Example: `  hey contact note set 12345 "Prefers email"
   hey contact note set 12345 --note "Prefers email"
@@ -68,13 +68,9 @@ func (c *contactNoteSetCommand) run(cmd *cobra.Command, args []string) error {
 					return inputErr
 				}
 			} else {
-				existing, getErr := contactNoteForEditor(cmd.Context(), contactID, sdk.Contacts().Note)
-				if getErr != nil {
-					return apierr.FromSDK(getErr)
-				}
-				markdownNote, inputErr = editor.Open(existing)
+				markdownNote, inputErr = contactNoteFromEditor(cmd.Context(), contactID, sdk.Contacts().Note, editor.Open)
 				if inputErr != nil {
-					return apierr.ErrAPI(0, fmt.Sprintf("could not open editor: %v", inputErr))
+					return inputErr
 				}
 			}
 		}
@@ -118,8 +114,24 @@ func contactNoteInput(flagChanged bool, flagValue string, args []string) (string
 
 type contactNoteFetcher func(context.Context, int64) (*generated.ContactNote, error)
 
+// contactNoteFromEditor opens $EDITOR on the existing note as Markdown and answers what
+// was saved there.
+func contactNoteFromEditor(ctx context.Context, contactID int64, fetch contactNoteFetcher, open func(string) (string, error)) (string, error) {
+	existing, err := contactNoteForEditor(ctx, contactID, fetch)
+	if err != nil {
+		return "", apierr.FromSDK(err)
+	}
+	edited, err := open(existing)
+	if err != nil {
+		return "", apierr.ErrAPI(0, fmt.Sprintf("could not open editor: %v", err))
+	}
+	return edited, nil
+}
+
 // contactNoteForEditor prefills $EDITOR with the existing note as Markdown — the same
-// form the edited result is saved in.
+// form the edited result is saved in. A note whose Markdown would lose part of it — an
+// attachment, say — is refused before an editor opens, because saving the editor
+// replaces the whole note with what it held.
 func contactNoteForEditor(ctx context.Context, contactID int64, fetch contactNoteFetcher) (string, error) {
 	note, err := fetch(ctx, contactID)
 	if err != nil {
@@ -127,6 +139,12 @@ func contactNoteForEditor(ctx context.Context, contactID int64, fetch contactNot
 	}
 	if note == nil {
 		return "", nil
+	}
+	if !htmlutil.MarkdownIsLossless(note.NoteHtml) {
+		return "", apierr.ErrUsageHint(
+			fmt.Sprintf("the note on contact %d holds an attachment or other markup Markdown cannot carry, so editing it as Markdown would drop it", contactID),
+			fmt.Sprintf("Change its HTML instead: read it with `hey contact note show %d --jq '.data.note_html'` and write it back with `hey contact note set %d --note-html '<the changed HTML>'`", contactID, contactID),
+		)
 	}
 	return contactNoteMarkdown(note.Note, note.NoteHtml).String(), nil
 }

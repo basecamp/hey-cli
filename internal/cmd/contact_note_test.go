@@ -1,10 +1,14 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -282,6 +286,89 @@ func TestContactNoteWithAnAttachmentKeepsItWhenChangedAsHTML(t *testing.T) {
 	}
 	if strings.Contains(stored, "trix-content") {
 		t.Errorf("stored = %q, want HEY's wrapper taken off", stored)
+	}
+}
+
+// Saving $EDITOR replaces the whole note with what it held, so a note whose Markdown
+// would drop part of it is refused before an editor opens.
+func TestContactNoteFromEditorRefusesANoteItsMarkdownWouldDrop(t *testing.T) {
+	opened := false
+	open := func(string) (string, error) {
+		opened = true
+		return "Renewal due in March.", nil
+	}
+	fetch := func(context.Context, int64) (*generated.ContactNote, error) {
+		return &generated.ContactNote{ContactId: 7, Note: "Signed contract:", NoteHtml: "<div class=\"trix-content\">\n  " + attachedNoteStored + "\n</div>\n"}, nil
+	}
+	_, err := contactNoteFromEditor(t.Context(), 7, fetch, open)
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Hint, "--note-html") {
+		t.Fatalf("error = %#v, want a usage error pointing at --note-html", err)
+	}
+	if opened {
+		t.Error("the editor opened on a note its Markdown would drop part of")
+	}
+}
+
+func TestContactNoteFromEditorOpensOnALosslessNote(t *testing.T) {
+	var prefilled string
+	open := func(existing string) (string, error) {
+		prefilled = existing
+		return existing + "\n\nMoved to the Lisbon office in March.", nil
+	}
+	fetch := func(context.Context, int64) (*generated.ContactNote, error) {
+		return &generated.ContactNote{ContactId: 7, Note: webEditedNotePlain, NoteHtml: webEditedNoteHTML}, nil
+	}
+	edited, err := contactNoteFromEditor(t.Context(), 7, fetch, open)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "**Anniversary:** June 12\n\n- Prefers texts after six"; prefilled != want {
+		t.Errorf("editor opened on %q, want %q", prefilled, want)
+	}
+	if !strings.HasSuffix(edited, "Moved to the Lisbon office in March.") {
+		t.Errorf("edited = %q", edited)
+	}
+}
+
+// Through the command, with a real $EDITOR: a note with an attachment is refused and
+// nothing is written or opened; a lossless note is edited and saved.
+func TestContactNoteSetAtATerminalGuardsTheEditor(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in editor is a shell script")
+	}
+	previous := stdinIsTerminal
+	stdinIsTerminal = func() bool { return true }
+	t.Cleanup(func() { stdinIsTerminal = previous })
+
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "opened")
+	script := filepath.Join(dir, "editor")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\n: > '"+marker+"'\nprintf '\\n\\nMoved to the Lisbon office in March.\\n' >> \"$1\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("EDITOR", script)
+
+	server, notes := newNoteServer(t, attachedNoteStored, "Signed contract:")
+	_, err := runContacts(t, server, "note", "set", "7")
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage {
+		t.Fatalf("error = %#v, want a usage error", err)
+	}
+	if _, writes := notes.snapshot(); len(writes) != 0 {
+		t.Errorf("writes = %q, want none", writes)
+	}
+	if _, statErr := os.Stat(marker); statErr == nil {
+		t.Error("the editor opened on a note its Markdown would drop part of")
+	}
+
+	server, notes = newNoteServer(t, webEditedNoteStored, webEditedNotePlain)
+	if _, err := runContacts(t, server, "note", "set", "7"); err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := notes.snapshot()
+	if want := "<p><strong>Anniversary:</strong> June 12</p>\n<ul>\n<li>Prefers texts after six</li>\n</ul>\n<p>Moved to the Lisbon office in March.</p>"; stored != want {
+		t.Errorf("stored = %q, want %q", stored, want)
 	}
 }
 
