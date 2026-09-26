@@ -162,6 +162,12 @@ func TestNewMailAfterASkipAheadIsSinceTheSkip(t *testing.T) {
 	if _, has := tracker.floors[24089]; has {
 		t.Error("an unreadable cursor must not become a floor")
 	}
+
+	// HEY writes its cursors to the microsecond.
+	tracker.skippedTo(24090, hey.PostingChangesCursor{Since: "2026-08-21T10:00:00.518496Z", Version: "2"})
+	if got := tracker.floors[24090]; !got.Equal(time.Date(2026, 8, 21, 10, 0, 0, 518496000, time.UTC)) {
+		t.Errorf("floor = %v, want the cursor HEY wrote, to the microsecond", got)
+	}
 }
 
 func TestNewMailCarriedTwiceByOneReadIsNewOnce(t *testing.T) {
