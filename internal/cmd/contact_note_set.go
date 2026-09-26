@@ -78,7 +78,7 @@ func (c *contactNoteSetCommand) run(cmd *cobra.Command, args []string) error {
 	} else {
 		// HTML read from note_html carries HEY's editor wrapper; writing it back as it is
 		// would nest the note one level deeper on every round trip.
-		content = htmlutil.UnwrapTrixContent(strings.TrimSpace(content))
+		content = htmlutil.UnwrapTrixContent(strings.Trim(content, " \t\n\f\r"))
 	}
 	if content == "" {
 		return apierr.ErrUsage("note cannot be empty; use `hey contact note delete <id>` to clear it")

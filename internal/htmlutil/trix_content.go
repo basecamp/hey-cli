@@ -8,6 +8,10 @@ import (
 	"golang.org/x/net/html/atom"
 )
 
+// htmlSpace is the whitespace HTML collapses. A non-breaking space is not in it: it
+// shows, so taking one off would change the note.
+const htmlSpace = " \t\n\f\r"
+
 // UnwrapTrixContent takes off the <div class="trix-content"> that HEY puts around rich
 // text it serves for editing — a contact note's note_html, a journal entry's
 // content_html. That div is Action Text's layout rather than part of what was written,
@@ -39,7 +43,7 @@ func UnwrapTrixContent(s string) string {
 			return s
 		}
 	}
-	return strings.TrimSpace(b.String())
+	return strings.Trim(b.String(), htmlSpace)
 }
 
 // unwrapLeadingTrixContent replaces the first node that is not whitespace with its
@@ -63,7 +67,7 @@ func unwrapLeadingTrixContent(nodes []*html.Node) ([]*html.Node, bool) {
 }
 
 func isWhitespace(n *html.Node) bool {
-	return n.Type == html.TextNode && strings.TrimSpace(n.Data) == ""
+	return n.Type == html.TextNode && strings.Trim(n.Data, htmlSpace) == ""
 }
 
 // isTrixContentLayout matches the div Action Text's layout writes
@@ -72,5 +76,5 @@ func isWhitespace(n *html.Node) bool {
 func isTrixContentLayout(n *html.Node) bool {
 	return n.Type == html.ElementNode && n.DataAtom == atom.Div &&
 		len(n.Attr) == 1 && n.Attr[0].Namespace == "" && n.Attr[0].Key == "class" &&
-		strings.TrimSpace(n.Attr[0].Val) == "trix-content"
+		strings.Trim(n.Attr[0].Val, htmlSpace) == "trix-content"
 }

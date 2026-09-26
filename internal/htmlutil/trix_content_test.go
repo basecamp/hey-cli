@@ -41,6 +41,11 @@ func TestUnwrapTrixContent(t *testing.T) {
 			want: "<div>Prefers email</div>\n\n<div>Call after six</div>",
 		},
 		{
+			name: "a non-breaking space the note starts with",
+			html: heyServesForEditing("&nbsp;Indented"),
+			want: " Indented",
+		},
+		{
 			name: "whitespace around the wrapper",
 			html: "\n\n  " + heyServesForEditing("<div>Prefers email</div>") + "\n\n",
 			want: "<div>Prefers email</div>",
@@ -67,6 +72,8 @@ func TestUnwrapTrixContentLeavesOtherHTMLAsItCame(t *testing.T) {
 		`<div class="trix-content" data-id="section"><p>Details</p></div>`,
 		`<div class="trix-content trix-content--wide"><p>Details</p></div>`,
 		`<div class="trix-content" id="details"><p>Details</p></div><p>Outro</p>`,
+		// A non-breaking space shows, so a wrapper after one is not first in the note.
+		"&nbsp;<div class=\"trix-content\"><p>Details</p></div>",
 		"Mentions trix-content in plain text",
 		"",
 	} {
