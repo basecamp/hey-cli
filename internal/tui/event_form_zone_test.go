@@ -835,3 +835,29 @@ func TestNewEventFormStartsAfterNowInLordHowesRepeatedHalfHour(t *testing.T) {
 	}
 	wantPlaced(t, "start", values.StartsAt, values.StartTime, values.StartTimeZone, time.Date(2026, 4, 4, 15, 30, 0, 0, time.UTC))
 }
+
+// A view pinned to a day that has since become today offers the next whole hour of now, not of
+// the moment it was pinned: `n` to tomorrow at 09:15, left open until 15:10 the next day, and a
+// new event there opens at 16:00. A day that is not today keeps its own hour.
+func TestAPinnedViewThatBecameTodayOffersAnHourStillToCome(t *testing.T) {
+	v, _ := calendarWithEventServer(t)
+	v.now = func() time.Time { return time.Date(2026, 8, 20, 9, 15, 0, 0, time.Local) }
+	v.HandleContentKey(keyPress("n")) // 2026-08-21, pinned at 09:15 on the 20th
+	now := time.Date(2026, 8, 21, 15, 10, 0, 0, time.Local)
+	v.now = func() time.Time { return now }
+
+	v.HandleContentKey(keyPress("a"))
+	if got := v.eventForm.starts.date() + " " + v.eventForm.starts.clock(); got != "2026-08-21 16:00" {
+		t.Errorf("start = %s, want 2026-08-21 16:00, the next whole hour after now", got)
+	}
+	if starts, ok := v.eventForm.starts.moment(); !ok || starts.Before(now) {
+		t.Errorf("start %s is before now %s", starts, now)
+	}
+
+	v.eventForm = nil
+	v.HandleContentKey(keyPress("n")) // 2026-08-22, still carrying the pinned 09:15
+	v.HandleContentKey(keyPress("a"))
+	if got := v.eventForm.starts.date() + " " + v.eventForm.starts.clock(); got != "2026-08-22 10:00" {
+		t.Errorf("start = %s, want 2026-08-22 10:00, the day's own hour", got)
+	}
+}

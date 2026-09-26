@@ -2111,7 +2111,7 @@ func (v *calendarView) startEventForm(mode eventFormMode, event Recording) tea.C
 		return notifyError("Cannot add an event", errNoCalendars)
 	}
 	v.editing = event
-	v.eventForm = newEventForm(mode, event, v.day(), fileable, v.newEventCalendarID(fileable), v.accountZone, v.vc.styles)
+	v.eventForm = newEventForm(mode, event, v.newEventDay(), fileable, v.newEventCalendarID(fileable), v.accountZone, v.vc.styles)
 
 	// An edit is handed what the event already carries, and this is load-bearing rather than a
 	// courtesy: HEY clears the notes, location, link and attached email on any write that
@@ -2127,6 +2127,18 @@ func (v *calendarView) startEventForm(mode eventFormMode, event Recording) tea.C
 	}
 	v.eventForm.resize(v.vc.width, v.vc.height)
 	return v.eventForm.init()
+}
+
+// newEventDay is the moment a new event is offered from: the day in view, carrying the clock
+// it had when the view was moved there. A pinned view that has become today — `n` to
+// tomorrow at 09:15, the TUI left open until the next afternoon — would offer an hour long
+// gone, so today is read off the clock now instead.
+func (v *calendarView) newEventDay() time.Time {
+	now := v.now()
+	if day := v.day(); !sameDay(day, now) {
+		return day
+	}
+	return now
 }
 
 // saveEvent writes what the form is holding, including which calendar it is on: an update
