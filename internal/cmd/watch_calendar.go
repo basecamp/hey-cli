@@ -328,6 +328,9 @@ func (w *postingsWatch) readCalendar(ctx context.Context, calendar *watchedCalen
 		return w.recoverCalendar(ctx, calendar)
 	}
 	w.calendarWasRead(calendar)
+	if calendar.recovery.skipped {
+		w.reportCalendar(ctx, watchEvent{Change: watchCalendarResync, At: watchTime(calendar.recovery.skippedTo)}, calendar.id, calendar.name)
+	}
 	calendar.recovery = feedRecovery{}
 
 	if changes.NextCursor != nil {
@@ -348,26 +351,27 @@ func (w *postingsWatch) readCalendar(ctx context.Context, calendar *watchedCalen
 	return nil
 }
 
-// recoverCalendar is recoverBox for a calendar's recording feed: one calendar_resync
-// per episode, and a repeated 409 skipped again on the retry backoff.
+// recoverCalendar is recoverBox for a calendar's recording feed: the first skip is read
+// from straight away, a 409 after a skip waits on the retry backoff, and the episode's
+// one calendar_resync goes out with the clean read that ends it.
 func (w *postingsWatch) recoverCalendar(ctx context.Context, calendar *watchedCalendar) error {
 	skippedTo, skipped, err := w.skipCalendarAhead(ctx, calendar)
 	if err != nil || !skipped {
 		return err
 	}
 
-	if calendar.recovery.resynced {
+	first := !calendar.recovery.skipped
+	calendar.recovery.skipped = true
+	calendar.recovery.skippedTo = skippedTo
+	if !first {
 		calendar.recovery.holding = true
 		w.calendar.unread[calendar.id] = true
 		w.armRetry()
 		return nil
 	}
-	calendar.recovery = feedRecovery{resynced: true}
-	w.calendarWasRead(calendar)
-	fmt.Fprintf(w.errOut, "notice: too much changed in %s to follow one change at a time — skipped ahead, re-read the calendar\n", calendar.name)
-	w.reportCalendar(ctx, watchEvent{Change: watchCalendarResync, At: watchTime(skippedTo)}, calendar.id, calendar.name)
 
-	return nil
+	fmt.Fprintf(w.errOut, "notice: too much changed in %s to follow one change at a time — skipped ahead, re-read the calendar\n", calendar.name)
+	return w.readCalendar(ctx, calendar)
 }
 
 // calendarWasRead takes a calendar off the retry list once it is caught up.

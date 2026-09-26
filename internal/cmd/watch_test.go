@@ -481,9 +481,10 @@ func TestWatchSkipsAheadToHEYsClock(t *testing.T) {
 	}
 }
 
-// skipHEY is HEY as a skip-ahead meets it: the feed too far behind, and the box list,
-// the calendar list and the clock answering — save the reads fail answers itself, which
-// it says it did by returning true.
+// skipHEY is HEY as a skip-ahead meets it: a feed read from before 11:00 too far behind
+// to follow and one from after it clean, and the box list, the calendar list and the
+// clock answering — save the reads fail answers itself, which it says it did by
+// returning true.
 func skipHEY(t *testing.T, fail func(http.ResponseWriter, *http.Request) bool) {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -503,12 +504,25 @@ func skipHEY(t *testing.T, fail func(http.ResponseWriter, *http.Request) bool) {
 			_, _ = w.Write([]byte(`{"calendars": [{"calendar": {"id": 512, "name": "Household"},
 				"recording_changes_url": "/calendars/512/recording/changes.json?since=2026-08-18T11%3A00%3A00.000000Z&v=1"}]}`))
 		default:
-			w.WriteHeader(http.StatusConflict)
+			answerTooFarBehindBefore(w, r, time.Date(2026, 8, 21, 11, 0, 0, 0, time.UTC))
 		}
 	}))
 	t.Cleanup(server.Close)
 	t.Setenv("HEY_TOKEN", "test-token")
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
+}
+
+// answerTooFarBehindBefore answers a changes feed read as HEY would for a feed that
+// changed too much before behind to follow — `head :conflict`, no body — and not at
+// all since.
+func answerTooFarBehindBefore(w http.ResponseWriter, r *http.Request, behind time.Time) {
+	since, err := time.Parse(time.RFC3339Nano, r.URL.Query().Get("since"))
+	if err != nil || since.Before(behind) {
+		w.WriteHeader(http.StatusConflict)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{}`))
 }
 
 // behindWatch is a watch whose Imbox and Household calendar have both fallen too far
@@ -602,9 +616,12 @@ func TestWatchSkipAheadRetriesAListThatFailed(t *testing.T) {
 	for _, feed := range []string{"box", "calendar"} {
 		t.Run(feed, func(t *testing.T) {
 			var down atomic.Bool
-			var listReads atomic.Int32
+			var listReads, feedReads atomic.Int32
 			down.Store(true)
 			skipHEY(t, func(w http.ResponseWriter, r *http.Request) bool {
+				if strings.Contains(r.URL.Path, "/changes") {
+					feedReads.Add(1)
+				}
 				if r.URL.Path != listOf(feed) {
 					return false
 				}
@@ -637,7 +654,8 @@ func TestWatchSkipAheadRetriesAListThatFailed(t *testing.T) {
 				t.Errorf("read the list %d times, want once — the retry, not a doorbell, tries again", got)
 			}
 
-			// The list is back: the retry skips, and says so once.
+			// The list is back: the retry skips, reads the feed from there, and says so
+			// once.
 			down.Store(false)
 			errOut.Reset()
 			if err := watch.retryUnread(context.Background()); err != nil {
@@ -651,9 +669,9 @@ func TestWatchSkipAheadRetriesAListThatFailed(t *testing.T) {
 			}
 
 			// Skipped, the feed follows its doorbells again.
-			reads := listReads.Load()
+			reads := feedReads.Load()
 			ringFeed(t, watch, feed)
-			if listReads.Load() == reads {
+			if feedReads.Load() == reads {
 				t.Error("a doorbell after the skip should read the feed again")
 			}
 		})
@@ -661,8 +679,9 @@ func TestWatchSkipAheadRetriesAListThatFailed(t *testing.T) {
 }
 
 // A feed busier than one skip can outrun answers 409 again straight after the skip. That
-// is one recovery: one resync line and one notice, and the skips after it wait on the
-// retry backoff — doubling — rather than following every doorbell.
+// is one recovery: one notice, skips after the first waiting on the retry backoff —
+// doubling — rather than following every doorbell, and one resync line, when a clean
+// read ends it, so a reader that re-reads on it has missed nothing a later skip passed.
 func TestWatchRecoversFromARepeated409Once(t *testing.T) {
 	for _, feed := range []string{"box", "calendar"} {
 		t.Run(feed, func(t *testing.T) {
@@ -673,11 +692,10 @@ func TestWatchRecoversFromARepeated409Once(t *testing.T) {
 					return false
 				}
 				feedReads.Add(1)
-				if !quiet.Load() {
-					return false // 409, as HEY answers for a feed this busy
+				if quiet.Load() {
+					return false
 				}
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{}`))
+				w.WriteHeader(http.StatusConflict) // as HEY answers for a feed this busy
 				return true
 			})
 			watch, out, errOut := behindWatch(t)
@@ -687,10 +705,10 @@ func TestWatchRecoversFromARepeated409Once(t *testing.T) {
 				ring()
 			}
 			if got := feedReads.Load(); got != 2 {
-				t.Errorf("read the feed %d times for five doorbells, want twice — the second 409 holds the rest for the retry", got)
+				t.Errorf("read the feed %d times for five doorbells, want twice — the skip's own read, then the rest held for the retry", got)
 			}
-			if lines := watchLines(t, out); len(lines) != 1 || !strings.HasSuffix(lines[0]["change"].(string), "resync") {
-				t.Errorf("wrote %v, want one resync for the whole recovery", lines)
+			if lines := watchLines(t, out); len(lines) != 0 {
+				t.Errorf("wrote %v, want the resync kept for the clean read that ends the recovery", lines)
 			}
 			if got := strings.Count(errOut.String(), "notice: too much changed"); got != 1 {
 				t.Errorf("stderr = %q, want the skip announced once", errOut.String())
@@ -708,25 +726,39 @@ func TestWatchRecoversFromARepeated409Once(t *testing.T) {
 			if got := feedReads.Load(); got != 3 {
 				t.Errorf("read the feed %d times, want the retry's read too", got)
 			}
-			if lines := watchLines(t, out); len(lines) != 1 {
-				t.Errorf("wrote %v, want still one resync", lines)
+			if out.Len() != 0 {
+				t.Errorf("wrote %q, want still nothing while the feed stays too busy", out.String())
 			}
 			if watch.backoff != 2*firstWatchRetry {
 				t.Errorf("backoff = %v, want it doubled while the feed stays too busy", watch.backoff)
 			}
 
-			// The feed quietens and a clean read ends the recovery; the next time it
-			// falls behind is a recovery of its own, with its own resync.
-			quiet.Store(true)
-			watch.retry = nil
-			if err := watch.retryUnread(context.Background()); err != nil {
-				t.Fatalf("unexpected error: %v", err)
+			// The feed quietens and a clean read ends the recovery with its one resync,
+			// at the last skip; the next time it falls behind is a recovery of its own.
+			retryClean := func() {
+				t.Helper()
+				quiet.Store(true)
+				watch.retry = nil
+				if err := watch.retryUnread(context.Background()); err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				quiet.Store(false)
 			}
+			retryClean()
 			if len(watch.unread)+len(watch.calendar.unread) != 0 {
 				t.Error("a clean read should leave nothing behind")
 			}
-			quiet.Store(false)
+			lines := watchLines(t, out)
+			if len(lines) != 1 || !strings.HasSuffix(lines[0]["change"].(string), "resync") {
+				t.Fatalf("wrote %v, want one resync for the whole recovery", lines)
+			}
+			skippedTo, err := time.Parse(time.RFC3339Nano, lines[0]["at"].(string))
+			if err != nil {
+				t.Fatalf("resync at %v: %v", lines[0]["at"], err)
+			}
+			wantSkippedToHEYsClock(t, skippedTo)
 			ring()
+			retryClean()
 			if lines := watchLines(t, out); len(lines) != 2 {
 				t.Errorf("wrote %v, want a second resync for a second recovery", lines)
 			}
@@ -796,7 +828,6 @@ func TestWatchSkipAheadReadsTheBoxListPastTheCache(t *testing.T) {
 	}
 	watch.boxes[24088].cursor = cursor
 
-	ringBox(t, watch)
 	ringBox(t, watch)
 
 	mu.Lock()
@@ -1563,8 +1594,7 @@ func TestWatchReportsAResyncAfterSkippingAhead(t *testing.T) {
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/postings/changes") {
-			// As HEY answers: `head :conflict`, no body.
-			w.WriteHeader(http.StatusConflict)
+			answerTooFarBehindBefore(w, r, time.Date(2026, 8, 21, 11, 0, 0, 0, time.UTC))
 			return
 		}
 		w.Header().Set("Date", skipDate)

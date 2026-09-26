@@ -703,9 +703,11 @@ version from a list read past the SDK's cache (`newUncachedSDKClient`: the list'
 its rows, which neither posting activity nor a new feed version changes, and HEY answers
 409 for a version it no longer speaks), and sets that box's floor there
 (`newMail.skippedTo`): activity at or before it is never new there, known thread or not,
-because the watch never read the gap. A 409 straight after a skip is the same recovery
-(`feedRecovery`): no second resync, and the next skip waits on the retry backoff rather
-than every doorbell. A list or clock read that fails is retried on that backoff, and an
+because the watch never read the gap. The first skip is read from straight away; a 409
+after it is the same recovery (`feedRecovery`), and the next skip waits on the retry
+backoff rather than every doorbell. The recovery's one resync goes out with the clean read
+that ends it, at the last skip, so a reader that re-reads on it has missed nothing a later
+skip passed. A list or clock read that fails is retried on that backoff, and an
 interrupt during one ends quietly (`skipFailed`). A calendar's 409 skips the same way. `resync` is an event of its own — reported by default,
 left out by `--events new` — so a script for new mail never runs on one. The Omarchy bar plugin toasts from those lines itself (app-name, glyph,
 click-to-focus and the replace-not-stack id all live in the plugin), and nothing

@@ -102,8 +102,9 @@ Besides the thread changes, three lines describe the watch itself: "ready" once 
 and calendar is caught up and the subscription is live (again after every reconnect's
 catch-up), "disconnected" when the connection drops, and "resync" when a box changed more
 than the feed can list one change at a time and the watch skipped ahead — re-read that
-box. One resync covers the whole catch-up: a box still too busy after the skip is skipped
-again on the retry backoff without another. A resync is an event of its own: reported by default, scripts run for it and
+box. One resync covers the whole catch-up and comes once the box is followed again: a box
+still too busy after the skip is skipped again on the retry backoff, and its "at" is the
+last skip. A resync is an event of its own: reported by default, scripts run for it and
 --exit-on-first counts it, and --events can leave it out, as --events new does. A
 calendar's feed falls behind the same way, and calendar_resync is the same word for it.
 Ready and disconnected are written to stdout only.`,
@@ -364,12 +365,14 @@ type watchedBox struct {
 // feedRecovery is how far a box's or a calendar's feed is into getting back from a 409.
 // One skip-ahead usually does it; a feed busier than that — more than an increment's
 // worth of changes after HEY's clock at the skip — answers 409 again straight after.
-// That is one episode, not several: the resync is reported once, and the skips after
-// it wait on the retry backoff rather than following every doorbell, which would ring
-// as fast as the feed is changing. A clean read ends the episode.
+// That is one episode, not several. Its skips after the first wait on the retry backoff
+// rather than following every doorbell, which would ring as fast as the feed is
+// changing, and its one resync goes out with the clean read that ends it: after every
+// skip it took, so a reader that re-reads on it is not left stale by a later one.
 type feedRecovery struct {
-	resynced bool // the episode's resync is out
-	holding  bool // skipped again straight after: the retry, not a doorbell, reads next
+	skipped   bool      // the episode has skipped ahead
+	skippedTo time.Time // where its last skip landed: the resync's at
+	holding   bool      // the retry, not a doorbell, reads the feed next
 }
 
 // watchEvent is one changed posting or calendar recording, as a line of NDJSON or as a
@@ -681,6 +684,9 @@ func (w *postingsWatch) readBox(ctx context.Context, box *watchedBox) error {
 		return w.recoverBox(ctx, box)
 	}
 	w.wasRead(box)
+	if box.recovery.skipped {
+		w.report(ctx, watchEvent{Change: watchResync, At: watchTime(box.recovery.skippedTo)}, box, nil)
+	}
 	box.recovery = feedRecovery{}
 
 	if changes.NextCursor != nil {
@@ -706,29 +712,29 @@ func (w *postingsWatch) readBox(ctx context.Context, box *watchedBox) error {
 }
 
 // recoverBox gets a box that answered 409 back onto its feed by skipping it ahead. The
-// first skip of an episode is announced — the notice, and the resync line that is the
-// reader's cue to re-read the box — and counts as the box read. A 409 straight after
-// it skips again without a word, and leaves the box behind on the retry backoff, which
-// doubles while the feed stays too busy to follow. A box that is gone is not worth
-// re-reading, and a skip that has not happened — its retry is on the backoff — says
-// nothing.
+// first skip of an episode is announced on stderr and read from straight away, since
+// one skip usually lands on a feed the watch can follow; the resync line, the reader's
+// cue to re-read the box, goes out with the clean read (readBox). A 409 after a skip
+// skips again without a word and leaves the box on the retry backoff, which doubles
+// while the feed stays too busy to follow. A box that is gone is not worth re-reading,
+// and a skip that has not happened — its retry is on the backoff — says nothing.
 func (w *postingsWatch) recoverBox(ctx context.Context, box *watchedBox) error {
 	skippedTo, skipped, err := w.skipAhead(ctx, box)
 	if err != nil || !skipped {
 		return err
 	}
 
-	if box.recovery.resynced {
+	first := !box.recovery.skipped
+	box.recovery.skipped = true
+	box.recovery.skippedTo = skippedTo
+	if !first {
 		box.recovery.holding = true
 		w.readAgainLater(box)
 		return nil
 	}
-	box.recovery = feedRecovery{resynced: true}
-	w.wasRead(box)
-	fmt.Fprintf(w.errOut, "notice: too much changed in %s to follow one change at a time — skipped ahead, read the box with `hey box view %s`\n", box.name, box.kind)
-	w.report(ctx, watchEvent{Change: watchResync, At: watchTime(skippedTo)}, box, nil)
 
-	return nil
+	fmt.Fprintf(w.errOut, "notice: too much changed in %s to follow one change at a time — skipped ahead, read the box with `hey box view %s`\n", box.name, box.kind)
+	return w.readBox(ctx, box)
 }
 
 // classify decides whether a posting is new mail and records it, in that order.

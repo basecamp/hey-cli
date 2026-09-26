@@ -725,7 +725,7 @@ describe the watch itself: `{"change": "ready"}` once every box and calendar is 
 is live (again after every reconnect's catch-up), `{"change": "disconnected"}` when the
 connection drops, and `{"change": "resync", "box": {...}}` when a box changed more than the
 feed can list and the watch skipped ahead — re-read that box; one resync covers the whole
-catch-up, however many skips it takes. A resync is an event of its
+catch-up, however many skips it takes, and comes once the box is followed again. A resync is an event of its
 own: reported by default (`--run-*` scripts run for it, `--exit-on-first` counts it) and left
 out by `--events new`, so a script for new mail never runs on one. `ready` and `disconnected`
 carry no `box`, are written only when no `--run-*` command is given, and never count for

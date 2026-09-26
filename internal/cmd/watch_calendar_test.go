@@ -269,7 +269,7 @@ func TestWatchCalendarSkipsAheadOnAFullSync(t *testing.T) {
 			_, _ = w.Write([]byte(`{"id":1}`))
 			return
 		}
-		w.WriteHeader(http.StatusConflict)
+		answerTooFarBehindBefore(w, r, time.Date(2026, 8, 21, 11, 0, 0, 0, time.UTC))
 	}))
 	defer server.Close()
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
