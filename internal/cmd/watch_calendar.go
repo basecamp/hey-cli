@@ -46,11 +46,12 @@ const (
 // watchedCalendar is one calendar the watch follows: how far its recording feed has been
 // read, and the stream that rings when it changes.
 type watchedCalendar struct {
-	id     int64
-	name   string
-	cursor hey.CalendarChangesCursor
-	stream string
-	stop   context.CancelFunc
+	id       int64
+	name     string
+	cursor   hey.CalendarChangesCursor
+	stream   string
+	stop     context.CancelFunc
+	recovery feedRecovery
 }
 
 // calendarsWatch is the calendar half of a watch: the calendars and their cursors, the
@@ -268,7 +269,8 @@ func (w *postingsWatch) coalesceCalendarRing() {
 func (w *postingsWatch) readRungCalendars(ctx context.Context) error {
 	w.calendar.due = nil
 	for _, id := range w.calendar.take() {
-		if calendar, watching := w.calendar.calendars[id]; watching {
+		// A calendar holding for its retry after a repeated 409 is read by the retry.
+		if calendar, watching := w.calendar.calendars[id]; watching && !calendar.recovery.holding {
 			if err := w.readCalendar(ctx, calendar); err != nil {
 				return err
 			}
@@ -322,20 +324,11 @@ func (w *postingsWatch) readCalendar(ctx context.Context, calendar *watchedCalen
 			return nil
 		}
 	}
-	delete(w.calendar.unread, calendar.id)
-	w.settleBackoff()
-
 	if changes.FullSyncRequired {
-		skippedTo, skipped, err := w.skipCalendarAhead(ctx, calendar)
-		if err != nil {
-			return err
-		}
-		if skipped {
-			fmt.Fprintf(w.errOut, "notice: too much changed in %s to follow one change at a time — skipped ahead, re-read the calendar\n", calendar.name)
-			w.reportCalendar(ctx, watchEvent{Change: watchCalendarResync, At: watchTime(skippedTo)}, calendar.id, calendar.name)
-		}
-		return nil
+		return w.recoverCalendar(ctx, calendar)
 	}
+	w.calendarWasRead(calendar)
+	calendar.recovery = feedRecovery{}
 
 	if changes.NextCursor != nil {
 		calendar.cursor = *changes.NextCursor
@@ -353,6 +346,34 @@ func (w *postingsWatch) readCalendar(ctx context.Context, calendar *watchedCalen
 	}
 
 	return nil
+}
+
+// recoverCalendar is recoverBox for a calendar's recording feed: one calendar_resync
+// per episode, and a repeated 409 skipped again on the retry backoff.
+func (w *postingsWatch) recoverCalendar(ctx context.Context, calendar *watchedCalendar) error {
+	skippedTo, skipped, err := w.skipCalendarAhead(ctx, calendar)
+	if err != nil || !skipped {
+		return err
+	}
+
+	if calendar.recovery.resynced {
+		calendar.recovery.holding = true
+		w.calendar.unread[calendar.id] = true
+		w.armRetry()
+		return nil
+	}
+	calendar.recovery.resynced = true
+	w.calendarWasRead(calendar)
+	fmt.Fprintf(w.errOut, "notice: too much changed in %s to follow one change at a time — skipped ahead, re-read the calendar\n", calendar.name)
+	w.reportCalendar(ctx, watchEvent{Change: watchCalendarResync, At: watchTime(skippedTo)}, calendar.id, calendar.name)
+
+	return nil
+}
+
+// calendarWasRead takes a calendar off the retry list once it is caught up.
+func (w *postingsWatch) calendarWasRead(calendar *watchedCalendar) {
+	delete(w.calendar.unread, calendar.id)
+	w.settleBackoff()
 }
 
 // reportRecordings walks one bucket in type order, so a read reports the same changes in

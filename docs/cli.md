@@ -366,7 +366,8 @@ calendar — `{"change":"recording_added","calendar":{"id":512,"name":"Household
 "recording_id":88001,"recording_type":"Calendar::Event","recording":{}}` — and a calendar
 arriving, changing or leaving is `calendar_added`, `calendar_updated` or
 `calendar_deleted`. A calendar whose feed fell too far behind is skipped ahead and says so
-with `calendar_resync`, the way a box says `resync`. The email-specific flags switch the
+with `calendar_resync`, the way a box says `resync`. Either is said once per catch-up: a
+feed still too busy after the skip is skipped again on the retry backoff, quietly. The email-specific flags switch the
 calendars off: `--box` scopes the watch to mail, and an `--events` list naming only mail
 changes does the same.
 

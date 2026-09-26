@@ -624,6 +624,93 @@ func TestWatchSkipAheadRetriesAListThatFailed(t *testing.T) {
 	}
 }
 
+// A feed busier than one skip can outrun answers 409 again straight after the skip. That
+// is one recovery: one resync line and one notice, and the skips after it wait on the
+// retry backoff — doubling — rather than following every doorbell.
+func TestWatchRecoversFromARepeated409Once(t *testing.T) {
+	for _, feed := range []string{"box", "calendar"} {
+		t.Run(feed, func(t *testing.T) {
+			var feedReads atomic.Int32
+			var quiet atomic.Bool
+			skipHEY(t, func(w http.ResponseWriter, r *http.Request) bool {
+				if !strings.Contains(r.URL.Path, "/changes") {
+					return false
+				}
+				feedReads.Add(1)
+				if !quiet.Load() {
+					return false // 409, as HEY answers for a feed this busy
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{}`))
+				return true
+			})
+			watch, out, errOut := behindWatch(t)
+			ring := func() {
+				t.Helper()
+				var err error
+				if feed == "box" {
+					err = watch.read(context.Background(), actioncable.Message(`{"change":"upsert","box_id":24088}`))
+				} else {
+					watch.calendar.ring(512)
+					<-watch.calendar.wake
+					err = watch.readRungCalendars(context.Background())
+				}
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			}
+
+			for range 5 {
+				ring()
+			}
+			if got := feedReads.Load(); got != 2 {
+				t.Errorf("read the feed %d times for five doorbells, want twice — the second 409 holds the rest for the retry", got)
+			}
+			if lines := watchLines(t, out); len(lines) != 1 || !strings.HasSuffix(lines[0]["change"].(string), "resync") {
+				t.Errorf("wrote %v, want one resync for the whole recovery", lines)
+			}
+			if got := strings.Count(errOut.String(), "notice: too much changed"); got != 1 {
+				t.Errorf("stderr = %q, want the skip announced once", errOut.String())
+			}
+			if watch.retry == nil || watch.backoff != firstWatchRetry {
+				t.Fatalf("backoff = %v, want the repeat held for the first retry", watch.backoff)
+			}
+
+			// The retry comes round, as the loop runs it: another 409, another skip,
+			// the same recovery, and a longer wait before the next.
+			watch.retry = nil
+			if err := watch.retryUnread(context.Background()); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := feedReads.Load(); got != 3 {
+				t.Errorf("read the feed %d times, want the retry's read too", got)
+			}
+			if lines := watchLines(t, out); len(lines) != 1 {
+				t.Errorf("wrote %v, want still one resync", lines)
+			}
+			if watch.backoff != 2*firstWatchRetry {
+				t.Errorf("backoff = %v, want it doubled while the feed stays too busy", watch.backoff)
+			}
+
+			// The feed quietens and a clean read ends the recovery; the next time it
+			// falls behind is a recovery of its own, with its own resync.
+			quiet.Store(true)
+			watch.retry = nil
+			if err := watch.retryUnread(context.Background()); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(watch.unread)+len(watch.calendar.unread) != 0 {
+				t.Error("a clean read should leave nothing behind")
+			}
+			quiet.Store(false)
+			ring()
+			if lines := watchLines(t, out); len(lines) != 2 {
+				t.Errorf("wrote %v, want a second resync for a second recovery", lines)
+			}
+		})
+	}
+}
+
 // HEY's ETag for /boxes.json is the box rows, which neither posting activity nor a new
 // feed version touches, so a list the SDK revalidates answers 304 with the since the
 // watch fell behind from and the version HEY now refuses — and HEY answers 409 for a

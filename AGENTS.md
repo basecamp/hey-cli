@@ -696,10 +696,15 @@ it is the reader's. The Date header is whole seconds, so the start can be up to 
 serves says the time finer — Action Cable pings are whole seconds too — and rounding the
 other way would skip changes. A 409 skip-ahead moves the cursor to HEY's clock when it
 answered (`serverNowAnswered` — not taken back by the request's time, since a resync has
-no gap to catch and a slow request could leave a busy feed still behind; and not the box
-list's since, which the ETag cache can serve unchanged and would 409 again) and sets that box's floor there (`newMail.skippedTo`): activity at or before it
-is never new there, known thread or not, because the watch never read the gap. A calendar's
-409 skips the same way. `resync` is an event of its own — reported by default,
+no gap to catch and a slow request could leave a busy feed still behind), keeping the feed
+version from a list read past the SDK's cache (`newUncachedSDKClient`: the list's ETag is
+its rows, which neither posting activity nor a new feed version changes, and HEY answers
+409 for a version it no longer speaks), and sets that box's floor there
+(`newMail.skippedTo`): activity at or before it is never new there, known thread or not,
+because the watch never read the gap. A 409 straight after a skip is the same recovery
+(`feedRecovery`): no second resync, and the next skip waits on the retry backoff rather
+than every doorbell. A list or clock read that fails is retried on that backoff, and an
+interrupt during one ends quietly (`skipFailed`). A calendar's 409 skips the same way. `resync` is an event of its own — reported by default,
 left out by `--events new` — so a script for new mail never runs on one. The Omarchy bar plugin toasts from those lines itself (app-name, glyph,
 click-to-focus and the replace-not-stack id all live in the plugin), and nothing
 desktop-shaped lives in `watch*.go`.
