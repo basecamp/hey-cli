@@ -71,9 +71,12 @@ func (n *newMail) skippedTo(boxID int64, cursor hey.PostingChangesCursor) {
 // calling mail a moment old new rather than mail a moment new old. That is a
 // window of up to a second, plus the request's own time: a change from that
 // long before the watch began is after the start, so it is read, reported and
-// can be new, and --exit-on-first can stop on it. Nothing HEY serves says the
-// time any finer — Action Cable's pings are whole seconds too, and no JSON
-// answer carries a server "now" — and rounding the other way would skip up to
+// can be new, and --exit-on-first can stop on it. Nothing HEY serves on demand
+// says the time any finer: Action Cable's pings are whole seconds, and no JSON
+// answer carries a server "now". Finer times do exist — a posting doorbell's at
+// and a feed's cursors are to the microsecond — but only once something has
+// changed, which is no use for the moment a watch starts. And rounding the
+// other way would skip up to
 // a second of changes that did come after the start, which is worse than
 // repeating one that did not. A reader who cares can tell from the line's at.
 // The SDK caches GETs by URL, so a query the server ignores keeps this one out

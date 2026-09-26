@@ -692,9 +692,11 @@ cutoff every feed and new mail are measured against, since a fast one would skip
 a slow one would report history. That
 is HEY's semantics and state across events, so the CLI decides it once; what to do about
 it is the reader's. The Date header is whole seconds, so the start can be up to a second
-(plus the clock request's whole time, retries included) early and a change from that window is reported; nothing HEY
-serves says the time finer — Action Cable pings are whole seconds too — and rounding the
-other way would skip changes. A 409 skip-ahead moves the cursor to HEY's clock when it
+(plus the clock request's whole time, retries included) early and a change from that window
+is reported. Nothing HEY serves on demand says the time finer — Action Cable pings are
+whole seconds too; a posting doorbell's `at` and the feeds' cursors carry microseconds, but
+only once something has changed, never as a "now" before the watch starts — and rounding
+the other way would skip changes. A 409 skip-ahead moves the cursor to HEY's clock when it
 answered (`serverNowAnswered` — not taken back by the request's time, since a resync has
 no gap to catch and a slow request could leave a busy feed still behind), keeping the feed
 version from a list read past the SDK's cache (`newUncachedSDKClient`: the list's ETag is

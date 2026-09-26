@@ -202,9 +202,10 @@ and `--events new` selects the true ones. The rule:
   into a box is never new, and a reply on a known thread is. A box's first read starts at
   the watch's start, not at the server's cursor — the box's last posting activity, which a
   deletion or a bundled posting can postdate, and which a cached box list can serve days
-  old — so it carries only what arrived while the
-  watch was starting, which is new. `--since` reads backlog first, which the start-time
-  rule keeps out.
+  old — so it carries what arrived while the watch was starting, which is new, and at most
+  the whole-second window above: a change from just before the start that the start could
+  not be told apart from. `--since` reads backlog first, which the start-time rule keeps
+  out.
 - **Every posting the watch reads is recorded**, in every box and whatever `--events` or
   `--box` reports — `--box` picks what is reported, every box is followed — so a thread
   known from a filtered-out change, or from another box, is never mistaken for new when its
