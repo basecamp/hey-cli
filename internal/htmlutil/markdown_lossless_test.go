@@ -73,6 +73,8 @@ func TestMarkdownIsLossless(t *testing.T) {
 		{name: "a link labelled with a URL Markdown rewrites", html: `<div><a href="https://example.com/acme deals">https://example.com/acme deals</a></div>`, want: false},
 		{name: "a link labelled with its own URL", html: `<div><a href="https://example.com/acme">https://example.com/acme</a></div>`, want: true},
 		{name: "text after a list", html: `<ul><li>Partners</li></ul>Leads`, want: true},
+		{name: "a list straight inside a list", html: `<ul><ul><li>Indented</li></ul></ul>`, want: false},
+		{name: "a list inside a list item", html: `<ul><li>Partners<ol><li>Acme</li><li>Globex</li></ol></li></ul>`, want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

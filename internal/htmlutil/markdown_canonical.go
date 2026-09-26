@@ -97,6 +97,9 @@ func (c *canonicalizer) walk(n *html.Node, place canonicalPlace, style string) {
 		place.pre = true
 		c.block(n, place, "")
 	case "ul", "ol":
+		// Every list counts, not only the items: a list straight inside a list indents
+		// its items a level that Markdown can only write inside an item.
+		place.items += "(" + n.Data + ")"
 		c.block(n, place, style)
 	case "li":
 		place.items += listItemMark(n)
