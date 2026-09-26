@@ -154,6 +154,9 @@ when it does, unless you have already changed its times. The zone list still off
 (your machine's clock, saved without a zone) and the zones in your machine's zone database,
 or a shortlist of common zones where that database cannot be listed. An edit keeps the
 event's own zone, and an event saved without one stays on `Local`; an all-day event given a
-time takes the account's zone.
+time takes the account's zone. Times are read as HEY reads them, on `Local` too: a time the
+clocks skip moves on to one that exists. Saving refuses a time HEY would put somewhere else —
+one kept at the second of two moments as the clocks go back, or one with seconds — and asks
+you to retype it rather than moving the event.
 
 In Calendar, press `a` to create a habit. Habits visible in the current calendar range can be selected with `[` and `]`, edited with `e`, and deleted by pressing `x` twice. Habit forms use Tab to move between fields and Ctrl+S to save.

@@ -10,7 +10,11 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
+	"github.com/basecamp/hey-cli/internal/timezone"
 )
 
 // These tests never set time.Local: every moment they build is in a zone named here, so
@@ -111,6 +115,9 @@ func TestChoosingLocalOnANewEventSendsUTC(t *testing.T) {
 	if choices := form.starts.choices; len(choices) < 3 || choices[0] != localZoneLabel {
 		t.Fatalf("choices = %v, want Local first and the full list after it", choices)
 	}
+	// The machine is put in Tokyo through the widget's own seam, so what Local means here does
+	// not depend on where the suite runs.
+	onMachine(form, mustZone(t, "Asia/Tokyo"))
 	for _, picker := range []*dateTimePicker{form.starts, form.ends} {
 		picker.focusField(dateTimeFieldZone)
 		typeInto(t, picker, "local")
@@ -120,14 +127,34 @@ func TestChoosingLocalOnANewEventSendsUTC(t *testing.T) {
 		t.Fatalf("zones = %q → %q, want Local chosen", form.starts.zoneName(), form.ends.zoneName())
 	}
 
-	// The clock on the form is now read on the machine's, and goes as that instant in UTC.
-	starts, _ := time.ParseInLocation("2006-01-02 15:04", form.starts.date()+" "+form.starts.clock(), time.Local)
+	// The form still reads 04:00 → 05:00 on the 14th, now on Tokyo's clock, and it goes as UTC
+	// with no zone. HEY reads 2026-10-14 04:00 Asia/Tokyo as 2026-10-13 19:00 UTC.
 	values := form.values()
-	if values.StartsAt != starts.UTC().Format("2006-01-02") || values.StartTime != starts.UTC().Format("15:04") {
-		t.Errorf("start = %q %q, want %s", values.StartsAt, values.StartTime, starts.UTC())
-	}
 	if values.StartTimeZone != "" || values.EndTimeZone != "" {
 		t.Errorf("zones = %q → %q, want none — a moment on Local goes as UTC", values.StartTimeZone, values.EndTimeZone)
+	}
+	wantPlaced(t, "start", values.StartsAt, values.StartTime, values.StartTimeZone, time.Date(2026, 10, 13, 19, 0, 0, 0, time.UTC))
+	wantPlaced(t, "end", values.EndsAt, values.EndTime, values.EndTimeZone, time.Date(2026, 10, 13, 20, 0, 0, 0, time.UTC))
+}
+
+// onMachine puts both of a form's moments on a machine in zone, through the widget's seam.
+func onMachine(form *eventForm, zone *time.Location) {
+	form.starts.local = zone
+	form.ends.local = zone
+}
+
+// wantPlaced reads an end on the wire the way HEY reads it — the clock time in the zone sent
+// with it, or UTC without one — and checks it is the instant wanted. The expectations are
+// ActiveSupport's own: Time.zone = "UTC"; Time.zone.parse(clock).change(zone:).utc.
+func wantPlaced(t *testing.T, end, date, clock, zone string, want time.Time) {
+	t.Helper()
+	var loc *time.Location
+	if zone != "" {
+		loc = mustZone(t, zone)
+	}
+	got, ok := timezone.Placed(date, clock, loc)
+	if !ok || !got.Equal(want) {
+		t.Errorf("%s sent as %s %s %q, which HEY places at %s, want %s", end, date, clock, zone, got.UTC(), want.UTC())
 	}
 }
 
@@ -136,16 +163,92 @@ func TestChoosingLocalOnANewEventSendsUTC(t *testing.T) {
 func TestOneEndOnLocalIsWrittenInTheOtherEndsZone(t *testing.T) {
 	on := time.Date(2026, 10, 14, 9, 41, 0, 0, mustZone(t, "Europe/Madrid"))
 	form := newAccountZoneForm(eventFormCreate, Recording{}, on, indianapolis)
+	onMachine(form, time.UTC)
+	form.ends.setZoneName("")
+	form.ends.setMoment(time.Date(2026, 10, 14, 10, 15, 0, 0, time.UTC))
+
+	values := form.values()
+	if values.StartTimeZone != indianapolis || values.EndTimeZone != indianapolis {
+		t.Errorf("zones = %q → %q, want the account's for both", values.StartTimeZone, values.EndTimeZone)
+	}
+	// 2026-10-14 04:00 America/Indiana/Indianapolis => 08:00 UTC; the end is 10:15 UTC itself.
+	wantPlaced(t, "start", values.StartsAt, values.StartTime, values.StartTimeZone, time.Date(2026, 10, 14, 8, 0, 0, 0, time.UTC))
+	wantPlaced(t, "end", values.EndsAt, values.EndTime, values.EndTimeZone, time.Date(2026, 10, 14, 10, 15, 0, 0, time.UTC))
+	if got := form.validate(); got != "Name is required" {
+		t.Errorf("validate = %q, want only the missing name", got)
+	}
+}
+
+// A Local end beside a zoned start is written on the start's clock, and at the second 01:30 of
+// the night New York falls back that clock time is one HEY reads as the first: the form refuses
+// rather than moving the end an hour. The first 01:30 goes through.
+func TestALocalEndHEYWouldMoveIsRefused(t *testing.T) {
+	on := time.Date(2026, 11, 1, 0, 10, 0, 0, mustZone(t, "America/New_York"))
+	form := newAccountZoneForm(eventFormCreate, Recording{}, on, "America/New_York")
+	form.title.SetValue("Night shift handover")
+	onMachine(form, time.UTC)
 	form.ends.setZoneName("")
 
-	ends, _ := time.ParseInLocation("2006-01-02 15:04", form.ends.date()+" "+form.ends.clock(), time.Local)
-	ends = ends.In(mustZone(t, indianapolis))
-	values := form.values()
-	if values.EndTimeZone != indianapolis || values.EndsAt != ends.Format("2006-01-02") || values.EndTime != ends.Format("15:04") {
-		t.Errorf("end = %q %q %q, want %s", values.EndsAt, values.EndTime, values.EndTimeZone, ends)
+	// 06:30 UTC is the second 01:30 in New York; HEY reads 2026-11-01 01:30 as 05:30 UTC.
+	form.ends.setMoment(time.Date(2026, 11, 1, 6, 30, 0, 0, time.UTC))
+	want := "Ends — HEY reads 2026-11-01 01:30 America/New_York as another moment, so saving would move it an hour earlier. Retype the time or choose another"
+	if got := form.validate(); got != want {
+		t.Errorf("validate = %q, want %q", got, want)
 	}
-	if values.StartTimeZone != indianapolis || values.StartTime != "04:00" {
-		t.Errorf("start = %q %q, want 04:00 in the account's zone", values.StartTime, values.StartTimeZone)
+
+	form.ends.setMoment(time.Date(2026, 11, 1, 5, 30, 0, 0, time.UTC))
+	if got := form.validate(); got != "" {
+		t.Errorf("validate = %q, want the first 01:30 taken", got)
+	}
+	values := form.values()
+	wantPlaced(t, "end", values.EndsAt, values.EndTime, values.EndTimeZone, time.Date(2026, 11, 1, 5, 30, 0, 0, time.UTC))
+}
+
+// A title-only edit sends the times back as they are shown, and an end HEY imported at the
+// second 01:30 of the night New York falls back would come back at the first: the form refuses
+// rather than moving it, as `hey event edit` does. Retyping the time is the reader choosing
+// HEY's reading of it.
+func TestEditingAnEventHEYWouldMoveIsRefusedUntilRetyped(t *testing.T) {
+	event := Recording{
+		ID: 4821, Title: "Night shift handover", Type: "Calendar::Event",
+		StartsAt:     time.Date(2026, 11, 1, 5, 0, 0, 0, time.UTC),  // 01:00 EDT
+		EndsAt:       time.Date(2026, 11, 1, 6, 30, 0, 0, time.UTC), // the second 01:30, EST
+		StartsAtZone: "America/New_York", EndsAtZone: "America/New_York",
+	}
+	form := newAccountZoneForm(eventFormEdit, event, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC), indianapolis)
+	form.title.SetValue("Night shift handover, west door")
+
+	want := "Ends — HEY reads 2026-11-01 01:30 America/New_York as another moment, so saving would move it an hour earlier. Retype the time or choose another"
+	if got := form.validate(); got != want {
+		t.Errorf("validate = %q, want %q", got, want)
+	}
+
+	form.ends.focusField(dateTimeFieldTime)
+	form.ends.handleKey(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	typeInto(t, form.ends, "0")
+	if got := form.validate(); got != "" {
+		t.Errorf("validate = %q, want a retyped time taken", got)
+	}
+	values := form.values()
+	// 2026-11-01 01:00 and 01:30 America/New_York => 05:00 and 05:30 UTC.
+	wantPlaced(t, "start", values.StartsAt, values.StartTime, values.StartTimeZone, time.Date(2026, 11, 1, 5, 0, 0, 0, time.UTC))
+	wantPlaced(t, "end", values.EndsAt, values.EndTime, values.EndTimeZone, time.Date(2026, 11, 1, 5, 30, 0, 0, time.UTC))
+}
+
+// HEY is sent whole minutes, so an imported time with seconds cannot be kept by an edit that
+// never touched it; the form says so rather than dropping them.
+func TestEditingAnEventWithSecondsIsRefused(t *testing.T) {
+	event := Recording{
+		ID: 4822, Title: "Standup", Type: "Calendar::Event",
+		StartsAt: time.Date(2026, 8, 20, 13, 30, 30, 0, time.UTC),
+		EndsAt:   time.Date(2026, 8, 20, 13, 45, 0, 0, time.UTC),
+	}
+	form := newAccountZoneForm(eventFormEdit, event, time.Date(2026, 8, 20, 9, 0, 0, 0, time.UTC), indianapolis)
+	onMachine(form, time.UTC)
+
+	want := "Starts — HEY is sent whole minutes, so saving would move it 30 seconds earlier. Retype the time"
+	if got := form.validate(); got != want {
+		t.Errorf("validate = %q, want %q", got, want)
 	}
 }
 
@@ -408,5 +511,115 @@ func TestEventFormOrdersASkippedTimeAsHEYPlacesIt(t *testing.T) {
 	form.ends.timeInput.SetValue("03:30")
 	if got := form.validate(); got != "" {
 		t.Errorf("validate = %q, want an end at the start HEY places taken", got)
+	}
+}
+
+// A time typed on Local is read the way HEY and `hey event` read it too: on a machine in New
+// York, 02:30 on the morning the clocks spring forward is 03:30, sent as 07:30 UTC, not an
+// 01:30 Go would make of it.
+func TestATimeTypedOnLocalIsReadAsHEYReadsIt(t *testing.T) {
+	newYork := mustZone(t, "America/New_York")
+	form := newAccountZoneForm(eventFormCreate, Recording{}, time.Date(2026, 3, 8, 0, 20, 0, 0, newYork), "")
+	onMachine(form, newYork)
+	form.title.SetValue("Night shift handover")
+	form.starts.timeInput.SetValue("02:30")
+	form.ends.timeInput.SetValue("04:00")
+
+	if got := form.validate(); got != "" {
+		t.Fatalf("validate = %q, want the form taken", got)
+	}
+	values := form.values()
+	// 2026-03-08 02:30 and 04:00 America/New_York => 07:30 and 08:00 UTC.
+	wantPlaced(t, "start", values.StartsAt, values.StartTime, values.StartTimeZone, time.Date(2026, 3, 8, 7, 30, 0, 0, time.UTC))
+	wantPlaced(t, "end", values.EndsAt, values.EndTime, values.EndTimeZone, time.Date(2026, 3, 8, 8, 0, 0, 0, time.UTC))
+}
+
+// An all-day event opened for editing before the identity read lands takes the account's zone
+// when it does, for the times it would get by no longer being all day, as it would have had
+// the read come first.
+func TestAnAllDayEditTakesTheAccountZoneWhenTheIdentityLandsLate(t *testing.T) {
+	event := Recording{
+		ID: 3, Title: "Offsite", Type: "Calendar::Event", AllDay: true,
+		StartsAt: time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC),
+		EndsAt:   time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC),
+	}
+	form := newAccountZoneForm(eventFormEdit, event, time.Date(2026, 8, 20, 9, 0, 0, 0, time.UTC), "")
+	form.adoptAccountZone(indianapolis)
+	form.setAllDay(false)
+
+	values := form.values()
+	if values.StartTimeZone != indianapolis || values.EndTimeZone != indianapolis || values.StartsAt != "2026-08-20" {
+		t.Errorf("made timed = %s %q → %q, want the day in the account's zone",
+			values.StartsAt, values.StartTimeZone, values.EndTimeZone)
+	}
+
+	// A timed event keeps its own terms whenever the read lands.
+	timed := Recording{
+		ID: 100, Title: "Standup", Type: "Calendar::Event",
+		StartsAt: time.Date(2026, 8, 20, 13, 30, 0, 0, time.UTC),
+		EndsAt:   time.Date(2026, 8, 20, 13, 45, 0, 0, time.UTC),
+	}
+	form = newAccountZoneForm(eventFormEdit, timed, time.Date(2026, 8, 20, 9, 0, 0, 0, time.UTC), "")
+	form.adoptAccountZone(indianapolis)
+	if form.starts.zoneName() != "" || form.ends.zoneName() != "" {
+		t.Errorf("a zoneless event took the zones %q → %q", form.starts.zoneName(), form.ends.zoneName())
+	}
+}
+
+// Choosing Local is an answer even though it leaves the form showing what it showed, and an
+// identity read landing after it does not take it back.
+func TestChoosingLocalOutlastsALateIdentityRead(t *testing.T) {
+	form := newAccountZoneForm(eventFormCreate, Recording{}, time.Date(2026, 10, 14, 9, 41, 0, 0, time.UTC), "")
+	form.starts.focusField(dateTimeFieldZone)
+	typeInto(t, form.starts, "local")
+	form.starts.handleKey(keyPress("enter"))
+	shown := form.starts.clock()
+
+	form.adoptAccountZone(indianapolis)
+	if form.starts.zoneName() != "" || form.ends.zoneName() != "" {
+		t.Errorf("zones = %q → %q, want Local kept", form.starts.zoneName(), form.ends.zoneName())
+	}
+	if form.starts.clock() != shown {
+		t.Errorf("start = %s, want %s left as it was", form.starts.clock(), shown)
+	}
+}
+
+// At Lord Howe the clocks go back half an hour, so an hour on from 01:00 is the second 01:30,
+// which HEY reads as the first: a half-hour event. The form offers 02:00, the first end at
+// least an hour on that HEY places where it is shown.
+func TestNewEventFormRunsAnHourAcrossLordHowesHalfHourFallBack(t *testing.T) {
+	lordHowe := mustZone(t, "Australia/Lord_Howe")
+	form := newAccountZoneForm(eventFormCreate, Recording{}, time.Date(2026, 4, 5, 0, 41, 0, 0, lordHowe), "Australia/Lord_Howe")
+
+	values := form.values()
+	if values.StartTime != "01:00" || values.EndTime != "02:00" {
+		t.Errorf("times = %s → %s, want 01:00 → 02:00", values.StartTime, values.EndTime)
+	}
+	// 2026-04-05 01:00 and 02:00 Australia/Lord_Howe => 2026-04-04 14:00 and 15:30 UTC.
+	wantPlaced(t, "start", values.StartsAt, values.StartTime, values.StartTimeZone, time.Date(2026, 4, 4, 14, 0, 0, 0, time.UTC))
+	wantPlaced(t, "end", values.EndsAt, values.EndTime, values.EndTimeZone, time.Date(2026, 4, 4, 15, 30, 0, 0, time.UTC))
+}
+
+// A zone name comes from HEY — an event's own zone, the account's — and is shown with its
+// escape sequences stripped, on the form and in the open list, while the name itself is kept
+// for the checks and the write.
+func TestZoneNamesAreShownSanitized(t *testing.T) {
+	const hostile = "Europe/Madrid\x1b]0;owned\x07"
+	form := newAccountZoneForm(eventFormCreate, Recording{}, time.Date(2026, 10, 14, 9, 41, 0, 0, time.UTC), "")
+	form.starts.setZoneName(hostile)
+
+	if got := form.view(); strings.Contains(got, "\x1b]0;") {
+		t.Errorf("the form shows the zone's escape sequence: %q", got)
+	}
+	form.starts.focusField(dateTimeFieldZone)
+	typeInto(t, form.starts, "madrid")
+	if got := form.view(); strings.Contains(got, "\x1b]0;") {
+		t.Errorf("the zone list shows the escape sequence: %q", got)
+	}
+	if form.starts.zone != hostile {
+		t.Errorf("zone = %q, want the name kept as it came", form.starts.zone)
+	}
+	if got := form.starts.problem(); got != "That is not a time zone" {
+		t.Errorf("problem = %q, want the name refused", got)
 	}
 }

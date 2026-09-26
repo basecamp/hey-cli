@@ -96,11 +96,17 @@ type eventForm struct {
 	starts *dateTimePicker
 	ends   *dateTimePicker
 
-	// on is the day the form was opened on, and offered is when it offered the event, as
-	// schedule() reads it: together they are what lets a new event take the account's zone
-	// when the identity read naming it lands after the form opened — see adoptAccountZone.
-	on      time.Time
-	offered string
+	// startsHad and endsHad are the instants a timed event being edited already has, and
+	// what an end the reader leaves alone means; they are zero for a new event and for an
+	// all-day one, whose ends are dates rather than instants. See wireMoment.
+	startsHad time.Time
+	endsHad   time.Time
+
+	// on is the day the form was opened on, and allDayArrived whether the event being edited
+	// was all day: what adoptAccountZone needs to give a form the account's zone when the
+	// identity read naming it lands after the form opened.
+	on            time.Time
+	allDayArrived bool
 
 	// chosenReminders runs alongside eventReminders, and notify is the one the arrows are on.
 	chosenReminders []bool
@@ -210,62 +216,67 @@ func newEventForm(mode eventFormMode, event Recording, on time.Time, calendars [
 	form.starts.setZoneName(startZone)
 	form.ends.setZoneName(endZone)
 	if mode == eventFormCreate {
-		form.offerAnHour(starts)
+		form.offerAnHour()
 	}
+	if mode == eventFormEdit && !event.AllDay {
+		form.startsHad, form.endsHad = event.StartsAt, event.EndsAt
+	}
+	form.starts.markOpened()
+	form.ends.markOpened()
 	form.on = on
-	form.offered = form.schedule()
+	form.allDayArrived = mode == eventFormEdit && event.AllDay
 	return form
 }
 
-// offerAnHour ends a new event an hour after it starts, as the end reads once it is sent. An
-// hour on from the first 01:00 of the night New York falls back is the second 01:00, which
-// reads — and is sent — as the same clock as the start, and HEY places both at the first: a
-// zero-length event. The end moves on an hour at a time until it reads as after the start,
-// which there is 02:00, an hour on the clock.
-func (f *eventForm) offerAnHour(starts time.Time) {
-	ends := starts.Add(time.Hour)
-	f.ends.setMoment(ends)
-	begins, ok := f.starts.moment()
+// offerAnHour ends a new event at least an hour after it starts, where HEY will place both:
+// the first end from an hour on whose clock time HEY reads back as that same instant, a
+// quarter of an hour at a time. An hour on from the first 01:00 of the night New York falls
+// back is the second 01:00, which HEY reads as the first — a zero-length event — so the form
+// offers 02:00; at Lord Howe, where the clocks go back half an hour, an hour on from 01:00 is
+// the second 01:30, and the form offers 02:00 there too.
+func (f *eventForm) offerAnHour() {
+	starts, ok := f.starts.moment()
 	if !ok {
 		return
 	}
-	for range 3 {
-		if finishes, ok := f.ends.moment(); !ok || finishes.After(begins) {
+	clock := f.ends.clockZone()
+	if clock == nil {
+		clock = starts.Location()
+	}
+	for ends := starts.Add(time.Hour); ends.Before(starts.Add(48 * time.Hour)); ends = ends.Add(15 * time.Minute) {
+		if timezone.Representable(ends, clock) {
+			f.ends.setMoment(ends.In(clock))
 			return
 		}
-		ends = ends.Add(time.Hour)
-		f.ends.setMoment(ends)
 	}
+	f.ends.setMoment(starts.Add(time.Hour).In(clock))
 }
 
-// adoptAccountZone gives a new event the account's zone when the identity read that names it
-// lands after the form opened on Local, offering the next whole hour on that clock instead.
-// It does so only while the form still offers what it opened with: a reader who has touched
-// the day, a time or a zone has answered the question already, and moving the times out from
-// under them would be worse than Local. A zone that cannot be used changes nothing.
+// adoptAccountZone gives the form the account's zone when the identity read that names it
+// lands after the form opened on Local. A new event takes it and is offered the next whole
+// hour on that clock; an all-day event being edited takes it for the times it would be given
+// if it stopped being all day, as it would have had the read been first. Neither happens once
+// the reader has touched a day, a time or a zone — choosing Local included — since they have
+// answered the question already and moving the times out from under them would be worse than
+// Local. A zone that cannot be used changes nothing.
 func (f *eventForm) adoptAccountZone(name string) {
-	if f.mode != eventFormCreate || f.schedule() != f.offered {
+	if f.starts.changed() || f.ends.changed() || (f.mode == eventFormEdit && !f.allDayArrived) {
 		return
 	}
 	account, zone := usableZone(name)
 	if zone == nil {
 		return
 	}
-	starts := newEventStart(f.on, zone)
-	f.starts.setMoment(starts)
+	if f.mode == eventFormCreate {
+		f.starts.setMoment(newEventStart(f.on, zone))
+	}
 	f.starts.setZoneName(account)
 	f.ends.setZoneName(account)
-	f.offerAnHour(starts)
-	f.offered = f.schedule()
-}
-
-// schedule is everything the form says about when the event is, as one string to compare.
-func (f *eventForm) schedule() string {
-	return strings.Join([]string{
-		strconv.FormatBool(f.allDay),
-		f.starts.date(), f.starts.timeInput.Value(), f.starts.zone,
-		f.ends.date(), f.ends.timeInput.Value(), f.ends.zone,
-	}, "\x00")
+	if f.mode == eventFormCreate {
+		f.offerAnHour()
+	}
+	f.starts.markOpened()
+	f.ends.markOpened()
 }
 
 // usableZone is the account's zone when HEY can look it up by that name, and nothing when it
@@ -672,32 +683,82 @@ func (f *eventForm) values() eventFormValues {
 	if f.allDay {
 		return values
 	}
-	values.StartsAt, values.StartTime, values.StartTimeZone = wireMoment(f.starts, f.ends.zoneName())
-	values.EndsAt, values.EndTime, values.EndTimeZone = wireMoment(f.ends, f.starts.zoneName())
+	starts, ends := f.wireEnds()
+	values.StartsAt, values.StartTime, values.StartTimeZone = starts.date, starts.clock, starts.zone
+	values.EndsAt, values.EndTime, values.EndTimeZone = ends.date, ends.clock, ends.zone
 	return values
+}
+
+// wireEnd is one end of a timed event as HEY is sent it, and the instant the form means by it.
+type wireEnd struct {
+	date, clock, zone string
+	meant             time.Time
+	known             bool
+}
+
+func (f *eventForm) wireEnds() (starts, ends wireEnd) {
+	return wireMoment(f.starts, f.startsHad, f.ends.zoneName()), wireMoment(f.ends, f.endsHad, f.starts.zoneName())
 }
 
 // wireMoment is one moment as HEY should read it. A field the reader is still typing does not
 // parse; validate refuses the save before that matters, and until then the strings as typed
 // are the honest answer.
 //
+// The moment meant is the one on the widget, read as HEY reads a clock time — except on an
+// edit, where an end the reader has not touched means the instant the event already has. That
+// is what validate holds the wire to: a kept end HEY would place somewhere else is refused
+// rather than moved.
+//
 // HEY keeps a zone for both ends of an event or for neither, and a write naming one zone is
 // given it for both. So a moment left on Local beside one with a zone — a new event whose end
 // the reader moved back to Local, say — cannot go as UTC: HEY would read it on the other end's
-// clock. It is written on that clock instead, which is the same instant.
-func wireMoment(p *dateTimePicker, other string) (date, clock, zone string) {
+// clock. It is written on that clock instead.
+func wireMoment(p *dateTimePicker, had time.Time, other string) wireEnd {
+	meant, known := p.moment()
+	if !had.IsZero() && !p.changed() {
+		meant, known = had, true
+	}
 	if name := p.zoneName(); name != "" {
-		return p.date(), p.clock(), name
+		return wireEnd{date: p.date(), clock: p.clock(), zone: name, meant: meant, known: known}
 	}
-	at, ok := p.moment()
-	if !ok {
-		return p.date(), p.clock(), ""
+	if !known {
+		return wireEnd{date: p.date(), clock: p.clock()}
 	}
+	at, zone := meant.UTC(), ""
 	if loc, ok := loadEventZone(other); ok {
-		at = at.In(loc)
-		return at.Format("2006-01-02"), at.Format("15:04"), other
+		at, zone = meant.In(loc), other
 	}
-	return at.UTC().Format("2006-01-02"), at.UTC().Format("15:04"), ""
+	return wireEnd{date: at.Format("2006-01-02"), clock: at.Format("15:04"), zone: zone, meant: meant, known: true}
+}
+
+// placed is where HEY puts the end it is sent.
+func (w wireEnd) placed() (time.Time, bool) {
+	var loc *time.Location
+	if w.zone != "" {
+		zone, ok := loadEventZone(w.zone)
+		if !ok {
+			return time.Time{}, false
+		}
+		loc = zone
+	}
+	return timezone.Placed(w.date, w.clock, loc)
+}
+
+// moveProblem is the refusal for an end HEY would place away from the moment meant: one with
+// seconds, which HEY is never sent, or one at the second of two moments a clock time names as
+// the clocks go back, where HEY takes the first. Retyping the time is the reader saying that
+// HEY's reading of it is the one they want.
+func (w wireEnd) moveProblem(label string, placed time.Time) string {
+	moved := timezone.MovedBy(w.meant, placed)
+	if !w.meant.Equal(w.meant.Truncate(time.Minute)) {
+		return fmt.Sprintf("%s — HEY is sent whole minutes, so saving would move it %s. Retype the time", label, moved)
+	}
+	zone := "UTC"
+	if w.zone != "" {
+		zone = terminal.SanitizeLine(w.zone)
+	}
+	return fmt.Sprintf("%s — HEY reads %s %s %s as another moment, so saving would move it %s. Retype the time or choose another",
+		label, w.date, w.clock, zone, moved)
 }
 
 // trixHTML is what the reader typed as the rich text HEY stores an event's notes as: escaped,
@@ -777,11 +838,29 @@ func (f *eventForm) validate() string {
 		return "Ends — " + problem
 	}
 
+	if f.allDay {
+		starts, startsOK := f.starts.moment()
+		ends, endsOK := f.ends.moment()
+		if startsOK && endsOK && ends.Before(starts) {
+			return "The end is before the start"
+		}
+		return f.detailProblem()
+	}
+
+	// What is checked is what HEY is sent, read the way HEY reads it: an end it would place
+	// away from the moment meant is refused rather than moved, and the order is HEY's order.
 	// Eight in the morning in Auckland is the evening before in Madrid, so the two clocks on
-	// their own do not say which comes first — the moments do.
-	starts, startsOK := f.starts.moment()
-	ends, endsOK := f.ends.moment()
-	if startsOK && endsOK && ends.Before(starts) {
+	// their own do not say which comes first — the placed moments do.
+	starts, ends := f.wireEnds()
+	startsAt, startsOK := starts.placed()
+	endsAt, endsOK := ends.placed()
+	if startsOK && starts.known && !startsAt.Equal(starts.meant) {
+		return starts.moveProblem("Starts", startsAt)
+	}
+	if endsOK && ends.known && !endsAt.Equal(ends.meant) {
+		return ends.moveProblem("Ends", endsAt)
+	}
+	if startsOK && endsOK && endsAt.Before(startsAt) {
 		return "The end is before the start"
 	}
 	return f.detailProblem()
