@@ -651,4 +651,7 @@ write it back with `--content-html` instead, which takes off the wrapper HEY ser
 Saving an empty buffer in `$EDITOR` removes the day's entry, and `hey journal write` says
 so rather than reporting a save. An empty day answers with an empty entry, so if the read
 that pre-fills the editor fails for any other reason the command stops there instead of
-opening a blank buffer over an entry it could not see.
+opening a blank buffer over an entry it could not see. Nor is `$EDITOR` opened on an entry whose
+`content_markdown_lossless` is `false`: saving its Markdown would drop the attachment or
+image it holds, so the command refuses and writes nothing, and the entry is changed through
+`content` and `--content-html` instead.

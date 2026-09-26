@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/output"
 )
@@ -561,5 +562,61 @@ func TestJournalEntryWithAnAttachmentKeepsItWhenChangedAsHTML(t *testing.T) {
 	}
 	if strings.Contains(stored, "trix-content") {
 		t.Errorf("stored = %q, want HEY's wrapper taken off", stored)
+	}
+}
+
+// Saving the Markdown of an entry that holds an attachment would drop the attachment, so
+// the editor is not opened on one, and nothing is written.
+func TestJournalEntryFromEditorRefusesAnEntryMarkdownCannotCarry(t *testing.T) {
+	opened := false
+	_, err := journalEntryFromEditor(t.Context(), "2026-03-15",
+		func(context.Context, string) (string, error) {
+			return "<div class=\"trix-content\">\n  " + attachedJournalStored + "\n</div>\n", nil
+		},
+		func(string) (string, error) {
+			opened = true
+			return "", nil
+		})
+
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Hint, "--content-html") {
+		t.Fatalf("error = %#v, want a usage error pointing at --content-html", err)
+	}
+	if opened {
+		t.Error("the editor was opened on an entry its Markdown cannot carry")
+	}
+}
+
+func TestJournalWriteAtATerminalRefusesAnEntryMarkdownCannotCarry(t *testing.T) {
+	previous := stdinIsTerminal
+	stdinIsTerminal = func() bool { return true }
+	t.Cleanup(func() { stdinIsTerminal = previous })
+	// An editor that saves what it was handed, so a missing guard writes rather than hangs.
+	t.Setenv("EDITOR", "true")
+
+	server, store := newJournalStore(t, attachedJournalStored)
+	_, err := runJournalWrite(t, server, "2026-03-15")
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage {
+		t.Fatalf("error = %#v, want a usage error", err)
+	}
+	if stored, writes := store.snapshot(); len(writes) != 0 || stored != attachedJournalStored {
+		t.Errorf("writes = %q, stored = %q, want the entry untouched", writes, stored)
+	}
+}
+
+func TestJournalEntryFromEditorOpensAnEmptyDay(t *testing.T) {
+	prefilled := "unset"
+	content, err := journalEntryFromEditor(t.Context(), "2026-03-15",
+		func(context.Context, string) (string, error) { return "", nil },
+		func(existing string) (string, error) {
+			prefilled = existing
+			return "Booked the venue for the offsite.", nil
+		})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if prefilled != "" || content != "Booked the venue for the offsite." {
+		t.Errorf("prefilled = %q, content = %q, want an empty editor and what was typed", prefilled, content)
 	}
 }

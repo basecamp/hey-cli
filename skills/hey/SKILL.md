@@ -998,7 +998,8 @@ entry=$(hey journal read 2026-03-15 --jq '.data.content_markdown') &&
 ```
 
 When it is `false`, the entry holds an attachment or other markup Markdown cannot carry, and
-writing Markdown would drop it. Add to the HTML instead — `--content-html` takes off the
+writing Markdown would drop it — `hey journal write` refuses to open `$EDITOR` on such an
+entry for the same reason. Add to the HTML instead — `--content-html` takes off the
 wrapper HEY serves the entry in, so this does not nest:
 
 ```bash
