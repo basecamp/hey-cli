@@ -106,7 +106,7 @@ func TestOmarchySetupInstallsEverythingOnce(t *testing.T) {
 	setup := omarchySetup{env: env}
 
 	first := setup.apply()
-	for _, name := range []string{"desktop entry", "menu", "theme template"} {
+	for _, name := range []string{"desktop entry", "theme template"} {
 		if status := statuses(first)[name]; status != "installed" {
 			t.Errorf("%s: first run = %q, want installed", name, status)
 		}
@@ -128,9 +128,11 @@ func TestOmarchySetupInstallsEverythingOnce(t *testing.T) {
 		t.Errorf("without a hey icon installed the entry should fall back:\n%s", desktop)
 	}
 
-	menu := readText(t, env.menuPath())
-	if !strings.Contains(menu, `"hey-tui"`) || !strings.HasPrefix(menu, "{\n"+omarchyMenuBegin) {
-		t.Errorf("menu block not written:\n%s", menu)
+	if _, err := os.Stat(env.menuPath()); !os.IsNotExist(err) {
+		t.Error("setup must not write to the Omarchy menu")
+	}
+	if _, ok := statuses(first)["menu"]; ok {
+		t.Error("with no earlier HEY row there is nothing to report about the menu")
 	}
 
 	if readText(t, env.templatePath()) != omarchyThemeTemplate {
@@ -166,8 +168,8 @@ func TestOmarchySetupRemoveReversesEveryPiece(t *testing.T) {
 	}
 	setup.apply()
 
-	if menu := readText(t, env.menuPath()); !strings.Contains(menu, `"notes"`) || !strings.Contains(menu, `"hey-tui"`) {
-		t.Errorf("install should keep the user's rows alongside ours:\n%s", menu)
+	if menu := readText(t, env.menuPath()); menu != menuBefore {
+		t.Errorf("setup must leave the user's menu alone:\n%s", menu)
 	}
 	if entry := pluginEntry(t, env); entry["notify"] != true {
 		t.Fatalf("--notify should set notify on the plugin entry, got %v", entry)
@@ -183,6 +185,10 @@ func TestOmarchySetupRemoveReversesEveryPiece(t *testing.T) {
 		case "bar plugin":
 			if status != "removed" {
 				t.Errorf("remove disables the plugin, got %q", status)
+			}
+		case "menu":
+			if status != "absent" {
+				t.Errorf("no HEY row was in the menu, got %q", status)
 			}
 		default:
 			if status != "removed" {
@@ -238,7 +244,7 @@ func TestOmarchySetupRejectsNonJSONShellConfig(t *testing.T) {
 	if steps["bar plugin"] != "failed" {
 		t.Errorf("a shell.json we cannot round-trip must fail rather than be rewritten, got %q", steps["bar plugin"])
 	}
-	if steps["menu"] != "installed" {
+	if steps["desktop entry"] != "installed" {
 		t.Error("one failing step must not stop the others")
 	}
 }
@@ -645,43 +651,34 @@ func TestOmarchySetupKeepsForeignTemplate(t *testing.T) {
 	}
 }
 
-func TestInsertMenuBlockSkipsBracesInComments(t *testing.T) {
-	content := "// A row looks like {\"icon\": \"x\"}.\n/* or a block: { nested } */\n{\n  \"mine\": {},\n}\n"
-	next, ok := insertMenuBlock(content, omarchyMenuBlock())
-	if !ok {
-		t.Fatal("insert failed")
-	}
-	if !strings.HasPrefix(next, "// A row looks like") {
-		t.Errorf("leading comments must be preserved above the block:\n%s", next)
-	}
-	if !strings.Contains(next, "*/\n{\n"+omarchyMenuBegin) {
-		t.Errorf("block must land after the structural brace, not a commented one:\n%s", next)
-	}
-	if _, ok := insertMenuBlock("// only a comment with { in it", omarchyMenuBlock()); ok {
-		t.Error("a file with no structural brace should be refused")
-	}
-	if _, ok := insertMenuBlock("[\n  {\"rows\": {}}\n]\n", omarchyMenuBlock()); ok {
-		t.Error("an array root must be refused rather than having the block inserted into a nested object")
-	}
-	if _, ok := insertMenuBlock("  // leading comment\n  {\"mine\": {}}\n", omarchyMenuBlock()); !ok {
-		t.Error("a commented object root is still an object root")
-	}
-}
+// Earlier releases wrote a HEY row into the Omarchy menu. Setup takes it back
+// out and leaves the user's own rows and comments byte for byte; --remove on
+// an already-clean menu has nothing to do.
+func TestOmarchySetupRemovesEarlierMenuRow(t *testing.T) {
+	env, _ := testOmarchyEnv(t)
+	writeShell(t, env, pluginShellJSON)
 
-func TestInsertMenuBlockReplacesStaleBlock(t *testing.T) {
-	stale := "{\n" + omarchyMenuBegin + "\n  \"hey\": {\"label\":\"old\"},\n" + omarchyMenuEnd + "\n  \"mine\": {},\n}\n"
-	next, ok := insertMenuBlock(stale, omarchyMenuBlock())
-	if !ok {
-		t.Fatal("insert failed")
+	mine := "{\n  // my rows\n  \"mine\": {\"label\":\"Mine\",\"action\":\"true\"},\n}\n"
+	earlier := "{\n" + omarchyMenuBegin + "\n  \"hey-tui\": {\"label\":\"HEY\",\"action\":\"hey tui\"},\n" + omarchyMenuEnd + "\n  // my rows\n  \"mine\": {\"label\":\"Mine\",\"action\":\"true\"},\n}\n"
+	if err := os.MkdirAll(filepath.Dir(env.menuPath()), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	if strings.Count(next, omarchyMenuBegin) != 1 || strings.Contains(next, `"old"`) {
-		t.Errorf("stale block should be replaced:\n%s", next)
+	if err := os.WriteFile(env.menuPath(), []byte(earlier), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(next, `"mine"`) {
-		t.Errorf("user rows lost:\n%s", next)
+
+	if menu := stepNamed(omarchySetup{env: env}.apply(), "menu"); menu.Status != "removed" {
+		t.Errorf("setup should report taking the earlier row out, got %q", menu.Status)
 	}
-	if _, ok := insertMenuBlock("not json at all", omarchyMenuBlock()); ok {
-		t.Error("a file with no object should be refused")
+	if menu := readText(t, env.menuPath()); menu != mine {
+		t.Errorf("only the hey block should go:\n%s", menu)
+	}
+
+	if _, ok := statuses(omarchySetup{env: env}.apply())["menu"]; ok {
+		t.Error("a second run has nothing to say about the menu")
+	}
+	if menu := stepNamed(omarchySetup{env: env, forcePlugin: true}.remove(), "menu"); menu.Status != "absent" {
+		t.Errorf("remove on a clean menu should report absent, got %q", menu.Status)
 	}
 }
 

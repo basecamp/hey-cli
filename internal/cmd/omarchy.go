@@ -19,8 +19,8 @@ import (
 )
 
 // Omarchy integration: `hey setup omarchy` installs hey-cli into the desktop
-// (launcher entry, menu rows, theme template) and configures the 37signals.hey
-// bar plugin, which runs `hey watch` (watch.go, watch_new.go).
+// (launcher entry, theme template) and configures the 37signals.hey bar
+// plugin, which runs `hey watch` (watch.go, watch_new.go).
 //
 // Omarchy already ships HEY as a web app (SUPER+SHIFT+E, the mailto handler, a
 // HEY.desktop). Everything here complements that under its own names and never
@@ -37,7 +37,6 @@ const (
 	omarchyMenuBegin    = "  // >>> hey-cli — managed by `hey setup omarchy`, do not edit between the markers"
 	omarchyMenuEnd      = "  // <<< hey-cli"
 	omarchyFocusCommand = "omarchy-launch-or-focus-tui --app-id=" + omarchyAppID + " hey tui"
-	omarchyBarGlyph     = "" // nf-fa-envelope; verified to render in the bar's JetBrainsMono Nerd Font
 	// The hint spells the focus command out rather than using `{ tui = "hey tui" }`:
 	// the lua helper shell-quotes that into one word and launch-or-focus-tui would
 	// derive the app-id from it, never matching the window every other surface opens.
@@ -152,7 +151,13 @@ type omarchySetup struct {
 }
 
 func (s omarchySetup) apply() []omarchyStep {
-	steps := []omarchyStep{s.installDesktop(), s.installMenu()}
+	steps := []omarchyStep{s.installDesktop()}
+	// The Omarchy menu is the user's and Omarchy's, not hey's. Earlier releases
+	// added a HEY row to it, so setup takes that row back out and says so only
+	// when there was one.
+	if menu := s.removeMenu(); menu.Status != "absent" {
+		steps = append(steps, menu)
+	}
 	steps = append(steps, s.configureBarPlugin()...)
 	return append(steps, s.installTemplate())
 }
@@ -204,33 +209,9 @@ func (s omarchySetup) removeDesktop() omarchyStep {
 	return stepResult("desktop entry", path, changed, err, "removed", "absent")
 }
 
-// Menu: a marker-delimited block in the user's JSONC menu extension. The shell
-// tolerates trailing commas and strips full-line // comments, so the block is
-// inserted right after the opening brace with every row comma-terminated. One
-// root row for now; it becomes a submenu when there is more than one thing to
-// open. The guard is a PATH lookup — menu guards must never call hey itself.
-
-// omarchyMenuBlock is the managed rows. The member key is hey-tui rather than
-// hey so a user's own hey row can coexist instead of becoming a duplicate key.
-func omarchyMenuBlock() string {
-	row := fmt.Sprintf(`  "hey-tui": {"icon":"%s","label":"HEY","action":"%s","when":"command -v hey >/dev/null"},`,
-		omarchyBarGlyph, omarchyFocusCommand)
-	return omarchyMenuBegin + "\n" + row + "\n" + omarchyMenuEnd + "\n"
-}
-
-func (s omarchySetup) installMenu() omarchyStep {
-	path := s.env.menuPath()
-	current, err := os.ReadFile(path) // #nosec G304 -- fixed path under the user's config dir
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return stepResult("menu", path, false, err, "", "")
-	}
-	next, ok := insertMenuBlock(string(current), omarchyMenuBlock())
-	if !ok {
-		return stepResult("menu", path, false, errors.New("could not find the top-level object to extend"), "", "")
-	}
-	changed, err := writeFileIfChanged(path, []byte(next), 0o644)
-	return stepResult("menu", path, changed, err, "installed", "unchanged")
-}
+// Menu: earlier releases wrote a marker-delimited HEY row into the user's
+// JSONC menu extension. Setup and --remove both strip that block, leaving the
+// rest of the file byte for byte.
 
 func (s omarchySetup) removeMenu() omarchyStep {
 	path := s.env.menuPath()
@@ -244,62 +225,6 @@ func (s omarchySetup) removeMenu() omarchyStep {
 	next := stripMenuBlock(string(current))
 	changed, err := writeFileIfChanged(path, []byte(next), 0o644)
 	return stepResult("menu", path, changed, err, "removed", "absent")
-}
-
-// insertMenuBlock places block after the file's first structural `{`, replacing
-// any earlier block. An empty file becomes a fresh object.
-func insertMenuBlock(content, block string) (string, bool) {
-	content = stripMenuBlock(content)
-	if strings.TrimSpace(content) == "" {
-		return "{\n" + block + "}\n", true
-	}
-	idx := structuralBraceIndex(content)
-	if idx < 0 {
-		return "", false
-	}
-	head := content[:idx+1]
-	tail := strings.TrimLeft(content[idx+1:], " \t")
-	if !strings.HasPrefix(tail, "\n") {
-		tail = "\n" + tail
-	}
-	return head + "\n" + block + strings.TrimPrefix(tail, "\n"), true
-}
-
-// structuralBraceIndex is the index of the first `{` outside JSONC comments
-// and strings, or -1 — a leading doc comment showing an object-shaped example
-// must not be mistaken for the menu object itself.
-func structuralBraceIndex(content string) int {
-	// Only whitespace and comments may precede the root token; anything else
-	// (an array root, a bare string) means the file is not a menu object.
-	for i := 0; i < len(content); i++ {
-		switch content[i] {
-		case ' ', '\t', '\r', '\n':
-		case '{':
-			return i
-		case '/':
-			if i+1 >= len(content) {
-				return -1
-			}
-			switch content[i+1] {
-			case '/':
-				i += 2
-				for i < len(content) && content[i] != '\n' {
-					i++
-				}
-			case '*':
-				end := strings.Index(content[i+2:], "*/")
-				if end < 0 {
-					return -1
-				}
-				i += 2 + end + 1
-			default:
-				return -1
-			}
-		default:
-			return -1
-		}
-	}
-	return -1
 }
 
 func stripMenuBlock(content string) string {
@@ -863,8 +788,9 @@ func newSetupOmarchyCommand() *setupOmarchyCommand {
 		Args:  cobra.NoArgs,
 		Short: "Install hey into the Omarchy desktop",
 		Long: `Install hey into the Omarchy desktop: the 37signals.hey bar plugin, a launcher
-entry, rows in the SUPER+SPACE menu, and a theme template so themes can tune the
-TUI's accent colors. Every piece is idempotent.
+entry, and a theme template so themes can tune the TUI's accent colors. Every
+piece is idempotent. A HEY row an earlier release added to the SUPER+SPACE menu
+is taken back out.
 
 Signing in with hey offers the bar plugin on its own, asked once; this command is
 the explicit path — it installs in every output format, finishes an interrupted
