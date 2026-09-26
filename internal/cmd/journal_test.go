@@ -29,6 +29,9 @@ func journalServerWithReadBehavior(t *testing.T, readBehavior string) *httptest.
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == "GET" && r.URL.Path == "/identity.json":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, newYorkIdentity)
 		case r.Method == "GET" && strings.Contains(r.URL.Path, "/calendar/days/") && strings.HasSuffix(r.URL.Path, "/journal_entry/edit"):
 			// Legacy HTML-scrape path
 			w.Header().Set("Content-Type", "text/html")

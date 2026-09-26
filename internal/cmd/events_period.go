@@ -31,8 +31,12 @@ type eventsPeriodCommand struct {
 	read func(ctx context.Context, date string) (*generated.CalendarPeriod, error)
 
 	// describe names the span read, in words that follow "No events" and sit inside the
-	// summary's parentheses: "on 2026-09-02", "in the week of 2026-09-02".
-	describe func(date string) string
+	// summary's parentheses: "on 2026-09-02", "in the week of 2026-09-02". today says the
+	// date was not given.
+	describe func(date string, today bool) string
+
+	// todayHint is how a refusal to name today says to name the date instead.
+	todayHint string
 }
 
 func newEventsDayCommand() *eventsPeriodCommand {
@@ -40,12 +44,13 @@ func newEventsDayCommand() *eventsPeriodCommand {
 		read: func(ctx context.Context, date string) (*generated.CalendarPeriod, error) {
 			return sdk.CalendarPeriods().Day(ctx, date)
 		},
-		describe: func(date string) string {
-			if date == periodNow {
-				return "today"
+		describe: func(date string, today bool) string {
+			if today {
+				return "today, " + date
 			}
 			return "on " + date
 		},
+		todayHint: "name the day, for example hey event day 2026-10-14",
 	}
 	eventsDayCommand.cmd = &cobra.Command{
 		Use:   "day [date]",
@@ -56,6 +61,9 @@ A calendar stores a repeating event once, so 'hey event list' answers a standing
 standup on the day the series began and on no other. A day is HEY's own expansion: every
 event that falls on it, occurrences of a repeating series included, and nothing from
 outside it.
+
+Without a date the day is today in your HEY account's time zone, whatever this machine's
+is. An account with no time zone set reads this machine's today, and says so on stderr.
 
 The day covers the calendars switched on in HEY, the same set the app draws, so there is
 no --calendar to narrow it. A virtual occurrence carries the series in id and parent_id.
@@ -80,18 +88,23 @@ func newEventsWeekCommand() *eventsPeriodCommand {
 		read: func(ctx context.Context, date string) (*generated.CalendarPeriod, error) {
 			return sdk.CalendarPeriods().Week(ctx, date)
 		},
-		describe: func(date string) string {
-			if date == periodNow {
-				return "this week"
+		describe: func(date string, today bool) string {
+			if today {
+				return "this week, the week of " + date
 			}
 			return "in the week of " + date
 		},
+		todayHint: "name a day in the week, for example hey event week 2026-10-14",
 	}
 	eventsWeekCommand.cmd = &cobra.Command{
 		Use:   "week [date]",
 		Short: "List the events of one week, as HEY draws it",
 		Long: `List the events of the week a date falls in, as HEY's Week View draws it: every event
 inside the week, occurrences of a repeating series included. Any day names its week.
+
+Without a date the week is the one today falls in, today in your HEY account's time zone,
+whatever this machine's is. An account with no time zone set reads this machine's today,
+and says so on stderr.
 
 The week covers the calendars switched on in HEY, the same set the app draws, so there is
 no --calendar to narrow it. A virtual occurrence carries the series in id and parent_id.
@@ -121,17 +134,12 @@ func (c *eventsPeriodCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// With no date the read asks for "now" and HEY resolves today in the account's own
-	// time zone, so a host in another zone does not fetch yesterday's schedule at midnight.
-	date := periodNow
-	if len(args) > 0 {
-		if _, err := parseDateArg("date", args[0]); err != nil {
-			return err
-		}
-		date = args[0]
+	ctx := cmd.Context()
+	date, described, err := c.date(ctx, cmd, args)
+	if err != nil {
+		return err
 	}
 
-	ctx := cmd.Context()
 	period, err := c.read(ctx, date)
 	if err != nil {
 		return apierr.FromSDK(err)
@@ -150,12 +158,28 @@ func (c *eventsPeriodCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	notice := output.TruncationNotice(len(rows), total)
 
-	return writeEventRows(cmd, rows, c.describe(date), notice)
+	return writeEventRows(cmd, rows, described, notice)
 }
 
-// periodNow is the date the period reads accept for today: HEY resolves it in the
-// account's own time zone, which the CLI process's clock cannot.
-const periodNow = "now"
+// date is the day the period is read around, and the words that name it. With no date given
+// it is today in the account's zone, sent as a date: HEY resolves "now" in UTC on a JSON
+// request, which in New York after 20:00 is tomorrow.
+func (c *eventsPeriodCommand) date(ctx context.Context, cmd *cobra.Command, args []string) (string, string, error) {
+	if len(args) > 0 {
+		if _, err := parseDateArg("date", args[0]); err != nil {
+			return "", "", err
+		}
+		return args[0], c.describe(args[0], false), nil
+	}
+
+	var account accountZone
+	today, err := account.todayToRead(ctx, cmd.ErrOrStderr(), c.todayHint)
+	if err != nil {
+		return "", "", err
+	}
+	date := today.Format(dateLayout)
+	return date, c.describe(date, true), nil
+}
 
 // eventRow is the event shape the CLI publishes. A virtual occurrence's id names its
 // series; a realized day's id and RecordingID both name its own event.

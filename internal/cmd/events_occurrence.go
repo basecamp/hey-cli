@@ -740,7 +740,7 @@ func countdownFromRecording(countdown, event generated.Recording, additionalZone
 func (c *eventsEditCommand) countdownFromRecording(ctx context.Context, countdown, event generated.Recording) (hey.CountdownParams, error) {
 	params, unreadable := countdownFromRecording(countdown, event)
 
-	zone, err := c.fields.accountTimeZone(ctx)
+	zone, err := c.fields.account.timeZone(ctx)
 	if err != nil {
 		return hey.CountdownParams{}, apierr.FromSDK(err)
 	}

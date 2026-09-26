@@ -17,6 +17,9 @@ func todoServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == "GET" && r.URL.Path == "/identity.json":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, newYorkIdentity)
 		case r.Method == "POST" && r.URL.Path == "/calendar/todos.json":
 			body, _ := io.ReadAll(r.Body)
 			var req map[string]any

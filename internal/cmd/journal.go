@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -25,7 +24,7 @@ func newJournalCommand() *journalCommand {
 		Use:   "journal",
 		Short: "Read and write journal entries",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, read, write. Read defaults to today. Write accepts --content, stdin, or opens $EDITOR; content is Markdown, or raw HTML via --content-html.",
+			"agent_notes": "Subcommands: list, read, write. Read and write default to today in the HEY account's time zone; write refuses without one, so name the date. Write accepts --content, stdin, or opens $EDITOR; content is Markdown, or raw HTML via --content-html.",
 		},
 	}
 
@@ -131,6 +130,10 @@ func newJournalReadCommand() *journalReadCommand {
 	journalReadCommand.cmd = &cobra.Command{
 		Use:   "read [date]",
 		Short: "Read a journal entry (default: today)",
+		Long: `Read a journal entry, today's by default.
+
+Without a date the day is today in your HEY account's time zone, whatever this machine's
+is. An account with no time zone set reads this machine's today, and says so on stderr.`,
 		Example: `  hey journal read
   hey journal read 2026-03-15
   hey journal read --html > entry.html
@@ -147,15 +150,22 @@ func (c *journalReadCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	date := time.Now().Format(dateLayout)
+	ctx := cmd.Context()
+	var date string
 	if len(args) > 0 {
 		if _, err := parseDateArg("date", args[0]); err != nil {
 			return err
 		}
 		date = args[0]
+	} else {
+		var account accountZone
+		today, err := account.todayToRead(ctx, cmd.ErrOrStderr(), "name the day, for example hey journal read 2026-10-14")
+		if err != nil {
+			return err
+		}
+		date = today.Format(dateLayout)
 	}
 
-	ctx := cmd.Context()
 	content, err := sdk.Journal().GetContent(ctx, date)
 	if err != nil {
 		return apierr.FromSDK(err)
@@ -209,6 +219,9 @@ func newJournalWriteCommand() *journalWriteCommand {
 		Use:   "write [date] [content]",
 		Short: "Write or edit a journal entry (default: today)",
 		Long: `Write or edit a journal entry, today's by default.
+
+Without a date the day is today in your HEY account's time zone, whatever this machine's
+is. An account with no time zone set is refused rather than guessed at: name the date.
 
 Content that trims to nothing — whitespace-only, or an emptied $EDITOR buffer — removes the
 day's entry, and the command says "removed" rather than "saved". Omitting content reads
@@ -267,8 +280,15 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	ctx := cmd.Context()
 
+	// Today is the account's, and without it the write is refused before any content is
+	// read or an editor opened: writing over the wrong day's entry is not a guess to make.
 	if date == "" {
-		date = time.Now().Format(dateLayout)
+		var account accountZone
+		today, err := account.todayToWrite(ctx, `name the day first, for example hey journal write 2026-10-14 "Shipped the pagination fix"`)
+		if err != nil {
+			return err
+		}
+		date = today.Format(dateLayout)
 	}
 
 	if c.contentHTML != "" {
