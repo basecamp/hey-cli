@@ -474,18 +474,19 @@ func occurrenceInstants(series generated.Recording, day time.Time) (time.Time, t
 }
 
 // wallClockOn is a clock time on a day, resolved the way HEY resolves one. A clock time that
-// does not exist on that day — the hour a zone springs forward over — is moved an hour later
-// and tried again, which is what ActiveSupport does when it changes the day of a time. A
-// clock time that happens twice is resolved by heysChoice. Go's time.Date is no guide to
-// either: it picks one side of a gap or an overlap by its own rules, not HEY's, so a
-// title-only edit would move the day an hour.
+// does not exist — the hour a zone springs forward over, or the whole of 30 December 2011 in
+// Samoa — is moved an hour later and tried again, date and all, until it does: that is what
+// ActiveSupport does with a local time TZInfo cannot find. A clock time that happens twice
+// is resolved by heysChoice. Go's time.Date is no guide to either: it picks one side of a gap
+// or an overlap by its own rules, not HEY's, so a title-only edit would move the day.
 func wallClockOn(day, wall time.Time, loc *time.Location) time.Time {
 	hour, minute, second := wall.Clock()
-	for step := range 24 {
-		at := time.Date(day.Year(), day.Month(), day.Day(), hour+step, minute, second, 0, loc)
-		if h, m, _ := at.Clock(); h == (hour+step)%24 && m == minute {
-			return heysChoice(instantsReading(localClock(at), loc))
+	local := time.Date(day.Year(), day.Month(), day.Day(), hour, minute, second, 0, time.UTC)
+	for range 48 {
+		if instants := instantsReading(local, loc); len(instants) > 0 {
+			return heysChoice(instants)
 		}
+		local = local.Add(time.Hour)
 	}
 	return time.Date(day.Year(), day.Month(), day.Day(), hour, minute, second, 0, loc)
 }

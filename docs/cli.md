@@ -455,11 +455,11 @@ the times you type are read in the account's zone and sent as the moment they na
 the ones you do not type keep theirs, so nothing you did not touch moves — a repeating
 series included. `--time-zone` gives the event that zone, and the times you do not type
 keep their moment in it. An all-day event given a time takes the account's zone, as a new
-event does. A typed time is placed as HEY places one: a time the clocks skip moves an hour
-later, and a time they repeat as they go back is the daylight-saving one of its two
-moments, or the later where neither is. A kept time at the other moment cannot be sent to
-HEY as a clock time and zone, so an edit that would move it refuses and asks you to retype
-it.
+event does. A typed time is placed as HEY places one: a time the clocks skip moves on an
+hour at a time until it exists, and a time they repeat as they go back is the
+daylight-saving one of its two moments, or the later where neither is. A kept time at the
+other moment cannot be sent to HEY as a clock time and zone, so an edit that would move it
+refuses and asks you to retype it.
 
 `hey event edit` changes only the flags you name, but that is this command's doing rather
 than HEY's: an event write is a replacement, so the edit reads the event first and sends
