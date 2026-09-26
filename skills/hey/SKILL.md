@@ -19,7 +19,9 @@ triggers:
   - hey snippet
   - hey search
   - hey contact
+  - hey bundle
   - hey thread read
+  - hey attachment
   - hey share
   - hey unshare
   - hey reply
@@ -32,6 +34,7 @@ triggers:
   - hey draft send
   - hey draft delete
   - hey screener
+  - hey watch
   - screen a sender
   - approve a sender
   - deny a sender
@@ -86,6 +89,7 @@ triggers:
   - bundle contact mail
   - unbundle contact mail
   - contact note
+  - find a contact by email
   - check calendar
   - add todo
   - complete todo
@@ -120,13 +124,13 @@ CLI for HEY: mailboxes, labels, collections, email threads, contacts, replies, c
 
 1. **Choose the right structured output** — use `--jq '<expression>'` to filter or extract fields and `--json` for the full response. Never pipe to an external `jq`; `--jq` is built in and implies `--json`.
 2. **Reuse stored authentication** — run the requested data command; it uses stored credentials and refreshes expiring OAuth tokens automatically. If it returns an auth error, follow the one-command macOS/Codex retry in [Authentication](#authentication) before you report the task as blocked. Use `hey auth status --json` when an explicit authentication check is needed. Never run `hey auth login` unattended; use it only for interactive recovery with the user present.
-3. **HTML output** is available via `--html` for commands that return HTML content
+3. **HTML output** — `--html` writes the original HTML of `hey thread read`, `hey journal read`, `hey contact show` and `hey contact note show` to a pipe or file; a terminal is refused
 4. **Linked mail accounts share one login** — use `hey account list --json`, then `--account <id|all>` when a task must target one account
 5. **Local HEY configuration requires human trust** — never run `hey config trust-local` without the user's explicit approval
 
 ## Output Filtering
 
-`--jq` filters the full JSON success envelope, so result data is under `.data`. String results print as plain text; objects and arrays print as formatted JSON. Use `--quiet --jq` when the expression should run against result data directly. Errors retain their complete structured envelope. Commands with dedicated raw output (`auth token`, `completion`, `skill`, `tui`, and `--version`) reject `--jq`.
+`--jq` filters the full JSON success envelope, so result data is under `.data`. String results print as plain text; objects and arrays print as formatted JSON. Use `--quiet --jq` when the expression should run against result data directly. Errors retain their complete structured envelope. Commands with dedicated raw output (`auth token`, `shell-completion generate`, `setup`, `skill`, `tui`, and `--version`) reject `--jq`.
 
 ```bash
 hey box list --jq '.data[] | {id, name}'
@@ -139,12 +143,13 @@ listing that found nothing.
 
 For the two commonest shapes there is no need for an expression at all: `--ids-only` prints
 one ID per line and `--count` prints a bare number, both on stdout with any pagination
-notice on stderr. Both need list data, so they work on `hey box list`, `hey box view`,
-`hey label list`, `hey label view`, `hey collection list`, `hey collection view`, `hey workflow list`,
-`hey workflow view`, `hey clip list`, `hey snippet list`, `hey draft list`, `hey search`,
-`hey contact list`, `hey screener list`, `hey screener history`, `hey calendar list`,
-`hey event list`, `hey event day`, `hey event week`, `hey todo list`, `hey habit list`,
-`hey timetrack list`, `hey journal list` and `hey attachment list`. On `hey box view` they count and list its postings, not the box itself.
+notice on stderr. Both need list data, so they work on the listings: every `list` command,
+the thread listings (`hey box view`, `hey label view`, `hey collection view`, `hey set-aside view`,
+`hey set-aside group view`, `hey bundle view`, `hey contact threads`, `hey bubble list`),
+`hey workflow view`, `hey search`, `hey screener history`, `hey event day`, `hey event week`,
+`hey timetrack categories`, `hey attachment list` and `hey thread read` (its entries, read
+from the index without fetching bodies). On the thread listings they count and list the
+postings, not the box, label or contact around them.
 
 ## Quick Reference
 
@@ -178,20 +183,28 @@ notice on stderr. Both need list data, so they work on `hey box list`, `hey box 
 | Break a group up | `hey set-aside group delete <group_id>` |
 | List workflows | `hey workflow list --json` |
 | View workflow stages | `hey workflow view <workflow_id> --json` |
+| Put threads in a workflow stage | `hey workflow add <topic_id> --to <workflow_id> --stage <stage_id>` |
+| Move threads to another stage | `hey workflow move <topic_id> --workflow <workflow_id> --to <stage_id>` |
+| Take threads out of a workflow | `hey workflow remove <topic_id> --from <workflow_id>` |
 | List clips | `hey clip list --json` |
+| Clip a passage from a message | `hey clip create <entry_id> --content "The launch moves to Wednesday."` |
 | List snippets | `hey snippet list --json` |
+| Create a snippet | `hey snippet create --name "Scheduling reply" --content "Tuesday works for me."` |
 | Search email | `hey search "quarterly planning" --json` |
 | List search filters | `hey search filters --json` |
 | List contacts | `hey contact list --json` |
-| View contact | `hey contact show <id> --json` |
+| Find a contact by email | `hey contact list --all --jq '.data[] \| select(.email_address == "jane@example.com") \| .id'` |
+| View contact without its threads | `hey contact show <id> --jq '.data \| del(.postings)'` |
+| List every thread with a contact | `hey contact threads <id> --json` |
 | Add contact | `hey contact add --name "Jane Doe" --email jane@example.com` |
 | Edit contact | `hey contact update <id> --name "Jane Dawson"` |
 | Hide contact | `hey contact hide <id>` |
 | Show contact again | `hey contact show-again <id>` |
 | Bundle a contact's mail | `hey contact bundle <id>` |
 | List a contact's mail separately | `hey contact unbundle <id>` |
+| List a bundle's unseen threads | `hey bundle view <box_item_id> --json` |
 | Read private contact note | `hey contact note show <id> --json` |
-| Set private contact note | `hey contact note set <id> "Prefers email"` |
+| Replace private contact note | `hey contact note set <id> "Prefers email"` (replaces the whole note) |
 | Delete private contact note | `hey contact note delete <id>` |
 | Read email thread | `hey thread read <topic_id> --json` |
 | Get a sharing link | `hey share <thread_id>` |
@@ -248,9 +261,11 @@ notice on stderr. Both need list data, so they work on `hey box list`, `hey box 
 | Complete habit | `hey habit complete 123` |
 | Uncomplete habit | `hey habit uncomplete 123` |
 | Start time tracking | `hey timetrack start` |
-| Stop time tracking | `hey timetrack stop` |
+| Stop time tracking | `hey timetrack stop` (`--category "Client work"` files it) |
 | Current timer | `hey timetrack current --json` |
 | List time entries | `hey timetrack list --json` |
+| Edit a completed time entry | `hey timetrack edit <id> --end 2026-08-22T17:30` |
+| Delete a time entry | `hey timetrack delete <id>` |
 | Export completed time entries | `hey timetrack export > tracked-time.csv` (`--json` etc. need `--output`) |
 | Save a time tracking export | `hey timetrack export --output tracked-time.csv --json` |
 | List time track categories | `hey timetrack categories --json` |
@@ -279,6 +294,9 @@ Want to read email?
 ├── Search threads and messages? → hey search <query> --json
 ├── Need available refinements? → hey search filters --json
 ├── List or view contacts? → hey contact list --json / hey contact show <id> --json
+├── Find a contact by email? → hey contact list --all --jq (see Contacts)
+├── Every thread with a contact? → hey contact threads <contact_id> --json
+├── A row with kind "bundle"? → hey bundle view <box_item_id> --json (its unseen threads)
 ├── Read full thread? → hey thread read <topic_id> --json
 ├── Get a sharing link? → hey share <thread_id>
 ├── Turn off the sharing link? → hey unshare <thread_id>
@@ -345,9 +363,9 @@ hey box view imbox --page next-cursor --json # Continue from an earlier listing
 
 Box names: `imbox`, `feedbox`, `trailbox`, `asidebox`, `laterbox`, `bubblebox`
 
-**Response format:** `hey box view --json` returns the box itself — `id`, `kind`, `name`, `app_url`, `next_history_url`, `next_page` — with a `postings` array of the email threads in it. Each posting has: `id` (box item ID), `topic_id` (thread ID), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`, `visible_entry_count`. Use `id` for `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring`, and `topic_id` for `hey thread read`, `hey reply`, `hey forward`, `hey share` and `hey attachment list`. A box item `id` passed to `hey thread read` answers `not_found`. The reverse is not caught yet: `hey seen`, `hey unseen` and `hey move` silently ignore any id that is not one of your box items — a `topic_id`, a typo — and still answer success counting every id given, because HEY's endpoints do not report a non-match. Every id in the same call that *is* one of your box items is changed, so a mixed batch is a partial success reported as a whole one, and a `topic_id` that happens to equal one of your other box item ids marks or moves that unrelated thread. Confirm rather than trust the envelope: `hey box view <box> --json --all --jq '{notice, next_page: .data.next_page, match: [.data.postings[] | select(.id == <id>) | {id, topic_id, seen}]}'` for a mark, or the destination box for a move. `--all` reads every page up to the command's cap of 101; an empty `match` with `next_page` still set means the box is larger than that, so continue with `--page <next_page>` rather than calling it a non-match, and `topic_id` in the match says which thread an id actually named. `hey trash`, `hey spam` and the label commands do answer `not_found`.
+**Response format:** `hey box view --json` returns the box itself — `id`, `kind`, `name`, `app_url`, `next_history_url`, `next_page` — with a `postings` array of the email threads in it. Each posting has: `id` (box item ID), `topic_id` (thread ID), `kind` (`bundle` for a bundle row), `name` (subject), `seen` (read status), `created_at`, `contacts`, `summary`, `app_url`, `visible_entry_count`. Use `id` for `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring`, and `topic_id` for `hey thread read`, `hey reply`, `hey forward`, `hey share` and `hey attachment list`. A box item `id` passed to `hey thread read` answers `not_found`. The reverse is not caught yet: `hey seen`, `hey unseen` and `hey move` silently ignore any id that is not one of your box items — a `topic_id`, a typo — and still answer success counting every id given, because HEY's endpoints do not report a non-match. Every id in the same call that *is* one of your box items is changed, so a mixed batch is a partial success reported as a whole one, and a `topic_id` that happens to equal one of your other box item ids marks or moves that unrelated thread. Confirm rather than trust the envelope: `hey box view <box> --json --all --jq '{notice, next_page: .data.next_page, match: [.data.postings[] | select(.id == <id>) | {id, topic_id, seen}]}'` for a mark, or the destination box for a move. `--all` reads every page up to the command's cap of 101; an empty `match` with `next_page` still set means the box is larger than that, so continue with `--page <next_page>` rather than calling it a non-match, and `topic_id` in the match says which thread an id actually named. `hey trash`, `hey spam` and the label commands do answer `not_found`.
 
-A posting that bundles a contact's mail into one row can **omit `topic_id`**: a bundle names its sender rather than a thread, and its `name` joins the bundled subjects with `•`. A bundle that does carry a `topic_id` opens as that thread — its one unseen thread — and `hey threads` reads it as usual. For a bundle without one, never substitute the box item `id` (`hey threads <id>` answers `not_found`); there is no command that lists the threads inside a bundle, so run `hey contacts unbundle <contact_id>` — the contact is in the posting's `contacts` — to list that sender's mail as separate rows, or direct the user to open the bundle in HEY.
+A posting whose `kind` is `bundle` rolls one sender's mail into a single row and can **omit `topic_id`**: a bundle names its sender rather than a thread, and its `name` joins the bundled subjects with `•`. It carries a `topic_id` only while it holds exactly one unseen thread, and `hey thread read` reads that thread as usual. Never substitute the bundle row's `id` for a thread (`hey thread read <id>` answers `not_found`, with a hint naming the bundle). Instead, `hey bundle view <id>` lists the bundle's unseen threads, each with its `topic_id`, and answers the bundled `contact`; `hey contact threads <contact_id>` lists every thread with that sender, seen and unseen — the only place a bundle's mail is listed once it has been read through. `hey move` refuses a bundle row; change grouping with `hey contact bundle|unbundle <contact_id>`.
 
 `next_page` is the cursor `--page` takes, and it is the cursor inside `next_history_url` — `--page` accepts either. `--all` reads to the end instead.
 
@@ -393,6 +411,28 @@ hey set-aside group delete 42                  # Dissolve the group; its threads
 
 Groups have no name in HEY: a group is its ID and the threads in it. Group commands take posting `id` values (box item IDs), not `topic_id`. HEY's group index answers IDs alone, so `group list` reads each group once for its count; `group view` returns `next_page` and `total_count` and takes `--page` and `--all`. HEY removes a group itself once its last thread leaves, so `group view` or `group delete` on it answers `not_found`. `group create` moves threads into Set Aside if they are in another box. To clear an overflowing Set Aside without losing threads, prefer `group create`/`group add` over `group delete`: deleting a group moves its threads to Previously Seen in the Imbox.
 
+### Email - Workflows, clips and snippets
+
+```bash
+hey workflow list --json                                   # Workflows and their IDs
+hey workflow view 123 --json                               # Stages, in position order, with IDs
+hey workflow add 501 --to 123 --stage 456                  # Put threads (topic IDs) in a stage
+hey workflow move 501 --workflow 123 --to 789              # Move them to another stage
+hey workflow remove 501 --from 123                         # Take them out of the workflow
+hey workflow create "Hiring"                               # Also: update <id> --name, delete <id>
+hey workflow stage create 123                              # Adds an Untitled stage; rename with stage update
+hey workflow stage update 123 456 --name "Interviewing"
+hey clip create 987 --content "The launch moves to Wednesday."  # Save a passage from an entry
+hey clip delete 44
+hey snippet create --name "Scheduling reply" --content "Tuesday works for me."
+hey snippet update 44 --content "Wednesday works for me."
+hey snippet delete 44
+```
+
+Workflow membership commands take `topic_id`. `hey clip create` takes an entry ID — an
+entry's `id` from `hey thread read` — and the passage must appear in that message's text;
+`hey clip list` reads only the newest page of clips.
+
 ### Email - Search
 
 ```bash
@@ -413,7 +453,9 @@ Search refinements are `--required`, `--any`, `--none`, `--exact`, `--from`, `--
 ```bash
 hey contact list --json                       # List contacts
 hey contact list --page 2 --json              # List another page
-hey contact show 12345 --json                 # View details, aliases, and private note
+hey contact list --all --jq '.data[] | select(.email_address == "jane@example.com") | .id'  # Find by email
+hey contact show 12345 --jq '.data | del(.postings)'  # Details, aliases, and private note, without its threads
+hey contact threads 12345 --all --json        # Every thread with the contact, seen and unseen
 hey contact add --name "Jane Doe" --email jane@example.com
 hey contact add --name "Jane Doe" --email jane@example.com --alias jane.doe@example.org
 hey contact update 12345 --name "Jane Dawson"
@@ -424,19 +466,32 @@ hey contact bundle 12345                       # Group this contact's mail into 
 hey contact unbundle 12345                     # List this contact's mail separately
 hey contact note show 12345 --json
 hey contact note set 12345 "Prefers email"
-echo "Multiline private note" | hey contact note set 12345
+echo "Prefers email; call only for urgent deliveries" | hey contact note set 12345
+hey contact note set 12345 --note-html "<p><strong>Prefers email</strong></p>"
 hey contact note delete 12345
 ```
 
-`hey contact list` returns contact IDs, names, email addresses, and update timestamps. `hey contact show` adds aliases, screening status, and the private note. Contact updates preserve omitted fields. Supplying `--alias` replaces the complete alias list, and `--alias=` clears it.
+`hey contact list` returns contact IDs, names, primary email addresses, and update timestamps. It has no search: to find a contact by email, read every page with `--all` (up to 100 pages; the notice names the `--page` to continue from) and filter with `--jq` as above. Aliases are not in the list — they are on `hey contact show` — and hidden contacts are left out.
 
-HEY hides contacts instead of permanently deleting them. A hidden contact leaves contact lists, autocomplete, and search results while remaining available by ID; `show-again` reverses the action. Bundling groups a contact's mail into one row without merging or deleting the underlying threads; `unbundle` lists those threads separately again. HEY applies bundling when the contact's current delivery setting supports bundles. Contact notes are private and support positional content, `--note`, stdin, or `$EDITOR`. Deleting a note leaves the contact unchanged.
+`hey contact show` adds aliases, screening status, the private note, and `postings`: a page of the contact's threads, which can run to tens of kilobytes. Drop it with `--jq '.data | del(.postings)'`, read just the note with `hey contact note show`, or page through every thread with `hey contact threads`. Contact updates preserve omitted fields. Supplying `--alias` replaces the complete alias list, and `--alias=` clears it.
+
+HEY hides contacts instead of permanently deleting them. A hidden contact leaves contact lists, autocomplete, and search results while remaining available by ID; `show-again` reverses the action. Bundling groups a contact's mail into one row without merging or deleting the underlying threads; `unbundle` lists those threads separately again. HEY applies bundling when the contact's current delivery setting supports bundles.
+
+**A contact note is written whole.** `hey contact note set` replaces the entire note, so to add a detail, read the note, change it, and write all of it back. It takes Markdown — positional, `--note`, stdin, or `$EDITOR` (which opens on the existing note) — or raw HTML with `--note-html`; an empty note is refused, and `hey contact note delete` clears one without touching the contact. `hey contact note show --json` answers `note` as plain text, which loses formatting (bold is dropped, list items become `•`), and `note_html` with the formatting intact. To append without losing formatting, extend `note_html` and write it back as HTML:
+
+```bash
+note=$(hey contact note show 12345 --jq '.data.note_html')
+hey contact note set 12345 --note-html "$note<p>Moved to the Lisbon office in March.</p>"
+```
+
+Notes are private to the HEY account that holds the contact, so they are reached only through the user's own login. With linked accounts, `--account <id>` (from `hey account list`) selects whose contacts a command reads and writes.
 
 ### Email - Threads
 
 ```bash
 hey thread read <topic_id> --json                 # Read full email thread
-hey thread read <topic_id> --html                 # Read with raw HTML content
+hey thread read <topic_id> --html > thread.html  # Original HTML, to a file or pipe
+hey thread read <topic_id> --allow-partial --json # Accept a thread that could only be read in part
 hey share <thread_id>                         # Get a sharing link
 hey unshare <thread_id>                       # Turn off the sharing link
 ```
@@ -453,13 +508,15 @@ every exact account address HEY recorded it arriving through, including aliases 
 tags. These delivery records are distinct from visible To/CC/BCC recipients. Each one's
 resolved `contact` is optional; `received_via` is omitted for sent/generated messages and
 when the message was not hydrated. `--html` returns the original body HTML framed by From,
-To, CC and BCC header rows. Use `hey reply` to have HEY work out reply addressing.
+To, CC and BCC header rows, and is refused on a terminal — redirect it. A thread that could
+only be read in part is refused unless `--allow-partial` is given, and then the notice says
+what is missing. Use `hey reply` to have HEY work out reply addressing.
 
 `hey share` returns a URL that shows the entire thread and future emails or replies sent to it. Anyone with the link can open it. `hey unshare` turns off the sharing link.
 
-**ID note:** Every email thread has two IDs: an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, and `hey stop-ignoring` expect `id`. `hey thread read`, `hey share`, `hey unshare`, `hey attachment list`, `hey reply`, `hey forward`, `hey collection add`, and `hey collection remove` expect `topic_id`. Passing the wrong one answers `not_found`, not a redirect — except `hey seen`, `hey unseen` and `hey move`, which ignore an unmatched id, act on every id that does match, and answer success either way (confirm with `hey box view <box> --json --all`, as in the note above).
+**ID note:** Every email thread has two IDs: an `id` (its box item ID) and a `topic_id` (its thread ID). `hey seen`, `hey unseen`, `hey move`, `hey label add`, `hey label remove`, `hey trash`, `hey spam`, `hey ignore`, `hey stop-ignoring`, `hey bubble up|pop`, `hey set-aside group`, `hey bulk-reply` and `hey bundle view` expect `id`. `hey thread read`, `hey share`, `hey unshare`, `hey attachment list`, `hey reply`, `hey forward`, `hey compose --thread-id`, `hey collection add|remove`, and `hey workflow add|move|remove` expect `topic_id`. Passing the wrong one answers `not_found`, not a redirect — except `hey seen`, `hey unseen` and `hey move`, which ignore an unmatched id, act on every id that does match, and answer success either way (confirm with `hey box view <box> --json --all`, as in the note above).
 
-`hey box view --json`, `hey label view --json`, `hey collection view --json` and `hey search --json` all carry both — except a bundle posting, which can omit `topic_id` (see the Boxes section).
+`hey box view --json`, `hey label view --json`, `hey collection view --json`, `hey bundle view --json`, `hey contact threads --json` and `hey search --json` all carry both — except a bundle posting, which can omit `topic_id` (see the Boxes section).
 
 ### Email - Attachments
 
@@ -505,8 +562,8 @@ recipient makes it addressable.
 Everything you send is Markdown by default — `-m`, `--content`, `--note`, positional
 content, stdin, and `$EDITOR` alike — and is converted to rich text on the way out. To
 send raw HTML instead, use the flag's HTML twin: `--message-html` on `compose`, `reply`,
-`forward`, and `bulk-reply send`; `--content-html` on `journal write` and
-`snippet create`/`update`; `--note-html` on `contacts note set`. Each pair is mutually
+`forward`, `draft edit` and `bulk-reply send`; `--content-html` on `journal write` and
+`snippet create`/`update`; `--note-html` on `contact note set`. Each pair is mutually
 exclusive. A fenced code block's language (` ```ruby `) survives the conversion, and
 HEY's web app syntax-highlights it.
 
@@ -543,7 +600,7 @@ hey bulk-reply send 12345 67890 -m "Thanks for the update — noted."
 hey bulk-reply undo 98765                     # Recall a delayed bulk reply
 ```
 
-Takes posting IDs, which must be positive and unique. **Always run `preview` first** — it
+Takes box item IDs, which must be positive and unique. **Always run `preview` first** — it
 resolves each posting to the entry a reply would answer and shows the exact To/CC/BCC, so
 the blast radius is visible before anything sends. `send` resolves the selection again and
 skips threads with no replyable entry, then returns the reply count, delivery ID, delayed
@@ -568,7 +625,7 @@ hey move 12345 67890 --to "paper trail"       # Move multiple threads
 hey move 12345 67890 --to imbox               # Remove Reply Later from threads
 ```
 
-Takes box item IDs (the `id` field from `hey box view --json`). `--to` accepts a box name, kind, or ID. Supported destinations are Imbox, The Feed, Set Aside, Reply Later, and Paper Trail. Reply Later is a box, not an independent flag: moving a Reply Later thread to Imbox removes Reply Later, preserves its seen state, and leaves a seen thread in Previously Seen. It does not return the thread to the box it occupied before Reply Later. Bubble Up goes through `hey bubble` instead.
+Takes box item IDs (the `id` field from `hey box view --json`). `--to` accepts a box name, kind, or ID. Supported destinations are Imbox, The Feed, Set Aside, Reply Later, and Paper Trail. Reply Later is a box, not an independent flag: moving a Reply Later thread to Imbox removes Reply Later, preserves its seen state, and leaves a seen thread in Previously Seen. It does not return the thread to the box it occupied before Reply Later. Bubble Up goes through `hey bubble` instead. A bundle row is refused — moving it would unbundle that sender's mail; use `hey contact bundle|unbundle <contact_id>`.
 
 ### Email - Bubble Up
 
@@ -612,9 +669,10 @@ Takes box item IDs (the `id` field from `hey box view --json`). Ignored threads 
 ### Email - Watching for changes
 
 ```bash
-hey watch                         # Follow every box until interrupted
+hey watch                         # Follow every box and calendar until interrupted
 hey watch --box imbox             # Report one box's changes (repeatable, by name or ID); every box is followed
-hey watch --events added,deleted  # Only these changes (added, updated, deleted, new, resync)
+hey watch --events added,deleted  # Only these mail changes (added, updated, deleted, new, resync)
+hey watch --events recording_added,recording_updated  # Only calendar recordings as they change
 hey watch --box imbox --events new  # New mail only: unseen, unmuted, active since the watch began
 hey watch --box imbox --events new --exit-on-first  # Block until new mail lands, print it, exit
 hey watch --exit-on-first         # Wait for one change of any kind, print it, exit
@@ -633,7 +691,7 @@ or since the watch began for a thread it has not seen; the backlog a watch start
 never new, nor is reading, muting or moving a thread, and a reply on a known thread is.
 `--events new` selects the new ones, alone or in a union with the other three. A deleted
 posting carries no `posting`, `thread_id` or `new`. Three more lines
-describe the watch itself: `{"change": "ready"}` once every box is caught up and the subscription
+describe the watch itself: `{"change": "ready"}` once every box and calendar is caught up and the subscription
 is live (again after every reconnect's catch-up), `{"change": "disconnected"}` when the
 connection drops, and `{"change": "resync", "box": {...}}` when a box changed more than the
 feed can list and the watch skipped ahead — re-read that box. A resync is an event of its
@@ -641,12 +699,20 @@ own: reported by default (`--run-*` scripts run for it, `--exit-on-first` counts
 out by `--events new`, so a script for new mail never runs on one; `ready` and `disconnected`
 are written to stdout only and carry no `box`.
 
+The calendars are followed too, unless `--box` or an `--events` list naming only mail changes
+scopes the watch to mail. A calendar line names its `calendar` (`id`, `name`) where a mail
+line names its box: `recording_added`, `recording_updated` and `recording_deleted` (events,
+todos, habits and journal entries) carry `recording_id` and `recording_type`, and all but a
+deletion the `recording`; `calendar_added`, `calendar_updated` and `calendar_deleted` are
+calendars coming and going, and `calendar_resync` is a calendar's feed skipping ahead.
+
 To drive a command per change, choose one of two behaviours — passing both is an error.
 `--run-async` spawns the command and moves on, so a slow one never holds up the watch and
 two can overlap; `--run-sync` waits for each and runs them in order. Both get the JSON on
 stdin and the fields as `HEY_CHANGE`, `HEY_AT`, `HEY_BOX_ID`, `HEY_BOX_KIND`,
-`HEY_BOX_NAME`, `HEY_POSTING_ID` and `HEY_THREAD_ID` — plus `HEY_NEW=1` for new mail, `HEY_NEW=0`
-otherwise — and both take over stdout.
+`HEY_BOX_NAME`, `HEY_POSTING_ID` and `HEY_THREAD_ID` (or `HEY_CALENDAR_ID`, `HEY_CALENDAR_NAME`,
+`HEY_RECORDING_ID` and `HEY_RECORDING_TYPE` for a calendar change) — plus `HEY_NEW=1` for new
+mail, `HEY_NEW=0` otherwise — and both take over stdout.
 
 ### Drafts
 
@@ -681,7 +747,7 @@ cancels it entirely.
 ### Calendars
 
 ```bash
-hey calendar list --json                          # List calendars (returns array of {id, name, kind})
+hey calendar list --json                          # List calendars, each with id, name, kind and owned
 ```
 
 Everything a calendar holds is a recording, and each kind has its own command: `hey event`,
@@ -754,7 +820,7 @@ virtual day of an opaque custom schedule takes its exact time from HEY's Day vie
 refused if that view no longer serves it. A realized custom day is refused for `future`,
 because HEY does not serve the rule's authoritative occurrence boundary; split from a
 virtual occurrence, edit that day alone, or edit the whole series. A realized preset occurrence moved away from its
-series time is also refused: move it back with a `current` edit first. Haystack cancels
+series time is also refused: move it back with a `current` edit first. HEY cancels
 children from the moved time but truncates the parent at the occurrence identifier, so
 splitting directly can lose neighboring realized edits. A preset `--repeat` alone means
 forever. HEY gives
@@ -826,8 +892,13 @@ weekday names, common abbreviations, or `0` (Sunday) through `6` (Saturday).
 ```bash
 hey timetrack start                           # Start timer
 hey timetrack stop                            # Stop timer
+hey timetrack stop --category "Client work"  # Stop and file under a category (created if missing)
 hey timetrack current --json                  # Show current timer
-hey timetrack list --json                     # List time entries
+hey timetrack list --json                     # List completed time entries, newest first
+hey timetrack list --category 42 --json       # Only one category, by ID
+hey timetrack edit 1042 --start 2026-08-22T09:00 --end 2026-08-22T11:15
+hey timetrack edit 1042 --category "Client work" --notes "Invoice review"
+hey timetrack delete 1042                     # Delete a time entry
 hey timetrack export > tracked-time.csv        # Write the complete CSV export
 hey timetrack export -o tracked-time.csv --json # Save the CSV, return file metadata
 hey timetrack categories --json               # List categories
@@ -835,6 +906,11 @@ hey timetrack category create "Client work"   # Create a category
 hey timetrack category rename 123 "Planning"  # Rename a category
 hey timetrack category delete 123              # Delete a category
 ```
+
+`list` leaves out the running track; read it with `current`. `edit` changes only the fields
+it is given, takes `YYYY-MM-DDTHH:MM` in the local zone (or a full RFC 3339 instant), and
+completes the track, so it is for finished tracks. A category is a title: `--category` files
+under it and HEY creates it if missing; a blank title does not clear one.
 
 Without `--output`, `hey timetrack export` writes CSV to stdout — redirect it to a file.
 The output formatting flags cannot reshape a CSV, so `--json`, `--quiet`, `--markdown`,
