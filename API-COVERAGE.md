@@ -117,6 +117,6 @@ which is what `Entries().ListDraftsPage` and `hey draft list --page` exist for.
 | `/boxes/{id}/postings/changes.json` | GET | SDK `Postings().AllChanges` | `hey watch` | covered |
 | `/cable` (`Postings::ChangesChannel`) | WS | `internal/cable` + actioncable-go | `hey watch`, TUI mail list | covered |
 | `/cable` (`Turbo::StreamsChannel`) | WS | `internal/cable` + actioncable-go | TUI Screener (stream name from `/clearances.json`) | covered |
-| `/identity.json` | GET | SDK `Identity().GetIdentity` | `hey account list`, `--account` validation | covered |
+| `/identity.json` | GET | SDK `Identity().GetIdentity` | `hey account list`, `--account` validation, `hey event add`/`edit` (the account's time zone, and the countdown an occurrence edit keeps) | covered |
 | `/oauth/authorizations/new` | GET | `internal/auth` (PKCE S256) | `hey auth login` | covered |
 | `/oauth/tokens` | POST | `internal/auth` | `hey auth login`, `hey auth refresh`, automatic refresh | covered |

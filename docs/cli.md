@@ -436,8 +436,34 @@ and `--all`. With no date they read the account's own today, whatever zone the m
 runs in.
 
 An event with no `--start-time` is an all-day event, and a `--start-time` with no
-`--end-time` runs for an hour. Clock times are read in `--time-zone`, which defaults to the
-machine's own zone; without one HEY would read them as UTC.
+`--end-time` runs for an hour — unless `--ends-on` names a later day, when it ends there at
+the start's clock time plus an hour. A default end that falls in the hour the clocks repeat,
+where HEY would place it at the other of its two moments, is refused; pass `--end-time`. Clock times are read in your HEY account's time zone, the
+one HEY's web app uses, and so is today when `--starts-on` is left out, for an all-day
+event too; `--time-zone America/New_York` names another zone. The command reads your
+identity for the account's zone at most once, and only when it needs it: for a clock time
+or today on an event with no zone of its own, or for a countdown an occurrence edit keeps.
+`--account` checks the account with a read of its own. If a clock time or today needs the
+zone and the account has none, or it cannot be read for any reason but a sign-in failure
+(which is reported as one), the write refuses and asks for `--time-zone` rather
+than guessing at UTC or the machine's zone. A failed read for a kept countdown reports the
+API error itself, since `--time-zone` cannot stand in for it. An all-day event on a named date needs no zone. `--time-zone` takes IANA names only, spelled as the zone database
+spells them (`America/New_York`, `US/Eastern`, `Etc/GMT+5`, `UTC`). That is this command's
+rule, not HEY's: `Local`, a lowercase spelling and Rails' friendly names such as `Eastern
+Time (US & Canada)` are refused.
+
+On `edit`, and on an `--occurrence` edit alike, an event saved in a time zone keeps it for
+the times you type and the times you keep. An event saved without one stays without one:
+the times you type are read in the account's zone and sent as the moment they name, and
+the ones you do not type keep theirs, so nothing you did not touch moves — a repeating
+series included. `--time-zone` gives the event that zone, and the times you do not type
+keep their moment in it. An all-day event given a time takes the account's zone, as a new
+event does. A typed time is placed as HEY places one: a time the clocks skip moves on an
+hour at a time until it exists, and a time they repeat as they go back is the
+daylight-saving one of its two moments, or the later where neither is. A kept time at the
+other moment cannot be sent to HEY as a clock time and zone, and nor can one with seconds,
+since HEY is sent whole minutes, so an edit that would move either refuses and asks you to
+retype it.
 
 `hey event edit` changes only the flags you name, but that is this command's doing rather
 than HEY's: an event write is a replacement, so the edit reads the event first and sends

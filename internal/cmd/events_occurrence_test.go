@@ -1215,7 +1215,6 @@ func TestEventsEditOccurrenceValidatesExplicitFlagsBeforeReading(t *testing.T) {
 		{name: "reminder", args: []string{"--remind", "soon"}, want: "invalid remind: soon"},
 		{name: "start date", args: []string{"--starts-on", "next-week"}, want: "invalid starts-on date"},
 		{name: "end date", args: []string{"--ends-on", "eventually"}, want: "invalid ends-on date"},
-		{name: "date order", args: []string{"--starts-on", "2026-09-15", "--ends-on", "2026-09-14"}, want: "ends-on 2026-09-14 is before starts-on 2026-09-15"},
 		{name: "start time", args: []string{"--start-time", "morning"}, want: "invalid start-time: morning"},
 		{name: "end time", args: []string{"--end-time", "later"}, want: "invalid end-time: later"},
 		{name: "time zone", args: []string{"--time-zone", "Not/AZone"}, want: "invalid time-zone: Not/AZone"},

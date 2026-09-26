@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -213,7 +214,7 @@ func (c *eventsEditCommand) editOccurrence(ctx context.Context, cmd *cobra.Comma
 		}
 	}
 
-	schedule, err := c.fields.scheduleFrom(cmd, event)
+	schedule, err := c.fields.scheduleFrom(ctx, cmd, event)
 	if err != nil {
 		return err
 	}
@@ -472,20 +473,73 @@ func occurrenceInstants(series generated.Recording, day time.Time) (time.Time, t
 	return start, start.Add(duration)
 }
 
-// wallClockOn is the series' clock time on a day, resolved the way HEY resolves it. A clock
-// time that does not exist on that day — the hour a zone springs forward over — is moved
-// an hour later and tried again, which is what ActiveSupport does when it changes the day
-// of a time; Go's time.Date picks the earlier zone instead and would land the day an hour
-// before HEY's, so a title-only edit would move it.
+// wallClockOn is a clock time on a day, resolved the way HEY resolves one. A clock time that
+// does not exist — the hour a zone springs forward over, or the whole of 30 December 2011 in
+// Samoa — is moved an hour later and tried again, date and all, until it does: that is what
+// ActiveSupport does with a local time TZInfo cannot find. A clock time that happens twice
+// is resolved by heysChoice. Go's time.Date is no guide to either: it picks one side of a gap
+// or an overlap by its own rules, not HEY's, so a title-only edit would move the day.
 func wallClockOn(day, wall time.Time, loc *time.Location) time.Time {
 	hour, minute, second := wall.Clock()
-	for step := range 24 {
-		at := time.Date(day.Year(), day.Month(), day.Day(), hour+step, minute, second, 0, loc)
-		if h, m, _ := at.Clock(); h == (hour+step)%24 && m == minute {
-			return at
+	local := time.Date(day.Year(), day.Month(), day.Day(), hour, minute, second, 0, time.UTC)
+	for range 48 {
+		if instants := instantsReading(local, loc); len(instants) > 0 {
+			return heysChoice(instants)
 		}
+		local = local.Add(time.Hour)
 	}
 	return time.Date(day.Year(), day.Month(), day.Day(), hour, minute, second, 0, loc)
+}
+
+// localClock is the clock time an instant reads as, held as the same figures in UTC so it
+// can be stepped without a zone getting in the way.
+func localClock(at time.Time) time.Time {
+	return time.Date(at.Year(), at.Month(), at.Day(), at.Hour(), at.Minute(), at.Second(), 0, time.UTC)
+}
+
+// instantsReading is every instant whose clock in loc reads local, earliest first: none in a
+// gap the clocks skip, two where they go back over the same hour, one anywhere else. Each
+// offset the zone has within a day and a half either side is tried in turn.
+func instantsReading(local time.Time, loc *time.Location) []time.Time {
+	var instants []time.Time
+	seen := map[int]bool{}
+	for at := local.Add(-36 * time.Hour).In(loc); at.Before(local.Add(36 * time.Hour)); {
+		_, offset := at.Zone()
+		if !seen[offset] {
+			seen[offset] = true
+			if candidate := local.Add(-time.Duration(offset) * time.Second).In(loc); localClock(candidate).Equal(local) {
+				instants = append(instants, candidate)
+			}
+		}
+		_, end := at.ZoneBounds()
+		if end.IsZero() {
+			break
+		}
+		at = end.In(loc)
+	}
+	slices.SortFunc(instants, func(a, b time.Time) int { return a.Compare(b) })
+	return slices.CompactFunc(instants, time.Time.Equal)
+}
+
+// heysChoice is the instant HEY takes for a clock time that names more than one:
+// ActiveSupport asks TZInfo for the period with daylight saving in force, and takes the
+// last of those still left — so the daylight-saving side of a fall-back, and the later of
+// two when neither side keeps daylight saving, as when Almaty moved its clocks back an hour
+// for good in 2024.
+func heysChoice(instants []time.Time) time.Time {
+	if len(instants) == 0 {
+		return time.Time{}
+	}
+	var saving []time.Time
+	for _, at := range instants {
+		if at.IsDST() {
+			saving = append(saving, at)
+		}
+	}
+	if len(saving) > 0 {
+		instants = saving
+	}
+	return instants[len(instants)-1]
 }
 
 // occurrenceCountdown is the countdown the write sends: the one --countdown names, or an
@@ -686,14 +740,14 @@ func countdownFromRecording(countdown, event generated.Recording, additionalZone
 func (c *eventsEditCommand) countdownFromRecording(ctx context.Context, countdown, event generated.Recording) (hey.CountdownParams, error) {
 	params, unreadable := countdownFromRecording(countdown, event)
 
-	identity, err := rootSDK.Identity().GetIdentity(ctx)
+	zone, err := c.fields.accountTimeZone(ctx)
 	if err != nil {
 		return hey.CountdownParams{}, apierr.FromSDK(err)
 	}
-	if identity == nil || identity.TimeZone == "" {
+	if zone == "" {
 		return params, unreadable
 	}
-	return countdownFromRecording(countdown, event, identity.TimeZone)
+	return countdownFromRecording(countdown, event, zone)
 }
 
 // countdownLabelMatchesDuration applies the same month, week, then day test HEY uses to

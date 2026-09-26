@@ -138,7 +138,7 @@ func TestEventsAddDefaultsTheEndTime(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_, _ = io.WriteString(w, `{"id":4823,"title":"Standup"}`)
-	}), "event", "add", "Standup", "--calendar", "9", "--starts-on", "2026-09-02", "--start-time", "09:15")
+	}), "event", "add", "Standup", "--calendar", "9", "--starts-on", "2026-09-02", "--start-time", "09:15", "--time-zone", "America/Chicago")
 	if err != nil {
 		t.Fatalf("execute events add: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestEventsAddRepeatsAndReminds(t *testing.T) {
 		w.WriteHeader(http.StatusCreated)
 		_, _ = io.WriteString(w, `{"id":4824,"title":"Standup"}`)
 	}),
-		"event", "add", "Standup", "--calendar", "9", "--start-time", "09:15",
+		"event", "add", "Standup", "--calendar", "9", "--start-time", "09:15", "--time-zone", "America/Chicago",
 		"--repeat", "every_weekday", "--repeat-times", "20", "--remind", "1d", "--remind", "1h")
 	if err != nil {
 		t.Fatalf("execute events add: %v", err)
