@@ -702,8 +702,9 @@ stdout, one per line, instead of the usual envelope (at a terminal, one text lin
 "name"}, "posting_id": ..., "thread_id": ..., "new": true|false, "posting": {...}}`. Use
 `thread_id` with `hey thread read` (absent for a bundle row that names no single thread). `new` is on every `added` and `updated` line and says whether
 the posting is new mail — unseen, not muted, and active since the watch last saw the thread,
-or since the watch began for a thread it has not seen; the backlog a watch starts with is
+or since the watch began for a thread it has not seen; the backlog `--since` reads is
 never new, nor is reading, muting or moving a thread, and a reply on a known thread is.
+Without `--since`, nothing from before the watch began is reported at all.
 `--events new` selects the new ones, alone or in a union with the other three. A deleted
 posting carries no `posting`, `thread_id` or `new`. Three more lines
 describe the watch itself: `{"change": "ready"}` once every box and calendar is caught up and the subscription

@@ -193,13 +193,15 @@ and `--events new` selects the true ones. The rule:
   translated back to the moment the request was made), the clock every `active_at` is on,
   so a workstation running fast or slow neither calls the backlog new nor sits on new mail;
   whole seconds, rounded down, so the doubt falls on the side of calling mail a moment old
-  new, and every box's cursor starts no later than that start, so mail that lands while the
+  new, and every box's cursor starts at that start, so mail that lands while the
   watch is starting up is read and is new. `active_at` moves on new mail only, not on a
   seen flip, a mute or a move, so reading a thread, marking it unseen again or moving it
-  into a box is never new, and a reply on a known thread is. A box's first read is its
-  catch-up from the server's cursor — the box's last activity, not this moment — so it
-  carries backlog, which the start-time rule keeps out, alongside anything that arrived
-  while the watch was starting, which is new.
+  into a box is never new, and a reply on a known thread is. A box's first read starts at
+  the watch's start, not at the server's cursor — the box's last posting activity, which a
+  deletion or a bundled posting can postdate, and which a cached box list can serve days
+  old — so it carries only what arrived while the
+  watch was starting, which is new. `--since` reads backlog first, which the start-time
+  rule keeps out.
 - **Every posting the watch reads is recorded**, in every box and whatever `--events` or
   `--box` reports — `--box` picks what is reported, every box is followed — so a thread
   known from a filtered-out change, or from another box, is never mistaken for new when its

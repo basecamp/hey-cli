@@ -335,7 +335,9 @@ hey watch --box imbox --events new --run-async 'notify-send -a HEY "New mail in 
 hey watch --run-sync ./triage.sh        # one at a time, waiting for each
 ```
 
-Runs until interrupted, printing changes as they happen, one line each:
+Runs until interrupted, printing changes as they happen, one line each. What changed before
+the watch began is not reported unless `--since` reads back to it first, so
+`--exit-on-first` waits for a change rather than stopping on an old one:
 
 ```json
 {"change":"added","at":"2026-08-18T09:14:22.031Z","box":{"id":24088,"kind":"imbox","name":"Imbox"},"posting_id":98765,"thread_id":54321,"new":true,"posting":{}}
@@ -343,7 +345,7 @@ Runs until interrupted, printing changes as they happen, one line each:
 
 Every `added` and `updated` line says whether the posting is new mail: unseen, not muted,
 and active since the watch last saw the thread — or since the watch began, for a thread it
-has not seen, so a box's backlog is never new. Reading, muting or moving a thread is not new
+has not seen, so the backlog `--since` reads is never new. Reading, muting or moving a thread is not new
 activity; a reply on a known thread is. `--events new` selects the new ones, alone or in a
 union with `added`, `updated`, `deleted` and `resync` — the default is everything but `new`,
 and `new` alone leaves a `resync` out, so a script for new mail never runs on one. `--box`

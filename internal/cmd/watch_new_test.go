@@ -249,16 +249,16 @@ func TestCutoffBeforeIsAWholeMillisecondStrictlyBefore(t *testing.T) {
 		t.Errorf("cutoffBefore(%v) = %v, want strictly before even on a boundary", exact, got)
 	}
 
-	// So mail in the start's own millisecond is new, and a cursor at that
-	// millisecond is moved back to before it.
+	// So mail in the start's own millisecond is new, and a cursor started at
+	// the watch's start reads it: the feed answers what is strictly later.
 	tracker := trackNewMail(cutoffBefore(within))
 	landed := within.Truncate(time.Millisecond)
 	if !tracker.isNew(24088, newPosting(101, "Maria Delgado", "Lunch on Thursday?", landed)) {
 		t.Error("mail in the same millisecond as the watch's start is new")
 	}
-	cursor := noLaterThan(hey.PostingChangesCursor{Since: landed.Format(watchCursorTimeLayout)}, cutoffBefore(within))
+	cursor := startingAt(hey.PostingChangesCursor{Since: landed.Format(watchCursorTimeLayout)}, cutoffBefore(within))
 	if cursor.Since != "2026-08-21T09:00:05.122Z" {
-		t.Errorf("cursor = %q, want it moved back to before the millisecond the mail landed in", cursor.Since)
+		t.Errorf("cursor = %q, want it before the millisecond the mail landed in", cursor.Since)
 	}
 }
 
