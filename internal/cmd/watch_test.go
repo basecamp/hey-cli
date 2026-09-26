@@ -546,17 +546,19 @@ func TestWatchSkipAheadEndsQuietlyWhenInterrupted(t *testing.T) {
 	}
 }
 
-// A box list the SDK revalidates answers 304 while no box row has changed, which is
-// every posting's activity — so after a long drop the list hands back the since the
-// watch fell behind from. Skipping to it answered 409 again on every read; skipping to
-// HEY's clock gets past it.
-func TestWatchSkipAheadGetsPastACachedBoxList(t *testing.T) {
+// HEY's ETag for /boxes.json is the box rows, which neither posting activity nor a new
+// feed version touches, so a list the SDK revalidates answers 304 with the since the
+// watch fell behind from and the version HEY now refuses — and HEY answers 409 for a
+// version it no longer speaks as surely as for too many changes. The skip-ahead reads
+// the list past the cache: the next read is on HEY's clock and on the new version.
+func TestWatchSkipAheadReadsTheBoxListPastTheCache(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
 	behind := time.Date(2026, 8, 21, 11, 0, 0, 0, time.UTC) // a since before this is too far behind
 	var mu sync.Mutex
 	var notModified, conflicts int
+	listed := `[{"id":24088,"kind":"imbox","name":"Imbox","posting_changes_url":"/boxes/24088/postings/changes.json?since=2026-08-01T09%3A00%3A00.000000Z&v=2"}]`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -573,27 +575,31 @@ func TestWatchSkipAheadGetsPastACachedBoxList(t *testing.T) {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`[{"id":24088,"kind":"imbox","name":"Imbox","posting_changes_url":"/boxes/24088/postings/changes.json?since=2026-08-01T09%3A00%3A00.000000Z&v=2"}]`))
+			_, _ = w.Write([]byte(listed))
 		default:
 			since, _ := time.Parse(time.RFC3339Nano, r.URL.Query().Get("since"))
-			if since.Before(behind) {
+			if since.Before(behind) || r.URL.Query().Get("v") != "3" {
 				// As HEY answers: `head :conflict`, no body.
 				conflicts++
 				w.WriteHeader(http.StatusConflict)
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("Link", `<`+r.URL.Path+`?since=2026-08-21T11%3A06%3A12.250000Z&v=2>; rel="next"`)
+			w.Header().Set("Link", `<`+r.URL.Path+`?since=2026-08-21T11%3A06%3A12.250000Z&v=3>; rel="next"`)
 			_, _ = w.Write([]byte(`{"added":[{"id":9004,"kind":"topic","box_id":24088,"name":"Re: Lunch on Thursday?","active_at":"2026-08-21T11:06:12.250Z","created_at":"2026-08-21T11:06:12.250Z","creator":{"name":"Maria Delgado"}}]}`))
 		}
 	}))
 	defer server.Close()
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
 
-	// The box list as the watch read it at its start, now in the SDK's cache.
+	// The box list as the watch read it at its start, now in the SDK's cache. Then HEY
+	// moves the feed to version 3, and the list's rows — its ETag — stay as they were.
 	if _, err := sdk.Boxes().List(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	mu.Lock()
+	listed = `[{"id":24088,"kind":"imbox","name":"Imbox","posting_changes_url":"/boxes/24088/postings/changes.json?since=2026-08-21T11%3A04%3A58.310442Z&v=3"}]`
+	mu.Unlock()
 
 	watch, out := newTestWatch("added", "resync")
 	cursor, err := watchCursor(server.URL+"/boxes/24088/postings/changes.json?since=2026-08-01T09%3A00%3A00.000000Z&v=2", "")
@@ -607,11 +613,14 @@ func TestWatchSkipAheadGetsPastACachedBoxList(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if notModified == 0 {
-		t.Fatal("the skip-ahead should have read the box list from the cache, as HEY answers a list whose rows have not changed")
+	if notModified != 0 {
+		t.Errorf("the skip-ahead read the box list from the cache %d times, want never — a 304 hands back the version HEY refused", notModified)
 	}
 	if conflicts != 1 {
 		t.Errorf("the feed answered 409 %d times, want once — the skip-ahead should get past it", conflicts)
+	}
+	if got := watch.boxes[24088].cursor.Version; got != "3" {
+		t.Errorf("version = %q, want the one HEY speaks now", got)
 	}
 	lines := watchLines(t, out)
 	if len(lines) != 2 || lines[0]["change"] != watchResync || lines[1]["change"] != "added" || lines[1]["posting_id"] != float64(9004) {

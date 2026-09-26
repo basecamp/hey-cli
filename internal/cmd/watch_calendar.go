@@ -375,12 +375,17 @@ func (w *postingsWatch) reportRecordings(ctx context.Context, calendar *watchedC
 // back once its feed has fallen too far behind, and says where it skipped to and whether
 // it did — the rule skipAhead follows for a box, and for the same reason: the since in
 // the calendar's URL is its updated_at, not HEY's clock. The list is read for the feed's
-// version and to learn whether the calendar is still there. A calendar the server no
+// version and to learn whether the calendar is still there, past the SDK's cache as a
+// box's is: a new feed version need not change the list's ETag. A calendar the server no
 // longer lists cannot be followed any more and stops being watched — the calendar-level
 // feed reports its deletion in its own time. A clock that cannot be read leaves the
 // cursor where it was, to be tried again on the retry's backoff.
 func (w *postingsWatch) skipCalendarAhead(ctx context.Context, calendar *watchedCalendar) (time.Time, bool, error) {
-	list, err := sdk.Calendars().ListWithChanges(ctx)
+	client, err := newUncachedSDKClient(ctx)
+	if err != nil {
+		return time.Time{}, false, apierr.FromSDK(err)
+	}
+	list, err := client.Calendars().ListWithChanges(ctx)
 	if err != nil {
 		return time.Time{}, false, apierr.FromSDK(err)
 	}

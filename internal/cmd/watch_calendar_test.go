@@ -298,6 +298,78 @@ func TestWatchCalendarSkipsAheadOnAFullSync(t *testing.T) {
 	}
 }
 
+// A calendar's feed can move to a new version without the calendar list's ETag — its
+// calendars and the selection — changing, so the skip-ahead reads the list past the cache.
+func TestWatchCalendarSkipAheadReadsTheListPastTheCache(t *testing.T) {
+	t.Setenv("HEY_TOKEN", "test-token")
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	var mu sync.Mutex
+	var notModified, conflicts int
+	version := "1"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch r.URL.Path {
+		case "/identity.json":
+			w.Header().Set("Date", skipDate)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":1}`))
+		case "/calendars.json":
+			w.Header().Set("ETag", `W/"calendars-unchanged"`)
+			if r.Header.Get("If-None-Match") == `W/"calendars-unchanged"` {
+				notModified++
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"calendars": [{"calendar": {"id": 512, "name": "Household"},
+				"recording_changes_url": "/calendars/512/recording/changes.json?since=2026-08-18T11%3A00%3A00.000000Z&v=` + version + `"}],
+				"calendar_changes_url": "/calendar/changes.json?since=2026-08-18T11%3A00%3A00.000000Z"}`))
+		default:
+			if r.URL.Query().Get("v") != "2" {
+				conflicts++
+				w.WriteHeader(http.StatusConflict)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}))
+	defer server.Close()
+	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
+
+	// The list as the watch read it at its start, now in the SDK's cache; then HEY
+	// moves the recording feed to version 2.
+	if _, err := sdk.Calendars().ListWithChanges(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	mu.Lock()
+	version = "2"
+	mu.Unlock()
+
+	watch, out := newTestWatch("recording_added", "calendar_resync")
+	watch.calendar = newTestCalendarsWatch(t, &watchedCalendar{id: 512, name: "Household", cursor: hey.CalendarChangesCursor{Since: "2026-08-18T11:00:00.000Z", Version: "1"}})
+
+	for range 2 {
+		if err := watch.readCalendar(context.Background(), watch.calendar.calendars[512]); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if notModified != 0 || conflicts != 1 {
+		t.Errorf("list served from the cache %d times and the feed answered 409 %d times, want never and once", notModified, conflicts)
+	}
+	if got := watch.calendar.calendars[512].cursor.Version; got != "2" {
+		t.Errorf("version = %q, want the one HEY speaks now", got)
+	}
+	if lines := watchLines(t, out); len(lines) != 1 || lines[0]["change"] != watchCalendarResync {
+		t.Errorf("wrote %v, want one calendar_resync", lines)
+	}
+}
+
 func TestWatchCalendarStopsWatchingAGoneCalendar(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 

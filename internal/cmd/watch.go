@@ -761,12 +761,12 @@ func (w *postingsWatch) settleBackoff() {
 // and says where it skipped to and whether it did.
 //
 // Not to the since in the box's posting_changes_url, which is what it used to take:
-// that is the box's last posting activity rather than HEY's clock, a deletion or a
-// bundled posting can come later than it, and the box list reaches the watch through
-// the SDK's ETag cache, whose ETag — the box rows — posting activity never changes. A
-// 304 after a long drop would hand back the since the watch had already fallen behind
-// from, and every read after it would answer 409 again. The list is still read, for
-// the feed's version and to learn whether the box is still there.
+// that is the box's last posting activity rather than HEY's clock, and a deletion or a
+// bundled posting can come later than it. The list is still read, for the feed's
+// version and to learn whether the box is still there — and read past the SDK's ETag
+// cache (newUncachedSDKClient — a skip is rare enough to build one each time), because HEY's ETag for it is the box rows, which neither
+// posting activity nor a new feed version touches. A 304 would hand back the version
+// HEY had just refused, and a version HEY refuses answers 409 on every read.
 //
 // A box the server no longer lists, or no longer serves a changes feed for, has no
 // cursor to skip to: keeping the one it had would answer 409 on every read, and
@@ -775,7 +775,11 @@ func (w *postingsWatch) settleBackoff() {
 // A clock that cannot be read leaves the cursor where it was, to be tried again on the
 // retry's backoff like any read that failed.
 func (w *postingsWatch) skipAhead(ctx context.Context, box *watchedBox) (time.Time, bool, error) {
-	listed, err := sdk.Boxes().List(ctx)
+	client, err := newUncachedSDKClient(ctx)
+	if err != nil {
+		return time.Time{}, false, apierr.FromSDK(err)
+	}
+	listed, err := client.Boxes().List(ctx)
 	if err != nil {
 		return time.Time{}, false, apierr.FromSDK(err)
 	}
