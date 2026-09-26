@@ -115,13 +115,14 @@ bare number. `--ids-only` and `--count` need list data, so they work on `hey box
 `hey workflow list`, `hey workflow view`, `hey clip list`, `hey snippet list`, `hey draft list`, `hey search`, `hey contact list`, `hey contact threads`, `hey screener list`, `hey screener history`, `hey calendar list`,
 `hey event list`, `hey event day`, `hey event week`, `hey todo list`, `hey habit list`,
 `hey timetrack list` and `hey journal list`.
-The
-data-only formats print any pagination notice on stderr, so the IDs on stdout stay
+Both answer
+for what was read — the first page unless `--all` or `--limit` reads more — and a notice
+that more pages exist, where a command writes one, goes to stderr so the IDs on stdout stay
 pipeable. `hey clip list --ids-only` and `--count` cover the newest page only because the
 released SDK does not expose HEY's cursor for older clip pages.
 
 `--html` writes the original HTML, for the commands that hold some: `hey thread read`,
-`hey journal read`, `hey contact show` and `hey contact note show`. It is a format of
+`hey journal read`, and a contact's private note (`hey contact show` or `hey contact note show`). It is a format of
 its own — it cannot be combined with the other output flags (`--stats` included: there is
 no envelope to carry stats), every other command refuses it, and it is meant for a file or
 a pipe: on a terminal it is refused with the redirect spelled out, since markup on a
@@ -215,7 +216,7 @@ hey screener approve 91 --box "The Feed"  # let them through, into another box
 hey screener deny 91 92            # turn several senders away
 hey screener deny 91 --spam        # turn them away and mark what they sent as spam
 hey screener history               # who has already been screened
-hey screener clear                 # empty the queue without deciding
+hey screener clear                 # trash everything waiting, deciding no one
 hey thread read 123                    # read a full email thread
 hey thread read 123 --markdown         # the thread as one Markdown document
 hey thread read 123 --html > 123.html  # HEY's original HTML, to a file
@@ -231,9 +232,9 @@ hey bulk-reply preview 12345 67890  # inspect threads and exact To/CC/BCC recipi
 hey bulk-reply send 12345 67890 -m "Thanks for the update."
 hey bulk-reply undo 98765            # recall a delayed bulk reply
 hey forward 123 --to alice@example.com -m "For your review"  # forward the latest message
-hey compose --to alice@example.com --subject "Lunch plans"  # body from $EDITOR
+hey compose --to alice@example.com --subject "Lunch plans"  # body from $EDITOR at a terminal, otherwise stdin
 hey compose --to alice@example.com --subject "Q3 revenue report" -m "The numbers are attached." --attach ./report.pdf
-hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Kitchen remodel timeline"  # with CC/BCC
+hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Kitchen remodel timeline" -m "Cabinets land the week of the 14th."  # with CC/BCC
 hey compose --to alice@example.com --subject "Sprint recap" -m "We **shipped** the pagination fix."
 hey compose --to alice@example.com --subject "Newsletter draft" --message-html "<h1>March</h1><p>What we shipped.</p>"
 hey compose --subject "Board update" -m "Numbers to follow." --draft  # save a draft instead of sending
@@ -262,23 +263,23 @@ hey ignore 12345                   # ignore future activity on a thread
 hey stop-ignoring 12345            # resume attention for a thread
 ```
 
-`hey thread read` reads a whole thread, oldest entry first, however many pages HEY serves it in — within limits it states: a hundred pages past the first, two thousand entries, as many bodies, 64 MiB of retained thread data and two minutes in all. The byte budget covers entry-index metadata, message bodies and metadata, the recipient identities retained for thread output, and inbound delivery addresses and resolved contact identities retained for JSON. A thread that could only be read in part — a body HEY would not serve, a limit reached — is refused rather than passed off as whole; `--allow-partial` takes what was read, with a `notice` saying what is missing and each entry's `body_state` saying whether its body was `hydrated`, `bodyless` (HEY served none), `over_limit` or `failed`. Each entry whose message was read carries `recipients`, with `to`, `cc` and `bcc` contact lists; the object is absent when the message was not read, while a known-empty line is `[]`. `creator` remains the HEY account user; if HEY sent as a different address, the hydrated entry also has `sender` with that address, and the displayed From uses it. A missing `sender` does not mean the same sender was verified: the index-only formats and entries whose message was not read have no sender data. In JSON, an inbound entry also carries `received_via`: every exact account address HEY recorded the message arriving through, including plus tags and catch-all aliases. These are delivery records, not the visible To/CC/BCC recipients. A record's `contact` is optional and is omitted when HEY did not resolve one; the whole field is omitted for sent or generated messages and whenever the message was not read. `--count` and `--ids-only` read the entry index and no messages, so only a truncated index can make them partial. `--markdown` writes the thread as one Markdown document — a heading per entry naming the sender, date and ID, then the body — which is the shape to hand an agent or a notes app. `hey attachment list` reads the bodies in every format, since that is where attachment metadata lives, and answers a partial thread the same way. `hey reply` answers the thread's latest entry and addresses the reply the way HEY does: it asks HEY for the reply's recipients — everyone that entry was addressed to, its sender moved onto the To line, and your own addresses, aliases and catch-alls excluded — falling back to the latest message's metadata for a send when that read is unavailable.
+`hey thread read` reads a whole thread, oldest entry first, however many pages HEY serves it in — within limits it states: a hundred pages past the first, two thousand entries, as many bodies, 64 MiB of retained thread data and two minutes in all. The byte budget covers entry-index metadata, message bodies and metadata, the recipient identities retained for thread output, and inbound delivery addresses and resolved contact identities retained for JSON. A thread that could only be read in part — a body HEY would not serve, a limit reached — is refused rather than passed off as whole; `--allow-partial` takes what was read, with a `notice` saying what is missing and each entry's `body_state` saying whether its body was `hydrated`, `bodyless` (HEY served none), `over_limit` or `failed`. Each entry whose message was read carries `recipients`, with `to`, `cc` and `bcc` contact lists; the object is absent when the message was not read, while a known-empty line is `[]`. `creator` is the entry's author — the external sender for inbound mail, your own contact for mail you sent; if you sent from a different address (an alias, custom domain or external account), the hydrated entry also has `sender` with that address, and the displayed From uses it. A missing `sender` does not mean the same sender was verified: the index-only formats and entries whose message was not read have no sender data. In JSON, an inbound entry also carries `received_via`: every exact account address HEY recorded the message arriving through, including plus tags and catch-all aliases. These are delivery records, not the visible To/CC/BCC recipients. A record's `contact` is optional and is omitted when HEY did not resolve one; the whole field is omitted for sent or generated messages and whenever the message was not read. `--count` and `--ids-only` read the entry index and no messages, so only a truncated index can make them partial. `--markdown` writes the thread as one Markdown document — a heading per entry naming the sender, date and ID, then the body — which is the shape to hand an agent or a notes app. `hey attachment list` reads the bodies in every format, since that is where attachment metadata lives, and answers a partial thread the same way. `hey reply` answers the thread's latest entry and addresses the reply the way HEY does: it asks HEY for the reply's recipients — everyone that entry was addressed to, its sender moved onto the To line, and your own addresses, aliases and catch-alls excluded — falling back to the latest message's metadata for a send when that read is unavailable.
 
 Repeatable `hey reply --to`, `--cc` and `--bcc` flags add recipients to that envelope; comma-separated addresses also work. An explicitly named address moves to that line instead of appearing twice. `--replace-recipients` discards HEY's prefill and requires at least one explicit address. `--dry-run` needs no body, does not read the original message body, uploads nothing and sends nothing; its JSON data reports the account, thread, entry, subject, resolved sender, and final To, CC and BCC lists. If HEY's envelope prefill is unavailable, a dry run refuses to guess the original recipient lists; use `--replace-recipients` with explicit addresses to preview a complete replacement instead.
 
 Email bodies come back as Markdown. `hey thread read` and the TUI render that Markdown for the terminal — headings, emphasis, lists, quotes, tables and code survive, and links keep their URLs and stay clickable where the terminal supports it. `--json` carries the same Markdown in `body`, so an agent reading a thread sees the structure a human sees rather than a flattened wall of text. `--html` keeps HEY's original body HTML and frames each entry with its From, To, CC and BCC headers.
 
-Writing is Markdown too, everywhere text goes in: `-m`, `--content`, `--note`, positional content, stdin, and `$EDITOR` (which opens prefilled with the existing entry or note as Markdown). Every such flag has a raw-HTML twin — `--message-html`, `--content-html`, `--note-html` — for sending markup verbatim; each pair is mutually exclusive. The TUI's compose and bulk-reply forms convert Markdown the same way, and the compose editor renders it live as you type — `**bold**` turns bold, markers and all. A fenced code block's language (` ```ruby `) is carried the way HEY's own editor stores it, so the web app syntax-highlights it.
+Writing is Markdown too, for message bodies, drafts, journal entries, snippets and contact notes: `-m`, `--content`, `--note`, positional content, stdin, and `$EDITOR` (which opens prefilled with the existing entry or note as Markdown). Every such flag has a raw-HTML twin — `--message-html`, `--content-html`, `--note-html` — for sending markup verbatim; each pair is mutually exclusive. The TUI's compose and bulk-reply forms convert Markdown the same way, and the compose editor renders it live as you type — `**bold**` turns bold, markers and all. A fenced code block's language (` ```ruby `) is carried the way HEY's own editor stores it, so the web app syntax-highlights it — for the languages HEY highlights (Ruby, Python, JavaScript, TypeScript, Go, Rust, Java, C#, C++, PHP, Swift, HTML, CSS); any other is dropped. Clip passages, event notes and time track notes are plain text.
 
-Drafts are the review-before-send lane: `hey compose --draft` (and `hey reply --draft`) saves instead of sending — recipients optional on a draft — and answers the draft's ID. `hey draft show` reads it back with the body as Markdown, `hey draft edit` revises it (each flag replaces its field; what is not flagged is kept, by reading the draft and resending the whole of it, since a revision is not a patch on HEY's side), `hey draft send` delivers through HEY's undo window, and `hey draft delete` trashes it. Scheduling a delivery is done in a HEY app for now — the API cannot yet name an exact instant — and a schedule set there survives CLI edits untouched. A draft prepared here is reviewed and sent from any HEY app, which is the workflow this is for: an agent writes, a person decides.
+Drafts are the review-before-send lane: `hey compose --draft` (and `hey reply --draft`) saves instead of sending — recipients optional on a draft — and answers the draft's ID. `hey draft show` reads it back with the body as Markdown, `hey draft edit` revises it (each flag replaces its field; what is not flagged is kept, by reading the draft and resending the whole of it, since a revision is not a patch on HEY's side), `hey draft send` delivers through HEY's undo window, and `hey draft delete` trashes it. Scheduling a delivery is done in a HEY app for now — the CLI has no flag for it, and HEY's API schedules only to a whole hour — and a schedule set there survives CLI edits untouched. A draft prepared here is reviewed and sent from any HEY app, which is the workflow this is for: an agent writes, a person decides.
 
 `hey share <thread_id>` gets a sharing link for a thread. Anyone with the link can see the entire thread and future emails or replies sent to it. `hey unshare <thread_id>` turns off the sharing link.
 
-Search accepts free text plus `--required`, `--any`, `--none`, `--exact`, `--from`, `--to`, `--subject`, `--date`, `--in`, `--label`, and `--attachment`. `--in`, `--date`, `--label` and `--attachment` take one of the values `hey search filters` lists — the attachment kinds are `any`, `images`, `pdfs`, `calendar_invites`, `documents`, `spreadsheets`, `presentations`, `media` and `zip_files`, so it is `--attachment pdfs` rather than `pdf`, and an unrecognized `--in`, `--date` or `--attachment` is refused with the values it accepts before anything is sent. Use `--page` for one page or `--all` to fetch up to 100 pages; capped searches report the next page for continuation. Search results include `topic_id` for reading the thread and the matching message summaries. Results with an active box item also include `id` for organization actions.
+Search accepts free text plus `--required`, `--any`, `--none`, `--exact`, `--from`, `--to`, `--subject`, `--date`, `--in`, `--label`, and `--attachment`. `--in`, `--date`, `--label` and `--attachment` take one of the values `hey search filters` lists — the attachment kinds are `any`, `images`, `pdfs`, `calendar_invites`, `documents`, `spreadsheets`, `presentations`, `media` and `zip_files`, so it is `--attachment pdfs` rather than `pdf`, and an unrecognized `--in`, `--date` or `--attachment` is refused with the values it accepts before anything is sent. Use `--page` for one page or `--all` to fetch up to 100 pages; capped searches report the next page for continuation. Search results include `topic_id` for reading the thread and the matching message summaries. Results also include `id` for organization actions, except when you have no box item for the thread.
 
-Contact updates preserve omitted name, email, and alias fields. Supplying `--alias` replaces the complete alias list; `--alias=` clears it. Contact notes accept positional content, `--note`, stdin, or `$EDITOR`. HEY hides contacts rather than permanently deleting them; hidden contacts leave lists, autocomplete, and search, and can be shown again by ID. Bundling groups a contact's mail into one row without merging or deleting the underlying threads; unbundling lists those threads separately again. HEY applies bundling when the contact's current delivery setting supports bundles.
+Contact updates preserve omitted name, email, and alias fields. Supplying `--alias` replaces the complete alias list; `--alias=` clears it. Contact notes accept positional content, `--note`, stdin, or `$EDITOR`. HEY hides contacts rather than permanently deleting them; hidden contacts leave lists, autocomplete, and search, and can be shown again by ID. Bundling groups a contact's mail into one row without merging or deleting the underlying threads; unbundling lists those threads separately again. HEY bundles only a contact with no box preference or one sent to the Paper Trail; for any other, bundling answers success and changes nothing. A contact that is hidden, an alias, or another HEY user cannot be edited: updating it or setting or deleting its note answers `not_found`. `hey contact list` holds only non-HEY senders you have screened in — other HEY users, senders still in or denied by The Screener, aliases and hidden contacts are left out.
 
-The Screener is where first-time senders wait. `hey screener list` returns clearance IDs — not contact IDs — with the sender and the subject of what they sent, plus `topic_id` for reading the thread before deciding. `--count` asks for the number alone, which is a far cheaper request than the queue, and prints it as a bare number like every other command's `--count`, so `n=$(hey screener list --count)` reads it directly. Approving delivers everything the sender has waiting; denying hides it. Either is reversible with the opposite command, and `hey screener history` shows what was already decided. Both listings page the way `hey box view` does: `--all` follows HEY's cursor to the end of the queue (up to 100 pages), and a single-page or capped read reports `next_page` in its JSON meta, which `--page <next_page>` continues from — the cursor is opaque, so a page *number* does not name a position. `hey screener list` also reports `total_count`, the whole queue's size, next to what the read returned. `--box` and `--seen` approve one sender at a time; several IDs go through HEY's bulk endpoint, which takes neither. `--spam` also trains HEY's filter, which is harder to undo than denying. `hey screener clear` empties the queue without deciding anything — those senders reappear on their next email.
+The Screener is where first-time senders wait. `hey screener list` returns clearance IDs — not contact IDs — with the sender and the subject of what they sent, plus `topic_id` for reading the thread before deciding. `--count` asks for the number alone, which is a far cheaper request than the queue, and prints it as a bare number like every other command's `--count`, so `n=$(hey screener list --count)` reads it directly. Approving delivers everything the sender has waiting; denying hides it. Either is reversible with the opposite command, and `hey screener history` shows what was already decided. Both listings page the way `hey box view` does: `--all` follows HEY's cursor to the end of the queue (up to 100 pages), and a single-page or capped read reports `next_page` in its JSON meta, which `--page <next_page>` continues from — the cursor is opaque, so a page *number* does not name a position. `hey screener list` also reports `total_count`, the whole queue's size, next to what the read returned. `--box` and `--seen` approve one sender at a time; several IDs go through HEY's bulk endpoint, which takes neither. `--seen` reliably marks the mail read only for a sender with one waiting thread. `--spam` marks what they sent as spam and, for a single ID, trains HEY's filter, which is harder to undo than denying. `hey screener clear` moves everything waiting to Trash (a shared thread loses your access instead) without approving or denying anyone — those senders reappear on their next email.
 
 `hey bulk-reply preview` is read-only and resolves each posting to its latest replyable entry. `hey bulk-reply send` resolves the selection again, skips threads without a replyable entry, keeps HEY's server-provided name tag, and returns the exact reply count, delivery ID, delayed state, undo URL, and undo command. Posting IDs must be positive and unique. The message can come from `-m`, stdin, or `$EDITOR`; `--attach` is repeatable.
 
@@ -304,7 +305,7 @@ and JSON output. No command here persists a default sender.
 
 `--attach` is repeatable on `hey compose`, `hey reply`, and `hey bulk-reply send`, and attachment-only messages are supported. The CLI validates and uploads every file before sending the email. `hey attachment list <thread-id>` returns every named downloadable file, including named inline images. Direct files keep stable message-and-position IDs such as `456:1`; files inside embedded HTML receive opaque IDs scoped to their message. Pass either returned ID to `hey attachment save`. Saving uses the original filename by default, accepts `--output` for a file or directory, and preserves existing files unless `--force` is set.
 
-Organization actions take the `id` values returned by `hey box view --json`, `hey label view --json`, or `hey search --json`. Reading, replying to, and forwarding a thread take its `topic_id` instead, which `hey box view --json`, `hey label view --json`, `hey collection view --json` and `hey search --json` all carry alongside `id`. `hey box view` also returns `next_page` and accepts `--page <next_page>` to continue a box listing; it keeps `next_history_url` for the sync clients that read it, and `--page` accepts that URL as readily as the cursor inside it. Label IDs come from `hey label list`; `hey label view` returns `next_page` and `total_count`, accepts `--page <next_page>` for continuation, and supports `--all` for complete traversal. HEY creates a label while adding it to at least one thread, so `hey label create` requires thread item IDs.
+Organization actions take the `id` values returned by `hey box view --json`, `hey label view --json`, or `hey search --json`. Reading, replying to, and forwarding a thread take its `topic_id` instead, which `hey box view --json`, `hey label view --json`, `hey collection view --json` and `hey search --json` all carry alongside `id`. `hey box view` also returns `next_page` and accepts `--page <next_page>` to continue a box listing; it keeps `next_history_url` for the sync clients that read it, and `--page` accepts that URL as readily as the cursor inside it. Label IDs come from `hey label list`; `hey label view` returns `next_page` and `total_count`, accepts `--page <next_page>` for continuation, and supports `--all` for complete traversal. `hey label create` files at least one thread as it creates the label, so it needs one or more of your box item IDs; a name you already use (in any case) is refused.
 
 Collection IDs come from `hey collection list`. `hey collection view` returns both each posting `id` and its `topic_id`, plus `next_page` and `total_count`. Collection membership commands take `topic_id`; posting organization commands continue to take `id`. Creating a collection returns a confirmed mutation, and `hey collection list` provides its ID for subsequent commands. Collection updates accept a non-empty name, summary, or both.
 
@@ -318,7 +319,7 @@ Snippets are named reusable email content, separate from clips saved out of rece
 
 `hey box view <name|id>`, `hey label view <id>` and `hey collection view <id>` list the same postings and answer the same formats: `--json`, `--styled`, `--markdown`, `--ids-only`, and `--count`. The data-only formats print the pagination notice and any `next_page` cursor on stderr, so the IDs on stdout stay pipeable. `--json` differs only in what wraps the postings: a box answers with HEY's box payload, a label and a collection with the source and its `total_count`.
 
-Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Reply Later is a box rather than a separate flag: moving a Reply Later thread to Imbox removes Reply Later, preserves its seen state, and leaves a seen thread in Previously Seen. It does not return the thread to the box it occupied before Reply Later. A bundle row is refused rather than moved: it stands in for one sender's whole stream in the box they are delivered to, so moving it leaves nothing there for their next email to join and it arrives unbundled instead. Group or ungroup a sender with `hey contact bundle` and `hey contact unbundle`, and read a bundle with `hey bundle view`. Bubble Up has its own commands: `hey bubble up` raises a thread right away with `--now`, on a date with `--on` (HEY resurfaces it at its morning hour of that day, or its evening hour when the date is today), or at the morning hour of tomorrow, Saturday, or next Monday with `--tomorrow`, `--weekend`, and `--next-week`; `hey bubble pop` cancels one. `hey bubble list` shows both buckets — the threads back in the Imbox after bubbling up and the ones still scheduled, each with when it resurfaces. Trashing a shared thread removes your access instead of deleting it for everyone. Ignored threads remain in their box and can be restored with `hey stop-ignoring`.
+Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Moving to any of them but Imbox marks the threads seen, and a thread that cannot be replied to is silently not moved to Reply Later. Reply Later is a box rather than a separate flag: moving a Reply Later thread to Imbox removes Reply Later, preserves its seen state, and leaves a seen thread in Previously Seen. It does not return the thread to the box it occupied before Reply Later. A bundle row is refused rather than moved: it stands in for one sender's whole stream in the box they are delivered to, so moving it leaves nothing there for their next email to join and it arrives unbundled instead. Group or ungroup a sender with `hey contact bundle` and `hey contact unbundle`, and read a bundle with `hey bundle view`. Bubble Up has its own commands: `hey bubble up` raises a thread right away with `--now`, on a date with `--on` (HEY resurfaces it at 08:00 UTC that day, or 18:00 UTC when the date is today), or at 08:00 UTC tomorrow, the next Saturday, or next Monday with `--tomorrow`, `--weekend`, and `--next-week`; `hey bubble pop` cancels one, moving the thread to the Imbox and marking it seen rather than returning it to its original box. `hey bubble list` shows both buckets — the threads back in the Imbox after bubbling up and the ones still scheduled, each with when it resurfaces. Trashing a shared thread removes your access instead of deleting it for everyone. Ignoring marks a thread seen and leaves it in its box; while it is ignored `hey unseen` has no effect, and `hey stop-ignoring` resumes notifications but leaves it seen.
 
 ## Watching for changes
 
@@ -393,7 +394,7 @@ the whole window rather than reading up to the default end.
 ### Events
 
 ```bash
-hey event list                    # every calendar, from today onward
+hey event list                    # every calendar, today through the next 30 days
 hey event list --calendar 123 --starts-on 2026-01-01 --ends-on 2026-01-31
 hey event list --count            # how many events in the window
 
@@ -412,18 +413,20 @@ hey event delete 4821
 ```
 
 Without `--calendar`, `hey event list` reads every calendar and `hey event add` files on
-the first one it can — the personal calendar is in the list HEY serves but refuses events.
+the first calendar you own that is neither personal nor subscribed, in `hey calendar list`
+order — which is often "Maybe" rather than the calendar you mean, so pass `--calendar`.
 The list follows every page HEY serves. Within each calendar HEY orders recordings by
 newest start time, not creation time, so use the ID returned by `hey event add` for a follow-up
 edit or delete rather than choosing an event by its position in the list. A repeating event
-lists once as the series it is stored as, not once per day it falls on.
+lists once as the series it is stored as, plus a row for each day HEY has written out on its own.
 
 `hey event day` and `hey event week` read a span the way HEY's own views draw it: a
 repeating event is expanded into the occurrences that fall inside it, each carrying that
 day's own times and an `occurrence_id`. A virtual occurrence carries the series in `id`
 and `parent_id`. A day HEY has written out on its own keeps its own event ID in both `id`
 and `recording_id`, while `parent_id` remains the series; that own ID is what `hey event
-edit` and `hey event delete` act on for that day alone. A period covers the calendars
+edit` changes for that day alone. `hey event delete` on it discards only the day's own
+changes — HEY's series still has that date, so the series' occurrence shows again. A period covers the calendars
 switched on in HEY, the same set
 the app draws, so `day` and `week` take no `--calendar` — only `--limit`
 and `--all`. With no date they read the account's own today, whatever zone the machine
@@ -437,10 +440,11 @@ machine's own zone; without one HEY would read them as UTC.
 than HEY's: an event write is a replacement, so the edit reads the event first and sends
 back the notes, location, link, attached email, reminders and time zones it is not
 changing. Two things cannot survive the round trip. HEY serves notes back as plain text, so
-saving flattens their formatting; and a countdown is not served at all, so an edit removes
-one unless `--countdown` names it again. An event that cannot be read is refused rather
-than written blind — pass the day it starts (`hey event edit 4821 2026-09-02`) or
-`--calendar` to look somewhere narrower.
+saving flattens their formatting; and a countdown is a recording of its own that this edit
+does not read back, so an edit removes one unless `--countdown` names it again. An event that cannot be read is refused rather
+than written blind. It is looked for within a year either side of today; pass the day it
+starts (`hey event edit 4821 2026-09-02`) for one outside that — `--calendar` only limits
+which calendars are read.
 
 An id on its own changes the whole event, a repeating series included. One day of a
 series is changed with `--occurrence`, which takes the `occurrence_id` that `hey event
@@ -477,8 +481,8 @@ email, reminders and circle, taking them from the day itself where HEY has alrea
 that day out on its own. Styled `day` and `week` tables that contain occurrences print
 `Series ID`, `Occurrence ID` and `Recording ID` columns beside `ID`. A day like that
 lists its own event ID in `id` and `recording_id`, with the series in `parent_id`; `hey
-event edit <id>` and
-`hey event delete <id>` act on that day alone. The series id is what `--occurrence` takes
+event edit <id>` changes that day alone; `hey event delete <id>` discards the day's own
+changes and the series' occurrence shows again. The series id is what `--occurrence` takes
 beside its `occurrence_id`. A countdown owned by the day is read back and sent again. An
 inherited series countdown is left inherited by a `current` edit, while a `future` edit
 reads it from the day the series began and copies it to the replacement series. It
@@ -528,9 +532,8 @@ hey habit complete 1                # mark habit done (today or --date YYYY-MM-D
 hey habit uncomplete 1              # undo habit completion
 ```
 
-`hey habit list` reads the week a date falls in, because habits are not in a calendar's
-recordings listing — that carries only their completions. A week lists every habit exactly
-once, whatever weekday each is scheduled for. Weekdays use `0` for Sunday through `6` for
+`hey habit list` reads the week a date falls in. A week lists each habit once, whatever
+weekday it runs on; a week that has not started yet lists none. Weekdays use `0` for Sunday through `6` for
 Saturday; full names and common abbreviations are accepted too.
 
 ### Time tracking
@@ -571,8 +574,9 @@ The time tracking export contains every completed entry, newest first, with Star
 
 Without `--output` the CSV goes to stdout as CSV, so redirecting it to a file is the whole
 recipe. The output formatting flags have nothing to reshape there and are refused rather
-than ignored: `--json`, `--quiet`, `--markdown`, `--ids-only`, `--count` and `--html` all
-need `--output`, which returns file metadata they can format.
+than ignored. With `--output`, `--json`, `--quiet` and `--markdown` format the file's
+metadata; `--ids-only` and `--count` still fail, since that is not a list, and `--html` is
+never accepted.
 
 ### Journal
 
@@ -580,7 +584,7 @@ need `--output`, which returns file metadata they can format.
 hey journal list                   # list entries
 hey journal list --starts-on 2026-01-01 --ends-on 2026-01-31
 hey journal read                   # read today's entry (or pass YYYY-MM-DD)
-hey journal write "..."            # write today's entry (or omit content for $EDITOR)
+hey journal write "..."            # write today's entry (omit content: $EDITOR at a terminal, else stdin)
 ```
 
 Saving an empty buffer in `$EDITOR` removes the day's entry, and `hey journal write` says

@@ -97,7 +97,7 @@ func newSetAsideGroupCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "group",
 		Short: "List and manage groups in Set Aside",
-		Long:  "Gather Set Aside threads into groups, list the groups, and break them up.",
+		Long:  "Gather Set Aside threads into groups, list the groups, and delete them.",
 		Example: `  hey set-aside group list
   hey set-aside group view 42
   hey set-aside group create 12345 67890
@@ -170,7 +170,7 @@ func (c *setAsideGroupListCommand) run(cmd *cobra.Command, _ []string) error {
 		output.WithSummary(fmt.Sprintf("%d %s in Set Aside", len(groups), groupNoun(len(groups)))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{Action: "view", Command: "hey set-aside group view <group-id>", Description: "List the threads in a group"},
-			output.Breadcrumb{Action: "delete", Command: "hey set-aside group delete <group-id>", Description: "Break a group up"},
+			output.Breadcrumb{Action: "delete", Command: "hey set-aside group delete <group-id>", Description: "Delete a group; its threads go to Previously Seen"},
 		),
 	)
 }
@@ -230,7 +230,7 @@ var setAsideGroupListing = postingsListing{
 	breadcrumbs: []output.Breadcrumb{
 		{Action: "read", Command: "hey thread read <thread-id>", Description: "Read an email thread"},
 		{Action: "remove", Command: "hey set-aside group remove <box-item-id>", Description: "Take a thread out of its group"},
-		{Action: "delete", Command: "hey set-aside group delete <group-id>", Description: "Break the group up"},
+		{Action: "delete", Command: "hey set-aside group delete <group-id>", Description: "Delete the group; its threads go to Previously Seen"},
 	},
 }
 

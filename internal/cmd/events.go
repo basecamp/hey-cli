@@ -126,7 +126,11 @@ func newEventsAddCommand() *eventsAddCommand {
 		Long: `Create an event.
 
 An event with no --start-time is an all-day event. A --start-time with no --end-time runs
-for an hour. Clock times are read in --time-zone, which defaults to this machine's zone.`,
+for an hour. Clock times are read in --time-zone, which defaults to this machine's zone.
+
+Without --calendar the event is filed on the first calendar you own that is neither personal
+nor subscribed, in 'hey calendar list' order — often "Maybe" rather than the one you mean,
+so pass --calendar.`,
 		Example: `  hey event add "Design review" --starts-on 2026-09-02 --start-time 14:00 --end-time 15:00
   hey event add "Sarah's birthday" --starts-on 2026-09-02
   hey event add "Standup" --start-time 09:15 --repeat every_weekday --calendar 123
@@ -239,7 +243,8 @@ sent back, because HEY clears whatever a write leaves out.
 
 Two things cannot survive that round trip, and both are HEY's doing rather than this
 command's. Notes are served back as plain text, so saving flattens their formatting. A
-countdown is not served at all, so an edit removes one unless --countdown names it again.
+countdown is a recording of its own that this edit does not read back, so an edit removes
+one unless --countdown names it again.
 
 The event is found by reading the calendars it might be on, which is one request each and
 covers the pages HEY answers with. Give the day it starts as [date] to look on that day
@@ -278,8 +283,9 @@ so a day that had come to have guests of its own is refused until --invite names
 series' list. The day is read over every calendar, so here --calendar is only where the
 day is moved to; a day already moved elsewhere stays there. A virtual occurrence lists
 its series in id and parent_id; a day HEY has written out on its own keeps its own event id
-in id and recording_id, with the series in parent_id. That own id edits and deletes the
-day alone. One thing no edit can keep: an attached email you cannot read is not served, so
+in id and recording_id, with the series in parent_id. That own id edits the day
+alone; deleting it discards only the day's own changes, and the series' occurrence shows
+again. One thing no edit can keep: an attached email you cannot read is not served, so
 it is detached by any edit, whole event
 or one day.`,
 		Example: `  hey event edit 4821 --title "Design review (moved)"

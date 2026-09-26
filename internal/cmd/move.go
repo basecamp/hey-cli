@@ -26,6 +26,7 @@ func newMoveCommand() *moveCommand {
 		Use:   "move <box-item-id>...",
 		Short: "Move email threads to another box",
 		Long: "Move one or more email threads to Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. " +
+			"Moving to any box but Imbox marks the threads seen, and a thread that cannot be replied to is not moved to Reply Later. " +
 			"Moving a Reply Later thread to Imbox removes Reply Later while preserving its seen state. " +
 			"A bundle row is refused, even one that opens as a single thread: it stands in for a sender's whole stream, and moving it takes that stream out of the box they are delivered to, so their next email arrives unbundled.",
 		Example: `  hey move 12345 --to feed

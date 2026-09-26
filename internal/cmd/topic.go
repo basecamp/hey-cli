@@ -91,11 +91,11 @@ func newThreadsCommand() *topicCommand {
 		Use:   "read <thread-id>",
 		Short: "Read a thread",
 		Long: "Read every entry in a thread, oldest first. JSON entries keep the " +
-			"creator as the account user and, when HEY used another From address, " +
-			"include that address as sender. Entries also include To/CC/BCC recipients " +
+			"creator as the entry's author (the external sender for inbound mail) and, when you sent " +
+			"from another address, include that address as sender. Entries also include To/CC/BCC recipients " +
 			"and, for inbound mail, received_via with the exact account delivery addresses HEY recorded.",
 		Annotations: map[string]string{
-			"agent_notes": "Returns a thread with all entries, oldest first. Entry bodies are Markdown; the creator is the account user, while a non-default send-as address is the optional sender on a hydrated entry. Each entry whose message was read carries recipients as to, cc and bcc contact lists. In JSON, inbound entries also carry received_via: the exact account delivery addresses HEY recorded, distinct from the visible recipients, with an optional resolved contact. --html writes an HTML document instead, one <article> per entry with a From/To/CC/BCC header and HEY's original body HTML. A thread that could only be read in part is refused unless --allow-partial is passed, in which case each entry's body_state says what was read. Use the topic ID with hey reply or hey forward.",
+			"agent_notes": "Returns a thread with all entries, oldest first. Entry bodies are Markdown; the creator is the entry's author (the external sender for inbound mail, your own contact for mail you sent), while a non-default send-as address you sent from is the optional sender on a hydrated entry. Each entry whose message was read carries recipients as to, cc and bcc contact lists. In JSON, inbound entries also carry received_via: the exact account delivery addresses HEY recorded, distinct from the visible recipients, with an optional resolved contact. --html writes an HTML document instead, one <article> per entry with a From/To/CC/BCC header and HEY's original body HTML. A thread that could only be read in part is refused unless --allow-partial is passed, in which case each entry's body_state says what was read. Use the topic ID with hey reply or hey forward.",
 		},
 		Example: `  hey thread read 12345
   hey thread read 12345 --json
