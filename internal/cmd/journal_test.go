@@ -9,9 +9,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
+	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -369,5 +371,155 @@ func TestJournalReadReturns204NoFallbackContent(t *testing.T) {
 	// 204 from SDK and legacy /edit returns empty page — no content available.
 	if !strings.Contains(resp.Summary, "No journal entry") {
 		t.Errorf("summary = %q, want to contain %q", resp.Summary, "No journal entry")
+	}
+}
+
+// An entry as HEY's web editor saves it; journalStore answers it the way
+// _journal_entry.jbuilder does, with content_html inside Action Text's layout.
+const webEditedJournalStored = "<div><strong>Shipped</strong> the pagination fix<br><br></div>\n<ul>\n<li>Paired with Jane on the cover art</li>\n</ul>"
+
+// journalStore stands in for HEY's journal: it keeps what was written and serves it back
+// wrapped for the editor, as every read of it does.
+type journalStore struct {
+	mu     sync.Mutex
+	stored string
+	writes []string
+}
+
+func newJournalStore(t *testing.T, stored string) (*httptest.Server, *journalStore) {
+	t.Helper()
+	store := &journalStore{stored: stored}
+	server := httptest.NewServer(http.HandlerFunc(store.serve))
+	t.Cleanup(server.Close)
+	return server, store
+}
+
+func (s *journalStore) serve(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if r.URL.Path != "/calendar/days/2026-03-15/journal_entry.json" {
+		http.NotFound(w, r)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+	case http.MethodPatch:
+		var body struct {
+			CalendarJournalEntry struct {
+				Content string `json:"content"`
+			} `json:"calendar_journal_entry"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		s.writes = append(s.writes, body.CalendarJournalEntry.Content)
+		s.stored = body.CalendarJournalEntry.Content
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if s.stored == "" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"id":           1,
+		"type":         "Calendar::JournalEntry",
+		"starts_at":    "2026-03-15T00:00:00Z",
+		"content":      htmlutil.ToText(s.stored),
+		"content_html": "<div class=\"trix-content\">\n  " + s.stored + "\n</div>\n",
+	})
+}
+
+func (s *journalStore) snapshot() (stored string, writes []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stored, append([]string(nil), s.writes...)
+}
+
+func readJournalEntry(t *testing.T, server *httptest.Server) map[string]any {
+	t.Helper()
+	resp, err := runJournalRead(t, server, "2026-03-15")
+	if err != nil {
+		t.Fatalf("journal read: %v", err)
+	}
+	data, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("data = %#v, want the entry", resp.Data)
+	}
+	return data
+}
+
+// content is served inside HEY's editor wrapper, and writing it back used to store the
+// wrapper too, so the entry sank one div deeper on every round trip.
+func TestJournalHTMLRoundTripDoesNotNest(t *testing.T) {
+	server, store := newJournalStore(t, webEditedJournalStored)
+	for range 3 {
+		content, _ := readJournalEntry(t, server)["content"].(string)
+		if _, err := runJournalWrite(t, server, "2026-03-15", "--content-html", content+"<div>Reviewed the Q3 numbers with Alice</div>"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stored, writes := store.snapshot()
+	for _, written := range writes {
+		if strings.Contains(written, "trix-content") {
+			t.Errorf("wrote %q, want HEY's wrapper taken off", written)
+		}
+	}
+	if strings.Count(stored, "Reviewed the Q3 numbers") != 3 || !strings.Contains(stored, "<strong>Shipped</strong>") {
+		t.Errorf("stored = %q, want the entry and every addition", stored)
+	}
+	content, _ := readJournalEntry(t, server)["content"].(string)
+	if strings.Count(content, "trix-content") != 1 {
+		t.Errorf("content = %q, want one wrapper", content)
+	}
+}
+
+// Divs of the writer's own are theirs: one named like the wrapper, one inside another,
+// and even the wrapper's class where it does not stand at the top level.
+func TestJournalWriteKeepsTheWritersOwnDivs(t *testing.T) {
+	server, store := newJournalStore(t, "")
+	own := `<div class="trix-content-note"><div>Retrospective: the migration took two days longer than planned.</div></div>` +
+		`<blockquote><div class="trix-content">Quoted from the offsite notes</div></blockquote>`
+	if _, err := runJournalWrite(t, server, "2026-03-15", "--content-html", own); err != nil {
+		t.Fatal(err)
+	}
+	if stored, _ := store.snapshot(); stored != own {
+		t.Errorf("stored = %q, want %q", stored, own)
+	}
+}
+
+func TestJournalReadAnswersTheEntryAsMarkdown(t *testing.T) {
+	server, _ := newJournalStore(t, webEditedJournalStored)
+	entry := readJournalEntry(t, server)
+	if want := "<div class=\"trix-content\">\n  " + webEditedJournalStored + "\n</div>\n"; entry["content"] != want {
+		t.Errorf("content = %q, want it as HEY served it", entry["content"])
+	}
+	if want := "**Shipped** the pagination fix  \n\n- Paired with Jane on the cover art"; entry["content_markdown"] != want {
+		t.Errorf("content_markdown = %q, want %q", entry["content_markdown"], want)
+	}
+}
+
+// content_markdown is what journal write takes, so it goes round without loss.
+func TestJournalMarkdownWritesBackWithoutLoss(t *testing.T) {
+	server, store := newJournalStore(t, webEditedJournalStored)
+	first, _ := readJournalEntry(t, server)["content_markdown"].(string)
+	if _, err := runJournalWrite(t, server, "2026-03-15", first); err != nil {
+		t.Fatal(err)
+	}
+	settled, _ := readJournalEntry(t, server)["content_markdown"].(string)
+	for range 2 {
+		if _, err := runJournalWrite(t, server, "2026-03-15", settled); err != nil {
+			t.Fatal(err)
+		}
+		if again, _ := readJournalEntry(t, server)["content_markdown"].(string); again != settled {
+			t.Fatalf("content_markdown = %q, want it unchanged at %q", again, settled)
+		}
+	}
+	if _, writes := store.snapshot(); writes[1] != writes[0] || writes[2] != writes[0] {
+		t.Errorf("writes = %q, want the same HTML each time", writes)
 	}
 }

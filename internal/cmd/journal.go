@@ -25,7 +25,7 @@ func newJournalCommand() *journalCommand {
 		Use:   "journal",
 		Short: "Read and write journal entries",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, read, write. Read defaults to today. Write accepts --content, stdin, or opens $EDITOR; content is Markdown, or raw HTML via --content-html.",
+			"agent_notes": "Subcommands: list, read, write. Read defaults to today; its JSON answers content (HTML as HEY serves it) and content_markdown (the form write takes). Write replaces the whole entry and accepts --content, stdin, or opens $EDITOR; content is Markdown, or raw HTML via --content-html.",
 		},
 	}
 
@@ -134,7 +134,8 @@ func newJournalReadCommand() *journalReadCommand {
 		Example: `  hey journal read
   hey journal read 2026-03-15
   hey journal read --html > entry.html
-  hey journal read --json`,
+  hey journal read --json
+  hey journal read 2026-03-15 --jq '.data.content_markdown'`,
 		RunE: journalReadCommand.run,
 		Args: cobra.MaximumNArgs(1),
 	}
@@ -185,7 +186,7 @@ func (c *journalReadCommand) run(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return writeOK(map[string]string{"date": date, "content": content},
+	return writeOK(map[string]any{"date": date, "content": content, "content_markdown": htmlutil.ToMarkdown(content)},
 		output.WithSummary(fmt.Sprintf("Journal entry for %s", date)),
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "write",
@@ -272,7 +273,9 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if c.contentHTML != "" {
-		content = strings.TrimSpace(c.contentHTML)
+		// HTML read back from HEY carries its editor wrapper; writing it back as it is
+		// would nest the entry one level deeper on every round trip.
+		content = htmlutil.UnwrapTrixContent(strings.TrimSpace(c.contentHTML))
 	} else {
 		if content == "" && !stdinIsTerminal() {
 			piped, err := readStdin()

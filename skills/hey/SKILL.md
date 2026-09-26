@@ -273,7 +273,7 @@ postings, not the box, label or contact around them.
 | List time track categories | `hey timetrack categories --json` |
 | Create time track category | `hey timetrack category create "Client work"` |
 | List journal entries | `hey journal list --json` |
-| Read journal entry | `hey journal read 2024-03-15 --json` |
+| Read journal entry | `hey journal read 2024-03-15 --json` (`content_markdown` is the form `journal write` takes) |
 | Write journal entry | `hey journal write "Shipped the pagination fix."` (whitespace-only content removes the entry) |
 | Check auth status | `hey auth status --json` |
 | Print bearer token | `hey auth token` (refuses a `--cookie` login) |
@@ -582,7 +582,9 @@ are plain text). To
 send raw HTML instead, use the flag's HTML twin: `--message-html` on `compose`, `reply`,
 `forward`, `draft edit` and `bulk-reply send`; `--content-html` on `journal write` and
 `snippet create`/`update`; `--note-html` on `contact note set`. Each pair is mutually
-exclusive. A fenced code block's language (` ```ruby `) survives the conversion for the
+exclusive. `--content-html` and `--note-html` take off the `<div class="trix-content">`
+wrapper HEY serves journal entries, snippets and notes in, so HTML read back can be written
+again without nesting. A fenced code block's language (` ```ruby `) survives the conversion for the
 languages HEY highlights — Ruby, Python, JavaScript, TypeScript, Go, Rust, Java, C#, C++,
 PHP, Swift, HTML and CSS; any other is dropped.
 
@@ -973,6 +975,7 @@ accepted. An existing file needs `--force`.
 ```bash
 hey journal list --json                       # Entries on the personal calendar, 4 years back to 1 year ahead
 hey journal read 2026-03-15 --json            # Read entry by date
+hey journal read 2026-03-15 --jq '.data.content_markdown'  # The entry as Markdown, ready to edit and write back
 hey journal write "Shipped the pagination fix and paired with Jane on the cover art."
 hey journal write 2026-03-15 "Retrospective: the migration took two days longer than planned."
 hey journal write                             # $EDITOR at a terminal; otherwise the entry is read from stdin

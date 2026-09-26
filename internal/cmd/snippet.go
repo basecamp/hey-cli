@@ -160,10 +160,7 @@ func (c *snippetCreateCommand) run(cmd *cobra.Command, _ []string) error {
 	if name == "" {
 		return apierr.ErrUsage("--name is required")
 	}
-	content := c.contentHTML
-	if content == "" {
-		content = htmlutil.FromMarkdown(c.content)
-	}
+	content := snippetContent(c.content, c.contentHTML)
 	if strings.TrimSpace(content) == "" {
 		return apierr.ErrUsage("--content is required")
 	}
@@ -220,10 +217,7 @@ func (c *snippetUpdateCommand) run(cmd *cobra.Command, args []string) error {
 			return apierr.ErrUsage("--name cannot be empty")
 		}
 	}
-	content := c.contentHTML
-	if content == "" {
-		content = htmlutil.FromMarkdown(c.content)
-	}
+	content := snippetContent(c.content, c.contentHTML)
 	if contentChanged && strings.TrimSpace(content) == "" {
 		return apierr.ErrUsage("--content cannot be empty")
 	}
@@ -231,6 +225,16 @@ func (c *snippetUpdateCommand) run(cmd *cobra.Command, args []string) error {
 		return apierr.FromSDK(err)
 	}
 	return writeMutation(cmd, fmt.Sprintf("Snippet %d updated", snippetID), map[string]any{"id": snippetID})
+}
+
+// snippetContent is the snippet body to send: the Markdown converted, or the raw HTML
+// less the editor wrapper HEY serves content_html in, which writing back as it is would
+// nest one level deeper on every round trip.
+func snippetContent(markdown, rawHTML string) string {
+	if rawHTML != "" {
+		return htmlutil.UnwrapTrixContent(rawHTML)
+	}
+	return htmlutil.FromMarkdown(markdown)
 }
 
 type snippetDeleteCommand struct {
