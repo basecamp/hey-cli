@@ -733,3 +733,32 @@ func TestNewEventFormRunsAnHourAcrossMonroviasHalfMinute(t *testing.T) {
 		t.Errorf("validate = %q, want only the missing name", got)
 	}
 }
+
+// At the second 01:00 of the night New York falls back — 06:00 UTC — 01:00 is a whole hour on
+// the clock, but HEY reads 2026-11-01 01:00 America/New_York as 05:00 UTC, an hour ago. The
+// next whole hour it places after now is 02:00 (=> 07:00 UTC), and the hour runs to 03:00
+// (=> 08:00 UTC).
+func TestNewEventFormStartsAfterNowAtASecondRepeatedHour(t *testing.T) {
+	newYork := mustZone(t, "America/New_York")
+	form := newAccountZoneForm(eventFormCreate, Recording{}, time.Date(2026, 11, 1, 6, 0, 0, 0, time.UTC).In(newYork), "America/New_York")
+
+	values := form.values()
+	if values.StartTime != "02:00" || values.EndTime != "03:00" {
+		t.Errorf("times = %s → %s, want 02:00 → 03:00", values.StartTime, values.EndTime)
+	}
+	wantPlaced(t, "start", values.StartsAt, values.StartTime, values.StartTimeZone, time.Date(2026, 11, 1, 7, 0, 0, 0, time.UTC))
+	wantPlaced(t, "end", values.EndsAt, values.EndTime, values.EndTimeZone, time.Date(2026, 11, 1, 8, 0, 0, 0, time.UTC))
+}
+
+// Lord Howe's clocks go back half an hour, from 02:00 to 01:30, so no whole hour repeats: at the
+// second 01:30 (15:00 UTC) the next whole hour is 02:00 (=> 2026-04-04 15:30 UTC), after now.
+func TestNewEventFormStartsAfterNowInLordHowesRepeatedHalfHour(t *testing.T) {
+	lordHowe := mustZone(t, "Australia/Lord_Howe")
+	form := newAccountZoneForm(eventFormCreate, Recording{}, time.Date(2026, 4, 4, 15, 0, 0, 0, time.UTC).In(lordHowe), "Australia/Lord_Howe")
+
+	values := form.values()
+	if values.StartTime != "02:00" {
+		t.Errorf("start = %s, want 02:00", values.StartTime)
+	}
+	wantPlaced(t, "start", values.StartsAt, values.StartTime, values.StartTimeZone, time.Date(2026, 4, 4, 15, 30, 0, 0, time.UTC))
+}

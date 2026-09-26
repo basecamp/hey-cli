@@ -442,7 +442,22 @@ func newEventStart(on time.Time, zone *time.Location) time.Time {
 	}
 	// Written in UTC first so that hour 24 rolls over to the next day and nothing else moves.
 	wall := time.Date(on.Year(), on.Month(), on.Day(), hour, 0, 0, 0, time.UTC)
-	return timezone.WallClock(wall, wall, zone).In(zone)
+	start := timezone.WallClock(wall, wall, zone)
+
+	// On the clock's own day the hour offered is one still to come. At the second 01:00 of the
+	// night New York falls back, 01:00 is a whole hour on the clock, and HEY places it at the
+	// first, an hour ago; the next one it places after now is 02:00. On a day in view that the
+	// clock has already left or not yet reached, the hour is the day's, wherever that falls.
+	if clock.Format("2006-01-02") == on.Format("2006-01-02") {
+		for range 48 {
+			if !start.Before(on) {
+				break
+			}
+			wall = wall.Add(time.Hour)
+			start = timezone.WallClock(wall, wall, zone)
+		}
+	}
+	return start.In(zone)
 }
 
 // indexOfCalendar finds the calendar an event is filed on. The id is the answer where the
