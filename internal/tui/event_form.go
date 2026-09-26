@@ -209,9 +209,33 @@ func newEventForm(mode eventFormMode, event Recording, on time.Time, calendars [
 	form.ends = newDateTimePicker(inZoneNamed(ends, event.EndsAtZone), form.allDay)
 	form.starts.setZoneName(startZone)
 	form.ends.setZoneName(endZone)
+	if mode == eventFormCreate {
+		form.offerAnHour(starts)
+	}
 	form.on = on
 	form.offered = form.schedule()
 	return form
+}
+
+// offerAnHour ends a new event an hour after it starts, as the end reads once it is sent. An
+// hour on from the first 01:00 of the night New York falls back is the second 01:00, which
+// reads — and is sent — as the same clock as the start, and HEY places both at the first: a
+// zero-length event. The end moves on an hour at a time until it reads as after the start,
+// which there is 02:00, an hour on the clock.
+func (f *eventForm) offerAnHour(starts time.Time) {
+	ends := starts.Add(time.Hour)
+	f.ends.setMoment(ends)
+	begins, ok := f.starts.moment()
+	if !ok {
+		return
+	}
+	for range 3 {
+		if finishes, ok := f.ends.moment(); !ok || finishes.After(begins) {
+			return
+		}
+		ends = ends.Add(time.Hour)
+		f.ends.setMoment(ends)
+	}
 }
 
 // adoptAccountZone gives a new event the account's zone when the identity read that names it
@@ -230,8 +254,8 @@ func (f *eventForm) adoptAccountZone(name string) {
 	starts := newEventStart(f.on, zone)
 	f.starts.setMoment(starts)
 	f.starts.setZoneName(account)
-	f.ends.setMoment(starts.Add(time.Hour).In(zone))
 	f.ends.setZoneName(account)
+	f.offerAnHour(starts)
 	f.offered = f.schedule()
 }
 

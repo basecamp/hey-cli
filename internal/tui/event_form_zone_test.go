@@ -330,9 +330,52 @@ func TestANewEventTakesTheAccountZoneWhenTheIdentityLandsLate(t *testing.T) {
 	v.Init()
 	v.HandleContentKey(keyPress("a"))
 	v.eventForm.starts.timeInput.SetValue("15:00")
-	v.Update(identity)
+	v.Update(v.fetchIdentity()())
 	if v.eventForm.starts.zoneName() != "" || v.eventForm.starts.clock() != "15:00" {
 		t.Errorf("start = %s %q, want 15:00 left on Local", v.eventForm.starts.clock(), v.eventForm.starts.zoneName())
+	}
+}
+
+// Each visit to the calendar reads the identity again, and only the latest read is taken: an
+// earlier visit's answer landing late does not put its zone back, and a form opened on Local
+// does not take it.
+func TestAnEarlierVisitsIdentityReadIsDropped(t *testing.T) {
+	v, _ := calendarWithEventServer(t)
+	v.Init()
+	earlier := v.fetchIdentity()()
+	v.Init()
+
+	v.HandleContentKey(keyPress("a"))
+	v.Update(earlier)
+	if v.accountZone != "" {
+		t.Errorf("accountZone = %q, want the earlier visit's answer dropped", v.accountZone)
+	}
+	if v.eventForm.starts.zoneName() != "" {
+		t.Errorf("zone = %q, want the form left on Local", v.eventForm.starts.zoneName())
+	}
+
+	v.Update(v.fetchIdentity()())
+	if v.accountZone != indianapolis || v.eventForm.starts.zoneName() != indianapolis {
+		t.Errorf("zone = %q / %q, want the latest read's", v.accountZone, v.eventForm.starts.zoneName())
+	}
+}
+
+// An hour on from the first 01:00 of the night New York falls back is the second 01:00, which
+// is sent as the same clock and placed by HEY at the first: a zero-length event. The form
+// offers 01:00 to 02:00 instead.
+func TestNewEventFormEndsAfterItStartsAcrossAFallBack(t *testing.T) {
+	newYork := mustZone(t, "America/New_York")
+	on := time.Date(2026, 11, 1, 0, 41, 0, 0, newYork)
+	form := newAccountZoneForm(eventFormCreate, Recording{}, on, "America/New_York")
+
+	values := form.values()
+	if values.StartsAt != "2026-11-01" || values.StartTime != "01:00" || values.EndTime != "02:00" {
+		t.Errorf("times = %s %s → %s, want 01:00 → 02:00", values.StartsAt, values.StartTime, values.EndTime)
+	}
+	starts, _ := form.starts.moment()
+	ends, _ := form.ends.moment()
+	if !ends.After(starts) {
+		t.Errorf("the end %s is not after the start %s", ends, starts)
 	}
 }
 
