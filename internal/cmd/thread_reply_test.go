@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -54,6 +55,10 @@ type sentReply struct {
 	// /entries/{id}/replies/new answers — HEY's own computed reply recipients.
 	// Empty means the endpoint 404s and the CLI falls back to computing locally.
 	ReplyNewJSON string
+
+	// SendAnswer, when set before the command runs, is what a delivered reply answers.
+	// Empty is {}, the answer of a HEY that predates the delivered entry's ids.
+	SendAnswer string
 }
 
 // threadReplyServer answers the typed topic, the latest entry's message, the identity
@@ -106,7 +111,7 @@ func threadReplyServer(t *testing.T, messageJSON string, entryIDs ...int64) (*ht
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
-			fmt.Fprint(w, `{}`)
+			fmt.Fprint(w, cmp.Or(sent.SendAnswer, `{}`))
 		case strings.Contains(r.URL.Path, "identity"):
 			if got := r.URL.Query().Get("filtered_account_id"); got != "" {
 				t.Errorf("identity account = %q, want unscoped", got)

@@ -142,12 +142,14 @@ func (c *composeCommand) composeFrom(cmd *cobra.Command, client *hey.Client, sen
 		}
 		return writeDraftSaved(cmd, id, len(c.attachments))
 	}
-	if err := client.Messages().Send(ctx, hey.MessageContent{
+	sent, sendErr := client.Messages().Send(ctx, hey.MessageContent{
 		Subject: c.subject, Content: message, To: to, CC: cc, BCC: bcc, ActingSenderID: sender.Id,
-	}); err != nil {
-		return apierr.FromSDK(err)
+	})
+	if sendErr != nil {
+		return apierr.FromSDK(sendErr)
 	}
-	return writeMutation(cmd, sentWithAttachmentsSummary("Message sent", len(c.attachments)), nil)
+	summary := sentWithAttachmentsSummary("Message sent", len(c.attachments))
+	return writeMessageSent(cmd, messageSent{line: summary, summary: summary}, sent)
 }
 
 // The account comes from the existing draft, never from the requested sender.

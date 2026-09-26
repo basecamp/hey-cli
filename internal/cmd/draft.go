@@ -328,7 +328,7 @@ func newDraftSendCommand() *draftSendCommand {
 		Use:   "send <draft-id>",
 		Short: "Deliver a draft",
 		Annotations: map[string]string{
-			"agent_notes": "Sends the draft as it stands — recipients are required, added with `hey draft edit --to`. Delivery goes through HEY's undo window. Scheduling a delivery is done in a HEY app for now; the CLI has no flag for it, and HEY's API schedules only to a whole hour.",
+			"agent_notes": "Sends the draft as it stands — recipients are required, added with `hey draft edit --to`. Delivery goes through HEY's undo window. The answer carries the delivered message's id and its thread's topic_id once HEY serves them. Scheduling a delivery is done in a HEY app for now; the CLI has no flag for it, and HEY's API schedules only to a whole hour.",
 		},
 		Example: `  hey draft send 12345`,
 		RunE:    sendCommand.run,
@@ -360,11 +360,15 @@ func (c *draftSendCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	content.Schedule = nil
-	if err := sdk.Messages().SendDraft(ctx, draftID, content); err != nil {
+	sent, err := sdk.Messages().SendDraft(ctx, draftID, content)
+	if err != nil {
 		return apierr.FromSDK(err)
 	}
-	return writeMutationLine(cmd, fmt.Sprintf("Draft %d sent.", draftID), "Draft sent",
-		map[string]any{"id": draftID})
+	return writeMessageSent(cmd, messageSent{
+		line:     fmt.Sprintf("Draft %d sent", draftID),
+		summary:  "Draft sent",
+		reported: map[string]any{"id": draftID},
+	}, sent)
 }
 
 // --- delete ---

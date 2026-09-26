@@ -342,6 +342,8 @@ Want to send email?
 └── Check drafts? → hey draft list --json
 ```
 
+A send (compose, reply, forward, draft send) answers with the new message's `id` and its thread's `topic_id` once HEY serves them — use `topic_id` with `hey thread read`. `delayed: true` means Undo Send is still holding it.
+
 ### Managing Todos
 
 ```

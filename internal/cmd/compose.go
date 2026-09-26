@@ -49,7 +49,7 @@ A --to, --cc or --bcc address HEY would drop without saying so — one with no d
 or a top-level domain HEY does not know — is refused before anything is sent.`,
 		Args: recipientsChecked(nil),
 		Annotations: map[string]string{
-			"agent_notes": "--from selects a configured sender email or ID from account senders; --account must agree. --from is only for new messages. Starts a new thread with --to (optionally --cc/--bcc), which requires --subject, or replies to an existing one with --thread-id, which does not; --thread-id answers the thread's latest emailed message, never a note (kind \"comment\") or share notice (kind \"access_notice\"), and a thread with no emailed message is refused as not_found. Repeatable --attach files are uploaded before sending and can be sent without body text. The body is Markdown; use --message-html to send raw HTML instead. --draft saves instead of sending — recipients become optional — and answers the draft ID for hey draft show/edit/send/delete. A new message ends with the sender's HEY name tag, as one composed in HEY does; --no-name-tag leaves it out.",
+			"agent_notes": "--from selects a configured sender email or ID from account senders; --account must agree. --from is only for new messages. Starts a new thread with --to (optionally --cc/--bcc), which requires --subject, or replies to an existing one with --thread-id, which does not; --thread-id answers the thread's latest emailed message, never a note (kind \"comment\") or share notice (kind \"access_notice\"), and a thread with no emailed message is refused as not_found. Repeatable --attach files are uploaded before sending and can be sent without body text. The body is Markdown; use --message-html to send raw HTML instead. --draft saves instead of sending — recipients become optional — and answers the draft ID for hey draft show/edit/send/delete. A new message ends with the sender's HEY name tag, as one composed in HEY does; --no-name-tag leaves it out. A send answers the new message's id and the topic_id of its thread (for hey thread read), with subject and delayed (true while Undo Send holds it back), once HEY serves them; until then it answers without them.",
 		},
 		Example: `  hey compose --to alice@example.com --subject "Lunch plans" -m "Are you free Friday?"
   hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Kitchen remodel timeline" -m "Cabinets land the week of the 14th."
@@ -92,6 +92,7 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := cmd.Context()
+	summary := sentWithAttachmentsSummary("Message sent", len(c.attachments))
 	var senderClient *hey.Client
 	var sender generated.Sender
 	if cmd.Flags().Changed("from") {
@@ -152,46 +153,48 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 			}
 			return writeDraftSaved(cmd, draftID, len(c.attachments))
 		}
-		if err := replySDK.Entries().CreateReply(ctx, target.EntryID, target.ActingSenderID, target.Subject, messageWithAttachments,
-			target.Addressed.To, target.Addressed.CC, target.Addressed.BCC); err != nil {
+		sent, err := replySDK.Entries().CreateReply(ctx, target.EntryID, target.ActingSenderID, target.Subject, messageWithAttachments,
+			target.Addressed.To, target.Addressed.CC, target.Addressed.BCC)
+		if err != nil {
 			return apierr.FromSDK(err)
 		}
-	} else {
-		to := parseAddresses(c.to)
-		cc := parseAddresses(c.cc)
-		bcc := parseAddresses(c.bcc)
-		// A draft needs nobody on it yet; only a send does.
-		if len(to)+len(cc)+len(bcc) == 0 && !c.draft {
-			return apierr.ErrUsage("a message needs at least one recipient (to, cc or bcc)")
-		}
-		if cmd.Flags().Changed("from") {
-			return c.composeFrom(cmd, senderClient, sender, message, to, cc, bcc)
-		}
-		messageWithAttachments, attachErr := attachFiles(ctx, message, c.attachments)
-		if attachErr != nil {
-			return attachErr
-		}
-		if !c.noNameTag {
-			var tagErr error
-			if messageWithAttachments, tagErr = appendSenderNameTag(ctx, messageWithAttachments); tagErr != nil {
-				return tagErr
-			}
-		}
-		if c.draft {
-			draftID, draftErr := sdk.Messages().CreateDraft(ctx, hey.DraftContent{
-				Subject: c.subject, Content: messageWithAttachments, To: to, CC: cc, BCC: bcc,
-			})
-			if draftErr != nil {
-				return apierr.FromSDK(draftErr)
-			}
-			return writeDraftSaved(cmd, draftID, len(c.attachments))
-		}
-		if err := sdk.Messages().Create(ctx, c.subject, messageWithAttachments, to, cc, bcc); err != nil {
-			return apierr.FromSDK(err)
-		}
+		return writeMessageSent(cmd, messageSent{line: summary, summary: summary, thread: topicID}, sent)
 	}
 
-	return writeMutation(cmd, sentWithAttachmentsSummary("Message sent", len(c.attachments)), nil)
+	to := parseAddresses(c.to)
+	cc := parseAddresses(c.cc)
+	bcc := parseAddresses(c.bcc)
+	// A draft needs nobody on it yet; only a send does.
+	if len(to)+len(cc)+len(bcc) == 0 && !c.draft {
+		return apierr.ErrUsage("a message needs at least one recipient (to, cc or bcc)")
+	}
+	if cmd.Flags().Changed("from") {
+		return c.composeFrom(cmd, senderClient, sender, message, to, cc, bcc)
+	}
+	messageWithAttachments, attachErr := attachFiles(ctx, message, c.attachments)
+	if attachErr != nil {
+		return attachErr
+	}
+	if !c.noNameTag {
+		var tagErr error
+		if messageWithAttachments, tagErr = appendSenderNameTag(ctx, messageWithAttachments); tagErr != nil {
+			return tagErr
+		}
+	}
+	if c.draft {
+		draftID, draftErr := sdk.Messages().CreateDraft(ctx, hey.DraftContent{
+			Subject: c.subject, Content: messageWithAttachments, To: to, CC: cc, BCC: bcc,
+		})
+		if draftErr != nil {
+			return apierr.FromSDK(draftErr)
+		}
+		return writeDraftSaved(cmd, draftID, len(c.attachments))
+	}
+	sent, err := sdk.Messages().Create(ctx, c.subject, messageWithAttachments, to, cc, bcc)
+	if err != nil {
+		return apierr.FromSDK(err)
+	}
+	return writeMessageSent(cmd, messageSent{line: summary, summary: summary}, sent)
 }
 
 // appendSenderNameTag ends a new message — attachments included — with the sender's name

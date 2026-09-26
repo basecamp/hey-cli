@@ -288,6 +288,8 @@ The Screener is where first-time senders wait. `hey screener list` returns clear
 
 `hey bulk-reply preview` is read-only and resolves each posting to its latest replyable entry. `hey bulk-reply send` resolves the selection again, skips threads without a replyable entry, keeps HEY's server-provided name tag, and returns the exact reply count, delivery ID, delayed state, undo URL, and undo command. Posting IDs must be positive and unique. The message can come from `-m`, stdin, or `$EDITOR`; `--attach` is repeatable.
 
+A send says what HEY delivered. `hey compose`, `hey reply`, `hey forward` and `hey draft send` answer the new message's `id` and the `topic_id` of the thread it is on — the one to hand `hey thread read` or `hey reply` next — with its `subject` and `delayed`, which is true while Undo Send holds the delivery back. A reply that HEY breaks out into a thread of its own, as a HEY for Domains account does when a reply changes who is on the thread, names that new thread. `hey forward` keeps `thread_id` and `entry_id` for the thread and entry it forwarded, beside the new `id` and `topic_id`. The styled line names the thread too: `Message sent (thread 880).` Until HEY serves these, a send answers without them, and nothing is guessed in their place.
+
 A new message from `hey compose` — sent or saved with `--draft` — ends with the sender's HEY name tag, appended the way HEY's own compose form does; HEY puts the tag into the form rather than onto the saved message, so the CLI carries it itself. `--no-name-tag` leaves it off. A reply does not carry one yet.
 
 Choose a new message's sender with `compose --from <email-or-sender-id>`. Discover
