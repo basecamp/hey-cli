@@ -769,20 +769,19 @@ func (w wireEnd) placed() (time.Time, bool) {
 	return timezone.Placed(w.date, w.clock, loc)
 }
 
-// moveProblem is the refusal for an end HEY would place away from the moment meant, saying how
-// far and what to do: choose another time, or save again to take HEY's reading of this one.
+// moveProblem says why and how far HEY would place an end away from the moment meant; the form
+// adds what to do about it (eventForm.moveProblem).
 func (w wireEnd) moveProblem(label string, placed time.Time) string {
-	const choice = "Choose another time, or press ctrl+s again to save it there"
 	moved := timezone.MovedBy(w.meant, placed)
 	if !w.meant.Equal(w.meant.Truncate(time.Minute)) {
-		return fmt.Sprintf("%s — HEY is sent whole minutes, so saving would move it %s. %s", label, moved, choice)
+		return fmt.Sprintf("%s — HEY is sent whole minutes, so saving would move it %s.", label, moved)
 	}
 	zone := "UTC"
 	if w.zone != "" {
 		zone = terminal.SanitizeLine(w.zone)
 	}
-	return fmt.Sprintf("%s — HEY reads %s %s %s as another moment, so saving would move it %s. %s",
-		label, w.date, w.clock, zone, moved, choice)
+	return fmt.Sprintf("%s — HEY reads %s %s %s as another moment, so saving would move it %s.",
+		label, w.date, w.clock, zone, moved)
 }
 
 // trixHTML is what the reader typed as the rich text HEY stores an event's notes as: escaped,
@@ -896,14 +895,23 @@ func (f *eventForm) moveProblem() string {
 	if f.allDay {
 		return ""
 	}
+	// Every end that would move is named in the one refusal, because a second ctrl+s accepts
+	// the refusal as a whole: naming only the start would let the end move unannounced.
 	starts, ends := f.wireEnds()
+	var moves []string
 	if at, ok := starts.placed(); ok && starts.known && !at.Equal(starts.meant) {
-		return starts.moveProblem("Starts", at)
+		moves = append(moves, starts.moveProblem("Starts", at))
 	}
 	if at, ok := ends.placed(); ok && ends.known && !at.Equal(ends.meant) {
-		return ends.moveProblem("Ends", at)
+		moves = append(moves, ends.moveProblem("Ends", at))
 	}
-	return ""
+	switch len(moves) {
+	case 0:
+		return ""
+	case 1:
+		return moves[0] + " Choose another time, or press ctrl+s again to save it there"
+	}
+	return strings.Join(moves, " ") + " Choose other times, or press ctrl+s again to save them there"
 }
 
 // detailProblem is the first thing wrong behind the More row. It is asked separately so that a

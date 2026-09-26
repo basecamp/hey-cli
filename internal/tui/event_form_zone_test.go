@@ -842,6 +842,28 @@ func TestAFailedSaveKeepsWhatTheReaderSaw(t *testing.T) {
 	}
 }
 
+// When both ends would move, the refusal names both, so the second ctrl+s that accepts it has
+// been told about each: an imported event with seconds at either end loses them at both.
+func TestARefusalNamesEveryEndThatWouldMove(t *testing.T) {
+	event := Recording{
+		ID: 4823, Title: "Quarterly planning", Type: "Calendar::Event",
+		StartsAt: time.Date(2026, 8, 20, 13, 30, 30, 0, time.UTC),
+		EndsAt:   time.Date(2026, 8, 20, 14, 45, 15, 0, time.UTC),
+	}
+	form := newAccountZoneForm(eventFormEdit, event, time.Date(2026, 8, 20, 9, 0, 0, 0, time.UTC), indianapolis)
+	onMachine(form, time.UTC)
+
+	want := "Starts — HEY is sent whole minutes, so saving would move it 30 seconds earlier. " +
+		"Ends — HEY is sent whole minutes, so saving would move it 15 seconds earlier. " +
+		"Choose other times, or press ctrl+s again to save them there"
+	if _, save := form.handleKey(keyPress("ctrl+s")); save || form.status != want {
+		t.Fatalf("first ctrl+s saved=%v status=%q, want %q", save, form.status, want)
+	}
+	if _, save := form.handleKey(keyPress("ctrl+s")); !save {
+		t.Errorf("a second ctrl+s did not save both: %q", form.status)
+	}
+}
+
 // A view pinned to a day that has since become today offers the next whole hour of now, not of
 // the moment it was pinned: `n` to tomorrow at 09:15, left open until 15:10 the next day, and a
 // new event there opens at 16:00. A day that is not today keeps its own hour.
