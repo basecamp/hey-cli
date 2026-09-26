@@ -531,6 +531,23 @@ func readBehind(ctx context.Context, watch *postingsWatch, feed string) error {
 	return watch.readCalendar(ctx, watch.calendar.calendars[512])
 }
 
+// ringFeed rings the doorbell for the box or the calendar behindWatch left behind, and
+// answers it the way the watch's loop does.
+func ringFeed(t *testing.T, watch *postingsWatch, feed string) {
+	t.Helper()
+	var err error
+	if feed == "box" {
+		err = watch.read(context.Background(), actioncable.Message(`{"change":"upsert","box_id":24088}`))
+	} else {
+		watch.calendar.ring(512)
+		<-watch.calendar.wake
+		err = watch.readRungCalendars(context.Background())
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 // listOf is the list a skip-ahead reads for a feed.
 func listOf(feed string) string {
 	if feed == "box" {
@@ -585,9 +602,14 @@ func TestWatchSkipAheadRetriesAListThatFailed(t *testing.T) {
 	for _, feed := range []string{"box", "calendar"} {
 		t.Run(feed, func(t *testing.T) {
 			var down atomic.Bool
+			var listReads atomic.Int32
 			down.Store(true)
 			skipHEY(t, func(w http.ResponseWriter, r *http.Request) bool {
-				if r.URL.Path != listOf(feed) || !down.Load() {
+				if r.URL.Path != listOf(feed) {
+					return false
+				}
+				listReads.Add(1)
+				if !down.Load() {
 					return false
 				}
 				http.Error(w, "down for maintenance", http.StatusInternalServerError)
@@ -608,6 +630,13 @@ func TestWatchSkipAheadRetriesAListThatFailed(t *testing.T) {
 				t.Errorf("wrote %q, want no resync before the skip", out.String())
 			}
 
+			// Doorbells wait for the retry rather than trying the failing list again.
+			ringFeed(t, watch, feed)
+			ringFeed(t, watch, feed)
+			if got := listReads.Load(); got != 1 {
+				t.Errorf("read the list %d times, want once — the retry, not a doorbell, tries again", got)
+			}
+
 			// The list is back: the retry skips, and says so once.
 			down.Store(false)
 			errOut.Reset()
@@ -619,6 +648,13 @@ func TestWatchSkipAheadRetriesAListThatFailed(t *testing.T) {
 			}
 			if !strings.Contains(errOut.String(), "notice: too much changed") {
 				t.Errorf("stderr = %q, want the skip announced once it happened", errOut.String())
+			}
+
+			// Skipped, the feed follows its doorbells again.
+			reads := listReads.Load()
+			ringFeed(t, watch, feed)
+			if listReads.Load() == reads {
+				t.Error("a doorbell after the skip should read the feed again")
 			}
 		})
 	}
@@ -645,20 +681,7 @@ func TestWatchRecoversFromARepeated409Once(t *testing.T) {
 				return true
 			})
 			watch, out, errOut := behindWatch(t)
-			ring := func() {
-				t.Helper()
-				var err error
-				if feed == "box" {
-					err = watch.read(context.Background(), actioncable.Message(`{"change":"upsert","box_id":24088}`))
-				} else {
-					watch.calendar.ring(512)
-					<-watch.calendar.wake
-					err = watch.readRungCalendars(context.Background())
-				}
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-			}
+			ring := func() { ringFeed(t, watch, feed) }
 
 			for range 5 {
 				ring()

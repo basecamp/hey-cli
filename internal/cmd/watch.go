@@ -723,7 +723,7 @@ func (w *postingsWatch) recoverBox(ctx context.Context, box *watchedBox) error {
 		w.readAgainLater(box)
 		return nil
 	}
-	box.recovery.resynced = true
+	box.recovery = feedRecovery{resynced: true}
 	w.wasRead(box)
 	fmt.Fprintf(w.errOut, "notice: too much changed in %s to follow one change at a time — skipped ahead, read the box with `hey box view %s`\n", box.name, box.kind)
 	w.report(ctx, watchEvent{Change: watchResync, At: watchTime(skippedTo)}, box, nil)
@@ -807,7 +807,12 @@ func (w *postingsWatch) settleBackoff() {
 // A clock that cannot be read leaves the cursor where it was, to be tried again on the
 // retry's backoff like any read that failed.
 func (w *postingsWatch) skipAhead(ctx context.Context, box *watchedBox) (time.Time, bool, error) {
-	later := func() { w.readAgainLater(box) }
+	// A skip that could not be made is tried again by the retry, not by the next doorbell,
+	// which would only meet the same 409 and the same failing read.
+	later := func() {
+		box.recovery.holding = true
+		w.readAgainLater(box)
+	}
 	client, err := newUncachedSDKClient(ctx)
 	if err != nil {
 		return time.Time{}, false, w.skipFailed(ctx, box.name, err, later)

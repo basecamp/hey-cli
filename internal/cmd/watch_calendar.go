@@ -362,7 +362,7 @@ func (w *postingsWatch) recoverCalendar(ctx context.Context, calendar *watchedCa
 		w.armRetry()
 		return nil
 	}
-	calendar.recovery.resynced = true
+	calendar.recovery = feedRecovery{resynced: true}
 	w.calendarWasRead(calendar)
 	fmt.Fprintf(w.errOut, "notice: too much changed in %s to follow one change at a time — skipped ahead, re-read the calendar\n", calendar.name)
 	w.reportCalendar(ctx, watchEvent{Change: watchCalendarResync, At: watchTime(skippedTo)}, calendar.id, calendar.name)
@@ -402,7 +402,9 @@ func (w *postingsWatch) reportRecordings(ctx context.Context, calendar *watchedC
 // feed reports its deletion in its own time. A clock that cannot be read leaves the
 // cursor where it was, to be tried again on the retry's backoff.
 func (w *postingsWatch) skipCalendarAhead(ctx context.Context, calendar *watchedCalendar) (time.Time, bool, error) {
+	// Tried again by the retry, not by the next ring — as for a box.
 	later := func() {
+		calendar.recovery.holding = true
 		w.calendar.unread[calendar.id] = true
 		w.armRetry()
 	}
