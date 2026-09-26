@@ -458,8 +458,9 @@ keep their moment in it. An all-day event given a time takes the account's zone,
 event does. A typed time is placed as HEY places one: a time the clocks skip moves on an
 hour at a time until it exists, and a time they repeat as they go back is the
 daylight-saving one of its two moments, or the later where neither is. A kept time at the
-other moment cannot be sent to HEY as a clock time and zone, so an edit that would move it
-refuses and asks you to retype it.
+other moment cannot be sent to HEY as a clock time and zone, and nor can one with seconds,
+since HEY is sent whole minutes, so an edit that would move either refuses and asks you to
+retype it.
 
 `hey event edit` changes only the flags you name, but that is this command's doing rather
 than HEY's: an event write is a replacement, so the edit reads the event first and sends

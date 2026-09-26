@@ -943,3 +943,53 @@ func TestEventsAddRefusesDatesInTheWrongOrderBeforeReading(t *testing.T) {
 		t.Errorf("requests = %d, want none", got)
 	}
 }
+
+// HEY is sent clock times in whole minutes, so an end with seconds — an imported event —
+// cannot be sent back as it is. A title-only edit that would move it is refused, whether the
+// event has a zone or not.
+func TestEventsEditRefusesToDropAKeptTimesSeconds(t *testing.T) {
+	for _, tt := range []struct{ name, event, want string }{
+		{name: "zoned", event: strings.Replace(zonedEventJSON, `"2026-10-14T08:00:00Z"`, `"2026-10-14T08:00:30Z"`, 1),
+			want: "the event's start is at 2026-10-14 10:00:30 Europe/Zagreb, and HEY is only sent whole minutes, so the edit would move it 30 seconds earlier"},
+		{name: "zoneless", event: strings.Replace(zonelessEventJSON, `"2026-10-14T15:00:00Z"`, `"2026-10-14T15:00:45Z"`, 1),
+			want: "the event's end is at 2026-10-14 15:00:45 UTC, and HEY is only sent whole minutes, so the edit would move it 45 seconds earlier"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			handler, requests := zoneServer(t, zoneFixture{event: tt.event})
+			_, err := runJSONCommand(t, handler, "event", "edit", "4821", "2026-10-14", "--calendar", "9", "--title", "Dentist appointment (moved)")
+			var cliErr *apierr.Error
+			if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || cliErr.Message != tt.want {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+			if got := requests.writes.Load(); got != 0 {
+				t.Errorf("writes = %d, want none", got)
+			}
+		})
+	}
+}
+
+// The refusal says how far the edit would move a kept time: an hour in New York, where the
+// clocks go back an hour, and half an hour on Lord Howe Island, where they go back thirty
+// minutes.
+func TestEventsEditSaysHowFarARepeatedTimeWouldMove(t *testing.T) {
+	for _, tt := range []struct{ name, day, event, want string }{
+		{name: "New York", day: "2026-11-01", want: "would move it an hour earlier",
+			event: `{"id":4821,"title":"Night shift handover","starts_at":"2026-11-01T06:30:00Z","ends_at":"2026-11-01T07:30:00Z",` +
+				`"starts_at_time_zone":"America/New_York","ends_at_time_zone":"America/New_York"}`},
+		{name: "Lord Howe", day: "2026-04-05", want: "would move it 30 minutes earlier",
+			event: `{"id":4821,"title":"Night shift handover","starts_at":"2026-04-04T15:15:00Z","ends_at":"2026-04-04T16:30:00Z",` +
+				`"starts_at_time_zone":"Australia/Lord_Howe","ends_at_time_zone":"Australia/Lord_Howe"}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			handler, requests := zoneServer(t, zoneFixture{event: tt.event})
+			_, err := runJSONCommand(t, handler, "event", "edit", "4821", tt.day, "--calendar", "9", "--title", "Night shift handover (Sam)")
+			var cliErr *apierr.Error
+			if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, tt.want) {
+				t.Fatalf("error = %v, want a usage error saying it %s", err, tt.want)
+			}
+			if got := requests.writes.Load(); got != 0 {
+				t.Errorf("writes = %d, want none", got)
+			}
+		})
+	}
+}
