@@ -883,9 +883,11 @@ a date that is not a day of the series and for a series you cannot edit alike. T
 envelope is the one every mutation writes: `summary` (`Occurrence updated` or `Occurrence
 and the following updated`) and `data` holding the recording HEY answered.
 
-On `add`, no `--start-time` means all-day, a `--start-time` with no `--end-time` runs an
-hour, and clock times are read in `--time-zone`, defaulting to the machine's zone. On
-`edit`, an end or zone not named keeps the event's own.
+On `add`, no `--start-time` means all-day and a `--start-time` with no `--end-time` runs an
+hour. Clock times are read in the user's HEY account time zone (the one the web app uses);
+pass `--time-zone America/New_York` to write in another. If the account has no zone the
+command refuses and asks for `--time-zone`. On `edit`, an end or zone not named keeps the
+event's own, and an event saved without a zone stays without one.
 
 ### Todos
 
