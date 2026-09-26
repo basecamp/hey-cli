@@ -24,7 +24,7 @@ type contactsShowCommand struct {
 type contactShowResult struct {
 	generated.ContactDetail
 	Note                 string            `json:"note"`
-	NoteHTML             string            `json:"note_html,omitempty"`
+	NoteHTML             string            `json:"note_html"`
 	NoteMarkdown         htmlutil.Markdown `json:"note_markdown"`
 	NoteMarkdownLossless bool              `json:"note_markdown_lossless"`
 }
@@ -35,7 +35,7 @@ func newContactsShowCommand() *contactsShowCommand {
 		Use:   "show <id>",
 		Short: "View a contact",
 		Annotations: map[string]string{
-			"agent_notes": "Returns contact details, aliases, screening status, and the private note (note_markdown is the form hey contact note set takes). The embedded postings are one page of the contact's threads; hey contact threads <id> pages through all of them.",
+			"agent_notes": "Returns contact details, aliases, screening status, and the private note: note, note_html, note_markdown and note_markdown_lossless, empty for a contact with no note (note_markdown is the form hey contact note set takes when note_markdown_lossless is true). The embedded postings are one page of the contact's threads; hey contact threads <id> pages through all of them.",
 		},
 		Example: `  hey contact show 12345
   hey contact show 12345 --json`,

@@ -144,6 +144,25 @@ func TestContactsShowAnswersTheNoteAsMarkdown(t *testing.T) {
 	}
 }
 
+// A contact without a note answers every note field, empty, the way note show does, so
+// a reader never has to tell a missing field from an empty note.
+func TestContactsShowAnswersEveryNoteFieldForAnEmptyNote(t *testing.T) {
+	server, _ := newNoteServer(t, "", "")
+	resp, err := runContacts(t, server, "show", "7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("data = %#v", resp.Data)
+	}
+	for _, field := range []string{"note", "note_html", "note_markdown"} {
+		if value, present := data[field]; !present || value != "" {
+			t.Errorf("%s = %#v (present %v), want an empty string", field, value, present)
+		}
+	}
+}
+
 func TestContactNoteSetAnswersTheSavedNoteAsMarkdown(t *testing.T) {
 	server, _ := newNoteServer(t, "", "")
 	resp, err := runContacts(t, server, "note", "set", "7", "--note=**Prefers email**\n\n- Call after six")
