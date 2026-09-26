@@ -749,7 +749,19 @@ func (m *markdownizer) block(render func()) {
 	m.blank()
 	render()
 	m.flushLine()
+	m.dropTrailingBreak()
 	m.blank()
+}
+
+// dropTrailingBreak takes the hard break off a block's last line: a break that ends a
+// block ends nothing Markdown can show, and writing it would make a note read back
+// differently the second time.
+func (m *markdownizer) dropTrailingBreak() {
+	if m.brokenLines > 0 && m.brokenLines == len(m.lines) {
+		last := len(m.lines) - 1
+		m.lines[last] = strings.TrimSuffix(m.lines[last], "  ")
+		m.brokenLines = 0
+	}
 }
 
 func (m *markdownizer) write(s string) {

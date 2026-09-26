@@ -1,6 +1,17 @@
 package htmlutil
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func nestedLists(depth int) string {
+	return strings.Repeat("<ul><li>Partners", depth) + strings.Repeat("</li></ul>", depth)
+}
+
+func nestedQuotes(depth int) string {
+	return strings.Repeat("<blockquote>", depth) + "Call after six" + strings.Repeat("</blockquote>", depth)
+}
 
 func TestMarkdownIsLossless(t *testing.T) {
 	tests := []struct {
@@ -33,6 +44,19 @@ func TestMarkdownIsLossless(t *testing.T) {
 		{name: "two blank lines", html: `<div>Met at RailsConf.<br><br><br>Prefers texts.</div>`, want: false},
 		{name: "a line break in a list item", html: `<ul><li>Jane Doe<br>Head of purchasing</li></ul>`, want: true},
 		{name: "a paragraph break in a list item", html: `<ul><li>Jane Doe<br><br>Head of purchasing</li></ul>`, want: false},
+		{name: "inline code", html: `<div>Quote <code>#4821</code> on every invoice</div>`, want: true},
+		{name: "formatting inside inline code", html: `<div>Quote <code><strong>#4821</strong></code> on every invoice</div>`, want: false},
+		{name: "lists nested as deep as ToMarkdown renders", html: nestedLists(maxNestingDepth), want: true},
+		{name: "lists nested deeper than ToMarkdown renders", html: nestedLists(maxNestingDepth + 1), want: false},
+		{name: "quotes nested as deep as ToMarkdown renders", html: nestedQuotes(maxNestingDepth), want: true},
+		{name: "quotes nested deeper than ToMarkdown renders", html: nestedQuotes(maxNestingDepth + 1), want: false},
+		{name: "HEY's wrapper nested by earlier round trips", html: heyServesForEditing(heyServesForEditing("<div>Prefers email</div>") + "<div>Call after six</div>"), want: true},
+		{name: "a trix-content div of the author's own", html: `<div>Intro</div><div class="trix-content"><div>Details</div></div>`, want: false},
+		{name: "a break starting a block", html: `<div><br>Call after six</div>`, want: false},
+		{name: "a break starting a block inside bold", html: `<div><strong><br>Call after six</strong></div>`, want: false},
+		{name: "a break after bold text", html: `<div><strong>Call</strong><br>after six</div>`, want: true},
+		{name: "a break ending a block", html: `<div>Call after six<br></div><div>Prefers texts</div>`, want: true},
+		{name: "a break in a heading", html: `<h1>Acme<br>Corporation</h1>`, want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
