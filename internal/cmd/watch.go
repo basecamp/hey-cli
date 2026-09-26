@@ -756,9 +756,9 @@ func (w *postingsWatch) settleBackoff() {
 	}
 }
 
-// skipAhead moves a box's cursor to HEY's clock now, which is the only way back once
-// a box has changed more than an increment can carry, and says where it skipped to and
-// whether it did.
+// skipAhead moves a box's cursor to HEY's clock when it answered (serverNowAnswered),
+// which is the only way back once a box has changed more than an increment can carry,
+// and says where it skipped to and whether it did.
 //
 // Not to the since in the box's posting_changes_url, which is what it used to take:
 // that is the box's last posting activity rather than HEY's clock, a deletion or a
@@ -795,7 +795,7 @@ func (w *postingsWatch) skipAhead(ctx context.Context, box *watchedBox) (time.Ti
 			break
 		}
 
-		now, err := serverNow(ctx)
+		now, err := serverNowAnswered(ctx)
 		if err != nil {
 			switch {
 			case ctx.Err() != nil:

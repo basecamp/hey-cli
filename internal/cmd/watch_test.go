@@ -446,13 +446,13 @@ func boxesAndChanges(t *testing.T, boxes string) *httptest.Server {
 // HEY's clock when a skip-ahead reads it.
 const skipDate = "Fri, 21 Aug 2026 11:05:00 GMT"
 
-// wantSkippedToHEYsClock checks a skip-ahead's point: HEY's clock at the skip, read the
-// way the start is — a whole millisecond, just before the Date header.
+// wantSkippedToHEYsClock checks a skip-ahead's point: HEY's clock when it answered — the
+// millisecond before the Date header, not taken back by the request's time, which a
+// skip has no gap to catch in and which could leave a busy feed still behind.
 func wantSkippedToHEYsClock(t *testing.T, skippedTo time.Time) {
 	t.Helper()
-	date := time.Date(2026, 8, 21, 11, 5, 0, 0, time.UTC)
-	if !skippedTo.Before(date) || date.Sub(skippedTo) > time.Second {
-		t.Errorf("skipped to %v, want HEY's clock at the skip, just before %v", skippedTo, date)
+	if want := time.Date(2026, 8, 21, 11, 4, 59, 999000000, time.UTC); !skippedTo.Equal(want) {
+		t.Errorf("skipped to %v, want HEY's clock when it answered, %v", skippedTo, want)
 	}
 }
 

@@ -56,11 +56,10 @@ func (n *newMail) skippedTo(boxID int64, cursor hey.PostingChangesCursor) {
 	}
 }
 
-// serverNow is HEY's clock at the moment it is asked — the watch's start, or a
-// skip-ahead's — read off the Date header of one cheap request, so that the
-// cutoff between backlog and new mail sits on the same clock as every posting's
-// active_at and a workstation running fast or slow can neither call the backlog
-// new nor sit on new mail.
+// serverNow is HEY's clock at the moment the watch began, read off the Date
+// header of one cheap request, so that the cutoff between backlog and new mail
+// sits on the same clock as every posting's active_at and a workstation running
+// fast or slow can neither call the backlog new nor sit on new mail.
 //
 // Date is the server's clock when it answered, and the watch began when it
 // asked: mail that lands in between is later than the start but no later than
@@ -88,20 +87,45 @@ func (n *newMail) skippedTo(boxID int64, cursor hey.PostingChangesCursor) {
 // would report history. A request that fails here would fail at the box list
 // next anyway.
 func serverNow(ctx context.Context) (time.Time, error) {
+	answered, took, err := readHEYsClock(ctx)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	return cutoffBefore(answered.Add(-took)), nil
+}
+
+// serverNowAnswered is HEY's clock when it answered, not taken back by the
+// request's time: where a skip-ahead resumes. A skip has already given up on
+// the gap — the resync line says so — so there is nothing to catch between
+// asking and the answer, and a skip point taken back by a slow or retried
+// request could leave a busy feed still too far behind to follow.
+func serverNowAnswered(ctx context.Context) (time.Time, error) {
+	answered, _, err := readHEYsClock(ctx)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	return cutoffBefore(answered), nil
+}
+
+// readHEYsClock asks HEY the time: the Date header of its answer, and how long
+// the request took on the local monotonic clock.
+func readHEYsClock(ctx context.Context) (time.Time, time.Duration, error) {
 	started := time.Now()
 	response, err := rootSDK.Get(ctx, "/identity.json?clock="+strconv.FormatInt(started.UnixNano(), 10))
 	if err != nil {
-		return time.Time{}, apierr.FromSDK(err)
+		return time.Time{}, 0, apierr.FromSDK(err)
 	}
 	if response == nil || response.FromCache {
-		return time.Time{}, apierr.ErrAPI(0, "could not read HEY's clock — the watch needs it to tell what happened after it began")
+		return time.Time{}, 0, apierr.ErrAPI(0, "could not read HEY's clock — the watch needs it to tell what happened after it began")
 	}
-	at, err := http.ParseTime(response.Headers.Get("Date"))
+	answered, err := http.ParseTime(response.Headers.Get("Date"))
 	if err != nil {
-		return time.Time{}, apierr.ErrAPI(0, "HEY's answer carried no Date header — the watch needs HEY's clock to tell what happened after it began")
+		return time.Time{}, 0, apierr.ErrAPI(0, "HEY's answer carried no Date header — the watch needs HEY's clock to tell what happened after it began")
 	}
 
-	return cutoffBefore(at.Add(-time.Since(started))), nil
+	return answered, time.Since(started), nil
 }
 
 // watchStartSince is where a feed's first read begins without --since: the

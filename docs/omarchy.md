@@ -216,7 +216,7 @@ and `--events new` selects the true ones. The rule:
   is new. `hey watch --box imbox --events new --exit-on-first` is "block until new mail", and
   a `--run-*` script sees `HEY_NEW=1` or `HEY_NEW=0`.
 - **A skip-ahead sets a floor.** A box that answered 409 was never read across the gap, so
-  the cursor it skips to — HEY's clock at the skip, read the way the start is — becomes that
+  the cursor it skips to — HEY's clock when the skip read it — becomes that
   box's floor: activity at or before it is never new there, on a thread the watch knows or one it does
   not, so a reply the watch missed and then a move while still unseen is not new mail. Mail
   after the floor is. The floor is the box's own; a gap thread moved to another box is

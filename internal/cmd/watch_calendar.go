@@ -371,7 +371,7 @@ func (w *postingsWatch) reportRecordings(ctx context.Context, calendar *watchedC
 	}
 }
 
-// skipCalendarAhead moves a calendar's cursor to HEY's clock now, which is the only way
+// skipCalendarAhead moves a calendar's cursor to HEY's clock when it answered, the only way
 // back once its feed has fallen too far behind, and says where it skipped to and whether
 // it did — the rule skipAhead follows for a box, and for the same reason: the since in
 // the calendar's URL is its updated_at, not HEY's clock. The list is read for the feed's
@@ -397,7 +397,7 @@ func (w *postingsWatch) skipCalendarAhead(ctx context.Context, calendar *watched
 			return time.Time{}, false, apierr.FromSDK(err)
 		}
 
-		now, err := serverNow(ctx)
+		now, err := serverNowAnswered(ctx)
 		if err != nil {
 			switch {
 			case ctx.Err() != nil:
