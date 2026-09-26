@@ -23,74 +23,51 @@ import (
 // under it, spanning from the countdown's start to the moment the event begins.
 const recordingTypeCountdown = "Calendar::Countdown"
 
-// occurrenceEdit is one day of a repeating event and how much of the series a change to it
-// reaches, as --occurrence and --apply-to name them.
-type occurrenceEdit struct {
+// occurrenceWrite is one day of a repeating event and how much of the series a write to it
+// reaches, as --occurrence and --apply-to name them for an edit or a delete.
+type occurrenceWrite struct {
 	occurrence hey.EventOccurrence
 	scope      hey.OccurrenceScope
 }
 
-// parseOccurrence reads --occurrence and --apply-to, and answers nil for an edit of the
-// whole event. Everything here is refused before a request is made: the occurrence_id has
-// to be the one a day or a week listing served, byte for byte, naming the series the
-// positional id names; --apply-to has to say current or future; a future edit has to state
-// the schedule of the new series explicitly; and a schedule change cannot apply to one day,
-// which is HEY's rule as much as this command's.
-func (c *eventsEditCommand) parseOccurrence(cmd *cobra.Command, id int64, on string) (*occurrenceEdit, error) {
+// parseOccurrenceFlags reads --occurrence and --apply-to as edit and delete both take them,
+// and answers nil for a write to the whole event. Everything here is refused before a
+// request is made: the occurrence_id has to be the one a day or a week listing served, byte
+// for byte, naming the series the positional id names, and --apply-to has to say current or
+// future. The hints name the command they were given to.
+func parseOccurrenceFlags(cmd *cobra.Command, id int64, value, applyTo string) (*occurrenceWrite, error) {
 	flags := cmd.Flags()
+	command := cmd.CommandPath()
 	if !flags.Changed("occurrence") {
 		if flags.Changed("apply-to") {
 			return nil, apierr.ErrUsageHint("--apply-to needs --occurrence",
-				"hey event edit 4821 --occurrence 4821_2026-09-15 --apply-to current")
+				command+" 4821 --occurrence 4821_2026-09-15 --apply-to current")
 		}
 		return nil, nil
 	}
-	// An --occurrence given empty — a script's unset variable — must not quietly become an
-	// edit of the whole series, which is the one thing the flag was there to avoid.
-	if c.occurrence == "" {
+	// An --occurrence given empty — a script's unset variable — must not quietly become a
+	// write to the whole series, which is the one thing the flag was there to avoid.
+	if value == "" {
 		return nil, apierr.ErrUsageHint("--occurrence needs an occurrence_id",
 			"an occurrence_id as hey event day serves it, <series id>_<YYYY-MM-DD>, for example 4821_2026-09-15")
 	}
 
-	occurrence, err := hey.ParseOccurrenceID(c.occurrence)
-	if err != nil || occurrence.String() != c.occurrence {
-		return nil, apierr.ErrUsageHint(fmt.Sprintf("invalid occurrence: %s", c.occurrence),
+	occurrence, err := hey.ParseOccurrenceID(value)
+	if err != nil || occurrence.String() != value {
+		return nil, apierr.ErrUsageHint(fmt.Sprintf("invalid occurrence: %s", value),
 			"an occurrence_id as hey event day serves it, <series id>_<YYYY-MM-DD>, for example 4821_2026-09-15")
 	}
 	if occurrence.EventID != id {
 		return nil, apierr.ErrUsageHint(
-			fmt.Sprintf("occurrence %s belongs to series %d, not %d", c.occurrence, occurrence.EventID, id),
-			fmt.Sprintf("hey event edit %d --occurrence %s", occurrence.EventID, c.occurrence))
-	}
-	if on != "" {
-		day, dateErr := parseDateArg("date", on)
-		if dateErr != nil {
-			return nil, dateErr
-		}
-		if day.Format(dateLayout) != occurrence.DateParam() {
-			return nil, apierr.ErrUsageHint(fmt.Sprintf("date %s is not the day of occurrence %s", on, c.occurrence),
-				"an occurrence is read on its own day, so leave the date out or name that day")
-		}
+			fmt.Sprintf("occurrence %s belongs to series %d, not %d", value, occurrence.EventID, id),
+			fmt.Sprintf("%s %d --occurrence %s", command, occurrence.EventID, value))
 	}
 
-	scope, err := parseApplyTo(c.applyTo, flags.Changed("apply-to"))
+	scope, err := parseApplyTo(applyTo, flags.Changed("apply-to"))
 	if err != nil {
 		return nil, err
 	}
-	if scope == hey.OccurrenceScopeThisAndFollowing && !flags.Changed("repeat") {
-		return nil, apierr.ErrUsageHint("--apply-to future needs --repeat to define the new series",
-			"pass --repeat with --repeat-times or --repeat-until, or pass --repeat alone to repeat forever")
-	}
-	if scope == hey.OccurrenceScopeThisEvent {
-		for _, flag := range []string{"repeat", "repeat-until", "repeat-times"} {
-			if flags.Changed(flag) {
-				return nil, apierr.ErrUsageHint(fmt.Sprintf("--%s cannot apply to one day of a series", flag),
-					"a change to the schedule reaches this day and every one after it with --apply-to future, or the whole series when the id is edited alone")
-			}
-		}
-	}
-
-	return &occurrenceEdit{occurrence: occurrence, scope: scope}, nil
+	return &occurrenceWrite{occurrence: occurrence, scope: scope}, nil
 }
 
 // parseApplyTo reads the scope. There is no default: a caller who does not say how much of
@@ -99,7 +76,7 @@ func (c *eventsEditCommand) parseOccurrence(cmd *cobra.Command, id int64, on str
 func parseApplyTo(value string, given bool) (hey.OccurrenceScope, error) {
 	if !given {
 		return "", apierr.ErrUsageHint("--apply-to is required with --occurrence",
-			"--apply-to current changes that day alone; --apply-to future changes it and every day after it")
+			"--apply-to current reaches that day alone; --apply-to future reaches it and every day after it")
 	}
 	switch value {
 	case "current":
@@ -108,6 +85,41 @@ func parseApplyTo(value string, given bool) (hey.OccurrenceScope, error) {
 		return hey.OccurrenceScopeThisAndFollowing, nil
 	}
 	return "", apierr.ErrUsageHint(fmt.Sprintf("invalid apply-to: %s", value), "one of current or future")
+}
+
+// parseOccurrence is parseOccurrenceFlags with what only an edit refuses: a date that is not
+// the occurrence's own, a future edit that does not state the schedule of the new series,
+// and a schedule change applied to one day, which is HEY's rule as much as this command's.
+func (c *eventsEditCommand) parseOccurrence(cmd *cobra.Command, id int64, on string) (*occurrenceWrite, error) {
+	edit, err := parseOccurrenceFlags(cmd, id, c.occurrence, c.applyTo)
+	if err != nil || edit == nil {
+		return nil, err
+	}
+	if on != "" {
+		day, dateErr := parseDateArg("date", on)
+		if dateErr != nil {
+			return nil, dateErr
+		}
+		if day.Format(dateLayout) != edit.occurrence.DateParam() {
+			return nil, apierr.ErrUsageHint(fmt.Sprintf("date %s is not the day of occurrence %s", on, c.occurrence),
+				"an occurrence is read on its own day, so leave the date out or name that day")
+		}
+	}
+
+	flags := cmd.Flags()
+	if edit.scope == hey.OccurrenceScopeThisAndFollowing && !flags.Changed("repeat") {
+		return nil, apierr.ErrUsageHint("--apply-to future needs --repeat to define the new series",
+			"pass --repeat with --repeat-times or --repeat-until, or pass --repeat alone to repeat forever")
+	}
+	if edit.scope == hey.OccurrenceScopeThisEvent {
+		for _, flag := range []string{"repeat", "repeat-until", "repeat-times"} {
+			if flags.Changed(flag) {
+				return nil, apierr.ErrUsageHint(fmt.Sprintf("--%s cannot apply to one day of a series", flag),
+					"a change to the schedule reaches this day and every one after it with --apply-to future, or the whole series when the id is edited alone")
+			}
+		}
+	}
+	return edit, nil
 }
 
 // editOccurrence changes one day of a repeating event, or that day and every one after it.
@@ -131,7 +143,7 @@ func parseApplyTo(value string, given bool) (hey.OccurrenceScope, error) {
 // cannot read is left out of what HEY serves, indistinguishable from none, and HEY clears
 // the attachment whether the write sends an empty entry id or no key at all. That is the
 // server's to fix; the docs say so.
-func (c *eventsEditCommand) editOccurrence(ctx context.Context, cmd *cobra.Command, edit occurrenceEdit) error {
+func (c *eventsEditCommand) editOccurrence(ctx context.Context, cmd *cobra.Command, edit occurrenceWrite) error {
 	// The flags that need no read are refused first, so a bad one costs no request.
 	repeat, err := c.fields.parseRepeat(cmd, true)
 	if err != nil {
@@ -161,7 +173,7 @@ func (c *eventsEditCommand) editOccurrence(ctx context.Context, cmd *cobra.Comma
 	if err != nil {
 		return err
 	}
-	day, err := locateOccurrence(rows, edit.occurrence)
+	day, err := locateOccurrence(cmd, rows, edit.occurrence)
 	if err != nil {
 		return err
 	}
@@ -173,22 +185,11 @@ func (c *eventsEditCommand) editOccurrence(ctx context.Context, cmd *cobra.Comma
 		}
 	}
 
-	if edit.scope == hey.OccurrenceScopeThisAndFollowing && day.realized != nil {
-		// A preset determines an occurrence's boundary from the parent's wall clock, so it
-		// can be compared with the realized day below. A custom schedule is opaque in the
-		// API: BYHOUR, RDATE and similar rules can put the occurrence at a different time.
-		// Guessing the parent's clock there can miss a moved day, after which Haystack may
-		// cancel neighboring realized children from the wrong boundary.
-		if !day.series.RecurrenceSchedule.Preset {
-			return apierr.ErrUsageHint(
-				fmt.Sprintf("occurrence %s belongs to an opaque custom schedule and cannot be changed with --apply-to future after HEY has written that day out", edit.occurrence.String()),
-				"use --apply-to current for that day, edit the whole series, or split from a later virtual occurrence")
-		}
-		virtual := virtualOccurrence(day.series, edit.occurrence.Date)
-		if !day.realized.StartsAt.Equal(virtual.StartsAt) {
-			return apierr.ErrUsageHint(
-				fmt.Sprintf("occurrence %s was moved from %s to %s and cannot be changed with --apply-to future", edit.occurrence.String(), virtual.StartsAt.Format(time.RFC3339), day.realized.StartsAt.Format(time.RFC3339)),
-				"move that occurrence back to its series date and time with --apply-to current, then retry the future edit")
+	if edit.scope == hey.OccurrenceScopeThisAndFollowing {
+		if err = day.refuseAnUnsafeFutureBoundary("changed",
+			"use --apply-to current for that day, edit the whole series, or split from a later virtual occurrence",
+			"move that occurrence back to its series date and time with --apply-to current, then retry the future edit"); err != nil {
+			return err
 		}
 	}
 
@@ -280,12 +281,12 @@ func (c *eventsEditCommand) editOccurrence(ctx context.Context, cmd *cobra.Comma
 
 // occurrenceWriteError says what HEY's refusal of an occurrence write means. The occurrence
 // route answers not-found for a date that is not a day of the series and for a series the
-// caller may not edit alike, and the SDK reports a form route's status as a bare API
+// caller may not change alike, and the SDK reports a form route's status as a bare API
 // error, so the status is read here into the not-found it is, with both meanings named.
 func occurrenceWriteError(err error, occurrence hey.EventOccurrence) error {
 	if hey.AsError(err).HTTPStatus == http.StatusNotFound {
 		return apierr.ErrNotFoundHint("occurrence", occurrence.String(),
-			fmt.Sprintf("HEY refuses a date that is not a day of the series and a series you cannot edit alike; hey event day %s  lists that day's occurrences", occurrence.DateParam()))
+			fmt.Sprintf("HEY refuses a date that is not a day of the series and a series you cannot change alike; hey event day %s  lists that day's occurrences", occurrence.DateParam()))
 	}
 	return apierr.FromSDK(err)
 }
@@ -320,8 +321,8 @@ type occurrenceDay struct {
 // id and has to be one: an id that names a day of some other series, or an event that does
 // not repeat, is refused rather than written through the occurrence route to be answered
 // not-found. The written-out day is matched by its occurrence_id alone, which names the
-// series and the date together.
-func locateOccurrence(rows []generated.Recording, occurrence hey.EventOccurrence) (occurrenceDay, error) {
+// series and the date together. The hints name the command that asked.
+func locateOccurrence(cmd *cobra.Command, rows []generated.Recording, occurrence hey.EventOccurrence) (occurrenceDay, error) {
 	day := occurrenceDay{occurrence: occurrence}
 	found := false
 	for i := range rows {
@@ -338,6 +339,7 @@ func locateOccurrence(rows []generated.Recording, occurrence hey.EventOccurrence
 	}
 
 	id := strconv.FormatInt(occurrence.EventID, 10)
+	command := cmd.CommandPath()
 	switch {
 	case !found:
 		return occurrenceDay{}, apierr.ErrNotFoundHint("occurrence", occurrence.String(),
@@ -345,11 +347,11 @@ func locateOccurrence(rows []generated.Recording, occurrence hey.EventOccurrence
 	case day.series.OccurrenceId != "":
 		return occurrenceDay{}, apierr.ErrUsageHint(
 			fmt.Sprintf("event %s is one day of series %d, not a series", id, day.series.ParentId),
-			fmt.Sprintf("hey event edit %d --occurrence %s", day.series.ParentId, day.series.OccurrenceId))
+			fmt.Sprintf("%s %d --occurrence %s", command, day.series.ParentId, day.series.OccurrenceId))
 	case !day.series.Recurring:
 		return occurrenceDay{}, apierr.ErrUsageHint(
 			fmt.Sprintf("event %s does not repeat, so it has no occurrences", id),
-			fmt.Sprintf("hey event edit %s  changes it", id))
+			fmt.Sprintf("%s %s  acts on the whole event", command, id))
 	}
 	return day, nil
 }
@@ -362,6 +364,35 @@ func (d occurrenceDay) event() generated.Recording {
 		return *d.realized
 	}
 	return virtualOccurrence(d.series, d.occurrence.Date)
+}
+
+// refuseAnUnsafeFutureBoundary refuses a future write from a day HEY has written out when
+// the boundary of that write cannot be trusted. HEY truncates the series at the day's
+// occurrence date but cancels the written-out days from the selected day's actual start, so
+// a day moved off its series time would take an earlier edited day with it, or leave a later
+// one behind. A preset puts every day at the series' wall clock, so a moved day shows; a
+// custom schedule is opaque in the API — BYHOUR, RDATE and similar rules can put a day at a
+// different time — so a written-out day there cannot be checked and is refused outright. A
+// virtual day has no start of its own and is always safe.
+//
+// verb says what the write would do to the days ("changed", "deleted"); the hints are the
+// caller's way round each refusal.
+func (d occurrenceDay) refuseAnUnsafeFutureBoundary(verb, customHint, movedHint string) error {
+	if d.realized == nil {
+		return nil
+	}
+	if !d.series.RecurrenceSchedule.Preset {
+		return apierr.ErrUsageHint(
+			fmt.Sprintf("occurrence %s belongs to an opaque custom schedule and cannot be %s with --apply-to future after HEY has written that day out", d.occurrence.String(), verb),
+			customHint)
+	}
+	virtual := virtualOccurrence(d.series, d.occurrence.Date)
+	if !d.realized.StartsAt.Equal(virtual.StartsAt) {
+		return apierr.ErrUsageHint(
+			fmt.Sprintf("occurrence %s was moved from %s to %s and cannot be %s with --apply-to future", d.occurrence.String(), virtual.StartsAt.Format(time.RFC3339), d.realized.StartsAt.Format(time.RFC3339), verb),
+			movedHint)
+	}
+	return nil
 }
 
 // readCustomVirtualOccurrence finds the exact virtual occurrence HEY serves in its Day view.

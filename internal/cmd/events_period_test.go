@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -8,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
 // A repeating event is one row on a calendar, so `hey event list` answers it on the day the
@@ -56,24 +59,28 @@ func TestEventsDayExpandsRecurringEvents(t *testing.T) {
 	}
 }
 
-// A day an earlier edit has written out has an id of its own, and HEY's event routes act
-// on that id for that day alone. The published id keeps that established meaning while
-// recording_id makes the distinction from a virtual occurrence explicit.
+// A day an earlier edit has written out has an id of its own, which the published id keeps
+// while recording_id makes the distinction from a virtual occurrence explicit. That id edits
+// the day alone, but it does not delete it: HEY would draw the day again from the series.
+// The delete refuses it and names the occurrence delete, which is what removes the day.
 func TestEventsDayKeepsARealizedOccurrenceID(t *testing.T) {
+	const realized = `{"id":9001,"parent_id":4821,"occurrence_id":"4821_2026-09-15","title":"Design review (with the vendor)","starts_at":"2026-09-15T13:30:00Z","ends_at":"2026-09-15T14:30:00Z","type":"Calendar::Event","calendar":{"id":9,"name":"Work"}}`
 	var deletedPath string
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/calendar/days/2026-09-15.json":
 			_, _ = io.WriteString(w, `{"kind":"day","starts_at":"2026-09-15T00:00:00Z","ends_at":"2026-09-15T23:59:59Z","recordings":{`+
-				`"Calendar::Event":[`+
-				`{"id":9001,"parent_id":4821,"occurrence_id":"4821_2026-09-15","title":"Design review (with the vendor)","starts_at":"2026-09-15T13:30:00Z","ends_at":"2026-09-15T14:30:00Z","type":"Calendar::Event","calendar":{"id":9,"name":"Work"}}`+
-				`]}}`)
+				`"Calendar::Event":[`+realized+`]}}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/calendars.json":
+			_, _ = io.WriteString(w, `{"calendars":[{"calendar":{"id":9,"name":"Work","owned":true}}]}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/calendars/9/recordings.json":
+			_, _ = io.WriteString(w, `{"Calendar::Event":[`+realized+`]}`)
 		case r.Method == http.MethodDelete:
-			deletedPath = r.URL.Path
+			deletedPath = r.URL.Path + "?" + r.URL.RawQuery
 			w.WriteHeader(http.StatusNoContent)
 		default:
-			t.Errorf("request = %s %s, want the day read or an event delete", r.Method, r.URL.Path)
+			t.Errorf("request = %s %s, want the day read, the event looked for, or a delete", r.Method, r.URL.Path)
 			http.NotFound(w, r)
 		}
 	})
@@ -90,17 +97,31 @@ func TestEventsDayKeepsARealizedOccurrenceID(t *testing.T) {
 		t.Errorf("row = %#v, want the day's own id and recording_id with its series in parent_id", events[0])
 	}
 
-	if _, err := runJSONCommand(t, handler, "event", "delete", fmt.Sprintf("%.0f", row["id"])); err != nil {
-		t.Fatalf("delete the id from the day response: %v", err)
+	_, err = runJSONCommand(t, handler, "event", "delete", fmt.Sprintf("%.0f", row["id"]))
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage {
+		t.Fatalf("delete the id from the day response: error = %v, want a usage refusal", err)
 	}
-	if deletedPath != "/calendar/events/9001.json" {
-		t.Errorf("delete path = %q, want the realized day alone", deletedPath)
+	if want := "hey event delete 4821 --occurrence 4821_2026-09-15 --apply-to current"; cliErr.Hint != want {
+		t.Errorf("hint = %q, want %q", cliErr.Hint, want)
+	}
+	if deletedPath != "" {
+		t.Fatalf("deleted %q, want nothing deleted by the day's own id", deletedPath)
+	}
+
+	if _, err := runJSONCommand(t, handler, "event", "delete", fmt.Sprintf("%.0f", row["parent_id"]),
+		"--occurrence", row["occurrence_id"].(string), "--apply-to", "current"); err != nil {
+		t.Fatalf("delete the day through its occurrence: %v", err)
+	}
+	if deletedPath != "/calendar/events/4821/occurrences/2026-09-15.json?apply_to_future=false" {
+		t.Errorf("delete = %q, want the day deleted through its occurrence", deletedPath)
 	}
 }
 
 // Styled period output carries every identifier needed to act on an occurrence. A moved
-// realized day cannot reconstruct its occurrence id from the date drawn in the table, and
-// its own recording id is what edits or deletes that day without the rest of the series.
+// realized day cannot reconstruct its occurrence id from the date drawn in the table, which
+// is what deletes that day, and its own recording id is what edits it without the rest of
+// the series.
 func TestEventsPeriodStyledPublishesOccurrenceIdentifiers(t *testing.T) {
 	for _, tt := range []struct {
 		name, period, path string

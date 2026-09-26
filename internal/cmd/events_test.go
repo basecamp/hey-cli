@@ -360,18 +360,42 @@ func TestEventsEditRefusesAnEventItCannotRead(t *testing.T) {
 	}
 }
 
+// An id alone deletes the whole event. It is read first, only to make sure it is not a day
+// of a series written out on its own; a series, or an id the read does not find, is deleted.
 func TestEventsDeleteCommand(t *testing.T) {
-	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodDelete || r.URL.Path != "/calendar/events/4821.json" {
-			t.Errorf("request = %s %s, want DELETE /calendar/events/4821.json", r.Method, r.URL.Path)
-		}
-		w.WriteHeader(http.StatusNoContent)
-	}), "event", "delete", "4821")
-	if err != nil {
-		t.Fatalf("execute events delete: %v", err)
-	}
-	if response.Summary != "Event deleted" {
-		t.Errorf("summary = %q", response.Summary)
+	for _, tt := range []struct {
+		name, recordings string
+	}{
+		{name: "the series", recordings: `{"Calendar::Event":[{"id":4821,"type":"Calendar::Event","title":"Design review","recurring":true,"starts_at":"2026-09-01T12:00:00Z","ends_at":"2026-09-01T13:00:00Z"}]}`},
+		{name: "not found in the year", recordings: `{}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var deleted atomic.Int32
+			response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/calendars.json":
+					_, _ = io.WriteString(w, `{"calendars":[{"calendar":{"id":9,"name":"Work","owned":true}}]}`)
+				case r.Method == http.MethodGet && r.URL.Path == "/calendars/9/recordings.json":
+					_, _ = io.WriteString(w, tt.recordings)
+				case r.Method == http.MethodDelete && r.URL.Path == "/calendar/events/4821.json":
+					deleted.Add(1)
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					t.Errorf("unexpected request = %s %s", r.Method, r.URL)
+					http.NotFound(w, r)
+				}
+			}), "event", "delete", "4821")
+			if err != nil {
+				t.Fatalf("execute events delete: %v", err)
+			}
+			if deleted.Load() != 1 {
+				t.Errorf("deletes = %d, want one", deleted.Load())
+			}
+			if response.Summary != "Event deleted" {
+				t.Errorf("summary = %q", response.Summary)
+			}
+		})
 	}
 }
 

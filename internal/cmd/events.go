@@ -29,7 +29,7 @@ func newEventsCommand() *eventsCommand {
 		Use:   "event",
 		Short: "Read and manage calendar events",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, day, week, add, edit, delete. \"What's on the schedule today?\" is answered by day, not list: day and week read the span as HEY draws it, with a repeating event expanded into the occurrences inside it, over the calendars switched on in HEY. list reads what calendars hold — every calendar unless --calendar names one — and a repeating event is one row, its series, on the day the series began. An edit is not a patch on HEY's side: it resends the notes, location, link, attached email, reminders and time zones the event already carries, so notes lose their formatting and a countdown is removed unless --countdown names one again. edit <series id> changes a whole series; one day of it is edit <series id> --occurrence <occurrence_id from day/week> --apply-to current|future, which keeps the countdown and refuses to flatten notes unless --allow-plain-notes or --notes is given. --apply-to future starts a new series and requires --repeat with its complete schedule; a preset alone means forever and custom copies an existing opaque schedule (a count-based rule can restart its full count). A virtual day of an opaque custom schedule is read from HEY's Day view and refused if that view no longer serves it. A realized custom day cannot be split safely; use a virtual occurrence, edit that day alone, or edit the whole series. A realized preset occurrence moved away from its series time must be moved back with --apply-to current before a future split. Read the day again afterward for the new series id.",
+			"agent_notes": "Subcommands: list, day, week, add, edit, delete. \"What's on the schedule today?\" is answered by day, not list: day and week read the span as HEY draws it, with a repeating event expanded into the occurrences inside it, over the calendars switched on in HEY. list reads what calendars hold — every calendar unless --calendar names one — and a repeating event is one row, its series, on the day the series began. An edit is not a patch on HEY's side: it resends the notes, location, link, attached email, reminders and time zones the event already carries, so notes lose their formatting and a countdown is removed unless --countdown names one again. edit <series id> changes a whole series; one day of it is edit <series id> --occurrence <occurrence_id from day/week> --apply-to current|future, which keeps the countdown and refuses to flatten notes unless --allow-plain-notes or --notes is given. --apply-to future starts a new series and requires --repeat with its complete schedule; a preset alone means forever and custom copies an existing opaque schedule (a count-based rule can restart its full count). A virtual day of an opaque custom schedule is read from HEY's Day view and refused if that view no longer serves it. A realized custom day cannot be split safely; use a virtual occurrence, edit that day alone, or edit the whole series. A realized preset occurrence moved away from its series time must be moved back with --apply-to current before a future split. Read the day again afterward for the new series id. delete <series id> deletes the whole series; one day of it is delete <series id> --occurrence <occurrence_id> --apply-to current|future, whether or not HEY has written that day out. delete refuses a written-out day's own id, because HEY would draw the day again from the series.",
 		},
 	}
 
@@ -282,9 +282,9 @@ so a day that had come to have guests of its own is refused until --invite names
 series' list. The day is read over every calendar, so here --calendar is only where the
 day is moved to; a day already moved elsewhere stays there. A virtual occurrence lists
 its series in id and parent_id; a day HEY has written out on its own keeps its own event id
-in id and recording_id, with the series in parent_id. That own id edits the day
-alone; deleting it discards only the day's own changes, and the series' occurrence shows
-again. One thing no edit can keep: an attached email you cannot read is not served, so
+in id and recording_id, with the series in parent_id. That own id edits the day alone; it
+is deleted with 'hey event delete <series id> --occurrence <occurrence_id> --apply-to
+current'. One thing no edit can keep: an attached email you cannot read is not served, so
 it is detached by any edit, whole event
 or one day.`,
 		Example: `  hey event edit 4821 --title "Design review (moved)"
@@ -446,12 +446,18 @@ func (c *eventsEditCommand) findEvent(ctx context.Context, id int64, on string) 
 // or a window wide enough to cover an event somebody is editing, over the calendar
 // --calendar names or every one of them.
 func (c *eventsEditCommand) searchWindow(ctx context.Context, on string) (recordingWindow, error) {
+	return eventSearchWindow(ctx, c.fields.calendar, on)
+}
+
+// eventSearchWindow is where an event given by id is looked for: the day given, read as
+// [day, day+1), or a year either side of today, over one calendar or every one of them.
+func eventSearchWindow(ctx context.Context, calendar int64, on string) (recordingWindow, error) {
 	endsOn := on
 	if day, err := time.Parse(dateLayout, on); err == nil {
 		endsOn = day.AddDate(0, 0, 1).Format(dateLayout)
 	}
 	filter := recordingFilter{
-		calendar:         c.fields.calendar,
+		calendar:         calendar,
 		startsOn:         on,
 		endsOn:           endsOn,
 		defaultWindow:    func(now time.Time) (time.Time, time.Time) { return now.AddDate(-1, 0, 0), now.AddDate(1, 0, 0) },
@@ -464,6 +470,10 @@ func (c *eventsEditCommand) searchWindow(ctx context.Context, on string) (record
 
 type eventsDeleteCommand struct {
 	cmd *cobra.Command
+	// occurrence and applyTo name one day of a repeating event and how much of the series
+	// goes with it, as they do for an edit.
+	occurrence string
+	applyTo    string
 }
 
 func newEventsDeleteCommand() *eventsDeleteCommand {
@@ -471,13 +481,39 @@ func newEventsDeleteCommand() *eventsDeleteCommand {
 	eventsDeleteCommand.cmd = &cobra.Command{
 		Use:   "delete <id>",
 		Short: "Delete an event",
+		Long: `Delete an event. An id alone deletes the whole event, a repeating series included, and
+an event on a shared calendar is deleted for everybody on it.
+
+One day of a series is deleted with --occurrence, which takes the occurrence_id 'hey event
+day' and 'hey event week' serve (<series id>_<YYYY-MM-DD>, and the series must be the id
+given), and --apply-to, which is required with it: 'current' deletes that day alone and
+HEY keeps the rest of the series by writing the day into its exceptions; 'future' deletes
+it and every day after it, stopping the series the day before — from the series' first
+day, that is the whole series. A day HEY has written out on its own and a day it has not
+are deleted the same way.
+
+A day HEY has written out on its own — after an edit of that day alone, or a reminder —
+has an id of its own, but that id is refused here: deleting it would remove only HEY's
+copy of the day, and HEY would draw the day again from the series. The refusal names the
+command that deletes the day. To tell, the event is read first, over every calendar and a
+year either side of today; an id that read does not find is deleted as given.
+
+A 'future' delete from a written-out day is refused where its boundary cannot be trusted,
+as a 'future' edit is: a day moved off its series time, or any written-out day of an
+opaque custom schedule. Delete that day alone first, then from the next day.`,
 		Annotations: map[string]string{
-			"agent_notes": "Deletes the whole event, recurring series included. An event on a shared calendar is deleted for everybody on it.",
+			"agent_notes": "delete <id> deletes the whole event, recurring series included, for everybody on a shared calendar. One day of a series is delete <series id> --occurrence <occurrence_id from day/week> --apply-to current|future: current deletes that day alone; future deletes it and every day after, and from the series' first day that is the whole series. A day HEY wrote out on its own (own id in id/recording_id, series in parent_id) is refused by its own id, because deleting that id lets HEY draw the day again from the series; use the occurrence form. future is refused from a written-out day moved off its series time or on an opaque custom schedule.",
 		},
-		Example: `  hey event delete 4821`,
-		RunE:    eventsDeleteCommand.run,
-		Args:    usageExactOneArg(),
+		Example: `  hey event delete 4821
+  hey event delete 4821 --occurrence 4821_2026-09-15 --apply-to current
+  hey event delete 4821 --occurrence 4821_2026-09-15 --apply-to future`,
+		RunE: eventsDeleteCommand.run,
+		Args: usageExactOneArg(),
 	}
+
+	flags := eventsDeleteCommand.cmd.Flags()
+	flags.StringVar(&eventsDeleteCommand.occurrence, "occurrence", "", "One day of a repeating event, by the occurrence_id 'hey event day' serves (<series id>_<YYYY-MM-DD>)")
+	flags.StringVar(&eventsDeleteCommand.applyTo, "apply-to", "", "How much of the series an --occurrence delete reaches: current (that day alone) or future (that day and every one after it)")
 
 	return eventsDeleteCommand
 }
@@ -492,12 +528,96 @@ func (c *eventsDeleteCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	occurrence, err := parseOccurrenceFlags(cmd, id, c.occurrence, c.applyTo)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
-	if err := sdk.CalendarEvents().Delete(ctx, id); err != nil {
+	if occurrence != nil {
+		return c.deleteOccurrence(ctx, cmd, *occurrence)
+	}
+
+	if err = refuseADayOfASeries(ctx, cmd, id); err != nil {
+		return err
+	}
+	if err = sdk.CalendarEvents().Delete(ctx, id); err != nil {
 		return apierr.FromSDK(err)
 	}
 
 	return writeMutation(cmd, "Event deleted", nil)
+}
+
+// deleteOccurrence deletes one day of a repeating event, or that day and every one after it,
+// through the occurrence route: that is the one that writes a day into the series'
+// exceptions, so the day stays gone. A future delete reads the day first, for the boundary
+// check a future edit makes; a current one has nothing to check that HEY does not.
+func (c *eventsDeleteCommand) deleteOccurrence(ctx context.Context, cmd *cobra.Command, write occurrenceWrite) error {
+	if write.scope == hey.OccurrenceScopeThisAndFollowing {
+		window, err := occurrenceDayWindow(ctx, write.occurrence.Date)
+		if err != nil {
+			return err
+		}
+		rows, err := window.read(ctx, recordingTypeEvent)
+		if err != nil {
+			return err
+		}
+		day, err := locateOccurrence(cmd, rows, write.occurrence)
+		if err != nil {
+			return err
+		}
+		if err = day.refuseAnUnsafeFutureBoundary("deleted",
+			"delete that day alone with --apply-to current, then delete from a later virtual occurrence with --apply-to future",
+			"delete that day alone with --apply-to current, then delete from the next day with --apply-to future"); err != nil {
+			return err
+		}
+	}
+
+	if err := sdk.CalendarEvents().DeleteOccurrence(ctx, write.occurrence, write.scope); err != nil {
+		return occurrenceWriteError(err, write.occurrence)
+	}
+
+	summary := "Occurrence deleted"
+	applyTo := "current"
+	if write.scope == hey.OccurrenceScopeThisAndFollowing {
+		summary = "Occurrence and the following deleted"
+		applyTo = "future"
+	}
+	return writeMutationLine(cmd,
+		fmt.Sprintf("%s: %s.", summary, write.occurrence),
+		summary,
+		map[string]string{"occurrence_id": write.occurrence.String(), "apply_to": applyTo})
+}
+
+// refuseADayOfASeries stops a delete by id from reaching a day HEY has written out on its
+// own. HEY deletes that recording and nothing else — the day is not written into the
+// series' exceptions — so the series draws the day again, in the series' own version, and
+// the delete would be reported done having undone an edit instead. There is no read of one
+// event, so it is looked for where an edit looks, and an id that is not found there is
+// deleted as it always was: whatever it is, it is not a day of a series within a year.
+func refuseADayOfASeries(ctx context.Context, cmd *cobra.Command, id int64) error {
+	window, err := eventSearchWindow(ctx, 0, "")
+	if err != nil {
+		return err
+	}
+	events, err := window.read(ctx, recordingTypeEvent)
+	if err != nil {
+		return err
+	}
+	for _, event := range events {
+		if event.Id != id || event.OccurrenceId == "" {
+			continue
+		}
+		occurrence, err := hey.ParseOccurrenceID(event.OccurrenceId)
+		if err != nil {
+			return apierr.ErrUsageHint(
+				fmt.Sprintf("event %d is one day of a series, and deleting it by its own id would bring the series' version of that day back", id),
+				fmt.Sprintf("hey event day  lists the day's occurrence_id for %s --occurrence", cmd.CommandPath()))
+		}
+		return apierr.ErrUsageHint(
+			fmt.Sprintf("event %d is one day of series %d, and deleting it by its own id would bring the series' version of that day back", id, occurrence.EventID),
+			fmt.Sprintf("%s %d --occurrence %s --apply-to current", cmd.CommandPath(), occurrence.EventID, occurrence))
+	}
+	return nil
 }
 
 // --- Shared write flags ---

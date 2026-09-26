@@ -360,7 +360,11 @@ about which line it is on — scrolling by the number is what let the cursor wal
 occurrences with `id: 0` and an `occurrence_id` of `"<series>_<date>"`, so an id keyed selection
 could not pick one out at all. The same fact decides how it is written: `occurrenceOf` sends an
 edit or a delete of such a day through `CalendarEvents().UpdateOccurrence`/`DeleteOccurrence`
-with `OccurrenceScopeThisEvent`.
+with `OccurrenceScopeThisEvent`. A day HEY has written out on its own has an id as well as its
+`occurrence_id`: an edit goes by the id, but a delete still goes through the occurrence, because
+HEY's `events#destroy` removes that recording without writing the day into the series'
+exceptions, and the series then draws the day again. `hey event delete` refuses that id for the
+same reason and deletes a day with `--occurrence`.
 
 The selected event is marked by a light travelling round its edge rather than a color of its own
 — it keeps its calendar's, which is what says whose it is. `sweepIntensity` and `edgePosition` in

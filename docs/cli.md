@@ -409,7 +409,9 @@ hey event edit 4821 --title "Design review (moved)"
 hey event edit 4821 --starts-on 2026-09-04 --start-time 15:00
 hey event edit 4821 --occurrence 4821_2026-09-15 --apply-to current --start-time 15:00   # that day alone
 hey event edit 4821 --occurrence 4821_2026-09-15 --apply-to future --repeat every_week --repeat-times 8 --location "Studio, 3rd floor" --allow-plain-notes
-hey event delete 4821
+hey event delete 4821                                                    # the whole series
+hey event delete 4821 --occurrence 4821_2026-09-15 --apply-to current    # that day alone
+hey event delete 4821 --occurrence 4821_2026-09-15 --apply-to future     # that day and every one after it
 ```
 
 Without `--calendar`, `hey event list` reads every calendar and `hey event add` files on
@@ -425,8 +427,9 @@ repeating event is expanded into the occurrences that fall inside it, each carry
 day's own times and an `occurrence_id`. A virtual occurrence carries the series in `id`
 and `parent_id`. A day HEY has written out on its own keeps its own event ID in both `id`
 and `recording_id`, while `parent_id` remains the series; that own ID is what `hey event
-edit` changes for that day alone. `hey event delete` on it discards only the day's own
-changes — HEY's series still has that date, so the series' occurrence shows again. A period covers the calendars
+edit` acts on for that day alone. Deleting one day, written out or not, takes its
+`occurrence_id` instead: `hey event delete <series id> --occurrence <occurrence_id>
+--apply-to current` (see below). A period covers the calendars
 switched on in HEY, the same set
 the app draws, so `day` and `week` take no `--calendar` — only `--limit`
 and `--all`. With no date they read the account's own today, whatever zone the machine
@@ -481,8 +484,7 @@ email, reminders and circle, taking them from the day itself where HEY has alrea
 that day out on its own. Styled `day` and `week` tables that contain occurrences print
 `Series ID`, `Occurrence ID` and `Recording ID` columns beside `ID`. A day like that
 lists its own event ID in `id` and `recording_id`, with the series in `parent_id`; `hey
-event edit <id>` changes that day alone; `hey event delete <id>` discards the day's own
-changes and the series' occurrence shows again. The series id is what `--occurrence` takes
+event edit <id>` acts on that day alone. The series id is what `--occurrence` takes
 beside its `occurrence_id`. A countdown owned by the day is read back and sent again. An
 inherited series countdown is left inherited by a `current` edit, while a `future` edit
 reads it from the day the series began and copies it to the replacement series. It
@@ -506,6 +508,29 @@ One thing no edit can keep, whole event or one day: an attached email you cannot
 left out of what HEY serves, indistinguishable from none, and HEY clears the attachment
 whether the write sends an empty entry id or no entry id at all. Editing such an event
 detaches the email; only HEY can change that.
+
+`hey event delete <id>` deletes the whole event, a repeating series included, and an event
+on a shared calendar is deleted for everybody on it. One day of a series is deleted the
+way it is edited: `--occurrence` takes the `occurrence_id` that `hey event day` and `hey
+event week` serve, naming the series the positional id names, and `--apply-to` is required
+with it. `current` deletes that day alone, and HEY keeps the rest of the series by writing
+the day into its exceptions. `future` deletes that day and every one after it, stopping the
+series the day before — from the series' first day, that is the whole series. A day HEY has
+written out on its own is deleted the same way as one it has not.
+
+What does not delete such a day is its own ID. HEY deletes that recording and nothing else:
+the day is not written into the series' exceptions, so HEY draws it again from the series,
+and the delete would report success having undone the day's edit. So `hey event delete
+<id>` reads the event first — over every calendar, a year either side of today — and
+refuses a written-out day with a usage error naming the `--occurrence` command that
+deletes it. An ID that read does not find is deleted as before.
+
+A `future` delete from a written-out day is refused where its boundary cannot be trusted,
+for the reason a `future` edit is: HEY stops the series at the day's occurrence date but
+cancels the written-out days from the day's actual start. A day moved off its series time,
+or any written-out day of an opaque custom schedule, is refused; delete that day alone with
+`current`, then delete from the next day with `future`. HEY answers not-found both for a
+date that is not a day of the series and for a series you cannot delete from.
 
 ### Todos
 
