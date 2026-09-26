@@ -413,8 +413,8 @@ hey event delete 4821
 ```
 
 Without `--calendar`, `hey event list` reads every calendar and `hey event add` files on
-the first calendar you own that is neither personal nor subscribed, in `hey calendar list`
-order — which is often "Maybe" rather than the calendar you mean, so pass `--calendar`.
+the calendar HEY uses by default: the first ordinary calendar you own that is not a
+subscription — never Maybe or the personal calendar.
 The list follows every page HEY serves. Within each calendar HEY orders recordings by
 newest start time, not creation time, so use the ID returned by `hey event add` for a follow-up
 edit or delete rather than choosing an event by its position in the list. A repeating event
