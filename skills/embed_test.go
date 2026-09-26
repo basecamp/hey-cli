@@ -73,7 +73,7 @@ func TestHeySkillAddsToAContactNoteWithoutLosingIt(t *testing.T) {
 
 	for _, want := range []string{
 		"note_markdown_lossless",
-		"note=$(hey contact note show 12345 --jq '.data.note_markdown') &&",
+		"--jq 'if .data.note_markdown_lossless then .data.note_markdown else error(",
 		"note=$(hey contact note show 12345 --jq '.data.note_html') &&",
 		`hey contact note set 12345 --note-html "$note`,
 		"a failed read must not go on to write",

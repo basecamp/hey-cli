@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -17,6 +19,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
+	"github.com/basecamp/hey-cli/skills"
 )
 
 // A note as HEY's web editor saves it, and as HEY answers it: to_plain_text drops the
@@ -414,4 +417,65 @@ func TestContactNoteReadFailuresAreReported(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The skill's recipe for adding to a note reads note_markdown through a --jq filter that
+// checks note_markdown_lossless itself, and writes only if that read succeeds. This runs
+// the recipe's own filter against a note Markdown cannot carry and against one it can.
+func TestSkillNoteRecipeWritesOnlyALosslessNote(t *testing.T) {
+	skill, err := skills.FS.ReadFile("hey/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, write := skillNoteRecipe(t, string(skill))
+	filter := regexp.MustCompile(`--jq '([^']*)'`).FindStringSubmatch(read)
+	if filter == nil || !strings.HasSuffix(strings.TrimSpace(read), "&&") || !strings.Contains(write, "| hey contact note set 12345") {
+		t.Fatalf("recipe = %q / %q, want a --jq read, then && and a note set", read, write)
+	}
+
+	server, notes := newNoteServer(t, attachedNoteStored, "Signed contract:")
+	if out, err := runContactsRaw(t, server, "note", "show", "7", "--jq", filter[1]); err == nil || out != "" {
+		t.Errorf("recipe read of a note with an attachment = %q, %v; want a failure and nothing to write", out, err)
+	}
+	if _, writes := notes.snapshot(); len(writes) != 0 {
+		t.Errorf("writes = %q, want none", writes)
+	}
+
+	server, _ = newNoteServer(t, webEditedNoteStored, webEditedNotePlain)
+	out, err := runContactsRaw(t, server, "note", "show", "7", "--jq", filter[1])
+	if err != nil || strings.TrimSpace(out) != "**Anniversary:** June 12\n\n- Prefers texts after six" {
+		t.Errorf("recipe read of a lossless note = %q, %v; want its Markdown", out, err)
+	}
+}
+
+// skillNoteRecipe finds the recipe's two lines: the read, and the write after it.
+func skillNoteRecipe(t *testing.T, skill string) (read, write string) {
+	t.Helper()
+	lines := strings.Split(skill, "\n")
+	for i, line := range lines {
+		if strings.Contains(line, "note_markdown_lossless then") && i+1 < len(lines) {
+			return line, lines[i+1]
+		}
+	}
+	t.Fatal("the skill has no note_markdown recipe that checks note_markdown_lossless")
+	return "", ""
+}
+
+func runContactsRaw(t *testing.T, server *httptest.Server, args ...string) (string, error) {
+	t.Helper()
+	t.Setenv("HEY_TOKEN", "test-token")
+	t.Setenv("HEY_NO_KEYRING", "1")
+	t.Setenv("HEY_BASE_URL", "")
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	t.Setenv("XDG_STATE_HOME", tmpDir)
+	t.Setenv("XDG_CACHE_HOME", tmpDir)
+
+	root := newRootCmd()
+	var stdout, stderr bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetErr(&stderr)
+	root.SetArgs(append([]string{"contact", "--base-url", server.URL}, args...))
+	err := root.Execute()
+	return stdout.String(), err
 }
