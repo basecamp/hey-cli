@@ -373,6 +373,57 @@ const (
 	allDayEventJSON   = `{"id":4821,"title":"Dentist appointment","all_day":true,"starts_at":"2026-10-14T00:00:00Z","ends_at":"2026-10-14T00:00:00Z"}`
 )
 
+// A start and an end in zones of their own each keep theirs. A flight leaves New York and
+// lands in London; and where only one end was given a zone, HEY serves the other as Etc/UTC
+// — the zone its JSON reads in — rather than leaving it out, so there is never a zoned end
+// beside a missing one to fill in. A title-only edit sends each end back in its own zone.
+func TestEventsEditKeepsEachEndsOwnZone(t *testing.T) {
+	tests := []struct {
+		name                       string
+		event                      string
+		startTime, endsAt, endTime string
+		startZone, endZone         string
+	}{
+		{
+			name: "flight",
+			event: `{"id":4821,"title":"Flight to London","starts_at":"2026-10-14T22:00:00Z","ends_at":"2026-10-15T05:00:00Z",` +
+				`"starts_at_time_zone":"America/New_York","ends_at_time_zone":"Europe/London"}`,
+			startTime: "18:00", endsAt: "2026-10-15", endTime: "06:00",
+			startZone: "America/New_York", endZone: "Europe/London",
+		},
+		{
+			name: "one end zoned",
+			event: `{"id":4821,"title":"Dentist appointment","starts_at":"2026-10-14T14:00:00Z","ends_at":"2026-10-14T15:00:00Z",` +
+				`"starts_at_time_zone":"America/New_York","ends_at_time_zone":"Etc/UTC"}`,
+			startTime: "10:00", endsAt: "2026-10-14", endTime: "15:00",
+			startZone: "America/New_York", endZone: "Etc/UTC",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requests := runZoneEdit(t, zoneFixture{accountZone: "Asia/Tokyo", event: tt.event}, "--title", "Renamed")
+			form := requests.written(t)
+			want := map[string]string{
+				"calendar_event[set_time_zone]":            "1",
+				"calendar_event[starts_at]":                "2026-10-14",
+				"calendar_event[starts_at_time]":           tt.startTime + ":00",
+				"calendar_event[starts_at_time_zone_name]": tt.startZone,
+				"calendar_event[ends_at]":                  tt.endsAt,
+				"calendar_event[ends_at_time]":             tt.endTime + ":00",
+				"calendar_event[ends_at_time_zone_name]":   tt.endZone,
+			}
+			for field, value := range want {
+				if got := form.Get(field); got != value {
+					t.Errorf("%s = %q, want %q", field, got, value)
+				}
+			}
+			if got := requests.identity.Load(); got != 0 {
+				t.Errorf("identity reads = %d, want none", got)
+			}
+		})
+	}
+}
+
 // A zoned event keeps its zone, for the time typed and for the one kept, and asks the
 // account nothing.
 func TestEventsEditZonedEventKeepsItsZone(t *testing.T) {
