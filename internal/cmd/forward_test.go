@@ -92,10 +92,10 @@ func TestForwardSendsLatestEntryDraft(t *testing.T) {
 		t.Fatalf("forward failed: %v", err)
 	}
 
-	// The identity is read once: the thread's account is checked against the same answer.
 	wantRequests := []string{
 		"GET /identity.json",
 		"GET /topics/7.json",
+		"GET /identity.json",
 		"GET /entries/12/forwards/new.json",
 		"POST /messages.json",
 	}

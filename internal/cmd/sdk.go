@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,7 +11,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -101,7 +99,6 @@ func initSDK(authMgr *auth.Manager, baseURL string) {
 
 	sdkStats = &statsHooks{}
 	opts = append(opts, hey.WithHooks(sdkStats))
-	opts = append(opts, hey.WithTransport(&identityOnce{inner: sdkTransport()}))
 
 	sdkClientCfg = sdkCfg
 	sdkClientOpts = opts
@@ -130,84 +127,6 @@ func clearHTTPCache(errOut io.Writer) {
 	if err := hey.NewCache(dir).Clear(); err != nil {
 		fmt.Fprintf(errOut, "warning: could not clear cached responses in %s: %v\n", dir, err)
 	}
-}
-
-// sdkTransport is the transport the SDK builds for itself when it is given none.
-func sdkTransport() http.RoundTripper {
-	defaults, ok := http.DefaultTransport.(*http.Transport)
-	if !ok {
-		return http.DefaultTransport
-	}
-	transport := defaults.Clone()
-	transport.MaxIdleConns = 100
-	transport.MaxIdleConnsPerHost = 10
-	transport.IdleConnTimeout = 90 * time.Second
-	return transport
-}
-
-// identityOnce answers a command's identity reads from the first one. The SDK reads the
-// identity to validate --account before a command runs, and a command that needs something
-// from it — an event's time zone — reads it again; the second would ask HEY for what it
-// just answered. Only an identical request is answered this way, credentials and
-// revalidation headers included, so a sign-in in the middle of a command reads afresh, and
-// any write forgets the answer in case it changed the identity.
-type identityOnce struct {
-	inner http.RoundTripper
-
-	mu     sync.Mutex
-	key    string
-	answer *http.Response
-	body   []byte
-}
-
-// identityOnceLimit is the largest identity answer kept. HEY's is a few kilobytes.
-const identityOnceLimit = 1 << 20
-
-func (t *identityOnce) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req.Method != http.MethodGet || req.URL.Path != "/identity.json" {
-		if req.Method != http.MethodGet && req.Method != http.MethodHead {
-			t.forget()
-		}
-		return t.inner.RoundTrip(req)
-	}
-
-	key := strings.Join([]string{req.URL.String(), req.Header.Get("Authorization"), req.Header.Get("Cookie"), req.Header.Get("If-None-Match")}, "\x00")
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.answer != nil && t.key == key {
-		return t.replay(req), nil
-	}
-
-	resp, err := t.inner.RoundTrip(req)
-	if err != nil || (resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotModified) {
-		return resp, err
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, identityOnceLimit+1))
-	if err != nil || len(body) > identityOnceLimit {
-		resp.Body = struct {
-			io.Reader
-			io.Closer
-		}{io.MultiReader(bytes.NewReader(body), resp.Body), resp.Body}
-		return resp, nil
-	}
-	_ = resp.Body.Close()
-	t.key, t.answer, t.body = key, resp, body
-	return t.replay(req), nil
-}
-
-func (t *identityOnce) replay(req *http.Request) *http.Response {
-	resp := *t.answer
-	resp.Header = t.answer.Header.Clone()
-	resp.Body = io.NopCloser(bytes.NewReader(t.body))
-	resp.ContentLength = int64(len(t.body))
-	resp.Request = req
-	return &resp
-}
-
-func (t *identityOnce) forget() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.key, t.answer, t.body = "", nil, nil
 }
 
 // newSDKClient builds another client sharing the CLI's configuration — auth,

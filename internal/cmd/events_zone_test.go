@@ -719,39 +719,51 @@ func TestEventsEditOccurrenceRefusesToMoveADayOutOfTheRepeatedHour(t *testing.T)
 	}
 }
 
-// --account has the SDK read the identity before the command runs, to check the account is
-// one the identity has. The account's zone comes from that same answer: a timed add reads
-// the identity once, not twice.
-func TestEventsAddWithAnAccountReadsTheIdentityOnce(t *testing.T) {
-	var identityReads, writes atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/identity.json":
-			identityReads.Add(1)
-			_, _ = io.WriteString(w, `{"id":1,"time_zone":"America/New_York",`+
-				`"accounts":[{"id":1,"name":"Personal","purpose":"home","status":"active"},{"id":2,"name":"Work","purpose":"work","status":"active"}],`+
-				`"all_users":[{"id":22,"account_id":2}],"senders":[{"id":222,"account_id":2,"default":true}]}`)
-		case r.Method == http.MethodPost && r.URL.Path == "/calendar/events.json":
-			writes.Add(1)
-			wantSchedule(t, eventForm(t, r), "2026-10-14", "10:00", "2026-10-14", "11:00", "America/New_York")
-			w.WriteHeader(http.StatusCreated)
-			_, _ = io.WriteString(w, `{"id":4821,"title":"Dentist appointment"}`)
-		default:
-			t.Errorf("unexpected request = %s %s", r.Method, r.URL)
-			http.NotFound(w, r)
-		}
-	}))
-	t.Cleanup(server.Close)
+// The event command reads the identity once for the account's zone. --account adds a read
+// of its own before the command runs, the SDK's check that the account is one the identity
+// has, so a timed add reads it twice with --account and once without.
+func TestEventsAddReadsTheIdentityOnceItself(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		args []string
+		want int32
+	}{
+		{name: "without --account", want: 1},
+		{name: "with --account", args: []string{"--account", "2"}, want: 2},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var identityReads, writes atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/identity.json":
+					identityReads.Add(1)
+					_, _ = io.WriteString(w, `{"id":1,"time_zone":"America/New_York",`+
+						`"accounts":[{"id":1,"name":"Personal","purpose":"home","status":"active"},{"id":2,"name":"Work","purpose":"work","status":"active"}],`+
+						`"all_users":[{"id":22,"account_id":2}],"senders":[{"id":222,"account_id":2,"default":true}]}`)
+				case r.Method == http.MethodPost && r.URL.Path == "/calendar/events.json":
+					writes.Add(1)
+					wantSchedule(t, eventForm(t, r), "2026-10-14", "10:00", "2026-10-14", "11:00", "America/New_York")
+					w.WriteHeader(http.StatusCreated)
+					_, _ = io.WriteString(w, `{"id":4821,"title":"Dentist appointment"}`)
+				default:
+					t.Errorf("unexpected request = %s %s", r.Method, r.URL)
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(server.Close)
 
-	if _, err := runAccountsCLI(t, server, "--account", "2", "event", "add", "Dentist appointment", "--calendar", "9",
-		"--starts-on", "2026-10-14", "--start-time", "10:00"); err != nil {
-		t.Fatalf("execute event add: %v", err)
-	}
-	if got := identityReads.Load(); got != 1 {
-		t.Errorf("identity reads = %d, want one", got)
-	}
-	if got := writes.Load(); got != 1 {
-		t.Errorf("writes = %d, want one", got)
+			args := append(append([]string{}, tt.args...), "event", "add", "Dentist appointment", "--calendar", "9",
+				"--starts-on", "2026-10-14", "--start-time", "10:00")
+			if _, err := runAccountsCLI(t, server, args...); err != nil {
+				t.Fatalf("execute event add: %v", err)
+			}
+			if got := identityReads.Load(); got != tt.want {
+				t.Errorf("identity reads = %d, want %d", got, tt.want)
+			}
+			if got := writes.Load(); got != 1 {
+				t.Errorf("writes = %d, want one", got)
+			}
+		})
 	}
 }
