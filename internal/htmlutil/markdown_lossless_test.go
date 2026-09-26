@@ -57,6 +57,14 @@ func TestMarkdownIsLossless(t *testing.T) {
 		{name: "a break after bold text", html: `<div><strong>Call</strong><br>after six</div>`, want: true},
 		{name: "a break ending a block", html: `<div>Call after six<br></div><div>Prefers texts</div>`, want: true},
 		{name: "a break in a heading", html: `<h1>Acme<br>Corporation</h1>`, want: false},
+		{name: "a soft hyphen", html: `<p>Q3&#173; planning</p>`, want: false},
+		{name: "a zero width space", html: `<p>Jane&#8203;Doe</p>`, want: false},
+		{name: "a control character", html: "<p>Invoice\x1b[31m overdue</p>", want: false},
+		{name: "an emoji family", html: "<p>Family \U0001F468\u200D\U0001F469\u200D\U0001F467 dinner on Sunday</p>", want: true},
+		{name: "a non-breaking space between words", html: `<p>June&nbsp;12</p>`, want: true},
+		{name: "spaces held apart by non-breaking spaces", html: `<p>Total:&nbsp;&nbsp; $4,200</p>`, want: false},
+		{name: "a control character in code", html: "<pre>quote\x1b #4821</pre>", want: false},
+		{name: "a tab in a code block", html: "<pre>quote\t#4821</pre>", want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

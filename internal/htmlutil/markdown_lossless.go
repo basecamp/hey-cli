@@ -2,9 +2,12 @@ package htmlutil
 
 import (
 	"strings"
+	"unicode"
 
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
+
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 // markdownElements are the elements ToMarkdown writes as Markdown that FromMarkdown
@@ -62,11 +65,16 @@ func MarkdownIsLossless(s string) bool {
 		v := pending[len(pending)-1]
 		pending = pending[:len(pending)-1]
 		n, ctx := v.node, v.context
-		if n.Type == html.ElementNode {
+		switch n.Type { //nolint:exhaustive // only text and element nodes carry content
+		case html.ElementNode:
 			if !elementKeptByMarkdown(n, ctx) {
 				return false
 			}
 			ctx = ctx.inside(n)
+		case html.TextNode:
+			if !textKeptByMarkdown(n.Data, ctx) {
+				return false
+			}
 		}
 		for child := n.FirstChild; child != nil; child = child.NextSibling {
 			pending = append(pending, visit{node: child, context: ctx})
@@ -118,6 +126,37 @@ func elementKeptByMarkdown(n *html.Node, ctx losslessContext) bool {
 		return !ctx.inHeading && breaksKeptByMarkdown(n, ctx.inListItem)
 	}
 	return true
+}
+
+// textKeptByMarkdown reports whether ToMarkdown writes text as it stands. Code keeps
+// everything but control characters. Prose goes through terminal.Sanitize, which drops
+// what draws nothing — a soft hyphen, a zero width space, a control — and has its
+// whitespace folded, which only matters where a non-breaking space makes a run of
+// spaces show.
+func textKeptByMarkdown(text string, ctx losslessContext) bool {
+	if ctx.inCodeBlock || ctx.inCode {
+		return stripControls(text) == text
+	}
+	return terminal.Sanitize(text) == text && !hasVisibleSpaceRun(text)
+}
+
+// hasVisibleSpaceRun reports two or more whitespace characters in a row with a
+// non-breaking space among them: HTML shows that run as it is, and ToMarkdown folds it
+// to one space.
+func hasVisibleSpaceRun(text string) bool {
+	run, nonBreaking := 0, false
+	for _, r := range text {
+		if !unicode.IsSpace(r) {
+			run, nonBreaking = 0, false
+			continue
+		}
+		run++
+		nonBreaking = nonBreaking || r == ' '
+		if run > 1 && nonBreaking {
+			return true
+		}
+	}
+	return false
 }
 
 // keptByMarkdown reports whether an element and its attributes survive a trip through
