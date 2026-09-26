@@ -29,6 +29,8 @@ field AppUrl
 field UndoSendUrl
 field Purpose
 field Status
+field zoneMatches
+field zone
 
 sanitizer terminal.Sanitize
 sanitizer terminal.SanitizeLine
