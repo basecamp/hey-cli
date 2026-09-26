@@ -36,6 +36,67 @@ func TestWallClockPlacesAClockTimeAsHEYDoes(t *testing.T) {
 			if got := WallClock(day, clock, loc).UTC().Format(time.RFC3339); got != tt.want {
 				t.Errorf("WallClock(%s %s) = %s, want %s", tt.day, tt.clock, got, tt.want)
 			}
+			if got, ok := Placed(tt.day, tt.clock, loc); !ok || got.UTC().Format(time.RFC3339) != tt.want {
+				t.Errorf("Placed(%s %s) = %s, want %s", tt.day, tt.clock, got.UTC(), tt.want)
+			}
 		})
+	}
+}
+
+// With no zone, HEY reads the clock as UTC; a date or a time that does not parse places
+// nothing.
+func TestPlacedWithoutAZoneIsUTC(t *testing.T) {
+	if got, ok := Placed("2026-11-01", "06:30", nil); !ok || !got.Equal(time.Date(2026, 11, 1, 6, 30, 0, 0, time.UTC)) {
+		t.Errorf("Placed = %s, want 06:30 UTC", got)
+	}
+	if _, ok := Placed("1 November", "06:30", nil); ok {
+		t.Error("Placed read a date that does not parse")
+	}
+	if _, ok := Placed("2026-11-01", "half six", nil); ok {
+		t.Error("Placed read a time that does not parse")
+	}
+}
+
+// An instant can be sent as a clock time only when HEY places that clock back on it. These
+// are checked against Time.zone.parse(clock).change(zone:) with Time.zone UTC.
+func TestRepresentable(t *testing.T) {
+	newYork, _ := time.LoadLocation("America/New_York")
+	lordHowe, _ := time.LoadLocation("Australia/Lord_Howe")
+	for _, tt := range []struct {
+		name string
+		at   time.Time
+		loc  *time.Location
+		want bool
+	}{
+		// 2026-11-01 01:30 America/New_York => 2026-11-01 05:30:00 UTC
+		{"the first 01:30 in New York", time.Date(2026, 11, 1, 5, 30, 0, 0, time.UTC), newYork, true},
+		{"the second 01:30 in New York", time.Date(2026, 11, 1, 6, 30, 0, 0, time.UTC), newYork, false},
+		// 2026-04-05 01:30 Australia/Lord_Howe => 2026-04-04 14:30:00 UTC
+		{"the first 01:30 at Lord Howe", time.Date(2026, 4, 4, 14, 30, 0, 0, time.UTC), lordHowe, true},
+		{"the second 01:30 at Lord Howe", time.Date(2026, 4, 4, 15, 0, 0, 0, time.UTC), lordHowe, false},
+		{"a time with seconds", time.Date(2026, 6, 10, 14, 0, 30, 0, time.UTC), newYork, false},
+		{"an ordinary time", time.Date(2026, 6, 10, 14, 0, 0, 0, time.UTC), newYork, true},
+		{"UTC", time.Date(2026, 11, 1, 6, 30, 0, 0, time.UTC), time.UTC, true},
+	} {
+		if got := Representable(tt.at, tt.loc); got != tt.want {
+			t.Errorf("%s: Representable = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestMovedBy(t *testing.T) {
+	at := time.Date(2026, 11, 1, 6, 30, 0, 0, time.UTC)
+	for _, tt := range []struct {
+		sent time.Time
+		want string
+	}{
+		{at.Add(-time.Hour), "an hour earlier"},
+		{at.Add(2 * time.Hour), "2 hours later"},
+		{at.Add(-30 * time.Minute), "30 minutes earlier"},
+		{at.Add(30 * time.Second), "30 seconds later"},
+	} {
+		if got := MovedBy(at, tt.sent); got != tt.want {
+			t.Errorf("MovedBy(%s) = %q, want %q", tt.sent.Sub(at), got, tt.want)
+		}
 	}
 }

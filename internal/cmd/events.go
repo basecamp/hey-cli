@@ -965,36 +965,13 @@ func keepsItsMoment(end string, had time.Time, date, clock string, zone clockZon
 	if !had.Equal(had.Truncate(time.Minute)) {
 		return apierr.ErrUsageHint(
 			fmt.Sprintf("the event's %s is at %s %s, and HEY is only sent whole minutes, so the edit would move it %s",
-				end, had.In(zone.loc).Format(time.DateTime+".999999999"), zone.label(), movedBy(had, sent)),
+				end, had.In(zone.loc).Format(time.DateTime+".999999999"), zone.label(), timezone.MovedBy(had, sent)),
 			hint)
 	}
 	return apierr.ErrUsageHint(
 		fmt.Sprintf("the event's %s, %s %s %s, falls in the hour the clocks repeat as they go back, and HEY would place that clock time at its other moment, so the edit would move it %s",
-			end, date, clock, zone.label(), movedBy(had, sent)),
+			end, date, clock, zone.label(), timezone.MovedBy(had, sent)),
 		hint+", or choose a time outside that hour")
-}
-
-// movedBy says how far and which way an end would move, from had to sent.
-func movedBy(had, sent time.Time) string {
-	moved, way := sent.Sub(had), "later"
-	if moved < 0 {
-		moved, way = -moved, "earlier"
-	}
-	switch {
-	case moved == time.Hour:
-		return "an hour " + way
-	case moved%time.Hour == 0:
-		return fmt.Sprintf("%d hours %s", moved/time.Hour, way)
-	case moved%time.Minute == 0:
-		return fmt.Sprintf("%d minutes %s", moved/time.Minute, way)
-	case moved < time.Millisecond:
-		return "less than a millisecond " + way
-	case moved < time.Second:
-		return fmt.Sprintf("%s milliseconds %s", strconv.FormatFloat(float64(moved)/float64(time.Millisecond), 'f', -1, 64), way)
-	case moved < time.Minute:
-		return fmt.Sprintf("%s seconds %s", strconv.FormatFloat(moved.Seconds(), 'f', -1, 64), way)
-	}
-	return moved.String() + " " + way
 }
 
 // clockZone is the zone one end of an edited event is read and written in. An end with no
@@ -1007,12 +984,12 @@ type clockZone struct {
 // instant is when a date and clock time sent in this zone happen: placed as HEY places them
 // for a named zone, and as UTC for a zoneless end, which is sent that way.
 func (z clockZone) instant(date, clock string) time.Time {
-	day, _ := time.Parse(dateLayout, date)
-	at, _ := time.Parse(clockLayout, clock)
+	loc := z.loc
 	if z.name == "" {
-		return time.Date(day.Year(), day.Month(), day.Day(), at.Hour(), at.Minute(), 0, 0, time.UTC)
+		loc = nil
 	}
-	return timezone.WallClock(day, at, z.loc)
+	at, _ := timezone.Placed(date, clock, loc)
+	return at
 }
 
 // label is the zone as a refusal names it.
@@ -1147,7 +1124,7 @@ func defaultEnd(startsOn, startTime, endsOn string, loc *time.Location) (string,
 	if placed := timezone.WallClock(end, end, loc); !placed.Equal(end) {
 		return "", "", apierr.ErrUsageHint(
 			fmt.Sprintf("an hour after it starts, the event would end at %s %s %s, a clock time the clocks show twice as they go back, and HEY would place it %s",
-				endsOn, endTime, terminal.SanitizeLine(loc.String()), movedBy(end, placed)),
+				endsOn, endTime, terminal.SanitizeLine(loc.String()), timezone.MovedBy(end, placed)),
 			"pass --end-time to say when it ends")
 	}
 	return endsOn, endTime, nil

@@ -1,7 +1,9 @@
 package timezone
 
 import (
+	"fmt"
 	"slices"
+	"strconv"
 	"time"
 )
 
@@ -23,6 +25,52 @@ func WallClock(day, wall time.Time, loc *time.Location) time.Time {
 		local = local.Add(time.Hour)
 	}
 	return time.Date(day.Year(), day.Month(), day.Day(), hour, minute, second, 0, loc)
+}
+
+// Placed is the instant HEY stores for a date and a clock time sent with a zone: placed in
+// that zone by WallClock, or read as UTC when no zone is sent, since HEY answers a JSON
+// request in UTC. It answers false for a date or a time that does not parse.
+func Placed(date, clock string, loc *time.Location) (time.Time, bool) {
+	day, dayErr := time.Parse("2006-01-02", date)
+	at, clockErr := time.Parse("15:04", clock)
+	if dayErr != nil || clockErr != nil {
+		return time.Time{}, false
+	}
+	if loc == nil {
+		return time.Date(day.Year(), day.Month(), day.Day(), at.Hour(), at.Minute(), 0, 0, time.UTC), true
+	}
+	return WallClock(day, at, loc), true
+}
+
+// Representable is whether an instant can be sent to HEY as a clock time in loc and come
+// back as itself: false for the second of two moments a clock time names as the clocks go
+// back, when HEY takes the first, and for an instant between whole minutes.
+func Representable(at time.Time, loc *time.Location) bool {
+	on := at.In(loc)
+	return at.Equal(at.Truncate(time.Minute)) && WallClock(on, on, loc).Equal(at)
+}
+
+// MovedBy says how far and which way an instant would move, from had to sent.
+func MovedBy(had, sent time.Time) string {
+	moved, way := sent.Sub(had), "later"
+	if moved < 0 {
+		moved, way = -moved, "earlier"
+	}
+	switch {
+	case moved == time.Hour:
+		return "an hour " + way
+	case moved%time.Hour == 0:
+		return fmt.Sprintf("%d hours %s", moved/time.Hour, way)
+	case moved%time.Minute == 0:
+		return fmt.Sprintf("%d minutes %s", moved/time.Minute, way)
+	case moved < time.Millisecond:
+		return "less than a millisecond " + way
+	case moved < time.Second:
+		return fmt.Sprintf("%s milliseconds %s", strconv.FormatFloat(float64(moved)/float64(time.Millisecond), 'f', -1, 64), way)
+	case moved < time.Minute:
+		return fmt.Sprintf("%s seconds %s", strconv.FormatFloat(moved.Seconds(), 'f', -1, 64), way)
+	}
+	return moved.String() + " " + way
 }
 
 // localClock is the clock time an instant reads as, held as the same figures in UTC so it
