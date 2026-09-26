@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -16,9 +17,10 @@ import (
 const maxContactPages = 100
 
 type contactsListCommand struct {
-	cmd  *cobra.Command
-	page int
-	all  bool
+	cmd   *cobra.Command
+	page  int
+	all   bool
+	query string
 }
 
 func newContactsListCommand() *contactsListCommand {
@@ -27,16 +29,28 @@ func newContactsListCommand() *contactsListCommand {
 		Use:   "list",
 		Short: "List contacts",
 		Annotations: map[string]string{
-			"agent_notes": "Returns contact IDs, names, and email addresses. Use --all to fetch up to 100 pages.",
+			"agent_notes": "Returns contact IDs, names, and email addresses. Use --all to fetch up to 100 pages. " +
+				"--query narrows the list by name, email address, initials or private note text. " +
+				"If HEY does not support the query yet, it ignores it and lists every contact, so filter the results on the field you need as well.",
 		},
+		Long: `List contacts: the non-HEY senders you have screened in. Other HEY users, senders still
+in or denied by The Screener, aliases and hidden contacts are left out.
+
+--query narrows the list to contacts whose name or email address matches the text, whole or
+by the start of any word in it (a domain works too), or whose initials or private note match
+it. If HEY does not support the query yet, it ignores it and lists every contact, so filter
+the results on the field you need as well — as the email example below does.`,
 		Example: `  hey contact list
   hey contact list --page 2 --json
-  hey contact list --all --json`,
+  hey contact list --all --json
+  hey contact list --query "Jane Doe" --json
+  hey contact list --query jane@example.com --all --jq '.data[] | select(.email_address == "jane@example.com") | .id'`,
 		RunE: listCommand.run,
 		Args: cobra.NoArgs,
 	}
 	listCommand.cmd.Flags().IntVar(&listCommand.page, "page", 1, "Results page")
 	listCommand.cmd.Flags().BoolVar(&listCommand.all, "all", false, "Fetch up to 100 results pages from --page onward")
+	listCommand.cmd.Flags().StringVar(&listCommand.query, "query", "", "Only contacts matching this name, email address, initials or note text")
 	return listCommand
 }
 
@@ -48,11 +62,11 @@ func (c *contactsListCommand) run(cmd *cobra.Command, _ []string) error {
 		return apierr.ErrUsage("--page must be at least 1")
 	}
 
-	first, err := readContactsPage(cmd.Context(), strconv.Itoa(c.page))
+	first, err := c.readPage(cmd.Context(), strconv.Itoa(c.page))
 	if err != nil {
 		return err
 	}
-	collected, err := collectPages(cmd.Context(), first, pageRequest{All: c.all, MaxPages: maxContactPages}, readContactsPage)
+	collected, err := collectPages(cmd.Context(), first, pageRequest{All: c.all, MaxPages: maxContactPages}, c.readPage)
 	if err != nil {
 		return err
 	}
@@ -96,13 +110,17 @@ func (c *contactsListCommand) run(cmd *cobra.Command, _ []string) error {
 	)
 }
 
-func readContactsPage(ctx context.Context, cursor string) (pageResult[generated.Contact], error) {
+func (c *contactsListCommand) readPage(ctx context.Context, cursor string) (pageResult[generated.Contact], error) {
 	page, err := strconv.Atoi(cursor)
 	if err != nil {
 		return pageResult[generated.Contact]{}, fmt.Errorf("unreadable contacts page %q: %w", cursor, err)
 	}
 
-	result, err := sdk.Contacts().List(ctx, &generated.ListContactsParams{Page: &cursor})
+	params := &generated.ListContactsParams{Page: &cursor}
+	if query := strings.TrimSpace(c.query); query != "" {
+		params.Q = &query
+	}
+	result, err := sdk.Contacts().List(ctx, params)
 	if err != nil {
 		return pageResult[generated.Contact]{}, apierr.FromSDK(err)
 	}

@@ -195,7 +195,7 @@ postings, not the box, label or contact around them.
 | Search email | `hey search "quarterly planning" --json` |
 | List search filters | `hey search filters --json` |
 | List contacts | `hey contact list --json` |
-| Find a screened-in contact by email | `hey contact list --all --jq '.data[] \| select(.email_address == "jane@example.com") \| .id'` (see Contacts for what it misses) |
+| Find a screened-in contact by email | `hey contact list --query jane@example.com --all --jq '.data[] \| select(.email_address == "jane@example.com") \| .id'` (see Contacts for what it misses) |
 | View contact without its threads | `hey contact show <contact_id> --jq '.data \| del(.postings)'` |
 | List every thread with a contact | `hey contact threads <contact_id> --json` |
 | Add contact | `hey contact add --name "Jane Doe" --email jane@example.com` |
@@ -296,7 +296,7 @@ Want to read email?
 ├── Search threads and messages? → hey search <query> --json
 ├── Need available refinements? → hey search filters --json
 ├── List or view contacts? → hey contact list --json / hey contact show <contact_id> --json
-├── Find a contact by email? → hey contact list --all --jq (see Contacts)
+├── Find a contact by email? → hey contact list --query <email> --all --jq (see Contacts)
 ├── Every thread with a contact? → hey contact threads <contact_id> --json
 ├── A row with kind "bundle"? → hey bundle view <box_item_id> --json (its unseen threads)
 ├── Read full thread? → hey thread read <topic_id> --json
@@ -456,7 +456,7 @@ Search refinements are `--required`, `--any`, `--none`, `--exact`, `--from`, `--
 ```bash
 hey contact list --json                       # List contacts
 hey contact list --page 2 --json              # List another page
-hey contact list --all --jq '.data[] | select(.email_address == "jane@example.com") | .id'  # Find a screened-in contact by email
+hey contact list --query jane@example.com --all --jq '.data[] | select(.email_address == "jane@example.com") | .id'  # Find a screened-in contact by email
 hey contact show 12345 --jq '.data | del(.postings)'  # Details, aliases, and private note, without its threads
 hey contact threads 12345 --all --json        # Every thread with the contact, seen and unseen
 hey contact add --name "Jane Doe" --email jane@example.com
@@ -474,7 +474,7 @@ hey contact note set 12345 --note-html "<p><strong>Prefers email</strong></p>"
 hey contact note delete 12345
 ```
 
-`hey contact list` returns each contact's ID, name, primary email address and update timestamp. It lists only non-HEY senders you have screened in: other HEY users, senders still in (or denied by) The Screener, aliases and hidden contacts are left out, so an address missing there does not mean HEY has no contact for it. It has no search: to find a contact by email, read every page with `--all` (up to 100 pages; the notice names the `--page` to continue from) and filter with `--jq` as above. That matches primary addresses only — a contact's aliases are on `hey contact show`.
+`hey contact list` returns each contact's ID, name, primary email address and update timestamp. It lists only non-HEY senders you have screened in: other HEY users, senders still in (or denied by) The Screener, aliases and hidden contacts are left out, so an address missing there does not mean HEY has no contact for it. `--query` narrows the list to contacts whose name or email address matches the text, whole or by the start of any word in it (a domain works too), or whose initials or private note text match it. If HEY does not support the query yet, it ignores it and lists every contact, so keep the `--jq` filter as above: it is correct either way. `--all` reads up to 100 pages (the notice names the `--page` to continue from). Filtering on `email_address` matches primary addresses only — a contact's aliases are on `hey contact show`.
 
 `hey contact show` adds aliases, screening status, the private note, and `postings`: a page of the contact's threads, which can run to tens of kilobytes. Drop it with `--jq '.data | del(.postings)'`, read just the note with `hey contact note show`, or page through every thread with `hey contact threads`. Contact updates preserve omitted fields. Supplying `--alias` replaces the complete alias list, and `--alias=` clears it.
 
