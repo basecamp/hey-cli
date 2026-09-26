@@ -953,12 +953,12 @@ func newHEYHistory(t *testing.T) *heyHistory {
 	return history
 }
 
-// land is a change arriving at HEY, whose box's cursor is now its last activity.
-func (h *heyHistory) land(boxID int64, change historyChange) {
+// land is a change arriving in the Imbox, whose cursor is now its last activity.
+func (h *heyHistory) land(change historyChange) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.changes[boxID] = append(h.changes[boxID], change)
-	h.cursors[boxID] = change.at
+	h.changes[24088] = append(h.changes[24088], change)
+	h.cursors[24088] = change.at
 }
 
 func (h *heyHistory) serve(w http.ResponseWriter, r *http.Request) {
@@ -1047,7 +1047,7 @@ func TestWatchDoesNotReportHistoryAsItStarts(t *testing.T) {
 	}
 
 	// A reply lands after the watch began: that is the change it was waiting for.
-	history.land(24088, historyChange{at: "2026-08-21T09:00:12.250000Z", id: 9003, subject: "Re: Lunch on Thursday?"})
+	history.land(historyChange{at: "2026-08-21T09:00:12.250000Z", id: 9003, subject: "Re: Lunch on Thursday?"})
 	ringBox(t, watch)
 
 	lines = watchLines(t, out)
@@ -1064,7 +1064,7 @@ func TestWatchReadsMailThatLandedBeforeItReadTheBoxes(t *testing.T) {
 	// The watch reads HEY's clock a moment before the Date header; this lands on the
 	// header's second, after the start and before the box list, so the Imbox's cursor is
 	// already past it.
-	history.land(24088, historyChange{at: "2026-08-21T09:00:05.000000Z", id: 9003, subject: "Invoice #4021"})
+	history.land(historyChange{at: "2026-08-21T09:00:05.000000Z", id: 9003, subject: "Invoice #4021"})
 	watch, out := newTestWatch(defaultChanges...)
 
 	startWatch(t, newWatchCommand(), watch)
@@ -1072,6 +1072,25 @@ func TestWatchReadsMailThatLandedBeforeItReadTheBoxes(t *testing.T) {
 	lines := watchLines(t, out)
 	if len(lines) != 2 || lines[0]["posting_id"] != float64(9003) || lines[0]["new"] != true || lines[1]["change"] != "ready" {
 		t.Errorf("wrote %v, want the mail that landed during startup, new, then ready — and no history", lines)
+	}
+}
+
+// HEY's clock is read to the whole second, so the watch cannot tell a change from the
+// Date header's own second that came before it from one that came after, and it reads
+// both: skipping one that came after would be worse than repeating one that did not.
+// Anything earlier than the second the watch read — less the request's time — is
+// behind the start and not reported.
+func TestWatchReadsTheWholeSecondHEYsClockWasReadIn(t *testing.T) {
+	history := newHEYHistory(t)
+	history.land(historyChange{at: "2026-08-21T09:00:03.990000Z", id: 9003, subject: "Invoice #4021"})
+	history.land(historyChange{at: "2026-08-21T09:00:05.200000Z", id: 9004, subject: "Re: Invoice #4021"})
+	watch, out := newTestWatch(defaultChanges...)
+
+	startWatch(t, newWatchCommand(), watch)
+
+	lines := watchLines(t, out)
+	if len(lines) != 2 || lines[0]["posting_id"] != float64(9004) || lines[0]["at"] != "2026-08-21T09:00:05.200Z" || lines[0]["new"] != true || lines[1]["change"] != "ready" {
+		t.Errorf("wrote %v, want the change from the Date header's second, with when it happened, and not the one before it", lines)
 	}
 }
 

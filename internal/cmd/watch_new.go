@@ -68,10 +68,17 @@ func (n *newMail) skippedTo(boxID int64, cursor hey.PostingChangesCursor) {
 // the request took — the local monotonic clock, which a wrong wall clock does
 // not touch — and a slow request, or one the SDK retried, only moves the start
 // earlier. Date is whole seconds, rounded down, which errs the same way: towards
-// calling mail a moment old new rather than mail a moment new old. The SDK
-// caches GETs by URL, so a query the server ignores keeps this one out of the
-// cache. The start is handed out as a cutoff: a whole millisecond, strictly
-// before the instant it stands for.
+// calling mail a moment old new rather than mail a moment new old. That is a
+// window of up to a second, plus the request's own time: a change from that
+// long before the watch began is after the start, so it is read, reported and
+// can be new, and --exit-on-first can stop on it. Nothing HEY serves says the
+// time any finer — Action Cable's pings are whole seconds too, and no JSON
+// answer carries a server "now" — and rounding the other way would skip up to
+// a second of changes that did come after the start, which is worse than
+// repeating one that did not. A reader who cares can tell from the line's at.
+// The SDK caches GETs by URL, so a query the server ignores keeps this one out
+// of the cache. The start is handed out as a cutoff: a whole millisecond,
+// strictly before the instant it stands for.
 //
 // A watch that cannot read HEY's clock does not start. The workstation's clock
 // is no stand-in: every feed starts at the start (watchStartSince) and new mail
@@ -130,8 +137,7 @@ func cutoffBefore(at time.Time) time.Time {
 // isNew says whether a posting is new mail: unseen, not muted, and active since
 // this watch last saw the thread — or since the watch began, for a thread it
 // has no record of, because anything active before that was already there: the
-// backlog a box's first read carries from the server's cursor, or a thread that
-// merely moved in. active_at moves on new mail only, not when a thread is read,
+// backlog --since reads, or a thread that merely moved in. active_at moves on new mail only, not when a thread is read,
 // muted or moved, so none of those is new and a reply on a known thread is.
 func (n *newMail) isNew(boxID int64, posting generated.Posting) bool {
 	last, known := n.activeAt[posting.Id]

@@ -716,7 +716,8 @@ stdout, one per line, instead of the usual envelope (at a terminal, one text lin
 the posting is new mail — unseen, not muted, and active since the watch last saw the thread,
 or since the watch began for a thread it has not seen; the backlog `--since` reads is
 never new, nor is reading, muting or moving a thread, and a reply on a known thread is.
-Without `--since`, nothing from before the watch began is reported at all.
+Without `--since`, nothing from before the watch began is reported, save a change from up to
+about a second before (HEY's clock is read to the whole second); its `at` says when it happened.
 `--events new` selects the new ones, alone or in a union with the other three. A deleted
 posting carries no `posting`, `thread_id` or `new`. Three more lines
 describe the watch itself: `{"change": "ready"}` once every box and calendar is caught up and the subscription

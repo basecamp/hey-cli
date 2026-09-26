@@ -691,7 +691,10 @@ that cannot read HEY's clock does not start: the workstation's clock is no stand
 cutoff every feed and new mail are measured against, since a fast one would skip changes and
 a slow one would report history. That
 is HEY's semantics and state across events, so the CLI decides it once; what to do about
-it is the reader's. A 409 skip-ahead sets that box's floor at the cursor it skipped to
+it is the reader's. The Date header is whole seconds, so the start can be up to a second
+(plus the request's time) early and a change from that window is reported; nothing HEY
+serves says the time finer — Action Cable pings are whole seconds too — and rounding the
+other way would skip changes. A 409 skip-ahead sets that box's floor at the cursor it skipped to
 (`newMail.skippedTo`): activity at or before it is never new there, known thread or not,
 because the watch never read the gap. `resync` is an event of its own — reported by default,
 left out by `--events new` — so a script for new mail never runs on one. The Omarchy bar plugin toasts from those lines itself (app-name, glyph,
