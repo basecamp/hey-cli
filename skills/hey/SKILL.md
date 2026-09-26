@@ -235,7 +235,7 @@ postings, not the box, label or contact around them.
 | List calendars | `hey calendar list --json` |
 | List calendar events | `hey event list --json` |
 | Today's schedule, recurrences expanded | `hey event day --json` |
-| Add a calendar event | `hey event add "Design review" --calendar <calendar_id> --starts-on 2026-09-02 --start-time 14:00` |
+| Add a calendar event | `hey event add "Design review" --starts-on 2026-09-02 --start-time 14:00` |
 | List todos | `hey todo list --json` |
 | Add todo | `hey todo add "Draft the quarterly report"` |
 | Complete todo | `hey todo complete 123` |
@@ -783,8 +783,8 @@ hey event list --calendar 123 --starts-on 2026-01-01 --ends-on 2026-01-31 --json
 hey event day --json                         # Today as HEY draws it, recurrences expanded
 hey event day 2026-09-02 --json              # One day
 hey event week 2026-09-02 --json             # The week that day falls in
-hey event add "Design review" --calendar 123 --starts-on 2026-09-02 --start-time 14:00 --end-time 15:00
-hey event add "Sarah's birthday" --calendar 123 --starts-on 2026-09-02   # No time given, so all day
+hey event add "Design review" --starts-on 2026-09-02 --start-time 14:00 --end-time 15:00
+hey event add "Sarah's birthday" --starts-on 2026-09-02   # No time given, so all day
 hey event add "Standup" --calendar 123 --start-time 09:15 --repeat every_weekday --remind 10m
 hey event edit 4821 --title "Design review (moved)"
 hey event edit 4821 --occurrence 4821_2026-09-15 --apply-to current --start-time 15:00 --json   # That day alone
@@ -792,10 +792,9 @@ hey event edit 4821 --occurrence 4821_2026-09-15 --apply-to future --repeat ever
 hey event delete 4821
 ```
 
-Without `--calendar`, `list` reads every calendar and `add` files on the first calendar
-you own that is neither personal nor subscribed, in `hey calendar list` order — which is
-often "Maybe" (`kind: "maybe"`) rather than the calendar the user means. Pass `--calendar`
-to `add`. A repeating event lists once as its series, plus a row for each day HEY has
+Without `--calendar`, `list` reads every calendar and `add` files on HEY's default: the
+first ordinary calendar the user owns that is not a subscription — never Maybe or the
+personal calendar. Pass `--calendar` to file anywhere else. A repeating event lists once as its series, plus a row for each day HEY has
 written out on its own.
 
 **"What's on my schedule today?" is `hey event day`, not `list`.** A day or a week is the
