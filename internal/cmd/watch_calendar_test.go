@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -59,8 +60,17 @@ func TestCalendarCursor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cursor.Since != "2026-08-18T09:00:00.000Z" || cursor.Version != "1" {
-		t.Errorf("cursor = %+v, want the server's own since and version", cursor)
+	if cursor.Since != "2026-08-18T10:00:00.000Z" || cursor.Version != "1" {
+		t.Errorf("cursor = %+v, want the watch's start and the server's version", cursor)
+	}
+
+	later := "https://app.hey.com/calendars/512/recording/changes.json?since=2026-08-18T10%3A30%3A00.518496Z&v=1"
+	cursor, err = command.calendarCursor(later, started)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cursor.Since != "2026-08-18T10:00:00.000Z" {
+		t.Errorf("since = %q, want a cursor later than the start moved back to it", cursor.Since)
 	}
 
 	command.since = "2026-08-17T08:30:00Z"
@@ -81,22 +91,69 @@ func TestCalendarCursor(t *testing.T) {
 	}
 }
 
-func TestCalendarCursorNoLaterThan(t *testing.T) {
-	started := time.Date(2026, 8, 18, 9, 0, 0, 0, time.UTC)
+// The list's cursor is the latest updated_at of the calendars still on it, so a calendar
+// deleted after the rest last changed is later than it — and history by the time the
+// watch starts. The feed here answers what is strictly later than its cursor, as HEY's
+// does.
+func TestWatchPollDoesNotReportHistoryAsItStarts(t *testing.T) {
+	t.Setenv("HEY_TOKEN", "test-token")
 
-	late := hey.CalendarChangesCursor{Since: "2026-08-18T09:30:00.000Z", Version: "1"}
-	if capped := calendarCursorNoLaterThan(late, started); capped.Since != "2026-08-18T09:00:00.000Z" {
-		t.Errorf("since = %q, want a cursor later than the start moved back to it", capped.Since)
+	var mu sync.Mutex
+	deletedAt := "2026-08-20T16:42:07.204613Z"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/calendars.json":
+			_, _ = w.Write([]byte(`{
+				"calendars": [{"calendar": {"id": 512, "name": "Household"},
+				               "recording_changes_url": "/calendars/512/recording/changes.json?since=2026-08-18T11%3A00%3A00.000000Z&v=1",
+				               "signed_stream_name": "signed-household"}],
+				"calendar_changes_url": "/calendar/changes.json?since=2026-08-18T11%3A00%3A00.000000Z"
+			}`))
+		case "/calendar/changes.json":
+			since, err := time.Parse(time.RFC3339Nano, r.URL.Query().Get("since"))
+			deleted, _ := time.Parse(time.RFC3339Nano, deletedAt)
+			if err != nil || !deleted.After(since) {
+				_, _ = w.Write([]byte(`{}`))
+				return
+			}
+			w.Header().Set("Link", `</calendar/changes.json?since=`+deletedAt+`>; rel="next"`)
+			_, _ = w.Write([]byte(`{"deleted": [{"id": 513, "deleted_at": "` + deletedAt + `"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
+
+	calendars, err := newWatchCommand().watchedCalendars(context.Background(), watchStarted)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	t.Cleanup(calendars.poll.Stop)
+	watch, out := newTestWatch(defaultChanges...)
+	watch.exitOnFirst = true
+	watch.calendar = calendars
+
+	if err := watch.pollCalendarList(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Len() != 0 || watch.finished() {
+		t.Fatalf("wrote %q, want nothing for a calendar deleted before the watch began", out.String())
 	}
 
-	early := hey.CalendarChangesCursor{Since: "2026-08-18T08:00:00.000Z"}
-	if kept := calendarCursorNoLaterThan(early, started); kept.Since != "2026-08-18T08:00:00.000Z" {
-		t.Errorf("since = %q, want a cursor before the start left alone", kept.Since)
+	// A calendar deleted after the watch began is a change.
+	mu.Lock()
+	deletedAt = "2026-08-21T09:04:31.880112Z"
+	mu.Unlock()
+	if err := watch.pollCalendarList(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-
-	unreadable := hey.CalendarChangesCursor{Since: "whenever"}
-	if kept := calendarCursorNoLaterThan(unreadable, started); kept.Since != "whenever" {
-		t.Errorf("since = %q, want a cursor we can't read left as it is", kept.Since)
+	lines := watchLines(t, out)
+	if len(lines) != 1 || lines[0]["change"] != watchCalendarDeleted || !watch.finished() {
+		t.Errorf("wrote %v, want the deletion after the start, ending the watch", lines)
 	}
 }
 

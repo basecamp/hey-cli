@@ -12,6 +12,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -851,14 +852,15 @@ func TestWatchDoesNotSayReadyOnItsWayOut(t *testing.T) {
 	}
 }
 
-func TestWatchedBoxesStartNoLaterThanTheWatchDid(t *testing.T) {
+func TestWatchedBoxesStartAtTheWatchsStart(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		// The Imbox's last activity is after the watch read HEY's clock — mail
-		// landed in between; The Feed's is before.
-		_, _ = w.Write([]byte(`[{"id":24088,"kind":"imbox","name":"Imbox","posting_changes_url":"/boxes/24088/postings/changes.json?since=2026-08-21T09%3A00%3A30.000Z&v=2"},` +
-			`{"id":24089,"kind":"feedbox","name":"The Feed","posting_changes_url":"/boxes/24089/postings/changes.json?since=2026-08-21T08%3A00%3A00.000Z&v=2"}]`))
+		// landed in between; The Feed's is before, and its feed may still hold
+		// changes later than that which are history all the same.
+		_, _ = w.Write([]byte(`[{"id":24088,"kind":"imbox","name":"Imbox","posting_changes_url":"/boxes/24088/postings/changes.json?since=2026-08-21T09%3A00%3A30.183221Z&v=2"},` +
+			`{"id":24089,"kind":"feedbox","name":"The Feed","posting_changes_url":"/boxes/24089/postings/changes.json?since=2026-08-21T08%3A00%3A00.518496Z&v=2"}]`))
 	}))
 	defer server.Close()
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
@@ -868,11 +870,10 @@ func TestWatchedBoxesStartNoLaterThanTheWatchDid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := boxes[24088].cursor.Since; got != "2026-08-21T09:00:00.000Z" {
-		t.Errorf("Imbox cursor = %q, want it moved back to the watch's start so the mail in between is read", got)
-	}
-	if got := boxes[24089].cursor.Since; got != "2026-08-21T08:00:00.000Z" {
-		t.Errorf("Feed cursor = %q, want the box's own when it is earlier", got)
+	for _, id := range []int64{24088, 24089} {
+		if got := boxes[id].cursor; got.Since != "2026-08-21T09:00:00.000Z" || got.Version != "2" {
+			t.Errorf("%s cursor = %+v, want the watch's start and HEY's version, whatever since HEY served", boxes[id].name, got)
+		}
 	}
 	if !boxes[24088].reported || !boxes[24089].reported {
 		t.Error("without --box every box is reported")
@@ -894,7 +895,7 @@ func TestWatchedBoxesStartNoLaterThanTheWatchDid(t *testing.T) {
 	}
 	command.boxes = nil
 
-	// --since is the reader's choice and wins over both.
+	// --since is the reader's choice and wins over the start.
 	command.since = "2026-08-21T09:30:00Z"
 	boxes, err = command.watchedBoxes(context.Background(), watchStarted)
 	if err != nil {
@@ -902,6 +903,190 @@ func TestWatchedBoxesStartNoLaterThanTheWatchDid(t *testing.T) {
 	}
 	if got := boxes[24088].cursor.Since; got != "2026-08-21T09:30:00.000Z" {
 		t.Errorf("cursor = %q, want --since untouched", got)
+	}
+}
+
+// heyHistory is HEY as a watch's startup meets it: its clock, the box list, and a
+// changes feed that answers what is strictly later than its cursor, the way HEY's does.
+// Each box's posting_changes_url carries what HEY puts there — the box's last posting
+// activity, the latest updated_at among its unbundled postings, or the box's own
+// updated_at when it has none — not the time, and a cached box list serves it as it
+// was when cached. So the feed can answer a change later than that cursor that is
+// history all the same.
+type heyHistory struct {
+	mu      sync.Mutex
+	cursors map[int64]string
+	changes map[int64][]historyChange
+}
+
+type historyChange struct {
+	at      string
+	deleted bool
+	id      int64
+	subject string
+}
+
+// The clock the server answers with; a watch's start is taken a moment before it.
+const heyHistoryDate = "Fri, 21 Aug 2026 09:00:05 GMT"
+
+func newHEYHistory(t *testing.T) *heyHistory {
+	t.Helper()
+	history := &heyHistory{
+		cursors: map[int64]string{
+			// The Imbox's since as a box list cached before its latest posting serves it.
+			24088: "2026-08-20T23:45:00.000000Z",
+			// Reply Later is empty, so its cursor is the box's own updated_at — years
+			// before the posting deleted from it last week.
+			24091: "2020-06-16T11:22:18.853469Z",
+		},
+		changes: map[int64][]historyChange{
+			24088: {{at: "2026-08-20T23:45:39.083350Z", id: 9001, subject: "Lunch on Thursday?"}},
+			24091: {{at: "2026-08-19T01:07:15.496840Z", id: 9002, deleted: true}},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(history.serve))
+	t.Cleanup(server.Close)
+	t.Setenv("HEY_TOKEN", "test-token")
+	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
+
+	return history
+}
+
+// land is a change arriving at HEY, whose box's cursor is now its last activity.
+func (h *heyHistory) land(boxID int64, change historyChange) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.changes[boxID] = append(h.changes[boxID], change)
+	h.cursors[boxID] = change.at
+}
+
+func (h *heyHistory) serve(w http.ResponseWriter, r *http.Request) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	var boxID int64
+	switch {
+	case r.URL.Path == "/identity.json":
+		w.Header().Set("Date", heyHistoryDate)
+		_, _ = w.Write([]byte(`{"id":1}`))
+	case r.URL.Path == "/boxes.json":
+		_, _ = fmt.Fprintf(w, `[{"id":24088,"kind":"imbox","name":"Imbox","posting_changes_url":"/boxes/24088/postings/changes.json?since=%s&v=2"},`+
+			`{"id":24091,"kind":"laterbox","name":"Reply Later","posting_changes_url":"/boxes/24091/postings/changes.json?since=%s&v=2"}]`,
+			h.cursors[24088], h.cursors[24091])
+	case scanBox(r.URL.Path, &boxID):
+		h.serveChanges(w, boxID, r.URL.Query().Get("since"))
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func scanBox(path string, boxID *int64) bool {
+	_, err := fmt.Sscanf(path, "/boxes/%d/postings/changes.json", boxID)
+	return err == nil
+}
+
+func (h *heyHistory) serveChanges(w http.ResponseWriter, boxID int64, since string) {
+	from, err := time.Parse(time.RFC3339Nano, since)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	var added, deleted []string
+	var last string
+	for _, change := range h.changes[boxID] {
+		at, _ := time.Parse(time.RFC3339Nano, change.at)
+		if !at.After(from) {
+			continue
+		}
+		last = change.at
+		if change.deleted {
+			deleted = append(deleted, fmt.Sprintf(`{"id":%d,"deleted_at":%q}`, change.id, change.at))
+		} else {
+			added = append(added, fmt.Sprintf(`{"id":%d,"kind":"topic","box_id":%d,"name":%q,"created_at":%q,"updated_at":%q,"active_at":%q,"creator":{"name":"Maria Delgado"}}`,
+				change.id, boxID, change.subject, change.at, change.at, change.at))
+		}
+	}
+	if last != "" {
+		w.Header().Set("Link", fmt.Sprintf(`</boxes/%d/postings/changes.json?since=%s&v=2>; rel="next"`, boxID, last))
+	}
+	_, _ = fmt.Fprintf(w, `{"added":[%s],"deleted":[%s]}`, strings.Join(added, ","), strings.Join(deleted, ","))
+}
+
+// startWatch begins a watch the way run does: HEY's clock, then the boxes, then the
+// catch-up.
+func startWatch(t *testing.T, command *watchCommand, watch *postingsWatch) {
+	t.Helper()
+	started := serverNow(context.Background())
+	boxes, err := command.watchedBoxes(context.Background(), started)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	watch.boxes = boxes
+	watch.newMail = trackNewMail(started)
+	if err := watch.catchUp(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestWatchDoesNotReportHistoryAsItStarts(t *testing.T) {
+	history := newHEYHistory(t)
+	watch, out := newTestWatch(defaultChanges...)
+	watch.exitOnFirst = true
+
+	startWatch(t, newWatchCommand(), watch)
+
+	lines := watchLines(t, out)
+	if len(lines) != 1 || lines[0]["change"] != "ready" {
+		t.Fatalf("wrote %v, want ready alone — a deletion and a posting from before the watch began are history", lines)
+	}
+	if watch.finished() {
+		t.Fatal("--exit-on-first should still be waiting for a change")
+	}
+
+	// A reply lands after the watch began: that is the change it was waiting for.
+	history.land(24088, historyChange{at: "2026-08-21T09:00:12.250000Z", id: 9003, subject: "Re: Lunch on Thursday?"})
+	ringBox(t, watch)
+
+	lines = watchLines(t, out)
+	if len(lines) != 2 || lines[1]["change"] != "added" || lines[1]["posting_id"] != float64(9003) || lines[1]["new"] != true {
+		t.Errorf("wrote %v, want the reply that landed after the start, new", lines)
+	}
+	if !watch.finished() {
+		t.Error("--exit-on-first should end on the change that landed after the start")
+	}
+}
+
+func TestWatchReadsMailThatLandedBeforeItReadTheBoxes(t *testing.T) {
+	history := newHEYHistory(t)
+	// The watch reads HEY's clock a moment before the Date header; this lands on the
+	// header's second, after the start and before the box list, so the Imbox's cursor is
+	// already past it.
+	history.land(24088, historyChange{at: "2026-08-21T09:00:05.000000Z", id: 9003, subject: "Invoice #4021"})
+	watch, out := newTestWatch(defaultChanges...)
+
+	startWatch(t, newWatchCommand(), watch)
+
+	lines := watchLines(t, out)
+	if len(lines) != 2 || lines[0]["posting_id"] != float64(9003) || lines[0]["new"] != true || lines[1]["change"] != "ready" {
+		t.Errorf("wrote %v, want the mail that landed during startup, new, then ready — and no history", lines)
+	}
+}
+
+func TestWatchSinceReadsTheHistoryFirst(t *testing.T) {
+	newHEYHistory(t)
+	command := newWatchCommand()
+	command.since = "2026-08-19"
+	watch, out := newTestWatch(defaultChanges...)
+
+	startWatch(t, command, watch)
+
+	lines := watchLines(t, out)
+	if len(lines) != 3 || lines[0]["posting_id"] != float64(9001) || lines[0]["new"] != false ||
+		lines[1]["change"] != "deleted" || lines[1]["posting_id"] != float64(9002) || lines[2]["change"] != "ready" {
+		t.Errorf("wrote %v, want both changes since --since, not new, then ready", lines)
 	}
 }
 

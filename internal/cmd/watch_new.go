@@ -45,9 +45,11 @@ func trackNewMail(started time.Time) *newMail {
 // the box's last posting activity, which bounds every thread in it. The floor
 // is the box's alone — a gap thread that moves to another box is measured
 // there, and may still read as new once. The resync line is the reader's cue
-// to re-read the box either way.
+// to re-read the box either way. HEY writes the cursor to the microsecond, so
+// it is read as RFC 3339 with any fraction rather than in the watch's own
+// millisecond layout, which refuses it.
 func (n *newMail) skippedTo(boxID int64, cursor hey.PostingChangesCursor) {
-	if at, err := time.Parse(watchCursorTimeLayout, cursor.Since); err == nil {
+	if at, err := time.Parse(time.RFC3339Nano, cursor.Since); err == nil {
 		n.floors[boxID] = at
 	}
 }

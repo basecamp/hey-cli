@@ -79,9 +79,11 @@ func (c *watchCommand) watchingCalendars(changes map[string]bool) bool {
 }
 
 // watchedCalendars reads the calendars and where each one's feed should be read from. The
-// cursors are capped at the watch's start the way the boxes' are — the server bakes each
-// calendar's last activity into its URL, so a write that lands between reading the clock
-// and reading the list would otherwise sit behind the cursor, read by nothing.
+// cursors start at the watch's start the way the boxes' do: the since HEY serves is a
+// calendar's own updated_at — for the list, the latest of them — not HEY's clock, and a
+// calendar deleted after the rest last changed is later than that, so a first poll from
+// it would report the deletion as news on every start; and a write that lands between
+// reading the clock and reading the list would sit behind a later one, read by nothing.
 func (c *watchCommand) watchedCalendars(ctx context.Context, started time.Time) (*calendarsWatch, error) {
 	list, err := sdk.Calendars().ListWithChanges(ctx)
 	if err != nil {
@@ -129,35 +131,23 @@ func (c *watchCommand) followedCalendar(listed hey.ListedCalendar, started time.
 	}, nil
 }
 
-// calendarCursor is where a feed should be read from: the URL HEY served, moved by
-// --since, and otherwise capped at the watch's start.
+// calendarCursor is where a feed should be read from: the feed and version the URL HEY
+// served names, from --since or else from the watch's start.
 func (c *watchCommand) calendarCursor(changesURL string, started time.Time) (hey.CalendarChangesCursor, error) {
 	cursor, err := hey.CalendarChangesCursorFrom(changesURL)
 	if err != nil {
 		return hey.CalendarChangesCursor{}, apierr.FromSDK(err)
 	}
-	if c.since == "" {
-		return calendarCursorNoLaterThan(cursor, started), nil
-	}
 
-	at, err := parseWatchSince(c.since)
-	if err != nil {
-		return hey.CalendarChangesCursor{}, err
+	from := started
+	if c.since != "" {
+		if from, err = parseWatchSince(c.since); err != nil {
+			return hey.CalendarChangesCursor{}, err
+		}
 	}
-	cursor.Since = at.UTC().Format(watchCursorTimeLayout)
+	cursor.Since = from.UTC().Format(watchCursorTimeLayout)
 
 	return cursor, nil
-}
-
-// calendarCursorNoLaterThan is noLaterThan for a calendar feed's cursor, and exists for
-// the same race. A cursor that cannot be read is left as it is.
-func calendarCursorNoLaterThan(cursor hey.CalendarChangesCursor, started time.Time) hey.CalendarChangesCursor {
-	at, err := time.Parse(watchCursorTimeLayout, cursor.Since)
-	if err == nil && at.After(started) {
-		cursor.Since = started.UTC().Format(watchCursorTimeLayout)
-	}
-
-	return cursor
 }
 
 // calendarDisplayName is what a calendar is called on a watch line. The personal calendar
