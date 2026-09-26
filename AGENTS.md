@@ -692,7 +692,7 @@ cutoff every feed and new mail are measured against, since a fast one would skip
 a slow one would report history. That
 is HEY's semantics and state across events, so the CLI decides it once; what to do about
 it is the reader's. The Date header is whole seconds, so the start can be up to a second
-(plus the request's time) early and a change from that window is reported; nothing HEY
+(plus the clock request's whole time, retries included) early and a change from that window is reported; nothing HEY
 serves says the time finer — Action Cable pings are whole seconds too — and rounding the
 other way would skip changes. A 409 skip-ahead moves the cursor to HEY's clock now
 (`serverNow`, not the box list's since, which the ETag cache can serve unchanged and would

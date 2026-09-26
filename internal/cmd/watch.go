@@ -75,8 +75,9 @@ func newWatchCommand() *watchCommand {
 		Long: `Print email threads and calendar changes as they happen: piped or with --json, one
 JSON object per line; at a terminal, one text line each. Runs until interrupted. What
 changed before the watch began is not reported, unless --since reads back to it first —
-save a change from up to about a second before, since HEY's clock is read to the whole
-second; its "at" says when it happened.
+save a change from just before it: HEY's clock is read to the whole second, and taken back
+by however long reading it took, so a change up to a second before the watch asked, plus
+that request's time, may be reported. Its "at" says when it happened.
 
 Changes can drive a command instead of being printed, and that is a choice between two
 behaviours: --run-async spawns the command per change and moves on, so a slow one never

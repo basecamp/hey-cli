@@ -340,8 +340,9 @@ Runs until interrupted, printing changes as they happen, one line each. What cha
 the watch began is not reported unless `--since` reads back to it first, so
 `--exit-on-first` waits for a change rather than stopping on an old one. When the watch began
 is read off HEY's clock, and a watch that cannot read it exits with an error rather than
-guess. That clock is read to the whole second, so a change from up to about a second before
-the watch began can still be reported (and be new, and end `--exit-on-first`); its `at` says
+guess. That clock is read to the whole second and taken back by however long the request
+took (retries included), so a change from up to a second before the watch began, plus that
+request's time, can still be reported (and be new, and end `--exit-on-first`); its `at` says
 when it happened. Rounding the other way would skip changes that came after:
 
 ```json

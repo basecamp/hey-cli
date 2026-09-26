@@ -194,7 +194,8 @@ and `--events new` selects the true ones. The rule:
   so a workstation running fast or slow neither calls the backlog new nor sits on new mail
   (a watch that cannot read HEY's clock exits with an error rather than use its own);
   whole seconds, rounded down, so the doubt falls on the side of calling mail a moment old
-  new — mail from up to about a second before the watch began can read as new — and every
+  new — mail from up to a second before the watch began, plus however long the clock request
+  took (retries included), can read as new — and every
   box's cursor starts at that start, so mail that lands while the
   watch is starting up is read and is new. `active_at` moves on new mail only, not on a
   seen flip, a mute or a move, so reading a thread, marking it unseen again or moving it
