@@ -50,8 +50,11 @@ func writeMessageSent(cmd *cobra.Command, confirmation messageSent, sent *genera
 }
 
 // sentMessageData is HEY's answer for a delivery as the JSON output carries it: the keys
-// HEY served, and only those. delayed is reported once HEY names the entry, or when an
-// undo says the delivery is delayed; a bare {} says nothing either way.
+// HEY served, and only those. HEY serves subject and delayed whenever it names the entry,
+// so both are reported then — an empty subject included, since a draft can go out without
+// one — and the SDK's field, which cannot tell an empty subject from none, is not asked.
+// Without the entry, delayed is reported only when an undo says the delivery is delayed;
+// a bare {} says nothing either way.
 func sentMessageData(sent *generated.SentMessage) map[string]any {
 	data := map[string]any{}
 	if sent == nil {
@@ -63,7 +66,7 @@ func sentMessageData(sent *generated.SentMessage) map[string]any {
 	if sent.TopicId != 0 {
 		data["topic_id"] = sent.TopicId
 	}
-	if sent.Subject != "" {
+	if sent.Id != 0 {
 		data["subject"] = sent.Subject
 	}
 	if sent.Id != 0 || sent.Delayed {

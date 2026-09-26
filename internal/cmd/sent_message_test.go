@@ -130,6 +130,47 @@ func TestComposeAgainstAHEYThatNamesNoEntryAnswersWithoutIDs(t *testing.T) {
 	}
 }
 
+// A message can go out without a subject — a draft edited to none, say — and HEY then
+// answers an empty one. That is the subject it went out with, and it is reported as HEY
+// served it, never replaced by one the command knew locally.
+func TestSendsReportTheEmptySubjectHEYServed(t *testing.T) {
+	const sentWithoutSubject = `{"id":2201,"topic_id":880,"subject":"","delayed":false}`
+	want := map[string]any{"id": float64(2201), "topic_id": float64(880), "subject": "", "delayed": false}
+
+	t.Run("compose", func(t *testing.T) {
+		response, err := composeNewMessage(t, sentWithoutSubject)
+		if err != nil {
+			t.Fatalf("compose: %v", err)
+		}
+		assertSentData(t, response, want)
+	})
+
+	t.Run("draft send", func(t *testing.T) {
+		var writes []draftWrite
+		response, err := runJSONCommand(t, answeringDeliveries(draftLifecycleServer(t, draftEditJSON, &writes), sentWithoutSubject),
+			"draft", "send", "12345")
+		if err != nil {
+			t.Fatalf("draft send: %v", err)
+		}
+		assertSentData(t, response, want)
+	})
+
+	t.Run("forward", func(t *testing.T) {
+		server, sent := forwardServer(t, `[{"id":11},{"id":12}]`)
+		sent.SendAnswer = sentWithoutSubject
+
+		stdout, err := runCLIOutput(t, server, "--account", "8", "forward", "7", "--to", "alice@example.com")
+		if err != nil {
+			t.Fatalf("forward: %v", err)
+		}
+		assertSentData(t, decodeResponse(t, stdout), map[string]any{
+			"thread_id": float64(7), "entry_id": float64(12),
+			"id": float64(2201), "topic_id": float64(880), "subject": "", "delayed": false,
+			"to": []any{"alice@example.com"}, "cc": nil, "bcc": nil,
+		})
+	})
+}
+
 func TestComposeFromAnswersTheMessageHEYDelivered(t *testing.T) {
 	var writes []draftWrite
 	response, err := runJSONCommand(t, answeringDeliveries(senderServer(t, senderIdentity, &writes, nil), heySentNow),
