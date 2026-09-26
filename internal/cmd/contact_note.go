@@ -45,16 +45,27 @@ func newContactNoteResult(note generated.ContactNote) contactNoteResult {
 	return contactNoteResult{
 		ContactNote:          note,
 		NoteMarkdown:         contactNoteMarkdown(note.Note, note.NoteHtml),
-		NoteMarkdownLossless: htmlutil.MarkdownIsLossless(note.NoteHtml),
+		NoteMarkdownLossless: contactNoteLossless(note.Note, note.NoteHtml),
 	}
 }
 
 // contactNoteMarkdown is a contact note as Markdown, converted from its HTML so bold,
-// lists, links and headings survive; the plain text is the fallback when HEY served no
-// HTML.
+// lists, links and headings survive.
 func contactNoteMarkdown(note, noteHTML string) htmlutil.Markdown {
+	return htmlutil.ToMarkdown(contactNoteSource(note, noteHTML))
+}
+
+// contactNoteLossless reports whether contactNoteMarkdown holds everything in the note,
+// judged against the same HTML it was converted from.
+func contactNoteLossless(note, noteHTML string) bool {
+	return htmlutil.MarkdownIsLossless(contactNoteSource(note, noteHTML))
+}
+
+// contactNoteSource is the HTML a note is converted from: HEY's, or the plain text as
+// HTML when HEY served none.
+func contactNoteSource(note, noteHTML string) string {
 	if noteHTML != "" {
-		return htmlutil.ToMarkdown(noteHTML)
+		return noteHTML
 	}
-	return htmlutil.ToMarkdown(strings.ReplaceAll(stdhtml.EscapeString(note), "\n", "<br>"))
+	return strings.ReplaceAll(stdhtml.EscapeString(note), "\n", "<br>")
 }

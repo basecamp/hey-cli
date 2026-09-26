@@ -140,7 +140,7 @@ func contactNoteForEditor(ctx context.Context, contactID int64, fetch contactNot
 	if note == nil {
 		return "", nil
 	}
-	if !htmlutil.MarkdownIsLossless(note.NoteHtml) {
+	if !contactNoteLossless(note.Note, note.NoteHtml) {
 		return "", apierr.ErrUsageHint(
 			fmt.Sprintf("the note on contact %d holds an attachment or other markup Markdown cannot carry, so editing it as Markdown would drop it", contactID),
 			fmt.Sprintf("Change its HTML instead: read it with `hey contact note show %d --jq '.data.note_html'` and write it back with `hey contact note set %d --note-html '<the changed HTML>'`", contactID, contactID),

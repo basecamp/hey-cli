@@ -14,7 +14,7 @@ import (
 // turns back into the same thing — or into what HEY shows the same way, a <p> for a
 // <div>, <strong> for <b>. They are everything HEY's editor writes, attachments aside.
 var markdownElements = map[string]bool{
-	"div": true, "p": true, "br": true, "hr": true,
+	"body": true, "div": true, "p": true, "br": true, "hr": true,
 	"h1": true, "h2": true, "h3": true, "h4": true, "h5": true, "h6": true,
 	"strong": true, "b": true, "em": true, "i": true, "del": true, "s": true, "strike": true,
 	"a": true, "blockquote": true, "ul": true, "ol": true, "li": true, "pre": true, "code": true,
@@ -52,15 +52,20 @@ func MarkdownIsLossless(s string) bool {
 	// HEY's own wrapper is taken off, as --note-html does; any other trix-content div
 	// is the author's and has to pass like any other div.
 	nodes, _ = unwrapLeadingTrixContent(nodes)
+	// The fragment's nodes come back detached; they are put back under one body so a
+	// break at the top level can see what stands beside it.
+	for _, node := range nodes {
+		if node.Parent != nil {
+			node.Parent.RemoveChild(node)
+		}
+		context.AppendChild(node)
+	}
 
 	type visit struct {
 		node    *html.Node
 		context losslessContext
 	}
-	pending := make([]visit, 0, len(nodes))
-	for _, node := range nodes {
-		pending = append(pending, visit{node: node})
-	}
+	pending := []visit{{node: context}}
 	for len(pending) > 0 {
 		v := pending[len(pending)-1]
 		pending = pending[:len(pending)-1]
@@ -154,7 +159,7 @@ func hasVisibleSpaceRun(text string) bool {
 			continue
 		}
 		run++
-		nonBreaking = nonBreaking || r == ' '
+		nonBreaking = nonBreaking || r == '\u00a0'
 		if run > 1 && nonBreaking {
 			return true
 		}

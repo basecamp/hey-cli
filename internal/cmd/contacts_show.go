@@ -85,7 +85,7 @@ func (c *contactsShowCommand) run(cmd *cobra.Command, args []string) error {
 		result.Note = note.Note
 		result.NoteHTML = note.NoteHtml
 		result.NoteMarkdown = contactNoteMarkdown(note.Note, note.NoteHtml)
-		result.NoteMarkdownLossless = htmlutil.MarkdownIsLossless(note.NoteHtml)
+		result.NoteMarkdownLossless = contactNoteLossless(note.Note, note.NoteHtml)
 	}
 	if writer.EffectiveFormat() == output.FormatHTML {
 		return writeNoteHTML(cmd.OutOrStdout(), result.NoteHTML)

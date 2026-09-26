@@ -272,6 +272,25 @@ func TestContactNoteSaysWhenItsMarkdownIsLossless(t *testing.T) {
 	}
 }
 
+// When HEY serves a note as plain text alone, note_markdown is made from that text, and
+// note_markdown_lossless is judged against the same text rather than the empty HTML.
+func TestContactNoteLosslessJudgesThePlainTextFallback(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		note string
+		want bool
+	}{
+		{name: "lines", note: "Prefers email\nCall after six", want: true},
+		{name: "two blank lines", note: "Prefers email\n\n\nCall after six", want: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := contactNoteLossless(tt.note, ""); got != tt.want {
+				t.Errorf("contactNoteLossless(%q) = %v, want %v", tt.note, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestContactNoteWithAnAttachmentKeepsItWhenChangedAsHTML(t *testing.T) {
 	server, notes := newNoteServer(t, attachedNoteStored, "Signed contract:")
 	noteHTML := showContactNote(t, server).NoteHTML
