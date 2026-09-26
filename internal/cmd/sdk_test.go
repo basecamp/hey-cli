@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -161,5 +164,65 @@ func TestFilterRecordingsByType(t *testing.T) {
 	nilResult := filterRecordingsByType(nil, "Calendar::Todo")
 	if nilResult == nil || len(nilResult) != 0 {
 		t.Errorf("expected an empty non-nil slice for a nil response, got %v", nilResult)
+	}
+}
+
+// countingTransport answers every request with the status it is set to, counting them.
+type countingTransport struct {
+	status int
+	sent   map[string]int
+}
+
+func (c *countingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	c.sent[req.Method+" "+req.URL.Path]++
+	return &http.Response{StatusCode: c.status, Header: http.Header{"Content-Type": {"application/json"}},
+		Body: io.NopCloser(strings.NewReader(`{"id":1,"time_zone":"America/New_York"}`)), Request: req}, nil
+}
+
+// The identity is read from HEY once a command, and asked again only when the answer might
+// have changed: other credentials, or a write in between. An answer that was not a success
+// is not kept.
+func TestIdentityOnceAnswersARepeatedIdentityRead(t *testing.T) {
+	get := func(t *testing.T, transport http.RoundTripper, method, path, token string) string {
+		t.Helper()
+		req, err := http.NewRequestWithContext(t.Context(), method, "https://app.hey.com"+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := transport.RoundTrip(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return string(body)
+	}
+
+	inner := &countingTransport{status: http.StatusOK, sent: map[string]int{}}
+	once := &identityOnce{inner: inner}
+	first := get(t, once, http.MethodGet, "/identity.json", "one")
+	if second := get(t, once, http.MethodGet, "/identity.json", "one"); second != first || first == "" {
+		t.Errorf("repeated read = %q, want %q", second, first)
+	}
+	if got := inner.sent["GET /identity.json"]; got != 1 {
+		t.Errorf("identity reads sent = %d after a repeat, want one", got)
+	}
+	get(t, once, http.MethodGet, "/identity.json", "two")
+	if got := inner.sent["GET /identity.json"]; got != 2 {
+		t.Errorf("identity reads sent = %d after new credentials, want two", got)
+	}
+	get(t, once, http.MethodPatch, "/identity/time_format.json", "two")
+	get(t, once, http.MethodGet, "/identity.json", "two")
+	if got := inner.sent["GET /identity.json"]; got != 3 {
+		t.Errorf("identity reads sent = %d after a write, want three", got)
+	}
+
+	failing := &countingTransport{status: http.StatusInternalServerError, sent: map[string]int{}}
+	once = &identityOnce{inner: failing}
+	get(t, once, http.MethodGet, "/identity.json", "one")
+	get(t, once, http.MethodGet, "/identity.json", "one")
+	if got := failing.sent["GET /identity.json"]; got != 2 {
+		t.Errorf("identity reads sent = %d after a failure, want each one sent", got)
 	}
 }
