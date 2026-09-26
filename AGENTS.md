@@ -842,6 +842,11 @@ Never use abbreviations or placeholders like "Test Event", "User1", "a@ex.com". 
 
 Whenever you add, remove or change any functionality add/remove/change tests as well. Tests are located in the same package as the code they test, with filenames ending in `_test.go`. Run `make test` to run all tests.
 
+A loopback test server is not private to its test: a dev-server finder on the machine
+(moshi-hook, when the Moshi app is connected over SSH) sends `GET /` to every listening
+port. In `internal/cmd`, start a server the CLI talks to with `newCLIServer`, which keeps
+those visits from a handler that fails on an unexpected request.
+
 ### Smoke Testing
 
 Smoke tests verify all CLI commands against a real HEY server. They live in `tests/smoke/` as a separate Go module and use a pre-compiled binary built by `make build`.

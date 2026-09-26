@@ -56,7 +56,7 @@ func TestSDK401RetryAdoptsCredentialsAnotherProcessStored(t *testing.T) {
 			var manager *auth.Manager
 			var mu sync.Mutex
 			var credentials []string
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				credential := r.Header.Get("Authorization")
 				if credential == "" {
 					credential = r.Header.Get("Cookie")
@@ -86,7 +86,6 @@ func TestSDK401RetryAdoptsCredentialsAnotherProcessStored(t *testing.T) {
 					http.Error(w, "too many attempts", http.StatusInternalServerError)
 				}
 			}))
-			defer server.Close()
 
 			manager = auth.NewManager(server.URL, server.Client(), configDir)
 			if err := manager.GetStore().Save(manager.CredentialKey(), tt.initial); err != nil {

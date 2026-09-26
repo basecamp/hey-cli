@@ -52,7 +52,7 @@ func stubInteractive(t *testing.T, interactive bool) {
 
 func identityServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/identity.json" {
 			t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)
@@ -73,8 +73,6 @@ func identityServer(t *testing.T) *httptest.Server {
 			]
 		}`))
 	}))
-	t.Cleanup(server.Close)
-	return server
 }
 
 func wizardData(t *testing.T, response output.Response) map[string]any {

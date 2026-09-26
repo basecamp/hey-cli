@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -26,8 +25,7 @@ func runFormattedCommandWithStderr(t *testing.T, handler http.Handler, formatArg
 	colorDisabled = false
 	t.Cleanup(func() { colorDisabled = previousColorDisabled })
 
-	server := httptest.NewServer(handler)
-	t.Cleanup(server.Close)
+	server := newCLIServer(t, handler)
 
 	t.Setenv("HEY_TOKEN", "test-token")
 	t.Setenv("HEY_NO_KEYRING", "1")
