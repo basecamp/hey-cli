@@ -472,20 +472,42 @@ func occurrenceInstants(series generated.Recording, day time.Time) (time.Time, t
 	return start, start.Add(duration)
 }
 
-// wallClockOn is the series' clock time on a day, resolved the way HEY resolves it. A clock
-// time that does not exist on that day — the hour a zone springs forward over — is moved
-// an hour later and tried again, which is what ActiveSupport does when it changes the day
-// of a time; Go's time.Date picks the earlier zone instead and would land the day an hour
-// before HEY's, so a title-only edit would move it.
+// wallClockOn is a clock time on a day, resolved the way HEY resolves one. A clock time that
+// does not exist on that day — the hour a zone springs forward over — is moved an hour later
+// and tried again, which is what ActiveSupport does when it changes the day of a time. A
+// clock time that happens twice — the hour a zone repeats as it falls back — is the first of
+// the two, as ActiveSupport takes it. Go's time.Date is no guide to either: it picks one side
+// of a gap or an overlap by the zone's rules, not HEY's, so a title-only edit would move the
+// day an hour.
 func wallClockOn(day, wall time.Time, loc *time.Location) time.Time {
 	hour, minute, second := wall.Clock()
 	for step := range 24 {
 		at := time.Date(day.Year(), day.Month(), day.Day(), hour+step, minute, second, 0, loc)
 		if h, m, _ := at.Clock(); h == (hour+step)%24 && m == minute {
-			return at
+			return firstOfARepeatedClock(at)
 		}
 	}
 	return time.Date(day.Year(), day.Month(), day.Day(), hour, minute, second, 0, loc)
+}
+
+// firstOfARepeatedClock is the earlier of the two instants a clock time names in the hour a
+// zone repeats, and the instant itself anywhere else. The earlier one belongs to the offset
+// in force before the clocks went back.
+func firstOfARepeatedClock(at time.Time) time.Time {
+	start, _ := at.ZoneBounds()
+	if start.IsZero() {
+		return at
+	}
+	_, offset := at.Zone()
+	_, before := start.Add(-time.Second).Zone()
+	if before <= offset {
+		return at
+	}
+	earlier := at.Add(-time.Duration(before-offset) * time.Second)
+	if earlier.Before(start) && earlier.In(at.Location()).Format(time.DateTime) == at.Format(time.DateTime) {
+		return earlier
+	}
+	return at
 }
 
 // occurrenceCountdown is the countdown the write sends: the one --countdown names, or an
