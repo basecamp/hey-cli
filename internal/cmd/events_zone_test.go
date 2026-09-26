@@ -91,9 +91,9 @@ func atInstant(t *testing.T, instant string) {
 	if err != nil {
 		t.Fatalf("instant %q: %v", instant, err)
 	}
-	previous := eventNow
-	eventNow = func() time.Time { return at }
-	t.Cleanup(func() { eventNow = previous })
+	previous := clockNow
+	clockNow = func() time.Time { return at }
+	t.Cleanup(func() { clockNow = previous })
 }
 
 // wantSchedule checks the schedule an event write sent. An empty zone says the write must be

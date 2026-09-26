@@ -27,7 +27,12 @@ type recordingFilter struct {
 	// defaultWindow is the span to read when no dates are given. An event looks ahead from
 	// today, the way a calendar is read; a to-do or a journal entry looks back over years,
 	// because that is where the ones worth listing already are.
-	defaultWindow func(now time.Time) (time.Time, time.Time)
+	defaultWindow func(today time.Time) (time.Time, time.Time)
+
+	// today is the day a default window is laid around when no start is given. Without it
+	// that is the machine's today, which is close enough for a window that reaches years
+	// either way; a window that starts at today has to ask the account.
+	today func(ctx context.Context) (time.Time, error)
 
 	// defaultCalendars is where to look when --calendar is not given. Events are spread over
 	// every calendar the identity has; to-dos and journal entries live on the personal one.
@@ -36,14 +41,14 @@ type recordingFilter struct {
 
 // eventWindow reads from today forward, which is what somebody asking what is on their
 // calendar means.
-func eventWindow(now time.Time) (time.Time, time.Time) {
-	return now, now.AddDate(0, 0, 30)
+func eventWindow(today time.Time) (time.Time, time.Time) {
+	return today, today.AddDate(0, 0, 30)
 }
 
 // personalWindow reads years back and a year forward. A to-do or a journal entry is looked up
 // by having been written rather than by coming up, so its window is wide.
-func personalWindow(now time.Time) (time.Time, time.Time) {
-	return now.AddDate(-4, 0, 0), now.AddDate(1, 0, 0)
+func personalWindow(today time.Time) (time.Time, time.Time) {
+	return today.AddDate(-4, 0, 0), today.AddDate(1, 0, 0)
 }
 
 // registerFlags puts the window on a command. calendarUsage says where the listing looks
@@ -66,7 +71,21 @@ type recordingWindow struct {
 }
 
 func (f *recordingFilter) resolve(ctx context.Context) (recordingWindow, error) {
-	defaultStart, defaultEnd := f.defaultWindow(time.Now())
+	// A date that cannot be read is refused before today is asked for.
+	if f.endsOn != "" {
+		if _, err := parseDateArg("ends-on date", f.endsOn); err != nil {
+			return recordingWindow{}, err
+		}
+	}
+
+	today := calendarDay(clockNow())
+	if f.startsOn == "" && f.today != nil {
+		var err error
+		if today, err = f.today(ctx); err != nil {
+			return recordingWindow{}, err
+		}
+	}
+	defaultStart, defaultEnd := f.defaultWindow(today)
 
 	startsOn := f.startsOn
 	if startsOn == "" {

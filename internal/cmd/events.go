@@ -30,7 +30,7 @@ func newEventsCommand() *eventsCommand {
 		Use:   "event",
 		Short: "Read and manage calendar events",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, day, week, add, edit, delete. \"What's on the schedule today?\" is answered by day, not list: day and week read the span as HEY draws it, with a repeating event expanded into the occurrences inside it, over the calendars switched on in HEY. list reads what calendars hold — every calendar unless --calendar names one — and a repeating event is one row, its series, on the day the series began. An edit is not a patch on HEY's side: it resends the notes, location, link, attached email, reminders and time zones the event already carries, so notes lose their formatting and a countdown is removed unless --countdown names one again. edit <series id> changes a whole series; one day of it is edit <series id> --occurrence <occurrence_id from day/week> --apply-to current|future, which keeps the countdown and refuses to flatten notes unless --allow-plain-notes or --notes is given. --apply-to future starts a new series and requires --repeat with its complete schedule; a preset alone means forever and custom copies an existing opaque schedule (a count-based rule can restart its full count). A virtual day of an opaque custom schedule is read from HEY's Day view and refused if that view no longer serves it. A realized custom day cannot be split safely; use a virtual occurrence, edit that day alone, or edit the whole series. A realized preset occurrence moved away from its series time must be moved back with --apply-to current before a future split. Read the day again afterward for the new series id. delete <series id> deletes the whole series; one day of it is delete <series id> --occurrence <occurrence_id> --apply-to current|future, whether or not HEY has written that day out. delete refuses a written-out day's own id, because HEY would draw the day again from the series. add and edit read clock times, and today when --starts-on is left out, in the HEY account's time zone unless --time-zone names one, and refuse when they need it and the account has none; an edit keeps a zoned event's zone and leaves a zoneless event zoneless.",
+			"agent_notes": "Subcommands: list, day, week, add, edit, delete. \"What's on the schedule today?\" is answered by day, not list: day and week read the span as HEY draws it, with a repeating event expanded into the occurrences inside it, over the calendars switched on in HEY; without a date they, and list's window, start from today in the HEY account's time zone. list reads what calendars hold — every calendar unless --calendar names one — and a repeating event is one row, its series, on the day the series began. An edit is not a patch on HEY's side: it resends the notes, location, link, attached email, reminders and time zones the event already carries, so notes lose their formatting and a countdown is removed unless --countdown names one again. edit <series id> changes a whole series; one day of it is edit <series id> --occurrence <occurrence_id from day/week> --apply-to current|future, which keeps the countdown and refuses to flatten notes unless --allow-plain-notes or --notes is given. --apply-to future starts a new series and requires --repeat with its complete schedule; a preset alone means forever and custom copies an existing opaque schedule (a count-based rule can restart its full count). A virtual day of an opaque custom schedule is read from HEY's Day view and refused if that view no longer serves it. A realized custom day cannot be split safely; use a virtual occurrence, edit that day alone, or edit the whole series. A realized preset occurrence moved away from its series time must be moved back with --apply-to current before a future split. Read the day again afterward for the new series id. delete <series id> deletes the whole series; one day of it is delete <series id> --occurrence <occurrence_id> --apply-to current|future, whether or not HEY has written that day out. delete refuses a written-out day's own id, because HEY would draw the day again from the series. add and edit read clock times, and today when --starts-on is left out, in the HEY account's time zone unless --time-zone names one, and refuse when they need it and the account has none; an edit keeps a zoned event's zone and leaves a zoneless event zoneless.",
 		},
 	}
 
@@ -62,7 +62,11 @@ func newEventsListCommand() *eventsListCommand {
 
 A repeating event is stored once, so it lists once, as its series, on the day the series
 began. For the events of a day or a week as HEY draws them — occurrences of a repeating
-series expanded into the days they fall on — read 'hey event day' or 'hey event week'.`,
+series expanded into the days they fall on — read 'hey event day' or 'hey event week'.
+
+Without --starts-on the window is the 30 days from today, today in your HEY account's time
+zone, whatever this machine's is. An account with no time zone set reads this machine's
+today, and says so on stderr.`,
 		Example: `  hey event list
   hey event list --starts-on 2026-01-01 --ends-on 2026-01-31
   hey event list --calendar 123 --limit 5 --json`,
@@ -78,6 +82,13 @@ series expanded into the days they fall on — read 'hey event day' or 'hey even
 func (c *eventsListCommand) run(cmd *cobra.Command, args []string) error {
 	if err := requireAuth(); err != nil {
 		return err
+	}
+
+	// The window starts at today, so today is the account's: in New York after 20:00 the
+	// machine's clock on a server, like HEY's own, is already on tomorrow.
+	var account accountZone
+	c.filter.today = func(ctx context.Context) (time.Time, error) {
+		return account.todayToRead(ctx, cmd.ErrOrStderr(), "name the start, for example --starts-on 2026-10-14")
 	}
 
 	ctx := cmd.Context()
@@ -477,7 +488,7 @@ func eventSearchWindow(ctx context.Context, calendar int64, on string) (recordin
 		calendar:         calendar,
 		startsOn:         on,
 		endsOn:           endsOn,
-		defaultWindow:    func(now time.Time) (time.Time, time.Time) { return now.AddDate(-1, 0, 0), now.AddDate(1, 0, 0) },
+		defaultWindow:    func(today time.Time) (time.Time, time.Time) { return today.AddDate(-1, 0, 0), today.AddDate(1, 0, 0) },
 		defaultCalendars: allCalendarIDs,
 	}
 	return filter.resolve(ctx)
@@ -763,7 +774,7 @@ func (f *eventFields) newSchedule(ctx context.Context) (eventSchedule, error) {
 		if name, loc, err = f.writeZone(ctx); err != nil {
 			return eventSchedule{}, err
 		}
-		today = eventNow().In(loc)
+		today = clockNow().In(loc)
 		if !allDay {
 			zone = name
 		}

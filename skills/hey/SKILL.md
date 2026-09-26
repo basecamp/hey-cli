@@ -655,7 +655,7 @@ hey bubble list                               # List bubbled-up and scheduled th
 hey bubble pop 12345                          # Cancel a bubble-up: the thread moves to the Imbox, seen
 ```
 
-Takes box item IDs (the `id` field from `hey box view --json`). `hey bubble up` requires exactly one of `--now`, `--on`, `--tomorrow`, `--weekend`, and `--next-week`. `--on` takes a YYYY-MM-DD date; HEY bubbles the threads up at 08:00 UTC that day, or at 18:00 UTC when the date is today by your local clock. HEY schedules in UTC, so for a reader far from UTC "morning" may be the night before or the afternoon. `hey bubble pop` does not return a thread to its original box; it moves it to the Imbox and marks it seen.
+Takes box item IDs (the `id` field from `hey box view --json`). `hey bubble up` requires exactly one of `--now`, `--on`, `--tomorrow`, `--weekend`, and `--next-week`. `--on` takes a YYYY-MM-DD date; HEY bubbles the threads up at 08:00 UTC that day, or at 18:00 UTC when the date is today in UTC. HEY schedules in UTC, so for a reader far from UTC "morning" may be the night before or the afternoon. `hey bubble pop` does not return a thread to its original box; it moves it to the Imbox and marks it seen.
 
 `hey bubble list --json` answers two buckets: `bubbled_up`, the threads back in the Imbox after bubbling up, and `scheduled`, the threads waiting in Bubble Up — each scheduled row carries `bubble_up_schedule.bubble_up_at`, and `surprise_me` when HEY picked the time. Use `id` with `hey bubble pop`, `topic_id` with `hey thread read`.
 
@@ -774,6 +774,13 @@ window — `hey event list`, `hey todo list`, `hey journal list` — share `--ca
 unreadable one, or an `--ends-on` before `--starts-on`, is a usage error rather than an
 empty result. Naming only `--starts-on` moves the whole window rather than reading up to
 the default end.
+
+**Today is the HEY account's today.** Every command that defaults to today (`event
+day`/`week`/`list`, `habit list`/`complete`/`uncomplete`, `journal read`/`write`, `todo
+add`) works it out in the account's time zone and sends the date, so a UTC machine in the
+New York evening still gets the New York day. Name the date to skip the account read. With
+no account zone, a read uses the machine's date and says so on stderr; a write refuses —
+pass the date.
 
 ### Events
 

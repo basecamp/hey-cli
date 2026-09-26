@@ -319,7 +319,7 @@ Snippets are named reusable email content, separate from clips saved out of rece
 
 `hey box view <name|id>`, `hey label view <id>` and `hey collection view <id>` list the same postings and answer the same formats: `--json`, `--styled`, `--markdown`, `--ids-only`, and `--count`. The data-only formats print the pagination notice and any `next_page` cursor on stderr, so the IDs on stdout stay pipeable. `--json` differs only in what wraps the postings: a box answers with HEY's box payload, a label and a collection with the source and its `total_count`.
 
-Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Moving to any of them but Imbox marks the threads seen, and a thread that cannot be replied to is silently not moved to Reply Later. Reply Later is a box rather than a separate flag: moving a Reply Later thread to Imbox removes Reply Later, preserves its seen state, and leaves a seen thread in Previously Seen. It does not return the thread to the box it occupied before Reply Later. A bundle row is refused rather than moved: it stands in for one sender's whole stream in the box they are delivered to, so moving it leaves nothing there for their next email to join and it arrives unbundled instead. Group or ungroup a sender with `hey contact bundle` and `hey contact unbundle`, and read a bundle with `hey bundle view`. Bubble Up has its own commands: `hey bubble up` raises a thread right away with `--now`, on a date with `--on` (HEY resurfaces it at 08:00 UTC that day, or 18:00 UTC when the date is today), or at 08:00 UTC tomorrow, the next Saturday, or next Monday with `--tomorrow`, `--weekend`, and `--next-week`; `hey bubble pop` cancels one, moving the thread to the Imbox and marking it seen rather than returning it to its original box. `hey bubble list` shows both buckets — the threads back in the Imbox after bubbling up and the ones still scheduled, each with when it resurfaces. Trashing a shared thread removes your access instead of deleting it for everyone. Ignoring marks a thread seen and leaves it in its box; while it is ignored `hey unseen` has no effect, and `hey stop-ignoring` resumes notifications but leaves it seen.
+Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Moving to any of them but Imbox marks the threads seen, and a thread that cannot be replied to is silently not moved to Reply Later. Reply Later is a box rather than a separate flag: moving a Reply Later thread to Imbox removes Reply Later, preserves its seen state, and leaves a seen thread in Previously Seen. It does not return the thread to the box it occupied before Reply Later. A bundle row is refused rather than moved: it stands in for one sender's whole stream in the box they are delivered to, so moving it leaves nothing there for their next email to join and it arrives unbundled instead. Group or ungroup a sender with `hey contact bundle` and `hey contact unbundle`, and read a bundle with `hey bundle view`. Bubble Up has its own commands: `hey bubble up` raises a thread right away with `--now`, on a date with `--on` (HEY resurfaces it at 08:00 UTC that day, or 18:00 UTC when the date is today in UTC), or at 08:00 UTC tomorrow, the next Saturday, or next Monday with `--tomorrow`, `--weekend`, and `--next-week`; `hey bubble pop` cancels one, moving the thread to the Imbox and marking it seen rather than returning it to its original box. `hey bubble list` shows both buckets — the threads back in the Imbox after bubbling up and the ones still scheduled, each with when it resurfaces. Trashing a shared thread removes your access instead of deleting it for everyone. Ignoring marks a thread seen and leaves it in its box; while it is ignored `hey unseen` has no effect, and `hey stop-ignoring` resumes notifications but leaves it seen.
 
 ## Watching for changes
 
@@ -391,6 +391,18 @@ and `--all`. Dates want `YYYY-MM-DD`, and an unreadable one or an `--ends-on` be
 `--starts-on` is a usage error rather than an empty result. Naming only `--starts-on` moves
 the whole window rather than reading up to the default end.
 
+**Today is your HEY account's today.** Every command that defaults to today — `hey event
+day`, `week` and `list`, `hey habit list`, `complete` and `uncomplete`, `hey journal read`
+and `write`, and `hey todo add` — works it out in your HEY account's time zone and sends
+the date. HEY would read "now" in UTC, and a server's clock is UTC too, so in New York
+after 20:00 either would name tomorrow. The account's zone is read at most once, and not
+at all when you name the date. If the account has no zone set, or one this build does not
+know, a read uses this machine's today and says so on stderr, while a write is refused and
+asks you to name the date. A failed read of the account is an error either way, with the
+code it failed with; a sign-in failure is reported as one. `hey todo list` and `hey
+journal list` read years either side of today, so they use this machine's clock without
+asking.
+
 ### Events
 
 ```bash
@@ -432,8 +444,8 @@ edit` acts on for that day alone. Deleting one day, written out or not, takes it
 --apply-to current` (see below). A period covers the calendars
 switched on in HEY, the same set
 the app draws, so `day` and `week` take no `--calendar` — only `--limit`
-and `--all`. With no date they read the account's own today, whatever zone the machine
-runs in.
+and `--all`. With no date they read the account's today (see above), whatever zone the
+machine runs in.
 
 An event with no `--start-time` is an all-day event, and a `--start-time` with no
 `--end-time` runs for an hour — unless `--ends-on` names a later day, when it ends there at
