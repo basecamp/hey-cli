@@ -755,8 +755,12 @@ func (m *markdownizer) block(render func()) {
 
 // dropTrailingBreak takes the hard break off a block's last line: a break that ends a
 // block ends nothing Markdown can show, and writing it would make a note read back
-// differently the second time.
+// differently the second time. Inside a list it stays, because blank writes no blank
+// line there: the break is all that keeps the item's next line from joining this one.
 func (m *markdownizer) dropTrailingBreak() {
+	if len(m.lists) > 0 {
+		return
+	}
 	if m.brokenLines > 0 && m.brokenLines == len(m.lines) {
 		last := len(m.lines) - 1
 		m.lines[last] = strings.TrimSuffix(m.lines[last], "  ")

@@ -193,6 +193,34 @@ func TestToMarkdownConsecutiveBreaksAreABlankLine(t *testing.T) {
 	}
 }
 
+// A break ending a block is dropped only where a blank line follows the block. Inside a
+// list item nothing follows but the item's next line, so the break has to stay or a
+// renderer joins the two lines into one. Checked on what a conformant renderer shows.
+func TestToMarkdownBreakEndingABlockKeepsItsLineApart(t *testing.T) {
+	separated := func(rendered string) bool {
+		return strings.Contains(rendered, "Call Jane<br") || strings.Contains(rendered, "Call Jane</p>") ||
+			strings.Contains(rendered, "Call Jane</li>") || strings.Contains(rendered, "Call Jane\n<ul>")
+	}
+	for _, tt := range []struct {
+		name string
+		html string
+	}{
+		{name: "in a list item", html: `<ul><li><div>Call Jane<br></div><div>after six</div></li></ul>`},
+		{name: "in the last list item", html: `<ul><li>Partners</li><li><div>Call Jane<br></div><div>after six</div></li></ul>`},
+		{name: "before a nested list", html: `<ul><li><div>Call Jane<br></div><ul><li>after six</li></ul></li></ul>`},
+		{name: "in a quote", html: `<blockquote><div>Call Jane<br></div><div>after six</div></blockquote>`},
+		{name: "at the top level", html: `<div>Call Jane<br></div><div>after six</div>`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			markdown := toMarkdown(tt.html)
+			rendered := renderedHTML(t, markdown)
+			if !separated(rendered) || !strings.Contains(rendered, "after six") {
+				t.Errorf("ToMarkdown(%q) = %q renders as %q, want the lines kept apart", tt.html, markdown, rendered)
+			}
+		})
+	}
+}
+
 func TestToMarkdownHorizontalRule(t *testing.T) {
 	got := toMarkdown("<p>Above</p><hr><p>Below</p>")
 	want := "Above\n\n---\n\nBelow"
