@@ -794,16 +794,77 @@ func TestASubmittedFormKeepsWhatTheReaderSaw(t *testing.T) {
 		t.Errorf("after a refused save the form moved to %s %q", form.starts.clock(), form.starts.zoneName())
 	}
 
-	// Sent, and failed: the view hands the form back with saving off.
-	form = newAccountZoneForm(eventFormCreate, Recording{}, on, "")
-	form.title.SetValue("Design review")
-	if _, save := form.handleKey(keyPress("ctrl+s")); !save {
-		t.Fatalf("ctrl+s did not save: %q", form.status)
+}
+
+// A save HEY refuses hands the form back through the view's own failure path, and an identity
+// read landing after that leaves it as the reader saved it.
+func TestAFailedSaveKeepsWhatTheReaderSaw(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case req.Method == http.MethodPost && req.URL.Path == "/calendar/events.json":
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = io.WriteString(w, `{"error":"Calendar is read-only"}`)
+		case req.URL.Path == "/identity.json":
+			_, _ = io.WriteString(w, `{"id":7,"first_week_day":0,"time_zone":"America/Indiana/Indianapolis"}`)
+		default:
+			_, _ = io.WriteString(w, `{"starts_at":"2026-08-20T00:00:00Z","ends_at":"2026-08-20T23:59:59Z","kind":"day","recordings":{}}`)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	v := dayWithEvents(t)
+	v.vc.ctx = context.Background()
+	v.vc.sdk = hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"},
+		hey.WithMaxRetries(0))
+	v.calendars = eventFormCalendars()
+	v.Init()
+	identity := v.fetchIdentity()()
+
+	v.HandleContentKey(keyPress("a"))
+	v.eventForm.title.SetValue("Design review")
+	shown := v.eventForm.values()
+	save := v.HandleContentKey(keyPress("ctrl+s"))
+	if save == nil {
+		t.Fatal("ctrl+s did not save")
 	}
-	form.saving = false
-	form.adoptAccountZone(indianapolis)
-	if form.starts.zoneName() != "" || form.starts.clock() != shown {
-		t.Errorf("after a failed save the form moved to %s %q", form.starts.clock(), form.starts.zoneName())
+	v.Update(save())
+	if v.eventForm == nil || v.eventForm.saving || !v.eventForm.isError {
+		t.Fatalf("the failed save did not hand the form back: %+v", v.eventForm)
+	}
+
+	v.Update(identity)
+	if got := v.eventForm.values(); got.StartsAt != shown.StartsAt || got.StartTime != shown.StartTime ||
+		got.StartTimeZone != shown.StartTimeZone || got.EndTimeZone != shown.EndTimeZone {
+		t.Errorf("after a failed save the form shows %s %s %q → %q, want %s %s %q → %q as it was saved",
+			got.StartsAt, got.StartTime, got.StartTimeZone, got.EndTimeZone,
+			shown.StartsAt, shown.StartTime, shown.StartTimeZone, shown.EndTimeZone)
+	}
+}
+
+// A view pinned to a day that has since become today offers the next whole hour of now, not of
+// the moment it was pinned: `n` to tomorrow at 09:15, left open until 15:10 the next day, and a
+// new event there opens at 16:00. A day that is not today keeps its own hour.
+func TestAPinnedViewThatBecameTodayOffersAnHourStillToCome(t *testing.T) {
+	v, _ := calendarWithEventServer(t)
+	v.now = func() time.Time { return time.Date(2026, 8, 20, 9, 15, 0, 0, time.Local) }
+	v.HandleContentKey(keyPress("n")) // 2026-08-21, pinned at 09:15 on the 20th
+	now := time.Date(2026, 8, 21, 15, 10, 0, 0, time.Local)
+	v.now = func() time.Time { return now }
+
+	v.HandleContentKey(keyPress("a"))
+	if got := v.eventForm.starts.date() + " " + v.eventForm.starts.clock(); got != "2026-08-21 16:00" {
+		t.Errorf("start = %s, want 2026-08-21 16:00, the next whole hour after now", got)
+	}
+	if starts, ok := v.eventForm.starts.moment(); !ok || starts.Before(now) {
+		t.Errorf("start %s is before now %s", starts, now)
+	}
+
+	v.eventForm = nil
+	v.HandleContentKey(keyPress("n")) // 2026-08-22, still carrying the pinned 09:15
+	v.HandleContentKey(keyPress("a"))
+	if got := v.eventForm.starts.date() + " " + v.eventForm.starts.clock(); got != "2026-08-22 10:00" {
+		t.Errorf("start = %s, want 2026-08-22 10:00, the day's own hour", got)
 	}
 }
 
@@ -834,30 +895,4 @@ func TestNewEventFormStartsAfterNowInLordHowesRepeatedHalfHour(t *testing.T) {
 		t.Errorf("start = %s, want 02:00", values.StartTime)
 	}
 	wantPlaced(t, "start", values.StartsAt, values.StartTime, values.StartTimeZone, time.Date(2026, 4, 4, 15, 30, 0, 0, time.UTC))
-}
-
-// A view pinned to a day that has since become today offers the next whole hour of now, not of
-// the moment it was pinned: `n` to tomorrow at 09:15, left open until 15:10 the next day, and a
-// new event there opens at 16:00. A day that is not today keeps its own hour.
-func TestAPinnedViewThatBecameTodayOffersAnHourStillToCome(t *testing.T) {
-	v, _ := calendarWithEventServer(t)
-	v.now = func() time.Time { return time.Date(2026, 8, 20, 9, 15, 0, 0, time.Local) }
-	v.HandleContentKey(keyPress("n")) // 2026-08-21, pinned at 09:15 on the 20th
-	now := time.Date(2026, 8, 21, 15, 10, 0, 0, time.Local)
-	v.now = func() time.Time { return now }
-
-	v.HandleContentKey(keyPress("a"))
-	if got := v.eventForm.starts.date() + " " + v.eventForm.starts.clock(); got != "2026-08-21 16:00" {
-		t.Errorf("start = %s, want 2026-08-21 16:00, the next whole hour after now", got)
-	}
-	if starts, ok := v.eventForm.starts.moment(); !ok || starts.Before(now) {
-		t.Errorf("start %s is before now %s", starts, now)
-	}
-
-	v.eventForm = nil
-	v.HandleContentKey(keyPress("n")) // 2026-08-22, still carrying the pinned 09:15
-	v.HandleContentKey(keyPress("a"))
-	if got := v.eventForm.starts.date() + " " + v.eventForm.starts.clock(); got != "2026-08-22 10:00" {
-		t.Errorf("start = %s, want 2026-08-22 10:00, the day's own hour", got)
-	}
 }
