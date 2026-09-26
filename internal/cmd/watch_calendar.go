@@ -399,13 +399,17 @@ func (w *postingsWatch) skipCalendarAhead(ctx context.Context, calendar *watched
 
 		now, err := serverNow(ctx)
 		if err != nil {
-			if permanentReadError(err) {
+			switch {
+			case ctx.Err() != nil:
+				return time.Time{}, false, nil //nolint:nilerr // an interrupt or a --timeout is how a watch is meant to end
+			case permanentReadError(err):
 				return time.Time{}, false, err
+			default:
+				fmt.Fprintf(w.errOut, "warning: could not skip %s ahead: %v\n", calendar.name, err)
+				w.calendar.unread[calendar.id] = true
+				w.armRetry()
+				return time.Time{}, false, nil
 			}
-			fmt.Fprintf(w.errOut, "warning: could not skip %s ahead: %v\n", calendar.name, err)
-			w.calendar.unread[calendar.id] = true
-			w.armRetry()
-			return time.Time{}, false, nil
 		}
 		cursor.Since = watchStartSince(now)
 		calendar.cursor = cursor

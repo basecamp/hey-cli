@@ -480,6 +480,72 @@ func TestWatchSkipsAheadToHEYsClock(t *testing.T) {
 	}
 }
 
+// cancelledAtTheClock is HEY as a skip-ahead meets it when the watch is interrupted
+// while it reads the clock: the feed is too far behind, the box and calendar lists
+// answer, and the clock request is where the interrupt lands.
+func cancelledAtTheClock(t *testing.T, cancel context.CancelFunc) {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/identity.json":
+			cancel()
+			<-r.Context().Done()
+		case "/boxes.json":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"id":24088,"kind":"imbox","name":"Imbox","posting_changes_url":"/boxes/24088/postings/changes.json?since=2026-08-21T11%3A02%3A00.518496Z&v=2"}]`))
+		case "/calendars.json":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"calendars": [{"calendar": {"id": 512, "name": "Household"},
+				"recording_changes_url": "/calendars/512/recording/changes.json?since=2026-08-18T11%3A00%3A00.000000Z&v=1"}]}`))
+		default:
+			w.WriteHeader(http.StatusConflict)
+		}
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("HEY_TOKEN", "test-token")
+	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
+}
+
+// An interrupt or --timeout while a skip-ahead reads HEY's clock is how a watch is
+// meant to end, not a failed read: nothing is warned about and no retry is armed.
+func TestWatchSkipAheadEndsQuietlyWhenInterrupted(t *testing.T) {
+	for _, feed := range []string{"box", "calendar"} {
+		t.Run(feed, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			cancelledAtTheClock(t, cancel)
+
+			watch, out := newTestWatch("added", "resync", "calendar_resync")
+			errOut := &bytes.Buffer{}
+			watch.errOut = errOut
+			watch.boxes[24088].cursor.Since = "2026-08-01T00:00:00.000Z"
+			watch.calendar = newTestCalendarsWatch(t, &watchedCalendar{id: 512, name: "Household", cursor: hey.CalendarChangesCursor{Since: "2026-08-01T00:00:00.000Z", Version: "1"}})
+
+			var err error
+			if feed == "box" {
+				err = watch.readBox(ctx, watch.boxes[24088])
+			} else {
+				err = watch.readCalendar(ctx, watch.calendar.calendars[512])
+			}
+			if err != nil {
+				t.Fatalf("read = %v, want an interrupted skip-ahead to end quietly", err)
+			}
+			if strings.Contains(errOut.String(), "warning") {
+				t.Errorf("stderr = %q, want no warning for an interrupt", errOut.String())
+			}
+			if watch.retry != nil || len(watch.unread) != 0 || len(watch.calendar.unread) != 0 {
+				t.Error("an interrupted skip-ahead should not arm a retry")
+			}
+			if out.Len() != 0 {
+				t.Errorf("wrote %q, want no resync for a skip that did not happen", out.String())
+			}
+			if watch.boxes[24088].cursor.Since != "2026-08-01T00:00:00.000Z" || watch.calendar.calendars[512].cursor.Since != "2026-08-01T00:00:00.000Z" {
+				t.Error("an interrupted skip-ahead should leave the cursor where it was")
+			}
+		})
+	}
+}
+
 // A box list the SDK revalidates answers 304 while no box row has changed, which is
 // every posting's activity — so after a long drop the list hands back the since the
 // watch fell behind from. Skipping to it answered 409 again on every read; skipping to
