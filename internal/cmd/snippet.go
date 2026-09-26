@@ -147,7 +147,7 @@ func newSnippetCreateCommand() *snippetCreateCommand {
 	}
 	createCommand.cmd.Flags().StringVar(&createCommand.name, "name", "", "Snippet name (required)")
 	createCommand.cmd.Flags().StringVar(&createCommand.content, "content", "", "Snippet content as Markdown")
-	createCommand.cmd.Flags().StringVar(&createCommand.contentHTML, "content-html", "", "Snippet content as raw HTML instead of Markdown")
+	createCommand.cmd.Flags().StringVar(&createCommand.contentHTML, "content-html", "", "Snippet content as raw HTML instead of Markdown; the trix-content wrapper HEY serves content_html in is taken off")
 	createCommand.cmd.MarkFlagsMutuallyExclusive("content", "content-html")
 	return createCommand
 }
@@ -192,7 +192,7 @@ func newSnippetUpdateCommand() *snippetUpdateCommand {
 	}
 	updateCommand.cmd.Flags().StringVar(&updateCommand.name, "name", "", "New snippet name")
 	updateCommand.cmd.Flags().StringVar(&updateCommand.content, "content", "", "New snippet content as Markdown")
-	updateCommand.cmd.Flags().StringVar(&updateCommand.contentHTML, "content-html", "", "New snippet content as raw HTML instead of Markdown")
+	updateCommand.cmd.Flags().StringVar(&updateCommand.contentHTML, "content-html", "", "New snippet content as raw HTML instead of Markdown; the trix-content wrapper HEY serves content_html in is taken off")
 	updateCommand.cmd.MarkFlagsMutuallyExclusive("content", "content-html")
 	return updateCommand
 }

@@ -235,7 +235,7 @@ not opened in $EDITOR, since saving it would drop that content: change the entry
 	}
 
 	journalWriteCommand.cmd.Flags().StringVarP(&journalWriteCommand.content, "content", "c", "", "Journal content as Markdown (or opens $EDITOR)")
-	journalWriteCommand.cmd.Flags().StringVar(&journalWriteCommand.contentHTML, "content-html", "", "Journal content as raw HTML instead of Markdown")
+	journalWriteCommand.cmd.Flags().StringVar(&journalWriteCommand.contentHTML, "content-html", "", "Journal content as raw HTML instead of Markdown; the trix-content wrapper HEY serves an entry in is taken off")
 	journalWriteCommand.cmd.MarkFlagsMutuallyExclusive("content", "content-html")
 
 	return journalWriteCommand
