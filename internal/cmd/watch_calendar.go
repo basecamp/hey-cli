@@ -79,12 +79,11 @@ func (c *watchCommand) watchingCalendars(changes map[string]bool) bool {
 }
 
 // watchedCalendars reads the calendars and where each one's feed should be read from. The
-// cursors start at the watch's start the way the boxes' do: the since HEY serves is a
-// calendar's own updated_at — for the list, the latest of them — not HEY's clock, and a
-// calendar deleted after the rest last changed is later than that, so a first poll from
-// it would report the deletion as news on every start; and a write that lands between
-// reading the clock and reading the list would sit behind a later one, read by nothing.
-func (c *watchCommand) watchedCalendars(ctx context.Context, started time.Time) (*calendarsWatch, error) {
+// cursors start at the watch's start the way the boxes' do (watchStart.since): the since
+// HEY serves is a calendar's own updated_at — for the list, the latest of them — so a
+// calendar deleted after the rest last changed was reported by the first poll of every
+// watch.
+func (c *watchCommand) watchedCalendars(ctx context.Context, started watchStart) (*calendarsWatch, error) {
 	list, err := sdk.Calendars().ListWithChanges(ctx)
 	if err != nil {
 		return nil, apierr.FromSDK(err)
@@ -117,7 +116,7 @@ func (c *watchCommand) watchedCalendars(ctx context.Context, started time.Time) 
 	return watch, nil
 }
 
-func (c *watchCommand) followedCalendar(listed hey.ListedCalendar, started time.Time) (*watchedCalendar, error) {
+func (c *watchCommand) followedCalendar(listed hey.ListedCalendar, started watchStart) (*watchedCalendar, error) {
 	cursor, err := c.calendarCursor(listed.RecordingChangesURL, started)
 	if err != nil {
 		return nil, err
@@ -133,19 +132,21 @@ func (c *watchCommand) followedCalendar(listed hey.ListedCalendar, started time.
 
 // calendarCursor is where a feed should be read from: the feed and version the URL HEY
 // served names, from --since or else from the watch's start.
-func (c *watchCommand) calendarCursor(changesURL string, started time.Time) (hey.CalendarChangesCursor, error) {
+func (c *watchCommand) calendarCursor(changesURL string, started watchStart) (hey.CalendarChangesCursor, error) {
 	cursor, err := hey.CalendarChangesCursorFrom(changesURL)
 	if err != nil {
 		return hey.CalendarChangesCursor{}, apierr.FromSDK(err)
 	}
-
-	from := started
-	if c.since != "" {
-		if from, err = parseWatchSince(c.since); err != nil {
-			return hey.CalendarChangesCursor{}, err
-		}
+	if c.since == "" {
+		cursor.Since = started.since(cursor.Since)
+		return cursor, nil
 	}
-	cursor.Since = from.UTC().Format(watchCursorTimeLayout)
+
+	at, err := parseWatchSince(c.since)
+	if err != nil {
+		return hey.CalendarChangesCursor{}, err
+	}
+	cursor.Since = at.UTC().Format(watchCursorTimeLayout)
 
 	return cursor, nil
 }

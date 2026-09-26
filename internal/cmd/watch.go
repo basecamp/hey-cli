@@ -154,7 +154,7 @@ func (c *watchCommand) run(cmd *cobra.Command, args []string) error {
 	// the boxes' cursors are read — and the cursors start at it, so nothing
 	// that lands between the two sits behind a cursor, read by nothing.
 	started := serverNow(ctx)
-	newMail := trackNewMail(started)
+	newMail := trackNewMail(started.at)
 
 	boxes, err := c.watchedBoxes(ctx, started)
 	if err != nil {
@@ -253,7 +253,7 @@ func (c *watchCommand) watchedChanges() (map[string]bool, error) {
 	return changes, nil
 }
 
-func (c *watchCommand) watchedBoxes(ctx context.Context, started time.Time) (map[int64]*watchedBox, error) {
+func (c *watchCommand) watchedBoxes(ctx context.Context, started watchStart) (map[int64]*watchedBox, error) {
 	listed, err := sdk.Boxes().List(ctx)
 	if err != nil {
 		return nil, apierr.FromSDK(err)
@@ -277,7 +277,7 @@ func (c *watchCommand) watchedBoxes(ctx context.Context, started time.Time) (map
 			continue
 		}
 		if c.since == "" {
-			cursor = startingAt(cursor, started)
+			cursor.Since = started.since(cursor.Since)
 		}
 
 		watched[box.Id] = &watchedBox{id: box.Id, kind: box.Kind, name: box.Name, cursor: cursor, reported: c.watching(box)}
@@ -308,8 +308,8 @@ func boxIs(box generated.Box, wanted string) bool {
 }
 
 // watchCursor reads the cursor out of a box's changes URL — HEY's own, which a skip-ahead
-// resumes from — unless --since moves it. A watch's first read starts at the watch's
-// start instead (startingAt).
+// resumes from — unless --since moves it. Without --since, a watch's first read starts
+// at the watch's start instead (watchStart.since).
 func watchCursor(changesURL, since string) (hey.PostingChangesCursor, error) {
 	if changesURL == "" {
 		return hey.PostingChangesCursor{}, nil
@@ -333,24 +333,6 @@ func watchCursor(changesURL, since string) (hey.PostingChangesCursor, error) {
 }
 
 const watchCursorTimeLayout = "2006-01-02T15:04:05.000Z"
-
-// startingAt starts a feed's cursor at the watch's start, keeping the version HEY's
-// URL names. The since HEY serves is not its clock but the box's last posting
-// activity — the latest updated_at among its unbundled postings, or the box's own
-// when it has none — and the feed answers changes later than that which are history
-// by now: a deletion, a bundled posting. Nor is it always even that: the box list
-// comes through the SDK's ETag cache, HEY's ETag for it is the box rows, and posting
-// activity does not touch them, so a 304 hands back the since as it stood when the
-// list was cached — hours or days behind. Read from there, the catch-up reported
-// what came after as news on every start, and --exit-on-first stopped on the first
-// of it. From the start it
-// reports what happened after it and nothing before — including mail that landed
-// after the watch read HEY's clock and before it read the box list, which a cursor
-// later than the start would leave behind it, read by nothing. That mail is new, too.
-func startingAt(cursor hey.PostingChangesCursor, started time.Time) hey.PostingChangesCursor {
-	cursor.Since = started.UTC().Format(watchCursorTimeLayout)
-	return cursor
-}
 
 func parseWatchSince(since string) (time.Time, error) {
 	if at, err := time.Parse(time.RFC3339, since); err == nil {
