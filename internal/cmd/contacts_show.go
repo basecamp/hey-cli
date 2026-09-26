@@ -23,8 +23,9 @@ type contactsShowCommand struct {
 
 type contactShowResult struct {
 	generated.ContactDetail
-	Note     string `json:"note"`
-	NoteHTML string `json:"note_html,omitempty"`
+	Note         string            `json:"note"`
+	NoteHTML     string            `json:"note_html,omitempty"`
+	NoteMarkdown htmlutil.Markdown `json:"note_markdown"`
 }
 
 func newContactsShowCommand() *contactsShowCommand {
@@ -33,7 +34,7 @@ func newContactsShowCommand() *contactsShowCommand {
 		Use:   "show <id>",
 		Short: "View a contact",
 		Annotations: map[string]string{
-			"agent_notes": "Returns contact details, aliases, screening status, and the private note. The embedded postings are one page of the contact's threads; hey contact threads <id> pages through all of them.",
+			"agent_notes": "Returns contact details, aliases, screening status, and the private note (note_markdown is the form hey contact note set takes). The embedded postings are one page of the contact's threads; hey contact threads <id> pages through all of them.",
 		},
 		Example: `  hey contact show 12345
   hey contact show 12345 --json`,
@@ -82,6 +83,7 @@ func (c *contactsShowCommand) run(cmd *cobra.Command, args []string) error {
 	if note != nil {
 		result.Note = note.Note
 		result.NoteHTML = note.NoteHtml
+		result.NoteMarkdown = contactNoteMarkdown(note.Note, note.NoteHtml)
 	}
 	if writer.EffectiveFormat() == output.FormatHTML {
 		return writeNoteHTML(cmd.OutOrStdout(), result.NoteHTML)

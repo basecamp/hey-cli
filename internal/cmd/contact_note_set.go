@@ -27,11 +27,13 @@ func newContactNoteSetCommand() *contactNoteSetCommand {
 		Use:   "set <id> [note]",
 		Short: "Write or edit a private contact note",
 		Annotations: map[string]string{
-			"agent_notes": "Accepts --note, positional content, stdin, or opens $EDITOR with the existing note. The note is Markdown, or raw HTML via --note-html. Use the delete subcommand to clear a note.",
+			"agent_notes": "Replaces the whole note. Accepts --note, positional content, stdin, or opens $EDITOR with the existing note. The note is Markdown, or raw HTML via --note-html. To add to a note, read note_markdown from hey contact note show, change it, and set all of it. Use the delete subcommand to clear a note.",
 		},
 		Example: `  hey contact note set 12345 "Prefers email"
   hey contact note set 12345 --note "Prefers email"
-  echo "Prefers email" | hey contact note set 12345`,
+  echo "Prefers email" | hey contact note set 12345
+  hey contact note show 12345 --jq '.data.note_markdown' > note.md
+  hey contact note set 12345 < note.md`,
 		RunE: setCommand.run,
 		Args: cobra.MatchAll(usageMinOneArg(), cobra.MaximumNArgs(2)),
 	}
@@ -78,7 +80,9 @@ func (c *contactNoteSetCommand) run(cmd *cobra.Command, args []string) error {
 		}
 		content = htmlutil.FromMarkdown(strings.TrimSpace(markdownNote))
 	} else {
-		content = strings.TrimSpace(content)
+		// HTML read from note_html carries HEY's editor wrapper; writing it back as it is
+		// would nest the note one level deeper on every round trip.
+		content = htmlutil.UnwrapTrixContent(strings.TrimSpace(content))
 	}
 	if content == "" {
 		return apierr.ErrUsage("note cannot be empty; use `hey contact note delete <id>` to clear it")
@@ -94,7 +98,7 @@ func (c *contactNoteSetCommand) run(cmd *cobra.Command, args []string) error {
 	return writeMutationLine(cmd,
 		fmt.Sprintf("Private note for contact %d saved.", contactID),
 		"Private contact note saved",
-		note,
+		newContactNoteResult(*note),
 		output.WithBreadcrumbs(output.Breadcrumb{Action: "read", Command: fmt.Sprintf("hey contact note show %d", contactID), Description: "Read the private note"}),
 	)
 }
@@ -124,8 +128,5 @@ func contactNoteForEditor(ctx context.Context, contactID int64, fetch contactNot
 	if note == nil {
 		return "", nil
 	}
-	if note.NoteHtml != "" {
-		return htmlutil.ToMarkdown(note.NoteHtml).String(), nil
-	}
-	return note.Note, nil
+	return contactNoteMarkdown(note.Note, note.NoteHtml).String(), nil
 }
