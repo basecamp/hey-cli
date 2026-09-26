@@ -623,3 +623,79 @@ func TestEventsEditZonelessEventPlacesARepeatedTimeAsHEYDoes(t *testing.T) {
 		"--starts-on", "2026-10-25", "--start-time", "02:30", "--ends-on", "2026-10-25", "--end-time", "04:00")
 	wantSchedule(t, requests.written(t), "2026-10-25", "00:30", "2026-10-25", "03:00", "")
 }
+
+// HEY is sent a clock time and a zone, and takes the first of the two moments a clock time
+// names as the clocks go back. An end kept at the second one cannot be sent back as it is,
+// so the edit is refused rather than moving it an hour; one at the first goes through.
+func TestEventsEditRefusesToMoveAKeptTimeOutOfTheRepeatedHour(t *testing.T) {
+	// 05:30Z is the first 01:30 in New York on 1 November, 06:30Z the second.
+	zoneless := func(start, end string) string {
+		return `{"id":4821,"title":"Night shift handover","starts_at":"` + start + `","ends_at":"` + end + `"}`
+	}
+	zoned := func(start, end string) string {
+		return `{"id":4821,"title":"Night shift handover","starts_at":"` + start + `","ends_at":"` + end + `",` +
+			`"starts_at_time_zone":"America/New_York","ends_at_time_zone":"America/New_York"}`
+	}
+	tests := []struct {
+		name  string
+		event string
+		args  []string
+		want  string // the start sent, or empty for a refusal
+	}{
+		{name: "zoneless given a zone, first 01:30", event: zoneless("2026-11-01T05:30:00Z", "2026-11-01T07:30:00Z"),
+			args: []string{"--time-zone", "America/New_York"}, want: "01:30"},
+		{name: "zoneless given a zone, second 01:30", event: zoneless("2026-11-01T06:30:00Z", "2026-11-01T07:30:00Z"),
+			args: []string{"--time-zone", "America/New_York"}},
+		{name: "zoned, first 01:30", event: zoned("2026-11-01T05:30:00Z", "2026-11-01T07:30:00Z"),
+			args: []string{"--title", "Night shift handover (Sam)"}, want: "01:30"},
+		{name: "zoned, second 01:30", event: zoned("2026-11-01T06:30:00Z", "2026-11-01T07:30:00Z"),
+			args: []string{"--title", "Night shift handover (Sam)"}},
+		{name: "zoned, second 01:30 retyped", event: zoned("2026-11-01T06:30:00Z", "2026-11-01T07:30:00Z"),
+			args: []string{"--start-time", "01:30"}, want: "01:30"},
+		{name: "zoned, end at the second 01:30", event: zoned("2026-11-01T04:30:00Z", "2026-11-01T06:30:00Z"),
+			args: []string{"--title", "Night shift handover (Sam)"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler, requests := zoneServer(t, zoneFixture{accountZone: "America/New_York", event: tt.event})
+			_, err := runJSONCommand(t, handler, append([]string{"event", "edit", "4821", "2026-11-01", "--calendar", "9"}, tt.args...)...)
+			if tt.want == "" {
+				var cliErr *apierr.Error
+				if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, "clocks go back") {
+					t.Fatalf("error = %v, want a usage error about the repeated hour", err)
+				}
+				if got := requests.writes.Load(); got != 0 {
+					t.Errorf("writes = %d, want none", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("execute event edit: %v", err)
+			}
+			if got := requests.written(t).Get("calendar_event[starts_at_time]"); got != tt.want+":00" {
+				t.Errorf("starts_at_time = %q, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+// One day of a series goes through the same check: a day HEY wrote out at the second 02:30
+// of the night Zagreb falls back is refused rather than moved an hour earlier.
+func TestEventsEditOccurrenceRefusesToMoveADayOutOfTheRepeatedHour(t *testing.T) {
+	realized := `{"id":9001,"type":"Calendar::Event","parent_id":4821,"occurrence_id":"4821_2026-10-27",` +
+		`"title":"Design review","starts_at":"2026-10-25T01:30:00Z","ends_at":"2026-10-25T02:30:00Z",` +
+		`"starts_at_time_zone":"Europe/Zagreb","ends_at_time_zone":"Europe/Zagreb","calendar":{"id":9,"name":"Work"}}`
+	handler, writes := occurrenceServer(t, "2026-10-27",
+		`{"Calendar::Event":[`+occurrenceSeriesJSON+`,`+realized+`]}`,
+		"",
+		func(t *testing.T, form url.Values) { t.Error("wrote a day an hour away from where it was") })
+	_, err := runJSONCommand(t, handler, "event", "edit", "4821", "--occurrence", "4821_2026-10-27", "--apply-to", "current",
+		"--title", "Design review (moved)")
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, "clocks go back") {
+		t.Fatalf("error = %v, want a usage error about the repeated hour", err)
+	}
+	if writes.Load() != 0 {
+		t.Errorf("writes = %d, want none", writes.Load())
+	}
+}

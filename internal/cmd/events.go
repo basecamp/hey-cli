@@ -253,7 +253,10 @@ stays without one: typed times are read in your HEY account's zone and sent as t
 they name, and the times you do not type keep theirs. --time-zone gives the event that
 zone, keeping the moment of every time you do not type. An all-day event given a time
 takes the account's zone. If a zone is needed and the account has none, the edit refuses
-and asks for --time-zone. All of this holds for an --occurrence edit too.
+and asks for --time-zone. HEY is sent a clock time and a zone, and a clock time in the hour
+the clocks repeat as they go back is the first of the two; a time you keep at the second
+cannot be sent, so the edit refuses until you retype it. All of this holds for an
+--occurrence edit too.
 
 The event is found by reading the calendars it might be on, which is one request each and
 covers the pages HEY answers with. Give the day it starts as [date] to look on that day
@@ -874,15 +877,40 @@ func (f *eventFields) scheduleFrom(ctx context.Context, cmd *cobra.Command, even
 		return eventSchedule{}, err
 	}
 
+	startRetyped := flags.Changed("starts-on") || flags.Changed("start-time")
+	endRetyped := flags.Changed("ends-on") || flags.Changed("end-time")
 	if startZone.name == "" {
-		retyped := flags.Changed("starts-on") || flags.Changed("start-time")
-		schedule.startsAt, schedule.startTime = zonelessEnd(event.StartsAt, schedule.startsAt, schedule.startTime, startZone.loc, retyped)
+		schedule.startsAt, schedule.startTime = zonelessEnd(event.StartsAt, schedule.startsAt, schedule.startTime, startZone.loc, startRetyped)
+	} else if !event.AllDay && !startRetyped {
+		if err = keepsItsMoment("start", event.StartsAt, schedule.startsAt, schedule.startTime, startZone); err != nil {
+			return eventSchedule{}, err
+		}
 	}
 	if endZone.name == "" {
-		retyped := flags.Changed("ends-on") || flags.Changed("end-time")
-		schedule.endsAt, schedule.endTime = zonelessEnd(event.EndsAt, schedule.endsAt, schedule.endTime, endZone.loc, retyped)
+		schedule.endsAt, schedule.endTime = zonelessEnd(event.EndsAt, schedule.endsAt, schedule.endTime, endZone.loc, endRetyped)
+	} else if !event.AllDay && !endRetyped {
+		if err = keepsItsMoment("end", event.EndsAt, schedule.endsAt, schedule.endTime, endZone); err != nil {
+			return eventSchedule{}, err
+		}
 	}
 	return schedule, nil
+}
+
+// keepsItsMoment refuses to send an end nobody retyped as a clock time HEY would place
+// somewhere else. HEY is sent a date, a clock time and a zone, and of the two moments a
+// clock time names in the hour the clocks go back, it takes the first: an end at the
+// second one — an event HEY imported, or a zoneless one given a zone — cannot be sent back
+// as it is, and would move an hour earlier on an edit that never touched it.
+func keepsItsMoment(end string, had time.Time, date, clock string, zone clockZone) error {
+	day, _ := time.Parse(dateLayout, date)
+	at, _ := time.Parse(clockLayout, clock)
+	if wallClockOn(day, at, zone.loc).Equal(had.Truncate(time.Minute)) {
+		return nil
+	}
+	return apierr.ErrUsageHint(
+		fmt.Sprintf("the event's %s, %s %s in %s, is the second %s of the night the clocks go back, and HEY can only be sent the first, so the edit would move it an hour",
+			end, date, clock, terminal.SanitizeLine(zone.name), clock),
+		fmt.Sprintf("retype it with --%ss-on and --%s-time to place it at the first %s, or choose a time outside that hour", end, end, clock))
 }
 
 // clockZone is the zone one end of an edited event is read and written in. An end with no
