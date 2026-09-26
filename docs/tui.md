@@ -150,8 +150,10 @@ A new event's times are written in your HEY account's time zone, the one HEY's w
 `hey event add` use: the Starts and Ends rows name it, and the event is saved in it. The
 Calendar reads the zone each time it opens; if the account has none or it cannot be read,
 the form opens on `Local` instead, and a form opened before the read answers takes the zone
-when it does, unless you have already changed its times. The zone list still offers `Local` (your machine's clock,
-saved without a zone) and every other zone. An edit keeps the event's own zone, and an event
-saved without one stays on `Local`; an all-day event given a time takes the account's zone.
+when it does, unless you have already changed its times. The zone list still offers `Local`
+(your machine's clock, saved without a zone) and the zones in your machine's zone database,
+or a shortlist of common zones where that database cannot be listed. An edit keeps the
+event's own zone, and an event saved without one stays on `Local`; an all-day event given a
+time takes the account's zone.
 
 In Calendar, press `a` to create a habit. Habits visible in the current calendar range can be selected with `[` and `]`, edited with `e`, and deleted by pressing `x` twice. Habit forms use Tab to move between fields and Ctrl+S to save.
