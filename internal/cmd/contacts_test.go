@@ -18,6 +18,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 type recordedContactRequest struct {
@@ -42,7 +43,7 @@ func (r *recordedContacts) snapshot() []recordedContactRequest {
 func contactsServer(t *testing.T) (*httptest.Server, *recordedContacts) {
 	t.Helper()
 	recorded := &recordedContacts{statuses: make(map[string]int)}
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		body := new(bytes.Buffer)
 		_, _ = body.ReadFrom(req.Body)
 		recorded.mu.Lock()

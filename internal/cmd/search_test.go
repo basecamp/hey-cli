@@ -16,6 +16,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 type recordedSearch struct {
@@ -27,7 +28,7 @@ type recordedSearch struct {
 func searchServer(t *testing.T) (*httptest.Server, *recordedSearch) {
 	t.Helper()
 	recorded := &recordedSearch{status: http.StatusOK}
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		recorded.requests++
 		if r.URL.Path == "/advanced_search_filters.json" {
 			w.Header().Set("Content-Type", "application/json")

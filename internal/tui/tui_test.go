@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"strconv"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/mail"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 // --- Test helpers ---
@@ -1308,7 +1308,7 @@ func TestViewShowsBoxNames(t *testing.T) {
 
 func openLinkThreadThroughModel(t *testing.T) model {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/topics/100/entries.json":
@@ -1327,7 +1327,6 @@ func openLinkThreadThroughModel(t *testing.T) model {
 			http.NotFound(w, r)
 		}
 	}))
-	t.Cleanup(server.Close)
 
 	m := modelWithBoxes()
 	m.mailView.vc.sdk = hey.NewClient(

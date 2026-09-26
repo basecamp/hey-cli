@@ -14,6 +14,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 type recordedBubble struct {
@@ -30,7 +31,7 @@ type recordedBubble struct {
 func bubbleServer(t *testing.T) (*httptest.Server, *recordedBubble) {
 	t.Helper()
 	recorded := &recordedBubble{status: http.StatusNoContent}
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		recorded.requests++
 		recorded.method = r.Method
 		recorded.path = r.URL.Path

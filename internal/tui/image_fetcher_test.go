@@ -7,12 +7,13 @@ import (
 	"hash/crc32"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"sync/atomic"
 	"testing"
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 type imageBlobDownloaderFunc func(context.Context, string, io.Writer) (int64, http.Header, error)
@@ -89,12 +90,11 @@ func TestTrustedImageFetcherRejectsLookalikeAndUnsafeOrigins(t *testing.T) {
 func TestTrustedImageFetcherRejectsURLCredentialsBeforeRequest(t *testing.T) {
 	var requests atomic.Int64
 	imageData := testPNG(t)
-	gopher := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	gopher := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requests.Add(1)
 		w.Header().Set("Content-Type", "image/png")
 		_, _ = w.Write(imageData)
 	}))
-	t.Cleanup(gopher.Close)
 
 	parsed, err := url.Parse(gopher.URL + "/image.png")
 	if err != nil {
@@ -165,12 +165,11 @@ func TestTrustedImageFetcherRejectsOversizedHEYImage(t *testing.T) {
 func TestTrustedImageFetcherLoadsImageFromGopherWithoutHEYCredentials(t *testing.T) {
 	imageData := testPNG(t)
 	var authorization string
-	gopher := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	gopher := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authorization = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "image/png")
 		_, _ = w.Write(imageData)
 	}))
-	t.Cleanup(gopher.Close)
 
 	fetcher := newTrustedImageFetcherWithOrigins(
 		rejectingImageBlobDownloader(t),
@@ -194,11 +193,10 @@ func TestTrustedImageFetcherLoadsImageFromGopherWithoutHEYCredentials(t *testing
 // to reject every image served without the header before the magic bytes were sniffed.
 func TestTrustedImageFetcherAcceptsAnImageWithNoContentType(t *testing.T) {
 	imageData := testPNG(t)
-	gopher := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	gopher := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header()["Content-Type"] = nil
 		_, _ = w.Write(imageData)
 	}))
-	t.Cleanup(gopher.Close)
 
 	fetcher := newTrustedImageFetcherWithOrigins(
 		rejectingImageBlobDownloader(t),
@@ -216,11 +214,10 @@ func TestTrustedImageFetcherAcceptsAnImageWithNoContentType(t *testing.T) {
 }
 
 func TestTrustedImageFetcherRejectsNonImageContent(t *testing.T) {
-	gopher := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	gopher := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		_, _ = w.Write([]byte("<script>alert(1)</script>"))
 	}))
-	t.Cleanup(gopher.Close)
 
 	fetcher := newTrustedImageFetcherWithOrigins(
 		rejectingImageBlobDownloader(t),
@@ -239,11 +236,10 @@ func TestTrustedImageFetcherRejectsExcessivePixelDimensions(t *testing.T) {
 	binary.BigEndian.PutUint32(imageData[20:24], 20_000)
 	binary.BigEndian.PutUint32(imageData[29:33], crc32.ChecksumIEEE(imageData[12:29]))
 
-	gopher := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	gopher := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		_, _ = w.Write(imageData)
 	}))
-	t.Cleanup(gopher.Close)
 
 	fetcher := newTrustedImageFetcherWithOrigins(
 		rejectingImageBlobDownloader(t),
@@ -257,11 +253,10 @@ func TestTrustedImageFetcherRejectsExcessivePixelDimensions(t *testing.T) {
 }
 
 func TestTrustedImageFetcherRejectsMalformedImage(t *testing.T) {
-	gopher := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	gopher := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		_, _ = w.Write([]byte("\x89PNG\r\n\x1a\nmalformed"))
 	}))
-	t.Cleanup(gopher.Close)
 
 	fetcher := newTrustedImageFetcherWithOrigins(
 		rejectingImageBlobDownloader(t),
@@ -275,11 +270,10 @@ func TestTrustedImageFetcherRejectsMalformedImage(t *testing.T) {
 }
 
 func TestTrustedImageFetcherRejectsOversizedGopherImage(t *testing.T) {
-	gopher := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	gopher := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		_, _ = w.Write([]byte("123456789"))
 	}))
-	t.Cleanup(gopher.Close)
 
 	fetcher := newTrustedImageFetcherWithOrigins(
 		rejectingImageBlobDownloader(t),
@@ -295,17 +289,15 @@ func TestTrustedImageFetcherRejectsOversizedGopherImage(t *testing.T) {
 
 func TestTrustedImageFetcherRejectsGopherRedirectOutsideTrustedOrigin(t *testing.T) {
 	var untrustedRequests atomic.Int64
-	untrusted := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	untrusted := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		untrustedRequests.Add(1)
 		w.Header().Set("Content-Type", "image/png")
 		_, _ = w.Write([]byte("untrusted image"))
 	}))
-	t.Cleanup(untrusted.Close)
 
-	gopher := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	gopher := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, untrusted.URL+"/image.png", http.StatusFound)
 	}))
-	t.Cleanup(gopher.Close)
 
 	fetcher := newTrustedImageFetcherWithOrigins(
 		rejectingImageBlobDownloader(t),

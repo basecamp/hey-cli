@@ -15,6 +15,7 @@ import (
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/testserver"
 	"github.com/basecamp/hey-cli/internal/threadload"
 )
 
@@ -29,7 +30,7 @@ func partialThreadServer(t *testing.T, pages [][]int64, missing ...int64) (*http
 	}
 	reads := &threadEntriesReads{}
 	var mu sync.Mutex
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/topics/7/entries.json":
@@ -381,7 +382,7 @@ func TestThreadsStyledCallsAnEmptyHydratedBodyEmpty(t *testing.T) {
 // reporting a partial thread over hundreds of failing requests.
 func TestThreadsStopOnAServerError(t *testing.T) {
 	reads := &threadEntriesReads{}
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/topics/7/entries.json":
@@ -408,7 +409,7 @@ func TestThreadsStopOnAServerError(t *testing.T) {
 // read once, not retried, and not the command's error.
 func TestThreadsMarkAnOversizedMessageOverLimit(t *testing.T) {
 	reads := &threadEntriesReads{}
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/topics/7/entries.json":

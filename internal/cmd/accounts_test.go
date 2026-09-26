@@ -14,6 +14,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/config"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 func TestCommandAccountScopePolicy(t *testing.T) {
@@ -343,7 +344,7 @@ func TestAccountsUseRejectsUnknownAccountWithoutSaving(t *testing.T) {
 
 func linkedAccountServer(t *testing.T, fallback http.HandlerFunc) *httptest.Server {
 	t.Helper()
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/identity.json" {
 			if got := r.URL.Query().Get("filtered_account_id"); got != "" {

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"strings"
 	"sync"
@@ -15,6 +14,8 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 type recordedTUIContacts struct {
@@ -33,7 +34,7 @@ func (r *recordedTUIContacts) snapshot() ([]string, [][]byte) {
 func contactsWithTestServer(t *testing.T) (*contactsView, *recordedTUIContacts) {
 	t.Helper()
 	recorded := &recordedTUIContacts{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		var raw json.RawMessage
 		if req.Body != nil {
 			_ = json.NewDecoder(req.Body).Decode(&raw)
@@ -89,7 +90,6 @@ func contactsWithTestServer(t *testing.T) (*contactsView, *recordedTUIContacts) 
 			http.NotFound(w, req)
 		}
 	}))
-	t.Cleanup(server.Close)
 
 	client := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
 	vc := testVC()

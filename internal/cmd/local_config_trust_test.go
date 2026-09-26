@@ -11,11 +11,12 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/config"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 func TestUntrustedLocalConfigFailsBeforeNetworkRequest(t *testing.T) {
 	requests := 0
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requests++
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":1}`))
@@ -48,7 +49,7 @@ func TestJQIsMachineReadableForLocalConfigTrust(t *testing.T) {
 
 func TestTrustLocalAllowsRequestsAndChangesRequireTrustAgain(t *testing.T) {
 	requests := 0
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {

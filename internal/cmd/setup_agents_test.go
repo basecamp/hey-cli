@@ -13,6 +13,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 // runSetupAgents runs `hey setup agents --json` against an isolated HOME with
@@ -27,7 +28,7 @@ func runSetupAgents(t *testing.T, selector string, agentDirs ...string) (map[str
 			t.Fatal(err)
 		}
 	}
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 	}))
 
@@ -183,7 +184,7 @@ func TestSetupAgentCommandEnvelope(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	server := newCLIServer(t, http.NotFoundHandler())
+	server := testserver.New(t, http.NotFoundHandler())
 
 	_, response, err := runAuthCommand(t, home, server.URL, "", true, "setup", "codex")
 	if err != nil {
@@ -234,7 +235,7 @@ func TestSetupAgentsPreservesUnmarkedBaselineSkill(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(custom), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	server := newCLIServer(t, http.NotFoundHandler())
+	server := testserver.New(t, http.NotFoundHandler())
 
 	_, response, err := runAuthCommand(t, home, server.URL, "", true, "setup", "agents")
 	if err != nil {
@@ -264,7 +265,7 @@ func TestSetupAgentsPreservesUnmarkedBaselineSkill(t *testing.T) {
 func TestSetupCodexDoesNotFabricateCodex(t *testing.T) {
 	isolateAgents(t)
 	home := t.TempDir()
-	server := newCLIServer(t, http.NotFoundHandler())
+	server := testserver.New(t, http.NotFoundHandler())
 
 	_, _, err := runAuthCommand(t, home, server.URL, "", true, "setup", "codex")
 	var cliErr *apierr.Error
@@ -284,7 +285,7 @@ func TestSetupAgentStyledReportsNotConnected(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	server := newCLIServer(t, http.NotFoundHandler())
+	server := testserver.New(t, http.NotFoundHandler())
 	origColor := colorDisabled
 	colorDisabled = true
 	t.Cleanup(func() { colorDisabled = origColor })
@@ -313,7 +314,7 @@ func TestSetupAgentsDoesNotMigrateLegacyCredentials(t *testing.T) {
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	server := newCLIServer(t, http.NotFoundHandler())
+	server := testserver.New(t, http.NotFoundHandler())
 	legacy := `{"base_url":"` + server.URL + `","access_token":"legacy-token"}`
 	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(legacy), 0o600); err != nil {
 		t.Fatal(err)
@@ -349,7 +350,7 @@ func TestSetupAgentsPreservesUnmanagedLegacyCodexSkill(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(codexSkill, "SKILL.md"), []byte(custom), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	server := newCLIServer(t, http.NotFoundHandler())
+	server := testserver.New(t, http.NotFoundHandler())
 
 	_, response, err := runAuthCommand(t, home, server.URL, "", true, "setup", "agents")
 	if err != nil {
@@ -381,7 +382,7 @@ func TestConfigSetMigratesLegacyCredentialsBeforeRewriting(t *testing.T) {
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	server := newCLIServer(t, http.NotFoundHandler())
+	server := testserver.New(t, http.NotFoundHandler())
 	legacy := `{"base_url":"` + server.URL + `","access_token":"legacy-token","refresh_token":"legacy-refresh"}`
 	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(legacy), 0o600); err != nil {
 		t.Fatal(err)
@@ -409,7 +410,7 @@ func TestConfigRewritesPreserveLegacyCredentialsWhenMigrationFails(t *testing.T)
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	server := newCLIServer(t, http.NotFoundHandler())
+	server := testserver.New(t, http.NotFoundHandler())
 	legacy := `{"base_url":"` + server.URL + `","access_token":"legacy-token"}`
 	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(legacy), 0o600); err != nil {
 		t.Fatal(err)
@@ -505,7 +506,7 @@ func TestMigrationRetriesScrubWhenStoreAlreadyPopulated(t *testing.T) {
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	server := newCLIServer(t, http.NotFoundHandler())
+	server := testserver.New(t, http.NotFoundHandler())
 
 	// A populated credential store, as a completed earlier migration leaves it.
 	if _, _, err := runAuthCommand(t, home, server.URL, "", true, "auth", "login", "--token", "stored-token"); err != nil {
@@ -587,7 +588,7 @@ func TestSetupAgentsRemoveDeletesManagedSkillsAndPreservesUserFiles(t *testing.T
 		t.Fatal(err)
 	}
 
-	server := newCLIServer(t, http.NotFoundHandler())
+	server := testserver.New(t, http.NotFoundHandler())
 	_, response, err := runAuthCommand(t, home, server.URL, "", true, "setup", "agents", "--remove")
 	if err != nil {
 		t.Fatalf("setup agents --remove: %v", err)
@@ -629,7 +630,7 @@ func TestSetupAgentsRemovePreservesUnmanagedSkills(t *testing.T) {
 		}
 	}
 
-	server := newCLIServer(t, http.NotFoundHandler())
+	server := testserver.New(t, http.NotFoundHandler())
 	if _, _, err := runAuthCommand(t, home, server.URL, "", true, "setup", "agents", "--remove"); err != nil {
 		t.Fatalf("setup agents --remove: %v", err)
 	}
@@ -701,7 +702,7 @@ func TestSetupAgentsRemoveUninstallsClaudePlugin(t *testing.T) {
 		return nil, nil
 	})
 
-	server := newCLIServer(t, http.NotFoundHandler())
+	server := testserver.New(t, http.NotFoundHandler())
 	if _, _, err := runAuthCommand(t, home, server.URL, "", true, "setup", "agents", "--remove"); err != nil {
 		t.Fatalf("setup agents --remove: %v", err)
 	}
@@ -732,7 +733,7 @@ func TestSetupAgentsRemoveReportsFailedPluginUninstall(t *testing.T) {
 		return []byte("network unreachable"), errors.New("exit status 1")
 	})
 
-	server := newCLIServer(t, http.NotFoundHandler())
+	server := testserver.New(t, http.NotFoundHandler())
 	_, _, err := runAuthCommand(t, home, server.URL, "", true, "setup", "agents", "--remove")
 	var apiErr *apierr.Error
 	if !errors.As(err, &apiErr) {
@@ -765,7 +766,7 @@ func TestSetupAgentsRemoveReportsMissingClaudeBinary(t *testing.T) {
 		return nil, nil
 	})
 
-	server := newCLIServer(t, http.NotFoundHandler())
+	server := testserver.New(t, http.NotFoundHandler())
 	_, _, err := runAuthCommand(t, home, server.URL, "", true, "setup", "agents", "--remove")
 	var apiErr *apierr.Error
 	if !errors.As(err, &apiErr) {
@@ -815,7 +816,7 @@ func TestMigrationLeavesForeignOriginLegacyCredentialsAlone(t *testing.T) {
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	server := newCLIServer(t, http.NotFoundHandler())
+	server := testserver.New(t, http.NotFoundHandler())
 
 	// Store already holds credentials for the dev server this run targets.
 	if _, _, err := runAuthCommand(t, home, server.URL, "", true, "auth", "login", "--token", "dev-token"); err != nil {

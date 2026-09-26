@@ -18,6 +18,7 @@ import (
 	"github.com/basecamp/hey-cli/internal/auth"
 	"github.com/basecamp/hey-cli/internal/harness"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 // isolateAgents makes agent detection deterministic: no claude/codex binary
@@ -52,7 +53,7 @@ func stubInteractive(t *testing.T, interactive bool) {
 
 func identityServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	return newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/identity.json" {
 			t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)
@@ -251,7 +252,7 @@ func TestSetupRejectsJQ(t *testing.T) {
 // browser: it reports "not logged in" and points at `hey auth login`.
 func TestSetupJSONNotLoggedInWithoutTerminalReportsIncomplete(t *testing.T) {
 	isolateAgents(t)
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 	}))
 	configHome := t.TempDir()
@@ -377,7 +378,7 @@ func TestSetupJSONRunsAgentStepNonInteractively(t *testing.T) {
 func TestBareHeyLiteWizardSkipsAgentsWhenOnboarded(t *testing.T) {
 	isolateAgents(t)
 	stubInteractive(t, true)
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 	}))
 	configHome := t.TempDir()
@@ -783,7 +784,7 @@ func TestSetupJSONNonInteractiveEnvSkipsSignIn(t *testing.T) {
 // wizard must not skip OAuth and then report a complete, signed-in setup.
 func TestSetupJSONStaleCredentialsReportIncomplete(t *testing.T) {
 	isolateAgents(t)
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 	}))
 	configHome := t.TempDir()
@@ -907,7 +908,7 @@ func TestSetupRejectsListOnlyFormatsBeforeSideEffects(t *testing.T) {
 // remediation must point at the environment, not at a login that cannot win.
 func TestSetupJSONRejectedEnvTokenPointsAtEnvironment(t *testing.T) {
 	isolateAgents(t)
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 	}))
 

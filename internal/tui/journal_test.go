@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +12,7 @@ import (
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/htmlutil"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 func currentJournalResult(v *journalView) requestResult {
@@ -270,10 +270,9 @@ func TestJournalDetailRemovalRequiresConfirmation(t *testing.T) {
 }
 
 func TestJournalFailedReadDoesNotOpenEditor(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "nope", http.StatusBadRequest)
 	}))
-	t.Cleanup(server.Close)
 	vc := testVC()
 	vc.ctx = context.Background()
 	vc.sdk = hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
@@ -287,7 +286,7 @@ func TestJournalFailedReadDoesNotOpenEditor(t *testing.T) {
 }
 
 func TestJournalFetchKeepsRichContentForEditing(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id": 1, "content": "Today was great",
@@ -295,7 +294,6 @@ func TestJournalFetchKeepsRichContentForEditing(t *testing.T) {
 			"type":         "Calendar::JournalEntry",
 		})
 	}))
-	t.Cleanup(server.Close)
 	vc := testVC()
 	vc.ctx = context.Background()
 	vc.sdk = hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))

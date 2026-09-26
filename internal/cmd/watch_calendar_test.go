@@ -12,6 +12,7 @@ import (
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/auth"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 func TestWatchingCalendars(t *testing.T) {
@@ -128,7 +129,7 @@ func TestWatchReadsRungCalendars(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 
 	var requested []string
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requested = append(requested, r.URL.String())
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Link", `<`+r.URL.Path+`?since=2026-08-18T09%3A14%3A22.031Z&v=1>; rel="next"`)
@@ -194,7 +195,7 @@ func TestWatchReadsRungCalendars(t *testing.T) {
 func TestWatchCalendarSkipsAheadOnAFullSync(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/calendars.json" {
 			_, _ = w.Write([]byte(`{
@@ -231,7 +232,7 @@ func TestWatchCalendarSkipsAheadOnAFullSync(t *testing.T) {
 func TestWatchCalendarStopsWatchingAGoneCalendar(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/calendars.json" {
 			_, _ = w.Write([]byte(`{"calendars": [], "calendar_changes_url": "/calendar/changes.json?since=2026-08-18T11%3A00%3A00.000Z"}`))
@@ -258,7 +259,7 @@ func TestWatchCalendarStopsWatchingAGoneCalendar(t *testing.T) {
 func TestWatchPollReportsCalendarChanges(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if strings.HasPrefix(r.URL.Path, "/calendars/") {
 			w.Header().Set("Link", `<`+r.URL.Path+`?since=2026-08-18T09%3A20%3A00.000Z&v=1>; rel="next"`)

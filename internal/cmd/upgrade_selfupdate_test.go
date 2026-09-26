@@ -318,9 +318,10 @@ func assertTargetUntouched(t *testing.T, f *nativeFlowFixture) {
 // serveBytes spins up a one-asset server and returns its URL.
 func serveBytes(t *testing.T, data []byte) string {
 	t.Helper()
-	srv := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write(data)
 	}))
+	t.Cleanup(srv.Close)
 	return srv.URL
 }
 

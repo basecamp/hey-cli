@@ -4,7 +4,6 @@ import (
 	"errors"
 	"image/color"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +13,8 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 // at is a timestamp as HEY answers one: RFC 3339 in UTC, which is what every fixture here
@@ -250,7 +251,7 @@ func TestCalendarViewSubnavLeftRightMovesTheSpan(t *testing.T) {
 func TestCalendarYearReadsTheYearItself(t *testing.T) {
 	var mu sync.Mutex
 	var paths []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		mu.Lock()
 		paths = append(paths, req.URL.Path)
 		mu.Unlock()
@@ -262,7 +263,6 @@ func TestCalendarYearReadsTheYearItself(t *testing.T) {
 			"spanned_events":[{"id":1,"type":"CalendarEvent","title":"Summer break","all_day":true,
 			                   "starts_at":"2026-07-06T00:00:00Z","ends_at":"2026-07-17T23:59:59Z"}]}`))
 	}))
-	t.Cleanup(server.Close)
 
 	vc := testVC()
 	vc.sdk = hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
@@ -449,14 +449,13 @@ func TestCalendarViewKeysDoNotSupersedeAHabitWrite(t *testing.T) {
 func TestCalendarViewFetchesAroundTheCurrentDay(t *testing.T) {
 	var mu sync.Mutex
 	var paths []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		mu.Lock()
 		paths = append(paths, req.URL.Path)
 		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{}`))
 	}))
-	t.Cleanup(server.Close)
 
 	vc := testVC()
 	vc.sdk = hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
@@ -482,14 +481,13 @@ func TestCalendarViewFetchesAroundTheCurrentDay(t *testing.T) {
 func TestCalendarViewReadsTheWeekForTheWeekSpan(t *testing.T) {
 	var mu sync.Mutex
 	var paths []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		mu.Lock()
 		paths = append(paths, req.URL.Path)
 		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"starts_at":"2025-03-03T00:00:00Z","ends_at":"2025-03-09T23:59:59Z","kind":"week","recordings":{}}`))
 	}))
-	t.Cleanup(server.Close)
 
 	vc := testVC()
 	vc.sdk = hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -15,6 +14,7 @@ import (
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	habitvalues "github.com/basecamp/hey-cli/internal/habit"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 // openHabits opens the habits modal, which is where a habit is created, edited and
@@ -204,7 +204,7 @@ const habitRefreshPath = "/calendar/days/2025-03-09.json"
 func calendarHabitsWithServer(t *testing.T) (*calendarView, *recordedHabitRequests) {
 	t.Helper()
 	recorded := &recordedHabitRequests{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		recorded.add(req)
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -227,7 +227,6 @@ func calendarHabitsWithServer(t *testing.T) (*calendarView, *recordedHabitReques
 			http.NotFound(w, req)
 		}
 	}))
-	t.Cleanup(server.Close)
 
 	client := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
 	vc := testVC()
@@ -246,12 +245,11 @@ func calendarHabitsWithServer(t *testing.T) (*calendarView, *recordedHabitReques
 
 func calendarHabitsWithFailingServer(t *testing.T, status int) *calendarView {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		_, _ = io.WriteString(w, `{"error":"habit mutation failed"}`)
 	}))
-	t.Cleanup(server.Close)
 
 	client := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
 	vc := testVC()

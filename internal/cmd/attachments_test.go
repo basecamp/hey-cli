@@ -17,6 +17,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 type attachmentServerState struct {
@@ -36,7 +37,7 @@ func attachmentServer(t *testing.T) (*httptest.Server, *attachmentServerState) {
 	t.Helper()
 	state := &attachmentServerState{}
 	var server *httptest.Server
-	server = newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server = testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/topics/42/entries.json":
@@ -227,7 +228,7 @@ func TestAttachmentsListsAndSavesNamedFilesInRenderedOrder(t *testing.T) {
 		directPDF,
 	}, "\n")
 
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/topics/42/entries.json":
@@ -303,7 +304,7 @@ func TestAttachmentsRejectNonBlobURLs(t *testing.T) {
 	}})[0]
 	var identityRequests atomic.Int64
 
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/topics/42/entries.json":
@@ -356,7 +357,7 @@ func TestAttachmentSaveRejectsNonCanonicalOpaqueIDsBeforeRequest(t *testing.T) {
 	withTrailingBits := validID[:len(validID)-1] + string(base64URLAlphabet[last+1])
 
 	var requests atomic.Int64
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
 		http.Error(w, "unexpected request", http.StatusInternalServerError)
 	}))
@@ -378,7 +379,7 @@ func TestAttachmentSaveRejectsNonCanonicalOpaqueIDsBeforeRequest(t *testing.T) {
 func TestAttachmentsFollowsTheCursorThroughALongThread(t *testing.T) {
 	pages := [][]int64{{103, 102}, {101}}
 	reads := &threadEntriesReads{}
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/topics/42/entries.json":

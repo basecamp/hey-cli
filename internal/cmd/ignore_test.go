@@ -12,6 +12,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 type recordedIgnoring struct {
@@ -25,7 +26,7 @@ type recordedIgnoring struct {
 func ignoringServer(t *testing.T) (*httptest.Server, *recordedIgnoring) {
 	t.Helper()
 	recorded := &recordedIgnoring{status: http.StatusNoContent}
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		recorded.requests++
 		recorded.method = r.Method
 		recorded.path = r.URL.Path

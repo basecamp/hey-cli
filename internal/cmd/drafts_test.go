@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 func runStyledCommand(t *testing.T, handler http.Handler, args ...string) (string, error) {
@@ -25,7 +27,7 @@ func runFormattedCommandWithStderr(t *testing.T, handler http.Handler, formatArg
 	colorDisabled = false
 	t.Cleanup(func() { colorDisabled = previousColorDisabled })
 
-	server := newCLIServer(t, handler)
+	server := testserver.New(t, handler)
 
 	t.Setenv("HEY_TOKEN", "test-token")
 	t.Setenv("HEY_NO_KEYRING", "1")

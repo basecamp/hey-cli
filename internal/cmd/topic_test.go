@@ -13,6 +13,7 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
+	"github.com/basecamp/hey-cli/internal/testserver"
 	"github.com/basecamp/hey-cli/internal/threadload"
 )
 
@@ -52,7 +53,7 @@ func threadEntriesServer(t *testing.T, pages [][]int64, bodies map[int64]string)
 func threadEntriesServerServing(t *testing.T, pages [][]int64, messages map[int64]string) (*httptest.Server, *threadEntriesReads) {
 	t.Helper()
 	reads := &threadEntriesReads{}
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
 		switch {

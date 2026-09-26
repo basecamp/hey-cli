@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 type recordedBulkReplyRequest struct {
@@ -53,7 +54,7 @@ func bulkReplyServer(t *testing.T) (*httptest.Server, *bulkReplyServerState) {
 		delivery: `{"id":900,"entries_count":2,"delayed":true,"undo_send_url":"https://app.hey.com/bulk_replies/900/undo_send"}`,
 	}
 	var server *httptest.Server
-	server = newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server = testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := new(bytes.Buffer)
 		_, _ = body.ReadFrom(r.Body)
 		state.mu.Lock()

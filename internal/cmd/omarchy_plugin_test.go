@@ -18,6 +18,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 const (
@@ -912,7 +913,7 @@ func TestSetupWizardSkipsOmarchyOnRejectedCredentials(t *testing.T) {
 	stubInteractive(t, true)
 	confirms := stubConfirmOmarchyPanel(t, true, nil)
 	ran := stubOmarchyRun(t, omarchyUnavailable)
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 	}))
 	configHome := t.TempDir()

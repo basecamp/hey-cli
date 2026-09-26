@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strconv"
 	"testing"
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 // testCap keeps the oversized fixtures small: the SDK refuses a declared length past the
@@ -25,14 +26,13 @@ const testCap int64 = 256
 func oversizedMessageSource(t *testing.T, status int) (Source, func() int) {
 	t.Helper()
 	reads := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reads++
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Content-Length", strconv.FormatInt(testCap+1, 10))
 		w.WriteHeader(status)
 		_, _ = io.WriteString(w, `{"truncated":"`)
 	}))
-	t.Cleanup(server.Close)
 
 	client := hey.NewClient(&hey.Config{BaseURL: server.URL, CacheEnabled: false},
 		&hey.StaticTokenProvider{Token: "test-token"},

@@ -22,6 +22,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/auth"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 func TestWatchedChanges(t *testing.T) {
@@ -291,7 +292,7 @@ func TestWatchReadsChangesWhenNotified(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 
 	var requested []string
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requested = append(requested, r.URL.String())
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Link", `<`+r.URL.Path+`?since=2026-08-18T09%3A14%3A22.031Z&v=2>; rel="next"`)
@@ -340,7 +341,7 @@ func TestWatchReadsAgainAfterAFailedRead(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 
 	broken := true
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if broken {
 			http.Error(w, "boom", http.StatusInternalServerError)
 			return
@@ -393,7 +394,7 @@ func TestWatchReadsAgainAfterAFailedRead(t *testing.T) {
 
 func TestWatchStopsOnAReadThatCannotWork(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("the server was asked for %s, want a read the SDK turns down on its own", r.URL)
 	}))
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
@@ -423,7 +424,7 @@ func TestWatchStopsOnAReadThatCannotWork(t *testing.T) {
 func boxesAndChanges(t *testing.T, boxes string) *httptest.Server {
 	t.Helper()
 
-	return newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/boxes.json":
 			w.Header().Set("Content-Type", "application/json")
@@ -462,7 +463,7 @@ func TestWatchSkipsAheadToTheBoxesOwnCursor(t *testing.T) {
 func TestWatchReadyWaitsForAFailedCatchUpRead(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 	broken := true
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if broken {
 			http.Error(w, "boom", http.StatusInternalServerError)
 			return
@@ -558,7 +559,7 @@ func TestWatchReadyYieldsToADropQueuedDuringTheCatchUp(t *testing.T) {
 func TestWatchDoorbellReadPaysTheReadyACatchUpOwed(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 	broken := true
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if broken {
 			http.Error(w, "boom", http.StatusInternalServerError)
 			return
@@ -593,7 +594,7 @@ func TestWatchDoorbellReadPaysTheReadyACatchUpOwed(t *testing.T) {
 func TestWatchDropWhileCatchingUpCancelsTheReadyItOwed(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 	broken := true
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if broken {
 			http.Error(w, "boom", http.StatusInternalServerError)
 			return
@@ -847,7 +848,7 @@ func TestWatchDoesNotSayReadyOnItsWayOut(t *testing.T) {
 
 func TestWatchedBoxesStartNoLaterThanTheWatchDid(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		// The Imbox's last activity is after the watch read HEY's clock — mail
 		// landed in between; The Feed's is before.
@@ -989,7 +990,7 @@ func TestWatchReportsAResyncWhenAskedFor(t *testing.T) {
 func TestWatchReportsAResyncAfterSkippingAhead(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 	var server *httptest.Server
-	server = newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server = testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/postings/changes") {
 			// As haystack answers: `head :conflict`, no body.
 			w.WriteHeader(http.StatusConflict)

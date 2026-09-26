@@ -5,13 +5,14 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 func ctrlT() tea.KeyPressMsg {
@@ -20,8 +21,7 @@ func ctrlT() tea.KeyPressMsg {
 
 func snippetPickerTestView(t *testing.T, handler http.Handler) *mailView {
 	t.Helper()
-	srv := httptest.NewServer(handler)
-	t.Cleanup(srv.Close)
+	srv := testserver.New(t, handler)
 	sdk := hey.NewClient(&hey.Config{BaseURL: srv.URL}, &hey.StaticTokenProvider{Token: "t"}, hey.WithMaxRetries(0))
 	vc := testVC()
 	vc.rootSDK = sdk

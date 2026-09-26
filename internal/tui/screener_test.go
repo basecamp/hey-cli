@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -17,6 +16,7 @@ import (
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 // --- Test helpers ---
@@ -56,7 +56,7 @@ func screenerTestView(t *testing.T) (*screenerView, *screenerServerState) {
 			{"id":81,"status":"denied","petitioner":{"id":14,"name":"Carl Reed","email_address":"carl@example.org"},"updated_at":"2026-08-17T09:00:00Z"}
 		]}`,
 	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := new(bytes.Buffer)
 		_, _ = body.ReadFrom(r.Body)
 		state.mu.Lock()
@@ -83,7 +83,6 @@ func screenerTestView(t *testing.T) (*screenerView, *screenerServerState) {
 			http.NotFound(w, r)
 		}
 	}))
-	t.Cleanup(server.Close)
 
 	vc := testVC()
 	vc.ctx = context.Background()
@@ -456,7 +455,7 @@ func TestScreenerOffersClearOnBothPanes(t *testing.T) {
 
 func TestScreenerGrowsTheQueueAsTheReaderScrolls(t *testing.T) {
 	var pages []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pages = append(pages, r.URL.Query().Get("page"))
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Query().Get("page") == "cursor-2" {
@@ -469,7 +468,6 @@ func TestScreenerGrowsTheQueueAsTheReaderScrolls(t *testing.T) {
 			{"id":91,"status":"pending","petitioner":{"id":11,"name":"Jane Doe"}},
 			{"id":92,"status":"pending","petitioner":{"id":12,"name":"Bob Smith"}}]}`))
 	}))
-	t.Cleanup(server.Close)
 
 	vc := testVC()
 	vc.ctx = context.Background()

@@ -12,6 +12,8 @@ import (
 	"time"
 
 	keyringlib "github.com/zalando/go-keyring"
+
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 type managerKeyring struct {
@@ -408,11 +410,10 @@ func TestFailedForcedReadClearsStaleCredentials(t *testing.T) {
 }
 
 func TestFailedRefreshSaveDoesNotPublishCredentials(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"access_token":"unpersisted-token","refresh_token":"rotated-refresh","expires_in":3600}`))
 	}))
-	defer server.Close()
 
 	old := &Credentials{
 		AccessToken:   "working-token",
@@ -441,12 +442,11 @@ func TestFailedRefreshSaveDoesNotPublishCredentials(t *testing.T) {
 
 func TestConcurrentAuthenticationSharesOneRefresh(t *testing.T) {
 	var refreshes atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		refreshes.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"access_token":"fresh-token","refresh_token":"fresh-refresh","expires_in":3600}`))
 	}))
-	defer server.Close()
 
 	mgr, keyring := managerWithKeyring(t, &Credentials{
 		AccessToken:   "expired-token",

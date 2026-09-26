@@ -11,11 +11,12 @@ import (
 	"testing"
 
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 func todoServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	return newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "POST" && r.URL.Path == "/calendar/todos.json":
 			body, _ := io.ReadAll(r.Body)

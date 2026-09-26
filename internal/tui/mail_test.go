@@ -9,7 +9,6 @@ import (
 	"image/color"
 	"image/png"
 	"net/http"
-	"net/http/httptest"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -27,6 +26,7 @@ import (
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/mail"
+	"github.com/basecamp/hey-cli/internal/testserver"
 	"github.com/basecamp/hey-cli/internal/threadload"
 )
 
@@ -95,7 +95,7 @@ func mailWithTestServer(t *testing.T, status int) (*mailView, *recordedMailReque
 	t.Helper()
 
 	recorded := &recordedMailRequest{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/boxes.json" {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[
@@ -148,7 +148,6 @@ func mailWithTestServer(t *testing.T, status int) (*mailView, *recordedMailReque
 			w.WriteHeader(status)
 		}
 	}))
-	t.Cleanup(server.Close)
 
 	client := hey.NewClient(
 		&hey.Config{BaseURL: server.URL},
@@ -1374,7 +1373,7 @@ func TestMailViewMovePickerCancelsWithoutRequest(t *testing.T) {
 }
 
 func TestMailViewLoadsFolderSourcesAndPostings(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/boxes.json":
@@ -1389,7 +1388,6 @@ func TestMailViewLoadsFolderSourcesAndPostings(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	t.Cleanup(server.Close)
 
 	client := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
 	vc := testVC()
@@ -1433,7 +1431,7 @@ func TestMailViewLoadsFolderSourcesAndPostings(t *testing.T) {
 
 func TestMailViewFolderGrowsAsTheReaderScrolls(t *testing.T) {
 	var folderQueries []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/boxes.json":
@@ -1455,7 +1453,6 @@ func TestMailViewFolderGrowsAsTheReaderScrolls(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	t.Cleanup(server.Close)
 
 	client := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
 	vc := testVC()
@@ -1498,7 +1495,7 @@ func TestMailViewFolderGrowsAsTheReaderScrolls(t *testing.T) {
 // matches the page it came from.
 func TestMailViewBoxGrowsAsTheReaderScrolls(t *testing.T) {
 	var reads []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reads = append(reads, r.URL.Path+"?"+r.URL.Query().Get("page"))
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Query().Get("page") == "cursor-2" {
@@ -1510,7 +1507,6 @@ func TestMailViewBoxGrowsAsTheReaderScrolls(t *testing.T) {
 			{"id":100,"summary":"First","created_at":"2025-03-01T10:00:00Z","seen":true},
 			{"id":101,"summary":"Second","created_at":"2025-03-01T09:00:00Z","seen":true}]}`))
 	}))
-	t.Cleanup(server.Close)
 
 	vc := testVC()
 	vc.sdk = hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
@@ -1541,7 +1537,7 @@ func TestMailViewBoxGrowsAsTheReaderScrolls(t *testing.T) {
 // and postings repeat or go missing.
 func TestMailViewReadsTheFeedOnItsOwnRoute(t *testing.T) {
 	var reads []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reads = append(reads, r.URL.Path+"?"+r.URL.Query().Get("page"))
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path != "/feedbox.json" {
@@ -1551,7 +1547,6 @@ func TestMailViewReadsTheFeedOnItsOwnRoute(t *testing.T) {
 		_, _ = w.Write([]byte(`{"id":2,"kind":"feedbox","name":"The Feed","next_history_url":"https://app.hey.com/feedbox.json?page=feed-cursor-2","postings":[
 			{"id":300,"summary":"The Whale Weekly","created_at":"2025-03-01T10:00:00Z","seen":true}]}`))
 	}))
-	t.Cleanup(server.Close)
 
 	vc := testVC()
 	vc.sdk = hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
@@ -1630,7 +1625,7 @@ func TestMailViewGrowingSkipsPostingsAlreadyShown(t *testing.T) {
 
 func TestMailViewFolderDiscoveryFailurePreservesMailAndRetries(t *testing.T) {
 	var navigationRequests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/boxes.json":
@@ -1649,7 +1644,6 @@ func TestMailViewFolderDiscoveryFailurePreservesMailAndRetries(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	t.Cleanup(server.Close)
 
 	client := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
 	vc := testVC()
@@ -2170,7 +2164,7 @@ func TestMailViewDirectTopicDerivesItsTitleAndIgnoresTheCurrentBox(t *testing.T)
 func TestMailViewDownloadsImageDataOnlyForKittyRenderer(t *testing.T) {
 	var imageRequests atomic.Int64
 	imageData := testPNG(t)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/topics/100/entries.json":
 			w.Header().Set("Content-Type", "application/json")
@@ -2186,7 +2180,6 @@ func TestMailViewDownloadsImageDataOnlyForKittyRenderer(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	t.Cleanup(server.Close)
 
 	client := hey.NewClient(
 		&hey.Config{BaseURL: server.URL},
@@ -2216,14 +2209,13 @@ func TestMailViewDownloadsImageDataOnlyForKittyRenderer(t *testing.T) {
 
 func TestMailViewDoesNotFetchImagesOutsideHEYOrGopher(t *testing.T) {
 	var untrustedRequests atomic.Int64
-	untrusted := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	untrusted := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		untrustedRequests.Add(1)
 		w.Header().Set("Content-Type", "image/png")
 		_, _ = w.Write([]byte("untrusted image"))
 	}))
-	t.Cleanup(untrusted.Close)
 
-	heyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	heyServer := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/topics/100/entries.json":
@@ -2237,7 +2229,6 @@ func TestMailViewDoesNotFetchImagesOutsideHEYOrGopher(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	t.Cleanup(heyServer.Close)
 
 	client := hey.NewClient(
 		&hey.Config{BaseURL: heyServer.URL},
@@ -2271,7 +2262,7 @@ func TestMailViewFetchesThreadMessagesConcurrentlyInOrder(t *testing.T) {
 	started := make(chan struct{}, entryCount)
 	release := make(chan struct{})
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/topics/100/entries.json" {
 			// The index is served newest first, as HEY serves it.
@@ -2304,7 +2295,6 @@ func TestMailViewFetchesThreadMessagesConcurrentlyInOrder(t *testing.T) {
 			"id": id, "subject": fmt.Sprintf("Message %d", id), "content": fmt.Sprintf("body %d", id),
 		})
 	}))
-	t.Cleanup(server.Close)
 
 	client := hey.NewClient(
 		&hey.Config{BaseURL: server.URL},
@@ -2378,7 +2368,7 @@ func TestMailViewCancelPendingDetailStopsMessageRequests(t *testing.T) {
 	messageStarted := make(chan struct{})
 	messageCanceled := make(chan struct{})
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/topics/100/entries.json":
@@ -2391,7 +2381,6 @@ func TestMailViewCancelPendingDetailStopsMessageRequests(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	t.Cleanup(server.Close)
 
 	client := hey.NewClient(
 		&hey.Config{BaseURL: server.URL},
@@ -3211,7 +3200,7 @@ func TestMailViewIgnoresStaleSearchResults(t *testing.T) {
 
 func TestMailViewSearchGrowsAsTheReaderScrolls(t *testing.T) {
 	var pages []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pages = append(pages, r.URL.Query().Get("page"))
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Query().Get("page") == "2" {
@@ -3221,7 +3210,6 @@ func TestMailViewSearchGrowsAsTheReaderScrolls(t *testing.T) {
 		w.Header().Set("Link", `<http://`+r.Host+`/advanced_search.json?page=2>; rel="next"`)
 		_, _ = w.Write([]byte(`{"matches":[{"topic":{"id":100,"name":"Hello world"},"posting_id":10}]}`))
 	}))
-	t.Cleanup(server.Close)
 
 	vc := testVC()
 	vc.ctx = context.Background()
@@ -3737,7 +3725,7 @@ func TestThreadEntriesCarryTheTimeOfDay(t *testing.T) {
 // A thread longer than one geared page is read whole in the TUI, oldest first, through
 // the same loader the CLI uses; a body that could not be read is marked, not faked.
 func TestMailViewReadsEveryPageOfAThreadAndMarksUnreadBodies(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/topics/100/entries.json" && r.URL.Query().Get("page") == "":
@@ -3754,7 +3742,6 @@ func TestMailViewReadsEveryPageOfAThreadAndMarksUnreadBodies(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	t.Cleanup(server.Close)
 
 	client := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
 	vc := testVC()

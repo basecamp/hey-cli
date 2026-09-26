@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"strings"
 	"sync"
@@ -15,6 +14,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 type tuiBulkReplyRequest struct {
@@ -52,7 +53,7 @@ func tuiBulkReplyServer(t *testing.T) (*mailView, *tuiBulkReplyServerState) {
 		}`,
 		delivery: `{"id":900,"entries_count":2,"delayed":true,"undo_send_url":"https://app.hey.com/bulk_replies/900/undo_send"}`,
 	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := new(bytes.Buffer)
 		_, _ = body.ReadFrom(r.Body)
 		state.mu.Lock()
@@ -95,7 +96,6 @@ func tuiBulkReplyServer(t *testing.T) (*mailView, *tuiBulkReplyServerState) {
 			http.NotFound(w, r)
 		}
 	}))
-	t.Cleanup(server.Close)
 
 	client := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "t"}, hey.WithMaxRetries(0))
 	vc := testVC()

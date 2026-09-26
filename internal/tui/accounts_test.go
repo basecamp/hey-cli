@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -14,10 +13,12 @@ import (
 	"charm.land/lipgloss/v2"
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 func TestLoadMailAccountsUsesAccessibleLinkedAccounts(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/identity.json" {
 			http.NotFound(w, r)
 			return
@@ -36,7 +37,6 @@ func TestLoadMailAccountsUsesAccessibleLinkedAccounts(t *testing.T) {
 			]
 		}`)
 	}))
-	t.Cleanup(server.Close)
 	client := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "token"}, hey.WithMaxRetries(0))
 
 	msg, ok := loadMailAccounts(t.Context(), client, "3")().(mailAccountsLoadedMsg)
@@ -52,11 +52,10 @@ func TestLoadMailAccountsUsesAccessibleLinkedAccounts(t *testing.T) {
 }
 
 func TestUnavailableSelectedAccountFailsClosedAndAllowsRecovery(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"id":1,"accounts":[{"id":1,"status":"active"}]}`)
 	}))
-	t.Cleanup(server.Close)
 	root := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "token"}, hey.WithMaxRetries(0))
 	m := newModelWithMailAccounts(root, root, "99", Watchers{})
 
@@ -74,7 +73,7 @@ func TestUnavailableSelectedAccountFailsClosedAndAllowsRecovery(t *testing.T) {
 func TestAccountDiscoveryFailureCanRetry(t *testing.T) {
 	var fail atomic.Bool
 	fail.Store(true)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if fail.Load() {
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -83,7 +82,6 @@ func TestAccountDiscoveryFailureCanRetry(t *testing.T) {
 		}
 		_, _ = fmt.Fprint(w, `{"id":1,"accounts":[{"id":1,"status":"active"},{"id":2,"status":"active"}]}`)
 	}))
-	t.Cleanup(server.Close)
 	root := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "token"}, hey.WithMaxRetries(0))
 	m := newModelWithMailAccounts(root, root, "all", Watchers{})
 	m.loading = false
@@ -180,7 +178,7 @@ func TestAccountPickerWaitsForPendingMutation(t *testing.T) {
 }
 
 func TestAccountSwitchRebuildsViewsAndCancelsOldGeneration(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/identity.json":
@@ -191,7 +189,6 @@ func TestAccountSwitchRebuildsViewsAndCancelsOldGeneration(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	t.Cleanup(server.Close)
 	root := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "token"}, hey.WithMaxRetries(0))
 	m := newModelWithMailAccounts(root, root, "all", Watchers{})
 	m.mailAccounts = []mailAccountChoice{
@@ -235,11 +232,10 @@ func TestAccountSwitchRebuildsViewsAndCancelsOldGeneration(t *testing.T) {
 }
 
 func TestTopicRequestSwitchesToItsMailAccountBeforeOpening(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"id":1,"accounts":[{"id":1,"status":"active"},{"id":2,"status":"active"}]}`)
 	}))
-	t.Cleanup(server.Close)
 	root := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "token"}, hey.WithMaxRetries(0))
 	m := newModelWithMailAccounts(root, root, "all", Watchers{})
 	m.mailAccountsLoaded = true
@@ -276,11 +272,10 @@ func TestTopicRequestSwitchesToItsMailAccountBeforeOpening(t *testing.T) {
 }
 
 func TestScreenerRequestSwitchesToItsMailAccountBeforeOpening(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"id":1,"accounts":[{"id":1,"status":"active"},{"id":2,"status":"active"}]}`)
 	}))
-	t.Cleanup(server.Close)
 	root := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "token"}, hey.WithMaxRetries(0))
 	m := newModelWithMailAccounts(root, root, "all", Watchers{})
 	m.mailAccountsLoaded = true
@@ -409,11 +404,10 @@ func TestTopicRequestDoesNotDiscardAnotherSectionsForm(t *testing.T) {
 }
 
 func TestFailedAccountSwitchPreservesCurrentViews(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"id":1,"accounts":[{"id":1,"status":"active"}]}`)
 	}))
-	t.Cleanup(server.Close)
 	root := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "token"}, hey.WithMaxRetries(0))
 	m := newModelWithMailAccounts(root, root, "all", Watchers{})
 	m.mailAccounts = []mailAccountChoice{{label: "All Accounts"}, {id: 1, label: "jane@example.com"}, {id: 2, label: "missing@example.com"}}

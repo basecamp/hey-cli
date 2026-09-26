@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +15,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 type timeTrackRequest struct {
@@ -198,10 +199,9 @@ func timeTrackView(t *testing.T) (*calendarView, *timeTrackServer) {
 		{id: 502, startsAt: "2026-08-20T09:00:00Z", endsAt: "2026-08-20T10:30:00Z", category: "Client work", notes: "Invoicing"},
 		{id: 503, startsAt: "2024-11-24T12:25:00Z", endsAt: "2024-11-24T16:10:07Z", category: "Family", notes: "Birthday dinner"},
 	}}}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tracked.handle(t, w, r)
 	}))
-	t.Cleanup(server.Close)
 
 	vc := testVC()
 	vc.ctx = context.Background()

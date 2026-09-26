@@ -14,6 +14,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/testserver"
 	"github.com/basecamp/hey-cli/internal/tui"
 )
 
@@ -43,7 +44,7 @@ func stubAskToSignIn(t *testing.T, answer bool) *int {
 
 func quietServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 	}))
 	return server

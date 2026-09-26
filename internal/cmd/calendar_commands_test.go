@@ -13,11 +13,12 @@ import (
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 func runJSONCommand(t *testing.T, handler http.Handler, args ...string) (output.Response, error) {
 	t.Helper()
-	server := newCLIServer(t, handler)
+	server := testserver.New(t, handler)
 
 	t.Setenv("HEY_TOKEN", "test-token")
 	t.Setenv("HEY_NO_KEYRING", "1")

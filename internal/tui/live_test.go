@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -13,6 +12,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/mail"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 // --- The changes stream ---
@@ -687,11 +687,10 @@ func TestScreenerRefreshMarksTheQueueStaleFromHistory(t *testing.T) {
 func mailWithScreenerSummaryServer(t *testing.T, signedStreamName string) *mailView {
 	t.Helper()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"pending_clearances_count":2,"signed_stream_name":"` + signedStreamName + `"}`))
 	}))
-	t.Cleanup(server.Close)
 
 	vc := testVC()
 	vc.ctx = context.Background()
@@ -706,12 +705,11 @@ func mailWithBoxServer(t *testing.T, postingsJSON string) (*mailView, *recordedR
 	t.Helper()
 
 	recorded := &recordedReads{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		recorded.paths = append(recorded.paths, r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":1,"kind":"imbox","name":"Imbox","postings":` + postingsJSON + `}`))
 	}))
-	t.Cleanup(server.Close)
 
 	vc := testVC()
 	vc.ctx = context.Background()

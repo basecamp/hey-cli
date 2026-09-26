@@ -16,6 +16,7 @@ import (
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/auth"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 var watchStarted = time.Date(2026, 8, 21, 9, 0, 0, 0, time.UTC)
@@ -210,7 +211,7 @@ func TestWatchFollowsEveryBoxAndReportsTheOnesAskedFor(t *testing.T) {
 func TestServerNowReadsTheServersClock(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 	var requested []string
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requested = append(requested, r.URL.String())
 		w.Header().Set("Date", "Fri, 21 Aug 2026 09:00:05 GMT")
 		w.Header().Set("Content-Type", "application/json")
@@ -264,7 +265,7 @@ func TestCutoffBeforeIsAWholeMillisecondStrictlyBefore(t *testing.T) {
 func TestServerNowIsTheClockWhenTheRequestBeganNotWhenItWasAnswered(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 	const delay = 300 * time.Millisecond
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(delay)
 		w.Header().Set("Date", "Fri, 21 Aug 2026 09:00:05 GMT")
 		w.Header().Set("Content-Type", "application/json")
@@ -297,7 +298,7 @@ func TestWatchReadsMailThatLandedWhileItReadTheClock(t *testing.T) {
 	// The Date header is 09:00:05; the posting landed at 09:00:04.900, inside
 	// the request; the box's cursor is therefore 09:00:04.900 as well.
 	var changesSince []string
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case strings.HasPrefix(r.URL.Path, "/identity.json"):
@@ -346,7 +347,7 @@ func TestWatchReadsMailThatLandedWhileItReadTheClock(t *testing.T) {
 
 func TestServerNowFallsBackToTheLocalClock(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "down", http.StatusBadGateway)
 	}))
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
@@ -368,7 +369,7 @@ func TestServerNowFallsBackToTheLocalClock(t *testing.T) {
 func changesServer(t *testing.T, bodies ...string) *httptest.Server {
 	t.Helper()
 	reads := 0
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := bodies[min(reads, len(bodies)-1)]
 		reads++
 		w.Header().Set("Content-Type", "application/json")

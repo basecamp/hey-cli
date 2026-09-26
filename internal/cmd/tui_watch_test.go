@@ -16,6 +16,7 @@ import (
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/auth"
 	"github.com/basecamp/hey-cli/internal/config"
+	"github.com/basecamp/hey-cli/internal/testserver"
 	"github.com/basecamp/hey-cli/internal/tui"
 )
 
@@ -378,7 +379,7 @@ func TestRingDropsWhatWouldBlock(t *testing.T) {
 func TestCalendarStreamWatchPollFollowsTheCalendarSet(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Link", `<`+r.URL.Path+`?since=2026-08-18T09%3A20%3A00.000Z>; rel="next"`)
 		_, _ = w.Write([]byte(`{
@@ -421,7 +422,7 @@ func TestCalendarStreamWatchPollReportsSubscriptionAuthenticationFailure(t *test
 	t.Setenv("HEY_TOKEN", "")
 	t.Setenv("HEY_NO_KEYRING", "1")
 
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Link", `<`+r.URL.Path+`?since=2026-08-18T09%3A20%3A00.000Z>; rel="next"`)
 		_, _ = w.Write([]byte(`{
@@ -463,7 +464,7 @@ func TestCalendarStreamWatchPollReportsSubscriptionAuthenticationFailure(t *test
 func TestCalendarStreamWatchPollSkipsAFailedRead(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)

@@ -16,6 +16,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/mail"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 // messageAddressedToJane is entry 12 as HEY serves it: Rick wrote it, Jane was on the
@@ -62,7 +63,7 @@ type sentReply struct {
 func threadReplyServer(t *testing.T, messageJSON string, entryIDs ...int64) (*httptest.Server, *sentReply) {
 	t.Helper()
 	sent := &sentReply{}
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/replies/new.json"):
 			if sent.ReplyNewJSON == "" {

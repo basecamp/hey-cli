@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 type sentForward struct {
@@ -25,7 +26,7 @@ type sentForward struct {
 func forwardServer(t *testing.T, entriesJSON string) (*httptest.Server, *sentForward) {
 	t.Helper()
 	sent := &sentForward{}
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sent.Requests = append(sent.Requests, r.Method+" "+r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {

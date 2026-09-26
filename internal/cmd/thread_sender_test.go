@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 // HEY keeps the account user as creator and the selected send-as contact as sender.
@@ -15,7 +17,7 @@ import (
 func TestComposeFromIsVisibleOnThreadRead(t *testing.T) {
 	var actingSenderID atomic.Int64
 	var messageReads atomic.Int64
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case strings.Contains(r.URL.Path, "identity"):

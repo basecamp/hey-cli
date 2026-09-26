@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -12,6 +11,7 @@ import (
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/mail"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 func TestCollectionNavPickerConstrainsAndSanitizesNames(t *testing.T) {
@@ -53,7 +53,7 @@ func TestCollectionMembershipPickerShowsCurrentMembership(t *testing.T) {
 
 func TestMailViewLoadsAndPagesCollections(t *testing.T) {
 	var collectionQueries []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/boxes.json":
@@ -75,7 +75,6 @@ func TestMailViewLoadsAndPagesCollections(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	t.Cleanup(server.Close)
 
 	client := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
 	vc := testVC()
@@ -303,11 +302,10 @@ func TestMailViewCollectionDiscoveryRetryKey(t *testing.T) {
 
 func TestMailViewCollectionActionUsesTopicNotPostingID(t *testing.T) {
 	var path string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path = r.URL.Path
 		w.WriteHeader(http.StatusNoContent)
 	}))
-	t.Cleanup(server.Close)
 	client := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
 	vc := testVC()
 	vc.sdk = client
@@ -669,11 +667,10 @@ func TestMailViewCollectionActionCompletionMessageCarriesIdentity(t *testing.T) 
 
 func TestMailViewCollectionMutationUsesOneRequest(t *testing.T) {
 	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
 		w.WriteHeader(http.StatusNoContent)
 	}))
-	t.Cleanup(server.Close)
 	client := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
 	vc := testVC()
 	vc.sdk = client

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 func testManager(t *testing.T, server *httptest.Server) *Manager {
@@ -25,10 +26,9 @@ func testManager(t *testing.T, server *httptest.Server) *Manager {
 }
 
 func TestHEYTokenPrecedence(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("server should not be called when HEY_TOKEN is set")
 	}))
-	defer server.Close()
 
 	t.Setenv("HEY_TOKEN", "env-token-123")
 	mgr := testManager(t, server)
@@ -119,7 +119,7 @@ func TestNormalizeBaseURL(t *testing.T) {
 func TestLoginOAuthFlow(t *testing.T) {
 	redirectURIs := make(chan string, 1)
 	var installID string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/oauth/tokens" {
 			t.Errorf("path = %q, want /oauth/tokens", r.URL.Path)
 		}
@@ -141,7 +141,6 @@ func TestLoginOAuthFlow(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"access_token":"oauth-access","refresh_token":"oauth-refresh","expires_in":3600}`)
 	}))
-	defer server.Close()
 
 	t.Setenv("HEY_TOKEN", "")
 	mgr := testManager(t, server)
@@ -228,12 +227,11 @@ func TestLoginDoesNotSaveCredentialsOnFailure(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			calls := 0
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls++
 				w.WriteHeader(tt.statusCode)
 				_, _ = io.WriteString(w, "denied")
 			}))
-			defer server.Close()
 
 			t.Setenv("HEY_TOKEN", "")
 			mgr := testManager(t, server)
@@ -352,10 +350,9 @@ func TestWaitForCallbackContextCancellation(t *testing.T) {
 }
 
 func TestLoginWithCookieAuthenticateAndLogout(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("authentication should not make an HTTP request")
 	}))
-	defer server.Close()
 
 	t.Setenv("HEY_TOKEN", "")
 	mgr := testManager(t, server)
@@ -519,7 +516,7 @@ func TestMissingCredentialsDoNotModifyRequest(t *testing.T) {
 
 func TestTokenRefreshOnExpiry(t *testing.T) {
 	refreshCalls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/oauth/tokens" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
@@ -532,7 +529,6 @@ func TestTokenRefreshOnExpiry(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
 	}))
-	defer server.Close()
 
 	t.Setenv("HEY_TOKEN", "")
 	mgr := testManager(t, server)
@@ -563,7 +559,7 @@ func TestTokenRefreshOnExpiry(t *testing.T) {
 }
 
 func TestAuthenticateRequestRefreshesAndPreservesRefreshToken(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/oauth/tokens" {
 			t.Errorf("path = %q, want /oauth/tokens", r.URL.Path)
 		}
@@ -576,7 +572,6 @@ func TestAuthenticateRequestRefreshesAndPreservesRefreshToken(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"access_token":"fresh-access","expires_in":7200}`)
 	}))
-	defer server.Close()
 
 	t.Setenv("HEY_TOKEN", "")
 	mgr := testManager(t, server)
@@ -609,14 +604,13 @@ func TestAuthenticateRequestRefreshesAndPreservesRefreshToken(t *testing.T) {
 }
 
 func TestRefreshUsesStoredEndpointAndRotatesToken(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/custom-refresh" {
 			t.Errorf("path = %q, want /custom-refresh", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"access_token":"fresh-access","refresh_token":"rotated-refresh","expires_in":3600}`)
 	}))
-	defer server.Close()
 
 	t.Setenv("HEY_TOKEN", "")
 	mgr := testManager(t, server)
@@ -669,12 +663,11 @@ func TestRefreshFailuresPreserveCredentials(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			calls := 0
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls++
 				w.WriteHeader(tt.status)
 				_, _ = fmt.Fprint(w, tt.body)
 			}))
-			defer server.Close()
 
 			t.Setenv("HEY_TOKEN", "")
 			mgr := testManager(t, server)
@@ -704,11 +697,10 @@ func TestRefreshFailuresPreserveCredentials(t *testing.T) {
 }
 
 func TestRefreshWithoutAnAccessTokenKeepsTheWorkingOne(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"refresh_token":"rotated-refresh","expires_in":3600}`)
 	}))
-	defer server.Close()
 
 	t.Setenv("HEY_TOKEN", "")
 	mgr := testManager(t, server)
@@ -734,11 +726,10 @@ func TestRefreshWithoutAnAccessTokenKeepsTheWorkingOne(t *testing.T) {
 }
 
 func TestRefreshForgetsAnExpiryTheServerStopsSending(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"access_token":"fresh-access","refresh_token":"rotated-refresh"}`)
 	}))
-	defer server.Close()
 
 	t.Setenv("HEY_TOKEN", "")
 	mgr := testManager(t, server)
@@ -766,12 +757,11 @@ func TestRefreshForgetsAnExpiryTheServerStopsSending(t *testing.T) {
 
 func TestRefreshAdoptsATokenAnotherProcessStored(t *testing.T) {
 	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"access_token":"ours","refresh_token":"rotated-refresh","expires_in":3600}`)
 	}))
-	defer server.Close()
 
 	t.Setenv("HEY_TOKEN", "")
 	mgr := testManager(t, server)
@@ -798,7 +788,7 @@ func TestRefreshAdoptsATokenAnotherProcessStored(t *testing.T) {
 
 func TestConcurrentManagersRefreshOnce(t *testing.T) {
 	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			t.Fatalf("ParseForm: %v", err)
 		}
@@ -814,7 +804,6 @@ func TestConcurrentManagersRefreshOnce(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"access_token":"fresh-access","refresh_token":"second-refresh","expires_in":3600}`)
 	}))
-	defer server.Close()
 
 	t.Setenv("HEY_TOKEN", "")
 	t.Setenv("HEY_NO_KEYRING", "1")
@@ -951,12 +940,11 @@ func TestRefreshForgetsAGrantTheServerRefused(t *testing.T) {
 
 	for name, body := range bodies {
 		t.Run(name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusBadRequest)
 				_, _ = fmt.Fprint(w, body)
 			}))
-			defer server.Close()
 
 			t.Setenv("HEY_TOKEN", "")
 			mgr := testManager(t, server)
@@ -986,8 +974,7 @@ func TestRefreshForgetsAGrantTheServerRefused(t *testing.T) {
 // later process cannot load and resend the same dead token.
 func TestARefusedGrantIsNotResentByANewManagerWhenItCannotBeDeleted(t *testing.T) {
 	calls := 0
-	server := httptest.NewServer(invalidGrantHandler(&calls))
-	defer server.Close()
+	server := testserver.New(t, invalidGrantHandler(&calls))
 
 	t.Setenv("HEY_TOKEN", "")
 	t.Setenv("HEY_NO_KEYRING", "")
@@ -1061,12 +1048,11 @@ func TestTheClearedCredentialHookRunsOnlyWhenTheCredentialWent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(tt.status)
 				_, _ = fmt.Fprint(w, tt.body)
 			}))
-			defer server.Close()
 
 			t.Setenv("HEY_TOKEN", "")
 			t.Setenv("HEY_NO_KEYRING", "")
@@ -1121,8 +1107,7 @@ func TestTheClearedCredentialHookRunsOnlyWhenTheCredentialWent(t *testing.T) {
 // client spent the allowance it needed to log back in.
 func TestARefusedGrantIsNeverSentTwice(t *testing.T) {
 	calls := 0
-	server := httptest.NewServer(invalidGrantHandler(&calls))
-	defer server.Close()
+	server := testserver.New(t, invalidGrantHandler(&calls))
 
 	t.Setenv("HEY_TOKEN", "")
 	mgr := testManager(t, server)
@@ -1145,13 +1130,12 @@ func TestARefusedGrantIsNeverSentTwice(t *testing.T) {
 
 func TestRateLimitedRefreshStopsAskingUntilTheLimitCanHaveCleared(t *testing.T) {
 	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls++
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = fmt.Fprint(w, `{"error":"rate_limit_exceeded"}`)
 	}))
-	defer server.Close()
 
 	t.Setenv("HEY_TOKEN", "")
 	mgr := testManager(t, server)
@@ -1180,13 +1164,12 @@ func TestRateLimitedRefreshStopsAskingUntilTheLimitCanHaveCleared(t *testing.T) 
 // should run on it rather than fail.
 func TestRateLimitedRefreshFallsBackToTheTokenItStillHolds(t *testing.T) {
 	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls++
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = fmt.Fprint(w, `{"error":"rate_limit_exceeded"}`)
 	}))
-	defer server.Close()
 
 	t.Setenv("HEY_TOKEN", "")
 	mgr := testManager(t, server)
@@ -1215,12 +1198,11 @@ func TestRateLimitedRefreshFallsBackToTheTokenItStillHolds(t *testing.T) {
 }
 
 func TestRefreshHoldHonorsRetryAfter(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Retry-After", "42")
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = fmt.Fprint(w, `{"error":"rate_limit_exceeded"}`)
 	}))
-	defer server.Close()
 
 	t.Setenv("HEY_TOKEN", "")
 	mgr := testManager(t, server)
@@ -1264,11 +1246,10 @@ func TestParseRetryAfter(t *testing.T) {
 
 func TestASuccessfulRefreshLiftsTheHold(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "")
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"access_token":"fresh","refresh_token":"rotated","expires_in":3600}`)
 	}))
-	defer server.Close()
 
 	mgr := testManager(t, server)
 	saveExpiredCredential(t, mgr)
@@ -1289,10 +1270,9 @@ func TestASuccessfulRefreshLiftsTheHold(t *testing.T) {
 }
 
 func TestRefreshKeepsCachedCredentialsWhenTheStoreIsTemporarilyUnavailable(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("refresh endpoint called without a fresh read of the stored credential")
 	}))
-	defer server.Close()
 
 	t.Setenv("HEY_TOKEN", "")
 	fake := newFakeKeyring()
@@ -1331,12 +1311,11 @@ func TestRefreshKeepsCachedCredentialsWhenTheStoreIsTemporarilyUnavailable(t *te
 // or the allowance is spent twice over for one dead session.
 func TestRefreshStopsWhenAnotherProcessForgotTheCredential(t *testing.T) {
 	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls++
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = fmt.Fprint(w, `{"error":"invalid_grant"}`)
 	}))
-	defer server.Close()
 
 	t.Setenv("HEY_TOKEN", "")
 	mgr := testManager(t, server)
@@ -1364,7 +1343,7 @@ func TestRefreshStopsWhenAnotherProcessForgotTheCredential(t *testing.T) {
 // A 429 whose body never arrives is still a 429: the hold has to come from the
 // status, not from parsing what followed it.
 func TestRateLimitHoldSurvivesABodyThatNeverArrives(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Length", "64")
 		w.Header().Set("Retry-After", "30")
 		w.WriteHeader(http.StatusTooManyRequests)
@@ -1380,7 +1359,6 @@ func TestRateLimitHoldSurvivesABodyThatNeverArrives(t *testing.T) {
 			}
 		}
 	}))
-	defer server.Close()
 
 	t.Setenv("HEY_TOKEN", "")
 	mgr := testManager(t, server)

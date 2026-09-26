@@ -15,6 +15,7 @@ import (
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/auth"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 func runAuthCommand(t *testing.T, configHome, baseURL, envToken string, jsonOutput bool, args ...string) (string, output.Response, error) {
@@ -50,7 +51,7 @@ func runAuthCommand(t *testing.T, configHome, baseURL, envToken string, jsonOutp
 }
 
 func TestAuthCookieLoginStatusAndLogout(t *testing.T) {
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 	}))
 	configHome := t.TempDir()
@@ -98,7 +99,7 @@ func TestAuthCookieLoginStatusAndLogout(t *testing.T) {
 }
 
 func TestAuthTokenLoginAndStoredTokenOutput(t *testing.T) {
-	server := newCLIServer(t, http.NotFoundHandler())
+	server := testserver.New(t, http.NotFoundHandler())
 	configHome := t.TempDir()
 
 	_, response, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--token", "stored-token")
@@ -122,7 +123,7 @@ func TestAuthTokenLoginAndStoredTokenOutput(t *testing.T) {
 // the caller something that 401s with nothing to explain it -- and put the cookie in
 // their shell history.
 func TestAuthTokenRefusesToPrintASessionCookie(t *testing.T) {
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 	}))
 	configHome := t.TempDir()
@@ -144,7 +145,7 @@ func TestAuthTokenRefusesToPrintASessionCookie(t *testing.T) {
 }
 
 func TestAuthStatusReportsUnreadableCredentialState(t *testing.T) {
-	server := newCLIServer(t, http.NotFoundHandler())
+	server := testserver.New(t, http.NotFoundHandler())
 
 	configHome := t.TempDir()
 	configDir := filepath.Join(configHome, "hey-cli")
@@ -165,7 +166,7 @@ func TestAuthStatusReportsUnreadableCredentialState(t *testing.T) {
 }
 
 func TestAuthCommandsPreserveCredentialStorageFailures(t *testing.T) {
-	server := newCLIServer(t, http.NotFoundHandler())
+	server := testserver.New(t, http.NotFoundHandler())
 
 	for _, command := range [][]string{{"auth", "refresh"}, {"auth", "token"}} {
 		t.Run(strings.Join(command, " "), func(t *testing.T) {
@@ -191,7 +192,7 @@ func TestAuthCommandsPreserveCredentialStorageFailures(t *testing.T) {
 }
 
 func TestAuthStatusUsesEnvironmentTokenWithoutStorage(t *testing.T) {
-	server := newCLIServer(t, http.NotFoundHandler())
+	server := testserver.New(t, http.NotFoundHandler())
 
 	_, response, err := runAuthCommand(t, t.TempDir(), server.URL, "environment-token", true, "auth", "status")
 	if err != nil {
@@ -204,7 +205,7 @@ func TestAuthStatusUsesEnvironmentTokenWithoutStorage(t *testing.T) {
 }
 
 func TestAuthRefreshCommand(t *testing.T) {
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/oauth/tokens" {
 			t.Errorf("request = %s %s", r.Method, r.URL.Path)
 		}
@@ -241,7 +242,7 @@ func TestAuthRefreshCommand(t *testing.T) {
 }
 
 func TestAuthRefreshFailure(t *testing.T) {
-	server := newCLIServer(t, http.NotFoundHandler())
+	server := testserver.New(t, http.NotFoundHandler())
 	_, _, err := runAuthCommand(t, t.TempDir(), server.URL, "", true, "auth", "refresh")
 	if err == nil || !strings.Contains(err.Error(), "refresh failed: not authenticated") {
 		t.Fatalf("error = %v", err)
@@ -259,7 +260,7 @@ func TestAuthCommandsKeepARateLimitClassified(t *testing.T) {
 
 	for name, args := range commands {
 		t.Run(name, func(t *testing.T) {
-			server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Retry-After", "42")
 				w.WriteHeader(http.StatusTooManyRequests)
 			}))
@@ -299,7 +300,7 @@ func TestAuthCommandsKeepARateLimitClassified(t *testing.T) {
 }
 
 func TestDoctorCommandReportsEnvironment(t *testing.T) {
-	server := newCLIServer(t, http.NotFoundHandler())
+	server := testserver.New(t, http.NotFoundHandler())
 	configHome := t.TempDir()
 	t.Setenv("SHELL", "/bin/zsh")
 	skillPath := filepath.Join(configHome, ".agents", "skills", "hey", "SKILL.md")
@@ -352,7 +353,7 @@ func TestDoctorCommandReportsEnvironment(t *testing.T) {
 }
 
 func TestDoctorCommandReportsMissingAuthentication(t *testing.T) {
-	server := newCLIServer(t, http.NotFoundHandler())
+	server := testserver.New(t, http.NotFoundHandler())
 	_, response, err := runAuthCommand(t, t.TempDir(), server.URL, "", true, "doctor")
 	if err != nil {
 		t.Fatalf("doctor: %v", err)
@@ -374,7 +375,7 @@ func TestDoctorCommandReportsMissingAuthentication(t *testing.T) {
 }
 
 func TestLoginLogoutShortcutsMirrorAuthCommands(t *testing.T) {
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 	}))
 	configHome := t.TempDir()
@@ -419,7 +420,7 @@ func TestLoginLogoutShortcutsMirrorAuthCommands(t *testing.T) {
 }
 
 func TestAuthStatusReportsInstallID(t *testing.T) {
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 	}))
 	configHome := t.TempDir()

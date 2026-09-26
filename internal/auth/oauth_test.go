@@ -6,16 +6,17 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 func TestExchangeCodeRequest(t *testing.T) {
 	before := time.Now()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("method = %s, want POST", r.Method)
 		}
@@ -41,7 +42,6 @@ func TestExchangeCodeRequest(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"access_token":"access","refresh_token":"refresh","token_type":"Bearer","expires_in":3600}`)
 	}))
-	defer server.Close()
 
 	token, err := exchangeCode(t.Context(), server.Client(), server.URL, "authorization-code", "http://127.0.0.1/callback", "client-id", "verifier", "installation")
 	if err != nil {
@@ -56,7 +56,7 @@ func TestExchangeCodeRequest(t *testing.T) {
 }
 
 func TestRefreshOAuthTokenRequest(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("method = %s, want POST", r.Method)
 		}
@@ -77,7 +77,6 @@ func TestRefreshOAuthTokenRequest(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"access_token":"new-access"}`)
 	}))
-	defer server.Close()
 
 	token, err := refreshOAuthToken(t.Context(), server.Client(), server.URL, "old-refresh", "client-id", "installation")
 	if err != nil {
@@ -107,11 +106,10 @@ func TestOAuthTokenResponseFailures(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(tt.status)
 				_, _ = io.WriteString(w, tt.body)
 			}))
-			defer server.Close()
 
 			var err error
 			if tt.exchange {
@@ -154,10 +152,9 @@ func TestOAuthTransportAndRequestFailures(t *testing.T) {
 }
 
 func TestOAuthContextCancellation(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
 	}))
-	defer server.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

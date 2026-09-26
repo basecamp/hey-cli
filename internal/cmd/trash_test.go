@@ -11,6 +11,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 type recordedRemoval struct {
@@ -24,7 +25,7 @@ type recordedRemoval struct {
 func removalServer(t *testing.T) (*httptest.Server, *recordedRemoval) {
 	t.Helper()
 	recorded := &recordedRemoval{status: http.StatusNoContent}
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		recorded.requests++
 		recorded.method = r.Method
 		recorded.path = r.URL.Path

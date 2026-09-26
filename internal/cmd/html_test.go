@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/testserver"
 	"github.com/basecamp/hey-cli/internal/threadload"
 )
 
@@ -197,7 +198,7 @@ func TestHTMLConflictsWithEveryOtherOutputSelector(t *testing.T) {
 // A command without HTML refuses the flag before it reads configuration or makes a
 // request: the server here answers nothing, and no credentials are set.
 func TestHTMLIsRefusedByOtherCommandsBeforeAnythingElse(t *testing.T) {
-	server := newCLIServer(t, http.NotFoundHandler())
+	server := testserver.New(t, http.NotFoundHandler())
 	t.Setenv("HEY_TOKEN", "")
 	stdoutTerminal(t, false)
 

@@ -4,15 +4,16 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 func TestList(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/my/navigation.json" {
 			t.Errorf("request = %s %s, want GET /my/navigation.json", r.Method, r.URL.Path)
 			http.NotFound(w, r)
@@ -21,7 +22,6 @@ func TestList(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"items":[{"title":"Etiquetas","icon":{"name":"folders"},"menu_items":[{"title":"All Labels","app_url":"/folders"},{"title":"Receipts","app_url":"https://app.hey.com/folders/12"},{"title":"Travel","app_url":"/folders/34?from=navigation"}]},{"title":"Collections","menu_items":[{"title":"Planning","app_url":"/collections/56"}]}]}`)
 	}))
-	t.Cleanup(server.Close)
 
 	client := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
 	folders, err := List(context.Background(), client)
@@ -57,10 +57,9 @@ func TestFromNavigationHandlesEmptyAndMalformedItems(t *testing.T) {
 }
 
 func TestListReportsNavigationFailure(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "navigation unavailable", http.StatusBadRequest)
 	}))
-	t.Cleanup(server.Close)
 
 	client := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
 	if _, err := List(context.Background(), client); err == nil {

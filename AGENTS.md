@@ -844,8 +844,8 @@ Whenever you add, remove or change any functionality add/remove/change tests as 
 
 A loopback test server is not private to its test: a dev-server finder on the machine
 (moshi-hook, when the Moshi app is connected over SSH) sends `GET /` to every listening
-port. In `internal/cmd`, start a server the CLI talks to with `newCLIServer`, which keeps
-those visits from a handler that fails on an unexpected request.
+port. Start a server that stands in for HEY with `testserver.New` (`internal/testserver`),
+which keeps an uncredentialed `GET /` from the handler and closes the server at cleanup.
 
 ### Smoke Testing
 

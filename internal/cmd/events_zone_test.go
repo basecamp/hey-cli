@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 // zoneFixture is what zoneServer answers with: the identity's time zone, or a status for the
@@ -830,7 +831,7 @@ func TestEventsAddReadsTheIdentityOnceItself(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			var identityReads, writes atomic.Int32
-			server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				switch {
 				case r.Method == http.MethodGet && r.URL.Path == "/identity.json":

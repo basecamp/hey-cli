@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"slices"
 	"strings"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/auth"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 func TestURL(t *testing.T) {
@@ -208,7 +208,7 @@ func TestOnlyAuthenticationFailuresStopReconnects(t *testing.T) {
 
 func TestAuthenticationFailureStopsAReconnect(t *testing.T) {
 	refreshCalls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/oauth/tokens" {
 			t.Errorf("path = %q, want /oauth/tokens", r.URL.Path)
 		}
@@ -217,7 +217,6 @@ func TestAuthenticationFailureStopsAReconnect(t *testing.T) {
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = fmt.Fprint(w, `{"error":"invalid_grant"}`)
 	}))
-	defer server.Close()
 
 	t.Setenv("HEY_NO_KEYRING", "1")
 	t.Setenv("HEY_TOKEN", "")

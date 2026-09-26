@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -14,6 +13,8 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 func typeText(v *mailView, s string) {
@@ -47,7 +48,7 @@ func composeTestServer(t *testing.T) (*mailView, *struct {
 		account      string
 		body         map[string]any
 	}{}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/identity.json":
@@ -77,7 +78,6 @@ func composeTestServer(t *testing.T) (*mailView, *struct {
 			_, _ = w.Write([]byte(`{}`))
 		}
 	}))
-	t.Cleanup(srv.Close)
 	sdk := hey.NewClient(&hey.Config{BaseURL: srv.URL}, &hey.StaticTokenProvider{Token: "t"}, hey.WithMaxRetries(0))
 	vc := testVC()
 	vc.rootSDK = sdk
@@ -325,7 +325,7 @@ func TestReplyContextFallsBackWhenPrefillIsEmpty(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			srv := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				switch r.URL.Path {
 				case "/identity.json":
@@ -341,7 +341,6 @@ func TestReplyContextFallsBackWhenPrefillIsEmpty(t *testing.T) {
 					_, _ = w.Write([]byte(`{}`))
 				}
 			}))
-			t.Cleanup(srv.Close)
 			sdk := hey.NewClient(&hey.Config{BaseURL: srv.URL}, &hey.StaticTokenProvider{Token: "t"}, hey.WithMaxRetries(0))
 			vc := testVC()
 			vc.rootSDK = sdk

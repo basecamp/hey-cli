@@ -13,6 +13,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/auth"
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 func TestSDK401RetryAdoptsCredentialsAnotherProcessStored(t *testing.T) {
@@ -56,7 +57,7 @@ func TestSDK401RetryAdoptsCredentialsAnotherProcessStored(t *testing.T) {
 			var manager *auth.Manager
 			var mu sync.Mutex
 			var credentials []string
-			server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				credential := r.Header.Get("Authorization")
 				if credential == "" {
 					credential = r.Header.Get("Cookie")
@@ -165,7 +166,7 @@ func TestLogoutClearsTheHTTPCache(t *testing.T) {
 // of whatever command sent it. Cached mail must not outlive that credential any more
 // than it outlives an explicit logout.
 func TestARefusedGrantClearsTheHTTPCache(t *testing.T) {
-	server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = io.WriteString(w, `{"error":"invalid_grant","error_description":"The refresh token is invalid"}`)
@@ -201,7 +202,7 @@ func TestATransientRefreshFailureKeepsTheCredentialAndTheHTTPCache(t *testing.T)
 
 	for name, status := range statuses {
 		t.Run(name, func(t *testing.T) {
-			server := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(status)
 			}))
 			configHome := t.TempDir()

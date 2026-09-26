@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"slices"
 	"strings"
@@ -13,6 +12,8 @@ import (
 	"time"
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 // eventFormCalendars is what the form is handed: the calendars an event can be filed on,
@@ -925,7 +926,7 @@ func calendarWithEventServer(t *testing.T) (*calendarView, *recordedEventRequest
 	t.Helper()
 
 	recorded := &recordedEventRequests{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		recorded.add(req)
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -940,7 +941,6 @@ func calendarWithEventServer(t *testing.T) (*calendarView, *recordedEventRequest
 			_, _ = io.WriteString(w, `{"starts_at":"2026-08-20T00:00:00Z","ends_at":"2026-08-20T23:59:59Z","kind":"day","recordings":{}}`)
 		}
 	}))
-	t.Cleanup(server.Close)
 
 	v := dayWithEvents(t)
 	v.vc.ctx = context.Background()

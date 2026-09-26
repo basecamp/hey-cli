@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/basecamp/hey-cli/internal/testserver"
 )
 
 func TestMCPCommandRegistration(t *testing.T) {
@@ -103,7 +105,7 @@ func runMCPCommand(t *testing.T, upstream *httptest.Server, args ...string) *mcp
 }
 
 func TestMCPCommandServesMCP(t *testing.T) {
-	upstream := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/boxes.json" {
 			t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)
@@ -157,7 +159,7 @@ func TestMCPCommandServesMCP(t *testing.T) {
 }
 
 func TestMCPCommandFlagPassthrough(t *testing.T) {
-	upstream := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 		http.NotFound(w, r)
 	}))
@@ -184,7 +186,7 @@ func TestMCPCommandFlagPassthrough(t *testing.T) {
 
 func TestMCPCommandDoesNotRetryMutations(t *testing.T) {
 	var deliveries atomic.Int32
-	upstream := newCLIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPut || !strings.HasPrefix(r.URL.Path, "/messages/1") {
 			t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)
