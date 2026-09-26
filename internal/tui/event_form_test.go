@@ -87,6 +87,44 @@ func TestEventFormIsOnlyOfferedCalendarsHEYWillTake(t *testing.T) {
 	}
 }
 
+// HEY lists calendars by when they were made, and every account is given Maybe right after
+// the personal calendar, so the first fileable calendar is Maybe. A new event opens where HEY
+// puts one when none is named — `owned_calendars.internal.normal.first!` — unless the reader
+// filed on another calendar last time.
+func TestNewEventFormOpensOnHEYsDefaultCalendarRatherThanMaybe(t *testing.T) {
+	v := dayWithEvents(t)
+	v.calendars = []Calendar{
+		{ID: 1101, Personal: true, Kind: "normal"},
+		{ID: 1102, Name: "Maybe", Owned: true, Kind: "maybe"},
+		{ID: 1103, Name: "Family", Kind: "normal"},
+		{ID: 1104, Name: "General", Owned: true, Kind: "normal"},
+	}
+
+	v.HandleContentKey(keyPress("a"))
+	if v.eventForm == nil {
+		t.Fatal("a did not open the form")
+	}
+	if got := v.eventForm.values().CalendarID; got != 1104 {
+		t.Errorf("the form would file on %d, want 1104, the first ordinary calendar the reader owns", got)
+	}
+
+	// The calendar filed on last still wins, Maybe included: that was the reader's choice.
+	v.eventForm = nil
+	v.vc.loadLastCalendar = func() int64 { return 1102 }
+	v.HandleContentKey(keyPress("a"))
+	if got := v.eventForm.values().CalendarID; got != 1102 {
+		t.Errorf("the form would file on %d, want 1102, the calendar filed on last", got)
+	}
+
+	// A remembered calendar that is no longer offered falls back to HEY's default, not to Maybe.
+	v.eventForm = nil
+	v.vc.loadLastCalendar = func() int64 { return 999999 }
+	v.HandleContentKey(keyPress("a"))
+	if got := v.eventForm.values().CalendarID; got != 1104 {
+		t.Errorf("the form would file on %d, want 1104 when the remembered calendar is gone", got)
+	}
+}
+
 // A new event opens on the day the reader is looking at, at the next whole hour, for an
 // hour — the same guess the web form makes rather than an empty pair of fields.
 func TestNewEventFormOpensOnTheDayInView(t *testing.T) {

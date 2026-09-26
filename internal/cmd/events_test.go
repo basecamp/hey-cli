@@ -1,12 +1,15 @@
 package cmd
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
 // eventForm reads the form-encoded body an event write sends. Calendar events take forms
@@ -167,17 +170,24 @@ func TestEventsAddRepeatsAndReminds(t *testing.T) {
 	}
 }
 
-// Without --calendar a new event goes on the first calendar it can be filed on. The personal
-// calendar is in the list HEY serves and answers 404 when filed on, which is the trap.
-func TestEventsAddSkipsTheUnfileableCalendars(t *testing.T) {
+// Without --calendar a new event goes where HEY files one when none is named:
+// `owned_calendars.internal.normal.first!`. HEY lists calendars by when they were made, so the
+// personal calendar (which answers 404 when filed on) and then Maybe come before it — Maybe is
+// the trap that is easy to miss, because it is owned and internal and only its kind says no.
+func TestEventsAddFilesOnHEYsDefaultCalendar(t *testing.T) {
 	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/calendars.json":
-			_, _ = io.WriteString(w, `{"calendars":[{"calendar":{"id":7,"name":"Personal","personal":true,"owned":true}},{"calendar":{"id":8,"name":"Holidays","external":true,"owned":true}},{"calendar":{"id":9,"name":"Work","owned":true}}]}`)
+			_, _ = io.WriteString(w, `{"calendars":[`+
+				`{"calendar":{"id":1101,"name":"","kind":"normal","personal":true}},`+
+				`{"calendar":{"id":1102,"name":"Maybe","kind":"maybe","owned":true}},`+
+				`{"calendar":{"id":1103,"name":"Holidays in Croatia","kind":"normal","external":true,"owned":true}},`+
+				`{"calendar":{"id":1104,"name":"Family","kind":"normal"}},`+
+				`{"calendar":{"id":1105,"name":"General","kind":"normal","owned":true}}]}`)
 		case "/calendar/events.json":
-			if got := eventForm(t, r).Get("calendar_event[calendar_id]"); got != "9" {
-				t.Errorf("calendar_id = %q, want the first fileable calendar", got)
+			if got := eventForm(t, r).Get("calendar_event[calendar_id]"); got != "1105" {
+				t.Errorf("calendar_id = %q, want 1105, the first ordinary calendar the reader owns", got)
 			}
 			w.WriteHeader(http.StatusCreated)
 			_, _ = io.WriteString(w, `{"id":4825,"title":"Design review"}`)
@@ -187,6 +197,27 @@ func TestEventsAddSkipsTheUnfileableCalendars(t *testing.T) {
 	}), "event", "add", "Design review", "--starts-on", "2026-09-02")
 	if err != nil {
 		t.Fatalf("execute events add: %v", err)
+	}
+}
+
+// Maybe takes an event when it is named, but it is never the default, so a reader with no
+// ordinary calendar of their own is asked to name one rather than filed on Maybe.
+func TestEventsAddNeverDefaultsToMaybe(t *testing.T) {
+	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/calendars.json":
+			_, _ = io.WriteString(w, `{"calendars":[`+
+				`{"calendar":{"id":1101,"name":"","kind":"normal","personal":true}},`+
+				`{"calendar":{"id":1102,"name":"Maybe","kind":"maybe","owned":true}}]}`)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}), "event", "add", "Design review", "--starts-on", "2026-09-02")
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, "no calendar to file the event on") {
+		t.Fatalf("error = %v, want the no-calendar usage error", err)
 	}
 }
 

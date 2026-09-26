@@ -135,10 +135,11 @@ type eventForm struct {
 // newEventForm opens on the day the reader is looking at, at the next whole hour, for an
 // hour — the same guess the web form makes rather than an empty pair of fields.
 //
-// lastCalendarID is the calendar this reader filed on last. A new event opens on it while it
-// is still one of the offered ones, because somebody who keeps a work calendar and a personal
-// one files on the same one all week. An edit opens on the event's own calendar instead.
-func newEventForm(mode eventFormMode, event Recording, on time.Time, calendars []Calendar, lastCalendarID int64, styles styles) *eventForm {
+// calendarID is the calendar a new event opens on while it is one of the offered ones:
+// the one this reader filed on last, because somebody who keeps a work calendar and a
+// personal one files on the same one all week, or else the one HEY files on by default (see
+// calendarView.newEventCalendarID). An edit opens on the event's own calendar instead.
+func newEventForm(mode eventFormMode, event Recording, on time.Time, calendars []Calendar, calendarID int64, styles styles) *eventForm {
 	form := &eventForm{
 		mode:            mode,
 		eventID:         event.ID,
@@ -160,7 +161,7 @@ func newEventForm(mode eventFormMode, event Recording, on time.Time, calendars [
 		form.allDay = event.AllDay
 		form.calendar = indexOfCalendar(calendars, event)
 	} else {
-		form.calendar = indexOfCalendarID(calendars, lastCalendarID)
+		form.calendar = indexOfCalendarID(calendars, calendarID)
 	}
 
 	// An edit shows the event's own times; a new event is offered the next whole hour for

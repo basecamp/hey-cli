@@ -128,9 +128,8 @@ func newEventsAddCommand() *eventsAddCommand {
 An event with no --start-time is an all-day event. A --start-time with no --end-time runs
 for an hour. Clock times are read in --time-zone, which defaults to this machine's zone.
 
-Without --calendar the event is filed on the first calendar you own that is neither personal
-nor subscribed, in 'hey calendar list' order — often "Maybe" rather than the one you mean,
-so pass --calendar.`,
+Without --calendar the event goes where HEY puts one by default: the first ordinary calendar
+you own that is not a subscription — never Maybe or the personal calendar.`,
 		Example: `  hey event add "Design review" --starts-on 2026-09-02 --start-time 14:00 --end-time 15:00
   hey event add "Sarah's birthday" --starts-on 2026-09-02
   hey event add "Standup" --start-time 09:15 --repeat every_weekday --calendar 123
@@ -551,8 +550,13 @@ func (f *eventFields) registerFlags(cmd *cobra.Command) {
 	flags.StringArrayVar(&f.reminders, "remind", nil, "Notice before the event, e.g. 10m, 1h, 1d (repeatable)")
 }
 
-// resolveCalendar is which calendar a new event is filed on. Without --calendar it is the
-// first one HEY lists that the identity can file on, the way the TUI's form opens on one.
+// calendarKindNormal is the kind of an ordinary calendar. The other kind HEY has is "maybe",
+// the tentative calendar every account is given right after the personal one.
+const calendarKindNormal = "normal"
+
+// resolveCalendar is which calendar a new event is filed on. Without --calendar it is the one
+// HEY itself files on when no calendar is named — `owned_calendars.internal.normal.first!` —
+// which the TUI's form opens on as well.
 func (f *eventFields) resolveCalendar(ctx context.Context) (int64, error) {
 	if f.calendar != 0 {
 		return f.calendar, nil
@@ -563,14 +567,21 @@ func (f *eventFields) resolveCalendar(ctx context.Context) (int64, error) {
 		return 0, apierr.FromSDK(err)
 	}
 	for _, calendar := range unwrapCalendars(payload) {
-		// The personal calendar is in the list and answers 404 when filed on, and a
-		// calendar somebody else owns or a subscription cannot take an event either.
-		if calendar.Owned && !calendar.Personal && !calendar.External {
+		if isDefaultEventCalendar(calendar) {
 			return calendar.Id, nil
 		}
 	}
 	return 0, apierr.ErrUsageHint("no calendar to file the event on",
 		"hey calendar list  lists them; pass one with --calendar")
+}
+
+// isDefaultEventCalendar is whether HEY would file a new event here when none is named. HEY
+// lists calendars by when they were made, and every account has Maybe before the calendar
+// it files on, so the first owned calendar is the wrong one: it has to be a normal one too.
+// The personal calendar is in the list and answers 404 when filed on, and a subscription —
+// external, the other side of HEY's `internal` — cannot take an event either.
+func isDefaultEventCalendar(calendar generated.Calendar) bool {
+	return calendar.Owned && !calendar.Personal && !calendar.External && calendar.Kind == calendarKindNormal
 }
 
 // eventSchedule is when an event happens, in the shape HEY writes it: dates, clock times and

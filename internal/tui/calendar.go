@@ -37,7 +37,15 @@ type Calendar struct {
 	// External is a calendar HEY subscribes to rather than owns — haystack's `internal`
 	// scope is `where.missing(:subscription)`, and this is the other side of it.
 	External bool
+	// Owned is whether the reader owns the calendar rather than having it shared with them.
+	Owned bool
+	// Kind is "normal" or "maybe". Every account has a Maybe calendar, made right after the
+	// personal one, so it comes before the ordinary calendar in the order HEY lists them.
+	Kind string
 }
+
+// calendarKindNormal is the kind of every calendar but Maybe.
+const calendarKindNormal = "normal"
 
 // listed is whether the picker offers this calendar at all. The personal calendar is
 // never offered: it holds the reader's own habits and todos, it is on in every client,
@@ -58,6 +66,13 @@ func (c Calendar) listed() bool {
 // `accessible_calendars.internal` for exactly this reason.
 func (c Calendar) fileable() bool {
 	return !c.Personal && !c.External
+}
+
+// defaultForEvents is whether this is where HEY opens a new event when no calendar is named:
+// `owned_calendars.internal.normal.first!`. Maybe is fileable but never the default, and it
+// is listed before the calendar that is, so the first fileable calendar is the wrong answer.
+func (c Calendar) defaultForEvents() bool {
+	return c.fileable() && c.Owned && c.Kind == calendarKindNormal
 }
 
 // CalendarYear is a year as HEY draws one: a grid of days, and the events that span more
@@ -2066,7 +2081,7 @@ func (v *calendarView) startEventForm(mode eventFormMode, event Recording) tea.C
 		return notifyError("Cannot add an event", errNoCalendars)
 	}
 	v.editing = event
-	v.eventForm = newEventForm(mode, event, v.day(), fileable, v.lastCalendarID(), v.vc.styles)
+	v.eventForm = newEventForm(mode, event, v.day(), fileable, v.newEventCalendarID(fileable), v.vc.styles)
 
 	// An edit is handed what the event already carries, and this is load-bearing rather than a
 	// courtesy: HEY clears the notes, location, link and attached email on any write that
@@ -2154,10 +2169,30 @@ func (v *calendarView) saveEvent() tea.Cmd {
 	}
 }
 
+// newEventCalendarID is the calendar a new event opens on: the one the reader filed on last
+// while it is still offered, and otherwise the one HEY files on by default. An account with no
+// default answers zero and the form opens on its first calendar — unlike `hey event add`, which
+// refuses, because here the choice is on screen in the Calendar row before anything is saved.
+func (v *calendarView) newEventCalendarID(fileable []Calendar) int64 {
+	if last := v.lastCalendarID(); last != 0 {
+		for _, calendar := range fileable {
+			if calendar.ID == last {
+				return last
+			}
+		}
+	}
+	for _, calendar := range fileable {
+		if calendar.defaultForEvents() {
+			return calendar.ID
+		}
+	}
+	return 0
+}
+
 // lastCalendarID and rememberCalendar are where the calendar a new event opens on comes from and
 // goes. It is a preference rather than data, so it is remembered as soon as the reader saves
-// rather than after HEY answers, and a machine that cannot store it simply keeps offering the
-// first calendar.
+// rather than after HEY answers, and a machine that cannot store it simply keeps offering
+// HEY's default.
 func (v *calendarView) lastCalendarID() int64 {
 	if v.vc.loadLastCalendar == nil {
 		return 0
@@ -2327,6 +2362,7 @@ func sdkCalendarToModel(c generated.Calendar) Calendar {
 	return Calendar{
 		ID: c.Id, Name: c.Name, OwnerEmail: c.OwnerEmailAddress,
 		Color: c.Color, Personal: c.Personal, External: c.External,
+		Owned: c.Owned, Kind: c.Kind,
 	}
 }
 
