@@ -884,11 +884,14 @@ envelope is the one every mutation writes: `summary` (`Occurrence updated` or `O
 and the following updated`) and `data` holding the recording HEY answered.
 
 On `add`, no `--start-time` means all-day and a `--start-time` with no `--end-time` runs an
-hour. Clock times, and today when `--starts-on` is left out, are read in the user's HEY
+hour — unless `--ends-on` names a later day, when it ends there at the start's clock time
+plus an hour; a default end that falls in the hour the clocks repeat is refused (pass
+`--end-time`). Clock times, and today when `--starts-on` is left out, are read in the user's HEY
 account time zone (the one the web app uses); pass `--time-zone America/New_York` to write
 in another. If a clock time or today needs the account's zone and it has none, the command
-refuses and asks for `--time-zone`. On `edit`, an end or zone not named keeps the
-event's own, and an event saved without a zone stays without one.
+refuses and asks for `--time-zone`. On `edit`, a timed event keeps the end and zone
+not named, and one saved without a zone stays without one; an all-day event given a time
+starts at 09:00 unless `--start-time` says otherwise and gets the default hour.
 
 ### Todos
 

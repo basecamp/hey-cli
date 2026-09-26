@@ -127,7 +127,8 @@ func newEventsAddCommand() *eventsAddCommand {
 		Long: `Create an event.
 
 An event with no --start-time is an all-day event. A --start-time with no --end-time runs
-for an hour. Clock times are read in your HEY account's time zone, the one HEY's web app
+for an hour, unless --ends-on names a later day; a default end in the hour the clocks repeat
+is refused, so pass --end-time there. Clock times are read in your HEY account's time zone, the one HEY's web app
 uses, and so is today when --starts-on is left out, for an all-day event too; --time-zone
 names another. If one of those needs the account's zone and the account has none, the
 command refuses and asks for --time-zone; an all-day event on a named date needs no zone.

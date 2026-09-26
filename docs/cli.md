@@ -436,13 +436,16 @@ and `--all`. With no date they read the account's own today, whatever zone the m
 runs in.
 
 An event with no `--start-time` is an all-day event, and a `--start-time` with no
-`--end-time` runs for an hour. Clock times are read in your HEY account's time zone, the
+`--end-time` runs for an hour — unless `--ends-on` names a later day, when it ends there at
+the start's clock time plus an hour. A default end that falls in the hour the clocks repeat,
+where HEY would place it at the other of its two moments, is refused; pass `--end-time`. Clock times are read in your HEY account's time zone, the
 one HEY's web app uses, and so is today when `--starts-on` is left out, for an all-day
 event too; `--time-zone America/New_York` names another zone. The command reads your
 identity for the account's zone at most once, and only when it needs it: for a clock time
 or today on an event with no zone of its own, or for a countdown an occurrence edit keeps.
 `--account` checks the account with a read of its own. If the zone is needed and the
-account has none, or it cannot be read, the write refuses and asks for `--time-zone` rather
+account has none, or it cannot be read for any reason but a sign-in failure (which is
+reported as one), the write refuses and asks for `--time-zone` rather
 than guessing at UTC or the machine's zone; an all-day event on a named date needs no zone. `--time-zone` takes IANA names only, spelled as the zone database
 spells them (`America/New_York`, `US/Eastern`, `Etc/GMT+5`, `UTC`). That is this command's
 rule, not HEY's: `Local`, a lowercase spelling and Rails' friendly names such as `Eastern
