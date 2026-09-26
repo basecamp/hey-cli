@@ -636,7 +636,7 @@ never accepted.
 hey journal list                   # list entries
 hey journal list --starts-on 2026-01-01 --ends-on 2026-01-31
 hey journal read                   # read today's entry (or pass YYYY-MM-DD)
-hey journal read 2026-03-15 --jq '.data.content_markdown'  # the entry as Markdown, to edit and write back
+hey journal read 2026-03-15 --jq '.data.content_markdown'  # the entry as Markdown; write it back only if content_markdown_lossless is true
 hey journal write "..."            # write today's entry (omit content: $EDITOR at a terminal, else stdin)
 ```
 

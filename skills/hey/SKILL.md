@@ -975,7 +975,7 @@ accepted. An existing file needs `--force`.
 ```bash
 hey journal list --json                       # Entries on the personal calendar, 4 years back to 1 year ahead
 hey journal read 2026-03-15 --json            # Read entry by date
-hey journal read 2026-03-15 --jq '.data.content_markdown'  # The entry as Markdown, ready to edit and write back
+hey journal read 2026-03-15 --jq '.data.content_markdown'  # The entry as Markdown; write it back only if content_markdown_lossless is true (see below)
 hey journal write "Shipped the pagination fix and paired with Jane on the cover art."
 hey journal write 2026-03-15 "Retrospective: the migration took two days longer than planned."
 hey journal write                             # $EDITOR at a terminal; otherwise the entry is read from stdin
@@ -990,10 +990,11 @@ no content and falls through to stdin or `$EDITOR`.) A day with no entry is not 
 **A journal entry is written whole**, so to add to one, read it, change it and write all of
 it back. `hey journal read --json` answers `content` (the HTML as HEY serves it),
 `content_markdown` and `content_markdown_lossless`. When `content_markdown_lossless` is
-`true`, add to the Markdown:
+`true`, add to the Markdown. The read checks the flag itself and fails when it is `false` —
+or when the day has no entry, which answers no `data` — so nothing is written:
 
 ```bash
-entry=$(hey journal read 2026-03-15 --jq '.data.content_markdown') &&
+entry=$(hey journal read 2026-03-15 --jq 'if .data.content_markdown_lossless then .data.content_markdown else error("content_markdown would drop part of this entry, or there is none: change content with --content-html") end') &&
   printf '%s\n\nBooked the venue for the second day.\n' "$entry" | hey journal write 2026-03-15
 ```
 
@@ -1008,8 +1009,8 @@ entry=$(hey journal read 2026-03-15 --jq '.data.content') &&
 ```
 
 Keep the `&&`: a failed read must not go on to write. A day with no entry answers no `data`,
-which `--jq` prints as `null`, so check for that before adding to it, or the entry starts
-with the word null.
+which a bare `--jq '.data.content'` prints as `null`, so check for that before adding to the
+HTML, or the entry starts with the word null.
 
 ### Authentication
 
