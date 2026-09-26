@@ -885,17 +885,22 @@ func (f *eventFields) scheduleFrom(ctx context.Context, cmd *cobra.Command, even
 
 	start := stringOr(cmd, "start-time", f.startTime, schedule.startTime)
 	end := stringOr(cmd, "end-time", f.endTime, schedule.endTime)
-	if start == "" {
-		start = defaultEventStartTime
-	}
-	// An all-day event given only a start has no end to keep, so it takes the default hour.
-	if event.AllDay && flags.Changed("start-time") && !flags.Changed("end-time") {
-		end = ""
+	// An all-day event has no clock times to keep. Made a timed one, it starts at HEY's
+	// default hour unless given a start, and runs the default hour unless given an end —
+	// from its start, not from the last of the days it used to cover, unless --ends-on names
+	// the day it ends.
+	if event.AllDay {
+		if !flags.Changed("start-time") {
+			start = defaultEventStartTime
+		}
+		if !flags.Changed("end-time") {
+			end = ""
+		}
 	}
 	if schedule.startTime, schedule.endTime, err = f.clockTimes(start, end); err != nil {
 		return eventSchedule{}, err
 	}
-	if schedule.endTime == "" && (flags.Changed("ends-on") || schedule.endsAt == schedule.startsAt) {
+	if schedule.endTime == "" {
 		given := ""
 		if flags.Changed("ends-on") {
 			given = schedule.endsAt
@@ -903,8 +908,6 @@ func (f *eventFields) scheduleFrom(ctx context.Context, cmd *cobra.Command, even
 		if schedule.endsAt, schedule.endTime, err = defaultEnd(schedule.startsAt, schedule.startTime, given, endZone.loc); err != nil {
 			return eventSchedule{}, err
 		}
-	} else if schedule.endTime == "" {
-		schedule.endTime = hourAfter(schedule.startTime)
 	}
 
 	startRetyped := flags.Changed("starts-on") || flags.Changed("start-time")

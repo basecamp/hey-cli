@@ -1116,3 +1116,35 @@ func TestEventsAddRefusesADefaultHourHEYCannotBeSent(t *testing.T) {
 		})
 	}
 }
+
+// An all-day event made a timed one keeps no clock time of its own: it starts at 09:00 unless
+// given a start, and runs an hour from its start unless given an end — not to the last of the
+// days it covered, which made a three-day birthday edited to 23:30 a 25-hour event. --ends-on
+// names the day it ends. A timed event given a new start keeps its own end, days away or not.
+func TestEventsEditDerivesTheEndOfAnAllDayEventMadeTimed(t *testing.T) {
+	threeDays := `{"id":4821,"title":"Team offsite","all_day":true,"starts_at":"2026-10-14T00:00:00Z","ends_at":"2026-10-16T00:00:00Z"}`
+	twoDaysTimed := `{"id":4821,"title":"Team offsite","starts_at":"2026-10-14T08:00:00Z","ends_at":"2026-10-16T10:00:00Z",` +
+		`"starts_at_time_zone":"Europe/Zagreb","ends_at_time_zone":"Europe/Zagreb"}`
+	tests := []struct {
+		name, event                                string
+		args                                       []string
+		startsAt, startTime, endsAt, endTime, zone string
+	}{
+		{name: "late start", event: threeDays, args: []string{"--start-time", "23:30"},
+			startsAt: "2026-10-14", startTime: "23:30", endsAt: "2026-10-15", endTime: "00:30", zone: "America/New_York"},
+		{name: "start and ends-on", event: threeDays, args: []string{"--start-time", "10:00", "--ends-on", "2026-10-16"},
+			startsAt: "2026-10-14", startTime: "10:00", endsAt: "2026-10-16", endTime: "11:00", zone: "America/New_York"},
+		{name: "end only", event: allDayEventJSON, args: []string{"--end-time", "17:00"},
+			startsAt: "2026-10-14", startTime: "09:00", endsAt: "2026-10-14", endTime: "17:00", zone: "America/New_York"},
+		{name: "all-day off", event: allDayEventJSON, args: []string{"--all-day=false"},
+			startsAt: "2026-10-14", startTime: "09:00", endsAt: "2026-10-14", endTime: "10:00", zone: "America/New_York"},
+		{name: "timed event given a start", event: twoDaysTimed, args: []string{"--start-time", "09:00"},
+			startsAt: "2026-10-14", startTime: "09:00", endsAt: "2026-10-16", endTime: "12:00", zone: "Europe/Zagreb"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requests := runZoneEdit(t, zoneFixture{accountZone: "America/New_York", event: tt.event}, tt.args...)
+			wantSchedule(t, requests.written(t), tt.startsAt, tt.startTime, tt.endsAt, tt.endTime, tt.zone)
+		})
+	}
+}
