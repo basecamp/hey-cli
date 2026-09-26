@@ -213,7 +213,7 @@ func (c *eventsEditCommand) editOccurrence(ctx context.Context, cmd *cobra.Comma
 		}
 	}
 
-	schedule, err := c.fields.scheduleFrom(cmd, event)
+	schedule, err := c.fields.scheduleFrom(ctx, cmd, event)
 	if err != nil {
 		return err
 	}
@@ -686,14 +686,14 @@ func countdownFromRecording(countdown, event generated.Recording, additionalZone
 func (c *eventsEditCommand) countdownFromRecording(ctx context.Context, countdown, event generated.Recording) (hey.CountdownParams, error) {
 	params, unreadable := countdownFromRecording(countdown, event)
 
-	identity, err := rootSDK.Identity().GetIdentity(ctx)
+	zone, err := c.fields.accountTimeZone(ctx)
 	if err != nil {
 		return hey.CountdownParams{}, apierr.FromSDK(err)
 	}
-	if identity == nil || identity.TimeZone == "" {
+	if zone == "" {
 		return params, unreadable
 	}
-	return countdownFromRecording(countdown, event, identity.TimeZone)
+	return countdownFromRecording(countdown, event, zone)
 }
 
 // countdownLabelMatchesDuration applies the same month, week, then day test HEY uses to

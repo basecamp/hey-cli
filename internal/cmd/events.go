@@ -14,6 +14,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 // recordingTypeEvent is how HEY names an event among the recordings a calendar holds.
@@ -29,7 +30,7 @@ func newEventsCommand() *eventsCommand {
 		Use:   "event",
 		Short: "Read and manage calendar events",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, day, week, add, edit, delete. \"What's on the schedule today?\" is answered by day, not list: day and week read the span as HEY draws it, with a repeating event expanded into the occurrences inside it, over the calendars switched on in HEY. list reads what calendars hold — every calendar unless --calendar names one — and a repeating event is one row, its series, on the day the series began. An edit is not a patch on HEY's side: it resends the notes, location, link, attached email, reminders and time zones the event already carries, so notes lose their formatting and a countdown is removed unless --countdown names one again. edit <series id> changes a whole series; one day of it is edit <series id> --occurrence <occurrence_id from day/week> --apply-to current|future, which keeps the countdown and refuses to flatten notes unless --allow-plain-notes or --notes is given. --apply-to future starts a new series and requires --repeat with its complete schedule; a preset alone means forever and custom copies an existing opaque schedule (a count-based rule can restart its full count). A virtual day of an opaque custom schedule is read from HEY's Day view and refused if that view no longer serves it. A realized custom day cannot be split safely; use a virtual occurrence, edit that day alone, or edit the whole series. A realized preset occurrence moved away from its series time must be moved back with --apply-to current before a future split. Read the day again afterward for the new series id. delete <series id> deletes the whole series; one day of it is delete <series id> --occurrence <occurrence_id> --apply-to current|future, whether or not HEY has written that day out. delete refuses a written-out day's own id, because HEY would draw the day again from the series.",
+			"agent_notes": "Subcommands: list, day, week, add, edit, delete. \"What's on the schedule today?\" is answered by day, not list: day and week read the span as HEY draws it, with a repeating event expanded into the occurrences inside it, over the calendars switched on in HEY. list reads what calendars hold — every calendar unless --calendar names one — and a repeating event is one row, its series, on the day the series began. An edit is not a patch on HEY's side: it resends the notes, location, link, attached email, reminders and time zones the event already carries, so notes lose their formatting and a countdown is removed unless --countdown names one again. edit <series id> changes a whole series; one day of it is edit <series id> --occurrence <occurrence_id from day/week> --apply-to current|future, which keeps the countdown and refuses to flatten notes unless --allow-plain-notes or --notes is given. --apply-to future starts a new series and requires --repeat with its complete schedule; a preset alone means forever and custom copies an existing opaque schedule (a count-based rule can restart its full count). A virtual day of an opaque custom schedule is read from HEY's Day view and refused if that view no longer serves it. A realized custom day cannot be split safely; use a virtual occurrence, edit that day alone, or edit the whole series. A realized preset occurrence moved away from its series time must be moved back with --apply-to current before a future split. Read the day again afterward for the new series id. delete <series id> deletes the whole series; one day of it is delete <series id> --occurrence <occurrence_id> --apply-to current|future, whether or not HEY has written that day out. delete refuses a written-out day's own id, because HEY would draw the day again from the series. add and edit read clock times in the HEY account's time zone unless --time-zone names one, and refuse a timed write when the account has none; an edit keeps a zoned event's zone and leaves a zoneless event zoneless.",
 		},
 	}
 
@@ -126,7 +127,9 @@ func newEventsAddCommand() *eventsAddCommand {
 		Long: `Create an event.
 
 An event with no --start-time is an all-day event. A --start-time with no --end-time runs
-for an hour. Clock times are read in --time-zone, which defaults to this machine's zone.
+for an hour. Clock times are read in your HEY account's time zone, the one HEY's web app
+uses, and so is today when --starts-on is left out; --time-zone names another. If the
+account has no time zone the command refuses and asks for --time-zone.
 
 Without --calendar the event goes where HEY puts one by default: the first ordinary calendar
 you own that is not a subscription — never Maybe or the personal calendar.`,
@@ -168,7 +171,8 @@ func (c *eventsAddCommand) run(cmd *cobra.Command, args []string) error {
 	if err = c.fields.validateExplicitScheduleFlags(cmd); err != nil {
 		return err
 	}
-	schedule, err := c.fields.newSchedule()
+	ctx := cmd.Context()
+	schedule, err := c.fields.newSchedule(ctx)
 	if err != nil {
 		return err
 	}
@@ -177,7 +181,6 @@ func (c *eventsAddCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx := cmd.Context()
 	calendarID, err := c.fields.resolveCalendar(ctx)
 	if err != nil {
 		return err
@@ -244,6 +247,13 @@ Two things cannot survive that round trip, and both are HEY's doing rather than 
 command's. Notes are served back as plain text, so saving flattens their formatting. A
 countdown is a recording of its own that this edit does not read back, so an edit removes
 one unless --countdown names it again.
+
+Clock times you type are read in the event's own time zone. An event saved without one
+stays without one: typed times are read in your HEY account's zone and sent as the moment
+they name, and the times you do not type keep theirs. --time-zone gives the event that
+zone, keeping the moment of every time you do not type. An all-day event given a time
+takes the account's zone. If a zone is needed and the account has none, the edit refuses
+and asks for --time-zone. All of this holds for an --occurrence edit too.
 
 The event is found by reading the calendars it might be on, which is one request each and
 covers the pages HEY answers with. Give the day it starts as [date] to look on that day
@@ -357,7 +367,7 @@ func (c *eventsEditCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	schedule, err := c.fields.scheduleFrom(cmd, event)
+	schedule, err := c.fields.scheduleFrom(ctx, cmd, event)
 	if err != nil {
 		return err
 	}
@@ -643,6 +653,8 @@ type eventFields struct {
 	countdown    int
 	countdownFor string
 	reminders    []string
+
+	account accountZone
 }
 
 func (f *eventFields) registerFlags(cmd *cobra.Command) {
@@ -654,7 +666,7 @@ func (f *eventFields) registerFlags(cmd *cobra.Command) {
 	flags.BoolVar(&f.allDay, "all-day", false, "Make it an all-day event")
 	flags.StringVar(&f.startTime, "start-time", "", "Start time (HH:MM)")
 	flags.StringVar(&f.endTime, "end-time", "", "End time (HH:MM, defaults to an hour after the start)")
-	flags.StringVar(&f.timeZone, "time-zone", "", "IANA zone the times are written in (defaults to this machine's)")
+	flags.StringVar(&f.timeZone, "time-zone", "", "IANA zone the times are written in, such as America/New_York (defaults to your HEY account's)")
 	flags.StringVar(&f.notes, "notes", "", "Event notes")
 	flags.StringVar(&f.location, "location", "", "Event location")
 	flags.StringVar(&f.link, "link", "", "Meeting or reference URL")
@@ -716,10 +728,29 @@ type eventSchedule struct {
 
 // newSchedule is when a new event happens. Saying nothing about the time of day makes it an
 // all-day event, which is what a bare `hey event add "Sarah's birthday"` means.
-func (f *eventFields) newSchedule() (eventSchedule, error) {
+//
+// A timed event's clock times are read in writeZone's zone, and so is today when no date is
+// named: at 02:00 UTC it is still the evening before in New York. An all-day event has no
+// zone and asks for none, so its today is this machine's.
+func (f *eventFields) newSchedule(ctx context.Context) (eventSchedule, error) {
+	allDay := f.allDay || f.startTime == ""
+	var startTime, endTime, zone string
+	today := eventNow().Local()
+	if !allDay {
+		var err error
+		if startTime, endTime, err = f.clockTimes(f.startTime, f.endTime); err != nil {
+			return eventSchedule{}, err
+		}
+		var loc *time.Location
+		if zone, loc, err = f.writeZone(ctx); err != nil {
+			return eventSchedule{}, err
+		}
+		today = today.In(loc)
+	}
+
 	startsOn := f.startsOn
 	if startsOn == "" {
-		startsOn = time.Now().Format(dateLayout)
+		startsOn = today.Format(dateLayout)
 	}
 	if _, err := parseDateArg("starts-on date", startsOn); err != nil {
 		return eventSchedule{}, err
@@ -733,15 +764,9 @@ func (f *eventFields) newSchedule() (eventSchedule, error) {
 		return eventSchedule{}, err
 	}
 
-	if f.allDay || f.startTime == "" {
+	if allDay {
 		return eventSchedule{startsAt: startsOn, endsAt: endsOn, allDay: true}, nil
 	}
-
-	startTime, endTime, err := f.clockTimes(f.startTime, f.endTime)
-	if err != nil {
-		return eventSchedule{}, err
-	}
-	zone := f.zoneOrLocal()
 	return eventSchedule{
 		startsAt: startsOn, endsAt: endsOn,
 		startTime: startTime, endTime: endTime,
@@ -790,39 +815,46 @@ func (f *eventFields) validateExplicitScheduleFlags(cmd *cobra.Command) error {
 }
 
 // scheduleFrom is when an edited event happens: whatever the flags name, and the event's own
-// answer for everything they do not.
-func (f *eventFields) scheduleFrom(cmd *cobra.Command, event generated.Recording) (eventSchedule, error) {
-	startsOn, startTime := eventClock(event.StartsAt, event.StartsAtTimeZone)
-	endsOn, endTime := eventClock(event.EndsAt, event.EndsAtTimeZone)
+// answer for everything they do not, each end read and written in the zone editZones gives it.
+func (f *eventFields) scheduleFrom(ctx context.Context, cmd *cobra.Command, event generated.Recording) (eventSchedule, error) {
+	flags := cmd.Flags()
+	allDay := event.AllDay
+	if flags.Changed("all-day") {
+		allDay = f.allDay
+	}
+	// A time given to an all-day event is what turns it into a timed one — asking for 14:00
+	// and being answered with a day would read as the flag being ignored.
+	if flags.Changed("start-time") || flags.Changed("end-time") {
+		allDay = false
+	}
+
+	startZone, endZone, err := f.editZones(ctx, cmd, event, allDay)
+	if err != nil {
+		return eventSchedule{}, err
+	}
+	startsOn, startTime := eventClock(event.StartsAt, startZone.readIn(event))
+	endsOn, endTime := eventClock(event.EndsAt, endZone.readIn(event))
 
 	schedule := eventSchedule{
 		startsAt:  stringOr(cmd, "starts-on", f.startsOn, startsOn),
 		endsAt:    stringOr(cmd, "ends-on", f.endsOn, endsOn),
-		allDay:    event.AllDay,
+		allDay:    allDay,
 		startTime: startTime,
 		endTime:   endTime,
-		zone:      stringOr(cmd, "time-zone", f.timeZone, event.StartsAtTimeZone),
-		endZone:   stringOr(cmd, "time-zone", f.timeZone, event.EndsAtTimeZone),
-	}
-	if cmd.Flags().Changed("all-day") {
-		schedule.allDay = f.allDay
+		zone:      startZone.name,
+		endZone:   endZone.name,
 	}
 
-	if _, err := parseDateArg("starts-on date", schedule.startsAt); err != nil {
+	if _, err = parseDateArg("starts-on date", schedule.startsAt); err != nil {
 		return eventSchedule{}, err
 	}
-	if _, err := parseDateArg("ends-on date", schedule.endsAt); err != nil {
+	if _, err = parseDateArg("ends-on date", schedule.endsAt); err != nil {
 		return eventSchedule{}, err
 	}
-	if err := checkEventDates(schedule.startsAt, schedule.endsAt); err != nil {
+	if err = checkEventDates(schedule.startsAt, schedule.endsAt); err != nil {
 		return eventSchedule{}, err
 	}
 
-	// A time given to an all-day event is what turns it into a timed one — asking for 14:00
-	// and being answered with a day would read as the flag being ignored.
-	if cmd.Flags().Changed("start-time") || cmd.Flags().Changed("end-time") {
-		schedule.allDay = false
-	}
 	if schedule.allDay {
 		return eventSchedule{startsAt: schedule.startsAt, endsAt: schedule.endsAt, allDay: true}, nil
 	}
@@ -833,14 +865,105 @@ func (f *eventFields) scheduleFrom(cmd *cobra.Command, event generated.Recording
 		start = defaultEventStartTime
 	}
 	// An all-day event given only a start has no end to keep, so it takes the default hour.
-	if event.AllDay && cmd.Flags().Changed("start-time") && !cmd.Flags().Changed("end-time") {
+	if event.AllDay && flags.Changed("start-time") && !flags.Changed("end-time") {
 		end = ""
 	}
-	var err error
 	if schedule.startTime, schedule.endTime, err = f.clockTimes(start, end); err != nil {
 		return eventSchedule{}, err
 	}
+
+	if startZone.name == "" {
+		retyped := flags.Changed("starts-on") || flags.Changed("start-time")
+		schedule.startsAt, schedule.startTime = zonelessEnd(event.StartsAt, schedule.startsAt, schedule.startTime, startZone.loc, retyped)
+	}
+	if endZone.name == "" {
+		retyped := flags.Changed("ends-on") || flags.Changed("end-time")
+		schedule.endsAt, schedule.endTime = zonelessEnd(event.EndsAt, schedule.endsAt, schedule.endTime, endZone.loc, retyped)
+	}
 	return schedule, nil
+}
+
+// clockZone is the zone one end of an edited event is read and written in. An end with no
+// name is zoneless: its clock times are read in loc and go back to HEY as UTC, zone and all.
+type clockZone struct {
+	name string
+	loc  *time.Location
+}
+
+// readIn is where the event's own end is read from. An all-day event's end is the date it
+// names, whatever zone it is about to be written in.
+func (z clockZone) readIn(event generated.Recording) *time.Location {
+	if event.AllDay {
+		return time.UTC
+	}
+	return z.loc
+}
+
+// editZones is the zone each end of an edited event is read and written in.
+//
+// --time-zone names it outright, and the times nobody retyped are read in it, so they keep
+// their instant. Otherwise a zoned event keeps its own zones, and one this build cannot load
+// is refused rather than read as UTC. A zoneless event stays zoneless — HEY expands it, a
+// repeating series across a change of daylight saving included, as it was saved — so only
+// the times and dates somebody typed are read in the account's zone. An all-day event given
+// a time takes the account's zone, as a new event does. The account is read only when a
+// typed time or date needs it.
+func (f *eventFields) editZones(ctx context.Context, cmd *cobra.Command, event generated.Recording, allDay bool) (clockZone, clockZone, error) {
+	if f.timeZone != "" {
+		name, loc, err := f.writeZone(ctx)
+		return clockZone{name, loc}, clockZone{name, loc}, err
+	}
+
+	if !event.AllDay && event.StartsAtTimeZone != "" {
+		start, err := storedZone(event.StartsAtTimeZone)
+		if err != nil {
+			return clockZone{}, clockZone{}, err
+		}
+		if event.EndsAtTimeZone == "" {
+			return start, start, nil
+		}
+		end, err := storedZone(event.EndsAtTimeZone)
+		return start, end, err
+	}
+
+	flags := cmd.Flags()
+	retyped := flags.Changed("starts-on") || flags.Changed("ends-on") || flags.Changed("start-time") || flags.Changed("end-time")
+	if allDay == event.AllDay && (allDay || !retyped) {
+		return clockZone{loc: time.UTC}, clockZone{loc: time.UTC}, nil
+	}
+	name, loc, err := f.writeZone(ctx)
+	if err != nil {
+		return clockZone{}, clockZone{}, err
+	}
+	if !event.AllDay {
+		name = ""
+	}
+	return clockZone{name, loc}, clockZone{name, loc}, nil
+}
+
+// storedZone loads a zone an event was saved in.
+func storedZone(name string) (clockZone, error) {
+	loc, err := loadEventZone(name)
+	if err != nil {
+		return clockZone{}, &apierr.Error{
+			Code:    apierr.CodeUsage,
+			Message: fmt.Sprintf("the event is in time zone %s, which this build of hey does not know, so its times cannot be read", terminal.SanitizeLine(name)),
+			Hint:    "pass --time-zone to write the event in a zone this build knows",
+			Cause:   err,
+		}
+	}
+	return clockZone{name, loc}, nil
+}
+
+// zonelessEnd is one end of a zoneless event as HEY takes it back. An end nobody retyped keeps
+// the instant it had; a retyped one is read in loc and sent as the UTC time it names.
+func zonelessEnd(had time.Time, date, clock string, loc *time.Location, retyped bool) (string, string) {
+	if !retyped {
+		return eventClock(had, time.UTC)
+	}
+	// Both halves were checked before they got here.
+	wall, _ := time.ParseInLocation(dateLayout+" "+clockLayout, date+" "+clock, loc)
+	return eventClock(wall, time.UTC)
 }
 
 // defaultEventStartTime is when an all-day event starts once it is given a time but not one of
@@ -877,32 +1000,13 @@ func parseEventClock(name, value, example string) (time.Time, error) {
 // clockLayout is the time of day HEY's form takes, and the one a reader types.
 const clockLayout = "15:04"
 
-// zoneOrLocal is the zone the clock times are written in. Naming none would have HEY read
-// them as UTC, so 14:00 typed in Lisbon would be stored as 14:00 in Tokyo's morning.
-func (f *eventFields) zoneOrLocal() string {
-	if f.timeZone != "" {
-		return f.timeZone
-	}
-	// A machine with no TZ set has a location called "Local", which names no zone HEY could
-	// look up; UTC is what it already assumes.
-	if name := time.Now().Location().String(); name != "Local" && name != "UTC" {
-		return name
-	}
-	return ""
-}
-
-// eventClock takes an end of an event apart into the day and the clock time it was written
-// in. HEY stores a wall-clock time and the zone it belongs to, and serves the instant in UTC,
-// so reading one back for a resend means putting it into its own zone first.
-func eventClock(at time.Time, zone string) (string, string) {
+// eventClock takes an end of an event apart into the day and the clock time it reads as in
+// loc. HEY serves every instant in UTC, so an end is put into the zone it is written in first.
+func eventClock(at time.Time, loc *time.Location) (string, string) {
 	if at.IsZero() {
 		return "", ""
 	}
-	if zone != "" {
-		if loc, err := time.LoadLocation(zone); err == nil {
-			at = at.In(loc)
-		}
-	}
+	at = at.In(loc)
 	return at.Format(dateLayout), at.Format(clockLayout)
 }
 
