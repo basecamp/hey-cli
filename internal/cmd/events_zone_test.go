@@ -399,6 +399,15 @@ func TestEventsEditZonelessEventReadsTypedTimesInTheAccountZone(t *testing.T) {
 	}
 }
 
+// A typed time the clocks skip is placed as HEY places one, on the first time that exists:
+// 02:30 on the morning New York springs forward is 03:30 EDT, 07:30 UTC — not 01:30 EST,
+// where Go's own parse would put it, an hour earlier than the same edit made in HEY.
+func TestEventsEditZonelessEventPlacesASkippedTimeAsHEYDoes(t *testing.T) {
+	requests := runZoneEdit(t, zoneFixture{accountZone: "America/New_York", event: zonelessEventJSON},
+		"--starts-on", "2026-03-08", "--start-time", "02:30", "--ends-on", "2026-03-08", "--end-time", "04:00")
+	wantSchedule(t, requests.written(t), "2026-03-08", "07:30", "2026-03-08", "08:00", "")
+}
+
 // A zoneless repeating series given a new end time keeps its start exactly: HEY expands the
 // series from that instant, so moving it would move every occurrence. The start here is in
 // the hour New York repeats as the clocks go back, which a read and rewrite of the wall

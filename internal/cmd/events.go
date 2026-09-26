@@ -309,6 +309,8 @@ or one day.`,
 
 	eventsEditCommand.fields.registerFlags(eventsEditCommand.cmd)
 	flags := eventsEditCommand.cmd.Flags()
+	// An edit only falls back to the account's zone for an event that has none of its own.
+	flags.Lookup("time-zone").Usage = "IANA zone the times are written in, such as America/New_York (defaults to the event's own zone, else your HEY account's)"
 	flags.StringVar(&eventsEditCommand.occurrence, "occurrence", "", "One day of a repeating event, by the occurrence_id 'hey event day' serves (<series id>_<YYYY-MM-DD>)")
 	flags.StringVar(&eventsEditCommand.applyTo, "apply-to", "", "How much of the series an --occurrence edit reaches: current (that day alone) or future (that day and every one after it)")
 	flags.BoolVar(&eventsEditCommand.allowPlainNotes, "allow-plain-notes", false, "Let an --occurrence edit send notes it is not changing back as plain text, losing their formatting")
@@ -961,9 +963,12 @@ func zonelessEnd(had time.Time, date, clock string, loc *time.Location, retyped 
 	if !retyped {
 		return eventClock(had, time.UTC)
 	}
-	// Both halves were checked before they got here.
-	wall, _ := time.ParseInLocation(dateLayout+" "+clockLayout, date+" "+clock, loc)
-	return eventClock(wall, time.UTC)
+	// Both halves were checked before they got here. The wall time is placed the way HEY
+	// places one: a time the clocks skip, like 02:30 on the morning they spring forward,
+	// moves on to the first one that exists rather than back an hour.
+	day, _ := time.Parse(dateLayout, date)
+	at, _ := time.Parse(clockLayout, clock)
+	return eventClock(wallClockOn(day, at, loc), time.UTC)
 }
 
 // defaultEventStartTime is when an all-day event starts once it is given a time but not one of
