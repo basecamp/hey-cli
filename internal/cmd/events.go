@@ -561,7 +561,7 @@ func (c *eventsDeleteCommand) deleteOccurrence(ctx context.Context, cmd *cobra.C
 		if err != nil {
 			return err
 		}
-		day, err := locateOccurrence(cmd, rows, write.occurrence)
+		day, err := locateOccurrence(cmd, rows, write.occurrence, write.scope)
 		if err != nil {
 			return err
 		}
@@ -577,15 +577,13 @@ func (c *eventsDeleteCommand) deleteOccurrence(ctx context.Context, cmd *cobra.C
 	}
 
 	summary := "Occurrence deleted"
-	applyTo := "current"
 	if write.scope == hey.OccurrenceScopeThisAndFollowing {
 		summary = "Occurrence and the following deleted"
-		applyTo = "future"
 	}
 	return writeMutationLine(cmd,
 		fmt.Sprintf("%s: %s.", summary, write.occurrence),
 		summary,
-		map[string]string{"occurrence_id": write.occurrence.String(), "apply_to": applyTo})
+		map[string]string{"occurrence_id": write.occurrence.String(), "apply_to": applyToFlag(write.scope)})
 }
 
 // refuseADayOfASeries stops a delete by id from reaching a day HEY has written out on its

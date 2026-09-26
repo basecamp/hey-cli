@@ -1810,6 +1810,60 @@ func TestEventsDeleteOccurrenceRefusesWhatItCannotMean(t *testing.T) {
 	}
 }
 
+// A hint that names a command names one that runs: the series the occurrence belongs to,
+// with the scope that was given, since --apply-to is required.
+func TestEventsOccurrenceHintsCarryTheScope(t *testing.T) {
+	for _, tt := range []struct {
+		command, scope string
+	}{
+		{command: "delete", scope: "current"},
+		{command: "delete", scope: "future"},
+		{command: "edit", scope: "current"},
+	} {
+		t.Run(tt.command+" "+tt.scope, func(t *testing.T) {
+			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				t.Errorf("unexpected request = %s %s", r.Method, r.URL)
+				http.NotFound(w, r)
+			})
+			_, err := runJSONCommand(t, handler,
+				"event", tt.command, "4821", "--occurrence", "4822_2026-09-15", "--apply-to", tt.scope)
+			var cliErr *apierr.Error
+			if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage {
+				t.Fatalf("error = %v, want a usage refusal", err)
+			}
+			if want := "hey event " + tt.command + " 4822 --occurrence 4822_2026-09-15 --apply-to " + tt.scope; cliErr.Hint != want {
+				t.Errorf("hint = %q, want %q", cliErr.Hint, want)
+			}
+		})
+	}
+
+	// A series id that names a day HEY wrote out is found on the day's read, and the hint
+	// points at the series with the same scope.
+	realized := `{"id":9001,"type":"Calendar::Event","parent_id":4821,"occurrence_id":"4821_2026-09-15",` +
+		`"title":"Design review","starts_at":"2026-09-15T12:00:00Z","ends_at":"2026-09-15T13:00:00Z","calendar":{"id":9,"name":"Work"}}`
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/calendars.json":
+			_, _ = io.WriteString(w, oneCalendarJSON)
+		case r.Method == http.MethodGet && r.URL.Path == "/calendars/9/recordings.json":
+			_, _ = io.WriteString(w, `{"Calendar::Event":[`+occurrenceSeriesJSON+`,`+realized+`]}`)
+		default:
+			t.Errorf("unexpected request = %s %s", r.Method, r.URL)
+			http.NotFound(w, r)
+		}
+	})
+	_, err := runJSONCommand(t, handler,
+		"event", "delete", "9001", "--occurrence", "9001_2026-09-15", "--apply-to", "future")
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage {
+		t.Fatalf("error = %v, want a usage refusal", err)
+	}
+	if want := "hey event delete 4821 --occurrence 4821_2026-09-15 --apply-to future"; cliErr.Hint != want {
+		t.Errorf("hint = %q, want %q", cliErr.Hint, want)
+	}
+}
+
 // HEY's own refusal — a date that is not a day of the series, or a series the caller cannot
 // delete from, both 404 on the occurrence route — reaches the caller as not-found.
 func TestEventsDeleteOccurrenceReportsHEYsRefusal(t *testing.T) {

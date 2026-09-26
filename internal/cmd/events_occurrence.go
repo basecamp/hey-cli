@@ -57,17 +57,26 @@ func parseOccurrenceFlags(cmd *cobra.Command, id int64, value, applyTo string) (
 		return nil, apierr.ErrUsageHint(fmt.Sprintf("invalid occurrence: %s", value),
 			"an occurrence_id as hey event day serves it, <series id>_<YYYY-MM-DD>, for example 4821_2026-09-15")
 	}
-	if occurrence.EventID != id {
-		return nil, apierr.ErrUsageHint(
-			fmt.Sprintf("occurrence %s belongs to series %d, not %d", value, occurrence.EventID, id),
-			fmt.Sprintf("%s %d --occurrence %s", command, occurrence.EventID, value))
-	}
-
+	// The scope is read before the series is checked, so the command the hint below names is
+	// one that runs.
 	scope, err := parseApplyTo(applyTo, flags.Changed("apply-to"))
 	if err != nil {
 		return nil, err
 	}
+	if occurrence.EventID != id {
+		return nil, apierr.ErrUsageHint(
+			fmt.Sprintf("occurrence %s belongs to series %d, not %d", value, occurrence.EventID, id),
+			fmt.Sprintf("%s %d --occurrence %s --apply-to %s", command, occurrence.EventID, value, applyToFlag(scope)))
+	}
 	return &occurrenceWrite{occurrence: occurrence, scope: scope}, nil
+}
+
+// applyToFlag is the scope as --apply-to takes it, for a hint that names a command to run.
+func applyToFlag(scope hey.OccurrenceScope) string {
+	if scope == hey.OccurrenceScopeThisAndFollowing {
+		return "future"
+	}
+	return "current"
 }
 
 // parseApplyTo reads the scope. There is no default: a caller who does not say how much of
@@ -173,7 +182,7 @@ func (c *eventsEditCommand) editOccurrence(ctx context.Context, cmd *cobra.Comma
 	if err != nil {
 		return err
 	}
-	day, err := locateOccurrence(cmd, rows, edit.occurrence)
+	day, err := locateOccurrence(cmd, rows, edit.occurrence, edit.scope)
 	if err != nil {
 		return err
 	}
@@ -322,7 +331,7 @@ type occurrenceDay struct {
 // not repeat, is refused rather than written through the occurrence route to be answered
 // not-found. The written-out day is matched by its occurrence_id alone, which names the
 // series and the date together. The hints name the command that asked.
-func locateOccurrence(cmd *cobra.Command, rows []generated.Recording, occurrence hey.EventOccurrence) (occurrenceDay, error) {
+func locateOccurrence(cmd *cobra.Command, rows []generated.Recording, occurrence hey.EventOccurrence, scope hey.OccurrenceScope) (occurrenceDay, error) {
 	day := occurrenceDay{occurrence: occurrence}
 	found := false
 	for i := range rows {
@@ -347,7 +356,7 @@ func locateOccurrence(cmd *cobra.Command, rows []generated.Recording, occurrence
 	case day.series.OccurrenceId != "":
 		return occurrenceDay{}, apierr.ErrUsageHint(
 			fmt.Sprintf("event %s is one day of series %d, not a series", id, day.series.ParentId),
-			fmt.Sprintf("%s %d --occurrence %s", command, day.series.ParentId, day.series.OccurrenceId))
+			fmt.Sprintf("%s %d --occurrence %s --apply-to %s", command, day.series.ParentId, day.series.OccurrenceId, applyToFlag(scope)))
 	case !day.series.Recurring:
 		return occurrenceDay{}, apierr.ErrUsageHint(
 			fmt.Sprintf("event %s does not repeat, so it has no occurrences", id),
