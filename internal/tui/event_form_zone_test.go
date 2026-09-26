@@ -311,9 +311,11 @@ func TestEditingAnEventWithSecondsIsRefused(t *testing.T) {
 
 	// Typing at the start and taking it back leaves it showing what it opened with, and the
 	// seconds it has are still not dropped without a word.
+	// The start shows on the machine's own clock, so the digit taken off is whatever it reads.
+	shown := form.starts.clock()
 	form.starts.focusField(dateTimeFieldTime)
 	form.starts.handleKey(tea.KeyPressMsg{Code: tea.KeyBackspace})
-	typeInto(t, form.starts, "0")
+	typeInto(t, form.starts, shown[len(shown)-1:])
 	if got := form.validate(); got != want {
 		t.Errorf("after typing and taking it back, validate = %q, want %q", got, want)
 	}
