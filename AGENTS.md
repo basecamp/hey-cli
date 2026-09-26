@@ -694,9 +694,11 @@ is HEY's semantics and state across events, so the CLI decides it once; what to 
 it is the reader's. The Date header is whole seconds, so the start can be up to a second
 (plus the request's time) early and a change from that window is reported; nothing HEY
 serves says the time finer — Action Cable pings are whole seconds too — and rounding the
-other way would skip changes. A 409 skip-ahead sets that box's floor at the cursor it skipped to
-(`newMail.skippedTo`): activity at or before it is never new there, known thread or not,
-because the watch never read the gap. `resync` is an event of its own — reported by default,
+other way would skip changes. A 409 skip-ahead moves the cursor to HEY's clock now
+(`serverNow`, not the box list's since, which the ETag cache can serve unchanged and would
+409 again) and sets that box's floor there (`newMail.skippedTo`): activity at or before it
+is never new there, known thread or not, because the watch never read the gap. A calendar's
+409 skips the same way. `resync` is an event of its own — reported by default,
 left out by `--events new` — so a script for new mail never runs on one. The Omarchy bar plugin toasts from those lines itself (app-name, glyph,
 click-to-focus and the replace-not-stack id all live in the plugin), and nothing
 desktop-shaped lives in `watch*.go`.
@@ -800,7 +802,7 @@ themselves (`internal/cmd/watch_calendar.go`). Rings are coalesced per calendar 
 `calendarCursor`) and each recording is a `recording_added`, `recording_updated`
 or `recording_deleted` line naming its calendar where a mail line names its box. The poll
 reports `calendar_added`, `calendar_updated` and `calendar_deleted`, and a recording feed's
-409 is `calendar_resync` after skipping ahead to a fresh cursor from the list. The
+409 is `calendar_resync` after skipping ahead to HEY's clock now, as a box does. The
 email-specific flags switch all of it off — `--box`, or an `--events` list naming only
 mail changes (`watchingCalendars` in watch_calendar.go) — and `ready` waits for the
 calendars' catch-up exactly as it waits for the boxes', on the same retry backoff and the

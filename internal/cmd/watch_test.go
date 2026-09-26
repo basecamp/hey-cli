@@ -422,13 +422,18 @@ func TestWatchStopsOnAReadThatCannotWork(t *testing.T) {
 	}
 }
 
-// boxesAndChanges answers the two reads a skip-ahead makes: a changes feed that is too far
-// behind to follow, and the box list it then looks for a fresh cursor in.
+// boxesAndChanges answers the reads a skip-ahead makes: a changes feed that is too far
+// behind to follow, the box list it looks for the box and its feed's version in, and
+// HEY's clock, which it skips to.
 func boxesAndChanges(t *testing.T, boxes string) *httptest.Server {
 	t.Helper()
 
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/identity.json":
+			w.Header().Set("Date", skipDate)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":1}`))
 		case "/boxes.json":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(boxes))
@@ -438,9 +443,22 @@ func boxesAndChanges(t *testing.T, boxes string) *httptest.Server {
 	}))
 }
 
-func TestWatchSkipsAheadToTheBoxesOwnCursor(t *testing.T) {
+// HEY's clock when a skip-ahead reads it.
+const skipDate = "Fri, 21 Aug 2026 11:05:00 GMT"
+
+// wantSkippedToHEYsClock checks a skip-ahead's point: HEY's clock at the skip, read the
+// way the start is — a whole millisecond, just before the Date header.
+func wantSkippedToHEYsClock(t *testing.T, skippedTo time.Time) {
+	t.Helper()
+	date := time.Date(2026, 8, 21, 11, 5, 0, 0, time.UTC)
+	if !skippedTo.Before(date) || date.Sub(skippedTo) > time.Second {
+		t.Errorf("skipped to %v, want HEY's clock at the skip, just before %v", skippedTo, date)
+	}
+}
+
+func TestWatchSkipsAheadToHEYsClock(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
-	server := boxesAndChanges(t, `[{"id":24088,"kind":"imbox","name":"Imbox","posting_changes_url":"/boxes/24088/postings/changes.json?since=2026-08-21T11%3A02%3A00.000Z&v=2"}]`)
+	server := boxesAndChanges(t, `[{"id":24088,"kind":"imbox","name":"Imbox","posting_changes_url":"/boxes/24088/postings/changes.json?since=2026-08-21T11%3A02%3A00.518496Z&v=2"}]`)
 	defer server.Close()
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
 
@@ -455,11 +473,91 @@ func TestWatchSkipsAheadToTheBoxesOwnCursor(t *testing.T) {
 	if watch.boxes[24088] == nil {
 		t.Fatal("the box should still be watched")
 	}
-	if got := watch.boxes[24088].cursor.Since; got != "2026-08-21T11:02:00.000Z" {
-		t.Errorf("cursor = %q, want the server's current one", got)
+	floor := watch.newMail.floors[24088]
+	wantSkippedToHEYsClock(t, floor)
+	if got := watch.boxes[24088].cursor; got.Since != watchStartSince(floor) || got.Version != "2" {
+		t.Errorf("cursor = %+v, want HEY's clock at the skip, the new-mail floor, and the box's feed version", got)
 	}
-	if got := watch.newMail.floors[24088]; !got.Equal(time.Date(2026, 8, 21, 11, 2, 0, 0, time.UTC)) {
-		t.Errorf("new-mail floor = %v, want the box's floor at the cursor it skipped to", got)
+}
+
+// A box list the SDK revalidates answers 304 while no box row has changed, which is
+// every posting's activity — so after a long drop the list hands back the since the
+// watch fell behind from. Skipping to it answered 409 again on every read; skipping to
+// HEY's clock gets past it.
+func TestWatchSkipAheadGetsPastACachedBoxList(t *testing.T) {
+	t.Setenv("HEY_TOKEN", "test-token")
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	behind := time.Date(2026, 8, 21, 11, 0, 0, 0, time.UTC) // a since before this is too far behind
+	var mu sync.Mutex
+	var notModified, conflicts int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch r.URL.Path {
+		case "/identity.json":
+			w.Header().Set("Date", skipDate)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":1}`))
+		case "/boxes.json":
+			w.Header().Set("ETag", `W/"boxes-unchanged"`)
+			if r.Header.Get("If-None-Match") == `W/"boxes-unchanged"` {
+				notModified++
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"id":24088,"kind":"imbox","name":"Imbox","posting_changes_url":"/boxes/24088/postings/changes.json?since=2026-08-01T09%3A00%3A00.000000Z&v=2"}]`))
+		default:
+			since, _ := time.Parse(time.RFC3339Nano, r.URL.Query().Get("since"))
+			if since.Before(behind) {
+				// As HEY answers: `head :conflict`, no body.
+				conflicts++
+				w.WriteHeader(http.StatusConflict)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Link", `<`+r.URL.Path+`?since=2026-08-21T11%3A06%3A12.250000Z&v=2>; rel="next"`)
+			_, _ = w.Write([]byte(`{"added":[{"id":9004,"kind":"topic","box_id":24088,"name":"Re: Lunch on Thursday?","active_at":"2026-08-21T11:06:12.250Z","created_at":"2026-08-21T11:06:12.250Z","creator":{"name":"Maria Delgado"}}]}`))
+		}
+	}))
+	defer server.Close()
+	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
+
+	// The box list as the watch read it at its start, now in the SDK's cache.
+	if _, err := sdk.Boxes().List(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	watch, out := newTestWatch("added", "resync")
+	cursor, err := watchCursor(server.URL+"/boxes/24088/postings/changes.json?since=2026-08-01T09%3A00%3A00.000000Z&v=2", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	watch.boxes[24088].cursor = cursor
+
+	ringBox(t, watch)
+	ringBox(t, watch)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if notModified == 0 {
+		t.Fatal("the skip-ahead should have read the box list from the cache, as HEY answers a list whose rows have not changed")
+	}
+	if conflicts != 1 {
+		t.Errorf("the feed answered 409 %d times, want once — the skip-ahead should get past it", conflicts)
+	}
+	lines := watchLines(t, out)
+	if len(lines) != 2 || lines[0]["change"] != watchResync || lines[1]["change"] != "added" || lines[1]["posting_id"] != float64(9004) {
+		t.Fatalf("wrote %v, want one resync and then the change after it", lines)
+	}
+	skippedTo, err := time.Parse(time.RFC3339Nano, lines[0]["at"].(string))
+	if err != nil {
+		t.Fatalf("resync at %v: %v", lines[0]["at"], err)
+	}
+	wantSkippedToHEYsClock(t, skippedTo)
+	if floor := watch.newMail.floors[24088]; watchTime(floor) != lines[0]["at"] {
+		t.Errorf("new-mail floor = %v, want the skip point the resync names", floor)
 	}
 }
 
@@ -1202,10 +1300,11 @@ func TestWatchReportsAResyncAfterSkippingAhead(t *testing.T) {
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/postings/changes") {
-			// As haystack answers: `head :conflict`, no body.
+			// As HEY answers: `head :conflict`, no body.
 			w.WriteHeader(http.StatusConflict)
 			return
 		}
+		w.Header().Set("Date", skipDate)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`[{"id":24088,"kind":"imbox","name":"Imbox","posting_changes_url":"` + server.URL + `/boxes/24088/postings/changes.json?since=2026-08-21T12%3A00%3A00.000Z&v=2"}]`))
 	}))
@@ -1230,8 +1329,13 @@ func TestWatchReportsAResyncAfterSkippingAhead(t *testing.T) {
 	if event.Change != watchResync || event.Box == nil || event.Box.ID != 24088 {
 		t.Errorf("event = %+v, want a resync for the Imbox", event)
 	}
-	if watch.boxes[24088].cursor.Since != "2026-08-21T12:00:00.000Z" {
-		t.Errorf("cursor = %+v, want it moved to the server's current one", watch.boxes[24088].cursor)
+	skippedTo, err := time.Parse(time.RFC3339Nano, event.At)
+	if err != nil {
+		t.Fatalf("resync at %q: %v", event.At, err)
+	}
+	wantSkippedToHEYsClock(t, skippedTo)
+	if watch.boxes[24088].cursor.Since != watchStartSince(skippedTo) {
+		t.Errorf("cursor = %+v, want it moved to HEY's clock at the skip the resync names", watch.boxes[24088].cursor)
 	}
 }
 

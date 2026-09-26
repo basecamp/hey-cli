@@ -44,7 +44,7 @@ func trackNewMail(started time.Time) *newMail {
 // one it does not, updated later while still unseen — moved, say — would
 // otherwise measure its gap activity against an older record and read as
 // new. Activity at or before the floor is never new in that box; the cursor is
-// the box's last posting activity, which bounds every thread in it. The floor
+// HEY's clock at the skip, which bounds every thread in it. The floor
 // is the box's alone — a gap thread that moves to another box is measured
 // there, and may still read as new once. The resync line is the reader's cue
 // to re-read the box either way. HEY writes the cursor to the microsecond, so
@@ -56,10 +56,11 @@ func (n *newMail) skippedTo(boxID int64, cursor hey.PostingChangesCursor) {
 	}
 }
 
-// serverNow is HEY's clock at the moment the watch began, read off the Date
-// header of one cheap request, so that the cutoff between backlog and new mail
-// sits on the same clock as every posting's active_at and a workstation running
-// fast or slow can neither call the backlog new nor sit on new mail.
+// serverNow is HEY's clock at the moment it is asked — the watch's start, or a
+// skip-ahead's — read off the Date header of one cheap request, so that the
+// cutoff between backlog and new mail sits on the same clock as every posting's
+// active_at and a workstation running fast or slow can neither call the backlog
+// new nor sit on new mail.
 //
 // Date is the server's clock when it answered, and the watch began when it
 // asked: mail that lands in between is later than the start but no later than

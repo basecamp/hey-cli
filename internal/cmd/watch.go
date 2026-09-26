@@ -664,13 +664,13 @@ func (w *postingsWatch) readBox(ctx context.Context, box *watchedBox) error {
 
 	if changes.FullSyncRequired {
 		fmt.Fprintf(w.errOut, "notice: too much changed in %s to follow one change at a time — skipping ahead, read the box with `hey box view %s`\n", box.name, box.kind)
-		skipped, err := w.skipAhead(ctx, box)
+		skippedTo, skipped, err := w.skipAhead(ctx, box)
 		if err != nil {
 			return err
 		}
 		// A resync says the box is worth re-reading; a box that is gone is not.
 		if skipped {
-			w.report(ctx, watchEvent{Change: watchResync, At: watchTime(time.Now())}, box, nil)
+			w.report(ctx, watchEvent{Change: watchResync, At: watchTime(skippedTo)}, box, nil)
 		}
 		return nil
 	}
@@ -754,38 +754,61 @@ func (w *postingsWatch) settleBackoff() {
 	}
 }
 
-// skipAhead moves a box's cursor to the server's current one, which is the only way
-// back once a box has changed more than an increment can carry, and says whether it
-// did.
+// skipAhead moves a box's cursor to HEY's clock now, which is the only way back once
+// a box has changed more than an increment can carry, and says where it skipped to and
+// whether it did.
+//
+// Not to the since in the box's posting_changes_url, which is what it used to take:
+// that is the box's last posting activity rather than HEY's clock, a deletion or a
+// bundled posting can come later than it, and the box list reaches the watch through
+// the SDK's ETag cache, whose ETag — the box rows — posting activity never changes. A
+// 304 after a long drop would hand back the since the watch had already fallen behind
+// from, and every read after it would answer 409 again. The list is still read, for
+// the feed's version and to learn whether the box is still there.
 //
 // A box the server no longer lists, or no longer serves a changes feed for, has no
 // cursor to skip to: keeping the one it had would answer 409 on every read, and
 // installing an empty one would be a usage error on every read instead. Either way the
 // box can't be followed any more, so it stops being watched — and nothing was skipped.
-func (w *postingsWatch) skipAhead(ctx context.Context, box *watchedBox) (bool, error) {
+// A clock that cannot be read leaves the cursor where it was, to be tried again on the
+// retry's backoff like any read that failed.
+func (w *postingsWatch) skipAhead(ctx context.Context, box *watchedBox) (time.Time, bool, error) {
 	listed, err := sdk.Boxes().List(ctx)
 	if err != nil {
-		return false, apierr.FromSDK(err)
+		return time.Time{}, false, apierr.FromSDK(err)
 	}
 	if listed == nil {
-		return false, apierr.ErrAPI(0, "could not list boxes")
+		return time.Time{}, false, apierr.ErrAPI(0, "could not list boxes")
 	}
 
 	for _, listedBox := range *listed {
-		if listedBox.Id == box.id {
-			cursor, err := watchCursor(listedBox.PostingChangesUrl, "")
-			if err != nil {
-				return false, err
-			}
-			if cursor.Since != "" {
-				box.cursor = cursor
-				w.newMail.skippedTo(box.id, cursor)
-				return true, nil
-			}
+		if listedBox.Id != box.id {
+			continue
 		}
+		cursor, err := watchCursor(listedBox.PostingChangesUrl, "")
+		if err != nil {
+			return time.Time{}, false, err
+		}
+		if cursor.Since == "" {
+			break
+		}
+
+		now, err := serverNow(ctx)
+		if err != nil {
+			if permanentReadError(err) {
+				return time.Time{}, false, err
+			}
+			fmt.Fprintf(w.errOut, "warning: could not skip %s ahead: %v\n", box.name, err)
+			w.readAgainLater(box)
+			return time.Time{}, false, nil
+		}
+		cursor.Since = watchStartSince(now)
+		box.cursor = cursor
+		w.newMail.skippedTo(box.id, cursor)
+		return now, true, nil
 	}
 
-	return false, w.stopWatching(box)
+	return time.Time{}, false, w.stopWatching(box)
 }
 
 // stopWatching drops a box the watch can't follow any longer. When it was the last one

@@ -264,6 +264,11 @@ func TestWatchCalendarSkipsAheadOnAFullSync(t *testing.T) {
 			}`))
 			return
 		}
+		if r.URL.Path == "/identity.json" {
+			w.Header().Set("Date", skipDate)
+			_, _ = w.Write([]byte(`{"id":1}`))
+			return
+		}
 		w.WriteHeader(http.StatusConflict)
 	}))
 	defer server.Close()
@@ -283,8 +288,13 @@ func TestWatchCalendarSkipsAheadOnAFullSync(t *testing.T) {
 	if event.Change != watchCalendarResync || event.Calendar == nil || event.Calendar.ID != 512 {
 		t.Errorf("event = %+v, want a calendar_resync naming the calendar", event)
 	}
-	if watch.calendar.calendars[512].cursor.Since != "2026-08-18T11:00:00.000Z" {
-		t.Errorf("cursor = %+v, want the server's own fresh cursor", watch.calendar.calendars[512].cursor)
+	skippedTo, err := time.Parse(time.RFC3339Nano, event.At)
+	if err != nil {
+		t.Fatalf("resync at %q: %v", event.At, err)
+	}
+	wantSkippedToHEYsClock(t, skippedTo)
+	if got := watch.calendar.calendars[512].cursor; got.Since != watchStartSince(skippedTo) || got.Version != "1" {
+		t.Errorf("cursor = %+v, want HEY's clock at the skip the resync names, and the feed's version", got)
 	}
 }
 
@@ -295,6 +305,11 @@ func TestWatchCalendarStopsWatchingAGoneCalendar(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/calendars.json" {
 			_, _ = w.Write([]byte(`{"calendars": [], "calendar_changes_url": "/calendar/changes.json?since=2026-08-18T11%3A00%3A00.000Z"}`))
+			return
+		}
+		if r.URL.Path == "/identity.json" {
+			w.Header().Set("Date", skipDate)
+			_, _ = w.Write([]byte(`{"id":1}`))
 			return
 		}
 		w.WriteHeader(http.StatusConflict)
