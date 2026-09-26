@@ -147,7 +147,7 @@ func errInvalidTimeZone(name string) error {
 func errNoAccountZone(reason string, cause error) error {
 	return &apierr.Error{
 		Code:    apierr.CodeUsage,
-		Message: "no time zone to read the times in: " + reason,
+		Message: "no time zone to place the event in: " + reason,
 		Hint:    timeZoneHint,
 		Cause:   cause,
 	}

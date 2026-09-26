@@ -160,24 +160,42 @@ func TestEventsAddTimeZoneFlagNeedsNoAccountRead(t *testing.T) {
 	}
 }
 
-// An all-day event has no clock time and no zone, so it asks the account nothing, and its
-// today is this machine's.
-func TestEventsAddAllDayNeedsNoAccountRead(t *testing.T) {
-	atInstant(t, "2026-10-14T12:00:00Z")
-	handler, requests := zoneServer(t, zoneFixture{})
-	_, err := runJSONCommand(t, handler, "event", "add", "Sarah's birthday", "--calendar", "9")
-	if err != nil {
-		t.Fatalf("execute event add: %v", err)
+// Today is the account's today for an all-day event as well, whatever the machine's zone: at
+// 02:00 UTC it is still the 14th in New York. A named date needs no zone and asks the
+// account nothing, and --time-zone's today needs no account either.
+func TestEventsAddAllDayTodayIsTheAccountsToday(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		want     string
+		identity int32
+	}{
+		{name: "no date", want: "2026-10-14", identity: 1},
+		{name: "named date", args: []string{"--starts-on", "2026-10-20"}, want: "2026-10-20"},
+		{name: "time zone", args: []string{"--time-zone", "Asia/Tokyo"}, want: "2026-10-15"},
 	}
-	form := requests.written(t)
-	if got, want := form.Get("calendar_event[starts_at]"), eventNow().Local().Format(dateLayout); got != want {
-		t.Errorf("starts_at = %q, want this machine's today %q", got, want)
-	}
-	if got := form.Get("calendar_event[all_day]"); got != "1" {
-		t.Errorf("all_day = %q, want 1", got)
-	}
-	if got := requests.identity.Load(); got != 0 {
-		t.Errorf("identity reads = %d, want none", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			atInstant(t, "2026-10-15T02:00:00Z")
+			handler, requests := zoneServer(t, zoneFixture{accountZone: "America/New_York"})
+			_, err := runJSONCommand(t, handler, append([]string{"event", "add", "Sarah's birthday", "--calendar", "9"}, tt.args...)...)
+			if err != nil {
+				t.Fatalf("execute event add: %v", err)
+			}
+			form := requests.written(t)
+			if got := form.Get("calendar_event[starts_at]"); got != tt.want {
+				t.Errorf("starts_at = %q, want %s", got, tt.want)
+			}
+			if got := form.Get("calendar_event[all_day]"); got != "1" {
+				t.Errorf("all_day = %q, want 1", got)
+			}
+			if form.Has("calendar_event[starts_at_time_zone_name]") {
+				t.Errorf("zone = %q, want none on an all-day event", form.Get("calendar_event[starts_at_time_zone_name]"))
+			}
+			if got := requests.identity.Load(); got != tt.identity {
+				t.Errorf("identity reads = %d, want %d", got, tt.identity)
+			}
+		})
 	}
 }
 

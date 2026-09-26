@@ -128,8 +128,9 @@ func newEventsAddCommand() *eventsAddCommand {
 
 An event with no --start-time is an all-day event. A --start-time with no --end-time runs
 for an hour. Clock times are read in your HEY account's time zone, the one HEY's web app
-uses, and so is today when --starts-on is left out; --time-zone names another. If the
-account has no time zone the command refuses and asks for --time-zone.
+uses, and so is today when --starts-on is left out, for an all-day event too; --time-zone
+names another. If the account has no time zone the command refuses and asks for
+--time-zone.
 
 Without --calendar the event goes where HEY puts one by default: the first ordinary calendar
 you own that is not a subscription — never Maybe or the personal calendar.`,
@@ -735,22 +736,27 @@ type eventSchedule struct {
 // all-day event, which is what a bare `hey event add "Sarah's birthday"` means.
 //
 // A timed event's clock times are read in writeZone's zone, and so is today when no date is
-// named: at 02:00 UTC it is still the evening before in New York. An all-day event has no
-// zone and asks for none, so its today is this machine's.
+// named, all-day or not: at 02:00 UTC it is still the evening before in New York. An
+// all-day event on a named date has no zone and asks for none.
 func (f *eventFields) newSchedule(ctx context.Context) (eventSchedule, error) {
 	allDay := f.allDay || f.startTime == ""
 	var startTime, endTime, zone string
-	today := eventNow().Local()
 	if !allDay {
 		var err error
 		if startTime, endTime, err = f.clockTimes(f.startTime, f.endTime); err != nil {
 			return eventSchedule{}, err
 		}
-		var loc *time.Location
-		if zone, loc, err = f.writeZone(ctx); err != nil {
+	}
+	var today time.Time
+	if !allDay || f.startsOn == "" {
+		name, loc, err := f.writeZone(ctx)
+		if err != nil {
 			return eventSchedule{}, err
 		}
-		today = today.In(loc)
+		today = eventNow().In(loc)
+		if !allDay {
+			zone = name
+		}
 	}
 
 	startsOn := f.startsOn
