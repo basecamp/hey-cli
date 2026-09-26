@@ -108,8 +108,11 @@ type eventForm struct {
 	on            time.Time
 	allDayArrived bool
 	// allDaySwitched says the reader has switched All day, which answers what the form's days
-	// are as surely as typing one does.
+	// are as surely as typing one does. submitted says they have pressed ctrl+s: the form as it
+	// stood then is what they asked to save, what a failed save hands back to them, and not
+	// something a late identity read may rewrite underneath a write already on its way.
 	allDaySwitched bool
+	submitted      bool
 
 	// movesAccepted is the refusal a save was last met with when it would have moved an end
 	// HEY cannot be sent as it is; ctrl+s again, with nothing pressed in between, saves it
@@ -262,9 +265,12 @@ func (f *eventForm) offerAnHour() {
 // if it stopped being all day, as it would have had the read been first. Neither happens once
 // the reader has edited a date or a time, chosen a zone — Local included — or switched All
 // day, since they have answered the question already and moving the days or times out from
-// under them would be worse than Local. A zone that cannot be used changes nothing.
+// under them would be worse than Local. Nor once they have pressed ctrl+s, saving or not: the
+// form they saved is the form they keep, and one whose write is on its way must go on showing
+// what it is writing. A zone that cannot be used changes nothing.
 func (f *eventForm) adoptAccountZone(name string) {
-	if f.starts.answered() || f.ends.answered() || f.allDaySwitched || (f.mode == eventFormEdit && !f.allDayArrived) {
+	if f.submitted || f.saving || f.starts.answered() || f.ends.answered() || f.allDaySwitched ||
+		(f.mode == eventFormEdit && !f.allDayArrived) {
 		return
 	}
 	account, zone := usableZone(name)
@@ -966,6 +972,7 @@ func (f *eventForm) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		// A kept end HEY would place elsewhere is refused once, saying where; the same save
 		// asked for again, with nothing touched in between, is the reader choosing that. The
 		// form has no other way to say it, since typing the same clock back is not a change.
+		f.submitted = true
 		problem := f.validate()
 		accepted := problem != "" && problem == f.movesAccepted
 		f.movesAccepted = ""

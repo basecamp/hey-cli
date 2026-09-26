@@ -734,6 +734,79 @@ func TestNewEventFormRunsAnHourAcrossMonroviasHalfMinute(t *testing.T) {
 	}
 }
 
+// An identity read that lands while a new event is being saved leaves the form as it is: the
+// write already carries what the form showed, and the form goes on showing it, so the screen
+// and the saved event agree.
+func TestALateIdentityReadLeavesASavingFormAlone(t *testing.T) {
+	v, recorded := calendarWithEventServer(t)
+	v.Init()
+	identity := v.fetchIdentity()()
+
+	v.HandleContentKey(keyPress("a"))
+	v.eventForm.title.SetValue("Design review")
+	shown := v.eventForm.values()
+	save := v.HandleContentKey(keyPress("ctrl+s"))
+	if save == nil || !v.eventForm.saving {
+		t.Fatal("ctrl+s did not start the save")
+	}
+
+	v.Update(identity)
+	if got := v.eventForm.values(); got.StartsAt != shown.StartsAt || got.StartTime != shown.StartTime ||
+		got.StartTimeZone != shown.StartTimeZone || got.EndTimeZone != shown.EndTimeZone {
+		t.Errorf("the saving form now shows %s %s %q → %q, want %s %s %q → %q as it was saved",
+			got.StartsAt, got.StartTime, got.StartTimeZone, got.EndTimeZone,
+			shown.StartsAt, shown.StartTime, shown.StartTimeZone, shown.EndTimeZone)
+	}
+
+	if msg, ok := save().(calendarMutationMsg); !ok || msg.err != nil {
+		t.Fatalf("save = %T %v", msg, msg.err)
+	}
+	requests, bodies := recorded.snapshot()
+	var body string
+	for i, request := range requests {
+		if request == "POST /calendar/events.json" {
+			body = bodies[i]
+		}
+	}
+	form, err := url.ParseQuery(body)
+	if err != nil || body == "" {
+		t.Fatalf("no create was sent: %v %v", requests, err)
+	}
+	if form.Get("calendar_event[starts_at]") != shown.StartsAt || form.Get("calendar_event[starts_at_time]") != shown.StartTime+":00" ||
+		form.Get("calendar_event[starts_at_time_zone_name]") != shown.StartTimeZone {
+		t.Errorf("the write carried %s %s %q, want what the form showed: %s %s %q",
+			form.Get("calendar_event[starts_at]"), form.Get("calendar_event[starts_at_time]"), form.Get("calendar_event[starts_at_time_zone_name]"),
+			shown.StartsAt, shown.StartTime, shown.StartTimeZone)
+	}
+}
+
+// Pressing ctrl+s is accepting the form as it stands, whether the save is refused or goes out
+// and fails: the reader is handed back what they saw, not a form a late identity read rewrote.
+func TestASubmittedFormKeepsWhatTheReaderSaw(t *testing.T) {
+	on := time.Date(2026, 10, 14, 9, 41, 0, 0, time.UTC)
+
+	// Refused: there is no name yet.
+	form := newAccountZoneForm(eventFormCreate, Recording{}, on, "")
+	form.handleKey(keyPress("ctrl+s"))
+	shown := form.starts.clock()
+	form.adoptAccountZone(indianapolis)
+	if form.starts.zoneName() != "" || form.starts.clock() != shown {
+		t.Errorf("after a refused save the form moved to %s %q", form.starts.clock(), form.starts.zoneName())
+	}
+
+	// Sent, and failed: the view hands the form back with saving off.
+	form = newAccountZoneForm(eventFormCreate, Recording{}, on, "")
+	form.title.SetValue("Design review")
+	if _, save := form.handleKey(keyPress("ctrl+s")); !save {
+		t.Fatalf("ctrl+s did not save: %q", form.status)
+	}
+	form.saving = false
+	form.adoptAccountZone(indianapolis)
+	if form.starts.zoneName() != "" || form.starts.clock() != shown {
+		t.Errorf("after a failed save the form moved to %s %q", form.starts.clock(), form.starts.zoneName())
+	}
+}
+
 // At the second 01:00 of the night New York falls back — 06:00 UTC — 01:00 is a whole hour on
 // the clock, but HEY reads 2026-11-01 01:00 America/New_York as 05:00 UTC, an hour ago. The
 // next whole hour it places after now is 02:00 (=> 07:00 UTC), and the hour runs to 03:00
