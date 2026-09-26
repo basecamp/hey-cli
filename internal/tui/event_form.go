@@ -229,11 +229,13 @@ func newEventForm(mode eventFormMode, event Recording, on time.Time, calendars [
 }
 
 // offerAnHour ends a new event at least an hour after it starts, where HEY will place both:
-// the first end from an hour on whose clock time HEY reads back as that same instant, a
-// quarter of an hour at a time. An hour on from the first 01:00 of the night New York falls
-// back is the second 01:00, which HEY reads as the first — a zero-length event — so the form
-// offers 02:00; at Lord Howe, where the clocks go back half an hour, an hour on from 01:00 is
-// the second 01:30, and the form offers 02:00 there too.
+// the first clock time on the end's clock that HEY places an hour or more after the start,
+// where it reads (timezone.FirstClockFrom). An hour on from the first 01:00 of the night New
+// York falls back is the second 01:00, which HEY reads as the first — a zero-length event — so
+// the form offers 02:00; at Lord Howe, where the clocks go back half an hour, an hour on from
+// 01:00 is the second 01:30, and the form offers 02:00 there too. Monrovia's 23:00 on 6 January
+// 1972 was 23:44:30 UTC, and an hour on is 00:44:30 on a clock that had just dropped its half
+// minute; the form offers 00:45.
 func (f *eventForm) offerAnHour() {
 	starts, ok := f.starts.moment()
 	if !ok {
@@ -243,13 +245,7 @@ func (f *eventForm) offerAnHour() {
 	if clock == nil {
 		clock = starts.Location()
 	}
-	for ends := starts.Add(time.Hour); ends.Before(starts.Add(48 * time.Hour)); ends = ends.Add(15 * time.Minute) {
-		if timezone.Representable(ends, clock) {
-			f.ends.setMoment(ends.In(clock))
-			return
-		}
-	}
-	f.ends.setMoment(starts.Add(time.Hour).In(clock))
+	f.ends.setMoment(timezone.FirstClockFrom(starts.Add(time.Hour), clock).In(clock))
 }
 
 // adoptAccountZone gives the form the account's zone when the identity read that names it

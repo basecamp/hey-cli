@@ -42,12 +42,25 @@ func Placed(date, clock string, loc *time.Location) (time.Time, bool) {
 	return WallClock(day, at, loc), true
 }
 
-// Representable is whether an instant can be sent to HEY as a clock time in loc and come
-// back as itself: false for the second of two moments a clock time names as the clocks go
-// back, when HEY takes the first, and for an instant between whole minutes.
-func Representable(at time.Time, loc *time.Location) bool {
-	on := at.In(loc)
-	return at.Equal(at.Truncate(time.Minute)) && WallClock(on, on, loc).Equal(at)
+// FirstClockFrom is the earliest clock time in loc, in whole minutes, that HEY places no
+// earlier than at and places where it reads — the instant it places it at. Clock times are
+// searched rather than instants, a minute at a time: an instant between whole minutes, as
+// the start of anything in a zone that kept seconds in its offset is, cannot be sent at all,
+// and neither can a time the clocks skip (HEY moves it on an hour) or the second of two they
+// repeat (HEY takes the first).
+func FirstClockFrom(at time.Time, loc *time.Location) time.Time {
+	wall := localClock(at.In(loc))
+	if !wall.Equal(wall.Truncate(time.Minute)) {
+		wall = wall.Truncate(time.Minute).Add(time.Minute)
+	}
+	for range 3 * 24 * 60 {
+		placed := WallClock(wall, wall, loc)
+		if !placed.Before(at) && localClock(placed.In(loc)).Equal(wall) {
+			return placed
+		}
+		wall = wall.Add(time.Minute)
+	}
+	return at
 }
 
 // MovedBy says how far and which way an instant would move, from had to sent.

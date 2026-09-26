@@ -623,3 +623,22 @@ func TestZoneNamesAreShownSanitized(t *testing.T) {
 		t.Errorf("problem = %q, want the name refused", got)
 	}
 }
+
+// Monrovia's clocks kept thirty seconds in their offset until 7 January 1972: 23:00 on the 6th
+// was 23:44:30 UTC, and at midnight they jumped to 00:44:30 UTC. An hour on from that start is
+// 00:44:30, which no clock time names; 00:44 is one HEY moves an hour on (01:44 UTC), so the
+// first end at least an hour on is 00:45 (=> 00:45 UTC).
+func TestNewEventFormRunsAnHourAcrossMonroviasHalfMinute(t *testing.T) {
+	monrovia := mustZone(t, "Africa/Monrovia")
+	form := newAccountZoneForm(eventFormCreate, Recording{}, time.Date(1972, 1, 6, 22, 30, 0, 0, monrovia), "Africa/Monrovia")
+
+	values := form.values()
+	if values.StartTime != "23:00" || values.EndsAt != "1972-01-07" || values.EndTime != "00:45" {
+		t.Errorf("times = %s %s → %s %s, want 23:00 → 00:45 the next day", values.StartsAt, values.StartTime, values.EndsAt, values.EndTime)
+	}
+	wantPlaced(t, "start", values.StartsAt, values.StartTime, values.StartTimeZone, time.Date(1972, 1, 6, 23, 44, 30, 0, time.UTC))
+	wantPlaced(t, "end", values.EndsAt, values.EndTime, values.EndTimeZone, time.Date(1972, 1, 7, 0, 45, 0, 0, time.UTC))
+	if got := form.validate(); got != "Name is required" {
+		t.Errorf("validate = %q, want only the missing name", got)
+	}
+}
