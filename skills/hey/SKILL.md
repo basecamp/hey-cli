@@ -626,11 +626,12 @@ within HEY's 15-second window. IDs that are not your box items are skipped:
 ```bash
 hey seen 12345                                # Mark a thread as seen
 hey seen 12345 67890                          # Mark multiple threads as seen
+hey seen --box "paper trail"                  # Queue marking a whole box as seen
 hey unseen 12345                              # Mark a thread as unseen
 hey unseen 12345 67890                        # Mark multiple threads as unseen
 ```
 
-Takes box item IDs (the `id` field from `hey box view` output).
+Takes box item IDs (the `id` field from `hey box view` output). Alternatively, `hey seen --box <name|id>` resolves a box like `hey box view`, using the current account selection; it cannot be combined with item IDs. Whole-box work is queued, so success acknowledges the request and threads may still appear unseen immediately afterward.
 
 ### Email - Moving Threads
 

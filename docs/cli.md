@@ -248,6 +248,7 @@ hey compose --from billing@example.org --to alice@example.com --subject "Board u
 hey draft send 12345               # deliver it
 hey draft delete 12345             # trash it
 hey seen 12345                     # mark a thread as seen
+hey seen --box "paper trail"       # queue marking a whole box as seen
 hey unseen 12345 67890             # mark threads as unseen
 hey move 12345 --to feed           # move a thread to another box
 hey move 12345 67890 --to imbox    # remove Reply Later from seen threads
@@ -320,6 +321,8 @@ Snippets are named reusable email content, separate from clips saved out of rece
 `hey box view <name|id>`, `hey label view <id>` and `hey collection view <id>` list the same postings and answer the same formats: `--json`, `--styled`, `--markdown`, `--ids-only`, and `--count`. The data-only formats print the pagination notice and any `next_page` cursor on stderr, so the IDs on stdout stay pipeable. `--json` differs only in what wraps the postings: a box answers with HEY's box payload, a label and a collection with the source and its `total_count`.
 
 Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Moving to any of them but Imbox marks the threads seen, and a thread that cannot be replied to is silently not moved to Reply Later. Reply Later is a box rather than a separate flag: moving a Reply Later thread to Imbox removes Reply Later, preserves its seen state, and leaves a seen thread in Previously Seen. It does not return the thread to the box it occupied before Reply Later. A bundle row is refused rather than moved: it stands in for one sender's whole stream in the box they are delivered to, so moving it leaves nothing there for their next email to join and it arrives unbundled instead. Group or ungroup a sender with `hey contact bundle` and `hey contact unbundle`, and read a bundle with `hey bundle view`. Bubble Up has its own commands: `hey bubble up` raises a thread right away with `--now`, on a date with `--on` (HEY resurfaces it at 08:00 UTC that day, or 18:00 UTC when the date is today), or at 08:00 UTC tomorrow, the next Saturday, or next Monday with `--tomorrow`, `--weekend`, and `--next-week`; `hey bubble pop` cancels one, moving the thread to the Imbox and marking it seen rather than returning it to its original box. `hey bubble list` shows both buckets — the threads back in the Imbox after bubbling up and the ones still scheduled, each with when it resurfaces. Trashing a shared thread removes your access instead of deleting it for everyone. Ignoring marks a thread seen and leaves it in its box; while it is ignored `hey unseen` has no effect, and `hey stop-ignoring` resumes notifications but leaves it seen.
+
+`hey seen` accepts either box item IDs or `--box <name|id>`, never both. The box resolves the same way as `hey box view`, using the current account selection; for The Feed, use `feedbox` or `"the feed"`. Whole-box work is queued by HEY, so the acknowledgment confirms the request was accepted and threads may still appear unseen immediately afterward.
 
 ## Watching for changes
 

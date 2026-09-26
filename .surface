@@ -323,6 +323,7 @@ hey search --subject
 hey search --to
 hey search filters
 hey seen
+hey seen --box
 hey set-aside
 hey set-aside group
 hey set-aside group add
