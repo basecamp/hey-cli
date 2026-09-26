@@ -741,10 +741,9 @@ type eventSchedule struct {
 func (f *eventFields) newSchedule(ctx context.Context) (eventSchedule, error) {
 	allDay := f.allDay || f.startTime == ""
 	var startTime, endTime, zone string
-	var endsNextDay bool
 	if !allDay {
 		var err error
-		if startTime, endTime, endsNextDay, err = f.clockTimes(f.startTime, f.endTime); err != nil {
+		if startTime, endTime, err = f.clockTimes(f.startTime, f.endTime); err != nil {
 			return eventSchedule{}, err
 		}
 	}
@@ -780,8 +779,11 @@ func (f *eventFields) newSchedule(ctx context.Context) (eventSchedule, error) {
 	endsOn := f.endsOn
 	if endsOn == "" {
 		endsOn = startsOn
-		if endsNextDay {
-			endsOn = dayAfter(startsOn)
+	}
+	if !allDay && endTime == "" {
+		var err error
+		if endsOn, endTime, err = defaultEnd(startsOn, startTime, f.endsOn, loc); err != nil {
+			return eventSchedule{}, err
 		}
 	}
 	if err := checkEventDates(startsOn, endsOn); err != nil {
@@ -817,12 +819,12 @@ func (f *eventFields) validateExplicitScheduleFlags(cmd *cobra.Command) error {
 		}
 	}
 	if flags.Changed("start-time") {
-		if _, err := parseEventClock("start-time", f.startTime, "14:30"); err != nil {
+		if err := parseEventClock("start-time", f.startTime, "14:30"); err != nil {
 			return err
 		}
 	}
 	if flags.Changed("end-time") {
-		if _, err := parseEventClock("end-time", f.endTime, "15:30"); err != nil {
+		if err := parseEventClock("end-time", f.endTime, "15:30"); err != nil {
 			return err
 		}
 	}
@@ -890,13 +892,19 @@ func (f *eventFields) scheduleFrom(ctx context.Context, cmd *cobra.Command, even
 	if event.AllDay && flags.Changed("start-time") && !flags.Changed("end-time") {
 		end = ""
 	}
-	var endsNextDay bool
-	if schedule.startTime, schedule.endTime, endsNextDay, err = f.clockTimes(start, end); err != nil {
+	if schedule.startTime, schedule.endTime, err = f.clockTimes(start, end); err != nil {
 		return eventSchedule{}, err
 	}
-	// A default end past midnight is on the next day, unless --ends-on said otherwise.
-	if endsNextDay && !flags.Changed("ends-on") && schedule.endsAt == schedule.startsAt {
-		schedule.endsAt = dayAfter(schedule.startsAt)
+	if schedule.endTime == "" && (flags.Changed("ends-on") || schedule.endsAt == schedule.startsAt) {
+		given := ""
+		if flags.Changed("ends-on") {
+			given = schedule.endsAt
+		}
+		if schedule.endsAt, schedule.endTime, err = defaultEnd(schedule.startsAt, schedule.startTime, given, endZone.loc); err != nil {
+			return eventSchedule{}, err
+		}
+	} else if schedule.endTime == "" {
+		schedule.endTime = hourAfter(schedule.startTime)
 	}
 
 	startRetyped := flags.Changed("starts-on") || flags.Changed("start-time")
@@ -1102,37 +1110,56 @@ const defaultEventStartTime = "09:00"
 // eventDuration is how long a timed event runs when only its start was named.
 const eventDuration = time.Hour
 
-// clockTimes reads the pair of HH:MM times, defaulting the end to an hour after the start.
-// nextDay says the default end is past midnight — 00:30 for a 23:30 start — and so belongs
-// on the day after the start's.
-func (f *eventFields) clockTimes(startTime, endTime string) (start, end string, nextDay bool, err error) {
-	clock, err := parseEventClock("start-time", startTime, "14:30")
-	if err != nil {
-		return "", "", false, err
+// clockTimes reads the pair of HH:MM times. An end left out comes back empty, for
+// defaultEnd to fill in once the start's date and zone are known.
+func (f *eventFields) clockTimes(startTime, endTime string) (string, string, error) {
+	if err := parseEventClock("start-time", startTime, "14:30"); err != nil {
+		return "", "", err
 	}
 	if endTime == "" {
-		ends := clock.Add(eventDuration)
-		return startTime, ends.Format(clockLayout), ends.Day() != clock.Day(), nil
+		return startTime, "", nil
 	}
-	if _, err := parseEventClock("end-time", endTime, "15:30"); err != nil {
-		return "", "", false, err
+	if err := parseEventClock("end-time", endTime, "15:30"); err != nil {
+		return "", "", err
 	}
-	return startTime, endTime, false, nil
+	return startTime, endTime, nil
 }
 
-// dayAfter is the date after a YYYY-MM-DD date, which has been checked already.
-func dayAfter(date string) string {
-	day, _ := time.Parse(dateLayout, date)
-	return day.AddDate(0, 0, 1).Format(dateLayout)
+// defaultEnd is when an event given no end finishes: an hour after it starts. Given an
+// --ends-on, it is the start's clock time an hour on, on that date. Otherwise it is an hour
+// of elapsed time after the start as HEY places it, so it crosses midnight into the next day
+// and a change of the clocks the way a real hour does, and it has to come back to that
+// same moment when HEY places it in turn. In the hour the clocks go back, it can land on the
+// moment of a repeated clock time HEY would not take; that is refused.
+func defaultEnd(startsOn, startTime, endsOn string, loc *time.Location) (string, string, error) {
+	if endsOn != "" {
+		return endsOn, hourAfter(startTime), nil
+	}
+	day, _ := time.Parse(dateLayout, startsOn)
+	clock, _ := time.Parse(clockLayout, startTime)
+	end := wallClockOn(day, clock, loc).Add(eventDuration).In(loc)
+	endsOn, endTime := end.Format(dateLayout), end.Format(clockLayout)
+	if placed := wallClockOn(end, end, loc); !placed.Equal(end) {
+		return "", "", apierr.ErrUsageHint(
+			fmt.Sprintf("an hour after it starts, the event would end at %s %s %s, a clock time the clocks show twice as they go back, and HEY would place it %s",
+				endsOn, endTime, terminal.SanitizeLine(loc.String()), movedBy(end, placed)),
+			"pass --end-time to say when it ends")
+	}
+	return endsOn, endTime, nil
 }
 
-func parseEventClock(name, value, example string) (time.Time, error) {
-	clock, err := time.Parse(clockLayout, value)
-	if err != nil {
-		return time.Time{}, apierr.ErrUsageHint(fmt.Sprintf("invalid %s: %s", name, value),
+// hourAfter is the clock time an hour on from a checked HH:MM time.
+func hourAfter(clock string) string {
+	at, _ := time.Parse(clockLayout, clock)
+	return at.Add(eventDuration).Format(clockLayout)
+}
+
+func parseEventClock(name, value, example string) error {
+	if _, err := time.Parse(clockLayout, value); err != nil {
+		return apierr.ErrUsageHint(fmt.Sprintf("invalid %s: %s", name, value),
 			fmt.Sprintf("times are HH:MM on a 24-hour clock, for example %s", example))
 	}
-	return clock, nil
+	return nil
 }
 
 // clockLayout is the time of day HEY's form takes, and the one a reader types.

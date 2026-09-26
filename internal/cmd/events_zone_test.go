@@ -1023,11 +1023,13 @@ func TestEventsAddRefusesAnEventThatEndsBeforeItStarts(t *testing.T) {
 	wantSchedule(t, requests.written(t), "2026-10-14", "10:00", "2026-10-14", "10:00", "Europe/Zagreb")
 }
 
-// A start with no end runs an hour, and an hour past a start late in the evening is on the
-// next day: 23:30 runs to 00:30 on the 15th, 23:00 to midnight. On the night Santiago's
-// clocks skip midnight the end is still the next day's 00:30, which HEY places at 01:30,
-// an hour after the start. --ends-on given with no --end-time is taken as it is, and one
-// that puts the end before the start is refused.
+// A start with no end runs an hour of elapsed time from where HEY places the start, and ends
+// at a clock time HEY places back at that moment. So 23:30 runs to 00:30 on the 15th and
+// 23:00 to midnight; on the night Santiago's clocks skip midnight, 23:30 runs to 01:30; on
+// the morning New York springs forward, 01:30 runs to 03:30; and on Lord Howe Island, whose
+// clocks move half an hour, 01:30 runs to 02:00 as they go back and to 03:00 as they go
+// forward. Every pair is an hour apart in ActiveSupport. --ends-on given with no --end-time is
+// taken as it is, and one that puts the end before the start is refused.
 func TestEventsAddRunsADefaultHourPastMidnight(t *testing.T) {
 	tests := []struct {
 		name, zone, startsOn, start string
@@ -1037,7 +1039,10 @@ func TestEventsAddRunsADefaultHourPastMidnight(t *testing.T) {
 		{name: "23:30", zone: "Europe/Zagreb", startsOn: "2026-10-14", start: "23:30", endsOn: "2026-10-15", end: "00:30"},
 		{name: "23:00", zone: "Europe/Zagreb", startsOn: "2026-10-14", start: "23:00", endsOn: "2026-10-15", end: "00:00"},
 		{name: "a normal time", zone: "Europe/Zagreb", startsOn: "2026-10-14", start: "14:00", endsOn: "2026-10-14", end: "15:00"},
-		{name: "Santiago skips midnight", zone: "America/Santiago", startsOn: "2026-09-05", start: "23:30", endsOn: "2026-09-06", end: "00:30"},
+		{name: "Santiago skips midnight", zone: "America/Santiago", startsOn: "2026-09-05", start: "23:30", endsOn: "2026-09-06", end: "01:30"},
+		{name: "New York springs forward", zone: "America/New_York", startsOn: "2026-03-08", start: "01:30", endsOn: "2026-03-08", end: "03:30"},
+		{name: "Lord Howe goes back", zone: "Australia/Lord_Howe", startsOn: "2026-04-05", start: "01:30", endsOn: "2026-04-05", end: "02:00"},
+		{name: "Lord Howe goes forward", zone: "Australia/Lord_Howe", startsOn: "2026-10-04", start: "01:30", endsOn: "2026-10-04", end: "03:00"},
 		{name: "ends-on given", zone: "Europe/Zagreb", startsOn: "2026-10-14", start: "23:30",
 			args: []string{"--ends-on", "2026-10-16"}, endsOn: "2026-10-16", end: "00:30"},
 	}
@@ -1085,5 +1090,29 @@ func TestEventsEditMadeAllDayOnTwoDatesNeedsNoZone(t *testing.T) {
 	}
 	if got := requests.identity.Load(); got != 0 {
 		t.Errorf("identity reads = %d, want none", got)
+	}
+}
+
+// An hour after 01:30 on the night New York falls back is 01:30 again, the second one, and
+// HEY takes 01:30 as the first: sending 01:30 would make no event, and 02:30 two hours. On
+// Lord Howe Island an hour after 01:00 is the second 01:30, which HEY would place thirty
+// minutes after the start. Neither default hour can be sent, so the add asks for an end.
+func TestEventsAddRefusesADefaultHourHEYCannotBeSent(t *testing.T) {
+	for _, tt := range []struct{ name, zone, startsOn, start, want string }{
+		{name: "New York", zone: "America/New_York", startsOn: "2026-11-01", start: "01:30", want: "would end at 2026-11-01 01:30 America/New_York"},
+		{name: "Lord Howe", zone: "Australia/Lord_Howe", startsOn: "2026-04-05", start: "01:00", want: "would end at 2026-04-05 01:30 Australia/Lord_Howe"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			handler, requests := zoneServer(t, zoneFixture{})
+			_, err := runJSONCommand(t, handler, "event", "add", "Night shift handover", "--calendar", "9",
+				"--starts-on", tt.startsOn, "--start-time", tt.start, "--time-zone", tt.zone)
+			var cliErr *apierr.Error
+			if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, tt.want) || !strings.Contains(cliErr.Hint, "--end-time") {
+				t.Fatalf("error = %v, want a usage error saying it %s and naming --end-time", err, tt.want)
+			}
+			if got := requests.writes.Load(); got != 0 {
+				t.Errorf("writes = %d, want none", got)
+			}
+		})
 	}
 }
