@@ -313,9 +313,10 @@ func boxIs(box generated.Box, wanted string) bool {
 		wanted == strconv.FormatInt(box.Id, 10)
 }
 
-// watchCursor reads the cursor out of a box's changes URL — HEY's own, which a skip-ahead
-// resumes from — unless --since moves it. Without --since, a watch's first read starts
-// at the watch's start instead (watchStartSince).
+// watchCursor reads the cursor out of a box's changes URL, moved by --since. Its since
+// is HEY's, which neither caller keeps without --since: a watch's first read replaces it
+// with the watch's start (watchStartSince), and a skip-ahead with HEY's clock at the
+// skip. Both keep the feed version it names.
 func watchCursor(changesURL, since string) (hey.PostingChangesCursor, error) {
 	if changesURL == "" {
 		return hey.PostingChangesCursor{}, nil
