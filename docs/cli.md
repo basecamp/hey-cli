@@ -198,7 +198,7 @@ hey search "quarterly planning"    # search threads and matching messages
 hey search --from jane@example.com --date last_30_days  # refine a search
 hey search filters                 # list available refinement values
 hey contact list                  # list contacts
-hey contact list --query jane@example.com  # only contacts matching a name, email, initials or note
+hey contact list --query jane@example.com  # only contacts matching a name, email, initials or note (once HEY supports it; until then HEY returns every contact)
 hey contact show 12345            # view a contact and private note
 hey contact threads 12345         # list every thread with a contact, seen and unseen
 hey contact add --name "Jane Doe" --email jane@example.com

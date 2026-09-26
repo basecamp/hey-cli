@@ -50,7 +50,7 @@ the results on the field you need as well — as the email example below does.`,
 	}
 	listCommand.cmd.Flags().IntVar(&listCommand.page, "page", 1, "Results page")
 	listCommand.cmd.Flags().BoolVar(&listCommand.all, "all", false, "Fetch up to 100 results pages from --page onward")
-	listCommand.cmd.Flags().StringVar(&listCommand.query, "query", "", "Only contacts matching this name, email address, initials or note text")
+	listCommand.cmd.Flags().StringVar(&listCommand.query, "query", "", "Only contacts matching this name, email address, initials or note text (once HEY supports it; until then HEY returns every contact)")
 	return listCommand
 }
 

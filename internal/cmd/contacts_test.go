@@ -185,6 +185,30 @@ func TestContactsListQueryIsSentOnEveryPage(t *testing.T) {
 	}
 }
 
+func TestContactsListStopsAtAnEmptyFirstPage(t *testing.T) {
+	var queries []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		queries = append(queries, req.URL.RawQuery)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	t.Cleanup(server.Close)
+
+	resp, err := runContacts(t, server, "list", "--all", "--query", "Wilhelmina Harker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(queries) != 1 {
+		t.Errorf("requests = %q, want the first page alone", queries)
+	}
+	if contacts := decodeContactData[[]generated.Contact](t, resp.Data); len(contacts) != 0 {
+		t.Errorf("contacts = %+v", contacts)
+	}
+	if resp.Summary != "0 contacts" || resp.Meta["pages_fetched"] != float64(1) {
+		t.Errorf("summary = %q, meta = %+v", resp.Summary, resp.Meta)
+	}
+}
+
 func TestContactsListWithoutAQuerySendsNone(t *testing.T) {
 	for _, args := range [][]string{{"list"}, {"list", "--query", "  "}} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {

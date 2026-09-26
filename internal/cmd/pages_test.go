@@ -76,6 +76,22 @@ func TestCollectPagesStopsAtAnEmptyPage(t *testing.T) {
 	}
 }
 
+func TestCollectPagesStopsAtAnEmptyFirstPage(t *testing.T) {
+	var read []string
+	first := pageResult[int]{Cursor: "2"}
+
+	collected, err := collectPages(t.Context(), first, pageRequest{All: true, MaxPages: 10}, numberedPages(5, &read))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(read) != 0 {
+		t.Errorf("read %v, want nothing after an empty first page", read)
+	}
+	if len(collected.Items) != 0 || collected.Read != 1 || collected.Truncated {
+		t.Errorf("collected = %+v", collected)
+	}
+}
+
 func TestCollectPagesReportsTheCap(t *testing.T) {
 	var read []string
 	first := pageResult[int]{Items: []int{0}, Cursor: "1"}
