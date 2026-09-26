@@ -15,6 +15,7 @@ import (
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
 	"github.com/basecamp/hey-cli/internal/terminal"
+	"github.com/basecamp/hey-cli/internal/timezone"
 )
 
 // recordingTypeEvent is how HEY names an event among the recordings a calendar holds.
@@ -833,7 +834,7 @@ func (f *eventFields) validateExplicitScheduleFlags(cmd *cobra.Command) error {
 		if f.timeZone == "" {
 			return apierr.ErrUsageHint("--time-zone needs a time zone", "an IANA time zone name, for example America/New_York")
 		}
-		if _, err := loadEventZone(f.timeZone); err != nil {
+		if _, err := timezone.Load(f.timeZone); err != nil {
 			return errInvalidTimeZone(f.timeZone)
 		}
 	}
@@ -1081,7 +1082,7 @@ func (f *eventFields) editZones(ctx context.Context, cmd *cobra.Command, event g
 
 // storedZone loads a zone an event was saved in.
 func storedZone(name string) (clockZone, error) {
-	loc, err := loadEventZone(name)
+	loc, err := timezone.Load(name)
 	if err != nil {
 		return clockZone{}, &apierr.Error{
 			Code:    apierr.CodeUsage,
