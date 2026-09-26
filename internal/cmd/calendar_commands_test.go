@@ -146,6 +146,8 @@ func TestEventsListReadsEveryCalendar(t *testing.T) {
 	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
+		case "/identity.json":
+			_, _ = io.WriteString(w, newYorkIdentity)
 		case "/calendars.json":
 			_, _ = io.WriteString(w, `{"calendars":[{"calendar":{"id":7,"name":"Personal","personal":true}},{"calendar":{"id":9,"name":"Work","owned":true}}]}`)
 		case "/calendars/7/recordings.json":

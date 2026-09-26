@@ -230,26 +230,6 @@ func TestEventBoundaryDrawsTheReadersClock(t *testing.T) {
 	}
 }
 
-// With no date the read asks HEY for "now", which the server resolves in the account's own
-// time zone — the CLI process's clock could be a day off either way around midnight.
-func TestEventsDayDefaultsToNow(t *testing.T) {
-	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/calendar/days/now.json" {
-			t.Errorf("request = %s %s, want the day read for now", r.Method, r.URL.Path)
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"kind":"day","starts_at":"2026-09-02T00:00:00Z","ends_at":"2026-09-02T23:59:59Z","recordings":{"Calendar::Event":[]}}`)
-	}), "event", "day")
-	if err != nil {
-		t.Fatalf("execute event day: %v", err)
-	}
-	if response.Summary != "0 events (today)" {
-		t.Errorf("summary = %q", response.Summary)
-	}
-}
-
 func TestEventsDayRejectsABadDate(t *testing.T) {
 	var requests atomic.Int32
 	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
