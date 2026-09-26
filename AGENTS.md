@@ -686,7 +686,10 @@ is HEY's semantics and state across events, so the CLI decides it once; what to 
 it is the reader's. A 409 skip-ahead sets that box's floor at the cursor it skipped to
 (`newMail.skippedTo`): activity at or before it is never new there, known thread or not,
 because the watch never read the gap. `resync` is an event of its own — reported by default,
-left out by `--events new` — so a script for new mail never runs on one. The Omarchy bar plugin toasts from those lines itself (app-name, glyph,
+left out by `--events new` — so a script for new mail never runs on one. With
+`--label`, a genuine label gain on a thread the watch already saw without the folder
+also counts as new (`classify` in `watch.go`), so `--events new` reports it; a late
+tag on a thread never seen before still needs `--events updated`. The Omarchy bar plugin toasts from those lines itself (app-name, glyph,
 click-to-focus and the replace-not-stack id all live in the plugin), and nothing
 desktop-shaped lives in `watch*.go`.
 
@@ -790,7 +793,7 @@ themselves (`internal/cmd/watch_calendar.go`). Rings are coalesced per calendar 
 or `recording_deleted` line naming its calendar where a mail line names its box. The poll
 reports `calendar_added`, `calendar_updated` and `calendar_deleted`, and a recording feed's
 409 is `calendar_resync` after skipping ahead to a fresh cursor from the list. The
-email-specific flags switch all of it off — `--box`, or an `--events` list naming only
+email-specific flags switch all of it off — `--box`, `--label`, or an `--events` list naming only
 mail changes (`watchingCalendars` in watch_calendar.go) — and `ready` waits for the
 calendars' catch-up exactly as it waits for the boxes', on the same retry backoff and the
 same `readyOnceCaughtUp` critical section.

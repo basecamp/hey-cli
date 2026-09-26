@@ -69,10 +69,10 @@ type calendarsWatch struct {
 }
 
 // watchingCalendars is whether this invocation follows the calendars at all. Email-specific
-// flags switch them off: --box scopes the watch to mail, and an --events list that names
-// only mail changes has not asked for the calendar.
+// flags switch them off: --box or --label scopes the watch to mail, and an --events list
+// that names only mail changes has not asked for the calendar.
 func (c *watchCommand) watchingCalendars(changes map[string]bool) bool {
-	if len(c.boxes) > 0 {
+	if len(c.boxes) > 0 || len(c.labels) > 0 {
 		return false
 	}
 	return slices.ContainsFunc(calendarWatchChanges, func(change string) bool { return changes[change] })

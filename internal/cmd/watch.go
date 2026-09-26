@@ -27,6 +27,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/cable"
+	internalfolders "github.com/basecamp/hey-cli/internal/folders"
 	"github.com/basecamp/hey-cli/internal/output"
 	"github.com/basecamp/hey-cli/internal/terminal"
 )
@@ -49,7 +50,7 @@ const (
 // default; new is asked for, and asking for new alone leaves a resync out, so a
 // script for new mail never runs on one. The calendar's changes are named in
 // watch_calendar.go, reported by default, and switched off entirely by the
-// email-specific flags: --box, or an --events list that names only mail changes.
+// email-specific flags: --box, --label, or an --events list that names only mail changes.
 var (
 	postingChanges   = []string{"added", "updated", "deleted"}
 	defaultChanges   = append([]string{"added", "updated", "deleted", "resync"}, calendarWatchChanges...)
@@ -59,6 +60,7 @@ var (
 type watchCommand struct {
 	cmd         *cobra.Command
 	boxes       []string
+	labels      []string
 	events      []string
 	since       string
 	asyncScript string
@@ -91,8 +93,16 @@ recording_deleted cover every recording the calendars hold — events, todos, ha
 their completions, journal entries, time tracks, countdowns and day titles — each line
 naming its calendar; calendar_added, calendar_updated and calendar_deleted are
 the calendars themselves coming and going. The email-specific flags switch the calendars
-off: --box scopes the watch to mail, and an --events list naming only mail changes
-(added, updated, deleted, new, resync) does the same.
+off: --box or --label scopes the watch to mail, and an --events list naming only mail
+changes (added, updated, deleted, new, resync) does the same.
+
+--label keeps only mail already filed under that label (by id or name, from
+hey label list). --events new reports new mail that already has the label, and a
+thread this watch already saw without the label that later gains it when the feed
+returns an update with the folder. A late tag on a thread the watch has never seen
+still needs --events updated (or updated alongside new). Deletions and resyncs
+carry no folders, so they are left out while --label is set. Each reported line
+includes label {id,name}.
 
 Besides the thread changes, three lines describe the watch itself: "ready" once every box
 and calendar is caught up and the subscription is live (again after every reconnect's
@@ -107,6 +117,8 @@ Ready and disconnected are written to stdout only.`,
 		},
 		Example: `  hey watch
   hey watch --box imbox --events added
+  hey watch --label 789 --events new
+  hey watch --label agent-trades --events new --run-async './wake-agent.sh'
   hey watch --box imbox --events new --exit-on-first
   hey watch --box imbox --events new --run-async 'notify-send -a HEY "New mail in HEY"'
   hey watch --run-sync ./triage.sh
@@ -117,6 +129,7 @@ Ready and disconnected are written to stdout only.`,
 
 	flags := watchCommand.cmd.Flags()
 	flags.StringArrayVar(&watchCommand.boxes, "box", nil, "Box whose changes to report, by name or ID (repeatable, defaults to all; every box is followed either way, so new mail is judged across all of them)")
+	flags.StringArrayVar(&watchCommand.labels, "label", nil, "Label whose mail to report, by name or ID (repeatable; calendars off; only mail already filed under the label)")
 	flags.StringSliceVar(&watchCommand.events, "events", defaultChanges, "Changes to report: added, updated, deleted, resync and new for mail; recording_added, recording_updated, recording_deleted, calendar_added, calendar_updated, calendar_deleted and calendar_resync for the calendars")
 	flags.StringVar(&watchCommand.since, "since", "", "Report changes since this time first (RFC 3339 or YYYY-MM-DD)")
 	flags.StringVar(&watchCommand.asyncScript, "run-async", "", "Shell command to spawn per change, without waiting for it")
@@ -160,19 +173,27 @@ func (c *watchCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	labels, err := c.watchedLabels(ctx)
+	if err != nil {
+		return err
+	}
+
 	watch := &postingsWatch{
-		boxes:       boxes,
-		changes:     changes,
-		asyncScript: c.asyncScript,
-		syncScript:  c.syncScript,
-		exitOnFirst: c.exitOnFirst,
-		newMail:     newMail,
-		out:         cmd.OutOrStdout(),
-		errOut:      cmd.ErrOrStderr(),
-		styled:      writer.IsStyled(),
-		connection:  make(chan struct{}, 1),
-		unread:      map[int64]bool{},
-		running:     make(chan struct{}, asyncScriptLimit),
+		boxes:           boxes,
+		labels:          labels,
+		seenPostings:    map[int64]bool{},
+		labeledPostings: map[int64]bool{},
+		changes:         changes,
+		asyncScript:     c.asyncScript,
+		syncScript:      c.syncScript,
+		exitOnFirst:     c.exitOnFirst,
+		newMail:         newMail,
+		out:             cmd.OutOrStdout(),
+		errOut:          cmd.ErrOrStderr(),
+		styled:          writer.IsStyled(),
+		connection:      make(chan struct{}, 1),
+		unread:          map[int64]bool{},
+		running:         make(chan struct{}, asyncScriptLimit),
 	}
 
 	if c.watchingCalendars(changes) {
@@ -306,6 +327,60 @@ func boxIs(box generated.Box, wanted string) bool {
 		wanted == strconv.FormatInt(box.Id, 10)
 }
 
+// watchedLabels resolves --label values once, by id or name from the same list
+// `hey label list` shows. Every wanted label must match exactly one entry.
+func (c *watchCommand) watchedLabels(ctx context.Context) ([]watchEventLabel, error) {
+	if len(c.labels) == 0 {
+		return nil, nil
+	}
+
+	listed, err := internalfolders.List(ctx, sdk)
+	if err != nil {
+		return nil, apierr.FromSDK(err)
+	}
+
+	resolved := make([]watchEventLabel, 0, len(c.labels))
+	for _, wanted := range c.labels {
+		label, err := resolveWatchLabel(listed, wanted)
+		if err != nil {
+			return nil, err
+		}
+		resolved = append(resolved, label)
+	}
+	return resolved, nil
+}
+
+func resolveWatchLabel(listed []internalfolders.Label, wanted string) (watchEventLabel, error) {
+	wanted = strings.TrimSpace(wanted)
+	if wanted == "" {
+		return watchEventLabel{}, apierr.ErrUsage("--label needs a label name or ID")
+	}
+
+	// A numeric --label is an ID first: a label named "789" must not block ID 789.
+	if id, err := strconv.ParseInt(wanted, 10, 64); err == nil {
+		for _, label := range listed {
+			if label.ID == id {
+				return watchEventLabel{ID: label.ID, Name: label.Name}, nil
+			}
+		}
+	}
+
+	var matches []internalfolders.Label
+	for _, label := range listed {
+		if strings.EqualFold(wanted, label.Name) {
+			matches = append(matches, label)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return watchEventLabel{}, apierr.ErrNotFound("label", wanted)
+	case 1:
+		return watchEventLabel{ID: matches[0].ID, Name: matches[0].Name}, nil
+	default:
+		return watchEventLabel{}, apierr.ErrUsage(fmt.Sprintf("label %q is ambiguous — pass an ID from hey label list", wanted))
+	}
+}
+
 // watchCursor is where a box's changes feed should be read from. The server bakes its own
 // clock into the box's changes URL, so that's the cursor unless --since moves it.
 func watchCursor(changesURL, since string) (hey.PostingChangesCursor, error) {
@@ -375,6 +450,7 @@ type watchEvent struct {
 	Change        string               `json:"change"`
 	At            string               `json:"at"`
 	Box           *watchEventBox       `json:"box,omitempty"`
+	Label         *watchEventLabel     `json:"label,omitempty"`
 	PostingID     int64                `json:"posting_id,omitempty"`
 	ThreadID      int64                `json:"thread_id,omitempty"`
 	New           *bool                `json:"new,omitempty"`
@@ -410,30 +486,38 @@ type watchEventBox struct {
 	Name string `json:"name"`
 }
 
+type watchEventLabel struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
 // postingsWatch holds what a run of the command follows: the boxes and how far each
 // one has been read, and what to do with a change once it arrives.
 type postingsWatch struct {
-	boxes          map[int64]*watchedBox
-	calendar       *calendarsWatch
-	cable          *actioncable.Client
-	changes        map[string]bool
-	asyncScript    string
-	syncScript     string
-	exitOnFirst    bool
-	newMail        *newMail
-	out            io.Writer
-	errOut         io.Writer
-	styled         bool
-	connection     chan struct{}
-	transitionsMu  sync.Mutex
-	transitions    []bool
-	catchingUp     bool
-	unread         map[int64]bool
-	backoff        time.Duration
-	retry          <-chan time.Time
-	running        chan struct{}
-	reported       int
-	lastScriptExit int
+	boxes           map[int64]*watchedBox
+	labels          []watchEventLabel
+	seenPostings    map[int64]bool // posting IDs this watch has already classified
+	labeledPostings map[int64]bool // last known match of posting ID to a watched label
+	calendar        *calendarsWatch
+	cable           *actioncable.Client
+	changes         map[string]bool
+	asyncScript     string
+	syncScript      string
+	exitOnFirst     bool
+	newMail         *newMail
+	out             io.Writer
+	errOut          io.Writer
+	styled          bool
+	connection      chan struct{}
+	transitionsMu   sync.Mutex
+	transitions     []bool
+	catchingUp      bool
+	unread          map[int64]bool
+	backoff         time.Duration
+	retry           <-chan time.Time
+	running         chan struct{}
+	reported        int
+	lastScriptExit  int
 }
 
 func (w *postingsWatch) listen(ctx context.Context, subscription *actioncable.Subscription) error {
@@ -707,8 +791,21 @@ func (w *postingsWatch) readBox(ctx context.Context, box *watchedBox) error {
 }
 
 // classify decides whether a posting is new mail and records it, in that order.
+// With --label, a thread this watch already saw without the label that later
+// gains it counts as new, so --events new reports that filing. Match state is
+// updated on every classification so a remove-then-re-add is another gain.
 func (w *postingsWatch) classify(box *watchedBox, posting generated.Posting) *bool {
 	isNew := w.newMail.isNew(box.id, posting)
+	if len(w.labels) > 0 {
+		matched := labeling(&posting, w.labels) != nil
+		seen := w.seenPostings[posting.Id]
+		wasLabeled := w.labeledPostings[posting.Id]
+		if matched && seen && !wasLabeled {
+			isNew = true
+		}
+		w.seenPostings[posting.Id] = true
+		w.labeledPostings[posting.Id] = matched
+	}
 	w.newMail.record(posting)
 	return &isNew
 }
@@ -832,6 +929,15 @@ func (w *postingsWatch) report(ctx context.Context, event watchEvent, box *watch
 			event.ThreadID = resolvePostingTopicID(*posting)
 		}
 	}
+	if len(w.labels) > 0 {
+		// --label keeps only postings whose change payload already lists the folder.
+		// Deletions and resyncs carry no folders, so they never match.
+		matched := labeling(posting, w.labels)
+		if matched == nil {
+			return false
+		}
+		event.Label = matched
+	}
 	w.reported++
 
 	switch {
@@ -857,6 +963,23 @@ func (w *postingsWatch) reporting(event watchEvent) bool {
 	}
 
 	return w.changes[event.Change] || (w.changes["new"] && event.isNew())
+}
+
+// labeling is the watched label a posting is already filed under, if any. The
+// change feed's Posting carries folders when HEY includes them; that is what
+// --label filters on, without a second round trip.
+func labeling(posting *generated.Posting, labels []watchEventLabel) *watchEventLabel {
+	if posting == nil {
+		return nil
+	}
+	for i := range labels {
+		for _, folder := range posting.Folders {
+			if folder.Id == labels[i].ID {
+				return &labels[i]
+			}
+		}
+	}
+	return nil
 }
 
 func (w *postingsWatch) finished() bool {
@@ -955,7 +1078,7 @@ func (w *postingsWatch) scriptCommand(ctx context.Context, script string, event 
 // the script for an event that does not set it: HEY_NEW=1 on an update that is
 // not new, a thread id on a deletion. They are the event's to set or leave unset.
 var watchVariables = []string{
-	"HEY_CHANGE", "HEY_AT", "HEY_BOX_ID", "HEY_BOX_KIND", "HEY_BOX_NAME", "HEY_POSTING_ID", "HEY_THREAD_ID", "HEY_NEW",
+	"HEY_CHANGE", "HEY_AT", "HEY_BOX_ID", "HEY_BOX_KIND", "HEY_BOX_NAME", "HEY_LABEL_ID", "HEY_LABEL_NAME", "HEY_POSTING_ID", "HEY_THREAD_ID", "HEY_NEW",
 	"HEY_CALENDAR_ID", "HEY_CALENDAR_NAME", "HEY_RECORDING_ID", "HEY_RECORDING_TYPE",
 }
 
@@ -994,6 +1117,11 @@ func (e watchEvent) environment() []string {
 			"HEY_BOX_ID="+strconv.FormatInt(e.Box.ID, 10),
 			"HEY_BOX_KIND="+e.Box.Kind,
 			"HEY_BOX_NAME="+e.Box.Name)
+	}
+	if e.Label != nil {
+		environment = append(environment,
+			"HEY_LABEL_ID="+strconv.FormatInt(e.Label.ID, 10),
+			"HEY_LABEL_NAME="+e.Label.Name)
 	}
 	if e.PostingID != 0 {
 		environment = append(environment, "HEY_POSTING_ID="+strconv.FormatInt(e.PostingID, 10))

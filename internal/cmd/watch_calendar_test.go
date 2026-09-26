@@ -31,6 +31,12 @@ func TestWatchingCalendars(t *testing.T) {
 	}
 
 	command = newWatchCommand()
+	command.labels = []string{"789"}
+	if command.watchingCalendars(changes) {
+		t.Error("--label scopes the watch to mail, so the calendars should be off")
+	}
+
+	command = newWatchCommand()
 	command.events = []string{"added", "new"}
 	changes, err = command.watchedChanges()
 	if err != nil {

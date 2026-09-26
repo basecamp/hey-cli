@@ -326,6 +326,7 @@ Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. M
 ```bash
 hey watch                               # follow every box and calendar, a line of JSON per change
 hey watch --box imbox --events added    # only new postings in the Imbox (calendars off)
+hey watch --label 789 --events new      # labeled new mail, or a known thread that gains the label (calendars off)
 hey watch --events recording_added,recording_updated,recording_deleted   # calendar changes only
 hey watch --box imbox --exit-on-first   # block until something lands, then exit
 hey watch --since 2026-08-18T09:00:00Z  # catch up from a time first, then follow
@@ -348,9 +349,14 @@ activity; a reply on a known thread is. `--events new` selects the new ones, alo
 union with `added`, `updated`, `deleted` and `resync` — the default is everything but `new`,
 and `new` alone leaves a `resync` out, so a script for new mail never runs on one. `--box`
 picks the boxes whose changes are reported; every box is followed regardless, so what is new
-is judged across all of them — a reply in The Feed and then a move into the Imbox is not. The
-one-liner above is what any desktop does with it; on Omarchy the bar plugin reads the same
-lines and sends one batched, replacing toast instead.
+is judged across all of them — a reply in The Feed and then a move into the Imbox is not.
+`--label` keeps only postings already filed under that label (id or name from
+`hey label list`), and each reported line includes `label` `{id,name}`. With `--events new`,
+that means new mail that already carries the label, and a thread this watch already saw
+without the label that later gains it when the feed returns an update with the folder. A
+late tag on a thread the watch has never seen still needs `--events updated` (or `updated`
+alongside `new`). The one-liner above is what any desktop does with it; on Omarchy the bar
+plugin reads the same lines and sends one batched, replacing toast instead.
 
 The calendars are followed too, by default. A changed event, todo, habit or journal entry
 is a `recording_added`, `recording_updated` or `recording_deleted` line naming its
@@ -359,8 +365,8 @@ calendar — `{"change":"recording_added","calendar":{"id":512,"name":"Household
 arriving, changing or leaving is `calendar_added`, `calendar_updated` or
 `calendar_deleted`. A calendar whose feed fell too far behind is skipped ahead and says so
 with `calendar_resync`, the way a box says `resync`. The email-specific flags switch the
-calendars off: `--box` scopes the watch to mail, and an `--events` list naming only mail
-changes does the same.
+calendars off: `--box` or `--label` scopes the watch to mail, and an `--events` list naming
+only mail changes does the same.
 
 A change can drive a command instead of being printed, and there's a choice to make
 between two behaviours — pass one or the other, not both. `--run-async` spawns the
@@ -369,8 +375,9 @@ overlap. `--run-sync` waits for each and runs them in order, so they never overl
 slow one delays the next.
 
 Both hand the JSON to the command on its stdin, and the same fields as `HEY_CHANGE`,
-`HEY_AT`, `HEY_BOX_ID`, `HEY_BOX_KIND`, `HEY_BOX_NAME`, `HEY_POSTING_ID` and
-`HEY_THREAD_ID`, with `HEY_NEW=1` for new mail and `HEY_NEW=0` otherwise — and on a
+`HEY_AT`, `HEY_BOX_ID`, `HEY_BOX_KIND`, `HEY_BOX_NAME`, `HEY_LABEL_ID`, `HEY_LABEL_NAME`,
+`HEY_POSTING_ID` and `HEY_THREAD_ID`, with `HEY_NEW=1` for new mail and `HEY_NEW=0`
+otherwise — and on a
 calendar line `HEY_CALENDAR_ID`, `HEY_CALENDAR_NAME`, `HEY_RECORDING_ID` and
 `HEY_RECORDING_TYPE` instead of the box and posting fields. Both also take over
 stdout, so the JSON isn't printed as well.

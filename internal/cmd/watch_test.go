@@ -22,6 +22,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/auth"
+	internalfolders "github.com/basecamp/hey-cli/internal/folders"
 )
 
 func TestWatchedChanges(t *testing.T) {
@@ -150,14 +151,16 @@ func newTestWatch(changes ...string) (*postingsWatch, *bytes.Buffer) {
 
 	out := &bytes.Buffer{}
 	return &postingsWatch{
-		boxes:      map[int64]*watchedBox{24088: {id: 24088, kind: "imbox", name: "Imbox", reported: true}},
-		changes:    watched,
-		newMail:    trackNewMail(watchStarted),
-		out:        out,
-		errOut:     &bytes.Buffer{},
-		connection: make(chan struct{}, 1),
-		unread:     map[int64]bool{},
-		running:    make(chan struct{}, asyncScriptLimit),
+		boxes:           map[int64]*watchedBox{24088: {id: 24088, kind: "imbox", name: "Imbox", reported: true}},
+		seenPostings:    map[int64]bool{},
+		labeledPostings: map[int64]bool{},
+		changes:         watched,
+		newMail:         trackNewMail(watchStarted),
+		out:             out,
+		errOut:          &bytes.Buffer{},
+		connection:      make(chan struct{}, 1),
+		unread:          map[int64]bool{},
+		running:         make(chan struct{}, asyncScriptLimit),
 	}, out
 }
 
@@ -1078,5 +1081,223 @@ func TestPermanentReadErrorRecognizesACLIAuthFailure(t *testing.T) {
 				t.Errorf("permanentReadError(%v) = %t, want %t", tt.err, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestResolveWatchLabel(t *testing.T) {
+	listed := []internalfolders.Label{
+		{ID: 789, Name: "agent-trades"},
+		{ID: 790, Name: "Receipts"},
+		{ID: 791, Name: "789"},
+	}
+
+	byID, err := resolveWatchLabel(listed, "789")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if byID.ID != 789 || byID.Name != "agent-trades" {
+		t.Errorf("by ID = %+v, want agent-trades 789 over a same-named label", byID)
+	}
+
+	byName, err := resolveWatchLabel(listed, "AGENT-TRADES")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if byName.ID != 789 {
+		t.Errorf("by name = %+v, want case-insensitive match on 789", byName)
+	}
+
+	byNumericName, err := resolveWatchLabel(listed, "790")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if byNumericName.ID != 790 {
+		t.Errorf("numeric with no name clash = %+v, want Receipts 790", byNumericName)
+	}
+
+	if _, err := resolveWatchLabel(listed, "missing"); err == nil {
+		t.Error("expected not found for an unknown label")
+	}
+	if _, err := resolveWatchLabel(listed, "  "); err == nil {
+		t.Error("expected usage error for a blank --label")
+	}
+}
+
+func TestLabeling(t *testing.T) {
+	labels := []watchEventLabel{{ID: 789, Name: "agent-trades"}, {ID: 12, Name: "Receipts"}}
+	if labeling(nil, labels) != nil {
+		t.Error("a missing posting cannot match a label")
+	}
+	if labeling(&generated.Posting{Id: 1}, labels) != nil {
+		t.Error("a posting with no folders should not match")
+	}
+
+	matched := labeling(&generated.Posting{Id: 1, Folders: []generated.Folder{{Id: 12, Name: "Receipts"}}}, labels)
+	if matched == nil || matched.ID != 12 || matched.Name != "Receipts" {
+		t.Errorf("matched = %+v, want Receipts", matched)
+	}
+}
+
+func TestWatchFiltersByLabel(t *testing.T) {
+	watch, out := newTestWatch("added", "updated", "deleted", "resync")
+	watch.labels = []watchEventLabel{{ID: 789, Name: "agent-trades"}}
+
+	unlabeled := &generated.Posting{Id: 9001, AppUrl: "https://app.hey.com/topics/5511"}
+	labeled := &generated.Posting{
+		Id:      9002,
+		AppUrl:  "https://app.hey.com/topics/5512",
+		Folders: []generated.Folder{{Id: 789, Name: "agent-trades"}},
+	}
+
+	if watch.report(context.Background(), watchEvent{Change: "added", At: "2026-08-18T09:14:22.031Z", PostingID: 9001}, watch.boxes[24088], unlabeled) {
+		t.Error("unlabeled mail should be dropped when --label is set")
+	}
+	if !watch.report(context.Background(), watchEvent{Change: "added", At: "2026-08-18T09:15:00.000Z", PostingID: 9002}, watch.boxes[24088], labeled) {
+		t.Fatal("mail already in the label should be reported")
+	}
+	if watch.report(context.Background(), watchEvent{Change: "deleted", PostingID: 9003}, watch.boxes[24088], nil) {
+		t.Error("a deletion carries no folders, so --label should leave it out")
+	}
+	if watch.report(context.Background(), watchEvent{Change: watchResync}, watch.boxes[24088], nil) {
+		t.Error("a resync carries no folders, so --label should leave it out")
+	}
+
+	var event watchEvent
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out.String())), &event); err != nil {
+		t.Fatalf("output isn't JSON: %q", out.String())
+	}
+	if event.PostingID != 9002 {
+		t.Errorf("event = %+v, want labeled posting 9002", event)
+	}
+	if event.Label == nil || event.Label.ID != 789 || event.Label.Name != "agent-trades" {
+		t.Errorf("label = %+v, want agent-trades on the JSON line", event.Label)
+	}
+}
+
+func TestWatchEventLabelEnvironment(t *testing.T) {
+	event := watchEvent{
+		Change: "added",
+		At:     "2026-08-18T09:14:22.031Z",
+		Label:  &watchEventLabel{ID: 789, Name: "agent-trades"},
+	}
+	environment := strings.Join(event.environment(), "\n")
+	for _, want := range []string{"HEY_LABEL_ID=789", "HEY_LABEL_NAME=agent-trades"} {
+		if !strings.Contains(environment, want) {
+			t.Errorf("environment = %q, want %s", environment, want)
+		}
+	}
+}
+
+func TestWatchLabelGainCountsAsNew(t *testing.T) {
+	watch, out := newTestWatch("new")
+	watch.labels = []watchEventLabel{{ID: 789, Name: "agent-trades"}}
+	box := watch.boxes[24088]
+	before := watchStarted.Add(-time.Hour)
+
+	unlabeled := generated.Posting{Id: 9001, AppUrl: "https://app.hey.com/topics/5511", ActiveAt: before}
+	first := watch.classify(box, unlabeled)
+	if *first {
+		t.Fatal("first sighting of old unlabeled mail should not be new")
+	}
+	if watch.report(context.Background(), watchEvent{Change: "updated", At: "2026-08-18T09:14:22.031Z", PostingID: 9001, New: first}, box, &unlabeled) {
+		t.Error("unlabeled mail should be dropped when --label is set")
+	}
+
+	labeled := generated.Posting{
+		Id:      9001,
+		AppUrl:  "https://app.hey.com/topics/5511",
+		ActiveAt: before,
+		Folders: []generated.Folder{{Id: 789, Name: "agent-trades"}},
+	}
+	gained := watch.classify(box, labeled)
+	if !*gained {
+		t.Fatal("a previously seen posting that gains the label should count as new")
+	}
+	if !watch.report(context.Background(), watchEvent{Change: "updated", At: "2026-08-18T09:15:00.000Z", PostingID: 9001, New: gained}, box, &labeled) {
+		t.Fatal("label gain should pass --events new")
+	}
+
+	var event watchEvent
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out.String())), &event); err != nil {
+		t.Fatalf("output isn't JSON: %q", out.String())
+	}
+	if event.PostingID != 9001 || event.New == nil || !*event.New {
+		t.Errorf("event = %+v, want posting 9001 with new true", event)
+	}
+}
+
+func TestWatchLabeledCatchUpNotNew(t *testing.T) {
+	watch, out := newTestWatch("new")
+	watch.labels = []watchEventLabel{{ID: 789, Name: "agent-trades"}}
+	box := watch.boxes[24088]
+	before := watchStarted.Add(-time.Hour)
+
+	oldLabeled := generated.Posting{
+		Id:       9002,
+		AppUrl:   "https://app.hey.com/topics/5512",
+		ActiveAt: before,
+		Folders:  []generated.Folder{{Id: 789, Name: "agent-trades"}},
+	}
+	isNew := watch.classify(box, oldLabeled)
+	if *isNew {
+		t.Fatal("first sighting of old already-labeled mail should not be new")
+	}
+	if watch.report(context.Background(), watchEvent{Change: "updated", At: "2026-08-18T09:14:22.031Z", PostingID: 9002, New: isNew}, box, &oldLabeled) {
+		t.Error("catch-up labeled mail should be dropped under --events new")
+	}
+	if out.Len() != 0 {
+		t.Errorf("wrote %q, want nothing for catch-up labeled mail", out.String())
+	}
+}
+
+func TestWatchLabelReAddCountsAsNew(t *testing.T) {
+	watch, out := newTestWatch("new")
+	watch.labels = []watchEventLabel{{ID: 789, Name: "agent-trades"}}
+	box := watch.boxes[24088]
+	before := watchStarted.Add(-time.Hour)
+
+	labeled := generated.Posting{
+		Id:       9003,
+		AppUrl:   "https://app.hey.com/topics/5513",
+		ActiveAt: before,
+		Folders:  []generated.Folder{{Id: 789, Name: "agent-trades"}},
+	}
+	first := watch.classify(box, labeled)
+	if *first {
+		t.Fatal("first sighting of old already-labeled mail should not be new")
+	}
+	if watch.report(context.Background(), watchEvent{Change: "updated", At: "2026-08-18T09:14:22.031Z", PostingID: 9003, New: first}, box, &labeled) {
+		t.Error("catch-up labeled mail should be dropped under --events new")
+	}
+
+	unlabeled := generated.Posting{Id: 9003, AppUrl: "https://app.hey.com/topics/5513", ActiveAt: before}
+	cleared := watch.classify(box, unlabeled)
+	if *cleared {
+		t.Fatal("removing the label should not count as new")
+	}
+	if watch.report(context.Background(), watchEvent{Change: "updated", At: "2026-08-18T09:15:00.000Z", PostingID: 9003, New: cleared}, box, &unlabeled) {
+		t.Error("unlabeled mail should be dropped when --label is set")
+	}
+
+	readded := generated.Posting{
+		Id:       9003,
+		AppUrl:   "https://app.hey.com/topics/5513",
+		ActiveAt: before,
+		Folders:  []generated.Folder{{Id: 789, Name: "agent-trades"}},
+	}
+	gained := watch.classify(box, readded)
+	if !*gained {
+		t.Fatal("re-adding the label after an unlabeled update should count as new")
+	}
+	if !watch.report(context.Background(), watchEvent{Change: "updated", At: "2026-08-18T09:16:00.000Z", PostingID: 9003, New: gained}, box, &readded) {
+		t.Fatal("label re-add should pass --events new")
+	}
+
+	var event watchEvent
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out.String())), &event); err != nil {
+		t.Fatalf("output isn't JSON: %q", out.String())
+	}
+	if event.PostingID != 9003 || event.New == nil || !*event.New {
+		t.Errorf("event = %+v, want posting 9003 with new true", event)
 	}
 }
