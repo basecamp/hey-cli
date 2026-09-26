@@ -284,14 +284,86 @@ func TestAFailedIdentityReadLeavesANewEventOnLocal(t *testing.T) {
 	v.vc.sdk = hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"},
 		hey.WithMaxRetries(0))
 	v.calendars = eventFormCalendars()
-	v.accountZone = indianapolis // what an earlier read served
+	v.accountZone = indianapolis // what an earlier visit was told
 
-	v.Update(v.fetchIdentity()())
+	// Entering the calendar starts a fresh read, and what an earlier visit was told does not
+	// stand in for it while it is on its way, nor after it fails.
+	v.Init()
 	v.HandleContentKey(keyPress("a"))
 	if v.eventForm == nil {
 		t.Fatal("a did not open the event form")
 	}
+	v.Update(v.fetchIdentity()())
 	if v.eventForm.starts.zoneName() != "" || v.eventForm.ends.zoneName() != "" {
 		t.Errorf("zones = %q → %q, want Local", v.eventForm.starts.zoneName(), v.eventForm.ends.zoneName())
+	}
+}
+
+// A new event opened before the identity read lands takes the account's zone when it does, on
+// the next whole hour of that clock — unless the reader has already touched when it is.
+func TestANewEventTakesTheAccountZoneWhenTheIdentityLandsLate(t *testing.T) {
+	v, _ := calendarWithEventServer(t)
+	v.Init()
+	identity := v.fetchIdentity()()
+
+	v.HandleContentKey(keyPress("a"))
+	if v.eventForm == nil || v.eventForm.starts.zoneName() != "" {
+		t.Fatal("a form opened before the read did not open on Local")
+	}
+	v.eventForm.title.SetValue("Design review")
+	v.Update(identity)
+
+	want := newEventStart(v.day(), mustZone(t, indianapolis))
+	form := v.eventForm
+	if form.starts.zoneName() != indianapolis || form.ends.zoneName() != indianapolis {
+		t.Errorf("zones = %q → %q, want the account's", form.starts.zoneName(), form.ends.zoneName())
+	}
+	if form.starts.date() != want.Format("2006-01-02") || form.starts.clock() != want.Format("15:04") {
+		t.Errorf("start = %s %s, want %s", form.starts.date(), form.starts.clock(), want)
+	}
+	if got := form.title.Value(); got != "Design review" {
+		t.Errorf("title = %q, want what the reader typed kept", got)
+	}
+
+	// A reader who has changed a time has answered the question; the read does not move it.
+	v.eventForm = nil
+	v.Init()
+	v.HandleContentKey(keyPress("a"))
+	v.eventForm.starts.timeInput.SetValue("15:00")
+	v.Update(identity)
+	if v.eventForm.starts.zoneName() != "" || v.eventForm.starts.clock() != "15:00" {
+		t.Errorf("start = %s %q, want 15:00 left on Local", v.eventForm.starts.clock(), v.eventForm.starts.zoneName())
+	}
+}
+
+// An hour the clocks skip is not offered: 01:41 on the morning New York springs forward opens
+// on 03:00, the next whole hour that exists, where Go would put 02:00 back at 01:00.
+func TestNewEventFormSkipsTheHourTheClocksSkip(t *testing.T) {
+	newYork := mustZone(t, "America/New_York")
+	on := time.Date(2026, 3, 8, 1, 41, 0, 0, newYork)
+	form := newAccountZoneForm(eventFormCreate, Recording{}, on, "America/New_York")
+
+	values := form.values()
+	if values.StartsAt != "2026-03-08" || values.StartTime != "03:00" || values.EndTime != "04:00" {
+		t.Errorf("times = %s %s → %s, want 03:00 → 04:00", values.StartsAt, values.StartTime, values.EndTime)
+	}
+}
+
+// Times are ordered where HEY will place them. HEY moves 02:30 on the morning New York springs
+// forward on to 03:30, so an end at 03:00 is before it — Go alone would read 02:30 as 01:30 and
+// let it through, and HEY would refuse the write.
+func TestEventFormOrdersASkippedTimeAsHEYPlacesIt(t *testing.T) {
+	on := time.Date(2026, 3, 8, 1, 0, 0, 0, mustZone(t, "America/New_York"))
+	form := newAccountZoneForm(eventFormCreate, Recording{}, on, "America/New_York")
+	form.title.SetValue("Night shift handover")
+	form.starts.timeInput.SetValue("02:30")
+	form.ends.timeInput.SetValue("03:00")
+
+	if got := form.validate(); got != "The end is before the start" {
+		t.Errorf("validate = %q, want the end refused as before the start", got)
+	}
+	form.ends.timeInput.SetValue("03:30")
+	if got := form.validate(); got != "" {
+		t.Errorf("validate = %q, want an end at the start HEY places taken", got)
 	}
 }

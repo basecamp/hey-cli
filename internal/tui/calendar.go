@@ -397,7 +397,8 @@ type calendarView struct {
 	// accountZone is the zone HEY's web app reads a typed time in, as the identity served it
 	// when this section was last entered, and what a new event's times are written in. It is
 	// read with the rest of the identity rather than kept anywhere longer-lived, so a zone
-	// changed on the web is picked up the next time the calendar is opened.
+	// changed on the web is picked up the next time the calendar is opened, and it is empty
+	// until that read answers.
 	accountZone string
 
 	// now is the clock the calendar anchors on. It is read on every fetch and
@@ -528,6 +529,10 @@ func newCalendarView(vc *viewContext) *calendarView {
 }
 
 func (v *calendarView) Init() tea.Cmd {
+	// The account's zone is this read's answer rather than the last one's, so a zone changed
+	// on the web, or a read that fails, is never covered by what an earlier visit was told. A
+	// form opened before the answer lands opens on Local and takes the zone when it does.
+	v.accountZone = ""
 	cmds := []tea.Cmd{v.fetchIdentity(), v.requestOngoingTrack(), v.followClock()}
 	if len(v.calendars) == 0 {
 		cmds = append(cmds, v.requestCalendars())
@@ -562,6 +567,9 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.firstWeekDay = msg.firstWeekDay
 		v.use24Hour = msg.use24Hour
 		v.accountZone = msg.timeZone
+		if v.eventForm != nil {
+			v.eventForm.adoptAccountZone(msg.timeZone)
+		}
 		v.rebuildView()
 		return nil, true
 

@@ -13,6 +13,8 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/basecamp/hey-cli/internal/timezone"
 )
 
 // A moment on a form is three questions that only make sense together — which day, what
@@ -69,9 +71,14 @@ func newDateTimePicker(at time.Time, allDay bool) *dateTimePicker {
 		zone:       localZoneLabel,
 		choices:    zoneChoices(),
 	}
-	picker.dateInput.SetValue(at.Format("2006-01-02"))
-	picker.timeInput.SetValue(at.Format("15:04"))
+	picker.setMoment(at)
 	return picker
+}
+
+// setMoment puts a date and a time of day on the widget, read on at's own clock.
+func (p *dateTimePicker) setMoment(at time.Time) {
+	p.dateInput.SetValue(at.Format("2006-01-02"))
+	p.timeInput.SetValue(at.Format("15:04"))
 }
 
 func dateTimeInput(placeholder string, width int) textinput.Model {
@@ -128,21 +135,30 @@ func (p *dateTimePicker) zoneName() string {
 
 // moment is the date and time read as belonging to the zone chosen, which is what a form
 // comparing two of these wants.
+//
+// A named zone is read the way HEY will read it, since HEY is sent the clock and places it
+// itself: a time the clocks skip moves on to one that exists, and a time they repeat is the
+// one HEY takes. Local is read the way the form converts it, which is what HEY is sent.
 func (p *dateTimePicker) moment() (time.Time, bool) {
-	in := time.Local
-	if name := p.zoneName(); name != "" {
-		zone, ok := loadEventZone(name)
-		if !ok {
-			return time.Time{}, false
-		}
-		in = zone
-	}
 	if p.allDay {
-		at, err := time.ParseInLocation("2006-01-02", p.date(), in)
+		at, err := time.ParseInLocation("2006-01-02", p.date(), time.Local)
 		return at, err == nil
 	}
-	at, err := time.ParseInLocation("2006-01-02 15:04", p.date()+" "+p.clock(), in)
-	return at, err == nil
+	name := p.zoneName()
+	if name == "" {
+		at, err := time.ParseInLocation("2006-01-02 15:04", p.date()+" "+p.clock(), time.Local)
+		return at, err == nil
+	}
+	zone, ok := loadEventZone(name)
+	if !ok {
+		return time.Time{}, false
+	}
+	day, dayErr := time.Parse("2006-01-02", p.date())
+	clock, clockErr := time.Parse("15:04", p.clock())
+	if dayErr != nil || clockErr != nil {
+		return time.Time{}, false
+	}
+	return timezone.WallClock(day, clock, zone), true
 }
 
 // problem says the first thing wrong with what the reader filled in, and nothing when the

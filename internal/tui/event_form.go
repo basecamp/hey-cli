@@ -96,6 +96,12 @@ type eventForm struct {
 	starts *dateTimePicker
 	ends   *dateTimePicker
 
+	// on is the day the form was opened on, and offered is when it offered the event, as
+	// schedule() reads it: together they are what lets a new event take the account's zone
+	// when the identity read naming it lands after the form opened — see adoptAccountZone.
+	on      time.Time
+	offered string
+
 	// chosenReminders runs alongside eventReminders, and notify is the one the arrows are on.
 	chosenReminders []bool
 	notify          int
@@ -203,7 +209,39 @@ func newEventForm(mode eventFormMode, event Recording, on time.Time, calendars [
 	form.ends = newDateTimePicker(inZoneNamed(ends, event.EndsAtZone), form.allDay)
 	form.starts.setZoneName(startZone)
 	form.ends.setZoneName(endZone)
+	form.on = on
+	form.offered = form.schedule()
 	return form
+}
+
+// adoptAccountZone gives a new event the account's zone when the identity read that names it
+// lands after the form opened on Local, offering the next whole hour on that clock instead.
+// It does so only while the form still offers what it opened with: a reader who has touched
+// the day, a time or a zone has answered the question already, and moving the times out from
+// under them would be worse than Local. A zone that cannot be used changes nothing.
+func (f *eventForm) adoptAccountZone(name string) {
+	if f.mode != eventFormCreate || f.schedule() != f.offered {
+		return
+	}
+	account, zone := usableZone(name)
+	if zone == nil {
+		return
+	}
+	starts := newEventStart(f.on, zone)
+	f.starts.setMoment(starts)
+	f.starts.setZoneName(account)
+	f.ends.setMoment(starts.Add(time.Hour).In(zone))
+	f.ends.setZoneName(account)
+	f.offered = f.schedule()
+}
+
+// schedule is everything the form says about when the event is, as one string to compare.
+func (f *eventForm) schedule() string {
+	return strings.Join([]string{
+		strconv.FormatBool(f.allDay),
+		f.starts.date(), f.starts.timeInput.Value(), f.starts.zone,
+		f.ends.date(), f.ends.timeInput.Value(), f.ends.zone,
+	}, "\x00")
 }
 
 // usableZone is the account's zone when HEY can look it up by that name, and nothing when it
@@ -353,13 +391,19 @@ func zoneMatchesLocal(name string) bool {
 // looking at, at the next whole hour on the clock the event is written on, so a form opened at
 // 09:41 offers 10:00 rather than 09:41. The day is the one on screen even where that clock is
 // already on another — the reader chose the day by looking at it.
+//
+// The hour is placed as HEY will place it, so an hour the clocks skip opens on the first one
+// after it: 01:41 on the morning New York springs forward offers 03:00, not an 02:00 that Go
+// would put back at 01:00, before the form was opened.
 func newEventStart(on time.Time, zone *time.Location) time.Time {
 	clock := on.In(zone)
 	hour := clock.Hour()
 	if clock.Minute() != 0 || clock.Second() != 0 || clock.Nanosecond() != 0 {
 		hour++
 	}
-	return time.Date(on.Year(), on.Month(), on.Day(), hour, 0, 0, 0, zone)
+	// Written in UTC first so that hour 24 rolls over to the next day and nothing else moves.
+	wall := time.Date(on.Year(), on.Month(), on.Day(), hour, 0, 0, 0, time.UTC)
+	return timezone.WallClock(wall, wall, zone).In(zone)
 }
 
 // indexOfCalendar finds the calendar an event is filed on. The id is the answer where the
