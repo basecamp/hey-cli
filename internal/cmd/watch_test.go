@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -480,16 +481,20 @@ func TestWatchSkipsAheadToHEYsClock(t *testing.T) {
 	}
 }
 
-// cancelledAtTheClock is HEY as a skip-ahead meets it when the watch is interrupted
-// while it reads the clock: the feed is too far behind, the box and calendar lists
-// answer, and the clock request is where the interrupt lands.
-func cancelledAtTheClock(t *testing.T, cancel context.CancelFunc) {
+// skipHEY is HEY as a skip-ahead meets it: the feed too far behind, and the box list,
+// the calendar list and the clock answering — save the reads fail answers itself, which
+// it says it did by returning true.
+func skipHEY(t *testing.T, fail func(http.ResponseWriter, *http.Request) bool) {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if fail(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/identity.json":
-			cancel()
-			<-r.Context().Done()
+			w.Header().Set("Date", skipDate)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":1}`))
 		case "/boxes.json":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[{"id":24088,"kind":"imbox","name":"Imbox","posting_changes_url":"/boxes/24088/postings/changes.json?since=2026-08-21T11%3A02%3A00.518496Z&v=2"}]`))
@@ -506,41 +511,114 @@ func cancelledAtTheClock(t *testing.T, cancel context.CancelFunc) {
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
 }
 
-// An interrupt or --timeout while a skip-ahead reads HEY's clock is how a watch is
-// meant to end, not a failed read: nothing is warned about and no retry is armed.
+// behindWatch is a watch whose Imbox and Household calendar have both fallen too far
+// behind to follow.
+func behindWatch(t *testing.T) (*postingsWatch, *bytes.Buffer, *bytes.Buffer) {
+	t.Helper()
+	watch, out := newTestWatch("added", "resync", "calendar_resync")
+	errOut := &bytes.Buffer{}
+	watch.errOut = errOut
+	watch.boxes[24088].cursor.Since = "2026-08-01T00:00:00.000Z"
+	watch.calendar = newTestCalendarsWatch(t, &watchedCalendar{id: 512, name: "Household", cursor: hey.CalendarChangesCursor{Since: "2026-08-01T00:00:00.000Z", Version: "1"}})
+	return watch, out, errOut
+}
+
+// readBehind reads the box or the calendar behindWatch left behind.
+func readBehind(ctx context.Context, watch *postingsWatch, feed string) error {
+	if feed == "box" {
+		return watch.readBox(ctx, watch.boxes[24088])
+	}
+	return watch.readCalendar(ctx, watch.calendar.calendars[512])
+}
+
+// listOf is the list a skip-ahead reads for a feed.
+func listOf(feed string) string {
+	if feed == "box" {
+		return "/boxes.json"
+	}
+	return "/calendars.json"
+}
+
+// An interrupt or --timeout while a skip-ahead reads its list or HEY's clock is how a
+// watch is meant to end, not a failed read: nothing is warned about, no retry is armed,
+// and nothing says it skipped.
 func TestWatchSkipAheadEndsQuietlyWhenInterrupted(t *testing.T) {
 	for _, feed := range []string{"box", "calendar"} {
+		for _, at := range []string{"/identity.json", listOf(feed)} {
+			t.Run(feed+at, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				skipHEY(t, func(w http.ResponseWriter, r *http.Request) bool {
+					if r.URL.Path != at {
+						return false
+					}
+					cancel()
+					<-r.Context().Done()
+					return true
+				})
+				watch, out, errOut := behindWatch(t)
+
+				if err := readBehind(ctx, watch, feed); err != nil {
+					t.Fatalf("read = %v, want an interrupted skip-ahead to end quietly", err)
+				}
+				if errOut.Len() != 0 {
+					t.Errorf("stderr = %q, want nothing for an interrupt", errOut.String())
+				}
+				if watch.retry != nil || len(watch.unread) != 0 || len(watch.calendar.unread) != 0 {
+					t.Error("an interrupted skip-ahead should not arm a retry")
+				}
+				if out.Len() != 0 {
+					t.Errorf("wrote %q, want no resync for a skip that did not happen", out.String())
+				}
+				if watch.boxes[24088].cursor.Since != "2026-08-01T00:00:00.000Z" || watch.calendar.calendars[512].cursor.Since != "2026-08-01T00:00:00.000Z" {
+					t.Error("an interrupted skip-ahead should leave the cursor where it was")
+				}
+			})
+		}
+	}
+}
+
+// A list that fails to read for a while is a reason to try the skip again, not to stop
+// watching: the watch warns, keeps the cursor, retries on the backoff, and says it
+// skipped only once it has.
+func TestWatchSkipAheadRetriesAListThatFailed(t *testing.T) {
+	for _, feed := range []string{"box", "calendar"} {
 		t.Run(feed, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			cancelledAtTheClock(t, cancel)
+			var down atomic.Bool
+			down.Store(true)
+			skipHEY(t, func(w http.ResponseWriter, r *http.Request) bool {
+				if r.URL.Path != listOf(feed) || !down.Load() {
+					return false
+				}
+				http.Error(w, "down for maintenance", http.StatusInternalServerError)
+				return true
+			})
+			watch, out, errOut := behindWatch(t)
 
-			watch, out := newTestWatch("added", "resync", "calendar_resync")
-			errOut := &bytes.Buffer{}
-			watch.errOut = errOut
-			watch.boxes[24088].cursor.Since = "2026-08-01T00:00:00.000Z"
-			watch.calendar = newTestCalendarsWatch(t, &watchedCalendar{id: 512, name: "Household", cursor: hey.CalendarChangesCursor{Since: "2026-08-01T00:00:00.000Z", Version: "1"}})
-
-			var err error
-			if feed == "box" {
-				err = watch.readBox(ctx, watch.boxes[24088])
-			} else {
-				err = watch.readCalendar(ctx, watch.calendar.calendars[512])
+			if err := readBehind(context.Background(), watch, feed); err != nil {
+				t.Fatalf("read = %v, want a failed list read retried, not the watch ended", err)
 			}
-			if err != nil {
-				t.Fatalf("read = %v, want an interrupted skip-ahead to end quietly", err)
+			if !strings.Contains(errOut.String(), "warning: could not skip") || strings.Contains(errOut.String(), "notice") {
+				t.Errorf("stderr = %q, want a warning and no word of a skip that has not happened", errOut.String())
 			}
-			if strings.Contains(errOut.String(), "warning") {
-				t.Errorf("stderr = %q, want no warning for an interrupt", errOut.String())
-			}
-			if watch.retry != nil || len(watch.unread) != 0 || len(watch.calendar.unread) != 0 {
-				t.Error("an interrupted skip-ahead should not arm a retry")
+			if watch.retry == nil || len(watch.unread)+len(watch.calendar.unread) != 1 {
+				t.Fatal("a failed list read should be retried on the backoff")
 			}
 			if out.Len() != 0 {
-				t.Errorf("wrote %q, want no resync for a skip that did not happen", out.String())
+				t.Errorf("wrote %q, want no resync before the skip", out.String())
 			}
-			if watch.boxes[24088].cursor.Since != "2026-08-01T00:00:00.000Z" || watch.calendar.calendars[512].cursor.Since != "2026-08-01T00:00:00.000Z" {
-				t.Error("an interrupted skip-ahead should leave the cursor where it was")
+
+			// The list is back: the retry skips, and says so once.
+			down.Store(false)
+			errOut.Reset()
+			if err := watch.retryUnread(context.Background()); err != nil {
+				t.Fatalf("retry = %v", err)
+			}
+			if lines := watchLines(t, out); len(lines) != 1 || !strings.HasSuffix(lines[0]["change"].(string), "resync") {
+				t.Errorf("wrote %v, want one resync once the skip happened", lines)
+			}
+			if !strings.Contains(errOut.String(), "notice: too much changed") {
+				t.Errorf("stderr = %q, want the skip announced once it happened", errOut.String())
 			}
 		})
 	}

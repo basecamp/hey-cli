@@ -326,12 +326,12 @@ func (w *postingsWatch) readCalendar(ctx context.Context, calendar *watchedCalen
 	w.settleBackoff()
 
 	if changes.FullSyncRequired {
-		fmt.Fprintf(w.errOut, "notice: too much changed in %s to follow one change at a time — skipping ahead, re-read the calendar\n", calendar.name)
 		skippedTo, skipped, err := w.skipCalendarAhead(ctx, calendar)
 		if err != nil {
 			return err
 		}
 		if skipped {
+			fmt.Fprintf(w.errOut, "notice: too much changed in %s to follow one change at a time — skipped ahead, re-read the calendar\n", calendar.name)
 			w.reportCalendar(ctx, watchEvent{Change: watchCalendarResync, At: watchTime(skippedTo)}, calendar.id, calendar.name)
 		}
 		return nil
@@ -381,13 +381,17 @@ func (w *postingsWatch) reportRecordings(ctx context.Context, calendar *watchedC
 // feed reports its deletion in its own time. A clock that cannot be read leaves the
 // cursor where it was, to be tried again on the retry's backoff.
 func (w *postingsWatch) skipCalendarAhead(ctx context.Context, calendar *watchedCalendar) (time.Time, bool, error) {
+	later := func() {
+		w.calendar.unread[calendar.id] = true
+		w.armRetry()
+	}
 	client, err := newUncachedSDKClient(ctx)
 	if err != nil {
-		return time.Time{}, false, apierr.FromSDK(err)
+		return time.Time{}, false, w.skipFailed(ctx, calendar.name, err, later)
 	}
 	list, err := client.Calendars().ListWithChanges(ctx)
 	if err != nil {
-		return time.Time{}, false, apierr.FromSDK(err)
+		return time.Time{}, false, w.skipFailed(ctx, calendar.name, err, later)
 	}
 	if list == nil {
 		return time.Time{}, false, apierr.ErrAPI(0, "could not list calendars")
@@ -404,17 +408,7 @@ func (w *postingsWatch) skipCalendarAhead(ctx context.Context, calendar *watched
 
 		now, err := serverNowAnswered(ctx)
 		if err != nil {
-			switch {
-			case ctx.Err() != nil:
-				return time.Time{}, false, nil //nolint:nilerr // an interrupt or a --timeout is how a watch is meant to end
-			case permanentReadError(err):
-				return time.Time{}, false, err
-			default:
-				fmt.Fprintf(w.errOut, "warning: could not skip %s ahead: %v\n", calendar.name, err)
-				w.calendar.unread[calendar.id] = true
-				w.armRetry()
-				return time.Time{}, false, nil
-			}
+			return time.Time{}, false, w.skipFailed(ctx, calendar.name, err, later)
 		}
 		cursor.Since = watchStartSince(now)
 		calendar.cursor = cursor

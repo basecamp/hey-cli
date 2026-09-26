@@ -665,13 +665,14 @@ func (w *postingsWatch) readBox(ctx context.Context, box *watchedBox) error {
 	w.wasRead(box)
 
 	if changes.FullSyncRequired {
-		fmt.Fprintf(w.errOut, "notice: too much changed in %s to follow one change at a time — skipping ahead, read the box with `hey box view %s`\n", box.name, box.kind)
 		skippedTo, skipped, err := w.skipAhead(ctx, box)
 		if err != nil {
 			return err
 		}
-		// A resync says the box is worth re-reading; a box that is gone is not.
+		// A resync says the box is worth re-reading; a box that is gone is not, and a
+		// skip that has not happened yet — its retry is on the backoff — says nothing.
 		if skipped {
+			fmt.Fprintf(w.errOut, "notice: too much changed in %s to follow one change at a time — skipped ahead, read the box with `hey box view %s`\n", box.name, box.kind)
 			w.report(ctx, watchEvent{Change: watchResync, At: watchTime(skippedTo)}, box, nil)
 		}
 		return nil
@@ -775,13 +776,14 @@ func (w *postingsWatch) settleBackoff() {
 // A clock that cannot be read leaves the cursor where it was, to be tried again on the
 // retry's backoff like any read that failed.
 func (w *postingsWatch) skipAhead(ctx context.Context, box *watchedBox) (time.Time, bool, error) {
+	later := func() { w.readAgainLater(box) }
 	client, err := newUncachedSDKClient(ctx)
 	if err != nil {
-		return time.Time{}, false, apierr.FromSDK(err)
+		return time.Time{}, false, w.skipFailed(ctx, box.name, err, later)
 	}
 	listed, err := client.Boxes().List(ctx)
 	if err != nil {
-		return time.Time{}, false, apierr.FromSDK(err)
+		return time.Time{}, false, w.skipFailed(ctx, box.name, err, later)
 	}
 	if listed == nil {
 		return time.Time{}, false, apierr.ErrAPI(0, "could not list boxes")
@@ -801,16 +803,7 @@ func (w *postingsWatch) skipAhead(ctx context.Context, box *watchedBox) (time.Ti
 
 		now, err := serverNowAnswered(ctx)
 		if err != nil {
-			switch {
-			case ctx.Err() != nil:
-				return time.Time{}, false, nil //nolint:nilerr // an interrupt or a --timeout is how a watch is meant to end
-			case permanentReadError(err):
-				return time.Time{}, false, err
-			default:
-				fmt.Fprintf(w.errOut, "warning: could not skip %s ahead: %v\n", box.name, err)
-				w.readAgainLater(box)
-				return time.Time{}, false, nil
-			}
+			return time.Time{}, false, w.skipFailed(ctx, box.name, err, later)
 		}
 		cursor.Since = watchStartSince(now)
 		box.cursor = cursor
@@ -819,6 +812,24 @@ func (w *postingsWatch) skipAhead(ctx context.Context, box *watchedBox) (time.Ti
 	}
 
 	return time.Time{}, false, w.stopWatching(box)
+}
+
+// skipFailed says what a skip-ahead's failed read — its client, its list or HEY's
+// clock — comes to: nothing, when the watch is being interrupted or timed out, which is
+// how a watch is meant to end; the error, when waiting will not help; and otherwise a
+// warning and the retry's backoff (later), with the cursor where it was. A 500 on the
+// list is a reason to try again, not to stop watching.
+func (w *postingsWatch) skipFailed(ctx context.Context, name string, err error, later func()) error {
+	switch {
+	case ctx.Err() != nil:
+		return nil //nolint:nilerr // an interrupt or a --timeout is how a watch is meant to end
+	case permanentReadError(err):
+		return apierr.FromSDK(err)
+	default:
+		fmt.Fprintf(w.errOut, "warning: could not skip %s ahead: %v\n", name, err)
+		later()
+		return nil
+	}
 }
 
 // stopWatching drops a box the watch can't follow any longer. When it was the last one
