@@ -107,6 +107,14 @@ type eventForm struct {
 	// identity read naming it lands after the form opened.
 	on            time.Time
 	allDayArrived bool
+	// allDaySwitched says the reader has switched All day, which answers what the form's days
+	// are as surely as typing one does.
+	allDaySwitched bool
+
+	// movesAccepted is the refusal a save was last met with when it would have moved an end
+	// HEY cannot be sent as it is; ctrl+s again, with nothing pressed in between, saves it
+	// where HEY reads it. See handleKey.
+	movesAccepted string
 
 	// chosenReminders runs alongside eventReminders, and notify is the one the arrows are on.
 	chosenReminders []bool
@@ -252,11 +260,11 @@ func (f *eventForm) offerAnHour() {
 // lands after the form opened on Local. A new event takes it and is offered the next whole
 // hour on that clock; an all-day event being edited takes it for the times it would be given
 // if it stopped being all day, as it would have had the read been first. Neither happens once
-// the reader has touched a day, a time or a zone — choosing Local included — since they have
-// answered the question already and moving the times out from under them would be worse than
-// Local. A zone that cannot be used changes nothing.
+// the reader has edited a date or a time, chosen a zone — Local included — or switched All
+// day, since they have answered the question already and moving the days or times out from
+// under them would be worse than Local. A zone that cannot be used changes nothing.
 func (f *eventForm) adoptAccountZone(name string) {
-	if f.starts.changed() || f.ends.changed() || (f.mode == eventFormEdit && !f.allDayArrived) {
+	if f.starts.answered() || f.ends.answered() || f.allDaySwitched || (f.mode == eventFormEdit && !f.allDayArrived) {
 		return
 	}
 	account, zone := usableZone(name)
@@ -701,9 +709,9 @@ func (f *eventForm) wireEnds() (starts, ends wireEnd) {
 // are the honest answer.
 //
 // The moment meant is the one on the widget, read as HEY reads a clock time — except on an
-// edit, where an end the reader has not touched means the instant the event already has. That
-// is what validate holds the wire to: a kept end HEY would place somewhere else is refused
-// rather than moved.
+// edit, where an end still showing what it opened with means the instant the event already
+// has, whatever the reader did on the way back to it. That is what validate holds the wire
+// to: a kept end HEY would place somewhere else is refused rather than moved.
 //
 // HEY keeps a zone for both ends of an event or for neither, and a write naming one zone is
 // given it for both. So a moment left on Local beside one with a zone — a new event whose end
@@ -711,7 +719,7 @@ func (f *eventForm) wireEnds() (starts, ends wireEnd) {
 // clock. It is written on that clock instead.
 func wireMoment(p *dateTimePicker, had time.Time, other string) wireEnd {
 	meant, known := p.moment()
-	if !had.IsZero() && !p.changed() {
+	if !had.IsZero() && !p.moved() {
 		meant, known = had, true
 	}
 	if name := p.zoneName(); name != "" {
@@ -740,21 +748,20 @@ func (w wireEnd) placed() (time.Time, bool) {
 	return timezone.Placed(w.date, w.clock, loc)
 }
 
-// moveProblem is the refusal for an end HEY would place away from the moment meant: one with
-// seconds, which HEY is never sent, or one at the second of two moments a clock time names as
-// the clocks go back, where HEY takes the first. Retyping the time is the reader saying that
-// HEY's reading of it is the one they want.
+// moveProblem is the refusal for an end HEY would place away from the moment meant, saying how
+// far and what to do: choose another time, or save again to take HEY's reading of this one.
 func (w wireEnd) moveProblem(label string, placed time.Time) string {
+	const choice = "Choose another time, or press ctrl+s again to save it there"
 	moved := timezone.MovedBy(w.meant, placed)
 	if !w.meant.Equal(w.meant.Truncate(time.Minute)) {
-		return fmt.Sprintf("%s — HEY is sent whole minutes, so saving would move it %s. Retype the time", label, moved)
+		return fmt.Sprintf("%s — HEY is sent whole minutes, so saving would move it %s. %s", label, moved, choice)
 	}
 	zone := "UTC"
 	if w.zone != "" {
 		zone = terminal.SanitizeLine(w.zone)
 	}
-	return fmt.Sprintf("%s — HEY reads %s %s %s as another moment, so saving would move it %s. Retype the time or choose another",
-		label, w.date, w.clock, zone, moved)
+	return fmt.Sprintf("%s — HEY reads %s %s %s as another moment, so saving would move it %s. %s",
+		label, w.date, w.clock, zone, moved, choice)
 }
 
 // trixHTML is what the reader typed as the rich text HEY stores an event's notes as: escaped,
@@ -843,23 +850,39 @@ func (f *eventForm) validate() string {
 		return f.detailProblem()
 	}
 
-	// What is checked is what HEY is sent, read the way HEY reads it: an end it would place
-	// away from the moment meant is refused rather than moved, and the order is HEY's order.
-	// Eight in the morning in Auckland is the evening before in Madrid, so the two clocks on
-	// their own do not say which comes first — the placed moments do.
+	// What is checked is what HEY is sent, read the way HEY reads it, so the order is HEY's
+	// order. Eight in the morning in Auckland is the evening before in Madrid, so the two
+	// clocks on their own do not say which comes first — the placed moments do.
 	starts, ends := f.wireEnds()
 	startsAt, startsOK := starts.placed()
 	endsAt, endsOK := ends.placed()
-	if startsOK && starts.known && !startsAt.Equal(starts.meant) {
-		return starts.moveProblem("Starts", startsAt)
-	}
-	if endsOK && ends.known && !endsAt.Equal(ends.meant) {
-		return ends.moveProblem("Ends", endsAt)
-	}
 	if startsOK && endsOK && endsAt.Before(startsAt) {
 		return "The end is before the start"
 	}
-	return f.detailProblem()
+	if problem := f.detailProblem(); problem != "" {
+		return problem
+	}
+	// Last, because it is the one refusal a reader can overrule: everything else has to be
+	// right before a second ctrl+s saves an end where HEY reads it.
+	return f.moveProblem()
+}
+
+// moveProblem refuses an end HEY would place away from the moment the form means by it: a
+// kept end with seconds, which HEY is never sent, or one kept at the second of two moments a
+// clock time names as the clocks go back, where HEY takes the first. It is nothing for an
+// all-day event, whose ends are dates.
+func (f *eventForm) moveProblem() string {
+	if f.allDay {
+		return ""
+	}
+	starts, ends := f.wireEnds()
+	if at, ok := starts.placed(); ok && starts.known && !at.Equal(starts.meant) {
+		return starts.moveProblem("Starts", at)
+	}
+	if at, ok := ends.placed(); ok && ends.known && !at.Equal(ends.meant) {
+		return ends.moveProblem("Ends", at)
+	}
+	return ""
 }
 
 // detailProblem is the first thing wrong behind the More row. It is asked separately so that a
@@ -909,6 +932,9 @@ func (f *eventForm) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	if f.saving {
 		return nil, false
 	}
+	if msg.String() != "ctrl+s" {
+		f.movesAccepted = ""
+	}
 	if f.capturesKeys() {
 		return f.picker(f.focus).handleKey(msg), false
 	}
@@ -922,11 +948,20 @@ func (f *eventForm) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	case msg.Key().Code == tea.KeyEnter && f.focus != eventFieldNotes:
 		return f.step(1), false
 	case msg.String() == "ctrl+s":
-		if problem := f.validate(); problem != "" {
+		// A kept end HEY would place elsewhere is refused once, saying where; the same save
+		// asked for again, with nothing touched in between, is the reader choosing that. The
+		// form has no other way to say it, since typing the same clock back is not a change.
+		problem := f.validate()
+		accepted := problem != "" && problem == f.movesAccepted
+		f.movesAccepted = ""
+		if problem != "" && !accepted {
 			f.status = problem
 			f.isError = true
 			if f.detailProblem() != "" {
 				f.revealed = true
+			}
+			if problem == f.moveProblem() {
+				f.movesAccepted = problem
 			}
 			return nil, false
 		}
@@ -946,6 +981,7 @@ func (f *eventForm) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	case eventFieldAllDay:
 		if isSpace(msg) {
 			f.setAllDay(!f.allDay)
+			f.allDaySwitched = true
 		}
 	case eventFieldMore:
 		if isSpace(msg) {

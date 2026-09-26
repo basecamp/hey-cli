@@ -64,9 +64,10 @@ type dateTimePicker struct {
 	// otherwise have to move the whole process's time.Local to put the widget somewhere.
 	local *time.Location
 
-	// touched says the reader has answered any of the widget's questions — typed in the date
-	// or the time, stepped the date, or chosen a zone, even the one already chosen — and
-	// opened is what it showed before they did. Between them they are what changed() asks.
+	// opened is what the widget showed before the reader had a hand in it — the date, the
+	// time and the zone — and touched says they have had one: typed in the date or the time,
+	// stepped the date, or chosen a zone, even the one already chosen. They answer two
+	// different questions; see moved() and answered().
 	touched bool
 	opened  string
 }
@@ -96,9 +97,18 @@ func (p *dateTimePicker) markOpened() {
 	p.opened = p.shown()
 }
 
-// changed is whether the reader has had a hand in what the widget says.
-func (p *dateTimePicker) changed() bool {
-	return p.touched || p.shown() != p.opened
+// moved is whether the widget says something other than what it opened with. A form keeps the
+// instant an end arrived with for as long as it does not: choosing the zone already chosen,
+// typing and taking it back, or stepping the date there and back leave the end where it was.
+func (p *dateTimePicker) moved() bool {
+	return p.shown() != p.opened
+}
+
+// answered is whether the reader has had a hand in the widget at all, even to leave it as it
+// was. Choosing Local on a form that opened on Local is an answer, and nothing the form learns
+// afterwards should take it back.
+func (p *dateTimePicker) answered() bool {
+	return p.touched || p.moved()
 }
 
 func (p *dateTimePicker) shown() string {

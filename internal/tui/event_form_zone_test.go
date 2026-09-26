@@ -191,7 +191,7 @@ func TestALocalEndHEYWouldMoveIsRefused(t *testing.T) {
 
 	// 06:30 UTC is the second 01:30 in New York; HEY reads 2026-11-01 01:30 as 05:30 UTC.
 	form.ends.setMoment(time.Date(2026, 11, 1, 6, 30, 0, 0, time.UTC))
-	want := "Ends — HEY reads 2026-11-01 01:30 America/New_York as another moment, so saving would move it an hour earlier. Retype the time or choose another"
+	want := "Ends — HEY reads 2026-11-01 01:30 America/New_York as another moment, so saving would move it an hour earlier. Choose another time, or press ctrl+s again to save it there"
 	if got := form.validate(); got != want {
 		t.Errorf("validate = %q, want %q", got, want)
 	}
@@ -204,34 +204,92 @@ func TestALocalEndHEYWouldMoveIsRefused(t *testing.T) {
 	wantPlaced(t, "end", values.EndsAt, values.EndTime, values.EndTimeZone, time.Date(2026, 11, 1, 5, 30, 0, 0, time.UTC))
 }
 
-// A title-only edit sends the times back as they are shown, and an end HEY imported at the
-// second 01:30 of the night New York falls back would come back at the first: the form refuses
-// rather than moving it, as `hey event edit` does. Retyping the time is the reader choosing
-// HEY's reading of it.
-func TestEditingAnEventHEYWouldMoveIsRefusedUntilRetyped(t *testing.T) {
-	event := Recording{
+// A night shift handover imported with its end at the second 01:30 of the night New York
+// falls back: 06:30 UTC, which HEY reads 2026-11-01 01:30 America/New_York back as 05:30.
+func repeatedHourEvent() Recording {
+	return Recording{
 		ID: 4821, Title: "Night shift handover", Type: "Calendar::Event",
 		StartsAt:     time.Date(2026, 11, 1, 5, 0, 0, 0, time.UTC),  // 01:00 EDT
 		EndsAt:       time.Date(2026, 11, 1, 6, 30, 0, 0, time.UTC), // the second 01:30, EST
 		StartsAtZone: "America/New_York", EndsAtZone: "America/New_York",
 	}
-	form := newAccountZoneForm(eventFormEdit, event, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC), indianapolis)
-	form.title.SetValue("Night shift handover, west door")
+}
 
-	want := "Ends — HEY reads 2026-11-01 01:30 America/New_York as another moment, so saving would move it an hour earlier. Retype the time or choose another"
-	if got := form.validate(); got != want {
-		t.Errorf("validate = %q, want %q", got, want)
+const repeatedHourRefusal = "Ends — HEY reads 2026-11-01 01:30 America/New_York as another moment, so saving would move it an hour earlier. Choose another time, or press ctrl+s again to save it there"
+
+// A title-only edit sends the times back as they are shown, and the end would come back at the
+// first 01:30: the form refuses rather than moving it, as `hey event edit` does. An end that
+// shows what it opened with keeps its instant however the reader got back there — choosing the
+// zone it was on, typing and taking it back, stepping the date there and back — so none of
+// those moves it either.
+func TestEditingAnEventHEYWouldMoveIsRefused(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		fiddle func(*eventForm)
+	}{
+		{"left alone", func(*eventForm) {}},
+		{"its zone chosen again", func(f *eventForm) {
+			f.ends.focusField(dateTimeFieldZone)
+			f.ends.handleKey(keyPress("enter"))
+			f.ends.handleKey(keyPress("enter"))
+		}},
+		{"a digit typed and taken back", func(f *eventForm) {
+			f.ends.focusField(dateTimeFieldTime)
+			f.ends.handleKey(tea.KeyPressMsg{Code: tea.KeyBackspace})
+			typeInto(t, f.ends, "0")
+		}},
+		{"its date stepped on and back", func(f *eventForm) {
+			f.ends.focusField(dateTimeFieldDate)
+			f.ends.handleKey(keyPress("up"))
+			f.ends.handleKey(keyPress("down"))
+		}},
+	} {
+		form := newAccountZoneForm(eventFormEdit, repeatedHourEvent(), time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC), indianapolis)
+		form.title.SetValue("Night shift handover, west door")
+		tt.fiddle(form)
+
+		if form.ends.date() != "2026-11-01" || form.ends.clock() != "01:30" || form.ends.zoneName() != "America/New_York" {
+			t.Fatalf("%s: the end shows %s %s %s, want it as it opened", tt.name, form.ends.date(), form.ends.clock(), form.ends.zoneName())
+		}
+		if got := form.validate(); got != repeatedHourRefusal {
+			t.Errorf("%s: validate = %q, want the end refused rather than moved from 06:30 UTC", tt.name, got)
+		}
 	}
+}
 
+// Changing the end is the reader writing a new clock time, which is read as HEY reads it.
+// 2026-11-01 01:45 America/New_York => 05:45 UTC.
+func TestEditingAnEventToAnotherTimeIsReadAsHEYReadsIt(t *testing.T) {
+	form := newAccountZoneForm(eventFormEdit, repeatedHourEvent(), time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC), indianapolis)
 	form.ends.focusField(dateTimeFieldTime)
 	form.ends.handleKey(tea.KeyPressMsg{Code: tea.KeyBackspace})
-	typeInto(t, form.ends, "0")
+	form.ends.handleKey(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	typeInto(t, form.ends, "45")
+
 	if got := form.validate(); got != "" {
-		t.Errorf("validate = %q, want a retyped time taken", got)
+		t.Fatalf("validate = %q, want a new time taken", got)
 	}
 	values := form.values()
-	// 2026-11-01 01:00 and 01:30 America/New_York => 05:00 and 05:30 UTC.
 	wantPlaced(t, "start", values.StartsAt, values.StartTime, values.StartTimeZone, time.Date(2026, 11, 1, 5, 0, 0, 0, time.UTC))
+	wantPlaced(t, "end", values.EndsAt, values.EndTime, values.EndTimeZone, time.Date(2026, 11, 1, 5, 45, 0, 0, time.UTC))
+}
+
+// The refusal can be overruled: ctrl+s again, with nothing pressed in between, saves the end
+// where HEY reads it. Any other key asks again.
+func TestSavingAgainTakesHEYsReadingOfAKeptEnd(t *testing.T) {
+	form := newAccountZoneForm(eventFormEdit, repeatedHourEvent(), time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC), indianapolis)
+
+	if _, save := form.handleKey(keyPress("ctrl+s")); save || form.status != repeatedHourRefusal {
+		t.Fatalf("first ctrl+s saved=%v status=%q, want the refusal", save, form.status)
+	}
+	form.handleKey(keyPress("tab"))
+	if _, save := form.handleKey(keyPress("ctrl+s")); save {
+		t.Fatal("ctrl+s after another key saved without asking again")
+	}
+	if _, save := form.handleKey(keyPress("ctrl+s")); !save {
+		t.Fatalf("a second ctrl+s did not save: %q", form.status)
+	}
+	values := form.values()
 	wantPlaced(t, "end", values.EndsAt, values.EndTime, values.EndTimeZone, time.Date(2026, 11, 1, 5, 30, 0, 0, time.UTC))
 }
 
@@ -246,9 +304,18 @@ func TestEditingAnEventWithSecondsIsRefused(t *testing.T) {
 	form := newAccountZoneForm(eventFormEdit, event, time.Date(2026, 8, 20, 9, 0, 0, 0, time.UTC), indianapolis)
 	onMachine(form, time.UTC)
 
-	want := "Starts — HEY is sent whole minutes, so saving would move it 30 seconds earlier. Retype the time"
+	want := "Starts — HEY is sent whole minutes, so saving would move it 30 seconds earlier. Choose another time, or press ctrl+s again to save it there"
 	if got := form.validate(); got != want {
 		t.Errorf("validate = %q, want %q", got, want)
+	}
+
+	// Typing at the start and taking it back leaves it showing what it opened with, and the
+	// seconds it has are still not dropped without a word.
+	form.starts.focusField(dateTimeFieldTime)
+	form.starts.handleKey(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	typeInto(t, form.starts, "0")
+	if got := form.validate(); got != want {
+		t.Errorf("after typing and taking it back, validate = %q, want %q", got, want)
 	}
 }
 
@@ -621,6 +688,28 @@ func TestZoneNamesAreShownSanitized(t *testing.T) {
 	}
 	if got := form.starts.problem(); got != "That is not a time zone" {
 		t.Errorf("problem = %q, want the name refused", got)
+	}
+}
+
+// Switching All day is an answer about the form's days, so an identity read landing after it
+// leaves the days the reader saw. On a UTC machine at 23:30 on the 14th, a new event is offered
+// midnight on the 15th; Los Angeles is still on the 14th, and taking its zone then would move
+// the all-day event the reader had just made back a day.
+func TestSwitchingAllDayOutlastsALateIdentityRead(t *testing.T) {
+	form := newAccountZoneForm(eventFormCreate, Recording{}, time.Date(2026, 10, 14, 23, 30, 0, 0, time.UTC), "")
+	onMachine(form, time.UTC)
+	focusOn(form, eventFieldAllDay)
+	form.handleKey(keyPress(" "))
+	if !form.allDay || form.starts.date() != "2026-10-15" {
+		t.Fatalf("all day = %v on %s, want the 15th all day", form.allDay, form.starts.date())
+	}
+
+	form.adoptAccountZone("America/Los_Angeles")
+	if values := form.values(); values.StartsAt != "2026-10-15" {
+		t.Errorf("starts on %s, want the 15th the reader saw", values.StartsAt)
+	}
+	if form.starts.zoneName() != "" {
+		t.Errorf("zone = %q, want Local left", form.starts.zoneName())
 	}
 }
 

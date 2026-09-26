@@ -264,12 +264,13 @@ func (f *timeTrackForm) validate() string {
 	return ""
 }
 
-// when is one end of the track: the instant it arrived with while the reader has left that
-// end alone, and what the picker reads once they have not. A picker shows a clock time, and
-// the second 01:30 of a night the clocks go back reads back as the first, so reading an
-// untouched end off the picker would move it on a save that only changed the category.
+// when is one end of the track: the instant it arrived with while the picker still shows what
+// it opened with, and what the picker reads once it shows something else. A picker shows a
+// clock time, and the second 01:30 of a night the clocks go back reads back as the first, so
+// reading an unchanged end off the picker would move it on a save that only changed the
+// category — however the reader got back to the value it opened with.
 func (f *timeTrackForm) when(p *dateTimePicker, arrived time.Time) (time.Time, bool) {
-	if !p.changed() {
+	if !p.moved() {
 		return arrived, true
 	}
 	return p.moment()
