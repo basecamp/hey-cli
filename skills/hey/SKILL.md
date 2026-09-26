@@ -886,8 +886,8 @@ and the following updated`) and `data` holding the recording HEY answered.
 On `add`, no `--start-time` means all-day and a `--start-time` with no `--end-time` runs an
 hour. Clock times, and today when `--starts-on` is left out, are read in the user's HEY
 account time zone (the one the web app uses); pass `--time-zone America/New_York` to write
-in another. If the account has no zone the
-command refuses and asks for `--time-zone`. On `edit`, an end or zone not named keeps the
+in another. If a clock time or today needs the account's zone and it has none, the command
+refuses and asks for `--time-zone`. On `edit`, an end or zone not named keeps the
 event's own, and an event saved without a zone stays without one.
 
 ### Todos
