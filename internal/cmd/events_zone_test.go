@@ -191,7 +191,6 @@ func TestEventsAddRefusesWithoutAnAccountZone(t *testing.T) {
 		{name: "account names none", fixture: zoneFixture{}, want: "your HEY account has no time zone set"},
 		{name: "zone this build does not know", fixture: zoneFixture{accountZone: "Mars/Olympus_Mons"}, want: "Mars/Olympus_Mons is not one this build of hey knows"},
 		{name: "server error", fixture: zoneFixture{identityStatus: http.StatusInternalServerError}, want: "could not be read"},
-		{name: "unauthorized", fixture: zoneFixture{identityStatus: http.StatusUnauthorized}, want: "could not be read"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -203,6 +202,24 @@ func TestEventsAddRefusesWithoutAnAccountZone(t *testing.T) {
 				t.Errorf("writes = %d, want none", got)
 			}
 		})
+	}
+}
+
+// A login HEY rejects while the account's zone is read is an auth failure, as it would be
+// on the write itself, rather than a zone refusal whose --time-zone hint would not help.
+func TestEventsAddReportsAnAuthFailureReadingTheAccountAsAuth(t *testing.T) {
+	handler, requests := zoneServer(t, zoneFixture{identityStatus: http.StatusUnauthorized})
+	_, err := runJSONCommand(t, handler, "event", "add", "Dentist appointment", "--calendar", "9",
+		"--starts-on", "2026-10-14", "--start-time", "10:00")
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeAuth {
+		t.Fatalf("error = %v, want an auth error", err)
+	}
+	if strings.Contains(cliErr.Hint, "--time-zone") {
+		t.Errorf("hint = %q, want no --time-zone advice for an auth failure", cliErr.Hint)
+	}
+	if got := requests.writes.Load(); got != 0 {
+		t.Errorf("writes = %d, want none", got)
 	}
 }
 
