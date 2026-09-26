@@ -741,9 +741,10 @@ type eventSchedule struct {
 func (f *eventFields) newSchedule(ctx context.Context) (eventSchedule, error) {
 	allDay := f.allDay || f.startTime == ""
 	var startTime, endTime, zone string
+	var endsNextDay bool
 	if !allDay {
 		var err error
-		if startTime, endTime, err = f.clockTimes(f.startTime, f.endTime); err != nil {
+		if startTime, endTime, endsNextDay, err = f.clockTimes(f.startTime, f.endTime); err != nil {
 			return eventSchedule{}, err
 		}
 	}
@@ -779,6 +780,9 @@ func (f *eventFields) newSchedule(ctx context.Context) (eventSchedule, error) {
 	endsOn := f.endsOn
 	if endsOn == "" {
 		endsOn = startsOn
+		if endsNextDay {
+			endsOn = dayAfter(startsOn)
+		}
 	}
 	if err := checkEventDates(startsOn, endsOn); err != nil {
 		return eventSchedule{}, err
@@ -886,8 +890,13 @@ func (f *eventFields) scheduleFrom(ctx context.Context, cmd *cobra.Command, even
 	if event.AllDay && flags.Changed("start-time") && !flags.Changed("end-time") {
 		end = ""
 	}
-	if schedule.startTime, schedule.endTime, err = f.clockTimes(start, end); err != nil {
+	var endsNextDay bool
+	if schedule.startTime, schedule.endTime, endsNextDay, err = f.clockTimes(start, end); err != nil {
 		return eventSchedule{}, err
+	}
+	// A default end past midnight is on the next day, unless --ends-on said otherwise.
+	if endsNextDay && !flags.Changed("ends-on") && schedule.endsAt == schedule.startsAt {
+		schedule.endsAt = dayAfter(schedule.startsAt)
 	}
 
 	startRetyped := flags.Changed("starts-on") || flags.Changed("start-time")
@@ -1084,18 +1093,27 @@ const defaultEventStartTime = "09:00"
 const eventDuration = time.Hour
 
 // clockTimes reads the pair of HH:MM times, defaulting the end to an hour after the start.
-func (f *eventFields) clockTimes(startTime, endTime string) (string, string, error) {
-	start, err := parseEventClock("start-time", startTime, "14:30")
+// nextDay says the default end is past midnight — 00:30 for a 23:30 start — and so belongs
+// on the day after the start's.
+func (f *eventFields) clockTimes(startTime, endTime string) (start, end string, nextDay bool, err error) {
+	clock, err := parseEventClock("start-time", startTime, "14:30")
 	if err != nil {
-		return "", "", err
+		return "", "", false, err
 	}
 	if endTime == "" {
-		return startTime, start.Add(eventDuration).Format(clockLayout), nil
+		ends := clock.Add(eventDuration)
+		return startTime, ends.Format(clockLayout), ends.Day() != clock.Day(), nil
 	}
 	if _, err := parseEventClock("end-time", endTime, "15:30"); err != nil {
-		return "", "", err
+		return "", "", false, err
 	}
-	return startTime, endTime, nil
+	return startTime, endTime, false, nil
+}
+
+// dayAfter is the date after a YYYY-MM-DD date, which has been checked already.
+func dayAfter(date string) string {
+	day, _ := time.Parse(dateLayout, date)
+	return day.AddDate(0, 0, 1).Format(dateLayout)
 }
 
 func parseEventClock(name, value, example string) (time.Time, error) {

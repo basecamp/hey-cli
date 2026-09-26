@@ -1018,3 +1018,52 @@ func TestEventsAddRefusesAnEventThatEndsBeforeItStarts(t *testing.T) {
 	}
 	wantSchedule(t, requests.written(t), "2026-10-14", "10:00", "2026-10-14", "10:00", "Europe/Zagreb")
 }
+
+// A start with no end runs an hour, and an hour past a start late in the evening is on the
+// next day: 23:30 runs to 00:30 on the 15th, 23:00 to midnight. On the night Santiago's
+// clocks skip midnight the end is still the next day's 00:30, which HEY places at 01:30,
+// an hour after the start. --ends-on given with no --end-time is taken as it is, and one
+// that puts the end before the start is refused.
+func TestEventsAddRunsADefaultHourPastMidnight(t *testing.T) {
+	tests := []struct {
+		name, zone, startsOn, start string
+		args                        []string
+		endsOn, end                 string
+	}{
+		{name: "23:30", zone: "Europe/Zagreb", startsOn: "2026-10-14", start: "23:30", endsOn: "2026-10-15", end: "00:30"},
+		{name: "23:00", zone: "Europe/Zagreb", startsOn: "2026-10-14", start: "23:00", endsOn: "2026-10-15", end: "00:00"},
+		{name: "a normal time", zone: "Europe/Zagreb", startsOn: "2026-10-14", start: "14:00", endsOn: "2026-10-14", end: "15:00"},
+		{name: "Santiago skips midnight", zone: "America/Santiago", startsOn: "2026-09-05", start: "23:30", endsOn: "2026-09-06", end: "00:30"},
+		{name: "ends-on given", zone: "Europe/Zagreb", startsOn: "2026-10-14", start: "23:30",
+			args: []string{"--ends-on", "2026-10-16"}, endsOn: "2026-10-16", end: "00:30"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler, requests := zoneServer(t, zoneFixture{})
+			args := append([]string{"event", "add", "Late shift", "--calendar", "9",
+				"--starts-on", tt.startsOn, "--start-time", tt.start, "--time-zone", tt.zone}, tt.args...)
+			if _, err := runJSONCommand(t, handler, args...); err != nil {
+				t.Fatalf("execute event add: %v", err)
+			}
+			wantSchedule(t, requests.written(t), tt.startsOn, tt.start, tt.endsOn, tt.end, tt.zone)
+		})
+	}
+
+	t.Run("ends-on the same day", func(t *testing.T) {
+		handler, requests := zoneServer(t, zoneFixture{})
+		_, err := runJSONCommand(t, handler, "event", "add", "Late shift", "--calendar", "9",
+			"--starts-on", "2026-10-14", "--ends-on", "2026-10-14", "--start-time", "23:30", "--time-zone", "Europe/Zagreb")
+		if err == nil || !strings.Contains(err.Error(), "before it starts") {
+			t.Fatalf("error = %v, want the end before the start refused", err)
+		}
+		if got := requests.writes.Load(); got != 0 {
+			t.Errorf("writes = %d, want none", got)
+		}
+	})
+}
+
+// An all-day event given a late start in an edit runs its default hour into the next day.
+func TestEventsEditRunsADefaultHourPastMidnight(t *testing.T) {
+	requests := runZoneEdit(t, zoneFixture{accountZone: "America/New_York", event: allDayEventJSON}, "--start-time", "23:30")
+	wantSchedule(t, requests.written(t), "2026-10-14", "23:30", "2026-10-15", "00:30", "America/New_York")
+}
