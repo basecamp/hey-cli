@@ -954,7 +954,7 @@ func endsAfterItStarts(schedule eventSchedule, startZone, endZone clockZone) err
 // else, which would move it on an edit that never touched it. Two things cannot be sent back
 // as they are. HEY is sent a clock time in whole minutes, so an end with seconds — an event
 // HEY imported — would lose them. And of the two moments a clock time names in the hour the
-// clocks go back, HEY takes one (see heysChoice), so an end at the other — imported again,
+// clocks go back, HEY takes one (see timezone.WallClock), so an end at the other — imported again,
 // or a zoneless event given a zone — would move by however far the clocks went back.
 func keepsItsMoment(end string, had time.Time, date, clock string, zone clockZone) error {
 	sent := zone.instant(date, clock)
@@ -1012,7 +1012,7 @@ func (z clockZone) instant(date, clock string) time.Time {
 	if z.name == "" {
 		return time.Date(day.Year(), day.Month(), day.Day(), at.Hour(), at.Minute(), 0, 0, time.UTC)
 	}
-	return wallClockOn(day, at, z.loc)
+	return timezone.WallClock(day, at, z.loc)
 }
 
 // label is the zone as a refusal names it.
@@ -1105,7 +1105,7 @@ func zonelessEnd(had time.Time, date, clock string, loc *time.Location, retyped 
 	// moves on to the first one that exists rather than back an hour.
 	day, _ := time.Parse(dateLayout, date)
 	at, _ := time.Parse(clockLayout, clock)
-	return eventClock(wallClockOn(day, at, loc), time.UTC)
+	return eventClock(timezone.WallClock(day, at, loc), time.UTC)
 }
 
 // defaultEventStartTime is when an all-day event starts once it is given a time but not one of
@@ -1142,9 +1142,9 @@ func defaultEnd(startsOn, startTime, endsOn string, loc *time.Location) (string,
 	}
 	day, _ := time.Parse(dateLayout, startsOn)
 	clock, _ := time.Parse(clockLayout, startTime)
-	end := wallClockOn(day, clock, loc).Add(eventDuration).In(loc)
+	end := timezone.WallClock(day, clock, loc).Add(eventDuration).In(loc)
 	endsOn, endTime := end.Format(dateLayout), end.Format(clockLayout)
-	if placed := wallClockOn(end, end, loc); !placed.Equal(end) {
+	if placed := timezone.WallClock(end, end, loc); !placed.Equal(end) {
 		return "", "", apierr.ErrUsageHint(
 			fmt.Sprintf("an hour after it starts, the event would end at %s %s %s, a clock time the clocks show twice as they go back, and HEY would place it %s",
 				endsOn, endTime, terminal.SanitizeLine(loc.String()), movedBy(end, placed)),
