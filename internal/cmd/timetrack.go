@@ -588,8 +588,8 @@ func newTimetrackExportCommand() *timetrackExportCommand {
 
 Without --output the CSV goes straight to stdout, so redirecting it to a file is the whole
 recipe. The output formatting flags have nothing to reshape there and are refused rather
-than ignored: --json, --quiet, --markdown, --ids-only, --count and --html all need
---output, which returns file metadata they can format.`,
+than ignored. With --output, --json, --quiet and --markdown format the file's metadata;
+--ids-only and --count still fail, since that is not a list, and --html is never accepted.`,
 		Example: `  hey timetrack export > time-tracking.csv
   hey timetrack export --output time-tracking.csv
   hey timetrack export --output time-tracking.csv --force`,

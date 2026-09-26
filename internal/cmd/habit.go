@@ -56,9 +56,8 @@ func newHabitListCommand() *habitListCommand {
 		Short: "List habits",
 		Long: `List habits.
 
-A habit is read from the week it belongs to rather than from a calendar's recordings,
-which carry only its completions. A week is what lists every habit exactly once, whatever
-weekday each is scheduled for.`,
+A habit is read from the week a date falls in. A week lists each habit once, whatever
+weekday it runs on; a week that has not started yet lists none.`,
 		Example: `  hey habit list
   hey habit list --date 2026-09-02
   hey habit list --ids-only`,

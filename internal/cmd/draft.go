@@ -324,7 +324,7 @@ func newDraftSendCommand() *draftSendCommand {
 		Use:   "send <draft-id>",
 		Short: "Deliver a draft",
 		Annotations: map[string]string{
-			"agent_notes": "Sends the draft as it stands — recipients are required, added with `hey draft edit --to`. Delivery goes through HEY's undo window. Scheduling a delivery is done in a HEY app for now; the API cannot yet name an exact instant.",
+			"agent_notes": "Sends the draft as it stands — recipients are required, added with `hey draft edit --to`. Delivery goes through HEY's undo window. Scheduling a delivery is done in a HEY app for now; the CLI has no flag for it, and HEY's API schedules only to a whole hour.",
 		},
 		Example: `  hey draft send 12345`,
 		RunE:    sendCommand.run,

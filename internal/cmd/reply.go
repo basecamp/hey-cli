@@ -47,7 +47,9 @@ func newReplyCommand() *replyCommand {
 		Long: `Reply to a thread's latest entry.
 
 The reply is addressed the way HEY's own web app addresses one: everyone that entry was
-addressed to, with whoever wrote it on the To line. Repeatable --to, --cc and --bcc
+addressed to, with whoever wrote it on the To line, minus your own addresses. If HEY's
+prefill is unavailable or names no one, a send falls back to the message's own recipients,
+which can include you. Repeatable --to, --cc and --bcc
 values add or move recipients on those lines; each value can also be comma-separated.
 --replace-recipients uses only the explicitly supplied recipients instead. A dry run
 resolves and prints the complete envelope without requiring a message or sending one.`,

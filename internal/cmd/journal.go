@@ -133,7 +133,7 @@ func newJournalReadCommand() *journalReadCommand {
 		Short: "Read a journal entry (default: today)",
 		Example: `  hey journal read
   hey journal read 2026-03-15
-  hey journal read --html
+  hey journal read --html > entry.html
   hey journal read --json`,
 		RunE: journalReadCommand.run,
 		Args: cobra.MaximumNArgs(1),
@@ -210,9 +210,10 @@ func newJournalWriteCommand() *journalWriteCommand {
 		Short: "Write or edit a journal entry (default: today)",
 		Long: `Write or edit a journal entry, today's by default.
 
-Writing empty content removes the day's entry, and the command says "removed" rather than
-"saved". Omitting content opens $EDITOR on the day's existing entry; if that entry cannot
-be read the command stops rather than opening a blank buffer over it.`,
+Content that trims to nothing — whitespace-only, or an emptied $EDITOR buffer — removes the
+day's entry, and the command says "removed" rather than "saved". Omitting content reads
+stdin when it is not a terminal, and otherwise opens $EDITOR on the day's existing entry; if
+that entry cannot be read the command stops rather than opening a blank buffer over it.`,
 		Example: `  hey journal write "Shipped the pagination fix and paired with Jane on the cover art."
   hey journal write 2026-03-15 "Retrospective: the migration took two days longer than planned."
   hey journal write -c "Reviewed the Q3 numbers with Alice."

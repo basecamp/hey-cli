@@ -61,7 +61,8 @@ The day covers the calendars switched on in HEY, the same set the app draws, so 
 no --calendar to narrow it. A virtual occurrence carries the series in id and parent_id.
 A day HEY has written out on its own — after an edit of that day alone, or a reminder —
 keeps its own event id in id and recording_id, while parent_id remains the series. The own
-id is what 'hey event edit' and 'hey event delete' act on for that day alone. Either way
+id is what 'hey event edit' changes for that day alone; 'hey event delete' on it discards
+only the day's own changes, and the series' occurrence shows again. Either way
 occurrence_id is what 'hey event edit --occurrence' takes, with the series id before it.`,
 		Example: `  hey event day
   hey event day 2026-09-02
@@ -96,7 +97,8 @@ The week covers the calendars switched on in HEY, the same set the app draws, so
 no --calendar to narrow it. A virtual occurrence carries the series in id and parent_id.
 A day HEY has written out on its own — after an edit of that day alone, or a reminder —
 keeps its own event id in id and recording_id, while parent_id remains the series. The own
-id is what 'hey event edit' and 'hey event delete' act on for that day alone. Either way
+id is what 'hey event edit' changes for that day alone; 'hey event delete' on it discards
+only the day's own changes, and the series' occurrence shows again. Either way
 occurrence_id is what 'hey event edit --occurrence' takes, with the series id before it.`,
 		Example: `  hey event week
   hey event week 2026-09-02

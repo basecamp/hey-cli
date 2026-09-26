@@ -72,8 +72,8 @@ func newWatchCommand() *watchCommand {
 	watchCommand.cmd = &cobra.Command{
 		Use:   "watch",
 		Short: "Follow email threads and calendars as they change",
-		Long: `Print email threads and calendar changes as they happen, one JSON object per line.
-Runs until interrupted.
+		Long: `Print email threads and calendar changes as they happen: piped or with --json, one
+JSON object per line; at a terminal, one text line each. Runs until interrupted.
 
 Changes can drive a command instead of being printed, and that is a choice between two
 behaviours: --run-async spawns the command per change and moves on, so a slow one never
@@ -87,8 +87,9 @@ moving it is not new activity; a reply on a known thread is. --events new select
 ones, alone or alongside added, updated and deleted, and a script sees HEY_NEW=1 for them.
 
 The calendars are followed too, by default: recording_added, recording_updated and
-recording_deleted are the events, todos, habits and journal entries the calendars hold,
-each line naming its calendar; calendar_added, calendar_updated and calendar_deleted are
+recording_deleted cover every recording the calendars hold — events, todos, habits and
+their completions, journal entries, time tracks, countdowns and day titles — each line
+naming its calendar; calendar_added, calendar_updated and calendar_deleted are
 the calendars themselves coming and going. The email-specific flags switch the calendars
 off: --box scopes the watch to mail, and an --events list naming only mail changes
 (added, updated, deleted, new, resync) does the same.
@@ -102,7 +103,7 @@ box. A resync is an event of its own: reported by default, scripts run for it an
 calendar's feed falls behind the same way, and calendar_resync is the same word for it.
 Ready and disconnected are written to stdout only.`,
 		Annotations: map[string]string{
-			"agent_notes": "Long-running. Writes one JSON object per changed thread to stdout (NDJSON), not the usual envelope. Use --exit-on-first to block until one change lands and then exit.",
+			"agent_notes": "Long-running. Piped or with --json, writes one JSON object per change to stdout (NDJSON), not the usual envelope, and does not apply --jq. Use --exit-on-first to block until one change lands and then exit; a ready line comes first. For new mail only, add --events new.",
 		},
 		Example: `  hey watch
   hey watch --box imbox --events added
