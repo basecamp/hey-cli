@@ -165,8 +165,14 @@ func TestContactsShowIncludesAliasesAndPrivateNote(t *testing.T) {
 	if err != nil {
 		t.Fatalf("show failed: %v; requests=%+v", err, recorded.snapshot())
 	}
-	result := decodeContactData[contactShowResult](t, resp.Data)
-	if result.Id != 7 || len(result.Aliases) != 1 || result.Note != "Prefers email" || result.Clearance.Status != "approved" {
+	// note_markdown is a sealed htmlutil.Markdown that only ToMarkdown can make, so the
+	// answer is read back as the SDK's shape with the note as strings.
+	result := decodeContactData[struct {
+		generated.ContactDetail
+		Note         string `json:"note"`
+		NoteMarkdown string `json:"note_markdown"`
+	}](t, resp.Data)
+	if result.Id != 7 || len(result.Aliases) != 1 || result.Note != "Prefers email" || result.NoteMarkdown != "Prefers email" || result.Clearance.Status != "approved" {
 		t.Errorf("result = %+v", result)
 	}
 	requests := recorded.snapshot()

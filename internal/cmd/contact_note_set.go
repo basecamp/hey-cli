@@ -26,12 +26,17 @@ func newContactNoteSetCommand() *contactNoteSetCommand {
 	setCommand.cmd = &cobra.Command{
 		Use:   "set <id> [note]",
 		Short: "Write or edit a private contact note",
+		Long: "Write a contact's private note. Set replaces the whole note: to add to one, read it, change it and set all of it. " +
+			"Read it as note_markdown only when hey contact note show answers note_markdown_lossless as true; " +
+			"otherwise the note holds an attachment or markup Markdown cannot carry, so change note_html and set it with --note-html. " +
+			"With no note given at a terminal, $EDITOR opens on the note as Markdown, and is refused for a note whose Markdown would drop part of it.",
 		Annotations: map[string]string{
-			"agent_notes": "Accepts --note, positional content, stdin, or opens $EDITOR with the existing note. The note is Markdown, or raw HTML via --note-html. Use the delete subcommand to clear a note.",
+			"agent_notes": "Replaces the whole note. Accepts --note, positional content, stdin, or opens $EDITOR with the existing note as Markdown, which is refused when that Markdown would drop part of the note. The note is Markdown, or raw HTML via --note-html. To add to a note, read note_markdown from hey contact note show, change it, and set all of it; when note_markdown_lossless is false, change note_html and set it with --note-html instead. Use the delete subcommand to clear a note.",
 		},
 		Example: `  hey contact note set 12345 "Prefers email"
   hey contact note set 12345 --note "Prefers email"
-  echo "Prefers email" | hey contact note set 12345`,
+  echo "Prefers email" | hey contact note set 12345
+  hey contact note set 12345 --note-html "<p><strong>Prefers email</strong></p>"`,
 		RunE: setCommand.run,
 		Args: cobra.MatchAll(usageMinOneArg(), cobra.MaximumNArgs(2)),
 	}
@@ -66,19 +71,17 @@ func (c *contactNoteSetCommand) run(cmd *cobra.Command, args []string) error {
 					return inputErr
 				}
 			} else {
-				existing, getErr := contactNoteForEditor(cmd.Context(), contactID, sdk.Contacts().Note)
-				if getErr != nil {
-					return apierr.FromSDK(getErr)
-				}
-				markdownNote, inputErr = editor.Open(existing)
+				markdownNote, inputErr = contactNoteFromEditor(cmd.Context(), contactID, sdk.Contacts().Note, editor.Open)
 				if inputErr != nil {
-					return apierr.ErrAPI(0, fmt.Sprintf("could not open editor: %v", inputErr))
+					return inputErr
 				}
 			}
 		}
 		content = htmlutil.FromMarkdown(strings.TrimSpace(markdownNote))
 	} else {
-		content = strings.TrimSpace(content)
+		// HTML read from note_html carries HEY's editor wrapper; writing it back as it is
+		// would nest the note one level deeper on every round trip.
+		content = htmlutil.UnwrapTrixContent(strings.Trim(content, " \t\n\f\r"))
 	}
 	if content == "" {
 		return apierr.ErrUsage("note cannot be empty; use `hey contact note delete <id>` to clear it")
@@ -94,7 +97,7 @@ func (c *contactNoteSetCommand) run(cmd *cobra.Command, args []string) error {
 	return writeMutationLine(cmd,
 		fmt.Sprintf("Private note for contact %d saved.", contactID),
 		"Private contact note saved",
-		note,
+		newContactNoteResult(*note),
 		output.WithBreadcrumbs(output.Breadcrumb{Action: "read", Command: fmt.Sprintf("hey contact note show %d", contactID), Description: "Read the private note"}),
 	)
 }
@@ -114,8 +117,24 @@ func contactNoteInput(flagChanged bool, flagValue string, args []string) (string
 
 type contactNoteFetcher func(context.Context, int64) (*generated.ContactNote, error)
 
+// contactNoteFromEditor opens $EDITOR on the existing note as Markdown and answers what
+// was saved there.
+func contactNoteFromEditor(ctx context.Context, contactID int64, fetch contactNoteFetcher, open func(string) (string, error)) (string, error) {
+	existing, err := contactNoteForEditor(ctx, contactID, fetch)
+	if err != nil {
+		return "", apierr.FromSDK(err)
+	}
+	edited, err := open(existing)
+	if err != nil {
+		return "", apierr.ErrAPI(0, fmt.Sprintf("could not open editor: %v", err))
+	}
+	return edited, nil
+}
+
 // contactNoteForEditor prefills $EDITOR with the existing note as Markdown — the same
-// form the edited result is saved in.
+// form the edited result is saved in. A note whose Markdown would lose part of it — an
+// attachment, say — is refused before an editor opens, because saving the editor
+// replaces the whole note with what it held.
 func contactNoteForEditor(ctx context.Context, contactID int64, fetch contactNoteFetcher) (string, error) {
 	note, err := fetch(ctx, contactID)
 	if err != nil {
@@ -124,8 +143,11 @@ func contactNoteForEditor(ctx context.Context, contactID int64, fetch contactNot
 	if note == nil {
 		return "", nil
 	}
-	if note.NoteHtml != "" {
-		return htmlutil.ToMarkdown(note.NoteHtml).String(), nil
+	if !contactNoteLossless(note.Note, note.NoteHtml) {
+		return "", apierr.ErrUsageHint(
+			fmt.Sprintf("the note on contact %d holds an attachment or other markup Markdown cannot carry, so editing it as Markdown would drop it", contactID),
+			fmt.Sprintf("Change its HTML instead: read it with `hey contact note show %d --jq '.data.note_html'` and write it back with `hey contact note set %d --note-html '<the changed HTML>'`", contactID, contactID),
+		)
 	}
-	return note.Note, nil
+	return contactNoteMarkdown(note.Note, note.NoteHtml).String(), nil
 }

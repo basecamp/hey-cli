@@ -1,0 +1,481 @@
+package cmd
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
+
+	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/htmlutil"
+	"github.com/basecamp/hey-cli/skills"
+)
+
+// A note as HEY's web editor saves it, and as HEY answers it: to_plain_text drops the
+// bold and bullets the list, and note_html is the stored HTML inside Action Text's
+// layout.
+const (
+	webEditedNoteStored = "<div><strong>Anniversary:</strong> June 12<br><br></div>\n<ul>\n<li>Prefers texts after six</li>\n</ul>"
+	webEditedNotePlain  = "Anniversary: June 12\n\n• Prefers texts after six"
+	webEditedNoteHTML   = "<div class=\"trix-content\">\n  " + webEditedNoteStored + "\n</div>\n"
+)
+
+// noteServer stands in for HEY's contact note: it keeps what was written and answers it
+// the way contacts/notes/show.jbuilder does, wrapped for the editor.
+type noteServer struct {
+	mu     sync.Mutex
+	stored string
+	plain  string
+	writes []string
+	status int
+}
+
+func newNoteServer(t *testing.T, stored, plain string) (*httptest.Server, *noteServer) {
+	t.Helper()
+	notes := &noteServer{stored: stored, plain: plain}
+	server := httptest.NewServer(http.HandlerFunc(notes.serve))
+	t.Cleanup(server.Close)
+	return server, notes
+}
+
+func (s *noteServer) serve(w http.ResponseWriter, req *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	if s.status != 0 {
+		w.WriteHeader(s.status)
+		_, _ = w.Write([]byte(`{"error":"Something went wrong"}`))
+		return
+	}
+	switch {
+	case req.Method == http.MethodGet && req.URL.Path == "/contacts/7.json":
+		_, _ = w.Write([]byte(`{"id":7,"account_id":1,"name":"Jane Doe","email_address":"jane@example.com"}`))
+	case req.Method == http.MethodGet && req.URL.Path == "/contacts/7/note.json":
+		s.answer(w)
+	case req.Method == http.MethodPatch && req.URL.Path == "/contacts/7/note.json":
+		var body generated.ContactNoteRequestContent
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		s.writes = append(s.writes, body.Contact.Note)
+		s.stored = body.Contact.Note
+		s.plain = htmlutil.ToText(body.Contact.Note)
+		s.answer(w)
+	default:
+		http.NotFound(w, req)
+	}
+}
+
+func (s *noteServer) answer(w http.ResponseWriter) {
+	note := generated.ContactNote{ContactId: 7}
+	if s.stored != "" {
+		note.Note = s.plain
+		note.NoteHtml = "<div class=\"trix-content\">\n  " + s.stored + "\n</div>\n"
+	}
+	_ = json.NewEncoder(w).Encode(note)
+}
+
+func (s *noteServer) snapshot() (stored string, writes []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stored, append([]string(nil), s.writes...)
+}
+
+type contactNoteJSON struct {
+	ContactID    int64  `json:"contact_id"`
+	Note         string `json:"note"`
+	NoteHTML     string `json:"note_html"`
+	NoteMarkdown string `json:"note_markdown"`
+}
+
+func showContactNote(t *testing.T, server *httptest.Server) contactNoteJSON {
+	t.Helper()
+	resp, err := runContacts(t, server, "note", "show", "7")
+	if err != nil {
+		t.Fatalf("note show: %v", err)
+	}
+	return decodeContactData[contactNoteJSON](t, resp.Data)
+}
+
+func TestContactNoteShowAnswersTheNoteAsMarkdown(t *testing.T) {
+	server, _ := newNoteServer(t, webEditedNoteStored, webEditedNotePlain)
+	note := showContactNote(t, server)
+	if note.Note != webEditedNotePlain || note.NoteHTML != webEditedNoteHTML {
+		t.Errorf("note = %q, note_html = %q, want both as HEY served them", note.Note, note.NoteHTML)
+	}
+	if want := "**Anniversary:** June 12\n\n- Prefers texts after six"; note.NoteMarkdown != want {
+		t.Errorf("note_markdown = %q, want %q", note.NoteMarkdown, want)
+	}
+}
+
+func TestContactNoteShowAnswersAnEmptyNoteAsEmptyMarkdown(t *testing.T) {
+	server, _ := newNoteServer(t, "", "")
+	resp, err := runContacts(t, server, "note", "show", "7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("data = %#v", resp.Data)
+	}
+	if markdown, present := data["note_markdown"]; !present || markdown != "" {
+		t.Errorf("note_markdown = %#v (present %v), want an empty string", markdown, present)
+	}
+}
+
+func TestContactsShowAnswersTheNoteAsMarkdown(t *testing.T) {
+	server, _ := newNoteServer(t, webEditedNoteStored, webEditedNotePlain)
+	resp, err := runContacts(t, server, "show", "7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	contact := decodeContactData[contactNoteJSON](t, resp.Data)
+	if contact.Note != webEditedNotePlain || contact.NoteHTML != webEditedNoteHTML {
+		t.Errorf("note = %q, note_html = %q, want both as HEY served them", contact.Note, contact.NoteHTML)
+	}
+	if want := "**Anniversary:** June 12\n\n- Prefers texts after six"; contact.NoteMarkdown != want {
+		t.Errorf("note_markdown = %q, want %q", contact.NoteMarkdown, want)
+	}
+}
+
+// A contact without a note answers every note field, empty, the way note show does, so
+// a reader never has to tell a missing field from an empty note.
+func TestContactsShowAnswersEveryNoteFieldForAnEmptyNote(t *testing.T) {
+	server, _ := newNoteServer(t, "", "")
+	resp, err := runContacts(t, server, "show", "7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("data = %#v", resp.Data)
+	}
+	for _, field := range []string{"note", "note_html", "note_markdown"} {
+		if value, present := data[field]; !present || value != "" {
+			t.Errorf("%s = %#v (present %v), want an empty string", field, value, present)
+		}
+	}
+}
+
+func TestContactNoteSetAnswersTheSavedNoteAsMarkdown(t *testing.T) {
+	server, _ := newNoteServer(t, "", "")
+	resp, err := runContacts(t, server, "note", "set", "7", "--note=**Prefers email**\n\n- Call after six")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if note := decodeContactData[contactNoteJSON](t, resp.Data); note.NoteMarkdown != "**Prefers email**\n\n- Call after six" {
+		t.Errorf("note_markdown = %q", note.NoteMarkdown)
+	}
+}
+
+// Reading note_markdown, adding to it and setting it is the way to add to a note: what
+// is written is what was read, so nothing is lost however many times it goes round.
+func TestContactNoteMarkdownWritesBackWithoutLoss(t *testing.T) {
+	server, notes := newNoteServer(t, webEditedNoteStored, webEditedNotePlain)
+
+	first := showContactNote(t, server).NoteMarkdown
+	if _, err := runContacts(t, server, "note", "set", "7", "--note="+first); err != nil {
+		t.Fatal(err)
+	}
+	settled := showContactNote(t, server).NoteMarkdown
+	if settled != first {
+		t.Fatalf("note_markdown after a write = %q, want the first read %q", settled, first)
+	}
+	for range 2 {
+		if _, err := runContacts(t, server, "note", "set", "7", "--note="+settled); err != nil {
+			t.Fatal(err)
+		}
+		if again := showContactNote(t, server).NoteMarkdown; again != settled {
+			t.Fatalf("note_markdown = %q, want it unchanged at %q", again, settled)
+		}
+	}
+	stored, writes := notes.snapshot()
+	if writes[1] != writes[0] || writes[2] != writes[0] {
+		t.Errorf("writes = %q, want the same HTML each time", writes)
+	}
+	if want := "<p><strong>Anniversary:</strong> June 12</p>\n<ul>\n<li>Prefers texts after six</li>\n</ul>"; stored != want {
+		t.Errorf("stored = %q, want %q", stored, want)
+	}
+
+	added := settled + "\n- Moved to the Lisbon office in March"
+	if _, err := runContacts(t, server, "note", "set", "7", "--note="+added); err != nil {
+		t.Fatal(err)
+	}
+	if got := showContactNote(t, server).NoteMarkdown; got != added {
+		t.Errorf("note_markdown after adding = %q, want %q", got, added)
+	}
+}
+
+// note_html carries HEY's editor wrapper, and writing it back used to store the wrapper
+// too, so the note sank one div deeper on every append.
+func TestContactNoteHTMLRoundTripDoesNotNest(t *testing.T) {
+	server, notes := newNoteServer(t, webEditedNoteStored, webEditedNotePlain)
+	for range 3 {
+		noteHTML := showContactNote(t, server).NoteHTML
+		if _, err := runContacts(t, server, "note", "set", "7", "--note-html", noteHTML+"<div>Call after six</div>"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, writes := notes.snapshot()
+	for _, written := range writes {
+		if strings.Contains(written, "trix-content") {
+			t.Errorf("wrote %q, want HEY's wrapper taken off", written)
+		}
+	}
+	served := showContactNote(t, server)
+	if strings.Count(served.NoteHTML, "trix-content") != 1 {
+		t.Errorf("note_html = %q, want one wrapper", served.NoteHTML)
+	}
+	if strings.Count(served.NoteMarkdown, "Call after six") != 3 || !strings.Contains(served.NoteMarkdown, "**Anniversary:**") {
+		t.Errorf("note_markdown = %q, want the note and every addition", served.NoteMarkdown)
+	}
+}
+
+// A note can hold what Markdown cannot carry: HEY's web editor refuses attachments on
+// a note, but --note-html writes whatever it is given. note_markdown_lossless says so,
+// and a figure survives being changed as HTML.
+const attachedNoteStored = `<div>Signed contract:</div><figure data-trix-attachment='{"contentType":"application/pdf","filename":"contract.pdf","url":"/rails/active_storage/blobs/redirect/eyJfcmFpbHMiOnt9fQ--4f1e/contract.pdf"}'><figcaption>contract.pdf</figcaption></figure>`
+
+func TestContactNoteSaysWhenItsMarkdownIsLossless(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		stored string
+		want   bool
+	}{
+		{name: "a note from HEY's editor", stored: webEditedNoteStored, want: true},
+		{name: "no note", stored: "", want: true},
+		{name: "a note with an attachment", stored: attachedNoteStored, want: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			server, _ := newNoteServer(t, tt.stored, htmlutil.ToText(tt.stored))
+			for _, args := range [][]string{{"note", "show", "7"}, {"show", "7"}} {
+				resp, err := runContacts(t, server, args...)
+				if err != nil {
+					t.Fatalf("%v: %v", args, err)
+				}
+				data, _ := resp.Data.(map[string]any)
+				if lossless, present := data["note_markdown_lossless"]; !present || lossless != tt.want {
+					t.Errorf("%v: note_markdown_lossless = %#v (present %v), want %v", args, lossless, present, tt.want)
+				}
+			}
+		})
+	}
+}
+
+// When HEY serves a note as plain text alone, note_markdown is made from that text, and
+// note_markdown_lossless is judged against the same text rather than the empty HTML.
+func TestContactNoteLosslessJudgesThePlainTextFallback(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		note string
+		want bool
+	}{
+		{name: "lines", note: "Prefers email\nCall after six", want: true},
+		{name: "two blank lines", note: "Prefers email\n\n\nCall after six", want: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := contactNoteLossless(tt.note, ""); got != tt.want {
+				t.Errorf("contactNoteLossless(%q) = %v, want %v", tt.note, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestContactNoteWithAnAttachmentKeepsItWhenChangedAsHTML(t *testing.T) {
+	server, notes := newNoteServer(t, attachedNoteStored, "Signed contract:")
+	noteHTML := showContactNote(t, server).NoteHTML
+	if _, err := runContacts(t, server, "note", "set", "7", "--note-html", noteHTML+"<div>Renewal due in March.</div>"); err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := notes.snapshot()
+	attachments := htmlutil.ExtractAttachments(stored)
+	if len(attachments) != 1 || attachments[0].Filename != "contract.pdf" || attachments[0].URL != "/rails/active_storage/blobs/redirect/eyJfcmFpbHMiOnt9fQ--4f1e/contract.pdf" ||
+		!strings.Contains(stored, "Renewal due in March.") {
+		t.Errorf("stored = %q, want the attachment and the addition", stored)
+	}
+	if strings.Contains(stored, "trix-content") {
+		t.Errorf("stored = %q, want HEY's wrapper taken off", stored)
+	}
+}
+
+// Saving $EDITOR replaces the whole note with what it held, so a note whose Markdown
+// would drop part of it is refused before an editor opens.
+func TestContactNoteFromEditorRefusesANoteItsMarkdownWouldDrop(t *testing.T) {
+	opened := false
+	open := func(string) (string, error) {
+		opened = true
+		return "Renewal due in March.", nil
+	}
+	fetch := func(context.Context, int64) (*generated.ContactNote, error) {
+		return &generated.ContactNote{ContactId: 7, Note: "Signed contract:", NoteHtml: "<div class=\"trix-content\">\n  " + attachedNoteStored + "\n</div>\n"}, nil
+	}
+	_, err := contactNoteFromEditor(t.Context(), 7, fetch, open)
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Hint, "--note-html") {
+		t.Fatalf("error = %#v, want a usage error pointing at --note-html", err)
+	}
+	if opened {
+		t.Error("the editor opened on a note its Markdown would drop part of")
+	}
+}
+
+func TestContactNoteFromEditorOpensOnALosslessNote(t *testing.T) {
+	var prefilled string
+	open := func(existing string) (string, error) {
+		prefilled = existing
+		return existing + "\n\nMoved to the Lisbon office in March.", nil
+	}
+	fetch := func(context.Context, int64) (*generated.ContactNote, error) {
+		return &generated.ContactNote{ContactId: 7, Note: webEditedNotePlain, NoteHtml: webEditedNoteHTML}, nil
+	}
+	edited, err := contactNoteFromEditor(t.Context(), 7, fetch, open)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "**Anniversary:** June 12\n\n- Prefers texts after six"; prefilled != want {
+		t.Errorf("editor opened on %q, want %q", prefilled, want)
+	}
+	if !strings.HasSuffix(edited, "Moved to the Lisbon office in March.") {
+		t.Errorf("edited = %q", edited)
+	}
+}
+
+// Through the command, with a real $EDITOR: a note with an attachment is refused and
+// nothing is written or opened; a lossless note is edited and saved.
+func TestContactNoteSetAtATerminalGuardsTheEditor(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in editor is a shell script")
+	}
+	previous := stdinIsTerminal
+	stdinIsTerminal = func() bool { return true }
+	t.Cleanup(func() { stdinIsTerminal = previous })
+
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "opened")
+	script := filepath.Join(dir, "editor")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\n: > '"+marker+"'\nprintf '\\n\\nMoved to the Lisbon office in March.\\n' >> \"$1\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("EDITOR", script)
+
+	server, notes := newNoteServer(t, attachedNoteStored, "Signed contract:")
+	_, err := runContacts(t, server, "note", "set", "7")
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage {
+		t.Fatalf("error = %#v, want a usage error", err)
+	}
+	if _, writes := notes.snapshot(); len(writes) != 0 {
+		t.Errorf("writes = %q, want none", writes)
+	}
+	if _, statErr := os.Stat(marker); statErr == nil {
+		t.Error("the editor opened on a note its Markdown would drop part of")
+	}
+
+	server, notes = newNoteServer(t, webEditedNoteStored, webEditedNotePlain)
+	if _, err := runContacts(t, server, "note", "set", "7"); err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := notes.snapshot()
+	if want := "<p><strong>Anniversary:</strong> June 12</p>\n<ul>\n<li>Prefers texts after six</li>\n</ul>\n<p>Moved to the Lisbon office in March.</p>"; stored != want {
+		t.Errorf("stored = %q, want %q", stored, want)
+	}
+}
+
+func TestContactNoteReadFailuresAreReported(t *testing.T) {
+	for _, tt := range []struct {
+		status int
+		code   string
+	}{
+		{status: http.StatusNotFound, code: apierr.CodeNotFound},
+		{status: http.StatusInternalServerError, code: apierr.CodeAPI},
+	} {
+		t.Run(tt.code, func(t *testing.T) {
+			server, notes := newNoteServer(t, webEditedNoteStored, webEditedNotePlain)
+			notes.status = tt.status
+			for _, args := range [][]string{{"note", "show", "7"}, {"show", "7"}} {
+				resp, err := runContacts(t, server, args...)
+				var cliErr *apierr.Error
+				if !errors.As(err, &cliErr) || cliErr.Code != tt.code {
+					t.Errorf("%v: error = %#v, want %s", args, err, tt.code)
+				}
+				if resp.Data != nil {
+					t.Errorf("%v: data = %#v, want none", args, resp.Data)
+				}
+			}
+		})
+	}
+}
+
+// The skill's recipe for adding to a note reads note_markdown through a --jq filter that
+// checks note_markdown_lossless itself, and writes only if that read succeeds. This runs
+// the recipe's own filter against a note Markdown cannot carry and against one it can.
+func TestSkillNoteRecipeWritesOnlyALosslessNote(t *testing.T) {
+	skill, err := skills.FS.ReadFile("hey/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, write := skillNoteRecipe(t, string(skill))
+	filter := regexp.MustCompile(`--jq '([^']*)'`).FindStringSubmatch(read)
+	if filter == nil || !strings.HasSuffix(strings.TrimSpace(read), "&&") || !strings.Contains(write, "| hey contact note set 12345") {
+		t.Fatalf("recipe = %q / %q, want a --jq read, then && and a note set", read, write)
+	}
+
+	server, notes := newNoteServer(t, attachedNoteStored, "Signed contract:")
+	if out, err := runContactsRaw(t, server, "note", "show", "7", "--jq", filter[1]); err == nil || out != "" {
+		t.Errorf("recipe read of a note with an attachment = %q, %v; want a failure and nothing to write", out, err)
+	}
+	if _, writes := notes.snapshot(); len(writes) != 0 {
+		t.Errorf("writes = %q, want none", writes)
+	}
+
+	server, _ = newNoteServer(t, webEditedNoteStored, webEditedNotePlain)
+	out, err := runContactsRaw(t, server, "note", "show", "7", "--jq", filter[1])
+	if err != nil || strings.TrimSpace(out) != "**Anniversary:** June 12\n\n- Prefers texts after six" {
+		t.Errorf("recipe read of a lossless note = %q, %v; want its Markdown", out, err)
+	}
+}
+
+// skillNoteRecipe finds the recipe's two lines: the read, and the write after it.
+func skillNoteRecipe(t *testing.T, skill string) (read, write string) {
+	t.Helper()
+	lines := strings.Split(skill, "\n")
+	for i, line := range lines {
+		if strings.Contains(line, "note_markdown_lossless then") && i+1 < len(lines) {
+			return line, lines[i+1]
+		}
+	}
+	t.Fatal("the skill has no note_markdown recipe that checks note_markdown_lossless")
+	return "", ""
+}
+
+func runContactsRaw(t *testing.T, server *httptest.Server, args ...string) (string, error) {
+	t.Helper()
+	t.Setenv("HEY_TOKEN", "test-token")
+	t.Setenv("HEY_NO_KEYRING", "1")
+	t.Setenv("HEY_BASE_URL", "")
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	t.Setenv("XDG_STATE_HOME", tmpDir)
+	t.Setenv("XDG_CACHE_HOME", tmpDir)
+
+	root := newRootCmd()
+	var stdout, stderr bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetErr(&stderr)
+	root.SetArgs(append([]string{"contact", "--base-url", server.URL}, args...))
+	err := root.Execute()
+	return stdout.String(), err
+}
