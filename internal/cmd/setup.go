@@ -680,7 +680,7 @@ func showWizardSuccess(w io.Writer, result wizardResult, outcome agentSetupOutco
 				barLine += " — " + bar.Detail
 			}
 			fmt.Fprintln(w, "Bar plugin: "+barLine)
-			desktop := "launcher entry, menu row and theme template in place"
+			desktop := "launcher entry and theme template in place"
 			for _, step := range result.Omarchy.Steps {
 				if step.Name != "bar plugin" && step.Status == "failed" {
 					desktop = step.Name + " failed: " + step.Detail

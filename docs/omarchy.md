@@ -68,12 +68,12 @@ step does not stop the others.
 | Piece | Where | Notes |
 |---|---|---|
 | Desktop entry | `~/.local/share/applications/HEY TUI.desktop` | Distinct from Omarchy's shipped `HEY.desktop` web app. Launches under app-id `org.omarchy.hey` |
-| Menu row | marker block in `~/.config/omarchy/extensions/omarchy-menu.jsonc` | one root `HEY` row that focuses or launches the TUI; its guard is a PATH lookup, never network or `hey` itself. Becomes a submenu once there is more than one thing to open |
+| Menu row | not written | the Omarchy menu belongs to the user and Omarchy, so hey adds nothing to it. Setup takes out the marker block earlier releases wrote into `~/.config/omarchy/extensions/omarchy-menu.jsonc`, leaving the rest of the file untouched |
 | Bar plugin | clone under `~/.config/omarchy/plugins/37signals.hey`, entry in `~/.config/omarchy/shell.json`'s bar layout | installed and enabled automatically by the full **`hey setup`** wizard; other interactive sign-ins ask once (see below). This command also finishes an interrupted install and re-enables a plugin you disabled, verified against the running shell. `--notify` / `--no-notify` set or delete the entry's `notify` key, which the shell hot-reloads and the plugin reads to decide whether to toast. `--remove` disables the plugin and keeps its checkout. An earlier inline `hey-unread` module is removed on sight, its notify choice carried over |
 | Theme template | `~/.config/omarchy/themed/hey.toml.tpl` | renders `hey.toml` into every theme so theme authors can override the overlay; triggers `omarchy-theme-refresh` |
 | Keybinding | printed, never written | `o.bind("SUPER + SHIFT + ALT + H", "HEY TUI", "omarchy-launch-or-focus-tui --app-id=org.omarchy.hey hey tui")`; SUPER+SHIFT+E keeps opening the web app unless you `hl.unbind` it. Spelled out rather than `{ tui = "hey tui" }` because the lua helper quotes that into one word and the app-id derived from it would never match |
 
-Every surface — launcher, menu, bar click, keybinding — uses the same app-id
+Every surface — launcher, bar click, keybinding — uses the same app-id
 (`org.omarchy.hey`) so they all focus one window. That is why the desktop entry is tiled
 rather than `TUI.float`: the float class is shared by every floating TUI, and
 focus-or-launch would grab whichever one was open.
