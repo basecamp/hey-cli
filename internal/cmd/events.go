@@ -15,6 +15,7 @@ import (
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
 	"github.com/basecamp/hey-cli/internal/terminal"
+	"github.com/basecamp/hey-cli/internal/timezone"
 )
 
 // recordingTypeEvent is how HEY names an event among the recordings a calendar holds.
@@ -833,7 +834,7 @@ func (f *eventFields) validateExplicitScheduleFlags(cmd *cobra.Command) error {
 		if f.timeZone == "" {
 			return apierr.ErrUsageHint("--time-zone needs a time zone", "an IANA time zone name, for example America/New_York")
 		}
-		if _, err := loadEventZone(f.timeZone); err != nil {
+		if _, err := timezone.Load(f.timeZone); err != nil {
 			return errInvalidTimeZone(f.timeZone)
 		}
 	}
@@ -953,7 +954,7 @@ func endsAfterItStarts(schedule eventSchedule, startZone, endZone clockZone) err
 // else, which would move it on an edit that never touched it. Two things cannot be sent back
 // as they are. HEY is sent a clock time in whole minutes, so an end with seconds — an event
 // HEY imported — would lose them. And of the two moments a clock time names in the hour the
-// clocks go back, HEY takes one (see heysChoice), so an end at the other — imported again,
+// clocks go back, HEY takes one (see timezone.WallClock), so an end at the other — imported again,
 // or a zoneless event given a zone — would move by however far the clocks went back.
 func keepsItsMoment(end string, had time.Time, date, clock string, zone clockZone) error {
 	sent := zone.instant(date, clock)
@@ -964,36 +965,13 @@ func keepsItsMoment(end string, had time.Time, date, clock string, zone clockZon
 	if !had.Equal(had.Truncate(time.Minute)) {
 		return apierr.ErrUsageHint(
 			fmt.Sprintf("the event's %s is at %s %s, and HEY is only sent whole minutes, so the edit would move it %s",
-				end, had.In(zone.loc).Format(time.DateTime+".999999999"), zone.label(), movedBy(had, sent)),
+				end, had.In(zone.loc).Format(time.DateTime+".999999999"), zone.label(), timezone.MovedBy(had, sent)),
 			hint)
 	}
 	return apierr.ErrUsageHint(
 		fmt.Sprintf("the event's %s, %s %s %s, falls in the hour the clocks repeat as they go back, and HEY would place that clock time at its other moment, so the edit would move it %s",
-			end, date, clock, zone.label(), movedBy(had, sent)),
+			end, date, clock, zone.label(), timezone.MovedBy(had, sent)),
 		hint+", or choose a time outside that hour")
-}
-
-// movedBy says how far and which way an end would move, from had to sent.
-func movedBy(had, sent time.Time) string {
-	moved, way := sent.Sub(had), "later"
-	if moved < 0 {
-		moved, way = -moved, "earlier"
-	}
-	switch {
-	case moved == time.Hour:
-		return "an hour " + way
-	case moved%time.Hour == 0:
-		return fmt.Sprintf("%d hours %s", moved/time.Hour, way)
-	case moved%time.Minute == 0:
-		return fmt.Sprintf("%d minutes %s", moved/time.Minute, way)
-	case moved < time.Millisecond:
-		return "less than a millisecond " + way
-	case moved < time.Second:
-		return fmt.Sprintf("%s milliseconds %s", strconv.FormatFloat(float64(moved)/float64(time.Millisecond), 'f', -1, 64), way)
-	case moved < time.Minute:
-		return fmt.Sprintf("%s seconds %s", strconv.FormatFloat(moved.Seconds(), 'f', -1, 64), way)
-	}
-	return moved.String() + " " + way
 }
 
 // clockZone is the zone one end of an edited event is read and written in. An end with no
@@ -1006,12 +984,12 @@ type clockZone struct {
 // instant is when a date and clock time sent in this zone happen: placed as HEY places them
 // for a named zone, and as UTC for a zoneless end, which is sent that way.
 func (z clockZone) instant(date, clock string) time.Time {
-	day, _ := time.Parse(dateLayout, date)
-	at, _ := time.Parse(clockLayout, clock)
+	loc := z.loc
 	if z.name == "" {
-		return time.Date(day.Year(), day.Month(), day.Day(), at.Hour(), at.Minute(), 0, 0, time.UTC)
+		loc = nil
 	}
-	return wallClockOn(day, at, z.loc)
+	at, _ := timezone.Placed(date, clock, loc)
+	return at
 }
 
 // label is the zone as a refusal names it.
@@ -1081,7 +1059,7 @@ func (f *eventFields) editZones(ctx context.Context, cmd *cobra.Command, event g
 
 // storedZone loads a zone an event was saved in.
 func storedZone(name string) (clockZone, error) {
-	loc, err := loadEventZone(name)
+	loc, err := timezone.Load(name)
 	if err != nil {
 		return clockZone{}, &apierr.Error{
 			Code:    apierr.CodeUsage,
@@ -1104,7 +1082,7 @@ func zonelessEnd(had time.Time, date, clock string, loc *time.Location, retyped 
 	// moves on to the first one that exists rather than back an hour.
 	day, _ := time.Parse(dateLayout, date)
 	at, _ := time.Parse(clockLayout, clock)
-	return eventClock(wallClockOn(day, at, loc), time.UTC)
+	return eventClock(timezone.WallClock(day, at, loc), time.UTC)
 }
 
 // defaultEventStartTime is when an all-day event starts once it is given a time but not one of
@@ -1141,12 +1119,12 @@ func defaultEnd(startsOn, startTime, endsOn string, loc *time.Location) (string,
 	}
 	day, _ := time.Parse(dateLayout, startsOn)
 	clock, _ := time.Parse(clockLayout, startTime)
-	end := wallClockOn(day, clock, loc).Add(eventDuration).In(loc)
+	end := timezone.WallClock(day, clock, loc).Add(eventDuration).In(loc)
 	endsOn, endTime := end.Format(dateLayout), end.Format(clockLayout)
-	if placed := wallClockOn(end, end, loc); !placed.Equal(end) {
+	if placed := timezone.WallClock(end, end, loc); !placed.Equal(end) {
 		return "", "", apierr.ErrUsageHint(
 			fmt.Sprintf("an hour after it starts, the event would end at %s %s %s, a clock time the clocks show twice as they go back, and HEY would place it %s",
-				endsOn, endTime, terminal.SanitizeLine(loc.String()), movedBy(end, placed)),
+				endsOn, endTime, terminal.SanitizeLine(loc.String()), timezone.MovedBy(end, placed)),
 			"pass --end-time to say when it ends")
 	}
 	return endsOn, endTime, nil

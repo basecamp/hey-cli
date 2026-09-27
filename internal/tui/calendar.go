@@ -239,9 +239,17 @@ type yearLoadedMsg struct {
 // identityLoadedMsg stays off the request lane: the identity's calendar preferences are
 // read once, alongside the calendars rather than instead of them, so putting it on the
 // lane would cancel the read it was batched with.
+//
+// It carries a count of its own instead: read is which visit's read this answers, so an
+// answer from an earlier visit that lands after a later one's is dropped rather than
+// putting that visit's zone back.
 type identityLoadedMsg struct {
+	read         int
 	firstWeekDay time.Weekday
 	use24Hour    bool
+	// timeZone is the account's zone as the identity serves it, and empty when it has none
+	// or the read failed.
+	timeZone string
 }
 
 // calendarSettingsSavedMsg is the settings form's write landing — or not.
@@ -391,6 +399,16 @@ type calendarView struct {
 	// it, and the settings form writes it back.
 	use24Hour bool
 
+	// accountZone is the zone HEY's web app reads a typed time in, as the identity served it
+	// when this section was last entered, and what a new event's times are written in. It is
+	// read with the rest of the identity rather than kept anywhere longer-lived, so a zone
+	// changed on the web is picked up the next time the calendar is opened, and it is empty
+	// until that read answers.
+	accountZone string
+	// identityRead counts the identity reads started, one a visit, so only the latest is
+	// taken; see identityLoadedMsg.
+	identityRead int
+
 	// now is the clock the calendar anchors on. It is read on every fetch and
 	// every render, so a TUI left open overnight moves to the new day instead of
 	// fetching around the day it started on while the grid highlights today.
@@ -519,6 +537,11 @@ func newCalendarView(vc *viewContext) *calendarView {
 }
 
 func (v *calendarView) Init() tea.Cmd {
+	// The account's zone is this read's answer rather than the last one's, so a zone changed
+	// on the web, or a read that fails, is never covered by what an earlier visit was told. A
+	// form opened before the answer lands opens on Local and takes the zone when it does.
+	v.accountZone = ""
+	v.identityRead++
 	cmds := []tea.Cmd{v.fetchIdentity(), v.requestOngoingTrack(), v.followClock()}
 	if len(v.calendars) == 0 {
 		cmds = append(cmds, v.requestCalendars())
@@ -550,8 +573,15 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return v.animate(), true
 
 	case identityLoadedMsg:
+		if msg.read != v.identityRead {
+			return nil, true
+		}
 		v.firstWeekDay = msg.firstWeekDay
 		v.use24Hour = msg.use24Hour
+		v.accountZone = msg.timeZone
+		if v.eventForm != nil {
+			v.eventForm.adoptAccountZone(msg.timeZone)
+		}
 		v.rebuildView()
 		return nil, true
 
@@ -2081,7 +2111,7 @@ func (v *calendarView) startEventForm(mode eventFormMode, event Recording) tea.C
 		return notifyError("Cannot add an event", errNoCalendars)
 	}
 	v.editing = event
-	v.eventForm = newEventForm(mode, event, v.day(), fileable, v.newEventCalendarID(fileable), v.vc.styles)
+	v.eventForm = newEventForm(mode, event, v.newEventDay(), fileable, v.newEventCalendarID(fileable), v.accountZone, v.vc.styles)
 
 	// An edit is handed what the event already carries, and this is load-bearing rather than a
 	// courtesy: HEY clears the notes, location, link and attached email on any write that
@@ -2097,6 +2127,18 @@ func (v *calendarView) startEventForm(mode eventFormMode, event Recording) tea.C
 	}
 	v.eventForm.resize(v.vc.width, v.vc.height)
 	return v.eventForm.init()
+}
+
+// newEventDay is the moment a new event is offered from: the day in view, carrying the clock
+// it had when the view was moved there. A pinned view that has become today — `n` to
+// tomorrow at 09:15, the TUI left open until the next afternoon — would offer an hour long
+// gone, so today is read off the clock now instead.
+func (v *calendarView) newEventDay() time.Time {
+	now := v.now()
+	if day := v.day(); !sameDay(day, now) {
+		return day
+	}
+	return now
 }
 
 // saveEvent writes what the form is holding, including which calendar it is on: an update
@@ -2408,21 +2450,24 @@ func sdkRecordingToModel(r generated.Recording) Recording {
 // --- Fetch commands ---
 
 func (v *calendarView) fetchIdentity() tea.Cmd {
+	read := v.identityRead
 	return func() tea.Msg {
 		if v.vc.sdk == nil || v.vc.ctx == nil {
-			return identityLoadedMsg{firstWeekDay: time.Monday}
+			return identityLoadedMsg{read: read, firstWeekDay: time.Monday}
 		}
 		identity, err := v.vc.sdk.Identity().GetIdentity(v.vc.ctx)
 		if err != nil || identity == nil {
-			return identityLoadedMsg{firstWeekDay: time.Monday}
+			return identityLoadedMsg{read: read, firstWeekDay: time.Monday}
 		}
 		wd := identity.FirstWeekDay
 		if wd < 0 || wd > 6 {
 			wd = 1 // default to Monday
 		}
 		return identityLoadedMsg{
+			read:         read,
 			firstWeekDay: time.Weekday(wd),
 			use24Hour:    identity.TimeFormat == string(hey.TimeFormatTwentyFourHour),
+			timeZone:     identity.TimeZone,
 		}
 	}
 }

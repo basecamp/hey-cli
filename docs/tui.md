@@ -146,4 +146,23 @@ The private note is shown formatted and edited as Markdown, the way `hey contact
 
 Press Shift+C to open Calendar, then `c` to manage time track categories. Create a category with `n`, rename the selected category with Enter or `r`, and press `x` twice to delete it. Time tracks in a deleted category become uncategorized.
 
+A new event's times are written in your HEY account's time zone, the one HEY's web app and
+`hey event add` use: the Starts and Ends rows name it, and the event is saved in it. The
+Calendar reads the zone each time it opens; if the account has none or it cannot be read,
+the form opens on `Local` instead, and a form opened before the read answers takes the zone
+when it does, unless you have already edited a date or a time, chosen a zone, switched
+All day, or pressed Ctrl+S — any save, even one that was refused or failed, keeps the form
+as you saw it. The zone list still offers `Local` (your machine's clock) and the zones in
+your machine's zone database, or a shortlist of common zones where that database cannot be
+listed. An event with both ends on `Local` is saved without a zone; a `Local` end beside one
+in a named zone is written in that zone, at the same moment, since HEY keeps a zone for both
+ends or neither. An edit keeps the
+event's own zone, and an event saved without one stays on `Local`; an all-day event given a
+time takes the account's zone. Times are read as HEY reads them, on `Local` too: a time the
+clocks skip moves on to one that exists. A time you leave showing what it opened with keeps
+the moment it had, even if you typed at it and took it back. Saving refuses one HEY would put
+somewhere else — at the second of two moments as the clocks go back, or with seconds — rather
+than moving the event: choose another time, or press Ctrl+S again to save it where HEY reads it.
+The tracked-time form keeps an unchanged time the same way.
+
 In Calendar, press `a` to create a habit. Habits visible in the current calendar range can be selected with `[` and `]`, edited with `e`, and deleted by pressing `x` twice. Habit forms use Tab to move between fields and Ctrl+S to save.

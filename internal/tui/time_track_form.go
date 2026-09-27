@@ -250,8 +250,8 @@ func (f *timeTrackForm) validate() string {
 	if problem := f.ends.problem(); problem != "" {
 		return "Ends: " + problem
 	}
-	starts, _ := f.starts.moment()
-	ends, _ := f.ends.moment()
+	starts, _ := f.when(f.starts, f.startsArrived)
+	ends, _ := f.when(f.ends, f.endsArrived)
 	if ends.Before(starts) {
 		return "It cannot end before it starts"
 	}
@@ -264,17 +264,29 @@ func (f *timeTrackForm) validate() string {
 	return ""
 }
 
+// when is one end of the track: the instant it arrived with while the picker still shows what
+// it opened with, and what the picker reads once it shows something else. A picker shows a
+// clock time, and the second 01:30 of a night the clocks go back reads back as the first, so
+// reading an unchanged end off the picker would move it on a save that only changed the
+// category — however the reader got back to the value it opened with.
+func (f *timeTrackForm) when(p *dateTimePicker, arrived time.Time) (time.Time, bool) {
+	if !p.moved() {
+		return arrived, true
+	}
+	return p.moment()
+}
+
 // payload is what changed, and nothing else: an omitted field is a field HEY leaves alone.
 func (f *timeTrackForm) payload() (generated.UpdateTimeTrackPayload, bool) {
 	var payload generated.UpdateTimeTrackPayload
 	changed := false
 
-	if starts, ok := f.starts.moment(); ok && !starts.Equal(f.startsArrived.Truncate(time.Minute)) {
+	if starts, ok := f.when(f.starts, f.startsArrived); ok && !starts.Truncate(time.Minute).Equal(f.startsArrived.Truncate(time.Minute)) {
 		utc := starts.UTC()
 		payload.StartsAt = &utc
 		changed = true
 	}
-	if ends, ok := f.ends.moment(); ok && !ends.Equal(f.endsArrived.Truncate(time.Minute)) {
+	if ends, ok := f.when(f.ends, f.endsArrived); ok && !ends.Truncate(time.Minute).Equal(f.endsArrived.Truncate(time.Minute)) {
 		utc := ends.UTC()
 		payload.EndsAt = &utc
 		changed = true
@@ -343,8 +355,8 @@ func (f *timeTrackForm) caution() string {
 // length and spanLine are the track as the list shows it, kept in front of the reader while
 // they move its ends around.
 func (f *timeTrackForm) length() time.Duration {
-	starts, startsOK := f.starts.moment()
-	ends, endsOK := f.ends.moment()
+	starts, startsOK := f.when(f.starts, f.startsArrived)
+	ends, endsOK := f.when(f.ends, f.endsArrived)
 	if !startsOK || !endsOK {
 		return 0
 	}
