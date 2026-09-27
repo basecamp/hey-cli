@@ -405,10 +405,12 @@ the whole window rather than reading up to the default end.
 day`, `week` and `list`, `hey habit list`, `complete` and `uncomplete`, `hey journal read`
 and `write`, and `hey todo add` — works it out in your HEY account's time zone and sends
 the date. HEY would read "now" in UTC, and a server's clock is UTC too, so in New York
-after 20:00 either would name tomorrow. The account's zone is read at most once, and not
-at all when you name the date. If the account has no zone set, or one this build does not
-know, a read uses this machine's today and says so on stderr, while a write is refused and
-asks you to name the date. A failed read of the account is an error either way, with the
+after 20:00 either would name tomorrow. Resolving today's date reads the identity once for
+the account's zone, and naming the date skips that read. A specific `--account` is validated
+by a separate identity read before the command runs, so a defaulted command with it reads
+the identity twice and a dated command once. If the account has no zone set, or one this
+build does not know, a read uses this machine's today and says so on stderr, while a write
+is refused and asks you to name the date. A failed read of the account is an error either way, with the
 code it failed with; a sign-in failure is reported as one. `hey todo list` and `hey
 journal list` read years either side of today, so they use this machine's clock without
 asking.

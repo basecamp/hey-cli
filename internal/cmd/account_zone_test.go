@@ -70,7 +70,8 @@ func todayServer(t *testing.T, fixture todayFixture) (http.Handler, *todayReques
 				if fixture.accountZone != "" {
 					zone = `"` + fixture.accountZone + `"`
 				}
-				_, _ = io.WriteString(w, `{"id":1,"name":"Jason Fried","time_zone":`+zone+`}`)
+				_, _ = io.WriteString(w, `{"id":1,"name":"Jason Fried","time_zone":`+zone+`,`+
+					`"accounts":[{"id":2,"name":"Work","purpose":"work","status":"active"}]}`)
 			}
 		case path == "/calendars":
 			requests.record("GET /calendars")
@@ -188,6 +189,35 @@ func TestANamedDayReadsNoAccountZone(t *testing.T) {
 			}
 			if got := requests.identity.Load(); got != 0 {
 				t.Errorf("identity reads = %d, want none", got)
+			}
+		})
+	}
+}
+
+// A specific --account is validated by the SDK with an identity read before the command
+// runs. Resolving an omitted date makes its own read for the zone; naming the date skips
+// that read, but not account validation.
+func TestAccountSelectionReadsIdentitySeparatelyFromToday(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		args          []string
+		wantDay       string
+		identityReads int32
+	}{
+		{name: "default date", args: []string{"--account", "2", "event", "day"}, wantDay: "2026-10-14", identityReads: 2},
+		{name: "named date", args: []string{"--account", "2", "event", "day", "2026-03-15"}, wantDay: "2026-03-15", identityReads: 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			atInstantOn(t, "2026-10-15T02:00:00Z", "UTC")
+			handler, requests := todayServer(t, todayFixture{accountZone: "America/New_York"})
+			if _, err := runJSONCommand(t, handler, tt.args...); err != nil {
+				t.Fatalf("execute event day: %v", err)
+			}
+			if sent := requests.all(); !strings.Contains(sent, "GET /calendar/days/"+tt.wantDay) {
+				t.Errorf("requests =\n%s\nwant the day %s", sent, tt.wantDay)
+			}
+			if got := requests.identity.Load(); got != tt.identityReads {
+				t.Errorf("identity reads = %d, want %d", got, tt.identityReads)
 			}
 		})
 	}

@@ -20,8 +20,10 @@ var clockNow = time.Now
 // todayUnknown is what a refusal to name today says it could not do.
 const todayUnknown = "cannot tell which day today is"
 
-// accountZone is the HEY account's time zone as the identity serves it, read at most once a
-// command and only when something needs it: a clock time to place, or a today to name.
+// accountZone is the HEY account's time zone as the identity serves it. Zone resolution
+// reads the identity at most once and only when something needs it: a clock time to place,
+// or a today to name. A specific --account is validated by a separate identity read before
+// the command runs.
 type accountZone struct {
 	read bool
 	name string
