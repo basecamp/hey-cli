@@ -33,10 +33,12 @@ func newContactsDeliverCommand() *contactsDeliverCommand {
 	deliverCommand.cmd = &cobra.Command{
 		Use:   "deliver <contact-id>",
 		Short: "Choose where a contact's email arrives",
-		Long: "Choose where future email from a contact arrives: the Imbox, The Feed, Paper Trail, or Screened Out. " +
-			"Screened Out applies only to external email contacts. Selecting The Feed removes an existing bundle; Imbox and Paper Trail preserve eligible bundles.",
+		Long: "Choose where future email from a contact arrives. Pass a contact ID and one of the exact --to values: imbox, feed, papertrail, or screened-out. " +
+			"Screened Out applies only to external email contacts. Imbox removes a custom box preference; selecting Imbox, The Feed, or Paper Trail does not approve a contact that is already Screened Out. " +
+			"Selecting The Feed removes an existing bundle; Imbox and Paper Trail preserve eligible bundles. This command is write-only because HEY does not expose the current setting as structured data. " +
+			"Existing mail may move asynchronously, so success means HEY accepted the change, not that every affected thread has already moved.",
 		Annotations: map[string]string{
-			"agent_notes": "Use a contact ID from `hey contact list`, not a clearance ID, box item ID, box ID, or email address. Accepted --to values: imbox, feed, papertrail, screened-out. This command changes the setting but cannot read it back.",
+			"agent_notes": "Use a contact ID from `hey contact list`, not a clearance ID, box item ID, box ID, or email address. Pass the exact --to token: imbox, feed, papertrail, or screened-out.",
 		},
 		Example: `  hey contact deliver 12345 --to feed
   hey contact deliver 12345 --to screened-out`,

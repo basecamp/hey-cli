@@ -71,6 +71,39 @@ func newContactDeliveryServer(t *testing.T) *contactDeliveryServer {
 	return state
 }
 
+func TestContactDeliverHelpDescribesRoutingContract(t *testing.T) {
+	command := newContactsDeliverCommand().cmd
+	var output bytes.Buffer
+	command.SetOut(&output)
+	command.SetErr(&output)
+	command.SetArgs([]string{"--help"})
+	if err := command.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	help := output.String()
+	for _, want := range []string{
+		"Pass a contact ID",
+		"exact --to values: imbox, feed, papertrail, or screened-out",
+		"Screened Out applies only to external email contacts",
+		"Imbox removes a custom box preference",
+		"does not approve a contact that is already Screened Out",
+		"Selecting The Feed removes an existing bundle",
+		"write-only",
+		"Existing mail may move asynchronously",
+		"success means HEY accepted the change",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("help does not contain %q:\n%s", want, help)
+		}
+	}
+
+	const wantAgentNotes = "Use a contact ID from `hey contact list`, not a clearance ID, box item ID, box ID, or email address. Pass the exact --to token: imbox, feed, papertrail, or screened-out."
+	if got := command.Annotations["agent_notes"]; got != wantAgentNotes {
+		t.Errorf("agent notes = %q, want %q", got, wantAgentNotes)
+	}
+}
+
 func TestContactDeliverDesignatesCanonicalBoxes(t *testing.T) {
 	tests := []struct {
 		destination string
