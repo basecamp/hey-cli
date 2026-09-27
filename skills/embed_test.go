@@ -34,6 +34,29 @@ func TestHeySkillReusesAuthenticationForUnattendedAgents(t *testing.T) {
 	}
 }
 
+func TestHeySkillExplainsContactDeliveryRouting(t *testing.T) {
+	data, err := FS.ReadFile("hey/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+
+	for _, want := range []string{
+		"hey contact deliver <contact_id> --to imbox\\|feed\\|papertrail\\|screened-out",
+		"contact ID",
+		"clearance ID",
+		"box item ID",
+		"box ID",
+		"Screened Out is the deny/blocking choice and applies only to external email contacts",
+		"Selecting Feed removes an existing bundle",
+		"write-only",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("embedded HEY skill does not contain %q", want)
+		}
+	}
+}
+
 func TestHeySkillRetriesMacOSKeychainAccessWithoutBroadEscalation(t *testing.T) {
 	data, err := FS.ReadFile("hey/SKILL.md")
 	if err != nil {

@@ -202,6 +202,7 @@ postings, not the box, label or contact around them.
 | Edit contact | `hey contact update <contact_id> --name "Jane Dawson"` |
 | Hide contact | `hey contact hide <contact_id>` |
 | Show contact again | `hey contact show-again <contact_id>` |
+| Choose where a contact's future email arrives | `hey contact deliver <contact_id> --to imbox\|feed\|papertrail\|screened-out` |
 | Bundle a contact's mail | `hey contact bundle <contact_id>` |
 | List a contact's mail separately | `hey contact unbundle <contact_id>` |
 | List a bundle's unseen threads | `hey bundle view <box_item_id> --json` |
@@ -298,6 +299,7 @@ Want to read email?
 ├── List or view contacts? → hey contact list --json / hey contact show <contact_id> --json
 ├── Find a contact by email? → hey contact list --all --jq (see Contacts)
 ├── Every thread with a contact? → hey contact threads <contact_id> --json
+├── Change where a contact's future email arrives? → hey contact deliver <contact_id> --to imbox|feed|papertrail|screened-out
 ├── A row with kind "bundle"? → hey bundle view <box_item_id> --json (its unseen threads)
 ├── Read full thread? → hey thread read <topic_id> --json
 ├── Get a sharing link? → hey share <topic_id>
@@ -465,6 +467,8 @@ hey contact update 12345 --name "Jane Dawson"
 hey contact update 12345 --alias=              # Clear aliases
 hey contact hide 12345                         # Hide from lists and autocomplete
 hey contact show-again 12345                   # Reverse hiding
+hey contact deliver 12345 --to feed            # Route future email to The Feed
+hey contact deliver 12345 --to screened-out    # Block future email from an external contact
 hey contact bundle 12345                       # Group this contact's mail into one row
 hey contact unbundle 12345                     # List this contact's mail separately
 hey contact note show 12345 --json
@@ -479,7 +483,11 @@ hey contact note delete 12345
 
 `hey contact show` adds aliases, screening status, the private note, and `postings`: a page of the contact's threads, which can run to tens of kilobytes. Drop it with `--jq '.data | del(.postings)'`, read just the note with `hey contact note show`, or page through every thread with `hey contact threads`. Contact updates preserve omitted fields. Supplying `--alias` replaces the complete alias list, and `--alias=` clears it.
 
-HEY hides contacts instead of permanently deleting them. A hidden contact leaves contact lists, autocomplete, and search results while remaining available by ID; `show-again` reverses the action. A contact that is hidden, an alias, or another HEY user cannot be edited: `contact update`, `contact note set` and `contact note delete` answer `not_found`. Bundling groups a contact's mail into one row without merging or deleting the underlying threads; `unbundle` lists those threads separately again. HEY bundles only a contact with no box preference or one sent to the Paper Trail; for any other, `bundle` answers success and changes nothing.
+HEY hides contacts instead of permanently deleting them. A hidden contact leaves contact lists, autocomplete, and search results while remaining available by ID; `show-again` reverses the action. A contact that is hidden, an alias, or another HEY user cannot be edited: `contact update`, `contact note set` and `contact note delete` answer `not_found`.
+
+`hey contact deliver` takes a **contact ID** from contact data — never substitute an email address, clearance ID, box item ID, or box ID. Its four exact destinations are `imbox`, `feed`, `papertrail`, and `screened-out`. Imbox removes a custom box preference; selecting a box does not approve a contact that is already Screened Out. Screened Out is the deny/blocking choice and applies only to external email contacts. Selecting Feed removes an existing bundle because HEY cannot keep a Feed-designated contact bundled; Imbox and Paper Trail preserve eligible bundles. The command is write-only: HEY does not expose the current setting as structured data, and existing mail may move asynchronously after success.
+
+Bundling groups a contact's mail into one row without merging or deleting the underlying threads; `unbundle` lists those threads separately again. HEY bundles only a contact with no box preference or one sent to the Paper Trail; for any other, `bundle` answers success and changes nothing.
 
 **A contact note is written whole.** `hey contact note set` replaces the entire note — there is no append — so to add a detail, read the note, change it, and write all of it back. It takes Markdown — positional, `--note`, stdin, or `$EDITOR` (which opens on the existing note, and is refused when `note_markdown_lossless` is false) — or raw HTML with `--note-html`; an empty note is refused, and `hey contact note delete` clears one without touching the contact. `hey contact note show --json` answers `note` (HEY's plain text, which loses formatting: bold is dropped, list items become `•`), `note_html` (the HTML as HEY serves it), `note_markdown`, and `note_markdown_lossless`. When `note_markdown_lossless` is `true`, `note_markdown` holds everything in the note and `note set` writes it back as the same note, so add to the Markdown. The read checks the flag itself and fails when it is `false`, so nothing is written:
 

@@ -13,7 +13,7 @@ which is what `Entries().ListDraftsPage` and `hey draft list --page` exist for.
 
 | Endpoint | Method | Client | CLI Command | Status |
 |----------|--------|--------|-------------|--------|
-| `/boxes.json` | GET | SDK `Boxes().List` | `hey box list` | covered |
+| `/boxes.json` | GET | SDK `Boxes().List`, `BoxIDByKind` | `hey box list`, `hey contact deliver` (canonical destination lookup) | covered |
 | `/boxes/{id}.json` | GET | SDK `Boxes().Get`, `Boxes().GetPage` | `hey box view <id>`, TUI mail list growth | covered |
 | `/imbox.json` | GET | SDK `Boxes().GetImbox` | `hey box view imbox` | covered |
 | `/imbox/seen.json` | GET | SDK `Boxes().GetImboxSeen` | TUI Previously Seen screen | covered |
@@ -43,13 +43,15 @@ which is what `Entries().ListDraftsPage` and `hey draft list --page` exist for.
 | `/my/clearances.json` | GET | SDK `Clearances().Screened`, `ScreenedPage` | `hey screener history`, TUI Screener History | covered |
 | `/my/clearances/{id}` | PATCH | SDK `Clearances().Rescreen` | — | unused by the CLI |
 | `/contacts.json` | GET | SDK `Contacts().List` | `hey contact list`, Contacts TUI | covered |
-| `/contacts/{id}.json` | GET | SDK `Contacts().Get` | `hey contact show`, Contacts TUI | covered |
+| `/contacts/{id}.json` | GET | SDK `Contacts().Get` | `hey contact show`, `hey contact deliver --to screened-out` (external-contact check), Contacts TUI | covered |
 | `/contacts.json` | POST | SDK `Contacts().Create` | `hey contact add`, Contacts TUI | covered |
 | `/contacts/{id}.json` | PATCH | SDK `Contacts().Update` | `hey contact update`, Contacts TUI | covered |
 | `/contacts/{id}.json` | DELETE | SDK `Contacts().Hide` | `hey contact hide`, Contacts TUI | covered |
 | `/contacts/{id}/reveal.json` | POST | SDK `Contacts().Reveal` | `hey contact show-again`, Contacts TUI | covered |
 | `/contacts/{id}/bundle.json` | POST | SDK `Contacts().Bundle` | `hey contact bundle` | covered |
 | `/contacts/{id}/bundle.json` | DELETE | SDK `Contacts().Unbundle` | `hey contact unbundle` | covered |
+| `/boxes/{id}/designations.json` | POST | SDK `Designations().Create` | `hey contact deliver <contact-id> --to imbox\|feed\|papertrail` | covered |
+| `/contacts/{id}/clearance.json` | PATCH | SDK `Contacts().Screen` | `hey contact deliver <contact-id> --to screened-out` | covered |
 | `/contacts/{id}/note.json` | GET | SDK `Contacts().Note` | `hey contact note show`, Contacts TUI | covered |
 | `/contacts/{id}/note.json` | PATCH | SDK `Contacts().SetNote` | `hey contact note set`, Contacts TUI | covered |
 | `/contacts/{id}/note.json` | DELETE | SDK `Contacts().DeleteNote` | `hey contact note delete`, Contacts TUI | covered |
