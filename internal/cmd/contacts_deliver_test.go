@@ -19,7 +19,6 @@ type contactDeliveryServer struct {
 	server      *httptest.Server
 	recorded    *recordedContacts
 	contactType string
-	statuses    map[string]int
 	boxes       string
 }
 
@@ -28,7 +27,6 @@ func newContactDeliveryServer(t *testing.T) *contactDeliveryServer {
 	state := &contactDeliveryServer{
 		recorded:    &recordedContacts{statuses: make(map[string]int)},
 		contactType: "Person",
-		statuses:    make(map[string]int),
 		boxes: `[
 			{"id":11,"kind":"imbox","name":"Definitely Not The Imbox"},
 			{"id":22,"kind":"feedbox","name":"Newsletters"},
@@ -45,9 +43,10 @@ func newContactDeliveryServer(t *testing.T) *contactDeliveryServer {
 			Query:  req.URL.RawQuery,
 			Body:   body.Bytes(),
 		})
+		status := state.recorded.statuses[req.Method+" "+req.URL.Path]
 		state.recorded.mu.Unlock()
 
-		if status := state.statuses[req.Method+" "+req.URL.Path]; status != 0 {
+		if status != 0 {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(status)
 			_, _ = w.Write([]byte(`{"message":"request failed"}`))
@@ -220,7 +219,7 @@ func TestContactDeliverStopsAfterReadOrWriteFailure(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			state := newContactDeliveryServer(t)
 			if tc.statusKey != "" {
-				state.statuses[tc.statusKey] = tc.status
+				state.recorded.statuses[tc.statusKey] = tc.status
 			}
 			if tc.boxes != "" {
 				state.boxes = tc.boxes
@@ -247,23 +246,11 @@ func TestContactDeliverStopsAfterReadOrWriteFailure(t *testing.T) {
 
 func TestContactDeliverStyledOutput(t *testing.T) {
 	state := newContactDeliveryServer(t)
-	t.Setenv("HEY_TOKEN", "test-token")
-	t.Setenv("HEY_NO_KEYRING", "1")
-	t.Setenv("HEY_BASE_URL", "")
-	tmpDir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmpDir)
-	t.Setenv("XDG_STATE_HOME", tmpDir)
-	t.Setenv("XDG_CACHE_HOME", tmpDir)
-
-	root := newRootCmd()
-	var stdout bytes.Buffer
-	root.SetOut(&stdout)
-	root.SetErr(&stdout)
-	root.SetArgs([]string{"contact", "--styled", "--base-url", state.server.URL, "deliver", "7", "--to", "feed"})
-	if err := root.Execute(); err != nil {
+	got, err := runStyledCommand(t, state.server.Config.Handler, "contact", "deliver", "7", "--to", "feed")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := stdout.String(), "Delivery changed for contact 7: The Feed.\n"; got != want {
+	if want := "Delivery changed for contact 7: The Feed.\n"; got != want {
 		t.Errorf("output = %q, want %q", got, want)
 	}
 }
