@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -25,7 +24,7 @@ func newJournalCommand() *journalCommand {
 		Use:   "journal",
 		Short: "Read and write journal entries",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, read, write. Read defaults to today; its JSON answers content (HTML as HEY serves it), content_markdown (the form write takes) and content_markdown_lossless; when that is false, change content and write it with --content-html instead. Write replaces the whole entry and accepts --content, stdin, or opens $EDITOR (refused for an entry whose Markdown is not lossless); content is Markdown, or raw HTML via --content-html.",
+			"agent_notes": "Subcommands: list, read, write. Read and write default to today in the HEY account's time zone; write refuses without one, so name the date. Read JSON answers content (HTML as HEY serves it), content_markdown (the form write takes) and content_markdown_lossless; when that is false, change content and write it with --content-html instead. Write replaces the whole entry and accepts --content, stdin, or opens $EDITOR (refused for an entry whose Markdown is not lossless); content is Markdown, or raw HTML via --content-html.",
 		},
 	}
 
@@ -133,6 +132,9 @@ func newJournalReadCommand() *journalReadCommand {
 		Short: "Read a journal entry (default: today)",
 		Long: `Read a journal entry, today's by default.
 
+Without a date the day is today in your HEY account's time zone, whatever this machine's
+is. An account with no time zone set reads this machine's today, and says so on stderr.
+
 JSON answers content, the entry's HTML as HEY serves it; content_markdown, the entry as
 Markdown; and content_markdown_lossless, which says whether that Markdown holds everything in
 the entry. Write content_markdown back with hey journal write only when
@@ -156,15 +158,22 @@ func (c *journalReadCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	date := time.Now().Format(dateLayout)
+	ctx := cmd.Context()
+	var date string
 	if len(args) > 0 {
 		if _, err := parseDateArg("date", args[0]); err != nil {
 			return err
 		}
 		date = args[0]
+	} else {
+		var account accountZone
+		today, err := account.todayToRead(ctx, cmd.ErrOrStderr(), "name the day, for example hey journal read 2026-10-14")
+		if err != nil {
+			return err
+		}
+		date = today.Format(dateLayout)
 	}
 
-	ctx := cmd.Context()
 	content, err := sdk.Journal().GetContent(ctx, date)
 	if err != nil {
 		return apierr.FromSDK(err)
@@ -227,6 +236,9 @@ func newJournalWriteCommand() *journalWriteCommand {
 		Short: "Write or edit a journal entry (default: today)",
 		Long: `Write or edit a journal entry, today's by default.
 
+Without a date the day is today in your HEY account's time zone, whatever this machine's
+is. An account with no time zone set is refused rather than guessed at: name the date.
+
 Content that trims to nothing — whitespace-only, or an emptied $EDITOR buffer — removes the
 day's entry, and the command says "removed" rather than "saved". Omitting content reads
 stdin when it is not a terminal, and otherwise opens $EDITOR on the day's existing entry as
@@ -287,8 +299,15 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	ctx := cmd.Context()
 
+	// Today is the account's, and without it the write is refused before any content is
+	// read or an editor opened: writing over the wrong day's entry is not a guess to make.
 	if date == "" {
-		date = time.Now().Format(dateLayout)
+		var account accountZone
+		today, err := account.todayToWrite(ctx, `name the day first, for example hey journal write 2026-10-14 "Shipped the pagination fix"`)
+		if err != nil {
+			return err
+		}
+		date = today.Format(dateLayout)
 	}
 
 	if c.contentHTML != "" {

@@ -52,7 +52,7 @@ func TestMutationEnvelopeCarriesSummaryAndBreadcrumbs(t *testing.T) {
 func TestMutationOmitsDataTheAPIDidNotSend(t *testing.T) {
 	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
-	}), "todo", "add", "Buy milk")
+	}), "todo", "add", "Buy milk", "--date", "2026-10-14")
 	if err != nil {
 		t.Fatalf("execute todo add: %v", err)
 	}

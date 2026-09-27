@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
@@ -123,8 +122,9 @@ func runBubbleOutput(t *testing.T, server *httptest.Server, args ...string) (str
 }
 
 func TestBubbleUpAndPop(t *testing.T) {
-	today := time.Now().Format("2006-01-02")
-	later := time.Now().AddDate(0, 0, 7).Format("2006-01-02")
+	// 21:00 on the 14th in New York is already 01:00 on the 15th in UTC, which is the clock
+	// HEY lays its bubble-up slots out on: the 15th is today, and the 14th is not.
+	const today, later, newYorksToday = "2026-10-15", "2026-10-22", "2026-10-14"
 	tests := []struct {
 		name     string
 		args     []string
@@ -141,6 +141,7 @@ func TestBubbleUpAndPop(t *testing.T) {
 		{"up multiple on a date", []string{"up", "12345", "67890", "--on", later}, http.MethodPost, "/postings/bubble_up.json", []int64{12345, 67890}, "custom", later, "2 threads will bubble up on " + later},
 		{"up one on today", []string{"up", "12345", "--on", today}, http.MethodPost, "/postings/bubble_up.json", []int64{12345}, "today", "", "1 thread will bubble up this evening"},
 		{"up multiple on today", []string{"up", "12345", "67890", "--on", today}, http.MethodPost, "/postings/bubble_up.json", []int64{12345, 67890}, "today", "", "2 threads will bubble up this evening"},
+		{"up on the local today", []string{"up", "12345", "--on", newYorksToday}, http.MethodPost, "/postings/bubble_up.json", []int64{12345}, "custom", newYorksToday, "1 thread will bubble up on " + newYorksToday},
 		{"up tomorrow", []string{"up", "12345", "--tomorrow"}, http.MethodPost, "/postings/bubble_up.json", []int64{12345}, "tomorrow", "", "1 thread will bubble up tomorrow morning"},
 		{"up weekend", []string{"up", "12345", "67890", "--weekend"}, http.MethodPost, "/postings/bubble_up.json", []int64{12345, 67890}, "weekend", "", "2 threads will bubble up Saturday morning"},
 		{"up next week", []string{"up", "12345", "--next-week"}, http.MethodPost, "/postings/bubble_up.json", []int64{12345}, "next_week", "", "1 thread will bubble up Monday morning"},
@@ -150,6 +151,7 @@ func TestBubbleUpAndPop(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			atInstantOn(t, "2026-10-15T01:00:00Z", "America/New_York")
 			server, recorded := bubbleServer(t)
 			resp, err := runBubble(t, server, tt.args...)
 			if err != nil {
