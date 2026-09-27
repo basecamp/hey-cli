@@ -65,6 +65,16 @@ func TestContactLifecycleAndPrivateNote(t *testing.T) {
 		t.Error("accepted contact unbundle action was not returned")
 	}
 
+	for _, destination := range []string{"papertrail", "feed", "imbox", "screened-out"} {
+		delivered := dataAs[struct {
+			ID          int    `json:"id"`
+			Destination string `json:"destination"`
+		}](t, contactWriteJSON(t, "contact", "deliver", id, "--to", destination))
+		if delivered.ID != created.ID || delivered.Destination != destination {
+			t.Errorf("accepted contact delivery to %s was not returned", destination)
+		}
+	}
+
 	noteText := "Prefers email follow-ups for project planning."
 	note := dataAs[struct {
 		Note string `json:"note"`
@@ -149,6 +159,9 @@ func TestContactCommandsValidateInput(t *testing.T) {
 	heyFail(t, "contact", "update", "12345")
 	heyFail(t, "contact", "show", "not-an-id")
 	heyFail(t, "contact", "threads", "not-an-id")
+	heyFail(t, "contact", "deliver", "12345")
+	heyFail(t, "contact", "deliver", "12345", "--to", "later")
+	heyFail(t, "contact", "deliver", "not-an-id", "--to", "imbox")
 	heyFail(t, "contact", "bundle", "not-an-id")
 	heyFail(t, "contact", "unbundle", "0")
 }
