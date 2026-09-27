@@ -123,6 +123,8 @@ hey contact add --alias
 hey contact add --email
 hey contact add --name
 hey contact bundle
+hey contact deliver
+hey contact deliver --to
 hey contact hide
 hey contact list
 hey contact list --all

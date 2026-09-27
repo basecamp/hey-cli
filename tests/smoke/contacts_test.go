@@ -92,6 +92,18 @@ func TestContactLifecycleAndPrivateNote(t *testing.T) {
 		t.Error("hidden contact was not shown again")
 	}
 	contactWriteJSON(t, "contact", "hide", id)
+
+	// Screened Out is terminal for this lifecycle: exercise every other contact
+	// write before denying future mail from the disposable contact.
+	for _, destination := range []string{"papertrail", "feed", "imbox", "screened-out"} {
+		delivered := dataAs[struct {
+			ID          int    `json:"id"`
+			Destination string `json:"destination"`
+		}](t, contactWriteJSON(t, "contact", "deliver", id, "--to", destination))
+		if delivered.ID != created.ID || delivered.Destination != destination {
+			t.Errorf("accepted contact delivery to %s was not returned", destination)
+		}
+	}
 }
 
 func TestContactThreads(t *testing.T) {
@@ -149,6 +161,9 @@ func TestContactCommandsValidateInput(t *testing.T) {
 	heyFail(t, "contact", "update", "12345")
 	heyFail(t, "contact", "show", "not-an-id")
 	heyFail(t, "contact", "threads", "not-an-id")
+	heyFail(t, "contact", "deliver", "12345")
+	heyFail(t, "contact", "deliver", "12345", "--to", "later")
+	heyFail(t, "contact", "deliver", "not-an-id", "--to", "imbox")
 	heyFail(t, "contact", "bundle", "not-an-id")
 	heyFail(t, "contact", "unbundle", "0")
 }
