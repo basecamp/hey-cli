@@ -714,14 +714,18 @@ stdout, one per line, instead of the usual envelope (at a terminal, one text lin
 "name"}, "posting_id": ..., "thread_id": ..., "new": true|false, "posting": {...}}`. Use
 `thread_id` with `hey thread read` (absent for a bundle row that names no single thread). `new` is on every `added` and `updated` line and says whether
 the posting is new mail — unseen, not muted, and active since the watch last saw the thread,
-or since the watch began for a thread it has not seen; the backlog a watch starts with is
+or since the watch began for a thread it has not seen; the backlog `--since` reads is
 never new, nor is reading, muting or moving a thread, and a reply on a known thread is.
+Without `--since`, nothing from before the watch began is reported, save a change from up to
+a second before it plus however long reading HEY's clock took (that clock is read to the whole
+second, and taken back by the request's time); its `at` says when it happened.
 `--events new` selects the new ones, alone or in a union with the other three. A deleted
 posting carries no `posting`, `thread_id` or `new`. Three more lines
 describe the watch itself: `{"change": "ready"}` once every box and calendar is caught up and the subscription
 is live (again after every reconnect's catch-up), `{"change": "disconnected"}` when the
 connection drops, and `{"change": "resync", "box": {...}}` when a box changed more than the
-feed can list and the watch skipped ahead — re-read that box. A resync is an event of its
+feed can list and the watch skipped ahead — re-read that box; one resync covers the whole
+catch-up, however many skips it takes, and comes once the box is followed again. A resync is an event of its
 own: reported by default (`--run-*` scripts run for it, `--exit-on-first` counts it) and left
 out by `--events new`, so a script for new mail never runs on one. `ready` and `disconnected`
 carry no `box`, are written only when no `--run-*` command is given, and never count for

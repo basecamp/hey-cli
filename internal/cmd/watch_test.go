@@ -12,6 +12,8 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -421,13 +423,18 @@ func TestWatchStopsOnAReadThatCannotWork(t *testing.T) {
 	}
 }
 
-// boxesAndChanges answers the two reads a skip-ahead makes: a changes feed that is too far
-// behind to follow, and the box list it then looks for a fresh cursor in.
+// boxesAndChanges answers the reads a skip-ahead makes: a changes feed that is too far
+// behind to follow, the box list it looks for the box and its feed's version in, and
+// HEY's clock, which it skips to.
 func boxesAndChanges(t *testing.T, boxes string) *httptest.Server {
 	t.Helper()
 
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/identity.json":
+			w.Header().Set("Date", skipDate)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":1}`))
 		case "/boxes.json":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(boxes))
@@ -437,9 +444,22 @@ func boxesAndChanges(t *testing.T, boxes string) *httptest.Server {
 	}))
 }
 
-func TestWatchSkipsAheadToTheBoxesOwnCursor(t *testing.T) {
+// HEY's clock when a skip-ahead reads it.
+const skipDate = "Fri, 21 Aug 2026 11:05:00 GMT"
+
+// wantSkippedToHEYsClock checks a skip-ahead's point: HEY's clock when it answered — the
+// millisecond before the Date header, not taken back by the request's time, which a
+// skip has no gap to catch in and which could leave a busy feed still behind.
+func wantSkippedToHEYsClock(t *testing.T, skippedTo time.Time) {
+	t.Helper()
+	if want := time.Date(2026, 8, 21, 11, 4, 59, 999000000, time.UTC); !skippedTo.Equal(want) {
+		t.Errorf("skipped to %v, want HEY's clock when it answered, %v", skippedTo, want)
+	}
+}
+
+func TestWatchSkipsAheadToHEYsClock(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
-	server := boxesAndChanges(t, `[{"id":24088,"kind":"imbox","name":"Imbox","posting_changes_url":"/boxes/24088/postings/changes.json?since=2026-08-21T11%3A02%3A00.000Z&v=2"}]`)
+	server := boxesAndChanges(t, `[{"id":24088,"kind":"imbox","name":"Imbox","posting_changes_url":"/boxes/24088/postings/changes.json?since=2026-08-21T11%3A02%3A00.518496Z&v=2"}]`)
 	defer server.Close()
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
 
@@ -454,11 +474,384 @@ func TestWatchSkipsAheadToTheBoxesOwnCursor(t *testing.T) {
 	if watch.boxes[24088] == nil {
 		t.Fatal("the box should still be watched")
 	}
-	if got := watch.boxes[24088].cursor.Since; got != "2026-08-21T11:02:00.000Z" {
-		t.Errorf("cursor = %q, want the server's current one", got)
+	floor := watch.newMail.floors[24088]
+	wantSkippedToHEYsClock(t, floor)
+	if got := watch.boxes[24088].cursor; got.Since != watchStartSince(floor) || got.Version != "2" {
+		t.Errorf("cursor = %+v, want HEY's clock at the skip, the new-mail floor, and the box's feed version", got)
 	}
-	if got := watch.newMail.floors[24088]; !got.Equal(time.Date(2026, 8, 21, 11, 2, 0, 0, time.UTC)) {
-		t.Errorf("new-mail floor = %v, want the box's floor at the cursor it skipped to", got)
+}
+
+// skipHEY is HEY as a skip-ahead meets it: a feed read from before 11:00 too far behind
+// to follow and one from after it clean, and the box list, the calendar list and the
+// clock answering — save the reads fail answers itself, which it says it did by
+// returning true.
+func skipHEY(t *testing.T, fail func(http.ResponseWriter, *http.Request) bool) {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if fail(w, r) {
+			return
+		}
+		switch r.URL.Path {
+		case "/identity.json":
+			w.Header().Set("Date", skipDate)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":1}`))
+		case "/boxes.json":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"id":24088,"kind":"imbox","name":"Imbox","posting_changes_url":"/boxes/24088/postings/changes.json?since=2026-08-21T11%3A02%3A00.518496Z&v=2"}]`))
+		case "/calendars.json":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"calendars": [{"calendar": {"id": 512, "name": "Household"},
+				"recording_changes_url": "/calendars/512/recording/changes.json?since=2026-08-18T11%3A00%3A00.000000Z&v=1"}]}`))
+		default:
+			answerTooFarBehindBefore(w, r, time.Date(2026, 8, 21, 11, 0, 0, 0, time.UTC))
+		}
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("HEY_TOKEN", "test-token")
+	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
+}
+
+// answerTooFarBehindBefore answers a changes feed read as HEY would for a feed that
+// changed too much before behind to follow — `head :conflict`, no body — and not at
+// all since.
+func answerTooFarBehindBefore(w http.ResponseWriter, r *http.Request, behind time.Time) {
+	since, err := time.Parse(time.RFC3339Nano, r.URL.Query().Get("since"))
+	if err != nil || since.Before(behind) {
+		w.WriteHeader(http.StatusConflict)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{}`))
+}
+
+// behindWatch is a watch whose Imbox and Household calendar have both fallen too far
+// behind to follow.
+func behindWatch(t *testing.T) (*postingsWatch, *bytes.Buffer, *bytes.Buffer) {
+	t.Helper()
+	watch, out := newTestWatch("added", "resync", "calendar_resync")
+	errOut := &bytes.Buffer{}
+	watch.errOut = errOut
+	watch.boxes[24088].cursor.Since = "2026-08-01T00:00:00.000Z"
+	watch.calendar = newTestCalendarsWatch(t, &watchedCalendar{id: 512, name: "Household", cursor: hey.CalendarChangesCursor{Since: "2026-08-01T00:00:00.000Z", Version: "1"}})
+	return watch, out, errOut
+}
+
+// readBehind reads the box or the calendar behindWatch left behind.
+func readBehind(ctx context.Context, watch *postingsWatch, feed string) error {
+	if feed == "box" {
+		return watch.readBox(ctx, watch.boxes[24088])
+	}
+	return watch.readCalendar(ctx, watch.calendar.calendars[512])
+}
+
+// ringFeed rings the doorbell for the box or the calendar behindWatch left behind, and
+// answers it the way the watch's loop does.
+func ringFeed(t *testing.T, watch *postingsWatch, feed string) {
+	t.Helper()
+	var err error
+	if feed == "box" {
+		err = watch.read(context.Background(), actioncable.Message(`{"change":"upsert","box_id":24088}`))
+	} else {
+		watch.calendar.ring(512)
+		<-watch.calendar.wake
+		err = watch.readRungCalendars(context.Background())
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// listOf is the list a skip-ahead reads for a feed.
+func listOf(feed string) string {
+	if feed == "box" {
+		return "/boxes.json"
+	}
+	return "/calendars.json"
+}
+
+// An interrupt or --timeout while a skip-ahead reads its list or HEY's clock is how a
+// watch is meant to end, not a failed read: nothing is warned about, no retry is armed,
+// and nothing says it skipped.
+func TestWatchSkipAheadEndsQuietlyWhenInterrupted(t *testing.T) {
+	for _, feed := range []string{"box", "calendar"} {
+		for _, at := range []string{"/identity.json", listOf(feed)} {
+			t.Run(feed+at, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				skipHEY(t, func(w http.ResponseWriter, r *http.Request) bool {
+					if r.URL.Path != at {
+						return false
+					}
+					cancel()
+					<-r.Context().Done()
+					return true
+				})
+				watch, out, errOut := behindWatch(t)
+
+				if err := readBehind(ctx, watch, feed); err != nil {
+					t.Fatalf("read = %v, want an interrupted skip-ahead to end quietly", err)
+				}
+				if errOut.Len() != 0 {
+					t.Errorf("stderr = %q, want nothing for an interrupt", errOut.String())
+				}
+				if watch.retry != nil || len(watch.unread) != 0 || len(watch.calendar.unread) != 0 {
+					t.Error("an interrupted skip-ahead should not arm a retry")
+				}
+				if out.Len() != 0 {
+					t.Errorf("wrote %q, want no resync for a skip that did not happen", out.String())
+				}
+				if watch.boxes[24088].cursor.Since != "2026-08-01T00:00:00.000Z" || watch.calendar.calendars[512].cursor.Since != "2026-08-01T00:00:00.000Z" {
+					t.Error("an interrupted skip-ahead should leave the cursor where it was")
+				}
+			})
+		}
+	}
+}
+
+// A list that fails to read for a while is a reason to try the skip again, not to stop
+// watching: the watch warns, keeps the cursor, retries on the backoff, and says it
+// skipped only once it has.
+func TestWatchSkipAheadRetriesAListThatFailed(t *testing.T) {
+	for _, feed := range []string{"box", "calendar"} {
+		t.Run(feed, func(t *testing.T) {
+			var down atomic.Bool
+			var listReads, feedReads atomic.Int32
+			down.Store(true)
+			skipHEY(t, func(w http.ResponseWriter, r *http.Request) bool {
+				if strings.Contains(r.URL.Path, "/changes") {
+					feedReads.Add(1)
+				}
+				if r.URL.Path != listOf(feed) {
+					return false
+				}
+				listReads.Add(1)
+				if !down.Load() {
+					return false
+				}
+				http.Error(w, "down for maintenance", http.StatusInternalServerError)
+				return true
+			})
+			watch, out, errOut := behindWatch(t)
+
+			if err := readBehind(context.Background(), watch, feed); err != nil {
+				t.Fatalf("read = %v, want a failed list read retried, not the watch ended", err)
+			}
+			if !strings.Contains(errOut.String(), "warning: could not skip") || strings.Contains(errOut.String(), "notice") {
+				t.Errorf("stderr = %q, want a warning and no word of a skip that has not happened", errOut.String())
+			}
+			if watch.retry == nil || len(watch.unread)+len(watch.calendar.unread) != 1 {
+				t.Fatal("a failed list read should be retried on the backoff")
+			}
+			if out.Len() != 0 {
+				t.Errorf("wrote %q, want no resync before the skip", out.String())
+			}
+
+			// Doorbells wait for the retry rather than trying the failing list again.
+			ringFeed(t, watch, feed)
+			ringFeed(t, watch, feed)
+			if got := listReads.Load(); got != 1 {
+				t.Errorf("read the list %d times, want once — the retry, not a doorbell, tries again", got)
+			}
+
+			// The list is back: the retry skips, reads the feed from there, and says so
+			// once.
+			down.Store(false)
+			errOut.Reset()
+			if err := watch.retryUnread(context.Background()); err != nil {
+				t.Fatalf("retry = %v", err)
+			}
+			if lines := watchLines(t, out); len(lines) != 1 || !strings.HasSuffix(lines[0]["change"].(string), "resync") {
+				t.Errorf("wrote %v, want one resync once the skip happened", lines)
+			}
+			if !strings.Contains(errOut.String(), "notice: too much changed") {
+				t.Errorf("stderr = %q, want the skip announced once it happened", errOut.String())
+			}
+
+			// Skipped, the feed follows its doorbells again.
+			reads := feedReads.Load()
+			ringFeed(t, watch, feed)
+			if feedReads.Load() == reads {
+				t.Error("a doorbell after the skip should read the feed again")
+			}
+		})
+	}
+}
+
+// A feed busier than one skip can outrun answers 409 again straight after the skip. That
+// is one recovery: one notice, skips after the first waiting on the retry backoff —
+// doubling — rather than following every doorbell, and one resync line, when a clean
+// read ends it, so a reader that re-reads on it has missed nothing a later skip passed.
+func TestWatchRecoversFromARepeated409Once(t *testing.T) {
+	for _, feed := range []string{"box", "calendar"} {
+		t.Run(feed, func(t *testing.T) {
+			var feedReads atomic.Int32
+			var quiet atomic.Bool
+			skipHEY(t, func(w http.ResponseWriter, r *http.Request) bool {
+				if !strings.Contains(r.URL.Path, "/changes") {
+					return false
+				}
+				feedReads.Add(1)
+				if quiet.Load() {
+					return false
+				}
+				w.WriteHeader(http.StatusConflict) // as HEY answers for a feed this busy
+				return true
+			})
+			watch, out, errOut := behindWatch(t)
+			ring := func() { ringFeed(t, watch, feed) }
+
+			for range 5 {
+				ring()
+			}
+			if got := feedReads.Load(); got != 2 {
+				t.Errorf("read the feed %d times for five doorbells, want twice — the skip's own read, then the rest held for the retry", got)
+			}
+			if lines := watchLines(t, out); len(lines) != 0 {
+				t.Errorf("wrote %v, want the resync kept for the clean read that ends the recovery", lines)
+			}
+			if got := strings.Count(errOut.String(), "notice: too much changed"); got != 1 {
+				t.Errorf("stderr = %q, want the skip announced once", errOut.String())
+			}
+			if watch.retry == nil || watch.backoff != firstWatchRetry {
+				t.Fatalf("backoff = %v, want the repeat held for the first retry", watch.backoff)
+			}
+
+			// The retry comes round, as the loop runs it: another 409, another skip,
+			// the same recovery, and a longer wait before the next.
+			watch.retry = nil
+			if err := watch.retryUnread(context.Background()); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := feedReads.Load(); got != 3 {
+				t.Errorf("read the feed %d times, want the retry's read too", got)
+			}
+			if out.Len() != 0 {
+				t.Errorf("wrote %q, want still nothing while the feed stays too busy", out.String())
+			}
+			if watch.backoff != 2*firstWatchRetry {
+				t.Errorf("backoff = %v, want it doubled while the feed stays too busy", watch.backoff)
+			}
+
+			// The feed quietens and a clean read ends the recovery with its one resync,
+			// at the last skip; the next time it falls behind is a recovery of its own.
+			retryClean := func() {
+				t.Helper()
+				quiet.Store(true)
+				watch.retry = nil
+				if err := watch.retryUnread(context.Background()); err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				quiet.Store(false)
+			}
+			retryClean()
+			if len(watch.unread)+len(watch.calendar.unread) != 0 {
+				t.Error("a clean read should leave nothing behind")
+			}
+			lines := watchLines(t, out)
+			if len(lines) != 1 || !strings.HasSuffix(lines[0]["change"].(string), "resync") {
+				t.Fatalf("wrote %v, want one resync for the whole recovery", lines)
+			}
+			skippedTo, err := time.Parse(time.RFC3339Nano, lines[0]["at"].(string))
+			if err != nil {
+				t.Fatalf("resync at %v: %v", lines[0]["at"], err)
+			}
+			wantSkippedToHEYsClock(t, skippedTo)
+			ring()
+			retryClean()
+			if lines := watchLines(t, out); len(lines) != 2 {
+				t.Errorf("wrote %v, want a second resync for a second recovery", lines)
+			}
+		})
+	}
+}
+
+// HEY's ETag for /boxes.json is the box rows, which neither posting activity nor a new
+// feed version touches, so a list the SDK revalidates answers 304 with the since the
+// watch fell behind from and the version HEY now refuses — and HEY answers 409 for a
+// version it no longer speaks as surely as for too many changes. The skip-ahead reads
+// the list past the cache: the next read is on HEY's clock and on the new version.
+func TestWatchSkipAheadReadsTheBoxListPastTheCache(t *testing.T) {
+	t.Setenv("HEY_TOKEN", "test-token")
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	behind := time.Date(2026, 8, 21, 11, 0, 0, 0, time.UTC) // a since before this is too far behind
+	var mu sync.Mutex
+	var notModified, conflicts int
+	listed := `[{"id":24088,"kind":"imbox","name":"Imbox","posting_changes_url":"/boxes/24088/postings/changes.json?since=2026-08-01T09%3A00%3A00.000000Z&v=2"}]`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch r.URL.Path {
+		case "/identity.json":
+			w.Header().Set("Date", skipDate)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":1}`))
+		case "/boxes.json":
+			w.Header().Set("ETag", `W/"boxes-unchanged"`)
+			if r.Header.Get("If-None-Match") == `W/"boxes-unchanged"` {
+				notModified++
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(listed))
+		default:
+			since, _ := time.Parse(time.RFC3339Nano, r.URL.Query().Get("since"))
+			if since.Before(behind) || r.URL.Query().Get("v") != "3" {
+				// As HEY answers: `head :conflict`, no body.
+				conflicts++
+				w.WriteHeader(http.StatusConflict)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Link", `<`+r.URL.Path+`?since=2026-08-21T11%3A06%3A12.250000Z&v=3>; rel="next"`)
+			_, _ = w.Write([]byte(`{"added":[{"id":9004,"kind":"topic","box_id":24088,"name":"Re: Lunch on Thursday?","active_at":"2026-08-21T11:06:12.250Z","created_at":"2026-08-21T11:06:12.250Z","creator":{"name":"Maria Delgado"}}]}`))
+		}
+	}))
+	defer server.Close()
+	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
+
+	// The box list as the watch read it at its start, now in the SDK's cache. Then HEY
+	// moves the feed to version 3, and the list's rows — its ETag — stay as they were.
+	if _, err := sdk.Boxes().List(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	mu.Lock()
+	listed = `[{"id":24088,"kind":"imbox","name":"Imbox","posting_changes_url":"/boxes/24088/postings/changes.json?since=2026-08-21T11%3A04%3A58.310442Z&v=3"}]`
+	mu.Unlock()
+
+	watch, out := newTestWatch("added", "resync")
+	cursor, err := watchCursor(server.URL+"/boxes/24088/postings/changes.json?since=2026-08-01T09%3A00%3A00.000000Z&v=2", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	watch.boxes[24088].cursor = cursor
+
+	ringBox(t, watch)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if notModified != 0 {
+		t.Errorf("the skip-ahead read the box list from the cache %d times, want never — a 304 hands back the version HEY refused", notModified)
+	}
+	if conflicts != 1 {
+		t.Errorf("the feed answered 409 %d times, want once — the skip-ahead should get past it", conflicts)
+	}
+	if got := watch.boxes[24088].cursor.Version; got != "3" {
+		t.Errorf("version = %q, want the one HEY speaks now", got)
+	}
+	lines := watchLines(t, out)
+	if len(lines) != 2 || lines[0]["change"] != watchResync || lines[1]["change"] != "added" || lines[1]["posting_id"] != float64(9004) {
+		t.Fatalf("wrote %v, want one resync and then the change after it", lines)
+	}
+	skippedTo, err := time.Parse(time.RFC3339Nano, lines[0]["at"].(string))
+	if err != nil {
+		t.Fatalf("resync at %v: %v", lines[0]["at"], err)
+	}
+	wantSkippedToHEYsClock(t, skippedTo)
+	if floor := watch.newMail.floors[24088]; watchTime(floor) != lines[0]["at"] {
+		t.Errorf("new-mail floor = %v, want the skip point the resync names", floor)
 	}
 }
 
@@ -851,14 +1244,15 @@ func TestWatchDoesNotSayReadyOnItsWayOut(t *testing.T) {
 	}
 }
 
-func TestWatchedBoxesStartNoLaterThanTheWatchDid(t *testing.T) {
+func TestWatchedBoxesStartAtTheWatchsStart(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "test-token")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		// The Imbox's last activity is after the watch read HEY's clock — mail
-		// landed in between; The Feed's is before.
-		_, _ = w.Write([]byte(`[{"id":24088,"kind":"imbox","name":"Imbox","posting_changes_url":"/boxes/24088/postings/changes.json?since=2026-08-21T09%3A00%3A30.000Z&v=2"},` +
-			`{"id":24089,"kind":"feedbox","name":"The Feed","posting_changes_url":"/boxes/24089/postings/changes.json?since=2026-08-21T08%3A00%3A00.000Z&v=2"}]`))
+		// landed in between; The Feed's is before, and its feed may still hold
+		// changes later than that which are history all the same.
+		_, _ = w.Write([]byte(`[{"id":24088,"kind":"imbox","name":"Imbox","posting_changes_url":"/boxes/24088/postings/changes.json?since=2026-08-21T09%3A00%3A30.183221Z&v=2"},` +
+			`{"id":24089,"kind":"feedbox","name":"The Feed","posting_changes_url":"/boxes/24089/postings/changes.json?since=2026-08-21T08%3A00%3A00.518496Z&v=2"}]`))
 	}))
 	defer server.Close()
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
@@ -868,11 +1262,10 @@ func TestWatchedBoxesStartNoLaterThanTheWatchDid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := boxes[24088].cursor.Since; got != "2026-08-21T09:00:00.000Z" {
-		t.Errorf("Imbox cursor = %q, want it moved back to the watch's start so the mail in between is read", got)
-	}
-	if got := boxes[24089].cursor.Since; got != "2026-08-21T08:00:00.000Z" {
-		t.Errorf("Feed cursor = %q, want the box's own when it is earlier", got)
+	for _, id := range []int64{24088, 24089} {
+		if got := boxes[id].cursor; got.Since != "2026-08-21T09:00:00.000Z" || got.Version != "2" {
+			t.Errorf("%s cursor = %+v, want the watch's start and HEY's version, whatever since HEY served", boxes[id].name, got)
+		}
 	}
 	if !boxes[24088].reported || !boxes[24089].reported {
 		t.Error("without --box every box is reported")
@@ -894,7 +1287,7 @@ func TestWatchedBoxesStartNoLaterThanTheWatchDid(t *testing.T) {
 	}
 	command.boxes = nil
 
-	// --since is the reader's choice and wins over both.
+	// --since is the reader's choice and wins over the start.
 	command.since = "2026-08-21T09:30:00Z"
 	boxes, err = command.watchedBoxes(context.Background(), watchStarted)
 	if err != nil {
@@ -902,6 +1295,209 @@ func TestWatchedBoxesStartNoLaterThanTheWatchDid(t *testing.T) {
 	}
 	if got := boxes[24088].cursor.Since; got != "2026-08-21T09:30:00.000Z" {
 		t.Errorf("cursor = %q, want --since untouched", got)
+	}
+}
+
+// heyHistory is HEY as a watch's startup meets it: its clock, the box list, and a
+// changes feed that answers what is strictly later than its cursor, the way HEY's does.
+// Each box's posting_changes_url carries what HEY puts there — the box's last posting
+// activity, the latest updated_at among its unbundled postings, or the box's own
+// updated_at when it has none — not the time, and a cached box list serves it as it
+// was when cached. So the feed can answer a change later than that cursor that is
+// history all the same.
+type heyHistory struct {
+	mu      sync.Mutex
+	cursors map[int64]string
+	changes map[int64][]historyChange
+}
+
+type historyChange struct {
+	at      string
+	deleted bool
+	id      int64
+	subject string
+}
+
+// The clock the server answers with; a watch's start is taken a moment before it.
+const heyHistoryDate = "Fri, 21 Aug 2026 09:00:05 GMT"
+
+func newHEYHistory(t *testing.T) *heyHistory {
+	t.Helper()
+	history := &heyHistory{
+		cursors: map[int64]string{
+			// The Imbox's since as a box list cached before its latest posting serves it.
+			24088: "2026-08-20T23:45:00.000000Z",
+			// Reply Later is empty, so its cursor is the box's own updated_at — years
+			// before the posting deleted from it last week.
+			24091: "2020-06-16T11:22:18.853469Z",
+		},
+		changes: map[int64][]historyChange{
+			24088: {{at: "2026-08-20T23:45:39.083350Z", id: 9001, subject: "Lunch on Thursday?"}},
+			24091: {{at: "2026-08-19T01:07:15.496840Z", id: 9002, deleted: true}},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(history.serve))
+	t.Cleanup(server.Close)
+	t.Setenv("HEY_TOKEN", "test-token")
+	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
+
+	return history
+}
+
+// land is a change arriving in the Imbox, whose cursor is now its last activity.
+func (h *heyHistory) land(change historyChange) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.changes[24088] = append(h.changes[24088], change)
+	h.cursors[24088] = change.at
+}
+
+func (h *heyHistory) serve(w http.ResponseWriter, r *http.Request) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	var boxID int64
+	switch {
+	case r.URL.Path == "/identity.json":
+		w.Header().Set("Date", heyHistoryDate)
+		_, _ = w.Write([]byte(`{"id":1}`))
+	case r.URL.Path == "/boxes.json":
+		_, _ = fmt.Fprintf(w, `[{"id":24088,"kind":"imbox","name":"Imbox","posting_changes_url":"/boxes/24088/postings/changes.json?since=%s&v=2"},`+
+			`{"id":24091,"kind":"laterbox","name":"Reply Later","posting_changes_url":"/boxes/24091/postings/changes.json?since=%s&v=2"}]`,
+			h.cursors[24088], h.cursors[24091])
+	case scanBox(r.URL.Path, &boxID):
+		h.serveChanges(w, boxID, r.URL.Query().Get("since"))
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func scanBox(path string, boxID *int64) bool {
+	_, err := fmt.Sscanf(path, "/boxes/%d/postings/changes.json", boxID)
+	return err == nil
+}
+
+func (h *heyHistory) serveChanges(w http.ResponseWriter, boxID int64, since string) {
+	from, err := time.Parse(time.RFC3339Nano, since)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	var added, deleted []string
+	var last string
+	for _, change := range h.changes[boxID] {
+		at, _ := time.Parse(time.RFC3339Nano, change.at)
+		if !at.After(from) {
+			continue
+		}
+		last = change.at
+		if change.deleted {
+			deleted = append(deleted, fmt.Sprintf(`{"id":%d,"deleted_at":%q}`, change.id, change.at))
+		} else {
+			added = append(added, fmt.Sprintf(`{"id":%d,"kind":"topic","box_id":%d,"name":%q,"created_at":%q,"updated_at":%q,"active_at":%q,"creator":{"name":"Maria Delgado"}}`,
+				change.id, boxID, change.subject, change.at, change.at, change.at))
+		}
+	}
+	if last != "" {
+		w.Header().Set("Link", fmt.Sprintf(`</boxes/%d/postings/changes.json?since=%s&v=2>; rel="next"`, boxID, last))
+	}
+	_, _ = fmt.Fprintf(w, `{"added":[%s],"deleted":[%s]}`, strings.Join(added, ","), strings.Join(deleted, ","))
+}
+
+// startWatch begins a watch the way run does: HEY's clock, then the boxes, then the
+// catch-up.
+func startWatch(t *testing.T, command *watchCommand, watch *postingsWatch) {
+	t.Helper()
+	started := readServerNow(t)
+	boxes, err := command.watchedBoxes(context.Background(), started)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	watch.boxes = boxes
+	watch.newMail = trackNewMail(started)
+	if err := watch.catchUp(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestWatchDoesNotReportHistoryAsItStarts(t *testing.T) {
+	history := newHEYHistory(t)
+	watch, out := newTestWatch(defaultChanges...)
+	watch.exitOnFirst = true
+
+	startWatch(t, newWatchCommand(), watch)
+
+	lines := watchLines(t, out)
+	if len(lines) != 1 || lines[0]["change"] != "ready" {
+		t.Fatalf("wrote %v, want ready alone — a deletion and a posting from before the watch began are history", lines)
+	}
+	if watch.finished() {
+		t.Fatal("--exit-on-first should still be waiting for a change")
+	}
+
+	// A reply lands after the watch began: that is the change it was waiting for.
+	history.land(historyChange{at: "2026-08-21T09:00:12.250000Z", id: 9003, subject: "Re: Lunch on Thursday?"})
+	ringBox(t, watch)
+
+	lines = watchLines(t, out)
+	if len(lines) != 2 || lines[1]["change"] != "added" || lines[1]["posting_id"] != float64(9003) || lines[1]["new"] != true {
+		t.Errorf("wrote %v, want the reply that landed after the start, new", lines)
+	}
+	if !watch.finished() {
+		t.Error("--exit-on-first should end on the change that landed after the start")
+	}
+}
+
+func TestWatchReadsMailThatLandedBeforeItReadTheBoxes(t *testing.T) {
+	history := newHEYHistory(t)
+	// The watch reads HEY's clock a moment before the Date header; this lands on the
+	// header's second, after the start and before the box list, so the Imbox's cursor is
+	// already past it.
+	history.land(historyChange{at: "2026-08-21T09:00:05.000000Z", id: 9003, subject: "Invoice #4021"})
+	watch, out := newTestWatch(defaultChanges...)
+
+	startWatch(t, newWatchCommand(), watch)
+
+	lines := watchLines(t, out)
+	if len(lines) != 2 || lines[0]["posting_id"] != float64(9003) || lines[0]["new"] != true || lines[1]["change"] != "ready" {
+		t.Errorf("wrote %v, want the mail that landed during startup, new, then ready — and no history", lines)
+	}
+}
+
+// HEY's clock is read to the whole second, so the watch cannot tell a change from the
+// Date header's own second that came before it from one that came after, and it reads
+// both: skipping one that came after would be worse than repeating one that did not.
+// Anything earlier than the second the watch read — less the request's time — is
+// behind the start and not reported.
+func TestWatchReadsTheWholeSecondHEYsClockWasReadIn(t *testing.T) {
+	history := newHEYHistory(t)
+	history.land(historyChange{at: "2026-08-21T09:00:03.990000Z", id: 9003, subject: "Invoice #4021"})
+	history.land(historyChange{at: "2026-08-21T09:00:05.200000Z", id: 9004, subject: "Re: Invoice #4021"})
+	watch, out := newTestWatch(defaultChanges...)
+
+	startWatch(t, newWatchCommand(), watch)
+
+	lines := watchLines(t, out)
+	if len(lines) != 2 || lines[0]["posting_id"] != float64(9004) || lines[0]["at"] != "2026-08-21T09:00:05.200Z" || lines[0]["new"] != true || lines[1]["change"] != "ready" {
+		t.Errorf("wrote %v, want the change from the Date header's second, with when it happened, and not the one before it", lines)
+	}
+}
+
+func TestWatchSinceReadsTheHistoryFirst(t *testing.T) {
+	newHEYHistory(t)
+	command := newWatchCommand()
+	command.since = "2026-08-19"
+	watch, out := newTestWatch(defaultChanges...)
+
+	startWatch(t, command, watch)
+
+	lines := watchLines(t, out)
+	if len(lines) != 3 || lines[0]["posting_id"] != float64(9001) || lines[0]["new"] != false ||
+		lines[1]["change"] != "deleted" || lines[1]["posting_id"] != float64(9002) || lines[2]["change"] != "ready" {
+		t.Errorf("wrote %v, want both changes since --since, not new, then ready", lines)
 	}
 }
 
@@ -998,10 +1594,10 @@ func TestWatchReportsAResyncAfterSkippingAhead(t *testing.T) {
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/postings/changes") {
-			// As haystack answers: `head :conflict`, no body.
-			w.WriteHeader(http.StatusConflict)
+			answerTooFarBehindBefore(w, r, time.Date(2026, 8, 21, 11, 0, 0, 0, time.UTC))
 			return
 		}
+		w.Header().Set("Date", skipDate)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`[{"id":24088,"kind":"imbox","name":"Imbox","posting_changes_url":"` + server.URL + `/boxes/24088/postings/changes.json?since=2026-08-21T12%3A00%3A00.000Z&v=2"}]`))
 	}))
@@ -1026,8 +1622,13 @@ func TestWatchReportsAResyncAfterSkippingAhead(t *testing.T) {
 	if event.Change != watchResync || event.Box == nil || event.Box.ID != 24088 {
 		t.Errorf("event = %+v, want a resync for the Imbox", event)
 	}
-	if watch.boxes[24088].cursor.Since != "2026-08-21T12:00:00.000Z" {
-		t.Errorf("cursor = %+v, want it moved to the server's current one", watch.boxes[24088].cursor)
+	skippedTo, err := time.Parse(time.RFC3339Nano, event.At)
+	if err != nil {
+		t.Fatalf("resync at %q: %v", event.At, err)
+	}
+	wantSkippedToHEYsClock(t, skippedTo)
+	if watch.boxes[24088].cursor.Since != watchStartSince(skippedTo) {
+		t.Errorf("cursor = %+v, want it moved to HEY's clock at the skip the resync names", watch.boxes[24088].cursor)
 	}
 }
 

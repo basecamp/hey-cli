@@ -73,7 +73,11 @@ func newWatchCommand() *watchCommand {
 		Use:   "watch",
 		Short: "Follow email threads and calendars as they change",
 		Long: `Print email threads and calendar changes as they happen: piped or with --json, one
-JSON object per line; at a terminal, one text line each. Runs until interrupted.
+JSON object per line; at a terminal, one text line each. Runs until interrupted. What
+changed before the watch began is not reported, unless --since reads back to it first —
+save a change from just before it: HEY's clock is read to the whole second, and taken back
+by however long reading it took, so a change up to a second before the watch asked, plus
+that request's time, may be reported. Its "at" says when it happened.
 
 Changes can drive a command instead of being printed, and that is a choice between two
 behaviours: --run-async spawns the command per change and moves on, so a slow one never
@@ -82,7 +86,7 @@ Pass one or the other.
 
 Every added and updated line says whether the thread is new mail: unseen, not muted, and
 active since the watch last saw it — or since the watch began, for a thread it has not
-seen, so the backlog a box's first read carries is not new. Reading a thread, muting or
+seen, so the backlog --since reads is not new. Reading a thread, muting or
 moving it is not new activity; a reply on a known thread is. --events new selects the new
 ones, alone or alongside added, updated and deleted, and a script sees HEY_NEW=1 for them.
 
@@ -98,7 +102,9 @@ Besides the thread changes, three lines describe the watch itself: "ready" once 
 and calendar is caught up and the subscription is live (again after every reconnect's
 catch-up), "disconnected" when the connection drops, and "resync" when a box changed more
 than the feed can list one change at a time and the watch skipped ahead — re-read that
-box. A resync is an event of its own: reported by default, scripts run for it and
+box. One resync covers the whole catch-up and comes once the box is followed again: a box
+still too busy after the skip is skipped again on the retry backoff, and its "at" is the
+last skip. A resync is an event of its own: reported by default, scripts run for it and
 --exit-on-first counts it, and --events can leave it out, as --events new does. A
 calendar's feed falls behind the same way, and calendar_resync is the same word for it.
 Ready and disconnected are written to stdout only.`,
@@ -150,9 +156,12 @@ func (c *watchCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	// New mail is measured against the watch's start, so that is taken before
-	// the boxes' cursors are read — and the cursors start no later than it, so
-	// nothing that lands between the two sits behind a cursor, read by nothing.
-	started := serverNow(ctx)
+	// the boxes' cursors are read — and the cursors start at it, so nothing
+	// that lands between the two sits behind a cursor, read by nothing.
+	started, err := serverNow(ctx)
+	if err != nil {
+		return err
+	}
 	newMail := trackNewMail(started)
 
 	boxes, err := c.watchedBoxes(ctx, started)
@@ -276,7 +285,7 @@ func (c *watchCommand) watchedBoxes(ctx context.Context, started time.Time) (map
 			continue
 		}
 		if c.since == "" {
-			cursor = noLaterThan(cursor, started)
+			cursor.Since = watchStartSince(started)
 		}
 
 		watched[box.Id] = &watchedBox{id: box.Id, kind: box.Kind, name: box.Name, cursor: cursor, reported: c.watching(box)}
@@ -306,8 +315,10 @@ func boxIs(box generated.Box, wanted string) bool {
 		wanted == strconv.FormatInt(box.Id, 10)
 }
 
-// watchCursor is where a box's changes feed should be read from. The server bakes its own
-// clock into the box's changes URL, so that's the cursor unless --since moves it.
+// watchCursor reads the cursor out of a box's changes URL, moved by --since. Its since
+// is HEY's, which neither caller keeps without --since: a watch's first read replaces it
+// with the watch's start (watchStartSince), and a skip-ahead with HEY's clock at the
+// skip. Both keep the feed version it names.
 func watchCursor(changesURL, since string) (hey.PostingChangesCursor, error) {
 	if changesURL == "" {
 		return hey.PostingChangesCursor{}, nil
@@ -332,22 +343,6 @@ func watchCursor(changesURL, since string) (hey.PostingChangesCursor, error) {
 
 const watchCursorTimeLayout = "2006-01-02T15:04:05.000Z"
 
-// noLaterThan moves a box's cursor back to the watch's start when the box's
-// own is later. The server bakes the box's last posting activity into its
-// cursor, so mail that landed after the watch read HEY's clock and before it
-// read the box list is already behind the cursor: the feed would start after
-// it, and nothing would ever report it. Starting from the watch's own start
-// reads it as part of the catch-up instead — and it is new, since it is later
-// than the start. A cursor that cannot be read is left as it is.
-func noLaterThan(cursor hey.PostingChangesCursor, started time.Time) hey.PostingChangesCursor {
-	at, err := time.Parse(watchCursorTimeLayout, cursor.Since)
-	if err == nil && at.After(started) {
-		cursor.Since = started.UTC().Format(watchCursorTimeLayout)
-	}
-
-	return cursor
-}
-
 func parseWatchSince(since string) (time.Time, error) {
 	if at, err := time.Parse(time.RFC3339, since); err == nil {
 		return at, nil
@@ -364,6 +359,20 @@ type watchedBox struct {
 	name     string
 	cursor   hey.PostingChangesCursor
 	reported bool // --box named it, or named nothing
+	recovery feedRecovery
+}
+
+// feedRecovery is how far a box's or a calendar's feed is into getting back from a 409.
+// One skip-ahead usually does it; a feed busier than that — more than an increment's
+// worth of changes after HEY's clock at the skip — answers 409 again straight after.
+// That is one episode, not several. Its skips after the first wait on the retry backoff
+// rather than following every doorbell, which would ring as fast as the feed is
+// changing, and its one resync goes out with the clean read that ends it: after every
+// skip it took, so a reader that re-reads on it is not left stale by a later one.
+type feedRecovery struct {
+	skipped   bool      // the episode has skipped ahead
+	skippedTo time.Time // where its last skip landed: the resync's at
+	holding   bool      // the retry, not a doorbell, reads the feed next
 }
 
 // watchEvent is one changed posting or calendar recording, as a line of NDJSON or as a
@@ -644,7 +653,9 @@ func (w *postingsWatch) read(ctx context.Context, message actioncable.Message) e
 		return nil
 	}
 
-	if box, watching := w.boxes[notification.BoxID]; watching {
+	// A box holding for its retry after a repeated 409 is read by the retry: a doorbell
+	// would only skip it ahead again.
+	if box, watching := w.boxes[notification.BoxID]; watching && !box.recovery.holding {
 		if err := w.readBox(ctx, box); err != nil {
 			return err
 		}
@@ -669,20 +680,14 @@ func (w *postingsWatch) readBox(ctx context.Context, box *watchedBox) error {
 			return nil
 		}
 	}
-	w.wasRead(box)
-
 	if changes.FullSyncRequired {
-		fmt.Fprintf(w.errOut, "notice: too much changed in %s to follow one change at a time — skipping ahead, read the box with `hey box view %s`\n", box.name, box.kind)
-		skipped, err := w.skipAhead(ctx, box)
-		if err != nil {
-			return err
-		}
-		// A resync says the box is worth re-reading; a box that is gone is not.
-		if skipped {
-			w.report(ctx, watchEvent{Change: watchResync, At: watchTime(time.Now())}, box, nil)
-		}
-		return nil
+		return w.recoverBox(ctx, box)
 	}
+	w.wasRead(box)
+	if box.recovery.skipped {
+		w.report(ctx, watchEvent{Change: watchResync, At: watchTime(box.recovery.skippedTo)}, box, nil)
+	}
+	box.recovery = feedRecovery{}
 
 	if changes.NextCursor != nil {
 		box.cursor = *changes.NextCursor
@@ -704,6 +709,32 @@ func (w *postingsWatch) readBox(ctx context.Context, box *watchedBox) error {
 	}
 
 	return nil
+}
+
+// recoverBox gets a box that answered 409 back onto its feed by skipping it ahead. The
+// first skip of an episode is announced on stderr and read from straight away, since
+// one skip usually lands on a feed the watch can follow; the resync line, the reader's
+// cue to re-read the box, goes out with the clean read (readBox). A 409 after a skip
+// skips again without a word and leaves the box on the retry backoff, which doubles
+// while the feed stays too busy to follow. A box that is gone is not worth re-reading,
+// and a skip that has not happened — its retry is on the backoff — says nothing.
+func (w *postingsWatch) recoverBox(ctx context.Context, box *watchedBox) error {
+	skippedTo, skipped, err := w.skipAhead(ctx, box)
+	if err != nil || !skipped {
+		return err
+	}
+
+	first := !box.recovery.skipped
+	box.recovery.skipped = true
+	box.recovery.skippedTo = skippedTo
+	if !first {
+		box.recovery.holding = true
+		w.readAgainLater(box)
+		return nil
+	}
+
+	fmt.Fprintf(w.errOut, "notice: too much changed in %s to follow one change at a time — skipped ahead, read the box with `hey box view %s`\n", box.name, box.kind)
+	return w.readBox(ctx, box)
 }
 
 // classify decides whether a posting is new mail and records it, in that order.
@@ -763,38 +794,84 @@ func (w *postingsWatch) settleBackoff() {
 	}
 }
 
-// skipAhead moves a box's cursor to the server's current one, which is the only way
-// back once a box has changed more than an increment can carry, and says whether it
-// did.
+// skipAhead moves a box's cursor to HEY's clock when it answered (serverNowAnswered),
+// which is the only way back once a box has changed more than an increment can carry,
+// and says where it skipped to and whether it did.
+//
+// Not to the since in the box's posting_changes_url, which is what it used to take:
+// that is the box's last posting activity rather than HEY's clock, and a deletion or a
+// bundled posting can come later than it. The list is still read, for the feed's
+// version and to learn whether the box is still there — and read past the SDK's ETag
+// cache (newUncachedSDKClient — a skip is rare enough to build one each time), because HEY's ETag for it is the box rows, which neither
+// posting activity nor a new feed version touches. A 304 would hand back the version
+// HEY had just refused, and a version HEY refuses answers 409 on every read.
 //
 // A box the server no longer lists, or no longer serves a changes feed for, has no
 // cursor to skip to: keeping the one it had would answer 409 on every read, and
 // installing an empty one would be a usage error on every read instead. Either way the
 // box can't be followed any more, so it stops being watched — and nothing was skipped.
-func (w *postingsWatch) skipAhead(ctx context.Context, box *watchedBox) (bool, error) {
-	listed, err := sdk.Boxes().List(ctx)
+// A clock that cannot be read leaves the cursor where it was, to be tried again on the
+// retry's backoff like any read that failed.
+func (w *postingsWatch) skipAhead(ctx context.Context, box *watchedBox) (time.Time, bool, error) {
+	// A skip that could not be made is tried again by the retry, not by the next doorbell,
+	// which would only meet the same 409 and the same failing read.
+	later := func() {
+		box.recovery.holding = true
+		w.readAgainLater(box)
+	}
+	client, err := newUncachedSDKClient(ctx)
 	if err != nil {
-		return false, apierr.FromSDK(err)
+		return time.Time{}, false, w.skipFailed(ctx, box.name, err, later)
+	}
+	listed, err := client.Boxes().List(ctx)
+	if err != nil {
+		return time.Time{}, false, w.skipFailed(ctx, box.name, err, later)
 	}
 	if listed == nil {
-		return false, apierr.ErrAPI(0, "could not list boxes")
+		return time.Time{}, false, apierr.ErrAPI(0, "could not list boxes")
 	}
 
 	for _, listedBox := range *listed {
-		if listedBox.Id == box.id {
-			cursor, err := watchCursor(listedBox.PostingChangesUrl, "")
-			if err != nil {
-				return false, err
-			}
-			if cursor.Since != "" {
-				box.cursor = cursor
-				w.newMail.skippedTo(box.id, cursor)
-				return true, nil
-			}
+		if listedBox.Id != box.id {
+			continue
 		}
+		cursor, err := watchCursor(listedBox.PostingChangesUrl, "")
+		if err != nil {
+			return time.Time{}, false, err
+		}
+		if cursor.Since == "" {
+			break
+		}
+
+		now, err := serverNowAnswered(ctx)
+		if err != nil {
+			return time.Time{}, false, w.skipFailed(ctx, box.name, err, later)
+		}
+		cursor.Since = watchStartSince(now)
+		box.cursor = cursor
+		w.newMail.skippedTo(box.id, cursor)
+		return now, true, nil
 	}
 
-	return false, w.stopWatching(box)
+	return time.Time{}, false, w.stopWatching(box)
+}
+
+// skipFailed says what a skip-ahead's failed read — its client, its list or HEY's
+// clock — comes to: nothing, when the watch is being interrupted or timed out, which is
+// how a watch is meant to end; the error, when waiting will not help; and otherwise a
+// warning and the retry's backoff (later), with the cursor where it was. A 500 on the
+// list is a reason to try again, not to stop watching.
+func (w *postingsWatch) skipFailed(ctx context.Context, name string, err error, later func()) error {
+	switch {
+	case ctx.Err() != nil:
+		return nil //nolint:nilerr // an interrupt or a --timeout is how a watch is meant to end
+	case permanentReadError(err):
+		return apierr.FromSDK(err)
+	default:
+		fmt.Fprintf(w.errOut, "warning: could not skip %s ahead: %v\n", name, err)
+		later()
+		return nil
+	}
 }
 
 // stopWatching drops a box the watch can't follow any longer. When it was the last one

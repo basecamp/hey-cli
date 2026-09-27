@@ -46,11 +46,12 @@ const (
 // watchedCalendar is one calendar the watch follows: how far its recording feed has been
 // read, and the stream that rings when it changes.
 type watchedCalendar struct {
-	id     int64
-	name   string
-	cursor hey.CalendarChangesCursor
-	stream string
-	stop   context.CancelFunc
+	id       int64
+	name     string
+	cursor   hey.CalendarChangesCursor
+	stream   string
+	stop     context.CancelFunc
+	recovery feedRecovery
 }
 
 // calendarsWatch is the calendar half of a watch: the calendars and their cursors, the
@@ -79,9 +80,10 @@ func (c *watchCommand) watchingCalendars(changes map[string]bool) bool {
 }
 
 // watchedCalendars reads the calendars and where each one's feed should be read from. The
-// cursors are capped at the watch's start the way the boxes' are — the server bakes each
-// calendar's last activity into its URL, so a write that lands between reading the clock
-// and reading the list would otherwise sit behind the cursor, read by nothing.
+// cursors start at the watch's start the way the boxes' do (watchStartSince): the since
+// HEY serves is a calendar's own updated_at — for the list, the latest of them — so a
+// calendar deleted after the rest last changed was reported by the first poll of every
+// watch.
 func (c *watchCommand) watchedCalendars(ctx context.Context, started time.Time) (*calendarsWatch, error) {
 	list, err := sdk.Calendars().ListWithChanges(ctx)
 	if err != nil {
@@ -129,15 +131,16 @@ func (c *watchCommand) followedCalendar(listed hey.ListedCalendar, started time.
 	}, nil
 }
 
-// calendarCursor is where a feed should be read from: the URL HEY served, moved by
-// --since, and otherwise capped at the watch's start.
+// calendarCursor is where a feed should be read from: the feed and version the URL HEY
+// served names, from --since or else from the watch's start.
 func (c *watchCommand) calendarCursor(changesURL string, started time.Time) (hey.CalendarChangesCursor, error) {
 	cursor, err := hey.CalendarChangesCursorFrom(changesURL)
 	if err != nil {
 		return hey.CalendarChangesCursor{}, apierr.FromSDK(err)
 	}
 	if c.since == "" {
-		return calendarCursorNoLaterThan(cursor, started), nil
+		cursor.Since = watchStartSince(started)
+		return cursor, nil
 	}
 
 	at, err := parseWatchSince(c.since)
@@ -147,17 +150,6 @@ func (c *watchCommand) calendarCursor(changesURL string, started time.Time) (hey
 	cursor.Since = at.UTC().Format(watchCursorTimeLayout)
 
 	return cursor, nil
-}
-
-// calendarCursorNoLaterThan is noLaterThan for a calendar feed's cursor, and exists for
-// the same race. A cursor that cannot be read is left as it is.
-func calendarCursorNoLaterThan(cursor hey.CalendarChangesCursor, started time.Time) hey.CalendarChangesCursor {
-	at, err := time.Parse(watchCursorTimeLayout, cursor.Since)
-	if err == nil && at.After(started) {
-		cursor.Since = started.UTC().Format(watchCursorTimeLayout)
-	}
-
-	return cursor
 }
 
 // calendarDisplayName is what a calendar is called on a watch line. The personal calendar
@@ -277,7 +269,8 @@ func (w *postingsWatch) coalesceCalendarRing() {
 func (w *postingsWatch) readRungCalendars(ctx context.Context) error {
 	w.calendar.due = nil
 	for _, id := range w.calendar.take() {
-		if calendar, watching := w.calendar.calendars[id]; watching {
+		// A calendar holding for its retry after a repeated 409 is read by the retry.
+		if calendar, watching := w.calendar.calendars[id]; watching && !calendar.recovery.holding {
 			if err := w.readCalendar(ctx, calendar); err != nil {
 				return err
 			}
@@ -331,20 +324,14 @@ func (w *postingsWatch) readCalendar(ctx context.Context, calendar *watchedCalen
 			return nil
 		}
 	}
-	delete(w.calendar.unread, calendar.id)
-	w.settleBackoff()
-
 	if changes.FullSyncRequired {
-		fmt.Fprintf(w.errOut, "notice: too much changed in %s to follow one change at a time — skipping ahead, re-read the calendar\n", calendar.name)
-		skipped, err := w.skipCalendarAhead(ctx, calendar)
-		if err != nil {
-			return err
-		}
-		if skipped {
-			w.reportCalendar(ctx, watchEvent{Change: watchCalendarResync, At: watchTime(time.Now())}, calendar.id, calendar.name)
-		}
-		return nil
+		return w.recoverCalendar(ctx, calendar)
 	}
+	w.calendarWasRead(calendar)
+	if calendar.recovery.skipped {
+		w.reportCalendar(ctx, watchEvent{Change: watchCalendarResync, At: watchTime(calendar.recovery.skippedTo)}, calendar.id, calendar.name)
+	}
+	calendar.recovery = feedRecovery{}
 
 	if changes.NextCursor != nil {
 		calendar.cursor = *changes.NextCursor
@@ -364,6 +351,35 @@ func (w *postingsWatch) readCalendar(ctx context.Context, calendar *watchedCalen
 	return nil
 }
 
+// recoverCalendar is recoverBox for a calendar's recording feed: the first skip is read
+// from straight away, a 409 after a skip waits on the retry backoff, and the episode's
+// one calendar_resync goes out with the clean read that ends it.
+func (w *postingsWatch) recoverCalendar(ctx context.Context, calendar *watchedCalendar) error {
+	skippedTo, skipped, err := w.skipCalendarAhead(ctx, calendar)
+	if err != nil || !skipped {
+		return err
+	}
+
+	first := !calendar.recovery.skipped
+	calendar.recovery.skipped = true
+	calendar.recovery.skippedTo = skippedTo
+	if !first {
+		calendar.recovery.holding = true
+		w.calendar.unread[calendar.id] = true
+		w.armRetry()
+		return nil
+	}
+
+	fmt.Fprintf(w.errOut, "notice: too much changed in %s to follow one change at a time — skipped ahead, re-read the calendar\n", calendar.name)
+	return w.readCalendar(ctx, calendar)
+}
+
+// calendarWasRead takes a calendar off the retry list once it is caught up.
+func (w *postingsWatch) calendarWasRead(calendar *watchedCalendar) {
+	delete(w.calendar.unread, calendar.id)
+	w.settleBackoff()
+}
+
 // reportRecordings walks one bucket in type order, so a read reports the same changes in
 // the same order every time.
 func (w *postingsWatch) reportRecordings(ctx context.Context, calendar *watchedCalendar, change string, bucket map[string][]generated.Recording, at func(generated.Recording) time.Time) {
@@ -380,32 +396,54 @@ func (w *postingsWatch) reportRecordings(ctx context.Context, calendar *watchedC
 	}
 }
 
-// skipCalendarAhead moves a calendar's cursor to the server's current one, which is the
-// only way back once its feed has fallen too far behind, and says whether it did. A
-// calendar the server no longer lists cannot be followed any more and stops being watched
-// — the calendar-level feed reports its deletion in its own time.
-func (w *postingsWatch) skipCalendarAhead(ctx context.Context, calendar *watchedCalendar) (bool, error) {
-	list, err := sdk.Calendars().ListWithChanges(ctx)
+// skipCalendarAhead moves a calendar's cursor to HEY's clock when it answered, the only way
+// back once its feed has fallen too far behind, and says where it skipped to and whether
+// it did — the rule skipAhead follows for a box, and for the same reason: the since in
+// the calendar's URL is its updated_at, not HEY's clock. The list is read for the feed's
+// version and to learn whether the calendar is still there, past the SDK's cache as a
+// box's is: a new feed version need not change the list's ETag. A calendar the server no
+// longer lists cannot be followed any more and stops being watched — the calendar-level
+// feed reports its deletion in its own time. A clock that cannot be read leaves the
+// cursor where it was, to be tried again on the retry's backoff.
+func (w *postingsWatch) skipCalendarAhead(ctx context.Context, calendar *watchedCalendar) (time.Time, bool, error) {
+	// Tried again by the retry, not by the next ring — as for a box.
+	later := func() {
+		calendar.recovery.holding = true
+		w.calendar.unread[calendar.id] = true
+		w.armRetry()
+	}
+	client, err := newUncachedSDKClient(ctx)
 	if err != nil {
-		return false, apierr.FromSDK(err)
+		return time.Time{}, false, w.skipFailed(ctx, calendar.name, err, later)
+	}
+	list, err := client.Calendars().ListWithChanges(ctx)
+	if err != nil {
+		return time.Time{}, false, w.skipFailed(ctx, calendar.name, err, later)
 	}
 	if list == nil {
-		return false, apierr.ErrAPI(0, "could not list calendars")
+		return time.Time{}, false, apierr.ErrAPI(0, "could not list calendars")
 	}
 
 	for _, listed := range list.Calendars {
-		if listed.Calendar.Id == calendar.id {
-			cursor, err := hey.CalendarChangesCursorFrom(listed.RecordingChangesURL)
-			if err != nil {
-				return false, apierr.FromSDK(err)
-			}
-			calendar.cursor = cursor
-			return true, nil
+		if listed.Calendar.Id != calendar.id {
+			continue
 		}
+		cursor, err := hey.CalendarChangesCursorFrom(listed.RecordingChangesURL)
+		if err != nil {
+			return time.Time{}, false, apierr.FromSDK(err)
+		}
+
+		now, err := serverNowAnswered(ctx)
+		if err != nil {
+			return time.Time{}, false, w.skipFailed(ctx, calendar.name, err, later)
+		}
+		cursor.Since = watchStartSince(now)
+		calendar.cursor = cursor
+		return now, true, nil
 	}
 
 	w.stopWatchingCalendar(calendar.id)
-	return false, nil
+	return time.Time{}, false, nil
 }
 
 // pollCalendarList reads the calendar-level feed: calendars that arrived are followed

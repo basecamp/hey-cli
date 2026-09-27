@@ -336,7 +336,14 @@ hey watch --box imbox --events new --run-async 'notify-send -a HEY "New mail in 
 hey watch --run-sync ./triage.sh        # one at a time, waiting for each
 ```
 
-Runs until interrupted, printing changes as they happen, one line each:
+Runs until interrupted, printing changes as they happen, one line each. What changed before
+the watch began is not reported unless `--since` reads back to it first, so
+`--exit-on-first` waits for a change rather than stopping on an old one. When the watch began
+is read off HEY's clock, and a watch that cannot read it exits with an error rather than
+guess. That clock is read to the whole second and taken back by however long the request
+took (retries included), so a change from up to a second before the watch began, plus that
+request's time, can still be reported (and be new, and end `--exit-on-first`); its `at` says
+when it happened. Rounding the other way would skip changes that came after:
 
 ```json
 {"change":"added","at":"2026-08-18T09:14:22.031Z","box":{"id":24088,"kind":"imbox","name":"Imbox"},"posting_id":98765,"thread_id":54321,"new":true,"posting":{}}
@@ -344,7 +351,7 @@ Runs until interrupted, printing changes as they happen, one line each:
 
 Every `added` and `updated` line says whether the posting is new mail: unseen, not muted,
 and active since the watch last saw the thread — or since the watch began, for a thread it
-has not seen, so a box's backlog is never new. Reading, muting or moving a thread is not new
+has not seen, so the backlog `--since` reads is never new. Reading, muting or moving a thread is not new
 activity; a reply on a known thread is. `--events new` selects the new ones, alone or in a
 union with `added`, `updated`, `deleted` and `resync` — the default is everything but `new`,
 and `new` alone leaves a `resync` out, so a script for new mail never runs on one. `--box`
@@ -359,7 +366,9 @@ calendar — `{"change":"recording_added","calendar":{"id":512,"name":"Household
 "recording_id":88001,"recording_type":"Calendar::Event","recording":{}}` — and a calendar
 arriving, changing or leaving is `calendar_added`, `calendar_updated` or
 `calendar_deleted`. A calendar whose feed fell too far behind is skipped ahead and says so
-with `calendar_resync`, the way a box says `resync`. The email-specific flags switch the
+with `calendar_resync`, the way a box says `resync`. Either is said once per catch-up, when
+the feed can be followed again: a feed still too busy after the skip is skipped again on the
+retry backoff, and the line's `at` is the last skip. The email-specific flags switch the
 calendars off: `--box` scopes the watch to mail, and an `--events` list naming only mail
 changes does the same.
 

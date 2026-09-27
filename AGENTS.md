@@ -679,13 +679,36 @@ says (`--box` picks the boxes whose changes are reported; every box is followed)
 posting recorded as soon as it is classified. The
 start is the Date header translated back to when the request was made (mail that lands while
 the server answers is later than the start), it is taken before the box list, and each
-box's cursor starts no later than it (`noLaterThan`): the server bakes the box's last posting
-activity into the cursor, so mail that landed in between would otherwise sit behind the
-cursor, read by nothing. That
+box's cursor starts at it (`watchStartSince`), keeping only the version from the box's
+`posting_changes_url`. The since HEY puts there is not its clock but the box's last posting
+activity (`Box#last_posting_activity_at`: unbundled postings only, the box's own `updated_at`
+when it has none), and the feed answers deletions and bundled postings later than that; and
+`/boxes.json` comes through the SDK's ETag cache with an ETag of the box rows alone, which
+posting activity does not touch, so a 304 serves the since as it was when the list was
+cached. A read from HEY's since reported history as news on every start, and a since later
+than the start would leave mail that landed in between behind it, read by nothing. A watch
+that cannot read HEY's clock does not start: the workstation's clock is no stand-in for a
+cutoff every feed and new mail are measured against, since a fast one would skip changes and
+a slow one would report history. That
 is HEY's semantics and state across events, so the CLI decides it once; what to do about
-it is the reader's. A 409 skip-ahead sets that box's floor at the cursor it skipped to
+it is the reader's. The Date header is whole seconds, so the start can be up to a second
+(plus the clock request's whole time, retries included) early and a change from that window
+is reported. Nothing HEY serves on demand says the time finer — Action Cable pings are
+whole seconds too; a posting doorbell's `at` and the feeds' cursors carry microseconds, but
+only once something has changed, never as a "now" before the watch starts — and rounding
+the other way would skip changes. A 409 skip-ahead moves the cursor to HEY's clock when it
+answered (`serverNowAnswered` — not taken back by the request's time, since a resync has
+no gap to catch and a slow request could leave a busy feed still behind), keeping the feed
+version from a list read past the SDK's cache (`newUncachedSDKClient`: the list's ETag is
+its rows, which neither posting activity nor a new feed version changes, and HEY answers
+409 for a version it no longer speaks), and sets that box's floor there
 (`newMail.skippedTo`): activity at or before it is never new there, known thread or not,
-because the watch never read the gap. `resync` is an event of its own — reported by default,
+because the watch never read the gap. The first skip is read from straight away; a 409
+after it is the same recovery (`feedRecovery`), and the next skip waits on the retry
+backoff rather than every doorbell. The recovery's one resync goes out with the clean read
+that ends it, at the last skip, so a reader that re-reads on it has missed nothing a later
+skip passed. A list or clock read that fails is retried on that backoff, and an
+interrupt during one ends quietly (`skipFailed`). A calendar's 409 skips the same way. `resync` is an event of its own — reported by default,
 left out by `--events new` — so a script for new mail never runs on one. The Omarchy bar plugin toasts from those lines itself (app-name, glyph,
 click-to-focus and the replace-not-stack id all live in the plugin), and nothing
 desktop-shaped lives in `watch*.go`.
@@ -785,11 +808,11 @@ watch that is down costs staleness, not a notice.
 `hey watch` follows the same streams on its own connection and reports the changes
 themselves (`internal/cmd/watch_calendar.go`). Rings are coalesced per calendar for
 `calendarCoalesceDelay`, then the calendar's recording feed is read from its cursor
-(`Calendars().AllRecordingChanges`, cursors capped at the watch's start like the boxes' —
-`calendarCursorNoLaterThan`) and each recording is a `recording_added`, `recording_updated`
+(`Calendars().AllRecordingChanges`, cursors starting at the watch's start like the boxes' —
+`calendarCursor`) and each recording is a `recording_added`, `recording_updated`
 or `recording_deleted` line naming its calendar where a mail line names its box. The poll
 reports `calendar_added`, `calendar_updated` and `calendar_deleted`, and a recording feed's
-409 is `calendar_resync` after skipping ahead to a fresh cursor from the list. The
+409 is `calendar_resync` after skipping ahead to HEY's clock, as a box does. The
 email-specific flags switch all of it off — `--box`, or an `--events` list naming only
 mail changes (`watchingCalendars` in watch_calendar.go) — and `ready` waits for the
 calendars' catch-up exactly as it waits for the boxes', on the same retry backoff and the

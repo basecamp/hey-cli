@@ -191,15 +191,21 @@ and `--events new` selects the true ones. The rule:
   watch last recorded for the thread — or later than the watch's start, when it has no
   record. That start is read off HEY's own clock (the `Date` header of one request,
   translated back to the moment the request was made), the clock every `active_at` is on,
-  so a workstation running fast or slow neither calls the backlog new nor sits on new mail;
+  so a workstation running fast or slow neither calls the backlog new nor sits on new mail
+  (a watch that cannot read HEY's clock exits with an error rather than use its own);
   whole seconds, rounded down, so the doubt falls on the side of calling mail a moment old
-  new, and every box's cursor starts no later than that start, so mail that lands while the
+  new — mail from up to a second before the watch began, plus however long the clock request
+  took (retries included), can read as new — and every
+  box's cursor starts at that start, so mail that lands while the
   watch is starting up is read and is new. `active_at` moves on new mail only, not on a
   seen flip, a mute or a move, so reading a thread, marking it unseen again or moving it
-  into a box is never new, and a reply on a known thread is. A box's first read is its
-  catch-up from the server's cursor — the box's last activity, not this moment — so it
-  carries backlog, which the start-time rule keeps out, alongside anything that arrived
-  while the watch was starting, which is new.
+  into a box is never new, and a reply on a known thread is. A box's first read starts at
+  the watch's start, not at the server's cursor — the box's last posting activity, which a
+  deletion or a bundled posting can postdate, and which a cached box list can serve days
+  old — so it carries what arrived while the watch was starting, which is new, and at most
+  the whole-second window above: a change from just before the start that the start could
+  not be told apart from. `--since` reads backlog first, which the start-time rule keeps
+  out.
 - **Every posting the watch reads is recorded**, in every box and whatever `--events` or
   `--box` reports — `--box` picks what is reported, every box is followed — so a thread
   known from a filtered-out change, or from another box, is never mistaken for new when its
@@ -211,8 +217,8 @@ and `--events new` selects the true ones. The rule:
   is new. `hey watch --box imbox --events new --exit-on-first` is "block until new mail", and
   a `--run-*` script sees `HEY_NEW=1` or `HEY_NEW=0`.
 - **A skip-ahead sets a floor.** A box that answered 409 was never read across the gap, so
-  the cursor it skips to — the box's last posting activity — becomes that box's floor:
-  activity at or before it is never new there, on a thread the watch knows or one it does
+  the cursor it skips to — HEY's clock when the skip read it — becomes that
+  box's floor: activity at or before it is never new there, on a thread the watch knows or one it does
   not, so a reply the watch missed and then a move while still unseen is not new mail. Mail
   after the floor is. The floor is the box's own; a gap thread moved to another box is
   measured there and may read as new once — the `resync` line is the cue to re-read.

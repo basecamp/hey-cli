@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -59,8 +60,17 @@ func TestCalendarCursor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cursor.Since != "2026-08-18T09:00:00.000Z" || cursor.Version != "1" {
-		t.Errorf("cursor = %+v, want the server's own since and version", cursor)
+	if cursor.Since != "2026-08-18T10:00:00.000Z" || cursor.Version != "1" {
+		t.Errorf("cursor = %+v, want the watch's start and the server's version", cursor)
+	}
+
+	later := "https://app.hey.com/calendars/512/recording/changes.json?since=2026-08-18T10%3A30%3A00.518496Z&v=1"
+	cursor, err = command.calendarCursor(later, started)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cursor.Since != "2026-08-18T10:00:00.000Z" {
+		t.Errorf("since = %q, want a cursor later than the start moved back to it", cursor.Since)
 	}
 
 	command.since = "2026-08-17T08:30:00Z"
@@ -81,22 +91,69 @@ func TestCalendarCursor(t *testing.T) {
 	}
 }
 
-func TestCalendarCursorNoLaterThan(t *testing.T) {
-	started := time.Date(2026, 8, 18, 9, 0, 0, 0, time.UTC)
+// The list's cursor is the latest updated_at of the calendars still on it, so a calendar
+// deleted after the rest last changed is later than it — and history by the time the
+// watch starts. The feed here answers what is strictly later than its cursor, as HEY's
+// does.
+func TestWatchPollDoesNotReportHistoryAsItStarts(t *testing.T) {
+	t.Setenv("HEY_TOKEN", "test-token")
 
-	late := hey.CalendarChangesCursor{Since: "2026-08-18T09:30:00.000Z", Version: "1"}
-	if capped := calendarCursorNoLaterThan(late, started); capped.Since != "2026-08-18T09:00:00.000Z" {
-		t.Errorf("since = %q, want a cursor later than the start moved back to it", capped.Since)
+	var mu sync.Mutex
+	deletedAt := "2026-08-20T16:42:07.204613Z"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/calendars.json":
+			_, _ = w.Write([]byte(`{
+				"calendars": [{"calendar": {"id": 512, "name": "Household"},
+				               "recording_changes_url": "/calendars/512/recording/changes.json?since=2026-08-18T11%3A00%3A00.000000Z&v=1",
+				               "signed_stream_name": "signed-household"}],
+				"calendar_changes_url": "/calendar/changes.json?since=2026-08-18T11%3A00%3A00.000000Z"
+			}`))
+		case "/calendar/changes.json":
+			since, err := time.Parse(time.RFC3339Nano, r.URL.Query().Get("since"))
+			deleted, _ := time.Parse(time.RFC3339Nano, deletedAt)
+			if err != nil || !deleted.After(since) {
+				_, _ = w.Write([]byte(`{}`))
+				return
+			}
+			w.Header().Set("Link", `</calendar/changes.json?since=`+deletedAt+`>; rel="next"`)
+			_, _ = w.Write([]byte(`{"deleted": [{"id": 513, "deleted_at": "` + deletedAt + `"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
+
+	calendars, err := newWatchCommand().watchedCalendars(context.Background(), watchStarted)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	t.Cleanup(calendars.poll.Stop)
+	watch, out := newTestWatch(defaultChanges...)
+	watch.exitOnFirst = true
+	watch.calendar = calendars
+
+	if err := watch.pollCalendarList(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Len() != 0 || watch.finished() {
+		t.Fatalf("wrote %q, want nothing for a calendar deleted before the watch began", out.String())
 	}
 
-	early := hey.CalendarChangesCursor{Since: "2026-08-18T08:00:00.000Z"}
-	if kept := calendarCursorNoLaterThan(early, started); kept.Since != "2026-08-18T08:00:00.000Z" {
-		t.Errorf("since = %q, want a cursor before the start left alone", kept.Since)
+	// A calendar deleted after the watch began is a change.
+	mu.Lock()
+	deletedAt = "2026-08-21T09:04:31.880112Z"
+	mu.Unlock()
+	if err := watch.pollCalendarList(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-
-	unreadable := hey.CalendarChangesCursor{Since: "whenever"}
-	if kept := calendarCursorNoLaterThan(unreadable, started); kept.Since != "whenever" {
-		t.Errorf("since = %q, want a cursor we can't read left as it is", kept.Since)
+	lines := watchLines(t, out)
+	if len(lines) != 1 || lines[0]["change"] != watchCalendarDeleted || !watch.finished() {
+		t.Errorf("wrote %v, want the deletion after the start, ending the watch", lines)
 	}
 }
 
@@ -207,7 +264,12 @@ func TestWatchCalendarSkipsAheadOnAFullSync(t *testing.T) {
 			}`))
 			return
 		}
-		w.WriteHeader(http.StatusConflict)
+		if r.URL.Path == "/identity.json" {
+			w.Header().Set("Date", skipDate)
+			_, _ = w.Write([]byte(`{"id":1}`))
+			return
+		}
+		answerTooFarBehindBefore(w, r, time.Date(2026, 8, 21, 11, 0, 0, 0, time.UTC))
 	}))
 	defer server.Close()
 	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
@@ -226,8 +288,85 @@ func TestWatchCalendarSkipsAheadOnAFullSync(t *testing.T) {
 	if event.Change != watchCalendarResync || event.Calendar == nil || event.Calendar.ID != 512 {
 		t.Errorf("event = %+v, want a calendar_resync naming the calendar", event)
 	}
-	if watch.calendar.calendars[512].cursor.Since != "2026-08-18T11:00:00.000Z" {
-		t.Errorf("cursor = %+v, want the server's own fresh cursor", watch.calendar.calendars[512].cursor)
+	skippedTo, err := time.Parse(time.RFC3339Nano, event.At)
+	if err != nil {
+		t.Fatalf("resync at %q: %v", event.At, err)
+	}
+	wantSkippedToHEYsClock(t, skippedTo)
+	if got := watch.calendar.calendars[512].cursor; got.Since != watchStartSince(skippedTo) || got.Version != "1" {
+		t.Errorf("cursor = %+v, want HEY's clock at the skip the resync names, and the feed's version", got)
+	}
+}
+
+// A calendar's feed can move to a new version without the calendar list's ETag — its
+// calendars and the selection — changing, so the skip-ahead reads the list past the cache.
+func TestWatchCalendarSkipAheadReadsTheListPastTheCache(t *testing.T) {
+	t.Setenv("HEY_TOKEN", "test-token")
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	var mu sync.Mutex
+	var notModified, conflicts int
+	version := "1"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch r.URL.Path {
+		case "/identity.json":
+			w.Header().Set("Date", skipDate)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":1}`))
+		case "/calendars.json":
+			w.Header().Set("ETag", `W/"calendars-unchanged"`)
+			if r.Header.Get("If-None-Match") == `W/"calendars-unchanged"` {
+				notModified++
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"calendars": [{"calendar": {"id": 512, "name": "Household"},
+				"recording_changes_url": "/calendars/512/recording/changes.json?since=2026-08-18T11%3A00%3A00.000000Z&v=` + version + `"}],
+				"calendar_changes_url": "/calendar/changes.json?since=2026-08-18T11%3A00%3A00.000000Z"}`))
+		default:
+			if r.URL.Query().Get("v") != "2" {
+				conflicts++
+				w.WriteHeader(http.StatusConflict)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}))
+	defer server.Close()
+	initSDK(auth.NewManager(server.URL, server.Client(), t.TempDir()), server.URL)
+
+	// The list as the watch read it at its start, now in the SDK's cache; then HEY
+	// moves the recording feed to version 2.
+	if _, err := sdk.Calendars().ListWithChanges(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	mu.Lock()
+	version = "2"
+	mu.Unlock()
+
+	watch, out := newTestWatch("recording_added", "calendar_resync")
+	watch.calendar = newTestCalendarsWatch(t, &watchedCalendar{id: 512, name: "Household", cursor: hey.CalendarChangesCursor{Since: "2026-08-18T11:00:00.000Z", Version: "1"}})
+
+	for range 2 {
+		if err := watch.readCalendar(context.Background(), watch.calendar.calendars[512]); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if notModified != 0 || conflicts != 1 {
+		t.Errorf("list served from the cache %d times and the feed answered 409 %d times, want never and once", notModified, conflicts)
+	}
+	if got := watch.calendar.calendars[512].cursor.Version; got != "2" {
+		t.Errorf("version = %q, want the one HEY speaks now", got)
+	}
+	if lines := watchLines(t, out); len(lines) != 1 || lines[0]["change"] != watchCalendarResync {
+		t.Errorf("wrote %v, want one calendar_resync", lines)
 	}
 }
 
@@ -238,6 +377,11 @@ func TestWatchCalendarStopsWatchingAGoneCalendar(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/calendars.json" {
 			_, _ = w.Write([]byte(`{"calendars": [], "calendar_changes_url": "/calendar/changes.json?since=2026-08-18T11%3A00%3A00.000Z"}`))
+			return
+		}
+		if r.URL.Path == "/identity.json" {
+			w.Header().Set("Date", skipDate)
+			_, _ = w.Write([]byte(`{"id":1}`))
 			return
 		}
 		w.WriteHeader(http.StatusConflict)
