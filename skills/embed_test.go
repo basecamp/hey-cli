@@ -83,3 +83,24 @@ func TestHeySkillAddsToAContactNoteWithoutLosingIt(t *testing.T) {
 		}
 	}
 }
+
+// Writing a journal entry replaces it, so the skill's recipe for adding to one must not
+// write back Markdown that has lost part of the entry, nor write after a failed read.
+func TestHeySkillAddsToAJournalEntryWithoutLosingIt(t *testing.T) {
+	data, err := FS.ReadFile("hey/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+
+	for _, want := range []string{
+		"content_markdown_lossless",
+		"--jq 'if .data.content_markdown_lossless then .data.content_markdown else error(",
+		"entry=$(hey journal read 2026-03-15 --jq '.data.content // error(",
+		`hey journal write 2026-03-15 --content-html "$entry`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("embedded HEY skill does not contain %q", want)
+		}
+	}
+}

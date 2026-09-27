@@ -270,7 +270,7 @@ Repeatable `hey reply --to`, `--cc` and `--bcc` flags add recipients to that env
 
 Email bodies come back as Markdown. `hey thread read` and the TUI render that Markdown for the terminal — headings, emphasis, lists, quotes, tables and code survive, and links keep their URLs and stay clickable where the terminal supports it. `--json` carries the same Markdown in `body`, so an agent reading a thread sees the structure a human sees rather than a flattened wall of text. `--html` keeps HEY's original body HTML and frames each entry with its From, To, CC and BCC headers.
 
-Writing is Markdown too, for message bodies, drafts, journal entries, snippets and contact notes: `-m`, `--content`, `--note`, positional content, stdin, and `$EDITOR` (which opens prefilled with the existing entry or note as Markdown; for a contact note whose Markdown would drop part of it, the editor is refused and `--note-html` is the way to change it). Every such flag has a raw-HTML twin — `--message-html`, `--content-html`, `--note-html` — for sending markup verbatim; each pair is mutually exclusive. The TUI's compose and bulk-reply forms convert Markdown the same way, and the compose editor renders it live as you type — `**bold**` turns bold, markers and all. A fenced code block's language (` ```ruby `) is carried the way HEY's own editor stores it, so the web app syntax-highlights it — for the languages HEY highlights (Ruby, Python, JavaScript, TypeScript, Go, Rust, Java, C#, C++, PHP, Swift, HTML, CSS); any other is dropped. Clip passages, event notes and time track notes are plain text.
+Writing is Markdown too, for message bodies, drafts, journal entries, snippets and contact notes: `-m`, `--content`, `--note`, positional content, stdin, and `$EDITOR` (which opens prefilled with the existing entry or note as Markdown; for a journal entry or contact note whose Markdown would drop part of it, the editor is refused and `--content-html` or `--note-html` is the way to change it). Every such flag has a raw-HTML twin — `--message-html`, `--content-html`, `--note-html` — for sending markup verbatim; each pair is mutually exclusive. HEY serves a journal entry, a snippet's `content_html` and a contact's `note_html` inside its editor's `<div class="trix-content">` wrapper, so `--content-html` and `--note-html` take that wrapper off, and HTML read back and written again does not sink one level deeper each time. The TUI's compose and bulk-reply forms convert Markdown the same way, and the compose editor renders it live as you type — `**bold**` turns bold, markers and all. A fenced code block's language (` ```ruby `) is carried the way HEY's own editor stores it, so the web app syntax-highlights it — for the languages HEY highlights (Ruby, Python, JavaScript, TypeScript, Go, Rust, Java, C#, C++, PHP, Swift, HTML, CSS); any other is dropped. Clip passages, event notes and time track notes are plain text.
 
 Drafts are the review-before-send lane: `hey compose --draft` (and `hey reply --draft`) saves instead of sending — recipients optional on a draft — and answers the draft's ID. `hey draft show` reads it back with the body as Markdown, `hey draft edit` revises it (each flag replaces its field; what is not flagged is kept, by reading the draft and resending the whole of it, since a revision is not a patch on HEY's side), `hey draft send` delivers through HEY's undo window, and `hey draft delete` trashes it. Scheduling a delivery is done in a HEY app for now — the CLI has no flag for it, and HEY's API schedules only to a whole hour — and a schedule set there survives CLI edits untouched. A draft prepared here is reviewed and sent from any HEY app, which is the workflow this is for: an agent writes, a person decides.
 
@@ -636,10 +636,22 @@ never accepted.
 hey journal list                   # list entries
 hey journal list --starts-on 2026-01-01 --ends-on 2026-01-31
 hey journal read                   # read today's entry (or pass YYYY-MM-DD)
+hey journal read 2026-03-15 --jq '.data.content_markdown'  # the entry as Markdown; write it back only if content_markdown_lossless is true
 hey journal write "..."            # write today's entry (omit content: $EDITOR at a terminal, else stdin)
 ```
+
+`hey journal read --json` answers `content`, the entry's HTML as HEY serves it,
+`content_markdown`, the entry as Markdown, and `content_markdown_lossless`, which says
+whether that Markdown holds everything in the entry. A write replaces the whole entry. When
+`content_markdown_lossless` is `true`, `hey journal write` writes the Markdown back as the
+same entry. When it is `false`, the entry holds an attachment, an image, a table or other
+markup Markdown has no syntax for, and writing Markdown would drop it: change `content` and
+write it back with `--content-html` instead, which takes off the wrapper HEY serves it in.
 
 Saving an empty buffer in `$EDITOR` removes the day's entry, and `hey journal write` says
 so rather than reporting a save. An empty day answers with an empty entry, so if the read
 that pre-fills the editor fails for any other reason the command stops there instead of
-opening a blank buffer over an entry it could not see.
+opening a blank buffer over an entry it could not see. Nor is `$EDITOR` opened on an entry whose
+`content_markdown_lossless` is `false`: saving its Markdown would drop the attachment or
+image it holds, so the command refuses and writes nothing, and the entry is changed through
+`content` and `--content-html` instead.

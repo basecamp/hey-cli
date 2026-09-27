@@ -147,7 +147,7 @@ func newSnippetCreateCommand() *snippetCreateCommand {
 	}
 	createCommand.cmd.Flags().StringVar(&createCommand.name, "name", "", "Snippet name (required)")
 	createCommand.cmd.Flags().StringVar(&createCommand.content, "content", "", "Snippet content as Markdown")
-	createCommand.cmd.Flags().StringVar(&createCommand.contentHTML, "content-html", "", "Snippet content as raw HTML instead of Markdown")
+	createCommand.cmd.Flags().StringVar(&createCommand.contentHTML, "content-html", "", "Snippet content as raw HTML instead of Markdown; the trix-content wrapper HEY serves content_html in is taken off")
 	createCommand.cmd.MarkFlagsMutuallyExclusive("content", "content-html")
 	return createCommand
 }
@@ -160,10 +160,7 @@ func (c *snippetCreateCommand) run(cmd *cobra.Command, _ []string) error {
 	if name == "" {
 		return apierr.ErrUsage("--name is required")
 	}
-	content := c.contentHTML
-	if content == "" {
-		content = htmlutil.FromMarkdown(c.content)
-	}
+	content := snippetContent(c.content, c.contentHTML)
 	if strings.TrimSpace(content) == "" {
 		return apierr.ErrUsage("--content is required")
 	}
@@ -195,7 +192,7 @@ func newSnippetUpdateCommand() *snippetUpdateCommand {
 	}
 	updateCommand.cmd.Flags().StringVar(&updateCommand.name, "name", "", "New snippet name")
 	updateCommand.cmd.Flags().StringVar(&updateCommand.content, "content", "", "New snippet content as Markdown")
-	updateCommand.cmd.Flags().StringVar(&updateCommand.contentHTML, "content-html", "", "New snippet content as raw HTML instead of Markdown")
+	updateCommand.cmd.Flags().StringVar(&updateCommand.contentHTML, "content-html", "", "New snippet content as raw HTML instead of Markdown; the trix-content wrapper HEY serves content_html in is taken off")
 	updateCommand.cmd.MarkFlagsMutuallyExclusive("content", "content-html")
 	return updateCommand
 }
@@ -220,10 +217,7 @@ func (c *snippetUpdateCommand) run(cmd *cobra.Command, args []string) error {
 			return apierr.ErrUsage("--name cannot be empty")
 		}
 	}
-	content := c.contentHTML
-	if content == "" {
-		content = htmlutil.FromMarkdown(c.content)
-	}
+	content := snippetContent(c.content, c.contentHTML)
 	if contentChanged && strings.TrimSpace(content) == "" {
 		return apierr.ErrUsage("--content cannot be empty")
 	}
@@ -231,6 +225,16 @@ func (c *snippetUpdateCommand) run(cmd *cobra.Command, args []string) error {
 		return apierr.FromSDK(err)
 	}
 	return writeMutation(cmd, fmt.Sprintf("Snippet %d updated", snippetID), map[string]any{"id": snippetID})
+}
+
+// snippetContent is the snippet body to send: the Markdown converted, or the raw HTML
+// less the editor wrapper HEY serves content_html in, which writing back as it is would
+// nest one level deeper on every round trip.
+func snippetContent(markdown, rawHTML string) string {
+	if rawHTML != "" {
+		return htmlutil.UnwrapTrixContent(rawHTML)
+	}
+	return htmlutil.FromMarkdown(markdown)
 }
 
 type snippetDeleteCommand struct {
