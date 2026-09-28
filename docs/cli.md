@@ -497,8 +497,13 @@ changing. Two things cannot survive the round trip. HEY serves notes back as pla
 saving flattens their formatting; and a countdown is a recording of its own that this edit
 does not read back, so an edit removes one unless `--countdown` names it again. An event that cannot be read is refused rather
 than written blind. It is looked for within a year either side of today; pass the day it
-starts (`hey event edit 4821 2026-09-02`) for one outside that — `--calendar` only limits
-which calendars are read.
+starts (`hey event edit 4821 2026-09-02`) for one outside that. Every calendar is read, and
+`--calendar` is where the event moves to: `hey event edit 4821 --calendar 9102`. That has to
+be a calendar you own or share, not your personal calendar or a subscription. An event you
+cannot edit, such as an invitation, moves only onto a calendar nobody else is on, and an
+event on a subscription does not move at all; HEY keeps it where it is otherwise, and the
+edit fails saying so rather than reporting it updated. HEY still saves the circle, countdown
+and reminders of an event it does not move.
 
 An id on its own changes the whole event, a repeating series included. One day of a
 series is changed with `--occurrence`, which takes the `occurrence_id` that `hey event
