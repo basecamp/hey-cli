@@ -169,55 +169,13 @@ func resolveBox(ctx context.Context, nameOrID, page string) (*generated.BoxShowR
 		cursor = &page
 	}
 
-	// Numeric ID: fetch directly
 	if id, err := strconv.ParseInt(nameOrID, 10, 64); err == nil {
-		resp, err := sdk.Boxes().Get(ctx, id, &generated.GetBoxParams{Page: cursor})
-		if err != nil {
-			return nil, apierr.FromSDK(err)
-		}
-		return resp, nil
+		return resolveBoxByID(ctx, id, cursor)
 	}
 
-	// A box HEY names has a route of its own, which saves listing the boxes and pages the
-	// box in its own order.
 	kind := boxKindFor(nameOrID)
-	switch kind {
-	case hey.BoxKindImbox:
-		resp, err := sdk.Boxes().GetImbox(ctx, &generated.GetImboxParams{Page: cursor})
-		if err != nil {
-			return nil, apierr.FromSDK(err)
-		}
-		return resp, nil
-	case hey.BoxKindFeed:
-		resp, err := sdk.Boxes().GetFeedbox(ctx, &generated.GetFeedboxParams{Page: cursor})
-		if err != nil {
-			return nil, apierr.FromSDK(err)
-		}
-		return resp, nil
-	case hey.BoxKindTrail:
-		resp, err := sdk.Boxes().GetTrailbox(ctx, &generated.GetTrailboxParams{Page: cursor})
-		if err != nil {
-			return nil, apierr.FromSDK(err)
-		}
-		return resp, nil
-	case hey.BoxKindSetAside:
-		resp, err := sdk.Boxes().GetAsidebox(ctx, &generated.GetAsideboxParams{Page: cursor})
-		if err != nil {
-			return nil, apierr.FromSDK(err)
-		}
-		return resp, nil
-	case hey.BoxKindLater:
-		resp, err := sdk.Boxes().GetLaterbox(ctx, &generated.GetLaterboxParams{Page: cursor})
-		if err != nil {
-			return nil, apierr.FromSDK(err)
-		}
-		return resp, nil
-	case hey.BoxKindBubbleUp:
-		resp, err := sdk.Boxes().GetBubblebox(ctx, &generated.GetBubbleboxParams{Page: cursor})
-		if err != nil {
-			return nil, apierr.FromSDK(err)
-		}
-		return resp, nil
+	if resp, named, err := readNamedBox(ctx, kind, cursor); named {
+		return resp, err
 	}
 
 	// Any other box is found in the list, by the kind or the name HEY serves for it.
@@ -239,4 +197,57 @@ func resolveBox(ctx context.Context, nameOrID, page string) (*generated.BoxShowR
 	}
 
 	return nil, errBoxNotFound(nameOrID)
+}
+
+// resolveBoxByID reads a box HEY names on its own route, like a box given by name. The
+// pages after the first are read there whatever the first came from (mail.ReadPage
+// dispatches on the kind), and /boxes/{id} orders the Feed, the Paper Trail and Bubble Up
+// differently, so a first page read by ID would repeat or skip threads on the second.
+func resolveBoxByID(ctx context.Context, id int64, cursor *string) (*generated.BoxShowResponse, error) {
+	result, err := sdk.Boxes().List(ctx)
+	if err != nil {
+		return nil, apierr.FromSDK(err)
+	}
+
+	if result != nil {
+		for _, b := range *result {
+			if b.Id == id {
+				if resp, named, readErr := readNamedBox(ctx, b.Kind, cursor); named {
+					return resp, readErr
+				}
+				break
+			}
+		}
+	}
+
+	resp, err := sdk.Boxes().Get(ctx, id, &generated.GetBoxParams{Page: cursor})
+	if err != nil {
+		return nil, apierr.FromSDK(err)
+	}
+	return resp, nil
+}
+
+// readNamedBox reads a box HEY has a route of its own for, which pages the box in its own
+// order. named is false for any other kind, which only /boxes/{id} serves.
+func readNamedBox(ctx context.Context, kind string, cursor *string) (resp *generated.BoxShowResponse, named bool, err error) {
+	switch kind {
+	case hey.BoxKindImbox:
+		resp, err = sdk.Boxes().GetImbox(ctx, &generated.GetImboxParams{Page: cursor})
+	case hey.BoxKindFeed:
+		resp, err = sdk.Boxes().GetFeedbox(ctx, &generated.GetFeedboxParams{Page: cursor})
+	case hey.BoxKindTrail:
+		resp, err = sdk.Boxes().GetTrailbox(ctx, &generated.GetTrailboxParams{Page: cursor})
+	case hey.BoxKindSetAside:
+		resp, err = sdk.Boxes().GetAsidebox(ctx, &generated.GetAsideboxParams{Page: cursor})
+	case hey.BoxKindLater:
+		resp, err = sdk.Boxes().GetLaterbox(ctx, &generated.GetLaterboxParams{Page: cursor})
+	case hey.BoxKindBubbleUp:
+		resp, err = sdk.Boxes().GetBubblebox(ctx, &generated.GetBubbleboxParams{Page: cursor})
+	default:
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, true, apierr.FromSDK(err)
+	}
+	return resp, true, nil
 }

@@ -119,13 +119,16 @@ func TestBoxCommandTakesEverySearchBox(t *testing.T) {
 
 func TestBoxCommandNumericIDAndLimit(t *testing.T) {
 	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/boxes/17.json" {
-			t.Errorf("request = %s %s, want GET /boxes/17.json", r.Method, r.URL.Path)
-			http.NotFound(w, r)
-			return
-		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"id":17,"kind":"custom","name":"Receipts","next_history_url":"https://example.invalid/page-2","postings":[{"id":1,"summary":"First"},{"id":2,"summary":"Second"}]}`)
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/boxes.json":
+			_, _ = io.WriteString(w, `[{"id":17,"kind":"custom","name":"Receipts"}]`)
+		case r.Method == http.MethodGet && r.URL.Path == "/boxes/17.json":
+			_, _ = io.WriteString(w, `{"id":17,"kind":"custom","name":"Receipts","next_history_url":"https://example.invalid/page-2","postings":[{"id":1,"summary":"First"},{"id":2,"summary":"Second"}]}`)
+		default:
+			t.Errorf("request = %s %s, want GET /boxes.json or /boxes/17.json", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
 	}), "box", "17", "--limit", "1")
 	if err != nil {
 		t.Fatalf("execute box: %v", err)
@@ -219,23 +222,49 @@ func TestBoxCommandFollowsPagesOnTheNamedRoute(t *testing.T) {
 	}
 }
 
-// A numeric ID reaches the same named route, because the box says what kind it is.
-func TestBoxCommandFollowsPagesForANumericImbox(t *testing.T) {
+// A numeric ID reads every page on the box's own route, the first included: /boxes/{id}
+// orders The Feed differently, so a first page read there would repeat or skip threads on
+// the second.
+func TestBoxCommandFollowsPagesForANumericFeed(t *testing.T) {
 	var requests []string
 	if _, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.URL.Path+"?"+r.URL.RawQuery)
 		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Query().Get("page") {
-		case "":
-			_, _ = io.WriteString(w, `{"id":9,"kind":"imbox","name":"Imbox","next_history_url":"/imbox.json?page=cursor-2","postings":[{"id":1}]}`)
+		switch {
+		case r.URL.Path == "/boxes.json":
+			_, _ = io.WriteString(w, `[{"id":8,"kind":"imbox","name":"Imbox"},{"id":9,"kind":"feedbox","name":"The Feed"}]`)
+		case r.URL.Query().Get("page") == "":
+			_, _ = io.WriteString(w, `{"id":9,"kind":"feedbox","name":"The Feed","next_history_url":"/feedbox.json?page=cursor-2","postings":[{"id":1}]}`)
 		default:
-			_, _ = io.WriteString(w, `{"id":9,"kind":"imbox","name":"Imbox","postings":[]}`)
+			_, _ = io.WriteString(w, `{"id":9,"kind":"feedbox","name":"The Feed","postings":[]}`)
 		}
 	}), "box", "9", "--all"); err != nil {
 		t.Fatalf("execute box: %v", err)
 	}
-	want := "[/boxes/9.json? /imbox.json?page=cursor-2]"
+	want := "[/boxes.json? /feedbox.json? /feedbox.json?page=cursor-2]"
 	if got := fmt.Sprint(requests); got != want {
+		t.Errorf("requests = %s, want %s", got, want)
+	}
+}
+
+// An ID HEY does not list, such as one of another linked account's boxes, is still read
+// directly and answered however HEY answers it.
+func TestBoxCommandReadsAnUnlistedIDDirectly(t *testing.T) {
+	var requests []string
+	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/boxes.json":
+			_, _ = io.WriteString(w, `[{"id":8,"kind":"imbox","name":"Imbox"}]`)
+		default:
+			http.NotFound(w, r)
+		}
+	}), "box", "404")
+	if err == nil {
+		t.Fatal("execute box: want not found, got nil")
+	}
+	if got, want := fmt.Sprint(requests), "[/boxes.json /boxes/404.json]"; got != want {
 		t.Errorf("requests = %s, want %s", got, want)
 	}
 }
@@ -246,8 +275,10 @@ func TestBoxCommandFollowsPagesForACustomBox(t *testing.T) {
 	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.URL.Path+"?"+r.URL.RawQuery)
 		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Query().Get("page") {
-		case "":
+		switch {
+		case r.URL.Path == "/boxes.json":
+			_, _ = io.WriteString(w, `[{"id":17,"kind":"receipts","name":"Receipts"}]`)
+		case r.URL.Query().Get("page") == "":
 			_, _ = io.WriteString(w, `{"id":17,"kind":"receipts","name":"Receipts","next_history_url":"/boxes/17.json?page=cursor-2","postings":[{"id":1}]}`)
 		default:
 			_, _ = io.WriteString(w, `{"id":17,"kind":"receipts","name":"Receipts","next_history_url":"/boxes/17.json?page=cursor-3","postings":[{"id":2}]}`)
@@ -256,7 +287,7 @@ func TestBoxCommandFollowsPagesForACustomBox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute box: %v", err)
 	}
-	want := "[/boxes/17.json? /boxes/17.json?page=cursor-2]"
+	want := "[/boxes.json? /boxes/17.json? /boxes/17.json?page=cursor-2]"
 	if got := fmt.Sprint(requests); got != want {
 		t.Errorf("requests = %s, want %s", got, want)
 	}
