@@ -13,6 +13,7 @@ jobs:
       extra-patterns: |
         .goreleaser.yaml
         .github/workflows/release.yml
+        .github/workflows/attest-release.yml
         scripts/release.sh
         scripts/stamp-nix-version.sh
         scripts/sign-windows.sh
