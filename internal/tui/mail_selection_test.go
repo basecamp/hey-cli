@@ -10,6 +10,27 @@ import (
 	"github.com/basecamp/hey-cli/internal/mail"
 )
 
+// selectionMail is the mail view the selection tests work in: the Imbox, with every row
+// filed there as HEY serves it, since e and u act on a selection only in the Imbox.
+func selectionMail(t *testing.T, status int) (*mailView, *recordedMailRequest) {
+	t.Helper()
+	v, recorded := mailWithTestServer(t, status)
+	for i := range v.postingList.postings {
+		v.postingList.postings[i].BoxID = 1
+	}
+	return v, recorded
+}
+
+// imboxPostings are the test postings filed in the Imbox, the box mailWithTestServer lists
+// first.
+func imboxPostings() []mail.Posting {
+	postings := testPostings()
+	for i := range postings {
+		postings[i].BoxID = 1
+	}
+	return postings
+}
+
 // selectTwoSeenThreads selects both test postings after marking the unseen one seen, so
 // u has two rows it can act on.
 func selectTwoSeenThreads(v *mailView) {
@@ -18,7 +39,7 @@ func selectTwoSeenThreads(v *mailView) {
 }
 
 func TestMailViewMarksSelectedThreadsSeenInOneRequest(t *testing.T) {
-	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v, recorded := selectionMail(t, http.StatusNoContent)
 	selectTwoThreads(v)
 
 	done, ok := runCmd(v.HandleContentKey(keyPress("e"))).(postingActionDoneMsg)
@@ -47,7 +68,7 @@ func TestMailViewMarksSelectedThreadsSeenInOneRequest(t *testing.T) {
 }
 
 func TestMailViewMarksSelectedThreadsUnseenInOneRequest(t *testing.T) {
-	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v, recorded := selectionMail(t, http.StatusNoContent)
 	selectTwoSeenThreads(v)
 
 	done, ok := runCmd(v.HandleContentKey(keyPress("u"))).(postingActionDoneMsg)
@@ -75,7 +96,7 @@ func TestMailViewMarksSelectedThreadsUnseenInOneRequest(t *testing.T) {
 // The selection wins even at one row, as it does for t: the cursor has moved off what
 // was selected, and marking the row under it instead would change the wrong thread.
 func TestMailViewMarksTheSelectionSeenRatherThanTheCursor(t *testing.T) {
-	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v, recorded := selectionMail(t, http.StatusNoContent)
 	v.HandleContentKey(keyPress(" "))
 	v.HandleContentKey(keyPress("down"))
 
@@ -92,63 +113,64 @@ func TestMailViewMarksTheSelectionSeenRatherThanTheCursor(t *testing.T) {
 	}
 }
 
-// u holds each selected row to the rules it holds the cursor's row to. A thread already
-// unseen is left out silently, because it already is what was asked for; an ignored one
-// is left out and counted, because for that one the key did nothing.
-func TestMailViewUnseenSkipsWhatItCannotChangeInASelection(t *testing.T) {
-	v, recorded := mailWithTestServer(t, http.StatusNoContent)
-	v.postingList.postings[0].Seen = true
-	v.postingList.postings[0].Muted = true
+// Like the web app, u sends every selected thread — the ones already unseen included —
+// once the selection has any seen thread in it, rather than picking some out.
+func TestMailViewUnseenSendsEverySelectedThread(t *testing.T) {
+	v, recorded := selectionMail(t, http.StatusNoContent)
 	selectTwoThreads(v)
 
 	done, ok := runCmd(v.HandleContentKey(keyPress("u"))).(postingActionDoneMsg)
 	if !ok || done.err != nil {
 		t.Fatalf("bulk unseen returned %#v", done)
 	}
-	if !slices.Equal(recorded.body.PostingIDs, []int64{101}) {
-		t.Errorf("marked %v unseen, want the ignored thread left out", recorded.body.PostingIDs)
+	if !slices.Equal(recorded.body.PostingIDs, []int64{100, 101}) {
+		t.Errorf("marked %v unseen, want every selected thread", recorded.body.PostingIDs)
 	}
 	answer, _ := v.Update(done)
-	if toast := deliverToView(v, answer); toast != "Thread marked as unseen — 1 ignored thread skipped" {
+	if toast := deliverToView(v, answer); toast != "2 threads marked as unseen" {
 		t.Errorf("toast = %q", toast)
-	}
-	if !v.postingList.postings[v.postingIndex(100)].Seen {
-		t.Error("the ignored thread was marked unseen in the list")
-	}
-
-	quiet, recordedQuiet := mailWithTestServer(t, http.StatusNoContent)
-	selectTwoSeenThreads(quiet)
-	quiet.postingList.postings[quiet.postingIndex(100)].Seen = false
-	done, ok = runCmd(quiet.HandleContentKey(keyPress("u"))).(postingActionDoneMsg)
-	if !ok || done.err != nil {
-		t.Fatalf("bulk unseen returned %#v", done)
-	}
-	if !slices.Equal(recordedQuiet.body.PostingIDs, []int64{101}) {
-		t.Errorf("marked %v unseen, want the already unseen thread left out", recordedQuiet.body.PostingIDs)
-	}
-	answer, _ = quiet.Update(done)
-	if toast := deliverToView(quiet, answer); toast != "Thread marked as unseen" {
-		t.Errorf("toast = %q, want no mention of a thread that was already unseen", toast)
 	}
 }
 
-// With no row u could change there is no request at all, and the selection stays for
-// whatever the reader does next.
-func TestMailViewUnseenRefusesASelectionItCannotChange(t *testing.T) {
+// e and u act on a selection when HEY's web app enables its bulk Seen and Unseen buttons
+// (bulk_actions_controller.js) and are refused, with no request, when it disables them:
+// outside the Imbox, by each row's own box; with an ignored thread selected; and for e
+// when every thread is seen already, for u when none is. A bubbled-up thread is not a
+// seen one. A refusal keeps the selection for whatever the reader does next.
+func TestMailViewSelectionSeenFollowsTheWebToolbar(t *testing.T) {
+	selectSecond := func(v *mailView) {
+		v.HandleContentKey(keyPress("down"))
+		v.HandleContentKey(keyPress(" "))
+	}
 	cases := []struct {
 		name   string
+		key    string
 		prime  func(*mailView)
 		notice string
 	}{
 		{
-			name: "one already unseen",
+			name:   "e on one thread already seen",
+			key:    "e",
+			prime:  selectSecond,
+			notice: "Thread is already seen",
+		},
+		{
+			name:   "e on threads all seen",
+			key:    "e",
+			prime:  selectTwoSeenThreads,
+			notice: "Selected threads are already seen",
+		},
+		{
+			name: "u on one thread already unseen",
+			key:  "u",
 			prime: func(v *mailView) {
 				v.HandleContentKey(keyPress(" "))
 			},
 			notice: "Thread is already unseen",
 		},
 		{
-			name: "all already unseen",
+			name: "u on threads none of them seen",
+			key:  "u",
 			prime: func(v *mailView) {
 				v.postingList.postings[1].Seen = false
 				selectTwoThreads(v)
@@ -156,19 +178,58 @@ func TestMailViewUnseenRefusesASelectionItCannotChange(t *testing.T) {
 			notice: "Selected threads are already unseen",
 		},
 		{
-			name: "one ignored",
+			name: "u counts a bubbled-up thread as not seen",
+			key:  "u",
 			prime: func(v *mailView) {
-				v.postingList.postings[0].Seen = true
+				v.postingList.postings[1].Seen = false
+				v.postingList.postings[1].BubbledUp = true
+				selectTwoThreads(v)
+			},
+			notice: "Selected threads are already unseen",
+		},
+		{
+			name: "e outside the Imbox",
+			key:  "e",
+			prime: func(v *mailView) {
+				for i := range v.postingList.postings {
+					v.postingList.postings[i].BoxID = 2
+				}
+				selectTwoThreads(v)
+			},
+			notice: "Seen and unseen work on a selection only in the Imbox",
+		},
+		{
+			name: "u with threads from two boxes",
+			key:  "u",
+			prime: func(v *mailView) {
+				v.postingList.postings[1].BoxID = 3
+				selectTwoThreads(v)
+			},
+			notice: "Seen and unseen work on a selection only in the Imbox",
+		},
+		{
+			name: "e on a thread whose box is not known",
+			key:  "e",
+			prime: func(v *mailView) {
+				v.postingList.postings[0].BoxID = 0
+				v.HandleContentKey(keyPress(" "))
+			},
+			notice: "Seen and unseen work on a selection only in the Imbox",
+		},
+		{
+			name: "e on one ignored thread",
+			key:  "e",
+			prime: func(v *mailView) {
 				v.postingList.postings[0].Muted = true
 				v.HandleContentKey(keyPress(" "))
 			},
-			notice: "Stop ignoring this thread to mark it unseen",
+			notice: "Stop ignoring this thread to mark it seen",
 		},
 		{
-			name: "all ignored",
+			name: "u on threads all ignored",
+			key:  "u",
 			prime: func(v *mailView) {
 				for i := range v.postingList.postings {
-					v.postingList.postings[i].Seen = true
 					v.postingList.postings[i].Muted = true
 				}
 				selectTwoThreads(v)
@@ -176,22 +237,23 @@ func TestMailViewUnseenRefusesASelectionItCannotChange(t *testing.T) {
 			notice: "Stop ignoring these threads to mark them unseen",
 		},
 		{
-			name: "ignored and already unseen",
+			name: "u with one ignored thread among others",
+			key:  "u",
 			prime: func(v *mailView) {
-				v.postingList.postings[1].Muted = true
-				selectTwoThreads(v)
+				v.postingList.postings[0].Muted = true
+				selectTwoSeenThreads(v)
 			},
-			notice: "Selected threads are already unseen or ignored",
+			notice: "A selected thread is ignored — stop ignoring it to mark threads unseen",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			v, recorded := mailWithTestServer(t, http.StatusNoContent)
+			v, recorded := selectionMail(t, http.StatusNoContent)
 			tc.prime(v)
 			selected := v.postingList.selectedIDs()
 
-			if cmd := v.HandleContentKey(keyPress("u")); cmd != nil {
-				t.Fatalf("u returned %#v, want no request", runCmd(cmd))
+			if cmd := v.HandleContentKey(keyPress(tc.key)); cmd != nil {
+				t.Fatalf("%s returned %#v, want no request", tc.key, runCmd(cmd))
 			}
 			if v.notice != tc.notice {
 				t.Errorf("notice = %q, want %q", v.notice, tc.notice)
@@ -202,15 +264,48 @@ func TestMailViewUnseenRefusesASelectionItCannotChange(t *testing.T) {
 			if ids := v.postingList.selectedIDs(); !slices.Equal(ids, selected) {
 				t.Errorf("selection = %v, want %v kept", ids, selected)
 			}
+			if hasHelpBinding(v.HelpBindings(), tc.key) {
+				t.Errorf("help bar offers %q, which the selection refuses", tc.key)
+			}
 		})
+	}
+}
+
+// A refusal of e or u describes the selection, so it goes with it on Escape and is asked
+// again when a re-read changes it.
+func TestMailViewSeenRefusalFollowsTheSelection(t *testing.T) {
+	v, _ := selectionMail(t, http.StatusNoContent)
+	selectTwoSeenThreads(v)
+	v.HandleContentKey(keyPress("e"))
+	if v.notice != "Selected threads are already seen" {
+		t.Fatalf("notice = %q", v.notice)
+	}
+	v.ClearSelection()
+	if v.notice != "" {
+		t.Errorf("notice after esc = %q, want the refusal gone with the selection", v.notice)
+	}
+
+	selectTwoSeenThreads(v)
+	v.HandleContentKey(keyPress("e"))
+	v.postingPaging.read(postingIDs(imboxPostings()), "")
+	unseen := imboxPostings()[1]
+	unseen.Seen = false
+	v.Update(postingsRefreshedMsg{
+		requestID:  v.liveRequestID,
+		boxID:      v.currentBoxID(),
+		sourceKind: v.currentSourceKind(),
+		postings:   []mail.Posting{imboxPostings()[0], unseen},
+	})
+	if v.notice != "" {
+		t.Errorf("notice = %q, want it gone once a thread in the selection is unseen again", v.notice)
 	}
 }
 
 func TestMailViewSeenFailureKeepsSelection(t *testing.T) {
 	for _, key := range []string{"e", "u"} {
 		t.Run(key, func(t *testing.T) {
-			v, _ := mailWithTestServer(t, http.StatusInternalServerError)
-			selectTwoSeenThreads(v)
+			v, _ := selectionMail(t, http.StatusInternalServerError)
+			selectTwoThreads(v)
 
 			done := runCmd(v.HandleContentKey(keyPress(key))).(postingActionDoneMsg)
 			if done.err == nil {
@@ -227,9 +322,9 @@ func TestMailViewSeenFailureKeepsSelection(t *testing.T) {
 // Marking a thread unseen takes it off Previously Seen, so the selected rows leave the
 // screen and the selection goes with them.
 func TestMailViewMarksSelectedThreadsUnseenFromPreviouslySeen(t *testing.T) {
-	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v, recorded := selectionMail(t, http.StatusNoContent)
 	v.seenActive = true
-	seen := testPostings()
+	seen := imboxPostings()
 	seen[0].Seen = true
 	v.seenList.setPostings(seen)
 	selectTwoThreads(v)
@@ -259,7 +354,7 @@ func TestMailViewMarksSelectedThreadsUnseenFromPreviouslySeen(t *testing.T) {
 func TestMailViewRefusesOneThreadActionsWhileASelectionStands(t *testing.T) {
 	for _, key := range []string{"r", "f", "v", "b", "n", "i", "l", "a", "d", "p", "!", "-"} {
 		t.Run(key, func(t *testing.T) {
-			v, recorded := mailWithTestServer(t, http.StatusNoContent)
+			v, recorded := selectionMail(t, http.StatusNoContent)
 			selectTwoThreads(v)
 
 			if cmd := v.HandleContentKey(keyPress(key)); cmd != nil {
@@ -282,9 +377,9 @@ func TestMailViewRefusesOneThreadActionsWhileASelectionStands(t *testing.T) {
 }
 
 func TestMailViewRefusesOneThreadActionsOnPreviouslySeenSelection(t *testing.T) {
-	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v, recorded := selectionMail(t, http.StatusNoContent)
 	v.seenActive = true
-	v.seenList.setPostings(testPostings())
+	v.seenList.setPostings(imboxPostings())
 	v.HandleContentKey(keyPress(" "))
 
 	if cmd := v.HandleContentKey(keyPress("l")); cmd != nil {
@@ -299,7 +394,7 @@ func TestMailViewRefusesOneThreadActionsOnPreviouslySeenSelection(t *testing.T) 
 }
 
 func TestMailViewHelpBarOffersOnlyTheSelectionActions(t *testing.T) {
-	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	v, _ := selectionMail(t, http.StatusNoContent)
 	selectTwoThreads(v)
 
 	bindings := v.HelpBindings()
@@ -318,10 +413,16 @@ func TestMailViewHelpBarOffersOnlyTheSelectionActions(t *testing.T) {
 	}
 
 	v.seenActive = true
-	v.seenList.setPostings(testPostings())
+	seen := imboxPostings()
+	seen[0].Seen = true
+	v.seenList.setPostings(seen)
 	v.HandleContentKey(keyPress(" "))
-	if hasHelpBinding(v.HelpBindings(), "e") {
+	bindings = v.HelpBindings()
+	if hasHelpBinding(bindings, "e") {
 		t.Error("Previously Seen offers e for a selection of threads that are seen already")
+	}
+	if !hasHelpBinding(bindings, "u") {
+		t.Error("Previously Seen does not offer u for a selection of seen threads")
 	}
 }
 
@@ -397,7 +498,7 @@ func TestEscapeCancelsAPendingThreadBeforeClearingTheSelection(t *testing.T) {
 func TestEscapeClearsAPreviouslySeenSelectionBeforeLeaving(t *testing.T) {
 	m := modelWithBoxes()
 	m.mailView.seenActive = true
-	m.mailView.seenList.setPostings(testPostings())
+	m.mailView.seenList.setPostings(imboxPostings())
 	m.mailView.HandleContentKey(keyPress(" "))
 
 	updated, _ := m.Update(keyPress("esc"))
@@ -419,7 +520,7 @@ func TestEscapeClearsAPreviouslySeenSelectionBeforeLeaving(t *testing.T) {
 // refreshWithoutTheTestThreads is a live re-read whose top page no longer holds either
 // test thread, as when both were filed away from another device.
 func refreshWithoutTheTestThreads(v *mailView) {
-	v.postingPaging.read(postingIDs(testPostings()), "")
+	v.postingPaging.read(postingIDs(imboxPostings()), "")
 	v.Update(postingsRefreshedMsg{
 		requestID:  v.liveRequestID,
 		boxID:      v.currentBoxID(),
@@ -432,7 +533,7 @@ func refreshWithoutTheTestThreads(v *mailView) {
 // the reader never chose. The next e is refused rather than marking that row, once: by
 // the key after it the reader has seen why and means the cursor.
 func TestMailViewRefusesTheCursorWhenARefreshTookTheSelection(t *testing.T) {
-	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v, recorded := selectionMail(t, http.StatusNoContent)
 	selectTwoThreads(v)
 	refreshWithoutTheTestThreads(v)
 
@@ -447,7 +548,7 @@ func TestMailViewRefusesTheCursorWhenARefreshTookTheSelection(t *testing.T) {
 	}
 	for _, key := range []string{"e", "u", "t", "v"} {
 		t.Run(key, func(t *testing.T) {
-			v, recorded := mailWithTestServer(t, http.StatusNoContent)
+			v, recorded := selectionMail(t, http.StatusNoContent)
 			selectTwoThreads(v)
 			refreshWithoutTheTestThreads(v)
 			if cmd := v.HandleContentKey(keyPress(key)); cmd != nil {
@@ -477,7 +578,7 @@ func TestMailViewRefusesTheCursorWhenARefreshTookTheSelection(t *testing.T) {
 
 // Moving the cursor is aiming again, so the key after it acts on the row it reached.
 func TestMailViewActsOnTheCursorOnceTheReaderMovesOnFromALostSelection(t *testing.T) {
-	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v, recorded := selectionMail(t, http.StatusNoContent)
 	selectTwoThreads(v)
 	refreshWithoutTheTestThreads(v)
 
@@ -493,7 +594,7 @@ func TestMailViewActsOnTheCursorOnceTheReaderMovesOnFromALostSelection(t *testin
 // Escape lets go of a selection that went out from under the reader, as it lets go of
 // one that is still standing.
 func TestEscapeLetsGoOfALostSelection(t *testing.T) {
-	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v, recorded := selectionMail(t, http.StatusNoContent)
 	selectTwoThreads(v)
 	refreshWithoutTheTestThreads(v)
 
@@ -511,7 +612,7 @@ func TestEscapeLetsGoOfALostSelection(t *testing.T) {
 // A thread the reader selects while e is on its way to HEY is a new selection. HEY's
 // answer lets go of the threads it answered for and leaves that one selected.
 func TestMailViewLetsGoOfOnlyTheThreadsAnActionCarried(t *testing.T) {
-	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v, recorded := selectionMail(t, http.StatusNoContent)
 	v.HandleContentKey(keyPress(" "))
 
 	cmd := v.HandleContentKey(keyPress("e"))
@@ -534,7 +635,7 @@ func TestMailViewLetsGoOfOnlyTheThreadsAnActionCarried(t *testing.T) {
 // t on the row under the cursor is not a selection, so its answer lets go of nothing the
 // reader selected in the meantime.
 func TestMailViewTrashingTheCursorLeavesALaterSelectionAlone(t *testing.T) {
-	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	v, _ := selectionMail(t, http.StatusNoContent)
 
 	cmd := v.HandleContentKey(keyPress("t"))
 	v.HandleContentKey(keyPress("down"))
@@ -557,7 +658,7 @@ func TestMailViewTrashingTheCursorLeavesALaterSelectionAlone(t *testing.T) {
 // on every key, so the refusal counting the selection has to go with the selection. A
 // notice about something else is left where it is.
 func TestMailViewSelectionRefusalFollowsTheSelection(t *testing.T) {
-	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	v, _ := selectionMail(t, http.StatusNoContent)
 	selectTwoThreads(v)
 
 	v.HandleContentKey(keyPress("b"))
@@ -583,16 +684,16 @@ func TestMailViewSelectionRefusalFollowsTheSelection(t *testing.T) {
 // A live re-read is not a key either: the refusal follows the selection it leaves, and
 // goes when the re-read takes all of it.
 func TestMailViewSelectionRefusalFollowsARefresh(t *testing.T) {
-	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	v, _ := selectionMail(t, http.StatusNoContent)
 	selectTwoThreads(v)
 	v.HandleContentKey(keyPress("b"))
 
-	v.postingPaging.read(postingIDs(testPostings()), "")
+	v.postingPaging.read(postingIDs(imboxPostings()), "")
 	v.Update(postingsRefreshedMsg{
 		requestID:  v.liveRequestID,
 		boxID:      v.currentBoxID(),
 		sourceKind: v.currentSourceKind(),
-		postings:   []mail.Posting{{ID: 103, Summary: "Quarterly planning agenda"}, testPostings()[1]},
+		postings:   []mail.Posting{{ID: 103, Summary: "Quarterly planning agenda"}, imboxPostings()[1]},
 	})
 	if v.notice != "1 thread selected — choose a bulk action or press Esc to clear" {
 		t.Errorf("notice = %q, want the count the re-read left", v.notice)

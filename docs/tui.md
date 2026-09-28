@@ -44,7 +44,7 @@ uppercase belongs to Labels:
 | `v` | move |
 | `b` | manage labels |
 | `n` | add to or remove from a collection |
-| `e` / `u` | mark seen / unseen — every selected thread when any are selected, otherwise the one under the cursor |
+| `e` / `u` | mark seen / unseen — every selected thread when any are selected (Imbox only, as in HEY's web app), otherwise the one under the cursor |
 | `i` | move to the Imbox |
 | `l` | move to Reply Later |
 | `a` | move to Set Aside |
@@ -85,9 +85,15 @@ thread that is loading and leaves an open thread before it clears a selection, a
 Previously Seen the first Escape clears the selection and the next one leaves. A bulk
 action lets go of the threads it acted on once HEY has answered, and keeps them selected if
 the request fails, so it can be tried again; a thread you select while it is on its way stays
-selected. `u` leaves out a selected thread that is already unseen, and one you are ignoring,
-which the confirmation counts. `e` on a selected bundle marks every unseen thread in it seen,
-as it does on the row itself.
+selected.
+
+`e` and `u` act on a selection when HEY's web app would offer its bulk Seen and Unseen
+buttons, and the help bar shows them only then. Every selected thread has to be in the
+Imbox — each one's own box counts, so a label or a collection that mixes boxes does not
+qualify — and none of them may be one you are ignoring. `e` also needs a thread that is not
+seen yet, and `u` one that is; a bubbled-up thread is not a seen one. When they act, they
+send every selected thread, and otherwise a notice says why nothing happened. `e` on a
+selected bundle marks every unseen thread in it seen, as it does on the row itself.
 
 If every selected thread leaves the list while you are looking at it — filed away from
 another device, or covered when the cover comes down — the next thread action is refused
