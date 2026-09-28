@@ -1805,10 +1805,10 @@ func TestWatchLabelGainCountsAsNew(t *testing.T) {
 	}
 
 	labeled := generated.Posting{
-		Id:      9001,
-		AppUrl:  "https://app.hey.com/topics/5511",
+		Id:       9001,
+		AppUrl:   "https://app.hey.com/topics/5511",
 		ActiveAt: before,
-		Folders: []generated.Folder{{Id: 789, Name: "agent-trades"}},
+		Folders:  []generated.Folder{{Id: 789, Name: "agent-trades"}},
 	}
 	gained := watch.classify(box, labeled)
 	if !*gained {
