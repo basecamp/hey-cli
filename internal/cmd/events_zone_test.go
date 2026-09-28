@@ -396,7 +396,7 @@ func TestEventsAddDefaultsToTodayInTheAccountZone(t *testing.T) {
 func runZoneEdit(t *testing.T, fixture zoneFixture, args ...string) *zoneRequests {
 	t.Helper()
 	handler, requests := zoneServer(t, fixture)
-	_, err := runJSONCommand(t, handler, append([]string{"event", "edit", "4821", "2026-10-14", "--calendar", "9"}, args...)...)
+	_, err := runJSONCommand(t, handler, append([]string{"event", "edit", "4821", "2026-10-14"}, args...)...)
 	if err != nil {
 		t.Fatalf("execute event edit: %v", err)
 	}
@@ -476,7 +476,7 @@ func TestEventsEditZonedEventKeepsItsZone(t *testing.T) {
 func TestEventsEditRefusesAStoredZoneItCannotLoad(t *testing.T) {
 	handler, requests := zoneServer(t, zoneFixture{accountZone: "America/New_York",
 		event: strings.ReplaceAll(zonedEventJSON, "Europe/Zagreb", "Mars/Olympus_Mons")})
-	_, err := runJSONCommand(t, handler, "event", "edit", "4821", "2026-10-14", "--calendar", "9", "--title", "Dentist appointment (moved)")
+	_, err := runJSONCommand(t, handler, "event", "edit", "4821", "2026-10-14", "--title", "Dentist appointment (moved)")
 	var cliErr *apierr.Error
 	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, "Mars/Olympus_Mons") {
 		t.Fatalf("error = %v, want a usage error naming the zone", err)
@@ -525,7 +525,7 @@ func TestEventsEditZonelessSeriesKeepsTheStartItWasNotGiven(t *testing.T) {
 	series := `{"id":4821,"title":"Night shift handover","recurring":true,"starts_at":"2026-11-01T05:30:00Z","ends_at":"2026-11-01T06:30:00Z",` +
 		`"recurrence_schedule":{"kind":"every_week","preset":true}}`
 	handler, requests := zoneServer(t, zoneFixture{accountZone: "America/New_York", event: series})
-	_, err := runJSONCommand(t, handler, "event", "edit", "4821", "2026-11-01", "--calendar", "9", "--end-time", "03:00")
+	_, err := runJSONCommand(t, handler, "event", "edit", "4821", "2026-11-01", "--end-time", "03:00")
 	if err != nil {
 		t.Fatalf("execute event edit: %v", err)
 	}
@@ -586,7 +586,7 @@ func TestEventsEditZonelessEventMadeAllDayTakesTheAccountsDate(t *testing.T) {
 // A zoneless edit that needs a zone and cannot get one is refused, and nothing is written.
 func TestEventsEditRefusesWithoutAnAccountZone(t *testing.T) {
 	handler, requests := zoneServer(t, zoneFixture{event: zonelessEventJSON})
-	_, err := runJSONCommand(t, handler, "event", "edit", "4821", "2026-10-14", "--calendar", "9", "--start-time", "11:00")
+	_, err := runJSONCommand(t, handler, "event", "edit", "4821", "2026-10-14", "--start-time", "11:00")
 	wantNoZoneRefusal(t, err, "your HEY account has no time zone set")
 	if got := requests.writes.Load(); got != 0 {
 		t.Errorf("writes = %d, want none", got)
@@ -694,7 +694,7 @@ func TestEventsEditRefusesToMoveAKeptTimeOutOfTheRepeatedHour(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			handler, requests := zoneServer(t, zoneFixture{accountZone: "America/New_York", event: tt.event})
-			_, err := runJSONCommand(t, handler, append([]string{"event", "edit", "4821", "2026-11-01", "--calendar", "9"}, tt.args...)...)
+			_, err := runJSONCommand(t, handler, append([]string{"event", "edit", "4821", "2026-11-01"}, tt.args...)...)
 			if tt.want == "" {
 				var cliErr *apierr.Error
 				if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, "clocks repeat") {
@@ -800,7 +800,7 @@ func TestEventsEditKeepsATimeHEYTakesTheLaterOf(t *testing.T) {
 			event := `{"id":4821,"title":"Late call with Aigerim","starts_at":"` + tt.start + `","ends_at":"2024-02-29T20:00:00Z",` +
 				`"starts_at_time_zone":"Asia/Almaty","ends_at_time_zone":"Asia/Almaty"}`
 			handler, requests := zoneServer(t, zoneFixture{event: event})
-			_, err := runJSONCommand(t, handler, "event", "edit", "4821", "2024-02-29", "--calendar", "9", "--title", "Late call with Aigerim (moved)")
+			_, err := runJSONCommand(t, handler, "event", "edit", "4821", "2024-02-29", "--title", "Late call with Aigerim (moved)")
 			if !tt.kept {
 				var cliErr *apierr.Error
 				if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, "clocks repeat") {
@@ -860,7 +860,7 @@ func TestEventsEditRefusesAnEventThatEndsBeforeItStarts(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			handler, requests := zoneServer(t, zoneFixture{accountZone: "America/New_York", event: tt.event})
-			_, err := runJSONCommand(t, handler, append([]string{"event", "edit", "4821", "2026-10-14", "--calendar", "9"}, tt.args...)...)
+			_, err := runJSONCommand(t, handler, append([]string{"event", "edit", "4821", "2026-10-14"}, tt.args...)...)
 			var cliErr *apierr.Error
 			if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, tt.want) {
 				t.Fatalf("error = %v, want a usage error containing %q", err, tt.want)
@@ -919,7 +919,7 @@ func TestEventsEditRefusesToDropAKeptTimesSeconds(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			handler, requests := zoneServer(t, zoneFixture{event: tt.event})
-			_, err := runJSONCommand(t, handler, "event", "edit", "4821", "2026-10-14", "--calendar", "9", "--title", "Dentist appointment (moved)")
+			_, err := runJSONCommand(t, handler, "event", "edit", "4821", "2026-10-14", "--title", "Dentist appointment (moved)")
 			var cliErr *apierr.Error
 			if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || cliErr.Message != tt.want {
 				t.Fatalf("error = %v, want %q", err, tt.want)
@@ -945,7 +945,7 @@ func TestEventsEditSaysHowFarARepeatedTimeWouldMove(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			handler, requests := zoneServer(t, zoneFixture{event: tt.event})
-			_, err := runJSONCommand(t, handler, "event", "edit", "4821", tt.day, "--calendar", "9", "--title", "Night shift handover (Sam)")
+			_, err := runJSONCommand(t, handler, "event", "edit", "4821", tt.day, "--title", "Night shift handover (Sam)")
 			var cliErr *apierr.Error
 			if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, tt.want) {
 				t.Fatalf("error = %v, want a usage error saying it %s", err, tt.want)

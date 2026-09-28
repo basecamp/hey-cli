@@ -853,8 +853,12 @@ notes come back as plain text, so their formatting is flattened, and a countdown
 recording of its own that the whole-event edit does not read back, so an edit removes one
 unless `--countdown` names it again. The event is looked for within a year either side of
 today and refused rather than written blind if it is not found — pass the day it starts
-(`hey event edit 4821 2026-09-02`) for one outside that; `--calendar` only limits which
-calendars are read.
+(`hey event edit 4821 2026-09-02`) for one outside that. Every calendar is read, and
+`--calendar` moves the event there (`hey event edit 4821 --calendar 9102`) — a calendar you
+own or share, not the personal calendar or a subscription (`not_found` otherwise). An event
+you cannot edit, such as an invitation, moves only onto a calendar nobody else is on; HEY
+keeps it where it is otherwise, and the edit fails with `forbidden` rather than reporting
+it updated.
 
 **An id alone edits the whole series; one day of it is `--occurrence` plus `--apply-to`.**
 `--occurrence` takes the `occurrence_id` from `day` or `week` exactly as served

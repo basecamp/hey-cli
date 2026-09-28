@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -272,9 +273,14 @@ the clocks repeat as they go back names two moments, of which HEY takes the dayl
 one, or the later where neither is; a time you keep at the other, or with seconds, cannot
 be sent, so the edit refuses until you retype it. All of this holds for an --occurrence edit too.
 
-The event is found by reading the calendars it might be on, which is one request each and
+The event is found by reading every calendar it might be on, which is one request each and
 covers the pages HEY answers with. Give the day it starts as [date] to look on that day
-alone, or --calendar to look on one calendar.
+alone.
+
+--calendar moves the event to that calendar, which has to be one you own or share: not
+your personal calendar and not a subscription. An event you cannot edit, such as an
+invitation, moves only onto a calendar nobody else is on; HEY keeps it where it is
+otherwise, and the edit says so rather than reporting it updated.
 
 An id alone changes the whole event, a repeating series included. One day of a series is
 changed with --occurrence, which takes the occurrence_id 'hey event day' and 'hey event
@@ -318,6 +324,7 @@ or one day.`,
   hey event edit 4821 --starts-on 2026-09-04 --start-time 15:00
   hey event edit 4821 2026-09-02 --location "Studio, 3rd floor"
   hey event edit 4821 --circle=false
+  hey event edit 4821 --calendar 9102
   hey event edit 4821 --occurrence 4821_2026-09-15 --apply-to current --start-time 15:00 --json
   hey event edit 4821 --occurrence 4821_2026-09-15 --apply-to future --repeat every_week --repeat-times 8 --location "Studio, 3rd floor" --allow-plain-notes`,
 		RunE: eventsEditCommand.run,
@@ -328,6 +335,7 @@ or one day.`,
 	flags := eventsEditCommand.cmd.Flags()
 	// An edit only falls back to the account's zone for an event that has none of its own.
 	flags.Lookup("time-zone").Usage = "IANA zone the times are written in, such as America/New_York (defaults to the event's own zone, else your HEY account's)"
+	flags.Lookup("calendar").Usage = "Calendar ID to move the event to"
 	flags.StringVar(&eventsEditCommand.occurrence, "occurrence", "", "One day of a repeating event, by the occurrence_id 'hey event day' serves (<series id>_<YYYY-MM-DD>)")
 	flags.StringVar(&eventsEditCommand.applyTo, "apply-to", "", "How much of the series an --occurrence edit reaches: current (that day alone) or future (that day and every one after it)")
 	flags.BoolVar(&eventsEditCommand.allowPlainNotes, "allow-plain-notes", false, "Let an --occurrence edit send notes it is not changing back as plain text, losing their formatting")
@@ -433,7 +441,12 @@ func (c *eventsEditCommand) run(cmd *cobra.Command, args []string) error {
 
 	result, err := sdk.CalendarEvents().Update(ctx, id, changes)
 	if err != nil {
-		return apierr.FromSDK(err)
+		return eventWriteError(err, id, changes.CalendarID)
+	}
+	if changes.CalendarID != nil {
+		if err = checkMoved(id, *changes.CalendarID, result); err != nil {
+			return err
+		}
 	}
 
 	return writeMutationLine(cmd,
@@ -442,17 +455,51 @@ func (c *eventsEditCommand) run(cmd *cobra.Command, args []string) error {
 		result)
 }
 
+// eventWriteError says what HEY's refusal of a move means. The event was read a moment ago, so
+// a not-found is the calendar: HEY files only on a calendar you own or share, and answers 404
+// for any other — the personal calendar and a subscription among them — as it does when an
+// event is added there.
+func eventWriteError(err error, id int64, calendarID *int64) error {
+	if calendarID != nil && hey.AsError(err).HTTPStatus == http.StatusNotFound {
+		return &apierr.Error{
+			Code:       apierr.CodeNotFound,
+			Message:    fmt.Sprintf("HEY cannot move event %d to calendar %d", id, *calendarID),
+			Hint:       "an event moves onto a calendar you own or share, not your personal calendar or a subscription; hey calendar list  lists them",
+			HTTPStatus: http.StatusNotFound,
+			Cause:      err,
+		}
+	}
+	return apierr.FromSDK(err)
+}
+
+// checkMoved says so when HEY answers a move by leaving the event where it was. HEY does not
+// refuse a calendar it will not move an event to: an event you may not edit, such as an
+// invitation, moves only onto a calendar nobody else is on, and otherwise HEY drops the
+// calendar from the update and answers with the event unmoved. Reporting that as updated
+// would be the one wrong answer, so the event HEY answers with is read for its calendar.
+func checkMoved(id, calendarID int64, result *generated.Recording) error {
+	if result == nil || result.Calendar.Id == 0 || result.Calendar.Id == calendarID {
+		return nil
+	}
+	return &apierr.Error{
+		Code:    apierr.CodeForbidden,
+		Message: fmt.Sprintf("HEY did not move event %d to calendar %d; it is still on calendar %d", id, calendarID, result.Calendar.Id),
+		Hint:    "an event you cannot edit, such as an invitation, moves only onto a calendar nobody else is on",
+	}
+}
+
 // findEvent reads the event so the update can send back what it is not changing. HEY serves
-// no event on its own, so it is looked for among the recordings of the calendars it could be
-// on — every one of them, or the one --calendar names, over the day given or a window wide
-// enough to cover an event somebody is editing.
+// no event on its own, so it is looked for among the recordings of every calendar it could be
+// on, over the day given or a window wide enough to cover an event somebody is editing.
+// --calendar is not one of them: it is where the event is moving to, which is the one
+// calendar it is not on yet.
 //
 // The day is read as the window [day, day+1): HEY's recordings window is a pair of
 // instants, and the degenerate same-day window — midnight to the same midnight — can
 // never contain a timed event, which is how editing an event by its own day used to
 // answer not-found. Reading a day too many is harmless here: the event is matched by id.
 func (c *eventsEditCommand) findEvent(ctx context.Context, id int64, on string) (generated.Recording, error) {
-	window, err := c.searchWindow(ctx, on)
+	window, err := eventSearchWindow(ctx, on)
 	if err != nil {
 		return generated.Recording{}, err
 	}
@@ -471,22 +518,14 @@ func (c *eventsEditCommand) findEvent(ctx context.Context, id int64, on string) 
 		fmt.Sprintf("hey event edit %d <YYYY-MM-DD>  reads the day it starts on", id))
 }
 
-// searchWindow is where an edit looks for its event: the day given, read as [day, day+1),
-// or a window wide enough to cover an event somebody is editing, over the calendar
-// --calendar names or every one of them.
-func (c *eventsEditCommand) searchWindow(ctx context.Context, on string) (recordingWindow, error) {
-	return eventSearchWindow(ctx, c.fields.calendar, on)
-}
-
 // eventSearchWindow is where an event given by id is looked for: the day given, read as
-// [day, day+1), or a year either side of today, over one calendar or every one of them.
-func eventSearchWindow(ctx context.Context, calendar int64, on string) (recordingWindow, error) {
+// [day, day+1), or a year either side of today, over every calendar.
+func eventSearchWindow(ctx context.Context, on string) (recordingWindow, error) {
 	endsOn := on
 	if day, err := time.Parse(dateLayout, on); err == nil {
 		endsOn = day.AddDate(0, 0, 1).Format(dateLayout)
 	}
 	filter := recordingFilter{
-		calendar:         calendar,
 		startsOn:         on,
 		endsOn:           endsOn,
 		defaultWindow:    func(today time.Time) (time.Time, time.Time) { return today.AddDate(-1, 0, 0), today.AddDate(1, 0, 0) },
@@ -622,7 +661,7 @@ func (c *eventsDeleteCommand) deleteOccurrence(ctx context.Context, cmd *cobra.C
 // event, so it is looked for where an edit looks, and an id that is not found there is
 // deleted as it always was: whatever it is, it is not a day of a series within a year.
 func refuseADayOfASeries(ctx context.Context, cmd *cobra.Command, id int64) error {
-	window, err := eventSearchWindow(ctx, 0, "")
+	window, err := eventSearchWindow(ctx, "")
 	if err != nil {
 		return err
 	}
