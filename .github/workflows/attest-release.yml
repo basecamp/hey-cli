@@ -9,12 +9,13 @@
 # existing release or rebuild and re-sign, and the new binaries would not be
 # the bytes users download.
 #
-# This workflow attests what is already published and nothing else. It trusts
-# checksums.txt only after the release run's own cosign bundle verifies against
-# release.yml at the tag, and every checksum only if the published asset of
-# that name carries the same digest. The attestation's signer is this workflow
-# rather than release.yml; mise does not pin the signer workflow, and neither
-# the installers nor `hey upgrade` read attestations at all.
+# This workflow attests the published assets and nothing else. checksums.txt is
+# the list of subjects handed to attest-build-provenance, not a subject itself.
+# It is trusted only after the release run's own cosign bundle verifies against
+# release.yml at the tag, and each listed digest only if the published asset of
+# that name carries it. The attestation's signer is this workflow rather than
+# release.yml; mise does not pin the signer workflow, and the installers and
+# `hey upgrade`'s own verification do not read attestations at all.
 name: Attest a published release
 
 on:
@@ -73,8 +74,9 @@ jobs:
       - name: Install Cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
-      # The same identity the installers and `hey upgrade` pin: only a
-      # checksums.txt signed by the release run for this tag is attested.
+      # The same identity the installers and `hey upgrade` pin: only the
+      # assets listed in a checksums.txt the release run for this tag signed
+      # are attested.
       - name: Verify checksums.txt was signed by the release run
         env:
           TAG: ${{ inputs.tag }}

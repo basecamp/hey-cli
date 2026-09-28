@@ -274,11 +274,13 @@ gh workflow run attest-release.yml -f tag=v1.7.0
 gh attestation verify hey_1.7.0_linux_amd64.tar.gz --repo basecamp/hey-cli
 ```
 
-It attests the published `checksums.txt` only after the release run's
+`checksums.txt` is the index of subjects, not the subject: the workflow
+attests each release asset it lists, by name and digest, which is why the check
+above names an archive. It does so only after the release run's
 `checksums.txt.bundle` verifies against `release.yml` at that tag and every
-checksum matches the digest of the published asset of that name. The
-attestation's signer is `attest-release.yml` rather than `release.yml`; mise
-does not check the signer workflow.
+listed digest matches the published asset of that name. The attestation's
+signer is `attest-release.yml` rather than `release.yml`; mise does not check
+the signer workflow.
 
 ## Skills sync
 
