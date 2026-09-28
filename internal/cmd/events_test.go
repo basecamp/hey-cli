@@ -409,8 +409,63 @@ func TestEventsEditSaysSoWhenHEYKeepsTheEventWhereItWas(t *testing.T) {
 	}
 }
 
+// An older HEY redirects after an update rather than answering with the event, so the answer
+// names no calendar; the event is read again on the day it starts to see where it is.
+func TestEventsEditReadsAMoveBackWhenHEYDoesNotSayWhereTheEventIs(t *testing.T) {
+	for _, tt := range []struct {
+		name, onCalendar, wantErr string
+	}{
+		{name: "moved", onCalendar: "12"},
+		{name: "kept where it was", onCalendar: "9", wantErr: "HEY did not move event 4821 to calendar 12; it is still on calendar 9"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			moved := false
+			event := func(calendar string) string {
+				return `{"Calendar::Event":[{"id":4821,"title":"Swim meet","starts_at":"2026-10-03T08:00:00Z","ends_at":"2026-10-03T11:00:00Z","calendar":{"id":` + calendar + `}}]}`
+			}
+			_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.URL.Path == "/calendars.json":
+					_, _ = io.WriteString(w, `{"calendars":[{"calendar":{"id":9,"name":"Elena","owned":true}},{"calendar":{"id":12,"name":"Nina","owned":true}}]}`)
+				case r.URL.Path == "/calendars/9/recordings.json":
+					if !moved || tt.onCalendar == "9" {
+						_, _ = io.WriteString(w, event("9"))
+						return
+					}
+					_, _ = io.WriteString(w, `{}`)
+				case r.URL.Path == "/calendars/12/recordings.json":
+					if moved && tt.onCalendar == "12" {
+						_, _ = io.WriteString(w, event("12"))
+						return
+					}
+					_, _ = io.WriteString(w, `{}`)
+				case r.Method == http.MethodPatch && r.URL.Path == "/calendar/events/4821.json":
+					moved = true
+					_, _ = io.WriteString(w, `{"id":4821}`)
+				default:
+					t.Errorf("unexpected request = %s %s", r.Method, r.URL.Path)
+					http.NotFound(w, r)
+				}
+			}), "event", "edit", "4821", "2026-10-03", "--calendar", "12")
+
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("execute event edit: %v", err)
+				}
+				return
+			}
+			var apiErr *apierr.Error
+			if !errors.As(err, &apiErr) || apiErr.Code != apierr.CodeForbidden || apiErr.Message != tt.wantErr {
+				t.Fatalf("error = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 // HEY answers 404 for a calendar it will not file on — the personal calendar, a subscription —
-// and the event was just read, so that is what the not-found is about.
+// and for an event deleted since it was read, so the refusal names the move rather than
+// guessing which.
 func TestEventsEditNamesTheCalendarHEYWillNotFileOn(t *testing.T) {
 	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -433,7 +488,7 @@ func TestEventsEditNamesTheCalendarHEYWillNotFileOn(t *testing.T) {
 	if !errors.As(err, &apiErr) || apiErr.Code != apierr.CodeNotFound {
 		t.Fatalf("error = %v, want a not-found naming the calendar", err)
 	}
-	if want := "HEY cannot move event 4821 to calendar 14"; apiErr.Message != want {
+	if want := "HEY answered not found moving event 4821 to calendar 14"; apiErr.Message != want {
 		t.Errorf("message = %q, want %q", apiErr.Message, want)
 	}
 }

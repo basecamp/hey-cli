@@ -444,7 +444,7 @@ func (c *eventsEditCommand) run(cmd *cobra.Command, args []string) error {
 		return eventWriteError(err, id, changes.CalendarID)
 	}
 	if changes.CalendarID != nil {
-		if err = checkMoved(id, *changes.CalendarID, result); err != nil {
+		if err = c.checkMoved(ctx, id, schedule.startsAt, *changes.CalendarID, result); err != nil {
 			return err
 		}
 	}
@@ -455,16 +455,16 @@ func (c *eventsEditCommand) run(cmd *cobra.Command, args []string) error {
 		result)
 }
 
-// eventWriteError says what HEY's refusal of a move means. The event was read a moment ago, so
-// a not-found is the calendar: HEY files only on a calendar you own or share, and answers 404
-// for any other — the personal calendar and a subscription among them — as it does when an
-// event is added there.
+// eventWriteError says what HEY's refusal of a move can mean. HEY files only on a calendar you
+// own or share, and answers 404 for any other — the personal calendar and a subscription among
+// them — as it does when an event is added there. The same 404 answers an event deleted since
+// it was read, and nothing in it says which, so the refusal names both.
 func eventWriteError(err error, id int64, calendarID *int64) error {
 	if calendarID != nil && hey.AsError(err).HTTPStatus == http.StatusNotFound {
 		return &apierr.Error{
 			Code:       apierr.CodeNotFound,
-			Message:    fmt.Sprintf("HEY cannot move event %d to calendar %d", id, *calendarID),
-			Hint:       "an event moves onto a calendar you own or share, not your personal calendar or a subscription; hey calendar list  lists them",
+			Message:    fmt.Sprintf("HEY answered not found moving event %d to calendar %d", id, *calendarID),
+			Hint:       "HEY files an event only on a calendar you own or share, not your personal calendar or a subscription, and answers not found for any other or for an event deleted since it was read; hey calendar list  lists them",
 			HTTPStatus: http.StatusNotFound,
 			Cause:      err,
 		}
@@ -477,13 +477,32 @@ func eventWriteError(err error, id int64, calendarID *int64) error {
 // invitation, moves only onto a calendar nobody else is on, and otherwise HEY drops the
 // calendar from the update and answers with the event unmoved. Reporting that as updated
 // would be the one wrong answer, so the event HEY answers with is read for its calendar.
-func checkMoved(id, calendarID int64, result *generated.Recording) error {
-	if result == nil || result.Calendar.Id == 0 || result.Calendar.Id == calendarID {
+//
+// HEY's JSON answer always names the calendar. An older server redirects instead, and the
+// SDK then hands back only the id, so the event is read again on the day it now starts.
+func (c *eventsEditCommand) checkMoved(ctx context.Context, id int64, startsOn string, calendarID int64, result *generated.Recording) error {
+	onCalendar := int64(0)
+	if result != nil {
+		onCalendar = result.Calendar.Id
+	}
+	if onCalendar == 0 {
+		event, err := c.findEvent(ctx, id, startsOn)
+		if err != nil {
+			return &apierr.Error{
+				Code:    apierr.CodeAPI,
+				Message: fmt.Sprintf("HEY saved event %d without saying which calendar it is on, and reading it back failed: %v", id, err),
+				Hint:    fmt.Sprintf("hey event list --calendar %d  shows whether it moved", calendarID),
+				Cause:   err,
+			}
+		}
+		onCalendar = event.Calendar.Id
+	}
+	if onCalendar == calendarID {
 		return nil
 	}
 	return &apierr.Error{
 		Code:    apierr.CodeForbidden,
-		Message: fmt.Sprintf("HEY did not move event %d to calendar %d; it is still on calendar %d", id, calendarID, result.Calendar.Id),
+		Message: fmt.Sprintf("HEY did not move event %d to calendar %d; it is still on calendar %d", id, calendarID, onCalendar),
 		Hint:    "an event you cannot edit, such as an invitation, moves only onto a calendar nobody else is on",
 	}
 }

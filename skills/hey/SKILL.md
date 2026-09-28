@@ -855,7 +855,7 @@ unless `--countdown` names it again. The event is looked for within a year eithe
 today and refused rather than written blind if it is not found — pass the day it starts
 (`hey event edit 4821 2026-09-02`) for one outside that. Every calendar is read, and
 `--calendar` moves the event there (`hey event edit 4821 --calendar 9102`) — a calendar you
-own or share, not the personal calendar or a subscription (`not_found` otherwise). An event
+own or share, not the personal calendar or a subscription (HEY answers `not_found` otherwise). An event
 you cannot edit, such as an invitation, moves only onto a calendar nobody else is on; HEY
 keeps it where it is otherwise, and the edit fails with `forbidden` rather than reporting
 it updated.
