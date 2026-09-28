@@ -921,6 +921,11 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.updateHelpBindings()
 			return m, m.syncLoading(nil)
 		}
+		if msg.Key().Code == tea.KeyEscape {
+			if clearer, ok := m.activeView.(selectionClearer); ok && clearer.ClearSelection() {
+				m.updateHelpBindings()
+			}
+		}
 		return m, nil
 	}
 
