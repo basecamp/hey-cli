@@ -44,7 +44,7 @@ uppercase belongs to Labels:
 | `v` | move |
 | `b` | manage labels |
 | `n` | add to or remove from a collection |
-| `e` / `u` | mark seen / unseen |
+| `e` / `u` | mark seen / unseen — every selected thread when any are selected (Imbox only, as in HEY's web app), otherwise the one under the cursor |
 | `i` | move to the Imbox |
 | `l` | move to Reply Later |
 | `a` | move to Set Aside |
@@ -53,7 +53,8 @@ uppercase belongs to Labels:
 | `t` | trash — every selected thread when any are selected, otherwise the one under the cursor. Not offered when it would target a bundle |
 | `!` | mark as spam |
 | `-` / `+` | ignore / stop ignoring |
-| Space | select the thread for a bulk action (`t` or Ctrl+B) |
+| Space | select the thread for a bulk action (`e`, `u`, `t` or Ctrl+B) |
+| Escape | clear the selection |
 | Ctrl+B | preview every bulk-reply recipient, then write one reply to every selected thread |
 | Ctrl+U | recall a delayed bulk reply while HEY's undo window is open |
 | Ctrl+S | open The Screener |
@@ -74,6 +75,30 @@ not come into it: a bundle, a contact's threads, a label and a search all work, 
 every thread carries the box it is in and files out of that one rather than out of the
 list you found it through. Filing takes the row out of the list you were reading. Only a
 thread opened by its id has no row behind it, and says so instead.
+
+While any threads are selected, the help bar counts them and offers only what acts on
+all of them: `e`, `u`, `t` and Ctrl+B. The other thread actions — moving, filing, labels,
+collections, spam, ignoring, reply and forward — work on one thread at a time, so they
+are refused with a notice rather than quietly acting on the thread under the cursor;
+press Escape to clear the selection first. Escape still closes an open form, cancels a
+thread that is loading and leaves an open thread before it clears a selection, and on
+Previously Seen the first Escape clears the selection and the next one leaves. A bulk
+action lets go of the threads it acted on once HEY has answered, and keeps them selected if
+the request fails, so it can be tried again; a thread you select while it is on its way stays
+selected.
+
+`e` and `u` act on a selection when HEY's web app would offer its bulk Seen and Unseen
+buttons, and the help bar shows them only then. Every selected thread has to be in the
+Imbox — each one's own box counts, so a label or a collection that mixes boxes does not
+qualify — and none of them may be one you are ignoring. `e` also needs a thread that is not
+seen yet, and `u` one that is; a bubbled-up thread is not a seen one. When they act, they
+send every selected thread, and otherwise a notice says why nothing happened. `e` on a
+selected bundle marks every unseen thread in it seen, as it does on the row itself.
+
+If every selected thread leaves the list while you are looking at it — filed away from
+another device, or covered when the cover comes down — the next thread action is refused
+with a notice rather than falling back on the thread under the cursor, which you never chose.
+Moving the cursor, or pressing Escape, means you are aiming again.
 
 A bundle row cannot be trashed, and `t` leaves the help bar whenever the rows it would
 act on include one. A bundle stands for one sender's whole stream rather than for a thread,

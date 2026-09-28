@@ -99,6 +99,11 @@ type contentList struct {
 	height        int // visible rows (each posting takes 2 lines)
 	hideSeenState bool
 	selected      map[int64]struct{}
+	// selectionLost is a selection that went out from under the reader — a re-read took
+	// its threads out of the list or the cover came down over them — rather than one they
+	// let go of. Until they aim again, a key that acts on the selection must not fall
+	// back on the row under the cursor, which is not what they chose.
+	selectionLost bool
 
 	cover       coverPreset // art that hides Previously Seen, coverNone for none
 	coverPeeked bool        // the reader lifted the cover to get at what is under it
@@ -109,15 +114,19 @@ type contentList struct {
 // arrives covered rather than however the last one was left, and whatever the
 // cursor and the selection were on goes out from under the art with it.
 func (c *contentList) setCover(preset coverPreset) {
+	selected := c.hasSelection()
 	c.cover = preset
 	c.coverPeeked = false
 	c.settleCover()
+	c.noteSelectionLost(selected)
 }
 
 // toggleCoverPeek lifts the cover off Previously Seen, or puts it back.
 func (c *contentList) toggleCoverPeek() {
+	selected := c.hasSelection()
 	c.coverPeeked = !c.coverPeeked
 	c.settleCover()
+	c.noteSelectionLost(selected)
 }
 
 // settleCover keeps the cursor and the selection out from under the cover. A
@@ -248,6 +257,8 @@ func postingIDs(postings []mail.Posting) map[int64]struct{} {
 // window stays where it was scrolled to, and a multi-selection keeps every row that is
 // still there. A posting that left the box takes the cursor or its selection with it.
 func (c *contentList) keepPlaceIn(postings []mail.Posting) {
+	selected := c.hasSelection()
+	defer c.noteSelectionLost(selected)
 	if !c.hideSeenState {
 		postings = partitionSections(postings)
 	}
@@ -398,6 +409,7 @@ func (c *contentList) setSize(w, h int) {
 }
 
 func (c *contentList) moveUp() {
+	c.selectionLost = false
 	if c.cursor > 0 {
 		c.cursor--
 		c.ensureVisible()
@@ -405,6 +417,7 @@ func (c *contentList) moveUp() {
 }
 
 func (c *contentList) moveDown() {
+	c.selectionLost = false
 	if c.cursor < c.itemCount()-1 {
 		c.cursor++
 		c.ensureVisible()
@@ -503,6 +516,7 @@ func (c *contentList) toggleSelected() bool {
 	if posting == nil {
 		return false
 	}
+	c.selectionLost = false
 	if c.selected == nil {
 		c.selected = make(map[int64]struct{})
 	}
@@ -540,6 +554,27 @@ func (c *contentList) selectedPostings() []mail.Posting {
 
 func (c *contentList) clearSelected() {
 	c.selected = nil
+	c.selectionLost = false
+}
+
+// deselect lets go of the threads an action on the selection carried, and only those: a
+// row the reader selected while the action was on its way is a new selection, not part
+// of the one HEY just answered for.
+func (c *contentList) deselect(ids []int64) {
+	for _, id := range ids {
+		delete(c.selected, id)
+	}
+}
+
+func (c *contentList) hasSelection() bool {
+	return len(c.selectedIDs()) > 0
+}
+
+// noteSelectionLost records that the list emptied a selection the reader had, when it did.
+func (c *contentList) noteSelectionLost(hadSelection bool) {
+	if hadSelection && !c.hasSelection() {
+		c.selectionLost = true
+	}
 }
 
 func (c *contentList) view() string {
