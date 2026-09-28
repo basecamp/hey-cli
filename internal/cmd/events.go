@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -279,8 +280,10 @@ alone.
 
 --calendar moves the event to that calendar, which has to be one you own or share: not
 your personal calendar and not a subscription. An event you cannot edit, such as an
-invitation, moves only onto a calendar nobody else is on; HEY keeps it where it is
-otherwise, and the edit says so rather than reporting it updated.
+invitation, moves only onto a calendar nobody else is on, and an event on a subscription
+does not move at all; HEY keeps it where it is otherwise, and the edit says so rather than
+reporting it updated. HEY still saves the circle, countdown and reminders of an event it
+does not move.
 
 An id alone changes the whole event, a repeating series included. One day of a series is
 changed with --occurrence, which takes the occurrence_id 'hey event day' and 'hey event
@@ -444,7 +447,7 @@ func (c *eventsEditCommand) run(cmd *cobra.Command, args []string) error {
 		return eventWriteError(err, id, changes.CalendarID)
 	}
 	if changes.CalendarID != nil {
-		if err = c.checkMoved(ctx, id, schedule.startsAt, *changes.CalendarID, result); err != nil {
+		if err = checkMoved(ctx, event, schedule.startsAt, *changes.CalendarID, result); err != nil {
 			return err
 		}
 	}
@@ -474,26 +477,24 @@ func eventWriteError(err error, id int64, calendarID *int64) error {
 
 // checkMoved says so when HEY answers a move by leaving the event where it was. HEY does not
 // refuse a calendar it will not move an event to: an event you may not edit, such as an
-// invitation, moves only onto a calendar nobody else is on, and otherwise HEY drops the
-// calendar from the update and answers with the event unmoved. Reporting that as updated
-// would be the one wrong answer, so the event HEY answers with is read for its calendar.
+// invitation, moves only onto a calendar nobody else is on and never off a subscription, and
+// otherwise HEY drops the calendar from the update and answers with the event unmoved.
+// Reporting that as updated would be the one wrong answer, so the event HEY answers with is
+// read for its calendar. The rest of the update is not dropped with it — the circle, the
+// countdown and the reminders are an invitee's to set — so the refusal says so.
 //
 // HEY's JSON answer always names the calendar. An older server redirects instead, and the
-// SDK then hands back only the id, so the event is read again on the day it now starts.
-func (c *eventsEditCommand) checkMoved(ctx context.Context, id int64, startsOn string, calendarID int64, result *generated.Recording) error {
+// SDK then hands back only the id, so the event is read again, around the day it started on
+// and the day it was asked to start on: HEY may have kept either.
+func checkMoved(ctx context.Context, was generated.Recording, startsOn string, calendarID int64, result *generated.Recording) error {
 	onCalendar := int64(0)
 	if result != nil {
 		onCalendar = result.Calendar.Id
 	}
 	if onCalendar == 0 {
-		event, err := c.findEvent(ctx, id, startsOn)
+		event, err := readMovedEvent(ctx, was, startsOn)
 		if err != nil {
-			return &apierr.Error{
-				Code:    apierr.CodeAPI,
-				Message: fmt.Sprintf("HEY saved event %d without saying which calendar it is on, and reading it back failed: %v", id, err),
-				Hint:    fmt.Sprintf("hey event list --calendar %d  shows whether it moved", calendarID),
-				Cause:   err,
-			}
+			return movedReadBackError(was.Id, calendarID, err)
 		}
 		onCalendar = event.Calendar.Id
 	}
@@ -502,9 +503,51 @@ func (c *eventsEditCommand) checkMoved(ctx context.Context, id int64, startsOn s
 	}
 	return &apierr.Error{
 		Code:    apierr.CodeForbidden,
-		Message: fmt.Sprintf("HEY did not move event %d to calendar %d; it is still on calendar %d", id, calendarID, onCalendar),
-		Hint:    "an event you cannot edit, such as an invitation, moves only onto a calendar nobody else is on",
+		Message: fmt.Sprintf("HEY did not move event %d to calendar %d; it is still on calendar %d", was.Id, calendarID, onCalendar),
+		Hint:    "an event you cannot edit, such as an invitation, moves only onto a calendar nobody else is on and never off a subscription; HEY may still have saved the circle, countdown and reminders this edit sent",
 	}
+}
+
+// readMovedEvent reads an event back after a write HEY answered with its id alone. The days
+// are UTC days, and an event keeps its own zone's date, so each end is read a day wide either
+// way: a morning in Tokyo or an evening in Los Angeles sits on the neighbouring UTC day.
+func readMovedEvent(ctx context.Context, was generated.Recording, startsOn string) (generated.Recording, error) {
+	from := calendarDay(was.StartsAt.UTC())
+	to := from
+	if day, err := time.Parse(dateLayout, startsOn); err == nil {
+		if day.Before(from) {
+			from = day
+		}
+		if day.After(to) {
+			to = day
+		}
+	}
+	filter := recordingFilter{
+		startsOn:         from.AddDate(0, 0, -1).Format(dateLayout),
+		endsOn:           to.AddDate(0, 0, 2).Format(dateLayout),
+		defaultWindow:    eventSearchYear,
+		defaultCalendars: allCalendarIDs,
+	}
+	window, err := filter.resolve(ctx)
+	if err != nil {
+		return generated.Recording{}, err
+	}
+	return findEventIn(ctx, window, was.Id)
+}
+
+// movedReadBackError is a read-back that failed after the write went through. It keeps the
+// failure's own code, so an expired sign-in or a rate limit still exits as one, and says the
+// write was made so nobody runs it again to find out.
+func movedReadBackError(id, calendarID int64, err error) error {
+	var readErr *apierr.Error
+	if !errors.As(err, &readErr) {
+		readErr = &apierr.Error{Code: apierr.CodeAPI, Message: err.Error()}
+	}
+	wrapped := *readErr
+	wrapped.Message = fmt.Sprintf("HEY saved event %d without saying which calendar it is on, and reading it back failed: %s", id, readErr.Message)
+	wrapped.Hint = fmt.Sprintf("hey event list --calendar %d  shows whether it moved", calendarID)
+	wrapped.Cause = err
+	return &wrapped
 }
 
 // findEvent reads the event so the update can send back what it is not changing. HEY serves
@@ -522,14 +565,21 @@ func (c *eventsEditCommand) findEvent(ctx context.Context, id int64, on string) 
 	if err != nil {
 		return generated.Recording{}, err
 	}
+	return findEventIn(ctx, window, id)
+}
 
-	events, err := window.read(ctx, recordingTypeEvent)
-	if err != nil {
-		return generated.Recording{}, err
-	}
-	for _, event := range events {
-		if event.Id == id {
-			return event, nil
+// findEventIn looks for the event calendar by calendar and stops at the one it is on, so a
+// calendar listed after it that cannot be read does not stand in the way of an edit.
+func findEventIn(ctx context.Context, window recordingWindow, id int64) (generated.Recording, error) {
+	for _, calendarID := range window.calendars {
+		events, err := window.readCalendar(ctx, calendarID, []string{recordingTypeEvent})
+		if err != nil {
+			return generated.Recording{}, err
+		}
+		for _, event := range events {
+			if event.Id == id {
+				return event, nil
+			}
 		}
 	}
 
@@ -547,10 +597,16 @@ func eventSearchWindow(ctx context.Context, on string) (recordingWindow, error) 
 	filter := recordingFilter{
 		startsOn:         on,
 		endsOn:           endsOn,
-		defaultWindow:    func(today time.Time) (time.Time, time.Time) { return today.AddDate(-1, 0, 0), today.AddDate(1, 0, 0) },
+		defaultWindow:    eventSearchYear,
 		defaultCalendars: allCalendarIDs,
 	}
 	return filter.resolve(ctx)
+}
+
+// eventSearchYear is a year either side of today, wide enough to cover an event somebody is
+// editing without being told the day it is on.
+func eventSearchYear(today time.Time) (time.Time, time.Time) {
+	return today.AddDate(-1, 0, 0), today.AddDate(1, 0, 0)
 }
 
 // delete
