@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
 func TestValidateBoxArgs(t *testing.T) {
@@ -59,40 +62,56 @@ func TestValidateBoxArgs(t *testing.T) {
 	}
 }
 
+// Every spelling of a box HEY names — the short name hey search --in takes, the kind hey
+// box list shows, the display name — reads it on its own route, with no list lookup.
 func TestBoxCommandNamedRoutes(t *testing.T) {
 	tests := []struct {
-		name string
-		box  string
-		path string
+		name      string
+		path      string
+		spellings []string
 	}{
-		{name: "Imbox", box: "imbox", path: "/imbox.json"},
-		{name: "Feed", box: "the feed", path: "/feedbox.json"},
-		{name: "Paper Trail", box: "paper trail", path: "/paper_trail.json"},
-		{name: "Set Aside", box: "set aside", path: "/set_aside.json"},
-		{name: "Reply Later", box: "reply later", path: "/reply_later.json"},
-		{name: "Bubbled Up", box: "bubbled up", path: "/bubble_up.json"},
+		{name: "Imbox", path: "/imbox.json", spellings: []string{"imbox", "Imbox", "IMBOX"}},
+		{name: "The Feed", path: "/feedbox.json", spellings: []string{"feed", "feedbox", "the feed", "The Feed", "thefeed"}},
+		{name: "Paper Trail", path: "/paper_trail.json", spellings: []string{"papertrail", "trailbox", "paper trail", "Paper Trail", "paper-trail", "paper_trail", "trail"}},
+		{name: "Set Aside", path: "/set_aside.json", spellings: []string{"setaside", "asidebox", "set aside", "Set Aside", "set-aside", "aside"}},
+		{name: "Reply Later", path: "/reply_later.json", spellings: []string{"replylater", "laterbox", "reply later", "Reply Later", "reply-later", "later"}},
+		{name: "Bubble Up", path: "/bubble_up.json", spellings: []string{"bubbleup", "bubblebox", "bubble up", "Bubble Up", "bubbled up", "bubble"}},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var requests atomic.Int32
-			response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				requests.Add(1)
-				if r.Method != http.MethodGet || r.URL.Path != tt.path {
-					t.Errorf("request = %s %s, want GET %s", r.Method, r.URL.Path, tt.path)
-					http.NotFound(w, r)
-					return
+		for _, spelling := range tt.spellings {
+			t.Run(tt.name+"/"+spelling, func(t *testing.T) {
+				var requests atomic.Int32
+				response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					requests.Add(1)
+					if r.Method != http.MethodGet || r.URL.Path != tt.path {
+						t.Errorf("request = %s %s, want GET %s", r.Method, r.URL.Path, tt.path)
+						http.NotFound(w, r)
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = fmt.Fprintf(w, `{"id":1,"kind":"box","name":%q,"postings":[]}`, tt.name)
+				}), "box", "view", spelling)
+				if err != nil {
+					t.Fatalf("execute box: %v", err)
 				}
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = fmt.Fprintf(w, `{"id":1,"kind":%q,"name":%q,"postings":[]}`, tt.box, tt.name)
-			}), "box", tt.box)
-			if err != nil {
-				t.Fatalf("execute box: %v", err)
-			}
-			if requests.Load() != 1 {
-				t.Errorf("requests = %d, want one named lookup", requests.Load())
-			}
-			if response.Summary != "0 threads in "+tt.name {
-				t.Errorf("summary = %q", response.Summary)
+				if requests.Load() != 1 {
+					t.Errorf("requests = %d, want one named lookup", requests.Load())
+				}
+				if response.Summary != "0 threads in "+tt.name {
+					t.Errorf("summary = %q", response.Summary)
+				}
+			})
+		}
+	}
+}
+
+// A script takes a box name from hey search --help, so every value --in accepts that
+// names a box has to name the same box here.
+func TestBoxCommandTakesEverySearchBox(t *testing.T) {
+	for kind, value := range searchInValues {
+		t.Run(value, func(t *testing.T) {
+			if got := boxKindFor(value); got != kind {
+				t.Errorf("boxKindFor(%q) = %q, want %q", value, got, kind)
 			}
 		})
 	}
@@ -298,8 +317,57 @@ func TestBoxCommandUnknownNameReturnsNotFound(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `[{"id":17,"kind":"receipts","name":"Receipts"}]`)
 	}), "box", "newsletters")
-	if err == nil || !strings.Contains(err.Error(), `box "newsletters" not found`) {
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeNotFound || cliErr.Message != `box "newsletters" not found` {
 		t.Fatalf("error = %v, want box not found", err)
+	}
+	if !strings.Contains(cliErr.Hint, "imbox, feed, papertrail, setaside, replylater, or bubbleup") {
+		t.Errorf("hint = %q, want the valid box names", cliErr.Hint)
+	}
+}
+
+func TestBoxCommandPointsTrashAtSearch(t *testing.T) {
+	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `[{"id":1,"kind":"imbox","name":"Imbox"}]`)
+	}), "box", "view", "Trash")
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeNotFound {
+		t.Fatalf("error = %v, want not found", err)
+	}
+	if !strings.Contains(cliErr.Hint, "hey search --in trash") {
+		t.Errorf("hint = %q, want the search that reads Trash", cliErr.Hint)
+	}
+}
+
+// A box HEY lists under a kind nothing here knows is still found by that kind or its
+// name, spelled with the same folding as a named box.
+func TestBoxCommandFindsAnUnfamiliarBoxByEitherSpelling(t *testing.T) {
+	for _, spelling := range []string{"receipts_box", "Receipts-Box", "Tax Receipts", "taxreceipts"} {
+		t.Run(spelling, func(t *testing.T) {
+			var requests []string
+			response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests = append(requests, r.Method+" "+r.URL.Path)
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/boxes.json":
+					_, _ = io.WriteString(w, `[{"id":17,"kind":"receiptsbox","name":"Tax Receipts"}]`)
+				case "/boxes/17.json":
+					_, _ = io.WriteString(w, `{"id":17,"kind":"receiptsbox","name":"Tax Receipts","postings":[]}`)
+				default:
+					http.NotFound(w, r)
+				}
+			}), "box", "view", spelling)
+			if err != nil {
+				t.Fatalf("execute box: %v", err)
+			}
+			if got, want := fmt.Sprint(requests), "[GET /boxes.json GET /boxes/17.json]"; got != want {
+				t.Errorf("requests = %s, want %s", got, want)
+			}
+			if response.Summary != "0 threads in Tax Receipts" {
+				t.Errorf("summary = %q", response.Summary)
+			}
+		})
 	}
 }
 

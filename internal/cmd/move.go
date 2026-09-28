@@ -95,15 +95,15 @@ func resolveMoveDestination(ctx context.Context, nameOrID string) (*generated.Bo
 		return nil, apierr.ErrNotFound("box", nameOrID)
 	}
 
-	query := canonicalBoxName(nameOrID)
+	kind := boxKindFor(nameOrID)
 	for i := range *boxes {
 		box := &(*boxes)[i]
-		if canonicalBoxName(box.Kind) == query || canonicalBoxName(box.Name) == query {
+		if boxKindFor(box.Kind) == kind || boxKindFor(box.Name) == kind {
 			return validateMoveDestination(box)
 		}
 	}
 
-	return nil, apierr.ErrNotFound("box", nameOrID)
+	return nil, errBoxNotFound(nameOrID)
 }
 
 func validateMoveDestination(box *generated.Box) (*generated.Box, error) {
@@ -111,23 +111,4 @@ func validateMoveDestination(box *generated.Box) (*generated.Box, error) {
 		return nil, apierr.ErrUsageHint("Bubble Up is not a move destination", "Run: hey bubble up <box-item-id> --now (or --on <date>)")
 	}
 	return box, nil
-}
-
-func canonicalBoxName(name string) string {
-	name = strings.ToLower(strings.TrimSpace(name))
-	name = strings.NewReplacer(" ", "", "-", "", "_", "").Replace(name)
-
-	switch name {
-	case "feed", "thefeed":
-		return hey.BoxKindFeed
-	case "aside", "setaside":
-		return hey.BoxKindSetAside
-	case "later", "replylater":
-		return hey.BoxKindLater
-	case "trail", "papertrail":
-		return hey.BoxKindTrail
-	case "bubble", "bubbleup", "bubbled", "bubbledup":
-		return hey.BoxKindBubbleUp
-	}
-	return name
 }

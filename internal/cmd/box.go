@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
-	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
+	"github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/mail"
@@ -53,6 +53,7 @@ func newBoxCommand() *boxCommand {
 		"List HEY boxes or list email threads in one box.",
 		`  hey box list
   hey box view imbox
+  hey box view papertrail
   hey box view imbox --limit 10
   hey box view 123 --json`,
 	)
@@ -66,8 +67,9 @@ func newBoxViewCommand() *boxCommand {
 	return newBoxReaderCommand(
 		"view <name|id>",
 		"List email threads in a box",
-		"List email threads in a HEY box. Accepts a box name (imbox, feedbox, etc.) or numeric ID.",
+		"List email threads in a HEY box. Accepts a box's short name (imbox, feed, papertrail, setaside, replylater, bubbleup), its kind (feedbox, trailbox, …), its display name (The Feed, Paper Trail) or its numeric ID.",
 		`  hey box view imbox
+  hey box view papertrail
   hey box view imbox --limit 10
   hey box view imbox --page next-cursor
   hey box view 123 --json`,
@@ -81,7 +83,7 @@ func newBoxReaderCommand(use, short, long, example string) *boxCommand {
 		Short: short,
 		Long:  long,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts a box name or numeric ID. Returns email threads. Use topic_id with hey thread read, reply, and forward; use id with seen, unseen, and move. A row with kind \"bundle\" groups one sender's unseen threads and has no topic_id: list them with hey bundle view <id>, and every thread with that sender via hey contact threads <contact-id>. --page continues from the next_page cursor of an earlier listing of the same box.",
+			"agent_notes": "Accepts a box's short name (imbox, feed, papertrail, setaside, replylater, bubbleup), kind (feedbox, trailbox, …) or display name in any case — the spellings hey search --in and hey move --to take — or a numeric ID. Trash is not a box: use hey search --in trash. Returns email threads. Use topic_id with hey thread read, reply, and forward; use id with seen, unseen, and move. A row with kind \"bundle\" groups one sender's unseen threads and has no topic_id: list them with hey bundle view <id>, and every thread with that sender via hey contact threads <contact-id>. --page continues from the next_page cursor of an earlier listing of the same box.",
 		},
 		Example: example,
 		RunE:    command.run,
@@ -158,8 +160,9 @@ func boxPageCursor(nextHistoryURL string) string {
 	return parsed.Query().Get("page")
 }
 
-// resolveBox fetches a box by name or ID at the page cursor, using named SDK getters for
-// well-known box names to avoid an extra List API call.
+// resolveBox fetches a box by name or ID at the page cursor. A name is any spelling
+// boxKindFor knows — short name, kind or display name — and the same ones hey search --in
+// and hey move --to take.
 func resolveBox(ctx context.Context, nameOrID, page string) (*generated.BoxShowResponse, error) {
 	var cursor *string
 	if page != "" {
@@ -175,39 +178,41 @@ func resolveBox(ctx context.Context, nameOrID, page string) (*generated.BoxShowR
 		return resp, nil
 	}
 
-	// Named getter for well-known boxes (saves a List call)
-	switch strings.ToLower(nameOrID) {
-	case "imbox":
+	// A box HEY names has a route of its own, which saves listing the boxes and pages the
+	// box in its own order.
+	kind := boxKindFor(nameOrID)
+	switch kind {
+	case hey.BoxKindImbox:
 		resp, err := sdk.Boxes().GetImbox(ctx, &generated.GetImboxParams{Page: cursor})
 		if err != nil {
 			return nil, apierr.FromSDK(err)
 		}
 		return resp, nil
-	case "feedbox", "the feed":
+	case hey.BoxKindFeed:
 		resp, err := sdk.Boxes().GetFeedbox(ctx, &generated.GetFeedboxParams{Page: cursor})
 		if err != nil {
 			return nil, apierr.FromSDK(err)
 		}
 		return resp, nil
-	case "trailbox", "paper trail":
+	case hey.BoxKindTrail:
 		resp, err := sdk.Boxes().GetTrailbox(ctx, &generated.GetTrailboxParams{Page: cursor})
 		if err != nil {
 			return nil, apierr.FromSDK(err)
 		}
 		return resp, nil
-	case "asidebox", "set aside":
+	case hey.BoxKindSetAside:
 		resp, err := sdk.Boxes().GetAsidebox(ctx, &generated.GetAsideboxParams{Page: cursor})
 		if err != nil {
 			return nil, apierr.FromSDK(err)
 		}
 		return resp, nil
-	case "laterbox", "reply later":
+	case hey.BoxKindLater:
 		resp, err := sdk.Boxes().GetLaterbox(ctx, &generated.GetLaterboxParams{Page: cursor})
 		if err != nil {
 			return nil, apierr.FromSDK(err)
 		}
 		return resp, nil
-	case "bubblebox", "bubbled up":
+	case hey.BoxKindBubbleUp:
 		resp, err := sdk.Boxes().GetBubblebox(ctx, &generated.GetBubbleboxParams{Page: cursor})
 		if err != nil {
 			return nil, apierr.FromSDK(err)
@@ -215,16 +220,15 @@ func resolveBox(ctx context.Context, nameOrID, page string) (*generated.BoxShowR
 		return resp, nil
 	}
 
-	// Unknown name: list-then-filter fallback
+	// Any other box is found in the list, by the kind or the name HEY serves for it.
 	result, err := sdk.Boxes().List(ctx)
 	if err != nil {
 		return nil, apierr.FromSDK(err)
 	}
 
-	lower := strings.ToLower(nameOrID)
 	if result != nil {
 		for _, b := range *result {
-			if strings.ToLower(b.Kind) == lower || strings.ToLower(b.Name) == lower {
+			if boxKindFor(b.Kind) == kind || boxKindFor(b.Name) == kind {
 				resp, err := sdk.Boxes().Get(ctx, b.Id, &generated.GetBoxParams{Page: cursor})
 				if err != nil {
 					return nil, apierr.FromSDK(err)
@@ -234,5 +238,5 @@ func resolveBox(ctx context.Context, nameOrID, page string) (*generated.BoxShowR
 		}
 	}
 
-	return nil, apierr.ErrNotFound("box", nameOrID)
+	return nil, errBoxNotFound(nameOrID)
 }

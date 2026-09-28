@@ -364,7 +364,7 @@ hey box view 123 --json                      # List emails in box (by ID)
 hey box view imbox --page next-cursor --json # Continue from an earlier listing
 ```
 
-Box names: `imbox`, `feedbox`, `trailbox`, `asidebox`, `laterbox`, `bubblebox`
+Box names: `imbox`, `feed`, `papertrail`, `setaside`, `replylater`, `bubbleup` — or the kind (`feedbox`, `trailbox`, `asidebox`, `laterbox`, `bubblebox`) or display name (`"Paper Trail"`), in any case. `hey search --in` and `hey move --to` take the same spellings. Trash is not a box: use `hey search --in trash`.
 
 **Response format:** `hey box view --json` returns the box itself — `id`, `kind`, `name`, `app_url`, `next_history_url`, `next_page` — with a `postings` array of the email threads in it. Each posting has `id` (box item ID), `topic_id` (thread ID), `kind` (`bundle` for a bundle row), `name` (subject), `created_at` and `app_url`; a thread row also has `contacts`, `summary` and `visible_entry_count`. `seen` is present only when true — an unseen posting omits it, so test `.seen != true`. Use `id` for the box item commands (see the ID note under Threads) and `topic_id` for `hey thread read`, `hey reply`, `hey forward`, `hey share` and `hey attachment list`.
 
@@ -449,7 +449,7 @@ hey search filters --json                      # Available box, date, label, and
 
 Search refinements are `--required`, `--any`, `--none`, `--exact`, `--from`, `--to`, `--subject`, `--date`, `--in`, `--label`, and `--attachment`. `--page` selects one result page; `--all` fetches up to 100 pages from that point onward. When the cap is reached, the response notice provides the next `--page` value for continuation.
 
-`--in`, `--date`, `--label` and `--attachment` accept only the values `hey search filters` lists: boxes are `imbox`, `feed`, `papertrail`, `trash`; dates are `last_7_days`, `last_30_days`, `last_90_days` or a year (`hey search filters` lists 2020 to this year; the CLI refuses anything but `20xx`); attachment kinds are `any`, `images`, `pdfs`, `calendar_invites`, `documents`, `spreadsheets`, `presentations`, `media`, `zip_files`. The kinds are plural — `--attachment pdfs`, not `pdf`. An unrecognized `--in`, `--date` or `--attachment` is refused as a usage error naming the values it accepts, before anything is sent; `--label` is not checked, so read `hey search filters` when unsure of a label.
+`--in`, `--date`, `--label` and `--attachment` accept only the values `hey search filters` lists: boxes are `imbox`, `feed`, `papertrail`, `trash` (a box's kind or display name, such as `trailbox`, works too); dates are `last_7_days`, `last_30_days`, `last_90_days` or a year (`hey search filters` lists 2020 to this year; the CLI refuses anything but `20xx`); attachment kinds are `any`, `images`, `pdfs`, `calendar_invites`, `documents`, `spreadsheets`, `presentations`, `media`, `zip_files`. The kinds are plural — `--attachment pdfs`, not `pdf`. An unrecognized `--in`, `--date` or `--attachment` is refused as a usage error naming the values it accepts, before anything is sent; `--label` is not checked, so read `hey search filters` when unsure of a label.
 
 **Response format:** `data` contains one item per matching thread. Each result has `id` (box item ID for organization actions), `topic_id` (thread ID for `hey thread read`, `hey reply`, and `hey forward`), `subject`, `updated_at`, and `messages` containing the matching message IDs, senders, dates, and summaries. A result omits `id` when you have no box item for its thread.
 

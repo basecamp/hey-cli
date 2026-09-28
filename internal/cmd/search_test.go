@@ -213,6 +213,54 @@ func TestSearchValidatesPageDateAndBoxBeforeRequest(t *testing.T) {
 	}
 }
 
+// --in takes every spelling hey box view takes for the boxes search can narrow to, and
+// sends HEY the one value it reads for each.
+func TestSearchSendsTheValueHEYReadsForEveryBoxSpelling(t *testing.T) {
+	tests := map[string]string{
+		"imbox":       "imbox",
+		"Imbox":       "imbox",
+		"feed":        "feed",
+		"feedbox":     "feed",
+		"The Feed":    "feed",
+		"papertrail":  "papertrail",
+		"trailbox":    "papertrail",
+		"Paper Trail": "papertrail",
+		"paper-trail": "papertrail",
+		"trash":       "trash",
+		"TRASH":       "trash",
+	}
+	for spelling, want := range tests {
+		t.Run(spelling, func(t *testing.T) {
+			server, recorded := searchServer(t)
+			if _, err := runSearch(t, server, "planning", "--in", spelling); err != nil {
+				t.Fatalf("search --in %s: %v", spelling, err)
+			}
+			if got := recorded.queries[0].Get("refine[in]"); got != want {
+				t.Errorf("refine[in] = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestSearchNamesTheBoxesItCanNarrowTo(t *testing.T) {
+	for _, in := range []string{"set-aside", "laterbox", "Bubble Up", "archive"} {
+		t.Run(in, func(t *testing.T) {
+			server, recorded := searchServer(t)
+			_, err := runSearch(t, server, "planning", "--in", in)
+			var cliErr *apierr.Error
+			if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage {
+				t.Fatalf("error = %v, want usage error", err)
+			}
+			if cliErr.Message != "--in must be imbox, feed, papertrail, or trash" {
+				t.Errorf("message = %q", cliErr.Message)
+			}
+			if recorded.requests != 0 {
+				t.Errorf("requests = %d, want 0", recorded.requests)
+			}
+		})
+	}
+}
+
 func TestSearchNamesTheAttachmentKindsItRefuses(t *testing.T) {
 	server, _ := searchServer(t)
 	_, err := runSearch(t, server, "planning", "--attachment", "pdf")

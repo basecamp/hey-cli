@@ -77,7 +77,7 @@ func newSearchCommand() *searchCommand {
 	flags.StringVar(&searchCommand.to, "to", "", "Recipient name or email address")
 	flags.StringVar(&searchCommand.subject, "subject", "", "Words in the subject")
 	flags.StringVar(&searchCommand.date, "date", "", "Date range: last_7_days, last_30_days, last_90_days, or year")
-	flags.StringVar(&searchCommand.in, "in", "", "Box: imbox, feed, papertrail, or trash")
+	flags.StringVar(&searchCommand.in, "in", "", "Box: imbox, feed, papertrail, or trash (a box's kind or name works too)")
 	flags.StringVar(&searchCommand.label, "label", "", "Label name")
 	flags.StringVar(&searchCommand.attachment, "attachment", "", "Attachment kind: any, images, pdfs, calendar_invites, documents, spreadsheets, presentations, media, or zip_files")
 	flags.IntVar(&searchCommand.page, "page", 1, "Results page")
@@ -96,7 +96,7 @@ func (c *searchCommand) run(cmd *cobra.Command, args []string) error {
 	if !hasSearchCriteria(params) {
 		return apierr.ErrUsage("provide a query or at least one search refinement")
 	}
-	if err := validateSearchParams(params); err != nil {
+	if err := validateSearchParams(&params); err != nil {
 		return err
 	}
 
@@ -165,7 +165,9 @@ func hasSearchCriteria(params hey.SearchParams) bool {
 		params.Date != "" || params.In != "" || params.Label != "" || params.Attachment != ""
 }
 
-func validateSearchParams(params hey.SearchParams) error {
+// validateSearchParams refuses what HEY would misread before anything is sent, and
+// rewrites --in to the value HEY reads for whichever spelling of the box it was given.
+func validateSearchParams(params *hey.SearchParams) error {
 	if params.Page < 1 {
 		return apierr.ErrUsage("--page must be at least 1")
 	}
@@ -179,11 +181,11 @@ func validateSearchParams(params hey.SearchParams) error {
 		}
 	}
 	if params.In != "" {
-		switch params.In {
-		case "imbox", "feed", "papertrail", "trash":
-		default:
-			return apierr.ErrUsage("--in must be imbox, feed, papertrail, or trash")
+		in, err := searchInValue(params.In)
+		if err != nil {
+			return err
 		}
+		params.In = in
 	}
 	// HEY answers an unrecognized attachment kind with a 500, and the kinds are plural:
 	// the search filters call them pdfs, images, zip_files.
