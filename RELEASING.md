@@ -260,6 +260,28 @@ it is idempotent and refuses downgrades.
 One-time setup: `ssh-keygen -t ed25519 -f aur_key`, add the public key to the AUR
 account, store the private key as `AUR_KEY`.
 
+## Missing attestation
+
+mise refuses a version without GitHub build provenance once an earlier version
+of the tool had it, so a release whose run published but stopped before
+`Attest build provenance` cannot be installed or upgraded through mise (v1.7.0,
+#499). Do not re-run the release job: goreleaser would rebuild and re-sign, and
+the new digests are not what was published. Dispatch the `Attest a published
+release` workflow with the tag instead:
+
+```bash
+gh workflow run attest-release.yml -f tag=v1.7.0
+gh attestation verify hey_1.7.0_linux_amd64.tar.gz --repo basecamp/hey-cli
+```
+
+`checksums.txt` is the index of subjects, not the subject: the workflow
+attests each release asset it lists, by name and digest, which is why the check
+above names an archive. It does so only after the release run's
+`checksums.txt.bundle` verifies against `release.yml` at that tag and every
+listed digest matches the published asset of that name. The attestation's
+signer is `attest-release.yml` rather than `release.yml`; mise does not check
+the signer workflow.
+
 ## Skills sync
 
 Stable releases mirror `skills/` into [basecamp/skills](https://github.com/basecamp/skills),
