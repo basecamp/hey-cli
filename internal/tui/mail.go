@@ -327,6 +327,7 @@ type mailView struct {
 	lastBulkReplyID        int64  // delayed delivery currently available for undo
 	pendingMutations       int    // writes that must finish before changing the account context
 	notice                 string // one-shot confirmation shown above the posting list
+	selectionNotice        string // the refusal notice describing the selection, while it is up
 	requests               requestLane[mailRequestKind]
 	sourceRequestID        uint64
 	folderDiscoveryErr     string
@@ -453,6 +454,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.postingList.refreshHead(msg.postings, v.postingPaging.headIDs)
 		v.postingPaging.refreshed(postingIDs(msg.postings), msg.nextPage)
+		v.settleSelectionNotice()
 		return nil, true
 
 	case searchResultsLoadedMsg:
@@ -790,7 +792,8 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			}
 		}
 		if msg.fromSelection {
-			v.postingList.clearSelected()
+			v.postingList.deselect(msg.postings())
+			v.settleSelectionNotice()
 		}
 		// The open thread can file back into the box on screen — out and back while
 		// it stays open — and its row was removed when it first filed away, so the
@@ -1654,7 +1657,8 @@ func (v *mailView) applySeenPostingAction(msg postingActionDoneMsg) tea.Cmd {
 		}
 	}
 	if msg.fromSelection {
-		v.seenList.clearSelected()
+		v.seenList.deselect(msg.postings())
+		v.settleSelectionNotice()
 	}
 	return tea.Batch(notify(msg.action), v.loadMoreSeenPostings())
 }
@@ -2700,6 +2704,12 @@ func (v *mailView) fileablePosting() *mail.Posting {
 }
 
 func (v *mailView) handlePostingAction(key string) tea.Cmd {
+	if !isPostingActionKey(key) {
+		return nil
+	}
+	if v.refuseForLostSelection() {
+		return nil
+	}
 	if key == "t" || key == "T" {
 		return v.trash()
 	}
@@ -2718,6 +2728,16 @@ func (v *mailView) handlePostingAction(key string) tea.Cmd {
 		return nil
 	}
 	return v.postingAction(key, *selected, v.postingBoxKind(*selected))
+}
+
+// isPostingActionKey reports whether postingAction does anything with key, so a key that
+// means nothing to a thread is not answered with a refusal about the selection.
+func isPostingActionKey(key string) bool {
+	switch key {
+	case "l", "a", "A", "e", "E", "u", "U", "i", "I", "d", "D", "p", "P", "t", "T", "!", "-", "+", "r", "R", "f", "F":
+		return true
+	}
+	return false
 }
 
 // trashTargets is what t acts on: every selected row when there is a selection, the row
@@ -2752,7 +2772,8 @@ func (v *mailView) trash() tea.Cmd {
 	if len(ids) > 1 {
 		label = fmt.Sprintf("%d threads moved to Trash", len(ids))
 	}
-	return v.bulkPostingAction(label, postingActionRemove, ids, func() error {
+	fromSelection := len(v.actionList().selectedIDs()) > 0
+	return v.bulkPostingAction(label, postingActionRemove, ids, fromSelection, func() error {
 		return v.vc.sdk.Postings().MoveToTrash(v.vc.ctx, ids...)
 	})
 }
@@ -2766,7 +2787,7 @@ func (v *mailView) markSelectionSeen(selection []mail.Posting) tea.Cmd {
 	if len(ids) > 1 {
 		label = fmt.Sprintf("%d threads marked as seen", len(ids))
 	}
-	return v.bulkPostingAction(label, postingActionSeen, ids, func() error {
+	return v.bulkPostingAction(label, postingActionSeen, ids, true, func() error {
 		return v.vc.sdk.Postings().MarkSeen(v.vc.ctx, ids)
 	})
 }
@@ -2798,7 +2819,7 @@ func (v *mailView) markSelectionUnseen(selection []mail.Posting) tea.Cmd {
 	if ignored > 0 {
 		label += fmt.Sprintf(" — %d ignored %s skipped", ignored, threadNoun(ignored))
 	}
-	return v.bulkPostingAction(label, postingActionUnseen, ids, func() error {
+	return v.bulkPostingAction(label, postingActionUnseen, ids, true, func() error {
 		return v.vc.sdk.Postings().MarkUnseen(v.vc.ctx, ids)
 	})
 }
@@ -2821,8 +2842,9 @@ func unseenSelectionRefusal(ignored, selected int) string {
 }
 
 // bulkPostingAction runs fn over ids in one request and reports every one of them when
-// HEY answers, so the list lands the effect on each row and lets the selection go.
-func (v *mailView) bulkPostingAction(label string, effect postingActionEffect, ids []int64, fn func() error) tea.Cmd {
+// HEY answers, so the list lands the effect on each row and, when the ids were the
+// selection, lets go of them.
+func (v *mailView) bulkPostingAction(label string, effect postingActionEffect, ids []int64, fromSelection bool, fn func() error) tea.Cmd {
 	action := v.doPostingAction(label, effect, v.currentBoxID(), ids[0], fn)
 	return func() tea.Msg {
 		done, ok := action().(postingActionDoneMsg)
@@ -2830,7 +2852,7 @@ func (v *mailView) bulkPostingAction(label string, effect postingActionEffect, i
 			return nil
 		}
 		done.postingIDs = ids
-		done.fromSelection = true
+		done.fromSelection = fromSelection
 		return done
 	}
 }
@@ -2866,12 +2888,57 @@ func (v *mailView) selectionHelpBindings(selected int) []helpBinding {
 // Only t, e, u and Ctrl+B act on a selection so far; the rest have their own
 // confirmation needs and come later. It reports whether it refused.
 func (v *mailView) refuseForSelection() bool {
+	if v.refuseForLostSelection() {
+		return true
+	}
 	selected := len(v.actionList().selectedIDs())
 	if selected == 0 {
 		return false
 	}
-	v.notice = fmt.Sprintf("%d %s selected — choose a bulk action or press Esc to clear", selected, threadNoun(selected))
+	v.notice = selectionRefusal(selected)
+	v.selectionNotice = v.notice
 	return true
+}
+
+func selectionRefusal(selected int) string {
+	return fmt.Sprintf("%d %s selected — choose a bulk action or press Esc to clear", selected, threadNoun(selected))
+}
+
+// refuseForLostSelection holds back the one key that follows a selection going out from
+// under the reader. Their threads left the list or went under the cover, and without the
+// refusal e, u or t would act on the row under the cursor — a thread they never chose.
+// It refuses once: by the next key the reader has seen the notice and means the cursor.
+func (v *mailView) refuseForLostSelection() bool {
+	list := v.actionList()
+	if !list.selectionLost {
+		return false
+	}
+	list.selectionLost = false
+	v.notice = "The selected threads left the list — nothing was changed"
+	v.selectionNotice = ""
+	return true
+}
+
+// settleSelectionNotice keeps the refusal honest when the selection changes without a
+// key going through HandleContentKey, which would have cleared it: Escape, a live re-read,
+// an action landing. A count that no longer matches is replaced, and a selection that is
+// gone takes its refusal with it. Any other notice is left alone.
+func (v *mailView) settleSelectionNotice() {
+	if v.selectionNotice == "" {
+		return
+	}
+	if v.notice != v.selectionNotice {
+		v.selectionNotice = ""
+		return
+	}
+	selected := len(v.actionList().selectedIDs())
+	if selected == 0 {
+		v.notice = ""
+		v.selectionNotice = ""
+		return
+	}
+	v.notice = selectionRefusal(selected)
+	v.selectionNotice = v.notice
 }
 
 // ClearSelection is the last thing Escape does on a mail list: once nothing ahead of it
@@ -2882,10 +2949,11 @@ func (v *mailView) ClearSelection() bool {
 		return false
 	}
 	list := v.actionList()
-	if len(list.selectedIDs()) == 0 {
+	if len(list.selectedIDs()) == 0 && !list.selectionLost {
 		return false
 	}
 	list.clearSelected()
+	v.settleSelectionNotice()
 	return true
 }
 

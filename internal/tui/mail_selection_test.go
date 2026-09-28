@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/basecamp/hey-cli/internal/mail"
 )
 
 // selectTwoSeenThreads selects both test postings after marking the unseen one seen, so
@@ -411,5 +413,193 @@ func TestEscapeClearsAPreviouslySeenSelectionBeforeLeaving(t *testing.T) {
 	m = updated.(model)
 	if m.mailView.seenActive {
 		t.Error("the second esc did not leave Previously Seen")
+	}
+}
+
+// refreshWithoutTheTestThreads is a live re-read whose top page no longer holds either
+// test thread, as when both were filed away from another device.
+func refreshWithoutTheTestThreads(v *mailView) {
+	v.postingPaging.read(postingIDs(testPostings()), "")
+	v.Update(postingsRefreshedMsg{
+		requestID:  v.liveRequestID,
+		boxID:      v.currentBoxID(),
+		sourceKind: v.currentSourceKind(),
+		postings:   []mail.Posting{{ID: 103, Summary: "Quarterly planning agenda"}, {ID: 104, Summary: "Lunch on Friday?"}},
+	})
+}
+
+// A re-read that takes every selected thread out of the list leaves the cursor on a row
+// the reader never chose. The next e is refused rather than marking that row, once: by
+// the key after it the reader has seen why and means the cursor.
+func TestMailViewRefusesTheCursorWhenARefreshTookTheSelection(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	selectTwoThreads(v)
+	refreshWithoutTheTestThreads(v)
+
+	if ids := v.postingList.selectedIDs(); len(ids) != 0 {
+		t.Fatalf("selection = %v, want it gone with its threads", ids)
+	}
+	if cmd := v.HandleContentKey(keyPress("z")); cmd != nil {
+		t.Fatalf("z returned %#v", runCmd(cmd))
+	}
+	if v.notice != "" {
+		t.Errorf("notice after a key that means nothing = %q, want none", v.notice)
+	}
+	for _, key := range []string{"e", "u", "t", "v"} {
+		t.Run(key, func(t *testing.T) {
+			v, recorded := mailWithTestServer(t, http.StatusNoContent)
+			selectTwoThreads(v)
+			refreshWithoutTheTestThreads(v)
+			if cmd := v.HandleContentKey(keyPress(key)); cmd != nil {
+				t.Fatalf("%s after the selection left returned %#v", key, runCmd(cmd))
+			}
+			if v.notice != "The selected threads left the list — nothing was changed" {
+				t.Errorf("notice = %q", v.notice)
+			}
+			if v.modal != nil {
+				t.Errorf("%s opened %T", key, v.modal)
+			}
+			if len(recorded.requests) != 0 {
+				t.Errorf("requests = %v, want none", recorded.requests)
+			}
+		})
+	}
+
+	v.HandleContentKey(keyPress("e"))
+	done, ok := runCmd(v.HandleContentKey(keyPress("e"))).(postingActionDoneMsg)
+	if !ok || done.err != nil {
+		t.Fatalf("the second e returned %#v, want it to mark the cursor's thread", done)
+	}
+	if !slices.Equal(recorded.body.PostingIDs, []int64{103}) {
+		t.Errorf("marked %v seen, want the cursor's thread", recorded.body.PostingIDs)
+	}
+}
+
+// Moving the cursor is aiming again, so the key after it acts on the row it reached.
+func TestMailViewActsOnTheCursorOnceTheReaderMovesOnFromALostSelection(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	selectTwoThreads(v)
+	refreshWithoutTheTestThreads(v)
+
+	v.HandleContentKey(keyPress("down"))
+	if _, ok := runCmd(v.HandleContentKey(keyPress("e"))).(postingActionDoneMsg); !ok {
+		t.Fatal("e after moving the cursor did nothing")
+	}
+	if !slices.Equal(recorded.body.PostingIDs, []int64{104}) {
+		t.Errorf("marked %v seen, want the row the cursor moved to", recorded.body.PostingIDs)
+	}
+}
+
+// Escape lets go of a selection that went out from under the reader, as it lets go of
+// one that is still standing.
+func TestEscapeLetsGoOfALostSelection(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	selectTwoThreads(v)
+	refreshWithoutTheTestThreads(v)
+
+	if !v.ClearSelection() {
+		t.Fatal("esc did not claim a lost selection")
+	}
+	if _, ok := runCmd(v.HandleContentKey(keyPress("e"))).(postingActionDoneMsg); !ok {
+		t.Fatal("e after esc did nothing")
+	}
+	if !slices.Equal(recorded.body.PostingIDs, []int64{103}) {
+		t.Errorf("marked %v seen, want the cursor's thread", recorded.body.PostingIDs)
+	}
+}
+
+// A thread the reader selects while e is on its way to HEY is a new selection. HEY's
+// answer lets go of the threads it answered for and leaves that one selected.
+func TestMailViewLetsGoOfOnlyTheThreadsAnActionCarried(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+	v.HandleContentKey(keyPress(" "))
+
+	cmd := v.HandleContentKey(keyPress("e"))
+	v.HandleContentKey(keyPress("down"))
+	v.HandleContentKey(keyPress(" "))
+
+	done, ok := runCmd(cmd).(postingActionDoneMsg)
+	if !ok || done.err != nil {
+		t.Fatalf("seen returned %#v", done)
+	}
+	if !slices.Equal(recorded.body.PostingIDs, []int64{100}) {
+		t.Fatalf("marked %v seen, want the thread selected when e was pressed", recorded.body.PostingIDs)
+	}
+	v.Update(done)
+	if ids := v.postingList.selectedIDs(); !slices.Equal(ids, []int64{101}) {
+		t.Errorf("selection = %v, want the thread selected after e still selected", ids)
+	}
+}
+
+// t on the row under the cursor is not a selection, so its answer lets go of nothing the
+// reader selected in the meantime.
+func TestMailViewTrashingTheCursorLeavesALaterSelectionAlone(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+
+	cmd := v.HandleContentKey(keyPress("t"))
+	v.HandleContentKey(keyPress("down"))
+	v.HandleContentKey(keyPress(" "))
+
+	done, ok := runCmd(cmd).(postingActionDoneMsg)
+	if !ok || done.err != nil {
+		t.Fatalf("trash returned %#v", done)
+	}
+	if done.fromSelection {
+		t.Error("trashing the cursor's row was reported as a selection")
+	}
+	v.Update(done)
+	if ids := v.postingList.selectedIDs(); !slices.Equal(ids, []int64{101}) {
+		t.Errorf("selection = %v, want the thread selected after t still selected", ids)
+	}
+}
+
+// Escape reaches the list without going through HandleContentKey, which clears a notice
+// on every key, so the refusal counting the selection has to go with the selection. A
+// notice about something else is left where it is.
+func TestMailViewSelectionRefusalFollowsTheSelection(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	selectTwoThreads(v)
+
+	v.HandleContentKey(keyPress("b"))
+	if v.notice != "2 threads selected — choose a bulk action or press Esc to clear" {
+		t.Fatalf("notice = %q", v.notice)
+	}
+	if !v.ClearSelection() {
+		t.Fatal("esc did not clear the selection")
+	}
+	if v.notice != "" {
+		t.Errorf("notice after esc = %q, want the refusal gone with the selection", v.notice)
+	}
+
+	selectTwoThreads(v)
+	v.HandleContentKey(keyPress("b"))
+	v.notice = "Could not load labels — press b to retry"
+	v.ClearSelection()
+	if v.notice != "Could not load labels — press b to retry" {
+		t.Errorf("notice = %q, want an unrelated notice left alone", v.notice)
+	}
+}
+
+// A live re-read is not a key either: the refusal follows the selection it leaves, and
+// goes when the re-read takes all of it.
+func TestMailViewSelectionRefusalFollowsARefresh(t *testing.T) {
+	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	selectTwoThreads(v)
+	v.HandleContentKey(keyPress("b"))
+
+	v.postingPaging.read(postingIDs(testPostings()), "")
+	v.Update(postingsRefreshedMsg{
+		requestID:  v.liveRequestID,
+		boxID:      v.currentBoxID(),
+		sourceKind: v.currentSourceKind(),
+		postings:   []mail.Posting{{ID: 103, Summary: "Quarterly planning agenda"}, testPostings()[1]},
+	})
+	if v.notice != "1 thread selected — choose a bulk action or press Esc to clear" {
+		t.Errorf("notice = %q, want the count the re-read left", v.notice)
+	}
+
+	refreshWithoutTheTestThreads(v)
+	if v.notice != "" {
+		t.Errorf("notice = %q, want the refusal gone with the selection", v.notice)
 	}
 }

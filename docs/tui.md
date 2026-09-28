@@ -83,9 +83,16 @@ are refused with a notice rather than quietly acting on the thread under the cur
 press Escape to clear the selection first. Escape still closes an open form, cancels a
 thread that is loading and leaves an open thread before it clears a selection, and on
 Previously Seen the first Escape clears the selection and the next one leaves. A bulk
-action lets go of the selection once HEY has answered and keeps it if the request fails,
-so it can be tried again. `u` leaves out a selected thread that is already unseen, and
-one you are ignoring, which the confirmation counts.
+action lets go of the threads it acted on once HEY has answered, and keeps them selected if
+the request fails, so it can be tried again; a thread you select while it is on its way stays
+selected. `u` leaves out a selected thread that is already unseen, and one you are ignoring,
+which the confirmation counts. `e` on a selected bundle marks every unseen thread in it seen,
+as it does on the row itself.
+
+If every selected thread leaves the list while you are looking at it — filed away from
+another device, or covered when the cover comes down — the next thread action is refused
+with a notice rather than falling back on the thread under the cursor, which you never chose.
+Moving the cursor, or pressing Escape, means you are aiming again.
 
 A bundle row cannot be trashed, and `t` leaves the help bar whenever the rows it would
 act on include one. A bundle stands for one sender's whole stream rather than for a thread,
