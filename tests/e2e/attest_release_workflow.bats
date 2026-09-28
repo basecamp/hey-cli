@@ -34,7 +34,9 @@ step_order() {
   [ "$expected" = "$actual" ]
 }
 
-@test "it cannot write to the repository" {
+@test "it can read the release but cannot write to the repository" {
   run grep -E "contents: write|actions: write" "$WORKFLOW"
   [ "$status" -ne 0 ]
+  run grep -c "^      contents: read$" "$WORKFLOW"
+  [ "$output" = "1" ]
 }
