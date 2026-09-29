@@ -82,6 +82,7 @@ var screenerTabItems = []navItem{
 // someone already screened in or out.
 type screenerRow struct {
 	id       int64
+	entryID  int64 // the most recent email they sent, which space previews; pending rows only
 	name     string
 	email    string
 	subject  string // subject of what they sent, or the address they write from; pending rows only
@@ -244,6 +245,9 @@ type screenerView struct {
 	liveRequestID   uint64 // identifies the only live re-read allowed to update the queue
 	moreRequestID   uint64 // identifies the only page-below read allowed to grow a pane
 	mutations       int
+
+	preview          *screenerPreview // space's full look at a sender's email, nil when closed
+	previewRequestID uint64           // identifies the only preview read allowed to fill it
 }
 
 func newScreenerView(vc *viewContext) *screenerView {
@@ -253,15 +257,24 @@ func newScreenerView(vc *viewContext) *screenerView {
 func (v *screenerView) Init() tea.Cmd {
 	v.notice = ""
 	v.confirmingClear = false
+	v.closePreview()
 	v.tab = screenerPendingTab
 	return v.requestPending()
 }
 
-// Restyle is a no-op: the screener keeps plain rows and styles them on every View.
-func (v *screenerView) Restyle() {}
+// Restyle renders an open preview again; the rows are plain and styled on every View.
+func (v *screenerView) Restyle() {
+	if v.preview != nil {
+		v.preview.width = 0
+	}
+}
 
 func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
+	case screenerPreviewLoadedMsg:
+		v.previewLoaded(msg)
+		return nil, true
+
 	case screenerPendingLoadedMsg:
 		if msg.requestID != v.requestID {
 			return nil, true
@@ -351,6 +364,9 @@ func (v *screenerView) View() string {
 	if v.confirmingClear {
 		return v.clearConfirmationView()
 	}
+	if v.preview != nil {
+		return v.previewView()
+	}
 
 	var b strings.Builder
 	if v.notice != "" {
@@ -382,10 +398,18 @@ func (v *screenerView) HelpBindings() []helpBinding {
 			{"n/esc", "cancel"},
 		}
 	}
+	if v.preview != nil {
+		return []helpBinding{
+			{"↑↓", "scroll"},
+			{key: v.screenQuestion()},
+			{"space/esc", "close preview"},
+		}
+	}
 	bindings := []helpBinding{{"↑↓", "navigate"}}
 	if v.tab == screenerPendingTab {
 		bindings = append(bindings,
 			helpBinding{key: v.screenQuestion()},
+			helpBinding{"space", "preview"},
 			helpBinding{"tab", "screener history"},
 		)
 	} else {
@@ -425,6 +449,9 @@ func (v *screenerView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	if v.confirmingClear {
 		return v.handleClearConfirmationKey(msg)
 	}
+	if v.preview != nil {
+		return v.handlePreviewKey(msg)
+	}
 
 	key := msg.String()
 	if key == "F" {
@@ -462,6 +489,8 @@ func (v *screenerView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		return v.screen(hey.ClearanceApproved)
 	case "n":
 		return v.screen(hey.ClearanceDenied)
+	case "space", " ":
+		return v.openPreview()
 	case "X":
 		v.confirmingClear = true
 		v.notice = ""
@@ -567,7 +596,13 @@ func (v *screenerView) screen(status string) tea.Cmd {
 	if row == nil {
 		return nil
 	}
-	clearanceID, name := row.id, screenerRowName(*row)
+	return v.screenRow(*row, status)
+}
+
+// screenRow answers Yes or No for one sender: the one under the cursor, or the one open
+// in the preview.
+func (v *screenerView) screenRow(row screenerRow, status string) tea.Cmd {
+	clearanceID, name := row.id, screenerRowName(row)
 	v.mutations++
 	v.notice = ""
 	return func() tea.Msg {
@@ -717,6 +752,7 @@ func pendingScreenerRow(clearance generated.Clearance) screenerRow {
 	subject, summary := clearanceEntryParts(clearance)
 	return screenerRow{
 		id:       clearance.Id,
+		entryID:  clearance.MostRecentEntry.Id,
 		name:     terminal.SanitizeLine(clearance.Petitioner.Name),
 		email:    terminal.SanitizeLine(clearance.Petitioner.EmailAddress),
 		subject:  subject,

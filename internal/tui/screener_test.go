@@ -79,6 +79,8 @@ func screenerTestView(t *testing.T) (*screenerView, *screenerServerState) {
 			_, _ = w.Write([]byte(`{"id":91,"status":"approved","petitioner":{"id":11,"name":"Jane Doe","email_address":"jane@example.com"}}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/clearances/punt.json":
 			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && r.URL.Path == "/messages/501.json":
+			_, _ = w.Write([]byte(`{"id":501,"subject":"Quarterly planning","content":"<p>Can we meet Thursday?</p><p>I would like to walk through the <strong>budget</strong> before the board meeting.</p><p>Jane</p>"}`))
 		default:
 			http.NotFound(w, r)
 		}
