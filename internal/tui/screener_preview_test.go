@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // openedPreview presses space on the first sender and lands the email it reads.
@@ -119,6 +120,25 @@ func TestScreenerHistoryHasNoPreview(t *testing.T) {
 
 	if cmd := view.HandleContentKey(keyPress("space")); cmd != nil || view.preview != nil {
 		t.Error("space opened a preview on Screener History")
+	}
+}
+
+// A sender whose name and address fill the line still gets a header of one line each,
+// the date included: a line that wrapped would make the preview taller than the screen.
+func TestScreenerPreviewHeaderFitsTheWidth(t *testing.T) {
+	view, _ := openedPreview(t)
+	view.preview.row.name = strings.Repeat("Maria Fernanda Gonzalez de la Cruz ", 3)
+	view.preview.row.email = "maria.fernanda.gonzalez.delacruz@example.com"
+	view.preview.row.trailing = "Sep 29, 2026"
+	view.preview.row.subject = strings.Repeat("Following up on the quarterly planning agenda ", 3)
+
+	for index, line := range strings.Split(ansi.Strip(view.previewHeader()), "\n") {
+		if width := displayWidth(line); width > view.vc.width {
+			t.Errorf("header line %d is %d wide on an %d-wide screen: %q", index, width, view.vc.width, line)
+		}
+	}
+	if header := plainText(view.previewHeader()); !strings.Contains(header, "Sep 29, 2026") {
+		t.Errorf("the date was cut off: %q", header)
 	}
 }
 

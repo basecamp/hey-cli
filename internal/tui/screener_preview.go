@@ -122,27 +122,37 @@ func (v *screenerView) handlePreviewKey(msg tea.KeyPressMsg) tea.Cmd {
 	return cmd
 }
 
-// previewHeader is who wrote, what about and when, above the body.
+// previewHeader is who wrote, what about and when, above the body. Each line is cut to
+// the width before it is styled, the date's room held back first: a line that wrapped
+// would make the header taller than layoutPreview counts, and push the preview off the
+// bottom of the screen.
 func (v *screenerView) previewHeader() string {
 	row := v.preview.row
 	width := max(v.vc.width, 20)
-	name := lipgloss.NewStyle().Foreground(colorBright).Bold(true).Render(row.name)
-	if row.name == "" {
-		name = lipgloss.NewStyle().Foreground(colorBright).Bold(true).Render(row.email)
-	} else if row.email != "" {
-		name += lipgloss.NewStyle().Foreground(colorBright).Render(" <" + row.email + ">")
+	date := ""
+	if row.trailing != "" {
+		date = "  " + row.trailing
 	}
+	room := max(width-2-displayWidth(date), 1)
+	name, address := row.name, ""
+	if name == "" {
+		name = row.email
+	} else if row.email != "" {
+		address = " <" + row.email + ">"
+	}
+	name = truncateStr(name, room)
+	address = truncateStr(address, room-displayWidth(name))
 	subject := row.subject
 	if subject == row.email {
 		subject = ""
 	}
+	subject = truncateStr(subject, width-2)
+
 	var b strings.Builder
-	b.WriteString(truncateStr("  "+name, width))
-	if row.trailing != "" {
-		b.WriteString(styleMuted.Render("  " + row.trailing))
-	}
-	b.WriteString("\n")
-	b.WriteString(truncateStr("  "+lipgloss.NewStyle().Foreground(colorLink).Bold(true).Render(subject), width) + "\n\n")
+	b.WriteString("  " + lipgloss.NewStyle().Foreground(colorBright).Bold(true).Render(name))
+	b.WriteString(lipgloss.NewStyle().Foreground(colorBright).Render(address))
+	b.WriteString(styleMuted.Render(date) + "\n")
+	b.WriteString("  " + lipgloss.NewStyle().Foreground(colorLink).Bold(true).Render(subject) + "\n\n")
 	return b.String()
 }
 
