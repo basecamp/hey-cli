@@ -146,6 +146,11 @@ screens them out, Tab moves to Screener History and back, `X` clears the whole S
 after a confirmation, and Escape or `q` returns to mail. Both lists keep going as you
 scroll, the same way the mail list does.
 
+Space opens a bigger preview of the selected sender's most recent email: the whole message,
+not just the first line the list has room for. Arrow keys and PgUp/PgDn scroll it, `y` and
+`n` answer for that sender straight from it, and Space or Escape closes it again. Opening a
+preview only reads the email; it doesn't screen the sender or tell them anything.
+
 ## Imbox cover art
 
 The Imbox can wear cover art, the way the HEY web app does: everything you have already
