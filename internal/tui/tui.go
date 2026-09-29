@@ -358,7 +358,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(watchThemeCmd(omarchyWatchDir(userHomeDir())), tea.RequestBackgroundColor)
 
 	case screenerClosedMsg:
-		return m.closeScreener()
+		return m.closeScreener(msg.toImbox)
 
 	case mailWatchStartedMsg:
 		if msg.attempt != m.mailWatchAttempt {
@@ -1086,13 +1086,17 @@ func (m model) openScreener() (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m model) closeScreener() (tea.Model, tea.Cmd) {
+func (m model) closeScreener(toImbox bool) (tea.Model, tea.Cmd) {
 	if m.activeView != m.screenerView {
 		return m, nil
 	}
 	m.activeView = m.mailView
 	m.activeView.Resize(m.vc.width, m.vc.height)
-	cmd := m.syncLoading(m.mailView.refreshScreenerCount())
+	cmd := m.mailView.refreshScreenerCount()
+	if toImbox {
+		cmd = tea.Batch(cmd, m.mailView.switchBox(boxForShortcut("1", m.mailView.boxes)))
+	}
+	cmd = m.syncLoading(cmd)
 	m.updateHelpBindings()
 	return m, cmd
 }

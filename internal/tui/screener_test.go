@@ -409,13 +409,15 @@ func TestScreenerClearsTheQueueAfterConfirmation(t *testing.T) {
 	if !ok || cleared.err != nil {
 		t.Fatalf("clearing returned %#v", cleared)
 	}
-	view.Update(cleared)
+	answer, _ := view.Update(cleared)
 
 	if len(view.pending.rows) != 0 || view.pendingCount != 0 {
 		t.Errorf("clearing should empty the queue: rows:%d count:%d", len(view.pending.rows), view.pendingCount)
 	}
-	if !strings.HasPrefix(view.notice, "The Screener is clearing.") {
-		t.Errorf("notice = %q", view.notice)
+	// An empty Screener goes back to the Imbox, so what clearing did is said as a toast
+	// over it rather than as a notice on a screen that is closing.
+	if closed, toast := screenerAnswer(answer); !closed.toImbox || !strings.HasPrefix(toast, "The Screener is clearing.") {
+		t.Errorf("clearing answered closed=%+v toast=%q, want the Imbox and the clearing toast", closed, toast)
 	}
 
 	requests := state.snapshot()
@@ -564,6 +566,102 @@ func TestScreenerKeepsDrawingAfterScreeningOffTheBottom(t *testing.T) {
 }
 
 // --- Leaving ---
+
+// screenerAnswer runs what the Screener answered with, collecting the close it asked for
+// and the toast it gave.
+func screenerAnswer(cmd tea.Cmd) (closed screenerClosedMsg, toast string) {
+	if cmd == nil {
+		return closed, ""
+	}
+	switch msg := cmd().(type) {
+	case screenerClosedMsg:
+		return msg, ""
+	case notifyMsg:
+		return closed, msg.text
+	case tea.BatchMsg:
+		for _, sub := range msg {
+			subClosed, subToast := screenerAnswer(sub)
+			if subClosed.toImbox {
+				closed = subClosed
+			}
+			if subToast != "" {
+				toast = subToast
+			}
+		}
+	}
+	return closed, toast
+}
+
+// Screening the last sender empties The Screener, and an empty one has nothing left to
+// show, so it goes back to the Imbox the way the web app does.
+func TestScreenerReturnsToTheImboxOnceEmpty(t *testing.T) {
+	view, _ := loadedScreener(t)
+
+	for index, key := range []string{"y", "n"} {
+		done, ok := runCmd(view.HandleContentKey(keyPress(key))).(screenerDecisionDoneMsg)
+		if !ok || done.err != nil {
+			t.Fatalf("%s returned %#v", key, done)
+		}
+		answer, _ := view.Update(done)
+		closed, toast := screenerAnswer(answer)
+		last := index == 1
+		if closed.toImbox != last {
+			t.Errorf("after %d of 2 senders, closed to the Imbox = %v", index+1, closed.toImbox)
+		}
+		if toast == "" {
+			t.Errorf("the decision on sender %d was not confirmed", index+1)
+		}
+	}
+}
+
+// A queue with more senders on a page not read yet is not empty, however few rows are
+// on screen, and neither is one with a decision still on its way.
+func TestScreenerStaysOpenWhileSendersRemain(t *testing.T) {
+	view, _ := loadedScreener(t)
+	view.pending.setRows(view.pending.rows[:1], "next-page-cursor")
+
+	answer, _ := view.Update(screenerDecisionDoneMsg{clearanceID: 91, name: "Jane Doe", status: hey.ClearanceApproved})
+	if closed, _ := screenerAnswer(answer); closed.toImbox {
+		t.Error("closed with senders still on the next page")
+	}
+
+	view, _ = loadedScreener(t)
+	view.mutations = 2
+	view.pending.setRows(view.pending.rows[:1], "")
+	view.pendingCount = 1
+	answer, _ = view.Update(screenerDecisionDoneMsg{clearanceID: 91, name: "Jane Doe", status: hey.ClearanceApproved})
+	if closed, _ := screenerAnswer(answer); closed.toImbox {
+		t.Error("closed while another decision was still on its way")
+	}
+}
+
+// The model puts the Imbox on screen, whichever box The Screener was opened over.
+func TestModelLeavesAnEmptyScreenerForTheImbox(t *testing.T) {
+	m := modelWithBoxes()
+	m.mailView.switchBox(1) // The Feed
+	updated, _ := m.Update(keyPress("ctrl+s"))
+	m = updated.(model)
+
+	updated, _ = m.Update(screenerClosedMsg{toImbox: true})
+	m = updated.(model)
+
+	if m.activeView != m.mailView {
+		t.Fatal("closing The Screener should put the mail list back")
+	}
+	if m.mailView.boxIndex != 0 {
+		t.Errorf("landed on box %d, want the Imbox", m.mailView.boxIndex)
+	}
+
+	// Escape still goes back to wherever The Screener was opened from.
+	m.mailView.switchBox(1)
+	updated, _ = m.Update(keyPress("ctrl+s"))
+	m = updated.(model)
+	updated, _ = m.Update(screenerClosedMsg{})
+	m = updated.(model)
+	if m.mailView.boxIndex != 1 {
+		t.Errorf("escape landed on box %d, want The Feed it was opened over", m.mailView.boxIndex)
+	}
+}
 
 func TestScreenerEscapeAsksToClose(t *testing.T) {
 	view, _ := loadedScreener(t)

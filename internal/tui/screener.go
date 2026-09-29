@@ -61,8 +61,10 @@ type screenerDecisionDoneMsg struct {
 
 type screenerClearedMsg struct{ err error }
 
-// screenerClosedMsg asks the app to put the mail view back on screen.
-type screenerClosedMsg struct{}
+// screenerClosedMsg asks the app to put the mail view back on screen. toImbox is set when
+// the reader emptied The Screener: with nobody left to decide on, it goes back to the
+// Imbox, the way the web app does, rather than to whichever box it was opened over.
+type screenerClosedMsg struct{ toImbox bool }
 
 // --- Screener panes ---
 
@@ -340,6 +342,9 @@ func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.pending.remove(msg.clearanceID)
 		v.pendingCount = max(v.pendingCount-1, 0)
 		v.history.loaded = false
+		if v.emptied() {
+			return tea.Batch(notify(msg.name+" "+screenedVerb(msg.status)), v.closeToImbox()), true
+		}
 		// A sender being dealt with can uncover the bottom of the queue, so the senders
 		// behind them come up rather than leaving an empty pane with a count over it.
 		return tea.Batch(notify(msg.name+" "+screenedVerb(msg.status)), v.loadMoreRows()), true
@@ -354,8 +359,7 @@ func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.pending.setRows(nil, "")
 		v.pendingCount = 0
-		v.notice = "The Screener is clearing. Everyone waiting will be asked about again on their next email."
-		return nil, true
+		return tea.Batch(notify("The Screener is clearing. Everyone waiting will be asked about again on their next email."), v.closeToImbox()), true
 	}
 	return nil, false
 }
@@ -623,6 +627,17 @@ func (v *screenerView) handleClearConfirmationKey(msg tea.KeyPressMsg) tea.Cmd {
 		v.confirmingClear = false
 	}
 	return nil
+}
+
+// emptied reports that the reader's last decision left nobody waiting: no row on screen,
+// none on a page not read yet, and no decision still on its way to HEY.
+func (v *screenerView) emptied() bool {
+	return len(v.pending.rows) == 0 && v.pendingCount == 0 && v.pending.paging.nextPage == "" && v.mutations == 0
+}
+
+// closeToImbox leaves an empty Screener for the Imbox.
+func (v *screenerView) closeToImbox() tea.Cmd {
+	return func() tea.Msg { return screenerClosedMsg{toImbox: true} }
 }
 
 func (v *screenerView) close() tea.Cmd {
