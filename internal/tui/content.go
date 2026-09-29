@@ -267,8 +267,11 @@ func (c *contentList) keepPlaceIn(postings []mail.Posting) {
 		cursorID = posting.ID
 	}
 
+	// A posting that left takes the cursor's row with it, not its place: the cursor
+	// stays on the same row, on whatever came up into it, rather than jumping to the top.
+	row := max(c.cursor, 0)
 	c.postings = postings
-	c.cursor = 0
+	c.cursor = min(row, max(len(c.postings)-1, 0))
 	for i := range c.postings {
 		if c.postings[i].ID == cursorID {
 			c.cursor = i
@@ -350,6 +353,7 @@ func partitionSections(postings []mail.Posting) []mail.Posting {
 // chase after the one just put away.
 func (c *contentList) markSeen(index int) {
 	var nextID int64
+	scrollOff := c.scrollOff
 	if index == c.cursor && !c.hideSeenState {
 		if index+1 < len(c.postings) {
 			nextID = c.postings[index+1].ID
@@ -363,6 +367,10 @@ func (c *contentList) markSeen(index int) {
 	if nextID == 0 {
 		return
 	}
+	// resort followed the marked posting down into Previously Seen and scrolled the
+	// window after it; the window goes back where it was, so the rows the reader was
+	// looking at stay put and only the marked one leaves them.
+	c.scrollOff = scrollOff
 	for i := range c.postings {
 		if c.postings[i].ID == nextID {
 			c.cursor = i

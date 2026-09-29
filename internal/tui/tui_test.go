@@ -1178,6 +1178,63 @@ func TestMarkingSeenLeavesTheCursorOnTheNextThread(t *testing.T) {
 	}
 }
 
+// A list long enough to scroll: marking the thread under the cursor seen sends it far
+// below, and the window used to follow it there and then snap back with the next thread
+// on the top row — every row on screen moved. The window stays where it was.
+func TestMarkingSeenKeepsTheWindowWhereItWas(t *testing.T) {
+	cl := &contentList{}
+	cl.setPostings(longImbox(20, 10))
+	cl.setSize(80, 32)
+	for range 3 {
+		cl.moveDown()
+	}
+	before := stripANSI(cl.view())
+
+	cl.markSeen(3)
+
+	if cl.scrollOff != 0 || cl.cursor != 3 {
+		t.Errorf("cursor=%d scrollOff=%d, want row 3 in an unscrolled window", cl.cursor, cl.scrollOff)
+	}
+	after := strings.Split(stripANSI(cl.view()), "\n")
+	if first := strings.Split(before, "\n")[0]; after[0] != first {
+		t.Errorf("the top of the list moved: %q, was %q", after[0], first)
+	}
+}
+
+// A live re-read that takes away the thread under the cursor — read or filed somewhere
+// else — leaves the cursor on its row, on the thread that came up into it, rather than
+// sending it back to the top of the list.
+func TestARefreshThatDropsTheCursorsThreadKeepsItsRow(t *testing.T) {
+	cl := &contentList{}
+	postings := longImbox(20, 0)
+	cl.setPostings(postings)
+	cl.setSize(80, 32)
+	for range 3 {
+		cl.moveDown()
+	}
+
+	head := append(append([]mail.Posting(nil), postings[:3]...), postings[4:15]...)
+	cl.refreshHead(head, postingIDs(postings[:15]))
+
+	if got := cl.selectedPosting(); cl.cursor != 3 || got == nil || got.ID != postings[4].ID {
+		t.Errorf("cursor=%d on %+v, want row 3 on %q", cl.cursor, got, postings[4].Name)
+	}
+}
+
+func longImbox(unseen, seen int) []mail.Posting {
+	subjects := []string{"Quarterly planning agenda", "Lunch on Friday?", "Invoice for September hosting", "Weekly release notes", "Offsite travel details"}
+	var postings []mail.Posting
+	for i := range unseen + seen {
+		postings = append(postings, mail.Posting{
+			ID:        int64(i + 1),
+			Name:      fmt.Sprintf("%s #%d", subjects[i%len(subjects)], i+1),
+			CreatedAt: time.Date(2026, 9, 29, 9, 0, 0, 0, time.UTC).Add(-time.Duration(i) * time.Hour),
+			Seen:      i >= unseen,
+		})
+	}
+	return postings
+}
+
 func TestContentListAlignsDateColumn(t *testing.T) {
 	long := mail.Posting{
 		ID:        300,
