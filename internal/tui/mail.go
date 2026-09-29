@@ -1799,14 +1799,31 @@ func (v *mailView) switchBox(index int) tea.Cmd {
 		return nil
 	}
 	if index == v.boxIndex {
-		// The box under the seen screen: its number or tab closes the screen the
-		// way esc does, landing on the list that is already there.
-		if v.seenActive {
-			v.clearSeen()
+		// The box already under a thread, a search, a bundle or the seen screen: its
+		// number closes whatever is open over it and lands on the list that is already
+		// there. Answering with nothing would let the key fall through to the thread,
+		// which swallows it, so 1 from a thread opened in the Imbox did nothing at all.
+		if !v.inThread && !v.searchActive && !v.bundleActive && !v.seenActive {
+			return nil
+		}
+		v.closeOverlays()
+		if v.requests.kind != mailRequestPostings {
 			v.requests.cancel()
 		}
-		return nil
+		v.notice = ""
+		return func() tea.Msg { return nil }
 	}
+	v.closeOverlays()
+	v.requests.cancel()
+	v.notice = ""
+	v.postingList.setPostings(nil)
+	v.boxIndex = index
+	return v.requestPostings(v.boxes[index])
+}
+
+// closeOverlays puts away everything a box's list can have open over it — a thread, a
+// search, a bundle, the Previously Seen screen — leaving the list itself.
+func (v *mailView) closeOverlays() {
 	v.inThread = false
 	v.threadNotice = ""
 	v.threadPosting = mail.Posting{}
@@ -1816,11 +1833,6 @@ func (v *mailView) switchBox(index int) tea.Cmd {
 	v.clearSearch()
 	v.clearBundle()
 	v.clearSeen()
-	v.requests.cancel()
-	v.notice = ""
-	v.postingList.setPostings(nil)
-	v.boxIndex = index
-	return v.requestPostings(v.boxes[index])
 }
 
 // openPreviouslySeen jumps to the Imbox's Previously Seen threads on their own screen,

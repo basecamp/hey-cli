@@ -1355,6 +1355,49 @@ func openLinkThreadThroughModel(t *testing.T) model {
 	return m
 }
 
+// A box's number works from inside a thread, including the box the thread was opened
+// from: 1 in a thread read from the Imbox lands on the Imbox's list rather than falling
+// through to the thread, which swallowed it.
+func TestBoxNumbersLeaveAThread(t *testing.T) {
+	for _, testCase := range []struct {
+		key     string
+		wantBox int
+	}{
+		{key: "1", wantBox: 0},
+		{key: "2", wantBox: 1},
+	} {
+		t.Run(testCase.key, func(t *testing.T) {
+			m := openLinkThreadThroughModel(t)
+
+			updated, _ := m.Update(keyPress(testCase.key))
+			m = updated.(model)
+
+			if m.mailView.InThread() {
+				t.Errorf("%s left the thread open", testCase.key)
+			}
+			if m.mailView.boxIndex != testCase.wantBox {
+				t.Errorf("%s landed on box %d, want %d", testCase.key, m.mailView.boxIndex, testCase.wantBox)
+			}
+			if testCase.key == "1" && !strings.Contains(stripANSI(m.View().Content), "Meeting notes") {
+				t.Errorf("the Imbox's list is not on screen:\n%s", stripANSI(m.View().Content))
+			}
+		})
+	}
+}
+
+func TestBoxNumberForTheCurrentBoxClosesASearch(t *testing.T) {
+	v := mailWithPostings()
+	v.searchActive = true
+	v.searchQuery = "invoice"
+
+	if cmd := v.handleBoxShortcut("1"); cmd == nil {
+		t.Fatal("1 over a search in the Imbox should be handled")
+	}
+	if v.searchActive || v.boxIndex != 0 {
+		t.Errorf("searchActive=%v box=%d, want the Imbox's list", v.searchActive, v.boxIndex)
+	}
+}
+
 func TestRootModelKeepsGlobalTabForALinklessThread(t *testing.T) {
 	m := modelWithBoxes()
 	m.mailView.inThread = true
