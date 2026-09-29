@@ -1223,7 +1223,7 @@ func TestARefreshThatDropsTheCursorsThreadKeepsItsRow(t *testing.T) {
 
 func longImbox(unseen, seen int) []mail.Posting {
 	subjects := []string{"Quarterly planning agenda", "Lunch on Friday?", "Invoice for September hosting", "Weekly release notes", "Offsite travel details"}
-	var postings []mail.Posting
+	postings := make([]mail.Posting, 0, unseen+seen)
 	for i := range unseen + seen {
 		postings = append(postings, mail.Posting{
 			ID:        int64(i + 1),
