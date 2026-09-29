@@ -247,6 +247,7 @@ type screenerView struct {
 	liveRequestID   uint64 // identifies the only live re-read allowed to update the queue
 	moreRequestID   uint64 // identifies the only page-below read allowed to grow a pane
 	mutations       int
+	decided         bool // the reader has screened someone since opening; only then does emptying close
 
 	preview          *screenerPreview // space's full look at a sender's email, nil when closed
 	previewRequestID uint64           // identifies the only preview read allowed to fill it
@@ -260,6 +261,7 @@ func (v *screenerView) Init() tea.Cmd {
 	v.notice = ""
 	v.confirmingClear = false
 	v.closePreview()
+	v.decided = false
 	v.tab = screenerPendingTab
 	return v.requestPending()
 }
@@ -329,6 +331,11 @@ func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			v.pendingCount = msg.count
 		}
 		pane.growRows(msg.rows, msg.nextPage)
+		// The last sender on screen was screened while the page below was on its way, and
+		// that page says nobody is left: the reader's decision emptied the queue after all.
+		if msg.tab == screenerPendingTab && v.decided && v.emptied() {
+			return v.closeToImbox(), true
+		}
 		return v.loadMoreRows(), true
 
 	case screenerDecisionDoneMsg:
@@ -342,6 +349,7 @@ func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.pending.remove(msg.clearanceID)
 		v.pendingCount = max(v.pendingCount-1, 0)
 		v.history.loaded = false
+		v.decided = true
 		if v.emptied() {
 			return tea.Batch(notify(msg.name+" "+screenedVerb(msg.status)), v.closeToImbox()), true
 		}

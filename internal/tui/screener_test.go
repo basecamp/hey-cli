@@ -635,6 +635,34 @@ func TestScreenerStaysOpenWhileSendersRemain(t *testing.T) {
 	}
 }
 
+// The last sender on screen screened while the page below is still on its way: the queue
+// is only known to be empty when that page comes back empty, and that is when it closes.
+// An empty page on a Screener nobody has decided anything in leaves it open.
+func TestScreenerClosesWhenThePageBelowShowsItEmptied(t *testing.T) {
+	view, _ := loadedScreener(t)
+	view.pending.setRows(view.pending.rows[:1], "next-page-cursor")
+	view.pendingCount = 3
+
+	answer, _ := view.Update(screenerDecisionDoneMsg{clearanceID: 91, name: "Jane Doe", status: hey.ClearanceApproved})
+	if closed, _ := screenerAnswer(answer); closed.toImbox {
+		t.Fatal("closed before the page below said whether anyone was left")
+	}
+	view.pending.paging.loading = true
+	answer, _ = view.Update(screenerRowsAppendedMsg{requestID: view.moreRequestID, tab: screenerPendingTab, count: 0})
+	if closed, _ := screenerAnswer(answer); !closed.toImbox {
+		t.Error("an empty page after the last decision should close The Screener")
+	}
+
+	untouched, _ := loadedScreener(t)
+	untouched.pending.setRows(nil, "next-page-cursor")
+	untouched.pendingCount = 0
+	untouched.pending.paging.loading = true
+	answer, _ = untouched.Update(screenerRowsAppendedMsg{requestID: untouched.moreRequestID, tab: screenerPendingTab, count: 0})
+	if closed, _ := screenerAnswer(answer); closed.toImbox {
+		t.Error("an empty page with no decision behind it closed The Screener")
+	}
+}
+
 // The model puts the Imbox on screen, whichever box The Screener was opened over — found
 // by its kind, so a renamed Imbox is still where it goes. Escape still goes back to the
 // box The Screener was opened over.
