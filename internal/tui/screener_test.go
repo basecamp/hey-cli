@@ -694,6 +694,22 @@ func TestScreenerClearWaitsForADecisionInFlight(t *testing.T) {
 	}
 }
 
+// A clear that fails after a decision emptied the queue anyway still closes it, and says
+// the clear failed over the Imbox rather than on a screen that is gone.
+func TestScreenerSaysAFailedClearWhenClosing(t *testing.T) {
+	view, _ := loadedScreener(t)
+	view.pending.setRows(view.pending.rows[:1], "")
+	view.pendingCount = 1
+	view.mutations = 2 // the decision, and the clear
+
+	view.Update(screenerDecisionDoneMsg{clearanceID: 91, name: "Jane Doe", status: hey.ClearanceApproved})
+	answer, _ := view.Update(screenerClearedMsg{err: errors.New("server unavailable")})
+
+	if closed, toast := screenerAnswer(answer); !closed.toImbox || !strings.HasPrefix(toast, "Could not clear The Screener") {
+		t.Errorf("answered closed=%+v toast=%q, want the Imbox and the failure", closed, toast)
+	}
+}
+
 // A live re-read can be the first to say the queue is empty — the page below having come
 // back with a count from before the last decision — and it closes The Screener too.
 func TestScreenerClosesWhenALiveRereadShowsItEmptied(t *testing.T) {

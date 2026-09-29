@@ -280,10 +280,16 @@ func (v *screenerView) Restyle() {
 // racing a clear, a page below, or a live re-read that is the first to say the queue is empty.
 func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 	cmd, handled := v.update(msg)
-	if handled && v.decided && v.emptied() {
-		return tea.Batch(cmd, v.closeToImbox()), true
+	if !handled || !v.decided || !v.emptied() {
+		return cmd, handled
 	}
-	return cmd, handled
+	// Whatever The Screener had to say — a decision or a clear that failed while the
+	// other emptied the queue — would close with it, so it goes over the Imbox instead.
+	if v.notice != "" {
+		cmd = tea.Batch(cmd, notify(v.notice))
+		v.notice = ""
+	}
+	return tea.Batch(cmd, v.closeToImbox()), true
 }
 
 func (v *screenerView) update(msg tea.Msg) (tea.Cmd, bool) {
@@ -351,13 +357,7 @@ func (v *screenerView) update(msg tea.Msg) (tea.Cmd, bool) {
 			v.mutations--
 		}
 		if msg.err != nil {
-			failure := errorNotice("Could not screen "+msg.name, msg.err)
-			// A clear that landed while this was on its way has emptied the queue, and The
-			// Screener is about to close, so the failure goes over the Imbox instead.
-			if v.decided && v.emptied() {
-				return notify(failure), true
-			}
-			v.notice = failure
+			v.notice = errorNotice("Could not screen "+msg.name, msg.err)
 			return nil, true
 		}
 		v.pending.remove(msg.clearanceID)
