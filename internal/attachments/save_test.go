@@ -210,3 +210,35 @@ func assertNoTemporaryFiles(t *testing.T, directory string) {
 		}
 	}
 }
+
+func TestSaveMarksDownloadBeforeItReachesDestination(t *testing.T) {
+	destination := filepath.Join(t.TempDir(), "agenda.pdf")
+	var marked string
+	mark := func(path string) error {
+		if _, err := os.Lstat(destination); !os.IsNotExist(err) {
+			t.Errorf("destination existed before the download was marked: %v", err)
+		}
+		marked = path
+		return nil
+	}
+	if _, err := save(context.Background(), writeDownload("agenda"), destination, "/rails/active_storage/blobs/agenda", false, mark); err != nil {
+		t.Fatal(err)
+	}
+	if marked == "" || filepath.Dir(marked) != filepath.Dir(destination) {
+		t.Errorf("marked path = %q", marked)
+	}
+}
+
+func TestSaveKeepsNothingWhenDownloadCannotBeMarked(t *testing.T) {
+	directory := t.TempDir()
+	destination := filepath.Join(directory, "agenda.pdf")
+	mark := func(string) error { return errors.New("no extended attributes") }
+	_, err := save(context.Background(), writeDownload("agenda"), destination, "/rails/active_storage/blobs/agenda", false, mark)
+	if err == nil || !strings.Contains(err.Error(), "could not mark file as downloaded") {
+		t.Fatalf("save error = %v", err)
+	}
+	entries, readErr := os.ReadDir(directory)
+	if readErr != nil || len(entries) != 0 {
+		t.Errorf("directory after failed mark = %v, %v", entries, readErr)
+	}
+}

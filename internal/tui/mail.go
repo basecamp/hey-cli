@@ -2252,6 +2252,12 @@ func (v *mailView) openSelectedAttachment() tea.Cmd {
 		return nil
 	}
 	topicID := v.topicID
+	if !attachmentfiles.OpensInViewer(attachment.Filename) {
+		err := apierr.ErrUsageHint("it could run a program", "press s to save it")
+		return func() tea.Msg {
+			return attachmentOpenedMsg{topicID: topicID, attachmentID: attachment.ID, filename: attachment.Filename, err: err}
+		}
+	}
 	return func() tea.Msg {
 		directory, err := v.vc.newAttachmentTempDir()
 		if err != nil {

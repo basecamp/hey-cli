@@ -81,7 +81,7 @@ func PortableFilename(filename string) (string, error) {
 
 // SaveBytes safely writes data to destination. Existing paths are preserved unless force is set.
 func SaveBytes(destination string, data []byte, force bool) (int64, error) {
-	return save(context.Background(), byteDownloader(data), destination, "", force)
+	return save(context.Background(), byteDownloader(data), destination, "", force, nil)
 }
 
 type byteDownloader []byte
@@ -95,10 +95,12 @@ func Save(ctx context.Context, downloader Downloader, destination, sourceURL str
 	if !IsHEYBlobURL(sourceURL) {
 		return 0, apierr.ErrAPI(0, "attachment URL does not identify a HEY blob")
 	}
-	return save(ctx, downloader, destination, sourceURL, force)
+	return save(ctx, downloader, destination, sourceURL, force, markDownloaded)
 }
 
-func save(ctx context.Context, downloader Downloader, destination, sourceURL string, force bool) (int64, error) {
+// save writes the download beside destination and moves it into place. mark,
+// when given, runs on the finished file before anything can see it there.
+func save(ctx context.Context, downloader Downloader, destination, sourceURL string, force bool, mark func(string) error) (int64, error) {
 	if !force {
 		if _, err := os.Lstat(destination); err == nil {
 			return 0, apierr.ErrUsage(fmt.Sprintf("destination already exists: %s (use --force to replace it)", destination))
@@ -122,6 +124,11 @@ func save(ctx context.Context, downloader Downloader, destination, sourceURL str
 	}
 	if err := temporary.Close(); err != nil {
 		return written, apierr.ErrAPI(0, fmt.Sprintf("could not close temporary file: %v", err))
+	}
+	if mark != nil {
+		if err := mark(temporaryPath); err != nil {
+			return written, apierr.ErrAPI(0, fmt.Sprintf("could not mark file as downloaded: %v", err))
+		}
 	}
 
 	if force {

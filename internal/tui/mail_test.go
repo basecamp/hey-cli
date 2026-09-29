@@ -3062,6 +3062,61 @@ func TestMailViewDownloadsBeforeExplicitExternalOpen(t *testing.T) {
 	}
 }
 
+func TestMailViewOnlySavesAttachmentsThatCouldRunAProgram(t *testing.T) {
+	for _, filename := range []string{
+		"Invoice.terminal",
+		"setup.command",
+		"report.pdf.command",
+		"Shortcut.webloc",
+		"launcher.desktop",
+		"install.sh",
+		"invoice.bat",
+		"invoice.lnk",
+		"invoice.hta",
+		"Invoice.TERMINAL",
+		"Invoice.terminal. ",
+		"README",
+	} {
+		t.Run(filename, func(t *testing.T) {
+			v := mailWithPostings()
+			var events []string
+			v.vc.newAttachmentTempDir = func() (string, error) {
+				events = append(events, "download")
+				return t.TempDir(), nil
+			}
+			v.vc.saveAttachment = func(context.Context, string, string, bool) (int64, error) {
+				events = append(events, "save")
+				return 128, nil
+			}
+			v.vc.openAttachment = func(string) error {
+				events = append(events, "open")
+				return nil
+			}
+			v.Update(topicLoadedMsg{
+				boxID:       1,
+				topicID:     100,
+				title:       "Quarterly planning",
+				entries:     []mail.Entry{{ID: 501, Creator: mail.Contact{Name: "Alice"}}},
+				attachments: []messageAttachment{{ID: "501:1", MessageID: 501, Filename: filename, URL: "/rails/blobs/payload"}},
+			})
+
+			open := v.HandleContentKey(keyPress("enter"))
+			if open == nil {
+				t.Fatal("Enter should still answer for the selected attachment")
+			}
+			if _, consumed := v.Update(open()); !consumed {
+				t.Fatal("attachment open result was not consumed")
+			}
+			if len(events) != 0 {
+				t.Errorf("Enter on %q = %v, want nothing downloaded or opened", filename, events)
+			}
+			if !strings.Contains(v.notice, "Could not open attachment") || !strings.Contains(v.notice, "press s to save it") {
+				t.Errorf("refusal notice = %q", v.notice)
+			}
+		})
+	}
+}
+
 func TestMailViewDoesNotOpenAttachmentWhenDownloadFails(t *testing.T) {
 	v := mailWithPostings()
 	v.vc.newAttachmentTempDir = func() (string, error) { return t.TempDir(), nil }
