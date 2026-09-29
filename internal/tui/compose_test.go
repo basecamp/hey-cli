@@ -496,13 +496,16 @@ func TestForwardFormLoadsLatestEntryAndSends(t *testing.T) {
 
 // Sending from inside a thread used to leave its confirmation in the posting list's
 // header, which a thread covers — so it was said to nobody. A toast belongs to the
-// model and is drawn over whatever the section is showing.
-func TestForwardCompletionIsSaidFromInsideAThread(t *testing.T) {
+// model and is drawn over whatever the section is showing. The send also finishes with
+// the thread, so the reader is back on the list they opened it from.
+func TestForwardFromAThreadReturnsToTheList(t *testing.T) {
 	v := mailWithPostings()
 	v.Resize(80, 30)
 	v.inThread = true
+	v.topicID = 123
 	v.topicViewport.SetContent("Original thread")
 	v.modal = newForwardForm(forwardContextLoadedMsg{
+		topicID:   123,
 		topicName: "Quarterly planning",
 		subject:   "Fwd: Quarterly planning",
 		content:   "<div>Quoted message</div>",
@@ -516,8 +519,49 @@ func TestForwardCompletionIsSaidFromInsideAThread(t *testing.T) {
 	if toast := deliverToView(v, answer); toast != "Message forwarded" {
 		t.Errorf("toast = %q", toast)
 	}
-	if view := v.View(); !strings.Contains(view, "Original thread") {
-		t.Errorf("the thread should still be on screen, got %q", view)
+	if v.inThread {
+		t.Error("the thread should close once the forward is sent")
+	}
+	if view := v.View(); strings.Contains(view, "Original thread") {
+		t.Errorf("the list should be back on screen, got %q", view)
+	}
+}
+
+func TestReplyFromAThreadReturnsToTheList(t *testing.T) {
+	v := mailWithPostings()
+	v.Resize(80, 30)
+	v.inThread = true
+	v.topicID = 7
+	v.modal = newReplyForm(replyContextLoadedMsg{
+		boxID: 1, topicID: 7, topicName: "Kitchen renovation", entryID: 99, subject: "Re: Kitchen renovation",
+		to: []string{"jane.cooper@example.com"},
+	}, v.vc.styles)
+
+	v.Update(composeSentMsg{label: "Reply sent"})
+
+	if v.inThread {
+		t.Error("the thread should close once the reply is sent")
+	}
+	if composeModal(v) != nil {
+		t.Error("reply form should close after sending")
+	}
+}
+
+// A failed send keeps the reader in the thread with the form open, so nothing is lost.
+func TestFailedReplyStaysInTheThread(t *testing.T) {
+	v := mailWithPostings()
+	v.Resize(80, 30)
+	v.inThread = true
+	v.topicID = 7
+	v.modal = newReplyForm(replyContextLoadedMsg{
+		boxID: 1, topicID: 7, topicName: "Kitchen renovation", entryID: 99, subject: "Re: Kitchen renovation",
+		to: []string{"jane.cooper@example.com"},
+	}, v.vc.styles)
+
+	v.Update(composeSentMsg{label: "Reply sent", err: io.ErrUnexpectedEOF})
+
+	if !v.inThread || composeModal(v) == nil {
+		t.Errorf("a failed send should keep the thread and the form: inThread=%v form=%v", v.inThread, composeModal(v))
 	}
 }
 

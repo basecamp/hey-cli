@@ -715,6 +715,12 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		v.modal = nil
+		// A reply or a forward finishes with the thread it was written from, the way
+		// the web app sends you back to the box: the reader lands on the list they
+		// opened the thread from — the Imbox, a search, a bundle — ready for the next.
+		if v.inThread && form.topicID != 0 && form.topicID == v.topicID {
+			v.ExitThread()
+		}
 		return notify(msg.label), true
 
 	case attachmentSavedMsg:

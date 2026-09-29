@@ -82,6 +82,7 @@ const (
 type composeForm struct {
 	mode                composeMode
 	topicName           string
+	topicID             int64  // the thread a reply or forward was written from; 0 for a new message
 	entryID             int64  // reply target (composeReply only)
 	replySubject        string // the "Re: …" subject a reply goes out under (composeReply only)
 	replyActingSenderID int64  // the sender a reply goes out as; 0 = account default (composeReply only)
@@ -140,6 +141,7 @@ func placeholderFor(label string) string {
 func newReplyForm(ctxMsg replyContextLoadedMsg, s styles) *composeForm {
 	f := newComposeForm(composeReply, s)
 	f.topicName = ctxMsg.topicName
+	f.topicID = ctxMsg.topicID
 	f.entryID = ctxMsg.entryID
 	f.replySubject = ctxMsg.subject
 	f.replyActingSenderID = ctxMsg.actingSenderID
@@ -154,6 +156,7 @@ func newReplyForm(ctxMsg replyContextLoadedMsg, s styles) *composeForm {
 func newForwardForm(ctxMsg forwardContextLoadedMsg, s styles) *composeForm {
 	f := newComposeForm(composeForward, s)
 	f.topicName = ctxMsg.topicName
+	f.topicID = ctxMsg.topicID
 	f.sendSDK = ctxMsg.sdk
 	f.forwardedContent = ctxMsg.content
 	f.inputs[fieldSubject].SetValue(ctxMsg.subject)
