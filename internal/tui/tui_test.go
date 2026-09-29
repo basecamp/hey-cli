@@ -103,6 +103,10 @@ func keyPress(key string) tea.KeyPressMsg {
 		k = tea.Key{Code: tea.KeyUp}
 	case "down":
 		k = tea.Key{Code: tea.KeyDown}
+	case "pgup":
+		k = tea.Key{Code: tea.KeyPgUp}
+	case "pgdown":
+		k = tea.Key{Code: tea.KeyPgDown}
 	case " ", "space":
 		k = tea.Key{Code: tea.KeySpace, Text: " "}
 	}
@@ -1226,6 +1230,119 @@ func TestARefreshThatDropsTheCursorsThreadKeepsItsRow(t *testing.T) {
 
 	if got := cl.selectedPosting(); cl.cursor != 3 || got == nil || got.ID != postings[4].ID {
 		t.Errorf("cursor=%d on %+v, want row 3 on %q", cl.cursor, got, postings[4].Name)
+	}
+}
+
+// PgDn scrolls the list on by the window it shows, so what was just below the bottom
+// comes up to the top, and the cursor keeps its row on screen; PgUp takes it back.
+func TestContentListPagesByTheWindow(t *testing.T) {
+	cl := &contentList{}
+	cl.setPostings(longImbox(40, 0))
+	cl.setSize(80, 20)
+	cl.moveDown()
+	window := cl.visibleItemsFrom(0)
+	bottom := stripANSI(cl.view())
+	lastShown := cl.postings[window-1].Name
+	if !strings.Contains(bottom, lastShown) {
+		t.Fatalf("the window should end on %q", lastShown)
+	}
+
+	cl.pageDown()
+
+	if cl.scrollOff != window {
+		t.Errorf("scrollOff = %d, want the next window at %d", cl.scrollOff, window)
+	}
+	if cl.cursor != window+1 {
+		t.Errorf("cursor = %d, want it on the same row of the next window (%d)", cl.cursor, window+1)
+	}
+	if strings.Contains(stripANSI(cl.view()), lastShown+"\n") {
+		t.Errorf("the old window is still on screen")
+	}
+
+	cl.pageUp()
+
+	if cl.scrollOff != 0 || cl.cursor != 1 {
+		t.Errorf("PgUp landed on cursor=%d scrollOff=%d, want back at 1 and 0", cl.cursor, cl.scrollOff)
+	}
+}
+
+// At either end there is no window to scroll to, so the keys take the cursor to the
+// first or last thread, and a page down never scrolls the last thread off the bottom.
+func TestContentListPagingStopsAtTheEnds(t *testing.T) {
+	cl := &contentList{}
+	cl.setPostings(longImbox(40, 0))
+	cl.setSize(80, 20)
+
+	for range 10 {
+		cl.pageDown()
+	}
+	if cl.cursor != 39 {
+		t.Errorf("cursor = %d, want the last thread", cl.cursor)
+	}
+	if cl.scrollOff != cl.lastWindowStart() {
+		t.Errorf("scrollOff = %d, want the last full window at %d", cl.scrollOff, cl.lastWindowStart())
+	}
+	if !strings.Contains(stripANSI(cl.view()), cl.postings[39].Name) {
+		t.Error("the last thread is not on screen")
+	}
+
+	for range 10 {
+		cl.pageUp()
+	}
+	if cl.cursor != 0 || cl.scrollOff != 0 {
+		t.Errorf("cursor=%d scrollOff=%d, want the top of the list", cl.cursor, cl.scrollOff)
+	}
+
+	short := &contentList{}
+	short.setPostings(longImbox(3, 0))
+	short.setSize(80, 20)
+	short.pageDown()
+	if short.cursor != 2 || short.scrollOff != 0 {
+		t.Errorf("a list that fits: cursor=%d scrollOff=%d, want the last thread without scrolling", short.cursor, short.scrollOff)
+	}
+}
+
+func TestPageByMovesFixedHeightLists(t *testing.T) {
+	for _, testCase := range []struct {
+		name                      string
+		cursor, scroll, direction int
+		wantCursor, wantScroll    int
+	}{
+		{name: "down a page", cursor: 2, scroll: 0, direction: 1, wantCursor: 12, wantScroll: 10},
+		{name: "down into the last window", cursor: 32, scroll: 30, direction: 1, wantCursor: 37, wantScroll: 35},
+		{name: "down on the last window", cursor: 37, scroll: 35, direction: 1, wantCursor: 44, wantScroll: 35},
+		{name: "up a page", cursor: 22, scroll: 20, direction: -1, wantCursor: 12, wantScroll: 10},
+		{name: "up into the first window", cursor: 7, scroll: 5, direction: -1, wantCursor: 2, wantScroll: 0},
+		{name: "up on the first window", cursor: 4, scroll: 0, direction: -1, wantCursor: 0, wantScroll: 0},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			cursor, scroll := pageBy(testCase.cursor, testCase.scroll, 10, 45, testCase.direction)
+			if cursor != testCase.wantCursor || scroll != testCase.wantScroll {
+				t.Errorf("pageBy = cursor %d scroll %d, want %d and %d", cursor, scroll, testCase.wantCursor, testCase.wantScroll)
+			}
+		})
+	}
+	if cursor, scroll := pageBy(0, 0, 10, 0, 1); cursor != 0 || scroll != 0 {
+		t.Errorf("an empty list moved to %d/%d", cursor, scroll)
+	}
+}
+
+// The keys reach every list through the mail view, not just the list type.
+func TestMailListTakesPageKeys(t *testing.T) {
+	v := newMailView(testVC())
+	v.vc.width = 80
+	v.vc.height = 24
+	v.boxes = testBoxes()
+	v.postingList.setPostings(longImbox(40, 0))
+	v.postingList.setSize(80, 20)
+
+	v.HandleContentKey(keyPress("pgdown"))
+	if v.postingList.scrollOff == 0 || v.postingList.cursor == 0 {
+		t.Errorf("PgDn left the list at cursor=%d scrollOff=%d", v.postingList.cursor, v.postingList.scrollOff)
+	}
+	v.HandleContentKey(keyPress("pgup"))
+	if v.postingList.scrollOff != 0 || v.postingList.cursor != 0 {
+		t.Errorf("PgUp left the list at cursor=%d scrollOff=%d", v.postingList.cursor, v.postingList.scrollOff)
 	}
 }
 

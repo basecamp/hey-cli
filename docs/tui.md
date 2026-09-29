@@ -32,6 +32,8 @@ the boxes on `9`, the web app's shortcut, showing the Imbox's already-read threa
 newest-seen first with the usual thread actions available; Escape returns to the box you
 were in. Every list keeps going: scroll towards the bottom of a box, label, collection or
 search and the next threads are read in behind you, so there are no pages to step through.
+PgUp and PgDn move a screen at a time through any list — a box, a search, a bundle, The
+Screener or your contacts — keeping the cursor on the same row of the screen.
 
 The thread actions use HEY's web shortcuts, in either letter case except `l`, whose
 uppercase belongs to Labels:

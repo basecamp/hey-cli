@@ -1402,6 +1402,11 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		case tea.KeyDown:
 			v.searchList.moveDown()
 			return v.loadMoreSearchResults()
+		case tea.KeyPgUp:
+			v.searchList.pageUp()
+		case tea.KeyPgDown:
+			v.searchList.pageDown()
+			return v.loadMoreSearchResults()
 		case tea.KeyEnter:
 			return v.openSelected()
 		default:
@@ -1425,6 +1430,11 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		case tea.KeyDown:
 			v.bundleList.moveDown()
 			return v.loadMoreBundlePostings()
+		case tea.KeyPgUp:
+			v.bundleList.pageUp()
+		case tea.KeyPgDown:
+			v.bundleList.pageDown()
+			return v.loadMoreBundlePostings()
 		case tea.KeyEnter:
 			return v.openSelected()
 		default:
@@ -1445,6 +1455,11 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 			v.seenList.moveUp()
 		case tea.KeyDown:
 			v.seenList.moveDown()
+			return v.loadMoreSeenPostings()
+		case tea.KeyPgUp:
+			v.seenList.pageUp()
+		case tea.KeyPgDown:
+			v.seenList.pageDown()
 			return v.loadMoreSeenPostings()
 		case tea.KeyEnter:
 			return v.openSelected()
@@ -1489,6 +1504,12 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		v.postingList.moveUp()
 	case tea.KeyDown:
 		v.postingList.moveDown()
+		return v.loadMorePostings()
+	case tea.KeyPgUp:
+		v.postingList.pageUp()
+		return nil
+	case tea.KeyPgDown:
+		v.postingList.pageDown()
 		return v.loadMorePostings()
 	case tea.KeyEnter:
 		return v.openSelected()

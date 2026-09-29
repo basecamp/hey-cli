@@ -455,6 +455,79 @@ func (c *contentList) moveDown() {
 	}
 }
 
+// pageDown scrolls the list on by the window it shows, the way a pager does: what was
+// just past the bottom comes up to the top, and the cursor keeps its row on screen. On
+// the last window already there is nowhere to scroll, so the cursor goes to the end.
+func (c *contentList) pageDown() {
+	c.selectionLost = false
+	count := c.itemCount()
+	if count == 0 {
+		return
+	}
+	row := c.cursor - c.scrollOff
+	scrollOff := min(c.scrollOff+c.visibleItemsFrom(c.scrollOff), c.lastWindowStart())
+	if scrollOff <= c.scrollOff {
+		c.cursor = count - 1
+	} else {
+		c.scrollOff = scrollOff
+		c.cursor = min(scrollOff+row, count-1)
+	}
+	c.ensureVisible()
+}
+
+// pageUp scrolls the list back by a window, keeping the cursor's row on screen. At the
+// top already, the cursor goes to the first thread.
+func (c *contentList) pageUp() {
+	c.selectionLost = false
+	if c.itemCount() == 0 {
+		return
+	}
+	if c.scrollOff == 0 {
+		c.cursor = 0
+		return
+	}
+	row := c.cursor - c.scrollOff
+	// The window above is the one that ends where this one starts.
+	start := c.scrollOff
+	for start > 0 && start-1+c.visibleItemsFrom(start-1) >= c.scrollOff {
+		start--
+	}
+	c.scrollOff = start
+	c.cursor = min(start+row, c.itemCount()-1)
+	c.ensureVisible()
+}
+
+// lastWindowStart is the first posting of the window that ends the list, so a page
+// down never scrolls the last thread up past the bottom of the screen.
+func (c *contentList) lastWindowStart() int {
+	count := c.itemCount()
+	start := max(count-1, 0)
+	for start > 0 && start-1+c.visibleItemsFrom(start-1) >= count {
+		start--
+	}
+	return start
+}
+
+// pageBy moves a cursor and its window a page at a time through a list whose rows are
+// all one height, the way contentList.pageDown and pageUp do through postings: the
+// window moves by what it shows and the cursor keeps its row on screen, or goes to the
+// end when the window cannot move any further.
+func pageBy(cursor, scroll, visible, count, direction int) (int, int) {
+	if count == 0 {
+		return cursor, scroll
+	}
+	visible = max(visible, 1)
+	row := cursor - scroll
+	moved := min(max(scroll+direction*visible, 0), max(count-visible, 0))
+	if moved == scroll {
+		if direction > 0 {
+			return count - 1, scroll
+		}
+		return 0, scroll
+	}
+	return min(max(moved+row, 0), count-1), moved
+}
+
 // listHeight is the rows the postings get. A cover holds back its divider and
 // the art's floor at the bottom of the list, so the cover is always on screen
 // rather than something you could scroll past.
