@@ -1176,6 +1176,14 @@ func TestMarkingSeenLeavesTheCursorOnTheNextThread(t *testing.T) {
 	if got := cl.selectedPosting(); got == nil || got.ID != 2 {
 		t.Errorf("cursor should move past the last new thread: %+v", got)
 	}
+
+	// e on a thread already in Previously Seen moves nothing, the cursor included — at
+	// the end of the list it used to step back to the thread above.
+	cl.cursor = len(cl.postings) - 1
+	cl.markSeen(cl.cursor)
+	if cl.cursor != len(cl.postings)-1 {
+		t.Errorf("marking a seen thread seen moved the cursor to %d", cl.cursor)
+	}
 }
 
 // A list long enough to scroll: marking the thread under the cursor seen sends it far

@@ -354,7 +354,9 @@ func partitionSections(postings []mail.Posting) []mail.Posting {
 func (c *contentList) markSeen(index int) {
 	var nextID int64
 	scrollOff := c.scrollOff
-	if index == c.cursor && !c.hideSeenState {
+	// Only a posting that leaves its section goes down on its own; e on one already in
+	// Previously Seen moves nothing, so it moves the cursor nowhere either.
+	if index == c.cursor && !c.hideSeenState && sectionOf(c.postings[index]) != sectionPreviouslySeen {
 		if index+1 < len(c.postings) {
 			nextID = c.postings[index+1].ID
 		} else if index > 0 {
