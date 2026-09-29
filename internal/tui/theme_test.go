@@ -15,11 +15,18 @@ import (
 // the rendering tests assert exact ANSI output, so a developer's active theme
 // must never leak into them. Tests that want an Omarchy theme build one with
 // omarchyHome and point HOME at it themselves.
+//
+// The XDG directories go too, so the config, state and cache follow that HOME. A
+// developer's shell usually sets them, and they win over HOME: the Imbox cover picked
+// in their own TUI then hid Previously Seen from every test that selects a seen thread.
 func TestMain(m *testing.M) {
 	home, err := os.MkdirTemp("", "hey-tui-test-home-")
 	if err == nil {
 		os.Setenv("HOME", home)
 	}
+	os.Unsetenv("XDG_CONFIG_HOME")
+	os.Unsetenv("XDG_STATE_HOME")
+	os.Unsetenv("XDG_CACHE_HOME")
 	os.Unsetenv("HEY_THEME")
 	os.Unsetenv("NO_COLOR")
 	code := m.Run()
