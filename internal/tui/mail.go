@@ -3686,13 +3686,22 @@ func (v *mailView) renderEntriesWithLinks(entries []mail.Entry) (string, []int, 
 			}
 		}
 
+		// A note or a share notice was never emailed, so it is headed by what it is
+		// rather than by a From line that reads as mail that went out.
+		heading := v.vc.styles.entryFrom.Render(terminal.SanitizeLine(from))
+		date := v.vc.styles.entryDate.Render(formatDisplayDateTime(e.CreatedAt))
+		if label, tag, internal := mail.InternalEntryLabel(e.Kind, terminal.SanitizeLine(from)); internal {
+			heading = v.vc.styles.entryFrom.Render(label)
+			date += v.vc.styles.entryDate.Render("  · " + tag)
+		}
+
 		// Each arm below opens with a blank line, which is what separates the header
 		// from whatever follows it. The summary is HEY's ~105-character preview of the
 		// body, so it stands in only where HEY served no body at all — the same ladder
 		// as printThreadStyled in internal/cmd/topic.go. Printed beside a body it repeats
 		// the message's opening line; printed for a body that was read and rendered to
 		// nothing, or for one that was not read, it passes a preview off as the message.
-		write(fmt.Sprintf("%s  %s\n", v.vc.styles.entryFrom.Render(terminal.SanitizeLine(from)), v.vc.styles.entryDate.Render(formatDisplayDateTime(e.CreatedAt))))
+		write(fmt.Sprintf("%s  %s\n", heading, date))
 		switch {
 		case !e.Body.IsEmpty():
 			linked := markdown.RenderLinked(e.Body, sepWidth, -1)

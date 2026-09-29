@@ -29,7 +29,7 @@ func newForwardCommand() *forwardCommand {
 A --to, --cc or --bcc address HEY would drop without saying so — one with no domain,
 or a top-level domain HEY does not know — is refused before anything is sent.`,
 		Annotations: map[string]string{
-			"agent_notes": "Forwards the latest entry in a thread with HEY's quoted content. Accepts comma-separated recipients and an optional note via -m.",
+			"agent_notes": "Forwards the latest emailed message in a thread with HEY's quoted content — never an internal note or share notice posted after it. Accepts comma-separated recipients and an optional note via -m.",
 		},
 		Example: `  hey forward 12345 --to alice@example.com
   hey forward 12345 --to alice@example.com --cc bob@example.org -m "For your review"`,
@@ -76,7 +76,11 @@ func (c *forwardCommand) run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	entryID := topic.Entries[len(topic.Entries)-1].Id
+	entry, err := threadReplyEntry(ctx, forwardSDK, topic)
+	if err != nil {
+		return err
+	}
+	entryID := entry.Id
 
 	draft, err := forwardSDK.Entries().NewForward(ctx, entryID)
 	if err != nil {

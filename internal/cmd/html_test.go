@@ -66,11 +66,11 @@ func TestThreadsHTMLWritesEachEntryToAPipe(t *testing.T) {
 		t.Fatalf("unexpected error: %v (stderr %q)", err, stderr)
 	}
 	want := "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Thread 7</title>\n</head>\n<body>\n" +
-		"<article id=\"entry-11\" data-entry-id=\"11\" data-created-at=\"2026-04-12T09:30\" data-body-state=\"hydrated\">\n" +
+		"<article id=\"entry-11\" data-entry-id=\"11\" data-kind=\"message\" data-created-at=\"2026-04-12T09:30\" data-body-state=\"hydrated\">\n" +
 		"<header>\n<div>From: Rick Sanchez — 2026-04-12T09:30</div>\n</header>\n" +
 		"<div>the first <b>word</b></div>\n" +
 		"</article>\n" +
-		"<article id=\"entry-12\" data-entry-id=\"12\" data-created-at=\"2026-04-13T09:30\" data-body-state=\"bodyless\">\n" +
+		"<article id=\"entry-12\" data-entry-id=\"12\" data-kind=\"message\" data-created-at=\"2026-04-13T09:30\" data-body-state=\"bodyless\">\n" +
 		"<header>\n<div>From: Rick Sanchez — 2026-04-13T09:30</div>\n</header>\n" +
 		"</article>\n" +
 		"</body>\n</html>\n"

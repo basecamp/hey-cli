@@ -171,6 +171,15 @@ because both were mis-stated here before:
   `mail.ReplyPrefillFromServer` rather than reimplementing HEY's exclusion rules in
   each caller.
 
+  The entry a reply — or a forward — answers is not the thread's last entry but HEY's
+  `Topic#last_replyable_entry`: `mail.ReplyTarget` in `internal/mail/reply_target.go`,
+  which every reply and forward path asks. On HEY for Domains a thread also holds notes
+  (`kind: "comment"`) and share notices (`kind: "access_notice"`), visible to everyone
+  with access to it and never emailed; answering one addresses the reply to the teammate
+  who wrote it. Only `message`, `announcement` and `sign_up_message` are replyable, and a
+  thread with none is refused. The text formats and the TUI head a note or share notice
+  by what it is (`mail.InternalEntryLabel`) rather than with a From line.
+
 `internal/htmlutil` provides `ToMarkdown` (HTML→Markdown), `ToText` (HTML→plain text),
 `ExtractImageURLs` and `ExtractAttachments`, which are presentation helpers rather than
 scrapers and are staying. `ToMarkdown` is also where email content stops being trusted:
@@ -248,7 +257,7 @@ links keep their URLs and headings, lists, quotes, tables and code survive.
 `--html` is the one format that writes that HTML out, and it has two shapes. A thread
 (`writeThreadHTML` in `internal/cmd/topic.go`) is an HTML5 document: `<!doctype html>`,
 `<meta charset="utf-8">`, `<title>Thread N</title>`, then one
-`<article id="entry-ID" data-entry-id data-created-at data-body-state>` per entry, oldest
+`<article id="entry-ID" data-entry-id data-kind data-created-at data-body-state>` per entry, oldest
 first, with a `<header>` naming the sender, date and non-empty To, CC and BCC lines
 (sanitized, then HTML-escaped) and the entry's HTML verbatim — or nothing, with
 `data-body-state` saying why (`bodyless`,
