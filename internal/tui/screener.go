@@ -367,7 +367,15 @@ func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.pending.setRows(nil, "")
 		v.pendingCount = 0
-		return tea.Batch(notify("The Screener is clearing. Everyone waiting will be asked about again on their next email."), v.closeToImbox()), true
+		toast := notify("The Screener is clearing. Everyone waiting will be asked about again on their next email.")
+		// A decision still on its way would land after The Screener closed, and nothing
+		// would count it done. It closes The Screener itself when it lands, the queue
+		// being empty by then.
+		if v.mutations > 0 {
+			v.decided = true
+			return toast, true
+		}
+		return tea.Batch(toast, v.closeToImbox()), true
 	}
 	return nil, false
 }

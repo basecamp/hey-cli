@@ -663,6 +663,27 @@ func TestScreenerClosesWhenThePageBelowShowsItEmptied(t *testing.T) {
 	}
 }
 
+// Clearing while a decision is still on its way waits for it: closing first would leave
+// that decision landing on a Screener that is no longer on screen, never counted done,
+// and a reopened Screener that Escape could no longer leave.
+func TestScreenerClearWaitsForADecisionInFlight(t *testing.T) {
+	view, _ := loadedScreener(t)
+	view.mutations = 2 // the decision, and the clear itself
+
+	answer, _ := view.Update(screenerClearedMsg{})
+	if closed, toast := screenerAnswer(answer); closed.toImbox || !strings.HasPrefix(toast, "The Screener is clearing.") {
+		t.Fatalf("clear with a decision in flight answered closed=%+v toast=%q, want the toast only", closed, toast)
+	}
+
+	answer, _ = view.Update(screenerDecisionDoneMsg{clearanceID: 91, name: "Jane Doe", status: hey.ClearanceApproved})
+	if closed, _ := screenerAnswer(answer); !closed.toImbox {
+		t.Error("the decision landing on the cleared Screener should close it")
+	}
+	if view.mutations != 0 {
+		t.Errorf("mutations = %d, want every request counted done", view.mutations)
+	}
+}
+
 // The model puts the Imbox on screen, whichever box The Screener was opened over — found
 // by its kind, so a renamed Imbox is still where it goes. Escape still goes back to the
 // box The Screener was opened over.
