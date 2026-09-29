@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -149,7 +148,7 @@ func TestScreenerPreviewScrolls(t *testing.T) {
 	view.preview.body = htmlToMarkdown(strings.Repeat("<p>Another paragraph about the quarterly budget.</p>", 30))
 	view.preview.width = 0
 
-	view.HandleContentKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgDown}))
+	view.HandleContentKey(keyPress("pgdown"))
 
 	if view.preview.viewport.YOffset() == 0 {
 		t.Error("PgDn did not scroll the preview")
