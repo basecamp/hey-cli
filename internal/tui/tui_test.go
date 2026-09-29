@@ -1137,8 +1137,44 @@ func TestContentListMovesSeenBubbledUpPostingToItsSection(t *testing.T) {
 	if cl.postings[1].BubbledUp {
 		t.Error("marking a bubbled up posting seen should clear its bubbled up state")
 	}
-	if got := cl.selectedPosting(); got == nil || got.ID != 1 {
-		t.Errorf("cursor should follow the moved posting: %+v", got)
+	if got := cl.selectedPosting(); got == nil || got.ID != 2 {
+		t.Errorf("cursor should stay put on the next posting: %+v", got)
+	}
+}
+
+// Marking the thread under the cursor seen sends it down to Previously Seen on its own:
+// the highlight stays where it was, on the thread that came next, and the window does not
+// scroll after the one put away.
+func TestMarkingSeenLeavesTheCursorOnTheNextThread(t *testing.T) {
+	cl := &contentList{}
+	cl.setPostings([]mail.Posting{
+		{ID: 1, Name: "Lunch on Thursday?", CreatedAt: time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)},
+		{ID: 2, Name: "Weekly release notes", CreatedAt: time.Date(2026, 8, 20, 11, 0, 0, 0, time.UTC)},
+		{ID: 3, Name: "Invoice for July hosting", CreatedAt: time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)},
+		{ID: 4, Name: "Quarterly planning agenda", CreatedAt: time.Date(2026, 8, 19, 10, 0, 0, 0, time.UTC), Seen: true},
+	})
+	cl.setSize(80, 20)
+	cl.moveDown()
+
+	cl.markSeen(1)
+
+	if got := cl.selectedPosting(); got == nil || got.ID != 3 {
+		t.Errorf("cursor should land on the thread that followed: %+v", got)
+	}
+	if cl.cursor != 1 {
+		t.Errorf("cursor moved to row %d, want it to stay on row 1", cl.cursor)
+	}
+	if cl.scrollOff != 0 {
+		t.Errorf("the window scrolled to %d", cl.scrollOff)
+	}
+	if cl.postings[2].ID != 2 || !cl.postings[2].Seen {
+		t.Errorf("the seen thread should head Previously Seen: %+v", cl.postings)
+	}
+
+	// The last of New for You moves the cursor on to what followed it, not back onto itself.
+	cl.markSeen(1)
+	if got := cl.selectedPosting(); got == nil || got.ID != 2 {
+		t.Errorf("cursor should move past the last new thread: %+v", got)
 	}
 }
 
