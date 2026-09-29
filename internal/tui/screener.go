@@ -343,7 +343,13 @@ func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			v.mutations--
 		}
 		if msg.err != nil {
-			v.notice = errorNotice("Could not screen "+msg.name, msg.err)
+			failure := errorNotice("Could not screen "+msg.name, msg.err)
+			// A clear that landed while this was on its way already emptied the queue, and
+			// left closing to this decision; failing does not make the queue less empty.
+			if v.decided && v.emptied() {
+				return tea.Batch(notify(failure), v.closeToImbox()), true
+			}
+			v.notice = failure
 			return nil, true
 		}
 		v.pending.remove(msg.clearanceID)

@@ -682,6 +682,16 @@ func TestScreenerClearWaitsForADecisionInFlight(t *testing.T) {
 	if view.mutations != 0 {
 		t.Errorf("mutations = %d, want every request counted done", view.mutations)
 	}
+
+	// The decision failing does not refill the queue the clear emptied, so it closes too,
+	// with the failure said as a toast over the Imbox.
+	view, _ = loadedScreener(t)
+	view.mutations = 2
+	view.Update(screenerClearedMsg{})
+	answer, _ = view.Update(screenerDecisionDoneMsg{clearanceID: 91, name: "Jane Doe", status: hey.ClearanceApproved, err: errors.New("server unavailable")})
+	if closed, toast := screenerAnswer(answer); !closed.toImbox || !strings.HasPrefix(toast, "Could not screen Jane Doe") {
+		t.Errorf("a failed decision after a clear answered closed=%+v toast=%q", closed, toast)
+	}
 }
 
 // The model puts the Imbox on screen, whichever box The Screener was opened over — found
