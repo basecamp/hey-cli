@@ -273,7 +273,20 @@ func (v *screenerView) Restyle() {
 	}
 }
 
+// Update lands a message and then asks the one question every path shares: did the
+// reader's own decisions leave nobody waiting? An empty Screener has nothing left to show,
+// so it goes back to the Imbox the way the web app does. Asking after every message
+// rather than in each handler is what catches the orders they can land in — a decision
+// racing a clear, a page below, or a live re-read that is the first to say the queue is empty.
 func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
+	cmd, handled := v.update(msg)
+	if handled && v.decided && v.emptied() {
+		return tea.Batch(cmd, v.closeToImbox()), true
+	}
+	return cmd, handled
+}
+
+func (v *screenerView) update(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case screenerPreviewLoadedMsg:
 		v.previewLoaded(msg)
@@ -331,11 +344,6 @@ func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			v.pendingCount = msg.count
 		}
 		pane.growRows(msg.rows, msg.nextPage)
-		// The last sender on screen was screened while the page below was on its way, and
-		// that page says nobody is left: the reader's decision emptied the queue after all.
-		if msg.tab == screenerPendingTab && v.decided && v.emptied() {
-			return v.closeToImbox(), true
-		}
 		return v.loadMoreRows(), true
 
 	case screenerDecisionDoneMsg:
@@ -344,10 +352,10 @@ func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		if msg.err != nil {
 			failure := errorNotice("Could not screen "+msg.name, msg.err)
-			// A clear that landed while this was on its way already emptied the queue, and
-			// left closing to this decision; failing does not make the queue less empty.
+			// A clear that landed while this was on its way has emptied the queue, and The
+			// Screener is about to close, so the failure goes over the Imbox instead.
 			if v.decided && v.emptied() {
-				return tea.Batch(notify(failure), v.closeToImbox()), true
+				return notify(failure), true
 			}
 			v.notice = failure
 			return nil, true
@@ -356,9 +364,6 @@ func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.pendingCount = max(v.pendingCount-1, 0)
 		v.history.loaded = false
 		v.decided = true
-		if v.emptied() {
-			return tea.Batch(notify(msg.name+" "+screenedVerb(msg.status)), v.closeToImbox()), true
-		}
 		// A sender being dealt with can uncover the bottom of the queue, so the senders
 		// behind them come up rather than leaving an empty pane with a count over it.
 		return tea.Batch(notify(msg.name+" "+screenedVerb(msg.status)), v.loadMoreRows()), true
@@ -373,15 +378,8 @@ func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.pending.setRows(nil, "")
 		v.pendingCount = 0
-		toast := notify("The Screener is clearing. Everyone waiting will be asked about again on their next email.")
-		// A decision still on its way would land after The Screener closed, and nothing
-		// would count it done. It closes The Screener itself when it lands, the queue
-		// being empty by then.
-		if v.mutations > 0 {
-			v.decided = true
-			return toast, true
-		}
-		return tea.Batch(toast, v.closeToImbox()), true
+		v.decided = true
+		return notify("The Screener is clearing. Everyone waiting will be asked about again on their next email."), true
 	}
 	return nil, false
 }
@@ -651,8 +649,9 @@ func (v *screenerView) handleClearConfirmationKey(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
-// emptied reports that the reader's last decision left nobody waiting: no row on screen,
-// none on a page not read yet, and no decision still on its way to HEY.
+// emptied reports that nobody is left waiting: no row on screen, none on a page not read
+// yet, and no decision still on its way to HEY — one landing after The Screener closed
+// would never be counted done, and a reopened Screener could not be left.
 func (v *screenerView) emptied() bool {
 	return len(v.pending.rows) == 0 && v.pendingCount == 0 && v.pending.paging.nextPage == "" && v.mutations == 0
 }

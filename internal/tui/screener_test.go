@@ -694,6 +694,23 @@ func TestScreenerClearWaitsForADecisionInFlight(t *testing.T) {
 	}
 }
 
+// A live re-read can be the first to say the queue is empty — the page below having come
+// back with a count from before the last decision — and it closes The Screener too.
+func TestScreenerClosesWhenALiveRereadShowsItEmptied(t *testing.T) {
+	view, _ := loadedScreener(t)
+	view.pending.setRows(view.pending.rows[:1], "")
+	view.pendingCount = 2 // a count read before the decision
+
+	answer, _ := view.Update(screenerDecisionDoneMsg{clearanceID: 91, name: "Jane Doe", status: hey.ClearanceApproved})
+	if closed, _ := screenerAnswer(answer); closed.toImbox {
+		t.Fatal("closed while HEY's count still said someone was waiting")
+	}
+	answer, _ = view.Update(screenerPendingRefreshedMsg{requestID: view.liveRequestID, count: 0})
+	if closed, _ := screenerAnswer(answer); !closed.toImbox {
+		t.Error("a re-read showing nobody left should close The Screener")
+	}
+}
+
 // The model puts the Imbox on screen, whichever box The Screener was opened over — found
 // by its kind, so a renamed Imbox is still where it goes. Escape still goes back to the
 // box The Screener was opened over.
