@@ -294,6 +294,40 @@ func TestMailViewHandlesTopicLoaded(t *testing.T) {
 	}
 }
 
+// A thread opens on its newest message, where whatever brought the reader to it arrived,
+// rather than on the first message of a conversation they have mostly read already.
+func TestOpeningAThreadShowsItsLatestMessage(t *testing.T) {
+	v := mailWithPostings()
+	v.vc.width = 80
+	v.vc.height = 12
+	v.topicViewport.SetWidth(80)
+	v.Update(topicLoadedMsg{
+		boxID:   1,
+		topicID: 100,
+		title:   "Quarterly planning",
+		entries: []mail.Entry{
+			{ID: 1, Creator: mail.Contact{Name: "Maria Gonzalez"}, Body: htmlutil.ToMarkdown(strings.Repeat("<p>Here are the numbers for the quarter.</p>", 8))},
+			{ID: 2, Creator: mail.Contact{Name: "Sam Rivera"}, Body: htmlutil.ToMarkdown(strings.Repeat("<p>Thanks, a few questions on the forecast.</p>", 8))},
+			{ID: 3, Creator: mail.Contact{Name: "Ana Ortiz"}, Body: htmlutil.ToMarkdown(strings.Repeat("<p>Thursday at ten works for me.</p>", 8))},
+		},
+	})
+
+	if len(v.entryOffsets) != 3 {
+		t.Fatalf("entry offsets = %v", v.entryOffsets)
+	}
+	if got, want := v.topicViewport.YOffset(), v.entryOffsets[2]; got != want {
+		t.Errorf("thread opened at line %d, want the latest message at %d", got, want)
+	}
+	if !strings.Contains(ansi.Strip(v.topicViewport.View()), "Ana Ortiz") {
+		t.Errorf("the latest message is not on screen: %q", ansi.Strip(v.topicViewport.View()))
+	}
+
+	v.HandleContentKey(keyPress("k"))
+	if got, want := v.topicViewport.YOffset(), v.entryOffsets[1]; got != want {
+		t.Errorf("k should walk back to the message before it: offset %d, want %d", got, want)
+	}
+}
+
 // A thread heads its messages with the centered subject, and a blank line
 // separates each message header from the content under it.
 func TestThreadViewShowsSubjectAndSpacesTheHeader(t *testing.T) {

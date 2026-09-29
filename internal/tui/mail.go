@@ -591,7 +591,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.imageContent = imageContent.String()
 		v.rebuildTopicContent()
-		v.topicViewport.GotoTop()
+		v.showLatestEntry()
 		// A thread read only in part is not marked seen by being opened: the reader has
 		// not had all of it, and seen would slide it under the Imbox's cover. The seen
 		// key is there for a thread they are done with anyway.
@@ -2200,6 +2200,18 @@ func (v *mailView) currentAttachmentAction(topicID int64, attachmentID string) b
 		}
 	}
 	return false
+}
+
+// showLatestEntry opens a thread on its newest message, which is where whatever
+// brought the reader here arrived; k walks back through what came before it. The
+// viewport stops at the end of the content, so a short last message shows the tail
+// of the one above it too.
+func (v *mailView) showLatestEntry() {
+	if len(v.entryOffsets) == 0 {
+		v.topicViewport.GotoTop()
+		return
+	}
+	v.topicViewport.SetYOffset(v.entryOffsets[len(v.entryOffsets)-1])
 }
 
 // jumpEntry scrolls the thread to the next or previous message header.
