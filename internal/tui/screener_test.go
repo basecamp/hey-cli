@@ -635,31 +635,40 @@ func TestScreenerStaysOpenWhileSendersRemain(t *testing.T) {
 	}
 }
 
-// The model puts the Imbox on screen, whichever box The Screener was opened over.
+// The model puts the Imbox on screen, whichever box The Screener was opened over — found
+// by its kind, so a renamed Imbox is still where it goes. Escape still goes back to the
+// box The Screener was opened over.
 func TestModelLeavesAnEmptyScreenerForTheImbox(t *testing.T) {
-	m := modelWithBoxes()
-	m.mailView.switchBox(1) // The Feed
-	updated, _ := m.Update(keyPress("ctrl+s"))
-	m = updated.(model)
+	for _, testCase := range []struct {
+		name      string
+		imboxName string
+		closed    screenerClosedMsg
+		wantBox   int
+	}{
+		{name: "emptied", imboxName: "Imbox", closed: screenerClosedMsg{toImbox: true}, wantBox: 0},
+		{name: "emptied with the Imbox renamed", imboxName: "Important", closed: screenerClosedMsg{toImbox: true}, wantBox: 0},
+		{name: "escape", imboxName: "Imbox", closed: screenerClosedMsg{}, wantBox: 1},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			m := modelWithBoxes()
+			m.mailView.boxes[0].Name = testCase.imboxName
+			m.mailView.switchBox(1) // The Feed
+			updated, _ := m.Update(keyPress("ctrl+s"))
+			m = updated.(model)
+			if m.activeView != m.screenerView {
+				t.Fatal("ctrl+s did not open The Screener")
+			}
 
-	updated, _ = m.Update(screenerClosedMsg{toImbox: true})
-	m = updated.(model)
+			updated, _ = m.Update(testCase.closed)
+			m = updated.(model)
 
-	if m.activeView != m.mailView {
-		t.Fatal("closing The Screener should put the mail list back")
-	}
-	if m.mailView.boxIndex != 0 {
-		t.Errorf("landed on box %d, want the Imbox", m.mailView.boxIndex)
-	}
-
-	// Escape still goes back to wherever The Screener was opened from.
-	m.mailView.switchBox(1)
-	updated, _ = m.Update(keyPress("ctrl+s"))
-	m = updated.(model)
-	updated, _ = m.Update(screenerClosedMsg{})
-	m = updated.(model)
-	if m.mailView.boxIndex != 1 {
-		t.Errorf("escape landed on box %d, want The Feed it was opened over", m.mailView.boxIndex)
+			if m.activeView != m.mailView {
+				t.Fatal("closing The Screener should put the mail list back")
+			}
+			if m.mailView.boxIndex != testCase.wantBox {
+				t.Errorf("landed on box %d, want %d", m.mailView.boxIndex, testCase.wantBox)
+			}
+		})
 	}
 }
 

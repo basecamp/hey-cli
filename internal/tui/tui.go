@@ -1094,7 +1094,7 @@ func (m model) closeScreener(toImbox bool) (tea.Model, tea.Cmd) {
 	m.activeView.Resize(m.vc.width, m.vc.height)
 	cmd := m.mailView.refreshScreenerCount()
 	if toImbox {
-		cmd = tea.Batch(cmd, m.mailView.switchBox(boxForShortcut("1", m.mailView.boxes)))
+		cmd = tea.Batch(cmd, m.mailView.switchBox(m.mailView.imboxIndex()))
 	}
 	cmd = m.syncLoading(cmd)
 	m.updateHelpBindings()
