@@ -566,12 +566,13 @@ func TestMailViewRefusesTheCursorWhenARefreshTookTheSelection(t *testing.T) {
 		})
 	}
 
+	cursorID := v.postingList.selectedPosting().ID
 	v.HandleContentKey(keyPress("e"))
 	done, ok := runCmd(v.HandleContentKey(keyPress("e"))).(postingActionDoneMsg)
 	if !ok || done.err != nil {
 		t.Fatalf("the second e returned %#v, want it to mark the cursor's thread", done)
 	}
-	if !slices.Equal(recorded.body.PostingIDs, []int64{103}) {
+	if !slices.Equal(recorded.body.PostingIDs, []int64{cursorID}) {
 		t.Errorf("marked %v seen, want the cursor's thread", recorded.body.PostingIDs)
 	}
 }
@@ -582,11 +583,11 @@ func TestMailViewActsOnTheCursorOnceTheReaderMovesOnFromALostSelection(t *testin
 	selectTwoThreads(v)
 	refreshWithoutTheTestThreads(v)
 
-	v.HandleContentKey(keyPress("down"))
+	v.HandleContentKey(keyPress("up"))
 	if _, ok := runCmd(v.HandleContentKey(keyPress("e"))).(postingActionDoneMsg); !ok {
 		t.Fatal("e after moving the cursor did nothing")
 	}
-	if !slices.Equal(recorded.body.PostingIDs, []int64{104}) {
+	if !slices.Equal(recorded.body.PostingIDs, []int64{103}) {
 		t.Errorf("marked %v seen, want the row the cursor moved to", recorded.body.PostingIDs)
 	}
 }
@@ -601,10 +602,11 @@ func TestEscapeLetsGoOfALostSelection(t *testing.T) {
 	if !v.ClearSelection() {
 		t.Fatal("esc did not claim a lost selection")
 	}
+	cursorID := v.postingList.selectedPosting().ID
 	if _, ok := runCmd(v.HandleContentKey(keyPress("e"))).(postingActionDoneMsg); !ok {
 		t.Fatal("e after esc did nothing")
 	}
-	if !slices.Equal(recorded.body.PostingIDs, []int64{103}) {
+	if !slices.Equal(recorded.body.PostingIDs, []int64{cursorID}) {
 		t.Errorf("marked %v seen, want the cursor's thread", recorded.body.PostingIDs)
 	}
 }

@@ -1137,9 +1137,110 @@ func TestContentListMovesSeenBubbledUpPostingToItsSection(t *testing.T) {
 	if cl.postings[1].BubbledUp {
 		t.Error("marking a bubbled up posting seen should clear its bubbled up state")
 	}
-	if got := cl.selectedPosting(); got == nil || got.ID != 1 {
-		t.Errorf("cursor should follow the moved posting: %+v", got)
+	if got := cl.selectedPosting(); got == nil || got.ID != 2 {
+		t.Errorf("cursor should stay put on the next posting: %+v", got)
 	}
+}
+
+// Marking the thread under the cursor seen sends it down to Previously Seen on its own:
+// the highlight stays where it was, on the thread that came next, and the window does not
+// scroll after the one put away.
+func TestMarkingSeenLeavesTheCursorOnTheNextThread(t *testing.T) {
+	cl := &contentList{}
+	cl.setPostings([]mail.Posting{
+		{ID: 1, Name: "Lunch on Thursday?", CreatedAt: time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)},
+		{ID: 2, Name: "Weekly release notes", CreatedAt: time.Date(2026, 8, 20, 11, 0, 0, 0, time.UTC)},
+		{ID: 3, Name: "Invoice for July hosting", CreatedAt: time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)},
+		{ID: 4, Name: "Quarterly planning agenda", CreatedAt: time.Date(2026, 8, 19, 10, 0, 0, 0, time.UTC), Seen: true},
+	})
+	cl.setSize(80, 20)
+	cl.moveDown()
+
+	cl.markSeen(1)
+
+	if got := cl.selectedPosting(); got == nil || got.ID != 3 {
+		t.Errorf("cursor should land on the thread that followed: %+v", got)
+	}
+	if cl.cursor != 1 {
+		t.Errorf("cursor moved to row %d, want it to stay on row 1", cl.cursor)
+	}
+	if cl.scrollOff != 0 {
+		t.Errorf("the window scrolled to %d", cl.scrollOff)
+	}
+	if cl.postings[2].ID != 2 || !cl.postings[2].Seen {
+		t.Errorf("the seen thread should head Previously Seen: %+v", cl.postings)
+	}
+
+	// The last of New for You moves the cursor on to what followed it, not back onto itself.
+	cl.markSeen(1)
+	if got := cl.selectedPosting(); got == nil || got.ID != 2 {
+		t.Errorf("cursor should move past the last new thread: %+v", got)
+	}
+
+	// e on a thread already in Previously Seen moves nothing, the cursor included — at
+	// the end of the list it used to step back to the thread above.
+	cl.cursor = len(cl.postings) - 1
+	cl.markSeen(cl.cursor)
+	if cl.cursor != len(cl.postings)-1 {
+		t.Errorf("marking a seen thread seen moved the cursor to %d", cl.cursor)
+	}
+}
+
+// A list long enough to scroll: marking the thread under the cursor seen sends it far
+// below, and the window used to follow it there and then snap back with the next thread
+// on the top row — every row on screen moved. The window stays where it was.
+func TestMarkingSeenKeepsTheWindowWhereItWas(t *testing.T) {
+	cl := &contentList{}
+	cl.setPostings(longImbox(20, 10))
+	cl.setSize(80, 32)
+	for range 3 {
+		cl.moveDown()
+	}
+	before := stripANSI(cl.view())
+
+	cl.markSeen(3)
+
+	if cl.scrollOff != 0 || cl.cursor != 3 {
+		t.Errorf("cursor=%d scrollOff=%d, want row 3 in an unscrolled window", cl.cursor, cl.scrollOff)
+	}
+	after := strings.Split(stripANSI(cl.view()), "\n")
+	if first := strings.Split(before, "\n")[0]; after[0] != first {
+		t.Errorf("the top of the list moved: %q, was %q", after[0], first)
+	}
+}
+
+// A live re-read that takes away the thread under the cursor — read or filed somewhere
+// else — leaves the cursor on its row, on the thread that came up into it, rather than
+// sending it back to the top of the list.
+func TestARefreshThatDropsTheCursorsThreadKeepsItsRow(t *testing.T) {
+	cl := &contentList{}
+	postings := longImbox(20, 0)
+	cl.setPostings(postings)
+	cl.setSize(80, 32)
+	for range 3 {
+		cl.moveDown()
+	}
+
+	head := append(append([]mail.Posting(nil), postings[:3]...), postings[4:15]...)
+	cl.refreshHead(head, postingIDs(postings[:15]))
+
+	if got := cl.selectedPosting(); cl.cursor != 3 || got == nil || got.ID != postings[4].ID {
+		t.Errorf("cursor=%d on %+v, want row 3 on %q", cl.cursor, got, postings[4].Name)
+	}
+}
+
+func longImbox(unseen, seen int) []mail.Posting {
+	subjects := []string{"Quarterly planning agenda", "Lunch on Friday?", "Invoice for September hosting", "Weekly release notes", "Offsite travel details"}
+	postings := make([]mail.Posting, 0, unseen+seen)
+	for i := range unseen + seen {
+		postings = append(postings, mail.Posting{
+			ID:        int64(i + 1),
+			Name:      fmt.Sprintf("%s #%d", subjects[i%len(subjects)], i+1),
+			CreatedAt: time.Date(2026, 9, 29, 9, 0, 0, 0, time.UTC).Add(-time.Duration(i) * time.Hour),
+			Seen:      i >= unseen,
+		})
+	}
+	return postings
 }
 
 func TestContentListAlignsDateColumn(t *testing.T) {

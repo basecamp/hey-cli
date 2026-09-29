@@ -267,8 +267,11 @@ func (c *contentList) keepPlaceIn(postings []mail.Posting) {
 		cursorID = posting.ID
 	}
 
+	// A posting that left takes the cursor's row with it, not its place: the cursor
+	// stays on the same row, on whatever came up into it, rather than jumping to the top.
+	row := max(c.cursor, 0)
 	c.postings = postings
-	c.cursor = 0
+	c.cursor = min(row, max(len(c.postings)-1, 0))
 	for i := range c.postings {
 		if c.postings[i].ID == cursorID {
 			c.cursor = i
@@ -344,11 +347,39 @@ func partitionSections(postings []mail.Posting) []mail.Posting {
 }
 
 // markSeen moves a posting into "Previously Seen", clearing the bubbled up
-// state the way Postings::SeenController does.
+// state the way Postings::SeenController does. A posting under the cursor goes
+// down on its own: the cursor stays where it was and lands on the thread that
+// followed it, so working down New for You is one key per thread rather than a
+// chase after the one just put away.
 func (c *contentList) markSeen(index int) {
+	var nextID int64
+	scrollOff := c.scrollOff
+	// Only a posting that leaves its section goes down on its own; e on one already in
+	// Previously Seen moves nothing, so it moves the cursor nowhere either.
+	if index == c.cursor && !c.hideSeenState && sectionOf(c.postings[index]) != sectionPreviouslySeen {
+		if index+1 < len(c.postings) {
+			nextID = c.postings[index+1].ID
+		} else if index > 0 {
+			nextID = c.postings[index-1].ID
+		}
+	}
 	c.postings[index].Seen = true
 	c.postings[index].BubbledUp = false
 	c.resort()
+	if nextID == 0 {
+		return
+	}
+	// resort followed the marked posting down into Previously Seen and scrolled the
+	// window after it; the window goes back where it was, so the rows the reader was
+	// looking at stay put and only the marked one leaves them.
+	c.scrollOff = scrollOff
+	for i := range c.postings {
+		if c.postings[i].ID == nextID {
+			c.cursor = i
+			break
+		}
+	}
+	c.settleCover()
 }
 
 // markUnseen moves a posting to the front of "New for You", including one the reader is
