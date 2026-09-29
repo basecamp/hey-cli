@@ -144,7 +144,9 @@ Press Ctrl+S from the mail list to open The Screener. When senders are waiting, 
 list says so above the threads. In The Screener, `y` screens the selected sender in and `n`
 screens them out, Tab moves to Screener History and back, `X` clears the whole Screener
 after a confirmation, and Escape or `q` returns to mail. Both lists keep going as you
-scroll, the same way the mail list does.
+scroll, the same way the mail list does. Once you've dealt with everyone waiting — the
+last sender screened in or out, or the whole Screener cleared — it closes on its own and
+takes you to the Imbox, as the web app does.
 
 Space opens a bigger preview of the selected sender's most recent email: the whole message,
 not just the first line the list has room for. Arrow keys and PgUp/PgDn scroll it, `y` and

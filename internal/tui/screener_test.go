@@ -409,13 +409,15 @@ func TestScreenerClearsTheQueueAfterConfirmation(t *testing.T) {
 	if !ok || cleared.err != nil {
 		t.Fatalf("clearing returned %#v", cleared)
 	}
-	view.Update(cleared)
+	answer, _ := view.Update(cleared)
 
 	if len(view.pending.rows) != 0 || view.pendingCount != 0 {
 		t.Errorf("clearing should empty the queue: rows:%d count:%d", len(view.pending.rows), view.pendingCount)
 	}
-	if !strings.HasPrefix(view.notice, "The Screener is clearing.") {
-		t.Errorf("notice = %q", view.notice)
+	// An empty Screener goes back to the Imbox, so what clearing did is said as a toast
+	// over it rather than as a notice on a screen that is closing.
+	if closed, toast := screenerAnswer(answer); !closed.toImbox || !strings.HasPrefix(toast, "The Screener is clearing.") {
+		t.Errorf("clearing answered closed=%+v toast=%q, want the Imbox and the clearing toast", closed, toast)
 	}
 
 	requests := state.snapshot()
@@ -564,6 +566,203 @@ func TestScreenerKeepsDrawingAfterScreeningOffTheBottom(t *testing.T) {
 }
 
 // --- Leaving ---
+
+// screenerAnswer runs what the Screener answered with, collecting the close it asked for
+// and the toast it gave.
+func screenerAnswer(cmd tea.Cmd) (closed screenerClosedMsg, toast string) {
+	if cmd == nil {
+		return closed, ""
+	}
+	switch msg := cmd().(type) {
+	case screenerClosedMsg:
+		return msg, ""
+	case notifyMsg:
+		return closed, msg.text
+	case tea.BatchMsg:
+		for _, sub := range msg {
+			subClosed, subToast := screenerAnswer(sub)
+			if subClosed.toImbox {
+				closed = subClosed
+			}
+			if subToast != "" {
+				toast = subToast
+			}
+		}
+	}
+	return closed, toast
+}
+
+// Screening the last sender empties The Screener, and an empty one has nothing left to
+// show, so it goes back to the Imbox the way the web app does.
+func TestScreenerReturnsToTheImboxOnceEmpty(t *testing.T) {
+	view, _ := loadedScreener(t)
+
+	for index, key := range []string{"y", "n"} {
+		done, ok := runCmd(view.HandleContentKey(keyPress(key))).(screenerDecisionDoneMsg)
+		if !ok || done.err != nil {
+			t.Fatalf("%s returned %#v", key, done)
+		}
+		answer, _ := view.Update(done)
+		closed, toast := screenerAnswer(answer)
+		last := index == 1
+		if closed.toImbox != last {
+			t.Errorf("after %d of 2 senders, closed to the Imbox = %v", index+1, closed.toImbox)
+		}
+		if toast == "" {
+			t.Errorf("the decision on sender %d was not confirmed", index+1)
+		}
+	}
+}
+
+// A queue with more senders on a page not read yet is not empty, however few rows are
+// on screen, and neither is one with a decision still on its way.
+func TestScreenerStaysOpenWhileSendersRemain(t *testing.T) {
+	view, _ := loadedScreener(t)
+	view.pending.setRows(view.pending.rows[:1], "next-page-cursor")
+
+	answer, _ := view.Update(screenerDecisionDoneMsg{clearanceID: 91, name: "Jane Doe", status: hey.ClearanceApproved})
+	if closed, _ := screenerAnswer(answer); closed.toImbox {
+		t.Error("closed with senders still on the next page")
+	}
+
+	view, _ = loadedScreener(t)
+	view.mutations = 2
+	view.pending.setRows(view.pending.rows[:1], "")
+	view.pendingCount = 1
+	answer, _ = view.Update(screenerDecisionDoneMsg{clearanceID: 91, name: "Jane Doe", status: hey.ClearanceApproved})
+	if closed, _ := screenerAnswer(answer); closed.toImbox {
+		t.Error("closed while another decision was still on its way")
+	}
+}
+
+// The last sender on screen screened while the page below is still on its way: the queue
+// is only known to be empty when that page comes back empty, and that is when it closes.
+// An empty page on a Screener nobody has decided anything in leaves it open.
+func TestScreenerClosesWhenThePageBelowShowsItEmptied(t *testing.T) {
+	view, _ := loadedScreener(t)
+	view.pending.setRows(view.pending.rows[:1], "next-page-cursor")
+	view.pendingCount = 3
+
+	answer, _ := view.Update(screenerDecisionDoneMsg{clearanceID: 91, name: "Jane Doe", status: hey.ClearanceApproved})
+	if closed, _ := screenerAnswer(answer); closed.toImbox {
+		t.Fatal("closed before the page below said whether anyone was left")
+	}
+	view.pending.paging.loading = true
+	answer, _ = view.Update(screenerRowsAppendedMsg{requestID: view.moreRequestID, tab: screenerPendingTab, count: 0})
+	if closed, _ := screenerAnswer(answer); !closed.toImbox {
+		t.Error("an empty page after the last decision should close The Screener")
+	}
+
+	untouched, _ := loadedScreener(t)
+	untouched.pending.setRows(nil, "next-page-cursor")
+	untouched.pendingCount = 0
+	untouched.pending.paging.loading = true
+	answer, _ = untouched.Update(screenerRowsAppendedMsg{requestID: untouched.moreRequestID, tab: screenerPendingTab, count: 0})
+	if closed, _ := screenerAnswer(answer); closed.toImbox {
+		t.Error("an empty page with no decision behind it closed The Screener")
+	}
+}
+
+// Clearing while a decision is still on its way waits for it: closing first would leave
+// that decision landing on a Screener that is no longer on screen, never counted done,
+// and a reopened Screener that Escape could no longer leave.
+func TestScreenerClearWaitsForADecisionInFlight(t *testing.T) {
+	view, _ := loadedScreener(t)
+	view.mutations = 2 // the decision, and the clear itself
+
+	answer, _ := view.Update(screenerClearedMsg{})
+	if closed, toast := screenerAnswer(answer); closed.toImbox || !strings.HasPrefix(toast, "The Screener is clearing.") {
+		t.Fatalf("clear with a decision in flight answered closed=%+v toast=%q, want the toast only", closed, toast)
+	}
+
+	answer, _ = view.Update(screenerDecisionDoneMsg{clearanceID: 91, name: "Jane Doe", status: hey.ClearanceApproved})
+	if closed, _ := screenerAnswer(answer); !closed.toImbox {
+		t.Error("the decision landing on the cleared Screener should close it")
+	}
+	if view.mutations != 0 {
+		t.Errorf("mutations = %d, want every request counted done", view.mutations)
+	}
+
+	// The decision failing does not refill the queue the clear emptied, so it closes too,
+	// with the failure said as a toast over the Imbox.
+	view, _ = loadedScreener(t)
+	view.mutations = 2
+	view.Update(screenerClearedMsg{})
+	answer, _ = view.Update(screenerDecisionDoneMsg{clearanceID: 91, name: "Jane Doe", status: hey.ClearanceApproved, err: errors.New("server unavailable")})
+	if closed, toast := screenerAnswer(answer); !closed.toImbox || !strings.HasPrefix(toast, "Could not screen Jane Doe") {
+		t.Errorf("a failed decision after a clear answered closed=%+v toast=%q", closed, toast)
+	}
+}
+
+// A clear that fails after a decision emptied the queue anyway still closes it, and says
+// the clear failed over the Imbox rather than on a screen that is gone.
+func TestScreenerSaysAFailedClearWhenClosing(t *testing.T) {
+	view, _ := loadedScreener(t)
+	view.pending.setRows(view.pending.rows[:1], "")
+	view.pendingCount = 1
+	view.mutations = 2 // the decision, and the clear
+
+	view.Update(screenerDecisionDoneMsg{clearanceID: 91, name: "Jane Doe", status: hey.ClearanceApproved})
+	answer, _ := view.Update(screenerClearedMsg{err: errors.New("server unavailable")})
+
+	if closed, toast := screenerAnswer(answer); !closed.toImbox || !strings.HasPrefix(toast, "Could not clear The Screener") {
+		t.Errorf("answered closed=%+v toast=%q, want the Imbox and the failure", closed, toast)
+	}
+}
+
+// A live re-read can be the first to say the queue is empty — the page below having come
+// back with a count from before the last decision — and it closes The Screener too.
+func TestScreenerClosesWhenALiveRereadShowsItEmptied(t *testing.T) {
+	view, _ := loadedScreener(t)
+	view.pending.setRows(view.pending.rows[:1], "")
+	view.pendingCount = 2 // a count read before the decision
+
+	answer, _ := view.Update(screenerDecisionDoneMsg{clearanceID: 91, name: "Jane Doe", status: hey.ClearanceApproved})
+	if closed, _ := screenerAnswer(answer); closed.toImbox {
+		t.Fatal("closed while HEY's count still said someone was waiting")
+	}
+	answer, _ = view.Update(screenerPendingRefreshedMsg{requestID: view.liveRequestID, count: 0})
+	if closed, _ := screenerAnswer(answer); !closed.toImbox {
+		t.Error("a re-read showing nobody left should close The Screener")
+	}
+}
+
+// The model puts the Imbox on screen, whichever box The Screener was opened over — found
+// by its kind, so a renamed Imbox is still where it goes. Escape still goes back to the
+// box The Screener was opened over.
+func TestModelLeavesAnEmptyScreenerForTheImbox(t *testing.T) {
+	for _, testCase := range []struct {
+		name      string
+		imboxName string
+		closed    screenerClosedMsg
+		wantBox   int
+	}{
+		{name: "emptied", imboxName: "Imbox", closed: screenerClosedMsg{toImbox: true}, wantBox: 0},
+		{name: "emptied with the Imbox renamed", imboxName: "Important", closed: screenerClosedMsg{toImbox: true}, wantBox: 0},
+		{name: "escape", imboxName: "Imbox", closed: screenerClosedMsg{}, wantBox: 1},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			m := modelWithBoxes()
+			m.mailView.boxes[0].Name = testCase.imboxName
+			m.mailView.switchBox(1) // The Feed
+			updated, _ := m.Update(keyPress("ctrl+s"))
+			m = updated.(model)
+			if m.activeView != m.screenerView {
+				t.Fatal("ctrl+s did not open The Screener")
+			}
+
+			updated, _ = m.Update(testCase.closed)
+			m = updated.(model)
+
+			if m.activeView != m.mailView {
+				t.Fatal("closing The Screener should put the mail list back")
+			}
+			if m.mailView.boxIndex != testCase.wantBox {
+				t.Errorf("landed on box %d, want %d", m.mailView.boxIndex, testCase.wantBox)
+			}
+		})
+	}
+}
 
 func TestScreenerEscapeAsksToClose(t *testing.T) {
 	view, _ := loadedScreener(t)

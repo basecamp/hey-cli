@@ -2678,12 +2678,21 @@ func (v *mailView) actionSource() *mail.Source {
 }
 
 func (v *mailView) imboxSource() *mail.Source {
-	for i := range v.boxes {
-		if v.boxes[i].Kind == mail.KindBox && v.boxes[i].BoxKind == hey.BoxKindImbox {
-			return &v.boxes[i]
-		}
+	if index := v.imboxIndex(); index >= 0 {
+		return &v.boxes[index]
 	}
 	return nil
+}
+
+// imboxIndex is where the Imbox sits among the sources, by the kind HEY serves rather
+// than its name, which the user can change; -1 before the sources are read.
+func (v *mailView) imboxIndex() int {
+	for i := range v.boxes {
+		if v.boxes[i].Kind == mail.KindBox && v.boxes[i].BoxKind == hey.BoxKindImbox {
+			return i
+		}
+	}
+	return -1
 }
 
 const unfileableThreadNotice = "Can't file this thread from here"

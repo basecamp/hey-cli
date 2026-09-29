@@ -61,8 +61,10 @@ type screenerDecisionDoneMsg struct {
 
 type screenerClearedMsg struct{ err error }
 
-// screenerClosedMsg asks the app to put the mail view back on screen.
-type screenerClosedMsg struct{}
+// screenerClosedMsg asks the app to put the mail view back on screen. toImbox is set when
+// the reader emptied The Screener: with nobody left to decide on, it goes back to the
+// Imbox, the way the web app does, rather than to whichever box it was opened over.
+type screenerClosedMsg struct{ toImbox bool }
 
 // --- Screener panes ---
 
@@ -245,6 +247,7 @@ type screenerView struct {
 	liveRequestID   uint64 // identifies the only live re-read allowed to update the queue
 	moreRequestID   uint64 // identifies the only page-below read allowed to grow a pane
 	mutations       int
+	decided         bool // the reader has screened someone since opening; only then does emptying close
 
 	preview          *screenerPreview // space's full look at a sender's email, nil when closed
 	previewRequestID uint64           // identifies the only preview read allowed to fill it
@@ -258,6 +261,7 @@ func (v *screenerView) Init() tea.Cmd {
 	v.notice = ""
 	v.confirmingClear = false
 	v.closePreview()
+	v.decided = false
 	v.tab = screenerPendingTab
 	return v.requestPending()
 }
@@ -269,7 +273,26 @@ func (v *screenerView) Restyle() {
 	}
 }
 
+// Update lands a message and then asks the one question every path shares: did the
+// reader's own decisions leave nobody waiting? An empty Screener has nothing left to show,
+// so it goes back to the Imbox the way the web app does. Asking after every message
+// rather than in each handler is what catches the orders they can land in — a decision
+// racing a clear, a page below, or a live re-read that is the first to say the queue is empty.
 func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
+	cmd, handled := v.update(msg)
+	if !handled || !v.decided || !v.emptied() {
+		return cmd, handled
+	}
+	// Whatever The Screener had to say — a decision or a clear that failed while the
+	// other emptied the queue — would close with it, so it goes over the Imbox instead.
+	if v.notice != "" {
+		cmd = tea.Batch(cmd, notify(v.notice))
+		v.notice = ""
+	}
+	return tea.Batch(cmd, v.closeToImbox()), true
+}
+
+func (v *screenerView) update(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case screenerPreviewLoadedMsg:
 		v.previewLoaded(msg)
@@ -340,6 +363,7 @@ func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.pending.remove(msg.clearanceID)
 		v.pendingCount = max(v.pendingCount-1, 0)
 		v.history.loaded = false
+		v.decided = true
 		// A sender being dealt with can uncover the bottom of the queue, so the senders
 		// behind them come up rather than leaving an empty pane with a count over it.
 		return tea.Batch(notify(msg.name+" "+screenedVerb(msg.status)), v.loadMoreRows()), true
@@ -354,8 +378,8 @@ func (v *screenerView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.pending.setRows(nil, "")
 		v.pendingCount = 0
-		v.notice = "The Screener is clearing. Everyone waiting will be asked about again on their next email."
-		return nil, true
+		v.decided = true
+		return notify("The Screener is clearing. Everyone waiting will be asked about again on their next email."), true
 	}
 	return nil, false
 }
@@ -623,6 +647,18 @@ func (v *screenerView) handleClearConfirmationKey(msg tea.KeyPressMsg) tea.Cmd {
 		v.confirmingClear = false
 	}
 	return nil
+}
+
+// emptied reports that nobody is left waiting: no row on screen, none on a page not read
+// yet, and no decision still on its way to HEY — one landing after The Screener closed
+// would never be counted done, and a reopened Screener could not be left.
+func (v *screenerView) emptied() bool {
+	return len(v.pending.rows) == 0 && v.pendingCount == 0 && v.pending.paging.nextPage == "" && v.mutations == 0
+}
+
+// closeToImbox leaves an empty Screener for the Imbox.
+func (v *screenerView) closeToImbox() tea.Cmd {
+	return func() tea.Msg { return screenerClosedMsg{toImbox: true} }
 }
 
 func (v *screenerView) close() tea.Cmd {
