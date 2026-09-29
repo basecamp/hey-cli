@@ -206,6 +206,14 @@ func (p *screenerPane) moveDown(visible int) {
 	}
 }
 
+func (p *screenerPane) pageDown(visible int) {
+	p.cursor, p.scroll = pageBy(p.cursor, p.scroll, visible, len(p.rows), 1)
+}
+
+func (p *screenerPane) pageUp(visible int) {
+	p.cursor, p.scroll = pageBy(p.cursor, p.scroll, visible, len(p.rows), -1)
+}
+
 func (p *screenerPane) ensureVisible(visible int) {
 	if p.cursor < p.scroll {
 		p.scroll = p.cursor
@@ -433,6 +441,12 @@ func (v *screenerView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case tea.KeyDown:
 		v.pane().moveDown(v.visibleRows())
+		return v.loadMoreRows()
+	case tea.KeyPgUp:
+		v.pane().pageUp(v.visibleRows())
+		return nil
+	case tea.KeyPgDown:
+		v.pane().pageDown(v.visibleRows())
 		return v.loadMoreRows()
 	}
 

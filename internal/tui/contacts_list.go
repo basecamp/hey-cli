@@ -48,6 +48,14 @@ func (l *contactList) moveDown() {
 	}
 }
 
+func (l *contactList) pageDown() {
+	l.cursor, l.scrollOff = pageBy(l.cursor, l.scrollOff, l.visibleCount(), len(l.contacts), 1)
+}
+
+func (l *contactList) pageUp() {
+	l.cursor, l.scrollOff = pageBy(l.cursor, l.scrollOff, l.visibleCount(), len(l.contacts), -1)
+}
+
 // visibleCount is how many contacts the window holds. Each one takes one line.
 func (l *contactList) visibleCount() int {
 	return max(l.height, 1)

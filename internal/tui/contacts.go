@@ -374,6 +374,11 @@ func (v *contactsView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	case tea.KeyDown:
 		v.list.moveDown()
 		return v.loadMoreContacts()
+	case tea.KeyPgUp:
+		v.list.pageUp()
+	case tea.KeyPgDown:
+		v.list.pageDown()
+		return v.loadMoreContacts()
 	case tea.KeyEnter:
 		if contact := v.list.selected(); contact != nil {
 			return v.requestContactDetail(contact.ID)
