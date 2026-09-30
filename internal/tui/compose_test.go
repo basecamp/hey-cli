@@ -185,6 +185,29 @@ func TestComposeRefusesAnAddressHEYWouldDrop(t *testing.T) {
 	}
 }
 
+func TestComposeSendsAQuotedNameWithACommaAsOneRecipient(t *testing.T) {
+	v, rec := composeTestServer(t)
+	v.Resize(80, 30)
+	v.HandleContentKey(keyPress("c"))
+	typeText(v, `"Bryan, Annie" <annie@example.com>`)
+	v.HandleContentKey(keyPress("tab")) // cc
+	v.HandleContentKey(keyPress("tab")) // bcc
+	v.HandleContentKey(keyPress("tab")) // subject
+	typeText(v, "Kitchen remodel timeline")
+	v.HandleContentKey(keyPress("tab")) // body
+	typeText(v, "Cabinets land the week of the 14th.")
+
+	cmd := v.HandleContentKey(ctrlS())
+	if cmd == nil {
+		t.Fatalf("a quoted name with a comma was refused: %q", composeModal(v).status)
+	}
+	runCmd(cmd)
+	directly := rec.body["entry"].(map[string]any)["addressed"].(map[string]any)["directly"].([]any)
+	if len(directly) != 1 || directly[0] != `"Bryan, Annie" <annie@example.com>` {
+		t.Errorf("directly = %v, want the one recipient as typed", directly)
+	}
+}
+
 func TestComposeSendsMessage(t *testing.T) {
 	v, rec := composeTestServer(t)
 	v.Resize(80, 30)

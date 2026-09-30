@@ -211,6 +211,10 @@ func newDraftEditCommand() *draftEditCommand {
 	editCommand.cmd = &cobra.Command{
 		Use:   "edit <draft-id>",
 		Short: "Change a draft",
+		Long: `Change a draft.
+
+A --to, --cc or --bcc address HEY would drop without saying so — one with no domain,
+or a top-level domain HEY does not know — is refused before anything is sent.`,
 		Annotations: map[string]string{
 			"agent_notes": "--from chooses a configured sender email or ID within this draft account. It preserves the body verbatim, including existing signatures; use a body flag to replace those. Each flag replaces its field and an omitted flag keeps what the draft has — --to/--cc/--bcc replace that whole recipient kind (an explicit empty value clears it). With no field flags the body opens in $EDITOR as Markdown. A scheduled delivery is preserved.",
 		},

@@ -388,13 +388,7 @@ func (f *composeForm) view() string {
 
 // parseAddressList splits a comma-separated list, trimming blanks.
 func parseAddressList(s string) []string {
-	var out []string
-	for _, a := range strings.Split(s, ",") {
-		if a = strings.TrimSpace(a); a != "" {
-			out = append(out, a)
-		}
-	}
-	return out
+	return mail.SplitAddresses(s)
 }
 
 // --- mailView glue ---

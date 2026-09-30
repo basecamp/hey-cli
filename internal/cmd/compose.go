@@ -39,7 +39,11 @@ func newComposeCommand() *composeCommand {
 	composeCommand.cmd = &cobra.Command{
 		Use:   "compose",
 		Short: "Write and send a new email",
-		Args:  recipientsChecked(nil),
+		Long: `Write and send a new email, or reply to a thread with --thread-id.
+
+A --to, --cc or --bcc address HEY would drop without saying so — one with no domain,
+or a top-level domain HEY does not know — is refused before anything is sent.`,
+		Args: recipientsChecked(nil),
 		Annotations: map[string]string{
 			"agent_notes": "--from selects a configured sender email or ID from account senders; --account must agree. --from is only for new messages. Starts a new thread with --to (optionally --cc/--bcc), which requires --subject, or replies to an existing one with --thread-id, which does not. Repeatable --attach files are uploaded before sending and can be sent without body text. The body is Markdown; use --message-html to send raw HTML instead. --draft saves instead of sending — recipients become optional — and answers the draft ID for hey draft show/edit/send/delete. A new message ends with the sender's HEY name tag, as one composed in HEY does; --no-name-tag leaves it out.",
 		},
@@ -259,15 +263,5 @@ func recipientsChecked(args cobra.PositionalArgs) cobra.PositionalArgs {
 }
 
 func parseAddresses(s string) []string {
-	if s == "" {
-		return nil
-	}
-	var addrs []string
-	for _, addr := range strings.Split(s, ",") {
-		addr = strings.TrimSpace(addr)
-		if addr != "" {
-			addrs = append(addrs, addr)
-		}
-	}
-	return addrs
+	return mail.SplitAddresses(s)
 }

@@ -19,6 +19,48 @@ const maxAddressSize = 500
 // before the @.
 var encodedWord = regexp.MustCompile(`=\?[^?]*\?[bBqQ]\?[^?]*\?=`)
 
+// SplitAddresses splits a comma-separated recipient list, leaving a comma inside a
+// quoted name, a comment or angle brackets where it is: "Bryan, Annie"
+// <annie@example.com> is one recipient.
+func SplitAddresses(s string) []string {
+	var addresses []string
+	var b strings.Builder
+	quoted, depth, angled := false, 0, false
+	flush := func() {
+		if address := strings.TrimSpace(b.String()); address != "" {
+			addresses = append(addresses, address)
+		}
+		b.Reset()
+	}
+	escaped := false
+	for _, r := range s {
+		switch {
+		case escaped:
+			escaped = false
+		case r == '\\' && quoted:
+			escaped = true
+		case r == '"' && depth == 0:
+			quoted = !quoted
+		case quoted:
+		case r == '(':
+			depth++
+		case r == ')' && depth > 0:
+			depth--
+		case depth > 0:
+		case r == '<':
+			angled = true
+		case r == '>':
+			angled = false
+		case r == ',' && !angled:
+			flush()
+			continue
+		}
+		b.WriteRune(r)
+	}
+	flush()
+	return addresses
+}
+
 // InvalidAddress returns the first recipient HEY would certainly not deliver to, or ""
 // when there is none.
 //
@@ -69,18 +111,24 @@ func addrSpec(address string) (spec string, size int, ok bool) {
 		return parsed.Address, size, true
 	}
 	spec = withoutComments(address)
+	name := ""
 	if open := strings.LastIndexByte(spec, '<'); open >= 0 {
 		end := strings.IndexByte(spec[open:], '>')
 		if end < 0 {
 			return "", 0, false
 		}
+		name = strings.Join(strings.Fields(spec[:open]), " ")
 		spec = spec[open+1 : open+end]
 	}
 	spec = strings.Join(strings.Fields(spec), "")
 	if at := strings.LastIndexByte(spec, '@'); at >= 0 && strings.Contains(withoutQuoted(spec[:at]), "@") {
 		return "", 0, false
 	}
-	return spec, utf8.RuneCountInString(spec), true
+	size = utf8.RuneCountInString(spec)
+	if name != "" {
+		size += utf8.RuneCountInString(name) + len(" <>")
+	}
+	return spec, size, true
 }
 
 // withoutQuoted drops quoted strings, where an @ belongs to the name it is in.

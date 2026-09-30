@@ -48,6 +48,11 @@ func TestParseAddresses(t *testing.T) {
 			input: "alice@example.com,,bob@example.com",
 			want:  []string{"alice@example.com", "bob@example.com"},
 		},
+		{
+			name:  "a comma in a quoted name",
+			input: `"Bryan, Annie" <annie@example.com>, bob@example.com`,
+			want:  []string{`"Bryan, Annie" <annie@example.com>`, "bob@example.com"},
+		},
 	}
 
 	for _, tt := range tests {
