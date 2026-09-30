@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 )
 
@@ -228,5 +230,27 @@ func TestRenderLinkedRejectsMalformedDestinationAndHandlesNoLinks(t *testing.T) 
 		if linked := RenderLinked(htmlutil.ToMarkdown(source), 80, -1); len(linked.Links) != 0 {
 			t.Errorf("source %q produced links %#v", source, linked.Links)
 		}
+	}
+}
+
+func TestRenderShowsAnImageByNameAndLinksTheName(t *testing.T) {
+	attached := Render(htmlutil.ToMarkdown(`<figure data-trix-attachment='{"url":"/rails/active_storage/blobs/redirect/eyJfcmFpbHMiOnsi/1_an_Gustav.jpg","filename":"1_an_Gustav.jpg","contentType":"image/jpeg"}'></figure>`), 80)
+	if text := ansi.Strip(attached); text != "📷 1_an_Gustav.jpg" {
+		t.Errorf("attached image = %q, want its name behind a camera and no URL", text)
+	}
+
+	linked := RenderLinked(htmlutil.ToMarkdown(`<p><img src="https://images.example.com/lanterns.jpg" alt="Lantern walk" width="600" height="400"></p>`), 80, -1)
+	if text := ansi.Strip(linked.Text); text != "📷 Lantern walk" {
+		t.Errorf("web image = %q, want its name behind a camera and no URL", text)
+	}
+	if len(linked.Links) != 1 || linked.Links[0].Destination != "https://images.example.com/lanterns.jpg" {
+		t.Errorf("web image links = %#v, want its name selectable with the whole destination", linked.Links)
+	}
+}
+
+func TestRenderNeverHidesWhereAURLShapedImageLabelGoes(t *testing.T) {
+	out := ansi.Strip(Render(htmlutil.ToMarkdown(`<p><img alt="https://bank.example/login" src="https://evil.example/login"></p>`), 80))
+	if !strings.Contains(out, "📷 https://bank.example/login") || !strings.Contains(out, "https://evil.example/login") {
+		t.Errorf("rendered = %q, want the label and the destination it really links to", out)
 	}
 }

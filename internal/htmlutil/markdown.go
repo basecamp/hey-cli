@@ -673,7 +673,7 @@ func (m *markdownizer) image(n *html.Node) {
 	src, linkable := destination(getAttr(n, "src"))
 	switch {
 	case linkable:
-		m.write("![" + escapeText(alt, "alt") + "](" + src + ")")
+		m.write(imageMarkdown(alt, escapeText(alt, "alt"), src))
 	case alt != "":
 		m.write(escapeText(alt, m.line.String()))
 	}
@@ -724,18 +724,55 @@ func (m *markdownizer) actionTextAttachment(n *html.Node) {
 }
 
 func (m *markdownizer) attachment(filename, url, contentType string) {
-	filename = escapeText(strings.Join(strings.Fields(filename), " "), "📎 ")
+	icon := attachmentIcon(contentType)
+	name := strings.Join(strings.Fields(filename), " ")
+	filename = escapeText(name, icon)
 	if filename == "" {
 		filename = "attachment"
 	}
 	dest, linkable := destination(url)
 	m.block(func() {
 		if isImageContentType(contentType) && linkable {
-			m.write("![" + filename + "](" + dest + ")")
+			m.write(imageMarkdown(name, filename, dest))
 		} else {
-			m.write("📎 " + filename)
+			m.write(icon + filename)
 		}
 	})
+}
+
+// imageMarkdown writes an image. A terminal shows an image by its label alone, so a
+// label a reader could take for a URL gets the destination it links to written out
+// beside it, as a link's label does: "https://bank.example/login" pointed at
+// https://evil.example shows both. A label that is just the file the destination
+// names is not mistaken for anywhere else, and a relative destination is never a link.
+func imageMarkdown(label, escaped, dest string) string {
+	md := "![" + escaped + "](" + dest + ")"
+	if absolute(dest) && !strings.ContainsFunc(label, unicode.IsSpace) &&
+		strings.ContainsAny(label, ".:/@") && label != destinationFilename(dest) {
+		md += " <" + dest + ">"
+	}
+	return md
+}
+
+// attachmentIcon says what kind of file an attachment is. Each of these emoji is
+// drawn as an emoji without a variation selector, so every terminal gives it the
+// same two cells; 🖼️ and 🎞️ need U+FE0F for that, and terminals disagree on how
+// wide it makes them.
+func attachmentIcon(contentType string) string {
+	contentType = strings.ToLower(strings.TrimSpace(contentType))
+	switch {
+	case isImageContentType(contentType):
+		return "📷 "
+	case strings.HasPrefix(contentType, "video/"):
+		return "🎬 "
+	case strings.HasPrefix(contentType, "audio/"):
+		return "🎵 "
+	case contentType == "application/pdf", strings.HasPrefix(contentType, "text/"),
+		strings.Contains(contentType, "msword"), strings.Contains(contentType, "document"):
+		return "📄 "
+	default:
+		return "📎 "
+	}
 }
 
 func (m *markdownizer) children(n *html.Node) {

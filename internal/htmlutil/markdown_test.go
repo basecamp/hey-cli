@@ -278,7 +278,35 @@ func TestMarkdownRoundTripPreservesAuthoredContent(t *testing.T) {
 
 func TestToMarkdownTrixFileAttachment(t *testing.T) {
 	got := toMarkdown(`<figure data-trix-attachment='{"url":"/rails/blobs/q3.pdf","filename":"q3-report.pdf","contentType":"application/pdf"}'></figure>`)
-	want := "📎 q3-report.pdf"
+	want := "📄 q3-report.pdf"
+	if got != want {
+		t.Errorf("ToMarkdown = %q, want %q", got, want)
+	}
+}
+
+func TestAttachmentIconSaysWhatKindOfFileItIs(t *testing.T) {
+	for contentType, want := range map[string]string{
+		"image/jpeg":         "📷 ",
+		"video/mp4":          "🎬 ",
+		"audio/mpeg":         "🎵 ",
+		"application/pdf":    "📄 ",
+		"text/plain":         "📄 ",
+		"application/msword": "📄 ",
+		"application/vnd.openxmlformats-officedocument.wordprocessingml.document": "📄 ",
+		"application/zip": "📎 ",
+		"":                "📎 ",
+	} {
+		if got := attachmentIcon(contentType); got != want {
+			t.Errorf("attachmentIcon(%q) = %q, want %q", contentType, got, want)
+		}
+	}
+}
+
+func TestToMarkdownAttachmentsCarryTheirKind(t *testing.T) {
+	got := toMarkdown(`<figure data-trix-attachment='{"url":"/rails/blobs/walkthrough.mp4","filename":"walkthrough.mp4","contentType":"video/mp4"}'></figure>` +
+		`<figure data-trix-attachment='{"url":"/rails/blobs/voicemail.m4a","filename":"voicemail.m4a","contentType":"audio/mp4"}'></figure>` +
+		`<figure data-trix-attachment='{"url":"/rails/blobs/receipts.zip","filename":"receipts.zip","contentType":"application/zip"}'></figure>`)
+	want := "🎬 walkthrough.mp4\n\n🎵 voicemail.m4a\n\n📎 receipts.zip"
 	if got != want {
 		t.Errorf("ToMarkdown = %q, want %q", got, want)
 	}
@@ -286,7 +314,7 @@ func TestToMarkdownTrixFileAttachment(t *testing.T) {
 
 func TestToMarkdownActionTextAttachment(t *testing.T) {
 	got := toMarkdown(`<p>Attached:</p><action-text-attachment url="/rails/blobs/q3.pdf" filename="q3-report.pdf" content-type="application/pdf"></action-text-attachment>`)
-	want := "Attached:\n\n📎 q3-report.pdf"
+	want := "Attached:\n\n📄 q3-report.pdf"
 	if got != want {
 		t.Errorf("ToMarkdown = %q, want %q", got, want)
 	}

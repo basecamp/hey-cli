@@ -3107,8 +3107,8 @@ func TestMailViewAlwaysRendersAttachmentPanelAndTextMarker(t *testing.T) {
 	})
 
 	view := v.View()
-	for _, want := range []string{"Image: ", "Attachments", "chart.png", "image/png", "1.5 KB"} {
-		if !strings.Contains(view, want) {
+	for _, want := range []string{"📷 chart.png", "Attachments", "chart.png", "image/png", "1.5 KB"} {
+		if !strings.Contains(stripANSI(view), want) {
 			t.Errorf("thread view does not contain %q: %q", want, view)
 		}
 	}
