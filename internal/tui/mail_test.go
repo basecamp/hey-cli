@@ -482,7 +482,7 @@ func TestMailViewKeepsAPartialThreadsNoticeAndLeavesItUnseen(t *testing.T) {
 	}
 }
 
-func TestLinkDestinationMustFitFooterBeforeOpening(t *testing.T) {
+func TestLinkFooterShowsTheWholeDestinationBeforeOpening(t *testing.T) {
 	v := newMailView(testVC())
 	v.inThread = true
 	v.topicID = 100
@@ -530,90 +530,22 @@ func TestLinkDestinationMustFitFooterBeforeOpening(t *testing.T) {
 
 	v.vc.width = 24
 	footer, visible = v.LinkFooter()
-	if !visible || v.linkDestinationReviewable() || strings.Contains(footer, destination) {
-		t.Errorf("narrow link footer = %q visible=%v reviewable=%v", footer, visible, v.linkDestinationReviewable())
+	if !visible || !v.linkDestinationReviewable() || !strings.Contains(strings.ReplaceAll(footer, "\n", ""), destination) {
+		t.Errorf("narrow link footer = %q visible=%v reviewable=%v, want the whole destination wrapped", footer, visible, v.linkDestinationReviewable())
 	}
-	opened = ""
-	if cmd, handled := v.handleLinkKey(keyPress("enter")); !handled || cmd != nil || opened != "" {
-		t.Errorf("hidden destination opened: handled=%v command=%v destination=%q", handled, cmd != nil, opened)
+	for _, line := range strings.Split(footer, "\n") {
+		if lipgloss.Width(line) > v.vc.width {
+			t.Errorf("wrapped footer line %q is wider than %d", line, v.vc.width)
+		}
 	}
-
-	v.vc.width = 3
-	if v.linkDestinationReviewable() {
-		t.Error("destination wider than a tiny terminal was marked reviewable")
-	}
-	if cmd, handled := v.handleLinkKey(keyPress("enter")); !handled || cmd != nil {
-		t.Errorf("tiny terminal opened destination: handled=%v command=%v", handled, cmd != nil)
+	if !strings.HasSuffix(footer, "(press Enter to visit)") {
+		t.Errorf("wrapped footer = %q, want it to end with the action", footer)
 	}
 
 	v.selectedLink = -1
 	footer, visible = v.LinkFooter()
 	if !visible || footer != "" {
 		t.Errorf("unselected link footer = %q visible=%v, want one reserved blank row", footer, visible)
-	}
-}
-
-func TestLongLinkDestinationOpensWhenItsHostFits(t *testing.T) {
-	v := newMailView(testVC())
-	v.inThread = true
-	v.topicID = 100
-	v.selectedLink = 0
-	destination := "https://bulletin.example.com/T/OFC4/L2S/9330/B2827790/MNew/757620/28297471/JXSWDt/1/10333590/PxFblM2x.html?h=_GUL3Rht552Ov_esGif3"
-	v.links = []mailLink{{destination: destination, key: "501\x000"}}
-	v.selectedLinkKey = v.links[0].key
-	v.vc.width = 80
-	v.contentHeight = 12
-
-	footer, visible := v.LinkFooter()
-	if !visible || !v.linkDestinationReviewable() {
-		t.Fatalf("link footer = %q visible=%v, want a reviewable footer", footer, visible)
-	}
-	if !strings.HasPrefix(footer, "Open: https://bulletin.example.com/") || !strings.HasSuffix(footer, "... (press Enter to visit)") {
-		t.Errorf("link footer = %q, want the host in full and the path cut short", footer)
-	}
-	if width := lipgloss.Width(footer); width > v.vc.width {
-		t.Errorf("link footer is %d cells wide, want at most %d", width, v.vc.width)
-	}
-
-	var opened string
-	v.vc.openURL = func(destination string) error {
-		opened = destination
-		return nil
-	}
-	cmd, handled := v.handleLinkKey(keyPress("enter"))
-	if !handled || cmd == nil {
-		t.Fatal("a long destination with a visible host was not opened")
-	}
-	runCmd(cmd)
-	if opened != destination {
-		t.Errorf("opened %q, want the complete destination %q", opened, destination)
-	}
-
-	v.vc.width = 50
-	if footer, _ := v.LinkFooter(); v.linkDestinationReviewable() || !strings.HasPrefix(footer, "Enlarge the terminal") {
-		t.Errorf("footer too narrow for the host = %q reviewable=%v, want the enlarge hint", footer, v.linkDestinationReviewable())
-	}
-
-	v.vc.width = 80
-	v.links[0].destination = "mailto:" + strings.Repeat("quarterly.reports.", 5) + "@example.com"
-	if v.linkDestinationReviewable() {
-		t.Error("a long destination with no host was marked reviewable without being shown in full")
-	}
-}
-
-func TestLinkOrigin(t *testing.T) {
-	for destination, want := range map[string]string{
-		"https://example.com/quarterly-report":           "https://example.com",
-		"https://example.com?utm_source=newsletter":      "https://example.com",
-		"http://example.com:8080#top":                    "http://example.com:8080",
-		"https://example.com@phishing.example.org/login": "https://example.com@phishing.example.org",
-		"https://example.com":                            "https://example.com",
-		"mailto:annie.bryan@example.com":                 "",
-		"https:///quarterly-report":                      "",
-	} {
-		if got := linkOrigin(destination); got != want {
-			t.Errorf("linkOrigin(%q) = %q, want %q", destination, got, want)
-		}
 	}
 }
 
