@@ -45,8 +45,8 @@ func InvalidAddress(lists ...[]string) string {
 }
 
 func deliverable(address string) bool {
-	spec, size := addrSpec(address)
-	if size > maxAddressSize {
+	spec, size, ok := addrSpec(address)
+	if !ok || size > maxAddressSize {
 		return false
 	}
 	at := strings.LastIndexByte(spec, '@')
@@ -57,23 +57,44 @@ func deliverable(address string) bool {
 }
 
 // addrSpec returns the bare address and the fewest characters HEY could write the
-// whole address out in, so that a size over the limit is over it for HEY too.
-func addrSpec(address string) (spec string, size int) {
+// whole address out in, so that a size over the limit is over it for HEY too. ok is
+// false for what HEY's parser refuses outright: an unclosed angle bracket, or a second
+// @ outside quotes.
+func addrSpec(address string) (spec string, size int, ok bool) {
 	if parsed, err := netmail.ParseAddress(address); err == nil {
 		size = utf8.RuneCountInString(parsed.Address)
 		if parsed.Name != "" {
 			size += utf8.RuneCountInString(parsed.Name) + len(" <>")
 		}
-		return parsed.Address, size
+		return parsed.Address, size, true
 	}
 	spec = withoutComments(address)
 	if open := strings.LastIndexByte(spec, '<'); open >= 0 {
-		if end := strings.IndexByte(spec[open:], '>'); end > 0 {
-			spec = spec[open+1 : open+end]
+		end := strings.IndexByte(spec[open:], '>')
+		if end < 0 {
+			return "", 0, false
 		}
+		spec = spec[open+1 : open+end]
 	}
 	spec = strings.Join(strings.Fields(spec), "")
-	return spec, utf8.RuneCountInString(spec)
+	if at := strings.LastIndexByte(spec, '@'); at >= 0 && strings.Contains(withoutQuoted(spec[:at]), "@") {
+		return "", 0, false
+	}
+	return spec, utf8.RuneCountInString(spec), true
+}
+
+// withoutQuoted drops quoted strings, where an @ belongs to the name it is in.
+func withoutQuoted(s string) string {
+	var b strings.Builder
+	quoted := false
+	for _, r := range s {
+		if r == '"' {
+			quoted = !quoted
+		} else if !quoted {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // withoutComments drops parenthesized comments outside quoted strings.
@@ -98,36 +119,27 @@ func withoutComments(s string) string {
 	return b.String()
 }
 
-// deliverableDomain asks whether a domain ends in a public suffix, the way HEY's
-// PublicSuffix lookup does: ICANN rules only, wildcards included, private rules
-// ignored. HEY's list spells an internationalized suffix in Unicode, so a label typed
-// in punycode matches no rule there and is kept from matching one here.
+// deliverableDomain asks whether a domain ends in a top-level domain HEY's public
+// suffix list knows, which is all HEY's lookup comes down to: some rule matches any
+// domain under a known top-level domain, and none matches one under an unknown one.
+// HEY's list spells an internationalized top-level domain in Unicode, so one typed in
+// punycode matches nothing there, and x/net's list, spelled in punycode, is asked in
+// punycode without the lookup's mapping, which would turn a fullwidth .ｃｏｍ into .com.
 func deliverableDomain(domain string) bool {
 	domain = strings.ToLower(domain)
 	if strings.HasSuffix(domain, "localdomain") {
 		return true
 	}
-	labels := strings.Split(domain, ".")
-	for i, label := range labels {
-		switch {
-		case label == "":
-			return false
-		case strings.HasPrefix(label, "xn--"):
-			labels[i] = "punycode-label"
-		default:
-			ascii, err := idna.Punycode.ToASCII(label)
-			if err != nil {
-				return false
-			}
-			labels[i] = ascii
-		}
+	tld := domain[strings.LastIndexByte(domain, '.')+1:]
+	if tld == "" || strings.HasPrefix(tld, "xn--") {
+		return false
 	}
-	if _, icann := publicsuffix.PublicSuffix(strings.Join(labels, ".")); icann {
-		return true
+	ascii, err := idna.Punycode.ToASCII(tld)
+	if err != nil {
+		return false
 	}
-	// A private rule — blogspot.com — outranks the ICANN rule under it in the lookup,
-	// and HEY ignores private rules, so the top-level domain is asked on its own.
-	tld := labels[len(labels)-1]
-	suffix, icann := publicsuffix.PublicSuffix(tld)
-	return icann && suffix == tld
+	// Asked under a label, so a top-level domain with only a wildcard rule (*.np)
+	// matches as well.
+	_, icann := publicsuffix.PublicSuffix("x." + ascii)
+	return icann
 }

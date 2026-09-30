@@ -20,6 +20,9 @@ func TestInvalidAddressFollowsHEYsRule(t *testing.T) {
 		"annie@example.np": true,
 		"annie@www.ck":     true,
 		"annie@example.jm": true,
+		// Checked against the dev server: HEY asks only whether the top-level domain is known.
+		"annie@np":           true,
+		"annie@example..com": true,
 		// Ruby's parser takes these, and HEY keeps and prefills them; net/mail does not.
 		`a."b"@example.com`:          true,
 		`"a"."b"@example.com`:        true,
@@ -28,14 +31,15 @@ func TestInvalidAddressFollowsHEYsRule(t *testing.T) {
 		// Length is HEY's: characters, not bytes.
 		strings.Repeat("é", 245) + "@example.com": true,
 
-		"a":                     false,
-		"annie":                 false,
-		"annie@":                false,
-		"@example.com":          false,
-		"annie@example":         false,
-		"annie@np":              false,
-		"annie@example.notatld": false,
-		"annie@example.com.":    false,
+		"a":                        false,
+		"annie":                    false,
+		"annie@":                   false,
+		"@example.com":             false,
+		"annie@example":            false,
+		"annie@example.notatld":    false,
+		"annie@example.com.":       false,
+		"annie@@example.com":       false,
+		"Annie <annie@example.com": false,
 		// HEY's list spells suffixes in Unicode, so punycode and fullwidth forms match nothing.
 		"annie@xn--e1afmkfd.xn--p1ai": false,
 		"annie@example.ｃｏｍ":           false,
