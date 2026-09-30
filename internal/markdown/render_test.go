@@ -247,3 +247,10 @@ func TestRenderShowsAnImageByNameAndLinksTheName(t *testing.T) {
 		t.Errorf("web image links = %#v, want its name selectable with the whole destination", linked.Links)
 	}
 }
+
+func TestRenderNeverHidesWhereAURLShapedImageLabelGoes(t *testing.T) {
+	out := ansi.Strip(Render(htmlutil.ToMarkdown(`<p><img alt="https://bank.example/login" src="https://evil.example/login"></p>`), 80))
+	if !strings.Contains(out, "📷 https://bank.example/login") || !strings.Contains(out, "https://evil.example/login") {
+		t.Errorf("rendered = %q, want the label and the destination it really links to", out)
+	}
+}

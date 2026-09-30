@@ -630,3 +630,18 @@ func FuzzToMarkdownTerminalSafety(f *testing.F) {
 		assertSafeTree(t, md)
 	})
 }
+
+func TestToMarkdownImageLabelThatLooksLikeAURLShowsItsDestination(t *testing.T) {
+	for input, want := range map[string]string{
+		`<img alt="https://bank.example/login" src="https://evil.example/login">`:                                                                    "![https://bank.example/login](https://evil.example/login) <https://evil.example/login>",
+		`<img alt="bank.example" src="https://evil.example/pixel.png">`:                                                                              "![bank.example](https://evil.example/pixel.png) <https://evil.example/pixel.png>",
+		`<img alt="lanterns.jpg" src="https://images.example.org/lanterns.jpg">`:                                                                     "![lanterns.jpg](https://images.example.org/lanterns.jpg)",
+		`<img alt="Lantern walk poster" src="https://images.example.org/p.jpg">`:                                                                     "![Lantern walk poster](https://images.example.org/p.jpg)",
+		`<figure data-trix-attachment='{"url":"/rails/blobs/abc/bank.example","filename":"bank.example","contentType":"image/png"}'></figure>`:       "![bank.example](/rails/blobs/abc/bank.example)",
+		`<figure data-trix-attachment='{"url":"https://evil.example/q3.png","filename":"https://bank.example","contentType":"image/png"}'></figure>`: "![https://bank.example](https://evil.example/q3.png) <https://evil.example/q3.png>",
+	} {
+		if got := toMarkdown(input); got != want {
+			t.Errorf("ToMarkdown(%s) = %q, want %q", input, got, want)
+		}
+	}
+}

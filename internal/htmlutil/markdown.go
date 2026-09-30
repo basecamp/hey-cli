@@ -673,7 +673,7 @@ func (m *markdownizer) image(n *html.Node) {
 	src, linkable := destination(getAttr(n, "src"))
 	switch {
 	case linkable:
-		m.write("![" + escapeText(alt, "alt") + "](" + src + ")")
+		m.write(imageMarkdown(alt, escapeText(alt, "alt"), src))
 	case alt != "":
 		m.write(escapeText(alt, m.line.String()))
 	}
@@ -725,18 +725,33 @@ func (m *markdownizer) actionTextAttachment(n *html.Node) {
 
 func (m *markdownizer) attachment(filename, url, contentType string) {
 	icon := attachmentIcon(contentType)
-	filename = escapeText(strings.Join(strings.Fields(filename), " "), icon)
+	name := strings.Join(strings.Fields(filename), " ")
+	filename = escapeText(name, icon)
 	if filename == "" {
 		filename = "attachment"
 	}
 	dest, linkable := destination(url)
 	m.block(func() {
 		if isImageContentType(contentType) && linkable {
-			m.write("![" + filename + "](" + dest + ")")
+			m.write(imageMarkdown(name, filename, dest))
 		} else {
 			m.write(icon + filename)
 		}
 	})
+}
+
+// imageMarkdown writes an image. A terminal shows an image by its label alone, so a
+// label a reader could take for a URL gets the destination it links to written out
+// beside it, as a link's label does: "https://bank.example/login" pointed at
+// https://evil.example shows both. A label that is just the file the destination
+// names is not mistaken for anywhere else, and a relative destination is never a link.
+func imageMarkdown(label, escaped, dest string) string {
+	md := "![" + escaped + "](" + dest + ")"
+	if absolute(dest) && !strings.ContainsFunc(label, unicode.IsSpace) &&
+		strings.ContainsAny(label, ".:/@") && label != destinationFilename(dest) {
+		md += " <" + dest + ">"
+	}
+	return md
 }
 
 // attachmentIcon says what kind of file an attachment is. Each of these emoji is
