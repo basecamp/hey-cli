@@ -3030,9 +3030,9 @@ func TestMailViewDownloadsBeforeExplicitExternalOpen(t *testing.T) {
 		t.Fatalf("loading a thread opened an attachment: %v", events)
 	}
 
-	open := v.HandleContentKey(keyPress("o"))
+	open := v.HandleContentKey(keyPress("enter"))
 	if open == nil {
-		t.Fatal("o should open the selected attachment")
+		t.Fatal("Enter should open the selected attachment")
 	}
 	if len(events) != 0 {
 		t.Fatalf("handling the key opened an attachment before the command ran: %v", events)
@@ -3071,7 +3071,7 @@ func TestMailViewDoesNotOpenAttachmentWhenDownloadFails(t *testing.T) {
 		attachments: []messageAttachment{{ID: "501:1", MessageID: 501, Filename: "chart.png", URL: "/rails/blobs/chart.png"}},
 	})
 
-	open := v.HandleContentKey(keyPress("o"))
+	open := v.HandleContentKey(keyPress("enter"))
 	v.Update(open())
 	if openCalls != 0 {
 		t.Errorf("opener was called %d times after download failure", openCalls)
