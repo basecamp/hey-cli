@@ -93,7 +93,8 @@ While any threads are selected, the help bar counts them and offers only what ac
 all of them: `e`, `u`, `t` and Ctrl+B. The other thread actions — moving, filing, labels,
 collections, spam, ignoring, reply and forward — work on one thread at a time, so they
 are refused with a notice rather than quietly acting on the thread under the cursor;
-press Escape to clear the selection first. Escape still closes an open form, cancels a
+press Escape to clear the selection first. Escape still closes an open form (asking first
+when it holds a message you have written), cancels a
 thread that is loading and leaves an open thread before it clears a selection, and on
 Previously Seen the first Escape clears the selection and the next one leaves. A bulk
 action lets go of the threads it acted on once HEY has answered, and keeps them selected if
@@ -124,6 +125,25 @@ While writing a new message, reply or forward, Ctrl+T opens the searchable Snipp
 picker. HEY never chooses a default: Enter inserts the selected snippet at the body
 cursor, Escape returns without changing the draft, and the picker can be reopened to
 insert another.
+
+Typing in To, Cc or Bcc — in a new message, a reply or a forward — opens a short list of
+people under the field, from the same list HEY's web composer suggests: the people you
+wrote to most recently first, then your contacts by name, then "Everyone at" your
+company and your contact groups. It narrows as you type, matching a name or an address,
+and leaves out anyone already on that line. ↑ and ↓ (or Ctrl+P and Ctrl+N) move through
+it; Tab or Enter adds the highlighted person as `Name <address>, ` in place of what you
+were typing, ready for the next one; a group adds every address in it. Escape closes the
+list and nothing else, and moving the cursor closes it too. With the list closed, Tab and
+Enter move between fields as they always have. The list is read in the background when
+the form opens, so typing never waits on it, and an address typed in full works whether
+it arrives or not.
+
+Escape on a message you have written something in asks before it goes: `s` (or Enter)
+keeps it in HEY's drafts, where the web app and your phone can pick it up, `d` discards
+it, and Escape takes you back to it. A form holding only what it opened with — an empty
+new message, or a reply with just HEY's prefilled recipients — closes without asking. A
+draft with an address HEY would not deliver to is refused the way a send is, so the
+draft never comes back without that recipient.
 
 ## Live updates
 

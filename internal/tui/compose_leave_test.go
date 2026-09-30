@@ -1,0 +1,187 @@
+package tui
+
+import (
+	"fmt"
+	"strings"
+	"testing"
+)
+
+func TestEscClosesAFormWithNothingToLose(t *testing.T) {
+	v, _ := recipientsTestView(t)
+	form := openComposer(t, v)
+	typeText(v, "x")
+	v.HandleContentKey(keyPress("backspace"))
+	if form.edited() {
+		t.Fatal("a form typed into and emptied again has nothing in it")
+	}
+	v.HandleContentKey(keyPress("esc"))
+	if v.CapturingInput() {
+		t.Error("esc should close a form with nothing to lose")
+	}
+}
+
+func TestEscLeavesAnUntouchedReplyWithoutAsking(t *testing.T) {
+	v, _ := recipientsTestView(t)
+	openThreadComposer(t, v, v.loadReplyContext(100, "Quarterly planning"))
+	v.HandleContentKey(keyPress("esc"))
+	if v.CapturingInput() {
+		t.Error("a reply holding only what HEY prefilled has nothing to lose")
+	}
+}
+
+func TestEscAsksBeforeLosingAMessage(t *testing.T) {
+	v, rec := recipientsTestView(t)
+	form := openComposer(t, v)
+	form.focus = form.bodyIndex()
+	_ = form.focusCurrent()
+	typeText(v, "Lunch on Friday?")
+
+	v.HandleContentKey(keyPress("esc"))
+	if !form.confirmLeave || composeModal(v) == nil {
+		t.Fatal("esc on an edited message should ask")
+	}
+	view := v.View()
+	for _, want := range []string{"Close this message?", "save draft", "discard", "keep editing"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the question should offer %q:\n%s", want, view)
+		}
+	}
+	if b := v.HelpBindings(); len(b) == 0 || b[0].key != "s" {
+		t.Errorf("the help bar should describe the question, got %v", b)
+	}
+
+	// Typing is not an answer: the message is left as it was.
+	v.HandleContentKey(keyPress("x"))
+	if form.body.Value() != "Lunch on Friday?" || !form.confirmLeave {
+		t.Errorf("a stray key should neither type nor answer, body %q", form.body.Value())
+	}
+
+	v.HandleContentKey(keyPress("esc"))
+	if form.confirmLeave || composeModal(v) != form {
+		t.Fatal("esc on the question should go back to the message")
+	}
+	typeText(v, " Noon works.")
+	if form.body.Value() != "Lunch on Friday? Noon works." {
+		t.Errorf("editing should carry on where it was, body %q", form.body.Value())
+	}
+
+	v.HandleContentKey(keyPress("esc"))
+	v.HandleContentKey(keyPress("d"))
+	if v.CapturingInput() {
+		t.Error("d should discard the message")
+	}
+	if rec.writePath != "" {
+		t.Errorf("discarding should write nothing, got %s %s", rec.writeMethod, rec.writePath)
+	}
+}
+
+func TestSavingADraftOnTheWayOut(t *testing.T) {
+	for _, key := range []string{"s", "enter"} {
+		t.Run(key, func(t *testing.T) {
+			v, rec := recipientsTestView(t)
+			form := openComposer(t, v)
+			typeText(v, "jan")
+			v.HandleContentKey(keyPress("tab"))
+			form.inputs[fieldSubject].SetValue("Lunch on Friday")
+
+			v.HandleContentKey(keyPress("esc"))
+			cmd := v.HandleContentKey(keyPress(key))
+			if !form.sending || !strings.Contains(v.View(), "Saving draft") {
+				t.Fatal("saving should hold the form and say so")
+			}
+			v.HandleContentKey(keyPress("esc"))
+			if composeModal(v) != form {
+				t.Fatal("a form that is saving holds on to esc")
+			}
+			saved := runCmd(cmd)
+			if _, ok := saved.(draftSavedMsg); !ok {
+				t.Fatalf("save = %#v", saved)
+			}
+			v.Update(saved)
+			if v.CapturingInput() {
+				t.Error("a saved draft should close the form")
+			}
+
+			if rec.writeMethod != "POST" || rec.writePath != "/messages.json" {
+				t.Fatalf("draft went to %s %s", rec.writeMethod, rec.writePath)
+			}
+			entry, _ := rec.writeBody["entry"].(map[string]any)
+			message, _ := rec.writeBody["message"].(map[string]any)
+			addressed, _ := entry["addressed"].(map[string]any)
+			if entry["status"] != "drafted" || message["subject"] != "Lunch on Friday" ||
+				fmt.Sprint(addressed["directly"]) != "[Jane Doe <jane@example.com>]" {
+				t.Errorf("draft body = %v", rec.writeBody)
+			}
+		})
+	}
+}
+
+func TestSavingAReplyDraftFilesItUnderTheEntry(t *testing.T) {
+	v, rec := recipientsTestView(t)
+	form := openThreadComposer(t, v, v.loadReplyContext(100, "Quarterly planning"))
+	typeText(v, "Count me in.")
+	v.HandleContentKey(keyPress("esc"))
+	v.Update(runCmd(v.HandleContentKey(keyPress("s"))))
+	if v.CapturingInput() {
+		t.Fatal("a saved reply draft should close the form")
+	}
+	if rec.writePath != "/entries/501/replies.json" {
+		t.Fatalf("reply draft went to %s", rec.writePath)
+	}
+	entry, _ := rec.writeBody["entry"].(map[string]any)
+	message, _ := rec.writeBody["message"].(map[string]any)
+	if entry["status"] != "drafted" || message["subject"] != "Re: Quarterly planning" ||
+		!strings.Contains(fmt.Sprint(message["content"]), "Count me in.") {
+		t.Errorf("reply draft body = %v", rec.writeBody)
+	}
+	_ = form
+}
+
+func TestSavingAForwardDraftKeepsTheForwardedMessage(t *testing.T) {
+	v, rec := recipientsTestView(t)
+	openThreadComposer(t, v, v.loadForwardContext(100, "Quarterly planning"))
+	typeText(v, "morty@example.com")
+	v.HandleContentKey(keyPress("esc"))
+	v.Update(runCmd(v.HandleContentKey(keyPress("s"))))
+	if rec.writePath != "/messages.json" {
+		t.Fatalf("forward draft went to %s", rec.writePath)
+	}
+	message, _ := rec.writeBody["message"].(map[string]any)
+	if message["subject"] != "Fwd: Quarterly planning" || !strings.Contains(fmt.Sprint(message["content"]), "Quoted message") {
+		t.Errorf("forward draft body = %v", rec.writeBody)
+	}
+}
+
+func TestAFailedDraftSaveKeepsTheMessage(t *testing.T) {
+	v, rec := recipientsTestView(t)
+	form := openComposer(t, v)
+	typeText(v, "rick@example.com")
+	rec.failDrafts = true
+	v.HandleContentKey(keyPress("esc"))
+	v.Update(runCmd(v.HandleContentKey(keyPress("s"))))
+	if composeModal(v) != form || form.sending || form.confirmLeave {
+		t.Fatal("a failed save should leave the message open to edit")
+	}
+	if !form.isError || !strings.Contains(form.status, "Could not save the draft") {
+		t.Errorf("status = %q", form.status)
+	}
+	if form.inputs[fieldTo].Value() != "rick@example.com" {
+		t.Errorf("the message should be as it was, To %q", form.inputs[fieldTo].Value())
+	}
+}
+
+func TestADraftWithAnAddressHEYWouldDropIsNotSaved(t *testing.T) {
+	v, rec := recipientsTestView(t)
+	form := openComposer(t, v)
+	typeText(v, "sam@example")
+	v.HandleContentKey(keyPress("esc"))
+	if cmd := v.HandleContentKey(keyPress("s")); cmd != nil {
+		t.Fatal("nothing should be sent")
+	}
+	if composeModal(v) != form || !form.isError || !strings.Contains(form.status, "sam@example") {
+		t.Errorf("the form should stay open naming the address, status %q", form.status)
+	}
+	if rec.writePath != "" {
+		t.Errorf("nothing should have been written, got %s", rec.writePath)
+	}
+}

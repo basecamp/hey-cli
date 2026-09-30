@@ -416,7 +416,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mailWatchAttempt++
 		return m, startMailWatchCmd(m.watchCtx, m.watchMail, m.mailWatchAttempt)
 
-	case mailRefreshDueMsg, postingsRefreshedMsg:
+	// The recipient list can arrive after the composer that asked for it has sent and
+	// the reader has gone to another section; the list is still Mail's to keep.
+	case mailRefreshDueMsg, postingsRefreshedMsg, recipientsLoadedMsg:
 		cmd, _ := m.mailView.Update(msg)
 		return m, m.stampViewCmd(cmd)
 

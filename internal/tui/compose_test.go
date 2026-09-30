@@ -684,10 +684,16 @@ func TestModelRoutesAllKeysToOpenForm(t *testing.T) {
 	if composeModal(m.mailView).focus != int(fieldCc) {
 		t.Errorf("tab should move to Cc, got %d", composeModal(m.mailView).focus)
 	}
+	// The form holds a "q" now, so esc asks before it lets go of it.
 	updated, _ = m.Update(keyPress("esc"))
 	m = updated.(model)
+	if form := composeModal(m.mailView); form == nil || !form.confirmLeave {
+		t.Fatal("esc on an edited form should ask through the model")
+	}
+	updated, _ = m.Update(keyPress("d"))
+	m = updated.(model)
 	if m.mailView.CapturingInput() {
-		t.Error("esc should close the form through the model")
+		t.Error("d should discard the form through the model")
 	}
 }
 
