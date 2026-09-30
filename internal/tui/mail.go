@@ -1753,7 +1753,8 @@ func (v *mailView) threadNotices() []string {
 
 // LinkFooter reserves one footer row for a thread with selectable links. Its text
 // stays blank until a link is selected, so moving through links never changes the
-// viewport's height. A destination can open only when the footer shows it in full.
+// viewport's height. A destination can open only when the footer shows at least
+// its scheme and host in full.
 func (v *mailView) LinkFooter() (text string, visible bool) {
 	if !v.inThread || v.modal != nil || len(v.links) == 0 {
 		return "", false
@@ -1771,11 +1772,34 @@ func (v *mailView) linkDestinationFooter() (string, bool) {
 		return "", false
 	}
 	destination := terminal.SanitizeLine(v.links[v.selectedLink].destination)
-	footer := "Open: " + destination + " (press Enter to visit)"
+	const prefix, suffix = "Open: ", " (press Enter to visit)"
+	footer := prefix + destination + suffix
 	if lipgloss.Width(footer) <= width {
 		return footer, true
 	}
+	// A long destination can still open when the footer shows where it goes: the
+	// scheme and host in full, with only the tail of the path cut short.
+	room := width - lipgloss.Width(prefix+suffix)
+	if origin := linkOrigin(destination); origin != "" && room >= lipgloss.Width(origin)+3 {
+		return prefix + truncateToWidth(destination, room) + suffix, true
+	}
 	return truncateToWidth("Enlarge the terminal to inspect this link", width), false
+}
+
+// linkOrigin is a destination up to the end of its authority — "https://example.com"
+// of "https://example.com/path" — or empty when it has none, as a mailto link does.
+func linkOrigin(destination string) string {
+	scheme, rest, ok := strings.Cut(destination, "://")
+	if !ok {
+		return ""
+	}
+	if end := strings.IndexAny(rest, "/?#"); end >= 0 {
+		rest = rest[:end]
+	}
+	if rest == "" {
+		return ""
+	}
+	return scheme + "://" + rest
 }
 
 func (v *mailView) linkDestinationReviewable() bool {
