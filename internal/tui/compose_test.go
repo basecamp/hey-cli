@@ -143,7 +143,7 @@ func TestComposeValidatesBeforeSending(t *testing.T) {
 	if !composeModal(v).isError || !strings.Contains(composeModal(v).status, "recipient") {
 		t.Errorf("expected a recipient error, got %q", composeModal(v).status)
 	}
-	typeText(v, "a@b.com")
+	typeText(v, "annie@example.com")
 	v.HandleContentKey(keyPress("tab")) // cc
 	v.HandleContentKey(keyPress("tab")) // bcc
 	v.HandleContentKey(keyPress("tab")) // subject
@@ -152,6 +152,59 @@ func TestComposeValidatesBeforeSending(t *testing.T) {
 	}
 	if !strings.Contains(composeModal(v).status, "Subject") {
 		t.Errorf("expected a subject error, got %q", composeModal(v).status)
+	}
+}
+
+func TestComposeRefusesAnAddressHEYWouldDrop(t *testing.T) {
+	for _, recipients := range []string{"a", "a, annie@example.com"} {
+		v, rec := composeTestServer(t)
+		v.Resize(80, 30)
+		v.HandleContentKey(keyPress("c"))
+		typeText(v, recipients)
+		v.HandleContentKey(keyPress("tab")) // cc
+		v.HandleContentKey(keyPress("tab")) // bcc
+		v.HandleContentKey(keyPress("tab")) // subject
+		typeText(v, "Quarterly planning notes")
+		v.HandleContentKey(keyPress("tab")) // body
+		typeText(v, "Here are the notes from Tuesday.")
+
+		if cmd := v.HandleContentKey(ctrlS()); cmd != nil {
+			runCmd(cmd)
+			t.Fatalf("To %q: ctrl+s sent a message HEY would not deliver to everyone on it", recipients)
+		}
+		form := composeModal(v)
+		if form == nil || form.sending {
+			t.Fatalf("To %q: the form closed or is sending", recipients)
+		}
+		if !form.isError || form.status != "Not a valid email address: a" {
+			t.Errorf("To %q: status = %q, want the bad address named", recipients, form.status)
+		}
+		if rec.method != "" {
+			t.Errorf("To %q: sent %s %s", recipients, rec.method, rec.path)
+		}
+	}
+}
+
+func TestComposeSendsAQuotedNameWithACommaAsOneRecipient(t *testing.T) {
+	v, rec := composeTestServer(t)
+	v.Resize(80, 30)
+	v.HandleContentKey(keyPress("c"))
+	typeText(v, `"Bryan, Annie" <annie@example.com>`)
+	v.HandleContentKey(keyPress("tab")) // cc
+	v.HandleContentKey(keyPress("tab")) // bcc
+	v.HandleContentKey(keyPress("tab")) // subject
+	typeText(v, "Kitchen remodel timeline")
+	v.HandleContentKey(keyPress("tab")) // body
+	typeText(v, "Cabinets land the week of the 14th.")
+
+	cmd := v.HandleContentKey(ctrlS())
+	if cmd == nil {
+		t.Fatalf("a quoted name with a comma was refused: %q", composeModal(v).status)
+	}
+	runCmd(cmd)
+	directly := rec.body["entry"].(map[string]any)["addressed"].(map[string]any)["directly"].([]any)
+	if len(directly) != 1 || directly[0] != `"Bryan, Annie" <annie@example.com>` {
+		t.Errorf("directly = %v, want the one recipient as typed", directly)
 	}
 }
 
@@ -214,6 +267,25 @@ func TestComposeSendFailureKeepsForm(t *testing.T) {
 	}
 	if composeModal(v).sending || !composeModal(v).isError || !strings.Contains(composeModal(v).status, "Send failed") {
 		t.Errorf("expected an inline error, got sending=%v status=%q", composeModal(v).sending, composeModal(v).status)
+	}
+}
+
+func TestReplyPrefilledWithAnAddressHEYAcceptsStillSends(t *testing.T) {
+	v, rec := composeTestServer(t)
+	v.Resize(80, 30)
+	// HEY keeps quoted local parts net/mail cannot parse, and prefills them in a reply.
+	v.Update(replyContextLoadedMsg{
+		boxID: 1, topicID: 7, topicName: "Kitchen", entryID: 99, subject: "Re: Kitchen",
+		actingSenderID: 7,
+		to:             []string{`annie."bryan"@example.com`},
+	})
+	typeText(v, "Cabinets land the week of the 14th.")
+	cmd := v.HandleContentKey(ctrlS())
+	if cmd == nil {
+		t.Fatalf("a reply HEY prefilled was refused: %q", composeModal(v).status)
+	}
+	if sent, ok := runCmd(cmd).(composeSentMsg); !ok || sent.err != nil || rec.method != "POST" {
+		t.Fatalf("expected the reply to be sent, got %#v via %s %s", sent, rec.method, rec.path)
 	}
 }
 

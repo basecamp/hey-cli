@@ -15,6 +15,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/mail"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 // --- Messages ---
@@ -221,6 +222,9 @@ func (f *composeForm) validate() string {
 	if f.mode != composeReply && len(to)+len(cc)+len(bcc) == 0 {
 		return "Add at least one recipient"
 	}
+	if address := mail.InvalidAddress(to, cc, bcc); address != "" {
+		return "Not a valid email address: " + terminal.SanitizeLine(address)
+	}
 	if f.mode != composeReply && subject == "" {
 		return "Subject is required"
 	}
@@ -384,13 +388,7 @@ func (f *composeForm) view() string {
 
 // parseAddressList splits a comma-separated list, trimming blanks.
 func parseAddressList(s string) []string {
-	var out []string
-	for _, a := range strings.Split(s, ",") {
-		if a = strings.TrimSpace(a); a != "" {
-			out = append(out, a)
-		}
-	}
-	return out
+	return mail.SplitAddresses(s)
 }
 
 // --- mailView glue ---

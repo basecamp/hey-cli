@@ -67,7 +67,7 @@ uppercase belongs to Labels:
 
 A thread opens on its latest message; `k` steps back through the ones before it and `j` forward again.
 
-Sending a reply or a forward from a thread closes the thread and returns you to the list you opened it from — the Imbox, a search, a bundle. A send that fails keeps the form open.
+Sending a reply or a forward from a thread closes the thread and returns you to the list you opened it from — the Imbox, a search, a bundle. A send that fails keeps the form open, and so does an address HEY would not deliver to: the form names it (`Not a valid email address: a`) rather than sending a message HEY would quietly keep as a draft, or send without that recipient.
 
 While reading a thread, the From header shows the actual send-as address when HEY records one separately from the account user.
 

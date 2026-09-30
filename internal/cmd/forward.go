@@ -24,13 +24,17 @@ func newForwardCommand() *forwardCommand {
 	forwardCommand.cmd = &cobra.Command{
 		Use:   "forward <thread-id>",
 		Short: "Forward the latest message in a thread",
+		Long: `Forward the latest message in a thread.
+
+A --to, --cc or --bcc address HEY would drop without saying so — one with no domain,
+or a top-level domain HEY does not know — is refused before anything is sent.`,
 		Annotations: map[string]string{
 			"agent_notes": "Forwards the latest entry in a thread with HEY's quoted content. Accepts comma-separated recipients and an optional note via -m.",
 		},
 		Example: `  hey forward 12345 --to alice@example.com
   hey forward 12345 --to alice@example.com --cc bob@example.org -m "For your review"`,
 		RunE: forwardCommand.run,
-		Args: usageExactOneArg(),
+		Args: recipientsChecked(usageExactOneArg()),
 	}
 
 	forwardCommand.cmd.Flags().StringVar(&forwardCommand.to, "to", "", "Recipient email address(es)")
