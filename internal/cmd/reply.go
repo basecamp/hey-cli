@@ -63,7 +63,7 @@ resolves and prints the complete envelope without requiring a message or sending
   hey reply 12345 -m "Drafting a longer answer — sending tomorrow." --draft
   echo "Longer reply from a file or a heredoc" | hey reply 12345`,
 		RunE: replyCommand.run,
-		Args: usageExactOneArg(),
+		Args: recipientsChecked(usageExactOneArg()),
 	}
 
 	replyCommand.cmd.Flags().StringVarP(&replyCommand.message, "message", "m", "", "Reply message as Markdown (or opens $EDITOR)")
@@ -92,9 +92,6 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 		BCC: parseReplyAddresses(c.bcc),
 	}
 	if _, err := applyReplyRecipientOverrides(replyRecipients{}, overrides, c.replaceRecipients); err != nil {
-		return err
-	}
-	if err := checkRecipients(overrides.To, overrides.CC, overrides.BCC); err != nil {
 		return err
 	}
 

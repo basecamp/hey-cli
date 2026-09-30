@@ -30,7 +30,7 @@ func newForwardCommand() *forwardCommand {
 		Example: `  hey forward 12345 --to alice@example.com
   hey forward 12345 --to alice@example.com --cc bob@example.org -m "For your review"`,
 		RunE: forwardCommand.run,
-		Args: usageExactOneArg(),
+		Args: recipientsChecked(usageExactOneArg()),
 	}
 
 	forwardCommand.cmd.Flags().StringVar(&forwardCommand.to, "to", "", "Recipient email address(es)")
@@ -58,9 +58,6 @@ func (c *forwardCommand) run(cmd *cobra.Command, args []string) error {
 	bcc := parseAddresses(c.bcc)
 	if len(to)+len(cc)+len(bcc) == 0 {
 		return apierr.ErrUsageHint("at least one recipient is required", "hey forward <thread-id> --to <email>")
-	}
-	if err = checkRecipients(to, cc, bcc); err != nil {
-		return err
 	}
 
 	ctx := cmd.Context()

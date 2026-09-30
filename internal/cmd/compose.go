@@ -8,6 +8,7 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
@@ -38,6 +39,7 @@ func newComposeCommand() *composeCommand {
 	composeCommand.cmd = &cobra.Command{
 		Use:   "compose",
 		Short: "Write and send a new email",
+		Args:  recipientsChecked(nil),
 		Annotations: map[string]string{
 			"agent_notes": "--from selects a configured sender email or ID from account senders; --account must agree. --from is only for new messages. Starts a new thread with --to (optionally --cc/--bcc), which requires --subject, or replies to an existing one with --thread-id, which does not. Repeatable --attach files are uploaded before sending and can be sent without body text. The body is Markdown; use --message-html to send raw HTML instead. --draft saves instead of sending — recipients become optional — and answers the draft ID for hey draft show/edit/send/delete. A new message ends with the sender's HEY name tag, as one composed in HEY does; --no-name-tag leaves it out.",
 		},
@@ -79,11 +81,6 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 	// A reply carries the thread's subject, so only a new message needs one.
 	if c.subject == "" && c.threadID == "" {
 		return apierr.ErrUsageHint("--subject is required", "hey compose --to <email> --subject <subject> -m <message>")
-	}
-	// Checked before the editor opens, so nobody writes a message to an address HEY
-	// would drop.
-	if err := checkRecipients(parseAddresses(c.to), parseAddresses(c.cc), parseAddresses(c.bcc)); err != nil {
-		return err
 	}
 
 	ctx := cmd.Context()
@@ -229,13 +226,36 @@ func writeDraftSaved(cmd *cobra.Command, draftID int64, attachments int) error {
 	)
 }
 
-// checkRecipients refuses an address HEY would drop without saying so; see
-// mail.InvalidAddress.
-func checkRecipients(lists ...[]string) error {
-	if address := mail.InvalidAddress(lists...); address != "" {
-		return apierr.ErrUsage("not a valid email address: " + address)
+// recipientsChecked refuses a --to, --cc or --bcc address HEY would drop without
+// saying so (see mail.InvalidAddress). It runs as the command's arguments are checked,
+// which cobra does before the root's PersistentPreRunE resolves an account over the
+// network, so a bad address is refused before any request, upload or editor.
+func recipientsChecked(args cobra.PositionalArgs) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, positional []string) error {
+		if args != nil {
+			if err := args(cmd, positional); err != nil {
+				return err
+			}
+		}
+		var lists [][]string
+		for _, name := range []string{"to", "cc", "bcc"} {
+			flag := cmd.Flags().Lookup(name)
+			if flag == nil || !flag.Changed {
+				continue
+			}
+			values := []string{flag.Value.String()}
+			if slice, ok := flag.Value.(pflag.SliceValue); ok {
+				values = slice.GetSlice()
+			}
+			for _, value := range values {
+				lists = append(lists, parseAddresses(value))
+			}
+		}
+		if address := mail.InvalidAddress(lists...); address != "" {
+			return apierr.ErrUsage("not a valid email address: " + address)
+		}
+		return nil
 	}
-	return nil
 }
 
 func parseAddresses(s string) []string {

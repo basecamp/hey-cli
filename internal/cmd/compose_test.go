@@ -281,6 +281,10 @@ func TestCommandsRefuseAnAddressHEYWouldDropBeforeAnyRequest(t *testing.T) {
 		"reply":      {"reply", "7", "--to", "a", "-m", "Thanks, Annie."},
 		"forward":    {"forward", "7", "--to", "a"},
 		"draft edit": {"draft", "edit", "12", "--to", "a"},
+		// An account is resolved over the network before a command runs, so the
+		// address has to be refused before that.
+		"compose with account": {"--account", "8", "compose", "--to", "a", "--subject", "Quarterly planning notes", "-m", "Here are the notes."},
+		"reply with account":   {"--account", "8", "reply", "7", "--cc", "frank", "-m", "Thanks, Annie."},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var requests []string

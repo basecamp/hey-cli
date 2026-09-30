@@ -219,7 +219,7 @@ func newDraftEditCommand() *draftEditCommand {
   hey draft edit 12345 -m "Rewritten agenda: budget first, hiring second."
   hey draft edit 12345    # open the body in $EDITOR`,
 		RunE: editCommand.run,
-		Args: usageExactOneArg(),
+		Args: recipientsChecked(usageExactOneArg()),
 	}
 	editCommand.cmd.Flags().StringVar(&editCommand.from, "from", "", "Replace the sender with a configured email or ID in this draft account")
 	editCommand.cmd.Flags().StringVar(&editCommand.subject, "subject", "", "Replace the subject")
@@ -238,9 +238,6 @@ func (c *draftEditCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	draftID, err := parseDraftID(args[0])
 	if err != nil {
-		return err
-	}
-	if err = checkRecipients(parseAddresses(c.to), parseAddresses(c.cc), parseAddresses(c.bcc)); err != nil {
 		return err
 	}
 	ctx := cmd.Context()

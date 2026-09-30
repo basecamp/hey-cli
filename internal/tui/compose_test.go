@@ -247,6 +247,25 @@ func TestComposeSendFailureKeepsForm(t *testing.T) {
 	}
 }
 
+func TestReplyPrefilledWithAnAddressHEYAcceptsStillSends(t *testing.T) {
+	v, rec := composeTestServer(t)
+	v.Resize(80, 30)
+	// HEY keeps quoted local parts net/mail cannot parse, and prefills them in a reply.
+	v.Update(replyContextLoadedMsg{
+		boxID: 1, topicID: 7, topicName: "Kitchen", entryID: 99, subject: "Re: Kitchen",
+		actingSenderID: 7,
+		to:             []string{`annie."bryan"@example.com`},
+	})
+	typeText(v, "Cabinets land the week of the 14th.")
+	cmd := v.HandleContentKey(ctrlS())
+	if cmd == nil {
+		t.Fatalf("a reply HEY prefilled was refused: %q", composeModal(v).status)
+	}
+	if sent, ok := runCmd(cmd).(composeSentMsg); !ok || sent.err != nil || rec.method != "POST" {
+		t.Fatalf("expected the reply to be sent, got %#v via %s %s", sent, rec.method, rec.path)
+	}
+}
+
 func TestReplyFormPrefillsAndSends(t *testing.T) {
 	v, rec := composeTestServer(t)
 	v.Resize(80, 30)
