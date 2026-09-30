@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -649,14 +650,29 @@ func TestLoadingViewKeepsItsSectionUntilResponse(t *testing.T) {
 }
 
 func TestContactsSectionShortcut(t *testing.T) {
-	m := modelWithBoxes()
-	updated, cmd := m.Update(keyPress("O"))
-	result := updated.(model)
-	if result.section != sectionContacts || result.activeView != result.contactsView {
-		t.Errorf("O shortcut selected section %d and view %T", result.section, result.activeView)
+	for _, key := range []string{"o", "O"} {
+		m := modelWithBoxes()
+		updated, cmd := m.Update(keyPress(key))
+		result := updated.(model)
+		if result.section != sectionContacts || result.activeView != result.contactsView {
+			t.Errorf("%s shortcut selected section %d and view %T", key, result.section, result.activeView)
+		}
+		if cmd == nil || !result.loading {
+			t.Errorf("opening Contacts with %s should start its initial list request", key)
+		}
 	}
-	if cmd == nil || !result.loading {
-		t.Error("opening Contacts should start its initial list request")
+}
+
+func TestContactsTabUnderlinesTheKeyThatOpensIt(t *testing.T) {
+	for _, item := range sectionItems {
+		index := strings.Index(item.label, item.shortcut)
+		if index < 0 {
+			t.Errorf("%s tab underlines %q, which is not a letter of its label as written", item.label, item.shortcut)
+			continue
+		}
+		if got := sectionForShortcut(item.shortcut); got < 0 || sectionItems[got].label != item.label {
+			t.Errorf("pressing the %q underlined in %s does not open it", item.shortcut, item.label)
+		}
 	}
 }
 
@@ -1695,6 +1711,87 @@ func TestEnterWithoutASelectedLinkDoesNotOpen(t *testing.T) {
 	m = updated.(model)
 	if cmd != nil || opened || m.mailView.selectedLink != -1 {
 		t.Errorf("Enter without selection returned command=%v opened=%v selected=%d", cmd != nil, opened, m.mailView.selectedLink)
+	}
+}
+
+func openAttachmentLinkThreadThroughModel(t *testing.T) (model, *[]string) {
+	t.Helper()
+	m := openLinkThreadThroughModel(t)
+	var events []string
+	m.mailView.attachments = []messageAttachment{{ID: "501:1", MessageID: 501, Filename: "quarterly-report.pdf", URL: "/rails/blobs/quarterly-report.pdf"}}
+	m.mailView.attachmentCursor = 0
+	m.mailView.vc.newAttachmentTempDir = func() (string, error) { return t.TempDir(), nil }
+	m.mailView.vc.saveAttachment = func(context.Context, string, string, bool) (int64, error) {
+		events = append(events, "save")
+		return 2048, nil
+	}
+	m.mailView.vc.openAttachment = func(string) error {
+		events = append(events, "open attachment")
+		return nil
+	}
+	m.mailView.vc.openURL = func(destination string) error {
+		events = append(events, "visit "+destination)
+		return nil
+	}
+	m.updateHelpBindings()
+	return m, &events
+}
+
+func TestEnterOpensTheAttachmentUntilALinkIsSelected(t *testing.T) {
+	m, events := openAttachmentLinkThreadThroughModel(t)
+	if !hasHelpBinding(m.mailView.HelpBindings(), "enter") {
+		t.Errorf("a thread with an attachment should offer Enter to open it: %v", m.mailView.HelpBindings())
+	}
+	updated, cmd := m.Update(keyPress("enter"))
+	m = updated.(model)
+	if cmd == nil {
+		t.Fatal("Enter without a selected link should open the selected attachment")
+	}
+	runCmd(cmd)
+	if fmt.Sprint(*events) != "[save open attachment]" {
+		t.Errorf("Enter without a selected link = %v, want the attachment downloaded and opened", *events)
+	}
+
+	*events = nil
+	updated, _ = m.Update(keyPress("tab"))
+	m = updated.(model)
+	if hasHelpBinding(m.mailView.HelpBindings(), "enter") {
+		t.Errorf("with a link selected Enter belongs to the link, whose footer says so: %v", m.mailView.HelpBindings())
+	}
+	updated, cmd = m.Update(keyPress("enter"))
+	m = updated.(model)
+	if cmd == nil {
+		t.Fatal("Enter on a selected link returned no command")
+	}
+	runCmd(cmd)
+	if len(*events) != 1 || !strings.HasPrefix((*events)[0], "visit ") {
+		t.Errorf("Enter on a selected link = %v, want only the link visited", *events)
+	}
+
+	*events = nil
+	updated, _ = m.Update(keyPress("esc"))
+	m = updated.(model)
+	if m.mailView.selectedLink != -1 || !m.mailView.inThread {
+		t.Fatalf("Escape should clear the link and stay in the thread: selected=%d inThread=%v", m.mailView.selectedLink, m.mailView.inThread)
+	}
+	_, cmd = m.Update(keyPress("enter"))
+	runCmd(cmd)
+	if fmt.Sprint(*events) != "[save open attachment]" {
+		t.Errorf("Enter after clearing the link = %v, want the attachment again", *events)
+	}
+}
+
+func TestOOpensContactsFromAThreadWithAttachments(t *testing.T) {
+	m, events := openAttachmentLinkThreadThroughModel(t)
+	// Opening the thread marked it seen; a section waits for that write, so let it land.
+	m.mailView.pendingMutations = 0
+	updated, _ := m.Update(keyPress("o"))
+	m = updated.(model)
+	if m.section != sectionContacts || m.activeView != m.contactsView {
+		t.Errorf("o in a thread selected section %d and view %T, want Contacts", m.section, m.activeView)
+	}
+	if len(*events) != 0 {
+		t.Errorf("o should no longer open an attachment: %v", *events)
 	}
 }
 

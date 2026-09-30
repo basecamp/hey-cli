@@ -1058,8 +1058,11 @@ func (v *mailView) HelpBindings() []helpBinding {
 				helpBinding{"[", "previous attachment"},
 				helpBinding{"]", "next attachment"},
 				helpBinding{"s", "save attachment"},
-				helpBinding{"o", "open attachment"},
 			)
+			// A selected link has Enter, and the footer above says so.
+			if !v.LinkSelectionActive() {
+				bindings = append(bindings, helpBinding{"enter", "open attachment"})
+			}
 		}
 		return bindings
 	}
@@ -1356,6 +1359,11 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		if cmd, handled := v.handleLinkKey(msg); handled {
 			return cmd
 		}
+		// Enter opens what is selected: a link once Tab has picked one, which
+		// handleLinkKey has already answered, and otherwise the attachment.
+		if msg.Key().Code == tea.KeyEnter && len(v.attachments) > 0 {
+			return v.openSelectedAttachment()
+		}
 
 		switch msg.String() {
 		case "r", "R":
@@ -1378,8 +1386,6 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		case "s":
 			return v.saveSelectedAttachment()
-		case "o":
-			return v.openSelectedAttachment()
 		case "j":
 			if len(v.entryOffsets) > 1 {
 				v.jumpEntry(1)

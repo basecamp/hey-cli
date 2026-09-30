@@ -173,11 +173,11 @@ the iOS and Android apps each keep their own local choice too, and this is the s
 
 ## Attachments
 
-Thread attachments always appear with their filename, media type, and size. Use `[` and `]` to select an attachment, `s` to save it without replacing an existing file, and `o` to download and open it in an external application. Attachments never open automatically. Kitty and Ghostty can show inline images. In the message itself, a file is marked by its kind: 📷 an image, 🎬 a video, 🎵 audio, 📄 a PDF or document, 📎 anything else. An image shows by name rather than by its URL, unless its name looks like a URL, when the real destination is shown beside it; an image on the web is a link you can select with Tab, and the row above the shortcut bar shows its whole destination.
+Thread attachments always appear with their filename, media type, and size. Use `[` and `]` to select an attachment, `s` to save it without replacing an existing file, and Enter to download and open it in an external application — once Tab has selected a link, Enter opens the link instead, and Escape clears it. Attachments never open automatically. Kitty and Ghostty can show inline images. In the message itself, a file is marked by its kind: 📷 an image, 🎬 a video, 🎵 audio, 📄 a PDF or document, 📎 anything else. An image shows by name rather than by its URL, unless its name looks like a URL, when the real destination is shown beside it; an image on the web is a link you can select with Tab, and the row above the shortcut bar shows its whole destination.
 
 ## Contacts
 
-Press Shift+O to open Contacts. Use Enter to view a contact, `a` to add, `e` to edit, `n` to edit the private note, `x` twice to delete a note, `h` to hide, and `u` to show the most recently hidden contact again. Escape or `q` goes back.
+Press `o` (or Shift+O) to open Contacts — the letter underlined in its tab. Use Enter to view a contact, `a` to add, `e` to edit, `n` to edit the private note, `x` twice to delete a note, `h` to hide, and `u` to show the most recently hidden contact again. Escape or `q` goes back.
 
 The private note is shown formatted and edited as Markdown, the way `hey contact note set` takes it, so a note written in HEY keeps its bold, italics, lists, links and headings when you edit it here. Press ctrl+s to save it. A note holding an attachment or other formatting Markdown cannot preserve is shown but refused by the editor rather than losing that content; edit it in HEY or use `hey contact note set --note-html`.
 

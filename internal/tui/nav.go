@@ -30,7 +30,7 @@ const (
 
 // navItem is a single item in a navigation row.
 type navItem struct {
-	shortcut string // Shift+letter shortcut, underlined inside the label
+	shortcut string // the key that jumps here, underlined inside the label
 	label    string
 }
 
@@ -38,17 +38,20 @@ type navItem struct {
 
 var sectionItems = []navItem{
 	{"M", "Mail"},
-	{"O", "Contacts"},
+	{"o", "Contacts"},
 	{"C", "Calendar"},
 	{"J", "Journal"},
 }
 
-// sectionForShortcut returns the section for a Shift+letter shortcut, or -1.
+// sectionForShortcut returns the section for a shortcut key, or -1. Contacts is the
+// one on a lowercase letter: the C its label starts with is Calendar's, so its letter
+// is the o underlined inside it, which is what a reader presses. It answers O too,
+// the way HEY's letter shortcuts answer either case.
 func sectionForShortcut(key string) section {
 	switch key {
 	case "M":
 		return sectionMail
-	case "O":
+	case "o", "O":
 		return sectionContacts
 	case "C":
 		return sectionCalendar

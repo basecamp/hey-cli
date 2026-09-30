@@ -754,7 +754,8 @@ func (m *model) updateHelpBindings() {
 			bindings = []helpBinding{
 				{"←→", "section"},
 				{"tab", "next row"},
-				{"shift+M/O/C/J", "jump"},
+				{"shift+M/C/J", "jump"},
+				{"o", "contacts"},
 				quitHint,
 			}
 		case rowSubnav:
