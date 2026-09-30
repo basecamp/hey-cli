@@ -448,7 +448,7 @@ func TestToMarkdownUnlinkableImageAltIsProse(t *testing.T) {
 func TestToMarkdownAttachmentNamesAreSerialized(t *testing.T) {
 	got := toMarkdown(`<figure data-trix-attachment='{"url":"javascript:x","filename":"*report*.png","contentType":"image/png"}'></figure>` +
 		`<figure data-trix-attachment='{"url":"/rails/blobs/q3.pdf","filename":"[q3].pdf","contentType":"application/pdf"}'></figure>`)
-	want := "📎 \\*report\\*.png\n\n📎 \\[q3\\].pdf"
+	want := "📷 \\*report\\*.png\n\n📄 \\[q3\\].pdf"
 	if got != want {
 		t.Errorf("ToMarkdown = %q, want %q", got, want)
 	}

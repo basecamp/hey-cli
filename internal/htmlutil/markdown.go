@@ -724,7 +724,8 @@ func (m *markdownizer) actionTextAttachment(n *html.Node) {
 }
 
 func (m *markdownizer) attachment(filename, url, contentType string) {
-	filename = escapeText(strings.Join(strings.Fields(filename), " "), "📎 ")
+	icon := attachmentIcon(contentType)
+	filename = escapeText(strings.Join(strings.Fields(filename), " "), icon)
 	if filename == "" {
 		filename = "attachment"
 	}
@@ -733,9 +734,30 @@ func (m *markdownizer) attachment(filename, url, contentType string) {
 		if isImageContentType(contentType) && linkable {
 			m.write("![" + filename + "](" + dest + ")")
 		} else {
-			m.write("📎 " + filename)
+			m.write(icon + filename)
 		}
 	})
+}
+
+// attachmentIcon says what kind of file an attachment is. Each of these emoji is
+// drawn as an emoji without a variation selector, so every terminal gives it the
+// same two cells; 🖼️ and 🎞️ need U+FE0F for that, and terminals disagree on how
+// wide it makes them.
+func attachmentIcon(contentType string) string {
+	contentType = strings.ToLower(strings.TrimSpace(contentType))
+	switch {
+	case isImageContentType(contentType):
+		return "📷 "
+	case strings.HasPrefix(contentType, "video/"):
+		return "🎬 "
+	case strings.HasPrefix(contentType, "audio/"):
+		return "🎵 "
+	case contentType == "application/pdf", strings.HasPrefix(contentType, "text/"),
+		strings.Contains(contentType, "msword"), strings.Contains(contentType, "document"):
+		return "📄 "
+	default:
+		return "📎 "
+	}
 }
 
 func (m *markdownizer) children(n *html.Node) {

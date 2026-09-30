@@ -172,7 +172,7 @@ the iOS and Android apps each keep their own local choice too, and this is the s
 
 ## Attachments
 
-Thread attachments always appear with their filename, media type, and size. Use `[` and `]` to select an attachment, `s` to save it without replacing an existing file, and `o` to download and open it in an external application. Attachments never open automatically. Kitty and Ghostty can show inline images. Foot and other terminals use visible text markers.
+Thread attachments always appear with their filename, media type, and size. Use `[` and `]` to select an attachment, `s` to save it without replacing an existing file, and `o` to download and open it in an external application. Attachments never open automatically. Kitty and Ghostty can show inline images. In the message itself, a file is marked by its kind: 📷 an image, 🎬 a video, 🎵 audio, 📄 a PDF or document, 📎 anything else. An image shows by name rather than by its URL; an image on the web is a link you can select with Tab, and the row above the shortcut bar shows its whole destination.
 
 ## Contacts
 
