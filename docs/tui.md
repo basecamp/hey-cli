@@ -24,7 +24,8 @@ manually launched TUIs.
 
 The app has four sections: Mail, Contacts, Calendar and Journal. The context-sensitive
 shortcut bar is visible by default; press `?` to hide or restore it, and the choice is
-remembered across restarts.
+remembered across restarts. While it is hidden, `? help` at the left of the top bar says
+how to bring it back.
 
 Mail navigation includes HEY's boxes plus separate Labels and Collections tabs: Shift+L
 opens Labels directly and Shift+K opens Collections. Previously Seen has its own tab after

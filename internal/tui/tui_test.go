@@ -248,6 +248,9 @@ func TestQuestionMarkTogglesHelpAndResizesContent(t *testing.T) {
 	if !slices.Equal(saved, []bool{true}) {
 		t.Errorf("saved preferences = %v, want [true]", saved)
 	}
+	if top := lines[0]; !strings.Contains(top, " ? help ") {
+		t.Errorf("hidden help left no way back on the top rule: %q", top)
+	}
 
 	updated, _ = m.Update(keyPress("?"))
 	m = updated.(model)
@@ -1436,8 +1439,30 @@ func TestChromeUsesBlueBoldConvention(t *testing.T) {
 	}
 }
 
+func TestTopRuleShowsAHintBesideHeyWhenThereIsRoom(t *testing.T) {
+	line := stripANSI(renderTopRule(80, "? help", "frank.castillo@example.com"))
+	if got := lipgloss.Width(line); got != 80 {
+		t.Errorf("top rule width = %d, want 80", got)
+	}
+	if !strings.HasPrefix(line, "── ? help ─") {
+		t.Errorf("the hint should open the rule: %q", line)
+	}
+	heyColumn := func(rule string) int { return lipgloss.Width(rule[:strings.Index(rule, "HEY")]) }
+	if want := stripANSI(renderTopRule(80, "", "frank.castillo@example.com")); heyColumn(line) != heyColumn(want) {
+		t.Errorf("the hint moved HEY: %q, want HEY where it is in %q", line, want)
+	}
+	if !strings.HasSuffix(line, "frank.castillo@example.com ──") {
+		t.Errorf("the account should stay right-aligned: %q", line)
+	}
+
+	narrow := stripANSI(renderTopRule(40, "? help", "frank.castillo@example.com"))
+	if strings.Contains(narrow, "help") || lipgloss.Width(narrow) != 40 {
+		t.Errorf("a rule with no room for the hint = %q, want it left out", narrow)
+	}
+}
+
 func TestTopRuleCentersHeyAndRightAlignsAccount(t *testing.T) {
-	line := renderTopRule(80, "frank.castillo@example.com")
+	line := renderTopRule(80, "", "frank.castillo@example.com")
 	if got := lipgloss.Width(line); got != 80 {
 		t.Errorf("top rule width = %d, want 80", got)
 	}

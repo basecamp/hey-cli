@@ -324,10 +324,11 @@ func centerText(text string, width int) string {
 }
 
 // renderTopRule draws the top rule with HEY centered and the account
-// aligned to the right, both bold:
+// aligned to the right, both bold. A hint, when given, sits at the left end
+// if there is room for it beside HEY:
 //
-//	─────────── HEY ─────────── jz@example.com ──
-func renderTopRule(width int, account string) string {
+//	── ? help ── HEY ─────────── jz@example.com ──
+func renderTopRule(width int, hint, account string) string {
 	ruleStyle := lipgloss.NewStyle().Foreground(colorChrome)
 	labelStyle := lipgloss.NewStyle().Foreground(colorChrome).Bold(true)
 
@@ -346,6 +347,12 @@ func renderTopRule(width int, account string) string {
 	}
 
 	var b strings.Builder
+	const lead = 2
+	if hintWidth := lipgloss.Width(hint) + 2; hint != "" && left >= lead+hintWidth+1 {
+		b.WriteString(ruleStyle.Render(strings.Repeat("─", lead)))
+		b.WriteString(" " + labelStyle.Render(hint) + " ")
+		left -= lead + hintWidth
+	}
 	b.WriteString(ruleStyle.Render(strings.Repeat("─", left)))
 	b.WriteString(" " + labelStyle.Render("HEY") + " ")
 	b.WriteString(ruleStyle.Render(strings.Repeat("─", mid)))
@@ -360,8 +367,12 @@ func renderTopRule(width int, account string) string {
 func renderHeader(m *model) string {
 	var b strings.Builder
 
-	// Row 1: section rule + items
-	b.WriteString(renderTopRule(m.width, m.mailAccount.label))
+	// Row 1: section rule + items. Hidden help leaves the one key that brings it back.
+	hint := ""
+	if m.help.hidden && m.canToggleHelp() {
+		hint = "? help"
+	}
+	b.WriteString(renderTopRule(m.width, hint, m.mailAccount.label))
 	b.WriteString("\n")
 	b.WriteString(renderNavRow(sectionItems, int(m.section), m.focus == rowSection, m.width, true))
 	b.WriteString("\n")
