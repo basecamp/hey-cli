@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
@@ -1752,8 +1753,9 @@ func (v *mailView) threadNotices() []string {
 }
 
 // LinkFooter reserves one footer row for a thread with selectable links. Its text
-// stays blank until a link is selected, so moving through links never changes the
-// viewport's height. A destination can open only when the footer shows it in full.
+// stays blank until a link is selected, and a destination that fits keeps to that
+// row, so moving between such links never changes the viewport's height. A longer
+// one wraps onto the rows it needs to be shown in full.
 func (v *mailView) LinkFooter() (text string, visible bool) {
 	if !v.inThread || v.modal != nil || len(v.links) == 0 {
 		return "", false
@@ -1771,11 +1773,20 @@ func (v *mailView) linkDestinationFooter() (string, bool) {
 		return "", false
 	}
 	destination := terminal.SanitizeLine(v.links[v.selectedLink].destination)
-	footer := "Open: " + destination + " (press Enter to visit)"
+	const suffix = " (press Enter to visit)"
+	footer := "Open: " + destination + suffix
 	if lipgloss.Width(footer) <= width {
 		return footer, true
 	}
-	return truncateToWidth("Enlarge the terminal to inspect this link", width), false
+	// A destination too long for one row wraps onto as many as it needs, so the
+	// reader sees all of it before it opens. The model decides whether they fit.
+	lines := strings.Split(ansi.Hardwrap("Open: "+destination, width, true), "\n")
+	if last := len(lines) - 1; lipgloss.Width(lines[last]+suffix) <= width {
+		lines[last] += suffix
+	} else {
+		lines = append(lines, truncateToWidth(strings.TrimSpace(suffix), width))
+	}
+	return strings.Join(lines, "\n"), true
 }
 
 func (v *mailView) linkDestinationReviewable() bool {

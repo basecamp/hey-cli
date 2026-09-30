@@ -482,7 +482,7 @@ func TestMailViewKeepsAPartialThreadsNoticeAndLeavesItUnseen(t *testing.T) {
 	}
 }
 
-func TestLinkDestinationMustFitFooterBeforeOpening(t *testing.T) {
+func TestLinkFooterShowsTheWholeDestinationBeforeOpening(t *testing.T) {
 	v := newMailView(testVC())
 	v.inThread = true
 	v.topicID = 100
@@ -530,20 +530,16 @@ func TestLinkDestinationMustFitFooterBeforeOpening(t *testing.T) {
 
 	v.vc.width = 24
 	footer, visible = v.LinkFooter()
-	if !visible || v.linkDestinationReviewable() || strings.Contains(footer, destination) {
-		t.Errorf("narrow link footer = %q visible=%v reviewable=%v", footer, visible, v.linkDestinationReviewable())
+	if !visible || !v.linkDestinationReviewable() || !strings.Contains(strings.ReplaceAll(footer, "\n", ""), destination) {
+		t.Errorf("narrow link footer = %q visible=%v reviewable=%v, want the whole destination wrapped", footer, visible, v.linkDestinationReviewable())
 	}
-	opened = ""
-	if cmd, handled := v.handleLinkKey(keyPress("enter")); !handled || cmd != nil || opened != "" {
-		t.Errorf("hidden destination opened: handled=%v command=%v destination=%q", handled, cmd != nil, opened)
+	for _, line := range strings.Split(footer, "\n") {
+		if lipgloss.Width(line) > v.vc.width {
+			t.Errorf("wrapped footer line %q is wider than %d", line, v.vc.width)
+		}
 	}
-
-	v.vc.width = 3
-	if v.linkDestinationReviewable() {
-		t.Error("destination wider than a tiny terminal was marked reviewable")
-	}
-	if cmd, handled := v.handleLinkKey(keyPress("enter")); !handled || cmd != nil {
-		t.Errorf("tiny terminal opened destination: handled=%v command=%v", handled, cmd != nil)
+	if !strings.HasSuffix(footer, "(press Enter to visit)") {
+		t.Errorf("wrapped footer = %q, want it to end with the action", footer)
 	}
 
 	v.selectedLink = -1

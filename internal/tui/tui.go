@@ -688,7 +688,7 @@ func (m model) View() tea.View {
 		}
 		footerH := 1 + helpH
 		if linkFooterVisible {
-			footerH++
+			footerH += 1 + strings.Count(linkFooter, "\n")
 		}
 		padLines := m.height - contentLines - footerH - 1
 		for range max(padLines, 0) {
@@ -797,7 +797,18 @@ func (m *model) updateHelpBindings() {
 	}
 }
 
+// linkFooter is the link status as it goes on screen. A destination that wraps onto
+// more rows than the terminal can spare is replaced by a hint, and cannot be opened
+// until the terminal is enlarged.
 func (m model) linkFooter() (string, bool) {
+	text, visible := m.activeLinkFooter()
+	if visible && strings.Contains(text, "\n") && !m.linkFooterFits() {
+		return truncateToWidth("Enlarge the terminal to inspect this link", max(m.width, 0)), true
+	}
+	return text, visible
+}
+
+func (m model) activeLinkFooter() (string, bool) {
 	if provider, ok := m.activeView.(linkFooterProvider); ok {
 		return provider.LinkFooter()
 	}
@@ -805,7 +816,7 @@ func (m model) linkFooter() (string, bool) {
 }
 
 func (m model) linkFooterFits() bool {
-	_, visible := m.linkFooter()
+	text, visible := m.activeLinkFooter()
 	if !visible {
 		return false
 	}
@@ -813,18 +824,19 @@ func (m model) linkFooterFits() bool {
 	if m.mailWatchNotice() != "" {
 		statusHeight = 1
 	}
-	return m.height >= headerHeight+m.help.height()+3+statusHeight+1
+	return m.height >= headerHeight+m.help.height()+3+statusHeight+1+strings.Count(text, "\n")
 }
 
 // contentHeight gives the active view every row that is not navigation or a
 // visible footer. Ordinary help has two clear rows above its divider; a link
-// footer uses one of them for its stable status row.
+// footer uses one of them for its status row, and takes any further rows a
+// wrapped destination needs from the content.
 func (m model) contentHeight() int {
 	footerHeight := 0
 	helpHeight := m.help.height()
-	_, linkFooterVisible := m.linkFooter()
+	linkFooter, linkFooterVisible := m.linkFooter()
 	if helpHeight > 0 || linkFooterVisible {
-		footerHeight = helpHeight + 3
+		footerHeight = helpHeight + 3 + strings.Count(linkFooter, "\n")
 	}
 	statusHeight := 0
 	if m.mailWatchNotice() != "" {

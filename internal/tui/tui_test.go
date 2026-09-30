@@ -1757,6 +1757,65 @@ func TestQLeavesAThreadWithASelectedLink(t *testing.T) {
 	}
 }
 
+func TestRootModelWrapsALongDestinationOntoTheRowsItNeeds(t *testing.T) {
+	m := openLinkThreadThroughModel(t)
+	var opened []string
+	m.mailView.vc.openURL = func(destination string) error {
+		opened = append(opened, destination)
+		return nil
+	}
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 30})
+	m = updated.(model)
+	unselectedViewportHeight := m.mailView.topicViewport.Height()
+	for range 2 {
+		updated, _ = m.Update(keyPress("tab"))
+		m = updated.(model)
+	}
+	if m.mailView.selectedLink != 1 {
+		t.Fatalf("selected link = %d, want second occurrence", m.mailView.selectedLink)
+	}
+
+	screen := stripANSI(m.View().Content)
+	for _, line := range []string{"Open: https://example.org/second?full=de", "stination (press Enter to visit)"} {
+		if !strings.Contains(screen, line) {
+			t.Errorf("wrapped footer row %q is not on screen: %q", line, screen)
+		}
+	}
+	if got := strings.Count(m.View().Content, "\n") + 1; got > m.height {
+		t.Errorf("screen draws %d rows, want at most %d", got, m.height)
+	}
+	if got := m.mailView.topicViewport.Height(); got != unselectedViewportHeight-1 {
+		t.Errorf("viewport height = %d, want %d to make room for the second footer row", got, unselectedViewportHeight-1)
+	}
+	selected := m.mailView.links[m.mailView.selectedLink]
+	visibleStart := m.mailView.topicViewport.YOffset()
+	visibleEnd := visibleStart + m.mailView.topicViewport.Height() - 1
+	if selected.startLine < visibleStart || selected.endLine > visibleEnd {
+		t.Errorf("selected range %d-%d is outside viewport %d-%d", selected.startLine, selected.endLine, visibleStart, visibleEnd)
+	}
+
+	updated, cmd := m.Update(keyPress("enter"))
+	m = updated.(model)
+	if cmd == nil {
+		t.Fatal("enter did not open a destination shown in full over two rows")
+	}
+	runCmd(cmd)
+	if len(opened) != 1 || opened[0] != "https://example.org/second?full=destination" {
+		t.Fatalf("opened destinations = %q, want the exact second destination", opened)
+	}
+
+	// One row short of what the wrapped destination needs: a hint instead, and no opening.
+	updated, _ = m.Update(tea.WindowSizeMsg{Width: 40, Height: headerHeight + m.help.height() + 4})
+	m = updated.(model)
+	screen = stripANSI(m.View().Content)
+	if !strings.Contains(screen, "Enlarge the terminal") || strings.Contains(screen, "Open: https://example.org/second") {
+		t.Errorf("short terminal footer = %q, want the enlarge hint instead of a partial destination", screen)
+	}
+	if _, cmd = m.Update(keyPress("enter")); cmd != nil || len(opened) != 1 {
+		t.Errorf("enter opened a destination the footer could not show: command=%v opened=%q", cmd != nil, opened)
+	}
+}
+
 func TestRootModelNavigatesThreadLinksAndOpensExactDestination(t *testing.T) {
 	m := openLinkThreadThroughModel(t)
 	var opened []string
