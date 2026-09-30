@@ -998,7 +998,8 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) canToggleHelp() bool {
-	if m.mailAccountPicker {
+	// An error box takes every key until it is dismissed, ? included.
+	if m.mailAccountPicker || m.err != nil {
 		return false
 	}
 	if m.activeView == m.screenerView {

@@ -251,6 +251,16 @@ func TestQuestionMarkTogglesHelpAndResizesContent(t *testing.T) {
 	if top := lines[0]; !strings.Contains(top, " ? help ") {
 		t.Errorf("hidden help left no way back on the top rule: %q", top)
 	}
+	m.err = errors.New("HEY is not answering")
+	if top := strings.SplitN(stripANSI(m.View().Content), "\n", 2)[0]; strings.Contains(top, "? help") {
+		t.Errorf("the top rule offers ? while an error box would swallow it: %q", top)
+	}
+	updated, _ = m.Update(keyPress("?"))
+	m = updated.(model)
+	if !m.help.hidden {
+		t.Error("? acted through an error box")
+	}
+	m.err = nil
 
 	updated, _ = m.Update(keyPress("?"))
 	m = updated.(model)
