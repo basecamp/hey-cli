@@ -107,6 +107,11 @@ func addrSpec(address string) (spec string, size int, ok bool) {
 		size = utf8.RuneCountInString(parsed.Address)
 		if parsed.Name != "" {
 			size += utf8.RuneCountInString(parsed.Name) + len(" <>")
+			// The mail gem writes a name holding one of these in quotes, escaping any
+			// quote or backslash inside.
+			if strings.ContainsAny(parsed.Name, `()<>[]:;@\,."`) {
+				size += len(`""`) + strings.Count(parsed.Name, `"`) + strings.Count(parsed.Name, `\`)
+			}
 		}
 		return parsed.Address, size, true
 	}

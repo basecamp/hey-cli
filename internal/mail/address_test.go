@@ -53,6 +53,9 @@ func TestInvalidAddressFollowsHEYsRule(t *testing.T) {
 		// Even where net/mail cannot parse the address, the name counts.
 		strings.Repeat("A", 490) + ` <a."b"@example.com>`: false,
 		strings.Repeat("A", 470) + ` <a."b"@example.com>`: true,
+		// A name the mail gem has to quote is two characters longer written out.
+		`"` + strings.Repeat("A", 472) + `, Annie" <annie@example.com>`: false,
+		strings.Repeat("A", 474) + ` Annie <annie@example.com>`:         true,
 	} {
 		got := InvalidAddress([]string{address}) == ""
 		if got != deliverable {
