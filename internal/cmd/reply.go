@@ -94,6 +94,9 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 	if _, err := applyReplyRecipientOverrides(replyRecipients{}, overrides, c.replaceRecipients); err != nil {
 		return err
 	}
+	if err := checkRecipients(overrides.To, overrides.CC, overrides.BCC); err != nil {
+		return err
+	}
 
 	threadID, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil {

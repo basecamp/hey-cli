@@ -240,6 +240,9 @@ func (c *draftEditCommand) run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if err = checkRecipients(parseAddresses(c.to), parseAddresses(c.cc), parseAddresses(c.bcc)); err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 
 	edit, err := sdk.Messages().GetEdit(ctx, draftID)

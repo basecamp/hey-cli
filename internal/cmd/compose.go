@@ -14,6 +14,7 @@ import (
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/editor"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
+	"github.com/basecamp/hey-cli/internal/mail"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -78,6 +79,11 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 	// A reply carries the thread's subject, so only a new message needs one.
 	if c.subject == "" && c.threadID == "" {
 		return apierr.ErrUsageHint("--subject is required", "hey compose --to <email> --subject <subject> -m <message>")
+	}
+	// Checked before the editor opens, so nobody writes a message to an address HEY
+	// would drop.
+	if err := checkRecipients(parseAddresses(c.to), parseAddresses(c.cc), parseAddresses(c.bcc)); err != nil {
+		return err
 	}
 
 	ctx := cmd.Context()
@@ -221,6 +227,15 @@ func writeDraftSaved(cmd *cobra.Command, draftID int64, attachments int) error {
 			output.Breadcrumb{Action: "delete", Command: fmt.Sprintf("hey draft delete %d", draftID), Description: "Trash it"},
 		),
 	)
+}
+
+// checkRecipients refuses an address HEY would drop without saying so; see
+// mail.InvalidAddress.
+func checkRecipients(lists ...[]string) error {
+	if address := mail.InvalidAddress(lists...); address != "" {
+		return apierr.ErrUsage("not a valid email address: " + address)
+	}
+	return nil
 }
 
 func parseAddresses(s string) []string {

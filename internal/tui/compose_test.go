@@ -143,7 +143,7 @@ func TestComposeValidatesBeforeSending(t *testing.T) {
 	if !composeModal(v).isError || !strings.Contains(composeModal(v).status, "recipient") {
 		t.Errorf("expected a recipient error, got %q", composeModal(v).status)
 	}
-	typeText(v, "a@b.com")
+	typeText(v, "annie@example.com")
 	v.HandleContentKey(keyPress("tab")) // cc
 	v.HandleContentKey(keyPress("tab")) // bcc
 	v.HandleContentKey(keyPress("tab")) // subject
@@ -152,6 +152,36 @@ func TestComposeValidatesBeforeSending(t *testing.T) {
 	}
 	if !strings.Contains(composeModal(v).status, "Subject") {
 		t.Errorf("expected a subject error, got %q", composeModal(v).status)
+	}
+}
+
+func TestComposeRefusesAnAddressHEYWouldDrop(t *testing.T) {
+	for _, recipients := range []string{"a", "a, annie@example.com"} {
+		v, rec := composeTestServer(t)
+		v.Resize(80, 30)
+		v.HandleContentKey(keyPress("c"))
+		typeText(v, recipients)
+		v.HandleContentKey(keyPress("tab")) // cc
+		v.HandleContentKey(keyPress("tab")) // bcc
+		v.HandleContentKey(keyPress("tab")) // subject
+		typeText(v, "Quarterly planning notes")
+		v.HandleContentKey(keyPress("tab")) // body
+		typeText(v, "Here are the notes from Tuesday.")
+
+		if cmd := v.HandleContentKey(ctrlS()); cmd != nil {
+			runCmd(cmd)
+			t.Fatalf("To %q: ctrl+s sent a message HEY would not deliver to everyone on it", recipients)
+		}
+		form := composeModal(v)
+		if form == nil || form.sending {
+			t.Fatalf("To %q: the form closed or is sending", recipients)
+		}
+		if !form.isError || form.status != "Not a valid email address: a" {
+			t.Errorf("To %q: status = %q, want the bad address named", recipients, form.status)
+		}
+		if rec.method != "" {
+			t.Errorf("To %q: sent %s %s", recipients, rec.method, rec.path)
+		}
 	}
 }
 

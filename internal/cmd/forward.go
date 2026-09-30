@@ -59,6 +59,9 @@ func (c *forwardCommand) run(cmd *cobra.Command, args []string) error {
 	if len(to)+len(cc)+len(bcc) == 0 {
 		return apierr.ErrUsageHint("at least one recipient is required", "hey forward <thread-id> --to <email>")
 	}
+	if err = checkRecipients(to, cc, bcc); err != nil {
+		return err
+	}
 
 	ctx := cmd.Context()
 	topic, err := rootSDK.Topics().Get(ctx, threadID)
