@@ -65,6 +65,12 @@ uppercase belongs to Labels:
 | Ctrl+A | switch linked account |
 | Ctrl+V | choose an Imbox cover |
 
+`r` and `f` answer the thread's latest emailed message, as HEY's web app does: a note or
+share notice posted after it is internal — visible to everyone with access to the thread,
+never emailed — and is skipped, and a thread holding nothing else is refused. In the thread
+view a note is headed "Note by …" and a share notice "… shared this thread", each marked not
+emailed, instead of with the sender's name.
+
 A thread opens on its latest message; `k` steps back through the ones before it and `j` forward again.
 
 Sending a reply or a forward from a thread closes the thread and returns you to the list you opened it from — the Imbox, a search, a bundle. A send that fails keeps the form open, and so does an address HEY would not deliver to: the form names it (`Not a valid email address: a`) rather than sending a message HEY would quietly keep as a draft, or send without that recipient.

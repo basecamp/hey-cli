@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -400,8 +401,9 @@ func (v *mailView) startCompose() tea.Cmd {
 	return form.init()
 }
 
-// loadReplyContext fetches the thread's account, latest entry, and recipients,
-// then opens a reply form bound to that account's sender.
+// loadReplyContext fetches the thread's account, the entry a reply answers — its latest
+// emailed message, never a note or share notice after it — and recipients, then opens a
+// reply form bound to that account's sender.
 func (v *mailView) loadReplyContext(topicID int64, topicName string) tea.Cmd {
 	sdk := v.vc.sdk
 	boxID := v.currentBoxID()
@@ -422,7 +424,11 @@ func (v *mailView) loadReplyContext(topicID int64, topicName string) tea.Cmd {
 		if err != nil {
 			return replyContextLoadedMsg{requestID: requestID, boxID: boxID, err: err}
 		}
-		entryID := topic.Entries[len(topic.Entries)-1].Id
+		entry, err := replyTargetEntry(ctx, accountSDK, topic)
+		if err != nil {
+			return replyContextLoadedMsg{requestID: requestID, boxID: boxID, err: err}
+		}
+		entryID := entry.Id
 
 		// HEY's reply prefill is the authority on how a reply starts out — see
 		// mail.ReplyPrefillFromServer. A failed read falls back to the local
@@ -529,8 +535,9 @@ func addressesOf(contacts []generated.Contact, excluding string) []string {
 	return addresses
 }
 
-// loadForwardContext fetches HEY's prefilled forward for the latest entry in
-// the thread, then opens the forward form on forwardContextLoadedMsg.
+// loadForwardContext fetches HEY's prefilled forward for the latest emailed message in
+// the thread, then opens the forward form on forwardContextLoadedMsg. A note posted
+// after it is not what gets forwarded: it is internal to the thread.
 func (v *mailView) loadForwardContext(topicID int64, topicName string) tea.Cmd {
 	sdk := v.vc.sdk
 	boxID := v.currentBoxID()
@@ -551,7 +558,11 @@ func (v *mailView) loadForwardContext(topicID int64, topicName string) tea.Cmd {
 		if err != nil {
 			return forwardContextLoadedMsg{requestID: requestID, boxID: boxID, err: err}
 		}
-		entryID := topic.Entries[len(topic.Entries)-1].Id
+		entry, err := replyTargetEntry(ctx, accountSDK, topic)
+		if err != nil {
+			return forwardContextLoadedMsg{requestID: requestID, boxID: boxID, err: err}
+		}
+		entryID := entry.Id
 		draft, err := accountSDK.Entries().NewForward(ctx, entryID)
 		if err != nil {
 			return forwardContextLoadedMsg{requestID: requestID, boxID: boxID, err: err}
@@ -573,6 +584,16 @@ func (v *mailView) loadForwardContext(topicID int64, topicName string) tea.Cmd {
 			content:   draft.Content,
 		}
 	}
+}
+
+// replyTargetEntry is mail.ReplyTarget with its refusal told to the reader: a thread of
+// nothing but notes and share notices has nothing a reply or a forward could answer.
+func replyTargetEntry(ctx context.Context, client *hey.Client, topic *generated.Topic) (generated.Entry, error) {
+	entry, err := mail.ReplyTarget(ctx, client, topic)
+	if errors.Is(err, mail.ErrNoReplyableEntry) {
+		return entry, fmt.Errorf("thread %d has %w; notes and share notices are never emailed", topic.Id, err)
+	}
+	return entry, err
 }
 
 func (v *mailView) clientForTopicAccount(ctx context.Context, accountID int64) (*hey.Client, error) {

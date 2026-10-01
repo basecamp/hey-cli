@@ -532,7 +532,9 @@ resolved `contact` is optional; `received_via` is omitted for sent/generated mes
 when the message was not hydrated. `--html` returns the original body HTML framed by From,
 To, CC and BCC header rows, and is refused on a terminal — redirect it. A thread that could
 only be read in part is refused unless `--allow-partial` is given, and then the notice says
-what is missing. Use `hey reply` to have HEY work out reply addressing.
+what is missing. Use `hey reply` to have HEY work out reply addressing. An entry's `kind` is
+`message` for mail; `comment` (a note) and `access_notice` (a share notice) are internal to the
+thread and were never emailed — `--markdown`, styled and `--html` output label them so.
 
 `hey share` returns a URL that shows the entire thread and future emails or replies sent to it. Anyone with the link can open it. `hey unshare` turns off the sharing link.
 
@@ -571,8 +573,10 @@ hey compose --to alice@example.com --subject "Sprint recap" -m "We **shipped** t
 hey compose --to alice@example.com --subject "Newsletter draft" --message-html "<h1>March</h1><p>What we shipped.</p>"
 ```
 
-`hey reply` answers the thread's **latest** entry. HEY addresses the reply the way its own
-web app does: everyone that entry was addressed to, plus whoever wrote it, on the To line,
+`hey reply` answers the thread's **latest emailed message**, as HEY's web app does. A note
+(`kind: "comment"`) or share notice (`kind: "access_notice"`) is internal: visible to everyone
+with access to the thread, never emailed, and never what a reply or `hey forward` answers; a
+thread with nothing else is refused. HEY addresses the reply the way its own web app does: everyone that entry was addressed to, plus whoever wrote it, on the To line,
 minus your own addresses. If HEY's prefill is unavailable or names no one (a thread with only
 yourself), a send falls back to the message's own recipients, which can include you.
 Repeatable `--to`, `--cc` and `--bcc` flags add or move explicit recipients. Use
