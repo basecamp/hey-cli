@@ -67,17 +67,32 @@ func InternalEntryLabel(kind, author string) (heading, tag string, internal bool
 // through client, which must be bound to the thread's account. HEY picks by id among
 // the replyable entries, so a page does too.
 func ReplyTarget(ctx context.Context, client *hey.Client, topic *generated.Topic) (generated.Entry, error) {
+	return replyTarget(ctx, client.Topics(), topic)
+}
+
+// entryPages is the one read ReplyTarget makes of the entry index: hey.TopicsService's.
+type entryPages interface {
+	GetEntriesPage(ctx context.Context, topicID int64, page string) (*hey.TopicEntryPage, error)
+}
+
+// replyTarget is ReplyTarget over the entry index. A page that answers nothing at all is
+// a malformed response, as threadload's adapter treats it, not a thread without a
+// message: only an empty page ends the search with ErrNoReplyableEntry.
+func replyTarget(ctx context.Context, index entryPages, topic *generated.Topic) (generated.Entry, error) {
 	if entry, ok := lastReplyableEntry(topic.Entries); ok {
 		return entry, nil
 	}
 
 	cursor := ""
 	for range maxReplyTargetPages {
-		page, err := client.Topics().GetEntriesPage(ctx, topic.Id, cursor)
+		page, err := index.GetEntriesPage(ctx, topic.Id, cursor)
 		if err != nil {
 			return generated.Entry{}, err
 		}
-		if page == nil || len(page.Entries) == 0 {
+		if page == nil {
+			return generated.Entry{}, fmt.Errorf("thread %d answered no entry page at cursor %q", topic.Id, cursor)
+		}
+		if len(page.Entries) == 0 {
 			return generated.Entry{}, ErrNoReplyableEntry
 		}
 		if entry, ok := lastReplyableEntry(page.Entries); ok {

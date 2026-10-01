@@ -57,9 +57,35 @@ func TestReplyTargetSkipsNotesOnTheTopicsPage(t *testing.T) {
 		{Id: 14, Kind: "access_notice"},
 	}}
 
-	entry, err := ReplyTarget(context.Background(), nil, topic)
+	entry, err := replyTarget(context.Background(), noEntryPages{t}, topic)
 	if err != nil || entry.Id != 12 {
 		t.Errorf("entry = %d, %v, want 12", entry.Id, err)
+	}
+}
+
+// noEntryPages fails a test that reads the entry index when it should not need to.
+type noEntryPages struct{ t *testing.T }
+
+func (pages noEntryPages) GetEntriesPage(context.Context, int64, string) (*hey.TopicEntryPage, error) {
+	pages.t.Error("read the entry index although the topic's own page had a message")
+	return &hey.TopicEntryPage{}, nil
+}
+
+// nilEntryPages answers no page and no error, which is a malformed response.
+type nilEntryPages struct{}
+
+func (nilEntryPages) GetEntriesPage(context.Context, int64, string) (*hey.TopicEntryPage, error) {
+	return nil, nil
+}
+
+// An index that answers no page at all is a malformed response, not a thread without a
+// message: it must not be reported as not_found.
+func TestReplyTargetTreatsAMissingPageAsAnError(t *testing.T) {
+	topic := &generated.Topic{Id: 7, Entries: []generated.Entry{{Id: 13, Kind: "comment"}}}
+
+	_, err := replyTarget(context.Background(), nilEntryPages{}, topic)
+	if err == nil || errors.Is(err, ErrNoReplyableEntry) {
+		t.Errorf("error = %v, want a malformed-response error rather than ErrNoReplyableEntry", err)
 	}
 }
 

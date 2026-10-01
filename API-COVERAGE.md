@@ -8,8 +8,9 @@ Every endpoint below is read as JSON through a typed SDK operation; nothing pars
 geared_pagination's opaque cursor out of the `Link` header, not an offset. An integer there
 is not an error — it is ignored, and the first page comes back again. `Topics().GetEntriesPage`
 is the SDK read that keeps that header; `hey thread read` and `hey attachment list` walk it
-through `internal/threadload`. The drafts index (`/entries/drafts.json`) pages the same way,
-which is what `Entries().ListDraftsPage` and `hey draft list --page` exist for.
+through `internal/threadload`, and `mail.ReplyTarget` walks it for the message a reply or a
+forward answers. The drafts index (`/entries/drafts.json`) pages the same way, which is what
+`Entries().ListDraftsPage` and `hey draft list --page` exist for.
 
 | Endpoint | Method | Client | CLI Command | Status |
 |----------|--------|--------|-------------|--------|
@@ -57,7 +58,7 @@ which is what `Entries().ListDraftsPage` and `hey draft list --page` exist for.
 | `/contacts/{id}/note.json` | DELETE | SDK `Contacts().DeleteNote` | `hey contact note delete`, Contacts TUI | covered |
 | `/calendars.json` | GET | SDK `Calendars().List` | `hey calendar list` | covered |
 | `/calendars/{id}/recordings.json` | GET | SDK `Calendars().GetRecordings` | `hey event list`, `hey event edit <id>` (reading the event back; with `--occurrence`, the occurrence's day and then the series' first day for its `Calendar::Countdown`), `hey event delete <id>` (checking the id is not a day of a series HEY has written out; with `--occurrence --apply-to future`, the occurrence's day), `hey todo list`, `hey journal list` | covered |
-| `/topics/{id}/entries.json` | GET | SDK `Topics().GetEntries` | `hey thread read <id>`, `hey attachment list <topic-id>` | covered, but see the paging note below |
+| `/topics/{id}/entries.json` | GET | SDK `Topics().GetEntriesPage` | `hey thread read <id>`, `hey attachment list <topic-id>`, TUI thread view; `hey reply <topic-id>`, `hey compose --thread-id`, `hey forward <topic-id>` and TUI `r`/`f` when the topic's own page holds no emailed message (`mail.ReplyTarget`) | covered, but see the paging note above |
 | `/topics/{id}/publication` | POST | SDK `Publications().Create` | `hey share <thread-id>` | covered |
 | `/topics/{id}/publication.json` | GET | SDK `Publications().Create` readback | `hey share <thread-id>` | covered |
 | `/topics/{id}/publication` | DELETE | SDK `Publications().Delete` | `hey unshare <thread-id>` | covered |
