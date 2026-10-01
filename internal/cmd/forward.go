@@ -24,7 +24,11 @@ func newForwardCommand() *forwardCommand {
 	forwardCommand.cmd = &cobra.Command{
 		Use:   "forward <thread-id>",
 		Short: "Forward the latest message in a thread",
-		Long: `Forward the latest message in a thread.
+		Long: `Forward the latest emailed message in a thread, with HEY's quoted content.
+
+A note or share notice posted after it is internal — visible to everyone with access to
+the thread, never emailed — so it is skipped, as HEY's web app skips it. A thread holding
+nothing but notes and share notices is refused.
 
 A --to, --cc or --bcc address HEY would drop without saying so — one with no domain,
 or a top-level domain HEY does not know — is refused before anything is sent.`,
