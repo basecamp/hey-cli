@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	actioncable "github.com/basecamp/actioncable-go"
+	actioncable "github.com/basecamp/actioncable-client/go/v2"
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
