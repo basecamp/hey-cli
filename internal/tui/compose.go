@@ -329,7 +329,7 @@ func (f *composeForm) handleKey(view *mailView, msg tea.KeyPressMsg) (tea.Cmd, b
 		}
 		f.confirmLeave = true
 		return nil, true
-	case msg.Key().Code == tea.KeyTab && msg.Key().Mod == tea.ModShift:
+	case msg.String() == "shift+tab":
 		f.focus = (f.focus + f.bodyIndex()) % (f.bodyIndex() + 1)
 		return f.focusCurrent(), true
 	case msg.Key().Code == tea.KeyTab:
@@ -355,6 +355,15 @@ func (f *composeForm) edit(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	input := &f.inputs[f.focus]
 	value, position := input.Value(), input.Position()
+	if msg.String() == "backspace" {
+		if rest, cursor, ok := deleteRecipientBefore(value, byteOffset(value, position)); ok {
+			input.SetValue(rest)
+			input.SetCursor(len([]rune(rest[:cursor])))
+			f.suggest = nil
+			f.typing = false
+			return nil
+		}
+	}
 	cmd := f.update(msg)
 	switch {
 	case input.Value() != value:

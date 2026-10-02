@@ -132,7 +132,10 @@ wrote to most recently first, then your contacts by name, then "Everyone at" you
 company and your contact groups. It narrows as you type, matching a name or an address,
 and leaves out anyone already on that line. ↑ and ↓ (or Ctrl+P and Ctrl+N) move through
 it; Tab or Enter adds the highlighted person as `Name <address>, ` in place of what you
-were typing, ready for the next one; a group adds every address in it. Escape closes the
+were typing, ready for the next one; a group adds every address in it. Backspace right
+after a recipient written `Name <address>` takes the whole recipient and its comma in one
+press, the way HEY's composer removes a recipient; a bare address you typed still deletes
+a letter at a time. Escape closes the
 list and nothing else, and moving the cursor closes it too. With the list closed, Tab and
 Enter move between fields as they always have. The list is read in the background when
 the form opens, so typing never waits on it, and an address typed in full works whether

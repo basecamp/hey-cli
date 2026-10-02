@@ -428,6 +428,67 @@ func TestTheListReachesMailFromAnotherSection(t *testing.T) {
 	}
 }
 
+func TestDeleteRecipientBeforeTakesANamedRecipientWhole(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		value      string
+		pos        int
+		want       string
+		wantCursor int
+		ok         bool
+	}{
+		{name: "the only one, after its comma", value: "Jane Doe <jane@example.com>, ", pos: 29, want: "", wantCursor: 0, ok: true},
+		{name: "the only one, right after it", value: "Jane Doe <jane@example.com>", pos: 27, want: "", wantCursor: 0, ok: true},
+		{name: "the last of two", value: "Jane Doe <jane@example.com>, Rick Sanchez <rick@example.com>, ", pos: 62,
+			want: "Jane Doe <jane@example.com>, ", wantCursor: 29, ok: true},
+		{name: "one in the middle", value: "Jane Doe <jane@example.com>, Rick Sanchez <rick@example.com>, summer@example.com", pos: 60,
+			want: "Jane Doe <jane@example.com>, summer@example.com", wantCursor: 29, ok: true},
+		{name: "the first of two", value: "Jane Doe <jane@example.com>, rick@example.com", pos: 27,
+			want: "rick@example.com", wantCursor: 0, ok: true},
+		{name: "a quoted name with a comma", value: `"Bryan, Annie" <annie@example.com>, `, pos: 36, want: "", wantCursor: 0, ok: true},
+		{name: "a bare address deletes a letter at a time", value: "jane@example.com, ", pos: 18, ok: false},
+		{name: "an address in brackets with no name", value: "<jane@example.com>, ", pos: 20, ok: false},
+		{name: "typing the next one", value: "Jane Doe <jane@example.com>, ri", pos: 31, ok: false},
+		{name: "inside the address", value: "Jane Doe <jane@example.com>", pos: 20, ok: false},
+	} {
+		got, cursor, ok := deleteRecipientBefore(tc.value, tc.pos)
+		if ok != tc.ok || got != tc.want || cursor != tc.wantCursor {
+			t.Errorf("%s: deleteRecipientBefore = %q, %d, %v; want %q, %d, %v", tc.name, got, cursor, ok, tc.want, tc.wantCursor, tc.ok)
+		}
+	}
+}
+
+func TestBackspaceTakesAPickedRecipientInOnePress(t *testing.T) {
+	v, _ := recipientsTestView(t)
+	form := openComposer(t, v)
+	typeText(v, "jan")
+	v.HandleContentKey(keyPress("tab"))
+	typeText(v, "rick")
+	v.HandleContentKey(keyPress("tab"))
+	to := &form.inputs[fieldTo]
+	if to.Value() != "Jane Doe <jane@example.com>, Rick Sanchez <rick@example.com>, " {
+		t.Fatalf("To = %q", to.Value())
+	}
+
+	v.HandleContentKey(keyPress("backspace"))
+	if got := to.Value(); got != "Jane Doe <jane@example.com>, " {
+		t.Fatalf("one backspace should take Rick whole, To = %q", got)
+	}
+	if to.Position() != len([]rune(to.Value())) {
+		t.Errorf("the cursor should be ready for the next recipient, at %d", to.Position())
+	}
+	v.HandleContentKey(keyPress("backspace"))
+	if got := to.Value(); got != "" {
+		t.Errorf("a second backspace should take Jane, To = %q", got)
+	}
+
+	typeText(v, "sam@example.com")
+	v.HandleContentKey(keyPress("backspace"))
+	if got := to.Value(); got != "sam@example.co" {
+		t.Errorf("a typed address deletes a letter at a time, To = %q", got)
+	}
+}
+
 func TestMatchRecipientsPutsWordStartsFirstAndKeepsHEYsOrder(t *testing.T) {
 	all := newRecipientSuggestions([]hey.AddressableRecipient{
 		{Value: "joanna@example.org", Label: "Joanna Lumley"},

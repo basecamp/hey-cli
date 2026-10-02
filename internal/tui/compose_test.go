@@ -133,6 +133,23 @@ func TestComposeTabCyclesFields(t *testing.T) {
 	}
 }
 
+// A terminal speaking the kitty keyboard protocol reports Num Lock and Caps Lock
+// as modifiers, so Shift+Tab with Num Lock on arrives as Shift and Num Lock. It is
+// still Shift+Tab, and it must not fall through to plain Tab and move forward.
+func TestComposeShiftTabGoesBackWithALockKeyOn(t *testing.T) {
+	v := mailWithPostings()
+	v.HandleContentKey(keyPress("c"))
+	f := composeModal(v)
+	for _, lock := range []tea.KeyMod{tea.ModNumLock, tea.ModCapsLock, tea.ModNumLock | tea.ModCapsLock} {
+		f.focus = int(fieldSubject)
+		_ = f.focusCurrent()
+		v.HandleContentKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab, Mod: tea.ModShift | lock}))
+		if f.focus != int(fieldBcc) {
+			t.Errorf("shift+tab with lock %v should move back to Bcc, got %d", lock, f.focus)
+		}
+	}
+}
+
 func TestComposeValidatesBeforeSending(t *testing.T) {
 	v := mailWithPostings()
 	v.HandleContentKey(keyPress("c"))

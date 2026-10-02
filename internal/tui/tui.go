@@ -957,7 +957,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if msg.Key().Code == tea.KeyTab {
-		if msg.Key().Mod == tea.ModShift {
+		if msg.Key().Mod.Contains(tea.ModShift) {
 			m.focus = (m.focus + 2) % 3
 		} else {
 			m.focus = (m.focus + 1) % 3

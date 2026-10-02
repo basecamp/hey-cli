@@ -209,6 +209,35 @@ func (f *composeForm) acceptSuggestion() {
 	input.SetCursor(len([]rune(text)))
 }
 
+// deleteRecipientBefore answers the list with the recipient just before a cursor at
+// byte offset pos taken out whole, and where the cursor goes, when that recipient is
+// written Name <address> — the form the picker writes. Backspace then takes it in one
+// press, the way HEY's composer takes a recipient token, with its comma. A bare
+// address is left to delete a letter at a time, since that is how a typo in one is
+// fixed.
+func deleteRecipientBefore(value string, pos int) (string, int, bool) {
+	before := strings.TrimRight(value[:pos], " ")
+	before = strings.TrimRight(strings.TrimSuffix(before, ","), " ")
+	if !strings.HasSuffix(before, ">") {
+		return "", 0, false
+	}
+	start, end := mail.AddressAt(value, len(before)-1)
+	recipient := strings.TrimSpace(value[start:end])
+	open := strings.LastIndexByte(recipient, '<')
+	if open <= 0 || strings.TrimSpace(recipient[:open]) == "" {
+		return "", 0, false
+	}
+
+	head := strings.TrimRight(value[:start], " ")
+	tail := strings.TrimLeft(value[pos:], " ")
+	tail = strings.TrimLeft(strings.TrimPrefix(tail, ","), " ")
+	if head == "" {
+		return tail, 0, true
+	}
+	head += " "
+	return head + tail, len(head), true
+}
+
 // handleSuggestionKey answers the keys the list takes while it is open: moving
 // through it, picking from it and closing it. Everything else goes on to the
 // field, which is what narrows the list.

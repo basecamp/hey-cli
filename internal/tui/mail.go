@@ -2324,7 +2324,7 @@ func (v *mailView) handleLinkKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	}
 	if msg.Key().Code == tea.KeyTab {
 		delta := 1
-		if msg.Key().Mod == tea.ModShift {
+		if msg.Key().Mod.Contains(tea.ModShift) {
 			delta = -1
 		}
 		previous := v.selectedLink

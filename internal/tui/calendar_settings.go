@@ -65,7 +65,7 @@ func (f *calendarSettingsForm) handleKey(msg tea.KeyPressMsg) bool {
 	}
 
 	switch {
-	case msg.Key().Code == tea.KeyTab && msg.Key().Mod == tea.ModShift:
+	case msg.String() == "shift+tab":
 		f.step(-1)
 		return false
 	case msg.Key().Code == tea.KeyTab, msg.Key().Code == tea.KeyEnter:
