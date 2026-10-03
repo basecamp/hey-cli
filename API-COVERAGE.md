@@ -65,7 +65,7 @@ forward answers. The drafts index (`/entries/drafts.json`) pages the same way, w
 | `/topics/{id}/publication` | DELETE | SDK `Publications().Delete` | `hey unshare <thread-id>` | covered |
 | `/messages/{id}.json` | GET | SDK `Messages().Get` | `hey thread read <id>` (bodies), `hey reply <topic-id>` and TUI `r` (recipient fallback), `hey attachment list <topic-id>`, `hey attachment save <id>` | covered |
 | `/messages/{id}` | PUT | SDK `Messages().UpdateDraft`, `Messages().SendDraft` | `hey draft edit <id>`, `hey draft send <id>` | covered |
-| `/messages/{id}/edit.json` | GET | SDK `Messages().GetEdit` | `hey draft show <id>`, `hey draft edit/send` (reading the state an update resends) | covered |
+| `/messages/{id}/edit.json` | GET | SDK `Messages().GetEdit` | `hey draft show <id>`, `hey draft edit/send` (reading the state an update resends); every send in the CLI and TUI, to confirm a delivery HEY answered with no thread was refused and kept as a draft (`mail.ConfirmDelivered`) | covered |
 | `/entries/{id}/replies/new.json` | GET | SDK `Entries().NewReply` | `hey reply <topic-id>` and `hey compose --thread-id` (recipients, with the acting user excluded) | covered |
 | `/entries/drafts.json` | GET | SDK `Entries().ListDraftsPage` | `hey draft list` (`--all`/`--page` follow its cursor) | covered |
 | `/entries/drafts/{id}` | DELETE | SDK `Entries().DeleteDraft` | `hey draft delete <id>...` | covered |

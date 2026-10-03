@@ -301,10 +301,10 @@ func TestComposeRefusedByHEYClosesAndSaysWhichDraft(t *testing.T) {
 	if composeModal(v) != nil {
 		t.Error("the composer should close: HEY already has the message as a draft")
 	}
-	// The toast is half the screen wide, so it says only that; the notice row, which runs
-	// the width of the list, names the draft and the likely reason.
-	if toast := deliverToView(v, answer); toast != "Not sent — saved as a draft" {
-		t.Errorf("toast = %q, want it to say it was not sent", toast)
+	// The toast is half the screen wide, so it says that and the draft; the notice row,
+	// which runs the width of the list, adds the likely reason.
+	if toast := deliverToView(v, answer); toast != "Not sent — saved as draft 2201" {
+		t.Errorf("toast = %q, want it to say it was not sent and which draft holds it", toast)
 	}
 	if !strings.HasPrefix(v.notice, "Not sent") || !strings.Contains(v.notice, "draft 2201") || !strings.Contains(v.notice, "sending limit") {
 		t.Errorf("notice = %q, want it to name the draft and the likely reason", v.notice)

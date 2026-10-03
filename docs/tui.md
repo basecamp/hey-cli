@@ -73,7 +73,7 @@ emailed, instead of with the sender's name.
 
 A thread opens on its latest message; `k` steps back through the ones before it and `j` forward again.
 
-Sending a reply or a forward from a thread closes the thread and returns you to the list you opened it from — the Imbox, a search, a bundle. A send that fails keeps the form open, and so does an address HEY would not deliver to: the form names it (`Not a valid email address: a`) rather than sending a message HEY would quietly keep as a draft, or send without that recipient.
+Sending a reply or a forward from a thread closes the thread and returns you to the list you opened it from — the Imbox, a search, a bundle. A send that fails keeps the form open — except one HEY refused and kept as a draft (usually the account's sending limit): that closes the form, since sending again would only make another draft, and says "Not sent" with the draft it was saved as. An address HEY would not deliver to keeps the form open too: the form names it (`Not a valid email address: a`) rather than sending a message HEY would quietly keep as a draft, or send without that recipient.
 
 While reading a thread, the From header shows the actual send-as address when HEY records one separately from the account user.
 
