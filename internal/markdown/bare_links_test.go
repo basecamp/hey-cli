@@ -253,6 +253,18 @@ func TestRenderLinksBareURLsWhole(t *testing.T) {
 			[]string{"mailto:jane@example.org?subject=資料"},
 		},
 		{
+			"punctuation after a mailto:",
+			`<p>Ask mailto:jane@example.org! Or 'mailto:tessa@example.org' or mailto:kestrel@example.org?subject=Agenda! today</p>`,
+			"mailto:jane@example.org! Or 'mailto:tessa@example.org' or mailto:kestrel@example.org?subject=Agenda! today",
+			[]string{"mailto:jane@example.org", "mailto:tessa@example.org", "mailto:kestrel@example.org?subject=Agenda"},
+		},
+		{
+			"a mailto: in corner brackets",
+			`<p>「mailto:alice@example.org?」と「mailto:alice@example.org,o'brien@example.org」https://docs.example.com/資料</p>`,
+			"「mailto:alice@example.org?」と「mailto:alice@example.org,o'brien@example.org」https://docs.example.com/資料",
+			[]string{"mailto:alice@example.org", "https://docs.example.com/資料"},
+		},
+		{
 			"a www address",
 			`<p>Tickets at www.ferries.example.com/harbour_line?day=2&amp;seats=6 today</p>`,
 			"http://www.ferries.example.com/harbour_line?day=2&seats=6 today",

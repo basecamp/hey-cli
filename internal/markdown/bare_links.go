@@ -534,15 +534,17 @@ func urlAt(s string, i int) (bareLink, bool) {
 	// A mailto: URI is the whole of what it opens — every recipient, and the query
 	// that carries a subject and a body.
 	if m := mailtoURI.FindString(s[i:]); m != "" {
+		// The URI is linked when nothing but what a link's end sheds follows it in
+		// the run of text it sits in — "mailto:jane@example.org!" — and declined when
+		// more does: a recipient list the pattern could not read to its end, a second
+		// recipient of o'brien@ or devi*rao@, would open without the rest of it. A
+		// declined link comes back with no target, and its addresses are declined.
 		url := trimLinkEnd(cutAtUnopenedBracket(m))
-		if rest := s[i+len(url):]; !continuesWord(rest) && !continuesMailto(rest) {
+		token := cutAtUnopenedBracket(s[i : i+linkTokenEnd(s[i:])])
+		if trimLinkEnd(token) == url {
 			return bareLink{i, i + len(url), url}, true
 		}
-		// A recipient list the pattern could not read to its end — a second
-		// recipient of o'brien@ or devi*rao@ — would open without the rest of it, so
-		// none of it is linked: the link comes back with no target, and its addresses
-		// are declined.
-		return bareLink{start: i, end: i + linkTokenEnd(s[i:])}, true
+		return bareLink{start: i, end: i + len(token)}, true
 	}
 	if m := wholeHost(bareURL, s, i); m != "" {
 		if url := trimLinkEnd(cutAtUnopenedBracket(m)); strings.Contains(url[strings.Index(url, "://")+3:], ".") {
@@ -554,22 +556,6 @@ func urlAt(s string, i int) (bareLink, bool) {
 		return bareLink{i, i + len(url), "http://" + url}, true
 	}
 	return bareLink{}, false
-}
-
-// continuesMailto reports whether what follows a mailto: URI carries its recipient list
-// or its query on: a , ; or ? with more after it, or what a local part may hold.
-func continuesMailto(rest string) bool {
-	if rest == "" {
-		return false
-	}
-	if strings.IndexByte(otherLocalPart, rest[0]) >= 0 || rest[0] == '@' {
-		return true
-	}
-	if strings.IndexByte(",;?", rest[0]) < 0 || len(rest) == 1 {
-		return false
-	}
-	next, _ := utf8.DecodeRuneInString(rest[1:])
-	return !unicode.IsSpace(next)
 }
 
 // linkTokenEnd is where the run of text a link sits in ends: at a space, or at what ends
