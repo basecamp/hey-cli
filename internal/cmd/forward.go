@@ -36,9 +36,13 @@ or a top-level domain HEY does not know — is refused before anything is sent.
 The answer's thread_id and entry_id name the thread and entry that were forwarded. Beside
 them, id and topic_id name the new message and the thread it started, with delayed (true
 while Undo Send holds it back). Whatever HEY's answer leaves out is left out here too;
-nothing is guessed in its place.`,
+nothing is guessed in its place.
+
+If HEY refuses the send — usually because the account has reached its sending limit —
+it keeps the message as a draft; the command then fails with not_delivered (exit 7),
+naming the draft, which hey draft send sends later.`,
 		Annotations: map[string]string{
-			"agent_notes": "Forwards the latest emailed message in a thread with HEY's quoted content — never an internal note or share notice posted after it. Accepts comma-separated recipients and an optional note via -m. The answer's thread_id and entry_id name what was forwarded; id and topic_id name the new message and the thread it started, as HEY's answer names them.",
+			"agent_notes": "Forwards the latest emailed message in a thread with HEY's quoted content — never an internal note or share notice posted after it. Accepts comma-separated recipients and an optional note via -m. The answer's thread_id and entry_id name what was forwarded; id and topic_id name the new message and the thread it started, as HEY's answer names them. A send HEY refuses — usually the account's sending limit — is kept as a draft and fails with not_delivered (exit 7), naming the draft in meta.draft_id; send it later with hey draft send <draft_id>, not by sending again, which only makes another draft.",
 		},
 		Example: `  hey forward 12345 --to alice@example.com
   hey forward 12345 --to alice@example.com --cc bob@example.org -m "For your review"`,
@@ -107,6 +111,9 @@ func (c *forwardCommand) run(cmd *cobra.Command, args []string) error {
 	sent, err := forwardSDK.Messages().Create(ctx, draft.Subject, content, to, cc, bcc)
 	if err != nil {
 		return apierr.FromSDK(err)
+	}
+	if err := confirmSent(ctx, forwardSDK, sent); err != nil {
+		return err
 	}
 
 	// thread_id and entry_id name what was forwarded; id and topic_id, from HEY's answer,

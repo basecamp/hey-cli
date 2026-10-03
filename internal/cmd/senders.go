@@ -148,6 +148,9 @@ func (c *composeCommand) composeFrom(cmd *cobra.Command, client *hey.Client, sen
 	if sendErr != nil {
 		return apierr.FromSDK(sendErr)
 	}
+	if err := confirmSent(ctx, client, sent); err != nil {
+		return err
+	}
 	summary := sentWithAttachmentsSummary("Message sent", len(c.attachments))
 	return writeMessageSent(cmd, messageSent{line: summary, summary: summary}, sent)
 }
