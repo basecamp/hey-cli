@@ -508,9 +508,14 @@ func (m *markdownizer) link(n *html.Node) {
 			return
 		}
 	}
+	// A link inside a link is one CommonMark cannot hold — the outer brackets would be
+	// left on screen with their URL as text — and HTML allows it inside a table cell,
+	// where LinkedIn wraps a whole cell in one anchor around another. The inner links
+	// carry the destinations, so the outer anchor writes only what it holds.
+	nested := containsAnchor(n)
 	m.inline(n, func(text string) string {
 		switch {
-		case !linkable:
+		case !linkable || nested:
 			return text
 		case text == "" || strings.TrimSpace(elementText(n)) == strings.TrimSpace(href):
 			// An autolink shows its destination as written, so one destination
@@ -529,6 +534,16 @@ func (m *markdownizer) link(n *html.Node) {
 			return "[" + text + "](" + dest + ")"
 		}
 	})
+}
+
+// containsAnchor reports whether an anchor holds another anchor.
+func containsAnchor(n *html.Node) bool {
+	for child := n.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type == html.ElementNode && child.Data == "a" || containsAnchor(child) {
+			return true
+		}
+	}
+	return false
 }
 
 // soleLinkedImage returns the one image that is an anchor's whole content. The second

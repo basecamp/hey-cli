@@ -415,6 +415,23 @@ func TestToMarkdownDestinationEncodesNonASCII(t *testing.T) {
 	}
 }
 
+// HTML allows an anchor around a table cell that holds another anchor, which LinkedIn
+// sends; CommonMark cannot hold a link in a link, so the outer one writes only what it
+// holds and its brackets and URL are not left on screen as text.
+func TestToMarkdownNestedAnchorsLeaveNoBracketsBehind(t *testing.T) {
+	const url = "https://jobs.example.com/search?trk=main~module~text"
+	got := toMarkdown(`<table><tr><td><a href="` + url + `"><table><tr><td><a href="` + url + `">View job openings</a></td></tr></table></a></td></tr></table>`)
+	if strings.Contains(got, "](") && strings.Count(got, "](") != 1 || strings.Contains(got, "[[") {
+		t.Errorf("ToMarkdown = %q, want one link and no nested brackets", got)
+	}
+	if links := renderedLinks(t, got); len(links) != 1 || links[0] != url {
+		t.Errorf("rendered links = %q, want %q once", links, url)
+	}
+	if text := renderedText(t, got); strings.Contains(text, "](") || strings.Contains(text, url) {
+		t.Errorf("rendered = %q, want just the label", text)
+	}
+}
+
 // An autolink's entities are decoded by some renderers and read verbatim by others, so
 // a link that is its own URL, with an entity spelled out in that URL, is written as a
 // link whose destination every renderer decodes alike — and still reads as the URL.

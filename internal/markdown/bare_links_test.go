@@ -358,6 +358,18 @@ func TestRenderLinksBareURLsWhole(t *testing.T) {
 			[]string{"https://docs.example.com:/room_list?day=2&seats=6", "http://www.docs.example.com:/ferry_times"},
 		},
 		{
+			"tildes in a URL written out as text",
+			`<p>Openings: https://jobs.example.com/search?trk=main~module~text-0-view~job today</p>`,
+			"https://jobs.example.com/search?trk=main~module~text-0-view~job today",
+			[]string{"https://jobs.example.com/search?trk=main~module~text-0-view~job"},
+		},
+		{
+			"a URL struck through",
+			`<p><del>https://docs.example.com/old_plan</del> is gone</p>`,
+			"https://docs.example.com/old_plan is gone",
+			[]string{"https://docs.example.com/old_plan"},
+		},
+		{
 			"a www address",
 			`<p>Tickets at www.ferries.example.com/harbour_line?day=2&amp;seats=6 today</p>`,
 			"http://www.ferries.example.com/harbour_line?day=2&seats=6 today",

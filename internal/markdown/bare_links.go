@@ -34,9 +34,12 @@ import (
 // angle-bracket autolink, which it reads verbatim and wraps whole.
 
 // proseParser is glamour's configuration without linkify, so that prose linkify would
-// have cut into pieces arrives here as one run of text.
+// have cut into pieces arrives here as one run of text — and without strikethrough,
+// whose single tildes linkify reads before, as part of a link: a URL written out as text
+// with ~ in its query (LinkedIn's main~module~text) is one link, not a link cut at the
+// first tilde and the rest of it struck through and hidden.
 var proseParser = goldmark.New(goldmark.WithExtensions(
-	extension.Table, extension.Strikethrough, extension.TaskList, extension.DefinitionList,
+	extension.Table, extension.TaskList, extension.DefinitionList,
 )).Parser()
 
 var (
