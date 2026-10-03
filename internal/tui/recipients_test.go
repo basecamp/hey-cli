@@ -525,6 +525,45 @@ func TestAReloadThatPushesTheHighlightedPersonOutClosesTheList(t *testing.T) {
 	}
 }
 
+// An address typed out in full that someone in the list has is finished: no
+// list opens, however many other rows mention it, and tab moves on rather than
+// swap it for one of them.
+func TestATypedOutAddressOpensNoList(t *testing.T) {
+	work := hey.AddressableRecipient{Value: "jane.work@example.com", Label: "jane@example.com (work)"}
+	jane := hey.AddressableRecipient{Value: "jane@example.com", Label: "Jane Doe"}
+
+	t.Run("more than one row matches", func(t *testing.T) {
+		v, _ := recipientsTestView(t)
+		form := openComposer(t, v)
+		v.Update(recipientsLoadedMsg{suggestions: newRecipientSuggestions([]hey.AddressableRecipient{work, jane})})
+		typeText(v, "jane@example.com")
+		if form.suggest != nil {
+			t.Fatalf("a typed-out address opened a list: %q", suggestedLabels(form))
+		}
+		v.HandleContentKey(keyPress("tab"))
+		if got := form.inputs[fieldTo].Value(); got != "jane@example.com" || form.focus != int(fieldCc) {
+			t.Errorf("tab should leave the address and move on, To = %q, focus %d", got, form.focus)
+		}
+	})
+
+	t.Run("the address is past the rows shown", func(t *testing.T) {
+		v, _ := recipientsTestView(t)
+		form := openComposer(t, v)
+		teams := []string{"design", "sales", "support", "finance", "legal", "ops"}
+		rows := make([]hey.AddressableRecipient, 0, len(teams)+1)
+		for _, team := range teams {
+			rows = append(rows, hey.AddressableRecipient{
+				Value: "jane." + team + "@example.com", Label: "jane@example.com (" + team + ")",
+			})
+		}
+		v.Update(recipientsLoadedMsg{suggestions: newRecipientSuggestions(append(rows, jane))})
+		typeText(v, "jane@example.com")
+		if form.suggest != nil {
+			t.Errorf("a typed-out address opened a list: %q", suggestedLabels(form))
+		}
+	})
+}
+
 func TestCcAndBccSuggestToo(t *testing.T) {
 	for _, field := range []composeField{fieldCc, fieldBcc} {
 		v, _ := recipientsTestView(t)

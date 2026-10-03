@@ -135,6 +135,22 @@ func matchRecipients(all []recipientSuggestion, query string, chosen map[string]
 	return append(best, rest[:min(len(rest), maxRecipientSuggestions-len(best))]...)
 }
 
+// knownAddress reports whether a recipient, as typed, is exactly the address of
+// someone in the list, anywhere in it, not just in the rows a query would show.
+// Only something with an @ in it can be, so a name being typed costs nothing.
+func knownAddress(all []recipientSuggestion, recipient string) bool {
+	address := strings.ToLower(mail.BareAddress(recipient))
+	if !strings.Contains(address, "@") {
+		return false
+	}
+	for i := range all {
+		if all[i].address == address {
+			return true
+		}
+	}
+	return false
+}
+
 // chosenAddresses answers the bare addresses a recipient list already holds,
 // lower-cased, leaving out the one being typed.
 func chosenAddresses(list string, start, end int) map[string]bool {
@@ -196,8 +212,10 @@ func (f *composeForm) refreshSuggestions() {
 	if len(matches) == 0 {
 		return
 	}
-	// A recipient typed out in full needs nothing suggested for it.
-	if len(matches) == 1 && strings.EqualFold(strings.TrimSpace(value[start:end]), matches[0].value) {
+	// A recipient typed out in full needs nothing suggested for it, however many
+	// other rows it also matches: tab then moves on, rather than swap the
+	// address for a different mailbox whose name happens to contain it.
+	if knownAddress(f.recipients, value[start:end]) {
 		return
 	}
 	f.suggest = &recipientPopover{field: composeField(f.focus), matches: matches, start: start, end: end}
