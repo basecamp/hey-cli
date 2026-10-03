@@ -21,6 +21,7 @@ import (
 type recordedSearch struct {
 	queries  []url.Values
 	requests int
+	boxLists int
 	status   int
 }
 
@@ -29,6 +30,20 @@ func searchServer(t *testing.T) (*httptest.Server, *recordedSearch) {
 	recorded := &recordedSearch{status: http.StatusOK}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		recorded.requests++
+		// The Imbox and Set Aside carry names of the account holder's own choosing.
+		if r.URL.Path == "/boxes.json" {
+			recorded.boxLists++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[
+				{"id":1,"kind":"imbox","name":"Important"},
+				{"id":2,"kind":"feedbox","name":"The Feed"},
+				{"id":3,"kind":"asidebox","name":"Someday"},
+				{"id":4,"kind":"laterbox","name":"Reply Later"},
+				{"id":5,"kind":"trailbox","name":"Paper Trail"},
+				{"id":6,"kind":"bubblebox","name":"Bubble Up"}
+			]`))
+			return
+		}
 		if r.URL.Path == "/advanced_search_filters.json" {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{
@@ -205,6 +220,103 @@ func TestSearchValidatesPageDateAndBoxBeforeRequest(t *testing.T) {
 			var cliErr *apierr.Error
 			if !errors.As(err, &cliErr) || cliErr.Code != "usage" {
 				t.Fatalf("error = %v, want usage error", err)
+			}
+			if recorded.requests != 0 {
+				t.Errorf("requests = %d, want 0", recorded.requests)
+			}
+		})
+	}
+}
+
+// --in takes every spelling hey box view takes for the boxes search can narrow to, and
+// sends HEY the one value it reads for each.
+func TestSearchSendsTheValueHEYReadsForEveryBoxSpelling(t *testing.T) {
+	tests := map[string]string{
+		"imbox":       "imbox",
+		"Imbox":       "imbox",
+		"feed":        "feed",
+		"feedbox":     "feed",
+		"The Feed":    "feed",
+		"papertrail":  "papertrail",
+		"trailbox":    "papertrail",
+		"Paper Trail": "papertrail",
+		"paper-trail": "papertrail",
+		"trash":       "trash",
+		"TRASH":       "trash",
+	}
+	for spelling, want := range tests {
+		t.Run(spelling, func(t *testing.T) {
+			server, recorded := searchServer(t)
+			if _, err := runSearch(t, server, "planning", "--in", spelling); err != nil {
+				t.Fatalf("search --in %s: %v", spelling, err)
+			}
+			if got := recorded.queries[0].Get("refine[in]"); got != want {
+				t.Errorf("refine[in] = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// A box renamed in HEY is found in the box list by the name it was given, as hey box and
+// hey move find it, and searched by its kind.
+func TestSearchFindsARenamedBoxInTheBoxList(t *testing.T) {
+	server, recorded := searchServer(t)
+	if _, err := runSearch(t, server, "planning", "--in", "important"); err != nil {
+		t.Fatalf("search --in important: %v", err)
+	}
+	if recorded.boxLists != 1 {
+		t.Errorf("box list reads = %d, want 1", recorded.boxLists)
+	}
+	if got := recorded.queries[0].Get("refine[in]"); got != "imbox" {
+		t.Errorf("refine[in] = %q, want imbox", got)
+	}
+}
+
+// A renamed box search cannot narrow to is refused by its name, after the one list read
+// that found it, and nothing is searched.
+func TestSearchRefusesARenamedBoxItCannotNarrowTo(t *testing.T) {
+	server, recorded := searchServer(t)
+	_, err := runSearch(t, server, "planning", "--in", "Someday")
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage {
+		t.Fatalf("error = %v, want usage error", err)
+	}
+	if !strings.Contains(cliErr.Hint, "Someday is a box search cannot narrow to") {
+		t.Errorf("hint = %q, want the box named", cliErr.Hint)
+	}
+	if recorded.boxLists != 1 || len(recorded.queries) != 0 {
+		t.Errorf("box list reads = %d, searches = %d; want 1 and 0", recorded.boxLists, len(recorded.queries))
+	}
+}
+
+// A name no box answers to is a usage error, not not_found, once the list has been read.
+func TestSearchRefusesANameNoBoxAnswersTo(t *testing.T) {
+	server, recorded := searchServer(t)
+	_, err := runSearch(t, server, "planning", "--in", "archive")
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage {
+		t.Fatalf("error = %v, want usage error", err)
+	}
+	if cliErr.Message != "--in must be imbox, feed, papertrail, or trash" {
+		t.Errorf("message = %q", cliErr.Message)
+	}
+	if recorded.boxLists != 1 || len(recorded.queries) != 0 {
+		t.Errorf("box list reads = %d, searches = %d; want 1 and 0", recorded.boxLists, len(recorded.queries))
+	}
+}
+
+// The boxes search cannot narrow to are refused by their own spellings, with no request.
+func TestSearchNamesTheBoxesItCanNarrowTo(t *testing.T) {
+	for _, in := range []string{"set-aside", "laterbox", "Bubble Up"} {
+		t.Run(in, func(t *testing.T) {
+			server, recorded := searchServer(t)
+			_, err := runSearch(t, server, "planning", "--in", in)
+			var cliErr *apierr.Error
+			if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage {
+				t.Fatalf("error = %v, want usage error", err)
+			}
+			if cliErr.Message != "--in must be imbox, feed, papertrail, or trash" {
+				t.Errorf("message = %q", cliErr.Message)
 			}
 			if recorded.requests != 0 {
 				t.Errorf("requests = %d, want 0", recorded.requests)

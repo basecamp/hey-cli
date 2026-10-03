@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -53,6 +52,7 @@ func newBoxCommand() *boxCommand {
 		"List HEY boxes or list email threads in one box.",
 		`  hey box list
   hey box view imbox
+  hey box view papertrail
   hey box view imbox --limit 10
   hey box view 123 --json`,
 	)
@@ -66,8 +66,9 @@ func newBoxViewCommand() *boxCommand {
 	return newBoxReaderCommand(
 		"view <name|id>",
 		"List email threads in a box",
-		"List email threads in a HEY box. Accepts a box name (imbox, feedbox, etc.) or numeric ID.",
+		"List email threads in a HEY box. Accepts a box's short name (imbox, feed, papertrail, setaside, replylater, bubbleup), its kind (feedbox, trailbox, …), its display name (The Feed, Paper Trail) or its numeric ID.",
 		`  hey box view imbox
+  hey box view papertrail
   hey box view imbox --limit 10
   hey box view imbox --page next-cursor
   hey box view 123 --json`,
@@ -81,7 +82,7 @@ func newBoxReaderCommand(use, short, long, example string) *boxCommand {
 		Short: short,
 		Long:  long,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts a box name or numeric ID. Returns email threads. Use topic_id with hey thread read, reply, and forward; use id with seen, unseen, and move. A row with kind \"bundle\" groups one sender's unseen threads and has no topic_id: list them with hey bundle view <id>, and every thread with that sender via hey contact threads <contact-id>. --page continues from the next_page cursor of an earlier listing of the same box.",
+			"agent_notes": "Accepts a box's short name (imbox, feed, papertrail, setaside, replylater, bubbleup), kind (feedbox, trailbox, …) or display name (including one the user gave the box) in any case, or a numeric ID. hey search --in and hey move --to take the same spellings, but not every box: search narrows only to imbox, feed and papertrail (plus trash) and refuses anything else as a usage error, and move takes a box ID or any box but bubbleup (use hey bubble up). An unknown name is not_found here and in move. Trash is not a box: search it with hey search --in trash and move threads there with hey trash. Returns email threads. Use topic_id with hey thread read, reply, and forward; use id with seen, unseen, and move. A row with kind \"bundle\" groups one sender's unseen threads and has no topic_id: list them with hey bundle view <id>, and every thread with that sender via hey contact threads <contact-id>. --page continues from the next_page cursor of an earlier listing of the same box.",
 		},
 		Example: example,
 		RunE:    command.run,
@@ -158,81 +159,88 @@ func boxPageCursor(nextHistoryURL string) string {
 	return parsed.Query().Get("page")
 }
 
-// resolveBox fetches a box by name or ID at the page cursor, using named SDK getters for
-// well-known box names to avoid an extra List API call.
+// resolveBox fetches a box by name or ID at the page cursor. A name is any spelling
+// boxKindFor knows — short name, kind or display name — and the same ones hey search --in
+// and hey move --to take, or the name HEY lists a box under, a renamed one included.
 func resolveBox(ctx context.Context, nameOrID, page string) (*generated.BoxShowResponse, error) {
-	var cursor *string
-	if page != "" {
-		cursor = &page
-	}
-
-	// Numeric ID: fetch directly
 	if id, err := strconv.ParseInt(nameOrID, 10, 64); err == nil {
-		resp, err := sdk.Boxes().Get(ctx, id, &generated.GetBoxParams{Page: cursor})
-		if err != nil {
-			return nil, apierr.FromSDK(err)
-		}
-		return resp, nil
+		return resolveBoxByID(ctx, id, page)
 	}
 
-	// Named getter for well-known boxes (saves a List call)
-	switch strings.ToLower(nameOrID) {
-	case "imbox":
-		resp, err := sdk.Boxes().GetImbox(ctx, &generated.GetImboxParams{Page: cursor})
-		if err != nil {
-			return nil, apierr.FromSDK(err)
-		}
-		return resp, nil
-	case "feedbox", "the feed":
-		resp, err := sdk.Boxes().GetFeedbox(ctx, &generated.GetFeedboxParams{Page: cursor})
-		if err != nil {
-			return nil, apierr.FromSDK(err)
-		}
-		return resp, nil
-	case "trailbox", "paper trail":
-		resp, err := sdk.Boxes().GetTrailbox(ctx, &generated.GetTrailboxParams{Page: cursor})
-		if err != nil {
-			return nil, apierr.FromSDK(err)
-		}
-		return resp, nil
-	case "asidebox", "set aside":
-		resp, err := sdk.Boxes().GetAsidebox(ctx, &generated.GetAsideboxParams{Page: cursor})
-		if err != nil {
-			return nil, apierr.FromSDK(err)
-		}
-		return resp, nil
-	case "laterbox", "reply later":
-		resp, err := sdk.Boxes().GetLaterbox(ctx, &generated.GetLaterboxParams{Page: cursor})
-		if err != nil {
-			return nil, apierr.FromSDK(err)
-		}
-		return resp, nil
-	case "bubblebox", "bubbled up":
-		resp, err := sdk.Boxes().GetBubblebox(ctx, &generated.GetBubbleboxParams{Page: cursor})
-		if err != nil {
-			return nil, apierr.FromSDK(err)
-		}
-		return resp, nil
+	kind := boxKindFor(nameOrID)
+	if resp, named, err := readNamedBox(ctx, kind, page); named {
+		return resp, err
 	}
 
-	// Unknown name: list-then-filter fallback
+	// Any other box is found in the list, by the kind or the name HEY serves for it.
 	result, err := sdk.Boxes().List(ctx)
 	if err != nil {
 		return nil, apierr.FromSDK(err)
 	}
 
-	lower := strings.ToLower(nameOrID)
 	if result != nil {
 		for _, b := range *result {
-			if strings.ToLower(b.Kind) == lower || strings.ToLower(b.Name) == lower {
-				resp, err := sdk.Boxes().Get(ctx, b.Id, &generated.GetBoxParams{Page: cursor})
-				if err != nil {
-					return nil, apierr.FromSDK(err)
-				}
-				return resp, nil
+			if boxKindFor(b.Kind) == kind || boxKindFor(b.Name) == kind {
+				return readListedBox(ctx, b, page)
 			}
 		}
 	}
 
-	return nil, apierr.ErrNotFound("box", nameOrID)
+	return nil, errBoxNotFound(nameOrID)
+}
+
+// resolveBoxByID reads a box found in the box list on the route its kind names, like a
+// box given by name, and falls back to /boxes/{id} for an ID the list does not contain,
+// such as one of another linked account's boxes.
+func resolveBoxByID(ctx context.Context, id int64, page string) (*generated.BoxShowResponse, error) {
+	result, err := sdk.Boxes().List(ctx)
+	if err != nil {
+		return nil, apierr.FromSDK(err)
+	}
+
+	if result != nil {
+		for _, b := range *result {
+			if b.Id == id {
+				return readListedBox(ctx, b, page)
+			}
+		}
+	}
+
+	return readBoxByID(ctx, id, page)
+}
+
+// readListedBox reads a box found in the box list on the route its kind names, whether it
+// was found by its ID or by a name of the user's own. The pages after the first are read
+// there whatever the first came from (mail.ReadPage dispatches on the kind), and
+// /boxes/{id} orders the Feed, the Paper Trail and Bubble Up differently, so a first page
+// read there would repeat or skip threads on the second. Only a kind with no route of its
+// own is read from /boxes/{id}.
+func readListedBox(ctx context.Context, box generated.Box, page string) (*generated.BoxShowResponse, error) {
+	if resp, named, err := readNamedBox(ctx, box.Kind, page); named {
+		return resp, err
+	}
+	return readBoxByID(ctx, box.Id, page)
+}
+
+func readBoxByID(ctx context.Context, id int64, page string) (*generated.BoxShowResponse, error) {
+	var cursor *string
+	if page != "" {
+		cursor = &page
+	}
+	resp, err := sdk.Boxes().Get(ctx, id, &generated.GetBoxParams{Page: cursor})
+	if err != nil {
+		return nil, apierr.FromSDK(err)
+	}
+	return resp, nil
+}
+
+// readNamedBox reads a box HEY has a route of its own for, through the same table
+// mail.ReadPage reads its later pages from. named is false for any other kind, which only
+// /boxes/{id} serves.
+func readNamedBox(ctx context.Context, kind, page string) (*generated.BoxShowResponse, bool, error) {
+	resp, named, err := mail.ReadNamedBox(ctx, sdk, kind, page)
+	if err != nil {
+		return nil, named, apierr.FromSDK(err)
+	}
+	return resp, named, nil
 }
