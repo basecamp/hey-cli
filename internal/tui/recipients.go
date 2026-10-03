@@ -93,7 +93,10 @@ func newRecipientSuggestions(rows []hey.AddressableRecipient) []recipientSuggest
 				suggestion.members = append(suggestion.members, strings.ToLower(mail.BareAddress(member)))
 			}
 		} else {
-			suggestion.address = strings.ToLower(value)
+			// Compared the way the line's recipients are, through the parser, so
+			// a quoted local part ("jane doe"@example.com) matches itself. The
+			// value written into the field stays exactly as HEY gave it.
+			suggestion.address = strings.ToLower(mail.BareAddress(value))
 		}
 		suggestions = append(suggestions, suggestion)
 	}

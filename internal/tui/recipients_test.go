@@ -564,6 +564,33 @@ func TestATypedOutAddressOpensNoList(t *testing.T) {
 	})
 }
 
+// An address with a quoted local part is compared in the parsed form the line's
+// recipients are: once added it isn't offered again, and typed out in full it
+// opens no list.
+func TestAQuotedAddressMatchesItself(t *testing.T) {
+	quoted := hey.AddressableRecipient{Value: `"jane doe"@example.com`, Label: "Jane Doe"}
+	other := hey.AddressableRecipient{Value: "jane.doe.work@example.com", Label: `"jane doe"@example.com (work)`}
+
+	v, _ := recipientsTestView(t)
+	form := openComposer(t, v)
+	v.Update(recipientsLoadedMsg{suggestions: newRecipientSuggestions([]hey.AddressableRecipient{other, quoted})})
+	form.inputs[fieldTo].SetValue(`Jane Doe <"jane doe"@example.com>, `)
+	form.inputs[fieldTo].CursorEnd()
+	typeText(v, "jane d")
+	if got := suggestedLabels(form); slices.Contains(got, "Jane Doe") {
+		t.Errorf("Jane is already on the line, suggestions = %q", got)
+	}
+
+	form.inputs[fieldTo].SetValue("")
+	typeText(v, `"jane doe"@example.com`)
+	if form.suggest != nil {
+		t.Errorf("a typed-out quoted address opened a list: %q", suggestedLabels(form))
+	}
+	if got := newRecipientSuggestions([]hey.AddressableRecipient{quoted})[0].value; got != `"jane doe"@example.com` {
+		t.Errorf("the address written into the field must stay as HEY gave it, got %q", got)
+	}
+}
+
 func TestCcAndBccSuggestToo(t *testing.T) {
 	for _, field := range []composeField{fieldCc, fieldBcc} {
 		v, _ := recipientsTestView(t)
