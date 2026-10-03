@@ -189,7 +189,9 @@ func resolveBox(ctx context.Context, nameOrID, page string) (*generated.BoxShowR
 	return nil, errBoxNotFound(nameOrID)
 }
 
-// resolveBoxByID reads a box HEY names on its own route, like a box given by name.
+// resolveBoxByID reads a box found in the box list on the route its kind names, like a
+// box given by name, and falls back to /boxes/{id} for an ID the list does not contain,
+// such as one of another linked account's boxes.
 func resolveBoxByID(ctx context.Context, id int64, page string) (*generated.BoxShowResponse, error) {
 	result, err := sdk.Boxes().List(ctx)
 	if err != nil {
