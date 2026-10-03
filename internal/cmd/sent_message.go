@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"maps"
+	"strings"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	"github.com/spf13/cobra"
@@ -16,6 +17,9 @@ type messageSent struct {
 	// summary the envelope's summary; they differ only where the line names an id.
 	line    string
 	summary string
+	// lineID is an id the line already names — the draft in "Draft 12345 sent" — which
+	// the line does not repeat when HEY delivers the message under that same id.
+	lineID int64
 	// reported is what the command reported before HEY named the entry, kept beside
 	// HEY's answer; HEY's keys win over it.
 	reported map[string]any
@@ -26,9 +30,9 @@ type messageSent struct {
 
 // writeMessageSent confirms a message HEY has delivered — a new one, a reply, a forward
 // or a sent draft. HEY answers a delivery with the entry that went out and the thread it
-// is on, so the line names the thread and the envelope carries both, with the subject and
-// whether Undo Send is holding the delivery back. A HEY that predates the ids answers
-// without them, and so does this: nothing is guessed in their place.
+// is on, so the line and the envelope both name them, the envelope with the subject and
+// whether Undo Send is holding the delivery back. An answer that names no entry carries
+// no ids, and neither does this: nothing is guessed in their place.
 func writeMessageSent(cmd *cobra.Command, confirmation messageSent, sent *generated.SentMessage) error {
 	data := map[string]any{}
 	maps.Copy(data, confirmation.reported)
@@ -46,7 +50,7 @@ func writeMessageSent(cmd *cobra.Command, confirmation messageSent, sent *genera
 			Description: "Read the thread",
 		}))
 	}
-	return writeMutationLine(cmd, sentMessageLine(confirmation.line, sent), confirmation.summary, data, opts...)
+	return writeMutationLine(cmd, sentMessageLine(confirmation, sent), confirmation.summary, data, opts...)
 }
 
 // sentMessageData is HEY's answer for a delivery as the JSON output carries it: the keys
@@ -75,19 +79,27 @@ func sentMessageData(sent *generated.SentMessage) map[string]any {
 	return data
 }
 
-// sentMessageLine is the styled confirmation: the line's lead, the thread HEY put the
-// message on, and a word that Undo Send is holding it back.
-func sentMessageLine(lead string, sent *generated.SentMessage) string {
-	switch {
-	case sent == nil:
-		return lead + "."
-	case sent.TopicId != 0 && sent.Delayed:
-		return fmt.Sprintf("%s (thread %d); Undo Send is holding it back.", lead, sent.TopicId)
-	case sent.TopicId != 0:
-		return fmt.Sprintf("%s (thread %d).", lead, sent.TopicId)
-	case sent.Delayed:
-		return lead + "; Undo Send is holding it back."
-	default:
-		return lead + "."
+// sentMessageLine is the styled confirmation: the line's lead, the message HEY delivered
+// and the thread it put it on, and a word that Undo Send is holding it back.
+func sentMessageLine(confirmation messageSent, sent *generated.SentMessage) string {
+	line := confirmation.line
+	if sent == nil {
+		return line + "."
 	}
+
+	var named []string
+	if sent.Id != 0 && sent.Id != confirmation.lineID {
+		named = append(named, fmt.Sprintf("message %d", sent.Id))
+	}
+	if sent.TopicId != 0 {
+		named = append(named, fmt.Sprintf("thread %d", sent.TopicId))
+	}
+	if len(named) > 0 {
+		line += " (" + strings.Join(named, ", ") + ")"
+	}
+
+	if sent.Delayed {
+		return line + "; Undo Send is holding it back."
+	}
+	return line + "."
 }

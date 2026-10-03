@@ -166,7 +166,7 @@ func TestSendsReportTheEmptySubjectHEYServed(t *testing.T) {
 		assertSentData(t, decodeResponse(t, stdout), map[string]any{
 			"thread_id": float64(7), "entry_id": float64(12),
 			"id": float64(2201), "topic_id": float64(880), "subject": "", "delayed": false,
-			"to": []any{"alice@example.com"}, "cc": nil, "bcc": nil,
+			"to": []any{"alice@example.com"}, "cc": []any{}, "bcc": []any{},
 		})
 	})
 }
@@ -238,7 +238,7 @@ func TestForwardAnswersTheNewThreadBesideTheOneItForwarded(t *testing.T) {
 		"thread_id": float64(7), "entry_id": float64(12),
 		"id": float64(2203), "topic_id": float64(882),
 		"subject": "Fwd: Quarterly planning", "delayed": false,
-		"to": []any{"alice@example.com"}, "cc": nil, "bcc": nil,
+		"to": []any{"alice@example.com"}, "cc": []any{}, "bcc": []any{},
 	})
 	assertReadsThread(t, response, "882")
 }
@@ -252,7 +252,7 @@ func TestForwardAgainstAHEYThatNamesNoEntryKeepsItsOwnFields(t *testing.T) {
 	}
 	assertSentData(t, decodeResponse(t, stdout), map[string]any{
 		"thread_id": float64(7), "entry_id": float64(12), "subject": "Fwd: Quarterly planning",
-		"to": []any{"alice@example.com"}, "cc": nil, "bcc": nil,
+		"to": []any{"alice@example.com"}, "cc": []any{}, "bcc": []any{},
 	})
 }
 
@@ -284,29 +284,32 @@ func TestDraftSendAnswersTheEntryHEYDelivered(t *testing.T) {
 	}
 }
 
-func TestSendsNameTheThreadInTheirStyledLine(t *testing.T) {
+func TestSendsNameTheMessageAndThreadInTheirStyledLine(t *testing.T) {
+	composing := []string{"compose", "--to", "maria@example.com", "--subject", "Board update", "-m", "Numbers."}
+	answering := func(answer string) func(t *testing.T) http.Handler {
+		return func(t *testing.T) http.Handler {
+			var writes []draftWrite
+			return answeringDeliveries(draftLifecycleServer(t, draftEditJSON, &writes), answer)
+		}
+	}
 	for _, tt := range []struct {
 		name    string
 		handler func(t *testing.T) http.Handler
 		args    []string
 		want    string
 	}{
-		{"compose", func(t *testing.T) http.Handler {
-			var writes []draftWrite
-			return answeringDeliveries(draftLifecycleServer(t, draftEditJSON, &writes), heySentNow)
-		}, []string{"compose", "--to", "maria@example.com", "--subject", "Board update", "-m", "Numbers."}, "Message sent (thread 880).\n"},
-		{"compose held by Undo Send", func(t *testing.T) http.Handler {
-			var writes []draftWrite
-			return answeringDeliveries(draftLifecycleServer(t, draftEditJSON, &writes), heySentDelayed)
-		}, []string{"compose", "--to", "maria@example.com", "--subject", "Board update", "-m", "Numbers."}, "Message sent (thread 880); Undo Send is holding it back.\n"},
-		{"compose before ids", func(t *testing.T) http.Handler {
-			var writes []draftWrite
-			return answeringDeliveries(draftLifecycleServer(t, draftEditJSON, &writes), heySentBeforeIDs)
-		}, []string{"compose", "--to", "maria@example.com", "--subject", "Board update", "-m", "Numbers."}, "Message sent.\n"},
-		{"draft send", func(t *testing.T) http.Handler {
-			var writes []draftWrite
-			return answeringDeliveries(draftLifecycleServer(t, draftEditJSON, &writes), heySentNow)
-		}, []string{"draft", "send", "12345"}, "Draft 12345 sent (thread 880).\n"},
+		{"compose", answering(heySentNow), composing, "Message sent (message 2201, thread 880).\n"},
+		{"compose held by Undo Send", answering(heySentDelayed), composing,
+			"Message sent (message 2201, thread 880); Undo Send is holding it back.\n"},
+		{"compose without the entry", answering(heySentBeforeIDs), composing, "Message sent.\n"},
+		{"compose held without the entry", answering(heySentDelayedBeforeIDs), composing,
+			"Message sent; Undo Send is holding it back.\n"},
+		// A draft goes out under its own id, which the line already names.
+		{"draft send", answering(`{"id":12345,"topic_id":880,"subject":"Quarterly planning","delayed":false}`),
+			[]string{"draft", "send", "12345"}, "Draft 12345 sent (thread 880).\n"},
+		// One that breaks out goes out as a new entry, and only HEY's answer can name it.
+		{"draft send broken out", answering(`{"id":2204,"topic_id":883,"subject":"Quarterly planning","delayed":false}`),
+			[]string{"draft", "send", "12345"}, "Draft 12345 sent (message 2204, thread 883).\n"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(tt.handler(t))
@@ -323,7 +326,7 @@ func TestSendsNameTheThreadInTheirStyledLine(t *testing.T) {
 	}
 }
 
-func TestAReplyNamesTheThreadItLandedOnInItsStyledLine(t *testing.T) {
+func TestAReplyNamesItselfAndTheThreadItLandedOnInItsStyledLine(t *testing.T) {
 	server, sent := threadReplyServer(t, messageAddressedToJane, 11, 12)
 	sent.SendAnswer = `{"id":2202,"topic_id":881,"subject":"Re: Weekly sync","delayed":false}`
 
@@ -331,7 +334,7 @@ func TestAReplyNamesTheThreadItLandedOnInItsStyledLine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reply: %v", err)
 	}
-	if stdout != "Reply sent (thread 881).\n" {
+	if stdout != "Reply sent (message 2202, thread 881).\n" {
 		t.Errorf("stdout = %q", stdout)
 	}
 }

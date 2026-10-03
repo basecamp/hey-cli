@@ -342,7 +342,7 @@ Want to send email?
 └── Check drafts? → hey draft list --json
 ```
 
-A send (compose, reply, forward, draft send) answers with the new message's `id` and its thread's `topic_id` once HEY serves them — use `topic_id` with `hey thread read`. `delayed: true` means Undo Send is still holding it.
+In JSON output, a send (compose, reply, forward, draft send) answers with the new message's `id` and its thread's `topic_id` — use `topic_id` with `hey thread read`. `delayed: true` means Undo Send is still holding it. A field HEY's answer leaves out is left out, never guessed.
 
 ### Managing Todos
 
