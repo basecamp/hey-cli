@@ -41,7 +41,8 @@ is never overwritten or claimed. `hey doctor` flags an unmanaged baseline and ho
 ## MCP server
 
 `hey mcp` runs an MCP (Model Context Protocol) server on stdin/stdout, serving HEY
-boxes, search, threads, contacts, todos, calendars, and your identity as tools
+boxes, search, threads, contacts, todos, calendars, time tracks, habits, the
+journal, and your identity as tools
 backed by your signed-in account — the same keychain-stored credentials every other command uses.
 Register it with any MCP client as a stdio server:
 
@@ -52,13 +53,16 @@ hey mcp --domains boxes,search         # narrow the served tool surface
 ```
 
 Each domain is one gateway tool (`hey_boxes`, `hey_search`, `hey_threads`,
-`hey_contacts`, `hey_todos`, `hey_calendar`, `hey_identity`) dispatching actions
+`hey_contacts`, `hey_todos`, `hey_calendar`, `hey_timetracks`, `hey_habits`,
+`hey_journal`, `hey_identity`) dispatching actions
 derived from the HEY SDK's API model; call an action named `describe` for any
 action's parameter schema. Listings with more pages come back as
 `{"next_page": cursor, "results": ...}` — pass the cursor back as the action's
 `page` parameter. The posting-changes feed's last page comes back as
 `{"next_since": ..., "next_v": ..., "results": ...}` — the cursor for the next
 incremental poll, passed back as the action's `since` and `v` parameters.
+Creating or editing calendar events is not served yet: the HEY SDK's API model
+covers only their deletes, so use `hey event add` / `hey event edit` for those.
 Mutations are never retried automatically: a 429/503 on a write surfaces to
 the caller rather than risking a duplicate delivery, so retry a failed write
 yourself once you know it did not land. Logs go to stderr — stdout carries
