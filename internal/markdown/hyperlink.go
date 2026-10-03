@@ -35,7 +35,10 @@ func LinkifyURLs(text string) string {
 		if insideHyperlink(text[:start]) {
 			continue
 		}
-		url := trimLinkEnd(text[start:loc[1]])
+		// The URL ends where a bare link in prose would: at its run of text's end
+		// (linkTokenEnd), then at what a link's end sheds.
+		match := text[start:loc[1]]
+		url := trimLinkEnd(match[:linkTokenEnd(match)])
 		if url == "" {
 			continue
 		}

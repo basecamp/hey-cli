@@ -308,6 +308,18 @@ func TestRenderLinksBareURLsWhole(t *testing.T) {
 			[]string{"http://www.example.org/room_list", "https://docs.example.com/ferry_times"},
 		},
 		{
+			"links between CJK sentence punctuation",
+			`<p>mailto:jane@example.org。返信して、https://docs.example.com/資料、mailto:tessa@example.org</p>`,
+			"mailto:jane@example.org。返信して、https://docs.example.com/資料、mailto:tessa@example.org",
+			[]string{"mailto:jane@example.org", "https://docs.example.com/資料", "mailto:tessa@example.org"},
+		},
+		{
+			"a URL in corner brackets in inline code",
+			`<p><code>「https://docs.example.com/資料」を見て</code></p>`,
+			"「https://docs.example.com/資料」を見て",
+			[]string{"https://docs.example.com/資料"},
+		},
+		{
 			"a www address",
 			`<p>Tickets at www.ferries.example.com/harbour_line?day=2&amp;seats=6 today</p>`,
 			"http://www.ferries.example.com/harbour_line?day=2&seats=6 today",
@@ -462,19 +474,27 @@ func TestRenderWrapsANonASCIILinkWhole(t *testing.T) {
 // once for each.
 func TestFindBareLinksInALongUnspacedParagraphIsLinear(t *testing.T) {
 	const links = 20_000
-	paragraph := strings.Repeat("「mailto:jane@example.org」と", links)
-	found := make(chan int, 1)
-	go func() {
-		linked, _ := findBareLinks(paragraph)
-		found <- len(linked)
-	}()
-	select {
-	case n := <-found:
-		if n != links {
-			t.Errorf("found %d links, want %d", n, links)
+	for _, sentence := range []string{
+		"「mailto:jane@example.org」と",
+		"「mailto:jane@example.org?subject=資料」と",
+		"「https://docs.example.com/資料」と",
+		"「www.docs.example.com/資料」と",
+		"https://docs.example.com/資料。",
+	} {
+		paragraph := strings.Repeat(sentence, links)
+		found := make(chan int, 1)
+		go func() {
+			linked, _ := findBareLinks(paragraph)
+			found <- len(linked)
+		}()
+		select {
+		case n := <-found:
+			if n != links {
+				t.Errorf("%q: found %d links, want %d", sentence, n, links)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%q: findBareLinks did not finish within 5s for %d links", sentence, links)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatalf("findBareLinks did not finish within 5s for %d links", links)
 	}
 }
 

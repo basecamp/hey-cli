@@ -624,9 +624,13 @@ func urlAt(s string, i int) (bareLink, bool) {
 	}
 	// Only an ASCII letter or digit in front keeps a link from starting — xhttps:// is
 	// not a scheme — since Chinese and Japanese put no space before one: 詳細はhttps://…
-	if i > 0 && isAlphanumeric(s[i-1:i]) {
+	if i > 0 && isAlphanumeric(s[i-1:i]) || !startsLink(s[i:]) {
 		return bareLink{}, false
 	}
+	// A link is matched within the run of text it sits in and no further: Chinese and
+	// Japanese put no space after one, and a pattern let loose on the rest of the
+	// paragraph would read it once for every link in it.
+	s = s[:i+linkTokenEnd(s[i:])]
 	// A mailto: URI is the whole of what it opens — every recipient, and the query
 	// that carries a subject and a body.
 	if m := mailtoURI.FindString(s[i:]); m != "" {
@@ -636,7 +640,7 @@ func urlAt(s string, i int) (bareLink, bool) {
 		// recipient of o'brien@ or devi*rao@, would open without the rest of it. A
 		// declined link comes back with no target, and its addresses are declined.
 		url := trimLinkEnd(cutAtUnopenedBracket(m))
-		token := s[i : i+linkTokenEnd(s[i:])]
+		token := s[i:]
 		if trimLinkEnd(token) == url {
 			return bareLink{i, i + len(url), url}, true
 		}
@@ -654,8 +658,20 @@ func urlAt(s string, i int) (bareLink, bool) {
 	return bareLink{}, false
 }
 
+// startsLink reports whether s starts the way a URL, a www. address or a mailto: URI
+// does, in any case.
+func startsLink(s string) bool {
+	for _, prefix := range []string{"http://", "https://", "ftp://", "www.", "mailto:"} {
+		if len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // linkTokenEnd is where the run of text a link sits in ends: at a space, at what ends a
-// link in any form, or at a wide closing bracket the run did not open. It stops there
+// link in any form, at punctuation outside ASCII — the 。 or 、 a sentence goes on after —
+// or at a wide closing bracket the run did not open. It stops there
 // rather than running to the end of the paragraph and being cut afterwards: Chinese and
 // Japanese put no spaces between sentences, and a paragraph of many links would be
 // scanned to its end once for each of them.
@@ -675,6 +691,8 @@ func linkTokenEnd(s string) int {
 					return i
 				}
 				open[n]--
+			} else if unicode.IsPunct(r) {
+				return i
 			}
 		}
 	}
