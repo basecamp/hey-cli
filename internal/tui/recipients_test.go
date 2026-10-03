@@ -464,6 +464,40 @@ func TestAReloadKeepsTheHighlightedPerson(t *testing.T) {
 	}
 }
 
+// When the fresh list pushes the highlighted person past the rows shown, the
+// list closes rather than highlight somebody nobody picked.
+func TestAReloadThatPushesTheHighlightedPersonOutClosesTheList(t *testing.T) {
+	v, _ := recipientsTestView(t)
+	form := openComposer(t, v)
+	people := []hey.AddressableRecipient{
+		{Value: "jack@example.com", Label: "Jack Black"},
+		{Value: "jade@example.com", Label: "Jade Smith"},
+		{Value: "jake@example.com", Label: "Jake Peralta"},
+		{Value: "jean@example.com", Label: "Jean Grey"},
+		{Value: "jill@example.com", Label: "Jill Valentine"},
+		{Value: "joan@example.com", Label: "Joan Holloway"},
+	}
+	v.Update(recipientsLoadedMsg{suggestions: newRecipientSuggestions(people)})
+	typeText(v, "j")
+	for range maxRecipientSuggestions - 1 {
+		v.HandleContentKey(keyPress("down"))
+	}
+	if got := form.suggest.selected().label; got != "Joan Holloway" {
+		t.Fatalf("the sixth row should be highlighted, got %q", got)
+	}
+
+	// Someone new wrote to us, and the fresh list puts them first.
+	fresh := append([]hey.AddressableRecipient{{Value: "jane@example.com", Label: "Jane Doe"}}, people...)
+	v.Update(recipientsLoadedMsg{suggestions: newRecipientSuggestions(fresh)})
+	if form.suggest != nil {
+		t.Errorf("Joan is past the rows shown now, so the list should close, got %q highlighted", form.suggest.selected().label)
+	}
+	v.HandleContentKey(keyPress("tab"))
+	if got := form.inputs[fieldTo].Value(); got != "j" {
+		t.Errorf("tab with the list closed must not add anyone, To = %q", got)
+	}
+}
+
 func TestCcAndBccSuggestToo(t *testing.T) {
 	for _, field := range []composeField{fieldCc, fieldBcc} {
 		v, _ := recipientsTestView(t)

@@ -315,6 +315,10 @@ func (f *composeForm) recipientsLoaded(suggestions []recipientSuggestion) {
 			return
 		}
 	}
+	// The fresh list pushed them out of the rows shown. Highlighting someone
+	// else would have tab add a person nobody picked, so the list closes and
+	// the next key opens it again from the top.
+	f.suggest = nil
 }
 
 // suggestionsView draws the list, to be laid over the form under its field.
