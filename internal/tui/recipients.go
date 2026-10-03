@@ -24,15 +24,23 @@ type recipientSuggestion struct {
 	label  string // the name to show
 	detail string // what a group or an account stands for; empty for a person
 
-	// name and address are label and value folded to lower case once, when the
+	// name and written are label and value folded to lower case once, when the
 	// list arrives, so matching a keystroke against thousands of rows compares
-	// strings without allocating any.
+	// strings without allocating any. written is the address as someone types
+	// it, quotes and all; address is the same address parsed, which is how it
+	// is recognised as already on the line. Both are empty for a group.
 	name    string
+	written string
 	address string
 
 	// members is a group's addresses, lower-cased, so that a group already on
 	// the line can be left out the way a person is.
 	members []string
+
+	// isGroup is decided once, when the list arrives: a row HEY describes (an
+	// account or a contact group), or a value holding more than one address.
+	// A comma alone doesn't make one — "jane,doe"@example.com is one mailbox.
+	isGroup bool
 }
 
 // chosen reports whether the line already holds the row: a person's address,
@@ -51,7 +59,7 @@ func (s *recipientSuggestion) chosen(on map[string]bool) bool {
 
 // group reports whether picking the row adds more than one recipient.
 func (s recipientSuggestion) group() bool {
-	return s.detail != "" || strings.Contains(s.value, ",")
+	return s.isGroup
 }
 
 // recipientsLoadedMsg carries HEY's recipient list, already read into the
@@ -85,6 +93,7 @@ func newRecipientSuggestions(rows []hey.AddressableRecipient) []recipientSuggest
 			detail: strings.TrimSpace(terminal.SanitizeLine(row.Detail)),
 			name:   strings.ToLower(label),
 		}
+		suggestion.isGroup = suggestion.detail != "" || len(mail.SplitAddresses(value)) > 1
 		// A group is found by its name. Its members are people of their own, and
 		// matching their addresses would offer "Everyone at …" to anyone typing
 		// the first letters of one colleague.
@@ -96,6 +105,7 @@ func newRecipientSuggestions(rows []hey.AddressableRecipient) []recipientSuggest
 			// Compared the way the line's recipients are, through the parser, so
 			// a quoted local part ("jane doe"@example.com) matches itself. The
 			// value written into the field stays exactly as HEY gave it.
+			suggestion.written = strings.ToLower(value)
 			suggestion.address = strings.ToLower(mail.BareAddress(value))
 		}
 		suggestions = append(suggestions, suggestion)
@@ -124,14 +134,14 @@ func matchRecipients(all []recipientSuggestion, query string, chosen map[string]
 			continue
 		}
 		switch {
-		case strings.HasPrefix(row.name, query) || strings.HasPrefix(row.address, query) ||
+		case strings.HasPrefix(row.name, query) || strings.HasPrefix(row.written, query) ||
 			strings.Contains(row.name, wordStart):
 			best = append(best, *row)
 			if len(best) == maxRecipientSuggestions {
 				return best
 			}
 		case len(rest) < maxRecipientSuggestions &&
-			(strings.Contains(row.name, query) || strings.Contains(row.address, query)):
+			(strings.Contains(row.name, query) || strings.Contains(row.written, query)):
 			rest = append(rest, *row)
 		}
 	}

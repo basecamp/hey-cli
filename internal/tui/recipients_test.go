@@ -591,6 +591,37 @@ func TestAQuotedAddressMatchesItself(t *testing.T) {
 	}
 }
 
+// A comma inside a quoted local part makes one mailbox, not a group: it is
+// found by its address, picked under its name, and typed out in full it is
+// finished even when another contact's label mentions it.
+func TestAQuotedCommaIsOneMailbox(t *testing.T) {
+	mailbox := hey.AddressableRecipient{Value: `"jane,doe"@example.com`, Label: "Jane Doe"}
+	other := hey.AddressableRecipient{Value: "jane.doe.work@example.com", Label: `"jane,doe"@example.com (work)`}
+
+	all := newRecipientSuggestions([]hey.AddressableRecipient{mailbox})
+	if all[0].group() {
+		t.Fatal(`"jane,doe"@example.com is one mailbox, not a group`)
+	}
+
+	v, _ := recipientsTestView(t)
+	form := openComposer(t, v)
+	v.Update(recipientsLoadedMsg{suggestions: newRecipientSuggestions([]hey.AddressableRecipient{other, mailbox})})
+	typeText(v, `"jane,d`)
+	if got := suggestedLabels(form); !slices.Contains(got, "Jane Doe") {
+		t.Fatalf("the mailbox should be found by its address, suggestions = %q", got)
+	}
+
+	form.inputs[fieldTo].SetValue("")
+	typeText(v, `"jane,doe"@example.com`)
+	if form.suggest != nil {
+		t.Errorf("a typed-out quoted-comma address opened a list: %q", suggestedLabels(form))
+	}
+	v.HandleContentKey(keyPress("tab"))
+	if got := form.inputs[fieldTo].Value(); got != `"jane,doe"@example.com` {
+		t.Errorf("tab must leave the typed address alone, To = %q", got)
+	}
+}
+
 func TestCcAndBccSuggestToo(t *testing.T) {
 	for _, field := range []composeField{fieldCc, fieldBcc} {
 		v, _ := recipientsTestView(t)
