@@ -631,17 +631,17 @@ func (v *mailView) send(f *composeForm) tea.Cmd {
 		entryID := f.entryID
 		actingSenderID := f.replyActingSenderID
 		return func() tea.Msg {
-			err := sdk.Entries().CreateReply(ctx, entryID, actingSenderID, subject, body, to, cc, bcc)
+			_, err := sdk.Entries().CreateReply(ctx, entryID, actingSenderID, subject, body, to, cc, bcc)
 			return composeSentMsg{label: "Reply sent", err: err}
 		}
 	case composeForward:
 		return func() tea.Msg {
-			err := sdk.Messages().Create(ctx, subject, body, to, cc, bcc)
+			_, err := sdk.Messages().Create(ctx, subject, body, to, cc, bcc)
 			return composeSentMsg{label: "Message forwarded", err: err}
 		}
 	default:
 		return func() tea.Msg {
-			err := sdk.Messages().Create(ctx, subject, body, to, cc, bcc)
+			_, err := sdk.Messages().Create(ctx, subject, body, to, cc, bcc)
 			return composeSentMsg{label: "Message sent", err: err}
 		}
 	}

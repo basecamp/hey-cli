@@ -31,9 +31,14 @@ the thread, never emailed — so it is skipped, as HEY's web app skips it. A thr
 nothing but notes and share notices is refused.
 
 A --to, --cc or --bcc address HEY would drop without saying so — one with no domain,
-or a top-level domain HEY does not know — is refused before anything is sent.`,
+or a top-level domain HEY does not know — is refused before anything is sent.
+
+The answer's thread_id and entry_id name the thread and entry that were forwarded. Beside
+them, id and topic_id name the new message and the thread it started, with delayed (true
+while Undo Send holds it back). Whatever HEY's answer leaves out is left out here too;
+nothing is guessed in its place.`,
 		Annotations: map[string]string{
-			"agent_notes": "Forwards the latest emailed message in a thread with HEY's quoted content — never an internal note or share notice posted after it. Accepts comma-separated recipients and an optional note via -m.",
+			"agent_notes": "Forwards the latest emailed message in a thread with HEY's quoted content — never an internal note or share notice posted after it. Accepts comma-separated recipients and an optional note via -m. The answer's thread_id and entry_id name what was forwarded; id and topic_id name the new message and the thread it started, as HEY's answer names them.",
 		},
 		Example: `  hey forward 12345 --to alice@example.com
   hey forward 12345 --to alice@example.com --cc bob@example.org -m "For your review"`,
@@ -99,16 +104,24 @@ func (c *forwardCommand) run(cmd *cobra.Command, args []string) error {
 		note = htmlutil.FromMarkdown(c.message)
 	}
 	content := htmlutil.PrependHTML(draft.Content, note)
-	if err := forwardSDK.Messages().Create(ctx, draft.Subject, content, to, cc, bcc); err != nil {
+	sent, err := forwardSDK.Messages().Create(ctx, draft.Subject, content, to, cc, bcc)
+	if err != nil {
 		return apierr.FromSDK(err)
 	}
 
-	return writeMutation(cmd, "Message forwarded", map[string]any{
-		"thread_id": threadID,
-		"entry_id":  entryID,
-		"subject":   draft.Subject,
-		"to":        to,
-		"cc":        cc,
-		"bcc":       bcc,
-	})
+	// thread_id and entry_id name what was forwarded; id and topic_id, from HEY's answer,
+	// name the message that went out and the thread it started. An empty recipient line is
+	// [] rather than null, as it is in hey reply --dry-run.
+	return writeMessageSent(cmd, messageSent{
+		line:    "Message forwarded",
+		summary: "Message forwarded",
+		reported: map[string]any{
+			"thread_id": threadID,
+			"entry_id":  entryID,
+			"subject":   draft.Subject,
+			"to":        nonNilAddresses(to),
+			"cc":        nonNilAddresses(cc),
+			"bcc":       nonNilAddresses(bcc),
+		},
+	}, sent)
 }

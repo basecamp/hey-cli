@@ -327,8 +327,15 @@ func newDraftSendCommand() *draftSendCommand {
 	sendCommand.cmd = &cobra.Command{
 		Use:   "send <draft-id>",
 		Short: "Deliver a draft",
+		Long: `Deliver a draft through HEY's undo window.
+
+The answer carries the delivered message's id and the topic_id of its thread, with its
+subject and delayed (true while Undo Send holds it back). The id is the draft's own unless
+HEY breaks the draft out into a thread of its own, and the styled line then names the new
+message too. An answer from HEY that names no entry leaves the draft's id as the id, beside
+whatever HEY did serve, such as delayed.`,
 		Annotations: map[string]string{
-			"agent_notes": "Sends the draft as it stands — recipients are required, added with `hey draft edit --to`. Delivery goes through HEY's undo window. Scheduling a delivery is done in a HEY app for now; the CLI has no flag for it, and HEY's API schedules only to a whole hour.",
+			"agent_notes": "Sends the draft as it stands — recipients are required, added with `hey draft edit --to`. Delivery goes through HEY's undo window. The answer carries the delivered message's id and its thread's topic_id, with subject and delayed; when HEY's answer names no entry, the id stays the draft's and only the fields HEY served are added. Scheduling a delivery is done in a HEY app for now; the CLI has no flag for it, and HEY's API schedules only to a whole hour.",
 		},
 		Example: `  hey draft send 12345`,
 		RunE:    sendCommand.run,
@@ -360,11 +367,16 @@ func (c *draftSendCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	content.Schedule = nil
-	if err := sdk.Messages().SendDraft(ctx, draftID, content); err != nil {
+	sent, err := sdk.Messages().SendDraft(ctx, draftID, content)
+	if err != nil {
 		return apierr.FromSDK(err)
 	}
-	return writeMutationLine(cmd, fmt.Sprintf("Draft %d sent.", draftID), "Draft sent",
-		map[string]any{"id": draftID})
+	return writeMessageSent(cmd, messageSent{
+		line:     fmt.Sprintf("Draft %d sent", draftID),
+		summary:  "Draft sent",
+		lineID:   draftID,
+		reported: map[string]any{"id": draftID},
+	}, sent)
 }
 
 // --- delete ---
