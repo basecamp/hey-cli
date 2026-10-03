@@ -338,6 +338,18 @@ func TestRenderLinksBareURLsWhole(t *testing.T) {
 			[]string{"https://docs.example.com/one", "https://docs.example.com/two", "https://docs.example.com/a", "https://docs.example.com/b"},
 		},
 		{
+			"a host with the DNS root's dot",
+			`<p>See https://docs.example.com./room_list?day=2&amp;seats=6 and www.docs.example.com.:8443/ferry_times today.</p>`,
+			"https://docs.example.com./room_list?day=2&seats=6 and http://www.docs.example.com.:8443/ferry_times today.",
+			[]string{"https://docs.example.com./room_list?day=2&seats=6", "http://www.docs.example.com.:8443/ferry_times"},
+		},
+		{
+			"a host at the end of a sentence",
+			`<p>It moved to https://docs.example.com. Ask www.docs.example.com.</p>`,
+			"https://docs.example.com. Ask http://www.docs.example.com.",
+			[]string{"https://docs.example.com", "http://www.docs.example.com"},
+		},
+		{
 			"a www address",
 			`<p>Tickets at www.ferries.example.com/harbour_line?day=2&amp;seats=6 today</p>`,
 			"http://www.ferries.example.com/harbour_line?day=2&seats=6 today",

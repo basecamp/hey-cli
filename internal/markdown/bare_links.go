@@ -70,9 +70,11 @@ const (
 	// trimLinkEnd balances as it balances ( and ).
 	nonASCIIInLink = `[^\x00-\x7f\p{Z}\p{P}\p{C}]|[\x{200C}\x{200D}]`
 	nonASCIIInPath = nonASCIIInLink + `|[` + wideOpeners + wideClosers + `]`
-	// bareHost is a name ending in a top-level domain of letters or punycode, or an
-	// IPv4 address — tried in that order, so 192.0.2.1.example.com is a name.
-	bareHost = `(?:(?:[-a-zA-Z0-9@:%._\+~#=]|` + nonASCIIInLink + `){1,256}\.(?:(?i:xn--)[a-zA-Z0-9-]+|(?:[a-zA-Z]|\p{L})+)|(?:` + octet + `\.){3}` + octet + `)`
+	// bareHost is a name ending in a top-level domain of letters or punycode, and the
+	// DNS root's dot if it has one, or an IPv4 address — tried in that order, so
+	// 192.0.2.1.example.com is a name. A sentence's full stop after a host is taken in
+	// and shed again by trimLinkEnd.
+	bareHost = `(?:(?:[-a-zA-Z0-9@:%._\+~#=]|` + nonASCIIInLink + `){1,256}\.(?:(?i:xn--)[a-zA-Z0-9-]+|(?:[a-zA-Z]|\p{L})+)\.?|(?:` + octet + `\.){3}` + octet + `)`
 
 	// octet is one number of an IPv4 address, 0 to 255.
 	octet    = `(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)`
