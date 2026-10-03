@@ -1,15 +1,37 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"strings"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
+	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/mail"
 	"github.com/basecamp/hey-cli/internal/output"
 )
+
+// confirmSent checks that HEY delivered the message it answered for, through the client
+// that sent it (mail.ConfirmDelivered), and turns a refusal into the CLI's error for it:
+// not_delivered, naming the draft HEY kept and the command that sends it. Every command
+// that delivers a message asks this before confirming it.
+func confirmSent(ctx context.Context, client *hey.Client, sent *generated.SentMessage) error {
+	var refused *mail.NotDeliveredError
+	if err := mail.ConfirmDelivered(ctx, client, sent); errors.As(err, &refused) {
+		return &apierr.Error{
+			Code:    apierr.CodeNotDelivered,
+			Message: refused.Error(),
+			Hint:    fmt.Sprintf("hey draft send %d", refused.DraftID),
+			Meta:    map[string]any{"draft_id": refused.DraftID},
+		}
+	}
+	return nil
+}
 
 // messageSent is how a command confirms a delivery, before HEY's answer is added to it.
 type messageSent struct {

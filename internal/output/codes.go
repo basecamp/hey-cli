@@ -35,7 +35,7 @@ func ExitCodeFor(err error) int {
 		return ExitRateLimit
 	case apierr.CodeNetwork:
 		return ExitNetwork
-	case apierr.CodeAPI:
+	case apierr.CodeAPI, apierr.CodeNotDelivered:
 		return ExitAPI
 	case apierr.CodeAmbiguous:
 		return ExitAmbiguous
