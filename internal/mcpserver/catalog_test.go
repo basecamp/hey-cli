@@ -29,7 +29,7 @@ func TestCatalogServesCuratedDomains(t *testing.T) {
 			t.Errorf("domain %q has no operations", d.Key)
 		}
 	}
-	want := []string{"hey_boxes", "hey_search", "hey_threads", "hey_contacts", "hey_todos", "hey_calendar", "hey_identity"}
+	want := []string{"hey_boxes", "hey_search", "hey_threads", "hey_contacts", "hey_todos", "hey_calendar", "hey_timetracks", "hey_habits", "hey_journal", "hey_identity"}
 	if len(tools) != len(want) {
 		t.Fatalf("tools = %v, want %v", tools, want)
 	}
@@ -53,8 +53,7 @@ func TestCatalogUnmappedTagsArePinned(t *testing.T) {
 	sort.Strings(unmapped)
 
 	want := []string{
-		"Attachments", "Bulk Reply", "Calendar Events", "Calendar Habits", "Calendar Journal",
-		"Calendar Periods", "Calendar Time Tracks", "Clips",
+		"Attachments", "Bulk Reply", "Calendar Events", "Clips",
 		"Collections", "Extenzions", "Folders", "Postings",
 		"Publications", "Snippets", "Stickies", "Workflows",
 	}
