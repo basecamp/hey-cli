@@ -69,10 +69,20 @@ func writeMessageSent(cmd *cobra.Command, confirmation messageSent, sent *genera
 		opts = append(opts, output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "view",
 			Command:     fmt.Sprintf("hey thread read %d", threadID),
-			Description: "Read the thread",
+			Description: readThreadDescription(sent),
 		}))
 	}
 	return writeMutationLine(cmd, sentMessageLine(confirmation, sent), confirmation.summary, data, opts...)
+}
+
+// readThreadDescription is what the "view" breadcrumb says. While Undo Send holds the
+// message back HEY leaves it out of its thread — a thread it started reads as not found
+// until then — so the breadcrumb says to read it once the message has gone out.
+func readThreadDescription(sent *generated.SentMessage) string {
+	if sent != nil && sent.Delayed {
+		return "Read the thread once Undo Send releases the message"
+	}
+	return "Read the thread"
 }
 
 // sentMessageData is HEY's answer for a delivery as the JSON output carries it: the keys

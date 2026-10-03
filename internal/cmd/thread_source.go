@@ -43,8 +43,11 @@ func loadThreadRetainingMessageMetadata(ctx context.Context, threadID int64, hyd
 	if err != nil {
 		return nil, describeBundleMisread(ctx, threadID, err)
 	}
+	// HEY leaves a message out of its thread while Undo Send holds it back, so a thread
+	// whose only message was sent moments ago reads as empty until it goes out.
 	if len(thread.Entries) == 0 {
-		return nil, apierr.ErrNotFound("entries for thread", fmt.Sprint(threadID))
+		return nil, apierr.ErrNotFoundHint("entries for thread", fmt.Sprint(threadID),
+			"If you sent this message moments ago, Undo Send may still be holding it back; read the thread again once it goes out")
 	}
 	return thread, nil
 }

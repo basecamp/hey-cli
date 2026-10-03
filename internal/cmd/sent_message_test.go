@@ -104,6 +104,21 @@ func TestComposeSaysWhenUndoSendHoldsTheMessageBack(t *testing.T) {
 		t.Fatalf("compose: %v", err)
 	}
 	assertSentData(t, response, map[string]any{"id": float64(2201), "topic_id": float64(880), "subject": "Board update", "delayed": true})
+	// HEY leaves a held message out of its thread, so the breadcrumb says to read it once
+	// the message has gone out rather than now.
+	if len(response.Breadcrumbs) != 1 || !strings.Contains(response.Breadcrumbs[0].Description, "once Undo Send releases") {
+		t.Errorf("breadcrumbs = %+v, want the thread read once Undo Send releases the message", response.Breadcrumbs)
+	}
+}
+
+func TestComposeSentNowSaysToReadTheThread(t *testing.T) {
+	response, err := composeNewMessage(t, heySentNow)
+	if err != nil {
+		t.Fatalf("compose: %v", err)
+	}
+	if len(response.Breadcrumbs) != 1 || response.Breadcrumbs[0].Description != "Read the thread" {
+		t.Errorf("breadcrumbs = %+v, want the thread read now", response.Breadcrumbs)
+	}
 }
 
 // A HEY that has not started naming the delivered entry still delivers the message: the

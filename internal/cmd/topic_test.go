@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/threadload"
 )
 
@@ -221,8 +223,15 @@ func TestEntriesInThreadWithoutEntries(t *testing.T) {
 	server, _ := threadEntriesServer(t, nil, nil)
 	withSDKPointedAt(t, server)
 
-	if _, err := readThreadEntries(context.Background()); err == nil {
+	_, err := readThreadEntries(context.Background())
+	if err == nil {
 		t.Fatal("expected an error for a thread with no entries")
+	}
+	// HEY reads a thread as empty while Undo Send holds its only message back, which is
+	// the likeliest reason for an empty thread right after a send; the hint says so.
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeNotFound || !strings.Contains(cliErr.Hint, "Undo Send") {
+		t.Errorf("err = %#v, want not_found with a hint about Undo Send", err)
 	}
 }
 
