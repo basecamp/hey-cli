@@ -342,7 +342,7 @@ Want to send email?
 └── Check drafts? → hey draft list --json
 ```
 
-In JSON output, a send (compose, reply, forward, draft send) answers with the new message's `id` and its thread's `topic_id` — use `topic_id` with `hey thread read`. `delayed: true` means Undo Send is still holding it. A field HEY's answer leaves out is left out, never guessed. A send HEY refused — usually the account's sending limit — fails with `not_delivered` (exit 7): HEY kept it as a draft, named by `draft_id` in the error, and `hey draft send <draft_id>` sends it later. Do not resend the message; that makes a second draft.
+In JSON output, a send (compose, reply, forward, draft send) answers with the new message's `id` and its thread's `topic_id` — use `topic_id` with `hey thread read`. `delayed: true` means Undo Send is still holding it, and until it goes out HEY leaves it out of its thread: `hey thread read <topic_id>` shows the thread without it, or answers `not_found` for a thread it started — wait and read again rather than treating the send as lost. A field HEY's answer leaves out is left out, never guessed. A send HEY refused — usually the account's sending limit — fails with `not_delivered` (exit 7): HEY kept it as a draft, named by `draft_id` in the error, and `hey draft send <draft_id>` sends it later. Do not resend the message; that makes a second draft.
 
 ### Managing Todos
 

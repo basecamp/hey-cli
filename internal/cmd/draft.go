@@ -335,11 +335,15 @@ HEY breaks the draft out into a thread of its own, and the styled line then name
 message too. An answer from HEY that names no entry leaves the draft's id as the id, beside
 whatever HEY did serve, such as delayed.
 
+While Undo Send holds a message back (delayed), HEY leaves it out of its thread:
+hey thread read shows the thread without it, and a thread it started answers not_found,
+until the message goes out. Read the thread again then.
+
 If HEY refuses the send — usually because the account has reached its sending limit —
 the draft stays a draft and the command fails with not_delivered (exit 7); send it again
 once the limit allows.`,
 		Annotations: map[string]string{
-			"agent_notes": "Sends the draft as it stands — recipients are required, added with `hey draft edit --to`. Delivery goes through HEY's undo window. The answer carries the delivered message's id and its thread's topic_id, with subject and delayed; when HEY's answer names no entry, the id stays the draft's and only the fields HEY served are added. Scheduling a delivery is done in a HEY app for now; the CLI has no flag for it, and HEY's API schedules only to a whole hour. A send HEY refuses — usually the account's sending limit — is kept as a draft and fails with not_delivered (exit 7), naming the draft in meta.draft_id; send it later with hey draft send <draft_id>, not by sending again, which only makes another draft.",
+			"agent_notes": "Sends the draft as it stands — recipients are required, added with `hey draft edit --to`. Delivery goes through HEY's undo window. The answer carries the delivered message's id and its thread's topic_id, with subject and delayed; when HEY's answer names no entry, the id stays the draft's and only the fields HEY served are added. While delayed is true, HEY leaves the message out of its thread, so hey thread read shows the thread without it (a thread it started reads as not found) until Undo Send releases it. Scheduling a delivery is done in a HEY app for now; the CLI has no flag for it, and HEY's API schedules only to a whole hour. A send HEY refuses — usually the account's sending limit — is kept as a draft and fails with not_delivered (exit 7), naming the draft in meta.draft_id; send it later with hey draft send <draft_id>, not by sending again, which only makes another draft.",
 		},
 		Example: `  hey draft send 12345`,
 		RunE:    sendCommand.run,
