@@ -477,8 +477,9 @@ type bareLink struct {
 // or digit — and an email address is matched wherever an @ sits between a local part
 // and a host, as GFM matches one. An address inside a URL is part of the URL.
 func findBareLinks(s string) (links []bareLink, declined []int) {
+	run := 0 // where the run of text the last candidate sat in ends
 	for i := 0; i < len(s); {
-		if link, ok := urlAt(s, i); ok {
+		if link, ok := urlAt(s, i, &run); ok {
 			links = append(links, link)
 			if link.target == "" {
 				for at := strings.IndexByte(s[link.start:link.end], '@'); at >= 0; {
@@ -616,7 +617,7 @@ func linked(links []bareLink) []bareLink {
 
 // urlAt matches a URL, a www. address or a mailto: URI starting at s[i]. A link with
 // no target is one it declines: the span it covers is linked by nothing.
-func urlAt(s string, i int) (bareLink, bool) {
+func urlAt(s string, i int, run *int) (bareLink, bool) {
 	switch s[i] {
 	case 'h', 'H', 'f', 'F', 'w', 'W', 'm', 'M':
 	default:
@@ -627,10 +628,22 @@ func urlAt(s string, i int) (bareLink, bool) {
 	if i > 0 && isAlphanumeric(s[i-1:i]) || !startsLink(s[i:]) {
 		return bareLink{}, false
 	}
+	// Whether a link starts here is settled within its first kilobyte — a host is at
+	// most 256 characters and an address not much more — before anything reads further.
+	if probe := s[i:min(len(s), i+linkProbe)]; !mailtoURI.MatchString(probe) &&
+		!bareURL.MatchString(probe) && !bareWWW.MatchString(probe) {
+		return bareLink{}, false
+	}
 	// A link is matched within the run of text it sits in and no further: Chinese and
 	// Japanese put no space after one, and a pattern let loose on the rest of the
-	// paragraph would read it once for every link in it.
-	s = s[:i+linkTokenEnd(s[i:])]
+	// paragraph would read it once for every link in it. The run is found once and kept
+	// for the candidates after this one in it; from a later start it can only end at
+	// the same place or earlier, at a bracket opened before that start, and a match is
+	// cut at such a bracket anyway.
+	if i >= *run {
+		*run = i + linkTokenEnd(s[i:])
+	}
+	s = s[:*run]
 	// A mailto: URI is the whole of what it opens — every recipient, and the query
 	// that carries a subject and a body.
 	if m := mailtoURI.FindString(s[i:]); m != "" {
@@ -640,7 +653,7 @@ func urlAt(s string, i int) (bareLink, bool) {
 		// recipient of o'brien@ or devi*rao@, would open without the rest of it. A
 		// declined link comes back with no target, and its addresses are declined.
 		url := trimLinkEnd(cutAtUnopenedBracket(m))
-		token := s[i:]
+		token := cutAtUnopenedBracket(s[i:])
 		if trimLinkEnd(token) == url {
 			return bareLink{i, i + len(url), url}, true
 		}
@@ -657,6 +670,9 @@ func urlAt(s string, i int) (bareLink, bool) {
 	}
 	return bareLink{}, false
 }
+
+// linkProbe is how much of the text a candidate link is first matched in.
+const linkProbe = 1024
 
 // startsLink reports whether s starts the way a URL, a www. address or a mailto: URI
 // does, in any case.

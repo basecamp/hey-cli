@@ -498,6 +498,27 @@ func TestFindBareLinksInALongUnspacedParagraphIsLinear(t *testing.T) {
 	}
 }
 
+// A run of text full of prefixes that never become a link is read once, not once per
+// prefix, and a real link after them is still found.
+func TestFindBareLinksPastRejectedPrefixesIsLinear(t *testing.T) {
+	for _, prefix := range []string{"https://", "www.", "mailto:", "https://a.b_", "mailto:a@b.co_"} {
+		run := strings.Repeat(prefix, 100_000) + " https://docs.example.com/room_list"
+		found := make(chan []bareLink, 1)
+		go func() {
+			links, _ := findBareLinks(run)
+			found <- links
+		}()
+		select {
+		case links := <-found:
+			if len(links) == 0 || links[len(links)-1].target != "https://docs.example.com/room_list" {
+				t.Errorf("%q×100000: links end %v, want the room list last", prefix, links[max(0, len(links)-1):])
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%q×100000: findBareLinks did not finish within 5s", prefix)
+		}
+	}
+}
+
 // One run of text full of @s is one address to decline, read once.
 func TestFindBareLinksInALongRunOfAtSignsIsLinear(t *testing.T) {
 	for _, test := range []struct {
