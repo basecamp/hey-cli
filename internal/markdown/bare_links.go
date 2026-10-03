@@ -34,12 +34,11 @@ import (
 // angle-bracket autolink, which it reads verbatim and wraps whole.
 
 // proseParser is glamour's configuration without linkify, so that prose linkify would
-// have cut into pieces arrives here as one run of text — and without strikethrough,
-// whose single tildes linkify reads before, as part of a link: a URL written out as text
-// with ~ in its query (LinkedIn's main~module~text) is one link, not a link cut at the
-// first tilde and the rest of it struck through and hidden.
+// have cut into pieces arrives here as one run of text. ToMarkdown escapes every tilde
+// in prose, so a ~ this parse sees unescaped is strikethrough, and a URL written up to
+// one — https://example.com/a~~struck~~ — ends where the struck text starts.
 var proseParser = goldmark.New(goldmark.WithExtensions(
-	extension.Table, extension.TaskList, extension.DefinitionList,
+	extension.Table, extension.Strikethrough, extension.TaskList, extension.DefinitionList,
 )).Parser()
 
 var (
@@ -625,6 +624,10 @@ func addressAround(s string, at, from int) (start, end int) {
 			break
 		}
 		start -= size
+	}
+	if start == at {
+		// Nothing before the @ is no address, and what follows is not read.
+		return start, at + 1
 	}
 	end = at + 1
 	for end < len(s) {

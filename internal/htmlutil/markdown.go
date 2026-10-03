@@ -492,7 +492,13 @@ func (m *markdownizer) code(n *html.Node) {
 func (m *markdownizer) link(n *html.Node) {
 	href := getAttr(n, "href")
 	dest, linkable := destination(href)
-	if linkable && strings.TrimSpace(elementText(n)) == "" {
+	// A link inside a link is one CommonMark cannot hold — the outer brackets would be
+	// left on screen with their URL as text — and HTML allows it inside a table cell,
+	// where LinkedIn wraps a whole cell in one anchor around another. The inner links
+	// carry the destinations, an inner linked image included, so the outer anchor
+	// writes only what it holds.
+	nested := containsAnchor(n)
+	if linkable && !nested && strings.TrimSpace(elementText(n)) == "" {
 		if image, sole := soleLinkedImage(n); sole {
 			// The anchor may own the whitespace between it and its neighbours, so
 			// it is kept the way inline keeps it — around a decorative anchor too,
@@ -508,11 +514,6 @@ func (m *markdownizer) link(n *html.Node) {
 			return
 		}
 	}
-	// A link inside a link is one CommonMark cannot hold — the outer brackets would be
-	// left on screen with their URL as text — and HTML allows it inside a table cell,
-	// where LinkedIn wraps a whole cell in one anchor around another. The inner links
-	// carry the destinations, so the outer anchor writes only what it holds.
-	nested := containsAnchor(n)
 	m.inline(n, func(text string) string {
 		switch {
 		case !linkable || nested:

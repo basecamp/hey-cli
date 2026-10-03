@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/url"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -421,7 +422,7 @@ func TestToMarkdownDestinationEncodesNonASCII(t *testing.T) {
 func TestToMarkdownNestedAnchorsLeaveNoBracketsBehind(t *testing.T) {
 	const url = "https://jobs.example.com/search?trk=main~module~text"
 	got := toMarkdown(`<table><tr><td><a href="` + url + `"><table><tr><td><a href="` + url + `">View job openings</a></td></tr></table></a></td></tr></table>`)
-	if strings.Contains(got, "](") && strings.Count(got, "](") != 1 || strings.Contains(got, "[[") {
+	if (strings.Contains(got, "](") && strings.Count(got, "](") != 1) || strings.Contains(got, "[[") {
 		t.Errorf("ToMarkdown = %q, want one link and no nested brackets", got)
 	}
 	if links := renderedLinks(t, got); len(links) != 1 || links[0] != url {
@@ -429,6 +430,14 @@ func TestToMarkdownNestedAnchorsLeaveNoBracketsBehind(t *testing.T) {
 	}
 	if text := renderedText(t, got); strings.Contains(text, "](") || strings.Contains(text, url) {
 		t.Errorf("rendered = %q, want just the label", text)
+	}
+}
+
+// An image linked inside a nested anchor keeps its own destination.
+func TestToMarkdownNestedAnchorKeepsAnInnerLinkedImage(t *testing.T) {
+	got := toMarkdown(`<table><tr><td><a href="https://jobs.example.com/listing"><table><tr><td><a href="https://jobs.example.com/company"><img src="https://images.example.com/logo.png" alt="Harbour Ferries"></a></td></tr></table></a></td></tr></table>`)
+	if links := renderedLinks(t, got); !slices.Contains(links, "https://jobs.example.com/company") || slices.Contains(links, "https://jobs.example.com/listing") {
+		t.Errorf("ToMarkdown = %q links %q, want the image linked to the company page", got, links)
 	}
 }
 

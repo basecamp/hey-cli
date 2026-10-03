@@ -370,6 +370,12 @@ func TestRenderLinksBareURLsWhole(t *testing.T) {
 			[]string{"https://docs.example.com/old_plan"},
 		},
 		{
+			"a URL written up to struck text",
+			`<p>see https://docs.example.com/a<del>struck</del> later</p>`,
+			"https://docs.example.com/astruck later",
+			[]string{"https://docs.example.com/a"},
+		},
+		{
 			"a www address",
 			`<p>Tickets at www.ferries.example.com/harbour_line?day=2&amp;seats=6 today</p>`,
 			"http://www.ferries.example.com/harbour_line?day=2&seats=6 today",
@@ -638,6 +644,7 @@ func TestFindBareLinksInALongRunOfAtSignsIsLinear(t *testing.T) {
 		links, declines int
 	}{
 		{"one address", strings.Repeat("jane@", 100_000) + "example.org", 0, 100_000},
+		{"bare @s", strings.Repeat("@", 500_000), 0, 0},
 		{"a URL's query", "https://docs.example.com/list?owner=" + strings.Repeat("jane@", 100_000) + "example.org", 1, 0},
 	} {
 		type result struct{ links, declines int }
