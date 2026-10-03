@@ -306,8 +306,10 @@ type mailView struct {
 	threadNotice     string // what the open thread's read did not get; stays until the thread is left
 	contentHeight    int    // the rows the section has, which the thread's notices and viewport share
 
-	modal                  modal       // the form or picker over the list, and the only one there can be
-	cover                  coverPreset // the session's cover; HEY does not serve one to read
+	modal                  modal                 // the form or picker over the list, and the only one there can be
+	recipients             []recipientSuggestion // HEY's list of who can be written to, read when a composer opens
+	recipientsLoading      bool                  // a read of that list is on its way
+	cover                  coverPreset           // the session's cover; HEY does not serve one to read
 	searchList             contentList
 	searchActive           bool
 	searchQuery            string
@@ -608,9 +610,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if cmd, ok := v.requests.settle(newRequestResult(msg.requestID, msg.err)); !ok {
 			return cmd, true
 		}
-		form := newReplyForm(msg, v.vc.styles)
-		v.openModal(form)
-		return form.init(), true
+		return v.openComposeForm(newReplyForm(msg, v.vc.styles)), true
 
 	case forwardContextLoadedMsg:
 		if msg.boxID != v.currentBoxID() {
@@ -619,9 +619,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if cmd, ok := v.requests.settle(newRequestResult(msg.requestID, msg.err)); !ok {
 			return cmd, true
 		}
-		form := newForwardForm(msg, v.vc.styles)
-		v.openModal(form)
-		return form.init(), true
+		return v.openComposeForm(newForwardForm(msg, v.vc.styles)), true
 
 	case bulkReplyDraftLoadedMsg:
 		if !v.requests.accepts(newRequestResult(msg.requestID, msg.err)) || msg.boxID != v.currentBoxID() || msg.seen != v.seenActive {
@@ -704,6 +702,23 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			form.snippetPicker.loaded(msg.snippets, msg.err)
 		}
 		return nil, true
+
+	case recipientsLoadedMsg:
+		v.settleRecipients(msg)
+		return nil, true
+
+	case draftSavedMsg:
+		form := modalOf[*composeForm](v)
+		if form == nil || form != msg.form {
+			return nil, true
+		}
+		if msg.err != nil {
+			form.sending = false
+			form.setStatus(errorNotice("Could not save the draft", msg.err), true)
+			return nil, true
+		}
+		v.modal = nil
+		return notify("Draft saved"), true
 
 	case composeSentMsg:
 		form := modalOf[*composeForm](v)
@@ -2309,7 +2324,7 @@ func (v *mailView) handleLinkKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	}
 	if msg.Key().Code == tea.KeyTab {
 		delta := 1
-		if msg.Key().Mod == tea.ModShift {
+		if msg.Key().Mod.Contains(tea.ModShift) {
 			delta = -1
 		}
 		previous := v.selectedLink

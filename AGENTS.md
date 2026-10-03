@@ -341,6 +341,24 @@ router), `section_view.go` (the interface), plus `nav.go`, `content.go`, `help.g
 
 To add a new section: implement the `sectionView` interface in a new file, add a field and constructor call in `newModel`, and add a case in `switchSection`.
 
+### Recipients are suggested from HEY's composer list
+
+The To, Cc and Bcc fields of every compose form suggest people from
+`Contacts().Addressable` — `/autocompletable/contacts/addressable`, the list HEY's web
+composer uses, asked for `include_self` as the web asks. It is not `Contacts().List`: that
+is a paged search index with no groups, no "Everyone at" and no recently-addressed order.
+HEY answers the whole list with no query, so `mailView.loadRecipients` reads it in the
+background whenever a composer opens (the SDK's ETag cache makes a repeat a 304) and
+`matchRecipients` filters it in memory on every keystroke, against lower-cased copies made
+once when the list arrives. Keep it that way: a keystroke must never wait on the network.
+The finished list is routed to Mail from any section (`tui.go`), because it can arrive
+after the composer has sent. A group is matched by its name only, and picking it writes its
+addresses, since HEY takes addresses rather than a group's name.
+
+Esc on a composer holding more than it opened with asks before it closes, and `s` keeps
+the message as a HEY draft — `Messages().CreateDraft`, or `Entries().CreateReplyDraft` for a
+reply — which is the TUI's version of the web composer never losing a message.
+
 ### Each calendar span gives the arrows what it is made of
 
 The three spans are not one screen with a different date on it, so the arrows mean something

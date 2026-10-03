@@ -969,7 +969,7 @@ func (f *eventForm) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	}
 
 	switch {
-	case msg.Key().Code == tea.KeyTab && msg.Key().Mod == tea.ModShift:
+	case msg.String() == "shift+tab":
 		return f.step(-1), false
 	case msg.Key().Code == tea.KeyTab:
 		return f.step(1), false

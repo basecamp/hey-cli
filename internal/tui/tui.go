@@ -416,8 +416,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mailWatchAttempt++
 		return m, startMailWatchCmd(m.watchCtx, m.watchMail, m.mailWatchAttempt)
 
+	// The recipient list can arrive after the composer that asked for it has sent and
+	// the reader has gone to another section; the list is still Mail's to keep.
 	case mailRefreshDueMsg, postingsRefreshedMsg:
 		cmd, _ := m.mailView.Update(msg)
+		return m, m.stampViewCmd(cmd)
+
+	case recipientsLoadedMsg:
+		// Arriving mid-word opens the list under the field, and the help bar has
+		// to say what the list's keys do.
+		cmd, _ := m.mailView.Update(msg)
+		if m.activeView == m.mailView {
+			m.updateHelpBindings()
+		}
 		return m, m.stampViewCmd(cmd)
 
 	case screenerWatchStartedMsg:
@@ -955,7 +966,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if msg.Key().Code == tea.KeyTab {
-		if msg.Key().Mod == tea.ModShift {
+		if msg.Key().Mod.Contains(tea.ModShift) {
 			m.focus = (m.focus + 2) % 3
 		} else {
 			m.focus = (m.focus + 1) % 3

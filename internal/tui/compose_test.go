@@ -133,6 +133,23 @@ func TestComposeTabCyclesFields(t *testing.T) {
 	}
 }
 
+// A terminal speaking the kitty keyboard protocol reports Num Lock and Caps Lock
+// as modifiers, so Shift+Tab with Num Lock on arrives as Shift and Num Lock. It is
+// still Shift+Tab, and it must not fall through to plain Tab and move forward.
+func TestComposeShiftTabGoesBackWithALockKeyOn(t *testing.T) {
+	v := mailWithPostings()
+	v.HandleContentKey(keyPress("c"))
+	f := composeModal(v)
+	for _, lock := range []tea.KeyMod{tea.ModNumLock, tea.ModCapsLock, tea.ModNumLock | tea.ModCapsLock} {
+		f.focus = int(fieldSubject)
+		_ = f.focusCurrent()
+		v.HandleContentKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab, Mod: tea.ModShift | lock}))
+		if f.focus != int(fieldBcc) {
+			t.Errorf("shift+tab with lock %v should move back to Bcc, got %d", lock, f.focus)
+		}
+	}
+}
+
 func TestComposeValidatesBeforeSending(t *testing.T) {
 	v := mailWithPostings()
 	v.HandleContentKey(keyPress("c"))
@@ -684,10 +701,16 @@ func TestModelRoutesAllKeysToOpenForm(t *testing.T) {
 	if composeModal(m.mailView).focus != int(fieldCc) {
 		t.Errorf("tab should move to Cc, got %d", composeModal(m.mailView).focus)
 	}
+	// The form holds a "q" now, so esc asks before it lets go of it.
 	updated, _ = m.Update(keyPress("esc"))
 	m = updated.(model)
+	if form := composeModal(m.mailView); form == nil || !form.confirmLeave {
+		t.Fatal("esc on an edited form should ask through the model")
+	}
+	updated, _ = m.Update(keyPress("d"))
+	m = updated.(model)
 	if m.mailView.CapturingInput() {
-		t.Error("esc should close the form through the model")
+		t.Error("d should discard the form through the model")
 	}
 }
 

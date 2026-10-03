@@ -24,16 +24,43 @@ var encodedWord = regexp.MustCompile(`=\?[^?]*\?[bBqQ]\?[^?]*\?=`)
 // <annie@example.com> is one recipient.
 func SplitAddresses(s string) []string {
 	var addresses []string
-	var b strings.Builder
-	quoted, depth, angled := false, 0, false
-	flush := func() {
-		if address := strings.TrimSpace(b.String()); address != "" {
+	start := 0
+	for _, comma := range separators(s) {
+		if address := strings.TrimSpace(s[start:comma]); address != "" {
 			addresses = append(addresses, address)
 		}
-		b.Reset()
+		start = comma + 1
 	}
+	if address := strings.TrimSpace(s[start:]); address != "" {
+		addresses = append(addresses, address)
+	}
+	return addresses
+}
+
+// AddressAt returns the byte range of the recipient a cursor at byte offset pos is
+// in, commas excluded, split the way SplitAddresses splits: the part of a list that
+// someone typing at pos is writing.
+func AddressAt(s string, pos int) (start, end int) {
+	pos = min(max(pos, 0), len(s))
+	end = len(s)
+	for _, comma := range separators(s) {
+		if comma < pos {
+			start = comma + 1
+			continue
+		}
+		end = comma
+		break
+	}
+	return start, end
+}
+
+// separators returns the byte offsets of the commas that separate recipients, leaving
+// out the ones inside a quoted name, a comment or angle brackets.
+func separators(s string) []int {
+	var commas []int
+	quoted, depth, angled := false, 0, false
 	escaped := false
-	for _, r := range s {
+	for i, r := range s {
 		switch {
 		case escaped:
 			escaped = false
@@ -52,13 +79,25 @@ func SplitAddresses(s string) []string {
 		case r == '>':
 			angled = false
 		case r == ',' && !angled:
-			flush()
-			continue
+			commas = append(commas, i)
 		}
-		b.WriteRune(r)
 	}
-	flush()
-	return addresses
+	return commas
+}
+
+// FormatAddress writes a recipient the way a person would type it: the bare address
+// when there is no name to add, and Name <address> otherwise, quoting a name that
+// holds a character that would split or end it, as the mail gem HEY parses with does.
+func FormatAddress(name, address string) string {
+	name = strings.TrimSpace(name)
+	address = strings.TrimSpace(address)
+	if name == "" || strings.EqualFold(name, address) {
+		return address
+	}
+	if strings.ContainsAny(name, `()<>[]:;@\,."`) {
+		name = `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(name) + `"`
+	}
+	return name + " <" + address + ">"
 }
 
 // InvalidAddress returns the first recipient HEY would certainly not deliver to, or ""
@@ -96,6 +135,18 @@ func deliverable(address string) bool {
 		return false
 	}
 	return deliverableDomain(spec[at+1:])
+}
+
+// BareAddress returns the address a recipient names, without its display name,
+// angle brackets or comments: "Jane Doe <jane@example.com> (work)" and
+// "jane@example.com (Jane Doe)" are both jane@example.com. A recipient HEY's
+// parser would refuse, or text with no address in it, is returned trimmed, as
+// written.
+func BareAddress(recipient string) string {
+	if spec, _, ok := addrSpec(recipient); ok && strings.Contains(spec, "@") {
+		return spec
+	}
+	return strings.TrimSpace(recipient)
 }
 
 // addrSpec returns the bare address and the fewest characters HEY could write the
