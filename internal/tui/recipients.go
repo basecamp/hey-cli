@@ -296,8 +296,24 @@ func (f *composeForm) handleSuggestionKey(msg tea.KeyPressMsg) bool {
 // recipient before it arrived gets their suggestions without typing again.
 func (f *composeForm) recipientsLoaded(suggestions []recipientSuggestion) {
 	f.recipients = suggestions
-	if f.typing {
-		f.refreshSuggestions()
+	if !f.typing {
+		return
+	}
+	// A list re-read behind an open one must not move the highlight: the
+	// person picked with the arrows is the one tab adds, wherever they now sit.
+	var selected string
+	if f.suggest != nil {
+		selected = f.suggest.selected().value
+	}
+	f.refreshSuggestions()
+	if f.suggest == nil || selected == "" {
+		return
+	}
+	for i, match := range f.suggest.matches {
+		if match.value == selected {
+			f.suggest.cursor = i
+			return
+		}
 	}
 }
 

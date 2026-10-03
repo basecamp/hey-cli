@@ -431,6 +431,39 @@ func TestAnAddressSanitizingWouldChangeIsNotOffered(t *testing.T) {
 	}
 }
 
+// A composer opens on the list it already has and reads it again behind the
+// scenes. When that read lands, the person highlighted with the arrows stays
+// highlighted, wherever the fresh list puts them.
+func TestAReloadKeepsTheHighlightedPerson(t *testing.T) {
+	v, _ := recipientsTestView(t)
+	form := openComposer(t, v)
+	typeText(v, "j")
+	v.HandleContentKey(keyPress("down"))
+	if got := form.suggest.selected().label; got != "Joanna Lumley" {
+		t.Fatalf("down should highlight Joanna, got %q", got)
+	}
+
+	// The read behind the composer answers the same list it already had.
+	v.Update(recipientsLoadedMsg{suggestions: v.recipients})
+	if form.suggest == nil || form.suggest.selected().label != "Joanna Lumley" {
+		t.Fatalf("the reload moved the highlight off Joanna: %q", suggestedLabels(form))
+	}
+
+	// And when the fresh list puts her somewhere else, she is still the one.
+	v.Update(recipientsLoadedMsg{suggestions: newRecipientSuggestions([]hey.AddressableRecipient{
+		{Value: "jane@example.com", Label: "Jane Doe"},
+		{Value: "jack@example.com", Label: "Jack Black"},
+		{Value: "joanna@example.org", Label: "Joanna Lumley"},
+	})})
+	if form.suggest == nil || form.suggest.selected().label != "Joanna Lumley" {
+		t.Fatalf("the reload moved the highlight off Joanna: %q", suggestedLabels(form))
+	}
+	v.HandleContentKey(keyPress("tab"))
+	if got := form.inputs[fieldTo].Value(); got != "Joanna Lumley <joanna@example.org>, " {
+		t.Errorf("tab should add the person highlighted, To = %q", got)
+	}
+}
+
 func TestCcAndBccSuggestToo(t *testing.T) {
 	for _, field := range []composeField{fieldCc, fieldBcc} {
 		v, _ := recipientsTestView(t)
