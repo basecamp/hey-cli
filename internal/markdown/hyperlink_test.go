@@ -71,6 +71,8 @@ func TestLinkifyURLsStopsAtUnicodeSpacesAndPunctuation(t *testing.T) {
 		"She said “https://maps.example.com/harbour” twice.": "https://maps.example.com/harbour",
 		"Lien : https://exemple.fr/menu»":                    "https://exemple.fr/menu",
 		"Menu: https://cafe.example.com/café today":          "https://cafe.example.com/café",
+		"Rates: https://fx.example.com/convert?to=€ today":   "https://fx.example.com/convert?to=€",
+		"Tag: https://notes.example.com/tags/☕ today":        "https://notes.example.com/tags/☕",
 	} {
 		if got := LinkifyURLs(text); !strings.Contains(got, Hyperlink(url, url)) {
 			t.Errorf("LinkifyURLs(%q) = %q, want %q linked", text, got, url)

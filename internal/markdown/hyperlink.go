@@ -80,7 +80,7 @@ func trimURL(url string) string {
 			url = url[:len(url)-1]
 		default:
 			last, size := utf8.DecodeLastRuneInString(url)
-			if last < utf8.RuneSelf || !unicode.In(last, unicode.P, unicode.S) {
+			if last < utf8.RuneSelf || !unicode.IsPunct(last) {
 				return url
 			}
 			url = url[:len(url)-size]
