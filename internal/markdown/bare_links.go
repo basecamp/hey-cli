@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/rivo/uniseg"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
@@ -45,9 +46,10 @@ var (
 	// punctuation and controls — letters in any script, an emoji, a € — so a curly
 	// quote, a dash or a no-break space still ends a link. A link also ends at "<", at
 	// a straight double quote, at ">" and at "|", which would end a table cell; what is
-	// left is trimmed by trimLinkEnd.
-	bareURL = regexp.MustCompile(`^((?i:https?|ftp)://` + bareHost + `(?::\d+)?)((?:[/#?]` + barePath + `)?)`)
-	bareWWW = regexp.MustCompile(`^((?i:www)\.` + bareHost + `(?::\d+)?)((?:[/#?]` + barePath + `)?)`)
+	// left is trimmed by trimLinkEnd. A port may be empty — https://example.com:/x — as
+	// the URL standard allows.
+	bareURL = regexp.MustCompile(`^((?i:https?|ftp)://` + bareHost + `(?::\d*)?)((?:[/#?]` + barePath + `)?)`)
+	bareWWW = regexp.MustCompile(`^((?i:www)\.` + bareHost + `(?::\d*)?)((?:[/#?]` + barePath + `)?)`)
 
 	// mailtoURI is a mailto: link with its recipients and its query.
 	mailtoURI = regexp.MustCompile(`^(?i:mailto):` + emailAddress + `(?:,` + emailAddress + `)*(?:\?` + barePath + `)?`)
@@ -356,7 +358,8 @@ func printedLinks(out string) [][]linkSpan {
 }
 
 // decodeAcross decodes the lines of one link as one text, and gives each character back
-// to the line that held most of its escapes.
+// to the line that held most of its escapes — a character as a reader sees one, accents
+// and joined emoji included.
 func decodeAcross(texts []string) []string {
 	joined := strings.Join(texts, "")
 	line := make([]int, len(joined))
@@ -366,26 +369,45 @@ func decodeAcross(texts []string) []string {
 			at++
 		}
 	}
-	decoded := make([][]byte, len(texts))
+	// decoded is the link's text as it will be shown, and lineOf the line each of its
+	// bytes goes back on.
+	var decoded strings.Builder
+	var lineOf []int
+	place := func(text string, onLine int) {
+		decoded.WriteString(text)
+		for range len(text) {
+			lineOf = append(lineOf, onLine)
+		}
+	}
 	last := 0
 	for _, run := range encodedNonASCII.FindAllStringIndex(joined, -1) {
 		for k := last; k < run[0]; k++ {
-			decoded[line[k]] = append(decoded[line[k]], joined[k])
+			place(joined[k:k+1], line[k])
 		}
 		last = run[1]
 		at := run[0]
 		for _, unit := range decodedUnits(joined[run[0]:run[1]]) {
 			width := 3 * unit.escapes
-			decoded[line[at+width/2]] = append(decoded[line[at+width/2]], unit.text...)
+			place(unit.text, line[at+width/2])
 			at += width
 		}
 	}
 	for k := last; k < len(joined); k++ {
-		decoded[line[k]] = append(decoded[line[k]], joined[k])
+		place(joined[k:k+1], line[k])
 	}
-	texts = make([]string, len(decoded))
-	for i := range decoded {
-		texts[i] = string(decoded[i])
+	// A character is shown whole, on one line: a combining accent or the rest of a
+	// joined emoji goes with what it joins to. It draws in the cells that took, so no
+	// line grows.
+	shown := decoded.String()
+	lines := make([][]byte, len(texts))
+	graphemes := uniseg.NewGraphemes(shown)
+	for graphemes.Next() {
+		from, to := graphemes.Positions()
+		lines[lineOf[from]] = append(lines[lineOf[from]], shown[from:to]...)
+	}
+	texts = make([]string, len(lines))
+	for i := range lines {
+		texts[i] = string(lines[i])
 	}
 	return texts
 }

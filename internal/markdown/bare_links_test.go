@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 )
@@ -350,6 +352,12 @@ func TestRenderLinksBareURLsWhole(t *testing.T) {
 			[]string{"https://docs.example.com", "http://www.docs.example.com"},
 		},
 		{
+			"an empty port",
+			`<p>See https://docs.example.com:/room_list?day=2&amp;seats=6 and www.docs.example.com:/ferry_times today</p>`,
+			"https://docs.example.com:/room_list?day=2&seats=6 and http://www.docs.example.com:/ferry_times today",
+			[]string{"https://docs.example.com:/room_list?day=2&seats=6", "http://www.docs.example.com:/ferry_times"},
+		},
+		{
 			"a www address",
 			`<p>Tickets at www.ferries.example.com/harbour_line?day=2&amp;seats=6 today</p>`,
 			"http://www.ferries.example.com/harbour_line?day=2&seats=6 today",
@@ -486,11 +494,19 @@ func TestRenderWrapsANonASCIILinkWhole(t *testing.T) {
 		"https://docs.example.com/資料_最終版_資料_最終版_資料_最終版",
 		"https://cafe.example.com/menus/café_du_port_café_du_port_café",
 		"https://192.0.2.1/shared/harbour_offsite_2026/planning/ferry_times?day=2&seats=6",
+		"https://cafe.example.com/menus/cafe\u0301_du_port_cafe\u0301_du_port_cafe\u0301",
+		"https://photos.example.com/albums/family_\U0001F468\u200d\U0001F469\u200d\U0001F467_\U0001F468\u200d\U0001F469\u200d\U0001F467",
 	} {
 		for width := 20; width <= 60; width++ {
 			linked := RenderLinked(htmlutil.ToMarkdown("<p>"+html.EscapeString(page)+" "+html.EscapeString(page)+"</p>"), width, -1)
-			if shown := visible(linked.Text); strings.Contains(shown, "%") {
+			shown := visible(linked.Text)
+			if strings.Contains(shown, "%") {
 				t.Errorf("width %d: shows %q, want no escapes", width, shown)
+			}
+			for _, row := range strings.Split(shown, "\n") {
+				if first, _ := utf8.DecodeRuneInString(row); unicode.Is(unicode.M, first) || first == '\u200d' {
+					t.Errorf("width %d: line %q starts inside a character", width, row)
+				}
 			}
 			if len(linked.Links) != 2 || linked.Links[0].Destination != page || linked.Links[1].Destination != page {
 				t.Errorf("width %d: links = %#v, want %q twice", width, linked.Links, page)
