@@ -367,17 +367,10 @@ func decodeAcross(texts []string) []string {
 			decoded[line[k]] = append(decoded[line[k]], joined[k])
 		}
 		last = run[1]
-		encoded := joined[run[0]:run[1]]
-		if decodeNonASCII(encoded) == encoded {
-			for k := run[0]; k < run[1]; k++ {
-				decoded[line[k]] = append(decoded[line[k]], joined[k])
-			}
-			continue
-		}
 		at := run[0]
-		for _, r := range decodeNonASCII(encoded) {
-			width := 3 * utf8.RuneLen(r)
-			decoded[line[at+width/2]] = utf8.AppendRune(decoded[line[at+width/2]], r)
+		for _, unit := range decodedUnits(joined[run[0]:run[1]]) {
+			width := 3 * unit.escapes
+			decoded[line[at+width/2]] = append(decoded[line[at+width/2]], unit.text...)
 			at += width
 		}
 	}
@@ -393,20 +386,60 @@ func decodeAcross(texts []string) []string {
 
 func decodeNonASCII(s string) string {
 	return encodedNonASCII.ReplaceAllStringFunc(s, func(run string) string {
-		decoded := make([]byte, 0, len(run)/3)
-		for i := 0; i+2 < len(run); i += 3 {
-			decoded = append(decoded, unhex(run[i+1])<<4|unhex(run[i+2]))
+		var b strings.Builder
+		b.Grow(len(run))
+		for _, unit := range decodedUnits(run) {
+			b.WriteString(unit.text)
 		}
-		if !utf8.Valid(decoded) {
-			return run
+		return b.String()
+	})
+}
+
+// decodedUnit is one piece of a decoded run: a character and the escapes it was, or an
+// escape left as it is.
+type decodedUnit struct {
+	text    string
+	escapes int
+}
+
+// decodedUnits decodes a run of escapes a character at a time. A character starts at a
+// leading byte written in lowercase hex — the form percentEncodeNonASCII writes, and
+// which a URL's own escapes are moved out of — and is decoded when the escapes after it
+// complete it and it is one a link may show. Anything else stays as it is: an escape
+// such as %98, all digits, reads as lowercase but is never a leading byte, so a URL's
+// own %E2%98%80 next to one of ours is kept rather than taking ours down with it.
+func decodedUnits(run string) []decodedUnit {
+	units := make([]decodedUnit, 0, len(run)/3)
+	for i := 0; i+2 < len(run); {
+		lead := unhex(run[i+1])<<4 | unhex(run[i+2])
+		size := 0
+		switch {
+		case lead >= 0xc2 && lead <= 0xdf:
+			size = 2
+		case lead >= 0xe0 && lead <= 0xef:
+			size = 3
+		case lead >= 0xf0 && lead <= 0xf4:
+			size = 4
 		}
-		for _, r := range string(decoded) {
-			if !shownInLink(r) {
-				return run
+		if size > 0 && i+3*size <= len(run) && isLowerHex(run[i+1]) {
+			encoded := make([]byte, size)
+			for k := range size {
+				encoded[k] = unhex(run[i+3*k+1])<<4 | unhex(run[i+3*k+2])
+			}
+			if r, n := utf8.DecodeRune(encoded); r != utf8.RuneError && n == size && shownInLink(r) {
+				units = append(units, decodedUnit{string(r), size})
+				i += 3 * size
+				continue
 			}
 		}
-		return string(decoded)
-	})
+		units = append(units, decodedUnit{run[i : i+3], 1})
+		i += 3
+	}
+	return units
+}
+
+func isLowerHex(c byte) bool {
+	return c >= 'a' && c <= 'f'
 }
 
 func isASCII(s string) bool {
@@ -545,7 +578,7 @@ func urlAt(s string, i int) (bareLink, bool) {
 		// recipient of o'brien@ or devi*rao@, would open without the rest of it. A
 		// declined link comes back with no target, and its addresses are declined.
 		url := trimLinkEnd(cutAtUnopenedBracket(m))
-		token := cutAtUnopenedBracket(s[i : i+linkTokenEnd(s[i:])])
+		token := s[i : i+linkTokenEnd(s[i:])]
 		if trimLinkEnd(token) == url {
 			return bareLink{i, i + len(url), url}, true
 		}
@@ -563,13 +596,29 @@ func urlAt(s string, i int) (bareLink, bool) {
 	return bareLink{}, false
 }
 
-// linkTokenEnd is where the run of text a link sits in ends: at a space, or at what ends
-// a link in any form.
+// linkTokenEnd is where the run of text a link sits in ends: at a space, at what ends a
+// link in any form, or at a wide closing bracket the run did not open. It stops there
+// rather than running to the end of the paragraph and being cut afterwards: Chinese and
+// Japanese put no spaces between sentences, and a paragraph of many links would be
+// scanned to its end once for each of them.
 func linkTokenEnd(s string) int {
-	if end := strings.IndexFunc(s, func(r rune) bool {
-		return unicode.IsSpace(r) || strings.ContainsRune(`<>"`, r)
-	}); end >= 0 {
-		return end
+	var open [9]int
+	for i, r := range s {
+		switch {
+		case unicode.IsSpace(r) || strings.ContainsRune(`<>"`, r):
+			return i
+		case r < utf8.RuneSelf:
+		default:
+			if pair := strings.IndexRune(wideOpeners, r); pair >= 0 {
+				open[utf8.RuneCountInString(wideOpeners[:pair])]++
+			} else if pair := strings.IndexRune(wideClosers, r); pair >= 0 {
+				n := utf8.RuneCountInString(wideClosers[:pair])
+				if open[n] == 0 {
+					return i
+				}
+				open[n]--
+			}
+		}
 	}
 	return len(s)
 }

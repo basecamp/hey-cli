@@ -278,6 +278,12 @@ func TestRenderLinksBareURLsWhole(t *testing.T) {
 			[]string{"https://docs.example.com/é"},
 		},
 		{
+			"its own escapes next to Unicode",
+			`<p>See https://docs.example.com/%e2%98%80é today</p>`,
+			"https://docs.example.com/%E2%98%80é today",
+			[]string{"https://docs.example.com/%E2%98%80é"},
+		},
+		{
 			"a www address",
 			`<p>Tickets at www.ferries.example.com/harbour_line?day=2&amp;seats=6 today</p>`,
 			"http://www.ferries.example.com/harbour_line?day=2&seats=6 today",
@@ -424,6 +430,27 @@ func TestRenderWrapsANonASCIILinkWhole(t *testing.T) {
 				t.Errorf("width %d: links = %#v, want %q twice", width, linked.Links, page)
 			}
 		}
+	}
+}
+
+// Chinese and Japanese put no spaces between sentences, so a paragraph can be one run of
+// text with a link in every sentence; finding them must not scan to the paragraph's end
+// once for each.
+func TestFindBareLinksInALongUnspacedParagraphIsLinear(t *testing.T) {
+	const links = 20_000
+	paragraph := strings.Repeat("「mailto:jane@example.org」と", links)
+	found := make(chan int, 1)
+	go func() {
+		linked, _ := findBareLinks(paragraph)
+		found <- len(linked)
+	}()
+	select {
+	case n := <-found:
+		if n != links {
+			t.Errorf("found %d links, want %d", n, links)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("findBareLinks did not finish within 5s for %d links", links)
 	}
 }
 
