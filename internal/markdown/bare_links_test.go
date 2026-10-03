@@ -135,7 +135,7 @@ func TestRenderLinksBareURLsWhole(t *testing.T) {
 			"an address GFM would match only part of",
 			`<p>Write to devi*rao@example.com or o'brien@example.com</p>`,
 			"devi*rao@example.com or o'brien@example.com",
-			[]string{"mailto:o'brien@example.com"},
+			nil,
 		},
 		{
 			"an emoji sequence in its path",
@@ -172,6 +172,36 @@ func TestRenderLinksBareURLsWhole(t *testing.T) {
 			`<p>https://docs.example.com/資料_v2 https://docs.example.com/資料_v2</p>`,
 			"https://docs.example.com/資料_v2 https://docs.example.com/資料_v2",
 			[]string{"https://docs.example.com/資料_v2", "https://docs.example.com/資料_v2"},
+		},
+		{
+			"a punycode host",
+			`<p>See https://shop.example.xn--p1ai/plan_v2 and www.shop.example.xn--p1ai/plan_v2 today</p>`,
+			"https://shop.example.xn--p1ai/plan_v2 and http://www.shop.example.xn--p1ai/plan_v2 today",
+			[]string{"https://shop.example.xn--p1ai/plan_v2", "http://www.shop.example.xn--p1ai/plan_v2"},
+		},
+		{
+			"a www address with a port",
+			`<p>Staging is at www.staging.example.com:8443/plan_v2 today</p>`,
+			"http://www.staging.example.com:8443/plan_v2 today",
+			[]string{"http://www.staging.example.com:8443/plan_v2"},
+		},
+		{
+			"a mailto: query",
+			`<p>Reply via mailto:alice@example.org?subject=Agenda&amp;body=Hello_there today</p>`,
+			"mailto:alice@example.org?subject=Agenda&body=Hello_there today",
+			[]string{"mailto:alice@example.org?subject=Agenda&body=Hello_there"},
+		},
+		{
+			"addresses in angle brackets and quotes",
+			`<p>From &lt;jane@example.org&gt; and "tessa@example.org", not éjane@example.org or jane@example.orgé</p>`,
+			`<jane@example.org> and "tessa@example.org", not éjane@example.org or jane@example.orgé`,
+			[]string{"mailto:jane@example.org", "mailto:tessa@example.org"},
+		},
+		{
+			"a label with a literal escape in it",
+			`<p><a href="https://docs.example.com/encoding">Literal %c3%a9</a></p>`,
+			"Literal %c3%a9",
+			[]string{"https://docs.example.com/encoding"},
 		},
 		{
 			"a www address",
@@ -298,7 +328,6 @@ func TestRenderLinksAWrappedBareURLWhole(t *testing.T) {
 func TestWholeBareLinksLeavesWhatIsNotABareLink(t *testing.T) {
 	for _, md := range []string{
 		`Nothing to link \~ here, \_ none \*`,
-		"Not an address: devi\\*rao@example.com or o'brien@example.com",
 		"Not a host: https://localhost/admin",
 		"[the plan](https://docs.example.com/harbour_offsite)",
 		"`https://staging.example.com/api_v2`",
@@ -314,6 +343,8 @@ func TestWholeBareLinksWritesAutolinks(t *testing.T) {
 	for md, want := range map[string]string{
 		`See https://docs.example.com/plan?team=harbour&amp;day=2 now`: "See <https://docs.example.com/plan?team=harbour&day=2> now",
 		`See https://docs.example.com/harbour\_offsite now`:            "See <https://docs.example.com/harbour_offsite> now",
+		`Not devi\*rao@example.com or o'brien@example.com`:             `Not devi\*rao\@example.com or o'brien\@example.com`,
+		`See https://example.com2 now`:                                 `See https://example.com2 now`,
 		`See WwW.ferries.example.com/harbour\_line now`:                "See <http://WwW.ferries.example.com/harbour_line> now",
 		`See www.ferries.example.com/harbour\_line now`:                "See <http://www.ferries.example.com/harbour_line> now",
 		`Write to tessa\_nolan@example.com now`:                        "Write to <tessa_nolan@example.com> now",

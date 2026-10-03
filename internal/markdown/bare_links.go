@@ -8,6 +8,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
@@ -45,8 +46,11 @@ var (
 	// quote, a dash or a no-break space still ends a link. A link also ends at "<", at
 	// a straight double quote, at ">" and at "|", which would end a table cell; what is
 	// left is trimmed by trimLinkEnd.
-	bareURL = regexp.MustCompile(`^(?i:https?|ftp)://` + bareHost + `(?::\d+)?(?:[/#?]` + barePath + `)?`)
-	bareWWW = regexp.MustCompile(`^(?i:www)\.` + bareHost + `(?:[/#?]` + barePath + `)?`)
+	bareURL = regexp.MustCompile(`^((?i:https?|ftp)://` + bareHost + `(?::\d+)?)((?:[/#?]` + barePath + `)?)`)
+	bareWWW = regexp.MustCompile(`^((?i:www)\.` + bareHost + `(?::\d+)?)((?:[/#?]` + barePath + `)?)`)
+
+	// mailtoQuery is the query a mailto: address may carry after it.
+	mailtoQuery = regexp.MustCompile(`^\?` + barePath)
 
 	// bareEmail is an address as GFM finds one: a local part of letters, digits and
 	// . + - _, an @, and a host of at least two labels.
@@ -63,8 +67,8 @@ const (
 	// with. A path also takes the brackets of other scripts — （最終版） — which
 	// trimLinkEnd balances as it balances ( and ).
 	nonASCIIInLink = `[^\x00-\x7f\p{Z}\p{P}\p{C}]|\x{200D}`
-	nonASCIIInPath = nonASCIIInLink + `|[（）［］｛｝「」『』【】〔〕〈〉《》]`
-	bareHost       = `(?:[-a-zA-Z0-9@:%._\+~#=]|` + nonASCIIInLink + `){1,256}\.(?:[a-zA-Z]|\p{L})+`
+	nonASCIIInPath = nonASCIIInLink + `|[` + wideOpeners + wideClosers + `]`
+	bareHost       = `(?:[-a-zA-Z0-9@:%._\+~#=]|` + nonASCIIInLink + `){1,256}\.(?:(?i:xn--)[a-zA-Z0-9-]+|(?:[a-zA-Z]|\p{L})+)`
 	barePath       = `(?:[-a-zA-Z0-9@:%_+*.~#$!?&/=\(\);,'\^{}\[\]` + "`" + `]|` + nonASCIIInPath + `)*`
 )
 
@@ -168,10 +172,16 @@ func bareLinksIn(source []byte, start, stop int) []replacement {
 	}
 	plain, at := unescapeProse(run)
 	var found []replacement
-	for _, link := range findBareLinks(string(plain)) {
+	links, declined := findBareLinks(string(plain))
+	for _, link := range links {
 		if target := percentEncodeNonASCII(link.target); autolinks(target) {
 			found = append(found, replacement{start + at[link.start], start + at[link.end], "<" + target + ">"})
 		}
+	}
+	// glamour's linkify would link the part of a declined address it can match, so its
+	// @ is escaped; textAmpersands then spells it as the reference glamour shows as @.
+	for _, sign := range declined {
+		found = append(found, replacement{start + at[sign], start + at[sign+1], `\@`})
 	}
 	return found
 }
@@ -210,7 +220,9 @@ func percentEncodeNonASCII(s string) string {
 var encodedNonASCII = regexp.MustCompile(`(?:%[89a-f][0-9a-f])+`)
 
 // restoreNonASCIILinks decodes, in the text of each hyperlink glamour wrote — never in
-// its destination — what percentEncodeNonASCII encoded. A run is decoded only when it is
+// its destination — what percentEncodeNonASCII encoded. Only text that is part of the
+// destination is touched, which is the destination glamour prints: a label the email
+// wrote is the email's, "%c3%a9" and all. A run is decoded only when it is
 // whole UTF-8 of characters a link may show (shownInLink), so a line glamour wrapped in the
 // middle of one stays encoded rather than turning into something else. glamour ends its
 // hyperlink sequences with BEL; one that ends otherwise is left for contain to judge.
@@ -220,7 +232,7 @@ func restoreNonASCIILinks(out string) string {
 	}
 	var b strings.Builder
 	b.Grow(len(out))
-	inLink := false
+	uri := ""
 	for {
 		start := strings.Index(out, "\x1b]8;")
 		if start < 0 {
@@ -231,15 +243,16 @@ func restoreNonASCIILinks(out string) string {
 			break
 		}
 		end += start + 1
-		if inLink {
-			b.WriteString(decodeNonASCII(out[:start]))
-		} else {
-			b.WriteString(out[:start])
+		text := out[:start]
+		if shown := withoutWhitespace(ansi.Strip(text)); uri != "" && shown != "" && strings.Contains(uri, shown) {
+			text = decodeNonASCII(text)
 		}
+		b.WriteString(text)
 		sequence := out[start:end]
 		b.WriteString(sequence)
-		// A sequence with no destination — "\x1b]8;;\a" — closes the link.
-		inLink = !strings.HasSuffix(sequence, ";\a")
+		// The destination follows the parameters; a sequence with none — "\x1b]8;;\a"
+		// — closes the link.
+		_, uri, _ = strings.Cut(strings.TrimPrefix(strings.TrimSuffix(sequence, "\a"), "\x1b]8;"), ";")
 		out = out[end:]
 	}
 	b.WriteString(out)
@@ -294,12 +307,11 @@ type bareLink struct {
 }
 
 // findBareLinks finds the URLs, www. addresses and email addresses in plain text, in
-// order. A URL or a www. address starts wherever a word could — anywhere not straight
+// order, and the @ of each address it declines to link. A URL or a www. address starts wherever a word could — anywhere not straight
 // after a letter or a digit — and an email address is matched wherever an @ sits
 // between a local part and a host, as GFM matches one, with a "mailto:" in front of it
 // taken in. An address inside a URL is part of the URL.
-func findBareLinks(s string) []bareLink {
-	var links []bareLink
+func findBareLinks(s string) (links []bareLink, declined []int) {
 	for i := 0; i < len(s); {
 		if link, ok := urlAt(s, i); ok {
 			links = append(links, link)
@@ -310,37 +322,55 @@ func findBareLinks(s string) []bareLink {
 		i += size
 	}
 	if !strings.Contains(s, "@") {
-		return links
+		return links, nil
 	}
 
 	urls := links
 	var addresses []bareLink
+	next := 0 // the first URL that does not end before the address being checked
 	for _, match := range bareEmail.FindAllStringIndex(s, -1) {
 		start, end := match[0], match[1]
-		// An address with more in its local part than GFM matches — devi*rao@ — is
-		// left alone rather than linked as the different address rao@ would be.
+		for next < len(urls) && urls[next].end <= start {
+			next++
+		}
+		// An address with more to it than GFM matches — devi*rao@, éjane@, or a host
+		// that runs on into more letters — is left alone rather than linked as the
+		// different address the matched part would be.
+		if next < len(urls) && urls[next].start <= start {
+			continue
+		}
 		if start > 0 && strings.IndexByte(otherLocalPart, s[start-1]) >= 0 ||
-			end < len(s) && (s[end] == '-' || s[end] == '_') || inside(urls, start) {
+			continuesWordBackwards(s[:start]) || continuesWord(s[end:]) {
+			declined = append(declined, start+strings.IndexByte(s[start:end], '@'))
 			continue
 		}
 		target := s[start:end]
-		if strings.HasSuffix(strings.ToLower(s[:start]), "mailto:") {
+		if start >= len("mailto:") && strings.EqualFold(s[start-len("mailto:"):start], "mailto:") {
 			start -= len("mailto:")
+			// A mailto: link carries its query — ?subject=…&body=… — with it.
+			if query := mailtoQuery.FindString(s[end:]); query != "" {
+				end += len(trimLinkEnd(query))
+			}
 			target = s[start:end]
 		}
 		addresses = append(addresses, bareLink{start, end, target})
 	}
 	// An address that starts before a URL holds it — jane@www.example.com is an
-	// address at a www host — so the URL gives way to it.
-	links = links[:0]
+	// address at a www host — so the URL gives way to it. Both lists are in order, so
+	// one pass over each finds the URLs an address overlaps.
+	links = make([]bareLink, 0, len(urls)+len(addresses))
+	next = 0
 	for _, url := range urls {
-		if !overlaps(addresses, url) {
+		for next < len(addresses) && addresses[next].end <= url.start {
+			next++
+		}
+		if next == len(addresses) || addresses[next].start >= url.end {
 			links = append(links, url)
 		}
 	}
 	links = append(links, addresses...)
 	sort.Slice(links, func(i, j int) bool { return links[i].start < links[j].start })
-	return links
+	return links, declined
 }
 
 // urlAt matches a URL or a www. address starting at s[i].
@@ -355,57 +385,78 @@ func urlAt(s string, i int) (bareLink, bool) {
 	if i > 0 && isAlphanumeric(s[i-1:i]) {
 		return bareLink{}, false
 	}
-	if m := bareURL.FindString(s[i:]); m != "" {
+	if m := wholeHost(bareURL, s, i); m != "" {
 		if url := trimLinkEnd(cutAtUnopenedBracket(m)); strings.Contains(url[strings.Index(url, "://")+3:], ".") {
 			return bareLink{i, i + len(url), url}, true
 		}
 	}
-	if m := bareWWW.FindString(s[i:]); m != "" {
+	if m := wholeHost(bareWWW, s, i); m != "" {
 		url := trimLinkEnd(cutAtUnopenedBracket(m))
 		return bareLink{i, i + len(url), "http://" + url}, true
 	}
 	return bareLink{}, false
 }
 
+// wholeHost matches pattern at s[i], answering nothing when the host it matched stops
+// short of the host in the text — https://example.com2 is not a link to example.com,
+// and linking it as one would open a different site.
+func wholeHost(pattern *regexp.Regexp, s string, i int) string {
+	m := pattern.FindStringSubmatch(s[i:])
+	if m == nil {
+		return ""
+	}
+	if m[2] == "" && continuesWord(s[i+len(m[1]):]) {
+		return ""
+	}
+	return m[0]
+}
+
+// continuesWord reports whether s starts with what would carry on the word before it: a
+// letter, a digit, a mark, - or _.
+func continuesWord(s string) bool {
+	r, _ := utf8.DecodeRuneInString(s)
+	return s != "" && (r == '-' || r == '_' || unicode.In(r, unicode.L, unicode.M, unicode.N))
+}
+
+// continuesWordBackwards reports whether s ends in a letter, a digit or a mark.
+func continuesWordBackwards(s string) bool {
+	r, _ := utf8.DecodeLastRuneInString(s)
+	return s != "" && unicode.In(r, unicode.L, unicode.M, unicode.N)
+}
+
 // cutAtUnopenedBracket ends a link at the first non-ASCII closing bracket it did not
-// open — the pairs in openingBracket, which are all a path admits. Chinese and Japanese put no space after a link either, so the 」 that closes a
-// quotation around one is followed by the sentence, which would otherwise run on into
-// the link; a path's own （最終版） is opened in it and stays.
+// open — the pairs in wideOpeners and wideClosers, which are all a path admits. Chinese
+// and Japanese put no space after a link either, so the 」 that closes a quotation around
+// one is followed by the sentence, which would otherwise run on into the link; a path's
+// own （最終版） is opened in it and stays.
 func cutAtUnopenedBracket(url string) string {
-	open := map[string]int{}
+	if isASCII(url) {
+		return url
+	}
+	var open [9]int
 	for i, r := range url {
 		if r < utf8.RuneSelf {
 			continue
 		}
-		if opener := openingBracket[r]; opener != "" {
-			if open[opener] == 0 {
+		if pair := strings.IndexRune(wideOpeners, r); pair >= 0 {
+			open[utf8.RuneCountInString(wideOpeners[:pair])]++
+		} else if pair := strings.IndexRune(wideClosers, r); pair >= 0 {
+			n := utf8.RuneCountInString(wideClosers[:pair])
+			if open[n] == 0 {
 				return url[:i]
 			}
-			open[opener]--
-		} else {
-			open[string(r)]++
+			open[n]--
 		}
 	}
 	return url
 }
 
-func overlaps(links []bareLink, span bareLink) bool {
-	for _, link := range links {
-		if link.start < span.end && span.start < link.end {
-			return true
-		}
-	}
-	return false
-}
-
-func inside(links []bareLink, at int) bool {
-	for _, link := range links {
-		if at >= link.start && at < link.end {
-			return true
-		}
-	}
-	return false
-}
+// wideOpeners and wideClosers are the nine non-ASCII bracket pairs a path admits, in
+// the same order.
+const (
+	wideOpeners = "（［｛「『【〔〈《"
+	wideClosers = "）］｝」』】〕〉》"
+)
 
 // trimLinkEnd takes off the end of a link what GFM leaves outside one: the punctuation
 // a sentence puts after a link (? ! . , : * _ ~ ' " and a backtick), a closing bracket

@@ -182,11 +182,13 @@ func underImage(n ast.Node) bool {
 // and the list has no "\~" or "\=" — both of which ToMarkdown writes, the first before
 // every tilde in prose — so it shows the backslash. Those two are written as the
 // character references for the same characters instead, which glamour's decode turns
-// back into a tilde or an equals sign that no parser then sees as syntax. An escaped
+// back into a tilde or an equals sign that no parser then sees as syntax. "\@", which
+// ToMarkdown never writes and wholeBareLinks writes in an address it declines to link,
+// is spelled the same way, so that glamour's linkify does not find an @ there either. An escaped
 // backslash is matched first and kept, so that "\\~" stays a backslash and a tilde.
 var (
 	codeAmpersands = strings.NewReplacer("&", "&amp;")
-	textAmpersands = strings.NewReplacer(`\\`, `\\`, `\~`, "&#126;", `\=`, "&#61;",
+	textAmpersands = strings.NewReplacer(`\\`, `\\`, `\~`, "&#126;", `\=`, "&#61;", `\@`, "&#64;",
 		"&amp;", "&amp;", `\&`, "&amp;", "&", "&amp;")
 )
 

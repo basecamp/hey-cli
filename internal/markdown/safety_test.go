@@ -370,5 +370,15 @@ func FuzzContainment(f *testing.F) {
 				t.Fatalf("render(%q) = %q links to %q (params %q)", md, out, uri, params)
 			}
 		}
+		// A destination is ASCII on the wire: the ANSI parser glamour and lipgloss share
+		// misreads UTF-8 in one (percentEncodeNonASCII). That holds for what Render is
+		// handed — ToMarkdown's output, whose destinations are encoded — and not for the
+		// raw Markdown render takes in this package's tests.
+		for _, open := range strings.Split(linked.Text, "\x1b]8;")[1:] {
+			sequence, _, _ := strings.Cut(open, "\x07")
+			if !isASCII(sequence) {
+				t.Fatalf("RenderLinked(ToMarkdown(%q)) has a hyperlink that is not ASCII: %q", md, sequence)
+			}
+		}
 	})
 }
