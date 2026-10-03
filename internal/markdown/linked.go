@@ -3,6 +3,7 @@ package markdown
 import (
 	"net/url"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -74,12 +75,12 @@ func linkedRender(out string, selected int) LinkedRender {
 								// its label and one or more underlined spans for the shown
 								// destination. Only those destination spans complete the
 								// occurrence. A plain fallback URL has no style prefix.
-								if !currentShownDestination && (precededByUnderline(out, i) || content == shown) {
+								if !currentShownDestination && (precededByUnderline(out, i) || sameURL(content, destination)) {
 									currentShownDestination = true
 								}
 								if currentShownDestination {
 									currentShownText += withoutWhitespace(ansi.Strip(content))
-									currentComplete = currentShownText == withoutWhitespace(shown)
+									currentComplete = sameURL(currentShownText, withoutWhitespace(destination))
 								} else {
 									currentComplete = false
 								}
@@ -155,6 +156,37 @@ func precededByUnderline(out string, position int) bool {
 		}
 	}
 	return false
+}
+
+// sameURL reports whether a and b spell the same URL: a link's text and its destination
+// can differ in the case of an escape's hex (Hyperlink writes a URL's own escapes in
+// uppercase) and in whether non-ASCII is encoded at all.
+func sameURL(a, b string) bool {
+	return canonicalEscapes(a) == canonicalEscapes(b)
+}
+
+func canonicalEscapes(s string) string {
+	const digits = "0123456789ABCDEF"
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= utf8.RuneSelf:
+			b.Write([]byte{'%', digits[c>>4], digits[c&0x0f]})
+		case c == '%' && i+2 < len(s) && isHex(s[i+1]) && isHex(s[i+2]):
+			b.WriteByte('%')
+			b.WriteString(strings.ToUpper(s[i+1 : i+3]))
+			i += 2
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
+func isHex(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
 }
 
 func withoutWhitespace(s string) string {

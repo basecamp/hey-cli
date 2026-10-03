@@ -217,6 +217,30 @@ func TestRenderLinksBareURLsWhole(t *testing.T) {
 			nil,
 		},
 		{
+			"an address whose local part starts www.",
+			`<p>Write to www.jane@example.org today</p>`,
+			"www.jane@example.org today",
+			[]string{"mailto:www.jane@example.org"},
+		},
+		{
+			"a Persian path with a zero width non-joiner",
+			"<p>See https://docs.example.com/\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645 and <a href=\"https://docs.example.com/\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645\">this</a></p>",
+			"https://docs.example.com/\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645 and",
+			[]string{"https://docs.example.com/\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645", "https://docs.example.com/\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645"},
+		},
+		{
+			"a mailto: with several recipients and a query",
+			`<p>Write via mailto:alice@example.org,bob@example.org?subject=Agenda&amp;body=Hello_there today</p>`,
+			"mailto:alice@example.org,bob@example.org?subject=Agenda&body=Hello_there today",
+			[]string{"mailto:alice@example.org,bob@example.org?subject=Agenda&body=Hello_there"},
+		},
+		{
+			"the same escaped URL twice in inline code",
+			`<p><code>https://docs.example.com/%c3%a9</code> and <code>https://docs.example.com/%c3%a9</code></p>`,
+			"https://docs.example.com/%c3%a9",
+			[]string{"https://docs.example.com/%C3%A9", "https://docs.example.com/%C3%A9"},
+		},
+		{
 			"a www address",
 			`<p>Tickets at www.ferries.example.com/harbour_line?day=2&amp;seats=6 today</p>`,
 			"http://www.ferries.example.com/harbour_line?day=2&seats=6 today",
@@ -341,6 +365,26 @@ func TestTrimLinkEndIsLinear(t *testing.T) {
 			}
 		case <-time.After(5 * time.Second):
 			t.Fatalf("trimLinkEnd with %q×%d did not finish within 5s", suffix, run)
+		}
+	}
+}
+
+// glamour wraps a long destination wherever the line ends, which can be the middle of
+// a character's escapes; the character is shown whole, and two copies of the link are
+// still two links.
+func TestRenderWrapsANonASCIILinkWhole(t *testing.T) {
+	for _, page := range []string{
+		"https://docs.example.com/資料_最終版_資料_最終版_資料_最終版",
+		"https://cafe.example.com/menus/café_du_port_café_du_port_café",
+	} {
+		for width := 20; width <= 60; width++ {
+			linked := RenderLinked(htmlutil.ToMarkdown("<p>"+page+" "+page+"</p>"), width, -1)
+			if shown := visible(linked.Text); strings.Contains(shown, "%") {
+				t.Errorf("width %d: shows %q, want no escapes", width, shown)
+			}
+			if len(linked.Links) != 2 || linked.Links[0].Destination != page || linked.Links[1].Destination != page {
+				t.Errorf("width %d: links = %#v, want %q twice", width, linked.Links, page)
+			}
 		}
 	}
 }
