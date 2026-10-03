@@ -38,11 +38,15 @@ them, id and topic_id name the new message and the thread it started, with delay
 while Undo Send holds it back). Whatever HEY's answer leaves out is left out here too;
 nothing is guessed in its place.
 
+While Undo Send holds a message back (delayed), HEY leaves it out of its thread:
+hey thread read shows the thread without it, and a thread it started answers not_found,
+until the message goes out. Read the thread again then.
+
 If HEY refuses the send — usually because the account has reached its sending limit —
 it keeps the message as a draft; the command then fails with not_delivered (exit 7),
 naming the draft, which hey draft send sends later.`,
 		Annotations: map[string]string{
-			"agent_notes": "Forwards the latest emailed message in a thread with HEY's quoted content — never an internal note or share notice posted after it. Accepts comma-separated recipients and an optional note via -m. The answer's thread_id and entry_id name what was forwarded; id and topic_id name the new message and the thread it started, as HEY's answer names them. A send HEY refuses — usually the account's sending limit — is kept as a draft and fails with not_delivered (exit 7), naming the draft in meta.draft_id; send it later with hey draft send <draft_id>, not by sending again, which only makes another draft.",
+			"agent_notes": "Forwards the latest emailed message in a thread with HEY's quoted content — never an internal note or share notice posted after it. Accepts comma-separated recipients and an optional note via -m. The answer's thread_id and entry_id name what was forwarded; id and topic_id name the new message and the thread it started, as HEY's answer names them. While delayed is true, HEY leaves the message out of its thread, so hey thread read shows the thread without it (a thread it started reads as not found) until Undo Send releases it. A send HEY refuses — usually the account's sending limit — is kept as a draft and fails with not_delivered (exit 7), naming the draft in meta.draft_id; send it later with hey draft send <draft_id>, not by sending again, which only makes another draft.",
 		},
 		Example: `  hey forward 12345 --to alice@example.com
   hey forward 12345 --to alice@example.com --cc bob@example.org -m "For your review"`,

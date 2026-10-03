@@ -67,6 +67,10 @@ HEY breaks the reply out of this one, as HEY for Domains does when a reply chang
 on the thread. Whatever HEY's answer leaves out is left out here too, and the "view"
 breadcrumb then points at the thread replied to.
 
+While Undo Send holds a message back (delayed), HEY leaves it out of its thread:
+hey thread read shows the thread without it, and a thread it started answers not_found,
+until the message goes out. Read the thread again then.
+
 If HEY refuses the send — usually because the account has reached its sending limit —
 it keeps the message as a draft; the command then fails with not_delivered (exit 7),
 naming the draft, which hey draft send sends later.`,
