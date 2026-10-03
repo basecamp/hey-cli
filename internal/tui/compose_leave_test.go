@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestEscClosesAFormWithNothingToLose(t *testing.T) {
@@ -167,6 +169,38 @@ func TestAFailedDraftSaveKeepsTheMessage(t *testing.T) {
 	}
 	if form.inputs[fieldTo].Value() != "rick@example.com" {
 		t.Errorf("the message should be as it was, To %q", form.inputs[fieldTo].Value())
+	}
+}
+
+// A paste is held off exactly as keys are while the close question is up and
+// while a draft save is on its way: a paste behind the question would edit a
+// form the reader can't see, and one during the save would be lost when the
+// saved form closes.
+func TestAPasteWaitsForTheQuestionAndTheSave(t *testing.T) {
+	v, rec := recipientsTestView(t)
+	form := openComposer(t, v)
+	form.focus = form.bodyIndex()
+	_ = form.focusCurrent()
+	typeText(v, "Lunch on Friday?")
+
+	v.HandleContentKey(keyPress("esc"))
+	v.Update(tea.PasteMsg{Content: " Noon works."})
+	if got := form.body.Value(); got != "Lunch on Friday?" {
+		t.Errorf("a paste behind the close question changed the message: %q", got)
+	}
+
+	cmd := v.HandleContentKey(keyPress("s"))
+	if !form.sending {
+		t.Fatal("s should start saving the draft")
+	}
+	v.Update(tea.PasteMsg{Content: " Noon works."})
+	if got := form.body.Value(); got != "Lunch on Friday?" {
+		t.Errorf("a paste during the save changed the message: %q", got)
+	}
+	v.Update(runCmd(cmd))
+	message, _ := rec.seen().writeBody["message"].(map[string]any)
+	if content := fmt.Sprint(message["content"]); !strings.Contains(content, "Lunch on Friday?") || strings.Contains(content, "Noon") {
+		t.Errorf("the draft should be the message as it was when saved, got %q", content)
 	}
 }
 

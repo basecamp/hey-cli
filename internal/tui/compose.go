@@ -417,6 +417,13 @@ func (f *composeForm) submit(view *mailView) tea.Cmd {
 }
 
 func (f *composeForm) handleMsg(msg tea.Msg) (tea.Cmd, bool) {
+	// A paste is typing, so it is held off for as long as keys are: while the
+	// close question is up, and while a send or a draft save is on its way,
+	// which has already taken the form's values and would close it on top of
+	// whatever was pasted.
+	if _, paste := msg.(tea.PasteMsg); paste && (f.sending || f.confirmLeave) {
+		return nil, true
+	}
 	if f.snippetPicker != nil {
 		return f.snippetPicker.handleMsg(msg), true
 	}
