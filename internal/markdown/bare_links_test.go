@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 )
@@ -204,6 +205,18 @@ func TestRenderLinksBareURLsWhole(t *testing.T) {
 			[]string{"https://docs.example.com/encoding"},
 		},
 		{
+			"a label that is part of its destination",
+			`<p><a href="https://docs.example.com/é">%c3%a9</a></p>`,
+			"%c3%a9 https://docs.example.com/é",
+			[]string{"https://docs.example.com/é"},
+		},
+		{
+			"an address it declines with a www host",
+			`<p>Not devi*rao@www.example.org today</p>`,
+			"devi*rao@www.example.org today",
+			nil,
+		},
+		{
 			"a www address",
 			`<p>Tickets at www.ferries.example.com/harbour_line?day=2&amp;seats=6 today</p>`,
 			"http://www.ferries.example.com/harbour_line?day=2&seats=6 today",
@@ -305,6 +318,23 @@ func TestRenderKeepsLinksWithNonASCIIDestinations(t *testing.T) {
 		}
 		if strings.ContainsFunc(linked.Text, func(r rune) bool { return r >= 0x80 && r <= 0x9f }) {
 			t.Errorf("%s: output carries a C1 control: %q", html, linked.Text)
+		}
+	}
+}
+
+// A link that ends in a long run of closers or semicolons is trimmed in one pass: an
+// email is rendered as the reader opens it, so this must not take time in proportion
+// to the square of what somebody else wrote.
+func TestTrimLinkEndIsLinear(t *testing.T) {
+	const url = "https://docs.example.com/plan"
+	for _, suffix := range []string{"]", ")", "}", "）", ";", "&amp;", "a;"} {
+		started := time.Now()
+		got := trimLinkEnd(url + strings.Repeat(suffix, 100_000))
+		if elapsed := time.Since(started); elapsed > time.Second {
+			t.Errorf("trimLinkEnd with %q×100000 took %v", suffix, elapsed)
+		}
+		if !strings.HasPrefix(got, url) {
+			t.Errorf("trimLinkEnd with %q×100000 = %.60q…, want it to keep %q", suffix, got, url)
 		}
 	}
 }

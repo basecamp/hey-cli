@@ -220,9 +220,9 @@ func percentEncodeNonASCII(s string) string {
 var encodedNonASCII = regexp.MustCompile(`(?:%[89a-f][0-9a-f])+`)
 
 // restoreNonASCIILinks decodes, in the text of each hyperlink glamour wrote — never in
-// its destination — what percentEncodeNonASCII encoded. Only text that is part of the
-// destination is touched, which is the destination glamour prints: a label the email
-// wrote is the email's, "%c3%a9" and all. A run is decoded only when it is
+// its destination — what percentEncodeNonASCII encoded. Only the destination glamour
+// prints is touched — underlined, and part of the URI — so a label the email wrote is
+// the email's, "%c3%a9" and all, even on a link to /é. A run is decoded only when it is
 // whole UTF-8 of characters a link may show (shownInLink), so a line glamour wrapped in the
 // middle of one stays encoded rather than turning into something else. glamour ends its
 // hyperlink sequences with BEL; one that ends otherwise is left for contain to judge.
@@ -232,30 +232,34 @@ func restoreNonASCIILinks(out string) string {
 	}
 	var b strings.Builder
 	b.Grow(len(out))
-	uri := ""
-	for {
-		start := strings.Index(out, "\x1b]8;")
+	uri, printed := "", false
+	last := 0
+	for last < len(out) {
+		start := strings.Index(out[last:], "\x1b]8;")
 		if start < 0 {
 			break
 		}
+		start += last
 		end := strings.IndexByte(out[start:], '\a')
 		if end < 0 {
 			break
 		}
 		end += start + 1
-		text := out[:start]
-		if shown := withoutWhitespace(ansi.Strip(text)); uri != "" && shown != "" && strings.Contains(uri, shown) {
+		text := out[last:start]
+		if shown := withoutWhitespace(ansi.Strip(text)); printed && shown != "" && strings.Contains(uri, shown) {
 			text = decodeNonASCII(text)
 		}
 		b.WriteString(text)
-		sequence := out[start:end]
-		b.WriteString(sequence)
+		b.WriteString(out[start:end])
 		// The destination follows the parameters; a sequence with none — "\x1b]8;;\a"
-		// — closes the link.
-		_, uri, _ = strings.Cut(strings.TrimPrefix(strings.TrimSuffix(sequence, "\a"), "\x1b]8;"), ";")
-		out = out[end:]
+		// — closes the link. glamour prints a destination underlined (the Link style)
+		// and a label the email wrote without, which is how linkedRender tells them
+		// apart too.
+		_, uri, _ = strings.Cut(strings.TrimPrefix(strings.TrimSuffix(out[start:end], "\a"), "\x1b]8;"), ";")
+		printed = uri != "" && precededByUnderline(out, start)
+		last = end
 	}
-	b.WriteString(out)
+	b.WriteString(out[last:])
 	return b.String()
 }
 
@@ -326,7 +330,9 @@ func findBareLinks(s string) (links []bareLink, declined []int) {
 	}
 
 	urls := links
-	var addresses []bareLink
+	// claimed is every address, linked or declined, in order: a URL inside one —
+	// devi*rao@www.example.org — is part of it, and goes with it.
+	var addresses, claimed []bareLink
 	next := 0 // the first URL that does not end before the address being checked
 	for _, match := range bareEmail.FindAllStringIndex(s, -1) {
 		start, end := match[0], match[1]
@@ -342,6 +348,7 @@ func findBareLinks(s string) (links []bareLink, declined []int) {
 		if start > 0 && strings.IndexByte(otherLocalPart, s[start-1]) >= 0 ||
 			continuesWordBackwards(s[:start]) || continuesWord(s[end:]) {
 			declined = append(declined, start+strings.IndexByte(s[start:end], '@'))
+			claimed = append(claimed, bareLink{start: start, end: end})
 			continue
 		}
 		target := s[start:end]
@@ -354,6 +361,7 @@ func findBareLinks(s string) (links []bareLink, declined []int) {
 			target = s[start:end]
 		}
 		addresses = append(addresses, bareLink{start, end, target})
+		claimed = append(claimed, bareLink{start: start, end: end})
 	}
 	// An address that starts before a URL holds it — jane@www.example.com is an
 	// address at a www host — so the URL gives way to it. Both lists are in order, so
@@ -361,10 +369,10 @@ func findBareLinks(s string) (links []bareLink, declined []int) {
 	links = make([]bareLink, 0, len(urls)+len(addresses))
 	next = 0
 	for _, url := range urls {
-		for next < len(addresses) && addresses[next].end <= url.start {
+		for next < len(claimed) && claimed[next].end <= url.start {
 			next++
 		}
-		if next == len(addresses) || addresses[next].start >= url.end {
+		if next == len(claimed) || claimed[next].start >= url.end {
 			links = append(links, url)
 		}
 	}
@@ -464,6 +472,9 @@ const (
 // outside ASCII — a closing curly quote, a guillemet, an ellipsis. It is the one rule
 // for both passes, so a link ends in the same place whatever stands in front of it.
 func trimLinkEnd(url string) string {
+	// The brackets are counted once, and a closer taken off is taken off the count, so
+	// a link ending in a thousand ]s is trimmed in one pass rather than a thousand.
+	var opened, closed map[rune]int
 	for url != "" {
 		last, size := utf8.DecodeLastRuneInString(url)
 		switch {
@@ -471,13 +482,30 @@ func trimLinkEnd(url string) string {
 			url = url[:len(url)-size]
 		case last == ';':
 			url = url[:len(url)-1]
-			if amp := strings.LastIndexByte(url, '&'); amp >= 0 && amp < len(url)-1 && isAlphanumeric(url[amp+1:]) {
-				url = url[:amp]
+			// The alphanumerics in front of it, back to an &, are an entity's name.
+			name := len(url)
+			for name > 0 && isAlphanumeric(url[name-1:name]) {
+				name--
+			}
+			if name > 0 && name < len(url) && url[name-1] == '&' {
+				url = url[:name-1]
 			}
 		case openingBracket[last] != "":
-			if strings.Count(url, openingBracket[last]) >= strings.Count(url, string(last)) {
+			if opened == nil {
+				opened, closed = map[rune]int{}, map[rune]int{}
+				for _, r := range url {
+					if openingBracket[r] != "" {
+						closed[r]++
+					} else if strings.ContainsRune(openers, r) {
+						opened[r]++
+					}
+				}
+			}
+			opener, _ := utf8.DecodeRuneInString(openingBracket[last])
+			if opened[opener] >= closed[last] {
 				return url
 			}
+			closed[last]--
 			url = url[:len(url)-size]
 		case last >= utf8.RuneSelf && unicode.IsPunct(last):
 			url = url[:len(url)-size]
@@ -487,6 +515,9 @@ func trimLinkEnd(url string) string {
 	}
 	return url
 }
+
+// openers is every bracket openingBracket pairs a closer with.
+const openers = "([{" + wideOpeners
 
 // openingBracket pairs each closing bracket a link may end with to the one that opens
 // it, in ASCII and in the full-width and CJK forms.
