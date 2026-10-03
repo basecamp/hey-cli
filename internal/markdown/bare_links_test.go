@@ -296,6 +296,18 @@ func TestRenderLinksBareURLsWhole(t *testing.T) {
 			[]string{"https://docs.example.com/\ufffd_v2"},
 		},
 		{
+			"an address in a www link's query",
+			`<p>See www.docs.example.com/list?owner=jane@example.org&amp;tag=room_list today</p>`,
+			"http://www.docs.example.com/list?owner=jane@example.org&tag=room_list today",
+			[]string{"http://www.docs.example.com/list?owner=jane@example.org&tag=room_list"},
+		},
+		{
+			"an @ with nothing before it",
+			`<p>Ping @www.example.org/room_list and @https://docs.example.com/ferry_times</p>`,
+			"@http://www.example.org/room_list and @https://docs.example.com/ferry_times",
+			[]string{"http://www.example.org/room_list", "https://docs.example.com/ferry_times"},
+		},
+		{
 			"a www address",
 			`<p>Tickets at www.ferries.example.com/harbour_line?day=2&amp;seats=6 today</p>`,
 			"http://www.ferries.example.com/harbour_line?day=2&seats=6 today",
@@ -468,19 +480,27 @@ func TestFindBareLinksInALongUnspacedParagraphIsLinear(t *testing.T) {
 
 // One run of text full of @s is one address to decline, read once.
 func TestFindBareLinksInALongRunOfAtSignsIsLinear(t *testing.T) {
-	run := strings.Repeat("jane@", 100_000) + "example.org"
-	found := make(chan int, 1)
-	go func() {
-		_, declined := findBareLinks(run)
-		found <- len(declined)
-	}()
-	select {
-	case n := <-found:
-		if n != 100_000 {
-			t.Errorf("declined %d @s, want 100000", n)
+	for _, test := range []struct {
+		name, run       string
+		links, declines int
+	}{
+		{"one address", strings.Repeat("jane@", 100_000) + "example.org", 0, 100_000},
+		{"a URL's query", "https://docs.example.com/list?owner=" + strings.Repeat("jane@", 100_000) + "example.org", 1, 0},
+	} {
+		type result struct{ links, declines int }
+		found := make(chan result, 1)
+		go func() {
+			links, declined := findBareLinks(test.run)
+			found <- result{len(links), len(declined)}
+		}()
+		select {
+		case got := <-found:
+			if got.links != test.links || got.declines != test.declines {
+				t.Errorf("%s: %d links and %d declined @s, want %d and %d", test.name, got.links, got.declines, test.links, test.declines)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s: findBareLinks did not finish within 5s for 100000 @s", test.name)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("findBareLinks did not finish within 5s for a run of 100000 @s")
 	}
 }
 

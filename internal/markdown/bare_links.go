@@ -514,13 +514,23 @@ func findBareLinks(s string) (links []bareLink, declined []int) {
 		// linked only when GFM's pattern reads all of it: devi*rao@, éjane@,
 		// jane@example.orgé and jane@dept.example.公司 are each declined as a whole
 		// rather than linked as the different address the pattern could read.
-		start, end := addressAround(s, at, settled)
-		for next < len(urls) && urls[next].end <= start {
+		for next < len(urls) && urls[next].end <= at {
 			next++
 		}
-		// An address inside a URL is the URL's; one that starts where a www. match
-		// does — www.jane@example.org — is an address.
-		if next < len(urls) && urls[next].start < start {
+		start, end := addressAround(s, at, settled)
+		// An @ inside a URL is the URL's — in its path or query, or after its scheme
+		// — and the URL is passed over whole rather than read again for every @ in it.
+		// One in the host of a www. match, with nothing before it but the address —
+		// www.jane@example.org — is an address.
+		if next < len(urls) && urls[next].start <= at {
+			url := urls[next]
+			if url.start < start || strings.ContainsAny(s[url.start:at], "/?#") {
+				settled = url.end
+				continue
+			}
+		}
+		// An @ with nothing before it is not an address, and claims nothing.
+		if start == at {
 			settled = at + 1
 			continue
 		}
