@@ -161,13 +161,8 @@ func boxPageCursor(nextHistoryURL string) string {
 
 // resolveBox fetches a box by name or ID at the page cursor. A name is any spelling
 // boxKindFor knows — short name, kind or display name — and the same ones hey search --in
-// and hey move --to take.
+// and hey move --to take, or the name HEY lists a box under, a renamed one included.
 func resolveBox(ctx context.Context, nameOrID, page string) (*generated.BoxShowResponse, error) {
-	var cursor *string
-	if page != "" {
-		cursor = &page
-	}
-
 	if id, err := strconv.ParseInt(nameOrID, 10, 64); err == nil {
 		return resolveBoxByID(ctx, id, page)
 	}
@@ -186,11 +181,7 @@ func resolveBox(ctx context.Context, nameOrID, page string) (*generated.BoxShowR
 	if result != nil {
 		for _, b := range *result {
 			if boxKindFor(b.Kind) == kind || boxKindFor(b.Name) == kind {
-				resp, err := sdk.Boxes().Get(ctx, b.Id, &generated.GetBoxParams{Page: cursor})
-				if err != nil {
-					return nil, apierr.FromSDK(err)
-				}
-				return resp, nil
+				return readListedBox(ctx, b, page)
 			}
 		}
 	}
@@ -198,10 +189,7 @@ func resolveBox(ctx context.Context, nameOrID, page string) (*generated.BoxShowR
 	return nil, errBoxNotFound(nameOrID)
 }
 
-// resolveBoxByID reads a box HEY names on its own route, like a box given by name. The
-// pages after the first are read there whatever the first came from (mail.ReadPage
-// dispatches on the kind), and /boxes/{id} orders the Feed, the Paper Trail and Bubble Up
-// differently, so a first page read by ID would repeat or skip threads on the second.
+// resolveBoxByID reads a box HEY names on its own route, like a box given by name.
 func resolveBoxByID(ctx context.Context, id int64, page string) (*generated.BoxShowResponse, error) {
 	result, err := sdk.Boxes().List(ctx)
 	if err != nil {
@@ -211,14 +199,28 @@ func resolveBoxByID(ctx context.Context, id int64, page string) (*generated.BoxS
 	if result != nil {
 		for _, b := range *result {
 			if b.Id == id {
-				if resp, named, readErr := readNamedBox(ctx, b.Kind, page); named {
-					return resp, readErr
-				}
-				break
+				return readListedBox(ctx, b, page)
 			}
 		}
 	}
 
+	return readBoxByID(ctx, id, page)
+}
+
+// readListedBox reads a box found in the box list on the route its kind names, whether it
+// was found by its ID or by a name of the user's own. The pages after the first are read
+// there whatever the first came from (mail.ReadPage dispatches on the kind), and
+// /boxes/{id} orders the Feed, the Paper Trail and Bubble Up differently, so a first page
+// read there would repeat or skip threads on the second. Only a kind with no route of its
+// own is read from /boxes/{id}.
+func readListedBox(ctx context.Context, box generated.Box, page string) (*generated.BoxShowResponse, error) {
+	if resp, named, err := readNamedBox(ctx, box.Kind, page); named {
+		return resp, err
+	}
+	return readBoxByID(ctx, box.Id, page)
+}
+
+func readBoxByID(ctx context.Context, id int64, page string) (*generated.BoxShowResponse, error) {
 	var cursor *string
 	if page != "" {
 		cursor = &page

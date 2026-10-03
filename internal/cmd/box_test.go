@@ -247,6 +247,34 @@ func TestBoxCommandFollowsPagesForANumericFeed(t *testing.T) {
 	}
 }
 
+// A Feed renamed in HEY is found in the box list by its name and then read on its own
+// route, first page included, for the same reason as a numeric ID: a first page from
+// /boxes/{id} would repeat or skip threads on the pages after it.
+func TestBoxCommandFollowsPagesForARenamedFeed(t *testing.T) {
+	var requests []string
+	if _, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.Path+"?"+r.URL.RawQuery)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/boxes.json":
+			_, _ = io.WriteString(w, `[{"id":8,"kind":"imbox","name":"Imbox"},{"id":9,"kind":"feedbox","name":"Newsletters"}]`)
+		case r.URL.Path != "/feedbox.json":
+			t.Errorf("request = %s, want /feedbox.json", r.URL.Path)
+			http.NotFound(w, r)
+		case r.URL.Query().Get("page") == "":
+			_, _ = io.WriteString(w, `{"id":9,"kind":"feedbox","name":"Newsletters","next_history_url":"/feedbox.json?page=cursor-2","postings":[{"id":1}]}`)
+		default:
+			_, _ = io.WriteString(w, `{"id":9,"kind":"feedbox","name":"Newsletters","postings":[]}`)
+		}
+	}), "box", "newsletters", "--all"); err != nil {
+		t.Fatalf("execute box: %v", err)
+	}
+	want := "[/boxes.json? /feedbox.json? /feedbox.json?page=cursor-2]"
+	if got := fmt.Sprint(requests); got != want {
+		t.Errorf("requests = %s, want %s", got, want)
+	}
+}
+
 // An ID HEY does not list, such as one of another linked account's boxes, is still read
 // directly and answered however HEY answers it.
 func TestBoxCommandReadsAnUnlistedIDDirectly(t *testing.T) {
