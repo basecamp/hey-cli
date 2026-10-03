@@ -1,6 +1,7 @@
 package markdown
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,20 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 )
+
+// decodedDestinations is the destination of every OSC 8 sequence in out, decoded the
+// way linkedRender reports one.
+func decodedDestinations(out string) []string {
+	opens := strings.Split(out, "\x1b]8;")[1:]
+	destinations := make([]string, 0, len(opens))
+	for _, open := range opens {
+		_, rest, _ := strings.Cut(open, ";")
+		uri, _, _ := strings.Cut(rest, "\x07")
+		uri, _, _ = strings.Cut(uri, "\x1b\\")
+		destinations = append(destinations, decodeNonASCII(uri))
+	}
+	return destinations
+}
 
 // visible is what the terminal shows: the output with every escape sequence removed.
 func visible(out string) string {
@@ -338,8 +353,7 @@ func FuzzContainment(f *testing.F) {
 			}
 			// A destination is reported with its non-ASCII decoded, and sits in the
 			// OSC 8 sequence percent-encoded.
-			uri := percentEncodeNonASCII(link.Destination)
-			if !strings.Contains(linked.Text, ";"+uri+"\a") && !strings.Contains(linked.Text, ";"+uri+"\x1b\\") {
+			if !slices.Contains(decodedDestinations(linked.Text), link.Destination) {
 				t.Fatalf("RenderLinked(%q) returned destination %q without a matching OSC 8 occurrence", md, link.Destination)
 			}
 		}

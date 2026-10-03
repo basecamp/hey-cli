@@ -278,16 +278,19 @@ func longestRun(s string, c byte) int {
 // in a hyperlink's destination (see markdown.percentEncodeNonASCII), and turned a link
 // to a page named in Japanese into a body with all its styling stripped. The hex is
 // lowercase, which markdown.Render looks for to show the characters again where it
-// prints a destination as text.
+// prints a destination as text; an escape the URL already had in lowercase is written
+// in uppercase, the same address, so that only what is encoded here is decoded there.
 func destination(raw string) (string, bool) {
-	// What the sanitizer removes goes before the rest is encoded, so that a zero width
-	// space in a destination is gone rather than kept as a %e2%80%8b nothing strips.
-	raw = strings.TrimSpace(terminal.Sanitize(strings.Map(func(r rune) rune {
+	// The sanitizer goes first: it removes an escape sequence whole, where stripping
+	// controls first would leave the sequence's payload behind, and what it removes —
+	// a zero width space — is gone rather than kept as a %e2%80%8b nothing strips.
+	raw = strings.TrimSpace(strings.Map(func(r rune) rune {
 		if isControl(r) {
 			return -1
 		}
 		return r
-	}, raw)))
+	}, terminal.Sanitize(raw)))
+	raw = lowercaseNonASCIIEscape.ReplaceAllStringFunc(raw, strings.ToUpper)
 	if raw == "" || !allowedScheme(raw) {
 		return "", false
 	}
@@ -310,6 +313,10 @@ func destination(raw string) (string, bool) {
 	}
 	return b.String(), true
 }
+
+// lowercaseNonASCIIEscape is a percent-escape of a byte at or above 0x80 in lowercase
+// hex, the form destination writes non-ASCII in.
+var lowercaseNonASCIIEscape = regexp.MustCompile(`%[89a-f][0-9a-f]`)
 
 func isASCII(s string) bool {
 	for i := range len(s) {

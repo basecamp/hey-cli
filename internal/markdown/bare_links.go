@@ -63,7 +63,7 @@ const (
 	// with. A path also takes the brackets of other scripts — （最終版） — which
 	// trimLinkEnd balances as it balances ( and ).
 	nonASCIIInLink = `[^\x00-\x7f\p{Z}\p{P}\p{C}]|\x{200D}`
-	nonASCIIInPath = nonASCIIInLink + `|[^\x00-\x7f\P{Ps}]|[^\x00-\x7f\P{Pe}]`
+	nonASCIIInPath = nonASCIIInLink + `|[（）［］｛｝「」『』【】〔〕〈〉《》]`
 	bareHost       = `(?:[-a-zA-Z0-9@:%._\+~#=]|` + nonASCIIInLink + `){1,256}\.(?:[a-zA-Z]|\p{L})+`
 	barePath       = `(?:[-a-zA-Z0-9@:%_+*.~#$!?&/=\(\);,'\^{}\[\]` + "`" + `]|` + nonASCIIInPath + `)*`
 )
@@ -115,8 +115,16 @@ func wholeBareLinks(md string) string {
 
 // mayHoldLink is the cheap test for whether there is anything to find.
 func mayHoldLink(s string) bool {
-	return strings.Contains(s, "://") || strings.Contains(s, "@") ||
-		strings.Contains(s, "www.") || strings.Contains(s, "WWW.")
+	if strings.Contains(s, "://") || strings.Contains(s, "@") {
+		return true
+	}
+	// www. in any case — WwW.example.com is matched by bareWWW too.
+	for i := 3; i < len(s); i++ {
+		if s[i] == '.' && strings.EqualFold(s[i-3:i], "www") {
+			return true
+		}
+	}
+	return false
 }
 
 // bareLinksUnder finds the bare links in the prose directly under parent. Text sits in
@@ -176,8 +184,11 @@ func bareLinksIn(source []byte, start, stop int) []replacement {
 // therefore kept ASCII: a link's non-ASCII is handed to glamour percent-encoded, which
 // is the URI a browser opens anyway, and restoreNonASCIILinks decodes it again in the
 // text glamour shows. The encoding is lowercase hex, which the RFC allows and almost
-// nothing writes, so what is decoded afterwards is what was encoded here.
+// nothing writes — and an escape the URL already had in lowercase is written in
+// uppercase, the same address, so that what is decoded afterwards is only ever what
+// was encoded here.
 func percentEncodeNonASCII(s string) string {
+	s = encodedNonASCII.ReplaceAllStringFunc(s, strings.ToUpper)
 	if isASCII(s) {
 		return s
 	}
@@ -200,7 +211,7 @@ var encodedNonASCII = regexp.MustCompile(`(?:%[89a-f][0-9a-f])+`)
 
 // restoreNonASCIILinks decodes, in the text of each hyperlink glamour wrote — never in
 // its destination — what percentEncodeNonASCII encoded. A run is decoded only when it is
-// whole UTF-8 of characters a bare link may hold, so a line glamour wrapped in the
+// whole UTF-8 of characters a link may show (shownInLink), so a line glamour wrapped in the
 // middle of one stays encoded rather than turning into something else. glamour ends its
 // hyperlink sequences with BEL; one that ends otherwise is left for contain to judge.
 func restoreNonASCIILinks(out string) string {
@@ -245,7 +256,7 @@ func decodeNonASCII(s string) string {
 			return run
 		}
 		for _, r := range string(decoded) {
-			if !linkRune(r) {
+			if !shownInLink(r) {
 				return run
 			}
 		}
@@ -269,11 +280,11 @@ func unhex(c byte) byte {
 	return c - '0'
 }
 
-// linkRune reports whether r is non-ASCII a bare link may hold — the nonASCIIInPath
-// pattern as a predicate.
-func linkRune(r rune) bool {
-	return r >= utf8.RuneSelf && (r == '‍' ||
-		!unicode.In(r, unicode.Z, unicode.P, unicode.C) || unicode.In(r, unicode.Ps, unicode.Pe))
+// shownInLink reports whether r, decoded, may be shown in a link: any non-ASCII but a
+// space or a control — a format character such as a bidi override or a zero width
+// space among them — except the zero width joiner an emoji sequence is built with.
+func shownInLink(r rune) bool {
+	return r >= utf8.RuneSelf && (r == '\u200d' || !unicode.In(r, unicode.Z, unicode.C))
 }
 
 // bareLink is a link found in plain text: the bytes it spans, and what it links to.
@@ -357,7 +368,7 @@ func urlAt(s string, i int) (bareLink, bool) {
 }
 
 // cutAtUnopenedBracket ends a link at the first non-ASCII closing bracket it did not
-// open. Chinese and Japanese put no space after a link either, so the 」 that closes a
+// open — the pairs in openingBracket, which are all a path admits. Chinese and Japanese put no space after a link either, so the 」 that closes a
 // quotation around one is followed by the sentence, which would otherwise run on into
 // the link; a path's own （最終版） is opened in it and stays.
 func cutAtUnopenedBracket(url string) string {
@@ -371,7 +382,7 @@ func cutAtUnopenedBracket(url string) string {
 				return url[:i]
 			}
 			open[opener]--
-		} else if unicode.Is(unicode.Ps, r) {
+		} else {
 			open[string(r)]++
 		}
 	}

@@ -58,10 +58,12 @@ func linkedRender(out string, selected int) LinkedRender {
 								startLine := line
 								endLine := line + strings.Count(out[contentStart:closeStart], "\n")
 								content := out[contentStart:closeStart]
+								// The destination is ASCII on the wire (percentEncodeNonASCII);
+								// a reader is shown, and a browser handed, the characters,
+								// and the shown text is compared with those.
+								shown := decodeNonASCII(destination)
 								if destination != currentDestination || currentComplete {
-									// The destination is ASCII on the wire (percentEncodeNonASCII);
-									// a reader is shown, and a browser handed, the characters.
-									links = append(links, LinkOccurrence{Destination: decodeNonASCII(destination), StartLine: startLine, EndLine: endLine})
+									links = append(links, LinkOccurrence{Destination: shown, StartLine: startLine, EndLine: endLine})
 									currentDestination = destination
 									currentShownDestination = false
 									currentShownText = ""
@@ -72,12 +74,12 @@ func linkedRender(out string, selected int) LinkedRender {
 								// its label and one or more underlined spans for the shown
 								// destination. Only those destination spans complete the
 								// occurrence. A plain fallback URL has no style prefix.
-								if !currentShownDestination && (precededByUnderline(out, i) || content == destination) {
+								if !currentShownDestination && (precededByUnderline(out, i) || content == shown) {
 									currentShownDestination = true
 								}
 								if currentShownDestination {
 									currentShownText += withoutWhitespace(ansi.Strip(content))
-									currentComplete = currentShownText == withoutWhitespace(destination)
+									currentComplete = currentShownText == withoutWhitespace(shown)
 								} else {
 									currentComplete = false
 								}

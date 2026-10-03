@@ -232,8 +232,10 @@ handed. The model has three layers, and it is worth knowing which one a change t
   `\~` and `\=`, which glamour does not unescape, as character references), finds every
   bare link itself, by GFM's rules, before glamour wraps, and hands it over as an
   autolink (`wholeBareLinks` — glamour's linkify matches the escaped source and starts
-  only after a space, so it stopped at `\_`, opened `&amp;`, and left `<https://…>` to
-  `LinkifyURLs`, which sees wrapped output), shows a
+  only after a space, `*`, `_`, `~` or `(`, so it stopped at `\_`, opened `&amp;`, and
+  left `<https://…>` to `LinkifyURLs`, which sees wrapped output), keeps every
+  hyperlink's destination ASCII (non-ASCII percent-encoded — the shared ANSI parser
+  reads its UTF-8 as C1 controls — and decoded again in the text shown), shows a
   document nested past twenty levels unrendered rather than handing glamour something
   exponential, and checks its own output: anything but SGR and OSC 8 to an allowed scheme strips all
   styling rather than guessing. That last check is a backstop, not the guarantee — an

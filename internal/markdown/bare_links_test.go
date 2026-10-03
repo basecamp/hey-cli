@@ -156,6 +156,24 @@ func TestRenderLinksBareURLsWhole(t *testing.T) {
 			[]string{"https://docs.example.com/資料_最終版"},
 		},
 		{
+			"an escape it already had",
+			`<p>See https://docs.example.com/%e8%b3%87%e6%96%99_v2 today</p>`,
+			"https://docs.example.com/%E8%B3%87%E6%96%99_v2 today",
+			[]string{"https://docs.example.com/%E8%B3%87%E6%96%99_v2"},
+		},
+		{
+			"a bracket it does not pair",
+			`<p>〖https://docs.example.com/資料_最終版〗を見て</p>`,
+			"〖https://docs.example.com/資料_最終版〗を見て",
+			[]string{"https://docs.example.com/資料_最終版"},
+		},
+		{
+			"the same link twice",
+			`<p>https://docs.example.com/資料_v2 https://docs.example.com/資料_v2</p>`,
+			"https://docs.example.com/資料_v2 https://docs.example.com/資料_v2",
+			[]string{"https://docs.example.com/資料_v2", "https://docs.example.com/資料_v2"},
+		},
+		{
 			"a www address",
 			`<p>Tickets at www.ferries.example.com/harbour_line?day=2&amp;seats=6 today</p>`,
 			"http://www.ferries.example.com/harbour_line?day=2&seats=6 today",
@@ -296,6 +314,7 @@ func TestWholeBareLinksWritesAutolinks(t *testing.T) {
 	for md, want := range map[string]string{
 		`See https://docs.example.com/plan?team=harbour&amp;day=2 now`: "See <https://docs.example.com/plan?team=harbour&day=2> now",
 		`See https://docs.example.com/harbour\_offsite now`:            "See <https://docs.example.com/harbour_offsite> now",
+		`See WwW.ferries.example.com/harbour\_line now`:                "See <http://WwW.ferries.example.com/harbour_line> now",
 		`See www.ferries.example.com/harbour\_line now`:                "See <http://www.ferries.example.com/harbour_line> now",
 		`Write to tessa\_nolan@example.com now`:                        "Write to <tessa_nolan@example.com> now",
 		`\\https://docs.example.com/a\_b`:                              `\\<https://docs.example.com/a_b>`,

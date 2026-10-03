@@ -316,13 +316,15 @@ func TestToMarkdownFencedCodeInfoStringIsALanguageOrNothing(t *testing.T) {
 // rest of the attribute in the paragraph as text a renderer parses.
 func TestToMarkdownDestinationCannotExitTheLink(t *testing.T) {
 	got := toMarkdown(`<p><a href=")&#27;[31mRED">x</a></p>`)
-	if got != "[x](%29[31mRED)" {
+	// The sanitizer removes the escape sequence whole, as it does in prose, rather than
+	// leaving its payload in the destination.
+	if got != "[x](%29RED)" {
 		t.Errorf("ToMarkdown = %q", got)
 	}
 	if hasControl(got) {
 		t.Errorf("ToMarkdown = %q carries a control character", got)
 	}
-	if links := renderedLinks(t, got); len(links) != 1 || links[0] != ")[31mRED" {
+	if links := renderedLinks(t, got); len(links) != 1 || links[0] != ")RED" {
 		t.Errorf("rendered links = %q, want the label's own URL, decoded", links)
 	}
 	if text := renderedText(t, got); text != "x" {
@@ -398,6 +400,8 @@ func TestToMarkdownDestinationEncodesNonASCII(t *testing.T) {
 	for _, test := range []struct{ html, want, url string }{
 		{`<a href="https://docs.example.com/資料">the files</a>`, "[the files](https://docs.example.com/%e8%b3%87%e6%96%99)", "https://docs.example.com/資料"},
 		{`<a href="https://docs.example.com/資料">https://docs.example.com/資料</a>`, "[https://docs.example.com/資料](https://docs.example.com/%e8%b3%87%e6%96%99)", "https://docs.example.com/資料"},
+		{"<a href=\"https://docs.example.com/\x1b[31mroom_list\">the rooms</a>", "[the rooms](https://docs.example.com/room_list)", "https://docs.example.com/room_list"},
+		{`<a href="https://docs.example.com/%e8%b3%87">the files</a>`, "[the files](https://docs.example.com/%E8%B3%87)", "https://docs.example.com/資"},
 		{"<a href=\"https://docs.example.com/room\u200b_list\">the rooms</a>", "[the rooms](https://docs.example.com/room_list)", "https://docs.example.com/room_list"},
 	} {
 		got := toMarkdown("<p>" + test.html + "</p>")
