@@ -70,8 +70,8 @@ func TestEscAsksBeforeLosingAMessage(t *testing.T) {
 	if v.CapturingInput() {
 		t.Error("d should discard the message")
 	}
-	if rec.writePath != "" {
-		t.Errorf("discarding should write nothing, got %s %s", rec.writeMethod, rec.writePath)
+	if rec.seen().writePath != "" {
+		t.Errorf("discarding should write nothing, got %s %s", rec.seen().writeMethod, rec.seen().writePath)
 	}
 }
 
@@ -102,15 +102,15 @@ func TestSavingADraftOnTheWayOut(t *testing.T) {
 				t.Error("a saved draft should close the form")
 			}
 
-			if rec.writeMethod != "POST" || rec.writePath != "/messages.json" {
-				t.Fatalf("draft went to %s %s", rec.writeMethod, rec.writePath)
+			if rec.seen().writeMethod != "POST" || rec.seen().writePath != "/messages.json" {
+				t.Fatalf("draft went to %s %s", rec.seen().writeMethod, rec.seen().writePath)
 			}
-			entry, _ := rec.writeBody["entry"].(map[string]any)
-			message, _ := rec.writeBody["message"].(map[string]any)
+			entry, _ := rec.seen().writeBody["entry"].(map[string]any)
+			message, _ := rec.seen().writeBody["message"].(map[string]any)
 			addressed, _ := entry["addressed"].(map[string]any)
 			if entry["status"] != "drafted" || message["subject"] != "Lunch on Friday" ||
 				fmt.Sprint(addressed["directly"]) != "[Jane Doe <jane@example.com>]" {
-				t.Errorf("draft body = %v", rec.writeBody)
+				t.Errorf("draft body = %v", rec.seen().writeBody)
 			}
 		})
 	}
@@ -125,14 +125,14 @@ func TestSavingAReplyDraftFilesItUnderTheEntry(t *testing.T) {
 	if v.CapturingInput() {
 		t.Fatal("a saved reply draft should close the form")
 	}
-	if rec.writePath != "/entries/501/replies.json" {
-		t.Fatalf("reply draft went to %s", rec.writePath)
+	if rec.seen().writePath != "/entries/501/replies.json" {
+		t.Fatalf("reply draft went to %s", rec.seen().writePath)
 	}
-	entry, _ := rec.writeBody["entry"].(map[string]any)
-	message, _ := rec.writeBody["message"].(map[string]any)
+	entry, _ := rec.seen().writeBody["entry"].(map[string]any)
+	message, _ := rec.seen().writeBody["message"].(map[string]any)
 	if entry["status"] != "drafted" || message["subject"] != "Re: Quarterly planning" ||
 		!strings.Contains(fmt.Sprint(message["content"]), "Count me in.") {
-		t.Errorf("reply draft body = %v", rec.writeBody)
+		t.Errorf("reply draft body = %v", rec.seen().writeBody)
 	}
 	_ = form
 }
@@ -143,12 +143,12 @@ func TestSavingAForwardDraftKeepsTheForwardedMessage(t *testing.T) {
 	typeText(v, "morty@example.com")
 	v.HandleContentKey(keyPress("esc"))
 	v.Update(runCmd(v.HandleContentKey(keyPress("s"))))
-	if rec.writePath != "/messages.json" {
-		t.Fatalf("forward draft went to %s", rec.writePath)
+	if rec.seen().writePath != "/messages.json" {
+		t.Fatalf("forward draft went to %s", rec.seen().writePath)
 	}
-	message, _ := rec.writeBody["message"].(map[string]any)
+	message, _ := rec.seen().writeBody["message"].(map[string]any)
 	if message["subject"] != "Fwd: Quarterly planning" || !strings.Contains(fmt.Sprint(message["content"]), "Quoted message") {
-		t.Errorf("forward draft body = %v", rec.writeBody)
+		t.Errorf("forward draft body = %v", rec.seen().writeBody)
 	}
 }
 
@@ -156,7 +156,7 @@ func TestAFailedDraftSaveKeepsTheMessage(t *testing.T) {
 	v, rec := recipientsTestView(t)
 	form := openComposer(t, v)
 	typeText(v, "rick@example.com")
-	rec.failDrafts = true
+	rec.configure(func(r *recipientsRecorder) { r.failDrafts = true })
 	v.HandleContentKey(keyPress("esc"))
 	v.Update(runCmd(v.HandleContentKey(keyPress("s"))))
 	if composeModal(v) != form || form.sending || form.confirmLeave {
@@ -181,7 +181,7 @@ func TestADraftWithAnAddressHEYWouldDropIsNotSaved(t *testing.T) {
 	if composeModal(v) != form || !form.isError || !strings.Contains(form.status, "sam@example") {
 		t.Errorf("the form should stay open naming the address, status %q", form.status)
 	}
-	if rec.writePath != "" {
-		t.Errorf("nothing should have been written, got %s", rec.writePath)
+	if rec.seen().writePath != "" {
+		t.Errorf("nothing should have been written, got %s", rec.seen().writePath)
 	}
 }

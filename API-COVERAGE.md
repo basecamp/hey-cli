@@ -56,6 +56,7 @@ forward answers. The drafts index (`/entries/drafts.json`) pages the same way, w
 | `/contacts/{id}/note.json` | GET | SDK `Contacts().Note` | `hey contact note show`, Contacts TUI | covered |
 | `/contacts/{id}/note.json` | PATCH | SDK `Contacts().SetNote` | `hey contact note set`, Contacts TUI | covered |
 | `/contacts/{id}/note.json` | DELETE | SDK `Contacts().DeleteNote` | `hey contact note delete`, Contacts TUI | covered |
+| `/autocompletable/contacts/addressable.json` | GET | SDK `Contacts().Addressable` | TUI composer's To, Cc and Bcc suggestions (new message, reply, forward) | covered |
 | `/calendars.json` | GET | SDK `Calendars().List` | `hey calendar list` | covered |
 | `/calendars/{id}/recordings.json` | GET | SDK `Calendars().GetRecordings` | `hey event list`, `hey event edit <id>` (reading the event back; with `--occurrence`, the occurrence's day and then the series' first day for its `Calendar::Countdown`), `hey event delete <id>` (checking the id is not a day of a series HEY has written out; with `--occurrence --apply-to future`, the occurrence's day), `hey todo list`, `hey journal list` | covered |
 | `/topics/{id}/entries.json` | GET | SDK `Topics().GetEntriesPage` | `hey thread read <id>`, `hey attachment list <topic-id>`, TUI thread view; `hey reply <topic-id>`, `hey compose --thread-id`, `hey forward <topic-id>` and TUI `r`/`f` when the topic's own page holds no emailed message (`mail.ReplyTarget`) | covered, but see the paging note above |

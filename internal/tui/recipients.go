@@ -29,6 +29,24 @@ type recipientSuggestion struct {
 	// strings without allocating any.
 	name    string
 	address string
+
+	// members is a group's addresses, lower-cased, so that a group already on
+	// the line can be left out the way a person is.
+	members []string
+}
+
+// chosen reports whether the line already holds the row: a person's address,
+// or every one of a group's.
+func (s *recipientSuggestion) chosen(on map[string]bool) bool {
+	if len(s.members) == 0 {
+		return on[s.address]
+	}
+	for _, member := range s.members {
+		if !on[member] {
+			return false
+		}
+	}
+	return true
 }
 
 // group reports whether picking the row adds more than one recipient.
@@ -66,7 +84,11 @@ func newRecipientSuggestions(rows []hey.AddressableRecipient) []recipientSuggest
 		// A group is found by its name. Its members are people of their own, and
 		// matching their addresses would offer "Everyone at …" to anyone typing
 		// the first letters of one colleague.
-		if !suggestion.group() {
+		if suggestion.group() {
+			for _, member := range mail.SplitAddresses(value) {
+				suggestion.members = append(suggestion.members, strings.ToLower(member))
+			}
+		} else {
 			suggestion.address = strings.ToLower(value)
 		}
 		suggestions = append(suggestions, suggestion)
@@ -91,7 +113,7 @@ func matchRecipients(all []recipientSuggestion, query string, chosen map[string]
 	var best, rest []recipientSuggestion
 	for i := range all {
 		row := &all[i]
-		if chosen[row.address] {
+		if row.chosen(chosen) {
 			continue
 		}
 		switch {
@@ -289,13 +311,14 @@ func (f *composeForm) suggestionsView() string {
 		if secondary == name {
 			secondary = ""
 		}
-		nameWidth := min(lipgloss.Width(name), max(inner-len(marker), 1))
+		markerWidth := lipgloss.Width(marker)
+		nameWidth := min(lipgloss.Width(name), max(inner-markerWidth, 1))
 		name = truncateToWidth(name, nameWidth)
 		line := marker + name
 		if i == p.cursor {
 			line = selected.Render(line)
 		}
-		if room := inner - len(marker) - nameWidth - 2; secondary != "" && room > 3 {
+		if room := inner - markerWidth - nameWidth - 2; secondary != "" && room > 3 {
 			line += "  " + styleMuted.Render(truncateToWidth(secondary, room))
 		}
 		rows = append(rows, line)

@@ -42,9 +42,36 @@ type recipientsRecorder struct {
 }
 
 func (r *recipientsRecorder) reads() int {
+	return r.seen().listReads
+}
+
+// recorded is what the server has seen, copied out under the lock so a test
+// never reads a field the handler goroutine is writing.
+type recorded struct {
+	listReads   int
+	includeSelf string
+	writeMethod string
+	writePath   string
+	writeBody   map[string]any
+}
+
+func (r *recipientsRecorder) seen() recorded {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.listReads
+	return recorded{
+		listReads:   r.listReads,
+		includeSelf: r.includeSelf,
+		writeMethod: r.writeMethod,
+		writePath:   r.writePath,
+		writeBody:   r.writeBody,
+	}
+}
+
+// configure changes how the server answers, under the lock the handler reads it with.
+func (r *recipientsRecorder) configure(change func(r *recipientsRecorder)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	change(r)
 }
 
 // recipientsTestView is a mail view whose HEY serves a recipient list, a thread
@@ -156,8 +183,8 @@ func TestComposerReadsTheRecipientListOnceWithItself(t *testing.T) {
 	if rec.reads() != 1 {
 		t.Fatalf("list reads = %d, want 1", rec.reads())
 	}
-	if rec.includeSelf != "true" {
-		t.Errorf("include_self = %q, want true, as the web composer asks", rec.includeSelf)
+	if rec.seen().includeSelf != "true" {
+		t.Errorf("include_self = %q, want true, as the web composer asks", rec.seen().includeSelf)
 	}
 
 	// A second read while the first is on its way is the same read.
@@ -205,9 +232,7 @@ func TestTypingANameSuggestsAndTabAddsThePerson(t *testing.T) {
 	if msg, ok := runCmd(v.HandleContentKey(ctrlS())).(composeSentMsg); !ok || msg.err != nil {
 		t.Fatalf("send = %#v", msg)
 	}
-	rec.mu.Lock()
-	defer rec.mu.Unlock()
-	entry, _ := rec.writeBody["entry"].(map[string]any)
+	entry, _ := rec.seen().writeBody["entry"].(map[string]any)
 	addressed, _ := entry["addressed"].(map[string]any)
 	if fmt.Sprint(addressed["directly"]) != "[Jane Doe <jane@example.com>]" ||
 		fmt.Sprint(addressed["copied"]) != `["Bryan, Annie" <annie@example.com>]` {
@@ -311,6 +336,61 @@ func TestSomeoneAlreadyOnTheLineIsNotSuggestedAgain(t *testing.T) {
 	}
 }
 
+func TestAGroupAlreadyOnTheLineIsNotSuggestedAgain(t *testing.T) {
+	v, _ := recipientsTestView(t)
+	form := openComposer(t, v)
+	typeText(v, "book")
+	v.HandleContentKey(keyPress("tab"))
+	if got := form.inputs[fieldTo].Value(); got != "morty@example.com, summer@example.com, " {
+		t.Fatalf("To = %q", got)
+	}
+	typeText(v, "book")
+	if got := suggestedLabels(form); slices.Contains(got, "Book club") {
+		t.Errorf("every member of Book club is already on the line, suggestions = %q", got)
+	}
+}
+
+// A selected row draws "› " before its name, which is four bytes and two cells.
+// Measuring it in bytes cut the name short the moment the row was selected.
+func TestASelectedRowKeepsItsWholeName(t *testing.T) {
+	// A 42-cell form leaves 26 cells inside the list's frame; after the two-cell
+	// marker that is room for exactly this 24-cell name.
+	name := "Josephine Montgomery-Lee"
+	form := newComposeForm(composeNew, newStyles())
+	form.width = 42
+	form.recipients = newRecipientSuggestions([]hey.AddressableRecipient{{Value: "bart@example.com", Label: name}})
+	form.focus = int(fieldTo)
+	form.inputs[fieldTo].SetValue("bart")
+	form.inputs[fieldTo].CursorEnd()
+	form.refreshSuggestions()
+	if form.suggest == nil {
+		t.Fatal("the list should be open")
+	}
+	if view := form.suggestionsView(); !strings.Contains(view, name) {
+		t.Errorf("the selected row should show the whole name:\n%s", view)
+	}
+}
+
+func TestTheHelpBarFollowsAListThatOpensWhenTheRecipientsArrive(t *testing.T) {
+	m := modelWithBoxes()
+	updated, _ := m.Update(keyPress("c"))
+	m = updated.(model)
+	for _, r := range "jan" {
+		updated, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: r, Text: string(r)}))
+		m = updated.(model)
+	}
+	updated, _ = m.Update(recipientsLoadedMsg{suggestions: newRecipientSuggestions([]hey.AddressableRecipient{
+		{Value: "jane@example.com", Label: "Jane Doe"},
+	})})
+	m = updated.(model)
+	if form := composeModal(m.mailView); form == nil || form.suggest == nil {
+		t.Fatal("the list should open when the recipients arrive mid-word")
+	}
+	if len(m.help.bindings) == 0 || m.help.bindings[0].desc != "choose" {
+		t.Errorf("the help bar should describe the list, got %v", m.help.bindings)
+	}
+}
+
 func TestCcAndBccSuggestToo(t *testing.T) {
 	for _, field := range []composeField{fieldCc, fieldBcc} {
 		v, _ := recipientsTestView(t)
@@ -373,7 +453,7 @@ func TestTypingBeforeTheListArrivesSuggestsWhenItDoes(t *testing.T) {
 
 func TestAFailedListReadLeavesTypingAlone(t *testing.T) {
 	v, rec := recipientsTestView(t)
-	rec.failList = true
+	rec.configure(func(r *recipientsRecorder) { r.failList = true })
 	settle(t, v, v.HandleContentKey(keyPress("c")))
 	form := composeModal(v)
 	typeText(v, "jane@example.com")
@@ -389,9 +469,7 @@ func TestAFailedReadKeepsTheListFromBefore(t *testing.T) {
 	v, rec := recipientsTestView(t)
 	openComposer(t, v)
 	v.modal = nil
-	rec.mu.Lock()
-	rec.failList = true
-	rec.mu.Unlock()
+	rec.configure(func(r *recipientsRecorder) { r.failList = true })
 	form := openComposer(t, v)
 	typeText(v, "rick")
 	if got := suggestedLabels(form); !slices.Equal(got, []string{"Rick Sanchez"}) {
@@ -401,7 +479,9 @@ func TestAFailedReadKeepsTheListFromBefore(t *testing.T) {
 
 func TestSuggestionsAreSanitized(t *testing.T) {
 	v, rec := recipientsTestView(t)
-	rec.addressables = `[["mallory@example.com","Mallory \u001b[31mRed\u001b]8;;https://evil.example.com\u0007 Evil","\u001b[2Jwipe"]]`
+	rec.configure(func(r *recipientsRecorder) {
+		r.addressables = `[["mallory@example.com","Mallory \u001b[31mRed\u001b]8;;https://evil.example.com\u0007 Evil","\u001b[2Jwipe"]]`
+	})
 	form := openComposer(t, v)
 	typeText(v, "mal")
 	view := v.View()
