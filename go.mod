@@ -16,6 +16,7 @@ require (
 	github.com/itchyny/gojq v0.12.19
 	github.com/mattn/go-runewidth v0.0.30
 	github.com/modelcontextprotocol/go-sdk v1.8.0
+	github.com/rivo/uniseg v0.4.7
 	github.com/sigstore/sigstore-go v1.3.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
@@ -94,7 +95,6 @@ require (
 	github.com/oklog/ulid/v2 v2.1.1 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/secure-systems-lab/go-securesystemslib v0.11.0 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect

@@ -1,6 +1,7 @@
 package markdown
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,20 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 )
+
+// decodedDestinations is the destination of every OSC 8 sequence in out, decoded the
+// way linkedRender reports one.
+func decodedDestinations(out string) []string {
+	opens := strings.Split(out, "\x1b]8;")[1:]
+	destinations := make([]string, 0, len(opens))
+	for _, open := range opens {
+		_, rest, _ := strings.Cut(open, ";")
+		uri, _, _ := strings.Cut(rest, "\x07")
+		uri, _, _ = strings.Cut(uri, "\x1b\\")
+		destinations = append(destinations, decodeNonASCII(uri))
+	}
+	return destinations
+}
 
 // visible is what the terminal shows: the output with every escape sequence removed.
 func visible(out string) string {
@@ -315,6 +330,8 @@ func FuzzContainment(f *testing.F) {
 		"![&#27;](/rails/blobs/x.png)",
 		"a\u0085b\u009cc",
 		"pay\u200bpal Z" + strings.Repeat("\u0336", 8) + "algo [https://p\u0430ypal.com](https://evil.example)",
+		`See https://example.com/a\_b?x=1&amp;#27;[31m \~ www.example.com/c\_d tessa\_nolan@example.com`,
+		"| https://example.com/a\\_b\\|c | \\=\\= |\n| --- | --- |",
 	} {
 		f.Add(seed)
 	}
@@ -334,7 +351,9 @@ func FuzzContainment(f *testing.F) {
 			if link.StartLine < 0 || link.EndLine < link.StartLine {
 				t.Fatalf("RenderLinked(%q) returned invalid range %#v", md, link)
 			}
-			if !strings.Contains(linked.Text, ";"+link.Destination+"\a") && !strings.Contains(linked.Text, ";"+link.Destination+"\x1b\\") {
+			// A destination is reported with its non-ASCII decoded, and sits in the
+			// OSC 8 sequence percent-encoded.
+			if !slices.Contains(decodedDestinations(linked.Text), link.Destination) {
 				t.Fatalf("RenderLinked(%q) returned destination %q without a matching OSC 8 occurrence", md, link.Destination)
 			}
 		}
@@ -349,6 +368,16 @@ func FuzzContainment(f *testing.F) {
 			}
 			if uri != "" && !allowedHyperlink(uri) {
 				t.Fatalf("render(%q) = %q links to %q (params %q)", md, out, uri, params)
+			}
+		}
+		// A destination is ASCII on the wire: the ANSI parser glamour and lipgloss share
+		// misreads UTF-8 in one (percentEncodeNonASCII). That holds for what Render is
+		// handed — ToMarkdown's output, whose destinations are encoded — and not for the
+		// raw Markdown render takes in this package's tests.
+		for _, open := range strings.Split(linked.Text, "\x1b]8;")[1:] {
+			sequence, _, _ := strings.Cut(open, "\x07")
+			if !isASCII(sequence) {
+				t.Fatalf("RenderLinked(ToMarkdown(%q)) has a hyperlink that is not ASCII: %q", md, sequence)
 			}
 		}
 	})

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/url"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -316,13 +317,15 @@ func TestToMarkdownFencedCodeInfoStringIsALanguageOrNothing(t *testing.T) {
 // rest of the attribute in the paragraph as text a renderer parses.
 func TestToMarkdownDestinationCannotExitTheLink(t *testing.T) {
 	got := toMarkdown(`<p><a href=")&#27;[31mRED">x</a></p>`)
-	if got != "[x](%29[31mRED)" {
+	// The sanitizer removes the escape sequence whole, as it does in prose, rather than
+	// leaving its payload in the destination.
+	if got != "[x](%29RED)" {
 		t.Errorf("ToMarkdown = %q", got)
 	}
 	if hasControl(got) {
 		t.Errorf("ToMarkdown = %q carries a control character", got)
 	}
-	if links := renderedLinks(t, got); len(links) != 1 || links[0] != ")[31mRED" {
+	if links := renderedLinks(t, got); len(links) != 1 || links[0] != ")RED" {
 		t.Errorf("rendered links = %q, want the label's own URL, decoded", links)
 	}
 	if text := renderedText(t, got); text != "x" {
@@ -392,6 +395,71 @@ func TestToMarkdownAutolinkOnlyForAbsoluteURLs(t *testing.T) {
 	}
 }
 
+// A destination's non-ASCII is written percent-encoded, which is the same address, and
+// what the sanitizer removes — a zero width space — is gone rather than encoded.
+func TestToMarkdownDestinationEncodesNonASCII(t *testing.T) {
+	for _, test := range []struct{ html, want, url string }{
+		{`<a href="https://docs.example.com/資料">the files</a>`, "[the files](https://docs.example.com/%e8%b3%87%e6%96%99)", "https://docs.example.com/資料"},
+		{`<a href="https://docs.example.com/資料">https://docs.example.com/資料</a>`, "[https://docs.example.com/資料](https://docs.example.com/%e8%b3%87%e6%96%99)", "https://docs.example.com/資料"},
+		{"<a href=\"https://docs.example.com/\x1b[31mroom_list\">the rooms</a>", "[the rooms](https://docs.example.com/room_list)", "https://docs.example.com/room_list"},
+		{`<a href="https://docs.example.com/%e8%b3%87">the files</a>`, "[the files](https://docs.example.com/%E8%B3%87)", "https://docs.example.com/資"},
+		{`<a href="https://docs.example.com/a%7cb">the list</a>`, "[the list](https://docs.example.com/a%7Cb)", "https://docs.example.com/a|b"},
+		{"<a href=\"https://docs.example.com/room\u200b_list\">the rooms</a>", "[the rooms](https://docs.example.com/room_list)", "https://docs.example.com/room_list"},
+	} {
+		got := toMarkdown("<p>" + test.html + "</p>")
+		if got != test.want {
+			t.Errorf("%s: ToMarkdown = %q, want %q", test.html, got, test.want)
+		}
+		if links := renderedLinks(t, got); len(links) != 1 || links[0] != test.url {
+			t.Errorf("%s: rendered links = %q, want %q", test.html, links, test.url)
+		}
+	}
+}
+
+// HTML allows an anchor around a table cell that holds another anchor, which LinkedIn
+// sends; CommonMark cannot hold a link in a link, so the outer one writes only what it
+// holds and its brackets and URL are not left on screen as text.
+func TestToMarkdownNestedAnchorsLeaveNoBracketsBehind(t *testing.T) {
+	const url = "https://jobs.example.com/search?trk=main~module~text"
+	got := toMarkdown(`<table><tr><td><a href="` + url + `"><table><tr><td><a href="` + url + `">View job openings</a></td></tr></table></a></td></tr></table>`)
+	if (strings.Contains(got, "](") && strings.Count(got, "](") != 1) || strings.Contains(got, "[[") {
+		t.Errorf("ToMarkdown = %q, want one link and no nested brackets", got)
+	}
+	if links := renderedLinks(t, got); len(links) != 1 || links[0] != url {
+		t.Errorf("rendered links = %q, want %q once", links, url)
+	}
+	if text := renderedText(t, got); strings.Contains(text, "](") || strings.Contains(text, url) {
+		t.Errorf("rendered = %q, want just the label", text)
+	}
+}
+
+// An image linked inside a nested anchor keeps its own destination.
+func TestToMarkdownNestedAnchorKeepsAnInnerLinkedImage(t *testing.T) {
+	got := toMarkdown(`<table><tr><td><a href="https://jobs.example.com/listing"><table><tr><td><a href="https://jobs.example.com/company"><img src="https://images.example.com/logo.png" alt="Harbour Ferries"></a></td></tr></table></a></td></tr></table>`)
+	if links := renderedLinks(t, got); !slices.Contains(links, "https://jobs.example.com/company") || slices.Contains(links, "https://jobs.example.com/listing") {
+		t.Errorf("ToMarkdown = %q links %q, want the image linked to the company page", got, links)
+	}
+}
+
+// An autolink's entities are decoded by some renderers and read verbatim by others, so
+// a link that is its own URL, with an entity spelled out in that URL, is written as a
+// link whose destination every renderer decodes alike — and still reads as the URL.
+func TestToMarkdownSelfLabelledLinkWithAnEntityLinksTheURL(t *testing.T) {
+	for _, test := range []struct{ html, url string }{
+		{`<a href="https://legacy.example.com/view?a=1&amp;copy;=2">https://legacy.example.com/view?a=1&amp;copy;=2</a>`, "https://legacy.example.com/view?a=1&copy;=2"},
+		{`<a href="https://legacy.example.com/view?a=1&amp;amp;b=2"></a>`, "https://legacy.example.com/view?a=1&amp;b=2"},
+		{`<a href="/rails/blobs/view?a=1&amp;copy;=2">/rails/blobs/view?a=1&amp;copy;=2</a>`, "/rails/blobs/view?a=1&copy;=2"},
+	} {
+		got := toMarkdown("<p>" + test.html + "</p>")
+		if links := renderedLinks(t, got); len(links) != 1 || links[0] != test.url {
+			t.Errorf("%s: ToMarkdown = %q links %q, want %q", test.html, got, links, test.url)
+		}
+		if text := renderedText(t, got); text != test.url {
+			t.Errorf("%s: ToMarkdown = %q shows %q, want %q", test.html, got, text, test.url)
+		}
+	}
+}
+
 // A label that reads as one URL or host while pointing at another never collapses
 // into an autolink: the destination is written beside the label, where it can be
 // compared. That holds for a homoglyph host as much as an honest one — the Cyrillic
@@ -407,7 +475,7 @@ func TestToMarkdownDeceptiveLabelShowsTheDestination(t *testing.T) {
 		{"a www host", "www.bank.example", "https://evil.example", "[www.bank.example](https://evil.example)"},
 		{"a bare host and path", "bank.example/login", "https://evil.example/login", "[bank.example/login](https://evil.example/login)"},
 		{"the same host, a different path", "https://bank.example/", "https://bank.example/login", "[https://bank.example/](https://bank.example/login)"},
-		{"a label that is its href", homoglyphHost, homoglyphHost, "<" + homoglyphHost + ">"},
+		{"a label that is its href", homoglyphHost, homoglyphHost, "[" + homoglyphHost + "](https://p%d0%b0ypal.com/login)"},
 	} {
 		got := toMarkdown(`<p><a href="` + test.href + `">` + test.label + `</a></p>`)
 		if got != test.want {

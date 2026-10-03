@@ -228,7 +228,14 @@ handed. The model has three layers, and it is worth knowing which one a change t
   delimiters longer than any run they hold; destinations percent-encode what would end
   them, keep a query string's `&`, and link only http, https, mailto and relative paths.
   Prose goes through `terminal.Sanitize` first and is written in that form; code and destinations strip controls and are measured through the sanitizer (`backtickRun`, `needsPadding`). `markdown.Render` then strips controls and bidi controls from the body, rewrites the
-  spans glamour decodes so that its extra entity decode is the identity, shows a
+  spans glamour decodes so that its extra entity decode is the identity (and spells
+  `\~` and `\=`, which glamour does not unescape, as character references), finds every
+  bare link itself, by GFM's rules, before glamour wraps, and hands it over as an
+  autolink (`wholeBareLinks` — glamour's linkify matches the escaped source and starts
+  only after a space, `*`, `_`, `~` or `(`, so it stopped at `\_`, opened `&amp;`, and
+  left `<https://…>` to `LinkifyURLs`, which sees wrapped output), keeps every
+  hyperlink's destination ASCII (non-ASCII percent-encoded — the shared ANSI parser
+  reads its UTF-8 as C1 controls — and decoded again in the text shown), shows a
   document nested past twenty levels unrendered rather than handing glamour something
   exponential, and checks its own output: anything but SGR and OSC 8 to an allowed scheme strips all
   styling rather than guessing. That last check is a backstop, not the guarantee — an

@@ -492,7 +492,13 @@ func (m *markdownizer) code(n *html.Node) {
 func (m *markdownizer) link(n *html.Node) {
 	href := getAttr(n, "href")
 	dest, linkable := destination(href)
-	if linkable && strings.TrimSpace(elementText(n)) == "" {
+	// A link inside a link is one CommonMark cannot hold — the outer brackets would be
+	// left on screen with their URL as text — and HTML allows it inside a table cell,
+	// where LinkedIn wraps a whole cell in one anchor around another. The inner links
+	// carry the destinations, an inner linked image included, so the outer anchor
+	// writes only what it holds.
+	nested := containsAnchor(n)
+	if linkable && !nested && strings.TrimSpace(elementText(n)) == "" {
 		if image, sole := soleLinkedImage(n); sole {
 			// The anchor may own the whitespace between it and its neighbours, so
 			// it is kept the way inline keeps it — around a decorative anchor too,
@@ -510,9 +516,17 @@ func (m *markdownizer) link(n *html.Node) {
 	}
 	m.inline(n, func(text string) string {
 		switch {
-		case !linkable:
+		case !linkable || nested:
 			return text
 		case text == "" || strings.TrimSpace(elementText(n)) == strings.TrimSpace(href):
+			// An autolink shows its destination as written, so one destination
+			// changed on the way — an entity, which some renderers decode in an
+			// autolink and others (goldmark, and so glamour) read verbatim, or
+			// non-ASCII, which is percent-encoded — is linked under its own URL as
+			// the label instead, and a reader sees the address the email showed.
+			if strings.Contains(dest, "&amp;") || !isASCII(href) {
+				return "[" + escapeText(strings.TrimSpace(href), m.line.String()) + "](" + dest + ")"
+			}
 			if absolute(dest) {
 				return "<" + dest + ">"
 			}
@@ -521,6 +535,16 @@ func (m *markdownizer) link(n *html.Node) {
 			return "[" + text + "](" + dest + ")"
 		}
 	})
+}
+
+// containsAnchor reports whether an anchor holds another anchor.
+func containsAnchor(n *html.Node) bool {
+	for child := n.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type == html.ElementNode && child.Data == "a" || containsAnchor(child) {
+			return true
+		}
+	}
+	return false
 }
 
 // soleLinkedImage returns the one image that is an anchor's whole content. The second
