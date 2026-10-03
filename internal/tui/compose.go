@@ -520,6 +520,9 @@ func (f *composeForm) leaveView() string {
 	key := lipgloss.NewStyle().Foreground(colorActive).Bold(true)
 	body := "Keep it as a draft to finish later, here or in HEY?\n\n" +
 		key.Render("s") + " save draft   " + key.Render("d") + " discard   " + key.Render("esc") + " keep editing"
+	// The frame only fits its title to the screen, so the question and the
+	// choices wrap to the room inside it, or a narrow terminal cuts them off.
+	body = lipgloss.NewStyle().Width(modalContentWidth(f.width)).Render(body)
 	return modalFrame("Close this message?", body, f.width)
 }
 

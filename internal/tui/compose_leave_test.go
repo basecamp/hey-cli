@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestEscClosesAFormWithNothingToLose(t *testing.T) {
@@ -201,6 +203,26 @@ func TestAPasteWaitsForTheQuestionAndTheSave(t *testing.T) {
 	message, _ := rec.seen().writeBody["message"].(map[string]any)
 	if content := fmt.Sprint(message["content"]); !strings.Contains(content, "Lunch on Friday?") || strings.Contains(content, "Noon") {
 		t.Errorf("the draft should be the message as it was when saved, got %q", content)
+	}
+}
+
+// The close question wraps to a narrow terminal rather than run off its edge.
+func TestTheCloseQuestionFitsANarrowTerminal(t *testing.T) {
+	form := newComposeForm(composeNew, newStyles())
+	for _, width := range []int{40, 30} {
+		form.width = width
+		dialog := form.leaveView()
+		for _, line := range strings.Split(dialog, "\n") {
+			if w := lipgloss.Width(line); w > width {
+				t.Errorf("at %d columns a line of the question is %d wide: %q", width, w, line)
+			}
+		}
+		plain := ansi.Strip(dialog)
+		for _, want := range []string{"save draft", "discard", "keep editing"} {
+			if !strings.Contains(strings.Join(strings.Fields(plain), " "), want) {
+				t.Errorf("at %d columns the question lost %q:\n%s", width, want, plain)
+			}
+		}
 	}
 }
 
