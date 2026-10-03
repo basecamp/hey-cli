@@ -72,7 +72,10 @@ const (
 	nonASCIIInPath = nonASCIIInLink + `|[` + wideOpeners + wideClosers + `]`
 	// bareHost is a name ending in a top-level domain of letters or punycode, or an
 	// IPv4 address — tried in that order, so 192.0.2.1.example.com is a name.
-	bareHost = `(?:(?:[-a-zA-Z0-9@:%._\+~#=]|` + nonASCIIInLink + `){1,256}\.(?:(?i:xn--)[a-zA-Z0-9-]+|(?:[a-zA-Z]|\p{L})+)|(?:\d{1,3}\.){3}\d{1,3})`
+	bareHost = `(?:(?:[-a-zA-Z0-9@:%._\+~#=]|` + nonASCIIInLink + `){1,256}\.(?:(?i:xn--)[a-zA-Z0-9-]+|(?:[a-zA-Z]|\p{L})+)|(?:` + octet + `\.){3}` + octet + `)`
+
+	// octet is one number of an IPv4 address, 0 to 255.
+	octet    = `(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)`
 	barePath = `(?:[-a-zA-Z0-9@:%_+*.~#$!?&/=\(\);,'\^{}\[\]` + "`" + `]|` + nonASCIIInPath + `)*`
 )
 
@@ -579,10 +582,16 @@ func wholeHost(pattern *regexp.Regexp, s string, i int) string {
 	if m == nil {
 		return ""
 	}
-	if m[2] == "" && continuesWord(s[i+len(m[1]):]) {
+	if rest := s[i+len(m[1]):]; m[2] == "" && (continuesWord(rest) || continuesNumber(rest)) {
 		return ""
 	}
 	return m[0]
+}
+
+// continuesNumber reports whether s starts with a dot and a digit — more of an IPv4-shaped
+// host than the address matched, 192.0.2.1 of 192.0.2.1.2.
+func continuesNumber(s string) bool {
+	return len(s) > 1 && s[0] == '.' && s[1] >= '0' && s[1] <= '9'
 }
 
 // continuesWord reports whether s starts with what would carry on the word before it: a

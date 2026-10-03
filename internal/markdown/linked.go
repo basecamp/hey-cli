@@ -75,7 +75,7 @@ func linkedRender(out string, selected int) LinkedRender {
 								// its label and one or more underlined spans for the shown
 								// destination. Only those destination spans complete the
 								// occurrence. A plain fallback URL has no style prefix.
-								if !currentShownDestination && (precededByUnderline(out, i) || !strings.Contains(content, "\x1b") && sameURL(content, destination)) {
+								if !currentShownDestination && (precededByUnderline(out, i) || (!strings.Contains(content, "\x1b") && sameURL(content, destination))) {
 									currentShownDestination = true
 								}
 								if currentShownDestination {
