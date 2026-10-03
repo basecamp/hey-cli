@@ -284,6 +284,18 @@ func TestRenderLinksBareURLsWhole(t *testing.T) {
 			[]string{"https://docs.example.com/%E2%98%80é"},
 		},
 		{
+			"addresses at non-ASCII domains",
+			`<p>Write to jane@dept.example.公司 or jane@www.例子.example.org today</p>`,
+			"jane@dept.example.公司 or jane@www.例子.example.org today",
+			nil,
+		},
+		{
+			"a replacement character in its path",
+			"<p>See https://docs.example.com/\ufffd_v2 today</p>",
+			"https://docs.example.com/\ufffd_v2 today",
+			[]string{"https://docs.example.com/\ufffd_v2"},
+		},
+		{
 			"a www address",
 			`<p>Tickets at www.ferries.example.com/harbour_line?day=2&amp;seats=6 today</p>`,
 			"http://www.ferries.example.com/harbour_line?day=2&seats=6 today",
@@ -451,6 +463,24 @@ func TestFindBareLinksInALongUnspacedParagraphIsLinear(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatalf("findBareLinks did not finish within 5s for %d links", links)
+	}
+}
+
+// One run of text full of @s is one address to decline, read once.
+func TestFindBareLinksInALongRunOfAtSignsIsLinear(t *testing.T) {
+	run := strings.Repeat("jane@", 100_000) + "example.org"
+	found := make(chan int, 1)
+	go func() {
+		_, declined := findBareLinks(run)
+		found <- len(declined)
+	}()
+	select {
+	case n := <-found:
+		if n != 100_000 {
+			t.Errorf("declined %d @s, want 100000", n)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("findBareLinks did not finish within 5s for a run of 100000 @s")
 	}
 }
 

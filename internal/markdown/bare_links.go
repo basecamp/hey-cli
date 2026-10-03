@@ -426,7 +426,7 @@ func decodedUnits(run string) []decodedUnit {
 			for k := range size {
 				encoded[k] = unhex(run[i+3*k+1])<<4 | unhex(run[i+3*k+2])
 			}
-			if r, n := utf8.DecodeRune(encoded); r != utf8.RuneError && n == size && shownInLink(r) {
+			if r, n := utf8.DecodeRune(encoded); n == size && shownInLink(r) {
 				units = append(units, decodedUnit{string(r), size})
 				i += 3 * size
 				continue
@@ -504,28 +504,40 @@ func findBareLinks(s string) (links []bareLink, declined []int) {
 	// claimed is every address, linked or declined, in order: a URL inside one —
 	// devi*rao@www.example.org — is part of it, and goes with it.
 	var addresses, claimed []bareLink
-	next := 0 // the first URL that does not end before the address being checked
-	for _, match := range bareEmail.FindAllStringIndex(s, -1) {
-		start, end := match[0], match[1]
+	next := 0    // the first URL that does not end before the address being checked
+	settled := 0 // where the last address checked ends; nothing before it is looked at again
+	for at := strings.IndexByte(s, '@'); at >= 0; at = nextAt(s, at) {
+		if at < settled {
+			continue
+		}
+		// The address is the whole run of address-shaped text around the @, and it is
+		// linked only when GFM's pattern reads all of it: devi*rao@, éjane@,
+		// jane@example.orgé and jane@dept.example.公司 are each declined as a whole
+		// rather than linked as the different address the pattern could read.
+		start, end := addressAround(s, at, settled)
 		for next < len(urls) && urls[next].end <= start {
 			next++
 		}
-		// An address with more to it than GFM matches — devi*rao@, éjane@, or a host
-		// that runs on into more letters — is left alone rather than linked as the
-		// different address the matched part would be.
 		// An address inside a URL is the URL's; one that starts where a www. match
 		// does — www.jane@example.org — is an address.
 		if next < len(urls) && urls[next].start < start {
+			settled = at + 1
 			continue
 		}
-		if start > 0 && strings.IndexByte(otherLocalPart, s[start-1]) >= 0 ||
-			continuesWordBackwards(s[:start]) || continuesWord(s[end:]) {
-			declined = append(declined, start+strings.IndexByte(s[start:end], '@'))
-			claimed = append(claimed, bareLink{start: start, end: end})
-			continue
-		}
-		addresses = append(addresses, bareLink{start, end, s[start:end]})
+		settled = end
 		claimed = append(claimed, bareLink{start: start, end: end})
+		if match := bareEmail.FindStringIndex(s[start:end]); match != nil && match[0] == 0 && match[1] == end-start {
+			addresses = append(addresses, bareLink{start, end, s[start:end]})
+			continue
+		}
+		for sign := start + strings.IndexByte(s[start:end], '@'); sign >= start; {
+			declined = append(declined, sign)
+			following := strings.IndexByte(s[sign+1:end], '@')
+			if following < 0 {
+				break
+			}
+			sign += following + 1
+		}
 	}
 	// An address that starts before a URL holds it — jane@www.example.com is an
 	// address at a www host — so the URL gives way to it. Both lists are in order, so
@@ -543,6 +555,42 @@ func findBareLinks(s string) (links []bareLink, declined []int) {
 	links = append(links, addresses...)
 	sort.Slice(links, func(i, j int) bool { return links[i].start < links[j].start })
 	return links, declined
+}
+
+// nextAt is the next @ in s after the one at at, or -1.
+func nextAt(s string, at int) int {
+	next := strings.IndexByte(s[at+1:], '@')
+	if next < 0 {
+		return -1
+	}
+	return at + 1 + next
+}
+
+// addressAround is the run of address-shaped text around the @ at at, looking no further
+// back than from: a local part of letters, digits and marks in any script and what a
+// local part may hold, and a host of letters, digits, marks, dots, - and _, less the
+// dot a sentence ends with.
+func addressAround(s string, at, from int) (start, end int) {
+	start = at
+	for start > from {
+		r, size := utf8.DecodeLastRuneInString(s[from:start])
+		if !unicode.In(r, unicode.L, unicode.M, unicode.N) && !strings.ContainsRune(".+_-"+otherLocalPart, r) {
+			break
+		}
+		start -= size
+	}
+	end = at + 1
+	for end < len(s) {
+		r, size := utf8.DecodeRuneInString(s[end:])
+		if !unicode.In(r, unicode.L, unicode.M, unicode.N) && !strings.ContainsRune(".-_", r) && r != '@' {
+			break
+		}
+		end += size
+	}
+	for end > at+1 && s[end-1] == '.' {
+		end--
+	}
+	return start, end
 }
 
 // linked is links less those urlAt declined.
@@ -648,12 +696,6 @@ func continuesNumber(s string) bool {
 func continuesWord(s string) bool {
 	r, _ := utf8.DecodeRuneInString(s)
 	return s != "" && (r == '-' || r == '_' || unicode.In(r, unicode.L, unicode.M, unicode.N))
-}
-
-// continuesWordBackwards reports whether s ends in a letter, a digit or a mark.
-func continuesWordBackwards(s string) bool {
-	r, _ := utf8.DecodeLastRuneInString(s)
-	return s != "" && unicode.In(r, unicode.L, unicode.M, unicode.N)
 }
 
 // cutAtUnopenedBracket ends a link at the first non-ASCII closing bracket it did not
