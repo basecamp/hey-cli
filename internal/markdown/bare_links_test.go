@@ -554,6 +554,22 @@ func TestLinkifyURLsPastRejectedFragmentsIsLinear(t *testing.T) {
 	}
 }
 
+// Many links glamour already made are each read once, whatever ends their sequences.
+func TestLinkifyURLsPastManyHyperlinksIsLinear(t *testing.T) {
+	linked := strings.Repeat(Hyperlink("the plan", "https://docs.example.com/plan")+" ", 100_000)
+	text := linked + "https://docs.example.com/room_list"
+	done := make(chan string, 1)
+	go func() { done <- LinkifyURLs(text) }()
+	select {
+	case got := <-done:
+		if !strings.HasPrefix(got, linked) || !strings.HasSuffix(got, Hyperlink("https://docs.example.com/room_list", "https://docs.example.com/room_list")) {
+			t.Errorf("LinkifyURLs changed the links it was given or missed the room list: …%q", got[max(0, len(got)-120):])
+		}
+	case <-time.After(linearBound):
+		t.Fatalf("LinkifyURLs did not finish within %v past 100000 hyperlinks", linearBound)
+	}
+}
+
 // A run of text full of prefixes that never become a link is read once, not once per
 // prefix, and a real link after them is still found.
 func TestFindBareLinksPastRejectedPrefixesIsLinear(t *testing.T) {

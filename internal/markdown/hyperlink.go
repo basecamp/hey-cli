@@ -91,16 +91,15 @@ func newLinkState(text string) *linkState {
 // parameters — given that no later call asks about an earlier position.
 func (l *linkState) inside(pos int) bool {
 	for l.next < pos {
-		end := strings.IndexByte(l.text[l.next:], '\a')
-		if st := strings.Index(l.text[l.next:], "\x1b\\"); st >= 0 && (end < 0 || st < end) {
-			end = st + 1
-		}
-		if end < 0 || pos <= l.next+end {
+		// hyperlinkEnd stops at the sequence's own terminator, BEL or ST, so each
+		// sequence is read once; one with none is taken to run on.
+		end, terminator := hyperlinkEnd(l.text[l.next:])
+		if end < 0 || pos < l.next+end+terminator {
 			return true
 		}
-		_, uri, _ := strings.Cut(strings.TrimRight(l.text[l.next+len("\x1b]8;"):l.next+end], "\x1b"), ";")
+		_, uri, _ := strings.Cut(l.text[l.next+len("\x1b]8;"):l.next+end], ";")
 		l.open = uri != ""
-		l.next = nextHyperlink(l.text, l.next+end+1)
+		l.next = nextHyperlink(l.text, l.next+end+terminator)
 	}
 	return l.open
 }
