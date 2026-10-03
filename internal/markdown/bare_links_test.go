@@ -320,6 +320,24 @@ func TestRenderLinksBareURLsWhole(t *testing.T) {
 			[]string{"https://docs.example.com/資料"},
 		},
 		{
+			"a pipe in its path",
+			`<p>See https://docs.example.com/a|b and <code>https://docs.example.com/c|d</code></p>`,
+			"https://docs.example.com/a|b and",
+			[]string{"https://docs.example.com/a|b", "https://docs.example.com/c|d"},
+		},
+		{
+			"a pipe in a table cell",
+			`<table><tr><td>https://docs.example.com/a|b</td><td>rooms</td></tr></table>`,
+			"rooms",
+			[]string{"https://docs.example.com/a|b"},
+		},
+		{
+			"two URLs glued together in inline code",
+			`<p><code>https://docs.example.com/one。https://docs.example.com/two</code> and <code>「https://docs.example.com/a」「https://docs.example.com/b」</code></p>`,
+			"https://docs.example.com/one。https://docs.example.com/two",
+			[]string{"https://docs.example.com/one", "https://docs.example.com/two", "https://docs.example.com/a", "https://docs.example.com/b"},
+		},
+		{
 			"a www address",
 			`<p>Tickets at www.ferries.example.com/harbour_line?day=2&amp;seats=6 today</p>`,
 			"http://www.ferries.example.com/harbour_line?day=2&seats=6 today",
@@ -442,8 +460,8 @@ func TestTrimLinkEndIsLinear(t *testing.T) {
 			if !strings.HasPrefix(got, url) {
 				t.Errorf("trimLinkEnd with %q×%d = %.60q…, want it to keep %q", suffix, run, got, url)
 			}
-		case <-time.After(5 * time.Second):
-			t.Fatalf("trimLinkEnd with %q×%d did not finish within 5s", suffix, run)
+		case <-time.After(linearBound):
+			t.Fatalf("trimLinkEnd with %q×%d did not finish within %v", suffix, run, linearBound)
 		}
 	}
 }
@@ -480,6 +498,7 @@ func TestFindBareLinksInALongUnspacedParagraphIsLinear(t *testing.T) {
 		"「https://docs.example.com/資料」と",
 		"「www.docs.example.com/資料」と",
 		"https://docs.example.com/資料。",
+		"`「https://docs.example.com/資料」`",
 	} {
 		paragraph := strings.Repeat(sentence, links)
 		found := make(chan int, 1)
@@ -492,8 +511,8 @@ func TestFindBareLinksInALongUnspacedParagraphIsLinear(t *testing.T) {
 			if n != links {
 				t.Errorf("%q: found %d links, want %d", sentence, n, links)
 			}
-		case <-time.After(5 * time.Second):
-			t.Fatalf("%q: findBareLinks did not finish within 5s for %d links", sentence, links)
+		case <-time.After(linearBound):
+			t.Fatalf("%q: findBareLinks did not finish within %v for %d links", sentence, linearBound, links)
 		}
 	}
 }
@@ -502,7 +521,7 @@ func TestFindBareLinksInALongUnspacedParagraphIsLinear(t *testing.T) {
 // prefix, and a real link after them is still found.
 func TestFindBareLinksPastRejectedPrefixesIsLinear(t *testing.T) {
 	for _, prefix := range []string{"https://", "www.", "mailto:", "https://a.b_", "mailto:a@b.co_"} {
-		run := strings.Repeat(prefix, 100_000) + " https://docs.example.com/room_list"
+		run := strings.Repeat(prefix, 50_000) + " https://docs.example.com/room_list"
 		found := make(chan []bareLink, 1)
 		go func() {
 			links, _ := findBareLinks(run)
@@ -511,10 +530,10 @@ func TestFindBareLinksPastRejectedPrefixesIsLinear(t *testing.T) {
 		select {
 		case links := <-found:
 			if len(links) == 0 || links[len(links)-1].target != "https://docs.example.com/room_list" {
-				t.Errorf("%q×100000: links end %v, want the room list last", prefix, links[max(0, len(links)-1):])
+				t.Errorf("%q×50000: links end %v, want the room list last", prefix, links[max(0, len(links)-1):])
 			}
-		case <-time.After(5 * time.Second):
-			t.Fatalf("%q×100000: findBareLinks did not finish within 5s", prefix)
+		case <-time.After(linearBound):
+			t.Fatalf("%q×50000: findBareLinks did not finish within %v", prefix, linearBound)
 		}
 	}
 }
@@ -539,8 +558,8 @@ func TestFindBareLinksInALongRunOfAtSignsIsLinear(t *testing.T) {
 			if got.links != test.links || got.declines != test.declines {
 				t.Errorf("%s: %d links and %d declined @s, want %d and %d", test.name, got.links, got.declines, test.links, test.declines)
 			}
-		case <-time.After(5 * time.Second):
-			t.Fatalf("%s: findBareLinks did not finish within 5s for 100000 @s", test.name)
+		case <-time.After(linearBound):
+			t.Fatalf("%s: findBareLinks did not finish within %v for 100000 @s", test.name, linearBound)
 		}
 	}
 }

@@ -7,12 +7,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// reBareURL matches bare http/https URLs not already inside an OSC 8 sequence. A
-// space ends one in any script: glamour pads inline code with no-break spaces, and a
-// URL that ran on into them would open with them on the end. The scheme is matched in
-// any case, and what follows is trimmed by trimLinkEnd, the rule bare links in prose
-// end by too.
-var reBareURL = regexp.MustCompile(`(?i:https?)://[^\s\p{Z}\x1b\x07<>"\x00-\x1f]+`)
+// reScheme is where a bare http or https URL starts, in any case.
+var reScheme = regexp.MustCompile(`(?i:https?)://`)
 
 // Hyperlink wraps text in an OSC 8 terminal hyperlink sequence, returning it
 // unchanged when there is no URL to link to. The destination's non-ASCII is
@@ -26,25 +22,35 @@ func Hyperlink(text, url string) string {
 }
 
 // LinkifyURLs wraps bare URLs in OSC 8 hyperlink sequences, leaving URLs that
-// already sit inside one alone.
+// already sit inside one alone. A URL ends where a bare link in prose would — at the
+// end of its run of text (linkTokenEnd: a space, a control, punctuation outside ASCII, a
+// wide bracket it did not open), then at what a link's end sheds — and the search for
+// the next one carries on from there, so https://…/one。https://…/two is two links. The
+// run's end is found once and kept for the URLs after the first in it.
 func LinkifyURLs(text string) string {
 	var b strings.Builder
-	last := 0
-	for _, loc := range reBareURL.FindAllStringIndex(text, -1) {
-		start := loc[0]
+	last, run := 0, 0
+	for at := 0; ; {
+		loc := reScheme.FindStringIndex(text[at:])
+		if loc == nil {
+			break
+		}
+		start := at + loc[0]
+		at += loc[1]
 		if insideHyperlink(text[:start]) {
 			continue
 		}
-		// The URL ends where a bare link in prose would: at its run of text's end
-		// (linkTokenEnd), then at what a link's end sheds.
-		match := text[start:loc[1]]
-		url := trimLinkEnd(match[:linkTokenEnd(match)])
-		if url == "" {
+		if start >= run {
+			run = start + linkTokenEnd(text[start:])
+		}
+		url := trimLinkEnd(cutAtUnopenedBracket(text[start:run]))
+		if len(url) <= loc[1]-loc[0] {
 			continue
 		}
 		b.WriteString(text[last:start])
 		b.WriteString(Hyperlink(url, url))
 		last = start + len(url)
+		at = last
 	}
 	if last == 0 {
 		return text

@@ -76,7 +76,7 @@ const (
 
 	// octet is one number of an IPv4 address, 0 to 255.
 	octet    = `(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)`
-	barePath = `(?:[-a-zA-Z0-9@:%_+*.~#$!?&/=\(\);,'\^{}\[\]` + "`" + `]|` + nonASCIIInPath + `)*`
+	barePath = `(?:[-a-zA-Z0-9@:%_+*.~#$!?&/=\(\);,'\^{}\[\]|` + "`" + `]|` + nonASCIIInPath + `)*`
 )
 
 // replacement swaps the source between start and stop for text.
@@ -178,10 +178,13 @@ func bareLinksIn(source []byte, start, stop int) []replacement {
 		return nil
 	}
 	plain, at := unescapeProse(run)
+	// A | — which a path may hold — would end a table cell, so percentEncodeNonASCII
+	// writes it as the escape restoreNonASCIILinks shows as | again.
 	var found []replacement
 	links, declined := findBareLinks(string(plain))
 	for _, link := range links {
 		if target := percentEncodeNonASCII(link.target); autolinks(target) {
+
 			found = append(found, replacement{start + at[link.start], start + at[link.end], "<" + target + ">"})
 		}
 	}
@@ -203,17 +206,18 @@ func bareLinksIn(source []byte, start, stop int) []replacement {
 // text glamour shows. The encoding is lowercase hex, which the RFC allows and almost
 // nothing writes — and an escape the URL already had in lowercase is written in
 // uppercase, the same address, so that what is decoded afterwards is only ever what
-// was encoded here.
+// was encoded here. A | is encoded the same way: a bare link's destination is written
+// into a table cell as it is, where a raw one would end the cell.
 func percentEncodeNonASCII(s string) string {
 	s = encodedNonASCII.ReplaceAllStringFunc(s, strings.ToUpper)
-	if isASCII(s) {
+	if isASCII(s) && !strings.Contains(s, "|") {
 		return s
 	}
 	const digits = "0123456789abcdef"
 	var b strings.Builder
 	b.Grow(len(s) * 3)
 	for i := range len(s) {
-		if c := s[i]; c >= utf8.RuneSelf {
+		if c := s[i]; c >= utf8.RuneSelf || c == '|' {
 			b.Write([]byte{'%', digits[c>>4], digits[c&0x0f]})
 		} else {
 			b.WriteByte(c)
@@ -222,9 +226,9 @@ func percentEncodeNonASCII(s string) string {
 	return b.String()
 }
 
-// encodedNonASCII is a run of lowercase percent-encoded bytes at or above 0x80, as
-// percentEncodeNonASCII writes them.
-var encodedNonASCII = regexp.MustCompile(`(?:%[89a-f][0-9a-f])+`)
+// encodedNonASCII is a run of lowercase percent-encoded bytes at or above 0x80, and of
+// %7c for a |, as percentEncodeNonASCII writes them.
+var encodedNonASCII = regexp.MustCompile(`(?:%[89a-f][0-9a-f]|%7c)+`)
 
 // restoreNonASCIILinks decodes, in the text of each hyperlink glamour wrote — never in
 // its destination — what percentEncodeNonASCII encoded. Only the destination glamour
@@ -411,6 +415,11 @@ type decodedUnit struct {
 func decodedUnits(run string) []decodedUnit {
 	units := make([]decodedUnit, 0, len(run)/3)
 	for i := 0; i+2 < len(run); {
+		if run[i:i+3] == "%7c" {
+			units = append(units, decodedUnit{"|", 1})
+			i += 3
+			continue
+		}
 		lead := unhex(run[i+1])<<4 | unhex(run[i+2])
 		size := 0
 		switch {
@@ -625,13 +634,14 @@ func urlAt(s string, i int, run *int) (bareLink, bool) {
 	}
 	// Only an ASCII letter or digit in front keeps a link from starting — xhttps:// is
 	// not a scheme — since Chinese and Japanese put no space before one: 詳細はhttps://…
-	if i > 0 && isAlphanumeric(s[i-1:i]) || !startsLink(s[i:]) {
+	if i > 0 && isAlphanumeric(s[i-1:i]) {
 		return bareLink{}, false
 	}
-	// Whether a link starts here is settled within its first kilobyte — a host is at
-	// most 256 characters and an address not much more — before anything reads further.
-	if probe := s[i:min(len(s), i+linkProbe)]; !mailtoURI.MatchString(probe) &&
-		!bareURL.MatchString(probe) && !bareWWW.MatchString(probe) {
+	// Whether a link starts here is settled within its first few hundred bytes — a host
+	// is at most 256 characters and an address not much more — by the one pattern its
+	// prefix calls for, before anything reads further.
+	pattern := linkPattern(s[i:])
+	if pattern == nil || !pattern.MatchString(s[i:min(len(s), i+linkProbe)]) {
 		return bareLink{}, false
 	}
 	// A link is matched within the run of text it sits in and no further: Chinese and
@@ -671,22 +681,30 @@ func urlAt(s string, i int, run *int) (bareLink, bool) {
 	return bareLink{}, false
 }
 
-// linkProbe is how much of the text a candidate link is first matched in.
-const linkProbe = 1024
+// linkProbe is how much of the text a candidate link is first matched in: enough for a
+// scheme, a 256-character host and a port, or for mailto: and an address.
+const linkProbe = 384
 
-// startsLink reports whether s starts the way a URL, a www. address or a mailto: URI
-// does, in any case.
-func startsLink(s string) bool {
-	for _, prefix := range []string{"http://", "https://", "ftp://", "www.", "mailto:"} {
-		if len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix) {
-			return true
-		}
+// linkPattern is the pattern for the link s starts the way of — a URL, a www. address
+// or a mailto: URI, its prefix in any case — or nil.
+func linkPattern(s string) *regexp.Regexp {
+	hasPrefix := func(prefix string) bool {
+		return len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix)
 	}
-	return false
+	switch {
+	case hasPrefix("http://"), hasPrefix("https://"), hasPrefix("ftp://"):
+		return bareURL
+	case hasPrefix("www."):
+		return bareWWW
+	case hasPrefix("mailto:"):
+		return mailtoURI
+	default:
+		return nil
+	}
 }
 
 // linkTokenEnd is where the run of text a link sits in ends: at a space, at what ends a
-// link in any form, at punctuation outside ASCII — the 。 or 、 a sentence goes on after —
+// link in any form or a control, at punctuation outside ASCII — the 。 or 、 a sentence goes on after —
 // or at a wide closing bracket the run did not open. It stops there
 // rather than running to the end of the paragraph and being cut afterwards: Chinese and
 // Japanese put no spaces between sentences, and a paragraph of many links would be
@@ -695,7 +713,7 @@ func linkTokenEnd(s string) int {
 	var open [9]int
 	for i, r := range s {
 		switch {
-		case unicode.IsSpace(r) || strings.ContainsRune(`<>"`, r):
+		case unicode.IsSpace(r) || r < 0x20 || r == 0x7f || strings.ContainsRune(`<>"`, r):
 			return i
 		case r < utf8.RuneSelf:
 		default:

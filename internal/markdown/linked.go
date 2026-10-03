@@ -172,7 +172,7 @@ func canonicalEscapes(s string) string {
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		switch {
-		case c >= utf8.RuneSelf:
+		case c >= utf8.RuneSelf || c == '|':
 			b.Write([]byte{'%', digits[c>>4], digits[c&0x0f]})
 		case c == '%' && i+2 < len(s) && isHex(s[i+1]) && isHex(s[i+2]):
 			b.WriteByte('%')
