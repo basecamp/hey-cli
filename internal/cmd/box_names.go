@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"context"
 	"strings"
 
 	"github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 // boxNames is what hey box answers an unknown box with: the one short spelling of each box
@@ -52,8 +54,12 @@ var searchInValues = map[string]string{
 // every box and searches them on their own.
 const searchTrash = "trash"
 
-// searchInValue turns any spelling of a box search can narrow to into the value HEY reads.
-func searchInValue(name string) (string, error) {
+// resolveSearchIn turns any spelling of a box search can narrow to into the value HEY
+// reads. A spelling boxKindFor does not know is looked up in the box list, by the name or
+// kind HEY serves, the way hey box and hey move find a box: a renamed Imbox is still the
+// Imbox. That list is read only for such a name, and a box found there is searched only
+// if its kind is one search can narrow to.
+func resolveSearchIn(ctx context.Context, name string) (string, error) {
 	kind := boxKindFor(name)
 	if kind == searchTrash {
 		return searchTrash, nil
@@ -61,10 +67,33 @@ func searchInValue(name string) (string, error) {
 	if value, ok := searchInValues[kind]; ok {
 		return value, nil
 	}
-	return "", apierr.ErrUsageHint(
-		"--in must be imbox, feed, papertrail, or trash",
-		"A box's kind or name works too, such as feedbox or \"Paper Trail\". Search cannot narrow to Set Aside, Reply Later or Bubble Up.",
-	)
+	switch kind {
+	case hey.BoxKindSetAside, hey.BoxKindLater, hey.BoxKindBubbleUp:
+		return "", errSearchIn(searchInHint)
+	}
+
+	boxes, err := sdk.Boxes().List(ctx)
+	if err != nil {
+		return "", apierr.FromSDK(err)
+	}
+	if boxes != nil {
+		for _, box := range *boxes {
+			if boxKindFor(box.Kind) != kind && boxKindFor(box.Name) != kind {
+				continue
+			}
+			if value, ok := searchInValues[boxKindFor(box.Kind)]; ok {
+				return value, nil
+			}
+			return "", errSearchIn(terminal.SanitizeLine(box.Name) + " is a box search cannot narrow to. " + searchInHint)
+		}
+	}
+	return "", errSearchIn(searchInHint)
+}
+
+const searchInHint = "A box's kind or name works too, such as feedbox, \"Paper Trail\" or a name you gave one of those boxes. Search cannot narrow to Set Aside, Reply Later or Bubble Up."
+
+func errSearchIn(hint string) *apierr.Error {
+	return apierr.ErrUsageHint("--in must be imbox, feed, papertrail, or trash", hint)
 }
 
 // errBoxNotFound names the spellings a box can be given in, since a script that picked

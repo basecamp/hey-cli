@@ -77,7 +77,7 @@ func newSearchCommand() *searchCommand {
 	flags.StringVar(&searchCommand.to, "to", "", "Recipient name or email address")
 	flags.StringVar(&searchCommand.subject, "subject", "", "Words in the subject")
 	flags.StringVar(&searchCommand.date, "date", "", "Date range: last_7_days, last_30_days, last_90_days, or year")
-	flags.StringVar(&searchCommand.in, "in", "", "Box: imbox, feed, papertrail, or trash (a box's kind or name works too)")
+	flags.StringVar(&searchCommand.in, "in", "", "Box: imbox, feed, papertrail, or trash (or the kind or name of one of those three boxes)")
 	flags.StringVar(&searchCommand.label, "label", "", "Label name")
 	flags.StringVar(&searchCommand.attachment, "attachment", "", "Attachment kind: any, images, pdfs, calendar_invites, documents, spreadsheets, presentations, media, or zip_files")
 	flags.IntVar(&searchCommand.page, "page", 1, "Results page")
@@ -98,6 +98,13 @@ func (c *searchCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	if err := validateSearchParams(&params); err != nil {
 		return err
+	}
+	if params.In != "" {
+		in, err := resolveSearchIn(cmd.Context(), params.In)
+		if err != nil {
+			return err
+		}
+		params.In = in
 	}
 
 	read := searchPageReader(params)
@@ -165,8 +172,8 @@ func hasSearchCriteria(params hey.SearchParams) bool {
 		params.Date != "" || params.In != "" || params.Label != "" || params.Attachment != ""
 }
 
-// validateSearchParams refuses what HEY would misread before anything is sent, and
-// rewrites --in to the value HEY reads for whichever spelling of the box it was given.
+// validateSearchParams refuses what HEY would misread before anything is sent. --in is
+// resolved after it by resolveSearchIn, which may have to read the box list.
 func validateSearchParams(params *hey.SearchParams) error {
 	if params.Page < 1 {
 		return apierr.ErrUsage("--page must be at least 1")
@@ -179,13 +186,6 @@ func validateSearchParams(params *hey.SearchParams) error {
 				return apierr.ErrUsage("--date must be last_7_days, last_30_days, last_90_days, or a four-digit year beginning with 20")
 			}
 		}
-	}
-	if params.In != "" {
-		in, err := searchInValue(params.In)
-		if err != nil {
-			return err
-		}
-		params.In = in
 	}
 	// HEY answers an unrecognized attachment kind with a 500, and the kinds are plural:
 	// the search filters call them pdfs, images, zip_files.

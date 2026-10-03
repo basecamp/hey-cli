@@ -64,27 +64,55 @@ func readBoxPage(ctx context.Context, client *hey.Client, source Source, cursor 
 }
 
 func readBox(ctx context.Context, client *hey.Client, source Source, page string) (*generated.BoxShowResponse, error) {
+	if box, named, err := ReadNamedBox(ctx, client, source.BoxKind, page); named {
+		return box, err
+	}
+
 	var cursor *string
 	if page != "" {
 		cursor = &page
 	}
+	return client.Boxes().Get(ctx, source.ID, &generated.GetBoxParams{Page: cursor})
+}
 
-	switch source.BoxKind {
-	case hey.BoxKindImbox:
-		return client.Boxes().GetImbox(ctx, &generated.GetImboxParams{Page: cursor})
-	case hey.BoxKindFeed:
-		return client.Boxes().GetFeedbox(ctx, &generated.GetFeedboxParams{Page: cursor})
-	case hey.BoxKindTrail:
-		return client.Boxes().GetTrailbox(ctx, &generated.GetTrailboxParams{Page: cursor})
-	case hey.BoxKindSetAside:
-		return client.Boxes().GetAsidebox(ctx, &generated.GetAsideboxParams{Page: cursor})
-	case hey.BoxKindLater:
-		return client.Boxes().GetLaterbox(ctx, &generated.GetLaterboxParams{Page: cursor})
-	case hey.BoxKindBubbleUp:
-		return client.Boxes().GetBubblebox(ctx, &generated.GetBubbleboxParams{Page: cursor})
-	default:
-		return client.Boxes().Get(ctx, source.ID, &generated.GetBoxParams{Page: cursor})
+// ReadNamedBox reads the page of a box HEY serves on a route of its own, which pages the
+// box in its own order, beginning at the page cursor (empty for the first page). named is
+// false, and nothing is read, for a kind with no route of its own: only /boxes/{id}
+// serves that one. This is the one table of those routes, so hey box's first page and
+// every page after it come from the same place.
+func ReadNamedBox(ctx context.Context, client *hey.Client, kind, page string) (box *generated.BoxShowResponse, named bool, err error) {
+	read, named := namedBoxRoutes[kind]
+	if !named {
+		return nil, false, nil
 	}
+
+	var cursor *string
+	if page != "" {
+		cursor = &page
+	}
+	box, err = read(ctx, client.Boxes(), cursor)
+	return box, true, err
+}
+
+var namedBoxRoutes = map[string]func(context.Context, *hey.BoxesService, *string) (*generated.BoxShowResponse, error){
+	hey.BoxKindImbox: func(ctx context.Context, boxes *hey.BoxesService, page *string) (*generated.BoxShowResponse, error) {
+		return boxes.GetImbox(ctx, &generated.GetImboxParams{Page: page})
+	},
+	hey.BoxKindFeed: func(ctx context.Context, boxes *hey.BoxesService, page *string) (*generated.BoxShowResponse, error) {
+		return boxes.GetFeedbox(ctx, &generated.GetFeedboxParams{Page: page})
+	},
+	hey.BoxKindTrail: func(ctx context.Context, boxes *hey.BoxesService, page *string) (*generated.BoxShowResponse, error) {
+		return boxes.GetTrailbox(ctx, &generated.GetTrailboxParams{Page: page})
+	},
+	hey.BoxKindSetAside: func(ctx context.Context, boxes *hey.BoxesService, page *string) (*generated.BoxShowResponse, error) {
+		return boxes.GetAsidebox(ctx, &generated.GetAsideboxParams{Page: page})
+	},
+	hey.BoxKindLater: func(ctx context.Context, boxes *hey.BoxesService, page *string) (*generated.BoxShowResponse, error) {
+		return boxes.GetLaterbox(ctx, &generated.GetLaterboxParams{Page: page})
+	},
+	hey.BoxKindBubbleUp: func(ctx context.Context, boxes *hey.BoxesService, page *string) (*generated.BoxShowResponse, error) {
+		return boxes.GetBubblebox(ctx, &generated.GetBubbleboxParams{Page: page})
+	},
 }
 
 // ReadSeenPage reads a page of the Imbox's Previously Seen postings, which HEY serves on

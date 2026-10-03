@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
-	"github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/mail"
@@ -83,7 +82,7 @@ func newBoxReaderCommand(use, short, long, example string) *boxCommand {
 		Short: short,
 		Long:  long,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts a box's short name (imbox, feed, papertrail, setaside, replylater, bubbleup), kind (feedbox, trailbox, …) or display name in any case, or a numeric ID. hey search --in and hey move --to take the same spellings, but not every box: search narrows only to imbox, feed and papertrail (plus trash), and move takes a box ID or any box but bubbleup (use hey bubble up). Trash is not a box: search it with hey search --in trash and move threads there with hey trash. Returns email threads. Use topic_id with hey thread read, reply, and forward; use id with seen, unseen, and move. A row with kind \"bundle\" groups one sender's unseen threads and has no topic_id: list them with hey bundle view <id>, and every thread with that sender via hey contact threads <contact-id>. --page continues from the next_page cursor of an earlier listing of the same box.",
+			"agent_notes": "Accepts a box's short name (imbox, feed, papertrail, setaside, replylater, bubbleup), kind (feedbox, trailbox, …) or display name (including one the user gave the box) in any case, or a numeric ID. hey search --in and hey move --to take the same spellings, but not every box: search narrows only to imbox, feed and papertrail (plus trash) and refuses anything else as a usage error, and move takes a box ID or any box but bubbleup (use hey bubble up). An unknown name is not_found here and in move. Trash is not a box: search it with hey search --in trash and move threads there with hey trash. Returns email threads. Use topic_id with hey thread read, reply, and forward; use id with seen, unseen, and move. A row with kind \"bundle\" groups one sender's unseen threads and has no topic_id: list them with hey bundle view <id>, and every thread with that sender via hey contact threads <contact-id>. --page continues from the next_page cursor of an earlier listing of the same box.",
 		},
 		Example: example,
 		RunE:    command.run,
@@ -170,11 +169,11 @@ func resolveBox(ctx context.Context, nameOrID, page string) (*generated.BoxShowR
 	}
 
 	if id, err := strconv.ParseInt(nameOrID, 10, 64); err == nil {
-		return resolveBoxByID(ctx, id, cursor)
+		return resolveBoxByID(ctx, id, page)
 	}
 
 	kind := boxKindFor(nameOrID)
-	if resp, named, err := readNamedBox(ctx, kind, cursor); named {
+	if resp, named, err := readNamedBox(ctx, kind, page); named {
 		return resp, err
 	}
 
@@ -203,7 +202,7 @@ func resolveBox(ctx context.Context, nameOrID, page string) (*generated.BoxShowR
 // pages after the first are read there whatever the first came from (mail.ReadPage
 // dispatches on the kind), and /boxes/{id} orders the Feed, the Paper Trail and Bubble Up
 // differently, so a first page read by ID would repeat or skip threads on the second.
-func resolveBoxByID(ctx context.Context, id int64, cursor *string) (*generated.BoxShowResponse, error) {
+func resolveBoxByID(ctx context.Context, id int64, page string) (*generated.BoxShowResponse, error) {
 	result, err := sdk.Boxes().List(ctx)
 	if err != nil {
 		return nil, apierr.FromSDK(err)
@@ -212,7 +211,7 @@ func resolveBoxByID(ctx context.Context, id int64, cursor *string) (*generated.B
 	if result != nil {
 		for _, b := range *result {
 			if b.Id == id {
-				if resp, named, readErr := readNamedBox(ctx, b.Kind, cursor); named {
+				if resp, named, readErr := readNamedBox(ctx, b.Kind, page); named {
 					return resp, readErr
 				}
 				break
@@ -220,6 +219,10 @@ func resolveBoxByID(ctx context.Context, id int64, cursor *string) (*generated.B
 		}
 	}
 
+	var cursor *string
+	if page != "" {
+		cursor = &page
+	}
 	resp, err := sdk.Boxes().Get(ctx, id, &generated.GetBoxParams{Page: cursor})
 	if err != nil {
 		return nil, apierr.FromSDK(err)
@@ -227,27 +230,13 @@ func resolveBoxByID(ctx context.Context, id int64, cursor *string) (*generated.B
 	return resp, nil
 }
 
-// readNamedBox reads a box HEY has a route of its own for, which pages the box in its own
-// order. named is false for any other kind, which only /boxes/{id} serves.
-func readNamedBox(ctx context.Context, kind string, cursor *string) (resp *generated.BoxShowResponse, named bool, err error) {
-	switch kind {
-	case hey.BoxKindImbox:
-		resp, err = sdk.Boxes().GetImbox(ctx, &generated.GetImboxParams{Page: cursor})
-	case hey.BoxKindFeed:
-		resp, err = sdk.Boxes().GetFeedbox(ctx, &generated.GetFeedboxParams{Page: cursor})
-	case hey.BoxKindTrail:
-		resp, err = sdk.Boxes().GetTrailbox(ctx, &generated.GetTrailboxParams{Page: cursor})
-	case hey.BoxKindSetAside:
-		resp, err = sdk.Boxes().GetAsidebox(ctx, &generated.GetAsideboxParams{Page: cursor})
-	case hey.BoxKindLater:
-		resp, err = sdk.Boxes().GetLaterbox(ctx, &generated.GetLaterboxParams{Page: cursor})
-	case hey.BoxKindBubbleUp:
-		resp, err = sdk.Boxes().GetBubblebox(ctx, &generated.GetBubbleboxParams{Page: cursor})
-	default:
-		return nil, false, nil
-	}
+// readNamedBox reads a box HEY has a route of its own for, through the same table
+// mail.ReadPage reads its later pages from. named is false for any other kind, which only
+// /boxes/{id} serves.
+func readNamedBox(ctx context.Context, kind, page string) (*generated.BoxShowResponse, bool, error) {
+	resp, named, err := mail.ReadNamedBox(ctx, sdk, kind, page)
 	if err != nil {
-		return nil, true, apierr.FromSDK(err)
+		return nil, named, apierr.FromSDK(err)
 	}
-	return resp, true, nil
+	return resp, named, nil
 }

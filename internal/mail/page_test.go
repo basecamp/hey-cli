@@ -197,6 +197,19 @@ func TestReadSeenPageRefusesACursorlessURL(t *testing.T) {
 	}
 }
 
+// A box with no route of its own is left to /boxes/{id}: ReadNamedBox says so without
+// reading anything, which is how hey box knows to look the box up in the list instead.
+func TestReadNamedBoxReadsNothingForAnUnnamedKind(t *testing.T) {
+	client := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected request %s", r.URL)
+	})
+
+	box, named, err := ReadNamedBox(context.Background(), client, "receipts", "")
+	if named || box != nil || err != nil {
+		t.Errorf("ReadNamedBox(receipts) = %v, %v, %v; want nothing read", box, named, err)
+	}
+}
+
 // A kind nobody taught this package about is a bug, not a box.
 func TestReadPageRefusesAnUnknownKind(t *testing.T) {
 	client := testClient(t, func(w http.ResponseWriter, r *http.Request) {
