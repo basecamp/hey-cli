@@ -90,6 +90,54 @@ func TestRenderLinksBareURLsWhole(t *testing.T) {
 			[]string{"https://notes.example.com/tags/harbour_☕"},
 		},
 		{
+			"angle brackets around it",
+			`<p>Unsubscribe: &lt;https://lists.example.org/options/announce?token=8f2c1a9e&gt;</p>`,
+			"<https://lists.example.org/options/announce?token=8f2c1a9e>",
+			[]string{"https://lists.example.org/options/announce?token=8f2c1a9e"},
+		},
+		{
+			"a label with no space after it",
+			`<p>Link:https://docs.example.com/room_list and "https://docs.example.com/ferry_times"</p>`,
+			`Link:https://docs.example.com/room_list and "https://docs.example.com/ferry_times"`,
+			[]string{"https://docs.example.com/room_list", "https://docs.example.com/ferry_times"},
+		},
+		{
+			"a sender's address in a reply header",
+			`<p>On Tuesday, Jane Smith &lt;jane.smith@example.org&gt; wrote:</p>`,
+			"Jane Smith <jane.smith@example.org> wrote:",
+			[]string{"mailto:jane.smith@example.org"},
+		},
+		{
+			"a mailto: address",
+			`<p>Replies to mailto:offsite@example.org please.</p>`,
+			"mailto:offsite@example.org please.",
+			[]string{"mailto:offsite@example.org"},
+		},
+		{
+			"a semicolon, a quote and a bracket after it",
+			`<p>See https://docs.example.com/room_list; https://docs.example.com/ferry' and [https://docs.example.com/pier]</p>`,
+			"https://docs.example.com/room_list; https://docs.example.com/ferry' and [https://docs.example.com/pier]",
+			[]string{"https://docs.example.com/room_list", "https://docs.example.com/ferry", "https://docs.example.com/pier"},
+		},
+		{
+			"entity-shaped text after it",
+			`<p>See https://docs.example.com/room_list&amp;nbsp; today</p>`,
+			"https://docs.example.com/room_list&nbsp; today",
+			[]string{"https://docs.example.com/room_list"},
+		},
+		{
+			"an uppercase scheme",
+			`<p>VISIT HTTPS://DOCS.EXAMPLE.COM/ROOM_LIST TODAY</p>`,
+			"HTTPS://DOCS.EXAMPLE.COM/ROOM_LIST TODAY",
+			[]string{"HTTPS://DOCS.EXAMPLE.COM/ROOM_LIST"},
+		},
+		{
+			"an address GFM would match only part of",
+			`<p>Write to devi*rao@example.com or o'brien@example.com</p>`,
+			"devi*rao@example.com or o'brien@example.com",
+			[]string{"mailto:o'brien@example.com"},
+		},
+		{
 			"a www address",
 			`<p>Tickets at www.ferries.example.com/harbour_line?day=2&amp;seats=6 today</p>`,
 			"http://www.ferries.example.com/harbour_line?day=2&seats=6 today",
@@ -169,13 +217,27 @@ func TestRenderLinksBareURLsWhole(t *testing.T) {
 	}
 }
 
-// A link glamour finds whole by itself is left for it to find, and a body with nothing
-// link-shaped in it is not parsed for links at all.
-func TestWholeBareLinksLeavesWhatGlamourReadsWhole(t *testing.T) {
+// A bare link longer than the line it starts on is found before glamour wraps it, so
+// every line of it opens the whole URL — LinkifyURLs, which sees the wrapped output,
+// linked the first line of a mailing list's footer and opened it without its token.
+func TestRenderLinksAWrappedBareURLWhole(t *testing.T) {
+	const url = "https://lists.example.org/mailman/options/announce/jane.smith%40example.com?token=8f2c1a9e4b7d6c3a"
+	linked := RenderLinked(htmlutil.ToMarkdown(`<p>To unsubscribe: &lt;`+url+`&gt;</p>`), 60, -1)
+	if len(linked.Links) != 1 || linked.Links[0].Destination != url {
+		t.Fatalf("links = %#v, want one link to %q", linked.Links, url)
+	}
+	if linked.Links[0].EndLine <= linked.Links[0].StartLine {
+		t.Errorf("line range = %d-%d, want the link to wrap", linked.Links[0].StartLine, linked.Links[0].EndLine)
+	}
+}
+
+// Code, a link's label and an image's alt text hold no bare links, and an address GFM
+// would match only part of is not linked as the different address that part is.
+func TestWholeBareLinksLeavesWhatIsNotABareLink(t *testing.T) {
 	for _, md := range []string{
-		"See https://docs.example.com/offsite/plan today",
-		"Write to tessa@example.com about rooms",
 		`Nothing to link \~ here, \_ none \*`,
+		"Not an address: devi\\*rao@example.com or o'brien@example.com",
+		"Not a host: https://localhost/admin",
 		"[the plan](https://docs.example.com/harbour_offsite)",
 		"`https://staging.example.com/api_v2`",
 		"![https://images.example.com/pier\\_photo](https://images.example.com/pier_photo.png)",
@@ -192,7 +254,13 @@ func TestWholeBareLinksWritesAutolinks(t *testing.T) {
 		`See https://docs.example.com/harbour\_offsite now`:            "See <https://docs.example.com/harbour_offsite> now",
 		`See www.ferries.example.com/harbour\_line now`:                "See <http://www.ferries.example.com/harbour_line> now",
 		`Write to tessa\_nolan@example.com now`:                        "Write to <tessa_nolan@example.com> now",
-		`\\https://docs.example.com/a\_b`:                              `\\https://docs.example.com/a\_b`,
+		`\\https://docs.example.com/a\_b`:                              `\\<https://docs.example.com/a_b>`,
+		"See https://docs.example.com/offsite/plan today":              "See <https://docs.example.com/offsite/plan> today",
+		`Footer: \<https://lists.example.org/options?token=8f2c\>`:     `Footer: \<<https://lists.example.org/options?token=8f2c>\>`,
+		`Jane Smith \<jane@example.org\> wrote:`:                       `Jane Smith \<<jane@example.org>\> wrote:`,
+		`Write to jane@www.example.org today`:                          "Write to <jane@www.example.org> today",
+		`See https://docs.example.com/list?owner=jane@example.org now`: "See <https://docs.example.com/list?owner=jane@example.org> now",
+		`Write to mailto:jane@example.org today`:                       "Write to <mailto:jane@example.org> today",
 		"| https://docs.example.com/a\\_b | x |\n| --- | --- |":        "| <https://docs.example.com/a_b> | x |\n| --- | --- |",
 	} {
 		if got := wholeBareLinks(md); got != want {

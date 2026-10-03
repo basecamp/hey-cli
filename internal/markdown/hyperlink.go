@@ -3,17 +3,16 @@ package markdown
 import (
 	"regexp"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
 )
 
 // reBareURL matches bare http/https URLs not already inside an OSC 8 sequence. A
 // space ends one in any script: glamour pads inline code with no-break spaces, and a
-// URL that ran on into them would open with them on the end. Trailing punctuation is
-// trimmed by trimURL to preserve balanced parentheses.
-var reBareURL = regexp.MustCompile(`https?://[^\s\p{Z}\x1b\x07<>"\x00-\x1f]+`)
+// URL that ran on into them would open with them on the end. The scheme is matched in
+// any case, and what follows is trimmed by trimLinkEnd, the rule bare links in prose
+// end by too.
+var reBareURL = regexp.MustCompile(`(?i:https?)://[^\s\p{Z}\x1b\x07<>"\x00-\x1f]+`)
 
 // Hyperlink wraps text in an OSC 8 terminal hyperlink sequence, returning it
 // unchanged when there is no URL to link to.
@@ -35,7 +34,7 @@ func LinkifyURLs(text string) string {
 		if insideHyperlink(text[:start]) {
 			continue
 		}
-		url := trimURL(text[start:loc[1]])
+		url := trimLinkEnd(text[start:loc[1]])
 		if url == "" {
 			continue
 		}
@@ -62,31 +61,6 @@ func sanitizeURL(url string) string {
 		}
 		return r
 	}, url)
-}
-
-// trimURL trims trailing punctuation from a URL match while preserving
-// balanced parentheses (e.g., Wikipedia URLs). Punctuation outside ASCII — a
-// closing curly quote, a guillemet, an ellipsis — is never the end of a URL
-// either, and is trimmed with the rest.
-func trimURL(url string) string {
-	for len(url) > 0 {
-		switch url[len(url)-1] {
-		case '.', ',', ';', ':', '!', '?', '\'', ']', '`':
-			url = url[:len(url)-1]
-		case ')':
-			if strings.Count(url, "(") >= strings.Count(url, ")") {
-				return url
-			}
-			url = url[:len(url)-1]
-		default:
-			last, size := utf8.DecodeLastRuneInString(url)
-			if last < utf8.RuneSelf || !unicode.IsPunct(last) {
-				return url
-			}
-			url = url[:len(url)-size]
-		}
-	}
-	return url
 }
 
 // insideHyperlink reports whether the text following prefix is part of an
