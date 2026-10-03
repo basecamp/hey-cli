@@ -3,13 +3,17 @@ package markdown
 import (
 	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
 )
 
-// reBareURL matches bare http/https URLs not already inside an OSC 8 sequence.
-// Trailing punctuation is trimmed by trimURL to preserve balanced parentheses.
-var reBareURL = regexp.MustCompile(`https?://[^\s\x1b\x07<>"\x00-\x1f]+`)
+// reBareURL matches bare http/https URLs not already inside an OSC 8 sequence. A
+// space ends one in any script: glamour pads inline code with no-break spaces, and a
+// URL that ran on into them would open with them on the end. Trailing punctuation is
+// trimmed by trimURL to preserve balanced parentheses.
+var reBareURL = regexp.MustCompile(`https?://[^\s\p{Z}\x1b\x07<>"\x00-\x1f]+`)
 
 // Hyperlink wraps text in an OSC 8 terminal hyperlink sequence, returning it
 // unchanged when there is no URL to link to.
@@ -61,7 +65,9 @@ func sanitizeURL(url string) string {
 }
 
 // trimURL trims trailing punctuation from a URL match while preserving
-// balanced parentheses (e.g., Wikipedia URLs).
+// balanced parentheses (e.g., Wikipedia URLs). Punctuation outside ASCII — a
+// closing curly quote, a guillemet, an ellipsis — is never the end of a URL
+// either, and is trimmed with the rest.
 func trimURL(url string) string {
 	for len(url) > 0 {
 		switch url[len(url)-1] {
@@ -73,7 +79,11 @@ func trimURL(url string) string {
 			}
 			url = url[:len(url)-1]
 		default:
-			return url
+			last, size := utf8.DecodeLastRuneInString(url)
+			if last < utf8.RuneSelf || !unicode.In(last, unicode.P, unicode.S) {
+				return url
+			}
+			url = url[:len(url)-size]
 		}
 	}
 	return url

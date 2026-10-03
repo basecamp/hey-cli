@@ -315,6 +315,8 @@ func FuzzContainment(f *testing.F) {
 		"![&#27;](/rails/blobs/x.png)",
 		"a\u0085b\u009cc",
 		"pay\u200bpal Z" + strings.Repeat("\u0336", 8) + "algo [https://p\u0430ypal.com](https://evil.example)",
+		`See https://example.com/a\_b?x=1&amp;#27;[31m \~ www.example.com/c\_d tessa\_nolan@example.com`,
+		"| https://example.com/a\\_b\\|c | \\=\\= |\n| --- | --- |",
 	} {
 		f.Add(seed)
 	}

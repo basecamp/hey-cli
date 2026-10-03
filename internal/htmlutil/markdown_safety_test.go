@@ -392,6 +392,25 @@ func TestToMarkdownAutolinkOnlyForAbsoluteURLs(t *testing.T) {
 	}
 }
 
+// An autolink's entities are decoded by some renderers and read verbatim by others, so
+// a link that is its own URL, with an entity spelled out in that URL, is written as a
+// link whose destination every renderer decodes alike — and still reads as the URL.
+func TestToMarkdownSelfLabelledLinkWithAnEntityLinksTheURL(t *testing.T) {
+	for _, test := range []struct{ html, url string }{
+		{`<a href="https://legacy.example.com/view?a=1&amp;copy;=2">https://legacy.example.com/view?a=1&amp;copy;=2</a>`, "https://legacy.example.com/view?a=1&copy;=2"},
+		{`<a href="https://legacy.example.com/view?a=1&amp;amp;b=2"></a>`, "https://legacy.example.com/view?a=1&amp;b=2"},
+		{`<a href="/rails/blobs/view?a=1&amp;copy;=2">/rails/blobs/view?a=1&amp;copy;=2</a>`, "/rails/blobs/view?a=1&copy;=2"},
+	} {
+		got := toMarkdown("<p>" + test.html + "</p>")
+		if links := renderedLinks(t, got); len(links) != 1 || links[0] != test.url {
+			t.Errorf("%s: ToMarkdown = %q links %q, want %q", test.html, got, links, test.url)
+		}
+		if text := renderedText(t, got); text != test.url {
+			t.Errorf("%s: ToMarkdown = %q shows %q, want %q", test.html, got, text, test.url)
+		}
+	}
+}
+
 // A label that reads as one URL or host while pointing at another never collapses
 // into an autolink: the destination is written beside the label, where it can be
 // compared. That holds for a homoglyph host as much as an honest one — the Cyrillic

@@ -46,7 +46,7 @@ var sourceParser = goldmark.New(goldmark.WithExtensions(extension.GFM, extension
 // way glamour would count it.
 func prepareSource(md string) (safe, forGlamour string, deep bool) {
 	safe = stripControls(md)
-	forGlamour, depth := neutralizeEntities(safe)
+	forGlamour, depth := neutralizeEntities(wholeBareLinks(safe))
 	return safe, forGlamour, depth > maxNestingDepth
 }
 
@@ -96,7 +96,7 @@ const (
 func neutralizeEntities(md string) (string, int) {
 	source := []byte(md)
 	spans, depth := textSpans(sourceParser.Parser().Parse(text.NewReader(source)))
-	if !strings.Contains(md, "&") {
+	if !strings.ContainsAny(md, `&\`) {
 		return md, depth
 	}
 	sort.Slice(spans, func(i, j int) bool { return spans[i].start < spans[j].start })
@@ -177,10 +177,18 @@ func underImage(n ast.Node) bool {
 // five characters it reads as. Alt text glamour shows as written, so the one decode
 // ToMarkdown's "&amp;" needs is done here, and only that one: nothing else in alt text
 // is touched, so an entity the email spelled out stays the characters it was.
+//
+// glamour resolves backslash escapes from a list of its own rather than CommonMark's,
+// and the list has no "\~" or "\=" — both of which ToMarkdown writes, the first before
+// every tilde in prose — so it shows the backslash. Those two are written as the
+// character references for the same characters instead, which glamour's decode turns
+// back into a tilde or an equals sign that no parser then sees as syntax. An escaped
+// backslash is matched first and kept, so that "\\~" stays a backslash and a tilde.
 var (
 	codeAmpersands = strings.NewReplacer("&", "&amp;")
-	textAmpersands = strings.NewReplacer("&amp;", "&amp;", `\&`, "&amp;", "&", "&amp;")
-	altAmpersands  = strings.NewReplacer("&amp;", "&")
+	textAmpersands = strings.NewReplacer(`\\`, `\\`, `\~`, "&#126;", `\=`, "&#61;",
+		"&amp;", "&amp;", `\&`, "&amp;", "&", "&amp;")
+	altAmpersands = strings.NewReplacer(`\\`, `\\`, `\~`, "~", `\=`, "=", "&amp;", "&")
 )
 
 func neutralized(s string, kind spanKind) string {

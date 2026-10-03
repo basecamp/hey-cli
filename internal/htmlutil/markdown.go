@@ -513,6 +513,13 @@ func (m *markdownizer) link(n *html.Node) {
 		case !linkable:
 			return text
 		case text == "" || strings.TrimSpace(elementText(n)) == strings.TrimSpace(href):
+			// An autolink's entities are decoded by some renderers and read verbatim
+			// by others — goldmark, and so glamour, among them — so a destination
+			// holding one, which destination writes as &amp;, is linked the way every
+			// renderer decodes alike, under its own URL as the label.
+			if strings.Contains(dest, "&amp;") {
+				return "[" + escapeText(strings.TrimSpace(href), m.line.String()) + "](" + dest + ")"
+			}
 			if absolute(dest) {
 				return "<" + dest + ">"
 			}
