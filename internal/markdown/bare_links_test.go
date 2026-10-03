@@ -324,17 +324,20 @@ func TestRenderKeepsLinksWithNonASCIIDestinations(t *testing.T) {
 
 // A link that ends in a long run of closers or semicolons is trimmed in one pass: an
 // email is rendered as the reader opens it, so this must not take time in proportion
-// to the square of what somebody else wrote.
+// to the square of what somebody else wrote. The bound is wide on purpose: in one pass
+// each run takes milliseconds, and the quadratic trim this guards against took tens of
+// seconds for each of them, so a slow or busy machine sits far from either.
 func TestTrimLinkEndIsLinear(t *testing.T) {
 	const url = "https://docs.example.com/plan"
+	const run = 300_000
 	for _, suffix := range []string{"]", ")", "}", "）", ";", "&amp;", "a;"} {
 		started := time.Now()
-		got := trimLinkEnd(url + strings.Repeat(suffix, 100_000))
-		if elapsed := time.Since(started); elapsed > time.Second {
-			t.Errorf("trimLinkEnd with %q×100000 took %v", suffix, elapsed)
+		got := trimLinkEnd(url + strings.Repeat(suffix, run))
+		if elapsed := time.Since(started); elapsed > 5*time.Second {
+			t.Errorf("trimLinkEnd with %q×%d took %v", suffix, run, elapsed)
 		}
 		if !strings.HasPrefix(got, url) {
-			t.Errorf("trimLinkEnd with %q×100000 = %.60q…, want it to keep %q", suffix, got, url)
+			t.Errorf("trimLinkEnd with %q×%d = %.60q…, want it to keep %q", suffix, run, got, url)
 		}
 	}
 }
