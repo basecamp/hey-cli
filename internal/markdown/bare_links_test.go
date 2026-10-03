@@ -241,6 +241,18 @@ func TestRenderLinksBareURLsWhole(t *testing.T) {
 			[]string{"https://docs.example.com/%C3%A9", "https://docs.example.com/%C3%A9"},
 		},
 		{
+			"a mailto: recipient it cannot read",
+			`<p>Write via mailto:alice@example.org,o'brien@example.org?subject=Agenda or mailto:alice@example.org,devi*rao@example.org today</p>`,
+			"mailto:alice@example.org,o'brien@example.org?subject=Agenda or mailto:alice@example.org,devi*rao@example.org today",
+			nil,
+		},
+		{
+			"a quoted mailto: query",
+			`<p>「mailto:jane@example.org?subject=資料」を見て</p>`,
+			"「mailto:jane@example.org?subject=資料」を見て",
+			[]string{"mailto:jane@example.org?subject=資料"},
+		},
+		{
 			"a www address",
 			`<p>Tickets at www.ferries.example.com/harbour_line?day=2&amp;seats=6 today</p>`,
 			"http://www.ferries.example.com/harbour_line?day=2&seats=6 today",

@@ -442,6 +442,16 @@ func findBareLinks(s string) (links []bareLink, declined []int) {
 	for i := 0; i < len(s); {
 		if link, ok := urlAt(s, i); ok {
 			links = append(links, link)
+			if link.target == "" {
+				for at := strings.IndexByte(s[link.start:link.end], '@'); at >= 0; {
+					declined = append(declined, link.start+at)
+					next := strings.IndexByte(s[link.start+at+1:link.end], '@')
+					if next < 0 {
+						break
+					}
+					at += next + 1
+				}
+			}
 			i = link.end
 			continue
 		}
@@ -449,7 +459,7 @@ func findBareLinks(s string) (links []bareLink, declined []int) {
 		i += size
 	}
 	if !strings.Contains(s, "@") {
-		return links, nil
+		return linked(links), declined
 	}
 
 	urls := links
@@ -488,7 +498,7 @@ func findBareLinks(s string) (links []bareLink, declined []int) {
 		for next < len(claimed) && claimed[next].end <= url.start {
 			next++
 		}
-		if next == len(claimed) || claimed[next].start >= url.end {
+		if url.target != "" && (next == len(claimed) || claimed[next].start >= url.end) {
 			links = append(links, url)
 		}
 	}
@@ -497,7 +507,19 @@ func findBareLinks(s string) (links []bareLink, declined []int) {
 	return links, declined
 }
 
-// urlAt matches a URL or a www. address starting at s[i].
+// linked is links less those urlAt declined.
+func linked(links []bareLink) []bareLink {
+	kept := links[:0]
+	for _, link := range links {
+		if link.target != "" {
+			kept = append(kept, link)
+		}
+	}
+	return kept
+}
+
+// urlAt matches a URL, a www. address or a mailto: URI starting at s[i]. A link with
+// no target is one it declines: the span it covers is linked by nothing.
 func urlAt(s string, i int) (bareLink, bool) {
 	switch s[i] {
 	case 'h', 'H', 'f', 'F', 'w', 'W', 'm', 'M':
@@ -512,9 +534,15 @@ func urlAt(s string, i int) (bareLink, bool) {
 	// A mailto: URI is the whole of what it opens — every recipient, and the query
 	// that carries a subject and a body.
 	if m := mailtoURI.FindString(s[i:]); m != "" {
-		if url := trimLinkEnd(m); !continuesWord(s[i+len(url):]) {
+		url := trimLinkEnd(cutAtUnopenedBracket(m))
+		if rest := s[i+len(url):]; !continuesWord(rest) && !continuesMailto(rest) {
 			return bareLink{i, i + len(url), url}, true
 		}
+		// A recipient list the pattern could not read to its end — a second
+		// recipient of o'brien@ or devi*rao@ — would open without the rest of it, so
+		// none of it is linked: the link comes back with no target, and its addresses
+		// are declined.
+		return bareLink{start: i, end: i + linkTokenEnd(s[i:])}, true
 	}
 	if m := wholeHost(bareURL, s, i); m != "" {
 		if url := trimLinkEnd(cutAtUnopenedBracket(m)); strings.Contains(url[strings.Index(url, "://")+3:], ".") {
@@ -526,6 +554,33 @@ func urlAt(s string, i int) (bareLink, bool) {
 		return bareLink{i, i + len(url), "http://" + url}, true
 	}
 	return bareLink{}, false
+}
+
+// continuesMailto reports whether what follows a mailto: URI carries its recipient list
+// or its query on: a , ; or ? with more after it, or what a local part may hold.
+func continuesMailto(rest string) bool {
+	if rest == "" {
+		return false
+	}
+	if strings.IndexByte(otherLocalPart, rest[0]) >= 0 || rest[0] == '@' {
+		return true
+	}
+	if strings.IndexByte(",;?", rest[0]) < 0 || len(rest) == 1 {
+		return false
+	}
+	next, _ := utf8.DecodeRuneInString(rest[1:])
+	return !unicode.IsSpace(next)
+}
+
+// linkTokenEnd is where the run of text a link sits in ends: at a space, or at what ends
+// a link in any form.
+func linkTokenEnd(s string) int {
+	if end := strings.IndexFunc(s, func(r rune) bool {
+		return unicode.IsSpace(r) || strings.ContainsRune(`<>"`, r)
+	}); end >= 0 {
+		return end
+	}
+	return len(s)
 }
 
 // wholeHost matches pattern at s[i], answering nothing when the host it matched stops
