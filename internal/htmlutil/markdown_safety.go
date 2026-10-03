@@ -314,9 +314,9 @@ func destination(raw string) (string, bool) {
 	return b.String(), true
 }
 
-// lowercaseNonASCIIEscape is a percent-escape of a byte at or above 0x80 in lowercase
-// hex, the form destination writes non-ASCII in.
-var lowercaseNonASCIIEscape = regexp.MustCompile(`%[89a-f][0-9a-f]`)
+// lowercaseNonASCIIEscape is a percent-escape of a byte at or above 0x80, or of a |, in
+// lowercase hex — the forms markdown.Render shows decoded, which only it writes.
+var lowercaseNonASCIIEscape = regexp.MustCompile(`%[89a-f][0-9a-f]|%7c`)
 
 func isASCII(s string) bool {
 	for i := range len(s) {

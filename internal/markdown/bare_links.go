@@ -641,7 +641,14 @@ func urlAt(s string, i int, run *int) (bareLink, bool) {
 	// is at most 256 characters and an address not much more — by the one pattern its
 	// prefix calls for, before anything reads further.
 	pattern := linkPattern(s[i:])
-	if pattern == nil || !pattern.MatchString(s[i:min(len(s), i+linkProbe)]) {
+	if pattern == nil {
+		return bareLink{}, false
+	}
+	probe := s[i:min(len(s), i+linkProbe)]
+	if space := strings.IndexFunc(probe, unicode.IsSpace); space >= 0 {
+		probe = probe[:space]
+	}
+	if !pattern.MatchString(probe) {
 		return bareLink{}, false
 	}
 	// A link is matched within the run of text it sits in and no further: Chinese and
@@ -682,8 +689,9 @@ func urlAt(s string, i int, run *int) (bareLink, bool) {
 }
 
 // linkProbe is how much of the text a candidate link is first matched in: enough for a
-// scheme, a 256-character host and a port, or for mailto: and an address.
-const linkProbe = 384
+// scheme, a host of 256 characters four bytes each, and a port — or for mailto: and an
+// address — and cut at the first space, so ordinary prose probes a word.
+const linkProbe = 4*256 + 64
 
 // linkPattern is the pattern for the link s starts the way of — a URL, a www. address
 // or a mailto: URI, its prefix in any case — or nil.

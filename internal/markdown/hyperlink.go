@@ -30,6 +30,7 @@ func Hyperlink(text, url string) string {
 func LinkifyURLs(text string) string {
 	var b strings.Builder
 	last, run := 0, 0
+	links := newLinkState(text)
 	for at := 0; ; {
 		loc := reScheme.FindStringIndex(text[at:])
 		if loc == nil {
@@ -37,7 +38,7 @@ func LinkifyURLs(text string) string {
 		}
 		start := at + loc[0]
 		at += loc[1]
-		if insideHyperlink(text[:start]) {
+		if links.inside(start) {
 			continue
 		}
 		if start >= run {
@@ -73,27 +74,40 @@ func sanitizeURL(url string) string {
 	}, url)
 }
 
-// insideHyperlink reports whether the text following prefix is part of an
-// existing OSC 8 hyperlink — either as the URI parameter or as the visible
-// text between set and reset.
-func insideHyperlink(prefix string) bool {
-	if strings.HasSuffix(prefix, "\x1b]8;;") {
-		return true
-	}
+// linkState follows the OSC 8 hyperlinks in a text as a scan moves forward through it,
+// so whether a position sits inside one is answered without reading the text before it
+// again: each sequence is read once.
+type linkState struct {
+	text string
+	next int  // where the next sequence not yet read starts, or len(text)
+	open bool // whether the sequences read so far leave a hyperlink open
+}
 
-	set := strings.LastIndex(prefix, "\x1b]8;")
-	if set == -1 {
-		return false
-	}
+func newLinkState(text string) *linkState {
+	return &linkState{text: text, next: nextHyperlink(text, 0)}
+}
 
-	bell := strings.IndexByte(prefix[set:], '\x07')
-	if bell == -1 {
-		return true
+// inside reports whether pos sits inside a hyperlink — in its text, or in a sequence's
+// parameters — given that no later call asks about an earlier position.
+func (l *linkState) inside(pos int) bool {
+	for l.next < pos {
+		end := strings.IndexByte(l.text[l.next:], '\a')
+		if st := strings.Index(l.text[l.next:], "\x1b\\"); st >= 0 && (end < 0 || st < end) {
+			end = st + 1
+		}
+		if end < 0 || pos <= l.next+end {
+			return true
+		}
+		_, uri, _ := strings.Cut(strings.TrimRight(l.text[l.next+len("\x1b]8;"):l.next+end], "\x1b"), ";")
+		l.open = uri != ""
+		l.next = nextHyperlink(l.text, l.next+end+1)
 	}
+	return l.open
+}
 
-	reset := "\x1b]8;;\x07"
-	if prefix[set:set+bell+1] == reset {
-		return false
+func nextHyperlink(text string, from int) int {
+	if next := strings.Index(text[from:], "\x1b]8;"); next >= 0 {
+		return from + next
 	}
-	return !strings.Contains(prefix[set+bell+1:], reset)
+	return len(text)
 }

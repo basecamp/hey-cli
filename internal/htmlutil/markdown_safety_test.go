@@ -402,6 +402,7 @@ func TestToMarkdownDestinationEncodesNonASCII(t *testing.T) {
 		{`<a href="https://docs.example.com/資料">https://docs.example.com/資料</a>`, "[https://docs.example.com/資料](https://docs.example.com/%e8%b3%87%e6%96%99)", "https://docs.example.com/資料"},
 		{"<a href=\"https://docs.example.com/\x1b[31mroom_list\">the rooms</a>", "[the rooms](https://docs.example.com/room_list)", "https://docs.example.com/room_list"},
 		{`<a href="https://docs.example.com/%e8%b3%87">the files</a>`, "[the files](https://docs.example.com/%E8%B3%87)", "https://docs.example.com/資"},
+		{`<a href="https://docs.example.com/a%7cb">the list</a>`, "[the list](https://docs.example.com/a%7Cb)", "https://docs.example.com/a|b"},
 		{"<a href=\"https://docs.example.com/room\u200b_list\">the rooms</a>", "[the rooms](https://docs.example.com/room_list)", "https://docs.example.com/room_list"},
 	} {
 		got := toMarkdown("<p>" + test.html + "</p>")

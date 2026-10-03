@@ -328,7 +328,7 @@ func TestRenderLinksBareURLsWhole(t *testing.T) {
 		{
 			"a pipe in a table cell",
 			`<table><tr><td>https://docs.example.com/a|b</td><td>rooms</td></tr></table>`,
-			"rooms",
+			"[1]: docs.example.com https://docs.example.com/a|b",
 			[]string{"https://docs.example.com/a|b"},
 		},
 		{
@@ -514,6 +514,43 @@ func TestFindBareLinksInALongUnspacedParagraphIsLinear(t *testing.T) {
 		case <-time.After(linearBound):
 			t.Fatalf("%q: findBareLinks did not finish within %v for %d links", sentence, linearBound, links)
 		}
+	}
+}
+
+// An authored %7c is the email's: shown as written, not taken for the | a bare link's
+// destination is written with.
+func TestRenderKeepsAnAuthoredPipeEscape(t *testing.T) {
+	linked := RenderLinked(htmlutil.ToMarkdown(`<p><a href="https://docs.example.com/a%7cb">https://docs.example.com/a%7cb</a></p>`), 200, -1)
+	if shown := visible(linked.Text); strings.Contains(shown, "a|b") {
+		t.Errorf("shows %q, want the authored escape kept", shown)
+	}
+	if len(linked.Links) != 1 || linked.Links[0].Destination != "https://docs.example.com/a%7Cb" {
+		t.Errorf("links = %#v, want the authored escape kept", linked.Links)
+	}
+}
+
+// A long host in a script of three- or four-byte characters is probed whole.
+func TestFindBareLinksProbesALongNonASCIIHost(t *testing.T) {
+	host := strings.Repeat("例", 200) + ".example"
+	links, _ := findBareLinks("See https://" + host + "/plan today")
+	if len(links) != 1 || links[0].target != "https://"+host+"/plan" {
+		t.Errorf("links = %v, want the whole URL", links)
+	}
+}
+
+// The fallback pass follows the hyperlinks already in its text as it goes, rather than
+// reading everything before each candidate again to find out whether it is inside one.
+func TestLinkifyURLsPastRejectedFragmentsIsLinear(t *testing.T) {
+	text := Hyperlink("the plan", "https://docs.example.com/plan") + strings.Repeat("https:// ", 100_000) + "https://docs.example.com/room_list"
+	done := make(chan string, 1)
+	go func() { done <- LinkifyURLs(text) }()
+	select {
+	case got := <-done:
+		if !strings.HasSuffix(got, Hyperlink("https://docs.example.com/room_list", "https://docs.example.com/room_list")) {
+			t.Errorf("LinkifyURLs = …%q, want the room list linked last", got[max(0, len(got)-120):])
+		}
+	case <-time.After(linearBound):
+		t.Fatalf("LinkifyURLs did not finish within %v for 100000 fragments", linearBound)
 	}
 }
 
