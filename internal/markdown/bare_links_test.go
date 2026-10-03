@@ -1,6 +1,7 @@
 package markdown
 
 import (
+	"html"
 	"slices"
 	"strings"
 	"testing"
@@ -265,6 +266,18 @@ func TestRenderLinksBareURLsWhole(t *testing.T) {
 			[]string{"mailto:alice@example.org", "https://docs.example.com/資料"},
 		},
 		{
+			"an IPv4 host",
+			`<p>Builds at https://192.0.2.1:8443/files_v2?team=ops&amp;day=2 today</p>`,
+			"https://192.0.2.1:8443/files_v2?team=ops&day=2 today",
+			[]string{"https://192.0.2.1:8443/files_v2?team=ops&day=2"},
+		},
+		{
+			"a named link that is its own non-ASCII URL",
+			`<p><a href="https://docs.example.com/é">https://docs.example.com/é</a></p>`,
+			"https://docs.example.com/é",
+			[]string{"https://docs.example.com/é"},
+		},
+		{
 			"a www address",
 			`<p>Tickets at www.ferries.example.com/harbour_line?day=2&amp;seats=6 today</p>`,
 			"http://www.ferries.example.com/harbour_line?day=2&seats=6 today",
@@ -400,9 +413,10 @@ func TestRenderWrapsANonASCIILinkWhole(t *testing.T) {
 	for _, page := range []string{
 		"https://docs.example.com/資料_最終版_資料_最終版_資料_最終版",
 		"https://cafe.example.com/menus/café_du_port_café_du_port_café",
+		"https://192.0.2.1/shared/harbour_offsite_2026/planning/ferry_times?day=2&seats=6",
 	} {
 		for width := 20; width <= 60; width++ {
-			linked := RenderLinked(htmlutil.ToMarkdown("<p>"+page+" "+page+"</p>"), width, -1)
+			linked := RenderLinked(htmlutil.ToMarkdown("<p>"+html.EscapeString(page)+" "+html.EscapeString(page)+"</p>"), width, -1)
 			if shown := visible(linked.Text); strings.Contains(shown, "%") {
 				t.Errorf("width %d: shows %q, want no escapes", width, shown)
 			}

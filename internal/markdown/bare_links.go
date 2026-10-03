@@ -70,8 +70,10 @@ const (
 	// trimLinkEnd balances as it balances ( and ).
 	nonASCIIInLink = `[^\x00-\x7f\p{Z}\p{P}\p{C}]|[\x{200C}\x{200D}]`
 	nonASCIIInPath = nonASCIIInLink + `|[` + wideOpeners + wideClosers + `]`
-	bareHost       = `(?:[-a-zA-Z0-9@:%._\+~#=]|` + nonASCIIInLink + `){1,256}\.(?:(?i:xn--)[a-zA-Z0-9-]+|(?:[a-zA-Z]|\p{L})+)`
-	barePath       = `(?:[-a-zA-Z0-9@:%_+*.~#$!?&/=\(\);,'\^{}\[\]` + "`" + `]|` + nonASCIIInPath + `)*`
+	// bareHost is a name ending in a top-level domain of letters or punycode, or an
+	// IPv4 address — tried in that order, so 192.0.2.1.example.com is a name.
+	bareHost = `(?:(?:[-a-zA-Z0-9@:%._\+~#=]|` + nonASCIIInLink + `){1,256}\.(?:(?i:xn--)[a-zA-Z0-9-]+|(?:[a-zA-Z]|\p{L})+)|(?:\d{1,3}\.){3}\d{1,3})`
+	barePath = `(?:[-a-zA-Z0-9@:%_+*.~#$!?&/=\(\);,'\^{}\[\]` + "`" + `]|` + nonASCIIInPath + `)*`
 )
 
 // replacement swaps the source between start and stop for text.
