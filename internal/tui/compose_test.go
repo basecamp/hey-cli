@@ -14,6 +14,8 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
+	"github.com/basecamp/hey-cli/internal/mail"
 )
 
 func typeText(v *mailView, s string) {
@@ -284,6 +286,34 @@ func TestComposeSendFailureKeepsForm(t *testing.T) {
 	}
 	if composeModal(v).sending || !composeModal(v).isError || !strings.Contains(composeModal(v).status, "Send failed") {
 		t.Errorf("expected an inline error, got sending=%v status=%q", composeModal(v).sending, composeModal(v).status)
+	}
+}
+
+// HEY kept the message as a draft instead of sending it: the composer closes, as a send
+// would close it — sending again would only make another draft — and the TUI says it was
+// not sent and which draft holds it.
+func TestComposeRefusedByHEYClosesAndSaysWhichDraft(t *testing.T) {
+	v := mailWithPostings()
+	v.vc.width = 160
+	v.HandleContentKey(keyPress("c"))
+	composeModal(v).sending = true
+	answer, _ := v.Update(composeSentMsg{label: "Message sent", err: &mail.NotDeliveredError{DraftID: 2201}})
+	if composeModal(v) != nil {
+		t.Error("the composer should close: HEY already has the message as a draft")
+	}
+	// The toast is half the screen wide, so it says only that; the notice row, which runs
+	// the width of the list, names the draft and the likely reason.
+	if toast := deliverToView(v, answer); toast != "Not sent — saved as a draft" {
+		t.Errorf("toast = %q, want it to say it was not sent", toast)
+	}
+	if !strings.HasPrefix(v.notice, "Not sent") || !strings.Contains(v.notice, "draft 2201") || !strings.Contains(v.notice, "sending limit") {
+		t.Errorf("notice = %q, want it to name the draft and the likely reason", v.notice)
+	}
+	// On a narrower screen the reason is cut before the draft is.
+	v.vc.width = 80
+	v.noteFailure("Not sent", &mail.NotDeliveredError{DraftID: 2201})
+	if !strings.Contains(v.notice, "draft 2201") {
+		t.Errorf("notice at 80 columns = %q, want the draft still named", v.notice)
 	}
 }
 

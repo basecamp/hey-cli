@@ -163,6 +163,9 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return apierr.FromSDK(err)
 		}
+		if err := confirmSent(ctx, replySDK, sent); err != nil {
+			return err
+		}
 		return writeMessageSent(cmd, messageSent{line: summary, summary: summary, thread: topicID}, sent)
 	}
 
@@ -198,6 +201,9 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 	sent, err := sdk.Messages().Create(ctx, c.subject, messageWithAttachments, to, cc, bcc)
 	if err != nil {
 		return apierr.FromSDK(err)
+	}
+	if err := confirmSent(ctx, sdk, sent); err != nil {
+		return err
 	}
 	return writeMessageSent(cmd, messageSent{line: summary, summary: summary}, sent)
 }

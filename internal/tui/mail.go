@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -724,6 +725,16 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		form := modalOf[*composeForm](v)
 		if form == nil {
 			return nil, true
+		}
+		// HEY kept the message as a draft instead of sending it: the composer closes, as
+		// it would have — sending it again from here would only make another draft. The
+		// toast, half the screen wide, says it was not sent; the notice row under the
+		// list has room for which draft holds it and why.
+		var refused *mail.NotDeliveredError
+		if errors.As(msg.err, &refused) {
+			v.modal = nil
+			v.noteFailure("Not sent", refused)
+			return func() tea.Msg { return notifyMsg{text: "Not sent — saved as a draft", kind: toastError} }, true
 		}
 		if msg.err != nil {
 			form.sending = false

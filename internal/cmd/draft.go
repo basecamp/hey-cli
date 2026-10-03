@@ -371,6 +371,9 @@ func (c *draftSendCommand) run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return apierr.FromSDK(err)
 	}
+	if err := confirmSent(ctx, sdk, sent); err != nil {
+		return err
+	}
 	return writeMessageSent(cmd, messageSent{
 		line:     fmt.Sprintf("Draft %d sent", draftID),
 		summary:  "Draft sent",

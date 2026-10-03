@@ -180,6 +180,9 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return apierr.FromSDK(err)
 	}
+	if err := confirmSent(ctx, replySDK, sent); err != nil {
+		return err
+	}
 	summary := sentWithAttachmentsSummary("Reply sent", len(c.attachments))
 	return writeMessageSent(cmd, messageSent{line: summary, summary: summary, thread: threadID}, sent)
 }

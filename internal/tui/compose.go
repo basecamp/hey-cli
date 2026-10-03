@@ -828,6 +828,15 @@ func (v *mailView) saveDraft(f *composeForm) tea.Cmd {
 	}
 }
 
+// delivered is a send's error, or — when HEY answered but kept the message as a draft
+// instead of sending it — a mail.NotDeliveredError naming that draft.
+func delivered(ctx context.Context, sdk *hey.Client, sent *generated.SentMessage, err error) error {
+	if err != nil {
+		return err
+	}
+	return mail.ConfirmDelivered(ctx, sdk, sent)
+}
+
 // send submits the open form through the SDK.
 func (v *mailView) send(f *composeForm) tea.Cmd {
 	to, cc, bcc, subject, body := f.values()
@@ -841,18 +850,18 @@ func (v *mailView) send(f *composeForm) tea.Cmd {
 		entryID := f.entryID
 		actingSenderID := f.replyActingSenderID
 		return func() tea.Msg {
-			_, err := sdk.Entries().CreateReply(ctx, entryID, actingSenderID, subject, body, to, cc, bcc)
-			return composeSentMsg{label: "Reply sent", err: err}
+			sent, err := sdk.Entries().CreateReply(ctx, entryID, actingSenderID, subject, body, to, cc, bcc)
+			return composeSentMsg{label: "Reply sent", err: delivered(ctx, sdk, sent, err)}
 		}
 	case composeForward:
 		return func() tea.Msg {
-			_, err := sdk.Messages().Create(ctx, subject, body, to, cc, bcc)
-			return composeSentMsg{label: "Message forwarded", err: err}
+			sent, err := sdk.Messages().Create(ctx, subject, body, to, cc, bcc)
+			return composeSentMsg{label: "Message forwarded", err: delivered(ctx, sdk, sent, err)}
 		}
 	default:
 		return func() tea.Msg {
-			_, err := sdk.Messages().Create(ctx, subject, body, to, cc, bcc)
-			return composeSentMsg{label: "Message sent", err: err}
+			sent, err := sdk.Messages().Create(ctx, subject, body, to, cc, bcc)
+			return composeSentMsg{label: "Message sent", err: delivered(ctx, sdk, sent, err)}
 		}
 	}
 }

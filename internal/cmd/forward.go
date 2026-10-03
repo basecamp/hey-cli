@@ -108,6 +108,9 @@ func (c *forwardCommand) run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return apierr.FromSDK(err)
 	}
+	if err := confirmSent(ctx, forwardSDK, sent); err != nil {
+		return err
+	}
 
 	// thread_id and entry_id name what was forwarded; id and topic_id, from HEY's answer,
 	// name the message that went out and the thread it started. An empty recipient line is
