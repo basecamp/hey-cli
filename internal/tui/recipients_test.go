@@ -391,6 +391,46 @@ func TestTheHelpBarFollowsAListThatOpensWhenTheRecipientsArrive(t *testing.T) {
 	}
 }
 
+func TestPastingWithTheListOpenKeepsItInStep(t *testing.T) {
+	v, _ := recipientsTestView(t)
+	form := openComposer(t, v)
+	typeText(v, "ja")
+	if form.suggest == nil {
+		t.Fatal("typing should open the list")
+	}
+	v.Update(tea.PasteMsg{Content: "n"})
+	if got := form.inputs[fieldTo].Value(); got != "jan" {
+		t.Fatalf("the paste should land in the field, To = %q", got)
+	}
+	if got := suggestedLabels(form); !slices.Equal(got, []string{"Jane Doe"}) {
+		t.Fatalf("the list should narrow on a paste as on typing, got %q", got)
+	}
+	v.HandleContentKey(keyPress("tab"))
+	if got := form.inputs[fieldTo].Value(); got != "Jane Doe <jane@example.com>, " {
+		t.Errorf("a pick after a paste must replace the whole recipient, To = %q", got)
+	}
+
+	// A paste that matches nobody closes the list.
+	typeText(v, "ri")
+	v.Update(tea.PasteMsg{Content: "x@example.com"})
+	if form.suggest != nil {
+		t.Errorf("nobody matches rix@example.com, so the list should close, got %q", suggestedLabels(form))
+	}
+}
+
+func TestAnAddressSanitizingWouldChangeIsNotOffered(t *testing.T) {
+	all := newRecipientSuggestions([]hey.AddressableRecipient{
+		{Value: "jo\u200banna@example.com", Label: "Joanna Lumley"},
+		{Value: "jane@example.com", Label: "Jane \u001b[31mDoe"},
+	})
+	if len(all) != 1 || all[0].value != "jane@example.com" {
+		t.Fatalf("suggestions = %+v, want only Jane", all)
+	}
+	if all[0].label != "Jane Doe" {
+		t.Errorf("a name is still sanitized for display, got %q", all[0].label)
+	}
+}
+
 func TestCcAndBccSuggestToo(t *testing.T) {
 	for _, field := range []composeField{fieldCc, fieldBcc} {
 		v, _ := recipientsTestView(t)
@@ -530,6 +570,9 @@ func TestDeleteRecipientBeforeTakesANamedRecipientWhole(t *testing.T) {
 		{name: "an address in brackets with no name", value: "<jane@example.com>, ", pos: 20, ok: false},
 		{name: "typing the next one", value: "Jane Doe <jane@example.com>, ri", pos: 31, ok: false},
 		{name: "inside the address", value: "Jane Doe <jane@example.com>", pos: 20, ok: false},
+		{name: "after a > inside a quoted name", value: `"Jane > Doe" <jane@example.com>`, pos: 7, ok: false},
+		{name: "a quoted name with a > in it, at its end", value: `"Jane > Doe" <jane@example.com>, `, pos: 33,
+			want: "", wantCursor: 0, ok: true},
 	} {
 		got, cursor, ok := deleteRecipientBefore(tc.value, tc.pos)
 		if ok != tc.ok || got != tc.want || cursor != tc.wantCursor {

@@ -420,7 +420,20 @@ func (f *composeForm) handleMsg(msg tea.Msg) (tea.Cmd, bool) {
 	if f.snippetPicker != nil {
 		return f.snippetPicker.handleMsg(msg), true
 	}
-	return f.update(msg), true
+	// A paste changes a recipient field without a key press, and the list
+	// under it keeps the byte range of the recipient being typed, so it has to
+	// follow the change the way typing does.
+	if !isRecipientField(f.focus) {
+		return f.update(msg), true
+	}
+	input := &f.inputs[f.focus]
+	value := input.Value()
+	cmd := f.update(msg)
+	if input.Value() != value {
+		f.typing = true
+		f.refreshSuggestions()
+	}
+	return cmd, true
 }
 
 func (f *composeForm) openSnippetPicker(view *mailView) tea.Cmd {

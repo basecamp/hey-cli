@@ -67,8 +67,12 @@ type recipientsLoadedMsg struct {
 func newRecipientSuggestions(rows []hey.AddressableRecipient) []recipientSuggestion {
 	suggestions := make([]recipientSuggestion, 0, len(rows))
 	for _, row := range rows {
-		value := strings.TrimSpace(terminal.SanitizeLine(row.Value))
-		if value == "" {
+		// The value is where mail goes, so sanitizing it may not change it: an
+		// address holding a control or an invisible format character would be
+		// rewritten into a different mailbox. Such a row is left out rather
+		// than offered under an address it doesn't have.
+		value := strings.TrimSpace(row.Value)
+		if value == "" || terminal.SanitizeLine(value) != value {
 			continue
 		}
 		label := strings.TrimSpace(terminal.SanitizeLine(row.Label))
@@ -244,6 +248,11 @@ func deleteRecipientBefore(value string, pos int) (string, int, bool) {
 		return "", 0, false
 	}
 	start, end := mail.AddressAt(value, len(before)-1)
+	// The > has to be the recipient's last character. One inside a quoted name,
+	// "Jane > Doe" <jane@example.com>, is a character like any other.
+	if start+len(strings.TrimRight(value[start:end], " ")) != len(before) {
+		return "", 0, false
+	}
 	recipient := strings.TrimSpace(value[start:end])
 	open := strings.LastIndexByte(recipient, '<')
 	if open <= 0 || strings.TrimSpace(recipient[:open]) == "" {
