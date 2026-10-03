@@ -103,7 +103,7 @@ func resolveMoveDestination(ctx context.Context, nameOrID string) (*generated.Bo
 		}
 	}
 
-	return nil, errBoxNotFound(nameOrID)
+	return nil, errMoveDestinationNotFound(nameOrID)
 }
 
 func validateMoveDestination(box *generated.Box) (*generated.Box, error) {

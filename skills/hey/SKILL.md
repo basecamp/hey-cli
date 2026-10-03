@@ -364,7 +364,7 @@ hey box view 123 --json                      # List emails in box (by ID)
 hey box view imbox --page next-cursor --json # Continue from an earlier listing
 ```
 
-Box names: `imbox`, `feed`, `papertrail`, `setaside`, `replylater`, `bubbleup` — or the kind (`feedbox`, `trailbox`, `asidebox`, `laterbox`, `bubblebox`) or display name (`"Paper Trail"`), in any case. `hey search --in` and `hey move --to` take the same spellings. Trash is not a box: use `hey search --in trash`.
+Box names: `imbox`, `feed`, `papertrail`, `setaside`, `replylater`, `bubbleup` — or the kind (`feedbox`, `trailbox`, `asidebox`, `laterbox`, `bubblebox`) or display name (`"Paper Trail"`), in any case. `hey search --in` and `hey move --to` take the same spellings, but not every box: `hey search --in` takes only `imbox`, `feed` and `papertrail` (plus `trash`), and `hey move --to` takes a box ID or any box but `bubbleup` (use `hey bubble up`). Trash is not a box: search it with `hey search --in trash` and move threads there with `hey trash`.
 
 **Response format:** `hey box view --json` returns the box itself — `id`, `kind`, `name`, `app_url`, `next_history_url`, `next_page` — with a `postings` array of the email threads in it. Each posting has `id` (box item ID), `topic_id` (thread ID), `kind` (`bundle` for a bundle row), `name` (subject), `created_at` and `app_url`; a thread row also has `contacts`, `summary` and `visible_entry_count`. `seen` is present only when true — an unseen posting omits it, so test `.seen != true`. Use `id` for the box item commands (see the ID note under Threads) and `topic_id` for `hey thread read`, `hey reply`, `hey forward`, `hey share` and `hey attachment list`.
 

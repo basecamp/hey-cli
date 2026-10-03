@@ -8,9 +8,13 @@ import (
 	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
-// boxNames is what an unknown box is answered with: the one short spelling of each box
-// HEY has. Every command that takes a box also takes its kind and its display name.
+// boxNames is what hey box answers an unknown box with: the one short spelling of each box
+// HEY has. Every command that takes a box also takes its kind and its display name, but
+// not every command takes every box: see moveBoxNames and searchInValues.
 const boxNames = "imbox, feed, papertrail, setaside, replylater, or bubbleup"
+
+// moveBoxNames is boxNames less Bubble Up, which is not a move destination.
+const moveBoxNames = "imbox, feed, papertrail, setaside, or replylater"
 
 // boxKindFor answers the kind HEY serves for a box, however it was spelled: a short name
 // (feed, papertrail), the kind itself (feedbox, trailbox) or the display name (The Feed,
@@ -70,4 +74,13 @@ func errBoxNotFound(name string) *apierr.Error {
 		return apierr.ErrNotFoundHint("box", name, "Trash is not a box. Search it with: hey search --in trash")
 	}
 	return apierr.ErrNotFoundHint("box", name, "Use "+boxNames+", a kind or name from hey box list, or a box ID")
+}
+
+// errMoveDestinationNotFound is errBoxNotFound for hey move --to: it names only the boxes a
+// thread can be moved to, and sends Trash to the command that moves threads there.
+func errMoveDestinationNotFound(name string) *apierr.Error {
+	if boxKindFor(name) == searchTrash {
+		return apierr.ErrNotFoundHint("box", name, "Trash is not a box. Move threads there with: hey trash <box-item-id>...")
+	}
+	return apierr.ErrNotFoundHint("box", name, "Use "+moveBoxNames+", a kind or name from hey box list, or a box ID. Bubble Up is not a destination: use hey bubble up")
 }
