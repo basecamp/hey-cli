@@ -336,6 +336,33 @@ func TestSomeoneAlreadyOnTheLineIsNotSuggestedAgain(t *testing.T) {
 	}
 }
 
+// A recipient written with a comment, the way some mail clients copy it, is
+// still on the line: it isn't offered again, and neither is a group it completes.
+func TestARecipientWithACommentIsNotSuggestedAgain(t *testing.T) {
+	for _, line := range []string{
+		"jane@example.com (Jane Doe), ",
+		"Jane Doe <jane@example.com> (work), ",
+	} {
+		v, _ := recipientsTestView(t)
+		form := openComposer(t, v)
+		form.inputs[fieldTo].SetValue(line)
+		form.inputs[fieldTo].CursorEnd()
+		typeText(v, "ja")
+		if got := suggestedLabels(form); slices.Contains(got, "Jane Doe") {
+			t.Errorf("with %q on the line, Jane was offered again: %q", line, got)
+		}
+	}
+
+	v, _ := recipientsTestView(t)
+	form := openComposer(t, v)
+	form.inputs[fieldTo].SetValue("morty@example.com (Morty), Summer <summer@example.com> (school), ")
+	form.inputs[fieldTo].CursorEnd()
+	typeText(v, "book")
+	if got := suggestedLabels(form); slices.Contains(got, "Book club") {
+		t.Errorf("every member of Book club is on the line, suggestions = %q", got)
+	}
+}
+
 func TestAGroupAlreadyOnTheLineIsNotSuggestedAgain(t *testing.T) {
 	v, _ := recipientsTestView(t)
 	form := openComposer(t, v)

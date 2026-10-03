@@ -137,6 +137,18 @@ func deliverable(address string) bool {
 	return deliverableDomain(spec[at+1:])
 }
 
+// BareAddress returns the address a recipient names, without its display name,
+// angle brackets or comments: "Jane Doe <jane@example.com> (work)" and
+// "jane@example.com (Jane Doe)" are both jane@example.com. A recipient HEY's
+// parser would refuse, or text with no address in it, is returned trimmed, as
+// written.
+func BareAddress(recipient string) string {
+	if spec, _, ok := addrSpec(recipient); ok && strings.Contains(spec, "@") {
+		return spec
+	}
+	return strings.TrimSpace(recipient)
+}
+
 // addrSpec returns the bare address and the fewest characters HEY could write the
 // whole address out in, so that a size over the limit is over it for HEY too. ok is
 // false for what HEY's parser refuses outright: an unclosed angle bracket, or a second

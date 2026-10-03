@@ -90,7 +90,7 @@ func newRecipientSuggestions(rows []hey.AddressableRecipient) []recipientSuggest
 		// the first letters of one colleague.
 		if suggestion.group() {
 			for _, member := range mail.SplitAddresses(value) {
-				suggestion.members = append(suggestion.members, strings.ToLower(member))
+				suggestion.members = append(suggestion.members, strings.ToLower(mail.BareAddress(member)))
 			}
 		} else {
 			suggestion.address = strings.ToLower(value)
@@ -140,11 +140,7 @@ func matchRecipients(all []recipientSuggestion, query string, chosen map[string]
 func chosenAddresses(list string, start, end int) map[string]bool {
 	chosen := map[string]bool{}
 	for _, recipient := range mail.SplitAddresses(list[:start] + list[end:]) {
-		address := recipient
-		if open := strings.LastIndexByte(recipient, '<'); open >= 0 {
-			address = strings.TrimSuffix(recipient[open+1:], ">")
-		}
-		chosen[strings.ToLower(strings.TrimSpace(address))] = true
+		chosen[strings.ToLower(mail.BareAddress(recipient))] = true
 	}
 	return chosen
 }

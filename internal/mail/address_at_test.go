@@ -34,6 +34,24 @@ func TestAddressAtFindsTheRecipientUnderTheCursor(t *testing.T) {
 	}
 }
 
+func TestBareAddressDropsTheNameAndComments(t *testing.T) {
+	for recipient, want := range map[string]string{
+		"jane@example.com":                   "jane@example.com",
+		"  jane@example.com  ":               "jane@example.com",
+		"Jane Doe <jane@example.com>":        "jane@example.com",
+		"Jane Doe <jane@example.com> (work)": "jane@example.com",
+		"jane@example.com (Jane Doe)":        "jane@example.com",
+		`"Bryan, Annie" <annie@example.com>`: "annie@example.com",
+		"(personal) rick@example.org":        "rick@example.org",
+		"not an address":                     "not an address",
+		"Jane Doe <jane@example.com":         "Jane Doe <jane@example.com",
+	} {
+		if got := BareAddress(recipient); got != want {
+			t.Errorf("BareAddress(%q) = %q, want %q", recipient, got, want)
+		}
+	}
+}
+
 func TestFormatAddressWritesWhatHEYParsesBack(t *testing.T) {
 	for _, tc := range []struct {
 		name, address, want string
