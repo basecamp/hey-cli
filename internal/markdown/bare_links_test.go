@@ -78,6 +78,18 @@ func TestRenderLinksBareURLsWhole(t *testing.T) {
 			[]string{"https://cafe.example.com/menus/café_du_port"},
 		},
 		{
+			"a currency symbol at its end",
+			`<p>Rates: https://fx.example.com/convert?from=USD&amp;to=€ today</p>`,
+			"https://fx.example.com/convert?from=USD&to=€ today",
+			[]string{"https://fx.example.com/convert?from=USD&to=€"},
+		},
+		{
+			"an emoji in its path",
+			`<p>Tagged https://notes.example.com/tags/harbour_☕ today</p>`,
+			"https://notes.example.com/tags/harbour_☕ today",
+			[]string{"https://notes.example.com/tags/harbour_☕"},
+		},
+		{
 			"a www address",
 			`<p>Tickets at www.ferries.example.com/harbour_line?day=2&amp;seats=6 today</p>`,
 			"http://www.ferries.example.com/harbour_line?day=2&seats=6 today",
@@ -193,12 +205,14 @@ func TestWholeBareLinksWritesAutolinks(t *testing.T) {
 // showed the backslash in front of every tilde in an email.
 func TestRenderShowsEscapesGlamourDoesNotResolve(t *testing.T) {
 	for html, want := range map[string]string{
-		"<p>About ~40 people, give or take.</p>":                                    "About ~40 people, give or take.",
-		"<p>Files are in ~/Offsite/2026 on the shared drive.</p>":                   "Files are in ~/Offsite/2026 on the shared drive.",
-		"<p>~~not struck~~</p>":                                                     "~~not struck~~",
-		"<p>===</p>":                                                                "===",
-		`<p>A literal \~ and a literal \&amp; stay as written.</p>`:                 `A literal \~ and a literal \& stay as written.`,
-		`<p><img alt="Pier at ~6pm" src="https://images.example.com/pier.png"></p>`: "Pier at ~6pm",
+		"<p>About ~40 people, give or take.</p>":                                                   "About ~40 people, give or take.",
+		"<p>Files are in ~/Offsite/2026 on the shared drive.</p>":                                  "Files are in ~/Offsite/2026 on the shared drive.",
+		"<p>~~not struck~~</p>":                                                                    "~~not struck~~",
+		"<p>===</p>":                                                                               "===",
+		`<p>A literal \~ and a literal \&amp; stay as written.</p>`:                                `A literal \~ and a literal \& stay as written.`,
+		`<p><img alt="Pier at ~6pm" src="https://images.example.com/pier.png"></p>`:                "Pier at ~6pm",
+		`<p><img alt="~~closed~~ pier, ~4 boats" src="https://images.example.com/pier.png"></p>`:   "~~closed~~ pier, ~4 boats",
+		`<p><img alt="a \~ and a ~` + "`" + ` too" src="https://images.example.com/pier.png"></p>`: `a \~ and a ~` + "`" + ` too`,
 	} {
 		if shown := visible(Render(htmlutil.ToMarkdown(html), 200)); !strings.Contains(shown, want) {
 			t.Errorf("Render(ToMarkdown(%q)) shows %q, want %q in it", html, shown, want)

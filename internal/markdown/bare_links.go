@@ -45,13 +45,20 @@ var (
 		), 100)),
 	)
 
-	// bareURL and bareWWW are goldmark's linkify patterns with \p{L}, \p{M} and \p{N}
-	// added to the host and the path, so that an address in any script is matched to
-	// its end, and with * added to the path, which GFM allows there and linkify already
-	// trims from a link's end. Other non-ASCII — a curly quote, a dash, a no-break
-	// space — still ends a link, as punctuation after one should.
-	bareURL = regexp.MustCompile(`^(?:http|https|ftp)://[-a-zA-Z0-9\p{L}\p{M}\p{N}@:%._\+~#=]{1,256}\.[a-z\p{L}]+(?::\d+)?(?:[/#?][-a-zA-Z0-9\p{L}\p{M}\p{N}@:%_+*.~#$!?&/=\(\);,'">\^{}\[\]` + "`" + `]*)?`)
-	bareWWW = regexp.MustCompile(`^www\.[-a-zA-Z0-9\p{L}\p{M}\p{N}@:%._\+~#=]{1,256}\.[a-z\p{L}]+(?:[/#?][-a-zA-Z0-9\p{L}\p{M}\p{N}@:%_\+*.~#!?&/=\(\);,'">\^{}\[\]` + "`" + `]*)?`)
+	// bareURL and bareWWW are goldmark's linkify patterns with non-ASCII added to the
+	// host and the path, so that an address in any script — and a path ending in € or
+	// ☕ — is matched to its end, and with * added to the path, which GFM allows there
+	// and linkify already trims from a link's end. Non-ASCII spaces, punctuation and
+	// controls are left out: a curly quote, a dash or a no-break space still ends a
+	// link, as punctuation after one should.
+	bareURL = regexp.MustCompile(`^(?:http|https|ftp)://` + bareHost + `(?::\d+)?(?:[/#?]` + barePath + `)?`)
+	bareWWW = regexp.MustCompile(`^www\.` + bareHost + `(?:[/#?]` + barePath + `)?`)
+)
+
+const (
+	nonASCIIInLink = `[^\x00-\x7f\p{Z}\p{P}\p{C}]`
+	bareHost       = `(?:[-a-zA-Z0-9@:%._\+~#=]|` + nonASCIIInLink + `){1,256}\.[a-z\p{L}]+`
+	barePath       = `(?:[-a-zA-Z0-9@:%_+*.~#$!?&/=\(\);,'">\^{}\[\]` + "`" + `]|` + nonASCIIInLink + `)*`
 )
 
 // replacement swaps the source between start and stop for text.
