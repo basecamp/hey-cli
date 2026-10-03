@@ -59,7 +59,9 @@ func linkedRender(out string, selected int) LinkedRender {
 								endLine := line + strings.Count(out[contentStart:closeStart], "\n")
 								content := out[contentStart:closeStart]
 								if destination != currentDestination || currentComplete {
-									links = append(links, LinkOccurrence{Destination: destination, StartLine: startLine, EndLine: endLine})
+									// The destination is ASCII on the wire (percentEncodeNonASCII);
+									// a reader is shown, and a browser handed, the characters.
+									links = append(links, LinkOccurrence{Destination: decodeNonASCII(destination), StartLine: startLine, EndLine: endLine})
 									currentDestination = destination
 									currentShownDestination = false
 									currentShownText = ""

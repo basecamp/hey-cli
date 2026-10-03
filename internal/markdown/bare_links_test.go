@@ -138,6 +138,24 @@ func TestRenderLinksBareURLsWhole(t *testing.T) {
 			[]string{"mailto:o'brien@example.com"},
 		},
 		{
+			"an emoji sequence in its path",
+			"<p>Album: https://photos.example.com/albums/family_\U0001F468\u200d\U0001F469\u200d\U0001F467 today</p>",
+			"https://photos.example.com/albums/family_\U0001F468\u200d\U0001F469\u200d\U0001F467 today",
+			[]string{"https://photos.example.com/albums/family_\U0001F468\u200d\U0001F469\u200d\U0001F467"},
+		},
+		{
+			"full-width brackets in its path",
+			`<p>資料：https://docs.example.com/資料_（最終版） です</p>`,
+			"https://docs.example.com/資料_（最終版） です",
+			[]string{"https://docs.example.com/資料_（最終版）"},
+		},
+		{
+			"corner brackets around it",
+			`<p>「https://docs.example.com/資料_最終版」を見て</p>`,
+			"「https://docs.example.com/資料_最終版」を見て",
+			[]string{"https://docs.example.com/資料_最終版"},
+		},
+		{
 			"a www address",
 			`<p>Tickets at www.ferries.example.com/harbour_line?day=2&amp;seats=6 today</p>`,
 			"http://www.ferries.example.com/harbour_line?day=2&seats=6 today",
@@ -214,6 +232,32 @@ func TestRenderLinksBareURLsWhole(t *testing.T) {
 				t.Errorf("output escaped containment: %q", linked.Text)
 			}
 		})
+	}
+}
+
+// A link to a page named in Japanese used to reach the terminal with a C1 control in
+// its destination, and the containment check then stripped the whole body of its
+// styling. Every link keeps its styling, opens the page, and shows its characters.
+func TestRenderKeepsLinksWithNonASCIIDestinations(t *testing.T) {
+	const page = "https://docs.example.com/資料_最終版"
+	for _, html := range []string{
+		`<p>See <a href="` + page + `">the files</a> today</p>`,
+		`<p><a href="` + page + `">` + page + `</a></p>`,
+		`<p>See ` + page + ` today</p>`,
+	} {
+		linked := RenderLinked(htmlutil.ToMarkdown(html), 200, -1)
+		if !strings.Contains(linked.Text, "\x1b[") {
+			t.Errorf("%s: rendered without styling: %q", html, linked.Text)
+		}
+		if !strings.Contains(visible(linked.Text), page) {
+			t.Errorf("%s: shows %q, want %q in it", html, visible(linked.Text), page)
+		}
+		if len(linked.Links) == 0 || linked.Links[0].Destination != page {
+			t.Errorf("%s: links = %#v, want %q", html, linked.Links, page)
+		}
+		if strings.ContainsFunc(linked.Text, func(r rune) bool { return r >= 0x80 && r <= 0x9f }) {
+			t.Errorf("%s: output carries a C1 control: %q", html, linked.Text)
+		}
 	}
 }
 

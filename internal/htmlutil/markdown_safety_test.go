@@ -392,6 +392,24 @@ func TestToMarkdownAutolinkOnlyForAbsoluteURLs(t *testing.T) {
 	}
 }
 
+// A destination's non-ASCII is written percent-encoded, which is the same address, and
+// what the sanitizer removes — a zero width space — is gone rather than encoded.
+func TestToMarkdownDestinationEncodesNonASCII(t *testing.T) {
+	for _, test := range []struct{ html, want, url string }{
+		{`<a href="https://docs.example.com/資料">the files</a>`, "[the files](https://docs.example.com/%e8%b3%87%e6%96%99)", "https://docs.example.com/資料"},
+		{`<a href="https://docs.example.com/資料">https://docs.example.com/資料</a>`, "[https://docs.example.com/資料](https://docs.example.com/%e8%b3%87%e6%96%99)", "https://docs.example.com/資料"},
+		{"<a href=\"https://docs.example.com/room\u200b_list\">the rooms</a>", "[the rooms](https://docs.example.com/room_list)", "https://docs.example.com/room_list"},
+	} {
+		got := toMarkdown("<p>" + test.html + "</p>")
+		if got != test.want {
+			t.Errorf("%s: ToMarkdown = %q, want %q", test.html, got, test.want)
+		}
+		if links := renderedLinks(t, got); len(links) != 1 || links[0] != test.url {
+			t.Errorf("%s: rendered links = %q, want %q", test.html, links, test.url)
+		}
+	}
+}
+
 // An autolink's entities are decoded by some renderers and read verbatim by others, so
 // a link that is its own URL, with an entity spelled out in that URL, is written as a
 // link whose destination every renderer decodes alike — and still reads as the URL.
@@ -426,7 +444,7 @@ func TestToMarkdownDeceptiveLabelShowsTheDestination(t *testing.T) {
 		{"a www host", "www.bank.example", "https://evil.example", "[www.bank.example](https://evil.example)"},
 		{"a bare host and path", "bank.example/login", "https://evil.example/login", "[bank.example/login](https://evil.example/login)"},
 		{"the same host, a different path", "https://bank.example/", "https://bank.example/login", "[https://bank.example/](https://bank.example/login)"},
-		{"a label that is its href", homoglyphHost, homoglyphHost, "<" + homoglyphHost + ">"},
+		{"a label that is its href", homoglyphHost, homoglyphHost, "[" + homoglyphHost + "](https://p%d0%b0ypal.com/login)"},
 	} {
 		got := toMarkdown(`<p><a href="` + test.href + `">` + test.label + `</a></p>`)
 		if got != test.want {

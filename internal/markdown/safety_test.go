@@ -336,7 +336,10 @@ func FuzzContainment(f *testing.F) {
 			if link.StartLine < 0 || link.EndLine < link.StartLine {
 				t.Fatalf("RenderLinked(%q) returned invalid range %#v", md, link)
 			}
-			if !strings.Contains(linked.Text, ";"+link.Destination+"\a") && !strings.Contains(linked.Text, ";"+link.Destination+"\x1b\\") {
+			// A destination is reported with its non-ASCII decoded, and sits in the
+			// OSC 8 sequence percent-encoded.
+			uri := percentEncodeNonASCII(link.Destination)
+			if !strings.Contains(linked.Text, ";"+uri+"\a") && !strings.Contains(linked.Text, ";"+uri+"\x1b\\") {
 				t.Fatalf("RenderLinked(%q) returned destination %q without a matching OSC 8 occurrence", md, link.Destination)
 			}
 		}

@@ -15,9 +15,10 @@ import (
 var reBareURL = regexp.MustCompile(`(?i:https?)://[^\s\p{Z}\x1b\x07<>"\x00-\x1f]+`)
 
 // Hyperlink wraps text in an OSC 8 terminal hyperlink sequence, returning it
-// unchanged when there is no URL to link to.
+// unchanged when there is no URL to link to. The destination's non-ASCII is
+// percent-encoded, for the reason percentEncodeNonASCII gives.
 func Hyperlink(text, url string) string {
-	url = sanitizeURL(url)
+	url = percentEncodeNonASCII(sanitizeURL(url))
 	if url == "" {
 		return text
 	}

@@ -58,9 +58,14 @@ const (
 	// matches.
 	otherLocalPart = "!#$%&'*/=?^`{|}~"
 
-	nonASCIIInLink = `[^\x00-\x7f\p{Z}\p{P}\p{C}]`
+	// nonASCIIInLink is what a link may hold beyond ASCII: anything but spaces,
+	// punctuation and controls, and the zero width joiner an emoji sequence is built
+	// with. A path also takes the brackets of other scripts — （最終版） — which
+	// trimLinkEnd balances as it balances ( and ).
+	nonASCIIInLink = `[^\x00-\x7f\p{Z}\p{P}\p{C}]|\x{200D}`
+	nonASCIIInPath = nonASCIIInLink + `|[^\x00-\x7f\P{Ps}]|[^\x00-\x7f\P{Pe}]`
 	bareHost       = `(?:[-a-zA-Z0-9@:%._\+~#=]|` + nonASCIIInLink + `){1,256}\.(?:[a-zA-Z]|\p{L})+`
-	barePath       = `(?:[-a-zA-Z0-9@:%_+*.~#$!?&/=\(\);,'\^{}\[\]` + "`" + `]|` + nonASCIIInLink + `)*`
+	barePath       = `(?:[-a-zA-Z0-9@:%_+*.~#$!?&/=\(\);,'\^{}\[\]` + "`" + `]|` + nonASCIIInPath + `)*`
 )
 
 // replacement swaps the source between start and stop for text.
@@ -156,11 +161,119 @@ func bareLinksIn(source []byte, start, stop int) []replacement {
 	plain, at := unescapeProse(run)
 	var found []replacement
 	for _, link := range findBareLinks(string(plain)) {
-		if autolinks(link.target) {
-			found = append(found, replacement{start + at[link.start], start + at[link.end], "<" + link.target + ">"})
+		if target := percentEncodeNonASCII(link.target); autolinks(target) {
+			found = append(found, replacement{start + at[link.start], start + at[link.end], "<" + target + ">"})
 		}
 	}
 	return found
+}
+
+// The ANSI parser glamour and lipgloss share mistakes a UTF-8 continuation byte inside
+// an escape sequence's parameters for a C1 control: the "最" in https://example.com/最終版
+// comes out of glamour's hyperlink as a C1 control — and the containment check, rightly,
+// then strips the whole body of its styling — and anything that measures or strips a
+// line with such a hyperlink in it misreads the sequence. A hyperlink's destination is
+// therefore kept ASCII: a link's non-ASCII is handed to glamour percent-encoded, which
+// is the URI a browser opens anyway, and restoreNonASCIILinks decodes it again in the
+// text glamour shows. The encoding is lowercase hex, which the RFC allows and almost
+// nothing writes, so what is decoded afterwards is what was encoded here.
+func percentEncodeNonASCII(s string) string {
+	if isASCII(s) {
+		return s
+	}
+	const digits = "0123456789abcdef"
+	var b strings.Builder
+	b.Grow(len(s) * 3)
+	for i := range len(s) {
+		if c := s[i]; c >= utf8.RuneSelf {
+			b.Write([]byte{'%', digits[c>>4], digits[c&0x0f]})
+		} else {
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
+// encodedNonASCII is a run of lowercase percent-encoded bytes at or above 0x80, as
+// percentEncodeNonASCII writes them.
+var encodedNonASCII = regexp.MustCompile(`(?:%[89a-f][0-9a-f])+`)
+
+// restoreNonASCIILinks decodes, in the text of each hyperlink glamour wrote — never in
+// its destination — what percentEncodeNonASCII encoded. A run is decoded only when it is
+// whole UTF-8 of characters a bare link may hold, so a line glamour wrapped in the
+// middle of one stays encoded rather than turning into something else. glamour ends its
+// hyperlink sequences with BEL; one that ends otherwise is left for contain to judge.
+func restoreNonASCIILinks(out string) string {
+	if !strings.Contains(out, "\x1b]8;") || !encodedNonASCII.MatchString(out) {
+		return out
+	}
+	var b strings.Builder
+	b.Grow(len(out))
+	inLink := false
+	for {
+		start := strings.Index(out, "\x1b]8;")
+		if start < 0 {
+			break
+		}
+		end := strings.IndexByte(out[start:], '\a')
+		if end < 0 {
+			break
+		}
+		end += start + 1
+		if inLink {
+			b.WriteString(decodeNonASCII(out[:start]))
+		} else {
+			b.WriteString(out[:start])
+		}
+		sequence := out[start:end]
+		b.WriteString(sequence)
+		// A sequence with no destination — "\x1b]8;;\a" — closes the link.
+		inLink = !strings.HasSuffix(sequence, ";\a")
+		out = out[end:]
+	}
+	b.WriteString(out)
+	return b.String()
+}
+
+func decodeNonASCII(s string) string {
+	return encodedNonASCII.ReplaceAllStringFunc(s, func(run string) string {
+		decoded := make([]byte, 0, len(run)/3)
+		for i := 0; i+2 < len(run); i += 3 {
+			decoded = append(decoded, unhex(run[i+1])<<4|unhex(run[i+2]))
+		}
+		if !utf8.Valid(decoded) {
+			return run
+		}
+		for _, r := range string(decoded) {
+			if !linkRune(r) {
+				return run
+			}
+		}
+		return string(decoded)
+	})
+}
+
+func isASCII(s string) bool {
+	for i := range len(s) {
+		if s[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
+}
+
+func unhex(c byte) byte {
+	if c >= 'a' {
+		return c - 'a' + 10
+	}
+	return c - '0'
+}
+
+// linkRune reports whether r is non-ASCII a bare link may hold — the nonASCIIInPath
+// pattern as a predicate.
+func linkRune(r rune) bool {
+	return r >= utf8.RuneSelf && (r == '‍' ||
+		!unicode.In(r, unicode.Z, unicode.P, unicode.C) || unicode.In(r, unicode.Ps, unicode.Pe))
 }
 
 // bareLink is a link found in plain text: the bytes it spans, and what it links to.
@@ -226,19 +339,43 @@ func urlAt(s string, i int) (bareLink, bool) {
 	default:
 		return bareLink{}, false
 	}
-	if before, _ := utf8.DecodeLastRuneInString(s[:i]); i > 0 && (unicode.IsLetter(before) || unicode.IsDigit(before)) {
+	// Only an ASCII letter or digit in front keeps a link from starting — xhttps:// is
+	// not a scheme — since Chinese and Japanese put no space before one: 詳細はhttps://…
+	if i > 0 && isAlphanumeric(s[i-1:i]) {
 		return bareLink{}, false
 	}
 	if m := bareURL.FindString(s[i:]); m != "" {
-		if url := trimLinkEnd(m); strings.Contains(url[strings.Index(url, "://")+3:], ".") {
+		if url := trimLinkEnd(cutAtUnopenedBracket(m)); strings.Contains(url[strings.Index(url, "://")+3:], ".") {
 			return bareLink{i, i + len(url), url}, true
 		}
 	}
 	if m := bareWWW.FindString(s[i:]); m != "" {
-		url := trimLinkEnd(m)
+		url := trimLinkEnd(cutAtUnopenedBracket(m))
 		return bareLink{i, i + len(url), "http://" + url}, true
 	}
 	return bareLink{}, false
+}
+
+// cutAtUnopenedBracket ends a link at the first non-ASCII closing bracket it did not
+// open. Chinese and Japanese put no space after a link either, so the 」 that closes a
+// quotation around one is followed by the sentence, which would otherwise run on into
+// the link; a path's own （最終版） is opened in it and stays.
+func cutAtUnopenedBracket(url string) string {
+	open := map[string]int{}
+	for i, r := range url {
+		if r < utf8.RuneSelf {
+			continue
+		}
+		if opener := openingBracket[r]; opener != "" {
+			if open[opener] == 0 {
+				return url[:i]
+			}
+			open[opener]--
+		} else if unicode.Is(unicode.Ps, r) {
+			open[string(r)]++
+		}
+	}
+	return url
 }
 
 func overlaps(links []bareLink, span bareLink) bool {
@@ -261,7 +398,7 @@ func inside(links []bareLink, at int) bool {
 
 // trimLinkEnd takes off the end of a link what GFM leaves outside one: the punctuation
 // a sentence puts after a link (? ! . , : * _ ~ ' " and a backtick), a closing bracket
-// with no opening one in the link, an entity-shaped "&name;", a ";", and punctuation
+// — ) or a full-width ） among them — with no opening one in the link, an entity-shaped "&name;", a ";", and punctuation
 // outside ASCII — a closing curly quote, a guillemet, an ellipsis. It is the one rule
 // for both passes, so a link ends in the same place whatever stands in front of it.
 func trimLinkEnd(url string) string {
@@ -275,12 +412,11 @@ func trimLinkEnd(url string) string {
 			if amp := strings.LastIndexByte(url, '&'); amp >= 0 && amp < len(url)-1 && isAlphanumeric(url[amp+1:]) {
 				url = url[:amp]
 			}
-		case last == ')' || last == ']' || last == '}':
-			open := map[rune]string{')': "(", ']': "[", '}': "{"}[last]
-			if strings.Count(url, open) >= strings.Count(url, string(last)) {
+		case openingBracket[last] != "":
+			if strings.Count(url, openingBracket[last]) >= strings.Count(url, string(last)) {
 				return url
 			}
-			url = url[:len(url)-1]
+			url = url[:len(url)-size]
 		case last >= utf8.RuneSelf && unicode.IsPunct(last):
 			url = url[:len(url)-size]
 		default:
@@ -288,6 +424,13 @@ func trimLinkEnd(url string) string {
 		}
 	}
 	return url
+}
+
+// openingBracket pairs each closing bracket a link may end with to the one that opens
+// it, in ASCII and in the full-width and CJK forms.
+var openingBracket = map[rune]string{
+	')': "(", ']': "[", '}': "{",
+	'）': "（", '］': "［", '｝': "｛", '」': "「", '』': "『", '】': "【", '〕': "〔", '〉': "〈", '》': "《",
 }
 
 func isAlphanumeric(s string) bool {
