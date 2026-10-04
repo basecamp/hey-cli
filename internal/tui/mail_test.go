@@ -135,6 +135,10 @@ func mailWithTestServer(t *testing.T, status int) (*mailView, *recordedMailReque
 			_, _ = w.Write([]byte(`[{"id":501,"kind":"message","summary":"Hello world","created_at":"2026-08-19T09:00:00Z","creator":{"id":10,"name":"Alice"}}]`))
 		case "/messages/501.json":
 			_, _ = w.Write([]byte(`{"id":501,"subject":"Hello world","content":"<p>Message body</p>","created_at":"2026-08-19T09:00:00Z","creator":{"id":10,"name":"Alice"}}`))
+		case "/topics/101/entries.json":
+			_, _ = w.Write([]byte(`[{"id":502,"kind":"message","summary":"Invoice #2041","created_at":"2026-08-18T15:00:00Z","creator":{"id":22,"name":"Fastmail Billing"}}]`))
+		case "/messages/502.json":
+			_, _ = w.Write([]byte(`{"id":502,"subject":"Invoice #2041 from Fastmail","content":"<p>Invoice attached</p>","created_at":"2026-08-18T15:00:00Z","creator":{"id":22,"name":"Fastmail Billing"}}`))
 		default:
 			if r.Method == http.MethodDelete {
 				for _, value := range strings.Split(r.URL.Query().Get("posting_ids"), ",") {
@@ -4271,12 +4275,49 @@ func TestMailViewJumpsToPreviouslySeen(t *testing.T) {
 }
 
 func TestMailViewPreviouslySeenIsANoOpWhileOpen(t *testing.T) {
-	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
 
 	loaded, _ := runCmd(v.handleBoxShortcut("9")).(seenLoadedMsg)
 	v.Update(loaded)
+	requestCount := len(recorded.requests)
 	if cmd := v.handleBoxShortcut("9"); cmd != nil {
 		t.Error("9 on the seen screen should do nothing")
+	}
+	if len(recorded.requests) != requestCount {
+		t.Errorf("9 made %d requests, want no refetch", len(recorded.requests)-requestCount)
+	}
+}
+
+func TestMailViewPreviouslySeenShortcutClosesItsThread(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+
+	loaded, _ := runCmd(v.handleBoxShortcut("9")).(seenLoadedMsg)
+	more, _ := v.Update(loaded)
+	v.Update(runCmd(more))
+	v.seenList.moveDown()
+	v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+	if !v.inThread || !v.seenActive {
+		t.Fatalf("thread state = open:%v seen:%v, want a thread open from Previously Seen", v.inThread, v.seenActive)
+	}
+	seenIDs := postingIDsOf(v.seenList.postings)
+	seenCursor := v.seenList.cursor
+	seenPostingID := v.seenList.selectedPosting().ID
+	requestCount := len(recorded.requests)
+
+	if cmd := v.handleBoxShortcut("9"); cmd == nil {
+		t.Fatal("9 in a thread opened from Previously Seen should be handled")
+	}
+	if v.inThread || !v.seenActive {
+		t.Errorf("9 landed on open:%v seen:%v, want the Previously Seen list", v.inThread, v.seenActive)
+	}
+	if ids := postingIDsOf(v.seenList.postings); !slices.Equal(ids, seenIDs) || v.seenList.cursor != seenCursor {
+		t.Errorf("Previously Seen list changed: postings=%v cursor=%d, want postings=%v cursor=%d", ids, v.seenList.cursor, seenIDs, seenCursor)
+	}
+	if posting := v.seenList.selectedPosting(); posting == nil || posting.ID != seenPostingID {
+		t.Errorf("Previously Seen selection = %+v, want posting %d", posting, seenPostingID)
+	}
+	if len(recorded.requests) != requestCount {
+		t.Errorf("9 made %d requests, want no refetch", len(recorded.requests)-requestCount)
 	}
 }
 
