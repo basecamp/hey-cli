@@ -129,8 +129,11 @@ func mailWithTestServer(t *testing.T, status int) (*mailView, *recordedMailReque
 				_, _ = w.Write([]byte(`{"id":1,"postings":[{"id":611,"kind":"topic","name":"Weekly team sync notes","seen":true,"app_url":"https://app.hey.com/topics/100","created_at":"2026-08-20T09:00:00Z","creator":{"id":21,"name":"Claire Lee"}}],"next_history_url":"/imbox?page=seen-page-2"}`))
 			case "seen-page-2":
 				_, _ = w.Write([]byte(`{"id":1,"postings":[{"id":612,"kind":"topic","name":"Invoice #2041 from Fastmail","seen":true,"app_url":"https://app.hey.com/topics/101","created_at":"2026-08-18T15:00:00Z","creator":{"id":22,"name":"Fastmail Billing"}}],"next_history_url":"/imbox?page=seen-page-3"}`))
-			default:
+			case "seen-page-3":
 				_, _ = w.Write([]byte(`{"id":1,"postings":[{"id":613,"kind":"topic","name":"Travel receipt","seen":true,"app_url":"https://app.hey.com/topics/102","created_at":"2026-08-17T11:00:00Z","creator":{"id":23,"name":"Jamie Rivera"}}]}`))
+			default:
+				t.Errorf("unexpected Previously Seen page %q", r.URL.Query().Get("page"))
+				http.Error(w, "unexpected page", http.StatusBadRequest)
 			}
 		case "/contacts/88.json":
 			_, _ = w.Write([]byte(`{"id":88,"name":"GitHub","entries_title":"All threads with GitHub","postings":[{"id":513,"kind":"topic","name":"Deploy failed on main","seen":true,"app_url":"https://app.hey.com/topics/100","created_at":"2026-08-25T09:00:00Z","creator":{"id":88,"name":"GitHub"}},{"id":514,"kind":"topic","name":"Nightly build is green again","seen":true,"app_url":"https://app.hey.com/topics/101","created_at":"2026-08-24T21:00:00Z","creator":{"id":88,"name":"GitHub"}}]}`))
