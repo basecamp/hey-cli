@@ -18,7 +18,9 @@ func testStore(t *testing.T) *Store {
 	return NewStore(t.TempDir())
 }
 
+// fakeKeyring is safe for concurrent use, as the system keychain it stands in for is.
 type fakeKeyring struct {
+	mu        sync.Mutex
 	values    map[string]string
 	setErr    error
 	getErr    error
@@ -33,6 +35,8 @@ func (f *fakeKeyring) Set(service, user, password string) error {
 	if f.setErr != nil {
 		return f.setErr
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.values[service+"/"+user] = password
 	return nil
 }
@@ -41,6 +45,8 @@ func (f *fakeKeyring) Get(service, user string) (string, error) {
 	if f.getErr != nil {
 		return "", f.getErr
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	value, ok := f.values[service+"/"+user]
 	if !ok {
 		return "", keyringlib.ErrNotFound
@@ -52,6 +58,8 @@ func (f *fakeKeyring) Delete(service, user string) error {
 	if f.deleteErr != nil {
 		return f.deleteErr
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	delete(f.values, service+"/"+user)
 	return nil
 }

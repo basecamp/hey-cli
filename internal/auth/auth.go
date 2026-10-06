@@ -286,6 +286,7 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
 		RefreshToken:  token.RefreshToken,
 		OAuthType:     "oauth",
 		TokenEndpoint: tokenEndpoint,
+		InstallID:     installID,
 	}
 	if !token.ExpiresAt.IsZero() {
 		creds.ExpiresAt = token.ExpiresAt.Unix()
@@ -435,9 +436,9 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 		tokenEndpoint = m.baseURL + "/oauth/tokens"
 	}
 
-	installID, err := m.store.installID()
+	installID, err := m.credentialInstallID(creds)
 	if err != nil {
-		return fmt.Errorf("install id: %w", err)
+		return err
 	}
 
 	token, err := refreshOAuthToken(ctx, m.httpClient, tokenEndpoint, creds.RefreshToken, oauthClientID, installID)
@@ -466,6 +467,36 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 	}
 	m.cachedCredentials = cloneCredentials(creds)
 	return nil
+}
+
+// credentialInstallID is the install a refresh presents: the one the tokens were issued
+// to. Credentials saved before they carried one were issued to this config directory's
+// install_id — the one every earlier login and refresh presented — so they take it when
+// the directory still holds a well-formed one, and HEY's binding of their family
+// matches. Without one they take an id derived from the refresh token, the same for every
+// holder of the credential, never a freshly minted one. The refresh's own save keeps
+// whichever they took, so every later refresh, from any config directory sharing the
+// keychain entry, presents it too.
+//
+// A stored id that isn't a well-formed install id is refused here rather than sent: HEY
+// would read it as another install and revoke the session, and substituting one would be
+// another install too. Signing in again stores a fresh one.
+func (m *Manager) credentialInstallID(creds *Credentials) (string, error) {
+	if creds.InstallID == "" {
+		directoryID, err := m.store.existingInstallID()
+		switch {
+		case err != nil:
+			return "", fmt.Errorf("install id: %w", err)
+		case directoryID != "":
+			creds.InstallID = directoryID
+		default:
+			creds.InstallID = adoptedInstallID(creds.RefreshToken)
+		}
+	}
+	if !isInstallID(creds.InstallID) {
+		return "", fmt.Errorf("stored credentials carry a malformed install_id; run `hey login` to sign in again")
+	}
+	return creds.InstallID, nil
 }
 
 // accountForRefreshFailure decides what a failed refresh costs the stored credential.

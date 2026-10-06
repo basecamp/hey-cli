@@ -212,6 +212,9 @@ func TestLoginOAuthFlow(t *testing.T) {
 	if creds.ExpiresAt <= time.Now().Unix() {
 		t.Errorf("ExpiresAt = %d, want future expiry", creds.ExpiresAt)
 	}
+	if creds.InstallID != installID {
+		t.Errorf("credentials InstallID = %q, want the install they were issued to, %q", creds.InstallID, installID)
+	}
 }
 
 func TestLoginDoesNotSaveCredentialsOnFailure(t *testing.T) {
