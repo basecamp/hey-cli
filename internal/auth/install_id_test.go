@@ -141,17 +141,35 @@ func TestDirectoriesSharingAKeychainEntryRefreshAsOneInstall(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
+	errs := make(chan error, 2)
 	for _, mgr := range []*Manager{first, second} {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _ = mgr.AccessToken(t.Context())
+			_, err := mgr.AccessToken(t.Context())
+			errs <- err
 		}()
 	}
-	<-arrived
-	<-arrived // both refreshes are in flight at once: their locks didn't serialize them
-	close(release)
+	timeout := time.After(10 * time.Second)
+	for range 2 {
+		select {
+		case <-arrived:
+		case err := <-errs:
+			close(release)
+			t.Fatalf("a refresh returned before reaching HEY: %v", err)
+		case <-timeout:
+			close(release)
+			t.Fatal("both refreshes never reached HEY at once")
+		}
+	}
+	close(release) // both refreshes were in flight at once: their locks didn't serialize them
 	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Errorf("AccessToken: %v", err)
+		}
+	}
 
 	want := adoptedInstallID("legacy-refresh")
 	if len(presented) != 2 || presented[0] != want || presented[1] != want {
