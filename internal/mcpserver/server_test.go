@@ -59,13 +59,13 @@ func TestServerListsGatewayTools(t *testing.T) {
 	_, session := connect(t, &fakeAPI{}, Config{})
 
 	tools := mcptest.ListTools(t, session)
-	for _, name := range []string{"hey_boxes", "hey_search", "hey_threads", "hey_contacts", "hey_todos", "hey_calendar", "hey_identity"} {
+	for _, name := range []string{"hey_boxes", "hey_search", "hey_threads", "hey_contacts", "hey_todos", "hey_calendar", "hey_timetracks", "hey_habits", "hey_journal", "hey_identity"} {
 		if _, ok := tools[name]; !ok {
 			t.Errorf("missing tool %q", name)
 		}
 	}
-	if len(tools) != 7 {
-		t.Errorf("tools/list returned %d tools, want 7", len(tools))
+	if len(tools) != 10 {
+		t.Errorf("tools/list returned %d tools, want 10", len(tools))
 	}
 }
 
