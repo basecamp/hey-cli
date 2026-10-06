@@ -164,7 +164,13 @@ func newAuthStatusCommand() *cobra.Command {
 			// they refresh as; HEY_TOKEN bypasses them, so it leaves them unread.
 			installID, _ := authMgr.GetStore().InstallID()
 			if os.Getenv("HEY_TOKEN") == "" {
-				if credentialInstallID := authMgr.RefreshInstallID(); credentialInstallID != "" {
+				credentialInstallID, err := authMgr.RefreshInstallID()
+				switch {
+				case err != nil:
+					// No refresh will present an id, so report none rather than the directory's.
+					installID = ""
+					status["install_id_error"] = err.Error()
+				case credentialInstallID != "":
 					installID = credentialInstallID
 				}
 			}

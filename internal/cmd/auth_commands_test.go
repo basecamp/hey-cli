@@ -516,8 +516,20 @@ func TestAuthStatusReportsTheCredentialsInstall(t *testing.T) {
 	if err := manager.GetStore().Save(manager.CredentialKey(), creds); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
+	adopted, err := manager.RefreshInstallID()
+	if err != nil {
+		t.Fatalf("RefreshInstallID: %v", err)
+	}
 	got := statusInstallID(t, configHome, server.URL, "")
-	if got == directoryID || got == "" || got != manager.RefreshInstallID() {
-		t.Errorf("status install_id = %q, want the id the next refresh adopts (%q), not the directory's %q", got, manager.RefreshInstallID(), directoryID)
+	if got == directoryID || got == "" || got != adopted {
+		t.Errorf("status install_id = %q, want the id the next refresh adopts (%q), not the directory's %q", got, adopted, directoryID)
+	}
+
+	creds.InstallID = "not-an-install"
+	if err := manager.GetStore().Save(manager.CredentialKey(), creds); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if got := statusInstallID(t, configHome, server.URL, ""); got != "" {
+		t.Errorf("status install_id = %q with a malformed stored id, want none: no refresh will present one", got)
 	}
 }

@@ -491,14 +491,20 @@ func credentialInstallID(creds *Credentials) (string, error) {
 }
 
 // RefreshInstallID is the install the next refresh will present, or "" when the stored
-// credential has no refresh token.
-func (m *Manager) RefreshInstallID() string {
+// credential has no refresh token. It errs when the stored install_id is malformed, since
+// no refresh will present anything.
+func (m *Manager) RefreshInstallID() (string, error) {
 	creds, err := m.store.Load(m.baseURL)
-	if err != nil || creds.RefreshToken == "" {
-		return ""
+	switch {
+	case errors.Is(err, ErrCredentialsNotFound):
+		return "", nil
+	case err != nil:
+		return "", err
+	case creds.RefreshToken == "":
+		return "", nil
+	default:
+		return credentialInstallID(creds)
 	}
-	installID, _ := credentialInstallID(creds)
-	return installID
 }
 
 // accountForRefreshFailure decides what a failed refresh costs the stored credential.
