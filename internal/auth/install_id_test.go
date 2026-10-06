@@ -136,6 +136,13 @@ func (b *bindingServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = fmt.Fprintf(w, `{"access_token":"access-%d","refresh_token":"refresh-%d","expires_in":3600}`, len(b.presented), len(b.presented))
 }
 
+// snapshot is what the server has seen, read under its lock.
+func (b *bindingServer) snapshot() (presented []string, revoked bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]string(nil), b.presented...), b.revoked
+}
+
 func legacyCredentials() *Credentials {
 	return &Credentials{AccessToken: "expired", RefreshToken: "legacy-refresh", ExpiresAt: time.Now().Add(-time.Hour).Unix()}
 }
@@ -175,8 +182,8 @@ func TestUpgradedCredentialsRefreshAsTheDirectoryTheyWereIssuedTo(t *testing.T) 
 		t.Fatalf("AccessToken: %v", err)
 	}
 
-	if hey.revoked || len(hey.presented) != 1 || hey.presented[0] != directoryID {
-		t.Errorf("presented %q (revoked %v), want the directory's %q", hey.presented, hey.revoked, directoryID)
+	if presented, revoked := hey.snapshot(); revoked || len(presented) != 1 || presented[0] != directoryID {
+		t.Errorf("presented %q (revoked %v), want the directory's %q", presented, revoked, directoryID)
 	}
 	stored, err := mgr.GetStore().Load(mgr.CredentialKey())
 	if err != nil {
@@ -216,8 +223,8 @@ func TestDirectoriesSharingAKeychainEntryConvergeOnOneInstall(t *testing.T) {
 		t.Fatalf("second AccessToken: %v", err)
 	}
 
-	if hey.revoked || len(hey.presented) != 2 || hey.presented[0] != firstDirID || hey.presented[1] != firstDirID {
-		t.Errorf("presented %q (revoked %v), want the first directory's %q both times, never the second's %q", hey.presented, hey.revoked, firstDirID, secondDirID)
+	if presented, revoked := hey.snapshot(); revoked || len(presented) != 2 || presented[0] != firstDirID || presented[1] != firstDirID {
+		t.Errorf("presented %q (revoked %v), want the first directory's %q both times, never the second's %q", presented, revoked, firstDirID, secondDirID)
 	}
 }
 
@@ -239,8 +246,8 @@ func TestCredentialsWithoutADirectoryIDAdoptTheDerivedOneWithoutMinting(t *testi
 	}
 
 	want := adoptedInstallID("legacy-refresh")
-	if len(hey.presented) != 1 || hey.presented[0] != want {
-		t.Errorf("presented %q, want the derived %q", hey.presented, want)
+	if presented, _ := hey.snapshot(); len(presented) != 1 || presented[0] != want {
+		t.Errorf("presented %q, want the derived %q", presented, want)
 	}
 	if _, err := os.Stat(mgr.GetStore().installIDPath()); !os.IsNotExist(err) {
 		t.Errorf("install_id file exists (err %v); a refresh must not mint one", err)
@@ -271,8 +278,9 @@ func TestAMalformedDirectoryIDFallsBackToTheDerivedOne(t *testing.T) {
 		t.Fatalf("AccessToken: %v", err)
 	}
 
-	if want := adoptedInstallID("legacy-refresh"); len(hey.presented) != 1 || hey.presented[0] != want {
-		t.Errorf("presented %q, want the derived %q", hey.presented, want)
+	want := adoptedInstallID("legacy-refresh")
+	if presented, _ := hey.snapshot(); len(presented) != 1 || presented[0] != want {
+		t.Errorf("presented %q, want the derived %q", presented, want)
 	}
 	if data, _ := os.ReadFile(path); string(data) != "truncat" {
 		t.Errorf("install_id file = %q, want it left as it was", data)

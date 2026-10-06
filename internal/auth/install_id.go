@@ -46,7 +46,7 @@ func (s *Store) installID() (string, error) {
 // existingInstallID is this directory's install_id when its file holds a well-formed one,
 // and "" otherwise. It never mints.
 func (s *Store) existingInstallID() (string, error) {
-	data, err := os.ReadFile(s.installIDPath())
+	data, err := os.ReadFile(s.installIDPath()) // #nosec G304 -- path built from the store's own config directory
 	switch {
 	case os.IsNotExist(err):
 		return "", nil
