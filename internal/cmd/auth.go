@@ -160,10 +160,13 @@ func newAuthStatusCommand() *cobra.Command {
 			// status path — env token and logged-out included, both of which
 			// return before the signed-in path — so the JSON and styled output
 			// stay consistent and can diagnose HEY's new-device alerts. Signed
-			// in, the one that counts is the install the tokens were issued to.
+			// in with stored OAuth credentials, the one that counts is the install
+			// they refresh as; HEY_TOKEN bypasses them, so it leaves them unread.
 			installID, _ := authMgr.GetStore().InstallID()
-			if credentialInstallID := authMgr.RefreshInstallID(); credentialInstallID != "" {
-				installID = credentialInstallID
+			if os.Getenv("HEY_TOKEN") == "" {
+				if credentialInstallID := authMgr.RefreshInstallID(); credentialInstallID != "" {
+					installID = credentialInstallID
+				}
 			}
 			if installID != "" {
 				status["install_id"] = installID

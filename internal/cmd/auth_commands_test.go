@@ -508,6 +508,9 @@ func TestAuthStatusReportsTheCredentialsInstall(t *testing.T) {
 	if got := statusInstallID(t, configHome, server.URL, ""); got != issuedTo {
 		t.Errorf("status install_id = %q, want the credentials' %q, not the directory's %q", got, issuedTo, directoryID)
 	}
+	if got := statusInstallID(t, configHome, server.URL, "environment-token"); got != directoryID {
+		t.Errorf("status install_id with HEY_TOKEN = %q, want the directory's %q: the stored credentials aren't in use", got, directoryID)
+	}
 
 	creds.InstallID = ""
 	if err := manager.GetStore().Save(manager.CredentialKey(), creds); err != nil {
