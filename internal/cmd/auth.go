@@ -147,6 +147,16 @@ func newAuthStatusCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "Show authentication status",
+		Long: `Show authentication status.
+
+install_id is the install HEY knows this CLI as. Signed in with OAuth credentials, it is
+the install those credentials refresh as: the one they were issued to, or, for
+credentials saved before they carried one, an id derived from the refresh token. Signed
+out, or with HEY_TOKEN set, it is this config directory's own install_id.
+
+When the stored credentials carry a malformed install_id, no refresh can run. Status
+then reports no install_id, and install_id_error says why: sign in again with
+hey auth login.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			status := map[string]any{
 				"base_url":       cfg.BaseURL,
@@ -258,6 +268,9 @@ func newAuthStatusCommand() *cobra.Command {
 				}
 				if installID != "" {
 					fmt.Fprintf(w, "Install:   %s\n", installID)
+				}
+				if installErr, ok := status["install_id_error"].(string); ok {
+					fmt.Fprintf(w, "Install:   %s\n", installErr)
 				}
 
 				if creds.ExpiresAt > 0 {

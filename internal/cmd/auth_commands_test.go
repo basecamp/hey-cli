@@ -532,4 +532,19 @@ func TestAuthStatusReportsTheCredentialsInstall(t *testing.T) {
 	if got := statusInstallID(t, configHome, server.URL, ""); got != "" {
 		t.Errorf("status install_id = %q with a malformed stored id, want none: no refresh will present one", got)
 	}
+	_, status, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "status")
+	if err != nil {
+		t.Fatalf("auth status: %v", err)
+	}
+	data, _ := status.Data.(map[string]any)
+	if reason, _ := data["install_id_error"].(string); !strings.Contains(reason, "hey login") {
+		t.Errorf("install_id_error = %q, want the reason and the re-login remedy", reason)
+	}
+	styled, _, err := runAuthCommand(t, configHome, server.URL, "", false, "auth", "status", "--styled")
+	if err != nil {
+		t.Fatalf("auth status (styled): %v", err)
+	}
+	if !strings.Contains(styled, "malformed install_id") || !strings.Contains(styled, "hey login") {
+		t.Errorf("styled status = %q, want the malformed install_id reason and remedy", styled)
+	}
 }
