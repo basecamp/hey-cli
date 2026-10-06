@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -114,6 +115,9 @@ func TestDirectoriesSharingAKeychainEntryRefreshAsOneInstall(t *testing.T) {
 	var presented []string
 	release := make(chan struct{})
 	arrived := make(chan struct{}, 2)
+	// Both refreshes succeed, as they do against HEY: a second presentation of a generation
+	// spent within its reuse grace gets the current generation back. Past the grace HEY
+	// revokes the whole session, so neither directory has a credential left to protect.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			t.Errorf("ParseForm: %v", err)
@@ -242,4 +246,27 @@ func sharedKeychainManager(t *testing.T, server *httptest.Server, fake *fakeKeyr
 	mgr := NewManager(server.URL, server.Client(), t.TempDir())
 	mgr.store.keyring = credentialKeyring{set: fake.Set, get: fake.Get, delete: fake.Delete}
 	return mgr
+}
+
+// A malformed install_id in stored credentials is refused locally, never sent: HEY would
+// read it as another install and revoke the session.
+func TestRefreshRefusesAMalformedStoredInstallID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected refresh request carrying install_id %q", r.FormValue("install_id"))
+	}))
+	defer server.Close()
+
+	t.Setenv("HEY_TOKEN", "")
+	mgr := sharedKeychainManager(t, server, newFakeKeyring())
+	creds := &Credentials{AccessToken: "expired", RefreshToken: "current", ExpiresAt: time.Now().Add(-time.Hour).Unix(), InstallID: "not-an-install"}
+	if err := mgr.GetStore().Save(mgr.CredentialKey(), creds); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	if _, err := mgr.AccessToken(t.Context()); err == nil || !strings.Contains(err.Error(), "malformed install_id") {
+		t.Errorf("AccessToken error = %v, want a local malformed install_id refusal", err)
+	}
+	if mgr.RefreshInstallID() != "" {
+		t.Errorf("RefreshInstallID = %q, want none for a malformed id", mgr.RefreshInstallID())
+	}
 }

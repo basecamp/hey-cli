@@ -436,7 +436,10 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 		tokenEndpoint = m.baseURL + "/oauth/tokens"
 	}
 
-	installID := credentialInstallID(creds)
+	installID, err := credentialInstallID(creds)
+	if err != nil {
+		return err
+	}
 
 	token, err := refreshOAuthToken(ctx, m.httpClient, tokenEndpoint, creds.RefreshToken, oauthClientID, installID)
 	if err != nil {
@@ -473,11 +476,18 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 // so none of them presents a second install for the lineage. A config directory's own
 // install_id can't serve: two directories sharing the keychain entry hold different ones,
 // and their store locks don't serialize against each other.
-func credentialInstallID(creds *Credentials) string {
+//
+// A stored id that isn't a well-formed install id is refused here rather than sent: HEY
+// would read it as another install and revoke the session, and re-deriving one would be
+// another install too. Signing in again stores a fresh one.
+func credentialInstallID(creds *Credentials) (string, error) {
 	if creds.InstallID == "" {
 		creds.InstallID = adoptedInstallID(creds.RefreshToken)
 	}
-	return creds.InstallID
+	if !isInstallID(creds.InstallID) {
+		return "", fmt.Errorf("stored credentials carry a malformed install_id; run `hey login` to sign in again")
+	}
+	return creds.InstallID, nil
 }
 
 // RefreshInstallID is the install the next refresh will present, or "" when the stored
@@ -487,7 +497,8 @@ func (m *Manager) RefreshInstallID() string {
 	if err != nil || creds.RefreshToken == "" {
 		return ""
 	}
-	return credentialInstallID(creds)
+	installID, _ := credentialInstallID(creds)
+	return installID
 }
 
 // accountForRefreshFailure decides what a failed refresh costs the stored credential.
