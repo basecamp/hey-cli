@@ -1,13 +1,13 @@
 package auth
 
 import (
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sync"
 	"testing"
 	"time"
 )
@@ -105,18 +105,26 @@ func TestInstallIDReplacesAMalformedFile(t *testing.T) {
 	}
 }
 
-// Two config directories sharing one keychain entry are one install to HEY: whichever
-// refreshes first settles the id that every later refresh presents, so neither revokes the
-// other's session by presenting a different install.
+// Two config directories sharing one keychain entry are one install to HEY. Credentials
+// saved before they carried an install derive it from their refresh token, so both
+// directories present the same id even when their refreshes race past each other's
+// (per-directory) locks, and neither presents its own directory's file.
 func TestDirectoriesSharingAKeychainEntryRefreshAsOneInstall(t *testing.T) {
+	var mu sync.Mutex
 	var presented []string
+	release := make(chan struct{})
+	arrived := make(chan struct{}, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
-			t.Fatalf("ParseForm: %v", err)
+			t.Errorf("ParseForm: %v", err)
 		}
+		mu.Lock()
 		presented = append(presented, r.Form.Get("install_id"))
+		mu.Unlock()
+		arrived <- struct{}{}
+		<-release
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"access_token":"access-%d","refresh_token":"refresh-%d","expires_in":3600}`, len(presented), len(presented))
+		_, _ = io.WriteString(w, `{"access_token":"fresh","refresh_token":"next","expires_in":3600}`)
 	}))
 	defer server.Close()
 
@@ -124,36 +132,55 @@ func TestDirectoriesSharingAKeychainEntryRefreshAsOneInstall(t *testing.T) {
 	fake := newFakeKeyring()
 	first := sharedKeychainManager(t, server, fake)
 	second := sharedKeychainManager(t, server, fake)
-
 	firstDirID, _ := first.GetStore().InstallID()
 	secondDirID, _ := second.GetStore().InstallID()
-	if firstDirID == secondDirID {
-		t.Fatal("each config directory should hold its own install_id file")
-	}
 
-	// Credentials saved before they carried an install, as every upgraded install has.
-	legacy := &Credentials{AccessToken: "expired", RefreshToken: "refresh-0", ExpiresAt: time.Now().Add(-time.Hour).Unix()}
+	legacy := &Credentials{AccessToken: "expired", RefreshToken: "legacy-refresh", ExpiresAt: time.Now().Add(-time.Hour).Unix()}
 	if err := first.GetStore().Save(first.CredentialKey(), legacy); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
-	if _, err := first.AccessToken(t.Context()); err != nil {
-		t.Fatalf("first AccessToken: %v", err)
+	var wg sync.WaitGroup
+	for _, mgr := range []*Manager{first, second} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = mgr.AccessToken(t.Context())
+		}()
 	}
-	expireStoredToken(t, second)
-	if _, err := second.AccessToken(t.Context()); err != nil {
-		t.Fatalf("second AccessToken: %v", err)
-	}
+	<-arrived
+	<-arrived // both refreshes are in flight at once: their locks didn't serialize them
+	close(release)
+	wg.Wait()
 
-	if len(presented) != 2 || presented[0] != firstDirID || presented[1] != firstDirID {
-		t.Errorf("presented install_ids = %q, want the first refresh's %q both times", presented, firstDirID)
+	want := adoptedInstallID("legacy-refresh")
+	if len(presented) != 2 || presented[0] != want || presented[1] != want {
+		t.Errorf("presented install_ids = %q, want %q from both directories", presented, want)
+	}
+	for _, id := range presented {
+		if id == firstDirID || id == secondDirID {
+			t.Errorf("presented a config directory's own install_id %q", id)
+		}
 	}
 	stored, err := second.GetStore().Load(second.CredentialKey())
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if stored.InstallID != firstDirID {
-		t.Errorf("stored InstallID = %q, want %q", stored.InstallID, firstDirID)
+	if stored.InstallID != want {
+		t.Errorf("stored InstallID = %q, want the adopted %q kept", stored.InstallID, want)
+	}
+}
+
+func TestAdoptedInstallIDIsAStableUUIDPerRefreshToken(t *testing.T) {
+	a := adoptedInstallID("token-a")
+	if a != adoptedInstallID("token-a") {
+		t.Error("adoption must be deterministic")
+	}
+	if a == adoptedInstallID("token-b") {
+		t.Error("different credentials must adopt different installs")
+	}
+	if !isInstallID(a) {
+		t.Errorf("adopted id %q is not a version-4 UUID", a)
 	}
 }
 
@@ -197,16 +224,4 @@ func sharedKeychainManager(t *testing.T, server *httptest.Server, fake *fakeKeyr
 	mgr := NewManager(server.URL, server.Client(), t.TempDir())
 	mgr.store.keyring = credentialKeyring{set: fake.Set, get: fake.Get, delete: fake.Delete}
 	return mgr
-}
-
-func expireStoredToken(t *testing.T, mgr *Manager) {
-	t.Helper()
-	creds, err := mgr.GetStore().Load(mgr.CredentialKey())
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	creds.ExpiresAt = time.Now().Add(-time.Hour).Unix()
-	if err := mgr.GetStore().Save(mgr.CredentialKey(), creds); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
 }

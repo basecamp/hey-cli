@@ -436,10 +436,7 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 		tokenEndpoint = m.baseURL + "/oauth/tokens"
 	}
 
-	installID, err := m.credentialInstallID(creds)
-	if err != nil {
-		return fmt.Errorf("install id: %w", err)
-	}
+	installID := credentialInstallID(creds)
 
 	token, err := refreshOAuthToken(ctx, m.httpClient, tokenEndpoint, creds.RefreshToken, oauthClientID, installID)
 	if err != nil {
@@ -470,18 +467,27 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 }
 
 // credentialInstallID is the install a refresh presents: the one the tokens were issued
-// to. Credentials saved before they carried it adopt this config directory's install_id,
-// which the refresh's own save then keeps, so the first refresh after an upgrade settles
-// the id for every directory sharing the keychain entry instead of each sending its own.
-func (m *Manager) credentialInstallID(creds *Credentials) (string, error) {
+// to. Credentials saved before they carried one take an id derived from their refresh
+// token, which the refresh's own save then keeps. Every process holding that credential
+// derives the same id, whatever its config directory and however its refreshes interleave,
+// so none of them presents a second install for the lineage. A config directory's own
+// install_id can't serve: two directories sharing the keychain entry hold different ones,
+// and their store locks don't serialize against each other.
+func credentialInstallID(creds *Credentials) string {
 	if creds.InstallID == "" {
-		installID, err := m.store.installID()
-		if err != nil {
-			return "", err
-		}
-		creds.InstallID = installID
+		creds.InstallID = adoptedInstallID(creds.RefreshToken)
 	}
-	return creds.InstallID, nil
+	return creds.InstallID
+}
+
+// RefreshInstallID is the install the next refresh will present, or "" when the stored
+// credential has no refresh token.
+func (m *Manager) RefreshInstallID() string {
+	creds, err := m.store.Load(m.baseURL)
+	if err != nil || creds.RefreshToken == "" {
+		return ""
+	}
+	return credentialInstallID(creds)
 }
 
 // accountForRefreshFailure decides what a failed refresh costs the stored credential.

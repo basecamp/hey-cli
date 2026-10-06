@@ -484,3 +484,37 @@ func statusInstallID(t *testing.T, configHome, baseURL, envToken string) string 
 	id, _ := data["install_id"].(string)
 	return id
 }
+
+// Signed in with OAuth, status shows the install the next refresh will present: the one
+// the credentials carry, or for credentials that predate carrying one, the id they adopt.
+func TestAuthStatusReportsTheCredentialsInstall(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+	configHome := t.TempDir()
+	t.Setenv("HEY_NO_KEYRING", "1")
+	manager := auth.NewManager(server.URL, server.Client(), filepath.Join(configHome, "hey-cli"))
+	directoryID, err := manager.GetStore().InstallID()
+	if err != nil {
+		t.Fatalf("InstallID: %v", err)
+	}
+
+	issuedTo := "6f1c2b3a-4d5e-4f60-8a71-92b3c4d5e6f7"
+	creds := &auth.Credentials{AccessToken: "access", RefreshToken: "refresh", ExpiresAt: time.Now().Add(time.Hour).Unix(), OAuthType: "oauth", InstallID: issuedTo}
+	if err := manager.GetStore().Save(manager.CredentialKey(), creds); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if got := statusInstallID(t, configHome, server.URL, ""); got != issuedTo {
+		t.Errorf("status install_id = %q, want the credentials' %q, not the directory's %q", got, issuedTo, directoryID)
+	}
+
+	creds.InstallID = ""
+	if err := manager.GetStore().Save(manager.CredentialKey(), creds); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got := statusInstallID(t, configHome, server.URL, "")
+	if got == directoryID || got == "" || got != manager.RefreshInstallID() {
+		t.Errorf("status install_id = %q, want the id the next refresh adopts (%q), not the directory's %q", got, manager.RefreshInstallID(), directoryID)
+	}
+}

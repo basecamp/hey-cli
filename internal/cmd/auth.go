@@ -162,8 +162,8 @@ func newAuthStatusCommand() *cobra.Command {
 			// stay consistent and can diagnose HEY's new-device alerts. Signed
 			// in, the one that counts is the install the tokens were issued to.
 			installID, _ := authMgr.GetStore().InstallID()
-			if creds, err := authMgr.GetStore().Load(authMgr.CredentialKey()); err == nil && creds.InstallID != "" {
-				installID = creds.InstallID
+			if credentialInstallID := authMgr.RefreshInstallID(); credentialInstallID != "" {
+				installID = credentialInstallID
 			}
 			if installID != "" {
 				status["install_id"] = installID
