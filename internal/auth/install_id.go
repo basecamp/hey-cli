@@ -25,29 +25,38 @@ func (s *Store) InstallID() (string, error) {
 
 // installID is the unlocked variant, for a caller already holding the store lock.
 func (s *Store) installID() (string, error) {
-	path := s.installIDPath()
-
-	data, err := os.ReadFile(path) // #nosec G304 -- path built from the store's own config directory
-	if err == nil {
-		// Only a well-formed identifier is a usable identity. A truncated or
-		// garbage file — an earlier write interrupted by a crash or a full
-		// disk, say — must not be adopted and sent to HEY on every login and
-		// refresh, so fall through and mint a fresh one over it.
-		if id := strings.TrimSpace(string(data)); isInstallID(id) {
-			return id, nil
-		}
-	} else if !os.IsNotExist(err) {
-		return "", err
+	id, err := s.existingInstallID()
+	if err != nil || id != "" {
+		return id, err
 	}
 
-	id := newInstallID()
+	// No file, or a truncated or garbage one — an earlier write interrupted by a
+	// crash or a full disk, say — that must not be adopted and sent to HEY on
+	// every login and refresh: mint a fresh one over it.
+	id = newInstallID()
 	if err := os.MkdirAll(s.fallbackDir, 0700); err != nil {
 		return "", err
 	}
-	if err := writeFileAtomic(path, []byte(id+"\n"), 0600); err != nil {
+	if err := writeFileAtomic(s.installIDPath(), []byte(id+"\n"), 0600); err != nil {
 		return "", err
 	}
 	return id, nil
+}
+
+// existingInstallID is this directory's install_id when its file holds a well-formed one,
+// and "" otherwise. It never mints.
+func (s *Store) existingInstallID() (string, error) {
+	data, err := os.ReadFile(s.installIDPath())
+	switch {
+	case os.IsNotExist(err):
+		return "", nil
+	case err != nil:
+		return "", err
+	}
+	if id := strings.TrimSpace(string(data)); isInstallID(id) {
+		return id, nil
+	}
+	return "", nil
 }
 
 // installIDPattern is the canonical version-4 UUID shape newInstallID mints and

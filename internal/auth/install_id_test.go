@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -106,30 +107,92 @@ func TestInstallIDReplacesAMalformedFile(t *testing.T) {
 	}
 }
 
-// Two config directories sharing one keychain entry are one install to HEY. Credentials
-// saved before they carried an install derive it from their refresh token, so both
-// directories present the same id even when their refreshes race past each other's
-// (per-directory) locks, and neither presents its own directory's file.
-func TestDirectoriesSharingAKeychainEntryRefreshAsOneInstall(t *testing.T) {
-	var mu sync.Mutex
-	var presented []string
-	release := make(chan struct{})
-	arrived := make(chan struct{}, 2)
-	// Both refreshes succeed, as they do against HEY: a second presentation of a generation
-	// spent within its reuse grace gets the current generation back. Past the grace HEY
-	// revokes the whole session, so neither directory has a credential left to protect.
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseForm(); err != nil {
-			t.Errorf("ParseForm: %v", err)
-		}
-		mu.Lock()
-		presented = append(presented, r.Form.Get("install_id"))
-		mu.Unlock()
-		arrived <- struct{}{}
-		<-release
+// bindingServer stands in for HEY's refresh endpoint with install binding on: a family
+// bound to one install answers that install and revokes on any other, and an unbound family
+// is claimed by the first install that refreshes it.
+type bindingServer struct {
+	mu        sync.Mutex
+	bound     string
+	presented []string
+	revoked   bool
+}
+
+func (b *bindingServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	installID := r.FormValue("install_id")
+	b.presented = append(b.presented, installID)
+	if b.bound == "" {
+		b.bound = installID
+	}
+	if b.revoked || installID != b.bound {
+		b.revoked = true
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"access_token":"fresh","refresh_token":"next","expires_in":3600}`)
-	}))
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"error":"invalid_grant","error_description":"issued to a different install"}`)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = fmt.Fprintf(w, `{"access_token":"access-%d","refresh_token":"refresh-%d","expires_in":3600}`, len(b.presented), len(b.presented))
+}
+
+func legacyCredentials() *Credentials {
+	return &Credentials{AccessToken: "expired", RefreshToken: "legacy-refresh", ExpiresAt: time.Now().Add(-time.Hour).Unix()}
+}
+
+func expireStoredToken(t *testing.T, mgr *Manager) {
+	t.Helper()
+	creds, err := mgr.GetStore().Load(mgr.CredentialKey())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	creds.ExpiresAt = time.Now().Add(-time.Hour).Unix()
+	if err := mgr.GetStore().Save(mgr.CredentialKey(), creds); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+}
+
+// An earlier release logged in presenting this directory's install_id and saved credentials
+// without it, so HEY bound their family to that id. The first refresh after upgrading
+// presents the same id, and the session survives.
+func TestUpgradedCredentialsRefreshAsTheDirectoryTheyWereIssuedTo(t *testing.T) {
+	hey := &bindingServer{}
+	server := httptest.NewServer(hey)
+	defer server.Close()
+
+	t.Setenv("HEY_TOKEN", "")
+	mgr := sharedKeychainManager(t, server, newFakeKeyring())
+	directoryID, err := mgr.GetStore().InstallID()
+	if err != nil {
+		t.Fatalf("InstallID: %v", err)
+	}
+	hey.bound = directoryID
+	if err := mgr.GetStore().Save(mgr.CredentialKey(), legacyCredentials()); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	if _, err := mgr.AccessToken(t.Context()); err != nil {
+		t.Fatalf("AccessToken: %v", err)
+	}
+
+	if hey.revoked || len(hey.presented) != 1 || hey.presented[0] != directoryID {
+		t.Errorf("presented %q (revoked %v), want the directory's %q", hey.presented, hey.revoked, directoryID)
+	}
+	stored, err := mgr.GetStore().Load(mgr.CredentialKey())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if stored.InstallID != directoryID {
+		t.Errorf("stored InstallID = %q, want %q kept with the rotated tokens", stored.InstallID, directoryID)
+	}
+}
+
+// Two config directories sharing one keychain entry are one install to HEY: whichever
+// refreshes first settles the id into the shared credential, and the other then presents it
+// rather than its own directory's.
+func TestDirectoriesSharingAKeychainEntryConvergeOnOneInstall(t *testing.T) {
+	hey := &bindingServer{}
+	server := httptest.NewServer(hey)
 	defer server.Close()
 
 	t.Setenv("HEY_TOKEN", "")
@@ -138,58 +201,81 @@ func TestDirectoriesSharingAKeychainEntryRefreshAsOneInstall(t *testing.T) {
 	second := sharedKeychainManager(t, server, fake)
 	firstDirID, _ := first.GetStore().InstallID()
 	secondDirID, _ := second.GetStore().InstallID()
-
-	legacy := &Credentials{AccessToken: "expired", RefreshToken: "legacy-refresh", ExpiresAt: time.Now().Add(-time.Hour).Unix()}
-	if err := first.GetStore().Save(first.CredentialKey(), legacy); err != nil {
+	if firstDirID == secondDirID {
+		t.Fatal("each config directory should hold its own install_id file")
+	}
+	if err := first.GetStore().Save(first.CredentialKey(), legacyCredentials()); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
-	var wg sync.WaitGroup
-	errs := make(chan error, 2)
-	for _, mgr := range []*Manager{first, second} {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			_, err := mgr.AccessToken(t.Context())
-			errs <- err
-		}()
+	if _, err := first.AccessToken(t.Context()); err != nil {
+		t.Fatalf("first AccessToken: %v", err)
 	}
-	timeout := time.After(10 * time.Second)
-	for range 2 {
-		select {
-		case <-arrived:
-		case err := <-errs:
-			close(release)
-			t.Fatalf("a refresh returned before reaching HEY: %v", err)
-		case <-timeout:
-			close(release)
-			t.Fatal("both refreshes never reached HEY at once")
-		}
+	expireStoredToken(t, second)
+	if _, err := second.AccessToken(t.Context()); err != nil {
+		t.Fatalf("second AccessToken: %v", err)
 	}
-	close(release) // both refreshes were in flight at once: their locks didn't serialize them
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		if err != nil {
-			t.Errorf("AccessToken: %v", err)
-		}
+
+	if hey.revoked || len(hey.presented) != 2 || hey.presented[0] != firstDirID || hey.presented[1] != firstDirID {
+		t.Errorf("presented %q (revoked %v), want the first directory's %q both times, never the second's %q", hey.presented, hey.revoked, firstDirID, secondDirID)
+	}
+}
+
+// A directory without an install_id file of its own takes the id derived from the refresh
+// token, the same for every holder, and mints nothing.
+func TestCredentialsWithoutADirectoryIDAdoptTheDerivedOneWithoutMinting(t *testing.T) {
+	hey := &bindingServer{}
+	server := httptest.NewServer(hey)
+	defer server.Close()
+
+	t.Setenv("HEY_TOKEN", "")
+	mgr := sharedKeychainManager(t, server, newFakeKeyring())
+	if err := mgr.GetStore().Save(mgr.CredentialKey(), legacyCredentials()); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	if _, err := mgr.AccessToken(t.Context()); err != nil {
+		t.Fatalf("AccessToken: %v", err)
 	}
 
 	want := adoptedInstallID("legacy-refresh")
-	if len(presented) != 2 || presented[0] != want || presented[1] != want {
-		t.Errorf("presented install_ids = %q, want %q from both directories", presented, want)
+	if len(hey.presented) != 1 || hey.presented[0] != want {
+		t.Errorf("presented %q, want the derived %q", hey.presented, want)
 	}
-	for _, id := range presented {
-		if id == firstDirID || id == secondDirID {
-			t.Errorf("presented a config directory's own install_id %q", id)
-		}
+	if _, err := os.Stat(mgr.GetStore().installIDPath()); !os.IsNotExist(err) {
+		t.Errorf("install_id file exists (err %v); a refresh must not mint one", err)
 	}
-	stored, err := second.GetStore().Load(second.CredentialKey())
-	if err != nil {
-		t.Fatalf("Load: %v", err)
+}
+
+// A directory whose install_id file is malformed has no usable id of its own, so it takes
+// the derived one rather than minting over the file.
+func TestAMalformedDirectoryIDFallsBackToTheDerivedOne(t *testing.T) {
+	hey := &bindingServer{}
+	server := httptest.NewServer(hey)
+	defer server.Close()
+
+	t.Setenv("HEY_TOKEN", "")
+	mgr := sharedKeychainManager(t, server, newFakeKeyring())
+	path := mgr.GetStore().installIDPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
 	}
-	if stored.InstallID != want {
-		t.Errorf("stored InstallID = %q, want the adopted %q kept", stored.InstallID, want)
+	if err := os.WriteFile(path, []byte("truncat"), 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := mgr.GetStore().Save(mgr.CredentialKey(), legacyCredentials()); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	if _, err := mgr.AccessToken(t.Context()); err != nil {
+		t.Fatalf("AccessToken: %v", err)
+	}
+
+	if want := adoptedInstallID("legacy-refresh"); len(hey.presented) != 1 || hey.presented[0] != want {
+		t.Errorf("presented %q, want the derived %q", hey.presented, want)
+	}
+	if data, _ := os.ReadFile(path); string(data) != "truncat" {
+		t.Errorf("install_id file = %q, want it left as it was", data)
 	}
 }
 
