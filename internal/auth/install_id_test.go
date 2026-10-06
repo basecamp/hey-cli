@@ -266,7 +266,4 @@ func TestRefreshRefusesAMalformedStoredInstallID(t *testing.T) {
 	if _, err := mgr.AccessToken(t.Context()); err == nil || !strings.Contains(err.Error(), "malformed install_id") {
 		t.Errorf("AccessToken error = %v, want a local malformed install_id refusal", err)
 	}
-	if id, err := mgr.RefreshInstallID(); id != "" || err == nil {
-		t.Errorf("RefreshInstallID = %q, %v; want no id and an error for a malformed id", id, err)
-	}
 }

@@ -147,17 +147,6 @@ func newAuthStatusCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "Show authentication status",
-		Long: `Show authentication status.
-
-install_id is the install HEY knows this CLI as. Signed in with OAuth credentials, it is
-the install those credentials refresh as: the one they were issued to, or, for
-credentials saved before they carried one, an id derived from the refresh token. Signed
-out, signed in with --token or --cookie (which never refresh), or with HEY_TOKEN set, it
-is this config directory's own install_id.
-
-When the stored credentials carry a malformed install_id, no refresh can run. Status
-then reports no install_id, and install_id_error says why: sign in again with
-hey auth login.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			status := map[string]any{
 				"base_url":       cfg.BaseURL,
@@ -170,21 +159,8 @@ hey auth login.`,
 			// is sent on every OAuth login and refresh. Surface it in every
 			// status path — env token and logged-out included, both of which
 			// return before the signed-in path — so the JSON and styled output
-			// stay consistent and can diagnose HEY's new-device alerts. Signed
-			// in with stored OAuth credentials, the one that counts is the install
-			// they refresh as; HEY_TOKEN bypasses them, so it leaves them unread.
+			// stay consistent and can diagnose HEY's new-device alerts.
 			installID, _ := authMgr.GetStore().InstallID()
-			if os.Getenv("HEY_TOKEN") == "" {
-				credentialInstallID, err := authMgr.RefreshInstallID()
-				switch {
-				case err != nil:
-					// No refresh will present an id, so report none rather than the directory's.
-					installID = ""
-					status["install_id_error"] = err.Error()
-				case credentialInstallID != "":
-					installID = credentialInstallID
-				}
-			}
 			if installID != "" {
 				status["install_id"] = installID
 			}
@@ -269,9 +245,6 @@ hey auth login.`,
 				}
 				if installID != "" {
 					fmt.Fprintf(w, "Install:   %s\n", installID)
-				}
-				if installErr, ok := status["install_id_error"].(string); ok {
-					fmt.Fprintf(w, "Install:   %s\n", installErr)
 				}
 
 				if creds.ExpiresAt > 0 {

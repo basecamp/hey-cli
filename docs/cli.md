@@ -61,17 +61,6 @@ hey auth logout   # clear credentials
 
 `hey login` and `hey logout` are top-level shortcuts for `hey auth login` and `hey auth logout`.
 
-`hey auth status` reports `install_id`, the install HEY knows this CLI as. HEY binds each
-refresh token to the install it was issued to and signs out a session whose token arrives
-from a different one. So signed in with OAuth, `install_id` is the install the stored
-credentials refresh as. That's the one they were issued to, or, for credentials saved
-before they carried one, an id derived from the refresh token. Every config directory
-sharing the keychain entry therefore refreshes as the same install. Signed out, signed
-in with `--token` or `--cookie` (which never refresh), or with `HEY_TOKEN` set, it is the
-config directory's own id. A malformed stored id blocks
-refreshing: status omits `install_id`, reports `install_id_error`, and `hey auth login`
-fixes it.
-
 ### Linked accounts
 
 One HEY login exposes every mail account linked to that identity. List the available
