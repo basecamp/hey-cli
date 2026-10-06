@@ -286,6 +286,7 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
 		RefreshToken:  token.RefreshToken,
 		OAuthType:     "oauth",
 		TokenEndpoint: tokenEndpoint,
+		InstallID:     installID,
 	}
 	if !token.ExpiresAt.IsZero() {
 		creds.ExpiresAt = token.ExpiresAt.Unix()
@@ -435,7 +436,7 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 		tokenEndpoint = m.baseURL + "/oauth/tokens"
 	}
 
-	installID, err := m.store.installID()
+	installID, err := m.credentialInstallID(creds)
 	if err != nil {
 		return fmt.Errorf("install id: %w", err)
 	}
@@ -466,6 +467,21 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 	}
 	m.cachedCredentials = cloneCredentials(creds)
 	return nil
+}
+
+// credentialInstallID is the install a refresh presents: the one the tokens were issued
+// to. Credentials saved before they carried it adopt this config directory's install_id,
+// which the refresh's own save then keeps, so the first refresh after an upgrade settles
+// the id for every directory sharing the keychain entry instead of each sending its own.
+func (m *Manager) credentialInstallID(creds *Credentials) (string, error) {
+	if creds.InstallID == "" {
+		installID, err := m.store.installID()
+		if err != nil {
+			return "", err
+		}
+		creds.InstallID = installID
+	}
+	return creds.InstallID, nil
 }
 
 // accountForRefreshFailure decides what a failed refresh costs the stored credential.

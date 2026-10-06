@@ -37,6 +37,11 @@ type Credentials struct {
 	OAuthType     string `json:"oauth_type"`
 	TokenEndpoint string `json:"token_endpoint"`
 	SessionCookie string `json:"session_cookie,omitempty"`
+	// InstallID is the install these tokens were issued to. HEY binds a refresh token's
+	// lineage to it and revokes the session when another install presents the token, so it
+	// travels with the tokens: every config directory that shares this keychain entry
+	// refreshes as the same install.
+	InstallID string `json:"install_id,omitempty"`
 }
 
 // Store handles credential storage, preferring system keychain.

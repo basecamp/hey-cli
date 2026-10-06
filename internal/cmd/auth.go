@@ -159,8 +159,12 @@ func newAuthStatusCommand() *cobra.Command {
 			// is sent on every OAuth login and refresh. Surface it in every
 			// status path — env token and logged-out included, both of which
 			// return before the signed-in path — so the JSON and styled output
-			// stay consistent and can diagnose HEY's new-device alerts.
+			// stay consistent and can diagnose HEY's new-device alerts. Signed
+			// in, the one that counts is the install the tokens were issued to.
 			installID, _ := authMgr.GetStore().InstallID()
+			if creds, err := authMgr.GetStore().Load(authMgr.CredentialKey()); err == nil && creds.InstallID != "" {
+				installID = creds.InstallID
+			}
 			if installID != "" {
 				status["install_id"] = installID
 			}
