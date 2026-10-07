@@ -21,7 +21,8 @@ func TestSaveSetsQuarantineOnDownloadedAttachment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("saved attachment has no quarantine flag: %v", err)
 	}
-	if !strings.HasSuffix(string(value[:size]), ";HEY CLI;") {
+	flag := string(value[:size])
+	if !strings.HasPrefix(flag, "0081;") || !strings.HasSuffix(flag, ";HEY CLI;") {
 		t.Errorf("quarantine flag = %q", value[:size])
 	}
 }
