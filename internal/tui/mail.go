@@ -1908,7 +1908,11 @@ func (v *mailView) closeOverlays() {
 // Imbox hides.
 func (v *mailView) openPreviouslySeen() tea.Cmd {
 	if v.seenActive {
-		return nil
+		if !v.inThread {
+			return nil
+		}
+		v.ExitThread()
+		return func() tea.Msg { return nil }
 	}
 	v.inThread = false
 	v.threadNotice = ""

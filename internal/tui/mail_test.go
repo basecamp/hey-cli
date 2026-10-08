@@ -124,10 +124,16 @@ func mailWithTestServer(t *testing.T, status int) (*mailView, *recordedMailReque
 				_, _ = w.Write([]byte(`{"contact":{"id":88,"name":"GitHub","email_address":"notifications@example.com"},"postings":[{"id":512,"kind":"topic","name":"Nightly build is green again","app_url":"https://app.hey.com/topics/101","created_at":"2026-08-24T21:00:00Z","creator":{"id":88,"name":"GitHub"}}]}`))
 			}
 		case "/imbox/seen.json":
-			if r.URL.Query().Get("page") == "" {
+			switch r.URL.Query().Get("page") {
+			case "":
 				_, _ = w.Write([]byte(`{"id":1,"postings":[{"id":611,"kind":"topic","name":"Weekly team sync notes","seen":true,"app_url":"https://app.hey.com/topics/100","created_at":"2026-08-20T09:00:00Z","creator":{"id":21,"name":"Claire Lee"}}],"next_history_url":"/imbox?page=seen-page-2"}`))
-			} else {
-				_, _ = w.Write([]byte(`{"id":1,"postings":[{"id":612,"kind":"topic","name":"Invoice #2041 from Fastmail","seen":true,"app_url":"https://app.hey.com/topics/101","created_at":"2026-08-18T15:00:00Z","creator":{"id":22,"name":"Fastmail Billing"}}]}`))
+			case "seen-page-2":
+				_, _ = w.Write([]byte(`{"id":1,"postings":[{"id":612,"kind":"topic","name":"Invoice #2041 from Fastmail","seen":true,"app_url":"https://app.hey.com/topics/101","created_at":"2026-08-18T15:00:00Z","creator":{"id":22,"name":"Fastmail Billing"}}],"next_history_url":"/imbox?page=seen-page-3"}`))
+			case "seen-page-3":
+				_, _ = w.Write([]byte(`{"id":1,"postings":[{"id":613,"kind":"topic","name":"Travel receipt","seen":true,"app_url":"https://app.hey.com/topics/102","created_at":"2026-08-17T11:00:00Z","creator":{"id":23,"name":"Jamie Rivera"}}]}`))
+			default:
+				t.Errorf("unexpected Previously Seen page %q", r.URL.Query().Get("page"))
+				http.Error(w, "unexpected page", http.StatusBadRequest)
 			}
 		case "/contacts/88.json":
 			_, _ = w.Write([]byte(`{"id":88,"name":"GitHub","entries_title":"All threads with GitHub","postings":[{"id":513,"kind":"topic","name":"Deploy failed on main","seen":true,"app_url":"https://app.hey.com/topics/100","created_at":"2026-08-25T09:00:00Z","creator":{"id":88,"name":"GitHub"}},{"id":514,"kind":"topic","name":"Nightly build is green again","seen":true,"app_url":"https://app.hey.com/topics/101","created_at":"2026-08-24T21:00:00Z","creator":{"id":88,"name":"GitHub"}}]}`))
@@ -135,6 +141,10 @@ func mailWithTestServer(t *testing.T, status int) (*mailView, *recordedMailReque
 			_, _ = w.Write([]byte(`[{"id":501,"kind":"message","summary":"Hello world","created_at":"2026-08-19T09:00:00Z","creator":{"id":10,"name":"Alice"}}]`))
 		case "/messages/501.json":
 			_, _ = w.Write([]byte(`{"id":501,"subject":"Hello world","content":"<p>Message body</p>","created_at":"2026-08-19T09:00:00Z","creator":{"id":10,"name":"Alice"}}`))
+		case "/topics/101/entries.json":
+			_, _ = w.Write([]byte(`[{"id":502,"kind":"message","summary":"Invoice #2041","created_at":"2026-08-18T15:00:00Z","creator":{"id":22,"name":"Fastmail Billing"}}]`))
+		case "/messages/502.json":
+			_, _ = w.Write([]byte(`{"id":502,"subject":"Invoice #2041 from Fastmail","content":"<p>Invoice attached</p>","created_at":"2026-08-18T15:00:00Z","creator":{"id":22,"name":"Fastmail Billing"}}`))
 		default:
 			if r.Method == http.MethodDelete {
 				for _, value := range strings.Split(r.URL.Query().Get("posting_ids"), ",") {
@@ -4237,9 +4247,20 @@ func TestMailViewJumpsToPreviouslySeen(t *testing.T) {
 	if recorded.path != "/imbox/seen.json" || recorded.rawQueries[len(recorded.rawQueries)-1] != "page=seen-page-2" {
 		t.Errorf("read %s?%s, want /imbox/seen.json?page=seen-page-2", recorded.path, recorded.rawQueries[len(recorded.rawQueries)-1])
 	}
-	v.Update(appended)
+	more, _ = v.Update(appended)
 	if len(v.seenList.postings) != 2 || v.seenList.postings[1].TopicID != 101 {
 		t.Fatalf("grown seen postings = %+v", v.seenList.postings)
+	}
+	if v.seenNextPage != "/imbox?page=seen-page-3" {
+		t.Errorf("nextPage = %q, want /imbox?page=seen-page-3", v.seenNextPage)
+	}
+	appended, ok = runCmd(more).(seenAppendedMsg)
+	if !ok || appended.err != nil {
+		t.Fatalf("growing the seen list again returned %#v", appended)
+	}
+	v.Update(appended)
+	if len(v.seenList.postings) != 3 || v.seenList.postings[2].TopicID != 102 {
+		t.Fatalf("twice-grown seen postings = %+v", v.seenList.postings)
 	}
 	if v.seenNextPage != "" {
 		t.Errorf("nextPage = %q, want none after the last page", v.seenNextPage)
@@ -4271,12 +4292,58 @@ func TestMailViewJumpsToPreviouslySeen(t *testing.T) {
 }
 
 func TestMailViewPreviouslySeenIsANoOpWhileOpen(t *testing.T) {
-	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
 
 	loaded, _ := runCmd(v.handleBoxShortcut("9")).(seenLoadedMsg)
 	v.Update(loaded)
+	requestCount := len(recorded.requests)
 	if cmd := v.handleBoxShortcut("9"); cmd != nil {
 		t.Error("9 on the seen screen should do nothing")
+	}
+	if len(recorded.requests) != requestCount {
+		t.Errorf("9 made %d requests, want no refetch", len(recorded.requests)-requestCount)
+	}
+}
+
+func TestMailViewPreviouslySeenShortcutClosesItsThread(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+
+	loaded, _ := runCmd(v.handleBoxShortcut("9")).(seenLoadedMsg)
+	more, _ := v.Update(loaded)
+	v.Update(runCmd(more))
+	v.seenList.moveDown()
+	v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+	if !v.inThread || !v.seenActive {
+		t.Fatalf("thread state = open:%v seen:%v, want a thread open from Previously Seen", v.inThread, v.seenActive)
+	}
+	seenIDs := postingIDsOf(v.seenList.postings)
+	seenCursor := v.seenList.cursor
+	seenPostingID := v.seenList.selectedPosting().ID
+	seenNextPage := v.seenNextPage
+	seenMoreID := v.seenMoreID
+	seenLoadingMore := v.seenLoadingMore
+	if seenNextPage == "" || !seenLoadingMore {
+		t.Fatalf("Previously Seen has no pending page: next=%q loading=%v", seenNextPage, seenLoadingMore)
+	}
+	requestCount := len(recorded.requests)
+
+	if cmd := v.handleBoxShortcut("9"); cmd == nil {
+		t.Fatal("9 in a thread opened from Previously Seen should be handled")
+	}
+	if v.inThread || !v.seenActive {
+		t.Errorf("9 landed on open:%v seen:%v, want the Previously Seen list", v.inThread, v.seenActive)
+	}
+	if ids := postingIDsOf(v.seenList.postings); !slices.Equal(ids, seenIDs) || v.seenList.cursor != seenCursor {
+		t.Errorf("Previously Seen list changed: postings=%v cursor=%d, want postings=%v cursor=%d", ids, v.seenList.cursor, seenIDs, seenCursor)
+	}
+	if posting := v.seenList.selectedPosting(); posting == nil || posting.ID != seenPostingID {
+		t.Errorf("Previously Seen selection = %+v, want posting %d", posting, seenPostingID)
+	}
+	if v.seenNextPage != seenNextPage || v.seenMoreID != seenMoreID || v.seenLoadingMore != seenLoadingMore {
+		t.Errorf("Previously Seen pagination = next:%q request:%d loading:%v, want next:%q request:%d loading:%v", v.seenNextPage, v.seenMoreID, v.seenLoadingMore, seenNextPage, seenMoreID, seenLoadingMore)
+	}
+	if len(recorded.requests) != requestCount {
+		t.Errorf("9 made %d requests, want no refetch", len(recorded.requests)-requestCount)
 	}
 }
 
