@@ -30,9 +30,10 @@ func newThreadUpdateCommand() *threadUpdateCommand {
 		Long: "Rename a thread: change the subject HEY shows for it in your boxes and at the top " +
 			"of the thread, for everyone in your account with access to it. Nothing is emailed: " +
 			"the other people on the thread keep the subject they received, and messages already " +
-			"sent keep the subject they were sent with.",
+			"sent keep the subject they were sent with. A collection's discussion thread is named " +
+			"after its collection, so rename it with hey collection update instead.",
 		Annotations: map[string]string{
-			"agent_notes": "Renames a thread (topic) by its topic_id, as HEY's web app does; nothing is emailed. --name is required, trimmed, and at most 1024 bytes. A thread merged into another is not renamed and the command fails; rename the thread it was merged into instead.",
+			"agent_notes": "Renames a thread (topic) by its topic_id, as HEY's web app does; nothing is emailed. --name is required, trimmed, and at most 1024 bytes. A thread merged into another is not renamed and the command fails; rename the thread it was merged into instead. A collection's discussion thread shows its collection's name whatever this sets: use hey collection update for it.",
 		},
 		Example: `  hey thread update 12345 --name "Kitchen renovation quotes"
   hey thread rename 12345 --name "Flights to Lisbon, May 14"`,
