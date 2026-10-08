@@ -48,7 +48,7 @@ job_body() {
 
   for job in release aur-publish macos-verify windows-verify sync-skills; do
     body=$(job_body "$job")
-    [[ "$body" != *"needs: [packslip]"* ]]
+    [[ "$body" != *"needs:"*"packslip"* ]]
     [[ "$body" != *"publish-packslip"* ]]
   done
 }
