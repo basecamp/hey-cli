@@ -11,7 +11,9 @@ import (
 	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
-func threadRenameHandler(t *testing.T, gotName *string) http.Handler {
+// gotName is written by the server goroutine and read by the test after the round trip;
+// the race detector does not see the socket as synchronization, so it is atomic.
+func threadRenameHandler(t *testing.T, gotName *atomic.Pointer[string]) http.Handler {
 	t.Helper()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPatch || r.URL.Path != "/topics/4471829.json" {
@@ -30,22 +32,29 @@ func threadRenameHandler(t *testing.T, gotName *string) http.Handler {
 		if body.Topic.Name == nil {
 			t.Fatal("body carries no topic.name")
 		}
-		*gotName = *body.Topic.Name
+		gotName.Store(body.Topic.Name)
 		w.WriteHeader(http.StatusNoContent)
 	})
+}
+
+func sentName(gotName *atomic.Pointer[string]) string {
+	if name := gotName.Load(); name != nil {
+		return *name
+	}
+	return "<no request>"
 }
 
 func TestThreadUpdateRenamesTheTopic(t *testing.T) {
 	for _, verb := range []string{"update", "rename", "edit"} {
 		t.Run(verb, func(t *testing.T) {
-			var gotName string
+			var gotName atomic.Pointer[string]
 			response, err := runJSONCommand(t, threadRenameHandler(t, &gotName),
 				"thread", verb, "4471829", "--name", "  Kitchen renovation quotes  ")
 			if err != nil {
 				t.Fatalf("thread %s: %v", verb, err)
 			}
-			if gotName != "Kitchen renovation quotes" {
-				t.Errorf("name sent = %q, want it trimmed", gotName)
+			if sentName(&gotName) != "Kitchen renovation quotes" {
+				t.Errorf("name sent = %q, want it trimmed", sentName(&gotName))
 			}
 			if response.Summary != `Thread 4471829 renamed to "Kitchen renovation quotes"` || response.Data != nil {
 				t.Errorf("response = %#v", response)
@@ -55,18 +64,18 @@ func TestThreadUpdateRenamesTheTopic(t *testing.T) {
 }
 
 func TestThreadUpdateKeepsTheNameAsTyped(t *testing.T) {
-	var gotName string
+	var gotName atomic.Pointer[string]
 	name := `Café "Lisboa" — 14 May ✈`
 	if _, err := runJSONCommand(t, threadRenameHandler(t, &gotName), "thread", "update", "4471829", "--name", name); err != nil {
 		t.Fatalf("thread update: %v", err)
 	}
-	if gotName != name {
-		t.Errorf("name sent = %q, want %q", gotName, name)
+	if sentName(&gotName) != name {
+		t.Errorf("name sent = %q, want %q", sentName(&gotName), name)
 	}
 }
 
 func TestThreadUpdateStyledConfirmation(t *testing.T) {
-	var gotName string
+	var gotName atomic.Pointer[string]
 	out, err := runStyledCommand(t, threadRenameHandler(t, &gotName),
 		"thread", "update", "4471829", "--name", "Flights to Lisbon\x1b[31m")
 	if err != nil {
@@ -114,13 +123,13 @@ func TestThreadUpdateRefusesBeforeWriting(t *testing.T) {
 }
 
 func TestThreadUpdateAcceptsTheLongestName(t *testing.T) {
-	var gotName string
+	var gotName atomic.Pointer[string]
 	name := strings.Repeat("é", 512)
 	if _, err := runJSONCommand(t, threadRenameHandler(t, &gotName), "thread", "update", "4471829", "--name", name); err != nil {
 		t.Fatalf("thread update: %v", err)
 	}
-	if gotName != name {
-		t.Errorf("name sent is %d bytes, want %d", len(gotName), len(name))
+	if sentName(&gotName) != name {
+		t.Errorf("name sent is not the %d bytes given", len(name))
 	}
 }
 
