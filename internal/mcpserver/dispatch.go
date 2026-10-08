@@ -63,6 +63,10 @@ func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.O
 	if err != nil {
 		return gateway.ErrorResult("%v", err), nil
 	}
+	if want, ok := acknowledgedBy[full.ID]; ok && resp.StatusCode != want {
+		return gateway.ErrorResult("%s was not acknowledged: HEY answered HTTP %d, not %d, so nothing was changed",
+			full.Action, resp.StatusCode, want), nil
+	}
 	if len(bytes.TrimSpace(resp.Data)) == 0 {
 		result := map[string]any{"status": resp.StatusCode}
 		// A draft save answers 204 with the saved entry's path in Location;
@@ -84,6 +88,17 @@ func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.O
 		}
 	}
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(resp.Data)}}}, nil
+}
+
+// acknowledgedBy names the mutations whose success is one exact status, because a
+// redirect would otherwise pass for it: net/http follows a PATCH's 302 as a GET, and
+// the read that answers is a 200 the dispatcher would hand back as a result. HEY
+// redirects a topic merged into another before updating it (TopicsController's
+// redirect_merged_topic, the only such redirect in haystack), so a rename of a merged
+// thread changes nothing — the typed Topics().Rename refuses anything but its 204 for
+// the same reason.
+var acknowledgedBy = map[string]int{
+	"RenameTopic": http.StatusNoContent,
 }
 
 // nextCursorFields extracts the next-read cursor from a geared_pagination Link
