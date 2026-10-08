@@ -1798,6 +1798,22 @@
       },
       "untrusted_content": false
     },
+    "RenameTopic": {
+      "destructive": false,
+      "idempotent": true,
+      "open_world": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      },
+      "untrusted_content": false
+    },
     "RestoreTopic": {
       "destructive": false,
       "idempotent": true,

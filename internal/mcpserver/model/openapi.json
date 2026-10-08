@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "HEY",
-    "version": "2026-09-20",
+    "version": "2026-10-05",
     "description": "HEY API",
     "contact": {
       "name": "Basecamp",
@@ -10267,6 +10267,101 @@
           ]
         },
         "x-hey-untrusted-content": true
+      },
+      "patch": {
+        "description": "Rename a topic. HEY normalizes a blank name to \"No subject\" and truncates\nnames to 1024 characters. Returns no content; read the topic to see the saved name.",
+        "operationId": "RenameTopic",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameTopicRequestContent"
+              }
+            }
+          },
+          "required": true
+        },
+        "parameters": [
+          {
+            "name": "topicId",
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "RenameTopic 204 response"
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "UnprocessableEntityError 422 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnprocessableEntityErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "ServiceUnavailableError 503 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceUnavailableErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Topics"
+        ],
+        "x-hey-destructive": false,
+        "x-hey-open-world": false,
+        "x-hey-retry": {
+          "maxAttempts": 2,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        },
+        "x-hey-untrusted-content": false
       }
     },
     "/topics/{topicId}/comments.json": {
@@ -14628,6 +14723,18 @@
           "id"
         ]
       },
+      "RenameTopicRequestContent": {
+        "type": "object",
+        "description": "Wire format: {topic: {name}}. Name is required, including when it is empty.",
+        "properties": {
+          "topic": {
+            "$ref": "#/components/schemas/TopicNamePayload"
+          }
+        },
+        "required": [
+          "topic"
+        ]
+      },
       "ReplyMessagePayload": {
         "type": "object",
         "description": "HEY does not derive a subject for a reply: a reply draft saved without message.subject\nreads \"No subject\" in Drafts. NewEntryReply hands back the prefilled subject (\"Re: …\") —\nsend it here. Content is the caller's reply body alone: the server appends the quoted\noriginal at delivery (auto_quoting defaults on), so the prefill's quoted content must\nnot be echoed back.",
@@ -15118,6 +15225,17 @@
             }
           }
         }
+      },
+      "TopicNamePayload": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
       },
       "TopicPublication": {
         "type": "object",

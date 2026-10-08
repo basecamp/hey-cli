@@ -77,12 +77,13 @@ type topicCommand struct {
 func newThreadCommand() *cobra.Command {
 	thread := &cobra.Command{
 		Use:   "thread",
-		Short: "Read email threads",
+		Short: "Read and rename email threads",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: read. Thread IDs come from hey box view. Use the same ID with hey reply or hey forward.",
+			"agent_notes": "Subcommands: read, update. Thread IDs come from hey box view. Use the same ID with hey reply or hey forward.",
 		},
 	}
 	thread.AddCommand(newThreadsCommand().cmd)
+	thread.AddCommand(newThreadUpdateCommand().cmd)
 	return thread
 }
 
