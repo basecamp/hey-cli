@@ -376,6 +376,8 @@ hey stop-ignoring
 hey thread
 hey thread read
 hey thread read --allow-partial
+hey thread update
+hey thread update --name
 hey timetrack
 hey timetrack categories
 hey timetrack category

@@ -345,3 +345,36 @@ func TestDispatchEmptyResponseReportsStatus(t *testing.T) {
 		t.Errorf("result = %q, want status report", text)
 	}
 }
+
+// A merged thread's rename is redirected, and the GET net/http follows it with answers
+// 200 with the thread it was merged into. That read is not a rename.
+func TestDispatchRenameTopicRequiresItsAcknowledgement(t *testing.T) {
+	cat := loadForTest(t)
+	threads := domainByKey(t, cat, "threads")
+	rename := mustFind(t, threads, "rename_topic")
+	params := map[string]any{"topicId": float64(4471829), "topic": map[string]any{"name": "Kitchen renovation quotes"}}
+
+	redirected := &fakeAPI{resp: &hey.Response{Data: json.RawMessage(`{"id":4471830}`), StatusCode: http.StatusOK}}
+	result, err := (dispatcher{api: redirected}).handle(context.Background(), threads, rename, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError || !strings.Contains(textContent(t, result), "rename_topic was not acknowledged: HEY answered HTTP 200") {
+		t.Fatalf("a redirected rename was not refused as unacknowledged: %s", textContent(t, result))
+	}
+	if redirected.method != "PATCH" || redirected.path != "/topics/4471829" {
+		t.Errorf("request = %s %s", redirected.method, redirected.path)
+	}
+	if got, _ := json.Marshal(redirected.body); string(got) != `{"topic":{"name":"Kitchen renovation quotes"}}` {
+		t.Errorf("body = %s", got)
+	}
+
+	renamed := &fakeAPI{resp: &hey.Response{StatusCode: http.StatusNoContent}}
+	result, err = (dispatcher{api: renamed}).handle(context.Background(), threads, rename, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("an acknowledged rename was reported as an error: %s", textContent(t, result))
+	}
+}

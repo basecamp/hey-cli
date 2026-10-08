@@ -21,6 +21,8 @@ triggers:
   - hey contact
   - hey bundle
   - hey thread read
+  - hey thread update
+  - rename a thread
   - hey attachment
   - hey share
   - hey unshare
@@ -210,6 +212,7 @@ postings, not the box, label or contact around them.
 | Replace private contact note | `hey contact note set <contact_id> "Prefers email"` (replaces the whole note) |
 | Delete private contact note | `hey contact note delete <contact_id>` |
 | Read email thread | `hey thread read <topic_id> --json` |
+| Rename a thread | `hey thread update <topic_id> --name "Kitchen renovation quotes"` |
 | Get a sharing link | `hey share <topic_id>` |
 | Turn off a sharing link | `hey unshare <topic_id>` |
 | Reply to email | `hey reply <topic_id> -m "Friday works for me."` |
@@ -302,6 +305,7 @@ Want to read email?
 ├── Change where a contact's future email arrives? → hey contact deliver <contact_id> --to imbox|feed|papertrail|screened-out
 ├── A row with kind "bundle"? → hey bundle view <box_item_id> --json (its unseen threads)
 ├── Read full thread? → hey thread read <topic_id> --json
+├── Rename the subject HEY shows for a thread (nothing is emailed; sent mail keeps its subject)? → hey thread update <topic_id> --name <name>
 ├── Get a sharing link? → hey share <topic_id>
 ├── Turn off the sharing link? → hey unshare <topic_id>
 ├── Mark as seen? → hey seen <box_item_id>

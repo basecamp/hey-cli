@@ -26,7 +26,7 @@ var DomainSpecs = []catalog.DomainSpec{
 	{
 		Key:   "threads",
 		Tags:  []string{"Topics", "Entries", "Messages"},
-		Blurb: "HEY email threads: topics and their entries, full message content, replies and forwards, drafts, and triage (trash, spam, restore, move).",
+		Blurb: "HEY email threads: topics and their entries, renaming a thread, full message content, replies and forwards, drafts, and triage (trash, spam, restore, move).",
 	},
 	{
 		Key:   "contacts",
