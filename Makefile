@@ -6,6 +6,13 @@
 
 BINARY := $(CURDIR)/bin/hey
 GOSEC_VERSION := v2.29.0
+# gosec v2.29.0 reads packages through golang.org/x/tools v0.49.0, which cannot
+# decode the export data Go 1.27.2 writes ("export data version 5 is greater than
+# maximum supported version 4"). It analyzes source, so running it on Go 1.27.1
+# finds the same things while the release still builds with go.mod's toolchain.
+# Drop this, and GOTOOLCHAIN in security.yml's gosec step, with the first gosec
+# release past v2.29.0 (securego/gosec 7b1b5ce moved to x/tools v0.51.0).
+GOSEC_GOTOOLCHAIN := go1.27.1
 COVERAGE_FLOOR ?= 70.8
 COVERAGE_PROFILE ?= coverage.out
 COVERAGE_FUNCTIONS ?= coverage.func.txt
@@ -153,7 +160,7 @@ vuln:
 
 # Run the same pinned gosec version as the security workflow.
 gosec:
-	GOWORK=off go run github.com/securego/gosec/v2/cmd/gosec@$(GOSEC_VERSION) ./...
+	GOWORK=off GOTOOLCHAIN=$(GOSEC_GOTOOLCHAIN) go run github.com/securego/gosec/v2/cmd/gosec@$(GOSEC_VERSION) ./...
 
 # Run gitleaks secret scan. The scan is part of the security gate, so a missing
 # binary or config fails it rather than passing it by skipping.
