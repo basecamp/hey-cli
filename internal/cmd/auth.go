@@ -111,7 +111,7 @@ Use --token or --cookie for non-interactive login.`,
 	}
 
 	cmd.Flags().StringVar(&token, "token", "", "Pre-generated Bearer token")
-	cmd.Flags().StringVar(&cookie, "cookie", "", "Session cookie value from browser (session_token)")
+	cmd.Flags().StringVar(&cookie, "cookie", "", "Session cookie value from browser (__Host-session_token, or session_token)")
 	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Don't open browser, print URL instead")
 
 	return cmd

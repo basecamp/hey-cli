@@ -280,7 +280,7 @@ func TestDialHeaderRereadsStoredCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first dial header: %v", err)
 	}
-	if got := first.Get("Cookie"); got != "session_token=cookie-at-first-dial" {
+	if got := first.Get("Cookie"); got != "__Host-session_token=cookie-at-first-dial; session_token=cookie-at-first-dial" {
 		t.Errorf("first dial Cookie = %q", got)
 	}
 
@@ -293,7 +293,7 @@ func TestDialHeaderRereadsStoredCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatalf("redial header: %v", err)
 	}
-	if got := redial.Get("Cookie"); got != "session_token=cookie-at-redial" {
+	if got := redial.Get("Cookie"); got != "__Host-session_token=cookie-at-redial; session_token=cookie-at-redial" {
 		t.Errorf("redial Cookie = %q, want the replacement from storage", got)
 	}
 
