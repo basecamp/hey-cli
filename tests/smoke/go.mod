@@ -2,6 +2,8 @@ module github.com/basecamp/hey-cli/tests/smoke
 
 go 1.27.0
 
+toolchain go1.27.2
+
 require (
 	github.com/chromedp/cdproto v0.0.0-20250803210736-d308e07a266d
 	github.com/chromedp/chromedp v0.14.2
