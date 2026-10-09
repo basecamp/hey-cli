@@ -70,7 +70,9 @@ jobs:
           persist-credentials: false
       - uses: securego/gosec@deb54465fea23d19a77f037e11e6589021f8501d # v2.29.0
         env:
-          GOTOOLCHAIN: auto
+          # v2.29.0 cannot read Go 1.27.2's export data; see GOSEC_GOTOOLCHAIN in
+          # the Makefile, and drop both with the next gosec release.
+          GOTOOLCHAIN: go1.27.1
         with:
           args: -fmt sarif -out gosec-results.sarif ./...
       - uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
