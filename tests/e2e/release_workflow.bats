@@ -37,3 +37,48 @@ job_body() {
   report=$(awk '/- name: Report release size budget/ { inside = 1 } inside && /run:/ { print; exit } inside { print }' <<<"$release")
   [[ "$report" == *"continue-on-error: true"* ]]
 }
+
+@test "Packslip runs after release without becoming a publication dependency" {
+  signing=$(job_body packslip)
+  [[ "$signing" == *"needs: [release]"* ]]
+  [[ "$signing" == *"needs.release.result == 'success'"* ]]
+  [[ "$signing" == *"!cancelled()"* ]]
+  [[ "$signing" == *"continue-on-error: true"* ]]
+  [[ "$signing" == *"timeout-minutes: 10"* ]]
+
+  for job in release aur-publish macos-verify windows-verify sync-skills; do
+    body=$(job_body "$job")
+    [[ "$body" != *"needs:"*"packslip"* ]]
+    [[ "$body" != *"publish-packslip"* ]]
+  done
+}
+
+@test "failed signing or staging cannot upload a Packslip bundle" {
+  signing=$(job_body packslip)
+  [[ "$signing" == *"if: steps.sign.outcome == 'success'"* ]]
+  [[ "$signing" == *"bundle-ready: \${{ steps.stage.outcome == 'success' }}"* ]]
+  [[ "$signing" == *"if-no-files-found: error"* ]]
+  [[ "$signing" == *"upload: false"* ]]
+
+  publishing=$(job_body publish-packslip)
+  [[ "$publishing" == *"needs.packslip.result == 'success'"* ]]
+  [[ "$publishing" == *"needs.packslip.outputs.bundle-ready == 'true'"* ]]
+  [[ "$publishing" == *"!cancelled()"* ]]
+  [[ "$publishing" == *"continue-on-error: true"* ]]
+  [[ "$publishing" == *"timeout-minutes: 10"* ]]
+}
+
+@test "Packslip separates signing from release-write access and links build provenance" {
+  signing=$(job_body packslip)
+  [[ "$signing" == *"contents: read"* ]]
+  [[ "$signing" == *"id-token: write"* ]]
+  [[ "$signing" != *"contents: write"* ]]
+  [[ "$signing" != *"attestations: write"* ]]
+  [[ "$signing" != *"secrets."* ]]
+  [[ "$signing" == *"attest: link"* ]]
+
+  publishing=$(job_body publish-packslip)
+  [[ "$publishing" == *"contents: write"* ]]
+  [[ "$publishing" != *"id-token:"* ]]
+  [[ "$publishing" != *"uses: jdx/packslip@"* ]]
+}
