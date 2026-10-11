@@ -47,3 +47,32 @@ func TestOpensInViewerOnlyForDocumentsImagesAndMedia(t *testing.T) {
 		}
 	}
 }
+
+func TestContentOpensInViewerOnlyWhenTheContentsAgree(t *testing.T) {
+	for _, tc := range []struct {
+		filename, contentType string
+		want                  bool
+	}{
+		{"agenda.pdf", "application/pdf", true},
+		{"notes.md", "text/plain", true},
+		{"Chart.PNG", " Image/PNG ", true},
+		{"photo.jpg", "image/png", true},
+		{"minutes.docx", "application/zip", true},
+		{"budget.ods", "application/zip", true},
+		{"agenda.pdf", "application/vnd.microsoft.portable-executable", false},
+		{"agenda.md", "application/x-ms-dos-executable", false},
+		{"notes.txt", "application/x-shellscript", false},
+		{"notes.txt", "text/x-script.python", false},
+		{"photo.jpg", "application/zip", false},
+		{"photo.png", "image/svg+xml", false},
+		{"photo.png", "application/x-desktop", false},
+		{"photo.png", "application/octet-stream", false},
+		{"photo.png", "", false},
+		{"Invoice.terminal", "text/plain", false},
+		{"report.pdf.command", "application/pdf", false},
+	} {
+		if got := ContentOpensInViewer(tc.filename, tc.contentType); got != tc.want {
+			t.Errorf("ContentOpensInViewer(%q, %q) = %v, want %v", tc.filename, tc.contentType, got, tc.want)
+		}
+	}
+}
