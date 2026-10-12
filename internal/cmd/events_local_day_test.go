@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -34,6 +35,7 @@ type localDayServer struct {
 	zone            string
 	identityStatus  int
 	paths           map[string]string
+	mu              sync.Mutex
 	identityReads   int
 	requestedPaths  []string
 	listedRecording string
@@ -41,10 +43,10 @@ type localDayServer struct {
 
 func (s *localDayServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	s.requestedPaths = append(s.requestedPaths, r.URL.Path+"?"+r.URL.RawQuery)
+	s.record(r)
 	switch r.URL.Path {
 	case "/identity.json":
-		s.identityReads++
+		s.countIdentityRead()
 		if s.identityStatus != 0 {
 			http.Error(w, `{"error":"identity unavailable"}`, s.identityStatus)
 			return
@@ -69,6 +71,30 @@ func (s *localDayServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		http.NotFound(w, r)
 	}
+}
+
+func (s *localDayServer) record(r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.requestedPaths = append(s.requestedPaths, r.URL.Path+"?"+r.URL.RawQuery)
+}
+
+func (s *localDayServer) countIdentityRead() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.identityReads++
+}
+
+func (s *localDayServer) requested() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.requestedPaths...)
+}
+
+func (s *localDayServer) identityReadCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.identityReads
 }
 
 func eventIDsOf(t *testing.T, data any) []float64 {
@@ -214,8 +240,8 @@ func TestEventsDayWithoutAnAccountZoneUsesTheMachinesDaysAndSaysSoOnce(t *testin
 	if got := strings.Count(stderr, "Notice:"); got != 1 {
 		t.Errorf("stderr has %d notices, want one: %q", got, stderr)
 	}
-	if server.identityReads != 1 {
-		t.Errorf("identity read %d times, want once", server.identityReads)
+	if reads := server.identityReadCount(); reads != 1 {
+		t.Errorf("identity read %d times, want once", reads)
 	}
 }
 
@@ -329,7 +355,7 @@ func TestEventsListSummaryNamesTheDatesGiven(t *testing.T) {
 	}
 	wanted := "starts_on=2026-09-19&ends_on=2026-09-22"
 	found := false
-	for _, path := range server.requestedPaths {
+	for _, path := range server.requested() {
 		if strings.Contains(path, "/calendars/9102/recordings.json") && strings.Contains(path, "ends_on=2026-09-22") && strings.Contains(path, "starts_on=2026-09-19") {
 			found = true
 		}

@@ -130,7 +130,7 @@ var todayCommands = []todayCommand{
 	{name: "event week", args: []string{"event", "week"}, sends: func(day string) string { return "GET /calendar/weeks/" + day }},
 	{name: "event list", args: []string{"event", "list"}, sends: func(day string) string {
 		start, _ := time.Parse(dateLayout, day)
-		return "GET /calendars/9/recordings starts_on=" + start.AddDate(0, 0, -1).Format(dateLayout) + " ends_on=" + start.AddDate(0, 0, 32).Format(dateLayout)
+		return "GET /calendars/9/recordings starts_on=" + start.AddDate(0, 0, -1).Format(dateLayout) + " ends_on=" + start.AddDate(0, 0, 31).Format(dateLayout)
 	}, readsZoneForDays: true},
 	{name: "habit list", args: []string{"habit", "list"}, sends: func(day string) string { return "GET /calendar/weeks/" + day }},
 	{name: "journal read", args: []string{"journal", "read"}, sends: func(day string) string { return "GET /calendar/days/" + day + "/journal_entry" }},

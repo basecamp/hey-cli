@@ -269,8 +269,8 @@ func TestEventsListRefusesARepeatedRecordingsCursor(t *testing.T) {
 
 func TestEventsListDefaultsEndDateFromStart(t *testing.T) {
 	response, err := runJSONCommand(t, withLocalDays(nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.URL.Query().Get("ends_on"); got != "2026-03-05" {
-			t.Errorf("ends_on = %q, want 30 days after 2026-02-01, and two days more for the zone", got)
+		if got := r.URL.Query().Get("ends_on"); got != "2026-03-04" {
+			t.Errorf("ends_on = %q, want the 30th day from 2026-02-01, and two days more for the zone", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{}`)

@@ -146,7 +146,7 @@ func TestLocalEventsByZone(t *testing.T) {
 		{name: "dinner is on the 21st in Tokyo", zone: "Asia/Tokyo", date: "2026-09-21", main: []generated.Recording{dinner}, want: []string{"Late dinner with Priya Patel"}},
 		{name: "dinner is not on the 20th in Tokyo", zone: "Asia/Tokyo", date: "2026-09-20", after: []generated.Recording{dinner}, wantNo: []string{"Late dinner with Priya Patel"}},
 		{name: "dinner is on the 21st in UTC", zone: "UTC", date: "2026-09-21", main: []generated.Recording{dinner}, want: []string{"Late dinner with Priya Patel"}},
-		{name: "concert from before-day is on the 19th in UTC", zone: "UTC", date: "2026-09-19", main: []generated.Recording{concert}, want: []string{"Evening concert"}},
+		{name: "concert from before-day is on the 19th in UTC", zone: "UTC", date: "2026-09-19", before: []generated.Recording{concert}, want: []string{"Evening concert"}},
 	}
 
 	for _, tc := range cases {
@@ -233,7 +233,9 @@ func TestInDays(t *testing.T) {
 		{"evening dinner is not on the next day", generated.Recording{StartsAt: instant(t, "2026-09-21T00:50:00Z"), EndsAt: instant(t, "2026-09-21T03:00:00Z")}, "2026-09-21", "2026-09-21", false},
 		{"concert ended before the day", generated.Recording{StartsAt: instant(t, "2026-09-18T22:00:00Z"), EndsAt: instant(t, "2026-09-19T01:30:00Z")}, "2026-09-19", "2026-09-19", false},
 		{"concert is on the 18th", generated.Recording{StartsAt: instant(t, "2026-09-18T22:00:00Z"), EndsAt: instant(t, "2026-09-19T01:30:00Z")}, "2026-09-18", "2026-09-18", true},
-		{"series row is always kept", generated.Recording{Recurring: true, StartsAt: instant(t, "2026-01-05T14:00:00Z")}, "2026-09-20", "2026-09-20", true},
+		{"series that started a year before is listed", generated.Recording{Recurring: true, StartsAt: instant(t, "2025-09-15T14:00:00Z")}, "2026-09-20", "2026-09-20", true},
+		{"series that starts the day after is not listed", generated.Recording{Recurring: true, StartsAt: instant(t, "2026-09-21T14:00:00Z")}, "2026-09-20", "2026-09-20", false},
+		{"series that starts in the evening of the last day is listed", generated.Recording{Recurring: true, StartsAt: instant(t, "2026-09-21T02:00:00Z")}, "2026-09-20", "2026-09-20", true},
 		{"event without a start is kept", generated.Recording{}, "2026-09-20", "2026-09-20", true},
 		{"all-day event on its date", generated.Recording{AllDay: true, StartsAt: day("2026-09-20"), EndsAt: day("2026-09-20")}, "2026-09-20", "2026-09-20", true},
 		{"all-day event outside", generated.Recording{AllDay: true, StartsAt: day("2026-09-20"), EndsAt: day("2026-09-20")}, "2026-09-21", "2026-09-22", false},

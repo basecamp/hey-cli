@@ -90,8 +90,11 @@ func WithLocalEvents(main *generated.CalendarPeriod, neighbours []*generated.Cal
 }
 
 func InDays(r generated.Recording, first, last time.Time, loc *time.Location) bool {
-	if r.Recurring || r.StartsAt.IsZero() {
+	if r.StartsAt.IsZero() {
 		return true
+	}
+	if r.Recurring {
+		return r.StartsAt.Before(civilMidnight(last.AddDate(0, 0, 1), loc))
 	}
 	if r.AllDay {
 		startsOn := utcDate(r.StartsAt)

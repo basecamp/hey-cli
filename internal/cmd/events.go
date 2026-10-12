@@ -76,7 +76,7 @@ today, and says so on stderr.
 --starts-on and --ends-on name days in that same zone, and --ends-on is included. An
 event is listed when it overlaps those days, so an evening event is on its own day and not
 on the next UTC day. An all-day event is listed on the dates it names. A repeating series
-is listed as the row HEY stores.`,
+is listed as the row HEY stores, unless the series starts after the last day.`,
 		Annotations: map[string]string{
 			"agent_notes": "list carries no countdowns; day and week do. " + recordingWindowNotes,
 		},
@@ -325,9 +325,9 @@ unknown, set your time zone in HEY before retrying. A day already written out ke
 own stored times.
 
 The event is found by reading every calendar it might be on, which is one request each and
-covers the pages HEY answers with. Give the day it starts as [date] to look on that day.
-The read covers the day before and the day after it too, so an evening or an early morning
-event is found by the date you see it on.
+covers the pages HEY answers with. Give the day it starts as [date] to look from the day
+before it to the day after it, so an evening or early-morning event is found by the date it
+shows on.
 Without [date] it is looked for within a year either side of today, and an event not
 found there is refused as not_found rather than written blind.
 
