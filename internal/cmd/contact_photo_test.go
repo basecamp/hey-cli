@@ -10,6 +10,7 @@ import (
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -279,27 +280,128 @@ func pngHeader(width, height uint32) []byte {
 	return binary.BigEndian.AppendUint32(header, crc32.ChecksumIEEE(chunk))
 }
 
+type exifByteOrder interface {
+	binary.ByteOrder
+	binary.AppendByteOrder
+}
+
+// jpegHeader is the start of a JPEG claiming the given dimensions and component count
+// (1 gray, 3 color, 4 CMYK), with an EXIF orientation when orientation is non-zero, in the
+// byte order named: everything a decoder reads before the scan, and no pixels.
+func jpegHeader(width, height uint16, components byte, orientation uint16, order exifByteOrder) []byte {
+	header := []byte{0xFF, 0xD8}
+	if orientation != 0 {
+		tiff := []byte("MM")
+		if order == binary.LittleEndian {
+			tiff = []byte("II")
+		}
+		tiff = order.AppendUint16(tiff, 42)
+		tiff = order.AppendUint32(tiff, 8)      // IFD0 offset
+		tiff = order.AppendUint16(tiff, 2)      // entries
+		tiff = order.AppendUint16(tiff, 0x010F) // Make, which is not the orientation
+		tiff = order.AppendUint16(tiff, 2)
+		tiff = order.AppendUint32(tiff, 4)
+		tiff = append(tiff, "HEY\x00"...)
+		tiff = order.AppendUint16(tiff, 0x0112)
+		tiff = order.AppendUint16(tiff, 3) // SHORT
+		tiff = order.AppendUint32(tiff, 1)
+		tiff = order.AppendUint16(tiff, orientation)
+		tiff = order.AppendUint16(tiff, 0)
+		tiff = order.AppendUint32(tiff, 0) // no next IFD
+		app1 := append([]byte("Exif\x00\x00"), tiff...)
+		header = append(header, 0xFF, 0xE1)
+		header = binary.BigEndian.AppendUint16(header, uint16(len(app1)+2))
+		header = append(header, app1...)
+	}
+	sof := []byte{8}
+	sof = binary.BigEndian.AppendUint16(sof, height)
+	sof = binary.BigEndian.AppendUint16(sof, width)
+	sof = append(sof, components)
+	for id := byte(1); id <= components; id++ {
+		sof = append(sof, id, 0x11, 0)
+	}
+	header = append(header, 0xFF, 0xC0)
+	header = binary.BigEndian.AppendUint16(header, uint16(len(sof)+2))
+	header = append(header, sof...)
+	return append(header, 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3F, 0x00)
+}
+
+func TestJPEGOrientationReadsTheExifTag(t *testing.T) {
+	for _, order := range []exifByteOrder{binary.BigEndian, binary.LittleEndian} {
+		for orientation := uint16(1); orientation <= 8; orientation++ {
+			got := jpegOrientation(bytes.NewReader(jpegHeader(640, 480, 3, orientation, order)))
+			if got != int(orientation) {
+				t.Errorf("%v orientation %d read as %d", order, orientation, got)
+			}
+		}
+	}
+	upright := jpegHeader(640, 480, 3, 6, binary.BigEndian)
+	for name, content := range map[string][]byte{
+		"no exif":             jpegHeader(640, 480, 3, 0, nil),
+		"out of range":        jpegHeader(640, 480, 3, 9, binary.BigEndian),
+		"a real encoder's":    jpegPhoto(t),
+		"not a jpeg":          pngPhoto(t),
+		"cut off in the exif": upright[:30],
+		"empty":               nil,
+	} {
+		if got := jpegOrientation(bytes.NewReader(content)); got != 1 {
+			t.Errorf("%s: orientation = %d, want 1", name, got)
+		}
+	}
+}
+
+func TestJPEGOrientationSkipsFillBytesBeforeAMarker(t *testing.T) {
+	rotated := jpegHeader(640, 480, 3, 6, binary.BigEndian)
+	for fill := 1; fill <= 3; fill++ {
+		padded := append([]byte{0xFF, 0xD8}, bytes.Repeat([]byte{0xFF}, fill)...)
+		padded = append(padded, rotated[2:]...)
+		if got := jpegOrientation(bytes.NewReader(padded)); got != 6 {
+			t.Errorf("%d fill bytes: orientation = %d, want 6", fill, got)
+		}
+	}
+}
+
+func TestJPEGOrientationSurvivesEveryTruncation(t *testing.T) {
+	rotated := jpegHeader(640, 480, 3, 6, binary.LittleEndian)
+	for cut := range rotated {
+		_ = jpegOrientation(bytes.NewReader(rotated[:cut]))
+	}
+}
+
+// The boundaries below are HEY's, measured by running its variant command under
+// hotcell/policy.xml and the cell's limits: 10800×10800 resizes and 11000×11000 does not;
+// rotated, 7600×7600 does and 7700×7700 does not; CMYK, 9600×9600 does and 9800×9600 does
+// not; rotated CMYK, 6000×6000 does and 7000×7000 does not. Each case sits on the line the
+// budget draws between them.
 func TestContactPhotoSetRefusesPhotosTooLargeForHEYToResize(t *testing.T) {
 	tests := []struct {
-		name          string
-		width, height uint32
+		name    string
+		content []byte
+		hint    string
 	}{
-		{name: "too wide", width: contactPhotoMaxSide + 1, height: 1},
-		{name: "too tall", width: 1, height: contactPhotoMaxSide + 1},
-		{name: "too many pixels inside the side limit", width: 15_000, height: 15_000},
-		{name: "a 200 megapixel phone photo", width: 16_320, height: 12_240},
+		{name: "too wide", content: pngHeader(contactPhotoMaxSide+1, 1), hint: "16000 pixels a side"},
+		{name: "too tall", content: jpegHeader(1, contactPhotoMaxSide+1, 3, 0, nil), hint: "16000 pixels a side"},
+		{name: "a 200 megapixel phone photo", content: jpegHeader(16_320, 12_240, 3, 0, nil), hint: "16000 pixels a side"},
+		{name: "upright png", content: pngHeader(16_000, 7_341), hint: "a photo of at most 117.4 megapixels"},
+		{name: "upright jpeg", content: jpegHeader(16_000, 7_341, 3, 1, binary.BigEndian), hint: "a photo of at most 117.4 megapixels"},
+		{name: "grayscale jpeg", content: jpegHeader(16_000, 7_341, 1, 0, nil), hint: "a photo of at most 117.4 megapixels"},
+		{name: "a 108 megapixel portrait", content: jpegHeader(12_000, 9_000, 3, 6, binary.LittleEndian), hint: "a photo that its EXIF orientation rotates or flips of at most 58.7 megapixels"},
+		{name: "rotated jpeg", content: jpegHeader(8_000, 7_341, 3, 8, binary.BigEndian), hint: "rotates or flips of at most 58.7 megapixels"},
+		{name: "mirrored jpeg", content: jpegHeader(8_000, 7_341, 3, 2, binary.BigEndian), hint: "rotates or flips of at most 58.7 megapixels"},
+		{name: "cmyk jpeg", content: jpegHeader(16_000, 5_873, 4, 0, nil), hint: "a CMYK JPEG of at most 94.0 megapixels"},
+		{name: "rotated cmyk jpeg", content: jpegHeader(8_000, 5_873, 4, 6, binary.BigEndian), hint: "a CMYK JPEG that its EXIF orientation rotates or flips of at most 47.0 megapixels"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			state := newContactPhotoServer(t)
-			photo := writePhotoFixture(t, "jane-doe.png", pngHeader(tc.width, tc.height))
+			photo := writePhotoFixture(t, "jane-doe.jpg", tc.content)
 			_, err := runContacts(t, state.server, "photo", "set", "7", photo)
 			var cliErr *apierr.Error
 			if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage {
 				t.Fatalf("error = %v, want usage error", err)
 			}
-			if !strings.Contains(cliErr.Message, "too large for HEY to resize") {
-				t.Errorf("message = %q", cliErr.Message)
+			if !strings.Contains(cliErr.Message, "too large for HEY to resize") || !strings.Contains(cliErr.Hint, tc.hint) {
+				t.Errorf("message = %q, hint = %q, want hint containing %q", cliErr.Message, cliErr.Hint, tc.hint)
 			}
 			if requests := state.requestLines(); len(requests) != 0 {
 				t.Fatalf("a refused photo sent requests: %v", requests)
@@ -309,16 +411,25 @@ func TestContactPhotoSetRefusesPhotosTooLargeForHEYToResize(t *testing.T) {
 }
 
 func TestContactPhotoSetAcceptsPhotosAtTheResizeLimits(t *testing.T) {
-	for _, size := range [][2]uint32{
-		{contactPhotoMaxSide, 1},
-		{1, contactPhotoMaxSide},
-		{contactPhotoMaxSide, contactPhotoMaxPixels / contactPhotoMaxSide},
+	for name, content := range map[string][]byte{
+		"widest png":              pngHeader(contactPhotoMaxSide, 1),
+		"tallest jpeg":            jpegHeader(1, contactPhotoMaxSide, 3, 0, nil),
+		"largest upright png":     pngHeader(16_000, 7_340),
+		"largest upright jpeg":    jpegHeader(16_000, 7_340, 3, 1, binary.LittleEndian),
+		"png whatever its exif":   pngHeader(16_000, 7_340),
+		"largest rotated jpeg":    jpegHeader(8_000, 7_340, 3, 6, binary.BigEndian),
+		"largest cmyk jpeg":       jpegHeader(16_000, 5_872, 4, 0, nil),
+		"largest rotated cmyk":    jpegHeader(8_000, 5_872, 4, 5, binary.LittleEndian),
+		"a 48 megapixel portrait": jpegHeader(8_064, 6_048, 3, 6, binary.LittleEndian),
 	} {
-		photo := writePhotoFixture(t, "jane-doe.png", pngHeader(size[0], size[1]))
+		photo := writePhotoFixture(t, "jane-doe.jpg", content)
 		prepared, err := openContactPhoto(photo)
 		if err != nil {
-			t.Errorf("%d×%d was refused: %v", size[0], size[1], err)
+			t.Errorf("%s was refused: %v", name, err)
 			continue
+		}
+		if offset, _ := prepared.file.Seek(0, io.SeekCurrent); offset != 0 {
+			t.Errorf("%s: the photo was left at offset %d, not its start", name, offset)
 		}
 		closePreparedAttachments([]preparedAttachment{prepared})
 	}
