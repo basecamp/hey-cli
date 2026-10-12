@@ -1259,9 +1259,9 @@ func buildWeekDayColumn(d weekDayInfo, width int, muted lipgloss.Style, sel sele
 }
 
 func dayColumns(starts, ends, anchor time.Time, daySpan int) (int, int) {
-	day := anchor.Local()
-	dayStart := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, time.Local)
-	dayEnd := time.Date(day.Year(), day.Month(), day.Day()+1, 0, 0, 0, 0, time.Local)
+	loc := anchor.Location()
+	dayStart := time.Date(anchor.Year(), anchor.Month(), anchor.Day(), 0, 0, 0, 0, loc)
+	dayEnd := time.Date(anchor.Year(), anchor.Month(), anchor.Day()+1, 0, 0, 0, 0, loc)
 
 	startPos, endPos := 0, daySpan
 	if !starts.Before(dayStart) {
