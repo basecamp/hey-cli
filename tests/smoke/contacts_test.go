@@ -155,7 +155,7 @@ func TestContactPhoto(t *testing.T) {
 	// The URL changes with the blob whether or not HEY can resize it; one it cannot is
 	// answered with the contact's initials as SVG. So fetch it: the photo is a raster.
 	// The avatar route needs no session.
-	resp, err := http.Get(withPhoto.AvatarURL)
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Get(withPhoto.AvatarURL)
 	if err != nil {
 		t.Fatalf("fetch avatar: %v", err)
 	}
