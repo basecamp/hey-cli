@@ -105,21 +105,21 @@ func TestCalendarsCommandAPIError(t *testing.T) {
 }
 
 func TestEventsListCommand(t *testing.T) {
-	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	response, err := runJSONCommand(t, withLocalDays(nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/calendars/7/recordings.json" {
 			t.Errorf("request = %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)
 			return
 		}
-		if got := r.URL.Query().Get("starts_on"); got != "2026-08-01" {
-			t.Errorf("starts_on = %q", got)
+		if got := r.URL.Query().Get("starts_on"); got != "2026-07-31" {
+			t.Errorf("starts_on = %q, want the day before so an evening in a zone west of UTC is inside", got)
 		}
-		if got := r.URL.Query().Get("ends_on"); got != "2026-08-31" {
-			t.Errorf("ends_on = %q", got)
+		if got := r.URL.Query().Get("ends_on"); got != "2026-09-02" {
+			t.Errorf("ends_on = %q, want two days after so the last day's evening is inside", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"Calendar::Event":[{"id":1,"title":"Planning","starts_at":"2026-08-02T09:00:00Z"},{"id":2,"title":"Review","starts_at":"2026-08-03T09:00:00Z"}],"Calendar::Todo":[{"id":3,"title":"Send notes"}]}`)
-	}), "event", "list", "--calendar", "7", "--starts-on", "2026-08-01", "--ends-on", "2026-08-31", "--limit", "1")
+	})), "event", "list", "--calendar", "7", "--starts-on", "2026-08-01", "--ends-on", "2026-08-31", "--limit", "1")
 	if err != nil {
 		t.Fatalf("execute events list: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestEventsListReadsEveryCalendar(t *testing.T) {
 // the requested window, so stopping at the first page makes the series disappear.
 func TestEventsListFollowsEveryRecordingsPage(t *testing.T) {
 	var pages []string
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := withLocalDays(nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		page := r.URL.Query().Get("page")
 		pages = append(pages, page)
 		w.Header().Set("Content-Type", "application/json")
@@ -189,7 +189,7 @@ func TestEventsListFollowsEveryRecordingsPage(t *testing.T) {
 		default:
 			http.Error(w, "unexpected page", http.StatusBadRequest)
 		}
-	})
+	}))
 
 	ids, err := runFormattedCommand(t, handler, []string{"--ids-only"},
 		"event", "list", "--calendar", "7", "--starts-on", "2026-08-01", "--ends-on", "2026-08-31")
@@ -208,7 +208,7 @@ func TestEventsListFollowsEveryRecordingsPage(t *testing.T) {
 // that cursor can make an empty last page cycle back into pages already read.
 func TestEventsListStopsOnAnEmptyRecordingsPage(t *testing.T) {
 	var pages []string
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := withLocalDays(nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		page := r.URL.Query().Get("page")
 		pages = append(pages, page)
 		w.Header().Set("Content-Type", "application/json")
@@ -222,7 +222,7 @@ func TestEventsListStopsOnAnEmptyRecordingsPage(t *testing.T) {
 		default:
 			http.Error(w, "unexpected page", http.StatusBadRequest)
 		}
-	})
+	}))
 
 	ids, err := runFormattedCommand(t, handler, []string{"--ids-only"},
 		"event", "list", "--calendar", "7", "--starts-on", "2026-08-01", "--ends-on", "2026-08-31")
@@ -241,7 +241,7 @@ func TestEventsListStopsOnAnEmptyRecordingsPage(t *testing.T) {
 // accepted once, then its repeated cursor is refused before another request is made.
 func TestEventsListRefusesARepeatedRecordingsCursor(t *testing.T) {
 	var pages []string
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := withLocalDays(nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		page := r.URL.Query().Get("page")
 		pages = append(pages, page)
 		w.Header().Set("Content-Type", "application/json")
@@ -255,7 +255,7 @@ func TestEventsListRefusesARepeatedRecordingsCursor(t *testing.T) {
 		default:
 			http.Error(w, "unexpected page", http.StatusBadRequest)
 		}
-	})
+	}))
 
 	_, err := runFormattedCommand(t, handler, []string{"--ids-only"},
 		"event", "list", "--calendar", "7", "--starts-on", "2026-08-01", "--ends-on", "2026-08-31")
@@ -268,13 +268,13 @@ func TestEventsListRefusesARepeatedRecordingsCursor(t *testing.T) {
 }
 
 func TestEventsListDefaultsEndDateFromStart(t *testing.T) {
-	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.URL.Query().Get("ends_on"); got != "2026-03-03" {
-			t.Errorf("ends_on = %q, want 30 days after 2026-02-01", got)
+	response, err := runJSONCommand(t, withLocalDays(nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("ends_on"); got != "2026-03-05" {
+			t.Errorf("ends_on = %q, want 30 days after 2026-02-01, and two days more for the zone", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{}`)
-	}), "event", "list", "--calendar", "7", "--starts-on", "2026-02-01")
+	})), "event", "list", "--calendar", "7", "--starts-on", "2026-02-01")
 	if err != nil {
 		t.Fatalf("execute events list: %v", err)
 	}

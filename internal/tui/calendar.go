@@ -15,6 +15,7 @@ import (
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
+	"github.com/basecamp/hey-cli/internal/calendarday"
 	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
@@ -2670,7 +2671,12 @@ func (v *calendarView) requestRecordings() tea.Cmd {
 		if err != nil {
 			return recordingsLoadedMsg{requestResult: newRequestResult(requestID, err)}
 		}
-		return recordingsLoadedMsg{requestResult: newRequestResult(requestID, nil), recordings: recordingsIn(period)}
+		neighbours, err := calendarday.ReadNeighbours(ctx, period, periods.Day)
+		if err != nil {
+			return recordingsLoadedMsg{requestResult: newRequestResult(requestID, err)}
+		}
+		local := calendarday.WithLocalEvents(period, neighbours, time.Local)
+		return recordingsLoadedMsg{requestResult: newRequestResult(requestID, nil), recordings: recordingsIn(local)}
 	}
 }
 

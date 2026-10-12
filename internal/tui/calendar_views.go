@@ -696,11 +696,7 @@ func renderDayView(events, habits, countdowns []Recording, anchor, now time.Time
 			et = st.Add(time.Hour)
 		}
 
-		startPos := (st.Hour()*60 + st.Minute()) * daySpan / (24 * 60)
-		endPos := (et.Hour()*60 + et.Minute()) * daySpan / (24 * 60)
-		if et.Day() != st.Day() || (et.Hour() == 0 && et.Minute() == 0 && et.After(st)) {
-			endPos = daySpan
-		}
+		startPos, endPos := dayColumns(st, et, anchor, daySpan)
 		if endPos <= startPos {
 			endPos = startPos + colWidth
 		}
@@ -1260,6 +1256,21 @@ func buildWeekDayColumn(d weekDayInfo, width int, muted lipgloss.Style, sel sele
 	}
 
 	return lines
+}
+
+func dayColumns(starts, ends, anchor time.Time, daySpan int) (int, int) {
+	day := anchor.Local()
+	dayStart := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, time.Local)
+	dayEnd := time.Date(day.Year(), day.Month(), day.Day()+1, 0, 0, 0, 0, time.Local)
+
+	startPos, endPos := 0, daySpan
+	if !starts.Before(dayStart) {
+		startPos = (starts.Hour()*60 + starts.Minute()) * daySpan / (24 * 60)
+	}
+	if ends.Before(dayEnd) {
+		endPos = (ends.Hour()*60 + ends.Minute()) * daySpan / (24 * 60)
+	}
+	return startPos, endPos
 }
 
 // eventTimeSpan is when an event runs, on the clock the reader keeps — not the one HEY answers

@@ -15,13 +15,37 @@ import (
 	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
+func emptyDayJSON(date string) string {
+	return `{"kind":"day","starts_at":"` + date + `T00:00:00Z","ends_at":"` + date + `T23:59:59Z","recordings":{}}`
+}
+
+func withLocalDays(days map[string]string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/identity.json" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"id":1,"name":"Jason Fried","time_zone":"UTC"}`)
+			return
+		}
+		if r.Method == http.MethodGet {
+			date := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/calendar/days/"), ".json")
+			if body, ok := days[date]; ok {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, body)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // A repeating event is one row on a calendar, so `hey event list` answers it on the day the
 // series began. A day is HEY's own expansion: the occurrence falls on the day asked for,
 // carrying that day's times, and everything that is not an event stays out of the answer.
 // HEY serves the occurrence virtual — no id of its own, the series in parent_id — and the
 // row resolves that to the series id, which is what edit and delete take.
 func TestEventsDayExpandsRecurringEvents(t *testing.T) {
-	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	neighbours := map[string]string{"2026-09-01": emptyDayJSON("2026-09-01"), "2026-09-03": emptyDayJSON("2026-09-03")}
+	response, err := runJSONCommand(t, withLocalDays(neighbours, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/calendar/days/2026-09-02.json" {
 			t.Errorf("request = %s %s, want the day read", r.Method, r.URL.Path)
 			http.NotFound(w, r)
@@ -35,7 +59,7 @@ func TestEventsDayExpandsRecurringEvents(t *testing.T) {
 			`],`+
 			`"Calendar::Habit":[{"id":11,"title":"Morning strength training"}],`+
 			`"Calendar::Todo":[{"id":3,"title":"Send notes"}]}}`)
-	}), "event", "day", "2026-09-02")
+	})), "event", "day", "2026-09-02")
 	if err != nil {
 		t.Fatalf("execute event day: %v", err)
 	}
@@ -268,7 +292,8 @@ func TestEventsDayKeepsARealizedOccurrenceID(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	})
-	response, err := runJSONCommand(t, handler, "event", "day", "2026-09-15")
+	neighbours := map[string]string{"2026-09-14": emptyDayJSON("2026-09-14"), "2026-09-16": emptyDayJSON("2026-09-16")}
+	response, err := runJSONCommand(t, withLocalDays(neighbours, handler), "event", "day", "2026-09-15")
 	if err != nil {
 		t.Fatalf("execute event day: %v", err)
 	}
@@ -338,7 +363,8 @@ func TestEventsPeriodStyledPublishesOccurrenceIdentifiers(t *testing.T) {
 }
 
 func TestEventsWeekReadsTheWeekPeriod(t *testing.T) {
-	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	neighbours := map[string]string{"2026-08-30": emptyDayJSON("2026-08-30"), "2026-09-07": emptyDayJSON("2026-09-07")}
+	response, err := runJSONCommand(t, withLocalDays(neighbours, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/calendar/weeks/2026-09-02.json" {
 			t.Errorf("request = %s %s, want the week read", r.Method, r.URL.Path)
 			http.NotFound(w, r)
@@ -350,7 +376,7 @@ func TestEventsWeekReadsTheWeekPeriod(t *testing.T) {
 			`{"title":"Standup","starts_at":"2026-09-04T09:15:00Z","ends_at":"2026-09-04T09:30:00Z","type":"Calendar::Event","recurring":true,"parent_id":204,"occurrence_id":"204_2026-09-04","calendar":{"id":9,"name":"Work"}},`+
 			`{"title":"Standup","starts_at":"2026-09-02T09:15:00Z","ends_at":"2026-09-02T09:30:00Z","type":"Calendar::Event","recurring":true,"parent_id":204,"occurrence_id":"204_2026-09-02","calendar":{"id":9,"name":"Work"}}`+
 			`]}}`)
-	}), "event", "week", "2026-09-02")
+	})), "event", "week", "2026-09-02")
 	if err != nil {
 		t.Fatalf("execute event week: %v", err)
 	}

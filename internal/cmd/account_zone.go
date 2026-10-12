@@ -25,9 +25,10 @@ const todayUnknown = "cannot tell which day today is"
 // or a today to name. A specific --account is validated by a separate identity read before
 // the command runs.
 type accountZone struct {
-	read bool
-	name string
-	err  error
+	read     bool
+	name     string
+	err      error
+	fellBack bool
 }
 
 // timeZone is the zone HEY's web app reads typed times and today in: the one the identity
@@ -85,6 +86,7 @@ func (a *accountZone) todayToRead(ctx context.Context, stderr io.Writer, hint st
 	_, loc, err := a.location(ctx)
 	if unknown, ok := errors.AsType[*unknownAccountZoneError](err); ok {
 		today := calendarDay(clockNow())
+		a.fellBack = true
 		fmt.Fprintf(stderr, "Notice: %s, so today is %s by this machine's clock\n", unknown.reason, today.Format(dateLayout))
 		return today, nil
 	}
@@ -92,6 +94,21 @@ func (a *accountZone) todayToRead(ctx context.Context, stderr io.Writer, hint st
 		return time.Time{}, accountZoneRefusal(err, todayUnknown, hint)
 	}
 	return calendarDay(clockNow().In(loc)), nil
+}
+
+func (a *accountZone) locationToRead(ctx context.Context, stderr io.Writer) (*time.Location, error) {
+	_, loc, err := a.location(ctx)
+	if unknown, ok := errors.AsType[*unknownAccountZoneError](err); ok {
+		if !a.fellBack {
+			a.fellBack = true
+			fmt.Fprintf(stderr, "Notice: %s, so days are this machine's days\n", unknown.reason)
+		}
+		return time.Local, nil
+	}
+	if err != nil {
+		return nil, accountZoneRefusal(err, "cannot tell which events fall on the days asked for", "retry the command")
+	}
+	return loc, nil
 }
 
 // calendarDay is the day an instant falls on where it was read, as a date with no zone left

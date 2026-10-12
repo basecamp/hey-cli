@@ -121,6 +121,8 @@ type todayCommand struct {
 	args  []string
 	sends func(day string) string
 	write bool
+
+	readsZoneForDays bool
 }
 
 var todayCommands = []todayCommand{
@@ -128,8 +130,8 @@ var todayCommands = []todayCommand{
 	{name: "event week", args: []string{"event", "week"}, sends: func(day string) string { return "GET /calendar/weeks/" + day }},
 	{name: "event list", args: []string{"event", "list"}, sends: func(day string) string {
 		start, _ := time.Parse(dateLayout, day)
-		return "GET /calendars/9/recordings starts_on=" + day + " ends_on=" + start.AddDate(0, 0, 30).Format(dateLayout)
-	}},
+		return "GET /calendars/9/recordings starts_on=" + start.AddDate(0, 0, -1).Format(dateLayout) + " ends_on=" + start.AddDate(0, 0, 32).Format(dateLayout)
+	}, readsZoneForDays: true},
 	{name: "habit list", args: []string{"habit", "list"}, sends: func(day string) string { return "GET /calendar/weeks/" + day }},
 	{name: "journal read", args: []string{"journal", "read"}, sends: func(day string) string { return "GET /calendar/days/" + day + "/journal_entry" }},
 	{name: "habit complete", args: []string{"habit", "complete", "42"}, write: true, sends: func(day string) string { return "POST /calendar/days/" + day + "/habits/42/completions" }},
@@ -175,9 +177,13 @@ func TestTodayIsTheAccountsToday(t *testing.T) {
 	}
 }
 
-// A day that is named is the day sent, and the account is not asked for its zone.
+// A day that is named is the day sent, and the account is not asked for its zone, bar the
+// list, which cuts events to local days.
 func TestANamedDayReadsNoAccountZone(t *testing.T) {
 	for _, command := range todayCommands {
+		if command.readsZoneForDays {
+			continue
+		}
 		t.Run(command.name, func(t *testing.T) {
 			atInstantOn(t, "2026-10-15T02:00:00Z", "UTC")
 			handler, requests := todayServer(t, todayFixture{identityStatus: http.StatusInternalServerError})

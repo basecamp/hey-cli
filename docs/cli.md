@@ -577,6 +577,14 @@ newest start time, not creation time, so use the ID returned by `hey event add` 
 edit or delete rather than choosing an event by its position in the list. A repeating event
 lists once as the series it is stored as, plus a row for each day HEY has written out on its own.
 
+A date given to `hey event list`, `hey event day`, `hey event week` and `hey event edit` is a
+day in your HEY account's time zone. If the account has none, it is a day in the machine's
+zone, and the command says so once on stderr. HEY reads a date as a UTC day, so the CLI reads
+the days either side too and keeps the events that overlap the days you named. An event at
+9:15 PM in New York is on its own date, not on the next one. `hey event list` includes
+`--ends-on`, lists an all-day event on the dates it names, and lists a repeating series
+as the one row HEY stores.
+
 `hey event day` and `hey event week` read a span the way HEY's own views draw it: a
 repeating event is expanded into the occurrences that fall inside it, each carrying that
 day's own times and an `occurrence_id`. A virtual occurrence carries the series in `id`

@@ -5,6 +5,8 @@ import (
 	"image/color"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -478,7 +480,7 @@ func TestCalendarViewFetchesAroundTheCurrentDay(t *testing.T) {
 	}
 }
 
-// The week reads the week the day falls in — one request, not seven days' worth.
+// The week reads the week the day falls in — three requests, not seven days' worth.
 func TestCalendarViewReadsTheWeekForTheWeekSpan(t *testing.T) {
 	var mu sync.Mutex
 	var paths []string
@@ -501,8 +503,10 @@ func TestCalendarViewReadsTheWeekForTheWeekSpan(t *testing.T) {
 	v.requestRecordings()()
 	mu.Lock()
 	defer mu.Unlock()
-	if len(paths) != 1 || paths[0] != "/calendar/weeks/2025-03-09.json" {
-		t.Errorf("paths = %v, want one read of the week", paths)
+	sort.Strings(paths)
+	want := []string{"/calendar/days/2025-03-02.json", "/calendar/days/2025-03-10.json", "/calendar/weeks/2025-03-09.json"}
+	if !slices.Equal(paths, want) {
+		t.Errorf("paths = %v, want %v", paths, want)
 	}
 }
 
