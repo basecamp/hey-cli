@@ -60,6 +60,7 @@ func TestLocalEvents(t *testing.T) {
 	flight := event(4, "Flight", "2026-09-20T23:00:00Z", "2026-09-21T05:00:00Z")
 	lateShow := event(5, "Late show", "2026-11-02T04:30:00Z", "2026-11-02T04:45:00Z")
 	earlyStart := event(6, "Early start", "2026-11-02T05:00:00Z", "2026-11-02T06:00:00Z")
+	closing := event(10, "Closing", "2026-09-19T02:00:00Z", "2026-09-19T04:00:00Z")
 	midnight := event(7, "Midnight", "2026-09-21T00:00:00Z", "")
 	holiday := event(8, "Holiday", "2026-09-20T00:00:00Z", "2026-09-20T00:00:00Z")
 	holiday.AllDay = true
@@ -75,6 +76,7 @@ func TestLocalEvents(t *testing.T) {
 		{"evening in New York", "America/New_York", "2026-09-20", []generated.Recording{breakfast}, nil, []generated.Recording{dinner}, []string{"Breakfast", "Dinner"}},
 		{"next local day", "America/New_York", "2026-09-21", []generated.Recording{dinner}, nil, nil, nil},
 		{"ended before the day", "America/New_York", "2026-09-19", []generated.Recording{concert}, nil, nil, nil},
+		{"ended at local midnight", "America/New_York", "2026-09-19", []generated.Recording{closing}, nil, nil, nil},
 		{"own local day", "America/New_York", "2026-09-18", []generated.Recording{concert}, nil, nil, []string{"Concert"}},
 		{"east of UTC", "Asia/Tokyo", "2026-09-21", []generated.Recording{dinner}, nil, nil, []string{"Dinner"}},
 		{"east of UTC, day before", "Asia/Tokyo", "2026-09-20", nil, nil, []generated.Recording{dinner}, nil},

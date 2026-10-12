@@ -93,3 +93,17 @@ func TestDayColumnsClipASpanningEventToTheDay(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderDayViewStartsAMultiDayStayAtTheFirstHour(t *testing.T) {
+	zone := newYork(t)
+	stay := []Recording{{ID: 4823, Title: "Conference hotel stay", Type: "Calendar::Event",
+		StartsAt: at("2026-09-16T18:00:00Z"), EndsAt: at("2026-09-18T15:00:00Z")}}
+	anchor := time.Date(2026, 9, 17, 12, 0, 0, 0, zone)
+
+	lines := strings.Split(stripANSI(renderDayView(stay, nil, nil, anchor, calendarFixtureNow(), "", 100, 14, selection{}, nil, true)), "\n")
+	for i, line := range lines[2:] {
+		if first := []rune(line)[0]; first == hourRule {
+			t.Errorf("grid row %d is ruled at midnight, so the stay does not start there: %q", i, line)
+		}
+	}
+}
