@@ -212,7 +212,7 @@ postings, not the box, label or contact around them.
 | Read private contact note | `hey contact note show <contact_id> --json` (`note_markdown` is the form `note set` takes when `note_markdown_lossless` is true) |
 | Replace private contact note | `hey contact note set <contact_id> "Prefers email"` (replaces the whole note) |
 | Delete private contact note | `hey contact note delete <contact_id>` |
-| Set a contact's photo | `hey contact photo set <contact_id> <file>` (PNG or JPEG, at most 40 MiB, 16000 px a side and ~117 megapixels; ~58 if EXIF-rotated) |
+| Set a contact's photo | `hey contact photo set <contact_id> <file>` (PNG or JPEG, at most 40 MiB, 58 megapixels and 16000 px a side) |
 | Remove a contact's photo | `hey contact photo remove <contact_id>` |
 | Read email thread | `hey thread read <topic_id> --json` |
 | Rename a thread | `hey thread update <topic_id> --name "Kitchen renovation quotes"` |
