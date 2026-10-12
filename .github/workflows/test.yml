@@ -165,7 +165,7 @@ jobs:
       - name: Run tests with race detector
         env:
           GOCACHE: ${{ runner.temp }}/go-build-race
-        run: go test -race -count=1 ./...
+        run: go test -race -shuffle=on -count=1 ./...
 
   e2e:
     name: Bats e2e

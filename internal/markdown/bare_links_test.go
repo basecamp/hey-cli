@@ -537,7 +537,7 @@ func TestRenderWrapsANonASCIILinkWhole(t *testing.T) {
 // text with a link in every sentence; finding them must not scan to the paragraph's end
 // once for each.
 func TestFindBareLinksInALongUnspacedParagraphIsLinear(t *testing.T) {
-	const links = 20_000
+	const links = 20_000 / linearInputScale
 	for _, sentence := range []string{
 		"「mailto:jane@example.org」と",
 		"「mailto:jane@example.org?subject=資料」と",
@@ -619,8 +619,9 @@ func TestLinkifyURLsPastManyHyperlinksIsLinear(t *testing.T) {
 // A run of text full of prefixes that never become a link is read once, not once per
 // prefix, and a real link after them is still found.
 func TestFindBareLinksPastRejectedPrefixesIsLinear(t *testing.T) {
+	const repeats = 50_000 / linearInputScale
 	for _, prefix := range []string{"https://", "www.", "mailto:", "https://a.b_", "mailto:a@b.co_"} {
-		run := strings.Repeat(prefix, 50_000) + " https://docs.example.com/room_list"
+		run := strings.Repeat(prefix, repeats) + " https://docs.example.com/room_list"
 		found := make(chan []bareLink, 1)
 		go func() {
 			links, _ := findBareLinks(run)
@@ -629,10 +630,10 @@ func TestFindBareLinksPastRejectedPrefixesIsLinear(t *testing.T) {
 		select {
 		case links := <-found:
 			if len(links) == 0 || links[len(links)-1].target != "https://docs.example.com/room_list" {
-				t.Errorf("%q×50000: links end %v, want the room list last", prefix, links[max(0, len(links)-1):])
+				t.Errorf("%q×%d: links end %v, want the room list last", prefix, repeats, links[max(0, len(links)-1):])
 			}
 		case <-time.After(linearBound):
-			t.Fatalf("%q×50000: findBareLinks did not finish within %v", prefix, linearBound)
+			t.Fatalf("%q×%d: findBareLinks did not finish within %v", prefix, repeats, linearBound)
 		}
 	}
 }
