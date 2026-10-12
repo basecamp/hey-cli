@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -259,6 +261,67 @@ func TestContactPhotoSetAcceptsAPhotoAtTheSizeLimit(t *testing.T) {
 		t.Fatalf("a photo of exactly %d bytes was refused: %v", contactPhotoMaxBytes, err)
 	}
 	closePreparedAttachments([]preparedAttachment{prepared})
+}
+
+// pngHeader is the start of a PNG claiming the given dimensions: the signature and a
+// well-formed IHDR, which is all a decoder reads to answer them. It lets a test name a
+// photo of any size without allocating its pixels.
+func pngHeader(width, height uint32) []byte {
+	ihdr := make([]byte, 13)
+	binary.BigEndian.PutUint32(ihdr[0:], width)
+	binary.BigEndian.PutUint32(ihdr[4:], height)
+	ihdr[8] = 8 // bit depth
+	ihdr[9] = 6 // RGBA
+	chunk := append([]byte("IHDR"), ihdr...)
+	header := []byte("\x89PNG\r\n\x1a\n")
+	header = binary.BigEndian.AppendUint32(header, uint32(len(ihdr)))
+	header = append(header, chunk...)
+	return binary.BigEndian.AppendUint32(header, crc32.ChecksumIEEE(chunk))
+}
+
+func TestContactPhotoSetRefusesPhotosTooLargeForHEYToResize(t *testing.T) {
+	tests := []struct {
+		name          string
+		width, height uint32
+	}{
+		{name: "too wide", width: contactPhotoMaxSide + 1, height: 1},
+		{name: "too tall", width: 1, height: contactPhotoMaxSide + 1},
+		{name: "too many pixels inside the side limit", width: 15_000, height: 15_000},
+		{name: "a 200 megapixel phone photo", width: 16_320, height: 12_240},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			state := newContactPhotoServer(t)
+			photo := writePhotoFixture(t, "jane-doe.png", pngHeader(tc.width, tc.height))
+			_, err := runContacts(t, state.server, "photo", "set", "7", photo)
+			var cliErr *apierr.Error
+			if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage {
+				t.Fatalf("error = %v, want usage error", err)
+			}
+			if !strings.Contains(cliErr.Message, "too large for HEY to resize") {
+				t.Errorf("message = %q", cliErr.Message)
+			}
+			if requests := state.requestLines(); len(requests) != 0 {
+				t.Fatalf("a refused photo sent requests: %v", requests)
+			}
+		})
+	}
+}
+
+func TestContactPhotoSetAcceptsPhotosAtTheResizeLimits(t *testing.T) {
+	for _, size := range [][2]uint32{
+		{contactPhotoMaxSide, 1},
+		{1, contactPhotoMaxSide},
+		{contactPhotoMaxSide, contactPhotoMaxPixels / contactPhotoMaxSide},
+	} {
+		photo := writePhotoFixture(t, "jane-doe.png", pngHeader(size[0], size[1]))
+		prepared, err := openContactPhoto(photo)
+		if err != nil {
+			t.Errorf("%d×%d was refused: %v", size[0], size[1], err)
+			continue
+		}
+		closePreparedAttachments([]preparedAttachment{prepared})
+	}
 }
 
 func TestContactPhotoSetRejectsBadArgumentsBeforeAnyRequest(t *testing.T) {

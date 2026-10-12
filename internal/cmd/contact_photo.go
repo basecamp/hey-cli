@@ -34,6 +34,16 @@ var contactPhotoFormats = map[string]string{
 	"image/jpeg": "jpeg",
 }
 
+// HEY resizes a photo with ImageMagick under hotcell/policy.xml, which refuses an image
+// wider or taller than 16KP outright and moves one over 128MP to a disk cache that its
+// disk ceiling then refuses (haystack's imagemagick_policy_test proves 15000×15000).
+// HEY would store such a photo and then fail to draw it, so the CLI refuses it first.
+// A 200MP phone photo is past both.
+const (
+	contactPhotoMaxSide   = 16_000
+	contactPhotoMaxPixels = 128_000_000
+)
+
 // contactPhotoNotEditableHint is what a not_found from the photo routes usually means:
 // HEY answers 404 for a contact it will not let you edit, not 403.
 const contactPhotoNotEditableHint = "HEY changes the photo of a contact you can edit, or your own: not a hidden contact, an alias, or another HEY user."
@@ -49,7 +59,7 @@ func newContactPhotoCommand() *contactPhotoCommand {
 		Aliases: []string{"avatar"},
 		Short:   "Set or remove a contact's photo",
 		Annotations: map[string]string{
-			"agent_notes": "Set takes a contact ID and a local PNG or JPEG file of at most 40 MiB; remove takes a contact ID. The photo is the contact's avatar_url. Hidden contacts, aliases and other HEY users answer not_found.",
+			"agent_notes": "Set takes a contact ID and a local PNG or JPEG file of at most 40 MiB, 16000 pixels a side and 128 megapixels; remove takes a contact ID. The photo is the contact's avatar_url. Hidden contacts, aliases and other HEY users answer not_found.",
 		},
 	}
 	photoCommand.cmd.AddCommand(newContactPhotoSetCommand().cmd)
@@ -69,7 +79,8 @@ func newContactPhotoSetCommand() *contactPhotoSetCommand {
 		Use:   "set <contact-id> <file>",
 		Short: "Upload a photo for a contact",
 		Long: "Upload a local image as a contact's photo, replacing any photo they already have. " +
-			"The file must be a PNG or JPEG of at most 40 MiB, judged by its contents rather than its name; HEY crops it to a square. " +
+			"The file must be a PNG or JPEG of at most 40 MiB, 16000 pixels a side and 128 megapixels, judged by its contents rather than its name. " +
+			"HEY crops it to a square, so a square image without transparency works best. " +
 			"Only a contact you can edit, or your own, takes a photo: a hidden contact, an alias or another HEY user answers not_found. " +
 			"HEY caches avatars, so the old photo may still show in places for up to 30 minutes.",
 		Example: `  hey contact photo set 12345 ~/Pictures/jane-doe.jpg
@@ -189,7 +200,7 @@ func contactPhotoError(err error, contactID int64) error {
 
 // openContactPhoto opens path and checks it is a photo HEY can show, before anything is
 // sent: a regular, non-empty file within contactPhotoMaxBytes whose bytes are a PNG or a
-// JPEG with a readable header and real dimensions. The file is left open at its start.
+// JPEG with a readable header and dimensions HEY can resize. The file is left open at its start.
 func openContactPhoto(path string) (preparedAttachment, error) {
 	file, err := os.Open(path) // #nosec G304 -- the user explicitly selected this photo
 	if err != nil {
@@ -238,6 +249,12 @@ func checkContactPhoto(file *os.File, path string) (preparedAttachment, error) {
 	config, decoded, err := image.DecodeConfig(file)
 	if err != nil || decoded != format || config.Width <= 0 || config.Height <= 0 {
 		return preparedAttachment{}, apierr.ErrUsage(fmt.Sprintf("photo %q is not a readable %s image", path, format))
+	}
+	if config.Width > contactPhotoMaxSide || config.Height > contactPhotoMaxSide ||
+		int64(config.Width)*int64(config.Height) > contactPhotoMaxPixels {
+		return preparedAttachment{}, apierr.ErrUsageHint(
+			fmt.Sprintf("photo %q is %d×%d pixels, too large for HEY to resize", path, config.Width, config.Height),
+			"Scale it down to at most 16000 pixels a side and 128 megapixels in all; HEY shows a contact photo at 300×300.")
 	}
 	if _, err = file.Seek(0, io.SeekStart); err != nil {
 		return preparedAttachment{}, fmt.Errorf("rewind photo %q: %w", path, err)
