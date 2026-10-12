@@ -135,6 +135,9 @@ hey contact note set
 hey contact note set --note
 hey contact note set --note-html
 hey contact note show
+hey contact photo
+hey contact photo remove
+hey contact photo set
 hey contact show
 hey contact show-again
 hey contact threads
