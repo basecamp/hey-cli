@@ -213,6 +213,13 @@ func TestContactPhotoSetRefusesBadFilesBeforeAnyRequest(t *testing.T) {
 		{name: "pdf named png", path: func(t *testing.T) string {
 			return writePhotoFixture(t, "jane-doe.png", []byte("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n"))
 		}, message: "is application/pdf, not a PNG or JPEG"},
+		{name: "dangling symlink", path: func(t *testing.T) string {
+			link := filepath.Join(t.TempDir(), "jane-doe.png")
+			if err := os.Symlink(filepath.Join(t.TempDir(), "gone.png"), link); err != nil {
+				t.Fatal(err)
+			}
+			return link
+		}, message: "could not open photo"},
 		{name: "text named jpg", path: func(t *testing.T) string {
 			return writePhotoFixture(t, "jane-doe.jpg", []byte("Jane Doe, Head of Partnerships"))
 		}, message: "not a PNG or JPEG"},
@@ -429,10 +436,15 @@ func TestContactPhotoSetStopsWhenTheUploadFails(t *testing.T) {
 		if _, err := runContacts(t, state.server, "photo", "set", "7", photo); err == nil {
 			t.Fatalf("%s failing: expected an error", statusKey)
 		}
+		reached := false
 		for _, line := range state.requestLines() {
+			reached = reached || line == statusKey
 			if line == "PUT /contacts/7/uploaded_avatar.json" {
 				t.Errorf("%s failing: the avatar was still set", statusKey)
 			}
+		}
+		if !reached {
+			t.Errorf("the command stopped before %s, so its failure was never exercised: %v", statusKey, state.requestLines())
 		}
 	}
 }
@@ -468,7 +480,7 @@ func TestContactPhotoStyledOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "Photo removed from contact 7.\n"; got != want {
+	if want := "Photo removed from contact 7. The old photo may still show in places for up to 30 minutes.\n"; got != want {
 		t.Errorf("remove output = %q, want %q", got, want)
 	}
 }

@@ -7,8 +7,10 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -119,7 +121,10 @@ func TestContactPhoto(t *testing.T) {
 		AvatarURL string `json:"avatar_url"`
 	}](t, contactWriteJSON(t, "contact", "add", "--name", "Priya Shah", "--email", "priya.shah+"+unique+"@example.com"))
 	id := intStr(created.ID)
-	t.Cleanup(func() { _, _, _ = hey(t, "contact", "hide", id) })
+	t.Cleanup(func() {
+		_, _, _ = hey(t, "contact", "photo", "remove", id)
+		_, _, _ = hey(t, "contact", "hide", id)
+	})
 
 	portrait := image.NewRGBA(image.Rect(0, 0, 64, 64))
 	for x := 0; x < 64; x++ {
@@ -146,6 +151,17 @@ func TestContactPhoto(t *testing.T) {
 	// The avatar URL carries a version of whatever the avatar is drawn from.
 	if withPhoto.AvatarURL == "" || withPhoto.AvatarURL == created.AvatarURL {
 		t.Errorf("avatar_url did not change after setting a photo: %q", withPhoto.AvatarURL)
+	}
+	// The URL changes with the blob whether or not HEY can resize it; one it cannot is
+	// answered with the contact's initials as SVG. So fetch it: the photo is a raster.
+	// The avatar route needs no session.
+	resp, err := http.Get(withPhoto.AvatarURL)
+	if err != nil {
+		t.Fatalf("fetch avatar: %v", err)
+	}
+	_ = resp.Body.Close()
+	if contentType := resp.Header.Get("Content-Type"); resp.StatusCode != http.StatusOK || !strings.HasPrefix(contentType, "image/") || strings.Contains(contentType, "svg") {
+		t.Errorf("avatar answered %d %q, want the uploaded photo as a raster image", resp.StatusCode, contentType)
 	}
 
 	contactWriteJSON(t, "contact", "photo", "remove", id)

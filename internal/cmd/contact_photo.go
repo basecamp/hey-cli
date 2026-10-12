@@ -27,8 +27,9 @@ const contactPhotoMaxBytes = 40 << 20
 // contactPhotoFormats are the formats HEY's photo picker accepts, keyed by the content
 // type sniffed from the bytes and naming the decoder that must agree. HEY stores whatever
 // blob it is handed and only fails later, when it resizes the photo to show it: a HEIC or
-// an AVIF, which HEY cannot decode, or a file that is not an image at all, then breaks the
-// contact's avatar everywhere it is drawn. So the bytes are judged, not the extension.
+// an AVIF, which HEY cannot decode, or a file that is not an image at all, is then never
+// shown, and the contact keeps wearing their initials. So the bytes are judged, not the
+// extension.
 var contactPhotoFormats = map[string]string{
 	"image/png":  "png",
 	"image/jpeg": "jpeg",
@@ -39,7 +40,8 @@ var contactPhotoFormats = map[string]string{
 // full-resolution photo from a modern phone — an iPhone's 48MP is 8064×6048, and 50MP
 // Android cameras are common — and stays inside what HEY can resize. HEY stores whatever it
 // is handed and only then resizes it, in ImageMagick under hotcell/policy.xml and the
-// cell's 896MiB memory limit; a photo past those is never drawn. Measured against HEY's own
+// cell's 896MiB memory limit; a photo past those is never drawn, and AvatarsController
+// serves the contact's initials instead. Measured against HEY's own
 // variant command, the tightest ceiling is a JPEG whose EXIF orientation has to be applied,
 // which holds a second copy: 7600×7600 resizes and 7700×7700 kills the worker, about 58.7MP.
 // An upright photo goes to about 117MP, and policy.xml refuses any side over 16000 pixels.
@@ -83,7 +85,7 @@ func newContactPhotoSetCommand() *contactPhotoSetCommand {
 	setCommand.cmd = &cobra.Command{
 		Use:   "set <contact-id> <file>",
 		Short: "Upload a photo for a contact",
-		Long: "Upload a local image as a contact's photo, replacing any photo they already have. " +
+		Long: "Upload a local image as a contact's photo, replacing any photo they already have, and answer the contact with its new avatar_url. " +
 			"The file must be a PNG or JPEG of at most 40 MiB, 58 megapixels and 16000 pixels a side, judged by its contents rather than its name; a full-resolution photo from a modern phone fits. " +
 			"HEY crops it to a square, so a square image without transparency works best. " +
 			"Only a contact you can edit, or your own, takes a photo: a hidden contact, an alias or another HEY user answers not_found. " +
@@ -186,7 +188,7 @@ func (c *contactPhotoRemoveCommand) run(cmd *cobra.Command, args []string) error
 		return contactPhotoError(err, contactID)
 	}
 	return writeMutationLine(cmd,
-		fmt.Sprintf("Photo removed from contact %d.", contactID),
+		fmt.Sprintf("Photo removed from contact %d. The old photo may still show in places for up to 30 minutes.", contactID),
 		"Contact photo removed",
 		map[string]int64{"id": contactID},
 		output.WithBreadcrumbs(output.Breadcrumb{Action: "set", Command: fmt.Sprintf("hey contact photo set %d <file>", contactID), Description: "Upload a photo"}),
@@ -207,6 +209,14 @@ func contactPhotoError(err error, contactID int64) error {
 // sent: a regular, non-empty file within contactPhotoMaxBytes whose bytes are a PNG or a
 // JPEG with a readable header and dimensions HEY can resize. The file is left open at its start.
 func openContactPhoto(path string) (preparedAttachment, error) {
+	// Stat first: opening a named pipe blocks until something writes to it.
+	pathInfo, err := os.Stat(path)
+	if err != nil {
+		return preparedAttachment{}, apierr.ErrUsage(fmt.Sprintf("could not open photo %q: %v", path, err))
+	}
+	if !pathInfo.Mode().IsRegular() {
+		return preparedAttachment{}, apierr.ErrUsage(fmt.Sprintf("photo %q is not a regular file", path))
+	}
 	file, err := os.Open(path) // #nosec G304 -- the user explicitly selected this photo
 	if err != nil {
 		return preparedAttachment{}, apierr.ErrUsage(fmt.Sprintf("could not open photo %q: %v", path, err))
@@ -245,7 +255,7 @@ func checkContactPhoto(file *os.File, path string) (preparedAttachment, error) {
 	if !ok {
 		return preparedAttachment{}, apierr.ErrUsageHint(
 			fmt.Sprintf("photo %q is %s, not a PNG or JPEG", path, contentType),
-			"Convert it to PNG or JPEG first; HEY cannot show other formats as a contact photo.")
+			"This command takes only PNG or JPEG, the formats HEY's own photo picker offers; convert the file first.")
 	}
 
 	if _, err = file.Seek(0, io.SeekStart); err != nil {

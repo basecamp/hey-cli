@@ -44,7 +44,7 @@ forward answers. The drafts index (`/entries/drafts.json`) pages the same way, w
 | `/my/clearances.json` | GET | SDK `Clearances().Screened`, `ScreenedPage` | `hey screener history`, TUI Screener History | covered |
 | `/my/clearances/{id}` | PATCH | SDK `Clearances().Rescreen` | — | unused by the CLI |
 | `/contacts.json` | GET | SDK `Contacts().List` | `hey contact list`, Contacts TUI | covered |
-| `/contacts/{id}.json` | GET | SDK `Contacts().Get` | `hey contact show`, `hey contact deliver --to screened-out` (external-contact check), Contacts TUI | covered |
+| `/contacts/{id}.json` | GET | SDK `Contacts().Get` | `hey contact show`, `hey contact deliver --to screened-out` (external-contact check), `hey contact photo set` (existence check before uploading), Contacts TUI | covered |
 | `/contacts.json` | POST | SDK `Contacts().Create` | `hey contact add`, Contacts TUI | covered |
 | `/contacts/{id}.json` | PATCH | SDK `Contacts().Update` | `hey contact update`, Contacts TUI | covered |
 | `/contacts/{id}.json` | DELETE | SDK `Contacts().Hide` | `hey contact hide`, Contacts TUI | covered |
@@ -56,6 +56,8 @@ forward answers. The drafts index (`/entries/drafts.json`) pages the same way, w
 | `/contacts/{id}/note.json` | GET | SDK `Contacts().Note` | `hey contact note show`, Contacts TUI | covered |
 | `/contacts/{id}/note.json` | PATCH | SDK `Contacts().SetNote` | `hey contact note set`, Contacts TUI | covered |
 | `/contacts/{id}/note.json` | DELETE | SDK `Contacts().DeleteNote` | `hey contact note delete`, Contacts TUI | covered |
+| `/contacts/{id}/uploaded_avatar.json` | PUT | SDK `Contacts().UpdateAvatar` | `hey contact photo set` | covered |
+| `/contacts/{id}/uploaded_avatar.json` | DELETE | SDK `Contacts().DeleteAvatar` | `hey contact photo remove` | covered |
 | `/autocompletable/contacts/addressable.json` | GET | SDK `Contacts().Addressable` | TUI composer's To, Cc and Bcc suggestions (new message, reply, forward) | covered |
 | `/calendars.json` | GET | SDK `Calendars().List` | `hey calendar list` | covered |
 | `/calendars/{id}/recordings.json` | GET | SDK `Calendars().GetRecordings` | `hey event list`, `hey event edit <id>` (reading the event back; with `--occurrence`, the occurrence's day and then the series' first day for its `Calendar::Countdown`), `hey event delete <id>` (checking the id is not a day of a series HEY has written out; with `--occurrence --apply-to future`, the occurrence's day), `hey todo list`, `hey journal list` | covered |
@@ -69,8 +71,8 @@ forward answers. The drafts index (`/entries/drafts.json`) pages the same way, w
 | `/entries/{id}/replies/new.json` | GET | SDK `Entries().NewReply` | `hey reply <topic-id>` and `hey compose --thread-id` (recipients, with the acting user excluded) | covered |
 | `/entries/drafts.json` | GET | SDK `Entries().ListDraftsPage` | `hey draft list` (`--all`/`--page` follow its cursor) | covered |
 | `/entries/drafts/{id}` | DELETE | SDK `Entries().DeleteDraft` | `hey draft delete <id>...` | covered |
-| `/rails/active_storage/direct_uploads.json` | POST | SDK `Attachments().Upload` | `hey compose --attach`, `hey reply --attach`, `hey bulk-reply send --attach` | covered |
-| signed Active Storage upload URL | PUT | SDK `Attachments().Upload` | `hey compose --attach`, `hey reply --attach`, `hey bulk-reply send --attach` | covered |
+| `/rails/active_storage/direct_uploads.json` | POST | SDK `Attachments().Upload` | `hey compose --attach`, `hey reply --attach`, `hey bulk-reply send --attach`, `hey contact photo set` | covered |
+| signed Active Storage upload URL | PUT | SDK `Attachments().Upload` | `hey compose --attach`, `hey reply --attach`, `hey bulk-reply send --attach`, `hey contact photo set` | covered |
 | signed Active Storage blob URL | GET | SDK `DownloadBlob` | `hey attachment save <id>` | covered |
 | `/messages.json` | POST | SDK `Messages().Create`, `Messages().CreateDraft` | `hey compose`, `hey compose --draft`, `hey forward <topic-id>` | covered |
 | `/entries/{id}/replies` | POST | SDK `Entries().CreateReply`, `Entries().CreateReplyDraft` | `hey reply <topic-id>`, `hey reply --draft`, `hey compose --thread-id [--draft]` | covered |
