@@ -767,6 +767,24 @@ func renderDayView(events, habits, countdowns []Recording, anchor, now time.Time
 	return strings.TrimRight(b.String(), "\n")
 }
 
+// dayColumns is the grid columns an event fills on the day of anchor. An event that began
+// before the day starts at its first column, and one that ends after it runs to its last, so
+// a stay over several days is drawn whole on each day it touches.
+func dayColumns(starts, ends, anchor time.Time, daySpan int) (int, int) {
+	loc := anchor.Location()
+	dayStart := time.Date(anchor.Year(), anchor.Month(), anchor.Day(), 0, 0, 0, 0, loc)
+	dayEnd := time.Date(anchor.Year(), anchor.Month(), anchor.Day()+1, 0, 0, 0, 0, loc)
+
+	startPos, endPos := 0, daySpan
+	if !starts.Before(dayStart) {
+		startPos = (starts.Hour()*60 + starts.Minute()) * daySpan / (24 * 60)
+	}
+	if ends.Before(dayEnd) {
+		endPos = (ends.Hour()*60 + ends.Minute()) * daySpan / (24 * 60)
+	}
+	return startPos, endPos
+}
+
 // renderDayGrid draws the day's hours as one canvas: the lanes of events stacked down
 // it, and an hour rule falling down every hour column no event stands on. The rules are
 // the grid, not a decoration on the events, so a day with nothing on it still reads as
@@ -1256,21 +1274,6 @@ func buildWeekDayColumn(d weekDayInfo, width int, muted lipgloss.Style, sel sele
 	}
 
 	return lines
-}
-
-func dayColumns(starts, ends, anchor time.Time, daySpan int) (int, int) {
-	loc := anchor.Location()
-	dayStart := time.Date(anchor.Year(), anchor.Month(), anchor.Day(), 0, 0, 0, 0, loc)
-	dayEnd := time.Date(anchor.Year(), anchor.Month(), anchor.Day()+1, 0, 0, 0, 0, loc)
-
-	startPos, endPos := 0, daySpan
-	if !starts.Before(dayStart) {
-		startPos = (starts.Hour()*60 + starts.Minute()) * daySpan / (24 * 60)
-	}
-	if ends.Before(dayEnd) {
-		endPos = (ends.Hour()*60 + ends.Minute()) * daySpan / (24 * 60)
-	}
-	return startPos, endPos
 }
 
 // eventTimeSpan is when an event runs, on the clock the reader keeps — not the one HEY answers

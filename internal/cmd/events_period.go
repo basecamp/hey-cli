@@ -202,6 +202,9 @@ func (c *eventsPeriodCommand) date(ctx context.Context, cmd *cobra.Command, acco
 	return date, c.describe(date, true), nil
 }
 
+// localPeriodRecordings are the events and countdowns of a period's local days. HEY filed an
+// event under its UTC day, so the days either side are read too, and a countdown that the
+// reads share is listed once.
 func localPeriodRecordings(ctx context.Context, cmd *cobra.Command, account *accountZone, period *generated.CalendarPeriod) ([]generated.Recording, []generated.Recording, error) {
 	if period == nil {
 		return []generated.Recording{}, nil, nil
@@ -236,6 +239,8 @@ func localPeriodRecordings(ctx context.Context, cmd *cobra.Command, account *acc
 	return events, distinctByID(countdowns), nil
 }
 
+// distinctByID drops a recording whose id an earlier one already had, so a countdown read
+// under two days is listed once. A recording with no id is always kept.
 func distinctByID(recordings []generated.Recording) []generated.Recording {
 	seen := map[int64]bool{}
 	distinct := make([]generated.Recording, 0, len(recordings))

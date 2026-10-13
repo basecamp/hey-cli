@@ -96,6 +96,9 @@ func (a *accountZone) todayToRead(ctx context.Context, stderr io.Writer, hint st
 	return calendarDay(clockNow().In(loc)), nil
 }
 
+// locationToRead is the zone whose days a command reads. An account with no usable zone takes
+// this machine's, as todayToRead does, and says so once on stderr. A read of the identity that
+// fails is refused, because a guessed zone would list the wrong events.
 func (a *accountZone) locationToRead(ctx context.Context, stderr io.Writer) (*time.Location, error) {
 	_, loc, err := a.location(ctx)
 	if unknown, ok := errors.AsType[*unknownAccountZoneError](err); ok {

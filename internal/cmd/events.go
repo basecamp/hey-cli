@@ -124,6 +124,9 @@ func (c *eventsListCommand) run(cmd *cobra.Command, args []string) error {
 	return writeEventRows(cmd, eventRows(events), window.describe(), notice)
 }
 
+// readEventsOfLocalDays reads the events that overlap the window's days in the account's zone.
+// HEY reads a date as a UTC day, so it asks for a day more on each side and keeps what falls
+// on the days named.
 func readEventsOfLocalDays(ctx context.Context, cmd *cobra.Command, account *accountZone, window recordingWindow) ([]generated.Recording, error) {
 	loc, err := account.locationToRead(ctx, cmd.ErrOrStderr())
 	if err != nil {
