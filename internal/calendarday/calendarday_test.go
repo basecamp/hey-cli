@@ -132,3 +132,27 @@ func TestInDays(t *testing.T) {
 		}
 	}
 }
+
+func TestInDaysComparesAnAllDaySeriesByItsDate(t *testing.T) {
+	newYork, _ := time.LoadLocation("America/New_York")
+	tokyo, _ := time.LoadLocation("Asia/Tokyo")
+	cases := []struct {
+		name     string
+		loc      *time.Location
+		startsOn string
+		last     string
+		want     bool
+	}{
+		{"New York, series from the day after", newYork, "2026-09-21", "2026-09-20", false},
+		{"New York, series from the last day", newYork, "2026-09-20", "2026-09-20", true},
+		{"Tokyo, series from the day after", tokyo, "2026-09-21", "2026-09-20", false},
+		{"Tokyo, series from the last day", tokyo, "2026-09-20", "2026-09-20", true},
+	}
+	for _, tc := range cases {
+		event := generated.Recording{Recurring: true, AllDay: true, StartsAt: instant(t, tc.startsOn+"T00:00:00Z")}
+		last := instant(t, tc.last+"T00:00:00Z")
+		if got := InDays(event, last, last, tc.loc); got != tc.want {
+			t.Errorf("%s: InDays = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

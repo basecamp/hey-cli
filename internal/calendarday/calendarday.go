@@ -114,12 +114,16 @@ func LocalEvents(main *generated.CalendarPeriod, neighbours []*generated.Calenda
 
 // InDays reports whether a recording belongs to the local days first through last. It
 // answers for a list read, which asks for a run of days and has no period to answer from.
-// HEY's series rows carry no end date, so a repeating row is kept unless it starts later.
+// HEY's series rows carry no end date, so a repeating row is kept unless it starts later. An
+// all-day series is a date, so it is compared by its date, and a timed series by its instant.
 func InDays(r generated.Recording, first, last time.Time, loc *time.Location) bool {
 	if r.StartsAt.IsZero() {
 		return true
 	}
 	if r.Recurring {
+		if r.AllDay {
+			return !utcDate(r.StartsAt).After(last)
+		}
 		return r.StartsAt.Before(civilMidnight(last.AddDate(0, 0, 1), loc))
 	}
 	if r.AllDay {
