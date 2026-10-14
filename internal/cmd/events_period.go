@@ -11,6 +11,7 @@ import (
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/calendarday"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -66,6 +67,10 @@ outside it.
 Without a date the day is today in your HEY account's time zone, whatever this machine's
 is. An account with no time zone set reads this machine's today, and says so on stderr.
 
+The date names a day in that same zone, so an event at 9:15 PM in New York is on its own
+date and not on the next UTC date. The day before and the day after are read too, and an
+event is listed when it overlaps the day.
+
 The day covers the calendars switched on in HEY, the same set the app draws, so there is
 no --calendar to narrow it. A virtual occurrence carries the series in id and parent_id.
 A day HEY has written out on its own — after an edit of that day alone, or a reminder —
@@ -109,6 +114,9 @@ Without a date the week is the one today falls in, today in your HEY account's t
 whatever this machine's is. An account with no time zone set reads this machine's today,
 and says so on stderr.
 
+The days of the week are days in that same zone. The day before the week and the day
+after it are read too, and an event is listed when it overlaps the week.
+
 The week covers the calendars switched on in HEY, the same set the app draws, so there is
 no --calendar to narrow it. A virtual occurrence carries the series in id and parent_id.
 A day HEY has written out on its own — after an edit of that day alone, or a reminder —
@@ -140,7 +148,8 @@ func (c *eventsPeriodCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := cmd.Context()
-	date, described, err := c.date(ctx, cmd, args)
+	var account accountZone
+	date, described, err := c.date(ctx, cmd, &account, args)
 	if err != nil {
 		return err
 	}
@@ -150,15 +159,13 @@ func (c *eventsPeriodCommand) run(cmd *cobra.Command, args []string) error {
 		return apierr.FromSDK(err)
 	}
 
-	events := []generated.Recording{}
-	if period != nil {
-		events = filterRecordingsByType(&period.Recordings, recordingTypeEvent)
+	events, countdowns, err := localPeriodRecordings(ctx, cmd, &account, period)
+	if err != nil {
+		return err
 	}
 	sortEventsByStart(events)
 	rows := occurrenceEventRows(events)
-	if period != nil {
-		attachEventCountdowns(rows, filterRecordingsByType(&period.Recordings, recordingTypeCountdown))
-	}
+	attachEventCountdowns(rows, countdowns)
 
 	total := len(rows)
 	if c.limit > 0 && !c.all && len(rows) > c.limit {
@@ -172,7 +179,7 @@ func (c *eventsPeriodCommand) run(cmd *cobra.Command, args []string) error {
 // date is the day the period is read around, and the words that name it. With no date given
 // it is today in the account's zone, sent as a date: HEY resolves "now" in UTC on a JSON
 // request, which in New York after 20:00 is tomorrow.
-func (c *eventsPeriodCommand) date(ctx context.Context, cmd *cobra.Command, args []string) (string, string, error) {
+func (c *eventsPeriodCommand) date(ctx context.Context, cmd *cobra.Command, account *accountZone, args []string) (string, string, error) {
 	if len(args) > 0 {
 		if _, err := parseDateArg("date", args[0]); err != nil {
 			return "", "", err
@@ -180,13 +187,66 @@ func (c *eventsPeriodCommand) date(ctx context.Context, cmd *cobra.Command, args
 		return args[0], c.describe(args[0], false), nil
 	}
 
-	var account accountZone
 	today, err := account.todayToRead(ctx, cmd.ErrOrStderr(), c.todayHint)
 	if err != nil {
 		return "", "", err
 	}
 	date := today.Format(dateLayout)
 	return date, c.describe(date, true), nil
+}
+
+// localPeriodRecordings are the events and countdowns of a period's local days. HEY filed an
+// event under its UTC day, so the days either side are read too, and a countdown that the
+// reads share is listed once.
+func localPeriodRecordings(ctx context.Context, cmd *cobra.Command, account *accountZone, period *generated.CalendarPeriod) ([]generated.Recording, []generated.Recording, error) {
+	if period == nil {
+		return []generated.Recording{}, nil, nil
+	}
+	if period.StartsAt.IsZero() {
+		return filterRecordingsByType(&period.Recordings, recordingTypeEvent), filterRecordingsByType(&period.Recordings, recordingTypeCountdown), nil
+	}
+
+	loc, err := account.locationToRead(ctx, cmd.ErrOrStderr())
+	if err != nil {
+		return nil, nil, err
+	}
+	readDay := func(ctx context.Context, date string) (*generated.CalendarPeriod, error) {
+		neighbour, readErr := sdk.CalendarPeriods().Day(ctx, date)
+		if readErr != nil {
+			return nil, apierr.FromSDK(readErr)
+		}
+		return neighbour, nil
+	}
+	neighbours, err := calendarday.ReadNeighbours(ctx, period, readDay)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	events := calendarday.LocalEvents(period, neighbours, loc)
+	countdowns := filterRecordingsByType(&period.Recordings, recordingTypeCountdown)
+	for _, neighbour := range neighbours {
+		if neighbour != nil {
+			countdowns = append(countdowns, filterRecordingsByType(&neighbour.Recordings, recordingTypeCountdown)...)
+		}
+	}
+	return events, distinctByID(countdowns), nil
+}
+
+// distinctByID drops a recording whose id an earlier one already had, so a countdown read
+// under two days is listed once. A recording with no id is always kept.
+func distinctByID(recordings []generated.Recording) []generated.Recording {
+	seen := map[int64]bool{}
+	distinct := make([]generated.Recording, 0, len(recordings))
+	for _, recording := range recordings {
+		if recording.Id != 0 {
+			if seen[recording.Id] {
+				continue
+			}
+			seen[recording.Id] = true
+		}
+		distinct = append(distinct, recording)
+	}
+	return distinct
 }
 
 // eventRow is the event shape the CLI publishes. A virtual occurrence's id names its

@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -223,6 +224,9 @@ func calendarHabitsWithServer(t *testing.T) (*calendarView, *recordedHabitReques
 		case req.Method == http.MethodGet && req.URL.Path == habitRefreshPath:
 			_, _ = io.WriteString(w, `{"starts_at":"2025-03-09T00:00:00Z","ends_at":"2025-03-09T23:59:59Z","kind":"day",
 				"recordings":{"Calendar::Habit":[{"id":7,"title":"Read before bed","type":"CalendarHabit","icon":"read","color":"blue","days":[1,3,5]}]}}`)
+		case req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/calendar/days/"):
+			date := strings.TrimSuffix(strings.TrimPrefix(req.URL.Path, "/calendar/days/"), ".json")
+			_, _ = io.WriteString(w, `{"starts_at":"`+date+`T00:00:00Z","ends_at":"`+date+`T23:59:59Z","kind":"day","recordings":{}}`)
 		default:
 			http.NotFound(w, req)
 		}
@@ -395,8 +399,9 @@ func TestCalendarHabitEnterCompletesAndClearsForTheDayOnScreen(t *testing.T) {
 		t.Errorf("toast = %q", toast)
 	}
 	requests, _ = recorded.snapshot()
-	if got := requests[len(requests)-2]; got != "DELETE /calendar/days/2026-08-22/habits/7/completions.json" {
-		t.Errorf("clearing request = %q", got)
+	clearing := slices.Index(requests, "DELETE /calendar/days/2026-08-22/habits/7/completions.json")
+	if clearing < 0 || clearing+1 >= len(requests) || requests[clearing+1] != "GET /calendar/days/2026-08-22.json" {
+		t.Errorf("clearing requests = %v", requests)
 	}
 }
 
