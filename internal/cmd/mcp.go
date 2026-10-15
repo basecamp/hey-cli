@@ -30,7 +30,8 @@ func newMCPCommand() *mcpCommand {
 		Use:   "mcp",
 		Short: "Serve HEY to MCP clients over stdio",
 		Long: "Run an MCP (Model Context Protocol) server on stdin/stdout, serving HEY mail,\n" +
-			"contacts, and todos as tools backed by your signed-in account.\n\n" +
+			"contacts, todos, and calendar (time tracks, habits, journal) as tools backed\n" +
+			"by your signed-in account.\n\n" +
 			"Register it with an MCP client as a stdio server, e.g.:\n\n" +
 			"  claude mcp add hey -- hey mcp",
 		Args: cobra.NoArgs,
