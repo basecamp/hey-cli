@@ -171,7 +171,7 @@ func (m *Manager) authenticateRequest(ctx context.Context, req *http.Request, re
 	}
 
 	if creds.SessionCookie != "" {
-		req.Header.Set("Cookie", "session_token="+creds.SessionCookie)
+		req.Header.Set("Cookie", sessionCookieHeader(creds.SessionCookie))
 		return nil
 	}
 
@@ -705,4 +705,13 @@ func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL st
 	case <-time.After(5 * time.Minute):
 		return "", fmt.Errorf("authentication timeout")
 	}
+}
+
+// sessionCookieHeader sends a browser session cookie under both of the names
+// HEY signs it with. Browsers signed in since HEY moved to __Host-session_token
+// hold that cookie; older ones hold session_token. The value's signature is
+// bound to its name, so HEY accepts it under one and ignores it under the other,
+// and stored cookies work whichever name they were copied from.
+func sessionCookieHeader(value string) string {
+	return "__Host-session_token=" + value + "; session_token=" + value
 }

@@ -373,8 +373,8 @@ func TestLoginWithCookieAuthenticateAndLogout(t *testing.T) {
 	if err := mgr.AuthenticateRequest(t.Context(), req); err != nil {
 		t.Fatalf("AuthenticateRequest: %v", err)
 	}
-	if got := req.Header.Get("Cookie"); got != "session_token=cookie-value" {
-		t.Errorf("Cookie = %q, want session_token cookie", got)
+	if got := req.Header.Get("Cookie"); got != "__Host-session_token=cookie-value; session_token=cookie-value" {
+		t.Errorf("Cookie = %q, want the session cookie under both names", got)
 	}
 	if got := req.Header.Get("Authorization"); got != "" {
 		t.Errorf("Authorization = %q, want empty for cookie auth", got)
