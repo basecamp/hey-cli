@@ -16,6 +16,7 @@ forward answers. The drafts index (`/entries/drafts.json`) pages the same way, w
 |----------|--------|--------|-------------|--------|
 | `/boxes.json` | GET | SDK `Boxes().List`, `BoxIDByKind` | `hey box list`, `hey contact deliver` (canonical destination lookup) | covered |
 | `/boxes/{id}.json` | GET | SDK `Boxes().Get`, `Boxes().GetPage` | `hey box view <id>`, TUI mail list growth | covered |
+| `/boxes/{id}/observation.json` | POST | SDK `Boxes().MarkSeen` | `hey seen --box <name\|id>` | covered (queued) |
 | `/imbox.json` | GET | SDK `Boxes().GetImbox` | `hey box view imbox` | covered |
 | `/imbox/seen.json` | GET | SDK `Boxes().GetImboxSeen` | TUI Previously Seen screen | covered |
 | `/feedbox.json` | GET | SDK `Boxes().GetFeedbox` | `hey box view feedbox` | covered |
