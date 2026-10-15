@@ -32,13 +32,17 @@ type collectedPages[T any] struct {
 
 // collectPages reads pages after the one the caller already has, until the request is
 // satisfied, the list runs out, or the page cap is reached. An empty page ends the list
-// whatever cursor came with it.
+// whatever cursor came with it — the caller's first page too, since a numbered list such
+// as the contacts or a search answers every page with the number after it.
 func collectPages[T any](ctx context.Context, first pageResult[T], request pageRequest, read pageReader[T]) (collectedPages[T], error) {
 	collected := collectedPages[T]{
 		Items:  first.Items,
 		Cursor: first.Cursor,
 		Total:  max(first.Total, len(first.Items)),
 		Read:   1,
+	}
+	if len(first.Items) == 0 {
+		return collected, nil
 	}
 
 	for collected.Read < request.MaxPages && collected.Cursor != "" && wantsMorePages(len(collected.Items), request) {

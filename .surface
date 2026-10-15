@@ -129,6 +129,7 @@ hey contact hide
 hey contact list
 hey contact list --all
 hey contact list --page
+hey contact list --query
 hey contact note
 hey contact note delete
 hey contact note set

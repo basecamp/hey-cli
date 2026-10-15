@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -156,6 +157,77 @@ func TestContactsListAndPagination(t *testing.T) {
 	}
 	if resp.Summary != "1 contact" {
 		t.Errorf("summary = %q", resp.Summary)
+	}
+}
+
+func TestContactsListQueryIsSentOnEveryPage(t *testing.T) {
+	server, recorded := contactsServer(t)
+	resp, err := runContacts(t, server, "list", "--all", "--query", "jane@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	contacts := decodeContactData[[]generated.Contact](t, resp.Data)
+	if len(contacts) != 1 || contacts[0].Id != 7 || contacts[0].EmailAddress != "jane@example.com" {
+		t.Errorf("contacts = %+v", contacts)
+	}
+	requests := recorded.snapshot()
+	if len(requests) != 2 {
+		t.Fatalf("requests = %+v, want pages 1 and 2", requests)
+	}
+	for i, request := range requests {
+		values, err := url.ParseQuery(request.Query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if values.Get("q") != "jane@example.com" || values.Get("page") != strconv.Itoa(i+1) {
+			t.Errorf("request %d query = %q, want q and page %d", i, request.Query, i+1)
+		}
+	}
+}
+
+func TestContactsListStopsAtAnEmptyFirstPage(t *testing.T) {
+	var queries []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		queries = append(queries, req.URL.RawQuery)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	t.Cleanup(server.Close)
+
+	resp, err := runContacts(t, server, "list", "--all", "--query", "Wilhelmina Harker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(queries) != 1 {
+		t.Errorf("requests = %q, want the first page alone", queries)
+	}
+	if contacts := decodeContactData[[]generated.Contact](t, resp.Data); len(contacts) != 0 {
+		t.Errorf("contacts = %+v", contacts)
+	}
+	if resp.Summary != "0 contacts" || resp.Meta["pages_fetched"] != float64(1) {
+		t.Errorf("summary = %q, meta = %+v", resp.Summary, resp.Meta)
+	}
+}
+
+func TestContactsListWithoutAQuerySendsNone(t *testing.T) {
+	for _, args := range [][]string{{"list"}, {"list", "--query", "  "}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			server, recorded := contactsServer(t)
+			if _, err := runContacts(t, server, args...); err != nil {
+				t.Fatal(err)
+			}
+			requests := recorded.snapshot()
+			if len(requests) != 1 {
+				t.Fatalf("requests = %+v", requests)
+			}
+			values, err := url.ParseQuery(requests[0].Query)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if values.Has("q") {
+				t.Errorf("query = %q, want no q", requests[0].Query)
+			}
+		})
 	}
 }
 
