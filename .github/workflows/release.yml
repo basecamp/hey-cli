@@ -320,6 +320,71 @@ jobs:
           gh workflow run upgrade-smoke.yml --repo "$GITHUB_REPOSITORY" \
             --ref "$GITHUB_REF_NAME" -f version="${GITHUB_REF_NAME#v}"
 
+  # This workflow path is the durable Packslip signing identity. Keep these
+  # optional jobs after publication so existing release consumers are unaffected.
+  packslip:
+    name: Sign release manifest
+    needs: [release]
+    if: ${{ !cancelled() && needs.release.result == 'success' }}
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      bundle-ready: ${{ steps.stage.outcome == 'success' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Sign the release manifest
+        id: sign
+        continue-on-error: true
+        uses: jdx/packslip@2af36e792faa28130987c8af509e475c7458405d # v1.6.0
+        with:
+          download: hey_*.tar.gz hey_*.zip
+          bin: hey
+          resources: |
+            completion/bash=archive:completions/hey.bash
+            completion/zsh=archive:completions/_hey
+            completion/fish=archive:completions/hey.fish
+            skill/hey=repo:skills/hey
+          attest: link
+          upload: false
+
+      - name: Stage the verified manifest
+        id: stage
+        if: steps.sign.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: packslip
+          path: ${{ steps.sign.outputs.bundle }}
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-packslip:
+    name: Upload release manifest
+    needs: [packslip]
+    if: ${{ !cancelled() && needs.packslip.result == 'success' && needs.packslip.outputs.bundle-ready == 'true' }}
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: packslip
+          path: packslip
+
+      - name: Upload the manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release upload "$TAG" packslip/packslip.sigstore.json --repo "$GITHUB_REPOSITORY" --clobber
+
   # The AUR goes down for maintenance often enough that a release must not
   # depend on it being reachable — isolated and continue-on-error, an AUR outage
   # cannot fail the release. Recover a missed publish with the aur-publish
